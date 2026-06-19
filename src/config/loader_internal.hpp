@@ -24,6 +24,29 @@
 
 #include <fixpp/config/load_diagnostic.hpp>
 
+// ---------------------------------------------------------------------------
+// Portable -Wdeprecated-declarations suppression (shared across config TUs)
+// ---------------------------------------------------------------------------
+// The TOML loader deliberately maps to deprecated-but-supported enumerators
+// (e.g. the insecure_plain_tcp / one_way_ca security profiles) ONLY when a
+// config file explicitly requests them. Each such mapping arm is wrapped in
+// this push/pop pair so the deliberate use does not warn, without globally
+// silencing the diagnostic. Both clang and gcc are covered (the gcc-release
+// preset is in the verify matrix).
+#ifdef __clang__
+#  define FIXPP_SUPPRESS_DEPRECATED_BEGIN \
+     _Pragma("clang diagnostic push") \
+     _Pragma("clang diagnostic ignored \"-Wdeprecated-declarations\"")
+#  define FIXPP_SUPPRESS_DEPRECATED_END \
+     _Pragma("clang diagnostic pop")
+#else
+#  define FIXPP_SUPPRESS_DEPRECATED_BEGIN \
+     _Pragma("GCC diagnostic push") \
+     _Pragma("GCC diagnostic ignored \"-Wdeprecated-declarations\"")
+#  define FIXPP_SUPPRESS_DEPRECATED_END \
+     _Pragma("GCC diagnostic pop")
+#endif
+
 namespace fixpp::config::detail {
 
 // ---------------------------------------------------------------------------

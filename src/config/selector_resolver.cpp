@@ -249,7 +249,7 @@ static void resolve_engine_cert_source(const toml::table&    root_tbl,
     }
 
     // Extract cert_file, key_file, ca_file paths.
-    auto get_path = [&](const char* key, std::string_view key_diag) -> std::string {
+    auto get_path = [&](const char* key) -> std::string {
         if (auto* n = cs_tbl->get(key); n && n->is_string()) {
             std::string_view sv = n->as_string()->get();
             if (sv.empty()) return {};
@@ -258,9 +258,9 @@ static void resolve_engine_cert_source(const toml::table&    root_tbl,
         return {};
     };
 
-    std::string leaf_path = get_path("cert_file", "cert_source.cert_file");
-    std::string key_path  = get_path("key_file",  "cert_source.key_file");
-    std::string ca_path   = get_path("ca_file",   "cert_source.ca_file");
+    std::string leaf_path = get_path("cert_file");
+    std::string key_path  = get_path("key_file");
+    std::string ca_path   = get_path("ca_file");
 
     tls::file_cert_source::Config cfg;
     cfg.leaf_path         = std::move(leaf_path);
@@ -414,10 +414,9 @@ static tls::SecurityProfile parse_security_profile(const toml::table&     merged
         return tls::SecurityProfile::mtls_ca;
     }
     if (sp_tok == "one_way_ca") {
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+        FIXPP_SUPPRESS_DEPRECATED_BEGIN
         return tls::SecurityProfile::one_way_ca;
-#pragma clang diagnostic pop
+        FIXPP_SUPPRESS_DEPRECATED_END
     }
     if (sp_tok == "mtls_pinned") {
         acc.add(LoadDiagnostic{

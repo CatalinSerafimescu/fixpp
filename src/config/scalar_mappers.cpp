@@ -31,23 +31,10 @@
 #include <fixpp/transport/endpoint.hpp>
 #include <fixpp/transport/reconnect_policy.hpp>
 
-// ── insecure_plain_tcp is [[deprecated]] — suppress the warning when we
-//    branch on it. We only ever write the *value* into out.security_profile.k
-//    if the TOML file explicitly requests "insecure_plain_tcp"; not using it
-//    speculatively. The pragma pair encloses only the one mapping arm.
-#ifdef __clang__
-#  define FIXPP_SUPPRESS_DEPRECATED_BEGIN \
-     _Pragma("clang diagnostic push") \
-     _Pragma("clang diagnostic ignored \"-Wdeprecated-declarations\"")
-#  define FIXPP_SUPPRESS_DEPRECATED_END \
-     _Pragma("clang diagnostic pop")
-#else
-#  define FIXPP_SUPPRESS_DEPRECATED_BEGIN \
-     _Pragma("GCC diagnostic push") \
-     _Pragma("GCC diagnostic ignored \"-Wdeprecated-declarations\"")
-#  define FIXPP_SUPPRESS_DEPRECATED_END \
-     _Pragma("GCC diagnostic pop")
-#endif
+// FIXPP_SUPPRESS_DEPRECATED_BEGIN/END (portable -Wdeprecated-declarations
+// push/pop) is shared across config TUs — defined in loader_internal.hpp
+// (reached here via mappers.hpp). Used below to wrap the deliberate
+// insecure_plain_tcp mapping arm without globally silencing the diagnostic.
 
 namespace fixpp::config::detail {
 
