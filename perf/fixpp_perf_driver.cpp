@@ -71,6 +71,7 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <csignal>
 #include <deque>
 #include <cstdint>
 #include <cstdio>
@@ -107,6 +108,14 @@ struct Options {
     // fixpp rows are apples-to-apples with the QF `tls:off` rows; "tls" (mtls_ca)
     // is retained for the TLS-overhead row (same workload, plain vs tls diff).
     std::string transport = "plain";
+    // Process topology. "loopback" (default) = self-paired (init+acc in ONE
+    // process over a real loopback socket — the original, back-compat path).
+    // "acceptor" / "initiator" = the 2-PROCESS rig: each role in its own process
+    // (production-faithful; removes the self-pairing shared-pool/futex-wakeup
+    // artifact). The initiator owns all RTT timing; the acceptor only serves.
+    std::string role = "loopback";
+    std::string host = "127.0.0.1";  // initiator dials this; acceptor binds 127.0.0.1
+    int port = 0;                    // explicit shared port (required for acceptor/initiator)
     int warmup_messages = 0;    // 0 = unset → workload default resolved in main()
     int measured_messages = 0;  // 0 = unset → workload default resolved in main()
     std::filesystem::path out;  // results directory (created if absent)
@@ -120,10 +129,16 @@ bool want_tls(const Options& o) { return o.transport == "tls"; }
         << "usage: " << argv0 << " --workload <id> --out <dir>\n"
         << "           [--transport plain|tls] [--warmup-msgs N] [--measured-msgs N]\n"
         << "           [--begin-string FIX.4.4]\n"
+        << "           [--role loopback|acceptor|initiator] [--host IP] [--port N]\n"
         << "  --transport plain (default) = 043 insecure_plain_tcp (apples-to-apples\n"
         << "    with QF tls:off rows); tls = mtls_ca (TLS-overhead row). TLS needs\n"
         << "    FIXPP_TLS_FIXTURE_DIR (compiled-in default = tests/tls/fixtures);\n"
-        << "    plaintext needs no certs.\n";
+        << "    plaintext needs no certs.\n"
+        << "  --role loopback (default) = self-paired one-process rig. --role\n"
+        << "    acceptor/initiator = 2-process rig (separate processes); both then\n"
+        << "    REQUIRE --port (the shared loopback port); the initiator dials --host\n"
+        << "    (default 127.0.0.1). Acceptor runs until SIGTERM, printing READY once\n"
+        << "    started; initiator runs the workload, writes the bundle, exits.\n";
     std::exit(code);
 }
 
@@ -141,12 +156,28 @@ Options parse_args(int argc, char** argv) {
         else if (a == "--warmup-msgs") o.warmup_messages = std::stoi(next());
         else if (a == "--measured-msgs") o.measured_messages = std::stoi(next());
         else if (a == "--begin-string") o.begin_string = next();
+        else if (a == "--role") o.role = next();
+        else if (a == "--host") o.host = next();
+        else if (a == "--port") o.port = std::stoi(next());
         else if (a == "-h" || a == "--help") usage(argv[0], 0);
         else { std::cerr << "unknown arg: " << a << "\n"; usage(argv[0], 2); }
     }
-    if (o.out.empty()) { std::cerr << "--out is required\n"; usage(argv[0], 2); }
+    // The acceptor process needs no --out (it owns no result bundle); the
+    // initiator and the self-paired loopback both do.
+    if (o.out.empty() && o.role != "acceptor") {
+        std::cerr << "--out is required\n";
+        usage(argv[0], 2);
+    }
     if (o.transport != "plain" && o.transport != "tls") {
         std::cerr << "--transport must be plain|tls, got: " << o.transport << "\n";
+        usage(argv[0], 2);
+    }
+    if (o.role != "loopback" && o.role != "acceptor" && o.role != "initiator") {
+        std::cerr << "--role must be loopback|acceptor|initiator, got: " << o.role << "\n";
+        usage(argv[0], 2);
+    }
+    if ((o.role == "acceptor" || o.role == "initiator") && (o.port <= 0 || o.port > 65535)) {
+        std::cerr << "--role " << o.role << " requires a valid --port (1..65535)\n";
         usage(argv[0], 2);
     }
     return o;
@@ -645,6 +676,104 @@ struct LoopbackHarness {
         return true;
     }
 
+    // 2-PROCESS rig: bring up exactly ONE role in THIS process. Registers a single
+    // session against the EXPLICIT shared --port (the peer process owns the other
+    // role) and runs workers from the start — single-role has no establishment/
+    // worker conflict, so the production work_guard + poll pattern applies and the
+    // run_for/restart dance (and its restart-while-workers asio UB) is avoided
+    // entirely. The initiator polls until its session reaches Active (logon
+    // delivered); the acceptor serves reactively (PerfApp.fromApp echoes the ER on
+    // the receiving leg via many_active). Acceptor readiness is gated LAUNCHER-side
+    // by an `ss` LISTEN probe — the accept loop binds asynchronously inside the
+    // start()-spawned run_accept_loop coroutine, so start() returning ≠ listening.
+    bool bring_up_role(const Options& o, int heartbeat_secs, const char* dir) {
+        const bool tls = want_tls(o);
+        if (tls) {
+            factory = make_tls_factory(dir);
+            if (factory == nullptr) return false;
+        }
+        clock_src = std::make_shared<fixpp::core::system_clock_source>(ioc.get_executor());
+
+        fixpp::core::EngineConfig ecfg;
+        ecfg.executor = ioc.get_executor();
+        ecfg.application = app;
+        ecfg.clock = clock_src;
+        ecfg.default_store_factory = std::make_shared<fixpp::session::MemoryStoreFactory>();
+        engine.emplace(ioc.get_executor(), std::move(ecfg));
+
+        const std::uint16_t port = static_cast<std::uint16_t>(o.port);
+        const bool is_acc = (o.role == "acceptor");
+        auto make_cfg = [&](const char* sender, const char* target,
+                            fixpp::session::session_role srole, const char* peer,
+                            const std::string& endpoint_host) {
+            fixpp::session::SessionConfig c;
+            c.sender_comp_id = sender;
+            c.target_comp_id = target;
+            c.begin_string = o.begin_string;
+            c.role = srole;
+            c.executor_override = ioc.get_executor();
+            if (tls) {
+                c.security_profile = fixpp::session::SecurityProfile{
+                    fixpp::session::SecurityProfile::kind::mtls_ca};
+                c.compid_authorization_policy.add_binding("fixpp-leaf-rsa2048", peer);
+                c.transport_factory_override = factory;
+            } else {
+                c.security_profile = plain_profile();
+            }
+            c.dictionary = fixpp::test_support::make_minimal_dictionary();
+            c.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
+            c.heartbeat_interval = std::chrono::seconds{heartbeat_secs};
+            c.logout_disconnect_timeout_ms = 2000;
+            c.reconnect_endpoint = fixpp::transport::Endpoint{endpoint_host, port};
+            c.transport_send = [](std::span<const std::byte>) {};
+            return c;
+        };
+
+        app->engine_ptr = &*engine;
+        app->exec = ioc.get_executor();
+
+        bool reg_ok = false;
+        if (is_acc) {
+            // Acceptor binds 127.0.0.1:port (reconnect_endpoint is repurposed as the
+            // bind endpoint for an acceptor session — same as the self-paired path).
+            auto acc_cfg = make_cfg("FIXPP_ACC", "FIXPP_INIT",
+                                    fixpp::session::session_role::acceptor, "FIXPP_INIT",
+                                    "127.0.0.1");
+            acc_id = SessionId::from_config(acc_cfg);
+            app->acceptor_id = acc_id;
+            // Route each ER reply to the receiving acceptor leg (`id`) — the
+            // single-leg id IS acceptor_id here, but this keeps fromApp uniform.
+            app->many_active.store(true, std::memory_order_release);
+            reg_ok = engine->register_session(std::move(acc_cfg)).has_value();
+        } else {
+            auto ini_cfg = make_cfg("FIXPP_INIT", "FIXPP_ACC",
+                                    fixpp::session::session_role::initiator, "FIXPP_ACC",
+                                    o.host);
+            ini_id = SessionId::from_config(ini_cfg);
+            app->initiator_id = ini_id;
+            reg_ok = engine->register_session(std::move(ini_cfg)).has_value();
+        }
+        const bool start_ok = reg_ok && engine->start().has_value();
+
+        // Workers from the start (NO ioc.restart() — see method comment).
+        wg.emplace(asio::make_work_guard(ioc));
+        t1 = std::thread{[this] { ioc.run(); }};
+        t2 = std::thread{[this] { ioc.run(); }};
+
+        if (is_acc) {
+            established = start_ok;  // serves reactively; nothing to wait on here
+        } else {
+            // Poll until the initiator session reaches Active (logon delivered).
+            auto deadline = Clock::now() + 15s;
+            while (start_ok && app->logon_count.load(std::memory_order_acquire) < 1 &&
+                   Clock::now() < deadline) {
+                std::this_thread::sleep_for(2ms);
+            }
+            established = start_ok && app->logon_count.load(std::memory_order_acquire) >= 1;
+        }
+        return true;
+    }
+
     // wl-08: N self-paired pairs on ONE engine/io_context (fixpp's shared-executor
     // strand model — the "scheduler/strand vs thread-per-session" comparison vs
     // QF's per-session runtimes). Each pair gets its own port + UNIQUE CompIDs
@@ -738,6 +867,45 @@ struct LoopbackHarness {
     }
 };
 
+// ── 2-process acceptor: serve replies until SIGTERM ──────────────────────────
+//
+// The acceptor process owns no result bundle and no timing. It stands up a single
+// acceptor session and serves ER/Heartbeat replies reactively through PerfApp,
+// running until the launcher signals it (SIGTERM, sent after the initiator
+// finishes). The signal handler is async-signal-safe — it sets ONLY a volatile
+// sig_atomic_t flag; the main loop performs the engine.stop()-drain teardown().
+volatile std::sig_atomic_t g_acc_stop = 0;
+extern "C" void acc_signal_handler(int) { g_acc_stop = 1; }
+
+int run_acceptor(const Options& o) {
+    const char* dir = fixture_dir();
+    if (want_tls(o) && (dir == nullptr || dir[0] == '\0')) {
+        std::cerr << "skip:tls-fixtures-absent (FIXPP_TLS_FIXTURE_DIR unset)\n";
+        return 3;
+    }
+    LoopbackHarness h;
+    if (!h.bring_up_role(o, 30, dir)) {
+        std::cerr << "skip:tls-fixtures-absent (cert source build failed in " << dir << ")\n";
+        return 3;
+    }
+    if (!h.established) {
+        std::cerr << "acceptor failed to register/start on port " << o.port << "\n";
+        h.teardown();
+        return 1;
+    }
+    std::signal(SIGTERM, acc_signal_handler);
+    std::signal(SIGINT, acc_signal_handler);
+    // The launcher gates true readiness with an `ss` LISTEN probe (the listener
+    // binds asynchronously inside the start()-spawned accept-loop coroutine); this
+    // line just confirms register+start succeeded and is a human breadcrumb.
+    std::cout << "READY role=acceptor port=" << o.port << " transport=" << o.transport
+              << "\n" << std::flush;
+    while (g_acc_stop == 0) std::this_thread::sleep_for(20ms);
+    h.teardown();
+    std::cout << "[fixpp-perf] acceptor stopped (port " << o.port << ")\n";
+    return 0;
+}
+
 // ── closed-loop NOS→ER (wl-04 plain / wl-05 grouped) ─────────────────────────
 
 int run_closed_loop(const Options& o) {
@@ -748,12 +916,16 @@ int run_closed_loop(const Options& o) {
     }
 
     LoopbackHarness h;
-    if (!h.bring_up(o, 30, dir)) {
+    // 2-process initiator registers only its own session and dials the shared port;
+    // loopback (default) self-pairs both roles in one process. Same measured loop.
+    const bool brought_up =
+        (o.role == "initiator") ? h.bring_up_role(o, 30, dir) : h.bring_up(o, 30, dir);
+    if (!brought_up) {
         std::cerr << "skip:tls-fixtures-absent (cert source build failed in " << dir << ")\n";
         return 3;
     }
     if (!h.established) {
-        std::cerr << "sessions did not reach Active within 10s\n";
+        std::cerr << "session(s) did not reach Active in time (role=" << o.role << ")\n";
         h.teardown();
         return 1;
     }
@@ -1480,6 +1652,22 @@ int run_wl07_spike(const Options& o) {
 
 int main(int argc, char** argv) {
     Options o = parse_args(argc, argv);
+
+    // 2-process acceptor: dispatched BEFORE workload resolution — one acceptor
+    // process serves whichever workload the peer initiator drives (reactive ER /
+    // Heartbeat replies), so it needs no per-workload branch.
+    if (o.role == "acceptor") {
+        return run_acceptor(o);
+    }
+    // 2-process initiator: only the closed-loop workloads are wired so far. Fail
+    // loudly rather than silently self-pairing (bring_up) under an initiator role.
+    if (o.role == "initiator" &&
+        !(o.workload == "wl-04-nos-er-small" || o.workload == "wl-05-nos-er-medium-groups")) {
+        std::cerr << "--role initiator is not yet wired for workload " << o.workload
+                  << " (2-process slice currently supports wl-04/wl-05)\n";
+        return 2;
+    }
+
     const bool heartbeat = (o.workload == "wl-03-admin-idle-heartbeat");
     const bool burst = (o.workload == "wl-07-burst-single-session");
     const bool logon_logout = (o.workload == "wl-01-logon-logout-fix44");
