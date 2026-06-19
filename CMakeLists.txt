@@ -129,6 +129,11 @@ if(FIXPP_BUILD_BENCH)
   add_subdirectory(bench)
 endif()
 
+# ── Phase 9 interop benchmark driver (perf/) ───────────────────────────────────
+if(FIXPP_BUILD_INTEROP_PERF)
+  add_subdirectory(perf)
+endif()
+
 # ── Tests ────────────────────────────────────────────────────────────────────
 if(FIXPP_BUILD_TESTS)
   add_subdirectory(tests/core)
