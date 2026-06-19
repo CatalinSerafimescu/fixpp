@@ -729,3 +729,20 @@ Items that are normative in the spec but explicitly deferred from fixpp v1.0. Th
 > - `tests/session/test_interpret_logon_encrypt_method.cpp` — FR-009/T030: inbound `98≠0` reject (4 cells, mutation-tested: absent/zero-valid/nonzero-reject/malformed-closes)
 
 > **Coverage.** Sanitizer/coverage matrix (`linux-clang-debug`, ASan, UBSan, TSan, coverage, gcc-release) pending T029 run by the orchestrator (`/speckit-verify` step).
+
+---
+
+## 044-toml-session-config — branch `044-toml-session-config` (2026-06-19)
+
+> Native TOML config-file loader (`load_toml_config`) translating a TOML file into a fully-validated `ConfigBundle`. Catalogue row **T-043** (design row, `[const §XV.16]`). No new wire field / error slot / codegen / C-ABI surface (FR-004). Isolated in the `fixpp_config_toml` static-library target — not linked into `fixpp::session` or `fixpp::core`.
+
+> **Production surface (exact set).**
+> - `include/fixpp/config/toml_config_loader.hpp` — `load_toml_config(path, LoadOptions) noexcept → LoadResult` entry point + `LoadOptions` struct (engine_executor + load-time memory resource)
+> - `include/fixpp/config/config_bundle.hpp` — `ConfigBundle`, `EngineEstablishment`, `SessionDefinition`, `LoadResult = std::expected<ConfigBundle, vector<LoadDiagnostic>>`
+> - `include/fixpp/config/load_diagnostic.hpp` — `LoadDiagnostic` (key_path, location, reason_class, message) + `reason_class` enum
+> - `src/config/toml_config_loader.cpp` — loader orchestrator (parse → merge_defaults static fn → validate → resolve → accumulate)
+> - `src/config/scalar_mappers.cpp` / `src/config/mappers.hpp` — per-key string→typed-field mappers (bucket-A scalars + duration parser)
+> - `src/config/selector_resolver.cpp` — object-selector dispatch (`store`, `clock`, `cert_source`, `transport`, `dictionary`, `security_profile` arms)
+> - `src/config/loader_internal.cpp` / `src/config/loader_internal.hpp` — noexcept-boundary helpers (`trap_throw_to_expected`, `DiagnosticAccumulator`, `resolve_path`)
+
+> **Coverage note.** This is a **synchronous cold-path** component — no coroutines, no async, no hot-path paths. All branches are exercised by ordinary unit tests. The `fixpp_config_toml` target links into the 5 config test binaries and is not included in any other sanitizer/session/transport build target. The coverage gate (`[const §IX.1]`) applies per-file to `src/config/` and `include/fixpp/config/` — measured in the `linux-clang-coverage` preset at `/speckit-verify`. A **Gate-B blocker (T039)** is outstanding: tomlplusplus 3.4.0 aborts/UBs on certain malformed TOML table headers, bypassing the `noexcept` boundary — reproducer at `tests/config/fuzz/crashes/repro_toml_assert_assume.toml`.

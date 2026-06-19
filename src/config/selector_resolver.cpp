@@ -22,6 +22,7 @@
 
 #include <fixpp/core/system_clock_source.hpp>
 #include <fixpp/dict/xml_loader.hpp>
+#include <fixpp/session/file_store_factory.hpp>
 #include <fixpp/session/memory_store_factory.hpp>
 #include <fixpp/session/security_profile.hpp>
 #include <fixpp/tls/file_cert_source.hpp>
@@ -115,9 +116,10 @@ static void resolve_engine_clock(const toml::table&    root_tbl,
 // ─────────────────────────────────────────────────────────────────────────────
 // resolve_engine_store — build engine.default_store_factory from [store] table (D-5).
 // ─────────────────────────────────────────────────────────────────────────────
-static void resolve_engine_store(const toml::table&    root_tbl,
-                                 ConfigBundle&         bundle,
-                                 DiagnosticAccumulator& acc)
+static void resolve_engine_store(const toml::table&           root_tbl,
+                                 const std::filesystem::path& base_dir,
+                                 ConfigBundle&                bundle,
+                                 DiagnosticAccumulator&       acc)
 {
     const toml::table* store_tbl = nullptr;
     if (auto* n = root_tbl.get("store"); n && n->is_table()) {
@@ -157,12 +159,34 @@ static void resolve_engine_store(const toml::table&    root_tbl,
     if (kind_tok == "memory") {
         bundle.engine.default_store_factory =
             std::make_shared<session::MemoryStoreFactory>();
+    } else if (kind_tok == "file") {
+        // Require store.directory (a path relative to the config file's directory).
+        std::string_view dir_sv;
+        if (auto* dir_n = store_tbl->get("directory"); dir_n && dir_n->is_string()) {
+            dir_sv = dir_n->as_string()->get();
+        } else {
+            acc.add(LoadDiagnostic{
+                .key_path = "store.directory",
+                .reason   = reason_class::missing_required,
+                .message  = "store.directory is required when store.kind=\"file\"",
+            });
+            return;
+        }
+
+        session::FileStore::Config cfg;
+        cfg.directory = resolve_path(base_dir, std::filesystem::path{dir_sv});
+        // Optional fields (policy, max_frame_bytes) are left at Config defaults;
+        // no fixture exercises them in step-1 (parsing deferred).
+        // file_io_executor and store_resource are host-supplied at make() time (D-5).
+
+        bundle.engine.default_store_factory =
+            std::make_shared<session::FileStoreFactory>(std::move(cfg));
     } else {
         acc.add(LoadDiagnostic{
             .key_path = "store.kind",
             .reason   = reason_class::unknown_enum,
             .message  = std::string{"unknown store.kind: \""} + std::string{kind_tok}
-                        + "\" (step-1 accepted: \"memory\")",
+                        + "\" (step-1 accepted: {file, memory})",
         });
     }
 }
@@ -363,17 +387,140 @@ static void resolve_engine_dictionary(const toml::table&    root_tbl,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// parse_security_profile — extract tls::SecurityProfile from a [security_profile]
+// sub-table, returning SecurityProfile::unset when the sub-table is absent.
+// Emits a diagnostic for mtls_pinned (deferred) but NOT for unrecognized tokens
+// (those are caught by map_structured_members; here we just return unset).
+// ─────────────────────────────────────────────────────────────────────────────
+static tls::SecurityProfile parse_security_profile(const toml::table&     merged,
+                                                   std::string_view       key_prefix,
+                                                   DiagnosticAccumulator& acc)
+{
+    const toml::table* sp_tbl = nullptr;
+    if (auto* sp_n = merged.get("security_profile"); sp_n && sp_n->is_table()) {
+        sp_tbl = sp_n->as_table();
+    }
+    if (!sp_tbl) {
+        return tls::SecurityProfile::unset;
+    }
+
+    auto* k_n = sp_tbl->get("kind");
+    if (!k_n || !k_n->is_string()) {
+        return tls::SecurityProfile::unset;
+    }
+
+    std::string_view sp_tok = k_n->as_string()->get();
+    if (sp_tok == "mtls_ca") {
+        return tls::SecurityProfile::mtls_ca;
+    }
+    if (sp_tok == "one_way_ca") {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+        return tls::SecurityProfile::one_way_ca;
+#pragma clang diagnostic pop
+    }
+    if (sp_tok == "mtls_pinned") {
+        acc.add(LoadDiagnostic{
+            .key_path = std::string{key_prefix} + ".security_profile.kind",
+            .reason   = reason_class::recognized_not_yet_supported_step2,
+            .message  = "security_profile.kind=\"mtls_pinned\" is recognized but "
+                        "requires a Pinset that cannot be sourced from a file in step 1 (D-9a)",
+        });
+        // Return unset so callers can propagate the error via acc without crashing.
+        return tls::SecurityProfile::unset;
+    }
+    // Unrecognized → unset; make_ssl_ctx_config will reject it.
+    return tls::SecurityProfile::unset;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// build_file_cert_source — resolve [cert_source] paths and call
+// make_file_cert_source.  Returns nullptr (+ diagnostic) on failure.
+// cs_tbl is the [cert_source] TOML table (engine-root or per-session).
+// ─────────────────────────────────────────────────────────────────────────────
+static std::shared_ptr<tls::cert_source>
+build_file_cert_source(const toml::table&            cs_tbl,
+                       const std::filesystem::path&  base_dir,
+                       const LoadOptions&             opts,
+                       std::string_view               key_prefix,
+                       DiagnosticAccumulator&         acc)
+{
+    auto get_path_str = [&](const char* key) -> std::string {
+        if (auto* n = cs_tbl.get(key); n && n->is_string()) {
+            std::string_view sv = n->as_string()->get();
+            if (sv.empty()) return {};
+            return resolve_path(base_dir, std::filesystem::path{sv}).string();
+        }
+        return {};
+    };
+
+    tls::file_cert_source::Config cfg;
+    cfg.leaf_path        = get_path_str("cert_file");
+    cfg.private_key_path = get_path_str("key_file");
+    cfg.ca_bundle_path   = get_path_str("ca_file");
+
+    auto cs_result = tls::file_cert_source::make_file_cert_source(std::move(cfg), opts.resource);
+    if (!cs_result) {
+        acc.add(LoadDiagnostic{
+            .key_path = std::string{key_prefix},
+            .reason   = reason_class::invalid_or_contradictory_selector,
+            .message  = "cert_source file loading failed",
+        });
+        return nullptr;
+    }
+    return std::move(*cs_result);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// build_tls_factory — assemble a TLS transport factory from a cert_source +
+// security_profile + clock.  Returns a shared_ptr; null + diagnostic on failure.
+// ─────────────────────────────────────────────────────────────────────────────
+static std::shared_ptr<transport::TransportFactory>
+build_tls_factory(tls::SecurityProfile                     profile,
+                  const std::shared_ptr<tls::cert_source>& cs,
+                  const std::shared_ptr<core::Clock>&      clock,
+                  std::string_view                         key_prefix,
+                  DiagnosticAccumulator&                   acc)
+{
+    auto ssl_cfg_result = tls::make_ssl_ctx_config(profile, cs, clock);
+    if (!ssl_cfg_result) {
+        acc.add(LoadDiagnostic{
+            .key_path = std::string{key_prefix},
+            .reason   = reason_class::invalid_or_contradictory_selector,
+            .message  = "make_ssl_ctx_config failed (check profile/cert_source/clock combination)",
+        });
+        return nullptr;
+    }
+
+    transport::Transport::Config t_cfg{};
+    auto factory_result = transport::make_asio_tls_transport_factory(
+        t_cfg, std::move(*ssl_cfg_result));
+    if (!factory_result) {
+        acc.add(LoadDiagnostic{
+            .key_path = std::string{key_prefix},
+            .reason   = reason_class::invalid_or_contradictory_selector,
+            .message  = "make_asio_tls_transport_factory failed (cert loading error?)",
+        });
+        return nullptr;
+    }
+
+    // Convert unique_ptr → shared_ptr (D-6).
+    return std::shared_ptr<transport::TransportFactory>(std::move(*factory_result));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // resolve_transport — build engine.default_transport_factory from the first
 // session's [transport] sub-table and the engine-level cert_source + clock (D-6).
 //
-// For US1 (single session, engine-default profile), the session's transport.kind
-// and security_profile.kind drive the engine default factory. No per-session
-// override is set (sessions matching the engine default use the shared factory).
+// Also mints per-session transport_factory_override for sessions whose
+// cert/profile DIVERGES from the engine default (D-6a).
 //
 // make_ssl_ctx_config and make_asio_*_transport_factory are noexcept expected_t
 // — check-the-expected, NO trap_throw (D-3 / loader_internal.hpp).
 // ─────────────────────────────────────────────────────────────────────────────
 static void resolve_transport(const std::vector<const toml::table*>& merged_session_tables,
+                              const std::filesystem::path&           base_dir,
+                              const LoadOptions&                     opts,
                               ConfigBundle&         bundle,
                               DiagnosticAccumulator& acc)
 {
@@ -425,34 +572,13 @@ static void resolve_transport(const std::vector<const toml::table*>& merged_sess
     if (transport_kind_tok == "tls") {
         // TLS factory requires: engine.clock + engine.default_cert_source + session security_profile.
 
-        // Extract session security_profile.kind → tls::SecurityProfile.
-        tls::SecurityProfile tls_profile = tls::SecurityProfile::unset;
+        // Extract session[0] security_profile → engine-default profile.
+        tls::SecurityProfile tls_profile = parse_security_profile(
+            session_merged, "session[0]", acc);
 
-        if (auto* sp_n = session_merged.get("security_profile"); sp_n && sp_n->is_table()) {
-            const toml::table& sp = *sp_n->as_table();
-            if (auto* k_n = sp.get("kind"); k_n && k_n->is_string()) {
-                std::string_view sp_tok = k_n->as_string()->get();
-                if (sp_tok == "mtls_ca") {
-                    tls_profile = tls::SecurityProfile::mtls_ca;
-                } else if (sp_tok == "one_way_ca") {
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-                    tls_profile = tls::SecurityProfile::one_way_ca;
-#pragma clang diagnostic pop
-                } else if (sp_tok == "mtls_pinned") {
-                    // mtls_pinned requires a Pinset which cannot be sourced from a file
-                    // in step 1 (D-9a / E-4 recognized_not_yet_supported).
-                    acc.add(LoadDiagnostic{
-                        .key_path = "session[0].security_profile.kind",
-                        .reason   = reason_class::recognized_not_yet_supported_step2,
-                        .message  = "security_profile.kind=\"mtls_pinned\" is recognized but "
-                                    "requires a Pinset that cannot be sourced from a file in step 1 (D-9a)",
-                    });
-                    return;
-                }
-                // Other tokens handled by map_structured_members; here unrecognized → unset
-                // and make_ssl_ctx_config will reject it below.
-            }
+        // If parse_security_profile added a deferral diagnostic, bail.
+        if (!acc.empty()) {
+            return;
         }
 
         // Validate prerequisites (E-3: cert_source required for TLS profiles).
@@ -473,40 +599,99 @@ static void resolve_transport(const std::vector<const toml::table*>& merged_sess
             return;
         }
 
-        // make_ssl_ctx_config is noexcept expected_t — check-the-expected.
+        // Build engine-default TLS factory.
         // CRITICAL: pass bundle.engine.clock BY COPY (not move) so engine.clock
         // AND the factory's ssl_cfg_.clock both hold the shared_ptr → use_count > 1 (D-6).
-        auto ssl_cfg_result = tls::make_ssl_ctx_config(
+        auto default_factory = build_tls_factory(
             tls_profile,
-            bundle.engine.default_cert_source,   // copy (shared_ptr)
-            bundle.engine.clock);                // copy (shared_ptr) — D-6 shared clock
+            bundle.engine.default_cert_source,  // copy (shared_ptr)
+            bundle.engine.clock,                // copy (shared_ptr) — D-6 shared clock
+            "session[0].transport",
+            acc);
 
-        if (!ssl_cfg_result) {
-            acc.add(LoadDiagnostic{
-                .key_path = "session[0].transport",
-                .reason   = reason_class::invalid_or_contradictory_selector,
-                .message  = "make_ssl_ctx_config failed (check profile/cert_source/clock combination)",
-            });
-            return;
+        if (!default_factory) {
+            return;  // diagnostic already added by build_tls_factory
         }
+        bundle.engine.default_transport_factory = std::move(default_factory);
 
-        // make_asio_tls_transport_factory is noexcept expected_t — check-the-expected.
-        transport::Transport::Config t_cfg{};
-        auto factory_result = transport::make_asio_tls_transport_factory(
-            t_cfg, std::move(*ssl_cfg_result));
+        // ── Per-session divergence scan (D-6a) ──────────────────────────────
+        // For each session: if it has a per-session [cert_source] OR a different
+        // security_profile kind from the engine default (tls_profile), it diverges
+        // and must get a freshly-minted transport_factory_override.
+        // Sessions that match (no per-session cert_source + same profile) stay null.
 
-        if (!factory_result) {
-            acc.add(LoadDiagnostic{
-                .key_path = "session[0].transport",
-                .reason   = reason_class::invalid_or_contradictory_selector,
-                .message  = "make_asio_tls_transport_factory failed (cert loading error?)",
-            });
-            return;
+        for (std::size_t i = 0; i < merged_session_tables.size(); ++i) {
+            const toml::table& sess = *merged_session_tables[i];
+
+            // Check if this session has a per-session transport and it's "tls".
+            const toml::table* s_transport_tbl = nullptr;
+            if (auto* t_n = sess.get("transport"); t_n && t_n->is_table()) {
+                s_transport_tbl = t_n->as_table();
+            }
+            if (!s_transport_tbl) {
+                continue;  // No transport table; validation error caught elsewhere.
+            }
+            std::string_view s_transport_kind;
+            if (auto* kn = s_transport_tbl->get("kind"); kn && kn->is_string()) {
+                s_transport_kind = kn->as_string()->get();
+            }
+            if (s_transport_kind != "tls") {
+                continue;  // Plaintext session — no TLS override.
+            }
+
+            // Determine per-session security_profile.
+            const std::string idx_str = std::to_string(i);
+            const std::string s_prefix = "session[" + idx_str + "]";
+            tls::SecurityProfile s_profile = parse_security_profile(sess, s_prefix, acc);
+            if (!acc.empty()) {
+                return;  // mtls_pinned deferral or similar
+            }
+
+            // Determine per-session cert_source table.
+            const toml::table* s_cs_tbl = nullptr;
+            if (auto* cs_n = sess.get("cert_source"); cs_n && cs_n->is_table()) {
+                s_cs_tbl = cs_n->as_table();
+            }
+
+            // Divergence: a per-session [cert_source] is present (different certs)
+            // OR the profile differs from the engine-default profile.
+            const bool cert_diverges  = (s_cs_tbl != nullptr);
+            const bool profile_diverges = (s_profile != tls_profile);
+
+            if (!cert_diverges && !profile_diverges) {
+                // Matches engine default → leave override null.
+                continue;
+            }
+
+            // Build per-session cert_source.
+            std::shared_ptr<tls::cert_source> s_cert_source;
+            if (s_cs_tbl) {
+                s_cert_source = build_file_cert_source(
+                    *s_cs_tbl, base_dir, opts,
+                    s_prefix + ".cert_source", acc);
+                if (!s_cert_source) {
+                    return;  // diagnostic already added
+                }
+            } else {
+                // Profile diverges but certs are the same: reuse engine default cert_source.
+                s_cert_source = bundle.engine.default_cert_source;
+            }
+
+            // Mint a FRESH TLS factory for this session (use_count()==1 per D-6a).
+            // Each divergent session gets its own independently-owned factory.
+            auto s_factory = build_tls_factory(
+                s_profile,
+                s_cert_source,
+                bundle.engine.clock,   // shared clock (copy) — D-6
+                s_prefix + ".transport",
+                acc);
+            if (!s_factory) {
+                return;  // diagnostic already added
+            }
+
+            // Set the per-session override (single-owner: not aliased anywhere else).
+            bundle.sessions[i].config.transport_factory_override = std::move(s_factory);
         }
-
-        // Convert unique_ptr<TransportFactory> → shared_ptr<TransportFactory> (D-6).
-        bundle.engine.default_transport_factory =
-            std::shared_ptr<transport::TransportFactory>(std::move(*factory_result));
 
     } else if (transport_kind_tok == "plaintext") {
         // T025 (validation rule D-6): plaintext transport + cert_source present
@@ -567,12 +752,13 @@ void resolve_selectors(const toml::table&                     root_tbl,
 {
     // Engine-scope selectors: read from root_tbl directly (D-5).
     resolve_engine_clock(root_tbl, opts, bundle, acc);
-    resolve_engine_store(root_tbl, bundle, acc);
+    resolve_engine_store(root_tbl, base_dir, bundle, acc);
     resolve_engine_cert_source(root_tbl, base_dir, opts, bundle, acc);
     resolve_engine_dictionary(root_tbl, base_dir, opts, bundle, acc);
 
     // Transport factory: synthesised from engine cert_source + clock + session profile.
-    resolve_transport(merged_session_tables, bundle, acc);
+    // base_dir + opts are forwarded for per-session cert_source resolution (D-6a).
+    resolve_transport(merged_session_tables, base_dir, opts, bundle, acc);
 }
 
 }  // namespace fixpp::config::detail

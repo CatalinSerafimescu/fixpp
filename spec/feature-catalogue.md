@@ -476,3 +476,15 @@ note above. 018 also discharges the orthogonal 016 verify-YELLOW sanitizer waive
 | TC-015 | OFFICIAL | test | Session conformance (optional): Message field ordering tolerance (test 15) | 4.0–5.0SP2, FIXT.1.1 | [FIX-TC §4 scenario 15] Message field ordering | backlog | — | — | — | — |
 | TC-016 | OFFICIAL | test | Session conformance (optional): Third-party addressing — OnBehalfOfCompID/DeliverToCompID validation (test 18) | 4.0–5.0SP2, FIXT.1.1 | [FIX-TC §4 scenario 18] Third-party addressing | backlog | — | — | — | — |
 | TC-017 | OFFICIAL | test | Session conformance (optional): Encryption / legacy EncryptMethod(98) handling (test 17, sub-cases 17a–17j) | 4.0–5.0SP2 | [FIX-TC §4 scenario 17] Support encryption | backlog | — | — | — | — |
+
+<!-- ═══════════════════════════════════════════════════════════════
+     DESIGN ROWS — design-blessed features per [const §XV.16]
+     Not tracked by the FIX spec; justified in their own spec docs.
+     Source = DESIGN; rows added per §VI.3 + §VI.4 before merge.
+     ═══════════════════════════════════════════════════════════════ -->
+
+## Design-Blessed Features
+
+| ID | Source | Category | Title | FIX version(s) | Spec ref | Status | /specify | PR | Tests | Verified |
+|---|---|---|---|---|---|---|---|---|---|---|
+| T-043 | DESIGN | config | Native TOML config-file loader (session establishment) — synchronous cold-path loader translating a TOML file into a fully-validated `ConfigBundle` (`EngineEstablishment` + `[]SessionDefinition`); fail-closed collect-ALL diagnostics; `fixpp_config_toml` isolated target | 4.0–5.0SP2, FIXT.1.1 | `specs/044-toml-session-config/` (`[const §XV.16]` / FR-001..FR-021 / data-model E-1..E-6) | implementing | 044-toml-session-config | — (unmerged; US1–US4 done locally; Gate B pending — T039 blocker) | `tests/config/test_load_happy_path.cpp` (US1/SC-001 field-for-field equivalence), `tests/config/test_load_negative_battery.cpp` (US2/SC-002 fail-closed collect-ALL diagnostics), `tests/config/test_load_selectors.cpp` (US3/SC-003 selector-kind matrix), `tests/config/test_load_multisession_defaults.cpp` (US4/SC-004/SC-005 multi-session `[default]`+`[[session]]`), `tests/config/test_quickfix_parity_table.cpp` (US4/SC-004 QuickFIX parity table) | — |

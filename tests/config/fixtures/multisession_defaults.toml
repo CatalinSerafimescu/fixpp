@@ -1,0 +1,95 @@
+# tests/config/fixtures/multisession_defaults.toml
+# 044-toml-session-config T031 [US4] — multi-session [default]+[[session]] fixture.
+#
+# Layout:
+#   Engine-scope selectors (top-level, per D-8): clock, store, cert_source, dictionary.
+#   [default]: session-scoped shared keys — scalars + sub-tables shared across all sessions.
+#   [[session]] A: inherits ALL [default] scalars unchanged.
+#   [[session]] B: OVERRIDES heartbeat_interval from [default] (30s → 45s).
+#                  ALSO sets reset_on_logout which is ABSENT from [default] (valid override-of-absent).
+#   [[session]] C: inherits all [default] scalars; uses a distinct identity.
+#
+# Assertions (T031 / SC-005):
+#   - bundle.sessions.size() == 3
+#   - sessions[0].heartbeat_interval == 30s (inherited from [default])
+#   - sessions[1].heartbeat_interval == 45s (B's override wins, NOT the 30s default)
+#   - sessions[1].reset_on_logout == true  (override-of-absent: applied to B only)
+#   - sessions[0].reset_on_logout == false (default false — not leaked from B)
+#   - sessions[2].reset_on_logout == false (same — B's per-session key does not bleed)
+#
+# Relative paths (cert_source.*, dictionary.path) resolve against THIS FILE's parent
+# directory (FR-016a).
+
+# ── Engine-scope selectors (NOT in [default] — these are bundle-level, D-8) ────
+
+[clock]
+kind = "system"
+
+[store]
+kind = "memory"
+
+[cert_source]
+kind      = "file"
+cert_file = "leaf_ecdsa_p256.pem"
+key_file  = "leaf_ecdsa_p256.key"
+ca_file   = "ca.pem"
+
+[dictionary]
+kind = "path"
+path = "FIX44.xml"
+
+# ── [default]: session-scope shared keys ─────────────────────────────────────
+#
+# Scalars here are inherited by every [[session]] unless overridden.
+# The sub-tables [default.transport] and [default.security_profile] are merged
+# one level deep into each session's transport / security_profile sub-table.
+
+[default]
+begin_string            = "FIX.4.4"
+role                    = "initiator"
+heartbeat_interval      = "30s"     # default value; session B overrides to 45s
+reset_on_logon          = true      # non-default (default false)
+check_comp_id           = false     # non-default (default true — inverted for discrimination)
+# reset_on_logout is intentionally ABSENT here — session B sets it (override-of-absent test)
+
+[default.transport]
+kind = "tls"
+# host and port are NOT shared — each initiator session provides its own endpoint
+
+[default.security_profile]
+kind = "mtls_ca"
+
+# ── Session A: inherits all [default] scalars unchanged ──────────────────────
+
+[[session]]
+sender_comp_id = "CLIENT_A"
+target_comp_id = "SERVER_A"
+
+[session.transport]
+host = "fix-a.example.com"
+port = 4001
+
+# Session A does NOT override heartbeat_interval → inherits 30s from [default]
+# Session A does NOT set reset_on_logout → inherits false (struct default)
+
+# ── Session B: overrides heartbeat_interval + sets override-of-absent key ────
+
+[[session]]
+sender_comp_id     = "CLIENT_B"
+target_comp_id     = "SERVER_B"
+heartbeat_interval = "45s"    # overrides [default]'s 30s → 45s wins
+reset_on_logout    = true     # absent from [default] — valid override-of-absent
+
+[session.transport]
+host = "fix-b.example.com"
+port = 4002
+
+# ── Session C: inherits all [default] scalars (like A) ───────────────────────
+
+[[session]]
+sender_comp_id = "CLIENT_C"
+target_comp_id = "SERVER_C"
+
+[session.transport]
+host = "fix-c.example.com"
+port = 4003

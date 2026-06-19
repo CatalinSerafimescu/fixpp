@@ -129,6 +129,7 @@ The known keys/selections that must be reported as `recognized_not_yet_supported
 - **Observability/diagnostics keys:** `logger`, `log_sink`, `tracer`, `meter`, `otlp`, `prometheus`, `exporter`, `tap` / `tap_consumer` (FR-009).
 - **Arena keys:** `arena` / `message_arena` / `session_arena` / `framer_carry_arena` (FR-009).
 - **Deferred selectors:** the `dialect_overlay` selector (FR-007a); `dictionary.kind="version"` (OQ-1 option A); `security_profile.kind="mtls_pinned"` (no file-based pinset channel — research D-9a).
+- **`reject_policy` (implementation-discovered, added during `/implement` T013).** `SessionConfig::reject_policy` is a recognized field, but its `RejectPolicy` enum is **forward-declared only** in `session_config.hpp` ("owned by 005"; **no enumerators exist in this checkout**), so no canonical token can be mapped from a file. A present `reject_policy` key therefore resolves to `recognized_not_yet_supported_step2` (recognized field, not yet file-selectable) rather than `unknown_key`. This is a step-1 **capability** limitation pending feature 005's enum; the programmatic path is unaffected. (Witnessed by `neg_multi.toml` in the negative battery.)
 
 Any other unrecognized key → `unknown_key`.
 

@@ -1,0 +1,83 @@
+# tests/config/fixtures/multisession_divergent_cert.toml
+# T027 [US3] — divergent-cert multi-session fixture.
+#
+# Two [[session]] blocks with distinct cert/profile configuration:
+#   session[0] — MATCHING the engine default (cert trio #1, security_profile=mtls_ca).
+#                Expected: transport_factory_override = null (uses shared engine default).
+#   session[1] — DIVERGENT from the engine default (cert trio #2: leaf_rsa2048.*,
+#                security_profile=one_way_ca).
+#                Expected: transport_factory_override != null, use_count()==1 (freshly minted).
+#
+# Engine default cert source: [cert_source] with leaf_ecdsa_p256.pem / leaf_ecdsa_p256.key / ca.pem.
+# Divergent cert source for session[1]: [session.cert_source] with leaf_rsa2048.pem / leaf_rsa2048.key / ca.pem.
+#
+# Anchor: data-model D-6a — per-session transport_factory_override minted only when
+# cert/profile DIVERGES from the engine default; use_count()==1 per session_config.hpp:298-307.
+#
+# Relative paths resolve against THIS FILE's parent directory (FR-016a).
+
+# ── Engine-level selectors ─────────────────────────────────────────────────────
+
+[clock]
+kind = "system"
+
+[store]
+kind = "memory"
+
+# Engine-default cert source (cert trio #1: ECDSA P-256).
+[cert_source]
+kind      = "file"
+cert_file = "leaf_ecdsa_p256.pem"
+key_file  = "leaf_ecdsa_p256.key"
+ca_file   = "ca.pem"
+
+[dictionary]
+kind = "path"
+path = "FIX44.xml"
+
+# ── Session[0]: MATCHING the engine default ────────────────────────────────────
+#
+# Uses the same cert trio as the engine default ([cert_source] above) and the
+# same security_profile kind (mtls_ca). The resolver should NOT mint a
+# transport_factory_override for this session — it shares the engine default.
+
+[[session]]
+sender_comp_id = "CLIENT_A"
+target_comp_id = "SERVER_A"
+begin_string   = "FIX.4.4"
+role           = "initiator"
+
+[session.transport]
+kind = "tls"
+host = "fix-a.example.com"
+port = 4001
+
+[session.security_profile]
+kind = "mtls_ca"
+
+# ── Session[1]: DIVERGENT — different cert + profile ──────────────────────────
+#
+# Declares a per-session cert_source (cert trio #2: RSA 2048) and a different
+# security_profile kind (one_way_ca). This session DIVERGES from the engine
+# default on both dimensions. The resolver must mint a freshly-owned
+# transport_factory_override for this session (use_count()==1, D-6a).
+
+[[session]]
+sender_comp_id = "CLIENT_B"
+target_comp_id = "SERVER_B"
+begin_string   = "FIX.4.4"
+role           = "initiator"
+
+[session.cert_source]
+kind      = "file"
+cert_file = "leaf_rsa2048.pem"
+key_file  = "leaf_rsa2048.key"
+ca_file   = "ca.pem"
+
+[session.transport]
+kind = "tls"
+host = "fix-b.example.com"
+port = 4002
+
+[session.security_profile]
+kind = "one_way_ca"

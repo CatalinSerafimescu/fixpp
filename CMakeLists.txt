@@ -166,6 +166,7 @@ endif()
 
 if(FIXPP_BUILD_FUZZ)
   add_subdirectory(tests/fuzz)
+  add_subdirectory(tests/config/fuzz)  # T037 — 044-toml-session-config fuzzer
 endif()
 
 # ── CMake package export (fixpp:: namespace per [arch §7.4]) ────────────────

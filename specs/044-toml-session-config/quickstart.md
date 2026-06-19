@@ -5,26 +5,33 @@ This shows the migration MVP (US1): bring up a session from a TOML file, injecti
 ## 1. An example config file (`fix-session.toml`)
 
 ```toml
-# Engine-level establishment anchors (shared).
+# Engine-level object selectors — must be ROOT-level tables (read by the
+# selector resolver directly from root_tbl, not from [default]).
+
+[clock]
+kind = "system"
+
+[dictionary]
+kind = "path"                           # by-path only this step; kind="version" is deferred (FR-007a)
+path = "dicts/FIX50SP2.xml"             # relative → resolved vs this file's dir (FR-016a)
+
+[store]
+kind      = "file"
+directory = "./store"                   # relative → resolved vs this file's dir (FR-016a)
+
+[cert_source]                           # engine-level default cert; must be ROOT-level (D-5)
+kind      = "file"
+cert_file = "certs/client.pem"         # TOML key: cert_file (not leaf_path)
+key_file  = "certs/client.key"         # TOML key: key_file  (not private_key_path)
+ca_file   = "certs/ca.pem"            # TOML key: ca_file   (not ca_bundle_path)
+
+# [default] carries session-scalar defaults; per-session [[session]] overrides.
 [default]
 begin_string          = "FIXT.1.1"
 default_appl_ver_id   = "FIX.5.0SP2"
 heartbeat_interval    = "30s"          # explicit unit required (FR / edge case)
 reset_on_logon        = true
 check_comp_id         = true
-
-# Object selectors: {kind, params}.
-[default.clock]
-kind = "system"
-
-[default.dictionary]
-kind = "path"                           # by-path only this step; kind="version" is deferred (FR-007a)
-path = "dicts/FIX50SP2.xml"             # relative → resolved vs this file's dir (FR-016a)
-
-[default.store]
-kind      = "file"
-directory = "./store"                   # relative → resolved vs this file's dir (FR-016a)
-policy    = "commit_per_message"
 
 # One session.
 [[session]]
@@ -36,12 +43,6 @@ role           = "initiator"
 kind = "mtls_ca"                        # explicit; no implicit default (FR / §XII.5)
                                         # step-1 accepted: {mtls_ca, one_way_ca, insecure_plain_tcp};
                                         # mtls_pinned is recognized-but-deferred (FR-006b)
-
-[session.cert_source]
-kind             = "file"
-leaf_path        = "certs/client.pem"
-private_key_path = "certs/client.key"
-ca_bundle_path   = "certs/ca.pem"
 
 [session.transport]
 kind = "tls"                            # kind() must match security_profile (open()-enforced)
@@ -116,3 +117,20 @@ for (auto& sd : bundle.sessions)
 - **US3:** each selector kind resolves to the requested built-in (`store=file`/`memory`, `transport=tls`/`plaintext`, dictionary by path); an unknown kind is rejected, and a deferred sub-selector (`dictionary.kind="version"`, `dialect_overlay`, `security_profile.kind="mtls_pinned"`) reports `recognized_not_yet_supported_step2`.
 - **Step-1 TLS boundaries (FR-006b / D-9a):** a config selecting `security_profile.kind="mtls_pinned"` reports `recognized_not_yet_supported_step2` (no file pin-material channel); a cert selector referencing an **encrypted** PEM key fails closed as `invalid_or_contradictory_selector` naming the cert selector (step 1 = plaintext-key-only) — a graceful diagnostic, never a terminate.
 - **US4 / SC-004 / SC-005:** every QuickFIX establishment setting has a documented equivalent key (parity table); a multi-session `[default]`+`[[session]]` file applies defaults with per-session overrides.
+
+## Migration note: build-time → load-time error relocation (FR-021)
+
+Moving session configuration out of C++ and into a text file **relocates type and
+spelling errors from compile time to load time**. A mistyped field name or a
+wrong-typed value that the compiler would have caught in a hand-built
+`SessionConfig` is now only detectable when the file is read.
+
+The mitigation is the loader's strict load-time validation (FR-012–FR-018): every
+configuration error is caught **before any `Session::open`**, reported per-key with
+the offending key path, a precise `reason_class`, and the file location, and **all**
+errors are collected in one pass (`load_toml_config` never stops at the first). A
+mistyped key surfaces as `unknown_key` (distinct from a recognized-but-deferred
+`recognized_not_yet_supported_step2`); a wrong-typed/range/enum value surfaces as
+`malformed_value`/`out_of_range`/`unknown_enum`; an absent required key surfaces as
+`missing_required`. The bundle is never returned on any error, so a typo can never
+silently reach the wire — it fails closed at load with an actionable diagnostic.
