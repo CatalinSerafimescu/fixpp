@@ -28,6 +28,7 @@
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/core/test/mock_clock.hpp>
+#include <fixpp/session/application.hpp>
 #include <fixpp/session/direction.hpp>
 #include <fixpp/session/message_store.hpp>
 #include <fixpp/session/message_store_factory.hpp>
@@ -206,6 +207,26 @@ static bool is_replay_with_poss_dup(std::span<const std::byte> frame, std::uint3
     if (wire.find("43=Y\x01") == std::string::npos) return false;
     return wire.find("34=" + std::to_string(seq) + "\x01") != std::string::npos;
 }
+
+// ── gap #5 support: an Application that counts toApp and ALWAYS vetoes ─────────
+// (returns app_do_not_send). On the ORIGINATE path this would suppress the frame
+// and consume no seqnum (L-019-1). The gap #5 cell proves it is INERT on resend.
+class ResendVetoApplication final : public fixpp::session::Application {
+public:
+    int to_app_calls = 0;
+    int to_admin_calls = 0;
+
+    fixpp::core::expected_t<void> toApp(
+        const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>& /*msg*/,
+        const fixpp::session::SessionId& /*id*/) override {
+        ++to_app_calls;
+        return std::unexpected(fixpp::core::error::app_do_not_send);  // always veto
+    }
+    void toAdmin(const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>& /*msg*/,
+                 const fixpp::session::SessionId& /*id*/) override {
+        ++to_admin_calls;
+    }
+};
 
 }  // namespace
 
@@ -483,4 +504,64 @@ TEST_F(RecoveryStoreHorizonTest, LargeAppFrameReplayed_NotGapFilled) {
     EXPECT_FALSE(found_gapfill)
         << "Large app frame (>1024B) must NOT be collapsed into a GapFill. "
         << "RED (before fix): truncated=true → treated as absent → GapFill emitted.";
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// gap #5 / FIX-TC RejectResentMessage's sibling — QF C++
+//   resendRequest_AResentMessageReceivesADoNotSendException — DoNotSend on resend.
+//
+// fix-tc-coverage-audit Consolidated Gap #5 = the documented limitation L-019-4:
+// fixpp's resend path exposes NO per-message app veto. QuickFIX calls toApp for
+// every resent message and converts an application DoNotSend into a
+// SequenceReset-GapFill over that slot; fixpp does not. This is a MISSING FEATURE
+// (a Phase-5 toApp-on-resend slice), not a defect — the wire output is conformant.
+//
+// This cell CHARACTERIZES the absence (it does not build the veto): an Application
+// that ALWAYS vetoes (toApp → app_do_not_send) is registered, then the peer asks
+// us to resend a stored application frame. The veto is INERT on the resend path:
+//   (a) toApp is NEVER invoked for the replayed application frame (call count 0);
+//   (b) the stored frame is replayed verbatim (43=Y) anyway — the DoNotSend is
+//       not honored and the slot is NOT substituted with a GapFill.
+// If a future slice wires toApp into resend, this cell flips RED and forces a
+// conscious decision about L-019-4. Pins the originate-vs-resend asymmetry that
+// test_application_outbound (originate veto → frame suppressed) leaves implicit.
+TEST_F(RecoveryStoreHorizonTest, ResendBypassesToApp_DoNotSendInertOnReplay) {
+    auto app = std::make_shared<ResendVetoApplication>();
+    engine.application = app;
+
+    auto cfg = make_acceptor_cfg();
+    fixpp::session::Session sess(engine, cfg);
+    ASSERT_TRUE(drive_to_active(sess));
+    ASSERT_EQ(app->to_app_calls, 0) << "precondition: establishment fires no toApp (admin only)";
+
+    // Peer asks to resend exactly [7..7] — a single stored APPLICATION frame (35=D),
+    // wholly inside the store horizon, so the reply is a pure app replay with no
+    // pre-horizon GapFill to muddy the toApp accounting.
+    auto rr = make_resend_request("FIX.4.2", 2, "TW", "ISLD", 7, 7);
+    feed(sess, rr);
+
+    // PROOF-OF-WIRING (so the toApp==0 below is not vacuous): the same Application
+    // IS registered and IS consulted on the ADMIN path — establishment + the resend
+    // reply fire toAdmin. If the app were not wired this would be 0 and the toApp
+    // assertion would prove nothing.
+    ASSERT_GT(app->to_admin_calls, 0)
+        << "the Application must be wired (toAdmin fires) for the toApp==0 below to be meaningful";
+
+    // (a) The veto's toApp was NEVER consulted for the replayed application frame —
+    // resend bypasses the originate-path tap entirely (L-019-4).
+    EXPECT_EQ(app->to_app_calls, 0)
+        << "L-019-4: retransmissions answering a ResendRequest are NOT surfaced to toApp";
+
+    // (b) The stored app frame is replayed verbatim with PossDupFlag(43)=Y despite
+    // the standing DoNotSend veto — the veto is inert, NOT converted to a GapFill.
+    bool found_app_replay = false;
+    bool found_gapfill_over_7 = false;
+    for (const auto& frame : capture.frames) {
+        if (is_replay_with_poss_dup(frame, 7)) found_app_replay = true;
+        if (is_gapfill_to(frame, 8)) found_gapfill_over_7 = true;  // would-be GapFill substitution
+    }
+    EXPECT_TRUE(found_app_replay)
+        << "the stored app frame is replayed (43=Y) — the app DoNotSend has no effect on resend";
+    EXPECT_FALSE(found_gapfill_over_7)
+        << "fixpp does NOT convert a resend DoNotSend into a SequenceReset-GapFill (QF would)";
 }
