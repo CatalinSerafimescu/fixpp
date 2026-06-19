@@ -1,0 +1,2 @@
+<<< this is not valid XML and pugixml must fail to parse it
+<fix major="4" minor="4"><messages><message>

@@ -439,6 +439,33 @@ TEST(LoadNegativeBattery, T018_ContradictoryEncryptedKey)
            "encrypted key (make_file_cert_source failure)";
 }
 
+// ── invalid_or_contradictory_selector — sub-cell (e): malformed dictionary XML ─
+//
+// neg_dict_malformed_xml.toml points dictionary.path at an UNPARSEABLE XML file.
+// XmlLoader::load THROWS (dict::xml_parse_error); the loader's trap_throw_to_expected
+// wrapper MUST convert that throw into a diagnostic, NEVER terminate (data-model D-3
+// / validation rule 9 / plan.md "malformed dictionary XML → diagnostic NOT terminate").
+// This exercises the one reachable, file-triggerable trap_throw arm — the same
+// noexcept-boundary class the fuzzer (T037) found broken for the toml++ parse path.
+// The (key_path, reason) are derived from data-model D-3 / selector_resolver
+// resolve_engine_dictionary: invalid_or_contradictory_selector at "dictionary.path".
+TEST(LoadNegativeBattery, T018_MalformedDictionaryXmlNoTerminate)
+{
+    // If trap_throw does NOT catch the XmlLoader throw, this load aborts the
+    // process (a crash, not an assertion failure) — which is itself the finding.
+    auto result = load(neg_fixture("neg_dict_malformed_xml.toml"));
+
+    ASSERT_FALSE(result.has_value())
+        << "malformed dictionary XML must fail closed with a diagnostic, "
+           "never a ConfigBundle";
+
+    using RC = fixpp::config::reason_class;
+    EXPECT_TRUE(has_diag(result.error(), RC::invalid_or_contradictory_selector,
+                         "dictionary.path"))
+        << "expected invalid_or_contradictory_selector at \"dictionary.path\" "
+           "(XmlLoader::load throw routed through trap_throw_to_expected, D-3)";
+}
+
 // =============================================================================
 // T019 — collect-ALL (SC-007)
 // =============================================================================
