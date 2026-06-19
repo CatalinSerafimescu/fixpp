@@ -349,11 +349,11 @@ TEST(Masker_SameLength_FieldAnchored_unit, I_FrameHasGenuine554_Detector) {
 // mirrors the NoHeap pattern in test_next_expected_msgseqnum.cpp.)
 extern "C" {
 // NOLINTNEXTLINE(misc-use-anonymous-namespace) — must be at file scope for LD_PRELOAD override.
-__attribute__((weak)) void alloc_guard_start() {}
+__attribute__((weak)) void alloc_guard_start();
 // NOLINTNEXTLINE(misc-use-anonymous-namespace)
-__attribute__((weak)) void alloc_guard_end() {}
+__attribute__((weak)) void alloc_guard_end();
 // NOLINTNEXTLINE(misc-use-anonymous-namespace)
-__attribute__((weak)) long alloc_guard_count() { return 0; }
+__attribute__((weak)) long alloc_guard_count();
 }
 
 namespace fixpp_redaction_session {
@@ -1348,13 +1348,13 @@ TEST(NoHeap, StorePath_NoNewAllocation) {
     std::array<std::byte, 256> mask_buf{};
 
     // ── Guarded window: only the new memcpy + mask step ──────────────────────
-    alloc_guard_start();
+    if (alloc_guard_start) alloc_guard_start();
 
     std::memcpy(mask_buf.data(), frame.data(), n);
     const bool masked =
         fixpp::session::mask_tag554_same_length_inplace(std::span<std::byte>{mask_buf.data(), n});
 
-    alloc_guard_end();
+    if (alloc_guard_end) alloc_guard_end();
 
     ASSERT_TRUE(masked) << "the representative Logon carries a 554 → must mask";
 
@@ -1368,7 +1368,7 @@ TEST(NoHeap, StorePath_NoNewAllocation) {
         << "Username(553) must NOT be masked (FR-005); masked copy: " << masked_str;
 
     // Under mallocnesia: a nonzero count means the mask step touched the heap.
-    const long heap_allocs = alloc_guard_count();
+    const long heap_allocs = alloc_guard_count ? alloc_guard_count() : 0L;
     EXPECT_EQ(heap_allocs, 0L)
         << "the copy+mask step must not touch the global heap; heap_allocs=" << heap_allocs
         << "; [SC-004 / FR-008 / [[feedback_tracking_pmr_resource_false_pass]]]";

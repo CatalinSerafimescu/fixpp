@@ -64,10 +64,13 @@
 
 #include "support/validation_test_dictionary.hpp"
 
-// mallocnesia replaces these weak no-ops with its interceptor scope markers.
+// mallocnesia provides these markers at runtime. They are weak UNDEFINED
+// declarations (no body) so they become PLT-routed dynamic symbols the
+// LD_PRELOAD interceptor can interpose; a local definition would bind
+// intra-executable and silently disable interception (item 13, 2026-06-19).
 extern "C" {
-__attribute__((weak)) void alloc_guard_start() {}
-__attribute__((weak)) void alloc_guard_end() {}
+__attribute__((weak)) void alloc_guard_start();
+__attribute__((weak)) void alloc_guard_end();
 }
 
 // ── Sanitizer-detection guard ─────────────────────────────────────────────────
@@ -107,11 +110,14 @@ __attribute__((weak)) void alloc_guard_end() {}
 
 // ── TU-local global operator new counter ─────────────────────────────────────
 //
-// WHY: mallocnesia is inert for the alloc-guard window on this WSL2/llvm22 host
-// (proven 2026-06-16): the test binary's alloc_guard_start/end markers are not
-// exported as dynamic symbols so the LD_PRELOAD interceptor cannot arm itself;
-// a `new int[256]` between the markers goes uncaught.  counting_resource is
-// PMR-scoped and cannot intercept std::string's global operator new.
+// WHY: historically mallocnesia was inert for the alloc-guard window because the
+// test binary's alloc_guard_start/end markers were locally-defined (not dynamic
+// symbols), so the LD_PRELOAD interceptor could not arm itself.  That marker bug
+// is now FIXED (item 13, 2026-06-19): the markers are weak UNDEFINED symbols and
+// mallocnesia arms correctly (RED-injection proven).  This TU-local counter is
+// retained as a sanitizer-independent local cross-check that needs no LD_PRELOAD
+// and also catches std::string's global operator new, which counting_resource
+// (PMR-scoped) cannot.
 //
 // This TU-local replacement of operator new/delete intercepts ALL global
 // allocations unconditionally, so it catches std::string{msg_type} constructed
@@ -303,9 +309,9 @@ TEST(ValidateGateAllocGuard, HotPathNoGlobalHeapAlloc) {
     // Under mallocnesia, any call to malloc/calloc/realloc inside this window
     // increments the interceptor's counter.  Zero is the required outcome.
     bool measured_ok = false;
-    alloc_guard_start();
+    if (alloc_guard_start) alloc_guard_start();
     measured_ok = run_validate();
-    alloc_guard_end();
+    if (alloc_guard_end) alloc_guard_end();
 
     // ── Post-guard assertions (always run, even without mallocnesia) ──────────
     EXPECT_TRUE(measured_ok)
@@ -333,7 +339,7 @@ TEST(ValidateGateAllocGuard, HotPathNoGlobalHeapAlloc) {
 //   g_new_count == 0 → ASSERT_EQ PASSES (GREEN confirmed 2026-06-16: count == 0).
 //
 //   mallocnesia + counting_resource assertions are retained (belt-and-suspenders;
-//   non-discriminating locally but may catch regressions in CI / future platforms).
+//   mallocnesia is now discriminating locally too after the item-13 marker fix).
 //
 // The table_view is built locally (not via the XML loader) so this test is
 // fully self-contained and independent of validation_test_dictionary.hpp.
@@ -450,15 +456,16 @@ TEST(ValidateGateAllocGuard, LongMsgTypeNoGlobalHeapAlloc) {
     // CI-tier cross-check on the alloc-guard window.
     //
     // SECONDARY gate: mallocnesia LD_PRELOAD (alloc_guard_start/end markers).
-    // Non-discriminating on this WSL2/llvm22 host (markers not exported as
-    // dynamic symbols → interceptor cannot arm itself); retained for CI coverage.
+    // Now discriminating: the markers are weak UNDEFINED symbols (item 13,
+    // 2026-06-19) so the interceptor arms; the TU-local operator-new counter
+    // below is retained as a sanitizer-independent local cross-check.
 #if !FIXPP_SANITIZER_REPLACES_NEW
     g_new_count.store(0, std::memory_order_relaxed);
     g_arming = true;
 #endif
-    alloc_guard_start();
+    if (alloc_guard_start) alloc_guard_start();
     bool measured_ok = run_long_validate();
-    alloc_guard_end();
+    if (alloc_guard_end) alloc_guard_end();
 #if !FIXPP_SANITIZER_REPLACES_NEW
     g_arming = false;
     std::size_t global_new_count = g_new_count.load(std::memory_order_relaxed);

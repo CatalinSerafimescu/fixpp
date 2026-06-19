@@ -60,11 +60,11 @@ using namespace std::chrono_literals;
 // Must be at file scope for the LD_PRELOAD override to bind.
 extern "C" {
 // NOLINTNEXTLINE(misc-use-anonymous-namespace) — must be at file scope for LD_PRELOAD override.
-__attribute__((weak)) void alloc_guard_start() {}
+__attribute__((weak)) void alloc_guard_start();
 // NOLINTNEXTLINE(misc-use-anonymous-namespace)
-__attribute__((weak)) void alloc_guard_end() {}
+__attribute__((weak)) void alloc_guard_end();
 // NOLINTNEXTLINE(misc-use-anonymous-namespace)
-__attribute__((weak)) long alloc_guard_count() { return 0; }
+__attribute__((weak)) long alloc_guard_count();
 }
 
 namespace {
@@ -1603,13 +1603,13 @@ TEST(NoHeap, Emit789Append) {
     const std::optional<seqnum_t> next_expected{5};
 
     // ── Guarded window: only the synchronous build_logon call ────────────────
-    alloc_guard_start();
+    if (alloc_guard_start) alloc_guard_start();
 
     auto result = fixpp::session::build_logon(std::span<std::byte>{out_buf.data(), out_buf.size()},
                                               seq, sender, target, begin, heartbt, stime,
                                               reset_seqnum, next_expected);
 
-    alloc_guard_end();
+    if (alloc_guard_end) alloc_guard_end();
 
     // ── Post-condition: call succeeded and the frame carries 789=5 ───────────
     ASSERT_TRUE(result.has_value()) << "build_logon with next_expected_seq=5 must succeed";
@@ -1624,7 +1624,7 @@ TEST(NoHeap, Emit789Append) {
     // Under mallocnesia: alloc_guard_count() returns the number of global
     // malloc/free calls in the window. A nonzero count means build_logon
     // touched the heap and the no-heap contract is violated. [const §VIII.5]
-    const long heap_allocs = alloc_guard_count();
+    const long heap_allocs = alloc_guard_count ? alloc_guard_count() : 0L;
     EXPECT_EQ(heap_allocs, 0L)
         << "build_logon with 789 append must not touch the global heap; "
            "heap_allocs="

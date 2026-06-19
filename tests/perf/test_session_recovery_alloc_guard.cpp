@@ -59,9 +59,9 @@ using namespace std::chrono_literals;
 // Without the preload, the stubs are no-ops (alloc counting = 0 always).
 extern "C" {
 
-__attribute__((weak)) void alloc_guard_start() {}
-__attribute__((weak)) void alloc_guard_end() {}
-__attribute__((weak)) long alloc_guard_count() { return 0; }
+__attribute__((weak)) void alloc_guard_start();
+__attribute__((weak)) void alloc_guard_end();
+__attribute__((weak)) long alloc_guard_count();
 
 }  // extern "C"
 
@@ -223,7 +223,7 @@ TEST_F(SessionRecoveryAllocGuardTest, HeartbeatSteadyState_DualGate) {
     pmr.alloc_count = 0;
 
     // --- OPEN GUARD WINDOW ---
-    alloc_guard_start();
+    if (alloc_guard_start) alloc_guard_start();
     std::size_t pre_pmr_count = pmr.alloc_count;
 
     for (int i = 0; i < kIter; ++i) {
@@ -231,9 +231,9 @@ TEST_F(SessionRecoveryAllocGuardTest, HeartbeatSteadyState_DualGate) {
         feed(sess, hb);
     }
 
-    long global_alloc_count = alloc_guard_count();
+    long global_alloc_count = alloc_guard_count ? alloc_guard_count() : 0L;
     std::size_t pmr_allocs_in_window = pmr.alloc_count - pre_pmr_count;
-    alloc_guard_end();
+    if (alloc_guard_end) alloc_guard_end();
     // --- CLOSE GUARD WINDOW ---
 
     // mallocnesia gate: zero global heap allocations in the steady-state window.
@@ -275,16 +275,16 @@ TEST_F(SessionRecoveryAllocGuardTest, AwaitingResendTransition_DualGate) {
     pmr.alloc_count = 0;
 
     // --- OPEN GUARD WINDOW ---
-    alloc_guard_start();
+    if (alloc_guard_start) alloc_guard_start();
     std::size_t pre_pmr_count = pmr.alloc_count;
 
     // Feed heartbeat with too-high seqnum (gap [3..4] → expected 3, got 5).
     auto gap_hb = make_fix_frame("FIX.4.2", "0", 5, "TW", "ISLD");
     feed(sess, gap_hb);
 
-    long global_alloc_count = alloc_guard_count();
+    long global_alloc_count = alloc_guard_count ? alloc_guard_count() : 0L;
     std::size_t pmr_allocs_in_window = pmr.alloc_count - pre_pmr_count;
-    alloc_guard_end();
+    if (alloc_guard_end) alloc_guard_end();
     // --- CLOSE GUARD WINDOW ---
 
     EXPECT_EQ(global_alloc_count, 0L)

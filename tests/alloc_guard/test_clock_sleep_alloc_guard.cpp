@@ -55,8 +55,8 @@
 
 // mallocnesia replaces these weak no-ops with its interceptor scope markers.
 extern "C" {
-__attribute__((weak)) void alloc_guard_start() {}
-__attribute__((weak)) void alloc_guard_end() {}
+__attribute__((weak)) void alloc_guard_start();
+__attribute__((weak)) void alloc_guard_end();
 }
 
 namespace {
@@ -170,9 +170,9 @@ void run_sleep_corpus(threading_mode mode) {
                        }),
                    asio::detached);
 
-    alloc_guard_start();
+    if (alloc_guard_start) alloc_guard_start();
     ioc.run();
-    alloc_guard_end();
+    if (alloc_guard_end) alloc_guard_end();
 
     EXPECT_EQ(corpus_done.load(), CORPUS_CYCLES);
 }
