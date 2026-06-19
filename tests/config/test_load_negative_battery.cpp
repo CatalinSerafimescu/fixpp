@@ -466,6 +466,36 @@ TEST(LoadNegativeBattery, T018_MalformedDictionaryXmlNoTerminate)
            "(XmlLoader::load throw routed through trap_throw_to_expected, D-3)";
 }
 
+// ── parse_error via toml++ internal assert — NO terminate (T039) ─────────────
+//
+// neg_toml_assert_table_header.toml has the malformed table header `[ [key]]`,
+// which drives tomlplusplus parse_key() to fire TOML_ASSERT_ASSUME
+// (parser.inl:3037). UNLIKE neg_parse_error.toml (an unterminated string, which
+// toml++ reports as a normal throwing parse_error), this path is an INTERNAL
+// invariant assert: before the toml_include.hpp shim it aborted (debug) / was
+// UB (release/NDEBUG), ESCAPING load_toml_config's try/catch noexcept boundary.
+// The shim re-routes TOML_ASSERT to a catchable throw so it lands in the
+// existing catch as a parse_error diagnostic.
+//
+// If the shim regresses, this load aborts the process (a crash, not an
+// assertion failure) — which is itself the finding.
+// Anchors: spec.md FR-012 / validation rule 9 / data-model D-3.
+
+TEST(LoadNegativeBattery, T039_TomlInternalAssert_NoTerminate)
+{
+    auto result = load(neg_fixture("neg_toml_assert_table_header.toml"));
+
+    ASSERT_FALSE(result.has_value())
+        << "a toml++ internal-invariant assert on malformed input must fail "
+           "closed with a diagnostic, never abort/UB past the noexcept boundary";
+
+    using RC = fixpp::config::reason_class;
+    // The throwing TOML_ASSERT raises std::logic_error, caught by the loader's
+    // catch(const std::exception&) arm → parse_error with key_path="".
+    EXPECT_TRUE(has_diag(result.error(), RC::parse_error, ""))
+        << "expected a parse_error diagnostic for the `[ [key]]` table header";
+}
+
 // =============================================================================
 // T019 — collect-ALL (SC-007)
 // =============================================================================

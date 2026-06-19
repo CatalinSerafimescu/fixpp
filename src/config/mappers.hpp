@@ -15,8 +15,10 @@
 #include <string_view>
 #include <vector>
 
-// toml++ forward include — PRIVATE to src/config/ only (FR-004).
-#include <toml++/toml.hpp>
+// toml++ include — PRIVATE to src/config/ only (FR-004).
+// Routed through the hardened shim (T039): NEVER include <toml++/toml.hpp>
+// directly from a config TU (ODR — see toml_include.hpp).
+#include "toml_include.hpp"
 
 // loader_internal.hpp is toml-free — it provides DiagnosticAccumulator.
 #include "loader_internal.hpp"

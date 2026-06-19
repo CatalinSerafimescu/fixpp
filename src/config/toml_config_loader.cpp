@@ -23,7 +23,9 @@
 #include "mappers.hpp"
 
 // toml++ header-only include — PRIVATE to this TU only (FR-004).
-#include <toml++/toml.hpp>
+// Routed through the hardened shim (T039): NEVER include <toml++/toml.hpp>
+// directly from a config TU (ODR — see toml_include.hpp).
+#include "toml_include.hpp"
 
 #include <string>
 #include <string_view>
