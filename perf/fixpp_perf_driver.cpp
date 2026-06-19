@@ -744,6 +744,11 @@ struct LoopbackHarness {
             // Route each ER reply to the receiving acceptor leg (`id`) — the
             // single-leg id IS acceptor_id here, but this keeps fromApp uniform.
             app->many_active.store(true, std::memory_order_release);
+            // Echo the inbound NOS's ClOrdID(11) on every ER, so this one acceptor
+            // process serves BOTH the fixed-id closed-loop workloads (wl-04/05,
+            // where 11 is the constant "ORD-PERF") AND the per-order burst workload
+            // (wl-07, where the initiator correlates each ER by its unique 11).
+            app->burst_active.store(true, std::memory_order_release);
             reg_ok = engine->register_session(std::move(acc_cfg)).has_value();
         } else {
             auto ini_cfg = make_cfg("FIXPP_INIT", "FIXPP_ACC",
@@ -1254,12 +1259,16 @@ int run_burst(const Options& o) {
         return 3;
     }
     LoopbackHarness h;
-    if (!h.bring_up(o, 30, dir)) {  // 30s heartbeat → liveness never fires mid-burst
+    // 2-process initiator dials the shared port; loopback self-pairs. 30s heartbeat
+    // → liveness never fires mid-burst.
+    const bool brought_up =
+        (o.role == "initiator") ? h.bring_up_role(o, 30, dir) : h.bring_up(o, 30, dir);
+    if (!brought_up) {
         std::cerr << "skip:tls-fixtures-absent (cert source build failed in " << dir << ")\n";
         return 3;
     }
     if (!h.established) {
-        std::cerr << "sessions did not reach Active within 10s\n";
+        std::cerr << "session(s) did not reach Active in time (role=" << o.role << ")\n";
         h.teardown();
         return 1;
     }
@@ -1662,9 +1671,10 @@ int main(int argc, char** argv) {
     // 2-process initiator: only the closed-loop workloads are wired so far. Fail
     // loudly rather than silently self-pairing (bring_up) under an initiator role.
     if (o.role == "initiator" &&
-        !(o.workload == "wl-04-nos-er-small" || o.workload == "wl-05-nos-er-medium-groups")) {
+        !(o.workload == "wl-04-nos-er-small" || o.workload == "wl-05-nos-er-medium-groups" ||
+          o.workload == "wl-07-burst-single-session")) {
         std::cerr << "--role initiator is not yet wired for workload " << o.workload
-                  << " (2-process slice currently supports wl-04/wl-05)\n";
+                  << " (2-process supports wl-04/wl-05/wl-07-burst-single-session)\n";
         return 2;
     }
 
