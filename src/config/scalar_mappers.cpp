@@ -30,6 +30,7 @@
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/transport/endpoint.hpp>
 #include <fixpp/transport/reconnect_policy.hpp>
+#include <utility>
 
 // FIXPP_SUPPRESS_DEPRECATED_BEGIN/END (portable -Wdeprecated-declarations
 // push/pop) is shared across config TUs — defined in loader_internal.hpp
@@ -48,8 +49,8 @@ namespace {
 SourceLoc loc_from_node(const toml::node& n) noexcept {
     const auto& src = n.source().begin;
     return SourceLoc{
-        static_cast<std::uint32_t>(src.line),
-        static_cast<std::uint32_t>(src.column),
+        .line = static_cast<std::uint32_t>(src.line),
+        .col = static_cast<std::uint32_t>(src.column),
     };
 }
 
@@ -114,7 +115,7 @@ ParsedDuration parse_duration_to_ms(std::string_view tok, std::string_view key_p
             .location = loc,
             .message = "empty duration string",
         });
-        return {0, false};
+        return {.value_ms = 0, .ok = false};
     }
 
     // Find where the digits end.
@@ -130,7 +131,7 @@ ParsedDuration parse_duration_to_ms(std::string_view tok, std::string_view key_p
             .location = loc,
             .message = "duration must start with a numeric value",
         });
-        return {0, false};
+        return {.value_ms = 0, .ok = false};
     }
 
     long long num = 0;
@@ -142,7 +143,7 @@ ParsedDuration parse_duration_to_ms(std::string_view tok, std::string_view key_p
             .location = loc,
             .message = "duration numeric part could not be parsed",
         });
-        return {0, false};
+        return {.value_ms = 0, .ok = false};
     }
 
     std::string_view unit = tok.substr(num_end);
@@ -151,9 +152,9 @@ ParsedDuration parse_duration_to_ms(std::string_view tok, std::string_view key_p
             .key_path = std::string{key_path},
             .reason = reason_class::malformed_value,
             .location = loc,
-            .message = "duration requires an explicit unit suffix (e.g. \"30s\", \"500ms\")",
+            .message = R"(duration requires an explicit unit suffix (e.g. "30s", "500ms"))",
         });
-        return {0, false};
+        return {.value_ms = 0, .ok = false};
     }
 
     long long ms = 0;
@@ -174,10 +175,10 @@ ParsedDuration parse_duration_to_ms(std::string_view tok, std::string_view key_p
             .location = loc,
             .message = std::string{"unrecognised duration unit: \""} + std::string{unit} + "\"",
         });
-        return {0, false};
+        return {.value_ms = 0, .ok = false};
     }
 
-    return {ms, true};
+    return {.value_ms = ms, .ok = true};
 }
 
 // ---------------------------------------------------------------------------
@@ -204,21 +205,21 @@ void map_scalars(const toml::table& merged, fixpp::session::SessionConfig& out,
                  const toml::table* raw_session) {
     // ── String scalars ────────────────────────────────────────────────────────
 
-    if (auto* n = merged.get("sender_comp_id"); n && n->is_string()) {
+    if (const auto* n = merged.get("sender_comp_id"); n && n->is_string()) {
         out.sender_comp_id = std::string{n->as_string()->get()};
     }
 
-    if (auto* n = merged.get("target_comp_id"); n && n->is_string()) {
+    if (const auto* n = merged.get("target_comp_id"); n && n->is_string()) {
         out.target_comp_id = std::string{n->as_string()->get()};
     }
 
-    if (auto* n = merged.get("begin_string"); n && n->is_string()) {
+    if (const auto* n = merged.get("begin_string"); n && n->is_string()) {
         out.begin_string = std::string{n->as_string()->get()};
     }
 
     // ── Credentials (FR-019: store verbatim, redact in diagnostics) ───────────
 
-    if (auto* n = merged.get("username"); n != nullptr) {
+    if (const auto* n = merged.get("username"); n != nullptr) {
         if (n->is_string()) {
             out.username = std::string{n->as_string()->get()};
         } else {
@@ -234,7 +235,7 @@ void map_scalars(const toml::table& merged, fixpp::session::SessionConfig& out,
         }
     }
 
-    if (auto* n = merged.get("password"); n != nullptr) {
+    if (const auto* n = merged.get("password"); n != nullptr) {
         if (n->is_string()) {
             out.password = std::string{n->as_string()->get()};
         } else {
@@ -254,7 +255,7 @@ void map_scalars(const toml::table& merged, fixpp::session::SessionConfig& out,
     // Canonical spellings: "initiator", "acceptor"
     // (session_config.hpp session_role enum, lines 112-115)
 
-    if (auto* n = merged.get("role"); n && n->is_string()) {
+    if (const auto* n = merged.get("role"); n && n->is_string()) {
         std::string_view tok = n->as_string()->get();
         if (tok == "initiator") {
             out.role = fixpp::session::session_role::initiator;
@@ -266,7 +267,7 @@ void map_scalars(const toml::table& merged, fixpp::session::SessionConfig& out,
                 .reason = reason_class::unknown_enum,
                 .location = loc_for_key(raw_session, "role"),
                 .message = std::string{"unknown role token: \""} + std::string{tok} +
-                           "\" (valid values: \"initiator\", \"acceptor\")",
+                           R"(" (valid values: "initiator", "acceptor"))",
             });
         }
     }
@@ -275,7 +276,7 @@ void map_scalars(const toml::table& merged, fixpp::session::SessionConfig& out,
     // Canonical spellings: "per_session_strand", "direct_executor"
     // (session_config.hpp threading_mode enum, lines 98-101)
 
-    if (auto* n = merged.get("mode"); n && n->is_string()) {
+    if (const auto* n = merged.get("mode"); n && n->is_string()) {
         std::string_view tok = n->as_string()->get();
         if (tok == "per_session_strand") {
             out.mode = fixpp::session::threading_mode::per_session_strand;
@@ -287,7 +288,7 @@ void map_scalars(const toml::table& merged, fixpp::session::SessionConfig& out,
                 .reason = reason_class::unknown_enum,
                 .location = loc_for_key(raw_session, "mode"),
                 .message = std::string{"unknown mode token: \""} + std::string{tok} +
-                           "\" (valid values: \"per_session_strand\", \"direct_executor\")",
+                           R"(" (valid values: "per_session_strand", "direct_executor"))",
             });
         }
     }
@@ -296,7 +297,7 @@ void map_scalars(const toml::table& merged, fixpp::session::SessionConfig& out,
     // Canonical spellings: "mutex", "spin"
     // (session_config.hpp lock_policy enum, lines 103-106)
 
-    if (auto* n = merged.get("locks"); n && n->is_string()) {
+    if (const auto* n = merged.get("locks"); n && n->is_string()) {
         std::string_view tok = n->as_string()->get();
         if (tok == "mutex") {
             out.locks = fixpp::session::lock_policy::mutex;
@@ -308,14 +309,14 @@ void map_scalars(const toml::table& merged, fixpp::session::SessionConfig& out,
                 .reason = reason_class::unknown_enum,
                 .location = loc_for_key(raw_session, "locks"),
                 .message = std::string{"unknown locks token: \""} + std::string{tok} +
-                           "\" (valid values: \"mutex\", \"spin\")",
+                           R"(" (valid values: "mutex", "spin"))",
             });
         }
     }
 
     // ── already_serialized_executor (bool) ────────────────────────────────────
 
-    if (auto* n = merged.get("already_serialized_executor"); n && n->is_boolean()) {
+    if (const auto* n = merged.get("already_serialized_executor"); n && n->is_boolean()) {
         out.already_serialized_executor = n->as_boolean()->get();
     }
 
@@ -363,7 +364,7 @@ void map_scalars(const toml::table& merged, fixpp::session::SessionConfig& out,
     // All three require an explicit unit suffix (D-3 / data-model validation).
 
     // heartbeat_interval → optional<std::chrono::seconds>
-    if (auto* n = merged.get("heartbeat_interval"); n && n->is_string()) {
+    if (const auto* n = merged.get("heartbeat_interval"); n && n->is_string()) {
         std::string_view tok = n->as_string()->get();
         auto d = parse_duration_to_ms(tok, kp(key_prefix, "heartbeat_interval"), acc,
                                       loc_for_key(raw_session, "heartbeat_interval"));
@@ -374,7 +375,7 @@ void map_scalars(const toml::table& merged, fixpp::session::SessionConfig& out,
     }
 
     // test_request_threshold → optional<std::chrono::milliseconds>
-    if (auto* n = merged.get("test_request_threshold"); n && n->is_string()) {
+    if (const auto* n = merged.get("test_request_threshold"); n && n->is_string()) {
         std::string_view tok = n->as_string()->get();
         auto d = parse_duration_to_ms(tok, kp(key_prefix, "test_request_threshold"), acc,
                                       loc_for_key(raw_session, "test_request_threshold"));
@@ -384,7 +385,7 @@ void map_scalars(const toml::table& merged, fixpp::session::SessionConfig& out,
     }
 
     // sending_time_threshold → optional<std::chrono::milliseconds>
-    if (auto* n = merged.get("sending_time_threshold"); n && n->is_string()) {
+    if (const auto* n = merged.get("sending_time_threshold"); n && n->is_string()) {
         std::string_view tok = n->as_string()->get();
         auto d = parse_duration_to_ms(tok, kp(key_prefix, "sending_time_threshold"), acc,
                                       loc_for_key(raw_session, "sending_time_threshold"));
@@ -396,9 +397,9 @@ void map_scalars(const toml::table& merged, fixpp::session::SessionConfig& out,
     // ── logout_disconnect_timeout_ms (bare uint32 integer in TOML) ───────────
     // NOT a duration string — a bare integer millisecond count (see fixture).
 
-    if (auto* n = merged.get("logout_disconnect_timeout_ms"); n && n->is_integer()) {
+    if (const auto* n = merged.get("logout_disconnect_timeout_ms"); n && n->is_integer()) {
         auto v = n->as_integer()->get();
-        if (v >= 0 && static_cast<std::uint64_t>(v) <= UINT32_MAX) {
+        if (v >= 0 && std::cmp_less_equal(v, UINT32_MAX)) {
             out.logout_disconnect_timeout_ms = static_cast<std::uint32_t>(v);
         } else {
             acc.add(LoadDiagnostic{
@@ -412,34 +413,34 @@ void map_scalars(const toml::table& merged, fixpp::session::SessionConfig& out,
 
     // ── Bool knobs ────────────────────────────────────────────────────────────
 
-    if (auto* n = merged.get("reset_on_logon"); n && n->is_boolean()) {
+    if (const auto* n = merged.get("reset_on_logon"); n && n->is_boolean()) {
         out.reset_on_logon = n->as_boolean()->get();
     }
-    if (auto* n = merged.get("reset_on_logout"); n && n->is_boolean()) {
+    if (const auto* n = merged.get("reset_on_logout"); n && n->is_boolean()) {
         out.reset_on_logout = n->as_boolean()->get();
     }
-    if (auto* n = merged.get("reset_on_disconnect"); n && n->is_boolean()) {
+    if (const auto* n = merged.get("reset_on_disconnect"); n && n->is_boolean()) {
         out.reset_on_disconnect = n->as_boolean()->get();
     }
-    if (auto* n = merged.get("refresh_on_logon"); n && n->is_boolean()) {
+    if (const auto* n = merged.get("refresh_on_logon"); n && n->is_boolean()) {
         out.refresh_on_logon = n->as_boolean()->get();
     }
-    if (auto* n = merged.get("redeliver_poss_dup"); n && n->is_boolean()) {
+    if (const auto* n = merged.get("redeliver_poss_dup"); n && n->is_boolean()) {
         out.redeliver_poss_dup = n->as_boolean()->get();
     }
-    if (auto* n = merged.get("allow_pos_dup"); n && n->is_boolean()) {
+    if (const auto* n = merged.get("allow_pos_dup"); n && n->is_boolean()) {
         out.allow_pos_dup = n->as_boolean()->get();
     }
-    if (auto* n = merged.get("enable_next_expected_msg_seq_num"); n && n->is_boolean()) {
+    if (const auto* n = merged.get("enable_next_expected_msg_seq_num"); n && n->is_boolean()) {
         out.enable_next_expected_msg_seq_num = n->as_boolean()->get();
     }
-    if (auto* n = merged.get("check_comp_id"); n && n->is_boolean()) {
+    if (const auto* n = merged.get("check_comp_id"); n && n->is_boolean()) {
         out.check_comp_id = n->as_boolean()->get();
     }
-    if (auto* n = merged.get("validate_sequence_numbers"); n && n->is_boolean()) {
+    if (const auto* n = merged.get("validate_sequence_numbers"); n && n->is_boolean()) {
         out.validate_sequence_numbers = n->as_boolean()->get();
     }
-    if (auto* n = merged.get("validate_inbound_messages"); n && n->is_boolean()) {
+    if (const auto* n = merged.get("validate_inbound_messages"); n && n->is_boolean()) {
         out.validate_inbound_messages = n->as_boolean()->get();
     }
 
@@ -448,7 +449,7 @@ void map_scalars(const toml::table& merged, fixpp::session::SessionConfig& out,
     // Canonical spellings: "bilateral_strict", "bilateral_lenient", "unilateral"
     // (session_config.hpp reset_seqnum_policy enum, lines 92-96)
 
-    if (auto* n = merged.get("reset_seqnum_policy"); n && n->is_string()) {
+    if (const auto* n = merged.get("reset_seqnum_policy"); n && n->is_string()) {
         std::string_view tok = n->as_string()->get();
         if (tok == "bilateral_strict") {
             out.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_strict;
@@ -472,7 +473,7 @@ void map_scalars(const toml::table& merged, fixpp::session::SessionConfig& out,
     // Canonical spellings: "seconds", "millis", "micros", "nanos"
     // (fix_time.hpp fix_time_precision enum, lines 43-48)
 
-    if (auto* n = merged.get("sending_time_precision"); n && n->is_string()) {
+    if (const auto* n = merged.get("sending_time_precision"); n && n->is_string()) {
         std::string_view tok = n->as_string()->get();
         if (tok == "seconds") {
             out.sending_time_precision = fixpp::core::fix_time_precision::seconds;
@@ -489,7 +490,7 @@ void map_scalars(const toml::table& merged, fixpp::session::SessionConfig& out,
                 .location = loc_for_key(raw_session, "sending_time_precision"),
                 .message = std::string{"unknown sending_time_precision token: \""} +
                            std::string{tok} +
-                           "\" (valid values: \"seconds\", \"millis\", \"micros\", \"nanos\")",
+                           R"(" (valid values: "seconds", "millis", "micros", "nanos"))",
             });
         }
     }
@@ -498,7 +499,7 @@ void map_scalars(const toml::table& merged, fixpp::session::SessionConfig& out,
     // Canonical spellings: "block", "disconnect_and_recover"
     // (session_config.hpp SessionConfig::backpressure_mode nested enum, lines 154-157)
 
-    if (auto* n = merged.get("app_backpressure"); n && n->is_string()) {
+    if (const auto* n = merged.get("app_backpressure"); n && n->is_string()) {
         std::string_view tok = n->as_string()->get();
         if (tok == "block") {
             out.app_backpressure = fixpp::session::SessionConfig::backpressure_mode::block;
@@ -511,7 +512,7 @@ void map_scalars(const toml::table& merged, fixpp::session::SessionConfig& out,
                 .reason = reason_class::unknown_enum,
                 .location = loc_for_key(raw_session, "app_backpressure"),
                 .message = std::string{"unknown app_backpressure token: \""} + std::string{tok} +
-                           "\" (valid values: \"block\", \"disconnect_and_recover\")",
+                           R"(" (valid values: "block", "disconnect_and_recover"))",
             });
         }
     }
@@ -521,7 +522,7 @@ void map_scalars(const toml::table& merged, fixpp::session::SessionConfig& out,
     // — no enumerators are available. The field cannot be mapped by token in
     // Phase 3b. If the key is present, emit a recognized_not_yet_supported_step2
     // diagnostic so the caller is aware; leave the field at its struct default.
-    if (auto* n = merged.get("reject_policy"); n != nullptr) {
+    if (const auto* n = merged.get("reject_policy"); n != nullptr) {
         acc.add(LoadDiagnostic{
             .key_path = kp(key_prefix, "reject_policy"),
             .reason = reason_class::recognized_not_yet_supported_step2,
@@ -536,7 +537,7 @@ void map_scalars(const toml::table& merged, fixpp::session::SessionConfig& out,
     // Note: D-9 says canonical spellings come from the enum defs + wire table.
     // The TOML config uses the same wire-value strings as the FIX protocol.
 
-    if (auto* n = merged.get("default_appl_ver_id"); n && n->is_string()) {
+    if (const auto* n = merged.get("default_appl_ver_id"); n && n->is_string()) {
         std::string_view tok = n->as_string()->get();
         using av = fixpp::dict::application_version;
         std::optional<av> ver;
@@ -562,7 +563,7 @@ void map_scalars(const toml::table& merged, fixpp::session::SessionConfig& out,
                 .reason = reason_class::unknown_enum,
                 .location = loc_for_key(raw_session, "default_appl_ver_id"),
                 .message = std::string{"unknown default_appl_ver_id token: \""} + std::string{tok} +
-                           "\" (expected ApplVerID wire values: \"2\"..\"9\")",
+                           R"(" (expected ApplVerID wire values: "2".."9"))",
             });
         }
         if (ver.has_value()) {
@@ -585,10 +586,10 @@ void map_structured_members(const toml::table& merged, fixpp::session::SessionCo
     //                   "insecure_plain_tcp"  [[deprecated]]
     // (session/security_profile.hpp SecurityProfile::kind nested enum)
 
-    if (auto* sp_node = merged.get("security_profile"); sp_node && sp_node->is_table()) {
+    if (const auto* sp_node = merged.get("security_profile"); sp_node && sp_node->is_table()) {
         const toml::table& sp = *sp_node->as_table();
 
-        if (auto* kind_n = sp.get("kind"); kind_n && kind_n->is_string()) {
+        if (const auto* kind_n = sp.get("kind"); kind_n && kind_n->is_string()) {
             std::string_view tok = kind_n->as_string()->get();
             using K = fixpp::session::SecurityProfile::kind;
 
@@ -623,7 +624,7 @@ void map_structured_members(const toml::table& merged, fixpp::session::SessionCo
     // target CompIDs.
     // Targets: out.compid_authorization_policy.add_binding(principal, compid)
 
-    if (auto* cap_node = merged.get("compid_authorization_policy");
+    if (const auto* cap_node = merged.get("compid_authorization_policy");
         cap_node && cap_node->is_table()) {
         const toml::table& cap = *cap_node->as_table();
 
@@ -661,13 +662,13 @@ void map_structured_members(const toml::table& merged, fixpp::session::SessionCo
     // Phase 3b maps only host/port (D-6a: reconnect_endpoint flows through
     // SessionConfig::reconnect_endpoint, NOT the factory).
 
-    if (auto* t_node = merged.get("transport"); t_node && t_node->is_table()) {
+    if (const auto* t_node = merged.get("transport"); t_node && t_node->is_table()) {
         const toml::table& t = *t_node->as_table();
 
-        if (auto* host_n = t.get("host"); host_n && host_n->is_string()) {
+        if (const auto* host_n = t.get("host"); host_n && host_n->is_string()) {
             out.reconnect_endpoint.host = std::string{host_n->as_string()->get()};
         }
-        if (auto* port_n = t.get("port"); port_n && port_n->is_integer()) {
+        if (const auto* port_n = t.get("port"); port_n && port_n->is_integer()) {
             auto v = port_n->as_integer()->get();
             if (v >= 0 && v <= 65535) {
                 out.reconnect_endpoint.port = static_cast<std::uint16_t>(v);
@@ -687,13 +688,13 @@ void map_structured_members(const toml::table& merged, fixpp::session::SessionCo
     // Fields: schedule (array of duration strings), jitter (float),
     //         max_attempts (integer), session_id_seed (integer).
 
-    if (auto* rp_node = merged.get("reconnect_policy"); rp_node && rp_node->is_table()) {
+    if (const auto* rp_node = merged.get("reconnect_policy"); rp_node && rp_node->is_table()) {
         const toml::table& rp = *rp_node->as_table();
 
         fixpp::transport::ReconnectPolicy policy;
 
         // schedule — array of duration strings → pmr::vector<chrono::milliseconds>
-        if (auto* sched_n = rp.get("schedule"); sched_n && sched_n->is_array()) {
+        if (const auto* sched_n = rp.get("schedule"); sched_n && sched_n->is_array()) {
             const toml::array& sched = *sched_n->as_array();
             policy.schedule.clear();
             policy.schedule.reserve(sched.size());
@@ -711,23 +712,23 @@ void map_structured_members(const toml::table& merged, fixpp::session::SessionCo
                                               kp(key_prefix, "reconnect_policy.schedule"), acc,
                                               loc_from_node(entry));
                 if (d.ok) {
-                    policy.schedule.push_back(std::chrono::milliseconds{d.value_ms});
+                    policy.schedule.emplace_back(d.value_ms);
                 }
             }
         }
 
-        if (auto* j_n = rp.get("jitter"); j_n && j_n->is_floating_point()) {
+        if (const auto* j_n = rp.get("jitter"); j_n && j_n->is_floating_point()) {
             policy.jitter = j_n->as_floating_point()->get();
         }
 
-        if (auto* ma_n = rp.get("max_attempts"); ma_n && ma_n->is_integer()) {
+        if (const auto* ma_n = rp.get("max_attempts"); ma_n && ma_n->is_integer()) {
             auto v = ma_n->as_integer()->get();
             if (v >= 0) {
                 policy.max_attempts = static_cast<std::uint32_t>(v);
             }
         }
 
-        if (auto* seed_n = rp.get("session_id_seed"); seed_n && seed_n->is_integer()) {
+        if (const auto* seed_n = rp.get("session_id_seed"); seed_n && seed_n->is_integer()) {
             policy.session_id_seed = static_cast<std::uint64_t>(seed_n->as_integer()->get());
         }
 

@@ -43,7 +43,7 @@ namespace fixpp::config::detail {
 static void resolve_engine_clock(const toml::table& root_tbl, const LoadOptions& opts,
                                  ConfigBundle& bundle, DiagnosticAccumulator& acc) {
     const toml::table* clk_tbl = nullptr;
-    if (auto* n = root_tbl.get("clock"); n && n->is_table()) {
+    if (const auto* n = root_tbl.get("clock"); n && n->is_table()) {
         clk_tbl = n->as_table();
     }
 
@@ -58,7 +58,7 @@ static void resolve_engine_clock(const toml::table& root_tbl, const LoadOptions&
 
     // Extract kind.
     std::string_view kind_tok;
-    if (auto* kind_n = clk_tbl->get("kind"); kind_n && kind_n->is_string()) {
+    if (const auto* kind_n = clk_tbl->get("kind"); kind_n && kind_n->is_string()) {
         kind_tok = kind_n->as_string()->get();
     } else if (!clk_tbl->get("kind")) {
         acc.add(LoadDiagnostic{
@@ -90,7 +90,7 @@ static void resolve_engine_clock(const toml::table& root_tbl, const LoadOptions&
             .key_path = "clock.kind",
             .reason = reason_class::unknown_enum,
             .message = std::string{"unknown clock.kind: \""} + std::string{kind_tok} +
-                       "\" (only accepted value: \"system\")",
+                       R"(" (only accepted value: "system"))",
         });
         return;
     }
@@ -113,7 +113,7 @@ static void resolve_engine_clock(const toml::table& root_tbl, const LoadOptions&
 static void resolve_engine_store(const toml::table& root_tbl, const std::filesystem::path& base_dir,
                                  ConfigBundle& bundle, DiagnosticAccumulator& acc) {
     const toml::table* store_tbl = nullptr;
-    if (auto* n = root_tbl.get("store"); n && n->is_table()) {
+    if (const auto* n = root_tbl.get("store"); n && n->is_table()) {
         store_tbl = n->as_table();
     }
 
@@ -127,7 +127,7 @@ static void resolve_engine_store(const toml::table& root_tbl, const std::filesys
     }
 
     std::string_view kind_tok;
-    if (auto* kind_n = store_tbl->get("kind"); kind_n && kind_n->is_string()) {
+    if (const auto* kind_n = store_tbl->get("kind"); kind_n && kind_n->is_string()) {
         kind_tok = kind_n->as_string()->get();
     } else {
         acc.add(LoadDiagnostic{
@@ -152,7 +152,7 @@ static void resolve_engine_store(const toml::table& root_tbl, const std::filesys
     } else if (kind_tok == "file") {
         // Require store.directory (a path relative to the config file's directory).
         std::string_view dir_sv;
-        if (auto* dir_n = store_tbl->get("directory"); dir_n && dir_n->is_string()) {
+        if (const auto* dir_n = store_tbl->get("directory"); dir_n && dir_n->is_string()) {
             dir_sv = dir_n->as_string()->get();
         } else {
             acc.add(LoadDiagnostic{
@@ -193,7 +193,7 @@ static void resolve_engine_cert_source(const toml::table& root_tbl,
                                        const LoadOptions& opts, ConfigBundle& bundle,
                                        DiagnosticAccumulator& acc) {
     const toml::table* cs_tbl = nullptr;
-    if (auto* n = root_tbl.get("cert_source"); n && n->is_table()) {
+    if (const auto* n = root_tbl.get("cert_source"); n && n->is_table()) {
         cs_tbl = n->as_table();
     }
 
@@ -206,7 +206,7 @@ static void resolve_engine_cert_source(const toml::table& root_tbl,
     }
 
     std::string_view kind_tok;
-    if (auto* kind_n = cs_tbl->get("kind"); kind_n && kind_n->is_string()) {
+    if (const auto* kind_n = cs_tbl->get("kind"); kind_n && kind_n->is_string()) {
         kind_tok = kind_n->as_string()->get();
     } else {
         acc.add(LoadDiagnostic{
@@ -231,14 +231,14 @@ static void resolve_engine_cert_source(const toml::table& root_tbl,
             .key_path = "cert_source.kind",
             .reason = reason_class::unknown_enum,
             .message = std::string{"unknown cert_source.kind: \""} + std::string{kind_tok} +
-                       "\" (step-1 accepted: \"file\")",
+                       R"(" (step-1 accepted: "file"))",
         });
         return;
     }
 
     // Extract cert_file, key_file, ca_file paths.
     auto get_path = [&](const char* key) -> std::string {
-        if (auto* n = cs_tbl->get(key); n && n->is_string()) {
+        if (const auto* n = cs_tbl->get(key); n && n->is_string()) {
             std::string_view sv = n->as_string()->get();
             if (sv.empty()) return {};
             return resolve_path(base_dir, std::filesystem::path{sv}).string();
@@ -281,7 +281,7 @@ static void resolve_engine_dictionary(const toml::table& root_tbl,
                                       const LoadOptions& opts, ConfigBundle& bundle,
                                       DiagnosticAccumulator& acc) {
     const toml::table* dict_tbl = nullptr;
-    if (auto* n = root_tbl.get("dictionary"); n && n->is_table()) {
+    if (const auto* n = root_tbl.get("dictionary"); n && n->is_table()) {
         dict_tbl = n->as_table();
     }
 
@@ -292,7 +292,7 @@ static void resolve_engine_dictionary(const toml::table& root_tbl,
     }
 
     std::string_view kind_tok;
-    if (auto* kind_n = dict_tbl->get("kind"); kind_n && kind_n->is_string()) {
+    if (const auto* kind_n = dict_tbl->get("kind"); kind_n && kind_n->is_string()) {
         kind_tok = kind_n->as_string()->get();
     } else {
         acc.add(LoadDiagnostic{
@@ -326,7 +326,7 @@ static void resolve_engine_dictionary(const toml::table& root_tbl,
                 .key_path = "dictionary.kind",
                 .reason = reason_class::unknown_enum,
                 .message = std::string{"unknown dictionary.kind: \""} + std::string{kind_tok} +
-                           "\" (step-1 accepted: \"path\")",
+                           R"(" (step-1 accepted: "path"))",
             });
         }
         return;
@@ -334,7 +334,7 @@ static void resolve_engine_dictionary(const toml::table& root_tbl,
 
     // Extract path param.
     std::string rel_path_str;
-    if (auto* p_n = dict_tbl->get("path"); p_n && p_n->is_string()) {
+    if (const auto* p_n = dict_tbl->get("path"); p_n && p_n->is_string()) {
         rel_path_str = std::string{p_n->as_string()->get()};
     } else {
         acc.add(LoadDiagnostic{
@@ -381,14 +381,14 @@ static tls::SecurityProfile parse_security_profile(const toml::table& merged,
                                                    std::string_view key_prefix,
                                                    DiagnosticAccumulator& acc) {
     const toml::table* sp_tbl = nullptr;
-    if (auto* sp_n = merged.get("security_profile"); sp_n && sp_n->is_table()) {
+    if (const auto* sp_n = merged.get("security_profile"); sp_n && sp_n->is_table()) {
         sp_tbl = sp_n->as_table();
     }
     if (!sp_tbl) {
         return tls::SecurityProfile::unset;
     }
 
-    auto* k_n = sp_tbl->get("kind");
+    const auto* k_n = sp_tbl->get("kind");
     if (!k_n || !k_n->is_string()) {
         return tls::SecurityProfile::unset;
     }
@@ -425,7 +425,7 @@ static std::shared_ptr<tls::cert_source> build_file_cert_source(
     const toml::table& cs_tbl, const std::filesystem::path& base_dir, const LoadOptions& opts,
     std::string_view key_prefix, DiagnosticAccumulator& acc) {
     auto get_path_str = [&](const char* key) -> std::string {
-        if (auto* n = cs_tbl.get(key); n && n->is_string()) {
+        if (const auto* n = cs_tbl.get(key); n && n->is_string()) {
             std::string_view sv = n->as_string()->get();
             if (sv.empty()) return {};
             return resolve_path(base_dir, std::filesystem::path{sv}).string();
@@ -508,7 +508,7 @@ static void resolve_transport(const std::vector<const toml::table*>& merged_sess
 
     // Extract transport.kind.
     const toml::table* transport_tbl = nullptr;
-    if (auto* t_n = session_merged.get("transport"); t_n && t_n->is_table()) {
+    if (const auto* t_n = session_merged.get("transport"); t_n && t_n->is_table()) {
         transport_tbl = t_n->as_table();
     }
 
@@ -522,7 +522,7 @@ static void resolve_transport(const std::vector<const toml::table*>& merged_sess
     }
 
     std::string_view transport_kind_tok;
-    if (auto* kind_n = transport_tbl->get("kind"); kind_n && kind_n->is_string()) {
+    if (const auto* kind_n = transport_tbl->get("kind"); kind_n && kind_n->is_string()) {
         transport_kind_tok = kind_n->as_string()->get();
     } else {
         acc.add(LoadDiagnostic{
@@ -598,14 +598,14 @@ static void resolve_transport(const std::vector<const toml::table*>& merged_sess
 
             // Check if this session has a per-session transport and it's "tls".
             const toml::table* s_transport_tbl = nullptr;
-            if (auto* t_n = sess.get("transport"); t_n && t_n->is_table()) {
+            if (const auto* t_n = sess.get("transport"); t_n && t_n->is_table()) {
                 s_transport_tbl = t_n->as_table();
             }
             if (!s_transport_tbl) {
                 continue;  // No transport table; validation error caught elsewhere.
             }
             std::string_view s_transport_kind;
-            if (auto* kn = s_transport_tbl->get("kind"); kn && kn->is_string()) {
+            if (const auto* kn = s_transport_tbl->get("kind"); kn && kn->is_string()) {
                 s_transport_kind = kn->as_string()->get();
             }
             if (s_transport_kind != "tls") {
@@ -622,7 +622,7 @@ static void resolve_transport(const std::vector<const toml::table*>& merged_sess
 
             // Determine per-session cert_source table.
             const toml::table* s_cs_tbl = nullptr;
-            if (auto* cs_n = sess.get("cert_source"); cs_n && cs_n->is_table()) {
+            if (const auto* cs_n = sess.get("cert_source"); cs_n && cs_n->is_table()) {
                 s_cs_tbl = cs_n->as_table();
             }
 
@@ -698,7 +698,7 @@ static void resolve_transport(const std::vector<const toml::table*>& merged_sess
             .key_path = "session[0].transport.kind",
             .reason = reason_class::unknown_enum,
             .message = std::string{"unknown transport.kind: \""} + std::string{transport_kind_tok} +
-                       "\" (accepted: \"tls\", \"plaintext\")",
+                       R"(" (accepted: "tls", "plaintext"))",
         });
     }
 }
