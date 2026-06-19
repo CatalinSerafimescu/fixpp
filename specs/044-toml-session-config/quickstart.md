@@ -103,10 +103,10 @@ eng.executor                = engine_exec;                   // SAME instance pa
 eng.file_io_executor        = my_file_pool.get_executor();   // host-supplied, post-load
 eng.application             = my_app;                        // business callbacks, post-load
 
-Engine engine;
-engine.start(eng);                                  // engine-open clock gate etc.
+Engine engine{engine_exec, std::move(eng)};         // Engine(executor, EngineConfig) — no default ctor
+if (auto r = engine.start(); !r) { /* handle engine-open failure (e.g. clock gate) */ return; }
 for (auto& sd : bundle.sessions)
-    engine.open(sd.config);                         // 043 profile↔factory check fires here
+    engine.register_session(std::move(sd.config));  // 043 profile↔factory check fires here
 ```
 
 ## Verify (acceptance)
