@@ -43,8 +43,10 @@
 
 #ifndef _WIN32
 // access(2) — POSIX file-accessibility check; not available on Windows/MSVC.
-// Guard mirrors file_store_factory.cpp:46. The ::access(W_OK) call inside
-// resolve_log_sink is also wrapped in the same #ifndef _WIN32 block.
+// The ::access(W_OK) directory-writability preflight inside resolve_log_sink is
+// wrapped in the same #ifndef _WIN32 block. This is consistent with the runtime
+// FileSink (017) being POSIX-only (::open/::fdopen/::fdatasync; src/log/file_sink.cpp),
+// so file-sink writability is not validated on Windows — see B-and-L L-045-2.
 #include <unistd.h>
 #endif
 
