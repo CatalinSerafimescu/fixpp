@@ -369,7 +369,7 @@ std::unique_ptr<fixpp::log::Sink> resolve_log_sink(const toml::table& sink_tbl,
         .reason = reason_class::unknown_enum,
         .location = loc_node(*kind_node),
         .message = std::string{"unknown logger sink kind: \""} + std::string{kind} +
-                   "\" (valid values: \"file\", \"syslog\", \"otlp\")",
+                   R"(" (valid values: "file", "syslog", "otlp"))",
     });
     return nullptr;
 }
@@ -433,7 +433,7 @@ void resolve_engine_logger(const toml::table& logger_tbl, std::string_view key_p
                 .reason = reason_class::unknown_enum,
                 .location = loc_node(*n),
                 .message = std::string{"unknown on_overflow token: \""} + std::string{tok} +
-                           "\" (valid values: \"drop_newest\", \"block\")",
+                           R"(" (valid values: "drop_newest", "block"))",
             });
         }
     }
@@ -514,7 +514,7 @@ void resolve_engine_logger(const toml::table& logger_tbl, std::string_view key_p
 
     // Park into the pending set (N-2: file-scoped, NOT constructed here).
     PendingLogger pl{
-        .cfg = std::move(cfg),
+        .cfg = cfg,
         .sinks = std::move(sinks),
         .key_path = std::string{key_prefix},
         .loc = loc,
@@ -550,7 +550,7 @@ void construct_loggers_if_clean(PendingLoggerSet&& pending, ConfigBundle& bundle
     if (pending.engine.has_value()) {
         auto& pl = *pending.engine;
         bundle.engine.logger =
-            std::make_shared<fixpp::log::Logger>(std::move(pl.cfg), std::move(pl.sinks));
+            std::make_shared<fixpp::log::Logger>(pl.cfg, std::move(pl.sinks));
     }
 
     // Per-session slots (US3/T019 — wired in Phase 5)
@@ -558,7 +558,7 @@ void construct_loggers_if_clean(PendingLoggerSet&& pending, ConfigBundle& bundle
         const std::size_t i = pl.session_index;
         if (i < bundle.sessions.size()) {
             bundle.sessions[i].config.logger_override =
-                std::make_shared<fixpp::log::Logger>(std::move(pl.cfg), std::move(pl.sinks));
+                std::make_shared<fixpp::log::Logger>(pl.cfg, std::move(pl.sinks));
         }
     }
 }
