@@ -478,18 +478,18 @@ TEST(LoadHappyPath, Cov_ScalarsMoreEnums) {
     // security_profile.kind = "insecure_plain_tcp" → insecure_plain_tcp
     using K = fixpp::session::SecurityProfile::kind;
 #ifdef __clang__
-#    pragma clang diagnostic push
-#    pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
 #elif defined(__GNUC__)
-#    pragma GCC diagnostic push
-#    pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #endif
     EXPECT_EQ(cfg.security_profile.k, K::insecure_plain_tcp)
         << "security_profile.k must be insecure_plain_tcp for kind=\"insecure_plain_tcp\"";
 #ifdef __clang__
-#    pragma clang diagnostic pop
+#pragma clang diagnostic pop
 #elif defined(__GNUC__)
-#    pragma GCC diagnostic pop
+#pragma GCC diagnostic pop
 #endif
 }
 
