@@ -1057,6 +1057,92 @@ on_overflow = "discard"
         << "Missing unknown_enum on logger.on_overflow";
 }
 
+// ── Gate B r1 A: noexcept boundary — throwing PMR resource must NOT terminate ──
+//
+// load_toml_config() is noexcept. resolve_engine_logger() uses opts.resource
+// for a pmr::vector allocation (logger_resolver.cpp:485-486). If the resolve
+// phase runs OUTSIDE the try/catch, a throwing resource → std::terminate.
+//
+// Design: pass a PMR resource that throws bad_alloc on the FIRST allocation so
+// it fires during sinks.reserve() inside resolve_engine_logger. The function
+// must return diagnostics (an error LoadResult), NOT terminate.
+//
+// Mutation discriminator: if the resolve phase is outside the try/catch, the
+// throwing resource causes std::terminate and the process exits — the test
+// binary crashes (RED). With the fix (resolve + construct both wrapped), the
+// throw is caught and a diagnostic is returned (GREEN).
+
+struct ThrowingResource : std::pmr::memory_resource {
+    void* do_allocate(std::size_t, std::size_t) override {
+        throw std::bad_alloc{};
+    }
+    void do_deallocate(void*, std::size_t, std::size_t) override {}
+    bool do_is_equal(const std::pmr::memory_resource& o) const noexcept override {
+        return this == &o;
+    }
+};
+
+TEST(GateBR1A_NoexceptBoundary, ThrowingResourceReturnsErrorNotTerminates)
+{
+    // We need a full config file. Write one to a temp file so load_toml_config
+    // can parse it. The [logger] sinks.reserve() fires before any other throw.
+    const auto tmp = std::filesystem::temp_directory_path() /
+                     "fixpp_gateb_r1a_throwing_resource.toml";
+    {
+        std::ofstream f(tmp);
+        // Minimal valid structure + a [logger] with a file sink so the
+        // resolve_engine_logger path is reached (sinks.reserve fires).
+        f << R"(
+[clock]
+kind = "system"
+[store]
+kind = "memory"
+[dictionary]
+kind = "path"
+path = "/tmp/nonexistent_for_test.xml"
+[logger]
+capacity = 65536
+  [[logger.sinks]]
+  kind      = "file"
+  directory = "/tmp"
+[[session]]
+sender_comp_id = "CLIENT1"
+target_comp_id = "SERVER1"
+begin_string   = "FIX.4.4"
+role           = "initiator"
+[session.transport]
+kind = "plain"
+host = "fix.example.com"
+port = 4321
+[session.security_profile]
+kind = "insecure_plain_tcp"
+)";
+    }
+    struct Cleanup {
+        std::filesystem::path p;
+        ~Cleanup() { std::error_code ec; std::filesystem::remove(p, ec); }
+    } cl{tmp};
+
+    ThrowingResource throwing_mr;
+    asio::io_context ctx;
+    fixpp::config::LoadOptions opts;
+    opts.engine_executor = ctx.get_executor();
+    opts.resource = &throwing_mr;
+
+    // Must NOT terminate — must return an error result.
+    const auto result = fixpp::config::load_toml_config(tmp, opts);
+
+    // With the fix: the throw is caught inside the noexcept boundary and
+    // returns either a diagnostic or (if the TOML parse itself failed first
+    // due to the dict path) a parse-level error. Either way: not a value.
+    // The discriminating property is "process still running, result has error".
+    EXPECT_FALSE(result.has_value())
+        << "load_toml_config with a throwing PMR resource must return an error, "
+           "not succeed (the throwing resource prevents valid logger resolution)";
+    // Process survival IS the assertion — if terminate() fired, the binary
+    // would have exited before reaching this line.
+}
+
 // ── T015b: N-2 property (whole-file accumulator) ─────────────────────────────
 //
 // A session-1 logger error suppresses ALL loggers (including session-0's valid

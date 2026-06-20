@@ -402,6 +402,16 @@ void recognize_keys(const toml::table& tbl, std::string_view key_prefix,
         return std::unexpected(std::vector<LoadDiagnostic>{std::move(diag)});
     }
 
+    // ── Gate B r1 fix A: noexcept boundary — wrap the ENTIRE post-parse
+    // resolve+construct phase in a try/catch so that any throw escaping from
+    // resolve_engine_logger (pmr::vector + reserve using opts.resource,
+    // non-noexcept factory.make(), std::string/path construction) or from
+    // construct_loggers_if_clean (Logger ctor / make_shared) is converted to a
+    // diagnostic instead of escaping the noexcept boundary → std::terminate.
+    // (FR-012 rule-9; [const §VIII.5] — the parse phase above has its own
+    // try/catch; this outer block covers everything after it.)
+    try {
+
     // ── T009: [default]-merge + collect-ALL accumulator ─────────────────────
     detail::DiagnosticAccumulator acc;
 
@@ -620,6 +630,26 @@ void recognize_keys(const toml::table& tbl, std::string_view key_prefix,
     }
 
     return bundle;
+
+    } catch (const std::exception& e) {
+        // Catch any throw escaping the resolve or construct phase (e.g. bad_alloc
+        // from pmr::vector::reserve with a throwing opts.resource, or a throwing
+        // factory.make()).  Convert to a fail-closed diagnostic (FR-012 rule-9).
+        return std::unexpected(std::vector<LoadDiagnostic>{{
+            .key_path = "logger",
+            .reason = reason_class::invalid_or_contradictory_selector,
+            .location = {},
+            .message = std::string{"logger config resolution failed (resource exhaustion or "
+                                   "internal error): "} + e.what(),
+        }});
+    } catch (...) {
+        return std::unexpected(std::vector<LoadDiagnostic>{{
+            .key_path = "logger",
+            .reason = reason_class::invalid_or_contradictory_selector,
+            .location = {},
+            .message = "logger config resolution failed (unknown exception)",
+        }});
+    }
 }
 
 }  // namespace fixpp::config
