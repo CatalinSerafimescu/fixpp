@@ -47,6 +47,12 @@
 #undef NDEBUG
 #endif
 
+// --- snapshot any prior TOML_ASSERT definition (restored after the include) ---
+// #6 (Gate B r1): TOML_ASSERT was defined here but never undef'd/restored, so
+// it leaked into every including TU after the shim.  Save and restore it so
+// callers see only their own prior definition (if any), not ours.
+#pragma push_macro("TOML_ASSERT")
+
 // --- throwing assert: unwinds into the loader's parse_error catch ------------
 #include <stdexcept>
 #define TOML_ASSERT(expr)    \
@@ -81,6 +87,11 @@
 #if defined(__GNUC__) && !defined(__clang__)
 #pragma GCC diagnostic pop
 #endif
+
+// --- restore TOML_ASSERT to whatever it was before (or undefine it) ----------
+// pop_macro restores the definition snapshotted by push_macro above.  If there
+// was no prior definition the macro is undefined — correct either way.
+#pragma pop_macro("TOML_ASSERT")
 
 // --- restore NDEBUG for the remainder of the translation unit -----------------
 #ifdef FIXPP_TOML_NDEBUG_WAS_DEFINED
