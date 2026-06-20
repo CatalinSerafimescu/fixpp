@@ -192,6 +192,14 @@ std::unique_ptr<fixpp::log::Sink> resolve_log_sink(const toml::table& sink_tbl,
             } else {
                 cfg.max_file_bytes = static_cast<std::uint64_t>(v);
             }
+        } else if (const auto* n = sink_tbl.get("max_file_bytes"); n && !n->is_integer()) {
+            // Gate B r2 #1 (class): present but wrong type → malformed_value (fail-closed).
+            acc.add(LoadDiagnostic{
+                .key_path = kp(sink_kp, "max_file_bytes"),
+                .reason = reason_class::malformed_value,
+                .location = loc_node(*n),
+                .message = "max_file_bytes must be an integer",
+            });
         }
         if (const auto* n = sink_tbl.get("max_keep_count"); n && n->is_integer()) {
             const auto v = n->as_integer()->get();
@@ -206,6 +214,14 @@ std::unique_ptr<fixpp::log::Sink> resolve_log_sink(const toml::table& sink_tbl,
             } else {
                 cfg.max_keep_count = static_cast<std::uint32_t>(v);
             }
+        } else if (const auto* n = sink_tbl.get("max_keep_count"); n && !n->is_integer()) {
+            // Gate B r2 #1 (class): present but wrong type → malformed_value (fail-closed).
+            acc.add(LoadDiagnostic{
+                .key_path = kp(sink_kp, "max_keep_count"),
+                .reason = reason_class::malformed_value,
+                .location = loc_node(*n),
+                .message = "max_keep_count must be an integer",
+            });
         }
         if (const auto* n = sink_tbl.get("async_fsync"); n && n->is_boolean()) {
             cfg.async_fsync = n->as_boolean()->get();
@@ -269,6 +285,14 @@ std::unique_ptr<fixpp::log::Sink> resolve_log_sink(const toml::table& sink_tbl,
 
         if (const auto* n = sink_tbl.get("ident"); n && n->is_string()) {
             cfg.ident = std::string{n->as_string()->get()};
+        } else if (const auto* n = sink_tbl.get("ident"); n && !n->is_string()) {
+            // Gate B r2 #1 (class): present but wrong type → malformed_value (fail-closed).
+            acc.add(LoadDiagnostic{
+                .key_path = kp(sink_kp, "ident"),
+                .reason = reason_class::malformed_value,
+                .location = loc_node(*n),
+                .message = "ident must be a string",
+            });
         }
         if (const auto* n = sink_tbl.get("facility"); n && n->is_string()) {
             const std::string_view fac_name = n->as_string()->get();
@@ -348,6 +372,14 @@ std::unique_ptr<fixpp::log::Sink> resolve_log_sink(const toml::table& sink_tbl,
                 });
                 // Do not early-return; fall through to collect other independent errors.
             }
+        } else if (const auto* n = sink_tbl.get("use_grpc"); n && !n->is_boolean()) {
+            // Gate B r2 #1 (class): present but wrong type → malformed_value (fail-closed).
+            acc.add(LoadDiagnostic{
+                .key_path = kp(sink_kp, "use_grpc"),
+                .reason = reason_class::malformed_value,
+                .location = loc_node(*n),
+                .message = "use_grpc must be a boolean (true or false)",
+            });
         }
 
         // cert_source — optional, relative→base_dir
@@ -448,6 +480,14 @@ std::unique_ptr<fixpp::log::Sink> resolve_log_sink(const toml::table& sink_tbl,
             } else {
                 cfg.max_export_batch = static_cast<std::size_t>(v);
             }
+        } else if (const auto* n = sink_tbl.get("max_export_batch"); n && !n->is_integer()) {
+            // Gate B r2 #1 (class): present but wrong type → malformed_value (fail-closed).
+            acc.add(LoadDiagnostic{
+                .key_path = kp(sink_kp, "max_export_batch"),
+                .reason = reason_class::malformed_value,
+                .location = loc_node(*n),
+                .message = "max_export_batch must be an integer",
+            });
         }
 
         // max_export_retries — size_t; <0 → wraps to SIZE_MAX (out_of_range)
@@ -464,6 +504,14 @@ std::unique_ptr<fixpp::log::Sink> resolve_log_sink(const toml::table& sink_tbl,
             } else {
                 cfg.max_export_retries = static_cast<std::size_t>(v);
             }
+        } else if (const auto* n = sink_tbl.get("max_export_retries"); n && !n->is_integer()) {
+            // Gate B r2 #1 (class): present but wrong type → malformed_value (fail-closed).
+            acc.add(LoadDiagnostic{
+                .key_path = kp(sink_kp, "max_export_retries"),
+                .reason = reason_class::malformed_value,
+                .location = loc_node(*n),
+                .message = "max_export_retries must be an integer",
+            });
         }
 
         // Gate B r1 #4: return nullptr iff this sink added new diagnostics.
@@ -541,6 +589,14 @@ void resolve_engine_logger(const toml::table& logger_tbl, std::string_view key_p
                 cfg.capacity = u;
             }
         }
+    } else if (const auto* n = logger_tbl.get("capacity"); n && !n->is_integer()) {
+        // Gate B r2 #1 (class): present but wrong type → malformed_value (fail-closed).
+        acc.add(LoadDiagnostic{
+            .key_path = kp(key_prefix, "capacity"),
+            .reason = reason_class::malformed_value,
+            .location = loc_node(*n),
+            .message = "capacity must be an integer",
+        });
     }
 
     // on_overflow enum: "drop_newest" | "block"
@@ -576,6 +632,14 @@ void resolve_engine_logger(const toml::table& logger_tbl, std::string_view key_p
         if (d.ok) {
             cfg.drain_timeout = std::chrono::milliseconds{d.value_ms};
         }
+    } else if (const auto* n = logger_tbl.get("drain_timeout"); n && !n->is_string()) {
+        // Gate B r2 #1 (class): present but wrong type → malformed_value (fail-closed).
+        acc.add(LoadDiagnostic{
+            .key_path = kp(key_prefix, "drain_timeout"),
+            .reason = reason_class::malformed_value,
+            .location = loc_node(*n),
+            .message = "drain_timeout must be a duration string (e.g. \"5000ms\", \"5s\")",
+        });
     }
 
     // drain_cpu_affinity — plain int, optional; default -1
@@ -594,6 +658,14 @@ void resolve_engine_logger(const toml::table& logger_tbl, std::string_view key_p
         } else {
             cfg.drain_cpu_affinity = static_cast<int>(v);
         }
+    } else if (const auto* n = logger_tbl.get("drain_cpu_affinity"); n && !n->is_integer()) {
+        // Gate B r2 #1 (class): present but wrong type → malformed_value (fail-closed).
+        acc.add(LoadDiagnostic{
+            .key_path = kp(key_prefix, "drain_cpu_affinity"),
+            .reason = reason_class::malformed_value,
+            .location = loc_node(*n),
+            .message = "drain_cpu_affinity must be an integer",
+        });
     }
 
     // ring_resource is NEVER file-set (deferred arena, FR-010) — stays default.

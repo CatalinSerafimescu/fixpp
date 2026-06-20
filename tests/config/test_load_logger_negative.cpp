@@ -1935,3 +1935,130 @@ TEST(GateBR1F_Portability, PosixAccessCheckStillActiveOnPosix)
         << "Expected invalid_or_contradictory_selector on logger.sinks[0].directory";
 }
 #endif  // !_WIN32
+
+// ── GateBR2_WrongTypeClass — complete the FR-020 wrong-type guard class ──────
+//
+// Round-2 Codex re-review found `directory=123` silently accepted; a census of
+// EVERY optional field read then found the whole class incomplete — only 7 of 16
+// fields had the wrong-type→malformed_value guard. This cell pins the 9 that the
+// r1 fixer + the r2 directory fix had left silently-defaulting.
+//
+// CRITICAL discriminator: each case uses a WRONG-TYPE value that is NOT
+// negative/out-of-range — e.g. max_file_bytes = "big" (a STRING). A negative or
+// oversized integer would hit the EXISTING r1 range check (out_of_range), not the
+// NEW `else if (!is_integer())` branch. So these values exercise exactly the new
+// guard. Mutation: drop any `else if (n && !n->is_TYPE())` branch → that field's
+// wrong-type value is silently accepted → no malformed_value → EXPECT RED.
+//
+// kind/endpoint/sinks are intentionally NOT here: their wrong-type maps to
+// missing_required (required-field semantics) — a split Codex r1 #6 called
+// "defensible" and explicitly blessed; only silent OPTIONAL defaulting was the bug.
+TEST(GateBR2_WrongTypeClass, AllRemainingOptionalFieldsRejectWrongType)
+{
+    struct Case {
+        std::string toml;
+        std::string key_path;
+    };
+    std::vector<Case> cases = {
+        // file-sink numerics — STRING where integer expected
+        {R"(
+[logger]
+  [[logger.sinks]]
+  kind           = "file"
+  directory      = "/tmp"
+  max_file_bytes = "big"
+)",
+         "logger.sinks[0].max_file_bytes"},
+        {R"(
+[logger]
+  [[logger.sinks]]
+  kind           = "file"
+  directory      = "/tmp"
+  max_keep_count = "many"
+)",
+         "logger.sinks[0].max_keep_count"},
+        // logger-level scalars
+        {R"(
+[logger]
+capacity = "huge"
+  [[logger.sinks]]
+  kind      = "file"
+  directory = "/tmp"
+)",
+         "logger.capacity"},
+        {R"(
+[logger]
+drain_timeout = 5000
+  [[logger.sinks]]
+  kind      = "file"
+  directory = "/tmp"
+)",
+         "logger.drain_timeout"},
+        {R"(
+[logger]
+drain_cpu_affinity = "two"
+  [[logger.sinks]]
+  kind      = "file"
+  directory = "/tmp"
+)",
+         "logger.drain_cpu_affinity"},
+#ifdef FIXPP_CONFIG_HAS_OTLP
+        {R"(
+[logger]
+  [[logger.sinks]]
+  kind     = "otlp"
+  endpoint = "https://collector:4317/v1/logs"
+  use_grpc = "yes"
+)",
+         "logger.sinks[0].use_grpc"},
+        {R"(
+[logger]
+  [[logger.sinks]]
+  kind             = "otlp"
+  endpoint         = "https://collector:4317/v1/logs"
+  max_export_batch = "lots"
+)",
+         "logger.sinks[0].max_export_batch"},
+        {R"(
+[logger]
+  [[logger.sinks]]
+  kind               = "otlp"
+  endpoint           = "https://collector:4317/v1/logs"
+  max_export_retries = "few"
+)",
+         "logger.sinks[0].max_export_retries"},
+#endif  // FIXPP_CONFIG_HAS_OTLP
+#ifdef FIXPP_HAS_SYSLOG
+        {R"(
+[logger]
+  [[logger.sinks]]
+  kind  = "syslog"
+  ident = 123
+)",
+         "logger.sinks[0].ident"},
+#endif  // FIXPP_HAS_SYSLOG
+    };
+
+    for (const auto& c : cases) {
+        auto parsed = parse_logger_inline(c.toml);
+        ASSERT_NE(parsed.logger_tbl, nullptr) << "parse failed for " << c.key_path;
+
+        fixpp::config::detail::DiagnosticAccumulator acc;
+        fixpp::config::PendingLoggerSet pending;
+        fixpp::config::LoadOptions opts;
+        opts.resource = std::pmr::get_default_resource();
+        fixpp::config::detail::resolve_engine_logger(
+            *parsed.logger_tbl, "logger", fixpp::config::SourceLoc{},
+            std::filesystem::temp_directory_path(), opts, pending, acc,
+            /*is_engine=*/true, /*session_index=*/0);
+
+        ASSERT_FALSE(acc.empty())
+            << "wrong-type field at " << c.key_path << " must produce a diagnostic";
+        const auto diags = std::move(acc).release();
+        EXPECT_TRUE(has_diag(diags, fixpp::config::reason_class::malformed_value, c.key_path))
+            << "Expected malformed_value at " << c.key_path
+            << " (present-but-wrong-type optional field must fail closed, FR-020)";
+        EXPECT_FALSE(pending.engine.has_value())
+            << "a wrong-type field must prevent the logger from being parked: " << c.key_path;
+    }
+}
