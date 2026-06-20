@@ -39,8 +39,8 @@
 
 // mallocnesia replaces these weak no-ops with its interceptor scope markers.
 extern "C" {
-__attribute__((weak)) void alloc_guard_start() {}
-__attribute__((weak)) void alloc_guard_end() {}
+__attribute__((weak)) void alloc_guard_start();
+__attribute__((weak)) void alloc_guard_end();
 }
 
 namespace {
@@ -132,11 +132,11 @@ TEST(SyncAllocGuard, ContendedEmbeddedPathNoHeapAlloc) {
     }
 
     // ── Measured loop — ZERO global new/delete expected between markers. ──────
-    alloc_guard_start();
+    if (alloc_guard_start) alloc_guard_start();
     for (int i = 0; i < ITERATIONS; ++i) {
         run_one_cycle();
     }
-    alloc_guard_end();
+    if (alloc_guard_end) alloc_guard_end();
 
     EXPECT_EQ(counter.load(), WARMUP_ITERATIONS + ITERATIONS)
         << "Not all waiter acquisitions completed";

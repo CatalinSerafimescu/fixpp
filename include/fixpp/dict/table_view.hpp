@@ -94,7 +94,7 @@ public:
     [[nodiscard]] bool field_valid_for(std::string_view msg_type,
                                        std::uint16_t tag) const noexcept {
         auto it = valid_.find(msg_type);
-        return it != valid_.end() && it->second.count(tag) > 0;
+        return it != valid_.end() && it->second.contains(tag);
     }
 
     // Tags that are required for `msg_type`. Empty span if unknown.

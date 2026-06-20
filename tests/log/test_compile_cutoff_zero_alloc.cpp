@@ -330,7 +330,7 @@ TEST(LogZeroAlloc, BiteTestPmrGateCatchesAlloc)
     counting_res.reset();
 
     // ── Bite: intentional allocation via PMR in the guard window ─────────
-    alloc_guard_start();
+    if (alloc_guard_start) alloc_guard_start();
 
     // Route an allocation through PMR default resource to simulate a
     // hypothetical mis-placed alloc on the enqueue path.
@@ -343,7 +343,7 @@ TEST(LogZeroAlloc, BiteTestPmrGateCatchesAlloc)
 
     emit_warn(logger.get(), 1u);
 
-    alloc_guard_end();
+    if (alloc_guard_end) alloc_guard_end();
 
     // Gate B1 must have caught the PMR allocation.
     EXPECT_GT(counting_res.alloc_count(), 0u)

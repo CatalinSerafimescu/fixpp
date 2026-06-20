@@ -682,11 +682,11 @@ TEST_F(SendingTimePrecisionTest, OrigSendingTime122_PreservedVerbatim_OnResend) 
 // mallocnesia weak-symbol hooks — replaced by LD_PRELOAD; no-ops otherwise.
 extern "C" {
 // NOLINTNEXTLINE(misc-use-anonymous-namespace) — must be at file scope for LD_PRELOAD override.
-__attribute__((weak)) void alloc_guard_start() {}
+__attribute__((weak)) void alloc_guard_start();
 // NOLINTNEXTLINE(misc-use-anonymous-namespace)
-__attribute__((weak)) void alloc_guard_end() {}
+__attribute__((weak)) void alloc_guard_end();
 // NOLINTNEXTLINE(misc-use-anonymous-namespace)
-__attribute__((weak)) long alloc_guard_count() { return 0; }
+__attribute__((weak)) long alloc_guard_count();
 }
 
 TEST(SendingTimePrecisionNoHeap, SendingTimePrecision_NoHeapOnFormatParse) {
@@ -711,7 +711,7 @@ TEST(SendingTimePrecisionNoHeap, SendingTimePrecision_NoHeapOnFormatParse) {
     };
 
     // ── Start the global-heap interception window ─────────────────────────────
-    alloc_guard_start();
+    if (alloc_guard_start) alloc_guard_start();
 
     // Format at every precision in a tight loop.
     for (auto prec : precisions) {
@@ -773,12 +773,12 @@ TEST(SendingTimePrecisionNoHeap, SendingTimePrecision_NoHeapOnFormatParse) {
     }
 
     // ── End the global-heap interception window ───────────────────────────────
-    alloc_guard_end();
+    if (alloc_guard_end) alloc_guard_end();
 
     // Under mallocnesia: alloc_guard_count() returns the number of global
     // malloc/free calls in the window. A nonzero count means the code touched
     // the heap and the no-heap contract is violated.
-    const long heap_allocs = alloc_guard_count();
+    const long heap_allocs = alloc_guard_count ? alloc_guard_count() : 0L;
     EXPECT_EQ(heap_allocs, 0L)
         << "utc_time_to_fix_string + fix_string_to_utc_time must not touch "
            "the global heap at any precision or parse width; "

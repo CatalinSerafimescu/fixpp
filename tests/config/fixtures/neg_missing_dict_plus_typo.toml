@@ -1,0 +1,39 @@
+# neg_missing_dict_plus_typo.toml
+# Three INDEPENDENT errors for the #2 Gate B r1 collect-ALL test:
+#   (1) [dictionary] section absent → missing_required at "dictionary"
+#   (2) session[0].sender_comp_idd (typo, double-d) → unknown_key at
+#       "session[0].sender_comp_idd"
+#   (3) [session.logger] (deferred step-2 key) → recognized_not_yet_supported_step2
+#       at "session[0].logger"
+#
+# Before fix: the early-return at toml_config_loader.cpp:444 fired on the
+# non-empty accumulator (from error #1 above), truncating #2 and #3.
+# After fix: the early-return only fires on missing/empty sessions_arr, so
+# all three diagnostics accumulate in a single pass.
+
+[clock]
+kind = "system"
+
+[store]
+kind = "memory"
+
+# [dictionary] intentionally omitted — error #1
+
+[[session]]
+sender_comp_id    = "CLIENT1"   # correct key
+sender_comp_idd   = "TYPO"      # error #2: unknown_key (extra 'd')
+target_comp_id    = "SERVER1"
+begin_string      = "FIX.4.4"
+role              = "initiator"
+
+[session.transport]
+kind = "plaintext"
+host = "fix.example.com"
+port = 4321
+
+[session.security_profile]
+kind = "insecure_plain_tcp"
+
+[session.logger]
+# error #3: recognized_not_yet_supported_step2 (step-2 key)
+kind = "console"

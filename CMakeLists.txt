@@ -90,6 +90,7 @@ add_subdirectory(src/transport)
 add_subdirectory(src/log)
 add_subdirectory(src/otel)
 add_subdirectory(src/session)
+add_subdirectory(src/config)  # 044-toml-session-config: opt-in TOML loader target
 add_subdirectory(src/tap)
 add_subdirectory(src/capi)
 add_subdirectory(src/service)
@@ -149,6 +150,7 @@ if(FIXPP_BUILD_TESTS)
   add_subdirectory(tests/transport)
   add_subdirectory(tests/interop)  # 016-interop-harness — session-layer interop gate (T002)
   add_subdirectory(tests/tls)
+  add_subdirectory(tests/config)  # 044-toml-session-config — happy-path + selector-build (T011/T012)
   add_subdirectory(tests/log)
   add_subdirectory(tests/otel)
   add_subdirectory(tests/tap)
@@ -164,6 +166,7 @@ endif()
 
 if(FIXPP_BUILD_FUZZ)
   add_subdirectory(tests/fuzz)
+  add_subdirectory(tests/config/fuzz)  # T037 — 044-toml-session-config fuzzer
 endif()
 
 # ── CMake package export (fixpp:: namespace per [arch §7.4]) ────────────────

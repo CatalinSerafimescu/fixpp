@@ -1,0 +1,37 @@
+# neg_contradictory_direct_spin.toml
+# mode="direct_executor" + locks="spin" — invalid_or_contradictory_selector:
+# direct_executor requires already_serialized_executor=true (no spin locks needed);
+# combining these two is contradictory.
+# NOTE: Phase 4b will implement this; RED until then.
+
+[clock]
+kind = "system"
+
+[store]
+kind = "memory"
+
+[cert_source]
+kind        = "file"
+cert_file   = "leaf_ecdsa_p256.pem"
+key_file    = "leaf_ecdsa_p256.key"
+ca_file     = "ca.pem"
+
+[dictionary]
+kind = "path"
+path = "FIX44.xml"
+
+[[session]]
+sender_comp_id = "CLIENT1"
+target_comp_id = "SERVER1"
+begin_string   = "FIX.4.4"
+role           = "initiator"
+mode           = "direct_executor"
+locks          = "spin"
+
+[session.transport]
+kind = "tls"
+host = "fix.example.com"
+port = 4321
+
+[session.security_profile]
+kind = "mtls_ca"

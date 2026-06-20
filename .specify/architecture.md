@@ -64,6 +64,7 @@
 | 11 | `service` | `service/` | `fixppd` daemon: gRPC control plane (default) + iceoryx2 data plane (opt-in) | Yes (binary + gRPC schema) |
 | 12 | `bindings/python` | `bindings/python/` | SWIG `.i` files, pytest suite, wheel build | Yes (Python module) |
 | 13 | `bindings/c` | `bindings/c/` | Example C consumers; not a library — example/test code | No (samples only) |
+| 14 | `config` | `src/config/` + `include/fixpp/config/` | TOML session-config loader (`fixpp_config_toml` STATIC target); opt-in adjacent — NOT part of the core module graph; nothing in core/session/transport links it. Parser (`tomlplusplus`) isolated as PRIVATE `.cpp`-only dep (FR-004/SC-006). | Yes (C++) |
 
 ### 2.2 Dependency direction (acyclic)
 
@@ -125,6 +126,7 @@ The build enforces this graph at the include level via `include-what-you-use` co
 | `service` | `capi` only — **never** the C++ headers |
 | `bindings/python` | `capi` only |
 | `bindings/c` | `capi` only |
+| `config` | `core`, `session`, `dictionary`, `tls`, `transport` (opt-in adjacent; enforced in `check_layers.py`) |
 
 **Forbidden:** any back-edge (e.g., `core` including `session/`), any cycle, and any non-C-ABI consumption from `service/` or the bindings. CI fails on violation. **Bridge-surface carve-out:** the `dictionary↔wire` bridge surface defined in §2.4 (the generated `fixpp::vXX::*` tree + the named hand-written `dict/` bridge headers + the vendored frozen `wire/message_view_contract.hpp` stub) compiles against both modules and is **not** a `dictionary` module edge; it is header-only template glue with no link cycle. `tools/check_layers.py` exempts exactly that documented file-list (see §2.4 RC#3 amendment) — the `dictionary | core` whitelist is otherwise unchanged for every non-bridge `dict/` header.
 
@@ -158,6 +160,7 @@ The build enforces this graph at the include level via `include-what-you-use` co
 | `fixpp::tap` | `RingBufferTap`, `Iox2Tap`, `SyncCallbackTap`, `TapConfig` | `tap` | |
 | `fixpp::service` | Public service-mode plugin interfaces (`ControlPlane`, `ControlPlaneConfig`); the daemon binary `fixppd` and default plugin impls are downstream and **not** C++ API | `service` (interface part) | Interface headers only; see §4.11. |
 | `fixpp::current_trace_context` | The free awaitable returning the current `trace_context` from the strand-stored slot `[const §XIII.3]` | `core` | Not `thread_local`; coroutine-correct. |
+| `fixpp::config` | TOML config loader, `LoadResult`, `ConfigBundle`, `LoadDiagnostic`, `LoadOptions` | `config` | Opt-in; consumers link `fixpp_config_toml` explicitly. |
 | `fixpp::detail` | Internal-only helpers; never user-callable | (any module) | Headers carry `// detail: not API` and are excluded from Doxygen. |
 
 The C ABI lives in `extern "C"` and uses the `fixpp_` prefix (e.g., `fixpp_session_open`, `fixpp_error_t`). It does not enter any C++ namespace.

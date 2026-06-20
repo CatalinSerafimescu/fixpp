@@ -1,0 +1,49 @@
+# tests/config/fixtures/neg_default_typo.toml
+# 044-toml-session-config T031 [US4] — cross-scope key-recognition cell.
+#
+# [default] contains a TYPO'd key: "heartbeat_intervall" (double-l).
+# The loader runs recognize_keys(*defaults_ptr, "default", acc), which emits:
+#   LoadDiagnostic{reason=unknown_key, key_path="default.heartbeat_intervall"}
+#
+# This proves the loader recognizes keys authored ONLY in [default] — a typo there
+# is not silently inherited by every session (SC-005 cross-scope guard).
+#
+# Expected: load returns std::unexpected; at least one diagnostic with
+#   reason=unknown_key, key_path="default.heartbeat_intervall".
+#
+# Relative paths resolve against THIS FILE's parent directory (FR-016a).
+
+[clock]
+kind = "system"
+
+[store]
+kind = "memory"
+
+[cert_source]
+kind      = "file"
+cert_file = "leaf_ecdsa_p256.pem"
+key_file  = "leaf_ecdsa_p256.key"
+ca_file   = "ca.pem"
+
+[dictionary]
+kind = "path"
+path = "FIX44.xml"
+
+[default]
+begin_string         = "FIX.4.4"
+role                 = "initiator"
+heartbeat_intervall  = "30s"     # TYPO: double-l → unknown_key at "default.heartbeat_intervall"
+
+[default.transport]
+kind = "tls"
+
+[default.security_profile]
+kind = "mtls_ca"
+
+[[session]]
+sender_comp_id = "CLIENT_A"
+target_comp_id = "SERVER_A"
+
+[session.transport]
+host = "fix-a.example.com"
+port = 4001

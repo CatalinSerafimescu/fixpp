@@ -1,0 +1,37 @@
+# neg_dict_malformed_xml.toml
+# copy of happy_full.toml with dictionary.path pointing at a MALFORMED XML file.
+# XmlLoader::load THROWS (dict::xml_parse_error) on unparseable XML; the loader's
+# trap_throw_to_expected wrapper (D-3 / validation rule 9) MUST convert that throw
+# into an invalid_or_contradictory_selector diagnostic at dictionary.path —
+# NEVER terminate. This is the spec-mandated "malformed dictionary XML → diagnostic
+# NOT terminate" cell (data-model D-3 / plan.md project-structure note).
+
+[clock]
+kind = "system"
+
+[store]
+kind = "memory"
+
+[cert_source]
+kind        = "file"
+cert_file   = "leaf_ecdsa_p256.pem"
+key_file    = "leaf_ecdsa_p256.key"
+ca_file     = "ca.pem"
+
+[dictionary]
+kind = "path"
+path = "malformed_dict.xml"        # deliberately unparseable XML
+
+[[session]]
+sender_comp_id = "CLIENT1"
+target_comp_id = "SERVER1"
+begin_string   = "FIX.4.4"
+role           = "initiator"
+
+[session.transport]
+kind = "tls"
+host = "fix.example.com"
+port = 4321
+
+[session.security_profile]
+kind = "mtls_ca"

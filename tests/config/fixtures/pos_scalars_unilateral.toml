@@ -1,0 +1,28 @@
+# pos_scalars_unilateral.toml
+# Covers reset_seqnum_policy = "unilateral" (line 458 scalar_mappers.cpp)
+# and sending_time_precision = "nanos" (line 484)
+# Uses plaintext transport, acceptor role (no host/port required).
+
+[clock]
+kind = "system"
+
+[store]
+kind = "memory"
+
+[dictionary]
+kind = "path"
+path = "FIX44.xml"
+
+[[session]]
+sender_comp_id         = "SERVER2"
+target_comp_id         = "CLIENT2"
+begin_string           = "FIX.4.4"
+role                   = "acceptor"
+reset_seqnum_policy    = "unilateral"
+sending_time_precision = "nanos"
+
+[session.transport]
+kind = "plaintext"
+
+[session.security_profile]
+kind = "insecure_plain_tcp"

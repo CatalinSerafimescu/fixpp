@@ -1,0 +1,39 @@
+# neg_p1s1_transport_kind_missing.toml
+# Two sessions: session[0] uses plaintext (becomes engine default), session[1]
+# has NO [session.transport] table at all.
+# Expected: missing_required at "session[1].transport.kind"
+
+[clock]
+kind = "system"
+
+[store]
+kind = "memory"
+
+[dictionary]
+kind = "path"
+path = "FIX44.xml"
+
+[[session]]
+sender_comp_id = "CLIENT_A"
+target_comp_id = "SERVER_A"
+begin_string   = "FIX.4.4"
+role           = "initiator"
+
+[session.transport]
+kind = "plaintext"
+host = "fix-plain.example.com"
+port = 1234
+
+[session.security_profile]
+kind = "insecure_plain_tcp"
+
+[[session]]
+sender_comp_id = "CLIENT_B"
+target_comp_id = "SERVER_B"
+begin_string   = "FIX.4.4"
+role           = "acceptor"
+
+# intentionally NO [session.transport] section
+
+[session.security_profile]
+kind = "insecure_plain_tcp"

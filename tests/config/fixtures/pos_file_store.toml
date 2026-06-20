@@ -1,0 +1,32 @@
+# pos_file_store.toml
+# T026 cell: store=file — FileStoreFactory.
+# Uses insecure_plain_tcp to avoid cert_source dependency.
+# directory is a relative path (resolved against this file's dir at load time).
+# NOTE: FileStoreFactory ctor does NOT validate or stat the directory at construction
+# time; validation happens in make() which is not called by the loader (Phase-3c).
+# A relative "." directory is safe to use here.
+
+[clock]
+kind = "system"
+
+[store]
+kind      = "file"
+directory = "."
+
+[dictionary]
+kind = "path"
+path = "FIX44.xml"
+
+[[session]]
+sender_comp_id = "CLIENT1"
+target_comp_id = "SERVER1"
+begin_string   = "FIX.4.4"
+role           = "initiator"
+
+[session.transport]
+kind = "plaintext"
+host = "fix.example.com"
+port = 4321
+
+[session.security_profile]
+kind = "insecure_plain_tcp"

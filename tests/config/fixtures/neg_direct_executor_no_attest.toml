@@ -1,0 +1,38 @@
+# neg_direct_executor_no_attest.toml
+# T028 cell: mode="direct_executor" WITHOUT already_serialized_executor=true.
+# Triggers invalid_or_contradictory_selector at session[0].mode (FR-011 / US3 AC-4).
+# Copy of happy_full.toml with only mode changed.
+
+[clock]
+kind = "system"
+
+[store]
+kind = "memory"
+
+[cert_source]
+kind        = "file"
+cert_file   = "leaf_ecdsa_p256.pem"
+key_file    = "leaf_ecdsa_p256.key"
+ca_file     = "ca.pem"
+
+[dictionary]
+kind = "path"
+path = "FIX44.xml"
+
+[[session]]
+sender_comp_id = "CLIENT1"
+target_comp_id = "SERVER1"
+begin_string   = "FIX.4.4"
+role           = "initiator"
+
+# mode=direct_executor without already_serialized_executor=true → FR-011 guard fires.
+# already_serialized_executor is intentionally absent (not false, not true).
+mode = "direct_executor"
+
+[session.transport]
+kind = "tls"
+host = "fix.example.com"
+port = 4321
+
+[session.security_profile]
+kind = "mtls_ca"

@@ -1,0 +1,33 @@
+# neg_missing_clock.toml
+# copy of happy_full.toml with the [clock] section removed entirely —
+# triggers missing_required at "clock.kind".
+# ALREADY-GREEN: selector_resolver.cpp resolve_engine_clock emits this from Phase 3b.
+
+# No [clock] section — intentionally omitted.
+
+[store]
+kind = "memory"
+
+[cert_source]
+kind        = "file"
+cert_file   = "leaf_ecdsa_p256.pem"
+key_file    = "leaf_ecdsa_p256.key"
+ca_file     = "ca.pem"
+
+[dictionary]
+kind = "path"
+path = "FIX44.xml"
+
+[[session]]
+sender_comp_id = "CLIENT1"
+target_comp_id = "SERVER1"
+begin_string   = "FIX.4.4"
+role           = "initiator"
+
+[session.transport]
+kind = "tls"
+host = "fix.example.com"
+port = 4321
+
+[session.security_profile]
+kind = "mtls_ca"

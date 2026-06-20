@@ -21,8 +21,8 @@ using fixpp::core::pod_decimal;
 // the ALLOC_GUARD_START / ALLOC_GUARD_END markers below.
 // These are defined as no-ops here; mallocnesia replaces them.
 extern "C" {
-__attribute__((weak)) void alloc_guard_start() {}
-__attribute__((weak)) void alloc_guard_end() {}
+__attribute__((weak)) void alloc_guard_start();
+__attribute__((weak)) void alloc_guard_end();
 }
 
 TEST(DecimalAllocGuard, ParseFormatLoopNoAlloc) {
@@ -34,7 +34,7 @@ TEST(DecimalAllocGuard, ParseFormatLoopNoAlloc) {
 
     std::array<std::byte, 64> dst{};
     // Repeat 1000 times to give the interceptor a statistical chance to catch leaks
-    alloc_guard_start();
+    if (alloc_guard_start) alloc_guard_start();
     for (int i = 0; i < 1000; ++i) {
         auto parsed = decimal<pod_decimal>::parse(std::span<const std::byte>{src},
                                                   std::pmr::null_memory_resource());
@@ -43,5 +43,5 @@ TEST(DecimalAllocGuard, ParseFormatLoopNoAlloc) {
         auto written = parsed->format(std::span<std::byte>{dst});
         ASSERT_TRUE(written.has_value());
     }
-    alloc_guard_end();
+    if (alloc_guard_end) alloc_guard_end();
 }

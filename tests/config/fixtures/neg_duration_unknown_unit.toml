@@ -1,0 +1,28 @@
+# neg_duration_unknown_unit.toml
+# heartbeat_interval has an unrecognised unit suffix "d" (days) — triggers
+# "unrecognised duration unit" error arm (lines 171-178 scalar_mappers.cpp).
+
+[clock]
+kind = "system"
+
+[store]
+kind = "memory"
+
+[dictionary]
+kind = "path"
+path = "FIX44.xml"
+
+[[session]]
+sender_comp_id     = "CLIENT1"
+target_comp_id     = "SERVER1"
+begin_string       = "FIX.4.4"
+role               = "initiator"
+heartbeat_interval = "30d"
+
+[session.transport]
+kind = "plaintext"
+host = "fix.example.com"
+port = 4321
+
+[session.security_profile]
+kind = "insecure_plain_tcp"

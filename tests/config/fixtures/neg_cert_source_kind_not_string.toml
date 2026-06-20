@@ -1,0 +1,30 @@
+# neg_cert_source_kind_not_string.toml
+# [cert_source] table is present but kind is not a string (integer) — triggers
+# missing_required at "cert_source.kind" (lines 212-217 selector_resolver.cpp).
+
+[clock]
+kind = "system"
+
+[store]
+kind = "memory"
+
+[cert_source]
+kind = 42
+
+[dictionary]
+kind = "path"
+path = "FIX44.xml"
+
+[[session]]
+sender_comp_id = "CLIENT1"
+target_comp_id = "SERVER1"
+begin_string   = "FIX.4.4"
+role           = "initiator"
+
+[session.transport]
+kind = "tls"
+host = "fix.example.com"
+port = 4321
+
+[session.security_profile]
+kind = "mtls_ca"

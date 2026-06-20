@@ -1,0 +1,12 @@
+# neg_toml_assert_table_header.toml
+# T039 regression fixture — the malformed table header `[ [key]]` drives
+# tomlplusplus parse_key() past is_bare_key_character/is_string_delimiter and
+# fires TOML_ASSERT_ASSUME (parser.inl:3037). Before the toml_include.hpp shim
+# this aborted (debug) / was UB (release/NDEBUG), ESCAPING load_toml_config's
+# noexcept boundary. The loader must instead fail closed with a parse_error
+# diagnostic (FR-012 / validation rule 9 / D-3).
+
+[clock]
+kind = "system"
+
+[ [key]]

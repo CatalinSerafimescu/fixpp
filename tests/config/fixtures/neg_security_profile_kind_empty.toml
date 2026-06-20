@@ -1,0 +1,33 @@
+# neg_security_profile_kind_empty.toml
+# security_profile.kind is an empty string — triggers empty_required at
+# session[0].security_profile.kind (lines 239-244 toml_config_loader.cpp
+# check_required_keys, and via scalar_mappers.cpp since kind is present/is_string).
+#
+# Note: scalar_mappers does not emit a diagnostic for empty kind (it just doesn't
+# match any token, and the else arm for unknown_enum fires only when kind is
+# non-empty). The check_required_keys in toml_config_loader.cpp fires the
+# empty_required because kind_node->value<std::string>().value_or("").empty() == true.
+
+[clock]
+kind = "system"
+
+[store]
+kind = "memory"
+
+[dictionary]
+kind = "path"
+path = "FIX44.xml"
+
+[[session]]
+sender_comp_id = "CLIENT1"
+target_comp_id = "SERVER1"
+begin_string   = "FIX.4.4"
+role           = "initiator"
+
+[session.transport]
+kind = "plaintext"
+host = "fix.example.com"
+port = 4321
+
+[session.security_profile]
+kind = ""

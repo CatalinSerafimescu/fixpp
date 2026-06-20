@@ -1,0 +1,27 @@
+# neg_dict_path_empty.toml
+# [dictionary] kind="path" and the "path" key is an empty string — triggers
+# empty_required at "dictionary.path" (lines 349-354 selector_resolver.cpp).
+
+[clock]
+kind = "system"
+
+[store]
+kind = "memory"
+
+[dictionary]
+kind = "path"
+path = ""
+
+[[session]]
+sender_comp_id = "CLIENT1"
+target_comp_id = "SERVER1"
+begin_string   = "FIX.4.4"
+role           = "initiator"
+
+[session.transport]
+kind = "plaintext"
+host = "fix.example.com"
+port = 4321
+
+[session.security_profile]
+kind = "insecure_plain_tcp"

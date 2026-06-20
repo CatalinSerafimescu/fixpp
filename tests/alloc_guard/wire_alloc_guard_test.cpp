@@ -34,8 +34,8 @@ using fixpp::wire::Writer;
 
 // mallocnesia replaces these weak no-ops with its interceptor scope markers.
 extern "C" {
-__attribute__((weak)) void alloc_guard_start() {}
-__attribute__((weak)) void alloc_guard_end() {}
+__attribute__((weak)) void alloc_guard_start();
+__attribute__((weak)) void alloc_guard_end();
 }
 
 namespace {
@@ -91,7 +91,7 @@ TEST(WireAllocGuard, ParseSerializeLoopNoHeapAlloc) {
     std::array<std::byte, 4096> write_scratch{};
     std::array<std::byte, 1024> dst_buf{};
 
-    alloc_guard_start();
+    if (alloc_guard_start) alloc_guard_start();
     for (int i = 0; i < 1000; ++i) {
         std::pmr::monotonic_buffer_resource parse_arena{parse_buf.data(), parse_buf.size(),
                                                         std::pmr::null_memory_resource()};
@@ -125,5 +125,5 @@ TEST(WireAllocGuard, ParseSerializeLoopNoHeapAlloc) {
         auto committed = std::move(writer).commit();
         ASSERT_TRUE(committed.has_value());
     }
-    alloc_guard_end();
+    if (alloc_guard_end) alloc_guard_end();
 }

@@ -1,0 +1,57 @@
+# pos_scalars_extra.toml
+# Coverage-targeted positive fixture for scalar_mappers.cpp.
+#
+# Covers (previously uncovered):
+#   - reset_seqnum_policy = "bilateral_strict"  (line 454)
+#   - sending_time_precision = "seconds"        (line 478)
+#   - duration unit "m" (minutes) via heartbeat_interval = "2m"
+#   - duration unit "ms" via sending_time_threshold = "100ms"
+#     NOTE: "us" was changed to "100ms" — sub-ms "us" is now rejected fail-closed
+#     (#5 Gate B r1). Separate neg_duration_us_rejected.toml tests the rejection.
+#   - duration unit "h" (hours) via test_request_threshold = "1h"
+#   - mode = "direct_executor" + already_serialized_executor = true  (line 320)
+#   - compid_authorization_policy sub-table                          (lines 629-658)
+#   - reconnect_policy sub-table                                     (lines 692-736)
+#   - role = "acceptor" (no host/port required)
+#
+# Selector: plaintext transport (no cert_source needed).
+# All engine-level selectors are minimal.
+
+[clock]
+kind = "system"
+
+[store]
+kind = "memory"
+
+[dictionary]
+kind = "path"
+path = "FIX44.xml"
+
+[[session]]
+sender_comp_id = "SERVER1"
+target_comp_id = "CLIENT1"
+begin_string   = "FIX.4.4"
+role           = "acceptor"
+mode           = "direct_executor"
+already_serialized_executor = true
+reset_seqnum_policy         = "bilateral_strict"
+sending_time_precision      = "seconds"
+heartbeat_interval          = "2m"
+test_request_threshold      = "1h"
+sending_time_threshold      = "100ms"
+
+[session.transport]
+kind = "plaintext"
+
+[session.security_profile]
+kind = "insecure_plain_tcp"
+
+[session.compid_authorization_policy]
+"PARTNER_A" = ["SERVER1", "SERVER2"]
+"PARTNER_B" = ["SERVER1"]
+
+[session.reconnect_policy]
+schedule      = ["1s", "5s", "30s"]
+jitter        = 0.2
+max_attempts  = 10
+session_id_seed = 42

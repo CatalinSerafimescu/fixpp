@@ -148,3 +148,41 @@ if(EXISTS "${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so")
     LABELS "041;alloc_guard;validation-gate;t014"
     DEPENDS alloc_guard_validate_gate)
 endif()
+
+# ── item 13 (2026-06-19): mallocnesia gate entries for the alloc-guard binaries
+# that previously had NO LD_PRELOAD entry. The marker fix (weak UNDEFINED symbols,
+# item 13) makes interception real; without these add_test entries the binaries
+# ran plainly and never enforced zero-alloc under mallocnesia. Absent the .so →
+# skipped. Mirrors alloc_guard_validate_gate_mallocnesia.
+#
+# Only the binaries whose MEASURED WINDOW is genuinely zero-global-alloc are gated
+# here (decimal / wire / sync — all verified green under the now-real interceptor).
+# DELIBERATELY NOT GATED: test_dispatch_alloc_guard, test_clock_sleep_alloc_guard,
+# test_session_alloc_guard — their windows wrap `ioc.run()` / `run_sync()` /
+# `co_spawn()`, which allocate coroutine frames + asio run-loop handlers on the
+# global heap (the false-green these were silently relying on). Gating them at
+# max-allocs=0 would be red. Re-scoping those windows to the true steady-state hot
+# path is tracked as a follow-up (see parent REMAINING-WORK.md item 13).
+if(EXISTS "${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so")
+  foreach(_ag IN ITEMS
+      decimal_alloc_guard_test
+      wire_alloc_guard_test
+      sync_alloc_guard_test)
+    add_test(
+      NAME ${_ag}_mallocnesia
+      COMMAND python3 "${CMAKE_SOURCE_DIR}/tools/check_alloc.py"
+              "--binary" "$<TARGET_FILE:${_ag}>")
+    set_tests_properties(${_ag}_mallocnesia PROPERTIES
+      LABELS "alloc_guard;mallocnesia;item13")
+  endforeach()
+endif()
+
+# ── item 13: recurrence guard — fail if any test/bench source reintroduces a
+# bodied alloc_guard_start/end definition (the local-symbol pattern that silently
+# disables LD_PRELOAD interception and made every gate false-green). Cheap static
+# scan, no preload needed; repo precedent = tools/check_admin_emit_observation.py.
+add_test(
+  NAME alloc_guard_markers_no_local_def
+  COMMAND python3 "${CMAKE_SOURCE_DIR}/tools/check_alloc_guard_markers.py")
+set_tests_properties(alloc_guard_markers_no_local_def PROPERTIES
+  LABELS "alloc_guard;mallocnesia;item13")

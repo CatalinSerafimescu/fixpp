@@ -1,0 +1,34 @@
+# pos_acceptor_no_host_port.toml
+# Acceptor session legitimately omitting transport.host / transport.port.
+# An acceptor binds a listen port (host-supplied); it has no connect target.
+# Must load OK — omitting host/port is VALID for acceptors (Bucket B E-3).
+
+[clock]
+kind = "system"
+
+[store]
+kind = "memory"
+
+[cert_source]
+kind        = "file"
+cert_file   = "leaf_ecdsa_p256.pem"
+key_file    = "leaf_ecdsa_p256.key"
+ca_file     = "ca.pem"
+
+[dictionary]
+kind = "path"
+path = "FIX44.xml"
+
+[[session]]
+sender_comp_id = "SERVER1"
+target_comp_id = "CLIENT1"
+begin_string   = "FIX.4.4"
+role           = "acceptor"
+# No host/port — valid for an acceptor
+
+[session.transport]
+kind = "tls"
+# host/port absent — acceptor has no connect target
+
+[session.security_profile]
+kind = "mtls_ca"

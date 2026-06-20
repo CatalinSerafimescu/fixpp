@@ -4,11 +4,11 @@
 // Must be at file scope for the LD_PRELOAD override to bind.
 extern "C" {
 // NOLINTNEXTLINE(misc-use-anonymous-namespace) — must be at file scope for LD_PRELOAD override.
-__attribute__((weak)) void alloc_guard_start() {}
+__attribute__((weak)) void alloc_guard_start();
 // NOLINTNEXTLINE(misc-use-anonymous-namespace)
-__attribute__((weak)) void alloc_guard_end() {}
+__attribute__((weak)) void alloc_guard_end();
 // NOLINTNEXTLINE(misc-use-anonymous-namespace)
-__attribute__((weak)) long alloc_guard_count() { return 0; }
+__attribute__((weak)) long alloc_guard_count();
 }
 
 // tests/session/test_refresh_on_logon.cpp
@@ -1420,7 +1420,7 @@ TEST(RefreshOnLogon, W8_NoHeap_RehydratePath) {
     }
 
     // ── Guarded window: one SeqnumManager::hydrate() invocation ───────────────
-    alloc_guard_start();
+    if (alloc_guard_start) alloc_guard_start();
 
     auto measured_fut = asio::co_spawn(
         fix.ioc,
@@ -1432,8 +1432,8 @@ TEST(RefreshOnLogon, W8_NoHeap_RehydratePath) {
     fix.ioc.restart();
     (void)measured_fut.get();
 
-    const long heap_allocs = alloc_guard_count();
-    alloc_guard_end();
+    const long heap_allocs = alloc_guard_count ? alloc_guard_count() : 0L;
+    if (alloc_guard_end) alloc_guard_end();
     // ── End of guarded window ─────────────────────────────────────────────────
 
     // Functional post-condition: hydrate set counters correctly.

@@ -1,0 +1,56 @@
+# pos_multisession_tls_and_plain.toml
+# Two sessions: session[0] uses TLS (becomes engine default TLS factory).
+# session[1] uses "plaintext" transport.
+#
+# #1 Gate B r1 fix: session[1] now receives a freshly-minted per-session
+# plaintext factory override (make_asio_plain_transport_factory), so it runs
+# on the correct transport.  Before the fix it silently ran on the engine-default
+# TLS factory — a latent data-model E-3 / FR-007 violation.
+#
+# The engine-level cert_source is present for session[0]'s TLS use only;
+# it is NOT contradictory with session[1]'s plaintext — that session does not
+# use the engine cert_source (the per-session contradiction guard applies only
+# when the *session itself* declares plaintext with its own cert_source, not
+# when the engine-level cert_source was loaded for another session's use).
+
+[clock]
+kind = "system"
+
+[store]
+kind = "memory"
+
+[cert_source]
+kind      = "file"
+cert_file = "leaf_ecdsa_p256.pem"
+key_file  = "leaf_ecdsa_p256.key"
+ca_file   = "ca.pem"
+
+[dictionary]
+kind = "path"
+path = "FIX44.xml"
+
+[[session]]
+sender_comp_id = "CLIENT_TLS"
+target_comp_id = "SERVER_TLS"
+begin_string   = "FIX.4.4"
+role           = "initiator"
+
+[session.transport]
+kind = "tls"
+host = "fix-tls.example.com"
+port = 4321
+
+[session.security_profile]
+kind = "mtls_ca"
+
+[[session]]
+sender_comp_id = "CLIENT_PLAIN"
+target_comp_id = "SERVER_PLAIN"
+begin_string   = "FIX.4.4"
+role           = "acceptor"
+
+[session.transport]
+kind = "plaintext"
+
+[session.security_profile]
+kind = "insecure_plain_tcp"

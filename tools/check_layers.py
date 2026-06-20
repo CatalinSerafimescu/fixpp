@@ -27,6 +27,9 @@ ALLOWED: dict[str, set[str]] = {
     "otel":       {"core", "log"},
     "tap":        {"core", "wire", "log"},
     "session":    {"core", "dictionary", "wire", "transport", "log", "otel"},
+    # 044-toml-session-config: opt-in adjacent loader target (fixpp_config_toml).
+    # Nothing in core or session links it; it links them — not the reverse.
+    "config":     {"core", "session", "dictionary", "tls", "transport"},
     "capi":       {"session", "wire", "dictionary", "transport", "tls", "log",
                    "otel", "tap", "core"},
     "service":    {"capi", "service"},   # service may include fixpp/service/ (own interface)

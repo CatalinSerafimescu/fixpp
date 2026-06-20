@@ -32,8 +32,8 @@
 
 // mallocnesia weak symbols — replaced by LD_PRELOAD.
 extern "C" {
-__attribute__((weak)) void alloc_guard_start() {}
-__attribute__((weak)) void alloc_guard_end() {}
+__attribute__((weak)) void alloc_guard_start();
+__attribute__((weak)) void alloc_guard_end();
 }
 
 namespace {
@@ -124,7 +124,7 @@ TEST(TlsHandshakeAllocGuard, FindAndSnapshotZeroGlobalMallocAfterWarmup) {
     ASSERT_TRUE(ps.add(make_cert(kFp, "CN=global-warmup")).has_value());
 
     // Warm-up complete. Begin mallocnesia interception.
-    alloc_guard_start();
+    if (alloc_guard_start) alloc_guard_start();
 
     constexpr int kRounds = 500;
     for (int i = 0; i < kRounds; ++i) {
@@ -134,7 +134,7 @@ TEST(TlsHandshakeAllocGuard, FindAndSnapshotZeroGlobalMallocAfterWarmup) {
         (void)snap->size();
     }
 
-    alloc_guard_end();
+    if (alloc_guard_end) alloc_guard_end();
 
     // If we reached here under mallocnesia without a crash/abort, zero global
     // malloc occurred inside the guard. Assert structural correctness too.

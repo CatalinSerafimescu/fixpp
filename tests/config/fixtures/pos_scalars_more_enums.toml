@@ -1,0 +1,31 @@
+# pos_scalars_more_enums.toml
+# Coverage-targeted positive fixture for scalar_mappers.cpp uncovered enum arms.
+#
+# Covers:
+#   - sending_time_precision = "millis"
+#   - app_backpressure = "block"
+#   - security_profile.kind = "insecure_plain_tcp" (valid for plaintext transport)
+
+[clock]
+kind = "system"
+
+[store]
+kind = "memory"
+
+[dictionary]
+kind = "path"
+path = "FIX44.xml"
+
+[[session]]
+sender_comp_id = "SERVER1"
+target_comp_id = "CLIENT1"
+begin_string   = "FIX.4.4"
+role           = "acceptor"
+sending_time_precision = "millis"
+app_backpressure       = "block"
+
+[session.transport]
+kind = "plaintext"
+
+[session.security_profile]
+kind = "insecure_plain_tcp"

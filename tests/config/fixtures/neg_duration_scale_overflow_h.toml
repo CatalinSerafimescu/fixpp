@@ -1,0 +1,29 @@
+# neg_duration_scale_overflow_h.toml
+# Duration: numeric part fits long long but overflows at * 3600000 (hours → ms).
+# 2562047788016 * 3600000 > LLONG_MAX — signed-overflow UB before the fix.
+# After #3 Gate B r1 fix: out_of_range emitted, never UB.
+
+[clock]
+kind = "system"
+
+[store]
+kind = "memory"
+
+[dictionary]
+kind = "path"
+path = "FIX44.xml"
+
+[[session]]
+sender_comp_id = "CLIENT1"
+target_comp_id = "SERVER1"
+begin_string   = "FIX.4.4"
+role           = "initiator"
+sending_time_threshold = "2562047788016h"
+
+[session.transport]
+kind = "plaintext"
+host = "fix.example.com"
+port = 4321
+
+[session.security_profile]
+kind = "insecure_plain_tcp"

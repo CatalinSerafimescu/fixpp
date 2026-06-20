@@ -44,8 +44,8 @@
 
 // mallocnesia replaces these weak no-ops with its interceptor scope markers.
 extern "C" {
-__attribute__((weak)) void alloc_guard_start() {}
-__attribute__((weak)) void alloc_guard_end() {}
+__attribute__((weak)) void alloc_guard_start();
+__attribute__((weak)) void alloc_guard_end();
 }
 
 namespace {
@@ -99,14 +99,14 @@ TEST(SessionAllocGuard, SeqnumPathNoGlobalHeapAlloc) {
     int assigned_count = 0;
     int checked_count = 0;
 
-    alloc_guard_start();
+    if (alloc_guard_start) alloc_guard_start();
     for (int i = 0; i < kCorpus; ++i) {
         auto a = run_sync(ioc, mgr.assign_outbound());
         if (a.has_value()) ++assigned_count;
         auto c = run_sync(ioc, mgr.check_inbound(static_cast<seqnum_t>(seqnum_min + kWarmup + i)));
         if (c.has_value()) ++checked_count;
     }
-    alloc_guard_end();
+    if (alloc_guard_end) alloc_guard_end();
 
     EXPECT_EQ(assigned_count, kCorpus);
     EXPECT_EQ(checked_count, kCorpus);
@@ -153,7 +153,7 @@ TEST(SessionAllocGuard, AdminBuildNoGlobalHeapAlloc) {
     int hb_ok = 0;
     int tr_ok = 0;
 
-    alloc_guard_start();
+    if (alloc_guard_start) alloc_guard_start();
     for (int i = 0; i < kCorpus; ++i) {
         auto hb =
             fixpp::session::build_heartbeat(hb_buf, static_cast<seqnum_t>(seqnum_min + i), kSender,
@@ -164,7 +164,7 @@ TEST(SessionAllocGuard, AdminBuildNoGlobalHeapAlloc) {
                                                      "20240101-00:00:00.000");
         if (tr.has_value()) ++tr_ok;
     }
-    alloc_guard_end();
+    if (alloc_guard_end) alloc_guard_end();
 
     EXPECT_EQ(hb_ok, kCorpus);
     EXPECT_EQ(tr_ok, kCorpus);

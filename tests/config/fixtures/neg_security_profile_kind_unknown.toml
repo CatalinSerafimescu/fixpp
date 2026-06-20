@@ -1,0 +1,52 @@
+# neg_security_profile_kind_unknown.toml
+# security_profile.kind has an unrecognised token — triggers:
+#   - unknown_enum at session[0].security_profile.kind    (scalar_mappers.cpp lines 609-618)
+#     This also exercises loc_for_subkey() (line 80-88) since kind is in a sub-table.
+#   - Additionally: missing_required at session[0].security_profile.kind
+#     from toml_config_loader.cpp check_required_keys (which checks the kind string).
+#
+# NOTE: The unknown enum produces unknown_enum via scalar_mappers, AND the missing
+#       security_profile.kind check in check_required_keys does NOT fire because the
+#       kind node IS present and IS a string — just unrecognised. So we get unknown_enum.
+#
+# Selector: plaintext, but the session security_profile still needs a kind check.
+# Actually: with an unknown kind from scalar_mappers, make_ssl_ctx_config won't be
+# called (since it gets insecure_plain_tcp from parse_security_profile for plaintext).
+# To trigger the scalar_mappers unknown_enum arm, we need a non-plain selector path.
+# Use TLS transport — then map_structured_members fires the unknown_enum on the session
+# security_profile table. However selector_resolver also uses parse_security_profile
+# which returns unset for unknown tokens, causing build_tls_factory to fail.
+#
+# The key coverage targets are:
+#   - scalar_mappers.cpp lines 609-618 (unknown security_profile.kind unknown_enum)
+#   - scalar_mappers.cpp lines 80-88 (loc_for_subkey called for the sub-table key)
+
+[clock]
+kind = "system"
+
+[store]
+kind = "memory"
+
+[cert_source]
+kind      = "file"
+cert_file = "leaf_ecdsa_p256.pem"
+key_file  = "leaf_ecdsa_p256.key"
+ca_file   = "ca.pem"
+
+[dictionary]
+kind = "path"
+path = "FIX44.xml"
+
+[[session]]
+sender_comp_id = "CLIENT1"
+target_comp_id = "SERVER1"
+begin_string   = "FIX.4.4"
+role           = "initiator"
+
+[session.transport]
+kind = "tls"
+host = "fix.example.com"
+port = 4321
+
+[session.security_profile]
+kind = "quantum_tls"

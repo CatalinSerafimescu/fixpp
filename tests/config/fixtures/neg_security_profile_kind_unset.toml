@@ -1,0 +1,28 @@
+# neg_security_profile_kind_unset.toml
+# Negative fixture: security_profile.kind = "unset" must be rejected at the
+# loader boundary (data-model E-3: "unset" is an internal sentinel, NOT a
+# valid file-selectable value).
+#
+# Expected: load fails; unknown_enum at "session[0].security_profile.kind".
+
+[clock]
+kind = "system"
+
+[store]
+kind = "memory"
+
+[dictionary]
+kind = "path"
+path = "FIX44.xml"
+
+[[session]]
+sender_comp_id = "SERVER1"
+target_comp_id = "CLIENT1"
+begin_string   = "FIX.4.4"
+role           = "acceptor"
+
+[session.transport]
+kind = "plaintext"
+
+[session.security_profile]
+kind = "unset"

@@ -68,8 +68,8 @@
 // without the alloc counting (so it passes trivially — the mallocnesia run
 // is the real gate).
 extern "C" {
-__attribute__((weak)) void alloc_guard_start() {}
-__attribute__((weak)) void alloc_guard_end() {}
+__attribute__((weak)) void alloc_guard_start();
+__attribute__((weak)) void alloc_guard_end();
 }
 
 namespace {
@@ -234,11 +234,11 @@ TEST(StoreAllocGuard, Mallocnesia_ZeroGlobalHeapStoreSteadyState) {
     ASSERT_TRUE(run_batch(0, kWarmupIter)) << "warm-up store() calls failed";
 
     // ── Measured window ───────────────────────────────────────────────────────
-    alloc_guard_start();
+    if (alloc_guard_start) alloc_guard_start();
 
     bool measured_ok = run_batch(kWarmupIter, kMeasuredIter);
 
-    alloc_guard_end();
+    if (alloc_guard_end) alloc_guard_end();
     // If mallocnesia was LD_PRELOADed and detected any global heap allocation,
     // alloc_guard_end() will have already called exit(1) before reaching here.
 
@@ -329,7 +329,7 @@ TEST(StoreAllocGuard, Mallocnesia_ZeroGlobalHeapFileStoreRetrieveSteadyState) {
     const long long baseline = mr.allocate_count();
 
     // ── Measured window ───────────────────────────────────────────────────────
-    alloc_guard_start();
+    if (alloc_guard_start) alloc_guard_start();
 
     counting_visitor vis;
     bool retrieve_ok = false;
@@ -342,7 +342,7 @@ TEST(StoreAllocGuard, Mallocnesia_ZeroGlobalHeapFileStoreRetrieveSteadyState) {
         asio::use_future);
     fut_retrieve.get();
 
-    alloc_guard_end();
+    if (alloc_guard_end) alloc_guard_end();
     // If mallocnesia was LD_PRELOADed and detected any global heap allocation,
     // alloc_guard_end() will have already called exit(1) before reaching here.
 

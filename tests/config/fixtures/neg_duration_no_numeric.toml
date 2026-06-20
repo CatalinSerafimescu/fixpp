@@ -1,0 +1,28 @@
+# neg_duration_no_numeric.toml
+# heartbeat_interval starts with a non-digit — triggers "duration must start
+# with a numeric value" error arm (lines 127-135).
+
+[clock]
+kind = "system"
+
+[store]
+kind = "memory"
+
+[dictionary]
+kind = "path"
+path = "FIX44.xml"
+
+[[session]]
+sender_comp_id     = "CLIENT1"
+target_comp_id     = "SERVER1"
+begin_string       = "FIX.4.4"
+role               = "initiator"
+heartbeat_interval = "xs"
+
+[session.transport]
+kind = "plaintext"
+host = "fix.example.com"
+port = 4321
+
+[session.security_profile]
+kind = "insecure_plain_tcp"

@@ -1,0 +1,51 @@
+# pos_fixt_appl_ver_ids.toml
+# Covers all default_appl_ver_id values "2".."9" (v40..v50sp2).
+# Each [[session]] uses begin_string="FIXT.1.1" with a distinct default_appl_ver_id.
+# The [default] block provides common fields to reduce repetition.
+# Selector: plaintext (no cert_source), FIXT11.xml dictionary.
+
+[clock]
+kind = "system"
+
+[store]
+kind = "memory"
+
+[dictionary]
+kind = "path"
+path = "FIXT11.xml"
+
+[default]
+sender_comp_id = "SERVER1"
+target_comp_id = "CLIENT1"
+begin_string   = "FIXT.1.1"
+role           = "acceptor"
+
+[default.transport]
+kind = "plaintext"
+
+[default.security_profile]
+kind = "insecure_plain_tcp"
+
+[[session]]
+default_appl_ver_id = "2"  # v40
+
+[[session]]
+default_appl_ver_id = "3"  # v41
+
+[[session]]
+default_appl_ver_id = "4"  # v42
+
+[[session]]
+default_appl_ver_id = "5"  # v43
+
+[[session]]
+default_appl_ver_id = "6"  # v44
+
+[[session]]
+default_appl_ver_id = "7"  # v50
+
+[[session]]
+default_appl_ver_id = "8"  # v50sp1
+
+[[session]]
+default_appl_ver_id = "9"  # v50sp2

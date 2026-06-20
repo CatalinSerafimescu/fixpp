@@ -11,9 +11,9 @@
 
 extern "C" {
 // NOLINTNEXTLINE(misc-use-internal-linkage) — weak override by mallocnesia.so
-__attribute__((weak)) void alloc_guard_start() {}
+__attribute__((weak)) void alloc_guard_start();
 // NOLINTNEXTLINE(misc-use-internal-linkage)
-__attribute__((weak)) void alloc_guard_end() {}
+__attribute__((weak)) void alloc_guard_end();
 }
 //
 // T004 [US1] initiator witnesses (1-5):
@@ -1502,14 +1502,14 @@ TEST_F(ResetOnLifecycleTest, ResetKnobs_NoHeapOnResetPath) {
             /*reset_on_disconnect=*/false);
         Session sess_a(engine, cfg_a);
 
-        alloc_guard_start();
+        if (alloc_guard_start) alloc_guard_start();
         {
             auto r = open_sync(sess_a);
             ASSERT_TRUE(r.has_value())
                 << "ResetKnobs_NoHeapOnResetPath [window A]: open() must succeed "
                    "(reset_on_logon path)";
         }
-        alloc_guard_end();
+        if (alloc_guard_end) alloc_guard_end();
 
         ASSERT_EQ(factory->store->reset_call_count(), 1u)
             << "ResetKnobs_NoHeapOnResetPath [window A]: reset must have fired on "
@@ -1561,11 +1561,11 @@ TEST_F(ResetOnLifecycleTest, ResetKnobs_NoHeapOnResetPath) {
         // The teardown reset path: reset_seqnums_to_one_durable(logged) which calls
         // SeqnumManager::reset_to_one() [atomic counter update + async_mutex]
         // then StoreDouble::reset() [vector::clear() — no-alloc after warmup].
-        alloc_guard_start();
+        if (alloc_guard_start) alloc_guard_start();
         {
             terminal_close_sync(sess_b);
         }
-        alloc_guard_end();
+        if (alloc_guard_end) alloc_guard_end();
 
         ASSERT_EQ(sess_b.state(), fsm_state::Disconnected)
             << "ResetKnobs_NoHeapOnResetPath [window B]: session must reach Disconnected";
