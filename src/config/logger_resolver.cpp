@@ -143,6 +143,13 @@ std::unique_ptr<fixpp::log::Sink> resolve_log_sink(const toml::table& sink_tbl,
             std::filesystem::path dir{n->as_string()->get()};
             if (dir.is_relative()) dir = base_dir / dir;
             cfg.directory = std::move(dir);
+        } else if (!sink_tbl.get("directory")) {
+            // Gate B r1 #3a: default directory (".") must also be resolved against
+            // base_dir (FR-018 / data-model E-4).  Without this, the default stays
+            // CWD-relative while the spec says relative paths — including the default
+            // — resolve against the config-file directory.  Preflight for the default
+            // is deliberately skipped (#3b waived; no mkdir, no stat here).
+            if (cfg.directory.is_relative()) cfg.directory = base_dir / cfg.directory;
         }
         if (const auto* n = sink_tbl.get("base_name"); n && n->is_string()) {
             cfg.base_name = std::string{n->as_string()->get()};
