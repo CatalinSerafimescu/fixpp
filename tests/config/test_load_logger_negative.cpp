@@ -1349,6 +1349,45 @@ TEST(GateBR1B_WrongTypeOptionals, BaseNameNotString)
         << "Expected malformed_value on logger.sinks[0].base_name";
 }
 
+TEST(GateBR1B_WrongTypeOptionals, FileSinkDirectoryNotString)
+{
+    // Gate B r2 #1: directory = 123 (integer, not string) → malformed_value.
+    // Pre-fix: directory=123 hit neither the is_string() branch nor the absent
+    // branch, leaving cfg.directory = "." which (being writable) silently passed
+    // preflight → the wrong-type explicit selector was accepted as CWD/default
+    // (FR-020 fail-closed / FR-018). With the fix: malformed_value emitted, the
+    // bad node is NOT preflighted against the default, acc non-empty.
+    // Mutation: drop the `else if (n && !n->is_string())` branch → directory=123
+    // accepted, no diagnostic → ASSERT_FALSE(acc.empty()) goes RED.
+    const std::string toml_text = R"(
+[logger]
+  [[logger.sinks]]
+  kind      = "file"
+  directory = 123
+)";
+    auto parsed = parse_logger_inline(toml_text);
+    ASSERT_NE(parsed.logger_tbl, nullptr);
+
+    fixpp::config::detail::DiagnosticAccumulator acc;
+    fixpp::config::PendingLoggerSet pending;
+    fixpp::config::LoadOptions opts;
+    opts.resource = std::pmr::get_default_resource();
+    fixpp::config::detail::resolve_engine_logger(
+        *parsed.logger_tbl, "logger", fixpp::config::SourceLoc{},
+        std::filesystem::temp_directory_path(), opts, pending, acc,
+        /*is_engine=*/true, /*session_index=*/0);
+
+    ASSERT_FALSE(acc.empty())
+        << "directory = 123 (integer) must produce a malformed_value diagnostic "
+           "(silent default to \".\" = wrong-type selector accepted as CWD)";
+    EXPECT_TRUE(has_diag(std::move(acc).release(),
+                          fixpp::config::reason_class::malformed_value,
+                          "logger.sinks[0].directory"))
+        << "Expected malformed_value on logger.sinks[0].directory";
+    EXPECT_FALSE(pending.engine.has_value())
+        << "a sink with a wrong-type directory must not park a pending logger";
+}
+
 TEST(GateBR1B_WrongTypeOptionals, OnOverflowNotString)
 {
     // on_overflow = true (boolean, not string) → malformed_value

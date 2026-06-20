@@ -148,6 +148,18 @@ std::unique_ptr<fixpp::log::Sink> resolve_log_sink(const toml::table& sink_tbl,
             std::filesystem::path dir{n->as_string()->get()};
             if (dir.is_relative()) dir = base_dir / dir;
             cfg.directory = std::move(dir);
+        } else if (const auto* n = sink_tbl.get("directory"); n && !n->is_string()) {
+            // Gate B r2 #1: present but wrong type → malformed_value (fail-closed).
+            // Without this, directory=123 falls through (neither string nor absent),
+            // leaves cfg.directory at the default ".", and the preflight below would
+            // run against "." — silently accepting a wrong-type explicit selector
+            // as CWD/default (FR-020 fail-closed / FR-018 path semantics).
+            acc.add(LoadDiagnostic{
+                .key_path = kp(sink_kp, "directory"),
+                .reason = reason_class::malformed_value,
+                .location = loc_node(*n),
+                .message = "directory must be a string path",
+            });
         } else if (!sink_tbl.get("directory")) {
             // Gate B r1 #3a: default directory (".") must also be resolved against
             // base_dir (FR-018 / data-model E-4).  Without this, the default stays
@@ -213,7 +225,10 @@ std::unique_ptr<fixpp::log::Sink> resolve_log_sink(const toml::table& sink_tbl,
         // validated here; operators who don't configure a directory get runtime errors).
         // Gate B r1 #4: do not early-return on directory errors; accumulate and let the
         // delta check below produce the final nullptr (collect-ALL within this sink).
-        if (sink_tbl.get("directory")) {
+        // Gate B r2 #1: only preflight a validly-typed EXPLICIT directory — a present
+        // wrong-type node (handled above with malformed_value) must NOT be preflighted
+        // against the bogus default ".".
+        if (const auto* dn = sink_tbl.get("directory"); dn && dn->is_string()) {
             const std::filesystem::path& dir = cfg.directory;
             std::error_code fs_ec;
             if (!std::filesystem::is_directory(dir, fs_ec)) {
