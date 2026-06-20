@@ -103,6 +103,16 @@ std::unique_ptr<fixpp::log::Sink> resolve_log_sink(const toml::table& sink_tbl,
     const std::string sink_kp =
         std::string{key_prefix} + ".sinks[" + std::to_string(sink_idx) + "]";
 
+    // Gate B r1 #4 (collect-ALL): capture acc size before parsing this sink.
+    // At the end of each sink branch, return nullptr iff new diagnostics were
+    // added (acc.size() > sink_acc_before).  Early-return is kept ONLY for
+    // fields where subsequent parsing genuinely depends on an earlier value
+    // (e.g. kind is absent/empty → can't branch on sink type; endpoint absent
+    // → cfg.endpoint is empty → later fields that embed it in error messages
+    // would be misleading).  All INDEPENDENT field errors accumulate without
+    // short-circuiting (FR-014 / FR-021 collect-ALL per key).
+    const std::size_t sink_acc_before = acc.size();
+
     // ── kind is required ──────────────────────────────────────────────────────
     const toml::node* kind_node = sink_tbl.get("kind");
     if (!kind_node || !kind_node->is_string()) {
@@ -154,9 +164,10 @@ std::unique_ptr<fixpp::log::Sink> resolve_log_sink(const toml::table& sink_tbl,
                     .location = loc_node(*n),
                     .message = "max_file_bytes must be > 0",
                 });
-                return nullptr;
+                // Gate B r1 #4: do NOT early-return; continue to collect further errors.
+            } else {
+                cfg.max_file_bytes = static_cast<std::uint64_t>(v);
             }
-            cfg.max_file_bytes = static_cast<std::uint64_t>(v);
         }
         if (const auto* n = sink_tbl.get("max_keep_count"); n && n->is_integer()) {
             cfg.max_keep_count = static_cast<std::uint32_t>(n->as_integer()->get());
@@ -177,6 +188,8 @@ std::unique_ptr<fixpp::log::Sink> resolve_log_sink(const toml::table& sink_tbl,
         // (stat/access ONLY — no mkdir, no probe file; research D-4/D-7)
         // Only validate when directory was explicitly set (default "." is not
         // validated here; operators who don't configure a directory get runtime errors).
+        // Gate B r1 #4: do not early-return on directory errors; accumulate and let the
+        // delta check below produce the final nullptr (collect-ALL within this sink).
         if (sink_tbl.get("directory")) {
             const std::filesystem::path& dir = cfg.directory;
             std::error_code fs_ec;
@@ -188,19 +201,24 @@ std::unique_ptr<fixpp::log::Sink> resolve_log_sink(const toml::table& sink_tbl,
                     .message = "file sink directory does not exist or is not a directory: \"" +
                                dir.string() + "\"",
                 });
-                return nullptr;
-            }
-            // POSIX access(2) W_OK: readable + writable by current process.
-            if (::access(dir.c_str(), W_OK) != 0) {
-                acc.add(LoadDiagnostic{
-                    .key_path = kp(sink_kp, "directory"),
-                    .reason = reason_class::invalid_or_contradictory_selector,
-                    .location = loc_node(*sink_tbl.get("directory")),
-                    .message = "file sink directory is not writable: \"" + dir.string() + "\"",
-                });
-                return nullptr;
+                // Do NOT access(W_OK) if the path isn't a directory at all.
+            } else {
+                // POSIX access(2) W_OK: readable + writable by current process.
+#ifndef _WIN32
+                if (::access(dir.c_str(), W_OK) != 0) {
+                    acc.add(LoadDiagnostic{
+                        .key_path = kp(sink_kp, "directory"),
+                        .reason = reason_class::invalid_or_contradictory_selector,
+                        .location = loc_node(*sink_tbl.get("directory")),
+                        .message = "file sink directory is not writable: \"" + dir.string() + "\"",
+                    });
+                }
+#endif
             }
         }
+
+        // Gate B r1 #4: return nullptr iff this sink added new diagnostics.
+        if (acc.size() > sink_acc_before) return nullptr;
 
         fixpp::log::FileSinkFactory factory;
         return factory.make(nullptr, cfg);
@@ -217,21 +235,24 @@ std::unique_ptr<fixpp::log::Sink> resolve_log_sink(const toml::table& sink_tbl,
         if (const auto* n = sink_tbl.get("facility"); n && n->is_string()) {
             const std::string_view fac_name = n->as_string()->get();
             int fac_val = 0;
-            if (!map_syslog_facility(fac_name, fac_val, kp(sink_kp, "facility"), loc_node(*n),
-                                     acc)) {
-                return nullptr;
+            if (map_syslog_facility(fac_name, fac_val, kp(sink_kp, "facility"), loc_node(*n),
+                                    acc)) {
+                cfg.facility = fac_val;
             }
-            cfg.facility = fac_val;
+            // !map_syslog_facility: appended a diagnostic; fall through to delta check.
         } else if (const auto* n = sink_tbl.get("facility"); n && !n->is_string()) {
             // Gate B r1 #6: facility present but wrong type → malformed_value (fail-closed).
+            // Gate B r1 #4: do not early-return (collect-ALL pattern).
             acc.add(LoadDiagnostic{
                 .key_path = kp(sink_kp, "facility"),
                 .reason = reason_class::malformed_value,
                 .location = loc_node(*n),
                 .message = "syslog facility must be a string (e.g. \"user\", \"daemon\", \"local0\")",
             });
-            return nullptr;
         }
+
+        // Gate B r1 #4: return nullptr iff this sink added new diagnostics.
+        if (acc.size() > sink_acc_before) return nullptr;
 
         fixpp::log::SyslogSinkFactory factory;
         return factory.make(nullptr, cfg);
@@ -276,6 +297,8 @@ std::unique_ptr<fixpp::log::Sink> resolve_log_sink(const toml::table& sink_tbl,
         }
 
         // use_grpc — deferred (recognized_not_yet_supported_step2)
+        // Gate B r1 #4: do NOT early-return; let the delta check below handle it
+        // so subsequent independent fields are also validated (collect-ALL).
         if (const auto* n = sink_tbl.get("use_grpc"); n && n->is_boolean()) {
             if (n->as_boolean()->get()) {
                 acc.add(LoadDiagnostic{
@@ -285,12 +308,14 @@ std::unique_ptr<fixpp::log::Sink> resolve_log_sink(const toml::table& sink_tbl,
                     .message =
                         "use_grpc=true is not yet supported (gRPC OTLP transport is deferred)",
                 });
-                return nullptr;
+                // Do not early-return; fall through to collect other independent errors.
             }
         }
 
         // cert_source — optional, relative→base_dir
         // T016 preflight: must be readable AND PEM-magic-validated (research D-4).
+        // Gate B r1 #4: preflight errors append diagnostics but do NOT early-return
+        // (subsequent fields like export_timeout are independent; collect-ALL).
         if (const auto* n = sink_tbl.get("cert_source"); n && n->is_string()) {
             std::string_view cs_val = n->as_string()->get();
             if (!cs_val.empty()) {
@@ -309,34 +334,33 @@ std::unique_ptr<fixpp::log::Sink> resolve_log_sink(const toml::table& sink_tbl,
                                    redact_url_userinfo(cfg.endpoint) + "): \"" + cs_path.string() +
                                    "\"",
                     });
-                    return nullptr;
-                }
-
-                // Preflight: PEM-magic check — first non-whitespace bytes must be "-----BEGIN".
-                // Tolerate leading whitespace/BOM so we don't reject real PEM files.
-                constexpr std::string_view kPemMagic = "-----BEGIN";
-                std::string header;
-                header.resize(kPemMagic.size() + 8);  // read ahead a few extra bytes
-                cert_f.read(header.data(), static_cast<std::streamsize>(header.size()));
-                const std::size_t n_read = static_cast<std::size_t>(cert_f.gcount());
-                header.resize(n_read);
-                // Strip leading whitespace before checking magic.
-                const auto first_nonws = header.find_first_not_of(" \t\r\n\xEF\xBB\xBF");
-                const bool has_pem_magic =
-                    (first_nonws != std::string::npos) &&
-                    (header.size() - first_nonws >= kPemMagic.size()) &&
-                    (std::string_view{header}.substr(first_nonws, kPemMagic.size()) == kPemMagic);
-                if (!has_pem_magic) {
-                    acc.add(LoadDiagnostic{
-                        .key_path = kp(sink_kp, "cert_source"),
-                        .reason = reason_class::invalid_or_contradictory_selector,
-                        .location = loc_node(*n),
-                        .message = "otlp cert_source does not appear to be a PEM file "
-                                   "(missing \"-----BEGIN\" header; endpoint: " +
-                                   redact_url_userinfo(cfg.endpoint) + "): \"" + cs_path.string() +
-                                   "\"",
-                    });
-                    return nullptr;
+                    // cert_f not open → cannot do PEM check; skip.
+                } else {
+                    // Preflight: PEM-magic check — first non-whitespace bytes must be "-----BEGIN".
+                    // Tolerate leading whitespace/BOM so we don't reject real PEM files.
+                    constexpr std::string_view kPemMagic = "-----BEGIN";
+                    std::string header;
+                    header.resize(kPemMagic.size() + 8);  // read ahead a few extra bytes
+                    cert_f.read(header.data(), static_cast<std::streamsize>(header.size()));
+                    const std::size_t n_read = static_cast<std::size_t>(cert_f.gcount());
+                    header.resize(n_read);
+                    // Strip leading whitespace before checking magic.
+                    const auto first_nonws = header.find_first_not_of(" \t\r\n\xEF\xBB\xBF");
+                    const bool has_pem_magic =
+                        (first_nonws != std::string::npos) &&
+                        (header.size() - first_nonws >= kPemMagic.size()) &&
+                        (std::string_view{header}.substr(first_nonws, kPemMagic.size()) == kPemMagic);
+                    if (!has_pem_magic) {
+                        acc.add(LoadDiagnostic{
+                            .key_path = kp(sink_kp, "cert_source"),
+                            .reason = reason_class::invalid_or_contradictory_selector,
+                            .location = loc_node(*n),
+                            .message = "otlp cert_source does not appear to be a PEM file "
+                                       "(missing \"-----BEGIN\" header; endpoint: " +
+                                       redact_url_userinfo(cfg.endpoint) + "): \"" +
+                                       cs_path.string() + "\"",
+                        });
+                    }
                 }
             }
         } else if (const auto* n = sink_tbl.get("cert_source"); n && !n->is_string()) {
@@ -349,17 +373,19 @@ std::unique_ptr<fixpp::log::Sink> resolve_log_sink(const toml::table& sink_tbl,
                 .location = loc_node(*n),
                 .message = "cert_source must be a string path to a PEM certificate file",
             });
-            return nullptr;
         }
 
         // export_timeout — duration string (044 unit-suffix rule)
+        // Gate B r1 #4: !d.ok appends a diagnostic already; do not early-return.
         if (const auto* n = sink_tbl.get("export_timeout"); n && n->is_string()) {
             const auto d = parse_duration_to_ms(n->as_string()->get(),
                                                 kp(sink_kp, "export_timeout"), acc, loc_node(*n));
-            if (!d.ok) return nullptr;
-            // OtlpLogSinkConfig::export_timeout is chrono::seconds; duration_cast from ms.
-            cfg.export_timeout = std::chrono::duration_cast<std::chrono::seconds>(
-                std::chrono::milliseconds{d.value_ms});
+            if (d.ok) {
+                // OtlpLogSinkConfig::export_timeout is chrono::seconds; duration_cast from ms.
+                cfg.export_timeout = std::chrono::duration_cast<std::chrono::seconds>(
+                    std::chrono::milliseconds{d.value_ms});
+            }
+            // !d.ok: parse_duration_to_ms already appended a diagnostic; fall through.
         } else if (const auto* n = sink_tbl.get("export_timeout"); n && !n->is_string()) {
             // Gate B r1 #6: present but wrong type → malformed_value (fail-closed).
             acc.add(LoadDiagnostic{
@@ -371,6 +397,7 @@ std::unique_ptr<fixpp::log::Sink> resolve_log_sink(const toml::table& sink_tbl,
         }
 
         // max_export_batch — size_t, 0 → out_of_range
+        // Gate B r1 #4: do NOT early-return; fall through to delta check below.
         if (const auto* n = sink_tbl.get("max_export_batch"); n && n->is_integer()) {
             const auto v = n->as_integer()->get();
             if (v == 0) {
@@ -380,15 +407,18 @@ std::unique_ptr<fixpp::log::Sink> resolve_log_sink(const toml::table& sink_tbl,
                     .location = loc_node(*n),
                     .message = "max_export_batch must be > 0",
                 });
-                return nullptr;
+            } else {
+                cfg.max_export_batch = static_cast<std::size_t>(v);
             }
-            cfg.max_export_batch = static_cast<std::size_t>(v);
         }
 
         // max_export_retries
         if (const auto* n = sink_tbl.get("max_export_retries"); n && n->is_integer()) {
             cfg.max_export_retries = static_cast<std::size_t>(n->as_integer()->get());
         }
+
+        // Gate B r1 #4: return nullptr iff this sink added new diagnostics.
+        if (acc.size() > sink_acc_before) return nullptr;
 
         fixpp::log::OtlpLogSinkFactory factory;
         return factory.make(nullptr, cfg);

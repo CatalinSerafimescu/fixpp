@@ -1412,6 +1412,65 @@ TEST(GateBR1B_WrongTypeOptionals, SyslogFacilityNotString)
 }
 #endif  // FIXPP_HAS_SYSLOG
 
+// ---------------------------------------------------------------------------
+// Gate B r1 — Root cause C: sink-local collect-ALL truncation
+// ---------------------------------------------------------------------------
+//
+// Within a single sink, the first error early-returns before later preflights
+// are checked. Fix: parse all fields, accumulate diagnostics, return nullptr
+// at the END iff new diagnostics were added (acc.size() > sink_acc_before).
+//
+// Witness: file sink with TWO independent errors in the same sink (max_file_bytes=0
+// AND a non-existent directory). The pre-fix code returns early on max_file_bytes=0
+// and never checks the directory → only ONE diagnostic.
+//
+// Mutation discriminator: remove the collect-ALL fix (restore the early return on
+// max_file_bytes=0) → only max_file_bytes diagnostic is emitted, directory
+// diagnostic is absent → the EXPECT_TRUE(has_diag(…directory…)) goes RED.
+
+TEST(GateBR1C_SinkCollectAll, TwoIndependentFileSinkErrors)
+{
+    // File sink: max_file_bytes=0 (out_of_range) AND directory that does not exist.
+    // Both must be reported in a single pass.
+    const std::string nonexistent_dir = "/tmp/fixpp_test_nonexistent_for_collect_all_c";
+    { std::error_code ec; std::filesystem::remove_all(nonexistent_dir, ec); }
+
+    const std::string toml_text =
+        "[logger]\n"
+        "  [[logger.sinks]]\n"
+        "  kind           = \"file\"\n"
+        "  directory      = \"" + nonexistent_dir + "\"\n"
+        "  max_file_bytes = 0\n";
+
+    auto parsed = parse_logger_inline(toml_text);
+    ASSERT_NE(parsed.logger_tbl, nullptr);
+
+    fixpp::config::detail::DiagnosticAccumulator acc;
+    fixpp::config::PendingLoggerSet pending;
+    fixpp::config::LoadOptions opts;
+    opts.resource = std::pmr::get_default_resource();
+    fixpp::config::detail::resolve_engine_logger(
+        *parsed.logger_tbl, "logger", fixpp::config::SourceLoc{},
+        std::filesystem::temp_directory_path(), opts, pending, acc,
+        /*is_engine=*/true, /*session_index=*/0);
+
+    const auto diags = std::move(acc).release();
+    ASSERT_GE(diags.size(), std::size_t{2})
+        << "Expected ≥2 diagnostics (collect-ALL): max_file_bytes=0 AND nonexistent directory. "
+           "Pre-fix: early return on max_file_bytes=0 skips the directory check → 1 diagnostic.";
+
+    EXPECT_TRUE(has_diag(diags,
+                          fixpp::config::reason_class::out_of_range,
+                          "logger.sinks[0].max_file_bytes"))
+        << "Missing out_of_range on logger.sinks[0].max_file_bytes";
+
+    EXPECT_TRUE(has_diag(diags,
+                          fixpp::config::reason_class::invalid_or_contradictory_selector,
+                          "logger.sinks[0].directory"))
+        << "Missing invalid_or_contradictory_selector on logger.sinks[0].directory "
+           "(directory does not exist)";
+}
+
 #ifdef FIXPP_CONFIG_HAS_OTLP
 // CRITICAL: cert_source wrong type → silent plain-HTTP instead of TLS (fail-open).
 // Legit string cert_source FIRST (to rule out last-writer-wins pass), then the
