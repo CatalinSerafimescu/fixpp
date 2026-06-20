@@ -2,13 +2,9 @@
 # Coverage-targeted positive fixture for scalar_mappers.cpp uncovered enum arms.
 #
 # Covers:
-#   - sending_time_precision = "millis" (line 481)
-#   - app_backpressure = "block"        (line 505)
-#   - security_profile.kind = "unset"   (line 597) — valid "not-yet-configured" token
-#
-# NOTE: security_profile.kind = "unset" is a recognized token in scalar_mappers.cpp
-# (populates the SessionConfig struct), and does not affect selector_resolver.cpp
-# for plaintext transport (parse_security_profile is not called for plaintext sessions).
+#   - sending_time_precision = "millis"
+#   - app_backpressure = "block"
+#   - security_profile.kind = "insecure_plain_tcp" (valid for plaintext transport)
 
 [clock]
 kind = "system"
@@ -32,4 +28,4 @@ app_backpressure       = "block"
 kind = "plaintext"
 
 [session.security_profile]
-kind = "unset"
+kind = "insecure_plain_tcp"

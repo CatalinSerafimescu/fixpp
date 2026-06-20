@@ -445,11 +445,11 @@ TEST(LoadHappyPath, Cov_AbsoluteDictPath) {
         << "expected 1 dictionary entry when path is absolute";
 }
 
-// ── pos_scalars_more_enums.toml: millis + block + unset security profile ───────
+// ── pos_scalars_more_enums.toml: millis + block + insecure_plain_tcp profile ───
 //    Covers:
-//      scalar_mappers.cpp line 481: sending_time_precision="millis"
-//      scalar_mappers.cpp line 505: app_backpressure="block"
-//      scalar_mappers.cpp line 597: security_profile.kind="unset"
+//      scalar_mappers.cpp: sending_time_precision="millis"
+//      scalar_mappers.cpp: app_backpressure="block"
+//      scalar_mappers.cpp: security_profile.kind="insecure_plain_tcp"
 
 TEST(LoadHappyPath, Cov_ScalarsMoreEnums) {
     auto result = load_fixture("pos_scalars_more_enums.toml");
@@ -475,10 +475,22 @@ TEST(LoadHappyPath, Cov_ScalarsMoreEnums) {
     using BPM = fixpp::session::SessionConfig::backpressure_mode;
     EXPECT_EQ(cfg.app_backpressure, BPM::block) << "app_backpressure must be block";
 
-    // security_profile.kind = "unset" → unset
+    // security_profile.kind = "insecure_plain_tcp" → insecure_plain_tcp
     using K = fixpp::session::SecurityProfile::kind;
-    EXPECT_EQ(cfg.security_profile.k, K::unset)
-        << "security_profile.k must be unset for kind=\"unset\"";
+#ifdef __clang__
+#    pragma clang diagnostic push
+#    pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#elif defined(__GNUC__)
+#    pragma GCC diagnostic push
+#    pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+    EXPECT_EQ(cfg.security_profile.k, K::insecure_plain_tcp)
+        << "security_profile.k must be insecure_plain_tcp for kind=\"insecure_plain_tcp\"";
+#ifdef __clang__
+#    pragma clang diagnostic pop
+#elif defined(__GNUC__)
+#    pragma GCC diagnostic pop
+#endif
 }
 
 // ── load_toml_config with a nonexistent file: hits std::exception arm ─────────

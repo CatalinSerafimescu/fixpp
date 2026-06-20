@@ -624,9 +624,12 @@ void map_structured_members(const toml::table& merged, fixpp::session::SessionCo
     // ── [session.security_profile] ────────────────────────────────────────────
     // Sub-table; contains "kind" string token.
     // Targets: out.security_profile.k  (type: fixpp::session::SecurityProfile::kind)
-    // Canonical tokens: "unset", "mtls_ca", "mtls_pinned", "one_way_ca",
+    // Canonical tokens: "mtls_ca", "mtls_pinned", "one_way_ca",
     //                   "insecure_plain_tcp"  [[deprecated]]
     // (session/security_profile.hpp SecurityProfile::kind nested enum)
+    // NOTE: "unset" is an internal sentinel NOT accepted from config files
+    //       (data-model E-3: accepted profiles = {mtls_ca, one_way_ca,
+    //       insecure_plain_tcp}). It falls through to unknown_enum.
 
     if (const auto* sp_node = merged.get("security_profile"); sp_node && sp_node->is_table()) {
         const toml::table& sp = *sp_node->as_table();
@@ -635,9 +638,7 @@ void map_structured_members(const toml::table& merged, fixpp::session::SessionCo
             std::string_view tok = kind_n->as_string()->get();
             using K = fixpp::session::SecurityProfile::kind;
 
-            if (tok == "unset") {
-                out.security_profile.k = K::unset;
-            } else if (tok == "mtls_ca") {
+            if (tok == "mtls_ca") {
                 out.security_profile.k = K::mtls_ca;
             } else if (tok == "mtls_pinned") {
                 out.security_profile.k = K::mtls_pinned;
@@ -654,7 +655,7 @@ void map_structured_members(const toml::table& merged, fixpp::session::SessionCo
                     .location = loc_for_subkey(raw_session, "security_profile", "kind"),
                     .message = std::string{"unknown security_profile.kind token: \""} +
                                std::string{tok} +
-                               "\" (valid values: \"unset\", \"mtls_ca\", \"mtls_pinned\","
+                               "\" (valid values: \"mtls_ca\", \"mtls_pinned\","
                                " \"one_way_ca\", \"insecure_plain_tcp\")",
                 });
             }

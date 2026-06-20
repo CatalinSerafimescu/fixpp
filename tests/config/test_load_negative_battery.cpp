@@ -903,6 +903,29 @@ TEST(LoadNegativeBattery, T020_Positive_InsecurePlainNoCerts) {
            "cert_source is only required under a TLS profile (mtls_ca / one_way_ca)";
 }
 
+// ── NEGATIVE: security_profile.kind = "unset" must be rejected (Gate B r2 Fix A)
+//
+// "unset" is the internal sentinel value — NOT a valid file-selectable token
+// (data-model E-3: accepted profiles = {mtls_ca, one_way_ca, insecure_plain_tcp}).
+// Loader boundary must reject it with unknown_enum.
+//
+// Discriminating: checks BOTH reason (unknown_enum) AND key_path
+// (session[0].security_profile.kind). The old "unset" accept-branch returned
+// has_value()==true (the bug) — this test fails on the unfixed code.
+
+TEST(LoadNegativeBattery, GateBR2A_SecurityProfileKindUnset) {
+    auto result = load(neg_fixture("neg_security_profile_kind_unset.toml"));
+
+    ASSERT_FALSE(result.has_value())
+        << "security_profile.kind=\"unset\" must be rejected at the loader boundary "
+           "(data-model E-3: \"unset\" is an internal sentinel, not a valid file token)";
+
+    using RC = fixpp::config::reason_class;
+    EXPECT_TRUE(has_diag(result.error(), RC::unknown_enum, "session[0].security_profile.kind"))
+        << "expected unknown_enum at \"session[0].security_profile.kind\" "
+           "for token \"unset\"";
+}
+
 // =============================================================================
 // T021 — Redaction (FR-019)
 // =============================================================================
