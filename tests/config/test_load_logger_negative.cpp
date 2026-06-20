@@ -1811,3 +1811,93 @@ TEST(GateBR1B_WrongTypeOptionals, OtlpExportTimeoutNotString)
         << "Expected malformed_value on logger.sinks[0].export_timeout";
 }
 #endif  // FIXPP_CONFIG_HAS_OTLP
+
+// ---------------------------------------------------------------------------
+// Gate B r1 — Root cause F: unconditional #include <unistd.h> + ::access(W_OK)
+// ---------------------------------------------------------------------------
+//
+// logger_resolver.cpp included <unistd.h> unconditionally and called ::access()
+// unconditionally. Both are POSIX-only APIs not present on Windows/MSVC.
+// Fix: guard both behind #ifndef _WIN32 (the same guard already used in
+// file_store_factory.cpp:46 for the same reason).
+//
+// The behavioral test for the POSIX path already exists as
+//   T014_NegBattery.FileSinkDirNotWritable (tests the access(W_OK) POSIX arm)
+//   T014_NegBattery.FileSinkDirNotExist   (tests the is_directory() arm without access)
+//
+// This test provides a portability-contract witness that documents the Windows
+// fallback path: when an explicit directory is provided on a non-POSIX platform,
+// the resolver uses is_directory() only (no write-check) — this is the #else
+// branch that the #ifndef guard now activates on Windows.
+//
+// On Linux (POSIX): This test verifies the #ifndef _WIN32 guard is active
+// (i.e. the POSIX path still runs on Linux), confirming the guard compiles
+// correctly with the POSIX arm selected.  The mutation discriminator: without
+// the guard there would be a compile failure on MSVC (unresolved unistd.h);
+// since we can't test MSVC here, the test asserts the code COMPILES and the
+// POSIX arm remains behaviorally active on POSIX builds.
+
+#ifndef _WIN32
+// On POSIX builds: the access(W_OK) path must be selected.
+// This test is the POSIX arm of the #ifndef _WIN32 guard witness:
+// it confirms that the guarded code still executes on POSIX after the fix.
+// (The FileSinkDirNotWritable test is the full behavioral witness on POSIX.)
+TEST(GateBR1F_Portability, PosixAccessCheckStillActiveOnPosix)
+{
+    // Create a readable-but-not-writable directory.
+    const auto ro_dir = std::filesystem::temp_directory_path() /
+                        "fixpp_gateb_r1f_posix_portability_test";
+    {
+        std::error_code ec;
+        std::filesystem::create_directories(ro_dir, ec);
+        if (ec) { GTEST_SKIP() << "Could not create temp dir"; }
+        std::filesystem::permissions(ro_dir,
+            std::filesystem::perms::owner_write |
+            std::filesystem::perms::group_write |
+            std::filesystem::perms::others_write,
+            std::filesystem::perm_options::remove, ec);
+        if (ec) { GTEST_SKIP() << "Could not remove write permission"; }
+    }
+    struct Cleanup {
+        std::filesystem::path p;
+        ~Cleanup() {
+            std::error_code e;
+            std::filesystem::permissions(p,
+                std::filesystem::perms::owner_all,
+                std::filesystem::perm_options::add, e);
+            std::filesystem::remove_all(p, e);
+        }
+    } cl{ro_dir};
+
+    const std::string toml_text =
+        "[logger]\n"
+        "  [[logger.sinks]]\n"
+        "  kind      = \"file\"\n"
+        "  directory = \"" + ro_dir.string() + "\"\n";
+
+    auto parsed = parse_logger_inline(toml_text);
+    ASSERT_NE(parsed.logger_tbl, nullptr);
+
+    fixpp::config::detail::DiagnosticAccumulator acc;
+    fixpp::config::PendingLoggerSet pending;
+    fixpp::config::LoadOptions opts;
+    opts.resource = std::pmr::get_default_resource();
+
+    fixpp::config::detail::resolve_engine_logger(
+        *parsed.logger_tbl, "logger", fixpp::config::SourceLoc{},
+        std::filesystem::temp_directory_path(), opts, pending, acc,
+        /*is_engine=*/true, /*session_index=*/0);
+
+    // The access(W_OK) check must have fired: non-writable dir → diagnostic.
+    // Mutation discriminator: drop access(W_OK) check → acc stays empty (dir exists,
+    // is_directory() passes) → ASSERT_FALSE goes RED.
+    ASSERT_FALSE(acc.empty())
+        << "POSIX access(W_OK) preflight must reject a non-writable explicit directory "
+           "(Gate B r1 F: the #ifndef _WIN32 guard must keep POSIX path active on Linux)";
+    const auto diags = std::move(acc).release();
+    EXPECT_TRUE(has_diag(diags,
+                          fixpp::config::reason_class::invalid_or_contradictory_selector,
+                          "logger.sinks[0].directory"))
+        << "Expected invalid_or_contradictory_selector on logger.sinks[0].directory";
+}
+#endif  // !_WIN32

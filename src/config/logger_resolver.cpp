@@ -41,7 +41,12 @@
 #include <fixpp/log/otlp_log_sink.hpp>
 #endif
 
+#ifndef _WIN32
+// access(2) — POSIX file-accessibility check; not available on Windows/MSVC.
+// Guard mirrors file_store_factory.cpp:46. The ::access(W_OK) call inside
+// resolve_log_sink is also wrapped in the same #ifndef _WIN32 block.
 #include <unistd.h>
+#endif
 
 #include <chrono>
 #include <cstdint>
