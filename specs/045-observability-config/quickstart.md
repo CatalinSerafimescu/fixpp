@@ -11,7 +11,7 @@ A single TOML file now drives session establishment **and** the logging pipeline
 [logger]
 capacity      = 65536          # ring slots (power of 2)
 on_overflow   = "drop_newest"  # or "block"
-drain_timeout = 5000           # ms
+drain_timeout = "5000ms"       # unit-suffixed duration (044 rule — a bare integer is malformed_value)
 
   [[logger.sinks]]
   kind        = "file"
@@ -25,7 +25,7 @@ drain_timeout = 5000           # ms
   kind        = "otlp"
   endpoint    = "http://collector:4318/v1/logs"
   cert_source = "collector-ca.pem"   # optional PEM CA → relative to this file
-  export_timeout   = 10
+  export_timeout   = "10s"     # unit-suffixed duration (044 rule)
   max_export_batch = 512
 
 # (syslog example: kind = "syslog", ident = "fixpp", facility = "local0")
@@ -41,6 +41,8 @@ target_comp_id = "EXCH"
     kind = "file"
     directory = "logs/acme"
 ```
+
+> The referenced file-sink directories (`logs/`, `logs/acme/`) must exist before load — the loader fails closed if a configured file-sink directory does not exist (`FileSink::open()` opens the log file, not the directory).
 
 ## Host stub (unchanged shape from step 1 — just the logger wired for you)
 

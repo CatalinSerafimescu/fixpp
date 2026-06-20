@@ -25,7 +25,7 @@ Maps 1:1 onto `EngineConfig::logger` (`engine_config.hpp:134`, `shared_ptr`, nul
 
 ## E-3 — Logger (composite selector) — `[logger]`
 
-Built via `std::make_shared<Logger>(LoggerConfig, std::pmr::vector<std::unique_ptr<Sink>>)` (the only path — `Logger` is copy+move-deleted; ctor side-effect-free).
+Built via `std::make_shared<Logger>(LoggerConfig, std::pmr::vector<std::unique_ptr<Sink>>)` (the only path — `Logger` is copy+move-deleted). The **sink objects** are minted side-effect-free during resolution and parked, with the `LoggerConfig`, as a **`PendingLogger` candidate** in a loader-local keyed `PendingLoggerSet` (research D-7 — held *outside* `ConfigBundle`, since the bundle holds only the final `shared_ptr<Logger>`). The live `Logger` is constructed only at end-of-clean-load (its ctor opens every sink + spawns the drain thread — research D-7), after the side-effect-free load-time resource preflight passes; at that point each pending logger is moved into `make_shared<Logger>` and assigned to its keyed destination (engine slot → `engine.logger`; session index → `sessions[i].config.logger_override`). The carrier's `pmr::vector` and the minted sinks all use the 044 `LoadOptions::resource` (allocator identity preserved across resolve→hold→construct).
 
 **Logger-level scalars → `LoggerConfig` (`logger.hpp:79`):**
 
@@ -58,17 +58,25 @@ Each resolved via its factory `make(memory_resource*, SinkConfig const&)` (resou
 | File key | → Field | Type | Default | Notes |
 |---|---|---|---|---|
 | `ident` | `ident` | string | "fixpp" | |
-| `facility` | `facility` | **int**, via name→int map | `LOG_DAEMON` | canonical lowercase names `{daemon, user, mail, auth, syslog, local0..local7, …}`; unknown → `unknown_enum` |
+| `facility` | `facility` | **int**, via name→`LOG_*` map | `LOG_DAEMON` | exact closed set below; unknown → `unknown_enum`; build-undefined → `invalid_or_contradictory_selector` |
 
-**Platform gate:** on a build without `FIXPP_HAS_SYSLOG`, `kind="syslog"` → `invalid_or_contradictory_selector` (FR-013 / Clarifications). The resolver `#ifdef`-guards construction; the `#else` emits the diagnostic (never silently dropped).
+**Accepted `facility` names (exact closed set — canonical lowercase POSIX, no ellipsis):**
+`kern`, `user`, `mail`, `daemon`, `auth`, `syslog`, `lpr`, `news`, `uucp`, `cron`, `authpriv`, `ftp`, `local0`, `local1`, `local2`, `local3`, `local4`, `local5`, `local6`, `local7` → mapped to `LOG_KERN`, `LOG_USER`, …, `LOG_LOCAL7`.
 
-### kind = `otlp` → `OtlpLogSinkConfig` (`otlp_log_sink.hpp:34`) — **fully real (HTTP export in `open()`)**
+- A name **in this set whose `LOG_*` macro is not defined on the build** (some are `#ifdef`-conditional, e.g. `LOG_AUTHPRIV`, `LOG_FTP`, `LOG_CRON` on some platforms) → `invalid_or_contradictory_selector` (build-unavailable — same class as the platform gate below).
+- A name **not in this set** → `unknown_enum`, reporting the legal set.
+
+**Platform gate:** on a build without `FIXPP_HAS_SYSLOG`, `kind="syslog"` itself → `invalid_or_contradictory_selector` (FR-013 / Clarifications). The resolver `#ifdef`-guards construction; the `#else` emits the diagnostic (never silently dropped).
+
+### kind = `otlp` → `OtlpLogSinkConfig` (`otlp_log_sink.hpp:34`) — **fully real (HTTP export in `open()`)**, **build-conditional**
+
+**Build availability:** OTLP log-sink support compiles into the separate `fixpp_log_otlp` target only when the OpenTelemetry SDK is present (`src/log/CMakeLists.txt:38`, `if(TARGET opentelemetry-cpp::api)`). On a build without it (no `FIXPP_CONFIG_HAS_OTLP`), `kind="otlp"` → `invalid_or_contradictory_selector` (build-unavailable, mirroring syslog on non-POSIX — FR-013). The rows below apply when OTLP support is compiled in.
 
 | File key | → Field | Type | Default | Required | Notes |
 |---|---|---|---|---|---|
 | `endpoint` | `endpoint` | string | — | **required** | absent/empty → `missing_required`/`empty_required` |
 | `use_grpc` | `use_grpc` | bool | false | — | `true` → `recognized_not_yet_supported_step2` (deferred transport) |
-| `cert_source` | `cert_source` | string (PEM CA) | "" (plain HTTP) | optional | relative → config dir; unreadable → `invalid_or_contradictory_selector` (FR-014) |
+| `cert_source` | `cert_source` | string (PEM CA) | "" (plain HTTP) | optional | relative → config dir; unreadable **or not PEM-magic** → `invalid_or_contradictory_selector` (FR-014); full CA-bundle parse at sink `open()` |
 | `export_timeout` | `export_timeout` | duration (sec) | 10 s | optional | |
 | `max_export_batch` | `max_export_batch` | size_t | 512 | optional | `0` → `out_of_range` |
 | `max_export_retries` | `max_export_retries` | size_t | 3 | optional | |
@@ -77,13 +85,15 @@ Unknown sink `kind` → `unknown_enum` (legal set `{file, syslog, otlp}`). Expor
 
 ## E-5 — Per-session override + deferred-key disposition
 
-**Per-session override** (written onto the existing `SessionConfig::logger_override` by the per-session resolver):
+**Per-session override** (resolved into a session-keyed `PendingLogger`, then — only at end-of-clean-load — assigned onto the existing `SessionConfig::logger_override`):
 
 | Scope | Logger |
 |---|---|
 | Engine default | `engine.logger` (E-2) |
-| Per-session override key | `[session].logger` → `config.logger_override` (reuses the E-3 resolver) |
+| Per-session override key | `[session].logger` → session-keyed `PendingLogger` → `config.logger_override` at clean-construct (reuses the E-3 resolver) |
 | Absent | session inherits the engine default (null override) |
+
+**Keyed pending carrier (loader-local; research D-7).** The engine and every per-session pending logger are accumulated in **one file-scoped `PendingLoggerSet`** (`{ optional<PendingLogger> engine; vector<PendingLogger> sessions; }`), held *outside* `ConfigBundle`. Each `PendingLogger` carries its target key (engine slot OR session index). Construction is a **single final pass** over the whole set, gated on an empty whole-file accumulator: a later session's error suppresses construction of an earlier session's logger (N-2). The per-session pending loggers are therefore NOT constructed inside the per-session resolution loop.
 
 **Deferred-key disposition** (`recognize_keys()`, D-6):
 
@@ -104,7 +114,8 @@ All deferred keys → `recognized_not_yet_supported_step2` (symbol kept; message
 - Required key absent/empty → `missing_required`/`empty_required` (sink list, OTLP endpoint).
 - Every enum (sink kind, overflow policy, syslog facility) → canonical spellings only; else `unknown_enum` + legal set.
 - Numeric bounds (capacity power-of-2, positive batch/bytes) → `out_of_range`.
-- Unreadable/unparseable PEM (`otlp` `cert_source`) → `invalid_or_contradictory_selector`.
-- Platform-unavailable sink (syslog/non-POSIX) → `invalid_or_contradictory_selector`.
+- Unreadable or non-PEM-magic `otlp` `cert_source` → `invalid_or_contradictory_selector` (caught by the **side-effect-free** load-time resource preflight: readable + leading `-----BEGIN`/PEM-magic; the full CA-bundle parse happens at sink `open()`, research D-4/D-7).
+- File-sink `directory` that does **not already exist** or is **not a writable directory** → `invalid_or_contradictory_selector` (same **side-effect-free** preflight — stat/access only, **no `mkdir`, no probe file**; `FileSink::open()` creates/opens the live log file, not the directory; the directory must pre-exist (the preflight requires it)).
+- Platform/build-unavailable sink (syslog on non-POSIX; otlp on a no-OTel build) → `invalid_or_contradictory_selector`.
 - `use_grpc=true` → `recognized_not_yet_supported_step2`.
-- All diagnostics collected in **one pass** (D-7) with the session-local `acc.size()` delta pattern; non-empty accumulator ⇒ no bundle, nothing opened. Construction is side-effect-free, so a failed load leaves nothing opened.
+- All diagnostics collected in **one pass** (D-7) with the session-local `acc.size()` delta pattern. Pending loggers (engine + per-session) are parked in a file-scoped keyed `PendingLoggerSet`; the live `Logger`(s) are constructed only at end-of-clean-load (after the resource preflight passes) in a single final pass keyed to engine slot / session index; a non-empty accumulator ⇒ no `Logger` constructed, no bundle, **no files opened, no directory created, no drain thread started**. (Named inherited 017 limitation: the ctor silently disables a sink whose `open()` fails post-preflight — research D-7.)
