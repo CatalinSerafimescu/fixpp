@@ -608,7 +608,35 @@ void recognize_keys(const toml::table& tbl, std::string_view key_prefix,
 
     // ── T012: Construct live Logger(s) only when the whole-file acc is clean ─
     // (research D-7 / FR-015): the SOLE side-effectful step.
-    detail::construct_loggers_if_clean(std::move(pending_loggers), bundle, acc);
+    //
+    // noexcept boundary (FR-012 rule-9): the Logger ctor opens its sinks and
+    // SPAWNS a drain std::thread — thread creation throws std::system_error
+    // (EAGAIN / thread-limit) and make_shared can throw bad_alloc. Unlike the
+    // 044 validation/resolution code (which only ever appends diagnostics), this
+    // step can throw, and it runs OUTSIDE the parse try/catch above — so an
+    // unguarded throw would escape load_toml_config's noexcept boundary →
+    // std::terminate. Catch it and fail closed with a diagnostic. Any Logger
+    // already constructed into `bundle` before the throw is owned by `bundle`;
+    // the error return below discards `bundle`, and the Logger dtor joins its
+    // drain thread — so nothing is left running.
+    try {
+        detail::construct_loggers_if_clean(std::move(pending_loggers), bundle, acc);
+    } catch (const std::exception& e) {
+        acc.add(LoadDiagnostic{
+            .key_path = "logger",
+            .reason   = reason_class::invalid_or_contradictory_selector,
+            .location = {},
+            .message  = std::string{"logger construction failed (resource exhaustion): "} +
+                        e.what(),
+        });
+    } catch (...) {
+        acc.add(LoadDiagnostic{
+            .key_path = "logger",
+            .reason   = reason_class::invalid_or_contradictory_selector,
+            .location = {},
+            .message  = "logger construction failed (unknown exception)",
+        });
+    }
 
     if (!acc.empty()) {
         return std::unexpected(std::move(acc).release());
