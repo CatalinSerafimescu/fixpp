@@ -3,8 +3,10 @@
 #   (1) [dictionary] section absent → missing_required at "dictionary"
 #   (2) session[0].sender_comp_idd (typo, double-d) → unknown_key at
 #       "session[0].sender_comp_idd"
-#   (3) [session.logger] (deferred step-2 key) → recognized_not_yet_supported_step2
-#       at "session[0].logger"
+#   (3) [session.tracer] (deferred step-2 key) → recognized_not_yet_supported_step2
+#       at "session[0].tracer"
+#       (was [session.logger] until 045 FR-022 flipped logger to supported; a
+#        still-deferred key is used to keep error #3 a deferred diagnostic.)
 #
 # Before fix: the early-return at toml_config_loader.cpp:444 fired on the
 # non-empty accumulator (from error #1 above), truncating #2 and #3.
@@ -34,6 +36,6 @@ port = 4321
 [session.security_profile]
 kind = "insecure_plain_tcp"
 
-[session.logger]
-# error #3: recognized_not_yet_supported_step2 (step-2 key)
-kind = "console"
+[session.tracer]
+# error #3: recognized_not_yet_supported_step2 (still-deferred step-2 key)
+endpoint = "http://collector:4317"

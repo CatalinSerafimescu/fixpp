@@ -1,0 +1,64 @@
+# tests/config/fixtures/logger_happy.toml
+# 045-observability-config Phase-3 logger happy-path fixture (T008).
+#
+# Contains a [logger] block with ONE file sink so this fixture is always
+# loadable regardless of whether the build includes OTLP support.
+# The OTLP and duplicate-sink cells in T008 use runtime-generated TOML
+# (written via std::ofstream) so they can embed real tmp-directory paths
+# and are guarded under #ifdef FIXPP_CONFIG_HAS_OTLP where needed.
+#
+# Relative paths: directory "logs/t008" resolves against this file's parent
+# directory. The test creates the directory at runtime before loading.
+#
+# Values are chosen to DIFFER from FileSinkConfig/LoggerConfig defaults so
+# a resolver that ignores the TOML fields and applies defaults would produce
+# incorrect logger behaviour (discriminating against a partial implementation).
+
+# ── Engine-level selectors (required by 044) ─────────────────────────────────
+
+[clock]
+kind = "system"
+
+[store]
+kind = "memory"
+
+[cert_source]
+kind      = "file"
+cert_file = "leaf_ecdsa_p256.pem"
+key_file  = "leaf_ecdsa_p256.key"
+ca_file   = "ca.pem"
+
+[dictionary]
+kind = "path"
+path = "FIX44.xml"
+
+# ── Logger ───────────────────────────────────────────────────────────────────
+
+[logger]
+capacity      = 4096          # non-default (default 65536)
+on_overflow   = "drop_newest"
+drain_timeout = "2000ms"      # non-default (default 5000ms); unit-suffixed (044 rule)
+
+  [[logger.sinks]]
+  kind           = "file"
+  directory      = "logs/t008"   # relative; test creates this dir before loading
+  base_name      = "fixpp_t008"  # non-default (default "fixpp")
+  max_file_bytes = 1048576       # 1 MiB (non-default; default 256 MiB)
+  max_keep_count = 3             # non-default (default 8)
+  async_fsync    = false         # non-default (default true)
+
+# ── Per-session config ────────────────────────────────────────────────────────
+
+[[session]]
+sender_comp_id = "CLIENT1"
+target_comp_id = "SERVER1"
+begin_string   = "FIX.4.4"
+role           = "initiator"
+
+[session.transport]
+kind = "tls"
+host = "fix.example.com"
+port = 4321
+
+[session.security_profile]
+kind = "mtls_ca"

@@ -1,0 +1,103 @@
+# tests/config/fixtures/logger_default_merged.toml
+# 045-observability-config pinning fixture: [default.logger] MERGED semantics.
+#
+# Layout:
+#   Engine-scope selectors (required by 044).
+#   [logger]: engine-level logger (optional engine default, distinct directory).
+#   [default.logger]: per-session-defaults logger — inherited as logger_override
+#                     by EVERY session that has NO explicit [session.logger].
+#   [[session]] A: no [session.logger] — inherits [default.logger].
+#   [[session]] B: no [session.logger] — inherits [default.logger].
+#
+# Discriminating property (MERGED vs RAW):
+#   Under MERGED semantics:
+#     sessions[0].config.logger_override != nullptr  (inherited from [default.logger])
+#     sessions[1].config.logger_override != nullptr  (inherited from [default.logger])
+#     Both instances are DISTINCT (per-session construction, not aliased).
+#   Under RAW (no inheritance) both overrides would be null.
+#
+# Sink directories:
+#   logs/t_defaultmerge_engine  — engine logger (requires pre-creation)
+#   logs/t_defaultmerge_default — default-logger sessions (requires pre-creation)
+#
+# Relative paths resolve against THIS FILE's parent directory (FR-018).
+
+# ── Engine-scope selectors ────────────────────────────────────────────────────
+
+[clock]
+kind = "system"
+
+[store]
+kind = "memory"
+
+[cert_source]
+kind      = "file"
+cert_file = "leaf_ecdsa_p256.pem"
+key_file  = "leaf_ecdsa_p256.key"
+ca_file   = "ca.pem"
+
+[dictionary]
+kind = "path"
+path = "FIX44.xml"
+
+# ── Engine-level logger (DISTINCT directory — not the same as [default.logger]) ─
+
+[logger]
+capacity      = 4096
+on_overflow   = "drop_newest"
+drain_timeout = "2000ms"
+
+  [[logger.sinks]]
+  kind           = "file"
+  directory      = "logs/t_defaultmerge_engine"
+  base_name      = "fixpp_t_defaultmerge_engine"
+
+# ── [default.logger]: inherited as logger_override for sessions without [session.logger] ─
+
+[default]
+begin_string = "FIX.4.4"
+role         = "initiator"
+
+[default.transport]
+kind = "tls"
+
+[default.security_profile]
+kind = "mtls_ca"
+
+[default.logger]
+capacity      = 8192          # DISTINCT from engine logger capacity (4096)
+on_overflow   = "drop_newest"
+drain_timeout = "1000ms"
+
+  [[default.logger.sinks]]
+  kind           = "file"
+  directory      = "logs/t_defaultmerge_default"
+  base_name      = "fixpp_t_defaultmerge"
+
+# ── Session A: no [session.logger] — should inherit [default.logger] ─────────
+
+[[session]]
+sender_comp_id = "CLIENT_A"
+target_comp_id = "SERVER_A"
+
+[session.transport]
+kind = "tls"
+host = "fix-a.example.com"
+port = 4320
+
+[session.security_profile]
+kind = "mtls_ca"
+
+# ── Session B: no [session.logger] — should also inherit [default.logger] ────
+
+[[session]]
+sender_comp_id = "CLIENT_B"
+target_comp_id = "SERVER_B"
+
+[session.transport]
+kind = "tls"
+host = "fix-b.example.com"
+port = 4321
+
+[session.security_profile]
+kind = "mtls_ca"

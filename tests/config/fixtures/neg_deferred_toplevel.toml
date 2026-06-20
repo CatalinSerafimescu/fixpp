@@ -1,0 +1,94 @@
+# neg_deferred_toplevel.toml
+# 045-observability-config Phase-6 US4 fixture (T020).
+#
+# Places each still-deferred top-level observability/arena/dialect/tap key
+# alongside a valid [[session]] block.  The loader's recognize_keys() walk
+# fires recognized_not_yet_supported_step2 for each deferred key; the
+# session itself is otherwise valid (transport + security_profile present).
+#
+# Keys under test (the FULL kDeferred set minus `logger`, which is now supported):
+#   scalars: message_arena, dialect_overlay, arena, session_arena,
+#            framer_carry_arena, tap_consumer
+#   tables:  tracer, meter, tap, otlp, prometheus, exporter, log_sink
+#
+# All are in kDeferred (toml_config_loader.cpp:268-283; data-model E-5).
+# The `logger` key is NOT here because it is now SUPPORTED (045 T006/FR-022).
+# FR-022 explicitly requires otlp/prometheus/exporter/log_sink to STAY deferred
+# while `logger` flips; T020_DeferredSetExactCoverage pins every one so a silent
+# demotion to unknown_key fails RED ([[feedback_completeness_gate_exact_set_not_subset]]).
+#
+# IMPORTANT TOML scoping: in TOML, scalar keys that appear after a [header]
+# sub-table belong to that sub-table, NOT the root.  Place ALL root-level
+# scalar deferred keys (message_arena, dialect_overlay) BEFORE the first
+# [sub-table] header so they parse as root-level keys.
+
+# ── Root-level scalar deferred keys (MUST be before any [sub-table]) ─────────
+
+message_arena = "pmr_monotonic"
+dialect_overlay = "my_overlay"
+
+# Remaining deferred scalar keys (kDeferred). Present so the exact-coverage cell
+# detects a silent demotion of ANY of these from kDeferred → unknown_key.
+arena = "pmr_monotonic"
+session_arena = "pmr_monotonic"
+framer_carry_arena = "pmr_monotonic"
+tap_consumer = "tcp://127.0.0.1:9001"
+
+# ── Engine-level selectors ────────────────────────────────────────────────────
+
+[clock]
+kind = "system"
+
+[store]
+kind = "memory"
+
+[cert_source]
+kind      = "file"
+cert_file = "leaf_ecdsa_p256.pem"
+key_file  = "leaf_ecdsa_p256.key"
+ca_file   = "ca.pem"
+
+[dictionary]
+kind = "path"
+path = "FIX44.xml"
+
+# ── Deferred sub-table top-level keys ────────────────────────────────────────
+
+[tracer]
+endpoint = "http://collector:4317"
+
+[meter]
+endpoint = "http://collector:4317"
+
+[tap]
+# bare stub — step-2 deferred (2l unshipped); tap_consumer likewise
+endpoint = "tcp://127.0.0.1:9000"
+
+# FR-022-named observability keys that MUST stay deferred while `logger` flips.
+[otlp]
+endpoint = "http://collector:4318"
+
+[prometheus]
+endpoint = "http://127.0.0.1:9464/metrics"
+
+[exporter]
+kind = "otlp"
+
+[log_sink]
+kind = "otlp"
+
+# ── Required valid session ────────────────────────────────────────────────────
+
+[[session]]
+sender_comp_id = "CLIENT1"
+target_comp_id = "SERVER1"
+begin_string   = "FIX.4.4"
+role           = "initiator"
+
+[session.transport]
+kind = "tls"
+host = "fix.example.com"
+port = 4321
+
+[session.security_profile]
+kind = "mtls_ca"

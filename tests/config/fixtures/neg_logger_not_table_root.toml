@@ -1,0 +1,29 @@
+# Gate B r1 #2: root-scope logger = 123 (non-table) must produce malformed_value
+# Expected: malformed_value on "logger"
+# TOML note: logger = 123 must appear before any section headers ([clock], etc.)
+# to be a root-level key.
+logger = 123   # present at root but NOT a table — must not silently ignore
+
+[clock]
+kind = "system"
+
+[store]
+kind = "memory"
+
+[dictionary]
+kind = "path"
+path = "FIX44.xml"
+
+[[session]]
+sender_comp_id = "CLIENT1"
+target_comp_id = "SERVER1"
+begin_string   = "FIX.4.4"
+role           = "initiator"
+
+[session.transport]
+kind = "plain"
+host = "fix.example.com"
+port = 4321
+
+[session.security_profile]
+kind = "insecure_plain_tcp"

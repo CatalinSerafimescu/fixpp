@@ -1,0 +1,3 @@
+# Test-run artifacts: file-sink output written by test_load_logger
+# (relative file-sink directory resolves against this config-file dir, FR-018).
+logs/

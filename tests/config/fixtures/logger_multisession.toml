@@ -1,0 +1,96 @@
+# tests/config/fixtures/logger_multisession.toml
+# 045-observability-config Phase-5 US3 fixture (T018).
+#
+# Layout:
+#   Engine-scope [logger] with a file sink (directory logs/t018_engine).
+#   [[session]] 0 (OVERRIDE): has its own [session.logger] with a DISTINCT
+#               file sink (directory logs/t018_session0) and a different
+#               capacity, so we can discriminate it from the engine logger.
+#   [[session]] 1 (INHERIT): no [session.logger] — logger_override stays null.
+#
+# Assertions (T018 / SC-005, AC US3-1/2):
+#   (a) bundle.engine.logger != nullptr           (engine default present)
+#   (b) sessions[0].config.logger_override != nullptr
+#       AND is a DISTINCT instance from engine.logger
+#       AND writes to logs/t018_session0 (discriminating dir check)
+#   (c) sessions[1].config.logger_override == nullptr  (null = inherits engine)
+#
+# The test pre-creates both sink directories before loading.
+# Relative paths resolve against THIS FILE's parent directory (FR-018).
+#
+# No [default.logger] block: this keeps raw vs merged equivalent for this
+# fixture, so the test validates the wiring without depending on that
+# inheritance path (which is an implementation detail matching 044's
+# merged-table convention).
+
+# ── Engine-scope selectors (required by 044) ─────────────────────────────────
+
+[clock]
+kind = "system"
+
+[store]
+kind = "memory"
+
+[cert_source]
+kind      = "file"
+cert_file = "leaf_ecdsa_p256.pem"
+key_file  = "leaf_ecdsa_p256.key"
+ca_file   = "ca.pem"
+
+[dictionary]
+kind = "path"
+path = "FIX44.xml"
+
+# ── Engine-level logger (applies to all sessions that have no override) ───────
+
+[logger]
+capacity      = 4096          # non-default (default 65536)
+on_overflow   = "drop_newest"
+drain_timeout = "2000ms"
+
+  [[logger.sinks]]
+  kind           = "file"
+  directory      = "logs/t018_engine"   # test pre-creates this dir
+  base_name      = "fixpp_t018_engine"
+
+# ── Session 0: has a [session.logger] override ───────────────────────────────
+
+[[session]]
+sender_comp_id = "CLIENT0"
+target_comp_id = "SERVER0"
+begin_string   = "FIX.4.4"
+role           = "initiator"
+
+[session.transport]
+kind = "tls"
+host = "fix0.example.com"
+port = 4320
+
+[session.security_profile]
+kind = "mtls_ca"
+
+[session.logger]
+capacity      = 8192          # DISTINCT from engine logger (4096)
+on_overflow   = "drop_newest"
+drain_timeout = "2000ms"
+
+  [[session.logger.sinks]]
+  kind           = "file"
+  directory      = "logs/t018_session0"   # DISTINCT from engine logger dir
+  base_name      = "fixpp_t018_session0"
+
+# ── Session 1: no [session.logger] — logger_override stays null ──────────────
+
+[[session]]
+sender_comp_id = "CLIENT1"
+target_comp_id = "SERVER1"
+begin_string   = "FIX.4.4"
+role           = "initiator"
+
+[session.transport]
+kind = "tls"
+host = "fix1.example.com"
+port = 4321
+
+[session.security_profile]
+kind = "mtls_ca"

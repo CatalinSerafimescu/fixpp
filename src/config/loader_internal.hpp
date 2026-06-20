@@ -67,6 +67,14 @@ namespace fixpp::config::detail {
 [[nodiscard]] std::string_view display_value(std::string_view key_path, std::string_view value
                                              [[clang::lifetimebound]]) noexcept;
 
+// Redacts URL userinfo (user:password@) in an endpoint URL string (FR-023).
+// Returns a copy of the URL with the "user:password" portion replaced by
+// "***REDACTED***".  If no userinfo is present, returns the URL unchanged.
+// Example:
+//   redact_url_userinfo("http://user:secret@host:4318/v1/logs")
+//   → "http://***REDACTED***@host:4318/v1/logs"
+[[nodiscard]] std::string redact_url_userinfo(std::string_view url);
+
 // ---------------------------------------------------------------------------
 // T008 — noexcept-boundary throwing-site wrapper (validation rule 9 / D-3)
 // ---------------------------------------------------------------------------
@@ -170,5 +178,35 @@ private:
 // caller so this helper is reused across many paths (D-7 "capture once").
 [[nodiscard]] std::filesystem::path resolve_path(const std::filesystem::path& base_dir,
                                                  const std::filesystem::path& rel) noexcept;
+
+// ---------------------------------------------------------------------------
+// Dotted key-path builder — "prefix.key" (toml-free).
+// Shared by scalar_mappers.cpp and logger_resolver.cpp.
+// ---------------------------------------------------------------------------
+[[nodiscard]] std::string kp(std::string_view prefix, std::string_view key);
+
+// ---------------------------------------------------------------------------
+// Unit-suffix duration parser (toml-free) — single canonical definition.
+//
+// "30s" → 30000, "15000ms" → 15000.  Supported units: "ms", "s", "m", "h".
+// Returns {value_ms, ok}; on any error emits a diagnostic into `acc` and
+// returns ok=false:
+//   - empty string / missing-or-unparseable numeric prefix / absent unit
+//     suffix (bare integer rejected — explicit-unit contract) / unrecognised
+//     unit → malformed_value
+//   - per-scale signed-multiply overflow / sub-millisecond "us" → out_of_range
+// `loc` is the SourceLoc of the TOML value node (populated per FR-017).
+// The caller duration_casts {value_ms} to the target field type.
+//
+// Single home (T035-Polish): scalar_mappers.cpp and logger_resolver.cpp both
+// call this so the overflow guards (Gate B r1 #3/#5) cannot drift.
+// ---------------------------------------------------------------------------
+struct ParsedDuration {
+    long long value_ms;  // value in milliseconds
+    bool ok;
+};
+
+[[nodiscard]] ParsedDuration parse_duration_to_ms(std::string_view tok, std::string_view key_path,
+                                                  DiagnosticAccumulator& acc, SourceLoc loc = {});
 
 }  // namespace fixpp::config::detail

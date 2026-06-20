@@ -14,11 +14,24 @@
 
 // Forward declarations for shared_ptr<T> members — callers do not need the
 // full types unless they dereference the pointers.
-namespace fixpp::core   { class Clock; }
-namespace fixpp::session { class MessageStoreFactory; }
-namespace fixpp::tls    { class cert_source; }
-namespace fixpp::transport { class TransportFactory; }
-namespace fixpp::dict   { class Dictionary; }
+namespace fixpp::core {
+class Clock;
+}
+namespace fixpp::session {
+class MessageStoreFactory;
+}
+namespace fixpp::tls {
+class cert_source;
+}
+namespace fixpp::transport {
+class TransportFactory;
+}
+namespace fixpp::dict {
+class Dictionary;
+}
+namespace fixpp::log {
+class Logger;
+}
 
 #include <fixpp/config/load_diagnostic.hpp>
 
@@ -35,15 +48,18 @@ struct SessionDefinition {
 // Maps onto EngineConfig anchors; the host supplies executor / file_io_executor /
 // arenas / Application after load.
 struct EngineEstablishment {
-    std::shared_ptr<fixpp::core::Clock>                             clock;
-    std::shared_ptr<fixpp::session::MessageStoreFactory>            default_store_factory;
-    std::shared_ptr<fixpp::tls::cert_source>                        default_cert_source;
-    std::shared_ptr<fixpp::transport::TransportFactory>             default_transport_factory;
-    std::vector<std::shared_ptr<const fixpp::dict::Dictionary>>     dictionaries;
+    std::shared_ptr<fixpp::core::Clock> clock;
+    std::shared_ptr<fixpp::session::MessageStoreFactory> default_store_factory;
+    std::shared_ptr<fixpp::tls::cert_source> default_cert_source;
+    std::shared_ptr<fixpp::transport::TransportFactory> default_transport_factory;
+    std::vector<std::shared_ptr<const fixpp::dict::Dictionary>> dictionaries;
+    // 045-observability-config (logging leg, E-2): null → engine logger no-op.
+    // NO tracer/meter field this step (deferred — OTLP export unimplemented).
+    std::shared_ptr<fixpp::log::Logger> logger;
 };
 
 struct ConfigBundle {
-    EngineEstablishment         engine;
+    EngineEstablishment engine;
     std::vector<SessionDefinition> sessions;  // >= 1
 };
 

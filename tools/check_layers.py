@@ -29,7 +29,9 @@ ALLOWED: dict[str, set[str]] = {
     "session":    {"core", "dictionary", "wire", "transport", "log", "otel"},
     # 044-toml-session-config: opt-in adjacent loader target (fixpp_config_toml).
     # Nothing in core or session links it; it links them — not the reverse.
-    "config":     {"core", "session", "dictionary", "tls", "transport"},
+    # 045-observability-config: config → log added (logger/sink headers); the
+    # conditional fixpp_log_otlp link is a CMake-only edge, not an include edge.
+    "config":     {"core", "session", "dictionary", "tls", "transport", "log"},
     "capi":       {"session", "wire", "dictionary", "transport", "tls", "log",
                    "otel", "tap", "core"},
     "service":    {"capi", "service"},   # service may include fixpp/service/ (own interface)
