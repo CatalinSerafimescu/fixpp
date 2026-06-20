@@ -1224,3 +1224,259 @@ capacity = 999
     EXPECT_EQ(bundle.sessions[1].config.logger_override, nullptr)
         << "Session-1 logger (not parked) must also be null";
 }
+
+// ---------------------------------------------------------------------------
+// Gate B r1 — Root cause B: present-but-non-table logger + wrong-type optionals
+// ---------------------------------------------------------------------------
+//
+// #2 (P1): a present non-table `logger` must emit malformed_value, not silently
+//          skip.  Three scopes: root [logger], session [[session]] logger,
+//          [default] logger (which deep-merges into every session).
+//
+// Mutation discriminator for each: drop the `else` branch → the acc stays
+// empty → result.has_value() becomes true → EXPECT_FALSE(result.has_value())
+// goes RED.  (Alternatively: assert exact key_path — wrong path also RED.)
+
+TEST(GateBR1B_NonTableLogger, RootScopeLoggerNotTable)
+{
+    // logger = 123 at root must produce malformed_value on "logger".
+    const auto result = full_load(neg_fixture("neg_logger_not_table_root.toml"));
+    ASSERT_FALSE(result.has_value())
+        << "root logger = 123 must produce diagnostics, not succeed";
+    EXPECT_TRUE(has_diag(result.error(),
+                          fixpp::config::reason_class::malformed_value,
+                          "logger"))
+        << "Expected malformed_value on \"logger\" for non-table root logger";
+}
+
+TEST(GateBR1B_NonTableLogger, SessionScopeLoggerNotTable)
+{
+    // session.logger = 456 (non-table) must produce malformed_value on "session[0].logger".
+    const auto result = full_load(neg_fixture("neg_logger_not_table_session.toml"));
+    ASSERT_FALSE(result.has_value())
+        << "session logger = 456 must produce diagnostics, not succeed";
+    EXPECT_TRUE(has_diag(result.error(),
+                          fixpp::config::reason_class::malformed_value,
+                          "session[0].logger"))
+        << "Expected malformed_value on \"session[0].logger\" for non-table session logger";
+}
+
+TEST(GateBR1B_NonTableLogger, DefaultScopeLoggerNotTable)
+{
+    // [default].logger = 789 deep-merges into each session.
+    // The merged session[0].logger = 789 (non-table) must produce malformed_value.
+    const auto result = full_load(neg_fixture("neg_logger_not_table_default.toml"));
+    ASSERT_FALSE(result.has_value())
+        << "[default].logger = 789 must produce diagnostics (merges into session[0])";
+    EXPECT_TRUE(has_diag(result.error(),
+                          fixpp::config::reason_class::malformed_value,
+                          "session[0].logger"))
+        << "Expected malformed_value on \"session[0].logger\" "
+           "for [default].logger non-table inherited via deep-merge";
+}
+
+// ── #6 (P2): wrong-type optional fields must emit malformed_value ─────────────
+//
+// Each cell: present field with the wrong type → malformed_value at exact key_path.
+// Cells use white-box resolve_engine_logger / resolve_log_sink directly.
+//
+// CRITICAL field: cert_source=123 → wrong-type → silently leaves cfg.cert_source=""
+// → OTLP exports plain HTTP instead of TLS (fail-open security downgrade).
+// Mutation: drop the else → cert_source=123 is accepted → acc stays empty
+// → ASSERT_FALSE(acc.empty()) goes RED. Discriminating.
+
+TEST(GateBR1B_WrongTypeOptionals, AsyncFsyncNotBoolean)
+{
+    // async_fsync = "false" (string, not boolean) → malformed_value
+    // Mutation: drop the else → accepted → acc empty after the right-type check.
+    // Legit bool FIRST to confirm last-writer-wins doesn't hide the bad one.
+    // (Here they are different fields so no ordering concern.)
+    const std::string toml_text = R"(
+[logger]
+  [[logger.sinks]]
+  kind        = "file"
+  directory   = "/tmp"
+  async_fsync = "false"
+)";
+    auto parsed = parse_logger_inline(toml_text);
+    ASSERT_NE(parsed.logger_tbl, nullptr);
+
+    fixpp::config::detail::DiagnosticAccumulator acc;
+    fixpp::config::PendingLoggerSet pending;
+    fixpp::config::LoadOptions opts;
+    opts.resource = std::pmr::get_default_resource();
+    fixpp::config::detail::resolve_engine_logger(
+        *parsed.logger_tbl, "logger", fixpp::config::SourceLoc{},
+        std::filesystem::temp_directory_path(), opts, pending, acc,
+        /*is_engine=*/true, /*session_index=*/0);
+
+    ASSERT_FALSE(acc.empty())
+        << "async_fsync = \"false\" (string) must produce a malformed_value diagnostic";
+    EXPECT_TRUE(has_diag(std::move(acc).release(),
+                          fixpp::config::reason_class::malformed_value,
+                          "logger.sinks[0].async_fsync"))
+        << "Expected malformed_value on logger.sinks[0].async_fsync";
+}
+
+TEST(GateBR1B_WrongTypeOptionals, BaseNameNotString)
+{
+    // base_name = 123 (integer, not string) → malformed_value
+    const std::string toml_text = R"(
+[logger]
+  [[logger.sinks]]
+  kind      = "file"
+  directory = "/tmp"
+  base_name = 123
+)";
+    auto parsed = parse_logger_inline(toml_text);
+    ASSERT_NE(parsed.logger_tbl, nullptr);
+
+    fixpp::config::detail::DiagnosticAccumulator acc;
+    fixpp::config::PendingLoggerSet pending;
+    fixpp::config::LoadOptions opts;
+    opts.resource = std::pmr::get_default_resource();
+    fixpp::config::detail::resolve_engine_logger(
+        *parsed.logger_tbl, "logger", fixpp::config::SourceLoc{},
+        std::filesystem::temp_directory_path(), opts, pending, acc,
+        /*is_engine=*/true, /*session_index=*/0);
+
+    ASSERT_FALSE(acc.empty())
+        << "base_name = 123 (integer) must produce a malformed_value diagnostic";
+    EXPECT_TRUE(has_diag(std::move(acc).release(),
+                          fixpp::config::reason_class::malformed_value,
+                          "logger.sinks[0].base_name"))
+        << "Expected malformed_value on logger.sinks[0].base_name";
+}
+
+TEST(GateBR1B_WrongTypeOptionals, OnOverflowNotString)
+{
+    // on_overflow = true (boolean, not string) → malformed_value
+    // The string path already handles unknown enum values. The wrong-type path
+    // (n && !n->is_string() → i.e., n is present but not a string) is the gap.
+    const std::string toml_text = R"(
+[logger]
+on_overflow = true
+  [[logger.sinks]]
+  kind      = "file"
+  directory = "/tmp"
+)";
+    auto parsed = parse_logger_inline(toml_text);
+    ASSERT_NE(parsed.logger_tbl, nullptr);
+
+    fixpp::config::detail::DiagnosticAccumulator acc;
+    fixpp::config::PendingLoggerSet pending;
+    fixpp::config::LoadOptions opts;
+    opts.resource = std::pmr::get_default_resource();
+    fixpp::config::detail::resolve_engine_logger(
+        *parsed.logger_tbl, "logger", fixpp::config::SourceLoc{},
+        std::filesystem::temp_directory_path(), opts, pending, acc,
+        /*is_engine=*/true, /*session_index=*/0);
+
+    ASSERT_FALSE(acc.empty())
+        << "on_overflow = true (boolean) must produce a malformed_value diagnostic";
+    EXPECT_TRUE(has_diag(std::move(acc).release(),
+                          fixpp::config::reason_class::malformed_value,
+                          "logger.on_overflow"))
+        << "Expected malformed_value on logger.on_overflow";
+}
+
+#ifdef FIXPP_HAS_SYSLOG
+TEST(GateBR1B_WrongTypeOptionals, SyslogFacilityNotString)
+{
+    // facility = 3 (integer, not string) → malformed_value
+    // The string path handles the facility name mapping. Wrong type is the gap.
+    const std::string toml_text = R"(
+[logger]
+  [[logger.sinks]]
+  kind     = "syslog"
+  facility = 3
+)";
+    auto parsed = parse_logger_inline(toml_text);
+    ASSERT_NE(parsed.logger_tbl, nullptr);
+
+    fixpp::config::detail::DiagnosticAccumulator acc;
+    fixpp::config::PendingLoggerSet pending;
+    fixpp::config::LoadOptions opts;
+    opts.resource = std::pmr::get_default_resource();
+    fixpp::config::detail::resolve_engine_logger(
+        *parsed.logger_tbl, "logger", fixpp::config::SourceLoc{},
+        std::filesystem::temp_directory_path(), opts, pending, acc,
+        /*is_engine=*/true, /*session_index=*/0);
+
+    ASSERT_FALSE(acc.empty())
+        << "syslog facility = 3 (integer) must produce a malformed_value diagnostic";
+    EXPECT_TRUE(has_diag(std::move(acc).release(),
+                          fixpp::config::reason_class::malformed_value,
+                          "logger.sinks[0].facility"))
+        << "Expected malformed_value on logger.sinks[0].facility (syslog build)";
+}
+#endif  // FIXPP_HAS_SYSLOG
+
+#ifdef FIXPP_CONFIG_HAS_OTLP
+// CRITICAL: cert_source wrong type → silent plain-HTTP instead of TLS (fail-open).
+// Legit string cert_source FIRST (to rule out last-writer-wins pass), then the
+// wrong-type cert_source=123 in a separate call below.
+TEST(GateBR1B_WrongTypeOptionals, OtlpCertSourceNotString)
+{
+    // cert_source = 123 (integer, not string) → malformed_value
+    // Without the fix: cfg.cert_source stays "" → OTLP uses plain HTTP → security downgrade.
+    // With the fix: malformed_value emitted → sink rejected → acc non-empty.
+    // Mutation: drop the else → cert_source=123 accepted → acc empty → ASSERT_FALSE RED.
+    const std::string toml_text = R"(
+[logger]
+  [[logger.sinks]]
+  kind        = "otlp"
+  endpoint    = "https://collector:4317/v1/logs"
+  cert_source = 123
+)";
+    auto parsed = parse_logger_inline(toml_text);
+    ASSERT_NE(parsed.logger_tbl, nullptr);
+
+    fixpp::config::detail::DiagnosticAccumulator acc;
+    fixpp::config::PendingLoggerSet pending;
+    fixpp::config::LoadOptions opts;
+    opts.resource = std::pmr::get_default_resource();
+    fixpp::config::detail::resolve_engine_logger(
+        *parsed.logger_tbl, "logger", fixpp::config::SourceLoc{},
+        std::filesystem::temp_directory_path(), opts, pending, acc,
+        /*is_engine=*/true, /*session_index=*/0);
+
+    ASSERT_FALSE(acc.empty())
+        << "cert_source = 123 (integer) must produce a malformed_value diagnostic "
+           "(silent default = plain HTTP = TLS fail-open security downgrade)";
+    EXPECT_TRUE(has_diag(std::move(acc).release(),
+                          fixpp::config::reason_class::malformed_value,
+                          "logger.sinks[0].cert_source"))
+        << "Expected malformed_value on logger.sinks[0].cert_source";
+}
+
+TEST(GateBR1B_WrongTypeOptionals, OtlpExportTimeoutNotString)
+{
+    // export_timeout = 10 (integer, not a duration string) → malformed_value
+    const std::string toml_text = R"(
+[logger]
+  [[logger.sinks]]
+  kind           = "otlp"
+  endpoint       = "http://collector:4318/v1/logs"
+  export_timeout = 10
+)";
+    auto parsed = parse_logger_inline(toml_text);
+    ASSERT_NE(parsed.logger_tbl, nullptr);
+
+    fixpp::config::detail::DiagnosticAccumulator acc;
+    fixpp::config::PendingLoggerSet pending;
+    fixpp::config::LoadOptions opts;
+    opts.resource = std::pmr::get_default_resource();
+    fixpp::config::detail::resolve_engine_logger(
+        *parsed.logger_tbl, "logger", fixpp::config::SourceLoc{},
+        std::filesystem::temp_directory_path(), opts, pending, acc,
+        /*is_engine=*/true, /*session_index=*/0);
+
+    ASSERT_FALSE(acc.empty())
+        << "export_timeout = 10 (integer) must produce a malformed_value diagnostic";
+    EXPECT_TRUE(has_diag(std::move(acc).release(),
+                          fixpp::config::reason_class::malformed_value,
+                          "logger.sinks[0].export_timeout"))
+        << "Expected malformed_value on logger.sinks[0].export_timeout";
+}
+#endif  // FIXPP_CONFIG_HAS_OTLP

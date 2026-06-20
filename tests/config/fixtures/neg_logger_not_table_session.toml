@@ -1,0 +1,26 @@
+# Gate B r1 #2: session-scope session.logger = 123 (non-table) must produce malformed_value
+# Expected: malformed_value on "session[0].logger"
+[clock]
+kind = "system"
+
+[store]
+kind = "memory"
+
+[dictionary]
+kind = "path"
+path = "FIX44.xml"
+
+[[session]]
+sender_comp_id = "CLIENT1"
+target_comp_id = "SERVER1"
+begin_string   = "FIX.4.4"
+role           = "initiator"
+logger         = 456   # present but NOT a table — must not silently ignore
+
+[session.transport]
+kind = "plain"
+host = "fix.example.com"
+port = 4321
+
+[session.security_profile]
+kind = "insecure_plain_tcp"

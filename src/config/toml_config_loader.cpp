@@ -560,6 +560,18 @@ void recognize_keys(const toml::table& tbl, std::string_view key_prefix,
                 detail::resolve_engine_logger(*logger_node->as_table(), sess_logger_kp,
                                               sess_logger_loc, base_dir, opts, pending_loggers, acc,
                                               /*is_engine=*/false, /*session_index=*/session_idx);
+            } else if (logger_node && !logger_node->is_table()) {
+                // Gate B r1 #2: present but not a table → malformed_value (fail-closed).
+                // Silently dropping the entire logger block (the pre-fix behaviour) violates
+                // FR-020 fail-closed / SC-003. Covers both [[session]].logger and
+                // [default].logger (which deep-merges into each session).
+                acc.add(LoadDiagnostic{
+                    .key_path = key_prefix + ".logger",
+                    .reason = reason_class::malformed_value,
+                    .location = loc_from_region(logger_node->source()),
+                    .message = "logger must be a TOML table (got a non-table value); "
+                               "use [[" + key_prefix + ".sinks]] syntax",
+                });
             }
         }
 
@@ -587,11 +599,23 @@ void recognize_keys(const toml::table& tbl, std::string_view key_prefix,
     // Called AFTER 044 resolution so collect-ALL spans the whole file.
     // pending_loggers is declared before the per-session loop (T019) so it
     // accumulates both engine and per-session loggers in one file-scoped set.
-    if (const auto* logger_node = root_tbl.get("logger"); logger_node && logger_node->is_table()) {
-        SourceLoc logger_loc = loc_from_region(logger_node->source());
-        detail::resolve_engine_logger(*logger_node->as_table(), "logger", logger_loc, base_dir,
-                                      opts, pending_loggers, acc,
-                                      /*is_engine=*/true, /*session_index=*/0);
+    if (const toml::node* logger_root_node = root_tbl.get("logger"); logger_root_node != nullptr) {
+        if (logger_root_node->is_table()) {
+            SourceLoc logger_loc = loc_from_region(logger_root_node->source());
+            detail::resolve_engine_logger(*logger_root_node->as_table(), "logger", logger_loc,
+                                          base_dir, opts, pending_loggers, acc,
+                                          /*is_engine=*/true, /*session_index=*/0);
+        } else {
+            // Gate B r1 #2: root-scope logger present but not a table → malformed_value.
+            // Silently ignoring a non-table logger violates FR-020 fail-closed / SC-003.
+            acc.add(LoadDiagnostic{
+                .key_path = "logger",
+                .reason = reason_class::malformed_value,
+                .location = loc_from_region(logger_root_node->source()),
+                .message = "logger must be a TOML table (got a non-table value); "
+                           "use [[logger.sinks]] syntax",
+            });
+        }
     }
 
     // ── T012: Construct live Logger(s) only when the whole-file acc is clean ─

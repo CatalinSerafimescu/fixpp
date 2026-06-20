@@ -136,6 +136,14 @@ std::unique_ptr<fixpp::log::Sink> resolve_log_sink(const toml::table& sink_tbl,
         }
         if (const auto* n = sink_tbl.get("base_name"); n && n->is_string()) {
             cfg.base_name = std::string{n->as_string()->get()};
+        } else if (const auto* n = sink_tbl.get("base_name"); n && !n->is_string()) {
+            // Gate B r1 #6: present but wrong type → malformed_value (fail-closed).
+            acc.add(LoadDiagnostic{
+                .key_path = kp(sink_kp, "base_name"),
+                .reason = reason_class::malformed_value,
+                .location = loc_node(*n),
+                .message = "base_name must be a string",
+            });
         }
         if (const auto* n = sink_tbl.get("max_file_bytes"); n && n->is_integer()) {
             const auto v = n->as_integer()->get();
@@ -155,6 +163,14 @@ std::unique_ptr<fixpp::log::Sink> resolve_log_sink(const toml::table& sink_tbl,
         }
         if (const auto* n = sink_tbl.get("async_fsync"); n && n->is_boolean()) {
             cfg.async_fsync = n->as_boolean()->get();
+        } else if (const auto* n = sink_tbl.get("async_fsync"); n && !n->is_boolean()) {
+            // Gate B r1 #6: present but wrong type → malformed_value (fail-closed).
+            acc.add(LoadDiagnostic{
+                .key_path = kp(sink_kp, "async_fsync"),
+                .reason = reason_class::malformed_value,
+                .location = loc_node(*n),
+                .message = "async_fsync must be a boolean (true or false)",
+            });
         }
 
         // T016 — preflight: configured directory must already exist + be writable.
@@ -206,6 +222,15 @@ std::unique_ptr<fixpp::log::Sink> resolve_log_sink(const toml::table& sink_tbl,
                 return nullptr;
             }
             cfg.facility = fac_val;
+        } else if (const auto* n = sink_tbl.get("facility"); n && !n->is_string()) {
+            // Gate B r1 #6: facility present but wrong type → malformed_value (fail-closed).
+            acc.add(LoadDiagnostic{
+                .key_path = kp(sink_kp, "facility"),
+                .reason = reason_class::malformed_value,
+                .location = loc_node(*n),
+                .message = "syslog facility must be a string (e.g. \"user\", \"daemon\", \"local0\")",
+            });
+            return nullptr;
         }
 
         fixpp::log::SyslogSinkFactory factory;
@@ -314,6 +339,17 @@ std::unique_ptr<fixpp::log::Sink> resolve_log_sink(const toml::table& sink_tbl,
                     return nullptr;
                 }
             }
+        } else if (const auto* n = sink_tbl.get("cert_source"); n && !n->is_string()) {
+            // Gate B r1 #6 CRITICAL: cert_source present but wrong type → malformed_value.
+            // Without this: cfg.cert_source stays "" → OTLP uses plain HTTP instead of
+            // TLS (silent fail-open security downgrade, data-model E-4).
+            acc.add(LoadDiagnostic{
+                .key_path = kp(sink_kp, "cert_source"),
+                .reason = reason_class::malformed_value,
+                .location = loc_node(*n),
+                .message = "cert_source must be a string path to a PEM certificate file",
+            });
+            return nullptr;
         }
 
         // export_timeout — duration string (044 unit-suffix rule)
@@ -324,6 +360,14 @@ std::unique_ptr<fixpp::log::Sink> resolve_log_sink(const toml::table& sink_tbl,
             // OtlpLogSinkConfig::export_timeout is chrono::seconds; duration_cast from ms.
             cfg.export_timeout = std::chrono::duration_cast<std::chrono::seconds>(
                 std::chrono::milliseconds{d.value_ms});
+        } else if (const auto* n = sink_tbl.get("export_timeout"); n && !n->is_string()) {
+            // Gate B r1 #6: present but wrong type → malformed_value (fail-closed).
+            acc.add(LoadDiagnostic{
+                .key_path = kp(sink_kp, "export_timeout"),
+                .reason = reason_class::malformed_value,
+                .location = loc_node(*n),
+                .message = "export_timeout must be a duration string (e.g. \"10s\", \"500ms\")",
+            });
         }
 
         // max_export_batch — size_t, 0 → out_of_range
@@ -436,6 +480,14 @@ void resolve_engine_logger(const toml::table& logger_tbl, std::string_view key_p
                            R"(" (valid values: "drop_newest", "block"))",
             });
         }
+    } else if (const auto* n = logger_tbl.get("on_overflow"); n && !n->is_string()) {
+        // Gate B r1 #6: present but wrong type → malformed_value (fail-closed).
+        acc.add(LoadDiagnostic{
+            .key_path = kp(key_prefix, "on_overflow"),
+            .reason = reason_class::malformed_value,
+            .location = loc_node(*n),
+            .message = "on_overflow must be a string (\"drop_newest\" or \"block\")",
+        });
     }
 
     // drain_timeout — duration string (ms); default 5000ms
