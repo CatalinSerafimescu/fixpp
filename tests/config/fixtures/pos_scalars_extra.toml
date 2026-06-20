@@ -5,7 +5,9 @@
 #   - reset_seqnum_policy = "bilateral_strict"  (line 454)
 #   - sending_time_precision = "seconds"        (line 478)
 #   - duration unit "m" (minutes) via heartbeat_interval = "2m"
-#   - duration unit "us" (microseconds) via sending_time_threshold = "100us"
+#   - duration unit "ms" via sending_time_threshold = "100ms"
+#     NOTE: "us" was changed to "100ms" — sub-ms "us" is now rejected fail-closed
+#     (#5 Gate B r1). Separate neg_duration_us_rejected.toml tests the rejection.
 #   - duration unit "h" (hours) via test_request_threshold = "1h"
 #   - mode = "direct_executor" + already_serialized_executor = true  (line 320)
 #   - compid_authorization_policy sub-table                          (lines 629-658)
@@ -36,7 +38,7 @@ reset_seqnum_policy         = "bilateral_strict"
 sending_time_precision      = "seconds"
 heartbeat_interval          = "2m"
 test_request_threshold      = "1h"
-sending_time_threshold      = "100us"
+sending_time_threshold      = "100ms"
 
 [session.transport]
 kind = "plaintext"

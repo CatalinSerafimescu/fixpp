@@ -293,7 +293,9 @@ TEST(LoadHappyPath, Cov_ScalarsExtra) {
     ASSERT_TRUE(cfg.test_request_threshold.has_value());
     EXPECT_EQ(*cfg.test_request_threshold, std::chrono::milliseconds{3600000});
 
-    // sending_time_threshold = "100us" → 100ms (unit "us" arm, line 169)
+    // sending_time_threshold = "100ms" → 100ms (unit "ms" arm)
+    // NOTE: fixture changed from "100us" to "100ms" — "us" is now rejected fail-closed
+    // (#5 Gate B r1: sub-ms units unsupported; see neg_duration_us_rejected test).
     ASSERT_TRUE(cfg.sending_time_threshold.has_value());
     EXPECT_EQ(*cfg.sending_time_threshold, std::chrono::milliseconds{100});
 
@@ -538,4 +540,34 @@ TEST(LoadHappyPath, Cov_IsCredentialKeyBareNoDoc) {
     // operands of the || are false (branch 28:39-False side).
     EXPECT_FALSE(fixpp::config::detail::is_credential_key("host"))
         << "bare 'host' must not be a credential key";
+}
+
+// ── #4 (Gate B r1): null LoadOptions::resource must not cause UB ─────────────
+//
+// LoadOptions::resource defaults to std::pmr::get_default_resource() (non-null),
+// but the public struct allows LoadOptions{.resource = nullptr}.  XmlLoader::load
+// and make_file_cert_source both document mr!=nullptr as a caller precondition
+// with release UB.  The fix substitutes get_default_resource() at load entry.
+//
+// Discriminating post-condition: passing nullptr must yield a NORMAL load result
+// (not a crash / assert / terminate / UB).  We exercise the full dictionary-backed
+// TLS path (happy_full.toml) so that both XmlLoader::load AND make_file_cert_source
+// are reached with the substituted resource.
+
+TEST(LoadHappyPath, GateBR1_NullResourceSubstituted) {
+    const std::filesystem::path p =
+        std::filesystem::path{std::string{FIXPP_CONFIG_FIXTURE_DIR}} / "happy_full.toml";
+    asio::io_context ctx;
+    fixpp::config::LoadOptions opts;
+    opts.engine_executor = ctx.get_executor();
+    opts.resource = nullptr;  // explicit null — triggers the new guard
+
+    // Must produce a normal result (ConfigBundle), not crash / terminate / UB.
+    // Under ASan+UBSan the null-dereference / precondition-violation would be
+    // caught before this assertion is reached if the guard is missing.
+    auto result = fixpp::config::load_toml_config(p, opts);
+    EXPECT_TRUE(result.has_value())
+        << "null LoadOptions::resource must be silently substituted with "
+           "get_default_resource() and load must succeed (#4 Gate B r1); "
+           "if this crashes or fails, the null-resource guard is missing";
 }

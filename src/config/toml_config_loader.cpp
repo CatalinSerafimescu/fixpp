@@ -364,6 +364,17 @@ void recognize_keys(const toml::table& tbl, std::string_view key_prefix,
 //   → return ConfigBundle or accumulated diagnostics.
 [[nodiscard]] LoadResult load_toml_config(const std::filesystem::path& path,
                                           LoadOptions opts) noexcept {
+    // ── #4 (Gate B r1): null-resource guard ─────────────────────────────────
+    // LoadOptions::resource defaults to std::pmr::get_default_resource() (non-null)
+    // but the public struct allows LoadOptions{..., nullptr}.  XmlLoader::load and
+    // make_file_cert_source both document mr!=nullptr as a caller-precondition with
+    // release UB (xml_loader.hpp:51-54).  Substitute the default resource BEFORE any
+    // use so the noexcept "every input → ConfigBundle or diagnostics, never UB"
+    // contract holds unconditionally (FR-012 / validation rule 9).
+    if (opts.resource == nullptr) {
+        opts.resource = std::pmr::get_default_resource();
+    }
+
     // ── T007: Parse front-end ────────────────────────────────────────────────
     // Wrap toml::parse_file in try/catch to prevent any throw escaping the
     // noexcept boundary (validation rule 9 / D-3).
@@ -437,11 +448,19 @@ void recognize_keys(const toml::table& tbl, std::string_view key_prefix,
         });
     }
 
-    // Structural guard: without ≥1 session / a [dictionary] the per-session
-    // loop below cannot run, so fail closed here. Key-recognition + per-session
-    // validation accumulate AFTER this point so collect-ALL (FR-018) spans the
+    // Structural guard (sessions only) — #2 Gate B r1 fix:
+    //
+    // A missing/empty [[session]] array is a TRUE prerequisite: the loop below
+    // dereferences sessions_arr (->size(), range-for) and would null-deref.
+    // Short-circuit ONLY on the sessions condition so collect-ALL (FR-018) spans
     // engine, [default], and per-session scopes in one pass.
-    if (!acc.empty()) {
+    //
+    // A missing [dictionary] is NOT a prerequisite: resolve_engine_dictionary
+    // returns silently on an absent dict (selector_resolver.cpp:288-292) and the
+    // missing-dict diagnostic was already accumulated above at :431-438.  Returning
+    // here for the dictionary case truncated root/default/per-session diagnostics
+    // (breaking FR-018 collect-ALL).
+    if (!sessions_arr || sessions_arr->empty()) {
         return std::unexpected(std::move(acc).release());
     }
 

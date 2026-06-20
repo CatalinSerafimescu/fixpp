@@ -702,6 +702,54 @@ TEST(LoadNegativeBattery, T020_MissingRequired_Dictionary) {
            "is absent";
 }
 
+// ── #2 (Gate B r1): collect-ALL not truncated by missing [dictionary] ─────────
+//
+// Before fix: the early-return at toml_config_loader.cpp:444 fired for ANY
+// non-empty accumulator, which truncated all root/default/per-session diagnostics
+// when only the dictionary diagnostic had fired.  After fix: the return fires
+// ONLY on !sessions_arr||sessions_arr->empty().
+//
+// Discriminating: the fixture has THREE independent errors.  Before fix only 1
+// was reported; after fix all 3 accumulate.  Assert exact-set so a partial count
+// would fail.
+
+TEST(LoadNegativeBattery, GateBR1_CollectAllNotTruncatedByMissingDict) {
+    auto result = load(neg_fixture("neg_missing_dict_plus_typo.toml"));
+    ASSERT_FALSE(result.has_value())
+        << "fixture with 3 independent errors must fail";
+
+    using RC = fixpp::config::reason_class;
+    using KeyPath = std::string;
+    using DiagKey = std::pair<RC, KeyPath>;
+
+    const auto& diags = result.error();
+
+    // Build the set of (reason, key_path) pairs we expect — ALL three must appear.
+    const std::set<DiagKey> expected = {
+        {RC::missing_required,                    "dictionary"},
+        {RC::unknown_key,                          "session[0].sender_comp_idd"},
+        {RC::recognized_not_yet_supported_step2,  "session[0].logger"},
+    };
+
+    std::set<DiagKey> got;
+    for (const auto& d : diags) {
+        got.emplace(d.reason, d.key_path);
+    }
+
+    for (const auto& [reason, key] : expected) {
+        EXPECT_TRUE(got.count({reason, key}))
+            << "missing diagnostic: reason=" << static_cast<int>(reason)
+            << " key_path=\"" << key << "\" — collect-ALL (FR-018) truncated "
+               "before this diagnostic was reached (#2 Gate B r1)";
+    }
+
+    // Exact-count guard: the fixture has exactly these 3 errors (no spurious diags).
+    EXPECT_EQ(diags.size(), expected.size())
+        << "expected exactly " << expected.size() << " diagnostics from "
+           "neg_missing_dict_plus_typo.toml; got " << diags.size()
+        << " — either spurious diagnostics were added or some are still truncated";
+}
+
 // ── transport.kind missing → missing_required (ALREADY-GREEN, Phase 3b) ──────
 //
 // selector_resolver.cpp resolve_transport: absent [session.transport] table →
@@ -1116,6 +1164,53 @@ TEST(LoadNegativeBattery, Cov_TransportKindUnknown) {
         << "expected unknown_enum at transport.kind for value 'websocket'";
 }
 
+// ── #1 (Gate B r1): per-session transport.kind validated for non-first sessions
+//
+// Before fix: the divergence scan skipped non-"tls" sessions (continue at
+// line 612), so session[1] with a missing/empty/unknown kind escaped validation
+// and silently ran on the engine-default (wrong) transport.
+// After fix: each session[i>=1] has transport.kind validated; diagnostics are
+// attributed to "session[1].transport.kind" (not "session[0].transport.kind").
+//
+// Discriminating: the key_path index MUST be [1], not [0].  A test asserting
+// only reason without key_path would pass whether the fix is present or not
+// (the existing neg_transport_kind_*.toml fixtures cover session[0] and pass
+// before and after the fix).
+
+TEST(LoadNegativeBattery, GateBR1_Session1TransportKindMissing) {
+    auto result = load(neg_fixture("neg_session1_transport_kind_missing.toml"));
+    ASSERT_FALSE(result.has_value())
+        << "session[1] with no [session.transport] must fail; "
+           "pre-fix: load succeeded (session[1] escaped validation)";
+    using RC = fixpp::config::reason_class;
+    EXPECT_TRUE(has_diag(result.error(), RC::missing_required, "session[1].transport.kind"))
+        << "expected missing_required at \"session[1].transport.kind\" "
+           "(non-first session must also have transport.kind validated — #1 Gate B r1); "
+           "key_path must be session[1], not session[0]";
+}
+
+TEST(LoadNegativeBattery, GateBR1_Session1TransportKindEmpty) {
+    auto result = load(neg_fixture("neg_session1_transport_kind_empty.toml"));
+    ASSERT_FALSE(result.has_value())
+        << "session[1] with empty transport.kind must fail; "
+           "pre-fix: load succeeded (session[1] escaped validation)";
+    using RC = fixpp::config::reason_class;
+    EXPECT_TRUE(has_diag(result.error(), RC::empty_required, "session[1].transport.kind"))
+        << "expected empty_required at \"session[1].transport.kind\" (#1 Gate B r1)";
+}
+
+TEST(LoadNegativeBattery, GateBR1_Session1TransportKindUnknown) {
+    auto result = load(neg_fixture("neg_session1_transport_kind_unknown.toml"));
+    ASSERT_FALSE(result.has_value())
+        << "session[1] with unknown transport.kind must fail; "
+           "pre-fix: load succeeded (session[1] escaped validation)";
+    using RC = fixpp::config::reason_class;
+    EXPECT_TRUE(has_diag(result.error(), RC::unknown_enum, "session[1].transport.kind"))
+        << "expected unknown_enum at \"session[1].transport.kind\" "
+           "for value 'websocket' (#1 Gate B r1); "
+           "key_path must be session[1], not session[0]";
+}
+
 // ── No [[session]] at all → missing_required at "session" ────────────────────
 // (toml_config_loader.cpp lines 419-424)
 
@@ -1273,6 +1368,69 @@ TEST(LoadNegativeBattery, Cov_DurationOverflow) {
     // from_chars fails on a number exceeding LLONG_MAX → malformed_value
     EXPECT_TRUE(has_diag(result.error(), RC::malformed_value, "session[0].heartbeat_interval"))
         << "expected malformed_value at heartbeat_interval for overflowing numeric part";
+}
+
+// ── #3 (Gate B r1): duration scaling overflow → out_of_range ─────────────────
+//
+// The numeric prefix fits long long (from_chars succeeds) but overflows during
+// unit scaling (*1000 / *60000 / *3600000).  Before the fix this is signed-UB;
+// after the fix each arm checks num > LLONG_MAX/scale and emits out_of_range.
+//
+// Discriminating: pre-fix the load SUCCEEDS (UB wraps to a garbage ms value);
+// post-fix the load FAILS with out_of_range at the specific key.
+// The three fixtures use values just above the per-unit safe boundary:
+//   s: 9223372036854776 (> LLONG_MAX/1000)
+//   m: 153722867280913  (> LLONG_MAX/60000)
+//   h: 2562047788016    (> LLONG_MAX/3600000)
+
+TEST(LoadNegativeBattery, GateBR1_DurationScaleOverflow_Seconds) {
+    auto result = load(neg_fixture("neg_duration_scale_overflow_s.toml"));
+    ASSERT_FALSE(result.has_value())
+        << "duration scaling overflow must be caught (#3 Gate B r1); "
+           "pre-fix: from_chars succeeds → signed-UB wrap → load succeeds (wrong)";
+    using RC = fixpp::config::reason_class;
+    EXPECT_TRUE(has_diag(result.error(), RC::out_of_range, "session[0].heartbeat_interval"))
+        << "expected out_of_range at session[0].heartbeat_interval for 9223372036854776s "
+           "(overflows LLONG_MAX when multiplied by 1000)";
+}
+
+TEST(LoadNegativeBattery, GateBR1_DurationScaleOverflow_Minutes) {
+    auto result = load(neg_fixture("neg_duration_scale_overflow_m.toml"));
+    ASSERT_FALSE(result.has_value())
+        << "duration scaling overflow (minutes) must be caught (#3 Gate B r1)";
+    using RC = fixpp::config::reason_class;
+    EXPECT_TRUE(has_diag(result.error(), RC::out_of_range, "session[0].test_request_threshold"))
+        << "expected out_of_range at session[0].test_request_threshold for 153722867280913m";
+}
+
+TEST(LoadNegativeBattery, GateBR1_DurationScaleOverflow_Hours) {
+    auto result = load(neg_fixture("neg_duration_scale_overflow_h.toml"));
+    ASSERT_FALSE(result.has_value())
+        << "duration scaling overflow (hours) must be caught (#3 Gate B r1)";
+    using RC = fixpp::config::reason_class;
+    EXPECT_TRUE(has_diag(result.error(), RC::out_of_range, "session[0].sending_time_threshold"))
+        << "expected out_of_range at session[0].sending_time_threshold for 2562047788016h";
+}
+
+// ── #5 (Gate B r1): "us" (microseconds) unit rejected fail-closed ────────────
+//
+// Before fix: "us" arm set ms=num (1000x silent error; 100us → 100ms not 0ms).
+// test_load_happy_path.cpp asserted the buggy 100ms result.
+// After fix: "us" emits out_of_range (sub-ms unsupported).
+//
+// Discriminating: the fixture uses a key where the us→ms mapping would produce
+// a DIFFERENT value than 0 (so we can prove it doesn't silently truncate either).
+// Pre-fix the load SUCCEEDS (asserts 100ms); post-fix the load FAILS.
+
+TEST(LoadNegativeBattery, GateBR1_DurationUsRejected) {
+    auto result = load(neg_fixture("neg_duration_us_rejected.toml"));
+    ASSERT_FALSE(result.has_value())
+        << "\"us\" duration unit must be rejected fail-closed (#5 Gate B r1); "
+           "pre-fix: load succeeds with a 1000x-wrong ms value";
+    using RC = fixpp::config::reason_class;
+    EXPECT_TRUE(has_diag(result.error(), RC::out_of_range, "session[0].sending_time_threshold"))
+        << "expected out_of_range at session[0].sending_time_threshold for \"100us\" "
+           "(sub-ms units unsupported; use ms/s/m/h)";
 }
 
 // ── sending_time_precision: unknown token → unknown_enum ─────────────────────

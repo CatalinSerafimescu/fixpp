@@ -17,6 +17,7 @@
 
 #include <charconv>
 #include <cstdint>
+#include <limits>
 #include <string>
 #include <string_view>
 
@@ -161,13 +162,54 @@ ParsedDuration parse_duration_to_ms(std::string_view tok, std::string_view key_p
     if (unit == "ms") {
         ms = num;
     } else if (unit == "s") {
+        // #3 (Gate B r1): guard signed-multiply overflow before scaling.
+        // from_chars yields values up to LLONG_MAX which overflows * 1000.
+        if (num > (std::numeric_limits<long long>::max)() / 1000LL) {
+            acc.add(LoadDiagnostic{
+                .key_path = std::string{key_path},
+                .reason = reason_class::out_of_range,
+                .location = loc,
+                .message = "duration value overflows when converted to milliseconds (s scale)",
+            });
+            return {.value_ms = 0, .ok = false};
+        }
         ms = num * 1000LL;
     } else if (unit == "m") {
+        if (num > (std::numeric_limits<long long>::max)() / 60000LL) {
+            acc.add(LoadDiagnostic{
+                .key_path = std::string{key_path},
+                .reason = reason_class::out_of_range,
+                .location = loc,
+                .message = "duration value overflows when converted to milliseconds (m scale)",
+            });
+            return {.value_ms = 0, .ok = false};
+        }
         ms = num * 60000LL;
     } else if (unit == "h") {
+        if (num > (std::numeric_limits<long long>::max)() / 3600000LL) {
+            acc.add(LoadDiagnostic{
+                .key_path = std::string{key_path},
+                .reason = reason_class::out_of_range,
+                .location = loc,
+                .message = "duration value overflows when converted to milliseconds (h scale)",
+            });
+            return {.value_ms = 0, .ok = false};
+        }
         ms = num * 3600000LL;
     } else if (unit == "us") {
-        ms = num;  // rounded down to ms; acceptable for config
+        // #5 (Gate B r1): "us" (microseconds) cannot be represented in the
+        // loader's millisecond-only duration model without silent 1000x error
+        // ("ms = num" was wrong) or silent truncation to 0 (num/1000).
+        // Fail-closed: reject sub-millisecond units (FR-013 / FR-012).
+        acc.add(LoadDiagnostic{
+            .key_path = std::string{key_path},
+            .reason = reason_class::out_of_range,
+            .location = loc,
+            .message = "sub-millisecond duration unit \"us\" is not supported "
+                       "(the loader represents durations in whole milliseconds); "
+                       "use \"ms\", \"s\", \"m\", or \"h\"",
+        });
+        return {.value_ms = 0, .ok = false};
     } else {
         acc.add(LoadDiagnostic{
             .key_path = std::string{key_path},
