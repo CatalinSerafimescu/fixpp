@@ -31,6 +31,7 @@
 #include <fixpp/config/config_bundle.hpp>
 #include <fixpp/config/load_diagnostic.hpp>
 #include <fixpp/config/toml_config_loader.hpp>
+#include <fixpp/log/file_sink.hpp>   // FileSink + current_path() — for E witness
 #include <fixpp/log/logger.hpp>
 #include <fixpp/log/syslog_sink.hpp>  // defines FIXPP_HAS_SYSLOG when available
 
@@ -1582,27 +1583,28 @@ drain_cpu_affinity = 2147483648
 // Gate B r1 — Root cause E: default file-sink directory not base_dir-resolved
 // ---------------------------------------------------------------------------
 //
-// data-model E-4: directory defaults to "." and relative paths resolve against
-// the config-file directory (FR-018). The pre-fix code only resolves directory
-// when explicitly set; the default "." stays CWD-relative.
+// data-model E-4: directory defaults to "." and relative paths — including the
+// default — must resolve against the config-file directory (FR-018).
+// Pre-fix: only explicitly-set directory was resolved against base_dir; the
+// default "." stayed CWD-relative.
 //
-// Witness: use white-box resolve_engine_logger with base_dir=/some/config/dir.
-// With the fix, the resolved cfg.directory should be base_dir / "." (i.e.
-// base_dir), not std::filesystem::current_path().
+// Discriminating behavioral witness:
+//   After resolve_engine_logger, the pending FileSink owns the resolved path.
+//   Call FileSink::open() and check current_path().parent_path() == base_dir.
+//   Pre-fix: cfg.directory="." → file lands in CWD → parent_path()!=base_dir RED.
+//   Post-fix: cfg.directory=base_dir → file lands in base_dir → GREEN.
 //
-// Mutation discriminator: remove the default-dir resolution → cfg.directory
-// stays "." (CWD-relative) → the resolved path != base_dir → assertion RED.
-//
-// Note: We assert the RESOLVED path (base_dir) is used, not CWD.
-// The preflight (directory existence check) is NOT performed for the default
-// directory (that half is waived as L-045; #3b is not in scope).
+// Mutation discriminator: remove the `else if (!sink_tbl.get("directory"))` branch
+// in logger_resolver.cpp (line ~151-158) → cfg.directory stays "." → open() writes
+// to CWD → current_path().parent_path() != base_dir → assertion RED.
 
 TEST(GateBR1E_DefaultDirBaseDir, DefaultDirectoryResolvesAgainstBaseDir)
 {
-    // Use a distinct temp directory as the "config file directory" (base_dir).
-    // This must be different from CWD so we can distinguish the two paths.
+    // Create two distinct dirs: base_dir (to be used as the config-file dir)
+    // and CWD-sentinel (ensure CWD != base_dir so we can discriminate).
+    // We must MAKE CWD something that is NOT base_dir for this test.
     const auto base_dir = std::filesystem::temp_directory_path() /
-                          "fixpp_gateb_r1e_basedir_test";
+                          "fixpp_gateb_r1e_basedir";
     {
         std::error_code ec;
         std::filesystem::create_directories(base_dir, ec);
@@ -1612,6 +1614,12 @@ TEST(GateBR1E_DefaultDirBaseDir, DefaultDirectoryResolvesAgainstBaseDir)
         std::filesystem::path p;
         ~Cleanup() { std::error_code e; std::filesystem::remove_all(p, e); }
     } cl{base_dir};
+
+    // Precondition: base_dir must differ from the process CWD for discrimination.
+    // The test is vacuous otherwise (we'd assert parent == CWD which equals base_dir).
+    if (std::filesystem::current_path() == base_dir) {
+        GTEST_SKIP() << "Test precondition: CWD must not equal base_dir";
+    }
 
     // Logger with a file sink and NO explicit directory.
     // Default FileSinkConfig::directory = "." which must resolve to base_dir.
@@ -1631,57 +1639,44 @@ capacity = 65536
 
     fixpp::config::detail::resolve_engine_logger(
         *parsed.logger_tbl, "logger", fixpp::config::SourceLoc{},
-        base_dir,  // <-- this is the config-file's parent directory
+        base_dir,
         opts, pending, acc,
         /*is_engine=*/true, /*session_index=*/0);
 
-    // The resolve must succeed (no diagnostics for the default directory).
     ASSERT_TRUE(acc.empty())
         << "Unexpected diagnostics: resolve with default directory + valid base_dir";
-    ASSERT_TRUE(pending.engine.has_value())
-        << "PendingLogger must be parked for a valid logger with default directory";
+    ASSERT_TRUE(pending.engine.has_value()) << "PendingLogger must be parked";
+    ASSERT_EQ(pending.engine->sinks.size(), std::size_t{1});
 
-    // Check that the pending logger's sink was configured with the base_dir-resolved
-    // path, NOT the CWD-relative ".". We access the sink configuration indirectly
-    // by verifying the pending sinks vector is populated (the resolve succeeded).
-    // The discriminating assertion: the resolved cfg.directory must equal
-    // base_dir (or base_dir / "."), not std::filesystem::current_path().
-    //
-    // Since we can't directly inspect cfg.directory after minting (the Sink owns
-    // it), we verify the behaviour indirectly: when base_dir != CWD, only the
-    // base_dir-resolved path would exist (we just created it). We verify by
-    // providing a base_dir that DOES exist (so the optional preflight passes when
-    // directory resolution is correct) vs CWD (which may or may not exist/pass).
-    // The test passes because the sink was minted (acc empty, pending populated).
-    //
-    // Mutation discriminator: if the default directory stays CWD-relative ("."),
-    // the test still PASSES here (because we don't preflight the default dir).
-    // To truly discriminate, we assert the resolved path using a separate resolver
-    // call that checks the filesystem::path directly via a sentinel fixture:
-    // Pass a NON-EXISTING base_dir → default-dir resolution produces a valid
-    // pending (no preflight on default) — but that's the same for both paths.
-    //
-    // The TRUE discriminating witness: verify the resolved FileSinkConfig.directory
-    // is base_dir. We do this by checking that PendingLogger is parked (the
-    // sink was successfully minted with the given base_dir) AND that using
-    // a base_dir that is DIFFERENT from CWD produces the right path.
-    // The key property: pending.engine.has_value() above confirms the resolution
-    // succeeded with base_dir as the anchor. If the default were CWD-anchored,
-    // the test would still pass here (CWD also exists). The stronger discrimination
-    // is in the combination with the mutation: drop the base_dir resolution for the
-    // default case → cfg.directory stays "." (relative) → when later open() is called
-    // it resolves against CWD, not base_dir → violates FR-018. The test above
-    // captures this contract by asserting pending is populated with the correctly-
-    // resolved base_dir anchor.
+    // The behavioral discriminator: open the FileSink and check the live-file path.
+    // FileSink::open() writes to cfg.directory (the resolved path).
+    // current_path().parent_path() reveals whether the directory is base_dir or CWD.
+    fixpp::log::Sink* raw_sink = pending.engine->sinks[0].get();
+    ASSERT_NE(raw_sink, nullptr);
+    auto* fs = dynamic_cast<fixpp::log::FileSink*>(raw_sink);
+    ASSERT_NE(fs, nullptr) << "Sink must be a FileSink (kind=\"file\")";
 
-    // Additionally: verify the resolved path is base_dir, not CWD.
-    // We do this by using a base_dir that contains a unique sentinel to distinguish.
-    EXPECT_NE(base_dir, std::filesystem::current_path())
-        << "Test precondition: base_dir must differ from CWD for discrimination";
+    // open() creates the live log file in cfg.directory.
+    const auto open_result = fs->open();
+    ASSERT_TRUE(open_result.has_value())
+        << "FileSink::open() must succeed (base_dir exists and is writable)";
+    struct CloseGuard {
+        fixpp::log::FileSink* s;
+        ~CloseGuard() noexcept { s->close(); }
+    } cg{fs};
 
-    // Confirm 1 sink was parked (the file sink with the resolved base_dir).
-    EXPECT_EQ(pending.engine->sinks.size(), std::size_t{1})
-        << "Exactly 1 sink must be parked (the file sink with default directory)";
+    // The live file must reside under base_dir, not under CWD.
+    // Mutation discriminator: without the default-dir resolution, cfg.directory="."
+    // → current_path() for the live file is CWD/fixpp-*.log → parent != base_dir.
+    const std::filesystem::path live = fs->current_path();
+    EXPECT_TRUE(live.is_absolute()) << "Live log path must be absolute after open()";
+    std::error_code canon_ec;
+    const auto canonical_live_parent = std::filesystem::canonical(live.parent_path(), canon_ec);
+    ASSERT_FALSE(canon_ec) << "canonical(live.parent_path()) failed: " << canon_ec.message();
+    EXPECT_EQ(canonical_live_parent, std::filesystem::canonical(base_dir))
+        << "Log file must land under base_dir (the config-file directory), not CWD.\n"
+           "Pre-fix cfg.directory=\".\" (CWD-relative); post-fix cfg.directory=base_dir.\n"
+           "live=" << live << "\nbase_dir=" << base_dir;
 }
 
 // ---------------------------------------------------------------------------
