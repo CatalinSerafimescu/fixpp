@@ -762,6 +762,83 @@ static void resolve_transport(const std::vector<const toml::table*>& merged_sess
         bundle.engine.default_transport_factory =
             std::shared_ptr<transport::TransportFactory>(std::move(*factory_result));
 
+        // ── Per-session divergence scan (D-6a, plaintext-default) ────────────
+        // Validate transport.kind for every non-first session.  session[0] drove
+        // the engine-default plaintext factory and is already validated above.
+        // Any session that declares a kind diverging from "plaintext" is a
+        // cross-kind mismatch — fail closed (FR-012, data-model E-3 row 62).
+        for (std::size_t i = 1; i < merged_session_tables.size(); ++i) {
+            const toml::table& sess = *merged_session_tables[i];
+            const std::string s_prefix = "session[" + std::to_string(i) + "]";
+
+            const toml::table* s_transport_tbl = nullptr;
+            if (const auto* t_n = sess.get("transport"); t_n && t_n->is_table()) {
+                s_transport_tbl = t_n->as_table();
+            }
+            if (!s_transport_tbl) {
+                acc.add(LoadDiagnostic{
+                    .key_path = s_prefix + ".transport.kind",
+                    .reason = reason_class::missing_required,
+                    .message = "[session.transport] is required (data-model E-3 row 62)",
+                });
+                continue;
+            }
+
+            std::string_view s_transport_kind;
+            const auto* kind_node = s_transport_tbl->get("kind");
+            if (kind_node && kind_node->is_string()) {
+                s_transport_kind = kind_node->as_string()->get();
+            } else if (!kind_node) {
+                acc.add(LoadDiagnostic{
+                    .key_path = s_prefix + ".transport.kind",
+                    .reason = reason_class::missing_required,
+                    .message = "transport.kind is required",
+                });
+                continue;
+            } else {
+                acc.add(LoadDiagnostic{
+                    .key_path = s_prefix + ".transport.kind",
+                    .reason = reason_class::missing_required,
+                    .message = "transport.kind must be a string",
+                });
+                continue;
+            }
+
+            if (s_transport_kind.empty()) {
+                acc.add(LoadDiagnostic{
+                    .key_path = s_prefix + ".transport.kind",
+                    .reason = reason_class::empty_required,
+                    .message = "transport.kind must not be empty",
+                });
+                continue;
+            }
+
+            if (s_transport_kind == "plaintext") {
+                // Same as engine default → no override needed.
+                continue;
+            } else if (s_transport_kind == "tls") {
+                // TLS-on-plaintext-engine: cross-kind divergence is not supported
+                // (no engine cert_source available, and per-session TLS factory
+                // minting requires cert_source; D-6a fail-closed / FR-012).
+                acc.add(LoadDiagnostic{
+                    .key_path = s_prefix + ".transport.kind",
+                    .reason = reason_class::invalid_or_contradictory_selector,
+                    .message = s_prefix + " declares transport.kind=\"tls\" but the "
+                               "engine default is plaintext; per-session TLS requires "
+                               "an engine-level [cert_source] — add [cert_source] or "
+                               "switch all sessions to \"tls\"",
+                });
+            } else {
+                acc.add(LoadDiagnostic{
+                    .key_path = s_prefix + ".transport.kind",
+                    .reason = reason_class::unknown_enum,
+                    .message = std::string{"unknown transport.kind: \""} +
+                               std::string{s_transport_kind} +
+                               R"(" (accepted: "tls", "plaintext"))",
+                });
+            }
+        }
+
     } else {
         acc.add(LoadDiagnostic{
             .key_path = "session[0].transport.kind",

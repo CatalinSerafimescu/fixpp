@@ -384,6 +384,91 @@ TEST(LoadSelectors, Cov_MultisessionTlsAndPlain) {
            "(use_count()==1 per D-6a), not the shared engine-default TLS factory";
 }
 
+// =============================================================================
+// #1 Gate B r1 — plaintext-default per-session validation (symmetric path)
+// =============================================================================
+//
+// The per-session transport.kind validation loop was added to the TLS-default
+// branch during Gate B r1.  The symmetric plaintext-default branch also needs
+// the same loop (half-restructure gap caught by Gate B advisor).
+//
+// Fixtures and expected outcomes:
+//   neg_p1s1_transport_kind_missing.toml → missing_required @ "session[1].transport.kind"
+//   neg_p1s1_transport_kind_tls.toml     → invalid_or_contradictory_selector @ "session[1].transport.kind"
+//   pos_p1_multisession_all_plain.toml   → success; session[1].override == nullptr
+
+// ── Plaintext-engine-default + session[1] missing transport section ────────────
+//
+// Discriminating: before the fix the plaintext branch had no per-session loop,
+// so session[1] missing its [transport] silently loaded with no diagnostic
+// (session[1] would run on the engine-default plaintext factory regardless).
+// After fix: missing_required at "session[1].transport.kind".
+TEST(LoadSelectors, GateBR1_Plaintext_Session1KindMissing) {
+    auto result = load(fixture("neg_p1s1_transport_kind_missing.toml"));
+
+    ASSERT_FALSE(result.has_value())
+        << "expected load failure: session[1] has no [session.transport] on a "
+           "plaintext-default engine; plaintext-branch per-session validation "
+           "not yet implemented (symmetric half-restructure gap)";
+
+    using RC = fixpp::config::reason_class;
+    EXPECT_TRUE(has_diag(result.error(), RC::missing_required, "session[1].transport.kind"))
+        << "expected missing_required at \"session[1].transport.kind\" "
+           "(plaintext-default branch must validate non-first sessions)";
+}
+
+// ── Plaintext-engine-default + session[1] declares tls → cross-kind reject ─────
+//
+// Discriminating: before the fix session[1] declaring "tls" on a plaintext-default
+// engine had no cert_source available and would silently emit malformed TLS config.
+// After fix: invalid_or_contradictory_selector at "session[1].transport.kind".
+TEST(LoadSelectors, GateBR1_Plaintext_Session1KindTLS) {
+    auto result = load(fixture("neg_p1s1_transport_kind_tls.toml"));
+
+    ASSERT_FALSE(result.has_value())
+        << "expected load failure: session[1] declares \"tls\" but engine default is "
+           "plaintext + no cert_source; cross-kind must fail closed (FR-012 / D-6a)";
+
+    using RC = fixpp::config::reason_class;
+    EXPECT_TRUE(has_diag(result.error(), RC::invalid_or_contradictory_selector,
+                         "session[1].transport.kind"))
+        << "expected invalid_or_contradictory_selector at \"session[1].transport.kind\" "
+           "for tls-on-plaintext-engine without cert_source";
+}
+
+// ── Plaintext-engine-default + all sessions plaintext → positive (no override) ──
+//
+// Discriminating: the per-session validation loop must NOT add spurious diagnostics
+// when session[1] matches the engine-default kind ("plaintext" → "plaintext").
+TEST(LoadSelectors, GateBR1_Plaintext_MultisessionAllPlain) {
+    auto result = load(fixture("pos_p1_multisession_all_plain.toml"));
+
+    ASSERT_TRUE(result.has_value())
+        << "pos_p1_multisession_all_plain.toml must load successfully; "
+           "two-plaintext-session config is valid; diagnostics: "
+        << [&]() -> std::string {
+        if (!result.has_value()) {
+            std::string s;
+            for (const auto& d : result.error()) {
+                s += "[" + d.key_path + "] " + d.message + "; ";
+            }
+            return s;
+        }
+        return "(load succeeded)";
+    }();
+
+    ASSERT_EQ(result->sessions.size(), std::size_t{2});
+
+    // Engine default: plaintext
+    EXPECT_EQ(result->engine.default_transport_factory->kind(),
+              fixpp::transport::transport_security_kind::plaintext);
+
+    // session[1] matches engine default → no override needed
+    EXPECT_EQ(result->sessions[1].config.transport_factory_override, nullptr)
+        << "session[1] has same kind as engine default (plaintext); "
+           "transport_factory_override must be null (no override minted)";
+}
+
 TEST(LoadSelectors, T027_DivergentCertMultiSession) {
     auto result = load(fixture("multisession_divergent_cert.toml"));
 

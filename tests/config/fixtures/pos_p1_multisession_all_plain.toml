@@ -1,0 +1,40 @@
+# pos_p1_multisession_all_plain.toml
+# Two sessions, both plaintext.  Engine default = plaintext factory.
+# session[1] has the same kind → no override minted.
+# Expected: successful load, sessions[1].config.transport_factory_override == nullptr
+
+[clock]
+kind = "system"
+
+[store]
+kind = "memory"
+
+[dictionary]
+kind = "path"
+path = "FIX44.xml"
+
+[[session]]
+sender_comp_id = "CLIENT_A"
+target_comp_id = "SERVER_A"
+begin_string   = "FIX.4.4"
+role           = "initiator"
+
+[session.transport]
+kind = "plaintext"
+host = "fix-plain-a.example.com"
+port = 1234
+
+[session.security_profile]
+kind = "insecure_plain_tcp"
+
+[[session]]
+sender_comp_id = "CLIENT_B"
+target_comp_id = "SERVER_B"
+begin_string   = "FIX.4.4"
+role           = "acceptor"
+
+[session.transport]
+kind = "plaintext"
+
+[session.security_profile]
+kind = "insecure_plain_tcp"
