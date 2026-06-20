@@ -674,3 +674,134 @@ TEST(LoadLogger, T009_AbsentLoggerIsNull) {
     EXPECT_NE(result->engine.default_store_factory, nullptr)
         << "engine.default_store_factory must be populated even when [logger] is absent";
 }
+
+// =============================================================================
+// T027 — Quickstart drift check
+// =============================================================================
+//
+// Transcribes the example TOML from quickstart.md and verifies it loads
+// without errors.  Any key-name or scalar-spelling drift in quickstart.md
+// would surface here as a failed load or a diagnostic.
+//
+// The OTLP sink is included only under FIXPP_CONFIG_HAS_OTLP.
+// cert_source is omitted (no real PEM in the test environment; preflight
+// requires a readable PEM file which we cannot guarantee in all CI configs).
+// export_timeout and max_export_batch are verified by presence in the TOML.
+//
+// Sink directories are written to /tmp to satisfy the directory-pre-exists
+// preflight requirement (research D-4).  The test pre-creates and then
+// removes them.  The quickstart.md NOTE ("the referenced file-sink directories
+// must exist before load") is confirmed by this pre-creation step.
+
+TEST(LoadLogger, T027_QuickstartLoad) {
+    // Create temporary directories for the file sinks.
+    const auto log_dir     = std::filesystem::temp_directory_path() / "fixpp_qs_t027_logs";
+    const auto acme_dir    = std::filesystem::temp_directory_path() / "fixpp_qs_t027_acme";
+    const auto toml_path   = std::filesystem::temp_directory_path() / "fixpp_qs_t027.toml";
+    {
+        std::error_code ec;
+        std::filesystem::remove_all(log_dir, ec);
+        std::filesystem::remove_all(acme_dir, ec);
+        std::filesystem::create_directories(log_dir, ec);
+        ASSERT_FALSE(ec) << "Failed to create log_dir: " << log_dir;
+        std::filesystem::create_directories(acme_dir, ec);
+        ASSERT_FALSE(ec) << "Failed to create acme_dir: " << acme_dir;
+    }
+
+    // Write the quickstart.md example TOML with real tmp paths substituted.
+    // Keys and spellings match quickstart.md verbatim (drift check).
+    // Required 044 engine-level selectors added (clock, store, cert_source,
+    // dictionary) so the bundle loads cleanly.
+    {
+        std::ofstream f(toml_path);
+        ASSERT_TRUE(f.is_open()) << "Could not open temp TOML: " << toml_path;
+        f << "[clock]\n"
+          << "kind = \"system\"\n\n"
+          << "[store]\n"
+          << "kind = \"memory\"\n\n"
+          << "[cert_source]\n"
+          << "kind      = \"file\"\n"
+          << "cert_file = \"" << (fixture_dir() / "leaf_ecdsa_p256.pem").string() << "\"\n"
+          << "key_file  = \"" << (fixture_dir() / "leaf_ecdsa_p256.key").string() << "\"\n"
+          << "ca_file   = \"" << (fixture_dir() / "ca.pem").string() << "\"\n\n"
+          << "[dictionary]\n"
+          << "kind = \"path\"\n"
+          << "path = \"" << (fixture_dir() / "FIX44.xml").string() << "\"\n\n"
+          // ── Logger from quickstart.md ──────────────────────────────────────
+          << "[logger]\n"
+          << "capacity      = 65536\n"
+          << "on_overflow   = \"drop_newest\"\n"
+          << "drain_timeout = \"5000ms\"\n\n"
+          << "  [[logger.sinks]]\n"
+          << "  kind           = \"file\"\n"
+          << "  directory      = \"" << log_dir.string() << "\"\n"
+          << "  base_name      = \"fixpp\"\n"
+          << "  max_file_bytes = 268435456\n"
+          << "  max_keep_count = 8\n"
+          << "  async_fsync    = true\n\n"
+#ifdef FIXPP_CONFIG_HAS_OTLP
+          << "  [[logger.sinks]]\n"
+          << "  kind             = \"otlp\"\n"
+          << "  endpoint         = \"http://collector:4318/v1/logs\"\n"
+          << "  export_timeout   = \"10s\"\n"
+          << "  max_export_batch = 512\n\n"
+#endif
+          // ── Session from quickstart.md ─────────────────────────────────────
+          << "[[session]]\n"
+          << "sender_comp_id = \"ACME\"\n"
+          << "target_comp_id = \"EXCH\"\n"
+          << "begin_string   = \"FIX.4.4\"\n"
+          << "role           = \"initiator\"\n\n"
+          << "[session.transport]\n"
+          << "kind = \"tls\"\n"
+          << "host = \"fix.example.com\"\n"
+          << "port = 4321\n\n"
+          << "[session.security_profile]\n"
+          << "kind = \"mtls_ca\"\n\n"
+          // Per-session logger override from quickstart.md
+          << "[session.logger]\n"
+          << "capacity = 16384\n\n"
+          << "  [[session.logger.sinks]]\n"
+          << "  kind      = \"file\"\n"
+          << "  directory = \"" << acme_dir.string() << "\"\n";
+    }
+
+    asio::io_context ctx;
+    fixpp::config::LoadOptions opts;
+    opts.engine_executor = ctx.get_executor();
+    auto result = fixpp::config::load_toml_config(toml_path, opts);
+
+    // Cleanup temp files unconditionally.
+    {
+        std::error_code ec;
+        std::filesystem::remove(toml_path, ec);
+    }
+
+    ASSERT_TRUE(result.has_value())
+        << "quickstart.md example TOML must load cleanly; diagnostics:\n"
+        << (result.has_value() ? "" : diag_string(result.error()))
+        << "\n(A failure here means quickstart.md has drift from the resolver "
+           "— fix the quickstart, not the loader)";
+
+    // Engine logger must be non-null (quickstart has a [logger] block).
+    ASSERT_NE(result->engine.logger, nullptr)
+        << "engine.logger must be non-null; [logger] block present in quickstart TOML";
+
+    // Session[0] must have logger_override (quickstart has [session.logger]).
+    ASSERT_EQ(result->sessions.size(), std::size_t{1});
+    EXPECT_NE(result->sessions[0].config.logger_override, nullptr)
+        << "sessions[0].config.logger_override must be non-null; "
+           "[session.logger] block present in quickstart TOML";
+
+    // Shutdown loggers.
+    {
+        [[maybe_unused]] auto r = result->engine.logger->shutdown();
+        if (result->sessions[0].config.logger_override)
+            [[maybe_unused]] auto r2 = result->sessions[0].config.logger_override->shutdown();
+    }
+    {
+        std::error_code ec;
+        std::filesystem::remove_all(log_dir, ec);
+        std::filesystem::remove_all(acme_dir, ec);
+    }
+}

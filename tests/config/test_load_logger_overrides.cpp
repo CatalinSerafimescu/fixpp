@@ -208,3 +208,87 @@ TEST(LoadLoggerOverrides, T018_MultiSessionOverride) {
            "no [session.logger] block so it should inherit the engine default "
            "(null override), not get a constructed override logger";
 }
+
+// =============================================================================
+// Pinning cell — [default.logger] MERGED semantics
+// =============================================================================
+//
+// Discriminating witness: a [default.logger] block in the per-session-defaults
+// [default] table is inherited as logger_override for EVERY session that has
+// no explicit [session.logger].
+//
+// Under MERGED semantics (current impl):
+//   sessions[0].config.logger_override != nullptr   (inherited)
+//   sessions[1].config.logger_override != nullptr   (inherited)
+//   Both are DISTINCT instances (per-session construction, NOT aliased).
+//
+// Under RAW semantics (no inheritance) both would be null — so any assertion
+// below that != nullptr fails on a RAW impl. This pins MERGED.
+//
+// The fixture also has an engine-level [logger] (DISTINCT dir) to confirm
+// the engine logger is independently built and not confused with [default.logger].
+//
+// If this cell FAILS, the impl is not actually MERGED — escalate; do NOT
+// change the resolver to make it green.
+
+TEST(LoadLoggerOverrides, DefaultLoggerMergedToSessions) {
+    // Pre-create all sink directories the fixture references.
+    const auto engine_dir =
+        fixture_dir() / "logs" / "t_defaultmerge_engine";
+    const auto default_dir =
+        fixture_dir() / "logs" / "t_defaultmerge_default";
+    {
+        std::error_code ec;
+        std::filesystem::remove_all(engine_dir, ec);
+        std::filesystem::remove_all(default_dir, ec);
+        std::filesystem::create_directories(engine_dir, ec);
+        ASSERT_FALSE(ec) << "Failed to create engine dir: " << engine_dir;
+        std::filesystem::create_directories(default_dir, ec);
+        ASSERT_FALSE(ec) << "Failed to create default dir: " << default_dir;
+    }
+
+    auto result = load_fixture("logger_default_merged.toml");
+
+    ASSERT_TRUE(result.has_value())
+        << "logger_default_merged.toml must load successfully; diagnostics:\n"
+        << (result.has_value() ? "" : diag_string(result.error()));
+
+    ASSERT_EQ(result->sessions.size(), std::size_t{2})
+        << "expected exactly two sessions";
+
+    // Engine logger must be non-null (built from the top-level [logger]).
+    ASSERT_NE(result->engine.logger, nullptr)
+        << "engine.logger must be non-null (top-level [logger] present)";
+
+    // Both sessions must have a non-null logger_override (inherited from
+    // [default.logger]) — this is the MERGED discriminant.
+    const auto& s0_override = result->sessions[0].config.logger_override;
+    const auto& s1_override = result->sessions[1].config.logger_override;
+
+    ASSERT_NE(s0_override, nullptr)
+        << "sessions[0].config.logger_override must be non-null: "
+           "[default.logger] should be inherited (MERGED). "
+           "If null, the impl is RAW — escalate.";
+    ASSERT_NE(s1_override, nullptr)
+        << "sessions[1].config.logger_override must be non-null: "
+           "[default.logger] should be inherited (MERGED). "
+           "If null, the impl is RAW — escalate.";
+
+    // Both must be DISTINCT instances (per-session construction, not aliased).
+    EXPECT_NE(s0_override.get(), s1_override.get())
+        << "sessions[0] and sessions[1] logger_overrides must be DISTINCT "
+           "instances (per-session construction, not pointer aliasing)";
+
+    // Both must differ from engine.logger (not aliased to the engine default).
+    EXPECT_NE(s0_override.get(), result->engine.logger.get())
+        << "sessions[0].logger_override must not alias engine.logger";
+    EXPECT_NE(s1_override.get(), result->engine.logger.get())
+        << "sessions[1].logger_override must not alias engine.logger";
+
+    // Shutdown all constructed loggers.
+    {
+        [[maybe_unused]] auto r0 = s0_override->shutdown();
+        [[maybe_unused]] auto r1 = s1_override->shutdown();
+        [[maybe_unused]] auto re = result->engine.logger->shutdown();
+    }
+}

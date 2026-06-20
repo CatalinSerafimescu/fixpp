@@ -1,0 +1,30 @@
+# tests/config/fixtures/quickstart_logger.toml
+# T027 — quickstart.md drift check fixture.
+#
+# Transcription of the quickstart.md example logger TOML (logging excerpt).
+# The sink directories (logs/, logs/acme/) are replaced at load time by the
+# test that writes a version with real /tmp paths.
+# This file documents the KEY NAMES and SCALAR SPELLINGS from quickstart.md
+# for manual cross-checking; the test itself uses a runtime-generated copy
+# with real directory paths (required: directories must pre-exist for preflight).
+#
+# Key names verified against the loader (T027):
+#   [logger]:      capacity (int), on_overflow (str), drain_timeout (str, unit-suffixed)
+#   [[logger.sinks]] file:
+#                  kind, directory, base_name, max_file_bytes, max_keep_count, async_fsync
+#   [[logger.sinks]] otlp:
+#                  kind, endpoint, cert_source (optional), export_timeout, max_export_batch
+#   [session]:     sender_comp_id, target_comp_id (scalars)
+#   [session.logger]: capacity, [[session.logger.sinks]] kind, directory
+#
+# NOTE: cert_source for the otlp sink is omitted (requires a real PEM file for
+# the preflight to pass). The test generates TOML without cert_source.
+#
+# Scalar spellings from quickstart.md:
+#   on_overflow = "drop_newest"   ← checked against loader map
+#   drain_timeout = "5000ms"      ← unit-suffixed, matches 044 duration rule
+#   async_fsync = true            ← bool
+#   export_timeout = "10s"        ← unit-suffixed, matches 044 duration rule
+
+# This file is used only as a reference template — the test generates
+# runtime TOML with real /tmp paths for actual loading.

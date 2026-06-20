@@ -746,3 +746,16 @@ Items that are normative in the spec but explicitly deferred from fixpp v1.0. Th
 > - `src/config/loader_internal.cpp` / `src/config/loader_internal.hpp` — noexcept-boundary helpers (`trap_throw_to_expected`, `DiagnosticAccumulator`, `resolve_path`)
 
 > **Coverage note.** This is a **synchronous cold-path** component — no coroutines, no async, no hot-path paths. All branches are exercised by ordinary unit tests. The `fixpp_config_toml` target links into the 5 config test binaries and is not included in any other sanitizer/session/transport build target. The coverage gate (`[const §IX.1]`) applies per-file to `src/config/` and `include/fixpp/config/` — measured in the `linux-clang-coverage` preset at `/speckit-verify`. A **Gate-B blocker (T039)** is outstanding: tomlplusplus 3.4.0 aborts/UBs on certain malformed TOML table headers, bypassing the `noexcept` boundary — reproducer at `tests/config/fuzz/crashes/repro_toml_assert_assume.toml`.
+
+## 045-observability-config (logging leg) — branch `045-observability-config` (2026-06-20)
+
+> Extends the 044 loader to hydrate the existing `fixpp::log::Logger` (file / syslog / OTLP-log sinks) from `[logger]` / `[[logger.sinks]]`. Catalogue row **T-044** (design row, `[const §XV.16]`). No new wire / error / codegen / C-ABI surface (FR-024). Same `fixpp_config_toml` target; new include edge `config → log` + a **conditional** link edge `config → fixpp_log_otlp` (gated by `FIXPP_CONFIG_HAS_OTLP`).
+>
+> **New/changed source (the coverage surface):**
+> - `src/config/logger_resolver.cpp` / `.hpp` (NEW) — `resolve_log_sink` (object-minting + inline side-effect-free preflight: dir stat/access, OTLP cert readable+PEM-magic, endpoint non-empty), `resolve_engine_logger` (composite scalars + ordered `[[logger.sinks]]` → file-scoped `PendingLogger`), `construct_loggers_if_clean` (SOLE side-effectful step, gated on an empty whole-file accumulator).
+> - `src/config/toml_config_loader.cpp` — `recognize_keys()` flips `logger` deferred→recognized; per-session `[session.logger]` wiring + the single end-of-load construct call.
+> - `src/config/scalar_mappers.cpp` — `map_syslog_facility` (20-name closed POSIX set, build-conditional `LOG_*`), `validate_pow2_capacity`.
+> - `src/config/loader_internal.cpp` / `.hpp` — `redact_url_userinfo` (FR-023).
+> - `include/fixpp/config/config_bundle.hpp` — one additive `shared_ptr<fixpp::log::Logger>` field.
+>
+> **Coverage note.** Synchronous cold-path (the constructed `Logger`'s own threads are the inherited 017 contract, not new loader concurrency — see L-045-1). Coverage gate (`[const §IX.1]`, per-file DA/BRDA, `linux-clang-coverage` preset) at `/speckit-verify`. Build-conditional arms (syslog-unavailable `#else`, OTLP-unavailable `#else`, the syslog build-undefined-`LOG_*` arm) are unreachable on a single preset and assessed per the templated-header DA/BRDA basis, not the aggregate. Design choice (per the 044 PATH-B precedent): pure config translation of the existing public log value-types — no new logging machinery.
