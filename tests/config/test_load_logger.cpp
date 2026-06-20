@@ -63,6 +63,7 @@
 #include <fixpp/config/toml_config_loader.hpp>
 #include <fixpp/log/file_sink.hpp>      // FileSink — white-box OTLP order test
 #include <fixpp/log/logger.hpp>
+#include <fixpp/log/syslog_sink.hpp>    // SyslogSink + FIXPP_HAS_SYSLOG (facility cell)
 #include <fstream>
 #include <string>
 
@@ -482,8 +483,9 @@ TEST(LoadLogger, T008_OtlpSinkCountAndOrder) {
         "base_name = \"wb_otlp_test\"\n"
         "\n"
         "[[logger.sinks]]\n"
-        "kind     = \"otlp\"\n"
-        "endpoint = \"http://127.0.0.1:0/v1/logs\"\n";
+        "kind               = \"otlp\"\n"
+        "endpoint           = \"http://127.0.0.1:0/v1/logs\"\n"
+        "max_export_retries = 4\n";  // T026-verify: covers the max_export_retries arm
 
     auto parsed = toml::parse(toml_text);
     const toml::table* logger_tbl_ptr = parsed.get_as<toml::table>("logger");
@@ -805,3 +807,85 @@ TEST(LoadLogger, T027_QuickstartLoad) {
         std::filesystem::remove_all(acme_dir, ec);
     }
 }
+
+// =============================================================================
+// T026-verify coverage cells — positive resolver arms the /implement battery
+// missed (found by /speckit-verify §IX.1 on logger_resolver.cpp). White-box so
+// the witness discriminates the PARSED value, not just "it loaded".
+// =============================================================================
+
+// Logger-level scalar success arms: cfg.on_overflow="block", cfg.drain_cpu_affinity,
+// cfg.capacity. Uses a file sink with no directory (no preflight) so the cell is
+// always compiled (no build-conditional sink).
+TEST(LoadLogger, T026_LoggerLevelScalarsWhiteBox) {
+    const std::string toml_text =
+        "[logger]\n"
+        "capacity           = 8192\n"        // non-default (default 65536); valid pow2
+        "on_overflow        = \"block\"\n"   // non-default (default drop_newest)
+        "drain_cpu_affinity = 3\n"           // non-default (default -1)
+        "\n"
+        "[[logger.sinks]]\n"
+        "kind = \"file\"\n";                 // no directory -> default; no preflight
+
+    auto parsed = toml::parse(toml_text);
+    const toml::table* logger_tbl = parsed.get_as<toml::table>("logger");
+    ASSERT_NE(logger_tbl, nullptr);
+
+    fixpp::config::detail::DiagnosticAccumulator acc;
+    fixpp::config::PendingLoggerSet pending;
+    fixpp::config::LoadOptions opts;
+    opts.resource = std::pmr::get_default_resource();
+
+    fixpp::config::detail::resolve_engine_logger(
+        *logger_tbl, "logger", fixpp::config::SourceLoc{1, 1},
+        std::filesystem::temp_directory_path(), opts, pending, acc,
+        /*is_engine=*/true, /*session_index=*/0);
+
+    ASSERT_TRUE(acc.empty()) << "valid logger-level scalars must resolve cleanly";
+    ASSERT_TRUE(pending.engine.has_value());
+    EXPECT_EQ(pending.engine->cfg.capacity, std::uint32_t{8192});
+    EXPECT_EQ(pending.engine->cfg.on_overflow, fixpp::log::overflow_policy::block);
+    EXPECT_EQ(pending.engine->cfg.drain_cpu_affinity, 3);
+}
+
+#ifdef FIXPP_HAS_SYSLOG
+// Syslog facility success arm: cfg.facility = fac_val. Discriminating on the
+// facility name->value mapping (asserted directly via map_syslog_facility) AND
+// the sink minting as a SyslogSink. Compiled only where syslog is available.
+TEST(LoadLogger, T026_SyslogFacilitySuccessWhiteBox) {
+    // Direct value discrimination of the facility-map success path (the reject
+    // path is already covered by T014_NegBattery.UnknownSyslogFacility).
+    int fac = 0;
+    fixpp::config::detail::DiagnosticAccumulator fac_acc;
+    ASSERT_TRUE(fixpp::config::detail::map_syslog_facility(
+        "local0", fac, "logger.sinks[0].facility", fixpp::config::SourceLoc{}, fac_acc));
+    EXPECT_EQ(fac, LOG_LOCAL0) << "\"local0\" must map to LOG_LOCAL0";
+    EXPECT_TRUE(fac_acc.empty());
+
+    // Resolver arm: a syslog sink WITH a valid facility mints + sets cfg.facility.
+    const std::string toml_text =
+        "[logger]\n"
+        "  [[logger.sinks]]\n"
+        "  kind     = \"syslog\"\n"
+        "  facility = \"local0\"\n";
+    auto parsed = toml::parse(toml_text);
+    const toml::table* logger_tbl = parsed.get_as<toml::table>("logger");
+    ASSERT_NE(logger_tbl, nullptr);
+
+    fixpp::config::detail::DiagnosticAccumulator acc;
+    fixpp::config::PendingLoggerSet pending;
+    fixpp::config::LoadOptions opts;
+    opts.resource = std::pmr::get_default_resource();
+
+    fixpp::config::detail::resolve_engine_logger(
+        *logger_tbl, "logger", fixpp::config::SourceLoc{},
+        std::filesystem::temp_directory_path(), opts, pending, acc,
+        /*is_engine=*/true, /*session_index=*/0);
+
+    ASSERT_TRUE(acc.empty()) << "syslog sink with a valid facility must resolve cleanly";
+    ASSERT_TRUE(pending.engine.has_value());
+    ASSERT_EQ(pending.engine->sinks.size(), std::size_t{1});
+    EXPECT_NE(dynamic_cast<fixpp::log::SyslogSink*>(pending.engine->sinks[0].get()), nullptr)
+        << "the syslog sink must mint as a SyslogSink";
+}
+#endif  // FIXPP_HAS_SYSLOG

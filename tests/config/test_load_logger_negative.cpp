@@ -347,17 +347,99 @@ TEST(T014_NegBattery, OtlpUnitlessExportTimeout)
 }
 #endif  // FIXPP_CONFIG_HAS_OTLP
 
-// ── invalid_or_contradictory_selector: syslog on non-syslog library build ────
-//
-// On this POSIX host, FIXPP_HAS_SYSLOG is defined in the test TU (by including
-// syslog_sink.hpp), but the fixpp_config_toml library was compiled without it
-// being defined in logger_resolver.cpp (the macro is only set by including the
-// header, which is inside the #ifdef guard — a circular dependency). As a result,
-// the library ALWAYS takes the "syslog unavailable" path on this build, emitting
-// invalid_or_contradictory_selector for kind="syslog".
-// This test documents and validates that behavior without a compile-time guard
-// (the library's syslog mode is detected at runtime by the UnknownSyslogFacility
-// self-probe; here we just assert the unavailable diagnostic fires).
+// ── T026-verify coverage cells: sink-level reason_class arms ──────────────────
+// These four cells close the logger_resolver.cpp §IX.1 coverage gap found by
+// /speckit-verify — each exercises a reachable resolver arm the /implement
+// battery missed, with a discriminating (exact reason + key_path) witness.
+
+// missing_required: a [[logger.sinks]] entry with no "kind" field.
+TEST(T014_NegBattery, SinkMissingKind)
+{
+    const auto result = full_load(neg_fixture("neg_logger_sink_missing_kind.toml"));
+    ASSERT_FALSE(result.has_value());
+    EXPECT_TRUE(has_diag(result.error(),
+                          fixpp::config::reason_class::missing_required,
+                          "logger.sinks[0].kind"))
+        << "Expected missing_required on logger.sinks[0].kind";
+}
+
+// empty_required: a [[logger.sinks]] entry with kind = "".
+TEST(T014_NegBattery, SinkEmptyKind)
+{
+    const auto result = full_load(neg_fixture("neg_logger_sink_empty_kind.toml"));
+    ASSERT_FALSE(result.has_value());
+    EXPECT_TRUE(has_diag(result.error(),
+                          fixpp::config::reason_class::empty_required,
+                          "logger.sinks[0].kind"))
+        << "Expected empty_required on logger.sinks[0].kind";
+}
+
+// out_of_range: capacity > uint32 max (the v<0||v>max arm, distinct from the
+// not-a-power-of-2 else branch that neg_logger_capacity_not_pow2 already covers).
+TEST(T014_NegBattery, CapacityOutOfRange)
+{
+    const auto result = full_load(neg_fixture("neg_logger_capacity_oor.toml"));
+    ASSERT_FALSE(result.has_value());
+    EXPECT_TRUE(has_diag(result.error(),
+                          fixpp::config::reason_class::out_of_range,
+                          "logger.capacity"))
+        << "Expected out_of_range on logger.capacity (value exceeds uint32)";
+}
+
+// malformed_value: a [logger].sinks array element that is not a TOML table.
+TEST(T014_NegBattery, SinkElementNotATable)
+{
+    const auto result = full_load(neg_fixture("neg_logger_sink_not_table.toml"));
+    ASSERT_FALSE(result.has_value());
+    EXPECT_TRUE(has_diag(result.error(),
+                          fixpp::config::reason_class::malformed_value,
+                          "logger.sinks[0]"))
+        << "Expected malformed_value on logger.sinks[0] (element is not a table)";
+}
+
+// out_of_range: capacity = -1 (the v<0 sub-branch, distinct from the >uint32-max
+// sub-branch covered by CapacityOutOfRange).
+TEST(T014_NegBattery, CapacityNegative)
+{
+    const auto result = full_load(neg_fixture("neg_logger_capacity_negative.toml"));
+    ASSERT_FALSE(result.has_value());
+    EXPECT_TRUE(has_diag(result.error(),
+                          fixpp::config::reason_class::out_of_range,
+                          "logger.capacity"))
+        << "Expected out_of_range on logger.capacity (negative value)";
+}
+
+// missing_required: a sink "kind" that is present but NOT a string (the
+// !is_string() sub-branch, distinct from the absent-kind sub-branch).
+TEST(T014_NegBattery, SinkNonStringKind)
+{
+    const auto result = full_load(neg_fixture("neg_logger_sink_nonstring_kind.toml"));
+    ASSERT_FALSE(result.has_value());
+    EXPECT_TRUE(has_diag(result.error(),
+                          fixpp::config::reason_class::missing_required,
+                          "logger.sinks[0].kind"))
+        << "Expected missing_required on logger.sinks[0].kind (non-string kind)";
+}
+
+#ifdef FIXPP_CONFIG_HAS_OTLP
+// missing_required: an otlp endpoint present but NOT a string (the !is_string()
+// sub-branch). OTLP-build only.
+TEST(T014_NegBattery, OtlpNonStringEndpoint)
+{
+    const auto result = full_load(neg_fixture("neg_logger_otlp_nonstring_endpoint.toml"));
+    ASSERT_FALSE(result.has_value());
+    EXPECT_TRUE(has_diag(result.error(),
+                          fixpp::config::reason_class::missing_required,
+                          "logger.sinks[0].endpoint"))
+        << "Expected missing_required on logger.sinks[0].endpoint (non-string endpoint)";
+}
+#endif  // FIXPP_CONFIG_HAS_OTLP
+
+// ── build-conditional symmetry: syslog kind on a syslog/non-syslog build ─────
+// On a POSIX build syslog_sink.hpp self-defines FIXPP_HAS_SYSLOG, so the library
+// resolves kind="syslog" (the include is now unconditional — the old circular-
+// #ifdef bug that disabled syslog on every build is fixed). The cell below
+// asserts the available-branch accepts and the unavailable-branch rejects loudly.
 
 TEST(T014_NegBattery, SyslogBuildConditional)
 {
