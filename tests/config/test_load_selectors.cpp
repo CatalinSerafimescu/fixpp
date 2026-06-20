@@ -469,6 +469,68 @@ TEST(LoadSelectors, GateBR1_Plaintext_MultisessionAllPlain) {
            "transport_factory_override must be null (no override minted)";
 }
 
+// ── Plaintext-default: session[1] has [transport] but NO kind key ─────────────
+// Hits lines 792-797 in the plaintext-default per-session loop:
+//   `else if (!kind_node)` → missing_required.
+// Distinct from GateBR1_Plaintext_Session1KindMissing which has NO [transport]
+// section at all (lines 778-784 = missing table arm).
+TEST(LoadSelectors, GateBR1_Plaintext_Session1NoKindKey) {
+    auto result = load(fixture("neg_p1s1_transport_no_kind.toml"));
+
+    ASSERT_FALSE(result.has_value())
+        << "session[1] with [session.transport] present but no 'kind' key must fail "
+           "(plaintext-default branch; distinct from no-table arm)";
+
+    using RC = fixpp::config::reason_class;
+    EXPECT_TRUE(has_diag(result.error(), RC::missing_required, "session[1].transport.kind"))
+        << "expected missing_required at \"session[1].transport.kind\" "
+           "(plaintext-default: table present, kind key absent)";
+}
+
+// ── Plaintext-default: session[1] has transport.kind = 42 (non-string) ────────
+// Hits lines 799-804 in the plaintext-default per-session loop:
+//   the `else` arm (kind_node present but not is_string()).
+TEST(LoadSelectors, GateBR1_Plaintext_Session1KindNonString) {
+    auto result = load(fixture("neg_p1s1_transport_kind_nonstring.toml"));
+
+    ASSERT_FALSE(result.has_value())
+        << "session[1] with transport.kind=42 (integer, not string) must fail "
+           "(plaintext-default branch)";
+
+    using RC = fixpp::config::reason_class;
+    EXPECT_TRUE(has_diag(result.error(), RC::missing_required, "session[1].transport.kind"))
+        << "expected missing_required at \"session[1].transport.kind\" "
+           "(plaintext-default: kind present but not a string)";
+}
+
+// ── Plaintext-default: session[1] has transport.kind = "" (empty) ─────────────
+// Hits lines 807-813 in the plaintext-default per-session loop.
+TEST(LoadSelectors, GateBR1_Plaintext_Session1KindEmpty) {
+    auto result = load(fixture("neg_p1s1_transport_kind_empty.toml"));
+
+    ASSERT_FALSE(result.has_value())
+        << "session[1] with empty transport.kind must fail (plaintext-default branch)";
+
+    using RC = fixpp::config::reason_class;
+    EXPECT_TRUE(has_diag(result.error(), RC::empty_required, "session[1].transport.kind"))
+        << "expected empty_required at \"session[1].transport.kind\" "
+           "(plaintext-default branch)";
+}
+
+// ── Plaintext-default: session[1] has transport.kind = "websocket" (unknown) ──
+// Hits lines 832-839 in the plaintext-default per-session loop.
+TEST(LoadSelectors, GateBR1_Plaintext_Session1KindUnknown) {
+    auto result = load(fixture("neg_p1s1_transport_kind_unknown.toml"));
+
+    ASSERT_FALSE(result.has_value())
+        << "session[1] with unknown transport.kind must fail (plaintext-default branch)";
+
+    using RC = fixpp::config::reason_class;
+    EXPECT_TRUE(has_diag(result.error(), RC::unknown_enum, "session[1].transport.kind"))
+        << "expected unknown_enum at \"session[1].transport.kind\" "
+           "for value 'websocket' (plaintext-default branch)";
+}
+
 TEST(LoadSelectors, T027_DivergentCertMultiSession) {
     auto result = load(fixture("multisession_divergent_cert.toml"));
 

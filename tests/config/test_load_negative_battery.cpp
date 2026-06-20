@@ -1211,6 +1211,37 @@ TEST(LoadNegativeBattery, GateBR1_Session1TransportKindUnknown) {
            "key_path must be session[1], not session[0]";
 }
 
+// ── TLS-default: session[1] has [session.transport] but NO kind key ───────────
+// Hits lines 633-638 in the TLS-default per-session loop:
+//   `else if (!kind_node)` → missing_required.
+// Distinct from GateBR1_Session1TransportKindMissing which has NO [transport]
+// section at all (lines 619-625 = missing table arm).
+
+TEST(LoadNegativeBattery, GateBR1_Session1TransportNoKindKey) {
+    auto result = load(neg_fixture("neg_session1_transport_no_kind.toml"));
+    ASSERT_FALSE(result.has_value())
+        << "session[1] with [session.transport] but no 'kind' key must fail; "
+           "this arm is distinct from missing-table (no [session.transport] at all)";
+    using RC = fixpp::config::reason_class;
+    EXPECT_TRUE(has_diag(result.error(), RC::missing_required, "session[1].transport.kind"))
+        << "expected missing_required at \"session[1].transport.kind\" "
+           "(TLS-default branch: table present but kind key absent)";
+}
+
+// ── TLS-default: session[1] has transport.kind = 42 (non-string) ─────────────
+// Hits lines 641-646 in the TLS-default per-session loop:
+//   the `else` arm (kind_node present but not is_string()).
+
+TEST(LoadNegativeBattery, GateBR1_Session1TransportKindNonString) {
+    auto result = load(neg_fixture("neg_session1_transport_kind_nonstring.toml"));
+    ASSERT_FALSE(result.has_value())
+        << "session[1] with transport.kind=42 (integer, not string) must fail";
+    using RC = fixpp::config::reason_class;
+    EXPECT_TRUE(has_diag(result.error(), RC::missing_required, "session[1].transport.kind"))
+        << "expected missing_required at \"session[1].transport.kind\" "
+           "(TLS-default branch: kind present but not a string)";
+}
+
 // ── No [[session]] at all → missing_required at "session" ────────────────────
 // (toml_config_loader.cpp lines 419-424)
 

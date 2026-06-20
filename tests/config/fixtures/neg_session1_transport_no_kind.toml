@@ -1,0 +1,50 @@
+# neg_session1_transport_no_kind.toml
+# Two sessions: session[0] uses TLS (engine default), session[1] has a
+# [session.transport] section but NO `kind` key inside it.
+# Hits the "kind_node==nullptr" arm (lines 633-638) in the TLS-default
+# per-session validation loop.
+# Expected: missing_required at "session[1].transport.kind"
+
+[clock]
+kind = "system"
+
+[store]
+kind = "memory"
+
+[cert_source]
+kind      = "file"
+cert_file = "leaf_ecdsa_p256.pem"
+key_file  = "leaf_ecdsa_p256.key"
+ca_file   = "ca.pem"
+
+[dictionary]
+kind = "path"
+path = "FIX44.xml"
+
+[[session]]
+sender_comp_id = "CLIENT_TLS"
+target_comp_id = "SERVER_TLS"
+begin_string   = "FIX.4.4"
+role           = "initiator"
+
+[session.transport]
+kind = "tls"
+host = "fix-tls.example.com"
+port = 4321
+
+[session.security_profile]
+kind = "mtls_ca"
+
+[[session]]
+sender_comp_id = "CLIENT_B"
+target_comp_id = "SERVER_B"
+begin_string   = "FIX.4.4"
+role           = "acceptor"
+
+[session.transport]
+# intentionally NO 'kind' key (but the section IS present)
+host = "0.0.0.0"
+port = 4322
+
+[session.security_profile]
+kind = "insecure_plain_tcp"
