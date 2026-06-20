@@ -690,8 +690,7 @@ static void resolve_transport(const std::vector<const toml::table*>& merged_sess
                     s_cert_source = bundle.engine.default_cert_source;
                 }
 
-                auto s_factory = build_tls_factory(s_profile, s_cert_source,
-                                                   bundle.engine.clock,
+                auto s_factory = build_tls_factory(s_profile, s_cert_source, bundle.engine.clock,
                                                    s_prefix + ".transport", acc);
                 if (!s_factory) {
                     return;  // diagnostic already added
@@ -824,9 +823,9 @@ static void resolve_transport(const std::vector<const toml::table*>& merged_sess
                     .key_path = s_prefix + ".transport.kind",
                     .reason = reason_class::invalid_or_contradictory_selector,
                     .message = s_prefix + " declares transport.kind=\"tls\" but the "
-                               "engine default is plaintext; per-session TLS requires "
-                               "an engine-level [cert_source] — add [cert_source] or "
-                               "switch all sessions to \"tls\"",
+                                          "engine default is plaintext; per-session TLS requires "
+                                          "an engine-level [cert_source] — add [cert_source] or "
+                                          "switch all sessions to \"tls\"",
                 });
             } else {
                 acc.add(LoadDiagnostic{

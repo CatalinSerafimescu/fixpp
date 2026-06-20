@@ -394,8 +394,9 @@ TEST(LoadSelectors, Cov_MultisessionTlsAndPlain) {
 //
 // Fixtures and expected outcomes:
 //   neg_p1s1_transport_kind_missing.toml → missing_required @ "session[1].transport.kind"
-//   neg_p1s1_transport_kind_tls.toml     → invalid_or_contradictory_selector @ "session[1].transport.kind"
-//   pos_p1_multisession_all_plain.toml   → success; session[1].override == nullptr
+//   neg_p1s1_transport_kind_tls.toml     → invalid_or_contradictory_selector @
+//   "session[1].transport.kind" pos_p1_multisession_all_plain.toml   → success; session[1].override
+//   == nullptr
 
 // ── Plaintext-engine-default + session[1] missing transport section ────────────
 //
@@ -443,10 +444,9 @@ TEST(LoadSelectors, GateBR1_Plaintext_Session1KindTLS) {
 TEST(LoadSelectors, GateBR1_Plaintext_MultisessionAllPlain) {
     auto result = load(fixture("pos_p1_multisession_all_plain.toml"));
 
-    ASSERT_TRUE(result.has_value())
-        << "pos_p1_multisession_all_plain.toml must load successfully; "
-           "two-plaintext-session config is valid; diagnostics: "
-        << [&]() -> std::string {
+    ASSERT_TRUE(result.has_value()) << "pos_p1_multisession_all_plain.toml must load successfully; "
+                                       "two-plaintext-session config is valid; diagnostics: "
+                                    << [&]() -> std::string {
         if (!result.has_value()) {
             std::string s;
             for (const auto& d : result.error()) {

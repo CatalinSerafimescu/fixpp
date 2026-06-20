@@ -715,8 +715,7 @@ TEST(LoadNegativeBattery, T020_MissingRequired_Dictionary) {
 
 TEST(LoadNegativeBattery, GateBR1_CollectAllNotTruncatedByMissingDict) {
     auto result = load(neg_fixture("neg_missing_dict_plus_typo.toml"));
-    ASSERT_FALSE(result.has_value())
-        << "fixture with 3 independent errors must fail";
+    ASSERT_FALSE(result.has_value()) << "fixture with 3 independent errors must fail";
 
     using RC = fixpp::config::reason_class;
     using KeyPath = std::string;
@@ -726,9 +725,9 @@ TEST(LoadNegativeBattery, GateBR1_CollectAllNotTruncatedByMissingDict) {
 
     // Build the set of (reason, key_path) pairs we expect — ALL three must appear.
     const std::set<DiagKey> expected = {
-        {RC::missing_required,                    "dictionary"},
-        {RC::unknown_key,                          "session[0].sender_comp_idd"},
-        {RC::recognized_not_yet_supported_step2,  "session[0].logger"},
+        {RC::missing_required, "dictionary"},
+        {RC::unknown_key, "session[0].sender_comp_idd"},
+        {RC::recognized_not_yet_supported_step2, "session[0].logger"},
     };
 
     std::set<DiagKey> got;
@@ -738,16 +737,17 @@ TEST(LoadNegativeBattery, GateBR1_CollectAllNotTruncatedByMissingDict) {
 
     for (const auto& [reason, key] : expected) {
         EXPECT_TRUE(got.count({reason, key}))
-            << "missing diagnostic: reason=" << static_cast<int>(reason)
-            << " key_path=\"" << key << "\" — collect-ALL (FR-018) truncated "
+            << "missing diagnostic: reason=" << static_cast<int>(reason) << " key_path=\"" << key
+            << "\" — collect-ALL (FR-018) truncated "
                "before this diagnostic was reached (#2 Gate B r1)";
     }
 
     // Exact-count guard: the fixture has exactly these 3 errors (no spurious diags).
     EXPECT_EQ(diags.size(), expected.size())
-        << "expected exactly " << expected.size() << " diagnostics from "
-           "neg_missing_dict_plus_typo.toml; got " << diags.size()
-        << " — either spurious diagnostics were added or some are still truncated";
+        << "expected exactly " << expected.size()
+        << " diagnostics from "
+           "neg_missing_dict_plus_typo.toml; got "
+        << diags.size() << " — either spurious diagnostics were added or some are still truncated";
 }
 
 // ── transport.kind missing → missing_required (ALREADY-GREEN, Phase 3b) ──────
@@ -1179,9 +1179,8 @@ TEST(LoadNegativeBattery, Cov_TransportKindUnknown) {
 
 TEST(LoadNegativeBattery, GateBR1_Session1TransportKindMissing) {
     auto result = load(neg_fixture("neg_session1_transport_kind_missing.toml"));
-    ASSERT_FALSE(result.has_value())
-        << "session[1] with no [session.transport] must fail; "
-           "pre-fix: load succeeded (session[1] escaped validation)";
+    ASSERT_FALSE(result.has_value()) << "session[1] with no [session.transport] must fail; "
+                                        "pre-fix: load succeeded (session[1] escaped validation)";
     using RC = fixpp::config::reason_class;
     EXPECT_TRUE(has_diag(result.error(), RC::missing_required, "session[1].transport.kind"))
         << "expected missing_required at \"session[1].transport.kind\" "
@@ -1191,9 +1190,8 @@ TEST(LoadNegativeBattery, GateBR1_Session1TransportKindMissing) {
 
 TEST(LoadNegativeBattery, GateBR1_Session1TransportKindEmpty) {
     auto result = load(neg_fixture("neg_session1_transport_kind_empty.toml"));
-    ASSERT_FALSE(result.has_value())
-        << "session[1] with empty transport.kind must fail; "
-           "pre-fix: load succeeded (session[1] escaped validation)";
+    ASSERT_FALSE(result.has_value()) << "session[1] with empty transport.kind must fail; "
+                                        "pre-fix: load succeeded (session[1] escaped validation)";
     using RC = fixpp::config::reason_class;
     EXPECT_TRUE(has_diag(result.error(), RC::empty_required, "session[1].transport.kind"))
         << "expected empty_required at \"session[1].transport.kind\" (#1 Gate B r1)";
@@ -1201,9 +1199,8 @@ TEST(LoadNegativeBattery, GateBR1_Session1TransportKindEmpty) {
 
 TEST(LoadNegativeBattery, GateBR1_Session1TransportKindUnknown) {
     auto result = load(neg_fixture("neg_session1_transport_kind_unknown.toml"));
-    ASSERT_FALSE(result.has_value())
-        << "session[1] with unknown transport.kind must fail; "
-           "pre-fix: load succeeded (session[1] escaped validation)";
+    ASSERT_FALSE(result.has_value()) << "session[1] with unknown transport.kind must fail; "
+                                        "pre-fix: load succeeded (session[1] escaped validation)";
     using RC = fixpp::config::reason_class;
     EXPECT_TRUE(has_diag(result.error(), RC::unknown_enum, "session[1].transport.kind"))
         << "expected unknown_enum at \"session[1].transport.kind\" "
