@@ -31,9 +31,11 @@
 #include <fixpp/log/logger.hpp>
 #include <fixpp/log/sink.hpp>
 
-#ifdef FIXPP_HAS_SYSLOG
+// Unconditional include: syslog_sink.hpp self-#defines FIXPP_HAS_SYSLOG on a
+// POSIX platform that has <syslog.h> (there is no CMake define). It MUST be
+// included before any #ifdef FIXPP_HAS_SYSLOG test, or the macro is never seen
+// and the syslog branch is dead on every build (matches scalar_mappers.cpp:27).
 #include <fixpp/log/syslog_sink.hpp>
-#endif
 
 #ifdef FIXPP_CONFIG_HAS_OTLP
 #include <fixpp/log/otlp_log_sink.hpp>
@@ -43,10 +45,13 @@
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
+#include <fstream>
 #include <limits>
 #include <memory>
 #include <string>
 #include <string_view>
+#include <system_error>
+#include <unistd.h>
 #include <utility>
 
 namespace fixpp::config::detail {
@@ -264,6 +269,35 @@ std::unique_ptr<fixpp::log::Sink> resolve_log_sink(
             cfg.async_fsync = n->as_boolean()->get();
         }
 
+        // T016 — preflight: configured directory must already exist + be writable.
+        // (stat/access ONLY — no mkdir, no probe file; research D-4/D-7)
+        // Only validate when directory was explicitly set (default "." is not
+        // validated here; operators who don't configure a directory get runtime errors).
+        if (sink_tbl.get("directory")) {
+            const std::filesystem::path& dir = cfg.directory;
+            std::error_code fs_ec;
+            if (!std::filesystem::is_directory(dir, fs_ec)) {
+                acc.add(LoadDiagnostic{
+                    .key_path = kpath(sink_kp, "directory"),
+                    .reason   = reason_class::invalid_or_contradictory_selector,
+                    .location = loc_node(*sink_tbl.get("directory")),
+                    .message  = "file sink directory does not exist or is not a directory: \"" +
+                                dir.string() + "\"",
+                });
+                return nullptr;
+            }
+            // POSIX access(2) W_OK: readable + writable by current process.
+            if (::access(dir.c_str(), W_OK) != 0) {
+                acc.add(LoadDiagnostic{
+                    .key_path = kpath(sink_kp, "directory"),
+                    .reason   = reason_class::invalid_or_contradictory_selector,
+                    .location = loc_node(*sink_tbl.get("directory")),
+                    .message  = "file sink directory is not writable: \"" + dir.string() + "\"",
+                });
+                return nullptr;
+            }
+        }
+
         fixpp::log::FileSinkFactory factory;
         return factory.make(nullptr, cfg);
     }
@@ -341,13 +375,55 @@ std::unique_ptr<fixpp::log::Sink> resolve_log_sink(
             }
         }
 
-        // cert_source — optional, relative→base_dir (load-time PEM check is T016/Phase 4)
+        // cert_source — optional, relative→base_dir
+        // T016 preflight: must be readable AND PEM-magic-validated (research D-4).
         if (const auto* n = sink_tbl.get("cert_source"); n && n->is_string()) {
             std::string_view cs_val = n->as_string()->get();
             if (!cs_val.empty()) {
                 std::filesystem::path cs_path{std::string{cs_val}};
                 if (cs_path.is_relative()) cs_path = base_dir / cs_path;
                 cfg.cert_source = cs_path.string();
+
+                // Preflight: readable check.
+                std::ifstream cert_f(cs_path, std::ios::binary);
+                if (!cert_f.is_open()) {
+                    acc.add(LoadDiagnostic{
+                        .key_path = kpath(sink_kp, "cert_source"),
+                        .reason   = reason_class::invalid_or_contradictory_selector,
+                        .location = loc_node(*n),
+                        .message  = "otlp cert_source file is not readable (endpoint: " +
+                                    redact_url_userinfo(cfg.endpoint) + "): \"" +
+                                    cs_path.string() + "\"",
+                    });
+                    return nullptr;
+                }
+
+                // Preflight: PEM-magic check — first non-whitespace bytes must be "-----BEGIN".
+                // Tolerate leading whitespace/BOM so we don't reject real PEM files.
+                constexpr std::string_view kPemMagic = "-----BEGIN";
+                std::string header;
+                header.resize(kPemMagic.size() + 8);  // read ahead a few extra bytes
+                cert_f.read(header.data(), static_cast<std::streamsize>(header.size()));
+                const std::size_t n_read = static_cast<std::size_t>(cert_f.gcount());
+                header.resize(n_read);
+                // Strip leading whitespace before checking magic.
+                const auto first_nonws = header.find_first_not_of(" \t\r\n\xEF\xBB\xBF");
+                const bool has_pem_magic =
+                    (first_nonws != std::string::npos) &&
+                    (header.size() - first_nonws >= kPemMagic.size()) &&
+                    (std::string_view{header}.substr(first_nonws, kPemMagic.size()) == kPemMagic);
+                if (!has_pem_magic) {
+                    acc.add(LoadDiagnostic{
+                        .key_path = kpath(sink_kp, "cert_source"),
+                        .reason   = reason_class::invalid_or_contradictory_selector,
+                        .location = loc_node(*n),
+                        .message  = "otlp cert_source does not appear to be a PEM file "
+                                    "(missing \"-----BEGIN\" header; endpoint: " +
+                                    redact_url_userinfo(cfg.endpoint) + "): \"" +
+                                    cs_path.string() + "\"",
+                    });
+                    return nullptr;
+                }
             }
         }
 

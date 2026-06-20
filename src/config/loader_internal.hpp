@@ -67,6 +67,14 @@ namespace fixpp::config::detail {
 [[nodiscard]] std::string_view display_value(std::string_view key_path, std::string_view value
                                              [[clang::lifetimebound]]) noexcept;
 
+// Redacts URL userinfo (user:password@) in an endpoint URL string (FR-023).
+// Returns a copy of the URL with the "user:password" portion replaced by
+// "***REDACTED***".  If no userinfo is present, returns the URL unchanged.
+// Example:
+//   redact_url_userinfo("http://user:secret@host:4318/v1/logs")
+//   → "http://***REDACTED***@host:4318/v1/logs"
+[[nodiscard]] std::string redact_url_userinfo(std::string_view url);
+
 // ---------------------------------------------------------------------------
 // T008 — noexcept-boundary throwing-site wrapper (validation rule 9 / D-3)
 // ---------------------------------------------------------------------------

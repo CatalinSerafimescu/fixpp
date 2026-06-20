@@ -18,6 +18,33 @@ namespace fixpp::config::detail {
 
 static constexpr std::string_view kRedacted = "***REDACTED***";
 
+std::string redact_url_userinfo(std::string_view url) {
+    // Detect the "://" authority prefix.
+    const auto scheme_end = url.find("://");
+    if (scheme_end == std::string_view::npos) {
+        return std::string{url};
+    }
+    const auto auth_start = scheme_end + 3;  // first char after "://"
+    // Find the '@' that delimits userinfo from host, within the authority.
+    // The authority ends at the first '/', '?', '#', or end-of-string.
+    const auto auth_end = url.find_first_of("/?#", auth_start);
+    const std::string_view authority =
+        (auth_end == std::string_view::npos) ? url.substr(auth_start)
+                                              : url.substr(auth_start, auth_end - auth_start);
+    const auto at_pos = authority.rfind('@');
+    if (at_pos == std::string_view::npos) {
+        return std::string{url};  // no userinfo
+    }
+    // Replace everything between "://" and "@" (inclusive) with "***REDACTED***@".
+    std::string result;
+    result.reserve(url.size());
+    result += url.substr(0, auth_start);     // scheme + "://"
+    result += kRedacted;
+    result += '@';
+    result += url.substr(auth_start + at_pos + 1);  // host + rest
+    return result;
+}
+
 bool is_credential_key(std::string_view key_path) noexcept {
     // Extract the final dotted segment (everything after the last '.').
     // If there is no '.', the whole key_path is the final segment.

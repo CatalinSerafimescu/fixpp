@@ -1,0 +1,40 @@
+# tests/config/fixtures/neg_logger_use_grpc_true.toml
+# T014 cell: use_grpc = true → recognized_not_yet_supported_step2 on logger.sinks[0].use_grpc
+# Only exercised when FIXPP_CONFIG_HAS_OTLP is defined.
+[clock]
+kind = "system"
+
+[store]
+kind = "memory"
+
+[cert_source]
+kind      = "file"
+cert_file = "leaf_ecdsa_p256.pem"
+key_file  = "leaf_ecdsa_p256.key"
+ca_file   = "ca.pem"
+
+[dictionary]
+kind = "path"
+path = "FIX44.xml"
+
+[logger]
+capacity = 65536
+
+  [[logger.sinks]]
+  kind     = "otlp"
+  endpoint = "http://collector:4318/v1/logs"
+  use_grpc = true  # gRPC deferred → recognized_not_yet_supported_step2
+
+[[session]]
+sender_comp_id = "CLIENT1"
+target_comp_id = "SERVER1"
+begin_string   = "FIX.4.4"
+role           = "initiator"
+
+[session.transport]
+kind = "tls"
+host = "fix.example.com"
+port = 4321
+
+[session.security_profile]
+kind = "mtls_ca"

@@ -194,6 +194,44 @@ set_target_properties(test_load_logger PROPERTIES
 add_test(NAME test_load_logger COMMAND test_load_logger)
 set_tests_properties(test_load_logger PROPERTIES LABELS "config;045")
 
+# ── T014/T014a/T015: logger negative battery + redaction + collect-ALL (045) ──
+
+add_executable(test_load_logger_negative
+    test_load_logger_negative.cpp
+)
+target_compile_definitions(test_load_logger_negative PRIVATE
+    FIXPP_CONFIG_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures"
+)
+# White-box cells call detail::resolve_engine_logger and
+# detail::construct_loggers_if_clean (private headers in src/config/).
+target_include_directories(test_load_logger_negative PRIVATE
+    "${CMAKE_SOURCE_DIR}/src/config"
+)
+target_link_libraries(test_load_logger_negative PRIVATE
+    fixpp::config_toml
+    fixpp::session
+    fixpp::core
+    fixpp::tls
+    fixpp::dictionary
+    fixpp::transport
+    fixpp::log
+    tomlplusplus::tomlplusplus
+    GTest::gtest
+    GTest::gtest_main
+    "${FIXPP_CFG_OPENSSL_CRYPTO_LIB}"
+    "${FIXPP_CFG_OPENSSL_SSL_LIB}"
+    "${FIXPP_CFG_ZLIB_LIB}"
+)
+if(TARGET fixpp::log_otlp)
+    target_link_libraries(test_load_logger_negative PRIVATE fixpp::log_otlp)
+    target_compile_definitions(test_load_logger_negative PRIVATE FIXPP_CONFIG_HAS_OTLP)
+endif()
+set_target_properties(test_load_logger_negative PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+)
+add_test(NAME test_load_logger_negative COMMAND test_load_logger_negative)
+set_tests_properties(test_load_logger_negative PROPERTIES LABELS "config;045")
+
 # ── T030: QuickFIX parity table (SC-004) ─────────────────────────────────────
 # Pure data test — no loader link needed; GTest only.
 
