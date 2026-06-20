@@ -148,6 +148,52 @@ set_target_properties(test_load_multisession_defaults PROPERTIES
 add_test(NAME test_load_multisession_defaults COMMAND test_load_multisession_defaults)
 set_tests_properties(test_load_multisession_defaults PROPERTIES LABELS "config;044")
 
+# ── T008 + T009: logger equivalence + absence tests (045) ───────────────────
+
+find_package(tomlplusplus CONFIG REQUIRED)
+
+add_executable(test_load_logger
+    test_load_logger.cpp
+)
+target_compile_definitions(test_load_logger PRIVATE
+    FIXPP_CONFIG_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures"
+)
+# White-box cells (T008_OtlpSinkCount) call detail::resolve_engine_logger directly,
+# which requires mappers.hpp from src/config/ (private header) and toml++ headers.
+# The toml_include.hpp ODR shim is in src/config/; linking tomlplusplus::tomlplusplus
+# directly is permitted here because this target never exposes toml++ in its
+# installed headers (it is a test binary, not a library).
+target_include_directories(test_load_logger PRIVATE
+    "${CMAKE_SOURCE_DIR}/src/config"
+)
+target_link_libraries(test_load_logger PRIVATE
+    fixpp::config_toml
+    fixpp::session
+    fixpp::core
+    fixpp::tls
+    fixpp::dictionary
+    fixpp::transport
+    fixpp::log
+    tomlplusplus::tomlplusplus
+    GTest::gtest
+    GTest::gtest_main
+    "${FIXPP_CFG_OPENSSL_CRYPTO_LIB}"
+    "${FIXPP_CFG_OPENSSL_SSL_LIB}"
+    "${FIXPP_CFG_ZLIB_LIB}"
+)
+# Propagate the OTLP gate to the test binary so #ifdef FIXPP_CONFIG_HAS_OTLP
+# compiles the same sub-cells as the loader.  fixpp::log is PRIVATE to
+# fixpp_config_toml and does NOT auto-propagate; link it explicitly above.
+if(TARGET fixpp::log_otlp)
+    target_link_libraries(test_load_logger PRIVATE fixpp::log_otlp)
+    target_compile_definitions(test_load_logger PRIVATE FIXPP_CONFIG_HAS_OTLP)
+endif()
+set_target_properties(test_load_logger PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+)
+add_test(NAME test_load_logger COMMAND test_load_logger)
+set_tests_properties(test_load_logger PROPERTIES LABELS "config;045")
+
 # ── T030: QuickFIX parity table (SC-004) ─────────────────────────────────────
 # Pure data test — no loader link needed; GTest only.
 

@@ -1,7 +1,16 @@
 # neg_step2_logger.toml
-# copy of happy_full.toml with a [logger] section — triggers
-# recognized_not_yet_supported_step2 (logger config is a step-2 feature).
-# NOTE: Phase 4b will implement this; RED until then.
+# 045-observability-config Phase-3 reconciliation (T013 / tasks.md).
+#
+# FR-022: "logger" is a SUPPORTED key (moved from kDeferred to kRecognized in T006).
+# After the Phase-3 resolver lands (T010-T013), a [logger] with NO [[logger.sinks]]
+# produces missing_required on "logger.sinks" (absent array; data-model E-3).
+#
+# Reconciliation decision: this fixture deliberately has NO [[logger.sinks]] so that
+# T018_Step2Logger (test_load_negative_battery.cpp) can assert the empty_required
+# diagnostic.  The invalid "level" key is removed so the ONLY error is the missing
+# sinks (discriminating — not double-counting).  Keeps the negative battery negative.
+#
+# Note: Phase-4 T014 may dedup this with its dedicated per-error-class battery.
 
 [clock]
 kind = "system"
@@ -20,7 +29,7 @@ kind = "path"
 path = "FIX44.xml"
 
 [logger]
-level = "debug"
+# No [[logger.sinks]] → missing_required on "logger.sinks" (absent; data-model E-3)
 
 [[session]]
 sender_comp_id = "CLIENT1"

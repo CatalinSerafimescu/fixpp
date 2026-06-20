@@ -266,7 +266,7 @@ void check_required_keys(const toml::table& merged, std::string_view key_prefix,
 void recognize_keys(const toml::table& tbl, std::string_view key_prefix,
                     detail::DiagnosticAccumulator& acc) {
     static const std::unordered_set<std::string_view> kDeferred = {
-        "logger",
+        // "logger" moved to kRecognized (045 FR-022 — logging leg now supported)
         "log_sink",
         "tracer",
         "meter",
@@ -285,6 +285,8 @@ void recognize_keys(const toml::table& tbl, std::string_view key_prefix,
         // structural
         "default",
         "session",
+        // 045-observability-config: logger is now a supported top-level key (FR-022)
+        "logger",
         // selectors / sub-tables
         "clock",
         "store",
@@ -336,8 +338,7 @@ void recognize_keys(const toml::table& tbl, std::string_view key_prefix,
                 .key_path = std::move(path),
                 .reason = reason_class::recognized_not_yet_supported_step2,
                 .location = loc_from_region(node.source()),
-                .message =
-                    std::string{k} + " is recognized but not yet supported (deferred to step 2)",
+                .message = std::string{k} + " is recognized but not yet supported",
             });
         } else if (!kRecognized.contains(k)) {
             acc.add(LoadDiagnostic{
@@ -549,6 +550,35 @@ void recognize_keys(const toml::table& tbl, std::string_view key_prefix,
     // the named key); the resolver may additionally surface a selector-level
     // diagnostic for the same broken input — redundant but not contradictory.
     detail::resolve_selectors(root_tbl, merged_session_ptrs, base_dir, opts, bundle, acc);
+
+    // ── T013 (045-observability-config): Resolve [logger] (if present) ──────
+    //
+    // [logger] is optional (FR-003/SC-004): absent → engine.logger stays null.
+    // Called AFTER 044 resolution so collect-ALL spans the whole file.
+    //
+    // Seam for Phase-4 T016 preflight: insert the side-effect-free resource
+    // preflight (dir-exists, cert PEM-magic, endpoint non-empty) BETWEEN
+    // resolve_engine_logger and construct_loggers_if_clean when T016 is wired.
+    PendingLoggerSet pending_loggers;
+
+    if (const auto* logger_node = root_tbl.get("logger");
+        logger_node && logger_node->is_table()) {
+        SourceLoc logger_loc;
+        {
+            const auto& src = logger_node->source().begin;
+            logger_loc = SourceLoc{
+                .line = static_cast<std::uint32_t>(src.line),
+                .col  = static_cast<std::uint32_t>(src.column),
+            };
+        }
+        detail::resolve_engine_logger(*logger_node->as_table(), "logger", logger_loc,
+                                      base_dir, opts, pending_loggers, acc,
+                                      /*is_engine=*/true, /*session_index=*/0);
+    }
+
+    // ── T012: Construct live Logger(s) only when the whole-file acc is clean ─
+    // (research D-7 / FR-015): the SOLE side-effectful step.
+    detail::construct_loggers_if_clean(std::move(pending_loggers), bundle, acc);
 
     if (!acc.empty()) {
         return std::unexpected(std::move(acc).release());

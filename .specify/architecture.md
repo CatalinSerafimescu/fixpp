@@ -64,7 +64,7 @@
 | 11 | `service` | `service/` | `fixppd` daemon: gRPC control plane (default) + iceoryx2 data plane (opt-in) | Yes (binary + gRPC schema) |
 | 12 | `bindings/python` | `bindings/python/` | SWIG `.i` files, pytest suite, wheel build | Yes (Python module) |
 | 13 | `bindings/c` | `bindings/c/` | Example C consumers; not a library — example/test code | No (samples only) |
-| 14 | `config` | `src/config/` + `include/fixpp/config/` | TOML session-config loader (`fixpp_config_toml` STATIC target); opt-in adjacent — NOT part of the core module graph; nothing in core/session/transport links it. Parser (`tomlplusplus`) isolated as PRIVATE `.cpp`-only dep (FR-004/SC-006). | Yes (C++) |
+| 14 | `config` | `src/config/` + `include/fixpp/config/` | TOML session-config loader (`fixpp_config_toml` STATIC target); opt-in adjacent — NOT part of the core module graph; nothing in core/session/transport/log links it. Links `log` (for logger/sink hydration, 045); conditional `log_otlp` link when OTel SDK present. Parser (`tomlplusplus`) isolated as PRIVATE `.cpp`-only dep (FR-004/SC-006). | Yes (C++) |
 
 ### 2.2 Dependency direction (acyclic)
 
@@ -126,7 +126,7 @@ The build enforces this graph at the include level via `include-what-you-use` co
 | `service` | `capi` only — **never** the C++ headers |
 | `bindings/python` | `capi` only |
 | `bindings/c` | `capi` only |
-| `config` | `core`, `session`, `dictionary`, `tls`, `transport` (opt-in adjacent; enforced in `check_layers.py`) |
+| `config` | `core`, `session`, `dictionary`, `tls`, `transport`, `log` (opt-in adjacent; enforced in `check_layers.py`; conditional `log_otlp` link via CMake only) |
 
 **Forbidden:** any back-edge (e.g., `core` including `session/`), any cycle, and any non-C-ABI consumption from `service/` or the bindings. CI fails on violation. **Bridge-surface carve-out:** the `dictionary↔wire` bridge surface defined in §2.4 (the generated `fixpp::vXX::*` tree + the named hand-written `dict/` bridge headers + the vendored frozen `wire/message_view_contract.hpp` stub) compiles against both modules and is **not** a `dictionary` module edge; it is header-only template glue with no link cycle. `tools/check_layers.py` exempts exactly that documented file-list (see §2.4 RC#3 amendment) — the `dictionary | core` whitelist is otherwise unchanged for every non-bridge `dict/` header.
 

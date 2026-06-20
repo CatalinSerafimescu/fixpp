@@ -27,6 +27,12 @@
 
 #include "loader_internal.hpp"
 
+// 045-observability-config: PendingLogger / PendingLoggerSet carrier types.
+// Included here (BEFORE the namespace block) so that the heavy log/ headers
+// inside logger_resolver.hpp are processed at file scope, not inside the
+// fixpp::config::detail namespace (which would nest ::fixpp::log incorrectly).
+#include "logger_resolver.hpp"
+
 namespace fixpp::config::detail {
 
 // ---------------------------------------------------------------------------
@@ -95,5 +101,61 @@ void resolve_selectors(const toml::table& root_tbl,
                        const std::vector<const toml::table*>& merged_session_tables,
                        const std::filesystem::path& base_dir, const LoadOptions& opts,
                        ConfigBundle& bundle, DiagnosticAccumulator& acc);
+
+// ---------------------------------------------------------------------------
+// 045-observability-config (T011/T012) — logger resolver entry points
+// ---------------------------------------------------------------------------
+//
+// resolve_engine_logger:
+//   Resolves a [logger] TOML table into a PendingLogger parked in `pending`.
+//   Does NOT construct the live Logger.
+//
+// construct_loggers_if_clean:
+//   The sole side-effectful construction step: when acc.empty(), moves each
+//   PendingLogger into make_shared<Logger> and assigns to bundle destinations.
+//
+// PendingLogger/PendingLoggerSet types are from logger_resolver.hpp (included
+// before this namespace block — see above).
+// Defined in src/config/logger_resolver.cpp.
+void resolve_engine_logger(const toml::table&           logger_tbl,
+                           std::string_view             key_prefix,
+                           SourceLoc                    loc,
+                           const std::filesystem::path& base_dir,
+                           const LoadOptions&           opts,
+                           PendingLoggerSet&            pending,
+                           DiagnosticAccumulator&       acc,
+                           bool                         is_engine = true,
+                           std::size_t                  session_index = 0);
+
+void construct_loggers_if_clean(PendingLoggerSet&&     pending,
+                                 ConfigBundle&           bundle,
+                                 DiagnosticAccumulator& acc);
+
+// ---------------------------------------------------------------------------
+// T007 (045-observability-config) — shared sink vocabulary helpers
+// ---------------------------------------------------------------------------
+//
+// Declared here (toml-free) so both scalar_mappers.cpp (owner) and the
+// upcoming logger_resolver.cpp (caller) can reach them without a second TU.
+//
+// map_syslog_facility:
+//   Maps a facility name string to the corresponding LOG_* integer value.
+//   Returns true and sets `out_facility` on success. On failure, adds the
+//   appropriate diagnostic to `acc` and returns false:
+//     - name not in the closed set → unknown_enum + legal-set message
+//     - name in set but LOG_* undefined on this build →
+//       invalid_or_contradictory_selector
+//   On a build without FIXPP_HAS_SYSLOG the function is not meaningful
+//   (callers guard with #ifdef); it still compiles (returns false always).
+bool map_syslog_facility(std::string_view name, int& out_facility,
+                         const std::string& key_path, SourceLoc loc,
+                         DiagnosticAccumulator& acc);
+
+// validate_pow2_capacity:
+//   Returns true if `value` is a nonzero power-of-2.
+//   On failure (zero or not a power of 2) adds an out_of_range diagnostic
+//   and returns false.
+bool validate_pow2_capacity(std::uint32_t value, const std::string& key_path,
+                            SourceLoc loc, DiagnosticAccumulator& acc);
 
 }  // namespace fixpp::config::detail

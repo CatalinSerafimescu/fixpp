@@ -22,7 +22,8 @@
 //   NOT YET IMPLEMENTED (RED until Phase 4b):
 //   - unknown_key: Phase 4b will add key-schema enumeration.
 //   - missing_required / empty_required for session-scalar fields (sender_comp_id).
-//   - recognized_not_yet_supported_step2 for logger/dialect_overlay keys.
+//   - recognized_not_yet_supported_step2 for dialect_overlay keys
+//     (logger flipped to supported in 045 FR-022).
 //   - invalid_or_contradictory_selector for:
 //       * plaintext transport with cert material present
 //       * mode=direct_executor + locks=spin
@@ -129,22 +130,30 @@ TEST(LoadNegativeBattery, T018_UnknownKey) {
         << "expected unknown_key at session[0].sender_comp_idd";
 }
 
-// ── recognized_not_yet_supported_step2 — sub-cell (a): [logger] key ──────────
+// ── logger with no sinks — empty_required on logger.sinks ───────────────────
 //
-// neg_step2_logger.toml has a [logger] section (step-2 deferred).
-// NOT YET IMPLEMENTED — Phase 4b will scan top-level step-2 keys.
-// RED until 4b: the [logger] table is currently silently ignored.
+// neg_step2_logger.toml: a [logger] table with NO [[logger.sinks]].
+// 045 Phase-3 reconciliation (T013 / tasks.md):
+//   After the resolver (T010-T013) lands, a [logger] without any sinks becomes
+//   empty_required on "logger.sinks" (data-model E-3, FR-022).
+//   The fixture was updated to remove the invalid "level" key so the ONLY
+//   diagnostic is this empty_required — discriminating against a resolver that
+//   silently accepts a sink-less logger.
+// Note: Phase-4 T014 may dedup this cell with its per-error-class battery.
 
 TEST(LoadNegativeBattery, T018_Step2Logger) {
     auto result = load(neg_fixture("neg_step2_logger.toml"));
 
+    // After 045 Phase-3: a [logger] without [[logger.sinks]] must FAIL with
+    // missing_required on "logger.sinks" (absent sinks array → missing_required;
+    // data-model E-3: zero/absent → missing_required / empty_required).
     ASSERT_FALSE(result.has_value())
-        << "expected load failure for a step-2 [logger] key; "
-           "Phase 4b step-2 deferral not yet implemented — RED expected";
+        << "045 Phase-3: [logger] with no [[logger.sinks]] must fail with "
+           "missing_required on logger.sinks (data-model E-3)";
 
     using RC = fixpp::config::reason_class;
-    EXPECT_TRUE(has_diag(result.error(), RC::recognized_not_yet_supported_step2, "logger"))
-        << "expected recognized_not_yet_supported_step2 at \"logger\"";
+    EXPECT_TRUE(has_diag(result.error(), RC::missing_required, "logger.sinks"))
+        << "expected missing_required at \"logger.sinks\"";
 }
 
 // ── recognized_not_yet_supported_step2 — sub-cell (b): dialect_overlay key ──
@@ -727,7 +736,9 @@ TEST(LoadNegativeBattery, GateBR1_CollectAllNotTruncatedByMissingDict) {
     const std::set<DiagKey> expected = {
         {RC::missing_required, "dictionary"},
         {RC::unknown_key, "session[0].sender_comp_idd"},
-        {RC::recognized_not_yet_supported_step2, "session[0].logger"},
+        // 045 FR-022: logger is now supported; use a still-deferred key (tracer)
+        // so error #3 stays a recognized_not_yet_supported_step2 diagnostic.
+        {RC::recognized_not_yet_supported_step2, "session[0].tracer"},
     };
 
     std::set<DiagKey> got;
