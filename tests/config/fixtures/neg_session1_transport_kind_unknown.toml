@@ -1,0 +1,46 @@
+# neg_session1_transport_kind_unknown.toml
+# Two sessions: session[0] uses TLS (valid), session[1] has transport.kind =
+# "websocket" (unknown enum).  After #1 Gate B r1 fix: unknown_enum at
+# "session[1].transport.kind".
+
+[clock]
+kind = "system"
+
+[store]
+kind = "memory"
+
+[cert_source]
+kind      = "file"
+cert_file = "leaf_ecdsa_p256.pem"
+key_file  = "leaf_ecdsa_p256.key"
+ca_file   = "ca.pem"
+
+[dictionary]
+kind = "path"
+path = "FIX44.xml"
+
+[[session]]
+sender_comp_id = "CLIENT_TLS"
+target_comp_id = "SERVER_TLS"
+begin_string   = "FIX.4.4"
+role           = "initiator"
+
+[session.transport]
+kind = "tls"
+host = "fix-tls.example.com"
+port = 4321
+
+[session.security_profile]
+kind = "mtls_ca"
+
+[[session]]
+sender_comp_id = "CLIENT_WEBSOCKET"
+target_comp_id = "SERVER_WEBSOCKET"
+begin_string   = "FIX.4.4"
+role           = "acceptor"
+
+[session.transport]
+kind = "websocket"
+
+[session.security_profile]
+kind = "insecure_plain_tcp"

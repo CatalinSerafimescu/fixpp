@@ -1,11 +1,17 @@
 # pos_multisession_tls_and_plain.toml
 # Two sessions: session[0] uses TLS (becomes engine default TLS factory).
-# session[1] uses "plaintext" transport — in the per-session divergence scan,
-# this hits the `continue` at line 612 (s_transport_kind != "tls").
+# session[1] uses "plaintext" transport.
 #
-# The plaintext session shares the engine's cert_source (it's present at engine
-# level for session[0]'s TLS use), but the transport for session[1] is plaintext.
-# The per-session loop skips plaintext sessions (they don't need a TLS factory override).
+# #1 Gate B r1 fix: session[1] now receives a freshly-minted per-session
+# plaintext factory override (make_asio_plain_transport_factory), so it runs
+# on the correct transport.  Before the fix it silently ran on the engine-default
+# TLS factory — a latent data-model E-3 / FR-007 violation.
+#
+# The engine-level cert_source is present for session[0]'s TLS use only;
+# it is NOT contradictory with session[1]'s plaintext — that session does not
+# use the engine cert_source (the per-session contradiction guard applies only
+# when the *session itself* declares plaintext with its own cert_source, not
+# when the engine-level cert_source was loaded for another session's use).
 
 [clock]
 kind = "system"

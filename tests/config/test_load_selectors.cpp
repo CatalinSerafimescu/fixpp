@@ -321,8 +321,22 @@ TEST(LoadSelectors, T028_DirectExecutorNoAttest) {
 //
 // Anchor: research D-6a / session_config.hpp:298-307 / tasks.md T029.
 
-// ── Mixed TLS + plaintext multi-session → plaintext session skipped in
-//    divergence scan (line 612 selector_resolver.cpp: continue) ──────────────
+// ── Mixed TLS + plaintext multi-session → plaintext session gets its own
+//    plaintext factory override (#1 Gate B r1 fix) ───────────────────────────
+//
+// Before fix: the divergence scan skipped any non-"tls" session (line 612
+// continue), so session[1] declaring "plaintext" got no override and silently
+// fell back to the engine-default TLS factory (wrong transport — FR-007 drift).
+// pos_multisession_tls_and_plain.toml was a positive fixture that encoded this
+// latent bug.
+//
+// After fix (#1 Gate B r1): session[1] declaring "plaintext" with a TLS-engine-
+// default receives a freshly-minted per-session plaintext factory override
+// (make_asio_plain_transport_factory), ensuring it runs on the correct transport.
+//
+// Discriminating post-conditions (both required):
+//   (a) session[1].transport_factory_override is non-null → NOT the engine default
+//   (b) session[1].transport_factory_override->kind() == plaintext → correct kind
 
 TEST(LoadSelectors, Cov_MultisessionTlsAndPlain) {
     auto result = load(fixture("pos_multisession_tls_and_plain.toml"));
@@ -352,10 +366,22 @@ TEST(LoadSelectors, Cov_MultisessionTlsAndPlain) {
     EXPECT_EQ(result->sessions[0].config.transport_factory_override, nullptr)
         << "session[0] matches engine default; override must be null";
 
-    // session[1]: plaintext — the divergence scan skips it (line 612 continue)
-    // → no override (plaintext session inherits nothing from TLS engine default)
-    EXPECT_EQ(result->sessions[1].config.transport_factory_override, nullptr)
-        << "session[1] is plaintext; divergence scan skips it → override null";
+    // session[1]: plaintext — #1 Gate B r1 fix: must receive a per-session
+    // plaintext factory override (NOT fall back to the engine-default TLS factory).
+    // (a) override must be non-null
+    ASSERT_NE(result->sessions[1].config.transport_factory_override, nullptr)
+        << "session[1] declares plaintext but engine default is TLS; "
+           "#1 Gate B r1 fix must mint a plaintext factory override — "
+           "null here means session[1] would run on the wrong (TLS) transport";
+    // (b) override must be the plaintext kind
+    EXPECT_EQ(result->sessions[1].config.transport_factory_override->kind(),
+              fixpp::transport::transport_security_kind::plaintext)
+        << "session[1] override must be plaintext kind, not TLS (#1 Gate B r1)";
+    // (c) override must NOT be the engine-default factory (must be a fresh instance)
+    EXPECT_NE(result->sessions[1].config.transport_factory_override,
+              result->engine.default_transport_factory)
+        << "session[1] plaintext override must be a fresh factory instance "
+           "(use_count()==1 per D-6a), not the shared engine-default TLS factory";
 }
 
 TEST(LoadSelectors, T027_DivergentCertMultiSession) {

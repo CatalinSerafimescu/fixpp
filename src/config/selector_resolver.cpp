@@ -587,79 +587,148 @@ static void resolve_transport(const std::vector<const toml::table*>& merged_sess
         }
         bundle.engine.default_transport_factory = std::move(default_factory);
 
-        // ── Per-session divergence scan (D-6a) ──────────────────────────────
-        // For each session: if it has a per-session [cert_source] OR a different
-        // security_profile kind from the engine default (tls_profile), it diverges
-        // and must get a freshly-minted transport_factory_override.
-        // Sessions that match (no per-session cert_source + same profile) stay null.
+        // ── Per-session divergence scan (D-6a) — #1 Gate B r1 ──────────────
+        // For each session:
+        //   (a) Validate transport.kind (missing / empty / non-string / unknown).
+        //       session[0] is already validated above; sessions 1+ were not
+        //       checked before this fix, so they silently ran on the engine-default
+        //       (wrong) TLS factory (data-model E-3 row 62 / FR-007 / FR-012).
+        //   (b) If kind diverges from the engine default ("tls"):
+        //       - "tls" with a different cert/profile → mint a TLS override (original logic).
+        //       - "plaintext" → mint a plaintext factory override so the session
+        //         runs on the correct transport, not the engine-default TLS one.
+        //       Sessions whose kind matches ("tls", same cert, same profile) stay null.
 
         for (std::size_t i = 0; i < merged_session_tables.size(); ++i) {
             const toml::table& sess = *merged_session_tables[i];
+            const std::string idx_str = std::to_string(i);
+            const std::string s_prefix = "session[" + idx_str + "]";
 
-            // Check if this session has a per-session transport and it's "tls".
+            // ── (a) Validate per-session transport.kind ──────────────────────
+            // session[0] is validated in the main body above — skip it here.
+            if (i == 0) {
+                // session[0] drove the engine-default factory; already validated.
+                continue;
+            }
+
             const toml::table* s_transport_tbl = nullptr;
             if (const auto* t_n = sess.get("transport"); t_n && t_n->is_table()) {
                 s_transport_tbl = t_n->as_table();
             }
             if (!s_transport_tbl) {
-                continue;  // No transport table; validation error caught elsewhere.
-            }
-            std::string_view s_transport_kind;
-            if (const auto* kn = s_transport_tbl->get("kind"); kn && kn->is_string()) {
-                s_transport_kind = kn->as_string()->get();
-            }
-            if (s_transport_kind != "tls") {
-                continue;  // Plaintext session — no TLS override.
-            }
-
-            // Determine per-session security_profile.
-            const std::string idx_str = std::to_string(i);
-            const std::string s_prefix = "session[" + idx_str + "]";
-            tls::SecurityProfile s_profile = parse_security_profile(sess, s_prefix, acc);
-            if (!acc.empty()) {
-                return;  // mtls_pinned deferral or similar
-            }
-
-            // Determine per-session cert_source table.
-            const toml::table* s_cs_tbl = nullptr;
-            if (const auto* cs_n = sess.get("cert_source"); cs_n && cs_n->is_table()) {
-                s_cs_tbl = cs_n->as_table();
-            }
-
-            // Divergence: a per-session [cert_source] is present (different certs)
-            // OR the profile differs from the engine-default profile.
-            const bool cert_diverges = (s_cs_tbl != nullptr);
-            const bool profile_diverges = (s_profile != tls_profile);
-
-            if (!cert_diverges && !profile_diverges) {
-                // Matches engine default → leave override null.
+                // Missing [session.transport] for a non-first session.
+                acc.add(LoadDiagnostic{
+                    .key_path = s_prefix + ".transport.kind",
+                    .reason = reason_class::missing_required,
+                    .message = "[session.transport] is required (data-model E-3 row 62)",
+                });
                 continue;
             }
 
-            // Build per-session cert_source.
-            std::shared_ptr<tls::cert_source> s_cert_source;
-            if (s_cs_tbl) {
-                s_cert_source = build_file_cert_source(*s_cs_tbl, base_dir, opts,
-                                                       s_prefix + ".cert_source", acc);
-                if (!s_cert_source) {
+            std::string_view s_transport_kind;
+            const auto* kind_node = s_transport_tbl->get("kind");
+            if (kind_node && kind_node->is_string()) {
+                s_transport_kind = kind_node->as_string()->get();
+            } else if (!kind_node) {
+                acc.add(LoadDiagnostic{
+                    .key_path = s_prefix + ".transport.kind",
+                    .reason = reason_class::missing_required,
+                    .message = "transport.kind is required",
+                });
+                continue;
+            } else {
+                // Present but not a string.
+                acc.add(LoadDiagnostic{
+                    .key_path = s_prefix + ".transport.kind",
+                    .reason = reason_class::missing_required,
+                    .message = "transport.kind must be a string",
+                });
+                continue;
+            }
+
+            if (s_transport_kind.empty()) {
+                acc.add(LoadDiagnostic{
+                    .key_path = s_prefix + ".transport.kind",
+                    .reason = reason_class::empty_required,
+                    .message = "transport.kind must not be empty",
+                });
+                continue;
+            }
+
+            // ── (b) Handle per-session kind relative to engine default ───────
+
+            if (s_transport_kind == "tls") {
+                // TLS-on-TLS-engine: check cert/profile divergence as before.
+                tls::SecurityProfile s_profile = parse_security_profile(sess, s_prefix, acc);
+                if (!acc.empty()) {
+                    return;  // mtls_pinned deferral or similar
+                }
+
+                const toml::table* s_cs_tbl = nullptr;
+                if (const auto* cs_n = sess.get("cert_source"); cs_n && cs_n->is_table()) {
+                    s_cs_tbl = cs_n->as_table();
+                }
+
+                const bool cert_diverges = (s_cs_tbl != nullptr);
+                const bool profile_diverges = (s_profile != tls_profile);
+
+                if (!cert_diverges && !profile_diverges) {
+                    // Matches engine default TLS → leave override null.
+                    continue;
+                }
+
+                // Mint a FRESH TLS factory for this divergent session.
+                std::shared_ptr<tls::cert_source> s_cert_source;
+                if (s_cs_tbl) {
+                    s_cert_source = build_file_cert_source(*s_cs_tbl, base_dir, opts,
+                                                           s_prefix + ".cert_source", acc);
+                    if (!s_cert_source) {
+                        return;  // diagnostic already added
+                    }
+                } else {
+                    // Profile diverges but certs are the same.
+                    s_cert_source = bundle.engine.default_cert_source;
+                }
+
+                auto s_factory = build_tls_factory(s_profile, s_cert_source,
+                                                   bundle.engine.clock,
+                                                   s_prefix + ".transport", acc);
+                if (!s_factory) {
                     return;  // diagnostic already added
                 }
+                bundle.sessions[i].config.transport_factory_override = std::move(s_factory);
+
+            } else if (s_transport_kind == "plaintext") {
+                // Plaintext-on-TLS-engine: this session declared a different kind
+                // from the engine default.  Mint a per-session plaintext factory
+                // override so it runs on the correct transport (D-6a / FR-007).
+                //
+                // Guard: do NOT flag a contradiction with engine.default_cert_source
+                // — the cert material belongs to OTHER TLS sessions, not this one.
+                transport::Transport::Config t_cfg{};
+                auto factory_result = transport::make_asio_plain_transport_factory(t_cfg);
+                if (!factory_result) {
+                    acc.add(LoadDiagnostic{
+                        .key_path = s_prefix + ".transport",
+                        .reason = reason_class::invalid_or_contradictory_selector,
+                        .message = "make_asio_plain_transport_factory failed",
+                    });
+                    return;
+                }
+                bundle.sessions[i].config.transport_factory_override =
+                    std::shared_ptr<transport::TransportFactory>(std::move(*factory_result));
+
             } else {
-                // Profile diverges but certs are the same: reuse engine default cert_source.
-                s_cert_source = bundle.engine.default_cert_source;
+                // Unknown kind (e.g. "websocket").
+                acc.add(LoadDiagnostic{
+                    .key_path = s_prefix + ".transport.kind",
+                    .reason = reason_class::unknown_enum,
+                    .message = std::string{"unknown transport.kind: \""} +
+                               std::string{s_transport_kind} +
+                               R"(" (accepted: "tls", "plaintext"))",
+                });
+                // continue to next session (accumulate all errors — FR-018)
             }
-
-            // Mint a FRESH TLS factory for this session (use_count()==1 per D-6a).
-            // Each divergent session gets its own independently-owned factory.
-            auto s_factory = build_tls_factory(s_profile, s_cert_source,
-                                               bundle.engine.clock,  // shared clock (copy) — D-6
-                                               s_prefix + ".transport", acc);
-            if (!s_factory) {
-                return;  // diagnostic already added
-            }
-
-            // Set the per-session override (single-owner: not aliased anywhere else).
-            bundle.sessions[i].config.transport_factory_override = std::move(s_factory);
         }
 
     } else if (transport_kind_tok == "plaintext") {
