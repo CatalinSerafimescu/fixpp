@@ -225,6 +225,60 @@ TEST(LoadDeferredSurface, T020_DeferredTap) {
         << "tap must NOT produce unknown_key (SC-007)";
 }
 
+// ── T020_DeferredSetExactCoverage — every kDeferred key stays deferred ───────
+//
+// FR-022 (the one-key flip) requires `logger` to become supported while EVERY
+// OTHER recognized-but-deferred key — including the spec-named observability
+// keys otlp / prometheus / exporter / log_sink — stays under
+// recognized_not_yet_supported_step2.  The per-key cells above witness only a
+// subset (tracer/meter/message_arena/dialect_overlay/tap); a subset-presence
+// check passes even if a key is silently DEMOTED out of kDeferred (it would then
+// report unknown_key, which no above cell would catch for the un-listed keys).
+//
+// This cell pins the WHOLE deferred surface: the fixture carries all 13 kDeferred
+// keys, and we assert each one yields the deferred reason AND never unknown_key.
+// Dropping any key from kDeferred (toml_config_loader.cpp:268-283) demotes it to
+// unknown_key → both assertions fail RED here.  This is the exact-coverage
+// discipline of [[feedback_completeness_gate_exact_set_not_subset]] applied at
+// the public-API level (the kDeferred set itself is file-scoped in the .cpp; this
+// is the strongest demotion-detector reachable without exposing it).
+//
+// NOTE: this is exact coverage of "every deferred key STAYS deferred", not of the
+// set's literal membership — ADDING a new deferred key is not an FR-022 regression
+// and is intentionally not flagged here.  If a key is added to kDeferred, append
+// it to neg_deferred_toplevel.toml and to kAllDeferredKeys below.
+
+TEST(LoadDeferredSurface, T020_DeferredSetExactCoverage) {
+    // The full kDeferred set (toml_config_loader.cpp), minus `logger` (flipped to
+    // supported in 045 FR-022).  Mirror of the fixture's keys.
+    static constexpr std::string_view kAllDeferredKeys[] = {
+        "tracer",   "meter",         "tap",          "otlp",
+        "prometheus", "exporter",    "log_sink",     "message_arena",
+        "dialect_overlay", "arena",  "session_arena", "framer_carry_arena",
+        "tap_consumer",
+    };
+
+    auto result = load(fixture_path("neg_deferred_toplevel.toml"));
+
+    ASSERT_FALSE(result.has_value())
+        << "neg_deferred_toplevel.toml must fail (deferred keys present)";
+
+    const auto& diags = result.error();
+    for (const std::string_view key : kAllDeferredKeys) {
+        EXPECT_TRUE(has_diag(diags, RC::recognized_not_yet_supported_step2, key))
+            << "deferred key \"" << key
+            << "\" must yield recognized_not_yet_supported_step2 — a missing "
+               "diagnostic here means it was silently DEMOTED out of kDeferred "
+               "(FR-022 regression); diagnostics:\n"
+            << diag_string(diags);
+        EXPECT_FALSE(has_diag(diags, RC::unknown_key, key))
+            << "deferred key \"" << key
+            << "\" must NOT produce unknown_key — that is the exact demotion "
+               "FR-022 forbids (SC-007); diagnostics:\n"
+            << diag_string(diags);
+    }
+}
+
 // ── T020_TypoDistinction — typo'd key yields unknown_key, NOT deferred ───────
 //
 // SC-007 / AC US4-2: a key "loggerr" (double-r typo) that is neither in

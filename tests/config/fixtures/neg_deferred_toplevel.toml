@@ -6,11 +6,16 @@
 # fires recognized_not_yet_supported_step2 for each deferred key; the
 # session itself is otherwise valid (transport + security_profile present).
 #
-# Keys under test:
-#   tracer, meter, message_arena, dialect_overlay, tap
+# Keys under test (the FULL kDeferred set minus `logger`, which is now supported):
+#   scalars: message_arena, dialect_overlay, arena, session_arena,
+#            framer_carry_arena, tap_consumer
+#   tables:  tracer, meter, tap, otlp, prometheus, exporter, log_sink
 #
-# All five are in kDeferred (toml_config_loader.cpp:268-283; data-model E-5).
+# All are in kDeferred (toml_config_loader.cpp:268-283; data-model E-5).
 # The `logger` key is NOT here because it is now SUPPORTED (045 T006/FR-022).
+# FR-022 explicitly requires otlp/prometheus/exporter/log_sink to STAY deferred
+# while `logger` flips; T020_DeferredSetExactCoverage pins every one so a silent
+# demotion to unknown_key fails RED ([[feedback_completeness_gate_exact_set_not_subset]]).
 #
 # IMPORTANT TOML scoping: in TOML, scalar keys that appear after a [header]
 # sub-table belong to that sub-table, NOT the root.  Place ALL root-level
@@ -21,6 +26,13 @@
 
 message_arena = "pmr_monotonic"
 dialect_overlay = "my_overlay"
+
+# Remaining deferred scalar keys (kDeferred). Present so the exact-coverage cell
+# detects a silent demotion of ANY of these from kDeferred → unknown_key.
+arena = "pmr_monotonic"
+session_arena = "pmr_monotonic"
+framer_carry_arena = "pmr_monotonic"
+tap_consumer = "tcp://127.0.0.1:9001"
 
 # ── Engine-level selectors ────────────────────────────────────────────────────
 
@@ -51,6 +63,19 @@ endpoint = "http://collector:4317"
 [tap]
 # bare stub — step-2 deferred (2l unshipped); tap_consumer likewise
 endpoint = "tcp://127.0.0.1:9000"
+
+# FR-022-named observability keys that MUST stay deferred while `logger` flips.
+[otlp]
+endpoint = "http://collector:4318"
+
+[prometheus]
+endpoint = "http://127.0.0.1:9464/metrics"
+
+[exporter]
+kind = "otlp"
+
+[log_sink]
+kind = "otlp"
 
 # ── Required valid session ────────────────────────────────────────────────────
 

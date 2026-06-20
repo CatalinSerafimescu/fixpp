@@ -889,3 +889,124 @@ TEST(LoadLogger, T026_SyslogFacilitySuccessWhiteBox) {
         << "the syslog sink must mint as a SyslogSink";
 }
 #endif  // FIXPP_HAS_SYSLOG
+
+// ── T026_FileSinkRotationParamsBehavioral (FR-002 / FR-006 / SC-002) ─────────
+//
+// The minted Sink objects are opaque (no public config inspector), so the
+// per-sink scalar params parsed by resolve_log_sink cannot be value-asserted
+// white-box.  The OBSERVABLE file-sink params are witnessed BEHAVIOURALLY here,
+// end-to-end through the loader: a small `max_file_bytes` + small
+// `max_keep_count` + a distinctive `base_name` are driven by emitting enough
+// oversized records to force many rotations, then `shutdown()` drains
+// deterministically (the drain thread is joined before we inspect the dir —
+// FileSink::rotate() archives + prunes synchronously on that thread).
+//
+// `max_file_bytes = 1` forces FileSink::rotate() on EVERY record (any non-empty
+// line exceeds 1 byte; the stored record is a crc32 format-id, so line size is
+// content-independent — value 0 is rejected by the loader as out_of_range).
+//
+// Discrimination (each param fails RED independently if the loader dropped it):
+//   • base_name      — archived files are "<base_name>.<iso>.log"; a wrong/default
+//                       base_name yields ZERO files with our prefix → count 0 ≠ 2.
+//   • max_file_bytes — if the loader passed the 256 MiB default instead of 1 B,
+//                       NO rotation occurs → archived count 0 ≠ 2.
+//   • max_keep_count — pruning settles archived count at EXACTLY max_keep_count
+//                       once rotations exceed it; the default (8) would leave ~8,
+//                       not 2.  Same-second archive collisions are counter-
+//                       disambiguated (file_sink.cpp:296), so the count is exact.
+//
+// This complements the white-box scalar cells (T026_LoggerLevelScalars,
+// T026_SyslogFacility) which witness the logger-level cfg fields directly; the
+// remaining opaque sink params (async_fsync, syslog ident, OTLP export_timeout /
+// max_export_batch / max_export_retries) are honoured-and-witnessed by the 017
+// LOG-002 / OBS-003 sink unit tests and have no loader-observable seam (see the
+// completeness record's witnessing-limitation note).
+TEST(LoadLogger, T026_FileSinkRotationParamsBehavioral) {
+    constexpr std::uint32_t kMaxKeep = 2;
+    const auto sink_dir = std::filesystem::temp_directory_path() / "fixpp_t026_rotation";
+    const std::string base = "fixpp_t026rot";
+    {
+        std::error_code ec;
+        std::filesystem::remove_all(sink_dir, ec);  // clear stale archives from prior runs
+        std::filesystem::create_directories(sink_dir, ec);
+        ASSERT_FALSE(ec) << "failed to create " << sink_dir << " — " << ec.message();
+    }
+
+    const auto tmp_toml = std::filesystem::temp_directory_path() / "fixpp_t026_rotation.toml";
+    {
+        std::ofstream out{tmp_toml};
+        ASSERT_TRUE(out.is_open()) << "failed to create temp TOML at " << tmp_toml;
+        out << "[clock]\nkind = \"system\"\n\n"
+            << "[store]\nkind = \"memory\"\n\n"
+            << "[cert_source]\nkind = \"file\"\n"
+            << "cert_file = \"" << (fixture_dir() / "leaf_ecdsa_p256.pem").string() << "\"\n"
+            << "key_file  = \"" << (fixture_dir() / "leaf_ecdsa_p256.key").string() << "\"\n"
+            << "ca_file   = \"" << (fixture_dir() / "ca.pem").string() << "\"\n\n"
+            << "[dictionary]\nkind = \"path\"\n"
+            << "path = \"" << (fixture_dir() / "FIX44.xml").string() << "\"\n\n"
+            << "[logger]\ncapacity = 4096\ndrain_timeout = \"5000ms\"\n\n"
+            << "[[logger.sinks]]\n"
+            << "kind           = \"file\"\n"
+            << "directory      = \"" << sink_dir.string() << "\"\n"
+            << "base_name      = \"" << base << "\"\n"
+            << "max_file_bytes = 1\n"
+            << "max_keep_count = " << kMaxKeep << "\n\n"
+            << "[[session]]\n"
+            << "sender_comp_id = \"CLIENT1\"\ntarget_comp_id = \"SERVER1\"\n"
+            << "begin_string   = \"FIX.4.4\"\nrole = \"initiator\"\n\n"
+            << "[session.transport]\nkind = \"tls\"\nhost = \"fix.example.com\"\nport = 4321\n\n"
+            << "[session.security_profile]\nkind = \"mtls_ca\"\n";
+    }
+
+    auto result = load_path(tmp_toml);
+    {
+        std::error_code ec;
+        std::filesystem::remove(tmp_toml, ec);
+    }
+
+    ASSERT_TRUE(result.has_value())
+        << "file-sink rotation TOML must load; diagnostics:\n"
+        << (result.has_value() ? "" : diag_string(result.error()));
+    ASSERT_NE(result->engine.logger, nullptr) << "engine.logger must be non-null";
+
+    // Emit more records than max_keep_count; max_file_bytes=1 rotates on each.
+    {
+        auto& logger = *result->engine.logger;
+        for (int i = 0; i < 16; ++i) {
+            FIXPP_LOG0(&logger, info, fixpp::log::cat::session, "T026 rotation probe record");
+        }
+        [[maybe_unused]] auto sd = logger.shutdown();  // drains + joins the drain thread
+    }
+
+    // Count archived files: "<base>.<something>.log", excluding the live "<base>.log".
+    std::size_t archived = 0;
+    bool live_present = false;
+    const std::string live_name = base + ".log";
+    {
+        std::error_code ec;
+        for (const auto& entry : std::filesystem::directory_iterator(sink_dir, ec)) {
+            const std::string fn = entry.path().filename().string();
+            if (fn == live_name) {
+                live_present = true;
+                continue;
+            }
+            if (fn.starts_with(base + ".") && fn.ends_with(".log")) {
+                ++archived;
+            }
+        }
+    }
+
+    // max_keep_count + max_file_bytes + base_name all discriminated by this count.
+    EXPECT_EQ(archived, std::size_t{kMaxKeep})
+        << "expected exactly max_keep_count=" << kMaxKeep << " archived \"" << base
+        << ".*.log\" files after >max_keep_count rotations; got " << archived
+        << " — a wrong base_name (0), a defaulted max_file_bytes (0, no rotation), "
+           "or a defaulted max_keep_count (~8) would each miss this.";
+    EXPECT_TRUE(live_present)
+        << "the live file \"" << live_name << "\" must exist in " << sink_dir;
+
+    {
+        std::error_code ec;
+        std::filesystem::remove_all(sink_dir, ec);
+    }
+}
