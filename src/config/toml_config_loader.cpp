@@ -267,18 +267,9 @@ void recognize_keys(const toml::table& tbl, std::string_view key_prefix,
                     detail::DiagnosticAccumulator& acc) {
     static const std::unordered_set<std::string_view> kDeferred = {
         // "logger" moved to kRecognized (045 FR-022 — logging leg now supported)
-        "log_sink",
-        "tracer",
-        "meter",
-        "otlp",
-        "prometheus",
-        "exporter",
-        "tap",
-        "tap_consumer",
-        "arena",
-        "message_arena",
-        "session_arena",
-        "framer_carry_arena",
+        "log_sink",        "tracer",        "meter",         "otlp",
+        "prometheus",      "exporter",      "tap",           "tap_consumer",
+        "arena",           "message_arena", "session_arena", "framer_carry_arena",
         "dialect_overlay",
     };
     static const std::unordered_set<std::string_view> kRecognized = {
@@ -556,10 +547,9 @@ void recognize_keys(const toml::table& tbl, std::string_view key_prefix,
                     sess_logger_loc = loc_from_region(raw_node->source());
                 }
                 const std::string sess_logger_kp = key_prefix + ".logger";
-                detail::resolve_engine_logger(
-                    *logger_node->as_table(), sess_logger_kp, sess_logger_loc,
-                    base_dir, opts, pending_loggers, acc,
-                    /*is_engine=*/false, /*session_index=*/session_idx);
+                detail::resolve_engine_logger(*logger_node->as_table(), sess_logger_kp,
+                                              sess_logger_loc, base_dir, opts, pending_loggers, acc,
+                                              /*is_engine=*/false, /*session_index=*/session_idx);
             }
         }
 
@@ -587,11 +577,10 @@ void recognize_keys(const toml::table& tbl, std::string_view key_prefix,
     // Called AFTER 044 resolution so collect-ALL spans the whole file.
     // pending_loggers is declared before the per-session loop (T019) so it
     // accumulates both engine and per-session loggers in one file-scoped set.
-    if (const auto* logger_node = root_tbl.get("logger");
-        logger_node && logger_node->is_table()) {
+    if (const auto* logger_node = root_tbl.get("logger"); logger_node && logger_node->is_table()) {
         SourceLoc logger_loc = loc_from_region(logger_node->source());
-        detail::resolve_engine_logger(*logger_node->as_table(), "logger", logger_loc,
-                                      base_dir, opts, pending_loggers, acc,
+        detail::resolve_engine_logger(*logger_node->as_table(), "logger", logger_loc, base_dir,
+                                      opts, pending_loggers, acc,
                                       /*is_engine=*/true, /*session_index=*/0);
     }
 
@@ -613,17 +602,16 @@ void recognize_keys(const toml::table& tbl, std::string_view key_prefix,
     } catch (const std::exception& e) {
         acc.add(LoadDiagnostic{
             .key_path = "logger",
-            .reason   = reason_class::invalid_or_contradictory_selector,
+            .reason = reason_class::invalid_or_contradictory_selector,
             .location = {},
-            .message  = std::string{"logger construction failed (resource exhaustion): "} +
-                        e.what(),
+            .message = std::string{"logger construction failed (resource exhaustion): "} + e.what(),
         });
     } catch (...) {
         acc.add(LoadDiagnostic{
             .key_path = "logger",
-            .reason   = reason_class::invalid_or_contradictory_selector,
+            .reason = reason_class::invalid_or_contradictory_selector,
             .location = {},
-            .message  = "logger construction failed (unknown exception)",
+            .message = "logger construction failed (unknown exception)",
         });
     }
 

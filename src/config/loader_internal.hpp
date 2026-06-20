@@ -206,9 +206,7 @@ struct ParsedDuration {
     bool ok;
 };
 
-[[nodiscard]] ParsedDuration parse_duration_to_ms(std::string_view tok,
-                                                  std::string_view key_path,
-                                                  DiagnosticAccumulator& acc,
-                                                  SourceLoc loc = {});
+[[nodiscard]] ParsedDuration parse_duration_to_ms(std::string_view tok, std::string_view key_path,
+                                                  DiagnosticAccumulator& acc, SourceLoc loc = {});
 
 }  // namespace fixpp::config::detail

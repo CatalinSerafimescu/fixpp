@@ -52,11 +52,11 @@ namespace fixpp::config {
 //                   PendingLoggerSet::sessions; ignored for the engine entry.
 //                   Value: the [[session]] array index (0-based).
 struct PendingLogger {
-    fixpp::log::LoggerConfig                             cfg;
+    fixpp::log::LoggerConfig cfg;
     std::pmr::vector<std::unique_ptr<fixpp::log::Sink>> sinks;  // N-1 arena-bound
-    std::string                                          key_path;
-    SourceLoc                                            loc;
-    std::size_t                                          session_index{0};
+    std::string key_path;
+    SourceLoc loc;
+    std::size_t session_index{0};
 };
 
 // ── PendingLoggerSet ──────────────────────────────────────────────────────────
@@ -65,8 +65,9 @@ struct PendingLogger {
 // Populated across the whole-file resolution pass; consumed by the single
 // final construct_loggers_if_clean step.
 struct PendingLoggerSet {
-    std::optional<PendingLogger> engine;    // [logger] → bundle.engine.logger
-    std::vector<PendingLogger>   sessions;  // [session[i].logger] → sessions[i].config.logger_override
+    std::optional<PendingLogger> engine;  // [logger] → bundle.engine.logger
+    std::vector<PendingLogger>
+        sessions;  // [session[i].logger] → sessions[i].config.logger_override
 };
 
 }  // namespace fixpp::config

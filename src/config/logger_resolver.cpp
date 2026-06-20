@@ -18,11 +18,7 @@
 //   contracts/observability_config.hpp lines 77-116
 //   tasks.md T010–T012
 
-#include "toml_include.hpp"  // ODR-safe shim (T039 carry-over)
-
-#include "loader_internal.hpp"  // DiagnosticAccumulator, trap_throw_to_expected
 #include "logger_resolver.hpp"  // PendingLogger, PendingLoggerSet
-#include "mappers.hpp"           // map_syslog_facility, validate_pow2_capacity
 
 #include <fixpp/config/config_bundle.hpp>
 #include <fixpp/config/load_diagnostic.hpp>
@@ -30,6 +26,10 @@
 #include <fixpp/log/file_sink.hpp>
 #include <fixpp/log/logger.hpp>
 #include <fixpp/log/sink.hpp>
+
+#include "loader_internal.hpp"  // DiagnosticAccumulator, trap_throw_to_expected
+#include "mappers.hpp"          // map_syslog_facility, validate_pow2_capacity
+#include "toml_include.hpp"     // ODR-safe shim (T039 carry-over)
 
 // Unconditional include: syslog_sink.hpp self-#defines FIXPP_HAS_SYSLOG on a
 // POSIX platform that has <syslog.h> (there is no CMake define). It MUST be
@@ -41,6 +41,8 @@
 #include <fixpp/log/otlp_log_sink.hpp>
 #endif
 
+#include <unistd.h>
+
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
@@ -50,7 +52,6 @@
 #include <string>
 #include <string_view>
 #include <system_error>
-#include <unistd.h>
 #include <utility>
 
 namespace fixpp::config::detail {
@@ -65,7 +66,7 @@ SourceLoc loc_node(const toml::node& n) noexcept {
     const auto& src = n.source().begin;
     return SourceLoc{
         .line = static_cast<std::uint32_t>(src.line),
-        .col  = static_cast<std::uint32_t>(src.column),
+        .col = static_cast<std::uint32_t>(src.column),
     };
 }
 
@@ -92,26 +93,24 @@ SourceLoc loc_node(const toml::node& n) noexcept {
 // Returns the minted Sink on success, or nullptr (with diagnostics) on any error.
 // ---------------------------------------------------------------------------
 
-std::unique_ptr<fixpp::log::Sink> resolve_log_sink(
-    const toml::table& sink_tbl,
-    std::size_t         sink_idx,
-    std::string_view    key_prefix,
-    const std::filesystem::path& base_dir,
-    std::pmr::memory_resource*   /*resource*/,
-    DiagnosticAccumulator&       acc)
-{
+std::unique_ptr<fixpp::log::Sink> resolve_log_sink(const toml::table& sink_tbl,
+                                                   std::size_t sink_idx,
+                                                   std::string_view key_prefix,
+                                                   const std::filesystem::path& base_dir,
+                                                   std::pmr::memory_resource* /*resource*/,
+                                                   DiagnosticAccumulator& acc) {
     // Build key_path prefix for this sink entry.
-    const std::string sink_kp = std::string{key_prefix} + ".sinks[" +
-                                 std::to_string(sink_idx) + "]";
+    const std::string sink_kp =
+        std::string{key_prefix} + ".sinks[" + std::to_string(sink_idx) + "]";
 
     // ── kind is required ──────────────────────────────────────────────────────
     const toml::node* kind_node = sink_tbl.get("kind");
     if (!kind_node || !kind_node->is_string()) {
         acc.add(LoadDiagnostic{
             .key_path = kp(sink_kp, "kind"),
-            .reason   = reason_class::missing_required,
+            .reason = reason_class::missing_required,
             .location = kind_node ? loc_node(*kind_node) : SourceLoc{},
-            .message  = "logger sink must have a \"kind\" string field",
+            .message = "logger sink must have a \"kind\" string field",
         });
         return nullptr;
     }
@@ -119,9 +118,9 @@ std::unique_ptr<fixpp::log::Sink> resolve_log_sink(
     if (kind.empty()) {
         acc.add(LoadDiagnostic{
             .key_path = kp(sink_kp, "kind"),
-            .reason   = reason_class::empty_required,
+            .reason = reason_class::empty_required,
             .location = loc_node(*kind_node),
-            .message  = "logger sink kind must not be empty",
+            .message = "logger sink kind must not be empty",
         });
         return nullptr;
     }
@@ -143,9 +142,9 @@ std::unique_ptr<fixpp::log::Sink> resolve_log_sink(
             if (v == 0) {
                 acc.add(LoadDiagnostic{
                     .key_path = kp(sink_kp, "max_file_bytes"),
-                    .reason   = reason_class::out_of_range,
+                    .reason = reason_class::out_of_range,
                     .location = loc_node(*n),
-                    .message  = "max_file_bytes must be > 0",
+                    .message = "max_file_bytes must be > 0",
                 });
                 return nullptr;
             }
@@ -168,10 +167,10 @@ std::unique_ptr<fixpp::log::Sink> resolve_log_sink(
             if (!std::filesystem::is_directory(dir, fs_ec)) {
                 acc.add(LoadDiagnostic{
                     .key_path = kp(sink_kp, "directory"),
-                    .reason   = reason_class::invalid_or_contradictory_selector,
+                    .reason = reason_class::invalid_or_contradictory_selector,
                     .location = loc_node(*sink_tbl.get("directory")),
-                    .message  = "file sink directory does not exist or is not a directory: \"" +
-                                dir.string() + "\"",
+                    .message = "file sink directory does not exist or is not a directory: \"" +
+                               dir.string() + "\"",
                 });
                 return nullptr;
             }
@@ -179,9 +178,9 @@ std::unique_ptr<fixpp::log::Sink> resolve_log_sink(
             if (::access(dir.c_str(), W_OK) != 0) {
                 acc.add(LoadDiagnostic{
                     .key_path = kp(sink_kp, "directory"),
-                    .reason   = reason_class::invalid_or_contradictory_selector,
+                    .reason = reason_class::invalid_or_contradictory_selector,
                     .location = loc_node(*sink_tbl.get("directory")),
-                    .message  = "file sink directory is not writable: \"" + dir.string() + "\"",
+                    .message = "file sink directory is not writable: \"" + dir.string() + "\"",
                 });
                 return nullptr;
             }
@@ -202,8 +201,8 @@ std::unique_ptr<fixpp::log::Sink> resolve_log_sink(
         if (const auto* n = sink_tbl.get("facility"); n && n->is_string()) {
             const std::string_view fac_name = n->as_string()->get();
             int fac_val = 0;
-            if (!map_syslog_facility(fac_name, fac_val,
-                                     kp(sink_kp, "facility"), loc_node(*n), acc)) {
+            if (!map_syslog_facility(fac_name, fac_val, kp(sink_kp, "facility"), loc_node(*n),
+                                     acc)) {
                 return nullptr;
             }
             cfg.facility = fac_val;
@@ -216,9 +215,9 @@ std::unique_ptr<fixpp::log::Sink> resolve_log_sink(
     if (kind == "syslog") {
         acc.add(LoadDiagnostic{
             .key_path = kp(sink_kp, "kind"),
-            .reason   = reason_class::invalid_or_contradictory_selector,
+            .reason = reason_class::invalid_or_contradictory_selector,
             .location = loc_node(*kind_node),
-            .message  = "syslog sink is not available on this build (FIXPP_HAS_SYSLOG not defined)",
+            .message = "syslog sink is not available on this build (FIXPP_HAS_SYSLOG not defined)",
         });
         return nullptr;
     }
@@ -234,9 +233,9 @@ std::unique_ptr<fixpp::log::Sink> resolve_log_sink(
         if (!ep_node || !ep_node->is_string()) {
             acc.add(LoadDiagnostic{
                 .key_path = kp(sink_kp, "endpoint"),
-                .reason   = reason_class::missing_required,
+                .reason = reason_class::missing_required,
                 .location = ep_node ? loc_node(*ep_node) : SourceLoc{},
-                .message  = "otlp sink requires an \"endpoint\" string field",
+                .message = "otlp sink requires an \"endpoint\" string field",
             });
             return nullptr;
         }
@@ -244,9 +243,9 @@ std::unique_ptr<fixpp::log::Sink> resolve_log_sink(
         if (cfg.endpoint.empty()) {
             acc.add(LoadDiagnostic{
                 .key_path = kp(sink_kp, "endpoint"),
-                .reason   = reason_class::empty_required,
+                .reason = reason_class::empty_required,
                 .location = loc_node(*ep_node),
-                .message  = "otlp sink endpoint must not be empty",
+                .message = "otlp sink endpoint must not be empty",
             });
             return nullptr;
         }
@@ -256,9 +255,10 @@ std::unique_ptr<fixpp::log::Sink> resolve_log_sink(
             if (n->as_boolean()->get()) {
                 acc.add(LoadDiagnostic{
                     .key_path = kp(sink_kp, "use_grpc"),
-                    .reason   = reason_class::recognized_not_yet_supported_step2,
+                    .reason = reason_class::recognized_not_yet_supported_step2,
                     .location = loc_node(*n),
-                    .message  = "use_grpc=true is not yet supported (gRPC OTLP transport is deferred)",
+                    .message =
+                        "use_grpc=true is not yet supported (gRPC OTLP transport is deferred)",
                 });
                 return nullptr;
             }
@@ -278,11 +278,11 @@ std::unique_ptr<fixpp::log::Sink> resolve_log_sink(
                 if (!cert_f.is_open()) {
                     acc.add(LoadDiagnostic{
                         .key_path = kp(sink_kp, "cert_source"),
-                        .reason   = reason_class::invalid_or_contradictory_selector,
+                        .reason = reason_class::invalid_or_contradictory_selector,
                         .location = loc_node(*n),
-                        .message  = "otlp cert_source file is not readable (endpoint: " +
-                                    redact_url_userinfo(cfg.endpoint) + "): \"" +
-                                    cs_path.string() + "\"",
+                        .message = "otlp cert_source file is not readable (endpoint: " +
+                                   redact_url_userinfo(cfg.endpoint) + "): \"" + cs_path.string() +
+                                   "\"",
                     });
                     return nullptr;
                 }
@@ -304,12 +304,12 @@ std::unique_ptr<fixpp::log::Sink> resolve_log_sink(
                 if (!has_pem_magic) {
                     acc.add(LoadDiagnostic{
                         .key_path = kp(sink_kp, "cert_source"),
-                        .reason   = reason_class::invalid_or_contradictory_selector,
+                        .reason = reason_class::invalid_or_contradictory_selector,
                         .location = loc_node(*n),
-                        .message  = "otlp cert_source does not appear to be a PEM file "
-                                    "(missing \"-----BEGIN\" header; endpoint: " +
-                                    redact_url_userinfo(cfg.endpoint) + "): \"" +
-                                    cs_path.string() + "\"",
+                        .message = "otlp cert_source does not appear to be a PEM file "
+                                   "(missing \"-----BEGIN\" header; endpoint: " +
+                                   redact_url_userinfo(cfg.endpoint) + "): \"" + cs_path.string() +
+                                   "\"",
                     });
                     return nullptr;
                 }
@@ -319,7 +319,7 @@ std::unique_ptr<fixpp::log::Sink> resolve_log_sink(
         // export_timeout — duration string (044 unit-suffix rule)
         if (const auto* n = sink_tbl.get("export_timeout"); n && n->is_string()) {
             const auto d = parse_duration_to_ms(n->as_string()->get(),
-                                     kp(sink_kp, "export_timeout"), acc, loc_node(*n));
+                                                kp(sink_kp, "export_timeout"), acc, loc_node(*n));
             if (!d.ok) return nullptr;
             // OtlpLogSinkConfig::export_timeout is chrono::seconds; duration_cast from ms.
             cfg.export_timeout = std::chrono::duration_cast<std::chrono::seconds>(
@@ -332,9 +332,9 @@ std::unique_ptr<fixpp::log::Sink> resolve_log_sink(
             if (v == 0) {
                 acc.add(LoadDiagnostic{
                     .key_path = kp(sink_kp, "max_export_batch"),
-                    .reason   = reason_class::out_of_range,
+                    .reason = reason_class::out_of_range,
                     .location = loc_node(*n),
-                    .message  = "max_export_batch must be > 0",
+                    .message = "max_export_batch must be > 0",
                 });
                 return nullptr;
             }
@@ -353,11 +353,11 @@ std::unique_ptr<fixpp::log::Sink> resolve_log_sink(
     if (kind == "otlp") {
         acc.add(LoadDiagnostic{
             .key_path = kp(sink_kp, "kind"),
-            .reason   = reason_class::invalid_or_contradictory_selector,
+            .reason = reason_class::invalid_or_contradictory_selector,
             .location = loc_node(*kind_node),
-            .message  = "otlp log sink is not available on this build "
-                        "(FIXPP_CONFIG_HAS_OTLP not defined — "
-                        "OpenTelemetry SDK required)",
+            .message = "otlp log sink is not available on this build "
+                       "(FIXPP_CONFIG_HAS_OTLP not defined — "
+                       "OpenTelemetry SDK required)",
         });
         return nullptr;
     }
@@ -366,10 +366,10 @@ std::unique_ptr<fixpp::log::Sink> resolve_log_sink(
     // ── Unknown kind ──────────────────────────────────────────────────────────
     acc.add(LoadDiagnostic{
         .key_path = kp(sink_kp, "kind"),
-        .reason   = reason_class::unknown_enum,
+        .reason = reason_class::unknown_enum,
         .location = loc_node(*kind_node),
-        .message  = std::string{"unknown logger sink kind: \""} + std::string{kind} +
-                    "\" (valid values: \"file\", \"syslog\", \"otlp\")",
+        .message = std::string{"unknown logger sink kind: \""} + std::string{kind} +
+                   "\" (valid values: \"file\", \"syslog\", \"otlp\")",
     });
     return nullptr;
 }
@@ -392,16 +392,10 @@ std::unique_ptr<fixpp::log::Sink> resolve_log_sink(
 // `is_engine`     — true → emit into pending.engine; false → pending.sessions
 // ---------------------------------------------------------------------------
 
-void resolve_engine_logger(const toml::table&           logger_tbl,
-                           std::string_view             key_prefix,
-                           SourceLoc                    loc,
-                           const std::filesystem::path& base_dir,
-                           const LoadOptions&           opts,
-                           PendingLoggerSet&            pending,
-                           DiagnosticAccumulator&       acc,
-                           bool                         is_engine,
-                           std::size_t                  session_index)
-{
+void resolve_engine_logger(const toml::table& logger_tbl, std::string_view key_prefix,
+                           SourceLoc loc, const std::filesystem::path& base_dir,
+                           const LoadOptions& opts, PendingLoggerSet& pending,
+                           DiagnosticAccumulator& acc, bool is_engine, std::size_t session_index) {
     const std::size_t acc_before = acc.size();
 
     // ── LoggerConfig scalars ──────────────────────────────────────────────────
@@ -414,9 +408,9 @@ void resolve_engine_logger(const toml::table&           logger_tbl,
         if (v < 0 || v > static_cast<long long>(std::numeric_limits<std::uint32_t>::max())) {
             acc.add(LoadDiagnostic{
                 .key_path = kp(key_prefix, "capacity"),
-                .reason   = reason_class::out_of_range,
+                .reason = reason_class::out_of_range,
                 .location = loc_node(*n),
-                .message  = "capacity must be a non-zero power-of-2 uint32",
+                .message = "capacity must be a non-zero power-of-2 uint32",
             });
         } else {
             const auto u = static_cast<std::uint32_t>(v);
@@ -436,18 +430,18 @@ void resolve_engine_logger(const toml::table&           logger_tbl,
         } else {
             acc.add(LoadDiagnostic{
                 .key_path = kp(key_prefix, "on_overflow"),
-                .reason   = reason_class::unknown_enum,
+                .reason = reason_class::unknown_enum,
                 .location = loc_node(*n),
-                .message  = std::string{"unknown on_overflow token: \""} + std::string{tok} +
-                            "\" (valid values: \"drop_newest\", \"block\")",
+                .message = std::string{"unknown on_overflow token: \""} + std::string{tok} +
+                           "\" (valid values: \"drop_newest\", \"block\")",
             });
         }
     }
 
     // drain_timeout — duration string (ms); default 5000ms
     if (const auto* n = logger_tbl.get("drain_timeout"); n && n->is_string()) {
-        const auto d = parse_duration_to_ms(n->as_string()->get(),
-                                 kp(key_prefix, "drain_timeout"), acc, loc_node(*n));
+        const auto d = parse_duration_to_ms(n->as_string()->get(), kp(key_prefix, "drain_timeout"),
+                                            acc, loc_node(*n));
         if (d.ok) {
             cfg.drain_timeout = std::chrono::milliseconds{d.value_ms};
         }
@@ -468,12 +462,10 @@ void resolve_engine_logger(const toml::table&           logger_tbl,
     if (!sinks_node || !sinks_node->is_array()) {
         acc.add(LoadDiagnostic{
             .key_path = sinks_kp,
-            .reason   = sinks_node ? reason_class::malformed_value
-                                   : reason_class::missing_required,
+            .reason = sinks_node ? reason_class::malformed_value : reason_class::missing_required,
             .location = sinks_node ? loc_node(*sinks_node) : loc,
-            .message  = sinks_node
-                ? "logger.sinks must be an array of tables ([[logger.sinks]])"
-                : "logger must have at least one [[logger.sinks]] entry",
+            .message = sinks_node ? "logger.sinks must be an array of tables ([[logger.sinks]])"
+                                  : "logger must have at least one [[logger.sinks]] entry",
         });
         return;
     }
@@ -482,9 +474,9 @@ void resolve_engine_logger(const toml::table&           logger_tbl,
     if (sinks_arr.empty()) {
         acc.add(LoadDiagnostic{
             .key_path = sinks_kp,
-            .reason   = reason_class::empty_required,
+            .reason = reason_class::empty_required,
             .location = loc_node(*sinks_node),
-            .message  = "logger.sinks must not be empty; at least one sink is required",
+            .message = "logger.sinks must not be empty; at least one sink is required",
         });
         return;
     }
@@ -498,19 +490,20 @@ void resolve_engine_logger(const toml::table&           logger_tbl,
         if (!sink_elem.is_table()) {
             acc.add(LoadDiagnostic{
                 .key_path = sinks_kp + "[" + std::to_string(sink_idx) + "]",
-                .reason   = reason_class::malformed_value,
+                .reason = reason_class::malformed_value,
                 .location = loc_node(sink_elem),
-                .message  = "each [[logger.sinks]] entry must be a TOML table",
+                .message = "each [[logger.sinks]] entry must be a TOML table",
             });
             ++sink_idx;
             continue;
         }
-        auto sink_ptr = resolve_log_sink(*sink_elem.as_table(), sink_idx,
-                                         key_prefix, base_dir, opts.resource, acc);
+        auto sink_ptr = resolve_log_sink(*sink_elem.as_table(), sink_idx, key_prefix, base_dir,
+                                         opts.resource, acc);
         if (sink_ptr) {
             sinks.push_back(std::move(sink_ptr));
         }
-        // If resolve_log_sink returned nullptr it already added a diagnostic; collect-ALL continues.
+        // If resolve_log_sink returned nullptr it already added a diagnostic; collect-ALL
+        // continues.
         ++sink_idx;
     }
 
@@ -521,10 +514,10 @@ void resolve_engine_logger(const toml::table&           logger_tbl,
 
     // Park into the pending set (N-2: file-scoped, NOT constructed here).
     PendingLogger pl{
-        .cfg          = std::move(cfg),
-        .sinks        = std::move(sinks),
-        .key_path     = std::string{key_prefix},
-        .loc          = loc,
+        .cfg = std::move(cfg),
+        .sinks = std::move(sinks),
+        .key_path = std::string{key_prefix},
+        .loc = loc,
         .session_index = session_index,
     };
 
@@ -545,10 +538,8 @@ void resolve_engine_logger(const toml::table&           logger_tbl,
 // A non-empty accumulator → no Logger constructed, nothing opened.
 // ---------------------------------------------------------------------------
 
-void construct_loggers_if_clean(PendingLoggerSet&&     pending,
-                                 ConfigBundle&           bundle,
-                                 DiagnosticAccumulator& acc)
-{
+void construct_loggers_if_clean(PendingLoggerSet&& pending, ConfigBundle& bundle,
+                                DiagnosticAccumulator& acc) {
     // The whole-file accumulator must be empty (FR-015 / research D-7).
     if (!acc.empty()) {
         // Non-empty accumulator: no Logger constructed.
@@ -558,16 +549,16 @@ void construct_loggers_if_clean(PendingLoggerSet&&     pending,
     // Engine slot
     if (pending.engine.has_value()) {
         auto& pl = *pending.engine;
-        bundle.engine.logger = std::make_shared<fixpp::log::Logger>(
-            std::move(pl.cfg), std::move(pl.sinks));
+        bundle.engine.logger =
+            std::make_shared<fixpp::log::Logger>(std::move(pl.cfg), std::move(pl.sinks));
     }
 
     // Per-session slots (US3/T019 — wired in Phase 5)
     for (auto& pl : pending.sessions) {
         const std::size_t i = pl.session_index;
         if (i < bundle.sessions.size()) {
-            bundle.sessions[i].config.logger_override = std::make_shared<fixpp::log::Logger>(
-                std::move(pl.cfg), std::move(pl.sinks));
+            bundle.sessions[i].config.logger_override =
+                std::make_shared<fixpp::log::Logger>(std::move(pl.cfg), std::move(pl.sinks));
         }
     }
 }

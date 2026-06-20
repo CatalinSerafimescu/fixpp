@@ -117,19 +117,14 @@ void resolve_selectors(const toml::table& root_tbl,
 // PendingLogger/PendingLoggerSet types are from logger_resolver.hpp (included
 // before this namespace block — see above).
 // Defined in src/config/logger_resolver.cpp.
-void resolve_engine_logger(const toml::table&           logger_tbl,
-                           std::string_view             key_prefix,
-                           SourceLoc                    loc,
-                           const std::filesystem::path& base_dir,
-                           const LoadOptions&           opts,
-                           PendingLoggerSet&            pending,
-                           DiagnosticAccumulator&       acc,
-                           bool                         is_engine = true,
-                           std::size_t                  session_index = 0);
+void resolve_engine_logger(const toml::table& logger_tbl, std::string_view key_prefix,
+                           SourceLoc loc, const std::filesystem::path& base_dir,
+                           const LoadOptions& opts, PendingLoggerSet& pending,
+                           DiagnosticAccumulator& acc, bool is_engine = true,
+                           std::size_t session_index = 0);
 
-void construct_loggers_if_clean(PendingLoggerSet&&     pending,
-                                 ConfigBundle&           bundle,
-                                 DiagnosticAccumulator& acc);
+void construct_loggers_if_clean(PendingLoggerSet&& pending, ConfigBundle& bundle,
+                                DiagnosticAccumulator& acc);
 
 // ---------------------------------------------------------------------------
 // T007 (045-observability-config) — shared sink vocabulary helpers
@@ -147,15 +142,14 @@ void construct_loggers_if_clean(PendingLoggerSet&&     pending,
 //       invalid_or_contradictory_selector
 //   On a build without FIXPP_HAS_SYSLOG the function is not meaningful
 //   (callers guard with #ifdef); it still compiles (returns false always).
-bool map_syslog_facility(std::string_view name, int& out_facility,
-                         const std::string& key_path, SourceLoc loc,
-                         DiagnosticAccumulator& acc);
+bool map_syslog_facility(std::string_view name, int& out_facility, const std::string& key_path,
+                         SourceLoc loc, DiagnosticAccumulator& acc);
 
 // validate_pow2_capacity:
 //   Returns true if `value` is a nonzero power-of-2.
 //   On failure (zero or not a power of 2) adds an out_of_range diagnostic
 //   and returns false.
-bool validate_pow2_capacity(std::uint32_t value, const std::string& key_path,
-                            SourceLoc loc, DiagnosticAccumulator& acc);
+bool validate_pow2_capacity(std::uint32_t value, const std::string& key_path, SourceLoc loc,
+                            DiagnosticAccumulator& acc);
 
 }  // namespace fixpp::config::detail

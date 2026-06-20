@@ -653,125 +653,123 @@ void map_structured_members(const toml::table& merged, fixpp::session::SessionCo
 // every entry is "in-set but build-undefined" → invalid_or_contradictory_selector.
 // (Callers guard the kind="syslog" path with #ifdef FIXPP_HAS_SYSLOG separately.)
 
-bool map_syslog_facility(std::string_view name, int& out_facility,
-                         const std::string& key_path, SourceLoc loc,
-                         DiagnosticAccumulator& acc) {
+bool map_syslog_facility(std::string_view name, int& out_facility, const std::string& key_path,
+                         SourceLoc loc, DiagnosticAccumulator& acc) {
     // Closed set of accepted facility names (canonical lowercase POSIX).
     // Each entry: { name, LOG_* macro value (or -1 if undefined on this build) }
     // Listed in data-model E-4 / research D-3 order.
     struct Entry {
         std::string_view name;
-        int              value;  // -1 = in-set but LOG_* not defined on this build
+        int value;  // -1 = in-set but LOG_* not defined on this build
     };
     static const Entry kFacilities[] = {
 #ifdef FIXPP_HAS_SYSLOG
-#  ifdef LOG_KERN
-        {"kern",     LOG_KERN},
-#  else
-        {"kern",     -1},
-#  endif
-#  ifdef LOG_USER
-        {"user",     LOG_USER},
-#  else
-        {"user",     -1},
-#  endif
-#  ifdef LOG_MAIL
-        {"mail",     LOG_MAIL},
-#  else
-        {"mail",     -1},
-#  endif
-#  ifdef LOG_DAEMON
-        {"daemon",   LOG_DAEMON},
-#  else
-        {"daemon",   -1},
-#  endif
-#  ifdef LOG_AUTH
-        {"auth",     LOG_AUTH},
-#  else
-        {"auth",     -1},
-#  endif
-#  ifdef LOG_SYSLOG
-        {"syslog",   LOG_SYSLOG},
-#  else
-        {"syslog",   -1},
-#  endif
-#  ifdef LOG_LPR
-        {"lpr",      LOG_LPR},
-#  else
-        {"lpr",      -1},
-#  endif
-#  ifdef LOG_NEWS
-        {"news",     LOG_NEWS},
-#  else
-        {"news",     -1},
-#  endif
-#  ifdef LOG_UUCP
-        {"uucp",     LOG_UUCP},
-#  else
-        {"uucp",     -1},
-#  endif
-#  ifdef LOG_CRON
-        {"cron",     LOG_CRON},
-#  else
-        {"cron",     -1},
-#  endif
-#  ifdef LOG_AUTHPRIV
+#ifdef LOG_KERN
+        {"kern", LOG_KERN},
+#else
+        {"kern", -1},
+#endif
+#ifdef LOG_USER
+        {"user", LOG_USER},
+#else
+        {"user", -1},
+#endif
+#ifdef LOG_MAIL
+        {"mail", LOG_MAIL},
+#else
+        {"mail", -1},
+#endif
+#ifdef LOG_DAEMON
+        {"daemon", LOG_DAEMON},
+#else
+        {"daemon", -1},
+#endif
+#ifdef LOG_AUTH
+        {"auth", LOG_AUTH},
+#else
+        {"auth", -1},
+#endif
+#ifdef LOG_SYSLOG
+        {"syslog", LOG_SYSLOG},
+#else
+        {"syslog", -1},
+#endif
+#ifdef LOG_LPR
+        {"lpr", LOG_LPR},
+#else
+        {"lpr", -1},
+#endif
+#ifdef LOG_NEWS
+        {"news", LOG_NEWS},
+#else
+        {"news", -1},
+#endif
+#ifdef LOG_UUCP
+        {"uucp", LOG_UUCP},
+#else
+        {"uucp", -1},
+#endif
+#ifdef LOG_CRON
+        {"cron", LOG_CRON},
+#else
+        {"cron", -1},
+#endif
+#ifdef LOG_AUTHPRIV
         {"authpriv", LOG_AUTHPRIV},
-#  else
+#else
         {"authpriv", -1},
-#  endif
-#  ifdef LOG_FTP
-        {"ftp",      LOG_FTP},
-#  else
-        {"ftp",      -1},
-#  endif
-#  ifdef LOG_LOCAL0
-        {"local0",   LOG_LOCAL0},
-#  else
-        {"local0",   -1},
-#  endif
-#  ifdef LOG_LOCAL1
-        {"local1",   LOG_LOCAL1},
-#  else
-        {"local1",   -1},
-#  endif
-#  ifdef LOG_LOCAL2
-        {"local2",   LOG_LOCAL2},
-#  else
-        {"local2",   -1},
-#  endif
-#  ifdef LOG_LOCAL3
-        {"local3",   LOG_LOCAL3},
-#  else
-        {"local3",   -1},
-#  endif
-#  ifdef LOG_LOCAL4
-        {"local4",   LOG_LOCAL4},
-#  else
-        {"local4",   -1},
-#  endif
-#  ifdef LOG_LOCAL5
-        {"local5",   LOG_LOCAL5},
-#  else
-        {"local5",   -1},
-#  endif
-#  ifdef LOG_LOCAL6
-        {"local6",   LOG_LOCAL6},
-#  else
-        {"local6",   -1},
-#  endif
-#  ifdef LOG_LOCAL7
-        {"local7",   LOG_LOCAL7},
-#  else
-        {"local7",   -1},
-#  endif
+#endif
+#ifdef LOG_FTP
+        {"ftp", LOG_FTP},
+#else
+        {"ftp", -1},
+#endif
+#ifdef LOG_LOCAL0
+        {"local0", LOG_LOCAL0},
+#else
+        {"local0", -1},
+#endif
+#ifdef LOG_LOCAL1
+        {"local1", LOG_LOCAL1},
+#else
+        {"local1", -1},
+#endif
+#ifdef LOG_LOCAL2
+        {"local2", LOG_LOCAL2},
+#else
+        {"local2", -1},
+#endif
+#ifdef LOG_LOCAL3
+        {"local3", LOG_LOCAL3},
+#else
+        {"local3", -1},
+#endif
+#ifdef LOG_LOCAL4
+        {"local4", LOG_LOCAL4},
+#else
+        {"local4", -1},
+#endif
+#ifdef LOG_LOCAL5
+        {"local5", LOG_LOCAL5},
+#else
+        {"local5", -1},
+#endif
+#ifdef LOG_LOCAL6
+        {"local6", LOG_LOCAL6},
+#else
+        {"local6", -1},
+#endif
+#ifdef LOG_LOCAL7
+        {"local7", LOG_LOCAL7},
+#else
+        {"local7", -1},
+#endif
 #else
         // Non-POSIX build: closed set still defined, every entry is "unavailable"
-        {"kern", -1}, {"user", -1}, {"mail", -1}, {"daemon", -1},
-        {"auth", -1}, {"syslog", -1}, {"lpr", -1}, {"news", -1},
-        {"uucp", -1}, {"cron", -1}, {"authpriv", -1}, {"ftp", -1},
-        {"local0", -1}, {"local1", -1}, {"local2", -1}, {"local3", -1},
-        {"local4", -1}, {"local5", -1}, {"local6", -1}, {"local7", -1},
+        {"kern", -1},     {"user", -1},   {"mail", -1},   {"daemon", -1}, {"auth", -1},
+        {"syslog", -1},   {"lpr", -1},    {"news", -1},   {"uucp", -1},   {"cron", -1},
+        {"authpriv", -1}, {"ftp", -1},    {"local0", -1}, {"local1", -1}, {"local2", -1},
+        {"local3", -1},   {"local4", -1}, {"local5", -1}, {"local6", -1}, {"local7", -1},
 #endif
     };
     static constexpr std::string_view kLegalSet =
@@ -810,8 +808,8 @@ bool map_syslog_facility(std::string_view name, int& out_facility,
 // T007 (045-observability-config) — validate_pow2_capacity
 // ---------------------------------------------------------------------------
 
-bool validate_pow2_capacity(std::uint32_t value, const std::string& key_path,
-                            SourceLoc loc, DiagnosticAccumulator& acc) {
+bool validate_pow2_capacity(std::uint32_t value, const std::string& key_path, SourceLoc loc,
+                            DiagnosticAccumulator& acc) {
     if (value == 0 || !std::has_single_bit(value)) {
         acc.add(LoadDiagnostic{
             .key_path = key_path,
