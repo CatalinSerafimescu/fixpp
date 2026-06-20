@@ -496,6 +496,13 @@ void recognize_keys(const toml::table& tbl, std::string_view key_prefix,
     // Capture base_dir once (FR-016a / D-7).
     const std::filesystem::path base_dir = path.parent_path();
 
+    // ── T019 (045-observability-config): per-session + engine logger pending set
+    // Declared BEFORE the per-session loop so it can accumulate per-session
+    // PendingLoggers across the whole file (N-2: file-scoped; not constructed
+    // inside the loop). The single construct_loggers_if_clean call at the end
+    // drains the whole set (data-model E-5, research D-7 N-2).
+    PendingLoggerSet pending_loggers;
+
     std::size_t session_idx = 0;
     for (const auto& elem : *sessions_arr) {
         if (!elem.is_table()) {
@@ -533,6 +540,33 @@ void recognize_keys(const toml::table& tbl, std::string_view key_prefix,
         // duplication) — NOT the merged copy.
         recognize_keys(session_raw, key_prefix, acc);
 
+        // ── T019 (045-observability-config): per-session [session.logger] ────
+        // Read from the MERGED table (following the 044 convention for per-session
+        // selectors like transport — merged_session_ptrs passes merged to
+        // resolve_selectors). The logger sub-table, if present, was either
+        // written directly in the [[session]] block or inherited from [default]
+        // via deep-merge. SourceLoc comes from session_raw (merged loses it).
+        // Must be called BEFORE std::move(merged) below.
+        {
+            const toml::node* logger_node = merged.get("logger");
+            if (logger_node && logger_node->is_table()) {
+                SourceLoc sess_logger_loc;
+                // Prefer raw-table SourceLoc (merged zeroes source_regions).
+                if (const toml::node* raw_node = session_raw.get("logger")) {
+                    const auto& src = raw_node->source().begin;
+                    sess_logger_loc = SourceLoc{
+                        .line = static_cast<std::uint32_t>(src.line),
+                        .col  = static_cast<std::uint32_t>(src.column),
+                    };
+                }
+                const std::string sess_logger_kp = key_prefix + ".logger";
+                detail::resolve_engine_logger(
+                    *logger_node->as_table(), sess_logger_kp, sess_logger_loc,
+                    base_dir, opts, pending_loggers, acc,
+                    /*is_engine=*/false, /*session_index=*/session_idx);
+            }
+        }
+
         bundle.sessions.push_back(std::move(def));
 
         // Stash the merged table so resolve_selectors can read transport.kind.
@@ -555,12 +589,8 @@ void recognize_keys(const toml::table& tbl, std::string_view key_prefix,
     //
     // [logger] is optional (FR-003/SC-004): absent → engine.logger stays null.
     // Called AFTER 044 resolution so collect-ALL spans the whole file.
-    //
-    // Seam for Phase-4 T016 preflight: insert the side-effect-free resource
-    // preflight (dir-exists, cert PEM-magic, endpoint non-empty) BETWEEN
-    // resolve_engine_logger and construct_loggers_if_clean when T016 is wired.
-    PendingLoggerSet pending_loggers;
-
+    // pending_loggers is declared before the per-session loop (T019) so it
+    // accumulates both engine and per-session loggers in one file-scoped set.
     if (const auto* logger_node = root_tbl.get("logger");
         logger_node && logger_node->is_table()) {
         SourceLoc logger_loc;

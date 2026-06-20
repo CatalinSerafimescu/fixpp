@@ -92,11 +92,11 @@
 
 ### Tests for US3 (write FIRST, must FAIL)
 
-- [ ] T018 [P] [US3] **Multi-session override test** in `tests/config/test_load_logger_overrides.cpp` + fixture `tests/config/fixtures/logger_multisession.toml`: an engine `[logger]` + one session with `[session.logger]` + one without; assert the overriding session's `config.logger_override` is the override logger, the non-overriding session's `logger_override` is null (inherits engine default), and `engine.logger` is the engine default (SC-005, AC US3-1/2).
+- [x] T018 [P] [US3] **Multi-session override test** in `tests/config/test_load_logger_overrides.cpp` + fixture `tests/config/fixtures/logger_multisession.toml`: an engine `[logger]` + one session with `[session.logger]` + one without; assert the overriding session's `config.logger_override` is the override logger, the non-overriding session's `logger_override` is null (inherits engine default), and `engine.logger` is the engine default (SC-005, AC US3-1/2).
 
 ### Implementation for US3
 
-- [ ] T019 [US3] **Per-session logger resolver** in `src/config/logger_resolver.cpp`: `[session].logger` reuses `resolve_engine_logger` (T011) to emit a **session-keyed** `PendingLogger` (carrying the session index) into `pending.sessions` — NOT writing `logger_override` directly and NOT constructing inside the per-session loop (N-2 file-scoped). Wire the call into the per-session resolution path in `toml_config_loader.cpp`; the existing `construct_loggers_if_clean` (T012) assigns `bundle.sessions[i].config.logger_override` at clean-accumulator construction (data-model E-5, research D-7 N-2). Make T018 pass.
+- [x] T019 [US3] **Per-session logger resolver** in `src/config/logger_resolver.cpp`: `[session].logger` reuses `resolve_engine_logger` (T011) to emit a **session-keyed** `PendingLogger` (carrying the session index) into `pending.sessions` — NOT writing `logger_override` directly and NOT constructing inside the per-session loop (N-2 file-scoped). Wire the call into the per-session resolution path in `toml_config_loader.cpp`; the existing `construct_loggers_if_clean` (T012) assigns `bundle.sessions[i].config.logger_override` at clean-accumulator construction (data-model E-5, research D-7 N-2). Make T018 pass.
 
 **Checkpoint**: engine-default + per-session logger overrides honored; later-session errors suppress earlier-session construction.
 

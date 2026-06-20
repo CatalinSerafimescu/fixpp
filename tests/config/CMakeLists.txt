@@ -232,6 +232,42 @@ set_target_properties(test_load_logger_negative PROPERTIES
 add_test(NAME test_load_logger_negative COMMAND test_load_logger_negative)
 set_tests_properties(test_load_logger_negative PROPERTIES LABELS "config;045")
 
+# ── T018/T019: multi-session logger override test (045 US3) ──────────────────
+
+add_executable(test_load_logger_overrides
+    test_load_logger_overrides.cpp
+)
+target_compile_definitions(test_load_logger_overrides PRIVATE
+    FIXPP_CONFIG_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures"
+)
+# White-box: includes logger.hpp for FIXPP_LOG0; needs fixpp::log.
+target_include_directories(test_load_logger_overrides PRIVATE
+    "${CMAKE_SOURCE_DIR}/src/config"
+)
+target_link_libraries(test_load_logger_overrides PRIVATE
+    fixpp::config_toml
+    fixpp::session
+    fixpp::core
+    fixpp::tls
+    fixpp::dictionary
+    fixpp::transport
+    fixpp::log
+    GTest::gtest
+    GTest::gtest_main
+    "${FIXPP_CFG_OPENSSL_CRYPTO_LIB}"
+    "${FIXPP_CFG_OPENSSL_SSL_LIB}"
+    "${FIXPP_CFG_ZLIB_LIB}"
+)
+if(TARGET fixpp::log_otlp)
+    target_link_libraries(test_load_logger_overrides PRIVATE fixpp::log_otlp)
+    target_compile_definitions(test_load_logger_overrides PRIVATE FIXPP_CONFIG_HAS_OTLP)
+endif()
+set_target_properties(test_load_logger_overrides PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+)
+add_test(NAME test_load_logger_overrides COMMAND test_load_logger_overrides)
+set_tests_properties(test_load_logger_overrides PROPERTIES LABELS "config;045")
+
 # ── T030: QuickFIX parity table (SC-004) ─────────────────────────────────────
 # Pure data test — no loader link needed; GTest only.
 
