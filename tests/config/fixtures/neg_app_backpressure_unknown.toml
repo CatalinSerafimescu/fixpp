@@ -1,0 +1,28 @@
+# neg_app_backpressure_unknown.toml
+# session.app_backpressure with an unknown token — triggers unknown_enum
+# (lines 510-517 scalar_mappers.cpp).
+
+[clock]
+kind = "system"
+
+[store]
+kind = "memory"
+
+[dictionary]
+kind = "path"
+path = "FIX44.xml"
+
+[[session]]
+sender_comp_id = "CLIENT1"
+target_comp_id = "SERVER1"
+begin_string   = "FIX.4.4"
+role           = "initiator"
+app_backpressure = "throttle"
+
+[session.transport]
+kind = "plaintext"
+host = "fix.example.com"
+port = 4321
+
+[session.security_profile]
+kind = "insecure_plain_tcp"

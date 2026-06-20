@@ -1,0 +1,27 @@
+# neg_fixt_empty_appl_ver_id.toml
+# begin_string="FIXT.1.1" with default_appl_ver_id="" — triggers empty_required
+# at session[0].default_appl_ver_id (lines 210-216 toml_config_loader.cpp
+# check_required_keys).
+
+[clock]
+kind = "system"
+
+[store]
+kind = "memory"
+
+[dictionary]
+kind = "path"
+path = "FIXT11.xml"
+
+[[session]]
+sender_comp_id       = "CLIENT1"
+target_comp_id       = "SERVER1"
+begin_string         = "FIXT.1.1"
+role                 = "acceptor"
+default_appl_ver_id  = ""
+
+[session.transport]
+kind = "plaintext"
+
+[session.security_profile]
+kind = "insecure_plain_tcp"

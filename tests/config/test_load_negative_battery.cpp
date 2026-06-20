@@ -872,6 +872,488 @@ TEST(LoadNegativeBattery, T020_Positive_InsecurePlainNoCerts) {
 //   diagnostic emitted). Phase 4b will add the type-check with redaction.
 //   ASSERT_FALSE(has_value()) will be RED until Phase 4b (T023) ships.
 
+// =============================================================================
+// Coverage-targeted negative tests
+// =============================================================================
+
+// ── Duration: empty string ────────────────────────────────────────────────────
+// heartbeat_interval = "" → malformed_value (parse_duration_to_ms empty arm,
+// line 112 scalar_mappers.cpp).
+
+TEST(LoadNegativeBattery, Cov_DurationEmpty) {
+    auto result = load(neg_fixture("neg_duration_empty.toml"));
+    ASSERT_FALSE(result.has_value());
+    using RC = fixpp::config::reason_class;
+    EXPECT_TRUE(has_diag(result.error(), RC::malformed_value, "session[0].heartbeat_interval"))
+        << "expected malformed_value at heartbeat_interval for empty duration string";
+}
+
+// ── Duration: no numeric prefix ───────────────────────────────────────────────
+// heartbeat_interval = "xs" → malformed_value (line 127 scalar_mappers.cpp).
+
+TEST(LoadNegativeBattery, Cov_DurationNoNumeric) {
+    auto result = load(neg_fixture("neg_duration_no_numeric.toml"));
+    ASSERT_FALSE(result.has_value());
+    using RC = fixpp::config::reason_class;
+    EXPECT_TRUE(has_diag(result.error(), RC::malformed_value, "session[0].heartbeat_interval"))
+        << "expected malformed_value at heartbeat_interval for non-numeric start";
+}
+
+// ── Duration: unknown unit ────────────────────────────────────────────────────
+// heartbeat_interval = "30d" → malformed_value (unknown unit arm, line 171).
+
+TEST(LoadNegativeBattery, Cov_DurationUnknownUnit) {
+    auto result = load(neg_fixture("neg_duration_unknown_unit.toml"));
+    ASSERT_FALSE(result.has_value());
+    using RC = fixpp::config::reason_class;
+    EXPECT_TRUE(has_diag(result.error(), RC::malformed_value, "session[0].heartbeat_interval"))
+        << "expected malformed_value at heartbeat_interval for unknown unit 'd'";
+}
+
+// ── mode: unknown token ───────────────────────────────────────────────────────
+// mode = "event_loop" → unknown_enum at session[0].mode (line 286).
+
+TEST(LoadNegativeBattery, Cov_ModeUnknownToken) {
+    auto result = load(neg_fixture("neg_mode_unknown.toml"));
+    ASSERT_FALSE(result.has_value());
+    using RC = fixpp::config::reason_class;
+    EXPECT_TRUE(has_diag(result.error(), RC::unknown_enum, "session[0].mode"))
+        << "expected unknown_enum at session[0].mode for token 'event_loop'";
+}
+
+// ── locks: unknown token ──────────────────────────────────────────────────────
+// locks = "rwlock" → unknown_enum at session[0].locks (line 307).
+
+TEST(LoadNegativeBattery, Cov_LocksUnknownToken) {
+    auto result = load(neg_fixture("neg_locks_unknown.toml"));
+    ASSERT_FALSE(result.has_value());
+    using RC = fixpp::config::reason_class;
+    EXPECT_TRUE(has_diag(result.error(), RC::unknown_enum, "session[0].locks"))
+        << "expected unknown_enum at session[0].locks for token 'rwlock'";
+}
+
+// ── reset_seqnum_policy: unknown token ───────────────────────────────────────
+// reset_seqnum_policy = "never" → unknown_enum (line 461).
+
+TEST(LoadNegativeBattery, Cov_ResetSeqnumUnknownToken) {
+    auto result = load(neg_fixture("neg_reset_seqnum_unknown.toml"));
+    ASSERT_FALSE(result.has_value());
+    using RC = fixpp::config::reason_class;
+    EXPECT_TRUE(has_diag(result.error(), RC::unknown_enum, "session[0].reset_seqnum_policy"))
+        << "expected unknown_enum at session[0].reset_seqnum_policy for token 'never'";
+}
+
+// ── security_profile.kind: unknown token ─────────────────────────────────────
+// Exercises scalar_mappers.cpp lines 609-618 (unknown_enum for unknown kind)
+// AND loc_for_subkey (line 80-88) which is called for the sub-table location.
+
+TEST(LoadNegativeBattery, Cov_SecurityProfileKindUnknown) {
+    auto result = load(neg_fixture("neg_security_profile_kind_unknown.toml"));
+    ASSERT_FALSE(result.has_value());
+    using RC = fixpp::config::reason_class;
+    EXPECT_TRUE(has_diag(result.error(), RC::unknown_enum, "session[0].security_profile.kind"))
+        << "expected unknown_enum at session[0].security_profile.kind for unknown token";
+}
+
+// ── username: wrong type (integer) ───────────────────────────────────────────
+// username = 42 → malformed_value at session[0].username (lines 227-235).
+
+TEST(LoadNegativeBattery, Cov_UsernameWrongType) {
+    auto result = load(neg_fixture("neg_username_wrong_type.toml"));
+    ASSERT_FALSE(result.has_value());
+    using RC = fixpp::config::reason_class;
+    EXPECT_TRUE(has_diag(result.error(), RC::malformed_value, "session[0].username"))
+        << "expected malformed_value at session[0].username for integer value";
+}
+
+// ── transport.port: out of range ──────────────────────────────────────────────
+// transport.port = 99999 → out_of_range at session[0].transport.port (line 676).
+
+TEST(LoadNegativeBattery, Cov_TransportPortOutOfRange) {
+    auto result = load(neg_fixture("neg_transport_port_out_of_range.toml"));
+    ASSERT_FALSE(result.has_value());
+    using RC = fixpp::config::reason_class;
+    EXPECT_TRUE(has_diag(result.error(), RC::out_of_range, "session[0].transport.port"))
+        << "expected out_of_range at session[0].transport.port for value 99999";
+}
+
+// ── compid_authorization_policy: value not an array ──────────────────────────
+// Exercises scalar_mappers.cpp lines 631-641.
+
+TEST(LoadNegativeBattery, Cov_CompidAuthNotArray) {
+    auto result = load(neg_fixture("neg_compid_auth_not_array.toml"));
+    ASSERT_FALSE(result.has_value());
+    using RC = fixpp::config::reason_class;
+    // The key_path is built as kp(key_prefix, "compid_authorization_policy.PARTNER_A")
+    bool found = std::any_of(
+        result.error().begin(), result.error().end(), [](const fixpp::config::LoadDiagnostic& d) {
+            return d.reason == RC::malformed_value &&
+                   d.key_path.find("compid_authorization_policy") != std::string::npos;
+        });
+    EXPECT_TRUE(found)
+        << "expected malformed_value for compid_authorization_policy non-array value";
+}
+
+// ── reconnect_policy.schedule: non-string entry ───────────────────────────────
+// Exercises scalar_mappers.cpp lines 701-709.
+
+TEST(LoadNegativeBattery, Cov_ReconnectScheduleNotString) {
+    auto result = load(neg_fixture("neg_reconnect_schedule_not_string.toml"));
+    ASSERT_FALSE(result.has_value());
+    using RC = fixpp::config::reason_class;
+    EXPECT_TRUE(
+        has_diag(result.error(), RC::malformed_value, "session[0].reconnect_policy.schedule"))
+        << "expected malformed_value at reconnect_policy.schedule for integer entry";
+}
+
+// ── clock.kind: not a string ──────────────────────────────────────────────────
+// clock.kind = 42 → malformed_value at "clock.kind" (lines 71-76 selector_resolver).
+
+TEST(LoadNegativeBattery, Cov_ClockKindNotString) {
+    auto result = load(neg_fixture("neg_clock_kind_not_string.toml"));
+    ASSERT_FALSE(result.has_value());
+    using RC = fixpp::config::reason_class;
+    EXPECT_TRUE(has_diag(result.error(), RC::malformed_value, "clock.kind"))
+        << "expected malformed_value at clock.kind for integer value";
+}
+
+// ── clock.kind: empty string ──────────────────────────────────────────────────
+// clock.kind = "" → empty_required at "clock.kind" (lines 79-85).
+
+TEST(LoadNegativeBattery, Cov_ClockKindEmpty) {
+    auto result = load(neg_fixture("neg_clock_kind_empty.toml"));
+    ASSERT_FALSE(result.has_value());
+    using RC = fixpp::config::reason_class;
+    EXPECT_TRUE(has_diag(result.error(), RC::empty_required, "clock.kind"))
+        << "expected empty_required at clock.kind for empty string";
+}
+
+// ── clock.kind: unknown value ─────────────────────────────────────────────────
+// clock.kind = "ntp" → unknown_enum at "clock.kind" (lines 88-95).
+
+TEST(LoadNegativeBattery, Cov_ClockKindUnknown) {
+    auto result = load(neg_fixture("neg_clock_kind_unknown.toml"));
+    ASSERT_FALSE(result.has_value());
+    using RC = fixpp::config::reason_class;
+    EXPECT_TRUE(has_diag(result.error(), RC::unknown_enum, "clock.kind"))
+        << "expected unknown_enum at clock.kind for value 'ntp'";
+}
+
+// ── store.kind: not a string ──────────────────────────────────────────────────
+// store.kind = 42 → missing_required at "store.kind" (lines 133-138).
+
+TEST(LoadNegativeBattery, Cov_StoreKindNotString) {
+    auto result = load(neg_fixture("neg_store_kind_not_string.toml"));
+    ASSERT_FALSE(result.has_value());
+    using RC = fixpp::config::reason_class;
+    EXPECT_TRUE(has_diag(result.error(), RC::missing_required, "store.kind"))
+        << "expected missing_required at store.kind for integer value";
+}
+
+// ── store.kind: empty string ──────────────────────────────────────────────────
+// store.kind = "" → empty_required at "store.kind" (lines 141-147).
+
+TEST(LoadNegativeBattery, Cov_StoreKindEmpty) {
+    auto result = load(neg_fixture("neg_store_kind_empty.toml"));
+    ASSERT_FALSE(result.has_value());
+    using RC = fixpp::config::reason_class;
+    EXPECT_TRUE(has_diag(result.error(), RC::empty_required, "store.kind"))
+        << "expected empty_required at store.kind for empty string";
+}
+
+// ── store.kind: unknown value ─────────────────────────────────────────────────
+// store.kind = "redis" → unknown_enum at "store.kind" (lines 175-180).
+
+TEST(LoadNegativeBattery, Cov_StoreKindUnknown) {
+    auto result = load(neg_fixture("neg_store_kind_unknown.toml"));
+    ASSERT_FALSE(result.has_value());
+    using RC = fixpp::config::reason_class;
+    EXPECT_TRUE(has_diag(result.error(), RC::unknown_enum, "store.kind"))
+        << "expected unknown_enum at store.kind for value 'redis'";
+}
+
+// ── store.kind="file" without directory ──────────────────────────────────────
+// store.kind="file" but directory absent → missing_required at "store.directory".
+
+TEST(LoadNegativeBattery, Cov_StoreFileNoDirectory) {
+    auto result = load(neg_fixture("neg_store_file_no_directory.toml"));
+    ASSERT_FALSE(result.has_value());
+    using RC = fixpp::config::reason_class;
+    EXPECT_TRUE(has_diag(result.error(), RC::missing_required, "store.directory"))
+        << "expected missing_required at store.directory for file store without directory";
+}
+
+// ── transport.kind: not a string ─────────────────────────────────────────────
+// transport.kind = 42 → missing_required at "session[0].transport.kind" (line 529).
+
+TEST(LoadNegativeBattery, Cov_TransportKindNotString) {
+    auto result = load(neg_fixture("neg_transport_kind_not_string.toml"));
+    ASSERT_FALSE(result.has_value());
+    using RC = fixpp::config::reason_class;
+    EXPECT_TRUE(has_diag(result.error(), RC::missing_required, "session[0].transport.kind"))
+        << "expected missing_required at transport.kind for integer value";
+}
+
+// ── transport.kind: empty string ─────────────────────────────────────────────
+// transport.kind = "" → empty_required at "session[0].transport.kind" (line 537).
+
+TEST(LoadNegativeBattery, Cov_TransportKindEmpty) {
+    auto result = load(neg_fixture("neg_transport_kind_empty.toml"));
+    ASSERT_FALSE(result.has_value());
+    using RC = fixpp::config::reason_class;
+    EXPECT_TRUE(has_diag(result.error(), RC::empty_required, "session[0].transport.kind"))
+        << "expected empty_required at transport.kind for empty string";
+}
+
+// ── transport.kind: unknown value ────────────────────────────────────────────
+// transport.kind = "websocket" → unknown_enum at "session[0].transport.kind" (line 697).
+
+TEST(LoadNegativeBattery, Cov_TransportKindUnknown) {
+    auto result = load(neg_fixture("neg_transport_kind_unknown.toml"));
+    ASSERT_FALSE(result.has_value());
+    using RC = fixpp::config::reason_class;
+    EXPECT_TRUE(has_diag(result.error(), RC::unknown_enum, "session[0].transport.kind"))
+        << "expected unknown_enum at transport.kind for value 'websocket'";
+}
+
+// ── No [[session]] at all → missing_required at "session" ────────────────────
+// (toml_config_loader.cpp lines 419-424)
+
+TEST(LoadNegativeBattery, Cov_NoSessions) {
+    auto result = load(neg_fixture("neg_no_sessions.toml"));
+    ASSERT_FALSE(result.has_value());
+    using RC = fixpp::config::reason_class;
+    EXPECT_TRUE(has_diag(result.error(), RC::missing_required, "session"))
+        << "expected missing_required at 'session' when no [[session]] block exists";
+}
+
+// ── session array contains non-table element → parse_error ───────────────────
+// session = [1, 2] is an inline integer array, not array-of-tables.
+// (toml_config_loader.cpp lines 483-490)
+
+TEST(LoadNegativeBattery, Cov_SessionNonTableElement) {
+    auto result = load(neg_fixture("neg_session_non_table_element.toml"));
+    ASSERT_FALSE(result.has_value());
+    using RC = fixpp::config::reason_class;
+    // The non-table element path emits parse_error at key_path="session".
+    EXPECT_TRUE(has_diag(result.error(), RC::parse_error, "session"))
+        << "expected parse_error at 'session' when element is not a table";
+}
+
+// ── FIXT.1.1 with empty default_appl_ver_id → empty_required ─────────────────
+// (toml_config_loader.cpp check_required_keys lines 210-216)
+
+TEST(LoadNegativeBattery, Cov_FixtEmptyApplVerId) {
+    auto result = load(neg_fixture("neg_fixt_empty_appl_ver_id.toml"));
+    ASSERT_FALSE(result.has_value());
+    using RC = fixpp::config::reason_class;
+    EXPECT_TRUE(has_diag(result.error(), RC::empty_required, "session[0].default_appl_ver_id"))
+        << "expected empty_required at default_appl_ver_id for FIXT.1.1 with empty value";
+}
+
+// ── security_profile.kind = "" → empty_required ──────────────────────────────
+// (toml_config_loader.cpp check_required_keys lines 239-244)
+
+TEST(LoadNegativeBattery, Cov_SecurityProfileKindEmpty) {
+    auto result = load(neg_fixture("neg_security_profile_kind_empty.toml"));
+    ASSERT_FALSE(result.has_value());
+    using RC = fixpp::config::reason_class;
+    EXPECT_TRUE(has_diag(result.error(), RC::empty_required, "session[0].security_profile.kind"))
+        << "expected empty_required at security_profile.kind for empty string";
+}
+
+// ── clock.kind absent inside [clock] table → missing_required ────────────────
+// [clock] present but no "kind" key → missing_required at "clock.kind"
+// (lines 64-69 selector_resolver.cpp: !clk_tbl->get("kind") branch).
+
+TEST(LoadNegativeBattery, Cov_ClockKindAbsentInTable) {
+    auto result = load(neg_fixture("neg_clock_kind_absent_in_table.toml"));
+    ASSERT_FALSE(result.has_value());
+    using RC = fixpp::config::reason_class;
+    EXPECT_TRUE(has_diag(result.error(), RC::missing_required, "clock.kind"))
+        << "expected missing_required at clock.kind when [clock] present but kind absent";
+}
+
+// ── cert_source.kind: not a string → missing_required ────────────────────────
+// cert_source.kind = 42 → missing_required at "cert_source.kind" (lines 212-217).
+
+TEST(LoadNegativeBattery, Cov_CertSourceKindNotString) {
+    auto result = load(neg_fixture("neg_cert_source_kind_not_string.toml"));
+    ASSERT_FALSE(result.has_value());
+    using RC = fixpp::config::reason_class;
+    EXPECT_TRUE(has_diag(result.error(), RC::missing_required, "cert_source.kind"))
+        << "expected missing_required at cert_source.kind for integer value";
+}
+
+// ── cert_source.kind: empty string → empty_required ──────────────────────────
+// cert_source.kind = "" → empty_required at "cert_source.kind" (lines 221-226).
+
+TEST(LoadNegativeBattery, Cov_CertSourceKindEmpty) {
+    auto result = load(neg_fixture("neg_cert_source_kind_empty.toml"));
+    ASSERT_FALSE(result.has_value());
+    using RC = fixpp::config::reason_class;
+    EXPECT_TRUE(has_diag(result.error(), RC::empty_required, "cert_source.kind"))
+        << "expected empty_required at cert_source.kind for empty string";
+}
+
+// ── cert_source.kind: unknown → unknown_enum ─────────────────────────────────
+// cert_source.kind = "pkcs11" → unknown_enum at "cert_source.kind" (lines 230-236).
+
+TEST(LoadNegativeBattery, Cov_CertSourceKindUnknown) {
+    auto result = load(neg_fixture("neg_cert_source_kind_unknown.toml"));
+    ASSERT_FALSE(result.has_value());
+    using RC = fixpp::config::reason_class;
+    EXPECT_TRUE(has_diag(result.error(), RC::unknown_enum, "cert_source.kind"))
+        << "expected unknown_enum at cert_source.kind for value 'pkcs11'";
+}
+
+// ── dictionary.kind absent in [dictionary] table → missing_required ───────────
+// [dictionary] present but no "kind" key → missing_required at "dictionary.kind"
+// (lines 298-303 selector_resolver.cpp).
+
+TEST(LoadNegativeBattery, Cov_DictKindAbsentInTable) {
+    auto result = load(neg_fixture("neg_dict_kind_absent_in_table.toml"));
+    ASSERT_FALSE(result.has_value());
+    using RC = fixpp::config::reason_class;
+    EXPECT_TRUE(has_diag(result.error(), RC::missing_required, "dictionary.kind"))
+        << "expected missing_required at dictionary.kind when [dictionary] present but kind absent";
+}
+
+// ── dictionary.kind: empty string → empty_required ───────────────────────────
+// dictionary.kind = "" → empty_required at "dictionary.kind" (lines 307-312).
+
+TEST(LoadNegativeBattery, Cov_DictKindEmpty) {
+    auto result = load(neg_fixture("neg_dict_kind_empty.toml"));
+    ASSERT_FALSE(result.has_value());
+    using RC = fixpp::config::reason_class;
+    EXPECT_TRUE(has_diag(result.error(), RC::empty_required, "dictionary.kind"))
+        << "expected empty_required at dictionary.kind for empty string";
+}
+
+// ── dictionary.kind: unknown value → unknown_enum ────────────────────────────
+// dictionary.kind = "database" → unknown_enum at "dictionary.kind" (lines 325-330).
+
+TEST(LoadNegativeBattery, Cov_DictKindUnknown) {
+    auto result = load(neg_fixture("neg_dict_kind_unknown.toml"));
+    ASSERT_FALSE(result.has_value());
+    using RC = fixpp::config::reason_class;
+    EXPECT_TRUE(has_diag(result.error(), RC::unknown_enum, "dictionary.kind"))
+        << "expected unknown_enum at dictionary.kind for value 'database'";
+}
+
+// ── dictionary.path absent → missing_required ─────────────────────────────────
+// dictionary.kind="path" but path key absent → missing_required (lines 340-345).
+
+TEST(LoadNegativeBattery, Cov_DictPathAbsent) {
+    auto result = load(neg_fixture("neg_dict_path_absent.toml"));
+    ASSERT_FALSE(result.has_value());
+    using RC = fixpp::config::reason_class;
+    EXPECT_TRUE(has_diag(result.error(), RC::missing_required, "dictionary.path"))
+        << "expected missing_required at dictionary.path when path key absent";
+}
+
+// ── dictionary.path empty → empty_required ────────────────────────────────────
+// dictionary.kind="path" with path = "" → empty_required (lines 349-354).
+
+TEST(LoadNegativeBattery, Cov_DictPathEmpty) {
+    auto result = load(neg_fixture("neg_dict_path_empty.toml"));
+    ASSERT_FALSE(result.has_value());
+    using RC = fixpp::config::reason_class;
+    EXPECT_TRUE(has_diag(result.error(), RC::empty_required, "dictionary.path"))
+        << "expected empty_required at dictionary.path when path is empty string";
+}
+
+// ── duration numeric overflow (from_chars fails) → malformed_value ────────────
+// (lines 140-147 scalar_mappers.cpp: ec != std::errc{} after from_chars)
+
+TEST(LoadNegativeBattery, Cov_DurationOverflow) {
+    auto result = load(neg_fixture("neg_duration_overflow.toml"));
+    ASSERT_FALSE(result.has_value());
+    using RC = fixpp::config::reason_class;
+    // from_chars fails on a number exceeding LLONG_MAX → malformed_value
+    EXPECT_TRUE(has_diag(result.error(), RC::malformed_value, "session[0].heartbeat_interval"))
+        << "expected malformed_value at heartbeat_interval for overflowing numeric part";
+}
+
+// ── sending_time_precision: unknown token → unknown_enum ─────────────────────
+// (lines 487-495 scalar_mappers.cpp)
+
+TEST(LoadNegativeBattery, Cov_SendingTimePrecisionUnknown) {
+    auto result = load(neg_fixture("neg_sending_time_precision_unknown.toml"));
+    ASSERT_FALSE(result.has_value());
+    using RC = fixpp::config::reason_class;
+    EXPECT_TRUE(has_diag(result.error(), RC::unknown_enum, "session[0].sending_time_precision"))
+        << "expected unknown_enum at sending_time_precision for unknown token 'picoseconds'";
+}
+
+// ── app_backpressure: unknown token → unknown_enum ────────────────────────────
+// (lines 510-517 scalar_mappers.cpp)
+
+TEST(LoadNegativeBattery, Cov_AppBackpressureUnknown) {
+    auto result = load(neg_fixture("neg_app_backpressure_unknown.toml"));
+    ASSERT_FALSE(result.has_value());
+    using RC = fixpp::config::reason_class;
+    EXPECT_TRUE(has_diag(result.error(), RC::unknown_enum, "session[0].app_backpressure"))
+        << "expected unknown_enum at app_backpressure for unknown token 'throttle'";
+}
+
+// ── compid_authorization_policy: non-string element in array → malformed_value ─
+// (lines 646-654 scalar_mappers.cpp: each CompID must be a string)
+
+TEST(LoadNegativeBattery, Cov_CompidAuthNonStringElement) {
+    auto result = load(neg_fixture("neg_compid_auth_non_string_element.toml"));
+    ASSERT_FALSE(result.has_value());
+    using RC = fixpp::config::reason_class;
+    EXPECT_TRUE(has_diag(result.error(), RC::malformed_value,
+                         "session[0].compid_authorization_policy.SERVER1"))
+        << "expected malformed_value at compid_authorization_policy.SERVER1 for non-string element";
+}
+
+// ── cert_source file with missing cert_file (leaf) → make_file_cert_source fails ─
+// [cert_source] kind="file" but cert_file absent → get_path lambda returns {}
+// (line 246 selector_resolver.cpp), make_file_cert_source fails for empty leaf_path
+// → invalid_or_contradictory_selector (lines 261-268 selector_resolver.cpp).
+
+TEST(LoadNegativeBattery, Cov_CertSourceFileMissingLeaf) {
+    auto result = load(neg_fixture("neg_cert_source_file_missing_leaf.toml"));
+    ASSERT_FALSE(result.has_value());
+    using RC = fixpp::config::reason_class;
+    EXPECT_TRUE(has_diag(result.error(), RC::invalid_or_contradictory_selector, "cert_source"))
+        << "expected invalid_or_contradictory_selector at cert_source when cert_file is absent";
+}
+
+// ── per-session cert_source missing cert_file → build_file_cert_source fails ──
+// Two TLS sessions; session[1] has per-session [cert_source] with NO cert_file.
+// Divergence scan calls build_file_cert_source → line 433 (absent key) →
+// make_file_cert_source fails (empty leaf) → lines 443-449.
+
+TEST(LoadNegativeBattery, Cov_PerSessionCertMissingLeaf) {
+    auto result = load(neg_fixture("neg_per_session_cert_missing_leaf.toml"));
+    ASSERT_FALSE(result.has_value());
+    using RC = fixpp::config::reason_class;
+    EXPECT_TRUE(
+        has_diag(result.error(), RC::invalid_or_contradictory_selector, "session[1].cert_source"))
+        << "expected invalid_or_contradictory_selector at session[1].cert_source "
+           "when per-session cert_file is absent";
+}
+
+// =============================================================================
+// T021 — Redaction (FR-019)
+// =============================================================================
+//
+// A fixture with a wrong-typed password (integer) triggers malformed_value at
+// session[0].password. Phase 4b (T022/T023) wires the type-check and must use
+// display_value(key_path, raw_value) so the literal secret does not leak into
+// the diagnostic message.
+//
+// Anchor: data-model E-5 (LoadDiagnostic.message: "credential values redacted
+//   (***REDACTED***) for username/password keys (FR-019)").
+//         loader_internal.hpp display_value() / is_credential_key().
+//
+// RED condition: Phase 3b silently ignores non-string password values (no
+//   diagnostic emitted). Phase 4b will add the type-check with redaction.
+//   ASSERT_FALSE(has_value()) will be RED until Phase 4b (T023) ships.
+
 TEST(LoadNegativeBattery, T021_PasswordRedaction_SecretAbsent) {
     // Secret: the integer 99887766 as it would appear in a diagnostic message.
     static constexpr std::string_view kSecret = "99887766";

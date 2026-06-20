@@ -1,0 +1,15 @@
+# neg_no_sessions.toml
+# No [[session]] block at all — triggers missing_required at "session"
+# (lines 419-424 toml_config_loader.cpp).
+
+[clock]
+kind = "system"
+
+[store]
+kind = "memory"
+
+[dictionary]
+kind = "path"
+path = "FIX44.xml"
+
+# No [[session]] intentionally

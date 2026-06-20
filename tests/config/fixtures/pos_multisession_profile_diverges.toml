@@ -1,0 +1,60 @@
+# pos_multisession_profile_diverges.toml
+# Two sessions: session[0] uses TLS (mtls_ca) as the engine default.
+# session[1] uses TLS with one_way_ca (profile differs from engine default)
+# but NO per-session cert_source (reuses engine cert) — hits the
+# "profile diverges but certs are the same: reuse engine default cert_source"
+# path (line 647-649 selector_resolver.cpp).
+#
+# This exercises:
+#   - Per-session divergence scan (lines 596-663)
+#   - profile_diverges && !cert_diverges path (line 649 — s_cert_source = engine default)
+#   - The overall divergence loop (lines 596-663)
+#   - continue at line 612 (session[0] matches engine default → s_transport_kind=="tls" matches,
+#     then profile and cert both match → !cert_diverges && !profile_diverges → continue at 635)
+#
+# Engine default: session[0] cert (ECDSA P256) + mtls_ca.
+# session[1]: same certs (no per-session cert_source), one_way_ca profile.
+
+[clock]
+kind = "system"
+
+[store]
+kind = "memory"
+
+[cert_source]
+kind      = "file"
+cert_file = "leaf_ecdsa_p256.pem"
+key_file  = "leaf_ecdsa_p256.key"
+ca_file   = "ca.pem"
+
+[dictionary]
+kind = "path"
+path = "FIX44.xml"
+
+[[session]]
+sender_comp_id = "CLIENT1"
+target_comp_id = "SERVER1"
+begin_string   = "FIX.4.4"
+role           = "initiator"
+
+[session.transport]
+kind = "tls"
+host = "fix-primary.example.com"
+port = 4321
+
+[session.security_profile]
+kind = "mtls_ca"
+
+[[session]]
+sender_comp_id = "CLIENT2"
+target_comp_id = "SERVER2"
+begin_string   = "FIX.4.4"
+role           = "initiator"
+
+[session.transport]
+kind = "tls"
+host = "fix-backup.example.com"
+port = 4322
+
+[session.security_profile]
+kind = "one_way_ca"

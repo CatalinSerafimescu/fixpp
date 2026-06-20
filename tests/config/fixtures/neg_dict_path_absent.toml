@@ -1,0 +1,26 @@
+# neg_dict_path_absent.toml
+# [dictionary] kind="path" but the "path" key is absent — triggers missing_required at
+# "dictionary.path" (lines 340-345 selector_resolver.cpp).
+
+[clock]
+kind = "system"
+
+[store]
+kind = "memory"
+
+[dictionary]
+kind = "path"
+
+[[session]]
+sender_comp_id = "CLIENT1"
+target_comp_id = "SERVER1"
+begin_string   = "FIX.4.4"
+role           = "initiator"
+
+[session.transport]
+kind = "plaintext"
+host = "fix.example.com"
+port = 4321
+
+[session.security_profile]
+kind = "insecure_plain_tcp"

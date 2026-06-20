@@ -1,0 +1,20 @@
+# neg_session_non_table_element.toml
+# The "session" key is an array of integers (not array-of-tables) — triggers
+# parse_error at "session" (lines 483-490 toml_config_loader.cpp).
+# In TOML, [[session]] is an array-of-tables; `session = [1, 2]` is an inline
+# array of integers, so each element.is_table() == false.
+#
+# IMPORTANT: session = [1, 2] must appear BEFORE any [table] headers to belong
+# to the ROOT table, not to a sub-table.
+
+session = [1, 2]
+
+[clock]
+kind = "system"
+
+[store]
+kind = "memory"
+
+[dictionary]
+kind = "path"
+path = "FIX44.xml"

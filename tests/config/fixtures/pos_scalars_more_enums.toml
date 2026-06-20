@@ -1,0 +1,35 @@
+# pos_scalars_more_enums.toml
+# Coverage-targeted positive fixture for scalar_mappers.cpp uncovered enum arms.
+#
+# Covers:
+#   - sending_time_precision = "millis" (line 481)
+#   - app_backpressure = "block"        (line 505)
+#   - security_profile.kind = "unset"   (line 597) — valid "not-yet-configured" token
+#
+# NOTE: security_profile.kind = "unset" is a recognized token in scalar_mappers.cpp
+# (populates the SessionConfig struct), and does not affect selector_resolver.cpp
+# for plaintext transport (parse_security_profile is not called for plaintext sessions).
+
+[clock]
+kind = "system"
+
+[store]
+kind = "memory"
+
+[dictionary]
+kind = "path"
+path = "FIX44.xml"
+
+[[session]]
+sender_comp_id = "SERVER1"
+target_comp_id = "CLIENT1"
+begin_string   = "FIX.4.4"
+role           = "acceptor"
+sending_time_precision = "millis"
+app_backpressure       = "block"
+
+[session.transport]
+kind = "plaintext"
+
+[session.security_profile]
+kind = "unset"

@@ -1,0 +1,50 @@
+# pos_multisession_tls_and_plain.toml
+# Two sessions: session[0] uses TLS (becomes engine default TLS factory).
+# session[1] uses "plaintext" transport — in the per-session divergence scan,
+# this hits the `continue` at line 612 (s_transport_kind != "tls").
+#
+# The plaintext session shares the engine's cert_source (it's present at engine
+# level for session[0]'s TLS use), but the transport for session[1] is plaintext.
+# The per-session loop skips plaintext sessions (they don't need a TLS factory override).
+
+[clock]
+kind = "system"
+
+[store]
+kind = "memory"
+
+[cert_source]
+kind      = "file"
+cert_file = "leaf_ecdsa_p256.pem"
+key_file  = "leaf_ecdsa_p256.key"
+ca_file   = "ca.pem"
+
+[dictionary]
+kind = "path"
+path = "FIX44.xml"
+
+[[session]]
+sender_comp_id = "CLIENT_TLS"
+target_comp_id = "SERVER_TLS"
+begin_string   = "FIX.4.4"
+role           = "initiator"
+
+[session.transport]
+kind = "tls"
+host = "fix-tls.example.com"
+port = 4321
+
+[session.security_profile]
+kind = "mtls_ca"
+
+[[session]]
+sender_comp_id = "CLIENT_PLAIN"
+target_comp_id = "SERVER_PLAIN"
+begin_string   = "FIX.4.4"
+role           = "acceptor"
+
+[session.transport]
+kind = "plaintext"
+
+[session.security_profile]
+kind = "insecure_plain_tcp"

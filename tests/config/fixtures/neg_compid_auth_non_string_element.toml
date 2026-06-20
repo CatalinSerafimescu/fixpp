@@ -1,0 +1,32 @@
+# neg_compid_auth_non_string_element.toml
+# compid_authorization_policy array contains a non-string element (integer 42) —
+# triggers malformed_value "each CompID in compid_authorization_policy must be a string"
+# (lines 646-654 scalar_mappers.cpp).
+
+[clock]
+kind = "system"
+
+[store]
+kind = "memory"
+
+[dictionary]
+kind = "path"
+path = "FIX44.xml"
+
+[[session]]
+sender_comp_id = "CLIENT1"
+target_comp_id = "SERVER1"
+begin_string   = "FIX.4.4"
+role           = "initiator"
+sending_time_precision = "seconds"
+
+[session.compid_authorization_policy]
+SERVER1 = ["VALID_COMP", 42, "ANOTHER_COMP"]
+
+[session.transport]
+kind = "plaintext"
+host = "fix.example.com"
+port = 4321
+
+[session.security_profile]
+kind = "insecure_plain_tcp"

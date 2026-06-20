@@ -1,0 +1,42 @@
+# neg_username_wrong_type.toml
+# username is an integer (not a string) — triggers malformed_value at
+# session[0].username (lines 227-235 scalar_mappers.cpp).
+# This is symmetric with neg_password_wrong_type.toml (which hits the password arm).
+# Also exercises display_value() with a non-credential path (line 36 loader_internal.cpp)
+# via the username arm which calls display_value(kp_username, "").
+# Wait — kp_username ends in ".username" which IS a credential, so display_value
+# returns ***REDACTED***. Line 36 (non-credential return) requires a key NOT ending
+# in "username"/"password" to go through display_value.
+#
+# Line 36 of loader_internal.cpp (return value;) is only reachable when
+# display_value is called with a non-credential key_path. This is NOT called
+# anywhere in the public API path — it's only called from the credential branches
+# (username/password) which always ARE credential keys. So line 36 is unreachable
+# from the file API. That arm is documented as unreachable below.
+#
+# This fixture covers the username-wrong-type diagnostic arm.
+
+[clock]
+kind = "system"
+
+[store]
+kind = "memory"
+
+[dictionary]
+kind = "path"
+path = "FIX44.xml"
+
+[[session]]
+sender_comp_id = "CLIENT1"
+target_comp_id = "SERVER1"
+begin_string   = "FIX.4.4"
+role           = "initiator"
+username       = 42
+
+[session.transport]
+kind = "plaintext"
+host = "fix.example.com"
+port = 4321
+
+[session.security_profile]
+kind = "insecure_plain_tcp"

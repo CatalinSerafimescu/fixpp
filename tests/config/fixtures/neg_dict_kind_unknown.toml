@@ -1,0 +1,26 @@
+# neg_dict_kind_unknown.toml
+# [dictionary] kind is an unknown value (not "path" or "version") — triggers
+# unknown_enum at "dictionary.kind" (lines 325-330 selector_resolver.cpp).
+
+[clock]
+kind = "system"
+
+[store]
+kind = "memory"
+
+[dictionary]
+kind = "database"
+
+[[session]]
+sender_comp_id = "CLIENT1"
+target_comp_id = "SERVER1"
+begin_string   = "FIX.4.4"
+role           = "initiator"
+
+[session.transport]
+kind = "plaintext"
+host = "fix.example.com"
+port = 4321
+
+[session.security_profile]
+kind = "insecure_plain_tcp"

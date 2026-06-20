@@ -1,0 +1,29 @@
+# neg_reconnect_schedule_not_string.toml
+# reconnect_policy.schedule contains an integer entry instead of a duration string —
+# triggers malformed_value at session[0].reconnect_policy.schedule
+# (lines 701-709 scalar_mappers.cpp).
+
+[clock]
+kind = "system"
+
+[store]
+kind = "memory"
+
+[dictionary]
+kind = "path"
+path = "FIX44.xml"
+
+[[session]]
+sender_comp_id = "CLIENT1"
+target_comp_id = "SERVER1"
+begin_string   = "FIX.4.4"
+role           = "acceptor"
+
+[session.transport]
+kind = "plaintext"
+
+[session.security_profile]
+kind = "insecure_plain_tcp"
+
+[session.reconnect_policy]
+schedule = [1000, 5000]

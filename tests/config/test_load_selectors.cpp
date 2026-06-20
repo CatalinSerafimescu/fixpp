@@ -27,23 +27,20 @@
 //
 // Anchors: plan.md US3 / data-model §E-2 / FR-011 / specs/044 selector_resolver.cpp.
 
-#include <fixpp/config/toml_config_loader.hpp>
-#include <fixpp/config/config_bundle.hpp>
-#include <fixpp/config/load_diagnostic.hpp>
-
-#include <fixpp/core/system_clock_source.hpp>
-#include <fixpp/session/memory_store_factory.hpp>
-#include <fixpp/session/file_store_factory.hpp>
-#include <fixpp/transport/transport_factory.hpp>
-
-#include <asio/io_context.hpp>
+#include <gtest/gtest.h>
 
 #include <algorithm>
+#include <asio/io_context.hpp>
 #include <filesystem>
+#include <fixpp/config/config_bundle.hpp>
+#include <fixpp/config/load_diagnostic.hpp>
+#include <fixpp/config/toml_config_loader.hpp>
+#include <fixpp/core/system_clock_source.hpp>
+#include <fixpp/session/file_store_factory.hpp>
+#include <fixpp/session/memory_store_factory.hpp>
+#include <fixpp/transport/transport_factory.hpp>
 #include <string>
 #include <string_view>
-
-#include <gtest/gtest.h>
 
 #ifndef FIXPP_CONFIG_FIXTURE_DIR
 #error "FIXPP_CONFIG_FIXTURE_DIR must be set by CMake"
@@ -53,13 +50,11 @@ namespace {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-std::filesystem::path fixture(std::string_view name)
-{
+std::filesystem::path fixture(std::string_view name) {
     return std::filesystem::path{std::string{FIXPP_CONFIG_FIXTURE_DIR}} / name;
 }
 
-fixpp::config::LoadResult load(const std::filesystem::path& path)
-{
+fixpp::config::LoadResult load(const std::filesystem::path& path) {
     asio::io_context ctx;
     fixpp::config::LoadOptions opts;
     opts.engine_executor = ctx.get_executor();
@@ -68,14 +63,10 @@ fixpp::config::LoadResult load(const std::filesystem::path& path)
 
 // Discriminating diagnostic search: checks BOTH reason AND key_path.
 bool has_diag(const std::vector<fixpp::config::LoadDiagnostic>& diags,
-              fixpp::config::reason_class                        expected_reason,
-              std::string_view                                   expected_key_path)
-{
-    return std::any_of(diags.begin(), diags.end(),
-        [&](const fixpp::config::LoadDiagnostic& d) {
-            return d.reason == expected_reason
-                && d.key_path == expected_key_path;
-        });
+              fixpp::config::reason_class expected_reason, std::string_view expected_key_path) {
+    return std::any_of(diags.begin(), diags.end(), [&](const fixpp::config::LoadDiagnostic& d) {
+        return d.reason == expected_reason && d.key_path == expected_key_path;
+    });
 }
 
 }  // namespace
@@ -92,22 +83,18 @@ bool has_diag(const std::vector<fixpp::config::LoadDiagnostic>& diags,
 // does not override; only MemoryStoreFactory explicitly returns false).
 // PASS expected (existing impl: selector_resolver.cpp line 158).
 
-TEST(LoadSelectors, T026_StoreMemory)
-{
+TEST(LoadSelectors, T026_StoreMemory) {
     auto result = load(fixture("happy_full.toml"));
 
-    ASSERT_TRUE(result.has_value())
-        << "load failed for happy_full.toml";
+    ASSERT_TRUE(result.has_value()) << "load failed for happy_full.toml";
 
     const auto& engine = result->engine;
-    ASSERT_NE(engine.default_store_factory, nullptr)
-        << "expected a store factory, got null";
+    ASSERT_NE(engine.default_store_factory, nullptr) << "expected a store factory, got null";
 
-    auto* mem = dynamic_cast<fixpp::session::MemoryStoreFactory*>(
-                    engine.default_store_factory.get());
-    EXPECT_NE(mem, nullptr)
-        << "expected MemoryStoreFactory from store.kind=\"memory\"; "
-           "dynamic_cast returned null (wrong concrete type)";
+    auto* mem =
+        dynamic_cast<fixpp::session::MemoryStoreFactory*>(engine.default_store_factory.get());
+    EXPECT_NE(mem, nullptr) << "expected MemoryStoreFactory from store.kind=\"memory\"; "
+                               "dynamic_cast returned null (wrong concrete type)";
 
     // Secondary discriminator: MemoryStoreFactory::yields_persistent_store()==false.
     EXPECT_FALSE(engine.default_store_factory->yields_persistent_store())
@@ -124,24 +111,21 @@ TEST(LoadSelectors, T026_StoreMemory)
 // kind="file" falls through to the unknown_enum branch (line 161-167). This test
 // FAILS until T029 implements the file-store selector. A FAIL here is a real T029 gap.
 
-TEST(LoadSelectors, T026_StoreFile)
-{
+TEST(LoadSelectors, T026_StoreFile) {
     auto result = load(fixture("pos_file_store.toml"));
 
-    ASSERT_TRUE(result.has_value())
-        << "load failed for pos_file_store.toml; "
-           "store=file selector not yet implemented (T029 gap) — "
-           "expected FAIL until T029 wires FileStoreFactory";
+    ASSERT_TRUE(result.has_value()) << "load failed for pos_file_store.toml; "
+                                       "store=file selector not yet implemented (T029 gap) — "
+                                       "expected FAIL until T029 wires FileStoreFactory";
 
     const auto& engine = result->engine;
     ASSERT_NE(engine.default_store_factory, nullptr)
         << "expected a FileStoreFactory, got null (T029 gap)";
 
-    auto* file = dynamic_cast<fixpp::session::FileStoreFactory*>(
-                     engine.default_store_factory.get());
-    EXPECT_NE(file, nullptr)
-        << "expected FileStoreFactory from store.kind=\"file\"; "
-           "dynamic_cast returned null (T029 gap — resolver not yet wired)";
+    auto* file =
+        dynamic_cast<fixpp::session::FileStoreFactory*>(engine.default_store_factory.get());
+    EXPECT_NE(file, nullptr) << "expected FileStoreFactory from store.kind=\"file\"; "
+                                "dynamic_cast returned null (T029 gap — resolver not yet wired)";
 }
 
 // ── T026-C: transport=tls → transport_security_kind::tls ──────────────────────
@@ -150,12 +134,10 @@ TEST(LoadSelectors, T026_StoreFile)
 // Assert: default_transport_factory->kind() == transport_security_kind::tls.
 // PASS expected (existing impl).
 
-TEST(LoadSelectors, T026_TransportTLS)
-{
+TEST(LoadSelectors, T026_TransportTLS) {
     auto result = load(fixture("happy_full.toml"));
 
-    ASSERT_TRUE(result.has_value())
-        << "load failed for happy_full.toml";
+    ASSERT_TRUE(result.has_value()) << "load failed for happy_full.toml";
 
     const auto& engine = result->engine;
     ASSERT_NE(engine.default_transport_factory, nullptr)
@@ -172,12 +154,10 @@ TEST(LoadSelectors, T026_TransportTLS)
 // Assert: default_transport_factory->kind() == transport_security_kind::plaintext.
 // PASS expected (existing impl — 043 plaintext transport).
 
-TEST(LoadSelectors, T026_TransportPlaintext)
-{
+TEST(LoadSelectors, T026_TransportPlaintext) {
     auto result = load(fixture("pos_insecure_plain_no_certs.toml"));
 
-    ASSERT_TRUE(result.has_value())
-        << "load failed for pos_insecure_plain_no_certs.toml";
+    ASSERT_TRUE(result.has_value()) << "load failed for pos_insecure_plain_no_certs.toml";
 
     const auto& engine = result->engine;
     ASSERT_NE(engine.default_transport_factory, nullptr)
@@ -194,20 +174,17 @@ TEST(LoadSelectors, T026_TransportPlaintext)
 // Assert: dictionaries.size()==1 and the entry is non-null.
 // PASS expected (existing impl).
 
-TEST(LoadSelectors, T026_DictionaryByPath)
-{
+TEST(LoadSelectors, T026_DictionaryByPath) {
     auto result = load(fixture("happy_full.toml"));
 
-    ASSERT_TRUE(result.has_value())
-        << "load failed for happy_full.toml";
+    ASSERT_TRUE(result.has_value()) << "load failed for happy_full.toml";
 
     const auto& engine = result->engine;
     EXPECT_EQ(engine.dictionaries.size(), std::size_t{1})
         << "expected exactly 1 dictionary from [dictionary] kind=\"path\"";
 
     if (!engine.dictionaries.empty()) {
-        EXPECT_NE(engine.dictionaries[0], nullptr)
-            << "dictionaries[0] must not be null";
+        EXPECT_NE(engine.dictionaries[0], nullptr) << "dictionaries[0] must not be null";
     }
 }
 
@@ -217,21 +194,17 @@ TEST(LoadSelectors, T026_DictionaryByPath)
 // Assert: dynamic_cast<system_clock_source*> succeeds.
 // PASS expected (mirrors T012 assertion in test_load_happy_path.cpp).
 
-TEST(LoadSelectors, T026_ClockSystem)
-{
+TEST(LoadSelectors, T026_ClockSystem) {
     auto result = load(fixture("happy_full.toml"));
 
-    ASSERT_TRUE(result.has_value())
-        << "load failed for happy_full.toml";
+    ASSERT_TRUE(result.has_value()) << "load failed for happy_full.toml";
 
     const auto& engine = result->engine;
-    ASSERT_NE(engine.clock, nullptr)
-        << "expected system_clock_source, got null";
+    ASSERT_NE(engine.clock, nullptr) << "expected system_clock_source, got null";
 
     auto* sys_clock = dynamic_cast<fixpp::core::system_clock_source*>(engine.clock.get());
-    EXPECT_NE(sys_clock, nullptr)
-        << "expected engine.clock to be a system_clock_source; "
-           "dynamic_cast returned null (wrong concrete type)";
+    EXPECT_NE(sys_clock, nullptr) << "expected engine.clock to be a system_clock_source; "
+                                     "dynamic_cast returned null (wrong concrete type)";
 }
 
 // =============================================================================
@@ -241,20 +214,18 @@ TEST(LoadSelectors, T026_ClockSystem)
 // ── T028-A: dictionary.kind="version" → recognized_not_yet_supported_step2 ────
 //
 // Fixture: neg_step2_dict_version.toml (dictionary.kind="version").
-// Assert: load fails; diagnostic at "dictionary.kind" with reason=recognized_not_yet_supported_step2.
-// PASS expected (already handled in selector_resolver.cpp line 307-313).
+// Assert: load fails; diagnostic at "dictionary.kind" with
+// reason=recognized_not_yet_supported_step2. PASS expected (already handled in
+// selector_resolver.cpp line 307-313).
 
-TEST(LoadSelectors, T028_DictionaryVersionDeferred)
-{
+TEST(LoadSelectors, T028_DictionaryVersionDeferred) {
     auto result = load(fixture("neg_step2_dict_version.toml"));
 
     ASSERT_FALSE(result.has_value())
         << "expected load failure for dictionary.kind=\"version\" (step-2 deferred)";
 
     using RC = fixpp::config::reason_class;
-    EXPECT_TRUE(has_diag(result.error(),
-                         RC::recognized_not_yet_supported_step2,
-                         "dictionary.kind"))
+    EXPECT_TRUE(has_diag(result.error(), RC::recognized_not_yet_supported_step2, "dictionary.kind"))
         << "expected recognized_not_yet_supported_step2 at \"dictionary.kind\" "
            "for dictionary.kind=\"version\"";
 }
@@ -266,8 +237,7 @@ TEST(LoadSelectors, T028_DictionaryVersionDeferred)
 //   reason=recognized_not_yet_supported_step2.
 // NOTE: Phase 4b implements this scan; this test may FAIL (RED) until 4b.
 
-TEST(LoadSelectors, T028_DialectOverlayDeferred)
-{
+TEST(LoadSelectors, T028_DialectOverlayDeferred) {
     auto result = load(fixture("neg_step2_dialect_overlay.toml"));
 
     ASSERT_FALSE(result.has_value())
@@ -275,8 +245,7 @@ TEST(LoadSelectors, T028_DialectOverlayDeferred)
            "Phase 4b step-2 detection not yet implemented — RED expected";
 
     using RC = fixpp::config::reason_class;
-    EXPECT_TRUE(has_diag(result.error(),
-                         RC::recognized_not_yet_supported_step2,
+    EXPECT_TRUE(has_diag(result.error(), RC::recognized_not_yet_supported_step2,
                          "session[0].dialect_overlay"))
         << "expected recognized_not_yet_supported_step2 at \"session[0].dialect_overlay\"";
 }
@@ -287,16 +256,13 @@ TEST(LoadSelectors, T028_DialectOverlayDeferred)
 // Assert: load fails; diagnostic at "session[0].security_profile.kind".
 // PASS expected (already handled in selector_resolver.cpp line 442-451).
 
-TEST(LoadSelectors, T028_MtlsPinnedDeferred)
-{
+TEST(LoadSelectors, T028_MtlsPinnedDeferred) {
     auto result = load(fixture("neg_step2_mtls_pinned.toml"));
 
-    ASSERT_FALSE(result.has_value())
-        << "expected load failure for mtls_pinned (step-2 deferred)";
+    ASSERT_FALSE(result.has_value()) << "expected load failure for mtls_pinned (step-2 deferred)";
 
     using RC = fixpp::config::reason_class;
-    EXPECT_TRUE(has_diag(result.error(),
-                         RC::recognized_not_yet_supported_step2,
+    EXPECT_TRUE(has_diag(result.error(), RC::recognized_not_yet_supported_step2,
                          "session[0].security_profile.kind"))
         << "expected recognized_not_yet_supported_step2 at "
            "\"session[0].security_profile.kind\"";
@@ -305,11 +271,11 @@ TEST(LoadSelectors, T028_MtlsPinnedDeferred)
 // ── T028-D: mode="direct_executor" without already_serialized_executor=true ───
 //
 // Fixture: neg_direct_executor_no_attest.toml (mode="direct_executor", no attest).
-// Assert: load fails; diagnostic at "session[0].mode" with reason=invalid_or_contradictory_selector.
-// US3 AC-4 / FR-011. PASS expected (already in scalar_mappers.cpp Rule 7a, line 373-382).
+// Assert: load fails; diagnostic at "session[0].mode" with
+// reason=invalid_or_contradictory_selector. US3 AC-4 / FR-011. PASS expected (already in
+// scalar_mappers.cpp Rule 7a, line 373-382).
 
-TEST(LoadSelectors, T028_DirectExecutorNoAttest)
-{
+TEST(LoadSelectors, T028_DirectExecutorNoAttest) {
     auto result = load(fixture("neg_direct_executor_no_attest.toml"));
 
     ASSERT_FALSE(result.has_value())
@@ -317,9 +283,7 @@ TEST(LoadSelectors, T028_DirectExecutorNoAttest)
            "already_serialized_executor=true (FR-011 guard)";
 
     using RC = fixpp::config::reason_class;
-    EXPECT_TRUE(has_diag(result.error(),
-                         RC::invalid_or_contradictory_selector,
-                         "session[0].mode"))
+    EXPECT_TRUE(has_diag(result.error(), RC::invalid_or_contradictory_selector, "session[0].mode"))
         << "expected invalid_or_contradictory_selector at \"session[0].mode\" "
            "for mode=\"direct_executor\" without already_serialized_executor=true (FR-011)";
 }
@@ -330,13 +294,15 @@ TEST(LoadSelectors, T028_DirectExecutorNoAttest)
 //
 // Fixture: multisession_divergent_cert.toml
 //   session[0]: cert trio #1 (ECDSA P-256) + security_profile=mtls_ca → MATCHES engine default.
-//   session[1]: cert trio #2 (RSA 2048)    + security_profile=one_way_ca → DIVERGES from engine default.
+//   session[1]: cert trio #2 (RSA 2048)    + security_profile=one_way_ca → DIVERGES from engine
+//   default.
 //
 // Assertions (all discriminating per D-6a / session_config.hpp:298-307):
 //   (1) Load succeeds; sessions.size()==2    (fixture schema is valid)
 //   (2) session[0].transport_factory_override is NULL   (uses shared engine default)
-//   (3) session[1].transport_factory_override is NON-NULL, use_count()==1 (freshly minted, single owner)
-//   (4) session[1].transport_factory_override != bundle.engine.default_transport_factory (distinct instance)
+//   (3) session[1].transport_factory_override is NON-NULL, use_count()==1 (freshly minted, single
+//   owner) (4) session[1].transport_factory_override != bundle.engine.default_transport_factory
+//   (distinct instance)
 //
 // EXPECTED RESULT: T027 FAILS at assertion (3) — the current selector_resolver.cpp
 // only builds the engine default from session[0] (line 387) and NEVER mints a
@@ -355,8 +321,44 @@ TEST(LoadSelectors, T028_DirectExecutorNoAttest)
 //
 // Anchor: research D-6a / session_config.hpp:298-307 / tasks.md T029.
 
-TEST(LoadSelectors, T027_DivergentCertMultiSession)
-{
+// ── Mixed TLS + plaintext multi-session → plaintext session skipped in
+//    divergence scan (line 612 selector_resolver.cpp: continue) ──────────────
+
+TEST(LoadSelectors, Cov_MultisessionTlsAndPlain) {
+    auto result = load(fixture("pos_multisession_tls_and_plain.toml"));
+
+    ASSERT_TRUE(result.has_value())
+        << "pos_multisession_tls_and_plain.toml must load successfully; diagnostics: "
+        << [&]() -> std::string {
+        if (!result.has_value()) {
+            std::string s;
+            for (const auto& d : result.error()) {
+                s += "[" + d.key_path + "] " + d.message + "; ";
+            }
+            return s;
+        }
+        return "(load succeeded)";
+    }();
+
+    ASSERT_EQ(result->sessions.size(), std::size_t{2});
+
+    // Engine default: TLS factory (from session[0])
+    EXPECT_NE(result->engine.default_transport_factory, nullptr)
+        << "engine default transport factory must be non-null (TLS from session[0])";
+    EXPECT_EQ(result->engine.default_transport_factory->kind(),
+              fixpp::transport::transport_security_kind::tls);
+
+    // session[0]: TLS, matches engine default → no override
+    EXPECT_EQ(result->sessions[0].config.transport_factory_override, nullptr)
+        << "session[0] matches engine default; override must be null";
+
+    // session[1]: plaintext — the divergence scan skips it (line 612 continue)
+    // → no override (plaintext session inherits nothing from TLS engine default)
+    EXPECT_EQ(result->sessions[1].config.transport_factory_override, nullptr)
+        << "session[1] is plaintext; divergence scan skips it → override null";
+}
+
+TEST(LoadSelectors, T027_DivergentCertMultiSession) {
     auto result = load(fixture("multisession_divergent_cert.toml"));
 
     // (1) Load must succeed — a failure here is a fixture/schema bug, not the T029 gap.
@@ -364,16 +366,16 @@ TEST(LoadSelectors, T027_DivergentCertMultiSession)
         << "load_toml_config failed for multisession_divergent_cert.toml; "
            "this is a fixture/schema bug, not the T029 gap. "
            "Diagnostics: "
-           << [&]() -> std::string {
-               if (!result.has_value()) {
-                   std::string s;
-                   for (const auto& d : result.error()) {
-                       s += "[" + d.key_path + "] " + d.message + "; ";
-                   }
-                   return s;
-               }
-               return "(load succeeded)";
-           }();
+        << [&]() -> std::string {
+        if (!result.has_value()) {
+            std::string s;
+            for (const auto& d : result.error()) {
+                s += "[" + d.key_path + "] " + d.message + "; ";
+            }
+            return s;
+        }
+        return "(load succeeded)";
+    }();
 
     ASSERT_EQ(result->sessions.size(), std::size_t{2})
         << "expected exactly 2 sessions from multisession_divergent_cert.toml";
