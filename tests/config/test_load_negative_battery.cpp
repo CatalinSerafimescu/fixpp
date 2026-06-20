@@ -1544,6 +1544,8 @@ TEST(LoadNegativeBattery, Cov_PerSessionCertMissingLeaf) {
         has_diag(result.error(), RC::invalid_or_contradictory_selector, "session[1].cert_source"))
         << "expected invalid_or_contradictory_selector at session[1].cert_source "
            "when per-session cert_file is absent";
+    EXPECT_TRUE(has_diag(result.error(), RC::unknown_enum, "session[2].transport.kind"))
+        << "expected unknown_enum at session[2].transport.kind for websocket session";
 }
 
 // =============================================================================

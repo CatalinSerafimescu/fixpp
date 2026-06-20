@@ -718,8 +718,9 @@ static void resolve_transport(const std::vector<const toml::table*>& merged_sess
 
             if (s_transport_kind == "tls") {
                 // TLS-on-TLS-engine: check cert/profile divergence.
+                const std::size_t acc_before_parse = acc.size();
                 tls::SecurityProfile s_profile = parse_security_profile(sess, s_prefix, acc);
-                if (!acc.empty()) {
+                if (acc.size() != acc_before_parse) {
                     // mtls_pinned deferral or similar — skip remaining minting.
                     continue;
                 }

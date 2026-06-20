@@ -1,6 +1,7 @@
 # neg_per_session_cert_missing_leaf.toml
-# Two TLS sessions: session[0] uses the engine-default cert_source (valid).
+# session[0] uses the engine-default cert_source (valid).
 # session[1] has a per-session [cert_source] with kind="file" but NO cert_file.
+# session[2] uses transport.kind="websocket" to add an independent unknown_enum.
 # In the divergence scan: session[1] diverges (has per-session cert_source),
 # calls build_file_cert_source, which hits line 433 (absent cert_file key →
 # get_path_str returns {}) and then lines 443-449 (make_file_cert_source fails).
@@ -53,3 +54,14 @@ port = 4322
 
 [session.security_profile]
 kind = "mtls_ca"
+
+[[session]]
+sender_comp_id = "CLIENT_C"
+target_comp_id = "SERVER_C"
+begin_string   = "FIX.4.4"
+role           = "initiator"
+
+[session.transport]
+kind = "websocket"
+host = "fix-c.example.com"
+port = 4323
