@@ -411,6 +411,11 @@ TEST(T014_NegBattery, CapacityNegative)
 
 // missing_required: a sink "kind" that is present but NOT a string (the
 // !is_string() sub-branch, distinct from the absent-kind sub-branch).
+// NOTE (Gate B refinement candidate): data-model E-3/E-4 specifies absent ->
+// missing_required but is SILENT on present-but-wrong-type. The resolver
+// currently reuses missing_required (fail-closed — it rejects); malformed_value
+// is a defensible alternative. This cell pins CURRENT behavior; the reason_class
+// is flagged for Gate B, not silently blessed.
 TEST(T014_NegBattery, SinkNonStringKind)
 {
     const auto result = full_load(neg_fixture("neg_logger_sink_nonstring_kind.toml"));
@@ -424,6 +429,9 @@ TEST(T014_NegBattery, SinkNonStringKind)
 #ifdef FIXPP_CONFIG_HAS_OTLP
 // missing_required: an otlp endpoint present but NOT a string (the !is_string()
 // sub-branch). OTLP-build only.
+// NOTE (Gate B refinement candidate): same as SinkNonStringKind — E-4 specifies
+// absent/empty endpoint -> missing_required/empty_required but is silent on
+// wrong-type; current behavior reuses missing_required (fail-closed).
 TEST(T014_NegBattery, OtlpNonStringEndpoint)
 {
     const auto result = full_load(neg_fixture("neg_logger_otlp_nonstring_endpoint.toml"));
