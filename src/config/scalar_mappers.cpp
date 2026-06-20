@@ -16,9 +16,7 @@
 // SecurityProfile::kind, application_version.
 
 #include <bit>
-#include <charconv>
 #include <cstdint>
-#include <limits>
 #include <string>
 #include <string_view>
 
@@ -93,153 +91,11 @@ SourceLoc loc_for_subkey(const toml::table* raw_session, std::string_view sub_ke
     return loc_from_node(*n);
 }
 
-// ---------------------------------------------------------------------------
-// Duration parser — "30s" → seconds{30}, "15000ms" → milliseconds{15000}.
-// Returns false and accumulates a malformed_value diagnostic when:
-//   - the string is empty
-//   - the numeric prefix is missing or unparseable
-//   - the unit suffix is absent (bare integer: explicit-unit contract)
-//   - the unit is unrecognised
-// Supported units: "ms" (milliseconds), "s" (seconds), "m" (minutes),
-//                  "h" (hours), "us" (microseconds).
-// The caller is responsible for duration_cast to the target field type.
-// `loc` is the SourceLoc of the TOML value node (populated into each
-// emitted diagnostic per FR-017).
-// ---------------------------------------------------------------------------
-
-struct ParsedDuration {
-    long long value_ms;  // value in milliseconds
-    bool ok;
-};
-
-ParsedDuration parse_duration_to_ms(std::string_view tok, std::string_view key_path,
-                                    DiagnosticAccumulator& acc, SourceLoc loc = {}) {
-    if (tok.empty()) {
-        acc.add(LoadDiagnostic{
-            .key_path = std::string{key_path},
-            .reason = reason_class::malformed_value,
-            .location = loc,
-            .message = "empty duration string",
-        });
-        return {.value_ms = 0, .ok = false};
-    }
-
-    // Find where the digits end.
-    std::size_t num_end = 0;
-    while (num_end < tok.size() && (tok[num_end] >= '0' && tok[num_end] <= '9')) {
-        ++num_end;
-    }
-
-    if (num_end == 0) {
-        acc.add(LoadDiagnostic{
-            .key_path = std::string{key_path},
-            .reason = reason_class::malformed_value,
-            .location = loc,
-            .message = "duration must start with a numeric value",
-        });
-        return {.value_ms = 0, .ok = false};
-    }
-
-    long long num = 0;
-    auto [ptr, ec] = std::from_chars(tok.data(), tok.data() + num_end, num);
-    if (ec != std::errc{}) {
-        acc.add(LoadDiagnostic{
-            .key_path = std::string{key_path},
-            .reason = reason_class::malformed_value,
-            .location = loc,
-            .message = "duration numeric part could not be parsed",
-        });
-        return {.value_ms = 0, .ok = false};
-    }
-
-    std::string_view unit = tok.substr(num_end);
-    if (unit.empty()) {
-        acc.add(LoadDiagnostic{
-            .key_path = std::string{key_path},
-            .reason = reason_class::malformed_value,
-            .location = loc,
-            .message = R"(duration requires an explicit unit suffix (e.g. "30s", "500ms"))",
-        });
-        return {.value_ms = 0, .ok = false};
-    }
-
-    long long ms = 0;
-    if (unit == "ms") {
-        ms = num;
-    } else if (unit == "s") {
-        // #3 (Gate B r1): guard signed-multiply overflow before scaling.
-        // from_chars yields values up to LLONG_MAX which overflows * 1000.
-        if (num > (std::numeric_limits<long long>::max)() / 1000LL) {
-            acc.add(LoadDiagnostic{
-                .key_path = std::string{key_path},
-                .reason = reason_class::out_of_range,
-                .location = loc,
-                .message = "duration value overflows when converted to milliseconds (s scale)",
-            });
-            return {.value_ms = 0, .ok = false};
-        }
-        ms = num * 1000LL;
-    } else if (unit == "m") {
-        if (num > (std::numeric_limits<long long>::max)() / 60000LL) {
-            acc.add(LoadDiagnostic{
-                .key_path = std::string{key_path},
-                .reason = reason_class::out_of_range,
-                .location = loc,
-                .message = "duration value overflows when converted to milliseconds (m scale)",
-            });
-            return {.value_ms = 0, .ok = false};
-        }
-        ms = num * 60000LL;
-    } else if (unit == "h") {
-        if (num > (std::numeric_limits<long long>::max)() / 3600000LL) {
-            acc.add(LoadDiagnostic{
-                .key_path = std::string{key_path},
-                .reason = reason_class::out_of_range,
-                .location = loc,
-                .message = "duration value overflows when converted to milliseconds (h scale)",
-            });
-            return {.value_ms = 0, .ok = false};
-        }
-        ms = num * 3600000LL;
-    } else if (unit == "us") {
-        // #5 (Gate B r1): "us" (microseconds) cannot be represented in the
-        // loader's millisecond-only duration model without silent 1000x error
-        // ("ms = num" was wrong) or silent truncation to 0 (num/1000).
-        // Fail-closed: reject sub-millisecond units (FR-013 / FR-012).
-        acc.add(LoadDiagnostic{
-            .key_path = std::string{key_path},
-            .reason = reason_class::out_of_range,
-            .location = loc,
-            .message = "sub-millisecond duration unit \"us\" is not supported "
-                       "(the loader represents durations in whole milliseconds); "
-                       "use \"ms\", \"s\", \"m\", or \"h\"",
-        });
-        return {.value_ms = 0, .ok = false};
-    } else {
-        acc.add(LoadDiagnostic{
-            .key_path = std::string{key_path},
-            .reason = reason_class::malformed_value,
-            .location = loc,
-            .message = std::string{"unrecognised duration unit: \""} + std::string{unit} + "\"",
-        });
-        return {.value_ms = 0, .ok = false};
-    }
-
-    return {.value_ms = ms, .ok = true};
-}
-
-// ---------------------------------------------------------------------------
-// Helper: build a dotted key path from prefix + key.
-// ---------------------------------------------------------------------------
-
-std::string kp(std::string_view prefix, std::string_view key) {
-    std::string s;
-    s.reserve(prefix.size() + 1 + key.size());
-    s += prefix;
-    s += '.';
-    s += key;
-    return s;
-}
+// Duration parser (parse_duration_to_ms / ParsedDuration) and the dotted
+// key-path builder (kp) are toml-free and now live once in loader_internal
+// (reached via mappers.hpp → loader_internal.hpp) so this TU and
+// logger_resolver.cpp share one definition and the overflow guards cannot
+// drift. See loader_internal.hpp.
 
 }  // anonymous namespace
 

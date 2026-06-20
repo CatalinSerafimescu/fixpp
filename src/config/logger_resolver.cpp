@@ -41,7 +41,6 @@
 #include <fixpp/log/otlp_log_sink.hpp>
 #endif
 
-#include <charconv>
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
@@ -70,120 +69,10 @@ SourceLoc loc_node(const toml::node& n) noexcept {
     };
 }
 
-// Helper: build "prefix.key" key path string.
-std::string kpath(std::string_view prefix, std::string_view key) {
-    std::string s;
-    s.reserve(prefix.size() + 1 + key.size());
-    s += prefix;
-    s += '.';
-    s += key;
-    return s;
-}
-
-// ---------------------------------------------------------------------------
-// parse_duration_to_ms_local — reuses the 044 unit-suffix duration rule.
-// Returns {value_ms, ok}. Errors accumulated into acc.
-// The 044 canonical parser lives in scalar_mappers.cpp (anonymous ns) so we
-// replicate the logic here for this TU, matching it exactly.
-//
-// REFACTOR DEBT (T035-Polish): centralise into loader_internal.hpp (toml-free;
-// takes only std::string_view + DiagnosticAccumulator) so scalar_mappers.cpp
-// and logger_resolver.cpp share one definition and cannot drift.
-// ---------------------------------------------------------------------------
-
-struct ParsedDuration { long long value_ms; bool ok; };
-
-ParsedDuration parse_dur(std::string_view tok, const std::string& key_path,
-                         DiagnosticAccumulator& acc, SourceLoc loc) {
-    if (tok.empty()) {
-        acc.add(LoadDiagnostic{
-            .key_path = key_path,
-            .reason   = reason_class::malformed_value,
-            .location = loc,
-            .message  = "empty duration string",
-        });
-        return {0, false};
-    }
-    std::size_t num_end = 0;
-    while (num_end < tok.size() && tok[num_end] >= '0' && tok[num_end] <= '9') ++num_end;
-    if (num_end == 0) {
-        acc.add(LoadDiagnostic{
-            .key_path = key_path,
-            .reason   = reason_class::malformed_value,
-            .location = loc,
-            .message  = "duration must start with a numeric value",
-        });
-        return {0, false};
-    }
-    long long num = 0;
-    {
-        auto [ptr, ec] = std::from_chars(tok.data(), tok.data() + num_end, num);
-        if (ec != std::errc{}) {
-            acc.add(LoadDiagnostic{
-                .key_path = key_path,
-                .reason   = reason_class::malformed_value,
-                .location = loc,
-                .message  = "duration numeric part could not be parsed",
-            });
-            return {0, false};
-        }
-    }
-    std::string_view unit = tok.substr(num_end);
-    if (unit.empty()) {
-        acc.add(LoadDiagnostic{
-            .key_path = key_path,
-            .reason   = reason_class::malformed_value,
-            .location = loc,
-            .message  = R"(duration requires an explicit unit suffix (e.g. "30s", "500ms"))",
-        });
-        return {0, false};
-    }
-    long long ms = 0;
-    if (unit == "ms") {
-        ms = num;
-    } else if (unit == "s") {
-        constexpr long long kMax = (std::numeric_limits<long long>::max)() / 1000LL;
-        if (num > kMax) {
-            acc.add(LoadDiagnostic{.key_path = key_path, .reason = reason_class::out_of_range,
-                                   .location = loc, .message = "duration value overflows (s scale)"});
-            return {0, false};
-        }
-        ms = num * 1000LL;
-    } else if (unit == "m") {
-        constexpr long long kMax = (std::numeric_limits<long long>::max)() / 60000LL;
-        if (num > kMax) {
-            acc.add(LoadDiagnostic{.key_path = key_path, .reason = reason_class::out_of_range,
-                                   .location = loc, .message = "duration value overflows (m scale)"});
-            return {0, false};
-        }
-        ms = num * 60000LL;
-    } else if (unit == "h") {
-        constexpr long long kMax = (std::numeric_limits<long long>::max)() / 3600000LL;
-        if (num > kMax) {
-            acc.add(LoadDiagnostic{.key_path = key_path, .reason = reason_class::out_of_range,
-                                   .location = loc, .message = "duration value overflows (h scale)"});
-            return {0, false};
-        }
-        ms = num * 3600000LL;
-    } else if (unit == "us") {
-        acc.add(LoadDiagnostic{
-            .key_path = key_path,
-            .reason   = reason_class::out_of_range,
-            .location = loc,
-            .message  = "sub-millisecond unit \"us\" not supported; use \"ms\", \"s\", \"m\", or \"h\"",
-        });
-        return {0, false};
-    } else {
-        acc.add(LoadDiagnostic{
-            .key_path = key_path,
-            .reason   = reason_class::malformed_value,
-            .location = loc,
-            .message  = std::string{"unrecognised duration unit: \""} + std::string{unit} + "\"",
-        });
-        return {0, false};
-    }
-    return {ms, true};
-}
+// kp (dotted key-path builder) and parse_duration_to_ms (unit-suffix duration
+// parser) are toml-free and shared from loader_internal (reached via
+// mappers.hpp → loader_internal.hpp) so this TU and scalar_mappers.cpp cannot
+// drift on the overflow guards. See loader_internal.hpp.
 
 }  // anonymous namespace
 
@@ -219,7 +108,7 @@ std::unique_ptr<fixpp::log::Sink> resolve_log_sink(
     const toml::node* kind_node = sink_tbl.get("kind");
     if (!kind_node || !kind_node->is_string()) {
         acc.add(LoadDiagnostic{
-            .key_path = kpath(sink_kp, "kind"),
+            .key_path = kp(sink_kp, "kind"),
             .reason   = reason_class::missing_required,
             .location = kind_node ? loc_node(*kind_node) : SourceLoc{},
             .message  = "logger sink must have a \"kind\" string field",
@@ -229,7 +118,7 @@ std::unique_ptr<fixpp::log::Sink> resolve_log_sink(
     const std::string_view kind = kind_node->as_string()->get();
     if (kind.empty()) {
         acc.add(LoadDiagnostic{
-            .key_path = kpath(sink_kp, "kind"),
+            .key_path = kp(sink_kp, "kind"),
             .reason   = reason_class::empty_required,
             .location = loc_node(*kind_node),
             .message  = "logger sink kind must not be empty",
@@ -242,7 +131,7 @@ std::unique_ptr<fixpp::log::Sink> resolve_log_sink(
         fixpp::log::FileSinkConfig cfg;
 
         if (const auto* n = sink_tbl.get("directory"); n && n->is_string()) {
-            std::filesystem::path dir{std::string{n->as_string()->get()}};
+            std::filesystem::path dir{n->as_string()->get()};
             if (dir.is_relative()) dir = base_dir / dir;
             cfg.directory = std::move(dir);
         }
@@ -253,7 +142,7 @@ std::unique_ptr<fixpp::log::Sink> resolve_log_sink(
             const auto v = n->as_integer()->get();
             if (v == 0) {
                 acc.add(LoadDiagnostic{
-                    .key_path = kpath(sink_kp, "max_file_bytes"),
+                    .key_path = kp(sink_kp, "max_file_bytes"),
                     .reason   = reason_class::out_of_range,
                     .location = loc_node(*n),
                     .message  = "max_file_bytes must be > 0",
@@ -278,7 +167,7 @@ std::unique_ptr<fixpp::log::Sink> resolve_log_sink(
             std::error_code fs_ec;
             if (!std::filesystem::is_directory(dir, fs_ec)) {
                 acc.add(LoadDiagnostic{
-                    .key_path = kpath(sink_kp, "directory"),
+                    .key_path = kp(sink_kp, "directory"),
                     .reason   = reason_class::invalid_or_contradictory_selector,
                     .location = loc_node(*sink_tbl.get("directory")),
                     .message  = "file sink directory does not exist or is not a directory: \"" +
@@ -289,7 +178,7 @@ std::unique_ptr<fixpp::log::Sink> resolve_log_sink(
             // POSIX access(2) W_OK: readable + writable by current process.
             if (::access(dir.c_str(), W_OK) != 0) {
                 acc.add(LoadDiagnostic{
-                    .key_path = kpath(sink_kp, "directory"),
+                    .key_path = kp(sink_kp, "directory"),
                     .reason   = reason_class::invalid_or_contradictory_selector,
                     .location = loc_node(*sink_tbl.get("directory")),
                     .message  = "file sink directory is not writable: \"" + dir.string() + "\"",
@@ -314,7 +203,7 @@ std::unique_ptr<fixpp::log::Sink> resolve_log_sink(
             const std::string_view fac_name = n->as_string()->get();
             int fac_val = 0;
             if (!map_syslog_facility(fac_name, fac_val,
-                                     kpath(sink_kp, "facility"), loc_node(*n), acc)) {
+                                     kp(sink_kp, "facility"), loc_node(*n), acc)) {
                 return nullptr;
             }
             cfg.facility = fac_val;
@@ -326,7 +215,7 @@ std::unique_ptr<fixpp::log::Sink> resolve_log_sink(
 #else
     if (kind == "syslog") {
         acc.add(LoadDiagnostic{
-            .key_path = kpath(sink_kp, "kind"),
+            .key_path = kp(sink_kp, "kind"),
             .reason   = reason_class::invalid_or_contradictory_selector,
             .location = loc_node(*kind_node),
             .message  = "syslog sink is not available on this build (FIXPP_HAS_SYSLOG not defined)",
@@ -344,7 +233,7 @@ std::unique_ptr<fixpp::log::Sink> resolve_log_sink(
         const toml::node* ep_node = sink_tbl.get("endpoint");
         if (!ep_node || !ep_node->is_string()) {
             acc.add(LoadDiagnostic{
-                .key_path = kpath(sink_kp, "endpoint"),
+                .key_path = kp(sink_kp, "endpoint"),
                 .reason   = reason_class::missing_required,
                 .location = ep_node ? loc_node(*ep_node) : SourceLoc{},
                 .message  = "otlp sink requires an \"endpoint\" string field",
@@ -354,7 +243,7 @@ std::unique_ptr<fixpp::log::Sink> resolve_log_sink(
         cfg.endpoint = std::string{ep_node->as_string()->get()};
         if (cfg.endpoint.empty()) {
             acc.add(LoadDiagnostic{
-                .key_path = kpath(sink_kp, "endpoint"),
+                .key_path = kp(sink_kp, "endpoint"),
                 .reason   = reason_class::empty_required,
                 .location = loc_node(*ep_node),
                 .message  = "otlp sink endpoint must not be empty",
@@ -366,7 +255,7 @@ std::unique_ptr<fixpp::log::Sink> resolve_log_sink(
         if (const auto* n = sink_tbl.get("use_grpc"); n && n->is_boolean()) {
             if (n->as_boolean()->get()) {
                 acc.add(LoadDiagnostic{
-                    .key_path = kpath(sink_kp, "use_grpc"),
+                    .key_path = kp(sink_kp, "use_grpc"),
                     .reason   = reason_class::recognized_not_yet_supported_step2,
                     .location = loc_node(*n),
                     .message  = "use_grpc=true is not yet supported (gRPC OTLP transport is deferred)",
@@ -380,7 +269,7 @@ std::unique_ptr<fixpp::log::Sink> resolve_log_sink(
         if (const auto* n = sink_tbl.get("cert_source"); n && n->is_string()) {
             std::string_view cs_val = n->as_string()->get();
             if (!cs_val.empty()) {
-                std::filesystem::path cs_path{std::string{cs_val}};
+                std::filesystem::path cs_path{cs_val};
                 if (cs_path.is_relative()) cs_path = base_dir / cs_path;
                 cfg.cert_source = cs_path.string();
 
@@ -388,7 +277,7 @@ std::unique_ptr<fixpp::log::Sink> resolve_log_sink(
                 std::ifstream cert_f(cs_path, std::ios::binary);
                 if (!cert_f.is_open()) {
                     acc.add(LoadDiagnostic{
-                        .key_path = kpath(sink_kp, "cert_source"),
+                        .key_path = kp(sink_kp, "cert_source"),
                         .reason   = reason_class::invalid_or_contradictory_selector,
                         .location = loc_node(*n),
                         .message  = "otlp cert_source file is not readable (endpoint: " +
@@ -414,7 +303,7 @@ std::unique_ptr<fixpp::log::Sink> resolve_log_sink(
                     (std::string_view{header}.substr(first_nonws, kPemMagic.size()) == kPemMagic);
                 if (!has_pem_magic) {
                     acc.add(LoadDiagnostic{
-                        .key_path = kpath(sink_kp, "cert_source"),
+                        .key_path = kp(sink_kp, "cert_source"),
                         .reason   = reason_class::invalid_or_contradictory_selector,
                         .location = loc_node(*n),
                         .message  = "otlp cert_source does not appear to be a PEM file "
@@ -429,8 +318,8 @@ std::unique_ptr<fixpp::log::Sink> resolve_log_sink(
 
         // export_timeout — duration string (044 unit-suffix rule)
         if (const auto* n = sink_tbl.get("export_timeout"); n && n->is_string()) {
-            const auto d = parse_dur(n->as_string()->get(),
-                                     kpath(sink_kp, "export_timeout"), acc, loc_node(*n));
+            const auto d = parse_duration_to_ms(n->as_string()->get(),
+                                     kp(sink_kp, "export_timeout"), acc, loc_node(*n));
             if (!d.ok) return nullptr;
             // OtlpLogSinkConfig::export_timeout is chrono::seconds; duration_cast from ms.
             cfg.export_timeout = std::chrono::duration_cast<std::chrono::seconds>(
@@ -442,7 +331,7 @@ std::unique_ptr<fixpp::log::Sink> resolve_log_sink(
             const auto v = n->as_integer()->get();
             if (v == 0) {
                 acc.add(LoadDiagnostic{
-                    .key_path = kpath(sink_kp, "max_export_batch"),
+                    .key_path = kp(sink_kp, "max_export_batch"),
                     .reason   = reason_class::out_of_range,
                     .location = loc_node(*n),
                     .message  = "max_export_batch must be > 0",
@@ -463,7 +352,7 @@ std::unique_ptr<fixpp::log::Sink> resolve_log_sink(
 #else
     if (kind == "otlp") {
         acc.add(LoadDiagnostic{
-            .key_path = kpath(sink_kp, "kind"),
+            .key_path = kp(sink_kp, "kind"),
             .reason   = reason_class::invalid_or_contradictory_selector,
             .location = loc_node(*kind_node),
             .message  = "otlp log sink is not available on this build "
@@ -476,7 +365,7 @@ std::unique_ptr<fixpp::log::Sink> resolve_log_sink(
 
     // ── Unknown kind ──────────────────────────────────────────────────────────
     acc.add(LoadDiagnostic{
-        .key_path = kpath(sink_kp, "kind"),
+        .key_path = kp(sink_kp, "kind"),
         .reason   = reason_class::unknown_enum,
         .location = loc_node(*kind_node),
         .message  = std::string{"unknown logger sink kind: \""} + std::string{kind} +
@@ -524,14 +413,14 @@ void resolve_engine_logger(const toml::table&           logger_tbl,
         const auto v = n->as_integer()->get();
         if (v < 0 || v > static_cast<long long>(std::numeric_limits<std::uint32_t>::max())) {
             acc.add(LoadDiagnostic{
-                .key_path = kpath(key_prefix, "capacity"),
+                .key_path = kp(key_prefix, "capacity"),
                 .reason   = reason_class::out_of_range,
                 .location = loc_node(*n),
                 .message  = "capacity must be a non-zero power-of-2 uint32",
             });
         } else {
             const auto u = static_cast<std::uint32_t>(v);
-            if (validate_pow2_capacity(u, kpath(key_prefix, "capacity"), loc_node(*n), acc)) {
+            if (validate_pow2_capacity(u, kp(key_prefix, "capacity"), loc_node(*n), acc)) {
                 cfg.capacity = u;
             }
         }
@@ -546,7 +435,7 @@ void resolve_engine_logger(const toml::table&           logger_tbl,
             cfg.on_overflow = fixpp::log::overflow_policy::block;
         } else {
             acc.add(LoadDiagnostic{
-                .key_path = kpath(key_prefix, "on_overflow"),
+                .key_path = kp(key_prefix, "on_overflow"),
                 .reason   = reason_class::unknown_enum,
                 .location = loc_node(*n),
                 .message  = std::string{"unknown on_overflow token: \""} + std::string{tok} +
@@ -557,8 +446,8 @@ void resolve_engine_logger(const toml::table&           logger_tbl,
 
     // drain_timeout — duration string (ms); default 5000ms
     if (const auto* n = logger_tbl.get("drain_timeout"); n && n->is_string()) {
-        const auto d = parse_dur(n->as_string()->get(),
-                                 kpath(key_prefix, "drain_timeout"), acc, loc_node(*n));
+        const auto d = parse_duration_to_ms(n->as_string()->get(),
+                                 kp(key_prefix, "drain_timeout"), acc, loc_node(*n));
         if (d.ok) {
             cfg.drain_timeout = std::chrono::milliseconds{d.value_ms};
         }
@@ -573,7 +462,7 @@ void resolve_engine_logger(const toml::table&           logger_tbl,
 
     // ── [[logger.sinks]] — required, ordered, non-empty ──────────────────────
 
-    const std::string sinks_kp = kpath(key_prefix, "sinks");
+    const std::string sinks_kp = kp(key_prefix, "sinks");
 
     const toml::node* sinks_node = logger_tbl.get("sinks");
     if (!sinks_node || !sinks_node->is_array()) {

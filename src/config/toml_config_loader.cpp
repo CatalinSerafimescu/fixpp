@@ -553,11 +553,7 @@ void recognize_keys(const toml::table& tbl, std::string_view key_prefix,
                 SourceLoc sess_logger_loc;
                 // Prefer raw-table SourceLoc (merged zeroes source_regions).
                 if (const toml::node* raw_node = session_raw.get("logger")) {
-                    const auto& src = raw_node->source().begin;
-                    sess_logger_loc = SourceLoc{
-                        .line = static_cast<std::uint32_t>(src.line),
-                        .col  = static_cast<std::uint32_t>(src.column),
-                    };
+                    sess_logger_loc = loc_from_region(raw_node->source());
                 }
                 const std::string sess_logger_kp = key_prefix + ".logger";
                 detail::resolve_engine_logger(
@@ -593,14 +589,7 @@ void recognize_keys(const toml::table& tbl, std::string_view key_prefix,
     // accumulates both engine and per-session loggers in one file-scoped set.
     if (const auto* logger_node = root_tbl.get("logger");
         logger_node && logger_node->is_table()) {
-        SourceLoc logger_loc;
-        {
-            const auto& src = logger_node->source().begin;
-            logger_loc = SourceLoc{
-                .line = static_cast<std::uint32_t>(src.line),
-                .col  = static_cast<std::uint32_t>(src.column),
-            };
-        }
+        SourceLoc logger_loc = loc_from_region(logger_node->source());
         detail::resolve_engine_logger(*logger_node->as_table(), "logger", logger_loc,
                                       base_dir, opts, pending_loggers, acc,
                                       /*is_engine=*/true, /*session_index=*/0);
