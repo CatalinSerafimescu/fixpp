@@ -583,3 +583,52 @@ TEST(LoadSelectors, T027_DivergentCertMultiSession) {
            "bundle.engine.default_transport_factory (D-6a: per-session factory is "
            "freshly minted, never the shared engine anchor)";
 }
+
+// =============================================================================
+// Gate B r2 Fix B — discriminating counter-test for collect-ALL kind validation
+// =============================================================================
+//
+// Before Fix B, per-session transport.kind validation was embedded in the
+// minting loops and was skipped whenever a prerequisite return fired (e.g. the
+// cert-null return at :573).  validate_per_session_transport_kinds now runs
+// UNCONDITIONALLY for all sessions 1..n, independent of global acc state.
+//
+// Discriminating case (proves the fix vs a 554-only patch):
+//   TLS engine default + NO root [cert_source] → fires the cert-null return
+//   (:573) that previously suppressed all further per-session validation.
+//   session[1] has transport.kind="websocket" (unknown enum).
+//
+//   A 554-only patch: passes Codex's original root-unknown_key+websocket test
+//   because session[0] is valid and the factory builds. But under the
+//   cert-null path, the validation loop was never reached.
+//
+//   Fix B: BOTH diagnostics must accumulate:
+//     (1) cert_source: missing_required
+//     (2) session[1].transport.kind: unknown_enum
+//
+// Mutation-test: remove the validate_per_session_transport_kinds call in
+// resolve_transport → the unknown_enum diagnostic disappears → test FAILS RED.
+
+TEST(LoadSelectors, GateBR2B_TlsNoCerts_Session1WebsocketBothDiags) {
+    auto result = load(fixture("neg_tls_no_certs_session1_websocket.toml"));
+
+    ASSERT_FALSE(result.has_value())
+        << "TLS-default config with no [cert_source] + session[1].kind=\"websocket\" "
+           "must fail (cert_source missing + websocket unknown_enum)";
+
+    const auto& diags = result.error();
+    using RC = fixpp::config::reason_class;
+
+    // (1) cert_source missing — from the prerequisite check, not suppressed.
+    EXPECT_TRUE(has_diag(diags, RC::missing_required, "cert_source"))
+        << "expected missing_required at \"cert_source\" "
+           "(engine-level cert_source required for TLS transport)";
+
+    // (2) session[1].transport.kind unknown_enum — from validate_per_session_transport_kinds
+    // which runs UNCONDITIONALLY before the cert-null return.
+    // A 554-only patch or pre-Fix-B code returns before this validation → diagnostic absent.
+    EXPECT_TRUE(has_diag(diags, RC::unknown_enum, "session[1].transport.kind"))
+        << "expected unknown_enum at \"session[1].transport.kind\" for \"websocket\" — "
+           "validate_per_session_transport_kinds must run regardless of cert-null prerequisite "
+           "(Gate B r2 Fix B / FR-018 collect-ALL)";
+}

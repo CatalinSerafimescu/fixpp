@@ -142,6 +142,7 @@ public:
     void add(LoadDiagnostic diag) { diags_.push_back(std::move(diag)); }
 
     [[nodiscard]] bool empty() const noexcept { return diags_.empty(); }
+    [[nodiscard]] std::size_t size() const noexcept { return diags_.size(); }
 
     // Moves out the collected diagnostics. Call once at function exit.
     [[nodiscard]] std::vector<LoadDiagnostic> release() && { return std::move(diags_); }

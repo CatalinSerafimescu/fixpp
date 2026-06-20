@@ -494,6 +494,96 @@ static std::shared_ptr<transport::TransportFactory> build_tls_factory(
 // make_ssl_ctx_config and make_asio_*_transport_factory are noexcept expected_t
 // — check-the-expected, NO trap_throw (D-3 / loader_internal.hpp).
 // ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// validate_per_session_transport_kinds — pure kind-validation helper (FR-018).
+//
+// Validates transport.kind for every NON-FIRST session (sessions 1..n) against
+// the engine-default kind.  Runs UNCONDITIONALLY — independent of global acc
+// state — so a prerequisite failure on session[0] does NOT suppress validation
+// of later sessions (Gate B r2 Fix B / FR-018 collect-ALL).
+//
+// Only requires the merged session tables + the engine-default kind string.
+// Does NOT build factories — that is done in the minting loops below.
+//
+// "tls-on-plaintext" is a cross-kind error; "unknown kind" is unknown_enum.
+// ─────────────────────────────────────────────────────────────────────────────
+static void validate_per_session_transport_kinds(
+    const std::vector<const toml::table*>& merged_session_tables,
+    std::string_view engine_default_kind, DiagnosticAccumulator& acc) {
+    // session[0] is validated by the resolve_transport main body; start at 1.
+    for (std::size_t i = 1; i < merged_session_tables.size(); ++i) {
+        const toml::table& sess = *merged_session_tables[i];
+        const std::string s_prefix = "session[" + std::to_string(i) + "]";
+
+        const toml::table* s_transport_tbl = nullptr;
+        if (const auto* t_n = sess.get("transport"); t_n && t_n->is_table()) {
+            s_transport_tbl = t_n->as_table();
+        }
+        if (!s_transport_tbl) {
+            acc.add(LoadDiagnostic{
+                .key_path = s_prefix + ".transport.kind",
+                .reason = reason_class::missing_required,
+                .message = "[session.transport] is required (data-model E-3 row 62)",
+            });
+            continue;
+        }
+
+        const auto* kind_node = s_transport_tbl->get("kind");
+        if (!kind_node) {
+            acc.add(LoadDiagnostic{
+                .key_path = s_prefix + ".transport.kind",
+                .reason = reason_class::missing_required,
+                .message = "transport.kind is required",
+            });
+            continue;
+        }
+        if (!kind_node->is_string()) {
+            acc.add(LoadDiagnostic{
+                .key_path = s_prefix + ".transport.kind",
+                .reason = reason_class::missing_required,
+                .message = "transport.kind must be a string",
+            });
+            continue;
+        }
+
+        const std::string_view s_kind = kind_node->as_string()->get();
+        if (s_kind.empty()) {
+            acc.add(LoadDiagnostic{
+                .key_path = s_prefix + ".transport.kind",
+                .reason = reason_class::empty_required,
+                .message = "transport.kind must not be empty",
+            });
+            continue;
+        }
+
+        // Cross-kind: tls-on-plaintext-engine (no cert_source, fail-closed).
+        if (s_kind == "tls" && engine_default_kind == "plaintext") {
+            acc.add(LoadDiagnostic{
+                .key_path = s_prefix + ".transport.kind",
+                .reason = reason_class::invalid_or_contradictory_selector,
+                .message = s_prefix + " declares transport.kind=\"tls\" but the "
+                                      "engine default is plaintext; per-session TLS requires "
+                                      "an engine-level [cert_source] — add [cert_source] or "
+                                      "switch all sessions to \"tls\"",
+            });
+            continue;
+        }
+
+        // Unknown kind.
+        if (s_kind != "tls" && s_kind != "plaintext") {
+            acc.add(LoadDiagnostic{
+                .key_path = s_prefix + ".transport.kind",
+                .reason = reason_class::unknown_enum,
+                .message = std::string{"unknown transport.kind: \""} + std::string{s_kind} +
+                           R"(" (accepted: "tls", "plaintext"))",
+            });
+            // continue to next session (collect-ALL — FR-018)
+        }
+        // "tls" on tls-engine or "plaintext" on plaintext-engine: valid, handled by
+        // the minting loops below.
+    }
+}
+
 static void resolve_transport(const std::vector<const toml::table*>& merged_session_tables,
                               const std::filesystem::path& base_dir, const LoadOptions& opts,
                               ConfigBundle& bundle, DiagnosticAccumulator& acc) {
@@ -542,16 +632,26 @@ static void resolve_transport(const std::vector<const toml::table*>& merged_sess
         return;
     }
 
+    // ── Per-session kind validation (FR-018 collect-ALL) ─────────────────────
+    // Validate sessions 1..n UNCONDITIONALLY — independent of global acc state
+    // and of the minting prerequisites below.  session[0] is validated above.
+    validate_per_session_transport_kinds(merged_session_tables, transport_kind_tok, acc);
+
     if (transport_kind_tok == "tls") {
         // TLS factory requires: engine.clock + engine.default_cert_source + session
         // security_profile.
 
         // Extract session[0] security_profile → engine-default profile.
+        // Snapshot acc size before the call so we can tell whether parse_security_profile
+        // itself added a deferral (vs. diagnostics from validate_per_session_transport_kinds
+        // already in acc — those must not suppress the cert/clock prerequisite checks).
+        const std::size_t acc_before_parse = acc.size();
         tls::SecurityProfile tls_profile =
             parse_security_profile(session_merged, "session[0]", acc);
 
-        // If parse_security_profile added a deferral diagnostic, bail.
-        if (!acc.empty()) {
+        // If parse_security_profile added a deferral diagnostic (e.g. mtls_pinned),
+        // bail from minting only.
+        if (acc.size() != acc_before_parse) {
             return;
         }
 
@@ -587,81 +687,41 @@ static void resolve_transport(const std::vector<const toml::table*>& merged_sess
         }
         bundle.engine.default_transport_factory = std::move(default_factory);
 
-        // ── Per-session divergence scan (D-6a) — #1 Gate B r1 ──────────────
-        // For each session:
-        //   (a) Validate transport.kind (missing / empty / non-string / unknown).
-        //       session[0] is already validated above; sessions 1+ were not
-        //       checked before this fix, so they silently ran on the engine-default
-        //       (wrong) TLS factory (data-model E-3 row 62 / FR-007 / FR-012).
-        //   (b) If kind diverges from the engine default ("tls"):
-        //       - "tls" with a different cert/profile → mint a TLS override (original logic).
-        //       - "plaintext" → mint a plaintext factory override so the session
-        //         runs on the correct transport, not the engine-default TLS one.
-        //       Sessions whose kind matches ("tls", same cert, same profile) stay null.
-
-        for (std::size_t i = 0; i < merged_session_tables.size(); ++i) {
+        // ── Per-session MINTING loop (D-6a) ──────────────────────────────────
+        // Kind validation was already done by validate_per_session_transport_kinds
+        // above; skip any session whose kind is already known-invalid (unknown).
+        // session[0] drove the engine default — start at i=1.
+        for (std::size_t i = 1; i < merged_session_tables.size(); ++i) {
             const toml::table& sess = *merged_session_tables[i];
-            const std::string idx_str = std::to_string(i);
-            const std::string s_prefix = "session[" + idx_str + "]";
-
-            // ── (a) Validate per-session transport.kind ──────────────────────
-            // session[0] is validated in the main body above — skip it here.
-            if (i == 0) {
-                // session[0] drove the engine-default factory; already validated.
-                continue;
-            }
+            const std::string s_prefix = "session[" + std::to_string(i) + "]";
 
             const toml::table* s_transport_tbl = nullptr;
             if (const auto* t_n = sess.get("transport"); t_n && t_n->is_table()) {
                 s_transport_tbl = t_n->as_table();
             }
+            // Validation already added the missing-transport diagnostic; skip minting.
             if (!s_transport_tbl) {
-                // Missing [session.transport] for a non-first session.
-                acc.add(LoadDiagnostic{
-                    .key_path = s_prefix + ".transport.kind",
-                    .reason = reason_class::missing_required,
-                    .message = "[session.transport] is required (data-model E-3 row 62)",
-                });
                 continue;
             }
 
-            std::string_view s_transport_kind;
             const auto* kind_node = s_transport_tbl->get("kind");
-            if (kind_node && kind_node->is_string()) {
-                s_transport_kind = kind_node->as_string()->get();
-            } else if (!kind_node) {
-                acc.add(LoadDiagnostic{
-                    .key_path = s_prefix + ".transport.kind",
-                    .reason = reason_class::missing_required,
-                    .message = "transport.kind is required",
-                });
-                continue;
-            } else {
-                // Present but not a string.
-                acc.add(LoadDiagnostic{
-                    .key_path = s_prefix + ".transport.kind",
-                    .reason = reason_class::missing_required,
-                    .message = "transport.kind must be a string",
-                });
-                continue;
+            if (!kind_node || !kind_node->is_string()) {
+                continue;  // validation already flagged this
             }
-
+            const std::string_view s_transport_kind = kind_node->as_string()->get();
             if (s_transport_kind.empty()) {
-                acc.add(LoadDiagnostic{
-                    .key_path = s_prefix + ".transport.kind",
-                    .reason = reason_class::empty_required,
-                    .message = "transport.kind must not be empty",
-                });
-                continue;
+                continue;  // validation already flagged this
             }
-
-            // ── (b) Handle per-session kind relative to engine default ───────
+            if (s_transport_kind != "tls" && s_transport_kind != "plaintext") {
+                continue;  // validation already flagged unknown_enum
+            }
 
             if (s_transport_kind == "tls") {
-                // TLS-on-TLS-engine: check cert/profile divergence as before.
+                // TLS-on-TLS-engine: check cert/profile divergence.
                 tls::SecurityProfile s_profile = parse_security_profile(sess, s_prefix, acc);
                 if (!acc.empty()) {
-                    return;  // mtls_pinned deferral or similar
+                    // mtls_pinned deferral or similar — skip remaining minting.
+                    continue;
                 }
 
                 const toml::table* s_cs_tbl = nullptr;
@@ -683,7 +743,7 @@ static void resolve_transport(const std::vector<const toml::table*>& merged_sess
                     s_cert_source = build_file_cert_source(*s_cs_tbl, base_dir, opts,
                                                            s_prefix + ".cert_source", acc);
                     if (!s_cert_source) {
-                        return;  // diagnostic already added
+                        continue;  // diagnostic already added
                     }
                 } else {
                     // Profile diverges but certs are the same.
@@ -693,15 +753,13 @@ static void resolve_transport(const std::vector<const toml::table*>& merged_sess
                 auto s_factory = build_tls_factory(s_profile, s_cert_source, bundle.engine.clock,
                                                    s_prefix + ".transport", acc);
                 if (!s_factory) {
-                    return;  // diagnostic already added
+                    continue;  // diagnostic already added
                 }
                 bundle.sessions[i].config.transport_factory_override = std::move(s_factory);
 
-            } else if (s_transport_kind == "plaintext") {
-                // Plaintext-on-TLS-engine: this session declared a different kind
-                // from the engine default.  Mint a per-session plaintext factory
-                // override so it runs on the correct transport (D-6a / FR-007).
-                //
+            } else {
+                // s_transport_kind == "plaintext": Plaintext-on-TLS-engine.
+                // Mint a per-session plaintext factory override (D-6a / FR-007).
                 // Guard: do NOT flag a contradiction with engine.default_cert_source
                 // — the cert material belongs to OTHER TLS sessions, not this one.
                 transport::Transport::Config t_cfg{};
@@ -712,21 +770,10 @@ static void resolve_transport(const std::vector<const toml::table*>& merged_sess
                         .reason = reason_class::invalid_or_contradictory_selector,
                         .message = "make_asio_plain_transport_factory failed",
                     });
-                    return;
+                    continue;
                 }
                 bundle.sessions[i].config.transport_factory_override =
                     std::shared_ptr<transport::TransportFactory>(std::move(*factory_result));
-
-            } else {
-                // Unknown kind (e.g. "websocket").
-                acc.add(LoadDiagnostic{
-                    .key_path = s_prefix + ".transport.kind",
-                    .reason = reason_class::unknown_enum,
-                    .message = std::string{"unknown transport.kind: \""} +
-                               std::string{s_transport_kind} +
-                               R"(" (accepted: "tls", "plaintext"))",
-                });
-                // continue to next session (accumulate all errors — FR-018)
             }
         }
 
@@ -761,82 +808,10 @@ static void resolve_transport(const std::vector<const toml::table*>& merged_sess
         bundle.engine.default_transport_factory =
             std::shared_ptr<transport::TransportFactory>(std::move(*factory_result));
 
-        // ── Per-session divergence scan (D-6a, plaintext-default) ────────────
-        // Validate transport.kind for every non-first session.  session[0] drove
-        // the engine-default plaintext factory and is already validated above.
-        // Any session that declares a kind diverging from "plaintext" is a
-        // cross-kind mismatch — fail closed (FR-012, data-model E-3 row 62).
-        for (std::size_t i = 1; i < merged_session_tables.size(); ++i) {
-            const toml::table& sess = *merged_session_tables[i];
-            const std::string s_prefix = "session[" + std::to_string(i) + "]";
-
-            const toml::table* s_transport_tbl = nullptr;
-            if (const auto* t_n = sess.get("transport"); t_n && t_n->is_table()) {
-                s_transport_tbl = t_n->as_table();
-            }
-            if (!s_transport_tbl) {
-                acc.add(LoadDiagnostic{
-                    .key_path = s_prefix + ".transport.kind",
-                    .reason = reason_class::missing_required,
-                    .message = "[session.transport] is required (data-model E-3 row 62)",
-                });
-                continue;
-            }
-
-            std::string_view s_transport_kind;
-            const auto* kind_node = s_transport_tbl->get("kind");
-            if (kind_node && kind_node->is_string()) {
-                s_transport_kind = kind_node->as_string()->get();
-            } else if (!kind_node) {
-                acc.add(LoadDiagnostic{
-                    .key_path = s_prefix + ".transport.kind",
-                    .reason = reason_class::missing_required,
-                    .message = "transport.kind is required",
-                });
-                continue;
-            } else {
-                acc.add(LoadDiagnostic{
-                    .key_path = s_prefix + ".transport.kind",
-                    .reason = reason_class::missing_required,
-                    .message = "transport.kind must be a string",
-                });
-                continue;
-            }
-
-            if (s_transport_kind.empty()) {
-                acc.add(LoadDiagnostic{
-                    .key_path = s_prefix + ".transport.kind",
-                    .reason = reason_class::empty_required,
-                    .message = "transport.kind must not be empty",
-                });
-                continue;
-            }
-
-            if (s_transport_kind == "plaintext") {
-                // Same as engine default → no override needed.
-                continue;
-            } else if (s_transport_kind == "tls") {
-                // TLS-on-plaintext-engine: cross-kind divergence is not supported
-                // (no engine cert_source available, and per-session TLS factory
-                // minting requires cert_source; D-6a fail-closed / FR-012).
-                acc.add(LoadDiagnostic{
-                    .key_path = s_prefix + ".transport.kind",
-                    .reason = reason_class::invalid_or_contradictory_selector,
-                    .message = s_prefix + " declares transport.kind=\"tls\" but the "
-                                          "engine default is plaintext; per-session TLS requires "
-                                          "an engine-level [cert_source] — add [cert_source] or "
-                                          "switch all sessions to \"tls\"",
-                });
-            } else {
-                acc.add(LoadDiagnostic{
-                    .key_path = s_prefix + ".transport.kind",
-                    .reason = reason_class::unknown_enum,
-                    .message = std::string{"unknown transport.kind: \""} +
-                               std::string{s_transport_kind} +
-                               R"(" (accepted: "tls", "plaintext"))",
-                });
-            }
-        }
+        // Per-session kind validation was done by validate_per_session_transport_kinds
+        // above.  Plaintext-default sessions that match the engine kind ("plaintext")
+        // need no factory override (no minting needed here — D-6a / FR-007).
+        // Cross-kind (tls-on-plaintext) and unknown kinds are already diagnosed.
 
     } else {
         acc.add(LoadDiagnostic{

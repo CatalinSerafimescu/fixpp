@@ -1,0 +1,54 @@
+# neg_tls_no_certs_session1_websocket.toml
+# Gate B r2 Fix B discriminating counter-test fixture.
+#
+# TLS engine-default with NO root [cert_source] — fires session[0]'s cert-null
+# prerequisite return (:573) — PLUS session[1].transport.kind = "websocket"
+# (unknown enum).
+#
+# Before Fix B: the per-session validation was gated behind the cert-null return,
+# so the "websocket" unknown_enum was never emitted (collect-ALL violation).
+#
+# After Fix B: validate_per_session_transport_kinds runs UNCONDITIONALLY and
+# emits BOTH:
+#   - cert_source: missing_required
+#   - session[1].transport.kind: unknown_enum
+
+[clock]
+kind = "system"
+
+[store]
+kind = "memory"
+
+# NOTE: [cert_source] is intentionally ABSENT — this is what fires the :573
+# prerequisite return in resolve_transport (before Fix B, it also suppressed
+# session[1] kind validation).
+
+[dictionary]
+kind = "path"
+path = "FIX44.xml"
+
+[[session]]
+sender_comp_id = "CLIENT_TLS"
+target_comp_id = "SERVER_TLS"
+begin_string   = "FIX.4.4"
+role           = "initiator"
+
+[session.transport]
+kind = "tls"
+host = "fix-tls.example.com"
+port = 4321
+
+[session.security_profile]
+kind = "mtls_ca"
+
+[[session]]
+sender_comp_id = "CLIENT_WS"
+target_comp_id = "SERVER_WS"
+begin_string   = "FIX.4.4"
+role           = "acceptor"
+
+[session.transport]
+kind = "websocket"
+
+[session.security_profile]
+kind = "insecure_plain_tcp"
