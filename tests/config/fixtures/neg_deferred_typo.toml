@@ -1,0 +1,48 @@
+# neg_deferred_typo.toml
+# 045-observability-config Phase-6 US4 fixture (T020 typo-distinction cell).
+#
+# Places a typo'd key `loggerr` (double-r) at the top level.
+# Expected result: unknown_key at key_path "loggerr" — NOT
+# recognized_not_yet_supported_step2 (the key is not in kDeferred; it is
+# simply unrecognized).  This proves the two reason classes are never conflated
+# (SC-007, data-model E-5).
+#
+# IMPORTANT TOML scoping: scalar root-level keys MUST appear BEFORE any
+# [sub-table] header, otherwise they are parsed into the sub-table scope.
+# Place `loggerr` at the very top, before [clock], [store], etc.
+
+# ── Typo'd key at root scope (MUST be before any [sub-table]) ────────────────
+# NOT in kDeferred, NOT in kRecognized → unknown_key
+loggerr = "some_value"
+
+# ── Engine-level selectors ────────────────────────────────────────────────────
+
+[clock]
+kind = "system"
+
+[store]
+kind = "memory"
+
+[cert_source]
+kind      = "file"
+cert_file = "leaf_ecdsa_p256.pem"
+key_file  = "leaf_ecdsa_p256.key"
+ca_file   = "ca.pem"
+
+[dictionary]
+kind = "path"
+path = "FIX44.xml"
+
+[[session]]
+sender_comp_id = "CLIENT1"
+target_comp_id = "SERVER1"
+begin_string   = "FIX.4.4"
+role           = "initiator"
+
+[session.transport]
+kind = "tls"
+host = "fix.example.com"
+port = 4321
+
+[session.security_profile]
+kind = "mtls_ca"

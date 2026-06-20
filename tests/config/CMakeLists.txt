@@ -268,6 +268,34 @@ set_target_properties(test_load_logger_overrides PROPERTIES
 add_test(NAME test_load_logger_overrides COMMAND test_load_logger_overrides)
 set_tests_properties(test_load_logger_overrides PROPERTIES LABELS "config;045")
 
+# ── T020/T021: deferred-surface test (045 US4) ───────────────────────────────
+
+add_executable(test_load_deferred_surface
+    test_load_deferred_surface.cpp
+)
+target_compile_definitions(test_load_deferred_surface PRIVATE
+    FIXPP_CONFIG_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures"
+)
+target_link_libraries(test_load_deferred_surface PRIVATE
+    fixpp::config_toml
+    fixpp::session
+    fixpp::core
+    fixpp::tls
+    fixpp::dictionary
+    fixpp::transport
+    fixpp::log
+    GTest::gtest
+    GTest::gtest_main
+    "${FIXPP_CFG_OPENSSL_CRYPTO_LIB}"
+    "${FIXPP_CFG_OPENSSL_SSL_LIB}"
+    "${FIXPP_CFG_ZLIB_LIB}"
+)
+set_target_properties(test_load_deferred_surface PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+)
+add_test(NAME test_load_deferred_surface COMMAND test_load_deferred_surface)
+set_tests_properties(test_load_deferred_surface PROPERTIES LABELS "config;045")
+
 # ── T030: QuickFIX parity table (SC-004) ─────────────────────────────────────
 # Pure data test — no loader link needed; GTest only.
 

@@ -110,11 +110,11 @@
 
 ### Tests for US4 (write FIRST, must FAIL)
 
-- [ ] T020 [P] [US4] **Deferred-surface test** in `tests/config/test_load_deferred_surface.cpp` (new) or amend the 044 deferred cells + fixtures: `[tracer]`, `[meter]`, a memory-arena selector (`message_arena`), `dialect_overlay`, `[tap]` each → `recognized_not_yet_supported_step2` naming that key, distinct from an `unknown_key` typo; assert a `[logger]` block does NOT report the deferred reason (the one-key flip, FR-022). Confirm no previously-supported 044 key regresses (FR-025) (AC US4-1/2/3, SC-007).
+- [x] T020 [P] [US4] **Deferred-surface test** in `tests/config/test_load_deferred_surface.cpp` (new) or amend the 044 deferred cells + fixtures: `[tracer]`, `[meter]`, a memory-arena selector (`message_arena`), `dialect_overlay`, `[tap]` each → `recognized_not_yet_supported_step2` naming that key, distinct from an `unknown_key` typo; assert a `[logger]` block does NOT report the deferred reason (the one-key flip, FR-022). Confirm no previously-supported 044 key regresses (FR-025) (AC US4-1/2/3, SC-007).
 
 ### Implementation for US4
 
-- [ ] T021 [US4] Confirm the T006 `recognize_keys()` disposition satisfies T020 (logger flipped to supported; all other observability/arena/dialect/tap keys stay deferred under the kept enum symbol with the generalized message). Adjust the deferred-set membership / message text if T020 surfaces a gap (FR-022/FR-025, data-model E-5). Make T020 pass.
+- [x] T021 [US4] Confirm the T006 `recognize_keys()` disposition satisfies T020 (logger flipped to supported; all other observability/arena/dialect/tap keys stay deferred under the kept enum symbol with the generalized message). Adjust the deferred-set membership / message text if T020 surfaces a gap (FR-022/FR-025, data-model E-5). Make T020 pass.
 
 **Checkpoint**: the deferral boundary stays loud; exactly one key (`logger`) flipped; no regression.
 
