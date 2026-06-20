@@ -1413,6 +1413,172 @@ TEST(GateBR1B_WrongTypeOptionals, SyslogFacilityNotString)
 #endif  // FIXPP_HAS_SYSLOG
 
 // ---------------------------------------------------------------------------
+// Gate B r1 — Root cause D: negative/oversized numerics wrap to huge unsigned
+// ---------------------------------------------------------------------------
+//
+// Fields that cast a raw int64 to uint/size_t without a v<0 guard silently
+// accept negative values. The existing `capacity` guard (range check v<0||v>max)
+// is the correct pattern; apply it to max_file_bytes, max_keep_count,
+// max_export_batch, max_export_retries, drain_cpu_affinity.
+//
+// Mutation discriminator for each: remove the v<0 guard → -1 cast to
+// UINT64_MAX/SIZE_MAX is assigned to cfg → acc stays empty → ASSERT_FALSE
+// goes RED.
+
+TEST(GateBR1D_NumericOutOfRange, NegativeMaxFileBytes)
+{
+    // max_file_bytes = -1 → without guard: cast to UINT64_MAX (18446744073709551615).
+    const std::string toml_text = R"(
+[logger]
+  [[logger.sinks]]
+  kind           = "file"
+  directory      = "/tmp"
+  max_file_bytes = -1
+)";
+    auto parsed = parse_logger_inline(toml_text);
+    ASSERT_NE(parsed.logger_tbl, nullptr);
+
+    fixpp::config::detail::DiagnosticAccumulator acc;
+    fixpp::config::PendingLoggerSet pending;
+    fixpp::config::LoadOptions opts;
+    opts.resource = std::pmr::get_default_resource();
+    fixpp::config::detail::resolve_engine_logger(
+        *parsed.logger_tbl, "logger", fixpp::config::SourceLoc{},
+        std::filesystem::temp_directory_path(), opts, pending, acc,
+        /*is_engine=*/true, /*session_index=*/0);
+
+    ASSERT_FALSE(acc.empty())
+        << "max_file_bytes = -1 must produce out_of_range diagnostic (wraps to UINT64_MAX)";
+    EXPECT_TRUE(has_diag(std::move(acc).release(),
+                          fixpp::config::reason_class::out_of_range,
+                          "logger.sinks[0].max_file_bytes"))
+        << "Expected out_of_range on logger.sinks[0].max_file_bytes";
+}
+
+TEST(GateBR1D_NumericOutOfRange, NegativeMaxKeepCount)
+{
+    // max_keep_count = -1 → without guard: cast to UINT32_MAX.
+    const std::string toml_text = R"(
+[logger]
+  [[logger.sinks]]
+  kind           = "file"
+  directory      = "/tmp"
+  max_keep_count = -1
+)";
+    auto parsed = parse_logger_inline(toml_text);
+    ASSERT_NE(parsed.logger_tbl, nullptr);
+
+    fixpp::config::detail::DiagnosticAccumulator acc;
+    fixpp::config::PendingLoggerSet pending;
+    fixpp::config::LoadOptions opts;
+    opts.resource = std::pmr::get_default_resource();
+    fixpp::config::detail::resolve_engine_logger(
+        *parsed.logger_tbl, "logger", fixpp::config::SourceLoc{},
+        std::filesystem::temp_directory_path(), opts, pending, acc,
+        /*is_engine=*/true, /*session_index=*/0);
+
+    ASSERT_FALSE(acc.empty())
+        << "max_keep_count = -1 must produce out_of_range diagnostic (wraps to UINT32_MAX)";
+    EXPECT_TRUE(has_diag(std::move(acc).release(),
+                          fixpp::config::reason_class::out_of_range,
+                          "logger.sinks[0].max_keep_count"))
+        << "Expected out_of_range on logger.sinks[0].max_keep_count";
+}
+
+#ifdef FIXPP_CONFIG_HAS_OTLP
+TEST(GateBR1D_NumericOutOfRange, NegativeMaxExportBatch)
+{
+    // max_export_batch = -1 → without guard: cast to SIZE_MAX.
+    const std::string toml_text = R"(
+[logger]
+  [[logger.sinks]]
+  kind             = "otlp"
+  endpoint         = "http://collector:4318/v1/logs"
+  max_export_batch = -1
+)";
+    auto parsed = parse_logger_inline(toml_text);
+    ASSERT_NE(parsed.logger_tbl, nullptr);
+
+    fixpp::config::detail::DiagnosticAccumulator acc;
+    fixpp::config::PendingLoggerSet pending;
+    fixpp::config::LoadOptions opts;
+    opts.resource = std::pmr::get_default_resource();
+    fixpp::config::detail::resolve_engine_logger(
+        *parsed.logger_tbl, "logger", fixpp::config::SourceLoc{},
+        std::filesystem::temp_directory_path(), opts, pending, acc,
+        /*is_engine=*/true, /*session_index=*/0);
+
+    ASSERT_FALSE(acc.empty())
+        << "max_export_batch = -1 must produce out_of_range (wraps to SIZE_MAX)";
+    EXPECT_TRUE(has_diag(std::move(acc).release(),
+                          fixpp::config::reason_class::out_of_range,
+                          "logger.sinks[0].max_export_batch"))
+        << "Expected out_of_range on logger.sinks[0].max_export_batch";
+}
+
+TEST(GateBR1D_NumericOutOfRange, NegativeMaxExportRetries)
+{
+    // max_export_retries = -1 → without guard: cast to SIZE_MAX.
+    const std::string toml_text = R"(
+[logger]
+  [[logger.sinks]]
+  kind               = "otlp"
+  endpoint           = "http://collector:4318/v1/logs"
+  max_export_retries = -1
+)";
+    auto parsed = parse_logger_inline(toml_text);
+    ASSERT_NE(parsed.logger_tbl, nullptr);
+
+    fixpp::config::detail::DiagnosticAccumulator acc;
+    fixpp::config::PendingLoggerSet pending;
+    fixpp::config::LoadOptions opts;
+    opts.resource = std::pmr::get_default_resource();
+    fixpp::config::detail::resolve_engine_logger(
+        *parsed.logger_tbl, "logger", fixpp::config::SourceLoc{},
+        std::filesystem::temp_directory_path(), opts, pending, acc,
+        /*is_engine=*/true, /*session_index=*/0);
+
+    ASSERT_FALSE(acc.empty())
+        << "max_export_retries = -1 must produce out_of_range (wraps to SIZE_MAX)";
+    EXPECT_TRUE(has_diag(std::move(acc).release(),
+                          fixpp::config::reason_class::out_of_range,
+                          "logger.sinks[0].max_export_retries"))
+        << "Expected out_of_range on logger.sinks[0].max_export_retries";
+}
+#endif  // FIXPP_CONFIG_HAS_OTLP
+
+TEST(GateBR1D_NumericOutOfRange, DrainCpuAffinityOverflow)
+{
+    // drain_cpu_affinity = 2147483648 (INT_MAX+1, overflows int)
+    // Without guard: static_cast<int>(2147483648LL) = UB/implementation-defined.
+    const std::string toml_text = R"(
+[logger]
+drain_cpu_affinity = 2147483648
+  [[logger.sinks]]
+  kind      = "file"
+  directory = "/tmp"
+)";
+    auto parsed = parse_logger_inline(toml_text);
+    ASSERT_NE(parsed.logger_tbl, nullptr);
+
+    fixpp::config::detail::DiagnosticAccumulator acc;
+    fixpp::config::PendingLoggerSet pending;
+    fixpp::config::LoadOptions opts;
+    opts.resource = std::pmr::get_default_resource();
+    fixpp::config::detail::resolve_engine_logger(
+        *parsed.logger_tbl, "logger", fixpp::config::SourceLoc{},
+        std::filesystem::temp_directory_path(), opts, pending, acc,
+        /*is_engine=*/true, /*session_index=*/0);
+
+    ASSERT_FALSE(acc.empty())
+        << "drain_cpu_affinity = 2147483648 (INT_MAX+1) must produce out_of_range";
+    EXPECT_TRUE(has_diag(std::move(acc).release(),
+                          fixpp::config::reason_class::out_of_range,
+                          "logger.drain_cpu_affinity"))
+        << "Expected out_of_range on logger.drain_cpu_affinity";
+}
+
+// ---------------------------------------------------------------------------
 // Gate B r1 — Root cause C: sink-local collect-ALL truncation
 // ---------------------------------------------------------------------------
 //

@@ -157,20 +157,31 @@ std::unique_ptr<fixpp::log::Sink> resolve_log_sink(const toml::table& sink_tbl,
         }
         if (const auto* n = sink_tbl.get("max_file_bytes"); n && n->is_integer()) {
             const auto v = n->as_integer()->get();
-            if (v == 0) {
+            // Gate B r1 #5: v<0 must be rejected; v==0 is also rejected (>0 required).
+            if (v <= 0) {
                 acc.add(LoadDiagnostic{
                     .key_path = kp(sink_kp, "max_file_bytes"),
                     .reason = reason_class::out_of_range,
                     .location = loc_node(*n),
                     .message = "max_file_bytes must be > 0",
                 });
-                // Gate B r1 #4: do NOT early-return; continue to collect further errors.
             } else {
                 cfg.max_file_bytes = static_cast<std::uint64_t>(v);
             }
         }
         if (const auto* n = sink_tbl.get("max_keep_count"); n && n->is_integer()) {
-            cfg.max_keep_count = static_cast<std::uint32_t>(n->as_integer()->get());
+            const auto v = n->as_integer()->get();
+            // Gate B r1 #5: negative value wraps to UINT32_MAX; reject with out_of_range.
+            if (v < 0 || v > static_cast<long long>(std::numeric_limits<std::uint32_t>::max())) {
+                acc.add(LoadDiagnostic{
+                    .key_path = kp(sink_kp, "max_keep_count"),
+                    .reason = reason_class::out_of_range,
+                    .location = loc_node(*n),
+                    .message = "max_keep_count must be a non-negative uint32",
+                });
+            } else {
+                cfg.max_keep_count = static_cast<std::uint32_t>(v);
+            }
         }
         if (const auto* n = sink_tbl.get("async_fsync"); n && n->is_boolean()) {
             cfg.async_fsync = n->as_boolean()->get();
@@ -396,11 +407,11 @@ std::unique_ptr<fixpp::log::Sink> resolve_log_sink(const toml::table& sink_tbl,
             });
         }
 
-        // max_export_batch — size_t, 0 → out_of_range
-        // Gate B r1 #4: do NOT early-return; fall through to delta check below.
+        // max_export_batch — size_t, 0 → out_of_range; <0 → wraps to SIZE_MAX (out_of_range)
+        // Gate B r1 #4+#5: do NOT early-return; fall through to delta check below.
         if (const auto* n = sink_tbl.get("max_export_batch"); n && n->is_integer()) {
             const auto v = n->as_integer()->get();
-            if (v == 0) {
+            if (v <= 0) {
                 acc.add(LoadDiagnostic{
                     .key_path = kp(sink_kp, "max_export_batch"),
                     .reason = reason_class::out_of_range,
@@ -412,9 +423,20 @@ std::unique_ptr<fixpp::log::Sink> resolve_log_sink(const toml::table& sink_tbl,
             }
         }
 
-        // max_export_retries
+        // max_export_retries — size_t; <0 → wraps to SIZE_MAX (out_of_range)
+        // Gate B r1 #5: guard on v<0.
         if (const auto* n = sink_tbl.get("max_export_retries"); n && n->is_integer()) {
-            cfg.max_export_retries = static_cast<std::size_t>(n->as_integer()->get());
+            const auto v = n->as_integer()->get();
+            if (v < 0) {
+                acc.add(LoadDiagnostic{
+                    .key_path = kp(sink_kp, "max_export_retries"),
+                    .reason = reason_class::out_of_range,
+                    .location = loc_node(*n),
+                    .message = "max_export_retries must be >= 0",
+                });
+            } else {
+                cfg.max_export_retries = static_cast<std::size_t>(v);
+            }
         }
 
         // Gate B r1 #4: return nullptr iff this sink added new diagnostics.
@@ -530,8 +552,21 @@ void resolve_engine_logger(const toml::table& logger_tbl, std::string_view key_p
     }
 
     // drain_cpu_affinity — plain int, optional; default -1
+    // Gate B r1 #5: int narrowing from int64 is implementation-defined for values
+    // outside [INT_MIN, INT_MAX].  Guard with explicit range check (mirrors capacity).
     if (const auto* n = logger_tbl.get("drain_cpu_affinity"); n && n->is_integer()) {
-        cfg.drain_cpu_affinity = static_cast<int>(n->as_integer()->get());
+        const auto v = n->as_integer()->get();
+        if (v < static_cast<long long>(std::numeric_limits<int>::min()) ||
+            v > static_cast<long long>(std::numeric_limits<int>::max())) {
+            acc.add(LoadDiagnostic{
+                .key_path = kp(key_prefix, "drain_cpu_affinity"),
+                .reason = reason_class::out_of_range,
+                .location = loc_node(*n),
+                .message = "drain_cpu_affinity must fit in a signed 32-bit integer",
+            });
+        } else {
+            cfg.drain_cpu_affinity = static_cast<int>(v);
+        }
     }
 
     // ring_resource is NEVER file-set (deferred arena, FR-010) — stays default.
