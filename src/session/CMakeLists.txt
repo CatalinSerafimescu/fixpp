@@ -45,9 +45,16 @@ target_link_libraries(fixpp_session PUBLIC
   fixpp_wire
   fixpp_transport
   fixpp_log
-  fixpp_otel
   asio::asio
 )
+# 046-atomic-shared-ptr T014 (FR-011a): link fixpp_otel only when OTel is ON.
+# When OFF, fixpp_otel is a stub INTERFACE library (no SDK symbols), so the
+# link would be harmless, but the explicit guard makes intent clear and avoids
+# redundant link entries. engine.cpp's OTel include+calls are gated by
+# #if FIXPP_BUILD_OTEL (propagated globally via add_compile_definitions).
+if(FIXPP_BUILD_OTEL)
+  target_link_libraries(fixpp_session PUBLIC fixpp_otel)
+endif()
 
 # 008-message-store: Crc32c::crc32c is added PRIVATE in T024 when file_store.cpp
 # ships (per-record + sentinel CRC32 over Castagnoli polynomial 0x1EDC6F41;

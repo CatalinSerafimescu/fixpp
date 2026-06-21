@@ -215,6 +215,44 @@ add_test(NAME check_no_std_mutex_corpus
     "${CMAKE_SOURCE_DIR}/include/fixpp/session/retrieve_visitor.hpp"
 )
 
+# ── 046 T013 CT-1c/CT-1d: libc++ corpus gate (FIXPP_LIBCXX_LANE only) ────────
+# Registers two ctests guarded by FIXPP_LIBCXX_LANE=ON (set only by the
+# linux-clang-libc++ preset). Inert on all default libstdc++ presets.
+#
+# CT-1c (check_no_std_mutex_corpus_libcxx):
+#   Re-runs the [const §XV.9] corpus check under libc++ preprocessing.
+#   --require-awaitable-marker: a header that emits no asio/awaitable.hpp
+#   marker indicates empty / misrouted preprocessing → RED (fail-closed).
+#
+# CT-1d (check_libcxx_active):
+#   Compiles a tiny snippet that #errors if _LIBCPP_VERSION is not defined.
+#   Proves the libc++ stdlib headers were actually active during compilation
+#   (not silently resolved to libstdc++). Discriminates: libc++ → exit 0;
+#   libstdc++ / -stdlib= flag silently ignored → exit 1.
+if(FIXPP_LIBCXX_LANE)
+  add_test(NAME check_no_std_mutex_corpus_libcxx
+    COMMAND bash "${SYNC_GREP_GATE_SCRIPT}"
+      -I "${CMAKE_SOURCE_DIR}/include"
+      -I "$<TARGET_PROPERTY:asio::asio,INTERFACE_INCLUDE_DIRECTORIES>"
+      -stdlib=libc++
+      --require-awaitable-marker
+      --
+      "${CMAKE_SOURCE_DIR}/include/fixpp/core/sync/async_mutex.hpp"
+      "${CMAKE_SOURCE_DIR}/include/fixpp/session/engine.hpp"
+  )
+  # CT-1d: _LIBCPP_VERSION active probe.
+  # Compiles a one-liner via bash -c to avoid a dedicated source file.
+  # <version> is the standard feature-test header; it defines _LIBCPP_VERSION
+  # when compiled under libc++ and is absent (or defines nothing matching)
+  # under libstdc++ / MSVC. The snippet is passed on stdin so no temp file
+  # is needed.
+  add_test(NAME check_libcxx_active
+    COMMAND bash -c
+      "printf '#include <version>\\n#ifndef _LIBCPP_VERSION\\n#error libc++ not active\\n#endif\\n' \
+       | '${CMAKE_CXX_COMPILER}' -stdlib=libc++ -std=c++23 -x c++ -c -o /dev/null -"
+  )
+endif()
+
 # ── 046-atomic-shared-ptr (NFR-017): census-regrowth guard (FR-005 / SC-004) ──
 # Rejects any NEW raw std::atomic<std::shared_ptr> in project-owned code (the raw
 # form does not compile under libc++). Runs over the real tree → exit 0.

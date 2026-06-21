@@ -67,7 +67,10 @@ class FixppConan(ConanFile):
         "asio/1.38.0",
         "crc32c/1.1.2",
         "openssl/3.6.2",
-        "opentelemetry-cpp/1.26.0",
+        # opentelemetry-cpp is conditional on the with_otel option (default True).
+        # Moved to requirements() below so the libc++ Tier-2 lane can set
+        # with_otel=False and avoid rebuilding the entire OTel SDK under libc++.
+        # The unconditional pin was here until 046-atomic-shared-ptr T014.
         # 044-toml-session-config FR-001: TOML config-file loader. Header-only,
         # MIT. Parser dependency isolated in fixpp_config_toml target only
         # (FR-004/SC-006) — never leaks into core or any public header.
@@ -77,11 +80,18 @@ class FixppConan(ConanFile):
     # quill/11.1.0 is the TS-13 spike-only benchmark backend (FR-023): pulled
     #   ONLY when the spike_quill option is on (paired with the CMake option
     #   FIXPP_LOG_SPIKE_QUILL=ON). A default build MUST NOT require quill.
-    options = {"spike_quill": [True, False]}
+    # with_otel (046-atomic-shared-ptr T014 / FR-011a): controls whether the
+    #   OpenTelemetry C++ SDK is included as a dependency. Default True keeps
+    #   the primary OTel-ENABLED acceptance path unchanged. Set False on the
+    #   libc++ Tier-2 lane (linux-clang-libc++) to avoid a full SDK rebuild
+    #   under libc++. The paired CMake option is FIXPP_BUILD_OTEL (default ON).
+    options = {"spike_quill": [True, False], "with_otel": [True, False]}
 
     def requirements(self):
         if self.options.spike_quill:
             self.requires("quill/11.1.0")
+        if self.options.with_otel:
+            self.requires("opentelemetry-cpp/1.26.0")
 
     # ── Build-time tools ─────────────────────────────────────────────────────
     # cmake, ninja, swig provided by apt in CI and locally; Conan-pinned tools
@@ -93,8 +103,14 @@ class FixppConan(ConanFile):
         "gtest*:shared": False,
         "benchmark*:shared": False,
         "spike_quill": False,
+        # 046-atomic-shared-ptr T014 (FR-011a): OTel toggle default. True keeps
+        # the primary OTel-ENABLED path unchanged. Set False via
+        # `-o fixpp/*:with_otel=False` on the libc++ Tier-2 lane.
+        "with_otel": True,
         # 017-log-otel FR-023 OTel SDK option set (recipe option names verified
-        # against opentelemetry-cpp/1.26.0):
+        # against opentelemetry-cpp/1.26.0). These entries are harmless when
+        # the opentelemetry-cpp dep is absent (Conan 2.x ignores options for
+        # absent packages); no guard needed here.
         "opentelemetry-cpp*:with_abi_v2": True,
         "opentelemetry-cpp*:with_no_deprecated_code": True,
         "opentelemetry-cpp*:with_prometheus": True,

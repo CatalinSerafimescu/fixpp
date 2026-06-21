@@ -102,6 +102,11 @@ else()
     -DFIXPP_WERROR=OFF
     # Bootstrap guard — prevents the nested configure from re-entering Codegen.cmake
     -DFIXPP_CODEGEN_BOOTSTRAP_RUNNING=ON
+    # 046 T014: forward the OTel toggle so the bootstrap sub-configure
+    # agrees with the parent's Conan graph (no opentelemetry-cpp when
+    # with_otel=False). Without this the consistency check in CMakeLists.txt
+    # fires inside the bootstrap sub-build with the wrong default (ON).
+    -DFIXPP_BUILD_OTEL=${FIXPP_BUILD_OTEL}
   )
 
   # Forward the Conan toolchain — required so pugixml / GTest CMakeDeps are found

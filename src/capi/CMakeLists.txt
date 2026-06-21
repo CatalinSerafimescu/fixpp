@@ -25,9 +25,12 @@ target_link_libraries(fixpp_capi_objects PUBLIC
   fixpp_transport
   fixpp_tls
   fixpp_log
-  fixpp_otel
   fixpp_tap
 )
+# 046-atomic-shared-ptr T014 (FR-011a): link fixpp_otel only when OTel is ON.
+if(FIXPP_BUILD_OTEL)
+  target_link_libraries(fixpp_capi_objects PUBLIC fixpp_otel)
+endif()
 
 add_library(fixpp_capi STATIC)
 add_library(fixpp::capi ALIAS fixpp_capi)

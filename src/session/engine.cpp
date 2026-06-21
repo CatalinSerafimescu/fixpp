@@ -30,7 +30,16 @@
 // These headers are included only in the .cpp (not in engine.hpp) to keep
 // the awaitable-header include-edge clean ([const §XV.9]).
 #include <fixpp/log/logger.hpp>
+// 046-atomic-shared-ptr T014 (FR-011a): providers.hpp pulls in the OTel SDK
+// API headers. Include it only when OTel is compiled in so the OTel-OFF path
+// (libc++ Tier-2 lane) does not need the SDK installed. Default to 1 (ON) if
+// the macro is not defined so a cmake-less build stays backward-compatible.
+#ifndef FIXPP_BUILD_OTEL
+#  define FIXPP_BUILD_OTEL 1
+#endif
+#if FIXPP_BUILD_OTEL
 #include <fixpp/otel/providers.hpp>
+#endif
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/transport/tls_transport.hpp>
@@ -1420,12 +1429,21 @@ asio::awaitable<void> Engine::stop() {
         // [2k §6.6]: Engine::close() calls logger->shutdown(LoggerConfig::drain_timeout).
         (void)engine_cfg_.logger->shutdown();
     }
+#if FIXPP_BUILD_OTEL
+    // 046 T014: tracer/meter shutdown calls reference OTel SDK types (via
+    // providers.hpp). Guard under FIXPP_BUILD_OTEL so the OTel-OFF path
+    // compiles without the SDK. When OFF, engine_cfg_.tracer and
+    // engine_cfg_.meter are still valid shared_ptr<...> (fwd-declared in
+    // engine_config.hpp — unchanged per FR-015), but their shared_ptr::reset()
+    // at Engine dtor handles cleanup. No shutdown() needed when the SDK is not
+    // linked (the shared_ptr will be null in OTel-OFF builds).
     if (engine_cfg_.tracer) {
         engine_cfg_.tracer->shutdown();
     }
     if (engine_cfg_.meter) {
         engine_cfg_.meter->shutdown();
     }
+#endif  // FIXPP_BUILD_OTEL
 }
 
 // ── Engine::send — T012 (023-engine-session-strand US1) ───────────────────────

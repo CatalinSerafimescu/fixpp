@@ -69,6 +69,38 @@ endif()
 # conanfile option -o fixpp/*:spike_quill=True so the quill dependency resolves.
 option(FIXPP_LOG_SPIKE_QUILL "Build the TS-13 quill spike backend" OFF)
 
+# ── 046-atomic-shared-ptr T014 (FR-011a): OTel toggle ────────────────────────
+# FIXPP_BUILD_OTEL=ON (default): the OTel integration is compiled and linked.
+#   This is the PRIMARY acceptance path and must stay unchanged on normal builds.
+# FIXPP_BUILD_OTEL=OFF: the src/otel subdirectory is excluded, no OTel SDK is
+#   required. Used by the libc++ Tier-2 lane (linux-clang-libc++) via
+#   -o fixpp/*:with_otel=False + -DFIXPP_BUILD_OTEL=OFF so the full SDK rebuild
+#   under libc++ is deferred. The fallback path in engine.cpp is still compiled.
+#
+# Consistency check: FIXPP_BUILD_OTEL and the Conan-provided opentelemetry-cpp
+# package must agree. A mismatch (e.g. OTel-ON but SDK absent, or vice-versa)
+# is a misconfiguration and fails immediately before any target is defined.
+option(FIXPP_BUILD_OTEL "Build the OpenTelemetry integration" ON)
+if(FIXPP_BUILD_OTEL AND NOT TARGET opentelemetry-cpp::api)
+  message(FATAL_ERROR
+    "FIXPP_BUILD_OTEL=ON but the opentelemetry-cpp Conan package was not found "
+    "(opentelemetry-cpp::api target is absent). Either install the package "
+    "(`conan install . -o fixpp/*:with_otel=True ...`) or disable OTel "
+    "(`-DFIXPP_BUILD_OTEL=OFF -o fixpp/*:with_otel=False`).")
+endif()
+if(NOT FIXPP_BUILD_OTEL AND TARGET opentelemetry-cpp::api)
+  message(FATAL_ERROR
+    "FIXPP_BUILD_OTEL=OFF but the opentelemetry-cpp Conan package IS present "
+    "(opentelemetry-cpp::api target exists). Either remove the package "
+    "(`conan install . -o fixpp/*:with_otel=False ...`) or enable OTel "
+    "(`-DFIXPP_BUILD_OTEL=ON` — the default).")
+endif()
+# Propagate FIXPP_BUILD_OTEL as a 0/1 compile definition to all targets so
+# #if FIXPP_BUILD_OTEL guards in engine.cpp are evaluated correctly. Default
+# is 1 (OTel ON) to match the CMake option default and keep all existing code
+# paths unchanged when the option is not explicitly passed.
+add_compile_definitions(FIXPP_BUILD_OTEL=$<BOOL:${FIXPP_BUILD_OTEL}>)
+
 # ── 046-atomic-shared-ptr (NFR-017): atomic_shared_ptr force-mode overrides ───
 # Single target-level mode applied UNIFORMLY to the whole build via a global
 # compile definition (research D-9 / contract CT-4 — never a per-TU define).
@@ -109,7 +141,15 @@ add_subdirectory(src/wire)
 add_subdirectory(src/tls)
 add_subdirectory(src/transport)
 add_subdirectory(src/log)
-add_subdirectory(src/otel)
+if(FIXPP_BUILD_OTEL)
+  add_subdirectory(src/otel)
+else()
+  # Stub fixpp_otel target so consumers (session, capi, tests) that link it
+  # unconditionally still configure cleanly when OTel is disabled. The stub is
+  # an empty INTERFACE library — no headers, no SDK symbols, no link edges.
+  add_library(fixpp_otel INTERFACE)
+  add_library(fixpp::otel ALIAS fixpp_otel)
+endif()
 add_subdirectory(src/session)
 add_subdirectory(src/config)  # 044-toml-session-config: opt-in TOML loader target
 add_subdirectory(src/tap)
@@ -173,7 +213,9 @@ if(FIXPP_BUILD_TESTS)
   add_subdirectory(tests/tls)
   add_subdirectory(tests/config)  # 044-toml-session-config — happy-path + selector-build (T011/T012)
   add_subdirectory(tests/log)
-  add_subdirectory(tests/otel)
+  if(FIXPP_BUILD_OTEL)
+    add_subdirectory(tests/otel)
+  endif()
   add_subdirectory(tests/tap)
   add_subdirectory(tests/capi)
   add_subdirectory(tests/service)
