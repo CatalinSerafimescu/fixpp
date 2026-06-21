@@ -44,6 +44,7 @@
 #include <asio/use_awaitable.hpp>
 #include <atomic>
 #include <chrono>
+#include <cstdio>
 #include <fixpp/core/sync/async_mutex.hpp>
 #include <memory>
 #include <thread>
@@ -96,19 +97,24 @@ TEST(AsyncMutexDrainReapBlockers, WB3_UnlockResidualChainRacingDrainNeverOrphans
         std::atomic<int> settled_nonheld{0};
         std::atomic<int> drain_done{0};
         std::atomic<int> drain_ok{0};
+        std::atomic<bool> holder_acquired{false};
 
-        // Holder: holds briefly, then unlocks. Timed so the unlock races the
-        // drainer's publish — gives the unlock a real chance to read
-        // draining_==false and walk next_drain_head_ (the B3 path).
-        auto holder = [mtx]() -> asio::awaitable<void> {
+        // Holder: holds briefly, then unlocks. The race under test is the
+        // holder's UNLOCK vs the drain's publish — NOT the acquire, so we gate
+        // the drainer on holder_acquired to make the holder reliably acquire
+        // first (otherwise a drain that wins the acquire race drains the holder).
+        auto holder = [mtx, &holder_acquired]() -> asio::awaitable<void> {
             auto g = co_await mtx->async_lock();
             EXPECT_TRUE(g.has_value());
+            holder_acquired.store(true, std::memory_order_release);
             co_await yield_n(kWaitersPerRound + 2);
             // guard dtor → unlock() walks the residual chain on the non-draining
             // path, granting one waiter and push_residual-ing the tail.
         };
 
-        auto drainer = [mtx, &drain_done, &drain_ok]() -> asio::awaitable<void> {
+        auto drainer = [mtx, &drain_done, &drain_ok,
+                        &holder_acquired]() -> asio::awaitable<void> {
+            while (!holder_acquired.load(std::memory_order_acquire)) co_await yield_n(1);
             co_await yield_n(kWaitersPerRound + 2);
             auto d = co_await mtx->cancel_and_drain();
             if (d.has_value()) drain_ok.fetch_add(1, std::memory_order_acq_rel);
@@ -186,19 +192,25 @@ TEST(AsyncMutexDrainReapBlockers, WB4_SecondGateCancelRacingDrainResumesOnce) {
 
         std::atomic<int> completed{0};
         std::atomic<int> drain_done{0};
+        std::atomic<bool> holder_acquired{false};
+        std::atomic<bool> drain_started{false};
         // Per-waiter resume count: each waiter's body runs exactly once; a
         // double-resume would re-enter a destroyed frame (ASan), and the
         // resulting corruption typically also breaks this counter.
         auto resume_counts = std::make_shared<std::vector<std::atomic<int>>>(kWaitersPerRound);
 
-        auto holder = [mtx]() -> asio::awaitable<void> {
+        auto holder = [mtx, &holder_acquired]() -> asio::awaitable<void> {
             auto g = co_await mtx->async_lock();
             EXPECT_TRUE(g.has_value());
+            holder_acquired.store(true, std::memory_order_release);
             co_await yield_n(kWaitersPerRound + 6);
         };
 
-        auto drainer = [mtx, &drain_done]() -> asio::awaitable<void> {
+        auto drainer = [mtx, &drain_done, &holder_acquired,
+                        &drain_started]() -> asio::awaitable<void> {
+            while (!holder_acquired.load(std::memory_order_acquire)) co_await yield_n(1);
             co_await yield_n(kWaitersPerRound + 1);
+            drain_started.store(true, std::memory_order_release);
             (void)co_await mtx->cancel_and_drain();
             drain_done.fetch_add(1, std::memory_order_acq_rel);
         };
@@ -211,10 +223,13 @@ TEST(AsyncMutexDrainReapBlockers, WB4_SecondGateCancelRacingDrainResumesOnce) {
             completed.fetch_add(1, std::memory_order_acq_rel);
         };
 
-        // Canceller: fire total cancellation on every waiter, timed to coincide
-        // with the drain's publish so it races the second draining gate.
-        auto canceller = [sigs]() -> asio::awaitable<void> {
-            co_await yield_n(kWaitersPerRound + 1);
+        // Canceller: fire total cancellation on every waiter, gated on
+        // drain_started so the cancellation coincides with the drain's publish
+        // (races the second draining gate — the B4 window). Gating only the
+        // drainer on holder_acquired would desync the canceller from the drain
+        // and move the test into an untested cancel-before-drain regime.
+        auto canceller = [sigs, &drain_started]() -> asio::awaitable<void> {
+            while (!drain_started.load(std::memory_order_acquire)) co_await yield_n(1);
             for (auto& s : *sigs) s.emit(asio::cancellation_type::total);
             co_return;
         };
@@ -235,6 +250,14 @@ TEST(AsyncMutexDrainReapBlockers, WB4_SecondGateCancelRacingDrainResumesOnce) {
             kDeadline);
 
         if (!ok) {
+#ifdef FIXPP_ASYNC_MUTEX_DEBUG_COUNTERS
+            auto dc = mtx->_debug_counters();
+            std::fprintf(stderr,
+                         "WB4 STUCK round=%d: holders=%u acquirers=%u unlockers=%u "
+                         "state=%#zx fifo_nonempty=%d latch_published=%d completed=%d\n",
+                         round, dc.holders, dc.acquirers, dc.unlockers,
+                         dc.state, dc.fifo_nonempty, dc.latch_published, completed.load());
+#endif
             ADD_FAILURE() << "WB4 round=" << round << ": TIMEOUT. completed="
                           << completed.load() << "/" << kWaitersPerRound
                           << " drain_done=" << drain_done.load()
@@ -278,18 +301,22 @@ TEST(AsyncMutexDrainReapBlockers, WB1_FastFailDecrementNotifiesParkedReaper) {
         std::atomic<int> completed{0};
         std::atomic<int> drain_done{0};
         std::atomic<int> drain_ok{0};
+        std::atomic<bool> holder_acquired{false};
 
         // Holder acquires and releases promptly, then the drainer fires. Late
         // acquirers arrive while the drain is in progress and fast-fail on
         // draining_ — their feeder decrement is the reaper's only wake source.
-        auto holder = [mtx]() -> asio::awaitable<void> {
+        auto holder = [mtx, &holder_acquired]() -> asio::awaitable<void> {
             auto g = co_await mtx->async_lock();
             EXPECT_TRUE(g.has_value());
+            holder_acquired.store(true, std::memory_order_release);
             co_await yield_n(2);
             // release immediately (no waiters parked yet) → not_locked.
         };
 
-        auto drainer = [mtx, &drain_done, &drain_ok]() -> asio::awaitable<void> {
+        auto drainer = [mtx, &drain_done, &drain_ok,
+                        &holder_acquired]() -> asio::awaitable<void> {
+            while (!holder_acquired.load(std::memory_order_acquire)) co_await yield_n(1);
             co_await yield_n(4);
             auto d = co_await mtx->cancel_and_drain();
             if (d.has_value()) drain_ok.fetch_add(1, std::memory_order_acq_rel);
@@ -359,15 +386,18 @@ TEST(AsyncMutexDrainReapBlockers, WB2_NeverReportsSuccessWhileLockHeld) {
         std::atomic<int> drain_done{0};
         std::atomic<int> drain_ok{0};
         std::atomic<bool> violation{false};  // success observed while held
+        std::atomic<bool> holder_acquired{false};
 
-        auto holder = [mtx]() -> asio::awaitable<void> {
+        auto holder = [mtx, &holder_acquired]() -> asio::awaitable<void> {
             auto g = co_await mtx->async_lock();
             EXPECT_TRUE(g.has_value());
+            holder_acquired.store(true, std::memory_order_release);
             co_await yield_n(kWaitersPerRound);
         };
 
-        auto drainer = [mtx, &held_now, &drain_done, &drain_ok,
-                        &violation]() -> asio::awaitable<void> {
+        auto drainer = [mtx, &held_now, &drain_done, &drain_ok, &violation,
+                        &holder_acquired]() -> asio::awaitable<void> {
+            while (!holder_acquired.load(std::memory_order_acquire)) co_await yield_n(1);
             co_await yield_n(kWaitersPerRound / 2);
             auto d = co_await mtx->cancel_and_drain();
             if (d.has_value()) {

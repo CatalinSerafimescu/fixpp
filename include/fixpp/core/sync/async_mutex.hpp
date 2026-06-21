@@ -193,6 +193,23 @@ public:
 
     [[nodiscard]] completion_policy policy() const noexcept { return policy_; }
 
+#ifdef FIXPP_ASYNC_MUTEX_DEBUG_COUNTERS
+    // TEMPORARY (047 diagnosis) — dump the five quiesce participants.
+    struct debug_counters {
+        std::uint32_t holders, acquirers, unlockers;
+        std::uintptr_t state;
+        bool fifo_nonempty, latch_published;
+    };
+    [[nodiscard]] debug_counters _debug_counters() const noexcept {
+        return {active_holders_count_.load(std::memory_order_acquire),
+                active_acquirers_count_.load(std::memory_order_acquire),
+                active_unlockers_count_.load(std::memory_order_acquire),
+                state_.load(std::memory_order_acquire),
+                next_drain_head_.load(std::memory_order_acquire) != nullptr,
+                drain_latch_ptr_.load(std::memory_order_acquire) != nullptr};
+    }
+#endif
+
 private:
     // 047 R2-B1 — audited feeder terminal-decrement + notify helper.
     // ALL acquirer + unlocker terminal decrements route through this one site so
@@ -825,12 +842,15 @@ fixpp::sync::async_mutex::async_lock(std::pmr::memory_resource* mr) noexcept {
     auto cancellation_state = co_await asio::this_coro::cancellation_state;
     auto inherited_slot = cancellation_state.slot();
 
-    active_acquirers_count_.fetch_add(1, std::memory_order_acq_rel);
+    // 047 edge #2 — seq_cst entry increment (the Dekker "store" of the
+    // draining_ ↔ active_acquirers_count_ handshake; both draining_ loads below
+    // are the matching seq_cst "loads").
+    active_acquirers_count_.fetch_add(1, std::memory_order_seq_cst);
     auto result = co_await asio::async_initiate<const asio::use_awaitable_t<>&,
                                                 void(expected_t<async_lock_guard>)>(
         [this, &awaiter, mr, bound_executor, inherited_slot](auto handler) mutable {
-            if (draining_.load(std::memory_order_acquire)) {
-                active_acquirers_count_.fetch_sub(1, std::memory_order_acq_rel);
+            if (draining_.load(std::memory_order_seq_cst)) {  // edge #2 fast-path gate
+                feeder_dec_and_notify(active_acquirers_count_);
                 std::move(handler)(expected_t<async_lock_guard>{
                     std::unexpected(fixpp::core::error::sync_lock_drained)});
                 return;
@@ -842,7 +862,7 @@ fixpp::sync::async_mutex::async_lock(std::pmr::memory_resource* mr) noexcept {
                                                std::memory_order_acquire,
                                                std::memory_order_relaxed)) {
                 active_holders_count_.fetch_add(1, std::memory_order_acq_rel);
-                active_acquirers_count_.fetch_sub(1, std::memory_order_acq_rel);
+                feeder_dec_and_notify(active_acquirers_count_);
                 {
                     async_lock_guard guard{this};
                     std::move(handler)(expected_t<async_lock_guard>{std::move(guard)});
@@ -884,7 +904,7 @@ fixpp::sync::async_mutex::async_lock(std::pmr::memory_resource* mr) noexcept {
                     reinterpret_cast<waiter_record*>(waiter_pool_storage_[slot].storage));
             }();
             if (record == nullptr) {
-                active_acquirers_count_.fetch_sub(1, std::memory_order_acq_rel);
+                feeder_dec_and_notify(active_acquirers_count_);
                 std::move(handler)(expected_t<async_lock_guard>{
                     std::unexpected(fixpp::core::error::sync_lock_alloc_failed)});
                 return;
@@ -899,7 +919,7 @@ fixpp::sync::async_mutex::async_lock(std::pmr::memory_resource* mr) noexcept {
 
             {
                 if (!record->store_executor(bound_executor)) {
-                    active_acquirers_count_.fetch_sub(1, std::memory_order_acq_rel);
+                    feeder_dec_and_notify(active_acquirers_count_);
                     waiter_record::release_ref(record);
                     waiter_record::release_ref(record);
                     std::move(handler)(expected_t<async_lock_guard>{
@@ -917,12 +937,32 @@ fixpp::sync::async_mutex::async_lock(std::pmr::memory_resource* mr) noexcept {
                 }
             }
 
-            if (draining_.load(std::memory_order_acquire)) {
-                active_acquirers_count_.fetch_sub(1, std::memory_order_acq_rel);
-                record->result_ = expected_t<async_lock_guard>{
-                    std::unexpected(fixpp::core::error::sync_lock_drained)};
-                record->phase_.store(waiter_phase::cancelled, std::memory_order_release);
-                schedule_record_resume(record);
+            if (draining_.load(std::memory_order_seq_cst)) {  // edge #2 pre-push gate
+                // 047 B4 — win terminal ownership via queued→cancelled CAS. A
+                // concurrent on_cancel may already have CAS'd queued→cancelled
+                // and scheduled a resume; an unconditional phase_.store + schedule
+                // would double-resume (UAF on the destroyed waiter frame). Only
+                // the CAS winner sets the result and schedules the (single)
+                // resume. On the cancel arm there is NO holders++, and the
+                // self-schedule passes the default latch (does NOT bump
+                // in_flight_resumptions_), so schedule-sequenced-before-decrement
+                // is the only thing keeping the reaper from observing all-zero
+                // and finalizing while this resume is pending — schedule BEFORE
+                // the feeder decrement (research.md L230).
+                waiter_phase expected_q = waiter_phase::queued;
+                if (record->phase_.compare_exchange_strong(expected_q,
+                                                           waiter_phase::cancelled,
+                                                           std::memory_order_acq_rel,
+                                                           std::memory_order_acquire)) {
+                    record->result_ = expected_t<async_lock_guard>{
+                        std::unexpected(fixpp::core::error::sync_lock_drained)};
+                    schedule_record_resume(record);
+                }
+                // Common cleanup for BOTH outcomes (belongs to the async_lock
+                // invocation, not to CAS ownership): the acquirer terminal
+                // decrement (+notify) and the creator-ref release. On CAS loss
+                // the on_cancel path already owns and scheduled the resume.
+                feeder_dec_and_notify(active_acquirers_count_);
                 waiter_record::release_ref(record);  // creator
                 return;
             }
@@ -936,7 +976,7 @@ fixpp::sync::async_mutex::async_lock(std::pmr::memory_resource* mr) noexcept {
                                                      std::memory_order_acquire,
                                                      std::memory_order_acquire)) {
                         active_holders_count_.fetch_add(1, std::memory_order_acq_rel);
-                        active_acquirers_count_.fetch_sub(1, std::memory_order_acq_rel);
+                        feeder_dec_and_notify(active_acquirers_count_);
                         record->phase_.store(waiter_phase::granted, std::memory_order_release);
                         record->result_ = expected_t<async_lock_guard>{async_lock_guard{this}};
                         schedule_record_resume(record);
@@ -956,7 +996,10 @@ fixpp::sync::async_mutex::async_lock(std::pmr::memory_resource* mr) noexcept {
                 if (state_.compare_exchange_weak(old_state, reinterpret_cast<uintptr_t>(record),
                                                  std::memory_order_release,
                                                  std::memory_order_acquire)) {
-                    active_acquirers_count_.fetch_sub(1, std::memory_order_acq_rel);
+                    // edge #1: the push (release-CAS above) is sequenced-before
+                    // this feeder decrement → the reaper's confirming scan after
+                    // observing acquirers==0 sees the pushed record.
+                    feeder_dec_and_notify(active_acquirers_count_);
                     waiter_record::release_ref(record);  // creator
                     return;
                 }
@@ -1000,12 +1043,33 @@ inline void fixpp::sync::async_mutex::unlock() noexcept {
     using detail::waiter_phase;
     using detail::waiter_record;
 
+    // 047 B3 / edge #2′ — bracket the WHOLE unlock() body in the unlocker
+    // feeder counter. Increment at the very top (seq_cst — the Dekker "store"),
+    // BEFORE holders-- and the seq_cst draining_ read below, so the reaper can
+    // never finalize while this unlock is still doing structural list work. The
+    // RAII dtor decrements seq_cst + notifies via the audited helper, AFTER any
+    // push_residual / grant. The recursive re-drives (the two tail unlock()
+    // calls below) each get their OWN guard → count 1→2→1→0, never a premature
+    // 0 mid-walk (data-model 047 §NEW). The dtor runs after the nested unlock()
+    // returns, so the outer frame stays counted across the re-drive.
+    struct unlocker_guard {
+        async_mutex* m;
+        explicit unlocker_guard(async_mutex* mm) noexcept : m(mm) {
+            m->active_unlockers_count_.fetch_add(1, std::memory_order_seq_cst);
+        }
+        ~unlocker_guard() { m->feeder_dec_and_notify(m->active_unlockers_count_); }
+        unlocker_guard(unlocker_guard const&) = delete;
+        unlocker_guard& operator=(unlocker_guard const&) = delete;
+    } ug{this};
+
     active_holders_count_.fetch_sub(1, std::memory_order_acq_rel);
 
-    if (draining_.load(std::memory_order_acquire)) {
+    if (draining_.load(std::memory_order_seq_cst)) {
         uintptr_t expected = locked_no_waiters;
         state_.compare_exchange_strong(expected, not_locked, std::memory_order_acq_rel,
                                        std::memory_order_acquire);
+        // Old L958 latch notify retained (harmless); the unlocker-decrement
+        // notify in the guard dtor is the load-bearing wake (T014).
         if (auto latch = drain_latch_ptr_.load(std::memory_order_acquire)) {
             latch->notify();
         }
@@ -1161,7 +1225,11 @@ fixpp::sync::async_mutex::cancel_and_drain() noexcept {
     auto bound_ex = co_await asio::this_coro::executor;
     auto latch = std::make_shared<detail::drain_latch_state>(bound_ex);
     drain_latch_ptr_.store(latch, std::memory_order_release);
-    draining_.store(true, std::memory_order_release);
+    // 047 edge #2 — seq_cst PUBLISH store (the Dekker "store" matching the
+    // feeders' seq_cst loads/decrements). Sequenced-after the release-store of
+    // drain_latch_ptr_ above, so a feeder that observes draining_==true (seq_cst)
+    // happens-after the pointer publication → its latch load is non-null (R2-B1).
+    draining_.store(true, std::memory_order_seq_cst);
 
     auto reverse_lifo = [](waiter_record* head) -> waiter_record* {
         waiter_record* prev = nullptr;
@@ -1202,27 +1270,13 @@ fixpp::sync::async_mutex::cancel_and_drain() noexcept {
     reap_chain(reverse_lifo(lifo_head));
     reap_chain(fifo_head);
 
-    // ── (g) Stable re-walk until both lists observe null in one pass ─────
-    //        (RC-α; unlock()'s splice is short-circuited under draining_).
-    while (true) {
-        auto raw_late = state_.exchange(locked_no_waiters, std::memory_order_acq_rel);
-        auto* late_lifo = (raw_late == not_locked || raw_late == locked_no_waiters)
-                              ? nullptr
-                              : reinterpret_cast<waiter_record*>(raw_late);
-        auto* late_fifo = next_drain_head_.exchange(nullptr, std::memory_order_acq_rel);
-        if (!late_lifo && !late_fifo) break;
-        reap_chain(reverse_lifo(late_lifo));
-        reap_chain(late_fifo);
-    }
-
-    // ── (h) Wait for holders/acquirers/resumptions to quiesce. The reaper's
-    //        OWN cancellation is observed via an explicit cancellation-slot
-    //        handler (the same proven mechanism as the awaiter's on_cancel) —
-    //        NOT by relying on the channel honouring the coroutine slot. The
-    //        handler runs synchronously on cancel, sets a flag, and
-    //        signal_abort()s (closes the channel) so the parked async_wait()
-    //        completes promptly as a VALUE (channel_closed via as_tuple — no
-    //        thrown exception). [2f §4.7.3] I-5.
+    // Arm the reaper's OWN cancellation handler BEFORE the converging loop (the
+    // loop parks on latch->async_wait()). Observed via an explicit
+    // cancellation-slot handler (the same proven mechanism as the awaiter's
+    // on_cancel) — NOT by relying on the channel honouring the coroutine slot.
+    // The handler runs synchronously on cancel, sets a flag, and signal_abort()s
+    // (closes the channel) so the parked async_wait() completes promptly as a
+    // VALUE (channel_closed via as_tuple — no thrown exception). [2f §4.7.3] I-5.
     co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation{});
     auto reaper_cs = co_await asio::this_coro::cancellation_state;
     auto reaper_slot = reaper_cs.slot();
@@ -1233,20 +1287,64 @@ fixpp::sync::async_mutex::cancel_and_drain() noexcept {
             (void)latch->signal_abort();  // wake; CAS-win is irrelevant here
         });
     }
-    // The reaper's own cancellation can be delivered to this co_await either
-    // as a flag via the slot handler (channel closed → value), OR — when asio
-    // propagates the parent's cancellation across the awaitable boundary — as
-    // a thrown system_error{operation_aborted} at the co_await itself. Both
-    // are converted to the §4.7.3 I-5 contract return (unexpected), never an
-    // escaping exception (cancel_and_drain is noexcept).
+
+    // ── CONVERGE (047 I-33): the converging reap+quiesce loop replacing the
+    //    old linear (g)→(h). Each iteration:
+    //      1. drain both lists until they observe null in one pass (inner (g));
+    //      2. read FEEDERS first (acquirers seq_cst, unlockers seq_cst,
+    //         resumptions acquire) — wait on any nonzero;
+    //      3. only with all feeders 0, read the SINK (holders acquire) — wait if
+    //         nonzero (feeder-before-sink read order, edge #3 / B2);
+    //      4. CONFIRMING exchange of both lists — finalize only when all feeders
+    //         0 ∧ holders 0 ∧ both lists empty in one pass; else a late push
+    //         (edge #1) was caught → reap and re-loop.
+    //    The reaper's own cancellation may arrive as a thrown
+    //    system_error{operation_aborted} across the awaitable boundary; the
+    //    try/catch maps it to the I-5 contract (cancel_and_drain is noexcept).
     try {
-        while (active_holders_count_.load(std::memory_order_acquire) != 0 ||
-               active_acquirers_count_.load(std::memory_order_acquire) != 0 ||
-               latch->in_flight_resumptions_.load(std::memory_order_acquire) != 0) {
-            auto [ec] = co_await latch->async_wait();
-            (void)ec;
-            if (reaper_cancelled.load(std::memory_order_acquire)) break;
-            // ec == {} (notify token) or channel_closed → re-check counters.
+        while (true) {
+            // (1) drain-lists-until-empty.
+            while (true) {
+                auto raw_late = state_.exchange(locked_no_waiters, std::memory_order_acq_rel);
+                auto* late_lifo = (raw_late == not_locked || raw_late == locked_no_waiters)
+                                      ? nullptr
+                                      : reinterpret_cast<waiter_record*>(raw_late);
+                auto* late_fifo = next_drain_head_.exchange(nullptr, std::memory_order_acq_rel);
+                if (!late_lifo && !late_fifo) break;
+                reap_chain(reverse_lifo(late_lifo));
+                reap_chain(late_fifo);
+            }
+
+            // (2) feeders first (seq_cst on the two Dekker participants).
+            if (active_acquirers_count_.load(std::memory_order_seq_cst) != 0 ||
+                active_unlockers_count_.load(std::memory_order_seq_cst) != 0 ||
+                latch->in_flight_resumptions_.load(std::memory_order_acquire) != 0) {
+                auto [ec] = co_await latch->async_wait();
+                (void)ec;
+                if (reaper_cancelled.load(std::memory_order_acquire)) break;
+                continue;  // re-drain + re-read
+            }
+
+            // (3) sink read AFTER all feeders observed 0 (edge #3 / B2).
+            if (active_holders_count_.load(std::memory_order_acquire) != 0) {
+                auto [ec] = co_await latch->async_wait();
+                (void)ec;
+                if (reaper_cancelled.load(std::memory_order_acquire)) break;
+                continue;
+            }
+
+            // (4) confirming exchange — all feeders 0 ∧ holders 0, draining_
+            //     globally visible (seq_cst PUBLISH). A nonempty result is a
+            //     late push the count-quiesce now makes visible (edge #1).
+            auto raw_c = state_.exchange(locked_no_waiters, std::memory_order_acq_rel);
+            auto* confirm_lifo = (raw_c == not_locked || raw_c == locked_no_waiters)
+                                     ? nullptr
+                                     : reinterpret_cast<waiter_record*>(raw_c);
+            auto* confirm_fifo = next_drain_head_.exchange(nullptr, std::memory_order_acq_rel);
+            if (!confirm_lifo && !confirm_fifo) break;  // CONVERGED
+            reap_chain(reverse_lifo(confirm_lifo));
+            reap_chain(confirm_fifo);
+            // loop again
         }
     } catch (...) {
         reaper_cancelled.store(true, std::memory_order_release);

@@ -86,15 +86,18 @@ TEST(AsyncMutexDrainLatchPublishAcquire, ConcurrentDrainNeverOrphansLateWaiter) 
         std::atomic<int> aborted{0};
         std::atomic<int> drain_ok{0};
         std::atomic<int> drain_done{0};
+        std::atomic<bool> holder_acquired{false};
 
-        auto holder = [mtx]() -> asio::awaitable<void> {
+        auto holder = [mtx, &holder_acquired]() -> asio::awaitable<void> {
             auto g = co_await mtx->async_lock();
             EXPECT_TRUE(g.has_value()) << "holder must acquire successfully";
+            holder_acquired.store(true, std::memory_order_release);
             co_await yield_n(kWaitersPerRound * 2 + 4);
             // guard dtor unlocks here; draining_ may already be true.
         };
 
-        auto drainer = [mtx, &drain_ok, &drain_done]() -> asio::awaitable<void> {
+        auto drainer = [mtx, &drain_ok, &drain_done, &holder_acquired]() -> asio::awaitable<void> {
+            while (!holder_acquired.load(std::memory_order_acquire)) co_await yield_n(1);
             co_await yield_n(kWaitersPerRound + 2);
             auto d = co_await mtx->cancel_and_drain();
             if (d.has_value()) drain_ok.fetch_add(1, std::memory_order_acq_rel);
