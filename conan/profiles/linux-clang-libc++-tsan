@@ -1,0 +1,32 @@
+# Conan profile: linux-clang-libc++-tsan
+# TSan build under libc++ — Tier-3 lane for NFR-017 (046-atomic-shared-ptr).
+# Mirrors linux-clang-tsan sanitizer blocks but uses compiler.libcxx=libc++
+# so all rebuilt deps also use the libc++ runtime (ABI-consistent).
+# TSan and ASan cannot be combined [const §IX.2].
+# Clang 22 matches local install; CI provisions via apt.llvm.org.
+# OTel is not built on this lane (with_otel=False avoids the SDK rebuild).
+
+[settings]
+os=Linux
+arch=x86_64
+build_type=Debug
+compiler=clang
+compiler.version=22
+compiler.libcxx=libc++
+compiler.cppstd=23
+
+[buildenv]
+CC=clang-22
+CXX=clang++-22
+CXXFLAGS=-stdlib=libc++ -fsanitize=thread
+LDFLAGS=-stdlib=libc++ -fsanitize=thread
+
+[conf]
+tools.cmake.cmaketoolchain:generator=Ninja
+tools.build:cxxflags=["-fsanitize=thread"]
+tools.build:sharedlinkflags=["-fsanitize=thread"]
+tools.build:exelinkflags=["-fsanitize=thread"]
+# compiler.libcxx=libc++ is already in [settings] so it enters package_id.
+# The confs line keeps asan/ubsan/tsan distinct within the libc++ family
+# (same rationale as linux-clang-asan — see that profile for full explanation).
+tools.info.package_id:confs=["tools.build:cxxflags", "tools.build:cflags", "tools.build:sharedlinkflags", "tools.build:exelinkflags"]
