@@ -143,6 +143,13 @@ add_sync_test(sync_arm64_weak_memory test_arm64_weak_memory.cpp)
 # fixpp_sync to confirm non-inline surface link-completeness.
 add_sync_test(sync_consumer_contract_compile test_consumer_contract_compile.cpp)
 
+# ── 046-atomic-shared-ptr seam registrations (NFR-017) ───────────────────────
+# Primitive-level gtest ports of the locked research harness (18/18).
+# Runs on both native and forced-fallback presets; the ff preset supplies
+# -DFIXPP_FORCE_ATOMIC_SHARED_PTR_FALLBACK=ON so FIXPP_ATOMIC_SHARED_PTR_NATIVE_ACTIVE=0.
+add_sync_test(sync_atomic_shared_ptr_primitive  test_atomic_shared_ptr_primitive.cpp)
+add_sync_test(sync_atomic_shared_ptr_concurrency test_atomic_shared_ptr_concurrency.cpp)
+
 # ── US5 seam registration (T062) ─────────────────────────────────────────────
 # Seam #14: CI grep-gate driver.  Shells out to the bash gate script over the
 # T063–T065 fixture corpus and asserts zero-FN / zero-FP.
