@@ -40,7 +40,7 @@ Decisions, the reachability proof the whole feature rests on, the OOM fail-close
        // reap both lists: exchange state_->locked_no_waiters + next_drain_head_->nullptr;
        // reverse LIFO->FIFO; for each waiter: CAS queued->cancelled,
        // result_ = unexpected{sync_lock_aborted} (shipped, :1129-1130 — NOT sync_lock_drained),
-       // ++in_flight_resumers_, schedule_record_resume(record) (posted, E-3).
+       // schedule_record_resume(record) (posted, E-3; ++in_flight_resumers_ INSIDE the helper — sole owner, W-3c).
        reap_both_lists();
        if (active_holders_count_ == 0 && in_flight_resumers_ == 0 && both_lists_empty_this_pass)
            break;
@@ -80,8 +80,7 @@ The drain still yields to let pre-drain holders' `unlock()` and posted resumers 
 catch (...) {                                       // inherited_slot.assign threw (bad_alloc)
     record->result_ = std::unexpected(error::sync_lock_alloc_failed);
     record->phase_.store(waiter_phase::cancelled, std::memory_order_release);
-    ++in_flight_resumers_;                            // (inside schedule_record_resume)
-    schedule_record_resume(record);                  // POSTED resume of the alloc-failed result
+    schedule_record_resume(record);                  // POSTED resume; ++in_flight_resumers_ happens INSIDE this helper (sole owner — W-3c)
     waiter_record::release_ref(record);              // creator ref
     return;
 }

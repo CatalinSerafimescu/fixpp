@@ -52,7 +52,7 @@ disable cancellation on self → draining_=true
 UNIFIED QUIESCENCE LOOP (fixes round-2 P1-1):
    for (;;) {
      reap_both_lists()   // exchange state_/next_drain_head_; each waiter: CAS queued→cancelled,
-                         // result=sync_lock_aborted, ++in_flight_resumers_, posted resume
+                         // result=sync_lock_aborted, schedule_record_resume (posted; ++in_flight_resumers_ inside the helper — sole owner)
                          // (runner: after release_ref → --in_flight_resumers_)
      if (active_holders_count_==0 && in_flight_resumers_==0 && both_lists_empty_this_pass) break;
      co_await asio::post(executor)   // yield: posted resumers run + a pre-drain holder's unlock() runs
