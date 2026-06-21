@@ -12,35 +12,48 @@ its `waiter_record` onto `state_` concurrently with a drain: the reaper does its
 waiter lands unreaped, the finalize CAS silently fails, `signal_release()` runs
 anyway, and the waiter's awaitable never resumes (lost wake).
 
-**Fix (two coupled parts, both inside `async_mutex.hpp`):**
+**Fix — five coordinated changes, all inside `async_mutex.hpp`** (expanded from the
+original two-part sketch after **Gate A round 1** found four blockers; judge record
+`../../research/reviews/opus_047_gate_a_r1_judge.md`; user chose full restructure).
+Full proof in `research.md`:
 
-1. **Converging reap+quiesce loop (reaper).** Replace the linear "(g) re-walk →
-   (h) quiesce → finalize" with a single loop that terminates only when, in one
-   pass, **both lists** (`state_`, `next_drain_head_`) are observed empty **and**
-   `active_holders_count_ == active_acquirers_count_ == in_flight_resumptions_ ==
-   0`. After observing quiescence the loop performs one confirming list-scan; if
-   it finds a late waiter it reaps it and re-iterates. This closes the
-   **push-visibility edge**: a waiter's push (release-CAS) is sequenced-before its
-   count decrement (`acq_rel`, ≥release), so the reaper's acquire-load of
-   count==0 synchronizes-with that decrement and, via the count release-sequence,
-   sees the push on the confirming scan.
+1. **Converging reap+quiesce loop (reaper).** Replace linear (g)→(h)→finalize with a
+   loop that finalizes only when, in one pass, **all feeder counters** are 0
+   (`active_acquirers_count_`, the new `active_unlockers_count_`,
+   `in_flight_resumptions_`), **then** the sink `active_holders_count_ == 0`, **then**
+   both lists empty on a confirming exchange. Exploits the **push-visibility edge**
+   (edge #1): a push is sequenced-before its feeder's `acq_rel` decrement, so a
+   post-quiesce confirming scan sees any late push.
+2. **seq_cst Dekker handshake `draining_`↔`active_acquirers_count_`** (edge #2):
+   acquirer entry `fetch_add` + **both** `draining_` loads (L780 fast-path gate AND
+   L868 push gate are each load-bearing) + reaper `draining_.store` + reaper
+   acquirers-load → seq_cst. Closes the store-buffer reorder that acquire/release
+   permits (real on x86 TSO).
+3. **In-flight-unlocker representation** — new `active_unlockers_count_` brackets the
+   whole `unlock()` body, incremented **before** it reads `draining_`, with the same
+   seq_cst Dekker handshake (edge #2′). Closes **B3**: a stale `unlock()` that read
+   `draining_==false` can no longer privatize a waiter chain and re-push a residual
+   tail after the reaper finalized. Restores the I-32 single-walker soundness
+   precondition the prior design only assumed.
+4. **Notify-on-every-feeder-decrement** under a published latch (**B1**): the acquirer
+   fast-fail (L781) and alloc-fail (L835/L850) decrements currently do NOT
+   `latch->notify()`, so the converging loop's `async_wait` misses the `→0` edge and
+   hangs. Route all feeder decrements through one audited helper that notifies.
+5. **Feeder-before-sink quiesce read order (B2)** + **terminal-ownership CAS at the
+   second draining gate (B4)**: read acquirers/unlockers before holders so an
+   acquirer→holder transition can't be seen as `holders==0` while live; make the L868
+   draining branch win terminal ownership via `queued→cancelled` CAS (not an
+   unconditional `phase_.store`) so a concurrent `on_cancel` can't double-resume.
 
-2. **Seq_cst `draining_`↔`active_acquirers_count_` handshake (acquirer + reaper).**
-   Strengthen the Dekker pair so the converging loop's *termination* is provably
-   stable against a brand-new acquirer: make the acquirer's entry
-   `active_acquirers_count_.fetch_add` and its two `draining_` fast-fail loads
-   seq_cst, and the reaper's `draining_.store(true)` and quiesce-condition count
-   loads seq_cst. Then either the acquirer's `draining_` check observes `true`
-   (fast-fails, never pushes) or the reaper's count-load observes the increment
-   (waits, then catches the push via part 1). acquire/release alone leaves a
-   store-buffer reorder that lets both "miss" (real even on x86 TSO).
+**Witness:** the moved 046 `test_async_mutex_drain_latch_publish_acquire` (hardened —
+self-deadline, ≥4 workers × ≥32 acquirers × ≥100 rounds, fresh mutex/round,
+orphan-at-teardown safety) covers the original orphan; **each of B1–B4 gets its own
+discriminating mutation-tested RED→GREEN witness** (per
+[[feedback_coverage_push_enshrines_bugs]] — witnessing one fix would enshrine the
+other three). B4 lands as its own commit.
 
-**Witness:** the multi-threaded `test_async_mutex_drain_latch_publish_acquire`
-(authored under 046) is moved into this feature as the permanent RED→GREEN gate,
-hardened with an internal self-deadline so a lost wake surfaces as a fast,
-attributable test FAILURE rather than a lane-wide CI hang.
-
-No public API, ABI, wire, codegen, error-code, or config change (FR-007).
+No public API, ABI, wire, codegen, error-code, or config change (FR-007) — the new
+`active_unlockers_count_` is a private member.
 
 ## Technical Context
 
@@ -51,16 +64,20 @@ No public API, ABI, wire, codegen, error-code, or config change (FR-007).
 **Target Platform**: Linux (Tier 1 libstdc++ blocking; libc++ Tier 3 on-demand), Windows Tier 2
 **Project Type**: C++ library (header-only concurrency primitive in `include/fixpp/core/sync/`)
 **Performance Goals**: No new allocation, no new suspension on any existing path; uncontended fast path unchanged
-**Constraints**: `noexcept` operation preserved; lock-free protocol; preserve invariants I-1..I-31 and the F-2/F-3 Gate-B hardening fixes; FIFO-fair grant order
-**Scale/Scope**: Single header `async_mutex.hpp`; the reaper (`cancel_and_drain`) restructure + the seq_cst handshake ops in `async_lock`; one witness test moved in. No other source touched.
+**Constraints**: `noexcept` operation preserved; lock-free protocol; preserve invariants **I-1..I-32** (incl. I-32 waiter_record reclamation — the convergence invariant is the NEW **I-33**, not I-32) and the F-2/F-3 Gate-B hardening fixes; FIFO-fair grant order
+**Scale/Scope**: Single header `async_mutex.hpp`, three functions — `cancel_and_drain()` (converging loop, feeder-before-sink quiesce, B4 CAS), `async_lock()` (seq_cst acquirer handshake, notify on feeder decrements), `unlock()` (new `active_unlockers_count_` bracket + seq_cst handshake). One new private atomic member. Five+ discriminating witnesses (one per blocker + the moved original).
 
-**Scope clarification (corrects spec prose "drain protocol only / reaper-only"):**
-The correctness proof requires strengthening four acquirer-side memory orders in
-`async_lock()` (the `draining_`/`active_acquirers_count_` handshake), not just the
-reaper body. This is still confined to `async_mutex.hpp` and is a single-thread
-no-op (memory-order strengthening never changes serialized observable behavior),
-so **FR-005 holds**; the "reaper-only" wording is a simplification the plan
-deliberately widens to "drain protocol + its acquirer-side quiescence handshake."
+**Scope clarification (Gate A round 1 — corrects spec prose "drain protocol only /
+reaper-only"):** the correctness proof spans `cancel_and_drain()` + `async_lock()` +
+`unlock()` and adds one private counter (`active_unlockers_count_`). All confined to
+`async_mutex.hpp`. **FR-005 holds at the functional level** — memory-order
+strengthening and a delayed-finalization counter never change *serialized*
+observable outcomes (single strand → one thread → no reordering; the unlocker
+counter only delays a finalization that on one strand already happens after the
+acquirer synchronously returned). FR-005 wording tightened from "single-thread
+no-op" to "serialized **functional** semantics unchanged" (seq_cst changes emitted
+instructions/latency on weak archs — confirm fast-path within Article VIII §2 ±5%
+at verify).
 
 ## Constitution Check
 
@@ -109,21 +126,29 @@ skipped for purely-internal changes.
 
 ```text
 include/fixpp/core/sync/
-└── async_mutex.hpp        # THE change: cancel_and_drain() reaper restructure (≈L1142-1232)
-                            #             + seq_cst handshake ops in async_lock() (L776, L780, L868)
-                            #             + reaper draining_.store / count-loads → seq_cst (L1110, L1189-1191)
+└── async_mutex.hpp        # cancel_and_drain(): converging reap+quiesce loop, feeder-before-sink
+                            #   read order, B4 terminal-ownership CAS, seq_cst draining_.store + feeder loads
+                            # async_lock(): seq_cst entry fetch_add + both draining_ loads (L776/780/868);
+                            #   notify() on feeder decrements (L781/835/850)
+                            # unlock(): NEW active_unlockers_count_ bracket (entry inc before draining_ read,
+                            #   dec at every return after push_residual) + seq_cst draining_ load (L953)
+                            # NEW private member: std::atomic<uint32_t> active_unlockers_count_{0}
 
 tests/sync/
-└── test_async_mutex_drain_latch_publish_acquire.cpp   # moved from 046; hardened with internal self-deadline
+├── test_async_mutex_drain_latch_publish_acquire.cpp   # moved from 046; hardened (self-deadline, fresh mutex/round,
+│                                                       #   orphan-at-teardown safety) — covers the original orphan
+└── test_async_mutex_drain_reap_blockers.cpp           # NEW: discriminating witnesses W-B1..W-B4 (mutation-tested)
 
-specs/2f-async-mutex.md     # design-doc: append the convergence-loop + Dekker-handshake invariant (I-32?) note
+specs/2f-async-mutex.md     # design-doc: append I-33 (convergence) + the amended I-32 single-walker
+                            #   soundness note + the active_unlockers_count_ Dekker handshake
 ```
 
 **Structure Decision**: Single-header primitive fix. All production code change is
-in `include/fixpp/core/sync/async_mutex.hpp`. The witness moves into `tests/sync/`
-and is registered in the sync test `CMakeLists`. The 006 design doc
-(`.specify/2f-async-mutex.md`) gets the new convergence invariant appended so the
-proof is versioned alongside I-1..I-31.
+in `include/fixpp/core/sync/async_mutex.hpp` (three functions + one private member).
+The moved original witness plus a new per-blocker witness file land in `tests/sync/`
+and are registered in the sync test `CMakeLists`. The 006 design doc
+(`.specify/2f-async-mutex.md`) gets I-33 (convergence) and the amended I-32
+single-walker soundness note appended so the proof is versioned alongside I-1..I-32.
 
 ## Complexity Tracking
 

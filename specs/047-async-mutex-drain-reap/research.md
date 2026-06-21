@@ -1,177 +1,276 @@
 # Research: async_mutex cancel_and_drain late-waiter reap
 
-Phase 0 output for feature 047. Resolves the single design question — *how to
-restructure the reaper so no concurrently-acquiring waiter is orphaned* — and
-proves the fix correct against the C++ memory model. No `NEEDS CLARIFICATION`
-remained from the spec; this document records the design decision and its proof.
+Phase 0 output for feature 047. Resolves the design question — *how to restructure
+the drain protocol so no concurrently-acquiring, holding, or unlocking party can
+orphan a waiter or be dropped from quiescence* — and proves it correct against the
+C++20 memory model.
+
+**Revision after Gate A round 1 (2026-06-21).** The dual-Codex Gate A pass +
+Opus/advisor adjudication surfaced **four blockers** beyond the original two-edge
+sketch. The fix is now a coordinated restructure of `cancel_and_drain()`,
+`async_lock()`, AND `unlock()`. Judge record:
+`../../../research/reviews/opus_047_gate_a_r1_judge.md`. User chose **full
+restructure** (all four in-feature, each witnessed). This document is the revised
+design that round 2 must confirm.
 
 ## Decision
 
-Replace the reaper's linear **(g) re-walk → (h) quiesce → (i)/(j) finalize** with a
-**single converging reap+quiesce loop**, and **strengthen the
-`draining_`↔`active_acquirers_count_` handshake to seq_cst**. Both are confined to
-`include/fixpp/core/sync/async_mutex.hpp`.
+Five coordinated changes, all inside `include/fixpp/core/sync/async_mutex.hpp`:
 
-### Part 1 — converging reap+quiesce loop (reaper body)
+1. **Converging reap+quiesce loop** in the reaper (replaces linear (g)→(h)→finalize).
+2. **seq_cst Dekker handshakes** on `draining_` ↔ each *feeder* counter
+   (`active_acquirers_count_`, the new `active_unlockers_count_`).
+3. **In-flight-unlocker representation** — a new `active_unlockers_count_` so the
+   reaper cannot finalize while an `unlock()` that read `draining_==false` is still
+   doing structural list work (B3).
+4. **Notify-on-every-feeder-decrement** under a published latch (B1).
+5. **Feeder-before-sink quiesce read order** + **terminal-ownership CAS at the
+   second draining gate** (B2, B4).
 
-Pseudocode (replaces current L1151-1232):
+### Counter model (the proof's vocabulary)
 
-```
-loop:
-    # drain both lists fully (current (g), unchanged)
-    repeat:
-        lifo = state_.exchange(locked_no_waiters, acq_rel)
-        fifo = next_drain_head_.exchange(nullptr, acq_rel)
-        if lifo == empty and fifo == empty: break
-        reap_chain(reverse_lifo(lifo)); reap_chain(fifo)
+- **Feeder counters** — represent a party that may still *grant a holder* or *push
+  a waiter onto a list*: `active_acquirers_count_` (in `async_lock`),
+  `active_unlockers_count_` (NEW, brackets the whole `unlock()` body),
+  `in_flight_resumptions_` (posted resume runners).
+- **Sink counter** — `active_holders_count_`: a party currently holding the lock.
+  Incremented only by a grant from a feeder (acquirer fast-path / unlock grant),
+  always **sequenced-after** that feeder's own increment and **sequenced-before**
+  that feeder's terminal decrement.
+- **Lists** — `state_` (LIFO) and `next_drain_head_` (FIFO): where waiters park.
 
-    # quiescence check — counts loaded seq_cst (see Part 2)
-    if holders == 0 and acquirers == 0 and in_flight_resumptions == 0:
-        # CONFIRMING scan: a late-but-counted waiter that pushed before its
-        # decrement is now visible (edge #1). One more exchange:
-        lifo2 = state_.exchange(locked_no_waiters, acq_rel)
-        fifo2 = next_drain_head_.exchange(nullptr, acq_rel)
-        if lifo2 == empty and fifo2 == empty:
-            break            # converged: lists empty AND quiesced in one pass
-        reap_chain(...); continue   # caught a late waiter; re-iterate
-    else:
-        co_await latch->async_wait()   # wait for a counter edge, then re-loop
-        if reaper_cancelled: -> abort path (unchanged I-5 handling)
+**Invariant the whole proof rests on:** every grant does `holders++` *sequenced
+-before* the granting feeder's `feeder--`; every list push is *sequenced-before*
+the pushing feeder's `feeder--`. So observing a feeder at 0 (with the right
+acquire ordering) means every holder it transferred and every waiter it pushed is
+visible.
 
-finalize: CAS state_ locked_no_waiters -> not_locked; signal_release(); clear ptr
-```
+### Exact memory-order changes
 
-The reaper's own-cancellation handling ((h) cancel slot, abort path, F-2 latch
-retention) is preserved verbatim — only the loop *shape* around the quiesce
-changes.
-
-### Part 2 — seq_cst Dekker handshake (acquirer + reaper)
-
-Strengthen exactly these ops from their current orders to `seq_cst`:
-
-| Site | Current | New | Role |
+| Site | Current | New | Why |
 |---|---|---|---|
-| `async_lock` entry `active_acquirers_count_.fetch_add` (L776) | acq_rel | **seq_cst** | acquirer "store" of the Dekker pair |
-| `async_lock` first `draining_.load` (L780) | acquire | **seq_cst** | acquirer "load" |
-| `async_lock` second `draining_.load` (L868) | acquire | **seq_cst** | acquirer "load" (post-record, pre-push) |
-| `cancel_and_drain` `draining_.store(true)` (L1110) | release | **seq_cst** | reaper "store" |
-| `cancel_and_drain` quiesce count loads (L1189-1191) | acquire | **seq_cst** | reaper "load" of the Dekker pair |
+| `async_lock` entry `active_acquirers_count_.fetch_add` (L776) | acq_rel | **seq_cst** | edge #2 acquirer "store" |
+| `async_lock` `draining_.load` fast-path gate (L780) | acquire | **seq_cst** | edge #2 — guards the uncontended CAS that never reaches L868 |
+| `async_lock` `draining_.load` pre-push gate (L868) | acquire | **seq_cst** | edge #2 — final gate of the contended push path |
+| `cancel_and_drain` `draining_.store(true)` (L1110) | release | **seq_cst** | edge #2 reaper "store" |
+| `cancel_and_drain` quiesce `active_acquirers_count_.load` | acquire | **seq_cst** | edge #2 reaper "load" |
+| `unlock` entry `active_unlockers_count_.fetch_add` (NEW, top) | — | **seq_cst** | edge #2′ unlocker "store" (before reading `draining_`) |
+| `unlock` `draining_.load` (L953) | acquire | **seq_cst** | edge #2′ unlocker "load" |
+| `cancel_and_drain` quiesce `active_unlockers_count_.load` (NEW) | — | **seq_cst** | edge #2′ reaper "load" |
 
-All count **decrements** (L781/793/835/850/869/887/907) stay `acq_rel` — they are
-already ≥release, which is all edge #1 needs.
+**NOT strengthened** (release/acquire suffices): the `state_` push CAS (L904), all
+feeder *decrements* (edge #1 needs only ≥release; they already are acq_rel), and the
+`active_holders_count_` / `in_flight_resumptions_` quiesce loads (they are sinks /
+self-bracketed, not Dekker participants — M7).
 
-## Rationale — correctness proof
-
-The fix is correct iff **no waiter that begins an `async_lock()` acquisition is
-left parked in `state_`/`next_drain_head_` when the reaper finalizes.** Two
-independent happens-before edges are required; the current code has only the
-first available but never uses it, and lacks the second entirely.
-
-### Edge #1 — push-visibility (already satisfiable; the converging loop *uses* it)
-
-A waiter that pushes onto `state_` does so at L904 (release-CAS), **sequenced
--before** its `active_acquirers_count_` decrement at L907 (`acq_rel`). Every count
-decrement is ≥release, so they form a release sequence headed by each waiter's
-push. When the reaper's quiesce-condition load observes `active_acquirers_count_
-== 0` (seq_cst ⊇ acquire), it *synchronizes-with* the final decrement and, through
-the release sequence, **happens-after every push that contributed to the count
-reaching 0**. Therefore a list-scan performed *after* observing count==0 is
-guaranteed to see any such push. The current code never performs that
-post-quiesce scan → orphan. Part 1's confirming scan performs exactly it. ∎
-
-### Edge #2 — termination-stability (needs seq_cst; the spec's missing piece)
-
-The converging loop terminates when, in one pass, lists are empty AND counts are
-0. This is unsafe against a **new** acquirer that increments the count *after* the
-reaper's count-load but pushes *after* the reaper's confirming scan — unless we
-guarantee: **once the reaper has observed quiescence, no acquirer can still push.**
-
-Consider the Dekker/store-buffer (SB) litmus on the two threads:
+### Converging loop (revised)
 
 ```
-Acquirer:  fetch_add(acquirers)   ; r1 = load(draining_)      # L776 ; L780/L868
-Reaper:    store(draining_, true) ; r2 = load(acquirers)      # L1110 ; L1189
+PUBLISH:  publish latch; draining_.store(true, seq_cst)
+INITIAL_REAP: exchange both lists, reap LIFO+FIFO
+CONVERGE (loop):
+   drain-lists-until-empty                                  # inner (g), unchanged
+   if (acquirers!=0 [sc] || unlockers!=0 [sc] || resumptions!=0 [acq]):
+       co_await latch->async_wait(); if reaper_cancelled -> ABORT; continue
+   if (holders!=0 [acq]):                                   # sink read AFTER feeders
+       co_await latch->async_wait(); if reaper_cancelled -> ABORT; continue
+   # all feeders 0 AND holders 0, with draining_ globally visible:
+   confirming exchange of state_ + next_drain_head_
+   if both empty: break (CONVERGED)
+   else: reap; continue                                     # edge #1 caught a late push
+FINALIZE: CAS state_ locked_no_waiters->not_locked; signal_release(); clear ptr
 ```
 
-With acquire/release only, the SB outcome `r1 == false (not draining) && r2 == 0
-(increment unseen)` is **permitted** — the acquirer's increment sits in its store
-buffer w.r.t. the reaper's load, and the reaper's `draining_` store sits in its
-buffer w.r.t. the acquirer's load. This holds **even on x86 TSO**: x86 forbids
-load-load / store-store / load-store reordering but *permits store→load* reorder,
-and the reaper's `release` store of `draining_` is a plain `mov` that can sink past
-its `acquirers` load. So an acquirer could read `draining_ == false`, pass both
-fast-fail checks, and push — after the reaper terminated. Orphan.
+## Correctness proof
 
-Making **all four** ops seq_cst imposes a single total order S over them, which
-forbids the SB outcome: in S, either `store(draining_)` precedes `load(draining_)`
-(acquirer sees `true` → fast-fails at L780 or L868, never pushes) **or**
-`fetch_add(acquirers)` precedes `load(acquirers)` (reaper sees count ≥ 1 → does not
-terminate; it waits, the acquirer pushes-then-decrements, and the reaper re-scans
-via edge #1). Both branches are safe; the unsafe interleaving is eliminated. ∎
+The fix is correct iff at FINALIZE no waiter is parked in either list and no party
+can still grant/push. Required happens-before edges:
 
-The acquirer's *second* `draining_` load (L868) must also be seq_cst: it is the
-last gate before the push loop, so it is the one that must observe `draining_ ==
-true` in the branch where the reaper "wins" the total order. (L780 short-circuits
-the common case; L868 is the one load-bearing for the proof.)
+### Edge #1 — push-visibility (corrected wording; H4)
 
-### Why both edges, not one
+A feeder's push (e.g. acquirer L904 release-CAS on `state_`, or unlock's
+`push_residual` on `next_drain_head_`) is **sequenced-before** that feeder's own
+terminal decrement (`acq_rel` RMW). The push and the decrement are on **different
+atomic objects** — the push is *not* the head of the counter's release sequence
+(the prior draft mis-stated this). The valid chain is:
 
-- Edge #1 alone (converging loop, acquire/release handshake) closes the *witnessed*
-  orphan (a waiter already counted at drain start) but leaves edge #2's new-acquirer
-  race — a rarer but real lost wake the fix must not reintroduce under a different
-  timing. `/analyze` and Gate A should confirm edge #2 is addressed, not just #1.
-- Edge #2 alone (seq_cst handshake, no converging loop) still orphans the *original*
-  witnessed waiter, because the reaper never re-scans after quiescing.
+```
+push (state_/next_drain_head_, release)
+  —sequenced-before→  feeder-- (active_*_count_, acq_rel/release)
+  —release-sequence through later counter RMWs—  (every count access is an RMW;
+     verified: no plain store to active_acquirers_count_ exists in the header)
+  —synchronizes-with→  reaper's acquire/seq_cst load of count==0
+  —sequenced-before→  reaper's confirming list scan
+```
+
+Hence the confirming scan happens-after every push that contributed to the count
+reaching 0, and sees it. The current code never performs that post-quiesce scan →
+orphan; the converging loop's confirming exchange performs exactly it. ∎
+
+### Edge #2 — termination-stability, `draining_` ↔ `active_acquirers_count_` (Dekker)
+
+The loop terminates only when feeders are observed 0. Safe against a *new* acquirer
+iff: once the reaper has observed quiescence, no acquirer can still push. The
+store-buffer (SB) litmus:
+
+```
+Acquirer:  fetch_add(acquirers)   ; r1 = load(draining_)     # L776 ; L780/L868
+Reaper:    store(draining_, true) ; r2 = load(acquirers)     # L1110 ; quiesce
+```
+
+acquire/release permits `r1==false && r2==0` — real even on x86 TSO (the reaper's
+release-store of `draining_` can sink past its count-load). Adversarial round-1
+attack #3 formalised it as the cycle `I < D < S < C < I` that **only** seq_cst on
+all four ops forbids: under one total order S, either the acquirer's `draining_`
+load sees `true` (fast-fails, never pushes) or the reaper's count-load sees the
+increment (waits; later catches the push via edge #1). **Both `draining_` loads are
+load-bearing** (M7): L780 guards the uncontended fast-path CAS that grants without
+reaching L868; L868 is the final gate of the contended push path. Two litmus
+instances, one per path. ∎
+
+### Edge #2′ — same Dekker on the new `active_unlockers_count_`
+
+`unlock()` is bracketed by `active_unlockers_count_` incremented at entry **before**
+it reads `draining_` (L953). Identical SB litmus → identical seq_cst requirement on
+{unlocker entry `fetch_add`, unlock `draining_.load`, reaper `draining_.store`,
+reaper unlocker-load}. Then either the unlocker sees `draining_==true` and takes the
+no-grant draining branch, or the reaper sees `unlockers!=0` and waits. This is what
+closes **B3**: a stale-non-draining unlock can no longer privatize a chain and push
+a residual after finalize, because the reaper cannot finalize while it is counted,
+and its residual `push_residual` is sequenced-before its `unlocker--` (edge #1).
+The reaper reads `unlockers==0` (seq_cst ⊇ acquire) **before** the confirming list
+scan, so any residual tail is visible to the scan. ∎
+
+### Edge #3 — coherent quiesce snapshot (feeder-before-sink read order; B2)
+
+The reaper must not observe `holders==0` spuriously while a feeder→holder grant is
+in flight. On the acquirer fast-path, `holders++` (L792) is sequenced-before
+`acquirers--` (L793); on the unlock grant, `holders++` (L974/L1029) is sequenced
+-before `unlocker--`. **Therefore the reaper reads all feeders first; only if every
+feeder is 0 does it read `holders`.** Observing `acquirers==0 && unlockers==0`
+(seq_cst, so synchronizing with the last decrement of each) guarantees every
+transferred `holders++` is visible to the subsequent acquire-load of `holders`. So
+a true `holders==0` cannot coexist with an in-flight grant. Separate atomics are
+not an atomic snapshot — but the sequenced-before grant ordering plus feeder-first
+read order makes the snapshot *coherent for the property we need*. ∎
+
+The **resumption→re-entrant-acquirer** handoff needs no extra read-order rule:
+`invoke_handler` (L561→L556) resumes the coroutine **synchronously** within the
+resume runner, so a re-entrant `async_lock()` does its `acquirers++ … acquirers--`
+(fast-failing on `draining_`) entirely **sequenced-before** the runner's L598
+`in_flight_resumptions_--`. While a resumption is in flight (`resumptions!=0`) the
+reaper does not terminate; by the time `resumptions==0`, that re-entrant acquirer
+has already returned to 0. (Verified — not assumed.)
+
+### Liveness — notify discipline (B1)
+
+The converging loop blocks on `latch->async_wait()` and is woken only by
+`latch->notify()` / `signal_*`. Today only `unlock()`'s draining branch (L958), the
+reap-path resumption (L598-599), and reaper own-cancel notify. The acquirer
+**fast-fail decrement (L781)** and **alloc-fail decrements (L835/L850)** decrement
+`active_acquirers_count_` with NO notify → a reaper parked on `acquirers!=0` misses
+the `→0` edge → hang (same lost-wake class). **Fix:** every feeder terminal
+decrement, when a drain latch is published, MUST `notify()` it; route all feeder
+decrements (acquirer, unlocker, resumption) through one audited helper so no path
+can forget. The capacity-1 channel coalesces safely because every wake re-checks
+all predicates (M8).
+
+### Liveness contract (M8)
+
+`cancel_and_drain()` completes under **fair scheduling + finite in-flight
+activity**: every post-publication acquirer/unlocker fast-fails in bounded work and
+notifies, and the reaper makes progress on each notify. It is **not** starvation
+-free under an unbounded stream of fresh arrivals (that would need admission
+gating); this matches the primitive's contract (drain is a shutdown operation, not
+a steady-state path).
+
+### B4 — terminal-ownership CAS at the second draining gate
+
+The second draining branch (L868) currently does an **unconditional**
+`record->phase_.store(cancelled)` + `schedule_record_resume` after the cancel
+handler is installed (L860-865). A concurrent `on_cancel` that already CAS'd
+`queued→cancelled` and scheduled a resume → two `invoke_handler` calls → UAF.
+**Fix:** the branch must win terminal ownership via
+`phase_.compare_exchange(queued→cancelled)` and only schedule on success; on CAS
+loss the cancel path already owns resumption. (Separable — its own commit — but
+fixed in-feature: it is a UAF in the path being rewritten.)
+
+### Disposition — terminal-flag consistency (adversarial attack-6 tail)
+
+Cancellation firing between the L1200 `reaper_cancelled` check and the L1224
+`reaper_slot.clear()` can set `aborted_` while the reaper also `signal_release()`s
+and returns success → both terminal flags published; a concurrent subscriber
+returns aborted while the reaper returned success. **Disposition: FIX in-feature** —
+re-check `reaper_cancelled` (and/or make finalize publish release only via a
+`released_`-vs-`aborted_` CAS) so exactly one terminal edge wins. If implementation
+shows the window is benign under the new converging structure, downgrade to a
+written waiver in `.specify/decisions/047-...-verify.md` with the argument; do NOT
+drop silently.
 
 ## Invariant preservation (FR-004)
 
-- **FIFO-fair grant order**: untouched — the converging loop reaps in the same
-  reverse-LIFO-then-FIFO order as today; grant order is set by `unlock()`, not the
-  drain.
-- **Uncontended fast path** (L789 CAS): untouched. No new suspension, no new alloc.
-- **Idempotent / concurrent-caller drain** (steps (a)/(b)): untouched.
-- **Reentrant-drain UAF closure (F-2)**: latch retention on the abort path is
-  preserved verbatim; the loop change does not touch `drain_latch_ptr_` lifecycle.
-- **Reaper own-cancellation (I-5, F-3)**: the cancel slot + abort return are kept;
-  the `co_await latch->async_wait()` inside the loop is the same wait point, now
-  re-entered per iteration instead of once.
-- **`noexcept`**: no new throwing op; the existing try/catch around the wait covers
-  the only co_await. Memory-order strengthening cannot throw.
-- **FR-005 serialized no-op**: seq_cst vs acquire/release is unobservable on a
-  single strand (one thread → no reordering); the converging loop on one strand
-  executes the same statements as today (after the acquirer's synchronous
-  `count++ → push` it has already returned, so lists are empty and counts 0 on the
-  reaper's first pass — identical to the current single-pass behavior).
+- **I-1..I-32 (006), incl. I-32 waiter_record reclamation** — the convergence
+  invariant is named **I-33** (NOT I-32; H5). Repeated list exchanges keep
+  list-membership refs; no new ABA (adversarial #5 DEFEATED: a recycled `state_`
+  head denotes a currently-live record protected by its fresh membership ref).
+- **I-04..I-18 (unlock invariant block)** — re-proven under the new
+  `active_unlockers_count_`: the counter only *delays* finalization; it does not
+  change which waiter unlock grants or the grant order. The "single structural
+  walker" property is preserved because the reaper still never walks a chain an
+  unlock has privatized — it instead *waits* for the unlock to finish (unlockers→0)
+  and reaps the residual the unlock re-published.
+- **FIFO-fair** unchanged (reaping cancels, never grants). **F-2** latch retention
+  on abort unchanged. **F-3 / I-5** reaper own-cancel preserved (the per-iteration
+  wait is the same wait point). **noexcept** preserved (no new throwing op).
+
+## FR-005 (corrected wording; L9)
+
+Serialized **functional** semantics are unchanged (same outcomes, API, suspension,
+allocation on a single strand). It is **not** an unqualified "single-thread no-op":
+seq_cst changes emitted instructions/latency on weakly-ordered archs, and the entry
+increment + both `draining_` loads + the new unlocker increment are on every
+acquire/unlock. Mitigation: confirm the fast-path stays within the Article VIII §2
+±5% budget (bench or asm diff on a supported arch) at verify.
 
 ## Alternatives considered
 
-1. **Make the witness deterministic (barrier all waiters before drain) to get
-   green.** REJECTED — enshrines the bug ([[feedback_coverage_push_enshrines_bugs]],
-   and the finding doc's explicit DO-NOT). The witness must keep catching this.
-2. **Add a test-only scheduling seam to the production primitive to force the
-   late-park window.** REJECTED by clarification (FR-006): no production seam;
-   prove RED via stress + self-deadline + mutation-revert instead.
-3. **Edge #2 via `atomic_thread_fence(seq_cst)` instead of seq_cst ops.** Viable
-   and equivalent, but a single seq_cst fence on each side is harder to read and
-   to keep paired across future edits than naming the four ops seq_cst directly.
-   PREFER explicit seq_cst on the four ops; revisit only if a benchmark shows the
-   acquirer fast path regressed (Article VIII §2 ±5%).
-4. **Spin the reaper on counts without re-scanning (status-quo + busy-poll).**
-   REJECTED — does not address either edge; the orphan is a *list* membership, not
-   a count.
+1. Deterministic witness (barrier waiters) — REJECTED, enshrines the bug
+   ([[feedback_coverage_push_enshrines_bugs]]; finding-doc DO-NOT).
+2. Test-only production seam to force the window — REJECTED by clarification (FR-006).
+3. B3 via "make the draining branch walk `next_drain_head_`" instead of the
+   unlocker counter — **REJECTED (advisor): insufficient.** It still lets
+   `cancel_and_drain` return success while the residual W2 is transiently parked; a
+   later unlock reaps W2 after the caller may have destroyed the mutex → UAF
+   (violates US1-AS3). The reaper-waits-on-unlock representation is mandatory.
+4. seq_cst fences instead of seq_cst ops — equivalent only with a fence between
+   each path's publish and its final gate (the slow path has the later L868 gate),
+   harder to keep paired; PREFER named seq_cst ops, revisit only on a bench regression.
 
-## Verification strategy (informs tasks.md)
+## Verification strategy (drives tasks.md) — one witness per blocker
 
-- **RED proof**: documented pre-fix repro (libstdc++ release, `taskset -c 0,1`,
-  ~1/3 runs — finding doc) + mutation-revert (revert Part 1 → witness RED via its
-  internal self-deadline, not a lane hang).
-- **TSan basis**: validate under **libstdc++ TSan (Tier 1)** — libc++ TSan throws
-  false `std::promise` teardown races on this exact `use_future` join (finding 1);
-  it cannot adjudicate this fix. Optionally also run the witness without
-  `use_future` (poll a done-flag) to remove the teardown noise entirely.
-- **Coverage**: the converging loop's new branches (confirming-scan-empty vs
-  caught-late-waiter; quiesced vs wait-again) must be hit by the witness or carry a
-  recorded waiver (Article IX §1, lcov DA/BRDA basis).
-- **No-regression**: full existing 006 `test_cancel_and_drain.cpp` + the whole
-  sync suite green across debug/release/ASan/UBSan/TSan/gcc, one preset at a time
-  (WSL2 -j2 cap).
+Per [[feedback_coverage_push_enshrines_bugs]], witnessing only the original orphan
+would enshrine the other three fixes. Each blocker gets its own discriminating
+RED→GREEN, mutation-tested (revert that fix → its witness goes RED):
+
+- **W-orig (B-orphan)**: the moved 046 `drain_latch_publish_acquire` witness, hardened
+  — ≥4 workers, ≥32 acquirers/round, ≥100 rounds; internal self-deadline (fast
+  attributable FAIL, never lane hang); **orphan-at-teardown safety** (mutex dtor
+  rejects non-empty state → isolated child-process or leak-safe timeout); fresh
+  mutex per round; mutation baseline ≥99/100 pinned-release RED.
+- **W-B1 (notify)**: reaper parks while exactly one acquirer is between increment
+  and fast-fail decrement; assert drain completes (no hang) — RED if the
+  fast-fail decrement does not notify.
+- **W-B2 (snapshot)**: an acquirer wins the fast-path CAS (acquirer→holder) inside
+  the reaper's quiesce window; assert `cancel_and_drain` does not report success
+  while the lock is held.
+- **W-B3 (unlock privatization)**: a holder with a residual `W1→W2` chain in
+  `next_drain_head_` unlocks concurrently with a drain; assert W2 is reaped, not
+  orphaned, and drain does not finalize early.
+- **W-B4 (double-schedule)**: a cancellation hits the second draining gate
+  concurrently; assert the awaiter's handler is invoked exactly once.
+
+**TSan basis = libstdc++ Tier-1** (libc++ TSan throws false `use_future`/promise
+teardown races — finding 1; it cannot adjudicate this fix). Optionally drop
+`use_future` from cross-thread joins (poll a done-flag) to remove teardown noise.
+**Coverage**: the converging loop's new branches (confirming-empty vs late-waiter;
+each feeder-wait arm) hit by a witness or waived (Article IX §1 lcov DA/BRDA).

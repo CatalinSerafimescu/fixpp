@@ -1,78 +1,125 @@
 # Data Model: async_mutex cancel_and_drain late-waiter reap
 
-Phase 1 output. This feature adds **no new types, fields, or storage** — it is a
-control-flow + memory-order fix. This document records the *state* the reaper
-reasons about and the new convergence invariant, so the proof in
-[research.md](./research.md) is anchored to concrete data.
+Phase 1 output. **Revised after Gate A round 1.** The fix adds **one new atomic
+counter** (`active_unlockers_count_`); no other new type/field/storage. This
+document records the counter model, the new convergence invariant **I-33**, the
+**amendment to I-32's soundness note**, and the revised reaper state machine.
 
-## Entities (existing — unchanged shape)
+## Entities
 
-- **`waiter_record`** (`detail::waiter_record`): an in-flight `async_lock()`
-  attempt. Reaches exactly one terminal `waiter_phase`: `granted` or `cancelled`.
-  Reference-counted (creator + list-membership + attached-awaiter + resumer refs).
-  No field change.
-- **`drain_latch_state`** (`detail::drain_latch_state`): the cross-thread
-  publish/acquire latch; carries `released_`, `aborted_`, and
-  `in_flight_resumptions_`. Published via `drain_latch_ptr_` (atomic shared ptr).
-  No field change.
-- **Mutex counters** (members of `async_mutex`):
-  - `active_holders_count_` — threads currently holding the lock.
-  - `active_acquirers_count_` — threads inside `async_lock()` between entry
-    increment (L776) and their terminal decrement. **This is the Dekker "store"
-    side** that the reaper must observe.
-  - `latch->in_flight_resumptions_` — posted resume handlers not yet run.
-  - `draining_` (atomic bool) — set once by the reaper; **Dekker "store" of the
-    handshake**.
+### Existing (unchanged shape)
+- **`waiter_record`** — an in-flight `async_lock()` attempt; reaches exactly one
+  terminal `waiter_phase` (`granted` / `cancelled`); refcounted (I-32).
+- **`drain_latch_state`** — cross-thread latch (`released_`, `aborted_`,
+  `in_flight_resumptions_`), published via `drain_latch_ptr_`.
+- **`active_holders_count_`** — the **sink** counter: parties currently holding the
+  lock.
+- **`active_acquirers_count_`** — **feeder**: parties inside `async_lock()` between
+  entry increment (L776) and terminal decrement.
+- **`in_flight_resumptions_`** — **feeder**: posted resume runners not yet complete.
+- **`draining_`** — set once by the reaper.
 
-## Reaper convergence state machine (the only logic change)
+### NEW
+- **`active_unlockers_count_`** : `std::atomic<std::uint32_t>{0}` — **feeder**:
+  parties inside `unlock()` between an entry increment (added at the very top,
+  **before** the `draining_` read at L953) and a terminal decrement at every
+  `unlock()` return (added **after** any `push_residual` / grant). Brackets the
+  whole `unlock()` body so the reaper can represent an in-flight unlock in
+  quiescence (closes B3).
 
-States the reaper passes through per `cancel_and_drain()` invocation:
+## Counter model
+
+- **Feeders** = {`active_acquirers_count_`, `active_unlockers_count_`,
+  `in_flight_resumptions_`} — a party that may still *grant a holder* or *push a
+  waiter onto a list*.
+- **Sink** = `active_holders_count_` — incremented only by a grant from a feeder,
+  **sequenced-after** that feeder's increment and **sequenced-before** that feeder's
+  terminal decrement.
+- **Read-order rule (Edge #3 / B2):** the reaper reads **all feeders first**; only
+  if every feeder == 0 does it read the sink (`holders`). Feeder loads that
+  participate in a Dekker handshake (`acquirers`, `unlockers`) are **seq_cst**;
+  `resumptions` and `holders` are acquire.
+
+## Reaper convergence state machine
 
 ```
-PUBLISH      -> set draining_ (seq_cst), publish latch                 [steps (a)-(c)]
-INITIAL_REAP -> exchange both lists, reap LIFO+FIFO                    [steps (e)-(g)]
-                |
-                v
-CONVERGE  (loop):
-   drain-lists-until-empty           # inner (g) re-walk
-   load counts (seq_cst)
-   ├── all-zero ──> CONFIRM_SCAN: exchange both lists once more
-   │                 ├── empty  ──> CONVERGED  (exit loop)
-   │                 └── nonempty ─> reap, re-enter CONVERGE   (edge #1 caught a late waiter)
-   └── nonzero  ──> co_await latch->async_wait()
-                     ├── reaper_cancelled ──> ABORT (I-5, unchanged)
-                     └── else ──> re-enter CONVERGE
-                
-FINALIZE     -> CAS state_ locked_no_waiters->not_locked; signal_release(); clear ptr
+PUBLISH      -> publish latch; draining_.store(true, seq_cst)
+INITIAL_REAP -> exchange both lists; reap LIFO+FIFO
+CONVERGE (loop):
+   drain-lists-until-empty                       # inner (g)
+   load acquirers[sc], unlockers[sc], resumptions[acq]
+   ├── any feeder != 0 ──> co_await latch->async_wait()
+   │                        ├── reaper_cancelled ──> ABORT (I-5)
+   │                        └── else ──> CONVERGE
+   └── all feeders == 0 ──> load holders[acq]
+        ├── holders != 0 ──> co_await latch->async_wait() ──> (cancel?ABORT : CONVERGE)
+        └── holders == 0 ──> CONFIRM_SCAN: exchange both lists
+             ├── empty   ──> CONVERGED
+             └── nonempty ─> reap; CONVERGE        # edge #1 caught a late push
+FINALIZE     -> CAS state_ locked_no_waiters->not_locked
+                (terminal-flag check: publish release via released_-vs-aborted_
+                 resolution so a late cancel cannot double-publish — see research B4-tail);
+                signal_release(); clear drain_latch_ptr_
 ```
 
-### Termination / convergence invariant (NEW — to append to 006 design doc as I-32)
+Every feeder terminal decrement, when a latch is published, calls `latch->notify()`
+(B1) — routed through one audited helper so no path forgets.
 
-> **I-32 (drain convergence).** `cancel_and_drain()` transitions to FINALIZE only
+## Invariants
+
+### NEW — I-33 (drain convergence)
+
+> **I-33 (drain convergence).** `cancel_and_drain()` transitions to FINALIZE only
 > from a CONVERGE iteration in which, with `draining_ == true` already globally
-> visible (seq_cst store at PUBLISH), the reaper observed — within the same pass —
-> **both** waiter lists (`state_`, `next_drain_head_`) empty **and**
-> `active_holders_count_ == active_acquirers_count_ == in_flight_resumptions_ == 0`,
-> the count loads being seq_cst. By the seq_cst total order over
-> {entry `fetch_add`, both `draining_` fast-fail loads, `draining_.store(true)`,
-> quiesce count loads}, any acquirer not yet terminated at that observation either
-> (a) has already observed `draining_ == true` and will fast-fail without pushing,
-> or (b) is counted in `active_acquirers_count_`, contradicting the count==0
-> observation. Hence no un-reaped `waiter_record` can exist in either list at
-> FINALIZE, and the finalize CAS `locked_no_waiters -> not_locked` cannot fail on
-> a live waiter.
+> visible (seq_cst store at PUBLISH), the reaper observed — within one pass and in
+> feeder-before-sink order — **all feeders zero** (`active_acquirers_count_`,
+> `active_unlockers_count_`, `in_flight_resumptions_`, the first two via seq_cst
+> loads), **then** `active_holders_count_ == 0`, **then** both lists (`state_`,
+> `next_drain_head_`) empty on a confirming exchange. By the seq_cst total order
+> over the `draining_` ↔ feeder Dekker ops, any party not yet terminated at that
+> observation either has already observed `draining_ == true` (so it fast-fails /
+> takes the no-grant draining branch and pushes nothing) or is still counted in a
+> feeder (contradicting the zero observation). Every grant's `holders++` is
+> sequenced-before its feeder's decrement (so feeders==0 ⇒ holders snapshot is
+> coherent), and every push is sequenced-before its feeder's decrement (so
+> feeders==0 ⇒ the confirming scan sees it). Hence no un-reaped `waiter_record`
+> exists in either list at FINALIZE and the finalize CAS cannot fail on a live
+> waiter.
 
-This invariant supersedes the implicit assumption behind the old linear
-"(g) then (h)" ordering, which permitted a push between the last (g) pass and the
-(h) quiesce. I-1..I-31 and the F-2/F-3 fixes are unchanged.
+### AMENDED — I-32 soundness note (waiter_record reclamation)
 
-## State transitions of a racing acquirer (unchanged outcomes, now provably reaped)
+006 data-model.md:124 grounds I-32 reclamation on the **single structural walker**
+precondition, stated as *"unlock() and the reaper are mutually exclusive — unlock()
+short-circuits when `draining_ == true`."* **That statement is insufficient:** an
+`unlock()` that read `draining_ == false` *before* the reaper's publication does
+**not** short-circuit and is a competing walker (this is B3). The amended soundness
+argument under feature 047:
 
-| Acquirer timing relative to drain | Outcome | Reaped by |
+> Single-walker reclamation remains sound because (a) a non-draining `unlock()`
+> **detaches** its chain (`next_drain_head_.exchange`) before walking — it and the
+> reaper traverse **disjoint** nodes; and (b) the reaper **waits** for
+> `active_unlockers_count_ == 0` before its confirming scan and FINALIZE, so it
+> never reclaims/finalizes while an in-flight unlock still holds or re-publishes a
+> node. The unlock's residual re-push (`push_residual`) is sequenced-before its
+> `active_unlockers_count_--`; the reaper observes `unlockers == 0` (seq_cst) before
+> the confirming scan, so the residual is reaped, not orphaned. The Dekker handshake
+> `active_unlockers_count_` ↔ `draining_` (seq_cst) guarantees the
+> mutual-exclusion-at-finalization the old short-circuit claim assumed but did not
+> establish.
+
+I-1..I-31 unchanged. I-04..I-18 (unlock block) preserved: the unlocker counter only
+delays finalization; it changes neither which waiter `unlock()` grants nor the grant
+order.
+
+## State transitions of a racing party (outcomes; all reach exactly one terminal state)
+
+| Party / timing vs drain | Outcome | Reaped / settled by |
 |---|---|---|
-| Pushed before INITIAL_REAP | `cancelled` (aborted) | INITIAL_REAP / inner (g) |
-| Pushed during CONVERGE, still counted | `cancelled` | edge #1 confirming scan |
-| Saw `draining_==true` at L780/L868 | `sync_lock_drained`, never pushed | fast-fail (self) |
-| Won fast-path CAS before drain | `granted` then released | holder quiesce (count→0) |
-
-All four reach exactly one terminal state (FR-001/FR-003); none is left suspended.
+| Acquirer pushed before INITIAL_REAP | `cancelled` | INITIAL_REAP / inner (g) |
+| Acquirer pushed during CONVERGE, still counted | `cancelled` | edge #1 confirming scan (after acquirers==0) |
+| Acquirer saw `draining_==true` (L780/L868) | `sync_lock_drained`, never pushed | fast-fail (self), notifies reaper |
+| Acquirer won fast-path CAS before drain | `granted` then released | sink quiesce (holders→0), B2 read order |
+| **Unlock that read `draining_==false`, has residual chain** | residual re-pushed, then reaped | reaper waits unlockers→0, then confirming scan (B3) |
+| Unlock that read `draining_==true` | no-grant draining branch; notifies | self |
+| Cancellation at second draining gate | handler invoked **exactly once** | `queued→cancelled` CAS ownership (B4) |
+| Reaper own-cancel mid-loop | abort return; subscribers woken | F-3 / I-5 (unchanged) |

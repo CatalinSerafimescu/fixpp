@@ -29,6 +29,7 @@ correctness defect in a core primitive).
 ### Session 2026-06-21
 
 - Q: How should the multi-threaded witness reliably prove RED (catch the lost-wake), given it is a timing-dependent ~1/3 race? → A: Stress + self-deadline, **no production seam** — high thread-count × many rounds; a lost wake trips the witness's OWN internal deadline so it fails fast as a test failure (never a multi-minute CI hang). RED is proven by the documented pre-fix reproduction plus a mutation-revert (reverting the fix returns the witness to RED). No test-only scheduling hook is added to the production primitive.
+- Gate A round 1 (2026-06-21) — scope expanded after dual-Codex review found **four** blockers beyond the original orphan: (B1) reaper deadlock from acquirer decrements that don't wake the latch; (B2) incoherent quiesce snapshot finalizing while a live holder exists; (B3) a `draining_==false` `unlock()` privatizing the waiter chain and re-pushing an orphaned residual after finalize; (B4) double-resume/UAF at the second draining gate. User chose **full restructure** — all four fixed in-feature, each with its own mutation-tested witness; the fix spans `cancel_and_drain()`, `async_lock()`, AND `unlock()`, and adds one private counter (`active_unlockers_count_`). Judge record: `../../research/reviews/opus_047_gate_a_r1_judge.md`.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -132,6 +133,18 @@ passes reliably (no hang/flake) post-fix across repeated rounds on every lane.
   outcome is preserved (subscribers woken, drain reports aborted).
 - A new `async_lock()` that begins after the drain flag is set — must fast-fail
   with the drained result, never park.
+- An acquirer fast-fails (drained) while the reaper is parked waiting for the
+  acquirer count to reach zero — the reaper must be woken (notify), not left
+  blocked (B1).
+- A fast-path acquirer transitions acquirer→holder during the reaper's quiesce
+  snapshot — the reaper must not observe "all counts zero" and finalize while that
+  holder still holds the lock (B2).
+- An `unlock()` that read `draining_ == false` privately detaches the waiter chain
+  and grants one waiter while the drain runs concurrently — the reaper must wait for
+  that unlock to finish and reap the re-published residual; no orphan after finalize
+  (B3).
+- An acquisition's cancellation fires at the second draining gate just as the drained
+  fast-fail path runs — the awaiter resumes exactly once (B4).
 - Drain on an idle mutex — no-op success.
 
 ## Requirements *(mandatory)*
@@ -157,32 +170,57 @@ passes reliably (no hang/flake) post-fix across repeated rounds on every lane.
   use-after-free closure, reaper own-cancellation propagation, `noexcept`
   operation, and the documented acquisition/ordering invariants.
 - **FR-005**: On a single strand or attested-serialized executor (the production
-  execution model), observable behavior MUST be unchanged — the fix is a semantic
-  no-op for the serialized path.
+  execution model), **serialized functional semantics MUST be unchanged** — same
+  outcomes, API, suspension, and allocation behavior (memory-order strengthening
+  and the delayed-finalization counter never alter single-thread observable
+  results). This is a functional no-op for the serialized path; emitted
+  instructions/latency may differ on weakly-ordered architectures, so the
+  uncontended fast path MUST stay within the Article VIII §2 ±5% budget.
 - **FR-006**: A multi-threaded regression witness MUST exist that races
   concurrent drain vs. N lock attempts over repeated rounds on a real
   multi-worker executor, asserts every attempt completes exactly once (sum of
   aborted + granted equals N) with no hang, and runs under the standard CI
-  sanitizer lanes. The witness MUST establish RED via stress (sufficient thread
-  count × rounds to hit the late-park window with near-certainty) and MUST impose
-  its OWN internal completion deadline so a lost wake surfaces as a fast,
-  attributable test FAILURE — never a multi-minute lane-wide CI timeout. RED is
-  evidenced by the documented pre-fix reproduction and a mutation-revert (removing
-  the fix returns the witness to RED). It MUST NOT add any test-only scheduling
-  hook or seam to the production primitive.
+  sanitizer lanes. The witness MUST establish RED via stress (**≥4 workers, ≥32
+  racing acquirers per round, ≥100 rounds per invocation** — enough to hit the
+  late-park window with near-certainty) and MUST impose its OWN internal completion
+  deadline so a lost wake surfaces as a fast, attributable test FAILURE — never a
+  multi-minute lane-wide CI timeout. The deadline path MUST guarantee process
+  completion despite an orphan (isolated child process or leak-safe timeout — the
+  mutex destructor rejects a non-empty state). Each round MUST use a fresh mutex.
+  RED is evidenced by the documented pre-fix reproduction and a mutation-revert
+  (removing the fix returns the witness to RED; **≥99/100 pinned-release
+  invocations RED**). It MUST NOT add any test-only scheduling hook or seam to the
+  production primitive.
+- **FR-006a**: EACH of the four Gate-A blockers (B1 reaper-notify, B2 coherent
+  quiesce snapshot, B3 unlock chain-privatization, B4 exactly-once at the second
+  draining gate) MUST have its OWN discriminating witness that is RED on a
+  per-blocker mutation-revert and GREEN with the fix — witnessing only the original
+  orphan would enshrine the other three fixes.
 - **FR-007**: The change MUST NOT add or alter any public API, error code,
   configuration, wire format, codegen output, or C-ABI surface — it is an
-  internal correctness fix to the drain protocol only.
+  internal correctness fix to the drain protocol only (the new
+  `active_unlockers_count_` is a private member).
+- **FR-008**: `cancel_and_drain()` MUST NOT report completion while any `unlock()`
+  that began before the drain was observed is still performing structural list work
+  — including an `unlock()` that read `draining_ == false` and privately detached a
+  waiter chain. Any waiter such an `unlock()` re-publishes MUST be reaped, never
+  orphaned (no residual left in `next_drain_head_` after finalize).
+- **FR-009**: An `async_lock()` whose acquisition is cancelled concurrently with
+  entering the drained fast-fail path MUST resume its awaiter **exactly once** —
+  never twice (no double-resume / use-after-free of the awaiter handler).
 
 ### Key Entities
 
 - **Acquirer / waiter record**: an in-flight `async_lock()` attempt; must reach
   exactly one terminal state (granted or aborted) under any drain timing.
 - **Reaper (drain)**: the single `cancel_and_drain()` invocation that cancels
-  waiters and quiesces the mutex; must not finalize until every begun acquirer is
-  accounted for.
-- **In-flight acquirer/holder/resumption counters**: the quiescence signals the
-  reaper uses to know all concurrent activity has settled.
+  waiters and quiesces the mutex; must not finalize until every begun acquirer,
+  holder, in-flight unlock, and resumption is accounted for.
+- **Feeder / sink counters**: feeders (in-flight acquirers, in-flight unlockers,
+  posted resumptions) represent parties that may still grant a holder or push a
+  waiter; the sink (active holders) is fed by them. The reaper reads all feeders
+  before the sink so the quiescence snapshot is coherent. `active_unlockers_count_`
+  is new in this feature.
 
 ## Success Criteria *(mandatory)*
 
@@ -199,7 +237,11 @@ passes reliably (no hang/flake) post-fix across repeated rounds on every lane.
 - **SC-004**: **Zero** new sanitizer findings (TSan / ASan / UBSan) are introduced
   by the change.
 - **SC-005**: The pre-fix protocol, run against the new witness, is shown to
-  exhibit the lost wake (the witness is a genuine RED gate, not a tautology).
+  exhibit the lost wake (the witness is a genuine RED gate, not a tautology) —
+  ≥99/100 pinned-release invocations RED on a mutation-revert.
+- **SC-006**: Each of the four blockers (B1–B4) has a discriminating witness that
+  goes RED on its own mutation-revert and GREEN with the fix — all four fixes are
+  independently witnessed, not just the original orphan.
 
 ## Assumptions
 
