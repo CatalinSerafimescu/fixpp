@@ -150,3 +150,16 @@ An operator or maintainer on the existing supported toolchains (libstdc++, MSVC-
 - **Feature 023** (`reader_snapshot_` / CHK046) — its prohibition reversed by this feature.
 - **Feature 006** (`async_mutex` / `drain_latch_ptr_`) — the originally-planned consumer; its research.md D-4 names this as the follow-up.
 - **`spec/feature-catalogue.md` NFR-017** + project memory `project_libcxx_atomic_shared_ptr_followup` — the tracked backlog row + cross-session state.
+
+## Normative References
+
+*(Article VI §5 — every cite resolves to specific text in the named source.)*
+
+- **Constitution Article XI §3 / XV §9** (`.specify/constitution.md`) — `std::mutex` banned in any header that includes `asio::awaitable<…>`; enforced by `tools/check_no_std_mutex_in_awaitable_headers.sh`. Satisfied without amendment via FR-012 type-erasure.
+- **Constitution Article XV §1** (`.specify/constitution.md`) — no per-message/hot-path heap alloc between parse and `fromApp` (heap-alloc-scoped, not locking). PASS — the migration is a pure Tier-1 alias; the fallback shard lock is neither `new` nor `delete`.
+- **Constitution Article II §3 / III §3** (`.specify/constitution.md`) — Tier-2 toolchain additions; the new `linux-clang-libc++` profile is a Tier-2 addition blessed by II §3 (III §3 carries no closed-set language).
+- **Constitution Article VI §5, XVII §3, XVII §8** (`.specify/constitution.md`) — reference precision; author/reviewer independence; paired gate-label evidence.
+- **Architecture §3 / §4.1 / §9.1** (`.specify/architecture.md`) — `fixpp::sync` lives physically under `core/`; headers under `<module>/detail/` are physically installed but excluded from the supported API / Doxygen surface (FR-015 basis; `message_store.hpp` → `detail/` precedent).
+- **Research harness** `research/G19-fix-fpml-iso20022/atomic-shared-ptr/` + `CODEX-BRIEF.md` §6 — the locked primitive (API, sharded-mutex algorithm, vendor-macro detection, CAS-equivalence, memory-order honoring) and the §6 test inventory re-run here.
+- **Feature 023** `specs/023-engine-session-strand/` (CHK046 / FR-014) — the prohibition reversed by FR-013.
+- **Feature 006** `specs/006-async-mutex/` (research.md D-4; data-model I-23/I-24) — the originating consumer; the FR-008 async-mutex-specific ordering labels.
