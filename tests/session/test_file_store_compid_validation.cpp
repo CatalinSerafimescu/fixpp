@@ -15,6 +15,7 @@
 #include <gtest/gtest.h>
 #include <unistd.h>
 
+#include <exception>
 #include <asio/thread_pool.hpp>
 #include <climits>
 #include <cstring>

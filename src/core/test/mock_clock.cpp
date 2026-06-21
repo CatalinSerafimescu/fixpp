@@ -91,7 +91,7 @@ mock_clock::~mock_clock() {
 
 utc_time_point mock_clock::now() const noexcept {
     std::scoped_lock g(impl_->m);
-    return impl_->utc + impl_->utc_skew;
+    return std::chrono::time_point_cast<utc_time_point::duration>(impl_->utc + impl_->utc_skew);
 }
 
 steady_time_point mock_clock::steady_now() const noexcept {
@@ -186,7 +186,7 @@ void mock_clock::advance(std::chrono::nanoseconds delta) noexcept {
     {
         std::scoped_lock g(impl_->m);
         impl_->steady += delta;
-        impl_->utc += delta;  // wall moves with steady unless skewed
+        impl_->utc += std::chrono::duration_cast<utc_time_point::duration>(delta);  // wall moves with steady unless skewed
         due = impl_->due_locked();
     }
     for (auto& w : due) {
@@ -202,7 +202,7 @@ void mock_clock::step_to(steady_time_point point) noexcept {
         if (point > impl_->steady) {
             const auto d = point - impl_->steady;
             impl_->steady = point;
-            impl_->utc += d;
+            impl_->utc += std::chrono::duration_cast<utc_time_point::duration>(d);
         }
         due = impl_->due_locked();
     }

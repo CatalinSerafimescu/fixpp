@@ -64,7 +64,7 @@ RoundTripResult roundtrip(utc_time_point tp, fix_time_precision prec) {
             case fix_time_precision::micros:
                 return time_point_cast<microseconds>(t);
             case fix_time_precision::nanos:
-                return time_point_cast<nanoseconds>(t);
+                return time_point_cast<utc_time_point::duration>(t);
         }
         return t;
     };
@@ -422,7 +422,7 @@ TEST(FixTimeNanos, Format_Is27CharsUnderUBSan) {
     // 2024-01-01T00:00:00.123456789 UTC (epoch + offset + ns component)
     using namespace std::chrono;
     const auto base = utc_time_point{seconds{1704067200}};  // 2024-01-01T00:00:00Z
-    const auto tp = base + nanoseconds{123456789};
+    const auto tp = time_point_cast<utc_time_point::duration>(base + nanoseconds{123456789});
 
     std::array<char, 32> buf{};
     auto r = utc_time_to_fix_string(tp, fix_time_precision::nanos, std::span<char>{buf});
@@ -450,15 +450,15 @@ TEST(FixTimeNanos, Format_Is27CharsUnderUBSan) {
 TEST(FixTimeNanos, RoundTrip_Lossless) {
     using namespace std::chrono;
     const auto base = utc_time_point{seconds{1704067200}};
-    const auto tp = base + nanoseconds{987654321};
+    const auto tp = time_point_cast<utc_time_point::duration>(base + nanoseconds{987654321});
 
     auto r = roundtrip(tp, fix_time_precision::nanos);
     EXPECT_TRUE(r.format_ok) << "utc_time_to_fix_string failed for nanos";
     // RED pre-impl: length 17, parse returns millis-truncated value != nanos cast.
     EXPECT_TRUE(r.parse_ok)  << "fix_string_to_utc_time failed for nanos-formatted string: "
                               << r.formatted;
-    // The oracle: parsed == time_point_cast<nanoseconds>(tp) (I-NST-2 / New-3).
-    const auto expected = time_point_cast<nanoseconds>(tp);
+    // The oracle: parsed == time_point_cast to the native duration of utc_time_point (I-NST-2 / New-3).
+    const auto expected = time_point_cast<utc_time_point::duration>(tp);
     EXPECT_EQ(r.parsed_tp, expected)
         << "nanos round-trip not lossless; parsed=" << r.parsed_tp.time_since_epoch().count()
         << " expected=" << expected.time_since_epoch().count()
@@ -470,7 +470,7 @@ TEST(FixTimeNanos, RoundTrip_Lossless) {
 // [FR-003 / SC-002 / I-NST-1]
 TEST(FixTimeNanos, MillisMicros_ByteIdentical_NoRegression) {
     using namespace std::chrono;
-    const auto tp = utc_time_point{seconds{1704067200}} + nanoseconds{123456789};
+    const auto tp = time_point_cast<utc_time_point::duration>(utc_time_point{seconds{1704067200}} + nanoseconds{123456789});
 
     std::array<char, 32> buf_ms{};
     std::array<char, 32> buf_us{};
@@ -514,7 +514,7 @@ TEST(FixTimeParse, LenientWidths_1to9) {
     // Base time point: 20240101-00:00:00 (2024-01-01T00:00:00Z)
     // epoch seconds: 1704067200
     const std::int64_t base_sec = 1704067200LL;
-    const auto base_tp = utc_time_point{nanoseconds{base_sec * 1'000'000'000LL}};
+    const auto base_tp = utc_time_point{std::chrono::duration_cast<utc_time_point::duration>(nanoseconds{base_sec * 1'000'000'000LL})};
 
     // Bare 17-char: no dot, no fraction — parses to base_tp (ns scale = seconds).
     {
@@ -578,7 +578,7 @@ TEST(FixTimeParse, LenientWidths_1to9) {
         const std::string_view ts4 = "20240101-00:00:00.1234";
         auto r4 = fix_string_to_utc_time(std::span<const char>(ts4.data(), ts4.size()));
         ASSERT_TRUE(r4.has_value()) << ".1234 (4-digit) must parse";
-        const auto expected4 = utc_time_point{nanoseconds{base_sec * 1'000'000'000LL + 123'400'000LL}};
+        const auto expected4 = utc_time_point{std::chrono::duration_cast<utc_time_point::duration>(nanoseconds{base_sec * 1'000'000'000LL + 123'400'000LL})};
         EXPECT_EQ(*r4, expected4)
             << "oracle: parse('.1234') must yield +123_400_000 ns; [data-model E3 / contract C3]";
     }
@@ -674,11 +674,11 @@ TEST(FixTimeParse, Nanos27_RoundTrip) {
         << "27-char nanos parse must yield +123_456_789 ns; [I-NST-2 / New-3 / contract C3]";
 
     // Also verify via the roundtrip() helper (tests the format→parse oracle).
-    const auto tp = utc_time_point{nanoseconds{base_sec * 1'000'000'000LL + 123'456'789LL}};
+    const auto tp = utc_time_point{std::chrono::duration_cast<utc_time_point::duration>(nanoseconds{base_sec * 1'000'000'000LL + 123'456'789LL})};
     auto rt = roundtrip(tp, fix_time_precision::nanos);
     EXPECT_TRUE(rt.format_ok) << "format for nanos must succeed";
     EXPECT_TRUE(rt.parse_ok)  << "parse of nanos-formatted string must succeed";
-    EXPECT_EQ(rt.parsed_tp, time_point_cast<nanoseconds>(tp))
+    EXPECT_EQ(rt.parsed_tp, time_point_cast<utc_time_point::duration>(tp))
         << "nanos roundtrip not lossless; [I-NST-2 / FR-005]";
 }
 

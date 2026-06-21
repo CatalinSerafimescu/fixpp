@@ -217,7 +217,7 @@ protected:
         // micros form: "20240101-00:00:00.123456" (24 chars)
         // nanos  form: "20240101-00:00:00.123456789" (27 chars)
         const auto utc =
-            system_clock::time_point{seconds{1704067200}} + nanoseconds{123456789};
+            time_point_cast<system_clock::duration>(system_clock::time_point{seconds{1704067200}} + nanoseconds{123456789});
         const auto stp = fixpp::core::steady_time_point{} + seconds{0};
         clock = std::make_shared<fixpp::core::mock_clock>(utc, stp, ioc.get_executor());
         engine.clock = clock;
@@ -698,7 +698,7 @@ TEST(SendingTimePrecisionNoHeap, SendingTimePrecision_NoHeapOnFormatParse) {
     // A concrete time point with a non-zero nanosecond remainder so the
     // nanos path exercises the full 9-digit branch.
     // 2024-01-01T12:34:56.123456789Z
-    const auto tp = system_clock::time_point{seconds{1704109696}} + nanoseconds{123456789};
+    const auto tp = time_point_cast<system_clock::duration>(system_clock::time_point{seconds{1704109696}} + nanoseconds{123456789});
 
     // Buffer large enough for all precisions (nanos = 27 chars; 32 is safe).
     std::array<char, 32> buf{};

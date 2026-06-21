@@ -278,7 +278,9 @@ TEST(CompidPolicyStructural, AuthorizeIsConstNoexcept) {
     pid.subject_dn = "CN=TEST-CN,O=Test,C=US";
 
     // authorize() on a const policy — must compile (const method) and be noexcept.
-    static_assert(noexcept(const_policy.authorize(pid, "TESTCOMP")),
+    // Pass std::string_view explicitly (pointer+length form) to avoid the non-noexcept
+    // std::string_view(const char*) implicit conversion under libc++ (strlen not noexcept).
+    static_assert(noexcept(const_policy.authorize(pid, std::string_view{"TESTCOMP", 8})),
                   "authorize() must be noexcept per contracts/compid_authorization_policy.hpp");
 
     // binding_count() must not change after authorize().

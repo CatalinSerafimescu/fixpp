@@ -86,7 +86,9 @@ TEST(CipherPolicyStaticAssert, IsAllowedConstexprNoexcept) {
                   "banned cipher must be rejected constexpr.");
 
     // noexcept — verified at the call site.
-    static_assert(noexcept(CipherPolicy::is_allowed("test")),
+    // Pass std::string_view explicitly (pointer+length form) to avoid the non-noexcept
+    // std::string_view(const char*) implicit conversion under libc++ (strlen not noexcept).
+    static_assert(noexcept(CipherPolicy::is_allowed(std::string_view{"test", 4})),
                   "is_allowed must be noexcept per FR-012.");
     SUCCEED();
 }

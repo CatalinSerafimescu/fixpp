@@ -40,6 +40,7 @@
 #include <initializer_list>
 #include <memory>
 #include <memory_resource>
+#include <vector>
 
 namespace fixpp::log {
 
