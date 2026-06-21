@@ -193,23 +193,6 @@ public:
 
     [[nodiscard]] completion_policy policy() const noexcept { return policy_; }
 
-#ifdef FIXPP_ASYNC_MUTEX_DEBUG_COUNTERS
-    // TEMPORARY (047 diagnosis) — dump the five quiesce participants.
-    struct debug_counters {
-        std::uint32_t holders, acquirers, unlockers;
-        std::uintptr_t state;
-        bool fifo_nonempty, latch_published;
-    };
-    [[nodiscard]] debug_counters _debug_counters() const noexcept {
-        return {active_holders_count_.load(std::memory_order_acquire),
-                active_acquirers_count_.load(std::memory_order_acquire),
-                active_unlockers_count_.load(std::memory_order_acquire),
-                state_.load(std::memory_order_acquire),
-                next_drain_head_.load(std::memory_order_acquire) != nullptr,
-                drain_latch_ptr_.load(std::memory_order_acquire) != nullptr};
-    }
-#endif
-
 private:
     // 047 R2-B1 — audited feeder terminal-decrement + notify helper.
     // ALL acquirer + unlocker terminal decrements route through this one site so
@@ -845,10 +828,25 @@ fixpp::sync::async_mutex::async_lock(std::pmr::memory_resource* mr) noexcept {
     // 047 edge #2 — seq_cst entry increment (the Dekker "store" of the
     // draining_ ↔ active_acquirers_count_ handshake; both draining_ loads below
     // are the matching seq_cst "loads").
-    active_acquirers_count_.fetch_add(1, std::memory_order_seq_cst);
-    auto result = co_await asio::async_initiate<const asio::use_awaitable_t<>&,
+    // 047 — the acquirer count MUST stay balanced even when asio short-circuits
+    // the co_await: await_transform (asio/impl/awaitable.hpp) THROWS
+    // operation_aborted BEFORE running the initiation when a `total`
+    // cancellation is already pending at entry. The entry increment therefore
+    // lives INSIDE the initiation (a skipped initiation never increments), and
+    // the throw is converted to the aborted contract-return below — otherwise
+    // the increment leaks its matching in-lambda decrement and
+    // cancel_and_drain() hangs forever on active_acquirers_count_ != 0.
+    expected_t<async_lock_guard> result{
+        std::unexpected(fixpp::core::error::sync_lock_aborted)};
+    try {
+    result = co_await asio::async_initiate<const asio::use_awaitable_t<>&,
                                                 void(expected_t<async_lock_guard>)>(
         [this, &awaiter, mr, bound_executor, inherited_slot](auto handler) mutable {
+            // 047 edge #2 — seq_cst entry increment (the Dekker "store" of the
+            // draining_ ↔ active_acquirers_count_ handshake), placed as the
+            // initiation's first act so a cancellation-short-circuited co_await
+            // cannot leak it. Sequenced-before both draining_ seq_cst loads.
+            active_acquirers_count_.fetch_add(1, std::memory_order_seq_cst);
             if (draining_.load(std::memory_order_seq_cst)) {  // edge #2 fast-path gate
                 feeder_dec_and_notify(active_acquirers_count_);
                 std::move(handler)(expected_t<async_lock_guard>{
@@ -977,9 +975,28 @@ fixpp::sync::async_mutex::async_lock(std::pmr::memory_resource* mr) noexcept {
                                                      std::memory_order_acquire)) {
                         active_holders_count_.fetch_add(1, std::memory_order_acq_rel);
                         feeder_dec_and_notify(active_acquirers_count_);
-                        record->phase_.store(waiter_phase::granted, std::memory_order_release);
-                        record->result_ = expected_t<async_lock_guard>{async_lock_guard{this}};
-                        schedule_record_resume(record);
+                        // 047 — B4-sibling. on_cancel (wired to the inherited slot
+                        // above) may already have CAS'd queued→cancelled and
+                        // scheduled the aborted resume; an UNCONDITIONAL grant-store
+                        // + schedule here would double-schedule → double-invoke_handler
+                        // UAF under multi-threaded resume (identical to the second
+                        // gate B4 fix). Win the grant via queued→granted CAS.
+                        waiter_phase expected_g = waiter_phase::queued;
+                        if (record->phase_.compare_exchange_strong(
+                                expected_g, waiter_phase::granted,
+                                std::memory_order_acq_rel, std::memory_order_acquire)) {
+                            record->result_ =
+                                expected_t<async_lock_guard>{async_lock_guard{this}};
+                            schedule_record_resume(record);
+                        } else {
+                            // on_cancel won terminal ownership (phase==cancelled) and
+                            // already scheduled the aborted resume. We hold the lock
+                            // the cancelled waiter will never use → release it
+                            // (hand to the next waiter / restore not_locked),
+                            // balancing the holders++ above. unlock() runs its own
+                            // unlocker bracket and tolerates a concurrent drain (B3).
+                            unlock();
+                        }
                         waiter_record::release_ref(record);  // creator
                         return;
                     }
@@ -1007,6 +1024,13 @@ fixpp::sync::async_mutex::async_lock(std::pmr::memory_resource* mr) noexcept {
             }
         },
         asio::use_awaitable);
+    } catch (asio::system_error const&) {
+        // Pending-cancellation short-circuit: await_transform threw
+        // operation_aborted before the initiation ran, so no increment happened
+        // and no waiter_record was created. `result` already holds the aborted
+        // contract value; fall through to the shared epilogue (cancellation-state
+        // restore + record cleanup, which no-ops on the null awaiter.record_).
+    }
 
     // Restore the caller coroutine's default (terminal-only) cancellation
     // filter. async_lock()'s total-cancel enablement (set above for the
