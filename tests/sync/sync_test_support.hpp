@@ -8,6 +8,8 @@
 #include <asio/post.hpp>
 #include <asio/this_coro.hpp>
 #include <asio/use_awaitable.hpp>
+#include <chrono>
+#include <thread>
 
 namespace fixpp::sync::test {
 
@@ -17,6 +19,21 @@ namespace fixpp::sync::test {
 inline asio::awaitable<void> yield_n(int n) {
     auto ex = co_await asio::this_coro::executor;
     for (int i = 0; i < n; ++i) co_await asio::post(ex, asio::use_awaitable);
+}
+
+// Bounded poll on a predicate; returns false on deadline. The drain-reap
+// witnesses NEVER block-join (an orphaned waiter would hang the lane forever) —
+// they poll the completion counters under an internal self-deadline so a lost
+// wake surfaces as a fast, attributable FAIL. Hoisted here (047 /simplify) so
+// the blockers + latch-publish witnesses share one copy.
+template <typename Pred>
+bool wait_until(Pred pred, std::chrono::milliseconds budget) {
+    const auto deadline = std::chrono::steady_clock::now() + budget;
+    while (std::chrono::steady_clock::now() < deadline) {
+        if (pred()) return true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    return false;
 }
 
 }  // namespace fixpp::sync::test

@@ -42,7 +42,6 @@
 #include <chrono>
 #include <cstddef>
 #include <fixpp/core/sync/async_mutex.hpp>
-#include <thread>
 #include <vector>
 
 #include "sync/sync_test_support.hpp"
@@ -52,6 +51,7 @@ namespace {
 using fixpp::core::error;
 using fixpp::sync::async_mutex;
 using fixpp::sync::expected_t;
+using fixpp::sync::test::wait_until;
 using fixpp::sync::test::yield_n;
 
 // ── DrainLatchPublishAcquire ──────────────────────────────────────────────────
@@ -124,16 +124,12 @@ TEST(AsyncMutexDrainLatchPublishAcquire, ConcurrentDrainNeverOrphansLateWaiter) 
 
         // Bounded wait on the completion counters — NEVER a blocking join (an
         // orphaned waiter would hang the lane forever). On timeout, FAIL FAST.
-        const auto deadline = std::chrono::steady_clock::now() + kRoundDeadline;
-        bool ok = false;
-        while (std::chrono::steady_clock::now() < deadline) {
-            if (completed.load(std::memory_order_acquire) == kWaitersPerRound &&
-                drain_done.load(std::memory_order_acquire) == 1) {
-                ok = true;
-                break;
-            }
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
-        }
+        bool ok = wait_until(
+            [&] {
+                return completed.load(std::memory_order_acquire) == kWaitersPerRound &&
+                       drain_done.load(std::memory_order_acquire) == 1;
+            },
+            kRoundDeadline);
 
         if (!ok) {
             ADD_FAILURE() << "round=" << round

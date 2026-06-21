@@ -47,7 +47,6 @@
 #include <cstdio>
 #include <fixpp/core/sync/async_mutex.hpp>
 #include <memory>
-#include <thread>
 #include <vector>
 
 #include "sync/sync_test_support.hpp"
@@ -58,18 +57,8 @@ using fixpp::core::error;
 using fixpp::sync::async_lock_guard;
 using fixpp::sync::async_mutex;
 using fixpp::sync::expected_t;
+using fixpp::sync::test::wait_until;
 using fixpp::sync::test::yield_n;
-
-// Bounded poll on a predicate; returns false on deadline.
-template <typename Pred>
-bool wait_until(Pred pred, std::chrono::milliseconds budget) {
-    const auto deadline = std::chrono::steady_clock::now() + budget;
-    while (std::chrono::steady_clock::now() < deadline) {
-        if (pred()) return true;
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
-    return false;
-}
 
 // ── W-B3 ─────────────────────────────────────────────────────────────────────
 // A holder with a residual W1→W2 chain in next_drain_head_ unlocks on the
