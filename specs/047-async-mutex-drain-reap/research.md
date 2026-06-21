@@ -58,10 +58,17 @@ visible.
 | `unlock` `draining_.load` (L953) | acquire | **seq_cst** | edge #2′ unlocker "load" |
 | `cancel_and_drain` quiesce `active_unlockers_count_.load` (NEW) | — | **seq_cst** | edge #2′ reaper "load" |
 
-**NOT strengthened** (release/acquire suffices): the `state_` push CAS (L904), all
-feeder *decrements* (edge #1 needs only ≥release; they already are acq_rel), and the
-`active_holders_count_` / `in_flight_resumptions_` quiesce loads (they are sinks /
-self-bracketed, not Dekker participants — M7).
+**Acquirer + unlocker terminal decrements → seq_cst** (Gate A round 2, R2-B1): the
+notify helper that wakes the reaper reads these decrements as the Dekker "store" of a
+SECOND handshake `feeder-decrement` ↔ `draining_`-load (see Liveness below). seq_cst
+⊇ release, so edge #1 is unaffected. (`in_flight_resumptions_--` stays acq_rel — its
+notify uses a *captured* latch, not a `drain_latch_ptr_` load, so it has no
+publication race; see Liveness.)
+
+**NOT strengthened** (release/acquire suffices): the `state_` push CAS (L904), the
+`active_holders_count_` quiesce load (sink, not a Dekker participant), and the
+`in_flight_resumptions_` quiesce load (self-bracketed via synchronous
+`invoke_handler`) — M7.
 
 ### Converging loop (revised)
 
@@ -162,18 +169,42 @@ resume runner, so a re-entrant `async_lock()` does its `acquirers++ … acquirer
 reaper does not terminate; by the time `resumptions==0`, that re-entrant acquirer
 has already returned to 0. (Verified — not assumed.)
 
-### Liveness — notify discipline (B1)
+### Liveness — notify discipline (B1) + publication protocol (R2-B1)
 
 The converging loop blocks on `latch->async_wait()` and is woken only by
 `latch->notify()` / `signal_*`. Today only `unlock()`'s draining branch (L958), the
 reap-path resumption (L598-599), and reaper own-cancel notify. The acquirer
 **fast-fail decrement (L781)** and **alloc-fail decrements (L835/L850)** decrement
 `active_acquirers_count_` with NO notify → a reaper parked on `acquirers!=0` misses
-the `→0` edge → hang (same lost-wake class). **Fix:** every feeder terminal
-decrement, when a drain latch is published, MUST `notify()` it; route all feeder
-decrements (acquirer, unlocker, resumption) through one audited helper so no path
-can forget. The capacity-1 channel coalesces safely because every wake re-checks
-all predicates (M8).
+the `→0` edge → hang (same lost-wake class). **Fix (B1):** every acquirer/unlocker
+terminal decrement, when a drain latch is published, MUST `notify()` it; route all
+through one audited helper so no path can forget. The capacity-1 channel coalesces
+safely because every wake re-checks all predicates (M8).
+
+**Publication protocol (R2-B1) — the helper must reliably FIND the latch.** The
+helper notifies by loading `drain_latch_ptr_`; a naïve acquire-load can read
+stale-null (the reaper's publication not yet synchronized) → no notify → the same
+deadlock. This is itself a store-buffer hazard: helper `W(feeder, dec); R(draining_)`
+vs reaper `W(draining_, true); R(feeder)`. The litmus outcome "helper reads
+`draining_==false` ∧ reaper reads `feeder` stale-nonzero" is forbidden **only if all
+four ops are seq_cst** — hence the acquirer/unlocker decrement (helper "store") and
+the helper's `draining_`-load are seq_cst (the reaper's `draining_`-store and
+feeder-load already are). The helper protocol:
+
+```
+feeder.fetch_sub(1, seq_cst);
+if (draining_.load(seq_cst)) {                 // synchronizes-with reaper's seq_cst store
+    if (auto l = drain_latch_ptr_.load(acquire)) l->notify();   // guaranteed non-null
+}
+```
+
+`drain_latch_ptr_` is guaranteed visible-and-non-null here because the reaper
+publishes it (`store(latch, release)`, L1109) **before** `draining_.store(true,
+seq_cst)` (L1110); observing `draining_==true` (seq_cst) therefore happens-after the
+release-store of the pointer. The **resumption** decrement (L598) is EXEMPT from this
+protocol: its runner holds the latch by *capture* (L591) and notifies unconditionally
+(L599) — no `drain_latch_ptr_` load, no publication race, so its decrement stays
+acq_rel and the reaper reads `resumptions` with acquire.
 
 ### Liveness contract (M8)
 
@@ -191,21 +222,35 @@ The second draining branch (L868) currently does an **unconditional**
 handler is installed (L860-865). A concurrent `on_cancel` that already CAS'd
 `queued→cancelled` and scheduled a resume → two `invoke_handler` calls → UAF.
 **Fix:** the branch must win terminal ownership via
-`phase_.compare_exchange(queued→cancelled)` and only schedule on success; on CAS
-loss the cancel path already owns resumption. (Separable — its own commit — but
-fixed in-feature: it is a UAF in the path being rewritten.)
+`phase_.compare_exchange(queued→cancelled)` and only **schedule + set result** on
+success; on CAS loss the `on_cancel` path already owns resumption (its CAS at
+L736-742). **Common cleanup runs for BOTH outcomes** (both Gate A r2 passes): the
+`active_acquirers_count_` terminal decrement (+ notify helper) and the creator-ref
+release belong to the `async_lock()` invocation, not to CAS ownership — CAS loss
+must NOT bypass them. So: winner → set `sync_lock_drained`, schedule once, dec+notify,
+release creator ref; loser → dec+notify, release creator ref, return. (Separable —
+its own commit — but fixed in-feature: it is a UAF in the path being rewritten.)
 
-### Disposition — terminal-flag consistency (adversarial attack-6 tail)
+### Terminal-flag arbitration (R2-B2; was the attack-6 tail)
 
 Cancellation firing between the L1200 `reaper_cancelled` check and the L1224
 `reaper_slot.clear()` can set `aborted_` while the reaper also `signal_release()`s
-and returns success → both terminal flags published; a concurrent subscriber
-returns aborted while the reaper returned success. **Disposition: FIX in-feature** —
-re-check `reaper_cancelled` (and/or make finalize publish release only via a
-`released_`-vs-`aborted_` CAS) so exactly one terminal edge wins. If implementation
-shows the window is benign under the new converging structure, downgrade to a
-written waiver in `.specify/decisions/047-...-verify.md` with the argument; do NOT
-drop silently.
+and returns success → both terminal flags published; a concurrent subscriber returns
+aborted while the reaper returned success. A re-check alone does NOT close it
+(cancellation can fire right after the re-check), and two independent bools
+(`released_`, `aborted_`) cannot be mutually arbitrated.
+
+**Fix (concrete, single-winner):** replace `drain_latch_state`'s two bools with
+**one atomic terminal state** `enum class drain_terminal { pending, released,
+aborted }`. `signal_release()` and `signal_abort()` each `compare_exchange` from
+`pending` to their value; **only the CAS winner** closes the channel and fixes the
+outcome. The reaper's finalize calls `signal_release()`; if the CAS loses (a
+concurrent cancel already set `aborted`), the reaper returns the aborted result
+instead of success. Subscribers (`subscribe()` lambda) and the idempotent fast paths
+(steps (a)/(b)) read the single terminal state instead of the two booleans. This
+makes exactly one terminal edge authoritative for reaper and subscribers alike.
+F-2 latch retention on the abort path is unaffected (the state stays `aborted`,
+`drain_latch_ptr_` stays published).
 
 ## Invariant preservation (FR-004)
 

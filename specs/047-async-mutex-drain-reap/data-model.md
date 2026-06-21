@@ -21,11 +21,24 @@ document records the counter model, the new convergence invariant **I-33**, the
 
 ### NEW
 - **`active_unlockers_count_`** : `std::atomic<std::uint32_t>{0}` — **feeder**:
-  parties inside `unlock()` between an entry increment (added at the very top,
-  **before** the `draining_` read at L953) and a terminal decrement at every
-  `unlock()` return (added **after** any `push_residual` / grant). Brackets the
-  whole `unlock()` body so the reaper can represent an in-flight unlock in
-  quiescence (closes B3).
+  parties inside `unlock()` between an entry increment and a terminal decrement.
+  Brackets the whole `unlock()` body so the reaper can represent an in-flight unlock
+  in quiescence (closes B3). **Implementation-critical placement (both Gate A r2
+  passes, non-optional):**
+  - increment at the very top, **before** `holders--` (L951) AND before the seq_cst
+    `draining_` read (L953) — else the party is momentarily in neither counter, or
+    the edge-#2′ Dekker breaks;
+  - decrement is **seq_cst** (R2-B1 notify Dekker), at **every** `unlock()` return,
+    **after** any `push_residual` (L978/L1033) / grant;
+  - the recursive `unlock()` tail-calls (L1004, L1055) are NOT returns — the outer
+    frame stays counted across them. Use an **RAII entry/exit guard** over the whole
+    body; NEVER `unlockers--; unlock(); return` (exposes a transient 0 mid-walk →
+    reopens B3). Recursion yields count 1→2→1→0, never a premature 0.
+- **`drain_latch_state::terminal_`** : `std::atomic<drain_terminal>{pending}`
+  (`enum class drain_terminal { pending, released, aborted }`) — **replaces** the two
+  bools `released_`/`aborted_` (R2-B2). `signal_release`/`signal_abort` CAS from
+  `pending`; only the winner closes the channel and fixes the outcome. Subscribers +
+  the idempotent fast paths read this single state.
 
 ## Counter model
 
