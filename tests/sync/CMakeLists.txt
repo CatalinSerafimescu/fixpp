@@ -109,6 +109,16 @@ add_sync_test(sync_drain_latch_publish_acquire
     test_async_mutex_drain_latch_publish_acquire.cpp)
 add_sync_test(sync_drain_reap_blockers
     test_async_mutex_drain_reap_blockers.cpp)
+# T019 — these two witnesses each spawn a 4-worker asio::thread_pool and gate on
+# an internal wall-clock self-deadline (FR-006). Declare their true processor cost
+# so CTest's -j scheduler never co-schedules them with sibling stress tests and
+# oversubscribes the box (2 x 4-thread pools on a 2-core runner starved the parked
+# reaper past the 5 s deadline → a false TIMEOUT, never a real lost-wake: GREEN at
+# -j1 and standalone, GREEN under release/ASan/UBSan/TSan/gcc-release). The drain
+# semantics are unchanged; this only stops oversubscription flake in the permanent
+# regression gate.
+set_tests_properties(sync_drain_latch_publish_acquire sync_drain_reap_blockers
+    PROPERTIES PROCESSORS 4)
 
 # ── Polish seam registrations (T068, T078) ───────────────────────────────────
 # Seam #18: weak-memory contention stress verifying the I-01..I-31 ordering

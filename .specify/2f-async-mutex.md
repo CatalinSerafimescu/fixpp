@@ -928,6 +928,92 @@ static_assert(alignof(async_mutex_awaiter) >= 8,
 > `waiter_record::phase_`). This re-touches 006 Gate A scope — flag for the
 > eventual `/gate-a`.
 
+> **E-5 / 047 amendment — drain convergence (I-33) + the seq_cst feeder/sink
+> handshakes (shipped via `047-async-mutex-drain-reap`).** A latent lost-wake in
+> `cancel_and_drain()` was surfaced by the in-flight 046-atomic-shared-ptr witness
+> and is fixed here. The v1.5 reaper read its lists, then quiesced on the holder
+> count, then finalized in a single linear pass; a waiter that pushed onto `state_`
+> (or a residual onto `next_drain_head_`) **after** the reaper's list read but
+> **before** finalize was orphaned — the reaper never re-scanned. Root cause: the
+> walk happened **before** the counter quiesce, and the publication of a late push
+> was not ordered against the reaper's termination decision.
+>
+> - **I-33 (drain convergence — NEW).** `cancel_and_drain()` is a **converging
+>   reap+quiesce loop**, not a linear walk: it drains both lists, reads the three
+>   **feeder** counters (`active_acquirers_count_`, `active_unlockers_count_`
+>   **seq_cst**; `in_flight_resumptions_` acquire) **before** the **sink**
+>   (`active_holders_count_` acquire), waits on any nonzero feeder, then performs a
+>   **confirming list-exchange**; it finalizes **only** when, in one pass, every
+>   feeder is 0 ∧ the sink is 0 ∧ the confirming exchange privatizes an empty
+>   `state_`/`next_drain_head_`. Edge #1 (push-visibility): a contended push is
+>   sequenced-before the acquirer's terminal decrement, so the feeder-wait→re-loop
+>   →re-drain path cannot miss it. This is the terminating invariant that makes the
+>   late-waiter reap sound.
+> - **I-32 single-walker soundness — AMENDED.** I-32's "no competing walker"
+>   precondition is now **enforced during finalize** by the `active_unlockers_count_`
+>   bracket (below): the reaper waits `unlockers==0` before the confirming exchange
+>   and finalize, so no concurrent `unlock()` is mid-walk during the finalize CAS —
+>   single-walker, hence no `next_drain_head_` residual can be pushed in the
+>   ~tens-of-instructions gap between the confirming exchange and the finalize CAS
+>   that the two-atomic state cannot re-verify atomically.
+> - **`active_unlockers_count_` Dekker handshake (edge #2′ — NEW mutex member).**
+>   `unlock()`'s whole body is bracketed by a single RAII guard that
+>   `fetch_add(1, seq_cst)` at the very top (**before** `holders--` and the seq_cst
+>   `draining_` read) and decrements+notifies (seq_cst, via the audited
+>   `feeder_dec_and_notify` helper) on scope exit **after** any `push_residual`/
+>   grant. The two recursive re-drives (`unlock()` tail calls) each take their own
+>   guard → transient count 1→2→1→0, never a premature 0 mid-walk. This is the
+>   feeder the reaper waits on to guarantee single-walker (see amended I-32).
+> - **seq_cst `draining_` ↔ `active_acquirers_count_` handshake (edge #2).** The
+>   acquirer-side entry `active_acquirers_count_.fetch_add` and **both** `async_lock`
+>   `draining_` loads are **seq_cst** (the Dekker store/loads), and
+>   `cancel_and_drain`'s `draining_.store(true)` is seq_cst. Either the acquirer
+>   sees `draining_` and fast-fails (decrement+notify), or the reaper sees the
+>   acquirer's increment and waits — never both miss. All acquirer + unlocker
+>   terminal decrements route through `feeder_dec_and_notify` (the single audited
+>   `fetch_sub(seq_cst); if (draining_) notify()` publication site).
+> - **Single-atomic `drain_terminal` arbitration (replaces `released_`/`aborted_`).**
+>   `drain_latch_state` now carries one `std::atomic<drain_terminal>{pending}`
+>   (`enum class drain_terminal { pending, released, aborted }`) instead of two
+>   independent bools. `signal_release()`/`signal_abort()` **CAS from `pending`**,
+>   close the channel **only on a win**, and return whether they won — two bools
+>   could not be mutually arbitrated (a late cancel could publish `aborted` while
+>   the reaper published `released`). The idempotent fast paths and `subscribe()`
+>   read the single terminal state; F-2 (abort epoch keeps the latch published) is
+>   preserved. The reaper finalizes using the `signal_release()` CAS-win result
+>   (clear `drain_latch_ptr_` + report success only on a win; else keep the latch
+>   and return aborted).
+> - **Two cancellation defects fixed alongside the drain restructure.** (1) An
+>   **entry-pending acquirer leak**: asio `await_transform` throws `operation_aborted`
+>   **before** running an async op's initiation when a `total` cancellation is
+>   already pending; the entry increment lived before the `co_await`, leaking its
+>   in-lambda decrement → `cancel_and_drain` hung on `acquirers!=0`. Fixed by moving
+>   the seq_cst increment to the initiation's first statement (a skipped initiation
+>   never increments) + a try/catch converting the throw to the
+>   `unexpected{sync_lock_aborted}` contract return. (2) A **grant/second-gate
+>   double-schedule**: the drained-gate and the push-loop grant did an unconditional
+>   `phase_.store + schedule` while `on_cancel` was wired → double-`invoke_handler`
+>   UAF; fixed by `queued→{cancelled,granted}` CAS (schedule only on the win; on
+>   grant CAS-loss release the lock the cancelled waiter will never use via
+>   `unlock()`).
+> - **Witnessing / SC-006.** The drain-convergence and feeder/sink ordering are
+>   witnessed by W-orig (`drain_latch_publish_acquire`, 4×32×100) + W-B1..W-B3 and
+>   the mutation-revert matrix. The three **cross-thread-only** windows (entry-pending
+>   leak, second-gate B4 CAS, grant CAS-loss) are NOT same-thread witnessable —
+>   `async_lock`'s own `reset_cancellation_state(enable_total)` at entry wipes any
+>   pre-entry cancellation and there is no suspension between that reset and the
+>   throwing `async_initiate`, so the throw window is reachable only by a cross-thread
+>   emit (where asio `cancellation_signal::emit` is itself thread-unsafe — a harness
+>   UAF). They carry SC-006 waivers-with-proof + the `DISABLED_` W-B4 stress
+>   reproducer (**L-047**). The parked-waiter cancellation path stays same-thread
+>   witnessed by `test_race_cancel_pre_drain`.
+>
+> **Scope / Gate note.** E-5 amends Gate-A-converged 2f (047 Gate A converged 3
+> rounds). New mutex member `active_unlockers_count_` (4 B) + `drain_latch_state`
+> `released_`/`aborted_`→`terminal_` are private; no public/ABI surface change
+> (FR-007). Companion edits in `specs/047-async-mutex-drain-reap/` (research.md
+> multi-edge proof, data-model I-33 + the `active_unlockers_count_` model).
+
 **`result_` validity window and ownership (v1.2 / Opus N-P3-3 round-2 close; v1.4 CAS-then-publish close).** `result_` is a non-owning raw pointer that points into the *caller-frame storage* for the `expected_t<async_lock_guard>` value the coroutine yields via `await_resume`. Concretely: the awaiter is constructed in-place at the `co_await m.async_lock()` site; `result_` is initialised by the `async_lock(...)` awaitable factory to point at a stack-local `expected_t<async_lock_guard>` slot in the suspended coroutine's frame (or, on the PMR fallback path, at the equivalent slot allocated alongside the awaiter from `mr`). **Lifetime contract:** `result_` is valid from `await_suspend(h)` entry through `await_resume()` return, inclusive — i.e., for the duration of the awaiter's suspension. **Validity ends at `await_resume` return** (the coroutine resumes, reads `*result_`, and the awaiter is destroyed in the embedded path or de-allocated back to `mr` in the PMR-fallback path). **Writer-side discipline (v1.4): CAS-then-publish.** Potential writers (the unlock-walker and the cancellation-handler, OR the reaper-walker in §4.7.2 step (f) and the cancellation-handler) first arbitrate ownership by CAS'ing `phase_` from `queued` to their terminal state (`granted` or `cancelled`) with `memory_order_acq_rel`. **Only the CAS winner writes `*result_`; the loser observes terminal phase and does not touch `*result_`.** The winner then writes `*result_` and schedules the coroutine on its bound executor. The resumed coroutine's `await_resume` performs `phase_.load(acquire)` first, then reads `*result_`; that acquire-load synchronises with the winner's release-CAS, and the result-slot write is sequenced before the bound-executor resumption. **Critical section closure:** the winner-side `*result_ = ...` write is sequenced *before* `schedule_resume_on_bound_executor(awaiter)`, so the awaiter remains alive for the duration of the writer's critical section and `result_` continues to point at valid storage until the resumed coroutine returns from `await_resume()`. The §6.2.2 row "`result_` slot publication" governs the cross-thread publication ordering. The §9 seam #28 verifies the CAS-then-publish arbitration under TSan.
 
 **Residual ownership lives on the mutex (RC-A close).** The v1.0 design carried `residual_` on the awaiter — the granted waiter "owned" the FIFO chain of remaining queued waiters from the unlock-drain. Codex C-P1-2 / Opus C-P1-2 / Opus N-P1-1 / Opus N-P1-2 collectively showed this is unimplementable: the `async_lock_guard` carries only `async_mutex*` (§4.4), `unlock()` is invoked on `async_mutex*`-only state, and the awaiter is destroyed/deallocated when `await_resume` returns. The granted waiter's residual list was unreachable from `async_mutex::unlock()` and was destroyed on holder-cancellation mid-critical-section. v1.1's fix moves the residual chain into `async_mutex::next_drain_head_` (a `std::atomic<async_mutex_awaiter*>` field on the mutex itself); every `unlock()` walks `next_drain_head_` first; `cancel_and_drain()` (§4.7.2) atomically exchanges and reaps both `state_` and `next_drain_head_`.
