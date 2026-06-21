@@ -43,8 +43,15 @@ Certificate make_cert(pin_fingerprint const& fp, std::string_view dn) {
 // Returns the nanosecond ceiling applicable for this platform.
 // Returns 0 if undetectable (CI skips the assertion).
 std::size_t detect_snapshot_ceiling_ns() {
-#if defined(__cpp_lib_atomic_shared_ptr)
-    // lock-free std::atomic<shared_ptr> is available → lock-free floor.
+#if !FIXPP_ATOMIC_SHARED_PTR_NATIVE_ACTIVE
+    // NFR-017: on the libc++ / forced-fallback path snapshot_ is a sharded-mutex
+    // atomic_shared_ptr — the load takes a shard lock and is NOT lock-free, so
+    // the 30 ns lock-free floor does NOT apply. Key off the fixpp selector, NOT
+    // the raw __cpp_lib_atomic_shared_ptr macro (which is still defined under a
+    // forced-fallback build on libstdc++ → would false-green a 30 ns ceiling).
+    return 0;  // no lock-free ceiling on the fallback path (soft gate: skip assert)
+#elif defined(__cpp_lib_atomic_shared_ptr)
+    // Native path, lock-free std::atomic<shared_ptr> available → lock-free floor.
     return 30;
 #elif defined(_GLIBCXX_RELEASE) && _GLIBCXX_RELEASE >= 16
     return 30;  // libstdc++ ≥ 16: lock-free atomic<shared_ptr>.

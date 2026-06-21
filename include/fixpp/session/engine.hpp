@@ -117,8 +117,10 @@ struct std::hash<fixpp::session::SessionId> {
 // Published by the control strand after every mutation; `atomic_load`'d by readers
 // from any thread without entering a strand, taking a lock, or blocking. [E-7/INV-9]
 //
-// Standard C++20 `std::atomic<std::shared_ptr<const ReaderSnapshot>>` — no
-// `std::mutex` in our headers (Art. XV / [const §XV.9]). [D-SNAP / research D-SNAP]
+// `fixpp::sync::atomic_shared_ptr<const ReaderSnapshot>` (NFR-017; migrated from
+// the raw std-atomic-shared-ptr form) — no `std::mutex` token in our headers
+// (the fallback lock is type-erased into the .cpp; Art. XV / [const §XV.9]).
+// [D-SNAP / research D-SNAP]
 
 namespace fixpp::session {
 
@@ -458,9 +460,10 @@ private:
     // Read (via atomic_load/load(acquire)) by the public readers from any thread
     // without entering a strand, taking a lock, or blocking. [E-7/INV-9/D-SNAP]
     //
-    // Standard C++20 std::atomic<shared_ptr<>> — NO std::mutex in our headers
-    // (Art. XV / [const §XV.9]). Not lock-free on all STLs (measured by V-6
-    // perf gate), but correctness does not depend on lock-freedom. [D-SNAP]
+    // fixpp::sync::atomic_shared_ptr (NFR-017) — NO std::mutex token in our
+    // headers (lock type-erased into atomic_shared_ptr.cpp; Art. XV /
+    // [const §XV.9]). Native path lock-free; libc++/forced-fallback path is
+    // shard-locked. Correctness does not depend on lock-freedom. [D-SNAP]
     //
     // Initialized to a non-null empty Snapshot in the ctor so readers never
     // load null even before start() has been called. [E-7 invariant]

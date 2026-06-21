@@ -116,8 +116,10 @@ public:
     //   absent → unexpect{tls_pin_not_found}
     [[nodiscard]] core::expected_t<void> remove(std::array<std::byte, 32> const& sha256);
 
-    // (3) Lookup on the handshake-hot path. Lock-free — acquire-load on
-    // snapshot_, linear scan. Returns pin_view with snapshot shared_ptr pinned.
+    // (3) Lookup on the handshake-hot path. Native path lock-free (acquire-load
+    // on snapshot_); on the libc++/forced-fallback path the load takes a shard
+    // mutex (NFR-017 — correctness/portability over speed; runs per-handshake,
+    // not per-message). Linear scan. Returns pin_view with the snapshot pinned.
     [[nodiscard]] pin_view find(std::array<std::byte, 32> const& sha256) const noexcept;
 
     // (4) Explicit-snapshot accessor — TLS handshake captures this ONCE per

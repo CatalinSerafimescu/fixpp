@@ -34,7 +34,12 @@ Certificate make_cert(pin_fingerprint const& fp, std::string_view dn) {
 }
 
 std::size_t detect_find_ceiling_ns() {
-#if defined(__cpp_lib_atomic_shared_ptr)
+#if !FIXPP_ATOMIC_SHARED_PTR_NATIVE_ACTIVE
+    // NFR-017: fallback path snapshot_ load is shard-locked (not lock-free), so
+    // the 30 ns snapshot leg of the combined ceiling does not hold. Key off the
+    // fixpp selector, not raw __cpp_lib_atomic_shared_ptr (New-P3-2).
+    return 0;  // no lock-free combined ceiling on the fallback path (soft gate)
+#elif defined(__cpp_lib_atomic_shared_ptr)
     return 130;
 #elif defined(_GLIBCXX_RELEASE) && _GLIBCXX_RELEASE >= 16
     return 130;

@@ -205,3 +205,18 @@ add_test(NAME check_no_std_mutex_corpus
     "${CMAKE_SOURCE_DIR}/include/fixpp/session/reconnect_fsm.hpp"
     "${CMAKE_SOURCE_DIR}/include/fixpp/session/retrieve_visitor.hpp"
 )
+
+# ── 046-atomic-shared-ptr (NFR-017): census-regrowth guard (FR-005 / SC-004) ──
+# Rejects any NEW raw std::atomic<std::shared_ptr> in project-owned code (the raw
+# form does not compile under libc++). Runs over the real tree → exit 0.
+add_test(NAME census_no_raw_atomic_shared_ptr
+  COMMAND bash "${CMAKE_SOURCE_DIR}/tools/check_no_raw_atomic_shared_ptr.sh"
+    "${CMAKE_SOURCE_DIR}")
+# SC-004 mutation discrimination: the guard MUST FAIL on an injected raw
+# re-introduction (fixture root carrying a deliberate raw slot). WILL_FAIL flips
+# the expected exit so a guard that stopped detecting regrowth turns this RED.
+add_test(NAME census_no_raw_atomic_shared_ptr_mutation
+  COMMAND bash "${CMAKE_SOURCE_DIR}/tools/check_no_raw_atomic_shared_ptr.sh"
+    "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/census_mutation")
+set_tests_properties(census_no_raw_atomic_shared_ptr_mutation
+  PROPERTIES WILL_FAIL TRUE)

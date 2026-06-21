@@ -85,7 +85,7 @@ public:
 
     // 013 T012 — FR-030 / FR-033 / D-11 — atomic credential rotation.
     // Performs an atomic STORE on the factory-internal cert_source_slot_
-    // (std::atomic<std::shared_ptr<fixpp::tls::cert_source>>); O(1),
+    // (fixpp::sync::atomic_shared_ptr<fixpp::tls::cert_source>, NFR-017); O(1),
     // strand-free. Both initiator-side and acceptor-side rotation route
     // through the SAME factory call per [[feedback_half_restructure_symmetric_api]]
     // — the factory IS the symmetric authority (no separate Listener method).
