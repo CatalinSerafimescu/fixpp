@@ -363,8 +363,8 @@ namespace detail {
 // ─────────────────────────────────────────────────────────────────────────────
 
 // T048 (US3): channel-backed multi-waiter latch ([2f §4.7.3] I-4/I-7/I-8).
-// `released_`/`aborted_` are the terminal observer flags (I-25/I-26/I-27);
-// the `concurrent_channel` is the multi-waiter wake surface. `notify()` is a
+// `terminal_` (drain_terminal) is the single terminal observer state
+// (I-25/I-26/I-27); the `concurrent_channel` is the multi-waiter wake surface. `notify()` is a
 // non-terminal re-check wake (I-8); `signal_release()`/`signal_abort()` are the
 // two mutually-terminal idempotent edges (I-7) and `close()` the channel so
 // EVERY parked/future subscriber wakes. Executor is captured lazily from the
@@ -423,7 +423,7 @@ public:
     // as_tuple, a propagated total cancellation is delivered as
     // `ec == operation_aborted` VALUE (no thrown exception, no nested-awaitable
     // rethrow). channel_closed (terminal signal) / a notify() token arrive as
-    // a different ec; the caller then re-checks released_/aborted_.
+    // a different ec; the caller then re-checks terminal_.
     auto async_wait() { return channel_.async_receive(asio::as_tuple(asio::use_awaitable)); }
 
 private:
@@ -1226,7 +1226,7 @@ fixpp::sync::async_mutex::cancel_and_drain() noexcept {
         if (auto st = drain_latch_ptr_.load(std::memory_order_acquire))
             co_return co_await subscribe(std::move(st));
         // drain_latch_ptr_ is null only after a clean signal_release() epoch;
-        // on the abort path the latch is kept published (aborted_==true) so
+        // on the abort path the latch is kept published (terminal_==aborted) so
         // this branch is only reachable after a successful prior drain.
         co_return expected_t<void>{};
     }
@@ -1239,7 +1239,7 @@ fixpp::sync::async_mutex::cancel_and_drain() noexcept {
         if (auto st = drain_latch_ptr_.load(std::memory_order_acquire))
             co_return co_await subscribe(std::move(st));
         // null only after a clean signal_release() epoch; abort path keeps the
-        // latch published (aborted_==true) so this branch is only reachable
+        // latch published (terminal_==aborted) so this branch is only reachable
         // after a successful prior drain (consistent with F-2 fix above).
         co_return expected_t<void>{};
     }
@@ -1380,9 +1380,9 @@ fixpp::sync::async_mutex::cancel_and_drain() noexcept {
         // co_await here (a cancellation may be latched in this state).
         //
         // F-2 fix (gate-b/r1): do NOT clear drain_latch_ptr_ here. The latch
-        // stays published (aborted_==true) so any fresh reentrant
+        // stays published (terminal_==aborted) so any fresh reentrant
         // cancel_and_drain() call takes the subscribe() branch at the idempotent
-        // fast path (hpp:1167-1170) and observes aborted_==true → returns
+        // fast path (hpp:1167-1170) and observes terminal_==aborted → returns
         // unexpected{sync_lock_aborted} instead of false success. This closes the
         // UAF: a reentrant caller can no longer return success while in-flight
         // resumption handlers still hold waiter_record refs and dereference the
