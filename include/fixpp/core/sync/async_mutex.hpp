@@ -194,6 +194,19 @@ public:
     [[nodiscard]] completion_policy policy() const noexcept { return policy_; }
 
 private:
+    // 047 R2-B1 — audited feeder terminal-decrement + notify helper.
+    // ALL acquirer + unlocker terminal decrements route through this one site so
+    // no path can forget to wake a reaper parked on a feeder counter. Implements
+    // the seq_cst publication protocol: the seq_cst decrement is the Dekker
+    // "store" and the seq_cst draining_ load synchronizes-with the reaper's
+    // seq_cst draining_ store, so observing draining_==true happens-after the
+    // reaper's release-store of drain_latch_ptr_ (L: store ptr before store
+    // draining_) → the loaded latch pointer is guaranteed non-null. The
+    // resumption path (resume runner) is EXEMPT (it holds the latch by capture
+    // and notifies unconditionally — no drain_latch_ptr_ load, no publication
+    // race). Defined out-of-line below (needs drain_latch_state complete).
+    void feeder_dec_and_notify(std::atomic<std::uint32_t>& feeder) noexcept;
+
     // ─────────────────────────────────────────────────────────────────────────
     // State encoding constants (normative — low-bit sentinel design)
     // ─────────────────────────────────────────────────────────────────────────
@@ -242,6 +255,13 @@ private:
     // NEW v1.3 RC-α — in-flight acquirer epoch counter.
     // I-20..I-22 ordering sites.
     std::atomic<std::uint32_t> active_acquirers_count_{0};
+
+    // NEW (047) — in-flight unlocker epoch counter (feeder; B3 / edge #2′).
+    // Brackets the WHOLE unlock() body so the reaper can represent an in-flight
+    // unlock in quiescence: incremented at the very top of unlock() (before
+    // holders-- and the draining_ read), decremented seq_cst on scope exit via
+    // an RAII guard. data-model 047 §NEW / I-33.
+    std::atomic<std::uint32_t> active_unlockers_count_{0};
 
     // NEW v1.3 RC-β; UPDATED v1.4 — lazy drain latch.
     // NOT lock-free in general; cold path only (cancel_and_drain invocation).
@@ -349,12 +369,18 @@ namespace detail {
 // two mutually-terminal idempotent edges (I-7) and `close()` the channel so
 // EVERY parked/future subscriber wakes. Executor is captured lazily from the
 // reaper's frame (I-1/I-3; keeps `async_mutex()` constexpr + executor-free).
+// 047 R2-B2: the single authoritative terminal state. Replaces the two
+// independent bools released_/aborted_ — two bools cannot be mutually
+// arbitrated, so a late cancel could publish aborted while the reaper published
+// released. signal_release()/signal_abort() each CAS from `pending`; only the
+// CAS winner closes the channel and fixes the outcome.
+enum class drain_terminal : std::uint8_t { pending, released, aborted };
+
 class drain_latch_state {
 public:
     explicit drain_latch_state(asio::any_io_executor ex) : channel_(ex, 1) {}
 
-    std::atomic<bool> released_{false};
-    std::atomic<bool> aborted_{false};
+    std::atomic<drain_terminal> terminal_{drain_terminal::pending};
     std::atomic<std::uint32_t> in_flight_resumptions_{0};
 
     // Non-terminal wake: re-check counters (I-8). Idempotent, never blocks;
@@ -362,17 +388,34 @@ public:
     // between the reaper's counter read and its park on wait().
     void notify() noexcept { channel_.try_send(asio::error_code{}); }
 
-    // Terminal: drain committed (I-7). close() completes every pending and
-    // future async_receive so all subscribers wake exactly once.
-    void signal_release() noexcept {
-        released_.store(true, std::memory_order_release);
-        channel_.close();
+    // Terminal: drain committed (I-7). Single-winner (R2-B2): CAS pending→
+    // released; the terminal write is sequenced-before the channel close so a
+    // woken subscriber never reads `pending`. close() completes every pending
+    // and future async_receive so all subscribers wake exactly once. Returns
+    // whether THIS call won the terminal CAS (binding finalize rule: the reaper
+    // clears drain_latch_ptr_ + returns success ONLY on a winning release CAS).
+    [[nodiscard]] bool signal_release() noexcept {
+        drain_terminal expected = drain_terminal::pending;
+        if (terminal_.compare_exchange_strong(expected, drain_terminal::released,
+                                              std::memory_order_acq_rel,
+                                              std::memory_order_acquire)) {
+            channel_.close();
+            return true;
+        }
+        return false;
     }
 
-    // Terminal: reaper itself cancelled (I-5/I-7).
-    void signal_abort() noexcept {
-        aborted_.store(true, std::memory_order_release);
-        channel_.close();
+    // Terminal: reaper itself cancelled (I-5/I-7). Single-winner CAS; only the
+    // winner closes the channel.
+    [[nodiscard]] bool signal_abort() noexcept {
+        drain_terminal expected = drain_terminal::pending;
+        if (terminal_.compare_exchange_strong(expected, drain_terminal::aborted,
+                                              std::memory_order_acq_rel,
+                                              std::memory_order_acquire)) {
+            channel_.close();
+            return true;
+        }
+        return false;
     }
 
     // The cancellable park. Returned DIRECTLY (not via a child coroutine) so
@@ -728,6 +771,15 @@ inline void schedule_record_resume(
 
 }  // namespace
 
+// 047 R2-B1 — audited feeder terminal-decrement + notify (definition).
+inline void fixpp::sync::async_mutex::feeder_dec_and_notify(
+    std::atomic<std::uint32_t>& feeder) noexcept {
+    feeder.fetch_sub(1, std::memory_order_seq_cst);
+    if (draining_.load(std::memory_order_seq_cst)) {
+        if (auto l = drain_latch_ptr_.load(std::memory_order_acquire)) l->notify();
+    }
+}
+
 inline void fixpp::sync::detail::async_mutex_awaiter::on_cancel(
     asio::cancellation_type) const noexcept {
     auto* record = record_;
@@ -1064,17 +1116,19 @@ fixpp::sync::async_mutex::cancel_and_drain() noexcept {
     using detail::waiter_record;
 
     // Subscriber: park on the epoch latch until a terminal edge; map
-    // released_→ok, aborted_→sync_lock_aborted. Loops over non-terminal
+    // released→ok, aborted→sync_lock_aborted. Loops over non-terminal
     // notify() wakes ([2f §4.7.3] I-8); a cancelled own-wait → aborted.
+    // 047 R2-B2: reads the single authoritative terminal_ state (a woken
+    // subscriber never sees `pending` — the terminal write is sequenced-before
+    // the channel close that woke it).
     auto subscribe =
         [](std::shared_ptr<detail::drain_latch_state> st) -> asio::awaitable<expected_t<void>> {
-        while (!st->released_.load(std::memory_order_acquire) &&
-               !st->aborted_.load(std::memory_order_acquire)) {
+        while (st->terminal_.load(std::memory_order_acquire) == detail::drain_terminal::pending) {
             auto [ec] = co_await st->async_wait();
             if (ec == asio::error::operation_aborted)
                 co_return std::unexpected(fixpp::core::error::sync_lock_aborted);
         }
-        if (st->aborted_.load(std::memory_order_acquire))
+        if (st->terminal_.load(std::memory_order_acquire) == detail::drain_terminal::aborted)
             co_return std::unexpected(fixpp::core::error::sync_lock_aborted);
         co_return expected_t<void>{};
     };
@@ -1176,7 +1230,7 @@ fixpp::sync::async_mutex::cancel_and_drain() noexcept {
     if (reaper_slot.is_connected()) {
         reaper_slot.assign([&reaper_cancelled, latch](asio::cancellation_type) noexcept {
             reaper_cancelled.store(true, std::memory_order_release);
-            latch->signal_abort();
+            (void)latch->signal_abort();  // wake; CAS-win is irrelevant here
         });
     }
     // The reaper's own cancellation can be delivered to this co_await either
@@ -1214,7 +1268,7 @@ fixpp::sync::async_mutex::cancel_and_drain() noexcept {
         // comment "prior epoch published + cleared" was self-inconsistent with
         // I-5/I-7 on the abort path and is reconciled here: drain_latch_ptr_ is
         // cleared only on the release path (below), after signal_release().
-        latch->signal_abort();
+        (void)latch->signal_abort();  // wake; latch stays published (F-2)
         if (reaper_slot.is_connected()) reaper_slot.clear();
         co_return std::unexpected(fixpp::core::error::sync_lock_aborted);
     }
@@ -1227,7 +1281,13 @@ fixpp::sync::async_mutex::cancel_and_drain() noexcept {
     uintptr_t expected_state = locked_no_waiters;
     state_.compare_exchange_strong(expected_state, not_locked, std::memory_order_acq_rel,
                                    std::memory_order_acquire);
-    latch->signal_release();
-    drain_latch_ptr_.store(nullptr, std::memory_order_release);
-    co_return expected_t<void>{};
+    // 047 R2-B2 binding finalize rules: clear drain_latch_ptr_ + return success
+    // ONLY on a winning release CAS. On loss a concurrent cancel already set
+    // terminal_=aborted (a total fired after our reaper_cancelled re-check but
+    // before/at the disarm) → keep the latch published (F-2) and return aborted.
+    if (latch->signal_release()) {
+        drain_latch_ptr_.store(nullptr, std::memory_order_release);
+        co_return expected_t<void>{};
+    }
+    co_return std::unexpected(fixpp::core::error::sync_lock_aborted);
 }
