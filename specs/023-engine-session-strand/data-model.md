@@ -156,7 +156,10 @@ Existing struct (`include/fixpp/session/engine.hpp:119`). Amendments:
   synchronization that is NOT a `std::mutex` in our code — the absolute "lock-free" claim is
   dropped; the read cost is measured by the V-6 perf gate. This deliberately does **NOT** use the
   project's unshipped `fixpp::sync::atomic_shared_ptr` (NFR-017, backlog) — that is only a possible
-  later optimization (research D-SNAP).
+  later optimization (research D-SNAP). **[SUPERSEDED 2026-06-21 by feature 046 (FR-013): NFR-017
+  shipped and `reader_snapshot_` was migrated to `fixpp::sync::atomic_shared_ptr<const ReaderSnapshot>`.
+  The "do not use it" basis (a header-resident `std::mutex`) no longer holds — 046 type-erases the
+  lock into `src/core/sync/atomic_shared_ptr.cpp`, keeping `engine.hpp` mutex-free.]**
 - **Owner**: the `Engine` (a new member; e.g. `reader_snapshot_`). Republished by the control
   strand after **every** control-plane mutation (registry insert/erase, listener/endpoint
   mutation, D-PUB publish/unpublish).

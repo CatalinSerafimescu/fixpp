@@ -182,6 +182,13 @@ headers, `.specify/constitution.md:146-149,217`). The design does NOT depend on 
 NFR-017 is only a possible **later optimization** if the bench gate (V-6) shows the standard
 primitive's read cost is material.
 
+**[SUPERSEDED 2026-06-21 by feature 046-atomic-shared-ptr (FR-013).** NFR-017 has shipped and
+`engine.hpp::reader_snapshot_` is now `fixpp::sync::atomic_shared_ptr<const ReaderSnapshot>`. The
+"cannot be included into `engine.hpp`" basis above no longer holds: 046 **type-erases** the
+sharded-mutex lock into `src/core/sync/atomic_shared_ptr.cpp`, so the migrated header carries no
+`std::mutex` token and the §XV.9 corpus gate passes — the Art. XI §3 / XV §9 objection is *removed*,
+not overridden. See 046 research D-8.]**
+
 **Consistency with Art. XV (no `std::mutex` in our headers)**: `std::atomic<std::shared_ptr<…>>`
 is an STL primitive — it introduces **no `std::mutex` into our headers** regardless of the STL's
 internal lock strategy. Read cost: it is a **wait-free read on STLs where
