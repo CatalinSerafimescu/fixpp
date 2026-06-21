@@ -55,8 +55,8 @@
 namespace {
 
 using fixpp::core::error;
-using fixpp::sync::async_mutex;
 using fixpp::sync::async_lock_guard;
+using fixpp::sync::async_mutex;
 using fixpp::sync::expected_t;
 using fixpp::sync::test::yield_n;
 
@@ -112,8 +112,7 @@ TEST(AsyncMutexDrainReapBlockers, WB3_UnlockResidualChainRacingDrainNeverOrphans
             // path, granting one waiter and push_residual-ing the tail.
         };
 
-        auto drainer = [mtx, &drain_done, &drain_ok,
-                        &holder_acquired]() -> asio::awaitable<void> {
+        auto drainer = [mtx, &drain_done, &drain_ok, &holder_acquired]() -> asio::awaitable<void> {
             while (!holder_acquired.load(std::memory_order_acquire)) co_await yield_n(1);
             co_await yield_n(kWaitersPerRound + 2);
             auto d = co_await mtx->cancel_and_drain();
@@ -138,8 +137,7 @@ TEST(AsyncMutexDrainReapBlockers, WB3_UnlockResidualChainRacingDrainNeverOrphans
 
         asio::co_spawn(*pool, holder(), asio::detached);
         asio::co_spawn(*pool, drainer(), asio::detached);
-        for (int i = 0; i < kWaitersPerRound; ++i)
-            asio::co_spawn(*pool, waiter(), asio::detached);
+        for (int i = 0; i < kWaitersPerRound; ++i) asio::co_spawn(*pool, waiter(), asio::detached);
 
         bool ok = wait_until(
             [&] {
@@ -152,8 +150,7 @@ TEST(AsyncMutexDrainReapBlockers, WB3_UnlockResidualChainRacingDrainNeverOrphans
             ADD_FAILURE() << "WB3 round=" << round
                           << ": TIMEOUT — a residual waiter was ORPHANED. completed="
                           << completed.load() << "/" << kWaitersPerRound
-                          << " granted=" << granted.load()
-                          << " settled=" << settled_nonheld.load()
+                          << " granted=" << granted.load() << " settled=" << settled_nonheld.load()
                           << " drain_done=" << drain_done.load()
                           << ". LEAKING mutex+pool (dtor would abort on the orphan).";
             return;
@@ -278,11 +275,9 @@ TEST(AsyncMutexDrainReapBlockers, DISABLED_WB4_SecondGateCancelRacingDrainResume
             kDeadline);
 
         if (!ok) {
-            ADD_FAILURE() << "WB4 round=" << round << ": TIMEOUT. completed="
-                          << completed.load() << "/" << kWaitersPerRound
-                          << " drain_done=" << drain_done.load()
-                          << " cancel_done=" << cancel_done->load()
-                          << ". LEAKING mutex+pool.";
+            ADD_FAILURE() << "WB4 round=" << round << ": TIMEOUT. completed=" << completed.load()
+                          << "/" << kWaitersPerRound << " drain_done=" << drain_done.load()
+                          << " cancel_done=" << cancel_done->load() << ". LEAKING mutex+pool.";
             go_finish->store(true, std::memory_order_release);
             return;
         }
@@ -339,8 +334,7 @@ TEST(AsyncMutexDrainReapBlockers, WB1_FastFailDecrementNotifiesParkedReaper) {
             // release immediately (no waiters parked yet) → not_locked.
         };
 
-        auto drainer = [mtx, &drain_done, &drain_ok,
-                        &holder_acquired]() -> asio::awaitable<void> {
+        auto drainer = [mtx, &drain_done, &drain_ok, &holder_acquired]() -> asio::awaitable<void> {
             while (!holder_acquired.load(std::memory_order_acquire)) co_await yield_n(1);
             co_await yield_n(4);
             auto d = co_await mtx->cancel_and_drain();
@@ -407,7 +401,7 @@ TEST(AsyncMutexDrainReapBlockers, WB2_NeverReportsSuccessWhileLockHeld) {
         auto* mtx = new async_mutex;
 
         std::atomic<int> completed{0};
-        std::atomic<int> held_now{0};        // # waiters currently holding
+        std::atomic<int> held_now{0};  // # waiters currently holding
         std::atomic<int> drain_done{0};
         std::atomic<int> drain_ok{0};
         std::atomic<bool> violation{false};  // success observed while held
@@ -454,8 +448,7 @@ TEST(AsyncMutexDrainReapBlockers, WB2_NeverReportsSuccessWhileLockHeld) {
 
         asio::co_spawn(*pool, holder(), asio::detached);
         asio::co_spawn(*pool, drainer(), asio::detached);
-        for (int i = 0; i < kWaitersPerRound; ++i)
-            asio::co_spawn(*pool, waiter(), asio::detached);
+        for (int i = 0; i < kWaitersPerRound; ++i) asio::co_spawn(*pool, waiter(), asio::detached);
 
         bool ok = wait_until(
             [&] {
@@ -465,9 +458,9 @@ TEST(AsyncMutexDrainReapBlockers, WB2_NeverReportsSuccessWhileLockHeld) {
             kDeadline);
 
         if (!ok) {
-            ADD_FAILURE() << "WB2 round=" << round << ": TIMEOUT. completed="
-                          << completed.load() << "/" << kWaitersPerRound
-                          << " drain_done=" << drain_done.load() << ". LEAKING mutex+pool.";
+            ADD_FAILURE() << "WB2 round=" << round << ": TIMEOUT. completed=" << completed.load()
+                          << "/" << kWaitersPerRound << " drain_done=" << drain_done.load()
+                          << ". LEAKING mutex+pool.";
             return;
         }
 
