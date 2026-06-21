@@ -30,6 +30,7 @@
 #include <atomic>
 #include <cstdint>
 #include <fixpp/core/error.hpp>            // defines core::expected_t<T>
+#include <fixpp/core/sync/detail/atomic_shared_ptr.hpp>  // 046 (NFR-017): libc++ fallback primitive
 #include <fixpp/tls/cert_source.hpp>       // for reload_credentials (013 T012)
 #include <fixpp/tls/security_profile.hpp>  // [2g §4.5] SslCtxConfig (LOCKED)
 #include <fixpp/transport/transport.hpp>
@@ -207,7 +208,7 @@ private:
     // read this slot via cert_source_snapshot(); operator rotates via
     // reload_credentials(). Initialized at factory construction from
     // ssl_cfg_.cert_source (or nullptr if none). [data-model §E-7]
-    std::atomic<std::shared_ptr<fixpp::tls::cert_source>> cert_source_slot_;
+    fixpp::sync::atomic_shared_ptr<fixpp::tls::cert_source> cert_source_slot_;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -19,6 +19,7 @@
 #include <chrono>
 #include <cstddef>
 #include <fixpp/core/error.hpp>
+#include <fixpp/core/sync/detail/atomic_shared_ptr.hpp>  // 046 (NFR-017): libc++ fallback primitive
 #include <fixpp/tls/certificate.hpp>
 #include <memory>
 #include <memory_resource>
@@ -132,8 +133,9 @@ private:
     std::pmr::memory_resource* mr_;  // resolved at construction.
     mutable std::shared_mutex
         writer_;  // serialises add/remove vs each other; readers do NOT take it. [2g §6.5.2].
-    std::atomic<std::shared_ptr<const pin_snapshot>>
+    fixpp::sync::atomic_shared_ptr<const pin_snapshot>
         snapshot_;  // acquire-load on read; release-store on write [2g §6.2].
+                    // 046 (NFR-017): native lock-free; libc++ fallback shard-locked.
 };
 
 }  // namespace fixpp::tls

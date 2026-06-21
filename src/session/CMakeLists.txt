@@ -40,6 +40,7 @@ target_include_directories(fixpp_session PRIVATE
 #                        + asio (awaitable / cancellation slots — 007).
 target_link_libraries(fixpp_session PUBLIC
   fixpp_core
+  fixpp_sync   # 046 (NFR-017): atomic_shared_ptr fallback shard_guard symbols (reader_snapshot_ + async_mutex)
   fixpp_dictionary
   fixpp_wire
   fixpp_transport

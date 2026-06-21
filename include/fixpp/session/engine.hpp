@@ -28,6 +28,7 @@
 #include <cstdint>
 #include <fixpp/core/engine_config.hpp>  // EngineConfig — held by value in Engine
 #include <fixpp/core/error.hpp>          // expected_t<T>, error enum (incl. slot 121)
+#include <fixpp/core/sync/detail/atomic_shared_ptr.hpp>  // 046 (NFR-017): libc++ fallback primitive (reverses 023 CHK046)
 #include <fixpp/otel/trace_context.hpp>  // fixpp::otel::trace_context (for engine_trace_context())
 #include <fixpp/session/session_config.hpp>  // SessionConfig (complete — by-value store)
 #include <fixpp/transport/endpoint.hpp>      // Endpoint (for acceptor_bound_endpoint return type)
@@ -463,7 +464,10 @@ private:
     //
     // Initialized to a non-null empty Snapshot in the ctor so readers never
     // load null even before start() has been called. [E-7 invariant]
-    std::atomic<std::shared_ptr<const ReaderSnapshot>> reader_snapshot_;
+    // 046 (NFR-017): libc++-portable primitive (reverses 023 CHK046 — the
+    // lock is type-erased into atomic_shared_ptr.cpp, so this awaitable header
+    // gains no std::mutex token). Native path lock-free; fallback shard-locked.
+    fixpp::sync::atomic_shared_ptr<const ReaderSnapshot> reader_snapshot_;
 
     // gate-b/r1 #3 (V-12 seam): awaitable hook invoked by run_accept_loop on the
     // session strand BETWEEN step 7 (attach_accepted_transport) and step 7a

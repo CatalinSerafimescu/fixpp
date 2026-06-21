@@ -33,6 +33,7 @@ find_package(OpenSSL REQUIRED)
 target_link_libraries(fixpp_transport
   PUBLIC
     fixpp_core
+    fixpp_sync   # 046 (NFR-017): atomic_shared_ptr fallback shard_guard symbols (cert_source_slot_)
     fixpp_tls
     fixpp_log
   PRIVATE

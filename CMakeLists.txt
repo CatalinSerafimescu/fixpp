@@ -69,6 +69,27 @@ endif()
 # conanfile option -o fixpp/*:spike_quill=True so the quill dependency resolves.
 option(FIXPP_LOG_SPIKE_QUILL "Build the TS-13 quill spike backend" OFF)
 
+# ── 046-atomic-shared-ptr (NFR-017): atomic_shared_ptr force-mode overrides ───
+# Single target-level mode applied UNIFORMLY to the whole build via a global
+# compile definition (research D-9 / contract CT-4 — never a per-TU define).
+# FALLBACK forces the sharded-mutex path on a P0718-capable toolchain so the
+# fallback is continuously regression-exercised without a libc++ host; NATIVE is
+# a documented (untested) escape hatch. Mutually exclusive (the detect header
+# also #errors if both are set). The guard TU (src/core/sync/atomic_shared_ptr.cpp)
+# is ALWAYS compiled regardless of mode (always-ship-guard), so a forced-fallback
+# build always finds its shard_guard symbols at link.
+option(FIXPP_FORCE_ATOMIC_SHARED_PTR_FALLBACK "Force the atomic_shared_ptr sharded-mutex fallback path" OFF)
+option(FIXPP_FORCE_ATOMIC_SHARED_PTR_NATIVE "Force the atomic_shared_ptr native std alias path" OFF)
+if(FIXPP_FORCE_ATOMIC_SHARED_PTR_FALLBACK AND FIXPP_FORCE_ATOMIC_SHARED_PTR_NATIVE)
+  message(FATAL_ERROR "FIXPP_FORCE_ATOMIC_SHARED_PTR_FALLBACK and FIXPP_FORCE_ATOMIC_SHARED_PTR_NATIVE are mutually exclusive.")
+endif()
+if(FIXPP_FORCE_ATOMIC_SHARED_PTR_FALLBACK)
+  add_compile_definitions(FIXPP_FORCE_ATOMIC_SHARED_PTR_FALLBACK)
+endif()
+if(FIXPP_FORCE_ATOMIC_SHARED_PTR_NATIVE)
+  add_compile_definitions(FIXPP_FORCE_ATOMIC_SHARED_PTR_NATIVE)
+endif()
+
 # ── Enforce output layout consistent with [arch §7.1] ────────────────────────
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
