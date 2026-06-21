@@ -11,13 +11,13 @@ The "entities" are the `async_mutex` member set and the `waiter_record`. This fi
 | `std::atomic<bool> draining_` | `:233` | **KEEP**, demote to release/acquire (already is) | set by drain; gates new acquirers. Strand-local now. |
 | `std::atomic_flag drain_in_progress_` | `:236` | **KEEP** | shipped single-reaper election flag; reentrant-drain *completion* is now signaled by `draining_complete_` (New P3-N2), so this member's role narrows to the first-caller election only. |
 | `std::atomic<std::uint32_t> active_holders_count_` | `:240` | **KEEP**, demote to relaxed | inc on grant, dec on unlock — all on one strand now; used by the holder-yield loop and the terminal condition. |
-| `std::atomic<std::uint32_t> active_acquirers_count_` | `:244` | **KEEP**, demote to relaxed (strand-local) | cheap insurance against the exact 006/047 lost-wake shape (a new acquirer that has passed the `draining_` check but not yet CAS'd into `state_`). Retained as a plain strand-local counter — NOT removed (New P2-N2). |
+| `std::atomic<std::uint32_t> active_acquirers_count_` | `:244` | **REMOVE** (round-2 P3 — vestigial) | the corrected terminal condition does not read it, and a new acquirer during drain fast-fails via the `draining_` gate (`:780`/`:868`) so it never becomes a holder/missed-waiter. Removal is sound: `async_lock`'s initiation body from the `draining_` load to the `state_` push is synchronous (no `co_await`), so on the one strand the reap cannot interleave a half-finished acquirer; the drain contract forbids cross-thread overlap. Write-only counter with no reader → removed. |
 | `std::atomic<std::shared_ptr<drain_latch_state>> drain_latch_ptr_` | `:249` | **REMOVE** | the cross-thread latch pointer. **This is the 046 4→3 consumer** (one of: engine reader-snapshot, transport cert-source, pinset snapshot, this — New P2-N1). |
 | `detail::drain_latch_state` (type, `:352-388`) | `:352` | **REMOVE** entirely | `released_`/`aborted_`/`in_flight_resumptions_`/`channel_` + `notify`/`signal_release`/`signal_abort`/`async_wait`. All cross-thread. |
 | **NEW** `std::atomic<std::uint32_t> in_flight_resumers_` | — | **ADD** (relaxed/strand-local) | strand-local in-flight-resumer count — the SAME role as the removed `drain_latch_state::in_flight_resumptions_`, moved onto the mutex so it survives removing the latch. Incremented when the reap/grant schedules a posted resume; decremented in the resume runner AFTER `release_ref` (`async_mutex.hpp:670-690`). **THE barrier** that keeps the mutex alive until every posted resumer has dereferenced `record->mutex_` (fixes P1-1 UAF). |
 | **NEW** `std::atomic<bool> draining_complete_` | — | **ADD** (strand-local) | set true at finalize. A reentrant `cancel_and_drain()` on the strand `while (!draining_complete_) co_await asio::post(executor, use_awaitable)` then returns the terminal result — it does NOT return ok eagerly (fixes P1-2 false-success). |
 
-Net: the mutex loses one `atomic<shared_ptr>` (`drain_latch_ptr_`) + an entire nested type and its `concurrent_channel`; it ADDS one `atomic<uint32>` (`in_flight_resumers_`) + one `atomic<bool>` (`draining_complete_`); it KEEPS `active_holders_count_` and `active_acquirers_count_` (both demoted to relaxed). It keeps two atomic words for the lists + the small drain flags.
+Net: the mutex loses one `atomic<shared_ptr>` (`drain_latch_ptr_`) + an entire nested type and its `concurrent_channel` + one `atomic<uint32>` (`active_acquirers_count_`, now vestigial); it ADDS one `atomic<uint32>` (`in_flight_resumers_`) + one `atomic<bool>` (`draining_complete_`); it KEEPS `active_holders_count_` (demoted to relaxed). It keeps two atomic words for the lists + the small drain flags.
 
 ## `waiter_record` (`:486-518`)
 
@@ -49,21 +49,17 @@ reentrant? (draining_ already set):  while (!draining_complete_) co_await asio::
 disable cancellation on self → draining_=true
    │
    ▼
-SYNC REAP: exchange state_/next_drain_head_; for each waiter: CAS queued→cancelled,
-           result=sync_lock_aborted, ++in_flight_resumers_, posted resume
-           (resume runner: after release_ref → --in_flight_resumers_)
+UNIFIED QUIESCENCE LOOP (fixes round-2 P1-1):
+   for (;;) {
+     reap_both_lists()   // exchange state_/next_drain_head_; each waiter: CAS queued→cancelled,
+                         // result=sync_lock_aborted, ++in_flight_resumers_, posted resume
+                         // (runner: after release_ref → --in_flight_resumers_)
+     if (active_holders_count_==0 && in_flight_resumers_==0 && both_lists_empty_this_pass) break;
+     co_await asio::post(executor)   // yield: posted resumers run + a pre-drain holder's unlock() runs
+   }                                  // (DRAIN PRECONDITION: holders release promptly)
    │
    ▼
-while active_holders_count_ > 0:           ← yields so a pre-drain holder unlock() runs
-     co_await asio::post(executor)         ← strand-local (DRAIN PRECONDITION: holders release promptly)
-     re-exchange + reap any spliced residual waiters
-   │
-   ▼
-TERMINAL CONDITION: (active_holders_count_==0) AND (in_flight_resumers_==0)
-                    AND (state_ and next_drain_head_ both observed empty in one pass)
-   │
-   ▼
-FINALIZE: CAS state_ locked_no_waiters→not_locked; draining_complete_=true → terminal
+FINALIZE: CAS state_ locked_no_waiters→not_locked; THEN draining_complete_=true (release, ordered after) → terminal
 ```
 
 No `released_`/`aborted_` terminal object; no subscriber list; no `signal_*`; no cross-thread latch. A reentrant `cancel_and_drain()` AWAITS the first drain's `draining_complete_` then returns the terminal result (NOT eager-ok). The drain MUST NOT terminate on `active_holders_count_==0` alone — `in_flight_resumers_==0` is the barrier that keeps the mutex alive until every posted resumer has dereferenced `record->mutex_` (P1-1). Per-waiter `phase_` machine `{queued,granted,cancelled}` is unchanged (D-4).

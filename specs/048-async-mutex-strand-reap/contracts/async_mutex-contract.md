@@ -33,7 +33,7 @@ The public C++ signatures are **unchanged**; this documents the narrowed behavio
 
 **Unsupported (UNDEFINED) — DRAIN OVERLAP ONLY:** overlapping `cancel_and_drain()` with an `async_lock`/`unlock`/`cancel` for the same mutex on a genuinely-concurrent executor (e.g., a `direct_executor` that attests serialization but is concurrent — INV-2). Behavior is undefined. **PRESERVED:** ordinary cross-thread `async_lock`/`unlock` contention remains SUPPORTED — the `.specify/2f-async-mutex.md §1.1` cross-domain O(N) contention seam is not narrowed. There is no production debug assertion (no executor seam, P2-4); the unsupported overlap is exercised only by a test-only instrumented executor.
 
-**Removed vs prior (047/006):** no cross-thread convergence (`drain_latch_state`/`concurrent_channel`/`async_wait`), no Dekker handshake, no cancellable-drain abort path. `active_acquirers_count_` is KEPT as a plain strand-local counter (insurance against the 006/047 lost-wake shape). `in_flight_resumers_` (strand-local) replaces the latch's `in_flight_resumptions_`; `draining_complete_` replaces the channel subscriber protocol. The residual multi-threaded lost-wake (047 W-B1) is eliminated by construction.
+**Removed vs prior (047/006):** no cross-thread convergence (`drain_latch_state`/`concurrent_channel`/`async_wait`), no Dekker handshake, no cancellable-drain abort path; `active_acquirers_count_` REMOVED (vestigial under the corrected terminal condition + `draining_` gate — round-2 P3). `in_flight_resumers_` (strand-local) replaces the latch's `in_flight_resumptions_`; `draining_complete_` replaces the channel subscriber protocol. The residual multi-threaded lost-wake (047 W-B1) is eliminated by construction.
 
 ## Destructor
 
@@ -41,7 +41,7 @@ The public C++ signatures are **unchanged**; this documents the narrowed behavio
 
 ## Invariants (post-048)
 
-- **INV-A:** the reap is a synchronous single pass on the owning strand; the only suspension is the holder-yield, which terminates under the drain precondition (holders release promptly) — NOT an O(holder-count) bound.
+- **INV-A:** the drain is a single quiescence loop on the owning strand — reap both lists, break iff `(active_holders_count_==0 ∧ in_flight_resumers_==0 ∧ both lists empty)`, else `co_await asio::post` and repeat. The suspension (yield) waits for BOTH pre-drain holders' `unlock()` AND the posted resumers to run; it terminates under the drain precondition (holders release promptly) — NOT an O(holder-count) bound.
 - **INV-B:** a parked waiter is resolved exactly once — winner of the `phase_ queued→{granted,cancelled}` CAS (grant / on_cancel / reap); the winner schedules exactly one posted resume counted in `in_flight_resumers_`.
 - **INV-C (narrowed):** the `inherited_slot.assign` lock-setup site fails closed with `sync_lock_alloc_failed`; the resume `asio::post` + the holder-yield post remain pre-existing OOM-terminate sites (deferred L-048). 048 does NOT claim a fully terminate-free lock path.
 - **INV-D:** the drain terminal condition is (no holders) ∧ (`in_flight_resumers_==0`) ∧ (both lists empty); the mutex stays alive until every posted resumer has dereferenced it.
