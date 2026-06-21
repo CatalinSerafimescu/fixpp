@@ -7,6 +7,13 @@
 
 **Supersedes**: feature 047 (`047-async-mutex-drain-reap`, PR #143). 047's cross-thread converging-loop / Dekker / feeder-count / drain-latch approach left a residual multi-threaded orphan (047 W-B1: 3/25 standalone runs deadlock at both 5 s and 30 s; `entered=6/completed=5/drain_done=0`). This feature removes that machinery rather than patching it further. Full background: `research/findings/000-PLAN-libcxx-consolidation.md` (§1, §3, §5).
 
+## Clarifications
+
+### Session 2026-06-22
+
+- Q: Does the OOM fail-closed path need a NEW `sync_lock_alloc_failed` error variant / new C-ABI enumerator, or does it already exist? → A: It already exists — `error::sync_lock_alloc_failed = 44` is defined (`include/fixpp/core/error.hpp:87`) with a C-ABI mapping (`:848`), currently returned by the explicit `async_lock(mr)` PMR-fallback's `allocate()` failure. The OOM fix REUSES this existing variant for the default-path asio-internal allocation sites. Therefore this feature introduces **zero new public/ABI surface** — the only surface change is the narrowed drain-contract *documentation*. (Corrects the original FR-003/FR-008/Key-Entities/Assumptions wording, which assumed a new variant.)
+- Q: How is unsupported genuinely-concurrent (non-strand-serialized) drain misuse surfaced (FR-006)? → A: Documentation-primary — the published contract states strand-serialized-only — PLUS a debug-build assertion where a cheap on-owning-executor check is available. NO release-build runtime gate (it would cost on the hot path, and the `direct_executor` serialization-attestation path cannot always be detected). US3's testable runtime behavior is the debug assertion firing under cheaply-detectable misuse; otherwise the contract is documentation-enforced.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Reliable mutex drain on session teardown (Priority: P1)
@@ -69,12 +76,12 @@ The awaitable mutex's drain capability is documented as supporting only strand-s
 
 - **FR-001**: Under the supported strand-serialized topology, `cancel_and_drain()` MUST resolve every begun acquirer/holder/parked-waiter exactly once (resumed-then-released or drain-rejected) with zero orphaned waiters, and MUST complete in bounded time (no unbounded wait).
 - **FR-002**: The drain MUST reap parked waiters synchronously on the owning strand; it MUST NOT depend on cross-thread convergence machinery (no converging reap+quiesce loop, no seq_cst Dekker handshake, no acquirer/unlocker feeder counters, no cross-thread drain-latch) to reach its terminal state.
-- **FR-003**: `async_lock()` MUST fail closed with a dedicated lock-allocation error (`sync_lock_alloc_failed`) instead of allowing an allocation failure during lock setup to escape a `noexcept` boundary and call `std::terminate()`.
+- **FR-003**: `async_lock()` MUST fail closed with the existing lock-allocation error `error::sync_lock_alloc_failed` (already defined, `error.hpp:87`) instead of allowing an allocation failure during lock setup to escape a `noexcept` boundary and call `std::terminate()`. This reuses the existing variant (no new error code) and extends its use from the explicit-PMR path to the default-path asio-internal allocation sites.
 - **FR-004**: Strand-local cancellation of a parked waiter MUST resume that waiter exactly once — no double-resume (use-after-free) and no lost wake.
 - **FR-005**: Waiter resumption MUST remain always-posted (never inline/synchronous-dispatched into the resuming context), preserving the existing reentrancy-safety guarantee.
-- **FR-006**: Genuinely-concurrent (non-strand-serialized) drain MUST be documented as unsupported; where it is cheaply detectable at runtime it MUST be surfaced as a diagnostic/rejection rather than silently hanging or corrupting state. It MUST NOT be "resolved" by making the witness deterministic in a way that hides the unsupported nature.
+- **FR-006**: Genuinely-concurrent (non-strand-serialized) drain MUST be documented as unsupported (documentation-primary contract). Where a cheap on-owning-executor check is available, a **debug-build assertion** MUST surface the misuse rather than letting it silently hang or corrupt state; no release-build runtime gate is required (the `direct_executor` attestation path cannot always be detected, and a hot-path gate is not warranted). It MUST NOT be "resolved" by making the witness deterministic in a way that hides the unsupported nature.
 - **FR-007**: The change MUST NOT alter the observable behavior of the four production consumers (Session write-gate, SeqnumManager, MemoryStore, FileStore) on any supported path.
-- **FR-008**: No public API or ABI surface change is permitted beyond (a) the new `sync_lock_alloc_failed` error variant and its C-ABI mapping, and (b) the narrowed/clarified drain-contract documentation.
+- **FR-008**: No public API or ABI surface change is permitted. The OOM fix reuses the existing `sync_lock_alloc_failed` variant (no new error code, no C-ABI enumerator change). The only externally-visible change is the narrowed/clarified drain-contract documentation. (FR-007 ABI-no-change, as in 047.)
 - **FR-009**: Removing the drain's cross-thread shared-pointer slot MUST reduce the libc++ portability fallback's `std::atomic<std::shared_ptr<>>` consumer set from four to three, without affecting the remaining three consumers (engine reader-snapshot, transport cert-source slot, pinset snapshot).
 
 ### Key Entities
@@ -82,7 +89,7 @@ The awaitable mutex's drain capability is documented as supporting only strand-s
 - **Awaitable mutex (`fixpp::sync::async_mutex`)**: the NFR-016 coroutine-aware mutex. Holds a lock state, a queue of parked waiter records, and a drain terminal state. This feature removes its cross-thread convergence members.
 - **Waiter record**: a per-acquirer record (refcounted, embedded in the caller's coroutine frame) representing a parked or in-flight acquisition. Retained across this change; resumed via a posted continuation.
 - **Drain operation (`cancel_and_drain`)**: the owning-side teardown that rejects future acquisitions and reaps current waiters, satisfying the mutex's destruction precondition. Narrowed to strand-local synchronous reap.
-- **Lock-allocation error (`sync_lock_alloc_failed`)**: a new fail-closed error variant returned when lock setup cannot allocate.
+- **Lock-allocation error (`sync_lock_alloc_failed`)**: the EXISTING fail-closed error variant (`error.hpp:87`, code 44) returned when lock setup cannot allocate; this feature extends its use from the explicit-PMR path to the default-path asio-internal allocation sites. Not a new symbol.
 
 ## Success Criteria *(mandatory)*
 
@@ -100,5 +107,5 @@ The awaitable mutex's drain capability is documented as supporting only strand-s
 - **This feature supersedes 047** (PR #143) and is branched off `main` (the shipped 006 baseline), not off 047. The 047 converging-loop work is abandoned, not extended.
 - **046 (atomic_shared_ptr / libc++ portability, PR #142) rebases on this feature.** Removing the drain latch reduces 046's migrated `atomic<shared_ptr>` consumer set 4→3; the other three consumers still require the fallback.
 - The retained resumption discipline (always-post) and the anti-double-resume cancellation arbitration are kept; only the cross-thread *convergence* machinery is removed.
-- No new wire, codegen, or configuration surface is introduced; the only new public symbol is the `sync_lock_alloc_failed` error variant.
+- No new wire, codegen, configuration, or error/ABI surface is introduced (`sync_lock_alloc_failed` already exists; the OOM fix reuses it). The only externally-visible change is documentation of the narrowed drain contract.
 - Full gates apply (this narrows an advertised contract): spec → clarify → plan → Gate A → tasks → analyze → checklist → checklist-audit → implement → simplify → verify → Gate B, per constitution Article XVII.
