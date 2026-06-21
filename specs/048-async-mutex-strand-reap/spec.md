@@ -7,6 +7,14 @@
 
 **Supersedes**: feature 047 (`047-async-mutex-drain-reap`, PR #143). 047's cross-thread converging-loop / Dekker / feeder-count / drain-latch approach left a residual multi-threaded orphan (047 W-B1: 3/25 standalone runs deadlock at both 5 s and 30 s; `entered=6/completed=5/drain_done=0`). This feature removes that machinery rather than patching it further. Full background: `research/findings/000-PLAN-libcxx-consolidation.md` (§1, §3, §5).
 
+## Normative References
+
+- `.specify/2f-async-mutex.md` (the signed-off `async_mutex` design doc — §1.1 magnitude domain, §3.1 `drain_latch_state`, §4.1 member set, §4.5 cancellation-result table, §4.7.3 drain invariants, §4.7.4 consumer discipline, Errata E-1..E-4; this feature adds Erratum E-5). The governing design reference.
+- `.specify/constitution.md` — Article XI (concurrency / no std::mutex in awaitable headers), Article X §1 (frozen C ABI), §XII.5 (no-implicit-default / fail-closed), Article XVII (gates).
+- `.specify/architecture.md` — the layer model (the primitive stays in `core/sync`; no new layer edge).
+- Predecessor feature bundle `specs/006-async-mutex/` (the shipped primitive 048 amends) and `specs/047-async-mutex-drain-reap/` (the superseded converging-loop approach).
+- *Engineering-judgment exemption:* ISO/FIX wire specifications are not directly cited — `async_mutex` is a transport/parse-agnostic synchronization primitive with no wire surface.
+
 ## Clarifications
 
 ### Session 2026-06-22
