@@ -1,3 +1,3 @@
 {
-  "feature_directory": "specs/045-observability-config"
+  "feature_directory": "specs/048-async-mutex-strand-reap"
 }
