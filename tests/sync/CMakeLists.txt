@@ -175,5 +175,3 @@ add_test(NAME check_no_std_mutex_corpus
     "${CMAKE_SOURCE_DIR}/include/fixpp/session/reconnect_fsm.hpp"
     "${CMAKE_SOURCE_DIR}/include/fixpp/session/retrieve_visitor.hpp"
 )
-# TEMP-047-DIAG (remove): debug counters for WB4 stuck-reaper diagnosis.
-target_compile_definitions(sync_drain_reap_blockers PRIVATE FIXPP_ASYNC_MUTEX_DEBUG_COUNTERS)

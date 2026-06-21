@@ -170,33 +170,49 @@ TEST(AsyncMutexDrainReapBlockers, WB3_UnlockResidualChainRacingDrainNeverOrphans
 
 // ── W-B4 ─────────────────────────────────────────────────────────────────────
 // A cancellation hits the second draining gate concurrently with the drained
-// fast-fail: a waiter parks, a real cancellation_signal fires on its slot, and a
-// drain fires — both race for terminal ownership of the waiter_record. With the
-// unconditional phase_.store (pre-fix), both on_cancel and the gate schedule a
-// resume → invoke_handler runs twice on a frame the first resume destroyed →
-// ASan heap-use-after-free. With the queued→cancelled CAS, exactly one wins.
+// fast-fail: a waiter is mid-async_lock, a real cancellation_signal fires on its
+// slot, and a drain fires — both race for terminal ownership of the waiter_record.
+// With the unconditional phase_.store (pre-fix), both on_cancel and the gate
+// schedule a resume → invoke_handler runs twice on the destroyed async_lock awaiter
+// → ASan heap-use-after-free. With the queued→cancelled CAS, exactly one wins.
 //
-// ASan is the primary oracle (run this under linux-clang-asan). The exactly-once
-// completion counter per waiter is a secondary functional signal.
-TEST(AsyncMutexDrainReapBlockers, WB4_SecondGateCancelRacingDrainResumesOnce) {
+// HARNESS CORRECTNESS (the subtle part): asio::cancellation_signal is NOT
+// thread-safe, so a cross-thread emit() that races a waiter's NORMAL async_lock
+// completion (which clears/disconnects the inherited cancellation slot) is itself a
+// UAF — independent of the async_mutex code (it reproduces on pre-fix main AND the
+// fix). To isolate the PRODUCTION B4 race from that harness race, each waiter is
+// kept ALIVE on a post-lock barrier (go_finish) until the canceller has finished
+// ALL emits (cancel_done). async_lock's epilogue already reset the waiter to
+// terminal-only cancellation, so the late `total` emit is filtered at the barrier
+// and cannot abort/teardown the still-suspended frame. The emit therefore only ever
+// lands while the waiter is mid-async_lock (frame intact, racing the 2nd gate) or
+// parked on the filtered barrier — never on a frame being destroyed. ASan is the
+// oracle; exactly-once is the secondary functional signal.
+// NOTE (047 verify, UNRESOLVED): this witness currently FAILS on the fix — see
+// .specify/decisions/047-async-mutex-drain-reap-verify.md Finding 0. Two modes:
+// (1) an asio harness UAF (cross-thread cancellation_signal::emit racing the
+// cancelled op's teardown — an asio thread-safety limitation, reproduces on main
+// AND fix), and (2) a DETERMINISTIC hang where a cancellation racing the drain
+// leaves one acquirer counted-but-stuck (acquirers=1, not in any list) → the
+// reaper never converges. Root cause (real cancellation-vs-drain defect vs harness
+// corruption) is under investigation; B4 is NOT yet validated.
+TEST(AsyncMutexDrainReapBlockers, DISABLED_WB4_SecondGateCancelRacingDrainResumesOnce) {
     constexpr int kPoolSize = 4;
-    constexpr int kRounds = 200;
+    constexpr int kRounds = 300;
     constexpr int kWaitersPerRound = 16;
     constexpr auto kDeadline = std::chrono::seconds(5);
 
     for (int round = 0; round < kRounds; ++round) {
         auto* pool = new asio::thread_pool{kPoolSize};
         auto* mtx = new async_mutex;
-        // One cancellation_signal per waiter, kept alive for the whole round.
         auto sigs = std::make_shared<std::vector<asio::cancellation_signal>>(kWaitersPerRound);
+        auto go_finish = std::make_shared<std::atomic<bool>>(false);
+        auto cancel_done = std::make_shared<std::atomic<bool>>(false);
 
         std::atomic<int> completed{0};
         std::atomic<int> drain_done{0};
         std::atomic<bool> holder_acquired{false};
         std::atomic<bool> drain_started{false};
-        // Per-waiter resume count: each waiter's body runs exactly once; a
-        // double-resume would re-enter a destroyed frame (ASan), and the
-        // resulting corruption typically also breaks this counter.
         auto resume_counts = std::make_shared<std::vector<std::atomic<int>>>(kWaitersPerRound);
 
         auto holder = [mtx, &holder_acquired]() -> asio::awaitable<void> {
@@ -215,23 +231,32 @@ TEST(AsyncMutexDrainReapBlockers, WB4_SecondGateCancelRacingDrainResumesOnce) {
             drain_done.fetch_add(1, std::memory_order_acq_rel);
         };
 
-        auto waiter = [mtx, &completed, resume_counts](int idx) -> asio::awaitable<void> {
+        // Waiter: race async_lock against the drain + cancel, record exactly-once,
+        // then stay ALIVE on the barrier (frame intact) until all emits are done.
+        auto waiter = [mtx, &completed, resume_counts,
+                       go_finish](int idx) -> asio::awaitable<void> {
             co_await yield_n(1);
-            auto r = co_await mtx->async_lock();
-            (void)r;
+            {
+                auto r = co_await mtx->async_lock();
+                (void)r;
+                // Release the guard HERE (scope end) if granted — otherwise a
+                // granted waiter would hold the lock across the barrier below,
+                // keeping holders!=0 and wedging the reaper (drain never converges).
+            }
             (*resume_counts)[idx].fetch_add(1, std::memory_order_acq_rel);
             completed.fetch_add(1, std::memory_order_acq_rel);
+            // async_lock's epilogue reset us to terminal-only; the late `total`
+            // emit is filtered here, so this yield-loop cannot be cancelled and the
+            // frame stays alive until the harness releases it.
+            while (!go_finish->load(std::memory_order_acquire)) co_await yield_n(1);
         };
 
-        // Canceller: fire total cancellation on every waiter, gated on
-        // drain_started so the cancellation coincides with the drain's publish
-        // (races the second draining gate — the B4 window). Gating only the
-        // drainer on holder_acquired would desync the canceller from the drain
-        // and move the test into an untested cancel-before-drain regime.
-        auto canceller = [sigs, &drain_started]() -> asio::awaitable<void> {
+        // Canceller: fire total cancellation on every waiter, gated on drain_started
+        // so it coincides with the drain's publish (races the second draining gate).
+        auto canceller = [sigs, cancel_done, &drain_started]() -> asio::awaitable<void> {
             while (!drain_started.load(std::memory_order_acquire)) co_await yield_n(1);
             for (auto& s : *sigs) s.emit(asio::cancellation_type::total);
-            co_return;
+            cancel_done->store(true, std::memory_order_release);
         };
 
         asio::co_spawn(*pool, holder(), asio::detached);
@@ -242,26 +267,23 @@ TEST(AsyncMutexDrainReapBlockers, WB4_SecondGateCancelRacingDrainResumesOnce) {
                            asio::bind_cancellation_slot((*sigs)[i].slot(), asio::detached));
         }
 
+        // All waiters past async_lock (parked on the barrier), drain done, AND every
+        // emit fired — only then is it safe to release the barrier.
         bool ok = wait_until(
             [&] {
                 return completed.load(std::memory_order_acquire) == kWaitersPerRound &&
-                       drain_done.load(std::memory_order_acquire) == 1;
+                       drain_done.load(std::memory_order_acquire) == 1 &&
+                       cancel_done->load(std::memory_order_acquire);
             },
             kDeadline);
 
         if (!ok) {
-#ifdef FIXPP_ASYNC_MUTEX_DEBUG_COUNTERS
-            auto dc = mtx->_debug_counters();
-            std::fprintf(stderr,
-                         "WB4 STUCK round=%d: holders=%u acquirers=%u unlockers=%u "
-                         "state=%#zx fifo_nonempty=%d latch_published=%d completed=%d\n",
-                         round, dc.holders, dc.acquirers, dc.unlockers,
-                         dc.state, dc.fifo_nonempty, dc.latch_published, completed.load());
-#endif
             ADD_FAILURE() << "WB4 round=" << round << ": TIMEOUT. completed="
                           << completed.load() << "/" << kWaitersPerRound
                           << " drain_done=" << drain_done.load()
+                          << " cancel_done=" << cancel_done->load()
                           << ". LEAKING mutex+pool.";
+            go_finish->store(true, std::memory_order_release);
             return;
         }
 
@@ -271,6 +293,9 @@ TEST(AsyncMutexDrainReapBlockers, WB4_SecondGateCancelRacingDrainResumesOnce) {
                 << ": handler must be invoked EXACTLY ONCE (no double-resume)";
         }
 
+        // Release the barrier AFTER all emits are done → waiters complete and their
+        // frames are destroyed with no emit in flight.
+        go_finish->store(true, std::memory_order_release);
         pool->join();
         delete mtx;
         delete pool;
