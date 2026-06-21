@@ -102,6 +102,14 @@ add_sync_test(sync_cancel_and_drain_reentrant_after_abort
 add_sync_test(sync_reentrant_drain_uaf_window
     test_reentrant_drain_uaf_window.cpp)
 
+# ── 047-async-mutex-drain-reap witness registrations ─────────────────────────
+# W-orig: the hardened moved-046 late-waiter orphan witness (FR-006).
+# W-B1..W-B4: the four blocker-discriminating witnesses (one file).
+add_sync_test(sync_drain_latch_publish_acquire
+    test_async_mutex_drain_latch_publish_acquire.cpp)
+add_sync_test(sync_drain_reap_blockers
+    test_async_mutex_drain_reap_blockers.cpp)
+
 # ── Polish seam registrations (T068, T078) ───────────────────────────────────
 # Seam #18: weak-memory contention stress verifying the I-01..I-31 ordering
 # spec under a multi-threaded io_context (TSan is the portable check; native
