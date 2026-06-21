@@ -32,7 +32,7 @@ ROOT="${1:-$(cd "$(dirname "$0")/.." && pwd)}"
 # `using atomic_shared_ptr = std::atomic<std::shared_ptr<T>>`). Anchored to
 # exactly the primitive header (Gate B #2 — detect.hpp carries no raw form, so
 # it no longer needs an exemption).
-ALLOW_RE='include/fixpp/core/sync/detail/atomic_shared_ptr\.hpp'
+ALLOW_RE='^include/fixpp/core/sync/detail/atomic_shared_ptr\.hpp$'
 
 # Raw spellings that fail under libc++. The free-function `std::atomic_*` forms
 # are matched as bare calls (they only ever applied to shared_ptr and were

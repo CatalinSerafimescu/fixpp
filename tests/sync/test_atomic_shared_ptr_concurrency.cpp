@@ -119,7 +119,12 @@ TEST(AtomicSharedPtrPublishAcquireOrdering, WriterReaderNeverSeesTornPayload) {
           stop.store(true, std::memory_order_relaxed);
           return;
         }
-        valid_reads.fetch_add(1, std::memory_order_relaxed);
+        // Gate B r2: count ONLY writer-produced payloads (a >= 1). The seed has
+        // a == 0, so a reader that only ever sees the seed (ineffective writer
+        // stores) does NOT satisfy the assertion below.
+        if (snapshot->a > 0) {
+          valid_reads.fetch_add(1, std::memory_order_relaxed);
+        }
       }
     });
   }
