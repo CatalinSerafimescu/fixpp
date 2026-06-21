@@ -10,8 +10,10 @@ document records the counter model, the new convergence invariant **I-33**, the
 ### Existing (unchanged shape)
 - **`waiter_record`** — an in-flight `async_lock()` attempt; reaches exactly one
   terminal `waiter_phase` (`granted` / `cancelled`); refcounted (I-32).
-- **`drain_latch_state`** — cross-thread latch (`released_`, `aborted_`,
-  `in_flight_resumptions_`), published via `drain_latch_ptr_`.
+- **`drain_latch_state`** — cross-thread latch, published via `drain_latch_ptr_`.
+  `in_flight_resumptions_` unchanged; its two terminal bools `released_`/`aborted_`
+  are **replaced** by the single atomic `terminal_` (see NEW below — structurally
+  amended, R2-B2).
 - **`active_holders_count_`** — the **sink** counter: parties currently holding the
   lock.
 - **`active_acquirers_count_`** — **feeder**: parties inside `async_lock()` between
@@ -75,10 +77,11 @@ CONVERGE (loop):
         └── holders == 0 ──> CONFIRM_SCAN: exchange both lists
              ├── empty   ──> CONVERGED
              └── nonempty ─> reap; CONVERGE        # edge #1 caught a late push
-FINALIZE     -> CAS state_ locked_no_waiters->not_locked
-                (terminal-flag check: publish release via released_-vs-aborted_
-                 resolution so a late cancel cannot double-publish — see research B4-tail);
-                signal_release(); clear drain_latch_ptr_
+FINALIZE     -> CAS state_ locked_no_waiters->not_locked;
+                signal_release() = CAS terminal_ pending->released (returns win?);
+                  on WIN: close channel, clear drain_latch_ptr_, return success
+                  on LOSS (a late cancel already set terminal_=aborted): keep latch
+                    published, return sync_lock_aborted  (single-winner — R2-B2)
 ```
 
 Every feeder terminal decrement, when a latch is published, calls `latch->notify()`

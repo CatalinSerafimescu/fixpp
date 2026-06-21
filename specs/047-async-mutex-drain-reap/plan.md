@@ -64,7 +64,7 @@ No public API, ABI, wire, codegen, error-code, or config change (FR-007) — the
 **Target Platform**: Linux (Tier 1 libstdc++ blocking; libc++ Tier 3 on-demand), Windows Tier 2
 **Project Type**: C++ library (header-only concurrency primitive in `include/fixpp/core/sync/`)
 **Performance Goals**: No new allocation, no new suspension on any existing path; uncontended fast path unchanged
-**Constraints**: `noexcept` operation preserved; lock-free protocol; preserve invariants **I-1..I-32** (incl. I-32 waiter_record reclamation — the convergence invariant is the NEW **I-33**, not I-32) and the F-2/F-3 Gate-B hardening fixes; FIFO-fair grant order
+**Constraints**: `noexcept` operation preserved; lock-free protocol; preserve invariants **I-1..I-31 unchanged**, **I-32 soundness note amended** (single-walker — see data-model §AMENDED), **NEW I-33** (convergence); the F-2/F-3 Gate-B hardening fixes; FIFO-fair grant order
 **Scale/Scope**: Single header `async_mutex.hpp`, three functions — `cancel_and_drain()` (converging loop, feeder-before-sink quiesce, B4 CAS), `async_lock()` (seq_cst acquirer handshake, notify on feeder decrements), `unlock()` (new `active_unlockers_count_` bracket + seq_cst handshake). One new private atomic member. Five+ discriminating witnesses (one per blocker + the moved original).
 
 **Scope clarification (Gate A round 1 — corrects spec prose "drain protocol only /

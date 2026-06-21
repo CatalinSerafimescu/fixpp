@@ -32,7 +32,7 @@ core increment; US2/US3 are verification + durability around it.
 
 - [ ] T001 [P] Move `test_async_mutex_drain_latch_publish_acquire.cpp` from the 046 branch into `tests/sync/` on this branch and register it in `tests/sync/CMakeLists.txt` (046 will drop its copy on rebase).
 - [ ] T002 Harden the moved witness per FR-006: real `asio::thread_pool` with **≥4 workers, ≥32 racing acquirers/round, ≥100 rounds/invocation**, an **internal self-deadline** (fast attributable FAIL, never a lane hang), a **fresh mutex per round**, and **orphan-at-teardown safety** (isolated child-process or leak-safe timeout — the mutex dtor rejects a non-empty state). Prefer polling a done-flag over `use_future` for cross-thread joins (removes the libc++ teardown noise of finding 1).
-- [ ] T003 [P] Capture the RED baseline harness in `research/findings/` notes: `taskset -c 0,1` release loop reproducing the hang on `main` (per `quickstart.md`); record the pre-fix repro rate.
+- [ ] T003 [P] Capture the RED baseline harness in `../../research/findings/` (parent-repo, alongside the existing 046 findings — the submodule has no `research/findings/`): `taskset -c 0,1` release loop reproducing the hang on `main` (per `quickstart.md`); record the pre-fix repro rate.
 
 ---
 
@@ -59,11 +59,11 @@ fix's mutation-revert goes RED.
 
 - [ ] T007 [P] [US1] Author `tests/sync/test_async_mutex_drain_reap_blockers.cpp` with **W-B3** (a holder with a residual `W1→W2` chain in `next_drain_head_` unlocks concurrently with a drain; assert W2 is reaped, drain does not finalize early) — RED vs `main`.
 - [ ] T008 [P] [US1] Add **W-B4** to the blockers file (cancellation hits the second draining gate concurrently with the drained fast-fail; assert the awaiter's handler is invoked exactly once) — RED vs `main`.
-- [ ] T009 [US1] Confirm **W-orig** (the moved hardened witness) is RED vs `main` (self-deadline trips on the orphan) and record it.
+- [ ] T009 [US1] Confirm **W-orig** (the moved hardened witness) is RED vs `main` (self-deadline trips on the orphan) and record it. *(Requires T001 + T002 — the witness must be moved and hardened first.)*
 
 ### Implementation (sequential — all in `include/fixpp/core/sync/async_mutex.hpp`)
 
-- [ ] T010 [US1] **B3** — `unlock()` (~L947-1057): wrap the whole body in an RAII guard that increments `active_unlockers_count_` at the very top **before** `holders--` (L951) and the `draining_` read, and decrements (**seq_cst**, via the T006 helper) at every return **after** any `push_residual` (L978/L1033)/grant. Recursion-safe (L1004/L1055 are not returns — never `unlockers--; unlock(); return`). Make the L953 `draining_` load **seq_cst** (edge #2′).
+- [ ] T010 [US1] **B3** — `unlock()` (~L947-1057): wrap the whole body in **one RAII entry/exit guard** (NOT explicit per-return decrements) that increments `active_unlockers_count_` at the very top **before** `holders--` (L951) and the `draining_` read, and on scope exit decrements (**seq_cst**, via the T006 notify helper) **after** any `push_residual` (L978/L1033)/grant. **Recursion-safe: NEVER `unlockers--; unlock(); return`** — L1004/L1055 are re-drives, not returns; the outer guard must stay counted across them (transient count 2, never a premature 0). Make the L953 `draining_` load **seq_cst** (edge #2′).
 - [ ] T011 [US1] **B4** — `async_lock()` second draining gate (~L868-875): replace the unconditional `phase_.store(cancelled)` with a `phase_.compare_exchange(queued→cancelled)`; **set result + schedule only on CAS win**; run **common cleanup (acquirer dec via helper + creator-ref release) for BOTH outcomes**.
 - [ ] T012 [US1] **B-orig + B2** — `cancel_and_drain()` (~L1142-1233): replace the linear (g)→(h)→finalize with the **converging reap+quiesce loop** — drain both lists, read feeders (`acquirers`/`unlockers` **seq_cst**, `resumptions` acquire) **before** the sink (`holders` acquire), wait on any nonzero, then a confirming list-exchange; finalize only when all feeders 0 ∧ holders 0 ∧ confirming scan empty in one pass. `draining_.store(true)` → **seq_cst** (L1110). Finalize uses the `signal_release()` CAS-win result (clear ptr + success only on win; else keep latch + return aborted).
 - [ ] T013 [US1] **edge #2 + B1 (acquire side)** — `async_lock()`: make the entry `active_acquirers_count_.fetch_add` (L776) and **both** `draining_` loads (L780, L868) **seq_cst**; route **all** acquirer terminal decrements (L781/793/835/850/869/887/907) through the T006 notify helper (seq_cst).
@@ -101,7 +101,7 @@ no-op. (FR-004/005.)
 
 - [ ] T021 [P] Coverage (Article IX §1, lcov DA/BRDA): the converging loop's new branches (confirming-empty vs late-waiter; each feeder-wait arm; the B4 CAS-win/loss arms; the terminal-state CAS-win/loss arms) hit by a witness or carry a recorded Opus waiver in `.specify/decisions/047-async-mutex-drain-reap-verify.md`.
 - [ ] T022 [P] Perf (FR-005 / Article VIII §2): confirm the uncontended `async_lock` fast path stays within ±5% (bench or asm diff on a supported arch) despite the seq_cst entry increment + both `draining_` loads.
-- [ ] T023 [P] Static analysis: clang-tidy / clang-format / cppcheck / IWYU clean on `async_mutex.hpp` + the new/moved witnesses.
+- [ ] T023 [P] Static analysis: clang-tidy / clang-format / cppcheck / IWYU clean on `async_mutex.hpp` + the new/moved witnesses. **Also verify FR-007**: confirm no public signature / ABI surface change (the new `active_unlockers_count_` + `terminal_` are private members; `async_mutex`'s public method set is unchanged) — header-diff or `nm` spot-check.
 - [ ] T024 Completeness audit (tasks ↔ FR-001..009 / SC-001..006 ↔ catalogue, 100% or waived — `/gate-b` precondition) + update `spec/feature-catalogue.md` + `spec/coverage-index.md` + `spec/behaviors-and-limitations.md` (any B-047/L-047 rows; note the latent-defect-now-fixed disposition).
 - [ ] T025 `codegraph sync` (submodule cwd) after the code change so the index reflects the new member + reaper structure.
 

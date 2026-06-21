@@ -72,7 +72,8 @@ order, the uncontended no-suspension fast path, idempotent/concurrent
 `cancel_and_drain()` re-entry, the reentrant-drain use-after-free closure, the
 reaper's own-cancellation handling, `noexcept` operation, and the documented
 acquisition/ordering invariants. The serialized (single-strand) execution path —
-the only path used in production — must be a semantic no-op change.
+the only path used in production — must be a **functional** no-op (identical
+observable behavior; only emitted memory-order instructions differ — see FR-005).
 
 **Why this priority**: The drain protocol is delicate (lock-free, with a body of
 binding invariants and two prior hardening fixes). A fix that regresses any of
