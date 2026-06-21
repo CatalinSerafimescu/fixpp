@@ -568,7 +568,9 @@ TEST(FixTimeParse, LenientWidths_1to9) {
         std::int64_t frac_val = 0;
         for (int i = 0; i < n; ++i) frac_val = frac_val * 10 + (fracs[n-1][i] - '0');
         const auto expected_ns = nanoseconds{base_sec * 1'000'000'000LL + frac_val * scale[n]};
-        const auto expected_tp = utc_time_point{duration_cast<system_clock::duration>(expected_ns)};
+        // utc_time_point::duration is nanoseconds (pinned for cross-stdlib portability);
+        // no duration_cast needed — ns is the native precision of utc_time_point.
+        const auto expected_tp = utc_time_point{duration_cast<utc_time_point::duration>(expected_ns)};
         EXPECT_EQ(*r, expected_tp)
             << "width " << n << " ns offset mismatch; [data-model E3 / I-NST-3]";
     }
@@ -669,7 +671,8 @@ TEST(FixTimeParse, Nanos27_RoundTrip) {
     // Expected: 2024-01-01T00:00:00.123456789Z
     const std::int64_t base_sec = 1704067200LL;
     const auto expected_ns = nanoseconds{base_sec * 1'000'000'000LL + 123'456'789LL};
-    const auto expected_tp = utc_time_point{duration_cast<system_clock::duration>(expected_ns)};
+    // utc_time_point::duration is nanoseconds; no system_clock truncation.
+    const auto expected_tp = utc_time_point{duration_cast<utc_time_point::duration>(expected_ns)};
     EXPECT_EQ(*r, expected_tp)
         << "27-char nanos parse must yield +123_456_789 ns; [I-NST-2 / New-3 / contract C3]";
 

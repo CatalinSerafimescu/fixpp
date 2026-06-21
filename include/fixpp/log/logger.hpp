@@ -275,8 +275,8 @@ inline void enqueue_record(Logger* logger, Level level, Category category, std::
         if constexpr (static_cast<int>(::fixpp::log::Level::lvl) >= FIXPP_LOG_MIN_LEVEL) { \
             ::fixpp::log::detail::enqueue_record_notrace(                                  \
                 (logger_ptr), ::fixpp::log::Level::lvl, (cat), FIXPP_FORMAT_ID(fmt),       \
-                ::fixpp::core::utc_time_point{                                             \
-                    std::chrono::system_clock::now().time_since_epoch()},                  \
+                std::chrono::time_point_cast<std::chrono::nanoseconds>(                    \
+                    std::chrono::system_clock::now()),                                     \
                 {__VA_ARGS__});                                                            \
         }                                                                                  \
     } while (false)
@@ -308,8 +308,8 @@ inline void enqueue_record(Logger* logger, Level level, Category category, std::
                 (logger_ptr), ::fixpp::log::Level::lvl, (cat), FIXPP_FORMAT_ID(fmt),       \
                 reinterpret_cast<std::array<std::uint8_t, 16> const&>((tc).trace_id),      \
                 std::bit_cast<std::uint64_t>((tc).span_id),                                \
-                ::fixpp::core::utc_time_point{                                             \
-                    std::chrono::system_clock::now().time_since_epoch()},                  \
+                std::chrono::time_point_cast<std::chrono::nanoseconds>(                    \
+                    std::chrono::system_clock::now()),                                     \
                 {__VA_ARGS__});                                                            \
         }                                                                                  \
     } while (false)
@@ -333,12 +333,9 @@ inline void enqueue_record(Logger* logger, Level level, Category category, std::
         if constexpr (static_cast<int>(::fixpp::log::Level::lvl) >= FIXPP_LOG_MIN_LEVEL) {        \
             auto const _elog_tc = (engine_ref).engine_trace_context();                            \
             auto const _elog_ts = (engine_ref).clock()                                            \
-                                      ? ::fixpp::core::utc_time_point{(engine_ref)                \
-                                                                          .clock()                \
-                                                                          ->now()                 \
-                                                                          .time_since_epoch()}    \
-                                      : ::fixpp::core::utc_time_point{                            \
-                                            std::chrono::system_clock::now().time_since_epoch()}; \
+                                      ? (engine_ref).clock()->now()                               \
+                                      : std::chrono::time_point_cast<std::chrono::nanoseconds>(   \
+                                            std::chrono::system_clock::now());                    \
             ::fixpp::log::detail::enqueue_record(                                                 \
                 (logger_ptr), ::fixpp::log::Level::lvl, (cat), FIXPP_FORMAT_ID(fmt),              \
                 reinterpret_cast<std::array<std::uint8_t, 16> const&>(_elog_tc.trace_id),         \

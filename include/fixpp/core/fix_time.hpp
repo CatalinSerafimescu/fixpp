@@ -36,7 +36,9 @@ namespace fixpp::core {
 // Reuse [2d §4.1] alias: utc_time_point is already declared in clock.hpp.
 // Re-declare here independently so fix_time.hpp is self-contained (no forced
 // pull of clock.hpp and its asio dependency from the session/core path).
-using utc_time_point = std::chrono::time_point<std::chrono::system_clock>;
+// Pinned to nanoseconds for cross-stdlib precision portability (feature
+// 026-nanosecond-sendingtime; libc++ system_clock::duration is µs).
+using utc_time_point = std::chrono::time_point<std::chrono::system_clock, std::chrono::nanoseconds>;
 
 // ── Precision selector ───────────────────────────────────────────────────────
 
