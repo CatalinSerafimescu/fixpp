@@ -95,8 +95,9 @@ TEST(AtomicSharedPtrPublishAcquireOrdering, WriterReaderNeverSeesTornPayload) {
   const int kReaderCount = 4;
   const int kIterations = 20000;
 
-  // Seed a valid payload so a reader that wins the very first scheduling slot
-  // still observes a consistent (non-null) value to count.
+  // Seed a valid (a == 0) payload so readers never load null before the writer's
+  // first store. The seed is deliberately NOT counted toward valid_reads (only
+  // writer payloads with a > 0 are) — see the reader loop below.
   {
     auto seed = std::make_shared<Payload>();
     seed->a = 0; seed->b = 0; seed->c = 0; seed->checksum = 0;
