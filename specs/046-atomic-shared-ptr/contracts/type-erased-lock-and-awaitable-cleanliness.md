@@ -4,7 +4,7 @@
 
 ## Goal
 
-Keep `atomic_shared_ptr.hpp` free of `std::mutex` (and the FR-014 six banned mutex types) on **every** standard library, so the two awaitable consumers that include it (`async_mutex.hpp`, `engine.hpp`) never breach Article XI §3 / XV §9 — without amending the constitution.
+Keep `atomic_shared_ptr.hpp` free of `std::mutex` (and the five other banned `std::` mutex types enumerated in FR-012) on **every** standard library, so the two awaitable consumers that include it (`async_mutex.hpp`, `engine.hpp`) never breach Article XI §3 / XV §9 — without amending the constitution.
 
 ## Header/`.cpp` boundary
 
