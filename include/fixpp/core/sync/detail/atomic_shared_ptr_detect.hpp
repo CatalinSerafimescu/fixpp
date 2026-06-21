@@ -15,7 +15,7 @@
 #error "FIXPP_FORCE_ATOMIC_SHARED_PTR_FALLBACK and FIXPP_FORCE_ATOMIC_SHARED_PTR_NATIVE cannot both be defined."
 #endif
 
-// Conservative feature detection for std::atomic<std::shared_ptr<T>>:
+// Conservative feature detection for the std atomic-shared-ptr primitive (P0718):
 // - libc++: force fallback due hard-error instantiation behavior.
 // - libstdc++ and MSVC-STL: native only when macro level is known-good.
 // - unknown: fallback by default.

@@ -99,8 +99,17 @@ class atomic_shared_ptr {
   // operations; stronger memory_order values are accepted for API compatibility.
   void store(value_type desired,
              std::memory_order = std::memory_order_seq_cst) noexcept {
-    detail::shard_guard guard(this);
-    value_ = std::move(desired);
+    // Hold the displaced pointee in a local and let it destruct AFTER the shard
+    // lock is released — matches std::atomic<std::shared_ptr> (which deletes the
+    // old value past the update) and avoids a re-entrant deadlock if the
+    // pointee's destructor touches a same-shard atomic_shared_ptr (the shard
+    // mutex is non-recursive). Gate B P1.
+    value_type previous;
+    {
+      detail::shard_guard guard(this);
+      previous = std::move(value_);
+      value_ = std::move(desired);
+    }
   }
 
   value_type load(std::memory_order = std::memory_order_seq_cst) const noexcept {
@@ -132,13 +141,26 @@ class atomic_shared_ptr {
   bool compare_exchange_strong(value_type& expected, value_type desired,
                                std::memory_order /*success*/,
                                std::memory_order /*failure*/) noexcept {
-    detail::shard_guard guard(this);
-    if (equivalent(expected, value_)) {
-      value_ = std::move(desired);
-      return true;
+    // Same deferred-destruction discipline as store() (Gate B P1): the pointee
+    // displaced under the lock (the old value_ on success, or the old `expected`
+    // on failure) is moved into `displaced` and destructs only after the shard
+    // guard is released. The success path's `value_ = desired` and the failure
+    // path's `expected = value_` then run with no destructor under the lock.
+    value_type displaced;
+    bool matched = false;
+    {
+      detail::shard_guard guard(this);
+      if (equivalent(expected, value_)) {
+        displaced = std::move(value_);
+        value_ = std::move(desired);
+        matched = true;
+      } else {
+        displaced = std::move(expected);
+        expected = value_;
+        matched = false;
+      }
     }
-    expected = value_;
-    return false;
+    return matched;
   }
 
   bool compare_exchange_strong(

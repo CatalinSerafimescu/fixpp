@@ -168,8 +168,11 @@ VIOLATIONS=0
 
 for HEADER in "${HEADERS[@]}"; do
     if [[ ! -f "$HEADER" ]]; then
-        echo "check_no_std_mutex_in_awaitable_headers: WARNING: header not found: $HEADER" >&2
-        continue
+        # 046 Gate B #3: a SUPPLIED corpus header that does not exist is an ERROR,
+        # not a warning — a deleted/renamed/mistyped entry must not silently
+        # shrink the constitutional gate to a no-op.
+        echo "check_no_std_mutex_in_awaitable_headers: ERROR: corpus header not found: $HEADER" >&2
+        exit 2
     fi
 
     TMP_PP=$(mktemp /tmp/check_mutex_XXXXXX.pp)

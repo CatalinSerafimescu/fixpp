@@ -28,15 +28,24 @@ set -euo pipefail
 
 ROOT="${1:-$(cd "$(dirname "$0")/.." && pwd)}"
 
-# The one file allowed to mention the std form (its native-path alias).
-ALLOW_RE='include/fixpp/core/sync/detail/atomic_shared_ptr(_detect)?\.hpp'
+# The ONE file allowed to mention the std form (its native-path alias
+# `using atomic_shared_ptr = std::atomic<std::shared_ptr<T>>`). Anchored to
+# exactly the primitive header (Gate B #2 — detect.hpp carries no raw form, so
+# it no longer needs an exemption).
+ALLOW_RE='include/fixpp/core/sync/detail/atomic_shared_ptr\.hpp'
 
-# Raw spellings that fail under libc++.
+# Raw spellings that fail under libc++. The free-function `std::atomic_*` forms
+# are matched as bare calls (they only ever applied to shared_ptr and were
+# deprecated/removed in C++20), so the match does NOT depend on the argument
+# variable name containing "shared" (Gate B #2).
+# Known limitation: a member declaration split across lines (e.g. the template
+# `std::atomic<` and `std::shared_ptr<...>` on separate lines) is not caught by
+# this line-based scan — the in-tree form is single-line; recorded, not a gap.
 PATTERNS=(
   'std::atomic[[:space:]]*<[[:space:]]*std::shared_ptr'
-  'std::atomic_load[[:space:]]*\([[:space:]]*&?[A-Za-z_].*shared'
-  'std::atomic_store[[:space:]]*\([[:space:]]*&?[A-Za-z_].*shared'
-  'std::atomic_exchange[[:space:]]*\([[:space:]]*&?[A-Za-z_].*shared'
+  'std::atomic_load[[:space:]]*\('
+  'std::atomic_store[[:space:]]*\('
+  'std::atomic_exchange[[:space:]]*\('
   'std::atomic_compare_exchange'
 )
 

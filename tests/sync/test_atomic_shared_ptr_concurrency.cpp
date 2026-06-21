@@ -84,9 +84,49 @@ TEST(AtomicSharedPtrPublishAcquireOrdering, WriterReaderNeverSeesTornPayload) {
   fixpp::sync::atomic_shared_ptr<Payload> ptr;
   std::atomic<bool> stop{false};
   std::atomic<bool> observed_broken{false};
+  // Gate B #4: count validated non-null reader observations so the test fails if
+  // the writer raced ahead and finished before any reader ever loaded (a
+  // stimulus-guarded no-op). A barrier (readers_ready + go) also forces all
+  // readers into their loop BEFORE the writer publishes.
+  std::atomic<int> valid_reads{0};
+  std::atomic<int> readers_ready{0};
+  std::atomic<bool> go{false};
 
   const int kReaderCount = 4;
   const int kIterations = 20000;
+
+  // Seed a valid payload so a reader that wins the very first scheduling slot
+  // still observes a consistent (non-null) value to count.
+  {
+    auto seed = std::make_shared<Payload>();
+    seed->a = 0; seed->b = 0; seed->c = 0; seed->checksum = 0;
+    ptr.store(seed, std::memory_order_release);
+  }
+
+  std::vector<std::thread> readers;
+  readers.reserve(kReaderCount);
+  for (int t = 0; t < kReaderCount; ++t) {
+    readers.emplace_back([&]() {
+      readers_ready.fetch_add(1, std::memory_order_relaxed);
+      while (!go.load(std::memory_order_acquire)) { /* spin to the barrier */ }
+      while (!stop.load(std::memory_order_relaxed)) {
+        auto snapshot = ptr.load(std::memory_order_acquire);
+        if (!snapshot) {
+          continue;
+        }
+        if (snapshot->checksum != (snapshot->a + snapshot->b + snapshot->c)) {
+          observed_broken.store(true, std::memory_order_relaxed);
+          stop.store(true, std::memory_order_relaxed);
+          return;
+        }
+        valid_reads.fetch_add(1, std::memory_order_relaxed);
+      }
+    });
+  }
+
+  // Barrier: do not start publishing until every reader is in its loop.
+  while (readers_ready.load(std::memory_order_relaxed) < kReaderCount) { /* spin */ }
+  go.store(true, std::memory_order_release);
 
   std::thread writer([&]() {
     for (int i = 1; i <= kIterations && !stop.load(std::memory_order_relaxed); ++i) {
@@ -100,24 +140,6 @@ TEST(AtomicSharedPtrPublishAcquireOrdering, WriterReaderNeverSeesTornPayload) {
     stop.store(true, std::memory_order_relaxed);
   });
 
-  std::vector<std::thread> readers;
-  readers.reserve(kReaderCount);
-  for (int t = 0; t < kReaderCount; ++t) {
-    readers.emplace_back([&]() {
-      while (!stop.load(std::memory_order_relaxed)) {
-        auto snapshot = ptr.load(std::memory_order_acquire);
-        if (!snapshot) {
-          continue;
-        }
-        if (snapshot->checksum != (snapshot->a + snapshot->b + snapshot->c)) {
-          observed_broken.store(true, std::memory_order_relaxed);
-          stop.store(true, std::memory_order_relaxed);
-          return;
-        }
-      }
-    });
-  }
-
   writer.join();
   for (auto& thread : readers) {
     thread.join();
@@ -125,6 +147,44 @@ TEST(AtomicSharedPtrPublishAcquireOrdering, WriterReaderNeverSeesTornPayload) {
 
   EXPECT_FALSE(observed_broken.load(std::memory_order_relaxed))
       << "A torn/partial Payload was observed — store/load ordering is broken";
+  EXPECT_GT(valid_reads.load(std::memory_order_relaxed), 0)
+      << "No reader ever observed a published value — the publish/acquire "
+         "stimulus did not actually overlap a reader (Gate B #4).";
+}
+
+// ── Gate B P1 regression: pointee destructor re-enters the SAME atomic ────────
+//
+// Without deferred destruction, store()/CAS would run the displaced pointee's
+// destructor while holding the (non-recursive) shard mutex; a destructor that
+// re-enters the same atomic_shared_ptr re-locks the same shard → deadlock (the
+// test would HANG). With the fix (displaced pointee destructs after the guard
+// is released), the re-entrant store/load completes. Self-referential so the
+// shard always collides. Forced-fallback only (the alias path has no shard).
+TEST(AtomicSharedPtrReentrantDtor, DisplacedPointeeDtorReentersSameAtomicNoDeadlock) {
+#if FIXPP_ATOMIC_SHARED_PTR_NATIVE_ACTIVE
+  GTEST_SKIP() << "native alias path has no shard lock; re-entrancy is N/A";
+#else
+  struct Reentrant {
+    fixpp::sync::atomic_shared_ptr<Reentrant>* owner = nullptr;
+    ~Reentrant() {
+      // Re-enter the same atomic from the displaced pointee's destructor.
+      if (owner != nullptr) {
+        (void)owner->load(std::memory_order_acquire);
+      }
+    }
+  };
+
+  fixpp::sync::atomic_shared_ptr<Reentrant> a;
+  auto first = std::make_shared<Reentrant>();
+  first->owner = &a;
+  a.store(first, std::memory_order_release);
+  first.reset();  // a holds the only strong ref now
+
+  // This store displaces `first`'s pointee; its dtor calls a.load() — must NOT
+  // deadlock. If it hangs, the deferred-destruction fix regressed.
+  a.store(std::make_shared<Reentrant>(), std::memory_order_release);
+  SUCCEED() << "re-entrant displaced-pointee destructor did not deadlock";
+#endif
 }
 
 // ── Row 3: refcount integrity under contention ────────────────────────────────
