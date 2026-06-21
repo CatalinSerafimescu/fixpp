@@ -8,7 +8,7 @@ After the four consumers are migrated, prevent any project header/source from re
 
 ## Behavior
 
-- **Scan scope**: project-owned `include/**` + `src/**` (and any other first-party C++ tree). **Exclude**: the primitive header `include/fixpp/sync/atomic_shared_ptr.hpp` (the legitimate sole site of `std::atomic<std::shared_ptr>` in the native-alias branch), `tests/**` fixtures that intentionally probe raw forms (if any — none planned), third-party/Conan paths.
+- **Scan scope**: project-owned `include/**` + `src/**` (and any other first-party C++ tree). **Exclude**: the primitive header `include/fixpp/core/sync/detail/atomic_shared_ptr.hpp` (the legitimate sole site of `std::atomic<std::shared_ptr>` in the native-alias branch), `tests/**` fixtures that intentionally probe raw forms (if any — none planned), third-party/Conan paths.
 - **Detect**:
   - `std::atomic<std::shared_ptr` (any whitespace/`const` variation) — primary.
   - `std::atomic_load`/`atomic_store`/`atomic_exchange`/`atomic_compare_exchange*` applied to a `shared_ptr` (the free-function P0718-deprecated form).

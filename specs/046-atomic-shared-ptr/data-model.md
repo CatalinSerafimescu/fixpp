@@ -36,10 +36,10 @@ Two resolutions selected at preprocess time by `FIXPP_ATOMIC_SHARED_PTR_NATIVE_A
 
 ## E-3 — Shard table + type-erased lock (fallback internals)
 
-- 128 `std::mutex` in a function-local-static `std::array`, **defined in `src/sync/atomic_shared_ptr.cpp`** (one shared global table for all `atomic_shared_ptr` instances) — NOT in the header.
-- The header declares only `detail::shard_guard` (opaque RAII): `explicit shard_guard(const void* self) noexcept` (ctor hashes `self`, locks the shard, stores the index), `~shard_guard()` (unlocks), copy-deleted. Both bodies live in the `.cpp`. So `<mutex>` and the `std::mutex` token are **absent from the header** → §XI.3/§XV.9 satisfied on every path (E-5).
+- 128 `std::mutex` in a function-local-static `std::array`, **defined in `src/core/sync/atomic_shared_ptr.cpp`** (one shared global table for all `atomic_shared_ptr` instances; the `.cpp` is **always compiled** into the promoted `fixpp_sync` STATIC/OBJECT target on every mode — see the always-ship-guard decision, research D-9 / contract CT-4) — NOT in the header.
+- The header (`include/fixpp/core/sync/detail/atomic_shared_ptr.hpp`) declares only `detail::shard_guard` (RAII): `explicit shard_guard(const void* self) noexcept` (ctor hashes `self`, locks the shard, records the index in `shard_index_`), `~shard_guard()` (unlocks `shard_index_`), copy- **and move-deleted**. Its single header-visible member is `std::size_t shard_index_` (a plain integer — **not** a `std::mutex*`/`std::unique_lock`, which would re-introduce a banned token). Both ctor/dtor bodies live in the `.cpp`. So `<mutex>` and the `std::mutex` token are **absent from the header** → §XI.3/§XV.9 satisfied on every path (E-5). The `noexcept` ctor `std::terminate`s if `std::mutex::lock()` throws — deliberate `std::atomic`-no-throw match (Clarifications 2026-06-21 / contract New-C).
 - Shard chosen by hashing the **object's address** (`this`) with a murmur-style finalizer (`x ^= x>>33; x *= 0xff51afd7ed558ccd; x ^= x>>33; & 127`) — unchanged from the harness; now computed inside the `.cpp` guard ctor.
-- Consequence: distinct instances may share a shard (bounded false contention, never incorrectness); acceptable on the non-perf portability path. The `.cpp` is compiled only when `FIXPP_ATOMIC_SHARED_PTR_NATIVE_ACTIVE == 0` (empty TU on native).
+- Consequence: distinct instances may share a shard (bounded false contention, never incorrectness); acceptable on the non-perf portability path. The `.cpp` is **always compiled** (always-ship-guard, D-9/CT-4); on native the `shard_guard` symbols it defines are **present-but-never-called** (the alias path never constructs a guard → the function-local-static lazy-init never fires), so native pays **zero runtime overhead** and SC-005 holds.
 
 ## E-4 — The four migrated members (state transitions = atomic publish/replace)
 
@@ -50,7 +50,25 @@ Two resolutions selected at preprocess time by `FIXPP_ATOMIC_SHARED_PTR_NATIVE_A
 | 3 | `cert_source_slot_` | `include/fixpp/transport/transport_factory.hpp:210` | `load(acquire)` / `store(v, release)` (`src/transport/transport_factory.cpp`) | No | — |
 | 4 | `reader_snapshot_` (`shared_ptr<const ReaderSnapshot>`) | `include/fixpp/session/engine.hpp:466` | `load(acquire)` / `store(v, release)` (`src/session/engine.cpp:190/246/1592`) | **Yes** | **reverses CHK046** |
 
-Each member's "state" is a single immutable `shared_ptr` snapshot, replaced wholesale via `store` after building the new value; readers `load` lock-free (native) or shard-locked (fallback). No partial mutation. Migration = change the member type `std::atomic<std::shared_ptr<X>>` → `fixpp::sync::atomic_shared_ptr<X>` + add the `#include "fixpp/sync/atomic_shared_ptr.hpp"`; **no call-site change** (D-5).
+Each member's "state" is a single immutable `shared_ptr` snapshot, replaced wholesale via `store` after building the new value; readers `load` lock-free (native) or shard-locked (fallback). No partial mutation. Migration = change the member type `std::atomic<std::shared_ptr<X>>` → `fixpp::sync::atomic_shared_ptr<X>` + add the `#include "fixpp/core/sync/detail/atomic_shared_ptr.hpp"`; **no call-site *logic* change** (D-5), but the migration is **not comment-free** — see the stale-documentation census below.
+
+### E-4a — Stale-documentation + lock-free-assumption census (Codex #8 / New-D)
+
+"No call-site change" does **not** mean "no source change": several existing comments and any `is_lock_free`/perf-gate assumptions become false on the fallback path and MUST be corrected as part of the migration (they otherwise survive `/implement` as false records). The census (each must be reworded to "atomic snapshot load; native path lock-free status is implementation-defined, fallback path shard-locked"):
+
+| Site | Current (false on fallback) | Action |
+|---|---|---|
+| `src/tls/pinset.cpp:8` | "Reader path: lock-free — single acquire-load on snapshot_." | reword (lock-free only on native) |
+| `include/fixpp/tls/pinset.hpp:118-120` | `find()` doc: "Lookup on the handshake-hot path. **Lock-free** — acquire-load on snapshot_." (source-verified) | reword: lock-free **only on native**; on the libc++/forced-fallback path the `load(acquire)` takes a shard mutex (correctness/portability over speed — see plan:22) |
+| `bench/tls/bench_pinset_snapshot_acquire.cpp` (`[2g §9 seam #4]`, soft gate `[const §VIII.2]`) | `detect_snapshot_ceiling_ns()` returns a **30 ns** "lock-free atomic<shared_ptr>" ceiling; branches on `#if defined(__cpp_lib_atomic_shared_ptr)` (L46-52, source-verified) | (a) the **30 ns lock-free ceiling is false on the fallback path** (the shard-locked `load` is not lock-free) → define a separate, **no-lock-free-ceiling** expectation for the libc++/forced-fallback lane; (b) **New-P3-2**: the detector MUST branch on the **fixpp selector** `FIXPP_ATOMIC_SHARED_PTR_NATIVE_ACTIVE`, **not** the raw `__cpp_lib_atomic_shared_ptr` feature-test macro — otherwise a forced-fallback build under libstdc++ (where `__cpp_lib_atomic_shared_ptr` is still defined) reports a **false-green** 30 ns lock-free ceiling. (Soft gate, so it won't hard-fail CI, but it mis-measures silently.) |
+| `bench/tls/bench_pinset_find.cpp` (`[2g §9 seam #5]`, soft gate `[const §VIII.2]`) | combined **≤130 ns** ceiling ("snapshot_acquire ≤30 ns + scan_16 ≤100 ns"); same `#if defined(__cpp_lib_atomic_shared_ptr)` branch (L37-42, source-verified) | same two fixes as above — revise the libc++/forced-fallback ceiling (no 30 ns lock-free floor for the snapshot leg) and key the detector off `FIXPP_ATOMIC_SHARED_PTR_NATIVE_ACTIVE` (New-P3-2) |
+| `include/fixpp/session/engine.hpp:460-462` | "Standard C++20 std::atomic<shared_ptr<>> — NO std::mutex in our headers … Not lock-free on all STLs … correctness does not depend on lock-freedom." | reword: the "Standard C++20 std::atomic" identity is literally wrong post-migration (it is now `fixpp::sync::atomic_shared_ptr`); keep the "no std::mutex in our headers" claim (still true via type-erasure) + the lock-freedom hedge |
+| `include/fixpp/session/engine.hpp:119` | "Standard C++20 `std::atomic<std::shared_ptr<const ReaderSnapshot>>`" | reword to name `fixpp::sync::atomic_shared_ptr` |
+| `include/fixpp/core/sync/async_mutex.hpp:21` (prose) | "lazy drain_latch_state via atomic shared_ptr" | reword to the primitive's name |
+| `include/fixpp/transport/transport_factory.hpp:86-87` (prose) | "std::atomic<std::shared_ptr<…>>" | reword to the primitive's name |
+| consumer **test suites** + the **V-6 perf gate** | any `static_assert(is_always_lock_free)` / perf-gate assumption of lock-freedom (the two pinset benches above are the concrete realization of this risk) | grep the four consumers' tests + V-6; confirm **none** asserts lock-freedom (the forced-fallback lane would violate it) — New-D |
+
+Mutation-check: confirm the obsolete **023 CHK046 prohibition** ("avoid the unshipped `atomic_shared_ptr`; pin the standard primitive") is **absent** from active 023 artifacts after the FR-013 reversal (not just superseded in prose) — see research D-8.
 
 ## E-5 — Awaitable-header cleanliness (NO constitution change)
 
@@ -64,4 +82,4 @@ Each member's "state" is a single immutable `shared_ptr` snapshot, replaced whol
 
 ## E-7 — Census-regrowth guard (`tools/check_no_raw_atomic_shared_ptr.sh`)
 
-Input: project-owned headers + sources (exclude the primitive header + tests/third-party). Detects raw `std::atomic<std::shared_ptr` (and `std::atomic_{load,store,exchange,compare_exchange}` on a `shared_ptr`). Exit non-zero on any match outside `include/fixpp/sync/atomic_shared_ptr.hpp`. Wired into the gate set; SC-004 mutation-tests it.
+Input: project-owned headers + sources (exclude the primitive header + tests/third-party). Detects raw `std::atomic<std::shared_ptr` (and `std::atomic_{load,store,exchange,compare_exchange}` on a `shared_ptr`). Exit non-zero on any match outside `include/fixpp/core/sync/detail/atomic_shared_ptr.hpp`. Wired into the gate set; SC-004 mutation-tests it.
