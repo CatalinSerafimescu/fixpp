@@ -38,7 +38,13 @@ document records the counter model, the new convergence invariant **I-33**, the
   (`enum class drain_terminal { pending, released, aborted }`) — **replaces** the two
   bools `released_`/`aborted_` (R2-B2). `signal_release`/`signal_abort` CAS from
   `pending`; only the winner closes the channel and fixes the outcome. Subscribers +
-  the idempotent fast paths read this single state.
+  the idempotent fast paths read this single state. **Binding finalize rules (Gate A
+  r3):** (1) `signal_release()` MUST return whether its CAS won; (2) the reaper
+  finalize clears `drain_latch_ptr_` + returns success ONLY on a winning release
+  CAS — on loss (a concurrent cancel already set `aborted`) it keeps the latch
+  published and returns `sync_lock_aborted`; (3) the channel is closed ONLY by the
+  CAS winner (never on CAS failure); (4) terminal write is sequenced-before the
+  channel close so a woken subscriber never reads `pending`.
 
 ## Counter model
 
