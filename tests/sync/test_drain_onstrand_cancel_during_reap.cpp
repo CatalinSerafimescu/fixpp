@@ -133,10 +133,21 @@ TEST(DrainOnStrandCancelDuringReap, OnCancelWinsWhenCancelPrecedesDrain) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Ordering (b): the reap wins; a LATER cancel on a reaped waiter loses + no-ops.
+// Ordering (b): a cancel emitted AFTER the drain has reaped a waiter is BENIGN —
+// no double-resume, no crash. NOTE (Gate B r2): the EXACT reap-wins-then-on_cancel-
+// CAS-loss micro-window is NOT deterministically witnessable at the public API: the
+// reaper posts each waiter's resume FIFO, and those resumes run (completing the
+// waiter coroutine and detaching its cancellation slot) BEFORE any external code
+// gets a strand turn to emit — so a later emit hits a detached slot. The single-
+// winner CAS is therefore proven by (a) `OnCancelWinsWhenCancelPrecedesDrain` above
+// (fully deterministic: on_cancel wins, the reaper's CAS loses) + the SYMMETRIC
+// source CAS (`phase_.compare_exchange_strong(queued, cancelled)` — exactly one of
+// {on_cancel, reap} succeeds; the loser observes phase!=queued and no-ops). This
+// test asserts the BEHAVIORAL property a real caller cares about: a post-drain
+// cancel on a reaped waiter does not double-resume it (completed==N, ASan-clean).
 // ─────────────────────────────────────────────────────────────────────────────
 
-TEST(DrainOnStrandCancelDuringReap, ReapWinsLaterCancelNoOps) {
+TEST(DrainOnStrandCancelDuringReap, PostDrainCancelIsBenignNoDoubleResume) {
     constexpr int N = 8;
     constexpr int REPS = 50;
 

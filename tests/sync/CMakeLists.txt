@@ -1,4 +1,10 @@
-# tests/sync/CMakeLists.txt — 006-async-mutex test suite (29 named seams).
+# tests/sync/CMakeLists.txt — async_mutex test suite (35 registered sync_* seams;
+# the `add_sync_test(...)` calls below are authoritative). 048 / Erratum E-5: +6
+# strand-local drain witnesses (sync_drain_strand_local_reap / _immediate_destroy /
+# _reentrant_during_active / _onstrand_cancel / _predrain_holder / sync_async_mutex_
+# layout_golden); −3 retired cross-thread-machinery tests (reaper_abort_subscribers,
+# cancel_and_drain_reentrant_after_abort, reentrant_drain_uaf_window). The historical
+# US-map comments below predate 048 and are not kept in lockstep — trust add_sync_test.
 # Every test registers under the `sync_` CTest name prefix so
 # `ctest --preset linux-clang-debug -R '^sync_'` selects the full seam set
 # (quickstart §2).  ASan/UBSan/TSan/coverage are driven by the active preset;
