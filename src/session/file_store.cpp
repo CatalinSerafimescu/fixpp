@@ -529,20 +529,20 @@ struct OsFile {
         return h != INVALID_HANDLE_VALUE;
     }
 
-    [[nodiscard]] bool try_lock() noexcept {
+    [[nodiscard]] bool try_lock() const noexcept {
         OVERLAPPED ov{};
         return LockFileEx(h, LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY, 0, MAXDWORD,
                           MAXDWORD, &ov) != 0;
     }
 
-    void unlock() noexcept {
+    void unlock() const noexcept {
         if (h != INVALID_HANDLE_VALUE) {
             OVERLAPPED ov{};
             UnlockFileEx(h, 0, MAXDWORD, MAXDWORD, &ov);
         }
     }
 
-    [[nodiscard]] bool pwrite_all(const void* buf, std::size_t n, std::int64_t offset) noexcept {
+    [[nodiscard]] bool pwrite_all(const void* buf, std::size_t n, std::int64_t offset) const noexcept {
         const auto* p = static_cast<const char*>(buf);
         std::size_t remaining = n;
         std::int64_t off = offset;
@@ -562,7 +562,7 @@ struct OsFile {
         return true;
     }
 
-    [[nodiscard]] SSIZE_T pread_all(void* buf, std::size_t n, std::int64_t offset) noexcept {
+    [[nodiscard]] SSIZE_T pread_all(void* buf, std::size_t n, std::int64_t offset) const noexcept {
         auto* p = static_cast<char*>(buf);
         std::size_t total = 0;
         std::int64_t off = offset;
@@ -584,16 +584,16 @@ struct OsFile {
         return static_cast<SSIZE_T>(total);
     }
 
-    [[nodiscard]] bool datasync() noexcept { return FlushFileBuffers(h) != 0; }
+    [[nodiscard]] bool datasync() const noexcept { return FlushFileBuffers(h) != 0; }
 
-    [[nodiscard]] bool truncate(std::int64_t new_size) noexcept {
+    [[nodiscard]] bool truncate(std::int64_t new_size) const noexcept {
         LARGE_INTEGER li;
         li.QuadPart = new_size;
         if (!SetFilePointerEx(h, li, nullptr, FILE_BEGIN)) return false;
         return SetEndOfFile(h) != 0;
     }
 
-    [[nodiscard]] std::int64_t file_size() noexcept {
+    [[nodiscard]] std::int64_t file_size() const noexcept {
         LARGE_INTEGER sz{};
         if (!GetFileSizeEx(h, &sz)) return -1;
         return sz.QuadPart;
@@ -781,9 +781,12 @@ struct FileStoreImpl {
     // Returns true on success; false means caller should return store_factory_failed.
     bool restart_scan(const std::string& log_path) noexcept {
         // Step 0: Unlink stale .log.reset.tmp if present (I-14 / T042 prep).
+        // Portable existence-check + remove (this is common code on both
+        // platforms; POSIX ::access(F_OK)/::unlink are not available on MSVC).
         const std::string tmp_path = log_path + ".reset.tmp";
-        if (::access(tmp_path.c_str(), F_OK) == 0) {
-            ::unlink(tmp_path.c_str());
+        std::error_code tmp_ec;
+        if (std::filesystem::exists(tmp_path, tmp_ec)) {
+            std::filesystem::remove(tmp_path, tmp_ec);
         }
 
         const std::int64_t fsize = file.file_size();
@@ -1792,7 +1795,14 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::flush_for_session_clos
 // ── FileStore::open_log() — internal open called from FileStoreFactory::make() ─
 
 bool FileStore::open_log(const std::string& log_path) noexcept {
+    // Win32 OsFile::open takes a wide path (CreateFileW); convert via
+    // std::filesystem::path. The other Win32 open callers (in the #else branch of
+    // the reset logic) already pass wide strings; this common caller did not.
+#ifdef _WIN32
+    if (!impl_->file.open(std::filesystem::path(log_path).wstring().c_str())) return false;
+#else
     if (!impl_->file.open(log_path.c_str())) return false;
+#endif
     if (!impl_->file.try_lock()) return false;
 
     // RC#6 + N4: initialise PMR scratch buffers now that cfg is fully populated.
