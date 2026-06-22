@@ -11,8 +11,9 @@ on:
     types: [labeled]
   workflow_dispatch:
 
-env:
-  CONAN_HOME: C:\Users\runneradmin\.conan2
+# CONAN_HOME is set on the Windows job ONLY (it is a Windows path). The abidiff
+# job runs on ubuntu and must use the default ~/.conan2 — a workflow-level
+# CONAN_HOME=C:\... broke it with "Invalid CONAN_HOME value".
 
 jobs:
   # Only run on workflow_dispatch or PRs labeled 'run-tier2'
@@ -43,6 +44,9 @@ jobs:
     runs-on: windows-2022
     needs: filter
     if: needs.filter.outputs.should_run == 'true'
+
+    env:
+      CONAN_HOME: C:\Users\runneradmin\.conan2
 
     strategy:
       fail-fast: false
@@ -84,6 +88,7 @@ jobs:
         run: |
           conan install . ^
             -pr conan/profiles/${{ matrix.preset }} ^
+            -s:b compiler.cppstd=20 ^
             --build=missing ^
             -of build/${{ matrix.preset }}
 
