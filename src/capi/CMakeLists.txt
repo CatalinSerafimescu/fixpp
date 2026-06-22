@@ -39,10 +39,23 @@ target_link_libraries(fixpp_capi PUBLIC fixpp_capi_objects)
 if(FIXPP_BUILD_TESTS)
   add_library(fixpp_capi_shared SHARED)
   target_link_libraries(fixpp_capi_shared PUBLIC fixpp_capi_objects)
-  set_target_properties(fixpp_capi_shared PROPERTIES OUTPUT_NAME fixpp_capi)
+  # OUTPUT_NAME makes the runtime artifact libfixpp_capi.so / fixpp_capi.dll.
+  # ARCHIVE_OUTPUT_NAME renames ONLY the Windows import library so it does not
+  # collide with the static fixpp_capi target's fixpp_capi.lib ("multiple rules
+  # generate lib/fixpp_capi.lib"). No effect on POSIX (a SHARED lib has no
+  # archive output there), so static→libfixpp_capi.a / shared→libfixpp_capi.so
+  # are unchanged on Linux.
+  set_target_properties(fixpp_capi_shared PROPERTIES
+    OUTPUT_NAME fixpp_capi
+    ARCHIVE_OUTPUT_NAME fixpp_capi_shared)
   # Only export fixpp_* symbols; hide all C++ internals (decimal_traits, etc.)
   # per [const §X.2]. Version script is more reliable than -fvisibility=hidden
-  # across object libraries with transitive C++ deps.
-  target_link_options(fixpp_capi_shared PRIVATE
-    "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/fixpp_capi.map")
+  # across object libraries with transitive C++ deps. GNU-ld/lld only — MSVC's
+  # link.exe rejects -Wl,--version-script (Windows symbol export would use a .def
+  # / __declspec; the shared lib is test-only and has no Windows consumer yet —
+  # the Python wheel is Linux-only, PY-005).
+  if(NOT WIN32)
+    target_link_options(fixpp_capi_shared PRIVATE
+      "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/fixpp_capi.map")
+  endif()
 endif()
