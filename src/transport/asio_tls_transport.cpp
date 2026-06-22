@@ -144,7 +144,13 @@ std::chrono::system_clock::time_point asn1_time_to_tp(const ASN1_TIME* t) noexce
     if (ASN1_TIME_to_tm(t, &tm_val) != 1) {
         return {};
     }
+    // timegm is POSIX; _mkgmtime is the MSVC equivalent (both interpret UTC).
+    // Mirrors src/tls/certificate.cpp.
+#ifdef _WIN32
+    time_t epoch_seconds = _mkgmtime(&tm_val);
+#else
     time_t epoch_seconds = timegm(&tm_val);
+#endif
     if (epoch_seconds < 0) {
         return {};
     }

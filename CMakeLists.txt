@@ -101,6 +101,15 @@ endif()
 # paths unchanged when the option is not explicitly passed.
 add_compile_definitions(FIXPP_BUILD_OTEL=$<BOOL:${FIXPP_BUILD_OTEL}>)
 
+# Windows: <windows.h> (pulled transitively via openssl, and directly by the
+# file_store Win32 path) defines min/max as macros, which break std::min/std::max
+# (e.g. include/fixpp/transport/listener_events.hpp). NOMINMAX suppresses them;
+# WIN32_LEAN_AND_MEAN trims the rest of the windows.h surface. Global so every TU
+# that transitively includes windows.h is covered.
+if(WIN32)
+  add_compile_definitions(NOMINMAX WIN32_LEAN_AND_MEAN)
+endif()
+
 # ── 046-atomic-shared-ptr (NFR-017): atomic_shared_ptr force-mode overrides ───
 # Single target-level mode applied UNIFORMLY to the whole build via a global
 # compile definition (research D-9 / contract CT-4 — never a per-TU define).
