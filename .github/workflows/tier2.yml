@@ -80,21 +80,30 @@ jobs:
           restore-keys: |
             conan-win-${{ matrix.preset }}-
 
-      - name: Set up MSVC environment
-        uses: microsoft/setup-msbuild@v2
+      # setup-msbuild only adds msbuild to PATH; it does NOT run vcvars, so cl.exe
+      # is absent and the Ninja-generator presets fail "CMAKE_CXX_COMPILER (cl.exe)
+      # not found". msvc-dev-cmd activates the full MSVC dev environment (cl.exe +
+      # vcvars) and exports it via GITHUB_ENV so it persists into the cmd steps.
+      - name: Set up MSVC environment (vcvars)
+        uses: ilammy/msvc-dev-cmd@v1
 
-      - name: Conan install
+      # OTel-OFF for the first lane-bring-up: skip the protobuf/abseil/grpc build so
+      # the toolchain/configure/codegen path converges in fast (~10 min) cycles.
+      # Flip with_otel=True (the V1.0 CI requirement) once the lane is proven green;
+      # the build-ctx cppstd=20 fix is already in place for that flip.
+      - name: Conan install (OTel-OFF — first lane bring-up)
         shell: cmd
         run: |
           conan install . ^
             -pr conan/profiles/${{ matrix.preset }} ^
+            -o "fixpp/*:with_otel=False" ^
             -s:b compiler.cppstd=20 ^
             --build=missing ^
             -of build/${{ matrix.preset }}
 
-      - name: Configure
+      - name: Configure (OTel-OFF)
         shell: cmd
-        run: cmake --preset ${{ matrix.preset }}
+        run: cmake --preset ${{ matrix.preset }} -DFIXPP_BUILD_OTEL=OFF
 
       - name: Build
         shell: cmd
