@@ -1,4 +1,10 @@
-# tests/sync/CMakeLists.txt — 006-async-mutex test suite (29 named seams).
+# tests/sync/CMakeLists.txt — async_mutex test suite (35 registered sync_* seams;
+# the `add_sync_test(...)` calls below are authoritative). 048 / Erratum E-5: +6
+# strand-local drain witnesses (sync_drain_strand_local_reap / _immediate_destroy /
+# _reentrant_during_active / _onstrand_cancel / _predrain_holder / sync_async_mutex_
+# layout_golden); −3 retired cross-thread-machinery tests (reaper_abort_subscribers,
+# cancel_and_drain_reentrant_after_abort, reentrant_drain_uaf_window). The historical
+# US-map comments below predate 048 and are not kept in lockstep — trust add_sync_test.
 # Every test registers under the `sync_` CTest name prefix so
 # `ctest --preset linux-clang-debug -R '^sync_'` selects the full seam set
 # (quickstart §2).  ASan/UBSan/TSan/coverage are driven by the active preset;
@@ -72,7 +78,18 @@ add_sync_test(sync_cancel_and_drain_concurrent   test_cancel_and_drain_concurren
 add_sync_test(sync_drain_latch_holder_lifecycle  test_drain_latch_holder_lifecycle.cpp)
 add_sync_test(sync_in_flight_acquirer_coverage   test_in_flight_acquirer_coverage.cpp)
 add_sync_test(sync_drain_awaitable_cancellation  test_drain_awaitable_cancellation.cpp)
-add_sync_test(sync_drain_reaper_abort_subscribers test_drain_reaper_abort_subscribers.cpp)
+# sync_drain_reaper_abort_subscribers — RETIRED (048 Erratum E-5): tested
+# cross-thread abort-subscriber machinery (drain_latch_state::signal_abort()/
+# subscriber channel) which is REMOVED by 048. The drain is now uninterruptible
+# and strand-local; no abort path or subscribers exist. Replaced by T009/T011.
+# sync_cancel_and_drain_reentrant_after_abort — RETIRED (048): tested the
+# F-2 gate-b/r1 regression lock (abort + reentrant → unexpected{sync_lock_aborted}).
+# With E-5 the drain is uninterruptible; reentrant callers await draining_complete_
+# then return ok (not aborted). Replaced by T011 (test_drain_reentrant_during_active).
+# sync_reentrant_drain_uaf_window — RETIRED (048): tested the cross-thread F-3
+# residual UAF window (abort → reentrant → destroy while resumers in-flight).
+# With E-5 the UAF is prevented by in_flight_resumers_ instead of the latch;
+# witnessed by T010 (test_drain_immediate_destroy_after_reap).
 
 # ── Seam registrations (added red-first as Phase 2 / per-story tasks land) ────
 # US1 (T016–T025): sync_uncontended_latency #1, sync_contended_latency #2,
@@ -93,14 +110,28 @@ add_sync_test(sync_drain_reaper_abort_subscribers test_drain_reaper_abort_subscr
 # Polish: sync_arm64_weak_memory #18 (T068); sync_consumer_contract_compile (T078)
 
 # ── Gate-B/r1 seam registrations (F-2 regression lock + F-3-residual UAF) ────
-# Seam #30: reentrant cancel_and_drain() after abort must return
-# unexpected{sync_lock_aborted}, not false success (F-2 regression lock).
-add_sync_test(sync_cancel_and_drain_reentrant_after_abort
-    test_cancel_and_drain_reentrant_after_abort.cpp)
-# Seam #31: in-flight-acquirer + reentrant-drain UAF window (F-3-residual).
-# I-6 escape-hatch (a) works post-F-2-fix; destroy after quiescence is safe.
-add_sync_test(sync_reentrant_drain_uaf_window
-    test_reentrant_drain_uaf_window.cpp)
+# Seam #30: RETIRED (048 Erratum E-5) — was sync_cancel_and_drain_reentrant_after_abort.
+# Tests removed abort path. Replaced by sync_drain_reentrant_during_active (T011).
+# Seam #31: RETIRED (048 Erratum E-5) — was sync_reentrant_drain_uaf_window.
+# Tests removed cross-thread UAF window. Replaced by sync_drain_immediate_destroy (T010).
+
+# ── 048 strand-local-reap witness registrations (T009–T013, T020) ────────────
+# T009: SC-001 stress — N waiters on one strand, cancel_and_drain() reaps all,
+#   no hang, internal 5s self-deadline.
+add_sync_test(sync_drain_strand_local_reap        test_drain_strand_local_reap.cpp)
+# T010: UAF guard — destroy mutex immediately after drain returns; ASan proves
+#   in_flight_resumers_==0 held at drain return (INV-D).
+add_sync_test(sync_drain_immediate_destroy        test_drain_immediate_destroy_after_reap.cpp)
+# T011: reentrant drain — second cancel_and_drain() while first suspended awaits
+#   draining_complete_, returns ok (not false-success).
+add_sync_test(sync_drain_reentrant_during_active  test_drain_reentrant_during_active.cpp)
+# T012: on-strand cancel during reap — CAS single-winner; each waiter resolved
+#   exactly once; TSan-libstdc++ clean.
+add_sync_test(sync_drain_onstrand_cancel          test_drain_onstrand_cancel_during_reap.cpp)
+# T013: pre-drain holder — loop yields until holder unlocks; drain finalizes.
+add_sync_test(sync_drain_predrain_holder          test_drain_predrain_holder.cpp)
+# T020: layout golden — alignof==16; sizeof < 047 baseline (131152).
+add_sync_test(sync_async_mutex_layout_golden      test_async_mutex_layout_golden.cpp)
 
 # ── Polish seam registrations (T068, T078) ───────────────────────────────────
 # Seam #18: weak-memory contention stress verifying the I-01..I-31 ordering

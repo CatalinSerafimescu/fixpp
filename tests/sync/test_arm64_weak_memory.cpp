@@ -68,68 +68,14 @@ TEST(SeamArm64WeakMemory, MultiThreadedContentionMutualExclusion) {
     EXPECT_EQ(completed.load(), N) << "lost or double-completed coroutine";
 }
 
-// Graceful-close under multi-thread contention: a holder holds while a drain
-// runs concurrently and a wave of acquirers enqueues; exercises the
-// next_drain_head_ splice + waiter_record reclamation (I-32) + latch
-// signalling ordering across threads. No overlap, no leak, no hang.
-TEST(SeamArm64WeakMemory, DrainUnderMultiThreadContention) {
-    constexpr int N = 1'500;
-    const unsigned T = std::max(2u, std::thread::hardware_concurrency());
-
-    std::atomic<int> in_critical{0};
-    std::atomic<int> overlap{0};
-    std::atomic<int> done{0};
-
-    asio::io_context ioc;
-    async_mutex mtx;
-
-    // §4.7.4 canonical graceful-close: the holder holds, then releases on its
-    // OWN bounded timeline (a fixed number of executor yields so the drain +
-    // acquirer wave are in flight); cancel_and_drain() runs concurrently, sets
-    // draining_, reaps the queued waiters, and WAITS for this holder. The
-    // holder must NOT wait for the drain to finish (that would deadlock — the
-    // drain is waiting for the holder).
-    auto holder = [&]() -> asio::awaitable<void> {
-        auto g = co_await mtx.async_lock();
-        EXPECT_TRUE(g.has_value());
-        for (int i = 0; i < 64; ++i)
-            co_await asio::post(co_await asio::this_coro::executor, asio::use_awaitable);
-        in_critical.fetch_add(1, std::memory_order_acq_rel);
-        in_critical.fetch_sub(1, std::memory_order_acq_rel);
-        // guard released here -> reaper observes the holder gone, finalises
-    };
-
-    auto acquirer = [&]() -> asio::awaitable<void> {
-        auto g = co_await mtx.async_lock();
-        if (g.has_value()) {
-            int v = in_critical.fetch_add(1, std::memory_order_acq_rel) + 1;
-            if (v > 1) overlap.fetch_add(1, std::memory_order_relaxed);
-            in_critical.fetch_sub(1, std::memory_order_acq_rel);
-        }
-        done.fetch_add(1, std::memory_order_acq_rel);
-    };
-
-    auto drainer = [&]() -> asio::awaitable<void> {
-        auto r = co_await mtx.cancel_and_drain();
-        EXPECT_TRUE(r.has_value());
-    };
-
-    auto fh = asio::co_spawn(ioc, holder(), asio::use_future);
-    std::vector<std::future<void>> futs;
-    futs.reserve(N);
-    for (int i = 0; i < N; ++i) futs.push_back(asio::co_spawn(ioc, acquirer(), asio::use_future));
-    auto fd = asio::co_spawn(ioc, drainer(), asio::use_future);
-
-    std::vector<std::thread> pool;
-    pool.reserve(T);
-    for (unsigned t = 0; t < T; ++t) pool.emplace_back([&] { ioc.run(); });
-    for (auto& th : pool) th.join();
-    fh.get();
-    fd.get();
-    for (auto& f : futs) f.get();
-
-    EXPECT_EQ(overlap.load(), 0) << "mutual exclusion broken during drain";
-    EXPECT_EQ(done.load(), N) << "an acquirer neither granted nor drained";
-}
+// NOTE (048 / Erratum E-5 / Gate B P2-5): the former `DrainUnderMultiThreadContention`
+// test ran cancel_and_drain() concurrently with acquirers/unlocks on a MULTI-THREADED
+// io_context. Under the strand-local-reap contract (contracts/async_mutex-contract.md
+// §Unsupported), drain-overlap with another thread's acquire/cancel/unlock is UNDEFINED
+// — so a green sanitizer result there exercises undefined behavior and proves nothing.
+// It was removed. Ordinary cross-thread async_lock/unlock contention (the §1.1 seam) IS
+// supported and remains covered by MultiThreadedContentionMutualExclusion above. The
+// unsupported drain-overlap is documentation-enforced (no production assertion seam,
+// Gate-A P2-4); we do NOT invoke the UB to "test" it.
 
 }  // namespace

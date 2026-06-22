@@ -1,19 +1,24 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // tests/sync/test_drain_awaitable_cancellation.cpp — Seam #26
 //
-// The cancel_and_drain() awaitable's OWN cancellation (RC-β).
+// cancel_and_drain() uninterruptible behaviour (Erratum E-5 / 048).
 //
-// co_spawn the drain with a bound cancellation_slot, queue waiters, emit
-// cancellation_type::total on the drain's slot mid-drain.
+// 048 narrowing: cancel_and_drain() now DISABLES its own cancellation at entry
+// (co_await disable_cancellation{}) and always runs to completion. The old
+// "abort path" (drain's own slot fires → returns sync_lock_aborted) is REMOVED.
+// The drain is uninterruptible per E-5 / contracts/async_mutex-contract.md.
 //
-// Expected behaviour:
-//   - cancel_and_drain() returns unexpected(error::sync_lock_aborted);
-//   - draining_ stays effective (a subsequent async_lock() returns
-//     sync_lock_drained — the drain flag is NOT cleared on abort);
-//   - no hang (all futures complete within the test timeout).
+// This test verifies:
+//   - A drain with a bound cancellation_slot that has its signal fired
+//     COMPLETES (no hang) and returns ok (has_value) — NOT aborted.
+//   - draining_ remains set; post-drain async_lock() returns sync_lock_drained.
+//   - No dangling futures (no hang).
 //
-// Oracle: [2f §9 #26] — "cancel_and_drain() awaitable own cancellation" (RC-β).
-//         [2f §4.7.3] — drain's own cancellation slot; draining_ stays set.
+// [superseded test removed: DrainCancelledReturnsAborted tested the OLD
+//  interruptible drain behaviour; the drain is now uninterruptible (E-5).]
+//
+// Oracle: [2f §4.7.3] E-5 (drain is uninterruptible); data-model.md state diagram.
+// SC-001: cancel_and_drain() completes even when its slot is signalled.
 
 #include <gtest/gtest.h>
 
@@ -28,6 +33,9 @@
 #include <asio/use_awaitable.hpp>
 #include <asio/use_future.hpp>
 #include <atomic>
+#include <chrono>
+#include <future>
+#include <vector>
 #include <fixpp/core/sync/async_mutex.hpp>
 
 #include "sync/sync_test_support.hpp"
@@ -42,34 +50,96 @@ using fixpp::sync::expected_t;
 using fixpp::sync::test::yield_n;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Test 1: cancel_and_drain() returns sync_lock_aborted when its own slot fires.
-// draining_ stays effective — post-cancel async_lock() returns sync_lock_drained.
+// Test: cancel_and_drain() is UNINTERRUPTIBLE — emit through the ATTACHED slot
+// while the drain is parked in its quiescence loop behind a held mutex (P2-3:
+// the prior version emitted BEFORE the slot was attached → stimulus-free no-op).
+// The DISCRIMINATOR: the drain must NOT return after the cancel (it ignored it and
+// is still waiting for the holder). An interruptible-drain regression returns early.
 // ─────────────────────────────────────────────────────────────────────────────
 
-TEST(SeamDrainAwaitableCancellation, DrainCancelledReturnsAborted) {
+TEST(SeamDrainAwaitableCancellation, CancelThroughAttachedSlotDoesNotInterrupt) {
+    asio::cancellation_signal drain_sig;
+    std::atomic<bool> drain_done{false};
+    std::atomic<bool> drain_ok{false};
+
+    asio::io_context ioc;
+    async_mutex mtx;
+
+    auto main_coro = [&]() -> asio::awaitable<void> {
+        auto ex = co_await asio::this_coro::executor;
+
+        // Hold the mutex so the drain cannot finalize (it parks in its quiescence
+        // loop waiting for active_holders_count_==0).
+        auto holder = co_await mtx.async_lock();
+        EXPECT_TRUE(holder.has_value());
+
+        // Spawn the drain WITH its cancellation slot bound (now the slot attaches).
+        asio::co_spawn(
+            ex,
+            [&]() -> asio::awaitable<void> {
+                auto d = co_await mtx.cancel_and_drain();
+                drain_ok.store(d.has_value(), std::memory_order_release);
+                drain_done.store(true, std::memory_order_release);
+            },
+            asio::bind_cancellation_slot(drain_sig.slot(), asio::detached));
+
+        // Let the drain start and enter its quiescence loop (holder still held).
+        co_await yield_n(8);
+        // Emit through the NOW-ATTACHED slot.
+        drain_sig.emit(asio::cancellation_type::total);
+        co_await yield_n(8);
+
+        // DISCRIMINATOR: the drain must NOT have returned — it ignored the cancel
+        // (uninterruptible, E-5) AND is still waiting for the holder.
+        EXPECT_FALSE(drain_done.load(std::memory_order_acquire))
+            << "drain returned after a cancel through its attached slot — not uninterruptible";
+
+        // Release the holder → the drain can finalize now.
+        holder = expected_t<async_lock_guard>{};
+        co_await yield_n(8);
+    };
+
+    auto f = asio::co_spawn(ioc, main_coro(), asio::use_future);
+    bool timed_out = false;
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (std::chrono::steady_clock::now() < deadline) {
+        ioc.run_for(std::chrono::milliseconds(50));
+        if (drain_done.load(std::memory_order_acquire) &&
+            f.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready)
+            break;
+    }
+    if (f.wait_for(std::chrono::milliseconds(0)) != std::future_status::ready) {
+        timed_out = true;
+        ioc.stop();
+    }
+    ASSERT_FALSE(timed_out) << "drain hung (or main coroutine did not finish)";
+    f.get();
+
+    EXPECT_TRUE(drain_done.load()) << "drain must complete after holder release";
+    EXPECT_TRUE(drain_ok.load())
+        << "cancel_and_drain() is uninterruptible (E-5); must return ok, not aborted";
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Test: cancel fired during drain mid-flight — drain still completes with ok.
+// (Replaces DrainCancelledReturnsAborted; verifies the OPPOSITE: no abort.)
+// ─────────────────────────────────────────────────────────────────────────────
+
+TEST(SeamDrainAwaitableCancellation, DrainCompletesEvenIfSlotFiredMidFlight) {
     constexpr int N = 4;
 
     asio::cancellation_signal drain_cancel_sig;
-    bool drain_aborted = false;
-    bool post_cancel_lock_drained = false;
+    bool drain_ok = false;
+    bool post_drain_lock_drained = false;
     std::atomic<int> waiter_completed{0};
 
     asio::io_context ioc;
-    async_mutex mtx;  // after ioc — drain channel binds to ioc's executor.
-
-    // Canonical §4.7.3 I-5 sequencing: the holder stays HELD so the reaper
-    // reaches and PARKS on its cancellable wait (step (h)); the drain's own
-    // cancellation slot is then fired while it is parked → it must observe
-    // operation_aborted, signal_abort(), and return sync_lock_aborted with
-    // draining_ left set. (Releasing the holder first would quiesce the
-    // counters before the reaper parks, so the cancel would arrive too late
-    // — that is not what this seam tests.)
-    std::atomic<bool> holder_release{false};
+    async_mutex mtx;
 
     auto holder_coro = [&]() -> asio::awaitable<void> {
         auto g = co_await mtx.async_lock();
         EXPECT_TRUE(g.has_value());
-        while (!holder_release.load(std::memory_order_acquire)) co_await yield_n(1);
+        co_await yield_n(N * 8 + 16);
         // Guard dtor → unlock() (draining_ == true → short-circuit).
     };
 
@@ -81,18 +151,16 @@ TEST(SeamDrainAwaitableCancellation, DrainCancelledReturnsAborted) {
     };
 
     auto drain_coro = [&]() -> asio::awaitable<void> {
-        co_await yield_n(N * 2);  // let holder + waiters settle
+        co_await yield_n(N * 2);
         auto d = co_await mtx.cancel_and_drain();
-        if (!d.has_value() && d.error() == error::sync_lock_aborted) drain_aborted = true;
+        // 048: drain is uninterruptible — must return ok regardless of slot.
+        drain_ok = d.has_value();
     };
 
     auto canceller = [&]() -> asio::awaitable<void> {
-        // Let the reaper reap the waiters and PARK on its wait() (holder is
-        // still held → active_holders_count_ > 0), then fire its own slot.
-        co_await yield_n(N * 6 + 8);
+        // Fire the drain's slot mid-flight while the holder still holds.
+        co_await yield_n(N * 4 + 4);
         drain_cancel_sig.emit(asio::cancellation_type::total);
-        co_await yield_n(4);
-        holder_release.store(true, std::memory_order_release);
     };
 
     auto fh = asio::co_spawn(ioc, holder_coro(), asio::use_future);
@@ -109,58 +177,21 @@ TEST(SeamDrainAwaitableCancellation, DrainCancelledReturnsAborted) {
     fd.get();
     fcn.get();
 
-    // cancel_and_drain() with its own slot cancelled must return aborted.
-    // NOTE: With the current TODO(T049) stub this test will likely fail (hang or
-    // wrong result) — that is the expected TDD-red signal.
-    EXPECT_TRUE(drain_aborted)
-        << "cancel_and_drain() with cancelled slot must return sync_lock_aborted";
+    // The drain must succeed (uninterruptible) even with the slot fired.
+    EXPECT_TRUE(drain_ok) << "cancel_and_drain() is uninterruptible (E-5): must return ok";
 
-    // After the drain's cancellation, draining_ must remain set.
-    // Subsequent async_lock() must get sync_lock_drained.
+    // After drain, async_lock() returns sync_lock_drained.
     asio::io_context ioc2;
     auto check = [&]() -> asio::awaitable<void> {
         auto r = co_await mtx.async_lock();
-        post_cancel_lock_drained = !r.has_value() && r.error() == error::sync_lock_drained;
+        post_drain_lock_drained = !r.has_value() && r.error() == error::sync_lock_drained;
     };
     auto fc = asio::co_spawn(ioc2, check(), asio::use_future);
     ioc2.run();
     fc.get();
 
-    EXPECT_TRUE(post_cancel_lock_drained)
-        << "After drain's own cancellation, draining_ must stay set; "
-           "async_lock() must return sync_lock_drained";
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Test 2: No hang — all futures complete within test timeout.
-// Simpler form: fire cancellation immediately, verify no deadlock.
-// ─────────────────────────────────────────────────────────────────────────────
-
-TEST(SeamDrainAwaitableCancellation, NoDanglingFuturesOnDrainCancellation) {
-    asio::cancellation_signal drain_sig;
-
-    bool drain_done = false;
-
-    asio::io_context ioc;
-    async_mutex mtx;  // after ioc — drain channel binds to ioc's executor.
-
-    auto drain_coro = [&]() -> asio::awaitable<void> {
-        auto d = co_await mtx.cancel_and_drain();
-        drain_done = true;
-        (void)d;
-    };
-
-    // Fire the drain's slot immediately before it runs.
-    drain_sig.emit(asio::cancellation_type::total);
-
-    auto fd = asio::co_spawn(ioc, drain_coro(),
-                             asio::bind_cancellation_slot(drain_sig.slot(), asio::use_future));
-
-    ioc.run();
-    fd.get();  // must not block
-
-    EXPECT_TRUE(drain_done)
-        << "cancel_and_drain() must complete (no hang) even when cancelled immediately";
+    EXPECT_TRUE(post_drain_lock_drained)
+        << "After drain, async_lock() must return sync_lock_drained";
 }
 
 }  // namespace
