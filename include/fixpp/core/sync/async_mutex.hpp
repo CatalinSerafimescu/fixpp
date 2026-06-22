@@ -18,21 +18,19 @@
 //     - a mutex-owned residual FIFO (next_drain_head_) replacing the
 //       awaiter-owned residual_ field (RC-A);
 //     - a three-state per-waiter phase machine (RC-A);
-//     - lazy drain_latch_state via atomic shared_ptr (RC-β);
-//     - active_holders_count_ / active_acquirers_count_ epoch counters
-//       (RC-α); and
+//     - strand-local single-pass reap with in_flight_resumers_ barrier (048);
+//     - active_holders_count_ epoch counter (RC-α); and
 //     - a PMR-aware slot_allocator for the cancellation handler closure
 //       (RC-C).
 //   The algorithm core (LIFO push / exchange-based drain / FIFO grant) is
 //   due to Lewis Baker / cppcoro; all post-RC additions are original work.
 // ─────────────────────────────────────────────────────────────────────────────
 //
-// Design anchor: .specify/2f-async-mutex.md v1.6 (errata E-1..E-4)
-// Data model:    specs/006-async-mutex/data-model.md
-// Contracts:     specs/006-async-mutex/contracts/async_mutex.hpp
+// Design anchor: .specify/2f-async-mutex.md v1.6 (errata E-1..E-5)
+// Data model:    specs/048-async-mutex-strand-reap/data-model.md
+// Contracts:     specs/048-async-mutex-strand-reap/contracts/async_mutex-contract.md
 //                specs/006-async-mutex/contracts/async_mutex_awaiter.hpp
 //                specs/006-async-mutex/contracts/async_lock_guard.hpp
-//                specs/006-async-mutex/contracts/drain_latch_state.hpp
 //                specs/006-async-mutex/contracts/completion_policy.hpp
 //
 // Erratum E-1 (2026-05-18): The async_mutex_awaiter is a frame-local variable
@@ -41,6 +39,15 @@
 // stored via placement-new into the awaiter's inline slot_storage_ buffer (32 B).
 // This achieves zero global heap allocation on both the uncontended and contended
 // paths when mr==nullptr and HALO fires (§4.3.4 case 1).
+//
+// Erratum E-5 (048 — strand-local reap): cancel_and_drain() is narrowed to the
+// strand-serialised contract its two consumers actually use. The cross-thread
+// convergence machinery (drain_latch_state / concurrent_channel / Dekker
+// handshake / active_acquirers_count_ / quiescence park) is removed. The new
+// terminal condition is: (active_holders_count_==0) AND
+// (in_flight_resumers_==0) AND (both lists empty in one pass). The drain is
+// uninterruptible (disable_cancellation). Reentrant callers await
+// draining_complete_ then return the terminal result. See data-model.md.
 
 #pragma once
 
@@ -66,7 +73,6 @@
 #include <asio/cancellation_type.hpp>
 #include <asio/dispatch.hpp>
 #include <asio/error.hpp>
-#include <asio/experimental/concurrent_channel.hpp>
 #include <asio/post.hpp>
 #include <asio/this_coro.hpp>
 #include <asio/use_awaitable.hpp>
@@ -110,9 +116,6 @@ enum class waiter_phase : std::uint8_t {
     cancelled = 2,  // cancellation handler (or reaper) CAS-acquired this waiter;
                     //   await_resume returns unexpected{sync_lock_aborted}. Terminal.
 };
-
-// Forward declaration of drain_latch_state (full skeleton below).
-class drain_latch_state;
 
 // Forward declaration of slot_allocator (full skeleton below).
 class slot_allocator;
@@ -178,6 +181,17 @@ public:
 
     // cancel_and_drain — drain the mutex of all current and future acquisitions.
     // EXACT signature per [2f §4.1] lines 579-580, contracts/async_mutex.hpp.
+    //
+    // NARROWED contract (Erratum E-5 / 048):
+    //   - Must be called on the owning strand, co-located with all
+    //     acquire/cancel/unlock of this mutex.
+    //   - Drain overlap with another thread's acquire/unlock is UNDEFINED.
+    //   - Ordinary cross-thread async_lock/unlock contention stays SUPPORTED.
+    //   - The drain is UNINTERRUPTIBLE (disables own cancellation).
+    //   - Reentrant callers on the strand await draining_complete_, then
+    //     return the terminal result (NOT ok eagerly).
+    //   - Terminal: (active_holders_count_==0) AND (in_flight_resumers_==0)
+    //     AND (both lists empty in one pass).
     [[nodiscard]] asio::awaitable<expected_t<void>> cancel_and_drain() noexcept;
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -236,17 +250,25 @@ private:
     std::atomic_flag drain_in_progress_ = ATOMIC_FLAG_INIT;
 
     // v1.2 / v1.3 RC-α — winner-only post-CAS holder count.
-    // I-17..I-19 ordering sites.
+    // 048: demoted to relaxed — all inc/dec happen on the one owning strand.
     std::atomic<std::uint32_t> active_holders_count_{0};
 
-    // NEW v1.3 RC-α — in-flight acquirer epoch counter.
-    // I-20..I-22 ordering sites.
-    std::atomic<std::uint32_t> active_acquirers_count_{0};
+    // 048 (Erratum E-5) — strand-local in-flight-resumer count.
+    // Incremented inside schedule_record_resume() BEFORE the asio::post (sole
+    // incrementer; every path: reap/grant/drained-bypass/on_cancel).
+    // Decremented in the resume runner AFTER release_ref(record) — the LAST
+    // statement in the runner (the drain observing 0 may destroy the mutex
+    // immediately; nothing touches the mutex after the decrement).
+    // Relaxed: the drain-read is strand-confined; the member is atomic (not
+    // plain) because non-drain lock/cancel contention also touches it.
+    // This is THE barrier that keeps the mutex alive until every posted resumer
+    // has dereferenced record->mutex_ (fixes P1-1 UAF — data-model.md).
+    std::atomic<std::uint32_t> in_flight_resumers_{0};
 
-    // NEW v1.3 RC-β; UPDATED v1.4 — lazy drain latch.
-    // NOT lock-free in general; cold path only (cancel_and_drain invocation).
-    // I-23..I-24 ordering sites.
-    std::atomic<std::shared_ptr<detail::drain_latch_state>> drain_latch_ptr_;
+    // 048 (Erratum E-5) — set true at finalize, AFTER the state_ CAS.
+    // A reentrant cancel_and_drain() on the strand yields while this is false,
+    // then returns the terminal result — NOT ok eagerly (fixes P1-2).
+    std::atomic<bool> draining_complete_{false};
 
     // Per-mutex completion policy (immutable after construction).
     completion_policy const policy_{completion_policy::dispatch};
@@ -334,58 +356,6 @@ private:
 // Full static_assert is in T078; noted here for clarity.
 
 namespace detail {
-
-// ─────────────────────────────────────────────────────────────────────────────
-// T010: E4 — drain_latch_state skeleton
-// Source: [2f §4.7.2/§4.7.3], data-model E4, contracts/drain_latch_state.hpp
-//
-// Body is stubbed; T048 (US3) fills them in.
-// ─────────────────────────────────────────────────────────────────────────────
-
-// T048 (US3): channel-backed multi-waiter latch ([2f §4.7.3] I-4/I-7/I-8).
-// `released_`/`aborted_` are the terminal observer flags (I-25/I-26/I-27);
-// the `concurrent_channel` is the multi-waiter wake surface. `notify()` is a
-// non-terminal re-check wake (I-8); `signal_release()`/`signal_abort()` are the
-// two mutually-terminal idempotent edges (I-7) and `close()` the channel so
-// EVERY parked/future subscriber wakes. Executor is captured lazily from the
-// reaper's frame (I-1/I-3; keeps `async_mutex()` constexpr + executor-free).
-class drain_latch_state {
-public:
-    explicit drain_latch_state(asio::any_io_executor ex) : channel_(ex, 1) {}
-
-    std::atomic<bool> released_{false};
-    std::atomic<bool> aborted_{false};
-    std::atomic<std::uint32_t> in_flight_resumptions_{0};
-
-    // Non-terminal wake: re-check counters (I-8). Idempotent, never blocks;
-    // buffer size 1 coalesces bursts and prevents the lost-wakeup window
-    // between the reaper's counter read and its park on wait().
-    void notify() noexcept { channel_.try_send(asio::error_code{}); }
-
-    // Terminal: drain committed (I-7). close() completes every pending and
-    // future async_receive so all subscribers wake exactly once.
-    void signal_release() noexcept {
-        released_.store(true, std::memory_order_release);
-        channel_.close();
-    }
-
-    // Terminal: reaper itself cancelled (I-5/I-7).
-    void signal_abort() noexcept {
-        aborted_.store(true, std::memory_order_release);
-        channel_.close();
-    }
-
-    // The cancellable park. Returned DIRECTLY (not via a child coroutine) so
-    // that `co_await latch->async_wait()` IS the cancellable suspension: with
-    // as_tuple, a propagated total cancellation is delivered as
-    // `ec == operation_aborted` VALUE (no thrown exception, no nested-awaitable
-    // rethrow). channel_closed (terminal signal) / a notify() token arrive as
-    // a different ec; the caller then re-checks released_/aborted_.
-    auto async_wait() { return channel_.async_receive(asio::as_tuple(asio::use_awaitable)); }
-
-private:
-    asio::experimental::concurrent_channel<void(asio::error_code)> channel_;
-};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // T058: E5 — slot_allocator (RC-C, re-anchored by Erratum E-4).
@@ -492,8 +462,9 @@ struct alignas(std::max_align_t) waiter_record {
     alignas(std::max_align_t) std::array<std::byte, 64> exec_storage_{};
     std::atomic<std::uint32_t> refcount_{0};
 
-    using resume_fn_t = void (*)(void*, waiter_record*,
-                                 std::shared_ptr<drain_latch_state>) noexcept;
+    // 048: latch param removed — in_flight_resumers_ is now a plain member of
+    // async_mutex; schedule_record_resume increments it before posting.
+    using resume_fn_t = void (*)(void*, waiter_record*) noexcept;
     using destroy_exec_fn_t = void (*)(void*) noexcept;
 
     resume_fn_t resume_fn_{nullptr};
@@ -515,6 +486,11 @@ struct alignas(std::max_align_t) waiter_record {
     }
 
     static void release_ref(waiter_record* record) noexcept;
+
+    // 048: schedule_record_resume as a static method so it can access
+    // async_mutex::in_flight_resumers_ via the waiter_record friend relationship.
+    // Increments in_flight_resumers_ BEFORE the post (sole incrementer).
+    static void schedule_resume(waiter_record* record) noexcept;
 };
 
 struct alignas(8) async_mutex_awaiter {
@@ -585,20 +561,25 @@ bool waiter_record::store_executor(Executor&& ex) noexcept {
         return false;
     } else {
         ::new (exec_storage_.data()) RawExecutor(std::forward<Executor>(ex));
-        resume_fn_ = [](void* storage, waiter_record* record,
-                        std::shared_ptr<drain_latch_state> latch) noexcept {
+        // 048 (Erratum E-5): latch param removed from resume_fn_t.
+        // in_flight_resumers_ is decremented here, AFTER release_ref, as the
+        // LAST statement. Ordering: the drain observing in_flight_resumers_==0
+        // may finalize and the caller may destroy the mutex immediately — nothing
+        // must touch `m` after the decrement. Relaxed: drain-read is strand-local.
+        resume_fn_ = [](void* storage, waiter_record* record) noexcept {
             auto* exec = std::launder(reinterpret_cast<RawExecutor*>(storage));
-            auto runner = [record, latch = std::move(latch)]() mutable {
+            auto runner = [record]() mutable {
+                // Capture mutex pointer BEFORE release_ref which may free record.
+                auto* m = record->mutex_;
                 auto* awaiter = record->attached_awaiter_.load(std::memory_order_acquire);
                 if (awaiter != nullptr) {
                     awaiter->slot_.clear();
                     awaiter->invoke_handler(std::move(record->result_));
                 }
-                if (latch) {
-                    latch->in_flight_resumptions_.fetch_sub(1, std::memory_order_acq_rel);
-                    latch->notify();
-                }
-                release_ref(record);
+                release_ref(record);  // may free record; do not touch record after
+                // Decrement LAST — the drain may destroy the mutex once it
+                // observes 0; nothing may touch m after this line.
+                m->in_flight_resumers_.fetch_sub(1, std::memory_order_relaxed);
             };
 
             // v1.6 Erratum E-3: 2f waiter resumption is ALWAYS posted, never
@@ -699,6 +680,17 @@ inline void fixpp::sync::detail::waiter_record::release_ref(waiter_record* recor
     block->mr->deallocate(block, sizeof(pmr_waiter_block), alignof(pmr_waiter_block));
 }
 
+// 048 (Erratum E-5): sole incrementer of in_flight_resumers_.
+// Increments BEFORE the post so the drain's terminal condition cannot fire
+// before the resumer has been counted. Defined after async_mutex is complete
+// (so in_flight_resumers_ is accessible via the friend relationship).
+inline void fixpp::sync::detail::waiter_record::schedule_resume(waiter_record* record) noexcept {
+    add_ref(record);  // scheduled resumer ref
+    // Access in_flight_resumers_ through the waiter_record friend.
+    record->mutex_->in_flight_resumers_.fetch_add(1, std::memory_order_relaxed);
+    record->resume_fn_(record->exec_storage_.data(), record);
+}
+
 namespace {
 
 inline void push_residual(std::atomic<fixpp::sync::detail::waiter_record*>& head,
@@ -715,15 +707,10 @@ inline void push_residual(std::atomic<fixpp::sync::detail::waiter_record*>& head
                                          std::memory_order_acquire));
 }
 
-inline void schedule_record_resume(
-    fixpp::sync::detail::waiter_record* record,
-    std::shared_ptr<fixpp::sync::detail::drain_latch_state> latch = {}) noexcept {
-    using record_t = fixpp::sync::detail::waiter_record;
-    record_t::add_ref(record);  // scheduled resumer
-    if (latch) {
-        latch->in_flight_resumptions_.fetch_add(1, std::memory_order_acq_rel);
-    }
-    record->resume_fn_(record->exec_storage_.data(), record, std::move(latch));
+// 048 (Erratum E-5): delegates to waiter_record::schedule_resume which can
+// access async_mutex::in_flight_resumers_ via the friend relationship.
+inline void schedule_record_resume(fixpp::sync::detail::waiter_record* record) noexcept {
+    fixpp::sync::detail::waiter_record::schedule_resume(record);
 }
 
 }  // namespace
@@ -745,7 +732,13 @@ inline void fixpp::sync::detail::async_mutex_awaiter::on_cancel(
 
 // ─────────────────────────────────────────────────────────────────────────────
 // T026: async_lock — awaitable coroutine (Erratum E-1 conforming).
-// [2f §4.1], [2f §4.2], [2f §4.2.1], [2f §4.2.2], I-20.
+// [2f §4.1], [2f §4.2], [2f §4.2.1], [2f §4.2.2].
+//
+// 048 (Erratum E-5): active_acquirers_count_ REMOVED (vestigial — the corrected
+// terminal condition does not read it; async_lock's initiation body from the
+// draining_ load to the state_ push is synchronous, so the reap cannot
+// interleave a half-finished acquirer on the one strand; the drain contract
+// forbids cross-thread overlap — research.md D-2/W-3b).
 //
 // async_lock is itself an asio::awaitable<expected_t<async_lock_guard>>
 // coroutine. The async_mutex_awaiter is declared as a LOCAL VARIABLE in this
@@ -773,12 +766,10 @@ fixpp::sync::async_mutex::async_lock(std::pmr::memory_resource* mr) noexcept {
     auto cancellation_state = co_await asio::this_coro::cancellation_state;
     auto inherited_slot = cancellation_state.slot();
 
-    active_acquirers_count_.fetch_add(1, std::memory_order_acq_rel);
     auto result = co_await asio::async_initiate<const asio::use_awaitable_t<>&,
                                                 void(expected_t<async_lock_guard>)>(
         [this, &awaiter, mr, bound_executor, inherited_slot](auto handler) mutable {
             if (draining_.load(std::memory_order_acquire)) {
-                active_acquirers_count_.fetch_sub(1, std::memory_order_acq_rel);
                 std::move(handler)(expected_t<async_lock_guard>{
                     std::unexpected(fixpp::core::error::sync_lock_drained)});
                 return;
@@ -789,8 +780,7 @@ fixpp::sync::async_mutex::async_lock(std::pmr::memory_resource* mr) noexcept {
             if (state_.compare_exchange_strong(expected_state, locked_no_waiters,
                                                std::memory_order_acquire,
                                                std::memory_order_relaxed)) {
-                active_holders_count_.fetch_add(1, std::memory_order_acq_rel);
-                active_acquirers_count_.fetch_sub(1, std::memory_order_acq_rel);
+                active_holders_count_.fetch_add(1, std::memory_order_relaxed);
                 {
                     async_lock_guard guard{this};
                     std::move(handler)(expected_t<async_lock_guard>{std::move(guard)});
@@ -832,7 +822,6 @@ fixpp::sync::async_mutex::async_lock(std::pmr::memory_resource* mr) noexcept {
                     reinterpret_cast<waiter_record*>(waiter_pool_storage_[slot].storage));
             }();
             if (record == nullptr) {
-                active_acquirers_count_.fetch_sub(1, std::memory_order_acq_rel);
                 std::move(handler)(expected_t<async_lock_guard>{
                     std::unexpected(fixpp::core::error::sync_lock_alloc_failed)});
                 return;
@@ -847,7 +836,6 @@ fixpp::sync::async_mutex::async_lock(std::pmr::memory_resource* mr) noexcept {
 
             {
                 if (!record->store_executor(bound_executor)) {
-                    active_acquirers_count_.fetch_sub(1, std::memory_order_acq_rel);
                     waiter_record::release_ref(record);
                     waiter_record::release_ref(record);
                     std::move(handler)(expected_t<async_lock_guard>{
@@ -866,7 +854,6 @@ fixpp::sync::async_mutex::async_lock(std::pmr::memory_resource* mr) noexcept {
             }
 
             if (draining_.load(std::memory_order_acquire)) {
-                active_acquirers_count_.fetch_sub(1, std::memory_order_acq_rel);
                 record->result_ = expected_t<async_lock_guard>{
                     std::unexpected(fixpp::core::error::sync_lock_drained)};
                 record->phase_.store(waiter_phase::cancelled, std::memory_order_release);
@@ -883,8 +870,7 @@ fixpp::sync::async_mutex::async_lock(std::pmr::memory_resource* mr) noexcept {
                     if (state_.compare_exchange_weak(exp2, locked_no_waiters,
                                                      std::memory_order_acquire,
                                                      std::memory_order_acquire)) {
-                        active_holders_count_.fetch_add(1, std::memory_order_acq_rel);
-                        active_acquirers_count_.fetch_sub(1, std::memory_order_acq_rel);
+                        active_holders_count_.fetch_add(1, std::memory_order_relaxed);
                         record->phase_.store(waiter_phase::granted, std::memory_order_release);
                         record->result_ = expected_t<async_lock_guard>{async_lock_guard{this}};
                         schedule_record_resume(record);
@@ -904,7 +890,6 @@ fixpp::sync::async_mutex::async_lock(std::pmr::memory_resource* mr) noexcept {
                 if (state_.compare_exchange_weak(old_state, reinterpret_cast<uintptr_t>(record),
                                                  std::memory_order_release,
                                                  std::memory_order_acquire)) {
-                    active_acquirers_count_.fetch_sub(1, std::memory_order_acq_rel);
                     waiter_record::release_ref(record);  // creator
                     return;
                 }
@@ -939,6 +924,10 @@ fixpp::sync::async_mutex::async_lock(std::pmr::memory_resource* mr) noexcept {
 // unlock's drain walker).  We must find the next waiter (if any) and grant
 // it the lock, or set state_ back to not_locked if the list is empty.
 //
+// 048 (Erratum E-5): Under draining_, the latch->notify() call is REMOVED
+// (the latch is gone). The drain loop re-reaps both lists after yielding,
+// so unlock() need only do the CAS (which it already does) and return.
+//
 // Erratum E-1: "resume the waiter" is now awaiter->invoke_handler(result)
 // instead of resume_fn_(result). The awaiter node is frame-local; do NOT
 // delete it — it lives in async_lock()'s coroutine frame.
@@ -948,15 +937,15 @@ inline void fixpp::sync::async_mutex::unlock() noexcept {
     using detail::waiter_phase;
     using detail::waiter_record;
 
-    active_holders_count_.fetch_sub(1, std::memory_order_acq_rel);
+    active_holders_count_.fetch_sub(1, std::memory_order_relaxed);
 
     if (draining_.load(std::memory_order_acquire)) {
+        // 048: Under draining_, do not splice; only restore state_ to not_locked
+        // so the drain's terminal CAS succeeds. The drain loop re-reaps any
+        // residuals the holder may have had. No latch->notify() (latch removed).
         uintptr_t expected = locked_no_waiters;
         state_.compare_exchange_strong(expected, not_locked, std::memory_order_acq_rel,
                                        std::memory_order_acquire);
-        if (auto latch = drain_latch_ptr_.load(std::memory_order_acquire)) {
-            latch->notify();
-        }
         return;
     }
 
@@ -971,7 +960,7 @@ inline void fixpp::sync::async_mutex::unlock() noexcept {
                 if (cur->phase_.compare_exchange_strong(expected_ph, waiter_phase::granted,
                                                         std::memory_order_acq_rel,
                                                         std::memory_order_acquire)) {
-                    active_holders_count_.fetch_add(1, std::memory_order_acq_rel);
+                    active_holders_count_.fetch_add(1, std::memory_order_relaxed);
                     cur->result_ = expected_t<async_lock_guard>{async_lock_guard{this}};
                     auto* tail = cur->next_;
                     cur->next_ = nullptr;
@@ -1000,7 +989,7 @@ inline void fixpp::sync::async_mutex::unlock() noexcept {
         uintptr_t expected2 = locked_no_waiters;
         if (!state_.compare_exchange_strong(expected2, not_locked, std::memory_order_acq_rel,
                                             std::memory_order_acquire)) {
-            active_holders_count_.fetch_add(1, std::memory_order_acq_rel);
+            active_holders_count_.fetch_add(1, std::memory_order_relaxed);
             unlock();
         }
         return;
@@ -1026,7 +1015,7 @@ inline void fixpp::sync::async_mutex::unlock() noexcept {
             if (fifo_cur->phase_.compare_exchange_strong(expected_ph, waiter_phase::granted,
                                                          std::memory_order_acq_rel,
                                                          std::memory_order_acquire)) {
-                active_holders_count_.fetch_add(1, std::memory_order_acq_rel);
+                active_holders_count_.fetch_add(1, std::memory_order_relaxed);
                 fifo_cur->result_ = expected_t<async_lock_guard>{async_lock_guard{this}};
                 auto* tail = fifo_cur->next_;
                 fifo_cur->next_ = nullptr;
@@ -1051,63 +1040,74 @@ inline void fixpp::sync::async_mutex::unlock() noexcept {
     uintptr_t expected3 = locked_no_waiters;
     if (!state_.compare_exchange_strong(expected3, not_locked, std::memory_order_acq_rel,
                                         std::memory_order_acquire)) {
-        active_holders_count_.fetch_add(1, std::memory_order_acq_rel);
+        active_holders_count_.fetch_add(1, std::memory_order_relaxed);
         unlock();
     }
 }
 
-// T049 (US3): cancel_and_drain reaper — [2f §4.7.2] steps (a)–(j), translated
-// onto the Erratum-E-2 waiter_record model + Erratum-E-3 posted resumption.
+// ─────────────────────────────────────────────────────────────────────────────
+// cancel_and_drain — 048 (Erratum E-5): unified strand-local quiescence loop.
+//
+// Design: research.md D-2; data-model.md state diagram; contracts/async_mutex-contract.md.
+//
+// Terminal condition (INV-D): (active_holders_count_==0) AND
+//   (in_flight_resumers_==0) AND (both lists empty in one pass).
+// in_flight_resumers_ is the UAF barrier — the mutex must NOT be destroyed
+// until every posted resumer has decremented it.
+//
+// Reentrant caller: observes draining_ already set, awaits draining_complete_,
+//   then returns expected_t<void>{} — NOT ok eagerly (fixes P1-2).
+//
+// The drain is UNINTERRUPTIBLE: co_await disable_cancellation() at entry so
+// teardown always runs to completion (contract E-5; matches Session::close's
+// disable_cancellation, session.cpp:1334).
+// ─────────────────────────────────────────────────────────────────────────────
 inline asio::awaitable<fixpp::sync::expected_t<void>>
 fixpp::sync::async_mutex::cancel_and_drain() noexcept {
     using detail::waiter_phase;
     using detail::waiter_record;
 
-    // Subscriber: park on the epoch latch until a terminal edge; map
-    // released_→ok, aborted_→sync_lock_aborted. Loops over non-terminal
-    // notify() wakes ([2f §4.7.3] I-8); a cancelled own-wait → aborted.
-    auto subscribe =
-        [](std::shared_ptr<detail::drain_latch_state> st) -> asio::awaitable<expected_t<void>> {
-        while (!st->released_.load(std::memory_order_acquire) &&
-               !st->aborted_.load(std::memory_order_acquire)) {
-            auto [ec] = co_await st->async_wait();
-            if (ec == asio::error::operation_aborted)
-                co_return std::unexpected(fixpp::core::error::sync_lock_aborted);
-        }
-        if (st->aborted_.load(std::memory_order_acquire))
-            co_return std::unexpected(fixpp::core::error::sync_lock_aborted);
-        co_return expected_t<void>{};
-    };
+    // Step 1: disable own cancellation — teardown runs to completion (E-5).
+    co_await asio::this_coro::reset_cancellation_state(asio::disable_cancellation{});
 
-    // ── (a) Idempotent fast path. ────────────────────────────────────────
+    // Step 2: idempotent / reentrant fast path.
+    // If already draining_ (set by the first caller), this is a reentrant
+    // caller on the strand. It must NOT return ok eagerly — it awaits the
+    // first drain's terminal completion and then returns the terminal result
+    // (fixes P1-2 false-success — research.md D-2 step 1).
     if (draining_.load(std::memory_order_acquire)) {
-        if (auto st = drain_latch_ptr_.load(std::memory_order_acquire))
-            co_return co_await subscribe(std::move(st));
-        // drain_latch_ptr_ is null only after a clean signal_release() epoch;
-        // on the abort path the latch is kept published (aborted_==true) so
-        // this branch is only reachable after a successful prior drain.
-        co_return expected_t<void>{};
-    }
-
-    // ── (b) Concurrent-call serialiser — only the first becomes reaper. ───
-    if (drain_in_progress_.test_and_set(std::memory_order_acq_rel)) {
         auto ex = co_await asio::this_coro::executor;
-        while (!draining_.load(std::memory_order_acquire))
+        while (!draining_complete_.load(std::memory_order_acquire)) {
             co_await asio::post(ex, asio::use_awaitable);
-        if (auto st = drain_latch_ptr_.load(std::memory_order_acquire))
-            co_return co_await subscribe(std::move(st));
-        // null only after a clean signal_release() epoch; abort path keeps the
-        // latch published (aborted_==true) so this branch is only reachable
-        // after a successful prior drain (consistent with F-2 fix above).
+        }
         co_return expected_t<void>{};
     }
 
-    // ── (c) Lazy executor-bound latch; publish ptr BEFORE draining_ ──────
-    //        (v1.4 ordering; [2f §4.7.3] I-1/I-3).
+    // Step 3: first-caller election — only ONE becomes the reaper.
+    // (drain_in_progress_ is kept for potential future multi-caller paths;
+    // on the owning strand only one caller runs at a time, so this always
+    // succeeds for the first call and the reentrant path above handles others.)
+    if (drain_in_progress_.test_and_set(std::memory_order_acq_rel)) {
+        // Should not happen on a single owning strand, but handle defensively:
+        // the reentrant path above catches draining_==true; if we somehow
+        // reach here, yield until draining_ is set, then await completion.
+        auto ex = co_await asio::this_coro::executor;
+        while (!draining_.load(std::memory_order_acquire)) {
+            co_await asio::post(ex, asio::use_awaitable);
+        }
+        while (!draining_complete_.load(std::memory_order_acquire)) {
+            co_await asio::post(ex, asio::use_awaitable);
+        }
+        co_return expected_t<void>{};
+    }
+
+    // Step 4: set draining_ — gates new acquirers (fast-fail sync_lock_drained
+    // at async_lock entry :780/:868). Published BEFORE the reap so a new
+    // acquirer entering after this store is guaranteed to fast-fail.
     auto bound_ex = co_await asio::this_coro::executor;
-    auto latch = std::make_shared<detail::drain_latch_state>(bound_ex);
-    drain_latch_ptr_.store(latch, std::memory_order_release);
     draining_.store(true, std::memory_order_release);
+
+    // ── Helpers ────────────────────────────────────────────────────────────
 
     auto reverse_lifo = [](waiter_record* head) -> waiter_record* {
         waiter_record* prev = nullptr;
@@ -1119,6 +1119,11 @@ fixpp::sync::async_mutex::cancel_and_drain() noexcept {
         }
         return prev;
     };
+
+    // reap_chain: for each waiter, CAS queued→cancelled (single-winner with
+    // on_cancel); winner sets result_=sync_lock_aborted and schedules a posted
+    // resume (incrementing in_flight_resumers_ inside schedule_record_resume).
+    // Loser drops list membership only (on_cancel or grant already owns it).
     auto reap_chain = [&](waiter_record* chain) {
         while (chain != nullptr) {
             auto* next = chain->next_;
@@ -1129,7 +1134,7 @@ fixpp::sync::async_mutex::cancel_and_drain() noexcept {
                 chain->result_ = expected_t<async_lock_guard>{
                     std::unexpected(fixpp::core::error::sync_lock_aborted)};
                 detail::waiter_record::release_ref(chain);  // list membership
-                schedule_record_resume(chain, latch);       // resumer ref++
+                schedule_record_resume(chain);  // ++in_flight_resumers_ inside
             } else {
                 // CAS lost: granted (holder will quiesce) or the waiter's
                 // own on_cancel beat the reaper. Drop list membership only.
@@ -1139,95 +1144,50 @@ fixpp::sync::async_mutex::cancel_and_drain() noexcept {
         }
     };
 
-    // ── (e)/(f) Exchange both lists out; reap LIFO (reversed → FIFO) ─────
-    auto raw_state = state_.exchange(locked_no_waiters, std::memory_order_acq_rel);
-    auto* lifo_head = (raw_state == not_locked || raw_state == locked_no_waiters)
-                          ? nullptr
-                          : reinterpret_cast<waiter_record*>(raw_state);
-    auto* fifo_head = next_drain_head_.exchange(nullptr, std::memory_order_acq_rel);
-    reap_chain(reverse_lifo(lifo_head));
-    reap_chain(fifo_head);
-
-    // ── (g) Stable re-walk until both lists observe null in one pass ─────
-    //        (RC-α; unlock()'s splice is short-circuited under draining_).
-    while (true) {
-        auto raw_late = state_.exchange(locked_no_waiters, std::memory_order_acq_rel);
-        auto* late_lifo = (raw_late == not_locked || raw_late == locked_no_waiters)
+    // reap_both_lists: exchange both atomic list heads out synchronously and
+    // reap each chain. Returns true if BOTH lists were empty this pass.
+    auto reap_both_lists = [&]() -> bool {
+        auto raw_state = state_.exchange(locked_no_waiters, std::memory_order_acq_rel);
+        auto* lifo_head = (raw_state == not_locked || raw_state == locked_no_waiters)
                               ? nullptr
-                              : reinterpret_cast<waiter_record*>(raw_late);
-        auto* late_fifo = next_drain_head_.exchange(nullptr, std::memory_order_acq_rel);
-        if (!late_lifo && !late_fifo) break;
-        reap_chain(reverse_lifo(late_lifo));
-        reap_chain(late_fifo);
-    }
+                              : reinterpret_cast<waiter_record*>(raw_state);
+        auto* fifo_head = next_drain_head_.exchange(nullptr, std::memory_order_acq_rel);
+        bool both_empty = (lifo_head == nullptr && fifo_head == nullptr);
+        reap_chain(reverse_lifo(lifo_head));
+        reap_chain(fifo_head);
+        return both_empty;
+    };
 
-    // ── (h) Wait for holders/acquirers/resumptions to quiesce. The reaper's
-    //        OWN cancellation is observed via an explicit cancellation-slot
-    //        handler (the same proven mechanism as the awaiter's on_cancel) —
-    //        NOT by relying on the channel honouring the coroutine slot. The
-    //        handler runs synchronously on cancel, sets a flag, and
-    //        signal_abort()s (closes the channel) so the parked async_wait()
-    //        completes promptly as a VALUE (channel_closed via as_tuple — no
-    //        thrown exception). [2f §4.7.3] I-5.
-    co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation{});
-    auto reaper_cs = co_await asio::this_coro::cancellation_state;
-    auto reaper_slot = reaper_cs.slot();
-    std::atomic<bool> reaper_cancelled{false};
-    if (reaper_slot.is_connected()) {
-        reaper_slot.assign([&reaper_cancelled, latch](asio::cancellation_type) noexcept {
-            reaper_cancelled.store(true, std::memory_order_release);
-            latch->signal_abort();
-        });
-    }
-    // The reaper's own cancellation can be delivered to this co_await either
-    // as a flag via the slot handler (channel closed → value), OR — when asio
-    // propagates the parent's cancellation across the awaitable boundary — as
-    // a thrown system_error{operation_aborted} at the co_await itself. Both
-    // are converted to the §4.7.3 I-5 contract return (unexpected), never an
-    // escaping exception (cancel_and_drain is noexcept).
-    try {
-        while (active_holders_count_.load(std::memory_order_acquire) != 0 ||
-               active_acquirers_count_.load(std::memory_order_acquire) != 0 ||
-               latch->in_flight_resumptions_.load(std::memory_order_acquire) != 0) {
-            auto [ec] = co_await latch->async_wait();
-            (void)ec;
-            if (reaper_cancelled.load(std::memory_order_acquire)) break;
-            // ec == {} (notify token) or channel_closed → re-check counters.
+    // ── Step 5: unified quiescence loop ────────────────────────────────────
+    //
+    // Each pass: reap both lists (catches waiters the pre-drain holder spliced
+    // after unlock()); then check the FULL terminal condition (INV-D). If not
+    // terminal, yield so posted resumers run (--in_flight_resumers_) and a
+    // pre-drain holder's unlock() runs. The precondition (holders release
+    // promptly) guarantees termination.
+    //
+    // INV-D: terminal = (holders==0) AND (resumers==0) AND (lists empty).
+    // Must NOT terminate on active_holders_count_==0 alone — in_flight_resumers_
+    // is the UAF barrier (research.md D-2; fixes P1-1).
+    for (;;) {
+        bool both_empty = reap_both_lists();
+        if (active_holders_count_.load(std::memory_order_relaxed) == 0 &&
+            in_flight_resumers_.load(std::memory_order_relaxed) == 0 && both_empty) {
+            break;
         }
-    } catch (...) {
-        reaper_cancelled.store(true, std::memory_order_release);
-    }
-    if (reaper_cancelled.load(std::memory_order_acquire)) {
-        // Reaper itself cancelled — propagate ([2f §4.7.3] I-5). signal_abort()
-        // wakes every subscriber; draining_ stays true; in-flight resumption
-        // handlers retain the latch shared_ptr and finish. No trailing
-        // co_await here (a cancellation may be latched in this state).
-        //
-        // F-2 fix (gate-b/r1): do NOT clear drain_latch_ptr_ here. The latch
-        // stays published (aborted_==true) so any fresh reentrant
-        // cancel_and_drain() call takes the subscribe() branch at the idempotent
-        // fast path (hpp:1167-1170) and observes aborted_==true → returns
-        // unexpected{sync_lock_aborted} instead of false success. This closes the
-        // UAF: a reentrant caller can no longer return success while in-flight
-        // resumption handlers still hold waiter_record refs and dereference the
-        // mutex. Follows I-5/I-6/I-7 (binding invariants); the §4.7.2 sketch
-        // comment "prior epoch published + cleared" was self-inconsistent with
-        // I-5/I-7 on the abort path and is reconciled here: drain_latch_ptr_ is
-        // cleared only on the release path (below), after signal_release().
-        latch->signal_abort();
-        if (reaper_slot.is_connected()) reaper_slot.clear();
-        co_return std::unexpected(fixpp::core::error::sync_lock_aborted);
+        co_await asio::post(bound_ex, asio::use_awaitable);
     }
 
-    // Quiesced normally — disarm the cancel handler so a late total is a
-    // no-op (it must not signal_abort() after we publish release).
-    if (reaper_slot.is_connected()) reaper_slot.clear();
-
-    // ── (i)/(j) Finalize: state_ → not_locked, publish release edge. ────
+    // ── Step 6: finalize ───────────────────────────────────────────────────
+    //
+    // CAS state_ locked_no_waiters→not_locked (the drain holds the lock since
+    // the initial exchange; restore the free state for the destructor invariant).
+    // THEN store draining_complete_=true (release, ordered AFTER state_ store,
+    // no co_await between them) — a reentrant caller observing draining_complete_
+    // also observes state_==not_locked (research.md D-2 step 5).
     uintptr_t expected_state = locked_no_waiters;
     state_.compare_exchange_strong(expected_state, not_locked, std::memory_order_acq_rel,
                                    std::memory_order_acquire);
-    latch->signal_release();
-    drain_latch_ptr_.store(nullptr, std::memory_order_release);
+    draining_complete_.store(true, std::memory_order_release);
     co_return expected_t<void>{};
 }
