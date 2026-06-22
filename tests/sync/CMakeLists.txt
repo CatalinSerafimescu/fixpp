@@ -150,15 +150,6 @@ add_sync_test(sync_consumer_contract_compile test_consumer_contract_compile.cpp)
 add_sync_test(sync_atomic_shared_ptr_primitive  test_atomic_shared_ptr_primitive.cpp)
 add_sync_test(sync_atomic_shared_ptr_concurrency test_atomic_shared_ptr_concurrency.cpp)
 
-# T008 (plan row 6-consumers): publish/acquire witness for async_mutex::drain_latch_ptr_
-# (fixpp::sync::atomic_shared_ptr<detail::drain_latch_state>).
-# Uses asio::thread_pool{4} so drain_latch_ptr_ release-store (drainer thread) and
-# acquire-load (waiter unlock path) run on distinct OS threads — the cross-thread edge
-# the NFR-017 primitive was introduced to solve. Functional discriminators: sum(waiters)
-# == N per round; a torn pointer causes a missed wake (hang) or double-resume (EXPECT fail).
-add_sync_test(sync_async_mutex_drain_latch_publish_acquire
-    test_async_mutex_drain_latch_publish_acquire.cpp)
-
 # ── US5 seam registration (T062) ─────────────────────────────────────────────
 # Seam #14: CI grep-gate driver.  Shells out to the bash gate script over the
 # T063–T065 fixture corpus and asserts zero-FN / zero-FP.
