@@ -26,6 +26,8 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdio>
+#include <filesystem>
+#include <fstream>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/session/compid_authorization_policy.hpp>
@@ -100,25 +102,35 @@ public:
     }
 };
 
-// ── (1) Grep gate ───────────────────────────────────────────────────────────
+// ── (1) Source-scan gate ────────────────────────────────────────────────────
 TEST(EngineSeamRemoval, NoSeamReferenceInAnyTree) {
     // Assemble the needle from fragments so this file holds no contiguous match.
     const std::string needle = std::string{"logon_peer"} + "_identity_override";
     const std::string root = FIXPP_TEST_SOURCE_DIR;
-    const std::string cmd = "grep -rn -- '" + needle +
-                            "' "
-                            "'" +
-                            root + "/src' '" + root + "/include' '" + root + "/tests' 2>/dev/null";
 
-    FILE* pipe = ::popen(cmd.c_str(), "r");
-    ASSERT_NE(pipe, nullptr) << "popen(grep) failed";
-
+    // Portable recursive source scan (mirrors `grep -rn` over src/include/tests;
+    // no shell, so it runs identically on every platform).
+    namespace fs = std::filesystem;
     std::string out;
-    char buf[512];
-    while (std::fgets(buf, sizeof(buf), pipe) != nullptr) {
-        out += buf;
+    for (const char* sub : {"/src", "/include", "/tests"}) {
+        const fs::path base = root + sub;
+        std::error_code ec;
+        if (!fs::exists(base, ec)) continue;
+        for (fs::recursive_directory_iterator it{base, ec}, end; it != end && !ec;
+             it.increment(ec)) {
+            if (!it->is_regular_file(ec)) continue;
+            std::ifstream ifs(it->path());
+            if (!ifs) continue;
+            std::string line;
+            int lineno = 0;
+            while (std::getline(ifs, line)) {
+                ++lineno;
+                if (line.find(needle) != std::string::npos) {
+                    out += it->path().string() + ":" + std::to_string(lineno) + ": " + line + "\n";
+                }
+            }
+        }
     }
-    ::pclose(pipe);  // grep exits 1 (no match) when clean — status is not the gate
 
     EXPECT_TRUE(out.empty())
         << "SC-006 / FR-009: the per-config peer-identity test seam must have ZERO "

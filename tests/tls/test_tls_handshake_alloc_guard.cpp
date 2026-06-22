@@ -31,10 +31,7 @@
 #include <memory_resource>
 
 // mallocnesia weak symbols — replaced by LD_PRELOAD.
-extern "C" {
-__attribute__((weak)) void alloc_guard_start();
-__attribute__((weak)) void alloc_guard_end();
-}
+#include "support/alloc_guard_markers.hpp"
 
 namespace {
 

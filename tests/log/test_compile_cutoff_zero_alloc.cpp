@@ -66,10 +66,7 @@
 // local weak definition here) — i.e. a silent no-op gate. Without preload the
 // weak symbols are null, so the null-checked wrappers below skip them safely
 // (the binary still runs plainly for the PMR Gate B1 path).
-extern "C" {
-__attribute__((weak)) void alloc_guard_start();
-__attribute__((weak)) void alloc_guard_end();
-}
+#include "support/alloc_guard_markers.hpp"
 namespace {
 inline void guard_start() { if (alloc_guard_start) alloc_guard_start(); }
 inline void guard_end()   { if (alloc_guard_end)   alloc_guard_end(); }

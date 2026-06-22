@@ -68,10 +68,7 @@
 // declarations (no body) so they become PLT-routed dynamic symbols the
 // LD_PRELOAD interceptor can interpose; a local definition would bind
 // intra-executable and silently disable interception (item 13, 2026-06-19).
-extern "C" {
-__attribute__((weak)) void alloc_guard_start();
-__attribute__((weak)) void alloc_guard_end();
-}
+#include "support/alloc_guard_markers.hpp"
 
 // ── Sanitizer-detection guard ─────────────────────────────────────────────────
 //

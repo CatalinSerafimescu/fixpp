@@ -73,6 +73,8 @@ fixpp_add_store_test(perf_store_alloc_guard SOURCES test_store_alloc_guard.cpp)
 # Dual-gate: counting_resource + mallocnesia LD_PRELOAD.
 add_executable(perf_transport_read_alloc_guard
   test_transport_read_alloc_guard.cpp)
+target_include_directories(perf_transport_read_alloc_guard PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests")
 target_link_libraries(perf_transport_read_alloc_guard PRIVATE
   fixpp_transport  fixpp_wire  GTest::gtest  GTest::gtest_main)
 add_test(NAME perf_transport_read_alloc_guard

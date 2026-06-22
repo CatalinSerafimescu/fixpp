@@ -13,7 +13,9 @@
 //
 // TDD: linker-RED until T026 (FileStoreFactory::make() with CompID validation).
 #include <gtest/gtest.h>
-#include <unistd.h>
+#ifndef _WIN32
+#include <unistd.h>  // not used directly on Windows; FileStoreFactory owns all fd I/O
+#endif
 
 #include <exception>
 #include <asio/thread_pool.hpp>
@@ -170,8 +172,12 @@ TEST(FileStoreCompIDValidation, CompIDExceedingNAMEMAX) {
     // The composed filename is sender + "__" + target + ".log"
     // So each CompID alone must produce a composed component <= NAME_MAX.
     // We build a sender that, when combined with "__TARGET.log", exceeds NAME_MAX.
+#ifdef _WIN32
+    long name_max = 255;  // NTFS/exFAT max filename component; no pathconf on Windows
+#else
     long name_max = pathconf(dir.c_str(), _PC_NAME_MAX);
     if (name_max < 0) name_max = 255;  // POSIX fallback
+#endif
 
     // Component = sender + "__" + "TARGET" + ".log" = sender + 12 chars
     // Make sender of length (name_max - 12 + 2) to exceed the limit

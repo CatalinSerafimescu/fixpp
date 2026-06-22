@@ -19,7 +19,9 @@
 //   expected_t::unexpected{store_factory_failed} at config-load time.
 
 #include <gtest/gtest.h>
+#ifndef _WIN32
 #include <unistd.h>  // pathconf, _PC_NAME_MAX
+#endif
 
 #include <array>
 #include <asio/co_spawn.hpp>
@@ -253,8 +255,12 @@ TEST(CfgLoaderDefenseInDepth, NameMaxExcessSenderRejected) {
     auto scratch = make_scratch_dir("namemax_sender");
 
     // Compute NAME_MAX for the scratch dir.
+#ifdef _WIN32
+    long name_max = 255;  // NTFS/exFAT max filename component; no pathconf on Windows
+#else
     long name_max = pathconf(scratch.c_str(), _PC_NAME_MAX);
     if (name_max < 0) name_max = 255;
+#endif
 
     // The composed filename is sender + "__" + "TARGET" + ".log" (12 extra chars).
     // Build a sender that makes the composed filename exceed NAME_MAX.

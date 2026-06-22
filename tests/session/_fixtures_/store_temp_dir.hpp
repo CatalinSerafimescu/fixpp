@@ -15,15 +15,29 @@
 //   std::filesystem::remove_all(dir);
 #pragma once
 
+#ifdef _WIN32
+#include <process.h>  // _getpid()
+#else
 #include <unistd.h>  // getpid()
+#endif
 
 #include <atomic>
-#include <cstdlib>  // ::getpid()
+#include <cstdlib>
 #include <filesystem>
 #include <string>
 #include <string_view>
 
 namespace fixpp::store_test {
+
+// Portable current-process id (for cross-process temp-dir uniqueness under
+// parallel ctest): getpid() on POSIX, _getpid() on Windows.
+inline unsigned current_pid() noexcept {
+#ifdef _WIN32
+    return static_cast<unsigned>(::_getpid());
+#else
+    return static_cast<unsigned>(::getpid());
+#endif
+}
 
 /// Returns a new temporary directory path: /tmp/fixpp_test_<tag>_<pid>_<N>/
 /// Creates the directory; caller must remove it.
@@ -32,7 +46,7 @@ inline std::filesystem::path unique_store_dir(std::string_view tag) {
     const auto seq = ctr.fetch_add(1, std::memory_order_relaxed);
     auto p = std::filesystem::temp_directory_path() /
              (std::string("fixpp_test_") + std::string(tag) + "_" +
-              std::to_string(static_cast<unsigned>(::getpid())) + "_" + std::to_string(seq));
+              std::to_string(current_pid()) + "_" + std::to_string(seq));
     std::filesystem::create_directories(p);
     return p;
 }

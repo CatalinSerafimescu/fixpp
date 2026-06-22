@@ -95,6 +95,8 @@ fixpp_add_tls_test(NAME tls_pinset_per_counterparty_sharing
 # T018 — seam #7: zero-alloc dual gate (counting_resource + mallocnesia)
 fixpp_add_tls_test(NAME tls_handshake_alloc_guard
     SOURCES test_tls_handshake_alloc_guard.cpp)
+target_include_directories(tls_handshake_alloc_guard PRIVATE
+    "${CMAKE_SOURCE_DIR}/tests")
 
 # T019 — PMR failure witness (tls_pinset_alloc_failed)
 fixpp_add_tls_test(NAME tls_pinset_add_pmr_fail

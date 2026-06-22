@@ -84,7 +84,7 @@ TEST(FileCertSourceFactory, MalformedPemSurfacesCertParseFailed) {
     // Write a temp file with garbage content to trigger a parse error.
     auto tmp = std::filesystem::temp_directory_path() / "fixpp_test_malformed.pem";
     {
-        FILE* f = fopen(tmp.c_str(), "w");
+        FILE* f = fopen(tmp.string().c_str(), "w");
         ASSERT_NE(f, nullptr);
         fputs("-----BEGIN CERTIFICATE-----\nNOT_BASE64!!!\n-----END CERTIFICATE-----\n", f);
         fclose(f);

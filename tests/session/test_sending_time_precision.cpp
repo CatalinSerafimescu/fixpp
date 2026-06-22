@@ -680,14 +680,7 @@ TEST_F(SendingTimePrecisionTest, OrigSendingTime122_PreservedVerbatim_OnResend) 
 // the ::fixpp::core qualified names are unambiguous.
 
 // mallocnesia weak-symbol hooks — replaced by LD_PRELOAD; no-ops otherwise.
-extern "C" {
-// NOLINTNEXTLINE(misc-use-anonymous-namespace) — must be at file scope for LD_PRELOAD override.
-__attribute__((weak)) void alloc_guard_start();
-// NOLINTNEXTLINE(misc-use-anonymous-namespace)
-__attribute__((weak)) void alloc_guard_end();
-// NOLINTNEXTLINE(misc-use-anonymous-namespace)
-__attribute__((weak)) long alloc_guard_count();
-}
+#include "support/alloc_guard_markers.hpp"
 
 TEST(SendingTimePrecisionNoHeap, SendingTimePrecision_NoHeapOnFormatParse) {
     using namespace std::chrono;

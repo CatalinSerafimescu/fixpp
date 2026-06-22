@@ -14,7 +14,9 @@
 // TDD: linker-RED until T023/T024/T026 ship FileStore + FileStoreFactory.
 #include <gtest/gtest.h>
 #include <sys/stat.h>
-#include <unistd.h>
+#ifndef _WIN32
+#include <unistd.h>  // not used directly on Windows; FileStore owns all fd I/O
+#endif
 
 #include <asio/co_spawn.hpp>
 #include <asio/thread_pool.hpp>
@@ -96,10 +98,13 @@ TEST(FileStoreTornWrite, TruncateMidRecordCleansUp) {
     auto file_size = fs::file_size(lp);
     ASSERT_GT(file_size, static_cast<uintmax_t>(50));
 
-    // Truncate to remove the last partial record (last 20 bytes)
-    auto new_size = static_cast<off_t>(file_size) - 20;
-    EXPECT_EQ(::truncate(lp.c_str(), new_size), 0)
-        << "truncate syscall failed: " << strerror(errno);
+    // Truncate to remove the last partial record (last 20 bytes). Portable
+    // std::filesystem::resize_file replaces POSIX truncate() (file_size is
+    // std::uintmax_t and was asserted > 50 above, so new_size stays positive).
+    auto new_size = file_size - 20;
+    std::error_code resize_ec;
+    fs::resize_file(lp, new_size, resize_ec);
+    EXPECT_FALSE(resize_ec) << "resize_file failed: " << resize_ec.message();
 
     // Re-open: restart algorithm should detect and truncate the torn tail
     FileStore::Config cfg = make_config(dir, pool.get_executor());

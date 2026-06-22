@@ -58,6 +58,9 @@ target_link_libraries(log_alloc_test PRIVATE
   GTest::gtest
   GTest::gtest_main
 )
+target_include_directories(log_alloc_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+)
 add_test(NAME log_alloc COMMAND log_alloc_test
   WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 

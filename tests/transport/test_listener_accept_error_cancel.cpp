@@ -15,7 +15,6 @@
 #include <fixpp/core/error.hpp>
 #include <fixpp/transport/endpoint.hpp>
 #include <future>
-#include <sys/socket.h>
 #include <system_error>
 
 #define private public
@@ -83,14 +82,16 @@ TEST(ListenerAcceptErrorCancel, NonListeningAcceptorMapsToTransportFactoryFailed
     asio::io_context ioc;
     asio_listener listener{ioc.get_executor(), make_listener_cfg()};
 
-    const int raw_fd = ::socket(AF_INET, SOCK_STREAM, 0);
-    ASSERT_GE(raw_fd, 0) << "socket() failed: " << std::strerror(errno);
-
     asio::error_code ec;
     listener.acceptor_.close(ec);
     ASSERT_FALSE(ec) << ec.message();
 
-    asio::ip::tcp::acceptor broken_acceptor{ioc.get_executor(), asio::ip::tcp::v4(), raw_fd};
+    // Open an acceptor but never bind/listen → async_accept must fail. Use asio's
+    // own open() (portable across POSIX sockets / winsock) rather than adopting a
+    // raw native fd.
+    asio::ip::tcp::acceptor broken_acceptor{ioc.get_executor()};
+    broken_acceptor.open(asio::ip::tcp::v4(), ec);
+    ASSERT_FALSE(ec) << "open(v4) failed: " << ec.message();
     listener.acceptor_ = std::move(broken_acceptor);
     ASSERT_TRUE(listener.acceptor_.is_open());
 

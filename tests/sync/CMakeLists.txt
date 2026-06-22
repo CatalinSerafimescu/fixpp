@@ -156,6 +156,12 @@ add_sync_test(sync_atomic_shared_ptr_concurrency test_atomic_shared_ptr_concurre
 # add_sync_test sets a baseline ENVIRONMENT with SYNC_FIXTURES_DIR and
 # SYNC_GREP_GATE_SCRIPT; the explicit set_tests_properties below extends it
 # with the two include paths the gate script needs (project + asio).
+# WAIVED on Windows (cross-platform sign-off 2026-06-22): both the gate driver
+# below and the corpus ctest shell out to `bash` running the POSIX lint script
+# tools/check_no_std_mutex_in_awaitable_headers.sh, which has no Windows analog.
+# The [const §XV.9] header-hygiene property is platform-invariant and remains a
+# first-class non-waivable Tier-1 (Linux) gate.
+if(NOT WIN32)
 add_sync_test(sync_no_std_mutex_ci_gate test_no_std_mutex_ci_gate.cpp)
 set_tests_properties(sync_no_std_mutex_ci_gate PROPERTIES
   ENVIRONMENT
@@ -205,6 +211,7 @@ add_test(NAME check_no_std_mutex_corpus
     "${CMAKE_SOURCE_DIR}/include/fixpp/session/reconnect_fsm.hpp"
     "${CMAKE_SOURCE_DIR}/include/fixpp/session/retrieve_visitor.hpp"
 )
+endif()  # NOT WIN32 — no_std_mutex bash lint gate (waived on Windows)
 
 # ── 046 T013 CT-1c/CT-1d: libc++ corpus gate (FIXPP_LIBCXX_LANE only) ────────
 # Registers two ctests guarded by FIXPP_LIBCXX_LANE=ON (set only by the

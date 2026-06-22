@@ -7,6 +7,9 @@ target_link_libraries(decimal_alloc_guard_test PRIVATE
   GTest::gtest
   GTest::gtest_main
 )
+target_include_directories(decimal_alloc_guard_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+)
 set_target_properties(decimal_alloc_guard_test PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
 )
@@ -40,6 +43,9 @@ target_link_libraries(sync_alloc_guard_test PRIVATE
   fixpp_sync
   GTest::gtest
   GTest::gtest_main
+)
+target_include_directories(sync_alloc_guard_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
 )
 set_target_properties(sync_alloc_guard_test PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
