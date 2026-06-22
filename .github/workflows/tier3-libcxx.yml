@@ -40,6 +40,10 @@ jobs:
     needs: filter
     if: needs.filter.outputs.should_run == 'true'
 
+    permissions:
+      contents: read
+      packages: read
+
     strategy:
       fail-fast: false
       matrix:
@@ -138,5 +142,32 @@ jobs:
       - name: Build
         run: cmake --build --preset ${{ matrix.preset }} -j2
 
+      # TSan only: the apt-installed libc++ is NOT TSan-instrumented, so TSan
+      # cannot see libc++'s internal synchronisation and reports FALSE data
+      # races in std::future / asio::use_future shared-state teardown (proven
+      # instrumentation artifact — see #25; reproduce-then-disprove with an
+      # instrumented libc++ gives 0 races vs the apt libc++'s reliable trips).
+      # Pull a TSan-instrumented libc++ (llvmorg-22.1.2,
+      # -DLLVM_USE_SANITIZER=Thread, ABI-identical to stock so no relink) and
+      # load it ahead of the apt one at test time via LD_LIBRARY_PATH.
+      - name: Fetch instrumented libc++ (TSan)
+        if: matrix.preset == 'linux-clang-libc++-tsan'
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          docker pull ghcr.io/catalinserafimescu/fixpp-libcxx-tsan:22.1.2
+          cid=$(docker create ghcr.io/catalinserafimescu/fixpp-libcxx-tsan:22.1.2)
+          docker cp "$cid:/libcxx-tsan" "$RUNNER_TEMP/libcxx-tsan"
+          docker rm "$cid"
+          ls -l "$RUNNER_TEMP/libcxx-tsan"
+
       - name: Test
+        if: matrix.preset != 'linux-clang-libc++-tsan'
+        run: ctest --preset ${{ matrix.preset }} --output-on-failure
+
+      - name: Test (TSan — instrumented libc++)
+        if: matrix.preset == 'linux-clang-libc++-tsan'
+        env:
+          # Prepend the instrumented libc++ ahead of the apt libc++ in the
+          # job-level LD_LIBRARY_PATH so the soname resolves to it at runtime.
+          LD_LIBRARY_PATH: ${{ runner.temp }}/libcxx-tsan:${{ env.LD_LIBRARY_PATH }}
         run: ctest --preset ${{ matrix.preset }} --output-on-failure
