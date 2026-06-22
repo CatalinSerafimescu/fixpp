@@ -2,7 +2,7 @@ name: Tier 3 — Linux libc++ CI (on-demand)
 
 # Triggered only by:
 #   - workflow_dispatch (manual run from Actions UI)
-#   - PR labeled `libc++`
+#   - PR labeled `run-tier3` (on-demand; standardised run-tierN scheme)
 # No nightly cron — Tier 3 is on-demand to conserve CI minutes.
 # OTel is not built on this lane (with_otel=False + FIXPP_BUILD_OTEL=OFF via
 # the preset) — the OTel-enabled libc++ run is validated locally before merge.
@@ -17,7 +17,7 @@ env:
   CONAN_HOME: ~/.conan2
 
 jobs:
-  # Only run on workflow_dispatch or PRs labeled 'libc++'
+  # Only run on workflow_dispatch or PRs labeled 'run-tier3'
   filter:
     name: "Check trigger"
     runs-on: ubuntu-24.04
@@ -27,7 +27,7 @@ jobs:
       - id: check
         run: |
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]] || \
-             [[ "${{ contains(github.event.pull_request.labels.*.name, 'libc++') }}" == "true" ]]; then
+             [[ "${{ contains(github.event.pull_request.labels.*.name, 'run-tier3') }}" == "true" ]]; then
             echo "should_run=true" >> $GITHUB_OUTPUT
           else
             echo "should_run=false" >> $GITHUB_OUTPUT
