@@ -26,6 +26,7 @@ conanrunenv*.sh
 *.so
 *.so.*
 !tests/abi/baseline/*.so
+!tests/abi/baseline/*.a
 *.dylib
 *.dll
 *.lib
