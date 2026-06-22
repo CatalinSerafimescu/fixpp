@@ -4,6 +4,8 @@
 **Created**: 2026-06-20
 **Feature**: [spec.md](../spec.md)
 
+> **REBASE CORRECTION (2026-06-22) — consumer set 4→3.** Point-in-time audit of the original **four-consumer** design, preserved as-is. 046 was rebased onto merged **048** (PR #144), which **removed** `async_mutex.hpp drain_latch_ptr_`; the as-built consumer set is **three**. "four named consumers" below is the **historical design record**. Authoritative as-built: `spec/feature-catalogue.md` NFR-017.
+
 ## Content Quality
 
 - [x] No implementation details (languages, frameworks, APIs)

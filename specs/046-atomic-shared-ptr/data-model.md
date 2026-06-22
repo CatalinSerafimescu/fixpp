@@ -2,6 +2,8 @@
 
 **Feature**: `046-atomic-shared-ptr` | **Date**: 2026-06-20
 
+> **REBASE CORRECTION (2026-06-22) — consumer set 4→3.** This file was authored for the original **four-consumer** design. 046 was later rebased onto merged **048** (PR #144), whose strand-local `cancel_and_drain` reap **removed** `core/sync/async_mutex.hpp drain_latch_ptr_`. The as-built production `std::atomic<std::shared_ptr<T>>` consumer set is therefore **three**: `tls/pinset.hpp snapshot_`, `transport/transport_factory.hpp cert_source_slot_`, `session/engine.hpp reader_snapshot_`. References below to "four" / "all four" / `drain_latch_ptr_` (incl. the E-4 table's row 1) are the **historical design record**; the authoritative as-built record is `spec/feature-catalogue.md` NFR-017 (+ NFR-016 E-5).
+
 This feature adds a sync primitive and migrates four members; there is no domain/wire data model. The "entities" below are the integrated type, its detection inputs, the migrated members, and the gate/build artifacts.
 
 ## E-1 — `fixpp::sync::atomic_shared_ptr<T>` (the primitive)

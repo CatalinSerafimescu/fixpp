@@ -4,6 +4,8 @@
 
 This feature integrates the **algorithm** of a design-locked primitive (validated 18/18 in the research harness `research/G19-fix-fpml-iso20022/atomic-shared-ptr/`), so Phase 0 is mostly *consolidation and reconciliation*, not open research. The genuine decisions were how to keep the fallback `std::mutex` out of the awaitable headers (D-2 — resolved by type-erasure, **no constitution amendment**), the consumer API-compatibility (D-5), and the libc++ build/dependency story (D-3/D-4) — all resolved below.
 
+> **REBASE CORRECTION (2026-06-22) — consumer set 4→3.** This file was authored for the original **four-consumer** design. 046 was later rebased onto merged **048** (PR #144), whose strand-local `cancel_and_drain` reap **removed** `core/sync/async_mutex.hpp drain_latch_ptr_`. The as-built production `std::atomic<std::shared_ptr<T>>` consumer set is therefore **three**: `tls/pinset.hpp snapshot_`, `transport/transport_factory.hpp cert_source_slot_`, `session/engine.hpp reader_snapshot_`. References below to "four" / "all four" / `drain_latch_ptr_` (incl. the D-5 call-site census table) are the **historical design record**; the authoritative as-built record is `spec/feature-catalogue.md` NFR-017 (+ NFR-016 E-5).
+
 ---
 
 ## D-1 — Adopt the locked primitive's algorithm; adapt only the lock packaging

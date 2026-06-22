@@ -2,6 +2,8 @@
 
 **Feature**: `046-atomic-shared-ptr` | Library-internal sync utility (NOT public API / NOT C-ABI).
 
+> **REBASE CORRECTION (2026-06-22) — consumer set 4→3.** Authored for the original **four-consumer** design; 046 was rebased onto merged **048** (PR #144), which **removed** `async_mutex.hpp drain_latch_ptr_`. The as-built migrated consumer set is **three** (`pinset` `snapshot_`, `transport_factory` `cert_source_slot_`, `engine` `reader_snapshot_`). "four" below is the **historical design record**; the primitive's own API surface is unchanged. Authoritative as-built: `spec/feature-catalogue.md` NFR-017.
+
 ## Surface (both resolutions MUST satisfy)
 
 - Construct: default (null), from `nullptr`, from `std::shared_ptr<T>` (move).

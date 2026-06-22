@@ -4,6 +4,8 @@
 **Created**: 2026-06-21
 **Feature**: [spec.md](../spec.md) · derived from FR-001..015, SC-001..006, contracts, data-model E-4a
 
+> **REBASE CORRECTION (2026-06-22) — consumer set 4→3.** These CHK dispositions were a **point-in-time audit** of the original **four-consumer** design and are preserved as-is (line citations such as `async_mutex.hpp:249` were correct at disposition time). 046 was later rebased onto merged **048** (PR #144), which **removed** `core/sync/async_mutex.hpp drain_latch_ptr_`; the as-built consumer set is **three** (`pinset` `snapshot_`, `transport_factory` `cert_source_slot_`, `engine` `reader_snapshot_`). The "four" in CHK001/CHK019/CHK032/CHK033 etc. is the **historical design record** — NOT re-dispositioned here (per the v1.0 checklist re-sweep convention, which exists to catch moved anchors). Authoritative as-built: `spec/feature-catalogue.md` NFR-017.
+
 ## 1. Concurrency correctness of the type-erased fallback
 
 - [x] CHK001 Is the publish/acquire guarantee (a reader `load(acquire)` observes either the prior or the new fully-constructed `shared_ptr`, never torn/null) stated as a testable requirement for all four consumers? [Completeness, Spec §FR-008 / §INV-3 / data-model E-1] — PASS: FR-008 states the release-store/acquire-load pair for all four consumers; INV-3 (data-model E-1) states "A `load` never returns a torn/partial value"; contract C-2 binds it as a testable behavioral contract with T-API-6 + row 6-consumers tests covering all four. refs: spec.md §FR-008, data-model E-1 INV-3, contract C-2, plan row 6-consumers.

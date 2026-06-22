@@ -2,6 +2,8 @@
 
 **Feature**: `046-atomic-shared-ptr` | **Date**: 2026-06-20
 
+> **REBASE CORRECTION (2026-06-22) — consumer set 4→3.** This file was authored for the original **four-consumer** design. 046 was later rebased onto merged **048** (PR #144), whose strand-local `cancel_and_drain` reap **removed** `core/sync/async_mutex.hpp drain_latch_ptr_`. The as-built migrated consumer set is **three** (`pinset` `snapshot_`, `transport_factory` `cert_source_slot_`, `engine` `reader_snapshot_`); "four" below is the **historical design record**. Authoritative as-built: `spec/feature-catalogue.md` NFR-017.
+
 ## What changes for a developer
 
 - **On Tier-1 (libstdc++/MSVC-STL)**: nothing. `fixpp::sync::atomic_shared_ptr<T>` is `std::atomic<std::shared_ptr<T>>`; consumer operation codegen, runtime behavior, and performance remain unchanged; the build graph gains the always-shipped guard archive (`fixpp_sync` promotes INTERFACE→STATIC and always compiles the guard TU, whose symbols are present-but-never-called on the alias path).

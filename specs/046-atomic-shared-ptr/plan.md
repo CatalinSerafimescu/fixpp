@@ -3,6 +3,8 @@
 **Branch**: `046-atomic-shared-ptr` | **Date**: 2026-06-20 | **Spec**: [spec.md](./spec.md)
 **Input**: Feature specification from `specs/046-atomic-shared-ptr/spec.md`
 
+> **REBASE CORRECTION (2026-06-22) — consumer set 4→3.** This file was authored for the original **four-consumer** design. 046 was later rebased onto merged **048** (PR #144), whose strand-local `cancel_and_drain` reap **removed** `core/sync/async_mutex.hpp drain_latch_ptr_`. The as-built production `std::atomic<std::shared_ptr<T>>` consumer set is therefore **three**: `tls/pinset.hpp snapshot_`, `transport/transport_factory.hpp cert_source_slot_`, `session/engine.hpp reader_snapshot_`. References below to "four" / "all four" / `drain_latch_ptr_` are the **historical design record**; the authoritative as-built record is `spec/feature-catalogue.md` NFR-017 (+ NFR-016 E-5).
+
 ## Summary
 
 Integrate the **harness-validated** `fixpp::sync::atomic_shared_ptr<T>` primitive into the fixpp library so the library compiles and passes its tests under libc++ (today it does not build under libc++ at all). On P0718-capable standard libraries (libstdc++, MSVC-STL) the primitive is a **zero-overhead alias** to `std::atomic<std::shared_ptr<T>>`; on libc++ it resolves to an address-hash-sharded, mutex-guarded `shared_ptr` fallback over the public `shared_ptr` API, with the **lock type-erased into a `.cpp`** so the header carries no `std::mutex`. The work migrates **all four** production raw `std::atomic<std::shared_ptr<T>>` consumers to the primitive, adds a census-regrowth guard, stands up a Tier-2 opt-in `linux-clang-libc++` regression lane, and reverses feature 023's CHK046 prohibition for the engine reader-snapshot.
