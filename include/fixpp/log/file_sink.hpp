@@ -23,8 +23,13 @@
 //
 // fsync_fn seam (TS-5 testability):
 //   FileSinkConfig::fsync_fn is a function-pointer hook (default = nullptr,
-//   which causes FileSink to call ::fdatasync). Tests inject a mock to assert
-//   the call happens on the drain thread without touching I/O.
+//   which causes FileSink to call the platform fdatasync). Tests inject a mock
+//   to assert the call happens on the drain thread without touching I/O.
+//
+// Portability:
+//   FileSink is cross-platform. File I/O goes through std::FILE* (std::fopen/
+//   std::fwrite/std::fseek); the durability primitive is a thin platform shim —
+//   ::fdatasync(fileno) on POSIX, _commit(_fileno) on Windows (see file_sink.cpp).
 #pragma once
 
 #include <chrono>
@@ -134,7 +139,7 @@ private:
     void stop_worker() noexcept;
 
     FileSinkConfig config_;
-    int fd_{-1};                       // POSIX fd for the live file
+    int fd_{-1};                       // OS fd for the live file (fileno/_fileno)
     std::FILE* stream_{nullptr};       // buffered wrapper (for fprintf)
     std::filesystem::path live_path_;  // <dir>/<base_name>.log
     std::uint64_t bytes_written_{0};
