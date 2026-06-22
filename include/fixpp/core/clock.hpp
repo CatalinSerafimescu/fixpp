@@ -18,7 +18,9 @@ class Session;  // opaque key for forget_session (defined in fixpp/session/sessi
 
 namespace fixpp::core {
 
-using utc_time_point = std::chrono::time_point<std::chrono::system_clock>;
+// Pinned to nanoseconds so precision is portable across libstdc++ (ns-native)
+// and libc++ (µs-native system_clock). Feature 026-nanosecond-sendingtime.
+using utc_time_point = std::chrono::time_point<std::chrono::system_clock, std::chrono::nanoseconds>;
 using steady_time_point = std::chrono::time_point<std::chrono::steady_clock>;
 
 class Clock {

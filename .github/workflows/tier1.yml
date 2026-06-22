@@ -134,12 +134,28 @@ jobs:
             echo "Gate B: NOT satisfied (no gate-b-done/waived)."
           fi
 
+          # ── Run-trigger gate (Tier-1-SPECIFIC — NOT part of the gate-a/gate-b
+          # mirror above). The heavy matrix is on-demand: it runs ONLY when the
+          # `run-tier1` label is freshly ADDED (a `labeled` event), never on a
+          # plain push/synchronize — so we stop burning 1-2 full matrices before
+          # the run we actually want. Re-run = remove + re-add `run-tier1`
+          # (mirrors the Tier 2/3/4 run-tierN on-demand pattern). Non-PR events
+          # (push:main, workflow_dispatch) bypassed this via the early-exit above.
+          RUN_TRIGGER=false
+          if [ "${{ github.event.action }}" = "labeled" ] && \
+             [ "${{ github.event.label.name }}" = "run-tier1" ]; then
+            RUN_TRIGGER=true
+          fi
+
           # ── Verdict (this job stays green either way) ────────────────────
-          if [ "$GATE_A_OK" = true ] && [ "$GATE_B_OK" = true ]; then
-            echo "Both gates satisfied — Tier 1 matrix will run."
+          if [ "$GATE_A_OK" = true ] && [ "$GATE_B_OK" = true ] && [ "$RUN_TRIGGER" = true ]; then
+            echo "Gates satisfied + run-tier1 requested — Tier 1 matrix will run."
             echo "proceed=true" >> "$GITHUB_OUTPUT"
+          elif [ "$GATE_A_OK" = true ] && [ "$GATE_B_OK" = true ]; then
+            echo "::notice::Gates satisfied — add the 'run-tier1' label when ready to run the matrix (on-demand; skipped now to save CI)."
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
           else
-            echo "::notice::Gates not yet satisfied (A=$GATE_A_OK B=$GATE_B_OK) — Tier 1 heavy jobs SKIPPED to save CI. Run /gate-a + /gate-b and add the labels; adding a label re-triggers this workflow. Red enforcement (if any) comes from the gate-a / gate-b workflows."
+            echo "::notice::Gates not yet satisfied (A=$GATE_A_OK B=$GATE_B_OK) — Tier 1 heavy jobs SKIPPED to save CI. Run /gate-a + /gate-b and add the labels. Red enforcement (if any) comes from the gate-a / gate-b workflows."
             echo "proceed=false" >> "$GITHUB_OUTPUT"
           fi
           exit 0

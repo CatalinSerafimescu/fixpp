@@ -1,0 +1,184 @@
+name: Tier 3 — Linux libc++ CI (on-demand)
+
+# Triggered only by:
+#   - workflow_dispatch (manual run from Actions UI)
+#   - PR labeled `run-tier3` (on-demand; standardised run-tierN scheme)
+# No nightly cron — Tier 3 is on-demand to conserve CI minutes.
+# OTel is not built on this lane (with_otel=False + FIXPP_BUILD_OTEL=OFF via
+# the preset) — the OTel-enabled libc++ run is validated locally before merge.
+
+on:
+  pull_request:
+    branches: ["**"]
+    types: [labeled]
+  workflow_dispatch:
+
+env:
+  CONAN_HOME: ~/.conan2
+
+jobs:
+  # Only run on workflow_dispatch or PRs labeled 'run-tier3'
+  filter:
+    name: "Check trigger"
+    runs-on: ubuntu-24.04
+    outputs:
+      should_run: ${{ steps.check.outputs.should_run }}
+    steps:
+      - id: check
+        run: |
+          # One-shot: fire only when run-tier3 is the FRESHLY-ADDED label (a
+          # `labeled` event whose label IS run-tier3) — NOT whenever the label is
+          # merely present. The `contains(labels,…)` form re-ran the full matrix on
+          # every subsequent label change while run-tier3 sat on the PR (e.g. adding
+          # gate-b-done). Matches the Tier-1 run-trigger; re-run = remove + re-add.
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]] || \
+             { [[ "${{ github.event.action }}" == "labeled" ]] && \
+               [[ "${{ github.event.label.name }}" == "run-tier3" ]]; }; then
+            echo "should_run=true" >> $GITHUB_OUTPUT
+          else
+            echo "should_run=false" >> $GITHUB_OUTPUT
+          fi
+
+  # ── libc++ build / test matrix ───────────────────────────────────────────
+  libcxx:
+    name: "${{ matrix.preset }}"
+    runs-on: ubuntu-24.04
+    needs: filter
+    if: needs.filter.outputs.should_run == 'true'
+
+    permissions:
+      contents: read
+      packages: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        preset:
+          - linux-clang-libc++
+          - linux-clang-libc++-asan
+          - linux-clang-libc++-ubsan
+          - linux-clang-libc++-tsan
+
+    env:
+      # libc++.so.1 is installed by apt to /usr/lib/x86_64-linux-gnu (symlinked
+      # from /usr/lib/llvm-22/lib) when libc++-22-dev is installed.  We set
+      # LD_LIBRARY_PATH at the JOB level (not just the Test step) so that cmake's
+      # gtest_discover_tests step — which runs the test binary during Build to
+      # enumerate tests — can find the SO.  The sanitizer runtime lives under
+      # llvm-22's resource dir; the path pattern is stable for apt.llvm.org's
+      # llvm.sh-installed clang-22.
+      LD_LIBRARY_PATH: "/usr/lib/x86_64-linux-gnu:/usr/lib/llvm-22/lib:/usr/lib/llvm-22/lib/clang/22/lib/x86_64-unknown-linux-gnu"
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Clang 22 + libc++ + libc++abi + Ninja (apt.llvm.org)
+        run: |
+          # Clang 22 matches local dev toolchain (constitution Article II §2).
+          # llvm.sh handles GPG key + apt repo + versioned clang binaries.
+          wget -O /tmp/llvm.sh https://apt.llvm.org/llvm.sh
+          chmod +x /tmp/llvm.sh
+          sudo /tmp/llvm.sh 22 all
+          # apt.llvm.org's llvm.sh installs versioned binaries (e.g. clang-22)
+          # but does NOT update the unversioned `clang`/`clang++` paths. The
+          # sanitizer presets use clang-22/clang++-22 directly (versioned) so
+          # this only matters for the plain linux-clang-libc++ preset (unversioned).
+          # Force-symlink for full compatibility either way.
+          CLANG_BIN=$(ls /usr/bin/clang++-* 2>/dev/null | grep -oE '/usr/bin/clang\+\+-[0-9]+$' | sort -V | tail -1)
+          CLANG_VER=$(echo "$CLANG_BIN" | grep -oE '[0-9]+$')
+          test -n "$CLANG_VER" || { echo "::error::No clang-* installed by llvm.sh"; exit 1; }
+          echo "Force-symlinking clang-$CLANG_VER as default unversioned clang/clang++"
+          sudo ln -sf /usr/bin/clang-$CLANG_VER   /usr/bin/clang
+          sudo ln -sf /usr/bin/clang++-$CLANG_VER /usr/bin/clang++
+          clang++ --version
+          # libc++ and libc++abi dev packages are NOT installed by llvm.sh by
+          # default — must be installed explicitly.
+          sudo apt-get install -y --no-install-recommends \
+            libc++-22-dev \
+            libc++abi-22-dev \
+            ninja-build \
+            python3-pip \
+            pipx
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install Conan + pytest via pipx
+        run: |
+          pipx install conan
+          conan --version
+          # pytest is required by the decimal_compare_oracle CTest entry.
+          # pyyaml is required by the interop_cell_results_schema_check CTest entry.
+          pip install pytest pyyaml
+
+      - name: Initialize Conan default profile
+        run: conan profile detect --force
+
+      - name: Teach Conan about Clang 22
+        run: |
+          # Conan 2.x's stock settings.yml does not enumerate Clang 22 yet.
+          # Append via settings_user.yml (additive, non-destructive).
+          mkdir -p ~/.conan2
+          cat > ~/.conan2/settings_user.yml <<'EOF'
+          compiler:
+            clang:
+              version: ["19", "20", "21", "22", "23"]
+          EOF
+
+      - name: Cache Conan packages
+        uses: actions/cache@v5
+        with:
+          path: ~/.conan2/p
+          key: conan-${{ matrix.preset }}-${{ hashFiles('conanfile.py', format('conan/profiles/{0}', matrix.preset)) }}
+          restore-keys: |
+            conan-${{ matrix.preset }}-
+
+      - name: Conan install
+        run: |
+          conan install . \
+            -pr conan/profiles/${{ matrix.preset }} \
+            -o 'fixpp/*:with_otel=False' \
+            --build=missing \
+            -of build/${{ matrix.preset }}
+
+      - name: Configure
+        run: cmake --preset ${{ matrix.preset }}
+
+      - name: Build
+        run: cmake --build --preset ${{ matrix.preset }} -j2
+
+      # TSan only: the apt-installed libc++ is NOT TSan-instrumented, so TSan
+      # cannot see libc++'s internal synchronisation and reports FALSE data
+      # races in std::future / asio::use_future shared-state teardown (proven
+      # instrumentation artifact — see #25; reproduce-then-disprove with an
+      # instrumented libc++ gives 0 races vs the apt libc++'s reliable trips).
+      # Pull a TSan-instrumented libc++ (llvmorg-22.1.2,
+      # -DLLVM_USE_SANITIZER=Thread, ABI-identical to stock so no relink) and
+      # load it ahead of the apt one at test time via LD_LIBRARY_PATH.
+      - name: Fetch instrumented libc++ (TSan)
+        if: matrix.preset == 'linux-clang-libc++-tsan'
+        run: |
+          # Pin by DIGEST, not the mutable :22.1.2 tag — this .so is loaded into
+          # the test process, so a silently re-pushed tag could fabricate/suppress
+          # TSan results. Digest below = the verified-good image (tag 22.1.2).
+          # To roll forward: re-push, then update this digest + the comment.
+          IMG="ghcr.io/catalinserafimescu/fixpp-libcxx-tsan@sha256:65106764ae2318bf1e982216d84b0d45ec9c9245cb25a59728aab59f016ea161"
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          docker pull "$IMG"
+          cid=$(docker create "$IMG")
+          docker cp "$cid:/libcxx-tsan" "$RUNNER_TEMP/libcxx-tsan"
+          docker rm "$cid"
+          ls -l "$RUNNER_TEMP/libcxx-tsan"
+
+      - name: Test
+        if: matrix.preset != 'linux-clang-libc++-tsan'
+        run: ctest --preset ${{ matrix.preset }} --output-on-failure
+
+      - name: Test (TSan — instrumented libc++)
+        if: matrix.preset == 'linux-clang-libc++-tsan'
+        env:
+          # Prepend the instrumented libc++ ahead of the apt libc++ in the
+          # job-level LD_LIBRARY_PATH so the soname resolves to it at runtime.
+          LD_LIBRARY_PATH: ${{ runner.temp }}/libcxx-tsan:${{ env.LD_LIBRARY_PATH }}
+        run: ctest --preset ${{ matrix.preset }} --output-on-failure

@@ -19,6 +19,7 @@
 #include <chrono>
 #include <cstddef>
 #include <fixpp/core/error.hpp>
+#include <fixpp/core/sync/detail/atomic_shared_ptr.hpp>  // 046 (NFR-017): libc++ fallback primitive
 #include <fixpp/tls/certificate.hpp>
 #include <memory>
 #include <memory_resource>
@@ -115,8 +116,10 @@ public:
     //   absent → unexpect{tls_pin_not_found}
     [[nodiscard]] core::expected_t<void> remove(std::array<std::byte, 32> const& sha256);
 
-    // (3) Lookup on the handshake-hot path. Lock-free — acquire-load on
-    // snapshot_, linear scan. Returns pin_view with snapshot shared_ptr pinned.
+    // (3) Lookup on the handshake-hot path. Native path lock-free (acquire-load
+    // on snapshot_); on the libc++/forced-fallback path the load takes a shard
+    // mutex (NFR-017 — correctness/portability over speed; runs per-handshake,
+    // not per-message). Linear scan. Returns pin_view with the snapshot pinned.
     [[nodiscard]] pin_view find(std::array<std::byte, 32> const& sha256) const noexcept;
 
     // (4) Explicit-snapshot accessor — TLS handshake captures this ONCE per
@@ -132,8 +135,9 @@ private:
     std::pmr::memory_resource* mr_;  // resolved at construction.
     mutable std::shared_mutex
         writer_;  // serialises add/remove vs each other; readers do NOT take it. [2g §6.5.2].
-    std::atomic<std::shared_ptr<const pin_snapshot>>
+    fixpp::sync::atomic_shared_ptr<const pin_snapshot>
         snapshot_;  // acquire-load on read; release-store on write [2g §6.2].
+                    // 046 (NFR-017): native lock-free; libc++ fallback shard-locked.
 };
 
 }  // namespace fixpp::tls

@@ -5,7 +5,8 @@
 // Writer synchronisation: std::shared_mutex per [2g §6.5.2] — CITE AND STOP.
 //   (Per NEW-P2-6 the consolidated three-point rationale lives at §6.5.2;
 //    do NOT re-derive at impl site.)
-// Reader path: lock-free — single acquire-load on snapshot_ per [2g §6.2].
+// Reader path: native lock-free (single acquire-load on snapshot_ per
+// [2g §6.2]); libc++/forced-fallback path shard-locked (NFR-017).
 // PMR lifetime: Config::mr MUST outlive every published snapshot (§4.6 / §6.2).
 // Allocation failure: routed through [2a §4.2] trap_throw → tls_pinset_alloc_failed.
 //

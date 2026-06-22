@@ -76,9 +76,15 @@ private:
 // expiry skipped via null clock, pinning skipped via mtls_ca profile).
 // The subject_dn and one SAN DNS entry are included so peer_identity
 // construction actually allocates into the PMR.
+//
+// NOTE: strings must be >22 chars to exceed libc++ SSO (22 bytes) AND
+// >15 chars to exceed libstdc++ SSO (15 bytes), so all three PMR alloc sites
+// (subject_dn, san_dns_names_owned buffer, SAN string) trigger on both stdlibs.
 Certificate make_valid_cert_with_san() {
-    static const std::string_view kSubjectDn{"CN=test.example.com"};
-    static const std::string_view kSanDns{"test.example.com"};
+    static const std::string_view kSubjectDn{
+        "CN=test-node.fixpp.example.invalid"};  // 34 chars > libc++ SSO(22)
+    static const std::string_view kSanDns{
+        "test-node.fixpp.example.invalid"};  // 31 chars > libc++ SSO(22)
     static const std::span<const std::string_view> kSanDnsSpan{&kSanDns, 1};
     static const std::span<const std::string_view> kNoSanUri{};
 

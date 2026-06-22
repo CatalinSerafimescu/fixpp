@@ -108,6 +108,76 @@
     },
 
     {
+      "name": "linux-clang-libc++",
+      "displayName": "Linux / Clang / libc++ (Tier-2 NFR-017)",
+      "inherits": "_base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_C_COMPILER": "clang",
+        "CMAKE_CXX_COMPILER": "clang++",
+        "CMAKE_CXX_FLAGS": "-stdlib=libc++",
+        "CMAKE_EXE_LINKER_FLAGS": "-stdlib=libc++",
+        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/build/linux-clang-libc++/conan_toolchain.cmake",
+        "FIXPP_LIBCXX_LANE": "ON",
+        "FIXPP_BUILD_OTEL": "OFF"
+      }
+    },
+
+    {
+      "name": "linux-clang-libc++-asan",
+      "displayName": "Linux / Clang / libc++ / ASan (Tier-3 NFR-017)",
+      "inherits": "_base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_C_COMPILER": "clang-22",
+        "CMAKE_CXX_COMPILER": "clang++-22",
+        "CMAKE_CXX_FLAGS": "-stdlib=libc++",
+        "CMAKE_EXE_LINKER_FLAGS": "-stdlib=libc++",
+        "FIXPP_ENABLE_ASAN": "ON",
+        "BUILD_SHARED_LIBS": "ON",
+        "FIXPP_BUILD_OTEL": "OFF",
+        "FIXPP_LIBCXX_LANE": "ON",
+        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/build/linux-clang-libc++-asan/conan_toolchain.cmake"
+      }
+    },
+
+    {
+      "name": "linux-clang-libc++-ubsan",
+      "displayName": "Linux / Clang / libc++ / UBSan (Tier-3 NFR-017)",
+      "inherits": "_base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_C_COMPILER": "clang-22",
+        "CMAKE_CXX_COMPILER": "clang++-22",
+        "CMAKE_CXX_FLAGS": "-stdlib=libc++",
+        "CMAKE_EXE_LINKER_FLAGS": "-stdlib=libc++",
+        "FIXPP_ENABLE_UBSAN": "ON",
+        "BUILD_SHARED_LIBS": "ON",
+        "FIXPP_BUILD_OTEL": "OFF",
+        "FIXPP_LIBCXX_LANE": "ON",
+        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/build/linux-clang-libc++-ubsan/conan_toolchain.cmake"
+      }
+    },
+
+    {
+      "name": "linux-clang-libc++-tsan",
+      "displayName": "Linux / Clang / libc++ / TSan (Tier-3 NFR-017)",
+      "inherits": "_base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_C_COMPILER": "clang-22",
+        "CMAKE_CXX_COMPILER": "clang++-22",
+        "CMAKE_CXX_FLAGS": "-stdlib=libc++",
+        "CMAKE_EXE_LINKER_FLAGS": "-stdlib=libc++",
+        "FIXPP_ENABLE_TSAN": "ON",
+        "BUILD_SHARED_LIBS": "ON",
+        "FIXPP_BUILD_OTEL": "OFF",
+        "FIXPP_LIBCXX_LANE": "ON",
+        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/build/linux-clang-libc++-tsan/conan_toolchain.cmake"
+      }
+    },
+
+    {
       "name": "windows-msvc-debug",
       "displayName": "Windows / MSVC / Debug",
       "inherits": "_base",
@@ -147,7 +217,11 @@
     { "name": "linux-clang-tsan",     "configurePreset": "linux-clang-tsan" },
     { "name": "linux-clang-coverage", "configurePreset": "linux-clang-coverage" },
     { "name": "linux-gcc-release",    "configurePreset": "linux-gcc-release" },
-    { "name": "windows-msvc-debug",   "configurePreset": "windows-msvc-debug" },
+    { "name": "linux-clang-libc++",        "configurePreset": "linux-clang-libc++" },
+    { "name": "linux-clang-libc++-asan",   "configurePreset": "linux-clang-libc++-asan" },
+    { "name": "linux-clang-libc++-ubsan",  "configurePreset": "linux-clang-libc++-ubsan" },
+    { "name": "linux-clang-libc++-tsan",   "configurePreset": "linux-clang-libc++-tsan" },
+    { "name": "windows-msvc-debug",        "configurePreset": "windows-msvc-debug" },
     { "name": "windows-msvc-release", "configurePreset": "windows-msvc-release" },
     { "name": "windows-msvc-asan",    "configurePreset": "windows-msvc-asan" }
   ],
@@ -186,6 +260,26 @@
     {
       "name": "linux-gcc-release",
       "configurePreset": "linux-gcc-release",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "linux-clang-libc++",
+      "configurePreset": "linux-clang-libc++",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "linux-clang-libc++-asan",
+      "configurePreset": "linux-clang-libc++-asan",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "linux-clang-libc++-ubsan",
+      "configurePreset": "linux-clang-libc++-ubsan",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "linux-clang-libc++-tsan",
+      "configurePreset": "linux-clang-libc++-tsan",
       "output": { "outputOnFailure": true }
     },
     {

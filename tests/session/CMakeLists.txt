@@ -2199,6 +2199,45 @@ set_tests_properties(session_plaintext_factory_mismatch PROPERTIES
     TIMEOUT 30
     LABELS "043;t021;t022;us3;sc003;fr008;mismatch")
 
+# ── 046-atomic-shared-ptr (NFR-017) session consumer witnesses ────────────────
+
+# T008 (plan row 6-consumers): publish/acquire witness for Engine::reader_snapshot_
+# (fixpp::sync::atomic_shared_ptr<const ReaderSnapshot>).
+# Uses insecure_plain_tcp + a raw loopback acceptor — no TLS fixtures required.
+# Engine runs its io_context on a background thread (control-strand runs connect loop
+# and calls publish_entry → reader_snapshot_ release-store);
+# main thread loops calling lookup() until ioc_done (acquire-load of reader_snapshot_).
+# Overlap guarantee: main-thread loop runs while(!ioc_done), spanning the entire
+# 500ms window during which the connect loop publishes. nonnull_reads>0 proves overlap.
+add_executable(engine_reader_snapshot_publish_acquire_test
+    test_engine_reader_snapshot_publish_acquire.cpp)
+target_link_libraries(engine_reader_snapshot_publish_acquire_test PRIVATE
+    fixpp_session
+    fixpp_transport
+    fixpp_tls
+    "${FIXPP_TRANSPORT_OPENSSL_SSL_LIB}"
+    "${FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB}"
+    "${FIXPP_TRANSPORT_ZLIB_LIB}"
+    GTest::gtest
+    GTest::gtest_main
+)
+target_include_directories(engine_reader_snapshot_publish_acquire_test PRIVATE
+    "${CMAKE_SOURCE_DIR}/tests"
+)
+add_test(NAME engine_reader_snapshot_publish_acquire
+         COMMAND engine_reader_snapshot_publish_acquire_test)
+set_tests_properties(engine_reader_snapshot_publish_acquire PROPERTIES
+    LABELS "session;015;046;nfr017;publish_acquire"
+    ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+    TIMEOUT 30)
+
+# T019 (plan row +B): forced-fallback link test for fixpp_session.
+# Constructs fixpp::sync::atomic_shared_ptr<int> in a binary that links fixpp_session;
+# proves shard_guard symbols resolve transitively through the session→transport→sync chain.
+add_threading_test(session_forced_fallback_link test_session_forced_fallback_link.cpp)
+set_tests_properties(session_forced_fallback_link PROPERTIES
+    LABELS "session;046;nfr017;fallback_link")
+
 # ── Conformance subdirectory (005 Q2 in-scope [FIX-TC] subset) ───────────────
 # Phase 3 adds tc_establishment_test.cpp (T020); later phases add more.
 add_subdirectory(conformance)

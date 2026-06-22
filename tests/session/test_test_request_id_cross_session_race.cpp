@@ -58,6 +58,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <thread>
 #include <set>
 #include <span>
 #include <string>

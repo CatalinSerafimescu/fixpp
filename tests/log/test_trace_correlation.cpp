@@ -29,6 +29,7 @@
 #include <cstring>
 #include <memory_resource>
 #include <mutex>
+#include <thread>
 #include <vector>
 
 #include <fixpp/core/engine_config.hpp>

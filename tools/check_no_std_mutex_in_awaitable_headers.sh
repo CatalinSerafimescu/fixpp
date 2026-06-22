@@ -53,6 +53,10 @@ INCLUDE_FLAGS=()
 HEADERS=()
 PARSING_FLAGS=1
 NEXT_IS_IPATH=0
+# 046 (NFR-017) CT-1: when set, a supplied awaitable-including header that emits
+# NO asio/awaitable.hpp marker is a FAILURE, not a silent skip — so a libc++-leg
+# misconfiguration (empty/half output) goes RED instead of false-green.
+REQUIRE_AWAITABLE_MARKER=0
 
 for arg in "$@"; do
     if [[ $NEXT_IS_IPATH -eq 1 ]]; then
@@ -71,7 +75,13 @@ for arg in "$@"; do
         elif [[ "$arg" == -I* ]]; then
             # -Ipath combined form
             INCLUDE_FLAGS+=("$arg")
-        elif [[ "$arg" == -D* || "$arg" == --std=* || "$arg" == -std=* ]]; then
+        elif [[ "$arg" == --require-awaitable-marker ]]; then
+            # 046 CT-1: enforce marker presence (libc++-leg falsifiability).
+            REQUIRE_AWAITABLE_MARKER=1
+        elif [[ "$arg" == -D* || "$arg" == --std=* || "$arg" == -std=* || "$arg" == -stdlib=* ]]; then
+            # 046 CT-1: forward -stdlib=* (was previously mis-bucketed as a
+            # header → "header not found" WARNING, so the libc++ leg silently
+            # preprocessed under the host libstdc++).
             INCLUDE_FLAGS+=("$arg")
         else
             HEADERS+=("$arg")
@@ -158,21 +168,38 @@ VIOLATIONS=0
 
 for HEADER in "${HEADERS[@]}"; do
     if [[ ! -f "$HEADER" ]]; then
-        echo "check_no_std_mutex_in_awaitable_headers: WARNING: header not found: $HEADER" >&2
-        continue
+        # 046 Gate B #3: a SUPPLIED corpus header that does not exist is an ERROR,
+        # not a warning — a deleted/renamed/mistyped entry must not silently
+        # shrink the constitutional gate to a no-op.
+        echo "check_no_std_mutex_in_awaitable_headers: ERROR: corpus header not found: $HEADER" >&2
+        exit 2
     fi
 
     TMP_PP=$(mktemp /tmp/check_mutex_XXXXXX.pp)
     TMP_SRC=$(mktemp /tmp/check_mutex_XXXXXX.cpp)
     echo "#include \"$HEADER\"" > "$TMP_SRC"
 
-    # Preprocess (-E); KEEP line markers (no -P) so token→file attribution
-    # works. Tolerate failures — analyse whatever output we got.
-    $CXX -std=c++23 "${INCLUDE_FLAGS[@]}" -E "$TMP_SRC" -o "$TMP_PP" 2>/dev/null || true
-    rm -f "$TMP_SRC"
+    # Preprocess (-E); KEEP line markers (no -P) so token→file attribution works.
+    # 046 (NFR-017) CT-1: FAIL-CLOSED on a preprocess error (previously masked by
+    # `|| true`, so a missing libc++ / broken include path silently produced
+    # empty output and a false-green libc++ leg).
+    if ! $CXX -std=c++23 "${INCLUDE_FLAGS[@]}" -E "$TMP_SRC" -o "$TMP_PP" 2>"${TMP_PP}.err"; then
+        echo "check_no_std_mutex_in_awaitable_headers: ERROR: preprocessing failed for $HEADER" >&2
+        sed 's/^/    /' "${TMP_PP}.err" >&2 || true
+        rm -f "$TMP_SRC" "$TMP_PP" "${TMP_PP}.err"
+        exit 2
+    fi
+    rm -f "$TMP_SRC" "${TMP_PP}.err"
 
     # Only headers that (transitively) pull asio::awaitable are in scope.
     if ! grep -qF "$AWAITABLE_PATTERN" "$TMP_PP" 2>/dev/null; then
+        if [[ $REQUIRE_AWAITABLE_MARKER -eq 1 ]]; then
+            echo "check_no_std_mutex_in_awaitable_headers: ERROR: $HEADER emitted no" >&2
+            echo "  '$AWAITABLE_PATTERN' marker under --require-awaitable-marker — the" >&2
+            echo "  preprocess leg did not run as expected (libc++ misconfig?)." >&2
+            rm -f "$TMP_PP"
+            exit 1
+        fi
         rm -f "$TMP_PP"
         continue
     fi

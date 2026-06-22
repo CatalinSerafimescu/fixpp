@@ -332,12 +332,11 @@ constexpr std::int32_t date_to_days(std::int32_t y, std::uint8_t m, std::uint8_t
     const std::int64_t epoch_sec =
         (static_cast<std::int64_t>(epoch_days) * 86400LL) + (hh_i * 3600LL) + (mm_i * 60LL) + ss_i;
 
-    // Compose as nanoseconds and convert to system_clock duration.
+    // Compose as nanoseconds. utc_time_point is pinned to nanoseconds, so no
+    // duration cast is needed (avoids truncation on libc++ where
+    // system_clock::duration is microseconds).
     const auto ns_total = std::chrono::nanoseconds{(epoch_sec * 1'000'000'000LL) + ns_sub};
-
-    // system_clock::duration is typically nanoseconds on Linux; truncate to
-    // the clock's native resolution if coarser.
-    return utc_time_point{duration_cast<system_clock::duration>(ns_total)};
+    return utc_time_point{ns_total};
 }
 
 }  // namespace fixpp::core

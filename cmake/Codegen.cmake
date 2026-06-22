@@ -102,6 +102,11 @@ else()
     -DFIXPP_WERROR=OFF
     # Bootstrap guard — prevents the nested configure from re-entering Codegen.cmake
     -DFIXPP_CODEGEN_BOOTSTRAP_RUNNING=ON
+    # 046 T014: forward the OTel toggle so the bootstrap sub-configure
+    # agrees with the parent's Conan graph (no opentelemetry-cpp when
+    # with_otel=False). Without this the consistency check in CMakeLists.txt
+    # fires inside the bootstrap sub-build with the wrong default (ON).
+    -DFIXPP_BUILD_OTEL=${FIXPP_BUILD_OTEL}
   )
 
   # Forward the Conan toolchain — required so pugixml / GTest CMakeDeps are found
@@ -177,11 +182,34 @@ if(NOT _need_generate)
   endforeach()
 endif()
 
+# 046-atomic-shared-ptr (NFR-017): under -stdlib=libc++ the bootstrap/main
+# fixpp-codegen is a libc++-linked HOST tool. At configure-time execution the
+# dynamic loader may pick a SYSTEM libc++.so.1 that lacks newer symbols (e.g.
+# `vtable for std::pmr::memory_resource`), giving a symbol-lookup error. Derive
+# the compiler's OWN libc++ runtime dir and put it on LD_LIBRARY_PATH for the
+# codegen run so the matching runtime is found. No-op on a libstdc++ build (the
+# launcher stays empty and the tool runs directly).
+set(_codegen_run_launcher "")
+if(CMAKE_CXX_FLAGS MATCHES "libc\\+\\+" OR CMAKE_EXE_LINKER_FLAGS MATCHES "libc\\+\\+")
+  execute_process(
+    COMMAND "${CMAKE_CXX_COMPILER}" -stdlib=libc++ -print-file-name=libc++.so.1
+    OUTPUT_VARIABLE _libcxx_so OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET)
+  if(_libcxx_so)
+    get_filename_component(_libcxx_dir "${_libcxx_so}" DIRECTORY)
+    if(_libcxx_dir AND IS_DIRECTORY "${_libcxx_dir}")
+      set(_codegen_run_launcher
+        "${CMAKE_COMMAND}" -E env "LD_LIBRARY_PATH=${_libcxx_dir}:$ENV{LD_LIBRARY_PATH}")
+      message(STATUS "[Codegen] libc++ run path: ${_libcxx_dir}")
+    endif()
+  endif()
+endif()
+
 if(_need_generate)
   message(STATUS "[Codegen] Running fixpp-codegen at configure time → ${FIXPP_CODEGEN_OUT_DIR}")
   file(MAKE_DIRECTORY "${FIXPP_CODEGEN_OUT_DIR}")
   execute_process(
-    COMMAND "${_codegen_tool}"
+    COMMAND ${_codegen_run_launcher} "${_codegen_tool}"
             --xml "${_xml_dir}/FIX42.xml"    --out "${FIXPP_CODEGEN_OUT_DIR}"
             --xml "${_xml_dir}/FIX44.xml"    --out "${FIXPP_CODEGEN_OUT_DIR}"
             --xml "${_xml_dir}/FIX50SP2.xml" --out "${FIXPP_CODEGEN_OUT_DIR}"

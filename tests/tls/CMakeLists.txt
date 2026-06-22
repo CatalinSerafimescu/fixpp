@@ -220,6 +220,26 @@ fixpp_add_tls_test(NAME tls_certificate_lifetimebound
 target_link_libraries(tls_certificate_lifetimebound PRIVATE
     "${FIXPP_OPENSSL_CRYPTO_LIB}" "${FIXPP_OPENSSL_SSL_LIB}" "${FIXPP_ZLIB_LIB}")
 
+# ── 046-atomic-shared-ptr (NFR-017) TLS consumer witnesses ───────────────────
+
+# T008 (plan row 6-consumers): publish/acquire witness for Pinset::snapshot_
+# (fixpp::sync::atomic_shared_ptr<const pin_snapshot>).
+# Two-thread: writer add/remove on main; reader find/snapshot on std::thread.
+# TSan is the ordering oracle; subject_dn comparison discriminates torn reads.
+fixpp_add_tls_test(NAME tls_pinset_snapshot_publish_acquire
+    SOURCES test_pinset_snapshot_publish_acquire.cpp)
+set_tests_properties(tls_pinset_snapshot_publish_acquire PROPERTIES
+    LABELS "tls;011;046;nfr017;publish_acquire"
+    ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp")
+
+# T019 (plan row +B): forced-fallback link test.
+# Constructs fixpp::sync::atomic_shared_ptr<int> in a binary that links
+# fixpp::tls; proves shard_guard symbols resolve transitively through fixpp::tls.
+fixpp_add_tls_test(NAME tls_forced_fallback_link
+    SOURCES test_tls_forced_fallback_link.cpp)
+set_tests_properties(tls_forced_fallback_link PROPERTIES
+    LABELS "tls;011;046;nfr017;fallback_link")
+
 # ── T018 mallocnesia gate ─────────────────────────────────────────────────────
 # Registers a second CTest entry that invokes check_alloc.py to intercept
 # global malloc via LD_PRELOAD. Only runs if mallocnesia.so is present.

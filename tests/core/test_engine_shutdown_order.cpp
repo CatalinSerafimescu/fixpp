@@ -16,6 +16,7 @@
 #include <asio/system_executor.hpp>
 #include <asio/thread_pool.hpp>
 #include <chrono>
+#include <thread>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/core/system_clock_source.hpp>

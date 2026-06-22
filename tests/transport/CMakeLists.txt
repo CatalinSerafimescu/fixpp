@@ -403,3 +403,42 @@ add_test(NAME transport_asio_plain_transport_config
 set_tests_properties(transport_asio_plain_transport_config PROPERTIES
   LABELS "transport;043;us1;sc008;plain;config"
   TIMEOUT 60)
+
+# ── 046-atomic-shared-ptr (NFR-017) transport consumer witnesses ──────────────
+
+# T008 (plan row 6-consumers): publish/acquire witness for
+# asio_tls_transport_factory::cert_source_slot_
+# (fixpp::sync::atomic_shared_ptr<fixpp::tls::cert_source>).
+# Writer thread calls reload_credentials(); reader threads call cert_source_snapshot().
+# Assertions: each reader verifies the returned pointer is a known stub instance;
+# a torn pointer would fail dynamic_cast or return an out-of-range id.
+add_executable(transport_factory_cert_source_publish_acquire
+  test_transport_factory_cert_source_publish_acquire.cpp)
+target_link_libraries(transport_factory_cert_source_publish_acquire PRIVATE
+  fixpp_transport
+  fixpp_tls
+  GTest::gtest
+  GTest::gtest_main
+)
+add_test(NAME transport_factory_cert_source_publish_acquire
+         COMMAND transport_factory_cert_source_publish_acquire)
+set_tests_properties(transport_factory_cert_source_publish_acquire PROPERTIES
+  LABELS "transport;046;nfr017;publish_acquire"
+  ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  TIMEOUT 30)
+
+# T019 (plan row +B): forced-fallback link test.
+# Constructs fixpp::sync::atomic_shared_ptr<int> in a binary that links
+# fixpp_transport; proves shard_guard symbols resolve transitively through
+# fixpp_transport → fixpp_sync.
+add_executable(transport_forced_fallback_link
+  test_transport_forced_fallback_link.cpp)
+target_link_libraries(transport_forced_fallback_link PRIVATE
+  fixpp_transport
+  GTest::gtest
+  GTest::gtest_main
+)
+add_test(NAME transport_forced_fallback_link
+         COMMAND transport_forced_fallback_link)
+set_tests_properties(transport_forced_fallback_link PROPERTIES
+  LABELS "transport;046;nfr017;fallback_link")

@@ -1,0 +1,28 @@
+# Conan profile: linux-clang-libc++ (046-atomic-shared-ptr T013)
+# Tier-2 lane: libc++ portability check for fixpp::sync::atomic_shared_ptr
+# (NFR-017). Mirrors linux-clang-debug but uses compiler.libcxx=libc++.
+# CI-deferred: the full libc++ dep rebuild is not run locally by default.
+#
+# Toolchain notes:
+#   libc++ on this host: installed alongside Clang 22 via llvm.org apt.
+#   The -stdlib=libc++ flag is forwarded through cflags/cxxflags so Conan
+#   passes it to every dependency that is rebuilt (with_otel=False avoids
+#   the OTel SDK rebuild — the primary value on this lane).
+
+[settings]
+os=Linux
+arch=x86_64
+build_type=Debug
+compiler=clang
+compiler.version=22
+compiler.libcxx=libc++
+compiler.cppstd=23
+
+[buildenv]
+CC=clang-22
+CXX=clang++-22
+CXXFLAGS=-stdlib=libc++
+LDFLAGS=-stdlib=libc++
+
+[conf]
+tools.cmake.cmaketoolchain:generator=Ninja

@@ -28,6 +28,7 @@ target_include_directories(fixpp_tls PUBLIC
 # which includes core/error.hpp, not OpenSSL headers directly).
 target_link_libraries(fixpp_tls
   PUBLIC  fixpp_core
+          fixpp_sync   # 046 (NFR-017): atomic_shared_ptr fallback shard_guard symbols (pinset snapshot_)
           asio::asio
   PRIVATE OpenSSL::Crypto
 )

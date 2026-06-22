@@ -2,7 +2,7 @@ name: Tier 2 — Windows CI (on-demand only)
 
 # Triggered only by:
 #   - workflow_dispatch (manual run from Actions UI)
-#   - PR labeled `windows`
+#   - PR labeled `run-tier2` (on-demand; standardised run-tierN scheme)
 # No nightly cron — Tier 2 is on-demand to conserve Windows CI minutes.
 
 on:
@@ -15,7 +15,7 @@ env:
   CONAN_HOME: C:\Users\runneradmin\.conan2
 
 jobs:
-  # Only run on workflow_dispatch or PRs labeled 'windows'
+  # Only run on workflow_dispatch or PRs labeled 'run-tier2'
   filter:
     name: "Check trigger"
     runs-on: ubuntu-24.04
@@ -24,8 +24,14 @@ jobs:
     steps:
       - id: check
         run: |
+          # One-shot: fire only when run-tier2 is the FRESHLY-ADDED label (a
+          # `labeled` event whose label IS run-tier2) — NOT whenever the label is
+          # merely present. The `contains(labels,…)` form re-ran the full matrix on
+          # every subsequent label change while run-tier2 sat on the PR (e.g. adding
+          # gate-b-done). Matches the Tier-1 run-trigger; re-run = remove + re-add.
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]] || \
-             [[ "${{ contains(github.event.pull_request.labels.*.name, 'windows') }}" == "true" ]]; then
+             { [[ "${{ github.event.action }}" == "labeled" ]] && \
+               [[ "${{ github.event.label.name }}" == "run-tier2" ]]; }; then
             echo "should_run=true" >> $GITHUB_OUTPUT
           else
             echo "should_run=false" >> $GITHUB_OUTPUT
