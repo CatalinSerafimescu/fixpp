@@ -26,8 +26,14 @@ jobs:
     steps:
       - id: check
         run: |
+          # One-shot: fire only when run-tier3 is the FRESHLY-ADDED label (a
+          # `labeled` event whose label IS run-tier3) — NOT whenever the label is
+          # merely present. The `contains(labels,…)` form re-ran the full matrix on
+          # every subsequent label change while run-tier3 sat on the PR (e.g. adding
+          # gate-b-done). Matches the Tier-1 run-trigger; re-run = remove + re-add.
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]] || \
-             [[ "${{ contains(github.event.pull_request.labels.*.name, 'run-tier3') }}" == "true" ]]; then
+             { [[ "${{ github.event.action }}" == "labeled" ]] && \
+               [[ "${{ github.event.label.name }}" == "run-tier3" ]]; }; then
             echo "should_run=true" >> $GITHUB_OUTPUT
           else
             echo "should_run=false" >> $GITHUB_OUTPUT
@@ -153,9 +159,14 @@ jobs:
       - name: Fetch instrumented libc++ (TSan)
         if: matrix.preset == 'linux-clang-libc++-tsan'
         run: |
+          # Pin by DIGEST, not the mutable :22.1.2 tag — this .so is loaded into
+          # the test process, so a silently re-pushed tag could fabricate/suppress
+          # TSan results. Digest below = the verified-good image (tag 22.1.2).
+          # To roll forward: re-push, then update this digest + the comment.
+          IMG="ghcr.io/catalinserafimescu/fixpp-libcxx-tsan@sha256:65106764ae2318bf1e982216d84b0d45ec9c9245cb25a59728aab59f016ea161"
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
-          docker pull ghcr.io/catalinserafimescu/fixpp-libcxx-tsan:22.1.2
-          cid=$(docker create ghcr.io/catalinserafimescu/fixpp-libcxx-tsan:22.1.2)
+          docker pull "$IMG"
+          cid=$(docker create "$IMG")
           docker cp "$cid:/libcxx-tsan" "$RUNNER_TEMP/libcxx-tsan"
           docker rm "$cid"
           ls -l "$RUNNER_TEMP/libcxx-tsan"
