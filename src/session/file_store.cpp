@@ -69,7 +69,9 @@
 
 // Windows headers (Tier-2 — compilation only on Linux Tier-1; runtime is T057)
 #ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN  // also defined globally (CMakeLists, WIN32) — avoid C4005
 #define WIN32_LEAN_AND_MEAN
+#endif
 #include <windows.h>
 #endif
 
