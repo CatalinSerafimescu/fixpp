@@ -64,8 +64,13 @@ set(_xml_dir                     "${CMAKE_SOURCE_DIR}/dictionaries")
 # Resolution order for the codegen binary (see BOOTSTRAP MECHANISM above):
 #   1. Main build tree ${CMAKE_BINARY_DIR}/bin/fixpp-codegen
 #   2. Bootstrap sub-build ${CMAKE_BINARY_DIR}/_codegen_bootstrap/bin/fixpp-codegen
-set(_codegen_tool_main       "${CMAKE_BINARY_DIR}/bin/fixpp-codegen")
-set(_codegen_tool_bootstrap  "${FIXPP_CODEGEN_BOOTSTRAP_DIR}/bin/fixpp-codegen")
+# CMAKE_EXECUTABLE_SUFFIX is "" on POSIX and ".exe" on Windows/MSVC — without it
+# the EXISTS check below fails on Windows ("Bootstrap succeeded but … not found")
+# even though fixpp-codegen.exe built fine. Both presets are single-config Ninja
+# (CMAKE_GENERATOR is inherited by the bootstrap), so there is no per-config
+# subdir to account for — only the suffix.
+set(_codegen_tool_main       "${CMAKE_BINARY_DIR}/bin/fixpp-codegen${CMAKE_EXECUTABLE_SUFFIX}")
+set(_codegen_tool_bootstrap  "${FIXPP_CODEGEN_BOOTSTRAP_DIR}/bin/fixpp-codegen${CMAKE_EXECUTABLE_SUFFIX}")
 
 # ── Locate or build fixpp-codegen ─────────────────────────────────────────────
 if(EXISTS "${_codegen_tool_main}")
