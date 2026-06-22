@@ -3,16 +3,22 @@
 //
 // Witness: a holder is suspended on the strand at drain time.
 // The unified quiescence loop yields (co_await asio::post), which lets the
-// holder's unlock() run on the strand; the drain loop then re-reaps any
-// waiters spliced by unlock(); finalize: no hang, no orphan.
+// holder's unlock() run on the strand; the drain then finalizes once the holder
+// has released (active_holders_count_==0): no hang, no orphan.
+//
+// P3-1 (Gate B): the prior comment claimed unlock() "splices" waiters after the
+// drain starts — that does NOT occur strand-locally. Once draining_ is set, the
+// holder's unlock() SHORT-CIRCUITS (it does not splice or grant); the queued
+// waiters were parked BEFORE the drain and are reaped directly. The re-reap each
+// loop pass is a by-construction safety belt, not a late-splice path.
 //
 // Scenarios verified:
-//   (a) Pre-drain holder with no additional waiters — drain yields once, holder
-//       unlocks, drain finalizes.
-//   (b) Pre-drain holder with M additional waiters spliced AFTER unlock —
-//       the drain's W-2 re-reap picks them up.
-//   (c) Chain of pre-drain holders: holder 1 grants holder 2 via unlock(),
-//       then holder 2 also unlocks before drain finalizes.
+//   (a) Pre-drain holder with no additional waiters — drain yields until the
+//       holder unlocks, then finalizes.
+//   (b) Pre-drain holder with M additional waiters already queued behind it —
+//       the drain reaps all M (aborted) while waiting for the holder.
+//   (c) Chain of pre-drain holders releasing on their own timeline before the
+//       drain finalizes.
 //
 // Design: research.md D-2/W-2/W-4; data-model.md quiescence loop; INV-A.
 // Task: T013.

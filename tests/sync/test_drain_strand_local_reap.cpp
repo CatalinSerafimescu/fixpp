@@ -17,6 +17,7 @@
 #include <gtest/gtest.h>
 
 #include <asio/co_spawn.hpp>
+#include <asio/detached.hpp>
 #include <asio/io_context.hpp>
 #include <asio/post.hpp>
 #include <asio/steady_timer.hpp>
@@ -49,27 +50,24 @@ bool run_one_round(int n_waiters) {
     std::atomic<int> aborted_count{0};
     std::atomic<int> granted_count{0};
     std::atomic<int> completed_count{0};
-    bool drain_ok = false;
+    std::atomic<bool> drain_done{false};
+    std::atomic<bool> drain_ok{false};
 
     asio::io_context ioc;
+    async_mutex mtx;
 
-    // Self-deadline: if the test hangs, ioc.run_for times out and we return false.
-    bool timed_out = false;
-
+    // P2-4 (Gate B): keep the holder ACTIVE while the drain starts so NO waiter can
+    // be granted — every queued waiter must be reaped with sync_lock_aborted. The
+    // strict oracle is granted==0 ∧ aborted==N ∧ completed==N (was: accept any
+    // granted|aborted mix, which a regression could satisfy with grants).
     auto main_coro = [&]() -> asio::awaitable<void> {
-        async_mutex mtx;
-
-        // Acquire the mutex to force subsequent lockers to queue.
-        auto holder = co_await mtx.async_lock();
-        EXPECT_TRUE(holder.has_value());
-
         auto ex = co_await asio::this_coro::executor;
 
-        // Park N waiters — they will queue behind the holder.
-        std::vector<std::future<void>> futs;
-        futs.reserve(n_waiters);
+        auto holder = co_await mtx.async_lock();   // hold throughout the reap
+        EXPECT_TRUE(holder.has_value());
+
         for (int i = 0; i < n_waiters; ++i) {
-            futs.push_back(asio::co_spawn(
+            asio::co_spawn(
                 ex,
                 [&]() -> asio::awaitable<void> {
                     auto r = co_await mtx.async_lock();
@@ -81,79 +79,64 @@ bool run_one_round(int n_waiters) {
                     }
                     completed_count.fetch_add(1, std::memory_order_relaxed);
                 },
-                asio::use_future));
+                asio::detached);
         }
+        co_await yield_n(n_waiters * 2 + 4);  // let waiters queue behind the holder
 
-        // Yield to let waiters queue.
-        co_await yield_n(n_waiters * 2 + 4);
+        // Spawn the drain while the holder is STILL HELD: it sets draining_ and reaps
+        // all queued waiters (every one aborted — none granted, the holder holds), then
+        // parks in its quiescence loop waiting for the holder.
+        asio::co_spawn(
+            ex,
+            [&]() -> asio::awaitable<void> {
+                auto d = co_await mtx.cancel_and_drain();
+                drain_ok.store(d.has_value(), std::memory_order_release);
+                drain_done.store(true, std::memory_order_release);
+            },
+            asio::detached);
+        co_await yield_n(n_waiters * 2 + 6);  // let the drain set draining_ + reap (all aborted)
 
-        // Release holder BEFORE draining — the drain's loop will pick up any
-        // waiters that were spliced after unlock (validates W-2 re-reap).
+        // Holder STILL held → all waiters are reaped, none granted. Release → finalize.
         holder = expected_t<async_lock_guard>{};
-
-        // Drain — should complete with ok.
-        auto d = co_await mtx.cancel_and_drain();
-        drain_ok = d.has_value();
-
-        // All waiters should have completed by now (drain returns only when
-        // in_flight_resumers_==0 and both lists empty).
-        // Yield one more pass to let any lingering posted runners finish.
-        co_await yield_n(4);
-
-        for (auto& f : futs) f.get();
     };
 
-    auto f = asio::co_spawn(ioc, main_coro(), asio::use_future);
+    asio::co_spawn(ioc, main_coro(), asio::detached);
 
-    // Self-deadline: 5 seconds.
+    // Self-deadline: a hang FAILS instead of hanging ctest. No post-drain "settle"
+    // yield — the drain's terminal condition (in_flight_resumers_==0) guarantees every
+    // posted resumer has run by the time the drain returns, so completed==N then.
     auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
     while (std::chrono::steady_clock::now() < deadline) {
-        ioc.run_for(std::chrono::milliseconds(100));
-        if (f.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready) break;
+        ioc.run_for(std::chrono::milliseconds(50));
+        if (drain_done.load(std::memory_order_acquire) &&
+            completed_count.load(std::memory_order_acquire) == n_waiters)
+            break;
     }
-    if (f.wait_for(std::chrono::milliseconds(0)) != std::future_status::ready) {
-        timed_out = true;
+    if (!(drain_done.load() && completed_count.load() == n_waiters)) {
         ioc.stop();
+        return false;  // hang
     }
 
-    if (timed_out) return false;
-
-    f.get();
-
-    // All N waiters must have received sync_lock_aborted (drain BEFORE any
-    // waiter was granted — holder was released BEFORE drain, but drain reaps
-    // all remaining queued waiters; granted_count can be > 0 if unlock granted
-    // some before drain set draining_. What matters is: completed==N, no hang.
-    bool ok = drain_ok &&
-              completed_count.load() == n_waiters &&
-              (aborted_count.load() + granted_count.load()) == n_waiters;
-    return ok;
+    return drain_ok.load() && completed_count.load() == n_waiters &&
+           granted_count.load() == 0 && aborted_count.load() == n_waiters;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SC-001: ≥200 rounds × ≥25 repetitions.
+// SC-001: 200 rounds × 25 repetitions (the PRODUCT — 5000 drains), each with the
+// strict oracle (granted==0 ∧ aborted==N ∧ completed==N ∧ no hang).
 // ─────────────────────────────────────────────────────────────────────────────
 
-TEST(DrainStrandLocalReap, SC001StressNoHang) {
+TEST(DrainStrandLocalReap, SC001Stress200x25NoHang) {
     constexpr int ROUNDS = 200;
+    constexpr int REPS = 25;
     constexpr int N_WAITERS = 8;
 
     for (int r = 0; r < ROUNDS; ++r) {
-        ASSERT_TRUE(run_one_round(N_WAITERS))
-            << "Round " << r << "/" << ROUNDS << " failed (hang or wrong result)";
-    }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Single-pass variant: N=25 waiters, all aborted, drain returns ok.
-// This is the named "25 repetitions" arm from the brief.
-// ─────────────────────────────────────────────────────────────────────────────
-
-TEST(DrainStrandLocalReap, SC001TwentyFiveWaiters) {
-    constexpr int REPS = 25;
-    for (int i = 0; i < REPS; ++i) {
-        ASSERT_TRUE(run_one_round(16))
-            << "Rep " << i << " failed";
+        for (int rep = 0; rep < REPS; ++rep) {
+            ASSERT_TRUE(run_one_round(N_WAITERS))
+                << "round " << r << " rep " << rep
+                << " failed (hang, a grant slipped through, or wrong abort count)";
+        }
     }
 }
 

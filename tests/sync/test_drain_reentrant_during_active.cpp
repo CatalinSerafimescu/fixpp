@@ -53,6 +53,12 @@ TEST(DrainReentrantDuringActive, SecondDrainerAwaitsFirstCompletion) {
     bool second_drain_ok = false;
     std::atomic<int> drain_order{0};  // which drain returned first
     std::atomic<int> completed{0};
+    // P2-1 discrimination oracle: prove the second drain ACTUALLY WAITED. It must
+    // NOT have returned while the holder is still held (the first drain cannot have
+    // finalized → draining_complete_ is false → the reentrant caller is parked in its
+    // while(!draining_complete_) yield loop). An eager-false-success regression sets
+    // this true before the holder release and REDs the EXPECT_FALSE below.
+    std::atomic<bool> second_returned{false};
 
     asio::io_context ioc;
     async_mutex mtx;
@@ -97,12 +103,18 @@ TEST(DrainReentrantDuringActive, SecondDrainerAwaitsFirstCompletion) {
             [&]() -> asio::awaitable<void> {
                 auto d = co_await mtx.cancel_and_drain();
                 second_drain_ok = d.has_value();
+                second_returned.store(true, std::memory_order_release);
                 drain_order.fetch_add(1, std::memory_order_relaxed);
             },
             asio::use_future);
 
         // Yield so drains proceed; then release the holder.
         co_await yield_n(N * 4 + 8);
+        // DISCRIMINATOR (P2-1): the holder is STILL held here, so neither drain can
+        // have finalized; the reentrant second drain MUST still be parked awaiting
+        // draining_complete_. If it returned eagerly this REDs.
+        EXPECT_FALSE(second_returned.load(std::memory_order_acquire))
+            << "reentrant drain returned BEFORE the first drain finalized (eager false-success)";
         // Release holder — first drain loop can now complete.
         holder = expected_t<async_lock_guard>{};
 

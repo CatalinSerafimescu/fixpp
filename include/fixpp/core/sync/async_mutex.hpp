@@ -53,6 +53,7 @@
 
 #include <array>
 #include <atomic>
+#include <cassert>
 #include <coroutine>
 #include <cstddef>
 #include <cstdint>
@@ -1206,8 +1207,15 @@ fixpp::sync::async_mutex::cancel_and_drain() noexcept {
     // no co_await between them) — a reentrant caller observing draining_complete_
     // also observes state_==not_locked (research.md D-2 step 5).
     uintptr_t expected_state = locked_no_waiters;
-    state_.compare_exchange_strong(expected_state, not_locked, std::memory_order_acq_rel,
-                                   std::memory_order_acquire);
+    bool finalized = state_.compare_exchange_strong(expected_state, not_locked,
+                                                    std::memory_order_acq_rel,
+                                                    std::memory_order_acquire);
+    // P3-2 (Gate B): the loop only breaks once both lists are empty in a pass, so the
+    // drain holds the lock (locked_no_waiters) at this point and the CAS is invariant.
+    // Assert it — an internal regression must NOT publish draining_complete_ while
+    // state_ is non-terminal (which would return ok with a still-locked mutex).
+    assert(finalized && "cancel_and_drain finalize: state_ was not locked_no_waiters");
+    (void)finalized;
     draining_complete_.store(true, std::memory_order_release);
     co_return expected_t<void>{};
 }
