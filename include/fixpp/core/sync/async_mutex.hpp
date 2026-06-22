@@ -847,9 +847,29 @@ fixpp::sync::async_mutex::async_lock(std::pmr::memory_resource* mr) noexcept {
 
                 if (inherited_slot.is_connected()) {
                     awaiter.slot_ = inherited_slot;
-                    inherited_slot.assign([&awaiter](asio::cancellation_type type) noexcept {
-                        awaiter.on_cancel(type);
-                    });
+                    // 048 T014 / FR-003: inherited_slot.assign allocates the
+                    // cancellation-slot handler storage and can throw bad_alloc under
+                    // OOM; escaping the noexcept await_suspend would std::terminate the
+                    // whole process. Fail closed instead. The handler is already moved
+                    // into the awaiter (store_handler above), so complete via the POSTED
+                    // runner (E-3 — never an immediate invoke), NOT the moved-from local
+                    // handler and NOT the store_executor exit above (which precedes
+                    // store_handler). Ref-balance mirrors the draining_ branch below:
+                    // add_ref(2){creator,attached} → schedule_record_resume adds the
+                    // scheduled-resumer ref → release creator here → attached + scheduled
+                    // freed by async_lock's tail + the runner → 0. (research D-3.)
+                    try {
+                        inherited_slot.assign([&awaiter](asio::cancellation_type type) noexcept {
+                            awaiter.on_cancel(type);
+                        });
+                    } catch (...) {
+                        record->result_ = expected_t<async_lock_guard>{
+                            std::unexpected(fixpp::core::error::sync_lock_alloc_failed)};
+                        record->phase_.store(waiter_phase::cancelled, std::memory_order_release);
+                        schedule_record_resume(record);
+                        waiter_record::release_ref(record);  // creator
+                        return;
+                    }
                 }
             }
 
