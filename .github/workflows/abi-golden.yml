@@ -1,8 +1,17 @@
-name: ABI golden — C-ABI layout drift (per-PR)
+name: ABI golden — C-ABI symbol-set drift (per-PR)
 
-# The C-ABI golden-layout gate: verifies fixpp_decimal_t layout + the C-ABI
-# boundary symbols have not drifted from the golden captured in 001-core-decimal.
-# A pure Linux abidiff check — nothing toolchain/Windows-specific.
+# The C-ABI golden gate: verifies the exported fixpp_* C-ABI symbol set has not
+# drifted (a new or removed C-ABI function fails fast). A pure-Linux nm check —
+# nothing toolchain/Windows-specific.
+#
+# NOTE — was an abidiff layout gate; replaced with an nm symbol-set check
+# 2026-06-22. The release fixpp_capi.a has no debug info, so abidiff only ever
+# reported the symbol set ("…not referenced by debug info"), AND libabigail 2.4.0
+# (ubuntu-24.04 apt) asserts/core-dumps on debug-info-less archives. nm gives the
+# same check without the version fragility. True layout/type diffing (abidiff +
+# -g + a pinned non-asserting libabigail) is the Phase-5 upgrade when the C-ABI
+# surface is built out (CA-001..010); the abidiff suppr/golden/baseline files are
+# retained as that hook. See remaining-work/ci-windows-macos.md + c-abi.md.
 #
 # Runs on EVERY PR + push:main so C-ABI drift fails fast — important now that the
 # C ABI is a growing v1.0 surface (Phase 5). Moved out of tier2.yml (Windows
@@ -39,7 +48,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Install Clang 22 (apt.llvm.org) + GCC 13 + Ninja + abigail-tools
+      - name: Install Clang 22 (apt.llvm.org) + GCC 13 + Ninja
         run: |
           # Clang 22 matches the dev toolchain + the linux-clang-release profile.
           # llvm.sh installs versioned binaries (clang-22) but NOT the unversioned
@@ -59,7 +68,6 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             gcc-13 g++-13 \
             ninja-build \
-            abigail-tools \
             python3-pip \
             pipx
 
@@ -106,12 +114,27 @@ jobs:
       - name: Build fixpp_capi
         run: cmake --build --preset linux-clang-release --target fixpp_capi
 
-      - name: Run abidiff against golden
+      - name: Check C-ABI exported symbol set against golden
         run: |
-          abidiff \
-            --leaf-changes-only \
-            --suppressions tests/abi/abidiff.suppr \
-            tests/abi/baseline/libfixpp_capi.a \
+          # nm symbol-set gate (replaces the former abidiff gate). abidiff was
+          # fundamentally broken here: the release fixpp_capi.a has NO debug info,
+          # so abidiff only ever reported the symbol set anyway ("…not referenced
+          # by debug info") — and libabigail 2.4.0 (ubuntu-24.04 apt) *asserts and
+          # core-dumps* on debug-info-less archives (bare `abidiff a a` aborts).
+          # nm gives exactly what this gate actually checks (the exported fixpp_*
+          # C-ABI surface) with no libabigail version fragility. True layout/type
+          # diffing (abidiff + -g + a pinned non-asserting libabigail) is the right
+          # upgrade once the C-ABI surface is built out in Phase 5 (CA-001..010) —
+          # tests/abi/{abidiff.suppr,golden/fixpp_decimal_t.abidiff,baseline/} are
+          # kept as the hook for that. mirrors src/capi/fixpp_capi.map (global:
+          # fixpp_*; local: *) so a new/removed exported C-ABI function fails fast.
+          nm --defined-only --extern-only \
             build/linux-clang-release/lib/libfixpp_capi.a \
-            > /tmp/abidiff_current.txt || true
-          diff tests/abi/golden/fixpp_decimal_t.abidiff /tmp/abidiff_current.txt
+            | awk '{print $NF}' | grep -E '^fixpp_' | sort -u > /tmp/capi_symbols.txt
+          echo "=== exported C-ABI symbols (current build) ==="; cat /tmp/capi_symbols.txt
+          if ! diff -u tests/abi/golden/fixpp_capi_symbols.txt /tmp/capi_symbols.txt; then
+            echo "::error::C-ABI exported symbol set drifted from golden."
+            echo "If intentional (new/removed C-ABI function), update tests/abi/golden/fixpp_capi_symbols.txt."
+            exit 1
+          fi
+          echo "C-ABI symbol set matches golden."
