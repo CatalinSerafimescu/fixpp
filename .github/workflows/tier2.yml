@@ -82,10 +82,13 @@ jobs:
 
       # setup-msbuild only adds msbuild to PATH; it does NOT run vcvars, so cl.exe
       # is absent and the Ninja-generator presets fail "CMAKE_CXX_COMPILER (cl.exe)
-      # not found". msvc-dev-cmd activates the full MSVC dev environment (cl.exe +
+      # not found". vs-shell activates the full MSVC dev environment (cl.exe +
       # vcvars) and exports it via GITHUB_ENV so it persists into the cmd steps.
+      # It is a COMPOSITE (pure-PowerShell) action — no JS/Node runtime — so it
+      # avoids the Node-20-deprecation warning that the node20-based
+      # ilammy/msvc-dev-cmd emits (that action has no Node-24 release).
       - name: Set up MSVC environment (vcvars)
-        uses: ilammy/msvc-dev-cmd@v1
+        uses: egor-tensin/vs-shell@v2
 
       # OTel-OFF for the first lane-bring-up: skip the protobuf/abseil/grpc build so
       # the toolchain/configure/codegen path converges in fast (~10 min) cycles.
