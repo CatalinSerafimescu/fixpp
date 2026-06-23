@@ -9,7 +9,7 @@
 
 ## `fixpp_strerror` contract (`[2i §4.4]`)
 - Returns a **non-null**, static-storage `const char*` for every published code; caller MUST NOT free.
-- **Zero allocation.** Static `const char* const` table.
+- **Zero allocation.** Realized as a `switch` returning static string literals (ABI- and behavior-equivalent to the `[2i §4.4]` "static table" description; zero-alloc, O(1), stable pointer — `[const §X.1/X.2]` freeze the observable surface, not the impl body).
 - Out-of-range / undefined code → the documented "unknown error" string (no crash, no alloc).
 - Reentrancy: **thread-safe**.
 

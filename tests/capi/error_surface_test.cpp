@@ -452,9 +452,10 @@ TEST(CapiError, StrerrorUnknownSentinel) {
 
 // ---------------------------------------------------------------------------
 // 7. fixpp_strerror — returns static storage (zero global heap alloc)
-//    The static-const-char* contract is verified by the fact that the table is
-//    declared `static const char* const[]` — no alloc path is possible.
-//    We verify the pointer is stable across two calls (same address == static).
+//    Realized as a `switch` returning static string literals (string literal →
+//    static storage → stable pointer, zero global-heap alloc); `default:` →
+//    "unknown error". We verify the pointer is stable across two calls
+//    (same address == static storage, as guaranteed by string literals).
 // ---------------------------------------------------------------------------
 
 TEST(CapiError, StrerrorStaticStorage) {

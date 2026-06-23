@@ -11,7 +11,7 @@ All four spec-level scope forks were resolved at `/speckit-clarify` (see spec `#
 
 ## D-2 — `translate()` and `strerror` live in `src/capi/`, not exported
 
-**Decision**: `translate()` is engine-internal (`namespace fixpp_capi::detail`) in `src/capi/error.cpp`; only `fixpp_strerror` is exported. The `strerror` table is `static const char* const[]` indexed/looked-up by code.
+**Decision**: `translate()` is engine-internal (`namespace fixpp_capi::detail`) in `src/capi/error.cpp`; only `fixpp_strerror` is exported. `fixpp_strerror` is realized as a `switch` returning static string literals; `default:` → "unknown error". [Realized implementation note: the `[2i §4.4]` "static table" description was superseded by a `switch`; the observable contract (zero-alloc, stable pointer, O(1), null-safe) is identical — `[const §X.1/X.2]` freeze the surface, not the impl body. The sparse 0–1204 layout (e.g. `BINDING_*` at 1200–1204) makes a flat indexed array impractical (~1160 null holes); the `switch` is the better fit.]
 **Rationale**: `[2i §4.4]`: zero-alloc static table, returned pointer never freed, lifetime = binary. Keeping `translate()` unexported preserves §X.2 (the C consumer never sees `fixpp::core::error`). The nm gate confirms only `fixpp_*` are exported.
 **Alternatives considered**: exposing a `translate` symbol — rejected (would leak an implementation detail + a non-`fixpp_` C++ symbol).
 
