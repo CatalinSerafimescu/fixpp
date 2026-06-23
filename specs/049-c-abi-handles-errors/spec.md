@@ -53,7 +53,7 @@ A C consumer needs every fallible C-ABI call to report outcomes as a stable nume
 
 ### User Story 3 - Build against a stable opaque-handle catalogue (Priority: P2)
 
-A C consumer (and downstream binding authors) needs a fixed catalogue of opaque handle types with a uniform ownership/destroy discipline and well-defined behaviour when a null or already-destroyed handle is passed, so they can write forward-compatible code against handles whose concrete operations land in later features.
+A C consumer (and downstream binding authors) needs a fixed catalogue of opaque handle types with a per-handle ownership/destroy/invalidation discipline per `[2i §4.2.1]` and well-defined behaviour when a null or already-destroyed handle is passed, so they can write forward-compatible code against handles whose concrete operations land in later features.
 
 **Why this priority**: The handle catalogue and its plumbing rules must exist before any function that produces or consumes a handle (Features B/C). Establishing the catalogue and the null/invalid-handle contract now prevents churn in the later features. It depends on the error model (US2) being in place.
 
@@ -61,7 +61,7 @@ A C consumer (and downstream binding authors) needs a fixed catalogue of opaque 
 
 **Acceptance Scenarios**:
 
-1. **Given** the published header, **When** a consumer inspects the handle types, **Then** each is an opaque/incomplete type with a documented uniform destroy discipline and no exposed C++ internals.
+1. **Given** the published header, **When** a consumer inspects the handle types, **Then** each is an opaque/incomplete type with a documented per-handle destroy/invalidation discipline and no exposed C++ internals.
 2. **Given** a handle-taking C-ABI function, **When** a null handle is passed, **Then** the documented "null handle" code is returned and distinguished from the "invalid (destroyed/corrupted) handle" code.
 3. **Given** the compiled C-ABI surface, **When** the symbol-visibility gate runs, **Then** only `extern "C"` `fixpp_*` symbols are exported and no C++ symbol leaks.
 
@@ -98,7 +98,7 @@ A C consumer needs each public C-ABI symbol to carry an explicit, documented ree
 **Handle catalogue (CA-001)**
 
 - **FR-001**: The C ABI MUST expose the opaque handle catalogue defined by the authoritative contract `[2i §4.2]` — `fixpp_engine_t`, `fixpp_session_t`, `fixpp_msg_t`, `fixpp_dict_t`, `fixpp_store_t` — each as an incomplete (forward-declared) type, using the `fixpp_*_t` naming from `[2i]` (the v1-tracker shorthand `FixSession`/`FixMessage`/`FixDictionary` is reconciled to this naming).
-- **FR-002**: The C ABI MUST document a uniform ownership/destroy discipline for the handle catalogue, including idempotent destroy and the lifetime model, per `[2i §4.2.1]`.
+- **FR-002**: The C ABI MUST document a **per-handle** ownership / destroy / invalidation discipline per `[2i §4.2.1]` (engine/dict/outbound-msg have idempotent `*_destroy`; session is closed via `fixpp_session_close`; store has no destroy — invalidates on session close).
 - **FR-003**: Handle-taking C-ABI functions MUST distinguish a null handle (dedicated "null handle" code) from a previously-valid but destroyed/corrupted handle (dedicated "invalid handle" code), per `[2i §4.2.1]`.
 - **FR-004**: No C++ symbol MUST leak through the C ABI; only `extern "C"` `fixpp_*` symbols are exported, verified by the existing symbol-visibility gate (`nm` / `fixpp_capi.map` "fixpp_*; local: *"), per constitution Article X §2.
 - **FR-005**: Exceptions MUST NOT cross the `extern "C"` boundary; the C↔C++ thunk discipline (`[2i §4.2.3]`) wraps engine-internal calls and translates outcomes to numeric codes.
@@ -111,12 +111,12 @@ A C consumer needs each public C-ABI symbol to carry an explicit, documented ree
 - **FR-009**: The forward-compatibility downgrade rule MUST be implemented: an error code introduced after the consumer's recorded ABI minor version is mapped to the "unknown error" sentinel (numeric 2) on the return path; the from-consumer direction remains opaque pass-through, per `[2i §4.4]` / constitution Article X §4. (The point where the consumer's minor version is recorded — `fixpp_engine_create` — is owned by Feature B; see Out of Scope / Assumptions.)
 - **FR-010**: A reserved dedicated code MUST exist for explicit major-version mismatch at engine construction, distinct from the per-call "unknown error" downgrade, per `[2i §4.4]` / `[2i §4.5]`.
 - **FR-011**: The currently-shipped provisional decimal-boundary error codes MUST be re-numbered to the authoritative master layout (`BUFFER_TOO_SMALL` → 6, `DECIMAL_INVALID` → 800, `DECIMAL_PRECISION_LOSS` → 801; `OK` = 0, `UNKNOWN` = 2 unchanged), and **every** in-repo reference to the old numbers MUST move in lockstep (header, implementation, decimal C tests, contract copies, any binding skeleton). This is a permitted pre-1.0 change (the stability freeze binds only at major version 1).
-- **FR-012**: An append-only audit record (`tools/abi_history/error_codes_v1.txt`) MUST be created mapping every published numeric value to its symbolic name and introducing revision; CI MUST verify no published slot is re-defined relative to it.
-- **FR-013**: An occupancy-drift gate (`tools/check_capi_occupancy.sh`) MUST be created and wired into CI (Tier 1) to mechanically verify the published per-block counts match the authoritative sibling-doc tables, per `[2i §4.3]` occupancy gate.
+- **FR-012**: An append-only audit record (`tools/abi_history/error_codes_v1.txt`) MUST be created mapping every published numeric value to its symbolic name and `uint16_t` **introducing_minor** ordinal (the column the FR-009 downgrade consumes; current codes = 2); CI MUST verify no published slot is re-defined relative to it.
+- **FR-013**: An occupancy-drift gate (`tools/check_capi_occupancy.sh`) MUST be created and wired into CI (Tier 1) to mechanically verify (A) the header `#define` layout equals the `[2i §4.3]` published values, and (B) the source-domain variant-row counts (`[2X §6.X]` sibling tables) equal the expected coalescing-coverage table — the two quantities are never compared to each other, per `[2i §4.3]` occupancy gate.
 
 **Thread-safety contract (CA-003)**
 
-- **FR-014**: Every public C-ABI symbol introduced by this feature MUST be documented with exactly one reentrancy class — thread-safe, single-thread, or requires-session-lock — per constitution Article X §5 / `[2i §4.10]`. No public symbol may be left unannotated (no undocumented reentrancy).
+- **FR-014**: Every public C-ABI symbol introduced by this feature MUST be documented with exactly one reentrancy class — thread-safe, single-thread, or requires-session-lock — per constitution Article X §5 / `[2i §4.10]`. No public symbol may be left unannotated (no undocumented reentrancy). A discrete gate (`tools/check_capi_reentrancy.sh`, separate from the occupancy gate) MUST mechanically verify exactly one reentrancy class per exported symbol's doc-block.
 
 **Version negotiation (CA-004)**
 
@@ -131,7 +131,7 @@ A C consumer needs each public C-ABI symbol to carry an explicit, documented ree
 
 ### Key Entities
 
-- **Handle catalogue**: the five opaque engine-domain handle types; each an incomplete type with a uniform destroy discipline. Concrete create/operate functions are owned by later features.
+- **Handle catalogue**: the five opaque engine-domain handle types; each an incomplete type with a per-handle destroy/invalidation discipline per `[2i §4.2.1]`. Concrete create/operate functions are owned by later features.
 - **`fixpp_error_t` code space**: an `int32_t` value drawn from reserved per-domain numeric blocks; frozen-meaning once published at major version 1; audited append-only.
 - **Version descriptor**: a plain value-type carrying major/minor/patch for the C-ABI surface, with a parallel descriptor for the library surface.
 - **Reentrancy class**: one of {thread-safe, single-thread, requires-session-lock} attached to every public symbol.
@@ -147,12 +147,12 @@ A C consumer needs each public C-ABI symbol to carry an explicit, documented ree
 - **SC-004**: The occupancy-drift gate and append-only audit check both pass in CI and fail deterministically when a numeric slot is re-used or re-defined (demonstrated by a negative check).
 - **SC-005**: Every public C-ABI symbol introduced carries exactly one of the three reentrancy classes (0 unannotated symbols).
 - **SC-006**: The forward-compat downgrade is verified: a code "introduced after" a simulated consumer minor version maps to the unknown sentinel, while earlier codes pass through unchanged.
-- **SC-007**: The per-PR ABI-golden gate is green on the feature branch with the updated baseline reflecting exactly the new/changed exported symbols and re-numbered decimal codes.
+- **SC-007**: The per-PR ABI-golden gate is green on the feature branch with the updated baseline reflecting exactly the new/changed **exported-symbol set** (the nm gate sees symbols, not `#define` values). The decimal re-numbering is verified separately — by `error_codes_v1.txt` and the enumerating test — since it is invisible to the nm gate (D-4).
 
 ## Assumptions
 
 - **Engine-create binding is out of scope (deferred to Feature B).** The forward-compat downgrade (FR-009) needs the consumer's minor version, which the contract records at `fixpp_engine_create` time. That handle-lifecycle entry point is owned by Feature B / `[2j]`. Feature A implements the downgrade as a pure, unit-testable translation (FR-017) and declares the engine-create wiring as a **named limitation** so the feature-completeness audit does not later read CA-004 as falsely-complete.
-- **Full master enum is committed now, even for domains whose functions don't exist yet.** `[2i §4.3]` allocates the complete numeric layout (transport, TLS, store, session, etc.) up front so the blocks are coherent and the audit baseline is complete. Codes whose producing functions arrive in later features are published now and covered by the string-lookup table; this is intended forward-compatibility, not premature surface.
+- **Full master enum is committed now, even for domains whose functions don't exist yet.** `[2i §4.3]` allocates the complete numeric layout it publishes (transport, TLS, store, etc.) up front so the blocks are coherent and the audit baseline is complete. `[2i §4.3]` publishes **no session block** (and no log/otel/app block); per D-8 / L-049-2 `session_*` C++ variants map to `UNKNOWN` in Feature A, and the `FIXPP_ERR_SESSION_*` block is a Feature-B `[2i]` amendment. Codes whose producing functions arrive in later features are published now and covered by the string-lookup table; this is intended forward-compatibility, not premature surface.
 - **`fixpp_*_t` naming is authoritative** over the v1-tracker's `FixSession`/`FixMessage`/`FixDictionary` shorthand; the catalogue follows `[2i §4.2]` exactly (including `fixpp_engine_t` and `fixpp_store_t`, which the shorthand omits).
 - **The numeric error layout is taken verbatim from `[2i §4.3]`** — it supersedes the loose values in the original feature request (which carried the stale provisional decimal numbers). The decimal frozen PoD boundary type itself (`fixpp_decimal_t`) is unchanged per constitution Article X §3.
 - **Version stays 0.x** per the verified release-engineering policy; the GA major bump is a separate Phase-8 / release-gate task.
