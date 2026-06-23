@@ -14,6 +14,7 @@
 //              entries = 4096, so avail ≤ 4095 < default_max_group_entries_per_instance)
 
 #include <gtest/gtest.h>
+#include "../support/msvc_debug_arena_skip.hpp"
 
 #include <cstddef>
 #include <cstring>
@@ -56,6 +57,7 @@ std::vector<std::byte> make_raw_frame(std::string const& body) {
 // first field) throws → catch fires → lines 134-137 covered.
 
 TEST(OffsetTableErrorPath, CtorBadAllocDegradeCoversLines134to137) {
+    FIXPP_SKIP_ON_MSVC_DEBUG_ARENA();
     auto buf = make_raw_frame("35=D\x01");
     auto fv = fixpp::wire::test::make_frame_view(buf);
     ASSERT_TRUE(fv.has_value());
@@ -89,6 +91,7 @@ TEST(OffsetTableErrorPath, CtorBadAllocDegradeCoversLines134to137) {
 // "nofieldsep\x01" has no '=' separator → wire_invalid_field_format.
 
 TEST(OffsetTableErrorPath, FindOnRedTableReturnsStatusErrorCoversLines142to143) {
+    FIXPP_SKIP_ON_MSVC_DEBUG_ARENA();
     auto buf = make_raw_frame("nofieldsep\x01");
     auto fv = fixpp::wire::test::make_frame_view(buf);
     ASSERT_TRUE(fv.has_value());
@@ -113,6 +116,7 @@ TEST(OffsetTableErrorPath, FindOnRedTableReturnsStatusErrorCoversLines142to143) 
 // Lines 164-166 in offset_table.cpp.
 
 TEST(OffsetTableErrorPath, GroupOnRedTableReturnsStatusErrorCoversLines165to166) {
+    FIXPP_SKIP_ON_MSVC_DEBUG_ARENA();
     auto buf = make_raw_frame("nofieldsep\x01");
     auto fv = fixpp::wire::test::make_frame_view(buf);
     ASSERT_TRUE(fv.has_value());
@@ -157,6 +161,7 @@ TEST(OffsetTableErrorPath, GroupOnRedTableReturnsStatusErrorCoversLines165to166)
 // succeed normally (verifies the noexcept catch is not a permanent degradation).
 
 TEST(OffsetTableErrorPath, GroupSlicesBadAllocDegradeCoversLines231to232) {
+    FIXPP_SKIP_ON_MSVC_DEBUG_ARENA();
     auto buf = make_raw_frame(
         "453=1\x01"
         "448=A\x01");

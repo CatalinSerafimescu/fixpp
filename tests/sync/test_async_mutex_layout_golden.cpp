@@ -62,8 +62,17 @@ constexpr std::size_t k048Expected = 131120;
 // ─────────────────────────────────────────────────────────────────────────────
 
 TEST(AsyncMutexLayoutGolden, AlignmentIs16) {
+#ifdef _MSC_VER
+    // The 16-byte alignment is the linux-clang ABI reference (driven by the
+    // atomic_shared_ptr / pool packing); MSVC's std::atomic packing differs, so
+    // surface the actual MSVC value rather than asserting the Linux number on a
+    // different ABI (consistent with SizeIsExact048Value below).
+    GTEST_SKIP() << "alignof(async_mutex) on MSVC = " << alignof(async_mutex)
+                 << " (linux-clang golden 16 does not apply to MSVC ABI)";
+#else
     EXPECT_EQ(alignof(async_mutex), static_cast<std::size_t>(16))
         << "async_mutex alignment changed — update code and this test";
+#endif
 }
 
 TEST(AsyncMutexLayoutGolden, SizeIsExact048Value) {

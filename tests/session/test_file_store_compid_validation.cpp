@@ -77,14 +77,14 @@ TEST(FileStoreCompIDValidation, EmptySenderCompID) {
     asio::thread_pool pool{1};
     auto dir = unique_store_dir("empty_sender");
     expect_compid_fail("", "TARGET", dir, pool, "empty sender");
-    fs::remove_all(dir);
+    fixpp::store_test::remove_store_dir(dir);
 }
 
 TEST(FileStoreCompIDValidation, EmptyTargetCompID) {
     asio::thread_pool pool{1};
     auto dir = unique_store_dir("empty_target");
     expect_compid_fail("SENDER", "", dir, pool, "empty target");
-    fs::remove_all(dir);
+    fixpp::store_test::remove_store_dir(dir);
 }
 
 // ── Test 2: path separator ───────────────────────────────────────────────────
@@ -93,14 +93,14 @@ TEST(FileStoreCompIDValidation, ForwardSlashInSender) {
     asio::thread_pool pool{1};
     auto dir = unique_store_dir("slash_sender");
     expect_compid_fail("SEN/DER", "TARGET", dir, pool, "sender with /");
-    fs::remove_all(dir);
+    fixpp::store_test::remove_store_dir(dir);
 }
 
 TEST(FileStoreCompIDValidation, ForwardSlashInTarget) {
     asio::thread_pool pool{1};
     auto dir = unique_store_dir("slash_target");
     expect_compid_fail("SENDER", "TAR/GET", dir, pool, "target with /");
-    fs::remove_all(dir);
+    fixpp::store_test::remove_store_dir(dir);
 }
 
 // ── Test 3: NUL byte ─────────────────────────────────────────────────────────
@@ -111,7 +111,7 @@ TEST(FileStoreCompIDValidation, NULByteInSender) {
     // std::string can hold embedded NUL
     std::string sender_with_nul = std::string("SEN") + '\0' + "DER";
     expect_compid_fail(sender_with_nul, "TARGET", dir, pool, "sender with NUL");
-    fs::remove_all(dir);
+    fixpp::store_test::remove_store_dir(dir);
 }
 
 // ── Test 4: dot/dotdot segments ──────────────────────────────────────────────
@@ -120,14 +120,14 @@ TEST(FileStoreCompIDValidation, SingleDotSender) {
     asio::thread_pool pool{1};
     auto dir = unique_store_dir("dot_sender");
     expect_compid_fail(".", "TARGET", dir, pool, "sender='.'");
-    fs::remove_all(dir);
+    fixpp::store_test::remove_store_dir(dir);
 }
 
 TEST(FileStoreCompIDValidation, DoubleDotSender) {
     asio::thread_pool pool{1};
     auto dir = unique_store_dir("dotdot_sender");
     expect_compid_fail("..", "TARGET", dir, pool, "sender='..'");
-    fs::remove_all(dir);
+    fixpp::store_test::remove_store_dir(dir);
 }
 
 // ── Test 5: control characters ───────────────────────────────────────────────
@@ -136,21 +136,21 @@ TEST(FileStoreCompIDValidation, TabInSender) {
     asio::thread_pool pool{1};
     auto dir = unique_store_dir("tab_sender");
     expect_compid_fail("SEN\tDER", "TARGET", dir, pool, "sender with tab");
-    fs::remove_all(dir);
+    fixpp::store_test::remove_store_dir(dir);
 }
 
 TEST(FileStoreCompIDValidation, NewlineInTarget) {
     asio::thread_pool pool{1};
     auto dir = unique_store_dir("nl_target");
     expect_compid_fail("SENDER", "TAR\nGET", dir, pool, "target with \\n");
-    fs::remove_all(dir);
+    fixpp::store_test::remove_store_dir(dir);
 }
 
 TEST(FileStoreCompIDValidation, CarriageReturnInSender) {
     asio::thread_pool pool{1};
     auto dir = unique_store_dir("cr_sender");
     expect_compid_fail("SEN\rDER", "TARGET", dir, pool, "sender with \\r");
-    fs::remove_all(dir);
+    fixpp::store_test::remove_store_dir(dir);
 }
 
 // ── Test 6: DEL character (0x7F) ─────────────────────────────────────────────
@@ -160,7 +160,7 @@ TEST(FileStoreCompIDValidation, DELInSender) {
     auto dir = unique_store_dir("del_sender");
     expect_compid_fail(std::string("SEN") + '\x7F' + "DER", "TARGET", dir, pool,
                        "sender with DEL(0x7F)");
-    fs::remove_all(dir);
+    fixpp::store_test::remove_store_dir(dir);
 }
 
 // ── Test 7: NAME_MAX length limit ────────────────────────────────────────────
@@ -213,7 +213,7 @@ TEST(FileStoreCompIDValidation, CompIDExceedingNAMEMAX) {
         }
     }
 
-    fs::remove_all(dir);
+    fixpp::store_test::remove_store_dir(dir);
 }
 
 // ── Positive test: valid CompID ──────────────────────────────────────────────
@@ -235,7 +235,8 @@ TEST(FileStoreCompIDValidation, ValidCompIDSucceeds) {
     EXPECT_TRUE(result.has_value()) << "valid CompIDs should succeed; got error: "
                                     << (result.has_value() ? 0 : static_cast<int>(result.error()));
 
-    fs::remove_all(dir);
+    if (result.has_value()) result.value().reset();
+    fixpp::store_test::remove_store_dir(dir);
 }
 
 }  // namespace

@@ -176,7 +176,8 @@ TEST(FileStoreFlushForSessionClose, GracefulCloseFlushes32FramesBatch64) {
     auto reminted = factory2.make("FLUSHSND", "FLUSHTGT", nullptr, 1ULL << 30, pool.get_executor());
     ASSERT_TRUE(reminted.has_value()) << "re-open failed after graceful close + session destruct";
 
-    fs::remove_all(dir);
+    reminted.value().reset();
+    fixpp::store_test::remove_store_dir(dir);
 }
 
 // ── Direct flush_for_session_close() drain test ───────────────────────────────
@@ -271,7 +272,8 @@ TEST(FileStoreFlushForSessionClose, DirectFlushDrainsPendingBatchedFrames) {
             << "frame " << i << " not byte-identical after re-open";
     }
 
-    fs::remove_all(dir);
+    reminted.value().reset();
+    fixpp::store_test::remove_store_dir(dir);
 }
 
 // ── C. Terminal close hook non-invocation: verified structurally ──────────────
@@ -504,7 +506,8 @@ TEST(FileStoreFlushForSessionClose, FlushDoesNotSurfaceStoreCancelled) {
     // base case (no frames stored). We primarily verify the non-cancellation
     // property.
 
-    fs::remove_all(dir);
+    minted.value().reset();
+    fixpp::store_test::remove_store_dir(dir);
 }
 
 }  // namespace

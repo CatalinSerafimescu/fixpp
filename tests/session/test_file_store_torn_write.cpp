@@ -136,7 +136,8 @@ TEST(FileStoreTornWrite, TruncateMidRecordCleansUp) {
             << "frame " << i << " byte mismatch after torn-write recovery";
     }
 
-    fs::remove_all(dir);
+    minted2.value().reset();
+    fixpp::store_test::remove_store_dir(dir);
 }
 
 // ── Test 2: Stale reset.tmp is unlinked on open ──────────────────────────────
@@ -198,7 +199,8 @@ TEST(FileStoreTornWrite, StaleResetTmpIsUnlinked) {
 
     EXPECT_EQ(visitor.entries().size(), static_cast<std::size_t>(3));
 
-    fs::remove_all(dir);
+    minted2.value().reset();
+    fixpp::store_test::remove_store_dir(dir);
 }
 
 // ── Windows Tier-2 variants ──────────────────────────────────────────────────
@@ -248,7 +250,8 @@ TEST(FileStoreTornWriteWindows, SetEndOfFileTruncation) {
         factory.make("SENDER", "TARGET", nullptr, 1024 * 1024 * 1024, pool.get_executor());
     EXPECT_TRUE(minted2.has_value());
 
-    fs::remove_all(dir);
+    if (minted2.has_value()) minted2.value().reset();
+    fixpp::store_test::remove_store_dir(dir);
 }
 #endif  // _WIN32
 
@@ -360,7 +363,8 @@ TEST(FileStoreTornWrite, OversizedLenInHeaderDoesNotTerminate) {
         if (!vis.seqs.empty()) EXPECT_EQ(vis.seqs[0], 1u);
     }
 
-    fs::remove_all(dir);
+    if (minted2.has_value()) minted2.value().reset();
+    fixpp::store_test::remove_store_dir(dir);
 }
 #endif  // !_WIN32 (test uses fopen/fwrite; Windows variant is out of scope for Tier-1)
 
@@ -460,7 +464,7 @@ TEST(FileStoreTornWrite, N3_MidLogCorruptRecordSurfacesStoreFactoryFailed) {
             << "N3: expected store_factory_failed, got " << static_cast<int>(minted2.error());
     }
 
-    fs::remove_all(dir);
+    fixpp::store_test::remove_store_dir(dir);
 }
 #endif  // !_WIN32
 

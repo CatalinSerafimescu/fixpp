@@ -9,6 +9,7 @@
 // std::bad_alloc at a configurable call site.
 
 #include <gtest/gtest.h>
+#include "../support/msvc_debug_arena_skip.hpp"
 
 #include <array>
 #include <cstddef>
@@ -50,6 +51,7 @@ protected:
 // AC-L9: first allocation fails → xml_oom_error thrown (not std::bad_alloc).
 // ---------------------------------------------------------------------------
 TEST_F(OomInjection, EarlyAllocateFailsBecomesXmlOomError) {
+    FIXPP_SKIP_ON_MSVC_DEBUG_ARENA();
     std::array<std::byte, k4MiB> buffer{};
     std::pmr::monotonic_buffer_resource upstream{buffer.data(), buffer.size()};
     fixpp::test_support::failing_pmr_resource fail{&upstream,
@@ -71,6 +73,7 @@ TEST_F(OomInjection, EarlyAllocateFailsBecomesXmlOomError) {
 // AC-L9: mid-parse allocation failure (call #10) also maps to xml_oom_error.
 // ---------------------------------------------------------------------------
 TEST_F(OomInjection, MidAllocateFailsBecomesXmlOomError) {
+    FIXPP_SKIP_ON_MSVC_DEBUG_ARENA();
     std::array<std::byte, k4MiB> buffer{};
     std::pmr::monotonic_buffer_resource upstream{buffer.data(), buffer.size()};
     // fail_on_call_n = 10 is well into the parse; chosen as a representative
@@ -116,6 +119,7 @@ TEST_F(OomInjection, NoFailMeansNoThrow) {
 // caught first; the std::bad_alloc catch is the escape-detection arm.
 // ---------------------------------------------------------------------------
 TEST_F(OomInjection, BadAllocDoesNotEscape) {
+    FIXPP_SKIP_ON_MSVC_DEBUG_ARENA();
     std::array<std::byte, k4MiB> buffer{};
     std::pmr::monotonic_buffer_resource upstream{buffer.data(), buffer.size()};
     fixpp::test_support::failing_pmr_resource fail{&upstream,

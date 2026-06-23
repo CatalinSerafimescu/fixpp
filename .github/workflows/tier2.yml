@@ -64,7 +64,9 @@ jobs:
           python-version: "3.12"
 
       - name: Install Conan
-        run: pip install conan
+        # pytest: the interop_cell_results_schema_check ctest runs `python -m pytest`
+        # (tests/interop/CMakeLists.txt), absent from the Windows runner by default.
+        run: pip install conan pytest
 
       - name: Initialize Conan default profile
         run: conan profile detect --force

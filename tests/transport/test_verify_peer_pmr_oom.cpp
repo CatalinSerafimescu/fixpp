@@ -17,6 +17,7 @@
 // Constitutional: [arch §5.3] no exceptions across public surface.
 
 #include <gtest/gtest.h>
+#include "../support/msvc_debug_arena_skip.hpp"
 
 #include <cstddef>
 #include <fixpp/core/error.hpp>
@@ -185,6 +186,7 @@ error call_verify_peer_multi_san_with_throwing_mr(std::pmr::memory_resource& mr)
 // (subject_dn.assign triggers the PMR). Process must NOT terminate.
 // ═══════════════════════════════════════════════════════════════════════════════
 TEST(VerifyPeerPmrOom, BoundaryFirstAllocation) {
+    FIXPP_SKIP_ON_MSVC_DEBUG_ARENA();
     throw_on_nth_resource mr{/*throw_on=*/1};
     const auto ec = call_verify_peer_with_throwing_mr(mr);
     EXPECT_EQ(ec, error::tls_pinset_alloc_failed)
@@ -196,6 +198,7 @@ TEST(VerifyPeerPmrOom, BoundaryFirstAllocation) {
 // its first push_back). Process must NOT terminate.
 // ═══════════════════════════════════════════════════════════════════════════════
 TEST(VerifyPeerPmrOom, MidSecondAllocation) {
+    FIXPP_SKIP_ON_MSVC_DEBUG_ARENA();
     throw_on_nth_resource mr{/*throw_on=*/2};
     const auto ec = call_verify_peer_with_throwing_mr(mr);
     EXPECT_EQ(ec, error::tls_pinset_alloc_failed)
@@ -207,6 +210,7 @@ TEST(VerifyPeerPmrOom, MidSecondAllocation) {
 // Process must NOT terminate.
 // ═══════════════════════════════════════════════════════════════════════════════
 TEST(VerifyPeerPmrOom, TailThirdAllocation) {
+    FIXPP_SKIP_ON_MSVC_DEBUG_ARENA();
     throw_on_nth_resource mr{/*throw_on=*/3};
     const auto ec = call_verify_peer_with_throwing_mr(mr);
     EXPECT_EQ(ec, error::tls_pinset_alloc_failed)
@@ -249,6 +253,7 @@ TEST(VerifyPeerPmrOom, NoThrowSucceedsNormally) {
 
 // Multi-SAN boundary: N=1 — first allocation (subject_dn.assign).
 TEST(VerifyPeerPmrOomMultiSan, BoundaryFirstAllocation) {
+    FIXPP_SKIP_ON_MSVC_DEBUG_ARENA();
     throw_on_nth_resource mr{/*throw_on=*/1};
     const auto ec = call_verify_peer_multi_san_with_throwing_mr(mr);
     EXPECT_EQ(ec, error::tls_pinset_alloc_failed)
@@ -259,6 +264,7 @@ TEST(VerifyPeerPmrOomMultiSan, BoundaryFirstAllocation) {
 // Multi-SAN mid: N=2 — second allocation (first san_dns_names_owned.emplace_back).
 // This is the MID site in the peer_identity construction sequence.
 TEST(VerifyPeerPmrOomMultiSan, MidFirstSanDnsAllocation) {
+    FIXPP_SKIP_ON_MSVC_DEBUG_ARENA();
     throw_on_nth_resource mr{/*throw_on=*/2};
     const auto ec = call_verify_peer_multi_san_with_throwing_mr(mr);
     EXPECT_EQ(ec, error::tls_pinset_alloc_failed)
@@ -268,6 +274,7 @@ TEST(VerifyPeerPmrOomMultiSan, MidFirstSanDnsAllocation) {
 
 // Multi-SAN tail-1: N=3 — third allocation (second san_dns_names_owned.emplace_back).
 TEST(VerifyPeerPmrOomMultiSan, TailSecondSanDnsAllocation) {
+    FIXPP_SKIP_ON_MSVC_DEBUG_ARENA();
     throw_on_nth_resource mr{/*throw_on=*/3};
     const auto ec = call_verify_peer_multi_san_with_throwing_mr(mr);
     EXPECT_EQ(ec, error::tls_pinset_alloc_failed)
@@ -277,6 +284,7 @@ TEST(VerifyPeerPmrOomMultiSan, TailSecondSanDnsAllocation) {
 
 // Multi-SAN tail-2: N=4 — fourth allocation (third san_dns_names_owned.emplace_back).
 TEST(VerifyPeerPmrOomMultiSan, TailThirdSanDnsAllocation) {
+    FIXPP_SKIP_ON_MSVC_DEBUG_ARENA();
     throw_on_nth_resource mr{/*throw_on=*/4};
     const auto ec = call_verify_peer_multi_san_with_throwing_mr(mr);
     EXPECT_EQ(ec, error::tls_pinset_alloc_failed)

@@ -131,7 +131,7 @@ protected:
             strand_pool_->stop();
             strand_pool_->join();
         }
-        std::filesystem::remove_all(dir_);
+        fixpp::store_test::remove_store_dir(dir_);
     }
 
     FileStore::Config make_config(FileStorePolicy policy = {}) const {

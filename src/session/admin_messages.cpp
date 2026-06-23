@@ -23,6 +23,7 @@
 #include <cstdint>
 #include <expected>
 #include <fixpp/core/error.hpp>
+#include <fixpp/core/pmr_arena_upstream.hpp>  // detail::arena_upstream (MSVC-debug proxy)
 #include <fixpp/dict/version_profile.hpp>  // render_appl_ver_id — T016/033
 #include <fixpp/session/admin_messages.hpp>
 #include <fixpp/session/seqnum.hpp>
@@ -82,8 +83,9 @@ namespace {
     std::optional<fixpp::dict::application_version> default_appl_ver_id,
     std::optional<std::string_view> username, std::optional<std::string_view> password) noexcept {
     // NOLINTEND(bugprone-easily-swappable-parameters)
-    // Use std::pmr::null_memory_resource() for group scratch (no groups in Logon).
-    fixpp::wire::Writer w(out, std::pmr::null_memory_resource());
+    // Group scratch: no groups in Logon, so a bounded no-heap upstream
+    // (arena_upstream() = null on release/Linux, new_delete under MSVC debug).
+    fixpp::wire::Writer w(out, ::fixpp::detail::arena_upstream());
 
     // 8=BeginString (first call: also injects the 9= placeholder).
     if (auto r = w.append_raw(8, sv_to_bytes(begin_string)); !r) {
@@ -414,7 +416,7 @@ namespace {
     // Fields: 8=begin_string, 35=5, 34=seq, 49=SenderCompID, 52=sending_time,
     //         56=TargetCompID, [58=text (optional)].
     // FR-002/FR-003/RC#4: begin_string + sending_time threaded through from caller.
-    fixpp::wire::Writer w(out, std::pmr::null_memory_resource());
+    fixpp::wire::Writer w(out, ::fixpp::detail::arena_upstream());
 
     // 8=BeginString — negotiated FIX version from caller (FR-002/RC#4).
     {
@@ -489,7 +491,7 @@ namespace {
     std::string_view sending_time) noexcept {
     // NOLINTEND(bugprone-easily-swappable-parameters)
     // FR-002/FR-003/RC#4: begin_string + sending_time threaded through from caller.
-    fixpp::wire::Writer w(out, std::pmr::null_memory_resource());
+    fixpp::wire::Writer w(out, ::fixpp::detail::arena_upstream());
 
     // 8=BeginString — negotiated FIX version from caller (FR-002/RC#4).
     {
@@ -564,7 +566,7 @@ namespace {
     std::string_view sending_time) noexcept {
     // NOLINTEND(bugprone-easily-swappable-parameters)
     // FR-002/FR-003/RC#4: begin_string + sending_time threaded through from caller.
-    fixpp::wire::Writer w(out, std::pmr::null_memory_resource());
+    fixpp::wire::Writer w(out, ::fixpp::detail::arena_upstream());
 
     // 8=BeginString — negotiated FIX version from caller (FR-002/RC#4).
     {
@@ -642,7 +644,7 @@ namespace {
     std::string_view sending_time) noexcept {
     // NOLINTEND(bugprone-easily-swappable-parameters)
     // FR-002/FR-003/RC#4: begin_string + sending_time threaded through from caller.
-    fixpp::wire::Writer w(out, std::pmr::null_memory_resource());
+    fixpp::wire::Writer w(out, ::fixpp::detail::arena_upstream());
 
     // 8=BeginString — negotiated FIX version from caller (FR-002/RC#4).
     {
@@ -755,7 +757,7 @@ namespace {
     int business_reject_reason, std::string_view begin_string,
     std::string_view sending_time) noexcept {
     // NOLINTEND(bugprone-easily-swappable-parameters)
-    fixpp::wire::Writer w(out, std::pmr::null_memory_resource());
+    fixpp::wire::Writer w(out, ::fixpp::detail::arena_upstream());
 
     // 8=BeginString — negotiated FIX version from caller (FR-002/RC#4).
     if (auto r = w.append_raw(8, sv_to_bytes(begin_string)); !r) {
@@ -850,7 +852,7 @@ namespace {
     std::string_view target_comp_id, seqnum_t begin_seqno, seqnum_t end_seqno,
     std::string_view begin_string, std::string_view sending_time) noexcept {
     // NOLINTEND(bugprone-easily-swappable-parameters)
-    fixpp::wire::Writer w(out, std::pmr::null_memory_resource());
+    fixpp::wire::Writer w(out, ::fixpp::detail::arena_upstream());
 
     // 8=BeginString — negotiated FIX version from caller (FR-002/RC#4).
     if (auto r = w.append_raw(8, sv_to_bytes(begin_string)); !r) {
@@ -937,7 +939,7 @@ namespace {
     std::string_view target_comp_id, seqnum_t new_seqno, std::string_view begin_string,
     std::string_view sending_time) noexcept {
     // NOLINTEND(bugprone-easily-swappable-parameters)
-    fixpp::wire::Writer w(out, std::pmr::null_memory_resource());
+    fixpp::wire::Writer w(out, ::fixpp::detail::arena_upstream());
 
     // 8=BeginString — negotiated FIX version from caller (FR-002/RC#4).
     if (auto r = w.append_raw(8, sv_to_bytes(begin_string)); !r) {

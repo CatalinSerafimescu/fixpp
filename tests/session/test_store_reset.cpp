@@ -199,7 +199,7 @@ TEST(StoreResetFile, HappyPathClearsAndRewinds) {
         asio::use_future);
     fut.get();
 
-    fs::remove_all(dir);
+    fixpp::store_test::remove_store_dir(dir);
 }
 
 // FileStore: after reset, a new open sees counter = 1
@@ -248,7 +248,7 @@ TEST(StoreResetFile, AfterResetNewOpenSeesCounterOne) {
         asio::use_future);
     fut.get();
 
-    fs::remove_all(dir);
+    fixpp::store_test::remove_store_dir(dir);
 }
 
 // RC#2 regression: Reset_ThenStore_ThenReopen_RetrieveSucceeds
@@ -331,7 +331,7 @@ TEST(StoreResetFile, ResetThenStoreThenReopenRetrieveSucceeds) {
         asio::use_future);
     fut.get();
 
-    fs::remove_all(dir);
+    fixpp::store_test::remove_store_dir(dir);
 }
 
 // ── N2 regression: parent-dir fsync failure is fatal (gate-b/r2) ─────────────
@@ -399,7 +399,7 @@ TEST(StoreResetFile, N2_DirOpenFailureReturnsFatalError) {
     EXPECT_TRUE(reset_returned_failure)
         << "N2: reset() must return store_io_failure when parent-dir open fails";
 
-    std::filesystem::remove_all(outer);
+    fixpp::store_test::remove_store_dir(outer);
 }
 #endif  // !_WIN32
 

@@ -37,6 +37,27 @@
 
 #include <gtest/gtest.h>
 
+#include "../support/msvc_debug_arena_skip.hpp"
+
+#ifdef _WIN32
+#include <filesystem>
+namespace {
+// Several fixtures below use a file-sink `directory = "/tmp"` purely as "a valid,
+// existing directory" — the test's actual subject is some OTHER field (wrong type,
+// numeric range, noexcept boundary, collect-all). On Windows `/tmp` resolves to
+// <cwd-drive>:\tmp, which does not exist by default, so the logger-resolver's
+// directory-existence preflight would fire a spurious diagnostic. Materialise it
+// once at load time so those fixtures see a real directory (no fixture expects /tmp
+// to be REJECTED; the only dir-rejection test, FileSinkDirNotWritable, is skipped
+// on Windows). Mirrors the Unix /tmp the fixtures were written against.
+const int g_ensure_tmp_dir = [] {
+    std::error_code ec;
+    std::filesystem::create_directories("/tmp", ec);
+    return 0;
+}();
+}  // namespace
+#endif
+
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
@@ -615,7 +636,7 @@ TEST(T014_NegBattery, OtlpCertSourceNonPem)
         "  [[logger.sinks]]\n"
         "  kind        = \"otlp\"\n"
         "  endpoint    = \"http://collector:4318/v1/logs\"\n"
-        "  cert_source = \"" + tmp_cert.string() + "\"\n";
+        "  cert_source = \"" + tmp_cert.generic_string() + "\"\n";
 
     auto parsed = parse_logger_inline(toml_text);
     ASSERT_NE(parsed.logger_tbl, nullptr);
@@ -709,6 +730,14 @@ TEST(T014_NegBattery, FileSinkDirNotExist)
 
 TEST(T014_NegBattery, FileSinkDirNotWritable)
 {
+#ifdef _WIN32
+    // The file-sink directory-writability preflight is POSIX-only: std::filesystem
+    // permission bits do not model Windows ACL write-access, and the runtime
+    // FileSink is itself POSIX-only (L-045-1 / 045 waiver W-1), so the preflight
+    // does not reject a read-only directory on Windows. The rejection behavior is
+    // covered on the Linux lanes.
+    GTEST_SKIP() << "FileSink directory-writability preflight is POSIX-only (L-045-1)";
+#else
     // Create a temp dir and make it read-only.
     const auto ro_dir = std::filesystem::temp_directory_path() /
                         "fixpp_test_ro_log_dir_t014";
@@ -741,7 +770,7 @@ TEST(T014_NegBattery, FileSinkDirNotWritable)
         "[logger]\n"
         "  [[logger.sinks]]\n"
         "  kind      = \"file\"\n"
-        "  directory = \"" + ro_dir.string() + "\"\n";
+        "  directory = \"" + ro_dir.generic_string() + "\"\n";
 
     auto parsed = parse_logger_inline(toml_text);
     ASSERT_NE(parsed.logger_tbl, nullptr);
@@ -767,6 +796,7 @@ TEST(T014_NegBattery, FileSinkDirNotWritable)
 
     // Mutation discriminator: removing the access(W_OK) check would leave acc empty
     // (the directory IS_directory passes) → ASSERT_FALSE(acc.empty()) goes RED.
+#endif  // _WIN32
 }
 
 // ── recognized_not_yet_supported_step2: use_grpc = true ──────────────────────
@@ -826,7 +856,7 @@ TEST(T014_NegBattery, ZeroSideEffectsWhenAccumulatorNonEmpty)
         "capacity = 65536\n"
         "  [[logger.sinks]]\n"
         "  kind      = \"file\"\n"
-        "  directory = \"" + log_dir.string() + "\"\n";
+        "  directory = \"" + log_dir.generic_string() + "\"\n";
 
     auto parsed = parse_logger_inline(toml_text);
     ASSERT_NE(parsed.logger_tbl, nullptr);
@@ -1085,6 +1115,7 @@ struct ThrowingResource : std::pmr::memory_resource {
 
 TEST(GateBR1A_NoexceptBoundary, ThrowingResourceReturnsErrorNotTerminates)
 {
+    FIXPP_SKIP_ON_MSVC_DEBUG_ARENA();
     // We need a full config file. Write one to a temp file so load_toml_config
     // can parse it. The [logger] sinks.reserve() fires before any other throw.
     const auto tmp = std::filesystem::temp_directory_path() /
@@ -1907,7 +1938,7 @@ TEST(GateBR1F_Portability, PosixAccessCheckStillActiveOnPosix)
         "[logger]\n"
         "  [[logger.sinks]]\n"
         "  kind      = \"file\"\n"
-        "  directory = \"" + ro_dir.string() + "\"\n";
+        "  directory = \"" + ro_dir.generic_string() + "\"\n";
 
     auto parsed = parse_logger_inline(toml_text);
     ASSERT_NE(parsed.logger_tbl, nullptr);

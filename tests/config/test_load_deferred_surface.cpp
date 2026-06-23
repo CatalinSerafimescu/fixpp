@@ -350,20 +350,20 @@ TEST(LoadDeferredSurface, T020_LoggerNotDeferred) {
           << "[cert_source]\nkind = \"file\"\n"
           << "cert_file = \""
           << (std::filesystem::path{std::string{FIXPP_CONFIG_FIXTURE_DIR}} / "leaf_ecdsa_p256.pem")
-                 .string()
+                 .generic_string()
           << "\"\n"
           << "key_file = \""
           << (std::filesystem::path{std::string{FIXPP_CONFIG_FIXTURE_DIR}} / "leaf_ecdsa_p256.key")
-                 .string()
+                 .generic_string()
           << "\"\n"
           << "ca_file = \""
-          << (std::filesystem::path{std::string{FIXPP_CONFIG_FIXTURE_DIR}} / "ca.pem").string()
+          << (std::filesystem::path{std::string{FIXPP_CONFIG_FIXTURE_DIR}} / "ca.pem").generic_string()
           << "\"\n\n"
           << "[dictionary]\nkind = \"path\"\npath = \""
-          << (std::filesystem::path{std::string{FIXPP_CONFIG_FIXTURE_DIR}} / "FIX44.xml").string()
+          << (std::filesystem::path{std::string{FIXPP_CONFIG_FIXTURE_DIR}} / "FIX44.xml").generic_string()
           << "\"\n\n"
           << "[logger]\ncapacity = 4096\ndrain_timeout = \"2000ms\"\n\n"
-          << "[[logger.sinks]]\nkind = \"file\"\ndirectory = \"" << log_dir.string()
+          << "[[logger.sinks]]\nkind = \"file\"\ndirectory = \"" << log_dir.generic_string()
           << "\"\nbase_name = \"fixpp_t020\"\n\n"
           << "[[session]]\n"
           << "sender_comp_id = \"CLIENT1\"\ntarget_comp_id = \"SERVER1\"\n"

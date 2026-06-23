@@ -185,7 +185,8 @@ TEST(FileStoreCrashSurvival, CommitPerMessage100Frames) {
     }
 
     // Cleanup
-    fs::remove_all(dir);
+    minted.value().reset();
+    fixpp::store_test::remove_store_dir(dir);
 }
 
 // ── Sentinel mismatch ────────────────────────────────────────────────────────
@@ -221,7 +222,7 @@ TEST(FileStoreCrashSurvival, SentinelMismatchReturnsFailed) {
     EXPECT_FALSE(result.has_value());
     EXPECT_EQ(result.error(), fixpp::core::error::store_factory_failed);
 
-    fs::remove_all(dir);
+    fixpp::store_test::remove_store_dir(dir);
 }
 
 // ── Directory contention (advisory lock) ────────────────────────────────────
@@ -244,8 +245,9 @@ TEST(FileStoreCrashSurvival, SecondOpenerReturnsFailed) {
     EXPECT_EQ(result2.error(), fixpp::core::error::store_factory_failed)
         << "expected store_factory_failed due to advisory lock contention";
 
-    // Release first store (goes out of scope at end of test)
-    fs::remove_all(dir);
+    // Release first store before removing the directory
+    minted1.value().reset();
+    fixpp::store_test::remove_store_dir(dir);
 }
 
 // ── commit_batched: stores succeed and retrieve is consistent ─────────────────
@@ -301,7 +303,8 @@ TEST(FileStoreCrashSurvival, CommitBatchedReturnsSuccess) {
     EXPECT_GE(visitor.entries().size(), static_cast<std::size_t>(1));
     EXPECT_LE(visitor.entries().size(), static_cast<std::size_t>(kFrames));
 
-    fs::remove_all(dir);
+    minted.value().reset();
+    fixpp::store_test::remove_store_dir(dir);
 }
 
 }  // namespace

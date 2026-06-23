@@ -207,6 +207,15 @@ endif()
 
 # ── Tests ────────────────────────────────────────────────────────────────────
 if(FIXPP_BUILD_TESTS)
+  # Windows defaults to a 1 MiB stack; several tests put large parse arenas on
+  # the stack (e.g. the dictionary suites' 1–4 MiB std::array buffers) that fit
+  # comfortably under Linux's 8 MiB default but overflow on Windows (a __chkstk
+  # crash, worsened by MSVC debug's fat frames). Reserve 8 MiB to match Linux —
+  # for test executables only (placed after the library targets) and on MSVC
+  # only. /STACK also sets the default reserve for std::thread-created threads.
+  if(MSVC)
+    add_link_options(/STACK:8388608)
+  endif()
   add_subdirectory(tests/core)
   add_subdirectory(tests/codegen)  # 003-dictionary-codegen US1 suites (T017-T022).
                                    # fixpp_codegen_generate is now defined in cmake/Codegen.cmake

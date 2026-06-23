@@ -105,10 +105,15 @@ static std::map<fs::path, fs::file_time_type> snapshot_mtimes(const fs::path& ro
 }
 
 // Build the --xml A --out B ... command string, quoting paths portably.
-// std::system() passes the string to /bin/sh; wrap each path in single quotes
-// and escape any embedded single quotes (unusual in practice here).
+// std::system() hands the string to the platform shell — /bin/sh on POSIX,
+// cmd.exe on Windows — which quote differently.
 static std::string quote(const std::string& s) {
-    // Replace each ' with '\'' and wrap in single quotes.
+#ifdef _WIN32
+    // cmd.exe does not treat '...' as quoting; wrap in double quotes (the
+    // paths here never contain embedded double quotes).
+    return "\"" + s + "\"";
+#else
+    // /bin/sh: replace each ' with '\'' and wrap in single quotes.
     std::string out = "'";
     for (char c : s) {
         if (c == '\'')
@@ -118,6 +123,21 @@ static std::string quote(const std::string& s) {
     }
     out += "'";
     return out;
+#endif
+}
+
+// std::system() runs the string through `cmd.exe /c "<string>"` on Windows.
+// cmd.exe's quote rule: when the string has more than two quote chars (ours wraps
+// the exe path AND every path argument), it strips the FIRST and LAST quote — which
+// corrupts our command (`"exe"...` becomes `exe"...`, exit 1). Wrapping the WHOLE
+// command in one more pair of quotes makes cmd.exe strip that outer pair instead,
+// leaving the real command intact. No-op on POSIX (/bin/sh has no such rule).
+static int run_system(const std::string& cmd) {
+#ifdef _WIN32
+    return std::system(("\"" + cmd + "\"").c_str());
+#else
+    return std::system(cmd.c_str());
+#endif
 }
 
 static int run_codegen(const fs::path& out_dir) {
@@ -127,7 +147,7 @@ static int run_codegen(const fs::path& out_dir) {
         cmd += " --xml " + quote(xml_path.string());
         cmd += " --out " + quote(out_dir.string());
     }
-    return std::system(cmd.c_str());
+    return run_system(cmd);
 }
 
 static int run_codegen_args(std::string_view args) {
@@ -136,7 +156,7 @@ static int run_codegen_args(std::string_view args) {
         cmd += " ";
         cmd += std::string(args);
     }
-    return std::system(cmd.c_str());
+    return run_system(cmd);
 }
 
 // Decode the raw std::system() return value to the child's exit code.

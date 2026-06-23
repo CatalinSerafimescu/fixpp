@@ -517,15 +517,23 @@ struct OsFile {
     // 035-filestore-io-offload: raw HANDLE accessor for the offload lambda.
     [[nodiscard]] HANDLE fd_value() const noexcept { return h; }
 
+    // FILE_SHARE_DELETE gives a live handle POSIX-fd semantics: the file may be
+    // renamed-over (reset()'s MoveFileEx REPLACE_EXISTING targets the still-open
+    // live log) or unlinked (test teardown fs::remove_all) WHILE this handle is
+    // open. Without it those operations fail with "being used by another
+    // process". Exclusivity is enforced by try_lock()/LockFileEx, NOT the share
+    // mode, so the second-opener guard is unaffected. (FILE_SHARE_WRITE is
+    // deliberately NOT granted — no concurrent writer is permitted.)
     [[nodiscard]] bool open(const wchar_t* path) noexcept {
-        h = CreateFileW(path, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, nullptr, OPEN_ALWAYS,
-                        FILE_ATTRIBUTE_NORMAL, nullptr);
+        h = CreateFileW(path, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_DELETE,
+                        nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
         return h != INVALID_HANDLE_VALUE;
     }
 
     // T042: Open for write-only, create/truncate (for .reset.tmp file)
     [[nodiscard]] bool open_wronly_creat(const wchar_t* path) noexcept {
-        h = CreateFileW(path, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, nullptr,
+        h = CreateFileW(path, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_DELETE,
+                        nullptr,
                         CREATE_ALWAYS,  // create/truncate
                         FILE_ATTRIBUTE_NORMAL, nullptr);
         return h != INVALID_HANDLE_VALUE;
@@ -1444,6 +1452,56 @@ asio::awaitable<fixpp::core::expected_t<seqnum_t>> FileStore::next_seqnum(direct
     co_return fixpp::core::expected_t<seqnum_t>{current};
 }
 
+#ifdef _WIN32
+namespace {
+// Atomic replace-over-open-file via POSIX-semantics rename (Win10 1607+ /
+// Server 2016+). MoveFileEx(REPLACE_EXISTING) FAILS when the destination still
+// has a live handle: even with FILE_SHARE_DELETE the delete is only marked
+// pending and the name lingers, so the rename cannot take it. The reset path
+// deliberately keeps the FileStore's live log handle open (on the strand) during
+// the offloaded rename for crash-safe rollback, so MoveFileEx cannot be used.
+// FILE_RENAME_FLAG_POSIX_SEMANTICS swaps atomically regardless of open handles —
+// exactly the POSIX rename(2) the cross-platform algorithm assumes. Returns
+// false (treated as a reset failure) on any error.
+bool posix_rename_over_open(const std::wstring& from, const std::wstring& to) noexcept {
+    // FILE_RENAME_INFO's Flags member and the FileRenameInfoEx class are gated
+    // behind NTDDI_WIN10_RS1 in the SDK headers; define the layout + constants
+    // locally so the build is independent of the project's NTDDI level.
+    struct RenameInfoEx {
+        DWORD Flags;
+        HANDLE RootDirectory;
+        DWORD FileNameLength;  // in BYTES, excluding the terminating null
+        wchar_t FileName[1];
+    };
+    constexpr DWORD kReplaceIfExists = 0x00000001;
+    constexpr DWORD kPosixSemantics = 0x00000002;
+    constexpr auto kFileRenameInfoEx = static_cast<FILE_INFO_BY_HANDLE_CLASS>(22);
+
+    HANDLE h = CreateFileW(from.c_str(), DELETE | GENERIC_WRITE | SYNCHRONIZE,
+                           FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+                           OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (h == INVALID_HANDLE_VALUE) {
+        return false;
+    }
+    const std::size_t name_bytes = to.size() * sizeof(wchar_t);
+    const std::size_t total = offsetof(RenameInfoEx, FileName) + name_bytes + sizeof(wchar_t);
+    std::vector<std::byte> storage(total, std::byte{0});
+    auto* info = reinterpret_cast<RenameInfoEx*>(storage.data());
+    info->Flags = kReplaceIfExists | kPosixSemantics;
+    info->RootDirectory = nullptr;
+    info->FileNameLength = static_cast<DWORD>(name_bytes);
+    std::memcpy(info->FileName, to.c_str(), name_bytes + sizeof(wchar_t));
+    const BOOL ok =
+        SetFileInformationByHandle(h, kFileRenameInfoEx, info, static_cast<DWORD>(total));
+    if (ok != 0) {
+        FlushFileBuffers(h);  // WRITE_THROUGH durability parity with the old MoveFileEx
+    }
+    CloseHandle(h);
+    return ok != 0;
+}
+}  // namespace
+#endif  // _WIN32
+
 // ── FileStore::reset() ────────────────────────────────────────────────────────
 
 asio::awaitable<fixpp::core::expected_t<void>> FileStore::reset() noexcept {
@@ -1628,15 +1686,26 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::reset() noexcept {
                     tmp_file = std::move(tmp_impl.file);
                 }
                 tmp_file = OsFile{};  // close tmp
-                // Windows: MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH MANDATORY (I-15 /
-                // RC#1)
-                if (!MoveFileExW(wide_tmp.c_str(), wide_live.c_str(),
-                                 MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+                // POSIX-semantics rename (I-15 / RC#1): atomically replaces the
+                // live log even though FileStore's live handle is still open on
+                // the strand. MoveFileEx(REPLACE_EXISTING) cannot do this — see
+                // posix_rename_over_open. FlushFileBuffers inside provides the
+                // WRITE_THROUGH durability the old MoveFileEx flag gave.
+                if (!posix_rename_over_open(wide_tmp, wide_live)) {
                     DeleteFileW(wide_tmp.c_str());
                     return false;
                 }
                 // Rename succeeded — mark before reopen. [gate-b/r1 A.1/A.2]
                 *rename_done = true;
+                // gate-b/r1 A.1 fault-injection: same forced post-rename reopen
+                // failure seam as the POSIX branch above (the cancellation/poison
+                // witnesses install this hook and must fire on Windows too).
+                if (auto* h = g_post_rename_reopen_fail_hook.exchange(nullptr,
+                                                                      std::memory_order_relaxed)) {
+                    if (!h()) {
+                        return false;  // forced post-rename reopen failure → poison
+                    }
+                }
                 OsFile new_file;
                 if (!new_file.open(wide_live.c_str())) {
                     return false;

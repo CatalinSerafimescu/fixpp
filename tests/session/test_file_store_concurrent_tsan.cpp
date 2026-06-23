@@ -111,7 +111,7 @@ protected:
             pool_->stop();
             pool_->join();
         }
-        std::filesystem::remove_all(dir_);
+        fixpp::store_test::remove_store_dir(dir_);
     }
 
     FileStore::Config make_config(FileStorePolicy policy = {}) const {
@@ -349,7 +349,8 @@ TEST_F(FileStoreConcurrentTsanTest, ResetRace_vs_LogicalGap_Discriminating) {
             << "Logical gap must return store_seqnum_gap (57), got: "
             << static_cast<int>(result.error());
 
-        std::filesystem::remove_all(dir2);
+        store2.reset();
+        fixpp::store_test::remove_store_dir(dir2);
     }
 
     // --- Sanity: the two error codes are numerically distinct ---

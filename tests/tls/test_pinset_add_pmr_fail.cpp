@@ -12,6 +12,7 @@
 // and the allocation throw is caught.
 
 #include <gtest/gtest.h>
+#include "../support/msvc_debug_arena_skip.hpp"
 
 #include <array>
 #include <cstddef>
@@ -49,6 +50,7 @@ constexpr pin_fingerprint kFp2 = [] {
 
 // ── PMRAllocFailSurfacesAllocFailed ──────────────────────────────────────────
 TEST(PinsetAddPmrFail, SecondAddExhaustsArena) {
+    FIXPP_SKIP_ON_MSVC_DEBUG_ARENA();
     // Tiny arena: 128 bytes with null_memory_resource upstream so any overflow
     // throws std::bad_alloc (which trap_throw catches → tls_pinset_alloc_failed).
     // The first add() may succeed or fail depending on snapshot clone size; the
@@ -81,6 +83,7 @@ TEST(PinsetAddPmrFail, SecondAddExhaustsArena) {
 // subject_dn copy + vector overhead should fit; the second clone (now 2 elements)
 // may not. This is allocation-layout-dependent but covers the trap_throw path.
 TEST(PinsetAddPmrFail, TrapThrowBoundaryReturnsExpectedError) {
+    FIXPP_SKIP_ON_MSVC_DEBUG_ARENA();
     // Sized to allow first add but force eventual exhaustion on second or third.
     constexpr std::size_t kMedium = 512;
     std::array<std::byte, kMedium> buf{};
