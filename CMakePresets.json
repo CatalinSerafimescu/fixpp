@@ -204,7 +204,8 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
         "CMAKE_MSVC_RUNTIME_LIBRARY": "MultiThreadedDebug",
-        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/build/windows-msvc-asan/conan_toolchain.cmake"
+        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/build/windows-msvc-asan/conan_toolchain.cmake",
+        "FIXPP_ENABLE_ASAN": "ON"
       }
     }
   ],
