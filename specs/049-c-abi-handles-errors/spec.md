@@ -176,5 +176,5 @@ A C consumer needs each public C-ABI symbol to carry an explicit, documented ree
 - **Constitution Article XV §1** (`.specify/constitution.md`) — no hot-path heap allocation; `fixpp_strerror`/`fixpp_version`/`fixpp_library_version` are zero-alloc (FR-007).
 - **Constitution Article VI §5** (`.specify/constitution.md`) — reference precision (this section).
 - **Architecture §9.2** (`.specify/architecture.md`) — the C-ABI surface version and the C++ library version are decoupled tracks (FR-015; the `fixpp_version()` vs `fixpp_library_version()` split).
-- **Sibling error tables** (`[2a §6.7]` decimal, `[2b §6.7]` wire, `[2c §6.7]` dict, `[2e §6.7]` store) — the source-domain variant-row counts the occupancy gate's Check B compares against (FR-013), and the store-handle non-owning-observer ownership row (E-1).
+- **Sibling error tables** (`[2a §7.4]` decimal, `[2b §6.7]` wire, `[2c §6.7]` dict, `[2e §6.7]` store) — the source-domain variant-row counts the occupancy gate's Check B compares against (FR-013), and the store-handle non-owning-observer ownership row (E-1).
 - **`include/fixpp/core/error.hpp`** — the 116-enumerator source the `translate()` coalescing decision audits (data-model E-3); **`include/fixpp/core/version.hpp`** — `fixpp::core::FIXPP_VERSION` for `fixpp_library_version()`.
