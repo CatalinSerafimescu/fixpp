@@ -12,7 +12,10 @@ fixpp_error_t fixpp_session_send(fixpp_session_t* session,
 /* the receive callback type — invoked on the session strand, on a fixpp-owned worker thread */
 typedef void (*fixpp_recv_cb)(const fixpp_msg_t* inbound, void* userdata);
 
-/* THREAD: SINGLE_THREAD · THUNK: construction-time · MUST be called before fixpp_engine_start */
+/* THREAD: SINGLE_THREAD · THUNK: construction-time · MUST be called before fixpp_engine_start.
+   Returns FIXPP_ERR_CAPI_CONFIG_INVALID if called after fixpp_engine_start (enforcement, not merely
+   documentation — mirrors FR-004; the callback map is read on the session strand without a mutex
+   so a post-start call would be a data race). */
 fixpp_error_t fixpp_session_register_callback(fixpp_session_t* session,
                                               fixpp_recv_cb cb, void* userdata);
 ```
@@ -24,7 +27,7 @@ fixpp_error_t fixpp_session_register_callback(fixpp_session_t* session,
 - The `frame` buffer is **borrowed** (read-only during the call; the engine deep-copies into the per-session store path); the caller may free/reuse on return.
 
 **Receive (CA-007)**
-- `fixpp_session_register_callback` populates the `CapiApplication` `SessionId → {cb, userdata}` map (E-5). Must precede `fixpp_engine_start` (v1.0; no concurrent map mutation vs on-strand read — D-4). Re-registration overwrites; `cb == NULL` clears.
+- `fixpp_session_register_callback` populates the `CapiApplication` `SessionId → {cb, userdata}` map (E-5). MUST precede `fixpp_engine_start`; if called after start, MUST return `FIXPP_ERR_CAPI_CONFIG_INVALID` (construction-time thunk enforcement, no exception escape — mirrors FR-004 for `fixpp_session_open`). This is enforced, not merely documented: the map is read on the session strand without a mutex (Article XV §9) and a post-start registration would be a data race. Re-registration overwrites; `cb == NULL` clears.
 - On an inbound application message, `CapiApplication::fromApp` (on the session strand) wraps the borrowed `MessageView<Index>` in a **stack** `fixpp_msg_t` (no heap, D-6) and invokes `cb(&inbound, userdata)`. Admin messages (`fromAdmin`) are NOT delivered to the app callback (v1.0).
 - **Exception policy**: the trampoline wraps the C callback invocation in `try { cb(&inbound, userdata); } catch (...) { … }`. A C function pointer may throw (a C++ consumer building on the C ABI, or a C callback that re-enters throwing C++); an uncaught throw would unwind through the engine's `fromApp` coroutine frame. Because `fromApp` runs on the session strand in the steady-state hot path, an escaping exception is treated as an **on-strand steady-state invariant violation → fatal-log + `std::abort`** (matching FR-008's send-thunk policy), **not** translated to a `fixpp_error_t` and **not** routed into `fromApp`'s `expected_t` reject path. The trampoline still invalidates the stack `fixpp_msg_t` before aborting is moot — abort terminates. Witnessed by a negative test (a throwing callback → SIGABRT trap).
 - **Zero-global-heap-alloc**: the trampoline path (`fromApp` → wrap → `cb`) MUST NOT `new`/`delete`/PMR-allocate from the global heap (`[const §VIII.5]`); the inbound `fixpp_msg_t` is a stack wrapper over the borrowed `MessageView` (D-6). Verified under `mallocnesia` global-malloc interception on the round-trip, not a tracking PMR (`feedback_tracking_pmr_resource_false_pass`).

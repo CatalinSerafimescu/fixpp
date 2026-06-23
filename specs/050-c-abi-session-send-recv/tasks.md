@@ -53,7 +53,7 @@ description: "Task list — 050-c-abi-session-send-recv (C-ABI Feature B)"
 
 ### Tests for US1 (write FIRST, see them FAIL)
 
-- [ ] T015 [P] [US1] `tests/capi/lifecycle_test.cpp` — create/start/destroy + open/close/is_established happy path; **never-started destroy** (`create`→`session_open` fails→`destroy`) asserts no abort (FR-003); double-destroy + NULL-destroy no-op; `session_open` after `engine_start` → domain error (FR-004); NULL/dead handle → `FIXPP_ERR_NULL_HANDLE`/`INVALID_HANDLE` (FR-006).
+- [ ] T015 [P] [US1] `tests/capi/lifecycle_test.cpp` — create/start/destroy + open/close/is_established happy path; **never-started destroy** (`create`→`session_open` fails→`destroy`) asserts no abort (FR-003); double-destroy + NULL-destroy no-op; `session_open` after `engine_start` → domain error (FR-004); `register_callback` after `engine_start` → `FIXPP_ERR_CAPI_CONFIG_INVALID` (FR-011 enforcement — mirrors FR-004; no mutex in coroutine context requires pre-start only); NULL/dead handle → `FIXPP_ERR_NULL_HANDLE`/`INVALID_HANDLE` (FR-006).
 - [ ] T016 [P] [US1] In `lifecycle_test.cpp` add the **SC-007** witness — BOTH conjuncts: (a) park an established idle session in `async_read`, `fixpp_session_close`, assert prompt teardown by socket-close/cancellation NOT by a deadline elapsing (distinguishing witness); (b) issue an in-flight `fixpp_session_send` during engine total-cancellation/teardown and assert the return is `FIXPP_ERR_CANCELLED` (uniform code, FR-010) — a LIVE cross-thread cancel stimulus on the send bridge, not merely the T022 mapping oracle. Multi-threaded harness, TSan-gated (cross-thread close+send bridges, E-6).
 
 ### Implementation for US1
@@ -104,7 +104,7 @@ description: "Task list — 050-c-abi-session-send-recv (C-ABI Feature B)"
 
 ### Implementation for US3
 
-- [ ] T031 [US3] `src/capi/session.cpp` — `fixpp_session_register_callback(session, fixpp_recv_cb, void* userdata)`: construction-time thunk (MUST precede `fixpp_engine_start`); populate the `CapiApplication` `SessionId→{cb,userdata}` map.
+- [ ] T031 [US3] `src/capi/session.cpp` — `fixpp_session_register_callback(session, fixpp_recv_cb, void* userdata)`: construction-time thunk (MUST precede `fixpp_engine_start`); if called after engine started, return `FIXPP_ERR_CAPI_CONFIG_INVALID` (enforcement mirrors FR-004 for `session_open` — the map is read on-strand without a mutex so a post-start call is a data race); else populate the `CapiApplication` `SessionId→{cb,userdata}` map.
 - [ ] T032 [US3] `src/capi/engine.cpp` — implement the `CapiApplication::fromApp` trampoline: on the session strand, wrap the `MessageView` in a stack `fixpp_msg_t`, look up `{cb,userdata}`, invoke the C callback inside a `try/catch(...)` → fatal-log + `std::abort` (steady-state on-strand invariant; zero-global-heap-alloc per `[const §VIII.5]`); the inbound handle is engine-owned + destroyed at parse-window close (FR-012). No-op (accept) if no callback registered.
 - [ ] T033 [US3] Run `tools/check_capi_reentrancy.sh` → green for `register_callback` (the callback's on-strand dispatch = REQUIRES_SESSION_LOCK is a typedef contract, documented); build + `send_recv_test` green (debug + ASan + TSan).
 
