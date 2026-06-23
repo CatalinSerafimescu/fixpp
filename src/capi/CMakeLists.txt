@@ -51,10 +51,16 @@ if(FIXPP_BUILD_TESTS)
   # Only export fixpp_* symbols; hide all C++ internals (decimal_traits, etc.)
   # per [const §X.2]. Version script is more reliable than -fvisibility=hidden
   # across object libraries with transitive C++ deps. GNU-ld/lld only — MSVC's
-  # link.exe rejects -Wl,--version-script (Windows symbol export would use a .def
-  # / __declspec; the shared lib is test-only and has no Windows consumer yet —
-  # the Python wheel is Linux-only, PY-005).
-  if(NOT WIN32)
+  # link.exe rejects -Wl,--version-script.
+  if(WIN32)
+    # MSVC has no version-script equivalent; auto-generate a .def from all object
+    # symbols so the C ABI is exported. The shared lib is test-only (BUILD_TESTS)
+    # and exists solely for the Python ctypes oracle (tests/oracle) to dlopen and
+    # resolve fixpp_* — there is no shipped Windows consumer, so the §X.2
+    # "only fixpp_*" surface restriction (enforced on POSIX via the version
+    # script) does not apply to this artifact.
+    set_target_properties(fixpp_capi_shared PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
+  else()
     target_link_options(fixpp_capi_shared PRIVATE
       "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/fixpp_capi.map")
   endif()

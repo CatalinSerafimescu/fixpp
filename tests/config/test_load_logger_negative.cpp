@@ -1193,13 +1193,18 @@ kind = "insecure_plain_tcp"
 
 TEST(T015_CollectAll, N2_SessionErrorSuppressesAllLoggers)
 {
-    // Session-0: valid logger with a file sink in /tmp.
+    // Session-0: valid logger with a file sink. directory = "." resolves against
+    // the base_dir passed below (std::filesystem::temp_directory_path(), which is
+    // guaranteed to exist + be a real directory) so the sink is genuinely valid on
+    // every platform. "/tmp" is NOT a valid absolute path on Windows (no drive
+    // letter → treated as relative → resolves to <base-drive>:\tmp, which need not
+    // exist), which would make this "valid" session error and break acc.empty().
     const std::string toml_session0 = R"(
 [logger]
 capacity = 65536
   [[logger.sinks]]
   kind      = "file"
-  directory = "/tmp"
+  directory = "."
 )";
     // Session-1: invalid logger (capacity not pow2) → acc non-empty after resolve.
     const std::string toml_session1 = R"(

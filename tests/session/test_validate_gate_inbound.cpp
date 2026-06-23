@@ -459,17 +459,28 @@ TEST(ValidateGateInbound, ManyFieldsBypassArena_Rejected_NotBypassed) {
     Session sess{fix.engine, cfg};
     fix.open_to_active(sess);
 
-    // ── (a) Feed violation frame: 400 undefined tags → must produce Reject(373=2) ──
+    // ── (a) Feed violation frame: 265 undefined tags → must produce Reject(373=2) ──
     //
     // Total entries: 7 header fields (8,9,35,49,56,34,52) + 3 required body fields
-    // (11,54,60) + 400 undefined (9000-9399) = 410.  Needs cap-512 (next power of 2
-    // above 256 that fits 410).  Exhausts 8 KiB arena; fits in 16 KiB arena.
+    // (11,54,60) + 265 undefined (9000-9264) = 275.  Needs cap-512 (next power of 2
+    // above 256 that fits 275).
+    //
+    // The count must land in the window (admin-arena capacity, inbound-arena
+    // capacity): high enough to EXHAUST the 8 KiB kAdminParseArena (so the RED
+    // mutation in the header comment fails), low enough to FIT the 16 KiB
+    // kInboundParseArena.  That window is allocator-dependent — kInboundParseArena
+    // is exactly 2x kAdminParseArena, but MSVC's std::pmr grows vectors 1.5x (vs
+    // libstdc++/libc++ 2x), so a monotonic_buffer_resource retains ~3x vs ~2x the
+    // final size and the per-field cost is ~1.5x heavier, shifting both bounds
+    // down.  275 (vs the original libstdc++-only 410) sits in the overlap of both
+    // allocators' windows: above the ~257-field admin-arena capacity on libstdc++,
+    // below the inbound-arena capacity on MSVC.
     std::string body;
     body += "11=ORD001\x01";
     body += "54=1\x01";
     body += "60=20240101-00:00:00.000\x01";
-    for (int t = 9000; t < 9400; ++t) {
-        body += std::to_string(t) + "=X\x01";  // 400 undefined tags
+    for (int t = 9000; t < 9265; ++t) {
+        body += std::to_string(t) + "=X\x01";  // 265 undefined tags
     }
     auto violation_frame = make_raw_frame("FIX.4.2", "D", 2, "TW", "ISLD", body);
 

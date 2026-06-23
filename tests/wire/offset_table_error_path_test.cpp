@@ -168,16 +168,32 @@ TEST(OffsetTableErrorPath, GroupSlicesBadAllocDegradeCoversLines231to232) {
     auto fv = fixpp::wire::test::make_frame_view(buf);
     ASSERT_TRUE(fv.has_value());
 
+    // Measure how many PMR allocations OffsetTable construction performs. This is
+    // allocator-dependent (libstdc++/libc++ grow vectors 2x → 5 calls here; MSVC's
+    // std::pmr grows 1.5x → a different count), so it cannot be hard-coded. We then
+    // fail the FIRST post-construction allocation — group_slices_.reserve — which
+    // exercises the bad_alloc degrade path (lines 231-232) on every platform.
+    std::size_t construction_calls = 0;
+    {
+        std::pmr::monotonic_buffer_resource probe_upstream;
+        failing_pmr_resource probe_mr{&probe_upstream, /*fail_on_call_n=*/0};  // never fail
+        OffsetTable probe{*fv, &probe_mr};
+        ASSERT_TRUE(probe.build_status().has_value());
+        construction_calls = probe_mr.allocate_calls();
+    }
+    ASSERT_GT(construction_calls, 0U);
+
     std::pmr::monotonic_buffer_resource upstream;
-    // fail_on_call_n=6: allow 5 construction allocs (verified by measurement),
-    // fail the first group_slices alloc (group_slices_.reserve).
-    failing_pmr_resource fail_mr{&upstream, /*fail_on_call_n=*/6};
+    // Fail the first allocation AFTER construction (the group_slices_.reserve).
+    failing_pmr_resource fail_mr{&upstream, /*fail_on_call_n=*/construction_calls + 1};
 
     OffsetTable t{*fv, &fail_mr};
 
-    // Construction must succeed (5 allocs complete before call #6).
+    // Construction must succeed (all construction allocs complete before the
+    // (construction_calls + 1)-th call).
     ASSERT_TRUE(t.build_status().has_value())
-        << "table construction must succeed with the first 5 allocations allowed";
+        << "table construction must succeed with the first " << construction_calls
+        << " allocations allowed";
     EXPECT_GT(t.size(), 0U) << "table must have entries after successful build";
 
     // group_slices(453) triggers alloc #6 (reserve) → bad_alloc → catch → {}.
