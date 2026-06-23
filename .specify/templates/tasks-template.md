@@ -157,6 +157,13 @@ Examples of foundational tasks (adjust based on your project):
 - [ ] TXXX Security hardening
 - [ ] TXXX Run quickstart.md validation
 
+### Mandatory close-out tasks (ALWAYS emit — Gate-B preconditions, Article XVII §8)
+
+> These two tasks are NOT optional and are NOT feature-specific. Every feature ships them as the LAST tasks of the Polish phase. Omitting them is the 049-class end-gap (catalogue rows / FR-SC coverage silently dropped before "feature complete"). `/gate-b` pre-flight HARD-BLOCKS without the completeness-audit record.
+
+- [ ] TXXX [P] **Catalogue close-out**: flip every feature-owned OFFICIAL row in `spec/feature-catalogue.md` from `in-progress`/`backlog` → `done` (with the PR / evidence ref) AND add/update its matching `spec/coverage-index.md` entry. (T057 analog.)
+- [ ] TXXX **Feature-completeness audit (MUST be the FINAL task)**: assert against the merged tree that (i) every `tasks.md` row is `[X]` or carries an explicit waiver rationale; (ii) every spec FR- and SC- maps to a landed test AND a landed implementation; (iii) every feature-owned OFFICIAL catalogue row is `done` with a matching `coverage-index.md` entry. Record the verdict (100% or fully-waived) in the `/speckit-verify` decision doc (`.specify/decisions/<feature>-verify.md`, `## Completeness` section) OR a sibling `.specify/decisions/<feature>-completeness.md`. This is the hard `/gate-b` precondition (Article XVII §8 / pre-flight 4d). (T058 analog.)
+
 ---
 
 ## Dependencies & Execution Order
