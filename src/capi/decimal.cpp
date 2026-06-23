@@ -16,22 +16,19 @@ using fixpp::core::decimal_traits;
 using fixpp::core::error;
 using fixpp::core::pod_decimal;
 
+// T012 (FR-011): the local map_error() is replaced by the shared, audited
+// fixpp_capi::detail::translate() (src/capi/error.cpp) so the decimal boundary
+// uses the single master coalescing table. decimal_overflow → DECIMAL_INVALID
+// is preserved there. translate() is engine-internal (no public header);
+// forward-declared here, as in tests/capi/error_surface_test.cpp.
+namespace fixpp_capi::detail {
+fixpp_error_t translate(fixpp::core::error e) noexcept;
+}  // namespace fixpp_capi::detail
+
 namespace {
 
-// Map fixpp::core::error to FIXPP_ERR_* codes.
-fixpp_error_t map_error(error e) noexcept {
-    switch (e) {
-        case error::decimal_invalid_input:
-        case error::decimal_overflow:
-            return FIXPP_ERR_DECIMAL_INVALID;
-        case error::decimal_precision_loss:
-            return FIXPP_ERR_DECIMAL_PRECISION_LOSS;
-        case error::decimal_buffer_too_small:
-            return FIXPP_ERR_BUFFER_TOO_SMALL;
-        default:
-            return FIXPP_ERR_UNKNOWN;
-    }
-}
+// Thin forwarder to the shared master mapping (no local mapping logic).
+fixpp_error_t map_error(error e) noexcept { return fixpp_capi::detail::translate(e); }
 
 // Lift a fixpp_decimal_t into a pod_decimal through the trait boundary per 2a §5.2.
 // Returns an error if the value is out of the canonical domain [-38, 0] per 2a §4.2.

@@ -251,10 +251,10 @@ note above. 018 also discharges the orthogonal 016 verify-YELLOW sanitizer waive
 
 | ID | Source | Category | Title | FIX version(s) | Spec ref | Status | /specify | PR | Tests | Verified |
 |---|---|---|---|---|---|---|---|---|---|---|
-| CA-001 | OFFICIAL | c-api | Opaque handle types — FixSession, FixMessage, FixDictionary (no C++ symbols in ABI) | all | [2i §4.2] Opaque handle types | backlog | — | — | — | — |
-| CA-002 | OFFICIAL | c-api | Error code enum + fixpp_strerror() — all error paths return numeric code | all | [2i §4.3] / [2i §4.4] | backlog | — | — | — | — |
-| CA-003 | OFFICIAL | c-api | Thread-safety contract — explicit reentrancy guarantees per function | all | [2i §4.10] | backlog | — | — | — | — |
-| CA-004 | OFFICIAL | c-api | Version negotiation — fixpp_version() / ABI version tag in header | all | [2i §4.5] | backlog | — | — | — | — |
+| CA-001 | OFFICIAL | c-api | Opaque handle types — FixSession, FixMessage, FixDictionary (no C++ symbols in ABI) | all | [2i §4.2] Opaque handle types; `specs/049-c-abi-handles-errors/` | in progress | 049 | — | `tests/capi/handles_compile_test.c` (SC-003 pure-C) | — |
+| CA-002 | OFFICIAL | c-api | Error code enum + fixpp_strerror() — all error paths return numeric code | all | [2i §4.3] / [2i §4.4]; `specs/049-c-abi-handles-errors/` | in progress | 049 | — | `tests/capi/error_surface_test.cpp` (116-arm oracle, SC-002/006), `tools/test_capi_occupancy_negative.sh` (SC-004) | — |
+| CA-003 | OFFICIAL | c-api | Thread-safety contract — explicit reentrancy guarantees per function | all | [2i §4.10]; `specs/049-c-abi-handles-errors/` | in progress | 049 | — | `tools/check_capi_reentrancy.sh` + `tools/test_capi_reentrancy_negative.sh` (SC-005) | — |
+| CA-004 | OFFICIAL | c-api | Version negotiation — fixpp_version() / ABI version tag in header | all | [2i §4.5]; `specs/049-c-abi-handles-errors/` | in progress | 049 | — | `tests/capi/version_test.cpp`, `tests/capi/capi_version_smoke.c` (SC-001) | — |
 | CA-005 | OFFICIAL | c-api | Session lifecycle — fixpp_session_create / connect / disconnect / destroy | all | [2i §7.9] (shape; behaviour owed to 2j + Phase-4) | backlog | — | — | — | — |
 | CA-006 | OFFICIAL | c-api | Message send — fixpp_session_send(session, msg) | all | [2i §7.9] (shape; behaviour owed to 2j + Phase-4) | backlog | — | — | — | — |
 | CA-007 | OFFICIAL | c-api | Message receive callback — fixpp_session_on_message(session, cb, userdata) | all | [2i §7.9] (shape; behaviour owed to 2j + Phase-4) | backlog | — | — | — | — |

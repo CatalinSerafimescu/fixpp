@@ -23,19 +23,21 @@
 extern "C" {
 #endif
 
-/* ── Version macros ─────────────────────────────────────────────────────── */
-/* Library SemVer — independent from C ABI SemVer per [arch §9.2]. */
+/* ── Library SemVer — independent from C ABI SemVer per [arch §9.2] ───────── */
+/* The C-ABI SemVer macros (FIXPP_C_ABI_VERSION_{MAJOR,MINOR,PATCH} + composite)
+   live in fix/c_api/version.h (049 T022) — the single source — and are NOT
+   duplicated here. The stale inline FIXPP_C_ABI_VERSION_* block (0.1.0) was
+   removed; version.h carries the current 0.2.0 values. */
 #define FIXPP_VERSION_MAJOR 0
 #define FIXPP_VERSION_MINOR 0
 #define FIXPP_VERSION_PATCH 1
 
-/* C ABI SemVer — stable contract; bumped independently of library. */
-#define FIXPP_C_ABI_VERSION_MAJOR 0
-#define FIXPP_C_ABI_VERSION_MINOR 1
-#define FIXPP_C_ABI_VERSION_PATCH 0
-
-/* ── Phase 4 decimal boundary functions ─────────────────────────────────── */
-#include "fix/c_api/decimal.h"  // NOLINT(misc-include-cleaner): umbrella header
+/* ── Aggregate split headers ([2i §4.1] per-domain split) ─────────────────── */
+#include "fix/c_api/export.h"   // NOLINT(misc-include-cleaner): FIXPP_API_EXPORT
+#include "fix/c_api/error.h"    // NOLINT(misc-include-cleaner): fixpp_error_t + fixpp_strerror
+#include "fix/c_api/version.h"  // NOLINT(misc-include-cleaner): fixpp_version_t + accessors + C-ABI macros
+#include "fix/c_api/handles.h"  // NOLINT(misc-include-cleaner): opaque handle catalogue
+#include "fix/c_api/decimal.h"  // NOLINT(misc-include-cleaner): decimal boundary functions
 
 /* ── Version accessor ───────────────────────────────────────────────────── */
 /**
