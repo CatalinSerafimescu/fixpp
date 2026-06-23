@@ -5,8 +5,12 @@
  * No C++ headers are included here — only <stddef.h>, <stdint.h>, <stdbool.h>
  * per [arch §9.1] / [api §6].
  *
- * Phase 3 exposes only fixpp_version_string(). The full C ABI surface
- * enumerated in api-contract.md §7 lands incrementally starting Phase 4.
+ * Feature A (CA-001..004) exposes the foundation C-ABI surface aggregated here:
+ * opaque handle catalogue (handles.h), error codes + fixpp_strerror (error.h),
+ * version accessors + macros (version.h), and the frozen decimal boundary
+ * (decimal.h) — all decorated via the FIXPP_API_EXPORT visibility macro
+ * (export.h). The remaining surface (CA-005..010: session lifecycle, message
+ * send/receive, field accessors) lands incrementally in Features B/C.
  * [const §XII allows incremental rollout; constitution Article XII §...]
  */
 
