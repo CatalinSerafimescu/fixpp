@@ -27,6 +27,7 @@
 #include <asio/use_awaitable.hpp>
 #include <asio/use_future.hpp>
 #include <cstddef>
+#include <filesystem>
 #include <fixpp/core/error.hpp>
 #include <fixpp/tls/cert_source.hpp>
 #include <fixpp/tls/file_cert_source.hpp>
@@ -74,8 +75,10 @@ TEST(FileCertSourcePmrFail, FactoryNeverThrows) {
 // Malformed content triggers a parse error that routes through the factory
 // boundary as tls_cert_parse_failed, not a thrown exception.
 TEST(FileCertSourcePmrFail, ParseFailureSurfacesAsCertParseFailed) {
-    // Write temp file with garbage content.
-    auto tmp = std::string("/tmp/fixpp_fcs_pmr_test_bad.pem");
+    // Write temp file with garbage content. Use the platform temp dir
+    // (std::filesystem::temp_directory_path) — "/tmp" does not exist on the
+    // Windows CI runner, so a hard-coded "/tmp/..." fopen returns NULL there.
+    auto tmp = (std::filesystem::temp_directory_path() / "fixpp_fcs_pmr_test_bad.pem").string();
     {
         FILE* f = fopen(tmp.c_str(), "w");
         ASSERT_NE(f, nullptr);

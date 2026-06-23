@@ -10,16 +10,21 @@
 //   FR-008/FR-009       — file rotation bound + fdatasync obligation
 //   [arch §2.3]        — log → {core} only
 
-#include <fcntl.h>
-#include <sys/stat.h>
-#include <unistd.h>
+// Platform durability primitive + FILE*→fd helper (see platform_datasync /
+// stream_fd below). All other file I/O goes through portable std::FILE* +
+// std::filesystem, so FileSink builds on both POSIX and Windows/MSVC.
+#ifdef _WIN32
+#include <io.h>  // _commit, _fileno
+#else
+#include <unistd.h>  // fdatasync, fileno
+#endif
 
 #include <algorithm>
-#include <cerrno>
 #include <chrono>
 #include <condition_variable>
-#include <cstring>
+#include <cstdio>
 #include <ctime>
+#include <filesystem>
 #include <fixpp/core/error.hpp>
 #include <fixpp/log/file_sink.hpp>
 #include <fixpp/log/format_registry.hpp>
@@ -78,6 +83,26 @@ std::string make_iso8601_suffix() noexcept {
     return buf;
 }
 
+// Portable FILE*→OS file descriptor: fileno on POSIX, _fileno on Windows.
+int stream_fd(std::FILE* s) noexcept {
+#ifdef _WIN32
+    return ::_fileno(s);
+#else
+    return ::fileno(s);
+#endif
+}
+
+// Portable durability primitive: flush this fd's OS buffers to disk.
+// POSIX ::fdatasync / Windows ::_commit. Returns 0 on success (matches
+// ::fdatasync), so the FileSinkConfig::fsync_fn int(int) seam is unchanged.
+int platform_datasync(int fd) noexcept {
+#ifdef _WIN32
+    return ::_commit(fd);
+#else
+    return ::fdatasync(fd);
+#endif
+}
+
 }  // namespace
 
 // ── FileSink ──────────────────────────────────────────────────────────────────
@@ -89,25 +114,22 @@ FileSink::FileSink(FileSinkConfig config) : config_{std::move(config)} {
 FileSink::~FileSink() { close(); }
 
 fixpp::core::expected_t<void> FileSink::open() {
-    // Open (or create) the live log file for append.
-    fd_ = ::open(live_path_.c_str(), O_WRONLY | O_CREAT | O_APPEND, 0644);
-    if (fd_ < 0) {
+    // Open (or create) the live log file for append. Binary mode ("ab") keeps
+    // line endings ("\n") and bytes_written_ byte-exact across platforms (no
+    // CRLF translation on Windows). path::string() yields a char* path for
+    // std::fopen (path::c_str() is wchar_t* on Windows).
+    stream_ = std::fopen(live_path_.string().c_str(), "ab");
+    if (stream_ == nullptr) {
         return std::unexpected(fixpp::core::error::log_sink_open_failed);
     }
-
-    // Wrap in a buffered stream for efficient fprintf.
-    stream_ = ::fdopen(fd_, "a");
-    if (!stream_) {
-        ::close(fd_);
-        fd_ = -1;
-        return std::unexpected(fixpp::core::error::log_sink_open_failed);
-    }
+    fd_ = stream_fd(stream_);
 
     // Seed bytes_written_ with the current file size (we may be appending to
     // an existing file on restart).
-    struct stat st{};
-    if (::fstat(fd_, &st) == 0) {
-        bytes_written_ = static_cast<std::uint64_t>(st.st_size);
+    std::error_code ec;
+    auto sz = std::filesystem::file_size(live_path_, ec);
+    if (!ec) {
+        bytes_written_ = static_cast<std::uint64_t>(sz);
     }
 
     // Start the owned fsync worker (async_fsync escape — [2k §4.5]).
@@ -186,9 +208,6 @@ void FileSink::close() noexcept {
         std::fclose(stream_);
         stream_ = nullptr;
         fd_ = -1;
-    } else if (fd_ >= 0) {
-        ::close(fd_);
-        fd_ = -1;
     }
 }
 
@@ -227,7 +246,7 @@ void FileSink::start_worker() noexcept {
                     if (fsync_fn) {
                         fsync_fn(fd);
                     } else {
-                        ::fdatasync(fd);
+                        platform_datasync(fd);
                     }
                 }
 
@@ -320,14 +339,12 @@ void FileSink::rotate() noexcept {
             archived_list.erase(archived_list.begin());
         }
 
-        // 4. Open a fresh live file.
-        fd_ = ::open(live_path_.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
-        if (fd_ >= 0) {
-            stream_ = ::fdopen(fd_, "a");
-            if (!stream_) {
-                ::close(fd_);
-                fd_ = -1;
-            }
+        // 4. Open a fresh live file ("wb" = create/truncate, binary).
+        stream_ = std::fopen(live_path_.string().c_str(), "wb");
+        if (stream_ != nullptr) {
+            fd_ = stream_fd(stream_);
+        } else {
+            fd_ = -1;
         }
 
         bytes_written_ = 0;

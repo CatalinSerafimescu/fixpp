@@ -183,8 +183,26 @@ TEST(CloseTruncatedMapping, LiveLoopbackTruncatedClose) {
 
     ASSERT_TRUE(read_result.has_value() == false)
         << "server async_read_some must fail on truncated close";
+#ifdef _WIN32
+    // Platform divergence: POSIX/OpenSSL distinguishes a graceful FIN-without-
+    // close_notify (→ ssl::error::stream_truncated → transport_read_truncated)
+    // from an abortive RST (→ connection_reset → transport_read_error). Winsock
+    // cannot: closing a socket that still has unread received data (the case
+    // here — unread TLS session-ticket/handshake bytes) sends an RST, not a FIN,
+    // so the server sees connection_reset and the truncation collapses onto
+    // transport_read_error. The production mapping is intentionally identical on
+    // both platforms (no Windows-only special-case); the OS simply does not
+    // expose the FIN-vs-RST distinction here. Either variant is an acceptable
+    // "peer vanished mid-stream" outcome for the session layer.
+    EXPECT_TRUE(read_result.error() == error::transport_read_truncated ||
+                read_result.error() == error::transport_read_error)
+        << "Windows truncated close must surface as a transport read failure "
+           "(truncated or error); got slot="
+        << static_cast<int>(read_result.error());
+#else
     EXPECT_EQ(read_result.error(), error::transport_read_truncated)
         << "truncated peer close (no SSL_shutdown) must map to transport_read_truncated "
            "(SC-006 distinct variant); got slot="
         << static_cast<int>(read_result.error());
+#endif
 }

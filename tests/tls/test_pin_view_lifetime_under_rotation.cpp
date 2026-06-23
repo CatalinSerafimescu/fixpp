@@ -69,6 +69,16 @@ TEST(PinViewLifetime, DereferenceValidDuringConcurrentRotation) {
         EXPECT_EQ(std::string_view{held_view.value->subject_dn}, expected_dn);
     });
 
+    // Ensure the reader is actually running (has dereferenced at least once)
+    // before rotation begins. On Windows, std::thread spawn latency can let the
+    // rotation loop below finish and set rotation_done before the reader's loop
+    // runs even once, leaving read_count == 0 and failing the EXPECT_GT sanity
+    // check below — while still racing the dereference against rotation for the
+    // remaining iterations once it does start.
+    while (read_count.load(std::memory_order_acquire) == 0) {
+        std::this_thread::yield();
+    }
+
     // Thread B (main): add/remove loop — replaces the snapshot N times.
     for (int i = 0; i < kRounds; ++i) {
         (void)ps.remove(kFp);

@@ -40,7 +40,11 @@
 //       --gtest_filter='*Mallocnesia*'
 
 #include <gtest/gtest.h>
-#include <unistd.h>
+#ifdef _WIN32
+#include <process.h>  // _getpid()
+#else
+#include <unistd.h>  // getpid()
+#endif
 
 #include <algorithm>
 #include <asio/co_spawn.hpp>
@@ -67,10 +71,7 @@
 // Without LD_PRELOAD they remain no-ops and the test exercises the logic
 // without the alloc counting (so it passes trivially — the mallocnesia run
 // is the real gate).
-extern "C" {
-__attribute__((weak)) void alloc_guard_start();
-__attribute__((weak)) void alloc_guard_end();
-}
+#include "support/alloc_guard_markers.hpp"
 
 namespace {
 
@@ -138,12 +139,20 @@ private:
 };
 
 // ── Temp-dir helper for the FileStore alloc-guard test ─────────────────────────
+inline unsigned current_pid() noexcept {
+#ifdef _WIN32
+    return static_cast<unsigned>(::_getpid());
+#else
+    return static_cast<unsigned>(::getpid());
+#endif
+}
+
 inline std::filesystem::path perf_temp_dir(std::string_view tag) {
     static std::atomic<unsigned> ctr{0};
     const auto seq = ctr.fetch_add(1, std::memory_order_relaxed);
     auto p = std::filesystem::temp_directory_path() /
              (std::string("fixpp_perf_") + std::string(tag) + "_" +
-              std::to_string(static_cast<unsigned>(::getpid())) + "_" + std::to_string(seq));
+              std::to_string(current_pid()) + "_" + std::to_string(seq));
     std::filesystem::create_directories(p);
     return p;
 }

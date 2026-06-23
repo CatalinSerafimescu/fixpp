@@ -226,11 +226,8 @@ TEST(LoadLogger, T008_DuplicateFileSinkFanout) {
     const auto tmp_toml = std::filesystem::temp_directory_path() / "fixpp_t008_fanout.toml";
     {
         std::ofstream out{tmp_toml};
-        // Escape backslashes on Windows (not needed on Linux, but safe).
         auto esc = [](std::filesystem::path const& p) {
-            auto s = p.string();
-            // No-op on POSIX; kept for portability.
-            return s;
+            return p.generic_string();
         };
         out << "[clock]\nkind = \"system\"\n\n"
             << "[store]\nkind = \"memory\"\n\n"
@@ -352,7 +349,7 @@ TEST(LoadLogger, T008_EquivalenceOtlpSink) {
     const auto tmp_toml = std::filesystem::temp_directory_path() / "fixpp_t008_otlp.toml";
     {
         std::ofstream out{tmp_toml};
-        auto esc = [](std::filesystem::path const& p) { return p.string(); };
+        auto esc = [](std::filesystem::path const& p) { return p.generic_string(); };
         out << "[clock]\nkind = \"system\"\n\n"
             << "[store]\nkind = \"memory\"\n\n"
             << "[cert_source]\nkind = \"file\"\n"
@@ -479,7 +476,7 @@ TEST(LoadLogger, T008_OtlpSinkCountAndOrder) {
         "\n"
         "[[logger.sinks]]\n"
         "kind      = \"file\"\n"
-        "directory = \"" + log_dir.string() + "\"\n"
+        "directory = \"" + log_dir.generic_string() + "\"\n"
         "base_name = \"wb_otlp_test\"\n"
         "\n"
         "[[logger.sinks]]\n"
@@ -573,7 +570,7 @@ TEST(LoadLogger, T008_OtlpSinkResolvedNegative) {
         ASSERT_FALSE(ec) << "Failed to create " << log_dir;
 
         std::ofstream out{tmp_toml};
-        auto esc = [](std::filesystem::path const& p) { return p.string(); };
+        auto esc = [](std::filesystem::path const& p) { return p.generic_string(); };
         out << "[clock]\nkind = \"system\"\n\n"
             << "[store]\nkind = \"memory\"\n\n"
             << "[cert_source]\nkind = \"file\"\n"
@@ -723,12 +720,12 @@ TEST(LoadLogger, T027_QuickstartLoad) {
           << "kind = \"memory\"\n\n"
           << "[cert_source]\n"
           << "kind      = \"file\"\n"
-          << "cert_file = \"" << (fixture_dir() / "leaf_ecdsa_p256.pem").string() << "\"\n"
-          << "key_file  = \"" << (fixture_dir() / "leaf_ecdsa_p256.key").string() << "\"\n"
-          << "ca_file   = \"" << (fixture_dir() / "ca.pem").string() << "\"\n\n"
+          << "cert_file = \"" << (fixture_dir() / "leaf_ecdsa_p256.pem").generic_string() << "\"\n"
+          << "key_file  = \"" << (fixture_dir() / "leaf_ecdsa_p256.key").generic_string() << "\"\n"
+          << "ca_file   = \"" << (fixture_dir() / "ca.pem").generic_string() << "\"\n\n"
           << "[dictionary]\n"
           << "kind = \"path\"\n"
-          << "path = \"" << (fixture_dir() / "FIX44.xml").string() << "\"\n\n"
+          << "path = \"" << (fixture_dir() / "FIX44.xml").generic_string() << "\"\n\n"
           // ── Logger from quickstart.md ──────────────────────────────────────
           << "[logger]\n"
           << "capacity      = 65536\n"
@@ -736,7 +733,7 @@ TEST(LoadLogger, T027_QuickstartLoad) {
           << "drain_timeout = \"5000ms\"\n\n"
           << "  [[logger.sinks]]\n"
           << "  kind           = \"file\"\n"
-          << "  directory      = \"" << log_dir.string() << "\"\n"
+          << "  directory      = \"" << log_dir.generic_string() << "\"\n"
           << "  base_name      = \"fixpp\"\n"
           << "  max_file_bytes = 268435456\n"
           << "  max_keep_count = 8\n"
@@ -765,7 +762,7 @@ TEST(LoadLogger, T027_QuickstartLoad) {
           << "capacity = 16384\n\n"
           << "  [[session.logger.sinks]]\n"
           << "  kind      = \"file\"\n"
-          << "  directory = \"" << acme_dir.string() << "\"\n";
+          << "  directory = \"" << acme_dir.generic_string() << "\"\n";
     }
 
     asio::io_context ctx;
@@ -939,15 +936,15 @@ TEST(LoadLogger, T026_FileSinkRotationParamsBehavioral) {
         out << "[clock]\nkind = \"system\"\n\n"
             << "[store]\nkind = \"memory\"\n\n"
             << "[cert_source]\nkind = \"file\"\n"
-            << "cert_file = \"" << (fixture_dir() / "leaf_ecdsa_p256.pem").string() << "\"\n"
-            << "key_file  = \"" << (fixture_dir() / "leaf_ecdsa_p256.key").string() << "\"\n"
-            << "ca_file   = \"" << (fixture_dir() / "ca.pem").string() << "\"\n\n"
+            << "cert_file = \"" << (fixture_dir() / "leaf_ecdsa_p256.pem").generic_string() << "\"\n"
+            << "key_file  = \"" << (fixture_dir() / "leaf_ecdsa_p256.key").generic_string() << "\"\n"
+            << "ca_file   = \"" << (fixture_dir() / "ca.pem").generic_string() << "\"\n\n"
             << "[dictionary]\nkind = \"path\"\n"
-            << "path = \"" << (fixture_dir() / "FIX44.xml").string() << "\"\n\n"
+            << "path = \"" << (fixture_dir() / "FIX44.xml").generic_string() << "\"\n\n"
             << "[logger]\ncapacity = 4096\ndrain_timeout = \"5000ms\"\n\n"
             << "[[logger.sinks]]\n"
             << "kind           = \"file\"\n"
-            << "directory      = \"" << sink_dir.string() << "\"\n"
+            << "directory      = \"" << sink_dir.generic_string() << "\"\n"
             << "base_name      = \"" << base << "\"\n"
             << "max_file_bytes = 1\n"
             << "max_keep_count = " << kMaxKeep << "\n\n"

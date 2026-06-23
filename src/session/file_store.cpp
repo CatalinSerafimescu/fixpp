@@ -69,7 +69,9 @@
 
 // Windows headers (Tier-2 — compilation only on Linux Tier-1; runtime is T057)
 #ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN  // also defined globally (CMakeLists, WIN32) — avoid C4005
 #define WIN32_LEAN_AND_MEAN
+#endif
 #include <windows.h>
 #endif
 
@@ -515,34 +517,42 @@ struct OsFile {
     // 035-filestore-io-offload: raw HANDLE accessor for the offload lambda.
     [[nodiscard]] HANDLE fd_value() const noexcept { return h; }
 
+    // FILE_SHARE_DELETE gives a live handle POSIX-fd semantics: the file may be
+    // renamed-over (reset()'s MoveFileEx REPLACE_EXISTING targets the still-open
+    // live log) or unlinked (test teardown fs::remove_all) WHILE this handle is
+    // open. Without it those operations fail with "being used by another
+    // process". Exclusivity is enforced by try_lock()/LockFileEx, NOT the share
+    // mode, so the second-opener guard is unaffected. (FILE_SHARE_WRITE is
+    // deliberately NOT granted — no concurrent writer is permitted.)
     [[nodiscard]] bool open(const wchar_t* path) noexcept {
-        h = CreateFileW(path, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, nullptr, OPEN_ALWAYS,
-                        FILE_ATTRIBUTE_NORMAL, nullptr);
+        h = CreateFileW(path, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_DELETE,
+                        nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
         return h != INVALID_HANDLE_VALUE;
     }
 
     // T042: Open for write-only, create/truncate (for .reset.tmp file)
     [[nodiscard]] bool open_wronly_creat(const wchar_t* path) noexcept {
-        h = CreateFileW(path, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, nullptr,
+        h = CreateFileW(path, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_DELETE,
+                        nullptr,
                         CREATE_ALWAYS,  // create/truncate
                         FILE_ATTRIBUTE_NORMAL, nullptr);
         return h != INVALID_HANDLE_VALUE;
     }
 
-    [[nodiscard]] bool try_lock() noexcept {
+    [[nodiscard]] bool try_lock() const noexcept {
         OVERLAPPED ov{};
         return LockFileEx(h, LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY, 0, MAXDWORD,
                           MAXDWORD, &ov) != 0;
     }
 
-    void unlock() noexcept {
+    void unlock() const noexcept {
         if (h != INVALID_HANDLE_VALUE) {
             OVERLAPPED ov{};
             UnlockFileEx(h, 0, MAXDWORD, MAXDWORD, &ov);
         }
     }
 
-    [[nodiscard]] bool pwrite_all(const void* buf, std::size_t n, std::int64_t offset) noexcept {
+    [[nodiscard]] bool pwrite_all(const void* buf, std::size_t n, std::int64_t offset) const noexcept {
         const auto* p = static_cast<const char*>(buf);
         std::size_t remaining = n;
         std::int64_t off = offset;
@@ -562,7 +572,7 @@ struct OsFile {
         return true;
     }
 
-    [[nodiscard]] SSIZE_T pread_all(void* buf, std::size_t n, std::int64_t offset) noexcept {
+    [[nodiscard]] SSIZE_T pread_all(void* buf, std::size_t n, std::int64_t offset) const noexcept {
         auto* p = static_cast<char*>(buf);
         std::size_t total = 0;
         std::int64_t off = offset;
@@ -584,16 +594,16 @@ struct OsFile {
         return static_cast<SSIZE_T>(total);
     }
 
-    [[nodiscard]] bool datasync() noexcept { return FlushFileBuffers(h) != 0; }
+    [[nodiscard]] bool datasync() const noexcept { return FlushFileBuffers(h) != 0; }
 
-    [[nodiscard]] bool truncate(std::int64_t new_size) noexcept {
+    [[nodiscard]] bool truncate(std::int64_t new_size) const noexcept {
         LARGE_INTEGER li;
         li.QuadPart = new_size;
         if (!SetFilePointerEx(h, li, nullptr, FILE_BEGIN)) return false;
         return SetEndOfFile(h) != 0;
     }
 
-    [[nodiscard]] std::int64_t file_size() noexcept {
+    [[nodiscard]] std::int64_t file_size() const noexcept {
         LARGE_INTEGER sz{};
         if (!GetFileSizeEx(h, &sz)) return -1;
         return sz.QuadPart;
@@ -781,9 +791,12 @@ struct FileStoreImpl {
     // Returns true on success; false means caller should return store_factory_failed.
     bool restart_scan(const std::string& log_path) noexcept {
         // Step 0: Unlink stale .log.reset.tmp if present (I-14 / T042 prep).
+        // Portable existence-check + remove (this is common code on both
+        // platforms; POSIX ::access(F_OK)/::unlink are not available on MSVC).
         const std::string tmp_path = log_path + ".reset.tmp";
-        if (::access(tmp_path.c_str(), F_OK) == 0) {
-            ::unlink(tmp_path.c_str());
+        std::error_code tmp_ec;
+        if (std::filesystem::exists(tmp_path, tmp_ec)) {
+            std::filesystem::remove(tmp_path, tmp_ec);
         }
 
         const std::int64_t fsize = file.file_size();
@@ -1439,6 +1452,56 @@ asio::awaitable<fixpp::core::expected_t<seqnum_t>> FileStore::next_seqnum(direct
     co_return fixpp::core::expected_t<seqnum_t>{current};
 }
 
+#ifdef _WIN32
+namespace {
+// Atomic replace-over-open-file via POSIX-semantics rename (Win10 1607+ /
+// Server 2016+). MoveFileEx(REPLACE_EXISTING) FAILS when the destination still
+// has a live handle: even with FILE_SHARE_DELETE the delete is only marked
+// pending and the name lingers, so the rename cannot take it. The reset path
+// deliberately keeps the FileStore's live log handle open (on the strand) during
+// the offloaded rename for crash-safe rollback, so MoveFileEx cannot be used.
+// FILE_RENAME_FLAG_POSIX_SEMANTICS swaps atomically regardless of open handles —
+// exactly the POSIX rename(2) the cross-platform algorithm assumes. Returns
+// false (treated as a reset failure) on any error.
+bool posix_rename_over_open(const std::wstring& from, const std::wstring& to) noexcept {
+    // FILE_RENAME_INFO's Flags member and the FileRenameInfoEx class are gated
+    // behind NTDDI_WIN10_RS1 in the SDK headers; define the layout + constants
+    // locally so the build is independent of the project's NTDDI level.
+    struct RenameInfoEx {
+        DWORD Flags;
+        HANDLE RootDirectory;
+        DWORD FileNameLength;  // in BYTES, excluding the terminating null
+        wchar_t FileName[1];
+    };
+    constexpr DWORD kReplaceIfExists = 0x00000001;
+    constexpr DWORD kPosixSemantics = 0x00000002;
+    constexpr auto kFileRenameInfoEx = static_cast<FILE_INFO_BY_HANDLE_CLASS>(22);
+
+    HANDLE h = CreateFileW(from.c_str(), DELETE | GENERIC_WRITE | SYNCHRONIZE,
+                           FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+                           OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (h == INVALID_HANDLE_VALUE) {
+        return false;
+    }
+    const std::size_t name_bytes = to.size() * sizeof(wchar_t);
+    const std::size_t total = offsetof(RenameInfoEx, FileName) + name_bytes + sizeof(wchar_t);
+    std::vector<std::byte> storage(total, std::byte{0});
+    auto* info = reinterpret_cast<RenameInfoEx*>(storage.data());
+    info->Flags = kReplaceIfExists | kPosixSemantics;
+    info->RootDirectory = nullptr;
+    info->FileNameLength = static_cast<DWORD>(name_bytes);
+    std::memcpy(info->FileName, to.c_str(), name_bytes + sizeof(wchar_t));
+    const BOOL ok =
+        SetFileInformationByHandle(h, kFileRenameInfoEx, info, static_cast<DWORD>(total));
+    if (ok != 0) {
+        FlushFileBuffers(h);  // WRITE_THROUGH durability parity with the old MoveFileEx
+    }
+    CloseHandle(h);
+    return ok != 0;
+}
+}  // namespace
+#endif  // _WIN32
+
 // ── FileStore::reset() ────────────────────────────────────────────────────────
 
 asio::awaitable<fixpp::core::expected_t<void>> FileStore::reset() noexcept {
@@ -1623,15 +1686,26 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::reset() noexcept {
                     tmp_file = std::move(tmp_impl.file);
                 }
                 tmp_file = OsFile{};  // close tmp
-                // Windows: MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH MANDATORY (I-15 /
-                // RC#1)
-                if (!MoveFileExW(wide_tmp.c_str(), wide_live.c_str(),
-                                 MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+                // POSIX-semantics rename (I-15 / RC#1): atomically replaces the
+                // live log even though FileStore's live handle is still open on
+                // the strand. MoveFileEx(REPLACE_EXISTING) cannot do this — see
+                // posix_rename_over_open. FlushFileBuffers inside provides the
+                // WRITE_THROUGH durability the old MoveFileEx flag gave.
+                if (!posix_rename_over_open(wide_tmp, wide_live)) {
                     DeleteFileW(wide_tmp.c_str());
                     return false;
                 }
                 // Rename succeeded — mark before reopen. [gate-b/r1 A.1/A.2]
                 *rename_done = true;
+                // gate-b/r1 A.1 fault-injection: same forced post-rename reopen
+                // failure seam as the POSIX branch above (the cancellation/poison
+                // witnesses install this hook and must fire on Windows too).
+                if (auto* h = g_post_rename_reopen_fail_hook.exchange(nullptr,
+                                                                      std::memory_order_relaxed)) {
+                    if (!h()) {
+                        return false;  // forced post-rename reopen failure → poison
+                    }
+                }
                 OsFile new_file;
                 if (!new_file.open(wide_live.c_str())) {
                     return false;
@@ -1792,7 +1866,14 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::flush_for_session_clos
 // ── FileStore::open_log() — internal open called from FileStoreFactory::make() ─
 
 bool FileStore::open_log(const std::string& log_path) noexcept {
+    // Win32 OsFile::open takes a wide path (CreateFileW); convert via
+    // std::filesystem::path. The other Win32 open callers (in the #else branch of
+    // the reset logic) already pass wide strings; this common caller did not.
+#ifdef _WIN32
+    if (!impl_->file.open(std::filesystem::path(log_path).wstring().c_str())) return false;
+#else
     if (!impl_->file.open(log_path.c_str())) return false;
+#endif
     if (!impl_->file.try_lock()) return false;
 
     // RC#6 + N4: initialise PMR scratch buffers now that cfg is fully populated.

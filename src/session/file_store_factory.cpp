@@ -48,7 +48,9 @@
 #endif
 
 #ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN  // also defined globally (CMakeLists, WIN32) — avoid C4005
 #define WIN32_LEAN_AND_MEAN
+#endif
 #include <windows.h>  // MAX_PATH, CreateFileW, etc.
 #endif
 
@@ -192,7 +194,7 @@ fixpp::core::expected_t<std::unique_ptr<MessageStore>> FileStoreFactory::make(
     // ── (1) CompID filesystem-safety validation (BEFORE any file op) ──────────
     // Per [2e §D.4] Gap 1 close. Uses primitive string_view operations only (N-5).
 
-    const std::string dir_native = cfg_.directory.native();
+    const std::string dir_native = cfg_.directory.string();
     const std::string_view dir_sv{dir_native};
 
     // Validate sender
@@ -250,7 +252,7 @@ fixpp::core::expected_t<std::unique_ptr<MessageStore>> FileStoreFactory::make(
 
     // Open the log file: takes advisory lock + runs restart scan.
     // open_log() is engine-internal (documented; not a friend, per plan.md §88).
-    const std::string log_path_str = log_path.native();
+    const std::string log_path_str = log_path.string();
     if (!store->open_log(log_path_str)) {
         return std::unexpected(fixpp::core::error::store_factory_failed);
     }

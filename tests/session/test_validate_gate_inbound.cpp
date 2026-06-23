@@ -459,17 +459,29 @@ TEST(ValidateGateInbound, ManyFieldsBypassArena_Rejected_NotBypassed) {
     Session sess{fix.engine, cfg};
     fix.open_to_active(sess);
 
-    // ── (a) Feed violation frame: 400 undefined tags → must produce Reject(373=2) ──
+    // ── (a) Feed violation frame: 280 undefined tags → must produce Reject(373=2) ──
     //
     // Total entries: 7 header fields (8,9,35,49,56,34,52) + 3 required body fields
-    // (11,54,60) + 400 undefined (9000-9399) = 410.  Needs cap-512 (next power of 2
-    // above 256 that fits 410).  Exhausts 8 KiB arena; fits in 16 KiB arena.
+    // (11,54,60) + 280 undefined (9000-9279) = 290.  Needs cap-512 (next power of 2
+    // above 256 that fits 290).
+    //
+    // The count must land in the window (admin-arena capacity, inbound-arena
+    // capacity): high enough to EXHAUST the 8 KiB kAdminParseArena (so the RED
+    // mutation in the header comment fails), low enough to FIT the 16 KiB
+    // kInboundParseArena.  That window is allocator-dependent: kInboundParseArena
+    // is 2x kAdminParseArena, but MSVC's std::pmr grows vectors 1.5x (vs
+    // libstdc++/libc++ 2x), so a monotonic_buffer_resource retains more, shifting
+    // the inbound ceiling down.  MEASURED (windows-msvc-release sweep): the gate
+    // rejects up to 315 total fields and bypasses at >=320 on MSVC, vs >480 on
+    // libstdc++; the libstdc++ admin-arena floor is ~257.  290 (vs the original
+    // libstdc++-only 410) sits in the overlap with margin on both bounds: above
+    // the 257-field libstdc++ admin floor, below the 315-field MSVC inbound ceiling.
     std::string body;
     body += "11=ORD001\x01";
     body += "54=1\x01";
     body += "60=20240101-00:00:00.000\x01";
-    for (int t = 9000; t < 9400; ++t) {
-        body += std::to_string(t) + "=X\x01";  // 400 undefined tags
+    for (int t = 9000; t < 9280; ++t) {
+        body += std::to_string(t) + "=X\x01";  // 280 undefined tags
     }
     auto violation_frame = make_raw_frame("FIX.4.2", "D", 2, "TW", "ISLD", body);
 

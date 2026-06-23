@@ -36,6 +36,7 @@
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>     // expected_t, error values
 #include <fixpp/core/fix_time.hpp>  // 005 US5: fix_string_to_utc_time (T055/T056)
+#include <fixpp/core/pmr_arena_upstream.hpp>  // detail::arena_upstream (MSVC-debug proxy)
 #include <fixpp/core/session_executor.hpp>
 #include <fixpp/core/session_local.hpp>
 #include <fixpp/core/trace_context.hpp>
@@ -302,10 +303,10 @@ template <class CB>
     // Both constants fit; static_assert guards this.
     static_assert(kAdminParseArena <= kInboundParseArena);
     std::pmr::monotonic_buffer_resource pa_mr{pa_buf_storage.data(), arena_bytes,
-                                              std::pmr::null_memory_resource()};
+                                              ::fixpp::detail::arena_upstream()};
     std::array<std::byte, 512> carry_store{};
     std::pmr::monotonic_buffer_resource carry_mr{carry_store.data(), carry_store.size(),
-                                                 std::pmr::null_memory_resource()};
+                                                 ::fixpp::detail::arena_upstream()};
     fixpp::wire::pmr_carry_buffer carry{carry_store.size(), &carry_mr};
     fixpp::wire::Framer pd_framer;
     std::array<fixpp::wire::frame_view, 1> pd_out{};
@@ -1597,6 +1598,29 @@ using fixpp::session::detail::scan_frame_header;
 struct SendingTimeStamp {
     std::array<char, 32> buf{};
     std::string_view value;  // points into buf
+
+    // `value` aliases `buf`, so the struct is NOT trivially copyable: a copy/move
+    // must RE-POINT value into the destination's own buf. Returning this struct by
+    // value only worked under NRVO (which elides the copy entirely); MSVC debug
+    // builds disable NRVO, so the implicit move copied value as a pointer into the
+    // source's buf, which was then destroyed — value dangled and read back as 0xCC
+    // (uninitialized-stack fill). These explicit special members make the alias
+    // NRVO-independent on every toolchain.
+    SendingTimeStamp() = default;
+    SendingTimeStamp(const SendingTimeStamp& o) noexcept
+        : buf(o.buf), value(buf.data(), o.value.size()) {}
+    SendingTimeStamp(SendingTimeStamp&& o) noexcept
+        : buf(o.buf), value(buf.data(), o.value.size()) {}
+    SendingTimeStamp& operator=(const SendingTimeStamp& o) noexcept {
+        buf = o.buf;
+        value = std::string_view{buf.data(), o.value.size()};
+        return *this;
+    }
+    SendingTimeStamp& operator=(SendingTimeStamp&& o) noexcept {
+        buf = o.buf;
+        value = std::string_view{buf.data(), o.value.size()};
+        return *this;
+    }
 };
 
 [[nodiscard]] SendingTimeStamp stamp_sending_time(fixpp::core::Clock& clock,
@@ -1619,7 +1643,7 @@ struct SendingTimeStamp {
 // skipped (the Writer rebuilds them on commit).
 [[nodiscard]] fixpp::core::expected_t<std::span<std::byte>> build_replay_frame(
     std::span<std::byte> out, std::span<const std::byte> stored) noexcept {
-    fixpp::wire::Writer w(out, std::pmr::null_memory_resource());
+    fixpp::wire::Writer w(out, ::fixpp::detail::arena_upstream());
     const std::byte SOH{0x01};
     const std::byte EQ{static_cast<std::byte>('=')};
     std::string_view orig_sending_time;
@@ -1831,10 +1855,10 @@ std::optional<Session::RejectDecision> Session::validate_inbound_(
     fixpp::session::detail::FrameHeader const& hdr) const noexcept {
     std::array<std::byte, kInboundParseArena> vg_buf{};
     std::pmr::monotonic_buffer_resource vg_mr{vg_buf.data(), vg_buf.size(),
-                                              std::pmr::null_memory_resource()};
+                                              ::fixpp::detail::arena_upstream()};
     std::array<std::byte, 512> vg_carry_store{};
     std::pmr::monotonic_buffer_resource vg_carry_mr{vg_carry_store.data(), vg_carry_store.size(),
-                                                    std::pmr::null_memory_resource()};
+                                                    ::fixpp::detail::arena_upstream()};
     fixpp::wire::pmr_carry_buffer vg_carry{vg_carry_store.size(), &vg_carry_mr};
     fixpp::wire::Framer vg_framer;
     std::array<fixpp::wire::frame_view, 1> vg_out{};
@@ -1845,7 +1869,7 @@ std::optional<Session::RejectDecision> Session::validate_inbound_(
     fixpp::wire::Parser<fixpp::wire::access_mode::Index> vg_parser;
     std::array<std::byte, 512> vg_scratch_buf{};
     std::pmr::monotonic_buffer_resource vg_scratch_mr{vg_scratch_buf.data(), vg_scratch_buf.size(),
-                                                      std::pmr::null_memory_resource()};
+                                                      ::fixpp::detail::arena_upstream()};
     auto vg_mv_r = vg_parser.parse((*vg_feed)[0], &vg_mr);
     if (!vg_mv_r) {
         return std::nullopt;

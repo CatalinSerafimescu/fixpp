@@ -20,10 +20,7 @@ using fixpp::core::pod_decimal;
 // The alloc-guard interceptor watches for malloc/free between
 // the ALLOC_GUARD_START / ALLOC_GUARD_END markers below.
 // These are defined as no-ops here; mallocnesia replaces them.
-extern "C" {
-__attribute__((weak)) void alloc_guard_start();
-__attribute__((weak)) void alloc_guard_end();
-}
+#include "support/alloc_guard_markers.hpp"
 
 TEST(DecimalAllocGuard, ParseFormatLoopNoAlloc) {
     constexpr const char kInput[] = "12345.678";

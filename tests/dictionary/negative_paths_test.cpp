@@ -8,7 +8,22 @@
 // correct typed exception with the matching fixpp::core::error code.
 
 #include <gtest/gtest.h>
-#include <unistd.h>
+#ifdef _WIN32
+#include <process.h>  // _getpid()
+#else
+#include <unistd.h>  // getpid()
+#endif
+
+namespace {
+// Portable process id for per-process-unique temp filenames.
+inline unsigned current_pid() noexcept {
+#ifdef _WIN32
+    return static_cast<unsigned>(::_getpid());
+#else
+    return static_cast<unsigned>(::getpid());
+#endif
+}
+}  // namespace
 
 #include <array>
 #include <cstddef>
@@ -397,7 +412,7 @@ TEST(NegativePaths, LoadRejectsMalformedXmlFileWithPugixmlDescription) {
     auto* mr = std::pmr::new_delete_resource();
     // Per-process-unique filename avoids clobber under sharded/parallel reruns.
     auto const path = std::filesystem::temp_directory_path() /
-                      ("fixpp_dictionary_malformed_input_" + std::to_string(::getpid()) + ".xml");
+                      ("fixpp_dictionary_malformed_input_" + std::to_string(current_pid()) + ".xml");
     // RAII guard: remove the temp file on every exit path (throw or return).
     struct FileGuard {
         std::filesystem::path const& p;

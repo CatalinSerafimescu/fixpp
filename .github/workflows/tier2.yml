@@ -11,8 +11,9 @@ on:
     types: [labeled]
   workflow_dispatch:
 
-env:
-  CONAN_HOME: C:\Users\runneradmin\.conan2
+# CONAN_HOME is set on the Windows job ONLY (it is a Windows path). A
+# workflow-level CONAN_HOME=C:\... breaks any Linux job with "Invalid CONAN_HOME
+# value", so it is scoped to the windows job rather than set globally.
 
 jobs:
   # Only run on workflow_dispatch or PRs labeled 'run-tier2'
@@ -44,6 +45,9 @@ jobs:
     needs: filter
     if: needs.filter.outputs.should_run == 'true'
 
+    env:
+      CONAN_HOME: C:\Users\runneradmin\.conan2
+
     strategy:
       fail-fast: false
       matrix:
@@ -60,7 +64,9 @@ jobs:
           python-version: "3.12"
 
       - name: Install Conan
-        run: pip install conan
+        # pytest: the interop_cell_results_schema_check ctest runs `python -m pytest`
+        # (tests/interop/CMakeLists.txt), absent from the Windows runner by default.
+        run: pip install conan pytest
 
       - name: Initialize Conan default profile
         run: conan profile detect --force
@@ -76,20 +82,33 @@ jobs:
           restore-keys: |
             conan-win-${{ matrix.preset }}-
 
-      - name: Set up MSVC environment
-        uses: microsoft/setup-msbuild@v2
+      # setup-msbuild only adds msbuild to PATH; it does NOT run vcvars, so cl.exe
+      # is absent and the Ninja-generator presets fail "CMAKE_CXX_COMPILER (cl.exe)
+      # not found". vs-shell activates the full MSVC dev environment (cl.exe +
+      # vcvars) and exports it via GITHUB_ENV so it persists into the cmd steps.
+      # It is a COMPOSITE (pure-PowerShell) action — no JS/Node runtime — so it
+      # avoids the Node-20-deprecation warning that the node20-based
+      # ilammy/msvc-dev-cmd emits (that action has no Node-24 release).
+      - name: Set up MSVC environment (vcvars)
+        uses: egor-tensin/vs-shell@v2
 
-      - name: Conan install
+      # OTel-OFF for the first lane-bring-up: skip the protobuf/abseil/grpc build so
+      # the toolchain/configure/codegen path converges in fast (~10 min) cycles.
+      # Flip with_otel=True (the V1.0 CI requirement) once the lane is proven green;
+      # the build-ctx cppstd=20 fix is already in place for that flip.
+      - name: Conan install (OTel-OFF — first lane bring-up)
         shell: cmd
         run: |
           conan install . ^
             -pr conan/profiles/${{ matrix.preset }} ^
+            -o "fixpp/*:with_otel=False" ^
+            -s:b compiler.cppstd=20 ^
             --build=missing ^
             -of build/${{ matrix.preset }}
 
-      - name: Configure
+      - name: Configure (OTel-OFF)
         shell: cmd
-        run: cmake --preset ${{ matrix.preset }}
+        run: cmake --preset ${{ matrix.preset }} -DFIXPP_BUILD_OTEL=OFF
 
       - name: Build
         shell: cmd
@@ -99,60 +118,6 @@ jobs:
         shell: cmd
         run: ctest --preset ${{ matrix.preset }} --output-on-failure
 
-  # ── ABI golden check (Linux only, on-demand) ─────────────────────────────
-  # Verifies fixpp_decimal_t layout and the seven C-ABI boundary function
-  # symbols have not drifted from the golden captured in 001-core-decimal.
-  # Hard-fail on any change — requires a FIXPP_C_ABI_VERSION_MAJOR bump.
-  abidiff:
-    name: "ABI golden — fixpp_decimal_t"
-    runs-on: ubuntu-24.04
-    needs: filter
-    if: needs.filter.outputs.should_run == 'true'
-
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get update -q
-          sudo apt-get install -y abigail-tools
-
-      - name: Install Conan
-        run: pip install conan
-
-      - name: Initialize Conan profile
-        run: conan profile detect --force
-
-      - name: Cache Conan packages
-        uses: actions/cache@v5
-        with:
-          path: ~/.conan2/p
-          key: conan-linux-release-${{ hashFiles('conanfile.py') }}
-          restore-keys: conan-linux-release-
-
-      - name: Conan install (Release)
-        run: |
-          conan install . --build=missing \
-            --profile=default \
-            --output-folder=build/linux-clang-release \
-            -s build_type=Release
-
-      - name: Configure (Release)
-        run: cmake --preset linux-clang-release
-
-      - name: Build fixpp_capi
-        run: cmake --build --preset linux-clang-release --target fixpp_capi
-
-      - name: Run abidiff against golden
-        run: |
-          abidiff \
-            --leaf-changes-only \
-            --suppressions tests/abi/abidiff.suppr \
-            tests/abi/baseline/libfixpp_capi.a \
-            build/linux-clang-release/lib/libfixpp_capi.a \
-            > /tmp/abidiff_current.txt || true
-          diff tests/abi/golden/fixpp_decimal_t.abidiff /tmp/abidiff_current.txt
+  # NOTE: the "ABI golden — fixpp_decimal_t" abidiff job moved to tier1.yml
+  # (2026-06-22) — it is a Linux C-ABI layout gate with nothing Windows-specific,
+  # and belongs in the per-PR tier so C-ABI drift fails fast on every PR.

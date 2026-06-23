@@ -347,14 +347,7 @@ TEST(Masker_SameLength_FieldAnchored_unit, I_FrameHasGenuine554_Detector) {
 // mallocnesia weak-symbol hooks — replaced by LD_PRELOAD; no-ops otherwise.
 // Must be at file scope for the LD_PRELOAD override to bind. (T011 alloc gate;
 // mirrors the NoHeap pattern in test_next_expected_msgseqnum.cpp.)
-extern "C" {
-// NOLINTNEXTLINE(misc-use-anonymous-namespace) — must be at file scope for LD_PRELOAD override.
-__attribute__((weak)) void alloc_guard_start();
-// NOLINTNEXTLINE(misc-use-anonymous-namespace)
-__attribute__((weak)) void alloc_guard_end();
-// NOLINTNEXTLINE(misc-use-anonymous-namespace)
-__attribute__((weak)) long alloc_guard_count();
-}
+#include "support/alloc_guard_markers.hpp"
 
 namespace fixpp_redaction_session {
 

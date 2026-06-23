@@ -30,6 +30,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <fstream>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/core/test/mock_clock.hpp>
@@ -58,14 +59,7 @@ using namespace std::chrono_literals;
 
 // mallocnesia weak-symbol hooks — replaced by LD_PRELOAD; no-ops otherwise.
 // Must be at file scope for the LD_PRELOAD override to bind.
-extern "C" {
-// NOLINTNEXTLINE(misc-use-anonymous-namespace) — must be at file scope for LD_PRELOAD override.
-__attribute__((weak)) void alloc_guard_start();
-// NOLINTNEXTLINE(misc-use-anonymous-namespace)
-__attribute__((weak)) void alloc_guard_end();
-// NOLINTNEXTLINE(misc-use-anonymous-namespace)
-__attribute__((weak)) long alloc_guard_count();
-}
+#include "support/alloc_guard_markers.hpp"
 
 namespace {
 
@@ -530,15 +524,21 @@ TEST(WalkExtraction, SingleImplementation) {
         session_cpp = "../../src/session/session.cpp";
     }
 
-    // grep -c returns the count of matching lines.
+    // Count source lines containing a token (portable, mirrors `grep -c`; no shell).
+    auto count_lines_with = [](const std::string& file, const std::string& needle) -> int {
+        std::ifstream ifs(file);
+        if (!ifs) return -1;
+        int n = 0;
+        std::string line;
+        while (std::getline(ifs, line)) {
+            if (line.find(needle) != std::string::npos) ++n;
+        }
+        return n;
+    };
+
     const std::string loop_token = "for (seqnum_t k = ";
-    const std::string grep_loop_cmd =
-        "grep -c '" + loop_token + "' '" + session_cpp + "' 2>/dev/null";
-    FILE* fp_loop = popen(grep_loop_cmd.c_str(), "r");
-    ASSERT_NE(fp_loop, nullptr);
-    int loop_count = 0;
-    (void)fscanf(fp_loop, "%d", &loop_count);
-    pclose(fp_loop);
+    const int loop_count = count_lines_with(session_cpp, loop_token);
+    ASSERT_GE(loop_count, 0) << "could not open " << session_cpp;
 
     // After T005 extraction the loop is in exactly ONE place.
     EXPECT_EQ(loop_count, 1) << "Store-walk loop must exist exactly once in session.cpp "
@@ -546,14 +546,7 @@ TEST(WalkExtraction, SingleImplementation) {
                              << "count=" << loop_count;
 
     // replay_outbound_range_ must be defined in session.cpp after T005.
-    const std::string grep_fn_cmd =
-        "grep -c 'replay_outbound_range_' '" + session_cpp + "' 2>/dev/null";
-    FILE* fp_fn = popen(grep_fn_cmd.c_str(), "r");
-    ASSERT_NE(fp_fn, nullptr);
-    int fn_count = 0;
-    (void)fscanf(fp_fn, "%d", &fn_count);
-    pclose(fp_fn);
-
+    const int fn_count = count_lines_with(session_cpp, "replay_outbound_range_");
     EXPECT_GE(fn_count, 1)
         << "replay_outbound_range_ must appear in session.cpp after T005 extraction";
 }

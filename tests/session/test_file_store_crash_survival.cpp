@@ -17,18 +17,27 @@
 //
 // TDD: linker-RED until T023/T024/T026 ship FileStore + FileStoreFactory.
 #include <gtest/gtest.h>
+#ifdef _WIN32
+#include <windows.h>  // CreateProcessW / WaitForSingleObject (fork replacement)
+#else
 #include <sys/wait.h>
 #include <unistd.h>
+#endif
 
 #include <asio/co_spawn.hpp>
 #include <asio/thread_pool.hpp>
 #include <asio/use_future.hpp>
+#include <cstdlib>  // std::_Exit, std::getenv
 #include <filesystem>
 #include <fixpp/session/direction.hpp>
 #include <fixpp/session/file_store.hpp>
 #include <fixpp/session/file_store_factory.hpp>
 #include <fixpp/session/retrieve_visitor.hpp>
 #include <fstream>
+#ifdef _WIN32
+#include <string>
+#include <vector>
+#endif
 
 #include "_fixtures_/store_temp_dir.hpp"
 #include "_fixtures_/test_double_fsm.hpp"
@@ -57,10 +66,57 @@ FileStore::Config make_file_config(const fs::path& dir, asio::any_io_executor ex
     return cfg;
 }
 
-// ── SIGKILL-fork harness ─────────────────────────────────────────────────────
+// ── Cross-process store harness ──────────────────────────────────────────────
 
-// Fork a child that stores N frames then is SIGKILLed. Parent waits, then
-// re-opens and retrieves.
+// Child workload: store kFrames frames into `dir` in a SEPARATE process, then
+// hard-exit (releasing the FileStore advisory lock on process exit). Shared by
+// the fork() child (POSIX) and the CreateProcess re-exec child (Windows).
+// Never returns.
+[[noreturn]] void run_store_child(const fs::path& dir, int kFrames) {
+    asio::thread_pool child_pool{2};
+    FileStore::Config cfg = make_file_config(dir, child_pool.get_executor());
+    FileStoreFactory factory{cfg};
+    auto minted =
+        factory.make("SENDER", "TARGET", nullptr, 1024 * 1024 * 1024, child_pool.get_executor());
+    if (!minted) {
+        std::_Exit(1);
+    }
+    auto& store = *minted.value();
+    auto script = make_store_script(kFrames, direction_t::outbound);
+    auto fut = asio::co_spawn(
+        child_pool.get_executor(),
+        [&store, &script]() -> asio::awaitable<void> {
+            for (const auto& step : script) {
+                co_await store.store(step.seq, std::span<const std::byte>(step.frame_bytes),
+                                     step.dir);
+            }
+        },
+        asio::use_future);
+    try {
+        fut.get();
+    } catch (...) {
+    }
+    child_pool.stop();
+    child_pool.join();
+    std::_Exit(0);
+}
+
+#ifdef _WIN32
+// Windows has no fork(): the parent re-execs this same test binary with
+// --gtest_filter selecting this worker and FIXPP_CRASH_CHILD_DIR set, so the
+// worker runs run_store_child in a separate process (the fork() analog). In a
+// normal run the env var is unset and the worker skips.
+TEST(FileStoreCrashSurvival, WinStoreChildWorker) {
+    const char* dir_env = std::getenv("FIXPP_CRASH_CHILD_DIR");
+    if (dir_env == nullptr || *dir_env == '\0') {
+        GTEST_SKIP() << "not invoked as a re-exec child (FIXPP_CRASH_CHILD_DIR unset)";
+    }
+    run_store_child(fs::path{dir_env}, 100);  // never returns
+}
+#endif
+
+// Store kFrames frames in a child PROCESS, then re-open in the parent and
+// retrieve — verifies cross-process durability + advisory-lock release on exit.
 TEST(FileStoreCrashSurvival, CommitPerMessage100Frames) {
     asio::thread_pool pool{2};
     auto dir = unique_store_dir("crash_per_msg");
@@ -68,42 +124,41 @@ TEST(FileStoreCrashSurvival, CommitPerMessage100Frames) {
     constexpr int kFrames = 100;
     auto script = make_store_script(kFrames, direction_t::outbound);
 
-    // Fork child: store kFrames frames then exit cleanly (simulates commit)
+#ifdef _WIN32
+    // Re-exec self as a child process running WinStoreChildWorker.
+    wchar_t exe_path[MAX_PATH];
+    const DWORD path_len = ::GetModuleFileNameW(nullptr, exe_path, MAX_PATH);
+    ASSERT_GT(path_len, 0u) << "GetModuleFileNameW failed: " << ::GetLastError();
+    ASSERT_LT(path_len, static_cast<DWORD>(MAX_PATH));
+
+    ::_wputenv_s(L"FIXPP_CRASH_CHILD_DIR", dir.wstring().c_str());
+
+    std::wstring cmd = L"\"" + std::wstring{exe_path} +
+                       L"\" --gtest_filter=FileStoreCrashSurvival.WinStoreChildWorker";
+    std::vector<wchar_t> cmd_mut(cmd.begin(), cmd.end());
+    cmd_mut.push_back(L'\0');
+
+    STARTUPINFOW si{};
+    si.cb = sizeof(si);
+    PROCESS_INFORMATION pi{};
+    const BOOL spawned = ::CreateProcessW(nullptr, cmd_mut.data(), nullptr, nullptr, FALSE, 0,
+                                          nullptr, nullptr, &si, &pi);
+    // Clear the env immediately so the parent's own WinStoreChildWorker slot skips.
+    ::_wputenv_s(L"FIXPP_CRASH_CHILD_DIR", L"");
+    ASSERT_TRUE(spawned) << "CreateProcessW failed: " << ::GetLastError();
+    ::WaitForSingleObject(pi.hProcess, INFINITE);
+    ::CloseHandle(pi.hProcess);
+    ::CloseHandle(pi.hThread);
+#else
+    // Fork child: store kFrames frames then exit cleanly (simulates commit).
     pid_t pid = fork();
     ASSERT_NE(pid, -1);
-
     if (pid == 0) {
-        // Child process: create a fresh pool (parent's pool has no live threads after fork)
-        asio::thread_pool child_pool{2};
-        FileStore::Config cfg = make_file_config(dir, child_pool.get_executor());
-        FileStoreFactory factory{cfg};
-        auto minted = factory.make("SENDER", "TARGET", nullptr, 1024 * 1024 * 1024,
-                                   child_pool.get_executor());
-        if (!minted) {
-            _exit(1);
-        }
-        auto& store = *minted.value();
-        auto fut = asio::co_spawn(
-            child_pool.get_executor(),
-            [&store, &script]() -> asio::awaitable<void> {
-                for (const auto& step : script) {
-                    co_await store.store(step.seq, std::span<const std::byte>(step.frame_bytes),
-                                         step.dir);
-                }
-            },
-            asio::use_future);
-        try {
-            fut.get();
-        } catch (...) {
-        }
-        child_pool.stop();
-        child_pool.join();
-        _exit(0);
+        run_store_child(dir, kFrames);  // never returns
     }
-
-    // Parent: wait for child then re-open
     int status = 0;
     waitpid(pid, &status, 0);
+#endif
 
     // Re-open the store
     FileStore::Config cfg = make_file_config(dir, pool.get_executor());
@@ -130,7 +185,8 @@ TEST(FileStoreCrashSurvival, CommitPerMessage100Frames) {
     }
 
     // Cleanup
-    fs::remove_all(dir);
+    minted.value().reset();
+    fixpp::store_test::remove_store_dir(dir);
 }
 
 // ── Sentinel mismatch ────────────────────────────────────────────────────────
@@ -166,7 +222,7 @@ TEST(FileStoreCrashSurvival, SentinelMismatchReturnsFailed) {
     EXPECT_FALSE(result.has_value());
     EXPECT_EQ(result.error(), fixpp::core::error::store_factory_failed);
 
-    fs::remove_all(dir);
+    fixpp::store_test::remove_store_dir(dir);
 }
 
 // ── Directory contention (advisory lock) ────────────────────────────────────
@@ -189,8 +245,9 @@ TEST(FileStoreCrashSurvival, SecondOpenerReturnsFailed) {
     EXPECT_EQ(result2.error(), fixpp::core::error::store_factory_failed)
         << "expected store_factory_failed due to advisory lock contention";
 
-    // Release first store (goes out of scope at end of test)
-    fs::remove_all(dir);
+    // Release first store before removing the directory
+    minted1.value().reset();
+    fixpp::store_test::remove_store_dir(dir);
 }
 
 // ── commit_batched: stores succeed and retrieve is consistent ─────────────────
@@ -246,7 +303,8 @@ TEST(FileStoreCrashSurvival, CommitBatchedReturnsSuccess) {
     EXPECT_GE(visitor.entries().size(), static_cast<std::size_t>(1));
     EXPECT_LE(visitor.entries().size(), static_cast<std::size_t>(kFrames));
 
-    fs::remove_all(dir);
+    minted.value().reset();
+    fixpp::store_test::remove_store_dir(dir);
 }
 
 }  // namespace

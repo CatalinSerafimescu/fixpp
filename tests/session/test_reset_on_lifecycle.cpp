@@ -9,12 +9,7 @@
 // mallocnesia replaces these weak no-ops with its interceptor scope markers.
 // Run under: LD_PRELOAD=tools/mallocnesia/libmallocnesia.so MALLOCNESIA_MAX_ALLOCS=0
 
-extern "C" {
-// NOLINTNEXTLINE(misc-use-internal-linkage) — weak override by mallocnesia.so
-__attribute__((weak)) void alloc_guard_start();
-// NOLINTNEXTLINE(misc-use-internal-linkage)
-__attribute__((weak)) void alloc_guard_end();
-}
+#include "support/alloc_guard_markers.hpp"
 //
 // T004 [US1] initiator witnesses (1-5):
 //   (1) ResetOnLogon_Initiator_ResetsAndEmits141

@@ -416,7 +416,10 @@ TEST(LoadHappyPath, Cov_AbsoluteDictPath) {
             << "key_file  = \"leaf_ecdsa_p256.key\"\n"
             << "ca_file   = \"ca.pem\"\n\n"
             << "[dictionary]\nkind = \"path\"\n"
-            << "path = \"" << abs_dict.string() << "\"\n\n"
+            // TOML *literal* string (single quotes): a Windows absolute path
+            // contains backslashes (C:\...\FIX44.xml) that a basic (double-
+            // quoted) string would parse as escape sequences ('\a', '\U', ...).
+            << "path = '" << abs_dict.string() << "'\n\n"
             << "[[session]]\n"
             << "sender_comp_id = \"CLIENT1\"\n"
             << "target_comp_id = \"SERVER1\"\n"

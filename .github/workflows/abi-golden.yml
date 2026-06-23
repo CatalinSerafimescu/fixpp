@@ -1,0 +1,140 @@
+name: ABI golden — C-ABI symbol-set drift (per-PR)
+
+# The C-ABI golden gate: verifies the exported fixpp_* C-ABI symbol set has not
+# drifted (a new or removed C-ABI function fails fast). A pure-Linux nm check —
+# nothing toolchain/Windows-specific.
+#
+# NOTE — was an abidiff layout gate; replaced with an nm symbol-set check
+# 2026-06-22. The release fixpp_capi.a has no debug info, so abidiff only ever
+# reported the symbol set ("…not referenced by debug info"), AND libabigail 2.4.0
+# (ubuntu-24.04 apt) asserts/core-dumps on debug-info-less archives. nm gives the
+# same check without the version fragility. True layout/type diffing (abidiff +
+# -g + a pinned non-asserting libabigail) is the Phase-5 upgrade when the C-ABI
+# surface is built out (CA-001..010); the abidiff suppr/golden/baseline files are
+# retained as that hook. See remaining-work/ci-windows-macos.md + c-abi.md.
+#
+# Runs on EVERY PR + push:main so C-ABI drift fails fast — important now that the
+# C ABI is a growing v1.0 surface (Phase 5). Moved out of tier2.yml (Windows
+# on-demand) 2026-06-22: it had nothing to do with Windows, and being gated
+# behind run-tier2 meant it only ran when someone triggered Windows. tier1.yml
+# is fully gated behind run-tier1, so a dedicated per-PR workflow is its right
+# home (not an ungated job wedged into the gated Tier-1 matrix).
+#
+# OTel-OFF: fixpp_capi's golden symbols are OTel-independent, so this keeps the
+# per-PR check fast (no protobuf/OTel build). The explicit linux-clang-release
+# profile (clang-22, cppstd=23) is REQUIRED — the previous --profile=default
+# resolved to the runner's clang-18 lacking C++23 std::expected and broke the
+# codegen bootstrap.
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    types: [opened, reopened, synchronize]
+    branches: ["**"]
+  workflow_dispatch:
+
+concurrency:
+  group: abi-golden-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  CONAN_HOME: ~/.conan2
+
+jobs:
+  abidiff:
+    name: "ABI golden — fixpp_decimal_t"
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Clang 22 (apt.llvm.org) + GCC 13 + Ninja
+        run: |
+          # Clang 22 matches the dev toolchain + the linux-clang-release profile.
+          # llvm.sh installs versioned binaries (clang-22) but NOT the unversioned
+          # clang/clang++ paths — the preset uses unversioned clang++, which would
+          # otherwise resolve to the runner's pre-installed clang-18 (missing C++23
+          # std::expected in its visible libstdc++ headers — the exact failure this
+          # gate hit when it ran under --profile=default).
+          wget -O /tmp/llvm.sh https://apt.llvm.org/llvm.sh
+          chmod +x /tmp/llvm.sh
+          sudo /tmp/llvm.sh 22 all
+          CLANG_BIN=$(ls /usr/bin/clang++-* 2>/dev/null | grep -oE '/usr/bin/clang\+\+-[0-9]+$' | sort -V | tail -1)
+          CLANG_VER=$(echo "$CLANG_BIN" | grep -oE '[0-9]+$')
+          test -n "$CLANG_VER" || { echo "::error::No clang-* installed by llvm.sh"; exit 1; }
+          sudo ln -sf /usr/bin/clang-$CLANG_VER   /usr/bin/clang
+          sudo ln -sf /usr/bin/clang++-$CLANG_VER /usr/bin/clang++
+          clang++ --version
+          sudo apt-get install -y --no-install-recommends \
+            gcc-13 g++-13 \
+            ninja-build \
+            python3-pip \
+            pipx
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install Conan
+        run: |
+          pipx install conan
+          conan --version
+
+      - name: Initialize Conan default profile
+        run: conan profile detect --force
+
+      - name: Teach Conan about Clang 22
+        run: |
+          mkdir -p ~/.conan2
+          cat > ~/.conan2/settings_user.yml <<'EOF'
+          compiler:
+            clang:
+              version: ["19", "20", "21", "22", "23"]
+          EOF
+
+      - name: Cache Conan packages
+        uses: actions/cache@v5
+        with:
+          path: ~/.conan2/p
+          key: conan-abi-golden-${{ hashFiles('conanfile.py', 'conan/profiles/linux-clang-release') }}
+          restore-keys: |
+            conan-abi-golden-
+
+      - name: Conan install (Release, OTel-OFF)
+        run: |
+          conan install . \
+            -pr conan/profiles/linux-clang-release \
+            -o 'fixpp/*:with_otel=False' \
+            --build=missing \
+            -of build/linux-clang-release
+
+      - name: Configure (Release, OTel-OFF)
+        run: cmake --preset linux-clang-release -DFIXPP_BUILD_OTEL=OFF
+
+      - name: Build fixpp_capi
+        run: cmake --build --preset linux-clang-release --target fixpp_capi
+
+      - name: Check C-ABI exported symbol set against golden
+        run: |
+          # nm symbol-set gate (replaces the former abidiff gate). abidiff was
+          # fundamentally broken here: the release fixpp_capi.a has NO debug info,
+          # so abidiff only ever reported the symbol set anyway ("…not referenced
+          # by debug info") — and libabigail 2.4.0 (ubuntu-24.04 apt) *asserts and
+          # core-dumps* on debug-info-less archives (bare `abidiff a a` aborts).
+          # nm gives exactly what this gate actually checks (the exported fixpp_*
+          # C-ABI surface) with no libabigail version fragility. True layout/type
+          # diffing (abidiff + -g + a pinned non-asserting libabigail) is the right
+          # upgrade once the C-ABI surface is built out in Phase 5 (CA-001..010) —
+          # tests/abi/{abidiff.suppr,golden/fixpp_decimal_t.abidiff,baseline/} are
+          # kept as the hook for that. mirrors src/capi/fixpp_capi.map (global:
+          # fixpp_*; local: *) so a new/removed exported C-ABI function fails fast.
+          nm --defined-only --extern-only \
+            build/linux-clang-release/lib/libfixpp_capi.a \
+            | awk '{print $NF}' | grep -E '^fixpp_' | sort -u > /tmp/capi_symbols.txt
+          echo "=== exported C-ABI symbols (current build) ==="; cat /tmp/capi_symbols.txt
+          if ! diff -u tests/abi/golden/fixpp_capi_symbols.txt /tmp/capi_symbols.txt; then
+            echo "::error::C-ABI exported symbol set drifted from golden."
+            echo "If intentional (new/removed C-ABI function), update tests/abi/golden/fixpp_capi_symbols.txt."
+            exit 1
+          fi
+          echo "C-ABI symbol set matches golden."

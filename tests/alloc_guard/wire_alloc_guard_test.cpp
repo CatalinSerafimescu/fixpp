@@ -33,10 +33,7 @@ using fixpp::wire::Parser;
 using fixpp::wire::Writer;
 
 // mallocnesia replaces these weak no-ops with its interceptor scope markers.
-extern "C" {
-__attribute__((weak)) void alloc_guard_start();
-__attribute__((weak)) void alloc_guard_end();
-}
+#include "support/alloc_guard_markers.hpp"
 
 namespace {
 

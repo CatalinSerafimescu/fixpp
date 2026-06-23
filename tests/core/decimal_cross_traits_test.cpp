@@ -19,6 +19,14 @@ using fixpp::core::error;
 using fixpp::core::pod_decimal;
 
 // ── Inline wider-T for AC-X1/X2 tests ───────────────────────────────────────
+//
+// decimal_wide stores its mantissa as __int128, which MSVC x64 does NOT support
+// (no native 128-bit integer type). The wider-mantissa cross-traits machinery is
+// therefore exercised only on toolchains with __int128 (Linux/Clang/GCC); the X1,
+// X2 and X4 tests below are guarded out under MSVC. pod_decimal — the PRODUCTION
+// type — is fully covered on every platform by X3/X5/X6/X7 + the parse/same-type
+// tests, which do not depend on __int128.
+#ifndef _MSC_VER
 
 namespace fixpp::core::test {
 
@@ -84,6 +92,9 @@ struct decimal_traits<test::decimal_wide> {
 
 }  // namespace fixpp::core
 
+#endif  // !_MSC_VER (decimal_wide / __int128)
+
+#ifndef _MSC_VER
 // ── AC-X1: T≠U round-trip funnels through pod_decimal ───────────────────────
 // decimal<Wide>::to<pod_decimal>() then decimal<pod_decimal>::from<Wide>()
 // restores value for in-domain values. Exercises the wrapper methods end-to-end.
@@ -120,6 +131,7 @@ TEST(DecimalCrossTraits, X2_NarrowingPrecisionLoss) {
     // Wrapper must remap decimal_overflow → decimal_precision_loss (2a §6.4)
     EXPECT_EQ(r.error(), error::decimal_precision_loss);
 }
+#endif  // !_MSC_VER (X1/X2 use decimal_wide)
 
 // AC-X3: T==U if constexpr short-circuit — no funnel, no error
 // decimal<pod_decimal>::to<pod_decimal>() hits the is_same_v<T,U> branch and
@@ -151,6 +163,7 @@ TEST(DecimalCrossTraits, MockTraitsFromPodFail) {
 // AC-X4: from<U>() overflow remap — symmetric to X2 on the from<U>() wrapper.
 // decimal<pod_decimal>::from(decimal<Wide>) where Wide's to_pod returns
 // decimal_overflow must remap to decimal_precision_loss per 2a §6.4.
+#ifndef _MSC_VER  // decimal_wide / __int128 — see guard above
 TEST(DecimalCrossTraits, X4_FromOverflowRemap) {
     using Wide = fixpp::core::test::decimal_wide;
     static constexpr __int128 TOO_BIG = static_cast<__int128>(INT64_MAX) + 1;
@@ -161,6 +174,7 @@ TEST(DecimalCrossTraits, X4_FromOverflowRemap) {
     ASSERT_FALSE(r.has_value());
     EXPECT_EQ(r.error(), error::decimal_precision_loss);
 }
+#endif  // !_MSC_VER (X4 uses decimal_wide)
 
 // AC-X5: from<U>() target from_pod failure passes through raw error
 // (the second error branch in decimal<T>::from<U>()).

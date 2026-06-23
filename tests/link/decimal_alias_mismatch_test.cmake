@@ -22,6 +22,13 @@ if(NOT DEFINED FIXPP_LIB_DIR)
     message(FATAL_ERROR "FIXPP_LIB_DIR must be set to the build lib/ directory")
 endif()
 
+# Normalize native paths to CMake (forward-slash) form. On Windows the wrapper
+# passes backslash paths (e.g. D:\a\fixpp\fixpp); CMake otherwise parses "\a" as
+# an invalid string escape and the configure fails before the link is even
+# attempted (Seam #9 expects a *link* failure, not a configure failure).
+file(TO_CMAKE_PATH "${FIXPP_ROOT}" FIXPP_ROOT)
+file(TO_CMAKE_PATH "${FIXPP_LIB_DIR}" FIXPP_LIB_DIR)
+
 include_directories("${FIXPP_ROOT}/include")
 
 # Find the pre-built fixpp_core static library.

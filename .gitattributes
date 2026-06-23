@@ -1,0 +1,6 @@
+# Codegen golden fixtures are byte-compared against fixpp-codegen output, which
+# is always written with LF (main.cpp opens the output stream std::ios::binary).
+# Pin them to LF so a Windows checkout (core.autocrlf=true on the windows-latest
+# runners) does not CRLF-convert them and break the byte-exact determinism gate
+# (tests/codegen/determinism_test.cpp — DeterminismTest.GeneratedMatchesGolden).
+*.golden.hpp -text

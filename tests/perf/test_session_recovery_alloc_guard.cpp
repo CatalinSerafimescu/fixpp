@@ -57,13 +57,7 @@ using namespace std::chrono_literals;
 // ── mallocnesia weak-symbol hooks ─────────────────────────────────────────────
 // These are replaced by tools/mallocnesia/libmallocnesia.so via LD_PRELOAD.
 // Without the preload, the stubs are no-ops (alloc counting = 0 always).
-extern "C" {
-
-__attribute__((weak)) void alloc_guard_start();
-__attribute__((weak)) void alloc_guard_end();
-__attribute__((weak)) long alloc_guard_count();
-
-}  // extern "C"
+#include "support/alloc_guard_markers.hpp"
 
 // ── counting_resource — in-band PMR interceptor ───────────────────────────────
 

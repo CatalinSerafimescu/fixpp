@@ -45,6 +45,7 @@
 // [041-validation-gate-wiring; const §VIII.5; data-model E-4; SC-005]
 
 #include <gtest/gtest.h>
+#include "../support/msvc_debug_arena_skip.hpp"
 
 #include <array>
 #include <atomic>
@@ -68,10 +69,7 @@
 // declarations (no body) so they become PLT-routed dynamic symbols the
 // LD_PRELOAD interceptor can interpose; a local definition would bind
 // intra-executable and silently disable interception (item 13, 2026-06-19).
-extern "C" {
-__attribute__((weak)) void alloc_guard_start();
-__attribute__((weak)) void alloc_guard_end();
-}
+#include "support/alloc_guard_markers.hpp"
 
 // ── Sanitizer-detection guard ─────────────────────────────────────────────────
 //
@@ -250,6 +248,7 @@ std::vector<std::byte> make_heartbeat_frame(std::string_view begin_string, std::
 //   (operator new) in the measured window → mallocnesia intercepts it → test
 //   fails.  The synchronous form eliminates this allocation.
 TEST(ValidateGateAllocGuard, HotPathNoGlobalHeapAlloc) {
+    FIXPP_SKIP_ON_MSVC_DEBUG_ARENA();
     // ── Build dictionary + validator BEFORE the guard markers ─────────────────
     auto dict_ptr = fixpp::test_support::make_validation_test_dictionary();
     ASSERT_NE(dict_ptr, nullptr) << "dictionary build failed";
@@ -349,6 +348,7 @@ TEST(ValidateGateAllocGuard, HotPathNoGlobalHeapAlloc) {
 //
 // [gate-b/r1 FIX-1 witness; const §VIII.5 / §XV.1; P3 fold-in]
 TEST(ValidateGateAllocGuard, LongMsgTypeNoGlobalHeapAlloc) {
+    FIXPP_SKIP_ON_MSVC_DEBUG_ARENA();
     // 31-char MsgType: exceeds SSO on libstdc++ (~15) and libc++ (~22).
     // "CustomAppMessageTypeXYZ12345678" is exactly 31 chars.
     constexpr std::string_view kLongMsgType = "CustomAppMessageTypeXYZ12345678";

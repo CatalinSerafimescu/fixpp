@@ -222,8 +222,15 @@ static asio::awaitable<void> run_server_driver(fixpp::transport::test::LoopbackT
             received.insert(received.end(), buf.begin(), buf.begin() + n);
 
             // Check for "35=A" in received bytes (FIX Logon MsgType).
-            auto it = std::search(received.begin(), received.end(), (const std::byte*)"35=A",
-                                  (const std::byte*)"35=A" + 4);
+            // The needle's begin and end MUST point into the SAME array: two
+            // distinct `"35=A"` literals are not guaranteed to be pooled (MSVC
+            // debug keeps them separate), so `(const std::byte*)"35=A"` and a
+            // second `(const std::byte*)"35=A" + 4` would be pointers into
+            // different objects → a transposed/invalid range (UB; MSVC debug's
+            // _Adl_verify_range aborts). Use one named array for both ends.
+            static constexpr char kLogonMsgType[] = "35=A";
+            const auto* needle = reinterpret_cast<const std::byte*>(kLogonMsgType);
+            auto it = std::search(received.begin(), received.end(), needle, needle + 4);
             if (it != received.end()) {
                 server_received_logon.store(true, std::memory_order_release);
                 break;

@@ -181,7 +181,7 @@ protected:
             pool_->stop();
             pool_->join();
         }
-        fs::remove_all(dir_);
+        fixpp::store_test::remove_store_dir(dir_);
     }
 
     // Open a FileStore via the factory on the strand. Returns nullptr on failure.

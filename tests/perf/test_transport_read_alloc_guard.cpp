@@ -39,12 +39,7 @@
 // Without LD_PRELOAD the stubs are no-ops; WITH LD_PRELOAD the .so replaces them.
 // ─────────────────────────────────────────────────────────────────────────────
 
-extern "C" {
-// Weak symbols replaced by libmallocnesia.so at runtime.
-[[gnu::weak]] void alloc_guard_start();
-[[gnu::weak]] void alloc_guard_end();
-[[gnu::weak]] long alloc_guard_global_count();
-}
+#include "support/alloc_guard_markers.hpp"
 
 namespace {
 

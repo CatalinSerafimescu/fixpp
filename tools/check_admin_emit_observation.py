@@ -205,7 +205,7 @@ def main() -> int:
         return 1
 
     print(
-        f"[check_admin_emit_observation] OK — all builder→fire_to_admin_/toApp→store_then_emit "
+        f"[check_admin_emit_observation] OK - all builder->fire_to_admin_/toApp->store_then_emit "
         f"chains verified in {target.name} (SC-002 gate PASS)."
     )
     return 0

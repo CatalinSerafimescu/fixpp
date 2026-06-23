@@ -11,11 +11,17 @@ NEVER interpose it: the counting window is never armed and the gate is silently
 false-green. (That was exactly the repo-wide bug item 13 fixed.)
 
 This check fails the build if any test/bench source reintroduces a *bodied*
-definition of an `alloc_guard_start` / `alloc_guard_end` marker.
+definition of an `alloc_guard_start` / `alloc_guard_end` marker ON THE POSIX PATH.
 
     Allowed   : __attribute__((weak)) void alloc_guard_start();   (undefined decl)
                 if (alloc_guard_start) alloc_guard_start();        (null-checked call)
     Forbidden : __attribute__((weak)) void alloc_guard_start() {}  (local definition)
+
+Windows exception: there is no LD_PRELOAD on Windows, so the cross-platform marker
+header (tests/support/alloc_guard_markers.hpp) legitimately defines inline no-op
+bodies on the `#ifdef _WIN32` branch. The scan is preprocessor-aware about `_WIN32`
+guards and only flags definitions reachable on the POSIX (non-_WIN32) path — so a
+bodied def in a `#else` / unguarded region is still caught, anywhere in the tree.
 
 Reference correct pattern: tests/perf/test_transport_read_alloc_guard.cpp.
 The only legitimate DEFINITION of these symbols is the preload itself,
@@ -37,6 +43,48 @@ EXTS = {".cpp", ".cc", ".cxx", ".hpp", ".hh", ".h"}
 DEFN = re.compile(r"\bvoid\s+alloc_guard_(?:start|end)\s*\(\s*(?:void\s*)?\)\s*\{")
 
 
+def _classify_open(directive: str):
+    """Classify a #if/#ifdef/#ifndef line as (is_win32, posix_reachable_in_this_branch).
+
+    Non-_WIN32 conditionals are treated as POSIX-reachable (conservative: we never
+    suppress a finding behind an unrelated guard)."""
+    s = directive.strip()
+    if re.match(r"#\s*ifdef\s+_WIN32\b", s):
+        return True, False
+    if re.match(r"#\s*ifndef\s+_WIN32\b", s):
+        return True, True
+    m = re.match(r"#\s*if\b(.*)", s)
+    if m and "_WIN32" in m.group(1):
+        negated = bool(re.search(r"!\s*defined\s*\(\s*_WIN32", m.group(1)))
+        return True, negated
+    return False, True
+
+
+def _find_offenders(text: str, relpath) -> list:
+    """Return DEFN matches that are reachable on the POSIX (non-_WIN32) path."""
+    offenders = []
+    stack = []  # frames: {"is_win32": bool, "cur": bool (POSIX-reachable here)}
+    for i, line in enumerate(text.splitlines(), start=1):
+        s = line.lstrip()
+        if s.startswith("#"):
+            if re.match(r"#\s*(ifdef|ifndef|if)\b", s):
+                is_win32, reachable = _classify_open(s)
+                stack.append({"is_win32": is_win32, "cur": reachable})
+            elif re.match(r"#\s*elif\b", s) and stack:
+                stack[-1]["cur"] = True  # conservative after an elif
+            elif re.match(r"#\s*else\b", s) and stack:
+                top = stack[-1]
+                top["cur"] = (not top["cur"]) if top["is_win32"] else True
+            elif re.match(r"#\s*endif\b", s) and stack:
+                stack.pop()
+            continue
+        if all(f["cur"] for f in stack):
+            m = DEFN.search(line)
+            if m:
+                offenders.append((relpath, i, m.group(0).strip()))
+    return offenders
+
+
 def main() -> int:
     offenders = []
     for d in SCAN_DIRS:
@@ -50,9 +98,7 @@ def main() -> int:
                 text = p.read_text(encoding="utf-8", errors="replace")
             except OSError:
                 continue
-            for m in DEFN.finditer(text):
-                line = text.count("\n", 0, m.start()) + 1
-                offenders.append((p.relative_to(ROOT), line, m.group(0).strip()))
+            offenders.extend(_find_offenders(text, p.relative_to(ROOT)))
 
     if offenders:
         print("[alloc-guard-markers] FAIL: bodied alloc_guard_* definition(s) found.")

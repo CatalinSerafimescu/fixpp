@@ -268,9 +268,14 @@ struct file_cert_source::Impl {
                 }
                 // NOLINTBEGIN(cppcoreguidelines-pro-type-const-cast) -- OpenSSL PEM_read API needs
                 // void* userdata
-                key = EvpKeyPtr{PEM_read_bio_PrivateKey(
-                    bio.get(), nullptr, (passwd_ptr != nullptr) ? pem_passwd_cb : nullptr,
-                    const_cast<std::string*>(passwd_ptr))};
+                // ALWAYS pass our own callback (never nullptr): a null pem callback makes
+                // OpenSSL fall back to PEM_def_callback, which PROMPTS ON THE CONSOLE for a
+                // passphrase when the key is encrypted — blocking forever in a headless
+                // process (observed as a Windows CI hang). pem_passwd_cb returns 0 when
+                // userdata is null (no password set), so an encrypted key fails closed
+                // ("failed to parse private key") instead of prompting.
+                key = EvpKeyPtr{PEM_read_bio_PrivateKey(bio.get(), nullptr, pem_passwd_cb,
+                                                        const_cast<std::string*>(passwd_ptr))};
                 // NOLINTEND(cppcoreguidelines-pro-type-const-cast)
             } else {
                 // DER key

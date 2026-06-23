@@ -19,24 +19,33 @@
 // the port is actually connectable (a non-blocking TCP connect with a short
 // deadline). Either check failing ⇒ unavailable + reason.
 //
-// Header-only + self-contained: depends only on <gtest/gtest.h> + POSIX sockets.
-// No fixpp production includes, no asio — the probe must be cheap and run before
-// any Engine is constructed.
+// Header-only + self-contained: depends only on <gtest/gtest.h> + the platform
+// sockets API (POSIX sockets / winsock). No fixpp production includes, no asio —
+// the probe must be cheap and run before any Engine is constructed.
 #pragma once
 
 #include <gtest/gtest.h>
 
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+// Self-contained linkage: every includer auto-links winsock without each test
+// target naming ws2_32 in CMake (matches this header's no-CMake-dependency design).
+#pragma comment(lib, "ws2_32.lib")
+#else
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
 
 #include <arpa/inet.h>
+#include <fcntl.h>
+#endif
+
 #include <cerrno>
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
-#include <fcntl.h>
 #include <string>
 #include <string_view>
 
@@ -63,10 +72,66 @@ inline std::string env_token(std::string_view counterparty) {
     return t;
 }
 
+#ifdef _WIN32
+// Ensure WSAStartup has run once per process before any winsock call. The probe
+// runs in single-threaded test setup; function-local-static init is thread-safe.
+inline void ensure_winsock_started() {
+    static const bool started = [] {
+        WSADATA wsa_data{};
+        return ::WSAStartup(MAKEWORD(2, 2), &wsa_data) == 0;
+    }();
+    (void)started;
+}
+#endif
+
 // Best-effort non-blocking TCP connect to host:port with a deadline. Returns true
 // iff the connection establishes within the timeout (i.e. something is listening).
 inline bool tcp_port_connectable(const std::string& host, std::uint16_t port,
                                  std::chrono::milliseconds timeout) {
+#ifdef _WIN32
+    ensure_winsock_started();
+    SOCKET fd = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (fd == INVALID_SOCKET) {
+        return false;
+    }
+    // Put the socket in non-blocking mode so connect() does not hang.
+    u_long nonblocking = 1;
+    ::ioctlsocket(fd, FIONBIO, &nonblocking);
+
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_port = ::htons(port);
+    if (::inet_pton(AF_INET, host.c_str(), &addr.sin_addr) != 1) {
+        ::closesocket(fd);
+        return false;
+    }
+
+    int rc = ::connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr));
+    bool ok = false;
+    if (rc == 0) {
+        ok = true;  // connected immediately (loopback fast path)
+    } else if (::WSAGetLastError() == WSAEWOULDBLOCK) {
+        // Wait for writability (connect completion) up to the deadline.
+        fd_set wset;
+        FD_ZERO(&wset);
+        FD_SET(fd, &wset);
+        timeval tv{};
+        tv.tv_sec = static_cast<long>(timeout.count() / 1000);
+        tv.tv_usec = static_cast<long>((timeout.count() % 1000) * 1000);
+        // On winsock the first nfds argument is ignored.
+        if (::select(0, nullptr, &wset, nullptr, &tv) > 0) {
+            int so_error = 0;
+            int len = sizeof(so_error);
+            if (::getsockopt(fd, SOL_SOCKET, SO_ERROR, reinterpret_cast<char*>(&so_error),
+                             &len) == 0 &&
+                so_error == 0) {
+                ok = true;
+            }
+        }
+    }
+    ::closesocket(fd);
+    return ok;
+#else
     int fd = ::socket(AF_INET, SOCK_STREAM, 0);
     if (fd < 0) {
         return false;
@@ -105,6 +170,7 @@ inline bool tcp_port_connectable(const std::string& host, std::uint16_t port,
     }
     ::close(fd);
     return ok;
+#endif
 }
 
 // Probe a counterparty by its token (e.g. "quickfix-cpp"). Reads

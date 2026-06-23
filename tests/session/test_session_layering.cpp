@@ -31,13 +31,17 @@
 //     T060 assertion.
 
 #include <gtest/gtest.h>
-#include <unistd.h>
+#ifndef _WIN32
+#include <unistd.h>  // mkstemp/close — only the POSIX nm sub-test uses these
+#endif
 
 #include <asio/awaitable.hpp>
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
 #include <fixpp/session/seqnum_manager.hpp>
 #include <fixpp/session/session.hpp>
+#include <fstream>
 #include <span>
 #include <string>
 #include <type_traits>
@@ -102,6 +106,12 @@ static_assert(noexcept(std::declval<SeqnumManager&>().assign_outbound()),
 #error "FIXPP_TEST_BINARY_DIR must be defined (set by tests/session/CMakeLists.txt)"
 #endif
 
+// WAIVED on Windows: this gate shells out to `nm` (GNU binutils) over the static
+// archive and matches the ELF symbol-table format. MSVC ships a different archive
+// format and decorates symbols differently; the C-ABI-symbol property (005 adds
+// ZERO extern-C fixpp_session_* symbols) is a Linux-artifact ABI check already
+// gated in Linux CI. Cross-platform sign-off: 2026-06-22.
+#ifndef _WIN32
 TEST(SessionLayering, NoExternCSessionSymbolsInArchive) {
     const std::string lib_path = std::string{FIXPP_TEST_BINARY_DIR} + "/lib/libfixpp_session.a";
 
@@ -133,8 +143,9 @@ TEST(SessionLayering, NoExternCSessionSymbolsInArchive) {
                           << "fixpp_session_* symbol(s); 005 must add ZERO C-ABI symbols "
                           << "([const §X.2] / FR-015) — those belong to 2i.";
 }
+#endif  // !_WIN32 (nm symbol gate is Linux-binutils-specific)
 
-// ── (3) `<fix/c_api.h>` no-leakage grep ─────────────────────────────────────
+// ── (3) `<fix/c_api.h>` no-leakage source scan ──────────────────────────────
 //
 // The public C-ABI umbrella header and its subtree must contain zero
 // references to any `fixpp::session::` type — no C++ leakage through the C
@@ -145,22 +156,40 @@ TEST(SessionLayering, NoExternCSessionSymbolsInArchive) {
 #endif
 
 TEST(SessionLayering, CApiHeadersHaveNoSessionTypeReferences) {
-    const std::string inc_root = std::string{FIXPP_TEST_SOURCE_DIR} + "/include/fix";
+    namespace fs = std::filesystem;
+    const fs::path inc_root = std::string{FIXPP_TEST_SOURCE_DIR} + "/include/fix";
 
-    const std::string cmd = "grep -rEl 'fixpp::session|fixpp_session_' '" + inc_root +
-                            "' "
-                            "| wc -l";
+    // Portable recursive scan (mirrors `grep -rEl 'fixpp::session|fixpp_session_'
+    // | wc -l`): count FILES containing either token. No shell → runs everywhere.
+    int matches = 0;
+    std::string offending;
+    std::error_code ec;
+    if (fs::exists(inc_root, ec)) {
+        for (fs::recursive_directory_iterator it{inc_root, ec}, end; it != end && !ec;
+             it.increment(ec)) {
+            if (!it->is_regular_file(ec)) continue;
+            std::ifstream ifs(it->path());
+            if (!ifs) continue;
+            std::string line;
+            bool hit = false;
+            while (std::getline(ifs, line)) {
+                if (line.find("fixpp::session") != std::string::npos ||
+                    line.find("fixpp_session_") != std::string::npos) {
+                    hit = true;
+                    break;
+                }
+            }
+            if (hit) {
+                ++matches;
+                offending += "  " + it->path().string() + "\n";
+            }
+        }
+    }
 
-    FILE* pipe = ::popen(cmd.c_str(), "r");
-    ASSERT_NE(pipe, nullptr) << "popen(grep) failed";
-    int matches = -1;
-    (void)std::fscanf(pipe, "%d", &matches);
-    const int rc = ::pclose(pipe);
-
-    ASSERT_EQ(WEXITSTATUS(rc), 0) << "grep pipeline exited non-zero";
     EXPECT_EQ(matches, 0) << "<fix/c_api.h> subtree contains " << matches
                           << " file(s) referencing fixpp::session — 005 ships no C-ABI "
-                          << "surface ([const §X.2] / FR-015); the 2i feature owns it.";
+                          << "surface ([const §X.2] / FR-015); the 2i feature owns it.\n"
+                          << offending;
 }
 
 }  // namespace

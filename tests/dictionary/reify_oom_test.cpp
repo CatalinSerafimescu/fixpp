@@ -18,6 +18,7 @@
 //
 // Oracle: data-model Entity 4 (PMR accounting); spec AC-R7 / seam #7/#16.
 #include <gtest/gtest.h>
+#include "../support/msvc_debug_arena_skip.hpp"
 
 #include <array>
 #include <cstddef>
@@ -115,6 +116,7 @@ TEST(ReifyOomTest, AllocBudgetAtMostFour) {
 // is the PMR allocation. fail-on-call-1 fires there → bad_alloc caught by the
 // inline try/catch → dict_reify_oom (not propagated).
 TEST(ReifyOomTest, OomInjectionOnFirstAllocYieldsOomError) {
+    FIXPP_SKIP_ON_MSVC_DEBUG_ARENA();
     auto frame = fixpp::test_support::make_nos_frame();
     std::pmr::monotonic_buffer_resource frame_mr;
     fixpp::wire::pmr_carry_buffer carry{frame.size(), &frame_mr};
@@ -152,6 +154,7 @@ TEST(ReifyOomTest, OomInjectionOnFirstAllocYieldsOomError) {
 // std::terminate out of the noexcept MessageView/OffsetTable ctor. This is
 // the OOM-on-first-view() path that from_view's own try/catch does not cover.
 TEST(ReifyOomTest, FirstViewRebuildOomDegradesNotTerminate) {
+    FIXPP_SKIP_ON_MSVC_DEBUG_ARENA();
     auto frame = fixpp::test_support::make_nos_frame();
     std::pmr::monotonic_buffer_resource frame_mr;
     fixpp::wire::pmr_carry_buffer carry{frame.size(), &frame_mr};
@@ -274,6 +277,7 @@ TEST(ReifyOomTest, DecimalAccessorWithDefaultTraitIsZeroAlloc) {
 // Error slot shape — dict_reify_oom is slot 25 (data-model "Error mapping")
 // ─────────────────────────────────────────────────────────────────
 TEST(ReifyOomTest, OomErrorSlot) {
+    FIXPP_SKIP_ON_MSVC_DEBUG_ARENA();
     static_assert(static_cast<std::uint8_t>(fixpp::core::error::dict_reify_oom) == 25,
                   "dict_reify_oom must be slot 25 per data-model Error mapping");
     SUCCEED();

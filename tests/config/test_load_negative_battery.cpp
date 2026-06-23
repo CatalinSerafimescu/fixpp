@@ -43,6 +43,10 @@
 #include <string>
 #include <utility>
 
+// On Windows, route CRT abort()/assert() to stderr instead of a modal dialog so
+// the "...NoTerminate" gates below fail fast instead of hanging headless CI.
+#include "../support/win_crt_no_dialog.hpp"
+
 #ifndef FIXPP_CONFIG_FIXTURE_DIR
 #error "FIXPP_CONFIG_FIXTURE_DIR must be set by CMake"
 #endif

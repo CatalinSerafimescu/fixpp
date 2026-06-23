@@ -19,7 +19,9 @@
 //   expected_t::unexpected{store_factory_failed} at config-load time.
 
 #include <gtest/gtest.h>
+#ifndef _WIN32
 #include <unistd.h>  // pathconf, _PC_NAME_MAX
+#endif
 
 #include <array>
 #include <asio/co_spawn.hpp>
@@ -38,6 +40,8 @@
 #include <fstream>
 #include <string>
 #include <vector>
+
+#include "_fixtures_/store_temp_dir.hpp"
 
 namespace {
 
@@ -152,7 +156,8 @@ TEST(CfgLoaderHappyPath, ParsesDirectoryAndRoundTripsFrame) {
     EXPECT_EQ(visitor.frames[0], frame_bytes) << "Round-trip frame mismatch: byte content differs";
 
     pool.join();
-    fs::remove_all(scratch);
+    store_result.value().reset();
+    fixpp::store_test::remove_store_dir(scratch);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -186,7 +191,7 @@ void assert_compid_rejected(const std::string& sender_compid, const char* suffix
         EXPECT_EQ(result.error(), error::store_factory_failed)
             << label << ": expected error code store_factory_failed (slot 61).";
     }
-    fs::remove_all(scratch);
+    fixpp::store_test::remove_store_dir(scratch);
 }
 
 // Sub-case 1: path traversal in SenderCompID
@@ -219,7 +224,7 @@ TEST(CfgLoaderDefenseInDepth, EmptySenderCompIDRejected) {
     if (!result.has_value()) {
         EXPECT_EQ(result.error(), error::store_factory_failed);
     }
-    fs::remove_all(scratch);
+    fixpp::store_test::remove_store_dir(scratch);
 }
 
 // Sub-case 4: control character in SenderCompID (\x01abc)
@@ -245,7 +250,7 @@ TEST(CfgLoaderDefenseInDepth, ControlCharSenderRejected) {
     if (!result.has_value()) {
         EXPECT_EQ(result.error(), error::store_factory_failed);
     }
-    fs::remove_all(scratch);
+    fixpp::store_test::remove_store_dir(scratch);
 }
 
 // Sub-case 5: SenderCompID exceeding NAME_MAX
@@ -253,8 +258,12 @@ TEST(CfgLoaderDefenseInDepth, NameMaxExcessSenderRejected) {
     auto scratch = make_scratch_dir("namemax_sender");
 
     // Compute NAME_MAX for the scratch dir.
+#ifdef _WIN32
+    long name_max = 255;  // NTFS/exFAT max filename component; no pathconf on Windows
+#else
     long name_max = pathconf(scratch.c_str(), _PC_NAME_MAX);
     if (name_max < 0) name_max = 255;
+#endif
 
     // The composed filename is sender + "__" + "TARGET" + ".log" (12 extra chars).
     // Build a sender that makes the composed filename exceed NAME_MAX.
@@ -281,7 +290,7 @@ TEST(CfgLoaderDefenseInDepth, NameMaxExcessSenderRejected) {
     if (!result.has_value()) {
         EXPECT_EQ(result.error(), error::store_factory_failed);
     }
-    fs::remove_all(scratch);
+    fixpp::store_test::remove_store_dir(scratch);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -301,7 +310,7 @@ TEST(CfgLoaderEdgeCases, MissingFileStorePathRejected) {
     if (!result.has_value()) {
         EXPECT_EQ(result.error(), error::store_factory_failed);
     }
-    fs::remove_all(scratch);
+    fixpp::store_test::remove_store_dir(scratch);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -346,7 +355,7 @@ TEST(CfgLoaderCoverageUplift, SessionSectionOverridesDefault) {
     auto result = cfg_to_file_store_factory(cfg_path);
     EXPECT_TRUE(result.has_value()) << "[SESSION] override: expected success but got error: "
                                     << (!result.has_value() ? static_cast<int>(result.error()) : 0);
-    fs::remove_all(scratch);
+    fixpp::store_test::remove_store_dir(scratch);
 }
 
 // F2: [session] (lowercase) → case-insensitive fallback path.
@@ -366,7 +375,7 @@ TEST(CfgLoaderCoverageUplift, LowercaseSessionSectionRecognised) {
     EXPECT_TRUE(result.has_value())
         << "[default] (lowercase): expected success (case-insensitive) but got error: "
         << (!result.has_value() ? static_cast<int>(result.error()) : 0);
-    fs::remove_all(scratch);
+    fixpp::store_test::remove_store_dir(scratch);
 }
 
 // F3: [session] lowercase SESSION section overrides DEFAULT.
@@ -390,7 +399,7 @@ TEST(CfgLoaderCoverageUplift, LowercaseSessionOverrideRecognised) {
     EXPECT_TRUE(result.has_value())
         << "[session] lowercase override: expected success but got error: "
         << (!result.has_value() ? static_cast<int>(result.error()) : 0);
-    fs::remove_all(scratch);
+    fixpp::store_test::remove_store_dir(scratch);
 }
 
 // F4: Unknown section → keys inside it must be ignored; result depends
@@ -415,7 +424,7 @@ TEST(CfgLoaderCoverageUplift, UnknownSectionKeysIgnored) {
     EXPECT_TRUE(result.has_value())
         << "Unknown section keys ignored: expected success but got error: "
         << (!result.has_value() ? static_cast<int>(result.error()) : 0);
-    fs::remove_all(scratch);
+    fixpp::store_test::remove_store_dir(scratch);
 }
 
 // F5: Key without '=' → parser skips it via eq == npos branch (line 129).
@@ -436,7 +445,7 @@ TEST(CfgLoaderCoverageUplift, KeyWithoutEqualsIgnored) {
     EXPECT_TRUE(result.has_value())
         << "Key-without-equals ignored: expected success but got error: "
         << (!result.has_value() ? static_cast<int>(result.error()) : 0);
-    fs::remove_all(scratch);
+    fixpp::store_test::remove_store_dir(scratch);
 }
 
 // F6: Empty file → all keys missing → store_factory_failed.
@@ -449,7 +458,7 @@ TEST(CfgLoaderCoverageUplift, EmptyFileRejected) {
     if (!result.has_value()) {
         EXPECT_EQ(result.error(), error::store_factory_failed);
     }
-    fs::remove_all(scratch);
+    fixpp::store_test::remove_store_dir(scratch);
 }
 
 // F7: Comment-only file → no keys → store_factory_failed.
@@ -466,7 +475,7 @@ TEST(CfgLoaderCoverageUplift, CommentOnlyFileRejected) {
     if (!result.has_value()) {
         EXPECT_EQ(result.error(), error::store_factory_failed);
     }
-    fs::remove_all(scratch);
+    fixpp::store_test::remove_store_dir(scratch);
 }
 
 // F8: Missing SenderCompID → store_factory_failed.
@@ -485,7 +494,7 @@ TEST(CfgLoaderCoverageUplift, MissingSenderCompIDRejected) {
     if (!result.has_value()) {
         EXPECT_EQ(result.error(), error::store_factory_failed);
     }
-    fs::remove_all(scratch);
+    fixpp::store_test::remove_store_dir(scratch);
 }
 
 // F9: Missing TargetCompID → store_factory_failed.
@@ -504,7 +513,7 @@ TEST(CfgLoaderCoverageUplift, MissingTargetCompIDRejected) {
     if (!result.has_value()) {
         EXPECT_EQ(result.error(), error::store_factory_failed);
     }
-    fs::remove_all(scratch);
+    fixpp::store_test::remove_store_dir(scratch);
 }
 
 // F10: Whitespace-only FileStorePath value → trimmed to empty → store_factory_failed.
@@ -523,7 +532,7 @@ TEST(CfgLoaderCoverageUplift, WhitespaceOnlyFileStorePathRejected) {
     if (!result.has_value()) {
         EXPECT_EQ(result.error(), error::store_factory_failed);
     }
-    fs::remove_all(scratch);
+    fixpp::store_test::remove_store_dir(scratch);
 }
 
 // F11: Duplicate FileStorePath key — last value wins per QuickFIX convention
@@ -544,7 +553,7 @@ TEST(CfgLoaderCoverageUplift, DuplicateFileStorePathLastWins) {
     EXPECT_TRUE(result.has_value())
         << "Duplicate FileStorePath (last wins): expected success but got error: "
         << (!result.has_value() ? static_cast<int>(result.error()) : 0);
-    fs::remove_all(scratch);
+    fixpp::store_test::remove_store_dir(scratch);
 }
 
 // F12: Malformed section header (missing ']') → treated as Section::other
@@ -568,7 +577,7 @@ TEST(CfgLoaderCoverageUplift, MalformedSectionHeaderRejected) {
     if (!result.has_value()) {
         EXPECT_EQ(result.error(), error::store_factory_failed);
     }
-    fs::remove_all(scratch);
+    fixpp::store_test::remove_store_dir(scratch);
 }
 
 }  // namespace

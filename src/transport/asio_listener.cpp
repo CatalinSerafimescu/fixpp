@@ -79,9 +79,23 @@ asio_listener::asio_listener(asio::any_io_executor exec, Config cfg)
 
     acceptor_.open(bind_ep.protocol());
 
+#ifdef _WIN32
+    // Winsock divergence: SO_REUSEADDR on Windows lets a SECOND bind to the same
+    // addr+port SUCCEED (port hijacking) — the inverse of POSIX, where a second
+    // bind fails with EADDRINUSE. SO_EXCLUSIVEADDRUSE restores POSIX-like
+    // exclusivity (duplicate bind → WSAEADDRINUSE) while still permitting the
+    // same process to rebind after a clean restart. The two options are mutually
+    // exclusive on Windows, so we set this INSTEAD of reuse_address. Raw
+    // setsockopt (int value, char* cast) mirrors the SO_REUSEPORT call below and
+    // avoids pulling in <windows.h>.
+    const int exclusive = 1;
+    ::setsockopt(acceptor_.native_handle(), SOL_SOCKET, SO_EXCLUSIVEADDRUSE,
+                 reinterpret_cast<const char*>(&exclusive), sizeof(exclusive));
+#else
     if (cfg_.so_reuseaddr) {
         acceptor_.set_option(asio::socket_base::reuse_address{true});
     }
+#endif
 
 #ifdef SO_REUSEPORT
     if (cfg_.so_reuseport) {

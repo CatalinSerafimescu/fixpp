@@ -23,6 +23,7 @@
 #include <fixpp/core/decimal_alias.hpp>    // fixpp::decimal_t (2a/001 trait)
 #include <fixpp/core/decimal_helpers.hpp>  // core::detail::trap_throw (C1)
 #include <fixpp/core/error.hpp>
+#include <fixpp/core/pmr_arena_upstream.hpp>  // detail::arena_upstream (MSVC-debug proxy)
 #include <memory>
 #include <memory_resource>
 #include <span>
@@ -315,7 +316,16 @@ private : [[nodiscard]] std::span<const std::byte> field_bytes(std::uint16_t tag
     void const* opaque_dict_ = nullptr;
     classify_fn_t classify_fn_ = nullptr;
     // unk_items_: lazily built unknown-fields kv list in the per-message arena.
-    mutable std::pmr::vector<unknown_fields_view::kv> unk_items_{std::pmr::null_memory_resource()};
+    // An Index-mode ctor overrides this default with the real arena
+    // (`unk_items_{mr}`), but a default-constructed view and EVERY Iter-mode view
+    // fall through to this initializer. The default backing is arena_upstream()
+    // (null on release/Linux, new_delete under MSVC debug): MSVC's debug STL
+    // heap-allocates a _Container_proxy for this vector AT CONSTRUCTION, and
+    // null_memory_resource would throw bad_alloc there -> noexcept ctor ->
+    // std::terminate (a silent Windows-debug abort). unk_items_ is only ever
+    // *built* on the Index-mode unknown-fields path (which threads the real
+    // arena), so behaviour is unchanged on every lane.
+    mutable std::pmr::vector<unknown_fields_view::kv> unk_items_{::fixpp::detail::arena_upstream()};
     mutable bool unk_items_built_ = false;
 };
 
