@@ -20,18 +20,16 @@
 extern "C" {
 #endif
 
-/* ── fixpp_error_t forward declaration ──────────────────────────────────────── */
-typedef int fixpp_error_t;
-
-/* ── Provisional error codes (allocated 2026-05-12, owned by 2i) ─────────── */
-/* C-ABI error codes must be #define, not enum, to remain usable by pure-C consumers.
-   NOLINTBEGIN(cppcoreguidelines-macro-to-enum,modernize-macro-to-enum) */
-#define FIXPP_ERR_OK 0
-#define FIXPP_ERR_UNKNOWN 2
-#define FIXPP_ERR_BUFFER_TOO_SMALL 3
-#define FIXPP_ERR_DECIMAL_INVALID 10        /* provisional 2026-05-12 */
-#define FIXPP_ERR_DECIMAL_PRECISION_LOSS 11 /* provisional 2026-05-12 */
-/* NOLINTEND(cppcoreguidelines-macro-to-enum,modernize-macro-to-enum) */
+/* ── fixpp_error_t + error codes ─────────────────────────────────────────────
+   049 T012 (FR-011): the provisional `typedef int fixpp_error_t` and the
+   provisional error #defines (BUFFER_TOO_SMALL/DECIMAL_INVALID/DECIMAL_PRECISION_LOSS
+   at the old slots 3/10/11) are removed. fix/c_api/error.h is now the single
+   source for `fixpp_error_t` (int32_t) and the full master code layout — the
+   decimal codes live in their [800,899] block (DECIMAL_INVALID=800,
+   DECIMAL_PRECISION_LOSS=801; decimal_buffer_too_small reuses BUFFER_TOO_SMALL=6).
+   Codes are referenced by macro name everywhere, so the value change is
+   transparent to this header's consumers. */
+#include "fix/c_api/error.h"
 
 /* ── §5.1 Layout — frozen for FIXPP_C_ABI_VERSION_MAJOR == 1 [const §X.1] ─── */
 typedef struct fixpp_decimal {
@@ -45,28 +43,36 @@ typedef struct fixpp_decimal {
 
 /* ── §5.2 Boundary functions — verbatim from 2a-decimal.md v0.3 §5.2 ──────── */
 
-/* Thread-safe (no engine-global state, no allocation) [const §X.5] */
+/* No engine-global state, no allocation [const §X.5].
+   Reentrancy: thread-safe (049 T019 / [2i §4.10]). */
 fixpp_error_t fixpp_decimal_parse(const char* src, size_t src_len, fixpp_decimal_t* out);
 
+/* Writes only the caller-supplied dst buffer; no shared state.
+   Reentrancy: thread-safe. */
 fixpp_error_t fixpp_decimal_format(fixpp_decimal_t d, char* dst, size_t dst_cap, size_t* written);
 
-/* ASSUMES canonical domain (exponent ∈ [-38,0]). Returns -1/0/+1. */
+/* ASSUMES canonical domain (exponent ∈ [-38,0]). Returns -1/0/+1.
+   Reentrancy: thread-safe. */
 int fixpp_decimal_compare(fixpp_decimal_t a, fixpp_decimal_t b);
 
-/* Convenience equality. Returns 0/1. ASSUMES canonical domain. */
+/* Convenience equality. Returns 0/1. ASSUMES canonical domain.
+   Reentrancy: thread-safe. */
 int fixpp_decimal_equal(fixpp_decimal_t a, fixpp_decimal_t b);
 
-/* Zero-init helper for forward-compat with future _reserved semantics. */
+/* Zero-init helper for forward-compat with future _reserved semantics.
+   Reentrancy: thread-safe. */
 void fixpp_decimal_init(fixpp_decimal_t* out);
 
 /* ── _checked siblings — ratified 2026-05-12 (AC-C6, research.md D-12) ────── */
 
 /* Validates exponent ∈ [-38,0] on both inputs. On out-of-domain returns
-   FIXPP_ERR_DECIMAL_INVALID; on in-domain writes ordering to *out_ordering. */
+   FIXPP_ERR_DECIMAL_INVALID; on in-domain writes ordering to *out_ordering.
+   Reentrancy: thread-safe. */
 fixpp_error_t fixpp_decimal_compare_checked(fixpp_decimal_t a, fixpp_decimal_t b,
                                             int* out_ordering);
 
-/* Same validation as _compare_checked. On in-domain writes 0/1 to *out_equal. */
+/* Same validation as _compare_checked. On in-domain writes 0/1 to *out_equal.
+   Reentrancy: thread-safe. */
 fixpp_error_t fixpp_decimal_equal_checked(fixpp_decimal_t a, fixpp_decimal_t b, int* out_equal);
 
 #ifdef __cplusplus

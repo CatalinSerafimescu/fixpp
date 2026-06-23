@@ -759,3 +759,14 @@ Items that are normative in the spec but explicitly deferred from fixpp v1.0. Th
 > - `include/fixpp/config/config_bundle.hpp` — one additive `shared_ptr<fixpp::log::Logger>` field.
 >
 > **Coverage note.** Synchronous cold-path (the constructed `Logger`'s own threads are the inherited 017 contract, not new loader concurrency — see L-045-1). Coverage gate (`[const §IX.1]`, per-file DA/BRDA, `linux-clang-coverage` preset) at `/speckit-verify`. Build-conditional arms (syslog-unavailable `#else`, OTLP-unavailable `#else`, the syslog build-undefined-`LOG_*` arm) are unreachable on a single preset and assessed per the templated-header DA/BRDA basis, not the aggregate. Design choice (per the 044 PATH-B precedent): pure config translation of the existing public log value-types — no new logging machinery.
+
+## 049-c-abi-handles-errors — C ABI Feature A (CA-001..004, 2026-06-23)
+
+> **New/changed source (the coverage surface):**
+> - `src/capi/error.cpp` (NEW) — `fixpp_capi::detail::translate()` (total 116-arm switch, no `default`), `translate_for_consumer()` (forward-compat downgrade), `fixpp_strerror()` (static zero-alloc string literals). The 116-arm switch is the coverage risk → driven by the enumerating correctness oracle (`tests/capi/error_surface_test.cpp` against `tests/capi/expected_error_map.csv`, mutation-tested), with explicit override-group (`session_*`/`log_*`/`otel_*`/`app_*`/`out_of_memory` → `UNKNOWN`) assertions.
+> - `src/capi/version.cpp` (NEW) — `fixpp_version()` / `fixpp_library_version()` (value-typed PoD, zero-alloc).
+> - `include/fix/c_api/{error,version,handles,export}.h` (NEW) — C-clean public headers (typedefs/macros/decls; passive — no executable coverage surface).
+> - `src/capi/decimal.cpp` — local `map_error()` replaced by a thin forwarder to the shared `translate()` (renumber lockstep, FR-011).
+> - `include/fix/c_api/decimal.h`, `include/fix/c_api.h` — provisional codes removed → `#include error.h`; umbrella aggregates the split headers + drops the stale `FIXPP_C_ABI_VERSION_*` block.
+>
+> **Coverage note.** Pure cold-path value translation; no concurrency, no allocation. The 116-arm `translate()` totality is `-Wswitch`-enforced; correctness (not just totality) is the checked-in oracle's job. `fixpp_strerror`'s `"unknown error"` default + the override-group arms are exercised. Two new Tier-1 shell gates (`tools/check_capi_occupancy.sh`, `tools/check_capi_reentrancy.sh`) carry their own positive+negative ctest fixtures (`capi_occupancy_negative`, `capi_reentrancy_negative`). Coverage gate (`[const §IX.1]`, per-file DA/BRDA, `linux-clang-coverage` preset) at `/speckit-verify`.

@@ -159,8 +159,12 @@ TEST(SessionLayering, CApiHeadersHaveNoSessionTypeReferences) {
     namespace fs = std::filesystem;
     const fs::path inc_root = std::string{FIXPP_TEST_SOURCE_DIR} + "/include/fix";
 
-    // Portable recursive scan (mirrors `grep -rEl 'fixpp::session|fixpp_session_'
-    // | wc -l`): count FILES containing either token. No shell → runs everywhere.
+    // Portable recursive scan (mirrors `grep -rEl 'fixpp::session' | wc -l`):
+    // count FILES referencing the C++ `fixpp::session` namespace. No shell → runs
+    // everywhere. The C-ABI snake_case `fixpp_session_*` handle prefix is the
+    // legitimate published surface owned by the 2i C-ABI feature (049 handles.h:
+    // `fixpp_session_t`); it is NOT a C++ leak and is enforced separately by the
+    // nm exported-symbol gate ([const §X.2]) — so it is deliberately not matched.
     int matches = 0;
     std::string offending;
     std::error_code ec;
@@ -173,8 +177,7 @@ TEST(SessionLayering, CApiHeadersHaveNoSessionTypeReferences) {
             std::string line;
             bool hit = false;
             while (std::getline(ifs, line)) {
-                if (line.find("fixpp::session") != std::string::npos ||
-                    line.find("fixpp_session_") != std::string::npos) {
+                if (line.find("fixpp::session") != std::string::npos) {
                     hit = true;
                     break;
                 }
@@ -187,8 +190,8 @@ TEST(SessionLayering, CApiHeadersHaveNoSessionTypeReferences) {
     }
 
     EXPECT_EQ(matches, 0) << "<fix/c_api.h> subtree contains " << matches
-                          << " file(s) referencing fixpp::session — 005 ships no C-ABI "
-                          << "surface ([const §X.2] / FR-015); the 2i feature owns it.\n"
+                          << " file(s) referencing the C++ fixpp::session namespace — "
+                          << "no C++ leakage through the C ABI ([const §X.2] / FR-015).\n"
                           << offending;
 }
 

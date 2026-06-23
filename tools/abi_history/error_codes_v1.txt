@@ -1,29 +1,95 @@
 # tools/abi_history/error_codes_v1.txt
 #
-# C-ABI fixpp_error_t occupancy mapping — append-only per [const §X.4].
-# Managed by: 2i C-ABI audit infra (check_capi_occupancy.sh — not yet landed).
-# This file is a FORWARD RESERVATION for v1.x; no extern "C" symbols expose
-# these values in v1.0 (FR-020 — the log/OTel C-ABI surface is deferred).
+# C-ABI fixpp_error_t occupancy audit trail — append-only per [const §X.4].
+# Rewritten by 049-c-abi-handles-errors (T013, FR-012/E-6) from the
+# log/otel forward-reservation form to the published-code form.
 #
-# Format: <fixpp_error_t integer> <status> <fixpp::core::error enumerator> <notes>
+# Format (one line per PUBLISHED code):
+#   <numeric>\t<FIXPP_ERR_SYMBOL>\t<introducing_minor>
 #
-# Status values:
-#   used     — occupied by a defined C++ enumerator; will map to this C-ABI value in v1.x
-#   reserved — placeholder for a future variant in the same feature block
+# introducing_minor is the uint16_t C-ABI MINOR ordinal at which the code was
+# first published. Every code below was published in C-ABI 0.2.0 → minor 2.
+# This is the column translate_for_consumer(code, consumer_minor) consumes for
+# the forward-compat downgrade (data-model E-5): introducing_minor > consumer_minor
+# → FIXPP_ERR_UNKNOWN. Stability binds only at MAJOR==1 ([const §X.4]).
+#
+# CI rule (tools/check_capi_occupancy.sh): every `#define FIXPP_ERR_*` in
+# include/fix/c_api/error.h appears here with an unchanged numeric→symbol
+# binding; a redefined slot fails CI.
 
-# ── [1000, 1099] block — owned by 017-log-otel / 2k ([2i §1.1] reserved-block layout)
-# Anchor: contracts/error-block.md + [2k §6.3]
-1000 used     log_queue_overflow        internal-only; maps to Logger::drop_count() counter; no C-ABI return path in v1.0
-1001 used     log_sink_open_failed
-1002 used     log_sink_write_failed
-1003 used     log_sink_flush_failed
-1004 used     log_drain_timeout         returned via expected_t<void> from Logger::shutdown()
-1005 reserved                           reserved for future log variants
-1006 reserved
-1007 reserved
-1008 reserved
-1009 reserved
-1010 used     otel_export_failed
-1011 used     otel_provider_init_failed returned via expected_t<void> on provider ctor failure
-1012 reserved                           reserved for future otel variants
-# 1013–1099: reserved for future log/otel C-ABI extensions
+# ── Cross-cutting [0, 99] (2i-owned) ──────────────────────────────────────────
+0	FIXPP_ERR_OK	2
+1	FIXPP_ERR_CANCELLED	2
+2	FIXPP_ERR_UNKNOWN	2
+3	FIXPP_ERR_NULL_HANDLE	2
+4	FIXPP_ERR_INVALID_HANDLE	2
+5	FIXPP_ERR_VERSION_MISMATCH	2
+6	FIXPP_ERR_BUFFER_TOO_SMALL	2
+7	FIXPP_ERR_TYPE_MISMATCH	2
+8	FIXPP_ERR_TAG_NOT_FOUND	2
+9	FIXPP_ERR_INDEX_OUT_OF_RANGE	2
+10	FIXPP_ERR_CAPI_CONFIG_INVALID	2
+
+# ── Wire [100, 199] (2b-owned) ────────────────────────────────────────────────
+100	FIXPP_ERR_WIRE_INVALID_FRAME	2
+101	FIXPP_ERR_WIRE_LIMIT_EXCEEDED	2
+102	FIXPP_ERR_WIRE_CONFORMANCE	2
+
+# ── Dict [200, 299] (2c-owned) ────────────────────────────────────────────────
+200	FIXPP_ERR_DICT_CONFIG	2
+201	FIXPP_ERR_DICT_LIMIT_EXCEEDED	2
+202	FIXPP_ERR_DICT_OOM	2
+
+# ── Threading [300, 399] (2d-owned) ───────────────────────────────────────────
+300	FIXPP_ERR_THREAD_CONFIG	2
+301	FIXPP_ERR_THREAD_SESSION_LIFECYCLE	2
+302	FIXPP_ERR_THREAD_RUNTIME	2
+
+# ── Store [400, 499] (2e-owned) ───────────────────────────────────────────────
+400	FIXPP_ERR_STORE_RUNTIME	2
+401	FIXPP_ERR_STORE_CONSISTENCY	2
+402	FIXPP_ERR_STORE_CONFIG	2
+403	FIXPP_ERR_STORE_VISITOR	2
+
+# ── Sync [500, 599] (2f-owned) ────────────────────────────────────────────────
+500	FIXPP_ERR_SYNC_RUNTIME	2
+
+# ── TLS [600, 699] (2g-owned) ─────────────────────────────────────────────────
+600	FIXPP_ERR_TLS_CONFIG	2
+601	FIXPP_ERR_TLS_HANDSHAKE	2
+602	FIXPP_ERR_TLS_PINSET	2
+603	FIXPP_ERR_TLS_RUNTIME	2
+
+# ── Transport [700, 799] (2h-owned) ───────────────────────────────────────────
+700	FIXPP_ERR_TRANSPORT_LIFECYCLE	2
+701	FIXPP_ERR_TRANSPORT_IO	2
+702	FIXPP_ERR_TRANSPORT_HANDSHAKE	2
+703	FIXPP_ERR_TRANSPORT_CONFIG	2
+
+# ── Decimal [800, 899] (2a-owned) ─────────────────────────────────────────────
+800	FIXPP_ERR_DECIMAL_INVALID	2
+801	FIXPP_ERR_DECIMAL_PRECISION_LOSS	2
+
+# ── Control plane [900, 999] (2j-owned) ───────────────────────────────────────
+900	FIXPP_ERR_CTRL_CONFIG	2
+901	FIXPP_ERR_CTRL_RUNTIME	2
+
+# ── Log + OTel [1000, 1099] (2k-owned) — RESERVED ─────────────────────────────
+# No #define in v1.0; translate() maps log_*/otel_* → FIXPP_ERR_UNKNOWN
+# (L-049-2). The 017-log-otel C++ error variants (log_queue_overflow …
+# otel_provider_init_failed) have NO published C-ABI code in Feature A — they
+# are deliberately NOT listed as `used` here (that contradicted L-049-2 in the
+# pre-049 forward-reservation form). Feature B publishes the
+# FIXPP_ERR_LOG_*/OTEL_* block and appends those rows.
+
+# ── Tap [1100, 1199] (2l-owned) — RESERVED (no #define yet) ────────────────────
+
+# ── Bindings [1200, 1299] (2m-owned) ──────────────────────────────────────────
+1200	FIXPP_ERR_BINDING_PYTHON_CALLBACK_RAISED	2
+1201	FIXPP_ERR_BINDING_SUBINTERPRETER	2
+1202	FIXPP_ERR_BINDING_OBJECT_LIFETIME	2
+1203	FIXPP_ERR_BINDING_WHEEL_ABI_MISMATCH	2
+1204	FIXPP_ERR_BINDING_CALLBACK_REENTRANT_CLOSE	2
+
+# ── Post-v1.x growth [1300, 1399] — RESERVED ──────────────────────────────────
+# ── Future expansion [1400+] — RESERVED ───────────────────────────────────────

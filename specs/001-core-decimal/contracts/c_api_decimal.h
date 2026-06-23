@@ -52,11 +52,21 @@ typedef int fixpp_error_t;
  * ============================================================================
  */
 
+/* NOTE (049-c-abi-handles-errors T012, 2026-06-23): these provisional values
+   are ARCHIVAL. The live C-ABI codes were renumbered into their [2i §4.3]
+   master blocks — BUFFER_TOO_SMALL 3→6, DECIMAL_INVALID 10→800,
+   DECIMAL_PRECISION_LOSS 11→801 — and now live in include/fix/c_api/error.h
+   (the single source). decimal.h includes error.h; references are by macro
+   name so the value change is transparent. The values below are kept as the
+   original 001 contract record, not the current ABI. */
 #define FIXPP_ERR_OK                       0
 #define FIXPP_ERR_UNKNOWN                  2   /* reserved by [const §X.4] / 2i §4.5 */
-#define FIXPP_ERR_BUFFER_TOO_SMALL         3   /* generic; reused for decimal_buffer_too_small */
-#define FIXPP_ERR_DECIMAL_INVALID         10   /* provisional 2026-05-12; carries decimal_invalid_input + decimal_overflow */
-#define FIXPP_ERR_DECIMAL_PRECISION_LOSS  11   /* provisional 2026-05-12; carries decimal_precision_loss */
+/* ARCHIVAL only — live values are in include/fix/c_api/error.h (FR-011 lockstep).
+ * Original 001 provisional values (DO NOT USE — macro definitions removed):
+ *   FIXPP_ERR_BUFFER_TOO_SMALL  = 3   (live: 6,  renumbered by 049 T012)
+ *   FIXPP_ERR_DECIMAL_INVALID   = 10  (live: 800, renumbered by 049 T012)
+ *   FIXPP_ERR_DECIMAL_PRECISION_LOSS = 11 (live: 801, renumbered by 049 T012)
+ */
 
 /* ============================================================================
  * §5.1 — Layout

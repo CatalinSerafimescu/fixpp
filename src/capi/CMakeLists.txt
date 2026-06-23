@@ -12,6 +12,8 @@ add_library(fixpp_capi_objects OBJECT
   capi.cpp
   decimal.cpp
   decimal_assert.cpp
+  version.cpp
+  error.cpp
 )
 set_property(TARGET fixpp_capi_objects PROPERTY POSITION_INDEPENDENT_CODE ON)
 target_include_directories(fixpp_capi_objects PUBLIC

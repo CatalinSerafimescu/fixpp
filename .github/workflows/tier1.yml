@@ -516,6 +516,14 @@ jobs:
       - name: Run layer enforcement script
         run: python3 tools/check_layers.py
 
+      # 049-c-abi-handles-errors (T024): C-ABI occupancy + reentrancy gates.
+      # Pure-text checks (no build) — run alongside the layer gate.
+      - name: Run C-ABI occupancy gate (FR-013)
+        run: bash tools/check_capi_occupancy.sh
+
+      - name: Run C-ABI reentrancy gate (FR-014)
+        run: bash tools/check_capi_reentrancy.sh
+
   # ── Benchmarks (SOFT — exit 0 always; Phase 3) ──────────────────────────
   # SOFT GATE: perf regression gate is disabled until Phase 4 module 1 closes
   # per [const §VIII.2] and the deliverables note in Step 4.
