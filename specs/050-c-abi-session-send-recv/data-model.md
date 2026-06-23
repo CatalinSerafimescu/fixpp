@@ -52,7 +52,7 @@ created ──fixpp_session_open×N──▶ registered ──fixpp_engine_start
 
 **`fixpp_engine_config_*` v1.0 setters** (subset of `EngineConfig`, `engine_config.hpp:125+`):
 - `set_worker_threads(n)` (default 1, research D-2)
-- `set_clock_default()` (a real-time clock; clock is **required non-null** — `Engine::start` rejects null → `clock_not_set`)
+- `set_realtime_clock()` (installs a real-time clock; clock is **required non-null** — `Engine::start` rejects null → `clock_not_set`) — name matches `contracts/config-builders.md` + `tasks.md`
 - dictionaries / store-factory / transport-factory / cert-source defaults as needed (mostly engine defaults for v1.0)
 - the engine application is set internally to the `CapiApplication` trampoline (NOT a consumer setter).
 

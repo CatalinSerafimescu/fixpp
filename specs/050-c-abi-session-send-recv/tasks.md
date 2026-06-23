@@ -54,7 +54,7 @@ description: "Task list — 050-c-abi-session-send-recv (C-ABI Feature B)"
 ### Tests for US1 (write FIRST, see them FAIL)
 
 - [ ] T015 [P] [US1] `tests/capi/lifecycle_test.cpp` — create/start/destroy + open/close/is_established happy path; **never-started destroy** (`create`→`session_open` fails→`destroy`) asserts no abort (FR-003); double-destroy + NULL-destroy no-op; `session_open` after `engine_start` → domain error (FR-004); NULL/dead handle → `FIXPP_ERR_NULL_HANDLE`/`INVALID_HANDLE` (FR-006).
-- [ ] T016 [P] [US1] In `lifecycle_test.cpp` add the **SC-007** witness: park an established idle session in `async_read`, `fixpp_session_close`, assert prompt teardown by socket-close/cancellation NOT by a deadline elapsing (distinguishing witness); multi-threaded harness, TSan-gated (cross-thread close bridge, E-6).
+- [ ] T016 [P] [US1] In `lifecycle_test.cpp` add the **SC-007** witness — BOTH conjuncts: (a) park an established idle session in `async_read`, `fixpp_session_close`, assert prompt teardown by socket-close/cancellation NOT by a deadline elapsing (distinguishing witness); (b) issue an in-flight `fixpp_session_send` during engine total-cancellation/teardown and assert the return is `FIXPP_ERR_CANCELLED` (uniform code, FR-010) — a LIVE cross-thread cancel stimulus on the send bridge, not merely the T022 mapping oracle. Multi-threaded harness, TSan-gated (cross-thread close+send bridges, E-6).
 
 ### Implementation for US1
 
@@ -115,6 +115,7 @@ description: "Task list — 050-c-abi-session-send-recv (C-ABI Feature B)"
 ## Phase 6: Polish & Cross-Cutting Concerns
 
 - [ ] T034 [P] Confirm **SC-002** (100% of the 21 new symbols carry exactly one reentrancy class, 0 unannotated) via `tools/check_capi_reentrancy.sh` both directions; **SC-003** (nm symbol-golden == exported set AND 0 C++ leak) via the per-PR nm gate on the branch with the updated golden.
+- [ ] T034a [P] **§VIII.5 zero-global-alloc gate** (the trampoline hot path, FR-013): run the `send_recv_test` round-trip under `LD_PRELOAD=tools/mallocnesia/libmallocnesia.so` (global-malloc interception) and assert NO global heap allocation fires on the on-strand `CapiApplication::fromApp` callback path. A tracking-PMR/counting-resource alone is a FALSE-PASS without global interception (memory `feedback_tracking_pmr_resource_false_pass`); mallocnesia is the binding gate. Guard the alloc-witness under the sanitizer-incompat caveat (`feedback_operator_new_witness_breaks_sanitizers`).
 - [ ] T035 [P] `fixpp_version()` reflects 0.3.0; the `version.h`/`c_api.h` bump is consistent; `fixpp_decimal_t` PoD untouched (Article X §3).
 - [ ] T036 [P] Add the Behaviors & Limitations rows to `spec/behaviors-and-limitations.md`: B-050-* (the C-ABI session/send/receive surface) + L-050-1 (round-trip dict blocked on Feature C), L-050-2 (no fork() holding a live engine), L-050-3 (store I/O failure I-07-swallowed on send), L-050-x (lifecycle callbacks / non-blocking send deferred).
 - [ ] T037 Run the local Tier-1 mirror prep: full unfiltered `ctest` (public-header change → run FULL ctest, not a prefix filter — memory `feedback_speckit_verify_prefix_filter_misses_header_consumers`); commit/stash any dirty tree first (codegen graph-check is a git-cleanliness gate).
