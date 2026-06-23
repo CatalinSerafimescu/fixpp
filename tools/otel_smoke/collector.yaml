@@ -1,0 +1,29 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+exporters:
+  debug:
+    verbosity: detailed
+  file/logs:
+    path: /var/output/logs.json
+  file/metrics:
+    path: /var/output/metrics.json
+  file/traces:
+    path: /var/output/traces.json
+
+service:
+  pipelines:
+    logs:
+      receivers: [otlp]
+      exporters: [debug, file/logs]
+    metrics:
+      receivers: [otlp]
+      exporters: [debug, file/metrics]
+    traces:
+      receivers: [otlp]
+      exporters: [debug, file/traces]
