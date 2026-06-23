@@ -81,7 +81,7 @@ src/capi/
 
 tools/
 ├── abi_history/
-│   └── error_codes_v1.txt   # NEW — append-only audit: every numeric code → symbol + uint16_t introducing_minor (=2 now)
+│   └── error_codes_v1.txt   # EDIT/RECONCILE (pre-exists as a log/otel forward-reservation, wrong format) — rewrite to FR-012/E-6: every published numeric code → symbol + uint16_t introducing_minor (=2 now); drop the `used` lines for unpublished 1000–1099 codes (L-049-2), keep reserved ranges as comments
 ├── check_capi_occupancy.sh  # NEW — occupancy/drift gate (Tier 1): Check A (header #define layout == [2i §4.3]) + Check B (sibling variant-row counts == coverage table); the two are NEVER compared to each other
 └── check_capi_reentrancy.sh # NEW — discrete reentrancy gate (Tier 1): exactly one class token per exported symbol's doc-block, 0 unannotated
 

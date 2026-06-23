@@ -13,7 +13,7 @@
 - Reentrancy-class completeness is a **separate, discrete check** (not bundled here — see below).
 - Non-zero exit fails the build. Mirrors the existing shell-gate style used elsewhere in `tools/`.
 
-## Reentrancy-completeness gate (NEW, discrete — FR-014/SC-005)
+## `tools/check_capi_reentrancy.sh` — reentrancy-completeness gate (NEW, discrete — FR-014/SC-005)
 - A separate, independently-runnable check (NOT folded into `check_capi_occupancy.sh`): for every exported `fixpp_*` declaration in `include/fix/c_api/*.h`, assert the symbol's **doc-block** (the contiguous comment block immediately preceding the declaration) contains **exactly one** of `thread-safe`/`single-thread`/`requires-session-lock` — 0 unannotated, 0 double-classed. Presence "anywhere in the file" is insufficient; it must be the symbol's own doc-block.
 - Non-zero exit fails the build (Tier 1).
 
