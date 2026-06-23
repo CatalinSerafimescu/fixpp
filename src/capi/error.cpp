@@ -236,9 +236,10 @@ fixpp_error_t translate_for_consumer(fixpp_error_t code, std::uint16_t consumer_
 
 }  // namespace fixpp_capi::detail
 
-// fixpp_strerror — exported. Static-storage string table (string literals have
-// static lifetime; the same literal address is returned on every call → zero
-// allocation, stable pointer). Out-of-range/undefined/reserved → "unknown error".
+// fixpp_strerror — exported. Returns a pointer into static storage (string
+// literals have static lifetime; the same literal address is returned on every
+// call → zero allocation, stable pointer). Out-of-range/undefined/reserved →
+// "unknown error".
 extern "C" const char* fixpp_strerror(fixpp_error_t code) {
     switch (code) {
         // cross-cutting

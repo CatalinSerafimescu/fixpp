@@ -763,7 +763,7 @@ Items that are normative in the spec but explicitly deferred from fixpp v1.0. Th
 ## 049-c-abi-handles-errors — C ABI Feature A (CA-001..004, 2026-06-23)
 
 > **New/changed source (the coverage surface):**
-> - `src/capi/error.cpp` (NEW) — `fixpp_capi::detail::translate()` (total 116-arm switch, no `default`), `translate_for_consumer()` (forward-compat downgrade), `fixpp_strerror()` (static zero-alloc table). The 116-arm switch is the coverage risk → driven by the enumerating correctness oracle (`tests/capi/error_surface_test.cpp` against `tests/capi/expected_error_map.csv`, mutation-tested), with explicit override-group (`session_*`/`log_*`/`otel_*`/`app_*`/`out_of_memory` → `UNKNOWN`) assertions.
+> - `src/capi/error.cpp` (NEW) — `fixpp_capi::detail::translate()` (total 116-arm switch, no `default`), `translate_for_consumer()` (forward-compat downgrade), `fixpp_strerror()` (static zero-alloc string literals). The 116-arm switch is the coverage risk → driven by the enumerating correctness oracle (`tests/capi/error_surface_test.cpp` against `tests/capi/expected_error_map.csv`, mutation-tested), with explicit override-group (`session_*`/`log_*`/`otel_*`/`app_*`/`out_of_memory` → `UNKNOWN`) assertions.
 > - `src/capi/version.cpp` (NEW) — `fixpp_version()` / `fixpp_library_version()` (value-typed PoD, zero-alloc).
 > - `include/fix/c_api/{error,version,handles,export}.h` (NEW) — C-clean public headers (typedefs/macros/decls; passive — no executable coverage surface).
 > - `src/capi/decimal.cpp` — local `map_error()` replaced by a thin forwarder to the shared `translate()` (renumber lockstep, FR-011).

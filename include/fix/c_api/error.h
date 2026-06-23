@@ -167,7 +167,7 @@ typedef int32_t fixpp_error_t;
 /**
  * fixpp_strerror — return a human-readable description of a fixpp_error_t code.
  *
- * Thread-safety: thread-safe (returns a pointer into a static const table).
+ * Thread-safety: thread-safe (returns a pointer into static storage).
  * Allocation: none — result points to static storage; caller must not free it.
  * Returns: non-null pointer to a null-terminated string.
  *          Published codes (E-2) return a descriptive message.
