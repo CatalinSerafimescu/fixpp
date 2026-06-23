@@ -16,16 +16,26 @@ fixpp_error_t fixpp_session_config_set_comp_ids(fixpp_session_config_t*, const c
 fixpp_error_t fixpp_session_config_set_begin_string(fixpp_session_config_t*, const char* s);
 fixpp_error_t fixpp_session_config_set_role(fixpp_session_config_t*, fixpp_session_role role); /* initiator|acceptor */
 fixpp_error_t fixpp_session_config_set_heartbeat_seconds(fixpp_session_config_t*, uint32_t n);
-fixpp_error_t fixpp_session_config_set_security(fixpp_session_config_t*, /* profile kind + params */ ...);
-fixpp_error_t fixpp_session_config_set_dictionary(fixpp_session_config_t*, fixpp_dict_t* dict);  /* OQ-1 */
+/* set_security: concrete typed signature (NOT a C variadic — a variadic with no
+   fixed named parameter is not valid C and leaves the security shape unspecified).
+   FROZEN enums (Gate-A pinned): fixpp_session_role { FIXPP_ROLE_INITIATOR=0,
+   FIXPP_ROLE_ACCEPTOR=1 } and fixpp_security_kind { FIXPP_SECURITY_TLS=0,
+   FIXPP_SECURITY_INSECURE_PLAIN_TCP=1 } (mirrors SecurityProfile::kind from 043/2g).
+   `cert`/`key` are PEM file paths, ignored for the plaintext kind; plaintext requires
+   the explicit insecure opt-in (`[const §XII.5]`). The broader setter *list* may still
+   sequence at /tasks, but this signature + both enums are frozen now (P3 / Codex #5). */
+fixpp_error_t fixpp_session_config_set_security(fixpp_session_config_t*,
+                                                fixpp_security_kind kind,
+                                                const char* cert, const char* key);
+fixpp_error_t fixpp_session_config_set_dictionary(fixpp_session_config_t*, fixpp_dict_t* dict);  /* L-050-x: handle creation is Feature C — see below */
 /* ... reset knobs (set_reset_on_logon, ...) as thin pass-throughs ... */
 void          fixpp_session_config_destroy(fixpp_session_config_t*);                     /* NULL-safe; or consumed by session_open */
 ```
 
 **Obligations**
-- Each builder handle wraps a heap `EngineConfig` / `SessionConfig` under construction (data-model E-1/E-3). `create` → `*_CONFIG`-flavoured construction-time thunk; setters validate eagerly where cheap (e.g. empty CompID → `FIXPP_ERR_SESSION_CONFIG`), else defer to open/create.
-- The builder is **consumed** at `fixpp_engine_create` / `fixpp_session_open` (the thunk moves the built config into the engine/registry). After consumption the builder handle is invalidated; an explicit `destroy` before consumption frees it (idempotent, NULL-safe).
+- Each builder handle wraps a heap `EngineConfig` / `SessionConfig` under construction (data-model E-1/E-3). `create` → `*_CONFIG`-flavoured construction-time thunk; setters validate eagerly where cheap (e.g. empty CompID → `FIXPP_ERR_CAPI_CONFIG_INVALID` at the builder boundary), else defer to open/create — where a bad config surfaces the **existing** 049-published `invalid_session_config` (53) → `FIXPP_ERR_THREAD_CONFIG` (NOT a new SESSION code; see data-model E-4 LEAVE decision).
+- The builder is **consumed** at `fixpp_engine_create` / `fixpp_session_open` — the create/open thunk takes the builder by a **non-`const`** pointer (a consuming move through a `const` pointer is incoherent C-API ownership; Codex #6) and moves the built config into the engine/registry. **On success** the builder handle is invalidated and the caller must NOT `destroy` it. **On failure** the builder is untouched and the caller still owns it (must `destroy`). An explicit `destroy` before consumption frees it (idempotent, NULL-safe).
 - **`set_security`**: reuses the existing `SecurityProfile` (plaintext_tcp from 043 / TLS from 2g). `kind::unset` → open() rejects (FR-018 parity); plaintext requires the explicit insecure opt-in.
-- **OQ-1 — dictionary** (data-model E-3): a `SessionConfig` requires a non-null `dictionary`, but the `fixpp_dict_load_*` surface is Feature C. v1.0 resolution (at /tasks): prefer an **engine-default dictionary** the session inherits, OR gate the round-trip test on a test-built dictionary and document productive use needs Feature C. Do NOT pull a full dict-loader forward into B silently.
+- **Dictionary — DESCOPED (L-050-1)** (data-model E-3, research D-3a): a `SessionConfig` requires a non-null `dictionary` (`session_config.hpp:180`) and `Session::open()` unconditionally rejects null with **no engine fallback** (`session.cpp:925-931`). Source-verified at Gate A (Explore sweep): the **only** ways to obtain a `Dictionary` are `XmlLoader::load(path)` / `load_from_string(xml)` — both C++ constructs; there is **no built-in/version-keyed dictionary factory** (`version_registry` is a lookup over pre-loaded dictionaries, not a producer) and the file-loading C-ABI surface (`fixpp_dict_load_*`) is **Feature C**. Therefore there is **no pure-C path** for a consumer to obtain or select a dictionary in Feature B. `fixpp_session_config_set_dictionary` takes a `fixpp_dict_t*` whose creation is Feature C; for the Feature-B round-trip test the dictionary is supplied via a **test-only** path (a test-built `Dictionary` injected behind the C-ABI seam). Productive C-consumer dictionary loading is **blocked on Feature C** (`fixpp_dict_load_*`). We do NOT pull a dict-loader (or a net-new embedded-dict-by-version mechanism) forward into B (Simplicity First). SC-001 is reworded accordingly to "C-ABI round-trip with a test-supplied dictionary" (spec §SC-001).
 - The engine application is set internally to the `CapiApplication` trampoline — **not** a consumer-settable field.
 - Every new builder symbol: appended to the nm golden (FR-018), reentrancy-annotated SINGLE_THREAD (FR-017), no exception escapes (FR-019).
