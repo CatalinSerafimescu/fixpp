@@ -116,6 +116,24 @@ Phase 0 decisions. Every "real surface" claim below is **source-verified against
 
 **Follow-up (v1.x, not now)**: a non-blocking `fixpp_session_send_async` (detached co_spawn, fire-and-forget, no synchronous error return) would be callback-safe — recorded as a possible v1.x addition, NOT v1.0 (loses the durable-before-transmit error return; D-3). Tracked as part of L-050.
 
+## D-11 — Test strategy (DECIDED, user-ratified 2026-06-24)
+
+**Topology**: the **headline round-trip drives BOTH ends through the C ABI** — two C-ABI engines in one test process (initiator **A** + acceptor **B**), each owning its own internal io_context + worker (D-2), talking over **loopback plaintext TCP** (043 `insecure_plain_tcp`). This proves the genuine pure-C-consumer path, not a half-mock. Cheaper functional cases (lifecycle edges, error arms, thunk split) use the lighter **one-C-ABI-side + one-C++-side** `tests/interop/support` loopback harness where a full second engine is overkill. **No in-memory/mock transport** for the round-trip — a mock would hide SC-007 (a socket-close breaking a blocked `async_read`), exactly the class of bug [[feedback_engine_stop_must_close_transports_total_cancel_insufficient]] warns about.
+
+**The conversational round-trip** (`send_recv_test`, the SC-001 + SC-008 witness): A(initiator) logs on to B(acceptor) → both poll `fixpp_session_is_established` → A `fixpp_session_send`s an app frame → B's on-strand callback receives it, copies it out, and **replies from a drain thread** (the D-10 supported reply path, FR-013a) → A's callback receives the reply → both `fixpp_session_close` gracefully → both `fixpp_engine_destroy`. One flow exercises lifecycle (both roles), send (both directions), receive callback (both ends), establishment, and graceful close.
+
+**SC-007 (close breaks a blocked idle read)** — **required** (topology is real sockets): park a session in `async_read` (established, idle), `fixpp_session_close`, assert prompt teardown by *cancellation/socket-close*, NOT by a timeout elapsing (the witness must distinguish "close broke the read" from "the deadline fired"). TSan-gated (cross-thread close bridge, E-6) on a **multi-threaded** harness per [[feedback_single_threaded_harness_masks_strand_races]].
+
+**D-10 deadlock** — **document + test the SUPPORTED path only** (copy-out-then-send-from-a-drain-thread completes). No watchdog "prove it hangs" test (fragile wedged-thread risk; marginal benefit with no real clients yet). The hazard is witnessed indirectly: the supported reply path completing IS the positive proof the contract works.
+
+**Error-arm discipline**: each re-pointed `translate()` arm (E-4) is **mutation-tested** — flipping one arm to a wrong code must go RED (a correctness oracle, not a "returns a published code" proxy), per [[feedback_completeness_gate_exact_set_not_subset]] / [[feedback_coverage_push_enshrines_bugs]]. The downgrade (D-9) uses a synthetic minor-3 code vs a minor-2 consumer (SC-004).
+
+**Thunk-split (SC-006)**: reuse Feature A's §9-seam-5b SIGABRT-trap fixture pattern (`sigaction` + `setjmp/longjmp`) for the steady-state send abort; construction-time (create/open/start) asserts `*_CONFIG` + no abort.
+
+**OQ-1 resolution (dictionary)**: tests use an **engine-default / test-built dictionary** the session inherits; productive C-consumer dictionary *loading* (`fixpp_dict_load_*`) is **Feature C** — marked to come back. Do NOT pull a dict-loader forward into B (see data-model E-3 OQ-1).
+
+**Cross-feature follow-up (user, 2026-06-24)**: hold a similar test-design conversation for **Feature C**; and/or plan a **comprehensive real-C-client conversational integration test after all three C-ABI features (A+B+C) are implemented** — a full pure-C program standing up a session, exchanging real business messages bidirectionally, and tearing down, as the end-to-end acceptance of the whole C-ABI surface. Tracked as **L-050 / a Feature-C+ planning item** (not a Feature-B blocker).
+
 ## Deferred / not in scope (recorded so the completeness audit doesn't read them as gaps)
 
 - **`onLogon`/`onLogout`/`onCreate` lifecycle callbacks at the C boundary** — L-050-x; v1.0 ships only the `fixpp_session_is_established` poll accessor (FR-022).

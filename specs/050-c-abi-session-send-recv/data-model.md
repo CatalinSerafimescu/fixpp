@@ -56,7 +56,7 @@ created ──fixpp_session_open×N──▶ registered ──fixpp_engine_start
 - dictionaries / store-factory / transport-factory / cert-source defaults as needed (mostly engine defaults for v1.0)
 - the engine application is set internally to the `CapiApplication` trampoline (NOT a consumer setter).
 
-> **OQ-1 (for /tasks + Gate A): the dictionary dependency.** A `SessionConfig` requires a non-null `dictionary` (`session.hpp` open() rejects null → `invalid_session_config`), but the `fixpp_dict_t` *loading* surface (`fixpp_dict_load_*`) is Feature C. v1.0 Feature B must give a session SOME dictionary. Options to resolve at /tasks: (a) a minimal `fixpp_dict_load_from_xml`-style entry pulled forward into B (scope creep); (b) an engine-default dictionary the session inherits; (c) gate the round-trip test on a test-built dictionary and document that productive use needs Feature C. Lean (b)/(c); do NOT pull (a) forward silently.
+> **OQ-1 — RESOLVED (user, 2026-06-24): engine-default / test-built dictionary.** A `SessionConfig` requires a non-null `dictionary` (`session.hpp` open() rejects null → `invalid_session_config`), but the `fixpp_dict_t` *loading* surface (`fixpp_dict_load_*`) is Feature C. **Decision:** the session inherits an **engine-default dictionary** (set on the engine-config builder / engine default); tests use a test-built dictionary. The productive C-consumer dictionary-loading entry (`fixpp_dict_load_*`) is **Feature C — marked to come back**. We do **NOT** pull a dict-loader forward into B. (Rejected: (a) a minimal `fixpp_dict_load_from_xml` pulled into B = scope creep into C.)
 
 ---
 

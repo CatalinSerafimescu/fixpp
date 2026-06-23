@@ -91,8 +91,8 @@ tools/
 tests/abi/golden/fixpp_capi_symbols.txt  # EDIT — append the new exported symbols
 
 tests/capi/
-├── lifecycle_test.cpp   # NEW — create→open→start→is_established→close→destroy; register-after-start rejected; double-destroy idempotent
-├── send_recv_test.cpp   # NEW — pure-C-style round-trip over loopback (send bytes; callback fires on-strand; inbound handle invalid after return — ASan negative)
+├── lifecycle_test.cpp   # NEW — create→open→start→is_established→close→destroy; register-after-start rejected; double-destroy idempotent; SC-007 close-breaks-blocked-read (real socket, TSan)
+├── send_recv_test.cpp   # NEW — HEADLINE: two C-ABI engines (initiator+acceptor) over loopback plaintext TCP; bidirectional conversation; reply from a drain thread (D-10 supported path); inbound handle invalid after return (ASan); engine-default dict (OQ-1). Strategy = research D-11
 ├── error_block_test.cpp # NEW — session_*/app_* reachable variants → published codes; downgrade live (minor-3 code → UNKNOWN for minor-2 consumer)
 ├── thunk_split_test.cpp # NEW — synthetic-throw: construction (create/open/start)→*_CONFIG no abort; steady-state (send)→abort (SIGABRT trap)
 └── CMakeLists.txt       # EDIT — register the new targets

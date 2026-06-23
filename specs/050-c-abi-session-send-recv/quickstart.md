@@ -82,10 +82,11 @@ int main(void) {
 - **Send takes bytes**, a committed wire frame — not a message handle. Outbound message *construction* is Feature C.
 - **Error downgrade is live**: if you compiled against an older minor than the engine, codes newer than your minor arrive as `FIXPP_ERR_UNKNOWN`.
 
-## Test surfaces (mirror of the SCs)
-- `lifecycle_test` — create→open→start→is_established→close→destroy; open-after-start rejected; double-destroy no-op (SC-007 close-breaks-blocked-read).
-- `send_recv_test` — loopback round-trip; callback fires; inbound invalid after return (ASan, SC-008); send-cancel → `CANCELLED`; **receive→reply via copy-out-then-send-from-a-drain-thread** (the supported pattern, FR-013a); a **negative** guard documenting that a blocking send from inside the callback would deadlock (D-10) — asserted via the from-another-thread path completing, not by hanging the suite.
-- `error_block_test` — reachable session/app variants → published codes; downgrade live (SC-004/005).
-- `thunk_split_test` — synthetic-throw: construction (create/open/start) → `*_CONFIG` no abort; steady-state (send) → abort (SC-006).
+## Test surfaces (mirror of the SCs — strategy in research D-11)
+- `send_recv_test` (**headline, two C-ABI engines over loopback plaintext TCP**) — a real bidirectional **conversation**: initiator A logs on to acceptor B → both poll `is_established` → A sends an app frame → B's on-strand callback receives it, copies out, and **replies from a drain thread** (the D-10 supported reply path, FR-013a) → A's callback receives the reply → both close gracefully → both destroy. Witnesses SC-001 round-trip + SC-008 (inbound invalid after return, ASan) + send-cancel → `CANCELLED`. Engine-default/test-built dictionary (OQ-1).
+- `lifecycle_test` — create→open→start→is_established→close→destroy; open-after-start rejected; double-destroy no-op; **SC-007 close-breaks-a-blocked-idle-read** (real socket; witness = cancellation/socket-close, not deadline-elapse; TSan, multi-threaded).
+- `error_block_test` — reachable session/app variants → published codes (**mutation-tested arms**); downgrade live: synthetic minor-3 code → UNKNOWN for a minor-2 consumer (SC-004/005).
+- `thunk_split_test` — synthetic-throw: construction (create/open/start) → `*_CONFIG` no abort; steady-state (send) → abort via the §9-seam-5b SIGABRT trap (SC-006).
 - pure-C smoke — headers compile as C, link only the C ABI, 0 C++ leak (SC-001/003).
 - alloc guard — receive trampoline + send zero global-heap alloc under mallocnesia (D-6).
+- D-10: **supported path only** (copy-out-then-send-from-a-drain-thread completes); the deadlock hazard is documented, not witnessed by a watchdog hang test.
