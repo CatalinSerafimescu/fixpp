@@ -6,28 +6,32 @@
  *
  * Macro selection (research D-5, [2i §4.3/§4.5]):
  *
- *   _WIN32 + FIXPP_CAPI_BUILD (building the DLL) → dllexport
- *   _WIN32                    (consuming the DLL) → dllimport
- *   POSIX (everything else)                       → visibility("default")
- *   Static-archive consumer (no symbol needed)    → empty (falls through)
+ *   _WIN32 + FIXPP_CAPI_SHARED + FIXPP_CAPI_BUILD (building the shared DLL) → dllexport
+ *   _WIN32 + FIXPP_CAPI_SHARED                    (consuming the shared DLL) → dllimport
+ *   POSIX (everything else)                                                   → visibility("default")
+ *   Static archive default (incl. _WIN32 with no FIXPP_CAPI_SHARED)          → empty (falls through)
  *
- * On POSIX the shipped artifact is a static archive; the test-only .so uses
- * the GNU version script (fixpp_capi.map) for §X.2 symbol filtering.
- * The macro is still present on POSIX so headers compile cleanly on Windows.
+ * The shipped artifact is the STATIC archive fixpp_capi; FIXPP_CAPI_SHARED is
+ * not set by any target today, so the _WIN32 default is correctly empty.
+ * The test-only shared lib uses WINDOWS_EXPORT_ALL_SYMBOLS ON and does not
+ * require FIXPP_CAPI_SHARED.  The GNU version script (fixpp_capi.map) handles
+ * §X.2 symbol filtering on POSIX.
  */
 
 #ifndef FIXPP_C_API_EXPORT_H
 #define FIXPP_C_API_EXPORT_H
 
 /* NOLINTBEGIN(cppcoreguidelines-macro-usage) */
-#if defined(_WIN32)
+#if defined(_WIN32) && defined(FIXPP_CAPI_SHARED)
 #  if defined(FIXPP_CAPI_BUILD)
-#    define FIXPP_API_EXPORT __declspec(dllexport)
+#    define FIXPP_API_EXPORT __declspec(dllexport)   /* building the shared DLL */
 #  else
-#    define FIXPP_API_EXPORT __declspec(dllimport)
+#    define FIXPP_API_EXPORT __declspec(dllimport)   /* consuming the shared DLL */
 #  endif
+#elif defined(__GNUC__) || defined(__clang__)
+#  define FIXPP_API_EXPORT __attribute__((visibility("default")))  /* POSIX — unchanged */
 #else
-#  define FIXPP_API_EXPORT __attribute__((visibility("default")))
+#  define FIXPP_API_EXPORT                            /* static archive (incl. _WIN32 default) → empty */
 #endif
 /* NOLINTEND(cppcoreguidelines-macro-usage) */
 
