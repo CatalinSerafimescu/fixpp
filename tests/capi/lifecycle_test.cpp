@@ -91,11 +91,17 @@ TEST(CapiLifecycle, DestroyIsIdempotentSamePointer) {
 // [2i §4.2.1] / contracts/lifecycle-surface.md:43: "dead/corrupted handle →
 // FIXPP_ERR_INVALID_HANDLE". After fixpp_engine_destroy (WITHOUT closing the
 // session first), any call on a stale session handle must return INVALID_HANDLE,
-// not UAF/UB. The fix: engine->state_.reset() reclaims the EngineState before
-// tombstoning, so check_session sees state_==nullptr → FIXPP_ERR_INVALID_HANDLE
-// without dereferencing freed internals.  Mutation-test: remove the state_.reset()
-// from fixpp_engine_destroy → this test goes RED under ASan (the session call
-// reaches freed EngineState internals).
+// not UAF/UB.  UAF-safety here rests on two complementary mechanisms:
+//   1. Shell retention: the fixpp_engine object is never freed (s_dead_shells
+//      keeps it reachable), so sessions_ (and the session handle pointers into
+//      it) remain valid memory after destroy.
+//   2. tag_=DEAD tombstone: check_session reads engine->tag_ FIRST (before any
+//      state_ dereference) and short-circuits on FIXPP_HANDLE_TAG_DEAD →
+//      FIXPP_ERR_INVALID_HANDLE.  The `state_==nullptr` clause is redundant
+//      defense-in-depth; the tag is always DEAD before the shell is retained.
+// Therefore removing state_.reset() from fixpp_engine_destroy does NOT make
+// this test go RED — the tombstone fires first.  The state_.reset() reclaim
+// (L-050-z fix) is mutation-tested SEPARATELY by EngineStateReclaimedOnDestroy.
 TEST(CapiLifecycle, PostEngineDestroySessionHandleIsInvalidHandle) {
     fixpp_engine_t* eng = nullptr;
     ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 0, 0, &eng), FIXPP_ERR_OK);
