@@ -181,16 +181,16 @@ TEST(CapiErrorLive, SeqnumOverflowReturnsStoreRuntimeNoTransmit) {
         ASSERT_NE(sess, nullptr) << "session lookup failed after establishment";
 
         // Post the seqnum seed to the session's executor (strand-confined) and
-        // block until it completes.
-        auto fut = asio::co_spawn(
-            sess->executor(),
-            [&]() -> asio::awaitable<void> {
-                auto& mgr = sess->seqnum_mgr_test_access();
-                const fixpp::session::seqnum_t cur_inbound = mgr.next_inbound_unsafe();
-                mgr.set_counters_for_test(cur_inbound, fixpp::session::seqnum_max);
-                co_return;
-            }(),
-            asio::use_future);
+        // block until it completes. Pass the lambda directly (not pre-invoked IIFE)
+        // so co_spawn owns the lambda+capture on the heap; captures sess by value so
+        // no reference to a stack variable crosses the thread boundary (ASan-clean).
+        auto seed_fn = [sess]() -> asio::awaitable<void> {
+            auto& mgr = sess->seqnum_mgr_test_access();
+            const fixpp::session::seqnum_t cur_inbound = mgr.next_inbound_unsafe();
+            mgr.set_counters_for_test(cur_inbound, fixpp::session::seqnum_max);
+            co_return;
+        };
+        auto fut = asio::co_spawn(sess->executor(), std::move(seed_fn), asio::use_future);
         fut.get();  // wait for the seam to complete on the strand
     }
 

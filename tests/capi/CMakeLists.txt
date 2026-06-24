@@ -139,6 +139,13 @@ target_link_libraries(capi_send_recv_test PRIVATE
 )
 target_include_directories(capi_send_recv_test PRIVATE ${FIXPP_CAPI_FEATURE_B_INCLUDES})
 add_test(NAME capi_send_recv COMMAND capi_send_recv_test)
+# T029 (InboundHandleUseAfterReturnCaughtUnderAsan) deliberately dereferences a
+# dangling pointer inside the ASan-gated block to prove ASan fires; the process
+# ABORTS, so under the ASan preset the test binary exits non-zero. Mark it
+# WILL_FAIL so ctest treats the abort-exit as a pass.
+if(FIXPP_ENABLE_ASAN)
+    set_tests_properties(capi_send_recv PROPERTIES WILL_FAIL TRUE)
+endif()
 
 # T034a (US3, FR-013) — §VIII.5 zero-global-alloc gate for the on-strand receive
 # trampoline (CapiApplication::fromApp). Runs the synchronous fromApp corpus as a

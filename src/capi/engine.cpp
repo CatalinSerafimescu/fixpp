@@ -19,6 +19,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <utility>
+#include <vector>
 
 #include <asio/co_spawn.hpp>
 #include <asio/use_future.hpp>
@@ -193,14 +194,30 @@ fixpp_error_t fixpp_engine_start(fixpp_engine_t* engine) {
     return FIXPP_ERR_OK;
 }
 
+// Dead-shell registry ([2i §4.2.1/§4.2.2]): destroyed engine shells are
+// RETAINED here (never freed) so a second fixpp_engine_destroy(eng) call on
+// the same pointer can safely read the DEAD tag without UAF.  Reachability
+// via this root prevents ASan/LSan from reporting them as leaks.
+//
+// The registry itself is heap-allocated and deliberately NEVER deleted.  A
+// static-storage std::vector<> has its destructor run at exit() time BEFORE
+// LSan's atexit check fires; the resulting "all pointers freed by static dtor"
+// state makes LSan classify the retained shells as leaks anyway.  Using a raw
+// heap pointer that is never freed keeps the shells reachable during LSan's
+// scan window and suppresses the false-positive.  The leaked registry object
+// is small (one std::vector control block per process) and harmless.
+//
+// fixpp_engine_destroy is SINGLE_THREAD ([2i §4.10]) so no lock is needed.
+static std::vector<fixpp_engine_t*>* s_dead_shells = // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+    new std::vector<fixpp_engine_t*>();
+
 void fixpp_engine_destroy(fixpp_engine_t* engine) {
     if (engine == nullptr) {
         return;  // NULL-safe
     }
     // Tombstone check ([2i §4.2.1]): a second fixpp_engine_destroy(eng) on the
-    // same pointer is a no-op. The shell is intentionally NOT freed by the first
-    // destroy (see capi_internal.hpp SHELL LEAK note), so this read is always safe
-    // regardless of how many times destroy is called with the same pointer.
+    // same pointer is a no-op.  The shell is retained in s_dead_shells (not freed)
+    // after the first destroy, so this tag read is always safe — no UAF possible.
     if (engine->tag_ == FIXPP_HANDLE_TAG_DEAD) {
         return;  // already destroyed — idempotent, no UAF
     }
@@ -237,12 +254,14 @@ void fixpp_engine_destroy(fixpp_engine_t* engine) {
     // FIXPP_ERR_INVALID_HANDLE safely (finding #2 fix).
     engine->engine_.reset();
 
-    // Tombstone the handle and return WITHOUT deleting the shell. The shell is
-    // intentionally leaked so a second fixpp_engine_destroy(eng) on the same
-    // pointer can read the DEAD tag above and return immediately with no UAF.
-    // Engine shells are small and process-lifetime; the leak is acceptable per
-    // the design caution ([2i §4.2.2] / capi_internal.hpp SHELL LEAK note).
+    // Tombstone the handle then retain the shell in s_dead_shells.  The shell is
+    // never freed: the dead-shell registry provides a reachable root (LSan
+    // mark-sweep does not report it as a leak) while the tag guarantees the
+    // second-destroy read-of-DEAD is safe from any thread that still holds the
+    // original pointer.  See [2i §4.2.2] and the SHELL RETAIN note in
+    // capi_internal.hpp.
     engine->tag_ = FIXPP_HANDLE_TAG_DEAD;
+    s_dead_shells->push_back(engine);
 }
 
 }  // extern "C"

@@ -133,8 +133,8 @@ struct fixpp_session {
 // Handle-liveness tag constants ([2i §4.2.2]). Stored in each handle struct at a
 // known offset so fixpp_engine_destroy (and future entry-point guards) can detect
 // an already-destroyed handle without dereferencing its (freed) internals. The
-// dead tag is written AT THE END of destroy BEFORE the shell exits scope (shell is
-// leaked, not freed — see destruction note below). [const §XVI.3]
+// dead tag is written AT THE END of destroy before the shell is appended to the
+// retained-shell registry (see SHELL RETAIN note below). [const §XVI.3]
 static constexpr std::uint32_t FIXPP_HANDLE_TAG_ENGINE = 0xF1ECE001u;
 static constexpr std::uint32_t FIXPP_HANDLE_TAG_DEAD   = 0xDEADD1EDu;
 
@@ -148,21 +148,23 @@ static constexpr std::uint32_t FIXPP_HANDLE_TAG_DEAD   = 0xDEADD1EDu;
 //              calls std::terminate;
 //   engine_    reset next — MUST be stopped() (~Engine asserts stopped(),
 //              engine.hpp:233); after reset, engine_.has_value() == false;
-//   work_guard_ / ioc_ left alive in the shell (see SHELL LEAK note below);
+//   work_guard_ / ioc_ left alive in the shell (see SHELL RETAIN note below);
 //   app_ / clock_ LAST — a parked sleep's deregister hook reaches into the clock
 //              pimpl at io_context teardown (system_clock_source F2 belt #2), so
 //              the clock must outlive ioc_; both also back EngineConfig copies
 //              held inside engine_, so they must outlive engine_ too.
 //
-// SHELL LEAK ([2i §4.2.1] double-destroy idempotency): fixpp_engine_destroy sets
-// tag_ = FIXPP_HANDLE_TAG_DEAD and returns WITHOUT deleting the engine struct.
-// The shell is intentionally leaked so that a second fixpp_engine_destroy(eng) on
-// the same pointer can read the DEAD tag and return immediately — no UAF. The
-// same reasoning protects session handle pointers (stored in sessions_ which stays
+// SHELL RETAIN ([2i §4.2.1] double-destroy idempotency): fixpp_engine_destroy sets
+// tag_ = FIXPP_HANDLE_TAG_DEAD, then pushes the shell pointer into a
+// process-global `s_dead_shells` vector (engine.cpp).  The shell is never freed;
+// the registry root keeps the entire graph (shell + sessions_ entries) reachable,
+// so ASan/LSan do not report a leak.  A second fixpp_engine_destroy(eng) reads
+// the DEAD tag on the retained shell and returns immediately — no UAF.  The same
+// reasoning protects session handle pointers (stored in sessions_ which stays
 // alive in the shell): after engine destroy, check_session sees
 // !engine_->engine_.has_value() and returns FIXPP_ERR_INVALID_HANDLE without any
-// UAF. Engine shells are small (< 200 bytes) and long-lived (process lifetime);
-// the intentional leak is acceptable. [2i §4.2.2] / findings Q1.
+// UAF. Engine shells are small (< 200 bytes) and process-lifetime; the retained
+// allocation is acceptable. [2i §4.2.2] / findings Q1.
 //
 // NB (L-050-2): do NOT fork() a process holding a live fixpp_engine_t — fork()
 // copies only the calling thread, leaving a dead worker (feedback_fork_
