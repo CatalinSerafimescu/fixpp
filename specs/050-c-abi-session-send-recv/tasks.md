@@ -1,0 +1,157 @@
+---
+description: "Task list — 050-c-abi-session-send-recv (C-ABI Feature B)"
+---
+
+# Tasks: C ABI engine surface — Feature B (session lifecycle, message send, receive callback)
+
+**Input**: Design documents from `specs/050-c-abi-session-send-recv/`
+**Prerequisites**: plan.md ✔, spec.md ✔ (3 user stories, all P1), research.md (D-1..D-12), data-model.md (E-1..E-7), contracts/ (4).
+
+**Tests**: REQUIRED (constitution Article VII §3 + the spec requests explicit batteries: SC-001..008, `tests/capi/*`). TDD ordering — write the test, see it FAIL, then implement.
+
+**Build caps** (WSL2, per memory): `-j2` max; sanitizer presets ONE AT A TIME; never Linux+Windows builds in parallel.
+
+**Symbol surface (21 new exported `fixpp_*`)** — engine: `fixpp_engine_create/start/destroy`; engine-config: `fixpp_engine_config_create/set_worker_threads/set_realtime_clock/destroy`; session: `fixpp_session_open/close/is_established/send/register_callback`; session-config: `fixpp_session_config_create/set_comp_ids/set_begin_string/set_role/set_heartbeat_seconds/set_security/set_dictionary/set_reset_on_logon/destroy`. Plus the `fixpp_recv_cb` typedef. **No new `FIXPP_ERR_*` codes** — the session/app error block is **DEFERRED (L-050-4)**; the 5 reachable session/app arms (119/77/129/130/131) stay `FIXPP_ERR_UNKNOWN`, no `error.h`/`translate()`/`error_codes_v1.txt`/occupancy delta.
+
+---
+
+## Phase 1: Setup (Shared Infrastructure)
+
+**Purpose**: grounding + build wiring so every later task compiles.
+
+- [X] T001 Read the anchors before writing code: `.specify/2i-capi.md` (shape, `[2i §4.2/4.3/4.6/4.9/4.10/5.2/10]`), Feature A's shipped surface (`include/fix/c_api/{handles,error,version,export,c_api}.h`, `src/capi/{error,version,handles}.cpp`, `tests/abi/golden/fixpp_capi_symbols.txt`, `tools/abi_history/error_codes_v1.txt`, `tools/check_capi_{occupancy,reentrancy}.sh`), and the real C++ surface (`include/fixpp/session/{engine,session,application,engine_config,session_config}.hpp`, `src/session/{engine,session,seqnum_manager}.cpp`). Confirm the `## Gate A → Round 1 deviations` (send=THREAD_SAFE) + `Round 2 decisions` (LEAVE threading-block) + the round-3 reachable-arm set in plan.md.
+- [X] T002 [P] Wire `src/capi/CMakeLists.txt`: add `engine.cpp`, `session.cpp`, `config.cpp` to `fixpp_capi_objects`; ensure the OBJECT lib links the existing `fixpp_session` (Engine/Session/Application) + `fixpp_core` (error) targets. (No new third-party dep.)
+- [X] T003 [P] Wire `tests/capi/CMakeLists.txt`: register the four new targets `lifecycle_test`, `send_recv_test`, `error_block_test`, `thunk_split_test`; link the C-ABI lib + GoogleTest + the `tests/interop/support` loopback harness + `tests/support/minimal_dictionary.hpp` (test-supplied dict seam, L-050-1). The pure-C linkage smoke (SC-003) compiles a `.c` TU against the headers. ✅ DONE: tests/capi/CMakeLists.txt registers lifecycle/send_recv/error_block/thunk_split (+ recv_alloc_guard, config_builders, lifecycle_negative); pure-C linkage smoke via capi_version_smoke.c + handles_compile_test.c (SC-003).
+- [X] T004 Confirm the `capi → session`/`capi → core` layering is whitelisted in `tools/check_layers.py` + `.specify/architecture.md` (Feature A activated `capi/`; Feature B adds TUs linking `fixpp_session` — extend the whitelist row if `engine.cpp`/`session.cpp`/`config.cpp` are not yet covered). Run `tools/check_layers.py` → green. ✅ DONE: tools/check_layers.py green (`OK — no layer violations`); capi→session/core layering clean.
+
+---
+
+## Phase 2: Foundational (Blocking Prerequisites)
+
+**⚠️ CRITICAL**: the public header skeleton, the error block, the config builders, and the internal event-loop/trampoline scaffold block ALL user stories.
+
+- [X] T005 [P] `include/fix/c_api/handles.h` — add opaque forward typedefs `fixpp_engine_config_t` / `fixpp_session_config_t` (and confirm `fixpp_engine_t`/`fixpp_session_t`/`fixpp_msg_t` from Feature A). Pure C11; no struct layout exposed. (FR-014.)
+- [X] T006 [P] `include/fix/c_api/version.h` + `include/fix/c_api/c_api.h` — bump `FIXPP_C_ABI_VERSION_MINOR` 2 → 3 (0.2.0 → 0.3.0, FR-020); umbrella `c_api.h` includes the new `engine.h` + `session.h`.
+- [X] T007 `include/fix/c_api/engine.h` — NEW: declare `fixpp_engine_create/start/destroy` + the `fixpp_engine_config_*` builder family, each `extern "C"` with its reentrancy doc-block (FR-016/017) and the `[2i §5.2]` thunk-split note. `create` takes `(fixpp_engine_config_t* cfg, uint16_t consumer_major, uint16_t consumer_minor, fixpp_engine_t** out)`; `cfg` CONSUMED-on-success.
+- [X] T008 `include/fix/c_api/session.h` — NEW: declare `fixpp_session_open/close/is_established/send/register_callback` + the `fixpp_session_config_*` builder family + the `fixpp_recv_cb` typedef + the frozen enums `fixpp_session_role {INITIATOR=0,ACCEPTOR=1}` and `fixpp_security_kind {TLS=0,INSECURE_PLAIN_TCP=1}`. Reentrancy doc-blocks per FR-017 (send=THREAD_SAFE w/ the callback carve-out + Gate-A-deviation note; close=SINGLE_THREAD non-callback-caller; is_established=THREAD_SAFE; register_callback=SINGLE_THREAD construction-time). The `register_callback` doc-block MUST state the FR-013a no-blocking-call-from-callback rule.
+- [X] T009 **[DEFERRED — L-050-4] no `FIXPP_ERR_SESSION_*` block; `include/fix/c_api/error.h` gets NO new codes this feature.** `[2i §4.3]` has no published session/app block and publishing per-variant codes would require editing signed-off `[2i]` (forbidden, CHK030). The 5 reachable session/app arms (119/77/129/130/131) stay `FIXPP_ERR_UNKNOWN`; L-049-2 stays open. (FR-015 DEFERRED; data-model E-4.)
+- [X] T010 `src/capi/error.cpp` — **no `translate()` re-point.** Verify the 5 session/app arms (119/77/129/130/131) **remain `FIXPP_ERR_UNKNOWN`** and that `translate()` stays a TOTAL switch (`-Wswitch`, no `default`) **unchanged from Feature A**. The threading-block arms (51/52/53/48/54) keep their existing `THREAD_*` codes; non-reachable session/app/log/otel/oom variants stay `UNKNOWN` (residual L-049-2). No new `fixpp_strerror` strings.
+- [X] T011 [P] **no `tools/abi_history/error_codes_v1.txt` append** (no new codes). Run `tools/check_capi_occupancy.sh` → confirm it stays **GREEN unchanged** (Check A header layout == `[2i §4.3]`; Check B sibling variant-row counts) with no delta from Feature A. ✅ `check_capi_occupancy: OK (Check A: 42 published codes; Check B: 8 source-domain counts)` — no delta.
+- [X] T012 `src/capi/config.cpp` — NEW: the two opaque builder families. Each wraps a heap `EngineConfig`/`SessionConfig` under construction (E-1/E-3); `create` = construction-time thunk; setters validate cheaply (empty CompID → `FIXPP_ERR_CAPI_CONFIG_INVALID`) else defer to open/create; `destroy` NULL-safe; non-`const` consuming pointer semantics (consumed at create/open, invalidated on success, owner-frees on failure — Codex #6). `set_security` typed `(kind, const char* cert, const char* key)`; `set_dictionary(fixpp_dict_t*)` thin pass-through (creation is Feature C; test-supplied seam, L-050-1). The engine `application` is set internally to the trampoline (not consumer-settable).
+- [X] T013 `src/capi/engine.cpp` — NEW (scaffold, no thunks yet): the internal io_context + worker-thread(s) + work-guard owner (D-2) and the `CapiApplication` trampoline class (subclass of `Application`, holds a `SessionId → {fixpp_recv_cb, void* userdata}` map; `fromApp` override is a stub for now). This is the load-bearing structural novelty (engine owns no threads — `engine.hpp:222`); isolate it here. Construct executors INSIDE the worker, honour the no-fork limitation (L-050-2, no code, comment only).
+- [X] T014 [P] `tests/abi/golden/fixpp_capi_symbols.txt` — append all 21 new exported `fixpp_*` symbols (sorted). (FR-018; the per-PR nm gate verifies set == golden AND 0 C++ leak — SC-003.)
+
+**Checkpoint**: headers compile as C11; error block + occupancy green; config builders + event-loop/trampoline scaffold exist. User stories can begin.
+
+---
+
+## Phase 3: User Story 1 — Engine + session lifecycle from C (Priority: P1) 🎯 MVP
+
+**Goal**: a pure-C program creates an engine, opens a session, starts, polls establishment, closes, destroys — no exception crosses the boundary, destroy idempotent incl. never-started.
+
+**Independent Test**: `lifecycle_test` — create→open→start→is_established→close→destroy over the loopback harness; register-after-start rejected; double-destroy + null-destroy no-op; never-started destroy does NOT abort; SC-007 close-breaks-blocked-read on real sockets (TSan).
+
+### Tests for US1 (write FIRST, see them FAIL)
+
+- [X] T015 [P] [US1] `tests/capi/lifecycle_test.cpp` — create/start/destroy + open/close/is_established happy path; **never-started destroy** (`create`→`session_open` fails→`destroy`) asserts no abort (FR-003); double-destroy + NULL-destroy no-op; `session_open` after `engine_start` → domain error (FR-004); `register_callback` after `engine_start` → `FIXPP_ERR_CAPI_CONFIG_INVALID` (FR-011 enforcement — mirrors FR-004; no mutex in coroutine context requires pre-start only); NULL/dead handle → `FIXPP_ERR_NULL_HANDLE`/`INVALID_HANDLE` (FR-006).
+- [X] T016 [P] [US1] In `lifecycle_test.cpp` add the **SC-007** witness — (a) park an established idle session in `async_read`, `fixpp_session_close`, assert prompt teardown by socket-close/cancellation NOT by a deadline elapsing (distinguishing witness) — ✅ `Sc007CloseBreaksBlockedIdleReadPromptly`. (b) **RESCOPED + L-050-y**: the originally-specified LIVE in-flight-`send`-during-`engine_destroy` cancel stimulus is a use-after-free the C-ABI single-thread/quiesce-before-destroy contract forbids (ASan-confirmed), so it is NOT safely expressible through the public C-ABI; the FR-010 `CANCELLED` *mapping* is witnessed by the `error_block_test`/`error_surface_test` oracle, and the safe sequential teardown observable (send after close → `FIXPP_ERR_INVALID_HANDLE`, never abort/UB) is witnessed by `Sc007SendAfterTeardownIsTerminalNotUb`. Multi-threaded (worker drives the read); TSan-clean with `tools/tsan/asio.supp` (the only finding is the documented asio `shared_target_executor` refcount artifact). (E-6.)
+
+### Implementation for US1
+
+- [X] T017 [US1] `src/capi/engine.cpp` — `fixpp_engine_create` thunk: build `EngineConfig` from the consumed builder; stand up the internal io_context+worker; install the `CapiApplication` as `EngineConfig::application`; `new Engine`; record `consumer_minor` (D-9, L-049-1); `consumer_major != 0` → `FIXPP_ERR_VERSION_MISMATCH`; bad config → `*_CONFIG`, no exception escapes (construction-time thunk).
+- [X] T018 [US1] `src/capi/engine.cpp` — `fixpp_engine_start` (once; null clock → `clock_not_set` translated; second call → error) and `fixpp_engine_destroy` (**unconditional** `co_await Engine::stop()` → reset work-guard → join worker → `delete Engine`; NULL/double → no-op — FR-003).
+- [X] T019 [US1] `src/capi/session.cpp` — NEW: `fixpp_session_open` (reject if engine started; `Engine::register_session`; key a non-owning `fixpp_session_t` by `SessionId::from_config`; dup → `session_invalid_argument` 119 → `FIXPP_ERR_UNKNOWN` (publication deferred — L-050-4); builder consumed-on-success) + `fixpp_session_is_established` (`lookup(id)!=null && is_open()`, THREAD_SAFE).
+- [X] T020 [US1] `src/capi/session.cpp` — `fixpp_session_close`: `lookup(id)`; post `Session::close(graceful)` onto the session domain and block on completion (E-6 bridge); translate; invalidate the handle; already-closed → `session_already_closed` (52) → `FIXPP_ERR_THREAD_SESSION_LIFECYCLE` (existing). Use ASIO native cancellation that closes the transport (FR-005; SC-007).
+- [X] T021 [US1] Apply the FR-017 reentrancy annotations to every US1 symbol + run `tools/check_capi_reentrancy.sh` → green for the lifecycle + config-builder symbols. ✅ DONE: tools/check_capi_reentrancy.sh green (one class per exported symbol; lifecycle + config-builder symbols).
+
+**Checkpoint**: US1 fully functional + independently testable (MVP). Build + `lifecycle_test` green (debug + TSan).
+
+---
+
+## Phase 4: User Story 2 — Send a message over an open session (Priority: P1)
+
+**Goal**: a C consumer sends a committed wire-frame byte span and learns the outcome as a stable code; durable-before-transmit honoured by reference; the session-domain error surface is live + downgrade-correct.
+
+**Independent Test**: send returns success + peer receives; the reachable error arms map to their published codes (incl. `store_seqnum_overflow`→STORE_RUNTIME via a restored-at-`seqnum_max` session, and `wire_frame_too_large`→WIRE_LIMIT_EXCEEDED on an oversized frame); cancellation → uniform code; steady-state abort on synthetic throw; downgrade live.
+
+### Tests for US2 (write FIRST, see them FAIL)
+
+- [X] T022 [P] [US2] `tests/capi/error_block_test.cpp` — mutation-tested per-row oracle (D-11), reframed for the **L-050-4 descope**: the 5 **deferred** session/app arms (119/77/129/130/131) map to `FIXPP_ERR_UNKNOWN` (the documented deferred set — no newly-published arms, so NO "flip-off-UNKNOWN → RED" oracle); each existing-published arm (threading-block, `store_seqnum_overflow`/STORE_RUNTIME, `wire_frame_too_large`/WIRE_LIMIT_EXCEEDED, CANCELLED) still maps to its existing code (not silently re-pointed). (FR-015 DEFERRED / SC-005 DEFERRED.)
+- [X] T023 [P] [US2] In `error_block_test.cpp` add **SC-004** downgrade-live **at the real minor-2 boundary** (post-L-050-4 there is NO minor-3 code; `error.cpp` `kIntroducingMinor=2` for all codes — the spec's old "minor-3" framing was stale, reconciled by `/analyze` F2): on the send-path composition `translate_for_consumer(translate(e), minor)`, a reachable published code (`store_seqnum_overflow`→`STORE_RUNTIME`) downgrades to `FIXPP_ERR_UNKNOWN` for `consumer_minor < 2` and is preserved for `≥ 2`; a deferred arm composes to `UNKNOWN` at any minor (L-049-1). The end-to-end create→send→downgraded-return witness lands with T026/T028 (pure-fn witness is T023). The minor-3-specific session-code sub-witness is deferred WITH the L-050-4 block.
+- [X] T024 [P] [US2] `tests/capi/thunk_split_test.cpp` — **SC-006**: throw into the steady-state `fixpp_session_send` thunk → SIGABRT (`sigaction`+`sigsetjmp/siglongjmp` trap); a throw into a construction-time thunk (create/open/start) → `*_CONFIG` + NO abort. ✅ All 3 arms green: abort-trap mechanism, construction-time-no-abort, and `SteadyStateSendThrowAborts` (the steady-state throw is armed via a minimal `FIXPP_TEST_HOOKS` seam — `fixpp_capi::detail::set_send_throw_hook`, mirroring the `engine.hpp` `test_hook_*` idiom — since `Session::send` is `noexcept` so no input-driven throw reaches the C-ABI catch; mutation-proved RED by swapping `std::abort()`→`return`).
+
+### Implementation for US2
+
+- [X] T025 [US2] `src/capi/session.cpp` — `fixpp_session_send(session, const uint8_t* frame, size_t len)`: map to `Engine::send(SessionId, span<const byte>)`; **steady-state** thunk (escaping exception → fatal-log + `std::abort`, NOT translated — FR-008/019); durable-before-transmit honoured by reference (FR-009, `[2e §6.1.4]`); borrowed-frame discipline (caller may free on return). Reentrancy `FIXPP_THREAD_SAFE` with the receive-callback carve-out (FR-017/FR-013a).
+- [X] T026 [US2] Ensure the send-path return codes match data-model E-4 exactly: `OK`; the **deferred** app arms 129/130/131 + session arms 77/119 → `FIXPP_ERR_UNKNOWN` (publication deferred — L-050-4); `WIRE_LIMIT_EXCEEDED` (30, oversized frame); `STORE_RUNTIME` (60, `store_seqnum_overflow`); `THREAD_SESSION_LIFECYCLE` (52, send-vs-close TOCTOU); `CANCELLED` (uniform, FR-010). NO `store_io_failure` (I-07-swallowed, L-050-3). All run through `translate_for_consumer`. ✅ DONE: send-path return set matches data-model E-4 (asserted in error_block_test; deferred 77/119/129/130/131→UNKNOWN per L-050-4; WIRE_LIMIT_EXCEEDED/STORE_RUNTIME/THREAD_SESSION_LIFECYCLE/CANCELLED unchanged; no store_io_failure per L-050-3); all via translate_for_consumer.
+- [X] T027 [US2] Run `tools/check_capi_reentrancy.sh` → green for `fixpp_session_send`; build + `error_block_test` + `thunk_split_test` green (debug + ASan + UBSan). ✅ DONE: check_capi_reentrancy green for fixpp_session_send; error_block_test + thunk_split_test green debug + ASan + UBSan (+ TSan).
+
+**Checkpoint**: US1 + US2 work independently. Session-domain error surface live; downgrade live (SC-004/005); thunk split proven (SC-006).
+
+---
+
+## Phase 5: User Story 3 — Receive inbound messages via a registered callback (Priority: P1)
+
+**Goal**: a registered C callback fires on inbound application messages with an inbound `fixpp_msg_t` valid only inside the dispatch window; no further callbacks after close.
+
+**Independent Test**: register callback → loopback peer sends → callback fires with a readable inbound handle + the registered user-data; inbound handle invalid after return (ASan); no callbacks after close; the D-10 supported reply path (copy-out-then-send-from-a-drain-thread) completes.
+
+### Tests for US3 (write FIRST, see them FAIL)
+
+- [X] T028 [P] [US3] `tests/capi/send_recv_test.cpp` — the **HEADLINE SC-001 + SC-008** round-trip (D-11): two C-ABI engines (initiator A + acceptor B) over loopback plaintext TCP, each its own io_context+worker; A logs on to B → both poll `is_established` → A sends an app frame → B's on-strand callback receives + copies out + **replies from a drain thread** (D-10 supported path) → A's callback receives the reply → both graceful-close → both destroy. Test-supplied dictionary (L-050-1).
+- [X] T029 [P] [US3] In `send_recv_test.cpp` add **SC-008**: a use-after-return on the inbound `fixpp_msg_t` (retained past the callback) is caught under **ASan** (negative test) — the `[2i §4.6]` dispatch-window lifetime; and assert no callbacks fire for a session after `fixpp_session_close` (FR-012). ✅ ASan caught `stack-use-after-return` on the retained view (witness fires → process aborts = the lifetime is enforced; the ASan ctest sweep filters `-*UseAfterReturn*` for its green line, witness captured manually); `NoCallbacksAfterClose` green (debug).
+- [X] T030 [P] [US3] In `send_recv_test.cpp` witness the **FR-013a** SUPPORTED path only (D-10): copy-out-then-send-from-a-drain-thread completes (no watchdog "prove it hangs" test). The completing reply path IS the positive proof. ✅ `TwoEngineRoundTripReplyFromDrainThread` — A's callback receives B's drain-thread reply; mutation-proved RED by suppressing the trampoline callback.
+
+### Implementation for US3
+
+- [X] T031 [US3] `src/capi/session.cpp` — `fixpp_session_register_callback(session, fixpp_recv_cb, void* userdata)`: construction-time thunk (MUST precede `fixpp_engine_start`); if called after engine started, return `FIXPP_ERR_CAPI_CONFIG_INVALID` (enforcement mirrors FR-004 for `session_open` — the map is read on-strand without a mutex so a post-start call is a data race); else populate the `CapiApplication` `SessionId→{cb,userdata}` map.
+- [X] T032 [US3] `src/capi/engine.cpp` — implement the `CapiApplication::fromApp` trampoline: on the session strand, wrap the `MessageView` in a stack `fixpp_msg_t`, look up `{cb,userdata}`, invoke the C callback inside a `try/catch(...)` → fatal-log + `std::abort` (steady-state on-strand invariant; zero-global-heap-alloc per `[const §VIII.5]`); the inbound handle is engine-owned + destroyed at parse-window close (FR-012). No-op (accept) if no callback registered.
+- [X] T033 [US3] Run `tools/check_capi_reentrancy.sh` → green for `register_callback` (the callback's on-strand dispatch = REQUIRES_SESSION_LOCK is a typedef contract, documented); build + `send_recv_test` green (debug + ASan + TSan). ✅ reentrancy gate OK; `send_recv` green debug + ASan (clean) + TSan (clean with `asio.supp`).
+
+**Checkpoint**: full round-trip (SC-001) green; all 3 user stories independently functional.
+
+---
+
+## Phase 6: Polish & Cross-Cutting Concerns
+
+- [X] T034 [P] Confirm **SC-002** (100% of the 21 new symbols carry exactly one reentrancy class, 0 unannotated) via `tools/check_capi_reentrancy.sh` both directions; **SC-003** (nm symbol-golden == exported set AND 0 C++ leak) via the per-PR nm gate on the branch with the updated golden. ✅ reentrancy gate OK; nm golden = 32 `fixpp_*` symbols, MATCHES `tests/abi/golden/fixpp_capi_symbols.txt` (the `FIXPP_TEST_HOOKS` seam setter is `fixpp_capi::detail` — local in the `.so` via `fixpp_capi.map`, not a `fixpp_*` export, 0 C++ leak in the public surface).
+- [X] T034a [P] **§VIII.5 zero-global-alloc gate** (the trampoline hot path, FR-013): assert NO global heap allocation fires on the on-strand `CapiApplication::fromApp` callback path under `LD_PRELOAD=tools/mallocnesia/libmallocnesia.so`. ✅ `tests/capi/recv_alloc_guard_test.cpp` invokes the PRODUCTION `CapiApplication::fromApp` **synchronously** (10⁴ corpus) under the mallocnesia guard markers — the literal "run send_recv round-trip under LD_PRELOAD" phrasing would FALSE-PASS because the round-trip never calls `alloc_guard_start/end` (the worker-thread callback can't be bracketed from the test thread); the synchronous-invoke idiom matches `tests/alloc_guard/test_session_alloc_guard.cpp`. `capi_recv_alloc_guard_mallocnesia` ctest entry green (0 allocs); mutation-proved by injecting a `new`/`delete` into `fromApp` → mallocnesia intercepted + failed. No TU-local operator-new override (sanitizer-safe, `feedback_operator_new_witness_breaks_sanitizers`).
+- [X] T035 [P] `fixpp_version()` reflects 0.3.0; the `version.h`/`c_api.h` bump is consistent; `fixpp_decimal_t` PoD untouched (Article X §3). ✅ `version.h` MAJOR=0/MINOR=3/PATCH=0; `tests/capi/version_test.cpp` exact-value assertions updated `0.2.0`→`0.3.0` (the full-ctest sweep caught the stale `CApiVersionIsExactly_0_2_0` — the version bump's missing test counterpart); `capi_version` 7/7 green.
+- [X] T036 [P] Add the Behaviors & Limitations rows to `spec/behaviors-and-limitations.md`: B-050-* (the C-ABI session/send/receive surface) + L-050-1 (round-trip dict blocked on Feature C), L-050-2 (no fork() holding a live engine), L-050-3 (store I/O failure I-07-swallowed on send), **L-050-4 (published session/app C-ABI error block deferred to a dedicated `[2i §4.3]` amendment — reachable session/app arms stay `FIXPP_ERR_UNKNOWN`, L-049-2 stays open)**, L-050-x (lifecycle callbacks / non-blocking send deferred). ✅ DONE: B-050-1 (register-then-start-once lifecycle + owns-the-loop + open≠connected), B-050-2 (send = application payload, THREAD_SAFE, session stamps header+34), B-050-3 (receive callback sync-on-strand + inbound-valid-for-callback-only + FR-013a no-blocking-call + no-callbacks-after-close) added at the section head; L-rows L-050-1/4/5/y + L-050-3 (store-I/O-on-send I-07 swallow) + L-050-x (lifecycle callbacks / non-blocking send deferred) added. L-050-2 (no fork() holding a live engine) is documented in `capi_internal.hpp` (not duplicated).
+- [X] T037 Run the local Tier-1 mirror prep: full unfiltered `ctest` (public-header change → run FULL ctest, not a prefix filter — memory `feedback_speckit_verify_prefix_filter_misses_header_consumers`); commit/stash any dirty tree first (codegen graph-check is a git-cleanliness gate). ✅ full `ctest` 507/509 pass; the 2 failures were (1) stale `capi_version` 0.2.0 assertion — FIXED to 0.3.0 (T035), now green; (2) `codegen-build-graph-check` — the documented `git status --porcelain` cleanliness gate (17/18 sub-checks pass; lone failure = untracked 050 test files), passes once the tree is committed at merge. No real-defect failures.
+
+### Mandatory close-out tasks (ALWAYS emit — Gate-B preconditions, Article XVII §8)
+
+- [X] T038 [P] **Catalogue close-out**: flip `spec/feature-catalogue.md` rows **CA-005 / CA-006 / CA-007** → `done` with the PR/evidence ref, and add/update their `spec/coverage-index.md` entries. ✅ DONE (gate-b/r1 2026-06-24): CA-005/006/007 flipped to `done` with PR #147 + test evidence; coverage-index entry added for 050.
+- [X] T039 **Feature-completeness audit (FINAL task)**: assert against the merged tree that (i) every `tasks.md` row is `[X]` or carries an explicit waiver; (ii) every FR-001..022 and SC-001..008 maps to a landed test AND landed implementation — **EXCEPT FR-015 and SC-005, which are DEFERRED (not landed), waived via L-050-4** (the session/app block needs an `[2i §4.3]` amendment, out of scope; L-049-2 stays open). Read these two as deferred-not-gaps. **SC-004 is MET (not deferred): witnessed at the real minor-2 downgrade boundary; only its minor-3-specific sub-witness is deferred WITH the L-050-4 block — distinct from SC-005, whose criterion is unmeetable** (`/analyze` F2). **SC-001 binds transport via a documented test-only seam (L-050-5) parallel to the L-050-1 dict seam — not a coverage gap** (`/analyze` F1); (iii) CA-005/006/007 are `done` with matching `coverage-index.md` entries. Record the verdict (100% or fully-waived) in `.specify/decisions/050-c-abi-session-send-recv-verify.md` `## Completeness` (or a sibling `-completeness.md`). HARD `/gate-b` precondition (Article XVII §8 / pre-flight 4d). ✅ DONE: completeness audit recorded in .specify/decisions/050-c-abi-session-send-recv-verify.md `## Completeness`.
+
+---
+
+## Dependencies & Execution Order
+
+- **Phase 1 Setup** → **Phase 2 Foundational** (BLOCKS all stories: headers + error block + config builders + event-loop/trampoline scaffold) → **Phase 3 US1** → **Phase 4 US2** → **Phase 5 US3** → **Phase 6 Polish**.
+- US1 is the MVP and the lifecycle prerequisite for US2 (needs an open+started session to send) and US3 (needs an open session to receive). US2 and US3 are otherwise independent of each other.
+- The error-surface tasks (T009–T011) are now **verify-only** under the L-050-4 descope (no new codes / no `translate()` re-point / no occupancy delta); `translate()` stays unchanged from Feature A. The downgrade wiring (T017 records `consumer_minor`) is exercised by the US2 `error_block_test` with a SYNTHETIC minor-3 code (SC-004).
+
+### Within each story
+
+- Tests written and FAILING before implementation (TDD).
+- Headers/config/scaffold (Phase 2) before any thunk.
+- `src/capi/session.cpp` open/is_established (T019) before close (T020) before send (T025) before register_callback (T031).
+
+### Parallel opportunities
+
+- Phase 1: T002/T003 [P]; Phase 2: T005/T006/T011/T014 [P] (different files); the test files T015/T022/T024/T028 [P] (different test TUs).
+- US2 and US3 implementation can proceed in parallel once US1 lands (different concerns in `session.cpp`/`engine.cpp` — coordinate the shared files).
+
+---
+
+## Implementation Strategy
+
+**MVP** = Phase 1 + Phase 2 + Phase 3 (US1 lifecycle): a C program can create/open/start/poll/close/destroy. **Then** US2 (send + error surface) → US3 (receive callback, closes the round-trip SC-001) → Polish + close-out. Build `-j2`; sanitizer presets ONE AT A TIME; full unfiltered ctest before Gate B (public-header change).
+
+## Notes
+
+- The headline `send_recv_test` drives BOTH ends through the C ABI (no mock transport — a mock hides SC-007). Lighter cases use the one-C-ABI-side + one-C++-side `tests/interop/support` harness.
+- Inbound-handle UAF (SC-008) and the steady-state abort (SC-006) are negative tests; the D-10 deadlock is witnessed by the SUPPORTED path completing, not a watchdog.
+- Deferred (recorded so the completeness audit reads them as intentional, not gaps): the published session/app error block (FR-015 / SC-005 → **L-050-4**; reachable session/app arms stay `FIXPP_ERR_UNKNOWN`, L-049-2 stays open), lifecycle callbacks (L-050-x), app-reject-from-callback (D-4), multi-thread executor (D-2), post-start registration (D-1/D-4), outbound `fixpp_msg_*` construction (Feature C).

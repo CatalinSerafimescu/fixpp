@@ -42,6 +42,8 @@ extern "C" {
 #include "fix/c_api/version.h"  // NOLINT(misc-include-cleaner): fixpp_version_t + accessors + C-ABI macros
 #include "fix/c_api/handles.h"  // NOLINT(misc-include-cleaner): opaque handle catalogue
 #include "fix/c_api/decimal.h"  // NOLINT(misc-include-cleaner): decimal boundary functions
+#include "fix/c_api/engine.h"   // NOLINT(misc-include-cleaner): engine lifecycle + engine-config builder (CA-005)
+#include "fix/c_api/session.h"  // NOLINT(misc-include-cleaner): session lifecycle/send/recv + session-config builder (CA-005/006/007)
 
 /* ── Version accessor ───────────────────────────────────────────────────── */
 /**

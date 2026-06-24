@@ -23,11 +23,12 @@ TEST(CapiVersion, CApiVersionMatchesPatchMacro) {
     EXPECT_EQ(v.patch, static_cast<uint16_t>(FIXPP_C_ABI_VERSION_PATCH));
 }
 
-// Concrete value assertions (AC-2: MAJOR=0, MINOR=2, PATCH=0 for this feature)
-TEST(CapiVersion, CApiVersionIsExactly_0_2_0) {
+// Concrete value assertions (MAJOR=0, MINOR=3, PATCH=0 — 050 Feature B additive
+// MINOR bump from 0.2.0 for the 21 new exported session/engine symbols, FR-020).
+TEST(CapiVersion, CApiVersionIsExactly_0_3_0) {
     fixpp_version_t v = fixpp_version();
     EXPECT_EQ(v.major, uint16_t{0});
-    EXPECT_EQ(v.minor, uint16_t{2});
+    EXPECT_EQ(v.minor, uint16_t{3});
     EXPECT_EQ(v.patch, uint16_t{0});
 }
 
@@ -38,8 +39,8 @@ TEST(CapiVersion, CompositeMacroValue) {
         (static_cast<uint32_t>(FIXPP_C_ABI_VERSION_MINOR) << 8u) |
         static_cast<uint32_t>(FIXPP_C_ABI_VERSION_PATCH);
     EXPECT_EQ(static_cast<uint32_t>(FIXPP_C_ABI_VERSION), expected);
-    // Exact numeric value for MAJOR=0, MINOR=2, PATCH=0
-    EXPECT_EQ(static_cast<uint32_t>(FIXPP_C_ABI_VERSION), uint32_t{(0u << 16u) | (2u << 8u) | 0u});
+    // Exact numeric value for MAJOR=0, MINOR=3, PATCH=0
+    EXPECT_EQ(static_cast<uint32_t>(FIXPP_C_ABI_VERSION), uint32_t{(0u << 16u) | (3u << 8u) | 0u});
 }
 
 // ── Library version accessors ─────────────────────────────────────────────────
