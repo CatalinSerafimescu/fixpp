@@ -138,13 +138,25 @@ target_link_libraries(capi_send_recv_test PRIVATE
   GTest::gtest_main
 )
 target_include_directories(capi_send_recv_test PRIVATE ${FIXPP_CAPI_FEATURE_B_INCLUDES})
-add_test(NAME capi_send_recv COMMAND capi_send_recv_test)
-# T029 (InboundHandleUseAfterReturnCaughtUnderAsan) deliberately dereferences a
-# dangling pointer inside the ASan-gated block to prove ASan fires; the process
-# ABORTS, so under the ASan preset the test binary exits non-zero. Mark it
-# WILL_FAIL so ctest treats the abort-exit as a pass.
+# Split into two ctest entries so WILL_FAIL is scoped ONLY to the deliberate
+# ASan UAF witness (T029), not to the positive round-trip tests (CA-006/007).
+# A binary-wide WILL_FAIL would invert a real ASan failure in the positive tests
+# into a pass, silently masking CA-006/007 ASan coverage.
+#
+# capi_send_recv_positive — all tests EXCEPT the ASan UAF witness: must PASS
+#   normally, including under ASan (no WILL_FAIL).
+# capi_send_recv_uaf_negative — ONLY the ASan witness: WILL_FAIL under ASan
+#   (the process aborts on the deliberate stack-use-after-return); the test is
+#   #if-guarded in the source, so without ASan it does not exist and the
+#   negative entry exits 0 (no WILL_FAIL needed outside ASan).
+add_test(NAME capi_send_recv_positive
+    COMMAND capi_send_recv_test
+        --gtest_filter=-CapiSendRecv.InboundHandleUseAfterReturnCaughtUnderAsan)
+add_test(NAME capi_send_recv_uaf_negative
+    COMMAND capi_send_recv_test
+        --gtest_filter=CapiSendRecv.InboundHandleUseAfterReturnCaughtUnderAsan)
 if(FIXPP_ENABLE_ASAN)
-    set_tests_properties(capi_send_recv PROPERTIES WILL_FAIL TRUE)
+    set_tests_properties(capi_send_recv_uaf_negative PROPERTIES WILL_FAIL TRUE)
 endif()
 
 # T034a (US3, FR-013) — §VIII.5 zero-global-alloc gate for the on-strand receive
