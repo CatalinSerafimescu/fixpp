@@ -9,9 +9,10 @@
  * A fixpp_session_t is a NON-owning observer of an engine-owned Session, keyed by
  * the derived SessionId. fixpp_session_open = Engine::register_session (BEFORE
  * fixpp_engine_start); it returns a resolvable handle but the session is NOT yet
- * connected (open != connected). Send takes a COMMITTED wire-frame byte span
- * (not a fixpp_msg_t — the outbound construction surface is Feature C, [2i §10]);
- * inbound delivery hands the callback a fixpp_msg_t valid only for the dispatch
+ * connected (open != connected). Send takes a COMMITTED application-message-
+ * payload byte span (35=<type> + app fields; the session frames it and assigns
+ * MsgSeqNum) — not a fixpp_msg_t (the outbound construction surface is Feature C,
+ * [2i §10]); inbound delivery hands the callback a fixpp_msg_t valid only for the dispatch
  * window. The receive callback runs synchronously ON the session strand.
  */
 
@@ -60,45 +61,50 @@ typedef enum fixpp_security_kind {
 typedef void (*fixpp_recv_cb)(const fixpp_msg_t* inbound, void* userdata);
 
 /* ── Session-config builder (opaque; FR-014) ───────────────────────────────
- * THREAD: SINGLE_THREAD per handle. CONSUMED by fixpp_session_open on success
- * (moved into the registry, invalidated; do NOT destroy afterwards); on failure
- * untouched (caller still owns it). */
+ * Reentrancy: single-thread per handle (each setter below restates the class so
+ * the per-symbol reentrancy gate sees exactly one token). CONSUMED by
+ * fixpp_session_open on success (moved into the registry, invalidated; do NOT
+ * destroy afterwards); on failure untouched (caller still owns it). */
 
+/** Create a session-config builder. Reentrancy: single-thread. */
 FIXPP_API_EXPORT fixpp_error_t fixpp_session_config_create(fixpp_session_config_t** out_cfg);
 
-/** SenderCompID / TargetCompID (both required; empty → config error). */
+/** SenderCompID / TargetCompID (both required; empty → config error).
+ *  Reentrancy: single-thread. */
 FIXPP_API_EXPORT fixpp_error_t fixpp_session_config_set_comp_ids(
     fixpp_session_config_t* cfg, const char* sender, const char* target);
 
-/** BeginString (e.g. "FIX.4.4" / "FIXT.1.1"). */
+/** BeginString (e.g. "FIX.4.4" / "FIXT.1.1"). Reentrancy: single-thread. */
 FIXPP_API_EXPORT fixpp_error_t fixpp_session_config_set_begin_string(
     fixpp_session_config_t* cfg, const char* begin_string);
 
-/** Session role (initiator / acceptor). */
+/** Session role (initiator / acceptor). Reentrancy: single-thread. */
 FIXPP_API_EXPORT fixpp_error_t fixpp_session_config_set_role(
     fixpp_session_config_t* cfg, fixpp_session_role role);
 
-/** Heartbeat interval in seconds. */
+/** Heartbeat interval in seconds. Reentrancy: single-thread. */
 FIXPP_API_EXPORT fixpp_error_t fixpp_session_config_set_heartbeat_seconds(
     fixpp_session_config_t* cfg, uint32_t n);
 
 /** Security profile. `cert`/`key` are PEM file paths (ignored for the plaintext
- *  kind, which requires the explicit insecure opt-in). */
+ *  kind, which requires the explicit insecure opt-in). Reentrancy: single-thread. */
 FIXPP_API_EXPORT fixpp_error_t fixpp_session_config_set_security(
     fixpp_session_config_t* cfg, fixpp_security_kind kind,
     const char* cert, const char* key);
 
 /** Dictionary (required). The dict handle's creation is Feature C
- *  (fixpp_dict_load_*); Feature-B tests supply it via a test-only seam (L-050-1). */
+ *  (fixpp_dict_load_*); Feature-B tests supply it via a test-only seam (L-050-1).
+ *  Reentrancy: single-thread. */
 FIXPP_API_EXPORT fixpp_error_t fixpp_session_config_set_dictionary(
     fixpp_session_config_t* cfg, fixpp_dict_t* dict);
 
-/** Reset sequence numbers on logon. */
+/** Reset sequence numbers on logon. Reentrancy: single-thread. */
 FIXPP_API_EXPORT fixpp_error_t fixpp_session_config_set_reset_on_logon(
     fixpp_session_config_t* cfg, bool reset_on_logon);
 
 /** Destroy a session-config builder. NULL-safe; never-throws. Do NOT call after
- *  the builder was consumed by a successful fixpp_session_open. */
+ *  the builder was consumed by a successful fixpp_session_open.
+ *  Reentrancy: single-thread. */
 FIXPP_API_EXPORT void fixpp_session_config_destroy(fixpp_session_config_t* cfg);
 
 /* ── Session lifecycle ─────────────────────────────────────────────────────*/
@@ -111,7 +117,7 @@ FIXPP_API_EXPORT void fixpp_session_config_destroy(fixpp_session_config_t* cfg);
  * by SessionId; open != connected (poll fixpp_session_is_established). `cfg` is
  * CONSUMED on success.
  *
- * THREAD: SINGLE_THREAD. THUNK: construction-time (catch → *_CONFIG; never throws).
+ * Reentrancy: single-thread. THUNK: construction-time (catch → *_CONFIG; never throws).
  */
 FIXPP_API_EXPORT fixpp_error_t fixpp_session_open(fixpp_engine_t* engine,
                                                   fixpp_session_config_t* cfg,
@@ -125,7 +131,7 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_open(fixpp_engine_t* engine,
  * blocked idle read breaks, FR-005). The handle is invalidated once close
  * returns; there is no separate session-destroy.
  *
- * THREAD: SINGLE_THREAD — non-callback / non-session-strand caller only; no
+ * Reentrancy: single-thread — non-callback / non-session-strand caller only; no
  * concurrent close on the same handle (the thunk posts onto the session domain
  * and BLOCKS, so a callback/strand caller deadlocks — FR-013a).
  */
@@ -137,20 +143,26 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_close(fixpp_session_t* session);
  * Writes *out_established = (Engine::lookup(id) != null && Session::is_open()).
  * A consumer waits on this before sending (open != connected).
  *
- * THREAD: THREAD_SAFE. O(1) lock-free (atomic reader snapshot).
+ * Reentrancy: thread-safe. O(1) lock-free (atomic reader snapshot).
  */
 FIXPP_API_EXPORT fixpp_error_t fixpp_session_is_established(fixpp_session_t* session,
                                                            bool* out_established);
 
 /**
- * fixpp_session_send — send a committed wire-frame byte span (= Engine::send).
+ * fixpp_session_send — send an application-message payload (= Engine::send).
  *
- * `frame`/`len` is a committed wire frame (obtained from Feature C's
- * fixpp_msg_commit, or hand-rolled); send does NOT take a fixpp_msg_t. The frame
- * is borrowed (read-only during the call; the engine deep-copies); the caller may
- * free/reuse on return. Honours durable-before-transmit by reference (FR-009).
+ * `frame`/`len` is an APPLICATION-MESSAGE PAYLOAD as a committed byte span (a
+ * byte buffer, NOT a fixpp_msg_t — [2i §10], decoupled from Feature C's outbound
+ * construction): it MUST lead with "35=<msgtype>\x01" (an application MsgType)
+ * and contain only application fields, SOH-terminated. The session itself stamps
+ * the header/trailer (8/9/49/56/52/10) and ASSIGNS the in-sequence MsgSeqNum(34),
+ * so the payload MUST NOT contain session framing tags (8/9/34/49/52/56/10) at a
+ * field boundary — a payload that does is rejected `app_payload_malformed`
+ * (→ FIXPP_ERR_UNKNOWN, L-050-4) with no transmit. The span is borrowed
+ * (read-only during the call; the engine deep-copies); the caller may free/reuse
+ * on return. Honours durable-before-transmit by reference (FR-009).
  *
- * THREAD: THREAD_SAFE — callable from any consumer thread (the any-thread
+ * Reentrancy: thread-safe — callable from any consumer thread (the any-thread
  * Engine::send contract) EXCEPT from inside the receive callback, where the
  * blocking wrapper deadlocks (FR-013a; recorded Gate-A deviation from
  * [2i §4.10]'s REQUIRES_SESSION_LOCK example).
@@ -170,7 +182,7 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_send(fixpp_session_t* session,
  * fixpp_msg_t and `userdata`. See fixpp_recv_cb for the dispatch-window lifetime
  * and the no-blocking-call-from-callback rule (FR-013a).
  *
- * THREAD: SINGLE_THREAD. THUNK: construction-time.
+ * Reentrancy: single-thread. THUNK: construction-time.
  */
 FIXPP_API_EXPORT fixpp_error_t fixpp_session_register_callback(
     fixpp_session_t* session, fixpp_recv_cb cb, void* userdata);

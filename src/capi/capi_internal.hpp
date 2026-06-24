@@ -40,6 +40,14 @@ namespace fixpp_capi::detail {
 fixpp_error_t translate(fixpp::core::error e) noexcept;
 fixpp_error_t translate_for_consumer(fixpp_error_t code, std::uint16_t consumer_minor) noexcept;
 
+#ifdef FIXPP_TEST_HOOKS
+// SC-006 steady-state-abort seam: arms fixpp_session_send to throw inside its try
+// block so the catch(...)→abort path (FR-008/FR-019) is witnessed. Defined
+// unconditionally in src/capi/session.cpp; only this declaration is gated, so a
+// production caller cannot flip it. Test sets true, calls send (→ abort), restores.
+void set_send_throw_hook(bool on) noexcept;
+#endif  // FIXPP_TEST_HOOKS
+
 // Per-session callback + established state, keyed by SessionId. Inserted ONLY
 // before fixpp_engine_start (fixpp_session_open / fixpp_session_register_callback
 // are construction-time, single-threaded by contract); the map is immutable

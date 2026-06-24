@@ -47,19 +47,22 @@ extern "C" {
  * fixpp_engine_create on success and must NOT be destroyed afterwards; on
  * failure it is untouched and the caller still owns it (must destroy). */
 
-/** Create an engine-config builder. THUNK: construction-time. */
+/** Create an engine-config builder. THUNK: construction-time. Reentrancy: single-thread. */
 FIXPP_API_EXPORT fixpp_error_t fixpp_engine_config_create(fixpp_engine_config_t** out_cfg);
 
-/** Set the worker-thread count for the internal io_context (default 1). */
+/** Set the worker-thread count for the internal io_context (default 1).
+ *  Reentrancy: single-thread. */
 FIXPP_API_EXPORT fixpp_error_t fixpp_engine_config_set_worker_threads(
     fixpp_engine_config_t* cfg, uint32_t n);
 
-/** Install a real-time clock (REQUIRED non-null; Engine::start rejects null). */
+/** Install a real-time clock (REQUIRED non-null; Engine::start rejects null).
+ *  Reentrancy: single-thread. */
 FIXPP_API_EXPORT fixpp_error_t fixpp_engine_config_set_realtime_clock(
     fixpp_engine_config_t* cfg);
 
 /** Destroy an engine-config builder. NULL-safe; never-throws. Do NOT call after
- *  the builder was consumed by a successful fixpp_engine_create. */
+ *  the builder was consumed by a successful fixpp_engine_create.
+ *  Reentrancy: single-thread. */
 FIXPP_API_EXPORT void fixpp_engine_config_destroy(fixpp_engine_config_t* cfg);
 
 /* ── Engine lifecycle ──────────────────────────────────────────────────────*/
@@ -71,7 +74,7 @@ FIXPP_API_EXPORT void fixpp_engine_config_destroy(fixpp_engine_config_t* cfg);
  * return on this engine runs Feature A's forward-compat downgrade
  * (translate_for_consumer). `cfg` is CONSUMED on success (moved in; invalidated).
  *
- * THREAD: SINGLE_THREAD. THUNK: construction-time (catch → *_CONFIG; never throws).
+ * Reentrancy: single-thread. THUNK: construction-time (catch → *_CONFIG; never throws).
  * @return FIXPP_ERR_OK + a non-null owning *out_engine; or a config code (null
  *         *out_engine); FIXPP_ERR_VERSION_MISMATCH if consumer_major != MAJOR.
  */
@@ -87,7 +90,7 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_engine_create(fixpp_engine_config_t* cfg,
  * AFTER all fixpp_session_open calls. A second call returns a domain error; a
  * null clock returns a configuration error.
  *
- * THREAD: SINGLE_THREAD. THUNK: construction-time.
+ * Reentrancy: single-thread. THUNK: construction-time.
  */
 FIXPP_API_EXPORT fixpp_error_t fixpp_engine_start(fixpp_engine_t* engine);
 
@@ -98,7 +101,7 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_engine_start(fixpp_engine_t* engine);
  * engine — ~Engine asserts stopped(); stop() is idempotent from any state,
  * FR-003), resets the work-guard, joins the worker thread(s), deletes the Engine.
  *
- * THREAD: SINGLE_THREAD. Idempotent, NULL-safe, never-throws (NULL / already-
+ * Reentrancy: single-thread. Idempotent, NULL-safe, never-throws (NULL / already-
  * destroyed → no-op).
  */
 FIXPP_API_EXPORT void fixpp_engine_destroy(fixpp_engine_t* engine);

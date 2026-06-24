@@ -16,6 +16,7 @@
 #include <cstdlib>
 #include <memory>
 #include <span>
+#include <stdexcept>
 #include <utility>
 
 #include <asio/co_spawn.hpp>
@@ -30,6 +31,12 @@ namespace {
 
 using fixpp_capi::detail::translate;
 using fixpp_capi::detail::translate_for_consumer;
+
+// SC-006 steady-state-abort test seam: when set, fixpp_session_send throws inside
+// its try block so the catch(...)→abort path (FR-008/FR-019) is witnessed. Always
+// false in production — the setter is FIXPP_TEST_HOOKS-gated (capi_internal.hpp),
+// so a production caller cannot flip it. Zero production overhead: one bool load.
+bool g_send_throw_hook = false;
 
 // Validate a non-owning session handle; resolves the owning engine. Returns the
 // handle code (OK) or NULL/INVALID per the Feature-A discipline.
@@ -150,6 +157,15 @@ fixpp_error_t fixpp_session_close(fixpp_session_t* session) {
         }
     }
     session->valid = false;  // handle invalidated once close returns (no destroy)
+    // Success must NOT be routed through translate_for_consumer: OK is the
+    // universal sentinel (not a minor-gated code), and the sibling ops
+    // (open/send/is_established) return FIXPP_ERR_OK directly on success. Routing
+    // OK through the downgrade would map a clean close to UNKNOWN for a
+    // consumer_minor<2 engine — a misleading success→error flip. Downgrade error
+    // codes only (forward-compat for the deferred session/app block, L-050-4).
+    if (code == FIXPP_ERR_OK) {
+        return FIXPP_ERR_OK;
+    }
     return translate_for_consumer(code, e->consumer_minor);
 }
 
@@ -164,6 +180,11 @@ fixpp_error_t fixpp_session_send(fixpp_session_t* session, const uint8_t* frame,
     }
     fixpp_engine* e = session->engine;
     try {
+        if (g_send_throw_hook) {
+            // SC-006 seam (test-only): force an escaping exception into the
+            // catch(...)→abort below — the steady-state invariant-violation path.
+            throw std::runtime_error("fixpp test seam: forced steady-state throw (SC-006)");
+        }
         std::span<const std::byte> payload{reinterpret_cast<const std::byte*>(frame), len};
         // Engine::send is any-thread-safe (it enrols + exec-hops internally). The
         // borrowed `frame` outlives the call because .get() blocks until send
@@ -205,3 +226,10 @@ fixpp_error_t fixpp_session_register_callback(fixpp_session_t* session, fixpp_re
 }
 
 }  // extern "C"
+
+namespace fixpp_capi::detail {
+// SC-006 send-throw seam setter. Compiled UNCONDITIONALLY (the library TU is built
+// without FIXPP_TEST_HOOKS); only the declaration in capi_internal.hpp is gated, so
+// a production caller cannot reach it (mirrors the file_store.cpp seam idiom).
+void set_send_throw_hook(bool on) noexcept { g_send_throw_hook = on; }
+}  // namespace fixpp_capi::detail
