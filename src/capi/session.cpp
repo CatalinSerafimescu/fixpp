@@ -145,7 +145,17 @@ fixpp_error_t fixpp_session_close(fixpp_session_t* session) {
             // ASIO native cancellation inside close() shuts the transport so a
             // blocked idle read is broken (SC-007).
             try {
-                auto fut = asio::co_spawn(sess->executor(),
+                // Spawn on the underlying strand (asio::any_io_executor), NOT on
+                // the session_executor wrapper.  ASIO type-erases the executor arg
+                // to asio::any_io_executor, which reference-counts the impl; the
+                // session_executor wrapper's ~impl() is what TSan flagged when the
+                // wrapper was type-erased across the caller thread and the worker
+                // thread.  Using the long-lived underlying strand (the precedent at
+                // engine.cpp:1567 / src/session/engine.cpp) avoids the cross-thread
+                // wrapper destruction entirely — the strand's ref-counted impl is
+                // long-lived (Session is alive for the duration of close's .get()).
+                const asio::any_io_executor& close_exec = sess->executor().underlying();
+                auto fut = asio::co_spawn(close_exec,
                                           sess->close(fixpp::session::close_mode::graceful),
                                           asio::use_future);
                 fixpp::core::expected_t<void> r = fut.get();
