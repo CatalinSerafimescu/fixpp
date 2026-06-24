@@ -55,6 +55,14 @@ typedef struct fixpp_msg     fixpp_msg_t;
 typedef struct fixpp_dict    fixpp_dict_t;
 typedef struct fixpp_store   fixpp_store_t;
 
+/* Opaque config-builder handles (CA-005, Feature B, FR-014). Owning: created by
+   fixpp_{engine,session}_config_create, destroyed by *_config_destroy OR consumed
+   (moved into the engine/registry + invalidated) by fixpp_engine_create /
+   fixpp_session_open. Opaque so a future config field is a new setter, not a
+   struct-layout break (Article X). */
+typedef struct fixpp_engine_config  fixpp_engine_config_t;
+typedef struct fixpp_session_config fixpp_session_config_t;
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif
