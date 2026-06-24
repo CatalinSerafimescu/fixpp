@@ -278,6 +278,21 @@ void fixpp_engine_destroy(fixpp_engine_t* engine) {
             }
         }
 
+        // Expire liveness tokens for ALL sessions BEFORE reclaiming the arena.
+        // This covers the "engine destroyed without prior fixpp_session_close" path:
+        // state_.reset() destroys EngineState::engine_ → all Session objects and
+        // their session_arena_ are freed; any outbound fixpp_msg held by the
+        // consumer must see token.lock()==nullptr before any arena dereference.
+        // fixpp_session_close resets its own session's token too (path (a)); this
+        // loop covers the discriminating path (b) where close was NOT called.
+        // Invariant: token expiry happens-before arena teardown on every path (E-9).
+        // [data-model E-9 / feedback_cabi_handle_destroy_needs_tombstone]
+        for (auto& s : engine->sessions_) {
+            if (s) {
+                s->liveness_.reset();
+            }
+        }
+
         // Reclaim the heavy EngineState (ioc_, work_guard_, clock_, engine_,
         // workers_).  Destruction order inside EngineState (reverse declaration):
         //   engine_ first  — stopped(); borrows ioc_ executor (ioc_ still alive)

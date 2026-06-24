@@ -175,6 +175,15 @@ fixpp_error_t fixpp_session_close(fixpp_session_t* session) {
             }
         }
     }
+    // Expire the liveness token so any outbound fixpp_msg handles held by the
+    // consumer see token.lock()==nullptr on their next check-before-deref, and
+    // return FIXPP_ERR_INVALID_HANDLE before touching the (now-closing) arena.
+    // Reset BEFORE the arena is closed (Session::close is already done above);
+    // happens-before guarantee: the reset is sequenced-before return, and any
+    // subsequent weak.lock() from another thread sees nullptr (E-9 UAF-close).
+    // [data-model E-9 / feedback_cabi_handle_destroy_needs_tombstone]
+    session->liveness_.reset();
+
     // Publish the dead state with release semantics so any concurrent THREAD_SAFE
     // consumer (fixpp_session_send / fixpp_session_is_established) that acquires
     // `valid` after this point sees the handle as dead. close() itself is

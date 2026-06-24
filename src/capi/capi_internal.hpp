@@ -13,6 +13,7 @@
 #include <atomic>
 #include <cstdint>
 #include <memory>
+#include <memory_resource>
 #include <optional>
 #include <thread>
 #include <unordered_map>
@@ -60,6 +61,11 @@ struct SessionSlot {
     fixpp_recv_cb cb = nullptr;
     void* userdata = nullptr;
     std::atomic<bool> established{false};
+    // E-6: send (toApp) callback — registered by fixpp_session_register_send_callback
+    // (US6/T018).  Absent (nullptr) → CapiApplication::toApp returns {} (send).
+    // Written pre-start (single-threaded); read on the session strand (fromApp path).
+    fixpp_send_cb send_cb = nullptr;
+    void* send_userdata = nullptr;
 };
 
 // CapiApplication — the single per-engine Application receiver installed as
@@ -107,12 +113,194 @@ struct fixpp_dict {
     std::shared_ptr<const fixpp::dict::Dictionary> dict;
 };
 
-// Inbound message handle (CA-007): a STACK wrapper over the borrowed MessageView
-// handed to fromApp; valid only inside the receive-callback dispatch window
-// ([2i §4.6], FR-012). Read accessors are Feature C; Feature B exposes only the
-// opaque handle + its dispatch-window lifetime.
+// Handle-liveness tag constants ([2i §4.2.2]). Stored in each handle struct at a
+// known offset so fixpp_engine_destroy (and future entry-point guards) can detect
+// an already-destroyed handle without dereferencing its (freed) internals. The
+// dead tag is written AT THE END of destroy before the shell is appended to the
+// retained-shell registry (see SHELL RETAIN note below). [const §XVI.3]
+// PLACED HERE: must precede all handle structs that use these constants as
+// default member initialisers (fixpp_msg::tag_ and fixpp_engine::tag_).
+static constexpr std::uint32_t FIXPP_HANDLE_TAG_ENGINE = 0xF1ECE001u;
+static constexpr std::uint32_t FIXPP_HANDLE_TAG_MSG    = 0xF1EC1E55u;  // live outbound msg
+static constexpr std::uint32_t FIXPP_HANDLE_TAG_DEAD   = 0xDEADD1EDu;
+
+// SessionLiveness — the control-block type for the per-session validity token.
+//
+// The "content" is intentionally empty: the token's sole purpose is to exist
+// (strong-ref alive → session arena live; expired → arena may be freed).  The
+// per-session fixpp_session shell holds the strong shared_ptr<SessionLiveness>;
+// outbound fixpp_msg handles hold a weak_ptr<SessionLiveness> aimed at the same
+// block.  The strong ref is reset on every arena-teardown path BEFORE the arena
+// is freed, so a weak.lock() == nullptr is a safe "arena gone" signal.
+//
+// Expiry paths (E-9 §"MUST cover EVERY arena-reclamation path"):
+//   (a) fixpp_session_close  — resets liveness_ alongside valid=false.
+//   (b) fixpp_engine_destroy — loops sessions_ and resets each liveness_ BEFORE
+//       state_.reset() reclaims EngineState::engine_ (→ Session::session_arena_).
+// [data-model E-9 / feedback_cabi_handle_destroy_needs_tombstone]
+struct SessionLiveness {};
+
+// Outbound accumulator (E-3): arena-resident data structure built by the consumer
+// via set_*/group_begin/etc. (US2/T009).  Declared here so fixpp_msg can hold a
+// pointer to it without a forward-decl forward-decl gap; fully defined below.
+struct OutboundAccumulator;
+
+// Message flavour tag (E-1): distinguishes the two live fixpp_msg shapes.
+enum class FixppMsgFlavour : std::uint8_t {
+    inbound  = 0,  // stack flyweight; view is valid; accumulator == nullptr
+    outbound = 1,  // heap shell; accumulator points into the session arena
+};
+
+// fixpp_msg — dual-flavour message handle (E-1 / data-model §E-1).
+//
+// INBOUND flavour (legacy Feature-B path, no change in observable behavior):
+//   - Constructed on-stack inside CapiApplication::fromApp (engine.cpp); tag_ is
+//     irrelevant for inbound because the handle never outlives the dispatch window.
+//     Tag is set to FIXPP_HANDLE_TAG_MSG for uniformity so check_msg (US2) can
+//     treat both flavours identically for the dead-tag arm.
+//   - `view` points to the borrowed MessageView; `accumulator` is nullptr.
+//   - `token` is default-constructed (expired) — check-before-deref (US2) returns
+//     FIXPP_ERR_INVALID_HANDLE on any set_*/commit call, which is correct for
+//     inbound: E-1 says inbound set_* → FIXPP_ERR_INVALID_HANDLE.
+//
+// OUTBOUND flavour (new in Feature C):
+//   - Heap-allocated by fixpp_msg_create (US2/T009); tag_ = FIXPP_HANDLE_TAG_MSG.
+//   - `accumulator` owns the in-arena accumulator (pointer into session arena);
+//     `view` is nullptr.
+//   - `token` is a weak_ptr<SessionLiveness> set at create-time from the owning
+//     session's liveness_; expires when the session arena is torn down (E-9).
+//     The fixpp_msg shell itself lives OUTSIDE the arena (operator new), so
+//     reading tag_/token after arena teardown is safe — the mechanism closes the
+//     050 arena-UAF class.
+//
+// DESTROYED state: tag_ flipped to FIXPP_HANDLE_TAG_DEAD by fixpp_msg_destroy.
+// TOMBSTONED state: tag_ still FIXPP_HANDLE_TAG_MSG but token.lock() == nullptr.
+//   → check_msg (US2) detects both and returns FIXPP_ERR_INVALID_HANDLE before
+//   any arena dereference.
+//
+// [data-model E-1 / E-9 / feedback_cabi_handle_destroy_needs_tombstone]
 struct fixpp_msg {
+    std::uint32_t        tag_      = FIXPP_HANDLE_TAG_MSG;  // handle-liveness (E-1)
+    FixppMsgFlavour      flavour   = FixppMsgFlavour::inbound;
+
+    // Inbound arm: borrowed MessageView (valid only in receive-callback window).
     const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>* view = nullptr;
+
+    // Outbound arm: pointer to the in-arena accumulator (non-owning; the session
+    // arena owns the allocation).  nullptr for inbound handles.
+    OutboundAccumulator* accumulator = nullptr;
+
+    // Validity token (E-9 lazy tombstone).  Default-constructed = expired, which
+    // is the correct sentinel for inbound (set_* → FIXPP_ERR_INVALID_HANDLE) and
+    // for unset outbound handles.  Set from session->liveness_ at create_outbound
+    // time (US2/T009).
+    std::weak_ptr<SessionLiveness> token;
+};
+
+// OutboundAccumulator — the ordered, mutable, arena-resident structure (E-3).
+//
+// Lives in the session arena; fixpp_msg holds a NON-OWNING pointer to it (NOT
+// inline in fixpp_msg — the token check-before-deref must read tag_/token from a
+// heap shell that survives arena teardown; inlining the accumulator would make
+// that read itself a UAF after arena teardown, defeating the lazy mechanism).
+//
+// Structural shape (E-3, INV-1..5):
+//   msg_type  — the "35=" value (non-empty; INV-1).
+//   entries   — ordered list of scalar and group entries.
+//
+// Each AccumulatorEntry is either:
+//   scalar (tag != 0): tag + value_bytes (INV-2: non-empty after validate).
+//   group  (tag == 0): a list of GroupInstance, each an ordered list of nested
+//                      AccumulatorEntry (recursive for nested groups, FR-012 / E-4).
+//
+// Mutual recursion (AccumulatorEntry ↔ GroupInstance) is broken via
+// std::unique_ptr: GroupInstance holds unique_ptr<AccumulatorEntry>[] elements so
+// that only a POINTER to AccumulatorEntry (not its full layout) is needed at
+// GroupInstance definition time.  AccumulatorEntry is then fully defined after.
+// This is the standard recursive-struct technique; no arena PMR allocator is used
+// for the unique_ptr nodes (the nodes themselves are arena-new'd in US2/T009 via
+// the OutboundAccumulator::arena_ resource pointer passed down the call chain).
+//
+// INVARIANT: every allocation (msg_type, entry value_bytes, vectors, nodes) uses
+// the session arena's memory_resource — no global-heap (INV-5 / [const §VIII.5]).
+// US2/T009 must use `new(arena_->allocate(…)) AccumulatorEntry` patterns or
+// pmr::vector with the resource propagated.
+//
+// All mutation (set_*, add_entry, commit, etc.) is US2/T009 — not present here.
+
+// OutboundAccumulator node types — recursive group tree.
+//
+// The mutual recursion (AccumulatorEntry contains group instances, each instance
+// contains AccumulatorEntry) is broken by defining GroupInstance to store pointers
+// to AccumulatorEntry via a helper opaque list, with the destructor defined after
+// AccumulatorEntry is complete.  See the GroupEntryList / GroupInstance comment.
+//
+// Layout at a glance (E-3):
+//   OutboundAccumulator
+//     .msg_type                   — the 35= value
+//     .entries[]                  — ordered field/group list
+//       AccumulatorEntry (scalar) — tag != 0, value_bytes non-empty
+//       AccumulatorEntry (group)  — tag == 0, instances[]{…AccumulatorEntry…}
+//
+// All mutation (set_*, add_entry, commit) is US2/T009 — only shape here.
+// All arena allocations use OutboundAccumulator::arena_.
+
+// ── Forward declarations for the mutual-recursion cycle ───────────────────
+struct AccumulatorEntry;
+
+// GroupInstance: one repeating-group instance; holds an ordered list of
+// AccumulatorEntry via pmr::vector<AccumulatorEntry>.  Because AccumulatorEntry
+// is not yet complete here, vector operations on the fields member are deferred
+// to .cpp (US2/T009), which sees the full definition.  The struct itself is
+// defined as having a default-constructible vector (no element operations needed
+// here) — this is legal: the vector data-member declaration is fine with an
+// incomplete element type; it's the constructor/destructor/push_back that need
+// completeness, and those are all deferred (user-defined dtors declared = delete
+// here, defined in message_write.cpp after AccumulatorEntry is complete).
+struct GroupInstance {
+    std::pmr::vector<AccumulatorEntry> fields;  // element type complete in message_write.cpp
+
+    // Constructor body deferred: defined in message_write.cpp (US2/T009) after
+    // AccumulatorEntry is fully defined.  See the "GroupInstance_ctor" comment
+    // there.  Only the declaration is emitted here.
+    explicit GroupInstance(std::pmr::memory_resource* mr);
+    ~GroupInstance();
+    GroupInstance(GroupInstance&&) noexcept;
+    GroupInstance& operator=(GroupInstance&&) noexcept;
+    GroupInstance(const GroupInstance&) = delete;
+    GroupInstance& operator=(const GroupInstance&) = delete;
+};
+
+// AccumulatorEntry: a single ordered entry — scalar or group.
+struct AccumulatorEntry {
+    std::uint16_t                   tag = 0;       // 0 == group; non-zero == scalar
+    std::pmr::vector<std::byte>     value_bytes;   // scalar: serialised field bytes
+    std::pmr::vector<GroupInstance> instances;     // group: repeating instances
+
+    explicit AccumulatorEntry(std::pmr::memory_resource* mr)
+        : value_bytes(mr), instances(mr) {}
+
+    ~AccumulatorEntry() = default;
+    AccumulatorEntry(AccumulatorEntry&&) = default;
+    AccumulatorEntry& operator=(AccumulatorEntry&&) = default;
+    AccumulatorEntry(const AccumulatorEntry&) = delete;
+    AccumulatorEntry& operator=(const AccumulatorEntry&) = delete;
+};
+
+// OutboundAccumulator: the arena-resident root of the outbound message tree.
+struct OutboundAccumulator {
+    std::pmr::memory_resource*         arena_;    // session arena (non-owning)
+    std::pmr::string                   msg_type;  // 35= value (INV-1: non-empty)
+    std::pmr::vector<AccumulatorEntry> entries;   // ordered field/group list
+
+    explicit OutboundAccumulator(std::pmr::memory_resource* mr)
+        : arena_(mr), msg_type(mr), entries(mr) {}
+
+    ~OutboundAccumulator() = default;
+    OutboundAccumulator(OutboundAccumulator&&) = default;
+    OutboundAccumulator& operator=(OutboundAccumulator&&) = default;
+    OutboundAccumulator(const OutboundAccumulator&) = delete;
+    OutboundAccumulator& operator=(const OutboundAccumulator&) = delete;
 };
 
 // Session handle (E-2): NON-owning observer keyed by SessionId. Stores the
@@ -128,15 +316,17 @@ struct fixpp_session {
     fixpp_capi::detail::SessionSlot* slot = nullptr;  // borrowed (lives in CapiApplication)
     std::atomic<bool> valid{true};                   // invalidated by close(); atomic for
                                                      // send-vs-close concurrent access (Q2)
-};
 
-// Handle-liveness tag constants ([2i §4.2.2]). Stored in each handle struct at a
-// known offset so fixpp_engine_destroy (and future entry-point guards) can detect
-// an already-destroyed handle without dereferencing its (freed) internals. The
-// dead tag is written AT THE END of destroy before the shell is appended to the
-// retained-shell registry (see SHELL RETAIN note below). [const §XVI.3]
-static constexpr std::uint32_t FIXPP_HANDLE_TAG_ENGINE = 0xF1ECE001u;
-static constexpr std::uint32_t FIXPP_HANDLE_TAG_DEAD   = 0xDEADD1EDu;
+    // Liveness token (E-9): the STRONG owner of the per-session SessionLiveness
+    // control block.  Constructed at session-shell creation time (so a strong ref
+    // exists for the session's whole live span).  Reset on EVERY arena-teardown
+    // path (fixpp_session_close + fixpp_engine_destroy before state_.reset()) so
+    // that outbound fixpp_msg handles' weak_ptr<SessionLiveness>::lock() == nullptr
+    // happens-before the session_arena_ is freed — closing the 050 UAF class.
+    // The shell (fixpp_session) outlives the arena, so liveness_ itself is safe to
+    // read/reset after session close/engine destroy. [data-model E-9]
+    std::shared_ptr<SessionLiveness> liveness_ = std::make_shared<SessionLiveness>();
+};
 
 namespace fixpp_capi::detail {
 

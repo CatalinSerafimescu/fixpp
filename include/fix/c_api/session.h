@@ -60,6 +60,27 @@ typedef enum fixpp_security_kind {
  * and waits. Reply by copying out and sending from a non-callback thread. */
 typedef void (*fixpp_recv_cb)(const fixpp_msg_t* inbound, void* userdata);
 
+/* ── Send (toApp) callback ─────────────────────────────────────────────────
+ * Verdict the send callback returns to steer the originate path.  CLOSED enum —
+ * NOT an alias of fixpp_error_t (so an accidental `return FIXPP_ERR_*` cannot be
+ * a legal send/veto verdict and silently terminal-close the session).
+ * Fixed integer constants for a stable C ABI.
+ * [data-model E-6 / contracts/toapp-callback.md] */
+typedef enum fixpp_toapp_verdict {
+    FIXPP_TOAPP_SEND  = 0,  /**< Proceed — transmit the message. */
+    FIXPP_TOAPP_VETO  = 1,  /**< Suppress — mapped to app_do_not_send. */
+    FIXPP_TOAPP_ERROR = 2   /**< Callback signalled failure — mapped to app_callback_threw. */
+} fixpp_toapp_verdict;
+
+/** Send (toApp) callback type.  Invoked on the session strand BEFORE an
+ *  application message is transmitted.  `outbound` is a read-only framed
+ *  fixpp_msg_t valid only for the duration of the call.  Returns a verdict.
+ *  Any out-of-range value is treated as FIXPP_TOAPP_ERROR.
+ *  Reentrancy: requires-session-lock (runs on exec_; must not allocate
+ *  from the global heap; must not call back into a blocking session API).
+ *  [contracts/toapp-callback.md] */
+typedef fixpp_toapp_verdict (*fixpp_send_cb)(const fixpp_msg_t* outbound, void* userdata);
+
 /* ── Session-config builder (opaque; FR-014) ───────────────────────────────
  * Reentrancy: single-thread per handle (each setter below restates the class so
  * the per-symbol reentrancy gate sees exactly one token). CONSUMED by
