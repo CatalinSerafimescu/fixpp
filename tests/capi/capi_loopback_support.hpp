@@ -82,8 +82,8 @@ inline void set_loopback_endpoint(fixpp_session_config_t* cfg, const char* host,
 inline std::uint16_t acceptor_bound_port(fixpp_engine_t* engine,
                                          const fixpp::session::SessionId& id) {
     auto* e = reinterpret_cast<fixpp_engine*>(engine);
-    if (!e->engine_.has_value()) return 0;
-    return e->engine_->acceptor_bound_endpoint(id).port;
+    if (e->state_ == nullptr || !e->state_->engine_.has_value()) return 0;
+    return e->state_->engine_->acceptor_bound_endpoint(id).port;
 }
 
 // Spin until acceptor_bound_port(engine, id) != 0 or the deadline elapses.

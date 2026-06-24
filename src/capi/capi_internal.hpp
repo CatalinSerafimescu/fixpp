@@ -138,57 +138,94 @@ struct fixpp_session {
 static constexpr std::uint32_t FIXPP_HANDLE_TAG_ENGINE = 0xF1ECE001u;
 static constexpr std::uint32_t FIXPP_HANDLE_TAG_DEAD   = 0xDEADD1EDu;
 
+namespace fixpp_capi::detail {
+
+// LIVE-STATE COUNTER — test seam for L-050-z witness.  Tracks the number of
+// EngineState instances alive at any point.  Incremented in EngineState ctor,
+// decremented in EngineState dtor.  Exposed only via live_state_count() (non-
+// exported, detail namespace); NOT an exported C symbol.  See engine.cpp for
+// the atomic and the accessor.
+long live_state_count() noexcept;
+
+}  // namespace fixpp_capi::detail
+
 // Engine handle (E-1): owns the internal io_context + worker thread(s) + the C++
 // Engine + the trampoline. The C++ Engine owns NO worker threads (engine.hpp:222
 // — "the engine owns NO worker threads"); a C consumer has no executor to
 // supply, so the C-ABI boundary owns one (research D-2).
 //
-// DESTRUCTION (reverse of declaration order) is load-bearing:
-//   workers_   joined first — a joinable std::thread that destructs unjoined
-//              calls std::terminate;
-//   engine_    reset next — MUST be stopped() (~Engine asserts stopped(),
-//              engine.hpp:233); after reset, engine_.has_value() == false;
-//   work_guard_ / ioc_ left alive in the shell (see SHELL RETAIN note below);
-//   app_ / clock_ LAST — a parked sleep's deregister hook reaches into the clock
-//              pimpl at io_context teardown (system_clock_source F2 belt #2), so
-//              the clock must outlive ioc_; both also back EngineConfig copies
-//              held inside engine_, so they must outlive engine_ too.
+// SPLIT INTO SHELL + EngineState (L-050-z fix):
+//   The retained shell (fixpp_engine) holds only the IDENTITY members —
+//   tag_, sessions_, app_, and a unique_ptr<EngineState> state_.  The heavy
+//   members (ioc_, work_guard_, clock_, engine_, workers_) live in EngineState
+//   and are reclaimed by state_.reset() inside fixpp_engine_destroy, immediately
+//   after joining workers and destroying the C++ Engine.  Only the small shell
+//   (+ sessions_ + app_) is retained in s_dead_shells for tombstone idempotency.
 //
-// SHELL RETAIN ([2i §4.2.1] double-destroy idempotency): fixpp_engine_destroy sets
-// tag_ = FIXPP_HANDLE_TAG_DEAD, then pushes the shell pointer into a
-// process-global `s_dead_shells` vector (engine.cpp).  The shell is never freed;
-// the registry root keeps the entire graph (shell + sessions_ entries) reachable,
-// so ASan/LSan do not report a leak.  A second fixpp_engine_destroy(eng) reads
-// the DEAD tag on the retained shell and returns immediately — no UAF.  The same
-// reasoning protects session handle pointers (stored in sessions_ which stays
-// alive in the shell): after engine destroy, check_session sees
-// !engine_->engine_.has_value() and returns FIXPP_ERR_INVALID_HANDLE without any
-// UAF. Engine shells are small (< 200 bytes) and process-lifetime; the retained
-// allocation is acceptable. [2i §4.2.2] / findings Q1.
+// EngineState DESTRUCTION ORDER (reverse of member declaration order):
+//   engine_    — declared LAST → destroyed FIRST; MUST be stopped()
+//               (~Engine asserts stopped(), engine.hpp:233); borrowed ioc_ must
+//               still be alive (engine_ borrows the io_context executor).
+//   work_guard_ — declared 3rd → destroyed 2nd; ioc_ still alive.
+//   ioc_        — declared 2nd → destroyed 3rd.
+//   clock_      — declared FIRST → destroyed LAST; the parked-sleep deregister
+//               hook (system_clock_source F2 belt #2) reaches into the clock pimpl
+//               at io_context teardown — clock_ must outlive ioc_.
+//   workers_    — declared 4th (after work_guard_); all workers are joined inside
+//               fixpp_engine_destroy BEFORE state_.reset(), so workers_ is empty
+//               and harmless at State dtor time.
+//
+// SHELL RETAIN ([2i §4.2.1] double-destroy idempotency): fixpp_engine_destroy
+// sets state_.reset() (reclaims heavy graph) then tag_ = FIXPP_HANDLE_TAG_DEAD,
+// then pushes the (now-small) shell pointer into s_dead_shells (engine.cpp).
+// The shell is never freed; ASan/LSan see it as reachable.  A second
+// fixpp_engine_destroy(eng) reads the DEAD tag on the retained shell (state_ is
+// null, tag_ is DEAD) and returns immediately — no UAF.
+//
+// GUARD ORDERING: every read of state_->engine_ / ioc_ / clock_ MUST short-
+// circuit through the null-state / dead-tag guard FIRST.  check_session in
+// session.cpp checks tag_==DEAD || state_==nullptr before dereferencing state_.
+// This is what keeps PostEngineDestroySessionHandleIsInvalidHandle safe.
 //
 // NB (L-050-2): do NOT fork() a process holding a live fixpp_engine_t — fork()
-// copies only the calling thread, leaving a dead worker (feedback_fork_
-// inherited_asio_pool_deadlock). Create the engine in the child after fork.
-//
-// NB (L-050-z): the comment "Engine shells are small (< 200 bytes)" on the
-// SHELL RETAIN note below refers only to sizeof(fixpp_engine) and is MISLEADING
-// in isolation — the retained dead shell includes the full heap graph behind
-// all shared_ptr/vector members (ioc_, clock_, app_ with its slots_ map, and
-// every sessions_ entry).  This is an unbounded per-cycle leak under engine
-// create/destroy churn; it is waived for v1.0 because engines are process-
-// lifetime (`[2i §4.10]`).  See L-050-z in spec/behaviors-and-limitations.md.
-struct fixpp_engine {
-    std::uint32_t tag_ = FIXPP_HANDLE_TAG_ENGINE;                    // liveness tombstone
-    std::shared_ptr<fixpp::core::Clock> clock_;                       // destroyed LAST
-    std::shared_ptr<fixpp_capi::detail::CapiApplication> app_;
-    std::vector<std::unique_ptr<fixpp_session>> sessions_;            // handle storage
+// copies only the calling thread, leaving a dead worker.
+// Live-count counter — defined in engine.cpp, declared here so EngineState
+// ctor/dtor can reference it inline without a block-scope extern.
+namespace fixpp_capi::detail {
+extern std::atomic<long> g_engine_state_live_count;
+}  // namespace fixpp_capi::detail
+
+struct EngineState {
+    // Declared in clock_→ioc_→work_guard_→workers_→engine_ order so
+    // that reverse-declaration destruction runs:
+    //   engine_ first, work_guard_ second, ioc_ third, clock_ last.
+    // workers_ is between work_guard_ and engine_; all workers are
+    // joined before EngineState is destroyed, so the order is inert.
+    std::shared_ptr<fixpp::core::Clock> clock_;         // destroyed LAST
     asio::io_context ioc_;
     asio::executor_work_guard<asio::io_context::executor_type> work_guard_;
-    std::optional<fixpp::session::Engine> engine_;
-    std::vector<std::thread> workers_;                               // joined in destroy
+    std::vector<std::thread> workers_;                  // joined before state_.reset()
+    std::optional<fixpp::session::Engine> engine_;      // destroyed FIRST
+
+    EngineState() : work_guard_(asio::make_work_guard(ioc_)) {
+        fixpp_capi::detail::g_engine_state_live_count.fetch_add(1, std::memory_order_relaxed);
+    }
+    ~EngineState() {
+        fixpp_capi::detail::g_engine_state_live_count.fetch_sub(1, std::memory_order_relaxed);
+    }
+    // Non-copyable, non-movable (io_context is neither).
+    EngineState(const EngineState&) = delete;
+    EngineState& operator=(const EngineState&) = delete;
+};
+
+struct fixpp_engine {
+    std::uint32_t tag_ = FIXPP_HANDLE_TAG_ENGINE;                    // liveness tombstone
+    std::shared_ptr<fixpp_capi::detail::CapiApplication> app_;        // retained (slot borrows)
+    std::vector<std::unique_ptr<fixpp_session>> sessions_;            // retained (handle storage)
+    std::unique_ptr<EngineState> state_;                              // reclaimed on destroy
     std::uint32_t worker_threads_ = 1;
     std::uint16_t consumer_minor = 0;
     bool engine_started_ = false;  // Engine::start() succeeded
 
-    fixpp_engine() : work_guard_(asio::make_work_guard(ioc_)) {}
+    fixpp_engine() : state_(std::make_unique<EngineState>()) {}
 };

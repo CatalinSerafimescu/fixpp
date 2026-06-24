@@ -40,12 +40,19 @@ bool g_send_throw_hook = false;
 
 // Validate a non-owning session handle; resolves the owning engine. Returns the
 // handle code (OK) or NULL/INVALID per the Feature-A discipline.
+//
+// GUARD ORDER is load-bearing (L-050-z split): check tag_==DEAD and
+// state_==nullptr BEFORE dereferencing state_->engine_.  The retained shell is
+// never freed (s_dead_shells keeps it reachable), so reading engine->tag_ /
+// engine->state_ after engine destroy is safe — no UAF.  Only once we confirm
+// state_ is non-null do we dereference state_->engine_.has_value().
 fixpp_error_t check_session(const fixpp_session_t* s) noexcept {
     if (s == nullptr) {
         return FIXPP_ERR_NULL_HANDLE;
     }
     if (!s->valid.load(std::memory_order_acquire) || s->engine == nullptr ||
-        !s->engine->engine_.has_value()) {
+        s->engine->tag_ == FIXPP_HANDLE_TAG_DEAD || s->engine->state_ == nullptr ||
+        !s->engine->state_->engine_.has_value()) {
         return FIXPP_ERR_INVALID_HANDLE;
     }
     return FIXPP_ERR_OK;
@@ -63,7 +70,7 @@ fixpp_error_t fixpp_session_open(fixpp_engine_t* engine, fixpp_session_config_t*
     if (engine == nullptr || cfg == nullptr || out_session == nullptr) {
         return FIXPP_ERR_NULL_HANDLE;
     }
-    if (!engine->engine_.has_value()) {
+    if (engine->state_ == nullptr || !engine->state_->engine_.has_value()) {
         return FIXPP_ERR_INVALID_HANDLE;
     }
     // Register-before-start (FR-004): a session_open after engine_start is a
@@ -78,7 +85,7 @@ fixpp_error_t fixpp_session_open(fixpp_engine_t* engine, fixpp_session_config_t*
         id = fixpp::session::SessionId::from_config(cfg->cfg);
         // register_session takes SessionConfig BY VALUE → copies the builder's
         // config (builder still owns its copy; consumed/freed below on success).
-        auto rr = engine->engine_->register_session(cfg->cfg);
+        auto rr = engine->state_->engine_->register_session(cfg->cfg);
         if (!rr.has_value()) {
             // e.g. duplicate SessionId → session_invalid_argument (119) →
             // FIXPP_ERR_UNKNOWN (publication deferred, L-050-4). Builder NOT
@@ -133,7 +140,8 @@ fixpp_error_t fixpp_session_close(fixpp_session_t* session) {
     fixpp_error_t code = FIXPP_ERR_OK;
     {
         // Scoped lease — released at the end of this block, before return.
-        std::shared_ptr<fixpp::session::Session> sess = e->engine_->lookup(session->id);
+        // state_ is guaranteed non-null here (check_session validated it above).
+        std::shared_ptr<fixpp::session::Session> sess = e->state_->engine_->lookup(session->id);
         if (sess == nullptr) {
             // Registered but never established, or already gone → treat as an
             // already-closed lifecycle outcome (existing 049 code).
@@ -204,7 +212,8 @@ fixpp_error_t fixpp_session_send(fixpp_session_t* session, const uint8_t* frame,
         // Engine::send is any-thread-safe (it enrols + exec-hops internally). The
         // borrowed `frame` outlives the call because .get() blocks until send
         // completes, and the span is copied by value into the coroutine frame.
-        auto fut = asio::co_spawn(e->ioc_, e->engine_->send(session->id, payload),
+        // state_ is guaranteed non-null here (check_session validated it above).
+        auto fut = asio::co_spawn(e->state_->ioc_, e->state_->engine_->send(session->id, payload),
                                   asio::use_future);
         fixpp::core::expected_t<void> r = fut.get();
         if (!r.has_value()) {

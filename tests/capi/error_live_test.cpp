@@ -174,10 +174,10 @@ TEST(CapiErrorLive, SeqnumOverflowReturnsStoreRuntimeNoTransmit) {
     // co_spawn onto the session's executor to perform the seed, then wait.
     {
         auto* e_internal = reinterpret_cast<fixpp_engine*>(A);
-        ASSERT_TRUE(e_internal->engine_.has_value());
+        ASSERT_TRUE(e_internal->state_ != nullptr && e_internal->state_->engine_.has_value());
         const auto& id_ref = ini_h->id;  // SessionId of the initiator
         std::shared_ptr<fixpp::session::Session> sess =
-            e_internal->engine_->lookup(id_ref);
+            e_internal->state_->engine_->lookup(id_ref);
         ASSERT_NE(sess, nullptr) << "session lookup failed after establishment";
 
         // Post the seqnum seed to the session's executor (strand-confined) and

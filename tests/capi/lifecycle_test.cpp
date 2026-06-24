@@ -91,11 +91,11 @@ TEST(CapiLifecycle, DestroyIsIdempotentSamePointer) {
 // [2i §4.2.1] / contracts/lifecycle-surface.md:43: "dead/corrupted handle →
 // FIXPP_ERR_INVALID_HANDLE". After fixpp_engine_destroy (WITHOUT closing the
 // session first), any call on a stale session handle must return INVALID_HANDLE,
-// not UAF/UB. The fix: engine_->engine_.reset() before tombstoning, so
-// check_session sees !engine_.has_value() → FIXPP_ERR_INVALID_HANDLE instead of
-// dereferencing freed internals. Mutation-test: remove engine->engine_.reset()
+// not UAF/UB. The fix: engine->state_.reset() reclaims the EngineState before
+// tombstoning, so check_session sees state_==nullptr → FIXPP_ERR_INVALID_HANDLE
+// without dereferencing freed internals.  Mutation-test: remove the state_.reset()
 // from fixpp_engine_destroy → this test goes RED under ASan (the session call
-// reaches freed engine internals).
+// reaches freed EngineState internals).
 TEST(CapiLifecycle, PostEngineDestroySessionHandleIsInvalidHandle) {
     fixpp_engine_t* eng = nullptr;
     ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 0, 0, &eng), FIXPP_ERR_OK);
@@ -468,4 +468,48 @@ TEST(CapiLifecycle, ConcurrentSendAndCloseNoDataRace) {
 
     fixpp_engine_destroy(A);
     fixpp_engine_destroy(B);
+}
+
+// ── L-050-z RESOLVED: EngineState is reclaimed on destroy (bounded-shell) ───
+//
+// Proves that fixpp_engine_destroy reclaims the heavy EngineState (ioc_,
+// work_guard_, clock_, engine_, workers_) by resetting state_, and that only
+// the small identity shell (tag_, sessions_, app_) is retained in s_dead_shells.
+//
+// The live_state_count() seam increments in EngineState::EngineState() and
+// decrements in EngineState::~EngineState() (engine.cpp / capi_internal.hpp).
+// Before the L-050-z fix, destroy() did NOT call state_.reset(), so the
+// count would remain elevated after destroy; after the fix, state_.reset()
+// reclaims the State and decrements the counter back to baseline.
+//
+// Mutation test: revert `engine->state_.reset()` from fixpp_engine_destroy
+// → the assert "count returns to baseline after destroy" will fail (count stays
+// at baseline+N) → test goes RED.  That is the discriminator.
+TEST(CapiLifecycle, EngineStateReclaimedOnDestroy) {
+    // Snapshot the baseline BEFORE this test (other tests may have already
+    // created and destroyed engines — we assert RELATIVE to this baseline).
+    const long baseline = fixpp_capi::detail::live_state_count();
+
+    constexpr int N = 3;
+    for (int i = 0; i < N; ++i) {
+        fixpp_engine_t* eng = nullptr;
+        ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 0, 0, &eng), FIXPP_ERR_OK);
+        ASSERT_NE(eng, nullptr);
+
+        // Each create allocates one EngineState → live count rises by 1.
+        EXPECT_EQ(fixpp_capi::detail::live_state_count(), baseline + 1)
+            << "EngineState must be allocated inside fixpp_engine_create (iteration " << i << ")";
+
+        fixpp_engine_destroy(eng);
+
+        // Each destroy reclaims the EngineState via state_.reset() → count returns
+        // to baseline.  Mutation: if state_.reset() is absent, count stays at
+        // baseline+1 → this assertion fails → RED.
+        EXPECT_EQ(fixpp_capi::detail::live_state_count(), baseline)
+            << "EngineState must be reclaimed by fixpp_engine_destroy (L-050-z fix; "
+               "iteration " << i << ")";
+    }
+    // Final check: the live count is back to baseline after all N cycles.
+    EXPECT_EQ(fixpp_capi::detail::live_state_count(), baseline)
+        << "live_state_count must return to baseline after " << N << " create/destroy cycles";
 }

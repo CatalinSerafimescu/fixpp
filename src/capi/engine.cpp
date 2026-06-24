@@ -16,6 +16,7 @@
 
 #include "fix/c_api/engine.h"
 
+#include <atomic>
 #include <cstdio>
 #include <cstdlib>
 #include <utility>
@@ -88,6 +89,15 @@ fixpp::core::expected_t<void> CapiApplication::fromApp(
     return {};
 }
 
+// L-050-z witness seam: counts live EngineState instances.  Incremented in
+// EngineState ctor, decremented in EngineState dtor (both in capi_internal.hpp
+// via the extern reference).  live_state_count() is the test accessor.
+std::atomic<long> g_engine_state_live_count{0};  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+
+long live_state_count() noexcept {
+    return g_engine_state_live_count.load(std::memory_order_relaxed);
+}
+
 }  // namespace fixpp_capi::detail
 
 // ── Engine lifecycle ────────────────────────────────────────────────────────
@@ -111,16 +121,17 @@ fixpp_error_t fixpp_engine_create(fixpp_engine_config_t* cfg, uint16_t consumer_
 
     fixpp_engine* e = nullptr;
     try {
-        e = new fixpp_engine{};
+        e = new fixpp_engine{};  // constructs state_ = make_unique<EngineState>()
         e->consumer_minor = consumer_minor;
         e->worker_threads_ = cfg->worker_threads == 0 ? 1U : cfg->worker_threads;
         e->app_ = std::make_shared<fixpp_capi::detail::CapiApplication>();
 
         fixpp::core::EngineConfig eng_cfg;
-        eng_cfg.executor = e->ioc_.get_executor();
+        eng_cfg.executor = e->state_->ioc_.get_executor();
         if (cfg->want_realtime_clock) {
-            e->clock_ = std::make_shared<fixpp::core::system_clock_source>(e->ioc_.get_executor());
-            eng_cfg.clock = e->clock_;  // null clock → Engine::start() rejects (clock_not_set)
+            e->state_->clock_ = std::make_shared<fixpp::core::system_clock_source>(
+                e->state_->ioc_.get_executor());
+            eng_cfg.clock = e->state_->clock_;  // null clock → Engine::start() rejects
         }
         eng_cfg.application = e->app_;  // the trampoline (NOT consumer-settable)
 
@@ -129,13 +140,15 @@ fixpp_error_t fixpp_engine_create(fixpp_engine_config_t* cfg, uint16_t consumer_
         // canonical sequencing: start() only POSTS the role loops; they run once
         // a worker drives the io_context), then the workers launch. This sidesteps
         // any race between start()'s synchronous body and a freshly-spawned loop.
-        e->engine_.emplace(e->ioc_.get_executor(), std::move(eng_cfg));
+        e->state_->engine_.emplace(e->state_->ioc_.get_executor(), std::move(eng_cfg));
     } catch (...) {
         // engine_ is left disengaged if emplace threw (std::optional guarantee),
         // and no workers were launched, so freeing e here destructs nothing that
         // asserts. (Belt: reset the work-guard so a future run() would return.)
         if (e != nullptr) {
-            e->work_guard_.reset();
+            if (e->state_) {
+                e->state_->work_guard_.reset();
+            }
             delete e;
         }
         return FIXPP_ERR_CAPI_CONFIG_INVALID;
@@ -151,7 +164,7 @@ fixpp_error_t fixpp_engine_start(fixpp_engine_t* engine) {
     if (engine == nullptr) {
         return FIXPP_ERR_NULL_HANDLE;
     }
-    if (!engine->engine_.has_value()) {
+    if (engine->state_ == nullptr || !engine->state_->engine_.has_value()) {
         return FIXPP_ERR_INVALID_HANDLE;
     }
     if (engine->engine_started_) {
@@ -165,7 +178,7 @@ fixpp_error_t fixpp_engine_start(fixpp_engine_t* engine) {
     // the io_context — start() only co_spawns the role loops; nothing executes
     // until a worker drives the loop. This matches the proven C++ test sequencing
     // (start() before ioc.run()) and avoids start()-vs-loop control-plane races.
-    fixpp::core::expected_t<void> r = engine->engine_->start();
+    fixpp::core::expected_t<void> r = engine->state_->engine_->start();
     if (!r.has_value()) {
         // Validated-and-failed (e.g. null clock): no loops spawned; leave
         // engine_started_ false so the error is reported as the config error,
@@ -178,16 +191,18 @@ fixpp_error_t fixpp_engine_start(fixpp_engine_t* engine) {
     // Launch the worker thread(s) to drive establishment. Each runs ioc_.run(),
     // kept alive by the work-guard until destroy() resets it.
     try {
-        engine->workers_.reserve(engine->worker_threads_);
+        engine->state_->workers_.reserve(engine->worker_threads_);
         for (std::uint32_t i = 0; i < engine->worker_threads_; ++i) {
-            engine->workers_.emplace_back([engine] { engine->ioc_.run(); });
+            engine->state_->workers_.emplace_back([st = engine->state_.get()] {
+                st->ioc_.run();
+            });
         }
     } catch (...) {
         // Thread creation failed. Any workers that DID launch still drive the
         // io_context; if none launched, destroy() drains stop() on the consumer
         // thread (the no-worker path). Either way the engine is recoverable via
         // destroy(); report a config error.
-        if (engine->workers_.empty()) {
+        if (engine->state_->workers_.empty()) {
             return FIXPP_ERR_CAPI_CONFIG_INVALID;
         }
     }
@@ -207,16 +222,15 @@ fixpp_error_t fixpp_engine_start(fixpp_engine_t* engine) {
 // scan window and suppresses the false-positive.  The leaked registry object
 // is small (one std::vector control block per process) and harmless.
 //
-// NOTE (L-050-z): each retained engine shell includes the full heap graph
-// behind all its members (sessions_, app_, ioc_, clock_) — NOT just the
-// sizeof(fixpp_engine) control bytes.  sessions_ and app_ CANNOT be freed
-// because fixpp_session_t* consumer pointers live in sessions_, and
-// session->slot borrows into app_->slots_.  This is an acceptable per-engine
-// bounded cost for v1.0 (engines are process-lifetime per [2i §4.10]);
-// reclaiming ioc_/clock_ is deferred per L-050-z in behaviors-and-limitations.
+// L-050-z RESOLVED: each retained dead shell holds ONLY the small identity
+// graph (tag_, sessions_, app_, state_=nullptr).  The heavy EngineState
+// (ioc_, work_guard_, clock_, engine_, workers_) is reclaimed by state_.reset()
+// before the shell is pushed here.  sessions_ and app_ CANNOT be freed because
+// fixpp_session_t* consumer pointers live in sessions_, and session->slot borrows
+// into app_->slots_ — they must survive until the process exits.
 //
 // fixpp_engine_destroy is SINGLE_THREAD ([2i §4.10]) so no lock is needed.
-static std::vector<fixpp_engine_t*>* s_dead_shells = // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+static std::vector<fixpp_engine_t*>* s_dead_shells =  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
     new std::vector<fixpp_engine_t*>();
 
 void fixpp_engine_destroy(fixpp_engine_t* engine) {
@@ -229,45 +243,58 @@ void fixpp_engine_destroy(fixpp_engine_t* engine) {
     if (engine->tag_ == FIXPP_HANDLE_TAG_DEAD) {
         return;  // already destroyed — idempotent, no UAF
     }
-    if (engine->engine_.has_value()) {
+
+    // state_ is only null if fixpp_engine's ctor threw making state_ (then create
+    // would have deleted e before returning). In normal usage state_ is non-null.
+    if (engine->state_ && engine->state_->engine_.has_value()) {
         // UNCONDITIONALLY drive Engine::stop() to completion (FR-003): ~Engine
         // asserts stopped(), which inits false and is only set by stop(), so even
         // a never-started engine must stop() or the dtor would std::abort. stop()
         // is idempotent from any state.
-        auto stop_fut = asio::co_spawn(engine->ioc_, engine->engine_->stop(), asio::use_future);
-        if (!engine->workers_.empty()) {
+        auto stop_fut = asio::co_spawn(engine->state_->ioc_,
+                                       engine->state_->engine_->stop(),
+                                       asio::use_future);
+        if (!engine->state_->workers_.empty()) {
             // Workers drive the io_context → they execute stop().
             stop_fut.get();
         } else {
             // No worker running: drive the io_context on THIS thread until stop()
             // completes. Reset the work-guard first so run() returns once the
             // (idempotent, quick) stop() coroutine finishes with no other work.
-            engine->work_guard_.reset();
-            engine->ioc_.run();
+            engine->state_->work_guard_.reset();
+            engine->state_->ioc_.run();
             stop_fut.get();
         }
     }
 
-    // Unblock any running workers and join them.
-    engine->work_guard_.reset();  // idempotent
-    for (auto& w : engine->workers_) {
-        if (w.joinable()) {
-            w.join();
+    if (engine->state_) {
+        // Unblock any running workers and join them BEFORE resetting state_.
+        // Workers reference state_->ioc_; joining ensures no worker is alive
+        // when state_ is freed.
+        engine->state_->work_guard_.reset();  // idempotent; unblocks workers
+        for (auto& w : engine->state_->workers_) {
+            if (w.joinable()) {
+                w.join();
+            }
         }
+
+        // Reclaim the heavy EngineState (ioc_, work_guard_, clock_, engine_,
+        // workers_).  Destruction order inside EngineState (reverse declaration):
+        //   engine_ first  — stopped(); borrows ioc_ executor (ioc_ still alive)
+        //   work_guard_ second — references ioc_ (ioc_ still alive)
+        //   ioc_ third
+        //   clock_ last    — parked-sleep deregister hook runs at ioc_ teardown;
+        //                    clock_ must outlive ioc_ (system_clock_source F2 belt #2)
+        // workers_ is empty (all joined above) → harmless at dtor time.
+        engine->state_.reset();
+        // After state_.reset(): engine->state_ == nullptr.
+        // check_session / fixpp_session_open see state_==nullptr before any
+        // state_->engine_ dereference → FIXPP_ERR_INVALID_HANDLE (safe, no UAF).
     }
 
-    // Release the C++ Engine (calls ~Engine, which asserts stopped() — satisfied
-    // above). After this, engine->engine_.has_value() == false, so any outstanding
-    // session handle that reads check_session → !engine_->has_value() returns
-    // FIXPP_ERR_INVALID_HANDLE safely (finding #2 fix).
-    engine->engine_.reset();
-
-    // Tombstone the handle then retain the shell in s_dead_shells.  The shell is
-    // never freed: the dead-shell registry provides a reachable root (LSan
-    // mark-sweep does not report it as a leak) while the tag guarantees the
-    // second-destroy read-of-DEAD is safe from any thread that still holds the
-    // original pointer.  See [2i §4.2.2] and the SHELL RETAIN note in
-    // capi_internal.hpp.
+    // Tombstone the handle then retain the SMALL shell in s_dead_shells.
+    // The shell now holds only: tag_(DEAD) + sessions_ + app_ + state_(null).
+    // The heavy EngineState graph has been reclaimed above.
     engine->tag_ = FIXPP_HANDLE_TAG_DEAD;
     s_dead_shells->push_back(engine);
 }
