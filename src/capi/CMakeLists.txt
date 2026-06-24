@@ -14,6 +14,9 @@ add_library(fixpp_capi_objects OBJECT
   decimal_assert.cpp
   version.cpp
   error.cpp
+  config.cpp   # 050 Feature B (CA-005): opaque engine/session config builders
+  engine.cpp   # 050 Feature B (CA-005/007): engine lifecycle + CapiApplication trampoline
+  session.cpp  # 050 Feature B (CA-005/006/007): session open/close/is_established/send/register_callback
 )
 set_property(TARGET fixpp_capi_objects PROPERTY POSITION_INDEPENDENT_CODE ON)
 target_include_directories(fixpp_capi_objects PUBLIC
