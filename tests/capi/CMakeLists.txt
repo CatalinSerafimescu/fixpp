@@ -153,6 +153,21 @@ target_link_libraries(capi_recv_alloc_guard_test PRIVATE
 target_include_directories(capi_recv_alloc_guard_test PRIVATE ${FIXPP_CAPI_FEATURE_B_INCLUDES})
 add_test(NAME capi_recv_alloc_guard COMMAND capi_recv_alloc_guard_test)
 
+# gate-b/r1 (Q3+Q4): live send-path negative witnesses + live downgrade witness.
+# Q3(a) malformed payload → FIXPP_ERR_UNKNOWN + no transmit.
+# Q3(b) seqnum_max overflow → FIXPP_ERR_STORE_RUNTIME + no transmit (needs FIXPP_TEST_HOOKS).
+# Q4 live consumer_minor downgrade through fixpp_engine_start public thunk.
+add_executable(capi_error_live_test error_live_test.cpp)
+target_link_libraries(capi_error_live_test PRIVATE
+  fixpp_capi
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(capi_error_live_test PRIVATE ${FIXPP_CAPI_FEATURE_B_INCLUDES})
+target_compile_definitions(capi_error_live_test PRIVATE FIXPP_TEST_HOOKS)
+add_test(NAME capi_error_live COMMAND capi_error_live_test)
+set_tests_properties(capi_error_live PROPERTIES LABELS "capi;050")
+
 if(EXISTS "${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so")
     add_test(
         NAME capi_recv_alloc_guard_mallocnesia
