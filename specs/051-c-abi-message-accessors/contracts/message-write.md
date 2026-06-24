@@ -28,7 +28,7 @@ fixpp_error_t fixpp_msg_remove_tag (fixpp_msg_t* msg, uint16_t tag);   /* idempo
 ```
 
 - Deep-copies borrowed bytes into the arena (caller may free immediately). Overwrites an existing tag in place.
-- **Rejects framing tags** `8/9/34/49/52/56/10` at set-time (INV-3) → a reject code (final code chosen in error-block-amendment.md; candidate `FIXPP_ERR_SESSION_INVALID_ARGUMENT`).
+- **Rejects framing tags** `8/9/34/49/52/56/10` at set-time (INV-3) → **`FIXPP_ERR_MSG_FRAMING_TAG_FORBIDDEN`** (1405, error-block-amendment.md) — a distinct **message-construction** reject, NOT the session-domain `SESSION_INVALID_ARGUMENT`.
 - `DICT_CONFIG` (tag absent from dict) / `TYPE_MISMATCH` (dict type ≠ flavour) / `WIRE_LIMIT_EXCEEDED` (obvious overrun). Setting invalidates prior `get_*` pointers on this msg.
 
 ## Commit (the app-payload bridge, D-3)
@@ -39,6 +39,7 @@ fixpp_error_t fixpp_msg_commit(fixpp_msg_t* msg, const uint8_t** payload_out, si
 
 - Serialises the accumulator (E-3) into a **valid app-payload**: `35=<type>` first, fields in set-order, groups in grammar order, SOH-terminated, **no** framing tags. `*payload_out` aliases the arena; valid until the next mutation or destroy.
 - The consumer ships it via the **existing, unchanged** `fixpp_session_send(session, *payload_out, *len_out)`.
+- **NORMATIVE inherited ordering invariant (Codex #4).** The committed span may be destroyed immediately after `fixpp_session_send` returns (the quickstart `commit → send → destroy` pattern) **only because** Feature B's `fixpp_session_send` blocks on `fut.get()` (`src/capi/session.cpp:216–218`) AND `Engine::send` deep-copies the payload at send entry (`src/session/engine.cpp:1490`), before any async hop. 051 **depends** on this ordering; a future non-blocking send or zero-copy `Engine::send` would turn the immediate-destroy into a UAF. FR-021 adds a commit→send→immediate-destroy ASan regression seam.
 - `WIRE_LIMIT_EXCEEDED` if the body exceeds the frame cap (~3800 B, aligned to `session.cpp:4021`). Unfinished group builder → reject. **Steady-state thunk** → abort on exception escape (`[2i §5.2]`).
 
 ## Group build (CA-010-write)
@@ -53,9 +54,13 @@ fixpp_error_t fixpp_entry_set_string (fixpp_entry_t* e, uint16_t tag, const char
 fixpp_error_t fixpp_entry_set_int    (fixpp_entry_t* e, uint16_t tag, int64_t v);
 fixpp_error_t fixpp_entry_set_double (fixpp_entry_t* e, uint16_t tag, double v);
 fixpp_error_t fixpp_entry_set_decimal(fixpp_entry_t* e, uint16_t tag, fixpp_decimal_t v);
+/* Begin a NESTED group WITHIN an entry (FR-012 MUST — ABI added per user
+   decision 2026-06-24). Closed by the SAME fixpp_msg_group_end under a LIFO
+   close-order contract. */
+fixpp_error_t fixpp_entry_group_begin(fixpp_entry_t* e, uint16_t group_tag, fixpp_group_builder_t** b_out);
 fixpp_error_t fixpp_msg_group_end    (fixpp_msg_t* msg, fixpp_group_builder_t* b);
 ```
 
-- `group_begin`: `TYPE_MISMATCH` if `group_tag` not a dictionary group; `INVALID_HANDLE` on inbound msg.
-- `group_end`: seals; **invalidates** the builder + its entry handles (reuse → `INVALID_HANDLE`).
-- Nested: an entry may `group_begin` a nested group (LIFO close).
+- `group_begin` / `entry_group_begin`: `TYPE_MISMATCH` if `group_tag` not a dictionary group; `INVALID_HANDLE` on inbound msg. `entry_set_*` rejects framing tags → `FIXPP_ERR_MSG_FRAMING_TAG_FORBIDDEN` (same INV-3 rule as `msg_set_*`).
+- `group_end`: seals; **invalidates** the builder + its entry handles (reuse → `INVALID_HANDLE`). Reused for nested close.
+- **Nested LIFO contract:** an entry opens a nested group via `fixpp_entry_group_begin`; builders MUST be ended in reverse of begin order. Ending a parent builder while a younger (nested) builder it parents is still open → **`FIXPP_ERR_INVALID_HANDLE`** (out-of-order close). One net-new exported symbol (`fixpp_entry_group_begin`) vs the pre-#6 count; close reuses `fixpp_msg_group_end` (the cleaner shape — no separate nested-close symbol).

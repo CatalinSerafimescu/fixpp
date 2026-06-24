@@ -7,13 +7,14 @@ A pure-C consumer (no C++ headers) building on Features A/B + C. Illustrative �
 
 /* --- send-side (toApp) callback: inspect/veto outbound messages --------- */
 static fixpp_toapp_verdict on_send(const fixpp_msg_t* out, void* ud) {
+    /* `out` is a FRAMED view here — 8/9/34/49/52/56/10 are readable (toApp). */
     const char* mt; size_t n;
     if (fixpp_msg_get_msg_type(out, &mt, &n) == FIXPP_ERR_OK && n == 1 && mt[0] == 'D') {
         int64_t qty;
         if (fixpp_msg_get_int(out, 38 /*OrderQty*/, &qty) == FIXPP_ERR_OK && qty > 1000000)
-            return FIXPP_ERR_APP_DO_NOT_SEND;        /* veto oversized orders */
+            return FIXPP_TOAPP_VETO;                 /* veto oversized orders → APP_DO_NOT_SEND */
     }
-    return FIXPP_ERR_OK;                             /* otherwise send */
+    return FIXPP_TOAPP_SEND;                          /* otherwise send */
 }
 
 /* --- receive (fromApp) callback: read inbound fields + groups ----------- */
@@ -74,6 +75,8 @@ int main(void) {
 ## Notes
 
 - **Read pointers alias the wire buffer** — copy out anything you keep past the callback / past the next mutating set / past destroy. No `free()`.
+- **Commit span lifetime** — the span from `fixpp_msg_commit` aliases the arena; the `commit → send → destroy` sequence above is safe because `fixpp_session_send` **blocks** until the engine has **deep-copied** the payload at send entry (inherited Feature-B ordering invariant). Destroying the message before send returns would be a UAF — don't.
+- **Framing tags are rejected at set-time** — `fixpp_msg_set_*` of tag 8/9/34/49/52/56/10 on an outbound accumulator returns `FIXPP_ERR_MSG_FRAMING_TAG_FORBIDDEN` (the session stamps those itself).
 - **Outbound is tombstoned on session close** — using `out` after the session closes returns `FIXPP_ERR_INVALID_HANDLE` (not UAF); `fixpp_msg_destroy` stays a safe no-op.
 - **Cross-strand handoff** of an inbound message: `fixpp_msg_clone(msg, &copy)` first — the clone is owner-controlled, survives the dispatch window, and its reads are `FIXPP_THREAD_SAFE`.
 - **Error legibility (US5):** a malformed payload → `FIXPP_ERR_APP_PAYLOAD_MALFORMED`; an unregistered session id → `FIXPP_ERR_SESSION_INVALID_ARGUMENT` — published codes, not the old `FIXPP_ERR_UNKNOWN`. `fixpp_strerror(rc)` gives a static description.

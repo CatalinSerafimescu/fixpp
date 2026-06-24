@@ -1,6 +1,8 @@
 # Contract — Message read surface (CA-008 + CA-010-read)
 
-Header: `include/fix/c_api/message.h` (NEW). Impl: `src/capi/message_read.cpp`. All thunk into `wire::MessageView<Index>` (`parser.hpp`); zero global-heap; no exception crosses `extern "C"` (steady-state → abort on escape). Reentrancy: inbound-flyweight `FIXPP_REQUIRES_SESSION_LOCK`; detached-clone reads `FIXPP_THREAD_SAFE`; `fixpp_msg_version` `FIXPP_THREAD_SAFE`.
+Header: `include/fix/c_api/message.h` (NEW). Impl: `src/capi/message_read.cpp`. All thunk into `wire::MessageView<Index>` (`parser.hpp`); zero global-heap; no exception crosses `extern "C"` (steady-state → abort on escape). **Reentrancy:** the shared `fixpp_msg_get_*` accessors carry the **single conservative class `FIXPP_REQUIRES_SESSION_LOCK`** (matching the inherited `[2i §4.6]` annotation — NOT edited here); `fixpp_msg_version` `FIXPP_THREAD_SAFE`. The detached-clone-read `FIXPP_THREAD_SAFE` property is a **documented runtime/handle-state guarantee, OUTSIDE the per-symbol gate** (the static gate checks one annotation per declaration and cannot distinguish a clone read from an inbound-flyweight read on the same symbol) — a clone owns its arena, its reads are callable from any thread, and the caller serialises concurrent same-handle access. The seam-#13 cross-strand contract is this documented/runtime guarantee, not a gate-enforced one.
+
+**Framed toApp view (New-P2-b / FR-024).** The same `fixpp_msg_t` opaque type has two read behaviours: as an outbound *accumulator* the framing tags 8/9/34/49/52/56/10 are forbidden (INV-3), but the `fixpp_msg_t` exposed inside the **toApp callback window** is a read-only **FRAMED** view parsed from the complete built frame — so 8/9/34/49/52/56/10 (`8=`/`9=`/`34=`/`49=`/`52=`/`56=`/`10=`) **ARE** readable at their wire positions. A consumer reading `34=`/`49=` in toApp is reading the session-stamped frame, by design.
 
 ## CA-008 — field read accessors
 
