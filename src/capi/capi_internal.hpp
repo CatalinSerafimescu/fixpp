@@ -169,6 +169,14 @@ static constexpr std::uint32_t FIXPP_HANDLE_TAG_DEAD   = 0xDEADD1EDu;
 // NB (L-050-2): do NOT fork() a process holding a live fixpp_engine_t — fork()
 // copies only the calling thread, leaving a dead worker (feedback_fork_
 // inherited_asio_pool_deadlock). Create the engine in the child after fork.
+//
+// NB (L-050-z): the comment "Engine shells are small (< 200 bytes)" on the
+// SHELL RETAIN note below refers only to sizeof(fixpp_engine) and is MISLEADING
+// in isolation — the retained dead shell includes the full heap graph behind
+// all shared_ptr/vector members (ioc_, clock_, app_ with its slots_ map, and
+// every sessions_ entry).  This is an unbounded per-cycle leak under engine
+// create/destroy churn; it is waived for v1.0 because engines are process-
+// lifetime (`[2i §4.10]`).  See L-050-z in spec/behaviors-and-limitations.md.
 struct fixpp_engine {
     std::uint32_t tag_ = FIXPP_HANDLE_TAG_ENGINE;                    // liveness tombstone
     std::shared_ptr<fixpp::core::Clock> clock_;                       // destroyed LAST

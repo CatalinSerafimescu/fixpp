@@ -207,6 +207,14 @@ fixpp_error_t fixpp_engine_start(fixpp_engine_t* engine) {
 // scan window and suppresses the false-positive.  The leaked registry object
 // is small (one std::vector control block per process) and harmless.
 //
+// NOTE (L-050-z): each retained engine shell includes the full heap graph
+// behind all its members (sessions_, app_, ioc_, clock_) — NOT just the
+// sizeof(fixpp_engine) control bytes.  sessions_ and app_ CANNOT be freed
+// because fixpp_session_t* consumer pointers live in sessions_, and
+// session->slot borrows into app_->slots_.  This is an acceptable per-engine
+// bounded cost for v1.0 (engines are process-lifetime per [2i §4.10]);
+// reclaiming ioc_/clock_ is deferred per L-050-z in behaviors-and-limitations.
+//
 // fixpp_engine_destroy is SINGLE_THREAD ([2i §4.10]) so no lock is needed.
 static std::vector<fixpp_engine_t*>* s_dead_shells = // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
     new std::vector<fixpp_engine_t*>();
