@@ -184,13 +184,19 @@ TEST(CapiErrorLive, SeqnumOverflowReturnsStoreRuntimeNoTransmit) {
         // block until it completes. Pass the lambda directly (not pre-invoked IIFE)
         // so co_spawn owns the lambda+capture on the heap; captures sess by value so
         // no reference to a stack variable crosses the thread boundary (ASan-clean).
+        //
+        // Spawn on the UNDERLYING executor (asio::any_io_executor strand), NOT on
+        // the session_executor wrapper — mirroring the R1 fix in session.cpp and the
+        // engine.cpp:1567 precedent.  The wrapper's ~impl() is destroyed across the
+        // caller thread and the worker, causing a TSan race at any_executor.hpp:475.
         auto seed_fn = [sess]() -> asio::awaitable<void> {
             auto& mgr = sess->seqnum_mgr_test_access();
             const fixpp::session::seqnum_t cur_inbound = mgr.next_inbound_unsafe();
             mgr.set_counters_for_test(cur_inbound, fixpp::session::seqnum_max);
             co_return;
         };
-        auto fut = asio::co_spawn(sess->executor(), std::move(seed_fn), asio::use_future);
+        const asio::any_io_executor& seed_exec = sess->executor().underlying();
+        auto fut = asio::co_spawn(seed_exec, std::move(seed_fn), asio::use_future);
         fut.get();  // wait for the seam to complete on the strand
     }
 
