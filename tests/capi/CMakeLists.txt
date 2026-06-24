@@ -94,6 +94,29 @@ target_link_libraries(capi_lifecycle_test PRIVATE
 target_include_directories(capi_lifecycle_test PRIVATE ${FIXPP_CAPI_FEATURE_B_INCLUDES})
 add_test(NAME capi_lifecycle COMMAND capi_lifecycle_test)
 
+# T012 (US1, CA-005) — exhaustive config-builder contract: per-setter null-handle
+# guards, eager validation arms (CONFIG_INVALID), enum mappings, happy paths.
+add_executable(capi_config_builders_test config_builders_test.cpp)
+target_link_libraries(capi_config_builders_test PRIVATE
+  fixpp_capi
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(capi_config_builders_test PRIVATE ${FIXPP_CAPI_FEATURE_B_INCLUDES})
+add_test(NAME capi_config_builders COMMAND capi_config_builders_test)
+
+# T015/T019/T025/T031 (US1/US2/US3) — engine+session lifecycle/op REJECTION arms:
+# null-handle guards, register-before-start (FR-004/FR-011), major gate, clock /
+# double-start surfacing, eager send validation, never-established close.
+add_executable(capi_lifecycle_negative_test lifecycle_negative_test.cpp)
+target_link_libraries(capi_lifecycle_negative_test PRIVATE
+  fixpp_capi
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(capi_lifecycle_negative_test PRIVATE ${FIXPP_CAPI_FEATURE_B_INCLUDES})
+add_test(NAME capi_lifecycle_negative COMMAND capi_lifecycle_negative_test)
+
 # T024 (US2, SC-006) — thunk split: in-process SIGABRT trap + construction-time
 # no-abort discipline + the steady-state send-throw seam (FIXPP_TEST_HOOKS).
 add_executable(capi_thunk_split_test thunk_split_test.cpp)
