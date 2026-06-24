@@ -27,8 +27,10 @@
 
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <thread>
 #include <vector>
 
 #include "fix/c_api/engine.h"
@@ -61,18 +63,60 @@ TEST(CapiLifecycle, NeverStartedDestroyDoesNotAbort) {
     SUCCEED() << "never-started destroy returned without aborting (FR-003)";
 }
 
-// ── T015: double-destroy + NULL-destroy are no-ops ───────────────────────────
-TEST(CapiLifecycle, DestroyIsNullSafe) {
+// ── T015: double-destroy of the SAME pointer is a no-op (not UAF) ────────────
+//
+// [2i §4.2.1] / contracts/lifecycle-surface.md:38: "NULL / double-destroy →
+// no-op". The first destroy tombstones the shell (tag_=DEAD) and DOES NOT free
+// it; the second destroy reads the DEAD tag and returns immediately with no
+// UAF/double-free. Without the tombstone, the second call would dereference freed
+// storage → detectable as UAF under ASan. Mutation-test: revert the tag_ write in
+// fixpp_engine_destroy (replace tombstone with delete) → this test goes RED under
+// ASan. NULL-destroy is also covered for completeness.
+TEST(CapiLifecycle, DestroyIsIdempotentSamePointer) {
     fixpp_engine_destroy(nullptr);  // NULL → no-op, no crash.
 
     fixpp_engine_t* eng = nullptr;
     ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 0, 0, &eng), FIXPP_ERR_OK);
+    ASSERT_NE(eng, nullptr);
+    // First destroy: quiesces the engine, tombstones the shell (tag_=DEAD).
     fixpp_engine_destroy(eng);
-    // A second destroy on the same (now-freed) pointer is UB on the freed object;
-    // the contract's "double-destroy no-op" is the NULL path. We witness the
-    // documented idempotent NULL no-op explicitly.
-    fixpp_engine_destroy(nullptr);
-    SUCCEED();
+    // Second destroy on the same pointer: must read DEAD tag and no-op — no UAF,
+    // no double-free. Under ASan this is the deterministic discriminator.
+    fixpp_engine_destroy(eng);
+    SUCCEED() << "same-pointer double-destroy returned without UAF/double-free";
+}
+
+// ── T015: post-engine-destroy session handle → FIXPP_ERR_INVALID_HANDLE ───────
+//
+// [2i §4.2.1] / contracts/lifecycle-surface.md:43: "dead/corrupted handle →
+// FIXPP_ERR_INVALID_HANDLE". After fixpp_engine_destroy (WITHOUT closing the
+// session first), any call on a stale session handle must return INVALID_HANDLE,
+// not UAF/UB. The fix: engine_->engine_.reset() before tombstoning, so
+// check_session sees !engine_.has_value() → FIXPP_ERR_INVALID_HANDLE instead of
+// dereferencing freed internals. Mutation-test: remove engine->engine_.reset()
+// from fixpp_engine_destroy → this test goes RED under ASan (the session call
+// reaches freed engine internals).
+TEST(CapiLifecycle, PostEngineDestroySessionHandleIsInvalidHandle) {
+    fixpp_engine_t* eng = nullptr;
+    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 0, 0, &eng), FIXPP_ERR_OK);
+
+    fixpp_session_config_t* sc =
+        make_session_cfg("INIT-PDQ", "ACC-PDQ", FIXPP_ROLE_INITIATOR);
+    fixpp_session_t* sess = nullptr;
+    ASSERT_EQ(fixpp_session_open(eng, sc, &sess), FIXPP_ERR_OK);
+    ASSERT_NE(sess, nullptr);
+
+    // Destroy the engine WITHOUT closing the session. The session handle is now
+    // stale — its owning engine is dead.
+    fixpp_engine_destroy(eng);
+
+    // Any non-destroy call on the stale session handle must return INVALID_HANDLE,
+    // not UAF/crash/UB (under ASan this is the deterministic discriminator).
+    bool est = true;
+    EXPECT_EQ(fixpp_session_is_established(sess, &est), FIXPP_ERR_INVALID_HANDLE)
+        << "stale session handle after engine destroy must return INVALID_HANDLE (FR-006)";
+    EXPECT_EQ(fixpp_session_close(sess), FIXPP_ERR_INVALID_HANDLE)
+        << "close on stale session handle must return INVALID_HANDLE (FR-006)";
 }
 
 // ── T015: session_open AFTER engine_start → CAPI_CONFIG_INVALID (FR-004) ──────
@@ -331,6 +375,96 @@ TEST(CapiLifecycle, Sc007SendAfterTeardownIsTerminalNotUb) {
               FIXPP_ERR_INVALID_HANDLE)
         << "send after teardown must return a clean terminal code (SC-007b rescoped; "
            "the live in-flight-cancel race is L-050-y)";
+
+    fixpp_engine_destroy(A);
+    fixpp_engine_destroy(B);
+}
+
+// ── Q2: concurrent fixpp_session_send vs fixpp_session_close (TSan witness) ───
+//
+// fixpp_session_send is THREAD_SAFE; the design explicitly models send racing
+// a concurrent close as a defined lifecycle outcome (data-model.md:80 / E-6 /
+// contracts/send-and-receive.md:25: "send raced a concurrent close() drain →
+// session_already_closed → FIXPP_ERR_THREAD_SESSION_LIFECYCLE"). Without
+// `std::atomic<bool> valid` (Q2 fix), the read in check_session (valid load)
+// and the write in fixpp_session_close (valid store) form a C++ data race →
+// undefined behavior under TSan. Mutation-test: revert valid to `bool` in
+// capi_internal.hpp → this test reports a TSan data race.
+//
+// Allowed terminal codes for the sender thread: FIXPP_ERR_OK (send completed
+// before close drained), FIXPP_ERR_THREAD_SESSION_LIFECYCLE (send vs close
+// TOCTOU), FIXPP_ERR_CANCELLED (send cancelled by stop), or
+// FIXPP_ERR_INVALID_HANDLE (send saw the closed flag after close published it).
+// FIXPP_ERR_UNKNOWN is also possible (session_invalid_state_for_send arm, L-050-4).
+TEST(CapiLifecycle, ConcurrentSendAndCloseNoDataRace) {
+    fixpp_engine_t* B = nullptr;
+    fixpp_engine_t* A = nullptr;
+    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 0, 0, &B), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 0, 0, &A), FIXPP_ERR_OK);
+
+    fixpp_session_config_t* acc =
+        make_session_cfg("ACC-RACE", "INIT-RACE", FIXPP_ROLE_ACCEPTOR);
+    set_loopback_endpoint(acc, "127.0.0.1", 0);
+    auto acc_id = session_id_of(acc);
+    fixpp_session_t* acc_h = nullptr;
+    ASSERT_EQ(fixpp_session_open(B, acc, &acc_h), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_engine_start(B), FIXPP_ERR_OK);
+
+    std::uint16_t port = wait_for_bound_port(B, acc_id);
+    ASSERT_NE(port, 0u) << "acceptor did not bind";
+
+    fixpp_session_config_t* ini =
+        make_session_cfg("INIT-RACE", "ACC-RACE", FIXPP_ROLE_INITIATOR);
+    set_loopback_endpoint(ini, "127.0.0.1", port);
+    fixpp_session_t* ini_h = nullptr;
+    ASSERT_EQ(fixpp_session_open(A, ini, &ini_h), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_engine_start(A), FIXPP_ERR_OK);
+
+    // Wait for establishment so the send path is live.
+    ASSERT_TRUE(wait_for_established(ini_h)) << "initiator never established";
+
+    const auto payload = make_app_payload("RACETEST");
+
+    // A separate thread hammers fixpp_session_send while the main thread calls
+    // fixpp_session_close on the SAME session. Under TSan this detects the data
+    // race on `valid` when it is a plain `bool`; with `std::atomic<bool>` there
+    // is no race.
+    std::atomic<bool> sender_done{false};
+    std::atomic<fixpp_error_t> last_send_code{FIXPP_ERR_OK};
+
+    std::thread sender([&] {
+        while (!sender_done.load(std::memory_order_acquire)) {
+            fixpp_error_t rc = fixpp_session_send(ini_h, payload.data(), payload.size());
+            last_send_code.store(rc, std::memory_order_relaxed);
+            // Once close is done (valid=false), the send loop should also observe
+            // INVALID_HANDLE and we can stop racing.
+            if (rc == FIXPP_ERR_INVALID_HANDLE) {
+                break;
+            }
+        }
+        sender_done.store(true, std::memory_order_release);
+    });
+
+    // Give the sender a moment to get into the steady-state send loop, then close.
+    std::this_thread::sleep_for(std::chrono::milliseconds{5});
+    fixpp_error_t close_rc = fixpp_session_close(ini_h);
+    // Signal the sender that close is done (it may already have exited on
+    // INVALID_HANDLE, which is fine).
+    sender_done.store(true, std::memory_order_release);
+    sender.join();
+
+    // close() returns OK (graceful) or a lifecycle code (already-closed); both
+    // are acceptable — the THREAD_SESSION_LIFECYCLE path is the race-observed path.
+    EXPECT_TRUE(close_rc == FIXPP_ERR_OK || close_rc == FIXPP_ERR_THREAD_SESSION_LIFECYCLE)
+        << "unexpected close code: " << close_rc;
+
+    // The sender thread must have seen one of the defined terminal codes —
+    // NEVER a crash/abort/TSan report (which indicates the atomic fix works).
+    fixpp_error_t final_send = last_send_code.load(std::memory_order_acquire);
+    EXPECT_TRUE(final_send == FIXPP_ERR_OK || final_send == FIXPP_ERR_THREAD_SESSION_LIFECYCLE ||
+                final_send == FIXPP_ERR_CANCELLED || final_send == FIXPP_ERR_INVALID_HANDLE ||
+                final_send == FIXPP_ERR_UNKNOWN)
+        << "send racing close returned an unexpected code: " << final_send;
 
     fixpp_engine_destroy(A);
     fixpp_engine_destroy(B);

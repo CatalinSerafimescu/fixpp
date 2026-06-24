@@ -44,7 +44,8 @@ fixpp_error_t check_session(const fixpp_session_t* s) noexcept {
     if (s == nullptr) {
         return FIXPP_ERR_NULL_HANDLE;
     }
-    if (!s->valid || s->engine == nullptr || !s->engine->engine_.has_value()) {
+    if (!s->valid.load(std::memory_order_acquire) || s->engine == nullptr ||
+        !s->engine->engine_.has_value()) {
         return FIXPP_ERR_INVALID_HANDLE;
     }
     return FIXPP_ERR_OK;
@@ -96,7 +97,7 @@ fixpp_error_t fixpp_session_open(fixpp_engine_t* engine, fixpp_session_config_t*
         h->engine = engine;
         h->id = id;
         h->slot = &slot;
-        h->valid = true;
+        h->valid.store(true, std::memory_order_relaxed);  // single-threaded construction
         fixpp_session* raw = h.get();
         engine->sessions_.push_back(std::move(h));
         delete cfg;  // builder CONSUMED on success (invalidated)
@@ -156,7 +157,11 @@ fixpp_error_t fixpp_session_close(fixpp_session_t* session) {
             }
         }
     }
-    session->valid = false;  // handle invalidated once close returns (no destroy)
+    // Publish the dead state with release semantics so any concurrent THREAD_SAFE
+    // consumer (fixpp_session_send / fixpp_session_is_established) that acquires
+    // `valid` after this point sees the handle as dead. close() itself is
+    // SINGLE_THREAD, so the store races only the THREAD_SAFE callers (Q2 fix).
+    session->valid.store(false, std::memory_order_release);
     // Success must NOT be routed through translate_for_consumer: OK is the
     // universal sentinel (not a minor-gated code), and the sibling ops
     // (open/send/is_established) return FIXPP_ERR_OK directly on success. Routing

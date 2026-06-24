@@ -197,6 +197,13 @@ void fixpp_engine_destroy(fixpp_engine_t* engine) {
     if (engine == nullptr) {
         return;  // NULL-safe
     }
+    // Tombstone check ([2i §4.2.1]): a second fixpp_engine_destroy(eng) on the
+    // same pointer is a no-op. The shell is intentionally NOT freed by the first
+    // destroy (see capi_internal.hpp SHELL LEAK note), so this read is always safe
+    // regardless of how many times destroy is called with the same pointer.
+    if (engine->tag_ == FIXPP_HANDLE_TAG_DEAD) {
+        return;  // already destroyed — idempotent, no UAF
+    }
     if (engine->engine_.has_value()) {
         // UNCONDITIONALLY drive Engine::stop() to completion (FR-003): ~Engine
         // asserts stopped(), which inits false and is only set by stop(), so even
@@ -216,15 +223,26 @@ void fixpp_engine_destroy(fixpp_engine_t* engine) {
         }
     }
 
-    // Unblock any running workers and join them BEFORE the struct destructs
-    // (a joinable std::thread that destructs unjoined calls std::terminate).
+    // Unblock any running workers and join them.
     engine->work_guard_.reset();  // idempotent
     for (auto& w : engine->workers_) {
         if (w.joinable()) {
             w.join();
         }
     }
-    delete engine;  // ~Engine asserts stopped() (satisfied) + zero lookup leases
+
+    // Release the C++ Engine (calls ~Engine, which asserts stopped() — satisfied
+    // above). After this, engine->engine_.has_value() == false, so any outstanding
+    // session handle that reads check_session → !engine_->has_value() returns
+    // FIXPP_ERR_INVALID_HANDLE safely (finding #2 fix).
+    engine->engine_.reset();
+
+    // Tombstone the handle and return WITHOUT deleting the shell. The shell is
+    // intentionally leaked so a second fixpp_engine_destroy(eng) on the same
+    // pointer can read the DEAD tag above and return immediately with no UAF.
+    // Engine shells are small and process-lifetime; the leak is acceptable per
+    // the design caution ([2i §4.2.2] / capi_internal.hpp SHELL LEAK note).
+    engine->tag_ = FIXPP_HANDLE_TAG_DEAD;
 }
 
 }  // extern "C"
