@@ -1,4 +1,4 @@
-name: Tier 1 — Linux CI (per-PR)
+name: Tier 1 — Linux CI
 
 on:
   push:

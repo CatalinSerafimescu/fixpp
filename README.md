@@ -2,7 +2,10 @@
 
 # fixpp
 
-[![CI: Tier 1](https://github.com/CatalinSerafimescu/fixpp/actions/workflows/tier1.yml/badge.svg?branch=main)](https://github.com/CatalinSerafimescu/fixpp/actions/workflows/tier1.yml)
+[![Tier 1 — Linux](https://github.com/CatalinSerafimescu/fixpp/actions/workflows/tier1.yml/badge.svg?branch=main)](https://github.com/CatalinSerafimescu/fixpp/actions/workflows/tier1.yml)
+[![Tier 2 — Windows](https://github.com/CatalinSerafimescu/fixpp/actions/workflows/tier2.yml/badge.svg?branch=main)](https://github.com/CatalinSerafimescu/fixpp/actions/workflows/tier2.yml)
+[![Tier 3 — Linux libc++](https://github.com/CatalinSerafimescu/fixpp/actions/workflows/tier3-libcxx.yml/badge.svg?branch=main)](https://github.com/CatalinSerafimescu/fixpp/actions/workflows/tier3-libcxx.yml)
+
 [![Coverage](https://codecov.io/gh/CatalinSerafimescu/fixpp/branch/main/graph/badge.svg)](https://codecov.io/gh/CatalinSerafimescu/fixpp)
 [![Docs](https://img.shields.io/badge/docs-fixpp-blue)](https://catalinserafimescu.github.io/fixpp/)
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)

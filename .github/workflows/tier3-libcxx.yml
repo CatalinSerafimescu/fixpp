@@ -1,13 +1,16 @@
-name: Tier 3 — Linux libc++ CI (on-demand)
+name: Tier 3 — Linux libc++ CI
 
-# Triggered only by:
+# Triggered by:
+#   - push to main (mandatory merge-gate; also populates the README badge)
 #   - workflow_dispatch (manual run from Actions UI)
 #   - PR labeled `run-tier3` (on-demand; standardised run-tierN scheme)
-# No nightly cron — Tier 3 is on-demand to conserve CI minutes.
+# No nightly cron — outside of main, Tier 3 is on-demand to conserve CI minutes.
 # OTel is not built on this lane (with_otel=False + FIXPP_BUILD_OTEL=OFF via
 # the preset) — the OTel-enabled libc++ run is validated locally before merge.
 
 on:
+  push:
+    branches: ["main"]
   pull_request:
     branches: ["**"]
     types: [labeled]
@@ -17,7 +20,7 @@ env:
   CONAN_HOME: ~/.conan2
 
 jobs:
-  # Only run on workflow_dispatch or PRs labeled 'run-tier3'
+  # Run on push to main, workflow_dispatch, or PRs labeled 'run-tier3'
   filter:
     name: "Check trigger"
     runs-on: ubuntu-24.04
@@ -31,7 +34,8 @@ jobs:
           # merely present. The `contains(labels,…)` form re-ran the full matrix on
           # every subsequent label change while run-tier3 sat on the PR (e.g. adding
           # gate-b-done). Matches the Tier-1 run-trigger; re-run = remove + re-add.
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]] || \
+          if [[ "${{ github.event_name }}" == "push" ]] || \
+             [[ "${{ github.event_name }}" == "workflow_dispatch" ]] || \
              { [[ "${{ github.event.action }}" == "labeled" ]] && \
                [[ "${{ github.event.label.name }}" == "run-tier3" ]]; }; then
             echo "should_run=true" >> $GITHUB_OUTPUT
