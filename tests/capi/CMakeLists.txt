@@ -187,6 +187,47 @@ target_compile_definitions(capi_error_live_test PRIVATE FIXPP_TEST_HOOKS)
 add_test(NAME capi_error_live COMMAND capi_error_live_test)
 set_tests_properties(capi_error_live PROPERTIES LABELS "capi;050")
 
+# ── 051 Feature C test targets (stubs; bodies land per-story T005/T008/T011/T019) ──
+# message_read_test — CA-008/CA-010-read: inbound field + group read accessors
+add_executable(capi_message_read_test message_read_test.cpp)
+target_link_libraries(capi_message_read_test PRIVATE
+  fixpp_capi
+  GTest::gtest
+  GTest::gtest_main
+)
+add_test(NAME capi_message_read COMMAND capi_message_read_test)
+set_tests_properties(capi_message_read PROPERTIES LABELS "capi;051")
+
+# message_write_test — CA-009/CA-010-write: outbound construct/populate/commit + group builder
+add_executable(capi_message_write_test message_write_test.cpp)
+target_link_libraries(capi_message_write_test PRIVATE
+  fixpp_capi
+  GTest::gtest
+  GTest::gtest_main
+)
+add_test(NAME capi_message_write COMMAND capi_message_write_test)
+set_tests_properties(capi_message_write PROPERTIES LABELS "capi;051")
+
+# msg_clone_cross_strand_test — CA-009 clone seam ([2i §9] seam #13, SC-006)
+add_executable(capi_msg_clone_cross_strand_test msg_clone_cross_strand_test.cpp)
+target_link_libraries(capi_msg_clone_cross_strand_test PRIVATE
+  fixpp_capi
+  GTest::gtest
+  GTest::gtest_main
+)
+add_test(NAME capi_msg_clone_cross_strand COMMAND capi_msg_clone_cross_strand_test)
+set_tests_properties(capi_msg_clone_cross_strand PROPERTIES LABELS "capi;051")
+
+# toapp_callback_test — CA-009 toApp send-callback (US6)
+add_executable(capi_toapp_callback_test toapp_callback_test.cpp)
+target_link_libraries(capi_toapp_callback_test PRIVATE
+  fixpp_capi
+  GTest::gtest
+  GTest::gtest_main
+)
+add_test(NAME capi_toapp_callback COMMAND capi_toapp_callback_test)
+set_tests_properties(capi_toapp_callback PROPERTIES LABELS "capi;051")
+
 if(EXISTS "${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so")
     add_test(
         NAME capi_recv_alloc_guard_mallocnesia

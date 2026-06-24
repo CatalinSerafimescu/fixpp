@@ -92,4 +92,16 @@
 1204	FIXPP_ERR_BINDING_CALLBACK_REENTRANT_CLOSE	2
 
 # ── Post-v1.x growth [1300, 1399] — RESERVED ──────────────────────────────────
-# ── Future expansion [1400+] — RESERVED ───────────────────────────────────────
+
+# ── Session/app + message-construction [1400, 1499] (Phase-4-owned, 051) ──────
+# Minted in C-ABI 0.4.0 (051 [2i §4.3] amendment, Article XX) → introducing_minor 4.
+# 1400-1404 map five reachable C++ core::error ordinals (119/77/129/130/131);
+# 1405 is a pure C-ABI construction reject with NO C++ ordinal (set_* framing-tag
+# fail-fast path, INV-3), never produced by translate().
+1400	FIXPP_ERR_SESSION_INVALID_ARGUMENT	4
+1401	FIXPP_ERR_SESSION_INVALID_STATE	4
+1402	FIXPP_ERR_APP_DO_NOT_SEND	4
+1403	FIXPP_ERR_APP_CALLBACK_THREW	4
+1404	FIXPP_ERR_APP_PAYLOAD_MALFORMED	4
+1405	FIXPP_ERR_MSG_FRAMING_TAG_FORBIDDEN	4
+# ── Future expansion [1406, 1499] — RESERVED (Phase-4 growth) ──────────────────

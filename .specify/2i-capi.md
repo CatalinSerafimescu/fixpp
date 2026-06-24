@@ -44,6 +44,7 @@
 | `FIXPP_ERR_CAPI_*` (2i-introduced) | 2i | 8 (this doc — §6.5; v0.2 adds `FIXPP_ERR_CAPI_CONFIG_INVALID` per RC#3 close) | §6.5 |
 | `FIXPP_ERR_THREAD_SESSION_*` (lifecycle subset) | 2d (already counted above; rebranded sub-group) | (subset of 2d) | `[2d §6.7]` |
 | `FIXPP_ERR_BINDING_*` (2m-introduced) | 2m | 5 | `[2m §6.7]` |
+| `FIXPP_ERR_SESSION_*` / `FIXPP_ERR_APP_*` / `FIXPP_ERR_MSG_*` (Phase-4 C-ABI-minted, NOT a prior-doc source domain) | 2i/051 | 6 | this doc §4.3 (051 amendment) — Check A only, NOT a Check-B source-domain count |
 
 **Block width.** 100 codes per block (e.g., `FIXPP_ERR_WIRE_*` lives in `[100, 199]`). Worst-current-occupancy is 22 variants (2h transport); 2× growth = 44; 4× growth = 88. A 100-wide block accommodates ≥ 4× the worst current count and ≥ 5× the project median (~10–12 variants per doc). `int32_t` storage gives 2³¹ headroom; we use ≤ 1500 of those across v1.x for a budget of 15 100-wide blocks.
 
@@ -68,7 +69,7 @@
 [1100, 1199] RESERVED: 2l tap (FIXPP_ERR_TAP_*)
 [1200, 1299] FIXPP_ERR_BINDING_*  (2m-owned per [2m §6.7]; 5 occupied; assigned at 2m sign-off 2026-05-10)
 [1300, 1399] RESERVED: post-v1.x growth (one of: SOFH, FIX-Latest, SBE, FIXP, FAST per [const §XVIII.2])
-[1400+]      RESERVED: future expansion
+[1400, 1499] FIXPP_ERR_SESSION_*/APP_*/MSG_*  (Phase-4-owned per 051 [2i §4.3] amendment; 6 occupied = 5 reachable core::error arms + 1 C-ABI construction reject; minted v0.4. The 15th and last 100-wide block in the ≤1500 budget.)
 ```
 
 Each domain owner keeps the right to **densify** their own 100-wide block over v1.x without consulting 2i (e.g., 2h growing from 22 to 40 variants is a 2h amendment, not a 2i amendment); cross-block growth (a 2g variant overflowing into the `[700, 799]` 2h block) requires a 2i amendment per `[const §XX]` because it touches the C ABI surface.
@@ -585,7 +586,18 @@ typedef int32_t fixpp_error_t;
 /* [1205, 1299] reserved for 2m growth. */
 
 /* [1300, 1399] reserved for post-v1.x growth */
-/* [1400+]      reserved for future expansion */
+
+/* ── Session/app + message-construction block [1400, 1499] — Phase-4-owned ──
+ *    (051 [2i §4.3] amendment, Article XX). 1400-1404 map five reachable C++
+ *    core::error ordinals (119/77/129/130/131); 1405 is a pure C-ABI
+ *    construction reject with no C++ ordinal. Minted in C-ABI 0.4.0. */
+#define FIXPP_ERR_SESSION_INVALID_ARGUMENT  ((fixpp_error_t)1400)
+#define FIXPP_ERR_SESSION_INVALID_STATE     ((fixpp_error_t)1401)
+#define FIXPP_ERR_APP_DO_NOT_SEND           ((fixpp_error_t)1402)
+#define FIXPP_ERR_APP_CALLBACK_THREW        ((fixpp_error_t)1403)
+#define FIXPP_ERR_APP_PAYLOAD_MALFORMED     ((fixpp_error_t)1404)
+#define FIXPP_ERR_MSG_FRAMING_TAG_FORBIDDEN ((fixpp_error_t)1405)
+/* [1406, 1499] reserved for Phase-4 session/app + message-construction growth. */
 
 /* ── fixpp_strerror — convert a fixpp_error_t to a static const char* ── */
 FIXPP_API_EXPORT

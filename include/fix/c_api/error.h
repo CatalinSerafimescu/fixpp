@@ -8,7 +8,9 @@
  *   - typedef int32_t fixpp_error_t  (NOT a C enum; storage size is ABI-stable).
  *   - Constants via #define so C89 compilers can use them without casts.
  *   - Once C-ABI MAJOR==1, a published slot never changes meaning.
- *   - All codes introduced in C-ABI 0.2.0 have introducing_minor=2.
+ *   - Codes introduced in C-ABI 0.2.0 have introducing_minor=2; the Phase-4
+ *     session/app + message-construction block [1400,1499] was minted in
+ *     C-ABI 0.4.0 (051 [2i §4.3] amendment) -> introducing_minor=4.
  *     (Used by translate_for_consumer() forward-compat downgrade, E-5.)
  *
  * Published code space (data-model.md E-2):
@@ -159,6 +161,23 @@ typedef int32_t fixpp_error_t;
 #define FIXPP_ERR_BINDING_WHEEL_ABI_MISMATCH     ((fixpp_error_t)1203)
 /** Python binding: reentrant close from callback. */
 #define FIXPP_ERR_BINDING_CALLBACK_REENTRANT_CLOSE ((fixpp_error_t)1204)
+
+/* ── Session/app + message-construction block [1400, 1499] — Phase-4-owned ──
+ *    (added v0.4 / 051 per Article XX). 1400-1404 map five reachable C++
+ *    core::error ordinals; 1405 is a pure C-ABI construction reject. */
+/** Session API: invalid argument (core::error session_invalid_argument, 119). */
+#define FIXPP_ERR_SESSION_INVALID_ARGUMENT  ((fixpp_error_t)1400)
+/** Session API: invalid state for send (core::error session_invalid_state_for_send, 77). */
+#define FIXPP_ERR_SESSION_INVALID_STATE     ((fixpp_error_t)1401)
+/** Application toApp callback vetoed the send (core::error app_do_not_send, 129). */
+#define FIXPP_ERR_APP_DO_NOT_SEND           ((fixpp_error_t)1402)
+/** Application callback signalled an error (core::error app_callback_threw, 130). */
+#define FIXPP_ERR_APP_CALLBACK_THREW        ((fixpp_error_t)1403)
+/** Application payload malformed (core::error app_payload_malformed, 131). */
+#define FIXPP_ERR_APP_PAYLOAD_MALFORMED     ((fixpp_error_t)1404)
+/** Message construction: set_* of a framing tag (8/9/34/49/52/56/10) on an outbound accumulator. */
+#define FIXPP_ERR_MSG_FRAMING_TAG_FORBIDDEN ((fixpp_error_t)1405)
+/* [1406, 1499] reserved for Phase-4 session/app + message-construction growth. */
 
 /* NOLINTEND(cppcoreguidelines-macro-usage) */
 
