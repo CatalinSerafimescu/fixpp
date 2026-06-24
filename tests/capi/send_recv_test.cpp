@@ -247,8 +247,22 @@ TEST(CapiSendRecv, NoCallbacksAfterClose) {
 // is UB; ASan catches the use-after-scope/use-after-return on the borrowed
 // MessageView. Guarded ASan-only — under the plain debug preset the bad read is
 // silent UB (would not fail), so the orchestrator's ASan matrix owns this witness.
-#if defined(__SANITIZE_ADDRESS__) || \
-    (defined(__has_feature) && __has_feature(address_sanitizer))
+//
+// Clang's __has_feature() MUST be nested inside `#if defined(__has_feature)` — it
+// cannot share an `#if` line with its `defined()` guard, because GCC's preprocessor
+// still parses `__has_feature(` (an unknown identifier → 0 followed by `(`) and
+// errors "missing binary operator before token (" regardless of `&&` short-circuit.
+// GCC exposes ASan via __SANITIZE_ADDRESS__ instead. (Matches the portable idiom in
+// tests/session/test_business_messages_build.cpp + tests/alloc_guard/.)
+#if defined(__has_feature)
+#  if __has_feature(address_sanitizer)
+#    define FIXPP_CAPI_TEST_ASAN 1
+#  endif
+#elif defined(__SANITIZE_ADDRESS__)
+#  define FIXPP_CAPI_TEST_ASAN 1
+#endif
+
+#ifdef FIXPP_CAPI_TEST_ASAN
 TEST(CapiSendRecv, InboundHandleUseAfterReturnCaughtUnderAsan) {
     fixpp_engine_t* B = nullptr;
     fixpp_engine_t* A = nullptr;
@@ -309,4 +323,4 @@ TEST(CapiSendRecv, InboundHandleUseAfterReturnCaughtUnderAsan) {
     fixpp_engine_destroy(A);
     fixpp_engine_destroy(B);
 }
-#endif  // address_sanitizer
+#endif  // FIXPP_CAPI_TEST_ASAN
