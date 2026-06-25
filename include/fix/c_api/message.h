@@ -285,8 +285,9 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_create_outbound(fixpp_session_t* sessio
  */
 FIXPP_API_EXPORT fixpp_error_t fixpp_msg_destroy(fixpp_msg_t* msg);
 
-/** Clone an inbound message (or a committed outbound clone) into a session-independent handle.
- *  Uncommitted outbound accumulators return FIXPP_ERR_INVALID_HANDLE (L-051-2).
+/** Clone an inbound (view-backed) message into a session-independent handle.
+ *  An outbound accumulator handle (committed or not) has no wire view and returns
+ *  FIXPP_ERR_INVALID_HANDLE (v1.0 scope — outbound-accumulator clone is L-051-2).
  *
  *  The clone owns its own arena; it is NOT tied to the source session's
  *  liveness token (session close does NOT tombstone the clone).

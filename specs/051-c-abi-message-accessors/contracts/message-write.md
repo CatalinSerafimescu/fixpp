@@ -8,12 +8,12 @@ Header: `include/fix/c_api/message.h` (NEW). Impl: `src/capi/message_write.cpp`.
 fixpp_error_t fixpp_msg_create_outbound(fixpp_session_t* session,
                                         const char* msg_type, size_t msg_type_len,
                                         fixpp_msg_t** msg_out);
-fixpp_error_t fixpp_msg_destroy(fixpp_msg_t* msg);                 /* idempotent, NULL-safe, never throws */
+fixpp_error_t fixpp_msg_destroy(fixpp_msg_t* msg);                 /* NULL-safe + single-destroy (double-destroy same ptr = UB); never throws */
 fixpp_error_t fixpp_msg_clone(const fixpp_msg_t* src, fixpp_msg_t** clone_out);
 ```
 
 - `create_outbound`: `DICT_CONFIG` if `msg_type` absent from the session dictionary (D-5); `NULL_HANDLE` on NULL; `INVALID_HANDLE` on destroyed session. **Construction-time thunk** → catch→translate.
-- `destroy`: releases the arena slot; no-op on NULL/destroyed/tombstoned (returns `OK`).
+- `destroy`: frees the message shell + its per-message arena; NULL → `OK`. A double-destroy of the same non-null pointer is **UB** (free-on-destroy, B-051-2 — the consumer nulls its pointer after destroy). Destroy on a tombstoned (session-closed) handle is a single destroy and returns `OK`.
 - `clone`: independent owner-controlled arena copy (session-independent; reads `THREAD_SAFE`; not session-tombstoned); `VERSION_MISMATCH` if src's resolved version not in loaded dicts; the v1.0 cross-strand-handoff escape hatch (seam #13).
 
 ## Setters (outbound only — inbound → `INVALID_HANDLE`, FR-007)
