@@ -195,6 +195,7 @@ target_link_libraries(capi_message_read_test PRIVATE
   GTest::gtest
   GTest::gtest_main
 )
+target_include_directories(capi_message_read_test PRIVATE ${FIXPP_CAPI_FEATURE_B_INCLUDES})
 add_test(NAME capi_message_read COMMAND capi_message_read_test)
 set_tests_properties(capi_message_read PROPERTIES LABELS "capi;051")
 

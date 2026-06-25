@@ -313,6 +313,16 @@ core::expected_t<OffsetTable::group_index> OffsetTable::group(std::uint16_t no_t
     std::uint16_t const delim = entries_[first].tag;
     std::size_t group_end = first;
     if (opaque_dict_ != nullptr && group_member_fn_ != nullptr) {
+        // Validate that `no_tag` is actually a group count field by confirming
+        // the dictionary recognises `delim` (the tag immediately following the
+        // count field) as a member of `no_tag`'s group.  If the dict does NOT
+        // know about this membership the count field is a plain scalar (e.g.
+        // SenderCompID=49) and we must return an absent result so that
+        // group_slices() yields an empty span → the thunk can report
+        // TYPE_MISMATCH (E-2 / CA-010-read contract).
+        if (!group_member_fn_(opaque_dict_, no_tag, delim)) {
+            return err_required_field_missing<group_index>();
+        }
         std::size_t k = first;
         while (k < entries_.size()) {
             if (entries_[k].tag != delim) {

@@ -260,6 +260,13 @@ fixpp_error_t symbol_to_code(const std::string& sym) {
         {"FIXPP_ERR_TRANSPORT_CONFIG",     FIXPP_ERR_TRANSPORT_CONFIG},
         {"FIXPP_ERR_DECIMAL_INVALID",      FIXPP_ERR_DECIMAL_INVALID},
         {"FIXPP_ERR_DECIMAL_PRECISION_LOSS", FIXPP_ERR_DECIMAL_PRECISION_LOSS},
+        // Session/app block [1400,1499] published by the 051 [2i §4.3] amendment.
+        {"FIXPP_ERR_SESSION_INVALID_ARGUMENT", FIXPP_ERR_SESSION_INVALID_ARGUMENT},
+        {"FIXPP_ERR_SESSION_INVALID_STATE",    FIXPP_ERR_SESSION_INVALID_STATE},
+        {"FIXPP_ERR_APP_DO_NOT_SEND",          FIXPP_ERR_APP_DO_NOT_SEND},
+        {"FIXPP_ERR_APP_CALLBACK_THREW",       FIXPP_ERR_APP_CALLBACK_THREW},
+        {"FIXPP_ERR_APP_PAYLOAD_MALFORMED",    FIXPP_ERR_APP_PAYLOAD_MALFORMED},
+        {"FIXPP_ERR_MSG_FRAMING_TAG_FORBIDDEN", FIXPP_ERR_MSG_FRAMING_TAG_FORBIDDEN},
     };
     // clang-format on
     auto it = kMap.find(sym);
@@ -312,13 +319,12 @@ TEST(CapiError, ExplicitUnknownOverrides) {
     EXPECT_EQ(translate(error::session_test_request_unanswered), FIXPP_ERR_UNKNOWN);
     EXPECT_EQ(translate(error::session_admin_not_supported),     FIXPP_ERR_UNKNOWN);
     EXPECT_EQ(translate(error::session_invalid_config),          FIXPP_ERR_UNKNOWN);
-    EXPECT_EQ(translate(error::session_invalid_state_for_send),  FIXPP_ERR_UNKNOWN);
+    // session_invalid_state_for_send (77) → now PUBLISHED in 051 (see Published051SessionAppArms).
 
-    // session_* (116-121): override + L-049-2 deferral
+    // session_* (116-121): override + L-049-2 deferral (session_invalid_argument now published)
     EXPECT_EQ(translate(error::session_seqnum_reset_mismatch),   FIXPP_ERR_UNKNOWN);
     EXPECT_EQ(translate(error::session_compid_unauthorized),     FIXPP_ERR_UNKNOWN);
     EXPECT_EQ(translate(error::session_testreqid_mismatch),      FIXPP_ERR_UNKNOWN);
-    EXPECT_EQ(translate(error::session_invalid_argument),        FIXPP_ERR_UNKNOWN);
     EXPECT_EQ(translate(error::session_seqnum_too_high),         FIXPP_ERR_UNKNOWN);
     EXPECT_EQ(translate(error::session_unknown_acceptor_session),FIXPP_ERR_UNKNOWN);
 
@@ -333,10 +339,19 @@ TEST(CapiError, ExplicitUnknownOverrides) {
     EXPECT_EQ(translate(error::otel_export_failed),       FIXPP_ERR_UNKNOWN);
     EXPECT_EQ(translate(error::otel_provider_init_failed),FIXPP_ERR_UNKNOWN);
 
-    // app_* (129-131): override — source defers; no published code
-    EXPECT_EQ(translate(error::app_do_not_send),       FIXPP_ERR_UNKNOWN);
-    EXPECT_EQ(translate(error::app_callback_threw),    FIXPP_ERR_UNKNOWN);
-    EXPECT_EQ(translate(error::app_payload_malformed), FIXPP_ERR_UNKNOWN);
+    // app_* (129-131): PUBLISHED in 051 [2i §4.3] amendment (see Published051SessionAppArms).
+}
+
+// 051 [2i §4.3] amendment: the FIVE reachable session/app arms are now published
+// off FIXPP_ERR_UNKNOWN into the dedicated Phase-4 [1400,1499] block. The other
+// 15 session arms + all log/otel arms stay UNKNOWN above, by design (L-049-2 /
+// L-051-1). Mirrors the csv oracle rows + error_block_test.
+TEST(CapiError, Published051SessionAppArms) {
+    EXPECT_EQ(translate(error::session_invalid_state_for_send), FIXPP_ERR_SESSION_INVALID_STATE);     // 77 -> 1401
+    EXPECT_EQ(translate(error::session_invalid_argument),       FIXPP_ERR_SESSION_INVALID_ARGUMENT);  // 119 -> 1400
+    EXPECT_EQ(translate(error::app_do_not_send),               FIXPP_ERR_APP_DO_NOT_SEND);            // 129 -> 1402
+    EXPECT_EQ(translate(error::app_callback_threw),            FIXPP_ERR_APP_CALLBACK_THREW);         // 130 -> 1403
+    EXPECT_EQ(translate(error::app_payload_malformed),         FIXPP_ERR_APP_PAYLOAD_MALFORMED);      // 131 -> 1404
 }
 
 // ---------------------------------------------------------------------------

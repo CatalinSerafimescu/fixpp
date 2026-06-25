@@ -15,6 +15,7 @@
 #include <memory>
 #include <memory_resource>
 #include <optional>
+#include <span>
 #include <thread>
 #include <unordered_map>
 #include <vector>
@@ -195,6 +196,26 @@ struct fixpp_msg {
     // for unset outbound handles.  Set from session->liveness_ at create_outbound
     // time (US2/T009).
     std::weak_ptr<SessionLiveness> token;
+};
+
+// fixpp_group — inbound repeating-group read cursor (E-2 / CA-010-read).
+//
+// NON-owning: aliases the parent message's parse arena; lifetime bounded by the
+// parent fixpp_msg_t dispatch window. Do NOT call any destroy function on this.
+//
+// Stored on-stack inside fixpp_msg_get_group (and fixpp_group_get_nested_group)
+// and placed into an arena-allocated shell so the pointer returned to the C
+// consumer remains valid for the dispatch window.
+//
+// slices: span into the parent OffsetTable's lazily-built group_slices_ arena.
+//         Each slice is a (ptr,len) sub-frame aliasing the original wire buffer.
+// parent_view: the owning MessageView<Index>; needed for nested group descent
+//              (group_slices calls on sub-instances require a fresh OffsetTable).
+// [data-model E-2 / contracts/message-read.md CA-010]
+struct fixpp_group {
+    std::span<const fixpp::wire::group_slice> slices{};  // borrowed from parent OffsetTable arena
+    const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>* parent_view = nullptr;
+    std::pmr::memory_resource* arena = nullptr;  // scratch arena for nested OffsetTables
 };
 
 // OutboundAccumulator — the ordered, mutable, arena-resident structure (E-3).
