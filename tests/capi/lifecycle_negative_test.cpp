@@ -198,4 +198,13 @@ TEST(CapiLifecycleNegative, CloseNeverEstablishedIsLifecycleOutcome) {
     fixpp_engine_destroy(eng);
 }
 
+// NOTE (issue #151): the established-then-reaped idempotent-close contract is NOT
+// testable here — a reaped session stays NON-null in lookup (the engine retains the
+// entry on disconnect), so it reaches fixpp_session_close's else branch, not the
+// null branch this never-established case exercises. The real-mechanism OK arm is
+// witnessed end-to-end by send_recv_test.cpp::CloseReapedSessionIsIdempotentOk; its
+// ever_established-discriminated THREAD_SESSION_LIFECYCLE sibling
+// (CloseReapedNeverEstablishedIsLifecycle) is a seam-driven branch-discrimination
+// witness (it flips the latch off on a really-drained session).
+
 }  // namespace

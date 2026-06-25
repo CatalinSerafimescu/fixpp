@@ -142,6 +142,13 @@ target_link_libraries(capi_send_recv_test PRIVATE
   GTest::gtest_main
 )
 target_include_directories(capi_send_recv_test PRIVATE ${FIXPP_CAPI_FEATURE_B_INCLUDES})
+# Issue #151: the reaped-close tests use the FIXPP_TEST_HOOKS Session accessor
+# is_drained_for_test() to wait DETERMINISTICALLY for the acceptor to reach
+# closed_drained (avoiding a sleep that races the `closing` window) and the
+# set_session_ever_established seam (capi_internal.hpp gated decl). ODR-safe: both
+# FIXPP_TEST_HOOKS blocks are methods/decls only — no gated data members — so the
+# struct layouts match the non-hooks library (same pattern as capi_error_live_test).
+target_compile_definitions(capi_send_recv_test PRIVATE FIXPP_TEST_HOOKS)
 # Split into two ctest entries so WILL_FAIL is scoped ONLY to the deliberate
 # ASan UAF witness (T029), not to the positive round-trip tests (CA-006/007).
 # A binary-wide WILL_FAIL would invert a real ASan failure in the positive tests

@@ -152,6 +152,14 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_open(fixpp_engine_t* engine,
  * blocked idle read breaks, FR-005). The handle is invalidated once close
  * returns; there is no separate session-destroy.
  *
+ * Reaped-session contract (issue #151): if the session was established at least
+ * once (logged on) and its peer has since disconnected — leaving it reaped/drained
+ * by the engine — the first close returns FIXPP_ERR_OK: closing a once-live,
+ * now-drained session is an idempotent success, not an error. A session that was
+ * opened but never established (never started/connected, or published but never
+ * logged on) returns FIXPP_ERR_THREAD_SESSION_LIFECYCLE. Either way the handle is
+ * invalidated, so a subsequent close returns FIXPP_ERR_INVALID_HANDLE.
+ *
  * Reentrancy: single-thread — non-callback / non-session-strand caller only; no
  * concurrent close on the same handle (the thunk posts onto the session domain
  * and BLOCKS, so a callback/strand caller deadlocks — FR-013a).

@@ -12,6 +12,7 @@
 
 #include "fix/c_api/session.h"
 
+#include <cassert>
 #include <cstdio>
 #include <cstdlib>
 #include <memory>
@@ -146,8 +147,16 @@ fixpp_error_t fixpp_session_close(fixpp_session_t* session) {
         // state_ is guaranteed non-null here (check_session validated it above).
         std::shared_ptr<fixpp::session::Session> sess = e->state_->engine_->lookup(session->id);
         if (sess == nullptr) {
-            // Registered but never established, or already gone → treat as an
-            // already-closed lifecycle outcome (existing 049 code).
+            // lookup()==nullptr ⇒ the session was NEVER published into the registry
+            // snapshot (opened, never started/connected). A session that WAS published
+            // is RETAINED by the engine on peer disconnect: unpublish_entry() resets only
+            // entry.live_transport and DELIBERATELY keeps entry.session alive until
+            // Engine::stop()'s registry_.clear() (src/session/engine.cpp:638-650). So an
+            // established-then-reaped session is NOT on this null branch — it reaches the
+            // else branch below with a non-null lookup and a closed_drained Session, where
+            // Session::close returns session_already_closed (handled there). Null lookup is
+            // therefore the never-established lifecycle outcome (issue #151; asserted by
+            // CapiLifecycleNegative.CloseNeverEstablishedIsLifecycleOutcome).
             code = FIXPP_ERR_THREAD_SESSION_LIFECYCLE;
         } else {
             // Post Session::close(graceful) onto the session's serialisation
@@ -171,7 +180,30 @@ fixpp_error_t fixpp_session_close(fixpp_session_t* session) {
                                           asio::use_future);
                 fixpp::core::expected_t<void> r = fut.get();
                 if (!r.has_value()) {
-                    code = translate(r.error());
+                    // Established-then-reaped idempotent close (issue #151): a session
+                    // that was published and is now closed_drained (peer disconnected
+                    // first; the entry is retained by the engine, see the null-branch
+                    // note above) makes Session::close return session_already_closed.
+                    // For a session that DID establish (logged on at least once — the
+                    // sticky ever_established latch, set on the first onLogon and never
+                    // reset) this is a normal idempotent close → OK. A published session
+                    // that NEVER established (connected/Logon-sent but the peer never
+                    // acked, then drained) is the never-established outcome →
+                    // THREAD_SESSION_LIFECYCLE, matching the null-branch contract. The
+                    // latch is the only signal that survives onLogout + drain. All other
+                    // close errors translate normally.
+                    if (r.error() == fixpp::core::error::session_already_closed) {
+                        // slot is always set by fixpp_session_open before the handle is
+                        // published; a null slot is an internal invariant break, not a
+                        // lifecycle outcome. Assert it (matching the unguarded sibling
+                        // load in fixpp_session_is_established).
+                        assert(session->slot != nullptr);
+                        code = session->slot->ever_established.load(std::memory_order_acquire)
+                                   ? FIXPP_ERR_OK
+                                   : FIXPP_ERR_THREAD_SESSION_LIFECYCLE;
+                    } else {
+                        code = translate(r.error());
+                    }
                 }
             } catch (...) {
                 code = FIXPP_ERR_THREAD_SESSION_LIFECYCLE;
@@ -288,4 +320,15 @@ namespace fixpp_capi::detail {
 // without FIXPP_TEST_HOOKS); only the declaration in capi_internal.hpp is gated, so
 // a production caller cannot reach it (mirrors the file_store.cpp seam idiom).
 void set_send_throw_hook(bool on) noexcept { g_send_throw_hook = on; }
+
+// Issue #151 branch-discrimination seam (see capi_internal.hpp). Forces the sticky
+// ever_established latch to a chosen value so the else branch's
+// session_already_closed → THREAD_SESSION_LIFECYCLE arm (the never-established case)
+// can be witnessed by flipping the latch OFF on a really-drained retained session.
+// Compiled unconditionally; only the declaration is FIXPP_TEST_HOOKS-gated.
+void set_session_ever_established(fixpp_session_t* session, bool on) noexcept {
+    if (session != nullptr && session->slot != nullptr) {
+        session->slot->ever_established.store(on, std::memory_order_release);
+    }
+}
 }  // namespace fixpp_capi::detail
