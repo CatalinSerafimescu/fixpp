@@ -321,10 +321,11 @@ namespace fixpp_capi::detail {
 // a production caller cannot reach it (mirrors the file_store.cpp seam idiom).
 void set_send_throw_hook(bool on) noexcept { g_send_throw_hook = on; }
 
-// Issue #151 branch-discrimination seam (see capi_internal.hpp). Forces the
-// sticky ever_established latch on a session's slot so the established-then-reaped
-// close branch can be witnessed without a real reap race. Compiled unconditionally;
-// only the declaration is FIXPP_TEST_HOOKS-gated.
+// Issue #151 branch-discrimination seam (see capi_internal.hpp). Forces the sticky
+// ever_established latch to a chosen value so the else branch's
+// session_already_closed → THREAD_SESSION_LIFECYCLE arm (the never-established case)
+// can be witnessed by flipping the latch OFF on a really-drained retained session.
+// Compiled unconditionally; only the declaration is FIXPP_TEST_HOOKS-gated.
 void set_session_ever_established(fixpp_session_t* session, bool on) noexcept {
     if (session != nullptr && session->slot != nullptr) {
         session->slot->ever_established.store(on, std::memory_order_release);

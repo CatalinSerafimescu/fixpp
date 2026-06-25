@@ -371,9 +371,9 @@ TEST(CapiSendRecv, InboundHandleUseAfterReturnCaughtUnderAsan) {
 // where Session::close on the now-closed_drained session returns
 // session_already_closed; the fix maps THAT to OK because the session
 // ever_established. Deterministic disconnect-first ordering: close the initiator
-// (sends Logout + tears down the transport), wait for the acceptor to leave Active,
-// then a short settle for the read-pump EOF to drain it to closed_drained, then
-// close the acceptor. RED on the unfixed else branch (returns 301), GREEN after.
+// (sends Logout + tears down the transport), poll the retained acceptor session ON
+// ITS STRAND until it reaches closed_drained (wait_for_acceptor_drained), then close
+// the acceptor. RED on the unfixed else branch (returns 301), GREEN after.
 TEST(CapiSendRecv, CloseReapedSessionIsIdempotentOk) {
     fixpp_engine_t* B = nullptr;
     fixpp_engine_t* A = nullptr;
