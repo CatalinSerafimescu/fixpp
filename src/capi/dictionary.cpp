@@ -22,9 +22,16 @@
 
 #include "fixpp/dict/xml_loader.hpp"
 
-// ── Dead-shell registry (bounded leak, intentional — see SHELL RETAIN note in
-//    fixpp_engine_destroy; prevents ASan/LSan false-positives on retained shells
-//    that outlive the process DSOcleanup order).  Heap-allocated once; never freed.
+// ── Dead-shell registry (retained-shell tombstone, gate-b/r1 comment F4):
+//    Each successful fixpp_dict_destroy pushes the shell pointer here so a
+//    second same-pointer destroy can read tag_==DEAD and no-op safely (SC-004
+//    idempotent double-destroy).  Growth is O(load/destroy cycle count), NOT
+//    O(live dicts) — the shells are kept live in perpetuity so tag_ remains
+//    readable after the dict's internals are freed.  A high-frequency consumer
+//    should load a dictionary ONCE and reuse it; see L-052-4 in
+//    spec/behaviors-and-limitations.md.  Heap-allocated once; never freed
+//    (prevents ASan/LSan false-positives on retained shells that outlive the
+//    process DSOcleanup order).
 // NOLINTBEGIN(cppcoreguidelines-avoid-non-const-global-variables)
 static std::vector<fixpp_dict*>* s_dead_dict_shells  // NOLINT(cert-err58-cpp)
     = new std::vector<fixpp_dict*>();
