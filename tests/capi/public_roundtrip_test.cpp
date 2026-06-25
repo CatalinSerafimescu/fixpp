@@ -23,11 +23,13 @@
 #include <cstring>
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <vector>
 
 #include "fix/c_api/dict.h"
 #include "fix/c_api/engine.h"
+#include "fix/c_api/message.h"  // fixpp_msg_get_string / fixpp_msg_get_msg_type (F7 receipt check)
 #include "fix/c_api/session.h"
 #include "fix/c_api/version.h"
 
@@ -216,15 +218,39 @@ TEST(PublicRoundtrip, TwoEngineLoopbackExchangesAppMessage) {
     // (exercises the port_out==nullptr guard on a real handle before engine start)
     EXPECT_EQ(fixpp_session_acceptor_bound_endpoint(acc_session, nullptr), FIXPP_ERR_NULL_HANDLE);
 
-    // Register receive callback on acceptor BEFORE engine_start (FR-011)
-    std::atomic<int> recv_count{0};
+    // Register receive callback on acceptor BEFORE engine_start (FR-011).
+    // F7 (gate-b/r1): the callback reads tag 35 (MsgType) and tag 11 (ClOrdID) via
+    // the public C-ABI and sets flags, so a future accidental app-message source
+    // cannot satisfy the receipt check with the wrong message content.
+    struct RecvResult {
+        std::atomic<int>  count{0};
+        std::atomic<bool> msg_type_d{false};        // tag 35 == "D"
+        std::atomic<bool> clord_id_order001{false}; // tag 11 == "ORDER-001"
+    };
+    RecvResult recv_result;
     ASSERT_EQ(fixpp_session_register_callback(
                   acc_session,
-                  [](const fixpp_msg_t* /*inbound*/, void* ud) {
-                      static_cast<std::atomic<int>*>(ud)->fetch_add(1,
-                                                                     std::memory_order_relaxed);
+                  [](const fixpp_msg_t* inbound, void* ud) {
+                      auto* r = static_cast<RecvResult*>(ud);
+                      r->count.fetch_add(1, std::memory_order_relaxed);
+                      const char* val = nullptr;
+                      size_t      len = 0;
+                      // Assert tag 35 == "D" (NewOrderSingle)
+                      if (fixpp_msg_get_msg_type(inbound, &val, &len) == FIXPP_ERR_OK) {
+                          r->msg_type_d.store(
+                              val != nullptr && len == 1 && val[0] == 'D',
+                              std::memory_order_relaxed);
+                      }
+                      // Assert tag 11 == "ORDER-001" (ClOrdID from make_app_payload)
+                      val = nullptr; len = 0;
+                      if (fixpp_msg_get_string(inbound, 11, &val, &len) == FIXPP_ERR_OK) {
+                          r->clord_id_order001.store(
+                              val != nullptr &&
+                              std::string_view(val, len) == "ORDER-001",
+                              std::memory_order_relaxed);
+                      }
                   },
-                  &recv_count),
+                  &recv_result),
               FIXPP_ERR_OK);
 
     ASSERT_EQ(fixpp_engine_start(acc_engine), FIXPP_ERR_OK);
@@ -283,12 +309,16 @@ TEST(PublicRoundtrip, TwoEngineLoopbackExchangesAppMessage) {
     {
         using clock = std::chrono::steady_clock;
         const auto until = clock::now() + std::chrono::milliseconds{4000};
-        while (recv_count.load(std::memory_order_relaxed) == 0 && clock::now() < until) {
+        while (recv_result.count.load(std::memory_order_relaxed) == 0 && clock::now() < until) {
             std::this_thread::sleep_for(std::chrono::milliseconds{2});
         }
     }
-    EXPECT_GT(recv_count.load(std::memory_order_relaxed), 0)
+    EXPECT_GT(recv_result.count.load(std::memory_order_relaxed), 0)
         << "Acceptor receive callback was not invoked within 4s";
+    EXPECT_TRUE(recv_result.msg_type_d.load(std::memory_order_relaxed))
+        << "Received message tag 35 (MsgType) != 'D'";
+    EXPECT_TRUE(recv_result.clord_id_order001.load(std::memory_order_relaxed))
+        << "Received message tag 11 (ClOrdID) != 'ORDER-001'";
 
     // ── Teardown (joins engine workers) ───────────────────────────────────────
     EXPECT_EQ(fixpp_session_close(ini_session), FIXPP_ERR_OK);
