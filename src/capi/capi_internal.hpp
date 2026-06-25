@@ -49,11 +49,12 @@ fixpp_error_t translate_for_consumer(fixpp_error_t code, std::uint16_t consumer_
 // production caller cannot flip it. Test sets true, calls send (→ abort), restores.
 void set_send_throw_hook(bool on) noexcept;
 // Issue #151 branch-discrimination seam: force a session handle's slot sticky
-// ever_established latch on, so the established-then-reaped close branch can be
-// witnessed deterministically (open + set + DON'T start the engine → lookup
-// misses, exactly as in CloseNeverEstablished, but with the latch set → OK).
-// Defined unconditionally in src/capi/session.cpp; only this declaration is
-// gated, so a production caller cannot reach it.
+// ever_established latch to a chosen value. Used by send_recv_test to flip the latch
+// OFF on a really-drained retained acceptor, driving the THREAD_SESSION_LIFECYCLE arm
+// of fixpp_session_close's session_already_closed handling (the never-established case)
+// without having to manufacture a published-but-never-logged-on session. Defined
+// unconditionally in src/capi/session.cpp; only this declaration is gated, so a
+// production caller cannot reach it.
 void set_session_ever_established(fixpp_session_t* session, bool on) noexcept;
 #endif  // FIXPP_TEST_HOOKS
 

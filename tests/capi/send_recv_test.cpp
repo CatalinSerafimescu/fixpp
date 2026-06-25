@@ -36,21 +36,48 @@
 #include <thread>
 #include <vector>
 
+#include <asio/co_spawn.hpp>
+#include <asio/use_future.hpp>
+
 #include "fix/c_api/engine.h"
 #include "fix/c_api/session.h"
 
-#include "capi_internal.hpp"  // fixpp_msg (to read the view in the UAF negative test)
+#include "capi_internal.hpp"  // fixpp_msg + fixpp_engine internals; set_session_ever_established
+                              // (FIXPP_TEST_HOOKS-gated decl, used by the #151 reaped tests)
 #include "capi_loopback_support.hpp"
 
-// Issue #151 discriminating-witness seam (defined unconditionally in
-// src/capi/session.cpp; the capi_internal.hpp declaration is FIXPP_TEST_HOOKS-
-// gated, so it is forward-declared here the way error_block_test.cpp forward-
-// declares translate()). Used by CloseReapedNeverEstablishedIsLifecycle to flip the
-// sticky latch on a really-drained session and drive the else branch's
-// THREAD_SESSION_LIFECYCLE arm.
-namespace fixpp_capi::detail {
-void set_session_ever_established(fixpp_session_t* session, bool on) noexcept;
-}  // namespace fixpp_capi::detail
+#include "fixpp/session/session.hpp"  // Session::is_drained_for_test (FIXPP_TEST_HOOKS)
+
+// Issue #151: poll the engine's RETAINED Session (a reaped session stays in lookup)
+// until it reaches lifecycle::closed_drained — the deterministic signal that
+// Session::close will return session_already_closed. is_established/onLogout fires on
+// the Active→!Active edge BEFORE closed_drained, so a fixed sleep races the `closing`
+// window; this waits on the real terminal state instead. Self-bounded by `deadline`.
+//
+// state_ is a plain enum, SINGLE-WRITER on the session strand (the worker mutates it
+// in Session::close), so it must be READ ON THAT STRAND — an off-strand read is a data
+// race (TSan-confirmed). The read is hopped onto sess->executor() (the same strand the
+// worker uses), then blocked on via use_future; the test thread never touches state_.
+inline bool wait_for_acceptor_drained(
+    fixpp_engine_t* engine, const fixpp::session::SessionId& id,
+    std::chrono::milliseconds deadline = std::chrono::milliseconds{5000}) {
+    auto* e = reinterpret_cast<fixpp_engine*>(engine);
+    const auto until = std::chrono::steady_clock::now() + deadline;
+    for (;;) {
+        if (e->state_ != nullptr && e->state_->engine_.has_value()) {
+            std::shared_ptr<fixpp::session::Session> sess = e->state_->engine_->lookup(id);
+            if (sess != nullptr) {
+                auto fut = asio::co_spawn(
+                    sess->executor().underlying(),
+                    [sess]() -> asio::awaitable<bool> { co_return sess->is_drained_for_test(); },
+                    asio::use_future);
+                if (fut.get()) return true;
+            }
+        }
+        if (std::chrono::steady_clock::now() >= until) return false;
+        std::this_thread::sleep_for(std::chrono::milliseconds{2});
+    }
+}
 
 using namespace std::chrono_literals;
 using namespace fixpp::capi_test;
@@ -374,9 +401,8 @@ TEST(CapiSendRecv, CloseReapedSessionIsIdempotentOk) {
 
     // Disconnect-first: close the initiator, then reap the acceptor.
     EXPECT_EQ(fixpp_session_close(ini_h), FIXPP_ERR_OK);
-    ASSERT_TRUE(wait_for_not_established(acc_h))
-        << "acceptor never left Active after the peer disconnected";
-    std::this_thread::sleep_for(500ms);  // settle: read-pump EOF → closed_drained
+    ASSERT_TRUE(wait_for_acceptor_drained(B, acc_id))
+        << "acceptor never reached closed_drained after the peer disconnected";
     // The reaped acceptor closes as an idempotent OK (issue #151). Pre-fix this
     // returned THREAD_SESSION_LIFECYCLE via session_already_closed in the else branch.
     EXPECT_EQ(fixpp_session_close(acc_h), FIXPP_ERR_OK);
@@ -428,9 +454,8 @@ TEST(CapiSendRecv, CloseReapedNeverEstablishedIsLifecycle) {
     // as the OK arm), then flip the latch off to stand in for a never-established
     // published session reaching the drained else branch.
     EXPECT_EQ(fixpp_session_close(ini_h), FIXPP_ERR_OK);
-    ASSERT_TRUE(wait_for_not_established(acc_h))
-        << "acceptor never left Active after the peer disconnected";
-    std::this_thread::sleep_for(500ms);  // settle: read-pump EOF → closed_drained
+    ASSERT_TRUE(wait_for_acceptor_drained(B, acc_id))
+        << "acceptor never reached closed_drained after the peer disconnected";
     fixpp_capi::detail::set_session_ever_established(acc_h, false);
     EXPECT_EQ(fixpp_session_close(acc_h), FIXPP_ERR_THREAD_SESSION_LIFECYCLE);
 

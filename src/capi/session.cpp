@@ -12,6 +12,7 @@
 
 #include "fix/c_api/session.h"
 
+#include <cassert>
 #include <cstdio>
 #include <cstdlib>
 #include <memory>
@@ -192,8 +193,12 @@ fixpp_error_t fixpp_session_close(fixpp_session_t* session) {
                     // latch is the only signal that survives onLogout + drain. All other
                     // close errors translate normally.
                     if (r.error() == fixpp::core::error::session_already_closed) {
-                        code = (session->slot != nullptr &&
-                                session->slot->ever_established.load(std::memory_order_acquire))
+                        // slot is always set by fixpp_session_open before the handle is
+                        // published; a null slot is an internal invariant break, not a
+                        // lifecycle outcome. Assert it (matching the unguarded sibling
+                        // load in fixpp_session_is_established).
+                        assert(session->slot != nullptr);
+                        code = session->slot->ever_established.load(std::memory_order_acquire)
                                    ? FIXPP_ERR_OK
                                    : FIXPP_ERR_THREAD_SESSION_LIFECYCLE;
                     } else {

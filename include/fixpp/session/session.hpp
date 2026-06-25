@@ -509,6 +509,17 @@ public:
     // NOT for production use. [041 T016; SC-005; FR-002]
     [[nodiscard]] bool has_validator_for_test() const noexcept { return validator_ != nullptr; }
 
+    // TEST-ONLY accessor: returns true iff the session reached lifecycle::closed_drained
+    // (the terminal drained state). Used by the issue #151 capi reaped-close tests
+    // (tests/capi/send_recv_test.cpp) to wait DETERMINISTICALLY for a peer-disconnected
+    // acceptor to finish draining before re-closing it — `is_established`/onLogout fires
+    // on the Active→!Active edge, BEFORE state_ reaches closed_drained, so a fixed sleep
+    // can race the `closing` window. A plain bool accessor; adds no include edge → safe
+    // ([const §XV.9]). NOT for production use.
+    [[nodiscard]] bool is_drained_for_test() const noexcept {
+        return state_ == lifecycle::closed_drained;
+    }
+
     // TEST-ONLY accessor: returns true iff live_peer_id_ has a value.
     // Used by 043 T008 to directly assert that install_reconnected_transport and
     // attach_accepted_transport leave live_peer_id_ == nullopt on insecure_plain_tcp
