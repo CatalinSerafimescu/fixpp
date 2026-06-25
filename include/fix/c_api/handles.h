@@ -16,9 +16,13 @@
  *   - fixpp_dict_t   : owning (refcounted shared_ptr). Future fixpp_dict_destroy(dict)
  *                      — same idempotent NULL-safe never-throwing discipline.
  *                      (Feature C / [2c])
- *   - fixpp_msg_t    : outbound — future fixpp_msg_destroy(msg) (same discipline,
- *                      Feature C). Inbound — engine-destroyed at parse-window
- *                      close; the consumer does NOT destroy it.
+ *   - fixpp_msg_t    : outbound/clone — fixpp_msg_destroy(msg): owning, NULL-safe,
+ *                      never throws, but SINGLE-DESTROY only — a double-destroy of
+ *                      the same non-null pointer is UB (B-051-2; a per-op handle,
+ *                      NOT the idempotent double-destroy-safe discipline of the
+ *                      singleton engine/dict handles above). Inbound — engine-
+ *                      destroyed at parse-window close; the consumer does NOT
+ *                      destroy it.
  *   - fixpp_session_t: NON-owning observer. There is NO fixpp_session_destroy;
  *                      the session is closed via the lifecycle
  *                      fixpp_session_close(session) (Feature B), and the handle
