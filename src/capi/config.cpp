@@ -206,6 +206,54 @@ fixpp_error_t fixpp_session_config_set_reset_on_logon(fixpp_session_config_t* cf
     return FIXPP_ERR_OK;
 }
 
+fixpp_error_t fixpp_session_config_set_reset_seqnum_policy(fixpp_session_config_t* cfg,
+                                                            fixpp_reset_seqnum_policy kind) {
+    if (cfg == nullptr) {
+        return FIXPP_ERR_NULL_HANDLE;
+    }
+    // A C caller can pass an out-of-range value (FFI bypass). A typed enum LOAD of
+    // an out-of-range value is UB (-fsanitize=enum), so read the raw bytes and
+    // switch on the integer; an out-of-range value falls through to CONFIG_INVALID.
+    int raw = 0;
+    static_assert(sizeof(kind) <= sizeof(raw), "kind wider than int");
+    std::memcpy(&raw, &kind, sizeof(kind));
+    switch (raw) {
+        case FIXPP_RESET_SEQNUM_BILATERAL_STRICT:
+            cfg->cfg.reset_seqnum_policy_field =
+                fixpp::session::reset_seqnum_policy::bilateral_strict;
+            return FIXPP_ERR_OK;
+        case FIXPP_RESET_SEQNUM_BILATERAL_LENIENT:
+            cfg->cfg.reset_seqnum_policy_field =
+                fixpp::session::reset_seqnum_policy::bilateral_lenient;
+            return FIXPP_ERR_OK;
+        case FIXPP_RESET_SEQNUM_UNILATERAL:
+            cfg->cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::unilateral;
+            return FIXPP_ERR_OK;
+    }
+    return FIXPP_ERR_CAPI_CONFIG_INVALID;  // out-of-range cast (FFI bypass)
+}
+
+fixpp_error_t fixpp_session_config_set_tcp_endpoint(fixpp_session_config_t* cfg, const char* host,
+                                                     uint16_t port) {
+    if (cfg == nullptr || host == nullptr) {
+        return FIXPP_ERR_NULL_HANDLE;
+    }
+    if (host[0] == '\0') {
+        return FIXPP_ERR_CAPI_CONFIG_INVALID;  // empty host (unusable)
+    }
+    try {
+        // Mirror the L-050-5 seam (capi_loopback_support.hpp:67-68), now public:
+        // set the reconnect_endpoint so the engine's auto-derived plaintext factory
+        // can connect (initiator) or bind (acceptor), and install the transport_send
+        // placeholder that the accept loop rebinds to the live socket.
+        cfg->cfg.reconnect_endpoint = fixpp::transport::Endpoint{host, port};
+        cfg->cfg.transport_send = [](std::span<const std::byte>) {};
+    } catch (...) {
+        return FIXPP_ERR_CAPI_CONFIG_INVALID;
+    }
+    return FIXPP_ERR_OK;
+}
+
 void fixpp_session_config_destroy(fixpp_session_config_t* cfg) {
     delete cfg;  // NULL-safe; never-throws
 }
