@@ -34,10 +34,12 @@ namespace {
 
 // ── Handle-validation helpers ───────────────────────────────────────────────
 
-// Minimal guard for the CA-008 read path (inbound only):
-//   1. NULL check
-//   2. Dead-tag check (FIXPP_HANDLE_TAG_DEAD → INVALID_HANDLE)
-//   3. View pointer check (outbound flavour has view==nullptr → INVALID_HANDLE)
+// Positive-tag guard for the CA-008 read path (inbound/clone handles):
+//   1. NULL check → NULL_HANDLE
+//   2. Positive tag check: tag_ must be exactly FIXPP_HANDLE_TAG_MSG → INVALID_HANDLE
+//      for any other value (ENGINE, DICT, DEAD, or foreign handle).  Mirrors the
+//      check_msg_for_field_iter guard added in 052 (gate-b/r1: F2 fix).
+//   3. View pointer check: outbound flavour has view==nullptr → INVALID_HANDLE.
 // Returns the inbound view pointer, or nullptr + sets *err.
 const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>*
 check_inbound_msg(const fixpp_msg_t* msg, fixpp_error_t* err) noexcept {
@@ -46,7 +48,7 @@ check_inbound_msg(const fixpp_msg_t* msg, fixpp_error_t* err) noexcept {
         return nullptr;
     }
     const auto* h = reinterpret_cast<const fixpp_msg*>(msg);
-    if (h->tag_ == FIXPP_HANDLE_TAG_DEAD) {
+    if (h->tag_ != FIXPP_HANDLE_TAG_MSG) {
         *err = FIXPP_ERR_INVALID_HANDLE;
         return nullptr;
     }
