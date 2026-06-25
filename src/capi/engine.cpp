@@ -54,6 +54,11 @@ SessionSlot* CapiApplication::find_(const fixpp::session::SessionId& id) noexcep
 void CapiApplication::onLogon(const fixpp::session::SessionId& id) {
     if (auto* s = find_(id)) {
         s->established.store(true, std::memory_order_release);
+        // Sticky latch (issue #151): record that this session reached established
+        // at least once. Never reset (onLogout clears `established` but not this),
+        // so fixpp_session_close can tell established-then-reaped (→ OK) from
+        // never-established (→ THREAD_SESSION_LIFECYCLE).
+        s->ever_established.store(true, std::memory_order_release);
     }
 }
 

@@ -17,6 +17,15 @@
 #include "fix/c_api/session.h"
 #include "fix/c_api/version.h"
 
+// Issue #151 branch-discrimination seam (defined unconditionally in
+// src/capi/session.cpp; the capi_internal.hpp declaration is FIXPP_TEST_HOOKS-
+// gated, so it is forward-declared here the same way error_block_test.cpp
+// forward-declares translate()). Forces the sticky ever_established latch on so
+// the established-then-reaped close branch is witnessed without a real reap race.
+namespace fixpp_capi::detail {
+void set_session_ever_established(fixpp_session_t* session, bool on) noexcept;
+}  // namespace fixpp_capi::detail
+
 namespace {
 
 constexpr uint16_t kMajor = FIXPP_C_ABI_VERSION_MAJOR;
@@ -194,6 +203,33 @@ TEST(CapiLifecycleNegative, CloseNeverEstablishedIsLifecycleOutcome) {
     // outcome (not OK), and the handle is invalidated.
     EXPECT_EQ(fixpp_session_close(s), FIXPP_ERR_THREAD_SESSION_LIFECYCLE);
     // Second close on the now-invalid handle is the terminal invalid-handle code.
+    EXPECT_EQ(fixpp_session_close(s), FIXPP_ERR_INVALID_HANDLE);
+    fixpp_engine_destroy(eng);
+}
+
+// Issue #151: a session that reached established at least once but is now reaped
+// from the engine registry (e.g. the peer disconnected first) must close as an
+// idempotent success (OK), NOT THREAD_SESSION_LIFECYCLE. lookup()==nullptr alone
+// cannot tell this apart from the never-established case above; the sticky
+// ever_established latch is what discriminates.
+//
+// Deterministic branch witness: open a session, force the latch on via the test
+// seam, and do NOT start the engine — so lookup(id) misses exactly as in
+// CloseNeverEstablished above. The ONLY difference from that test is the latch, so
+// this is a discriminating witness for the new OK arm: drop that arm in
+// fixpp_session_close and this flips back to THREAD_SESSION_LIFECYCLE (301). The
+// realistic established-then-reaped lifecycle is covered end-to-end by
+// CapiSendRecv.TwoEngineRoundTripReplyFromDrainThread.
+TEST(CapiLifecycleNegative, CloseEstablishedThenReapedIsIdempotentOk) {
+    fixpp_engine_t* eng = make_engine();
+    fixpp_session_config_t* sc = make_session_cfg("S", "T");
+    fixpp_session_t* s = nullptr;
+    ASSERT_EQ(fixpp_session_open(eng, sc, &s), FIXPP_ERR_OK);
+    fixpp_capi::detail::set_session_ever_established(s, true);
+    // Engine never started → lookup misses; with the latch set, the gone session
+    // is treated as established-then-reaped → idempotent OK.
+    EXPECT_EQ(fixpp_session_close(s), FIXPP_ERR_OK);
+    // The handle is still invalidated on the OK close → the next close is terminal.
     EXPECT_EQ(fixpp_session_close(s), FIXPP_ERR_INVALID_HANDLE);
     fixpp_engine_destroy(eng);
 }

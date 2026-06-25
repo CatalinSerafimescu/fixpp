@@ -146,9 +146,21 @@ fixpp_error_t fixpp_session_close(fixpp_session_t* session) {
         // state_ is guaranteed non-null here (check_session validated it above).
         std::shared_ptr<fixpp::session::Session> sess = e->state_->engine_->lookup(session->id);
         if (sess == nullptr) {
-            // Registered but never established, or already gone → treat as an
-            // already-closed lifecycle outcome (existing 049 code).
-            code = FIXPP_ERR_THREAD_SESSION_LIFECYCLE;
+            // lookup()==nullptr conflates two distinct lifecycle states (issue #151):
+            //   - established-then-reaped (was live, peer disconnected first, the
+            //     registry entry is gone) → idempotent close success (OK);
+            //   - never established (opened, never started/connected) → a deliberate
+            //     lifecycle outcome (THREAD_SESSION_LIFECYCLE, asserted by
+            //     CapiLifecycleNegative.CloseNeverEstablishedIsLifecycleOutcome).
+            // The sticky ever_established latch (set once on the first onLogon, never
+            // reset) is the only signal that survives onLogout + reap, so it is what
+            // distinguishes the two. Once ever_established is true the session was
+            // published + Active, and the sole exit from the registry snapshot is a
+            // reap — so a true latch + null lookup ⇒ established-then-reaped.
+            const bool was_established =
+                session->slot != nullptr &&
+                session->slot->ever_established.load(std::memory_order_acquire);
+            code = was_established ? FIXPP_ERR_OK : FIXPP_ERR_THREAD_SESSION_LIFECYCLE;
         } else {
             // Post Session::close(graceful) onto the session's serialisation
             // domain and BLOCK on completion (FR-005; the SINGLE_THREAD
@@ -288,4 +300,14 @@ namespace fixpp_capi::detail {
 // without FIXPP_TEST_HOOKS); only the declaration in capi_internal.hpp is gated, so
 // a production caller cannot reach it (mirrors the file_store.cpp seam idiom).
 void set_send_throw_hook(bool on) noexcept { g_send_throw_hook = on; }
+
+// Issue #151 branch-discrimination seam (see capi_internal.hpp). Forces the
+// sticky ever_established latch on a session's slot so the established-then-reaped
+// close branch can be witnessed without a real reap race. Compiled unconditionally;
+// only the declaration is FIXPP_TEST_HOOKS-gated.
+void set_session_ever_established(fixpp_session_t* session, bool on) noexcept {
+    if (session != nullptr && session->slot != nullptr) {
+        session->slot->ever_established.store(on, std::memory_order_release);
+    }
+}
 }  // namespace fixpp_capi::detail

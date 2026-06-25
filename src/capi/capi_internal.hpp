@@ -48,6 +48,13 @@ fixpp_error_t translate_for_consumer(fixpp_error_t code, std::uint16_t consumer_
 // unconditionally in src/capi/session.cpp; only this declaration is gated, so a
 // production caller cannot flip it. Test sets true, calls send (→ abort), restores.
 void set_send_throw_hook(bool on) noexcept;
+// Issue #151 branch-discrimination seam: force a session handle's slot sticky
+// ever_established latch on, so the established-then-reaped close branch can be
+// witnessed deterministically (open + set + DON'T start the engine → lookup
+// misses, exactly as in CloseNeverEstablished, but with the latch set → OK).
+// Defined unconditionally in src/capi/session.cpp; only this declaration is
+// gated, so a production caller cannot reach it.
+void set_session_ever_established(fixpp_session_t* session, bool on) noexcept;
 #endif  // FIXPP_TEST_HOOKS
 
 // Per-session callback + established state, keyed by SessionId. Inserted ONLY
@@ -62,6 +69,14 @@ struct SessionSlot {
     fixpp_recv_cb cb = nullptr;
     void* userdata = nullptr;
     std::atomic<bool> established{false};
+    // STICKY "was ever established" latch (issue #151). Set true (and never reset)
+    // on the FIRST onLogon; `established` above tracks the CURRENT logged-on state
+    // and is reset to false on onLogout, so it cannot distinguish a never-established
+    // session from one that was live and is now reaped. fixpp_session_close reads
+    // this on the lookup()==nullptr branch to decide OK (established-then-reaped,
+    // idempotent close) vs THREAD_SESSION_LIFECYCLE (never established). Written on
+    // the engine exec_ (onLogon), read from the closing consumer thread → atomic.
+    std::atomic<bool> ever_established{false};
     // E-6: send (toApp) callback — registered by fixpp_session_register_send_callback
     // (US6/T018).  Absent (nullptr) → CapiApplication::toApp returns {} (send).
     // Written pre-start (single-threaded); read on the session strand (fromApp path).
