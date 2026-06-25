@@ -232,10 +232,10 @@ TEST(PublicRoundtrip, TwoEngineLoopbackExchangesAppMessage) {
                   acc_session,
                   [](const fixpp_msg_t* inbound, void* ud) {
                       auto* r = static_cast<RecvResult*>(ud);
-                      r->count.fetch_add(1, std::memory_order_relaxed);
                       const char* val = nullptr;
                       size_t      len = 0;
-                      // Assert tag 35 == "D" (NewOrderSingle)
+                      // Assert tag 35 == "D" (NewOrderSingle). Store with relaxed before
+                      // the release store on count so flags are visible after count is seen.
                       if (fixpp_msg_get_msg_type(inbound, &val, &len) == FIXPP_ERR_OK) {
                           r->msg_type_d.store(
                               val != nullptr && len == 1 && val[0] == 'D',
@@ -249,6 +249,9 @@ TEST(PublicRoundtrip, TwoEngineLoopbackExchangesAppMessage) {
                               std::string_view(val, len) == "ORDER-001",
                               std::memory_order_relaxed);
                       }
+                      // Release store on count LAST: the poll's acquire load on count
+                      // guarantees the flag stores above are visible on the main thread.
+                      r->count.fetch_add(1, std::memory_order_release);
                   },
                   &recv_result),
               FIXPP_ERR_OK);
@@ -309,12 +312,15 @@ TEST(PublicRoundtrip, TwoEngineLoopbackExchangesAppMessage) {
     {
         using clock = std::chrono::steady_clock;
         const auto until = clock::now() + std::chrono::milliseconds{4000};
-        while (recv_result.count.load(std::memory_order_relaxed) == 0 && clock::now() < until) {
+        while (recv_result.count.load(std::memory_order_acquire) == 0 && clock::now() < until) {
             std::this_thread::sleep_for(std::chrono::milliseconds{2});
         }
     }
-    EXPECT_GT(recv_result.count.load(std::memory_order_relaxed), 0)
+    EXPECT_GT(recv_result.count.load(std::memory_order_acquire), 0)
         << "Acceptor receive callback was not invoked within 4s";
+    // Flag stores in the callback (relaxed) precede the release store on count,
+    // and the acquire load on count above synchronizes-with that release → the
+    // flag values are visible here without additional barrier.
     EXPECT_TRUE(recv_result.msg_type_d.load(std::memory_order_relaxed))
         << "Received message tag 35 (MsgType) != 'D'";
     EXPECT_TRUE(recv_result.clord_id_order001.load(std::memory_order_relaxed))
