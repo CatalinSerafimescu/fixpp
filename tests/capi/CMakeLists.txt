@@ -60,29 +60,33 @@ add_test(NAME capi_handles_compile COMMAND capi_handles_compile_test)
 add_test(NAME capi_reentrancy_negative
   COMMAND bash "${CMAKE_SOURCE_DIR}/tools/test_capi_reentrancy_negative.sh")
 
-# T022/T023 (US2, SC-004) — 050 Feature B send-path error oracle: deferred
-# session/app arms stay UNKNOWN (L-050-4), existing-published arms keep codes,
-# live consumer-minor downgrade on the send-path composition.
-add_executable(capi_error_block_test error_block_test.cpp)
-target_link_libraries(capi_error_block_test PRIVATE
-  fixpp_capi
-  GTest::gtest
-  GTest::gtest_main
-)
-add_test(NAME capi_error_block COMMAND capi_error_block_test)
-
-# ── 050 Feature B test targets ──────────────────────────────────────────────
+# ── 050 Feature B (and 051 T022) internal-seam include set ──────────────────
 # lifecycle_test (T015/T016) + send_recv_test (T028/T029/T030) reach the engine-
 # internal handles (capi_internal.hpp under src/capi) through the documented
 # test-only seams (L-050-1 dict + L-050-5 transport endpoint) and use the
 # session test support (minimal_dictionary.hpp under tests/support). thunk_split
 # (T024) additionally arms the SC-006 send-throw seam via the FIXPP_TEST_HOOKS-
 # gated set_send_throw_hook(). All link fixpp_capi (session/transport/tls/wire/dict).
+# Defined BEFORE any target that references it (error_block_test T022 + Feature-B
+# targets below both use this variable).
 set(FIXPP_CAPI_FEATURE_B_INCLUDES
   "${CMAKE_CURRENT_SOURCE_DIR}"          # capi_loopback_support.hpp
   "${CMAKE_SOURCE_DIR}/src/capi"         # capi_internal.hpp + the public src tree
   "${CMAKE_SOURCE_DIR}/tests"            # support/minimal_dictionary.hpp
 )
+
+# T004 (US1, SC-004) — 051 error-block foundational oracle (translate re-point +
+# strerror + per-code-minor downgrade).  T022 (US5) appends live end-to-end arms
+# over loopback — uses capi_internal.hpp (check_session seam) + the loopback
+# support (L-050-1 dict + L-050-5 endpoint).  Include the Feature-B set.
+add_executable(capi_error_block_test error_block_test.cpp)
+target_link_libraries(capi_error_block_test PRIVATE
+  fixpp_capi
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(capi_error_block_test PRIVATE ${FIXPP_CAPI_FEATURE_B_INCLUDES})
+add_test(NAME capi_error_block COMMAND capi_error_block_test)
 
 # T015/T016 (US1, SC-007) — engine + session lifecycle from C.
 add_executable(capi_lifecycle_test lifecycle_test.cpp)
@@ -187,6 +191,69 @@ target_compile_definitions(capi_error_live_test PRIVATE FIXPP_TEST_HOOKS)
 add_test(NAME capi_error_live COMMAND capi_error_live_test)
 set_tests_properties(capi_error_live PROPERTIES LABELS "capi;050")
 
+# ── 051 Feature C test targets (stubs; bodies land per-story T005/T008/T011/T019) ──
+# message_read_test — CA-008/CA-010-read: inbound field + group read accessors
+add_executable(capi_message_read_test message_read_test.cpp)
+target_link_libraries(capi_message_read_test PRIVATE
+  fixpp_capi
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(capi_message_read_test PRIVATE ${FIXPP_CAPI_FEATURE_B_INCLUDES})
+add_test(NAME capi_message_read COMMAND capi_message_read_test)
+set_tests_properties(capi_message_read PROPERTIES LABELS "capi;051")
+
+# message_write_test — CA-009/CA-010-write: outbound construct/populate/commit + group builder
+add_executable(capi_message_write_test message_write_test.cpp)
+target_link_libraries(capi_message_write_test PRIVATE
+  fixpp_capi
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(capi_message_write_test PRIVATE ${FIXPP_CAPI_FEATURE_B_INCLUDES})
+add_test(NAME capi_message_write COMMAND capi_message_write_test)
+set_tests_properties(capi_message_write PROPERTIES LABELS "capi;051")
+
+# msg_clone_cross_strand_test — CA-009 clone seam ([2i §9] seam #13, SC-006)
+add_executable(capi_msg_clone_cross_strand_test msg_clone_cross_strand_test.cpp)
+target_link_libraries(capi_msg_clone_cross_strand_test PRIVATE
+  fixpp_capi
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(capi_msg_clone_cross_strand_test PRIVATE ${FIXPP_CAPI_FEATURE_B_INCLUDES})
+add_test(NAME capi_msg_clone_cross_strand COMMAND capi_msg_clone_cross_strand_test)
+set_tests_properties(capi_msg_clone_cross_strand PROPERTIES LABELS "capi;051")
+
+# toapp_callback_test — CA-009 toApp send-callback (US6, T019)
+# Reaches capi_internal.hpp + capi_loopback_support.hpp (L-050-1/L-050-5 seams)
+# and the session test support (minimal_dictionary.hpp) — same include set as the
+# Feature-B loopback tests.
+add_executable(capi_toapp_callback_test toapp_callback_test.cpp)
+target_link_libraries(capi_toapp_callback_test PRIVATE
+  fixpp_capi
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(capi_toapp_callback_test PRIVATE ${FIXPP_CAPI_FEATURE_B_INCLUDES})
+add_test(NAME capi_toapp_callback COMMAND capi_toapp_callback_test)
+set_tests_properties(capi_toapp_callback PROPERTIES LABELS "capi;051")
+
+# toapp_alloc_guard_test — T020 / SC-003 third zero-heap path: the on-strand
+# toApp trampoline (CapiApplication::toApp) wraps MessageView in a STACK
+# fixpp_msg and must not touch the global heap ([const §VIII.5], E-6).
+# Runs SYNCHRONOUSLY like recv_alloc_guard_test (marker thread = calling thread).
+# Binding gate = the mallocnesia ctest entry below.
+add_executable(capi_toapp_alloc_guard_test toapp_alloc_guard_test.cpp)
+target_link_libraries(capi_toapp_alloc_guard_test PRIVATE
+  fixpp_capi
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(capi_toapp_alloc_guard_test PRIVATE ${FIXPP_CAPI_FEATURE_B_INCLUDES})
+add_test(NAME capi_toapp_alloc_guard COMMAND capi_toapp_alloc_guard_test)
+set_tests_properties(capi_toapp_alloc_guard PROPERTIES LABELS "capi;051;alloc_guard")
+
 if(EXISTS "${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so")
     add_test(
         NAME capi_recv_alloc_guard_mallocnesia
@@ -197,5 +264,49 @@ if(EXISTS "${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so")
     set_tests_properties(capi_recv_alloc_guard_mallocnesia PROPERTIES
         LABELS "capi;050;alloc_guard"
         DEPENDS capi_recv_alloc_guard_test
+    )
+
+    # SC-003 dual gate — read path: mallocnesia LD_PRELOAD interception for the
+    # inbound get_* accessors. The in-process marker test is in message_read_test.cpp
+    # (ZeroGlobalHeapAllocGuard). A counting-resource alone false-passes
+    # ([[feedback_tracking_pmr_resource_false_pass]]); this entry is the binding gate.
+    add_test(
+        NAME capi_message_read_mallocnesia
+        COMMAND
+            python3 "${CMAKE_SOURCE_DIR}/tools/check_alloc.py"
+            "--binary" "$<TARGET_FILE:capi_message_read_test>"
+    )
+    set_tests_properties(capi_message_read_mallocnesia PROPERTIES
+        LABELS "capi;051;alloc_guard"
+        DEPENDS capi_message_read_test
+    )
+
+    # SC-003 dual gate — write path: mallocnesia LD_PRELOAD interception for the
+    # outbound set_*/commit accessors. The in-process marker test is in
+    # message_write_test.cpp (ZeroGlobalHeapSetCommitGuard).
+    add_test(
+        NAME capi_message_write_mallocnesia
+        COMMAND
+            python3 "${CMAKE_SOURCE_DIR}/tools/check_alloc.py"
+            "--binary" "$<TARGET_FILE:capi_message_write_test>"
+    )
+    set_tests_properties(capi_message_write_mallocnesia PROPERTIES
+        LABELS "capi;051;alloc_guard"
+        DEPENDS capi_message_write_test
+    )
+
+    # SC-003 dual gate — toApp path: mallocnesia LD_PRELOAD interception for the
+    # on-strand toApp trampoline (CapiApplication::toApp). The in-process marker
+    # test is in toapp_alloc_guard_test.cpp (TrampolineToAppNoGlobalHeapAlloc).
+    # Third zero-heap path per SC-003 / T020 ([[feedback_tracking_pmr_resource_false_pass]]).
+    add_test(
+        NAME capi_toapp_alloc_guard_mallocnesia
+        COMMAND
+            python3 "${CMAKE_SOURCE_DIR}/tools/check_alloc.py"
+            "--binary" "$<TARGET_FILE:capi_toapp_alloc_guard_test>"
+    )
+    set_tests_properties(capi_toapp_alloc_guard_mallocnesia PROPERTIES
+        LABELS "capi;051;alloc_guard"
+        DEPENDS capi_toapp_alloc_guard_test
     )
 endif()

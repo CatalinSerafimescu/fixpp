@@ -122,9 +122,16 @@ fixpp_error_t translate(error e) noexcept {
         case error::store_cancelled:  // reused (error.hpp:181)
             return FIXPP_ERR_CANCELLED;
 
-        // ── session (slots 66-77 + 116-121) — OVERRIDE + L-049-2 ───────────
-        // [2i §4.3] publishes NO session block (D-8); no Feature-A producer.
-        // Feature B publishes the FIXPP_ERR_SESSION_* block + amends [2i].
+        // ── session (slots 66-77 + 116-121) ────────────────────────────────
+        // 051 [2i §4.3] amendment publishes the two REACHABLE send-path arms
+        // (session_invalid_state_for_send, session_invalid_argument) off
+        // UNKNOWN into the [1400,1499] block (D-6); the other 15 session arms
+        // stay UNKNOWN by design (not C-reachable / no published code) — the
+        // log/otel + remaining-session leg of L-049-2 is deferred-by-design.
+        case error::session_invalid_state_for_send:
+            return FIXPP_ERR_SESSION_INVALID_STATE;       // 1401 (ordinal 77)
+        case error::session_invalid_argument:
+            return FIXPP_ERR_SESSION_INVALID_ARGUMENT;    // 1400 (ordinal 119)
         case error::session_invalid_logon:
         case error::session_compid_mismatch:
         case error::session_begin_string_unsupported:
@@ -135,14 +142,12 @@ fixpp_error_t translate(error e) noexcept {
         case error::session_test_request_unanswered:
         case error::session_admin_not_supported:
         case error::session_invalid_config:
-        case error::session_invalid_state_for_send:
         case error::session_seqnum_reset_mismatch:
         case error::session_compid_unauthorized:
         case error::session_testreqid_mismatch:
-        case error::session_invalid_argument:
         case error::session_seqnum_too_high:
         case error::session_unknown_acceptor_session:
-            return FIXPP_ERR_UNKNOWN;  // L-049-2: publish FIXPP_ERR_SESSION_* in Feature B
+            return FIXPP_ERR_UNKNOWN;  // remaining session arms: no published code (by design)
 
         // ── tls (slots 78-93) — grouped ← prose (error.hpp:340-356) ────────
         case error::tls_cert_load_failed:
@@ -207,12 +212,15 @@ fixpp_error_t translate(error e) noexcept {
         case error::otel_provider_init_failed:
             return FIXPP_ERR_UNKNOWN;  // L-049-2: log/otel C-ABI block deferred
 
-        // ── app (slots 129-131) — OVERRIDE ─────────────────────────────────
-        // error.hpp annotates these "C-ABI reserved (future mapping)".
+        // ── app (slots 129-131) — published in 051 [2i §4.3] amendment ─────
+        // Reachable from pure C via the toApp send-callback hook (FR-022) +
+        // the direct send path; mapped into the [1400,1499] block (D-6).
         case error::app_do_not_send:
+            return FIXPP_ERR_APP_DO_NOT_SEND;       // 1402 (ordinal 129)
         case error::app_callback_threw:
+            return FIXPP_ERR_APP_CALLBACK_THREW;    // 1403 (ordinal 130)
         case error::app_payload_malformed:
-            return FIXPP_ERR_UNKNOWN;
+            return FIXPP_ERR_APP_PAYLOAD_MALFORMED; // 1404 (ordinal 131)
     }
     // No default above → -Wswitch proves all 116 enumerators are handled.
     // Reached only for an out-of-range value cast into `error` (not a real
@@ -220,15 +228,34 @@ fixpp_error_t translate(error e) noexcept {
     return FIXPP_ERR_UNKNOWN;
 }
 
+// introducing_minor — the C-ABI MINOR at which a published code first appeared
+// (E-5 / research D-3 / D-7), seeded from tools/abi_history/error_codes_v1.txt.
+// Per-code, NOT a scalar: every code published in C-ABI 0.2.0 is minor 2; the
+// six codes minted by the 051 [2i §4.3] amendment ([1400,1499]) are minor 4.
+// A literal scalar-bump to 4 would silently downgrade EVERY existing 0.2/0.3
+// code at consumer_minor=3 — the regression this per-code lookup forbids
+// (Codex #5 / FR-015). 1405 is included though it never flows through
+// translate() (no C++ ordinal) — it is still a minor-4 published code.
+static std::uint16_t introducing_minor(fixpp_error_t code) noexcept {
+    switch (code) {
+        case FIXPP_ERR_SESSION_INVALID_ARGUMENT:
+        case FIXPP_ERR_SESSION_INVALID_STATE:
+        case FIXPP_ERR_APP_DO_NOT_SEND:
+        case FIXPP_ERR_APP_CALLBACK_THREW:
+        case FIXPP_ERR_APP_PAYLOAD_MALFORMED:
+        case FIXPP_ERR_MSG_FRAMING_TAG_FORBIDDEN:
+            return 4;  // C-ABI 0.4.0 / 051 [2i §4.3] amendment
+        default:
+            return 2;  // every code published in C-ABI 0.2.0
+    }
+}
+
 // translate_for_consumer — forward-compat downgrade (E-5 / research D-3).
-// Every code published in C-ABI 0.2.0 has introducing_minor == 2 (the .2 of
-// 0.2.0; [const §X.4] keys downgrade on the consumer's published ABI minor and
-// stability binds only at MAJOR==1). When a later minor adds codes this
-// becomes a per-code lookup seeded from tools/abi_history/error_codes_v1.txt's
-// introducing column. For Feature A the value is uniform.
+// [const §X.4] keys downgrade on the consumer's published ABI minor and
+// stability binds only at MAJOR==1: introducing_minor(code) > consumer_minor
+// → FIXPP_ERR_UNKNOWN.
 fixpp_error_t translate_for_consumer(fixpp_error_t code, std::uint16_t consumer_minor) noexcept {
-    constexpr std::uint16_t kIntroducingMinor = 2;  // all current published codes
-    if (kIntroducingMinor > consumer_minor) {
+    if (introducing_minor(code) > consumer_minor) {
         return FIXPP_ERR_UNKNOWN;  // code is newer than the consumer's ABI minor
     }
     return code;
@@ -295,6 +322,13 @@ extern "C" const char* fixpp_strerror(fixpp_error_t code) {
         case FIXPP_ERR_BINDING_OBJECT_LIFETIME:          return "binding: object lifetime violation";
         case FIXPP_ERR_BINDING_WHEEL_ABI_MISMATCH:       return "binding: wheel ABI mismatch";
         case FIXPP_ERR_BINDING_CALLBACK_REENTRANT_CLOSE: return "binding: reentrant close from callback";
+        // session/app + message-construction ([1400,1499], 051 [2i §4.3] amendment)
+        case FIXPP_ERR_SESSION_INVALID_ARGUMENT:  return "session: invalid argument";
+        case FIXPP_ERR_SESSION_INVALID_STATE:     return "session: invalid state for send";
+        case FIXPP_ERR_APP_DO_NOT_SEND:           return "application: toApp callback vetoed the send";
+        case FIXPP_ERR_APP_CALLBACK_THREW:        return "application: callback signalled an error";
+        case FIXPP_ERR_APP_PAYLOAD_MALFORMED:     return "application: payload malformed";
+        case FIXPP_ERR_MSG_FRAMING_TAG_FORBIDDEN: return "message: framing tag forbidden in outbound accumulator";
         default:
             return "unknown error";
     }

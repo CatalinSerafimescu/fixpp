@@ -44,6 +44,7 @@ extern "C" {
 #include "fix/c_api/decimal.h"  // NOLINT(misc-include-cleaner): decimal boundary functions
 #include "fix/c_api/engine.h"   // NOLINT(misc-include-cleaner): engine lifecycle + engine-config builder (CA-005)
 #include "fix/c_api/session.h"  // NOLINT(misc-include-cleaner): session lifecycle/send/recv + session-config builder (CA-005/006/007)
+#include "fix/c_api/message.h"  // NOLINT(misc-include-cleaner): message handle types (CA-008/CA-009/CA-010, Feature C)
 
 /* ── Version accessor ───────────────────────────────────────────────────── */
 /**

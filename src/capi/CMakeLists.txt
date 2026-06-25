@@ -16,7 +16,9 @@ add_library(fixpp_capi_objects OBJECT
   error.cpp
   config.cpp   # 050 Feature B (CA-005): opaque engine/session config builders
   engine.cpp   # 050 Feature B (CA-005/007): engine lifecycle + CapiApplication trampoline
-  session.cpp  # 050 Feature B (CA-005/006/007): session open/close/is_established/send/register_callback
+  session.cpp      # 050 Feature B (CA-005/006/007): session open/close/is_established/send/register_callback
+  message_read.cpp  # 051 Feature C (CA-008/CA-010-read): inbound field + group read accessors
+  message_write.cpp # 051 Feature C (CA-009/CA-010-write): outbound construct/populate/commit + group builder
 )
 set_property(TARGET fixpp_capi_objects PROPERTY POSITION_INDEPENDENT_CODE ON)
 target_include_directories(fixpp_capi_objects PUBLIC

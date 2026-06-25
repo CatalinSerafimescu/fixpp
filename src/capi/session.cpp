@@ -105,6 +105,9 @@ fixpp_error_t fixpp_session_open(fixpp_engine_t* engine, fixpp_session_config_t*
         h->id = id;
         h->slot = &slot;
         h->valid.store(true, std::memory_order_relaxed);  // single-threaded construction
+        // D-5 (051): cache the dictionary BEFORE delete cfg so fixpp_msg_create_outbound
+        // can copy it into each outbound fixpp_msg shell for set_* validation.
+        h->dict_ = cfg->cfg.dictionary;
         fixpp_session* raw = h.get();
         engine->sessions_.push_back(std::move(h));
         delete cfg;  // builder CONSUMED on success (invalidated)
@@ -175,6 +178,15 @@ fixpp_error_t fixpp_session_close(fixpp_session_t* session) {
             }
         }
     }
+    // Expire the liveness token so any outbound fixpp_msg handles held by the
+    // consumer see token.lock()==nullptr on their next check-before-deref, and
+    // return FIXPP_ERR_INVALID_HANDLE before touching the (now-closing) arena.
+    // Reset BEFORE the arena is closed (Session::close is already done above);
+    // happens-before guarantee: the reset is sequenced-before return, and any
+    // subsequent weak.lock() from another thread sees nullptr (E-9 UAF-close).
+    // [data-model E-9 / feedback_cabi_handle_destroy_needs_tombstone]
+    session->liveness_.reset();
+
     // Publish the dead state with release semantics so any concurrent THREAD_SAFE
     // consumer (fixpp_session_send / fixpp_session_is_established) that acquires
     // `valid` after this point sees the handle as dead. close() itself is
@@ -246,6 +258,26 @@ fixpp_error_t fixpp_session_register_callback(fixpp_session_t* session, fixpp_re
     // Re-registration overwrites; cb == NULL clears. Single-threaded (pre-start).
     session->slot->cb = cb;
     session->slot->userdata = userdata;
+    return FIXPP_ERR_OK;
+}
+
+fixpp_error_t fixpp_session_register_send_callback(fixpp_session_t* session, fixpp_send_cb cb,
+                                                   void* userdata) {
+    if (fixpp_error_t c = check_session(session); c != FIXPP_ERR_OK) {
+        return c;
+    }
+    if (session->slot == nullptr) {
+        return FIXPP_ERR_INVALID_HANDLE;
+    }
+    // MUST precede fixpp_engine_start (mirrors FR-011 / fixpp_session_register_callback):
+    // the trampoline map is read on the session strand without a mutex; a post-start
+    // registration would race toApp. Enforced, not merely documented.
+    if (session->engine->engine_started_) {
+        return FIXPP_ERR_CAPI_CONFIG_INVALID;
+    }
+    // Re-registration overwrites; cb == NULL clears. Single-threaded (pre-start).
+    session->slot->send_cb = cb;
+    session->slot->send_userdata = userdata;
     return FIXPP_ERR_OK;
 }
 

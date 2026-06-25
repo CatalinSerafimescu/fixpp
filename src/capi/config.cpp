@@ -15,6 +15,7 @@
 #include "fix/c_api/session.h"
 
 #include <chrono>
+#include <cstring>
 
 #include "capi_internal.hpp"
 
@@ -123,7 +124,13 @@ fixpp_error_t fixpp_session_config_set_role(fixpp_session_config_t* cfg, fixpp_s
     if (cfg == nullptr) {
         return FIXPP_ERR_NULL_HANDLE;
     }
-    switch (role) {
+    // A C caller can pass an out-of-range value (FFI bypass). A typed enum LOAD of
+    // an out-of-range value is UB (-fsanitize=enum), so read the raw bytes and
+    // switch on the integer; an out-of-range value falls through to CONFIG_INVALID.
+    int raw = 0;
+    static_assert(sizeof(role) <= sizeof(raw), "role wider than int");
+    std::memcpy(&raw, &role, sizeof(role));
+    switch (raw) {
         case FIXPP_ROLE_INITIATOR:
             cfg->cfg.role = fixpp::session::session_role::initiator;
             return FIXPP_ERR_OK;
@@ -155,7 +162,13 @@ fixpp_error_t fixpp_session_config_set_security(fixpp_session_config_t* cfg,
     // round-trip; full TLS-over-C-ABI is a v1.x setter refinement (L-050-x).
     (void)cert;
     (void)key;
-    switch (kind) {
+    // Out-of-range value (FFI bypass): a typed enum LOAD of an out-of-range value
+    // is UB (-fsanitize=enum), so read the raw bytes and switch on the integer;
+    // out-of-range falls through to CONFIG_INVALID.
+    int raw = 0;
+    static_assert(sizeof(kind) <= sizeof(raw), "kind wider than int");
+    std::memcpy(&raw, &kind, sizeof(kind));
+    switch (raw) {
         case FIXPP_SECURITY_TLS:
             cfg->cfg.security_profile.k = fixpp::session::SecurityProfile::kind::mtls_ca;
             return FIXPP_ERR_OK;

@@ -125,10 +125,11 @@ TEST(CapiLifecycleNegative, SessionOpenDuplicateIdIsRejected) {
     fixpp_session_t* s1 = nullptr;
     ASSERT_EQ(fixpp_session_open(eng, sc1, &s1), FIXPP_ERR_OK);  // sc1 consumed
     // Same SessionId → register_session rejects (session_invalid_argument 119 →
-    // FIXPP_ERR_UNKNOWN, publication deferred L-050-4). Builder NOT consumed.
+    // FIXPP_ERR_SESSION_INVALID_ARGUMENT 1400, PUBLISHED by the 051 [2i §4.3]
+    // amendment; was FIXPP_ERR_UNKNOWN under the 050 L-050-4 descope). Builder NOT consumed.
     fixpp_session_config_t* sc2 = make_session_cfg("S", "T");
     fixpp_session_t* s2 = nullptr;
-    EXPECT_EQ(fixpp_session_open(eng, sc2, &s2), FIXPP_ERR_UNKNOWN);
+    EXPECT_EQ(fixpp_session_open(eng, sc2, &s2), FIXPP_ERR_SESSION_INVALID_ARGUMENT);
     EXPECT_EQ(s2, nullptr);
     fixpp_session_config_destroy(sc2);
     fixpp_engine_destroy(eng);
