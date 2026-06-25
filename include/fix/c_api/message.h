@@ -7,10 +7,12 @@
  *
  * Three opaque handle types used by Feature C:
  *   - fixpp_msg_t       (declared in handles.h; referenced here via export.h)
- *   - fixpp_group_t     : inbound repeating-group cursor; valid for the parent
- *                         fixpp_msg_t dispatch window ([2i §4.6], [2c §4.7]/W-007).
- *                         NON-owning — do NOT destroy; lifetime bounded by the
- *                         parent fixpp_msg_t (inbound) or outbound accumulator.
+ *   - fixpp_group_t     : inbound (read-cursor) repeating-group handle — outbound
+ *                         construction uses fixpp_group_builder_t/fixpp_entry_t, NOT
+ *                         this type ([2i §4.6], [2c §4.7]/W-007). NON-owning — do NOT
+ *                         destroy; lifetime bounded by the parent fixpp_msg_t: the
+ *                         inbound/toApp dispatch window, or — for a detached clone —
+ *                         until fixpp_msg_destroy.
  *   - fixpp_group_builder_t : outbound repeating-group builder; owning, invalidated
  *                         at fixpp_msg_group_end (LIFO close-order contract, FR-012).
  *   - fixpp_entry_t     : per-entry read/write cursor; valid while the enclosing
@@ -99,6 +101,13 @@ typedef struct fixpp_resolved_msg_version {
  *   FIXPP_ERR_INVALID_HANDLE  — destroyed / tombstoned / wrong-tag handle
  *                               OR wrong flavour (outbound handle, view==NULL)
  *   FIXPP_ERR_TAG_NOT_FOUND   — the tag is absent from the message
+ *
+ * Returned-pointer lifetime is HANDLE-FLAVOUR dependent: for an inbound / toApp
+ * handle the aliases are valid ONLY within the receive/send callback (dispatch)
+ * window; for a detached fixpp_msg_clone they are valid until fixpp_msg_destroy
+ * (the clone owns its arena, survives session/engine teardown, and its reads are
+ * THREAD_SAFE). The per-accessor "valid until the dispatch window closes" wording
+ * below is the inbound case; substitute "until fixpp_msg_destroy" for a clone.
  */
 
 /** Read the string value of `tag` from the inbound message.
