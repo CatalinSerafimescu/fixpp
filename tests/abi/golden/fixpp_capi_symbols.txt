@@ -5,6 +5,8 @@ fixpp_decimal_equal_checked
 fixpp_decimal_format
 fixpp_decimal_init
 fixpp_decimal_parse
+fixpp_dict_destroy
+fixpp_dict_load_from_xml
 fixpp_engine_config_create
 fixpp_engine_config_destroy
 fixpp_engine_config_set_realtime_clock

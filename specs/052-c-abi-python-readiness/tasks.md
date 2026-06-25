@@ -25,7 +25,7 @@ description: "Task list for 052-c-abi-python-readiness implementation"
 
 **Purpose**: anchor the implementation to the as-built patterns before writing code (the build "makes the L-050-1/L-050-5 seams real").
 
-- [ ] T001 [P] Source-grounding read: `tests/capi/capi_loopback_support.hpp` (L-050-1 dict seam `make_test_dict_handle`/`destroy_test_dict_handle`, L-050-5 endpoint seam), `src/capi/capi_internal.hpp` (the `fixpp_dict` struct, the clone-flavour `fixpp_msg`, the Index-mode inbound view ~:227), `src/capi/engine.cpp` (`fixpp_engine_destroy` tombstone `tag_=FIXPP_HANDLE_TAG_DEAD` + retained `s_dead_shells` registry), `include/fixpp/wire/offset_table.hpp` (`entries()` multiset / `find()` first-occurrence), `include/fixpp/session/session_config.hpp:92-96` (the `reset_seqnum_policy` enum) — confirm every anchor before implementing.
+- [X] T001 [P] Source-grounding read: `tests/capi/capi_loopback_support.hpp` (L-050-1 dict seam `make_test_dict_handle`/`destroy_test_dict_handle`, L-050-5 endpoint seam), `src/capi/capi_internal.hpp` (the `fixpp_dict` struct, the clone-flavour `fixpp_msg`, the Index-mode inbound view ~:227), `src/capi/engine.cpp` (`fixpp_engine_destroy` tombstone `tag_=FIXPP_HANDLE_TAG_DEAD` + retained `s_dead_shells` registry), `include/fixpp/wire/offset_table.hpp` (`entries()` multiset / `find()` first-occurrence), `include/fixpp/session/session_config.hpp:92-96` (the `reset_seqnum_policy` enum) — confirm every anchor before implementing.
 
 ---
 
@@ -33,7 +33,7 @@ description: "Task list for 052-c-abi-python-readiness implementation"
 
 **Purpose**: the version all 7 new symbols ship under. Must precede the ABI golden/abidiff gates.
 
-- [ ] T002 Bump `FIXPP_C_ABI_VERSION_MINOR` 4 → 5 in `include/fix/c_api/version.h` (FR-009 / SC-006; MAJOR stays 0, additive).
+- [X] T002 Bump `FIXPP_C_ABI_VERSION_MINOR` 4 → 5 in `include/fix/c_api/version.h` (FR-009 / SC-006; MAJOR stays 0, additive).
 
 **Checkpoint**: foundation ready — the three surfaces can proceed in parallel.
 
@@ -47,17 +47,17 @@ description: "Task list for 052-c-abi-python-readiness implementation"
 
 ### Tests for US1 (write FIRST, confirm RED)
 
-- [ ] T003 [P] [US1] Write `tests/capi/dictionary_load_test.cpp` (pure public headers only): load each bundled `dictionaries/FIX{42,44,50SP2,T11}.xml` → OK + usable in `fixpp_session_config_set_dictionary`; missing path + a syntactically-malformed XML → `CAPI_CONFIG_INVALID` + non-empty `fixpp_strerror` + no abort; NULL path / NULL out → `NULL_HANDLE` + `*out=NULL`; sequential double-destroy on the same handle + `fixpp_dict_destroy(NULL)` → safe no-op (SC-004 / US1 AC1-4).
+- [X] T003 [P] [US1] Write `tests/capi/dictionary_load_test.cpp` (pure public headers only): load each bundled `dictionaries/FIX{42,44,50SP2,T11}.xml` → OK + usable in `fixpp_session_config_set_dictionary`; missing path + a syntactically-malformed XML → `CAPI_CONFIG_INVALID` + non-empty `fixpp_strerror` + no abort; NULL path / NULL out → `NULL_HANDLE` + `*out=NULL`; sequential double-destroy on the same handle + `fixpp_dict_destroy(NULL)` → safe no-op (SC-004 / US1 AC1-4).
 
 ### Implementation for US1
 
-- [ ] T004 [P] [US1] Create the new public header `include/fix/c_api/dict.h` (`[2i]`-reserved name): `#ifndef FIXPP_C_API_DICT_H` guard, `extern "C"`, includes `<fix/c_api/error.h>`/`export.h`/`handles.h`; declare `fixpp_error_t fixpp_dict_load_from_xml(const char* path, fixpp_dict_t** out_dict)` (`FIXPP_SINGLE_THREAD`) + `void fixpp_dict_destroy(fixpp_dict_t* dict)` (`FIXPP_THREAD_SAFE`) with the reentrancy annotations + the doc-comments from `contracts/dictionary-loader.md`; note the header coexists with the reserved 2c `FIXPP_APPL_VER_*` constants (FR-001/FR-002/FR-008).
-- [ ] T005 [US1] Add `#include <fix/c_api/dict.h>` to the umbrella `include/fix/c_api.h` so `<fix/c_api.h>` exposes the dict symbols (FR-014); do NOT propagate the pre-existing stale `FIXPP_VERSION_*`/"0.2.0" comment in that file. (Depends on T004.)
-- [ ] T006 [P] [US1] Add a `tag_` liveness token as the FIRST member of the `fixpp_dict` struct in `src/capi/capi_internal.hpp` (fixed-offset type-tag-before-deref; E-1 tombstone).
-- [ ] T007 [US1] Create `src/capi/dictionary.cpp`: `fixpp_dict_load_from_xml` as a construction-time thunk (`guarded_call_construction` → `CAPI_CONFIG_INVALID` on `XmlLoader` throws) wrapping `fixpp::dict::XmlLoader::load(std::filesystem::path{path}, std::pmr::get_default_resource())` into `new fixpp_dict{ live tag_, make_shared<const Dictionary>(...) }`; NULL path/out → `NULL_HANDLE`; `*out_dict=NULL` on every failure path (FR-001/FR-003/FR-011). `fixpp_dict_destroy`: a process-global mutex covers the ENTIRE critical section as one atomic unit — `{ check tag_ != DEAD → release the shared_ptr (dict.reset()) → rewrite tag_ = FIXPP_HANDLE_TAG_DEAD → insert the shell into the bounded dead-shell registry }`; NULL-safe; never throws; second same-pointer destroy sees `tag_==DEAD` under the lock and no-ops (FR-002/FR-008). (Depends on T004, T006.)
-- [ ] T008 [US1] Append `fixpp_dict_load_from_xml` + `fixpp_dict_destroy` to `tests/abi/golden/fixpp_capi_symbols.txt` and their 2 reentrancy entries to the `tools/check_capi_reentrancy.sh` expected list (FR-008/FR-009).
-- [ ] T009 [US1] Add a sanitizer-gated TSan concurrent-double-destroy witness on the same dict handle to `tests/capi/dictionary_load_test.cpp` (the full-critical-section lock contract; SC-004) — race-free under TSan.
-- [ ] T010 [US1] Build (`-j2`) + run `dictionary_load_test` → GREEN; confirm the `CAPI_CONFIG_INVALID` path takes no abort, the ABI golden + reentrancy gates pass with the 2 new symbols.
+- [X] T004 [P] [US1] Create the new public header `include/fix/c_api/dict.h` (`[2i]`-reserved name): `#ifndef FIXPP_C_API_DICT_H` guard, `extern "C"`, includes `<fix/c_api/error.h>`/`export.h`/`handles.h`; declare `fixpp_error_t fixpp_dict_load_from_xml(const char* path, fixpp_dict_t** out_dict)` (`FIXPP_SINGLE_THREAD`) + `void fixpp_dict_destroy(fixpp_dict_t* dict)` (`FIXPP_THREAD_SAFE`) with the reentrancy annotations + the doc-comments from `contracts/dictionary-loader.md`; note the header coexists with the reserved 2c `FIXPP_APPL_VER_*` constants (FR-001/FR-002/FR-008).
+- [X] T005 [US1] Add `#include <fix/c_api/dict.h>` to the umbrella `include/fix/c_api.h` so `<fix/c_api.h>` exposes the dict symbols (FR-014); do NOT propagate the pre-existing stale `FIXPP_VERSION_*`/"0.2.0" comment in that file. (Depends on T004.)
+- [X] T006 [P] [US1] Add a `tag_` liveness token as the FIRST member of the `fixpp_dict` struct in `src/capi/capi_internal.hpp` (fixed-offset type-tag-before-deref; E-1 tombstone).
+- [X] T007 [US1] Create `src/capi/dictionary.cpp`: `fixpp_dict_load_from_xml` as a construction-time thunk (`guarded_call_construction` → `CAPI_CONFIG_INVALID` on `XmlLoader` throws) wrapping `fixpp::dict::XmlLoader::load(std::filesystem::path{path}, std::pmr::get_default_resource())` into `new fixpp_dict{ live tag_, make_shared<const Dictionary>(...) }`; NULL path/out → `NULL_HANDLE`; `*out_dict=NULL` on every failure path (FR-001/FR-003/FR-011). `fixpp_dict_destroy`: a process-global mutex covers the ENTIRE critical section as one atomic unit — `{ check tag_ != DEAD → release the shared_ptr (dict.reset()) → rewrite tag_ = FIXPP_HANDLE_TAG_DEAD → insert the shell into the bounded dead-shell registry }`; NULL-safe; never throws; second same-pointer destroy sees `tag_==DEAD` under the lock and no-ops (FR-002/FR-008). (Depends on T004, T006.)
+- [X] T008 [US1] Append `fixpp_dict_load_from_xml` + `fixpp_dict_destroy` to `tests/abi/golden/fixpp_capi_symbols.txt` and their 2 reentrancy entries to the `tools/check_capi_reentrancy.sh` expected list (FR-008/FR-009).
+- [X] T009 [US1] Add a sanitizer-gated TSan concurrent-double-destroy witness on the same dict handle to `tests/capi/dictionary_load_test.cpp` (the full-critical-section lock contract; SC-004) — race-free under TSan.
+- [X] T010 [US1] Build (`-j2`) + run `dictionary_load_test` → GREEN; confirm the `CAPI_CONFIG_INVALID` path takes no abort, the ABI golden + reentrancy gates pass with the 2 new symbols.
 
 **Checkpoint**: US1 fully functional — a pure-C consumer can construct + release a dictionary.
 

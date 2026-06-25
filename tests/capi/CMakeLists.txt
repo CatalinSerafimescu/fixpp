@@ -261,6 +261,20 @@ target_include_directories(capi_toapp_alloc_guard_test PRIVATE ${FIXPP_CAPI_FEAT
 add_test(NAME capi_toapp_alloc_guard COMMAND capi_toapp_alloc_guard_test)
 set_tests_properties(capi_toapp_alloc_guard PROPERTIES LABELS "capi;051;alloc_guard")
 
+# T003/T009 (052 US1 / SC-004) — dict loader public-API witness: load all bundled XMLs,
+# null/missing/malformed-XML negative arms, sequential + concurrent double-destroy (TSan).
+# Public headers only — no capi_internal.hpp seam needed.
+add_executable(capi_dictionary_load_test dictionary_load_test.cpp)
+target_link_libraries(capi_dictionary_load_test PRIVATE
+  fixpp_capi
+  GTest::gtest
+  GTest::gtest_main
+)
+target_compile_definitions(capi_dictionary_load_test PRIVATE
+  FIXPP_DICT_DIR="${CMAKE_SOURCE_DIR}/dictionaries")
+add_test(NAME capi_dictionary_load COMMAND capi_dictionary_load_test)
+set_tests_properties(capi_dictionary_load PROPERTIES LABELS "capi;052")
+
 if(EXISTS "${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so")
     add_test(
         NAME capi_recv_alloc_guard_mallocnesia

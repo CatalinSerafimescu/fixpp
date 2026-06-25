@@ -128,23 +128,32 @@ struct fixpp_session_config {
     fixpp::session::SessionConfig cfg;
 };
 
-// Dictionary handle (CA: full create/destroy is Feature C). Feature B defines
-// the concrete wrapper so the test-only dictionary seam (L-050-1) can inject a
-// test-built Dictionary behind the C-ABI boundary.
-struct fixpp_dict {
-    std::shared_ptr<const fixpp::dict::Dictionary> dict;
-};
+// fixpp_dict — forward declaration; definition follows the handle-tag constants
+// so tag_ can use FIXPP_HANDLE_TAG_DICT as a default initialiser.
+struct fixpp_dict;
 
 // Handle-liveness tag constants ([2i §4.2.2]). Stored in each handle struct at a
-// known offset so fixpp_engine_destroy (and future entry-point guards) can detect
-// an already-destroyed handle without dereferencing its (freed) internals. The
-// dead tag is written AT THE END of destroy before the shell is appended to the
-// retained-shell registry (see SHELL RETAIN note below). [const §XVI.3]
+// known offset so destroy thunks can detect an already-destroyed handle without
+// dereferencing freed internals. The dead tag is written AT THE END of destroy
+// before the shell is appended to the retained-shell registry. [const §XVI.3]
 // PLACED HERE: must precede all handle structs that use these constants as
-// default member initialisers (fixpp_msg::tag_ and fixpp_engine::tag_).
+// default member initialisers (fixpp_msg::tag_, fixpp_engine::tag_, fixpp_dict::tag_).
 static constexpr std::uint32_t FIXPP_HANDLE_TAG_ENGINE = 0xF1ECE001u;
 static constexpr std::uint32_t FIXPP_HANDLE_TAG_MSG    = 0xF1EC1E55u;  // live outbound msg
 static constexpr std::uint32_t FIXPP_HANDLE_TAG_DEAD   = 0xDEADD1EDu;
+static constexpr std::uint32_t FIXPP_HANDLE_TAG_DICT   = 0xD1C70DEFu;  // live dict handle
+
+// Dictionary handle (052 US1 / [2i §4.2.2]).
+// tag_ is the FIRST member so fixpp_dict_destroy can detect a destroyed handle
+// without dereferencing freed internals (mirrors fixpp_engine / fixpp_msg pattern).
+// Constructor initialises tag_=FIXPP_HANDLE_TAG_DICT automatically so callers write
+// `new fixpp_dict{some_shared_ptr}` — same syntax as the pre-052 aggregate form.
+struct fixpp_dict {
+    std::uint32_t tag_;
+    std::shared_ptr<const fixpp::dict::Dictionary> dict;
+    explicit fixpp_dict(std::shared_ptr<const fixpp::dict::Dictionary> d)
+        : tag_(FIXPP_HANDLE_TAG_DICT), dict(std::move(d)) {}
+};
 
 // SessionLiveness — the control-block type for the per-session validity token.
 //

@@ -14,9 +14,10 @@ add_library(fixpp_capi_objects OBJECT
   decimal_assert.cpp
   version.cpp
   error.cpp
-  config.cpp   # 050 Feature B (CA-005): opaque engine/session config builders
-  engine.cpp   # 050 Feature B (CA-005/007): engine lifecycle + CapiApplication trampoline
-  session.cpp      # 050 Feature B (CA-005/006/007): session open/close/is_established/send/register_callback
+  config.cpp      # 050 Feature B (CA-005): opaque engine/session config builders
+  engine.cpp      # 050 Feature B (CA-005/007): engine lifecycle + CapiApplication trampoline
+  session.cpp     # 050 Feature B (CA-005/006/007): session open/close/is_established/send/register_callback
+  dictionary.cpp  # 052 US1: fixpp_dict_load_from_xml + fixpp_dict_destroy (FR-001..003)
   message_read.cpp  # 051 Feature C (CA-008/CA-010-read): inbound field + group read accessors
   message_write.cpp # 051 Feature C (CA-009/CA-010-write): outbound construct/populate/commit + group builder
 )
