@@ -8,12 +8,14 @@
 // (fixpp_session_send) treats an escaping exception as an invariant violation and
 // std::abort()s (it is NOT translated to a code — FR-008/FR-019).
 //
-// In-process abort trap (NOT EXPECT_DEATH): sigaction(SIGABRT) + sigsetjmp /
-// siglongjmp. EXPECT_DEATH forks, and forking a process holding a live C-ABI
-// engine + worker threads is exactly the poisoned L-050-2 path; the in-process
-// trap avoids fork entirely. The send thunk's abort fires on the CALLER's thread
-// (fut.get() rethrows synchronously into the catch(...) at session.cpp), so a
-// same-thread siglongjmp back to a sigsetjmp on this thread is the correct catch.
+// In-process abort trap (NOT EXPECT_DEATH): a SIGABRT handler + (sig)setjmp /
+// (sig)longjmp — sigaction + sigsetjmp/siglongjmp on POSIX, signal(SIGABRT) +
+// setjmp/longjmp on Windows (MSVC has no sig*jmp family). EXPECT_DEATH forks, and
+// forking a process holding a live C-ABI engine + worker threads is exactly the
+// poisoned L-050-2 path; the in-process trap avoids fork entirely. The send
+// thunk's abort fires on the CALLER's thread (fut.get() rethrows synchronously
+// into the catch(...) at session.cpp), so a same-thread (sig)longjmp back to a
+// (sig)setjmp on this thread is the correct catch on both platforms.
 //
 // ── Steady-state-throw witness via the FIXPP_TEST_HOOKS send-throw seam ───────
 // The positive steady-state witness — an escaping exception INTO fixpp_session_send's
@@ -44,6 +46,17 @@
 #include <cstdint>
 #include <vector>
 
+#ifdef _WIN32
+// A SIGABRT handler is installed below and longjmps out BEFORE abort() can
+// terminate, so the CRT message box is never reached — but include the
+// dialog-suppressor anyway (belt-and-suspenders: a headless modal abort dialog
+// would HANG the test forever). MSVC also warns C4611 on the documented
+// setjmp/longjmp idiom (interaction with C++ object destruction); the trap lands
+// BACK in the same frame as the setjmp, so no live object is bypassed.
+#include "support/win_crt_no_dialog.hpp"
+#pragma warning(disable : 4611)
+#endif
+
 #include "fix/c_api/engine.h"
 #include "fix/c_api/session.h"
 
@@ -54,16 +67,39 @@ using namespace fixpp::capi_test;
 
 namespace {
 
-// ── In-process SIGABRT trap (sigaction + sigsetjmp/siglongjmp) ────────────────
-sigjmp_buf g_abort_jmp;
+// ── In-process SIGABRT trap ───────────────────────────────────────────────────
+// POSIX: sigaction(SIGABRT) + sigsetjmp/siglongjmp.  Windows: signal(SIGABRT) +
+// setjmp/longjmp — MSVC has neither <sys/...> sigaction nor the sig*jmp family,
+// but the steady-state abort fires SYNCHRONOUSLY on the caller's thread, so a
+// same-thread (sig)longjmp back to the (sig)setjmp established on this thread is
+// the correct catch on both platforms. Mechanism differs; both branches run.
+#ifdef _WIN32
+using abort_jmp_buf_t = std::jmp_buf;
+#define FIXPP_ABORT_SETJMP(buf) setjmp(buf)
+#else
+using abort_jmp_buf_t = sigjmp_buf;
+#define FIXPP_ABORT_SETJMP(buf) sigsetjmp((buf), 1)
+#endif
+
+abort_jmp_buf_t g_abort_jmp;
 volatile sig_atomic_t g_abort_caught = 0;
 
 extern "C" void abort_trap_handler(int /*sig*/) {
     g_abort_caught = 1;
-    siglongjmp(g_abort_jmp, 1);  // unwind back to the sigsetjmp on this thread
+    // unwind back to the (sig)setjmp established on this thread
+#ifdef _WIN32
+    std::longjmp(g_abort_jmp, 1);
+#else
+    siglongjmp(g_abort_jmp, 1);
+#endif
 }
 
 struct ScopedAbortTrap {
+#ifdef _WIN32
+    void (*old_handler_)(int) = nullptr;
+    ScopedAbortTrap() { old_handler_ = std::signal(SIGABRT, abort_trap_handler); }
+    ~ScopedAbortTrap() { std::signal(SIGABRT, old_handler_); }
+#else
     struct sigaction old_sa {};
     ScopedAbortTrap() {
         struct sigaction sa {};
@@ -73,6 +109,7 @@ struct ScopedAbortTrap {
         sigaction(SIGABRT, &sa, &old_sa);
     }
     ~ScopedAbortTrap() { sigaction(SIGABRT, &old_sa, nullptr); }
+#endif
 };
 
 }  // namespace
@@ -86,7 +123,7 @@ struct ScopedAbortTrap {
 TEST(CapiThunkSplit, AbortTrapMechanismCatchesSameThreadAbort) {
     ScopedAbortTrap trap;
     g_abort_caught = 0;
-    if (sigsetjmp(g_abort_jmp, 1) == 0) {
+    if (FIXPP_ABORT_SETJMP(g_abort_jmp) == 0) {
         std::abort();          // simulate the steady-state invariant-violation abort
         ADD_FAILURE() << "std::abort() returned — unreachable";
     }
@@ -106,7 +143,7 @@ TEST(CapiThunkSplit, ConstructionTimeThunkRejectsWithoutAbort) {
     ScopedAbortTrap trap;
     g_abort_caught = 0;
 
-    if (sigsetjmp(g_abort_jmp, 1) == 0) {
+    if (FIXPP_ABORT_SETJMP(g_abort_jmp) == 0) {
         fixpp_engine_config_t* ec = nullptr;
         ASSERT_EQ(fixpp_engine_config_create(&ec), FIXPP_ERR_OK);
         // consumer_major != MAJOR (=0) → VERSION_MISMATCH, builder NOT consumed.
@@ -192,7 +229,7 @@ TEST(CapiThunkSplit, SteadyStateSendThrowAborts) {
     ScopedAbortTrap trap;
     g_abort_caught = 0;
     fixpp_capi::detail::set_send_throw_hook(true);
-    if (sigsetjmp(g_abort_jmp, 1) == 0) {
+    if (FIXPP_ABORT_SETJMP(g_abort_jmp) == 0) {
         (void)fixpp_session_send(sess, payload.data(), payload.size());
         ADD_FAILURE() << "fixpp_session_send RETURNED despite an escaping send "
                          "exception — the steady-state thunk must abort, not translate "
