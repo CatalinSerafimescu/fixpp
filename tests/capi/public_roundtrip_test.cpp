@@ -11,7 +11,9 @@
 //   - fixpp_session_config_set_reset_seqnum_policy (T013) — seqnum-reset policy
 //   - E1 witness: dict handle destroyed BEFORE session open; session establishes
 //     via the config's independently-held shared_ptr copy.
-//   - D-4 empirical determination: see comment inside the live-roundtrip test.
+//   - D-4 empirical finding (2026-06-26): BILATERAL_STRICT establishes (26ms)
+//     even with asymmetric reset_on_logon (initiator=true, acceptor=false).
+//     BILATERAL_LENIENT is NOT required.
 //   - Error-path assertions for every new function (NULL / out-of-range).
 
 #include <gtest/gtest.h>
@@ -200,10 +202,11 @@ TEST(PublicRoundtrip, TwoEngineLoopbackExchangesAppMessage) {
     ASSERT_EQ(fixpp_session_config_set_dictionary(acc_sc, acc_dict), FIXPP_ERR_OK);
     fixpp_dict_destroy(acc_dict);  // config's shared_ptr copy now the sole owner
     acc_dict = nullptr;
-    // Policy: bilateral_lenient (D-4 finding — lenient is required for the
-    // initiator-resets / acceptor-does-not pattern; see seam comment)
+    // D-4 empirical finding (run 2026-06-26): BILATERAL_STRICT establishes
+    // even when the initiator sends 141=Y and the acceptor does not
+    // (reset_on_logon=false here).  BILATERAL_LENIENT is NOT required.
     ASSERT_EQ(
-        fixpp_session_config_set_reset_seqnum_policy(acc_sc, FIXPP_RESET_SEQNUM_BILATERAL_LENIENT),
+        fixpp_session_config_set_reset_seqnum_policy(acc_sc, FIXPP_RESET_SEQNUM_BILATERAL_STRICT),
         FIXPP_ERR_OK);
     // Bind on loopback, OS-assigned ephemeral port (port 0)
     ASSERT_EQ(fixpp_session_config_set_tcp_endpoint(acc_sc, "127.0.0.1", 0), FIXPP_ERR_OK);
@@ -259,8 +262,9 @@ TEST(PublicRoundtrip, TwoEngineLoopbackExchangesAppMessage) {
     ASSERT_EQ(fixpp_session_config_set_dictionary(ini_sc, ini_dict), FIXPP_ERR_OK);
     fixpp_dict_destroy(ini_dict);
     ini_dict = nullptr;
+    // D-4 empirical finding: BILATERAL_STRICT confirmed (see acceptor comment above)
     ASSERT_EQ(
-        fixpp_session_config_set_reset_seqnum_policy(ini_sc, FIXPP_RESET_SEQNUM_BILATERAL_LENIENT),
+        fixpp_session_config_set_reset_seqnum_policy(ini_sc, FIXPP_RESET_SEQNUM_BILATERAL_STRICT),
         FIXPP_ERR_OK);
     // Connect to the acceptor's OS-assigned port (read back above)
     ASSERT_EQ(fixpp_session_config_set_tcp_endpoint(ini_sc, "127.0.0.1", bound_port), FIXPP_ERR_OK);
