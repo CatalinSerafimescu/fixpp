@@ -118,6 +118,24 @@ inline bool wait_for_established(
     }
 }
 
+// Poll fixpp_session_is_established(session) until it reads false (onLogout fired —
+// the session left Active) or the deadline elapses. Returns true if it went
+// un-established. Used by the issue #151 reaped-close tests: after the peer
+// disconnects, the acceptor leaves Active (is_established→false) and then drains to
+// closed_drained shortly after. Callers add a small settle margin for the drain.
+inline bool wait_for_not_established(
+    fixpp_session_t* session,
+    std::chrono::milliseconds deadline = std::chrono::milliseconds{5000}) {
+    using clock = std::chrono::steady_clock;
+    const auto until = clock::now() + deadline;
+    for (;;) {
+        bool est = true;
+        if (fixpp_session_is_established(session, &est) == FIXPP_ERR_OK && !est) return true;
+        if (clock::now() >= until) return false;
+        std::this_thread::sleep_for(std::chrono::milliseconds{2});
+    }
+}
+
 // Build a minimal valid FIX application payload for fixpp_session_send.
 //
 // CRITICAL contract (verified against src/session/session.cpp Session::send_impl,

@@ -72,10 +72,12 @@ struct SessionSlot {
     // STICKY "was ever established" latch (issue #151). Set true (and never reset)
     // on the FIRST onLogon; `established` above tracks the CURRENT logged-on state
     // and is reset to false on onLogout, so it cannot distinguish a never-established
-    // session from one that was live and is now reaped. fixpp_session_close reads
-    // this on the lookup()==nullptr branch to decide OK (established-then-reaped,
-    // idempotent close) vs THREAD_SESSION_LIFECYCLE (never established). Written on
-    // the engine exec_ (onLogon), read from the closing consumer thread → atomic.
+    // session from one that was live and is now reaped/drained. fixpp_session_close
+    // reads this on the session_already_closed sub-case of its else branch (a reaped
+    // session stays in lookup, so it is non-null there) to decide OK (established-then-
+    // reaped, idempotent close) vs THREAD_SESSION_LIFECYCLE (published but never
+    // established). Written on the engine exec_ (onLogon), read from the closing
+    // consumer thread → atomic.
     std::atomic<bool> ever_established{false};
     // E-6: send (toApp) callback — registered by fixpp_session_register_send_callback
     // (US6/T018).  Absent (nullptr) → CapiApplication::toApp returns {} (send).
