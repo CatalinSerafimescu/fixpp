@@ -875,4 +875,78 @@ TEST(MessageReadGroup, NestedGroupDescent) {
     EXPECT_EQ(std::string_view(val, vlen), "C");
 }
 
+// FR-011 discriminating test: TWO outer-group instances each carrying a nested
+// group with DIFFERENT values.  Before the fix, get_nested_group(g,0,...) and
+// get_nested_group(g,1,...) return the same slices (the bug).
+//
+// Wire layout:
+//   453=2          — two instances of outer group
+//   448=PA 447=D   — outer entry 0 header fields
+//   539=1          — outer entry 0 carries one nested group
+//   524=NPA0 525=C0  — nested entry 0 (belongs to outer entry 0)
+//   448=PB 447=D   — outer entry 1 header fields
+//   539=1          — outer entry 1 carries one nested group
+//   524=NPB1 525=C1  — nested entry 1 (belongs to outer entry 1)
+TEST(MessageReadGroup, NestedGroupDescentTwoOuterEntries) {
+    auto dict = make_nested_group_dict();
+
+    auto buf = make_raw_frame(
+        "35=D\x01"
+        "453=2\x01"
+        "448=PA\x01"
+        "447=D\x01"
+        "539=1\x01"
+        "524=NPA0\x01"
+        "525=C0\x01"
+        "448=PB\x01"
+        "447=D\x01"
+        "539=1\x01"
+        "524=NPB1\x01"
+        "525=C1\x01");
+    auto fv = fixpp::wire::test::make_frame_view(buf);
+    ASSERT_TRUE(fv.has_value());
+
+    std::pmr::monotonic_buffer_resource arena;
+    Parser<access_mode::Index> parser{dict};
+    auto mv_res = parser.parse(*fv, &arena);
+    ASSERT_TRUE(mv_res.has_value());
+
+    InboundHandle h;
+    h.msg.view = &mv_res.value();
+
+    // Get the outer group (453) — expect 2 entries
+    const fixpp_group_t* grp = nullptr;
+    size_t count = 0;
+    ASSERT_EQ(fixpp_msg_get_group(h.ptr(), 453, &grp, &count), FIXPP_ERR_OK);
+    ASSERT_EQ(count, 2U);
+
+    // --- outer entry 0: nested 539 should have NPA0 / C0 ---
+    const fixpp_group_t* nested0 = nullptr;
+    size_t nested_count0 = 0;
+    ASSERT_EQ(fixpp_group_get_nested_group(grp, 0, 539, &nested0, &nested_count0), FIXPP_ERR_OK);
+    ASSERT_EQ(nested_count0, 1U);
+    ASSERT_NE(nested0, nullptr);
+
+    const char* val = nullptr; size_t vlen = 0;
+    ASSERT_EQ(fixpp_group_get_field_string(nested0, 0, 524, &val, &vlen), FIXPP_ERR_OK);
+    EXPECT_EQ(std::string_view(val, vlen), "NPA0");
+
+    ASSERT_EQ(fixpp_group_get_field_string(nested0, 0, 525, &val, &vlen), FIXPP_ERR_OK);
+    EXPECT_EQ(std::string_view(val, vlen), "C0");
+
+    // --- outer entry 1: nested 539 should have NPB1 / C1 ---
+    const fixpp_group_t* nested1 = nullptr;
+    size_t nested_count1 = 0;
+    ASSERT_EQ(fixpp_group_get_nested_group(grp, 1, 539, &nested1, &nested_count1), FIXPP_ERR_OK);
+    ASSERT_EQ(nested_count1, 1U);
+    ASSERT_NE(nested1, nullptr);
+
+    ASSERT_EQ(fixpp_group_get_field_string(nested1, 0, 524, &val, &vlen), FIXPP_ERR_OK);
+    // This MUST be NPB1 (entry 1), not NPA0 (entry 0) — the discriminating assertion.
+    EXPECT_EQ(std::string_view(val, vlen), "NPB1");
+
+    ASSERT_EQ(fixpp_group_get_field_string(nested1, 0, 525, &val, &vlen), FIXPP_ERR_OK);
+    EXPECT_EQ(std::string_view(val, vlen), "C1");
+}
+
 }  // namespace

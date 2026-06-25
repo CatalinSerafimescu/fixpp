@@ -11,7 +11,7 @@
 //   FR-004    set_* DICT_CONFIG  — tag not declared for this MsgType.
 //   FR-005    commit over frame-cap → FIXPP_ERR_WIRE_LIMIT_EXCEEDED.
 //   FR-006    set_* on an INBOUND handle → FIXPP_ERR_INVALID_HANDLE.
-//   FR-007    destroy idempotent (double-destroy OK); NULL-safe.
+//   FR-007    destroy NULL-safe + single-destroy OK; double-destroy same ptr = UB (B-051-2).
 //   FR-009a   Outbound tombstone seam: BOTH orderings under ASan + TSan.
 //             (a) fixpp_session_close → set_* → FIXPP_ERR_INVALID_HANDLE
 //             (b) fixpp_engine_destroy (no prior close) → set_* → INVALID_HANDLE
@@ -451,12 +451,13 @@ TEST(MessageWrite, SetStringOnDeclaredStringFieldSucceeds) {
     fixpp_engine_destroy(eng);
 }
 
-// FR-007: destroy is idempotent and NULL-safe
-TEST(MessageWrite, DestroyIdempotentAndNullSafe) {
+// FR-007 (narrowed contract B-051-2): destroy is NULL-safe + single-destroy OK.
+// Double-destroy of the same non-null pointer is UB — consumer nulls pointer.
+TEST(MessageWrite, DestroyNullSafeAndSingleDestroy) {
     // NULL-safe
     EXPECT_EQ(fixpp_msg_destroy(nullptr), FIXPP_ERR_OK);
 
-    // Create a real outbound msg and double-destroy it
+    // Single destroy of a real outbound msg.
     fixpp_engine_t* eng = nullptr;
     ASSERT_EQ(make_engine(&eng), FIXPP_ERR_OK);
 
@@ -470,10 +471,8 @@ TEST(MessageWrite, DestroyIdempotentAndNullSafe) {
     ASSERT_EQ(fixpp_msg_create_outbound(sess, "0", 1, &msg), FIXPP_ERR_OK);
     ASSERT_NE(msg, nullptr);
 
-    // First destroy
     EXPECT_EQ(fixpp_msg_destroy(msg), FIXPP_ERR_OK);
-    // Second destroy (idempotent — tag_ is now DEAD, must return OK without UAF)
-    EXPECT_EQ(fixpp_msg_destroy(msg), FIXPP_ERR_OK);
+    msg = nullptr;  // consumer nulls pointer after destroy (UB to re-use)
 
     fixpp_engine_destroy(eng);
 }
@@ -972,8 +971,7 @@ TEST(MessageWrite, SC001_CreateOutboundRoundTripPeerReceivesAppMsg) {
 //     the hot path. One pass exercises each steady-state path exactly once.
 //   - Return codes are captured to locals INSIDE the window; gtest assertions run
 //     AFTER alloc_guard_end (gtest success-path machinery may allocate).
-//   - fixpp_msg_destroy is OUTSIDE the window (tombstone push to s_dead_msg_shells
-//     touches the global heap).
+//   - fixpp_msg_destroy is OUTSIDE the window (shell free touches the global heap).
 //
 // Binding gate = capi_message_write_mallocnesia ctest entry (LD_PRELOAD interception);
 // without the preload the markers no-op and the test validates correctness only

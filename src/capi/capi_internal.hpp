@@ -191,12 +191,15 @@ enum class FixppMsgFlavour : std::uint8_t {
 //   - Reads THREAD_SAFE (no mutation path; only get_* accessors via view).
 //   - NOT tombstoned by session close (no liveness token).
 //
-// DESTROYED state: tag_ flipped to FIXPP_HANDLE_TAG_DEAD by fixpp_msg_destroy.
-// TOMBSTONED state: tag_ still FIXPP_HANDLE_TAG_MSG but token.lock() == nullptr.
-//   → check_msg (US2) detects both and returns FIXPP_ERR_INVALID_HANDLE before
-//   any arena dereference.
+// DESTROYED state: fixpp_msg_destroy frees the shell (delete h); the pointer is
+//   dangling after destroy — double-destroy UB.  Consumer must null the pointer.
+//   Unlike engine handles (O(few)), msg handles are per-send (unbounded), so
+//   retaining dead shells would leak indefinitely (B-051-2).
+// TOMBSTONED state: tag_ still FIXPP_HANDLE_TAG_MSG but token.lock() == nullptr
+//   (set when owning session closes).  check_msg (US2) detects this and returns
+//   FIXPP_ERR_INVALID_HANDLE before any arena dereference.
 //
-// [data-model E-1 / E-9 / feedback_cabi_handle_destroy_needs_tombstone]
+// [data-model E-1 / E-9 / B-051-2]
 struct fixpp_msg {
     std::uint32_t        tag_      = FIXPP_HANDLE_TAG_MSG;  // handle-liveness (E-1)
     FixppMsgFlavour      flavour   = FixppMsgFlavour::inbound;
@@ -241,12 +244,6 @@ struct fixpp_msg {
     std::unique_ptr<fixpp::wire::MessageView<fixpp::wire::access_mode::Index>>
         owned_view_;  // clone-owned MessageView over owned_frame_
 
-    // Commit-serialized payload (outbound).  Owned heap buffer; null until first
-    // commit; freed by fixpp_msg_destroy via unique_ptr auto-destruction.
-    // committed_payload_ aliases committed_buf_.get() for the C consumer pointer.
-    std::unique_ptr<std::byte[]> committed_buf_;
-    std::byte* committed_payload_ = nullptr;
-    std::size_t committed_len_ = 0;
 };
 
 // fixpp_group — inbound repeating-group read cursor (E-2 / CA-010-read).

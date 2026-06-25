@@ -202,9 +202,7 @@ TEST(MsgCloneCrossStrand, CloneOnDispatchWindowReadOnDrainThread) {
     EXPECT_NE(treq, nullptr);
     EXPECT_EQ(std::string_view(treq, treq_len), "CLONE_TEST");
 
-    // Destroy the clone
-    EXPECT_EQ(fixpp_msg_destroy(clone), FIXPP_ERR_OK);
-    // Idempotent
+    // Destroy the clone (single destroy — double-destroy is UB per B-051-2).
     EXPECT_EQ(fixpp_msg_destroy(clone), FIXPP_ERR_OK);
     clone = nullptr;
 }

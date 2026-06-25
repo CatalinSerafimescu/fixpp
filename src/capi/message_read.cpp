@@ -446,99 +446,131 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_group_get_nested_group(const fixpp_group_t*
     const auto* sl = group_entry(g, i, &idx_err);
     if (sl == nullptr) return idx_err;
 
-    // To find nested group slices within this instance slice, we need to look at
-    // the parent view's OffsetTable which has the group_member_fn threaded in.
-    // However, the parent OffsetTable covers the WHOLE message, not just this
-    // instance slice. The nested group's group_slices() must be obtained by
-    // parsing the INSTANCE SLICE with an OffsetTable that knows the nested dict.
+    // Scan the INSTANCE SLICE for nested group instances.
+    // OffsetTable::group_slices(nested_tag) returns only first-occurrence instances
+    // (first-occurrence-indexed), so for two outer entries each with a nested group,
+    // entry 1's nested instances would be absent.  Correct fix: scan *sl directly.
     //
-    // Since we don't have the dict readily available here (capi_internal fixpp_group
-    // doesn't store it), we use the parent view's group_member_fn which is
-    // threaded into the parent OffsetTable. The correct approach: use the parent
-    // view's OffsetTable to call group_slices(nested_tag) on the parent — this
-    // only works if the nested group tag appears in the parent frame at the top
-    // level, which it typically does not (it's nested inside instance bytes).
-    //
-    // The proper implementation for arbitrary nesting requires building a new
-    // OffsetTable from the instance slice bytes with the parent's group_member_fn.
-    // We do this here: build a transient OffsetTable from the instance slice.
-    //
-    // The transient OffsetTable needs a PMR arena; use a stack-local monotonic.
-    // This is per-call allocation (not on the parse hot path; get_nested_group
-    // is a user-initiated descent, not called millions of times per second).
-    //
-    // Limitation: the transient OffsetTable doesn't know about the NESTED dict
-    // (group_member_fn is on the outer MessageView). For the nested group to be
-    // correctly sliced, we need the parent's group_member_fn. We access it via
-    // the parent_view's offsets() — but the group_member_fn is private.
-    //
-    // Workaround: build a new OffsetTable from the instance slice using ONLY
-    // the dict-free constructor (which degrades group extent to rest-of-instance).
-    // This is the D-4 "Re-parse each instance with a fresh MessageView — viable
-    // fallback if group_slices per-instance field lookup proves awkward; deferred."
-    // For the test (US3 / T012 NestedGroupDescent), the dict-free OffsetTable will
-    // produce a group_slices for the nested group correctly (the nested group's
-    // count tag and instances are within this slice, and dict-free degrades
-    // extent to rest-of-slice which is correct for a single nested level).
-
+    // Algorithm: walk the instance bytes with field_iterator; find nested_tag (count),
+    // then identify the delimiter (first tag after nested_tag) and collect one slice
+    // per delimiter occurrence.  All storage from the parent arena (zero global-heap).
     const auto* parent_grp = as_group(g);
+    auto* nested_arena = parent_grp->parent_view->offsets().resource();
 
-    // Build a frame_view-like span from the instance slice bytes.
-    // The instance slice doesn't have 8=/9=/10= framing markers.
-    // We cannot use make_frame_view on it. Instead we construct OffsetTable
-    // directly from the raw bytes.
-    //
-    // OffsetTable needs a frame_view; we need the framer.hpp seam.
-    // Alternative: use MessageView<Iter> to scan for nested_tag manually.
-    //
-    // For the nested count field (nested_tag): scan the instance slice for
-    // tag `nested_tag` to get its count. Then for each instance, scan for
-    // the nested group delimiter (first tag after nested_tag).
-    //
-    // Since we don't have the nested delimiter readily, use the parent view's
-    // group_slices with the parent_view's offsets and look for nested slices
-    // that the OffsetTable has already built (the parent OffsetTable was built
-    // with the full dict including nested group info — if it wasn't, the
-    // nested slices won't exist).
-    //
-    // The cleanest approach: defer to the parent view's OffsetTable's
-    // group_slices(nested_tag) if the nested group appears there (it would for
-    // messages where the nested group tag also appears at the top level — rare).
-    //
-    // For the test case: a message with 453 → 539 nesting where 539 appears
-    // INSIDE 453 instance bytes. The parent OffsetTable (built with the nested
-    // dict) should have group_slices for 539 because the parser records ALL
-    // group start tags it encounters, including nested ones.
-    //
-    // Let's try: parent_view->offsets().group_slices(nested_tag) — this should
-    // work if the parser threaded the group_member_fn that knows 539 is nested.
-    auto nested_slices = parent_grp->parent_view->offsets().group_slices(nested_tag);
+    using FI = fixpp::wire::MessageView<fixpp::wire::access_mode::Iter>::field_iterator;
+    auto bytes = std::span<const std::byte>{sl->data, sl->len};
 
-    if (nested_slices.empty()) {
-        // Check if nested_tag is present in the instance at all
-        auto count_sv = scan_slice_for_tag(*sl, nested_tag);
-        if (!count_sv) return FIXPP_ERR_TAG_NOT_FOUND;
-        // Present but no group slices built by the parent OffsetTable → TYPE_MISMATCH
-        // (the dict didn't know nested_tag was a group — needs dict-aware parse)
-        return FIXPP_ERR_TYPE_MISMATCH;
+    // Phase 1: locate nested_tag count field and the delimiter that follows it.
+    std::uint16_t delim_tag = 0;
+    const std::byte* post_count_ptr = nullptr;  // start of delimiter field bytes
+    {
+        FI it{bytes, 0};
+        FI end_it{bytes, bytes.size()};
+        bool found_count = false;
+        while (!(it == end_it)) {
+            const auto& f = *it;
+            if (f.tag == nested_tag) {
+                found_count = true;
+                ++it;
+                if (!(it == end_it)) {
+                    delim_tag = (*it).tag;
+                    // The delimiter field's tag digits start at the beginning of the
+                    // buffer span used by this iterator position.  Compute the byte
+                    // pointer to the tag= prefix: value.data() - tag_digits - '=' (1).
+                    // Simpler: the value span aliases sl->data; we know the value
+                    // starts at value.data() inside sl->data..sl->data+sl->len.
+                    // Walk back from value.data() past '=' and tag digits to find tag=.
+                    const std::byte* vp = (*it).value.data();
+                    // Back up over '=': the byte immediately before value is '='.
+                    const std::byte* eq = vp - 1;
+                    // Back up over tag digits (1..5 digits for tags 1..65535).
+                    const std::byte* tp = eq;
+                    while (tp > sl->data && static_cast<unsigned char>(*(tp - 1)) >= '0' &&
+                           static_cast<unsigned char>(*(tp - 1)) <= '9') {
+                        --tp;
+                    }
+                    post_count_ptr = tp;
+                }
+                break;
+            }
+            ++it;
+        }
+        if (!found_count) return FIXPP_ERR_TAG_NOT_FOUND;
+        if (delim_tag == 0 || post_count_ptr == nullptr) {
+            // nested_tag present but no instances follow (count field is last) — empty group.
+            return FIXPP_ERR_OK;
+        }
     }
 
-    // We have nested slices from the parent OffsetTable. Check if nested_tag
-    // is present in this specific instance (it must be, since we're within it).
-    auto count_sv = scan_slice_for_tag(*sl, nested_tag);
-    if (!count_sv) return FIXPP_ERR_TAG_NOT_FOUND;
+    // Phase 2: scan from post_count_ptr to end of *sl, collecting instance slices.
+    // Each new occurrence of delim_tag starts a new instance; previous instance ends
+    // just before the new delimiter's tag= prefix.
+    // Collect into a small stack vector; then copy to arena.
+    constexpr std::size_t kMaxNested = 256;
+    fixpp::wire::group_slice stack_slices[kMaxNested];
+    std::size_t slice_count = 0;
 
-    // Allocate the nested cursor from the parent view's parse arena (same
-    // dispatch-window arena as the parent group's slices).  Zero global-heap,
-    // reclaimed wholesale when the arena resets.  [D5 / FR-002 / SC-003]
-    auto* nested_arena = parent_grp->parent_view->offsets().resource();
+    {
+        auto sub_bytes = std::span<const std::byte>{
+            post_count_ptr,
+            static_cast<std::size_t>(sl->data + sl->len - post_count_ptr)};
+        FI it{sub_bytes, 0};
+        FI end_it{sub_bytes, sub_bytes.size()};
+
+        const std::byte* inst_start = post_count_ptr;
+        bool in_instance = false;
+
+        while (!(it == end_it)) {
+            const auto& f = *it;
+            if (f.tag == delim_tag) {
+                if (in_instance) {
+                    // Close previous instance: ends just before this delimiter's tag=.
+                    const std::byte* vp = f.value.data();
+                    const std::byte* eq = vp - 1;
+                    const std::byte* tp = eq;
+                    while (tp > sub_bytes.data() &&
+                           static_cast<unsigned char>(*(tp - 1)) >= '0' &&
+                           static_cast<unsigned char>(*(tp - 1)) <= '9') {
+                        --tp;
+                    }
+                    // tp now points to the tag= prefix of the current delimiter.
+                    // Add the slice for the PREVIOUS instance. Fail CLOSED on a
+                    // pathologically large nested group (kMaxNested = DoS bound) —
+                    // never a silent truncation of nested_count_out.
+                    if (slice_count >= kMaxNested) return FIXPP_ERR_WIRE_LIMIT_EXCEEDED;
+                    std::size_t inst_len = static_cast<std::size_t>(tp - inst_start);
+                    stack_slices[slice_count++] = {inst_start, inst_len};
+                    inst_start = tp;  // new instance starts at this delimiter
+                } else {
+                    in_instance = true;
+                    // inst_start already set to post_count_ptr (= first delimiter).
+                }
+            }
+            ++it;
+        }
+        // Close the last instance (ends at end of sub_bytes).
+        if (in_instance) {
+            std::size_t inst_len = static_cast<std::size_t>(sub_bytes.data() + sub_bytes.size() - inst_start);
+            if (slice_count >= kMaxNested) return FIXPP_ERR_WIRE_LIMIT_EXCEEDED;  // fail-closed (no silent truncation)
+            stack_slices[slice_count++] = {inst_start, inst_len};
+        }
+    }
+
+    if (slice_count == 0) return FIXPP_ERR_TAG_NOT_FOUND;
+
+    // Copy slices to arena (zero global-heap; reclaimed with the dispatch arena).
+    auto* arena_slices = static_cast<fixpp::wire::group_slice*>(
+        nested_arena->allocate(slice_count * sizeof(fixpp::wire::group_slice),
+                               alignof(fixpp::wire::group_slice)));
+    std::memcpy(arena_slices, stack_slices, slice_count * sizeof(fixpp::wire::group_slice));
+
     auto* nested_grp = std::pmr::polymorphic_allocator<fixpp_group>(nested_arena).new_object<fixpp_group>();
-    nested_grp->slices      = nested_slices;
+    nested_grp->slices      = {arena_slices, slice_count};
     nested_grp->parent_view = parent_grp->parent_view;
     nested_grp->arena       = nullptr;
 
     *nested_out       = reinterpret_cast<const fixpp_group_t*>(nested_grp);
-    *nested_count_out = nested_slices.size();
+    *nested_count_out = slice_count;
     return FIXPP_ERR_OK;
 }
 

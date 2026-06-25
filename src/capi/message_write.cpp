@@ -216,26 +216,6 @@ static bool append_field(std::byte* buf, std::size_t cap, std::size_t& pos, uint
     return true;
 }
 
-// ── Dead-shell registry ([2i §4.2.2]) ────────────────────────────────────────
-//
-// Destroyed fixpp_msg shells are RETAINED here so a second fixpp_msg_destroy(msg)
-// can safely read the DEAD tag without UAF. The registry is a heap-allocated
-// std::vector that is never freed (same pattern as s_dead_shells for engines).
-// Each retained dead shell holds only the small tombstoned identity (tag_=DEAD,
-// all pointers null, unique_ptrs reset). The heavy internals (accumulator,
-// committed_buf_, owned_frame_, owned_view_, dict_, token) are freed at destroy time.
-//
-// NOTE: Only HEAP shells (outbound + clone handles created by fixpp_msg_create_outbound
-// or fixpp_msg_clone) are destroyed via fixpp_msg_destroy. INBOUND dispatch-window
-// handles are stack-locals in CapiApplication::fromApp and NEVER destroyed via this
-// function; they are never added to the registry.
-//
-// fixpp_msg_destroy is SINGLE_THREAD (same constraint as fixpp_engine_destroy) so
-// no lock is needed.
-
-static std::vector<fixpp_msg*>* s_dead_msg_shells =  // NOLINT
-    new std::vector<fixpp_msg*>();
-
 // ── CA-009 implementations ────────────────────────────────────────────────────
 
 extern "C" {
@@ -295,9 +275,9 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_create_outbound(fixpp_session_t* sessio
 
         // Seed the per-message arena (construction-time). 16 KiB comfortably holds
         // a frame-cap (~3800 B) message's accumulator (field bytes + container
-        // overhead) PLUS the committed buffer; valid messages never spill (over-cap
-        // → WIRE_LIMIT_EXCEEDED at commit). Upstream = new_delete for graceful
-        // degrade on pathological overwrite-heavy builds (NOT null → no terminate).
+        // overhead); typical messages don't spill (overwrite-churn of the same tag
+        // can, → graceful new_delete upstream). Upstream = new_delete (NOT null →
+        // no terminate on pathological overwrite-heavy builds).
         constexpr std::size_t kPerMsgArenaSeed = 16384;
         h->arena_buf_ = std::make_unique<std::byte[]>(kPerMsgArenaSeed);
         h->arena_resource_ = std::make_unique<std::pmr::monotonic_buffer_resource>(
@@ -317,13 +297,13 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_create_outbound(fixpp_session_t* sessio
 }
 
 // ── fixpp_msg_destroy ─────────────────────────────────────────────────────────
+//
+// NULL-safe: returns OK for NULL.  Single-destroy only: double-destroy of the
+// same non-null pointer is UB (standard C free() contract).  Consumer must null
+// their pointer after destroy to avoid UB on a second call.
 FIXPP_API_EXPORT fixpp_error_t fixpp_msg_destroy(fixpp_msg_t* msg) {
     if (msg == nullptr) return FIXPP_ERR_OK;
     auto* h = reinterpret_cast<fixpp_msg*>(msg);
-    if (h->tag_ == FIXPP_HANDLE_TAG_DEAD) return FIXPP_ERR_OK;  // idempotent
-
-    // Tombstone first (E-9: tag flip before any deallocation).
-    h->tag_ = FIXPP_HANDLE_TAG_DEAD;
 
     // Expire the session liveness token (no-op for inbound/clone handles that
     // have an expired token already).
@@ -331,10 +311,6 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_destroy(fixpp_msg_t* msg) {
 
     // Release the dict shared_ptr (decrements refcount; may free the dict if last ref).
     h->dict_.reset();
-
-    // Release commit payload buffer (unique_ptr auto-destructs; nullptr for inbound/clone).
-    h->committed_buf_.reset();
-    h->committed_payload_ = nullptr;
 
     // Release clone-owned buffers (unique_ptrs auto-destruct if non-null).
     h->owned_view_.reset();
@@ -347,16 +323,15 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_destroy(fixpp_msg_t* msg) {
     h->accumulator = nullptr;
 
     // Free the per-message arena AFTER the accumulator (resource before its backing
-    // buffer). The retained dead shell keeps only tag_ — so no 16 KiB-per-message
-    // leak. nullptr for inbound/clone handles (reset() is a no-op).
+    // buffer).  nullptr for inbound/clone handles (reset() is a no-op).
     h->arena_resource_.reset();
     h->arena_buf_.reset();
 
-    // Retain the dead shell in the registry so a second destroy(same_ptr) call
-    // can safely read tag_==DEAD without UAF ([2i §4.2.2] tombstone discipline).
-    // The shell is small (all pointers null; tag_==DEAD) so the retain is cheap.
-    s_dead_msg_shells->push_back(h);
-    // Do NOT delete h — it must remain readable for future destroy/guard checks.
+    // Free the shell.  Per the narrowed contract (B-051-2), single-destroy only;
+    // double-destroy of the same pointer is UB — consumer nulls their pointer.
+    // Unlike engine handles (O(few), retain viable), msg handles are per-send
+    // (unbounded), so retaining shells would leak ~150 B/msg indefinitely.
+    delete h;  // NOLINT(cppcoreguidelines-owning-memory)
     return FIXPP_ERR_OK;
 }
 
@@ -702,10 +677,6 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_commit(fixpp_msg_t* msg, const uint8_t*
     if (!serialise_entries(buf, total, pos, acc.entries)) {
         return FIXPP_ERR_WIRE_LIMIT_EXCEEDED;  // should not happen — size pre-computed
     }
-
-    // Update the C-consumer pointer alias (buffer is arena-owned, not a unique_ptr).
-    h->committed_payload_ = buf;
-    h->committed_len_ = pos;
 
     *payload_out = reinterpret_cast<const uint8_t*>(buf);
     *len_out = pos;
