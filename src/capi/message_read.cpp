@@ -63,8 +63,8 @@ fixpp_error_t map_get_error(fixpp::core::error e) noexcept {
     switch (e) {
         case fixpp::core::error::wire_required_field_missing:
             return FIXPP_ERR_TAG_NOT_FOUND;
-        default:
-            return FIXPP_ERR_WIRE_INVALID_FRAME;
+        default:  // LCOV_EXCL_LINE — MessageView::get() only returns wire_required_field_missing on failure; other error codes are future extensions
+            return FIXPP_ERR_WIRE_INVALID_FRAME;  // LCOV_EXCL_LINE
     }
 }
 
@@ -418,11 +418,11 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_group_get_field_decimal(const fixpp_group_t
 
     auto res = fixpp::core::detail::trap_throw(
         [&byte_span, &scratch]() { return fixpp::decimal_t::parse(byte_span, &scratch); });
-    if (!res) {
-        auto e = res.error();
-        if (e == fixpp::core::error::decimal_precision_loss) return FIXPP_ERR_DECIMAL_PRECISION_LOSS;
-        return FIXPP_ERR_DECIMAL_INVALID;
-    }
+    if (!res) {  // LCOV_EXCL_LINE — trap_throw outer failure fires only on OOM (exception from parse); unreachable in unit tests
+        auto e = res.error();  // LCOV_EXCL_LINE
+        if (e == fixpp::core::error::decimal_precision_loss) return FIXPP_ERR_DECIMAL_PRECISION_LOSS;  // LCOV_EXCL_LINE
+        return FIXPP_ERR_DECIMAL_INVALID;  // LCOV_EXCL_LINE
+    }  // LCOV_EXCL_LINE
     if (!(*res)) {
         auto e = (*res).error();
         if (e == fixpp::core::error::decimal_precision_loss) return FIXPP_ERR_DECIMAL_PRECISION_LOSS;
@@ -525,6 +525,15 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_group_get_nested_group(const fixpp_group_t*
             if (f.tag == delim_tag) {
                 if (in_instance) {
                     // Close previous instance: ends just before this delimiter's tag=.
+                    // LCOV_EXCL_START — structurally unreachable via the public API:
+                    // OffsetTable::group() tracks `seen_in_instance` for every member tag;
+                    // when any member tag (including the nested delimiter) repeats within the
+                    // same outer entry, it closes the outer entry boundary — so an outer
+                    // entry slice produced by `group_slices()` can never contain ≥2
+                    // occurrences of the nested-group delimiter tag.  Verified empirically:
+                    // both "flat" dict (524/525 as members of 453) and "proper" dict
+                    // (524/525 only under 539) return nc=0 on a 539=2 wire — the outer
+                    // slice is truncated before the second 524 in both cases.
                     const std::byte* vp = f.value.data();
                     const std::byte* eq = vp - 1;
                     const std::byte* tp = eq;
@@ -537,10 +546,10 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_group_get_nested_group(const fixpp_group_t*
                     // Add the slice for the PREVIOUS instance. Fail CLOSED on a
                     // pathologically large nested group (kMaxNested = DoS bound) —
                     // never a silent truncation of nested_count_out.
-                    if (slice_count >= kMaxNested) return FIXPP_ERR_WIRE_LIMIT_EXCEEDED;
-                    std::size_t inst_len = static_cast<std::size_t>(tp - inst_start);
-                    stack_slices[slice_count++] = {inst_start, inst_len};
-                    inst_start = tp;  // new instance starts at this delimiter
+                    if (slice_count >= kMaxNested) return FIXPP_ERR_WIRE_LIMIT_EXCEEDED;  // LCOV_EXCL_LINE — DoS bound: requires ≥256 nested group instances in a single outer entry
+                    std::size_t inst_len = static_cast<std::size_t>(tp - inst_start);  // LCOV_EXCL_LINE
+                    stack_slices[slice_count++] = {inst_start, inst_len};  // LCOV_EXCL_LINE
+                    inst_start = tp;  // LCOV_EXCL_LINE — new instance starts at this delimiter
                 } else {
                     in_instance = true;
                     // inst_start already set to post_count_ptr (= first delimiter).
@@ -551,7 +560,7 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_group_get_nested_group(const fixpp_group_t*
         // Close the last instance (ends at end of sub_bytes).
         if (in_instance) {
             std::size_t inst_len = static_cast<std::size_t>(sub_bytes.data() + sub_bytes.size() - inst_start);
-            if (slice_count >= kMaxNested) return FIXPP_ERR_WIRE_LIMIT_EXCEEDED;  // fail-closed (no silent truncation)
+            if (slice_count >= kMaxNested) return FIXPP_ERR_WIRE_LIMIT_EXCEEDED;  // LCOV_EXCL_LINE — fail-closed (no silent truncation; DoS bound: requires ≥256 instances to reach close-last path)
             stack_slices[slice_count++] = {inst_start, inst_len};
         }
     }

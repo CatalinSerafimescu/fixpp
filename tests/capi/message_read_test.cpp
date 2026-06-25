@@ -949,4 +949,534 @@ TEST(MessageReadGroup, NestedGroupDescentTwoOuterEntries) {
     EXPECT_EQ(std::string_view(val, vlen), "C1");
 }
 
+// ── Coverage gap closers ──────────────────────────────────────────────────────
+
+// NULL out-pointer for EVERY accessor (one call each, all return NULL_HANDLE).
+// Closes the True-branch of "if (bytes_out==nullptr)" etc. for each accessor.
+TEST(MessageRead, NullOutPointerAllAccessors) {
+    auto buf = make_raw_frame("35=D\x01" "49=SENDER\x01" "34=42\x01" "44=1.5\x01");
+    auto fv = fixpp::wire::test::make_frame_view(buf);
+    ASSERT_TRUE(fv.has_value());
+    std::pmr::monotonic_buffer_resource arena;
+    MessageView<access_mode::Index> mv{*fv, &arena};
+    InboundHandle h;
+    h.msg.view = &mv;
+
+    size_t len = 0;
+    const uint8_t* bp = nullptr;
+    EXPECT_EQ(fixpp_msg_get_bytes(h.ptr(), 49, nullptr, &len), FIXPP_ERR_NULL_HANDLE);
+    EXPECT_EQ(fixpp_msg_get_bytes(h.ptr(), 49, &bp, nullptr), FIXPP_ERR_NULL_HANDLE);
+
+    int64_t iv = 0;
+    EXPECT_EQ(fixpp_msg_get_int(h.ptr(), 34, nullptr), FIXPP_ERR_NULL_HANDLE);
+
+    double dv = 0.0;
+    EXPECT_EQ(fixpp_msg_get_double(h.ptr(), 44, nullptr), FIXPP_ERR_NULL_HANDLE);
+
+    fixpp_decimal_t dec{};
+    EXPECT_EQ(fixpp_msg_get_decimal(h.ptr(), 44, nullptr), FIXPP_ERR_NULL_HANDLE);
+
+    bool present = false;
+    EXPECT_EQ(fixpp_msg_has_tag(h.ptr(), 49, nullptr), FIXPP_ERR_NULL_HANDLE);
+
+    fixpp_resolved_msg_version_t ver{};
+    EXPECT_EQ(fixpp_msg_version(h.ptr(), nullptr), FIXPP_ERR_NULL_HANDLE);
+
+    const char* sv = nullptr;
+    EXPECT_EQ(fixpp_msg_get_msg_type(h.ptr(), nullptr, &len), FIXPP_ERR_NULL_HANDLE);
+    EXPECT_EQ(fixpp_msg_get_msg_type(h.ptr(), &sv, nullptr), FIXPP_ERR_NULL_HANDLE);
+
+    const fixpp_group_t* grp = nullptr;
+    size_t cnt = 0;
+    EXPECT_EQ(fixpp_msg_get_group(h.ptr(), 453, nullptr, &cnt), FIXPP_ERR_NULL_HANDLE);
+    EXPECT_EQ(fixpp_msg_get_group(h.ptr(), 453, &grp, nullptr), FIXPP_ERR_NULL_HANDLE);
+}
+
+// Group accessor NULL guards: g==nullptr for each group field accessor.
+TEST(MessageRead, GroupNullHandleAllAccessors) {
+    const fixpp_group_t* null_grp = nullptr;
+
+    const char* sv = nullptr; size_t svlen = 0;
+    EXPECT_EQ(fixpp_group_get_field_string(null_grp, 0, 448, &sv, &svlen), FIXPP_ERR_NULL_HANDLE);
+
+    const uint8_t* bv = nullptr; size_t blen = 0;
+    // v_out and len_out null checks for string
+    EXPECT_EQ(fixpp_group_get_field_string(null_grp, 0, 448, nullptr, &svlen), FIXPP_ERR_NULL_HANDLE);
+    EXPECT_EQ(fixpp_group_get_field_string(null_grp, 0, 448, &sv, nullptr), FIXPP_ERR_NULL_HANDLE);
+
+    int64_t iv = 0;
+    EXPECT_EQ(fixpp_group_get_field_int(null_grp, 0, 38, &iv), FIXPP_ERR_NULL_HANDLE);
+    EXPECT_EQ(fixpp_group_get_field_int(null_grp, 0, 38, nullptr), FIXPP_ERR_NULL_HANDLE);
+
+    double dv = 0.0;
+    EXPECT_EQ(fixpp_group_get_field_double(null_grp, 0, 44, &dv), FIXPP_ERR_NULL_HANDLE);
+    EXPECT_EQ(fixpp_group_get_field_double(null_grp, 0, 44, nullptr), FIXPP_ERR_NULL_HANDLE);
+
+    fixpp_decimal_t dec{};
+    EXPECT_EQ(fixpp_group_get_field_decimal(null_grp, 0, 44, &dec), FIXPP_ERR_NULL_HANDLE);
+    EXPECT_EQ(fixpp_group_get_field_decimal(null_grp, 0, 44, nullptr), FIXPP_ERR_NULL_HANDLE);
+
+    const fixpp_group_t* nested = nullptr; size_t nc = 0;
+    EXPECT_EQ(fixpp_group_get_nested_group(null_grp, 0, 539, &nested, &nc), FIXPP_ERR_NULL_HANDLE);
+    EXPECT_EQ(fixpp_group_get_nested_group(null_grp, 0, 539, nullptr, &nc), FIXPP_ERR_NULL_HANDLE);
+    EXPECT_EQ(fixpp_group_get_nested_group(null_grp, 0, 539, &nested, nullptr), FIXPP_ERR_NULL_HANDLE);
+}
+
+// tag 1137 present in the frame → appl_ver_id filled.
+TEST(MessageRead, VersionWithApplVerId) {
+    // Include tag 1137 (DefaultApplVerID) for FIXT
+    auto buf = make_raw_frame("35=D\x01" "1137=FIX.5.0SP2\x01");
+    auto fv = fixpp::wire::test::make_frame_view(buf);
+    ASSERT_TRUE(fv.has_value());
+    std::pmr::monotonic_buffer_resource arena;
+    MessageView<access_mode::Index> mv{*fv, &arena};
+    InboundHandle h;
+    h.msg.view = &mv;
+
+    fixpp_resolved_msg_version_t ver{};
+    ASSERT_EQ(fixpp_msg_version(h.ptr(), &ver), FIXPP_ERR_OK);
+    ASSERT_NE(ver.appl_ver_id, nullptr);
+    EXPECT_EQ(std::string_view(ver.appl_ver_id, ver.appl_ver_id_len), "FIX.5.0SP2");
+}
+
+// get_decimal with an invalid decimal string → FIXPP_ERR_DECIMAL_INVALID.
+// Uses tag 44 with a non-numeric value to trigger the decimal_invalid path.
+TEST(MessageRead, GetDecimalInvalid) {
+    auto buf = make_raw_frame("35=D\x01" "44=GARBAGE\x01");
+    auto fv = fixpp::wire::test::make_frame_view(buf);
+    ASSERT_TRUE(fv.has_value());
+    std::pmr::monotonic_buffer_resource arena;
+    MessageView<access_mode::Index> mv{*fv, &arena};
+    InboundHandle h;
+    h.msg.view = &mv;
+
+    fixpp_decimal_t val{};
+    EXPECT_EQ(fixpp_msg_get_decimal(h.ptr(), 44, &val), FIXPP_ERR_DECIMAL_INVALID);
+}
+
+// Group field accessors — error arms for int, double, decimal.
+// Reuses the dict and frame from GetGroupIntAndDouble.
+TEST(MessageReadGroup, GroupFieldIntErrors) {
+    fixpp::dict::table_view dict;
+    dict.add_valid("D", 35)
+        .add_valid("D", 453)
+        .add_valid("D", 448)
+        .add_valid("D", 38)
+        .add_valid("D", 44)
+        .set_group_first(453, 448)
+        .add_group_member(453, 38)
+        .add_group_member(453, 44);
+
+    // Entry with non-numeric value in tag 38
+    auto buf = make_raw_frame(
+        "35=D\x01"
+        "453=1\x01"
+        "448=PA\x01"
+        "38=NOTNUM\x01"
+        "44=10.50\x01");
+    auto fv = fixpp::wire::test::make_frame_view(buf);
+    ASSERT_TRUE(fv.has_value());
+    std::pmr::monotonic_buffer_resource arena;
+    Parser<access_mode::Index> parser{dict};
+    auto mv_res = parser.parse(*fv, &arena);
+    ASSERT_TRUE(mv_res.has_value());
+    InboundHandle h;
+    h.msg.view = &mv_res.value();
+
+    const fixpp_group_t* grp = nullptr;
+    size_t count = 0;
+    ASSERT_EQ(fixpp_msg_get_group(h.ptr(), 453, &grp, &count), FIXPP_ERR_OK);
+    ASSERT_EQ(count, 1U);
+
+    // Absent tag in the entry → TAG_NOT_FOUND
+    int64_t iv = 0;
+    EXPECT_EQ(fixpp_group_get_field_int(grp, 0, 55, &iv), FIXPP_ERR_TAG_NOT_FOUND);
+
+    // Non-numeric value → WIRE_INVALID_FRAME
+    EXPECT_EQ(fixpp_group_get_field_int(grp, 0, 38, &iv), FIXPP_ERR_WIRE_INVALID_FRAME);
+
+    // Index out of range
+    EXPECT_EQ(fixpp_group_get_field_int(grp, 1, 38, &iv), FIXPP_ERR_INDEX_OUT_OF_RANGE);
+}
+
+TEST(MessageReadGroup, GroupFieldDoubleErrors) {
+    fixpp::dict::table_view dict;
+    dict.add_valid("D", 35)
+        .add_valid("D", 453)
+        .add_valid("D", 448)
+        .add_valid("D", 44)
+        .set_group_first(453, 448)
+        .add_group_member(453, 44);
+
+    auto buf = make_raw_frame(
+        "35=D\x01"
+        "453=1\x01"
+        "448=PA\x01"
+        "44=NOTNUM\x01");
+    auto fv = fixpp::wire::test::make_frame_view(buf);
+    ASSERT_TRUE(fv.has_value());
+    std::pmr::monotonic_buffer_resource arena;
+    Parser<access_mode::Index> parser{dict};
+    auto mv_res = parser.parse(*fv, &arena);
+    ASSERT_TRUE(mv_res.has_value());
+    InboundHandle h;
+    h.msg.view = &mv_res.value();
+
+    const fixpp_group_t* grp = nullptr;
+    size_t count = 0;
+    ASSERT_EQ(fixpp_msg_get_group(h.ptr(), 453, &grp, &count), FIXPP_ERR_OK);
+    ASSERT_EQ(count, 1U);
+
+    // Absent tag → TAG_NOT_FOUND
+    double dv = 0.0;
+    EXPECT_EQ(fixpp_group_get_field_double(grp, 0, 55, &dv), FIXPP_ERR_TAG_NOT_FOUND);
+
+    // Non-numeric value → WIRE_INVALID_FRAME
+    EXPECT_EQ(fixpp_group_get_field_double(grp, 0, 44, &dv), FIXPP_ERR_WIRE_INVALID_FRAME);
+
+    // Index out of range
+    EXPECT_EQ(fixpp_group_get_field_double(grp, 1, 44, &dv), FIXPP_ERR_INDEX_OUT_OF_RANGE);
+}
+
+TEST(MessageReadGroup, GroupFieldDecimalErrors) {
+    fixpp::dict::table_view dict;
+    dict.add_valid("D", 35)
+        .add_valid("D", 453)
+        .add_valid("D", 448)
+        .add_valid("D", 44)
+        .set_group_first(453, 448)
+        .add_group_member(453, 44);
+
+    auto buf = make_raw_frame(
+        "35=D\x01"
+        "453=1\x01"
+        "448=PA\x01"
+        "44=GARBAGE\x01");
+    auto fv = fixpp::wire::test::make_frame_view(buf);
+    ASSERT_TRUE(fv.has_value());
+    std::pmr::monotonic_buffer_resource arena;
+    Parser<access_mode::Index> parser{dict};
+    auto mv_res = parser.parse(*fv, &arena);
+    ASSERT_TRUE(mv_res.has_value());
+    InboundHandle h;
+    h.msg.view = &mv_res.value();
+
+    const fixpp_group_t* grp = nullptr;
+    size_t count = 0;
+    ASSERT_EQ(fixpp_msg_get_group(h.ptr(), 453, &grp, &count), FIXPP_ERR_OK);
+    ASSERT_EQ(count, 1U);
+
+    // Absent tag → TAG_NOT_FOUND
+    fixpp_decimal_t dec{};
+    EXPECT_EQ(fixpp_group_get_field_decimal(grp, 0, 55, &dec), FIXPP_ERR_TAG_NOT_FOUND);
+
+    // Invalid decimal value → DECIMAL_INVALID
+    EXPECT_EQ(fixpp_group_get_field_decimal(grp, 0, 44, &dec), FIXPP_ERR_DECIMAL_INVALID);
+
+    // Index out of range
+    EXPECT_EQ(fixpp_group_get_field_decimal(grp, 1, 44, &dec), FIXPP_ERR_INDEX_OUT_OF_RANGE);
+}
+
+// Nested group: absent nested tag → TAG_NOT_FOUND.
+TEST(MessageReadGroup, NestedGroupAbsentTag) {
+    auto dict = make_nested_group_dict();
+    auto buf = make_raw_frame(
+        "35=D\x01"
+        "453=1\x01"
+        "448=PA\x01"
+        "447=D\x01");  // no 539 nested group
+    auto fv = fixpp::wire::test::make_frame_view(buf);
+    ASSERT_TRUE(fv.has_value());
+    std::pmr::monotonic_buffer_resource arena;
+    Parser<access_mode::Index> parser{dict};
+    auto mv_res = parser.parse(*fv, &arena);
+    ASSERT_TRUE(mv_res.has_value());
+    InboundHandle h;
+    h.msg.view = &mv_res.value();
+
+    const fixpp_group_t* grp = nullptr;
+    size_t count = 0;
+    ASSERT_EQ(fixpp_msg_get_group(h.ptr(), 453, &grp, &count), FIXPP_ERR_OK);
+    ASSERT_EQ(count, 1U);
+
+    const fixpp_group_t* nested = nullptr;
+    size_t nc = 0;
+    // 539 not present in the outer entry → TAG_NOT_FOUND
+    EXPECT_EQ(fixpp_group_get_nested_group(grp, 0, 539, &nested, &nc), FIXPP_ERR_TAG_NOT_FOUND);
+}
+
+// fixpp_msg_version with tag 8 absent: structurally invalid but should
+// return FIXPP_ERR_TAG_NOT_FOUND with nulled output fields.
+// Construct a frame that has 9= and 10= but NO 8= tag.
+TEST(MessageRead, VersionNoTag8) {
+    // Build a raw frame that starts at 9= (no 8= prefix)
+    std::string body = "35=D\x01";
+    std::string nine = "9=" + std::to_string(body.size()) + "\x01";
+    std::string full = nine + body + "10=000\x01";
+    std::vector<std::byte> buf(full.size());
+    std::memcpy(buf.data(), full.data(), full.size());
+
+    auto fv = fixpp::wire::test::make_frame_view(buf);
+    ASSERT_TRUE(fv.has_value());
+    std::pmr::monotonic_buffer_resource arena;
+    MessageView<access_mode::Index> mv{*fv, &arena};
+
+    InboundHandle h;
+    h.msg.view = &mv;
+
+    fixpp_resolved_msg_version_t ver{};
+    ASSERT_EQ(fixpp_msg_version(h.ptr(), &ver), FIXPP_ERR_TAG_NOT_FOUND);
+    // Output fields must be zero-initialized
+    EXPECT_EQ(ver.begin_string, nullptr);
+    EXPECT_EQ(ver.begin_string_len, 0U);
+    EXPECT_EQ(ver.appl_ver_id, nullptr);
+    EXPECT_EQ(ver.appl_ver_id_len, 0U);
+}
+
+// fixpp_msg_get_group on a null msg: exercises the TRUE arm of the
+// `if (view == nullptr)` guard at line 319 (check_inbound_msg returns null).
+// NullHandleReturnsNullHandle tests get_string/get_int/etc with null msg but
+// NOT get_group — this closes that gap.
+TEST(MessageRead, GetGroupNullMsgReturnsNullHandle) {
+    const fixpp_group_t* grp = nullptr;
+    size_t count = 0;
+    EXPECT_EQ(fixpp_msg_get_group(nullptr, 453, &grp, &count), FIXPP_ERR_NULL_HANDLE);
+}
+
+// fixpp_msg_get_msg_type on a frame that has no 35= tag (empty msg_type()): exercises
+// the `if (sv.empty()) return FIXPP_ERR_TAG_NOT_FOUND` at line 302.
+// The VersionNoTag8 test builds a frame without 8= but still has 35=D; here we
+// explicitly omit 35= from the body.
+TEST(MessageRead, GetMsgTypeEmptyMsgType) {
+    // Frame with 49=SENDER only (no 35=), so msg_type() returns empty string.
+    auto buf = make_raw_frame("49=SENDER\x01");
+    auto fv = fixpp::wire::test::make_frame_view(buf);
+    ASSERT_TRUE(fv.has_value());
+    std::pmr::monotonic_buffer_resource arena;
+    MessageView<access_mode::Index> mv{*fv, &arena};
+    InboundHandle h;
+    h.msg.view = &mv;
+
+    const char* mt = nullptr;
+    size_t mt_len = 0;
+    EXPECT_EQ(fixpp_msg_get_msg_type(h.ptr(), &mt, &mt_len), FIXPP_ERR_TAG_NOT_FOUND);
+}
+
+// get_string with a non-null value_out but null len_out: exercises the second
+// operand of the '||' guard at line 157 (covers the short-circuited branch).
+// The NullOutPointerAllAccessors test above passes null,null for get_string,
+// which short-circuits on the first operand — this test drives the second.
+TEST(MessageRead, GetStringNullLenOut) {
+    auto buf = make_raw_frame("35=D\x01" "49=SENDER\x01");
+    auto fv = fixpp::wire::test::make_frame_view(buf);
+    ASSERT_TRUE(fv.has_value());
+    std::pmr::monotonic_buffer_resource arena;
+    MessageView<access_mode::Index> mv{*fv, &arena};
+    InboundHandle h;
+    h.msg.view = &mv;
+
+    const char* sv = nullptr;
+    // value_out != nullptr, len_out == nullptr → NULL_HANDLE (second ||  operand)
+    EXPECT_EQ(fixpp_msg_get_string(h.ptr(), 49, &sv, nullptr), FIXPP_ERR_NULL_HANDLE);
+}
+
+// get_bytes on an absent tag: exercises line 179 (the if(!res) absent branch).
+TEST(MessageRead, GetBytesAbsentTag) {
+    auto buf = make_raw_frame("35=D\x01" "49=SENDER\x01");
+    auto fv = fixpp::wire::test::make_frame_view(buf);
+    ASSERT_TRUE(fv.has_value());
+    std::pmr::monotonic_buffer_resource arena;
+    MessageView<access_mode::Index> mv{*fv, &arena};
+    InboundHandle h;
+    h.msg.view = &mv;
+
+    const uint8_t* bp = nullptr;
+    size_t len = 0;
+    // tag 56 is absent → TAG_NOT_FOUND (line 179 branch)
+    EXPECT_EQ(fixpp_msg_get_bytes(h.ptr(), 56, &bp, &len), FIXPP_ERR_TAG_NOT_FOUND);
+}
+
+// get_double on an absent tag: exercises line 211 (the if(!res) absent branch).
+TEST(MessageRead, GetDoubleAbsentTag) {
+    auto buf = make_raw_frame("35=D\x01" "49=SENDER\x01");
+    auto fv = fixpp::wire::test::make_frame_view(buf);
+    ASSERT_TRUE(fv.has_value());
+    std::pmr::monotonic_buffer_resource arena;
+    MessageView<access_mode::Index> mv{*fv, &arena};
+    InboundHandle h;
+    h.msg.view = &mv;
+
+    double dv = 0.0;
+    // tag 44 is absent → TAG_NOT_FOUND (line 211 branch)
+    EXPECT_EQ(fixpp_msg_get_double(h.ptr(), 44, &dv), FIXPP_ERR_TAG_NOT_FOUND);
+}
+
+// Group field accessors: v_out == nullptr or len_out == nullptr with a VALID group
+// cursor. The GroupNullHandleAllAccessors test above always passes null_grp which
+// short-circuits on the first '||' operand; here g is non-null so later operands
+// are evaluated (covers lines 359/388 second and third sub-expressions).
+TEST(MessageReadGroup, GroupNullOutParamWithValidHandle) {
+    auto dict = make_group_dict();
+    auto buf = make_raw_frame(
+        "35=D\x01"
+        "453=1\x01"
+        "448=PA\x01"
+        "447=D\x01");
+    auto fv = fixpp::wire::test::make_frame_view(buf);
+    ASSERT_TRUE(fv.has_value());
+
+    std::pmr::monotonic_buffer_resource arena;
+    Parser<access_mode::Index> parser{dict};
+    auto mv_res = parser.parse(*fv, &arena);
+    ASSERT_TRUE(mv_res.has_value());
+    InboundHandle h;
+    h.msg.view = &mv_res.value();
+
+    const fixpp_group_t* grp = nullptr;
+    size_t count = 0;
+    ASSERT_EQ(fixpp_msg_get_group(h.ptr(), 453, &grp, &count), FIXPP_ERR_OK);
+    ASSERT_EQ(count, 1U);
+    ASSERT_NE(grp, nullptr);
+
+    // get_field_string: v_out null (g valid → second operand evaluated)
+    size_t slen = 0;
+    EXPECT_EQ(fixpp_group_get_field_string(grp, 0, 448, nullptr, &slen), FIXPP_ERR_NULL_HANDLE);
+
+    // get_field_string: len_out null (g valid → third operand evaluated)
+    const char* sv = nullptr;
+    EXPECT_EQ(fixpp_group_get_field_string(grp, 0, 448, &sv, nullptr), FIXPP_ERR_NULL_HANDLE);
+
+    // get_field_int: v_out null (g valid → second operand evaluated)
+    EXPECT_EQ(fixpp_group_get_field_int(grp, 0, 448, nullptr), FIXPP_ERR_NULL_HANDLE);
+
+    // get_field_double: v_out null (g valid → second operand evaluated)
+    EXPECT_EQ(fixpp_group_get_field_double(grp, 0, 448, nullptr), FIXPP_ERR_NULL_HANDLE);
+
+    // get_field_decimal: v_out null (g valid → second operand evaluated)
+    EXPECT_EQ(fixpp_group_get_field_decimal(grp, 0, 448, nullptr), FIXPP_ERR_NULL_HANDLE);
+}
+
+// Nested group: v_out / len_out null with a valid group cursor (second and third
+// operands of the nested_group null guard with g != nullptr).
+TEST(MessageReadGroup, NestedGroupNullOutParamWithValidHandle) {
+    auto dict = make_nested_group_dict();
+    auto buf = make_raw_frame(
+        "35=D\x01"
+        "453=1\x01"
+        "448=PA\x01"
+        "447=D\x01"
+        "539=1\x01"
+        "524=NPA\x01"
+        "525=C\x01");
+    auto fv = fixpp::wire::test::make_frame_view(buf);
+    ASSERT_TRUE(fv.has_value());
+
+    std::pmr::monotonic_buffer_resource arena;
+    Parser<access_mode::Index> parser{dict};
+    auto mv_res = parser.parse(*fv, &arena);
+    ASSERT_TRUE(mv_res.has_value());
+    InboundHandle h;
+    h.msg.view = &mv_res.value();
+
+    const fixpp_group_t* grp = nullptr;
+    size_t count = 0;
+    ASSERT_EQ(fixpp_msg_get_group(h.ptr(), 453, &grp, &count), FIXPP_ERR_OK);
+    ASSERT_EQ(count, 1U);
+    ASSERT_NE(grp, nullptr);
+
+    // g valid, nested_out == nullptr → NULL_HANDLE
+    size_t nc = 0;
+    EXPECT_EQ(fixpp_group_get_nested_group(grp, 0, 539, nullptr, &nc), FIXPP_ERR_NULL_HANDLE);
+
+    // g valid, count_out == nullptr → NULL_HANDLE
+    const fixpp_group_t* ng = nullptr;
+    EXPECT_EQ(fixpp_group_get_nested_group(grp, 0, 539, &ng, nullptr), FIXPP_ERR_NULL_HANDLE);
+}
+
+// parse_int64 / parse_double with an EMPTY string value: exercises the
+// `if (sv.empty()) return false` lines (73/82) — the true arm is unreachable
+// via standard get_int/get_double (the wire parser always gives non-empty
+// field values), but IS reachable here by building a fake entry with an
+// empty-value tag. These are LCOV branch lines, not DA lines.
+//
+// We test via get_field_int/get_field_double on a group member that has a
+// zero-length value in the slice.  The group slice is hand-crafted so the
+// member tag maps to an empty span_view — this is the only reachable path.
+//
+// NOTE: the standard wire format does not emit "tag=\x01" (empty field), but
+// scan_slice_for_tag matches on the raw bytes; we build a frame with "38=\x01"
+// and verify WIRE_INVALID_FRAME is returned (parse_int64 with empty → false).
+TEST(MessageReadGroup, ParseIntAndDoubleEmptyFieldValue) {
+    fixpp::dict::table_view dict;
+    dict.add_valid("D", 35)
+        .add_valid("D", 453)
+        .add_valid("D", 448)
+        .add_valid("D", 38)
+        .add_valid("D", 44)
+        .set_group_first(453, 448)
+        .add_group_member(453, 38)
+        .add_group_member(453, 44);
+
+    // Wire frame with empty values for tag 38 and tag 44
+    auto buf = make_raw_frame(
+        "35=D\x01"
+        "453=1\x01"
+        "448=PA\x01"
+        "38=\x01"   // empty value for int tag
+        "44=\x01"); // empty value for double tag
+    auto fv = fixpp::wire::test::make_frame_view(buf);
+    ASSERT_TRUE(fv.has_value());
+    std::pmr::monotonic_buffer_resource arena;
+    Parser<access_mode::Index> parser{dict};
+    auto mv_res = parser.parse(*fv, &arena);
+    ASSERT_TRUE(mv_res.has_value());
+    InboundHandle h;
+    h.msg.view = &mv_res.value();
+
+    const fixpp_group_t* grp = nullptr;
+    size_t count = 0;
+    ASSERT_EQ(fixpp_msg_get_group(h.ptr(), 453, &grp, &count), FIXPP_ERR_OK);
+    ASSERT_EQ(count, 1U);
+
+    // Empty string → parse_int64 returns false → WIRE_INVALID_FRAME (line 73 true arm)
+    int64_t iv = 0;
+    EXPECT_EQ(fixpp_group_get_field_int(grp, 0, 38, &iv), FIXPP_ERR_WIRE_INVALID_FRAME);
+
+    // Empty string → parse_double returns false → WIRE_INVALID_FRAME (line 82 true arm)
+    double dv = 0.0;
+    EXPECT_EQ(fixpp_group_get_field_double(grp, 0, 44, &dv), FIXPP_ERR_WIRE_INVALID_FRAME);
+}
+
+// Nested group: count field present but zero instances follow it (empty group).
+// The 539 count field is at the very end of the outer instance with no delimiter after it.
+TEST(MessageReadGroup, NestedGroupEmptyGroupCountLastField) {
+    auto dict = make_nested_group_dict();
+    // 539=0 at the end of the outer instance (count present, no delimiter follows)
+    auto buf = make_raw_frame(
+        "35=D\x01"
+        "453=1\x01"
+        "448=PA\x01"
+        "447=D\x01"
+        "539=0\x01");
+    auto fv = fixpp::wire::test::make_frame_view(buf);
+    ASSERT_TRUE(fv.has_value());
+    std::pmr::monotonic_buffer_resource arena;
+    Parser<access_mode::Index> parser{dict};
+    auto mv_res = parser.parse(*fv, &arena);
+    ASSERT_TRUE(mv_res.has_value());
+    InboundHandle h;
+    h.msg.view = &mv_res.value();
+
+    const fixpp_group_t* grp = nullptr;
+    size_t count = 0;
+    ASSERT_EQ(fixpp_msg_get_group(h.ptr(), 453, &grp, &count), FIXPP_ERR_OK);
+    ASSERT_EQ(count, 1U);
+
+    const fixpp_group_t* nested = nullptr;
+    size_t nc = 0;
+    // Count found but no delimiter follows → empty group → FIXPP_ERR_OK (count==0)
+    EXPECT_EQ(fixpp_group_get_nested_group(grp, 0, 539, &nested, &nc), FIXPP_ERR_OK);
+    EXPECT_EQ(nc, 0U);
+}
+
 }  // namespace
