@@ -206,6 +206,7 @@ target_link_libraries(capi_message_write_test PRIVATE
   GTest::gtest
   GTest::gtest_main
 )
+target_include_directories(capi_message_write_test PRIVATE ${FIXPP_CAPI_FEATURE_B_INCLUDES})
 add_test(NAME capi_message_write COMMAND capi_message_write_test)
 set_tests_properties(capi_message_write PROPERTIES LABELS "capi;051")
 
@@ -216,6 +217,7 @@ target_link_libraries(capi_msg_clone_cross_strand_test PRIVATE
   GTest::gtest
   GTest::gtest_main
 )
+target_include_directories(capi_msg_clone_cross_strand_test PRIVATE ${FIXPP_CAPI_FEATURE_B_INCLUDES})
 add_test(NAME capi_msg_clone_cross_strand COMMAND capi_msg_clone_cross_strand_test)
 set_tests_properties(capi_msg_clone_cross_strand PROPERTIES LABELS "capi;051")
 

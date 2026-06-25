@@ -105,6 +105,9 @@ fixpp_error_t fixpp_session_open(fixpp_engine_t* engine, fixpp_session_config_t*
         h->id = id;
         h->slot = &slot;
         h->valid.store(true, std::memory_order_relaxed);  // single-threaded construction
+        // D-5 (051): cache the dictionary BEFORE delete cfg so fixpp_msg_create_outbound
+        // can copy it into each outbound fixpp_msg shell for set_* validation.
+        h->dict_ = cfg->cfg.dictionary;
         fixpp_session* raw = h.get();
         engine->sessions_.push_back(std::move(h));
         delete cfg;  // builder CONSUMED on success (invalidated)

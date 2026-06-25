@@ -18,6 +18,10 @@ fixpp_group_get_field_int
 fixpp_group_get_field_string
 fixpp_group_get_nested_group
 fixpp_library_version
+fixpp_msg_clone
+fixpp_msg_commit
+fixpp_msg_create_outbound
+fixpp_msg_destroy
 fixpp_msg_get_bytes
 fixpp_msg_get_decimal
 fixpp_msg_get_double
@@ -26,6 +30,12 @@ fixpp_msg_get_int
 fixpp_msg_get_msg_type
 fixpp_msg_get_string
 fixpp_msg_has_tag
+fixpp_msg_remove_tag
+fixpp_msg_set_bytes
+fixpp_msg_set_decimal
+fixpp_msg_set_double
+fixpp_msg_set_int
+fixpp_msg_set_string
 fixpp_msg_version
 fixpp_session_close
 fixpp_session_config_create

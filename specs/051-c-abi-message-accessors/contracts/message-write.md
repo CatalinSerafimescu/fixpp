@@ -1,6 +1,6 @@
 # Contract — Outbound construct / set / commit + group build (CA-009 + CA-010-write)
 
-Header: `include/fix/c_api/message.h` (NEW). Impl: `src/capi/message_write.cpp`. The outbound `fixpp_msg_t` is an in-arena accumulator (data-model E-3) bound to `Session::session_arena()`. `set_*` is zero-global-heap (arena deep-copy). Reentrancy `FIXPP_REQUIRES_SESSION_LOCK`; `fixpp_msg_destroy` `FIXPP_THREAD_SAFE`; `fixpp_msg_clone` `FIXPP_REQUIRES_SESSION_LOCK` on the source.
+Header: `include/fix/c_api/message.h` (NEW). Impl: `src/capi/message_write.cpp`. The outbound `fixpp_msg_t` is an accumulator (data-model E-3) in a **per-message `std::pmr::monotonic_buffer_resource` owned by the heap shell** (impl reconciliation — `Session::session_arena()` does not exist for the C-ABI path; see data-model E-3/E-9). `set_*` and `commit` are **zero-global-heap** (allocate from the pre-seeded per-message arena; SC-003 dual gate). Reentrancy `FIXPP_REQUIRES_SESSION_LOCK`; `fixpp_msg_destroy` `FIXPP_THREAD_SAFE`; `fixpp_msg_clone` `FIXPP_REQUIRES_SESSION_LOCK` on the source.
 
 ## Lifecycle
 

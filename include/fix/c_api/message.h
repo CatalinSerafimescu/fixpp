@@ -237,6 +237,130 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_group_get_nested_group(const fixpp_group_t*
                                                       const fixpp_group_t** nested_out,
                                                       size_t* nested_count_out);
 
+/* ── CA-009 outbound message construct / set / commit (T009/US2) ────────────
+ *
+ * Outbound accumulator lifecycle:
+ *   fixpp_msg_create_outbound -> fixpp_msg_set_X (zero or more) ->
+ *   fixpp_msg_commit -> fixpp_session_send(*payload_out, len_out) ->
+ *   fixpp_msg_destroy
+ *
+ * The committed span (*payload_out) is valid until the next mutation or
+ * destroy.  The immediate-destroy pattern (commit->send->destroy) is safe
+ * because fixpp_session_send blocks on fut.get() and Engine::send deep-copies
+ * the payload at entry (NORMATIVE Codex #4, FR-021).
+ *
+ * Reentrancy: all create/set/commit/remove/destroy are FIXPP_REQUIRES_SESSION_LOCK
+ *             (must not be called concurrently on the same handle).
+ *             fixpp_msg_destroy is FIXPP_THREAD_SAFE (idempotent, NULL-safe).
+ *             fixpp_msg_clone is FIXPP_REQUIRES_SESSION_LOCK on the source.
+ */
+
+/** Create an outbound message accumulator bound to `session`.
+ *
+ *  The returned handle lives outside the session arena (operator new);
+ *  its internal accumulator is allocated into the session arena.
+ *  The handle is tied to the session's liveness token (E-9): after
+ *  fixpp_session_close or fixpp_engine_destroy, any set/commit call
+ *  returns FIXPP_ERR_INVALID_HANDLE (lazy tombstone).
+ *
+ *  Return codes:
+ *    FIXPP_ERR_OK             -- success; *msg_out is live
+ *    FIXPP_ERR_NULL_HANDLE    -- session or msg_out is NULL
+ *    FIXPP_ERR_INVALID_HANDLE -- session is destroyed / engine is gone
+ *    FIXPP_ERR_DICT_CONFIG    -- msg_type not found in the session dictionary
+ *
+ *  Reentrancy: requires-session-lock
+ */
+FIXPP_API_EXPORT fixpp_error_t fixpp_msg_create_outbound(fixpp_session_t* session,
+                                                    const char* msg_type, size_t msg_type_len,
+                                                    fixpp_msg_t** msg_out);
+
+/** Destroy an outbound or clone message handle.  Idempotent; NULL-safe.
+ *  Always returns FIXPP_ERR_OK.
+ *
+ *  Reentrancy: thread-safe
+ */
+FIXPP_API_EXPORT fixpp_error_t fixpp_msg_destroy(fixpp_msg_t* msg);
+
+/** Clone an inbound or outbound message into a session-independent handle.
+ *
+ *  The clone owns its own arena; it is NOT tied to the source session's
+ *  liveness token (session close does NOT tombstone the clone).
+ *  Clone reads (get, has_tag) are THREAD_SAFE.
+ *
+ *  Return codes:
+ *    FIXPP_ERR_OK             -- success; *clone_out is live
+ *    FIXPP_ERR_NULL_HANDLE    -- src or clone_out is NULL
+ *    FIXPP_ERR_INVALID_HANDLE -- src is destroyed / tombstoned
+ *
+ *  Reentrancy: requires-session-lock (on the source handle's owning session)
+ */
+FIXPP_API_EXPORT fixpp_error_t fixpp_msg_clone(const fixpp_msg_t* src, fixpp_msg_t** clone_out);
+
+/** Set a STRING field on an outbound accumulator.
+ *
+ *  Deep-copies value[0..len-1] into the session arena (caller may free
+ *  value immediately).  Overwrites any prior value for `tag`.
+ *  Framing tags 8/9/34/49/52/56/10 return FIXPP_ERR_MSG_FRAMING_TAG_FORBIDDEN.
+ *
+ *  Return codes:
+ *    FIXPP_ERR_OK                        -- success
+ *    FIXPP_ERR_NULL_HANDLE               -- msg or value is NULL
+ *    FIXPP_ERR_INVALID_HANDLE            -- msg is destroyed / session closed
+ *    FIXPP_ERR_MSG_FRAMING_TAG_FORBIDDEN -- tag is a framing tag
+ *    FIXPP_ERR_DICT_CONFIG               -- tag not declared for this MsgType
+ *    FIXPP_ERR_TYPE_MISMATCH             -- dict declares tag as a non-string type
+ *
+ *  Reentrancy: requires-session-lock
+ */
+FIXPP_API_EXPORT fixpp_error_t fixpp_msg_set_string(fixpp_msg_t* msg, uint16_t tag,
+                                               const char* value, size_t len);
+
+/** Set a raw-bytes field (type-agnostic escape hatch for Data or extension tags).
+ *  No dictionary type check; framing-tag check still applies.
+ *
+ *  Reentrancy: requires-session-lock
+ */
+FIXPP_API_EXPORT fixpp_error_t fixpp_msg_set_bytes(fixpp_msg_t* msg, uint16_t tag,
+                                              const uint8_t* bytes, size_t len);
+
+/** Set an integer field (serialised as ASCII decimal).
+ *  Reentrancy: requires-session-lock
+ */
+FIXPP_API_EXPORT fixpp_error_t fixpp_msg_set_int(fixpp_msg_t* msg, uint16_t tag, int64_t value);
+
+/** Set a floating-point field (serialised via snprintf %.10g).
+ *  Reentrancy: requires-session-lock
+ */
+FIXPP_API_EXPORT fixpp_error_t fixpp_msg_set_double(fixpp_msg_t* msg, uint16_t tag, double value);
+
+/** Set a fixpp_decimal_t field (serialised via fixpp_decimal_format).
+ *  Reentrancy: requires-session-lock
+ */
+FIXPP_API_EXPORT fixpp_error_t fixpp_msg_set_decimal(fixpp_msg_t* msg, uint16_t tag,
+                                                fixpp_decimal_t value);
+
+/** Remove a tag from the accumulator.  Idempotent (absent returns OK).
+ *  Reentrancy: requires-session-lock
+ */
+FIXPP_API_EXPORT fixpp_error_t fixpp_msg_remove_tag(fixpp_msg_t* msg, uint16_t tag);
+
+/** Serialise the accumulator into an app-payload span.
+ *
+ *  The payload is: 35=type SOH tag=value SOH ... (no framing tags 8/9/34/49/52/56/10).
+ *  *payload_out aliases the session arena; valid until the next mutation or destroy.
+ *
+ *  Return codes:
+ *    FIXPP_ERR_OK              -- success
+ *    FIXPP_ERR_NULL_HANDLE     -- msg or payload_out or len_out is NULL
+ *    FIXPP_ERR_INVALID_HANDLE  -- msg is destroyed or session closed or open group
+ *    FIXPP_ERR_WIRE_LIMIT_EXCEEDED -- serialised body exceeds ~3800 B
+ *
+ *  Reentrancy: requires-session-lock
+ */
+FIXPP_API_EXPORT fixpp_error_t fixpp_msg_commit(fixpp_msg_t* msg, const uint8_t** payload_out,
+                                           size_t* len_out);
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif

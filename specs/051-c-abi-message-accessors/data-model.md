@@ -6,7 +6,7 @@ Entities are C-ABI handle shapes + their internal C++ backing (`src/capi/capi_in
 
 | Field | Inbound flavour | Outbound flavour |
 |---|---|---|
-| Backing | `const wire::MessageView<Index>*` (borrowed; stack, `capi_internal.hpp:114`) | a mutable in-arena **accumulator** (E-3), arena = `Session::session_arena()` |
+| Backing | `const wire::MessageView<Index>*` (borrowed; stack, `capi_internal.hpp:114`) | a mutable **accumulator** (E-3) in a **per-message `std::pmr::monotonic_buffer_resource` owned by the heap shell** (impl reconciliation — see E-3/E-9 note; `Session::session_arena()` does not exist for the C-ABI path) |
 | Mutability | **immutable** — `set_*`/group-build → `FIXPP_ERR_INVALID_HANDLE` (`[2i §10] Q5`) | mutable until commit/destroy |
 | Lifetime | receive-callback dispatch window | until `fixpp_msg_destroy` **or** session-close tombstone (E-9) |
 | Type-tag | 049/050 handle tag; `FIXPP_HANDLE_TAG_DEAD` flipped only on the handle's own `fixpp_msg_destroy` | same. **Session-close tombstone is a LAZY token check, NOT a tag flip** (E-9): nothing enumerates live outbound handles at session close, so the dead-tag flip cannot be the mechanism. |
@@ -26,6 +26,8 @@ A **clone** (`fixpp_msg_clone`) is an outbound-flavour handle with its **own** a
 ## E-3 — Outbound message accumulator (the net-new core, D-2)
 
 An ordered, mutable, arena-resident structure: `msg_type` (the `35=` value) + an **ordered list of entries**, where each entry is either a scalar `(tag, value_bytes)` or a **group** `(no_tag, [instance…])`, each instance an ordered list of `(tag, value_bytes)` (recursively, for nested groups).
+
+> **Implementation reconciliation (ratified during US2 implement — replaces the "session arena" wording below).** The plan's `Session::session_arena()` does **not** exist; the C-ABI engine's `default_session_resource` is `new_delete_resource()`. The outbound `fixpp_msg` therefore owns a **per-message `std::pmr::monotonic_buffer_resource`** (a heap-shell member, seeded ≥ frame-cap at `create_outbound` construction-time, upstream `new_delete_resource()`), and the accumulator + committed span allocate from THAT. This is **safer** than a session arena — the accumulator is shell-owned, so session close cannot free it (no session-arena UAF was ever possible), and the steady-state set_*/commit path is **zero-global-heap** (allocations carve from the pre-seeded per-message arena; verified by the SC-003 write-path dual gate, counting-resource + mallocnesia). "session arena" / "in the session arena" below ≡ this per-message shell-owned arena.
 
 **Invariants (the emission contract — pinned because `send_impl` splices, D-2):**
 - **INV-1** — `35=<type>` is emitted first; `msg_type` is non-empty.
@@ -73,6 +75,8 @@ See plan §X.5 + D-10. The shared `fixpp_msg_get_*` read accessors carry the **s
 `FIXPP_C_ABI_VERSION_MINOR` 3 → 4 (`version.h`). `FIXPP_C_ABI_VERSION` recomputed.
 
 ## E-9 — Tombstone state machine (outbound, FR-009a / D-9) — single LAZY mechanism
+
+> **Implementation reconciliation (ratified during US2 implement).** The accumulator is **shell-owned** (per-message arena, E-3) — NOT in the session arena — so session teardown can never free it and **no session-arena UAF is possible**. The `weak_ptr<SessionLiveness>` token therefore functions as the **FR-009a semantic validity gate** (operating on an outbound msg whose owning session has closed/destroyed returns `FIXPP_ERR_INVALID_HANDLE`), not as UAF prevention. The mechanism below is unchanged and still required: the strong ref is reset on every teardown path and `set_*`/`commit`/group-build/`destroy` check `token.lock()` first. (The original "token outlives the arena" UAF framing assumed an in-session-arena accumulator; with shell ownership the safety is structural and the token is the contract gate.)
 
 `outbound fixpp_msg_t` states: **live** → (`fixpp_msg_destroy`) → **destroyed**; **live** → (owning session close/destroy) → **tombstoned**. In destroyed/tombstoned: `set_*`/`commit`/group-build → `FIXPP_ERR_INVALID_HANDLE`; `fixpp_msg_destroy` → no-op `FIXPP_ERR_OK`. A clone is exempt (own session-independent arena, FR-009).
 

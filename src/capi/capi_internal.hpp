@@ -173,6 +173,20 @@ enum class FixppMsgFlavour : std::uint8_t {
 //     The fixpp_msg shell itself lives OUTSIDE the arena (operator new), so
 //     reading tag_/token after arena teardown is safe — the mechanism closes the
 //     050 arena-UAF class.
+//   - `dict_` caches the session's dictionary shared_ptr at create-time, so the
+//     set_* thunks (which receive only the msg handle, not the session) can
+//     perform DICT_CONFIG / TYPE_MISMATCH validation without re-leasing the session.
+//     Stored in the HEAP SHELL (not in the arena) so it survives session close and
+//     its destructor runs correctly (arena teardown never destructed pmr objects).
+//
+// CLONE flavour (variant of INBOUND, created by fixpp_msg_clone):
+//   - Heap-allocated by fixpp_msg_clone; tag_ = FIXPP_HANDLE_TAG_MSG.
+//   - `flavour` = inbound; `view` points into the clone-owned MessageView.
+//   - `owned_frame_` holds the deep-copied frame bytes (unique_ptr<byte[]>).
+//   - `owned_view_` holds the clone-owned MessageView<Index> (unique_ptr).
+//   - `token` is default-constructed (expired) — session-independent.
+//   - Reads THREAD_SAFE (no mutation path; only get_* accessors via view).
+//   - NOT tombstoned by session close (no liveness token).
 //
 // DESTROYED state: tag_ flipped to FIXPP_HANDLE_TAG_DEAD by fixpp_msg_destroy.
 // TOMBSTONED state: tag_ still FIXPP_HANDLE_TAG_MSG but token.lock() == nullptr.
@@ -185,17 +199,51 @@ struct fixpp_msg {
     FixppMsgFlavour      flavour   = FixppMsgFlavour::inbound;
 
     // Inbound arm: borrowed MessageView (valid only in receive-callback window).
+    // Also used by clones (owned_view_ backs the pointed-to view).
     const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>* view = nullptr;
 
-    // Outbound arm: pointer to the in-arena accumulator (non-owning; the session
-    // arena owns the allocation).  nullptr for inbound handles.
+    // Outbound arm: pointer to the heap-owned accumulator (OWNING; freed by
+    // fixpp_msg_destroy via `delete accumulator`).  nullptr for inbound handles.
     OutboundAccumulator* accumulator = nullptr;
+
+    // Per-message arena (E-3 reconciliation, SC-003): a monotonic_buffer_resource
+    // over arena_buf_ backing ALL outbound accumulator + commit allocations, so the
+    // steady-state set_*/commit path is zero-global-heap (allocations carve from the
+    // pre-seeded buffer; upstream = new_delete for graceful degrade, never null).
+    // Seeded at create_outbound (construction-time alloc, FR-020); freed in
+    // fixpp_msg_destroy AFTER `delete accumulator`. arena_buf_ declared BEFORE
+    // arena_resource_ so the resource destructs before its backing buffer. nullptr
+    // for inbound/clone handles. (NOT the session arena — Session::session_arena()
+    // does not exist for the C-ABI path; shell-owned ⇒ no session-arena UAF.)
+    std::unique_ptr<std::byte[]>                          arena_buf_;
+    std::unique_ptr<std::pmr::monotonic_buffer_resource>  arena_resource_;
 
     // Validity token (E-9 lazy tombstone).  Default-constructed = expired, which
     // is the correct sentinel for inbound (set_* → FIXPP_ERR_INVALID_HANDLE) and
     // for unset outbound handles.  Set from session->liveness_ at create_outbound
     // time (US2/T009).
     std::weak_ptr<SessionLiveness> token;
+
+    // Dictionary for outbound TYPE_MISMATCH / DICT_CONFIG validation (US2/T009).
+    // Copied from the session's dict_ at create_outbound time; also copied into
+    // clones at clone time.  Stored here (not in the arena) so the shared_ptr
+    // destructor runs correctly and does not depend on the session arena lifetime.
+    // nullptr for inbound dispatch-window handles (they do not need validation).
+    std::shared_ptr<const fixpp::dict::Dictionary> dict_;
+
+    // Clone-owned storage: allocated by fixpp_msg_clone; nullptr for
+    // non-clone handles.  Owned by the shell; destroyed at fixpp_msg_destroy.
+    std::unique_ptr<std::byte[]>
+        owned_frame_;  // deep-copied frame bytes (view aliases into this)
+    std::unique_ptr<fixpp::wire::MessageView<fixpp::wire::access_mode::Index>>
+        owned_view_;  // clone-owned MessageView over owned_frame_
+
+    // Commit-serialized payload (outbound).  Owned heap buffer; null until first
+    // commit; freed by fixpp_msg_destroy via unique_ptr auto-destruction.
+    // committed_payload_ aliases committed_buf_.get() for the C consumer pointer.
+    std::unique_ptr<std::byte[]> committed_buf_;
+    std::byte* committed_payload_ = nullptr;
+    std::size_t committed_len_ = 0;
 };
 
 // fixpp_group — inbound repeating-group read cursor (E-2 / CA-010-read).
@@ -218,12 +266,24 @@ struct fixpp_group {
     std::pmr::memory_resource* arena = nullptr;  // scratch arena for nested OffsetTables
 };
 
-// OutboundAccumulator — the ordered, mutable, arena-resident structure (E-3).
+// OutboundAccumulator — the ordered, mutable structure (E-3).
 //
-// Lives in the session arena; fixpp_msg holds a NON-OWNING pointer to it (NOT
-// inline in fixpp_msg — the token check-before-deref must read tag_/token from a
-// heap shell that survives arena teardown; inlining the accumulator would make
-// that read itself a UAF after arena teardown, defeating the lazy mechanism).
+// Heap-owned by the fixpp_msg shell (operator new + delete in fixpp_msg_destroy);
+// NOT inline in fixpp_msg so the shell can live on the heap independently and the
+// token check-before-deref (E-9) can safely read tag_/token after the accumulator
+// is freed.  The fixpp_msg shell survives engine/session teardown; the accumulator
+// does not — it is freed by fixpp_msg_destroy before the shell is tombstoned.
+//
+// IMPLEMENTATION NOTE (E-3 reconciliation): data-model E-3/INV-5 said "all bytes
+// in the session arena; no global-heap".  Session::session_arena() does not exist
+// for the C-ABI path (the plan's session.hpp:189 was an unreliable claim) and the
+// engine's default_session_resource is new_delete_resource().  Resolution: the
+// fixpp_msg shell owns a PER-MESSAGE monotonic_buffer_resource (fixpp_msg::arena_
+// resource_, seeded >= frame-cap at create_outbound), and OutboundAccumulator::arena_
+// points at it.  This keeps the steady-state set_*/commit path ZERO-GLOBAL-HEAP
+// (SC-003 dual gate) AND is safer than a session arena: shell-owned ⇒ session close
+// cannot free the accumulator (no session-arena UAF was ever possible), so the
+// E-9 token is the FR-009a semantic validity gate, not UAF prevention.
 //
 // Structural shape (E-3, INV-1..5):
 //   msg_type  — the "35=" value (non-empty; INV-1).
@@ -233,19 +293,6 @@ struct fixpp_group {
 //   scalar (tag != 0): tag + value_bytes (INV-2: non-empty after validate).
 //   group  (tag == 0): a list of GroupInstance, each an ordered list of nested
 //                      AccumulatorEntry (recursive for nested groups, FR-012 / E-4).
-//
-// Mutual recursion (AccumulatorEntry ↔ GroupInstance) is broken via
-// std::unique_ptr: GroupInstance holds unique_ptr<AccumulatorEntry>[] elements so
-// that only a POINTER to AccumulatorEntry (not its full layout) is needed at
-// GroupInstance definition time.  AccumulatorEntry is then fully defined after.
-// This is the standard recursive-struct technique; no arena PMR allocator is used
-// for the unique_ptr nodes (the nodes themselves are arena-new'd in US2/T009 via
-// the OutboundAccumulator::arena_ resource pointer passed down the call chain).
-//
-// INVARIANT: every allocation (msg_type, entry value_bytes, vectors, nodes) uses
-// the session arena's memory_resource — no global-heap (INV-5 / [const §VIII.5]).
-// US2/T009 must use `new(arena_->allocate(…)) AccumulatorEntry` patterns or
-// pmr::vector with the resource propagated.
 //
 // All mutation (set_*, add_entry, commit, etc.) is US2/T009 — not present here.
 
@@ -310,7 +357,7 @@ struct AccumulatorEntry {
 
 // OutboundAccumulator: the arena-resident root of the outbound message tree.
 struct OutboundAccumulator {
-    std::pmr::memory_resource*         arena_;    // session arena (non-owning)
+    std::pmr::memory_resource*         arena_;    // PMR resource for pmr::string/vector (new_delete for C-ABI)
     std::pmr::string                   msg_type;  // 35= value (INV-1: non-empty)
     std::pmr::vector<AccumulatorEntry> entries;   // ordered field/group list
 
@@ -347,6 +394,12 @@ struct fixpp_session {
     // The shell (fixpp_session) outlives the arena, so liveness_ itself is safe to
     // read/reset after session close/engine destroy. [data-model E-9]
     std::shared_ptr<SessionLiveness> liveness_ = std::make_shared<SessionLiveness>();
+
+    // Dictionary (D-5): cached at fixpp_session_open time from cfg->cfg.dictionary
+    // BEFORE `delete cfg`.  Used by fixpp_msg_create_outbound (and fixpp_msg_clone)
+    // to populate fixpp_msg::dict_ so the set_* thunks can perform DICT_CONFIG /
+    // TYPE_MISMATCH validation without re-leasing the session.
+    std::shared_ptr<const fixpp::dict::Dictionary> dict_;
 };
 
 namespace fixpp_capi::detail {
