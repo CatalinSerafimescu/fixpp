@@ -89,6 +89,50 @@ fixpp::core::expected_t<void> CapiApplication::fromApp(
     return {};
 }
 
+// toApp runs ON the session strand BEFORE an application message is transmitted
+// (originate-path tap only; resend retransmissions are NOT surfaced — L-019-4).
+// Wrap the borrowed MessageView in a STACK fixpp_msg FRAMED read-only view (framing
+// tags 8/9/34/49/52/56/10 ARE readable per "Framed toApp view" — contracts/
+// toapp-callback.md). Map the C verdict to expected_t<void>:
+//   FIXPP_TOAPP_SEND  (0) → {} (proceed)
+//   FIXPP_TOAPP_VETO  (1) → unexpected(app_do_not_send)  (suppress, no seqnum consumed)
+//   FIXPP_TOAPP_ERROR (2) → unexpected(app_callback_threw) (terminal-close)
+//   out-of-range          → unexpected(app_callback_threw) (defined misuse path)
+// A C callback cannot throw; if one escapes anyway it is an on-strand steady-state
+// invariant violation → fatal-log + abort (same policy as fromApp). [D-8]
+fixpp::core::expected_t<void> CapiApplication::toApp(
+    const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>& msg,
+    const fixpp::session::SessionId& id) {
+    SessionSlot* s = find_(id);
+    if (s == nullptr || s->send_cb == nullptr) {
+        return {};  // no callback registered → default send
+    }
+    fixpp_msg framed{};  // stack wrapper; FRAMED view (framing tags readable), D-8
+    framed.view = &msg;
+    fixpp_toapp_verdict verdict{};
+    try {
+        verdict = s->send_cb(&framed, s->send_userdata);
+    } catch (...) {
+        std::fputs(
+            "fixpp C-ABI: send callback threw; aborting (on-strand steady-state "
+            "invariant violation, FR-008)\n",
+            stderr);
+        std::abort();
+    }
+    switch (verdict) {
+        case FIXPP_TOAPP_SEND:
+            return {};
+        case FIXPP_TOAPP_VETO:
+            return std::unexpected(fixpp::core::error::app_do_not_send);
+        case FIXPP_TOAPP_ERROR:
+            return std::unexpected(fixpp::core::error::app_callback_threw);
+        default:
+            // Out-of-range verdict is a defined C-ABI-misuse path: treat as ERROR,
+            // NOT silently coerced to send. [contracts/toapp-callback.md D-8]
+            return std::unexpected(fixpp::core::error::app_callback_threw);
+    }
+}
+
 // L-050-z witness seam: counts live EngineState instances.  Incremented in
 // EngineState ctor, decremented in EngineState dtor (both in capi_internal.hpp
 // via the extern reference).  live_state_count() is the test accessor.

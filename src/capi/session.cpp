@@ -261,6 +261,26 @@ fixpp_error_t fixpp_session_register_callback(fixpp_session_t* session, fixpp_re
     return FIXPP_ERR_OK;
 }
 
+fixpp_error_t fixpp_session_register_send_callback(fixpp_session_t* session, fixpp_send_cb cb,
+                                                   void* userdata) {
+    if (fixpp_error_t c = check_session(session); c != FIXPP_ERR_OK) {
+        return c;
+    }
+    if (session->slot == nullptr) {
+        return FIXPP_ERR_INVALID_HANDLE;
+    }
+    // MUST precede fixpp_engine_start (mirrors FR-011 / fixpp_session_register_callback):
+    // the trampoline map is read on the session strand without a mutex; a post-start
+    // registration would race toApp. Enforced, not merely documented.
+    if (session->engine->engine_started_) {
+        return FIXPP_ERR_CAPI_CONFIG_INVALID;
+    }
+    // Re-registration overwrites; cb == NULL clears. Single-threaded (pre-start).
+    session->slot->send_cb = cb;
+    session->slot->send_userdata = userdata;
+    return FIXPP_ERR_OK;
+}
+
 }  // extern "C"
 
 namespace fixpp_capi::detail {

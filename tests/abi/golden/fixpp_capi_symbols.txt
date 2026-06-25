@@ -58,6 +58,7 @@ fixpp_session_config_set_security
 fixpp_session_is_established
 fixpp_session_open
 fixpp_session_register_callback
+fixpp_session_register_send_callback
 fixpp_session_send
 fixpp_strerror
 fixpp_version

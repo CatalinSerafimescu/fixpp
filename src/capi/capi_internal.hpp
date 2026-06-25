@@ -84,6 +84,9 @@ public:
     fixpp::core::expected_t<void> fromApp(
         const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>& msg,
         const fixpp::session::SessionId& id) override;
+    fixpp::core::expected_t<void> toApp(
+        const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>& msg,
+        const fixpp::session::SessionId& id) override;
 
 private:
     SessionSlot* find_(const fixpp::session::SessionId& id) noexcept;
