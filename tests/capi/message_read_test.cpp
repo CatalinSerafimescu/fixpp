@@ -381,8 +381,22 @@ TEST(MessageRead, Version) {
 }
 
 // SC-003 alloc guard: the read path must not allocate on the global heap.
+// Covers ALL read accessors (SC-003: "every read accessor"):
+//   get_string, get_bytes, get_int, get_double, get_decimal, has_tag,
+//   get_msg_type, get_group (absent-tag early-return path).
+//
 // Uses the mallocnesia LD_PRELOAD dual-gate via alloc_guard_markers.hpp.
 // Without the preload the markers no-op (test still validates correctness).
+//
+// Frame: 35=D, 49=SENDER (STRING — used for get_string/get_bytes),
+//        56=TARGET, 34=42 (INT — used for get_int/get_double/get_decimal).
+// get_decimal: uses a stack-local 512-byte monotonic scratch (null upstream)
+//   inside fixpp_msg_get_decimal — zero global heap.
+// get_double:  uses std::from_chars (no alloc) on this platform.
+// get_bytes:   raw pointer alias into the wire buffer — no alloc.
+// get_group (absent tag): early-return before cursor allocation → zero alloc.
+//   The group cursor path (present tag) is guarded separately in
+//   ZeroGlobalHeapGroupCursorGuard below.
 TEST(MessageRead, ZeroGlobalHeapAllocGuard) {
     auto buf = make_raw_frame("35=D\x01" "49=SENDER\x01" "56=TARGET\x01" "34=42\x01");
     auto fv = fixpp::wire::test::make_frame_view(buf);
@@ -393,27 +407,60 @@ TEST(MessageRead, ZeroGlobalHeapAllocGuard) {
     InboundHandle h;
     h.msg.view = &mv;
 
-    // Warm-up: prime any lazy-init caches outside the measured window
+    // Warm-up: prime any lazy-init caches outside the measured window.
+    // Covers every scalar read accessor (get_string, get_bytes, get_int,
+    // get_double, get_decimal, has_tag, get_msg_type, version) and
+    // get_group (absent tag 453 — frame has no group field; early return).
     for (int i = 0; i < 8; ++i) {
         const char* out = nullptr; size_t len = 0;
         (void)fixpp_msg_get_string(h.ptr(), 49, &out, &len);
+        const uint8_t* bout = nullptr; size_t blen = 0;
+        (void)fixpp_msg_get_bytes(h.ptr(), 49, &bout, &blen);
         int64_t iv = 0;
         (void)fixpp_msg_get_int(h.ptr(), 34, &iv);
+        double dv = 0.0;
+        (void)fixpp_msg_get_double(h.ptr(), 34, &dv);
+        fixpp_decimal_t decv{};
+        (void)fixpp_msg_get_decimal(h.ptr(), 34, &decv);
+        fixpp_resolved_msg_version_t verv{};
+        (void)fixpp_msg_version(h.ptr(), &verv);
+        const fixpp_group_t* grp_wu = nullptr; size_t cnt_wu = 0;
+        (void)fixpp_msg_get_group(h.ptr(), 453, &grp_wu, &cnt_wu);  // absent → TAG_NOT_FOUND
     }
 
+    // SC-003 zero-global-heap guard: covers ALL read accessors including
+    // fixpp_msg_get_group on the absent-tag early-return path (no cursor
+    // allocated → zero alloc).  The present-tag cursor path is guarded in
+    // ZeroGlobalHeapGroupCursorGuard.
     if (alloc_guard_start) alloc_guard_start();
     for (int i = 0; i < 1000; ++i) {
         const char* out = nullptr; size_t len = 0;
         ASSERT_EQ(fixpp_msg_get_string(h.ptr(), 49, &out, &len), FIXPP_ERR_OK);
 
+        const uint8_t* bout = nullptr; size_t blen = 0;
+        ASSERT_EQ(fixpp_msg_get_bytes(h.ptr(), 49, &bout, &blen), FIXPP_ERR_OK);
+
         int64_t iv = 0;
         ASSERT_EQ(fixpp_msg_get_int(h.ptr(), 34, &iv), FIXPP_ERR_OK);
+
+        double dv = 0.0;
+        ASSERT_EQ(fixpp_msg_get_double(h.ptr(), 34, &dv), FIXPP_ERR_OK);
+
+        fixpp_decimal_t decv{};
+        ASSERT_EQ(fixpp_msg_get_decimal(h.ptr(), 34, &decv), FIXPP_ERR_OK);
 
         bool present = false;
         ASSERT_EQ(fixpp_msg_has_tag(h.ptr(), 56, &present), FIXPP_ERR_OK);
 
         const char* mt = nullptr; size_t mtl = 0;
         ASSERT_EQ(fixpp_msg_get_msg_type(h.ptr(), &mt, &mtl), FIXPP_ERR_OK);
+
+        fixpp_resolved_msg_version_t ver{};
+        ASSERT_EQ(fixpp_msg_version(h.ptr(), &ver), FIXPP_ERR_OK);
+
+        // get_group on an absent tag: early return before cursor allocation → zero alloc.
+        const fixpp_group_t* grp_out = nullptr; size_t grp_count = 0;
+        ASSERT_EQ(fixpp_msg_get_group(h.ptr(), 453, &grp_out, &grp_count), FIXPP_ERR_TAG_NOT_FOUND);
     }
     if (alloc_guard_end) alloc_guard_end();
 }
@@ -455,6 +502,74 @@ fixpp::dict::table_view make_nested_group_dict() {
         .set_group_first(539, 524)
         .add_group_member(539, 525);
     return dict;
+}
+
+// SC-003 alloc guard: group cursor path.  The group cursor shell
+// (fixpp_group) is now allocated from the parse arena (not the global heap),
+// so the steady-state "cursor already built" path is zero-global-heap.
+//
+// Strategy: use a pre-seeded arena large enough to hold the OffsetTable
+// entries + group_slices build + one cursor shell — all from the pre-seeded
+// buffer.  Warm up group_slices materialisation outside the markers (the first
+// build allocates into the pre-seeded arena, not new_delete, when the buffer
+// has capacity); inside the markers the slices are cached and the cursor
+// carves from the pre-seeded buffer → zero calls to new/malloc.
+//
+// Frame: 35=D, 453=1, 448=PA, 447=D (1 instance of group 453).
+// Buffer: 16 KiB — generous headroom for OffsetTable vectors + group_slices
+//         + cursor shell.  null_memory_resource upstream: if the buffer were
+//         exhausted, parse would fail (the test would ASSERT-fail before the
+//         guard window), so a passing test guarantees no overflow to new_delete.
+TEST(MessageRead, ZeroGlobalHeapGroupCursorGuard) {
+    auto dict = make_group_dict();
+    auto buf = make_raw_frame(
+        "35=D\x01"
+        "34=1\x01"
+        "453=1\x01"
+        "448=PA\x01"
+        "447=D\x01");
+    auto fv = fixpp::wire::test::make_frame_view(buf);
+    ASSERT_TRUE(fv.has_value());
+
+    // Pre-seeded arena with null_memory_resource upstream: all allocations must
+    // carve from arena_buf; any overflow would throw bad_alloc → test aborts.
+    // This proves that the parse + group_slices build + cursor all fit in the
+    // pre-seeded buffer (i.e. zero calls to new/malloc at any point).
+    alignas(std::max_align_t) std::byte arena_buf[16384];
+    std::pmr::monotonic_buffer_resource arena{arena_buf, sizeof(arena_buf),
+                                              std::pmr::null_memory_resource()};
+
+    Parser<access_mode::Index> parser{dict};
+    auto mv_res = parser.parse(*fv, &arena);
+    ASSERT_TRUE(mv_res.has_value());
+
+    InboundHandle h;
+    h.msg.view = &mv_res.value();
+
+    // Warm-up: trigger lazy group_slices build (allocates into the pre-seeded
+    // arena) and the first cursor allocation — both outside the measured window.
+    {
+        const fixpp_group_t* grp_wu = nullptr;
+        size_t cnt_wu = 0;
+        ASSERT_EQ(fixpp_msg_get_group(h.ptr(), 453, &grp_wu, &cnt_wu), FIXPP_ERR_OK);
+        EXPECT_EQ(cnt_wu, 1U);
+    }
+
+    // SC-003 guard: group_slices is cached; cursor carves from the pre-seeded
+    // buffer (null upstream → any new_delete call would terminate the test here).
+    if (alloc_guard_start) alloc_guard_start();
+    {
+        const fixpp_group_t* grp_out = nullptr;
+        size_t grp_count = 0;
+        ASSERT_EQ(fixpp_msg_get_group(h.ptr(), 453, &grp_out, &grp_count), FIXPP_ERR_OK);
+        ASSERT_EQ(grp_count, 1U);
+        ASSERT_NE(grp_out, nullptr);
+        // Verify field access through the cursor also stays zero-alloc.
+        const char* pv = nullptr; size_t pl = 0;
+        ASSERT_EQ(fixpp_group_get_field_string(grp_out, 0, 448, &pv, &pl), FIXPP_ERR_OK);
+        EXPECT_EQ(std::string_view(pv, pl), "PA");
+    }
+    if (alloc_guard_end) alloc_guard_end();
 }
 
 TEST(MessageReadGroup, GetGroupCount) {

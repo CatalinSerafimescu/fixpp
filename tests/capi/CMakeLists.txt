@@ -242,4 +242,33 @@ if(EXISTS "${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so")
         LABELS "capi;050;alloc_guard"
         DEPENDS capi_recv_alloc_guard_test
     )
+
+    # SC-003 dual gate — read path: mallocnesia LD_PRELOAD interception for the
+    # inbound get_* accessors. The in-process marker test is in message_read_test.cpp
+    # (ZeroGlobalHeapAllocGuard). A counting-resource alone false-passes
+    # ([[feedback_tracking_pmr_resource_false_pass]]); this entry is the binding gate.
+    add_test(
+        NAME capi_message_read_mallocnesia
+        COMMAND
+            python3 "${CMAKE_SOURCE_DIR}/tools/check_alloc.py"
+            "--binary" "$<TARGET_FILE:capi_message_read_test>"
+    )
+    set_tests_properties(capi_message_read_mallocnesia PROPERTIES
+        LABELS "capi;051;alloc_guard"
+        DEPENDS capi_message_read_test
+    )
+
+    # SC-003 dual gate — write path: mallocnesia LD_PRELOAD interception for the
+    # outbound set_*/commit accessors. The in-process marker test is in
+    # message_write_test.cpp (ZeroGlobalHeapSetCommitGuard).
+    add_test(
+        NAME capi_message_write_mallocnesia
+        COMMAND
+            python3 "${CMAKE_SOURCE_DIR}/tools/check_alloc.py"
+            "--binary" "$<TARGET_FILE:capi_message_write_test>"
+    )
+    set_tests_properties(capi_message_write_mallocnesia PROPERTIES
+        LABELS "capi;051;alloc_guard"
+        DEPENDS capi_message_write_test
+    )
 endif()

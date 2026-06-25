@@ -11,27 +11,29 @@
 // Design anchors:
 //   D-5  (dictionary access via fixpp_session::dict_)
 //   D-9  (lazy weak_ptr<SessionLiveness> tombstone)
-//   E-3  (OutboundAccumulator — structurally heap-owned by shell for C-ABI path;
-//          see ESCALATION note below re E-3/INV-5 deviation)
+//   E-3  (OutboundAccumulator — shell-owned, in a per-message monotonic arena;
+//          E-3/INV-5 reconciled — see note below)
 //   E-9  (liveness token / tombstone discipline)
 //   INV-3 (framing tag rejection at set-time)
 //   Codex #4 (commit->send->destroy safety via fut.get() + deep-copy)
-//   [const §VIII.5] (zero alloc between parse and fromApp — not applicable here)
+//   SC-003 / FR-006 (zero-global-heap set_*/commit via the per-message arena)
 //   [2i §5.2] (steady-state thunk: abort on exception escape)
 //
-// ESCALATION (not yet ratified by orchestrator): data-model E-3/INV-5 says the
-// OutboundAccumulator lives "in the session arena (no global-heap)".  The C-ABI
-// path has no way to set a custom session resource (EngineConfig::
-// default_session_resource defaults to get_default_resource() == new_delete_
-// resource(); the fixpp_engine_config_t builder exposes no override).  Therefore
-// "session arena" == new_delete for C-ABI, and the heap-owned accumulator is
-// observably spec-equivalent.  Shell-owns-and-deletes is also REQUIRED for safe
-// destroy ordering (arena-owned model would UAF or leak without wholesale reclaim).
-// Orchestrator: please ratify or correct E-3/INV-5 for the C-ABI context.
+// E-3/INV-5 RECONCILED (ratified): Session::session_arena() does not exist for the
+// C-ABI path (the plan's session.hpp:189 was an unreliable claim) and the engine's
+// default_session_resource is new_delete_resource().  The outbound fixpp_msg shell
+// therefore owns a PER-MESSAGE std::pmr::monotonic_buffer_resource
+// (fixpp_msg::arena_resource_, seeded >= frame-cap at create_outbound,
+// construction-time); the accumulator + committed buffer carve from it → the
+// steady-state set_*/commit path is ZERO-GLOBAL-HEAP (SC-003 dual gate). Shell-owned
+// ⇒ session close cannot free the accumulator (no session-arena UAF was ever
+// possible), so the E-9 token is the FR-009a semantic validity gate, not UAF
+// prevention. Bundle updated: data-model E-1/E-3/E-9 + contracts/message-write.md.
 //
-// The clone implementation (fixpp_msg_clone) produces an INBOUND-flavoured handle
-// with its own heap-allocated buffer (unique_ptr<byte[]>) and a MessageView over it.
-// The clone is session-independent (no liveness token), THREAD_SAFE for reads.
+// The clone (fixpp_msg_clone) produces an INBOUND-flavoured handle with its own
+// deep-copied frame buffer (unique_ptr<byte[]>) + a per-message monotonic arena (for
+// the MessageView OffsetTable + any group cursors), a MessageView over the copy, and
+// no liveness token. Reads (incl. get_group) are THREAD_SAFE and leak-free.
 
 #include "fix/c_api/message.h"
 #include "fix/c_api/decimal.h"
@@ -414,8 +416,22 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_clone(const fixpp_msg_t* src,
 
         auto maybe_fv = mk_fv(owned_frame.get(), frame_len);
 
-        // PMR backing for the MessageView OffsetTable internals.
-        auto* clone_mr = std::pmr::new_delete_resource();
+        // Allocate the clone shell first so we can seed its per-clone arena
+        // BEFORE building the MessageView.  The arena (arena_buf_ / arena_resource_)
+        // backs the clone's OffsetTable PMR vectors AND any group cursor shells
+        // allocated via fixpp_msg_get_group on the clone.  Seeded to frame_len +
+        // 4096 bytes: OffsetTable entries are proportional to the frame size; the
+        // extra 4096 gives headroom for group_slices + cursor shells.  Upstream =
+        // new_delete (graceful degrade if arena is exhausted, never null).
+        // Destruction order: fixpp_msg_destroy resets owned_view_ (line ~338) BEFORE
+        // arena_resource_ (line ~350), so MessageView destructs into a live arena.
+        auto* clone = new fixpp_msg{};
+        constexpr std::size_t kCursorHeadroom = 4096;
+        std::size_t clone_arena_size = frame_len + kCursorHeadroom;
+        clone->arena_buf_ = std::make_unique<std::byte[]>(clone_arena_size);
+        clone->arena_resource_ = std::make_unique<std::pmr::monotonic_buffer_resource>(
+            clone->arena_buf_.get(), clone_arena_size, std::pmr::new_delete_resource());
+        auto* clone_mr = clone->arena_resource_.get();
 
         // Build the owned dict-free MessageView<Index> over the cloned bytes.
         fixpp::wire::frame_view fv =
@@ -423,8 +439,6 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_clone(const fixpp_msg_t* src,
         auto clone_view =
             std::make_unique<fixpp::wire::MessageView<fixpp::wire::access_mode::Index>>(fv, clone_mr);
 
-        // Allocate the clone shell on the heap.
-        auto* clone = new fixpp_msg{};
         clone->tag_ = FIXPP_HANDLE_TAG_MSG;
         clone->flavour = FixppMsgFlavour::inbound;  // reads via view (get_* API)
         clone->view = clone_view.get();              // points to the owned view

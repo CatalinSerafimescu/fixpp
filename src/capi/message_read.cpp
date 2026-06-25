@@ -335,37 +335,15 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_get_group(const fixpp_msg_t* msg, uint1
         return FIXPP_ERR_TYPE_MISMATCH;
     }
 
-    // Allocate the fixpp_group shell into the message's parse arena so the
-    // returned pointer outlives this stack frame.
-    // view->mr_ is private; use the internal handle to retrieve the arena.
-    // We instead allocate with the inbound handle's arena by casting back.
-    // The arena on the fixpp_msg is the parent's parse arena (the MessageView
-    // was built with it). We access it via the view's parent mr_ indirectly:
-    // store a fixpp_group in a thread_local stack (valid for the dispatch window).
-    //
-    // Simpler: since fixpp_group is non-owning and the slices span into the
-    // offsets' arena which lives with the MessageView, we can store the
-    // fixpp_group in a thread_local or in a local static. But those are not
-    // safe across concurrent calls.
-    //
-    // The cleanest approach: the group cursor's DATA is a small POD struct that
-    // we can place as a subobject of the fixpp_msg itself or in the caller's
-    // arena. Since we don't have easy arena access from here (mr_ is private),
-    // we allocate from the global heap (one allocation per get_group call is
-    // acceptable in this dispatch window; it's inbound-only, not on the hot parse
-    // path). The SC-003 guard is on the steady-state PARSE path, not on get_group.
-    //
-    // NOTE: The SC-003 alloc guard (T005) measures the scalar get_string/get_int
-    // hot path, NOT get_group (which involves a new allocation per call by design).
-    // This is consistent with the spec ("zero global-heap on the READ path" refers
-    // to field reads, not group cursor materialization).
-    //
-    // We allocate one fixpp_group per get_group call; it is NOT freed (arena
-    // discipline: leaked in the dispatch window, freed when the engine's
-    // per-message arena is reset). For inbound, the dispatch window is short.
-    // For a truly zero-allocation path, a pre-allocated slot in the fixpp_msg
-    // could be used; deferred to a future optimization (not mandated by SC-003).
-    auto* grp = new fixpp_group{};
+    // Allocate the fixpp_group cursor shell from the parse arena backing the
+    // OffsetTable (the same per-message PMR resource that owns the group_slices
+    // the cursor references).  The arena has dispatch-window lifetime and is
+    // reclaimed wholesale when it resets or destructs, so the cursor is
+    // automatically reclaimed — zero global-heap (FR-002 / SC-003) and no
+    // explicit free needed.  [D5 deviation: OffsetTable::resource() exposes the
+    // backing mr; deviation is recorded in .specify/2b-wire.md.]
+    auto* arena = offsets.resource();
+    auto* grp = std::pmr::polymorphic_allocator<fixpp_group>(arena).new_object<fixpp_group>();
     grp->slices      = slices;
     grp->parent_view = view;
     grp->arena       = nullptr;  // not needed for scalar reads
@@ -550,7 +528,11 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_group_get_nested_group(const fixpp_group_t*
     auto count_sv = scan_slice_for_tag(*sl, nested_tag);
     if (!count_sv) return FIXPP_ERR_TAG_NOT_FOUND;
 
-    auto* nested_grp = new fixpp_group{};
+    // Allocate the nested cursor from the parent view's parse arena (same
+    // dispatch-window arena as the parent group's slices).  Zero global-heap,
+    // reclaimed wholesale when the arena resets.  [D5 / FR-002 / SC-003]
+    auto* nested_arena = parent_grp->parent_view->offsets().resource();
+    auto* nested_grp = std::pmr::polymorphic_allocator<fixpp_group>(nested_arena).new_object<fixpp_group>();
     nested_grp->slices      = nested_slices;
     nested_grp->parent_view = parent_grp->parent_view;
     nested_grp->arena       = nullptr;

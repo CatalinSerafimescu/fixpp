@@ -131,6 +131,16 @@ public:
     [[nodiscard]] std::span<group_slice const> group_slices(std::uint16_t no_tag) const noexcept
         [[clang::lifetimebound]];
 
+    // [D5 deviation] Cross-layer getter: returns the memory_resource backing this
+    // table's arena (the per-message PMR resource captured at construction time).
+    // Used by the capi layer (fixpp_msg_get_group / fixpp_group_get_nested_group)
+    // to allocate group cursor shells from the same dispatch-window arena as the
+    // group_slices they reference, satisfying FR-002 / SC-003 (zero-global-heap
+    // read path) — cursor reclaimed wholesale when the arena resets or destructs.
+    [[nodiscard]] std::pmr::memory_resource* resource() const noexcept {
+        return entries_.get_allocator().resource();
+    }
+
 private:
     [[nodiscard]] static std::size_t overlay_cap_for(std::size_t n) noexcept;
     void build(frame_view const& frame) noexcept;  // shared build impl (both ctors)

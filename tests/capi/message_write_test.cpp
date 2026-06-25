@@ -46,6 +46,8 @@
 #include "fixpp/dict/dictionary.hpp"
 #include "fixpp/dict/xml_loader.hpp"
 
+#include "support/alloc_guard_markers.hpp"
+
 using namespace std::chrono_literals;
 using namespace fixpp::capi_test;
 
@@ -936,4 +938,137 @@ TEST(MessageWrite, SC001_CreateOutboundRoundTripPeerReceivesAppMsg) {
     fixpp_session_close(acc_sess);
     fixpp_engine_destroy(init_eng);
     fixpp_engine_destroy(acc_eng);
+}
+
+// SC-003 alloc guard: the write path (set_string/set_int/set_double/set_decimal/commit)
+// must not allocate on the global heap during the steady-state hot loop.
+//
+// Design:
+//   - Uses the richer dict (NewOrderSingle "D") so set_double/set_decimal target a
+//     Float-typed field (tag 38, OrderQty = QTY); set_string/set_int target STRING
+//     fields (tags 11/55, ClOrdID/Symbol). All are declared in the "D" grammar.
+//   - Session is OPENED but NOT STARTED: no worker threads exist, so the marker
+//     thread is the only allocating thread — mallocnesia's MAX_ALLOCS=0 is
+//     deterministic and cannot be tripped by idle io_context workers.
+//   - fixpp_msg_create_outbound seeds the per-message arena (construction-time
+//     alloc, allowed by FR-020). Done OUTSIDE the guard window.
+//   - Warm-up on a throwaway msg OUTSIDE the window to prime any lazy-init caches
+//     (e.g., dict classification, to_chars internal tables).
+//   - SINGLE PASS inside the window (not 1000×): the per-message arena is a
+//     monotonic_buffer_resource that never frees; repeated set_*/commit on ONE msg
+//     would exhaust the 16 KiB and spill to global new — a false trip unrelated to
+//     the hot path. One pass exercises each steady-state path exactly once.
+//   - Return codes are captured to locals INSIDE the window; gtest assertions run
+//     AFTER alloc_guard_end (gtest success-path machinery may allocate).
+//   - fixpp_msg_destroy is OUTSIDE the window (tombstone push to s_dead_msg_shells
+//     touches the global heap).
+//
+// Binding gate = capi_message_write_mallocnesia ctest entry (LD_PRELOAD interception);
+// without the preload the markers no-op and the test validates correctness only
+// ([[feedback_tracking_pmr_resource_false_pass]]).
+//
+// Anchors: spec.md SC-003; research D-5/D-9/E-3/E-9; contracts/message-write.md FR-020.
+TEST(MessageWrite, ZeroGlobalHeapSetCommitGuard) {
+    // Engine open (not started) — no worker threads.
+    fixpp_engine_t* eng = nullptr;
+    ASSERT_EQ(make_engine(&eng), FIXPP_ERR_OK);
+
+    fixpp_session_config_t* sc =
+        make_session_cfg_app_dict("FIXSRV", "FIXCLI", FIXPP_ROLE_ACCEPTOR);
+    set_loopback_endpoint(sc, "127.0.0.1", 0);
+    fixpp_session_t* sess = nullptr;
+    ASSERT_EQ(fixpp_session_open(eng, sc, &sess), FIXPP_ERR_OK);
+    // NOTE: fixpp_engine_start is intentionally NOT called. The session is valid
+    // (valid flag set during session_open; engine_.has_value() set during engine_create),
+    // so fixpp_msg_create_outbound succeeds. Omitting start keeps this single-threaded.
+
+    // ── Warm-up pass (OUTSIDE the guard window) ───────────────────────────────
+    // Create a throwaway msg on msg_type "D" and exercise each setter + commit once
+    // to prime any first-call lazy caches (dict field classification, to_chars, etc.).
+    {
+        fixpp_msg_t* warmup = nullptr;
+        ASSERT_EQ(fixpp_msg_create_outbound(sess, "D", 1, &warmup), FIXPP_ERR_OK);
+        ASSERT_NE(warmup, nullptr);
+
+        (void)fixpp_msg_set_string(warmup, 11, "WU_STR", 6);   // STRING field
+        const uint8_t wu_bytes[] = {'W', 'U'};
+        (void)fixpp_msg_set_bytes(warmup, 58, wu_bytes, sizeof(wu_bytes)); // type-agnostic
+        (void)fixpp_msg_set_int(warmup, 55, 999);               // STRING field, int as ASCII
+        (void)fixpp_msg_set_double(warmup, 38, 1.5);            // Float (QTY) field
+        fixpp_decimal_t wu_dec{};
+        wu_dec.mantissa = 250;
+        wu_dec.exponent = -2;
+        (void)fixpp_msg_set_decimal(warmup, 38, wu_dec);        // Float (QTY) field
+        (void)fixpp_msg_remove_tag(warmup, 55);                 // PMR-vector erase warm-up
+        (void)fixpp_msg_set_string(warmup, 55, "WU_RESTR", 8); // re-set after remove
+
+        const uint8_t* wup = nullptr;
+        size_t wul = 0;
+        (void)fixpp_msg_commit(warmup, &wup, &wul);
+
+        EXPECT_EQ(fixpp_msg_destroy(warmup), FIXPP_ERR_OK);
+    }
+
+    // ── Fresh msg for the guarded window (OUTSIDE the window) ─────────────────
+    // Seeding the per-message 16 KiB arena is a construction-time alloc (FR-020).
+    // Done here so the window sees ONLY the steady-state carve-from-arena path.
+    fixpp_msg_t* msg = nullptr;
+    ASSERT_EQ(fixpp_msg_create_outbound(sess, "D", 1, &msg), FIXPP_ERR_OK);
+    ASSERT_NE(msg, nullptr);
+
+    // ── Guard window — single pass, return codes captured to locals ────────────
+    //
+    // Covers ALL setters (SC-003: "every setter"):
+    //   set_string, set_bytes (type-agnostic, skips dict check), set_int,
+    //   set_double, set_decimal, remove_tag, commit.
+    //
+    // set_bytes: tag 58 (Text, STRING) — set_bytes bypasses dict type check,
+    //   so it works on any non-framing tag; tag 58 is declared for "D" in the
+    //   richer dict.
+    // remove_tag: remove tag 11 after setting it (idempotent erase from PMR
+    //   vector; no global heap).  Then re-set tag 11 so commit has it.
+    fixpp_error_t rc_str     = FIXPP_ERR_OK;
+    fixpp_error_t rc_bytes   = FIXPP_ERR_OK;
+    fixpp_error_t rc_int     = FIXPP_ERR_OK;
+    fixpp_error_t rc_dbl     = FIXPP_ERR_OK;
+    fixpp_error_t rc_dec     = FIXPP_ERR_OK;
+    fixpp_error_t rc_remove  = FIXPP_ERR_OK;
+    fixpp_error_t rc_restr   = FIXPP_ERR_OK;  // re-set after remove
+    fixpp_error_t rc_commit  = FIXPP_ERR_OK;
+    const uint8_t* payload   = nullptr;
+    size_t payload_len       = 0;
+    fixpp_decimal_t dec{};
+    dec.mantissa = 100;
+    dec.exponent = 0;
+    const uint8_t kBytesPayload[] = {'G', 'U', 'A', 'R', 'D'};
+
+    if (alloc_guard_start) alloc_guard_start();
+
+    rc_str    = fixpp_msg_set_string(msg, 11, "GUARD_STR", 9);         // STRING field (ClOrdID)
+    rc_bytes  = fixpp_msg_set_bytes(msg, 58,                           // TEXT field, type-agnostic
+                                    kBytesPayload, sizeof(kBytesPayload));
+    rc_int    = fixpp_msg_set_int(msg, 55, 42);                        // STRING field (Symbol)
+    rc_dbl    = fixpp_msg_set_double(msg, 38, 2.5);                    // Float/QTY field
+    rc_dec    = fixpp_msg_set_decimal(msg, 38, dec);                   // Float/QTY (overwrite)
+    rc_remove = fixpp_msg_remove_tag(msg, 11);                         // PMR-vector erase
+    rc_restr  = fixpp_msg_set_string(msg, 11, "GUARD_RESTR", 11);     // re-set after remove
+    rc_commit = fixpp_msg_commit(msg, &payload, &payload_len);
+
+    if (alloc_guard_end) alloc_guard_end();  // exits(1) under mallocnesia if any global alloc fired
+
+    // ── Assert results AFTER the window ───────────────────────────────────────
+    EXPECT_EQ(rc_str,    FIXPP_ERR_OK) << "set_string(tag 11, STRING field) failed";
+    EXPECT_EQ(rc_bytes,  FIXPP_ERR_OK) << "set_bytes(tag 58, type-agnostic) failed";
+    EXPECT_EQ(rc_int,    FIXPP_ERR_OK) << "set_int(tag 55, STRING field) failed";
+    EXPECT_EQ(rc_dbl,    FIXPP_ERR_OK) << "set_double(tag 38, Float/QTY field) failed";
+    EXPECT_EQ(rc_dec,    FIXPP_ERR_OK) << "set_decimal(tag 38, Float/QTY field) failed";
+    EXPECT_EQ(rc_remove, FIXPP_ERR_OK) << "remove_tag(tag 11) failed";
+    EXPECT_EQ(rc_restr,  FIXPP_ERR_OK) << "re-set_string(tag 11) after remove failed";
+    EXPECT_EQ(rc_commit, FIXPP_ERR_OK) << "commit failed";
+    EXPECT_NE(payload, nullptr) << "committed payload must not be null";
+    EXPECT_GT(payload_len, 0u) << "committed payload must be non-empty";
+
+    // ── Cleanup OUTSIDE the window ─────────────────────────────────────────────
+    EXPECT_EQ(fixpp_msg_destroy(msg), FIXPP_ERR_OK);
+    fixpp_engine_destroy(eng);
 }
