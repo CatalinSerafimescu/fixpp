@@ -56,7 +56,8 @@ extern "C" {
 /** Inbound repeating-group read cursor (CA-010-read).
  *  Aliased into the parent message's wire buffer — zero-copy, zero-alloc.
  *  NON-owning: do NOT pass to any destroy function.
- *  Lifetime: bounded by the enclosing fixpp_msg_t dispatch window. */
+ *  Lifetime: handle-flavour dependent — bounded by the enclosing fixpp_msg_t's
+ *  inbound/toApp dispatch window, or (for a detached clone) until fixpp_msg_destroy. */
 typedef struct fixpp_group fixpp_group_t;
 
 /** Outbound repeating-group builder (CA-010-write).
@@ -73,8 +74,9 @@ typedef struct fixpp_entry fixpp_entry_t;
 /* ── fixpp_resolved_msg_version_t — resolved wire message version (CA-008) ──
  *
  * Returned by fixpp_msg_version(). The pointers alias the wire buffer
- * (flyweight rule [2b §6.4]) — no copy, no free. Lifetime: bounded by the
- * parent fixpp_msg_t dispatch window.
+ * (flyweight rule [2b §6.4]) — no copy, no free. Lifetime is handle-flavour
+ * dependent — bounded by the parent fixpp_msg_t's inbound/toApp dispatch window,
+ * or (for a detached clone) until fixpp_msg_destroy.
  *
  * begin_string: tag 8 (BeginString) value, e.g. "FIX.4.4" or "FIXT.1.1".
  *               Always present in a valid inbound message.
@@ -162,7 +164,8 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_has_tag(const fixpp_msg_t* msg, uint16_
                                            bool* present_out);
 
 /** Return the resolved wire message version (tag 8 + optional tag 1137).
- *  All fields alias the wire buffer; lifetime bounded by the dispatch window.
+ *  All fields alias the wire buffer; lifetime per the handle-flavour note above
+ *  (inbound/toApp dispatch window, or until fixpp_msg_destroy for a clone).
  *  Always succeeds for a valid inbound message (tag 8 is a required header field).
  *
  *  Reentrancy: requires-session-lock
@@ -186,8 +189,10 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_get_msg_type(const fixpp_msg_t* msg,
  * instance slice for the target tag via field_iterator. Nested groups recurse
  * on the sub-slice.
  *
- * All cursors (fixpp_group_t) alias the parent message's parse arena; lifetime
- * bounded by the parent fixpp_msg_t dispatch window. NON-owning — do NOT destroy.
+ * All cursors (fixpp_group_t) alias the parent message's parse arena; lifetime is
+ * handle-flavour dependent — bounded by the parent fixpp_msg_t's inbound/toApp
+ * dispatch window, or (for a detached clone) until fixpp_msg_destroy. NON-owning —
+ * do NOT destroy.
  *
  * Error codes:
  *   FIXPP_ERR_TAG_NOT_FOUND      — group or field absent
