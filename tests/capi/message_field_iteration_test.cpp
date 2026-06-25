@@ -118,6 +118,20 @@ TEST(MessageFieldIteration, DestroyedHandleReturnsInvalidHandle) {
     EXPECT_EQ(fixpp_msg_field_at(p, 0, &field), FIXPP_ERR_INVALID_HANDLE);
 }
 
+// A MSG-tagged but view-null handle (a not-yet-resolved / malformed inbound
+// shell) → INVALID_HANDLE. Covers check_msg_for_field_iter's view==nullptr arm
+// distinctly from the tag and NULL-handle guards.
+TEST(MessageFieldIteration, MsgTagButNullViewReturnsInvalidHandle) {
+    fixpp_msg shell{};  // default member-init: tag_ == FIXPP_HANDLE_TAG_MSG, view == nullptr
+    const auto* p = reinterpret_cast<const fixpp_msg_t*>(&shell);
+
+    size_t count = 0;
+    EXPECT_EQ(fixpp_msg_field_count(p, &count), FIXPP_ERR_INVALID_HANDLE);
+
+    fixpp_msg_field_t field{};
+    EXPECT_EQ(fixpp_msg_field_at(p, 0, &field), FIXPP_ERR_INVALID_HANDLE);
+}
+
 // Discriminating type-mismatch witness: ENGINE-tagged handle with a non-null view.
 // A DEAD-only guard would not fire here (ENGINE != DEAD, view != nullptr → proceeds).
 // The positive tag check (tag_ != FIXPP_HANDLE_TAG_MSG → INVALID) is the only guard
