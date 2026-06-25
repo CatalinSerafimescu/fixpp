@@ -19,6 +19,7 @@
 #include <atomic>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <utility>
 #include <vector>
 
@@ -119,7 +120,14 @@ fixpp::core::expected_t<void> CapiApplication::toApp(
             stderr);
         std::abort();
     }
-    switch (verdict) {
+    // A misbehaving C callback may return an out-of-range value (a DEFINED misuse
+    // path, FR-023). A typed enum LOAD of an out-of-range value is UB
+    // (-fsanitize=enum), so read the raw bytes and switch on the integer instead;
+    // an out-of-range value falls through to the ERROR arm below.
+    int raw = 0;
+    static_assert(sizeof(verdict) <= sizeof(raw), "verdict wider than int");
+    std::memcpy(&raw, &verdict, sizeof(verdict));
+    switch (raw) {
         case FIXPP_TOAPP_SEND:
             return {};
         case FIXPP_TOAPP_VETO:
