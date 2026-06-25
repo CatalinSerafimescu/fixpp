@@ -1846,3 +1846,34 @@ TEST(MessageWriteGroup, EntryGroupBeginNonGroupTagTypeMismatch) {
 
     EXPECT_EQ(fixpp_msg_group_end(f.msg, gb), FIXPP_ERR_OK);
 }
+
+// ── Gate B r2 / P2-1: scalar setters must not collide with a repeating group ──
+
+TEST(MessageWriteGroup, ScalarSetterOnGroupCountTagRejected) {
+    // set_*/set_bytes on a dict group-count tag (NoAllocs=78) → TYPE_MISMATCH:
+    // groups are built via the builder, never a scalar setter (NumInGroup is
+    // int-category, so the type check alone would let set_int through).
+    GroupFixture f;
+    ASSERT_NE(f.msg, nullptr);
+    EXPECT_EQ(fixpp_msg_set_int(f.msg, 78, 1), FIXPP_ERR_TYPE_MISMATCH);
+    EXPECT_EQ(fixpp_msg_set_string(f.msg, 78, "1", 1), FIXPP_ERR_TYPE_MISMATCH);
+    const uint8_t one[] = {'1'};
+    EXPECT_EQ(fixpp_msg_set_bytes(f.msg, 78, one, 1), FIXPP_ERR_TYPE_MISMATCH);
+}
+
+TEST(MessageWriteGroup, ScalarSetterCannotClobberNestedGroup) {
+    // After entry_group_begin builds a nested 539 group on entry e0, a scalar
+    // entry_set on 539 must NOT flip it to is_group=false (which would bypass
+    // validate_group_grammar) → TYPE_MISMATCH.
+    GroupFixture f;
+    ASSERT_NE(f.msg, nullptr);
+    fixpp_group_builder_t* gb = nullptr;
+    ASSERT_EQ(fixpp_msg_group_begin(f.msg, 78, &gb), FIXPP_ERR_OK);
+    fixpp_entry_t* e0 = nullptr;
+    ASSERT_EQ(fixpp_group_builder_add_entry(gb, &e0), FIXPP_ERR_OK);
+    fixpp_group_builder_t* nb = nullptr;
+    ASSERT_EQ(fixpp_entry_group_begin(e0, 539, &nb), FIXPP_ERR_OK);
+    EXPECT_EQ(fixpp_entry_set_string(e0, 539, "x", 1), FIXPP_ERR_TYPE_MISMATCH);
+    ASSERT_EQ(fixpp_msg_group_end(f.msg, nb), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_msg_group_end(f.msg, gb), FIXPP_ERR_OK);
+}

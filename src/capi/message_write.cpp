@@ -143,6 +143,22 @@ static bool is_float_category(fixpp::dict::field_data_type t) noexcept {
            t == T::Percentage || t == T::Float;
 }
 
+// P2-1 (group/scalar type-confusion): a scalar write to `tag` collides with a
+// repeating group when EITHER (a) the dict marks `tag` as a group-count (NoXxx)
+// tag — groups are built via the group builder, never a scalar setter (NumInGroup
+// is int-category, so the type check alone would let `set_int` through) — OR (b) an
+// existing entry for `tag` is already a group (a scalar must not clobber it to
+// is_group=false, which would bypass validate_group_grammar). Either ⇒ TYPE_MISMATCH.
+static bool is_group_collision(const fixpp_msg* h,
+                               const std::pmr::vector<AccumulatorEntry>& entries,
+                               uint16_t tag) noexcept {
+    if (h->dict_ && h->dict_->group_first_field(tag) != 0) return true;
+    for (const auto& e : entries) {
+        if (e.tag == tag && e.is_group) return true;
+    }
+    return false;
+}
+
 // Validate tag against the dictionary for a given msg_type and setter flavour.
 // Returns:
 //   FIXPP_ERR_MSG_FRAMING_TAG_FORBIDDEN  — framing tag (INV-3)
@@ -166,6 +182,9 @@ static fixpp_error_t check_dict(const fixpp_msg* h, uint16_t tag,
     if (fr.rule == fixpp::dict::field_presence::NotDeclared) {
         return FIXPP_ERR_DICT_CONFIG;
     }
+
+    // P2-1: reject a scalar write that would collide with a repeating group.
+    if (is_group_collision(h, acc.entries, tag)) return FIXPP_ERR_TYPE_MISMATCH;
 
     // FR-006: type-category check for non-String setters.
     if (flavour == SetterFlavour::Int && !is_int_category(fr.type)) {
@@ -458,6 +477,8 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_set_bytes(fixpp_msg_t* msg, uint16_t ta
     if (is_framing_tag(tag)) return FIXPP_ERR_MSG_FRAMING_TAG_FORBIDDEN;
 
     auto& acc = *h->accumulator;
+    // P2-1: even the type-agnostic set_bytes must not collide with a group.
+    if (is_group_collision(h, acc.entries, tag)) return FIXPP_ERR_TYPE_MISMATCH;
     auto& entry = upsert_entry(acc.entries, acc.arena_, tag);
     const auto* bdata = reinterpret_cast<const std::byte*>(bytes);
     entry.value_bytes.assign(bdata, bdata + len);
@@ -772,6 +793,9 @@ static fixpp_error_t entry_set_bytes_impl(fixpp_entry_t* entry, uint16_t tag,
     if (is_framing_tag(tag)) return FIXPP_ERR_MSG_FRAMING_TAG_FORBIDDEN;
     auto* arena = e->builder->msg->accumulator->arena_;
     GroupInstance* inst = resolve_instance(e);
+    // P2-1: a nested entry setter must not collide with a (nested) group either —
+    // group-count tag, or clobbering an existing nested group node.
+    if (is_group_collision(e->builder->msg, inst->fields, tag)) return FIXPP_ERR_TYPE_MISMATCH;
     auto& fe = upsert_entry(inst->fields, arena, tag);
     fe.is_group = false;
     fe.value_bytes.assign(data, data + len);
