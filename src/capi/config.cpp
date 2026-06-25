@@ -15,6 +15,8 @@
 #include "fix/c_api/session.h"
 
 #include <chrono>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
 #include "capi_internal.hpp"
@@ -190,10 +192,20 @@ fixpp_error_t fixpp_session_config_set_dictionary(fixpp_session_config_t* cfg, f
     if (cfg == nullptr) {
         return FIXPP_ERR_NULL_HANDLE;
     }
-    if (dict == nullptr || dict->dict == nullptr) {
-        return FIXPP_ERR_CAPI_CONFIG_INVALID;
+    if (dict == nullptr) {
+        return FIXPP_ERR_CAPI_CONFIG_INVALID;  // null outer handle — existing mapping preserved
     }
-    cfg->cfg.dictionary = dict->dict;  // thin pass-through (creation is Feature C / L-050-1)
+    // Positive tag gate ([2i §4.2.2]): destroyed (DEAD) or wrong-type handles return
+    // INVALID_HANDLE BEFORE the shared_ptr member is read.  A DEAD tag means dict was
+    // already destroyed; any non-DICT tag means a mismatched handle was cast.
+    const auto* h = reinterpret_cast<const fixpp_dict*>(dict);
+    if (h->tag_ != FIXPP_HANDLE_TAG_DICT) {
+        return FIXPP_ERR_INVALID_HANDLE;
+    }
+    if (h->dict == nullptr) {
+        return FIXPP_ERR_CAPI_CONFIG_INVALID;  // empty dict wrapper
+    }
+    cfg->cfg.dictionary = h->dict;  // thin pass-through (creation is Feature C / L-050-1)
     return FIXPP_ERR_OK;
 }
 
@@ -241,6 +253,9 @@ fixpp_error_t fixpp_session_config_set_tcp_endpoint(fixpp_session_config_t* cfg,
     if (host[0] == '\0') {
         return FIXPP_ERR_CAPI_CONFIG_INVALID;  // empty host (unusable)
     }
+    // Steady-state thunk (spec.md FR-011): an escaping exception is an invariant
+    // violation → fatal-log + abort, never translated.  Mirrors
+    // fixpp_session_acceptor_bound_endpoint in session.cpp.
     try {
         // Mirror the L-050-5 seam (capi_loopback_support.hpp:67-68), now public:
         // set the reconnect_endpoint so the engine's auto-derived plaintext factory
@@ -249,7 +264,11 @@ fixpp_error_t fixpp_session_config_set_tcp_endpoint(fixpp_session_config_t* cfg,
         cfg->cfg.reconnect_endpoint = fixpp::transport::Endpoint{host, port};
         cfg->cfg.transport_send = [](std::span<const std::byte>) {};
     } catch (...) {
-        return FIXPP_ERR_CAPI_CONFIG_INVALID;
+        std::fputs(
+            "fixpp C-ABI: fixpp_session_config_set_tcp_endpoint caught an escaping exception; "
+            "aborting (steady-state invariant violation, FR-011)\n",
+            stderr);
+        std::abort();
     }
     return FIXPP_ERR_OK;
 }

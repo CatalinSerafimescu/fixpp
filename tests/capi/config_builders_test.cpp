@@ -12,6 +12,7 @@
 
 #include <gtest/gtest.h>
 
+#include "fix/c_api/dict.h"    // fixpp_dict_destroy (F1 negative tests)
 #include "fix/c_api/engine.h"
 #include "fix/c_api/session.h"
 
@@ -161,6 +162,38 @@ TEST(CapiConfigBuilders, DestroyIsNullSafe) {
     fixpp_engine_config_destroy(nullptr);   // must not crash
     fixpp_session_config_destroy(nullptr);  // must not crash
     SUCCEED();
+}
+
+// ── F1 negative tests: fixpp_session_config_set_dictionary tag gate (gate-b/r1) ──
+
+// (a) A destroyed dict handle (tag_==DEAD, dict==null) must return INVALID_HANDLE,
+//     not CAPI_CONFIG_INVALID — the shell is retained by fixpp_dict_destroy so the
+//     pointer is still readable; only the positive tag check discriminates.
+TEST(CapiConfigBuilders, DictionaryRejectsDestroyedHandle) {
+    fixpp_session_config_t* cfg = nullptr;
+    ASSERT_EQ(fixpp_session_config_create(&cfg), FIXPP_ERR_OK);
+    // make_test_dict_handle() creates a live DICT-tagged handle; fixpp_dict_destroy
+    // tombstones it to DEAD and retains the shell so d is still a valid pointer.
+    fixpp_dict_t* d = make_test_dict_handle();
+    fixpp_dict_destroy(d);
+    // Pre-fix: dict->dict==nullptr → CAPI_CONFIG_INVALID (wrong code, wrong message).
+    // Post-fix: tag_==DEAD != DICT → INVALID_HANDLE.
+    EXPECT_EQ(fixpp_session_config_set_dictionary(cfg, d), FIXPP_ERR_INVALID_HANDLE);
+    fixpp_session_config_destroy(cfg);
+}
+
+// (b) An ENGINE-tagged shell cast as fixpp_dict_t* — the positive tag gate must fire
+//     before reading the dict shared_ptr.  Pre-fix: dict!=nullptr → proceeds to set
+//     cfg->cfg.dictionary → FIXPP_ERR_OK (function silently accepts garbage).
+//     Post-fix: tag_!=DICT → INVALID_HANDLE without reading the shared_ptr.
+TEST(CapiConfigBuilders, DictionaryRejectsTypeMismatchedHandle) {
+    fixpp_session_config_t* cfg = nullptr;
+    ASSERT_EQ(fixpp_session_config_create(&cfg), FIXPP_ERR_OK);
+    fixpp_dict_t* h = make_test_dict_handle();          // real DICT handle, dict!=null
+    reinterpret_cast<fixpp_dict*>(h)->tag_ = FIXPP_HANDLE_TAG_ENGINE;  // corrupt tag
+    EXPECT_EQ(fixpp_session_config_set_dictionary(cfg, h), FIXPP_ERR_INVALID_HANDLE);
+    fixpp_dict_destroy(h);   // dict.reset() + DEAD tag + retain shell
+    fixpp_session_config_destroy(cfg);
 }
 
 }  // namespace
