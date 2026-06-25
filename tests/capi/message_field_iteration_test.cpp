@@ -376,23 +376,39 @@ TEST(MessageFieldIteration, ZeroGlobalHeapAllocGuard) {
 
 // ── SC-003 clone cross-strand: field iteration on a clone is THREAD_SAFE ──────
 //
-// Clone the handle, then iterate its fields from a separate thread (simulating
-// a cross-strand read).  field_count and field_at on clone handles do not touch
-// any session-owned resource and are safe to call concurrently.
+// Discriminating witness (gate-b/r1 F5): the clone is created inside a nested
+// scope that holds the source buf/arena/MessageView/InboundHandle.  That scope
+// is exited (destroying ALL source objects) BEFORE the clone is read on a
+// separate thread.  If the clone secretly aliases the source buffer or arena,
+// the iteration will produce a use-after-free under ASan or wrong data here.
+//
+// The FR-006/007 contract states a clone is self-contained (owns its deep-copied
+// frame bytes via owned_frame_ + its own owned_view_) and is valid after the
+// source dispatch window closes.  This topology proves that contract: the worker
+// thread reads the clone only after every source object is gone.
 TEST(MessageFieldIteration, CloneFieldIterationCrossThread) {
-    auto buf = make_raw_frame("35=D\x01" "49=SENDER\x01" "56=TARGET\x01");
-    auto fv = fixpp::wire::test::make_frame_view(buf);
-    ASSERT_TRUE(fv.has_value());
-    std::pmr::monotonic_buffer_resource arena;
-    MessageView<access_mode::Index> mv{*fv, &arena};
-
-    InboundHandle h;
-    h.msg.view = &mv;
-
-    // Clone the inbound handle (fixpp_msg_clone copies the frame and view).
     fixpp_msg_t* clone = nullptr;
-    ASSERT_EQ(fixpp_msg_clone(h.ptr(), &clone), FIXPP_ERR_OK);
-    ASSERT_NE(clone, nullptr);
+
+    // ── Nested scope: holds the source objects.  Clone is created here, then the
+    //    scope exits, destroying buf / arena / mv / h — all source backing.
+    {
+        auto buf = make_raw_frame("35=D\x01" "49=SENDER\x01" "56=TARGET\x01");
+        auto fv = fixpp::wire::test::make_frame_view(buf);
+        ASSERT_TRUE(fv.has_value());
+        std::pmr::monotonic_buffer_resource arena;
+        MessageView<access_mode::Index> mv{*fv, &arena};
+
+        InboundHandle h;
+        h.msg.view = &mv;
+
+        // Clone while source is live (clone deep-copies the frame bytes).
+        ASSERT_EQ(fixpp_msg_clone(h.ptr(), &clone), FIXPP_ERR_OK);
+        ASSERT_NE(clone, nullptr);
+    }
+    // ── Source scope has ended: buf / arena / mv / h are destroyed.
+    //    If clone->owned_frame_ aliases buf, the next access is a use-after-free
+    //    caught by ASan.  If clone->owned_view_ aliases mv, field offsets are
+    //    dangling and values will be wrong.
 
     // Iterate the clone's fields from a separate thread.
     size_t thread_count = 0;
@@ -404,7 +420,7 @@ TEST(MessageFieldIteration, CloneFieldIterationCrossThread) {
             fixpp_msg_field_t f{};
             EXPECT_EQ(fixpp_msg_field_at(clone, 0, &f), FIXPP_ERR_OK);
             thread_tag0 = f.tag;
-            // Capture the length too; value aliases the clone's owned frame.
+            // Capture the value; it must alias the clone's OWN owned_frame_, not buf.
             thread_tag0_val = std::string_view(reinterpret_cast<const char*>(f.value), f.len);
         }
     });
