@@ -340,8 +340,13 @@ struct GroupInstance {
 };
 
 // AccumulatorEntry: a single ordered entry — scalar or group.
+//
+// US4: a GROUP entry sets `is_group=true`, `tag = NoXXX` (the count field), and
+// fills `instances`; a SCALAR entry keeps `is_group=false`, `tag = field tag`,
+// `value_bytes = payload`. The commit serialiser discriminates on `is_group`.
 struct AccumulatorEntry {
-    std::uint16_t                   tag = 0;       // 0 == group; non-zero == scalar
+    std::uint16_t                   tag = 0;       // scalar: field tag; group: NoXXX count tag
+    bool                            is_group = false;  // US4: true ⇒ repeating group
     std::pmr::vector<std::byte>     value_bytes;   // scalar: serialised field bytes
     std::pmr::vector<GroupInstance> instances;     // group: repeating instances
 
@@ -355,20 +360,49 @@ struct AccumulatorEntry {
     AccumulatorEntry& operator=(const AccumulatorEntry&) = delete;
 };
 
+// US4 forward decl: the open-builder LIFO stack lives on the accumulator.
+struct fixpp_group_builder;
+
 // OutboundAccumulator: the arena-resident root of the outbound message tree.
 struct OutboundAccumulator {
-    std::pmr::memory_resource*         arena_;    // PMR resource for pmr::string/vector (new_delete for C-ABI)
+    std::pmr::memory_resource*         arena_;    // per-message monotonic arena (pmr::string/vector backing)
     std::pmr::string                   msg_type;  // 35= value (INV-1: non-empty)
     std::pmr::vector<AccumulatorEntry> entries;   // ordered field/group list
+    // US4: stack of currently-open group builders (LIFO close-order, E-4). Holds
+    // arena-allocated fixpp_group_builder*. group_end must close the top; commit
+    // requires this empty (open builder → INVALID_HANDLE, analyze C2).
+    std::pmr::vector<fixpp_group_builder*> open_builders;
 
     explicit OutboundAccumulator(std::pmr::memory_resource* mr)
-        : arena_(mr), msg_type(mr), entries(mr) {}
+        : arena_(mr), msg_type(mr), entries(mr), open_builders(mr) {}
 
     ~OutboundAccumulator() = default;
     OutboundAccumulator(OutboundAccumulator&&) = default;
     OutboundAccumulator& operator=(OutboundAccumulator&&) = default;
     OutboundAccumulator(const OutboundAccumulator&) = delete;
     OutboundAccumulator& operator=(const OutboundAccumulator&) = delete;
+};
+
+// ── Outbound group-build handles (CA-010-write, US4) ────────────────────────
+//
+// Both are ARENA-allocated (per-message monotonic arena) — NEVER raw `new` (the
+// US3 get_group cursor leak was raw new → ASan). They hold INDICES (not pointers)
+// into the accumulator's by-value vectors, re-resolved per call, so add_entry /
+// group_begin vector reallocations never dangle a held reference.
+struct fixpp_entry;
+
+struct fixpp_group_builder {
+    fixpp_msg*    msg    = nullptr;        // owning outbound shell (tag_/token validity)
+    fixpp_entry*  parent = nullptr;        // null ⇒ top-level group; else the entry this nests within
+    std::uint32_t group_field_index = 0;  // index of the group AccumulatorEntry — in
+                                          // accumulator->entries (top-level) or in the
+                                          // parent entry's instance.fields (nested)
+    bool          open   = true;          // false after fixpp_msg_group_end (invalidates it + its entries)
+};
+
+struct fixpp_entry {
+    fixpp_group_builder* builder = nullptr;  // owning builder (validity ⇒ builder->open)
+    std::uint32_t        instance_index = 0; // index into the builder's group's `instances`
 };
 
 // Session handle (E-2): NON-owning observer keyed by SessionId. Stores the

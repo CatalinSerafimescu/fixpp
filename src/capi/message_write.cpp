@@ -557,6 +557,79 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_set_decimal(fixpp_msg_t* msg, uint16_t 
     return FIXPP_ERR_OK;
 }
 
+// ── US4: recursive group serialisation + builder/entry resolution ─────────────
+
+// Recursive payload size: scalar "<tag>=<value>\x01"; group "<NoXXX>=<count>\x01"
+// then each instance's fields (recursive).
+static std::size_t compute_entries_size(const std::pmr::vector<AccumulatorEntry>& entries) {
+    std::size_t total = 0;
+    for (const auto& e : entries) {
+        if (e.is_group) {
+            char nb[8];
+            int nl = static_cast<int>(std::to_chars(nb, nb + sizeof(nb), e.tag).ptr - nb);
+            char cb[16];
+            int cl = static_cast<int>(
+                std::to_chars(cb, cb + sizeof(cb), e.instances.size()).ptr - cb);
+            total += static_cast<std::size_t>(nl) + 1 + static_cast<std::size_t>(cl) + 1;
+            for (const auto& inst : e.instances) total += compute_entries_size(inst.fields);
+        } else {
+            char tb[8];
+            int tl = static_cast<int>(std::to_chars(tb, tb + sizeof(tb), e.tag).ptr - tb);
+            total += static_cast<std::size_t>(tl) + 1 + e.value_bytes.size() + 1;
+        }
+    }
+    return total;
+}
+
+// Recursive serialise (INV-4: NoXXX=count then per-instance delimiter-first).
+static bool serialise_entries(std::byte* buf, std::size_t cap, std::size_t& pos,
+                              const std::pmr::vector<AccumulatorEntry>& entries) noexcept {
+    for (const auto& e : entries) {
+        if (e.is_group) {
+            char cb[16];
+            int cl = static_cast<int>(
+                std::to_chars(cb, cb + sizeof(cb), e.instances.size()).ptr - cb);
+            if (!append_field(buf, cap, pos, e.tag, reinterpret_cast<const std::byte*>(cb),
+                              static_cast<std::size_t>(cl)))
+                return false;
+            for (const auto& inst : e.instances)
+                if (!serialise_entries(buf, cap, pos, inst.fields)) return false;
+        } else {
+            if (!append_field(buf, cap, pos, e.tag, e.value_bytes.data(), e.value_bytes.size()))
+                return false;
+        }
+    }
+    return true;
+}
+
+// Re-resolve a builder's group AccumulatorEntry BY INDEX (stable under the
+// vector reallocations that add_entry / group_begin trigger).
+static AccumulatorEntry* resolve_group(fixpp_group_builder* b) noexcept {
+    if (b->parent == nullptr) {
+        return &b->msg->accumulator->entries[b->group_field_index];
+    }
+    AccumulatorEntry* pg = resolve_group(b->parent->builder);
+    GroupInstance& inst = pg->instances[b->parent->instance_index];
+    return &inst.fields[b->group_field_index];
+}
+
+static GroupInstance* resolve_instance(fixpp_entry* e) noexcept {
+    AccumulatorEntry* g = resolve_group(e->builder);
+    return &g->instances[e->instance_index];
+}
+
+// Validity: a builder is live ⇒ builder->open AND its owning outbound msg is live.
+static fixpp_error_t check_builder(fixpp_group_builder* b) noexcept {
+    if (b == nullptr) return FIXPP_ERR_NULL_HANDLE;
+    if (!b->open) return FIXPP_ERR_INVALID_HANDLE;
+    return check_outbound_msg(reinterpret_cast<fixpp_msg_t*>(b->msg));
+}
+
+static fixpp_error_t check_entry(fixpp_entry* e) noexcept {
+    if (e == nullptr) return FIXPP_ERR_NULL_HANDLE;
+    return check_builder(e->builder);
+}
+
 // ── fixpp_msg_remove_tag ──────────────────────────────────────────────────────
 FIXPP_API_EXPORT fixpp_error_t fixpp_msg_remove_tag(fixpp_msg_t* msg, uint16_t tag) {
     if (msg == nullptr) return FIXPP_ERR_NULL_HANDLE;
@@ -590,22 +663,17 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_commit(fixpp_msg_t* msg, const uint8_t*
     auto* h = reinterpret_cast<fixpp_msg*>(msg);
     const auto& acc = *h->accumulator;
 
-    // First pass: compute total payload size.
-    // Format: "35=<mt>\x01" + for each entry: "<tag>=<value>\x01"
+    // An open (unended) group builder ⇒ not a sealed, committable state (analyze C2).
+    if (!acc.open_builders.empty()) return FIXPP_ERR_INVALID_HANDLE;
+
+    // First pass: compute total payload size = "35=<mt>\x01" + entries (recursive,
+    // scalars + groups, US4).
     std::size_t total = 0;
     {
         std::string_view mt = acc.msg_type;
-        // "35=" + mt.size() + "\x01"
-        total += 3 + mt.size() + 1;
+        total += 3 + mt.size() + 1;  // "35=" + mt + "\x01"
     }
-    for (const auto& entry : acc.entries) {
-        if (entry.tag == 0) continue;  // group slot (CA-010-write, not yet in CA-009)
-        // "<tag>=" len + value len + "\x01"
-        char tagbuf[8];
-        int taglen =
-            static_cast<int>(std::to_chars(tagbuf, tagbuf + sizeof(tagbuf), entry.tag).ptr - tagbuf);
-        total += static_cast<std::size_t>(taglen) + 1 + entry.value_bytes.size() + 1;
-    }
+    total += compute_entries_size(acc.entries);
 
     if (total > kFrameCap) return FIXPP_ERR_WIRE_LIMIT_EXCEEDED;
 
@@ -630,15 +698,9 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_commit(fixpp_msg_t* msg, const uint8_t*
         buf[pos++] = static_cast<std::byte>('\x01');
     }
 
-    // Write each field entry.
-    for (const auto& entry : acc.entries) {
-        if (entry.tag == 0) continue;  // group slot
-        bool ok = append_field(buf, total, pos, entry.tag, entry.value_bytes.data(),
-                               entry.value_bytes.size());
-        if (!ok) {
-            // Should not happen since we pre-computed the size.
-            return FIXPP_ERR_WIRE_LIMIT_EXCEEDED;
-        }
+    // Write each entry (US4: scalars + groups, recursive).
+    if (!serialise_entries(buf, total, pos, acc.entries)) {
+        return FIXPP_ERR_WIRE_LIMIT_EXCEEDED;  // should not happen — size pre-computed
     }
 
     // Update the C-consumer pointer alias (buffer is arena-owned, not a unique_ptr).
@@ -647,6 +709,145 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_commit(fixpp_msg_t* msg, const uint8_t*
 
     *payload_out = reinterpret_cast<const uint8_t*>(buf);
     *len_out = pos;
+    return FIXPP_ERR_OK;
+}
+
+// ── CA-010-write group builder (US4 / T016) ───────────────────────────────────
+// Builders + entries are ARENA-allocated (per-message monotonic arena) — never raw
+// new — and hold INDICES re-resolved per call (stable under vector reallocation).
+
+FIXPP_API_EXPORT fixpp_error_t fixpp_msg_group_begin(fixpp_msg_t* msg, uint16_t group_tag,
+                                                fixpp_group_builder_t** builder_out) {
+    if (builder_out != nullptr) *builder_out = nullptr;
+    if (builder_out == nullptr) return FIXPP_ERR_NULL_HANDLE;
+    if (fixpp_error_t c = check_outbound_msg(msg); c != FIXPP_ERR_OK) return c;
+    auto* h = reinterpret_cast<fixpp_msg*>(msg);
+    if (is_framing_tag(group_tag)) return FIXPP_ERR_MSG_FRAMING_TAG_FORBIDDEN;
+    // group_tag must be a NumInGroup count tag (group_first_field == 0 ⇒ not a group).
+    if (h->dict_ && h->dict_->group_first_field(group_tag) == 0) return FIXPP_ERR_TYPE_MISMATCH;
+
+    auto& acc = *h->accumulator;
+    acc.entries.emplace_back(acc.arena_);
+    auto idx = static_cast<std::uint32_t>(acc.entries.size() - 1);
+    acc.entries.back().tag = group_tag;
+    acc.entries.back().is_group = true;
+
+    auto* b = std::pmr::polymorphic_allocator<fixpp_group_builder>(acc.arena_)
+                  .new_object<fixpp_group_builder>();
+    b->msg = h;
+    b->parent = nullptr;
+    b->group_field_index = idx;
+    b->open = true;
+    acc.open_builders.push_back(b);
+    *builder_out = reinterpret_cast<fixpp_group_builder_t*>(b);
+    return FIXPP_ERR_OK;
+}
+
+FIXPP_API_EXPORT fixpp_error_t fixpp_group_builder_add_entry(fixpp_group_builder_t* builder,
+                                                       fixpp_entry_t** entry_out) {
+    if (entry_out != nullptr) *entry_out = nullptr;
+    if (entry_out == nullptr) return FIXPP_ERR_NULL_HANDLE;
+    auto* b = reinterpret_cast<fixpp_group_builder*>(builder);
+    if (fixpp_error_t c = check_builder(b); c != FIXPP_ERR_OK) return c;
+
+    auto* arena = b->msg->accumulator->arena_;
+    AccumulatorEntry* g = resolve_group(b);
+    g->instances.emplace_back(arena);
+    auto inst_idx = static_cast<std::uint32_t>(g->instances.size() - 1);
+
+    auto* e = std::pmr::polymorphic_allocator<fixpp_entry>(arena).new_object<fixpp_entry>();
+    e->builder = b;
+    e->instance_index = inst_idx;
+    *entry_out = reinterpret_cast<fixpp_entry_t*>(e);
+    return FIXPP_ERR_OK;
+}
+
+// Shared entry-field setter: framing-tag reject (INV-3) + upsert into the instance.
+static fixpp_error_t entry_set_bytes_impl(fixpp_entry_t* entry, uint16_t tag,
+                                          const std::byte* data, std::size_t len) {
+    auto* e = reinterpret_cast<fixpp_entry*>(entry);
+    if (fixpp_error_t c = check_entry(e); c != FIXPP_ERR_OK) return c;
+    if (is_framing_tag(tag)) return FIXPP_ERR_MSG_FRAMING_TAG_FORBIDDEN;
+    auto* arena = e->builder->msg->accumulator->arena_;
+    GroupInstance* inst = resolve_instance(e);
+    auto& fe = upsert_entry(inst->fields, arena, tag);
+    fe.is_group = false;
+    fe.value_bytes.assign(data, data + len);
+    return FIXPP_ERR_OK;
+}
+
+FIXPP_API_EXPORT fixpp_error_t fixpp_entry_set_string(fixpp_entry_t* entry, uint16_t tag,
+                                                 const char* value, size_t len) {
+    if (value == nullptr) return FIXPP_ERR_NULL_HANDLE;
+    return entry_set_bytes_impl(entry, tag, reinterpret_cast<const std::byte*>(value), len);
+}
+
+FIXPP_API_EXPORT fixpp_error_t fixpp_entry_set_int(fixpp_entry_t* entry, uint16_t tag,
+                                              int64_t value) {
+    char buf[24];
+    auto [ptr, ec] = std::to_chars(buf, buf + sizeof(buf), value);
+    if (ec != std::errc{}) return FIXPP_ERR_WIRE_INVALID_FRAME;
+    return entry_set_bytes_impl(entry, tag, reinterpret_cast<const std::byte*>(buf),
+                                static_cast<std::size_t>(ptr - buf));
+}
+
+FIXPP_API_EXPORT fixpp_error_t fixpp_entry_set_double(fixpp_entry_t* entry, uint16_t tag,
+                                                 double value) {
+    char buf[64];
+    int n = std::snprintf(buf, sizeof(buf), "%.10g", value);
+    if (n <= 0 || static_cast<std::size_t>(n) >= sizeof(buf)) return FIXPP_ERR_WIRE_INVALID_FRAME;
+    return entry_set_bytes_impl(entry, tag, reinterpret_cast<const std::byte*>(buf),
+                                static_cast<std::size_t>(n));
+}
+
+FIXPP_API_EXPORT fixpp_error_t fixpp_entry_set_decimal(fixpp_entry_t* entry, uint16_t tag,
+                                                  fixpp_decimal_t value) {
+    char buf[64];
+    std::size_t written = 0;
+    fixpp_error_t rc = fixpp_decimal_format(value, buf, sizeof(buf), &written);
+    if (rc != FIXPP_ERR_OK) return rc;
+    return entry_set_bytes_impl(entry, tag, reinterpret_cast<const std::byte*>(buf), written);
+}
+
+FIXPP_API_EXPORT fixpp_error_t fixpp_entry_group_begin(fixpp_entry_t* entry, uint16_t group_tag,
+                                                  fixpp_group_builder_t** builder_out) {
+    if (builder_out != nullptr) *builder_out = nullptr;
+    if (builder_out == nullptr) return FIXPP_ERR_NULL_HANDLE;
+    auto* e = reinterpret_cast<fixpp_entry*>(entry);
+    if (fixpp_error_t c = check_entry(e); c != FIXPP_ERR_OK) return c;
+    auto* h = e->builder->msg;
+    if (is_framing_tag(group_tag)) return FIXPP_ERR_MSG_FRAMING_TAG_FORBIDDEN;
+    if (h->dict_ && h->dict_->group_first_field(group_tag) == 0) return FIXPP_ERR_TYPE_MISMATCH;
+
+    auto* arena = h->accumulator->arena_;
+    GroupInstance* inst = resolve_instance(e);
+    inst->fields.emplace_back(arena);
+    auto idx = static_cast<std::uint32_t>(inst->fields.size() - 1);
+    inst->fields.back().tag = group_tag;
+    inst->fields.back().is_group = true;
+
+    auto* b = std::pmr::polymorphic_allocator<fixpp_group_builder>(arena)
+                  .new_object<fixpp_group_builder>();
+    b->msg = h;
+    b->parent = e;  // nested within this entry
+    b->group_field_index = idx;
+    b->open = true;
+    h->accumulator->open_builders.push_back(b);
+    *builder_out = reinterpret_cast<fixpp_group_builder_t*>(b);
+    return FIXPP_ERR_OK;
+}
+
+FIXPP_API_EXPORT fixpp_error_t fixpp_msg_group_end(fixpp_msg_t* msg, fixpp_group_builder_t* builder) {
+    if (msg == nullptr || builder == nullptr) return FIXPP_ERR_NULL_HANDLE;
+    if (fixpp_error_t c = check_outbound_msg(msg); c != FIXPP_ERR_OK) return c;
+    auto* h = reinterpret_cast<fixpp_msg*>(msg);
+    auto* b = reinterpret_cast<fixpp_group_builder*>(builder);
+    if (b->msg != h) return FIXPP_ERR_INVALID_HANDLE;  // builder belongs to another msg
+    auto& stack = h->accumulator->open_builders;
+    // LIFO: builder MUST be the innermost still-open builder (E-4).
+    if (stack.empty() || stack.back() != b || !b->open) return FIXPP_ERR_INVALID_HANDLE;
+    stack.pop_back();
+    b->open = false;  // invalidates the builder + its entries (validity ⇒ builder->open)
     return FIXPP_ERR_OK;
 }
 

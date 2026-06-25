@@ -12,6 +12,12 @@ fixpp_engine_config_set_worker_threads
 fixpp_engine_create
 fixpp_engine_destroy
 fixpp_engine_start
+fixpp_entry_group_begin
+fixpp_entry_set_decimal
+fixpp_entry_set_double
+fixpp_entry_set_int
+fixpp_entry_set_string
+fixpp_group_builder_add_entry
 fixpp_group_get_field_decimal
 fixpp_group_get_field_double
 fixpp_group_get_field_int
@@ -29,6 +35,8 @@ fixpp_msg_get_group
 fixpp_msg_get_int
 fixpp_msg_get_msg_type
 fixpp_msg_get_string
+fixpp_msg_group_begin
+fixpp_msg_group_end
 fixpp_msg_has_tag
 fixpp_msg_remove_tag
 fixpp_msg_set_bytes

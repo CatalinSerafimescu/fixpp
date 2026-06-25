@@ -361,6 +361,61 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_remove_tag(fixpp_msg_t* msg, uint16_t t
 FIXPP_API_EXPORT fixpp_error_t fixpp_msg_commit(fixpp_msg_t* msg, const uint8_t** payload_out,
                                            size_t* len_out);
 
+/* ── CA-010 outbound repeating-group builder (T016/US4) ─────────────────────
+ *
+ * Build a repeating group on an outbound accumulator:
+ *   fixpp_msg_group_begin(msg, NoXxx, &builder)
+ *   -> fixpp_group_builder_add_entry(builder, &entry) [per instance]
+ *      -> fixpp_entry_set_{string,int,double,decimal}(entry, tag, …) [per field]
+ *      -> fixpp_entry_group_begin(entry, NoYyy, &nested) [optional nested group]
+ *   -> fixpp_msg_group_end(msg, builder)
+ *
+ * LIFO close-order (FR-012 / E-4): builders MUST be ended in reverse of begin
+ * order; ending a parent while a younger nested builder is still open →
+ * FIXPP_ERR_INVALID_HANDLE. fixpp_msg_commit with any open builder →
+ * FIXPP_ERR_INVALID_HANDLE. Reuse of an ended builder/entry →
+ * FIXPP_ERR_INVALID_HANDLE. All are FIXPP_REQUIRES_SESSION_LOCK.
+ *
+ * NOTE: there is no fixpp_entry_set_bytes — entry fields are dictionary-typed;
+ * the raw-bytes escape (fixpp_msg_set_bytes) exists only at message level.
+ */
+
+/** Begin a repeating group `group_tag` (a NoXxx count field) on an outbound msg.
+ *  TYPE_MISMATCH if group_tag is not a group; INVALID_HANDLE on inbound/tombstoned.
+ *  Reentrancy: requires-session-lock */
+FIXPP_API_EXPORT fixpp_error_t fixpp_msg_group_begin(fixpp_msg_t* msg, uint16_t group_tag,
+                                                fixpp_group_builder_t** builder_out);
+
+/** Append a new entry (group instance) to `builder`; returns a writable entry.
+ *  Reentrancy: requires-session-lock */
+FIXPP_API_EXPORT fixpp_error_t fixpp_group_builder_add_entry(fixpp_group_builder_t* builder,
+                                                       fixpp_entry_t** entry_out);
+
+/** Set a STRING field on the current entry. Framing tags → MSG_FRAMING_TAG_FORBIDDEN.
+ *  Reentrancy: requires-session-lock */
+FIXPP_API_EXPORT fixpp_error_t fixpp_entry_set_string(fixpp_entry_t* entry, uint16_t tag,
+                                                 const char* value, size_t len);
+
+/** Set an INTEGER field on the current entry. Reentrancy: requires-session-lock */
+FIXPP_API_EXPORT fixpp_error_t fixpp_entry_set_int(fixpp_entry_t* entry, uint16_t tag, int64_t value);
+
+/** Set a DOUBLE field on the current entry. Reentrancy: requires-session-lock */
+FIXPP_API_EXPORT fixpp_error_t fixpp_entry_set_double(fixpp_entry_t* entry, uint16_t tag, double value);
+
+/** Set a DECIMAL field on the current entry. Reentrancy: requires-session-lock */
+FIXPP_API_EXPORT fixpp_error_t fixpp_entry_set_decimal(fixpp_entry_t* entry, uint16_t tag,
+                                                  fixpp_decimal_t value);
+
+/** Begin a NESTED group `group_tag` within `entry` (FR-012). Closed by the same
+ *  fixpp_msg_group_end under the LIFO contract. TYPE_MISMATCH if not a group.
+ *  Reentrancy: requires-session-lock */
+FIXPP_API_EXPORT fixpp_error_t fixpp_entry_group_begin(fixpp_entry_t* entry, uint16_t group_tag,
+                                                  fixpp_group_builder_t** builder_out);
+
+/** Seal `builder` (must be the innermost open builder — LIFO). Invalidates the
+ *  builder + its entry handles. Reentrancy: requires-session-lock */
+FIXPP_API_EXPORT fixpp_error_t fixpp_msg_group_end(fixpp_msg_t* msg, fixpp_group_builder_t* builder);
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif

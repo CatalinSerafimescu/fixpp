@@ -89,6 +89,13 @@ static constexpr std::string_view kFix42WithNewOrderSingleXml = R"xml(
       <field number="55"  name="Symbol"   required="Y"/>
       <field number="38"  name="OrderQty" required="N"/>
       <field number="58"  name="Text"     required="N"/>
+      <group number="78" name="NoAllocs" required="N">
+        <field number="79" name="AllocAccount" required="N"/>
+        <field number="80" name="AllocQty"     required="N"/>
+        <group number="539" name="NoNested" required="N">
+          <field number="524" name="NestedPartyID" required="N"/>
+        </group>
+      </group>
     </message>
   </messages>
   <fields>
@@ -105,6 +112,11 @@ static constexpr std::string_view kFix42WithNewOrderSingleXml = R"xml(
     <field number="55"  name="Symbol"       type="STRING"/>
     <field number="38"  name="OrderQty"     type="QTY"/>
     <field number="58"  name="Text"         type="STRING"/>
+    <field number="78"  name="NoAllocs"      type="NUMINGROUP"/>
+    <field number="79"  name="AllocAccount"  type="STRING"/>
+    <field number="80"  name="AllocQty"      type="QTY"/>
+    <field number="539" name="NoNested"      type="NUMINGROUP"/>
+    <field number="524" name="NestedPartyID" type="STRING"/>
   </fields>
 </fix>
 )xml";
@@ -1071,4 +1083,133 @@ TEST(MessageWrite, ZeroGlobalHeapSetCommitGuard) {
     // ── Cleanup OUTSIDE the window ─────────────────────────────────────────────
     EXPECT_EQ(fixpp_msg_destroy(msg), FIXPP_ERR_OK);
     fixpp_engine_destroy(eng);
+}
+
+// ── US4 (T015): CA-010-write group builder tests ─────────────────────────────
+
+namespace {
+// An open outbound NewOrderSingle ("D") message + its engine/session (dict has the
+// NoAllocs=78 group with a nested NoNested=539 group).
+struct GroupFixture {
+    fixpp_engine_t* eng = nullptr;
+    fixpp_session_t* sess = nullptr;
+    fixpp_msg_t* msg = nullptr;
+    GroupFixture() {
+        EXPECT_EQ(make_engine(&eng), FIXPP_ERR_OK);
+        fixpp_session_config_t* sc =
+            make_session_cfg_app_dict("CLI", "SRV", FIXPP_ROLE_INITIATOR);
+        set_loopback_endpoint(sc, "127.0.0.1", 0);
+        EXPECT_EQ(fixpp_session_open(eng, sc, &sess), FIXPP_ERR_OK);
+        EXPECT_EQ(fixpp_msg_create_outbound(sess, "D", 1, &msg), FIXPP_ERR_OK);
+    }
+    ~GroupFixture() {
+        if (msg) fixpp_msg_destroy(msg);
+        if (eng) fixpp_engine_destroy(eng);
+    }
+};
+}  // namespace
+
+TEST(MessageWriteGroup, BuildFlatGroupCommit) {
+    GroupFixture f;
+    ASSERT_NE(f.msg, nullptr);
+    fixpp_group_builder_t* gb = nullptr;
+    ASSERT_EQ(fixpp_msg_group_begin(f.msg, 78, &gb), FIXPP_ERR_OK);
+    fixpp_entry_t* e0 = nullptr;
+    ASSERT_EQ(fixpp_group_builder_add_entry(gb, &e0), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_entry_set_string(e0, 79, "ACC1", 4), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_entry_set_int(e0, 80, 100), FIXPP_ERR_OK);
+    fixpp_entry_t* e1 = nullptr;
+    ASSERT_EQ(fixpp_group_builder_add_entry(gb, &e1), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_entry_set_string(e1, 79, "ACC2", 4), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_msg_group_end(f.msg, gb), FIXPP_ERR_OK);
+
+    const uint8_t* p = nullptr;
+    size_t plen = 0;
+    ASSERT_EQ(fixpp_msg_commit(f.msg, &p, &plen), FIXPP_ERR_OK);
+    EXPECT_TRUE(span_has_field(p, plen, 78, "2"));  // NoAllocs=2
+    EXPECT_TRUE(span_has_field(p, plen, 79, "ACC1"));
+    EXPECT_TRUE(span_has_field(p, plen, 80, "100"));
+    EXPECT_TRUE(span_has_field(p, plen, 79, "ACC2"));
+}
+
+TEST(MessageWriteGroup, NestedGroupBuildCommit) {
+    GroupFixture f;
+    ASSERT_NE(f.msg, nullptr);
+    fixpp_group_builder_t* gb = nullptr;
+    ASSERT_EQ(fixpp_msg_group_begin(f.msg, 78, &gb), FIXPP_ERR_OK);
+    fixpp_entry_t* e0 = nullptr;
+    ASSERT_EQ(fixpp_group_builder_add_entry(gb, &e0), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_entry_set_string(e0, 79, "ACC1", 4), FIXPP_ERR_OK);
+    fixpp_group_builder_t* nb = nullptr;
+    ASSERT_EQ(fixpp_entry_group_begin(e0, 539, &nb), FIXPP_ERR_OK);
+    fixpp_entry_t* ne = nullptr;
+    ASSERT_EQ(fixpp_group_builder_add_entry(nb, &ne), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_entry_set_string(ne, 524, "NP1", 3), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_msg_group_end(f.msg, nb), FIXPP_ERR_OK);  // close nested first (LIFO)
+    ASSERT_EQ(fixpp_msg_group_end(f.msg, gb), FIXPP_ERR_OK);  // then outer
+
+    const uint8_t* p = nullptr;
+    size_t plen = 0;
+    ASSERT_EQ(fixpp_msg_commit(f.msg, &p, &plen), FIXPP_ERR_OK);
+    EXPECT_TRUE(span_has_field(p, plen, 78, "1"));   // NoAllocs=1
+    EXPECT_TRUE(span_has_field(p, plen, 79, "ACC1"));
+    EXPECT_TRUE(span_has_field(p, plen, 539, "1"));  // NoNested=1
+    EXPECT_TRUE(span_has_field(p, plen, 524, "NP1"));
+}
+
+TEST(MessageWriteGroup, LifoOutOfOrderCloseInvalid) {
+    GroupFixture f;
+    ASSERT_NE(f.msg, nullptr);
+    fixpp_group_builder_t* gb = nullptr;
+    ASSERT_EQ(fixpp_msg_group_begin(f.msg, 78, &gb), FIXPP_ERR_OK);
+    fixpp_entry_t* e0 = nullptr;
+    ASSERT_EQ(fixpp_group_builder_add_entry(gb, &e0), FIXPP_ERR_OK);
+    fixpp_group_builder_t* nb = nullptr;
+    ASSERT_EQ(fixpp_entry_group_begin(e0, 539, &nb), FIXPP_ERR_OK);
+    // Ending the OUTER builder while the nested is still open → INVALID_HANDLE.
+    EXPECT_EQ(fixpp_msg_group_end(f.msg, gb), FIXPP_ERR_INVALID_HANDLE);
+    EXPECT_EQ(fixpp_msg_group_end(f.msg, nb), FIXPP_ERR_OK);
+    EXPECT_EQ(fixpp_msg_group_end(f.msg, gb), FIXPP_ERR_OK);
+}
+
+TEST(MessageWriteGroup, EndedBuilderReuseInvalid) {
+    GroupFixture f;
+    ASSERT_NE(f.msg, nullptr);
+    fixpp_group_builder_t* gb = nullptr;
+    ASSERT_EQ(fixpp_msg_group_begin(f.msg, 78, &gb), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_msg_group_end(f.msg, gb), FIXPP_ERR_OK);
+    fixpp_entry_t* e = nullptr;
+    EXPECT_EQ(fixpp_group_builder_add_entry(gb, &e), FIXPP_ERR_INVALID_HANDLE);
+    EXPECT_EQ(fixpp_msg_group_end(f.msg, gb), FIXPP_ERR_INVALID_HANDLE);  // double-end
+}
+
+TEST(MessageWriteGroup, NonGroupTagTypeMismatch) {
+    GroupFixture f;
+    ASSERT_NE(f.msg, nullptr);
+    fixpp_group_builder_t* gb = nullptr;
+    // 55 (Symbol) is a scalar, not a NumInGroup → TYPE_MISMATCH.
+    EXPECT_EQ(fixpp_msg_group_begin(f.msg, 55, &gb), FIXPP_ERR_TYPE_MISMATCH);
+    EXPECT_EQ(gb, nullptr);
+}
+
+TEST(MessageWriteGroup, CommitWithOpenBuilderInvalid) {
+    GroupFixture f;
+    ASSERT_NE(f.msg, nullptr);
+    fixpp_group_builder_t* gb = nullptr;
+    ASSERT_EQ(fixpp_msg_group_begin(f.msg, 78, &gb), FIXPP_ERR_OK);
+    const uint8_t* p = nullptr;
+    size_t plen = 0;
+    EXPECT_EQ(fixpp_msg_commit(f.msg, &p, &plen), FIXPP_ERR_INVALID_HANDLE);  // open builder
+    EXPECT_EQ(fixpp_msg_group_end(f.msg, gb), FIXPP_ERR_OK);
+    EXPECT_EQ(fixpp_msg_commit(f.msg, &p, &plen), FIXPP_ERR_OK);  // now sealed
+}
+
+TEST(MessageWriteGroup, GroupBuildOnInboundIsInvalid) {
+    fixpp_msg inbound_shell{};
+    inbound_shell.tag_ = FIXPP_HANDLE_TAG_MSG;
+    inbound_shell.flavour = FixppMsgFlavour::inbound;
+    inbound_shell.view = nullptr;
+    auto* in = reinterpret_cast<fixpp_msg_t*>(&inbound_shell);
+    fixpp_group_builder_t* gb = nullptr;
+    EXPECT_EQ(fixpp_msg_group_begin(in, 78, &gb), FIXPP_ERR_INVALID_HANDLE);
 }
