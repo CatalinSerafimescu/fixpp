@@ -58,6 +58,30 @@ check_inbound_msg(const fixpp_msg_t* msg, fixpp_error_t* err) noexcept {
     return h->view;
 }
 
+// Positive-tag guard for the CA-053 field-iteration path (FR-006 / FR-007).
+// Unlike check_inbound_msg (which excludes only DEAD), this uses a POSITIVE check:
+// tag_ must be exactly FIXPP_HANDLE_TAG_MSG.  Any other tag — ENGINE, DICT, DEAD,
+// or a foreign handle — returns FIXPP_ERR_INVALID_HANDLE regardless of the view
+// pointer.  The view-null check below still catches outbound-flavour handles that
+// carry the MSG tag but have no wire view.
+const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>*
+check_msg_for_field_iter(const fixpp_msg_t* msg, fixpp_error_t* err) noexcept {
+    if (msg == nullptr) {
+        *err = FIXPP_ERR_NULL_HANDLE;
+        return nullptr;
+    }
+    const auto* h = reinterpret_cast<const fixpp_msg*>(msg);
+    if (h->tag_ != FIXPP_HANDLE_TAG_MSG) {
+        *err = FIXPP_ERR_INVALID_HANDLE;
+        return nullptr;
+    }
+    if (h->view == nullptr) {
+        *err = FIXPP_ERR_INVALID_HANDLE;
+        return nullptr;
+    }
+    return h->view;
+}
+
 // Map a wire::expected_t error to a C-ABI error code for tag lookups.
 fixpp_error_t map_get_error(fixpp::core::error e) noexcept {
     switch (e) {
@@ -580,6 +604,39 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_group_get_nested_group(const fixpp_group_t*
 
     *nested_out       = reinterpret_cast<const fixpp_group_t*>(nested_grp);
     *nested_count_out = slice_count;
+    return FIXPP_ERR_OK;
+}
+
+// ── CA-053 implementation (US3 field iteration) ──────────────────────────────
+
+FIXPP_API_EXPORT fixpp_error_t fixpp_msg_field_count(const fixpp_msg_t* msg,
+                                                size_t* count_out) {
+    if (count_out == nullptr) return FIXPP_ERR_NULL_HANDLE;
+    *count_out = 0;
+    fixpp_error_t err = FIXPP_ERR_OK;
+    const auto* view = check_msg_for_field_iter(msg, &err);
+    if (view == nullptr) return err;
+    *count_out = view->offsets().entries().size();
+    return FIXPP_ERR_OK;
+}
+
+FIXPP_API_EXPORT fixpp_error_t fixpp_msg_field_at(const fixpp_msg_t* msg, size_t index,
+                                             fixpp_msg_field_t* field_out) {
+    if (field_out == nullptr) return FIXPP_ERR_NULL_HANDLE;
+    fixpp_error_t err = FIXPP_ERR_OK;
+    const auto* view = check_msg_for_field_iter(msg, &err);
+    if (view == nullptr) return err;
+
+    const auto& entries = view->offsets().entries();
+    if (index >= entries.size()) return FIXPP_ERR_INDEX_OUT_OF_RANGE;
+
+    const auto& e = entries[index];
+    // wire_base points to the start of the full FIX frame; e.offset is the
+    // byte offset from frame start to the value (after '=', before SOH).
+    const auto* wire_base = reinterpret_cast<const uint8_t*>(view->bytes().data());
+    field_out->tag   = e.tag;
+    field_out->value = wire_base + e.offset;
+    field_out->len   = e.length;
     return FIXPP_ERR_OK;
 }
 

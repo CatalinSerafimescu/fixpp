@@ -30,6 +30,8 @@ fixpp_msg_clone
 fixpp_msg_commit
 fixpp_msg_create_outbound
 fixpp_msg_destroy
+fixpp_msg_field_at
+fixpp_msg_field_count
 fixpp_msg_get_bytes
 fixpp_msg_get_decimal
 fixpp_msg_get_double

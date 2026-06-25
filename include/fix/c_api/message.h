@@ -437,6 +437,47 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_entry_group_begin(fixpp_entry_t* entry, uin
  *  builder + its entry handles. Reentrancy: requires-session-lock */
 FIXPP_API_EXPORT fixpp_error_t fixpp_msg_group_end(fixpp_msg_t* msg, fixpp_group_builder_t* builder);
 
+/* ── CA-053: field iteration (US3) ─────────────────────────────────────────── */
+
+/** A single field occurrence returned by fixpp_msg_field_at.
+ *  `value` ALIASES the wire buffer (no copy, no free).
+ *  Lifetime: valid for the msg handle's dispatch window (inbound) or until
+ *  fixpp_msg_destroy (clone). */
+typedef struct fixpp_msg_field {
+    uint16_t        tag;    /* FIX tag number */
+    const uint8_t  *value;  /* aliases the wire buffer; no copy, no free */
+    size_t          len;    /* byte length of the value (excludes SOH) */
+} fixpp_msg_field_t;
+
+/** Count all field occurrences in wire/document order.
+ *  Each repeating-group delimiter and member field is counted individually
+ *  (multiset; FR-006).  Writes the total to *count_out.
+ *
+ *  For clone handles (fixpp_msg_clone), field_count is THREAD_SAFE.
+ *
+ *  Return codes:
+ *    FIXPP_ERR_OK             -- *count_out is valid
+ *    FIXPP_ERR_NULL_HANDLE    -- msg or count_out is NULL
+ *    FIXPP_ERR_INVALID_HANDLE -- msg is destroyed, type-mismatched, or outbound
+ *
+ *  Reentrancy: requires-session-lock
+ */
+FIXPP_API_EXPORT fixpp_error_t fixpp_msg_field_count(const fixpp_msg_t* msg, size_t* count_out);
+
+/** Return the field occurrence at zero-based `index` in wire/document order.
+ *  For clone handles (fixpp_msg_clone), field_at is THREAD_SAFE.
+ *
+ *  Return codes:
+ *    FIXPP_ERR_OK                   -- *field_out is valid
+ *    FIXPP_ERR_NULL_HANDLE          -- msg or field_out is NULL
+ *    FIXPP_ERR_INVALID_HANDLE       -- msg is destroyed, type-mismatched, or outbound
+ *    FIXPP_ERR_INDEX_OUT_OF_RANGE   -- index >= field_count
+ *
+ *  Reentrancy: requires-session-lock
+ */
+FIXPP_API_EXPORT fixpp_error_t fixpp_msg_field_at(const fixpp_msg_t* msg, size_t index,
+                                             fixpp_msg_field_t* field_out);
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif

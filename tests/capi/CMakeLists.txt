@@ -276,6 +276,16 @@ target_compile_definitions(capi_public_roundtrip_test PRIVATE
 add_test(NAME capi_public_roundtrip COMMAND capi_public_roundtrip_test)
 set_tests_properties(capi_public_roundtrip PROPERTIES LABELS "capi;052")
 
+# T018 (052 US3 / CA-053) — field iteration: fixpp_msg_field_count + fixpp_msg_field_at.
+# FR-006 wire-order (mutation-discriminating), FR-007 superset on repeating-group frame
+# (SC-002), zero-global-heap alloc guard (SC-003 in-process marker), clone cross-thread
+# (SC-003 THREAD_SAFE clone witness), error paths (NULL_HANDLE/INVALID_HANDLE/INDEX_OOR).
+add_executable(capi_message_field_iteration_test message_field_iteration_test.cpp)
+target_link_libraries(capi_message_field_iteration_test PRIVATE fixpp_capi GTest::gtest GTest::gtest_main)
+target_include_directories(capi_message_field_iteration_test PRIVATE ${FIXPP_CAPI_FEATURE_B_INCLUDES})
+add_test(NAME capi_message_field_iteration COMMAND capi_message_field_iteration_test)
+set_tests_properties(capi_message_field_iteration PROPERTIES LABELS "capi;052" TIMEOUT 120)
+
 # T003/T009 (052 US1 / SC-004) — dict loader public-API witness: load all bundled XMLs,
 # null/missing/malformed-XML negative arms, sequential + concurrent double-destroy (TSan).
 # Public headers only — no capi_internal.hpp seam needed.
@@ -344,5 +354,19 @@ if(EXISTS "${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so")
     set_tests_properties(capi_toapp_alloc_guard_mallocnesia PROPERTIES
         LABELS "capi;051;alloc_guard"
         DEPENDS capi_toapp_alloc_guard_test
+    )
+
+    # SC-003 dual gate — field iteration: mallocnesia LD_PRELOAD interception for
+    # fixpp_msg_field_count + fixpp_msg_field_at (CA-053 / 052 US3).  These functions
+    # are pure span lookups over the OffsetTable; the in-process alloc_guard_markers
+    # test confirms zero-alloc; mallocnesia is the binding gate
+    # ([[feedback_tracking_pmr_resource_false_pass]]).
+    add_test(NAME capi_message_field_iteration_mallocnesia
+        COMMAND python3 "${CMAKE_SOURCE_DIR}/tools/check_alloc.py"
+                "--binary" "$<TARGET_FILE:capi_message_field_iteration_test>"
+    )
+    set_tests_properties(capi_message_field_iteration_mallocnesia PROPERTIES
+        LABELS "capi;052;alloc_guard"
+        DEPENDS capi_message_field_iteration_test
     )
 endif()
