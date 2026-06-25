@@ -251,14 +251,16 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_group_get_nested_group(const fixpp_group_t*
  *
  * Reentrancy: all create/set/commit/remove/destroy are FIXPP_REQUIRES_SESSION_LOCK
  *             (must not be called concurrently on the same handle).
- *             fixpp_msg_destroy is FIXPP_THREAD_SAFE (idempotent, NULL-safe).
+ *             fixpp_msg_destroy is FIXPP_THREAD_SAFE (NULL-safe; single-destroy --
+ *             double-destroy of the same non-null pointer is UB, B-051-2).
  *             fixpp_msg_clone is FIXPP_REQUIRES_SESSION_LOCK on the source.
  */
 
 /** Create an outbound message accumulator bound to `session`.
  *
- *  The returned handle lives outside the session arena (operator new);
- *  its internal accumulator is allocated into the session arena.
+ *  The returned handle lives outside the per-message arena (operator new);
+ *  its internal accumulator is allocated into the per-message monotonic arena
+ *  owned by the handle itself (D3 -- not the session arena).
  *  The handle is tied to the session's liveness token (E-9): after
  *  fixpp_session_close or fixpp_engine_destroy, any set/commit call
  *  returns FIXPP_ERR_INVALID_HANDLE (lazy tombstone).
@@ -275,14 +277,16 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_create_outbound(fixpp_session_t* sessio
                                                     const char* msg_type, size_t msg_type_len,
                                                     fixpp_msg_t** msg_out);
 
-/** Destroy an outbound or clone message handle.  Idempotent; NULL-safe.
+/** Destroy an outbound or clone message handle.  NULL-safe (NULL -> OK).
+ *  Single-destroy: double-destroy of the same non-null pointer is UB (B-051-2).
  *  Always returns FIXPP_ERR_OK.
  *
  *  Reentrancy: thread-safe
  */
 FIXPP_API_EXPORT fixpp_error_t fixpp_msg_destroy(fixpp_msg_t* msg);
 
-/** Clone an inbound or outbound message into a session-independent handle.
+/** Clone an inbound message (or a committed outbound clone) into a session-independent handle.
+ *  Uncommitted outbound accumulators return FIXPP_ERR_INVALID_HANDLE (L-051-2).
  *
  *  The clone owns its own arena; it is NOT tied to the source session's
  *  liveness token (session close does NOT tombstone the clone).
@@ -299,7 +303,7 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_clone(const fixpp_msg_t* src, fixpp_msg
 
 /** Set a STRING field on an outbound accumulator.
  *
- *  Deep-copies value[0..len-1] into the session arena (caller may free
+ *  Deep-copies value[0..len-1] into the per-message arena (caller may free
  *  value immediately).  Overwrites any prior value for `tag`.
  *  Framing tags 8/9/34/49/52/56/10 return FIXPP_ERR_MSG_FRAMING_TAG_FORBIDDEN.
  *
@@ -309,7 +313,7 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_clone(const fixpp_msg_t* src, fixpp_msg
  *    FIXPP_ERR_INVALID_HANDLE            -- msg is destroyed / session closed
  *    FIXPP_ERR_MSG_FRAMING_TAG_FORBIDDEN -- tag is a framing tag
  *    FIXPP_ERR_DICT_CONFIG               -- tag not declared for this MsgType
- *    FIXPP_ERR_TYPE_MISMATCH             -- dict declares tag as a non-string type
+ *    (note: set_string is always-OK on any dict field type -- no TYPE_MISMATCH)
  *
  *  Reentrancy: requires-session-lock
  */
@@ -348,12 +352,14 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_remove_tag(fixpp_msg_t* msg, uint16_t t
 /** Serialise the accumulator into an app-payload span.
  *
  *  The payload is: 35=type SOH tag=value SOH ... (no framing tags 8/9/34/49/52/56/10).
- *  *payload_out aliases the session arena; valid until the next mutation or destroy.
+ *  *payload_out aliases the per-message arena; valid until the next mutation or destroy.
  *
  *  Return codes:
  *    FIXPP_ERR_OK              -- success
  *    FIXPP_ERR_NULL_HANDLE     -- msg or payload_out or len_out is NULL
  *    FIXPP_ERR_INVALID_HANDLE  -- msg is destroyed or session closed or open group
+ *    FIXPP_ERR_TYPE_MISMATCH   -- group grammar violated (empty instance or
+ *                                 non-delimiter-first instance; INV-4)
  *    FIXPP_ERR_WIRE_LIMIT_EXCEEDED -- serialised body exceeds ~3800 B
  *
  *  Reentrancy: requires-session-lock
