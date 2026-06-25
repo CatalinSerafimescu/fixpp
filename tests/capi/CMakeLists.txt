@@ -263,7 +263,7 @@ set_tests_properties(capi_toapp_alloc_guard PROPERTIES LABELS "capi;051;alloc_gu
 
 # T011 (052 US2 / SC-001) — two-engine TCP loopback round-trip, pure public C-ABI headers.
 # Witnesses: set_tcp_endpoint, acceptor_bound_endpoint, set_reset_seqnum_policy,
-# E1 dict-handle-destroy-before-open, D-4 bilateral_lenient establishment.
+# E1 dict-handle-destroy-before-open, D-4 bilateral_strict (production default) establishment.
 # No capi_loopback_support.hpp / capi_internal.hpp seam.
 add_executable(capi_public_roundtrip_test public_roundtrip_test.cpp)
 target_link_libraries(capi_public_roundtrip_test PRIVATE
