@@ -90,10 +90,11 @@ static constexpr std::string_view kFix42WithNewOrderSingleXml = R"xml(
       <field number="112" name="TestReqID" required="N"/>
     </message>
     <message name="NewOrderSingle" msgtype="D" msgcat="app">
-      <field number="11"  name="ClOrdID"  required="Y"/>
-      <field number="55"  name="Symbol"   required="Y"/>
-      <field number="38"  name="OrderQty" required="N"/>
-      <field number="58"  name="Text"     required="N"/>
+      <field number="11"  name="ClOrdID"    required="Y"/>
+      <field number="55"  name="Symbol"     required="Y"/>
+      <field number="38"  name="OrderQty"   required="N"/>
+      <field number="58"  name="Text"       required="N"/>
+      <field number="68"  name="TotNoOrders" required="N"/>
       <group number="78" name="NoAllocs" required="N">
         <field number="79" name="AllocAccount" required="N"/>
         <field number="80" name="AllocQty"     required="N"/>
@@ -116,7 +117,8 @@ static constexpr std::string_view kFix42WithNewOrderSingleXml = R"xml(
     <field number="11"  name="ClOrdID"      type="STRING"/>
     <field number="55"  name="Symbol"       type="STRING"/>
     <field number="38"  name="OrderQty"     type="QTY"/>
-    <field number="58"  name="Text"         type="STRING"/>
+    <field number="58"  name="Text"          type="STRING"/>
+    <field number="68"  name="TotNoOrders"  type="INT"/>
     <field number="78"  name="NoAllocs"      type="NUMINGROUP"/>
     <field number="79"  name="AllocAccount"  type="STRING"/>
     <field number="80"  name="AllocQty"      type="QTY"/>
@@ -401,56 +403,63 @@ TEST(MessageWrite, SetTagAbsentFromDictReturnsConfigError) {
     fixpp_engine_destroy(eng);
 }
 
-// FR-003: set_* TYPE_MISMATCH — dict declares tag as int but we set as string
-// The minimal dict has tag 112 (TestReqID) as STRING type.
-// Use set_int on a STRING-typed field → should NOT get TYPE_MISMATCH
-// (int serialises as string bytes which is valid for STRING type).
-// Use set_string on an INT-typed field (MsgSeqNum=34 is framing, skip) ...
-// For the minimal dict we have tag 9 (BodyLength) = INT — but that's framing.
-// Let's check: tag 112 is STRING, and set_int on a STRING field is NOT a type mismatch
-// (we only reject if the dict declares the field as a type whose category disagrees).
-// For the real TYPE_MISMATCH: would need an INT field in the dict for the test MsgType.
-// The minimal dict only has tag 112 (STRING) for Heartbeat. Skip detailed TYPE_MISMATCH
-// test here — it requires a more specific dictionary. Mark as a boundary-only test.
-// The contract says TYPE_MISMATCH fires when dict type category != setter flavour.
-// For the minimal dict, we cannot exercise this without a more complete fixture.
-// We verify that setting a valid STRING field with set_string succeeds instead.
-TEST(MessageWrite, SetStringOnDeclaredStringFieldSucceeds) {
+// FR-003/FR-006: TYPE_MISMATCH — dict declares tag as a type incompatible with the setter.
+//
+// Uses the richer dict (NewOrderSingle "D") which has:
+//   tag 38 (OrderQty)   → QTY (float category)
+//   tag 68 (TotNoOrders) → INT (integer category)
+//   tag 11 (ClOrdID)    → STRING
+//
+// Negative tests (must return TYPE_MISMATCH, discriminated by mutation — removing the
+// type check makes these RED):
+//   set_int on QTY (float) field   → TYPE_MISMATCH
+//   set_double on INT field        → TYPE_MISMATCH
+//   set_decimal on INT field       → TYPE_MISMATCH
+//
+// Positive tests (must return OK after the gate passes):
+//   set_int on INT field           → OK
+//   set_double on QTY (float) field → OK
+//   set_string on INT field        → OK (string is always-OK per contract)
+TEST(MessageWrite, SetterTypeMismatchNegativeAndPositive) {
     fixpp_engine_t* eng = nullptr;
     ASSERT_EQ(make_engine(&eng), FIXPP_ERR_OK);
-
-    fixpp_session_config_t* sc = make_session_cfg("FIXSRV", "FIXCLI", FIXPP_ROLE_ACCEPTOR);
+    fixpp_session_config_t* sc =
+        make_session_cfg_app_dict("FIXSRV", "FIXCLI", FIXPP_ROLE_ACCEPTOR);
     set_loopback_endpoint(sc, "127.0.0.1", 0);
     fixpp_session_t* sess = nullptr;
     ASSERT_EQ(fixpp_session_open(eng, sc, &sess), FIXPP_ERR_OK);
-    ASSERT_EQ(fixpp_engine_start(eng), FIXPP_ERR_OK);
+    // NOT started — no worker threads (single-threaded, deterministic).
 
     fixpp_msg_t* msg = nullptr;
-    ASSERT_EQ(fixpp_msg_create_outbound(sess, "0", 1, &msg), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_msg_create_outbound(sess, "D", 1, &msg), FIXPP_ERR_OK);
+    ASSERT_NE(msg, nullptr);
 
-    // tag 112 (TestReqID) is STRING in the minimal dict for Heartbeat
-    EXPECT_EQ(fixpp_msg_set_string(msg, 112, "TEST123", 7), FIXPP_ERR_OK);
+    // Negative: set_int on tag 38 (OrderQty, QTY → float) → TYPE_MISMATCH.
+    EXPECT_EQ(fixpp_msg_set_int(msg, 38, 100), FIXPP_ERR_TYPE_MISMATCH)
+        << "set_int on QTY (float-category) field must return TYPE_MISMATCH";
 
-    // Commit should succeed and produce a valid payload
-    const uint8_t* payload = nullptr;
-    size_t payload_len = 0;
-    EXPECT_EQ(fixpp_msg_commit(msg, &payload, &payload_len), FIXPP_ERR_OK);
-    EXPECT_NE(payload, nullptr);
-    EXPECT_GT(payload_len, 0u);
+    // Negative: set_double on tag 68 (TotNoOrders, INT → integer) → TYPE_MISMATCH.
+    EXPECT_EQ(fixpp_msg_set_double(msg, 68, 3.14), FIXPP_ERR_TYPE_MISMATCH)
+        << "set_double on INT (integer-category) field must return TYPE_MISMATCH";
 
-    // Payload must start with 35=0\x01
-    EXPECT_TRUE(span_has_field(payload, payload_len, 35, "0"))
-        << "Payload must contain 35=0\\x01";
+    // Negative: set_decimal on tag 68 (TotNoOrders, INT → integer) → TYPE_MISMATCH.
+    fixpp_decimal_t dec{};
+    dec.mantissa = 100;
+    dec.exponent = 0;
+    EXPECT_EQ(fixpp_msg_set_decimal(msg, 68, dec), FIXPP_ERR_TYPE_MISMATCH)
+        << "set_decimal on INT (integer-category) field must return TYPE_MISMATCH";
 
-    // Payload must contain 112=TEST123\x01
-    EXPECT_TRUE(span_has_field(payload, payload_len, 112, "TEST123"))
-        << "Payload must contain 112=TEST123\\x01";
+    // Positive: set_int on tag 68 (TotNoOrders, INT) → OK.
+    EXPECT_EQ(fixpp_msg_set_int(msg, 68, 5), FIXPP_ERR_OK)
+        << "set_int on INT field must return OK";
 
-    // Payload must NOT contain any framing tags at a field boundary
-    for (uint16_t t : {8u, 9u, 34u, 49u, 52u, 56u, 10u}) {
-        EXPECT_TRUE(span_lacks_tag(payload, payload_len, static_cast<uint16_t>(t)))
-            << "Framing tag " << t << " must not appear in committed payload";
-    }
+    // Positive: set_double on tag 38 (OrderQty, QTY → float) → OK.
+    EXPECT_EQ(fixpp_msg_set_double(msg, 38, 2.5), FIXPP_ERR_OK)
+        << "set_double on QTY (float-category) field must return OK";
+
+    // Positive: set_string on tag 68 (INT field) → OK (string is always-OK).
+    EXPECT_EQ(fixpp_msg_set_string(msg, 68, "5", 1), FIXPP_ERR_OK)
+        << "set_string on INT field must return OK (string is always-OK)";
 
     EXPECT_EQ(fixpp_msg_destroy(msg), FIXPP_ERR_OK);
     fixpp_engine_destroy(eng);
@@ -773,7 +782,8 @@ TEST(MessageWrite, SetOverwriteSemantics) {
     fixpp_engine_destroy(eng);
 }
 
-// set_int and set_double serialisation check: set via set_int, verify commit payload
+// set_int and set_double serialisation check: set via set_string/set_double, verify commit payload.
+// Uses set_string to produce integer-looking ASCII (not set_int — tag 112 is STRING in this dict).
 TEST(MessageWrite, SetIntAndDoubleSerialisation) {
     fixpp_engine_t* eng = nullptr;
     ASSERT_EQ(make_engine(&eng), FIXPP_ERR_OK);
@@ -786,15 +796,15 @@ TEST(MessageWrite, SetIntAndDoubleSerialisation) {
     fixpp_msg_t* msg = nullptr;
     ASSERT_EQ(fixpp_msg_create_outbound(sess, "0", 1, &msg), FIXPP_ERR_OK);
 
-    // set_int: tag 112 is STRING in the dict, but set_int should still work
-    // (it serialises the integer as ASCII decimal and stores as bytes)
-    ASSERT_EQ(fixpp_msg_set_int(msg, 112, 42), FIXPP_ERR_OK);
+    // set_string on a STRING field: tag 112 (TestReqID) is STRING in the minimal dict.
+    // Serialises the string value "42" to verify the payload format.
+    ASSERT_EQ(fixpp_msg_set_string(msg, 112, "42", 2), FIXPP_ERR_OK);
 
     const uint8_t* payload = nullptr;
     size_t payload_len = 0;
     ASSERT_EQ(fixpp_msg_commit(msg, &payload, &payload_len), FIXPP_ERR_OK);
     EXPECT_TRUE(span_has_field(payload, payload_len, 112, "42"))
-        << "set_int(112, 42) must produce '112=42\\x01' in payload";
+        << "set_string(112, '42') must produce '112=42\\x01' in payload";
 
     EXPECT_EQ(fixpp_msg_destroy(msg), FIXPP_ERR_OK);
     fixpp_engine_destroy(eng);
@@ -1008,7 +1018,7 @@ TEST(MessageWrite, ZeroGlobalHeapSetCommitGuard) {
         (void)fixpp_msg_set_string(warmup, 11, "WU_STR", 6);   // STRING field
         const uint8_t wu_bytes[] = {'W', 'U'};
         (void)fixpp_msg_set_bytes(warmup, 58, wu_bytes, sizeof(wu_bytes)); // type-agnostic
-        (void)fixpp_msg_set_int(warmup, 55, 999);               // STRING field, int as ASCII
+        (void)fixpp_msg_set_int(warmup, 68, 999);               // INT field (TotNoOrders)
         (void)fixpp_msg_set_double(warmup, 38, 1.5);            // Float (QTY) field
         fixpp_decimal_t wu_dec{};
         wu_dec.mantissa = 250;
@@ -1040,6 +1050,7 @@ TEST(MessageWrite, ZeroGlobalHeapSetCommitGuard) {
     // set_bytes: tag 58 (Text, STRING) — set_bytes bypasses dict type check,
     //   so it works on any non-framing tag; tag 58 is declared for "D" in the
     //   richer dict.
+    // set_int: tag 68 (TotNoOrders, INT) — integer-category field.
     // remove_tag: remove tag 11 after setting it (idempotent erase from PMR
     //   vector; no global heap).  Then re-set tag 11 so commit has it.
     fixpp_error_t rc_str     = FIXPP_ERR_OK;
@@ -1062,7 +1073,7 @@ TEST(MessageWrite, ZeroGlobalHeapSetCommitGuard) {
     rc_str    = fixpp_msg_set_string(msg, 11, "GUARD_STR", 9);         // STRING field (ClOrdID)
     rc_bytes  = fixpp_msg_set_bytes(msg, 58,                           // TEXT field, type-agnostic
                                     kBytesPayload, sizeof(kBytesPayload));
-    rc_int    = fixpp_msg_set_int(msg, 55, 42);                        // STRING field (Symbol)
+    rc_int    = fixpp_msg_set_int(msg, 68, 42);                        // INT field (TotNoOrders)
     rc_dbl    = fixpp_msg_set_double(msg, 38, 2.5);                    // Float/QTY field
     rc_dec    = fixpp_msg_set_decimal(msg, 38, dec);                   // Float/QTY (overwrite)
     rc_remove = fixpp_msg_remove_tag(msg, 11);                         // PMR-vector erase
@@ -1074,7 +1085,7 @@ TEST(MessageWrite, ZeroGlobalHeapSetCommitGuard) {
     // ── Assert results AFTER the window ───────────────────────────────────────
     EXPECT_EQ(rc_str,    FIXPP_ERR_OK) << "set_string(tag 11, STRING field) failed";
     EXPECT_EQ(rc_bytes,  FIXPP_ERR_OK) << "set_bytes(tag 58, type-agnostic) failed";
-    EXPECT_EQ(rc_int,    FIXPP_ERR_OK) << "set_int(tag 55, STRING field) failed";
+    EXPECT_EQ(rc_int,    FIXPP_ERR_OK) << "set_int(tag 68, INT field) failed";
     EXPECT_EQ(rc_dbl,    FIXPP_ERR_OK) << "set_double(tag 38, Float/QTY field) failed";
     EXPECT_EQ(rc_dec,    FIXPP_ERR_OK) << "set_decimal(tag 38, Float/QTY field) failed";
     EXPECT_EQ(rc_remove, FIXPP_ERR_OK) << "remove_tag(tag 11) failed";
@@ -1215,6 +1226,68 @@ TEST(MessageWriteGroup, GroupBuildOnInboundIsInvalid) {
     auto* in = reinterpret_cast<fixpp_msg_t*>(&inbound_shell);
     fixpp_group_builder_t* gb = nullptr;
     EXPECT_EQ(fixpp_msg_group_begin(in, 78, &gb), FIXPP_ERR_INVALID_HANDLE);
+}
+
+// INV-4 Fix 2: empty group instance → commit returns TYPE_MISMATCH.
+// An instance with zero fields is unambiguously malformed (78=1 with no fields inside).
+TEST(MessageWriteGroup, EmptyInstanceCommitRejectsTypeMismatch) {
+    GroupFixture f;
+    ASSERT_NE(f.msg, nullptr);
+    fixpp_group_builder_t* gb = nullptr;
+    ASSERT_EQ(fixpp_msg_group_begin(f.msg, 78, &gb), FIXPP_ERR_OK);
+    fixpp_entry_t* e = nullptr;
+    ASSERT_EQ(fixpp_group_builder_add_entry(gb, &e), FIXPP_ERR_OK);
+    // e is allocated but NO fields are set — empty instance.
+    ASSERT_EQ(fixpp_msg_group_end(f.msg, gb), FIXPP_ERR_OK);  // seal OK
+
+    // Commit must reject the empty-instance group.
+    const uint8_t* p = nullptr;
+    size_t plen = 0;
+    EXPECT_EQ(fixpp_msg_commit(f.msg, &p, &plen), FIXPP_ERR_TYPE_MISMATCH)
+        << "commit with an empty group instance must return TYPE_MISMATCH (INV-4)";
+}
+
+// INV-4 Fix 2: non-delimiter-first instance → commit returns TYPE_MISMATCH.
+// For NoAllocs=78 the delimiter (first-declared field) is tag 79 (AllocAccount).
+// If the first field set in an instance is NOT tag 79, commit must reject it.
+TEST(MessageWriteGroup, NonDelimiterFirstInstanceCommitRejectsTypeMismatch) {
+    GroupFixture f;
+    ASSERT_NE(f.msg, nullptr);
+    fixpp_group_builder_t* gb = nullptr;
+    ASSERT_EQ(fixpp_msg_group_begin(f.msg, 78, &gb), FIXPP_ERR_OK);
+    fixpp_entry_t* e = nullptr;
+    ASSERT_EQ(fixpp_group_builder_add_entry(gb, &e), FIXPP_ERR_OK);
+    // First field is tag 80 (AllocQty) — NOT the delimiter tag 79 (AllocAccount).
+    ASSERT_EQ(fixpp_entry_set_int(e, 80, 100), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_msg_group_end(f.msg, gb), FIXPP_ERR_OK);
+
+    const uint8_t* p = nullptr;
+    size_t plen = 0;
+    EXPECT_EQ(fixpp_msg_commit(f.msg, &p, &plen), FIXPP_ERR_TYPE_MISMATCH)
+        << "commit with non-delimiter-first instance must return TYPE_MISMATCH (INV-4)";
+}
+
+// INV-4 Fix 2: well-formed group (delimiter-first, non-empty) still passes commit.
+// Regression guard: Fix 2 must not break a properly-built group.
+TEST(MessageWriteGroup, WellFormedGroupCommitStillPasses) {
+    GroupFixture f;
+    ASSERT_NE(f.msg, nullptr);
+    fixpp_group_builder_t* gb = nullptr;
+    ASSERT_EQ(fixpp_msg_group_begin(f.msg, 78, &gb), FIXPP_ERR_OK);
+    fixpp_entry_t* e = nullptr;
+    ASSERT_EQ(fixpp_group_builder_add_entry(gb, &e), FIXPP_ERR_OK);
+    // First field IS the delimiter tag 79 (AllocAccount).
+    ASSERT_EQ(fixpp_entry_set_string(e, 79, "ACC1", 4), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_entry_set_int(e, 80, 50), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_msg_group_end(f.msg, gb), FIXPP_ERR_OK);
+
+    const uint8_t* p = nullptr;
+    size_t plen = 0;
+    EXPECT_EQ(fixpp_msg_commit(f.msg, &p, &plen), FIXPP_ERR_OK)
+        << "well-formed group (delimiter-first, non-empty) must commit successfully";
+    EXPECT_TRUE(span_has_field(p, plen, 78, "1"));   // NoAllocs=1
+    EXPECT_TRUE(span_has_field(p, plen, 79, "ACC1")); // AllocAccount
+    EXPECT_TRUE(span_has_field(p, plen, 80, "50"));   // AllocQty
 }
 
 // ── Coverage gap closers ──────────────────────────────────────────────────────

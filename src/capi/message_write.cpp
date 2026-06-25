@@ -123,32 +123,36 @@ static fixpp_error_t check_outbound_msg(const fixpp_msg_t* msg) noexcept {
 
 // ── Dictionary type-check helpers ─────────────────────────────────────────────
 
-// Returns true if the field_data_type is in the "numeric" category
-// (i.e., not string/data/char/boolean — things that shouldn't be set as pure ints/floats).
-// This drives TYPE_MISMATCH. For simplicity, we only reject truly incompatible pairs:
-//   set_string → always OK (serialises as bytes; string is the most permissive)
-//   set_bytes  → always OK (type-agnostic escape hatch; no dict type check)
-//   set_int    → allow Int, Length, SeqNum, NumInGroup, DayOfMonth + all non-string numeric
-//   set_double → allow Price, Qty, Amt, PriceOffset, Percentage, Float
-//   set_decimal → allow Price, Qty, Amt, PriceOffset, Percentage, Float
-// NOTE: The minimal test dictionary only has STRING fields, so TYPE_MISMATCH for
-// set_int on a STRING is intentionally NOT triggered (string accepts int ASCII text).
-// Per contract comment in message-write.md: "DICT_CONFIG (tag absent) / TYPE_MISMATCH
-// (dict type != flavour)". For the v1.0 wire CA-009 surface, we treat all dict types
-// as string-compatible (the wire is ASCII text) — the type check gates only obvious
-// mismatches. A full type-check system is US4 (CA-010-write group builder).
-// For CA-009, we perform DICT_CONFIG (absent from dict) only; TYPE_MISMATCH is a
-// forward-compat hook that fires for genuinely wrong setter/type pairings:
-//   set_int on a STRING/CHAR/BOOLEAN → NOT a mismatch (wire = ASCII decimal)
-//   set_double on a STRING → NOT a mismatch (wire = ASCII float)
-//   No strict mismatches exist with just string/int/double/decimal setters
-//   on the standard FIX dictionary types.
-// We skip the TYPE_MISMATCH check for CA-009 scope; it will be enforced in US4/group.
+// Setter flavour — drives TYPE_MISMATCH in check_dict (FR-006).
+//   String  → always OK (set_string serialises bytes; no dict-type restriction)
+//   Int     → only integer-category types accepted
+//   Float   → only float-category types accepted
+enum class SetterFlavour : uint8_t { String, Int, Float };
 
-// Validate tag against the dictionary for a given msg_type.
-// Returns OK or DICT_CONFIG (not declared) or MSG_FRAMING_TAG_FORBIDDEN.
-// TYPE_MISMATCH is not applied in CA-009 (see note above).
-static fixpp_error_t check_dict(const fixpp_msg* h, uint16_t tag) noexcept {
+// Integer-category dict types: Int, Length, SeqNum, NumInGroup, DayOfMonth.
+static bool is_int_category(fixpp::dict::field_data_type t) noexcept {
+    using T = fixpp::dict::field_data_type;
+    return t == T::Int || t == T::Length || t == T::SeqNum || t == T::NumInGroup ||
+           t == T::DayOfMonth;
+}
+
+// Float-category dict types: Price, Qty, Amt, PriceOffset, Percentage, Float.
+static bool is_float_category(fixpp::dict::field_data_type t) noexcept {
+    using T = fixpp::dict::field_data_type;
+    return t == T::Price || t == T::Qty || t == T::Amt || t == T::PriceOffset ||
+           t == T::Percentage || t == T::Float;
+}
+
+// Validate tag against the dictionary for a given msg_type and setter flavour.
+// Returns:
+//   FIXPP_ERR_MSG_FRAMING_TAG_FORBIDDEN  — framing tag (INV-3)
+//   FIXPP_ERR_DICT_CONFIG                — tag absent from the MsgType grammar
+//   FIXPP_ERR_TYPE_MISMATCH              — dict field type ≠ setter flavour (FR-006)
+//   FIXPP_ERR_OK                         — all checks pass
+// set_string passes SetterFlavour::String (no type check).
+// set_bytes skips check_dict entirely (type-agnostic escape hatch).
+static fixpp_error_t check_dict(const fixpp_msg* h, uint16_t tag,
+                                SetterFlavour flavour = SetterFlavour::String) noexcept {
     if (is_framing_tag(tag)) return FIXPP_ERR_MSG_FRAMING_TAG_FORBIDDEN;
 
     // If no dictionary was cached, skip validation (dict_==nullptr on handles
@@ -161,6 +165,14 @@ static fixpp_error_t check_dict(const fixpp_msg* h, uint16_t tag) noexcept {
     auto fr = dict.field_ref(acc.msg_type, tag);
     if (fr.rule == fixpp::dict::field_presence::NotDeclared) {
         return FIXPP_ERR_DICT_CONFIG;
+    }
+
+    // FR-006: type-category check for non-String setters.
+    if (flavour == SetterFlavour::Int && !is_int_category(fr.type)) {
+        return FIXPP_ERR_TYPE_MISMATCH;
+    }
+    if (flavour == SetterFlavour::Float && !is_float_category(fr.type)) {
+        return FIXPP_ERR_TYPE_MISMATCH;
     }
     return FIXPP_ERR_OK;
 }
@@ -423,8 +435,8 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_set_string(fixpp_msg_t* msg, uint16_t t
     if (fixpp_error_t c = check_outbound_msg(msg); c != FIXPP_ERR_OK) return c;
 
     auto* h = reinterpret_cast<fixpp_msg*>(msg);
-    // Dict validation (framing tag + DICT_CONFIG).
-    if (fixpp_error_t c = check_dict(h, tag); c != FIXPP_ERR_OK) return c;
+    // Dict validation (framing tag + DICT_CONFIG). String setter: always OK on any dict type.
+    if (fixpp_error_t c = check_dict(h, tag, SetterFlavour::String); c != FIXPP_ERR_OK) return c;
 
     // Steady-state thunk: abort on exception escape ([2i §5.2]).
     auto& acc = *h->accumulator;
@@ -458,7 +470,7 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_set_int(fixpp_msg_t* msg, uint16_t tag,
     if (fixpp_error_t c = check_outbound_msg(msg); c != FIXPP_ERR_OK) return c;
 
     auto* h = reinterpret_cast<fixpp_msg*>(msg);
-    if (fixpp_error_t c = check_dict(h, tag); c != FIXPP_ERR_OK) return c;
+    if (fixpp_error_t c = check_dict(h, tag, SetterFlavour::Int); c != FIXPP_ERR_OK) return c;
 
     // Serialise int64 as ASCII decimal into a small stack buffer, then store.
     char buf[24];
@@ -480,7 +492,7 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_set_double(fixpp_msg_t* msg, uint16_t t
     if (fixpp_error_t c = check_outbound_msg(msg); c != FIXPP_ERR_OK) return c;
 
     auto* h = reinterpret_cast<fixpp_msg*>(msg);
-    if (fixpp_error_t c = check_dict(h, tag); c != FIXPP_ERR_OK) return c;
+    if (fixpp_error_t c = check_dict(h, tag, SetterFlavour::Float); c != FIXPP_ERR_OK) return c;
 
     // Serialise double via snprintf "%.10g" (FIX convention for float fields).
     char buf[64];
@@ -501,7 +513,7 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_set_decimal(fixpp_msg_t* msg, uint16_t 
     if (fixpp_error_t c = check_outbound_msg(msg); c != FIXPP_ERR_OK) return c;
 
     auto* h = reinterpret_cast<fixpp_msg*>(msg);
-    if (fixpp_error_t c = check_dict(h, tag); c != FIXPP_ERR_OK) return c;
+    if (fixpp_error_t c = check_dict(h, tag, SetterFlavour::Float); c != FIXPP_ERR_OK) return c;
 
     // Serialise the decimal via fixpp_decimal_format (the C-ABI decimal formatter).
     char buf[64];
@@ -605,11 +617,42 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_remove_tag(fixpp_msg_t* msg, uint16_t t
     return FIXPP_ERR_OK;
 }
 
+// ── Group grammar validation (INV-4, Fix 2) ───────────────────────────────────
+//
+// Validates that every group instance is non-empty and delimiter-first (INV-4 legs
+// (c)/(d)).  Called from fixpp_msg_commit AFTER the open-builder check.
+// Returns TYPE_MISMATCH on violation (consistent with group_begin's non-group-tag
+// reject; no new symbol or error code needed).
+// Guarded on dict_ presence for the delimiter check (no-dict → empty check only).
+static fixpp_error_t validate_group_grammar(const std::pmr::vector<AccumulatorEntry>& entries,
+                                             const fixpp::dict::Dictionary* dict) noexcept {
+    for (const auto& e : entries) {
+        if (!e.is_group) continue;
+        for (const auto& inst : e.instances) {
+            // INV-4 leg (c): each instance must have at least one field.
+            if (inst.fields.empty()) return FIXPP_ERR_TYPE_MISMATCH;
+            // INV-4 leg (d): first field must be the group delimiter (dict-gated).
+            if (dict) {
+                uint16_t delim = dict->group_first_field(e.tag);
+                if (delim != 0 && inst.fields[0].tag != delim) {
+                    return FIXPP_ERR_TYPE_MISMATCH;
+                }
+            }
+            // Recurse into nested groups within this instance.
+            if (fixpp_error_t c = validate_group_grammar(inst.fields, dict);
+                c != FIXPP_ERR_OK) return c;
+        }
+    }
+    return FIXPP_ERR_OK;
+}
+
 // ── fixpp_msg_commit ──────────────────────────────────────────────────────────
 //
 // Serialise the accumulator into an app-payload in the session arena.
 // Format: "35=<type>\x01<tag>=<value>\x01..." (no framing tags).
 // Steady-state thunk: abort on exception escape ([2i §5.2]).
+// Returns TYPE_MISMATCH when group grammar is violated (INV-4: empty instance or
+// non-delimiter-first instance).
 FIXPP_API_EXPORT fixpp_error_t fixpp_msg_commit(fixpp_msg_t* msg, const uint8_t** payload_out,
                                            size_t* len_out) {
     if (payload_out != nullptr) *payload_out = nullptr;
@@ -624,6 +667,10 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_commit(fixpp_msg_t* msg, const uint8_t*
 
     // An open (unended) group builder ⇒ not a sealed, committable state (analyze C2).
     if (!acc.open_builders.empty()) return FIXPP_ERR_INVALID_HANDLE;
+
+    // INV-4 group grammar: non-empty + delimiter-first per instance.
+    if (fixpp_error_t c = validate_group_grammar(acc.entries, h->dict_.get());
+        c != FIXPP_ERR_OK) return c;
 
     // First pass: compute total payload size = "35=<mt>\x01" + entries (recursive,
     // scalars + groups, US4).
