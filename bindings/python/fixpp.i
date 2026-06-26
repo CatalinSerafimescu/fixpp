@@ -19,8 +19,8 @@
  *   T012  error bridge: %typemap(out) fixpp_error_t -> raise fixpp.Error.
  */
 
-%module(docstring="Thin Python binding over the fixpp C ABI (PY-001).\n\n"
-"Threading / GIL contract (FR-006 / FR-013a):\n"
+%module(docstring="Python binding over the fixpp C ABI (PY-001 + PY-002 GIL + PY-003 typed exceptions).\n\n"
+"Threading / GIL contract (PY-002 FR-001 audit / FR-003 trampoline; L-054-1 no-blocking-from-callback):\n"
 "  * The inbound callback registered with session_register_callback runs on an\n"
 "    engine WORKER THREAD (the session strand); the binding reacquires the GIL\n"
 "    before invoking it and releases it after.\n"
@@ -35,20 +35,53 @@
 #include <string.h>  /* strlen — embedded-NUL check in the config-str typemaps */
 #include "fix/c_api.h"
 
-/* fixpp.Error — the single thin exception type (PY-003 introduces the
- * hierarchy). Created in %init on the low-level module, re-exported to the
- * fixpp.* surface via %pythoncode below. */
-static PyObject* g_fixpp_error = NULL;
+/* PY-003: the typed-exception hierarchy + the single-source translator live in
+ * the fixpp.py proxy (%pythoncode below). The wrapper TU is _fixpp, so BOTH the
+ * out-typemap error bridge and the in-typemap conversion-failure path reach them
+ * via a cached lazy import of the "fixpp" module (data-model E-3 routing). The
+ * import runs only when a wrapped call raises — always under the GIL (the
+ * blocking wrappers re-take it before the out-typemap), so the static cache is
+ * GIL-protected. */
+static PyObject* fixpp_py_module(void) {
+    static PyObject* mod = NULL;  /* cached; one deliberate ref held for process life */
+    if (mod == NULL) mod = PyImport_ImportModule("fixpp");
+    return mod;
+}
+
+/* In-typemap conversion failures (FR-010 / T-2 tier b): raise the ROOT
+ * fixpp.FixppError with a message ONLY — no .code/.name, no fabricated code
+ * (no header code fits an argument-type error). */
+static void fixpp_py_raise_root(const char* msg) {
+    PyObject* mod = fixpp_py_module();
+    if (mod == NULL) return;  /* ImportError already set */
+    PyObject* root = PyObject_GetAttrString(mod, "FixppError");
+    if (root == NULL) return;
+    PyErr_SetString(root, msg);
+    Py_DECREF(root);
+}
+
+/* Out-typemap error bridge (FR-008 / T-4): delegate a non-OK code to the
+ * single-source Python translator fixpp._raise_for_code(code), which raises the
+ * block-matching typed subclass carrying .code/.name/.message. No parallel C
+ * mapping — the runtime path and the tests share _map_to_class / _CODE_TO_NAME. */
+static void fixpp_py_raise_for_code(fixpp_error_t code) {
+    PyObject* mod = fixpp_py_module();
+    if (mod == NULL) return;  /* ImportError already set */
+    PyObject* fn = PyObject_GetAttrString(mod, "_raise_for_code");
+    if (fn == NULL) return;
+    PyObject* r = PyObject_CallFunction(fn, "i", (int)code);  /* always raises -> NULL */
+    Py_XDECREF(r);
+    Py_DECREF(fn);
+}
 
 /* T011: forward-declare the inbound trampoline so the register_callback in-typemap
  * can reference it. The body (which needs SWIGTYPE_p_fixpp_msg, defined later in
  * the wrapper) lives in the %wrapper block below. */
 static void fixpp_py_recv_trampoline(const fixpp_msg_t* inbound, void* userdata);
 
-/* Raise the single binding exception type from an `in`-typemap conversion
- * failure (contract T-3 routes these through the shared error bridge -> one
- * fixpp.Error, FR-008). SWIG_fail is `goto fail` inside the wrapper. */
-#define FIXPP_PY_RAISE(MSG) do { PyErr_SetString(g_fixpp_error, MSG); SWIG_fail; } while (0)
+/* Raise the root fixpp.FixppError from an `in`-typemap conversion failure
+ * (contract T-2/T-3 / FR-010). SWIG_fail is `goto fail` inside the wrapper. */
+#define FIXPP_PY_RAISE(MSG) do { fixpp_py_raise_root(MSG); SWIG_fail; } while (0)
 
 /* Shared str -> interned UTF-8 buffer for the config-string + message in-typemaps.
  * Returns the buffer (len in *out_len; buffer owned by the str, alive for the
@@ -101,17 +134,148 @@ static const char* fixpp_py_str_utf8(PyObject* o, Py_ssize_t* out_len,
  * only after the native call returns FIXPP_ERR_OK (Fix 1 / RC-A). */
 %ignore fixpp_session_register_callback;
 
-/* ── fixpp.Error: create on the C module, re-export onto fixpp.* ─────────────*/
-%init %{
-    g_fixpp_error = PyErr_NewException((char*)"fixpp.Error", NULL, NULL);
-    Py_INCREF(g_fixpp_error);
-    PyModule_AddObject(m, "Error", g_fixpp_error);
-%}
-
+/* ── PY-003: typed exception hierarchy + single-source translator ────────────
+ * [2m §4.6] verbatim (+ AppError for the post-2m [1400,1499] block, D-5),
+ * realized as pure-Python classes in the fixpp.py proxy. The C wrapper reaches
+ * _raise_for_code (out-typemap, FR-008) and FixppError (in-typemap, FR-010) via
+ * fixpp_py_module() above. See contracts/python-exception-surface.md (T-1..T-5)
+ * and data-model E-2/E-3. */
 %pythoncode %{
-# Re-export the C-module exception onto the fixpp.* surface (the generated
-# proxy module does not auto-forward objects added via PyModule_AddObject).
-Error = _fixpp.Error
+class FixppError(Exception):
+    """Root of the fixpp typed-exception hierarchy ([2m §4.6])."""
+
+# Alias — the shipped 053 `fixpp.Error` surface (and pytest.raises(fixpp.Error)) survives.
+Error = FixppError
+
+# Cross-cutting C-ABI block [0,99] (Cancelled/1, Unknown/2 are sub-blocks).
+class CapiError(FixppError): pass
+class Cancelled(CapiError): pass
+class Unknown(CapiError): pass            # FIXPP_ERR_UNKNOWN/2 — NOT the unmapped-block fallback
+# One subclass per fixpp_error_t block.
+class ParseError(FixppError): pass        # [100,199] wire
+class ValidatorError(FixppError): pass    # [200,299] dict
+class SessionError(FixppError): pass      # [300,399] threading
+class StoreError(FixppError): pass        # [400,499]
+class SyncError(FixppError): pass         # [500,599]
+class TlsError(FixppError): pass          # [600,699]
+class TransportError(FixppError): pass    # [700,799]
+class DecimalError(FixppError): pass      # [800,899]
+class ControlPlaneError(FixppError): pass # [900,999]
+class LogError(FixppError): pass          # [1000,1099] reserved
+class TapError(FixppError): pass          # [1100,1199] reserved
+class BindingError(FixppError): pass      # [1200,1299]
+class PythonCallbackRaised(BindingError): pass      # 1200
+class SubInterpreterRejected(BindingError): pass    # 1201
+class ObjectLifetime(BindingError): pass            # 1202
+class WheelAbiMismatch(BindingError): pass          # 1203
+class CallbackReentrantClose(BindingError): pass    # 1204
+class AppError(FixppError): pass          # [1400,1499] NEW in 054 (post-2m block; 051 D-6)
+
+# Hand-written code -> symbolic name (the FIXPP_ERR_* #defines are NOT SWIG-exposed,
+# D-3; guarded by the header-sourced set-equality coverage test, T-5). 47 entries.
+_CODE_TO_NAME = {
+    1: "FIXPP_ERR_CANCELLED",
+    2: "FIXPP_ERR_UNKNOWN",
+    3: "FIXPP_ERR_NULL_HANDLE",
+    4: "FIXPP_ERR_INVALID_HANDLE",
+    5: "FIXPP_ERR_VERSION_MISMATCH",
+    6: "FIXPP_ERR_BUFFER_TOO_SMALL",
+    7: "FIXPP_ERR_TYPE_MISMATCH",
+    8: "FIXPP_ERR_TAG_NOT_FOUND",
+    9: "FIXPP_ERR_INDEX_OUT_OF_RANGE",
+    10: "FIXPP_ERR_CAPI_CONFIG_INVALID",
+    100: "FIXPP_ERR_WIRE_INVALID_FRAME",
+    101: "FIXPP_ERR_WIRE_LIMIT_EXCEEDED",
+    102: "FIXPP_ERR_WIRE_CONFORMANCE",
+    200: "FIXPP_ERR_DICT_CONFIG",
+    201: "FIXPP_ERR_DICT_LIMIT_EXCEEDED",
+    202: "FIXPP_ERR_DICT_OOM",
+    300: "FIXPP_ERR_THREAD_CONFIG",
+    301: "FIXPP_ERR_THREAD_SESSION_LIFECYCLE",
+    302: "FIXPP_ERR_THREAD_RUNTIME",
+    400: "FIXPP_ERR_STORE_RUNTIME",
+    401: "FIXPP_ERR_STORE_CONSISTENCY",
+    402: "FIXPP_ERR_STORE_CONFIG",
+    403: "FIXPP_ERR_STORE_VISITOR",
+    500: "FIXPP_ERR_SYNC_RUNTIME",
+    600: "FIXPP_ERR_TLS_CONFIG",
+    601: "FIXPP_ERR_TLS_HANDSHAKE",
+    602: "FIXPP_ERR_TLS_PINSET",
+    603: "FIXPP_ERR_TLS_RUNTIME",
+    700: "FIXPP_ERR_TRANSPORT_LIFECYCLE",
+    701: "FIXPP_ERR_TRANSPORT_IO",
+    702: "FIXPP_ERR_TRANSPORT_HANDSHAKE",
+    703: "FIXPP_ERR_TRANSPORT_CONFIG",
+    800: "FIXPP_ERR_DECIMAL_INVALID",
+    801: "FIXPP_ERR_DECIMAL_PRECISION_LOSS",
+    900: "FIXPP_ERR_CTRL_CONFIG",
+    901: "FIXPP_ERR_CTRL_RUNTIME",
+    1200: "FIXPP_ERR_BINDING_PYTHON_CALLBACK_RAISED",
+    1201: "FIXPP_ERR_BINDING_SUBINTERPRETER",
+    1202: "FIXPP_ERR_BINDING_OBJECT_LIFETIME",
+    1203: "FIXPP_ERR_BINDING_WHEEL_ABI_MISMATCH",
+    1204: "FIXPP_ERR_BINDING_CALLBACK_REENTRANT_CLOSE",
+    1400: "FIXPP_ERR_SESSION_INVALID_ARGUMENT",
+    1401: "FIXPP_ERR_SESSION_INVALID_STATE",
+    1402: "FIXPP_ERR_APP_DO_NOT_SEND",
+    1403: "FIXPP_ERR_APP_CALLBACK_THREW",
+    1404: "FIXPP_ERR_APP_PAYLOAD_MALFORMED",
+    1405: "FIXPP_ERR_MSG_FRAMING_TAG_FORBIDDEN",
+}
+
+def _map_to_class(code):
+    """Single source of truth: fixpp_error_t -> typed subclass (E-2 block map).
+
+    A code in a known populated block -> that block's class (an unrecognized value
+    within a known block still maps to the block class, FR-009). A code in a wholly
+    unmapped/future block -> the root FixppError fallback (no UnknownError class —
+    it would collide with Unknown/2). The runtime out-typemap never hands an
+    out-of-table code here: the [2i §4.4] downgrade collapses a future code to
+    FIXPP_ERR_UNKNOWN(2) first; this fallback is the direct-call (SC-006) /
+    forward-compat path."""
+    if code == 1: return Cancelled
+    if code == 2: return Unknown
+    if 3 <= code <= 99: return CapiError
+    if 100 <= code <= 199: return ParseError
+    if 200 <= code <= 299: return ValidatorError
+    if 300 <= code <= 399: return SessionError
+    if 400 <= code <= 499: return StoreError
+    if 500 <= code <= 599: return SyncError
+    if 600 <= code <= 699: return TlsError
+    if 700 <= code <= 799: return TransportError
+    if 800 <= code <= 899: return DecimalError
+    if 900 <= code <= 999: return ControlPlaneError
+    if 1000 <= code <= 1099: return LogError
+    if 1100 <= code <= 1199: return TapError
+    if code == 1200: return PythonCallbackRaised
+    if code == 1201: return SubInterpreterRejected
+    if code == 1202: return ObjectLifetime
+    if code == 1203: return WheelAbiMismatch
+    if code == 1204: return CallbackReentrantClose
+    if 1205 <= code <= 1299: return BindingError
+    if 1400 <= code <= 1499: return AppError
+    return FixppError  # unmapped/future block (FR-009 forward-compat fallback)
+
+# Public alias so callers/tests can introspect the mapping (FR-008).
+exception_for_code = _map_to_class
+
+def _make_error(code):
+    """Construct the typed instance carrying .code/.name/.message (FR-007).
+
+    .name falls back to f"FIXPP_ERR_{code}" for a code absent from _CODE_TO_NAME
+    (SC-006 synthetic / FR-009 future-in-known-block) so it is total over its
+    input domain (never KeyError/None)."""
+    cls = _map_to_class(code)
+    name = _CODE_TO_NAME.get(code, "FIXPP_ERR_%d" % code)
+    message = strerror(code)
+    exc = cls(message)
+    exc.code = code
+    exc.name = name
+    exc.message = message
+    return exc
+
+def _raise_for_code(code):
+    raise _make_error(code)
 %}
 
 /* ════════════════════════════════════════════════════════════════════════════
@@ -129,7 +293,12 @@ Error = _fixpp.Error
  * (is_established / acceptor_bound_endpoint) return OK + their value. */
 %typemap(out) fixpp_error_t {
     if ($1 != FIXPP_ERR_OK) {
-        FIXPP_PY_RAISE(fixpp_strerror($1));  /* same shared bridge as the in-typemaps */
+        /* PY-003 (FR-008): route through the single-source Python translator so
+         * the block-matching typed subclass (with .code/.name/.message) is raised
+         * — NOT a flat fixpp.Error. The GIL is held here (the blocking wrappers
+         * re-take it before this out-typemap runs). */
+        fixpp_py_raise_for_code($1);
+        SWIG_fail;
     }
     $result = SWIG_Py_Void();
 }
@@ -364,48 +533,89 @@ static fixpp_error_t fixpp_py_engine_create(fixpp_engine_config_t* cfg,
 }
 %}
 
-/* ── GIL release around BLOCKING wrappers (SC-004 / Gate-B r2) ──────────────
- * Per-function %exception blocks release the GIL around ONLY the C call
- * ($action) for wrappers that block waiting on the engine worker / io_context.
- * The %typemap(in) (which borrows Python buffers / converts args — needs GIL)
- * runs BEFORE Py_BEGIN_ALLOW_THREADS, and the %typemap(out) fixpp_error_t
- * (which raises fixpp.Error — needs GIL) runs AFTER Py_END_ALLOW_THREADS,
- * because both are outside $action in the generated wrapper.
+/* ════════════════════════════════════════════════════════════════════════════
+ * PY-002 GIL-DISCIPLINE AUDIT TABLE (FR-001 / SC-007) — data-model E-1
+ * ════════════════════════════════════════════════════════════════════════════
+ * EXHAUSTIVE over the %include'd surface of error.h/handles.h/version.h/dict.h/
+ * engine.h/session.h + the re-declared message.h functions below — NOT a grouped
+ * sample. "release" = Py_BEGIN/END_ALLOW_THREADS around $action; "hold" = GIL
+ * retained. A reviewer can mechanically diff this against the %exception blocks
+ * (only the three release rows have one) and the wrapped declarations.
  *
- * Blocking callers:
- *   fixpp_session_close   — co_spawn(close_exec, sess->close(...), use_future)
- *                           then fut.get() blocks until the session strand
- *                           completes the close coroutine.
- *   fixpp_session_send    — co_spawn(ioc_, engine_->send(...), use_future)
- *                           then fut.get() blocks until the send coroutine runs.
- *   fixpp_engine_destroy  — stop_fut.get() + thread joins; blocks until all
- *                           workers drain.
+ *   Wrapped C-ABI function          | Class   | Why
+ *   --------------------------------|---------|------------------------------------
+ *   session_close                   | release | co_spawn(close_exec,…,use_future)+fut.get() — strand drain
+ *   session_send                    | release | co_spawn(ioc_,…,use_future)+fut.get() — worker run
+ *                                   |         |   (mechanism src/capi/session.cpp:284-286; rule session.h:255-258)
+ *   engine_destroy                  | release | stop_fut.get() + worker joins
+ *   engine_create                   | hold    | construct + worker spawn; no round-trip
+ *   engine_start                    | hold    | starts workers; returns immediately
+ *   engine_config_create            | hold    | construction-time; returns fixpp_error_t, no engine round-trip
+ *   session_config_create           | hold    | construction-time; returns fixpp_error_t, no engine round-trip
+ *   engine_config_destroy           | hold    | in-memory free; void-returning — never reaches the error bridge
+ *   session_config_destroy          | hold    | in-memory free; void-returning — never reaches the error bridge
+ *   session_open                    | hold    | in-memory state mutation
+ *   session_is_established          | hold    | poll
+ *   acceptor_bound_endpoint         | hold    | registry read
+ *   session_register_callback       | hold    | registry write + INCREF (fixpp_py_register_callback)
+ *   all *_config_set_* setters      | hold    | in-memory
+ *   dict_load_from_xml              | hold    | sync file/XML parse; CPU-bound, NO engine round-trip ->
+ *                                   |         |   no worker-deadlock class (releasing for throughput = deferred nicety, not a gap)
+ *   dict_destroy                    | hold    | in-memory
+ *   all msg_* (create/set/commit/   | hold    | in-memory arena ops
+ *     get/destroy)                  |         |
+ *   version_string, strerror        | hold    | pure function
  *
- * NOT released (non-blocking, pure in-memory, or construction-time):
- *   fixpp_engine_create/start, fixpp_session_open/is_established/
- *   acceptor_bound_endpoint/register_callback, all config setters,
- *   all msg_* builders, dict ops, fixpp_py_register_callback.
+ * BOUND C->Python TRAMPOLINE CENSUS (FR-003): exactly ONE —
+ *   fixpp_py_recv_trampoline (recv callback), already GIL-correct
+ *   (PyGILState_Ensure/Release, see %wrapper above). The toApp/send callback
+ *   (fixpp_session_register_send_callback) is %ignore'd (UNBOUND); no
+ *   establishment/state callback exists in the C-ABI. Conclusion: 1 bound
+ *   trampoline; no unbound trampoline is a GIL gap.
+ *
+ * The three release wrappers below carry a %exception band. The %typemap(in)
+ * (borrows Python buffers / converts args — needs GIL) runs BEFORE the band; the
+ * %typemap(out) fixpp_error_t (routes through the Python translator — needs GIL)
+ * runs AFTER it; both are outside $action in the generated wrapper.
+ *
+ * FIXPP_PY_GIL_RELEASE_CANARY (FR-004, local-only): when defined, the
+ * Py_BEGIN/END_ALLOW_THREADS bands below are ELIDED so the worker cannot acquire
+ * the GIL while the main thread blocks in a teardown -> the teardown-vs-in-flight-
+ * recv-callback scenario DEADLOCKS (RED, hard-timeout). Distinct from 053's
+ * FIXPP_PY_GIL_CANARY (the reacquire canary -> segfault); both coexist. Never set
+ * in CI — the deliberate-hang build is local-only.
  *
  * session_send borrowed-buffer safety: Engine::send() deep-copies the span at
- * coroutine-body line 1490 (src/session/engine.cpp), which runs on the worker
- * thread after co_spawn. The Python bytes object is kept alive by the caller's
- * frame reference (the `payload` variable) for the entire duration of fut.get(),
- * preventing collection even when the GIL is released. This is the standard
- * CPython convention for borrowed C buffers across blocking C-extension calls. */
+ * the coroutine body (src/session/engine.cpp), which runs on the worker thread
+ * after co_spawn. The Python bytes object is kept alive by the caller's frame
+ * reference (the `payload` variable) for the entire duration of fut.get(),
+ * preventing collection even when the GIL is released. */
 %exception fixpp_session_close {
+#ifndef FIXPP_PY_GIL_RELEASE_CANARY
     Py_BEGIN_ALLOW_THREADS;
+#endif
     $action;
+#ifndef FIXPP_PY_GIL_RELEASE_CANARY
     Py_END_ALLOW_THREADS;
+#endif
 }
 %exception fixpp_session_send {
+#ifndef FIXPP_PY_GIL_RELEASE_CANARY
     Py_BEGIN_ALLOW_THREADS;
+#endif
     $action;
+#ifndef FIXPP_PY_GIL_RELEASE_CANARY
     Py_END_ALLOW_THREADS;
+#endif
 }
 %exception fixpp_engine_destroy {
+#ifndef FIXPP_PY_GIL_RELEASE_CANARY
     Py_BEGIN_ALLOW_THREADS;
+#endif
     $action;
+#ifndef FIXPP_PY_GIL_RELEASE_CANARY
     Py_END_ALLOW_THREADS;
+#endif
 }
 
 /* ── Wrapped declarations (selective) ───────────────────────────────────────
