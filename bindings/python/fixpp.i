@@ -590,32 +590,39 @@ static fixpp_error_t fixpp_py_engine_create(fixpp_engine_config_t* cfg,
  * after co_spawn. The Python bytes object is kept alive by the caller's frame
  * reference (the `payload` variable) for the entire duration of fut.get(),
  * preventing collection even when the GIL is released. */
+/* PY-002 GIL-RELEASE bands (FR-002/FR-004) — defined in a VERBATIM %wrapper
+ * block so SWIG passes the #ifdef through to the generated .cxx untouched (a
+ * bare #ifndef inside the %exception bodies is consumed by SWIG's own
+ * preprocessor; and a #define in the %{ %} header block is RESOLVED by SWIG at
+ * swig-time, both of which defeat the C-compile-time -D canary). The C compiler
+ * expands these at the %exception use site. Under -DFIXPP_PY_GIL_RELEASE_CANARY
+ * the bands are empty, so the three blocking wrappers DO NOT release the GIL ->
+ * the teardown-vs-in-flight-callback scenario deadlocks (local-only RED witness,
+ * data-model E-4). Mirrors the 053 FIXPP_PY_GIL_CANARY %wrapper pattern. */
+%wrapper %{
+#ifdef FIXPP_PY_GIL_RELEASE_CANARY
+#  define FIXPP_PY_GIL_RELEASE_BEGIN
+#  define FIXPP_PY_GIL_RELEASE_END
+#else
+#  define FIXPP_PY_GIL_RELEASE_BEGIN  Py_BEGIN_ALLOW_THREADS
+#  define FIXPP_PY_GIL_RELEASE_END    Py_END_ALLOW_THREADS
+#endif
+%}
+
 %exception fixpp_session_close {
-#ifndef FIXPP_PY_GIL_RELEASE_CANARY
-    Py_BEGIN_ALLOW_THREADS;
-#endif
+    FIXPP_PY_GIL_RELEASE_BEGIN;
     $action;
-#ifndef FIXPP_PY_GIL_RELEASE_CANARY
-    Py_END_ALLOW_THREADS;
-#endif
+    FIXPP_PY_GIL_RELEASE_END;
 }
 %exception fixpp_session_send {
-#ifndef FIXPP_PY_GIL_RELEASE_CANARY
-    Py_BEGIN_ALLOW_THREADS;
-#endif
+    FIXPP_PY_GIL_RELEASE_BEGIN;
     $action;
-#ifndef FIXPP_PY_GIL_RELEASE_CANARY
-    Py_END_ALLOW_THREADS;
-#endif
+    FIXPP_PY_GIL_RELEASE_END;
 }
 %exception fixpp_engine_destroy {
-#ifndef FIXPP_PY_GIL_RELEASE_CANARY
-    Py_BEGIN_ALLOW_THREADS;
-#endif
+    FIXPP_PY_GIL_RELEASE_BEGIN;
     $action;
-#ifndef FIXPP_PY_GIL_RELEASE_CANARY
-    Py_END_ALLOW_THREADS;
-#endif
+    FIXPP_PY_GIL_RELEASE_END;
 }
 
 /* ── Wrapped declarations (selective) ───────────────────────────────────────
