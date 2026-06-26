@@ -13,9 +13,10 @@
  *   - fixpp_engine_t : owning. Future fixpp_engine_destroy(engine) — idempotent,
  *                      NULL-safe (NULL / already-destroyed → no-op), never throws;
  *                      double-destroy is safe. (Feature B / [2j])
- *   - fixpp_dict_t   : owning (refcounted shared_ptr). Future fixpp_dict_destroy(dict)
- *                      — same idempotent NULL-safe never-throwing discipline.
- *                      (Feature C / [2c])
+ *   - fixpp_dict_t   : owning (refcounted shared_ptr). Created by
+ *                      fixpp_dict_load_from_xml(...) and destroyed by
+ *                      fixpp_dict_destroy(dict) with the same idempotent
+ *                      NULL-safe never-throwing discipline. ([2c])
  *   - fixpp_msg_t    : outbound/clone — fixpp_msg_destroy(msg): owning, NULL-safe,
  *                      never throws, but SINGLE-DESTROY only — a double-destroy of
  *                      the same non-null pointer is UB (B-051-2; a per-op handle,

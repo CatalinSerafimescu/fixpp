@@ -34,10 +34,12 @@ namespace {
 
 // ── Handle-validation helpers ───────────────────────────────────────────────
 
-// Minimal guard for the CA-008 read path (inbound only):
-//   1. NULL check
-//   2. Dead-tag check (FIXPP_HANDLE_TAG_DEAD → INVALID_HANDLE)
-//   3. View pointer check (outbound flavour has view==nullptr → INVALID_HANDLE)
+// Positive-tag guard for the CA-008 read path (inbound/clone handles):
+//   1. NULL check → NULL_HANDLE
+//   2. Positive tag check: tag_ must be exactly FIXPP_HANDLE_TAG_MSG → INVALID_HANDLE
+//      for any other value (ENGINE, DICT, DEAD, or foreign handle).  Mirrors the
+//      check_msg_for_field_iter guard added in 052 (gate-b/r1: F2 fix).
+//   3. View pointer check: outbound flavour has view==nullptr → INVALID_HANDLE.
 // Returns the inbound view pointer, or nullptr + sets *err.
 const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>*
 check_inbound_msg(const fixpp_msg_t* msg, fixpp_error_t* err) noexcept {
@@ -46,12 +48,36 @@ check_inbound_msg(const fixpp_msg_t* msg, fixpp_error_t* err) noexcept {
         return nullptr;
     }
     const auto* h = reinterpret_cast<const fixpp_msg*>(msg);
-    if (h->tag_ == FIXPP_HANDLE_TAG_DEAD) {
+    if (h->tag_ != FIXPP_HANDLE_TAG_MSG) {
         *err = FIXPP_ERR_INVALID_HANDLE;
         return nullptr;
     }
     if (h->view == nullptr) {
         // outbound flavour or unset — no wire view to read
+        *err = FIXPP_ERR_INVALID_HANDLE;
+        return nullptr;
+    }
+    return h->view;
+}
+
+// Positive-tag guard for the CA-053 field-iteration path (FR-006 / FR-007).
+// Uses a POSITIVE check (gate-b/r1 F2, same discipline as check_inbound_msg):
+// tag_ must be exactly FIXPP_HANDLE_TAG_MSG.  Any other tag — ENGINE, DICT, DEAD,
+// or a foreign handle — returns FIXPP_ERR_INVALID_HANDLE regardless of the view
+// pointer.  The view-null check below still catches outbound-flavour handles that
+// carry the MSG tag but have no wire view.
+const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>*
+check_msg_for_field_iter(const fixpp_msg_t* msg, fixpp_error_t* err) noexcept {
+    if (msg == nullptr) {
+        *err = FIXPP_ERR_NULL_HANDLE;
+        return nullptr;
+    }
+    const auto* h = reinterpret_cast<const fixpp_msg*>(msg);
+    if (h->tag_ != FIXPP_HANDLE_TAG_MSG) {
+        *err = FIXPP_ERR_INVALID_HANDLE;
+        return nullptr;
+    }
+    if (h->view == nullptr) {
         *err = FIXPP_ERR_INVALID_HANDLE;
         return nullptr;
     }
@@ -580,6 +606,39 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_group_get_nested_group(const fixpp_group_t*
 
     *nested_out       = reinterpret_cast<const fixpp_group_t*>(nested_grp);
     *nested_count_out = slice_count;
+    return FIXPP_ERR_OK;
+}
+
+// ── CA-053 implementation (US3 field iteration) ──────────────────────────────
+
+FIXPP_API_EXPORT fixpp_error_t fixpp_msg_field_count(const fixpp_msg_t* msg,
+                                                size_t* count_out) {
+    if (count_out == nullptr) return FIXPP_ERR_NULL_HANDLE;
+    *count_out = 0;
+    fixpp_error_t err = FIXPP_ERR_OK;
+    const auto* view = check_msg_for_field_iter(msg, &err);
+    if (view == nullptr) return err;
+    *count_out = view->offsets().entries().size();
+    return FIXPP_ERR_OK;
+}
+
+FIXPP_API_EXPORT fixpp_error_t fixpp_msg_field_at(const fixpp_msg_t* msg, size_t index,
+                                             fixpp_msg_field_t* field_out) {
+    if (field_out == nullptr) return FIXPP_ERR_NULL_HANDLE;
+    fixpp_error_t err = FIXPP_ERR_OK;
+    const auto* view = check_msg_for_field_iter(msg, &err);
+    if (view == nullptr) return err;
+
+    const auto& entries = view->offsets().entries();
+    if (index >= entries.size()) return FIXPP_ERR_INDEX_OUT_OF_RANGE;
+
+    const auto& e = entries[index];
+    // wire_base points to the start of the full FIX frame; e.offset is the
+    // byte offset from frame start to the value (after '=', before SOH).
+    const auto* wire_base = reinterpret_cast<const uint8_t*>(view->bytes().data());
+    field_out->tag   = e.tag;
+    field_out->value = wire_base + e.offset;
+    field_out->len   = e.length;
     return FIXPP_ERR_OK;
 }
 

@@ -12,8 +12,10 @@
 
 #include <gtest/gtest.h>
 
+#include "fix/c_api/dict.h"    // fixpp_dict_destroy (F1 negative tests)
 #include "fix/c_api/engine.h"
 #include "fix/c_api/session.h"
+#include "fix/c_api/version.h"  // FIXPP_C_ABI_VERSION_MAJOR/MINOR (R2-F1 counter-test)
 
 #include "capi_loopback_support.hpp"  // make_test_dict_handle / destroy_test_dict_handle (L-050-1)
 
@@ -161,6 +163,77 @@ TEST(CapiConfigBuilders, DestroyIsNullSafe) {
     fixpp_engine_config_destroy(nullptr);   // must not crash
     fixpp_session_config_destroy(nullptr);  // must not crash
     SUCCEED();
+}
+
+// ── F1 negative tests: fixpp_session_config_set_dictionary tag gate (gate-b/r1) ──
+
+// (a) A destroyed dict handle (tag_==DEAD, dict==null) must return INVALID_HANDLE,
+//     not CAPI_CONFIG_INVALID — the shell is retained by fixpp_dict_destroy so the
+//     pointer is still readable; only the positive tag check discriminates.
+TEST(CapiConfigBuilders, DictionaryRejectsDestroyedHandle) {
+    fixpp_session_config_t* cfg = nullptr;
+    ASSERT_EQ(fixpp_session_config_create(&cfg), FIXPP_ERR_OK);
+    // make_test_dict_handle() creates a live DICT-tagged handle; fixpp_dict_destroy
+    // tombstones it to DEAD and retains the shell so d is still a valid pointer.
+    fixpp_dict_t* d = make_test_dict_handle();
+    fixpp_dict_destroy(d);
+    // Pre-fix: dict->dict==nullptr → CAPI_CONFIG_INVALID (wrong code, wrong message).
+    // Post-fix: tag_==DEAD != DICT → INVALID_HANDLE.
+    EXPECT_EQ(fixpp_session_config_set_dictionary(cfg, d), FIXPP_ERR_INVALID_HANDLE);
+    fixpp_session_config_destroy(cfg);
+}
+
+// (b) An ENGINE-tagged shell cast as fixpp_dict_t* — the positive tag gate must fire
+//     before reading the dict shared_ptr.  Pre-fix: dict!=nullptr → proceeds to set
+//     cfg->cfg.dictionary → FIXPP_ERR_OK (function silently accepts garbage).
+//     Post-fix: tag_!=DICT → INVALID_HANDLE without reading the shared_ptr.
+TEST(CapiConfigBuilders, DictionaryRejectsTypeMismatchedHandle) {
+    fixpp_session_config_t* cfg = nullptr;
+    ASSERT_EQ(fixpp_session_config_create(&cfg), FIXPP_ERR_OK);
+    fixpp_dict_t* h = make_test_dict_handle();          // real DICT handle, dict!=null
+    reinterpret_cast<fixpp_dict*>(h)->tag_ = FIXPP_HANDLE_TAG_ENGINE;  // corrupt tag
+    EXPECT_EQ(fixpp_session_config_set_dictionary(cfg, h), FIXPP_ERR_INVALID_HANDLE);
+    // Restore the DICT tag before destroy — after gate-b/r2 fixpp_dict_destroy has a
+    // positive DICT-tag gate and would no-op (and leak) if tag_==ENGINE at call time.
+    reinterpret_cast<fixpp_dict*>(h)->tag_ = FIXPP_HANDLE_TAG_DICT;
+    fixpp_dict_destroy(h);   // dict.reset() + DEAD tag + retain shell
+    fixpp_session_config_destroy(cfg);
+}
+
+// (c) R2-F1 (gate-b/r2): fixpp_dict_destroy with a wrong-type ENGINE handle must be a
+//     safe no-op — the positive DICT-tag gate must fire BEFORE any mutation.
+//     Pre-fix: h->dict.reset() operates on fixpp_engine::app_ at the same struct offset
+//     (resetting it to null), then h->tag_=DEAD tombstones the engine tag → engine_destroy
+//     sees DEAD and silently no-ops (EngineState leaked; engine shell pushed into the dict
+//     dead-shell registry under the wrong type).
+//     Post-fix: tag_!=DICT → early return; engine tag remains FIXPP_HANDLE_TAG_ENGINE.
+TEST(CapiDictDestroy, WrongTypeEngineHandleIsNoOpSafe) {
+    fixpp_engine_config_t* ec = nullptr;
+    ASSERT_EQ(fixpp_engine_config_create(&ec), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_engine_config_set_realtime_clock(ec), FIXPP_ERR_OK);
+    fixpp_engine_t* eng = nullptr;
+    ASSERT_EQ(fixpp_engine_create(ec, FIXPP_C_ABI_VERSION_MAJOR, FIXPP_C_ABI_VERSION_MINOR,
+                                  &eng),
+              FIXPP_ERR_OK);
+    ASSERT_NE(eng, nullptr);
+
+    auto* h = reinterpret_cast<fixpp_engine*>(eng);
+    ASSERT_EQ(h->tag_, FIXPP_HANDLE_TAG_ENGINE);  // sanity: starts as ENGINE
+
+    // Type-confuse: pass the engine handle to fixpp_dict_destroy.
+    fixpp_dict_destroy(reinterpret_cast<fixpp_dict_t*>(eng));
+
+    // Post-call: tag_ must be UNCHANGED.
+    // Pre-fix: h->tag_ == FIXPP_HANDLE_TAG_DEAD (corrupted) → FAILS (RED).
+    // Post-fix: h->tag_ == FIXPP_HANDLE_TAG_ENGINE (untouched) → passes (GREEN).
+    EXPECT_EQ(h->tag_, FIXPP_HANDLE_TAG_ENGINE);
+
+    // fixpp_engine_destroy must still properly reclaim the EngineState.
+    // Pre-fix: engine_destroy sees DEAD → no-op → count unchanged → EXPECT_LT FAILS.
+    // Post-fix: engine intact → destroys normally → EngineState count decrements.
+    long const count_before = fixpp_capi::detail::live_state_count();
+    fixpp_engine_destroy(eng);
+    EXPECT_LT(fixpp_capi::detail::live_state_count(), count_before);
 }
 
 }  // namespace

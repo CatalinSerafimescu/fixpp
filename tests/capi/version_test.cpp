@@ -23,13 +23,13 @@ TEST(CapiVersion, CApiVersionMatchesPatchMacro) {
     EXPECT_EQ(v.patch, static_cast<uint16_t>(FIXPP_C_ABI_VERSION_PATCH));
 }
 
-// Concrete value assertions (MAJOR=0, MINOR=4, PATCH=0 — 051 Feature C additive
-// MINOR bump from 0.3.0 for the 33 new message-surface symbols + the [2i §4.3]
-// session/app error-block amendment, FR-019).
-TEST(CapiVersion, CApiVersionIsExactly_0_4_0) {
+// Concrete value assertions (MAJOR=0, MINOR=5, PATCH=0 — 052 Python-readiness
+// additive MINOR bump from 0.4.0 for the 7 new dict-loader / transport-endpoint /
+// field-iteration symbols (FR-009/SC-006); NO new error codes).
+TEST(CapiVersion, CApiVersionIsExactly_0_5_0) {
     fixpp_version_t v = fixpp_version();
     EXPECT_EQ(v.major, uint16_t{0});
-    EXPECT_EQ(v.minor, uint16_t{4});
+    EXPECT_EQ(v.minor, uint16_t{5});
     EXPECT_EQ(v.patch, uint16_t{0});
 }
 
@@ -40,8 +40,8 @@ TEST(CapiVersion, CompositeMacroValue) {
         (static_cast<uint32_t>(FIXPP_C_ABI_VERSION_MINOR) << 8u) |
         static_cast<uint32_t>(FIXPP_C_ABI_VERSION_PATCH);
     EXPECT_EQ(static_cast<uint32_t>(FIXPP_C_ABI_VERSION), expected);
-    // Exact numeric value for MAJOR=0, MINOR=4, PATCH=0
-    EXPECT_EQ(static_cast<uint32_t>(FIXPP_C_ABI_VERSION), uint32_t{(0u << 16u) | (4u << 8u) | 0u});
+    // Exact numeric value for MAJOR=0, MINOR=5, PATCH=0
+    EXPECT_EQ(static_cast<uint32_t>(FIXPP_C_ABI_VERSION), uint32_t{(0u << 16u) | (5u << 8u) | 0u});
 }
 
 // ── Library version accessors ─────────────────────────────────────────────────

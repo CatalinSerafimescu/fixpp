@@ -136,6 +136,34 @@ TEST(MessageRead, OutboundFlavorGetStringReturnsInvalidHandle) {
     EXPECT_EQ(fixpp_msg_get_string(p, 35, &out, &len), FIXPP_ERR_INVALID_HANDLE);
 }
 
+// F2 gate-b/r1: positive tag check in check_inbound_msg (mirrors
+// MessageFieldIteration.TypeMismatchedHandleReturnsInvalidHandle).
+// An ENGINE-tagged handle with a non-null view slips past the DEAD-only guard
+// (ENGINE != DEAD) and then the view-null check (view != nullptr), landing in a
+// real MessageView lookup on the wrong-layout struct.  The positive tag check
+// (tag_ != FIXPP_HANDLE_TAG_MSG → INVALID_HANDLE) is the only guard that catches it.
+//
+// Pre-fix (DEAD-only guard): ENGINE != DEAD → passes; view != null → passes; returns
+// the view pointer → fixpp_msg_get_string looks up tag 35 in the real view → OK.
+// Post-fix (positive tag): ENGINE != MSG → INVALID_HANDLE.
+TEST(MessageRead, TypeMismatchedHandleReturnsInvalidHandle) {
+    auto buf = make_raw_frame("35=D\x01" "49=SENDER\x01");
+    auto fv = fixpp::wire::test::make_frame_view(buf);
+    ASSERT_TRUE(fv.has_value());
+    std::pmr::monotonic_buffer_resource arena;
+    MessageView<access_mode::Index> mv{*fv, &arena};
+
+    fixpp_msg bad{};
+    bad.tag_ = FIXPP_HANDLE_TAG_ENGINE;  // wrong type, non-DEAD
+    bad.view = &mv;                       // non-null: DEAD-only guard would sail past
+    const auto* p = reinterpret_cast<const fixpp_msg_t*>(&bad);
+
+    const char* out = nullptr;
+    size_t len = 0;
+    EXPECT_EQ(fixpp_msg_get_string(p, 35, &out, &len), FIXPP_ERR_INVALID_HANDLE);
+    EXPECT_EQ(fixpp_msg_get_msg_type(p, &out, &len), FIXPP_ERR_INVALID_HANDLE);
+}
+
 TEST(MessageRead, GetMsgType) {
     auto buf = make_raw_frame("35=D\x01" "49=SENDER\x01" "56=TARGET\x01");
     auto fv = fixpp::wire::test::make_frame_view(buf);

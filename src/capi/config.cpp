@@ -15,6 +15,8 @@
 #include "fix/c_api/session.h"
 
 #include <chrono>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
 #include "capi_internal.hpp"
@@ -190,10 +192,20 @@ fixpp_error_t fixpp_session_config_set_dictionary(fixpp_session_config_t* cfg, f
     if (cfg == nullptr) {
         return FIXPP_ERR_NULL_HANDLE;
     }
-    if (dict == nullptr || dict->dict == nullptr) {
-        return FIXPP_ERR_CAPI_CONFIG_INVALID;
+    if (dict == nullptr) {
+        return FIXPP_ERR_CAPI_CONFIG_INVALID;  // null outer handle — existing mapping preserved
     }
-    cfg->cfg.dictionary = dict->dict;  // thin pass-through (creation is Feature C / L-050-1)
+    // Positive tag gate ([2i §4.2.2]): destroyed (DEAD) or wrong-type handles return
+    // INVALID_HANDLE BEFORE the shared_ptr member is read.  A DEAD tag means dict was
+    // already destroyed; any non-DICT tag means a mismatched handle was cast.
+    const auto* h = reinterpret_cast<const fixpp_dict*>(dict);
+    if (h->tag_ != FIXPP_HANDLE_TAG_DICT) {
+        return FIXPP_ERR_INVALID_HANDLE;
+    }
+    if (h->dict == nullptr) {
+        return FIXPP_ERR_CAPI_CONFIG_INVALID;  // empty dict wrapper
+    }
+    cfg->cfg.dictionary = h->dict;  // thin pass-through (creation is Feature C / L-050-1)
     return FIXPP_ERR_OK;
 }
 
@@ -203,6 +215,61 @@ fixpp_error_t fixpp_session_config_set_reset_on_logon(fixpp_session_config_t* cf
         return FIXPP_ERR_NULL_HANDLE;
     }
     cfg->cfg.reset_on_logon = reset_on_logon;
+    return FIXPP_ERR_OK;
+}
+
+fixpp_error_t fixpp_session_config_set_reset_seqnum_policy(fixpp_session_config_t* cfg,
+                                                            fixpp_reset_seqnum_policy kind) {
+    if (cfg == nullptr) {
+        return FIXPP_ERR_NULL_HANDLE;
+    }
+    // A C caller can pass an out-of-range value (FFI bypass). A typed enum LOAD of
+    // an out-of-range value is UB (-fsanitize=enum), so read the raw bytes and
+    // switch on the integer; an out-of-range value falls through to CONFIG_INVALID.
+    int raw = 0;
+    static_assert(sizeof(kind) <= sizeof(raw), "kind wider than int");
+    std::memcpy(&raw, &kind, sizeof(kind));
+    switch (raw) {
+        case FIXPP_RESET_SEQNUM_BILATERAL_STRICT:
+            cfg->cfg.reset_seqnum_policy_field =
+                fixpp::session::reset_seqnum_policy::bilateral_strict;
+            return FIXPP_ERR_OK;
+        case FIXPP_RESET_SEQNUM_BILATERAL_LENIENT:
+            cfg->cfg.reset_seqnum_policy_field =
+                fixpp::session::reset_seqnum_policy::bilateral_lenient;
+            return FIXPP_ERR_OK;
+        case FIXPP_RESET_SEQNUM_UNILATERAL:
+            cfg->cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::unilateral;
+            return FIXPP_ERR_OK;
+    }
+    return FIXPP_ERR_CAPI_CONFIG_INVALID;  // out-of-range cast (FFI bypass)
+}
+
+fixpp_error_t fixpp_session_config_set_tcp_endpoint(fixpp_session_config_t* cfg, const char* host,
+                                                     uint16_t port) {
+    if (cfg == nullptr || host == nullptr) {
+        return FIXPP_ERR_NULL_HANDLE;
+    }
+    if (host[0] == '\0') {
+        return FIXPP_ERR_CAPI_CONFIG_INVALID;  // empty host (unusable)
+    }
+    // Steady-state thunk (spec.md FR-011): an escaping exception is an invariant
+    // violation → fatal-log + abort, never translated.  Mirrors
+    // fixpp_session_acceptor_bound_endpoint in session.cpp.
+    try {
+        // Mirror the L-050-5 seam (capi_loopback_support.hpp:67-68), now public:
+        // set the reconnect_endpoint so the engine's auto-derived plaintext factory
+        // can connect (initiator) or bind (acceptor), and install the transport_send
+        // placeholder that the accept loop rebinds to the live socket.
+        cfg->cfg.reconnect_endpoint = fixpp::transport::Endpoint{host, port};
+        cfg->cfg.transport_send = [](std::span<const std::byte>) {};
+    } catch (...) {
+        std::fputs(
+            "fixpp C-ABI: fixpp_session_config_set_tcp_endpoint caught an escaping exception; "
+            "aborting (steady-state invariant violation, FR-011)\n",
+            stderr);
+        std::abort();
+    }
     return FIXPP_ERR_OK;
 }
 

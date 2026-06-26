@@ -30,7 +30,7 @@
 
 /** C-ABI surface version — bumped independently of the C++ library version. */
 #define FIXPP_C_ABI_VERSION_MAJOR 0
-#define FIXPP_C_ABI_VERSION_MINOR 4
+#define FIXPP_C_ABI_VERSION_MINOR 5
 #define FIXPP_C_ABI_VERSION_PATCH 0
 
 /** Composite: (MAJOR<<16)|(MINOR<<8)|PATCH — single-integer compatibility check. */

@@ -136,6 +136,30 @@ fixpp_error_t fixpp_session_is_established(fixpp_session_t* session, bool* out_e
     return FIXPP_ERR_OK;
 }
 
+fixpp_error_t fixpp_session_acceptor_bound_endpoint(fixpp_session_t* session, uint16_t* port_out) {
+    // Steady-state thunk: an escaping C++ exception is an invariant violation →
+    // fatal-log + abort, NOT translated (mirrors fixpp_session_send, FR-008).
+    if (port_out == nullptr) {
+        return FIXPP_ERR_NULL_HANDLE;
+    }
+    *port_out = 0;
+    if (fixpp_error_t c = check_session(session); c != FIXPP_ERR_OK) {
+        return c;  // NULL_HANDLE if session==nullptr; INVALID_HANDLE if destroyed
+    }
+    fixpp_engine* e = session->engine;
+    try {
+        // check_session guarantees state_ non-null and engine_ has_value().
+        *port_out = e->state_->engine_->acceptor_bound_endpoint(session->id).port;
+    } catch (...) {
+        std::fputs(
+            "fixpp C-ABI: fixpp_session_acceptor_bound_endpoint caught an escaping exception; "
+            "aborting (steady-state invariant violation, FR-008)\n",
+            stderr);
+        std::abort();
+    }
+    return FIXPP_ERR_OK;
+}
+
 fixpp_error_t fixpp_session_close(fixpp_session_t* session) {
     if (fixpp_error_t c = check_session(session); c != FIXPP_ERR_OK) {
         return c;

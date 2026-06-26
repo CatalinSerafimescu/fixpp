@@ -181,6 +181,22 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      # The Debug+sanitizer legs (asan/ubsan/tsan) build ~1748 instrumented
+      # executables and sit at the runner's ~14 GB free-disk ceiling. UBSan
+      # (slightly larger binaries from its type-check metadata) tipped over and
+      # failed `ld: final link failed: No space left on device`. Reclaim the
+      # preinstalled SDKs we don't use (~30 GB) to restore margin for every leg.
+      - name: Free up disk space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: false
+          docker-images: true
+          swap-storage: false
+
       - name: Install Clang 22 (apt.llvm.org) + GCC 13 + Ninja
         run: |
           # Clang 22 matches local dev toolchain (constitution Article II §2).

@@ -81,6 +81,15 @@ typedef enum fixpp_toapp_verdict {
  *  [contracts/toapp-callback.md] */
 typedef fixpp_toapp_verdict (*fixpp_send_cb)(const fixpp_msg_t* outbound, void* userdata);
 
+/** Sequence-number reset policy (FR-005b / E-4). Values mirror the C++ enum class
+ *  reset_seqnum_policy : uint8_t in session_config.hpp (same integer ordinals).
+ *  ABI-stable: new values are additive; out-of-range values → CAPI_CONFIG_INVALID. */
+typedef enum fixpp_reset_seqnum_policy {
+    FIXPP_RESET_SEQNUM_BILATERAL_STRICT  = 0,  /**< Both peers must present 141=Y (default). */
+    FIXPP_RESET_SEQNUM_BILATERAL_LENIENT = 1,  /**< Either peer presenting 141=Y is sufficient. */
+    FIXPP_RESET_SEQNUM_UNILATERAL        = 2   /**< Always reset regardless of peer 141=Y. */
+} fixpp_reset_seqnum_policy;
+
 /* ── Session-config builder (opaque; FR-014) ───────────────────────────────
  * Reentrancy: single-thread per handle (each setter below restates the class so
  * the per-symbol reentrancy gate sees exactly one token). CONSUMED by
@@ -113,15 +122,49 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_config_set_security(
     fixpp_session_config_t* cfg, fixpp_security_kind kind,
     const char* cert, const char* key);
 
-/** Dictionary (required). The dict handle's creation is Feature C
- *  (fixpp_dict_load_*); Feature-B tests supply it via a test-only seam (L-050-1).
- *  Reentrancy: single-thread. */
+/** Dictionary (required). Pass a handle created by fixpp_dict_load_from_xml()
+ *  and release it with fixpp_dict_destroy() after the setter returns if the
+ *  caller no longer needs its own reference. Reentrancy: single-thread. */
 FIXPP_API_EXPORT fixpp_error_t fixpp_session_config_set_dictionary(
     fixpp_session_config_t* cfg, fixpp_dict_t* dict);
 
 /** Reset sequence numbers on logon. Reentrancy: single-thread. */
 FIXPP_API_EXPORT fixpp_error_t fixpp_session_config_set_reset_on_logon(
     fixpp_session_config_t* cfg, bool reset_on_logon);
+
+/**
+ * fixpp_session_config_set_reset_seqnum_policy — set the seqnum-reset acceptance policy.
+ *
+ * Writes SessionConfig::reset_seqnum_policy_field.  The enumerator values mirror
+ * the C++ enum class reset_seqnum_policy : uint8_t (same integer ordinals; 0=strict,
+ * 1=lenient, 2=unilateral).  The default (bilateral_strict) requires BOTH peers to
+ * send ResetSeqNumFlag(141)=Y for a reset to be accepted.  Use bilateral_lenient when
+ * only one side sends 141=Y (e.g. initiator reset_on_logon=true, acceptor=false).
+ *
+ * Reentrancy: single-thread.
+ * @return FIXPP_ERR_OK; FIXPP_ERR_NULL_HANDLE (NULL cfg); FIXPP_ERR_CAPI_CONFIG_INVALID
+ *         (out-of-range enum value).
+ */
+FIXPP_API_EXPORT fixpp_error_t fixpp_session_config_set_reset_seqnum_policy(
+    fixpp_session_config_t* cfg, fixpp_reset_seqnum_policy kind);
+
+/**
+ * fixpp_session_config_set_tcp_endpoint — set the session's TCP endpoint.
+ *
+ * For an INITIATOR: the peer endpoint to connect to.  For an ACCEPTOR: the bind
+ * endpoint (port 0 = OS-assigned ephemeral; read back via
+ * fixpp_session_acceptor_bound_endpoint after engine start).  Sets
+ * SessionConfig::reconnect_endpoint = {host, port} and the internal
+ * SessionConfig::transport_send placeholder that the engine's auto-derived plaintext
+ * factory replaces at connect/accept — the consumer never references transport_send.
+ * Call BEFORE fixpp_session_open (open copies the config by value).
+ *
+ * Reentrancy: single-thread.
+ * @return FIXPP_ERR_OK; FIXPP_ERR_NULL_HANDLE (NULL cfg or host);
+ *         FIXPP_ERR_CAPI_CONFIG_INVALID (empty host string).
+ */
+FIXPP_API_EXPORT fixpp_error_t fixpp_session_config_set_tcp_endpoint(
+    fixpp_session_config_t* cfg, const char* host, uint16_t port);
 
 /** Destroy a session-config builder. NULL-safe; never-throws. Do NOT call after
  *  the builder was consumed by a successful fixpp_session_open.
@@ -178,6 +221,24 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_is_established(fixpp_session_t* ses
                                                            bool* out_established);
 
 /**
+ * fixpp_session_acceptor_bound_endpoint — read back an acceptor's OS-assigned bound port.
+ *
+ * Writes *port_out = Engine::acceptor_bound_endpoint(id).port.  For the port-0
+ * ephemeral-bind workflow: a session not yet bound (engine not yet started, or the
+ * accept-loop has not fired) yields *port_out = 0 with FIXPP_ERR_OK — poll until
+ * non-zero.  The bind host is consumer-known (no host out-param).
+ *
+ * Reentrancy: thread-safe. O(1) snapshot read, like fixpp_session_is_established.
+ * THUNK: steady-state — an escaping exception is an invariant violation → fatal
+ * log + abort, NOT translated to a code.
+ * @return FIXPP_ERR_OK (+ *port_out, possibly 0 if not yet bound);
+ *         FIXPP_ERR_NULL_HANDLE (NULL session or port_out);
+ *         FIXPP_ERR_INVALID_HANDLE (destroyed/invalidated session).
+ */
+FIXPP_API_EXPORT fixpp_error_t fixpp_session_acceptor_bound_endpoint(fixpp_session_t* session,
+                                                                      uint16_t* port_out);
+
+/**
  * fixpp_session_send — send an application-message payload (= Engine::send).
  *
  * `frame`/`len` is an APPLICATION-MESSAGE PAYLOAD as a committed byte span (a
@@ -186,8 +247,8 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_is_established(fixpp_session_t* ses
  * and contain only application fields, SOH-terminated. The session itself stamps
  * the header/trailer (8/9/49/56/52/10) and ASSIGNS the in-sequence MsgSeqNum(34),
  * so the payload MUST NOT contain session framing tags (8/9/34/49/52/56/10) at a
- * field boundary — a payload that does is rejected `app_payload_malformed`
- * (→ FIXPP_ERR_UNKNOWN, L-050-4) with no transmit. The span is borrowed
+ * field boundary — a payload that does is rejected → FIXPP_ERR_APP_PAYLOAD_MALFORMED
+ * with no transmit. The span is borrowed
  * (read-only during the call; the engine deep-copies); the caller may free/reuse
  * on return. Honours durable-before-transmit by reference (FR-009).
  *
