@@ -96,6 +96,10 @@ static const char* fixpp_py_str_utf8(PyObject* o, Py_ssize_t* out_len,
 /* The raw 4-arg fixpp_engine_create is replaced by the 1-arg engine_create
  * hand-wrapper (T008) that injects the C-ABI version macros. */
 %ignore fixpp_engine_create;
+/* The (fixpp_recv_cb cb, void* userdata) variant is replaced by the
+ * fixpp_py_register_callback hand-wrapper (below) that INCREFs the callable
+ * only after the native call returns FIXPP_ERR_OK (Fix 1 / RC-A). */
+%ignore fixpp_session_register_callback;
 
 /* ── fixpp.Error: create on the C module, re-export onto fixpp.* ─────────────*/
 %init %{
@@ -168,7 +172,10 @@ Error = _fixpp.Error
     if (_s == NULL) {
         if (_err == 1) FIXPP_PY_RAISE("in '$symname': '$1_name' must be a str");
         if (_err == 2) FIXPP_PY_RAISE("in '$symname': '$1_name' must not contain an embedded NUL");
-        SWIG_fail;  /* _err == 0: encoding error already set */
+        /* _err == 0: PyUnicode_AsUTF8AndSize failed (e.g. lone surrogate). Clear
+         * the bare codec exception and route through fixpp.Error (T-3 / FR-008). */
+        PyErr_Clear();
+        FIXPP_PY_RAISE("in '$symname': '$1_name' must be valid UTF-8 (no surrogate characters)");
     }
     $1 = (char*)_s;
 }
@@ -182,7 +189,9 @@ Error = _fixpp.Error
         if (_s == NULL) {
             if (_err == 1) FIXPP_PY_RAISE("in '$symname': '$1_name' must be str or None");
             if (_err == 2) FIXPP_PY_RAISE("in '$symname': '$1_name' must not contain an embedded NUL");
-            SWIG_fail;
+            /* _err == 0: codec failure — same bridge as FIXPP_CONFIG_STR above. */
+            PyErr_Clear();
+            FIXPP_PY_RAISE("in '$symname': '$1_name' must be valid UTF-8 (no surrogate characters)");
         }
         $1 = (char*)_s;
     }
@@ -202,7 +211,9 @@ Error = _fixpp.Error
     const char* _s = fixpp_py_str_utf8($input, &_n, 0 /* allow inner NUL: ptr+len */, &_err);
     if (_s == NULL) {
         if (_err == 1) FIXPP_PY_RAISE("in '$symname': expected a str");
-        SWIG_fail;  /* _err == 0: encoding error already set */
+        /* _err == 0: codec failure (ptr+len path; embedded NUL is allowed here). */
+        PyErr_Clear();
+        FIXPP_PY_RAISE("in '$symname': string must be valid UTF-8 (no surrogate characters)");
     }
     $1 = (char*)_s;
     $2 = (size_t)_n;
@@ -242,8 +253,15 @@ Error = _fixpp.Error
     $2 = &_n;
 }
 %typemap(argout) (const char** value_out, size_t* len_out) {
-    $result = SWIG_AppendOutput($result,
-        PyUnicode_FromStringAndSize(*$1, (Py_ssize_t)(*$2)));
+    PyObject* _str = PyUnicode_FromStringAndSize(*$1, (Py_ssize_t)(*$2));
+    if (_str == NULL) {
+        /* Wire bytes not valid UTF-8 (P3: unlikely on a conforming peer, but
+         * a non-NULL result from PyUnicode_FromStringAndSize is not guaranteed).
+         * Route through fixpp.Error (T-3 / FR-008). */
+        PyErr_Clear();
+        FIXPP_PY_RAISE("msg_get_string: field value is not valid UTF-8");
+    }
+    $result = SWIG_AppendOutput($result, _str);
 }
 
 /* ── T011: inbound callback trampoline (GIL + Py_INCREF + borrowed msg) ──────
@@ -257,7 +275,17 @@ Error = _fixpp.Error
  *      must read in-window (L-053-1; no active post-window guard until PY-004). */
 %wrapper %{
 static void fixpp_py_recv_trampoline(const fixpp_msg_t* inbound, void* userdata) {
+    /* FIXPP_PY_GIL_CANARY: define at compile-time to ELIDE the GIL acquire /
+     * release.  With the canary active the TSan leg MUST report data races
+     * in CPython refcount / eval internals (the races the suppressions mask).
+     * Proves the SC-004 TSan gate would go RED on a real GIL bug.  Canary
+     * instructions: cmake --build build/linux-clang-tsan-py ... after passing
+     * -DCMAKE_CXX_FLAGS="-DFIXPP_PY_GIL_CANARY=1" (or add to the .i file
+     * temporarily), then run test_roundtrip under TSan and confirm RED output.
+     * DO NOT define in production / CI builds. */
+#ifndef FIXPP_PY_GIL_CANARY
     PyGILState_STATE gil = PyGILState_Ensure();
+#endif
     PyObject* cb = (PyObject*)userdata;                       /* INCREF'd at register */
     PyObject* proxy = SWIG_NewPointerObj(SWIG_as_voidptr((void*)inbound),
                                          SWIGTYPE_p_fixpp_msg, 0 /* own=0, non-owning */);
@@ -269,12 +297,26 @@ static void fixpp_py_recv_trampoline(const fixpp_msg_t* inbound, void* userdata)
     /* Thin: surface but do not propagate a Python exception into the worker
      * (PY-003 owns the propagation policy). */
     if (PyErr_Occurred()) PyErr_Print();
+#ifndef FIXPP_PY_GIL_CANARY
     PyGILState_Release(gil);
+#endif
 }
 %}
 
+/* T011: pass-through typemap for the hand-wrapper's callable argument.
+ * The callable-check lives here (FIXPP_PY_RAISE fires before $action if the
+ * check fails, so the wrapper body never runs and no INCREF occurs).
+ * The INCREF itself is deferred to the wrapper body so it happens only after
+ * fixpp_session_register_callback returns FIXPP_ERR_OK. */
+%typemap(in) PyObject* py_callable {
+    if (!PyCallable_Check($input)) {
+        FIXPP_PY_RAISE("in 'session_register_callback': the callback must be callable");
+    }
+    $1 = $input;  /* pass through; wrapper body manages INCREF on success only */
+}
+
 /* FR-006 docstring: the threading/GIL contract on the public registration fn. */
-%feature("docstring") fixpp_session_register_callback
+%feature("docstring") fixpp_py_register_callback
 "session_register_callback(session, callable) -> None\n\n"
 "Register the inbound receive callback (MUST be called before engine_start).\n"
 "`callable` is invoked as callable(inbound_msg) on an engine worker thread with\n"
@@ -284,15 +326,26 @@ static void fixpp_py_recv_trampoline(const fixpp_msg_t* inbound, void* userdata)
 "deadlock). The callable is held alive until interpreter exit (PY-004 adds the\n"
 "deregistration / refcount-release registry).";
 
-/* register_callback: Python callable -> (trampoline, INCREF'd callable). */
-%typemap(in) (fixpp_recv_cb cb, void* userdata) {
-    if (!PyCallable_Check($input)) {
-        FIXPP_PY_RAISE("in '$symname': the callback must be callable");
+/* Hand-wrapper: INCREF only after FIXPP_ERR_OK (Fix 1 / RC-A Gate-B r1).
+ * The callable check is in the %typemap(in) PyObject* py_callable above.
+ * The T012 fixpp_error_t out-typemap raises fixpp.Error on non-OK return. */
+%rename("session_register_callback") fixpp_py_register_callback;
+%inline %{
+static fixpp_error_t fixpp_py_register_callback(
+        fixpp_session_t* session, PyObject* py_callable) {
+    /* Callable check done in typemap; py_callable is a valid callable here. */
+    Py_INCREF(py_callable);
+    fixpp_error_t err = fixpp_session_register_callback(
+        session, fixpp_py_recv_trampoline, (void*)py_callable);
+    if (err != FIXPP_ERR_OK) {
+        /* Native refused (e.g. post-start registration).  Release the ref we
+         * just acquired — the C-ABI never stored it (session.cpp:311-313
+         * returns before slot->userdata = userdata at 314-317). */
+        Py_DECREF(py_callable);
     }
-    Py_INCREF($input);  /* load-bearing; held until interpreter exit (PY-004 owns release) */
-    $1 = fixpp_py_recv_trampoline;
-    $2 = (void*)$input;
+    return err;
 }
+%}
 
 /* ── T008: engine_create(cfg) hand-wrapper (injects the version macros) ──────
  * The real symbol is the 4-arg fixpp_engine_create(cfg, major, minor, &out)

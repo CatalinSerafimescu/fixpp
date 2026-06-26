@@ -189,3 +189,87 @@ def test_bad_dict_path_raises_fixpp_error():
     # The message must be the human-readable strerror text, not a bare code int.
     assert not msg.strip().lstrip("-").isdigit(), \
         f"expected fixpp_strerror text, got a bare code: {msg!r}"
+
+
+# ── Gate-B r1 counter-tests (RC-A) ───────────────────────────────────────────
+
+def test_register_callback_after_start_no_leak():
+    """A failed session_register_callback (post-start, native returns non-OK) must
+    NOT hold a reference to the callable.
+
+    Fix 1 / RC-A (Gate-B r1): the old %typemap(in) Py_INCREF'd before the call;
+    on failure the T012 out-typemap raised without a matching Py_DECREF, leaking
+    the callable.  The hand-wrapper INCREFs only after FIXPP_ERR_OK.
+
+    Discrimination: revert the fix → weakref() is non-None after gc.collect()
+    (the leaked C-side ref kept the object alive).  With the fix it IS None."""
+    import gc
+    import weakref
+
+    dict_h = fixpp.dict_load_from_xml(_dict_path())
+    eng = sess = None
+    try:
+        ec = fixpp.engine_config_create()
+        fixpp.engine_config_set_realtime_clock(ec)
+        eng = fixpp.engine_create(ec)
+        # Initiator targeting a refused port — engine_start returns immediately
+        # (the async connect attempt runs in the background; we don't need it).
+        sc = _make_session_config(
+            dict_h, fixpp.ROLE_INITIATOR, "A", "B", 9)  # port 9 always refused
+        sess = fixpp.session_open(eng, sc)
+        fixpp.engine_start(eng)   # post-start: register_callback MUST return non-OK
+
+        class _TrackableCallback:
+            """Minimal callable; class instances are weakreffable."""
+            def __call__(self, msg):
+                pass
+
+        callback = _TrackableCallback()
+        ref = weakref.ref(callback)
+
+        with pytest.raises(fixpp.Error):
+            fixpp.session_register_callback(sess, callback)
+
+        del callback   # drop the only Python-side reference
+        gc.collect()   # force cycle collection
+
+        assert ref() is None, (
+            "session_register_callback leaked a reference to the callable on "
+            "the failure path — Py_DECREF is missing after non-OK native return")
+    finally:
+        if sess is not None:
+            try:
+                fixpp.session_close(sess)
+            except fixpp.Error:
+                pass  # non-established initiator (port 9) returns lifecycle error
+        if eng is not None:
+            fixpp.engine_destroy(eng)
+        fixpp.dict_destroy(dict_h)
+
+
+def test_codec_failure_routes_through_fixpp_error():
+    """A str containing a lone surrogate raises fixpp.Error, not UnicodeEncodeError.
+
+    Fix 2 / RC-A (Gate-B r1): the old code left a bare UnicodeEncodeError set by
+    PyUnicode_AsUTF8AndSize in the exception state (the _err==0 SWIG_fail path).
+    The fix calls PyErr_Clear() then FIXPP_PY_RAISE so all conversion failures
+    route through fixpp.Error (T-3 / FR-008 single binding exception type).
+
+    Discrimination: revert the fix → pytest.raises(fixpp.Error) does NOT catch a
+    UnicodeEncodeError and the test fails with an unexpected exception type."""
+    sc = fixpp.session_config_create()
+    try:
+        # '\ud800' is an unpaired high surrogate — not representable in UTF-8.
+        # PyUnicode_AsUTF8AndSize raises UnicodeEncodeError on it; the old code
+        # let that propagate as a bare Python exception; the fix normalises to
+        # fixpp.Error.
+        with pytest.raises(fixpp.Error):
+            fixpp.session_config_set_begin_string(sc, "FIX.4\ud800.4")
+        # T009 FIXPP_CONFIG_STR_OR_NONE path (cert / key parameters):
+        with pytest.raises(fixpp.Error):
+            fixpp.session_config_set_security(
+                sc, fixpp.SECURITY_INSECURE_PLAIN_TCP,
+                "cert\ud800bad", None)   # surrogate in cert path
+    finally:
+        fixpp.session_config_destroy(sc)
+
