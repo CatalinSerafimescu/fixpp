@@ -19,33 +19,15 @@ Runs in a child process under a hard timeout so a hung worker cannot wedge the
 parent pytest. In-matrix (none/asan/tsan); expected outcome is no-hang.
 """
 
-import os
 import subprocess
-import sys
 
 import pytest
 
-import fixpp  # parent import; used to pass the extension dir to the child (cwd-robust)
-
-HERE = os.path.dirname(os.path.abspath(__file__))
-STAGING = os.path.join(HERE, "_gil_staging.py")
-HARD_TIMEOUT = float(os.environ.get("FIXPP_GIL_TIMEOUT", "45"))
-_FIXPP_DIR = os.path.dirname(os.path.abspath(fixpp.__file__))
-
-
-def _child_env():
-    # Pass the extension's ABSOLUTE dir so the child (cwd=HERE) imports fixpp
-    # regardless of a relative PYTHONPATH in the parent.
-    env = dict(os.environ)
-    env["PYTHONPATH"] = _FIXPP_DIR + os.pathsep + env.get("PYTHONPATH", "")
-    return env
+from _gil_staging import run_staging
 
 
 def _run_raising_scenario():
-    return subprocess.run(
-        [sys.executable, STAGING, "raise"],
-        cwd=HERE, env=_child_env(), capture_output=True, text=True,
-        timeout=HARD_TIMEOUT)
+    return run_staging("raise")
 
 
 @pytest.mark.parametrize("rep", range(3))

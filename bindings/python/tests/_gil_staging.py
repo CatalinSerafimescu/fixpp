@@ -53,6 +53,34 @@ POLL_INTERVAL = 0.02
 CALLBACK_PARK_TIMEOUT = 30.0
 
 
+# ── Parent-side runner (used by the test wrappers; NOT by the child __main__) ──
+_THIS_FILE = os.path.abspath(__file__)
+_FIXPP_DIR = os.path.dirname(os.path.abspath(fixpp.__file__))
+DEFAULT_HARD_TIMEOUT = float(os.environ.get("FIXPP_GIL_TIMEOUT", "45"))
+
+
+def child_env():
+    """Env for the staging child: prepend the extension's ABSOLUTE dir so
+    `import fixpp` works regardless of the child's cwd or a relative parent
+    PYTHONPATH (CI sets an absolute path; this makes the tests robust either
+    way). Inherits LD_PRELOAD + *SAN_OPTIONS so the child is instrumented under
+    the asan/tsan legs."""
+    env = dict(os.environ)
+    env["PYTHONPATH"] = _FIXPP_DIR + os.pathsep + env.get("PYTHONPATH", "")
+    return env
+
+
+def run_staging(*extra_args, timeout=DEFAULT_HARD_TIMEOUT):
+    """Spawn this staging as a child process (cwd = this file's dir) under a hard
+    timeout, so a hung worker cannot wedge the parent pytest. Returns the
+    CompletedProcess; raises subprocess.TimeoutExpired on a hang."""
+    import subprocess
+    return subprocess.run(
+        [sys.executable, _THIS_FILE, *extra_args],
+        cwd=os.path.dirname(_THIS_FILE), env=child_env(),
+        capture_output=True, text=True, timeout=timeout)
+
+
 def _dict_path():
     here = os.path.dirname(os.path.abspath(__file__))
     repo_root = os.path.normpath(os.path.join(here, "..", "..", ".."))
