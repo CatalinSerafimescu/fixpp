@@ -27,9 +27,9 @@
 "  * The inbound message handed to the callback is a BORROWED, dispatch-window\n"
 "    view: read its fields inside the callback (e.g. msg_get_string); do NOT\n"
 "    store it or use it after the callback returns.\n"
-"  * Do NOT call a blocking API (session_send / session_close) from inside the\n"
-"    callback — it deadlocks (FR-013a). Copy the field out and send from another\n"
-"    thread.") fixpp
+"  * Do NOT call a blocking API (session_send / session_close / engine_destroy)\n"
+"    from inside the callback — it deadlocks (FR-013a). Copy the field out and\n"
+"    send from another thread.") fixpp
 
 %{
 #include <string.h>  /* strlen — embedded-NUL check in the config-str typemaps */
@@ -492,9 +492,9 @@ static void fixpp_py_recv_trampoline(const fixpp_msg_t* inbound, void* userdata)
 "`callable` is invoked as callable(inbound_msg) on an engine worker thread with\n"
 "the GIL reacquired by the binding. `inbound_msg` is a borrowed, dispatch-window\n"
 "view: read it inside the callback (msg_get_string); do not store it. Do NOT call\n"
-"a blocking API (session_send / session_close) from inside the callback (FR-013a:\n"
-"deadlock). The callable is held alive until interpreter exit (PY-004 adds the\n"
-"deregistration / refcount-release registry).";
+"a blocking API (session_send / session_close / engine_destroy) from inside the\n"
+"callback (FR-013a: deadlock). The callable is held alive until interpreter exit\n"
+"(PY-004 adds the deregistration / refcount-release registry).";
 
 /* Hand-wrapper: INCREF only after FIXPP_ERR_OK (Fix 1 / RC-A Gate-B r1).
  * The callable check is in the %typemap(in) PyObject* py_callable above.

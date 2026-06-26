@@ -121,3 +121,17 @@ def test_in_typemap_conversion_failures_are_root_message_only():
             assert str(e), "root conversion-failure carried no message"
     finally:
         fixpp.session_config_destroy(sc)
+
+
+def test_callback_deadlock_docstrings_name_all_three_blocking_apis():
+    # L-054-1 consistency pin: both the module docstring and the
+    # session_register_callback docstring must warn about all three blocking
+    # APIs (session_send, session_close, engine_destroy) that deadlock when
+    # called from inside the inbound callback.
+    for api in ("session_send", "session_close", "engine_destroy"):
+        assert api in fixpp.__doc__, (
+            f"fixpp.__doc__ missing '{api}' in callback-deadlock warning"
+        )
+        assert api in fixpp.session_register_callback.__doc__, (
+            f"session_register_callback.__doc__ missing '{api}' in deadlock warning"
+        )
