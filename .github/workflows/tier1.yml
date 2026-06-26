@@ -16,15 +16,25 @@ on:
 env:
   CONAN_HOME: ~/.conan2
 
-# Only the newest Tier 1 run per PR (or per branch on push:main) keeps
-# spending CI. Several runs pile up otherwise: each pre-gate push leaves a
-# SKIPPED run, then applying gate-{a,b}-done fires one `labeled` event per
-# label add/remove — every one re-triggers this workflow on the same head.
-# Without this, 3–4 full matrices ran in parallel after the gate labels
-# landed. Grouped by PR number (falls back to ref for push:main).
-concurrency:
-  group: tier1-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+# Concurrency is declared PER heavy job below, NOT workflow-wide. A
+# workflow-level `cancel-in-progress` group cancels the moment a new run ENTERS
+# the group — before its jobs are gated — so a skip-run (gate-precheck →
+# proceed=false, heavy jobs `if`-skipped) would cancel a genuine in-flight
+# matrix even though it does no work itself. Tier 1 is on-demand (heavy jobs run
+# only when `run-tier1` is freshly added), so pre-gate pushes and gate-{a,b}
+# label events routinely spawn exactly such skip-runs.
+#
+# A skipped job is never dispatched, so it never enters its concurrency group
+# and cannot cancel a real build. A genuine `run-tier1` re-trigger mid-matrix
+# DOES still cancel the prior matrix per job, which is the anti-pileup benefit
+# we keep. (The "3–4 matrices in parallel after the gate labels land" case is
+# already prevented by the `run-tier1` on-demand gate in gate-precheck — those
+# label events now produce skip-runs, not matrices; per-job concurrency is the
+# belt-and-suspenders for the re-add-mid-run case.) The linux matrix keys its
+# group on `matrix.preset` so the six preset legs don't cancel each other.
+#
+# gate-precheck is intentionally left ungrouped: it is cheap and must never
+# cancel anything.
 
 jobs:
   # ── Gate precheck — Tier 1 does not spend CI until gates are satisfied ────
@@ -166,6 +176,9 @@ jobs:
     runs-on: ubuntu-24.04
     needs: gate-precheck
     if: needs.gate-precheck.outputs.proceed == 'true'
+    concurrency:
+      group: tier1-${{ github.event.pull_request.number || github.ref }}-${{ matrix.preset }}
+      cancel-in-progress: true
 
     strategy:
       fail-fast: false
@@ -287,6 +300,9 @@ jobs:
     runs-on: ubuntu-24.04
     needs: gate-precheck  # runs in parallel with matrix, after the gate check
     if: needs.gate-precheck.outputs.proceed == 'true'
+    concurrency:
+      group: tier1-${{ github.event.pull_request.number || github.ref }}-coverage
+      cancel-in-progress: true
 
     steps:
       - uses: actions/checkout@v6
@@ -430,6 +446,9 @@ jobs:
     runs-on: ubuntu-24.04
     needs: gate-precheck
     if: needs.gate-precheck.outputs.proceed == 'true'
+    concurrency:
+      group: tier1-${{ github.event.pull_request.number || github.ref }}-python-bindings
+      cancel-in-progress: true
 
     steps:
       - uses: actions/checkout@v6
@@ -521,6 +540,9 @@ jobs:
     runs-on: ubuntu-24.04
     needs: gate-precheck
     if: needs.gate-precheck.outputs.proceed == 'true'
+    concurrency:
+      group: tier1-${{ github.event.pull_request.number || github.ref }}-check-layers
+      cancel-in-progress: true
 
     steps:
       - uses: actions/checkout@v6
@@ -548,6 +570,9 @@ jobs:
     runs-on: ubuntu-24.04
     needs: gate-precheck
     if: needs.gate-precheck.outputs.proceed == 'true'
+    concurrency:
+      group: tier1-${{ github.event.pull_request.number || github.ref }}-bench
+      cancel-in-progress: true
 
     steps:
       - uses: actions/checkout@v6
