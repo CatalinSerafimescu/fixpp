@@ -61,7 +61,7 @@ check_inbound_msg(const fixpp_msg_t* msg, fixpp_error_t* err) noexcept {
 }
 
 // Positive-tag guard for the CA-053 field-iteration path (FR-006 / FR-007).
-// Unlike check_inbound_msg (which excludes only DEAD), this uses a POSITIVE check:
+// Uses a POSITIVE check (gate-b/r1 F2, same discipline as check_inbound_msg):
 // tag_ must be exactly FIXPP_HANDLE_TAG_MSG.  Any other tag — ENGINE, DICT, DEAD,
 // or a foreign handle — returns FIXPP_ERR_INVALID_HANDLE regardless of the view
 // pointer.  The view-null check below still catches outbound-flavour handles that
