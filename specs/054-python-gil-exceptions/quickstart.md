@@ -10,16 +10,19 @@ import fixpp
 # Catch a specific category by type, recover the exact code.
 try:
     fixpp.dict_load_from_xml("/nope/missing.xml")
-except fixpp.ValidatorError as e:        # dict block [200,299]
-    print(e.code, e.name, e.message)     # e.g. 200 FIXPP_ERR_DICT_CONFIG "<strerror text>"
+except fixpp.CapiError as e:             # cross-cutting block [0,99]
+    print(e.code, e.name, e.message)     # 10 FIXPP_ERR_CAPI_CONFIG_INVALID "<strerror text>"
+except fixpp.ValidatorError:             # dict block [200,299] — e.g. a malformed dictionary
+    pass
 except fixpp.FixppError:                 # any fixpp error (root)
     pass
 
 # The shipped 053 alias still works:
 assert fixpp.Error is fixpp.FixppError
+cfg = fixpp.session_config_create()
 try:
-    fixpp.session_config_set_sender(cfg, "has\x00nul")   # in-typemap conversion failure
-except fixpp.FixppError as e:            # root (not a built-in TypeError)
+    fixpp.session_config_set_begin_string(cfg, "has\x00nul")   # in-typemap conversion failure
+except fixpp.FixppError as e:            # root (not a built-in TypeError); .message only
     print(e)
 
 # Introspect the mapping (single source of truth):
