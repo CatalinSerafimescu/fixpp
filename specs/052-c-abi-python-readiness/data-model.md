@@ -28,7 +28,7 @@ reads the tag at a fixed offset without an out-of-bounds field dereference.
   `config.cpp:189`); `fixpp_dict_destroy` releases the consumer's reference. The Dictionary's storage
   survives while any session still references it.
 - **Lifecycle:** `load_from_xml` (mints a live `tag_`) → (optional `set_dictionary` copies the shared_ptr)
-  → `destroy` (checks `tag_`, rewrites it to `FIXPP_HANDLE_TAG_DEAD`, retains a bounded dead shell).
+  → `destroy` (checks `tag_`, rewrites it to `FIXPP_HANDLE_TAG_DEAD`, retains the shell in an allocation-free intrusive tombstone list — O(load/destroy cycles), L-052-4).
   Destroy is NULL-safe and **idempotent double-destroy-safe via the tombstone** (per `[2i §4.2.1]`). The
   tombstone *mechanism* mirrors `fixpp_engine_destroy` (tag→DEAD + retained shell; dicts are O(few) →
   bounded); but because `[2i §4.2.1]` (line 415) mandates every `*_destroy` be thread-safe, the symbol

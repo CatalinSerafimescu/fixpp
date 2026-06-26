@@ -41,7 +41,7 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_dict_load_from_xml(const char* path, fixpp_
  * NULL-safe (NULL → no-op), never-throws. Owning/refcounted: releases ONE shared_ptr reference; the
  * underlying Dictionary persists while any session still references it. Idempotent double-destroy-safe
  * via a TOMBSTONE (per the [2i §4.2.1] owning-handle discipline): checks the handle's tag_, rewrites it
- * to FIXPP_HANDLE_TAG_DEAD, retains a bounded dead shell, so a second same-pointer destroy is a safe
+ * to FIXPP_HANDLE_TAG_DEAD, retains the shell in an allocation-free intrusive dead-shell list, so a second same-pointer destroy is a safe
  * no-op. The tombstone MECHANISM mirrors fixpp_engine_destroy (tag->DEAD + retained shell), but the full
  * destroy critical section {tag_ check, shared_ptr release, tag_=DEAD, dead-shell insert} runs under one
  * process-global lock (NOT a registry-only lock) and this symbol stays THREAD_SAFE because [2i §4.2.1]
