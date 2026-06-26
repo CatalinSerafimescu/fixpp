@@ -151,6 +151,7 @@ static constexpr std::uint32_t FIXPP_HANDLE_TAG_DICT   = 0xD1C70DEFu;  // live d
 struct fixpp_dict {
     std::uint32_t tag_;
     std::shared_ptr<const fixpp::dict::Dictionary> dict;
+    fixpp_dict* dead_next = nullptr;
     explicit fixpp_dict(std::shared_ptr<const fixpp::dict::Dictionary> d)
         : tag_(FIXPP_HANDLE_TAG_DICT), dict(std::move(d)) {}
 };

@@ -13,7 +13,6 @@
 #include <filesystem>
 #include <memory_resource>
 #include <mutex>
-#include <vector>
 
 #include "capi_internal.hpp"
 
@@ -23,18 +22,19 @@
 #include "fixpp/dict/xml_loader.hpp"
 
 // ── Dead-shell registry (retained-shell tombstone, gate-b/r1 comment F4):
-//    Each successful fixpp_dict_destroy pushes the shell pointer here so a
+//    Each successful fixpp_dict_destroy links the shell pointer here so a
 //    second same-pointer destroy can read tag_==DEAD and no-op safely (SC-004
 //    idempotent double-destroy).  Growth is O(load/destroy cycle count), NOT
 //    O(live dicts) — the shells are kept live in perpetuity so tag_ remains
 //    readable after the dict's internals are freed.  A high-frequency consumer
 //    should load a dictionary ONCE and reuse it; see L-052-4 in
-//    spec/behaviors-and-limitations.md.  Heap-allocated once; never freed
+//    spec/behaviors-and-limitations.md.  The retained shells are linked through
+//    fixpp_dict::dead_next, so destroy remains allocation-free and never throws
+//    across the C ABI boundary.  Head pointer is process-lifetime by design
 //    (prevents ASan/LSan false-positives on retained shells that outlive the
-//    process DSOcleanup order).
+//    process DSO cleanup order).
 // NOLINTBEGIN(cppcoreguidelines-avoid-non-const-global-variables)
-static std::vector<fixpp_dict*>* s_dead_dict_shells  // NOLINT(cert-err58-cpp)
-    = new std::vector<fixpp_dict*>();
+static fixpp_dict* s_dead_dict_head = nullptr;  // NOLINT(cert-err58-cpp)
 
 // Process-global mutex covering the FULL destroy critical section so that
 // concurrent same-pointer calls to fixpp_dict_destroy are data-race-free
@@ -85,9 +85,10 @@ void fixpp_dict_destroy(fixpp_dict_t* dict) {
     // the engine tag → fixpp_engine_destroy silently no-ops (EngineState leaked).
     // Positive check: only FIXPP_HANDLE_TAG_DICT passes; any other tag is a void no-op.
 
-    h->dict.reset();                        // release the consumer's shared_ptr reference
-    h->tag_ = FIXPP_HANDLE_TAG_DEAD;        // tombstone (tag_ now unambiguously dead)
-    s_dead_dict_shells->push_back(h);       // retain shell (bounded; see SHELL RETAIN note)
+    h->dict.reset();                  // release the consumer's shared_ptr reference
+    h->tag_ = FIXPP_HANDLE_TAG_DEAD;  // tombstone (tag_ now unambiguously dead)
+    h->dead_next = s_dead_dict_head;  // retain shell without allocating on destroy
+    s_dead_dict_head = h;
     // lk releases at end of scope
 }
 
