@@ -13,7 +13,7 @@ def test_import():
 
 
 def test_version_string_non_empty():
-    """fixpp_version_string() must return a non-empty string."""
-    v = fixpp.fixpp_version_string()
-    assert v, "fixpp_version_string() returned None or empty string"
+    """fixpp.version_string() must return a non-empty string."""
+    v = fixpp.version_string()  # renamed from fixpp_version_string (053 prefix strip)
+    assert v, "fixpp.version_string() returned None or empty string"
     assert len(v) > 0

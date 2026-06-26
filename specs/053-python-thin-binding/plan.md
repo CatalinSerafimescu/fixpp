@@ -25,7 +25,7 @@ import+version smoke test as the Tier-1 `python-bindings` gate. No `include/fix/
 **Language/Version**: SWIG 4.x interface + C/C++ trampoline (C++23 toolchain), CPython 3.12 reference interpreter; Python test code (pytest).
 **Primary Dependencies**: SWIG ≥4.0, `Python3::Module` (Development.Module), the static `fixpp_capi` archive (049/050/051/052 C-ABI), the bundled `dictionaries/FIX44.xml`.
 **Storage**: N/A (in-memory FIX session over loopback TCP).
-**Testing**: pytest (`bindings/python/tests/`) — one end-to-end loopback round-trip; plus a local AddressSanitizer build of the extension for the SC-004 evidence.
+**Testing**: pytest (`bindings/python/tests/`) — one end-to-end loopback round-trip; plus a CI AddressSanitizer (+ TSan) build of the extension for the SC-004 evidence.
 **Target Platform**: Linux x86_64 (in-tree build via `-DFIXPP_BUILD_PYTHON=ON`, the existing Tier-1 `python-bindings` job). macOS/Windows wheels and pip packaging are PY-005 / deferred.
 **Project Type**: Language binding (SWIG) over an existing C ABI — single project, additive consumer.
 **Performance Goals**: None (correctness slice; not a perf-sensitive module — Article VIII N/A).
@@ -43,7 +43,7 @@ import+version smoke test as the Tier-1 `python-bindings` gate. No `include/fix/
 | **VII §2/§3/§4** pytest, TDD mandatory, no untested code | E2E pytest authored **first** (RED), then binding to green; no library `src/` added without a test. | **PASS** (TDD ordering enforced in tasks) |
 | **VIII** Perf budgets / bench-in-PR | No perf-sensitive module touched; no bench required. | **N/A** |
 | **IX §1** Coverage ≥95/85 on touched modules | **No `include/`–`src/` library module is modified** (additive consumer); binding code under `bindings/` is outside the `include src` lcov scope and is exercised by the e2e. | **N/A** (stated, reviewer-checkable) |
-| **IX §2** Sanitizers Tier-1 (ASan/UBSan/TSan) | The trampoline is the riskiest surface → SC-004 requires a local ASan e2e run; CI-sanitized Python deferred to PY-002 (documented). | **PASS w/ documented deferral** |
+| **IX §2** Sanitizers Tier-1 (ASan/UBSan/TSan) | SC-004 wires an ASan (+ TSan) build+pytest leg of the extension into the Tier-1 `python-bindings` CI job — the trampoline worker path runs under sanitizers every PR. | **PASS** |
 | **X §1/§5/§6** ABI Policy — C-ABI is a versioned contract; ABI changes trigger Gate A + `/plan` sign-off | **C-ABI consumed unchanged** (no `c_api.h` edit) → X§6 ABI-change controls not triggered by an ABI change. Gate A still runs on this design bundle per the pipeline; reentrancy contracts are honored by the consumer (no blocking call from inside the callback — FR-013a). | **PASS** |
 | **XI §3** No `std::mutex` in awaitable headers | Trampoline is flat C/C++, includes no `asio::awaitable<...>`. | **N/A** |
 | **XII §5** Transport security — no implicit default; `unset` rejected at `Session::open()` | The loopback round-trip sets an **explicit** `insecure_plain_tcp` profile via `fixpp_session_config_set_security` (FR-004a, mirroring the gold reference); no implicit default, the `unset` sentinel is never relied on. §1–§4 vacuously satisfied (no TLS context); §7 not engaged (no app-layer `EncryptMethod(98)`). | **PASS** (explicit plaintext profile) |

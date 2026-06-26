@@ -1,0 +1,30 @@
+# bindings/python/tests/tsan_suppressions.txt
+#
+# CPython itself is NOT ThreadSanitizer-instrumented, so TSan reports false
+# data races inside the interpreter's own internals (refcounting, the GIL,
+# memory allocator, import machinery). 053 / PY-001 / SC-004 / research D-9:
+# suppress those interpreter-internal reports while keeping the fixpp
+# trampoline + C-ABI worker-thread reports LIVE — those are the FR-007 GIL race
+# surfaces this leg exists to catch.
+#
+# Scope: suppress races whose reporting frames are inside libpython / the
+# CPython runtime symbols. fixpp_py_recv_trampoline and the fixpp_* / engine
+# worker frames are NOT matched here, so a real trampoline/handle race still
+# fails the leg.
+
+# Interpreter-internal races reported from within the CPython shared library.
+called_from_lib:libpython3.*
+
+# CPython refcount / eval-loop / allocator internals (belt-and-braces in case
+# the interpreter is statically linked into the python executable).
+race:_PyEval_EvalFrameDefault
+race:_Py_Dealloc
+race:_Py_DecRef
+race:_Py_IncRef
+race:PyObject_Free
+race:PyObject_Malloc
+race:_PyObject_GC_New
+race:_PyObject_GC_Alloc
+race:gc_collect_main
+race:take_gil
+race:drop_gil

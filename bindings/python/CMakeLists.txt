@@ -33,9 +33,46 @@ target_link_libraries(fixpp_py PRIVATE
   Python3::Module
 )
 
+# ── T003 / FR-010 / research D-6 — self-contained static link ───────────────
+# Link the STATIC fixpp_capi archive (already PIC: src/capi builds it from an
+# OBJECT lib with POSITION_INDEPENDENT_CODE ON) plus -static-libstdc++/-libgcc
+# on Linux, so _fixpp.so carries no runtime libfixpp_capi.so / libstdc++ SONAME
+# dependency. Safe because nothing C++ crosses the extern "C" boundary (D-6):
+# the C-ABI thunks catch-all, so the C++ stdlib is fully resolved inside the
+# extension and never reaches the interpreter.
+#
+# ── T004 / SC-004 / research D-9 — sanitizer build path for the extension ────
+# FIXPP_PYTHON_SANITIZER selects an instrumented build of the _fixpp extension
+# (mutually exclusive asan|tsan). For a CONSISTENT instrumentation of the static
+# deps (fixpp_capi + the engine libs it pulls in), configure the whole tree with
+# the matching sanitizer preset (linux-clang-asan / linux-clang-tsan) +
+# -DFIXPP_BUILD_PYTHON=ON -DFIXPP_PYTHON_SANITIZER=asan|tsan: the preset flags
+# instrument the deps, this option instruments the module TU itself. The static
+# C++ runtime is dropped under a sanitizer (the asan/tsan runtime supplies its
+# own and -static-libstdc++ fights it) — the sanitizer leg is a correctness lane,
+# not the portability artifact (that is verified at PY-005 with a clean wheel).
+set(FIXPP_PYTHON_SANITIZER "none" CACHE STRING
+    "Sanitizer for the _fixpp extension: none|asan|tsan")
+set_property(CACHE FIXPP_PYTHON_SANITIZER PROPERTY STRINGS none asan tsan)
+
+if(FIXPP_PYTHON_SANITIZER STREQUAL "asan")
+  target_compile_options(fixpp_py PRIVATE -fsanitize=address -fno-omit-frame-pointer)
+  target_link_options(fixpp_py PRIVATE -fsanitize=address)
+elseif(FIXPP_PYTHON_SANITIZER STREQUAL "tsan")
+  target_compile_options(fixpp_py PRIVATE -fsanitize=thread)
+  target_link_options(fixpp_py PRIVATE -fsanitize=thread)
+elseif(UNIX AND NOT APPLE)
+  # Portability link only on the non-sanitized lane.
+  target_link_options(fixpp_py PRIVATE -static-libstdc++ -static-libgcc)
+endif()
+
 set_target_properties(fixpp_py PROPERTIES
   SWIG_USE_TARGET_INCLUDE_DIRECTORIES ON
-  OUTPUT_NAME "_fixpp"
+  # UseSWIG prepends its own "_" to the module basename, so "fixpp" yields the
+  # contract-specified low-level module "_fixpp" (-> _fixpp.so, PyInit__fixpp).
+  # The prior "_fixpp" double-prepended to "__fixpp" (053: fixpp.Error re-export
+  # needs the proxy to import the spec'd _fixpp).
+  OUTPUT_NAME "fixpp"
   LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
 )
 

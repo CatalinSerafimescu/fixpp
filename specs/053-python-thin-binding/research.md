@@ -29,7 +29,7 @@ collisions).
 **Decision**: Order per round-trip: load dict → (A) engine-config → engine_create → session-config
 (role=acceptor, comp_ids, begin_string `FIX.4.4`, dictionary, **security `insecure_plain_tcp`**,
 **heartbeat 30**, **reset_on_logon=false**, reset_seqnum_policy `bilateral_lenient`,
-tcp_endpoint `127.0.0.1:0`) → register inbound callback → session_open(A) → engine_start(A) → poll
+tcp_endpoint `127.0.0.1:0`) → session_open(A) → register inbound callback → engine_start(A) → poll
 `acceptor_bound_endpoint` until non-zero → (B) engine-config → engine_create → session-config
 (role=initiator, **reversed** comp_ids, begin_string, dictionary, **security `insecure_plain_tcp`**,
 **heartbeat 30**, **reset_on_logon=true**, reset_seqnum_policy `bilateral_lenient`,
@@ -45,9 +45,9 @@ establish, ≤5 s receive), asserting non-timeout.
 
 ## D-3 — First-establishment session config (mirror the gold reference)
 
-**Decision**: Mirror `capi_loopback_support.hpp`'s `make_session_cfg` (`:155-173`) session knobs **in full**,
-rather than guessing or partially mirroring. The four knobs the gold reference sets that the round-trip MUST
-also set are:
+**Decision**: Mirror `capi_loopback_support.hpp`'s `make_session_cfg` session knobs (it sets **three**, and
+uses **FIX 4.2**), and add the one extra knob the FIX 4.4 round-trip needs, rather than guessing or partially
+mirroring. The three knobs the gold reference sets that the round-trip MUST also set are:
 - `fixpp_session_config_set_security(sc, FIXPP_SECURITY_INSECURE_PLAIN_TCP, NULL, NULL)` — **explicit
   plaintext** (`:163-165`). This is load-bearing, not optional: Article XII §5 (`constitution.md:187`) keeps
   the `unset` sentinel **rejected at `Session::open()`**, so a config with no security profile cannot
@@ -55,8 +55,9 @@ also set are:
 - `fixpp_session_config_set_reset_on_logon(sc, role == FIXPP_ROLE_INITIATOR)` — **per-role** (`:167`): the
   initiator resets to seq 1 on logon, the acceptor does not, so a fresh pair logs on cleanly.
 - `fixpp_session_config_set_heartbeat_seconds(sc, 30)` (`:162`).
-- `fixpp_session_config_set_reset_seqnum_policy(sc, bilateral_lenient)` — accepts the one-sided 141=Y the
-  per-role `reset_on_logon` asymmetry produces (`session.h:141-142`).
+- `fixpp_session_config_set_reset_seqnum_policy(sc, bilateral_lenient)` — **NOT in the gold reference**;
+  the extra knob the FIX 4.4 pairing adds — accepts the one-sided 141=Y the per-role `reset_on_logon`
+  asymmetry produces (`session.h:141-142`).
 
 **Rationale**: a fresh loopback with default seqnum expectations may not log on cleanly; the gold reference
 chose this exact set deliberately. A wrong/missing knob (especially the security profile) manifests as a
@@ -172,6 +173,18 @@ chosen type; if it does, switch to a type with no required group.
 **Alternatives**: FIXT.1.1 + FIX 5.0 SP2 — deferred to the planned follow-on (two dicts + `1137`
 negotiation; not thin). A repeating-group message — deferred (Q2: scalar-only).
 
+**Implement-time choice (T002, 2026-06-26)**: **MsgType `D` (NewOrderSingle, `msgcat='app'`)**, scalar
+string field **`ClOrdID` (tag 11, `type='STRING'`)** — verified against the bundled `dictionaries/FIX44.xml`
+(`NewOrderSingle msgtype='D'` at :326; `field number='11' name='ClOrdID' type='STRING'` at :3753). This
+mirrors the 050 gold reference (`capi_loopback_support.hpp::make_app_payload` sends `35=D` + `11=…`).
+Sparse-body commit is accepted for the missing required fields/components: `fixpp_msg_commit`'s only
+grammar enforcement is **group shape** (`FIXPP_ERR_TYPE_MISMATCH` on an empty / non-delimiter-first group
+instance — `message.h:376`); it does **not** enforce required scalar-field or required-component presence,
+and inbound dictionary validation defaults OFF (041). `D` carries no required repeating group (its required
+`Instrument` is a scalar component-block, not a `NoXxx` group), so a body of just `35=D\x01 11=<value>\x01`
+commits, sends, and — being an application MsgType (`is_admin_msgtype("D")==false`) — routes to the
+acceptor's receive callback.
+
 ## D-8 — Send path: outbound builder, not raw bytes
 
 **Decision**: Build the outbound message through the C-ABI outbound builder
@@ -189,20 +202,28 @@ and re-implements framing rules in Python; rejected.
 
 ## D-9 — SC-004 sanitizer evidence
 
-**Decision**: SC-004 is satisfied by passing the round-trip **at least once under an AddressSanitizer build
-of the extension**, run **locally** as a pre-PR gate. The CI `python-bindings` job stays non-sanitized for
-v1; wiring a sanitized Python run into CI is deferred to PY-002 hardening (documented in the verify record).
+**Decision** (amended post-Gate-A by the SC-004 update): SC-004 is satisfied by passing the round-trip
+under an **AddressSanitizer build of the extension AND a ThreadSanitizer leg over the GIL-trampoline worker
+path**, both **wired into the Tier-1 `python-bindings` CI job** (not local-only). This satisfies constitution
+Article IX §2 for the binding's trampoline every PR. A local ASan pre-PR run remains useful but is no longer
+the gate of record.
+
+> **Superseded note**: the original D-9 decision (local-only ASan; CI stays non-sanitized; "TSan not
+> required for PY-001"; CI-sanitized Python deferred to PY-002) was overturned by the SC-004 amendment.
+> The IX §2 obligation applies to the binding's worker-thread trampoline now, not at PY-002.
 
 **Rationale**: the GIL trampoline + callable-lifetime + borrowed-msg path is the single riskiest surface in
-PY-001, and ASan is exactly what catches the FR-013/FR-014 UAF classes. Python-under-ASan needs
-`-fsanitize=address` on the extension, the ASan runtime preloaded, and `ASAN_OPTIONS=detect_leaks=0`
-(CPython has known benign leaks). Running it once locally is proportionate for a thin slice and matches the
-repo's "local stress / CI single" pattern (the SC-002 determinism decision). TSan is **not** required for
-PY-001 (single inbound callback, no concurrent Python-visible shared state); comprehensive TSan/GIL is
-PY-002.
+PY-001 — ASan catches the FR-013/FR-014 UAF classes and TSan covers the FR-007 worker-thread GIL race.
+Python-under-ASan needs `-fsanitize=address` on the extension, the ASan runtime preloaded, and
+`ASAN_OPTIONS=detect_leaks=0` (CPython has known benign leaks). The TSan leg is a **separate, mutually
+exclusive** build (`-fsanitize=thread`) and needs a CPython suppressions file (the interpreter itself is not
+TSan-instrumented — suppress interpreter-internal reports, keep trampoline reports live). UBSan is omitted
+for the extension leg (CPython C-API aliasing generates UBSan noise; ASan+TSan cover the riskiest surfaces) —
+record that omission as a verify-doc waiver.
 
-**Alternatives**: full CI-sanitized Python now — rejected (finicky, heavy for a thin slice; PY-002 owns
-it). No sanitizer at all — rejected (would leave the riskiest surface unwitnessed; Gate A would press it).
+**Alternatives**: local-only sanitizer (original D-9) — rejected by the SC-004 amendment (IX §2 binds the
+trampoline in CI). No sanitizer at all — rejected (would leave the riskiest surface unwitnessed; Gate A
+would press it).
 
 ---
 
