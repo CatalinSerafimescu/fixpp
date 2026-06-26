@@ -78,6 +78,12 @@ void fixpp_dict_destroy(fixpp_dict_t* dict) {
     std::unique_lock<std::mutex> lk(s_dict_destroy_mutex);
 
     if (h->tag_ == FIXPP_HANDLE_TAG_DEAD) { return; }  // already destroyed — safe no-op
+    if (h->tag_ != FIXPP_HANDLE_TAG_DICT) { return; }  // wrong-type handle (gate-b/r2 R2-F1)
+    // Without this positive-tag gate a non-DICT handle (e.g. fixpp_engine* cast to
+    // fixpp_dict_t*) reaches h->dict.reset() below.  On fixpp_engine, dict maps to
+    // app_ at the same struct offset → resets app_ to null; then h->tag_=DEAD corrupts
+    // the engine tag → fixpp_engine_destroy silently no-ops (EngineState leaked).
+    // Positive check: only FIXPP_HANDLE_TAG_DICT passes; any other tag is a void no-op.
 
     h->dict.reset();                        // release the consumer's shared_ptr reference
     h->tag_ = FIXPP_HANDLE_TAG_DEAD;        // tombstone (tag_ now unambiguously dead)
