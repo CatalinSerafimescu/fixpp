@@ -273,3 +273,187 @@ def test_codec_failure_routes_through_fixpp_error():
     finally:
         fixpp.session_config_destroy(sc)
 
+
+# ── Gate-B r2 counter-tests (Fix 1: GIL release) ─────────────────────────────
+
+# Generous teardown deadline for session_close + engine_destroy on CI (both run
+# asynchronously via fut.get(); under load, a 5 s RECV_TIMEOUT + teardown must
+# comfortably fit within 10 s).
+TEARDOWN_TIMEOUT = 10.0
+
+
+def test_raising_callback_no_hang():
+    """A raising callback + concurrent session_close must NOT deadlock (SC-004).
+
+    Root cause (Gate-B r1 escalation): the blocking SWIG wrappers held the GIL
+    while waiting on the io_context worker (fut.get / join). When the recv
+    trampoline fired a raising callback, PyErr_Print / raise needed the GIL;
+    session_close simultaneously held the GIL in fut.get -> deadlock.
+
+    Fix 1 (Gate-B r2): %exception blocks release the GIL around $action for
+    fixpp_engine_destroy / fixpp_session_close / fixpp_session_send. This test
+    verifies the fix: teardown must complete within TEARDOWN_TIMEOUT; if it
+    deadlocks, the assert fails (test never hangs CI).
+
+    RED->GREEN: revert the %exception blocks in fixpp.i -> td.join() times out,
+    td.is_alive() is True, the assert fails. With the fix: teardown completes
+    within the deadline, the assert passes.
+    """
+    dict_path = _dict_path()
+    assert os.path.isfile(dict_path), f"missing bundled dictionary: {dict_path}"
+    dict_h = fixpp.dict_load_from_xml(dict_path)
+
+    callback_fired = threading.Event()
+
+    def raising_callback(inbound):
+        # Touch the borrowed proxy (FR-014 path) — exercises the msg_get_string
+        # trampoline inside the dispatch window.
+        try:
+            fixpp.msg_get_string(inbound, TAG_CLORDID)
+        except fixpp.Error:
+            pass
+        callback_fired.set()
+        # time.sleep() releases the GIL for 150ms, giving the main/_teardown
+        # thread a chance to acquire the GIL and enter session_close.  After
+        # waking, the worker needs the GIL again to execute `raise` — without
+        # Fix 1 this deadlocks (worker needs GIL; _teardown holds GIL in
+        # fut.get).  With Fix 1 the worker re-acquires normally and raises
+        # (PyErr_Print logs it; the trampoline continues safely).
+        time.sleep(0.15)
+        raise RuntimeError("intentional: test SC-004 raising callback")
+
+    eng_a = eng_b = acc = ini = None
+    try:
+        eca = fixpp.engine_config_create()
+        fixpp.engine_config_set_realtime_clock(eca)
+        eng_a = fixpp.engine_create(eca)
+        acc_sc = _make_session_config(
+            dict_h, fixpp.ROLE_ACCEPTOR, "RC_ACCEP", "RC_INITI", 0)
+        acc = fixpp.session_open(eng_a, acc_sc)
+        fixpp.session_register_callback(acc, raising_callback)
+        fixpp.engine_start(eng_a)
+
+        port = _wait_until(
+            lambda: fixpp.session_acceptor_bound_endpoint(acc) or None,
+            BIND_TIMEOUT, "raising-callback acceptor to bind")
+
+        ecb = fixpp.engine_config_create()
+        fixpp.engine_config_set_realtime_clock(ecb)
+        eng_b = fixpp.engine_create(ecb)
+        ini_sc = _make_session_config(
+            dict_h, fixpp.ROLE_INITIATOR, "RC_INITI", "RC_ACCEP", port)
+        ini = fixpp.session_open(eng_b, ini_sc)
+        fixpp.engine_start(eng_b)
+
+        _wait_until(lambda: fixpp.session_is_established(acc),
+                    ESTABLISH_TIMEOUT, "raising-callback acceptor to establish")
+        _wait_until(lambda: fixpp.session_is_established(ini),
+                    ESTABLISH_TIMEOUT, "raising-callback initiator to establish")
+
+        m = fixpp.msg_create_outbound(ini, MSG_TYPE)
+        fixpp.msg_set_string(m, TAG_CLORDID, SENT)
+        payload = fixpp.msg_commit(m)
+        fixpp.session_send(ini, payload)
+        fixpp.msg_destroy(m)
+
+        fired = callback_fired.wait(timeout=RECV_TIMEOUT)
+        assert fired, "raising callback never fired within deadline"
+
+    finally:
+        # Teardown in a daemon thread with a bounded join deadline (research D-2).
+        # If session_close or engine_destroy deadlock (SC-004), td.is_alive() is
+        # True after the join and the assert fails the test cleanly — no hang.
+        _ini, _acc, _eng_b, _eng_a, _dh = ini, acc, eng_b, eng_a, dict_h
+
+        def _teardown():
+            if _ini is not None:
+                try:
+                    fixpp.session_close(_ini)
+                except fixpp.Error:
+                    pass
+            if _acc is not None:
+                try:
+                    fixpp.session_close(_acc)
+                except fixpp.Error:
+                    pass
+            if _eng_b is not None:
+                fixpp.engine_destroy(_eng_b)
+            if _eng_a is not None:
+                fixpp.engine_destroy(_eng_a)
+            fixpp.dict_destroy(_dh)
+
+        td = threading.Thread(target=_teardown, daemon=True)
+        td.start()
+        td.join(timeout=TEARDOWN_TIMEOUT)
+        assert not td.is_alive(), (
+            f"teardown deadlocked (SC-004): session_close or engine_destroy did "
+            f"not complete within {TEARDOWN_TIMEOUT}s -- blocking wrappers must "
+            "release the GIL around fut.get() to avoid deadlock with the recv "
+            "trampoline (Gate-B r2 Fix 1: %exception Py_BEGIN_ALLOW_THREADS).")
+
+    # Phase 2: verify interpreter is not corrupted after the raising callback.
+    # A fresh two-engine loopback with a normal callback must work normally.
+    dict_h2 = fixpp.dict_load_from_xml(dict_path)
+    received2 = {}
+    got2 = threading.Event()
+
+    def normal_callback(inbound):
+        received2["value"] = fixpp.msg_get_string(inbound, TAG_CLORDID)
+        got2.set()
+
+    eng_a2 = eng_b2 = acc2 = ini2 = None
+    try:
+        eca2 = fixpp.engine_config_create()
+        fixpp.engine_config_set_realtime_clock(eca2)
+        eng_a2 = fixpp.engine_create(eca2)
+        acc_sc2 = _make_session_config(
+            dict_h2, fixpp.ROLE_ACCEPTOR, "FRESH_A", "FRESH_B", 0)
+        acc2 = fixpp.session_open(eng_a2, acc_sc2)
+        fixpp.session_register_callback(acc2, normal_callback)
+        fixpp.engine_start(eng_a2)
+
+        port2 = _wait_until(
+            lambda: fixpp.session_acceptor_bound_endpoint(acc2) or None,
+            BIND_TIMEOUT, "fresh acceptor to bind")
+
+        ecb2 = fixpp.engine_config_create()
+        fixpp.engine_config_set_realtime_clock(ecb2)
+        eng_b2 = fixpp.engine_create(ecb2)
+        ini_sc2 = _make_session_config(
+            dict_h2, fixpp.ROLE_INITIATOR, "FRESH_B", "FRESH_A", port2)
+        ini2 = fixpp.session_open(eng_b2, ini_sc2)
+        fixpp.engine_start(eng_b2)
+
+        _wait_until(lambda: fixpp.session_is_established(acc2),
+                    ESTABLISH_TIMEOUT, "fresh acceptor to establish")
+        _wait_until(lambda: fixpp.session_is_established(ini2),
+                    ESTABLISH_TIMEOUT, "fresh initiator to establish")
+
+        m2 = fixpp.msg_create_outbound(ini2, MSG_TYPE)
+        fixpp.msg_set_string(m2, TAG_CLORDID, SENT)
+        payload2 = fixpp.msg_commit(m2)
+        fixpp.session_send(ini2, payload2)
+        fixpp.msg_destroy(m2)
+
+        assert got2.wait(timeout=RECV_TIMEOUT), \
+            "fresh session: no message received -- interpreter may be corrupted"
+        assert received2.get("value") == SENT, \
+            (f"fresh session: field mismatch: sent {SENT!r}, "
+             f"got {received2.get('value')!r}")
+    finally:
+        if ini2 is not None:
+            try:
+                fixpp.session_close(ini2)
+            except fixpp.Error:
+                pass
+        if acc2 is not None:
+            try:
+                fixpp.session_close(acc2)
+            except fixpp.Error:
+                pass
+        if eng_b2 is not None:
+            fixpp.engine_destroy(eng_b2)
+        if eng_a2 is not None:
+            fixpp.engine_destroy(eng_a2)
+        fixpp.dict_destroy(dict_h2)
+

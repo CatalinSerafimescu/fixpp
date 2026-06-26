@@ -363,6 +363,50 @@ static fixpp_error_t fixpp_py_engine_create(fixpp_engine_config_t* cfg,
 }
 %}
 
+/* ── GIL release around BLOCKING wrappers (SC-004 / Gate-B r2) ──────────────
+ * Per-function %exception blocks release the GIL around ONLY the C call
+ * ($action) for wrappers that block waiting on the engine worker / io_context.
+ * The %typemap(in) (which borrows Python buffers / converts args — needs GIL)
+ * runs BEFORE Py_BEGIN_ALLOW_THREADS, and the %typemap(out) fixpp_error_t
+ * (which raises fixpp.Error — needs GIL) runs AFTER Py_END_ALLOW_THREADS,
+ * because both are outside $action in the generated wrapper.
+ *
+ * Blocking callers:
+ *   fixpp_session_close   — co_spawn(close_exec, sess->close(...), use_future)
+ *                           then fut.get() blocks until the session strand
+ *                           completes the close coroutine.
+ *   fixpp_session_send    — co_spawn(ioc_, engine_->send(...), use_future)
+ *                           then fut.get() blocks until the send coroutine runs.
+ *   fixpp_engine_destroy  — stop_fut.get() + thread joins; blocks until all
+ *                           workers drain.
+ *
+ * NOT released (non-blocking, pure in-memory, or construction-time):
+ *   fixpp_engine_create/start, fixpp_session_open/is_established/
+ *   acceptor_bound_endpoint/register_callback, all config setters,
+ *   all msg_* builders, dict ops, fixpp_py_register_callback.
+ *
+ * session_send borrowed-buffer safety: Engine::send() deep-copies the span at
+ * coroutine-body line 1490 (src/session/engine.cpp), which runs on the worker
+ * thread after co_spawn. The Python bytes object is kept alive by the caller's
+ * frame reference (the `payload` variable) for the entire duration of fut.get(),
+ * preventing collection even when the GIL is released. This is the standard
+ * CPython convention for borrowed C buffers across blocking C-extension calls. */
+%exception fixpp_session_close {
+    Py_BEGIN_ALLOW_THREADS;
+    $action;
+    Py_END_ALLOW_THREADS;
+}
+%exception fixpp_session_send {
+    Py_BEGIN_ALLOW_THREADS;
+    $action;
+    Py_END_ALLOW_THREADS;
+}
+%exception fixpp_engine_destroy {
+    Py_BEGIN_ALLOW_THREADS;
+    $action;
+    Py_END_ALLOW_THREADS;
+}
+
 /* ── Wrapped declarations (selective) ───────────────────────────────────────
  * %include only the headers whose entire (or all-but-ignored) surface is in
  * scope; message.h is wrapped by re-declaration (5 of ~30 functions). */
