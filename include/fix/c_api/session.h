@@ -122,9 +122,9 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_config_set_security(
     fixpp_session_config_t* cfg, fixpp_security_kind kind,
     const char* cert, const char* key);
 
-/** Dictionary (required). The dict handle's creation is Feature C
- *  (fixpp_dict_load_*); Feature-B tests supply it via a test-only seam (L-050-1).
- *  Reentrancy: single-thread. */
+/** Dictionary (required). Pass a handle created by fixpp_dict_load_from_xml()
+ *  and release it with fixpp_dict_destroy() after the setter returns if the
+ *  caller no longer needs its own reference. Reentrancy: single-thread. */
 FIXPP_API_EXPORT fixpp_error_t fixpp_session_config_set_dictionary(
     fixpp_session_config_t* cfg, fixpp_dict_t* dict);
 
