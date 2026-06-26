@@ -279,9 +279,8 @@ static void fixpp_py_recv_trampoline(const fixpp_msg_t* inbound, void* userdata)
      * release.  With the canary active the TSan leg MUST report data races
      * in CPython refcount / eval internals (the races the suppressions mask).
      * Proves the SC-004 TSan gate would go RED on a real GIL bug.  Canary
-     * instructions: cmake --build build/linux-clang-tsan-py ... after passing
-     * -DCMAKE_CXX_FLAGS="-DFIXPP_PY_GIL_CANARY=1" (or add to the .i file
-     * temporarily), then run test_roundtrip under TSan and confirm RED output.
+     * instructions: configure with -DFIXPP_PY_GIL_CANARY=ON, build the TSan
+     * preset, then run test_roundtrip under TSan and confirm RED output.
      * DO NOT define in production / CI builds. */
 #ifndef FIXPP_PY_GIL_CANARY
     PyGILState_STATE gil = PyGILState_Ensure();

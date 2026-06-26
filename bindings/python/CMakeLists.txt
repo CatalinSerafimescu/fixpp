@@ -54,6 +54,13 @@ target_link_libraries(fixpp_py PRIVATE
 set(FIXPP_PYTHON_SANITIZER "none" CACHE STRING
     "Sanitizer for the _fixpp extension: none|asan|tsan")
 set_property(CACHE FIXPP_PYTHON_SANITIZER PROPERTY STRINGS none asan tsan)
+option(FIXPP_PY_GIL_CANARY
+  "Elide PyGILState_Ensure/Release in the recv trampoline for TSan calibration"
+  OFF)
+
+if(FIXPP_PY_GIL_CANARY)
+  target_compile_definitions(fixpp_py PRIVATE FIXPP_PY_GIL_CANARY=1)
+endif()
 
 if(FIXPP_PYTHON_SANITIZER STREQUAL "asan")
   target_compile_options(fixpp_py PRIVATE -fsanitize=address -fno-omit-frame-pointer)

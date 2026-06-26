@@ -257,7 +257,12 @@ def test_codec_failure_routes_through_fixpp_error():
 
     Discrimination: revert the fix → pytest.raises(fixpp.Error) does NOT catch a
     UnicodeEncodeError and the test fails with an unexpected exception type."""
+    dict_h = fixpp.dict_load_from_xml(_dict_path())
+    ec = fixpp.engine_config_create()
+    fixpp.engine_config_set_realtime_clock(ec)
+    eng = fixpp.engine_create(ec)
     sc = fixpp.session_config_create()
+    sess = None
     try:
         # '\ud800' is an unpaired high surrogate — not representable in UTF-8.
         # PyUnicode_AsUTF8AndSize raises UnicodeEncodeError on it; the old code
@@ -270,8 +275,15 @@ def test_codec_failure_routes_through_fixpp_error():
             fixpp.session_config_set_security(
                 sc, fixpp.SECURITY_INSECURE_PLAIN_TCP,
                 "cert\ud800bad", None)   # surrogate in cert path
+        sc_msg = _make_session_config(
+            dict_h, fixpp.ROLE_INITIATOR, "SENDER", "TARGET", 9)
+        sess = fixpp.session_open(eng, sc_msg)
+        with pytest.raises(fixpp.Error):
+            fixpp.msg_create_outbound(sess, "\ud800")
     finally:
+        fixpp.engine_destroy(eng)
         fixpp.session_config_destroy(sc)
+        fixpp.dict_destroy(dict_h)
 
 
 # ── Gate-B r2 counter-tests (Fix 1: GIL release) ─────────────────────────────
@@ -292,12 +304,14 @@ def test_raising_callback_no_hang():
 
     Fix 1 (Gate-B r2): %exception blocks release the GIL around $action for
     fixpp_engine_destroy / fixpp_session_close / fixpp_session_send. This test
-    verifies the fix: teardown must complete within TEARDOWN_TIMEOUT; if it
-    deadlocks, the assert fails (test never hangs CI).
+    is the in-process positive witness: teardown must complete within
+    TEARDOWN_TIMEOUT.
 
-    RED->GREEN: revert the %exception blocks in fixpp.i -> td.join() times out,
-    td.is_alive() is True, the assert fails. With the fix: teardown completes
-    within the deadline, the assert passes.
+    Regression truth: revert the %exception blocks in fixpp.i and the teardown
+    thread can block in C while holding the GIL; the main thread's
+    td.join(timeout) then cannot return to run the assert because the GIL is
+    held hostage in C. The regression manifests as a process hang caught by the
+    CI job-level timeout, not a clean in-test assertion failure.
     """
     dict_path = _dict_path()
     assert os.path.isfile(dict_path), f"missing bundled dictionary: {dict_path}"
@@ -361,8 +375,6 @@ def test_raising_callback_no_hang():
 
     finally:
         # Teardown in a daemon thread with a bounded join deadline (research D-2).
-        # If session_close or engine_destroy deadlock (SC-004), td.is_alive() is
-        # True after the join and the assert fails the test cleanly — no hang.
         _ini, _acc, _eng_b, _eng_a, _dh = ini, acc, eng_b, eng_a, dict_h
 
         def _teardown():
@@ -456,4 +468,3 @@ def test_raising_callback_no_hang():
         if eng_a2 is not None:
             fixpp.engine_destroy(eng_a2)
         fixpp.dict_destroy(dict_h2)
-
