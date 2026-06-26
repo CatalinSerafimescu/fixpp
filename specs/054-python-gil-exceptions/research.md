@@ -11,11 +11,15 @@ All decisions resolve the spec's requirements against the **as-built** PY-001 bi
 | Wrapper | Class | Justification |
 |---|---|---|
 | `session_close` | **release** | `co_spawn(close_exec, …, use_future)` + `fut.get()` blocks on the session strand draining the close coroutine. |
-| `session_send` | **release** | `co_spawn(ioc_, engine_->send(...), use_future)` + `fut.get()` blocks until the send coroutine runs (`session.h:256-260`, engine deep-copies the span on the worker). |
+| `session_send` | **release** | `co_spawn(ioc_, engine_->send(...), use_future)` + `fut.get()` blocks until the send coroutine runs (mechanism `src/capi/session.cpp:284-286`; deadlock rule `session.h:255-258`; engine deep-copies the span on the worker). |
 | `engine_destroy` | **release** | `stop_fut.get()` + worker-thread joins; blocks until all workers drain. |
 | `engine_create` / `engine_start` | hold | construction + `io_context` worker spawn; returns without blocking on a round-trip. |
+| `engine_config_create` / `session_config_create` | hold | construction-time; allocate + return a config-builder handle (return `fixpp_error_t`, reach the error bridge, but no engine round-trip). |
+| `engine_config_destroy` / `session_config_destroy` | hold | in-memory free; **`void`-returning** — never reach the error bridge. |
 | `session_open` / `session_is_established` / `acceptor_bound_endpoint` / `session_register_callback` | hold | in-memory state mutation / poll / registry write; no strand round-trip. |
 | all config setters, all `msg_*` builders, `dict` load/destroy, `version_string`, `strerror` | hold | pure in-memory (or a synchronous XML parse for `dict_load_from_xml` — CPU-bound, no engine round-trip; **flagged** below). |
+
+The census is **exhaustive over the `%include`d surface** of `engine.h` + `session.h` (`fixpp.i:418-419`), not a grouped sample — every wrapped function is classified (the four config create/destroy functions are listed explicitly above so a reviewer can mechanically diff the table against `fixpp.i`, satisfying SC-007/FR-001).
 
 **`dict_load_from_xml` nuance.** It does synchronous file I/O + XML parse. It does **not** block on the engine worker (the deadlock class PY-002 targets), so its GIL is **held** — consistent with PY-001. A future "release GIL around long file parse" is a throughput nicety, not a correctness gap; the audit records it as *hold, with a note* rather than reclassifying (avoids scope creep; no deadlock risk).
 
@@ -35,13 +39,17 @@ All decisions resolve the spec's requirements against the **as-built** PY-001 bi
 4. **Without** the release band the main thread holds the GIL while blocked in the join → the worker blocks forever in `PyGILState_Ensure` → never drains → **deadlock** (witnessed as a subprocess hard-timeout).
 5. **With** the release band the main thread yields the GIL during the wait → the worker runs the callback, drains, join completes → **pass**.
 
-The test is **proven RED under the canary, GREEN without it**; it asserts on a hard timeout (the deadlock is a hang, not a sanitizer report — cf. `[[feedback_sanitizer_canary_must_be_proven_red]]`).
+The test is a **two-mode witness** so the GREEN (pass-without) leg is actually observed in-matrix rather than skipped:
+- **Normal build (in-matrix, `none`/`asan`/`tsan`):** the test runs the teardown-vs-recv-callback scenario and must **complete GREEN** within its hard deadline — this is the in-matrix proof that the GIL release is present and the teardown drains the worker callback.
+- **`FIXPP_PY_GIL_RELEASE_CANARY` build (local-only):** the same scenario runs in a subprocess and must **hang (hit the hard timeout) — RED** — the proof the release is load-bearing.
+
+It asserts on a hard timeout (the deadlock is a hang, not a sanitizer report — cf. `[[feedback_sanitizer_canary_must_be_proven_red]]`).
 
 **Why this differs from 053's canary.** `FIXPP_PY_GIL_CANARY` (053, SC-004) elides the **reacquire** in the recv trampoline → the worker touches CPython **without** the GIL → segfault. `FIXPP_PY_GIL_RELEASE_CANARY` (054) elides the **release** in the blocking wrappers → the main thread **holds** the GIL while the worker needs it → deadlock. Two different bugs, two different canaries; 054 adds the second.
 
 **Why a "two threads both send" test does NOT discriminate (the false-green guard).** Without the release a blocking `send` still completes via the C++ worker (the send coroutine needs no Python); it merely *serializes*. The deadlock only manifests when the blocked op's completion **depends on a worker-thread callback acquiring the GIL** — i.e. the teardown-vs-recv-callback race above. A multi-send test is green with or without the release and proves nothing (advisor + `[[feedback_swig_blocking_wrapper_holds_gil_deadlock]]`).
 
-**Local-only + waiver (FR-013/SC-003).** The canary build ships a deliberate deadlock; wiring it into the matrix would add a timeout-based hang job. Per the `/speckit-clarify` answer + the 053 SC-004 canary precedent, it stays **local-only**, proven RED, documented, with a CI-automation waiver.
+**Local-only + waiver (FR-013/SC-003) — RED leg only.** Only the `FIXPP_PY_GIL_RELEASE_CANARY` build (the RED leg) ships a deliberate deadlock; wiring *that* into the matrix would add a timeout-based hang job, so it stays **local-only**, proven RED, documented, with a CI-automation waiver (the 053 SC-004 canary precedent). The **GREEN leg runs in a normal build and is therefore in-matrix** — the discrimination's "pass-without" half is witnessed every PR, not skipped.
 
 **Staging-determinism caveat (the proof's weak point).** The witness must reliably get an inbound callback **in flight on the worker at the instant of teardown**, AND the teardown drain path must actually **run** the pending callback (not cancel it). If that staging cannot be made deterministic (proven RED 5/5), the canary is "green-under-canary" — which proves nothing — and FR-004's **"document as a non-constructible limitation"** clause applies instead of shipping a flaky stage as proof. Tactics to make it deterministic: have the recv callback block on a `threading.Event` the main thread sets only after confirming entry, so the callback is provably mid-flight when teardown begins; confirm via the 053 evidence that `engine_destroy`/`session_close` drains (runs) rather than cancels pending dispatches.
 
@@ -57,7 +65,7 @@ The test is **proven RED under the canary, GREEN without it**; it asserts on a h
 - **`%pythoncode` block** defines the translator + helpers in the `fixpp` module namespace:
   - `_CODE_TO_NAME`: a **hand-written dict** `{1:"FIXPP_ERR_CANCELLED", …}` (47 raisable codes). **VERIFIED (2026-06-26): the `FIXPP_ERR_*` `#define`s are NOT exposed as Python attributes** — `[n for n in dir(fixpp) if n.startswith('ERR_')]` is empty against `build/linux-clang-debug-py/lib/_fixpp.so`, because SWIG does not constant-fold a cast-to-typedef macro (`#define X ((fixpp_error_t)200)`) into a Python `%constant` (cf. `[[feedback_planning_explore_existence_claims_unreliable]]` — checked against the real module, not assumed). So the name table cannot be introspected; it is a maintained dict, **guarded** by the D-4 coverage test that parses `error.h` (the independent source) and asserts the dict's key set equals the header's code set.
   - `_map_to_class(code) -> type`: the block-range → class map (`[2m §4.6]` "Mapping rule" table); the single source of truth (13 ranges + the `AppError` row, not 48 entries).
-  - `_make_error(code) -> FixppError`: constructs the instance, setting `.code` (int), `.name` (str from `_CODE_TO_NAME`), `.message` (str = `fixpp.strerror(code)` — **already exposed**, verified present in the module).
+  - `_make_error(code) -> FixppError`: constructs the instance, setting `.code` (int), `.name` (str — `_CODE_TO_NAME.get(code, f"FIXPP_ERR_{code}")`, i.e. a **fallback for codes absent from the hand-written dict** so `_make_error` is **total** over its input domain — SC-006's synthetic out-of-range code and FR-009's future-in-known-block code, e.g. `405`, do not `KeyError`), `.message` (str = `fixpp.strerror(code)` — **already exposed**, verified present in the module). **The runtime leg is already safe** independent of this fallback: per `[const §X.4]` (`constitution.md:153`) + `error.h:13-14`, the engine's `translate_for_consumer()` downgrades any code newer than the consumer's registered minor to `FIXPP_ERR_UNKNOWN`(2) *before return*, and 054 is an in-tree same-version static-linked build (consumer-minor == engine-minor), so the out-typemap never hands `_make_error` an out-of-table code at runtime — the fallback is a totality/robustness fix for **direct** translator calls (the SC-006 shape) and the forward-compat L-row, not a runtime-crash fix.
   - `_raise_for_code(code)`: `raise _make_error(code)`.
 - **Out-typemap rewire (cross-module routing).** `%typemap(out) fixpp_error_t` calls a C helper `fixpp_py_raise_for_code(code)` (in `%wrapper`) which **lazily imports the `fixpp` proxy module** (`PyImport_ImportModule("fixpp")`, cached in a `static PyObject*`) and calls its `_raise_for_code`, then `SWIG_fail`. The lazy import is required because the wrapper lives in `_fixpp` while `%pythoncode` lands in the `fixpp.py` proxy (the C `%init`-time `g_fixpp_error` pointer cannot reach a Python-defined translator); by the time any wrapped function is called, `fixpp` is fully imported, so the cached import resolves the already-loaded module. **The same translator serves the runtime path and the tests** (FR-008 single source of truth).
 
@@ -103,7 +111,7 @@ The test is **proven RED under the canary, GREEN without it**; it asserts on a h
 3. **The §6.5 carve-out table** (the reentrancy "what may a callback call" table).
 4. **§4.6 `CallbackReentrantClose` docstring** (~lines 802–804): "Session.send from inside fromApp is NOT banned … only close-from-callback raises this".
 
-**The amendment.** Add `session_send` to the deadlock carve-outs **as a current limitation**, grounded on the **as-built 050** shape: `fixpp_session_send` → `co_spawn(ioc_, …, use_future)` + `fut.get()` (`session.h:256-260`) **blocks** on the io_context; called from inside the recv trampoline (which runs *on* a worker thread) this is a strand/io_context **reentrancy** deadlock — the worker waits on `fut.get()` for work that can only run on that same worker.
+**The amendment.** Add `session_send` to the deadlock carve-outs **as a current limitation**, grounded on the **as-built 050** shape: `fixpp_session_send` → `co_spawn(ioc_, …, use_future)` + `fut.get()` (mechanism `src/capi/session.cpp:284-286` (send) / `:202-205` (close); the documented deadlock rule at `session.h:255-258`) **blocks** on the io_context; called from inside the recv trampoline (which runs *on* a worker thread) this is a strand/io_context **reentrancy** deadlock — the worker waits on `fut.get()` for work that can only run on that same worker.
 
 **Two framing constraints.**
 - **Distinct deadlock class.** This is a strand/io_context reentrancy deadlock, **distinct** from and **unaffected** by the GIL-teardown deadlock 053 fixed (and by the D-2 GIL release). Both are documented separately.
@@ -117,7 +125,14 @@ The test is **proven RED under the canary, GREEN without it**; it asserts on a h
 
 ## D-7 — Subprocess-watchdog harness (FR-011/SC-004)
 
-**Decision.** `test_callback_raise_watchdog.py` runs the raising-callback scenario in a **child process** (a helper module executed via `subprocess`/`multiprocessing` with a **hard timeout**): register a recv callback that raises, drive an inbound message, and assert the child exits (cleanly) within the deadline. A timeout = the engine deadlocked = test FAIL. The parent never blocks unboundedly (the timeout is the backstop). This pins the 053 raising-callback fix (the deferred regression test).
+**Decision.** `test_callback_raise_watchdog.py` runs the raising-callback scenario in a **child process** (a helper module executed via `subprocess`/`multiprocessing` with a **hard timeout**) and **re-uses the D-2 teardown-vs-in-flight-callback staging so it actually pins the 053 fix** (a raising callback alone — no concurrent blocking teardown — just runs `PyErr_Print` and returns, so the child exits cleanly **with or without** the GIL release; that does **not** discriminate the `%exception Py_BEGIN/END_ALLOW_THREADS` bands). The discriminating staging:
+1. Register a recv callback that **blocks on a `threading.Event`** (set only after the main thread confirms the callback is mid-flight) and then **raises** — so it is provably in flight when teardown begins.
+2. Drive an inbound message so the worker enters the callback and blocks on the Event.
+3. The main thread enters a **blocking teardown** (`engine_destroy` / `session_close`) and sets the Event.
+4. **WITH** the GIL release the worker acquires the GIL, runs (and `PyErr_Print`s) the raising callback, the teardown drains, and the child **exits cleanly within the deadline** → PASS.
+5. **WITHOUT** the release (a future edit deletes the `%exception` bands) the main thread holds the GIL in the teardown wait, the worker can never acquire it to run the raising callback, the drain never completes → the child **times out** → FAIL.
+
+A timeout = the engine deadlocked = test FAIL. The parent never blocks unboundedly (the timeout is the backstop). So the watchdog is a real regression guard for the 053 raising-callback-+-concurrent-teardown fix, not a no-op that passes even if the bands are removed.
 
 **Rationale.** A raising callback that deadlocked the engine would otherwise hang the whole pytest process with no culprit; the subprocess + hard timeout names the failure and keeps the in-matrix suite bounded (cf. `[[feedback_ci_hung_test_no_timeout_burns_6h_gdb_capture]]`). This test runs in the matrix (`none`/`asan`/`tsan`) — unlike the deliberate-deadlock canary (D-2), the *expected* outcome here is no-hang.
 

@@ -15,14 +15,14 @@ The E-1 table classifies every wrapped C-ABI function release/hold with justific
 ## G-4 — Discriminating release canary (FR-004/SC-003)
 
 - `-DFIXPP_PY_GIL_RELEASE_CANARY` elides the G-1 release bands.
-- Witness (`test_gil_release_canary.py`): teardown (`engine_destroy`/`session_close`) on the main thread races an in-flight inbound message whose recv callback needs the GIL → **deadlock under the canary, no deadlock without** (subprocess hard-timeout assertion).
+- Witness (`test_gil_release_canary.py`) is **two-mode**: a **normal build** runs the teardown (`engine_destroy`/`session_close`)-vs-in-flight-recv-callback scenario and must **complete GREEN** (the pass-without-canary leg, in-matrix); a `FIXPP_PY_GIL_RELEASE_CANARY` build runs it in a subprocess and must **hang (RED)** (subprocess hard-timeout assertion).
 - A "two threads both send" test does NOT discriminate (serializes, never deadlocks) — explicitly rejected.
-- **Local-only**; CI-automation waived (053 SC-004 precedent).
+- The **GREEN leg is in-matrix** (`none`/`asan`/`tsan`); **only the canary RED leg is local-only** — its CI-automation is waived (053 SC-004 precedent).
 - Distinct from 053's `FIXPP_PY_GIL_CANARY` (reacquire canary → segfault).
 
 ## G-5 — `[2m]` reentrancy amendment (FR-005) — Article XX
 
-`session_send`-from-inside-callback is added to the `[2m]` deadlock carve-outs at **all four** sites (§1.3 rule 2, §3.12, §6.5 table, §4.6 `CallbackReentrantClose` docstring), grounded on the as-built 050 blocking shape (`session.h:256-260`). Recorded as **L-054-1** (a current limitation tied to the blocking as-built; a strand/io_context reentrancy deadlock distinct from the GIL-teardown deadlock), **not** permanent-forbidden. Binding guarantee stays documentary (callback docstring); active enforcement (`session._in_callback` + `CallbackReentrantClose`/1204 pre-call) is PY-004. `AppError` is also added to §4.6/§6.7 (D-5).
+`session_send`-from-inside-callback **will be added** to the `[2m]` deadlock carve-outs at **all four** sites (§1.3 rule 2, §3.12, §6.5 table, §4.6 `CallbackReentrantClose` docstring) at `/implement`; the carve-out shape and the four target sites are ratified at Gate A, grounded on the as-built 050 blocking shape (mechanism `src/capi/session.cpp:284-286` (send) / `:202-205` (close); documented deadlock rule `session.h:255-258`). Recorded as **L-054-1** (a current limitation tied to the blocking as-built; a strand/io_context reentrancy deadlock distinct from the GIL-teardown deadlock), **not** permanent-forbidden. Binding guarantee stays documentary (callback docstring); active enforcement (`session._in_callback` + `CallbackReentrantClose`/1204 pre-call) is PY-004. `AppError` **will also be added** to §4.6/§6.7 at `/implement` (D-5).
 
 ## G-6 — Invariants under sanitizers (FR-013/SC-005)
 

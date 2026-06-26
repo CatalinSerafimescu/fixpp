@@ -8,13 +8,19 @@ Realizes `[2m §4.6]` verbatim (+ `AppError`). All names are module-level on `fi
 - One subclass per `fixpp_error_t` block (E-2 tree): `CapiError` (+ `Cancelled`/1, `Unknown`/2), `ParseError`, `ValidatorError`, `SessionError`, `StoreError`, `SyncError`, `TlsError`, `TransportError`, `DecimalError`, `ControlPlaneError`, `LogError`, `TapError`, `BindingError` (+ `PythonCallbackRaised`/1200, `SubInterpreterRejected`/1201, `ObjectLifetime`/1202, `WheelAbiMismatch`/1203, `CallbackReentrantClose`/1204), and **`AppError`** (`[1400,1499]`, new in 054).
 - Every block subclass is `issubclass(_, FixppError)`; `Cancelled`/`Unknown` are `issubclass(_, CapiError)`; the five binding subclasses are `issubclass(_, BindingError)`.
 
-## T-2 — Attributes (every raised instance)
+## T-2 — Attributes
+
+The attribute contract is **total but two-tier** (the two tiers do not contradict):
+
+**(a) Typed `fixpp_error_t` instances** (every instance raised from a translated C-ABI status, via `_make_error` / the out-typemap) carry all three:
 
 | attr | type | value |
 |---|---|---|
 | `.code` | `int` | the numeric `fixpp_error_t` |
-| `.name` | `str` | symbolic, e.g. `"FIXPP_ERR_DICT_CONFIG"` |
+| `.name` | `str` | symbolic, e.g. `"FIXPP_ERR_DICT_CONFIG"`; for a code absent from `_CODE_TO_NAME` (SC-006 synthetic / FR-009 future code) the fallback is `f"FIXPP_ERR_{code}"` so `.name` is **always present** (never `KeyError`/`None`) |
 | `.message` | `str` | `fixpp_strerror(code)`; also `str(exc)` |
+
+**(b) Non-`fixpp_error_t` in-typemap conversion failures** (non-str / embedded-NUL / invalid-UTF-8 / non-bytes — T-3) are **explicitly carved out of the `.code`/`.name` half**: they are raised as the root `fixpp.Error` (= `FixppError`, FR-010) with **`.message` only** and **no `.code`/`.name`** (the as-built `FIXPP_PY_RAISE` = message-only; no header code fits an argument-type error, so D-9's no-fabricated-code stance holds). They stay `fixpp.Error`-rooted (FR-010) but are NOT claimed to carry the numeric attributes.
 
 ## T-3 — Raising contract
 

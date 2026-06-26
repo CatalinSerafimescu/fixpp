@@ -6,9 +6,9 @@
 
 ## Content Quality
 
-- [x] No implementation details (languages, frameworks, APIs)
+- [~] No implementation details (languages, frameworks, APIs) — **WAIVED for this binding-hardening feature**: SWIG `%exception`, `Py_BEGIN/END_ALLOW_THREADS`, the `FIXPP_PY_GIL_RELEASE_CANARY` macro, exact C-file line cites, and typemap routing are necessarily **normative** here (see Notes). Not a clean pass.
 - [x] Focused on user value and business needs
-- [x] Written for non-technical stakeholders
+- [~] Written for non-technical stakeholders — **WAIVED**: the spec targets a binding maintainer/reviewer; the GIL/typemap/canary vocabulary is unavoidable. Not a clean pass.
 - [x] All mandatory sections completed
 
 ## Requirement Completeness
@@ -16,7 +16,7 @@
 - [x] No [NEEDS CLARIFICATION] markers remain
 - [x] Requirements are testable and unambiguous
 - [x] Success criteria are measurable
-- [x] Success criteria are technology-agnostic (no implementation details)
+- [~] Success criteria are technology-agnostic (no implementation details) — **WAIVED**: SC-003/SC-005/SC-007 reference the canary macro, the `none`/`asan`/`tsan` matrix, and `fixpp.i` by name because the contract IS the binding layer. Framed in developer-observable terms where possible (catch-by-category, recover the code, no deadlock, green matrix). Not a clean pass.
 - [x] All acceptance scenarios are defined
 - [x] Edge cases are identified
 - [x] Scope is clearly bounded
@@ -27,7 +27,7 @@
 - [x] All functional requirements have clear acceptance criteria
 - [x] User scenarios cover primary flows
 - [x] Feature meets measurable outcomes defined in Success Criteria
-- [x] No implementation details leak into specification
+- [~] No implementation details leak into specification — **WAIVED** (same rationale as Content Quality boxes 1/3): binding-layer anchors are intrinsic to this feature's contract, not avoidable leakage.
 
 ## Notes
 
