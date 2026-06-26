@@ -276,12 +276,14 @@ Error = _fixpp.Error
 %wrapper %{
 static void fixpp_py_recv_trampoline(const fixpp_msg_t* inbound, void* userdata) {
     /* FIXPP_PY_GIL_CANARY: define at compile-time to ELIDE the GIL acquire /
-     * release.  With the canary active the TSan leg MUST report data races
-     * in CPython refcount / eval internals (the races the suppressions mask).
-     * Proves the SC-004 TSan gate would go RED on a real GIL bug.  Canary
-     * instructions: configure with -DFIXPP_PY_GIL_CANARY=ON, build the TSan
-     * preset, then run test_roundtrip under TSan and confirm RED output.
-     * DO NOT define in production / CI builds. */
+     * release.  With the canary active, the worker touches CPython without the
+     * GIL and the TSan loopback leg goes RED — empirically a reproducible
+     * `Fatal Python error: Segmentation fault` (a crash, NOT a TSan data-race
+     * report), reliably 5/5 and independent of tsan_suppressions.txt (a segfault
+     * is unsuppressible).  This proves the SC-004 TSan gate goes RED on a real
+     * missing-GIL bug.  Canary instructions: configure with
+     * -DFIXPP_PY_GIL_CANARY=ON, build the TSan preset, then run test_roundtrip
+     * under TSan and confirm the RED crash.  DO NOT define in production / CI. */
 #ifndef FIXPP_PY_GIL_CANARY
     PyGILState_STATE gil = PyGILState_Ensure();
 #endif
