@@ -17,12 +17,15 @@ import fixpp
 | `fixpp.dict_load_from_xml(path)` | `fixpp_dict_load_from_xml` | Dictionary proxy (raises on bad path) |
 | `fixpp.dict_destroy(d)` | `fixpp_dict_destroy` | None |
 | `fixpp.engine_config_create()` / `engine_config_set_worker_threads(c,n)` / `engine_config_set_realtime_clock(c)` / `engine_config_destroy(c)` | `fixpp_engine_config_*` | EngineConfig proxy / None |
-| `fixpp.engine_create(cfg)` / `engine_start(e)` / `engine_destroy(e)` | `fixpp_engine_*` | Engine proxy / None |
+| `fixpp.engine_create(cfg)` / `engine_start(e)` / `engine_destroy(e)` | `fixpp_engine_*` | Engine proxy / None (`engine_create(cfg)` is a thin wrapper over the real 4-arg `fixpp_engine_create(cfg, consumer_major, consumer_minor, &out)` — it injects `FIXPP_C_ABI_VERSION_MAJOR`/`_MINOR`) |
 | `fixpp.session_config_create()` | `fixpp_session_config_create` | SessionConfig proxy |
 | `fixpp.session_config_set_comp_ids(c, sender, target)` | `..set_comp_ids` | None |
 | `fixpp.session_config_set_begin_string(c, "FIX.4.4")` | `..set_begin_string` | None |
 | `fixpp.session_config_set_role(c, role)` | `..set_role` | None |
 | `fixpp.session_config_set_dictionary(c, d)` | `..set_dictionary` | None |
+| `fixpp.session_config_set_security(c, kind, cert, key)` | `..set_security` | None (FR-004a; `SECURITY_INSECURE_PLAIN_TCP`, `cert`/`key` = `None` for plaintext) |
+| `fixpp.session_config_set_reset_on_logon(c, flag)` | `..set_reset_on_logon` | None (FR-004a; per-role: True initiator / False acceptor) |
+| `fixpp.session_config_set_heartbeat_seconds(c, n)` | `..set_heartbeat_seconds` | None (FR-004a) |
 | `fixpp.session_config_set_reset_seqnum_policy(c, policy)` | `..set_reset_seqnum_policy` | None |
 | `fixpp.session_config_set_tcp_endpoint(c, host, port)` | `..set_tcp_endpoint` | None |
 | `fixpp.session_open(engine, cfg)` | `fixpp_session_open` | Session proxy (consumes cfg) |
@@ -38,8 +41,9 @@ import fixpp
 | `fixpp.msg_get_string(m, tag)` | `fixpp_msg_get_string` | `str` |
 | `fixpp.version_string()` | `fixpp_version_string` | `str` (existing) |
 
-Role / policy enum values (`fixpp.ROLE_ACCEPTOR` / `ROLE_INITIATOR`, reset-seqnum policy constants) are
-exposed as wrapped C-ABI enum constants — exact names taken from `session.h` at implement time.
+Role / policy / security enum values (`fixpp.ROLE_ACCEPTOR` / `ROLE_INITIATOR`, reset-seqnum policy
+constants, and `fixpp.SECURITY_INSECURE_PLAIN_TCP`) are exposed as wrapped C-ABI enum constants — exact names
+taken from `session.h` at implement time.
 
 ## Callback contract
 
@@ -50,9 +54,11 @@ def on_message(inbound_msg):        # invoked from an engine worker thread (GIL 
 fixpp.session_register_callback(acceptor_session, on_message)   # MUST be before engine_start
 ```
 
-- The binding `Py_INCREF`s `on_message` and holds it until deregister/teardown (FR-013).
+- The binding `Py_INCREF`s `on_message` (the load-bearing half) and holds it until interpreter exit for the
+  thin single-callback test; DECREF-on-reregister/deregister/teardown (a session-keyed registry) is deferred
+  to PY-004 (FR-013).
 - `inbound_msg` is a **non-owning** view valid only for the call (FR-014).
-- No `session_send` / `session_close` from inside the callback (FR-013a — deadlock).
+- No `session_send` / `session_close` from inside the callback (FR-013a — deadlock). FR-013a (as-built 050 blocking send, `session.h:256-260`) **supersedes** `[2m §6.5]` / `2m-pybind.md:89` ("send-from-`fromApp` is legal"); the formal `[2m]` amendment is deferred to PY-002. See `data-model.md` E-4 provenance note.
 
 ## Error model (thin — FR-008)
 

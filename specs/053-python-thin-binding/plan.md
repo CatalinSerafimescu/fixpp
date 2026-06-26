@@ -46,6 +46,7 @@ import+version smoke test as the Tier-1 `python-bindings` gate. No `include/fix/
 | **IX §2** Sanitizers Tier-1 (ASan/UBSan/TSan) | The trampoline is the riskiest surface → SC-004 requires a local ASan e2e run; CI-sanitized Python deferred to PY-002 (documented). | **PASS w/ documented deferral** |
 | **X §1/§5/§6** ABI Policy — C-ABI is a versioned contract; ABI changes trigger Gate A + `/plan` sign-off | **C-ABI consumed unchanged** (no `c_api.h` edit) → X§6 ABI-change controls not triggered by an ABI change. Gate A still runs on this design bundle per the pipeline; reentrancy contracts are honored by the consumer (no blocking call from inside the callback — FR-013a). | **PASS** |
 | **XI §3** No `std::mutex` in awaitable headers | Trampoline is flat C/C++, includes no `asio::awaitable<...>`. | **N/A** |
+| **XII §5** Transport security — no implicit default; `unset` rejected at `Session::open()` | The loopback round-trip sets an **explicit** `insecure_plain_tcp` profile via `fixpp_session_config_set_security` (FR-004a, mirroring the gold reference); no implicit default, the `unset` sentinel is never relied on. §1–§4 vacuously satisfied (no TLS context); §7 not engaged (no app-layer `EncryptMethod(98)`). | **PASS** (explicit plaintext profile) |
 | **XV** Banned patterns | No global new/delete witness, no banned idioms; GIL/threading handled at the trampoline. | **PASS** |
 
 No violations requiring Complexity Tracking.
@@ -102,3 +103,8 @@ build/test vehicle.
 - **Phase 1** emits `data-model.md` (handle/proxy/trampoline state), `contracts/` (the Python surface +
   the typemap/trampoline contract), and `quickstart.md` (the round-trip script).
 - Command stops after Phase 1 design. **Gate A runs next** (per the pipeline: `/plan` → Gate A → `/tasks`).
+
+## Gate A
+
+- Round 1 applied 2026-06-26: Codex P1=3 P2=3 P3=1; Opus post-judging P1=2 P2=4 P3=4; rewrite addresses root causes A (engine_create 4-arg + stale dict name + false-provenance claim), B (gold-reference establishment recipe: security/reset_on_logon/heartbeat + cert/key typemap), C (FR-013a supersedes 2m §6.5 provenance note), D (FR-014 reword + callable-release reconcile) + New-2 (%exception scoping). No c_api.h change; freeze held; FR-012 survives. Reviews: research/reviews/codex_053-python-thin-binding_gate_a_review.md, research/reviews/opus_053-python-thin-binding_gate_a_adversarial_review.md.
+- Round 2 applied 2026-06-26: Codex 6/8 RESOLVED, 2 PARTIAL P2; Opus post-judging P1=0 P2=2 P3=1; rewrite completes the two sibling sweeps — D-4 wrap-table now lists set_security/set_reset_on_logon/set_heartbeat_seconds (+ SECURITY_INSECURE_PLAIN_TCP enum); FR-013/D-5/T-4/python-module-surface callable-release reworded to INCREF-load-bearing + held-until-interpreter-exit (DECREF/registry = PY-004), matching data-model E-4; FR-004a names reset_seqnum_policy as the 4th knob. No c_api.h change; freeze held. Reviews: research/reviews/codex_053-python-thin-binding_gate_a_2_review.md, research/reviews/opus_053-python-thin-binding_gate_a_2_adversarial_review.md.

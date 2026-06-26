@@ -34,12 +34,15 @@ dict_h = fixpp.dict_load_from_xml(DICT)
 
 # ── Acceptor engine (A): open before start, bind ephemeral port, read it after start ──
 eca = fixpp.engine_config_create(); fixpp.engine_config_set_realtime_clock(eca)
-eng_a = fixpp.engine_create(eca)
+eng_a = fixpp.engine_create(eca)   # thin wrapper injects FIXPP_C_ABI_VERSION_MAJOR/_MINOR into the real 4-arg fixpp_engine_create
 sca = fixpp.session_config_create()
 fixpp.session_config_set_role(sca, fixpp.ROLE_ACCEPTOR)
 fixpp.session_config_set_comp_ids(sca, "ACCEPTOR", "INITIATOR")
 fixpp.session_config_set_begin_string(sca, "FIX.4.4")
 fixpp.session_config_set_dictionary(sca, dict_h)
+fixpp.session_config_set_security(sca, fixpp.SECURITY_INSECURE_PLAIN_TCP, None, None)  # explicit plaintext (XII §5: unset is rejected at open)
+fixpp.session_config_set_heartbeat_seconds(sca, 30)
+fixpp.session_config_set_reset_on_logon(sca, False)        # acceptor: does NOT reset
 fixpp.session_config_set_reset_seqnum_policy(sca, fixpp.RESET_SEQNUM_BILATERAL_LENIENT)
 fixpp.session_config_set_tcp_endpoint(sca, HOST, 0)        # ephemeral
 acc = fixpp.session_open(eng_a, sca)
@@ -55,6 +58,9 @@ fixpp.session_config_set_role(scb, fixpp.ROLE_INITIATOR)
 fixpp.session_config_set_comp_ids(scb, "INITIATOR", "ACCEPTOR")   # reversed
 fixpp.session_config_set_begin_string(scb, "FIX.4.4")
 fixpp.session_config_set_dictionary(scb, dict_h)
+fixpp.session_config_set_security(scb, fixpp.SECURITY_INSECURE_PLAIN_TCP, None, None)  # explicit plaintext
+fixpp.session_config_set_heartbeat_seconds(scb, 30)
+fixpp.session_config_set_reset_on_logon(scb, True)         # initiator: resets to seq 1 on logon
 fixpp.session_config_set_reset_seqnum_policy(scb, fixpp.RESET_SEQNUM_BILATERAL_LENIENT)
 fixpp.session_config_set_tcp_endpoint(scb, HOST, port)
 ini = fixpp.session_open(eng_b, scb)

@@ -1,7 +1,11 @@
 # Phase 0 Research: Thin End-to-End Python Binding (PY-001)
 
-All signatures below were read from the shipped headers (`include/fix/c_api/*.h`) and the C-ABI test
-support (`tests/capi/capi_loopback_support.hpp`) on 2026-06-26, not inferred.
+Signatures below were re-verified against the shipped headers (`include/fix/c_api/*.h`) and the C-ABI test
+support (`tests/capi/capi_loopback_support.hpp`) at **Gate A round 1 (2026-06-26)**. The re-verification
+found **two** signatures wrong and corrected them: `fixpp_engine_create` is the **4-arg** form (see D-4) and
+the stale `fixpp_dict_load_xml_path` is really `fixpp_dict_load_from_xml` (spec Assumptions). The rest were
+confirmed against the headers — the D-4 table now matches `engine.h` (`:81-84`), `session.h` (`:100-167`,
+`:262`, `:277`), `message.h`, and `dict.h` (`:45-46`, `:67`).
 
 ## D-1 — Two engines, not one (forced by the lifecycle contract)
 
@@ -23,11 +27,13 @@ collisions).
 ## D-2 — Establishment sequence & the poll-with-deadline rule
 
 **Decision**: Order per round-trip: load dict → (A) engine-config → engine_create → session-config
-(role=acceptor, comp_ids, begin_string `FIX.4.4`, dictionary, tcp_endpoint `127.0.0.1:0`,
-reset_seqnum_policy) → register inbound callback → session_open(A) → engine_start(A) → poll
+(role=acceptor, comp_ids, begin_string `FIX.4.4`, dictionary, **security `insecure_plain_tcp`**,
+**heartbeat 30**, **reset_on_logon=false**, reset_seqnum_policy `bilateral_lenient`,
+tcp_endpoint `127.0.0.1:0`) → register inbound callback → session_open(A) → engine_start(A) → poll
 `acceptor_bound_endpoint` until non-zero → (B) engine-config → engine_create → session-config
-(role=initiator, **reversed** comp_ids, begin_string, dictionary, tcp_endpoint `127.0.0.1:<port>`,
-reset_seqnum_policy) → session_open(B) → engine_start(B) → poll `is_established` on both.
+(role=initiator, **reversed** comp_ids, begin_string, dictionary, **security `insecure_plain_tcp`**,
+**heartbeat 30**, **reset_on_logon=true**, reset_seqnum_policy `bilateral_lenient`,
+tcp_endpoint `127.0.0.1:<port>`) → session_open(B) → engine_start(B) → poll `is_established` on both.
 
 **Rationale (the CI-hang guard)**: every wait — the bound-port poll, the establishment poll, and the
 callback-receipt wait — MUST use a **bounded deadline that fails the test** on expiry, never an unbounded
@@ -39,14 +45,24 @@ establish, ≤5 s receive), asserting non-timeout.
 
 ## D-3 — First-establishment session config (mirror the gold reference)
 
-**Decision**: Mirror `capi_loopback_support.hpp`'s session knobs rather than guessing — notably
-`reset_seqnum_policy = bilateral_lenient` (via `fixpp_session_config_set_reset_seqnum_policy`) and
-`reset_on_logon` as the gold reference sets it, with default store behavior.
+**Decision**: Mirror `capi_loopback_support.hpp`'s `make_session_cfg` (`:155-173`) session knobs **in full**,
+rather than guessing or partially mirroring. The four knobs the gold reference sets that the round-trip MUST
+also set are:
+- `fixpp_session_config_set_security(sc, FIXPP_SECURITY_INSECURE_PLAIN_TCP, NULL, NULL)` — **explicit
+  plaintext** (`:163-165`). This is load-bearing, not optional: Article XII §5 (`constitution.md:187`) keeps
+  the `unset` sentinel **rejected at `Session::open()`**, so a config with no security profile cannot
+  establish at all.
+- `fixpp_session_config_set_reset_on_logon(sc, role == FIXPP_ROLE_INITIATOR)` — **per-role** (`:167`): the
+  initiator resets to seq 1 on logon, the acceptor does not, so a fresh pair logs on cleanly.
+- `fixpp_session_config_set_heartbeat_seconds(sc, 30)` (`:162`).
+- `fixpp_session_config_set_reset_seqnum_policy(sc, bilateral_lenient)` — accepts the one-sided 141=Y the
+  per-role `reset_on_logon` asymmetry produces (`session.h:141-142`).
 
 **Rationale**: a fresh loopback with default seqnum expectations may not log on cleanly; the gold reference
-chose `bilateral_lenient` deliberately. A wrong seqnum/reset knob manifests as a **non-establishment that
-the D-2 deadline turns into a (correct) test failure** — but mirroring the proven config avoids burning a
-cycle on it. Exact enum values to be read from `session.h` / the C-ABI test at implement time.
+chose this exact set deliberately. A wrong/missing knob (especially the security profile) manifests as a
+**non-establishment that the D-2 deadline turns into a (correct) test failure** — but mirroring the proven
+config in full avoids burning a cycle on it. All four setters already exist on the 052 surface (no C-ABI
+change). Exact enum values to be read from `session.h` / the C-ABI test at implement time.
 
 **Alternatives**: defaults — rejected (unproven for a cold loopback; risks a flaky establish).
 
@@ -61,8 +77,8 @@ The ~14 functions in scope and their out-param shape:
 | `fixpp_dict_load_from_xml(path, **out)` | handle | stock `OUTPUT` (opaque ptr) |
 | `fixpp_dict_destroy(d)` | — | plain |
 | `fixpp_engine_config_create(**out)` / `_set_*` / `_destroy` | handle | stock `OUTPUT` |
-| `fixpp_engine_create(cfg, **out)` / `_start` / `_destroy` | handle | stock `OUTPUT` |
-| `fixpp_session_config_create(**out)` / `_set_comp_ids` / `_set_begin_string` / `_set_role` / `_set_dictionary` / `_set_reset_seqnum_policy` / `_set_tcp_endpoint` / `_destroy` | handle | stock `OUTPUT` |
+| `fixpp_engine_create(cfg, uint16_t consumer_major, uint16_t consumer_minor, **out)` / `_start` / `_destroy` | handle | **hand** (Python `engine_create(cfg)` wrapper injects the version macros — see below) / stock `OUTPUT` |
+| `fixpp_session_config_create(**out)` / `_set_comp_ids` / `_set_begin_string` / `_set_role` / `_set_dictionary` / `_set_security(kind, const char* cert, const char* key)` / `_set_reset_on_logon(bool)` / `_set_heartbeat_seconds(int)` / `_set_reset_seqnum_policy` / `_set_tcp_endpoint` / `_destroy` | handle | stock `OUTPUT`; `_set_security`'s `cert`/`key` use the T-3 config-`const char*` typemap (accept `None`→`NULL`), `_set_reset_on_logon`/`_set_heartbeat_seconds` are plain. The `FIXPP_SECURITY_INSECURE_PLAIN_TCP` enum constant is exposed to SWIG (alongside the `ROLE_*` / `RESET_SEQNUM_*` enum constants, per T-1's `%constant` version-macro pattern). |
 | `fixpp_session_open(engine, cfg, **out)` | handle | stock `OUTPUT` |
 | `fixpp_session_is_established(s, bool* out)` | `bool` | stock `OUTPUT` |
 | `fixpp_session_acceptor_bound_endpoint(s, uint16_t* out)` | `int` | stock `OUTPUT` |
@@ -73,6 +89,14 @@ The ~14 functions in scope and their out-param shape:
 | `fixpp_msg_get_string(m, tag, …out buf…)` | `str` | **hand** (out-buffer → Python str) |
 | `fixpp_msg_destroy(m)` | — | plain |
 | `fixpp_session_register_callback(s, cb, userdata)` | — | **hand** (Python callable → trampoline + INCREF) |
+
+**`engine_create` version-macro injection (Gate A r1 correction)**: the real symbol is
+`fixpp_engine_create(cfg, uint16_t consumer_major, uint16_t consumer_minor, fixpp_engine_t** out)`
+(`engine.h:81-84`) — it records the consumer's ABI minor for Feature-A's forward-compat downgrade. The
+Python `engine_create(cfg)` is therefore a **thin hand-wrapper** that calls
+`fixpp_engine_create(cfg, FIXPP_C_ABI_VERSION_MAJOR, FIXPP_C_ABI_VERSION_MINOR, &out)`, where the two macros
+(`= 0` / `= 5`) come from `version.h:32-33`. Those macros must be made visible to the SWIG layer (e.g. an
+`%inline`/`%constant` exposure of `version.h`) so the wrapper can pass them. No `c_api.h` change.
 
 **Rationale**: SWIG's blanket include **compiles** wrappers for everything, but without typemaps the
 out-params are unusable from Python — the import smoke test stays green while the round-trip functions are
@@ -90,8 +114,10 @@ hand-written CPython C extension with no SWIG — rejected (Article IV §3 manda
 runtime + type tables). On `register_callback`, store the Python callable as `userdata` and **`Py_INCREF`**
 it; the trampoline matches `fixpp_recv_cb = void(*)(const fixpp_msg_t*, void*)` and, when fired from the
 engine worker thread, does `PyGILState_Ensure()` → wrap the `const fixpp_msg_t*` as a **non-owning** SWIG
-proxy via `SWIG_NewPointerObj(..., 0 /*own=0*/)` → call the Python callable → `PyGILState_Release()`. A
-deregister / engine teardown path **`Py_DECREF`**s the callable.
+proxy via `SWIG_NewPointerObj(..., 0 /*own=0*/)` → call the Python callable → `PyGILState_Release()`. The
+`Py_INCREF` is the load-bearing half; for the thin single-callback test the callable is **held until
+interpreter exit**. DECREF-on-reregister / deregister / engine teardown requires a session-keyed registry and
+is deferred to **PY-004** (consistent with `data-model.md` E-4).
 
 **Rationale (three forced landmines)**:
 1. **GIL (FR-007)**: the callback runs on an asio worker thread Python doesn't own; touching any Python

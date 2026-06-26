@@ -9,6 +9,11 @@ compiled). The e2e RED test is the enforcement: a missing/incorrect typemap make
   the headers/declarations the round-trip needs, or keep the umbrella include but `%ignore` everything
   out of scope. The in-scope set is the table in `python-module-surface.md`.
 - Bring in `%include "typemaps.i"` for stock `OUTPUT` typemaps.
+- **Expose the C-ABI version macros to the SWIG layer** (`%constant`/`%inline` over `version.h:32-33`,
+  `FIXPP_C_ABI_VERSION_MAJOR` / `_MINOR`) and provide a thin **`engine_create(cfg)` hand-wrapper** that calls
+  the real 4-arg `fixpp_engine_create(cfg, FIXPP_C_ABI_VERSION_MAJOR, FIXPP_C_ABI_VERSION_MINOR, &out)`
+  (`engine.h:81-84`). Python callers pass only `cfg`; the wrapper injects the version macros. No `c_api.h`
+  change.
 
 ## T-2 — Stock `OUTPUT` typemaps (scalar/handle out-params)
 
@@ -31,8 +36,11 @@ returned to Python.
 | `msg_commit(m, const uint8_t** payload, size_t* len)` | `out`: `(payload,len)` → one Python `bytes` (copy) |
 | `session_send(s, const uint8_t* frame, size_t len)` | `in`: Python `bytes` → `(frame, len)` |
 | `msg_get_string(m, tag, …out buffer…)` | `out`: C out-buffer/len → Python `str` (read exact `get_string` signature at implement time; it has an out-pointer+len shape) |
+| **config `const char*` inputs** — `set_comp_ids(sender, target)`, `set_begin_string(s)`, `set_tcp_endpoint(host, port)`, and the `cert`/`key` of `set_security(kind, cert, key)` | `in`: Python `str` → UTF-8-encoded NUL-terminated `const char*`; **reject an embedded NUL** (these are NUL-terminated C inputs, not ptr+len); borrowed for the call only (the C-ABI copies what it needs); a conversion failure raises via the shared error bridge (T-5). `cert`/`key` accept `None` → `NULL` (ignored for the plaintext kind). |
 
 `bytes` is the correct Python type for the committed wire payload (binary, SOH-delimited) — not `str`.
+The config `const char*` inputs above are the opposite case: NUL-terminated C strings, so `str` (UTF-8) is
+correct and an embedded NUL must be rejected (it would silently truncate the C string).
 
 ## T-4 — Callback trampoline (in the `.i` `%{ %}` / `%inline` block)
 
@@ -53,24 +61,34 @@ static void fixpp_py_recv_trampoline(const fixpp_msg_t* inbound, void* userdata)
 
 - `session_register_callback`'s `in` typemap: take a Python callable, `Py_INCREF` it, pass
   `fixpp_py_recv_trampoline` as `cb` and the callable as `userdata` (FR-013).
-- A deregister / teardown path `Py_DECREF`s the held callable. (For the thin test, releasing at
-  `engine_destroy` / interpreter exit is acceptable; the INCREF is the load-bearing half.)
+- The `Py_INCREF` is the load-bearing half; for the thin single-callback test the callable is **held until
+  interpreter exit**. DECREF-on-reregister / deregister / teardown requires a session-keyed registry and is
+  deferred to **PY-004** (consistent with `data-model.md` E-4).
 - `SWIGTYPE_p_fixpp_msg_t` is the SWIG type descriptor for `fixpp_msg_t` (present because the type is
   wrapped); confirm the exact descriptor symbol at implement time.
 
 ## T-5 — Error → exception bridge (thin)
 
-A shared `%exception` (or per-call check) converts a non-OK `fixpp_error_t` into `raise fixpp.Error(strerror(code))`:
+A `%exception` (or per-call check) converts a non-OK `fixpp_error_t` into `raise fixpp.Error(strerror(code))`.
+The check **MUST be scoped to functions whose return is `fixpp_error_t`** — a *blanket* `%exception` applies
+to every wrapped function and would misfire on non-`fixpp_error_t` returns: `fixpp_version_string` returns
+`const char*` (`c_api.h:57`) and `fixpp_engine_destroy` returns `void` (`engine.h:107`), where comparing
+`result != FIXPP_ERR_OK` is a latent type misfire. Scope it via a typed `%exception fixpp_error_t { … }` or
+a per-call `%exception <fn> { … }`, not a bare `%exception { … }`:
 
 ```c
-%exception {
+/* applies ONLY to functions whose result type is fixpp_error_t */
+%exception fixpp_error_t {
     $action
-    if (result != FIXPP_ERR_OK /* for fns returning fixpp_error_t */) {
+    if (result != FIXPP_ERR_OK) {
         SWIG_exception(SWIG_RuntimeError, fixpp_strerror(result));
     }
 }
 ```
 
+- This **reinforces the selective-wrap decision (D-4)**: a blanket `%include` + blanket `%exception` is the
+  false-green base; selectively wrapping (or `%ignore`-ing out-of-scope symbols) keeps the error check off
+  the `const char*` / `void` returns.
 - `fixpp.Error` is a single Python exception type (PY-003 introduces the hierarchy).
 - Poll functions that legitimately return a value with `FIXPP_ERR_OK` (`is_established`,
   `acceptor_bound_endpoint`) return that value, not raise.
