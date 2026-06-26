@@ -87,7 +87,7 @@
 ### Mandatory close-out tasks (Gate-B preconditions, Article XVII §8)
 
 - [X] T020 [P] **Catalogue close-out**: flip `spec/feature-catalogue.md` rows **PY-002** (line 273) and **PY-003** (line 274) from `backlog` → `done` with the `054-python-gil-exceptions` owner + test evidence refs; add/update their `spec/coverage-index.md` PY-002/PY-003 entries to point at the landed tests + the `[2m]` amendment.
-- [ ] T021 **Feature-completeness audit (FINAL task)**: assert against the tree that (i) every `tasks.md` row is `[X]` or carries an explicit waiver; (ii) every FR-001..FR-013 and SC-001..SC-007 maps to a landed test AND a landed implementation; (iii) PY-002 + PY-003 catalogue rows are `done` with matching `coverage-index.md` entries. Record the verdict (100% or fully-waived, with the UBSan-leg 053 D-9 carry-forward waiver noted) in `.specify/decisions/054-python-gil-exceptions-verify.md` (`## Completeness`). HARD `/gate-b` precondition (pre-flight 4d).
+- [X] T021 **Feature-completeness audit (FINAL task)**: assert against the tree that (i) every `tasks.md` row is `[X]` or carries an explicit waiver; (ii) every FR-001..FR-013 and SC-001..SC-007 maps to a landed test AND a landed implementation; (iii) PY-002 + PY-003 catalogue rows are `done` with matching `coverage-index.md` entries. Record the verdict (100% or fully-waived, with the UBSan-leg 053 D-9 carry-forward waiver noted) in `.specify/decisions/054-python-gil-exceptions-verify.md` (`## Completeness`). HARD `/gate-b` precondition (pre-flight 4d).
 
 ---
 
