@@ -27,7 +27,7 @@ from _gil_staging import run_staging
 
 
 def _run_raising_scenario():
-    return run_staging("raise")
+    return run_staging("engine_destroy", raise_in_callback=True)
 
 
 @pytest.mark.parametrize("rep", range(3))
