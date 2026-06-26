@@ -53,8 +53,10 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_dict_load_from_xml(const char*     path,
  * still holds a reference to it.
  *
  * Idempotent double-destroy-safe via a tombstone ([2i §4.2.1]): checks tag_,
- * rewrites it to FIXPP_HANDLE_TAG_DEAD, and retains a bounded dead shell so
- * a second same-pointer destroy is a safe no-op (no double-free, no UAF).
+ * rewrites it to FIXPP_HANDLE_TAG_DEAD, and retains a dead shell (never freed)
+ * so a second same-pointer destroy is a safe no-op (no double-free, no UAF).
+ * Shell growth is O(load/destroy cycle count), NOT O(live handles) — load once
+ * and reuse the handle where call frequency matters (see L-052-4).
  *
  * The full destroy critical section {tag_ check, shared_ptr release,
  * tag_=DEAD, dead-shell insert} runs under ONE process-global mutex so that
