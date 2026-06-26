@@ -77,7 +77,8 @@ bindings/python/
 └── tests/
     ├── test_smoke.py                       # KEPT
     ├── test_roundtrip.py                   # KEPT (updates fixpp.Error→FixppError-alias assertions stay green)
-    ├── test_exceptions.py                  # NEW: typed hierarchy, exact-mapping coverage, fallback, attrs
+    ├── test_exceptions.py                  # NEW: typed hierarchy, fallback, attrs
+    ├── test_error_coverage.py              # NEW: header-sourced set-equality coverage (error.h ↔ _CODE_TO_NAME / _map_to_class)
     ├── test_gil_release_canary.py          # NEW: two-mode release witness — GREEN in a normal build (in-matrix); RED in a FIXPP_PY_GIL_RELEASE_CANARY build (local-only)
     └── test_callback_raise_watchdog.py     # NEW: subprocess-watchdog raising-callback no-deadlock
 
