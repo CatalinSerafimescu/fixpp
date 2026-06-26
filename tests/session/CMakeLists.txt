@@ -83,6 +83,13 @@ function(add_threading_test name)
   # suppressions file scopes the noise; harmless under non-TSan builds.
   set_tests_properties(${name} PROPERTIES ENVIRONMENT
     "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp")
+  # Hang backstop: these async/threading tests `co_spawn(...use_future)` then
+  # block on `fut.get()`. A lost-wake or missed cross-thread completion makes
+  # get() block forever and (under serial `ctest --output-on-failure`) wedges
+  # the whole suite to CI's 6 h ceiling. The slowest legit run is sub-second
+  # under asan, so 120 s is pure margin while still failing a true deadlock
+  # fast and letting ctest report which test hung + continue.
+  set_tests_properties(${name} PROPERTIES TIMEOUT 120)
 endfunction()
 
 # ── US1 (Phase 3) seam registrations ────────────────────────────────────────
