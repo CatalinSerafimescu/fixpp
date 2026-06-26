@@ -62,6 +62,21 @@ if(FIXPP_PY_GIL_CANARY)
   target_compile_definitions(fixpp_py PRIVATE FIXPP_PY_GIL_CANARY=1)
 endif()
 
+# ── T001 / FR-004 / data-model E-4 — GIL-RELEASE canary (PY-002), LOCAL-ONLY ──
+# When ON, elides the Py_BEGIN/END_ALLOW_THREADS bands on session_close /
+# session_send / engine_destroy so the teardown-vs-in-flight-recv-callback
+# scenario DEADLOCKS (test_gil_release_canary.py asserts the hang via a
+# subprocess hard timeout). Distinct from FIXPP_PY_GIL_CANARY above (the 053
+# reacquire canary -> segfault). DELIBERATE-HANG build — never set in any CI
+# preset (FR-013); only its GREEN leg (this option OFF) runs in the matrix.
+option(FIXPP_PY_GIL_RELEASE_CANARY
+  "Elide the GIL release around the blocking wrappers (PY-002 release canary); LOCAL-ONLY"
+  OFF)
+
+if(FIXPP_PY_GIL_RELEASE_CANARY)
+  target_compile_definitions(fixpp_py PRIVATE FIXPP_PY_GIL_RELEASE_CANARY=1)
+endif()
+
 if(FIXPP_PYTHON_SANITIZER STREQUAL "asan")
   target_compile_options(fixpp_py PRIVATE -fsanitize=address -fno-omit-frame-pointer)
   target_link_options(fixpp_py PRIVATE -fsanitize=address)

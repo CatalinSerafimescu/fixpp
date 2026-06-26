@@ -88,9 +88,13 @@ Specifically:
 
 2. **Reentrancy legality** is determined by `[2i §4.10]` annotations; the SWIG director does **not** invent stricter Python-only rules. `Session.send()` from inside `fromApp` is legal at the C ABI per `[2i §4.10]` (every `fixpp_session_send` is `FIXPP_REQUIRES_SESSION_LOCK` and is dispatched on the strand per `[2d §7.6]`); the Python wrapper does **not** refuse it. The §6.5 carve-out table lists only the genuine deadlock cases — `engine.close()` / `session.close()` from inside a callback (which would block on the strand draining itself).
 
+   > **[Article XX amendment — 054-python-gil-exceptions, L-054-1]:** the "legal" claim above was predicated on the *non-blocking strand-dispatch* `fixpp_session_send` design. The **as-built 050 C-ABI** `fixpp_session_send` is **blocking** — `co_spawn(ioc_, …, use_future)` then `fut.get()` (mechanism `src/capi/session.cpp:284-286`; documented deadlock rule `session.h:255-258`). Calling it **from inside the inbound callback** (which runs on the engine worker / session strand) therefore **DEADLOCKS** as-built: the worker blocks in `fut.get()` waiting for the send coroutine to run on the *same* io_context/strand, which cannot progress (**L-054-1**). This is a **strand/io_context reentrancy deadlock — distinct from, and unaffected by, the 053 GIL-teardown deadlock** (053) and the close-from-callback deadlock (row below). It is a **current limitation tied to the blocking as-built**, NOT a permanent "forbidden by design": restoring real legality (non-blocking send-from-callback) is a deferred **engine** item outside the PY-002/PY-003 `0→1` freeze. The binding guarantee stays **documentary** (the callback docstring states the hazard); active detection (`session._in_callback` + a pre-call `CallbackReentrantClose`-style raise) is **PY-004**.
+
 3. **Logging on the director path** uses Python's `sys.stderr` only via `PyErr_PrintEx(0)`. The engine logger is **not** callable from `bindings/python/` in v1.0 per `[2k §2]` non-goal #7 ("No log forwarding to the C ABI in v1.0. Log/OTel access is C++ API only. `c_api/log.h` and `c_api/otel.h` contain placeholder version macros and `#include` guards only; no `extern "C"` symbols in v1.0."). There is no `fixpp_python_callback_log_fatal` or equivalent C-ABI symbol in v1.0. The engine's own logger may emit "code 1200 from session strand" using only the `fixpp_error_t` value (no Python traceback string crosses `extern "C"`); the Python traceback is observable on Python's `sys.stderr`.
 
 4. **Strand-execution discipline** uses GIL-protected session-local markers, **not** OS-thread-id detection. Per the `[2d §4.5]` threading-mode taxonomy (`per_session_strand` | `engine_thread_pool_strand` | `direct_executor`), the session strand is **not** pinned to a single OS thread under `engine_thread_pool_strand` mode (the most likely production deployment with `EngineConfig.io_threads > 1`). The director sets `session._in_callback = True` on the *Python `Session` instance* on entry (under the GIL) and clears it before releasing the GIL on exit; `Session.send` / `Session.close` / `Engine.close` check `self._in_callback` directly. The GIL serialises Python execution; only one callback runs in Python at a time; the marker is GIL-protected without thread-id assumptions. (See §6.5 for the runtime check shape.)
+
+   > **[Article XX amendment — 054-python-gil-exceptions, close-from-callback]:** The `session._in_callback` marker, the `Session.close`/`Engine.close` pre-call check, and the resulting `CallbackReentrantClose` (1204) raise are the **designed behavior** for the SWIG director, described here for the future PY-004 implementation. The **as-built flat v1.0 binding** (053/054) has **no director, no `_in_callback` marker, and no pre-call check** — `session_close` and `engine_destroy` are bare flat functions with `%exception` GIL-release bands. Close-from-callback in the v1.0 flat binding therefore **deadlocks** (same as send-from-callback, L-054-1) — the binding guarantee is **documentary** (the module docstring states the hazard). Active pre-call `CallbackReentrantClose` detection (this marker mechanism) is **PY-004**. Symmetric with L-054-1.
 
 The §3.4 / §9 seam #9 (`tools/check_layers.py` extension to `bindings/python/` — see §9 seam #9 commitment below) is the structural backstop that prevents regressions of rules (1)–(4) above. A `bindings/python/` source file that includes `<fixpp/wire/...>` or links a `fixpp::core::*` symbol fails the lint and the build.
 
@@ -205,6 +209,8 @@ Source: `library/.specify/constitution.md:135–136`. 2m's Python `FixppError` e
 > **Reentrancy contract** is documented per C ABI symbol (thread-safe / single-thread / requires-session-lock). No undocumented reentrancy.
 
 Source: `library/.specify/constitution.md:137`. 2m inherits the per-symbol annotation per `[2i §4.10]`: when a Python method calls into the C ABI, the SWIG wrapper enforces the reentrancy rule. Concretely: `Session.send()` is `FIXPP_REQUIRES_SESSION_LOCK` per `[2i §4.10]`; SWIG releases the GIL but the underlying C-ABI thunk dispatches the work onto the session strand via `fixpp_session_send`'s strand-aware shape per `[2j §6.5]`. The Python caller doesn't see the dispatch directly; they get back an `fixpp_error_t` translated to `FixppError`.
+
+> **[Article XX amendment — 054, L-054-1]:** the "dispatches onto the session strand" description matches the *intended* non-blocking shape. The **as-built 050** `fixpp_session_send` blocks on the dispatch (`co_spawn(ioc_, …, use_future)` + `fut.get()`), so the "SWIG releases the GIL … dispatches onto the strand" path is safe **only off the strand**. From *inside* an inbound callback (on the strand) it deadlocks — see the §1.3 rule (2) amendment and **L-054-1**.
 
 ### §3.13 From `[const §XV.15]` — Banned pattern: drop-oldest on app/session message paths
 
@@ -471,7 +477,8 @@ class Session:
         see the old `self._application` reference; the new application
         binding is installed for the next strand-dispatched callback).
         This separates cleanly from the close-from-callback case
-        (which raises CallbackReentrantClose 1204 per §6.5): swap is
+        (which deadlocks as-built in v1.0 [documentary; PY-004 implements the
+        active CallbackReentrantClose 1204 pre-call detection per §6.5]): swap is
         non-blocking and does not deadlock the strand. Implementation
         sets self._application to the new app under the GIL; the
         in-flight callback's bound-method-object dispatch already
@@ -795,13 +802,27 @@ class CallbackReentrantClose(BindingError):
     callback — the close path waits for the strand to drain, but the
     strand is mid-callback waiting for the close to return; the resulting
     deadlock is detected pre-call via the §1.3 rule (4) GIL-protected
-    session-local marker (`session._in_callback`). v1.0 raises this code
-    BEFORE entering the C ABI; no native deadlock occurs. (v0.3: split
-    from the v0.2 draft's single `GilDeadlock` (1201) semantic overload
-    into a distinct close-from-callback code — Codex round-2 P2-1
-    close.) Session.send from inside fromApp is NOT banned (it is legal
-    at the C ABI per [2i §4.10] / §1.3 rule (2)); only
-    close-from-callback raises this.
+    session-local marker (`session._in_callback`). The designed behavior
+    is to raise this code BEFORE entering the C ABI so no native deadlock
+    occurs. NOTE [054 / Article XX]: as-built flat v1.0 binding (053/054)
+    has NO director, NO `_in_callback` marker, and NO pre-call check —
+    `session_close`/`engine_destroy` are bare flat functions with
+    %exception GIL-release bands. Close-from-callback in the v1.0 flat
+    binding DEADLOCKS (same as send-from-callback per L-054-1); the
+    binding guarantee is DOCUMENTARY (module docstring states the hazard).
+    Active pre-call CallbackReentrantClose detection (this marker
+    mechanism) is PY-004. (v0.3: split from the v0.2 draft's single
+    `GilDeadlock` (1201) semantic overload into a distinct
+    close-from-callback code — Codex round-2 P2-1 close.) Session.send
+    from inside fromApp is NOT banned by *this code* (it is design-legal
+    at the C ABI per [2i §4.10] / §1.3 rule (2)); only close-from-callback
+    raises this. NOTE [054 / L-054-1, Article XX]: as-built (050 blocking
+    fixpp_session_send = co_spawn(ioc_, …, use_future)+fut.get()),
+    Session.send from inside the callback DEADLOCKS — a strand/io_context
+    reentrancy deadlock distinct from this close-from-callback deadlock and
+    from the 053 GIL-teardown deadlock. It stays documentary in v1.0;
+    active detection (a pre-call raise mirroring this one) is PY-004. See
+    the §1.3 rule (2) and §6.5 amendments.
 
     The numeric value 1201 was NEVER published in a tagged C-ABI release
     (v0.2 was an internal draft within Gate A — nothing tagged or
@@ -810,9 +831,19 @@ class CallbackReentrantClose(BindingError):
     violation per [const §X.4]. v0.3 is the FIRST signed-off version of
     this doc; no source-compatibility alias for the v0.2 draft name is
     retained."""
+
+# --- Session/app + message-construction block [1400, 1499]
+#     ([2i §4.3] / 051 D-6; ADDED to this hierarchy by 054 / Article XX) ---
+class AppError(FixppError):
+    """[1400, 1499] block. Session/app + message-construction failures
+    (FIXPP_ERR_SESSION_INVALID_ARGUMENT/1400 .. FIXPP_ERR_MSG_FRAMING_TAG_FORBIDDEN/1405).
+    The block was minted in [2i §4.3] / 051 AFTER this doc's §4.6 sign-off,
+    so AppError is an additive amendment (no new fixpp_error_t code — the
+    0->1 freeze holds). Distinct from SessionError ([300,399] threading);
+    the block could not reuse that name. [054 / Article XX]"""
 ```
 
-**Mapping rule (numeric → Python class).** Implemented in `fixpp.errors._map_to_class(code: int) -> type[FixppError]`:
+**Mapping rule (numeric → Python class).** Implemented in `fixpp.errors._map_to_class(code: int) -> type[FixppError]` (realized **module-level** as `fixpp._map_to_class` in v1.0 per 054 / PY-003; the `fixpp.errors.*` package form is the deferred package alias → PY-005):
 
 | `fixpp_error_t` range | Python class |
 |---|---|
@@ -837,7 +868,8 @@ class CallbackReentrantClose(BindingError):
 | 1203 | `WheelAbiMismatch` |
 | 1204 | `CallbackReentrantClose` (v0.3 — split from v0.2-draft `GilDeadlock` per Codex round-2 P2-1) |
 | [1205, 1299] | `BindingError` (parent class for unrecognised v1.x growth) |
-| anything else | `Unknown` (per `[2i §4.4]` forward-compat downgrade) |
+| **[1400, 1499]** | **`AppError`** ([054 / Article XX] — the Phase-4 session/app + message-construction block minted in `[2i §4.3]` / 051 D-6, codes 1400–1405; post-`[2m §4.6]`-sign-off additive amendment; distinct from `SessionError` `[300,399]`) |
+| anything else | **direct `_map_to_class` call: `FixppError` (root)** ([054 / Article XX] reconciliation, FR-009 — a wholly unmapped/future block falls back to the root, NOT `Unknown`; `Unknown` maps **only** code 2 / `FIXPP_ERR_UNKNOWN`, and a separate `UnknownError` would collide with it). **Runtime path: `Unknown`** — the `[2i §4.4]` forward-compat downgrade collapses any code newer than the consumer's registered minor to `FIXPP_ERR_UNKNOWN`(2) **before** it reaches the translator, so the out-typemap never hands `_map_to_class` a truly-unmapped code; the root fallback is the **direct-call** (SC-006) / forward-compat path. |
 
 **Stability rule.** Once a `fixpp_error_t` numeric value is **published** in a tagged C-ABI release, the Python subclass binding **never changes**. Adding a new variant in v1.x adds a new subclass under the same parent (e.g., `FIXPP_ERR_BINDING_FOO` at code 1205 would add `class Foo(BindingError)`); never re-binds existing ones. **Unrecognised** numeric values (from a newer engine binary that the wheel doesn't know about) surface as the block parent class (e.g., `BindingError` for any `[1205, 1299]` value not yet in the wheel's compile-time table); this matches the `[2i §4.4]` forward-compat downgrade rule. Verified by §9 seam #6.
 
@@ -1119,12 +1151,12 @@ When an inbound message arrives:
 2. The C-ABI receive-callback trampoline (a steady-state thunk per `[2i §5.2]`) is invoked with the inbound `fixpp_msg_t*`.
 3. The SWIG director adapter:
    a. Acquires the GIL via `PyGILState_Ensure`.
-   b. Sets `session._in_callback = True` on the Python `Session` instance (per §1.3 rule (4) / §6.5 enforcement).
+   b. Sets `session._in_callback = True` on the Python `Session` instance (per §1.3 rule (4) / §6.5 enforcement). **[054 / Article XX: this step is the PY-004 director design; the v1.0 flat binding omits the marker — see §1.3 rule (4) and §6.5 enforcement amendment.]**
    c. Constructs a Python `Message` wrapper with `_is_inbound = True`, `_dead = False` (one `PyObject*` allocation on the Python heap per RC#1 / §3.9 v0.2; not on the engine arena).
    d. Calls `application.fromApp(session_py, msg_py)`.
    e. If the call raises, captures and translates per §6.3 boundary 2 (`PyErr_PrintEx(0)` to `sys.stderr`; return `1200`).
    f. **Arms the `_dead` sentinel BEFORE GIL release**: `msg_py._dead = True` (so any post-return capture-and-access raises `fixpp.ObjectLifetime` (1202) instead of dereferencing a stale `fixpp_msg_t*`).
-   g. Clears `session._in_callback = False`.
+   g. Clears `session._in_callback = False`. **[054 / Article XX: PY-004 director design; v1.0 flat binding omits.]**
    h. Releases the GIL via `PyGILState_Release`.
 4. The C-ABI return code propagates back to the FSM.
 
@@ -1153,14 +1185,16 @@ When an inbound message arrives:
 | `msg.set_string(tag, value)` on **inbound** `msg` | **NO** | Per `[2i §10 Q5]` DECIDED v0.2 / §1.3 rule (1): `fixpp_msg_set_*` on an inbound flyweight returns `FIXPP_ERR_INVALID_HANDLE`. The Python wrapper raises `fixpp.CapiError` with `code = 4` (the `_is_inbound = True` flag short-circuits before the C-ABI round-trip). Use `msg.clone()` first to get a mutable outbound-shaped copy. (Codex P1-3 / Opus N-P1-1 close.) |
 | `msg.set_string(tag, value)` on **outbound** `msg` (passed to `toAdmin` / `toApp` or constructed via `Message(msg_type, session)`) | YES | The set path mutates the per-message arena per `[2i §4.7]`. This is the intended use of `toAdmin` / `toApp` — outbound mutation. |
 | `msg.clone()` | YES | `fixpp_msg_clone` is `FIXPP_REQUIRES_SESSION_LOCK`; we're on the strand. |
-| `session.send(other_msg)` | **YES** in v0.2 (was NO in v0.1) | `fixpp_session_send` is `FIXPP_REQUIRES_SESSION_LOCK` and is dispatched on the strand per `[2i §4.10]` / `[2d §7.6]`; the C ABI carves this as legal explicitly. The Python binding does not invent a stricter rule (Codex P2-3 close, v0.2). The §6.5 v0.1 ban was justified with a "recursive callback starvation" mechanism that conflated CPython's reentrant GIL acquire semantics with strand-level deadlock; v0.2 removes the ban. The user pattern remains "if you want to defer the send to another thread for ergonomics, `msg.clone()` and post to a `queue.Queue`" — a recommendation, not a requirement. |
-| `engine.close()` / `session.close()` | **NO** | Closing while inside a callback deadlocks: the close path posts a "drain the strand" closure and waits for the strand to drain, but the strand is mid-callback waiting for the close to return. The Python wrapper raises `fixpp.CallbackReentrantClose` (1204) — v0.3 split out from the v0.2-draft `GilDeadlock` (1201) per Codex round-2 P2-1. (No alias for the v0.2-draft name is retained; v0.3 is the first signed-off version.) This row remains the only deadlock-detection enforcement; the §6.1 sub-interpreter case is a distinct rejection at construction time and surfaces as `SubInterpreterRejected` (1201). |
+| `session.send(other_msg)` | **NO as-built (L-054-1)** — design-legal, blocked by the 050 blocking shape | **[054 / L-054-1 amendment, Article XX]** The v0.2 "YES" assumed the *non-blocking strand-dispatch* `fixpp_session_send`. The **as-built 050** `fixpp_session_send` blocks (`co_spawn(ioc_, …, use_future)` + `fut.get()`; `src/capi/session.cpp:284-286`, rule `session.h:255-258`), so from inside the callback (on the strand) it **DEADLOCKS** — the worker blocks on `fut.get()` for a coroutine that needs the same strand. A strand/io_context reentrancy deadlock, **distinct** from the close-from-callback row below and from the 053 GIL-teardown deadlock. **Documentary** (callback docstring); active detection = PY-004. Mitigation: `msg.clone()` from the callback and `queue.put()` to drain on **another thread**, then `session.send()` off the strand. Restoring true legality (non-blocking send-from-callback) is a deferred **engine** item. _(Original v0.2 rationale retained for history: `FIXPP_REQUIRES_SESSION_LOCK`, dispatched on the strand per `[2i §4.10]` / `[2d §7.6]`; the C ABI carves this as legal; the v0.1 ban conflated CPython's reentrant GIL acquire semantics with strand-level deadlock — but the as-built blocking shape reintroduces a genuine, different deadlock.)_ |
+| `engine.close()` / `session.close()` | **NO** | Closing while inside a callback deadlocks: the close path posts a "drain the strand" closure and waits for the strand to drain, but the strand is mid-callback waiting for the close to return. **[054 / Article XX amendment]:** The **designed** behavior (PY-004 SWIG director) is for the Python wrapper to raise `fixpp.CallbackReentrantClose` (1204) **without entering the C ABI** — v0.3 split out from the v0.2-draft `GilDeadlock` (1201) per Codex round-2 P2-1. **As-built v1.0 flat binding (053/054):** no director, no `_in_callback` marker, no pre-call check — close-from-callback **DEADLOCKS** (same shape as send-from-callback, L-054-1). The binding guarantee is **DOCUMENTARY** (the module docstring states the hazard); active `CallbackReentrantClose` detection is **PY-004**. (No alias for the v0.2-draft name is retained; v0.3 is the first signed-off version.) The §6.1 sub-interpreter case is a distinct rejection at construction time and surfaces as `SubInterpreterRejected` (1201). |
 | `dict.load_xml(path)` | YES (rare; not perf-sensitive) | `FIXPP_SINGLE_THREAD`; not on a session strand reentrancy. |
 | Calling user's own Python code | YES | Including `print`, `logging`, `numpy.array(...)`, etc. |
 | `time.sleep(seconds)` | YES (legal — but blocks the strand) | The strand is single-threaded; sleeping blocks all other dispatch. Document as "don't do this." |
 | `os.fork()` / `subprocess.Popen(...)` | YES (legal) | Standard CPython semantics. |
 
 **Enforcement of the close-from-callback ban — GIL-protected session-local marker, NOT thread-id detection.** Per §1.3 rule (4) (NEW in v0.2 — replaces the v0.1 thread-id detection that was unsound under `[2d §4.5]` `engine_thread_pool_strand` mode; Opus N-P1-3 close):
+
+> **[Article XX amendment — 054-python-gil-exceptions, close-from-callback]:** The marker mechanism described below is the **designed behavior (PY-004 SWIG director)**, not the as-built v1.0 flat binding. The **v1.0 flat binding** (053/054) has **no director, no `_in_callback` marker, and no pre-call check**. Close-from-callback in v1.0 **deadlocks** (same as send-from-callback per L-054-1); the guarantee is **documentary**. Active pre-call `CallbackReentrantClose` (1204) detection (this whole enforcement mechanism) is **PY-004**. The design prose below is retained as the normative PY-004 specification.
 
 - The SWIG director's entry path stores `session._in_callback = True` on the *Python `Session` instance* (NOT on a `threading.local()` and NOT keyed by `threading.get_ident()`), guarded by the GIL.
 - The director's exit path stores `session._in_callback = False` BEFORE releasing the GIL on return.
@@ -1225,7 +1259,7 @@ CI flags > 5% regression on the hot-path rows per `[const §VIII.2]`. Verified b
 | `FIXPP_ERR_BINDING_SUBINTERPRETER` | 1201 | §6.1 — `Engine.__init__` was invoked from a CPython sub-interpreter (PEP 554 / `interpreters` API); v1.0 supports only the main interpreter. (v0.3: split out from v0.2's `FIXPP_ERR_BINDING_GIL_DEADLOCK` per Codex round-2 P2-1; the sub-interpreter case is semantically wrong-interpreter UB-prevention, not a deadlock.) | Programmer / deployment error — construct `Engine` from the main interpreter only. | `SubInterpreterRejected` |
 | `FIXPP_ERR_BINDING_OBJECT_LIFETIME` | 1202 | §6.2 — a Python wrapper accessor was called after the parent native handle was invalidated (e.g., parent `Session` closed). | Programmer error — observe the close ordering / use `Session` as a context manager. | `ObjectLifetime` |
 | `FIXPP_ERR_BINDING_WHEEL_ABI_MISMATCH` | 1203 | §1 / §6.1 — the wheel's bundled `_fixpp.so` ABI does not match the SWIG wrapper's compiled-in expectation. Should never happen (cibuildwheel guarantees match); surfaces if a user manually replaces the binary. | Configuration error — reinstall the wheel. | `WheelAbiMismatch` |
-| `FIXPP_ERR_BINDING_CALLBACK_REENTRANT_CLOSE` | 1204 | §6.5 — a Python callback called `engine.close()` / `session.close()` from inside the callback; the close path waits for the strand to drain but the strand is mid-callback. The §1.3 rule (4) GIL-protected session-local marker (`session._in_callback`) detects the case before the C-ABI call and surfaces this code instead of allowing the native deadlock. (v0.3: split from v0.2-draft's `FIXPP_ERR_BINDING_GIL_DEADLOCK` per Codex round-2 P2-1; this is the genuine deadlock case.) | Programmer error — restructure to call `close()` from a non-callback Python thread (typical pattern: a separate "shutdown coordinator" thread that signals the FSM out-of-band). | `CallbackReentrantClose` |
+| `FIXPP_ERR_BINDING_CALLBACK_REENTRANT_CLOSE` | 1204 | §6.5 — a Python callback called `engine.close()` / `session.close()` from inside the callback; the close path waits for the strand to drain but the strand is mid-callback. The designed behavior (PY-004 SWIG director) is for the §1.3 rule (4) GIL-protected session-local marker (`session._in_callback`) to detect the case before the C-ABI call and surface this code instead of allowing the native deadlock. **As-built v1.0 flat binding (053/054): no marker, no pre-call check — close-from-callback deadlocks; enforcement is DOCUMENTARY (PY-004).** [054 / Article XX] (v0.3: split from v0.2-draft's `FIXPP_ERR_BINDING_GIL_DEADLOCK` per Codex round-2 P2-1; this is the genuine deadlock case.) | Programmer error — restructure to call `close()` from a non-callback Python thread (typical pattern: a separate "shutdown coordinator" thread that signals the FSM out-of-band). | `CallbackReentrantClose` |
 
 **Stability rule applied.** Each numeric value (1200, 1201, 1202, 1203, 1204) is published in the v1.0 wheel's compiled-in headers; subsequent v1.x wheels never re-bind these slots. Future variants append at 1205+. The v0.2 → v0.3 numeric reshuffle (1201's semantic split) does not violate `[const §X.4]` because v0.2 was a draft, never a tagged release; no published numeric value is re-bound to a different Python class.
 
@@ -1391,7 +1425,7 @@ Per `[arch §10]` requirement (4) and `[const §VII.4]`. 2m ships **12 seams** (
 
 3. **Lifetime — Python `Session` outlives the engine; raises `ObjectLifetime`.** Construct an `Engine` and `Session`; `engine.close()`; from Python, attempt `session.send(msg)`; verify the call raises `fixpp.ObjectLifetime` (numeric 1202) with no segfault. Symmetric test: `session.close()` then attempt `msg.get_string(tag)` on a `Message` derived from an inbound dispatch; verify `ObjectLifetime`. **Pickleability check (NEW v0.3 — Opus round-2 N-2-P2-1 close):** verify `pickle.dumps(engine)` / `pickle.dumps(session)` / `pickle.dumps(message)` each raise `TypeError` with the documented "not pickleable; native handles cannot cross process boundaries" message; verify `pickle.dumps(decimal)` / `pickle.dumps(msg_version)` / `pickle.dumps(engine_config)` succeed (the value-typed dataclasses round-trip). Lives in `tests/python/test_lifetime.py`. Verifies §6.2 + §6.7 row 3.
 
-4. **Reentrancy carve-out — `engine.close()` from inside `fromApp` raises `CallbackReentrantClose`; `session.send()` from inside `fromApp` is LEGAL (does not raise).** (Reshaped in v0.2 draft — Codex P2-3 close; tightened in v0.3 — Codex round-2 P2-1 close, the close-from-callback case now surfaces as `CallbackReentrantClose` (1204), distinct from the sub-interpreter rejection at `SubInterpreterRejected` (1201).) Python `Application.fromApp` that calls `engine.close()` directly: verify the call raises `fixpp.CallbackReentrantClose` (numeric 1204) without entering the C ABI. Symmetric test: Python `Application.fromApp` that calls `session.send(reply_msg)` directly: verify the call **succeeds** (the outbound message is enqueued; no exception raised); the v0.1 ban was a Python-only invention that conflicted with `[2i §4.10]` per §1.3 rule (2). Additional sub-interpreter test (NEW v0.3): construct `Engine` from a CPython sub-interpreter (PEP 554) and verify it raises `fixpp.SubInterpreterRejected` (numeric 1201) — distinct catch-clause from the close-from-callback case. Additional test: under `EngineConfig(io_threads=4)`, fire callbacks on rotating pool threads and verify the §1.3 rule (4) GIL-protected session-local marker (`session._in_callback`) detects the close-from-callback case correctly even when the callback resumes on a different OS thread (Opus N-P1-3 close). Lives in `tests/python/test_callback_reentrancy.py`. Verifies §6.5 + §6.7 + §1.3 rule (4).
+4. **Reentrancy carve-out — `engine.close()` from inside `fromApp` raises `CallbackReentrantClose`; `session.send()` from inside `fromApp` is LEGAL (does not raise).** **[054 / Article XX: this acceptance test verifies the PY-004 director behavior; the v1.0 flat binding has no marker/pre-call check — close-from-callback deadlocks (documentary, L-054-1). This test is deferred to PY-004.]** (Reshaped in v0.2 draft — Codex P2-3 close; tightened in v0.3 — Codex round-2 P2-1 close, the close-from-callback case now surfaces as `CallbackReentrantClose` (1204), distinct from the sub-interpreter rejection at `SubInterpreterRejected` (1201).) Python `Application.fromApp` that calls `engine.close()` directly: verify the call raises `fixpp.CallbackReentrantClose` (numeric 1204) without entering the C ABI. Symmetric test: Python `Application.fromApp` that calls `session.send(reply_msg)` directly: verify the call **succeeds** (the outbound message is enqueued; no exception raised); the v0.1 ban was a Python-only invention that conflicted with `[2i §4.10]` per §1.3 rule (2). Additional sub-interpreter test (NEW v0.3): construct `Engine` from a CPython sub-interpreter (PEP 554) and verify it raises `fixpp.SubInterpreterRejected` (numeric 1201) — distinct catch-clause from the close-from-callback case. Additional test: under `EngineConfig(io_threads=4)`, fire callbacks on rotating pool threads and verify the §1.3 rule (4) GIL-protected session-local marker (`session._in_callback`) detects the close-from-callback case correctly even when the callback resumes on a different OS thread (Opus N-P1-3 close). Lives in `tests/python/test_callback_reentrancy.py`. Verifies §6.5 + §6.7 + §1.3 rule (4).
 
 5. **Wheel-build smoke test — `auditwheel repair` produces a manylinux_2_28 wheel.** The CI builds the wheel via `cibuildwheel`; runs `auditwheel show` on the output and verifies the platform tag is `manylinux_2_28_x86_64`; runs `auditwheel repair` and verifies the result has all OpenSSL / mimalloc deps vendored under `fixpp.libs/` per `auditwheel`'s convention; runs `pip install <wheel>` in a clean venv; runs `python -c "import fixpp; print(fixpp.__version__)"`. Lives in `.github/workflows/wheel-build.yml` + `tests/wheel/test_wheel_smoke.sh`. Verifies §1 PY-005 + §1.1 platform matrix.
 

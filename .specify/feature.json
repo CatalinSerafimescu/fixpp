@@ -1,3 +1,1 @@
-{
-  "feature_directory": "specs/053-python-thin-binding"
-}
+{"feature_directory":"specs/054-python-gil-exceptions"}
