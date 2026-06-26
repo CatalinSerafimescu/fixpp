@@ -441,13 +441,37 @@ jobs:
           fail_ci_if_error: false  # SOFT: keep consistent with other coverage steps
 
   # ── Python bindings job ──────────────────────────────────────────────────
+  # Three mutually-exclusive legs (053 / SC-004 / research D-9): the `none` leg
+  # is the meaningful Tier-1 gate (smoke + the e2e round-trip); `asan` catches
+  # the FR-013/FR-014 UAF on the callable-lifetime + borrowed-msg path; `tsan`
+  # covers the FR-007 GIL worker-thread race (with the CPython suppressions file,
+  # since the interpreter itself is not TSan-instrumented). UBSan is omitted —
+  # CPython C-API aliasing generates UBSan noise; ASan+TSan cover the riskiest
+  # surfaces (waiver recorded in the /speckit-verify decision doc). Each leg is a
+  # separate runner, so the "one sanitizer at a time" build cap holds for free.
   python-bindings:
-    name: python-bindings
+    name: python-bindings (${{ matrix.sanitizer }})
     runs-on: ubuntu-24.04
     needs: gate-precheck
     if: needs.gate-precheck.outputs.proceed == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - sanitizer: none
+            bdir: linux-clang-debug-py
+            cfg_extra: ""
+            san_opts: ""
+          - sanitizer: asan
+            bdir: linux-clang-asan-py
+            cfg_extra: "-DFIXPP_ENABLE_ASAN=ON -DBUILD_SHARED_LIBS=ON -DFIXPP_PYTHON_SANITIZER=asan"
+            san_opts: "ASAN_OPTIONS=detect_leaks=0:halt_on_error=1"
+          - sanitizer: tsan
+            bdir: linux-clang-tsan-py
+            cfg_extra: "-DFIXPP_ENABLE_TSAN=ON -DBUILD_SHARED_LIBS=ON -DFIXPP_PYTHON_SANITIZER=tsan"
+            san_opts: "TSAN_OPTIONS=suppressions=$GITHUB_WORKSPACE/bindings/python/tests/tsan_suppressions.txt:halt_on_error=1"
     concurrency:
-      group: tier1-${{ github.event.pull_request.number || github.ref }}-python-bindings
+      group: tier1-${{ github.event.pull_request.number || github.ref }}-python-bindings-${{ matrix.sanitizer }}
       cancel-in-progress: true
 
     steps:
@@ -512,27 +536,50 @@ jobs:
 
       - name: Conan install
         run: |
+          # All legs share the linux-clang-debug Conan profile; the sanitizer is
+          # a CMake-level flag (FIXPP_ENABLE_{ASAN,TSAN}), not a Conan setting.
           conan install . \
             -pr conan/profiles/linux-clang-debug \
             --build=missing \
-            -of build/linux-clang-debug-py
+            -of build/${{ matrix.bdir }}
 
       - name: Configure with Python bindings
         run: |
-          # Override the preset's CMAKE_TOOLCHAIN_FILE because this job uses
-          # a -py-suffixed build folder where Conan placed the toolchain.
+          # Override the preset's CMAKE_TOOLCHAIN_FILE because each leg uses its
+          # own -py-suffixed build folder where Conan placed the toolchain.
           cmake --preset linux-clang-debug \
             -DFIXPP_BUILD_PYTHON=ON \
-            -DCMAKE_TOOLCHAIN_FILE="${{ github.workspace }}/build/linux-clang-debug-py/conan_toolchain.cmake" \
-            -B build/linux-clang-debug-py
+            ${{ matrix.cfg_extra }} \
+            -DCMAKE_TOOLCHAIN_FILE="${{ github.workspace }}/build/${{ matrix.bdir }}/conan_toolchain.cmake" \
+            -B build/${{ matrix.bdir }}
 
       - name: Build
-        run: cmake --build build/linux-clang-debug-py
+        run: cmake --build build/${{ matrix.bdir }}
 
-      - name: Run Python smoke tests
+      # ── none leg: the meaningful Tier-1 gate (smoke + e2e round-trip) ───────
+      - name: Run Python tests
+        if: matrix.sanitizer == 'none'
         env:
-          PYTHONPATH: "${{ github.workspace }}/build/linux-clang-debug-py/lib"
+          PYTHONPATH: "${{ github.workspace }}/build/${{ matrix.bdir }}/lib"
         run: pytest bindings/python/tests/ -v
+
+      # ── asan / tsan legs: round-trip under the sanitizer (FR-013/FR-014 UAF,
+      #    FR-007 GIL race). One step, matrix-driven — only the runtime basename
+      #    and *SAN_OPTIONS differ. CPython is not instrumented, so the runtime is
+      #    LD_PRELOADed; the TSan suppressions file filters interpreter-internal
+      #    reports (see matrix.san_opts). ──────────────────────────────────────
+      - name: Run round-trip under sanitizer
+        if: matrix.sanitizer != 'none'
+        env:
+          PYTHONPATH: "${{ github.workspace }}/build/${{ matrix.bdir }}/lib"
+        run: |
+          # Resolve the runtime for whichever clang naming scheme applies
+          # (older: libclang_rt.<san>-x86_64.so; newer: per-target libclang_rt.<san>.so).
+          RT=$(clang -print-file-name=libclang_rt.${{ matrix.sanitizer }}-x86_64.so)
+          [ -f "$RT" ] || RT="$(clang -print-runtime-dir)/libclang_rt.${{ matrix.sanitizer }}.so"
+          echo "${{ matrix.sanitizer }} runtime: $RT"
+          env ${{ matrix.san_opts }} LD_PRELOAD="$RT" \
+            pytest bindings/python/tests/test_roundtrip.py -v
 
   # ── Architecture layer check ─────────────────────────────────────────────
   check-layers:

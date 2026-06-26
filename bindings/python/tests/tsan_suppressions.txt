@@ -1,0 +1,9 @@
+# bindings/python/tests/tsan_suppressions.txt
+#
+# Empirical calibration for PY-001 / SC-004:
+# - Happy-path TSan loopback stays GREEN with no suppressions.
+# - The FIXPP_PY_GIL_CANARY variant still goes RED with no suppressions.
+#
+# Keep this file intentionally empty unless a concrete CPython-internal false
+# positive is reproduced on the happy path and documented with the matching
+# witness run.
