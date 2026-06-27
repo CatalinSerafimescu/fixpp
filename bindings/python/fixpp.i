@@ -488,6 +488,7 @@ static void fixpp_py_recv_trampoline_oo(const fixpp_msg_t* inbound, void* userda
     PyObject* app = NULL;
     PyObject* r = NULL;
 
+    (void)PyObject_SetAttrString(session, "_in_callback", Py_True);
     mod = fixpp_py_module();
     if (mod != NULL) {
         msg_type = PyObject_GetAttrString(mod, "Message");
@@ -510,6 +511,7 @@ static void fixpp_py_recv_trampoline_oo(const fixpp_msg_t* inbound, void* userda
     if (msg_wrapper != NULL) {
         (void)PyObject_SetAttrString(msg_wrapper, "_dead", Py_True);
     }
+    (void)PyObject_SetAttrString(session, "_in_callback", Py_False);
     Py_XDECREF(app);
     Py_XDECREF(msg_wrapper);
     Py_XDECREF(proxy);
@@ -579,6 +581,13 @@ static fixpp_error_t fixpp_py_register_application_oo(
         Py_INCREF(py_session_wrapper);
     }
     return err;
+}
+%}
+
+%rename("_release_application_oo") fixpp_py_release_application_oo;
+%inline %{
+static void fixpp_py_release_application_oo(PyObject* py_session_wrapper) {
+    Py_DECREF(py_session_wrapper);
 }
 %}
 

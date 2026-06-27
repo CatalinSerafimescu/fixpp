@@ -18,6 +18,7 @@ director and value-typed config/decimal classes are OUT of scope (D-1).
 # so at import time every name below is already bound on the partially-init'd
 # `fixpp` (the SWIG function wrappers and the %pythoncode exception block both
 # precede the re-export glue).
+import warnings
 import weakref
 
 from fixpp import (  # noqa: F401  (re-exported / used by later phases)
@@ -37,6 +38,7 @@ from fixpp import (  # noqa: F401  (re-exported / used by later phases)
     dict_load_from_xml,
     dict_destroy,
     _register_application_oo,
+    _release_application_oo,
     _is_main_interpreter,
     ObjectLifetime,
     CallbackReentrantClose,
@@ -50,6 +52,7 @@ from fixpp import (  # noqa: F401  (re-exported / used by later phases)
 # minted by PY-003; no new C-ABI code (FR-015, freeze held).
 _OBJECT_LIFETIME = 1202
 _SUBINTERPRETER_REJECTED = 1201
+_CALLBACK_REENTRANT_CLOSE = 1204
 _INVALID_HANDLE = 4
 
 
@@ -108,11 +111,34 @@ class Engine(_LiveHandle):
     def close(self):
         if self._dead:
             return
+        for session in list(self._sessions):
+            if session._in_callback:
+                raise _make_error(_CALLBACK_REENTRANT_CLOSE)
         self._dead = True
         for session in list(self._sessions):
             session._close_from_engine()
         engine_destroy(self._handle)
         self._was_explicitly_closed = True
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        self.close()
+        return None
+
+    def __del__(self):
+        if self._was_explicitly_closed or self._dead:
+            return
+        warnings.warn(
+            "fixpp.Engine finalized without explicit close(); use close() or a with block",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        try:
+            self.close()
+        except Exception:
+            pass
 
 
 class Session(_LiveHandle):
@@ -125,6 +151,7 @@ class Session(_LiveHandle):
         self._engine = engine
         self._messages = weakref.WeakSet()
         self._application = None
+        self._application_registered = False
         self._in_callback = False
 
     def is_established(self):
@@ -140,6 +167,8 @@ class Session(_LiveHandle):
         return Message(msg_create_outbound(self._handle, msg_type), self, False)
 
     def send(self, msg):
+        if self._in_callback:
+            raise _make_error(_CALLBACK_REENTRANT_CLOSE)
         self._ensure_live()
         if not isinstance(msg, Message):
             raise TypeError("fixpp.Session.send expects a fixpp.Message")
@@ -150,27 +179,55 @@ class Session(_LiveHandle):
         self._ensure_live()
         previous = self._application
         self._application = app
+        if self._application_registered:
+            return
         try:
             _register_application_oo(self._handle, self)
+            self._application_registered = True
         except Exception:
             self._application = previous
             raise
 
     def close(self):
-        self._close_impl()
+        self._close_impl(allow_reentrant=False)
 
     def _close_from_engine(self):
-        self._close_impl()
+        self._close_impl(allow_reentrant=True)
 
-    def _close_impl(self):
+    def _close_impl(self, *, allow_reentrant):
         if self._dead:
             return
+        if not allow_reentrant and self._in_callback:
+            raise _make_error(_CALLBACK_REENTRANT_CLOSE)
         self._dead = True
         for msg in list(self._messages):
             msg._dead = True
         self._application = None
         session_close(self._handle)
+        if self._application_registered:
+            _release_application_oo(self)
+            self._application_registered = False
         self._was_explicitly_closed = True
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        self.close()
+        return None
+
+    def __del__(self):
+        if self._was_explicitly_closed or self._dead:
+            return
+        warnings.warn(
+            "fixpp.Session finalized without explicit close(); use close() or a with block",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        try:
+            self.close()
+        except Exception:
+            pass
 
 
 class Message(_LiveHandle):
@@ -199,6 +256,12 @@ class Message(_LiveHandle):
         if not self._is_inbound:
             msg_destroy(self._handle)
         self._dead = True
+
+    def __del__(self):
+        try:
+            self.destroy()
+        except Exception:
+            pass
 
     def _ensure_sendable(self):
         if self._is_inbound:
