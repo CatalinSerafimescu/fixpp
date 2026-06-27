@@ -58,9 +58,15 @@ pickle.dumps(engine)        # raises TypeError: ... native handles cannot cross 
 ## Sub-interpreter rejection
 
 ```python
-# Constructing an Engine from a PEP 554 sub-interpreter:
-fixpp.Engine(config)        # raises fixpp.SubInterpreterRejected (1201). Use the main interpreter.
+# On this CPython 3.12 build, importing fixpp from a PEP 554 sub-interpreter
+# fails before Engine construction:
+import fixpp               # ImportError: module _fixpp does not support loading in subinterpreters
 ```
+
+The FR-018 goal still holds: the binding is unavailable from a sub-interpreter. On
+this build, CPython's stronger import-time barrier shadows the typed
+`fixpp.SubInterpreterRejected` (1201) constructor guard, so the typed path is
+unwitnessed here. Use the main interpreter.
 
 ## What's NOT in this feature
 
