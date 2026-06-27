@@ -66,15 +66,49 @@ class _PickleBan:
     introduced (FR-014 leg deferred).
     """
 
+    _PICKLE_ERR = ("fixpp.%s objects are not pickleable; native handles cannot "
+                   "cross process boundaries")
+
     def __reduce_ex__(self, protocol):
-        raise TypeError(
-            "fixpp.%s objects are not pickleable; native handles cannot cross "
-            "process boundaries" % type(self).__name__)
+        raise TypeError(self._PICKLE_ERR % type(self).__name__)
 
     def __reduce__(self):
-        raise TypeError(
-            "fixpp.%s objects are not pickleable; native handles cannot cross "
-            "process boundaries" % type(self).__name__)
+        raise TypeError(self._PICKLE_ERR % type(self).__name__)
+
+
+class _Finalizable:
+    """Context-manager + best-effort finalizer shared by Engine and Session.
+
+    Both own a native handle whose teardown must be deterministic; ``__exit__``
+    and ``__del__`` route to the subclass ``close()``. ``__del__`` warns when the
+    object was never explicitly closed — GC-only teardown is non-deterministic at
+    interpreter shutdown (FR-009/FR-010). The warning names the concrete class via
+    ``type(self).__name__``. ``__del__`` reads its guard attrs with ``getattr``
+    defaults so a half-constructed instance (``__init__`` never ran, e.g. via
+    ``__new__``) is treated as already-closed — no spurious warning, no
+    ``close()`` on a handle-less object.
+    """
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        self.close()
+        return None
+
+    def __del__(self):
+        if getattr(self, "_was_explicitly_closed", True) or getattr(self, "_dead", True):
+            return
+        warnings.warn(
+            "fixpp.%s finalized without explicit close(); use close() or a "
+            "with block" % type(self).__name__,
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        try:
+            self.close()
+        except Exception:
+            pass
 
 
 class _LiveHandle(_PickleBan):
@@ -107,7 +141,7 @@ class _LiveHandle(_PickleBan):
             raise _make_error(_OBJECT_LIFETIME)
 
 
-class Engine(_LiveHandle):
+class Engine(_Finalizable, _LiveHandle):
     """OO wrapper over a native engine handle."""
 
     def __init__(self, config):
@@ -141,28 +175,8 @@ class Engine(_LiveHandle):
         engine_destroy(self._handle)
         self._was_explicitly_closed = True
 
-    def __enter__(self):
-        return self
 
-    def __exit__(self, exc_type, exc, tb):
-        self.close()
-        return None
-
-    def __del__(self):
-        if self._was_explicitly_closed or self._dead:
-            return
-        warnings.warn(
-            "fixpp.Engine finalized without explicit close(); use close() or a with block",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        try:
-            self.close()
-        except Exception:
-            pass
-
-
-class Session(_LiveHandle):
+class Session(_Finalizable, _LiveHandle):
     """OO wrapper over a native session handle."""
 
     def __init__(self, engine, handle):
@@ -229,26 +243,6 @@ class Session(_LiveHandle):
             _release_application_oo(self)
             self._application_registered = False
         self._was_explicitly_closed = True
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc, tb):
-        self.close()
-        return None
-
-    def __del__(self):
-        if self._was_explicitly_closed or self._dead:
-            return
-        warnings.warn(
-            "fixpp.Session finalized without explicit close(); use close() or a with block",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        try:
-            self.close()
-        except Exception:
-            pass
 
 
 class Message(_LiveHandle):
