@@ -650,3 +650,17 @@ fixpp_error_t fixpp_msg_get_string(const fixpp_msg_t* msg, uint16_t tag,
 
 /* The umbrella library-version string (existing smoke surface). */
 const char* fixpp_version_string(void);
+
+/* ── PY-004 / 055 (T002): OO layer re-export ─────────────────────────────────
+ * Last %pythoncode block in the generated proxy: every flat function wrapper
+ * and the %pythoncode exception block above are already bound, so fixpp_oo's
+ * `from fixpp import ...` resolves. Exposes the OO wrappers on the `fixpp`
+ * surface (FR-001 additive) so `import fixpp; fixpp.Engine` works alongside the
+ * surviving flat substrate. Guarded so a flat-only deployment (fixpp_oo.py
+ * absent) still imports the substrate. */
+%pythoncode %{
+try:
+    from fixpp_oo import Engine, Session, Message, Application, Dictionary
+except ImportError:
+    pass
+%}
