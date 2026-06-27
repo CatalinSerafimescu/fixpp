@@ -85,7 +85,7 @@ The `(_handle, _dead)` pair on E-1..E-3/E-5. **Pre-call rule**: every method tha
 
 ## E-7 — In-callback marker (cross-cutting behavior)
 
-`Session._in_callback: bool`, GIL-protected (lives on the Python `Session`, not `threading.local`). **Set** True by the trampoline on callback entry (under GIL); **cleared** before GIL release on exit. **Read** by `Session.send` / `Session.close` / `Engine.close` (the latter walks child sessions); if any is True → raise `fixpp.CallbackReentrantClose` (1204) before the C-ABI. Correct under all `[2d §4.5]` threading modes (GIL serialises; survives strand resumption on a different OS thread).
+`Session._in_callback: bool`, GIL-protected (lives on the Python `Session`, not `threading.local`). **Set** True by the trampoline on callback entry (under GIL); **cleared** before GIL release on exit — unconditionally, including on the callback exception-exit path (`PyErr_Print` / `PyErr_Occurred`; the OO trampoline MUST NOT early-return on a raising callback in a way that skips this clear OR the FR-004 `Message._dead` arming; see FR-017 Trampoline exit discipline). **Read** by `Session.send` / `Session.close` / `Engine.close` (the latter walks child sessions); if any is True → raise `fixpp.CallbackReentrantClose` (1204) before the C-ABI. Correct under all `[2d §4.5]` threading modes (GIL serialises; survives strand resumption on a different OS thread).
 
 ---
 

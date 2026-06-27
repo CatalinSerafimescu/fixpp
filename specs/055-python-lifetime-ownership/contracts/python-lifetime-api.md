@@ -16,6 +16,7 @@ class Engine:
 
 class Session:
     def send(self, msg: "Message") -> None: ...    # _dead -> ObjectLifetime; _in_callback -> CallbackReentrantClose
+    def create_message(self, msg_type: str) -> "Message": ...  # wraps fixpp_msg_create_outbound; outbound flavour (Python-owned handle, NOT _is_inbound); _dead -> ObjectLifetime
     def register_application(self, app) -> None: ... # owns app; DECREF prior on re-register (C-4)
     def close(self) -> None: ...                   # ordered teardown (C-3); idempotent; _in_callback -> CallbackReentrantClose
     def __enter__(self) -> "Session": ...
