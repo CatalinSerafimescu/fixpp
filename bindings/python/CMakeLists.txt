@@ -78,8 +78,19 @@ if(FIXPP_PY_GIL_RELEASE_CANARY)
 endif()
 
 if(FIXPP_PYTHON_SANITIZER STREQUAL "asan")
+  execute_process(
+    COMMAND "${CMAKE_CXX_COMPILER}" -print-runtime-dir
+    OUTPUT_VARIABLE FIXPP_CLANG_RUNTIME_DIR
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+  )
   target_compile_options(fixpp_py PRIVATE -fsanitize=address -fno-omit-frame-pointer)
-  target_link_options(fixpp_py PRIVATE -fsanitize=address)
+  # Python loads _fixpp.so into an unsanitized host process; force a shared ASan
+  # runtime dependency on the module itself so import does not rely on LD_PRELOAD.
+  target_link_options(fixpp_py PRIVATE -fsanitize=address -shared-libasan)
+  set_target_properties(fixpp_py PROPERTIES
+    BUILD_RPATH "${FIXPP_CLANG_RUNTIME_DIR}"
+    INSTALL_RPATH "${FIXPP_CLANG_RUNTIME_DIR}"
+  )
 elseif(FIXPP_PYTHON_SANITIZER STREQUAL "tsan")
   target_compile_options(fixpp_py PRIVATE -fsanitize=thread)
   target_link_options(fixpp_py PRIVATE -fsanitize=thread)

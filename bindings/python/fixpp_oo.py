@@ -18,12 +18,26 @@ director and value-typed config/decimal classes are OUT of scope (D-1).
 # so at import time every name below is already bound on the partially-init'd
 # `fixpp` (the SWIG function wrappers and the %pythoncode exception block both
 # precede the re-export glue).
+import weakref
+
 from fixpp import (  # noqa: F401  (re-exported / used by later phases)
     engine_create,
+    engine_start,
+    engine_destroy,
     session_open,
+    session_close,
+    session_is_established,
+    session_acceptor_bound_endpoint,
     session_send,
+    msg_set_string,
+    msg_commit,
+    msg_destroy,
+    msg_get_string,
     msg_create_outbound,
     dict_load_from_xml,
+    dict_destroy,
+    _register_application_oo,
+    _is_main_interpreter,
     ObjectLifetime,
     CallbackReentrantClose,
     SubInterpreterRejected,
@@ -35,6 +49,8 @@ from fixpp import (  # noqa: F401  (re-exported / used by later phases)
 # fixpp_error_t code for "Python object outlived its native handle" — already
 # minted by PY-003; no new C-ABI code (FR-015, freeze held).
 _OBJECT_LIFETIME = 1202
+_SUBINTERPRETER_REJECTED = 1201
+_INVALID_HANDLE = 4
 
 
 class _LiveHandle:
@@ -68,20 +84,152 @@ class _LiveHandle:
 
 
 class Engine(_LiveHandle):
-    """OO wrapper over a native engine handle (filled in Phase 3 / US1)."""
+    """OO wrapper over a native engine handle."""
+
+    def __init__(self, config):
+        self._handle = None
+        self._dead = False
+        self._was_explicitly_closed = False
+        self._sessions = weakref.WeakSet()
+        if not _is_main_interpreter():
+            raise _make_error(_SUBINTERPRETER_REJECTED)
+        self._handle = engine_create(config)
+
+    def open_session(self, config):
+        self._ensure_live()
+        session = Session(self, session_open(self._handle, config))
+        self._sessions.add(session)
+        return session
+
+    def start(self):
+        self._ensure_live()
+        engine_start(self._handle)
+
+    def close(self):
+        if self._dead:
+            return
+        self._dead = True
+        for session in list(self._sessions):
+            session._close_from_engine()
+        engine_destroy(self._handle)
+        self._was_explicitly_closed = True
 
 
 class Session(_LiveHandle):
-    """OO wrapper over a native session handle (filled in Phase 3 / US1)."""
+    """OO wrapper over a native session handle."""
+
+    def __init__(self, engine, handle):
+        self._handle = handle
+        self._dead = False
+        self._was_explicitly_closed = False
+        self._engine = engine
+        self._messages = weakref.WeakSet()
+        self._application = None
+        self._in_callback = False
+
+    def is_established(self):
+        self._ensure_live()
+        return session_is_established(self._handle)
+
+    def acceptor_bound_endpoint(self):
+        self._ensure_live()
+        return session_acceptor_bound_endpoint(self._handle)
+
+    def create_message(self, msg_type):
+        self._ensure_live()
+        return Message(msg_create_outbound(self._handle, msg_type), self, False)
+
+    def send(self, msg):
+        self._ensure_live()
+        if not isinstance(msg, Message):
+            raise TypeError("fixpp.Session.send expects a fixpp.Message")
+        msg._ensure_sendable()
+        session_send(self._handle, msg_commit(msg._handle))
+
+    def register_application(self, app):
+        self._ensure_live()
+        previous = self._application
+        self._application = app
+        try:
+            _register_application_oo(self._handle, self)
+        except Exception:
+            self._application = previous
+            raise
+
+    def close(self):
+        self._close_impl()
+
+    def _close_from_engine(self):
+        self._close_impl()
+
+    def _close_impl(self):
+        if self._dead:
+            return
+        self._dead = True
+        for msg in list(self._messages):
+            msg._dead = True
+        self._application = None
+        session_close(self._handle)
+        self._was_explicitly_closed = True
 
 
 class Message(_LiveHandle):
-    """OO wrapper over a native message handle (filled in Phase 3 / US1)."""
+    """OO wrapper over a native message handle."""
+
+    def __init__(self, handle, session, is_inbound):
+        self._handle = handle
+        self._dead = False
+        self._is_inbound = is_inbound
+        self._session = session
+        self._session._messages.add(self)
+
+    def get_string(self, tag):
+        self._ensure_live()
+        return msg_get_string(self._handle, tag)
+
+    def set_string(self, tag, value):
+        if self._is_inbound:
+            raise _make_error(_INVALID_HANDLE)
+        self._ensure_live()
+        msg_set_string(self._handle, tag, value)
+
+    def destroy(self):
+        if self._dead:
+            return
+        if not self._is_inbound:
+            msg_destroy(self._handle)
+        self._dead = True
+
+    def _ensure_sendable(self):
+        if self._is_inbound:
+            raise _make_error(_INVALID_HANDLE)
+        self._ensure_live()
 
 
 class Application:
-    """Inbound-callback base class — NOT handle-bearing (filled in Phase 3 / US1)."""
+    """Inbound-callback base class — v1.0: inbound-only."""
+
+    def fromApp(self, session, msg):
+        raise NotImplementedError
 
 
 class Dictionary(_LiveHandle):
-    """OO wrapper over a native dictionary handle (filled in Phase 3 / US1)."""
+    """OO wrapper over a native dictionary handle."""
+
+    def __init__(self, handle):
+        self._handle = handle
+        self._dead = False
+
+    @staticmethod
+    def load_xml(path):
+        return Dictionary(dict_load_from_xml(path))
+
+    def destroy(self):
+        if self._dead:
+            return
+        self._dead = True
+        dict_destroy(self._handle)
+
+    def native_handle(self):
+        self._ensure_live()
+        return self._handle
