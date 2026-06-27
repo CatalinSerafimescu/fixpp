@@ -37,7 +37,7 @@ description: "Task list — PY-004 Python lifetime/ownership OO layer (055)"
 
 **⚠️ CRITICAL**: No user-story work begins until this is complete.
 
-- [ ] T003 Implement the shared liveness-sentinel base in `bindings/python/fixpp_oo.py`: the per-wrapper `(_handle, _dead)` state + a `_ensure_live()` guard helper that raises `fixpp.ObjectLifetime` (numeric 1202) and returns WITHOUT touching the C-ABI when `_dead` is True; every wrapper method that would call the C-ABI calls it FIRST. State is GIL-protected (no `threading.local`, no OS-thread-id assumptions). (FR-002, FR-003, FR-016 mechanism; data-model E-6; contracts C-2/C-8)
+- [X] T003 Implement the shared liveness-sentinel base in `bindings/python/fixpp_oo.py`: the per-wrapper `(_handle, _dead)` state + a `_ensure_live()` guard helper that raises `fixpp.ObjectLifetime` (numeric 1202) and returns WITHOUT touching the C-ABI when `_dead` is True; every wrapper method that would call the C-ABI calls it FIRST. State is GIL-protected (no `threading.local`, no OS-thread-id assumptions). (FR-002, FR-003, FR-016 mechanism; data-model E-6; contracts C-2/C-8)
 
 **Checkpoint**: the sentinel guard is unit-exercisable in isolation (fake handle → `_dead=True` → `ObjectLifetime`).
 
