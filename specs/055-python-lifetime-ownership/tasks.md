@@ -102,11 +102,11 @@ description: "Task list — PY-004 Python lifetime/ownership OO layer (055)"
 
 ### Tests for User Story 3 (write RED first)
 
-- [ ] T023 [P] [US3] `bindings/python/tests/test_pickle_ban.py`: `pickle.dumps` on each handle-bearing wrapper (`Engine`/`Session`/`Message`/`Application`/`Dictionary`) raises `TypeError` whose message explains native handles cannot cross process boundaries. (SC-003, FR-013; contracts C-5)
+- [X] T023 [P] [US3] `bindings/python/tests/test_pickle_ban.py`: `pickle.dumps` on each handle-bearing wrapper (`Engine`/`Session`/`Message`/`Application`/`Dictionary`) raises `TypeError` whose message explains native handles cannot cross process boundaries. (SC-003, FR-013; contracts C-5)
 
 ### Implementation for User Story 3
 
-- [ ] T024 [US3] Pickle-ban in `bindings/python/fixpp_oo.py`: a shared mixin overriding `__reduce_ex__`/`__reduce__` to raise `TypeError("fixpp.<ClassName> objects are not pickleable; native handles cannot cross process boundaries")`, composed into all five wrappers. Scoped to handle-bearing wrappers ONLY — no value-typed classes introduced (FR-014 leg deferred). (FR-013, FR-014; contracts C-5)
+- [X] T024 [US3] Pickle-ban in `bindings/python/fixpp_oo.py`: a shared mixin overriding `__reduce_ex__`/`__reduce__` to raise `TypeError("fixpp.<ClassName> objects are not pickleable; native handles cannot cross process boundaries")`, composed into all five wrappers. Scoped to handle-bearing wrappers ONLY — no value-typed classes introduced (FR-014 leg deferred). (FR-013, FR-014; contracts C-5)
 
 **Checkpoint**: all three user stories independently functional.
 

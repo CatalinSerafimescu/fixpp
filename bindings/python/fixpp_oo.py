@@ -56,7 +56,28 @@ _CALLBACK_REENTRANT_CLOSE = 1204
 _INVALID_HANDLE = 4
 
 
-class _LiveHandle:
+class _PickleBan:
+    """Refuse to pickle a handle-bearing wrapper (T024 / FR-013; contracts C-5).
+
+    A pickled native handle would deserialize in another process as a
+    meaningless pointer that use-after-frees on first touch, so block it loudly
+    at serialization time with a ``TypeError``. Scoped to the handle-bearing
+    wrappers (and the callback base) only — no value-typed classes are
+    introduced (FR-014 leg deferred).
+    """
+
+    def __reduce_ex__(self, protocol):
+        raise TypeError(
+            "fixpp.%s objects are not pickleable; native handles cannot cross "
+            "process boundaries" % type(self).__name__)
+
+    def __reduce__(self):
+        raise TypeError(
+            "fixpp.%s objects are not pickleable; native handles cannot cross "
+            "process boundaries" % type(self).__name__)
+
+
+class _LiveHandle(_PickleBan):
     """Shared liveness-sentinel base for every handle-bearing wrapper (T003).
 
     Carries the per-wrapper ``(_handle, _dead)`` state and the ``_ensure_live()``
@@ -269,7 +290,7 @@ class Message(_LiveHandle):
         self._ensure_live()
 
 
-class Application:
+class Application(_PickleBan):
     """Inbound-callback base class — v1.0: inbound-only."""
 
     def fromApp(self, session, msg):
