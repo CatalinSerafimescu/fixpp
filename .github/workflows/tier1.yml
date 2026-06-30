@@ -12,6 +12,12 @@ on:
     types: [opened, reopened, synchronize, labeled, unlabeled, edited]
     branches: ["**"]
   workflow_dispatch:
+  # 056 REL-1: on a published GitHub release, the python-wheel-release job below
+  # attaches the single cp310-abi3 wheel as a release asset (no PyPI — REL-2).
+  # The full Tier-1 gate runs first on the release commit so a broken artifact
+  # cannot be attached.
+  release:
+    types: [published]
 
 env:
   CONAN_HOME: ~/.conan2
@@ -596,6 +602,185 @@ jobs:
           echo "${{ matrix.sanitizer }} runtime: $RT"
           env ${{ matrix.san_opts }} LD_PRELOAD="$RT" \
             pytest bindings/python/tests/ -v
+
+  # ── Python wheel gate (PY-005 / 056) ─────────────────────────────────────
+  # ADDITIVE (CI-8): this does NOT touch the python-bindings sanitizer matrix or
+  # the local-only GIL canary above — it builds + install-tests the SHIPPED
+  # cp310-abi3 wheel. Build ONCE in manylinux_2_28 (python-wheel-build), then
+  # matrix-install-test the single artifact on 3.10–3.13 (python-wheel-test).
+  # All cibuildwheel config is in bindings/python/pyproject.toml [tool.cibuildwheel]
+  # — the single source shared with the local bindings/python/build-wheel.sh.
+  python-wheel-build:
+    name: python-wheel (build cp310-abi3)
+    runs-on: ubuntu-24.04
+    # CI-6: cibuildwheel builds the whole statically-linked engine + static
+    # OpenSSL in-container; generous backstop against a hung build wedging the runner.
+    timeout-minutes: 90
+    needs: gate-precheck       # CI-1
+    if: needs.gate-precheck.outputs.proceed == 'true'
+    concurrency:               # CI-7
+      group: tier1-${{ github.event.pull_request.number || github.ref }}-python-wheel-build
+      cancel-in-progress: true
+
+    steps:
+      - uses: actions/checkout@v6
+
+      # NBC-1 (T017): the C-ABI surface is byte-frozen (0->1 GA freeze). Pure-text,
+      # so it runs first and fails fast — no point building a wheel if the frozen
+      # C ABI drifted. Plus the existing occupancy gate (mirrors check-layers).
+      - name: C-ABI byte-freeze gate (NBC-1)
+        run: bash tools/check_capi_freeze.sh
+      - name: C-ABI occupancy gate
+        run: bash tools/check_capi_occupancy.sh
+
+      # REL-2 / SC-005: assert NO PyPI/index-publish step exists anywhere in the
+      # workflows. `gh release upload` (REL-1 below) attaches a release ASSET — it
+      # does NOT publish to an index. Patterns are ANCHORED to real step syntax (a
+      # line-leading pypi-action ref, or a twine-based publish command) so this
+      # assertion never matches its OWN source line — the pgrep-self-match class
+      # of false positive (worded here to avoid the matched token sequences).
+      - name: Assert no PyPI publish step (REL-2)
+        run: |
+          if grep -rnE '^[[:space:]]*uses:[[:space:]]+\S*pypi|twine[[:space:]]+upload|python[[:space:]]+-m[[:space:]]+twine' .github/workflows/; then
+            echo "::error::a PyPI/index publish step exists — REL-2/SC-005 forbids publishing to a package index"
+            exit 1
+          fi
+          echo "REL-2: no PyPI/index publish step present."
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install cibuildwheel + audit tooling
+        run: |
+          pipx install cibuildwheel
+          pipx install auditwheel
+          pipx install abi3audit
+          cibuildwheel --version
+
+      # CI-3: persist the IN-CONTAINER Conan cache. cibw-before-all.sh runs
+      # `conan install` inside the manylinux container, whose home is separate
+      # from the host. Mount a host dir as the container's CONAN_HOME and cache
+      # it across runs. Non-load-bearing: a cache miss just means conan
+      # --build=missing rebuilds (slower) — the build still succeeds.
+      - name: Cache Conan packages (CI-3)
+        uses: actions/cache@v5
+        with:
+          path: /tmp/wheel-conan2
+          key: conan-wheel-manylinux228-${{ hashFiles('conanfile.py', 'bindings/python/cibw-before-all.sh', 'bindings/python/pyproject.toml') }}
+          restore-keys: |
+            conan-wheel-manylinux228-
+
+      - name: Build the single cp310-abi3 wheel (CI-2)
+        env:
+          # CI-3: route the in-container Conan home to the host-mounted, cached dir.
+          CIBW_CONTAINER_ENGINE: "docker; create_args: -v /tmp/wheel-conan2:/host-conan2"
+          CIBW_ENVIRONMENT: "CONAN_HOME=/host-conan2"
+        run: |
+          mkdir -p /tmp/wheel-conan2
+          # A fresh CI checkout has NO build/ tree, so the local worktree wrapper
+          # (build-wheel.sh — which exists only to dodge cibuildwheel's blind
+          # `tar -c .` of cwd dragging in the multi-GB local build/) is
+          # unnecessary here. Run cibuildwheel directly from the repo root
+          # (pyproject's cmake.source-dir=../.. requires cwd=root).
+          cibuildwheel --platform linux --output-dir wheelhouse bindings/python
+          ls -l wheelhouse/
+
+      # T011 / SC-004 / LAY-3: exactly ONE wheel, tagged cp310-abi3 + manylinux,
+      # external-library list EMPTY (static everything).
+      - name: Verify tag + self-containment (SC-004, LAY-3)
+        run: |
+          set -euo pipefail
+          test "$(ls wheelhouse/fixpp-*.whl | wc -l)" -eq 1
+          WHL=$(ls wheelhouse/fixpp-*-cp310-abi3-manylinux*_x86_64.whl)
+          echo "wheel: $WHL"
+          auditwheel show "$WHL"
+          abi3audit --strict "$WHL"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fixpp-wheel
+          path: wheelhouse/fixpp-*-cp310-abi3-manylinux*_x86_64.whl
+          if-no-files-found: error
+
+  # CI-4/CI-5: install-test the ONE built wheel on each targeted interpreter —
+  # the cross-version import is the abi3 feasibility witness. No rebuild per
+  # interpreter (abi3: one wheel serves all). Red on any install/test failure.
+  python-wheel-test:
+    name: python-wheel (install-test ${{ matrix.python }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20        # CI-6
+    needs: python-wheel-build
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.11", "3.12", "3.13"]
+    concurrency:               # CI-7
+      group: tier1-${{ github.event.pull_request.number || github.ref }}-python-wheel-test-${{ matrix.python }}
+      cancel-in-progress: true
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: fixpp-wheel
+          path: wheelhouse
+
+      - name: Install the abi3 wheel + run the functional subset (CI-4)
+        run: |
+          set -euo pipefail
+          WHL=$(ls wheelhouse/fixpp-*-cp310-abi3-manylinux*_x86_64.whl)
+          python -m venv /tmp/wt
+          /tmp/wt/bin/pip install -q "$WHL" pytest
+          # Out-of-repo, PYTHONPATH scrubbed (quickstart §4): the dedicated
+          # tests/wheel/ suite imports only installed modules and resolves
+          # dictionaries through fixpp.dictionary_path — assert fixpp loads from
+          # the venv site-packages so no source tree shadows the locator.
+          WORK=$(mktemp -d)
+          cp -r bindings/python/tests/wheel "$WORK/wheel_tests"
+          cd "$WORK"
+          env -u PYTHONPATH /tmp/wt/bin/python -c \
+            "import fixpp, os, sys; assert os.path.realpath(fixpp.__file__).startswith(sys.prefix), fixpp.__file__"
+          env -u PYTHONPATH /tmp/wt/bin/python -m pytest -q "$WORK/wheel_tests"
+
+      # SC-006 / FR-009 (T019): a deliberately broken wheel (FIX44.xml stripped)
+      # must flip the gate red. Self-discriminating (proves the intact wheel
+      # round-trip passes first). CI-5: no continue-on-error.
+      - name: Broken-wheel negative gate (SC-006)
+        run: |
+          WHL=$(ls wheelhouse/fixpp-*-cp310-abi3-manylinux*_x86_64.whl)
+          PYTHON=python3 bash bindings/python/tests/wheel/test_broken_wheel_gate.sh "$WHL"
+
+  # REL-1/3 (T020): on a published release, attach the single cp310-abi3 wheel as
+  # a release ASSET (NOT a PyPI upload — REL-2/SC-005). Only after the build +
+  # full install-test matrix are green on the release commit.
+  python-wheel-release:
+    name: python-wheel (release attach)
+    runs-on: ubuntu-24.04
+    needs: [python-wheel-build, python-wheel-test]
+    if: github.event_name == 'release'
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: fixpp-wheel
+          path: wheelhouse
+
+      - name: Attach the cp310-abi3 wheel to the GitHub release (REL-1/3)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          WHL=$(ls wheelhouse/fixpp-*-cp310-abi3-manylinux*_x86_64.whl)
+          echo "attaching $WHL to release ${{ github.event.release.tag_name }}"
+          gh release upload "${{ github.event.release.tag_name }}" "$WHL" --clobber \
+            --repo "${{ github.repository }}"
 
   # ── Architecture layer check ─────────────────────────────────────────────
   check-layers:

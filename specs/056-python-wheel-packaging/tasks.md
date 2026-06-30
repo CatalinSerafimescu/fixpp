@@ -179,20 +179,6 @@ dictionary through `fixpp.dictionary_path("FIX44")` — succeeds with no repo pr
   relying only on AppendOutput's stable `!result` branch → correct on 4.2 AND 4.3+ with no #if guard.
   Pin **dropped** (`swig>=4.2`, no upper bound) so the wheel builds with the **latest SWIG (4.4.1)**
   per USER DECISION (drive the future). Re-verified — see T013.
-- [ ] T012 [US1] Create the dedicated `bindings/python/tests/wheel/` suite — **the canonical
-  "functional install-verification subset"** (D-8 / E-6, LOC witnesses): imports **only installed
-  modules** and resolves every dictionary through `fixpp.dictionary_path(...)` (never a repo-relative
-  path). **Enumerated membership** = the locator-using ports of the round-trip, smoke, exception,
-  lifetime, and OO-behaviour tests + the sub-interpreter test, **excluding `test_gil_release_canary.py`**
-  (the only test needing the deliberate-hang `FIXPP_PY_GIL_RELEASE_CANARY` build — stays in the in-tree
-  sanitizer matrix, FR-007). Cover: FIX 4.4 round-trip from the bundled dict (SC-002 / LOC-2),
-  `BUNDLED_DICTIONARIES` set-equality (LOC-1), `dictionary_bytes` XML-prolog (LOC-3),
-  `pytest.raises(KeyError)` on an unknown name asserting the sorted set is named (LOC-4),
-  `import fixpp`/`fixpp_oo`/`fixpp_dict_data` (LAY-4). **Sub-interpreter test note (F1)**: the 055
-  `test_subinterpreter.py` is **locator-independent** — it loads no dictionary (only `import fixpp` →
-  `Engine(cfg)` → assert code 1201), so it ports into this suite **as-is** with no dict-helper fallback
-  (E-6 approach (a) is moot for it). Out-of-repo harness scrubs `PYTHONPATH` and asserts
-  `os.path.realpath(fixpp.__file__).startswith(sys.prefix)` (quickstart §4) so no source tree shadows.
 - [X] T013 [US1] **DONE 2026-06-30** — full cross-version witness GREEN on the shipped **SWIG-4.4.1**
   wheel (`aaa5842…`), installed into clean `uv` venvs (PYTHONPATH scrubbed, fixpp under sys.prefix):
   **3.10 → 88 passed, 3.11 → 88 passed, 3.12 → 88 passed, 3.13 → 87 passed + 1 skipped**
@@ -237,7 +223,21 @@ attach the wheel to GitHub releases, and make a broken wheel fail the gate.
 on each of 3.10–3.13, runs the functional subset green against the installed package, and (on a release
 event) attaches the asset; a deliberately broken wheel turns it red.
 
-- [ ] T016 [US2] Add the **`python-wheel` Tier-1 job** to `.github/workflows/tier1.yml` (CI-1..8, D-9):
+- [X] T016 [US2] **DONE 2026-07-01** — added three additive jobs to `.github/workflows/tier1.yml`:
+  `python-wheel-build` (build the ONE cp310-abi3 wheel in `manylinux_2_28` via `cibuildwheel` — run
+  directly from repo root, not `build-wheel.sh`: a fresh CI checkout has no `build/` so the
+  blind-tar hazard is absent; NBC-1 freeze + occupancy + REL-2 grep run first/fast; `abi3audit
+  --strict` + `auditwheel show` + exactly-ONE-wheel on the artifact), `python-wheel-test` (CI-4
+  install-test **matrix 3.10/3.11/3.12/3.13 against the single downloaded artifact** — clean venv,
+  out-of-repo + `PYTHONPATH`-scrubbed `tests/wheel/`, then the T019 broken-wheel gate),
+  `python-wheel-release` (T020). All `gate-precheck`-guarded (CI-1), per-leg `concurrency` (CI-7),
+  `timeout-minutes` backstops (CI-6), no `continue-on-error` (CI-5), **additive — the existing
+  `python-bindings` sanitizer matrix + GIL canary are untouched (CI-8)**. CI-3 Conan cache mounted
+  into the container as `CONAN_HOME` (non-load-bearing — a miss just rebuilds). YAML validated;
+  REL-2 grep self-match avoided (anchored patterns, proven clean + detects an injected publish).
+  **Authored + structurally verified; the real execution is on the PR (no GH Actions runner / Docker
+  manylinux available locally).** Original spec follows:
+  Add the **`python-wheel` Tier-1 job** to `.github/workflows/tier1.yml` (CI-1..8, D-9):
   runs every PR behind the `gate-precheck` `proceed` guard (CI-1); builds the single `cp310-abi3`
   wheel via `cibuildwheel` in `manylinux_2_28_x86_64` with gcc-toolset ≥13 + in-container Conan +
   `-DPy_LIMITED_API` (compile-only) + `wheel.py-api="cp310"` + SWIG ≥4.2 + `with_otel=False` + static
@@ -250,19 +250,40 @@ event) attaches the asset; a deliberately broken wheel turns it red.
   hosts the negative-gate step authored in T019** (`test_broken_wheel_gate.sh`) and the NBC guards
   (T017 c_api-diff, T018 import-surface) as steps within it — T016 creates the job skeleton; T017/T018/T019
   add steps to it.
-- [ ] T017 [P] [US2] **NBC-1** C-ABI freeze guard: a CI step that **fails on any diff to
+- [X] T017 [P] [US2] **DONE 2026-07-01** — `tools/check_capi_freeze.sh` + the committed manifest
+  `tools/capi_freeze.sha256` (SHA-256 of `include/fix/c_api.h` **+ all of `include/fix/c_api/`** — the
+  literal `c_api*.h` glob would miss the subdir where `message.h`/`session.h`/`error.h` live). An
+  **absolute** checksum baseline (not a diff-vs-base) so it works on `push:main` too; `sha256sum -c`
+  catches content tamper, an exact-set check catches an added/removed header. Wired as the first step of
+  `python-wheel-build` (fail-fast) alongside the existing occupancy gate. **Mutation-verified locally:
+  PASS green; RED on a tampered header AND on an added header; restored green.**
+  **NBC-1** C-ABI freeze guard: a CI step that **fails on any diff to
   `include/fix/c_api*.h`** (the `0→1` GA freeze is byte-frozen) and runs the existing ABI/header-occupancy
   check (SC-007).
-- [ ] T018 [P] [US2] **NBC-3** import-surface snapshot test (in `tests/wheel/`): assert `import fixpp`
+- [X] T018 [P] [US2] **DONE 2026-07-01** — `bindings/python/tests/wheel/test_import_surface.py`: an
+  **exact-set** (`==`, not subset — `feedback_completeness_gate_exact_set_not_subset`) snapshot of the
+  full 79-name public surface of `import fixpp`, generated from the installed SWIG-4.4.1 wheel. Catches
+  a dropped symbol AND a silent addition → any surface change must be a reviewed snapshot edit. Plus a
+  named-categories belt-and-suspenders (Error===FixppError, OO classes, locator). **Verified GREEN
+  (2 passed) against the INSTALLED wheel in a scrubbed venv.** Joins the `tests/wheel/` suite that CI-4
+  runs every PR. **NBC-3** import-surface snapshot test (in `tests/wheel/`): assert `import fixpp`
   still resolves **every** existing name/class (flat functions, `FixppError`/`Error`, the OO classes, the
   new locator) — guards the additive `%pythoncode` re-export (T009) from dropping a symbol.
-- [ ] T019 [US2] **Broken-wheel negative gate** `bindings/python/tests/wheel/test_broken_wheel_gate.sh`
-  (SC-006 named witness): copy a built wheel, remove `_fixpp_data/FIX44.xml` from the copy, install the
-  mutated copy into a throwaway venv, run the locator/round-trip, **assert non-zero**. Non-publishing
-  (never uploads or pollutes the real artifact); wired as a CI step that flips the gate red (FR-009).
-- [ ] T020 [US2] **Release-attach** step (REL-1/3, FR-008): on a GitHub **release** event, upload the
-  single `cp310-abi3` Linux wheel as a release **asset**. Assert **no** `twine` / `pypa/gh-action-pypi-publish`
-  / index-upload step exists anywhere in the workflow (REL-2 / SC-005 / `[const §IV.5]`).
+- [X] T019 [US2] **DONE 2026-07-01** — `bindings/python/tests/wheel/test_broken_wheel_gate.sh`:
+  rebuilds a wheel COPY with `_fixpp_data/FIX44.xml` (and its RECORD line) stripped so the mutated
+  wheel still **installs cleanly** and the failure surfaces at locate-time (a *data* witness, not a
+  corrupt-zip witness), installs into a throwaway venv, runs the locator round-trip, asserts **non-zero**.
+  **Self-discriminating**: proves the INTACT wheel round-trip PASSES first (positive control) so a red
+  stripped arm is attributable to the missing data. Non-publishing (throwaway copies only). Wired as a
+  `python-wheel-test` step (CI-5, no `continue-on-error`). **Verified locally BOTH arms: intact →
+  ROUNDTRIP_OK; stripped → `CapiError` (dict load fails) → gate RED.**
+- [X] T020 [US2] **DONE 2026-07-01** — `python-wheel-release` job (`if: github.event_name == 'release'`,
+  `needs: [python-wheel-build, python-wheel-test]`, `contents: write`): on a published release the full
+  Tier-1 gate runs on the release commit first, then `gh release upload <tag> <wheel> --clobber` attaches
+  the single `cp310-abi3` wheel as an **asset** (REL-1/3). Added `release: types: [published]` to the
+  workflow `on:`. REL-2/SC-005 enforced by the `python-wheel-build` grep step (anchored to real
+  publish syntax — `gh release upload` is an asset attach, not an index publish; **verified the grep
+  finds no publish step and DETECTS an injected `pypa/gh-action-pypi-publish`**).
 
 **Checkpoint**: the wheel is produced + install-verified + released by CI; broken artifacts fail.
 
