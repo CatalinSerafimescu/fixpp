@@ -130,7 +130,10 @@ dictionary through `fixpp.dictionary_path("FIX44")` — succeeds with no repo pr
 
 ### Build the artifact + witnesses ([verify at implement])
 
-- [ ] T010 [US1] **Build the single abi3 wheel** locally via `cibuildwheel` (quickstart §1, D-2/D-7):
+- [ ] T010 [US1] **Build the single abi3 wheel** locally via `bindings/python/build-wheel.sh`
+  (quickstart §1, D-2/D-7) — the wrapper runs `cibuildwheel` from a pristine `git worktree` of
+  committed HEAD so the multi-GB `build/`/`.codegraph/` trees are never swept into cibuildwheel's
+  blind `tar -c .` of cwd (commit before running). Env knobs:
   `CIBW_BUILD="cp310-manylinux_x86_64"` + `CIBW_ARCHS_LINUX="x86_64"` +
   `CIBW_MANYLINUX_X86_64_IMAGE="manylinux_2_28"` (the architecture-only build identifier — `abi3`/`2_28`
   are NOT selector components); `CIBW_BEFORE_ALL` enables gcc-toolset (≥13), generates the matching

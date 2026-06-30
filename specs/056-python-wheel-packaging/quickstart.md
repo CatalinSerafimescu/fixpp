@@ -8,15 +8,31 @@ root (`research/G19-fix-fpml-iso20022/library`).
 
 ```bash
 pipx install cibuildwheel        # + Docker for the manylinux container
-# ONE build identifier (cp310 on the linux x86_64 platform); the abi3 ABI tag and
-# the manylinux_2_28 glibc baseline are NOT selector components — abi3 comes from
-# scikit-build-core's wheel.py-api = "cp310" (PKG-6; -DPy_LIMITED_API is
-# compile-only) and 2_28 from the image option below:
+# Build via the wrapper, which runs cibuildwheel from a PRISTINE git worktree:
+git add -A && git commit ...     # commit first — the worktree builds HEAD
+bindings/python/build-wheel.sh
+# -> wheelhouse/fixpp-<ver>-cp310-abi3-manylinux_2_28_x86_64.whl  (×1)
+```
+
+**Why the wrapper (not raw `cibuildwheel` from the root).** cibuildwheel copies
+the *entire current working directory* into the container with a blind
+`tar -c .` that honours no .gitignore/.dockerignore and cannot be told to
+exclude anything; it also requires `package_dir` to live under cwd. Because
+pyproject's `cmake.source-dir = "../.."` forces cwd to be the submodule root,
+`cibuildwheel --platform linux bindings/python` from the root sweeps the
+multi-GB `build/` + `.codegraph/` trees into the container (once ~100G in
+seconds). `build-wheel.sh` builds from a detached `git worktree` of committed
+HEAD, where those gitignored trees are physically absent (~tens of MB tarred),
+then copies the wheel back to `wheelhouse/`. This is a LOCAL-dev hazard only —
+CI builds on a fresh checkout where `build/` never exists. The build identifier
+is overridable via the same `CIBW_BUILD` / `CIBW_ARCHS_LINUX` /
+`CIBW_MANYLINUX_X86_64_IMAGE` env vars:
+
+```bash
 CIBW_BUILD="cp310-manylinux_x86_64" \
 CIBW_ARCHS_LINUX="x86_64" \
 CIBW_MANYLINUX_X86_64_IMAGE="manylinux_2_28" \
-cibuildwheel --platform linux bindings/python
-# -> wheelhouse/fixpp-<ver>-cp310-abi3-manylinux_2_28_x86_64.whl  (×1)
+bindings/python/build-wheel.sh
 ```
 
 A cibuildwheel build identifier is `{python_tag}-{platform_tag}`, where the linux
