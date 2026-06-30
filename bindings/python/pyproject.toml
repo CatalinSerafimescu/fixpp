@@ -68,3 +68,25 @@ FIXPP_BUILD_TESTS = "OFF"
 provider = "scikit_build_core.metadata.regex"
 input = "../../CMakeLists.txt"
 regex = '(?s)project\(\s*fixpp\s+VERSION\s+(?P<value>[0-9]+\.[0-9]+\.[0-9]+)'
+
+# ── cibuildwheel (T010 local / T016 CI — single source of truth) ────────────
+# Produces the ONE cp310-abi3 wheel in the pinned manylinux_2_28_x86_64 image.
+# Consumed identically by bindings/python/build-wheel.sh (local) and tier1.yml.
+[tool.cibuildwheel]
+# {python_tag}-{platform_tag}; abi3/2_28 are NOT selector components (D-7,
+# quickstart §1): abi3 from wheel.py-api="cp310", 2_28 from the image below.
+build = "cp310-manylinux_x86_64"
+archs = ["x86_64"]
+manylinux-x86_64-image = "manylinux_2_28"
+
+[tool.cibuildwheel.linux]
+# Toolchain + Conan setup, run ONCE per container; writes the Conan toolchain to
+# /tmp/wheel-conan (proven by the configure-only probe — see the script header).
+before-all = "bash {project}/bindings/python/cibw-before-all.sh {project}"
+
+# The Conan toolchain → scikit-build-core handoff. cmake does NOT read
+# CMAKE_TOOLCHAIN_FILE from the environment, so it MUST go through the build
+# backend as a config-setting (the same `-C cmake.define...` route proven
+# locally), NOT via [tool.cibuildwheel.linux.environment].
+[tool.cibuildwheel.config-settings]
+"cmake.define.CMAKE_TOOLCHAIN_FILE" = "/tmp/wheel-conan/conan_toolchain.cmake"

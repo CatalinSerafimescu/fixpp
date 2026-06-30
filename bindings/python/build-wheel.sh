@@ -15,13 +15,10 @@
 # committed HEAD — commit your work before running. Wheel(s) land in
 # <submodule-root>/wheelhouse/.
 #
-# Override the build identifier / image via the CIBW_* env vars below.
+# All cibuildwheel configuration (build selector, image, before-all toolchain
+# setup, the Conan toolchain-file handoff) lives in bindings/python/pyproject.toml
+# [tool.cibuildwheel] — the single source shared with the tier1.yml CI gate.
 set -euo pipefail
-
-: "${CIBW_BUILD:=cp310-manylinux_x86_64}"
-: "${CIBW_ARCHS_LINUX:=x86_64}"
-: "${CIBW_MANYLINUX_X86_64_IMAGE:=manylinux_2_28}"
-export CIBW_BUILD CIBW_ARCHS_LINUX CIBW_MANYLINUX_X86_64_IMAGE
 
 ROOT="$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)"
 WT="$(mktemp -d "${TMPDIR:-/tmp}/fixpp-wheel-wt.XXXXXX")"
