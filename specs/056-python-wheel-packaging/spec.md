@@ -192,21 +192,27 @@ the installed package.
   MUST resolve all native symbols from within the package, with no runtime
   dependency on a separately installed fixpp shared object or on a C++ standard
   library newer than the manylinux baseline.
-- **FR-003**: The wheel MUST bundle the complete public Python import surface as
-  the **two existing top-level modules, shipped as-is**: `fixpp` (the
-  SWIG-generated extension module plus the SWIG-generated flat Python module) and
-  `fixpp_oo` (the pure-Python OO layer PY-004 established as the user-facing API).
-  This feature MUST NOT restructure or rename those modules (e.g. into a `fixpp`
-  package) — the frozen PY-001..004 import surface is preserved.
+- **FR-003**: The wheel MUST bundle the complete public Python import surface,
+  **shipped as-is** as the existing top-level modules. `import fixpp` is the
+  user-facing surface: the SWIG-generated `fixpp` proxy already re-exports (via
+  its `%pythoncode` glue) the flat functions, the `FixppError`/`Error` hierarchy,
+  and the OO classes `Engine`/`Session`/`Message`/`Application`/`Dictionary` from
+  the `fixpp_oo` implementation module. Both `fixpp` (+ `_fixpp*.so`) and
+  `fixpp_oo` ship as top-level modules; this feature MUST NOT restructure or
+  rename them (e.g. into a `fixpp` package) — the frozen PY-001..004 import
+  surface is preserved.
 - **FR-004**: The wheel MUST bundle the standard FIX dictionary data
   (FIX42 / FIX44 / FIX50SP2 / FIXT11) as package data so that a session requiring
   a dictionary works from a clean install with no user-supplied files.
-- **FR-004a**: The package MUST provide a small additive pure-Python locator
-  helper that resolves a bundled dictionary by name (e.g. `"FIX44"`) to a
-  loadable form from package data, so installed code locates the bundled
-  dictionaries without computing repo-relative or installation-specific paths.
-  The helper is packaging glue (pure Python over package data) and introduces no
-  C-ABI or binding-behaviour change.
+- **FR-004a**: The package MUST provide a small additive pure-Python locator that
+  resolves a bundled dictionary by name (e.g. `"FIX44"`) to a loadable form from
+  package data, so installed code locates the bundled dictionaries without
+  computing repo-relative or installation-specific paths. To stay consistent with
+  the established public surface, the locator MUST be reachable through
+  `import fixpp` (e.g. `fixpp.dictionary_path(...)`), re-exported via the same
+  additive `%pythoncode` glue that already surfaces the OO classes — not as a new
+  separate top-level public import name. It is packaging glue (pure Python over
+  package data) and introduces no C-ABI or existing-binding-behaviour change.
 - **FR-005**: Each Linux wheel MUST carry the portable **`manylinux_2_28_x86_64`**
   platform tag (`[2m §1.1]`, via `auditwheel repair`) so it installs on mainstream
   glibc distributions, not only on the build host.
@@ -245,11 +251,13 @@ the installed package.
   compatibility (abi3 or per-version), bundled contents (extension module + flat
   module + OO layer + dictionary data), self-containment.
 - **Bundled dictionary data**: the standard FIX dictionary files shipped inside
-  the package, addressable from installed code via the locator helper (FR-004a) so
-  a session can load a dictionary with no external file.
-- **Public Python import surface**: the two top-level modules shipped as-is —
-  `fixpp` (the flat SWIG bindings) and `fixpp_oo` (the pure-Python OO API that is
-  the intended user-facing layer). No package restructure.
+  the package, addressable from installed code via `fixpp.dictionary_path(...)`
+  (FR-004a) so a session can load a dictionary with no external file.
+- **Public Python import surface**: `import fixpp` — the user-facing surface that
+  re-exports (via its existing `%pythoncode` glue) the flat SWIG bindings, the
+  exception hierarchy, the OO classes from the `fixpp_oo` implementation module,
+  and the new dictionary locator. `fixpp` and `fixpp_oo` ship as top-level modules
+  as-is; no package restructure.
 - **Wheel CI gate**: the pipeline stage that builds, install-tests, and (on
   release) publishes the wheel; the gating signal for the deliverable.
 - **Functional install-verification subset**: the binding tests that can run
@@ -265,8 +273,8 @@ the installed package.
   `import fixpp` succeeds with a zero exit status.
 - **SC-002**: On that same clean environment, the documented end-to-end FIX 4.4
   round-trip example runs to completion and the field read back equals the field
-  sent — using only a dictionary resolved through the package's bundled-dictionary
-  locator helper, with no user-supplied dictionary file.
+  sent — using only a dictionary resolved through `fixpp.dictionary_path(...)`
+  (the bundled-dictionary locator), with no user-supplied dictionary file.
 - **SC-003**: The functional binding subset passes (100% of its selected tests)
   when run against the installed wheel in a clean environment, on every Tier-1 PR
   run (the wheel build/install-test is a mandatory merge gate).

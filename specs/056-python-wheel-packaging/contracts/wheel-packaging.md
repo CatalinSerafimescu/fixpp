@@ -17,7 +17,7 @@ Defines what `pip wheel bindings/python/` (via `scikit-build-core` under
 
 | ID | Rule |
 |---|---|
-| LAY-1 | Top-level (site-packages root), **flat**: `_fixpp*.so`, `fixpp.py`, `fixpp_oo.py`, `fixpp_dict_data.py`. No `fixpp/` namespace directory (fixes the latent `install(... /fixpp)` layout — research D-4). |
+| LAY-1 | Top-level (site-packages root), **flat**: `_fixpp*.so`, `fixpp.py`, `fixpp_oo.py`, `fixpp_dict_data.py`. No `fixpp/` namespace directory (fixes the latent `install(... /fixpp)` layout — research D-4). The public import name is `fixpp`; `fixpp_oo`/`fixpp_dict_data` are implementation modules re-exported through it. |
 | LAY-2 | `_fixpp_data/` package present with `__init__.py` + the four XMLs (data-model E-3), staged from `dictionaries/` at build. |
 | LAY-3 | The wheel carries **no** external shared-lib dependency beyond libc/libpython: `_fixpp*.so` statically links `fixpp_capi` + `-static-libstdc++/-libgcc` (already in CMakeLists). `auditwheel show` lists no non-allowed external `.so`. |
 | LAY-4 | `import fixpp`, `import fixpp_oo`, `import fixpp_dict_data` all succeed from a clean install (SC-001). |

@@ -27,14 +27,18 @@ both succeed (SC-001).
 | Module | Role | Lifecycle |
 |---|---|---|
 | `_fixpp` (`_fixpp*.so`) | SWIG low-level extension (statically linked) | built, frozen content |
-| `fixpp` (`fixpp.py`) | flat SWIG Python wrapper + re-export glue | generated, frozen content |
-| `fixpp_oo` (`fixpp_oo.py`) | OO API (Engine/Session/Message/Application/Dictionary) | frozen content |
-| `fixpp_dict_data` (`fixpp_dict_data.py`) | **NEW** dictionary locator helper | added by this feature |
+| `fixpp` (`fixpp.py`) | **the public surface** — SWIG proxy whose `%pythoncode` glue re-exports the flat functions, `FixppError`/`Error`, the OO classes (from `fixpp_oo`), and the new locator | generated; glue extended additively (one re-export line) |
+| `fixpp_oo` (`fixpp_oo.py`) | OO API implementation module (Engine/Session/Message/Application/Dictionary), imported by `fixpp.py` | frozen content |
+| `fixpp_dict_data` (`fixpp_dict_data.py`) | **NEW** locator implementation module (mirrors `fixpp_oo`); surfaced as `fixpp.dictionary_path`/`fixpp.dictionary_bytes`/`fixpp.BUNDLED_DICTIONARIES` | added by this feature |
 | `_fixpp_data` (package) | **NEW** bundled FIX XML data package | added by this feature |
 
-**Rule (D-4)**: all four `*.py`/`*.so` are **top-level** (site-packages root); no
-`fixpp/` namespace directory. Fixes the latent install layout. Content of
-`fixpp`/`fixpp_oo`/`_fixpp` is **unchanged** (FR-012).
+**Rule (D-4)**: all `*.py`/`*.so` modules are **top-level** (site-packages root);
+no `fixpp/` namespace directory. Fixes the latent install layout. The **public
+import name is `fixpp`** — `fixpp_oo` and `fixpp_dict_data` are implementation
+modules surfaced through it, not new user-facing import names. Content of
+`fixpp_oo`/`_fixpp` is **unchanged**; `fixpp.py`'s `%pythoncode` glue gains only
+an additive locator re-export, mirroring the 055 OO re-export precedent (FR-012:
+no existing-binding-behaviour change).
 
 ## E-3 — Bundled dictionary data package `_fixpp_data/`
 
@@ -49,25 +53,34 @@ both succeed (SC-001).
 **Validation (FR-004)**: after a clean install, the four resources are present in
 the package and resolvable without any user-supplied file (SC-002).
 
-**Build wiring**: `scikit-build-core` packages `_fixpp_data/` as package data;
-the XMLs are staged from `dictionaries/` during CMake configure/build (copy step)
-so they are never hand-duplicated in the tree.
+**Build wiring**: `scikit-build-core` packages files that CMake **installs**, not
+loose tree copies — so the four XMLs (and `_fixpp_data/__init__.py`) MUST have an
+explicit `install(FILES … DESTINATION <wheel-root>/_fixpp_data)` rule (staged from
+`dictionaries/` at configure/build so they are never hand-duplicated), or be
+force-included via `tool.scikit-build.wheel.packages` / `sdist.include`. The
+`unzip -l … | grep _fixpp_data/FIX` witness (wheel-packaging LAY-2) guards that
+they actually land in the wheel.
 
-## E-4 — Dictionary locator API (`fixpp_dict_data`) — FR-004a
+## E-4 — Dictionary locator API — FR-004a
 
-Pure-Python; no native code; no C-ABI change.
+Pure-Python; no native code; no C-ABI change. Implemented in `fixpp_dict_data.py`
+and **re-exported through `fixpp`** so the public names are `fixpp.dictionary_path`
+/ `fixpp.dictionary_bytes` / `fixpp.BUNDLED_DICTIONARIES` (consistent with the
+existing "everything via `import fixpp`" surface; no new top-level public name).
 
-| Symbol | Signature | Behaviour |
+| Public symbol | Signature | Behaviour |
 |---|---|---|
-| `BUNDLED` | `frozenset({"FIX42","FIX44","FIX50SP2","FIXT11"})` | the shipped set |
-| `dictionary_path(name)` | `(str) -> ContextManager[str]` | yields a real filesystem path to the named XML via `importlib.resources.as_file`; for feeding `dict_load_from_xml(path)` |
-| `dictionary_bytes(name)` | `(str) -> bytes` | the XML contents, for `dict_load_from_xml_bytes`-style use |
+| `fixpp.BUNDLED_DICTIONARIES` | `frozenset({"FIX42","FIX44","FIX50SP2","FIXT11"})` | the shipped set |
+| `fixpp.dictionary_path(name)` | `(str) -> ContextManager[str]` | yields a real filesystem path to the named XML via `importlib.resources.as_file`; for feeding `dict_load_from_xml(path)` |
+| `fixpp.dictionary_bytes(name)` | `(str) -> bytes` | the XML contents, for `dict_load_from_xml_bytes`-style use |
 
 **Rules**:
-- `name` not in `BUNDLED` → `KeyError` (or `ValueError`) with the valid set in the
-  message (testable, unambiguous).
+- `name` not in the bundled set → `KeyError` (or `ValueError`) with the valid set
+  in the message (testable, unambiguous).
 - Resolution uses `importlib.resources.files("_fixpp_data")` — works from an
   installed wheel and from the build tree.
+- The re-export is one additive line in `fixpp.i`'s existing `%pythoncode` glue
+  block (the 055 OO re-export precedent); no change to existing wrappers.
 
 **Validation**: `dictionary_path("FIX44")` yields a path that
 `fixpp.dict_load_from_xml(...)` accepts and a FIX 4.4 round-trip succeeds against

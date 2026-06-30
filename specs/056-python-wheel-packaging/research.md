@@ -95,18 +95,26 @@ re-exporting OO (rejected by the clarification — renames the frozen flat modul
 
 **Decision**: Ship the four FIX XMLs inside a small **importable data package**
 `_fixpp_data/` (`__init__.py` + the XMLs), and add a pure-Python locator module
-`fixpp_dict_data.py` exposing a by-name resolver built on `importlib.resources`.
+`fixpp_dict_data.py` exposing a by-name resolver built on `importlib.resources`,
+**re-exported through `fixpp`** (one additive line in the existing `%pythoncode`
+glue) so the public names are `fixpp.dictionary_path` / `fixpp.dictionary_bytes`
+/ `fixpp.BUNDLED_DICTIONARIES`.
 
 **Rationale**: Top-level modules cannot host package data cleanly; a tiny data
 package is the idiomatic `importlib.resources` host. The XMLs are copied (or
 configured-in) from the repo `dictionaries/` at build time so there is one source
 of truth. The locator returns a filesystem path (via
 `importlib.resources.as_file`) suitable for the existing C-ABI
-`dict_load_from_xml(path)` entry, with no user-supplied file.
+`dict_load_from_xml(path)` entry, with no user-supplied file. **Surfacing it
+through `fixpp`** (not as a standalone top-level import) matches the verified
+public-surface pattern: `fixpp.py`'s `%pythoncode` glue already re-exports the
+flat functions, `Error`, and the OO classes from `fixpp_oo` (confirmed at
+`fixpp.i` ~L742 `from fixpp_oo import Engine, Session, …`). `fixpp_dict_data.py`
+mirrors `fixpp_oo.py` as an implementation module.
 
 **Locator shape** (contract in `contracts/`):
-`fixpp_dict_data.dictionary_path(name: str) -> contextmanager[str]` and/or
-`dictionary_bytes(name) -> bytes`, where `name ∈ {"FIX42","FIX44","FIX50SP2","FIXT11"}`.
+`fixpp.dictionary_path(name: str) -> contextmanager[str]` and/or
+`fixpp.dictionary_bytes(name) -> bytes`, where `name ∈ {"FIX42","FIX44","FIX50SP2","FIXT11"}`.
 
 **Alternatives**: data inside a `fixpp/` package (rejected — needs the package
 restructure D-4 declined); absolute build-host paths (rejected — non-portable,
@@ -125,6 +133,12 @@ tracks the library version with no second source of truth.
 **[verify at implement]**: confirm scikit-build-core reads the CMake project
 version cleanly; else fall back to a single static `project.version` in
 `pyproject.toml` kept in sync by a CI check.
+
+**Version-value note (not a PY-005 decision)**: the project version is `0.0.1`
+today, so the wheel would ship as `fixpp-0.0.1-…`. The v1.0 release-gate bump to
+`1.0.0` is a separate release-engineering step (it bumps `project(VERSION)` once,
+which this wheel then inherits automatically). PY-005 wires the version *source*;
+it does not set the release number.
 
 ## D-7 — Conan inside the container / build-graph cost
 

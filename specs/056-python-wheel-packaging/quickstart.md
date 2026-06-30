@@ -35,16 +35,17 @@ extension is self-contained.
 ## 3. End-to-end round-trip from the bundled dictionary (SC-002)
 
 ```python
-import fixpp, fixpp_dict_data
+import fixpp
 # Resolve the bundled FIX44 dictionary — no user-supplied file:
-with fixpp_dict_data.dictionary_path("FIX44") as p:
+with fixpp.dictionary_path("FIX44") as p:
     d = fixpp.dict_load_from_xml(p)
     # ... stand up two engines, open a session, send, read back the field ...
     # (the existing test_roundtrip.py flow, dict resolved via the locator)
 ```
 
-`fixpp_oo` gives the OO API (`Engine`/`Session`/`Message`/...) over the same
-substrate.
+`import fixpp` is the whole public surface: flat functions, the `Error`
+hierarchy, the OO classes (`fixpp.Engine`/`Session`/...), and the dictionary
+locator — all re-exported via the proxy's `%pythoncode` glue.
 
 ## 4. Run the functional subset against the installed wheel (SC-003)
 
