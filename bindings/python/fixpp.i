@@ -321,7 +321,23 @@ def _raise_for_code(code):
         fixpp_py_raise_for_code($1);
         SWIG_fail;
     }
-    $result = SWIG_Py_Void();
+    /* OK: leave $result NULL (not Py_None). SWIG_AppendOutput's `if (!result)
+     * result = obj;` first branch is identical on every SWIG version, so the
+     * FIRST argout out-param (handle / bytes / str / scalar OUTPUT) becomes the
+     * sole Python return on 4.2 AND 4.3+. Setting Py_None here would survive only
+     * on SWIG <4.3: 4.3.0 gave SWIG_Python_AppendOutput an is_void arg and now
+     * keeps a Py_None primary result for a non-void fn (fixpp_error_t) ->
+     * [None, handle], breaking the whole binding. The %typemap(ret) below
+     * restores None for fns that have no out-param. */
+    $result = NULL;
+}
+
+/* Default the Python return to None for fallible fns with NO out-param (setters,
+ * start, send, close, destroy, ...): their out typemap leaves $result NULL and no
+ * argout fills it. Runs only on the success path (SWIG_fail bypasses ret). This is
+ * what makes the NULL-on-OK out typemap above SWIG-version-agnostic. */
+%typemap(ret) fixpp_error_t {
+    if (!$result) $result = SWIG_Py_Void();
 }
 
 /* ── T007: OUTPUT typemaps for **out handles + scalar out-params ─────────────
