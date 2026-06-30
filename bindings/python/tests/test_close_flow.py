@@ -149,3 +149,79 @@ def test_concurrent_engine_entry_during_close_raises_without_cabi_entry(monkeypa
     close_thread.join(timeout=2.0)
     assert not close_thread.is_alive()
     assert calls == {"session_open": 0, "engine_start": 0}
+
+
+def test_session_close_native_raise_still_releases_userdata(monkeypatch):
+    """If session_close raises, _release_application_oo and _was_explicitly_closed must
+    still execute — contract C-3/C-4 on the error path (P1-a, gate-b/r1)."""
+    release_calls = []
+    sentinel = RuntimeError("injected close failure")
+
+    session = object.__new__(fixpp.Session)
+    session._handle = object()
+    session._dead = False
+    session._was_explicitly_closed = False
+    session._engine = None
+    session._messages = weakref.WeakSet()
+    session._application = object()
+    session._in_callback = False
+    session._application_registered = True
+
+    def fake_close(handle):
+        raise sentinel
+
+    monkeypatch.setattr(fixpp_oo, "session_close", fake_close)
+    monkeypatch.setattr(
+        fixpp_oo, "_release_application_oo",
+        lambda wrapper: release_calls.append(wrapper),
+    )
+
+    with pytest.raises(RuntimeError) as exc_info:
+        session.close()
+
+    assert exc_info.value is sentinel
+    assert len(release_calls) == 1
+    assert release_calls[0] is session
+    assert session._was_explicitly_closed is True
+    assert session._application_registered is False
+
+
+def test_engine_close_child_raises_still_destroys_engine(monkeypatch):
+    """If a child session close raises, engine_destroy must still be called and
+    _was_explicitly_closed set — contract C-3 on the Engine error path (P1-a, gate-b/r1)."""
+    destroy_calls = []
+    sentinel = RuntimeError("child close failed")
+
+    engine = object.__new__(fixpp.Engine)
+    engine._handle = object()
+    engine._dead = False
+    engine._was_explicitly_closed = False
+    engine._sessions = weakref.WeakSet()
+
+    child = object.__new__(fixpp.Session)
+    child._handle = object()
+    child._dead = False
+    child._was_explicitly_closed = False
+    child._engine = engine
+    child._messages = weakref.WeakSet()
+    child._application = None
+    child._application_registered = False
+    child._in_callback = False
+    engine._sessions.add(child)
+
+    def fake_close(handle):
+        raise sentinel
+
+    monkeypatch.setattr(fixpp_oo, "session_close", fake_close)
+    monkeypatch.setattr(
+        fixpp_oo, "engine_destroy",
+        lambda handle: destroy_calls.append(handle),
+    )
+
+    with pytest.raises(RuntimeError) as exc_info:
+        engine.close()
+
+    assert exc_info.value is sentinel
+    assert len(destroy_calls) == 1
+    assert destroy_calls[0] is engine._handle
+    assert engine._was_explicitly_closed is True

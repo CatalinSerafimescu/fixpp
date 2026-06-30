@@ -170,10 +170,19 @@ class Engine(_Finalizable, _LiveHandle):
             if session._in_callback:
                 raise _make_error(_CALLBACK_REENTRANT_CLOSE)
         self._dead = True
+        first_error = None
         for session in list(self._sessions):
-            session._close_from_engine()
-        engine_destroy(self._handle)
-        self._was_explicitly_closed = True
+            try:
+                session._close_from_engine()
+            except Exception as exc:
+                if first_error is None:
+                    first_error = exc
+        try:
+            engine_destroy(self._handle)
+        finally:
+            self._was_explicitly_closed = True
+        if first_error is not None:
+            raise first_error
 
 
 class Session(_Finalizable, _LiveHandle):
@@ -238,11 +247,17 @@ class Session(_Finalizable, _LiveHandle):
         for msg in list(self._messages):
             msg._dead = True
         self._application = None
-        session_close(self._handle)
-        if self._application_registered:
-            _release_application_oo(self)
-            self._application_registered = False
-        self._was_explicitly_closed = True
+        try:
+            # session.h:204 — handle is invalidated on return-or-raise, so dispatch
+            # has stopped; releasing userdata in finally is safe per contract C-4.
+            # session.cpp:246-250 — concurrent THREAD_SAFE sends are atomically
+            # guarded (valid release/acquire), so send-vs-close is not a UAF.
+            session_close(self._handle)
+        finally:
+            if self._application_registered:
+                _release_application_oo(self)
+                self._application_registered = False
+            self._was_explicitly_closed = True
 
 
 class Message(_LiveHandle):

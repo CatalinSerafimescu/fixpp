@@ -15,7 +15,7 @@ Build the `[2m §6.2]` pure-Python object-oriented **lifetime/ownership layer** 
 **Primary Dependencies**: SWIG (binding generator, already wired); CPython C-API (`PyGILState_*`, `PyObject_*`, `Py_INCREF/DECREF`, `weakref`); the existing `fixpp_capi` static archive (statically linked into `_fixpp.so`). Tests: pytest.
 **Storage**: N/A.
 **Testing**: pytest under `bindings/python/tests/`; Tier-1 `python-bindings` CI matrix (none / asan / tsan). ASan witnesses the no-UAF property (SC-001); a watchdog/timeout test witnesses the no-deadlock reentrancy property (SC-007).
-**Target Platform**: Linux x86_64 for build/test (the binding logic is OS-agnostic; wheels/manylinux are PY-005). 
+**Target Platform**: Linux x86_64 for build/test (the binding logic is OS-agnostic; wheels/manylinux are PY-005).
 **Project Type**: language-binding layer — a pure-Python OO layer + SWIG/C glue over a frozen C-ABI.
 **Performance Goals**: Correctness-first. The liveness guard is a single Python attribute check (~tens of ns) per accessor — negligible. The `[2m §6.6]` latency ceilings are provisional and bench-gated under PY-005/post; not a v1.0 PY-004 acceptance gate.
 **Constraints**: **No `include/fix/c_api.h` change** (`0→1` freeze held). GIL-protected wrapper state (no `threading.local`, no OS-thread-id assumptions — `[2m §1.3]` rule (4)). ASan/TSan clean. Build parallelism capped at `-j2`; sanitizer/verify presets run strictly one at a time (WSL2 OOM, per durable session cap).
