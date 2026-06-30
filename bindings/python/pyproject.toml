@@ -5,10 +5,23 @@
 # Built under cibuildwheel in manylinux_2_28 (see specs/056 quickstart.md / contracts).
 
 [build-system]
-# PKG-1: scikit-build-core backend; swig>=4.2 PINNED (a 4.0 runner silently
-# regresses the limited-API/abi3 mode — research D-3). Lower-bound pins;
-# exact published at implement (2026-06-30): scikit-build-core 0.12.2, swig 4.2.0.
-requires = ["scikit-build-core>=0.11", "swig>=4.2"]
+# PKG-1: scikit-build-core backend; swig>=4.2,<4.3 PINNED.
+#   Lower bound (>=4.2): a 4.0 runner silently regresses the limited-API/abi3
+#   mode (research D-3).
+#   Upper bound (<4.3): SWIG 4.3.0 changed SWIG_Python_AppendOutput's signature
+#   to (result, obj, is_void) and now drops a Py_None primary result ONLY when
+#   is_void=1. Our argout typemaps (fixpp.i %FIXPP_HANDLE_OUT, payload/value
+#   out-params) deliberately consume the fallible fixpp_error_t return to None
+#   via the `out` typemap so the out-param becomes the sole Python return — but
+#   SWIG passes is_void=0 for a non-void (fixpp_error_t) function, so under
+#   >=4.3 the None is kept and every factory returns [None, handle] instead of
+#   the bare handle, breaking the whole binding. 4.2.x (drops None
+#   unconditionally) is the toolchain the in-tree sanitizer matrix validates;
+#   confirmed via the tests/wheel/ subset (T012). The SWIG-4.3+ typemap
+#   portability fix (is_void-aware AppendOutput) is tracked as L-056-* follow-up.
+#   Exact published at implement (2026-06-30): scikit-build-core 0.12.2; pin
+#   resolves swig to the 4.2 line (4.2.0 local; latest 4.2.x in CI).
+requires = ["scikit-build-core>=0.11", "swig>=4.2,<4.3"]
 build-backend = "scikit_build_core.build"
 
 [project]
