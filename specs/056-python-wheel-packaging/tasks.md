@@ -192,9 +192,10 @@ dictionary through `fixpp.dictionary_path("FIX44")` — succeeds with no repo pr
 ### Per-version fallback contingency
 
 - [X] T015 [US1] **NOT TRIGGERED 2026-06-30** — abi3 shipped. T004 abi3 feasibility GATE passed (zero
-  limited-API violations) and the produced wheel passed `abi3audit --strict` (non_abi3_symbols:[], baseline
-  3.10); local 3.12 install-test green. No RED witness → the per-version `cp3XX-cp3XX` fallback is NOT
-  executed (closed as not-triggered). Full 3.10/3.11/3.13 install confirmation is T013 (CI matrix T016).
+  limited-API violations) and the produced **container** wheel passed `abi3audit --strict` (non_abi3_symbols:[],
+  baseline 3.10) AND imports + runs the locator round-trip on fresh CPython 3.12. No RED witness → the
+  per-version `cp3XX-cp3XX` fallback is NOT executed (closed as not-triggered). Full 3.10/3.11/3.13 install
+  confirmation is T013 (CI matrix T016).
   ~~Per-version fallback (FR-010 — CONTINGENCY, execute ONLY if T004 compile OR T013 runtime import fires RED).~~
 
 **Checkpoint**: a locally-built, install-tested abi3 wheel — the MVP deliverable.
