@@ -173,9 +173,12 @@ dictionary through `fixpp.dictionary_path("FIX44")` — succeeds with no repo pr
   guard is the separate NBC-3 T018). Fixed the committed `test_locator` LOC-3 bug (`<?xml`→`<fix`,
   the bundled dicts carry no XML declaration). **Validated GREEN against the SWIG-4.2 build-dir .so:
   87 passed** (sole "fail" = `test_installed_only` correctly firing off-prefix). **This run caught a
-  ship-blocking SWIG-4.3 wheel defect** (`SWIG_Python_AppendOutput` is_void change → every factory
-  returns `[None,handle]`); fixed by pinning `swig>=4.2,<4.3` (commit 35c82d2). Wheel rebuilt +
-  re-verified — see T013.
+  ship-blocking SWIG-4.3 wheel defect** (`SWIG_Python_AppendOutput` gained an is_void arg → every
+  factory returned `[None,handle]`). Fixed **version-agnostically** (commit follows 35c82d2): the
+  `%typemap(out) fixpp_error_t` leaves `$result` NULL on OK + a new `%typemap(ret)` defaults None,
+  relying only on AppendOutput's stable `!result` branch → correct on 4.2 AND 4.3+ with no #if guard.
+  Pin **dropped** (`swig>=4.2`, no upper bound) so the wheel builds with the **latest SWIG (4.4.1)**
+  per USER DECISION (drive the future). Re-verified — see T013.
 - [ ] T012 [US1] Create the dedicated `bindings/python/tests/wheel/` suite — **the canonical
   "functional install-verification subset"** (D-8 / E-6, LOC witnesses): imports **only installed
   modules** and resolves every dictionary through `fixpp.dictionary_path(...)` (never a repo-relative
@@ -196,10 +199,11 @@ dictionary through `fixpp.dictionary_path("FIX44")` — succeeds with no repo pr
   package. **3.10/3.11 is the concentrated verify band** — no import barrier there, so the reworked
   runtime 1201 check (T003) is the sole, previously-unwitnessed rejection mechanism (NBC-2/SC-007).
   A **red** runtime import on any version is the trigger for the per-version fallback (T015).
-  **3.12 DONE 2026-06-30**: the post-pin wheel (`d2d13f2…`, swig 4.2.1) installs into a clean 3.12
-  venv and the full `tests/wheel/` suite is GREEN (88 passed, PYTHONPATH scrubbed, `test_installed_only`
-  under sys.prefix). **PENDING the load-bearing 3.10/3.11 band + 3.13** — local pyenv or the T016 CI
-  matrix (only 3.12 is on this host). NOT RED on any version → per-version fallback (T015) stays untriggered.
+  **3.12 DONE 2026-06-30**: the **SWIG-4.4.1** wheel (`5b6bb8d…`, built with the latest swig after the
+  version-agnostic typemap fix) installs into a clean 3.12 venv and the full `tests/wheel/` suite is
+  GREEN (88 passed, PYTHONPATH scrubbed, `test_installed_only` under sys.prefix). **PENDING the
+  load-bearing 3.10/3.11 band + 3.13** — local pyenv or the T016 CI matrix (only 3.12 is on this host).
+  NOT RED on any version → per-version fallback (T015) stays untriggered.
 - [X] T014 [US1] **DONE 2026-06-30** — scikit-build-core resolved the version from CMake `project(VERSION)`
   cleanly; both the local and container wheels are named `fixpp-0.0.1-cp310-abi3-…`. No static fallback needed.
   **Version-source check [verify at implement]** (D-6 / PKG-2): confirm scikit-build-core
