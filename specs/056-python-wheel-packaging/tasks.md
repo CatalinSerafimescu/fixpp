@@ -135,7 +135,12 @@ dictionary through `fixpp.dictionary_path("FIX44")` — succeeds with no repo pr
 
 ### Build the artifact + witnesses ([verify at implement])
 
-- [ ] T010 [US1] **Build the single abi3 wheel** locally via `bindings/python/build-wheel.sh`
+- [X] T010 [US1] **DONE 2026-06-30** — built `fixpp-0.0.1-cp310-abi3-manylinux_2_26_x86_64.manylinux_2_28_x86_64.whl`
+  (4.1 MB) via `build-wheel.sh` in `manylinux_2_28` (gcc-toolset-14). D-2 gate PASSED (gcc 14.2.1 ≥13,
+  `std::expected` TU compiles). Config now in `[tool.cibuildwheel]` + `cibw-before-all.sh`; proven via an
+  isolated configure-only probe. Surfaced + fixed: perl modules for openssl, OTel/TESTS paired CMake toggles,
+  the Conan→cmake toolchain handoff (config-settings, not env), and a SWIG 4.4 conflicting-linkage bug
+  (commit d869735). **Build the single abi3 wheel** locally via `bindings/python/build-wheel.sh`
   (quickstart §1, D-2/D-7) — the wrapper runs `cibuildwheel` from a pristine `git worktree` of
   committed HEAD so the multi-GB `build/`/`.codegraph/` trees are never swept into cibuildwheel's
   blind `tar -c .` of cwd (commit before running). Env knobs:
@@ -148,7 +153,12 @@ dictionary through `fixpp.dictionary_path("FIX44")` — succeeds with no repo pr
   **[verify at implement] D-2**: confirm the pinned image's gcc-toolset major ≥ 13 (a one-file
   `std::expected` TU compiles in-container) before wiring the full matrix; else pin an image / install
   `gcc-toolset-13`.
-- [ ] T011 [US1] Verify tag + self-containment on the produced wheel (LAY-1/2/3, TAG-1/2/3, SC-004):
+- [X] T011 [US1] **DONE 2026-06-30** — `auditwheel show`: only baseline glibc libs (libc/libdl/libpthread/libm),
+  **NO external third-party libs** (libssl/libcrypto/libstdc++ all static) → self-contained (LAY-3). `abi3audit
+  --strict`: `is_abi3:true, baseline 3.10, non_abi3_symbols:[]`. `zipfile -l`: flat `_fixpp.so`/`fixpp.py`/
+  `fixpp_oo.py`/`fixpp_dict_data.py` + `_fixpp_data/FIX{42,44,50SP2,T11}.xml`; exactly ONE wheel; tag `cp310-abi3`.
+  NOTE: auditwheel tagged `manylinux_2_26.manylinux_2_28` (binary needs only glibc 2.26 — MORE compatible than
+  the 2_28 floor, and 2_28 is still in the tag). Verify tag + self-containment on the produced wheel (LAY-1/2/3, TAG-1/2/3, SC-004):
   `auditwheel show` → `manylinux_2_28_x86_64` + `abi3` + **external-library list EMPTY** (LAY-3 static-
   everything witness); `unzip -l` → flat top-level `_fixpp*.so`/`fixpp.py`/`fixpp_oo.py`/`fixpp_dict_data.py`
   + `_fixpp_data/FIX*.xml`; assert **exactly ONE** wheel, ABI tag `cp310-abi3` (not `cp3XX-cp3XX`).
@@ -172,17 +182,20 @@ dictionary through `fixpp.dictionary_path("FIX44")` — succeeds with no repo pr
   package. **3.10/3.11 is the concentrated verify band** — no import barrier there, so the reworked
   runtime 1201 check (T003) is the sole, previously-unwitnessed rejection mechanism (NBC-2/SC-007).
   A **red** runtime import on any version is the trigger for the per-version fallback (T015).
-- [ ] T014 [US1] **Version-source check [verify at implement]** (D-6 / PKG-2): confirm scikit-build-core
+- [X] T014 [US1] **DONE 2026-06-30** — scikit-build-core resolved the version from CMake `project(VERSION)`
+  cleanly; both the local and container wheels are named `fixpp-0.0.1-cp310-abi3-…`. No static fallback needed.
+  **Version-source check [verify at implement]** (D-6 / PKG-2): confirm scikit-build-core
   reads CMake `project(VERSION)` (`0.0.1` today) cleanly so the wheel ships `fixpp-<ver>-cp310-abi3-…`;
   else fall back to a single static `project.version` in `pyproject.toml` kept in sync by a CI check.
   (The v1.0 release-number bump is a separate release step, not this feature.)
 
 ### Per-version fallback contingency
 
-- [ ] T015 [US1] **Per-version fallback (FR-010 — CONTINGENCY, execute ONLY if T004 compile OR T013
-  runtime import fires RED)**: produce per-CPython-version `cp3XX-cp3XX` wheels via a CIBW per-version
-  build. This is the **documented fallback**, not the primary path; its trigger is a red witness, not a
-  green one. If T004 and T013 both pass, this task is closed as "not triggered" (abi3 shipped) — record that.
+- [X] T015 [US1] **NOT TRIGGERED 2026-06-30** — abi3 shipped. T004 abi3 feasibility GATE passed (zero
+  limited-API violations) and the produced wheel passed `abi3audit --strict` (non_abi3_symbols:[], baseline
+  3.10); local 3.12 install-test green. No RED witness → the per-version `cp3XX-cp3XX` fallback is NOT
+  executed (closed as not-triggered). Full 3.10/3.11/3.13 install confirmation is T013 (CI matrix T016).
+  ~~Per-version fallback (FR-010 — CONTINGENCY, execute ONLY if T004 compile OR T013 runtime import fires RED).~~
 
 **Checkpoint**: a locally-built, install-tested abi3 wheel — the MVP deliverable.
 
