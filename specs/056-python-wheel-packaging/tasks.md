@@ -162,6 +162,20 @@ dictionary through `fixpp.dictionary_path("FIX44")` — succeeds with no repo pr
   `auditwheel show` → `manylinux_2_28_x86_64` + `abi3` + **external-library list EMPTY** (LAY-3 static-
   everything witness); `unzip -l` → flat top-level `_fixpp*.so`/`fixpp.py`/`fixpp_oo.py`/`fixpp_dict_data.py`
   + `_fixpp_data/FIX*.xml`; assert **exactly ONE** wheel, ABI tag `cp310-abi3` (not `cp3XX-cp3XX`).
+- [X] T012 [US1] **DONE 2026-06-30** — created `bindings/python/tests/wheel/` (commit 61c1493):
+  16 modules = ports of the enumerated categories (round-trip, smoke, exception, lifetime,
+  OO-behaviour, sub-interpreter) + `test_locator.py` (LOC-0..6/LAY-4) + `test_installed_only.py`
+  (sys.prefix guard) + 4 support modules (`_wheeldict` locator resolver, `oo_test_support`,
+  `_gil_staging`, `_oo_reentrancy_staging`). Each port's only divergence from source is its dict
+  helper → `_wheeldict.resolve("FIX44")`. **Two documented exclusions** (README): the spec'd
+  `test_gil_release_canary.py` (FR-007 canary build) AND `test_error_coverage.py` (reads the repo
+  source header `include/fix/c_api/error.h` — not install-verifiable; stays in-tree; its additive
+  guard is the separate NBC-3 T018). Fixed the committed `test_locator` LOC-3 bug (`<?xml`→`<fix`,
+  the bundled dicts carry no XML declaration). **Validated GREEN against the SWIG-4.2 build-dir .so:
+  87 passed** (sole "fail" = `test_installed_only` correctly firing off-prefix). **This run caught a
+  ship-blocking SWIG-4.3 wheel defect** (`SWIG_Python_AppendOutput` is_void change → every factory
+  returns `[None,handle]`); fixed by pinning `swig>=4.2,<4.3` (commit 35c82d2). Wheel rebuilt +
+  re-verified — see T013.
 - [ ] T012 [US1] Create the dedicated `bindings/python/tests/wheel/` suite — **the canonical
   "functional install-verification subset"** (D-8 / E-6, LOC witnesses): imports **only installed
   modules** and resolves every dictionary through `fixpp.dictionary_path(...)` (never a repo-relative
@@ -176,12 +190,16 @@ dictionary through `fixpp.dictionary_path("FIX44")` — succeeds with no repo pr
   `Engine(cfg)` → assert code 1201), so it ports into this suite **as-is** with no dict-helper fallback
   (E-6 approach (a) is moot for it). Out-of-repo harness scrubs `PYTHONPATH` and asserts
   `os.path.realpath(fixpp.__file__).startswith(sys.prefix)` (quickstart §4) so no source tree shadows.
-- [ ] T013 [US1] **Runtime cross-version witness [verify at implement]** (the abi3 proof, D-3/D-8,
+- [~] T013 [US1] **Runtime cross-version witness [verify at implement]** (the abi3 proof, D-3/D-8,
   SC-001/007): for EACH of CPython 3.10/3.11/3.12/3.13, `pip install` **the one wheel** into a clean
   venv, `import fixpp`, run the T012 wheel suite + the sub-interpreter test against the installed
   package. **3.10/3.11 is the concentrated verify band** — no import barrier there, so the reworked
   runtime 1201 check (T003) is the sole, previously-unwitnessed rejection mechanism (NBC-2/SC-007).
   A **red** runtime import on any version is the trigger for the per-version fallback (T015).
+  **3.12 DONE 2026-06-30**: the post-pin wheel (`d2d13f2…`, swig 4.2.1) installs into a clean 3.12
+  venv and the full `tests/wheel/` suite is GREEN (88 passed, PYTHONPATH scrubbed, `test_installed_only`
+  under sys.prefix). **PENDING the load-bearing 3.10/3.11 band + 3.13** — local pyenv or the T016 CI
+  matrix (only 3.12 is on this host). NOT RED on any version → per-version fallback (T015) stays untriggered.
 - [X] T014 [US1] **DONE 2026-06-30** — scikit-build-core resolved the version from CMake `project(VERSION)`
   cleanly; both the local and container wheels are named `fixpp-0.0.1-cp310-abi3-…`. No static fallback needed.
   **Version-source check [verify at implement]** (D-6 / PKG-2): confirm scikit-build-core
