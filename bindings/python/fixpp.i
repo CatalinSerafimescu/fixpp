@@ -78,8 +78,17 @@ static void fixpp_py_raise_for_code(fixpp_error_t code) {
 /* T011: forward-declare the inbound trampoline so the register_callback in-typemap
  * can reference it. The body (which needs SWIGTYPE_p_fixpp_msg, defined later in
  * the wrapper) lives in the %wrapper block below. */
+/* extern "C" linkage: these are C-ABI recv callbacks. SWIG >= 4.4 emits the
+ * wrapper-block definitions inside extern "C" but leaves this header block at
+ * C++ linkage, so a plain static declaration conflicts (C vs C++ linkage) under
+ * gcc. The brace form is required (the extern "C" static prefix form is rejected
+ * by both gcc and clang). Verified clean under SWIG 4.2 and 4.4.
+ * NOTE: keep this comment free of apostrophes and percent signs (SWIG
+ * preprocessor mis-tokenizes them inside the header block). */
+extern "C" {
 static void fixpp_py_recv_trampoline(const fixpp_msg_t* inbound, void* userdata);
 static void fixpp_py_recv_trampoline_oo(const fixpp_msg_t* inbound, void* userdata);
+}
 static int fixpp_py_is_main_interpreter(void);
 
 /* T003 / FR-012 / SC-007 / D-3 — limited-API (Py_LIMITED_API=0x030A0000) sub-
