@@ -193,17 +193,21 @@ dictionary through `fixpp.dictionary_path("FIX44")` — succeeds with no repo pr
   `Engine(cfg)` → assert code 1201), so it ports into this suite **as-is** with no dict-helper fallback
   (E-6 approach (a) is moot for it). Out-of-repo harness scrubs `PYTHONPATH` and asserts
   `os.path.realpath(fixpp.__file__).startswith(sys.prefix)` (quickstart §4) so no source tree shadows.
-- [~] T013 [US1] **Runtime cross-version witness [verify at implement]** (the abi3 proof, D-3/D-8,
-  SC-001/007): for EACH of CPython 3.10/3.11/3.12/3.13, `pip install` **the one wheel** into a clean
-  venv, `import fixpp`, run the T012 wheel suite + the sub-interpreter test against the installed
-  package. **3.10/3.11 is the concentrated verify band** — no import barrier there, so the reworked
-  runtime 1201 check (T003) is the sole, previously-unwitnessed rejection mechanism (NBC-2/SC-007).
-  A **red** runtime import on any version is the trigger for the per-version fallback (T015).
-  **3.12 DONE 2026-06-30**: the **SWIG-4.4.1** wheel (`5b6bb8d…`, built with the latest swig after the
-  version-agnostic typemap fix) installs into a clean 3.12 venv and the full `tests/wheel/` suite is
-  GREEN (88 passed, PYTHONPATH scrubbed, `test_installed_only` under sys.prefix). **PENDING the
-  load-bearing 3.10/3.11 band + 3.13** — local pyenv or the T016 CI matrix (only 3.12 is on this host).
-  NOT RED on any version → per-version fallback (T015) stays untriggered.
+- [X] T013 [US1] **DONE 2026-06-30** — full cross-version witness GREEN on the shipped **SWIG-4.4.1**
+  wheel (`aaa5842…`), installed into clean `uv` venvs (PYTHONPATH scrubbed, fixpp under sys.prefix):
+  **3.10 → 88 passed, 3.11 → 88 passed, 3.12 → 88 passed, 3.13 → 87 passed + 1 skipped**
+  (`test_subinterpreter` skips on 3.13 only because `_xxsubinterpreters` was renamed `_interpreters`
+  in 3.13; 3.13 is covered by the same 3.12+ single-phase import barrier). **The load-bearing
+  3.10/3.11 band initially went RED** — `fixpp.Engine()` was NOT rejected in a sub-interpreter (no
+  import barrier <3.12, so the runtime 1201 check is the sole guard, and it was never actually
+  witnessed by 055/054 which only tested 3.12). Root cause = process-global `main_interp_id` captured
+  in `%init` overwritten by the sub-interp's re-init; **fixed** to the limited-API `interp id == 0`
+  is-main check (commit on fixpp.i). Standalone `test_subinterpreter` now PASSES on 3.10 AND 3.11
+  (the discriminator). NOT RED on any version → per-version fallback (T015) stays untriggered.
+  **The abi3 proof + the SWIG-4.4.1 toolchain are both validated end-to-end.**
+  **[verify at implement] obligation**: T013 + the typemap fix + the sub-interp fix all materially
+  changed 055's runtime binding behaviour → /speckit-verify owes the in-tree sanitizer matrix
+  (none/asan/tsan) revalidation + Gate B owes a sub-interp-contract re-check (not inherited-frozen).
 - [X] T014 [US1] **DONE 2026-06-30** — scikit-build-core resolved the version from CMake `project(VERSION)`
   cleanly; both the local and container wheels are named `fixpp-0.0.1-cp310-abi3-…`. No static fallback needed.
   **Version-source check [verify at implement]** (D-6 / PKG-2): confirm scikit-build-core
