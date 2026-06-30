@@ -33,7 +33,7 @@ def dictionary_bytes(name: str) -> bytes:
 | LOC-1 | `fixpp.BUNDLED_DICTIONARIES == {"FIX42","FIX44","FIX50SP2","FIXT11"}` exactly (set-equality, not subset). |
 | LOC-2 | `fixpp.dictionary_path(n)` for `n ∈ BUNDLED_DICTIONARIES` yields a path `p` such that `os.path.isfile(p)` is true and `fixpp.dict_load_from_xml(p)` returns a valid handle. |
 | LOC-3 | `fixpp.dictionary_bytes(n)` for `n ∈ BUNDLED_DICTIONARIES` returns non-empty bytes beginning with an XML prolog. |
-| LOC-4 | `n ∉ BUNDLED_DICTIONARIES` → raises `KeyError` (or `ValueError`) whose message lists the valid set. No silent default, no empty return. |
+| LOC-4 | `n ∉ BUNDLED_DICTIONARIES` → raises **`KeyError`** (single decided type — Gate A) whose message lists the **sorted** valid set. No silent default, no empty return. (data-model E-4 and the LOC-4 witness agree on `KeyError`.) |
 | LOC-5 | Resolution works identically from an installed wheel and from the build tree (uses `importlib.resources.files("_fixpp_data")`, never a repo-relative or build-host path). |
 | LOC-6 | The context manager cleans up any temporary materialisation on exit (zipped-wheel safe via `as_file`). |
 
@@ -45,7 +45,8 @@ def dictionary_bytes(name: str) -> bytes:
   a dropped/added XML).
 - LOC-2: round-trip — `with fixpp.dictionary_path("FIX44") as p:
   fixpp.dict_load_from_xml(p)` then a FIX 4.4 send/recv (SC-002).
-- LOC-4: `pytest.raises` on `fixpp.dictionary_path("FIX99")` asserting the valid
-  set is named.
-- LOC-5: the test runs against the **installed** wheel in CI (SC-003), i.e. with
-  no repo present.
+- LOC-4: `pytest.raises(KeyError)` on `fixpp.dictionary_path("FIX99")` asserting
+  the sorted valid set is named in the message.
+- LOC-5: the test runs against the **installed** wheel in CI (SC-003) via the
+  dedicated `tests/wheel/` suite (importing only installed modules), i.e. with no
+  repo present.

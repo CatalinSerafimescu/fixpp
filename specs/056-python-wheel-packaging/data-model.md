@@ -6,27 +6,29 @@ produces and the small locator surface it adds. Entities map to FRs/SCs.
 
 ## E-1 — Binding wheel artifact
 
-The distributable unit. One per (CPython version), Linux x86_64.
+The distributable unit. **One** stable-ABI wheel, Linux x86_64, covering CPython
+3.10–3.13+.
 
 | Field | Value / rule | Source |
 |---|---|---|
-| filename | `fixpp-<ver>-cp3XX-cp3XX-manylinux_2_28_x86_64.whl`, XX ∈ {10,11,12,13} | FR-001, FR-005, `[arch §7.1]` |
+| filename | `fixpp-<ver>-cp310-abi3-manylinux_2_28_x86_64.whl` (exactly ONE wheel) | FR-001, FR-005, `[arch §7.1]` as proposed-amended at Gate A |
 | `<ver>` | from CMake `project(VERSION)` (0.0.1 today) via scikit-build-core | research D-6 |
 | platform tag | `manylinux_2_28_x86_64` (post `auditwheel repair`) | FR-005, SC-004 |
-| python/abi tag | `cp3XX-cp3XX` (per-version; not abi3) | FR-010, research D-3 |
+| python/abi tag | `cp310-abi3` (stable ABI; `cp310` floor, NOT a per-version `cp3XX-cp3XX` tag; per-version is the fallback only) | FR-010, research D-3 |
 | contents | `_fixpp*.so`, `fixpp.py`, `fixpp_oo.py` (flat) + `_fixpp_data/` + `fixpp_dict_data.py` | FR-003, FR-004 |
-| self-containment | no external `.so` dep beyond libc/libpython; static `fixpp_capi` + `-static-libstdc++/-libgcc`; `auditwheel` bundles none-or-minimal | FR-002, SC-001 |
+| self-containment | **no external `.so`** beyond libc/libpython: static `fixpp_capi` + `-static-libstdc++/-libgcc`, `with_otel=False`, static OpenSSL (`-o openssl/*:shared=False`); `auditwheel show` external list **empty** | FR-002, SC-001, research D-7 |
 | distribution | attached to GitHub release; not uploaded to PyPI | FR-008, `[const §IV.5]` |
 
-**Validation**: `auditwheel show` reports `manylinux_2_28`; `pip install` into a
-clean venv on each of 3.10–3.13 succeeds; `import fixpp` and `import fixpp_oo`
-both succeed (SC-001).
+**Validation**: `auditwheel show` reports `manylinux_2_28` with an empty external
+list; the single wheel `pip install`s into a clean venv on **each** of 3.10–3.13
+(same `.whl` file every time) and `import fixpp` / `import fixpp_oo` succeed
+(SC-001) — the cross-version import is the abi3 feasibility witness (research D-3).
 
 ## E-2 — Installed module surface (flat, top-level)
 
 | Module | Role | Lifecycle |
 |---|---|---|
-| `_fixpp` (`_fixpp*.so`) | SWIG low-level extension (statically linked) | built, frozen content |
+| `_fixpp` (`_fixpp*.so`) | SWIG low-level extension (statically linked) | **rebuilt** for the bounded limited-API adaptation (`-DPy_LIMITED_API` + the `fixpp_py_is_main_interpreter` helper rework); behaviour-preserved per FR-012/SC-007 |
 | `fixpp` (`fixpp.py`) | **the public surface** — SWIG proxy whose `%pythoncode` glue re-exports the flat functions, `FixppError`/`Error`, the OO classes (from `fixpp_oo`), and the new locator | generated; glue extended additively (one re-export line) |
 | `fixpp_oo` (`fixpp_oo.py`) | OO API implementation module (Engine/Session/Message/Application/Dictionary), imported by `fixpp.py` | frozen content |
 | `fixpp_dict_data` (`fixpp_dict_data.py`) | **NEW** locator implementation module (mirrors `fixpp_oo`); surfaced as `fixpp.dictionary_path`/`fixpp.dictionary_bytes`/`fixpp.BUNDLED_DICTIONARIES` | added by this feature |
@@ -35,10 +37,12 @@ both succeed (SC-001).
 **Rule (D-4)**: all `*.py`/`*.so` modules are **top-level** (site-packages root);
 no `fixpp/` namespace directory. Fixes the latent install layout. The **public
 import name is `fixpp`** — `fixpp_oo` and `fixpp_dict_data` are implementation
-modules surfaced through it, not new user-facing import names. Content of
-`fixpp_oo`/`_fixpp` is **unchanged**; `fixpp.py`'s `%pythoncode` glue gains only
-an additive locator re-export, mirroring the 055 OO re-export precedent (FR-012:
-no existing-binding-behaviour change).
+modules surfaced through it, not new user-facing import names. `fixpp_oo` content
+is **unchanged** (hand-written pure Python, untouched); `_fixpp` is **rebuilt**
+only for the bounded limited-API adaptation (the `fixpp_py_is_main_interpreter`
+helper + `-DPy_LIMITED_API`), behaviour-preserved; `fixpp.py`'s `%pythoncode` glue
+gains only an additive locator re-export, mirroring the 055 OO re-export precedent
+(FR-012: no C-ABI change, no existing-binding-*behaviour* change).
 
 ## E-3 — Bundled dictionary data package `_fixpp_data/`
 
@@ -75,8 +79,9 @@ existing "everything via `import fixpp`" surface; no new top-level public name).
 | `fixpp.dictionary_bytes(name)` | `(str) -> bytes` | the XML contents, for `dict_load_from_xml_bytes`-style use |
 
 **Rules**:
-- `name` not in the bundled set → `KeyError` (or `ValueError`) with the valid set
-  in the message (testable, unambiguous).
+- `name` not in the bundled set → **`KeyError`** (single decided type — Gate A)
+  whose message lists the **sorted** valid set (testable, unambiguous). No silent
+  default, no empty return. LOC-4 and the LOC-4 witness agree on `KeyError`.
 - Resolution uses `importlib.resources.files("_fixpp_data")` — works from an
   installed wheel and from the build tree.
 - The re-export is one additive line in `fixpp.i`'s existing `%pythoncode` glue
@@ -91,20 +96,29 @@ it (SC-002); an unknown name raises (negative test).
 | Field | Rule |
 |---|---|
 | trigger | every PR (Tier-1, required to merge), `[const §IX.6]` |
-| build | `cibuildwheel` → cp310–cp313 manylinux_2_28 wheels (research D-2/D-7) |
-| install-test | each wheel installed into a clean venv; D-8 functional subset run against the installed package |
+| build | `cibuildwheel` → **one** `cp310-abi3` manylinux_2_28 wheel (research D-2/D-3/D-7) |
+| install-test | the single wheel installed into a clean venv on **each** of CPython 3.10/3.11/3.12/3.13; D-8 functional subset run against the installed package on every interpreter |
 | failure semantics | build/install/test failure → job red (FR-009, SC-006) |
-| release | on release event, wheels attached as assets; no PyPI (FR-008) |
+| release | on release event, the wheel attached as an asset; no PyPI (FR-008) |
 
-**Validation**: a deliberately broken wheel (e.g. omitted `_fixpp_data` or a bad
-tag) turns the gate red (SC-006); the green path proves SC-001/002/003/004.
+**Validation**: the named negative witness `tests/wheel/test_broken_wheel_gate.sh`
+(a deliberately broken wheel — `_fixpp_data/FIX44.xml` removed — installed into a
+throwaway venv, locator/round-trip asserted non-zero, non-publishing) turns the
+gate red (SC-006); the green path proves SC-001/002/003/004.
 
-## E-6 — Test-support change (dict-path fallback) — D-8
+## E-6 — Installed-wheel test suite + dict-path fallback — D-8
 
-`bindings/python/tests/oo_test_support.py` and `test_roundtrip.py` dict-path
-helpers gain a fallback: **repo-relative path if it exists, else
-`fixpp_dict_data.dictionary_path(...)`**. Test-only; no production change
-(FR-012). Lets the same suite run in-tree and against the installed wheel.
+The installed-wheel run uses a **dedicated `bindings/python/tests/wheel/` suite**
+that imports only installed modules and resolves every dictionary through
+`fixpp.dictionary_path(...)` (never a repo-relative path) — the one harness model
+shared by CI-4, quickstart §4, and LOC-5. For in-tree tests reused by that suite
+whose dict helpers use a **repo-relative path** (`<repo>/dictionaries/FIX44.xml`),
+the helper gains a fallback: **repo-relative path if it exists, else
+`fixpp_dict_data.dictionary_path(...)`**. This MUST cover **every** selected test's
+helper — not only `oo_test_support.py` / `test_roundtrip.py`, but also
+`test_lifetime.py`, `_gil_staging.py`, and the sub-interpreter test (each carries
+its own repo-relative helper) — or the wheel subset is scoped to locator-using
+tests only. Test-only; no production change (FR-012).
 
 ---
 
