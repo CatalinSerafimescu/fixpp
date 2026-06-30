@@ -78,6 +78,8 @@ static void fixpp_py_raise_for_code(fixpp_error_t code) {
  * can reference it. The body (which needs SWIGTYPE_p_fixpp_msg, defined later in
  * the wrapper) lives in the %wrapper block below. */
 static void fixpp_py_recv_trampoline(const fixpp_msg_t* inbound, void* userdata);
+static void fixpp_py_recv_trampoline_oo(const fixpp_msg_t* inbound, void* userdata);
+static int fixpp_py_is_main_interpreter(void);
 
 /* Raise the root fixpp.FixppError from an `in`-typemap conversion failure
  * (contract T-2/T-3 / FR-010). SWIG_fail is `goto fail` inside the wrapper. */
@@ -473,6 +475,54 @@ static void fixpp_py_recv_trampoline(const fixpp_msg_t* inbound, void* userdata)
 }
 %}
 
+%wrapper %{
+static void fixpp_py_recv_trampoline_oo(const fixpp_msg_t* inbound, void* userdata) {
+#ifndef FIXPP_PY_GIL_CANARY
+    PyGILState_STATE gil = PyGILState_Ensure();
+#endif
+    PyObject* session = (PyObject*)userdata;
+    PyObject* mod = NULL;
+    PyObject* msg_type = NULL;
+    PyObject* proxy = NULL;
+    PyObject* msg_wrapper = NULL;
+    PyObject* app = NULL;
+    PyObject* r = NULL;
+
+    (void)PyObject_SetAttrString(session, "_in_callback", Py_True);
+    mod = fixpp_py_module();
+    if (mod != NULL) {
+        msg_type = PyObject_GetAttrString(mod, "Message");
+    }
+    if (msg_type != NULL) {
+        proxy = SWIG_NewPointerObj(SWIG_as_voidptr((void*)inbound),
+                                   SWIGTYPE_p_fixpp_msg, 0 /* own=0, non-owning */);
+    }
+    if (proxy != NULL) {
+        msg_wrapper = PyObject_CallFunctionObjArgs(msg_type, proxy, session, Py_True, NULL);
+    }
+    if (msg_wrapper != NULL) {
+        app = PyObject_GetAttrString(session, "_application");
+    }
+    if (app != NULL && app != Py_None) {
+        r = PyObject_CallMethod(app, "fromApp", "OO", session, msg_wrapper);
+    }
+
+    Py_XDECREF(r);
+    if (msg_wrapper != NULL) {
+        (void)PyObject_SetAttrString(msg_wrapper, "_dead", Py_True);
+    }
+    (void)PyObject_SetAttrString(session, "_in_callback", Py_False);
+    Py_XDECREF(app);
+    Py_XDECREF(msg_wrapper);
+    Py_XDECREF(proxy);
+    Py_XDECREF(msg_type);
+    if (PyErr_Occurred()) PyErr_Print();
+#ifndef FIXPP_PY_GIL_CANARY
+    PyGILState_Release(gil);
+#endif
+}
+%}
+
 /* T011: pass-through typemap for the hand-wrapper's callable argument.
  * The callable-check lives here (FIXPP_PY_RAISE fires before $action if the
  * check fails, so the wrapper body never runs and no INCREF occurs).
@@ -483,6 +533,10 @@ static void fixpp_py_recv_trampoline(const fixpp_msg_t* inbound, void* userdata)
         FIXPP_PY_RAISE("in 'session_register_callback': the callback must be callable");
     }
     $1 = $input;  /* pass through; wrapper body manages INCREF on success only */
+}
+
+%typemap(in) PyObject* py_session_wrapper {
+    $1 = $input;
 }
 
 /* FR-006 docstring: the threading/GIL contract on the public registration fn. */
@@ -514,6 +568,33 @@ static fixpp_error_t fixpp_py_register_callback(
         Py_DECREF(py_callable);
     }
     return err;
+}
+%}
+
+%rename("_register_application_oo") fixpp_py_register_application_oo;
+%inline %{
+static fixpp_error_t fixpp_py_register_application_oo(
+        fixpp_session_t* session, PyObject* py_session_wrapper) {
+    fixpp_error_t err = fixpp_session_register_callback(
+        session, fixpp_py_recv_trampoline_oo, (void*)py_session_wrapper);
+    if (err == FIXPP_ERR_OK) {
+        Py_INCREF(py_session_wrapper);
+    }
+    return err;
+}
+%}
+
+%rename("_release_application_oo") fixpp_py_release_application_oo;
+%inline %{
+static void fixpp_py_release_application_oo(PyObject* py_session_wrapper) {
+    Py_DECREF(py_session_wrapper);
+}
+%}
+
+%rename("_is_main_interpreter") fixpp_py_is_main_interpreter;
+%inline %{
+static int fixpp_py_is_main_interpreter(void) {
+    return PyInterpreterState_Get() == PyInterpreterState_Main();
 }
 %}
 
@@ -650,3 +731,17 @@ fixpp_error_t fixpp_msg_get_string(const fixpp_msg_t* msg, uint16_t tag,
 
 /* The umbrella library-version string (existing smoke surface). */
 const char* fixpp_version_string(void);
+
+/* ── PY-004 / 055 (T002): OO layer re-export ─────────────────────────────────
+ * Last %pythoncode block in the generated proxy: every flat function wrapper
+ * and the %pythoncode exception block above are already bound, so fixpp_oo's
+ * `from fixpp import ...` resolves. Exposes the OO wrappers on the `fixpp`
+ * surface (FR-001 additive) so `import fixpp; fixpp.Engine` works alongside the
+ * surviving flat substrate. Guarded so a flat-only deployment (fixpp_oo.py
+ * absent) still imports the substrate. */
+%pythoncode %{
+try:
+    from fixpp_oo import Engine, Session, Message, Application, Dictionary
+except ImportError:
+    pass
+%}
