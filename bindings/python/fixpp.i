@@ -33,6 +33,7 @@
 
 %{
 #include <string.h>  /* strlen — embedded-NUL check in the config-str typemaps */
+#include <stdint.h>  /* int64_t — captured main-interpreter id (T003 limited-API) */
 #include "fix/c_api.h"
 
 /* PY-003: the typed-exception hierarchy + the single-source translator live in
@@ -80,6 +81,15 @@ static void fixpp_py_raise_for_code(fixpp_error_t code) {
 static void fixpp_py_recv_trampoline(const fixpp_msg_t* inbound, void* userdata);
 static void fixpp_py_recv_trampoline_oo(const fixpp_msg_t* inbound, void* userdata);
 static int fixpp_py_is_main_interpreter(void);
+
+/* T003 / FR-012 / SC-007 / D-3 — limited-API (Py_LIMITED_API=0x030A0000) sub-
+ * interpreter detection. PyInterpreterState_Main() is NOT in the limited API, so
+ * we capture the id of the interpreter that loads the module (the main interpreter
+ * under normal startup import) at %init below, and the helper compares it against
+ * the current interpreter's id. Both PyInterpreterState_Get() and
+ * PyInterpreterState_GetID() ARE in the limited API. Preserves the code-1201
+ * sub-interpreter rejection witnessed by 055 (fixpp_oo.py:152 / test_subinterpreter.py). */
+static int64_t fixpp_py_main_interp_id = -1;
 
 /* Raise the root fixpp.FixppError from an `in`-typemap conversion failure
  * (contract T-2/T-3 / FR-010). SWIG_fail is `goto fail` inside the wrapper. */
@@ -594,8 +604,14 @@ static void fixpp_py_release_application_oo(PyObject* py_session_wrapper) {
 %rename("_is_main_interpreter") fixpp_py_is_main_interpreter;
 %inline %{
 static int fixpp_py_is_main_interpreter(void) {
-    return PyInterpreterState_Get() == PyInterpreterState_Main();
+    return PyInterpreterState_GetID(PyInterpreterState_Get()) == fixpp_py_main_interp_id;
 }
+%}
+
+/* Capture the loading interpreter's id at module init (limited-API replacement for
+ * PyInterpreterState_Main, T003). Runs under the GIL in SWIG_init. */
+%init %{
+fixpp_py_main_interp_id = PyInterpreterState_GetID(PyInterpreterState_Get());
 %}
 
 /* ── T008: engine_create(cfg) hand-wrapper (injects the version macros) ──────
@@ -742,6 +758,19 @@ const char* fixpp_version_string(void);
 %pythoncode %{
 try:
     from fixpp_oo import Engine, Session, Message, Application, Dictionary
+except ImportError:
+    pass
+%}
+
+/* ── PY-005 / 056 (T009): bundled-dictionary locator re-export (LOC-0 / FR-004a)
+ * Surface the pure-Python fixpp_dict_data helper on the `fixpp` namespace so
+ * `import fixpp; fixpp.dictionary_path(...)` works (the public API; the module is
+ * an implementation module like fixpp_oo). SEPARATE guard from the fixpp_oo block
+ * above so each import fails independently — a deployment missing one module still
+ * gets the other + the flat substrate. Additive; no existing wrapper changes. */
+%pythoncode %{
+try:
+    from fixpp_dict_data import dictionary_path, dictionary_bytes, BUNDLED_DICTIONARIES
 except ImportError:
     pass
 %}

@@ -54,7 +54,7 @@ US2's CI invokes it; US3 reuses it for Windows). **No user-story work begins unt
 
 **⚠️ CRITICAL**: blocks US1/US2/US3.
 
-- [ ] T002 Create `bindings/python/pyproject.toml` — `scikit-build-core` PEP 517 backend
+- [X] T002 Create `bindings/python/pyproject.toml` — `scikit-build-core` PEP 517 backend
   (PKG-1..6, research D-1/D-6): `[build-system] requires = ["scikit-build-core>=…", "swig>=4.2"]`,
   `build-backend = "scikit_build_core.build"` (PKG-1); `[project] name = "fixpp"`, `version`
   **dynamic** from CMake `project(VERSION)` via `tool.scikit-build.metadata.version` (PKG-2/D-6);
@@ -80,7 +80,7 @@ dictionary through `fixpp.dictionary_path("FIX44")` — succeeds with no repo pr
 
 ### abi3 feasibility gate (front-loaded — the tightest constraint; everything below assumes it holds)
 
-- [ ] T003 [US1] Rework `fixpp_py_is_main_interpreter` in `bindings/python/fixpp.i` (~L596) for
+- [X] T003 [US1] Rework `fixpp_py_is_main_interpreter` in `bindings/python/fixpp.i` (~L596) for
   the limited API (FR-012 / SC-007 / D-3): remove `PyInterpreterState_Main()` (not in the limited
   API); capture the main interpreter's id at module init and compare it against
   `PyInterpreterState_GetID(PyInterpreterState_Get())` (both limited-API). **MUST preserve the
@@ -89,7 +89,7 @@ dictionary through `fixpp.dictionary_path("FIX44")` — succeeds with no repo pr
   matrix (none/asan/tsan) **in-tree** to confirm the frozen PY-001..004 behavioural suite — incl.
   the in-tree sub-interpreter witness — stays green BEFORE proceeding to T004 (the installed-wheel
   witness T013 is the per-version-runtime check; this is the distinct in-tree NBC-2 obligation).
-- [ ] T004 [US1] **abi3 feasibility GATE [verify at implement]** (D-3): regenerate the SWIG wrapper
+- [X] T004 [US1] **abi3 feasibility GATE [verify at implement]** (D-3): regenerate the SWIG wrapper
   and compile it `-fsyntax-only -DPy_LIMITED_API=0x030A0000` against 3.10 headers; assert **ZERO**
   limited-API violations (research proved only the single `PyInterpreterState_Main` violation — the
   `PyInterpreterState_Get`/`GetID` replacement is itself unverified at the `0x030A0000` floor).
@@ -97,11 +97,11 @@ dictionary through `fixpp.dictionary_path("FIX44")` — succeeds with no repo pr
 
 ### Build/tag adaptation (CMake) — depends on T004 passing
 
-- [ ] T005 [US1] `bindings/python/CMakeLists.txt`: raise `find_package(SWIG 4.0 → 4.2 REQUIRED)`
+- [X] T005 [US1] `bindings/python/CMakeLists.txt`: raise `find_package(SWIG 4.0 → 4.2 REQUIRED)`
   (PKG-1/D-3); add `-DPy_LIMITED_API=0x030A0000` **compile-only** + the CMake SABI wiring
   (`USE_SABI 3.10` / `SKBUILD_SABI_COMPONENT` / `Development.SABIModule`). **Compile-only — does
   NOT set the wheel tag** (the tag is PKG-6's `wheel.py-api`).
-- [ ] T006 [US1] `bindings/python/CMakeLists.txt` **flat-layout install fix** (D-4 / LAY-1):
+- [X] T006 [US1] `bindings/python/CMakeLists.txt` **flat-layout install fix** (D-4 / LAY-1):
   change the install `DESTINATION` for the `fixpp_py` target + `fixpp.py` + `fixpp_oo.py` from
   `"${Python3_SITEARCH}/fixpp"` (the latent PEP-420 namespace-dir that makes the module
   `fixpp.fixpp`) to the **flat** site-packages root. Fixes the in-tree `cmake --install` path too,
@@ -109,18 +109,18 @@ dictionary through `fixpp.dictionary_path("FIX44")` — succeeds with no repo pr
 
 ### Bundled dictionary data + locator
 
-- [ ] T007 [P] [US1] Create the `_fixpp_data/` data package (E-3 / LAY-2): add
+- [X] T007 [P] [US1] Create the `_fixpp_data/` data package (E-3 / LAY-2): add
   `bindings/python/_fixpp_data/__init__.py` (empty importable marker) and a CMake
   `install(FILES … DESTINATION <wheel-root>/_fixpp_data)` rule staging
   `dictionaries/{FIX42,FIX44,FIX50SP2,FIXT11}.xml` (single source of truth — copied/configured
   at build, never hand-duplicated). `unzip -l … | grep _fixpp_data/FIX` is the landing witness.
-- [ ] T008 [P] [US1] Create `bindings/python/fixpp_dict_data.py` locator (E-4 / contracts LOC-*):
+- [X] T008 [P] [US1] Create `bindings/python/fixpp_dict_data.py` locator (E-4 / contracts LOC-*):
   `BUNDLED_DICTIONARIES = frozenset({"FIX42","FIX44","FIX50SP2","FIXT11"})` (LOC-1, set-equality);
   `@contextmanager dictionary_path(name) -> Iterator[str]` via `importlib.resources.files("_fixpp_data")`
   + `as_file` (LOC-2/5/6); `dictionary_bytes(name) -> bytes` (LOC-3); unknown name → **`KeyError`**
   whose message lists the **sorted** valid set (LOC-4 — single decided type, no silent default). Add
   its CMake flat install rule (T006 destination).
-- [ ] T009 [US1] `bindings/python/fixpp.i` `%pythoncode` glue (the OO-re-export block at
+- [X] T009 [US1] `bindings/python/fixpp.i` `%pythoncode` glue (the OO-re-export block at
   fixpp.i L742–L747): add an **additive `try/except ImportError`-guarded re-export block** surfacing
   `dictionary_path` / `dictionary_bytes` / `BUNDLED_DICTIONARIES` from `fixpp_dict_data` into `fixpp`
   (LOC-0 / FR-004a) — mirroring the 055 `try: from fixpp_oo import … except ImportError: pass`

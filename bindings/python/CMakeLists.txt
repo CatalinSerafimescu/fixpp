@@ -3,10 +3,17 @@
 # Produces _fixpp.so (or _fixpp.pyd on Windows) + fixpp.py.
 # [arch §4.12] — depends on fixpp::capi ONLY; no C++ engine headers leak.
 
-find_package(SWIG 4.0 REQUIRED)
+# T005 / PKG-1 / D-3 — SWIG 4.2 PINNED: a 4.0 runner silently regresses the
+# limited-API (abi3) heap-type mode.
+find_package(SWIG 4.2 REQUIRED)
 include(UseSWIG)
 
-find_package(Python3 REQUIRED COMPONENTS Development.Module)
+# T005 — request the stable-ABI (SABI) development component when available so the
+# abi3 wheel links against the limited ABI (Python3::SABIModule). Optional so a
+# plain in-tree build on an older CMake/Python still configures with Development.Module.
+# scikit-build-core (wheel.py-api="cp310") drives this via SKBUILD_SABI_COMPONENT.
+find_package(Python3 REQUIRED COMPONENTS Development.Module
+             OPTIONAL_COMPONENTS Development.SABIModule)
 
 set_property(SOURCE fixpp.i PROPERTY CPLUSPLUS ON)
 set_property(SOURCE fixpp.i PROPERTY USE_TARGET_INCLUDE_DIRECTORIES ON)
@@ -28,10 +35,24 @@ target_include_directories(fixpp_py PRIVATE
   "${CMAKE_SOURCE_DIR}/include"
 )
 
+# T005 — link the limited-ABI (SABI) module when present so the abi3 wheel carries
+# no version-specific libpython dependency; else the classic Module target.
+if(TARGET Python3::SABIModule)
+  set(FIXPP_PY_PYTHON_LINK Python3::SABIModule)
+else()
+  set(FIXPP_PY_PYTHON_LINK Python3::Module)
+endif()
 target_link_libraries(fixpp_py PRIVATE
   fixpp_capi
-  Python3::Module
+  ${FIXPP_PY_PYTHON_LINK}
 )
+
+# T005 / PKG-6 / D-3 — compile the SWIG wrapper against the limited C API (abi3),
+# cp310 floor. COMPILE-ONLY: the wheel ABI tag is set by scikit-build-core's
+# wheel.py-api="cp310" (pyproject.toml), NOT by this flag (scikit-build-core does
+# not auto-detect the limited ABI). The reworked fixpp_py_is_main_interpreter
+# (T003) compiles clean at this floor — proven by the T004 abi3 feasibility gate.
+target_compile_definitions(fixpp_py PRIVATE Py_LIMITED_API=0x030A0000)
 
 # ── T003 / FR-010 / research D-6 — self-contained static link ───────────────
 # Link the STATIC fixpp_capi archive (already PIC: src/capi builds it from an
@@ -108,6 +129,24 @@ add_custom_command(TARGET fixpp_py POST_BUILD
           "${CMAKE_BINARY_DIR}/lib/fixpp_oo.py"
   COMMENT "Copying fixpp_oo.py next to _fixpp.so")
 
+# PY-005 / 056 (T007/T008): stage the locator + the _fixpp_data package (the four
+# FIX XMLs from the single-source dictionaries/) into lib/ so an in-tree
+# PYTHONPATH=lib run resolves fixpp.dictionary_path(...) exactly as the wheel does.
+add_custom_command(TARGET fixpp_py POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+          "${CMAKE_CURRENT_SOURCE_DIR}/fixpp_dict_data.py"
+          "${CMAKE_BINARY_DIR}/lib/fixpp_dict_data.py"
+  COMMAND ${CMAKE_COMMAND} -E make_directory
+          "${CMAKE_BINARY_DIR}/lib/_fixpp_data"
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+          "${CMAKE_CURRENT_SOURCE_DIR}/_fixpp_data/__init__.py"
+          "${CMAKE_SOURCE_DIR}/dictionaries/FIX42.xml"
+          "${CMAKE_SOURCE_DIR}/dictionaries/FIX44.xml"
+          "${CMAKE_SOURCE_DIR}/dictionaries/FIX50SP2.xml"
+          "${CMAKE_SOURCE_DIR}/dictionaries/FIXT11.xml"
+          "${CMAKE_BINARY_DIR}/lib/_fixpp_data"
+  COMMENT "Staging fixpp_dict_data + _fixpp_data XMLs next to _fixpp.so")
+
 set_target_properties(fixpp_py PROPERTIES
   SWIG_USE_TARGET_INCLUDE_DIRECTORIES ON
   # UseSWIG prepends its own "_" to the module basename, so "fixpp" yields the
@@ -118,17 +157,49 @@ set_target_properties(fixpp_py PROPERTIES
   LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
 )
 
-# Install: place _fixpp.so + fixpp.py together so `import fixpp` works
-install(TARGETS fixpp_py DESTINATION "${Python3_SITEARCH}/fixpp")
+# ── T006 / D-4 / LAY-1 — FLAT install layout ────────────────────────────────
+# Ship _fixpp.so + fixpp.py + fixpp_oo.py + fixpp_dict_data.py + the _fixpp_data
+# package at the site-packages ROOT (flat top-level modules), fixing the latent
+# install(... /fixpp) namespace dir that made the import `fixpp.fixpp` and only
+# worked under in-tree PYTHONPATH=lib. Under scikit-build-core the wheel platlib
+# root is "."; a plain in-tree `cmake --install` uses the real Python3_SITEARCH.
+# Under scikit-build-core (the wheel build) SKBUILD is defined and the platlib
+# root is "." — the flat top-level destination. A plain in-tree `cmake --install`
+# uses the real Python3_SITEARCH when known (the Development.Module component does
+# not always populate it without Interpreter); fall back to "." otherwise (in-tree
+# runs use PYTHONPATH=lib via the POST_BUILD staging above, not this install).
+if(DEFINED SKBUILD OR NOT Python3_SITEARCH)
+  set(FIXPP_PY_INSTALL_DIR ".")
+else()
+  set(FIXPP_PY_INSTALL_DIR "${Python3_SITEARCH}")
+endif()
+
+install(TARGETS fixpp_py DESTINATION "${FIXPP_PY_INSTALL_DIR}")
 install(
   FILES "${CMAKE_BINARY_DIR}/lib/fixpp.py"
-  DESTINATION "${Python3_SITEARCH}/fixpp"
+  DESTINATION "${FIXPP_PY_INSTALL_DIR}"
   OPTIONAL  # generated by SWIG; may be in swig output dir depending on version
 )
 
-# PY-004 / 055 (T002): ship the pure-Python OO layer next to _fixpp.so + fixpp.py.
-# fixpp.py (re-export glue) imports it; flat substrate stays usable without it.
+# PY-004 / 055 + PY-005 / 056 (T006/T008): the pure-Python implementation modules
+# (OO layer + dictionary locator), re-exported through `import fixpp`.
 install(
-  FILES "${CMAKE_CURRENT_SOURCE_DIR}/fixpp_oo.py"
-  DESTINATION "${Python3_SITEARCH}/fixpp"
+  FILES
+    "${CMAKE_CURRENT_SOURCE_DIR}/fixpp_oo.py"
+    "${CMAKE_CURRENT_SOURCE_DIR}/fixpp_dict_data.py"
+  DESTINATION "${FIXPP_PY_INSTALL_DIR}"
+)
+
+# ── T007 / E-3 / LAY-2 — bundled FIX dictionary data package ────────────────
+# _fixpp_data/__init__.py + the four XMLs staged from the submodule dictionaries/
+# (single source of truth; never hand-duplicated). The locator resolves them via
+# importlib.resources.files("_fixpp_data").
+install(
+  FILES
+    "${CMAKE_CURRENT_SOURCE_DIR}/_fixpp_data/__init__.py"
+    "${CMAKE_SOURCE_DIR}/dictionaries/FIX42.xml"
+    "${CMAKE_SOURCE_DIR}/dictionaries/FIX44.xml"
+    "${CMAKE_SOURCE_DIR}/dictionaries/FIX50SP2.xml"
+    "${CMAKE_SOURCE_DIR}/dictionaries/FIXT11.xml"
+  DESTINATION "${FIXPP_PY_INSTALL_DIR}/_fixpp_data"
 )

@@ -1,0 +1,61 @@
+# bindings/python/pyproject.toml — PY-005 wheel packaging (T002).
+# PEP 517 build backend (scikit-build-core) over the existing CMake
+# FIXPP_BUILD_PYTHON target. Produces ONE stable-ABI (abi3) wheel
+# fixpp-<ver>-cp310-abi3-manylinux_2_28_x86_64.whl covering CPython 3.10–3.13+.
+# Built under cibuildwheel in manylinux_2_28 (see specs/056 quickstart.md / contracts).
+
+[build-system]
+# PKG-1: scikit-build-core backend; swig>=4.2 PINNED (a 4.0 runner silently
+# regresses the limited-API/abi3 mode — research D-3). Lower-bound pins;
+# exact published at implement (2026-06-30): scikit-build-core 0.12.2, swig 4.2.0.
+requires = ["scikit-build-core>=0.11", "swig>=4.2"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "fixpp"
+description = "Python binding for the fixpp C++23 FIX protocol library (over the frozen C ABI)"
+# PKG-3: abi3 cp310 floor; the single stable-ABI wheel covers 3.10–3.13 and
+# future 3.14+ (no upper cap — abi3 forward-compatibility is the point).
+requires-python = ">=3.10"
+license = "AGPL-3.0-or-later"
+dynamic = ["version"]
+# PKG-5: NO runtime dependencies — the extension is self-contained (FR-002).
+
+[tool.scikit-build]
+# PKG-4: the CMake root (FIXPP_BUILD_PYTHON switch + the whole engine the
+# extension statically links) is the submodule root, two levels up from this file.
+cmake.source-dir = "../.."
+cmake.version = ">=3.28"
+# Bound the wheel build: pin a persistent, named build dir (default is an
+# ephemeral temp that is re-created — and on a failed build, NOT cleaned — every
+# invocation; building the whole statically-linked engine there ran to ~18G and
+# filled the disk). build-dir is relative to this pyproject; "build/{wheel_tag}"
+# → bindings/python/build/cp310-abi3-... which is already gitignored (build/),
+# and {wheel_tag} keeps the single abi3 wheel in ONE reusable tree.
+build-dir = "build/{wheel_tag}"
+# Force Release: a Debug engine tree is ~11-17G of object files vs ~2-3G Release.
+# The shipped wheel is Release regardless; this also stops a stray Debug default
+# from re-exploding the build dir.
+cmake.build-type = "Release"
+# PKG-6: the AUTHORITATIVE abi3 wheel-tag driver -> cp310-abi3. The
+# -DPy_LIMITED_API compile flag + SABI wiring in CMakeLists.txt is compile-only
+# and does NOT set the tag (scikit-build-core does not auto-detect the limited ABI
+# nor consume the setuptools py_limited_api kwarg).
+wheel.py-api = "cp310"
+# Ship ONLY the flat top-level Python modules + the _fixpp_data package (LAY-1/2).
+# The root install(DIRECTORY include/) would otherwise stage the C-ABI headers
+# into the wheel; the engine static libs have no install() rule so they do not leak.
+wheel.exclude = ["include/**"]
+
+[tool.scikit-build.cmake.define]
+# PKG-4: drive the existing bindings target. with_otel / OpenSSL staticness are
+# Conan options set at build time (cibuildwheel CIBW_BEFORE_ALL), not here.
+FIXPP_BUILD_PYTHON = "ON"
+
+[tool.scikit-build.metadata.version]
+# PKG-2 / D-6: single version source = the root CMake project(VERSION) (0.0.1
+# today). No second version source. (T014 confirms this resolves at build; the
+# documented fallback is a static project.version kept in sync by a CI check.)
+provider = "scikit_build_core.metadata.regex"
+input = "../../CMakeLists.txt"
+regex = '(?s)project\(\s*fixpp\s+VERSION\s+(?P<value>[0-9]+\.[0-9]+\.[0-9]+)'
