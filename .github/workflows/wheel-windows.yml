@@ -1,0 +1,98 @@
+name: Windows wheel (best-effort, on-demand)
+
+# 056 / PY-005 / FR-011 / WIN-1 — DEFERRED, BEST-EFFORT, NON-GATING.
+#
+# The Windows wheel is a SEPARABLE lane: it is NEVER a dependency of the Linux
+# Tier-1 `python-wheel` merge gate (tier1.yml). Its absence or failure does not
+# affect CI-1..CI-5. It runs ONLY on demand:
+#   - manual workflow_dispatch, or
+#   - a PR freshly labelled `windows-wheel`.
+# There is intentionally NO push:main / required-check wiring — a red run here
+# must not block a merge (FR-011). See L-056-1 in spec/behaviors-and-limitations.md
+# for the deferral rationale.
+#
+# STATUS: SCAFFOLD. The Linux pipeline (cibuildwheel + scikit-build-core +
+# auditwheel, abi3 via wheel.py-api="cp310") is the proven v1.0 deliverable. The
+# Windows port still needs: an MSVC-flavoured before-all (Conan profile with
+# compiler=msvc + static OpenSSL, no gcc-toolset), `delvewheel` (not auditwheel)
+# for the runtime-DLL repair, and validation of the SABI/-DPy_LIMITED_API link
+# under MSVC. Until that is proven green it is expected to be best-effort.
+
+on:
+  workflow_dispatch:
+  pull_request:
+    types: [labeled]
+    branches: ["**"]
+
+jobs:
+  filter:
+    name: "Check trigger"
+    runs-on: ubuntu-latest
+    outputs:
+      should_run: ${{ steps.check.outputs.should_run }}
+    steps:
+      - id: check
+        run: |
+          # One-shot: fire only when `windows-wheel` is the FRESHLY-ADDED label
+          # (matches the run-tierN scheme in tier2.yml). Re-run = remove + re-add.
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]] || \
+             { [[ "${{ github.event.action }}" == "labeled" ]] && \
+               [[ "${{ github.event.label.name }}" == "windows-wheel" ]]; }; then
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "should_run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  windows-wheel:
+    name: "windows-wheel (best-effort)"
+    runs-on: windows-2022
+    needs: filter
+    if: needs.filter.outputs.should_run == 'true'
+    # NON-GATING: a failure of the best-effort Windows port must not read as a
+    # broken build. The merge gate is the Linux python-wheel job in tier1.yml.
+    continue-on-error: true
+    timeout-minutes: 90
+    env:
+      CONAN_HOME: C:\Users\runneradmin\.conan2
+      # Reuse the shared cibuildwheel config in pyproject [tool.cibuildwheel]; the
+      # build selector is the same cp310 (abi3) tag — only the platform differs.
+      CIBW_BUILD: "cp310-win_amd64"
+      CIBW_ARCHS_WINDOWS: "AMD64"
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install cibuildwheel + Conan + delvewheel
+        run: |
+          pipx install cibuildwheel
+          pipx install conan
+          pipx install delvewheel
+          conan profile detect --force
+
+      # SCAFFOLD: the MSVC before-all (Conan install with compiler=msvc + static
+      # OpenSSL, no gcc-toolset) and the delvewheel repair are not yet wired into
+      # pyproject [tool.cibuildwheel.windows]. Until they are, this step documents
+      # the remaining work and is allowed to fail (continue-on-error above).
+      - name: Build the Windows wheel (best-effort)
+        run: |
+          cibuildwheel --platform windows --output-dir wheelhouse bindings/python
+
+      - name: Install-test the Windows wheel (best-effort)
+        run: |
+          $whl = Get-ChildItem wheelhouse\fixpp-*-cp310-abi3-win_amd64.whl | Select-Object -First 1
+          python -m venv $env:TEMP\wt
+          & $env:TEMP\wt\Scripts\pip.exe install -q $whl.FullName pytest
+          $env:PYTHONPATH = ""
+          & $env:TEMP\wt\Scripts\python.exe -c "import fixpp; print(fixpp.version_string())"
+        shell: pwsh
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fixpp-wheel-windows
+          path: wheelhouse/*.whl
+          if-no-files-found: ignore

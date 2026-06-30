@@ -296,7 +296,13 @@ event) attaches the asset; a deliberately broken wheel turns it red.
 **Independent Test**: on the on-demand Windows lane, build the wheel, install into a clean Windows Python
 env, run the functional subset; its absence/failure does not affect the Linux gate.
 
-- [ ] T021 [US3] Document the Windows deferral + add an **on-demand** `cibuildwheel` Windows stub
+- [X] T021 [US3] **DONE 2026-07-01 (DEFERRED disposition)** — added `.github/workflows/wheel-windows.yml`:
+  a SEPARABLE, on-demand (`workflow_dispatch` / `windows-wheel` label one-shot) `cibuildwheel`-windows
+  lane, **`continue-on-error` + never a Linux merge-gate dependency** (FR-011 / WIN-1). Not trivially
+  cheap to finish (needs an MSVC before-all: Conan `compiler=msvc` + static OpenSSL, `delvewheel`
+  instead of auditwheel, SABI-link validation under MSVC) so the disposition is **DEFERRED** — the file
+  is an honest scaffold documenting the remaining work; recorded as **L-056-1** (T024). YAML validated.
+  Document the Windows deferral + add an **on-demand** `cibuildwheel` Windows stub
   (D-10 / FR-011 / WIN-1): a `windows`-labelled / nightly lane reusing the same source + the existing
   green MSVC C-ABI build, with `delvewheel` glue. **MUST be separable — never a Linux merge-gate
   dependency**; build it only if trivially cheap, otherwise capture as a deferred limitation. Record the
@@ -306,9 +312,22 @@ env, run the functional subset; its absence/failure does not affect the Linux ga
 
 ## Phase 6: Polish & Cross-Cutting Concerns
 
-- [ ] T022 Run the quickstart.md validation end-to-end (§1 build → §2 install → §3 round-trip → §4 subset
+- [X] T022 **DONE 2026-07-01** — ran quickstart §1–§5 end-to-end against the built SWIG-4.4.1 wheel in a
+  clean `uv` 3.12 venv: §1 artifact present; §2 install + `fixpp.__file__` under sys.prefix + public-surface
+  smoke OK; §3 FIX44 round-trip via `fixpp.dictionary_path` OK; §4 out-of-repo PYTHONPATH-scrubbed
+  `tests/wheel/` = **90 passed** (the +2 over T013's 88 are the new T018 snapshot tests); §5 tag
+  `cp310-abi3` + flat `_fixpp.so`/`fixpp.py`/`fixpp_oo.py`/`fixpp_dict_data.py` + `_fixpp_data/FIX*.xml`.
+  Run the quickstart.md validation end-to-end (§1 build → §2 install → §3 round-trip → §4 subset
   → §5 tag/self-containment) as the manual mirror of the CI gate.
-- [ ] T023 **Apply the inherited-design amendments A-1 / A-2 / A-3** (deferred-apply at `/implement`;
+- [X] T023 **DONE 2026-07-01** — applied all 8 A-3 from→to sites: `spec/coverage-index.md:618`
+  (wheel name → `cp310-abi3`), `.specify/api-contract.md` §10 row 2m (single-abi3 prose), the §3.2
+  mirror + §1 goal-5 (name flip + **mimalloc clause dropped** + static-link surface recorded) + §1.1
+  prose + non-goal #2 in `.specify/2m-pybind.md`, `.specify/architecture.md:468` table row, and the
+  library `CLAUDE.md` Active-work pointer. **A-3 item 2b: ANNOTATED (not rewrote)** the two historical
+  audit quotes in `api-contract.md` (Root-cause-#3 + N-P2-2) with forward-pointers — audit trail
+  intact. Verified: `grep -rn "cp310-cp310" .specify/ spec/` now hits ONLY the gate-A decision log
+  (historical, expected); no live normative source names the per-version mandate.
+  **Apply the inherited-design amendments A-1 / A-2 / A-3** (deferred-apply at `/implement`;
   **user-ratified at Gate A**) per the exact from→to table in `plan.md` (*Proposed inherited-design
   amendments*). Sites: `spec/coverage-index.md:618` (PY-005 wheel name, normative index), `.specify/api-contract.md`
   (§10 row 2m), `.specify/2m-pybind.md` (§3.2 mirror :149/151, §1 goal-5 :23 incl. **dropping the stale
@@ -318,17 +337,35 @@ env, run the functional subset; its absence/failure does not affect the Linux ga
   forward-pointer ("superseded by the abi3 pivot — see PY-005 / `[arch §7.1]` amendment"); do NOT rewrite the
   quote — the audit trail must not be falsified.** Verify with `grep -rn "cp310-cp310" .specify/ spec/` → no
   live normative source names the per-version mandate afterward.
-- [ ] T024 Append `spec/behaviors-and-limitations.md` `L-056-*` rows: Windows wheel deferred/best-effort
+- [X] T024 **DONE 2026-07-01** — added the `### 056` section to `spec/behaviors-and-limitations.md`:
+  B-056-1 (the one self-contained abi3 wheel + bundled-dict locator), B-056-2 (typed-1201 sub-interp
+  guard now WITNESSED on 3.10/3.11 + the is-main `interp id==0` fix; cf. L-055-1), L-056-1 (Windows
+  deferred/best-effort, separable lane), L-056-2 (per-version fallback not triggered — abi3 shipped),
+  L-056-3 (3.14+ covered-by-abi3-but-untested-in-v1, PKG-3).
+  Append `spec/behaviors-and-limitations.md` `L-056-*` rows: Windows wheel deferred/best-effort
   (T021), the per-version fallback contingency (T015, abi3-untriggered), and 3.14+ covered-by-abi3-but-
   untested-in-v1 (PKG-3).
 
 ### Mandatory close-out tasks (ALWAYS emit — Gate-B preconditions, Article XVII §8)
 
-- [ ] T025 **Catalogue close-out** (depends on T023 — shares `spec/coverage-index.md`; NOT `[P]` with it):
+- [X] T025 **DONE 2026-07-01** — flipped the PY-005 OFFICIAL row in `spec/feature-catalogue.md`
+  `backlog → done` (specify=056, PR="— (verify + Gate B pending)", Tests/Verified columns populated with
+  the wheel suite + NBC guards + the 2 fixed ship-blockers). The matching `spec/coverage-index.md:618`
+  PY-005 entry was updated by T023 (wheel-name flip to `cp310-abi3`). PR number lands at merge.
+  **Catalogue close-out** (depends on T023 — shares `spec/coverage-index.md`; NOT `[P]` with it):
   flip every feature-owned OFFICIAL row in `spec/feature-catalogue.md` (PY-005) from
   `in-progress`/`backlog` → `done` with the PR / evidence ref, AND add/update its matching
   `spec/coverage-index.md` entry (the wheel-name update of T023 is part of this).
-- [ ] T026 **Feature-completeness audit (FINAL task)**: assert against the merged tree that (i) every
+- [X] T026 **DONE 2026-07-01** — verdict recorded in
+  `.specify/decisions/056-python-wheel-packaging-completeness.md`: **100% of implement-scope complete**.
+  (i) all T001–T026 `[X]` (T015 not-triggered + T021 deferred count; vestigial `[ ] T012` removed);
+  (ii) every FR-001..012 + SC-001..007 maps to a landed test AND implementation (traceability table in
+  the verdict); (iii) PY-005 catalogue row `done` + `coverage-index.md:618` entry updated. **ONE tracked
+  verify-stage obligation** (not an implement gap): `/speckit-verify` owes the in-tree none/asan/tsan
+  matrix (NBC-2 leg of FR-012/SC-007) + Gate B owes a sub-interp-contract re-check, because the SWIG
+  is-main + argout fixes changed 055's runtime binding (validated on the 4.4.1 wheel, not yet on the
+  in-tree 4.2 sanitizer build).
+  **Feature-completeness audit (FINAL task)**: assert against the merged tree that (i) every
   `tasks.md` row is `[X]` or carries an explicit waiver rationale (T015 "not triggered" counts); (ii) every
   spec FR-001..012 and SC-001..007 maps to a landed test AND a landed implementation (use the traceability
   map below); (iii) the PY-005 OFFICIAL catalogue row is `done` with a matching `coverage-index.md` entry.
