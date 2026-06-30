@@ -19,6 +19,27 @@ The constitution makes a Linux x86_64 wheel a **mandatory v1.0 deliverable**
 (`[const §IV.3]`), distributed as a **GitHub release asset with no PyPI upload in
 v1** (`[const §IV.5]`).
 
+## Normative References
+
+Per Article VIII §5, the exact coverage-index entries that inform this spec:
+
+- `[2m §1.1] Goals / platform matrix` — SWIG CPython extension wrapping only the
+  C ABI; **CPython 3.10–3.13 single-interpreter**; **manylinux_2_28** wheel via
+  `cibuildwheel` + `auditwheel repair`.
+- `[2m §11] Hand-off` — CI wheel-build workflow.
+- `[2m §10 Q2–Q5] Open questions (deferred)` — PEP 740 wheel signing,
+  sub-interpreter support, **Windows wheel**, and aarch64 are all deferred.
+- `[arch §4.12] / [arch §8] AGPL boundary` — the binding (and its packaging)
+  consume only `<fix/c_api.h>`; no engine-internal C++ headers.
+- `[arch §7.1]` — mandatory wheel name
+  `fixpp-<ver>-cp310-cp310-manylinux_2_28_x86_64.whl`.
+- `[const §IV.3] Distribution Model` — Python bindings ship as a CPython wheel;
+  **Linux x86_64 wheel mandatory for v1.0**; Windows wheel best-effort.
+- `[const §IV.5]` — v1.0 wheels are attached to GitHub releases; **no PyPI upload
+  in v1**.
+- `[const §IX.6] Two-tier CI` — Tier-1 (every PR, required to merge) runs the
+  Python pytest gate.
+
 ## Clarifications
 
 ### Session 2026-06-30
@@ -50,10 +71,10 @@ package index for anything but pip's own resolution of the local file.
 
 **Acceptance Scenarios**:
 
-1. **Given** a Linux x86_64 machine with only CPython ≥ 3.9 and pip and **no**
-   compiler/SWIG/Conan/system fixpp, **When** the user runs `pip install` against
-   the released wheel file, **Then** installation completes successfully and
-   `import fixpp` succeeds.
+1. **Given** a Linux x86_64 machine running one of CPython 3.10–3.13 with pip and
+   **no** compiler/SWIG/Conan/system fixpp, **When** the user runs `pip install`
+   against the released wheel file, **Then** installation completes successfully
+   and `import fixpp` succeeds.
 2. **Given** the wheel is installed, **When** the user runs the documented
    end-to-end example (dictionary load → two engines → session open → outbound
    send → receive callback → scalar field read), **Then** the round-trip
@@ -90,8 +111,9 @@ is attached to the release.
 **Acceptance Scenarios**:
 
 1. **Given** a Tier-1 CI run (the mandatory merge gate), **When** the wheel job
-   runs, **Then** it produces a `fixpp-*.whl` artifact whose platform tag is a
-   portable manylinux tag (not a machine-local `linux_x86_64` tag).
+   runs, **Then** it produces the cp310–cp313 `fixpp-*.whl` artifacts whose
+   platform tag is `manylinux_2_28_x86_64` (not a machine-local `linux_x86_64`
+   tag).
 2. **Given** a freshly produced wheel, **When** CI installs it into a clean
    environment and runs the functional binding subset, **Then** the subset passes
    against the installed package.
@@ -111,9 +133,10 @@ pipeline and installs it the same way. The Windows binding is already built and
 green under the MSVC C-ABI build; PY-005's Windows scope is the packaging glue
 (producing and DLL-bundling the wheel), exercised on a best-effort CI lane.
 
-**Why this priority**: The constitution makes the Windows wheel **best-effort**,
-not mandatory (`[const §IV.3]`). It broadens reach but must not block the
-mandatory Linux deliverable, so it is a separable lane that may trail.
+**Why this priority**: The Windows wheel is **deferred** per `[2m §10 Q3]` and
+**best-effort**, not mandatory, per `[const §IV.3]`. It broadens reach but must
+not block the mandatory Linux deliverable, so it is a separable lane that may
+trail or be dropped from this feature without affecting the v1.0 deliverable.
 
 **Independent Test**: On the best-effort Windows lane, build the wheel, install it
 into a clean Windows Python environment, and run the functional subset against
@@ -158,9 +181,13 @@ the installed package.
 
 ### Functional Requirements
 
-- **FR-001**: The project MUST produce a binary wheel for Linux x86_64 that
-  installs `fixpp` via `pip install <wheel>` on a machine with only CPython and
-  pip — no compiler, SWIG, Conan, C++ toolchain, or system fixpp present.
+- **FR-001**: The project MUST produce, for **each of CPython 3.10, 3.11, 3.12,
+  3.13** (`[2m §1.1]` single-interpreter matrix), a binary wheel for Linux x86_64
+  that installs `fixpp` via `pip install <wheel>` on a machine with only that
+  CPython and pip — no compiler, SWIG, Conan, C++ toolchain, or system fixpp
+  present. The mandatory named deliverable is
+  `fixpp-<ver>-cp310-cp310-manylinux_2_28_x86_64.whl` and its cp311/cp312/cp313
+  siblings (`[2m §1.1]`, `[arch §7.1]`).
 - **FR-002**: The installed wheel MUST be self-contained: the extension module
   MUST resolve all native symbols from within the package, with no runtime
   dependency on a separately installed fixpp shared object or on a C++ standard
@@ -180,8 +207,9 @@ the installed package.
   dictionaries without computing repo-relative or installation-specific paths.
   The helper is packaging glue (pure Python over package data) and introduces no
   C-ABI or binding-behaviour change.
-- **FR-005**: The Linux wheel MUST carry a portable manylinux platform tag so it
-  installs on mainstream glibc distributions, not only on the build host.
+- **FR-005**: Each Linux wheel MUST carry the portable **`manylinux_2_28_x86_64`**
+  platform tag (`[2m §1.1]`, via `auditwheel repair`) so it installs on mainstream
+  glibc distributions, not only on the build host.
 - **FR-006**: CI MUST build the Linux x86_64 wheel from source as a **Tier-1
   mandatory merge gate** (runs on every PR), install the produced wheel into a
   clean environment, and run the **functional** binding test subset against the
@@ -196,11 +224,14 @@ the installed package.
 - **FR-009**: The CI wheel gate MUST fail when the wheel cannot be built, cannot
   be installed into a clean environment, or fails the functional subset — a
   broken artifact MUST NOT pass silently.
-- **FR-010**: The pipeline SHOULD produce a single stable-ABI (abi3) wheel
-  covering CPython 3.x; if that cannot be produced cleanly it MUST fall back to
-  per-CPython-version wheels rather than ship a wheel that loads on an untested
-  interpreter version.
-- **FR-011**: A best-effort Windows x86_64 wheel lane MAY be provided using the
+- **FR-010**: The **baseline and named deliverable is per-CPython-version wheels**
+  for 3.10–3.13 (`cp3XX-cp3XX-manylinux_2_28_x86_64`, `[2m §1.1]`). A single
+  stable-ABI (abi3) wheel MAY be attempted as an optimisation (collapsing the
+  four to one), but only if it loads correctly on every targeted version;
+  because abi3 changes the `[2m §1.1]`-mandated wheel name, per-version remains
+  the required target and abi3 is an optional substitution, not the primary path.
+- **FR-011**: A Windows x86_64 wheel is **deferred** per `[2m §10 Q3]` and
+  **best-effort** per `[const §IV.3]`. A Windows lane MAY be provided using the
   same source and the existing MSVC C-ABI build; it MUST be separable such that
   its absence or failure does not gate the mandatory Linux deliverable.
 - **FR-012**: This feature MUST NOT change the C-ABI surface, the SWIG binding
@@ -239,8 +270,9 @@ the installed package.
 - **SC-003**: The functional binding subset passes (100% of its selected tests)
   when run against the installed wheel in a clean environment, on every Tier-1 PR
   run (the wheel build/install-test is a mandatory merge gate).
-- **SC-004**: The produced Linux wheel's platform tag is a portable manylinux tag,
-  verifiable from the wheel filename/metadata (not a raw `linux_x86_64` tag).
+- **SC-004**: Each produced Linux wheel's platform tag is `manylinux_2_28_x86_64`,
+  verifiable from the wheel filename/metadata (not a raw `linux_x86_64` tag), for
+  each of cp310/cp311/cp312/cp313.
 - **SC-005**: When a GitHub release is published, the Linux x86_64 wheel is
   present as a downloadable release asset, and no artifact is uploaded to PyPI.
 - **SC-006**: A deliberately broken wheel (uninstallable, or failing the
@@ -262,21 +294,25 @@ note); they are settled and are recorded here rather than re-opened:
   reaches Python. There is therefore **one Linux wheel** (manylinux/libstdc++);
   there is **no "libc++ wheel"** — Tier 3 (libc++) stays a compile-correctness
   lane, not a wheel target. The wheel matrix axis is OS × arch, not OS × stdlib.
-- **OS scope**: Linux + Windows for v1.0; **macOS is deferred** (needs an
-  unbuilt Tier-4 CI lane) and is out of scope here.
+- **Platform matrix** (`[2m §1.1]`, normative): **CPython 3.10–3.13,
+  single-interpreter** (sub-interpreters / PEP 703 free-threaded builds deferred),
+  **manylinux_2_28**, **x86_64**, via `cibuildwheel` + `auditwheel repair`. The
+  mandatory wheel name is `fixpp-<ver>-cp310-cp310-manylinux_2_28_x86_64.whl`
+  (and its cp311/cp312/cp313 siblings) per `[arch §7.1]`.
+- **OS scope**: Linux x86_64 is the mandatory v1.0 deliverable. **Windows is
+  deferred** (`[2m §10 Q3]`) / best-effort (`[const §IV.3]`); **macOS and aarch64
+  are deferred** (`[2m §10 Q4]`, no Tier-4 CI). Sub-interpreters and PEP 740 wheel
+  signing are also deferred (`[2m §10 Q2/Q5]`).
 - **Distribution channel**: GitHub release assets; **no PyPI upload in v1**
   (`[const §IV.5]`).
 - **Build tooling** (implementation detail, finalised at `/speckit-plan`): the
   intended toolchain is `cibuildwheel` (orchestrator) + a CMake-driven build
-  backend (`scikit-build-core`) + `auditwheel` (Linux) / `delvewheel` (Windows)
-  for tag normalisation and DLL bundling. The spec constrains observable outcomes
-  (portable tag, self-contained, install-tested), not the specific tools.
-- **Python ABI**: attempt a single stable-ABI (abi3 / limited-API) wheel; fall
-  back to per-version wheels if the generated wrapper fights the limited API
-  (FR-010).
-- **Minimum CPython**: the abi3 floor is assumed CPython **3.9** (a widely
-  available limited-API baseline); CI exercises CPython 3.12. The exact floor is
-  confirmable at planning and is not scope-affecting for this spec.
+  backend (`scikit-build-core`) + `auditwheel repair` (Linux) / `delvewheel`
+  (Windows, deferred). The spec constrains observable outcomes (manylinux_2_28
+  tag, self-contained, install-tested), not the specific tools.
+- **Python ABI**: the baseline is **per-version wheels** (3.10–3.13) matching the
+  `[2m §1.1]` named deliverable; a single abi3 wheel is an optional optimisation
+  that may be attempted but is not the required target (FR-010).
 - **Prerequisite binding is complete and frozen**: PY-001..004 (053/054/055) are
   merged; the `0→1` C-ABI freeze is held and is **independent** of this feature
   (PY-005 touches no C-ABI). The dictionary loader, OO layer, GIL discipline, and
@@ -298,7 +334,10 @@ note); they are settled and are recorded here rather than re-opened:
 
 - Any change to the C-ABI, the SWIG interface behaviour, GIL handling, exception
   translation, or the OO/lifetime layer (delivered and frozen by PY-001..004).
-- macOS wheels (deferred — no Tier-4 CI).
-- PyPI publication (deferred past v1.0).
+- macOS and aarch64 wheels (deferred — `[2m §10 Q4]`, no Tier-4 CI).
+- PEP 740 wheel signing / attestation (deferred — `[2m §10 Q2]`).
+- Sub-interpreter and PEP 703 free-threaded support (deferred — `[2m §1.1]`,
+  `[2m §10 Q5]`).
+- PyPI publication (deferred past v1.0 — `[const §IV.5]`).
 - A separate "libc++ wheel" (a category error — see Assumptions).
 - New FIX dictionaries beyond the four already bundled.
