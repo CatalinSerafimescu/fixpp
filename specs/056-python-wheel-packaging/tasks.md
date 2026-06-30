@@ -39,11 +39,16 @@ root (`research/G19-fix-fpml-iso20022/library`).
 
 **Purpose**: Pre-flight the toolchain pins (no build artifacts yet).
 
-- [ ] T001 Verify the build-tool versions against PyPI/registries **at implement** (per the
+- [X] T001 Verify the build-tool versions against PyPI/registries **at implement** (per the
   CLAUDE.md dependency rule — anchor-doc pins go stale): `scikit-build-core`, `cibuildwheel`,
   `auditwheel`, **`swig>=4.2` (PINNED — a 4.0 runner silently regresses the limited-API mode,
   PKG-1/D-3)**, Conan 2.x, CMake ≥ 3.28, Ninja. Record the exact resolved lower-bound pins to
   reuse in T002/T016; flag any value behind the current release.
+  **RESOLVED 2026-06-30** (PyPI / local): scikit-build-core 0.12.2 (latest), cibuildwheel 4.1.0
+  (latest), auditwheel 6.7.0 (latest), swig 4.4.1 latest / 4.2.0 local (pin `>=4.2` ✓), Conan
+  2.27.0, CMake 3.30.0 (≥3.28 ✓), Ninja 1.11.1. No anchor-doc pin is behind; pyproject uses
+  correct lower bounds. (The pyproject comment's "swig 4.2.0 published" is the local build copy —
+  latest published is 4.4.1; pin is a lower bound so unaffected.)
 
 ---
 

@@ -48,9 +48,18 @@ wheel.py-api = "cp310"
 wheel.exclude = ["include/**"]
 
 [tool.scikit-build.cmake.define]
-# PKG-4: drive the existing bindings target. with_otel / OpenSSL staticness are
-# Conan options set at build time (cibuildwheel CIBW_BEFORE_ALL), not here.
+# PKG-4: drive the existing bindings target. OpenSSL staticness is a Conan
+# option set at build time (cibuildwheel CIBW_BEFORE_ALL), not here.
 FIXPP_BUILD_PYTHON = "ON"
+# The wheel is self-contained with NO OTel (FR-002): the Conan dep is dropped via
+# `-o fixpp/*:with_otel=False` in CIBW_BEFORE_ALL, and this PAIRED CMake toggle
+# disables the OTel code so the `opentelemetry-cpp::api`-absent configure does not
+# error (CMakeLists.txt:85). Both halves are required (research D-7 paired toggle).
+FIXPP_BUILD_OTEL = "OFF"
+# Build ONLY the binding + its engine deps — the wheel needs neither the test
+# tree (defaults ON) nor bench/fuzz. Without this the wheel build compiles ~1500
+# test targets it then discards (the bulk of the in-container build time + size).
+FIXPP_BUILD_TESTS = "OFF"
 
 [tool.scikit-build.metadata.version]
 # PKG-2 / D-6: single version source = the root CMake project(VERSION) (0.0.1
