@@ -92,13 +92,17 @@ static void fixpp_py_recv_trampoline_oo(const fixpp_msg_t* inbound, void* userda
 static int fixpp_py_is_main_interpreter(void);
 
 /* T003 / FR-012 / SC-007 / D-3 — limited-API (Py_LIMITED_API=0x030A0000) sub-
- * interpreter detection. PyInterpreterState_Main() is NOT in the limited API, so
- * we capture the id of the interpreter that loads the module (the main interpreter
- * under normal startup import) at %init below, and the helper compares it against
- * the current interpreter's id. Both PyInterpreterState_Get() and
- * PyInterpreterState_GetID() ARE in the limited API. Preserves the code-1201
- * sub-interpreter rejection witnessed by 055 (fixpp_oo.py:152 / test_subinterpreter.py). */
-static int64_t fixpp_py_main_interp_id = -1;
+ * interpreter detection. PyInterpreterState_Main() is NOT in the limited API; the
+ * MAIN interpreter is the one whose PyInterpreterState_GetID() == 0 (sub-interps
+ * get 1,2,3...; verified main get_main()==0 on CPython 3.10/3.11/3.12/3.13). Both
+ * PyInterpreterState_Get() and PyInterpreterState_GetID() ARE in the limited API.
+ * This rejects EVERY non-main interpreter unconditionally (FR-018), independent of
+ * import order — unlike a capture-at-%init scheme, which is process-global-shared
+ * under single-phase init and is overwritten by a sub-interp's re-init on <3.12
+ * (no import barrier there), so a sub-interp would wrongly read as "main" (the
+ * 056 cp310-wheel 3.10/3.11 defect the tests/wheel/ band caught). Preserves the
+ * code-1201 rejection (fixpp_oo.py:152 / test_subinterpreter.py); on 3.12+ the
+ * single-phase import barrier rejects the sub-interp before this is reached. */
 
 /* Raise the root fixpp.FixppError from an `in`-typemap conversion failure
  * (contract T-2/T-3 / FR-010). SWIG_fail is `goto fail` inside the wrapper. */
@@ -629,14 +633,9 @@ static void fixpp_py_release_application_oo(PyObject* py_session_wrapper) {
 %rename("_is_main_interpreter") fixpp_py_is_main_interpreter;
 %inline %{
 static int fixpp_py_is_main_interpreter(void) {
-    return PyInterpreterState_GetID(PyInterpreterState_Get()) == fixpp_py_main_interp_id;
+    /* Main interpreter id is 0 (limited-API "is-main" check, T003); see header note. */
+    return PyInterpreterState_GetID(PyInterpreterState_Get()) == 0;
 }
-%}
-
-/* Capture the loading interpreter's id at module init (limited-API replacement for
- * PyInterpreterState_Main, T003). Runs under the GIL in SWIG_init. */
-%init %{
-fixpp_py_main_interp_id = PyInterpreterState_GetID(PyInterpreterState_Get());
 %}
 
 /* ── T008: engine_create(cfg) hand-wrapper (injects the version macros) ──────
