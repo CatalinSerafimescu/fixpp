@@ -38,10 +38,13 @@ def test_loc2_path_resolves_and_loads(name):
 
 @pytest.mark.parametrize("name", sorted({"FIX42", "FIX44", "FIX50SP2", "FIXT11"}))
 def test_loc3_bytes_xml_prolog(name):
-    # LOC-3: non-empty bytes beginning with an XML prolog.
+    # LOC-3: non-empty XML bytes beginning with the QuickFIX dictionary root
+    # element. The bundled dictionaries carry no `<?xml ...?>` declaration — they
+    # open directly with `<fix ...>` (verified against dictionaries/*.xml and the
+    # packaged _fixpp_data/*.xml).
     data = fixpp.dictionary_bytes(name)
     assert data, "empty dictionary bytes"
-    assert data.lstrip().startswith(b"<?xml"), data[:32]
+    assert data.lstrip().startswith(b"<fix"), data[:32]
 
 
 def test_loc4_unknown_name_keyerror_names_sorted_set():
