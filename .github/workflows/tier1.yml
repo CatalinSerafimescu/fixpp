@@ -490,14 +490,19 @@ jobs:
           fail_ci_if_error: false  # SOFT: keep consistent with other coverage steps
 
   # ── Python bindings job ──────────────────────────────────────────────────
-  # Three mutually-exclusive legs (053 / SC-004 / research D-9): the `none` leg
+  # Four mutually-exclusive legs (053 / SC-004 / research D-9): the `none` leg
   # is the meaningful Tier-1 gate (smoke + the e2e round-trip); `asan` catches
   # the FR-013/FR-014 UAF on the callable-lifetime + borrowed-msg path; `tsan`
   # covers the FR-007 GIL worker-thread race (with the CPython suppressions file,
-  # since the interpreter itself is not TSan-instrumented). UBSan is omitted —
-  # CPython C-API aliasing generates UBSan noise; ASan+TSan cover the riskiest
-  # surfaces (waiver recorded in the /speckit-verify decision doc). Each leg is a
-  # separate runner, so the "one sanitizer at a time" build cap holds for free.
+  # since the interpreter itself is not TSan-instrumented); `ubsan` covers signed
+  # overflow / bad casts / misalignment in the trampoline + wrapper + static deps
+  # (retires the W-1 / L-054-2 / 053 D-9 "no UBSan leg" waiver — the whole suite
+  # was proven UBSan-clean locally under clang-22, so no suppressions file is
+  # needed; a real finding on this lane is a real bug). The `ubsan` module links
+  # a SHARED ubsan runtime via rpath (bindings/python/CMakeLists.txt), so import
+  # does not depend on LD_PRELOAD, but the leg preloads it uniformly with the
+  # asan/tsan legs. Each leg is a separate runner, so the "one sanitizer at a
+  # time" build cap holds for free.
   python-bindings:
     name: python-bindings (${{ matrix.sanitizer }})
     runs-on: ubuntu-24.04
@@ -530,6 +535,10 @@ jobs:
             bdir: linux-clang-tsan-py
             cfg_extra: "-DFIXPP_ENABLE_TSAN=ON -DBUILD_SHARED_LIBS=ON -DFIXPP_PYTHON_SANITIZER=tsan"
             san_opts: "TSAN_OPTIONS=suppressions=$GITHUB_WORKSPACE/bindings/python/tests/tsan_suppressions.txt:halt_on_error=1"
+          - sanitizer: ubsan
+            bdir: linux-clang-ubsan-py
+            cfg_extra: "-DFIXPP_ENABLE_UBSAN=ON -DBUILD_SHARED_LIBS=ON -DFIXPP_PYTHON_SANITIZER=ubsan"
+            san_opts: "UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1"
     concurrency:
       group: tier1-${{ github.event.pull_request.number || github.ref }}-python-bindings-${{ matrix.sanitizer }}
       cancel-in-progress: true
@@ -644,8 +653,12 @@ jobs:
         run: |
           # Resolve the runtime for whichever clang naming scheme applies
           # (older: libclang_rt.<san>-x86_64.so; newer: per-target libclang_rt.<san>.so).
-          RT=$(clang -print-file-name=libclang_rt.${{ matrix.sanitizer }}-x86_64.so)
-          [ -f "$RT" ] || RT="$(clang -print-runtime-dir)/libclang_rt.${{ matrix.sanitizer }}.so"
+          # UBSan's standalone runtime is libclang_rt.ubsan_standalone[.-x86_64].so,
+          # not libclang_rt.ubsan.*, so map the basename for that leg.
+          RT_BASE="${{ matrix.sanitizer }}"
+          [ "$RT_BASE" = "ubsan" ] && RT_BASE="ubsan_standalone"
+          RT=$(clang -print-file-name=libclang_rt.${RT_BASE}-x86_64.so)
+          [ -f "$RT" ] || RT="$(clang -print-runtime-dir)/libclang_rt.${RT_BASE}.so"
           echo "${{ matrix.sanitizer }} runtime: $RT"
           env ${{ matrix.san_opts }} LD_PRELOAD="$RT" \
             pytest bindings/python/tests/ -v
