@@ -64,14 +64,17 @@ target_compile_definitions(fixpp_py PRIVATE Py_LIMITED_API=0x030A0000)
 #
 # ── T004 / SC-004 / research D-9 — sanitizer build path for the extension ────
 # FIXPP_PYTHON_SANITIZER selects an instrumented build of the _fixpp extension
-# (mutually exclusive asan|tsan). For a CONSISTENT instrumentation of the static
-# deps (fixpp_capi + the engine libs it pulls in), configure the whole tree with
-# the matching sanitizer preset (linux-clang-asan / linux-clang-tsan) +
-# -DFIXPP_BUILD_PYTHON=ON -DFIXPP_PYTHON_SANITIZER=asan|tsan: the preset flags
-# instrument the deps, this option instruments the module TU itself. The static
-# C++ runtime is dropped under a sanitizer (the asan/tsan runtime supplies its
-# own and -static-libstdc++ fights it) — the sanitizer leg is a correctness lane,
-# not the portability artifact (that is verified at PY-005 with a clean wheel).
+# (mutually exclusive asan|ubsan|tsan). For a CONSISTENT instrumentation of the
+# static deps (fixpp_capi + the engine libs it pulls in), configure the whole
+# tree with the matching sanitizer flag + -DFIXPP_BUILD_PYTHON=ON, e.g.
+#   -DFIXPP_ENABLE_ASAN=ON  -DFIXPP_PYTHON_SANITIZER=asan
+#   -DFIXPP_ENABLE_UBSAN=ON -DFIXPP_PYTHON_SANITIZER=ubsan
+#   -DFIXPP_ENABLE_TSAN=ON  -DFIXPP_PYTHON_SANITIZER=tsan
+# the tree flag instruments the deps, this option instruments the module TU
+# itself. The static C++ runtime is dropped under a sanitizer (the sanitizer
+# runtime supplies its own and -static-libstdc++ fights it) — the sanitizer leg
+# is a correctness lane, not the portability artifact (that is verified at PY-005
+# with a clean wheel).
 set(FIXPP_PYTHON_SANITIZER "none" CACHE STRING
     "Sanitizer for the _fixpp extension: none|asan|ubsan|tsan")
 set_property(CACHE FIXPP_PYTHON_SANITIZER PROPERTY STRINGS none asan ubsan tsan)
