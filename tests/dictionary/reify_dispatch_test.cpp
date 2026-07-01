@@ -461,6 +461,41 @@ TEST(ReifyRoundTrip, HandleSurvivesSourceBufferReuse) {
         << "FR-005: handle must survive (deep-copied, not aliased) source-buffer reuse";
 }
 
+TEST(ReifyRoundTrip, HandleMoveAssignPreservesTargetAndResetsSource) {
+    // Value semantics on the TYPE-ERASED owning_message_handle (reify()'s return),
+    // mirroring ReifyMoveTest.* which covers the TYPED owning_<Msg> sibling: the
+    // target adopts the source's owned bytes; the moved-from source is a valid
+    // null-pimpl husk whose noexcept accessors return defaults (never UB/terminate).
+    ReifyFixture fa{fixpp::test_support::make_nos_frame()};               // v44 NOS,  11=ORD1
+    ReifyFixture fb{fixpp::test_support::make_allocation_report_frame()};  // v44 AS,  70=ALLOC1
+    ASSERT_TRUE(fa.ok());
+    ASSERT_TRUE(fb.ok());
+    std::pmr::monotonic_buffer_resource mr;
+    auto a = fixpp::dict::reify(fa.view(), kProfileV44, &mr);
+    auto b = fixpp::dict::reify(fb.view(), kProfileV44, &mr);
+    ASSERT_TRUE(a.has_value());
+    ASSERT_TRUE(b.has_value());
+    (void)a->view();  // populate a's lazy view_cache_ so a non-trivial pimpl moves
+
+    *b = std::move(*a);
+
+    // Target now reads a's NewOrderSingle content, NOT its prior AllocationReport.
+    EXPECT_EQ(b->version().application, application_version::v44);
+    auto cl = b->field_value(11);
+    ASSERT_TRUE(cl.has_value());
+    EXPECT_EQ(cl->as_string(), "ORD1")
+        << "move-assign target adopts the source's owned bytes";
+    EXPECT_FALSE(b->field_value(70).has_value())
+        << "target's prior AllocationReport body (70=ALLOC1) is discarded on move-assign";
+
+    // Moved-from source: valid null-pimpl husk; accessors return the neutral
+    // defaults (session_admin/Unknown, empty view → empty msg_type / absent field).
+    EXPECT_EQ(a->version().k, resolved_message_version::kind::session_admin);
+    EXPECT_EQ(a->version().application, application_version::Unknown);
+    EXPECT_TRUE(a->msg_type().empty());
+    EXPECT_FALSE(a->field_value(11).has_value());
+}
+
 TEST(ReifyRoundTrip, ApplVerIdInFrameDrivesResolution) {
     // US1 Acceptance Scenario 4 (FR-003): a FIXT application frame carrying
     // ApplVerID(1128)="9" reifies as v50sp2 EVEN WITH a profile whose default_appl
