@@ -782,7 +782,7 @@ jobs:
           rm -rf "$WHL_TMP"
           abi3audit --strict "$WHL"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: fixpp-wheel
           path: wheelhouse/fixpp-*-cp310-abi3-manylinux_2_28_x86_64.whl
@@ -811,7 +811,7 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: fixpp-wheel
           path: wheelhouse
@@ -856,7 +856,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: fixpp-wheel
           path: wheelhouse
