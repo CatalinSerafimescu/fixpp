@@ -14,8 +14,10 @@ on:
   workflow_dispatch:
   # 056 REL-1: on a published GitHub release, the python-wheel-release job below
   # attaches the single cp310-abi3 wheel as a release asset (no PyPI — REL-2).
-  # The full Tier-1 gate runs first on the release commit so a broken artifact
-  # cannot be attached.
+  # The wheel build + full install-test matrix run first on the release commit so
+  # a broken artifact cannot be attached; the C++ build/sanitizer/coverage/bench
+  # lanes are SKIPPED on release (they already gated the merge commit this release
+  # descends from) via `github.event_name != 'release'` on those jobs.
   release:
     types: [published]
 
@@ -185,7 +187,10 @@ jobs:
     # in an async test) instead of letting it ride to GitHub's 6 h default.
     timeout-minutes: 45
     needs: gate-precheck
-    if: needs.gate-precheck.outputs.proceed == 'true'
+    # `&& github.event_name != 'release'`: a published release only needs the
+    # wheel build+install-test lanes to attach the asset — the C++/sanitizer
+    # matrix already gated the merge commit this release descends from.
+    if: needs.gate-precheck.outputs.proceed == 'true' && github.event_name != 'release'
     concurrency:
       group: tier1-${{ github.event.pull_request.number || github.ref }}-${{ matrix.preset }}
       cancel-in-progress: true
@@ -309,7 +314,8 @@ jobs:
     name: linux-clang-coverage
     runs-on: ubuntu-24.04
     needs: gate-precheck  # runs in parallel with matrix, after the gate check
-    if: needs.gate-precheck.outputs.proceed == 'true'
+    # Skipped on release (see the `linux` job note) — coverage doesn't gate the asset.
+    if: needs.gate-precheck.outputs.proceed == 'true' && github.event_name != 'release'
     concurrency:
       group: tier1-${{ github.event.pull_request.number || github.ref }}-coverage
       cancel-in-progress: true
@@ -466,7 +472,8 @@ jobs:
     # wedging the runner; see the `linux` job's timeout note.
     timeout-minutes: 45
     needs: gate-precheck
-    if: needs.gate-precheck.outputs.proceed == 'true'
+    # Skipped on release (see the `linux` job note) — the sanitizer legs don't gate the asset.
+    if: needs.gate-precheck.outputs.proceed == 'true' && github.event_name != 'release'
     strategy:
       fail-fast: false
       matrix:
@@ -751,7 +758,11 @@ jobs:
       # SC-006 / FR-009 (T019): a deliberately broken wheel (FIX44.xml stripped)
       # must flip the gate red. Self-discriminating (proves the intact wheel
       # round-trip passes first). CI-5: no continue-on-error.
+      # Runs on the first matrix leg only: the assertion is interpreter-independent
+      # (strip the bundled dict -> locator fails), so one leg fully exercises SC-006;
+      # `job-index == 0` (not a pinned version) keeps it firing if the list changes.
       - name: Broken-wheel negative gate (SC-006)
+        if: ${{ strategy.job-index == 0 }}
         run: |
           WHL=$(ls wheelhouse/fixpp-*-cp310-abi3-manylinux*_x86_64.whl)
           PYTHON=python3 bash bindings/python/tests/wheel/test_broken_wheel_gate.sh "$WHL"
@@ -787,7 +798,8 @@ jobs:
     name: check-layers
     runs-on: ubuntu-24.04
     needs: gate-precheck
-    if: needs.gate-precheck.outputs.proceed == 'true'
+    # Skipped on release (see the `linux` job note) — layer checks gated the merge commit.
+    if: needs.gate-precheck.outputs.proceed == 'true' && github.event_name != 'release'
     concurrency:
       group: tier1-${{ github.event.pull_request.number || github.ref }}-check-layers
       cancel-in-progress: true
@@ -817,7 +829,8 @@ jobs:
     name: bench (soft)
     runs-on: ubuntu-24.04
     needs: gate-precheck
-    if: needs.gate-precheck.outputs.proceed == 'true'
+    # Skipped on release (see the `linux` job note) — bench is a soft gate, not an asset gate.
+    if: needs.gate-precheck.outputs.proceed == 'true' && github.event_name != 'release'
     concurrency:
       group: tier1-${{ github.event.pull_request.number || github.ref }}-bench
       cancel-in-progress: true
