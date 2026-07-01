@@ -68,8 +68,8 @@ struct CallbackCounter {
 TEST(CapiErrorLive, MalformedPayloadReturnsUnknownNoTransmit) {
     fixpp_engine_t* B = nullptr;
     fixpp_engine_t* A = nullptr;
-    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 0, 0, &B), FIXPP_ERR_OK);
-    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 0, 0, &A), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 1, 0, &B), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 1, 0, &A), FIXPP_ERR_OK);
 
     CallbackCounter b_counter;
 
@@ -143,8 +143,8 @@ TEST(CapiErrorLive, SeqnumOverflowReturnsStoreRuntimeNoTransmit) {
     fixpp_engine_t* A = nullptr;
     // Use consumer_minor=2 so translate_for_consumer preserves FIXPP_ERR_STORE_RUNTIME
     // (introducing_minor=2 <= consumer_minor=2 → no downgrade to UNKNOWN).
-    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 0, /*consumer_minor=*/2, &B), FIXPP_ERR_OK);
-    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 0, /*consumer_minor=*/2, &A), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 1, /*consumer_minor=*/2, &B), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 1, /*consumer_minor=*/2, &A), FIXPP_ERR_OK);
 
     CallbackCounter b_counter;
 
@@ -246,7 +246,7 @@ TEST(CapiErrorLive, Sc004LiveDowngradeMinor2Boundary) {
         // Deliberately do NOT set realtime clock → clock_not_set (54) →
         // FIXPP_ERR_THREAD_CONFIG before downgrade.
         fixpp_engine_t* eng_a = nullptr;
-        ASSERT_EQ(fixpp_engine_create(cfg_a, 0, /*consumer_minor=*/0, &eng_a), FIXPP_ERR_OK);
+        ASSERT_EQ(fixpp_engine_create(cfg_a, 1, /*consumer_minor=*/0, &eng_a), FIXPP_ERR_OK);
         ASSERT_NE(eng_a, nullptr);
 
         const fixpp_error_t start_rc_a = fixpp_engine_start(eng_a);
@@ -263,7 +263,7 @@ TEST(CapiErrorLive, Sc004LiveDowngradeMinor2Boundary) {
         ASSERT_EQ(fixpp_engine_config_create(&cfg_b), FIXPP_ERR_OK);
         // Deliberately do NOT set realtime clock.
         fixpp_engine_t* eng_b = nullptr;
-        ASSERT_EQ(fixpp_engine_create(cfg_b, 0, /*consumer_minor=*/2, &eng_b), FIXPP_ERR_OK);
+        ASSERT_EQ(fixpp_engine_create(cfg_b, 1, /*consumer_minor=*/2, &eng_b), FIXPP_ERR_OK);
         ASSERT_NE(eng_b, nullptr);
 
         const fixpp_error_t start_rc_b = fixpp_engine_start(eng_b);

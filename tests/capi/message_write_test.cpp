@@ -58,7 +58,7 @@ using namespace fixpp::capi_test;
 
 // Create an engine with consumer_major=0, consumer_minor=4 (C-ABI 0.4.0, 051).
 static fixpp_error_t make_engine(fixpp_engine_t** out) {
-    return fixpp_engine_create(make_engine_cfg(), 0, 4, out);
+    return fixpp_engine_create(make_engine_cfg(), 1, 4, out);
 }
 
 // ── Richer dictionary seam (SC-001 live peer-receive) ────────────────────────
@@ -253,10 +253,10 @@ static void acceptor_recv_cb(const fixpp_msg_t* msg, void* userdata) {
 // Returns false on setup failure (test will FAIL via ASSERT).
 static bool setup_loopback_pair(LoopbackPair& pair) {
     // Build initiator engine
-    if (fixpp_engine_create(make_engine_cfg(), 0, 4, &pair.initiator_engine) != FIXPP_ERR_OK)
+    if (fixpp_engine_create(make_engine_cfg(), 1, 4, &pair.initiator_engine) != FIXPP_ERR_OK)
         return false;
     // Build acceptor engine
-    if (fixpp_engine_create(make_engine_cfg(), 0, 4, &pair.acceptor_engine) != FIXPP_ERR_OK)
+    if (fixpp_engine_create(make_engine_cfg(), 1, 4, &pair.acceptor_engine) != FIXPP_ERR_OK)
         return false;
 
     // acceptor session
@@ -846,8 +846,8 @@ TEST(MessageWrite, SC001_CreateOutboundRoundTripPeerReceivesAppMsg) {
     fixpp_session_t* init_sess = nullptr;
     fixpp_session_t* acc_sess = nullptr;
 
-    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 0, 4, &init_eng), FIXPP_ERR_OK);
-    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 0, 4, &acc_eng), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 1, 4, &init_eng), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 1, 4, &acc_eng), FIXPP_ERR_OK);
 
     // Acceptor session with richer dict
     {

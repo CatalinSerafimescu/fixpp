@@ -49,7 +49,7 @@ using namespace fixpp::capi_test;
 // skipped stop() on a never-started engine, ~Engine would abort here (RED).
 TEST(CapiLifecycle, NeverStartedDestroyDoesNotAbort) {
     fixpp_engine_t* eng = nullptr;
-    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 0, 0, &eng), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 1, 0, &eng), FIXPP_ERR_OK);
     ASSERT_NE(eng, nullptr);
 
     fixpp_session_config_t* sc =
@@ -76,7 +76,7 @@ TEST(CapiLifecycle, DestroyIsIdempotentSamePointer) {
     fixpp_engine_destroy(nullptr);  // NULL → no-op, no crash.
 
     fixpp_engine_t* eng = nullptr;
-    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 0, 0, &eng), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 1, 0, &eng), FIXPP_ERR_OK);
     ASSERT_NE(eng, nullptr);
     // First destroy: quiesces the engine, tombstones the shell (tag_=DEAD).
     fixpp_engine_destroy(eng);
@@ -104,7 +104,7 @@ TEST(CapiLifecycle, DestroyIsIdempotentSamePointer) {
 // (L-050-z fix) is mutation-tested SEPARATELY by EngineStateReclaimedOnDestroy.
 TEST(CapiLifecycle, PostEngineDestroySessionHandleIsInvalidHandle) {
     fixpp_engine_t* eng = nullptr;
-    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 0, 0, &eng), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 1, 0, &eng), FIXPP_ERR_OK);
 
     fixpp_session_config_t* sc =
         make_session_cfg("INIT-PDQ", "ACC-PDQ", FIXPP_ROLE_INITIATOR);
@@ -128,7 +128,7 @@ TEST(CapiLifecycle, PostEngineDestroySessionHandleIsInvalidHandle) {
 // ── T015: session_open AFTER engine_start → CAPI_CONFIG_INVALID (FR-004) ──────
 TEST(CapiLifecycle, SessionOpenAfterStartRejected) {
     fixpp_engine_t* eng = nullptr;
-    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 0, 0, &eng), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 1, 0, &eng), FIXPP_ERR_OK);
 
     // One acceptor so start() has something to bind; port 0 = OS-assigned.
     fixpp_session_config_t* acc =
@@ -157,7 +157,7 @@ TEST(CapiLifecycle, SessionOpenAfterStartRejected) {
 // ── T015: register_callback AFTER engine_start → CAPI_CONFIG_INVALID (FR-011) ─
 TEST(CapiLifecycle, RegisterCallbackAfterStartRejected) {
     fixpp_engine_t* eng = nullptr;
-    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 0, 0, &eng), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 1, 0, &eng), FIXPP_ERR_OK);
 
     fixpp_session_config_t* acc =
         make_session_cfg("ACC-FR11", "INIT-FR11", FIXPP_ROLE_ACCEPTOR);
@@ -196,8 +196,8 @@ TEST(CapiLifecycle, NullAndDeadHandleCodes) {
     // We need an established session to close cleanly; build the loopback pair.
     fixpp_engine_t* B = nullptr;  // acceptor
     fixpp_engine_t* A = nullptr;  // initiator
-    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 0, 0, &B), FIXPP_ERR_OK);
-    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 0, 0, &A), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 1, 0, &B), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 1, 0, &A), FIXPP_ERR_OK);
 
     fixpp_session_config_t* acc =
         make_session_cfg("ACC-DEAD", "INIT-DEAD", FIXPP_ROLE_ACCEPTOR);
@@ -233,8 +233,8 @@ TEST(CapiLifecycle, NullAndDeadHandleCodes) {
 TEST(CapiLifecycle, EstablishedSessionHappyPath) {
     fixpp_engine_t* B = nullptr;  // acceptor engine
     fixpp_engine_t* A = nullptr;  // initiator engine
-    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 0, 0, &B), FIXPP_ERR_OK);
-    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 0, 0, &A), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 1, 0, &B), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 1, 0, &A), FIXPP_ERR_OK);
 
     fixpp_session_config_t* acc =
         make_session_cfg("ACC-HP", "INIT-HP", FIXPP_ROLE_ACCEPTOR);
@@ -279,8 +279,8 @@ TEST(CapiLifecycle, EstablishedSessionHappyPath) {
 TEST(CapiLifecycle, Sc007CloseBreaksBlockedIdleReadPromptly) {
     fixpp_engine_t* B = nullptr;
     fixpp_engine_t* A = nullptr;
-    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 0, 0, &B), FIXPP_ERR_OK);
-    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 0, 0, &A), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 1, 0, &B), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 1, 0, &A), FIXPP_ERR_OK);
 
     fixpp_session_config_t* acc =
         make_session_cfg("ACC-S7", "INIT-S7", FIXPP_ROLE_ACCEPTOR);
@@ -345,8 +345,8 @@ TEST(CapiLifecycle, Sc007CloseBreaksBlockedIdleReadPromptly) {
 TEST(CapiLifecycle, Sc007SendAfterTeardownIsTerminalNotUb) {
     fixpp_engine_t* B = nullptr;
     fixpp_engine_t* A = nullptr;
-    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 0, 0, &B), FIXPP_ERR_OK);
-    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 0, 0, &A), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 1, 0, &B), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 1, 0, &A), FIXPP_ERR_OK);
 
     fixpp_session_config_t* acc =
         make_session_cfg("ACC-S7B", "INIT-S7B", FIXPP_ROLE_ACCEPTOR);
@@ -405,8 +405,8 @@ TEST(CapiLifecycle, Sc007SendAfterTeardownIsTerminalNotUb) {
 TEST(CapiLifecycle, ConcurrentSendAndCloseNoDataRace) {
     fixpp_engine_t* B = nullptr;
     fixpp_engine_t* A = nullptr;
-    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 0, 0, &B), FIXPP_ERR_OK);
-    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 0, 0, &A), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 1, 0, &B), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 1, 0, &A), FIXPP_ERR_OK);
 
     fixpp_session_config_t* acc =
         make_session_cfg("ACC-RACE", "INIT-RACE", FIXPP_ROLE_ACCEPTOR);
@@ -499,7 +499,7 @@ TEST(CapiLifecycle, EngineStateReclaimedOnDestroy) {
     constexpr int N = 3;
     for (int i = 0; i < N; ++i) {
         fixpp_engine_t* eng = nullptr;
-        ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 0, 0, &eng), FIXPP_ERR_OK);
+        ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 1, 0, &eng), FIXPP_ERR_OK);
         ASSERT_NE(eng, nullptr);
 
         // Each create allocates one EngineState → live count rises by 1.
