@@ -703,6 +703,25 @@ jobs:
           WHL=$(ls wheelhouse/fixpp-*-cp310-abi3-manylinux_2_28_x86_64.whl)
           echo "wheel: $WHL"
           auditwheel show "$WHL"
+          # FR-002: the external-library list must be EMPTY (static everything).
+          # Inspect the extension module(s) directly — format-independent.
+          WHL_TMP=$(mktemp -d)
+          unzip -q "$WHL" -d "$WHL_TMP"
+          SOS=$(find "$WHL_TMP" -name '_fixpp*.so')
+          test -n "$SOS" || { echo "FAIL FR-002: no _fixpp*.so found in wheel"; exit 1; }
+          NEEDED=$(for so in $SOS; do readelf -d "$so"; done \
+            | awk '/\(NEEDED\)/{gsub(/[][]/,"",$NF);print $NF}' | sort -u)
+          echo "extension NEEDED entries:"; echo "${NEEDED:-(none)}"
+          # Baseline: libc, libm, libdl, libpthread, librt, ld-linux-x86-64.
+          # libgcc_s, libstdc++, libssl, libcrypto, libfixpp*, OTel libs are banned.
+          BAD=$(echo "$NEEDED" | grep -v '^$' | grep -Ev \
+            '^(libc|libm|libdl|libpthread|librt|ld-linux-x86-64)\.so' || true)
+          if [ -n "$BAD" ]; then
+            echo "FAIL FR-002: wheel has non-baseline external dependencies:"
+            echo "$BAD"
+            exit 1
+          fi
+          rm -rf "$WHL_TMP"
           abi3audit --strict "$WHL"
 
       - uses: actions/upload-artifact@v4
