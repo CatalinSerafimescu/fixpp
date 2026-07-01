@@ -54,28 +54,39 @@ target_link_libraries(fixpp_dictionary
 # include(cmake/Codegen.cmake) (CMakeLists.txt:190), and fixpp_wire by the
 # later src/wire subdir — fixpp_dictionary already forward-links fixpp_wire and
 # builds today. Do NOT "fix" this ordering by restructuring CMake.
-file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/_codegen")
-configure_file(
-  "${CMAKE_SOURCE_DIR}/cmake/templates/reify_dispatch_bridge.cpp.in"
-  "${CMAKE_BINARY_DIR}/_codegen/reify_dispatch_bridge.cpp"
-  @ONLY
-)
-add_library(fixpp_dict_dispatch_bridge STATIC
-  "${CMAKE_BINARY_DIR}/_codegen/reify_dispatch_bridge.cpp"
-)
-target_include_directories(fixpp_dict_dispatch_bridge PRIVATE
-  "${CMAKE_CURRENT_SOURCE_DIR}"  # private reify_dispatch_bridge.hpp (decl/def match)
-)
-# The _codegen/include dir (for <fixpp/_dispatch/*.hpp>) rides on
-# fixpp::dict::dispatch — keep it on THIS target ONLY, never broaden
-# fixpp_dictionary or every dict TU gains build-tree reach.
-target_link_libraries(fixpp_dict_dispatch_bridge
-  PRIVATE fixpp::dict::dispatch fixpp_wire fixpp_dictionary
-)
-add_dependencies(fixpp_dict_dispatch_bridge fixpp_codegen_generate)
+#
+# Bootstrap guard: the codegen bootstrap sub-configure (Codegen.cmake spawns a
+# nested `-S .` build with FIXPP_CODEGEN_BOOTSTRAP_RUNNING=ON to build just the
+# fixpp-codegen host tool) makes Codegen.cmake early-return WITHOUT declaring
+# fixpp::dict::dispatch / fixpp_codegen_generate, so those forward-refs are
+# unresolvable there. The bootstrap only needs the tool, never the runtime
+# dispatch bridge, so skip the whole bridge block under that guard. Without this
+# a FRESH build dir (no pre-existing codegen tool → bootstrap runs) fails to
+# configure on every preset.
+if(NOT FIXPP_CODEGEN_BOOTSTRAP_RUNNING)
+  file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/_codegen")
+  configure_file(
+    "${CMAKE_SOURCE_DIR}/cmake/templates/reify_dispatch_bridge.cpp.in"
+    "${CMAKE_BINARY_DIR}/_codegen/reify_dispatch_bridge.cpp"
+    @ONLY
+  )
+  add_library(fixpp_dict_dispatch_bridge STATIC
+    "${CMAKE_BINARY_DIR}/_codegen/reify_dispatch_bridge.cpp"
+  )
+  target_include_directories(fixpp_dict_dispatch_bridge PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}"  # private reify_dispatch_bridge.hpp (decl/def match)
+  )
+  # The _codegen/include dir (for <fixpp/_dispatch/*.hpp>) rides on
+  # fixpp::dict::dispatch — keep it on THIS target ONLY, never broaden
+  # fixpp_dictionary or every dict TU gains build-tree reach.
+  target_link_libraries(fixpp_dict_dispatch_bridge
+    PRIVATE fixpp::dict::dispatch fixpp_wire fixpp_dictionary
+  )
+  add_dependencies(fixpp_dict_dispatch_bridge fixpp_codegen_generate)
 
-# Back-edge declared BOTH ways (mirror the fixpp_wire <-> fixpp_dictionary cycle
-# above; NOT left to TU co-location luck — research D-1): reify.cpp
-# (fixpp_dictionary) calls the bridge's reify_dispatch_*; the bridge's generated
-# arms call detail::owning_message_handle_from_frame (fixpp_dictionary).
-target_link_libraries(fixpp_dictionary PUBLIC fixpp_dict_dispatch_bridge)
+  # Back-edge declared BOTH ways (mirror the fixpp_wire <-> fixpp_dictionary cycle
+  # above; NOT left to TU co-location luck — research D-1): reify.cpp
+  # (fixpp_dictionary) calls the bridge's reify_dispatch_*; the bridge's generated
+  # arms call detail::owning_message_handle_from_frame (fixpp_dictionary).
+  target_link_libraries(fixpp_dictionary PUBLIC fixpp_dict_dispatch_bridge)
+endif()
