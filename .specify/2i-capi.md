@@ -688,8 +688,14 @@ extern "C" {
  * MAJOR bumps on breaking change; MINOR bumps on additive change;
  * PATCH bumps on bug fix that doesn't touch the ABI surface. */
 #define FIXPP_C_ABI_VERSION_MAJOR  1
-#define FIXPP_C_ABI_VERSION_MINOR  0
+#define FIXPP_C_ABI_VERSION_MINOR  5
 #define FIXPP_C_ABI_VERSION_PATCH  0
+/* NOTE: MINOR is preserved across the 0→1 GA freeze (GA version = 1.5.0, not
+ * 1.0.0) because the forward-compat error-code downgrade in §4.4 is keyed on
+ * the consumer's reported minor; resetting MINOR to 0 would downgrade already-
+ * published minor-2/minor-4 error codes to FIXPP_ERR_UNKNOWN for consumers
+ * compiled against an earlier minor.  The minor-reset and the corresponding
+ * introducing_minor rebase happen at the next breaking MAJOR (2.0.0). */
 
 /* Composite version macro for compile-time checks. */
 #define FIXPP_C_ABI_VERSION \

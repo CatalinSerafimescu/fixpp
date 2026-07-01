@@ -56,7 +56,7 @@
 using namespace std::chrono_literals;
 using namespace fixpp::capi_test;
 
-// Create an engine with consumer_major=0, consumer_minor=4 (C-ABI 0.4.0, 051).
+// Create an engine with consumer_major=1, consumer_minor=4 (minor 4 = the [1400,1499] block from 051).
 static fixpp_error_t make_engine(fixpp_engine_t** out) {
     return fixpp_engine_create(make_engine_cfg(), 1, 4, out);
 }

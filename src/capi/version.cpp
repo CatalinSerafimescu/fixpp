@@ -3,7 +3,7 @@
 
 // The umbrella supplies BOTH the library SemVer macros FIXPP_VERSION_{MAJOR,
 // MINOR,PATCH} (0/0/1, used by fixpp_library_version) AND — via its include of
-// fix/c_api/version.h — the C-ABI macros FIXPP_C_ABI_VERSION_* (0/2/0) and
+// fix/c_api/version.h — the C-ABI macros FIXPP_C_ABI_VERSION_* (1/5/0) and
 // fixpp_version_t. As of 049 T022 the umbrella no longer defines a stale
 // FIXPP_C_ABI_VERSION_* block, so there is a single consistent definition and
 // no #undef bridge is needed.
