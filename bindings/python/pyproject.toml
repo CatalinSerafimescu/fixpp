@@ -95,6 +95,14 @@ manylinux-x86_64-image = "manylinux_2_28"
 # Toolchain + Conan setup, run ONCE per container; writes the Conan toolchain to
 # /tmp/wheel-conan (proven by the configure-only probe — see the script header).
 before-all = "bash {project}/bindings/python/cibw-before-all.sh {project}"
+# RC#4 (SC-004/FR-001): force the single mandated platform tag at repair time.
+# Without --only-plat, auditwheel prepends the detected-floor policy (e.g. 2_26)
+# producing a compressed tag "manylinux_2_26_x86_64.manylinux_2_28_x86_64" that
+# does NOT match the spec-mandated exact filename (FR-001).  --only-plat (≥6.7.0)
+# suppresses the compressed second tag → exactly fixpp-<ver>-cp310-abi3-manylinux_2_28_x86_64.whl.
+# Trade-off: the wheel won't install on glibc 2.26/2.27 hosts; consistent with the
+# manylinux_2_28 baseline mandated by FR-002/SC-004.
+repair-wheel-command = "auditwheel repair --plat manylinux_2_28_x86_64 --only-plat -w {dest_dir} {wheel}"
 
 # The Conan toolchain → scikit-build-core handoff. cmake does NOT read
 # CMAKE_TOOLCHAIN_FILE from the environment, so it MUST go through the build

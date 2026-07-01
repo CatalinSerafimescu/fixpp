@@ -700,6 +700,13 @@ jobs:
           set -euo pipefail
           test "$(ls wheelhouse/fixpp-*.whl | wc -l)" -eq 1
           test "$(ls wheelhouse/fixpp-*-cp310-abi3-manylinux_2_28_x86_64.whl | wc -l)" -eq 1
+          # RC#4 regression guard: repair must emit a SINGLE 2_28 tag, not a compressed
+          # manylinux_2_XX_x86_64.manylinux_2_28_x86_64 tag.  If --only-plat ever stops
+          # taking effect the exact-match count above goes RED immediately; this guard
+          # makes the regression class explicit (recorded shape: manylinux_2_26_x86_64.manylinux_2_28_x86_64).
+          if ls wheelhouse/fixpp-*-cp310-abi3-manylinux_*_x86_64.manylinux_2_28_x86_64.whl >/dev/null 2>&1; then
+            echo "FAIL SC-004: compressed platform tag emitted; expected single manylinux_2_28_x86_64"; exit 1
+          fi
           WHL=$(ls wheelhouse/fixpp-*-cp310-abi3-manylinux_2_28_x86_64.whl)
           echo "wheel: $WHL"
           auditwheel show "$WHL"
