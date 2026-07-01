@@ -17,15 +17,27 @@ The runtime-dispatch return of `dict::reify()`. Move-only, heap pimpl.
   independent of the source parse buffer (FR-005). `view_cache_` is populated on first `view()` call via
   `Framer::feed` over `bytes_` (same pattern as `owning_<Msg>::view()`), then reused; move resets both source
   and destination caches (mirror `owning_<Msg>` move semantics).
-- **Construction.** Fallible factory `from_frame(resolved_message_version, MessageView<Index> const&,
-  std::pmr::memory_resource*) -> core::expected_t<owning_message_handle>`: deep-copies inside `try`, maps
-  `std::bad_alloc → dict_reify_oom`. Non-user-callable (private ctor + friend to the dispatch bridge /
-  `reify()`, or a `detail::` factory — Gate-A detail). No public-builder / C-ABI surface added (FR-012).
+- **Construction.** Fallible factory `detail::owning_message_handle_from_frame(resolved_message_version,
+  MessageView<Index> const&, std::pmr::memory_resource*) -> core::expected_t<owning_message_handle>`: a single
+  hand-written free function in `fixpp::dict::detail`, declared in `reify.hpp` and **DEFINED out-of-line in
+  `reify.cpp` (`fixpp_dictionary`)** — because the handle is a heap pimpl, the factory needs the complete
+  `impl` type and therefore cannot be defined inline in the header. Deep-copies inside `try`, maps
+  `std::bad_alloc → dict_reify_oom`. `owning_message_handle` `friend`s this ONE stable name to reach its
+  private ctor/storage (standard passkey/attorney pattern; a `detail::`-only passkey tag threaded through a
+  private ctor is an equally valid alternative — this bundle picks the free function + single friend).
+  Friending the many emitter-controlled generated dispatch-function names is what research D-2 rejects as
+  fragile — this single fixed name is NOT that (see contract C-2). Not a user construction surface ("handles
+  come only from `reify()`"). No public-builder / C-ABI surface added (FR-012).
 - **Accessors (unchanged signatures, `reify.hpp:84-94`).** `version()` returns the stored tuple;
   `msg_type()` = `view().get<35>()...as_string()`; `view()` returns the cached re-framed view;
   `field_value(tag)` = `view().get(tag)`. `as<Msg>()` **stays stubbed (T059, out of scope)**.
 - **NOT type-erased.** Storage equals a concrete `owning_<Msg>` minus typed accessors; no `owner_base`/
   `owner_impl` (see research D-2). A future `as<Msg>()` materializes an `owning_<Msg>` from `bytes_`.
+- **Shipped-header comment refresh (owed at convergence-at-implement).** The byte-only storage supersedes the
+  inherited `reify.hpp` comments at `reify.hpp:70` ("Type-erased owning message") and `:97` ("small-variant OR
+  heap polymorphic owner"), which will go stale in a shipped header. The implementation MUST refresh those two
+  comments and add a one-line note: "`as<Msg>()` remains AC-R6/T059-deferred; byte storage does not foreclose a
+  future lazily-populated owner-cache."
 
 ## E-2 — `resolved_message_version` (existing; consumed, not changed)
 
@@ -37,16 +49,25 @@ Surfaced by `owning_message_handle::version()` (FR-003) and asserted by the flip
 
 ## E-3 — Dispatch bridge functions (NEW, internal)
 
-Declared in shipped `include/fixpp/dict/reify_dispatch_bridge.hpp`; defined in the generated-aware TU
-`src/dictionary/reify_dispatch_bridge.cpp`.
+Declared in the **private same-module** header `src/dictionary/reify_dispatch_bridge.hpp` (NOT a shipped
+`include/` header); defined in the **build-tree-generated** TU
+`${build}/_codegen/reify_dispatch_bridge.cpp` (`configure_file`d from `cmake/templates/reify_dispatch_bridge.cpp.in`).
 
 | Function | Signature | Delegates to |
 |---|---|---|
 | `reify_dispatch_fixt` | `(MessageView<Index> const&, char msg_type, version_profile, mr) -> expected_t<owning_message_handle>` | inline `dispatch::dispatch_fixt` (`_dispatch/reify_dispatch_fixt.hpp`) |
 | `reify_dispatch_application` | `(MessageView<Index> const&, string_view msg_type, application_version, version_profile, mr) -> expected_t<owning_message_handle>` | inline `dispatch::dispatch_application` (`_dispatch/reify_dispatch_application.hpp`) |
 
-- The **only** TU that `#include`s the build-tree `_dispatch/*.hpp` (NFR-003-8; `check_layers.py` per-file exempt).
+- The **only** TU that `#include`s the build-tree `_dispatch/*.hpp`; being build-tree-generated it is outside
+  `check_layers.py`'s `src/**` scan (NFR-003-8 satisfied literally, no exempt added — `check_layers.py` unchanged).
 - `reify.cpp` calls these at `:211` (FIXT-admin) and `:236` (application), replacing the placeholder returns.
+- **Link graph (back-edge — declared, not luck).** `detail::owning_message_handle_from_frame` is defined
+  out-of-line in `reify.cpp` (→ `fixpp_dictionary`) and is called ONLY from the generated `_dispatch` arms,
+  which compile in the bridge TU (→ `fixpp_dict_dispatch_bridge`); the bridge's `reify_dispatch_*` are in turn
+  called from `reify.cpp`. That is a **mutual** static-archive dependency, so the CMake
+  `fixpp_dict_dispatch_bridge ↔ fixpp_dictionary` back-edge MUST be declared — mirroring the two-way
+  `fixpp_wire ↔ fixpp_dictionary` cycle already declared+commented at `src/dictionary/CMakeLists.txt:32-42` —
+  not left to TU co-location luck (research D-1).
 
 ## E-4 — Two-level MsgType dispatch key (emitter-generated)
 
@@ -55,13 +76,17 @@ Generated inside `dispatch::dispatch_application`. Length-first:
 - `len == 2` → `switch (static_cast<uint16_t>(msg_type[0]) << 8 | static_cast<uint8_t>(msg_type[1]))`, case
   labels `('A'<<8)|'S'`, etc. Safe: proven max MsgType length is 2.
 - `empty()` / unmatched → `dict_reify_unknown_msg_type` (FR-009).
-Arms emitted in existing bytewise-sorted order (determinism, B-003-3 / SC-005). Known multi-char arms: v44=68,
-v50sp2=210 (v42=0, FIXT-admin=0). Each known arm body is uniform: `return owning_message_handle::from_frame(...)`.
+Arms emitted in existing bytewise-sorted order (determinism, B-003-3 / SC-005). Known multi-char arms (unique
+2-char `msg_type_v` = generated message classes with `len(msg_type_v)==2` = one arm each): **v44=34,
+v50sp2=105** (v42=0, FIXT-admin=0); max MsgType length = 2. Each known arm body is uniform: `return
+detail::owning_message_handle_from_frame(...)`. The multi-char structural test binds to these true sets (34/105).
 
 ## E-5 — `reify_as<Msg>` typed path (NEW inline definition)
 
-`reify_as<Msg>(view, mr) -> expected_t<owning_message_t<Msg>>`. Header-only in `reify.hpp`; guards
-`view.get<35>() != Msg::msg_type_v → dict_reify_msg_type_mismatch`; else delegates to
+`reify_as<Msg>(view, mr) -> expected_t<owning_message_t<Msg>>`. Header-only in `reify.hpp`. Guard: unwrap
+`view.get<35>()` (an `expected_t<field_view>`) — if it is an **error / absent tag 35**, return
+`dict_reify_msg_type_mismatch` (an absent MsgType cannot match, mirroring `reify.cpp`'s `!mt_fv` guard); if
+present and `.as_string() != Msg::msg_type_v`, return `dict_reify_msg_type_mismatch`; else delegate to
 `owning_message_t<Msg>::from_view(view, mr)`. No bridge (compile-time-known `Msg`).
 
 ## E-6 — Test frame fixtures (NEW helper siblings)
@@ -83,10 +108,11 @@ All rebuilt into a `MessageView<Index>` via the existing `frame_view_factory.hpp
 | Condition | Returned error | Notes |
 |---|---|---|
 | Known MsgType (1- or 2-char), generated arm | *(success — live handle)* | FR-001/002/014 |
-| Unknown MsgType (any length) | `dict_reify_unknown_msg_type` | default arms + `get<35>`-absent branch (D-7) |
+| Unknown MsgType (any length) | `dict_reify_unknown_msg_type` | default arms |
+| **Absent MsgType (tag 35 not present)** | `dict_reify_unknown_msg_type` | `reify.cpp` `get<35>`-absent branch (D-7); **deliberate remap** from the retired `dict_reify_wire_body_not_ready` on a defensive/near-unreachable path — owned by the spec Edge Case + FR-009 note, not "preserved exactly" |
 | Unresolvable application version | `dict_unresolved_application_version` / `dict_unknown_appl_ver_id` | B-003-5 preserved |
-| Allocation failure in deep-copy | `dict_reify_oom` | in `from_frame` try/catch |
-| `reify_as<Msg>` MsgType ≠ `Msg::msg_type_v` | `dict_reify_msg_type_mismatch` | contract `reify.hpp:104` |
+| Allocation failure in deep-copy | `dict_reify_oom` | in `detail::owning_message_handle_from_frame` try/catch |
+| `reify_as<Msg>` MsgType ≠ `Msg::msg_type_v` **or `get<35>` error/absent** | `dict_reify_msg_type_mismatch` | contract `reify.hpp:104`; absent-35 mirrors `reify.cpp`'s `!mt_fv` guard |
 | Runtime-XML-only version | `dict_reify_unknown_msg_type` | outer-switch default; L-003-2 preserved |
 
 `dict_reify_wire_body_not_ready`: **zero live producers after 057** (retired from all success + the

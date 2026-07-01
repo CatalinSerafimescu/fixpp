@@ -32,15 +32,21 @@ returned by any path.
    cmake --build <build> --target fixpp-codegen        # rebuild the generator
    rm -rf <build>/_codegen                              # force regen (mtime won't trigger it)
    cmake --preset linux-clang-debug                     # reconfigure → regenerates
-   # ASSERT the regenerated dispatch is live BEFORE compiling tests:
-   grep -L dict_reify_wire_body_not_ready <build>/_codegen/include/fixpp/_dispatch/reify_dispatch_application.hpp
-   grep -c 'owning_message_handle::from_frame' <build>/_codegen/include/fixpp/_dispatch/reify_dispatch_application.hpp
+   # ASSERT BOTH regenerated dispatch headers are live BEFORE compiling tests
+   # (application + FIXT — emit_dispatch_fixt is mirrored, so its header is regenerated + compiled too):
+   for h in reify_dispatch_application.hpp reify_dispatch_fixt.hpp; do
+     grep -L dict_reify_wire_body_not_ready <build>/_codegen/include/fixpp/_dispatch/$h             # placeholder gone
+     grep -c 'detail::owning_message_handle_from_frame' <build>/_codegen/include/fixpp/_dispatch/$h  # >=1 live factory call
+   done
    ```
 2. **Discriminating witness (RED→GREEN, mutation-tested):** `ctest -R reify_dispatch` — the per-field
    assertions (`field_value(11) == "ORD1"`, the `AS` multi-char body read) must pass; reverting one arm to the
    placeholder must turn them RED.
-3. **Layer hygiene:** `python tools/check_layers.py` exits 0; and the discriminating check — injecting a
-   build-tree `#include` into `reify.cpp` makes it exit non-zero.
+3. **Layer hygiene:** `python tools/check_layers.py` exits 0 (`reify.cpp` + the private
+   `src/dictionary/reify_dispatch_bridge.hpp` include no build-tree header; the sole build-tree includer is the
+   build-tree-generated `${build}/_codegen/reify_dispatch_bridge.cpp`, which is outside the scan by design — no
+   exempt added, `check_layers.py` unchanged); and the discriminating check — injecting a build-tree
+   `#include` into `reify.cpp` makes it exit non-zero (the guard bites, not just observes).
 4. **Determinism / build-graph:** `ctest -R 'determinism|build_graph'` green (byte-identical regen; clean tree).
 5. **Full gate:** ASan/UBSan/TSan presets (one at a time), coverage ≥95/85 on `src/dictionary/` +
    `include/fixpp/dict/`, clang-tidy/format/cppcheck/iwyu clean.

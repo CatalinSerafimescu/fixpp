@@ -32,5 +32,5 @@
 ## Notes
 
 - This is a low-level library-infrastructure feature; the "user" is a fixpp library consumer / downstream feature author. Per the project's engineering-spec convention, requirements reference domain API contracts (`dict::reify()`, error codes, resolved-version metadata) at the observable-contract level rather than describing implementation. Named code artifacts (`emit_dispatch.cpp`, the dispatch bridge TU, `FIXPP_R6_WIRE_BODY_READY`) appear as *anchors to existing/target code* to keep the spec verifiable, not as prescribed implementation — the actual bridge design, target naming, and delegation seam are deferred to `/speckit-plan` (recorded in Assumptions).
-- One deliberate open decision — whether to fold multi-character MsgType dispatch into this feature — is documented as a bounded `/speckit-plan`-time decision in Assumptions rather than a `[NEEDS CLARIFICATION]` marker, because the default (defer, preserve the existing guard) is a reasonable, spec-complete baseline.
+- Multi-character MsgType dispatch is **RESOLVED**: folded into this feature **unconditionally** per the 2026-07-01 clarification (Option B), recorded in spec §Clarifications and FR-014 — no longer an open `/speckit-plan`-time decision.
 - Items marked incomplete require spec updates before `/speckit-clarify` or `/speckit-plan`.
