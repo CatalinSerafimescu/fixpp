@@ -50,6 +50,15 @@ jobs:
     needs: filter
     if: needs.filter.outputs.should_run == 'true'
 
+    # Anti-pileup: a newer push/run cancels the older run of the SAME preset leg.
+    # Keyed on matrix.preset so the four libc++ legs don't cancel each other
+    # (mirrors tier1.yml's per-job matrix.preset grouping). A skipped filter
+    # never dispatches this job, so it never enters the group and cannot cancel
+    # a real build — same skip-doesn't-cancel semantics as Tier 1.
+    concurrency:
+      group: tier3-${{ github.event.pull_request.number || github.ref }}-${{ matrix.preset }}
+      cancel-in-progress: true
+
     permissions:
       contents: read
       packages: read

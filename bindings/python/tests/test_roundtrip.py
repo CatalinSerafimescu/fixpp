@@ -31,6 +31,9 @@ HOST = "127.0.0.1"
 MSG_TYPE = "D"          # NewOrderSingle (msgcat='app' -> routes to the callback)
 TAG_CLORDID = 11        # ClOrdID, type STRING, required scalar field of "D"
 SENT = "ORDER-PY-001"
+TAG_TEXT = 58           # Text, a free-form STRING field carried verbatim on the wire
+NON_UTF8 = b"\xff\xfe"  # invalid UTF-8 (0xFF/0xFE are never valid lead bytes); no
+                        # SOH (0x01) / '=' (0x3D), so it survives FIX framing intact
 
 # Bounded deadlines (seconds). Generous enough for a cold loopback under CI load,
 # short enough that a real failure fails fast instead of hanging.
@@ -283,6 +286,101 @@ def test_codec_failure_routes_through_fixpp_error():
     finally:
         fixpp.engine_destroy(eng)
         fixpp.session_config_destroy(sc)
+        fixpp.dict_destroy(dict_h)
+
+
+def test_msg_get_string_non_utf8_routes_through_fixpp_error():
+    """DECODE side: msg_get_string on non-UTF-8 wire bytes raises fixpp.Error.
+
+    Companion to test_codec_failure_routes_through_fixpp_error (the ENCODE side:
+    a Python str with a surrogate → set_string/config). This is the OUTPUT
+    codec path in fixpp.i: the msg_get_string argout typemap decodes the aliased
+    wire bytes via PyUnicode_FromStringAndSize; a non-UTF-8 value returns NULL,
+    which must route through fixpp.Error (T-3 / FR-008), not surface a bare
+    UnicodeDecodeError or hand back a NULL object. Retires the standing 053
+    waiver / PY-003 residue (the `_str == NULL` branch was never witnessed).
+
+    The thin binding wraps no raw-bytes field setter (msg_set_string validates
+    UTF-8 on input), so the sender hand-builds the app payload in the msg_commit
+    wire format ("35=<type>\\x01<tag>=<value>\\x01..."; message_write.cpp:673) and
+    injects the invalid bytes directly; Engine::send stamps the session envelope
+    around this body. They round-trip through the wire and inbound parse intact
+    (no SOH/'='), so the acceptor's callback reads them back and the decode fails
+    on genuinely non-UTF-8 wire data — not a synthesised handle.
+
+    Discrimination: drop the `_str == NULL` guard in the argout typemap →
+    fixpp.Error is not raised (a NULL is appended / a bare exception leaks) and
+    this test fails, so it pins that exact branch."""
+    dict_h = fixpp.dict_load_from_xml(_dict_path())
+
+    captured = {}
+    got = threading.Event()
+
+    def on_message(inbound):
+        # Runs on an engine worker thread (GIL reacquired). Read the non-UTF-8
+        # field INSIDE the dispatch window and record what msg_get_string does.
+        try:
+            fixpp.msg_get_string(inbound, TAG_TEXT)
+            captured["exc"] = None          # no raise → the guard is missing (BUG)
+        except Exception as e:              # noqa: BLE001 — record the exact type
+            captured["exc"] = e
+        finally:
+            got.set()
+
+    eng_a = eng_b = acc = ini = None
+    try:
+        eca = fixpp.engine_config_create()
+        fixpp.engine_config_set_realtime_clock(eca)
+        eng_a = fixpp.engine_create(eca)
+        acc_sc = _make_session_config(
+            dict_h, fixpp.ROLE_ACCEPTOR, "ACCEPTOR", "INITIATOR", 0)
+        acc = fixpp.session_open(eng_a, acc_sc)
+        fixpp.session_register_callback(acc, on_message)
+        fixpp.engine_start(eng_a)
+
+        port = _wait_until(
+            lambda: fixpp.session_acceptor_bound_endpoint(acc) or None,
+            BIND_TIMEOUT, "acceptor to bind an ephemeral port")
+
+        ecb = fixpp.engine_config_create()
+        fixpp.engine_config_set_realtime_clock(ecb)
+        eng_b = fixpp.engine_create(ecb)
+        ini_sc = _make_session_config(
+            dict_h, fixpp.ROLE_INITIATOR, "INITIATOR", "ACCEPTOR", port)
+        ini = fixpp.session_open(eng_b, ini_sc)
+        fixpp.engine_start(eng_b)
+
+        _wait_until(lambda: fixpp.session_is_established(acc),
+                    ESTABLISH_TIMEOUT, "acceptor to establish")
+        _wait_until(lambda: fixpp.session_is_established(ini),
+                    ESTABLISH_TIMEOUT, "initiator to establish")
+
+        # Hand-built app payload in the msg_commit wire format so the non-UTF-8
+        # value can be injected directly (the binding wraps no raw-bytes setter).
+        payload = (
+            b"35=" + MSG_TYPE.encode() + b"\x01"
+            + str(TAG_CLORDID).encode() + b"=" + SENT.encode() + b"\x01"
+            + str(TAG_TEXT).encode() + b"=" + NON_UTF8 + b"\x01"
+        )
+        fixpp.session_send(ini, payload)
+
+        assert got.wait(timeout=RECV_TIMEOUT), "no message received within deadline"
+        exc = captured.get("exc")
+        assert exc is not None, \
+            "msg_get_string returned instead of raising on non-UTF-8 wire bytes"
+        assert isinstance(exc, fixpp.Error), \
+            f"expected fixpp.Error, got {type(exc).__name__}: {exc}"
+        assert "not valid UTF-8" in str(exc), \
+            f"unexpected fixpp.Error message: {exc!r}"
+    finally:
+        if ini is not None:
+            fixpp.session_close(ini)
+        if acc is not None:
+            fixpp.session_close(acc)
+        if eng_b is not None:
+            fixpp.engine_destroy(eng_b)
+        if eng_a is not None:
+            fixpp.engine_destroy(eng_a)
         fixpp.dict_destroy(dict_h)
 
 
