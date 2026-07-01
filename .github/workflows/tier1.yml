@@ -69,7 +69,6 @@ jobs:
     outputs:
       proceed: ${{ steps.decide.outputs.proceed }}
       python_touched: ${{ steps.decide.outputs.python_touched }}
-      run_tier1: ${{ steps.decide.outputs.run_tier1 }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -82,13 +81,15 @@ jobs:
         run: |
           set -o pipefail
 
-          # ── Python-relevance trigger (path-filter, computed for ALL events) ──
-          # The python jobs (python-bindings + python-wheel-{build,test}) are
-          # gated on RELEVANCE, not on `proceed`: they run only when the diff
-          # touches the binding/C-ABI surface, on a release, or on an explicit
-          # run-tier1 label — so a pure-C++ PR or merge to main skips the ~7-min
-          # container wheel build + the sanitizer legs entirely. This block runs
-          # BEFORE the non-PR early-exit below so push:main is path-filtered too.
+          # ── Python-relevance path-filter (computed for ALL events) ──
+          # The python jobs (python-bindings + python-wheel-{build,test}) gate on
+          # `proceed` (gates satisfied + run-tier1 requested) AND this relevance
+          # flag: on a PR they run only once the gates clear, and then only when
+          # the diff touches the binding/C-ABI surface — so a pure-C++ PR, a
+          # pre-gate PR, or a merge to main skips the ~7-min container wheel build
+          # + the sanitizer legs entirely. A release builds the asset regardless.
+          # This block runs BEFORE the non-PR early-exit below so push:main is
+          # path-filtered too.
           PY_RE='^(bindings/python/|include/fix/c_api|.*\.i$)'
           PYTHON_TOUCHED=false
           EV="${{ github.event_name }}"
@@ -111,13 +112,6 @@ jobs:
           fi
           echo "python jobs relevant (python_touched)=$PYTHON_TOUCHED"
           echo "python_touched=$PYTHON_TOUCHED" >> "$GITHUB_OUTPUT"
-
-          RUN_TIER1=false
-          if [ "${{ github.event.action }}" = "labeled" ] && \
-             [ "${{ github.event.label.name }}" = "run-tier1" ]; then
-            RUN_TIER1=true
-          fi
-          echo "run_tier1=$RUN_TIER1" >> "$GITHUB_OUTPUT"
 
           # ── Non-PR events: trusted, always run ──────────────────────────
           if [ "${{ github.event_name }}" != "pull_request" ]; then
@@ -511,12 +505,15 @@ jobs:
     # wedging the runner; see the `linux` job's timeout note.
     timeout-minutes: 45
     needs: gate-precheck
-    # Path-gated (release-excluded): sanitizer legs run when the binding/C-ABI
-    # surface changed OR run-tier1 is added; never on release.
+    # Gate-then-relevance (release-excluded): like the C++ matrix, the sanitizer
+    # legs run ONLY once the gates are satisfied + run-tier1 is requested
+    # (`proceed`), and then only when the binding/C-ABI surface actually changed
+    # (`python_touched` narrows within Tier 1). No gate labels ⇒ skipped. Never
+    # on release.
     if: >-
       github.event_name != 'release' &&
-      (needs.gate-precheck.outputs.python_touched == 'true' ||
-       needs.gate-precheck.outputs.run_tier1 == 'true')
+      needs.gate-precheck.outputs.proceed == 'true' &&
+      needs.gate-precheck.outputs.python_touched == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -667,13 +664,15 @@ jobs:
     # OpenSSL in-container; generous backstop against a hung build wedging the runner.
     timeout-minutes: 90
     needs: gate-precheck       # CI-1
-    # Path-gated: the ~7-min container wheel build runs on a release (the asset
-    # is built there), OR when the binding/C-ABI/packaging surface changed, OR
-    # on an explicit run-tier1 label. A pure-C++ PR or merge to main skips it.
+    # Gate-then-relevance: the ~7-min container wheel build runs on a release
+    # (the asset is built there), OR — on a PR/push — once the gates are
+    # satisfied + run-tier1 is requested (`proceed`) AND the binding/C-ABI/
+    # packaging surface actually changed (`python_touched`). A pure-C++ PR, a
+    # merge to main, or a PR without gate labels skips it.
     if: >-
       github.event_name == 'release' ||
-      needs.gate-precheck.outputs.python_touched == 'true' ||
-      needs.gate-precheck.outputs.run_tier1 == 'true'
+      (needs.gate-precheck.outputs.proceed == 'true' &&
+       needs.gate-precheck.outputs.python_touched == 'true')
     concurrency:               # CI-7
       group: tier1-${{ github.event.pull_request.number || github.ref }}-python-wheel-build
       cancel-in-progress: true
