@@ -116,3 +116,6 @@ book/
 tests/fuzz/corpus/message_store/
 tests/fuzz/corpus/*
 tests/config/fuzz/corpus/*
+
+# Python wheel build output (cibuildwheel / build-wheel.sh)
+wheelhouse/

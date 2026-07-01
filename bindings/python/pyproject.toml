@@ -1,0 +1,112 @@
+# bindings/python/pyproject.toml — PY-005 wheel packaging (T002).
+# PEP 517 build backend (scikit-build-core) over the existing CMake
+# FIXPP_BUILD_PYTHON target. Produces ONE stable-ABI (abi3) wheel
+# fixpp-<ver>-cp310-abi3-manylinux_2_28_x86_64.whl covering CPython 3.10–3.13+.
+# Built under cibuildwheel in manylinux_2_28 (see specs/056 quickstart.md / contracts).
+
+[build-system]
+# PKG-1: scikit-build-core backend; swig>=4.2 (NO upper bound — builds with the
+#   latest SWIG, 4.4.1 today). Lower bound (>=4.2): a 4.0 runner silently
+#   regresses the limited-API/abi3 mode (research D-3).
+#   SWIG-version-agnostic argout: SWIG 4.3.0 gave SWIG_Python_AppendOutput an
+#   `is_void` arg and now keeps a Py_None primary result for a NON-void fn unless
+#   is_void=1 — which would make our "consume the fixpp_error_t return, surface
+#   the out-param" typemaps return [None, handle] under >=4.3. fixpp.i avoids any
+#   pin by leaving $result NULL on OK in `%typemap(out) fixpp_error_t` (+ a
+#   `%typemap(ret)` defaulting None for no-out-param fns): AppendOutput's
+#   `if (!result) result = obj` first branch is identical on every SWIG, so the
+#   bare out-param is returned on 4.2 AND 4.3+. Verified at the generated-code
+#   level on 4.4.1 and behaviourally on SWIG 4.2 (in-tree sanitizer matrix) +
+#   4.4.1 (the shipped wheel) via the tests/wheel/ subset (T012).
+#   Exact published at implement (2026-06-30): scikit-build-core 0.12.2, swig
+#   4.4.1 (latest); 4.2.0 local.
+requires = ["scikit-build-core>=0.11", "swig>=4.2"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "fixpp"
+description = "Python binding for the fixpp C++23 FIX protocol library (over the frozen C ABI)"
+# PKG-3: abi3 cp310 floor; the single stable-ABI wheel covers 3.10–3.13 and
+# future 3.14+ (no upper cap — abi3 forward-compatibility is the point).
+requires-python = ">=3.10"
+license = "AGPL-3.0-or-later"
+dynamic = ["version"]
+# PKG-5: NO runtime dependencies — the extension is self-contained (FR-002).
+
+[tool.scikit-build]
+# PKG-4: the CMake root (FIXPP_BUILD_PYTHON switch + the whole engine the
+# extension statically links) is the submodule root, two levels up from this file.
+cmake.source-dir = "../.."
+cmake.version = ">=3.28"
+# Bound the wheel build: pin a persistent, named build dir (default is an
+# ephemeral temp that is re-created — and on a failed build, NOT cleaned — every
+# invocation; building the whole statically-linked engine there ran to ~18G and
+# filled the disk). build-dir is relative to this pyproject; "build/{wheel_tag}"
+# → bindings/python/build/cp310-abi3-... which is already gitignored (build/),
+# and {wheel_tag} keeps the single abi3 wheel in ONE reusable tree.
+build-dir = "build/{wheel_tag}"
+# Force Release: a Debug engine tree is ~11-17G of object files vs ~2-3G Release.
+# The shipped wheel is Release regardless; this also stops a stray Debug default
+# from re-exploding the build dir.
+cmake.build-type = "Release"
+# PKG-6: the AUTHORITATIVE abi3 wheel-tag driver -> cp310-abi3. The
+# -DPy_LIMITED_API compile flag + SABI wiring in CMakeLists.txt is compile-only
+# and does NOT set the tag (scikit-build-core does not auto-detect the limited ABI
+# nor consume the setuptools py_limited_api kwarg).
+wheel.py-api = "cp310"
+# Ship ONLY the flat top-level Python modules + the _fixpp_data package (LAY-1/2).
+# The root install(DIRECTORY include/) would otherwise stage the C-ABI headers
+# into the wheel; the engine static libs have no install() rule so they do not leak.
+wheel.exclude = ["include/**"]
+
+[tool.scikit-build.cmake.define]
+# PKG-4: drive the existing bindings target. OpenSSL staticness is a Conan
+# option set at build time (cibuildwheel CIBW_BEFORE_ALL), not here.
+FIXPP_BUILD_PYTHON = "ON"
+# The wheel is self-contained with NO OTel (FR-002): the Conan dep is dropped via
+# `-o fixpp/*:with_otel=False` in CIBW_BEFORE_ALL, and this PAIRED CMake toggle
+# disables the OTel code so the `opentelemetry-cpp::api`-absent configure does not
+# error (CMakeLists.txt:85). Both halves are required (research D-7 paired toggle).
+FIXPP_BUILD_OTEL = "OFF"
+# Build ONLY the binding + its engine deps — the wheel needs neither the test
+# tree (defaults ON) nor bench/fuzz. Without this the wheel build compiles ~1500
+# test targets it then discards (the bulk of the in-container build time + size).
+FIXPP_BUILD_TESTS = "OFF"
+
+[tool.scikit-build.metadata.version]
+# PKG-2 / D-6: single version source = the root CMake project(VERSION) (0.0.1
+# today). No second version source. (T014 confirms this resolves at build; the
+# documented fallback is a static project.version kept in sync by a CI check.)
+provider = "scikit_build_core.metadata.regex"
+input = "../../CMakeLists.txt"
+regex = '(?s)project\(\s*fixpp\s+VERSION\s+(?P<value>[0-9]+\.[0-9]+\.[0-9]+)'
+
+# ── cibuildwheel (T010 local / T016 CI — single source of truth) ────────────
+# Produces the ONE cp310-abi3 wheel in the pinned manylinux_2_28_x86_64 image.
+# Consumed identically by bindings/python/build-wheel.sh (local) and tier1.yml.
+[tool.cibuildwheel]
+# {python_tag}-{platform_tag}; abi3/2_28 are NOT selector components (D-7,
+# quickstart §1): abi3 from wheel.py-api="cp310", 2_28 from the image below.
+build = "cp310-manylinux_x86_64"
+archs = ["x86_64"]
+manylinux-x86_64-image = "manylinux_2_28"
+
+[tool.cibuildwheel.linux]
+# Toolchain + Conan setup, run ONCE per container; writes the Conan toolchain to
+# /tmp/wheel-conan (proven by the configure-only probe — see the script header).
+before-all = "bash {project}/bindings/python/cibw-before-all.sh {project}"
+# RC#4 (SC-004/FR-001): force the single mandated platform tag at repair time.
+# Without --only-plat, auditwheel prepends the detected-floor policy (e.g. 2_26)
+# producing a compressed tag "manylinux_2_26_x86_64.manylinux_2_28_x86_64" that
+# does NOT match the spec-mandated exact filename (FR-001).  --only-plat (≥6.7.0)
+# suppresses the compressed second tag → exactly fixpp-<ver>-cp310-abi3-manylinux_2_28_x86_64.whl.
+# Trade-off: the wheel won't install on glibc 2.26/2.27 hosts; consistent with the
+# manylinux_2_28 baseline mandated by FR-002/SC-004.
+repair-wheel-command = "auditwheel repair --plat manylinux_2_28_x86_64 --only-plat -w {dest_dir} {wheel}"
+
+# The Conan toolchain → scikit-build-core handoff. cmake does NOT read
+# CMAKE_TOOLCHAIN_FILE from the environment, so it MUST go through the build
+# backend as a config-setting (the same `-C cmake.define...` route proven
+# locally), NOT via [tool.cibuildwheel.linux.environment].
+[tool.cibuildwheel.config-settings]
+"cmake.define.CMAKE_TOOLCHAIN_FILE" = "/tmp/wheel-conan/conan_toolchain.cmake"

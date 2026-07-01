@@ -465,7 +465,7 @@ The `Application` callback interface (`onLogon`, `onLogout`, `toAdmin`, `fromAdm
 | Shared library | `libfixpp.so` | `fixpp.dll` + import lib `fixpp.lib` |
 | C ABI | re-exported from the same shared library; `extern "C"` symbols only | same |
 | Python extension | `_fixpp.so` (SWIG-generated) | `_fixpp.pyd` |
-| Python wheel | `fixpp-<ver>-cp310-cp310-manylinux_2_28_x86_64.whl` (mandatory) | best-effort |
+| Python wheel | `fixpp-<ver>-cp310-abi3-manylinux_2_28_x86_64.whl` (mandatory) | best-effort |
 | Service binary | `fixppd` | `fixppd.exe` |
 | Codegen tool | `fixpp-codegen` (build-only) | same |
 

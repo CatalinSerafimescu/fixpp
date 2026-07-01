@@ -33,6 +33,7 @@
 
 %{
 #include <string.h>  /* strlen — embedded-NUL check in the config-str typemaps */
+#include <stdint.h>  /* int64_t — captured main-interpreter id (T003 limited-API) */
 #include "fix/c_api.h"
 
 /* PY-003: the typed-exception hierarchy + the single-source translator live in
@@ -77,9 +78,31 @@ static void fixpp_py_raise_for_code(fixpp_error_t code) {
 /* T011: forward-declare the inbound trampoline so the register_callback in-typemap
  * can reference it. The body (which needs SWIGTYPE_p_fixpp_msg, defined later in
  * the wrapper) lives in the %wrapper block below. */
+/* extern "C" linkage: these are C-ABI recv callbacks. SWIG >= 4.4 emits the
+ * wrapper-block definitions inside extern "C" but leaves this header block at
+ * C++ linkage, so a plain static declaration conflicts (C vs C++ linkage) under
+ * gcc. The brace form is required (the extern "C" static prefix form is rejected
+ * by both gcc and clang). Verified clean under SWIG 4.2 and 4.4.
+ * NOTE: keep this comment free of apostrophes and percent signs (SWIG
+ * preprocessor mis-tokenizes them inside the header block). */
+extern "C" {
 static void fixpp_py_recv_trampoline(const fixpp_msg_t* inbound, void* userdata);
 static void fixpp_py_recv_trampoline_oo(const fixpp_msg_t* inbound, void* userdata);
+}
 static int fixpp_py_is_main_interpreter(void);
+
+/* T003 / FR-012 / SC-007 / D-3 — limited-API (Py_LIMITED_API=0x030A0000) sub-
+ * interpreter detection. PyInterpreterState_Main() is NOT in the limited API; the
+ * MAIN interpreter is the one whose PyInterpreterState_GetID() == 0 (sub-interps
+ * get 1,2,3...; verified main get_main()==0 on CPython 3.10/3.11/3.12/3.13). Both
+ * PyInterpreterState_Get() and PyInterpreterState_GetID() ARE in the limited API.
+ * This rejects EVERY non-main interpreter unconditionally (FR-018), independent of
+ * import order — unlike a capture-at-%init scheme, which is process-global-shared
+ * under single-phase init and is overwritten by a sub-interp's re-init on <3.12
+ * (no import barrier there), so a sub-interp would wrongly read as "main" (the
+ * 056 cp310-wheel 3.10/3.11 defect the tests/wheel/ band caught). Preserves the
+ * code-1201 rejection (fixpp_oo.py:152 / test_subinterpreter.py); on 3.12+ the
+ * single-phase import barrier rejects the sub-interp before this is reached. */
 
 /* Raise the root fixpp.FixppError from an `in`-typemap conversion failure
  * (contract T-2/T-3 / FR-010). SWIG_fail is `goto fail` inside the wrapper. */
@@ -302,7 +325,23 @@ def _raise_for_code(code):
         fixpp_py_raise_for_code($1);
         SWIG_fail;
     }
-    $result = SWIG_Py_Void();
+    /* OK: leave $result NULL (not Py_None). SWIG_AppendOutput's `if (!result)
+     * result = obj;` first branch is identical on every SWIG version, so the
+     * FIRST argout out-param (handle / bytes / str / scalar OUTPUT) becomes the
+     * sole Python return on 4.2 AND 4.3+. Setting Py_None here would survive only
+     * on SWIG <4.3: 4.3.0 gave SWIG_Python_AppendOutput an is_void arg and now
+     * keeps a Py_None primary result for a non-void fn (fixpp_error_t) ->
+     * [None, handle], breaking the whole binding. The %typemap(ret) below
+     * restores None for fns that have no out-param. */
+    $result = NULL;
+}
+
+/* Default the Python return to None for fallible fns with NO out-param (setters,
+ * start, send, close, destroy, ...): their out typemap leaves $result NULL and no
+ * argout fills it. Runs only on the success path (SWIG_fail bypasses ret). This is
+ * what makes the NULL-on-OK out typemap above SWIG-version-agnostic. */
+%typemap(ret) fixpp_error_t {
+    if (!$result) $result = SWIG_Py_Void();
 }
 
 /* ── T007: OUTPUT typemaps for **out handles + scalar out-params ─────────────
@@ -594,7 +633,8 @@ static void fixpp_py_release_application_oo(PyObject* py_session_wrapper) {
 %rename("_is_main_interpreter") fixpp_py_is_main_interpreter;
 %inline %{
 static int fixpp_py_is_main_interpreter(void) {
-    return PyInterpreterState_Get() == PyInterpreterState_Main();
+    /* Main interpreter id is 0 (limited-API "is-main" check, T003); see header note. */
+    return PyInterpreterState_GetID(PyInterpreterState_Get()) == 0;
 }
 %}
 
@@ -742,6 +782,19 @@ const char* fixpp_version_string(void);
 %pythoncode %{
 try:
     from fixpp_oo import Engine, Session, Message, Application, Dictionary
+except ImportError:
+    pass
+%}
+
+/* ── PY-005 / 056 (T009): bundled-dictionary locator re-export (LOC-0 / FR-004a)
+ * Surface the pure-Python fixpp_dict_data helper on the `fixpp` namespace so
+ * `import fixpp; fixpp.dictionary_path(...)` works (the public API; the module is
+ * an implementation module like fixpp_oo). SEPARATE guard from the fixpp_oo block
+ * above so each import fails independently — a deployment missing one module still
+ * gets the other + the flat substrate. Additive; no existing wrapper changes. */
+%pythoncode %{
+try:
+    from fixpp_dict_data import dictionary_path, dictionary_bytes, BUNDLED_DICTIONARIES
 except ImportError:
     pass
 %}
