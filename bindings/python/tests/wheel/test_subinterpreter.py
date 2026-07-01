@@ -51,7 +51,11 @@ def test_engine_constructor_rejects_subinterpreter():
                 ),
             )
         except xx.RunFailedError as exc:
-            if "module _fixpp does not support loading in subinterpreters" not in str(exc):
+            # The import-barrier text is a 3.12+ CPython message.  On 3.10/3.11 it
+            # never appears, so tolerate it ONLY on >=3.12 — on the owed 3.10/3.11
+            # band ANY RunFailedError must fail the test (RC#5, Gate B r2).
+            barrier = "module _fixpp does not support loading in subinterpreters"
+            if sys.version_info < (3, 12) or barrier not in str(exc):
                 raise
     finally:
         xx.destroy(interp)
