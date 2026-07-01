@@ -146,7 +146,7 @@ TEST(CapiThunkSplit, ConstructionTimeThunkRejectsWithoutAbort) {
     if (FIXPP_ABORT_SETJMP(g_abort_jmp) == 0) {
         fixpp_engine_config_t* ec = nullptr;
         ASSERT_EQ(fixpp_engine_config_create(&ec), FIXPP_ERR_OK);
-        // consumer_major != MAJOR (=0) → VERSION_MISMATCH, builder NOT consumed.
+        // consumer_major != MAJOR (=1) → VERSION_MISMATCH, builder NOT consumed.
         fixpp_engine_t* eng = nullptr;
         fixpp_error_t rc = fixpp_engine_create(ec, /*major=*/7, /*minor=*/0, &eng);
         EXPECT_EQ(rc, FIXPP_ERR_VERSION_MISMATCH);
@@ -159,7 +159,7 @@ TEST(CapiThunkSplit, ConstructionTimeThunkRejectsWithoutAbort) {
         ASSERT_EQ(fixpp_engine_config_create(&ec2), FIXPP_ERR_OK);
         ASSERT_EQ(fixpp_engine_config_set_realtime_clock(ec2), FIXPP_ERR_OK);
         fixpp_engine_t* eng2 = nullptr;
-        ASSERT_EQ(fixpp_engine_create(ec2, 0, 0, &eng2), FIXPP_ERR_OK);
+        ASSERT_EQ(fixpp_engine_create(ec2, 1, 0, &eng2), FIXPP_ERR_OK);
 
         // Empty CompID is rejected eagerly by the setter (construction-time).
         fixpp_session_config_t* sc = nullptr;
@@ -188,7 +188,7 @@ fixpp_session_t* open_unstarted_session(fixpp_engine_t** out_engine) {
     EXPECT_EQ(fixpp_engine_config_create(&ec), FIXPP_ERR_OK);
     EXPECT_EQ(fixpp_engine_config_set_realtime_clock(ec), FIXPP_ERR_OK);
     fixpp_engine_t* eng = nullptr;
-    EXPECT_EQ(fixpp_engine_create(ec, 0, 0, &eng), FIXPP_ERR_OK);
+    EXPECT_EQ(fixpp_engine_create(ec, 1, 0, &eng), FIXPP_ERR_OK);
 
     fixpp_session_config_t* sc = nullptr;
     EXPECT_EQ(fixpp_session_config_create(&sc), FIXPP_ERR_OK);

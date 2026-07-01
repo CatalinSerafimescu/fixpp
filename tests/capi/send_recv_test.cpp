@@ -139,8 +139,8 @@ TEST(CapiSendRecv, TwoEngineRoundTripReplyFromDrainThread) {
     // Acceptor engine B + initiator engine A — each owns its own io_context+worker.
     fixpp_engine_t* B = nullptr;
     fixpp_engine_t* A = nullptr;
-    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 0, 0, &B), FIXPP_ERR_OK);
-    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 0, 0, &A), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 1, 0, &B), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 1, 0, &A), FIXPP_ERR_OK);
 
     // The acceptor B replies from a drain thread when it receives A's order.
     DrainReplier b_drain;
@@ -231,8 +231,8 @@ TEST(CapiSendRecv, TwoEngineRoundTripReplyFromDrainThread) {
 TEST(CapiSendRecv, NoCallbacksAfterClose) {
     fixpp_engine_t* B = nullptr;
     fixpp_engine_t* A = nullptr;
-    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 0, 0, &B), FIXPP_ERR_OK);
-    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 0, 0, &A), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 1, 0, &B), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 1, 0, &A), FIXPP_ERR_OK);
 
     fixpp_session_config_t* acc =
         make_session_cfg("ACC-NC", "INIT-NC", FIXPP_ROLE_ACCEPTOR);
@@ -303,8 +303,8 @@ TEST(CapiSendRecv, NoCallbacksAfterClose) {
 TEST(CapiSendRecv, InboundHandleUseAfterReturnCaughtUnderAsan) {
     fixpp_engine_t* B = nullptr;
     fixpp_engine_t* A = nullptr;
-    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 0, 0, &B), FIXPP_ERR_OK);
-    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 0, 0, &A), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 1, 0, &B), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 1, 0, &A), FIXPP_ERR_OK);
 
     fixpp_session_config_t* acc =
         make_session_cfg("ACC-UAF", "INIT-UAF", FIXPP_ROLE_ACCEPTOR);
@@ -377,8 +377,8 @@ TEST(CapiSendRecv, InboundHandleUseAfterReturnCaughtUnderAsan) {
 TEST(CapiSendRecv, CloseReapedSessionIsIdempotentOk) {
     fixpp_engine_t* B = nullptr;
     fixpp_engine_t* A = nullptr;
-    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 0, 0, &B), FIXPP_ERR_OK);
-    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 0, 0, &A), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 1, 0, &B), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 1, 0, &A), FIXPP_ERR_OK);
 
     fixpp_session_config_t* acc =
         make_session_cfg("ACC-RP", "INIT-RP", FIXPP_ROLE_ACCEPTOR);
@@ -428,8 +428,8 @@ TEST(CapiSendRecv, CloseReapedSessionIsIdempotentOk) {
 TEST(CapiSendRecv, CloseReapedNeverEstablishedIsLifecycle) {
     fixpp_engine_t* B = nullptr;
     fixpp_engine_t* A = nullptr;
-    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 0, 4, &B), FIXPP_ERR_OK);  // minor=4: no downgrade
-    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 0, 0, &A), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 1, 4, &B), FIXPP_ERR_OK);  // minor=4: no downgrade
+    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 1, 0, &A), FIXPP_ERR_OK);
 
     fixpp_session_config_t* acc =
         make_session_cfg("ACC-RN", "INIT-RN", FIXPP_ROLE_ACCEPTOR);

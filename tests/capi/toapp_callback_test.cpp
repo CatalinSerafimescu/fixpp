@@ -51,7 +51,7 @@ namespace {
 // Build an engine with consumer_minor=4 so the [1400,1499] codes are not
 // downgraded to FIXPP_ERR_UNKNOWN.  (See T004 in error_block_test.cpp.)
 fixpp_error_t make_engine_v4(fixpp_engine_t** out) {
-    return fixpp_engine_create(make_engine_cfg(), 0, 4, out);
+    return fixpp_engine_create(make_engine_cfg(), 1, 4, out);
 }
 
 // Poll until `received` is true or the deadline elapses.

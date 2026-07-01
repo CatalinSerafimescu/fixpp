@@ -173,7 +173,7 @@ using namespace std::chrono_literals;
 // ── ARM 1: session_invalid_argument via duplicate session_open ────────────────
 TEST(CapiErrorBlock, T022_Arm1_SessionInvalidArgument) {
     fixpp_engine_t* A = nullptr;
-    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 0, 4, &A), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 1, 4, &A), FIXPP_ERR_OK);
 
     // First open: success (config is consumed).
     fixpp_session_config_t* cfg1 = make_session_cfg("DUP-SEND", "DUP-RECV", FIXPP_ROLE_INITIATOR);
@@ -199,7 +199,7 @@ TEST(CapiErrorBlock, T022_Arm2_SessionInvalidState) {
     // Use a port that nothing is listening on (port 1) — the initiator will be
     // in LogonSent/connecting, not Active when we immediately call send.
     fixpp_engine_t* A = nullptr;
-    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 0, 4, &A), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 1, 4, &A), FIXPP_ERR_OK);
 
     fixpp_session_config_t* ini = make_session_cfg("NOT-EST", "PEER", FIXPP_ROLE_INITIATOR);
     set_loopback_endpoint(ini, "127.0.0.1", 1);  // port 1: nothing there
@@ -221,8 +221,8 @@ TEST(CapiErrorBlock, T022_Arm2_SessionInvalidState) {
 TEST(CapiErrorBlock, T022_Arm3_AppPayloadMalformed) {
     fixpp_engine_t* B = nullptr;
     fixpp_engine_t* A = nullptr;
-    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 0, 4, &B), FIXPP_ERR_OK);
-    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 0, 4, &A), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 1, 4, &B), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 1, 4, &A), FIXPP_ERR_OK);
 
     fixpp_session_config_t* acc = make_session_cfg("ACC-MALF5", "INI-MALF5", FIXPP_ROLE_ACCEPTOR);
     set_loopback_endpoint(acc, "127.0.0.1", 0);
@@ -259,8 +259,8 @@ TEST(CapiErrorBlock, T022_Arm3_AppPayloadMalformed) {
 TEST(CapiErrorBlock, T022_Arm4_AppDoNotSend) {
     fixpp_engine_t* B = nullptr;
     fixpp_engine_t* A = nullptr;
-    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 0, 4, &B), FIXPP_ERR_OK);
-    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 0, 4, &A), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 1, 4, &B), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 1, 4, &A), FIXPP_ERR_OK);
 
     fixpp_session_config_t* acc = make_session_cfg("ACC-VETO5", "INI-VETO5", FIXPP_ROLE_ACCEPTOR);
     set_loopback_endpoint(acc, "127.0.0.1", 0);
@@ -300,8 +300,8 @@ TEST(CapiErrorBlock, T022_Arm4_AppDoNotSend) {
 TEST(CapiErrorBlock, T022_Arm5_AppCallbackThrew) {
     fixpp_engine_t* B = nullptr;
     fixpp_engine_t* A = nullptr;
-    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 0, 4, &B), FIXPP_ERR_OK);
-    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 0, 4, &A), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 1, 4, &B), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 1, 4, &A), FIXPP_ERR_OK);
 
     fixpp_session_config_t* acc = make_session_cfg("ACC-CBT5", "INI-CBT5", FIXPP_ROLE_ACCEPTOR);
     set_loopback_endpoint(acc, "127.0.0.1", 0);

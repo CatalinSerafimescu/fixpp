@@ -95,8 +95,8 @@ TEST(MsgCloneCrossStrand, CloneOnDispatchWindowReadOnDrainThread) {
     fixpp_session_t* init_sess = nullptr;
     fixpp_session_t* acc_sess = nullptr;
 
-    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 0, 4, &init_eng), FIXPP_ERR_OK);
-    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 0, 4, &acc_eng), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 1, 4, &init_eng), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 1, 4, &acc_eng), FIXPP_ERR_OK);
 
     // Acceptor session
     {

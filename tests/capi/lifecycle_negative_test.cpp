@@ -69,6 +69,24 @@ TEST(CapiLifecycleNegative, EngineCreateRejectsMajorMismatch) {
     fixpp_engine_config_destroy(ec);
 }
 
+TEST(CapiLifecycleNegative, EngineCreateRejectsPreGaMajorZero) {
+    // Pin the GA precondition: this test is only meaningful after the 0→1 GA freeze.
+    static_assert(kMajor == 1, "GA precondition: this test pins that pre-GA major 0 is now rejected");
+    // This directly witnesses the 0→1 GA freeze's core behavioral change: an old
+    // consumer compiled against C-ABI major 0 is now refused with VERSION_MISMATCH.
+    // The existing kMajor+1 mismatch test does NOT cover this specific case (it tests
+    // major=2, not major=0; a carve-out accepting major==0 would pass the kMajor+1 test
+    // yet still break the GA freeze contract).
+    fixpp_engine_config_t* ec = nullptr;
+    ASSERT_EQ(fixpp_engine_config_create(&ec), FIXPP_ERR_OK);
+    fixpp_engine_t* eng = nullptr;
+    // Pre-GA major 0 must be refused — builder NOT consumed.
+    EXPECT_EQ(fixpp_engine_create(ec, /*pre-GA major=*/0, kMinor, &eng),
+              FIXPP_ERR_VERSION_MISMATCH);
+    EXPECT_EQ(eng, nullptr);
+    fixpp_engine_config_destroy(ec);
+}
+
 // ── Engine start guards ───────────────────────────────────────────────────────
 
 TEST(CapiLifecycleNegative, EngineStartRejectsNullHandle) {
