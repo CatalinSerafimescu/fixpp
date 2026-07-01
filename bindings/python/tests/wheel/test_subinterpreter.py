@@ -1,11 +1,20 @@
 """Subinterpreter rejection witness for PY-004 Phase 3 (055 / US1)."""
 
+import sys
 import textwrap
 
 import pytest
 
 
-xx = pytest.importorskip("_xxsubinterpreters")
+if sys.version_info < (3, 12):
+    # On the owed band (3.10/3.11) the CPython import barrier does not fire;
+    # a missing _xxsubinterpreters module is a broken runner, not a skip.
+    # Gate B owes a real 1201 witness on this band — make it mandatory.
+    import _xxsubinterpreters as xx
+else:
+    # 3.12+: the CPython import barrier covers the owed check.
+    # 3.13 renamed the module to _interpreters, so tolerate a skip here.
+    xx = pytest.importorskip("_xxsubinterpreters")
 
 
 def test_engine_constructor_rejects_subinterpreter():
