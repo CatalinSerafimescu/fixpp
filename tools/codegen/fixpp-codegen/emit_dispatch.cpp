@@ -98,20 +98,17 @@ std::string emit_dispatch_fixt(std::vector<VersionIR> const& all) {
     w.line("// layering violation). The consumer #includes this file; the switch body");
     w.line("// it provides is evaluated by the inline dispatch helper in the same TU.");
     w.line("//");
-    w.line("// R6: the frozen wire stub returns field-absent for every get<>(). The");
-    w.line("// dispatch switch shape compiles and the fail-loud default is present;");
-    w.line("// behavioural round-trip is R6-blocked until 2b swaps in the real body.");
+    w.line("// 057: each known arm mints a live owning_message_handle via the single");
+    w.line("// hand-written factory detail::owning_message_handle_from_frame; the switch");
+    w.line("// is the known-MsgType membership test. Fail-loud default (I-11 / R3).");
     w.line("#pragma once");
     w.line("#include <fixpp/core/error.hpp>          // core::expected_t, core::error");
-    w.line("#include <fixpp/dict/reify.hpp>           // owning_message_handle");
+    w.line("#include <fixpp/dict/reify.hpp>           // owning_message_handle + factory");
     w.line("#include <fixpp/dict/version_profile.hpp> // resolved_message_version");
     w.line("#include <fixpp/wire/message_view_contract.hpp>");
     w.line("#include <expected>");
     w.line("#include <memory_resource>");
     w.line("#include <string_view>");
-    w.line();
-    w.line("// Generated vt11 Reify.hpp — owning_<Msg> classes for all admin types.");
-    w.line("#include <fixpp/vt11/Reify.hpp>");
     w.line();
     w.line("namespace fixpp::dict::dispatch {");
     w.line();
@@ -134,10 +131,7 @@ std::string emit_dispatch_fixt(std::vector<VersionIR> const& all) {
     w.line("        profile.session,");
     w.line("        ::fixpp::dict::application_version::Unknown");
     w.line("    };");
-    w.line("    // rmv is plumbed into the owning_message_handle ctor when 2b lands");
-    w.line("    // (gate-b/r1 RC#1 F1 fix: resolved_message_version is now propagated, not");
-    w.line("    // discarded). Under R6 it is (void)d because the handle is not yet returned.");
-    w.line("    (void)rmv;");
+    w.line("    // rmv drives the live owning_message_handle the factory mints below.");
     w.line("    switch (msg_type) {");
 
     for (auto const& fa : kFixtAdminTypes) {
@@ -146,19 +140,9 @@ std::string emit_dispatch_fixt(std::vector<VersionIR> const& all) {
         w.raw("': {  /* ");
         w.raw(fa.comment);
         w.line(" */");
-        w.line("            // gate-b/r1 RC#1 F1: forward the real view (not MV{}) so the");
-        w.line("            // dispatch arm is wire-body-ready when 2b lands.");
-        w.line("            // from_view returns dict_reify_wire_body_not_ready under R6");
-        w.line("            // (frozen stub has no bytes) — propagate that distinct error so");
-        w.line("            // positive oracle tests cannot go green until 2b.");
-        w.raw("            auto own = ::fixpp::vt11::owning_");
-        w.raw(fa.class_name);
-        w.raw("::from_view(");
-        w.line("view, mr);");
-        w.line("            if (!own) return ::std::unexpected{own.error()};");
-        w.line("            // 2b-unblock: construct and return owning_message_handle{rmv, own}.");
-        w.line("            (void)own;");
-        w.line("            return ::std::unexpected{::fixpp::core::error::dict_reify_wire_body_not_ready};");
+        w.line(
+            "            return "
+            "::fixpp::dict::detail::owning_message_handle_from_frame(rmv, view, mr);");
         w.line("        }");
     }
 
@@ -201,21 +185,18 @@ std::string emit_dispatch_application(std::vector<VersionIR> const& all) {
     w.line("// LAYERING NOTE ([2c §4.8] / contracts/reify_dispatch.hpp): included ONCE by");
     w.line("// the dispatch-consuming TU; NOT by the shipped include/fixpp/dict/reify.hpp.");
     w.line("//");
-    w.line("// R6: frozen wire stub — get<>() always returns field-absent. Switch shapes");
-    w.line("// compile and fail-loud defaults fire. Behavioural round-trip is R6-blocked.");
+    w.line("// 057: each known arm (single- or two-char MsgType) mints a live");
+    w.line("// owning_message_handle via detail::owning_message_handle_from_frame; the");
+    w.line("// two-level length-first switch is the known-MsgType membership test.");
     w.line("#pragma once");
     w.line("#include <fixpp/core/error.hpp>");
     w.line("#include <fixpp/dict/reify.hpp>");
     w.line("#include <fixpp/dict/version_profile.hpp>");
     w.line("#include <fixpp/wire/message_view_contract.hpp>");
+    w.line("#include <cstdint>");
     w.line("#include <expected>");
     w.line("#include <memory_resource>");
     w.line("#include <string_view>");
-    w.line();
-    w.line("// Generated Reify.hpp — owning_<Msg> classes for application versions.");
-    w.line("#include <fixpp/v42/Reify.hpp>");
-    w.line("#include <fixpp/v44/Reify.hpp>");
-    w.line("#include <fixpp/v50sp2/Reify.hpp>");
     w.line();
     w.line("namespace fixpp::dict::dispatch {");
     w.line();
@@ -234,10 +215,8 @@ std::string emit_dispatch_application(std::vector<VersionIR> const& all) {
     w.line("    ::fixpp::dict::version_profile profile,");
     w.line("    ::std::pmr::memory_resource* mr)");
     w.line("{");
-    w.line("    // gate-b/r1 RC#1 F1: view is now accepted and forwarded (not discarded).");
-    w.line("    // resolved_message_version is constructed per arm and plumbed into the handle");
-    w.line("    // when 2b lands. Under R6 (void)rmv suppresses unused-variable warnings.");
-    w.line("    (void)profile;  // carried in resolved_message_version per arm (2b-unblock)");
+    w.line("    // resolved_message_version is built per arm from profile.session +");
+    w.line("    // the resolved application version, then drives the live handle.");
     w.line("    switch (resolved_application) {");
 
     // Emit one outer case per codegen application version.
@@ -258,8 +237,10 @@ std::string emit_dispatch_application(std::vector<VersionIR> const& all) {
         w.raw("            // fixpp::");
         w.raw(av.ns);
         w.line(" application messages.");
-        w.line("            // gate-b/r1 RC#1 F1: resolved_message_version for application frames:");
-        w.line("            // {application, profile.session, resolved_application} per AC-D3 / [2c §6.3].");
+        w.line("            // resolved_message_version for application frames:");
+        w.line(
+            "            // {application, profile.session, resolved_application} (AC-D3 / [2c "
+            "§6.3]).");
         w.raw("            ::fixpp::dict::resolved_message_version const rmv_app{");
         w.line("");
         w.line("                ::fixpp::dict::resolved_message_version::kind::application,");
@@ -268,64 +249,85 @@ std::string emit_dispatch_application(std::vector<VersionIR> const& all) {
         w.raw(av.ns);
         w.line("");
         w.line("            };");
-        w.line("            (void)rmv_app;  // plumbed into handle when 2b lands; suppress warning under R6");
-        w.line("            if (msg_type.size() != 1 && msg_type.empty()) {");
+        w.line("            if (msg_type.empty()) {");
         w.line(
             "                return "
             "::std::unexpected{::fixpp::core::error::dict_reify_unknown_msg_type};");
         w.line("            }");
-        w.line("            char const mt = msg_type.empty() ? '\\0' : msg_type[0];");
-        w.line("            // Multi-char MsgTypes (FIX-Latest extensions) fall to default.");
-        w.line("            if (msg_type.size() > 1) {");
-        w.line(
-            "                return "
-            "::std::unexpected{::fixpp::core::error::dict_reify_unknown_msg_type};");
-        w.line("            }");
-        w.line("            switch (mt) {");
+        w.line("            // Length-first two-level dispatch (max MsgType length is 2): a");
+        w.line("            // single-char switch, else a packed-uint16 switch. Length-first so");
+        w.line("            // a single-char 'A' cannot collide with a two-char \"A?\".");
+        w.line("            if (msg_type.size() == 1) {");
+        w.line("                switch (static_cast<unsigned char>(msg_type[0])) {");
 
         if (ir != nullptr) {
-            // Emit one inner case per message in this version.
-            // Messages are bytewise-sorted by msg_type (002 D-6).
+            // Single-char arms, bytewise-sorted order (002 D-6) preserved.
             for (auto const& m : ir->messages) {
-                if (m.msg_type.empty()) {
-                    continue;
-                }
-                // Single-char MsgTypes only (multi-char are FIX-Latest, AC-G9).
                 if (m.msg_type.size() != 1) {
                     continue;
                 }
-                std::string const id = to_identifier(m.name);
-                w.raw("                case '");
+                w.raw("                    case '");
                 w.raw(m.msg_type);
                 w.raw("': {  /* ");
                 w.raw(m.name);
                 w.line(" */");
-                w.line("                    // gate-b/r1 RC#1 F1: forward the real view (not MV{}).");
-                w.raw("                    auto own = ::fixpp::");
-                w.raw(av.ns);
-                w.raw("::owning_");
-                w.raw(id);
-                w.raw("::from_view(");
-                w.line("view, mr);");
-                w.line("                    if (!own) return ::std::unexpected{own.error()};");
-                w.line("                    // 2b-unblock: return owning_message_handle{rmv_app, own}.");
-                w.line("                    (void)own;");
                 w.line(
-                    "                    return "
-                    "::std::unexpected{::fixpp::core::error::dict_reify_wire_body_not_ready};");
-                w.line("                }");
+                    "                        return "
+                    "::fixpp::dict::detail::owning_message_handle_from_frame(rmv_app, view, mr);");
+                w.line("                    }");
             }
         }
 
-        w.line("                default:");
-        w.line("                    // I-11 inner default — fail-loud for unknown MsgType");
-        w.raw("                    // in ");
-        w.raw(av.ns);
-        w.line(" (R3 / AC-D7).");
+        w.line("                    default:");
         w.line(
-            "                    return "
+            "                        return "
             "::std::unexpected{::fixpp::core::error::dict_reify_unknown_msg_type};");
+        w.line("                }");
         w.line("            }");
+        w.line("            if (msg_type.size() == 2) {");
+        w.line(
+            "                switch (static_cast<::std::uint16_t>("
+            "static_cast<unsigned char>(msg_type[0])) << 8");
+        w.line("                        | static_cast<unsigned char>(msg_type[1])) {");
+
+        if (ir != nullptr) {
+            // Two-char arms, bytewise-sorted order (== ascending packed uint16).
+            for (auto const& m : ir->messages) {
+                if (m.msg_type.size() != 2) {
+                    continue;
+                }
+                // Case label mirrors the switch-key expression EXACTLY (same
+                // unsigned-char casts) so char signedness cannot desync label vs key.
+                w.raw(
+                    "                    case (static_cast<::std::uint16_t>("
+                    "static_cast<unsigned char>('");
+                w.raw(std::string_view(m.msg_type.data(), 1));
+                w.raw("')) << 8 | static_cast<unsigned char>('");
+                w.raw(std::string_view(m.msg_type.data() + 1, 1));
+                w.raw("')): {  /* \"");
+                w.raw(m.msg_type);
+                w.raw("\" ");
+                w.raw(m.name);
+                w.line(" */");
+                w.line(
+                    "                        return "
+                    "::fixpp::dict::detail::owning_message_handle_from_frame(rmv_app, view, mr);");
+                w.line("                    }");
+            }
+        }
+
+        w.line("                    default:");
+        w.line(
+            "                        return "
+            "::std::unexpected{::fixpp::core::error::dict_reify_unknown_msg_type};");
+        w.line("                }");
+        w.line("            }");
+        w.raw("            // Unreachable (max MsgType length is 2) — fail-loud for ");
+        w.raw(av.ns);
+        w.line(" (I-11 / R3 / AC-D7).");
+        w.line(
+            "            return "
+            "::std::unexpected{::fixpp::core::error::dict_reify_unknown_msg_type};");
         w.line("        }");
     }
 

@@ -44,14 +44,23 @@
 //         must_include_manifest.txt (AC-G12 curated CI subset).
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <cstddef>
 #include <fixpp/core/error.hpp>
 #include <fixpp/dict/reify.hpp>
 #include <fixpp/dict/version_profile.hpp>
 #include <fixpp/wire/message_view_contract.hpp>
 #include <memory_resource>
+#include <optional>
+#include <span>
 #include <string_view>
 #include <type_traits>
 #include <utility>
+#include <vector>
+
+#include "support/failing_pmr_resource.hpp"  // 057: view()-OOM degrade witness
+#include "support/msvc_debug_arena_skip.hpp"
+#include "support/reify_test_frame.hpp"  // 057: make_*_frame() helpers (E-6)
 
 // Generated _dispatch/ headers — included ONCE by this dispatch-consuming TU
 // (AC-D1 / contracts/reify_dispatch.hpp "included once per dispatch-consuming
@@ -62,6 +71,11 @@
 #include <fixpp/_dispatch/reify_dispatch_application.hpp>
 #include <fixpp/_dispatch/reify_dispatch_fixt.hpp>
 
+// 057 US3: reify_as<Msg> needs the flyweight + owning_message_traits<Msg>
+// specialization (the generated _dispatch headers no longer pull Reify.hpp
+// after the D-4 emitter change, so include it directly here).
+#include <fixpp/v44/Reify.hpp>
+
 namespace {
 
 using fixpp::core::error;
@@ -71,6 +85,31 @@ using fixpp::dict::resolved_message_version;
 using fixpp::dict::session_version;
 using fixpp::dict::version_profile;
 using MV = fixpp::wire::MessageView<fixpp::wire::access_mode::Index>;
+
+// 057: frames a test byte buffer into a live MessageView<Index> and keeps every
+// dependency (bytes, arena, frame_view, MV) as a member so the MV — which is
+// [[clang::lifetimebound]] to its frame_view — never dangles. Mirrors the
+// Framer seam used by reify_oom_test.
+class ReifyFixture {
+public:
+    explicit ReifyFixture(std::vector<std::byte> frame) : frame_(std::move(frame)) {
+        fixpp::wire::pmr_carry_buffer carry{frame_.size(), &arena_};
+        fixpp::wire::Framer framer{};
+        auto framed = framer.feed(std::span<const std::byte>{frame_.data(), frame_.size()}, carry,
+                                  std::span<fixpp::wire::frame_view>{fvs_, 1});
+        if (framed && !framed->empty()) {
+            mv_.emplace(fvs_[0], &arena_);
+        }
+    }
+    [[nodiscard]] bool ok() const noexcept { return mv_.has_value(); }
+    [[nodiscard]] MV const& view() const noexcept { return *mv_; }
+
+private:
+    std::vector<std::byte> frame_;
+    std::pmr::monotonic_buffer_resource arena_;
+    fixpp::wire::frame_view fvs_[1]{};
+    std::optional<MV> mv_;
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Compile-time shape: dispatch helpers exist and have correct signatures.
@@ -110,46 +149,28 @@ static_assert(
 //   □ Assert r->msg_type() == the expected MsgType string_view.
 // ─────────────────────────────────────────────────────────────────────────────
 TEST(ReifyDispatchFixt, SevenAdminMsgTypesAllHit) {
-    // AC-D2 / seam #15a / gate-b/r1 RC#3-B: 7 FIXT.1.1 admin MsgTypes must
-    // return EXACTLY dict_reify_wire_body_not_ready — not success, and not
-    // dict_reify_unknown_msg_type (that is the default arm / I-11 / AC-D5).
-    // Any change to this error code breaks this oracle, preventing misdispatch
-    // from silently passing.
+    // 057: each of the 7 FIXT.1.1 admin MsgTypes dispatches to a LIVE handle
+    // whose version() is {session_admin, vt11, Unknown} — never the fail-loud
+    // default arm. (Empty-MV metadata oracle; the discriminating header-field
+    // read is FixtAdminReify.DiscriminatingHeaderField below.)
     std::pmr::monotonic_buffer_resource arena;
     MV mv;
     version_profile const fixt_profile{session_version::vt11, application_version::v50sp2, true, 0};
     constexpr char kAdminTypes[] = {'0', '1', '2', '3', '4', '5', 'A'};
     for (char mt : kAdminTypes) {
         auto r = fixpp::dict::dispatch::dispatch_fixt(mv, mt, fixt_profile, &arena);
-        ASSERT_FALSE(r.has_value())
-            << "AC-D2: dispatch_fixt on admin MsgType '" << mt
-            << "' must not return success under R6 (from_view: wire body not ready)";
-        EXPECT_EQ(r.error(), error::dict_reify_wire_body_not_ready)
-            << "AC-D2 R6 positive oracle: dispatch_fixt on admin MsgType '" << mt
-            << "' must return dict_reify_wire_body_not_ready (NOT dict_reify_unknown_msg_type "
-               "which would indicate a default-arm hit, NOR dict_xml_parse_failed)";
-        // Redundant guard — belt + suspenders: also assert NOT the default arm.
-        EXPECT_NE(r.error(), error::dict_reify_unknown_msg_type)
-            << "AC-D2: FIXT admin MsgType '" << mt << "' must NOT hit the fail-loud default arm";
+        ASSERT_TRUE(r.has_value())
+            << "057: dispatch_fixt on admin MsgType '" << mt << "' must return a live handle";
+        EXPECT_EQ(r->version().k, resolved_message_version::kind::session_admin);
+        EXPECT_EQ(r->version().session, session_version::vt11);
+        EXPECT_EQ(r->version().application, application_version::Unknown);
     }
 }
 
-// ─── #if R6 behavioural block — activates when 2b lands ─────────────────────
-// 2b-unblock: this block compiles always but the tests skip under R6.
-// Set FIXPP_R6_WIRE_BODY_READY=1 to remove the GTEST_SKIP().
-// ─────────────────────────────────────────────────────────────────────────────
-#ifndef FIXPP_R6_WIRE_BODY_READY
-
-TEST(ReifyDispatchFixt, SevenAdminMsgTypesFullHandle_R6Deferred) {
-    // AC-D2 behavioural: parsed-frame → dispatch_fixt → has_value() + version() exact.
-    // R6-deferred (spec §5): from_view returns wire_body_not_ready.
-    // 2b-unblock: remove GTEST_SKIP; assert has_value(), version().k == session_admin,
-    //             version().session == vt11, msg_type() == expected string.
-    GTEST_SKIP() << "R6-deferred (spec §5): full dispatch round-trip awaits 2b wire body";
-}
-
-#else  // FIXPP_R6_WIRE_BODY_READY
-
+// ─── FIXT-admin full-handle behavioural test (057: activated) ───────────────
+// dispatch_fixt on each admin MsgType now returns a LIVE handle; version()
+// carries {session_admin, vt11, Unknown}. (Empty-MV metadata oracle; the
+// discriminating FIXT header-field read is the US2 witness, T016.)
 TEST(ReifyDispatchFixt, SevenAdminMsgTypesFullHandle) {
     std::pmr::monotonic_buffer_resource arena;
     MV mv;
@@ -158,7 +179,7 @@ TEST(ReifyDispatchFixt, SevenAdminMsgTypesFullHandle) {
     for (char mt : kAdminTypes) {
         auto r = fixpp::dict::dispatch::dispatch_fixt(mv, mt, fixt_profile, &arena);
         ASSERT_TRUE(r.has_value())
-            << "2b: dispatch_fixt on admin MsgType '" << mt << "' must return a valid handle";
+            << "057: dispatch_fixt on admin MsgType '" << mt << "' must return a valid handle";
         EXPECT_EQ(r->version().k, resolved_message_version::kind::session_admin)
             << "AC-D2: FIXT admin handle must have kind == session_admin";
         EXPECT_EQ(r->version().session, session_version::vt11)
@@ -167,8 +188,6 @@ TEST(ReifyDispatchFixt, SevenAdminMsgTypesFullHandle) {
             << "AC-D2: FIXT admin handle must have application == Unknown";
     }
 }
-
-#endif  // FIXPP_R6_WIRE_BODY_READY
 
 TEST(ReifyDispatchFixt, NonAdminMsgTypeHitsDefault) {
     // AC-D7 / I-11 / seam #15a: a MsgType not in the 7 admin set returns
@@ -185,18 +204,13 @@ TEST(ReifyDispatchFixt, NonAdminMsgTypeHitsDefault) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Seam #15b — application MsgTypes (AC-G12 curated must-include subset).
-// AC-D1 / AC-D3. gate-b/r1 RC#3-B: replace "not-the-default-error" with the
-// EXACT R6 placeholder error code (dict_reify_wire_body_not_ready).
-// This ensures misdispatch (wrong version/MsgType combo hitting the default
-// arm and returning dict_reify_unknown_msg_type) cannot stay green.
-//
-// R6-unblock (2b): results change to valid owning_message_handle with correct
-// version().application and msg_type() — activate via FIXPP_R6_WIRE_BODY_READY.
+// AC-D1 / AC-D3. 057: each (version, MsgType) now dispatches to a LIVE handle
+// whose version().application matches the dispatched version. (Empty-MV
+// metadata oracle; the discriminating per-field body reads are in T013.)
 // ─────────────────────────────────────────────────────────────────────────────
 TEST(ReifyDispatchApplication, MustIncludeSubsetAllHit) {
-    // AC-G12 curated must-include subset / gate-b/r1 RC#3-B positive oracle.
-    // Each entry MUST return dict_reify_wire_body_not_ready — not
-    // dict_reify_unknown_msg_type (default arm) and not success.
+    // AC-G12 curated must-include subset. Each entry returns a live handle with
+    // version().application == the dispatched version (never a default-arm miss).
     struct Case {
         application_version version;
         std::string_view msg_type;
@@ -220,31 +234,15 @@ TEST(ReifyDispatchApplication, MustIncludeSubsetAllHit) {
     for (auto const& c : kCases) {
         auto r =
             fixpp::dict::dispatch::dispatch_application(mv, c.msg_type, c.version, profile, &arena);
-        ASSERT_FALSE(r.has_value())
-            << c.label << ": dispatch_application must not return success under R6";
-        EXPECT_EQ(r.error(), error::dict_reify_wire_body_not_ready)
-            << "AC-D3 R6 positive oracle: " << c.label
-            << " (version=" << static_cast<int>(c.version) << ", MsgType=" << c.msg_type
-            << ") must return dict_reify_wire_body_not_ready "
-               "(not dict_reify_unknown_msg_type which would indicate a default-arm hit)";
-        // Belt + suspenders: also assert NOT the fail-loud outer default arm.
-        EXPECT_NE(r.error(), error::dict_reify_unknown_msg_type)
-            << "AC-D3 / I-11: " << c.label << " must NOT hit the fail-loud outer default arm";
+        ASSERT_TRUE(r.has_value())
+            << c.label << ": 057 dispatch_application must return a live handle";
+        EXPECT_EQ(r->version().application, c.version)
+            << "AC-D3: " << c.label
+            << " handle.version().application must match the dispatched version";
     }
 }
 
-// ─── #if R6 behavioural block — activates when 2b lands ─────────────────────
-#ifndef FIXPP_R6_WIRE_BODY_READY
-
-TEST(ReifyDispatchApplication, MustIncludeSubsetFullHandles_R6Deferred) {
-    // AC-D3 behavioural: dispatch_application → has_value() + version() + msg_type() exact.
-    // R6-deferred (spec §5): from_view returns wire_body_not_ready.
-    // 2b-unblock: assert has_value(), version().application == c.version, msg_type() == c.msg_type.
-    GTEST_SKIP() << "R6-deferred (spec §5): full dispatch round-trip awaits 2b wire body";
-}
-
-#else  // FIXPP_R6_WIRE_BODY_READY
-
+// ─── application full-handle behavioural test (057: activated) ──────────────
 TEST(ReifyDispatchApplication, MustIncludeSubsetFullHandles) {
     struct Case {
         application_version version;
@@ -272,8 +270,6 @@ TEST(ReifyDispatchApplication, MustIncludeSubsetFullHandles) {
             << c.label << ": handle.version().application must match the dispatched version";
     }
 }
-
-#endif  // FIXPP_R6_WIRE_BODY_READY
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Seam #10c — fail-loud default arm for runtime-XML-only resolved version.
@@ -321,27 +317,20 @@ TEST(ReifyDispatchApplicationResolution, UnknownDefaultPropagates) {
 }
 
 TEST(ReifyDispatchApplicationResolution, UnknownDefaultPropagation_ViaReify) {
-    // AC-D6 (dict::reify() path): dict::reify with an Unknown-default profile
-    // and a frozen-stub MV returns dict_xml_parse_failed (get<35>() frozen).
-    // R6-blocked: the dict_unresolved_application_version propagation through
-    // dict::reify() is tested at the resolve_application_version level above
-    // (PURE function, fully testable). dict::reify() itself is MsgType-read-
-    // blocked under R6 (get<35>() returns dict_xml_parse_failed).
-    // 2b-unblock: when get<35>() returns a real MsgType, dict::reify() will
-    // propagate dict_unresolved_application_version for a non-FIXT MsgType
-    // with an Unknown default_appl and absent ApplVerID. This test confirms
-    // the dict::reify() function is callable and returns an error under R6.
+    // 057 (dict::reify() path): reify() on an EMPTY view has no MsgType(35), so
+    // it fails at the get<35>-absent branch with dict_reify_unknown_msg_type
+    // (FR-009 remap of the retired dict_reify_wire_body_not_ready) BEFORE the
+    // application-version resolution runs. The dict_unresolved_application_version
+    // propagation is exercised as a PURE function above (UnknownDefaultPropagates)
+    // and end-to-end on a REAL frame in the T014 reify() error-contract witness.
     std::pmr::monotonic_buffer_resource arena;
     MV mv;
     version_profile const unknown_default{session_version::vt11, application_version::Unknown, true,
                                           0};
     auto r = fixpp::dict::reify(mv, unknown_default, &arena);
-    ASSERT_FALSE(r.has_value()) << "dict::reify must return an error under R6 (frozen stub)";
-    // R6: error is dict_xml_parse_failed (get<35>() frozen) — NOT the
-    // dict_unresolved_application_version we'd get with real bytes.
-    // The resolution propagation is verified via resolve_application_version
-    // directly (test above). 2b-unblock: this test will need updating.
-    (void)r.error();  // error code is R6-implementation-defined (frozen stub)
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error(), error::dict_reify_unknown_msg_type)
+        << "reify() on an empty view (absent tag 35) must return dict_reify_unknown_msg_type";
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -381,6 +370,278 @@ TEST(ReifyDispatchApplication, UnknownMsgTypeInKnownVersionHitsInnerDefault) {
             << "AC-D7 inner default: unknown MsgType '!' in version " << static_cast<int>(av)
             << " must return dict_reify_unknown_msg_type";
     }
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// 057 US1 (T013) — discriminating per-field reify() round-trip witnesses. Each
+// reads a REAL body field from the live handle (not header-only / empty-view
+// green) and is mutation-tested: reverting the dispatch arm to the placeholder
+// turns each RED (SC-003). FR-001/003/004/005/014; SC-001/002/003.
+// ═════════════════════════════════════════════════════════════════════════════
+
+constexpr version_profile kProfileV42{session_version::v42, application_version::v42, false, 0};
+constexpr version_profile kProfileV44{session_version::v44, application_version::v44, false, 0};
+constexpr version_profile kProfileV50sp2{session_version::v50sp2, application_version::v50sp2,
+                                         false, 0};
+
+TEST(ReifyRoundTrip, V44NewOrderSingleClOrdId) {
+    ReifyFixture f{fixpp::test_support::make_nos_frame()};
+    ASSERT_TRUE(f.ok());
+    std::pmr::monotonic_buffer_resource mr;
+    auto r = fixpp::dict::reify(f.view(), kProfileV44, &mr);
+    ASSERT_TRUE(r.has_value());
+    EXPECT_EQ(r->version().k, resolved_message_version::kind::application);
+    EXPECT_EQ(r->version().application, application_version::v44);
+    auto clord = r->field_value(11);
+    ASSERT_TRUE(clord.has_value());
+    EXPECT_EQ(clord->as_string(), "ORD1")
+        << "FR-004: typed read must return the exact wire ClOrdID";
+}
+
+TEST(ReifyRoundTrip, V42NewOrderSingleClOrdId) {
+    ReifyFixture f{fixpp::test_support::make_nos_frame_v42()};
+    ASSERT_TRUE(f.ok());
+    std::pmr::monotonic_buffer_resource mr;
+    auto r = fixpp::dict::reify(f.view(), kProfileV42, &mr);
+    ASSERT_TRUE(r.has_value());
+    EXPECT_EQ(r->version().application, application_version::v42);
+    ASSERT_TRUE(r->field_value(11).has_value());
+    EXPECT_EQ(r->field_value(11)->as_string(), "ORD1");
+}
+
+TEST(ReifyRoundTrip, V50sp2NewOrderSingleClOrdId) {
+    ReifyFixture f{fixpp::test_support::make_nos_frame_v50sp2()};
+    ASSERT_TRUE(f.ok());
+    std::pmr::monotonic_buffer_resource mr;
+    auto r = fixpp::dict::reify(f.view(), kProfileV50sp2, &mr);
+    ASSERT_TRUE(r.has_value());
+    EXPECT_EQ(r->version().application, application_version::v50sp2);
+    ASSERT_TRUE(r->field_value(11).has_value());
+    EXPECT_EQ(r->field_value(11)->as_string(), "ORD1");
+}
+
+TEST(ReifyRoundTrip, MultiCharAllocationReportBodyField) {
+    // Two-char MsgType "AS" (v44 AllocationReport). Reads a real BODY field
+    // (70=AllocID), so the assertion is discriminating, not a header-only read.
+    ReifyFixture f{fixpp::test_support::make_allocation_report_frame()};
+    ASSERT_TRUE(f.ok());
+    std::pmr::monotonic_buffer_resource mr;
+    auto r = fixpp::dict::reify(f.view(), kProfileV44, &mr);
+    ASSERT_TRUE(r.has_value()) << "multi-char AS must dispatch to a live v44 handle";
+    EXPECT_EQ(r->version().application, application_version::v44);
+    EXPECT_EQ(r->msg_type(), "AS");
+    auto alloc = r->field_value(70);
+    ASSERT_TRUE(alloc.has_value());
+    EXPECT_EQ(alloc->as_string(), "ALLOC1")
+        << "FR-014: two-char dispatch must round-trip the AllocID body field";
+}
+
+TEST(ReifyRoundTrip, HandleSurvivesSourceBufferReuse) {
+    // FR-005: reify() deep-copies the frame, so the handle stays valid after the
+    // SOURCE buffer is overwritten. Overwrite BEFORE the first field read to
+    // prove the copy (an aliasing bug would read the clobbered bytes).
+    auto frame = fixpp::test_support::make_nos_frame();
+    std::pmr::monotonic_buffer_resource src_arena;
+    fixpp::wire::pmr_carry_buffer carry{frame.size(), &src_arena};
+    fixpp::wire::Framer framer{};
+    fixpp::wire::frame_view fvs[1]{};
+    auto framed = framer.feed(std::span<const std::byte>{frame.data(), frame.size()}, carry,
+                              std::span<fixpp::wire::frame_view>{fvs, 1});
+    ASSERT_TRUE(framed.has_value());
+    ASSERT_FALSE(framed->empty());
+    MV mv{fvs[0], &src_arena};
+    std::pmr::monotonic_buffer_resource mr;
+    auto r = fixpp::dict::reify(mv, kProfileV44, &mr);
+    ASSERT_TRUE(r.has_value());
+    // Clobber the source frame buffer; the handle's own bytes_ must be intact.
+    std::fill(frame.begin(), frame.end(), std::byte{'X'});
+    auto clord = r->field_value(11);
+    ASSERT_TRUE(clord.has_value());
+    EXPECT_EQ(clord->as_string(), "ORD1")
+        << "FR-005: handle must survive (deep-copied, not aliased) source-buffer reuse";
+}
+
+TEST(ReifyRoundTrip, ApplVerIdInFrameDrivesResolution) {
+    // US1 Acceptance Scenario 4 (FR-003): a FIXT application frame carrying
+    // ApplVerID(1128)="9" reifies as v50sp2 EVEN WITH a profile whose default_appl
+    // is Unknown — resolution derives from the in-frame 1128, not the profile
+    // default. The only end-to-end witness that a frame-borne 1128 drives
+    // resolution through live dispatch.
+    ReifyFixture f{fixpp::test_support::make_fixt_app_applverid_frame()};
+    ASSERT_TRUE(f.ok());
+    std::pmr::monotonic_buffer_resource mr;
+    version_profile const fixt_unknown_default{session_version::vt11, application_version::Unknown,
+                                               true, 0};
+    auto r = fixpp::dict::reify(f.view(), fixt_unknown_default, &mr);
+    ASSERT_TRUE(r.has_value());
+    EXPECT_EQ(r->version().application, application_version::v50sp2)
+        << "FR-003: in-frame ApplVerID(1128)=9 must resolve to v50sp2, not the Unknown default";
+    ASSERT_TRUE(r->field_value(11).has_value());
+    EXPECT_EQ(r->field_value(11)->as_string(), "ORD1");
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// 057 US1 (T014) — preserved error-contract witnesses (FR-009, SC-004). Each
+// asserts the EXACT error code, not merely !has_value().
+// ═════════════════════════════════════════════════════════════════════════════
+
+TEST(ReifyErrorContract, UnknownSingleCharMsgType) {
+    // 35=!: single-char MsgType that no version emits (matches the '!' sentinel
+    // used by UnknownMsgTypeInKnownVersionHitsInnerDefault) → inner default.
+    ReifyFixture f{fixpp::test_support::assemble_frame(
+        "8=FIX.4.4\x01", std::string("35=!\x01") + "34=1\x01" + "49=S\x01" + "56=T\x01")};
+    ASSERT_TRUE(f.ok());
+    std::pmr::monotonic_buffer_resource mr;
+    auto r = fixpp::dict::reify(f.view(), kProfileV44, &mr);
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error(), error::dict_reify_unknown_msg_type);
+}
+
+TEST(ReifyErrorContract, UnknownMultiCharMsgType) {
+    // 35=ZZ: two-char MsgType with no v44 arm → two-char switch default.
+    ReifyFixture f{fixpp::test_support::assemble_frame(
+        "8=FIX.4.4\x01", std::string("35=ZZ\x01") + "34=1\x01" + "49=S\x01" + "56=T\x01")};
+    ASSERT_TRUE(f.ok());
+    std::pmr::monotonic_buffer_resource mr;
+    auto r = fixpp::dict::reify(f.view(), kProfileV44, &mr);
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error(), error::dict_reify_unknown_msg_type);
+}
+
+TEST(ReifyErrorContract, AbsentMsgTypeTag35) {
+    // A frame with NO tag 35 → the get<35>-absent branch. Discriminating: assert
+    // the exact remapped error (distinct from the empty-view path).
+    ReifyFixture f{fixpp::test_support::assemble_frame(
+        "8=FIX.4.4\x01", std::string("34=1\x01") + "49=S\x01" + "56=T\x01" + "11=ORD1\x01")};
+    ASSERT_TRUE(f.ok());
+    std::pmr::monotonic_buffer_resource mr;
+    auto r = fixpp::dict::reify(f.view(), kProfileV44, &mr);
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error(), error::dict_reify_unknown_msg_type)
+        << "FR-009: absent tag 35 must return dict_reify_unknown_msg_type";
+}
+
+TEST(ReifyErrorContract, DeepCopyOomYieldsReifyOom) {
+    // A memory_resource that cannot satisfy the byte deep-copy → dict_reify_oom.
+    ReifyFixture f{fixpp::test_support::make_nos_frame()};
+    ASSERT_TRUE(f.ok());
+    std::pmr::monotonic_buffer_resource oom{std::pmr::null_memory_resource()};
+    auto r = fixpp::dict::reify(f.view(), kProfileV44, &oom);
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error(), error::dict_reify_oom);
+}
+
+TEST(ReifyErrorContract, ViewRebuildOomDegradesNotTerminate) {
+    // 057 / 004-T059 hardening: the deep-copy (alloc #1) succeeds so reify()
+    // returns a live handle, but the LAZY view() OffsetTable build (alloc #2)
+    // then OOMs. owning_message_handle::view() is noexcept, so a throwing mr at
+    // first field access must NOT terminate — the OffsetTable ctor degrades to
+    // an empty table (out_of_memory) and field_value() reports field-absent.
+    FIXPP_SKIP_ON_MSVC_DEBUG_ARENA();
+    ReifyFixture f{fixpp::test_support::make_nos_frame()};
+    ASSERT_TRUE(f.ok());
+    std::array<std::byte, 1024 * 64> buf{};
+    std::pmr::monotonic_buffer_resource upstream{buf.data(), buf.size()};
+    fixpp::test_support::failing_pmr_resource fail{&upstream, /*fail_on_call_n=*/2};
+
+    auto r = fixpp::dict::reify(f.view(), kProfileV44, &fail);
+    ASSERT_TRUE(r.has_value()) << "deep-copy (alloc #1) must succeed → live handle";
+    // First field access triggers the lazy view() rebuild → OffsetTable alloc #2
+    // fails. Must degrade, not terminate.
+    auto clord = r->field_value(11);
+    EXPECT_FALSE(clord.has_value())
+        << "OOM during OffsetTable build → field-absent (graceful degrade)";
+    auto st = r->view().offsets().build_status();
+    ASSERT_FALSE(st.has_value());
+    EXPECT_EQ(st.error(), fixpp::core::error::out_of_memory)
+        << "OffsetTable must record out_of_memory (graceful), not std::terminate";
+}
+
+TEST(ReifyErrorContract, UnresolvedApplicationVersion) {
+    // 35=D app frame, absent 1128, profile default_appl == Unknown →
+    // dict_unresolved_application_version (AC-D6).
+    ReifyFixture f{fixpp::test_support::make_nos_frame()};
+    ASSERT_TRUE(f.ok());
+    std::pmr::monotonic_buffer_resource mr;
+    version_profile const unknown_default{session_version::vt11, application_version::Unknown,
+                                          false, 0};
+    auto r = fixpp::dict::reify(f.view(), unknown_default, &mr);
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error(), error::dict_unresolved_application_version);
+}
+
+TEST(ReifyErrorContract, BadApplVerIdYieldsUnknownApplVerId) {
+    // 35=D with a non-parsing 1128=99 → dict_unknown_appl_ver_id (AC-D7).
+    ReifyFixture f{fixpp::test_support::assemble_frame(
+        "8=FIXT.1.1\x01", std::string("35=D\x01") + "34=1\x01" + "1128=99\x01" + "49=S\x01" +
+                              "56=T\x01" + "11=ORD1\x01")};
+    ASSERT_TRUE(f.ok());
+    std::pmr::monotonic_buffer_resource mr;
+    version_profile const fixt{session_version::vt11, application_version::v50sp2, true, 0};
+    auto r = fixpp::dict::reify(f.view(), fixt, &mr);
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error(), error::dict_unknown_appl_ver_id);
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// 057 US2 (T016) — FIXT-admin reify() discriminating witness. A real admin
+// frame (35=A Logon) reifies as session_admin AND round-trips a header field.
+// FR-002/003/004; SC-002. Mutation-tested (revert arm → placeholder → RED).
+// ═════════════════════════════════════════════════════════════════════════════
+
+TEST(FixtAdminReify, DiscriminatingHeaderField) {
+    ReifyFixture f{fixpp::test_support::make_fixt_admin_frame()};
+    ASSERT_TRUE(f.ok());
+    std::pmr::monotonic_buffer_resource mr;
+    version_profile const fixt_profile{session_version::vt11, application_version::v50sp2, true, 0};
+    auto r = fixpp::dict::reify(f.view(), fixt_profile, &mr);
+    ASSERT_TRUE(r.has_value()) << "FR-002: FIXT-admin frame must reify to a live handle";
+    EXPECT_EQ(r->version().k, resolved_message_version::kind::session_admin);
+    EXPECT_EQ(r->version().session, session_version::vt11);
+    EXPECT_EQ(r->version().application, application_version::Unknown);
+    EXPECT_EQ(r->msg_type(), "A");
+    auto sender = r->field_value(49);
+    ASSERT_TRUE(sender.has_value());
+    EXPECT_EQ(sender->as_string(), "SENDER")
+        << "FR-004: FIXT-admin handle must round-trip the exact SenderCompID";
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// 057 US3 (T018) — compile-time typed reify_as<Msg> (FR-006). No runtime bridge:
+// Msg is compile-time known; matching MsgType → populated owning_<Msg>, mismatch
+// or absent tag 35 → dict_reify_msg_type_mismatch.
+// ═════════════════════════════════════════════════════════════════════════════
+
+TEST(ReifyAsTyped, MatchingFrameReadsField) {
+    ReifyFixture f{fixpp::test_support::make_nos_frame()};  // 35=D, 11=ORD1 (v44)
+    ASSERT_TRUE(f.ok());
+    std::pmr::monotonic_buffer_resource mr;
+    auto r = fixpp::dict::reify_as<fixpp::v44::NewOrderSingle>(f.view(), &mr);
+    ASSERT_TRUE(r.has_value()) << "matching MsgType must produce a populated owning_<Msg>";
+    auto clord = r->field_value(11);
+    ASSERT_TRUE(clord.has_value());
+    EXPECT_EQ(clord->as_string(), "ORD1") << "FR-006: typed reify_as must round-trip ClOrdID";
+}
+
+TEST(ReifyAsTyped, MismatchedMsgTypeRejected) {
+    // 35=AS (AllocationReport) reified as NewOrderSingle (35=D) → mismatch.
+    ReifyFixture f{fixpp::test_support::make_allocation_report_frame()};
+    ASSERT_TRUE(f.ok());
+    std::pmr::monotonic_buffer_resource mr;
+    auto r = fixpp::dict::reify_as<fixpp::v44::NewOrderSingle>(f.view(), &mr);
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error(), error::dict_reify_msg_type_mismatch);
+}
+
+TEST(ReifyAsTyped, AbsentMsgTypeRejected) {
+    // A frame with no tag 35 → dict_reify_msg_type_mismatch (mirrors !mt_fv).
+    ReifyFixture f{fixpp::test_support::assemble_frame(
+        "8=FIX.4.4\x01", std::string("34=1\x01") + "49=S\x01" + "56=T\x01" + "11=ORD1\x01")};
+    ASSERT_TRUE(f.ok());
+    std::pmr::monotonic_buffer_resource mr;
+    auto r = fixpp::dict::reify_as<fixpp::v44::NewOrderSingle>(f.view(), &mr);
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error(), error::dict_reify_msg_type_mismatch);
 }
 
 }  // namespace

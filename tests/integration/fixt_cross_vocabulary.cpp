@@ -88,14 +88,10 @@ TEST(FixtCrossVocabulary, AcD4_Logon_IsFixtAdmin) {
     std::pmr::monotonic_buffer_resource arena;
     MV mv;
     auto r = fixpp::dict::dispatch::dispatch_fixt(mv, 'A', kSessionProfile, &arena);
-    ASSERT_FALSE(r.has_value()) << "R6: stub returns error (not a real handle)";
-    EXPECT_EQ(r.error(), error::dict_reify_wire_body_not_ready)
-        << "AC-D4 Frame 1 R6 oracle: Logon dispatch must return dict_reify_wire_body_not_ready";
-    EXPECT_NE(r.error(), error::dict_reify_unknown_msg_type)
-        << "AC-D4 Frame 1: Logon MsgType='A' must NOT hit the default arm (FIXT admin)";
-    // 2b-unblock: EXPECT_EQ(r->version().k, resolved_message_version::kind::session_admin);
-    //             EXPECT_EQ(r->version().session, session_version::vt11);
-    //             EXPECT_EQ(r->version().application, application_version::Unknown);
+    ASSERT_TRUE(r.has_value()) << "057: Logon dispatch must return a live session_admin handle";
+    EXPECT_EQ(r->version().k, resolved_message_version::kind::session_admin);
+    EXPECT_EQ(r->version().session, session_version::vt11);
+    EXPECT_EQ(r->version().application, application_version::Unknown);
 }
 
 TEST(FixtCrossVocabulary, AcD4_NOS_ApplVerID9_ResolvesToV50sp2) {
@@ -111,13 +107,8 @@ TEST(FixtCrossVocabulary, AcD4_NOS_ApplVerID9_ResolvesToV50sp2) {
     MV mv;
     auto r =
         fixpp::dict::dispatch::dispatch_application(mv, "D", *resolved, kSessionProfile, &arena);
-    ASSERT_FALSE(r.has_value()) << "R6: stub returns error";
-    EXPECT_EQ(r.error(), error::dict_reify_wire_body_not_ready)
-        << "AC-D4 Frame 2 R6 oracle: v50sp2 NOS dispatch must return "
-           "dict_reify_wire_body_not_ready";
-    EXPECT_NE(r.error(), error::dict_reify_unknown_msg_type)
-        << "AC-D4 Frame 2: v50sp2 NewOrderSingle must NOT hit fail-loud default";
-    // 2b-unblock: EXPECT_EQ(r->version().application, application_version::v50sp2);
+    ASSERT_TRUE(r.has_value()) << "057: v50sp2 NOS dispatch must return a live handle";
+    EXPECT_EQ(r->version().application, application_version::v50sp2);
 }
 
 TEST(FixtCrossVocabulary, AcD4_NOS_ApplVerID6_ResolvesToV44Override) {
@@ -134,12 +125,8 @@ TEST(FixtCrossVocabulary, AcD4_NOS_ApplVerID6_ResolvesToV44Override) {
     MV mv;
     auto r =
         fixpp::dict::dispatch::dispatch_application(mv, "D", *resolved, kSessionProfile, &arena);
-    ASSERT_FALSE(r.has_value()) << "R6: stub returns error";
-    EXPECT_EQ(r.error(), error::dict_reify_wire_body_not_ready)
-        << "AC-D4 Frame 3 R6 oracle: v44 NOS dispatch must return dict_reify_wire_body_not_ready";
-    EXPECT_NE(r.error(), error::dict_reify_unknown_msg_type)
-        << "AC-D4 Frame 3: v44 NewOrderSingle must NOT hit fail-loud default";
-    // 2b-unblock: EXPECT_EQ(r->version().application, application_version::v44);
+    ASSERT_TRUE(r.has_value()) << "057: v44 NOS dispatch must return a live handle";
+    EXPECT_EQ(r->version().application, application_version::v44);
 }
 
 TEST(FixtCrossVocabulary, AcD4_OCR_NoApplVerID_UsesSessionDefault) {
@@ -156,13 +143,8 @@ TEST(FixtCrossVocabulary, AcD4_OCR_NoApplVerID_UsesSessionDefault) {
     MV mv;
     auto r =
         fixpp::dict::dispatch::dispatch_application(mv, "F", *resolved, kSessionProfile, &arena);
-    ASSERT_FALSE(r.has_value()) << "R6: stub returns error";
-    EXPECT_EQ(r.error(), error::dict_reify_wire_body_not_ready)
-        << "AC-D4 Frame 4 R6 oracle: v50sp2 OCR dispatch must return "
-           "dict_reify_wire_body_not_ready";
-    EXPECT_NE(r.error(), error::dict_reify_unknown_msg_type)
-        << "AC-D4 Frame 4: v50sp2 OrderCancelRequest must NOT hit fail-loud default";
-    // 2b-unblock: EXPECT_EQ(r->version().application, application_version::v50sp2);
+    ASSERT_TRUE(r.has_value()) << "057: v50sp2 OCR dispatch must return a live handle";
+    EXPECT_EQ(r->version().application, application_version::v50sp2);
 }
 
 TEST(FixtCrossVocabulary, AcD4_Heartbeat_IsFixtAdmin) {
@@ -172,14 +154,11 @@ TEST(FixtCrossVocabulary, AcD4_Heartbeat_IsFixtAdmin) {
     std::pmr::monotonic_buffer_resource arena;
     MV mv;
     auto r = fixpp::dict::dispatch::dispatch_fixt(mv, '0', kSessionProfile, &arena);
-    ASSERT_FALSE(r.has_value()) << "R6: stub returns error";
-    EXPECT_EQ(r.error(), error::dict_reify_wire_body_not_ready)
-        << "AC-D4 Frame 5 R6 oracle: Heartbeat dispatch must return dict_reify_wire_body_not_ready";
-    EXPECT_NE(r.error(), error::dict_reify_unknown_msg_type)
-        << "AC-D4 Frame 5: Heartbeat MsgType='0' must NOT hit the default arm";
-    // 2b-unblock: EXPECT_EQ(r->version().k, resolved_message_version::kind::session_admin);
-    //             EXPECT_EQ(r->version().session, session_version::vt11);
-    //             EXPECT_EQ(r->version().application, application_version::Unknown);
+    ASSERT_TRUE(r.has_value()) << "057: Heartbeat dispatch must return a live session_admin handle";
+    EXPECT_EQ(r->version().k, resolved_message_version::kind::session_admin);
+    EXPECT_EQ(r->version().session, session_version::vt11);
+    EXPECT_EQ(r->version().application, application_version::Unknown);
+    // (was the retired R6 dict_reify_wire_body_not_ready oracle)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -201,18 +180,15 @@ TEST(FixtCrossVocabulary, AcD4_FullReifyCallable_R6Scoped) {
     // is reserved for genuine 002 XML-loader parse failures only; it must not
     // surface from the public reify() API.
     std::pmr::monotonic_buffer_resource arena;
-    MV mv;  // frozen stub MV
+    MV mv;  // empty view — no MsgType(35)
     auto r = fixpp::dict::reify(mv, kSessionProfile, &arena);
-    ASSERT_FALSE(r.has_value()) << "R6: dict::reify() must return an error with frozen stub MV";
-    // R6 exact oracle: dict::reify() returns the reify-domain
-    // dict_reify_wire_body_not_ready for the frozen-stub R6 condition (gate-b/r2
-    // RC#2 F1+F2 lockstep correction — pre-fix returned dict_xml_parse_failed,
-    // wrong layer/module, now normalized).
-    // 2b-unblock: replace this with has_value() assertion and version() checks.
-    EXPECT_EQ(r.error(), error::dict_reify_wire_body_not_ready)
-        << "R6: dict::reify() must return dict_reify_wire_body_not_ready (R6 wire-body "
-           "condition); dict_xml_parse_failed must not surface from the reify API "
-           "(2b-unblock: returns success with valid handle)";
+    ASSERT_FALSE(r.has_value()) << "empty view has no MsgType → reify() must error";
+    // 057: an empty view has no MsgType(35), so reify() returns
+    // dict_reify_unknown_msg_type from the get<35>-absent branch (FR-009 remap
+    // of the retired placeholder), never dict_xml_parse_failed. A REAL-frame
+    // success path is witnessed in reify_dispatch_test.cpp (ReifyRoundTrip.*).
+    EXPECT_EQ(r.error(), error::dict_reify_unknown_msg_type)
+        << "reify() on an empty view must return dict_reify_unknown_msg_type";
 
     // The resolution DECISIONS are verified by the pure-function tests above,
     // which are NOT R6-blocked (resolve_application_version is PURE).
