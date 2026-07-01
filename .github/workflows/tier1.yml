@@ -663,7 +663,9 @@ jobs:
           pipx install cibuildwheel
           pipx install auditwheel
           pipx install abi3audit
-          cibuildwheel --version
+          # Diagnostic: print installed tool versions. (cibuildwheel 4.x argparse
+          # has no --version flag — `pipx list` is the version-agnostic check.)
+          pipx list --short
 
       # CI-3: persist the IN-CONTAINER Conan cache. cibw-before-all.sh runs
       # `conan install` inside the manylinux container, whose home is separate
