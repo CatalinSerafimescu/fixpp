@@ -24,25 +24,38 @@ on:
 env:
   CONAN_HOME: ~/.conan2
 
-# Concurrency is declared PER heavy job below, NOT workflow-wide. A
-# workflow-level `cancel-in-progress` group cancels the moment a new run ENTERS
-# the group — before its jobs are gated — so a skip-run (gate-precheck →
-# proceed=false, heavy jobs `if`-skipped) would cancel a genuine in-flight
-# matrix even though it does no work itself. Tier 1 is on-demand (heavy jobs run
-# only when `run-tier1` is freshly added), so pre-gate pushes and gate-{a,b}
-# label events routinely spawn exactly such skip-runs.
+# Concurrency: a CONDITIONAL workflow-level group + per-heavy-job groups below.
 #
-# A skipped job is never dispatched, so it never enters its concurrency group
-# and cannot cancel a real build. A genuine `run-tier1` re-trigger mid-matrix
-# DOES still cancel the prior matrix per job, which is the anti-pileup benefit
-# we keep. (The "3–4 matrices in parallel after the gate labels land" case is
-# already prevented by the `run-tier1` on-demand gate in gate-precheck — those
-# label events now produce skip-runs, not matrices; per-job concurrency is the
-# belt-and-suspenders for the re-add-mid-run case.) The linux matrix keys its
-# group on `matrix.preset` so the six preset legs don't cancel each other.
+# The workflow-level group is EVENT-DEPENDENT to avoid the classic footgun (a
+# cheap skip-run cancelling a genuine in-flight matrix) while still preventing
+# overlapping Tier-1 runs on `main`:
+#   * push (main only — always proceed=true via the non-PR early-exit in
+#     gate-precheck, so a push run is NEVER a skip-run): a SHARED group
+#     `tier1-push-<ref>` with cancel-in-progress, so a newer main push (e.g. a
+#     squash-merge immediately followed by a post-merge close-out) cancels the
+#     older WHOLE run at run START — no overlapping Tier-1 runs, no duplicate
+#     clang matrix left running while the newer run spins up. Cancelling the
+#     older main run is always desirable: main HEAD is the newer commit, which
+#     supersedes it.
+#   * pull_request: a UNIQUE per-run group (`tier1-run-<run_id>`), so the
+#     workflow-level group NEVER cancels across PR runs. This preserves the
+#     property that a PR skip-run (gate-precheck proceed=false, heavy jobs
+#     `if`-skipped) cannot cancel a real in-flight matrix — Tier 1 is on-demand
+#     on PRs (heavy jobs run only when `run-tier1` is freshly added), so pre-gate
+#     pushes and gate-{a,b} label events routinely spawn such skip-runs.
 #
-# gate-precheck is intentionally left ungrouped: it is cheap and must never
+# PR anti-pileup is handled by the PER-JOB groups below (keyed on
+# `<pr#||ref>-<preset>/<sanitizer>/…`): a genuine `run-tier1` re-trigger
+# mid-matrix cancels the prior matrix per job. The linux matrix keys its group on
+# `matrix.preset` so the six preset legs don't cancel each other. gate-precheck
+# is intentionally left ungrouped at the job level: it is cheap and must never
 # cancel anything.
+concurrency:
+  group: >-
+    ${{ github.event_name == 'push'
+        && format('tier1-push-{0}', github.ref)
+        || format('tier1-run-{0}', github.run_id) }}
+  cancel-in-progress: true
 
 jobs:
   # ── Gate precheck — Tier 1 does not spend CI until gates are satisfied ────

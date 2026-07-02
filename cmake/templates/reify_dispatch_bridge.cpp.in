@@ -1,0 +1,37 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// cmake/templates/reify_dispatch_bridge.cpp.in
+//
+// 057-behavioral-reify-unblock — checked-in template `configure_file`d at
+// configure time into ${CMAKE_BINARY_DIR}/_codegen/reify_dispatch_bridge.cpp
+// and compiled by the private fixpp_dict_dispatch_bridge STATIC target.
+//
+// This is the SOLE translation unit that #includes the build-tree-generated
+// <fixpp/_dispatch/reify_dispatch_*.hpp> headers. It lives under the build
+// tree (${CMAKE_BINARY_DIR}/_codegen/), OUTSIDE the check_layers.py src/**
+// scan by design (NFR-003-8) — so no shipped src/** file ever includes a
+// build-tree header, and no check_layers exempt is needed.
+//
+// The body is FIXED / version-independent: two thin wrappers that forward to
+// the inline dispatch::dispatch_{fixt,application} helpers the generated
+// headers define. configure_file performs NO token substitution here (there
+// are no @VAR@ / ${VAR} tokens) — it is a tracked copy.
+#include <reify_dispatch_bridge.hpp>  // private declaring header (decl/def match)
+
+#include <fixpp/_dispatch/reify_dispatch_application.hpp>
+#include <fixpp/_dispatch/reify_dispatch_fixt.hpp>
+
+namespace fixpp::dict {
+
+core::expected_t<owning_message_handle> reify_dispatch_fixt(
+    wire::MessageView<wire::access_mode::Index> const& view, char msg_type, version_profile profile,
+    std::pmr::memory_resource* mr) noexcept {
+    return dispatch::dispatch_fixt(view, msg_type, profile, mr);
+}
+
+core::expected_t<owning_message_handle> reify_dispatch_application(
+    wire::MessageView<wire::access_mode::Index> const& view, std::string_view msg_type,
+    application_version appver, version_profile profile, std::pmr::memory_resource* mr) noexcept {
+    return dispatch::dispatch_application(view, msg_type, appver, profile, mr);
+}
+
+}  // namespace fixpp::dict
