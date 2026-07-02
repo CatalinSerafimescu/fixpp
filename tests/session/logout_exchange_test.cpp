@@ -37,6 +37,7 @@
 
 #include <array>
 #include <asio/co_spawn.hpp>
+#include <asio/executor_work_guard.hpp>
 #include <asio/io_context.hpp>
 #include <asio/thread_pool.hpp>
 #include <asio/use_awaitable.hpp>
@@ -668,12 +669,53 @@ TEST(SessionGracefulCloseFlushesFileStore, FlushRunsAndFramesDurableAfterClose) 
         // co_awaited and must complete before close() returns. [C5b / spec.md SC-007b]
         auto close_fut =
             asio::co_spawn(ioc, sess.close(fixpp::session::close_mode::graceful), asio::use_future);
-        ioc.run_for(100ms);
-        ioc.restart();
-        // Advance clock past logout timeout (2 s) to drive close to completion.
+
+        // close(graceful) first offloads its flush_for_session_close() fdatasync (and
+        // the Logout-frame store) to the real file_pool, resuming back on ioc, and
+        // only THEN emits Logout, enters LogoutSent, and arms the 2 s logout-timeout
+        // mock sleeper. The old harness pumped a fixed run_for(100ms), then advanced
+        // the mock clock 3 s once, then run_for(500ms). That is racy: if those pool
+        // round-trips outlast the 100 ms window on a loaded/sanitizer CI runner, the
+        // sleeper is armed only AFTER clock->advance(3s), i.e. at mock deadline 5 s —
+        // a time the test never reaches, so the mock timeout never fires. The only
+        // escape left is the real 2 s close_grace steady_timer, which needs ~2 s of
+        // real-time ioc pumping the ≤600 ms of windows never supplied → close parks →
+        // the bare close_fut.get() deadlocks (the 120 s ctest timeout seen on
+        // linux-clang-ubsan). Fix: first pump ioc until close has reached LogoutSent —
+        // there is no suspension point between that transition and the sleeper being
+        // armed, so LogoutSent observed ⟹ sleeper armed ⟹ the advance below is
+        // guaranteed to fire it. A work_guard keeps ioc alive so each slice blocks on
+        // real work instead of hot-spinning.
+        {
+            auto wg = asio::make_work_guard(ioc);
+            const auto arm_deadline = std::chrono::steady_clock::now() + std::chrono::seconds{10};
+            while (sess.state() != fixpp::session::fsm_state::LogoutSent &&
+                   std::chrono::steady_clock::now() < arm_deadline) {
+                ioc.run_for(std::chrono::milliseconds{20});
+            }
+            wg.reset();
+        }
+        ASSERT_EQ(sess.state(), fixpp::session::fsm_state::LogoutSent)
+            << "close(graceful) did not reach LogoutSent within 10 s — flush/Logout offload "
+               "wedged before the logout timer was armed (see flush_for_session_close)";
+
+        // Sleeper is armed: fire the 2 s logout timeout deterministically.
         clock->advance(std::chrono::seconds{3});
-        ioc.run_for(500ms);
-        ioc.restart();
+
+        // Drive close to completion. Bounded + asserted so a genuine lost-wake FAILs
+        // loudly at 10 s wall clock rather than hanging out the whole ctest timeout.
+        {
+            auto wg = asio::make_work_guard(ioc);
+            const auto done_deadline = std::chrono::steady_clock::now() + std::chrono::seconds{10};
+            while (close_fut.wait_for(std::chrono::milliseconds{0}) != std::future_status::ready &&
+                   std::chrono::steady_clock::now() < done_deadline) {
+                ioc.run_for(std::chrono::milliseconds{20});
+            }
+            wg.reset();
+        }
+        ASSERT_EQ(close_fut.wait_for(std::chrono::milliseconds{0}), std::future_status::ready)
+            << "close(graceful) did not complete within 10 s after the logout timeout fired — "
+               "possible lost-wake in the close/flush continuation";
         auto close_r = close_fut.get();
         // close() returns logout_timeout (no peer) or ok (if peer confirmed). Both are fine.
         (void)close_r;

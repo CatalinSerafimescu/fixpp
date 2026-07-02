@@ -558,6 +558,10 @@ TEST(ReifyErrorContract, AbsentMsgTypeTag35) {
 
 TEST(ReifyErrorContract, DeepCopyOomYieldsReifyOom) {
     // A memory_resource that cannot satisfy the byte deep-copy → dict_reify_oom.
+    // MSVC debug/asan STL allocates a hidden _Container_proxy per pmr container
+    // from this null-backed arena during a noexcept ctor → terminate, not a
+    // catchable bad_alloc. Behaviour is covered on msvc-release + all Linux lanes.
+    FIXPP_SKIP_ON_MSVC_DEBUG_ARENA();
     ReifyFixture f{fixpp::test_support::make_nos_frame()};
     ASSERT_TRUE(f.ok());
     std::pmr::monotonic_buffer_resource oom{std::pmr::null_memory_resource()};
