@@ -10,33 +10,24 @@
 //   4. OCR no ApplVerID        → application (session default) → v50sp2 {application, vt11, v50sp2}
 //   5. Heartbeat (MsgType=0)   → FIXT admin → vt11 {session_admin, vt11, Unknown}
 //
-// What IS testable now under R6 (what this test covers):
+// What this test covers (057 — R6 lifted, live dispatch):
 //   - The resolution DECISIONS (step 1: is_fixt_admin → session_admin;
 //     step 2: resolve_application_version → correct application_version).
 //     These are PURE functions (no wire state dependency) and ARE runtime-testable.
 //   - The dispatch SWITCH entries: dispatch_fixt(mv, mt, profile) for FIXT
 //     admin types; dispatch_application(mv, mt_sv, resolved, profile) for app
-//     messages. Shape verifiable at compile+link time (no misdispatch to default).
+//     messages now return LIVE typed owning_message_handle values (not a
+//     placeholder error) for a matching MsgType, and
+//     dict_reify_unknown_msg_type for an unrecognised/empty view (FR-009).
 //   - resolve_application_version with the exact AC-D4 ApplVerID wire values:
 //     "9" → v50sp2; "6" → v44; "" (absent) → v50sp2 (session default).
 //
-// R6-blocked (2b-unblock):
-//   - The full end-to-end: a real byte frame → dict::reify(view, profile, mr)
-//     → a typed owning_message_handle → handle.version().application. This
-//     is blocked because:
-//       (a) the frozen wire stub's get<35>() always returns dict_xml_parse_failed
-//           (no frame bytes → no MsgType read); and
-//       (b) owning_message_handle wrapping the dispatch result (T037 full
-//           handle return from dispatch_fixt/dispatch_application) is R6-
-//           blocked (the dispatch helpers currently return dict_xml_parse_failed
-//           as a stub — see emit_dispatch.cpp R6 comment).
-//   2b-unblock: when the real wire body lands, dict::reify() will:
-//     - Read MsgType from the real frame bytes.
-//     - Return a valid owning_message_handle with the correct resolved_message_version.
-//     - handle.version() will yield {session_admin, vt11, Unknown} for FIXT admin.
-//     - handle.version() will yield {application, vt11, v50sp2} for NOS+ApplVerID=9.
-//   This test then transitions from "resolution decision" verification to
-//   "full dispatch round-trip" verification by removing the R6-blocked guards.
+// A real byte frame → dict::reify(view, profile, mr) → a typed
+// owning_message_handle round-trip (MsgType read from real frame bytes,
+// handle.version() reflecting the resolved application/session version) is
+// covered separately in reify_dispatch_test.cpp (ReifyRoundTrip.*); this file
+// stays scoped to the AC-D4 [2c §6.3] worked-example resolution/dispatch
+// decisions using empty MessageView probes.
 //
 // Oracle: specs/003-dictionary-codegen/spec.md AC-D4 / seam #10b;
 //         [2c §6.3] worked example; contracts/reify_dispatch.hpp.
@@ -76,15 +67,15 @@ constexpr version_profile kSessionProfile{
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// AC-D4 Resolution Decision Tests — PURE, R6-testable.
+// AC-D4 Resolution Decision Tests — PURE (no wire-frame dependency).
 // Verify the resolution algorithm gives the correct application_version for
 // each AC-D4 worked-example message.
 // ─────────────────────────────────────────────────────────────────────────────
 
 TEST(FixtCrossVocabulary, AcD4_Logon_IsFixtAdmin) {
     // [2c §6.3] Frame 1: Logon (MsgType=A) → FIXT admin.
-    // gate-b/r1 RC#3-B positive oracle: dispatch_fixt on 'A' must return
-    // dict_reify_wire_body_not_ready (not dict_reify_unknown_msg_type).
+    // 057: dispatch_fixt on 'A' must return a live session_admin handle
+    // (not dict_reify_unknown_msg_type).
     std::pmr::monotonic_buffer_resource arena;
     MV mv;
     auto r = fixpp::dict::dispatch::dispatch_fixt(mv, 'A', kSessionProfile, &arena);
@@ -158,27 +149,19 @@ TEST(FixtCrossVocabulary, AcD4_Heartbeat_IsFixtAdmin) {
     EXPECT_EQ(r->version().k, resolved_message_version::kind::session_admin);
     EXPECT_EQ(r->version().session, session_version::vt11);
     EXPECT_EQ(r->version().application, application_version::Unknown);
-    // (was the retired R6 dict_reify_wire_body_not_ready oracle)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Full dict::reify() call shape — AC-D4 worked example.
-// R6-blocked: get<35>() returns dict_xml_parse_failed (frozen stub).
-// This test verifies dict::reify() is callable, returns an error under R6,
-// and the error is NOT dict_reify_unknown_msg_type (which would indicate
-// the resolution path incorrectly fell through to the fail-loud default).
-// 2b-unblock: remove R6 guards; assert handle.version() matches AC-D4 decisions.
+// Full dict::reify() call shape — AC-D4 worked example, empty-view boundary.
+// dict::reify() is callable and, on an empty MessageView (no MsgType(35)
+// present), returns dict_reify_unknown_msg_type — the FR-009 remap of the
+// retired R6 placeholder (dict_reify_wire_body_not_ready is no longer
+// returned by any path; the resolution path did not incorrectly fall through
+// either). The real-frame success round-trip (a live typed handle) is covered
+// in reify_dispatch_test.cpp (ReifyRoundTrip.*).
 // ─────────────────────────────────────────────────────────────────────────────
-TEST(FixtCrossVocabulary, AcD4_FullReifyCallable_R6Scoped) {
-    // AC-D4 worked-example full dict::reify() call.
-    // R6-blocked: MsgType read (get<35>()) returns dict_xml_parse_failed from
-    // the frozen stub (frozen-stub internal impl detail); dict::reify() normalizes
-    // that to dict_reify_wire_body_not_ready on the reachable R6 exit path.
-    // gate-b/r2 RC#2 (F1+F2): all three non-success exits of dict::reify() now
-    // consistently return dict_reify_wire_body_not_ready (the reify-domain error
-    // for the genuine "wire body not yet available" condition). dict_xml_parse_failed
-    // is reserved for genuine 002 XML-loader parse failures only; it must not
-    // surface from the public reify() API.
+TEST(FixtCrossVocabulary, AcD4_FullReifyCallable_EmptyViewUnknownMsgType) {
+    // AC-D4 worked-example full dict::reify() call on an empty view.
     std::pmr::monotonic_buffer_resource arena;
     MV mv;  // empty view — no MsgType(35)
     auto r = fixpp::dict::reify(mv, kSessionProfile, &arena);
@@ -197,12 +180,13 @@ TEST(FixtCrossVocabulary, AcD4_FullReifyCallable_R6Scoped) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Boundary: dict::reify() on a profile where the resolution would propagate
 // dict_unresolved_application_version for a non-FIXT frame (AC-D6 path).
-// R6-blocked: get<35>() is frozen, so we verify the resolution decision only.
+// Verified at the resolve_application_version level (this decision is a PURE
+// function with no wire-frame dependency).
 // ─────────────────────────────────────────────────────────────────────────────
 TEST(FixtCrossVocabulary, UnknownDefaultProfileResolutionDecision) {
     // Profile with Unknown DefaultApplVerID + absent ApplVerID(1128) →
     // dict_unresolved_application_version (AC-D6 propagation path).
-    // Verified at the resolve_application_version level (PURE — R6-testable).
+    // Verified at the resolve_application_version level (PURE function).
     version_profile const unknown_default{session_version::vt11, application_version::Unknown, true,
                                           0};
     auto res = resolve_application_version(unknown_default, "");

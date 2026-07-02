@@ -18,8 +18,11 @@
 // BRIDGE_EXEMPT_INCLUDES); the post-cutover LINK edge (fixpp_dictionary ->
 // fixpp_wire, a permitted static-archive cycle — see src/dictionary/
 // CMakeLists.txt) is the intended T028 topology. NOTE: this header binds the
-// real surface, but the owning deep-copy reify round-trip (owning_<Msg>::
-// from_view) remains codegen-R6-stubbed — carved out, see tasks.md T059.
+// real surface; the owning deep-copy reify round-trip (owning_<Msg>::
+// from_view) has been live since the 004 T059 cutover and is instantiated +
+// tested via reify_as<Msg>(). The remaining T059-deferred half is
+// owning_message_handle::as<Msg>() (the runtime-dispatch typed downcast) —
+// see tasks.md T059.
 #pragma once
 #include <fixpp/core/error.hpp>            // core::expected_t, core::error
 #include <fixpp/dict/version_profile.hpp>  // version_profile +
@@ -112,8 +115,12 @@ public:
     [[nodiscard]] core::expected_t<wire::field_view> field_value(std::uint16_t tag) const noexcept
         [[clang::lifetimebound]];
 
-    // nullptr on resolved-version / MsgType mismatch (no UB, no throw) — AC-R6.
-    // Return type is the canonical 2c v1.4 §4.8 owning_message_t<Msg> alias.
+    // as<Msg>() is DECLARED-ONLY (no out-of-line definition ships): the typed
+    // downcast half of AC-R6 stays deferred to T059 — instantiating this
+    // template is ill-formed until then. This is intentional, not a callable
+    // nullptr-returning stub. Once defined (T059), the contract is nullptr on
+    // resolved-version / MsgType mismatch (no UB, no throw). Return type is
+    // the canonical 2c v1.4 §4.8 owning_message_t<Msg> alias.
     template <class Msg>
     [[nodiscard]] auto as() const noexcept [[clang::lifetimebound]] -> owning_message_t<Msg> const*;
 

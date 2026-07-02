@@ -53,7 +53,8 @@ returned by any path.
 
 ## Out of scope (don't be surprised)
 
-- `owning_message_handle::as<Msg>()` still returns the stubbed path (T059) — read via `field_value(tag)` /
-  `view()`, or use `reify_as<Msg>()` for a typed owner.
+- `owning_message_handle::as<Msg>()` is declared-only (T059) — instantiating it is ill-formed until then, it
+  is not a callable nullptr-returning stub. Read via `field_value(tag)` / `view()`, or use `reify_as<Msg>()`
+  for a typed owner.
 - Per-message typed builders + full per-message read coverage (A/M/P/N rows) are downstream; 057 unblocks the
   dispatch mechanism only.
