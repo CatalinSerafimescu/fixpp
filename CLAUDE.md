@@ -1,5 +1,5 @@
 <!-- SPECKIT START -->
-**Active work: none** — no in-flight Spec-Kit feature. `058-async-mutex-hardening` MERGED 2026-07-03 (see Recently merged). Pick the next v1.0 slice per parent `REMAINING-WORK.md`. The **C-ABI surface is GA-frozen at `1.5.0`**; the Python-bindings workstream (PY-001..005) is COMPLETE and all follow-ups CLOSED. **Deferred CI fixes to bundle with the next feature** (per [[project_ci_run_tier_labels]]): #1 per-job Tier-1 concurrency; #2 build python on every main push.
+**Active work: none** — no in-flight Spec-Kit feature. `058-async-mutex-hardening` MERGED 2026-07-03 (see Recently merged). Pick the next v1.0 slice per parent `REMAINING-WORK.md`. The **C-ABI surface is GA-frozen at `1.5.0`**; the Python-bindings workstream (PY-001..005) is COMPLETE and all follow-ups CLOSED. **Deferred CI fix to bundle with the next feature** (per [[project_ci_run_tier_labels]]): #1 per-job Tier-1 concurrency. (#2 build-python-on-every-main-push landed on `main` 2026-07-03.)
 
 **This file is a THIN POINTER.** Per-feature history is NOT duplicated here — it lives in the authoritative trackers:
 - **Per-feature status + evidence:** `spec/feature-catalogue.md` (status / evidence_pr / tests per row) + `spec/coverage-index.md`.
