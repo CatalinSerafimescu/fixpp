@@ -6,7 +6,7 @@ No new data **types**. This feature changes a *disposition* (control flow over e
 
 | State | Owner | Meaning | Touched? |
 |---|---|---|---|
-| `SeqnumManager::next_outbound_` | `SeqnumManager` | in-memory wire counter; advanced by `assign_outbound()` per send | read-only here; re-seeded via existing `hydrate()` on reconnect |
+| `SeqnumManager::next_outbound_` | `SeqnumManager` | in-memory wire counter; advanced by `assign_outbound()` per send | **reconciled** to the durable store counter at disconnect time via `set_next_outbound(durable_k)` inside `store_then_emit`'s fatal branch (FR-007) — NOT re-seeded via `hydrate()` on reconnect |
 | store next-outbound counter | `MessageStore` impl | store's own next-expected; advanced only on successful `store()`; on `FileStore` it is the **durable** on-disk counter | unchanged |
 | `store_is_persistent_` | `Session` | `true` for `FileStore`/custom persistent, `false` for `MemoryStore`/null | **read** (the disposition gate) |
 | `hydrated_` | `Session` | one-shot latch; `ensure_hydrated_` re-reads the store when `!hydrated_` or `force` | **NOT touched** (clearing it has cross-feature blast radius — see research D4) |
