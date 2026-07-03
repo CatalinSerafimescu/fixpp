@@ -98,26 +98,20 @@ jobs:
           # The python jobs (python-bindings + python-wheel-{build,test}) gate on
           # `proceed` (gates satisfied + run-tier1 requested) AND this relevance
           # flag: on a PR they run only once the gates clear, and then only when
-          # the diff touches the binding/C-ABI surface — so a pure-C++ PR, a
-          # pre-gate PR, or a merge to main skips the ~7-min container wheel build
-          # + the sanitizer legs entirely. A release builds the asset regardless.
-          # This block runs BEFORE the non-PR early-exit below so push:main is
-          # path-filtered too.
+          # the diff touches the binding/C-ABI surface — so a pure-C++ PR or a
+          # pre-gate PR skips the ~7-min container wheel build + the sanitizer
+          # legs. A merge to main (push), workflow_dispatch, and release build
+          # them UNCONDITIONALLY (full build on main; PRs stay path-gated).
           PY_RE='^(bindings/python/|include/fix/c_api|.*\.i$)'
           PYTHON_TOUCHED=false
           EV="${{ github.event_name }}"
           if [ "$EV" = "pull_request" ]; then
             git diff --name-only "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}" > /tmp/py_changed.txt || true
-          elif [ "$EV" = "push" ]; then
-            BEFORE="${{ github.event.before }}"
-            if printf '%s' "$BEFORE" | grep -qE '^0+$'; then
-              # new branch / no parent recorded — fall back to the tip commit's diff
-              git show --name-only --format= HEAD > /tmp/py_changed.txt 2>/dev/null || true
-            else
-              git diff --name-only "$BEFORE" "${{ github.sha }}" > /tmp/py_changed.txt || true
-            fi
           else
-            # workflow_dispatch / release / other trusted manual events: don't path-gate
+            # push:main (merge), workflow_dispatch, release, other trusted events:
+            # build EVERYTHING including the python wheel + binding sanitizer legs,
+            # regardless of what the merge touched. Only PRs are path-gated (above).
+            # (user 2026-07-03 — full build on every main push.)
             PYTHON_TOUCHED=true
           fi
           if [ "$PYTHON_TOUCHED" != true ] && [ -s /tmp/py_changed.txt ] && grep -qE "$PY_RE" /tmp/py_changed.txt; then
@@ -691,10 +685,10 @@ jobs:
     timeout-minutes: 90
     needs: gate-precheck       # CI-1
     # Gate-then-relevance: the ~7-min container wheel build runs on a release
-    # (the asset is built there), OR — on a PR/push — once the gates are
-    # satisfied + run-tier1 is requested (`proceed`) AND the binding/C-ABI/
-    # packaging surface actually changed (`python_touched`). A pure-C++ PR, a
-    # merge to main, or a PR without gate labels skips it.
+    # (the asset is built there), OR — on a PR — once the gates are satisfied +
+    # run-tier1 is requested (`proceed`) AND the binding/C-ABI/packaging surface
+    # actually changed (`python_touched`). A pure-C++ PR or a PR without gate
+    # labels skips it; a merge to main (push) builds it unconditionally.
     if: >-
       github.event_name == 'release' ||
       (needs.gate-precheck.outputs.proceed == 'true' &&
