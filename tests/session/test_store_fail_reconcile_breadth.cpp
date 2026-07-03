@@ -281,6 +281,14 @@ TEST_P(StoreFailReconcileBreadthTest, PersistentStore_FailsClosed_RegardlessOfEr
     EXPECT_FALSE(send_r.has_value())
         << "FR-004 (currently RED pre-fix): a persistent-store retain failure of class "
         << static_cast<int>(injected_err) << " must fail closed, not be swallowed";
+    if (!send_r.has_value()) {
+        // gate-b/r1 FQ-2 (D2): the store's OWN error code must propagate un-coerced —
+        // load-bearing now that the fix is shape (b) durability-class range check, not
+        // shape (a) normalize-to-io_failure (rejected by opus_pr163_1_triage.md).
+        EXPECT_EQ(send_r.error(), injected_err)
+            << "D2: Session::send must surface the store's own error code un-coerced for "
+               "class " << static_cast<int>(injected_err);
+    }
     EXPECT_EQ(sess.state(), fsm_state::Disconnected)
         << "FR-004 (currently RED pre-fix): the session must transition to Disconnected for "
            "error class " << static_cast<int>(injected_err);
