@@ -12,16 +12,20 @@
 
 1. **Success** (`store()` returns a value): unchanged — proceed to transmit. Observable behaviour byte-identical to `main`.
 2. **`store_cancelled` return** (any store): unchanged — absorb → proceed. Cancellation-class (shutdown drain); MUST NOT fail closed or reconcile (FR-005 parity with thrown `operation_aborted`). Checked **before** the persistence gate.
-3. **Genuine failure return on a persistent store** (`!store_r && store_is_persistent_`, error ∈ {`store_io_failure`, `store_seqnum_out_of_order`, `store_capacity_exhausted`}): the coroutine MUST, before transmitting:
-   - best-effort reconcile the outbound wire counter to the durable value: `dk = co_await store_->next_seqnum(outbound, false)`; if `dk`, `co_await seqnum_mgr_.set_next_outbound(*dk)` (FR-007). Reconcile failure is non-fatal — the disconnect still proceeds.
-   - transition the session FSM to `Disconnected` (`record_state_transition_`),
-   - `co_return std::unexpected(store_r.error())` — surfacing the store's own error code (no new code),
-   - and MUST NOT transmit `frame`. (The hydration latch `hydrated_` is **not** touched — see research D4.)
+3. **Genuine failure return on a persistent store** (`!store_r && store_is_persistent_`, error ∈ {`store_io_failure`, `store_seqnum_out_of_order`, `store_capacity_exhausted`}): the coroutine MUST, before transmitting, return the **same shape** as the existing transport-write failure (`co_return dispatch_aborted`) — an error return with **no internal FSM transition**:
+   - capture `err = store_r.error()` **first** (before the reconcile read, so a reconcile-time throw cannot pre-empt it),
+   - best-effort reconcile the outbound wire counter to the durable value: `dk = co_await store_->next_seqnum(outbound, false)`; if `dk`, `co_await seqnum_mgr_.set_next_outbound(*dk)` (FR-007). Reconcile failure is non-fatal — the caller-owned disconnect still proceeds.
+   - `co_return std::unexpected(err)` — surfacing the store's own error code (no new code),
+   - and MUST NOT transmit `frame`. The `Disconnected` transition is **caller-owned** (not fired inside `store_then_emit`), exactly as it is for the transport-failure return today. (The hydration latch `hydrated_` is **not** touched — see research D4.)
 4. **Genuine failure return on a volatile store** (`!store_r && !store_is_persistent_`): unchanged — log-then-proceed; transmit proceeds (L-008-2 stands).
 5. **Thrown `operation_aborted`** (cancellation): unchanged — `co_return dispatch_aborted`.
 6. **Other throw:** unchanged — absorbed.
 
-**Caller contract (FR-006).** Callers are NOT required to inspect the return to obtain fail-closed: post-condition (2) is owned by the callee, so a persistent failure disconnects the session regardless. Callers that DO propagate `!emit_r` (the majority) additionally short-circuit their own flow (already the case). Best-effort callers (`(void)co_await store_then_emit(...)` at `session.cpp:2742`, `:3233`) MUST be verified to tolerate a mid-flow `Disconnected` — i.e. they must not resume `Active` or emit further frames assuming success after the swallowed call. (Verified in the SC-006 census.)
+**Caller contract (FR-006) — parity with the transport-failure return.** The persistent-fatal return is the same shape callers already handle on a transport-write failure, so no caller needs a new return-check beyond what already exists. Census of the 26 `store_then_emit` sites (`9305e69`):
+- **Propagating, broad guard `if (!emit_r) → Disconnected` (9):** `:864 :1781 :1825 :2496 :2820 :3379 :3542 :4615 :4673` — fail closed unchanged.
+- **Propagating, narrow guard `== dispatch_aborted` (1 — the residual):** `Session::send` (`:4046`, consuming `send_impl` `:4488`, the primary US1 app path). It misses the store class, so its guard is broadened to `dispatch_aborted || {store_io_failure, store_seqnum_out_of_order, store_capacity_exhausted}`, keeping app-veto (`app_do_not_send`/`app_payload_malformed`, `:4468-4470`) non-fatal. This is the one genuinely-new-in-059 call-site edit.
+- **Swallow-and-continue (16):** `:2130 :2344 :2656 :2680 :2742 :2869 :2921 :2959 :2982 :3176 :3233 :3687 :4902 :4963 :5221 :5264` — each `(void)`s the return and continues **identically to today's transport-failure return**; a pre-existing disposition (documented, not re-engineered). The un-retained frame is never transmitted on any of them.
+(All classified in the SC-006 census.)
 
 ## Error channel (existing codes reused)
 

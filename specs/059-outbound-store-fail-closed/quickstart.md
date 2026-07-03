@@ -25,24 +25,24 @@ This is the "how to verify" recipe (Art. XVI §5 CI evidence). Three witnesses m
 
 **Assert:** on the capacity failure the session does **not** disconnect and behaves byte-for-byte as `main` (logged-then-proceed; transmit proceeds). Existing volatile-store tests remain green. (FR-003.)
 
-## W3 — US3 / SC-004: reconcile-from-durable on reconnect (three policy variants)
+## W3 — US3 / SC-004: reconcile-from-durable on reconnect (three HONEST policy variants)
 
-**Setup:** `FileStore` session; drive one persistent `store()` failure (W1 step 2) to fail closed; **disarm** the seam (fault cleared).
+**Setup:** `FileStore` session; drive one persistent `store()` failure (W1 step 2) to fail closed via `Session::send` (broadened guard → `Disconnected`); **disarm** the seam (fault cleared).
 
-**Assert (at disconnect time, before any reconnect):** `peek_outbound() == durable_k` — the fatal branch reconciled the wire counter down via `set_next_outbound` (the reconcile is done in `store_then_emit`, not deferred to the reconnect). **Assert inbound sequencing is unchanged** (the manager's inbound counter is untouched — this is the trap the original finding is about: no prior test combined the store-failure + reconnect + policy conditions).
+**Assert (at disconnect time, before any reconnect):** `peek_outbound() == durable_k` — the fatal branch reconciled the wire counter down via `set_next_outbound` (done in `store_then_emit`, not deferred to the reconnect). **Assert inbound sequencing is unchanged** (the manager's inbound counter is untouched — this is the trap the original finding is about: no prior test combined the store-failure + reconnect + policy conditions).
 
-**Variant A — plain persistent session** (no reset policy): trigger an in-process reconnect; the next send stores + transmits at seq `k` — **no repeating disconnect**, no gap, no reuse. (FR-007.)
+**Variant A — plain persistent session** (no reset knob, not `bilateral_strict`): trigger an in-process reconnect; the next send stores + transmits at seq `k` — **clean resume**, no repeating disconnect, no gap, no reuse. (FR-007.)
 
-**Variant B — `bilateral_strict`:** after the same fail-closed + reconcile, the reconnect Logon `reset_to_one()` overrides the outbound counter to 1; assert the reconnect Logon is well-formed (seqnum 1, no INV-RoL-3 malformed-Logon) and inbound sequencing is correct — i.e. the reconcile did **not** re-hydrate inbound or bypass the strict-reset suppression.
+**Variant B — `reset_on_logon`:** the durable reset (`reset_seqnums_to_one_durable`, gated on `cfg_.reset_on_logon`, `session.cpp:776-782`) runs before the reconnect Logon and overrides the outbound counter to 1; the reconcile is neutral. Assert the reconnect Logon is `34=1` + `141=Y`, well-formed, and inbound sequencing is correct.
 
-**Variant C — `reset_on_logon`:** same as B — the reset path owns the post-reconnect state; assert clean resume.
+**Variant C — `bilateral_strict` (the DEFAULT policy):** there is **NO** durable reset (`bilateral_strict` only forces `141=Y`, `session.cpp:816-818`). After the same fail-closed + reconcile at `k>1`, assert the reconnect Logon carries `34=k` (k>1) **with** `141=Y` — the **pre-existing, deferred L-029-3** malformed-Logon (`behaviors-and-limitations.md:1252-1265`). The point of this variant is a **regression guard**: assert 059 does **not worsen** L-029-3 — the reconciled `durable_k` and an un-reconciled `k+1` are *both* non-1, so the malformed Logon is the pre-existing limitation, not a 059-introduced defect. Do **NOT** assert clean recovery here.
 
-Exercise on the initiator role (drives the reconcile directly); note the reconcile is role-independent (done in `store_then_emit`, before any reconnect), so the acceptor path is covered by the shared code.
+**Roles.** The reconcile is role-independent (done in `store_then_emit`). Reconnect **reset**, however, reaches through different sites per role: initiator via `reset_on_logon` (`:776`), acceptor via received-`141=Y` / inbound-Logon (`session.cpp:2141`, `:2414`). Exercise the initiator role directly; for the acceptor path either add an acceptor-side reset witness or record a sourced exclusion at `/tasks` (its reconnect-reset entry point differs from the initiator's).
 
 ## Cross-cutting gates (at `/speckit-verify`)
 
 - **Sanitizers:** ASan/UBSan/TSan Tier-1 green on the new tests. The store path is `async_mutex`-guarded and strand-confined; use a `thread_pool(≥2)` harness for the store-failure tests (`feedback_single_threaded_harness_masks_strand_races`).
-- **Coverage:** the new fatal branch and BOTH `store_is_persistent_` arms carry discriminating, mutation-tested witnesses; no uncovered error/edge branch without a recorded assessment (Art. IX §1).
+- **Coverage:** the new fatal branch and BOTH `store_is_persistent_` arms carry discriminating, mutation-tested witnesses; no uncovered error/edge branch without a recorded assessment (Art. IX §1). **Flag for the `/tasks` coverage-design gate — two hard-to-witness arms** (`feedback_coverage_design_gate_ex_ante_vs_measured`): (a) the `store_cancelled`-on-a-persistent-store branch (disposition-table row 2) is only reachable on shutdown drain — needs a discriminating witness or a recorded assessment; (b) the reconcile "durable read **failed** → skip reconcile, still fail closed" *else*-arm (D4 step 2) has no obvious witness recipe — same treatment. Also cover the `Session::send` guard broadening: assert an app-veto (`app_do_not_send`) still leaves the session `Active` (must not be caught by the widened predicate).
 - **Conformance:** TC-001..017 stay green (no session-FSM regression).
 - **No hot-path perf delta:** happy path unchanged; state in the verify doc (no bench required).
 
