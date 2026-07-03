@@ -36,10 +36,21 @@
 // ORACLE (discriminating, per the brief): after unlock() returns,
 //   (a) the cancelled waiter's future resolved `sync_lock_aborted` (proves
 //       on_cancel won), and
-//   (b) the cancelled waiter's pool-slot `refcount_` reads EXACTLY 0 (proves
-//       the CAS-loser released list membership EXACTLY ONCE — not zero
-//       times [a leaked ref, pool slot never freed] and not more than once
-//       [an unsigned underflow wrap, corrupting the free list]), and
+//   (b) the cancelled waiter's pool slot has been returned to the free list
+//       as its new head (`test_seam_free_list_head_slot_index() == idx`),
+//       proving the CAS-loser's `release_ref` ran its 1->0 transition and
+//       pushed the slot — a "skip the release" mutation leaves the free
+//       list unchanged (still pointing at whatever it held before this
+//       waiter's push, never `idx`), which is exactly what a leaked ref /
+//       pool slot never freed looks like. (2026-07-03 test-oracle-hygiene
+//       fix: this replaces a post-`~waiter_record()` read of the destroyed
+//       record's own `refcount_` — technically-UB even though the pool
+//       slot's storage bytes persist — with a read of the mutex's OWN,
+//       still-live `waiter_pool_free_` head. A second/double release
+//       cannot double-push here regardless [its `fetch_sub` returns != 1
+//       and early-returns before ever reaching the free-list push], so this
+//       oracle does not need to separately discriminate that direction),
+//       and
 //   (c) unlock() returns without hanging (thread_a.join() completes) and
 //       without a double-resume (the existing T023/T024 impossible-state
 //       traps would std::terminate() on a stray second schedule_resume for
@@ -188,15 +199,14 @@ TEST(AsyncMutexChainWalkCasLoss, FifoWalkCancelWinsGrantCasLoss) {
     ctx.t1_release.release();
     thread_a.join();
 
-    // ---- Oracle (b): W1's pool slot (index 0) refcount_ reads EXACTLY 0 —
-    // the CAS-loser released list membership exactly once. A "skip the
-    // release" mutation leaves this > 0 (leaked, never returned to the free
-    // list); a "double release" mutation underflows it (wraps to a huge
-    // value).
-    auto const* slot = mtx.test_seam_mutable_slot(0);
-    EXPECT_EQ(slot->refcount_.load(std::memory_order_acquire), 0u)
-        << "W1's waiter_record was not released exactly once by unlock()'s "
-           "cancelled-branch fallthrough after the CAS loss";
+    // ---- Oracle (b): W1's pool slot (index 0) is the free-list head — the
+    // CAS-loser's `release_ref` pushed it. This is a fresh mutex and W1 is
+    // the only slow-path record ever allocated (bump allocator index 0), so
+    // the free list was empty before this push; a "skip the release"
+    // mutation leaves the head at the empty sentinel, not 0.
+    EXPECT_EQ(mtx.test_seam_free_list_head_slot_index(), 0u)
+        << "W1's waiter_record was not released (pushed to the free list) by "
+           "unlock()'s cancelled-branch fallthrough after the CAS loss";
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -313,9 +323,15 @@ TEST(AsyncMutexChainWalkCasLoss, ResidualWalkCancelWinsGrantCasLoss) {
     ctx.t1_release.release();
     thread_a.join();
 
-    // ---- Oracle (b): W2's pool slot (index 1) refcount_ reads EXACTLY 0.
-    auto const* slot = mtx.test_seam_mutable_slot(1);
-    EXPECT_EQ(slot->refcount_.load(std::memory_order_acquire), 0u)
-        << "W2's waiter_record was not released exactly once by unlock()'s "
-           "cancelled-branch fallthrough after the residual-walk CAS loss";
+    // ---- Oracle (b): W2's pool slot (index 1) is the free-list head. W1
+    // (index 0) has already been fully released (its grant + resume-runner
+    // release_ref both ran before this point) and pushed onto the free list
+    // earlier, but W2's push — the CAS-loser's `release_ref` — is always the
+    // LAST push (LIFO), so it is always the head regardless of W1's timing.
+    // A "skip the release" mutation on W2 leaves the head at whatever it was
+    // before (0, from W1's earlier push), never 1.
+    EXPECT_EQ(mtx.test_seam_free_list_head_slot_index(), 1u)
+        << "W2's waiter_record was not released (pushed to the free list) by "
+           "unlock()'s cancelled-branch fallthrough after the residual-walk "
+           "CAS loss";
 }

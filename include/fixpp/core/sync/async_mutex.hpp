@@ -293,6 +293,19 @@ public:
     // record immediately before driving the real unlock()/resume path into
     // the corresponding trap.
     [[nodiscard]] detail::waiter_record* test_seam_mutable_slot(std::size_t idx) noexcept;
+
+    // 058 Gate-B (2026-07-03 test-oracle-hygiene fix): lifetime-safe
+    // free-list-membership read. Reads ONLY the mutex's own
+    // `waiter_pool_free_` head (an async_mutex member, alive for the whole
+    // test) — never a possibly-already-`~waiter_record()`'d pool slot. Used
+    // by the chain-walk CAS-loss witnesses to prove a released waiter_record
+    // was returned to the free list (as the new head) WITHOUT reading the
+    // destroyed record's own members. No production behaviour or layout
+    // change (accessor only; no new data member).
+    [[nodiscard]] std::uint32_t test_seam_free_list_head_slot_index() const noexcept {
+        return detail::unpack_free_list_head(waiter_pool_free_.load(std::memory_order_acquire))
+            .slot_index;
+    }
 #endif
 
 private:
