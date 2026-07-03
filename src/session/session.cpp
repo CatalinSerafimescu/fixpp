@@ -4053,29 +4053,29 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send(
     // propagate (std::terminate). [F5 drift fix;
     // [[feedback_async_mutex_us3_asio_cancel_and_subagent_seams]]]
     try {
-        auto impl_r = co_await send_impl(app_payload);
+        // gate-b/r2 FQ-1: disconnect_required carries PROVENANCE out of send_impl —
+        // set true ONLY at the two commit-region producer sites (assign_outbound
+        // overflow, store_then_emit fatal). Transition on origin, not on the
+        // returned error VALUE: a toApp passthrough can carry the identical
+        // store-block error value (session.hpp `Application::toApp` contract
+        // allows any error::* return) without having reached the commit region,
+        // and must stay Active per INV-5/SC-004.
+        bool disconnect_required = false;
+        auto impl_r = co_await send_impl(app_payload, disconnect_required);
         // F9 (Round-A drift): if store_then_emit converted an operation_aborted throw
         // into dispatch_aborted expected_t error, transition to Disconnected per US1 AC3.
-        // 059 T007 (gate-b/r1 FQ-1): widen to fail closed on the persistent
-        // store-retain fatal CLASS returned by store_then_emit — durability-classified
-        // (is_persistent_retain_fatal, [56,65) — every store_* code except
-        // store_cancelled), matching store_then_emit's own gate instead of the closed
-        // 3-code set the pre-fix guard hard-coded (contracts/store-then-emit-disposition.md,
-        // the single narrow-guard caller of the census). App-veto returns
-        // (app_do_not_send / app_payload_malformed, produced pre-store in send_impl,
-        // codes 129/131 — outside the store-code range) stay non-fatal for free.
-        // gate-b/r1 scope-expansion note: this range ALSO newly catches
-        // send_impl's assign_outbound() overflow return (store_seqnum_overflow=60,
-        // reused per [2e §6.7], not itself a store-retain failure) — bringing
-        // Session::send in line with the session-fatal-on-overflow disposition
-        // Cell7/RC#G already enforce on other call paths (test_acceptor_logon_
-        // sending_time.cpp Cell7, send_path_test.cpp RC#G), regardless of store
-        // persistence.
-        if (!impl_r && (impl_r.error() == error::dispatch_aborted ||
-                        is_persistent_retain_fatal(impl_r.error()))) {
-            record_state_transition_(fsm_state::Disconnected);  // [spec.md US1 AC3; F9 drift fix; 059 T007]
+        // dispatch_aborted(55) is outside is_persistent_retain_fatal's [56,65) range, so
+        // it is not covered by disconnect_required — kept as a value residual to
+        // preserve the exact pre-059 converted-cancellation disposition unchanged.
+        // Residual (documented, not fixed — out of 059's scope): a toApp returning
+        // unexpected(dispatch_aborted) still spuriously disconnects here; pre-existing
+        // since before 059 (the guard was always `== dispatch_aborted`), and
+        // dispatch_aborted is an internal cancellation sentinel an app should never
+        // return. [gate-b/r2 FQ-1; contracts/store-then-emit-disposition.md item 3]
+        if (disconnect_required || (!impl_r && impl_r.error() == error::dispatch_aborted)) {
+            record_state_transition_(fsm_state::Disconnected);  // [spec.md US1 AC3; F9 drift fix; gate-b/r2 FQ-1]
         }
-        co_return impl_r;
+        co_return impl_r;  // value un-coerced
     } catch (const asio::system_error& e) {
         if (e.code() == asio::error::operation_aborted) {
             // Uncaught operation_aborted from a co_await inside send_impl —
@@ -4127,7 +4127,7 @@ static bool has_boundary_token(std::string_view sv, std::string_view tok) noexce
 }
 
 asio::awaitable<fixpp::core::expected_t<void>> Session::send_impl(
-    std::span<const std::byte> app_payload) {
+    std::span<const std::byte> app_payload, bool& disconnect_required) {
     using fixpp::core::error;
 
     // ── T010: Opaque-payload validation — BEFORE seqnum peek/assign/stamp ──────
@@ -4506,6 +4506,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send_impl(
     {
         auto assign_r = co_await seqnum_mgr_.assign_outbound();
         if (!assign_r) {
+            // gate-b/r2 FQ-1: commit-region producer site — set provenance flag here,
+            // not classified by value at the Session::send caller.
+            disconnect_required = is_persistent_retain_fatal(assign_r.error());
             co_return std::unexpected(assign_r.error());  // store_seqnum_overflow (I-8)
         }
         // The assigned value must equal the peeked seq (single-strand, no race).
@@ -4514,7 +4517,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send_impl(
 
     // (4) store(outbound) BEFORE transport ([2e §4.1]).
     // Pass the stamped seqnum explicitly (RC#A: next_outbound_seq_ removed).
-    co_return co_await store_then_emit(seq, std::span<const std::byte>(buf.data(), pos));
+    // gate-b/r2 FQ-1: commit-region producer site — set provenance flag from the
+    // store's own error before returning it un-coerced.
+    auto emit_r = co_await store_then_emit(seq, std::span<const std::byte>(buf.data(), pos));
+    disconnect_required = !emit_r.has_value() && is_persistent_retain_fatal(emit_r.error());
+    co_return emit_r;  // store's own error, un-coerced
 }
 
 fsm_state Session::state() const noexcept { return fsm_state_; }

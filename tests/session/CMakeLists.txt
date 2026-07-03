@@ -350,6 +350,18 @@ fixpp_add_store_test(store_fail_reconcile_outofset SOURCES
   EXTRA_LIBS fixpp_mock_clock
 )
 
+# gate-b/r2 FQ-1 (P1): a toApp veto carrying a store-block error VALUE (on a
+# persistent store) must stay Active — the disconnect is decided by
+# provenance (did send_impl reach the commit region?), not by re-classifying
+# the returned value. Uses seqnum_mgr_test_access() to assert no seqnum
+# consumption, so FIXPP_TEST_HOOKS is required. No FileStore needed (a
+# minimal always-succeeding persistent store double).
+fixpp_add_store_test(send_toapp_store_collision SOURCES
+  test_send_toapp_store_collision.cpp
+  EXTRA_LIBS fixpp_mock_clock
+)
+target_compile_definitions(send_toapp_store_collision PRIVATE FIXPP_TEST_HOOKS)
+
 # ── T044–T045 US4 (Phase 6) QuickFIX compat seam registrations ───────────────
 
 # T044 — seam 11: Path-B compile-time guard (FR-032 / AC US4 #2)

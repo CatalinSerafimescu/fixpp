@@ -1110,8 +1110,15 @@ private:
     // Called from the noexcept send() wrapper which catches asio::system_error
     // thrown on async cancellation. May throw on store awaitable cancellation.
     // [F5 Round-A drift fix: noexcept-throw trap separation]
+    // disconnect_required (gate-b/r2 FQ-1): out-param set true ONLY at the two
+    // commit-region producer sites (assign_outbound overflow, store_then_emit
+    // fatal) — carries disconnect PROVENANCE out of send_impl so Session::send
+    // can decide the transition by origin, not by re-classifying the returned
+    // error value (a toApp passthrough can carry a store-block error value
+    // without having reached the commit region). Default-false; the caller
+    // must initialize it. [contracts/store-then-emit-disposition.md item 3]
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> send_impl(
-        std::span<const std::byte> app_payload);
+        std::span<const std::byte> app_payload, bool& disconnect_required);
 
     // 015 T016(d) — emit the initial initiator Logon via the admin-builder path
     // (build_logon + assign_outbound + store_then_emit). Extracted from open()'s
