@@ -329,6 +329,17 @@ fixpp_add_store_test(store_fail_reconcile_breadth SOURCES
   EXTRA_LIBS fixpp_mock_clock
 )
 
+# /speckit-verify coverage witness — the reconcile else-arm (dk.has_value()
+# ==false) and the store_cancelled false-leg (`!= store_cancelled`), which
+# W1/W3/breadth cannot reach (their reconcile read always succeeds; the
+# FileStore seam serves next_seqnum from a still-valid in-memory counter). A
+# persistent store DOUBLE additionally faults the reconcile read. No FileStore
+# / FIXPP_TEST_HOOKS needed. See 059-...-coverage-design.md Arm (a)/(b).
+fixpp_add_store_test(store_fail_reconcile_readfail SOURCES
+  test_store_fail_reconcile_readfail.cpp
+  EXTRA_LIBS fixpp_mock_clock
+)
+
 # ── T044–T045 US4 (Phase 6) QuickFIX compat seam registrations ───────────────
 
 # T044 — seam 11: Path-B compile-time guard (FR-032 / AC US4 #2)
