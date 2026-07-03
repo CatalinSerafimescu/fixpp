@@ -32,12 +32,19 @@
 //     exists.)
 //
 // The reconcile `catch (...)` arm (:4819) is NOT witnessed here and is waived
-// in the verify record: both awaits inside the try — store_->next_seqnum
-// (message_store.hpp:127) and seqnum_mgr_.set_next_outbound
-// (seqnum_manager.hpp:141) — are `noexcept`, so a throwing store would
-// std::terminate at the noexcept boundary, never surfacing at the catch. The
-// catch is defense-in-depth against a future non-noexcept store; no faithful
-// double can reach it without tripping terminate first.
+// in the verify record as a cancellation-race branch (Article IX §1, no stable
+// stimulus). It IS production-reachable: a real store (FileStore) serves
+// next_seqnum by acquiring the async_mutex → suspends → is cancellable, and a
+// co_await of a cancelled store method throws asio::system_error{
+// operation_aborted} in the AWAITER's frame even though the store method is
+// `noexcept` — the exact mechanism the OUTER catch at session.cpp:4827 absorbs
+// from `co_await store_->store()` (see its comment at :4790-4793). This
+// store-double cannot reach :4819 because ReconcileFaultStore::next_seqnum is
+// synchronous (co_return cur; — no suspension, nothing to cancel), and driving
+// the cancellation race deterministically is inherently flaky — the same
+// no-stable-stimulus rationale the coverage-design record used for Arm (a)'s
+// store_cancelled-on-shutdown-drain. (An earlier draft wrongly waived this as
+// "noexcept → std::terminate → unreachable"; that is disproved by :4827.)
 //
 // Harness mirrors test_store_fail_reconcile_breadth.cpp (single-threaded
 // io_context): the reconcile-read fault is deterministic (no strand race to
