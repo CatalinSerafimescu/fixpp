@@ -340,6 +340,16 @@ fixpp_add_store_test(store_fail_reconcile_readfail SOURCES
   EXTRA_LIBS fixpp_mock_clock
 )
 
+# gate-b/r1 FQ-1 (RC#1): the fatal-class predicate unification RED witness —
+# a minimal persistent store double armed to return an OUT-OF-SET store code
+# (outside the pre-fix closed 3-code Session::send guard) in turn. Fresh
+# fixture, authored separately from store_fail_reconcile_breadth.cpp per the
+# gate-b/r1 brief. No FileStore / FIXPP_TEST_HOOKS needed.
+fixpp_add_store_test(store_fail_reconcile_outofset SOURCES
+  test_store_fail_reconcile_outofset.cpp
+  EXTRA_LIBS fixpp_mock_clock
+)
+
 # ── T044–T045 US4 (Phase 6) QuickFIX compat seam registrations ───────────────
 
 # T044 — seam 11: Path-B compile-time guard (FR-032 / AC US4 #2)

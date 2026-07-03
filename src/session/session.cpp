@@ -4020,6 +4020,19 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
 //
 // Stack buffer: 4096 bytes. app_payload larger than ~3800 bytes returns wire_frame_too_large.
 // [const §VIII.5]: no heap allocation on this path.
+//
+// gate-b/r1 FQ-1 (RC#1): the persistent store-retain fatal class, matching
+// store_then_emit's durability-classified gate (session.cpp ~:4804) rather
+// than the closed 3-code set the pre-fix guard hard-coded. Range [56,65) is
+// EVERY store_* code except cancellation-class store_cancelled(65); sound
+// only because of the contiguity static_assert at error.hpp:775 (10 variants
+// 56..65) — an inserted 11th store code would shift store_cancelled and this
+// range must move with it. [contracts/store-then-emit-disposition.md item 3]
+static bool is_persistent_retain_fatal(fixpp::core::error e) noexcept {
+    using fixpp::core::error;
+    return e >= error::store_io_failure && e < error::store_cancelled;
+}
+
 asio::awaitable<fixpp::core::expected_t<void>> Session::send(
     std::span<const std::byte> app_payload) noexcept {
     using fixpp::core::error;
@@ -4043,15 +4056,23 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send(
         auto impl_r = co_await send_impl(app_payload);
         // F9 (Round-A drift): if store_then_emit converted an operation_aborted throw
         // into dispatch_aborted expected_t error, transition to Disconnected per US1 AC3.
-        // 059 T007: widen to also fail closed on the persistent store-retain fatal
-        // class returned by store_then_emit (contracts/store-then-emit-disposition.md,
+        // 059 T007 (gate-b/r1 FQ-1): widen to fail closed on the persistent
+        // store-retain fatal CLASS returned by store_then_emit — durability-classified
+        // (is_persistent_retain_fatal, [56,65) — every store_* code except
+        // store_cancelled), matching store_then_emit's own gate instead of the closed
+        // 3-code set the pre-fix guard hard-coded (contracts/store-then-emit-disposition.md,
         // the single narrow-guard caller of the census). App-veto returns
-        // (app_do_not_send / app_payload_malformed, produced pre-store in send_impl)
-        // are deliberately NOT in this set — they stay non-fatal (session Active).
+        // (app_do_not_send / app_payload_malformed, produced pre-store in send_impl,
+        // codes 129/131 — outside the store-code range) stay non-fatal for free.
+        // gate-b/r1 scope-expansion note: this range ALSO newly catches
+        // send_impl's assign_outbound() overflow return (store_seqnum_overflow=60,
+        // reused per [2e §6.7], not itself a store-retain failure) — bringing
+        // Session::send in line with the session-fatal-on-overflow disposition
+        // Cell7/RC#G already enforce on other call paths (test_acceptor_logon_
+        // sending_time.cpp Cell7, send_path_test.cpp RC#G), regardless of store
+        // persistence.
         if (!impl_r && (impl_r.error() == error::dispatch_aborted ||
-                        impl_r.error() == error::store_io_failure ||
-                        impl_r.error() == error::store_seqnum_out_of_order ||
-                        impl_r.error() == error::store_capacity_exhausted)) {
+                        is_persistent_retain_fatal(impl_r.error()))) {
             record_state_transition_(fsm_state::Disconnected);  // [spec.md US1 AC3; F9 drift fix; 059 T007]
         }
         co_return impl_r;
