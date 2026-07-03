@@ -57,6 +57,7 @@
 #include <coroutine>
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <expected>
 #include <memory>
 #include <memory_resource>
@@ -118,6 +119,30 @@ enum class waiter_phase : std::uint8_t {
                     //   await_resume returns unexpected{sync_lock_aborted}. Terminal.
 };
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 058 T004 (research.md D-1; data-model.md) — generation-tagged packed
+// free-list head: `{generation:54, slot_index:10}` packed into a u64.
+// `slot_index == free_list_empty_index` (0x3FF) marks an empty list. Shared,
+// bit-identical, by both the pop (async_lock) and the push (release_ref) so
+// the encoding cannot drift between the two call sites.
+// ─────────────────────────────────────────────────────────────────────────────
+inline constexpr std::uint32_t free_list_empty_index = 0x3FFU;
+
+struct free_list_head {
+    std::uint64_t generation;
+    std::uint32_t slot_index;
+};
+
+constexpr std::uint64_t pack_free_list_head(std::uint64_t generation,
+                                            std::uint32_t slot_index) noexcept {
+    return (generation << 10) | (slot_index & 0x3FFU);
+}
+
+constexpr free_list_head unpack_free_list_head(std::uint64_t packed) noexcept {
+    return free_list_head{.generation = packed >> 10,
+                          .slot_index = static_cast<std::uint32_t>(packed & 0x3FFU)};
+}
+
 // Forward declaration of slot_allocator (full skeleton below).
 class slot_allocator;
 
@@ -156,9 +181,11 @@ public:
 
     // ─────────────────────────────────────────────────────────────────────────
     // Destructor — RC#3 fix: std::terminate() precondition.
-    // Fires in BOTH debug AND release if the mutex is held OR waiters present.
+    // Fires in BOTH debug AND release if the mutex is held, waiters are
+    // present, OR any resumer is in-flight (058 T017 — research.md D-3).
     // Callers MUST drain via cancel_and_drain() before destruction.
-    // T050 (US3) finalizes the destructor; US1 checks only the state_ sentinel.
+    // T050 (US3) finalizes the destructor; US1 checks only the state_ sentinel;
+    // 058 T017 adds the in_flight_resumers_ term.
     // ─────────────────────────────────────────────────────────────────────────
     ~async_mutex() noexcept(false);
 
@@ -193,6 +220,28 @@ public:
     //     return the terminal result (NOT ok eagerly).
     //   - Terminal: (active_holders_count_==0) AND (in_flight_resumers_==0)
     //     AND (both lists empty in one pass).
+    //
+    // 058 T018 (research.md D-2/D-3; contracts/async_mutex-contract-delta.md)
+    // — cross-executor teardown, made SAFE for the parked-then-reaped case:
+    //   - A waiter that parked on a DIFFERENT executor than the owning
+    //     strand and was subsequently reaped by this drain has its abort
+    //     resume posted onto that waiter's OWN stored executor (ordinary
+    //     cross-thread contention, already supported). The runner's
+    //     in_flight_resumers_ decrement is RELEASE; this drain's terminal
+    //     read (and the destructor's, D-3) is ACQUIRE — establishing the
+    //     happens-before that makes destroying the mutex immediately after
+    //     a completed drain memory-safe even though that resumer ran on a
+    //     different core.
+    //   - Explicit EXCLUSION: a cross-executor waiter that was GRANTED
+    //     (not reaped-as-cancelled) becomes a cross-executor *holder*; if
+    //     its unlock() overlaps this drain, that is the "Drain overlap ...
+    //     is UNDEFINED" case above and is NOT made safe by this ordering
+    //     (active_holders_count_ decrements before the holder's state_ CAS,
+    //     so the drain can observe 0/finalize while that CAS still targets
+    //     freed memory — and the destructor guard cannot catch it, both
+    //     counters reading 0). Callers that keep the drain strand-local,
+    //     co-located with ALL acquire/cancel/unlock (the documented
+    //     contract above), never reach this.
     [[nodiscard]] asio::awaitable<expected_t<void>> cancel_and_drain() noexcept;
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -207,6 +256,57 @@ public:
     // ─────────────────────────────────────────────────────────────────────────
 
     [[nodiscard]] completion_policy policy() const noexcept { return policy_; }
+
+#ifdef FIXPP_ASYNC_MUTEX_TEST_SEAM
+    // 058 T020 (research.md D-4/D-7): test-only seam presetting/inspecting
+    // the bump-allocator counter, so the pre-fix u32 wrap-and-reissue defect
+    // can be witnessed without 2^32 real attempts. No-op / absent unless the
+    // standalone test_pool_exhaustion_reuse target defines the macro (same
+    // ODR discipline as the pop-phase seam: standalone target, zero
+    // fixpp_sync linkage — research.md D-7).
+    //
+    // test_seam_slot_attached_awaiter is declared here (needs waiter_pool_
+    // storage, private below) but DEFINED out-of-line after
+    // detail::waiter_record is complete (mirrors async_lock/unlock).
+    void test_seam_preset_waiter_pool_next(std::uint32_t v) noexcept {
+        waiter_pool_next_.store(v, std::memory_order_relaxed);
+    }
+    [[nodiscard]] std::uint32_t test_seam_waiter_pool_next() const noexcept {
+        return waiter_pool_next_.load(std::memory_order_relaxed);
+    }
+    // Reads the `attached_awaiter_` identity currently stored at pool slot
+    // `idx`, interpreting the slot storage as a (possibly still-live)
+    // waiter_record. Two reads returning different pointers proves a second,
+    // unrelated allocation attempt clobbered a still-parked waiter's memory
+    // (the reissue-of-a-live-slot oracle) — not merely that "an allocation
+    // succeeded", which is non-discriminating.
+    [[nodiscard]] void const* test_seam_slot_attached_awaiter(std::size_t idx) const noexcept;
+
+    // 058 T026 (research.md D-5/D-6, spec FR-005/FR-006): mutable pool-slot
+    // accessor, used ONLY to fault-inject the provably-impossible states the
+    // T023 chain-walk traps and the T024 null-awaiter trap exist to catch —
+    // no legitimate API sequence can produce a `granted` record mid
+    // chain-walk or a null `attached_awaiter_` on a scheduled record (see the
+    // trap-site comments in `unlock()` / the resume runner above). A
+    // death-test child uses this to directly corrupt `phase_` /
+    // `attached_awaiter_` on a genuinely-live (real `async_lock()`-parked)
+    // record immediately before driving the real unlock()/resume path into
+    // the corresponding trap.
+    [[nodiscard]] detail::waiter_record* test_seam_mutable_slot(std::size_t idx) noexcept;
+
+    // 058 Gate-B (2026-07-03 test-oracle-hygiene fix): lifetime-safe
+    // free-list-membership read. Reads ONLY the mutex's own
+    // `waiter_pool_free_` head (an async_mutex member, alive for the whole
+    // test) — never a possibly-already-`~waiter_record()`'d pool slot. Used
+    // by the chain-walk CAS-loss witnesses to prove a released waiter_record
+    // was returned to the free list (as the new head) WITHOUT reading the
+    // destroyed record's own members. No production behaviour or layout
+    // change (accessor only; no new data member).
+    [[nodiscard]] std::uint32_t test_seam_free_list_head_slot_index() const noexcept {
+        return detail::unpack_free_list_head(waiter_pool_free_.load(std::memory_order_acquire))
+            .slot_index;
+    }
+#endif
 
 private:
     // ─────────────────────────────────────────────────────────────────────────
@@ -234,14 +334,36 @@ private:
 
     static constexpr std::size_t waiter_pool_capacity_ = 512;
     static constexpr std::size_t waiter_record_storage_size_ = 256;
+    // 058 Gate-B (Fable MINOR-1): the generation-tagged free-list packs the slot
+    // index into 10 bits with `detail::free_list_empty_index` (0x3FF) as the
+    // empty sentinel. A capacity at/above the sentinel would let a real index
+    // alias the sentinel or be truncated by `pack_free_list_head`, silently
+    // corrupting the free list. Guard the coupling (512 < 1023 today).
+    static_assert(waiter_pool_capacity_ < detail::free_list_empty_index,
+                  "fixpp::sync: waiter_pool_capacity_ must stay below the 10-bit "
+                  "free-list slot-index sentinel (detail::free_list_empty_index).");
 
+    // 058 T003 (data-model.md; research.md D-1): `free_link` is PERSISTENT
+    // per-slot metadata (mutex-lifetime), not a `waiter_record` member — it
+    // stays unused until T010 wires the free-list push to it. Kept at 256 B
+    // total (248 + 4, rounded to alignof(max_align_t)=16) to preserve the
+    // layout golden.
     struct waiter_pool_slot {
-        alignas(std::max_align_t) std::byte storage[waiter_record_storage_size_];
+        alignas(std::max_align_t) std::byte storage[248];
+        std::atomic<std::uint32_t> free_link;
     };
+    static_assert(sizeof(waiter_pool_slot) == waiter_record_storage_size_,
+                  "fixpp::sync: waiter_pool_slot must stay 256 B (layout golden; data-model.md).");
 
     std::array<waiter_pool_slot, waiter_pool_capacity_> waiter_pool_storage_{};
     std::atomic<std::uint32_t> waiter_pool_next_{0};
-    std::atomic<detail::waiter_record*> waiter_pool_free_{nullptr};
+
+    // 058 T004 (research.md D-1): generation-tagged packed head, retyped from
+    // `std::atomic<detail::waiter_record*>` (same 8 B — layout golden held).
+    // Initialised to the empty-list sentinel (generation 0, slot_index =
+    // free_list_empty_index).
+    std::atomic<std::uint64_t> waiter_pool_free_{
+        detail::pack_free_list_head(0, detail::free_list_empty_index)};
 
     // RC-B v1.1 — drain flag; set by cancel_and_drain(), never cleared.
     // I-13..I-16 ordering sites.
@@ -254,14 +376,23 @@ private:
     // 048: demoted to relaxed — all inc/dec happen on the one owning strand.
     std::atomic<std::uint32_t> active_holders_count_{0};
 
-    // 048 (Erratum E-5) — strand-local in-flight-resumer count.
+    // 048 (Erratum E-5) — in-flight-resumer count.
     // Incremented inside schedule_record_resume() BEFORE the asio::post (sole
     // incrementer; every path: reap/grant/drained-bypass/on_cancel).
     // Decremented in the resume runner AFTER release_ref(record) — the LAST
     // statement in the runner (the drain observing 0 may destroy the mutex
     // immediately; nothing touches the mutex after the decrement).
-    // Relaxed: the drain-read is strand-confined; the member is atomic (not
-    // plain) because non-drain lock/cancel contention also touches it.
+    // 058 T016/T018 (research.md D-2): the decrement is RELEASE; the drain
+    // terminal condition and the destructor guard (D-3) both read it with
+    // ACQUIRE. The increment stays relaxed (program-order-before the
+    // asio::post on the SAME thread; asio::post itself supplies the
+    // synchronizes-with edge into the posted handler). The decrement's
+    // reader is NOT always strand-confined: the resume runner this barrier
+    // guards is posted onto the WAITER's own stored executor, which may
+    // differ from the drain's owning strand for a waiter parked
+    // cross-executor and then reaped (contracts/async_mutex-contract-
+    // delta.md). The release/acquire pairing is the happens-before that
+    // keeps that cross-executor teardown memory-safe.
     // This is THE barrier that keeps the mutex alive until every posted resumer
     // has dereferenced record->mutex_ (fixes P1-1 UAF — data-model.md).
     std::atomic<std::uint32_t> in_flight_resumers_{0};
@@ -463,6 +594,33 @@ struct alignas(std::max_align_t) waiter_record {
     alignas(std::max_align_t) std::array<std::byte, 64> exec_storage_{};
     std::atomic<std::uint32_t> refcount_{0};
 
+    // 058 T044 (tasks.md Phase 7.5, discharges W-6 by construction): the ONLY
+    // executor type ever stored here in production is asio::any_io_executor
+    // (async_lock() captures `co_await asio::this_coro::executor`, which is
+    // always this type). This static_assert proves at compile time that it
+    // fits `exec_storage_`, which makes store_executor()'s
+    // `sizeof(RawExecutor) > sizeof(exec_storage_)` fail arm (A7,
+    // store_executor's `return false;` below) STRUCTURALLY UNREACHABLE for
+    // every instantiation that ever occurs: `if constexpr` on a false
+    // condition preprocesses the `return false;` branch out of the compiled
+    // program for the only type that is ever substituted for `Executor`. Its
+    // sibling — destroy_executor()'s `if (destroy_exec_fn_ != nullptr)`
+    // null-fn guard — is likewise dead: with store_executor() infallible, the
+    // only record that would ever reach destroy_executor() with a null
+    // destroy_exec_fn_ was a record whose store_executor() call had failed;
+    // no such record is ever constructed. (Every record between construction
+    // at :1154 and a successful store_executor() at :1162 is released via
+    // the explicit two release_ref() calls in the store_executor()-fail arm
+    // above it, not via destroy_executor(); destroy_executor() is reached
+    // only along paths where store_executor() already succeeded and set
+    // destroy_exec_fn_.) Neither arm has a witness; both are waived
+    // (tasks.md W-6) as discharged-by-construction, not exercised.
+    static_assert(sizeof(asio::any_io_executor) <= sizeof(exec_storage_),
+                  "async_mutex waiter_record: asio::any_io_executor must fit "
+                  "exec_storage_ (store_executor()'s size-fail arm is "
+                  "otherwise reachable for the only production executor "
+                  "type)");
+
     // 048: latch param removed — in_flight_resumers_ is now a plain member of
     // async_mutex; schedule_record_resume increments it before posting.
     using resume_fn_t = void (*)(void*, waiter_record*) noexcept;
@@ -542,13 +700,16 @@ struct alignas(8) async_mutex_awaiter {
         fn(slot_storage_.data(), std::move(result));
     }
 
-    void destroy_handler() noexcept {
-        if (destroy_fn_) {
-            destroy_fn_(slot_storage_.data());
-            invoke_fn_ = nullptr;
-            destroy_fn_ = nullptr;
-        }
-    }
+    // 058 T043 (tasks.md Phase 7.5, discharges W-8 by removal): a defensive
+    // `destroy_handler()` (destroy-the-stored-handler-without-invoking-it) was
+    // grep-verified to have ZERO call sites tree-wide and removed rather than
+    // waived at 0% lcov. Every stored handler is always reached via
+    // invoke_handler() through the posted resume runner: the fast-path grant,
+    // the contended-grant chain-walk, the assign-throws catch arm, the
+    // draining_ arm, and cancel_and_drain() all route through
+    // schedule_record_resume() -> resume_fn_ -> invoke_handler() with an
+    // error or success result — none of them destroy the handler in place.
+    // Destroy-without-invoke was therefore dead, not a masked leak.
 
     void on_cancel(asio::cancellation_type) const noexcept;
 };
@@ -566,7 +727,16 @@ bool waiter_record::store_executor(Executor&& ex) noexcept {
         // in_flight_resumers_ is decremented here, AFTER release_ref, as the
         // LAST statement. Ordering: the drain observing in_flight_resumers_==0
         // may finalize and the caller may destroy the mutex immediately — nothing
-        // must touch `m` after the decrement. Relaxed: drain-read is strand-local.
+        // must touch `m` after the decrement.
+        // 058 T016/T018 (research.md D-2): the decrement below is a RELEASE,
+        // paired with an ACQUIRE at the drain terminal condition and the
+        // destructor guard — NOT relaxed. The drain is strand-local BY
+        // CONTRACT (cancel_and_drain() itself must run co-located with all
+        // acquire/cancel/unlock), but this resume runner is intentionally
+        // cross-executor: it is posted onto the WAITER's own stored executor,
+        // which may differ from the drain's owning strand (a waiter parked
+        // cross-executor and then reaped by the drain). The release/acquire
+        // pairing is what makes that cross-executor case memory-safe.
         resume_fn_ = [](void* storage, waiter_record* record) noexcept {
             auto* exec = std::launder(reinterpret_cast<RawExecutor*>(storage));
             auto runner = [record]() mutable {
@@ -576,11 +746,48 @@ bool waiter_record::store_executor(Executor&& ex) noexcept {
                 if (awaiter != nullptr) {
                     awaiter->slot_.clear();
                     awaiter->invoke_handler(std::move(record->result_));
+                } else {
+                    // 058 T024 (research.md D-6, spec FR-006 / AM-P3-2):
+                    // attached_awaiter_ is nulled ONLY at the async_lock()
+                    // coroutine tail (`:1187`), strictly AFTER this runner
+                    // invokes the handler for THIS SAME schedule (each record
+                    // is resumed at most once — the single-schedule
+                    // invariant: every schedule_record_resume() call site
+                    // transitions phase_ via a one-shot CAS/exchange before
+                    // scheduling). A null awaiter observed here is therefore
+                    // structurally impossible. Trap loudly instead of
+                    // silently dropping `record->result_` — which, for a
+                    // granted record, holds a live async_lock_guard; letting
+                    // it fall through to ~waiter_record() (below, via
+                    // release_ref) would run the guard's destructor and call
+                    // unlock() on a mutex no one ever took ownership of (a
+                    // phantom unlock / mutual-exclusion break). Terminating
+                    // here means that destructor never runs, so no defensive
+                    // `result_` disarm is needed — D-6's guidance (IF one
+                    // were ever added, it MUST disengage via
+                    // `async_lock_guard::release()`, the leaked-lock
+                    // direction, NEVER invoke `unlock()`) does not apply to
+                    // this primary fix.
+                    assert(awaiter != nullptr &&
+                           "async_mutex: resume runner observed a null "
+                           "attached_awaiter_ for a scheduled record — "
+                           "impossible invariant break");
+                    std::terminate();
                 }
                 release_ref(record);  // may free record; do not touch record after
                 // Decrement LAST — the drain may destroy the mutex once it
                 // observes 0; nothing may touch m after this line.
-                m->in_flight_resumers_.fetch_sub(1, std::memory_order_relaxed);
+                // 058 T016 (research.md D-2): RELEASE. Paired with the ACQUIRE
+                // load at the drain terminal condition and the destructor
+                // guard. This is the happens-before edge that makes
+                // cross-executor drain-then-destroy memory-safe: every write
+                // this runner made into mutex-owned storage above (the
+                // free-list push inside release_ref, in particular) is
+                // guaranteed visible to whichever thread's acquire load
+                // observes the resulting 0 — closing the write-after-free
+                // window on weakly-ordered hardware (contracts/async_mutex-
+                // contract-delta.md).
+                m->in_flight_resumers_.fetch_sub(1, std::memory_order_release);
             };
 
             // v1.6 Erratum E-3: 2f waiter resumption is ALWAYS posted, never
@@ -593,6 +800,27 @@ bool waiter_record::store_executor(Executor&& ex) noexcept {
             // (TSan: US1 sync_fifo_fairness, US2 sync_cancellation_mid_wait).
             // completion_policy() is preserved as a semantic knob; both
             // policies post for waiter resumption.
+            //
+            // 058 T025 (research.md D-8, spec FR-007 / AM-P3-3) — OOM
+            // disposition, settled: `asio::post` here can allocate (queuing
+            // the posted work item) and this lambda is `noexcept`, so an
+            // allocator-exhaustion `bad_alloc` escaping it is an ACCEPTED
+            // fail-stop (`std::terminate`), consistent with this primitive's
+            // terminate-on-contract-violation posture elsewhere (the
+            // destructor guard, the T023/T024 traps above). This is NOT
+            // closed the way the pre-grant slot-assign allocation is
+            // (`store_executor`/`inherited_slot.assign` failures above fail
+            // CLOSED with `sync_lock_alloc_failed`, `:1106-1127`): the
+            // difference is grant ORDERING, not an oversight. Slot-assign
+            // runs pre-commitment — no waiter has been granted yet, so
+            // returning an error is a legitimate outcome. This post runs
+            // POST-GRANT: the waiter already owns the lock (or has been
+            // definitively cancelled) and MUST be resumed — there is no
+            // error channel left to report through, and silently dropping
+            // the resume would leak a granted holder or hang a cancelled
+            // waiter forever, which is worse than a loud fail-stop. See
+            // contracts/async_mutex-contract-delta.md "OOM disposition on
+            // the resume path" for the full contract-level statement.
             asio::post(*exec, std::move(runner));
         };
         destroy_exec_fn_ = [](void* storage) noexcept {
@@ -616,7 +844,7 @@ static_assert(alignof(waiter_record) >= 8,
               "fixpp::sync: waiter_record must be 8-byte-aligned so the "
               "low-bit `not_locked` sentinel (= 1) is distinguishable from a real "
               "waiter pointer.");
-static_assert(sizeof(waiter_record) <= 256,
+static_assert(sizeof(waiter_record) <= 248,
               "fixpp::sync: waiter_record exceeds waiter_pool storage budget.");
 
 // T060: §1.1 / §6.4 awaiter byte budget — HALO-eligibility precondition.
@@ -628,6 +856,67 @@ static_assert(sizeof(waiter_record) <= 256,
 static_assert(sizeof(async_mutex_awaiter) <= 96,
               "fixpp::sync: async_mutex_awaiter exceeds the §1.1 ≤ 96 B HALO budget.");
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 058 T006 — compile-gated free-list pop test seam (research.md D-7).
+// Zero production footprint: absent entirely unless FIXPP_ASYNC_MUTEX_TEST_SEAM
+// is defined (the standalone `test_async_mutex_aba_interleave` target only).
+// Default no-op (nullptr); the seam-enabled witness overrides the pointer to
+// pin a thread at each half of the free-list pop window. No call sites are
+// wired into the pop yet — that lands with the T007/T008 witnesses.
+// ─────────────────────────────────────────────────────────────────────────────
+#ifdef FIXPP_ASYNC_MUTEX_TEST_SEAM
+enum class async_mutex_seam_phase : std::uint8_t {
+    pop_pre_link_load,  // head load -> free-link load (AM-P1 part 2)
+    pop_pre_cas,        // free-link load -> CAS (AM-P1 part 1)
+
+    // 058 T046 (F4/F6 — coverage-design gate empirical correction, see
+    // .specify/decisions/058-async-mutex-hardening-coverage-design.md
+    // "EMPIRICAL CORRECTION"): pin unlock()'s two terminal-CAS-fail ->
+    // recursive-unlock windows so a seam-installed hook can force a
+    // concurrent waiter arrival into the narrow gap between
+    // `state_.exchange(locked_no_waiters)` and the immediately-following
+    // CAS-back-to-`not_locked`. Both arms are reachable in-contract but not
+    // reliably organic on the seam-OFF coverage lane (F4 flaky ~0.3-1.5%;
+    // F6 0/all-trials) — see test_async_mutex_terminal_cas_recursive_unlock.cpp.
+    unlock_pre_terminal_cas_fast,  // F4: no-waiters fast path (:1379 CAS)
+    unlock_pre_terminal_cas_fifo,  // F6: FIFO walk exhausted, all cancelled (:1439 CAS)
+
+    // 058 Gate-B MAJOR-2 (async_mutex.hpp contended-acquire loop, ~:1250):
+    // deterministic reproduction of the pre-fix `old_state` staleness
+    // livelock. Two cooperating phases pin the SAME acquirer thread twice:
+    //   - acq_pre_state_reload: immediately BEFORE the loop's initial
+    //     `old_state = state_.load()` — lets the test release a temporary
+    //     holder with zero waiters queued, so the reload deterministically
+    //     observes `not_locked`.
+    //   - acq_pre_notlocked_cas: immediately AFTER the loop observes
+    //     `old_state == not_locked`, BEFORE the not_locked -> locked_no_waiters
+    //     CAS — lets a second thread win the lock first, forcing the pinned
+    //     acquirer's CAS to fail. Pre-fix, the CAS's `exp2` local is discarded
+    //     on failure and the loop retries against the stale `old_state`
+    //     forever (busy-spin, never re-queues). Post-fix, the CAS operates
+    //     directly on `old_state`, which is refreshed on failure, and the
+    //     next iteration correctly falls through to the queueing branch.
+    //     See test_async_mutex_acquire_livelock.cpp.
+    acq_pre_state_reload,
+    acq_pre_notlocked_cas,
+
+    // 058 Gate-B MAJOR-1 (unlock() chain-walk CAS-loss, residual walk
+    // ~:1345 / fresh FIFO walk ~:1426): pin unlock() immediately AFTER it
+    // loads a waiter's `phase_` as `queued`, BEFORE the `queued -> granted`
+    // CAS, so a concurrent `on_cancel()` can win the `queued -> cancelled`
+    // race first — the `ph = expected_ph` arm the coverage-design doc had
+    // waived as "hard to force" (2026-07-03 Gate-B correction: reachable,
+    // must be witnessed, not waived). Both list walks get their own phase
+    // since they are structurally distinct code (residual FIFO chain vs.
+    // the fresh LIFO->FIFO reversal). See
+    // test_async_mutex_chain_walk_cas_loss.cpp.
+    unlock_pre_grant_cas_residual,
+    unlock_pre_grant_cas_fifo,
+};
+
+inline void (*async_mutex_test_seam)(async_mutex_seam_phase) noexcept = nullptr;
+#endif
+
 }  // namespace detail
 
 }  // namespace fixpp::sync
@@ -638,12 +927,66 @@ static_assert(sizeof(async_mutex_awaiter) <= 96,
 
 // T050 (US3) final: fire terminate if held or waiters present.
 // US1: fires terminate if state_ != not_locked (mutex is held or has waiters).
+// 058 T017 (research.md D-3 / AM-P2-2): widened with a THIRD OR-term —
+// in_flight_resumers_ != 0 — closing the silent cancel/grant-delivered-then-
+// destroy UAF that neither of the first two terms detects (a resume runner
+// can be posted-but-not-yet-run with state_ already restored to not_locked
+// and next_drain_head_ already empty; see tests/sync/test_destructor_release_
+// death.cpp T013/T014). ACQUIRE — paired with the RELEASE decrement in the
+// resume runner (T016); observing 0 here happens-before every write that
+// runner made into mutex-owned pool storage, so a false-negative (reading a
+// stale nonzero-as-if-zero, or missing a real writer's in-flight state) is
+// ruled out on weakly-ordered hardware, not just x86.
+//
+// Deliberately NOT gated on active_holders_count_ (research.md D-3, Gate-A
+// both reviewers): active_holders_count_ is not a valid teardown barrier — it
+// is decremented EARLY in unlock() (:961-ish), before unlock() finishes
+// touching state_/draining_, so a ==0 reading does not prove the mutex is
+// untouched. A holders-based OR-term would also be REDUNDANT with the
+// existing `state_ != not_locked` term, not merely "not a barrier": every
+// path that increments active_holders_count_ does so only while `state_`
+// already reads as held (a grant transitions state_ away from not_locked in
+// the same CAS/exchange that hands out the holder slot), and every path that
+// would leave active_holders_count_ > 0 at destroy time necessarily leaves
+// state_ != not_locked too (unlock() only restores state_ == not_locked on
+// the fully-drained fast path, which is exactly the path that also decrements
+// active_holders_count_ back to 0 first). So active_holders_count_ > 0 =>
+// state_ != not_locked always holds, and dropping a holders term loses no
+// detection — it would be dead weight, not a partial fix (Fable coverage-gate
+// H3). The genuine cross-executor granted-holder-vs-drain UAF this exposes
+// (a waiter parked cross-executor, granted, whose unlock() overlaps a drain)
+// is out of scope for this guard and is instead handled by the CONTRACT
+// (cancel_and_drain() must be strand-local; contracts/async_mutex-contract-
+// delta.md "Explicit EXCLUSION").
 inline fixpp::sync::async_mutex::~async_mutex() noexcept(false) {
     uintptr_t s = state_.load(std::memory_order_acquire);
-    if (s != not_locked || next_drain_head_.load(std::memory_order_acquire) != nullptr) {
+    if (s != not_locked || next_drain_head_.load(std::memory_order_acquire) != nullptr ||
+        in_flight_resumers_.load(std::memory_order_acquire) != 0) {
         std::terminate();
     }
 }
+
+#ifdef FIXPP_ASYNC_MUTEX_TEST_SEAM
+// 058 T020 (research.md D-4/D-7): out-of-line so `detail::waiter_record` is
+// complete. Test-only; no-op / absent unless FIXPP_ASYNC_MUTEX_TEST_SEAM is
+// defined (standalone target only, per the D-7 ODR discipline — see the
+// in-class declaration above for the rationale).
+inline void const* fixpp::sync::async_mutex::test_seam_slot_attached_awaiter(
+    std::size_t idx) const noexcept {
+    auto const* record = std::launder(
+        reinterpret_cast<detail::waiter_record const*>(waiter_pool_storage_[idx].storage));
+    return record->attached_awaiter_.load(std::memory_order_relaxed);
+}
+
+// 058 T026 (research.md D-5/D-6): out-of-line for the same reason as
+// test_seam_slot_attached_awaiter above (detail::waiter_record completeness).
+// Test-only; no-op / absent unless FIXPP_ASYNC_MUTEX_TEST_SEAM is defined.
+inline fixpp::sync::detail::waiter_record* fixpp::sync::async_mutex::test_seam_mutable_slot(
+    std::size_t idx) noexcept {
+    return std::launder(
+        reinterpret_cast<detail::waiter_record*>(waiter_pool_storage_[idx].storage));
+}
+#endif
 
 inline std::byte* fixpp::sync::detail::slot_allocator::inline_storage() noexcept {
     return awaiter_->slot_storage_.data();
@@ -662,12 +1005,31 @@ inline void fixpp::sync::detail::waiter_record::release_ref(waiter_record* recor
     auto* end = begin + sizeof(mutex->waiter_pool_storage_);
     auto* raw = reinterpret_cast<std::byte*>(record);
     if (raw >= begin && raw < end) {
-        auto* node = reinterpret_cast<waiter_record*>(raw);
-        auto* expected = mutex->waiter_pool_free_.load(std::memory_order_relaxed);
-        do {
-            node->next_ = expected;
-        } while (!mutex->waiter_pool_free_.compare_exchange_weak(
-            expected, node, std::memory_order_release, std::memory_order_relaxed));
+        // 058 T010 (research.md D-1): generation-tagged push. Writes the
+        // PERSISTENT per-slot `free_link` (mutex-lifetime slot metadata) —
+        // never the just-destroyed record (`~waiter_record()` already ran
+        // above) — closing the Gate-A-1 lifetime blocker. Carries the
+        // CURRENTLY-LOADED generation UNCHANGED (only the pop bumps it; a
+        // push-side bump would silently defeat the T012 mutation-check by
+        // advancing the head on every push regardless of the pop fix).
+        using waiter_pool_slot = fixpp::sync::async_mutex::waiter_pool_slot;
+        auto this_idx = static_cast<std::uint32_t>(reinterpret_cast<waiter_pool_slot*>(raw) -
+                                                   mutex->waiter_pool_storage_.data());
+
+        auto head = mutex->waiter_pool_free_.load(std::memory_order_relaxed);
+        for (;;) {
+            auto unpacked = detail::unpack_free_list_head(head);
+            mutex->waiter_pool_storage_[this_idx].free_link.store(unpacked.slot_index,
+                                                                  std::memory_order_relaxed);
+            auto desired = detail::pack_free_list_head(unpacked.generation, this_idx);
+            if (mutex->waiter_pool_free_.compare_exchange_weak(
+                    head, desired, std::memory_order_release, std::memory_order_acquire)) {
+                break;
+            }
+            // CAS failed: `head` was reloaded; retry with the fresh link
+            // store above (re-executed each iteration, never hoisted out of
+            // the loop — a stale free_link write would lose the chain).
+        }
         return;
     }
 
@@ -805,22 +1167,77 @@ fixpp::sync::async_mutex::async_lock(std::pmr::memory_resource* mr) noexcept {
                     }
                 }
 
-                auto* free_head = waiter_pool_free_.load(std::memory_order_acquire);
-                while (free_head != nullptr) {
-                    auto* next = free_head->next_;
-                    if (waiter_pool_free_.compare_exchange_weak(free_head, next,
-                                                                std::memory_order_acq_rel,
-                                                                std::memory_order_acquire)) {
-                        return std::launder(reinterpret_cast<waiter_record*>(free_head));
+                // 058 T009 (research.md D-1/D-7): generation-tagged pop.
+                // Load the packed head; if empty, fall through to the bounded
+                // bump allocator below. Otherwise chase the PERSISTENT
+                // per-slot `free_link` (mutex-lifetime, never the destroyed
+                // record — closes the Gate-A-1 reuse-race BLOCKER) and
+                // install a new head whose generation is bumped by exactly
+                // one relative to the head just observed — the bump is what
+                // defeats the ABA on a stale CAS (D-1).
+                auto head = waiter_pool_free_.load(std::memory_order_acquire);
+                for (;;) {
+                    auto unpacked = detail::unpack_free_list_head(head);
+                    if (unpacked.slot_index == detail::free_list_empty_index) {
+                        break;
                     }
+#ifdef FIXPP_ASYNC_MUTEX_TEST_SEAM
+                    // 058 T007/T008/T009 (research.md D-7): pin the pop here
+                    // so a seam-installed hook can interleave a concurrent
+                    // pop/push cycle (part 2: reuse race on the free-link
+                    // atomic load below). No-op unless the standalone
+                    // test_async_mutex_aba_interleave target defines the
+                    // macro and installs a non-null hook.
+                    if (detail::async_mutex_test_seam) {
+                        detail::async_mutex_test_seam(
+                            detail::async_mutex_seam_phase::pop_pre_link_load);
+                    }
+#endif
+                    auto next_idx = waiter_pool_storage_[unpacked.slot_index].free_link.load(
+                        std::memory_order_acquire);
+#ifdef FIXPP_ASYNC_MUTEX_TEST_SEAM
+                    // 058 T007/T009 (research.md D-7): pin the pop here so a
+                    // seam-installed hook can interleave a concurrent
+                    // pop-pop-push cycle recreating the same head (part 1:
+                    // ABA on the generation-tagged CAS below).
+                    if (detail::async_mutex_test_seam) {
+                        detail::async_mutex_test_seam(detail::async_mutex_seam_phase::pop_pre_cas);
+                    }
+#endif
+                    auto desired = detail::pack_free_list_head(unpacked.generation + 1, next_idx);
+                    if (waiter_pool_free_.compare_exchange_weak(
+                            head, desired, std::memory_order_acq_rel, std::memory_order_acquire)) {
+                        return std::launder(reinterpret_cast<waiter_record*>(
+                            waiter_pool_storage_[unpacked.slot_index].storage));
+                    }
+                    // CAS failed: compare_exchange_weak reloaded `head` with
+                    // the current atomic value; loop retries against it.
                 }
 
-                auto slot = waiter_pool_next_.fetch_add(1, std::memory_order_acq_rel);
-                if (slot >= waiter_pool_capacity_) {
-                    return nullptr;
+                // 058 T021 (research.md D-4): bounded CAS bump allocator.
+                // The prior `fetch_add(1)` incremented UNCONDITIONALLY even on
+                // capacity-check-FAILING attempts (the `>= capacity` check ran
+                // AFTER the increment), so a sustained exhaustion storm
+                // eventually wraps the u32 counter back into [0, capacity) and
+                // RE-ISSUES an already-live slot (AM-P2-3). Load first; if
+                // already at/over capacity, fail closed WITHOUT incrementing —
+                // the counter can never advance past `waiter_pool_capacity_`,
+                // so it can never wrap.
+                auto cur = waiter_pool_next_.load(std::memory_order_acquire);
+                for (;;) {
+                    if (cur >= waiter_pool_capacity_) {
+                        return nullptr;
+                    }
+                    if (waiter_pool_next_.compare_exchange_weak(
+                            cur, cur + 1, std::memory_order_acq_rel, std::memory_order_acquire)) {
+                        break;
+                    }
+                    // CAS failed: compare_exchange_weak reloaded `cur` with the
+                    // current atomic value; loop retries against it (re-checks
+                    // the capacity bound on the reloaded value).
                 }
                 return std::launder(
-                    reinterpret_cast<waiter_record*>(waiter_pool_storage_[slot].storage));
+                    reinterpret_cast<waiter_record*>(waiter_pool_storage_[cur].storage));
             }();
             if (record == nullptr) {
                 std::move(handler)(expected_t<async_lock_guard>{
@@ -883,12 +1300,36 @@ fixpp::sync::async_mutex::async_lock(std::pmr::memory_resource* mr) noexcept {
                 return;
             }
 
+#ifdef FIXPP_ASYNC_MUTEX_TEST_SEAM
+            // 058 Gate-B MAJOR-2: see async_mutex_seam_phase::acq_pre_state_reload.
+            if (detail::async_mutex_test_seam) {
+                detail::async_mutex_test_seam(detail::async_mutex_seam_phase::acq_pre_state_reload);
+            }
+#endif
             uintptr_t old_state = state_.load(std::memory_order_acquire);
 
             while (true) {
                 if (old_state == not_locked) {
-                    uintptr_t exp2 = not_locked;
-                    if (state_.compare_exchange_weak(exp2, locked_no_waiters,
+#ifdef FIXPP_ASYNC_MUTEX_TEST_SEAM
+                    // 058 Gate-B MAJOR-2: see
+                    // async_mutex_seam_phase::acq_pre_notlocked_cas.
+                    if (detail::async_mutex_test_seam) {
+                        detail::async_mutex_test_seam(
+                            detail::async_mutex_seam_phase::acq_pre_notlocked_cas);
+                    }
+#endif
+                    // 058 Gate-B MAJOR-2 fix: CAS directly on `old_state` (not a
+                    // fresh local) so a failed CAS refreshes `old_state` with the
+                    // actual current value. Pre-fix, a fresh `exp2 = not_locked`
+                    // local was discarded on failure, leaving the outer
+                    // `old_state` permanently stale at `not_locked` — the loop
+                    // then retried the same doomed not_locked -> locked_no_waiters
+                    // CAS forever instead of re-observing the real (now-held)
+                    // state and falling through to the queueing branch below
+                    // (busy-spin livelock; deadlock on a shared/oversubscribed
+                    // single-thread executor). See
+                    // test_async_mutex_acquire_livelock.cpp.
+                    if (state_.compare_exchange_weak(old_state, locked_no_waiters,
                                                      std::memory_order_acquire,
                                                      std::memory_order_acquire)) {
                         active_holders_count_.fetch_add(1, std::memory_order_relaxed);
@@ -978,6 +1419,14 @@ inline void fixpp::sync::async_mutex::unlock() noexcept {
             waiter_phase ph = cur->phase_.load(std::memory_order_acquire);
             if (ph == waiter_phase::queued) {
                 waiter_phase expected_ph = waiter_phase::queued;
+#ifdef FIXPP_ASYNC_MUTEX_TEST_SEAM
+                // 058 Gate-B MAJOR-1: see
+                // async_mutex_seam_phase::unlock_pre_grant_cas_residual.
+                if (detail::async_mutex_test_seam) {
+                    detail::async_mutex_test_seam(
+                        detail::async_mutex_seam_phase::unlock_pre_grant_cas_residual);
+                }
+#endif
                 if (cur->phase_.compare_exchange_strong(expected_ph, waiter_phase::granted,
                                                         std::memory_order_acq_rel,
                                                         std::memory_order_acquire)) {
@@ -999,7 +1448,22 @@ inline void fixpp::sync::async_mutex::unlock() noexcept {
                 detail::waiter_record::release_ref(cur);  // list membership
                 cur = nxt;
             } else {
-                cur = cur->next_;
+                // 058 T023 (research.md D-5, spec FR-005 / AM-P3-1): `ph` here
+                // can only be `queued` (handled above, and which always
+                // returns on a successful CAS) or `cancelled` (handled
+                // above); a `granted` record is structurally impossible — the
+                // ONLY site that transitions a record's phase_ to `granted`
+                // is the CAS immediately above, which unchains it (splices
+                // the tail to `next_drain_head_`) and returns in the same
+                // breath, never leaving a granted record for a later pass of
+                // this walk to observe. unlock() is also holder-serialized
+                // (only one unlock() executes per mutex at a time), so no
+                // concurrent walk can race this one. Trap loudly instead of
+                // silently stepping past a corrupted invariant.
+                assert(false &&
+                       "async_mutex: granted record observed mid chain-walk "
+                       "(residual list) — impossible invariant break");
+                std::terminate();
             }
         }
     }
@@ -1007,6 +1471,17 @@ inline void fixpp::sync::async_mutex::unlock() noexcept {
     uintptr_t state_snapshot = state_.exchange(locked_no_waiters, std::memory_order_acq_rel);
 
     if (state_snapshot == not_locked || state_snapshot == locked_no_waiters) {
+#ifdef FIXPP_ASYNC_MUTEX_TEST_SEAM
+        // 058 T046 (F4): pin here so a seam-installed hook can force a
+        // concurrent waiter's queuing CAS into the window between the
+        // exchange above and the terminal CAS below. No-op unless the
+        // standalone test_async_mutex_terminal_cas_recursive_unlock target
+        // defines the macro and installs a non-null hook.
+        if (detail::async_mutex_test_seam) {
+            detail::async_mutex_test_seam(
+                detail::async_mutex_seam_phase::unlock_pre_terminal_cas_fast);
+        }
+#endif
         uintptr_t expected2 = locked_no_waiters;
         if (!state_.compare_exchange_strong(expected2, not_locked, std::memory_order_acq_rel,
                                             std::memory_order_acquire)) {
@@ -1033,6 +1508,14 @@ inline void fixpp::sync::async_mutex::unlock() noexcept {
         waiter_phase ph = fifo_cur->phase_.load(std::memory_order_acquire);
         if (ph == waiter_phase::queued) {
             waiter_phase expected_ph = waiter_phase::queued;
+#ifdef FIXPP_ASYNC_MUTEX_TEST_SEAM
+            // 058 Gate-B MAJOR-1: see
+            // async_mutex_seam_phase::unlock_pre_grant_cas_fifo.
+            if (detail::async_mutex_test_seam) {
+                detail::async_mutex_test_seam(
+                    detail::async_mutex_seam_phase::unlock_pre_grant_cas_fifo);
+            }
+#endif
             if (fifo_cur->phase_.compare_exchange_strong(expected_ph, waiter_phase::granted,
                                                          std::memory_order_acq_rel,
                                                          std::memory_order_acquire)) {
@@ -1054,10 +1537,28 @@ inline void fixpp::sync::async_mutex::unlock() noexcept {
             detail::waiter_record::release_ref(fifo_cur);  // list membership
             fifo_cur = nxt;
         } else {
-            fifo_cur = fifo_cur->next_;
+            // 058 T023 (research.md D-5, spec FR-005 / AM-P3-1): sibling trap
+            // for the fresh LIFO->FIFO walk — same reasoning as the residual
+            // walk's trap above: `granted` is set only by the CAS immediately
+            // above (which unchains and returns), and unlock() is
+            // holder-serialized, so a `granted` record here is structurally
+            // impossible. Trap loudly rather than silently stepping past it.
+            assert(false &&
+                   "async_mutex: granted record observed mid chain-walk "
+                   "(FIFO list) — impossible invariant break");
+            std::terminate();
         }
     }
 
+#ifdef FIXPP_ASYNC_MUTEX_TEST_SEAM
+    // 058 T046 (F6): pin here so a seam-installed hook can force a
+    // concurrent waiter's queuing CAS into the window between the exchange
+    // above and this terminal CAS, after the FIFO walk exhausts an
+    // all-cancelled chain (no grant, so no early return above).
+    if (detail::async_mutex_test_seam) {
+        detail::async_mutex_test_seam(detail::async_mutex_seam_phase::unlock_pre_terminal_cas_fifo);
+    }
+#endif
     uintptr_t expected3 = locked_no_waiters;
     if (!state_.compare_exchange_strong(expected3, not_locked, std::memory_order_acq_rel,
                                         std::memory_order_acquire)) {
@@ -1190,10 +1691,17 @@ fixpp::sync::async_mutex::cancel_and_drain() noexcept {
     // INV-D: terminal = (holders==0) AND (resumers==0) AND (lists empty).
     // Must NOT terminate on active_holders_count_==0 alone — in_flight_resumers_
     // is the UAF barrier (research.md D-2; fixes P1-1).
+    // 058 T016 (research.md D-2): ACQUIRE — paired with the RELEASE decrement
+    // in the resume runner (:626-ish, `fetch_sub(..., release)`). Observing 0
+    // here happens-before every write the runner made into mutex-owned pool
+    // storage, so a caller that destroys the mutex immediately after this
+    // drain returns cannot race those writes (contracts/async_mutex-
+    // contract-delta.md; scoped to the parked-then-reaped case — see the
+    // destructor's own comment for the granted-holder EXCLUSION).
     for (;;) {
         bool both_empty = reap_both_lists();
         if (active_holders_count_.load(std::memory_order_relaxed) == 0 &&
-            in_flight_resumers_.load(std::memory_order_relaxed) == 0 && both_empty) {
+            in_flight_resumers_.load(std::memory_order_acquire) == 0 && both_empty) {
             break;
         }
         co_await asio::post(bound_ex, asio::use_awaitable);

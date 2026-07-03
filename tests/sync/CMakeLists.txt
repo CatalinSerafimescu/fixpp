@@ -45,7 +45,39 @@ endfunction()
 add_sync_test(sync_uncontended_latency   test_uncontended_latency.cpp)
 add_sync_test(sync_contended_latency     test_contended_latency.cpp)
 add_sync_test(sync_fifo_fairness         test_fifo_fairness.cpp)
+# 058 T032 (US5, T-7): FIFO fairness ACROSS drain cycles (the residual-vs-
+# later-arrival straddle) — sync_fifo_fairness above only covers WITHIN a
+# single drain cycle. See file header for the deterministic poll_one()/gate
+# driver design (a determinism contract, not a race — deliberate deviation
+# from the T027-T031 genuinely-MT idiom).
+add_sync_test(sync_fifo_across_cycles    test_fifo_across_cycles.cpp)
 add_sync_test(sync_contention_stress     test_contention_stress.cpp)
+# 058 T040 (US5, Phase 7.5 coverage-design-gate addition): H-A genuinely-MT
+# hammer — organic (seam-OFF, coverage-lane-visible) coverage of the
+# free-list pop/bump-counter/release_ref-push CAS-retry loops, the
+# async_lock slow-path push CAS-retry, and the FIRST unlock() terminal-CAS-
+# fail recursive-unlock arm ("F4"). See file header for the CORRECTION note
+# (empirically measured F6/push_residual as NOT organically coverable —
+# escalated, recommend waiver) + .specify/decisions/058-async-mutex-
+# hardening-coverage-design.md. Ordinary add_sync_test linkage (no
+# FIXPP_ASYNC_MUTEX_TEST_SEAM) so it runs on every preset including the
+# seam-OFF coverage lane.
+#
+# Dual config (file header has the full rationale): the default (debug/TSan/
+# ASan) build uses the brief-literal light config; FIXPP_ENABLE_COVERAGE
+# switches on a much-higher-volume, jitter-free burst (via the
+# FIXPP_ASYNC_MUTEX_MT_HAMMER_COVERAGE_BURST compile definition) needed to
+# organically hit the F4 recursive-unlock arm's few-instruction race window
+# — measured to never fire under the brief-literal jittered design. The
+# burst is confined to the coverage lane so it never inflates the
+# correctness-lane TIMEOUT / TSan/ASan runtime.
+add_sync_test(sync_async_mutex_mt_hammer test_async_mutex_mt_hammer.cpp)
+set_tests_properties(sync_async_mutex_mt_hammer PROPERTIES TIMEOUT 120)
+if(FIXPP_ENABLE_COVERAGE)
+  target_compile_definitions(sync_async_mutex_mt_hammer PRIVATE
+    FIXPP_ASYNC_MUTEX_MT_HAMMER_COVERAGE_BURST)
+  set_tests_properties(sync_async_mutex_mt_hammer PROPERTIES TIMEOUT 300)
+endif()
 add_sync_test(sync_executor_compat       test_executor_compat.cpp)
 add_sync_test(sync_dispatch_vs_post      test_dispatch_vs_post.cpp)
 add_sync_test(sync_cross_strand_acquire  test_cross_strand_acquire.cpp)
@@ -73,6 +105,10 @@ add_sync_test(sync_slot_allocator_storage  test_slot_allocator_storage.cpp)
 # registration runs under the active preset (debug or release). Full
 # release-linkage CI execution is wired at T050/T052 by the parent.
 add_sync_test(sync_destructor_release_death      test_destructor_release_death.cpp)
+# 058 T015 (US2): genuinely multi-threaded, cross-executor drain-then-destroy
+# HB-observation witness (research.md D-2). See file header for the coordination
+# design (deterministic single-threaded park + genuinely-threaded reap/destroy).
+add_sync_test(sync_drain_destroy_inflight_mt     test_drain_destroy_inflight_mt.cpp)
 add_sync_test(sync_cancel_and_drain              test_cancel_and_drain.cpp)
 add_sync_test(sync_cancel_and_drain_concurrent   test_cancel_and_drain_concurrent.cpp)
 add_sync_test(sync_drain_latch_holder_lifecycle  test_drain_latch_holder_lifecycle.cpp)
@@ -138,6 +174,13 @@ add_sync_test(sync_async_mutex_layout_golden      test_async_mutex_layout_golden
 # spec under a multi-threaded io_context (TSan is the portable check; native
 # ARM64 execution recorded host-unavailable in the verify doc — T068).
 add_sync_test(sync_arm64_weak_memory test_arm64_weak_memory.cpp)
+# 058 T045: three new genuinely-MT D-2 discriminator epochs (20/20/15 reps,
+# each spinning two dedicated OS threads + bounded wait_ready deadlines) were
+# added on top of the pre-existing MultiThreadedContentionMutualExclusion
+# case. The internal deadlines make a hang near-impossible, but this is a
+# per-test backstop against the ctest default (1500s) per
+# feedback_ci_hung_test_no_timeout_burns_6h — cheap insurance, not a fix.
+set_tests_properties(sync_arm64_weak_memory PROPERTIES TIMEOUT 120)
 # T078: consumer compile/link contract — SC-008 / [2e §3.1] hand-off gate.
 # Compile-only static_assert/SFINAE TU over the SHIPPED headers; links
 # fixpp_sync to confirm non-inline surface link-completeness.
@@ -250,6 +293,177 @@ if(FIXPP_LIBCXX_LANE)
        | '${CMAKE_CXX_COMPILER}' -stdlib=libc++ -std=c++23 -x c++ -c -o /dev/null -"
   )
 endif()
+
+# ── 058-async-mutex-hardening T001/T002: standalone D-7 ABA-interleave seam ──
+# research.md D-7: FIXPP_ASYNC_MUTEX_TEST_SEAM changes async_mutex.hpp's inline
+# out-of-line body token sequences. A seam-enabled TU linked against ANY
+# non-seam TU that also instantiates those bodies is an ODR violation, so this
+# executable MUST NOT link fixpp_sync (or any other fixpp static library) via
+# add_sync_test(). It is built directly against the header include path +
+# asio::asio (header-only, no compiled TUs) + GTest — async_mutex.hpp's own
+# includes are all header-only (<asio/*>, fixpp/core/error.hpp; the latter has
+# no .cpp) so ZERO fixpp library linkage is required or present. This is the
+# strongest form of "standalone": no fixpp object file of any kind is linked
+# into this binary, seam-enabled or not.
+#
+# T007/T008 author the real witness bodies later; today this registers a
+# minimal compiling stub (test_async_mutex_aba_interleave.cpp) so CMake
+# configures green without any real race logic.
+#
+# T002 lane wiring (D-7 "document the expected TSan report" branch — NOT the
+# "non-TSan lane" branch): the target is registered on EVERY preset, TSan
+# included. Excluding TSan entirely would remove the *only* discriminating
+# lane for D-7 part 2 (`pop_pre_link_load`, T008): that phase's witness is
+# TSan-RED against the pre-fix member-`free_next_` shape and TSan-clean only
+# after the fix (T011 "confirm ... TSan clean"). A blanket non-TSan exclusion
+# would make part 2 non-discriminating everywhere — the exact witness-quality
+# failure this feature exists to eliminate.
+#
+# Consequence to read at T007/T008/T012 time: the PRE-FIX mutation-RED run of
+# this target is EXPECTED to produce
+#   - a real TSan data-race report on the `linux-clang-tsan` /
+#     `linux-clang-libc++-tsan` presets (part 2's discriminator), and
+#   - an assertion failure (no TSan report) on every other preset (part 1,
+#     the `pop_pre_cas` ABA window, is TSan-invisible per D-7's problem
+#     statement) —
+# neither is an unexpected sanitizer gate failure; do not suppress or waive
+# the TSan report generically. Post-fix (T009/T010 landed) both phases are
+# clean on every lane, TSan included.
+add_executable(test_async_mutex_aba_interleave
+  test_async_mutex_aba_interleave.cpp)
+target_compile_definitions(test_async_mutex_aba_interleave PRIVATE
+  FIXPP_ASYNC_MUTEX_TEST_SEAM)
+target_include_directories(test_async_mutex_aba_interleave PRIVATE
+  "${CMAKE_SOURCE_DIR}/include"
+)
+target_link_libraries(test_async_mutex_aba_interleave PRIVATE
+  asio::asio
+  GTest::gtest
+  GTest::gtest_main
+)
+add_test(NAME sync_async_mutex_aba_interleave
+  COMMAND test_async_mutex_aba_interleave)
+
+# ── 058-async-mutex-hardening T046: F4/F6 terminal-CAS recursive-unlock ─────
+# deterministic seam witnesses (coverage-design gate EMPIRICAL CORRECTION —
+# see .specify/decisions/058-async-mutex-hardening-coverage-design.md). Same
+# standalone / zero-fixpp_sync-linkage ODR discipline as
+# test_async_mutex_aba_interleave above (the two new
+# `unlock_pre_terminal_cas_fast` / `unlock_pre_terminal_cas_fifo` seam
+# call-sites in async_mutex.hpp's unlock() are FIXPP_ASYNC_MUTEX_TEST_SEAM-
+# gated). Per-test TIMEOUT bounds a mis-pinned interleave (both witnesses
+# also bound their internal waits and force-stop the stuck io_context rather
+# than hanging indefinitely, per the anti-hang build discipline).
+add_executable(test_async_mutex_terminal_cas_recursive_unlock
+  test_async_mutex_terminal_cas_recursive_unlock.cpp)
+target_compile_definitions(test_async_mutex_terminal_cas_recursive_unlock PRIVATE
+  FIXPP_ASYNC_MUTEX_TEST_SEAM)
+target_include_directories(test_async_mutex_terminal_cas_recursive_unlock PRIVATE
+  "${CMAKE_SOURCE_DIR}/include"
+)
+target_link_libraries(test_async_mutex_terminal_cas_recursive_unlock PRIVATE
+  asio::asio
+  GTest::gtest
+  GTest::gtest_main
+)
+add_test(NAME sync_async_mutex_terminal_cas_recursive_unlock
+  COMMAND test_async_mutex_terminal_cas_recursive_unlock)
+set_tests_properties(sync_async_mutex_terminal_cas_recursive_unlock PROPERTIES TIMEOUT 60)
+
+# ── 058-async-mutex-hardening Gate-B MAJOR-2: contended-acquire livelock ────
+# deterministic seam witness (async_mutex.hpp `old_state` refresh fix at the
+# contended acquire loop's not_locked branch). Same standalone / zero-
+# fixpp_sync-linkage ODR discipline as the targets above (the two new
+# `acq_pre_state_reload` / `acq_pre_notlocked_cas` seam call-sites in
+# async_mutex.hpp's async_lock() are FIXPP_ASYNC_MUTEX_TEST_SEAM-gated).
+add_executable(test_async_mutex_acquire_livelock
+  test_async_mutex_acquire_livelock.cpp)
+target_compile_definitions(test_async_mutex_acquire_livelock PRIVATE
+  FIXPP_ASYNC_MUTEX_TEST_SEAM)
+target_include_directories(test_async_mutex_acquire_livelock PRIVATE
+  "${CMAKE_SOURCE_DIR}/include"
+)
+target_link_libraries(test_async_mutex_acquire_livelock PRIVATE
+  asio::asio
+  GTest::gtest
+  GTest::gtest_main
+)
+add_test(NAME sync_async_mutex_acquire_livelock
+  COMMAND test_async_mutex_acquire_livelock)
+set_tests_properties(sync_async_mutex_acquire_livelock PROPERTIES TIMEOUT 60)
+
+# ── 058-async-mutex-hardening Gate-B MAJOR-1: chain-walk CAS-loss ──────────
+# deterministic seam witnesses (unlock()'s residual-walk and fresh-FIFO-walk
+# `queued -> granted` CAS-loss arms, previously waived as coverage-design
+# W-7 / re-labelled W-12 in the verify doc). Same standalone / zero-
+# fixpp_sync-linkage ODR discipline as the targets above (the two new
+# `unlock_pre_grant_cas_residual` / `unlock_pre_grant_cas_fifo` seam
+# call-sites in async_mutex.hpp's unlock() are FIXPP_ASYNC_MUTEX_TEST_SEAM-
+# gated). Uses test_seam_mutable_slot (T026 accessor) read-only for the
+# ref-balance oracle.
+add_executable(test_async_mutex_chain_walk_cas_loss
+  test_async_mutex_chain_walk_cas_loss.cpp)
+target_compile_definitions(test_async_mutex_chain_walk_cas_loss PRIVATE
+  FIXPP_ASYNC_MUTEX_TEST_SEAM)
+target_include_directories(test_async_mutex_chain_walk_cas_loss PRIVATE
+  "${CMAKE_SOURCE_DIR}/include"
+)
+target_link_libraries(test_async_mutex_chain_walk_cas_loss PRIVATE
+  asio::asio
+  GTest::gtest
+  GTest::gtest_main
+)
+add_test(NAME sync_async_mutex_chain_walk_cas_loss
+  COMMAND test_async_mutex_chain_walk_cas_loss)
+set_tests_properties(sync_async_mutex_chain_walk_cas_loss PROPERTIES TIMEOUT 60)
+
+# ── 058-async-mutex-hardening T020/T021/T022: AM-P2-3 bounded exhaustion ────
+# research.md D-4/D-7: test_seam_preset_waiter_pool_next /
+# test_seam_waiter_pool_next / test_seam_slot_attached_awaiter are
+# FIXPP_ASYNC_MUTEX_TEST_SEAM-gated `async_mutex` accessors — same class-
+# definition-alters-under-macro hazard as the pop-phase seam above, so this
+# target is standalone (zero fixpp_sync linkage) for the identical ODR reason
+# documented at the aba_interleave registration.
+add_executable(test_pool_exhaustion_reuse
+  test_pool_exhaustion_reuse.cpp)
+target_compile_definitions(test_pool_exhaustion_reuse PRIVATE
+  FIXPP_ASYNC_MUTEX_TEST_SEAM)
+target_include_directories(test_pool_exhaustion_reuse PRIVATE
+  "${CMAKE_SOURCE_DIR}/include"
+)
+target_link_libraries(test_pool_exhaustion_reuse PRIVATE
+  asio::asio
+  GTest::gtest
+  GTest::gtest_main
+)
+add_test(NAME sync_pool_exhaustion_reuse
+  COMMAND test_pool_exhaustion_reuse)
+
+# ── 058-async-mutex-hardening T023/T024/T026: AM-P3-1/AM-P3-2 impossible-
+# state terminate-trap witnesses ───────────────────────────────────────────
+# research.md D-5/D-6: uses the FIXPP_ASYNC_MUTEX_TEST_SEAM-gated mutable
+# `test_seam_mutable_slot` accessor to fault-inject the provably-impossible
+# `granted`-mid-chain-walk / null-`attached_awaiter_` states the T023/T024
+# traps exist to catch. Same ODR discipline as the two standalone targets
+# above (zero fixpp_sync linkage) — a FIXPP_ASYNC_MUTEX_TEST_SEAM-enabled TU
+# must not link any fixpp object that also instantiates async_mutex.hpp's
+# inline out-of-line bodies without the macro. Death tests (fork-based
+# EXPECT_DEATH), so linked without gtest_main is fine (same as the other two
+# standalone targets — GTest::gtest_main still used for a uniform main()).
+add_executable(test_am_p3_impossible_state_traps
+  test_am_p3_impossible_state_traps.cpp)
+target_compile_definitions(test_am_p3_impossible_state_traps PRIVATE
+  FIXPP_ASYNC_MUTEX_TEST_SEAM)
+target_include_directories(test_am_p3_impossible_state_traps PRIVATE
+  "${CMAKE_SOURCE_DIR}/include"
+)
+target_link_libraries(test_am_p3_impossible_state_traps PRIVATE
+  asio::asio
+  GTest::gtest
+  GTest::gtest_main
+)
+add_test(NAME sync_am_p3_impossible_state_traps
+  COMMAND test_am_p3_impossible_state_traps)
 
 # ── 046-atomic-shared-ptr (NFR-017): census-regrowth guard (FR-005 / SC-004) ──
 # Rejects any NEW raw std::atomic<std::shared_ptr> in project-owned code (the raw

@@ -1,5 +1,5 @@
 <!-- SPECKIT START -->
-**Active work: NONE — no in-flight Spec-Kit feature.** The **C-ABI surface is GA-frozen at `1.5.0`**; the Python-bindings workstream (PY-001..005) is COMPLETE and all follow-ups CLOSED. Start the next slice with `/speckit-specify` (candidates below).
+**Active work: `058-async-mutex-hardening`** — Cluster-4 async_mutex hardening (AM-P1..P3 + test-validity gaps). Plan: `specs/058-async-mutex-hardening/plan.md` (spec/research/data-model/contracts alongside). Phase-0 verified (Opus+Codex concur); awaiting user `/plan` sign-off → Gate A (dual Fable+Codex, first Fable spend). See [[project_async_mutex_cluster4_hardening]]. The **C-ABI surface is GA-frozen at `1.5.0`**; the Python-bindings workstream (PY-001..005) is COMPLETE and all follow-ups CLOSED.
 
 **This file is a THIN POINTER.** Per-feature history is NOT duplicated here — it lives in the authoritative trackers:
 - **Per-feature status + evidence:** `spec/feature-catalogue.md` (status / evidence_pr / tests per row) + `spec/coverage-index.md`.

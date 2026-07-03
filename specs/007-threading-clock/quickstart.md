@@ -73,7 +73,7 @@ Local Tier-1 mirror of CI; produces `.specify/decisions/007-threading-clock-veri
 
 ## 9. `/gate-a` (before `/speckit-tasks`)
 
-Phase-4 bundle Gate A — both Codex passes (rescue + `/codex:adversarial-review`) per memory `feedback_gate_a_codex_dual_pass`; Opus triages/rewrites; reviews → `research/reviews/`. Reviews this bundle for internal consistency + faithfulness to `.specify/2d-threading.md` v0.4 — it does **not** re-litigate the signed-off round-3 closures. Run `codex-usage.sh` for quota first (memory `feedback_gate_codex_quota`).
+Phase-4 bundle Gate A — both Codex passes (rescue + `/codex:adversarial-review`) per memory `feedback_gate_a_codex_dual_pass`; Opus triages/rewrites; reviews → `research/reviews/`. Reviews this bundle for internal consistency + faithfulness to `.specify/2d-threading.md` v0.4 — it does **not** re-litigate the signed-off round-3 closures. Run `.claude/scripts/codex-usage.sh` for quota first (memory `feedback_gate_codex_quota`).
 
 ## 10. Pipeline order & `/gate-b`
 

@@ -205,4 +205,103 @@ TEST(SyncPmrFallback, UncontendedPmrTakesFastPath) {
     f.get();
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Test 4 (058 T042(a)): unconditionally-throwing PMR resource — deterministic,
+// layout-independent witness for the `mr->allocate(...)` `catch (std::bad_alloc
+// const&)` arm (async_mutex.hpp, `pmr_waiter_block` allocation inside the
+// contended enqueue path). Unlike TinyPmrExhaustionReturnsAllocFailed above
+// (which relies on a 32-byte buffer being smaller than sizeof(waiter_record) —
+// a magic number that silently stops discriminating if waiter_record's layout
+// changes), this resource throws unconditionally regardless of the requested
+// size, so it stays correct across any future waiter_record resize.
+//
+// Oracle: result == unexpected{sync_lock_alloc_failed} AND the mutex is left
+// healthy — no waiter_record is ever constructed on this arm (the `catch`
+// returns nullptr from the lambda BEFORE `::new (record) waiter_record{}` and
+// before any `add_ref`, so there is nothing to leak or release), which we
+// confirm by proving a subsequent fresh acquire on the SAME mutex still
+// succeeds and the mutex destructs cleanly (no drain needed, no destructor
+// trap fires).
+// ─────────────────────────────────────────────────────────────────────────────
+
+namespace {
+struct throwing_resource final : std::pmr::memory_resource {
+    void* do_allocate(std::size_t, std::size_t) override { throw std::bad_alloc{}; }
+    void do_deallocate(void*, std::size_t, std::size_t) override {
+        ADD_FAILURE() << "deallocate must never be called: allocate always throws";
+    }
+    bool do_is_equal(std::pmr::memory_resource const& other) const noexcept override {
+        return this == &other;
+    }
+};
+}  // namespace
+
+TEST(SyncPmrFallback, AlwaysThrowingPmrReturnsAllocFailedAndLeavesMutexHealthy) {
+    throwing_resource throwing_mr;
+
+    bool alloc_failed_received = false;
+    bool followup_acquire_succeeded = false;
+
+    asio::io_context ioc;
+    async_mutex mtx;
+
+    auto run = [&]() -> asio::awaitable<void> {
+        // Step 1: hold the lock so the next async_lock MUST enqueue (contended
+        // path — the fast-path CAS never reaches mr->allocate() at all).
+        auto holder = co_await mtx.async_lock();
+        EXPECT_TRUE(holder.has_value());
+
+        auto ex = co_await asio::this_coro::executor;
+        std::atomic<bool> result_ready{false};
+        std::atomic<bool> got_alloc_failed{false};
+
+        asio::co_spawn(
+            ex,
+            [&]() -> asio::awaitable<void> {
+                co_await yield_n(1);
+                auto r = co_await mtx.async_lock(&throwing_mr);
+                if (!r.has_value() && r.error() == error::sync_lock_alloc_failed)
+                    got_alloc_failed.store(true, std::memory_order_release);
+                result_ready.store(true, std::memory_order_release);
+            },
+            asio::detached);
+
+        co_await yield_n(8);
+
+        // Release the holder — the throwing-mr waiter must already have
+        // returned sync_lock_alloc_failed before ever touching the LIFO list.
+        holder = expected_t<async_lock_guard>{};
+
+        co_await yield_n(4);
+
+        alloc_failed_received = got_alloc_failed.load(std::memory_order_acquire);
+
+        // Ref-balance / mutex-health check: a fresh, ordinary (non-PMR)
+        // contended-free acquire on the SAME mutex must still succeed — the
+        // failed throwing-mr attempt must not have corrupted state_,
+        // active_holders_count_, or any waiter bookkeeping.
+        auto g2 = co_await mtx.async_lock();
+        followup_acquire_succeeded = g2.has_value();
+        g2 = expected_t<async_lock_guard>{};
+
+        // No waiters were ever queued on this mutex (the throwing-mr attempt
+        // never reached the list push), so no drain is required for a clean
+        // destructor — but drain anyway for symmetry with Test 2 and to prove
+        // the destructor guard doesn't false-fire on this arm's residue.
+        auto d = co_await mtx.cancel_and_drain();
+        EXPECT_TRUE(d.has_value());
+    };
+
+    auto f = asio::co_spawn(ioc, run(), asio::use_future);
+    ioc.run();
+    f.get();
+
+    EXPECT_TRUE(alloc_failed_received)
+        << "Expected sync_lock_alloc_failed when the PMR resource unconditionally "
+           "throws std::bad_alloc; process must not terminate.";
+    EXPECT_TRUE(followup_acquire_succeeded)
+        << "Mutex must remain healthy (ref-balance intact) after an allocation-"
+           "failed contended attempt: a subsequent acquire must still succeed.";
+}
+
 }  // namespace
