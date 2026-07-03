@@ -120,6 +120,100 @@ the relevant US phases but BEFORE the close-out tasks T038/T039.
 - [x] T045 [US5] Extend `test_arm64_weak_memory` (H-G) to include cancellation + drain-then-destroy epochs + free-list churn under TSan — the only lane that can witness a relaxed-where-release regression on the D-2 pairing (TSan models the C++ memory model regardless of x86 host). Closes gap T-5. DONE — three new `TEST(SeamArm64WeakMemory, ...)` cases added (`namespace weak_memory_d2`), each a rep-loop (20/20/15 reps) over a helper function: `D2CancellationEpochCrossThreadDestroyIsSafe` (waiter resolved via a cross-thread cancellation signal — mutex held throughout the wait so a grant is structurally impossible, cancellation wins by construction not by timing), `D2DrainThenDestroyEpochIsSafe` (single waiter genuinely QUEUED, reaped by `cancel_and_drain()`'s `reap_chain`, T015-style topology reproduced locally), `D2FreeListChurnEpochIsSafe` (M=6 waiters queued behind one holder, ALL reaped in one drain pass — `in_flight_resumers_` accumulates 6 increments and 6 independent resumer runners each perform their own pool-slot push + RELEASE decrement, amplifying the same D-2 pairing under multi-writer churn). Topology (load-bearing, advisor-reviewed): every epoch uses TWO separate SINGLE-THREADED `io_context`s, one dedicated OS thread each — never a shared multi-worker `thread_pool` driving one `io_context`, because a shared io_context's internal scheduler lock is itself a real synchronizes-with edge that would transitively mask a relaxed-ordering mutation regardless of the test's own atomics (this is why T015's cross-executor two-io_context design, not the T040 shared-pool hammer design, was reused/extended here). Channel audit (verified by reading the production code, not assumed): neither the destructor (`:906-912`) nor the drain terminal loop (`:1610-1617`) reads/CASes `waiter_pool_free_` — both touch only `state_`/`next_drain_head_`/`active_holders_count_`/`in_flight_resumers_` — confirming `in_flight_resumers_` is the SOLE channel from the resumer thread's pool writes to the destroyer thread's safety check, so no alternate HB edge can rescue a D-2 mutation. Each epoch's SEQUENCING gate (e.g. epoch 1's `waiter_resolved` poll before the holder's own unlock) is verified to observe state set INSIDE `invoke_handler`, strictly BEFORE the risky `release_ref`/`fetch_sub` writes in program order — so it cannot itself supply the HB edge under test. MUTATION (mandatory, transient, captured then reverted — `git diff`/line-diff confirmed byte-identical restore, zero `T045 MUTATION` residue): reverted `in_flight_resumers_.fetch_sub(1, release)` (`:767`) → `relaxed`, AND both paired acquire loads (destructor `:909`, drain terminal `:1613`) → `relaxed`; rebuilt `linux-clang-tsan`; ran `--gtest_filter='*D2*'` **10/10 times, ALL 10 produced a genuine TSan data-race report** (`ctest` exit code 66, test marked FAILED — not just a printed warning) — identical shape across all 3 epochs: `Write of size 8 ... operator delete(...)` on the destroying thread racing `Previous read of size 8 ... fixpp::sync::detail::waiter_record::release_ref(...) (async_mutex.hpp:945) ... store_executor(...)::runner (async_mutex.hpp:754)` on the resumer thread — precisely the pool-write-vs-destroy race D-2 exists to prevent, at the exact production call sites. Restored all three orderings verbatim (confirmed by direct line comparison against the pre-mutation `Read` capture — byte-identical); rebuilt; re-ran 10/10 clean (0 reports, exit 0) on TSan, 5/5 clean on debug, 3/3 clean on ASan. Full `ctest --test-dir build/linux-clang-{debug,tsan} -R '^sync_'` → 45/45 passed on both presets post-restore (incl. `sync_async_mutex_layout_golden`, `sync_no_std_mutex_ci_gate`/`check_no_std_mutex_corpus`). `async_mutex.hpp` untouched outside the transient mutation window (T045 adds zero production code). This is the dedicated RED-on-mutation proof T015 (test_drain_destroy_inflight_mt.cpp) explicitly deferred — see the T034 mutation matrix row 8.
 - [x] T046 [US5] F4/F6 terminal-CAS recursive-unlock seam witnesses (coverage-design gate EMPIRICAL CORRECTION, `.specify/decisions/058-async-mutex-hardening-coverage-design.md`): T040's fresh llvm-cov measurement found F4 (`unlock()` fast-path terminal-CAS-fail, `:1379`) flaky (2/615) and F6 (post-FIFO-walk terminal-CAS-fail, `:1439`) 0-hit on the seam-OFF coverage lane, though both are REACHABLE IN-CONTRACT — not waivable as unreachable. DONE: two new `FIXPP_ASYNC_MUTEX_TEST_SEAM`-gated phases `unlock_pre_terminal_cas_fast` / `unlock_pre_terminal_cas_fifo` added to `detail::async_mutex_seam_phase`, with macro-gated `if (detail::async_mutex_test_seam) detail::async_mutex_test_seam(...)` call-sites inserted immediately before the `:1379` (F4) and `:1439` (F6) terminal CASes — identical `#ifdef`/no-op-when-off idiom as the existing `pop_pre_link_load`/`pop_pre_cas` phases (T006); zero production footprint when the macro is undefined. New standalone target `tests/sync/test_async_mutex_terminal_cas_recursive_unlock.cpp` (registered `sync_async_mutex_terminal_cas_recursive_unlock`, zero `fixpp_sync` linkage, same D-7 ODR discipline as `test_async_mutex_aba_interleave`): `F4FastPathTerminalCasFailGrantsWaiter` and `F6FifoExhaustedTerminalCasFailGrantsWaiter`, each genuinely 2-thread — T1 acquires the mutex (and, for F6, additionally queues+cancels a waiter W so the FIFO walk exhausts all-cancelled before reaching the terminal CAS), then calls `unlock()` directly from a dedicated thread and pins at the target phase (right after `state_.exchange(locked_no_waiters)`, right before the terminal CAS); T2 arrives on a separate `io_context`/thread and queues via the ordinary push CAS while T1 is pinned (queuing committed-and-confirmed via a hard `asio::post`-probe, the same non-timing idiom as T007's `t1_committed` probe, before T1 is released); T1 is then released, its terminal CAS fails against T2's freshly-queued record, and the discriminating oracle is T2's OWN `async_lock()` actually resolving (`r.has_value()==true`) within a bounded `wait_for` — not merely "no crash". Coordination via `std::atomic`/`std::binary_semaphore`/`std::promise`-`std::future` only (FR-012, no `std::mutex`/`condition_variable`). Evidence: 10/10 clean on `linux-clang-debug` (both tests, ~0-4ms each) + 20/20 clean on `linux-clang-tsan` (0 `WARNING: ThreadSanitizer` reports). MUTATION (mandatory, transient, captured then reverted — `git diff`/`grep "T046 MUTATION"` confirmed zero residue after each restore): commenting out the recursive `unlock();` call at the F4 site alone turned `F4FastPathTerminalCasFailGrantsWaiter` RED at the exact predicted assertion (`ASSERT_EQ(status, std::future_status::ready)` — "T2 was never granted"), with the process then aborting via the (expected, correct) T017 destructor guard on the still-wedged mutex (`state_ != not_locked` at `~async_mutex`) — the assertion failure itself is the discriminating RED signal; same shape confirmed independently for the F6 site's recursive call (its own dedicated `ASSERT_EQ` line). CROSS-LEG independence (advisor-flagged: the sibling-unaffected claim must be RUN, not just reasoned) genuinely executed via `--gtest_filter` isolation (the mutated test's own T017 SIGABRT would otherwise prevent gtest from ever reaching a second in-binary test): F4-mutation-applied + `--gtest_filter='*F6*'` → GREEN (F6 untouched); F6-mutation-applied + `--gtest_filter='*F4*'` → GREEN (F4 untouched) — confirming no cross-contamination between the two structurally distinct call sites. Restored both; re-verified 5/5 debug + 5/5 TSan clean (0 reports) post-restore. Full clean `linux-clang-debug` rebuild (1089/1089 ninja objects, exit 0) + unfiltered `ctest` → **529/532 passed**; the 3 failures are pre-existing/environmental, unrelated to this change, matching the exact precedent already recorded at T011/T022: `fixpp::dict::codegen-build-graph-check` (asserts a clean `git status --porcelain`; the working tree carries this round's uncommitted changes) and `interop_cell_results_schema_check` + `decimal_compare_oracle` (`No module named pytest`, pre-existing Python-environment gap). `ctest -R '^sync_'` → **45/45 passed** (incl. the new `sync_async_mutex_terminal_cas_recursive_unlock`); `check_no_std_mutex_corpus` → PASSED; `sync_async_mutex_layout_golden` → `sizeof(async_mutex)==131120`, `alignof==16`, both unchanged. Production (macro-off) build unaffected — both call-sites compile to nothing without `FIXPP_ASYNC_MUTEX_TEST_SEAM`.
 
+## Phase 7.6: Gate-B fixer round (2026-07-03) — MAJOR-1 witness + MAJOR-2 fix
+
+The Codex Gate-B review of PR #162 (commit `6788945`) returned BLOCK with two real MAJOR findings.
+Both landed against the already-merged coverage-design ledger above; the ledger is updated in place
+(W-7→W-12 relabel) rather than re-litigated.
+
+- [x] T047 [Gate-B MAJOR-1] Witness the chain-walk CAS-loss arms (residual walk `:1357`-area, fresh
+  FIFO walk `:1438`-area, `ph = expected_ph` after a failed `queued -> granted` CAS) instead of
+  waiving them. The coverage-design/verify doc had waived this as "W-7, hard to force" — an INVALID
+  §IX.1 waiver (the arm is reachable under supported cancel-vs-grant contention, the same
+  "reachable ≠ unreachable" class as the T046 F4/F6 empirical correction) AND the ID collided with
+  the coverage-design doc's own distinct W-7 (`on_cancel record_==nullptr`). DONE — no code change to
+  `async_mutex.hpp` beyond two macro-gated seam call-sites (`detail::async_mutex_seam_phase::
+  unlock_pre_grant_cas_residual` / `unlock_pre_grant_cas_fifo`, inserted immediately after each
+  walk's `phase_.load()` and BEFORE the grant CAS — same `#ifdef FIXPP_ASYNC_MUTEX_TEST_SEAM`/
+  no-op-when-off idiom as T046). New standalone target `tests/sync/test_async_mutex_chain_walk_cas_loss.cpp`
+  (registered `sync_async_mutex_chain_walk_cas_loss`, zero `fixpp_sync` linkage, D-7 ODR discipline):
+  `FifoWalkCancelWinsGrantCasLoss` (single fresh waiter, pool index 0) and
+  `ResidualWalkCancelWinsGrantCasLoss` (two waiters — W1 legitimately granted first via an unpinned
+  `unlock()` #1, spliced W2 becomes the residual, pool index 1). Both: a dedicated thread calls
+  `unlock()` directly and pins at the new phase; the target waiter's cancellation is driven to
+  completion on its OWN executor and its future's `sync_lock_aborted` resolution is awaited BEFORE
+  releasing the pin — proving `on_cancel()`'s `queued -> cancelled` CAS has already committed, so the
+  pinned `unlock()`'s CAS genuinely loses (not simulated). ORACLE (discriminating, per the brief): (a)
+  the cancelled waiter's future resolves `sync_lock_aborted`; (b) the cancelled waiter's pool-slot
+  `refcount_` (read via the existing T026 `test_seam_mutable_slot` accessor) reads EXACTLY 0 — proves
+  list membership was released exactly once (a "skip the release" mutation leaks the ref and leaves
+  it >0; a "double release" mutation underflows it to a huge value; both are caught by the SAME plain
+  equality assertion, no ASan/sanitizer dependency needed — verified empirically, see MUTATION below);
+  (c) `unlock()` returns without hanging and `thread_a.join()` completes cleanly (a stray double-resume
+  would trip the existing T023/T024 impossible-state traps via `std::terminate()`, which did NOT fire).
+  Coordination via `std::atomic`/`std::binary_semaphore`/`std::promise`-`std::future` only (FR-012).
+  MUTATION (mandatory, transient, captured then reverted — `git diff` confirmed byte-identical restore):
+  the `release_ref(cur)`/`release_ref(fifo_cur)` call in each arm's `cancelled` branch removed
+  independently, one at a time. FIFO arm mutated: `FifoWalkCancelWinsGrantCasLoss` RED at the ref-balance
+  assertion (`refcount_==1`, expected 0); `ResidualWalkCancelWinsGrantCasLoss` stayed GREEN (cross-leg
+  isolation confirmed — the two arms are structurally independent code). Residual arm mutated (FIFO arm
+  restored first): `ResidualWalkCancelWinsGrantCasLoss` RED at the ref-balance assertion (`refcount_==1`,
+  expected 0); `FifoWalkCancelWinsGrantCasLoss` stayed GREEN. Both restored; re-verified GREEN debug + TSan
+  (0 reports) post-restore. Relabels the colliding waiver **W-7 → W-12** in
+  `.specify/decisions/058-async-mutex-hardening-verify.md` and marks it DISCHARGED (witnessed, not
+  waived) — see that doc's Step 4 / Waivers sections.
+
+- [x] T048 [Gate-B MAJOR-2] Fix + witness a pre-existing acquisition livelock at the contended
+  acquire loop (`async_lock()`'s `while (true)` loop, `if (old_state == not_locked)` branch, pre-fix
+  `:1250-1266`-area): the branch CASed with a FRESH `uintptr_t exp2 = not_locked;` (NOT `old_state`),
+  and on CAS failure did `continue;` WITHOUT refreshing `old_state`. A waiter that observed
+  `not_locked` and lost the CAS to another acquirer kept `old_state == not_locked` FOREVER —
+  busy-spinning retrying the doomed `not_locked -> locked_no_waiters` CAS instead of falling through
+  to the queueing branch (livelock; deadlock on a shared/oversubscribed single-thread executor). DONE
+  — **FIX** (surgical, one CAS's expected-argument changed, no other logic touched): the CAS now
+  operates directly on `old_state` (`state_.compare_exchange_weak(old_state, locked_no_waiters, ...)`)
+  instead of a discarded local `exp2`, so a failed CAS refreshes `old_state` with the actual current
+  value via the standard `compare_exchange_weak(expected&, ...)` contract — the next iteration
+  correctly re-observes reality and falls through to the queueing branch. **WITNESS**: new standalone
+  target `tests/sync/test_async_mutex_acquire_livelock.cpp` (registered `sync_async_mutex_acquire_livelock`,
+  zero `fixpp_sync` linkage, D-7 ODR discipline), two new cooperating macro-gated seam phases
+  (`acq_pre_state_reload` immediately before the loop's initial `old_state` load; `acq_pre_notlocked_cas`
+  immediately after observing `old_state==not_locked`, before the CAS — matches the brief's named
+  seam) pin the SAME acquirer thread ("A") twice: pin 1 lets the test deterministically release a
+  temporary holder T0 (zero waiters queued) so the reload observes `not_locked` without a race; pin 2
+  lets a second thread B win the fast-path CAS first, so A's own CAS genuinely loses. ORACLE
+  (discriminating, bounded — advisor-refined from a re-entry-counter design to a simpler probe): after
+  releasing pin 2 (B still holding), a probe is posted onto A's OWN `io_context` and awaited with a
+  2-second bound — post-fix A's failed CAS re-queues and SUSPENDS almost immediately, freeing its
+  `io_context` to service the probe (GREEN); pre-fix A never suspends (busy-spins inside the same
+  synchronous initiation-lambda call), so the probe cannot run within the bound (RED). Test-process
+  hygiene: B is released regardless of the probe's verdict, letting even a pre-fix spinning A
+  eventually observe the free state and complete (via the buggy unfair bypass), so `thread_a.join()`
+  never hangs the test binary even when the assertion has already gone RED. Coordination via
+  `std::atomic`/`std::binary_semaphore`/`std::promise`-`std::future`/`shared_ptr`-owned-promise only
+  (FR-012) — the probe helper deliberately heap-allocates its promise behind a `shared_ptr` captured
+  BY VALUE in the posted lambda (not by reference, unlike every other `confirm_committed` helper in
+  this suite): a timed-out probe's posted work item legitimately survives past the function's return
+  in the pre-fix case (A's stuck `io_context` cannot drain it until B is later released), and a
+  stack-local promise captured by reference there is a genuine dangling-reference UAF once that
+  survivor eventually fires — caught empirically (SIGSEGV under gdb, `std::promise::set_value` on a
+  freed stack frame) during this task's own mutation-verification pass, before it could ship.
+  MUTATION (mandatory, transient, captured then reverted — `git diff` confirmed byte-identical
+  restore): the CAS's expected argument reverted to a fresh local `mutation_exp2 = not_locked;`.
+  5/5 runs RED (`probe_ok` false, clean assertion failure, no hang, no crash — process exits cleanly
+  every time via the B-release self-heal). Restored; re-verified 5/5 GREEN debug + GREEN TSan (0
+  reports) post-restore. `async_mutex.hpp` diff for this task is exactly: the one CAS's expected
+  argument + two new seam call-sites (both `#ifdef`-gated, zero production footprint) + the new
+  `acq_pre_state_reload`/`acq_pre_notlocked_cas` enum values.
+
+  **Verification (both T047/T048), full suite**: `linux-clang-debug` full rebuild exit 0; `ctest -R
+  '^sync_'` → 47/47 passed (incl. the 2 new targets, `sync_async_mutex_layout_golden` 131120/16
+  unchanged, `check_no_std_mutex_corpus` PASS). `linux-clang-tsan` incremental rebuild exit 0; `ctest
+  -R '^sync_'` → 47/47 passed, 0 TSan race reports (one transient `sync_consumer_contract_compile`
+  "permission denied" on the FIRST run was a filesystem race from a concurrent rebuild moments
+  earlier — confirmed a flake by re-running standalone AND the full suite again, both 100% clean; not
+  reproducible, unrelated to this change).
+
 ### Coverage waivers (written source-level proofs → `.specify/decisions/058-async-mutex-hardening-verify.md` `## Coverage`, per SC-004 — no silent skips)
 
 - **W-1** `async_lock :877` second `draining_`-check T-arm — synchronous initiation (no suspension `:773`→`:877`); cross-thread drain/acquire overlap is the `:189` UNDEFINED case.

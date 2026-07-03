@@ -370,6 +370,53 @@ add_test(NAME sync_async_mutex_terminal_cas_recursive_unlock
   COMMAND test_async_mutex_terminal_cas_recursive_unlock)
 set_tests_properties(sync_async_mutex_terminal_cas_recursive_unlock PROPERTIES TIMEOUT 60)
 
+# ── 058-async-mutex-hardening Gate-B MAJOR-2: contended-acquire livelock ────
+# deterministic seam witness (async_mutex.hpp `old_state` refresh fix at the
+# contended acquire loop's not_locked branch). Same standalone / zero-
+# fixpp_sync-linkage ODR discipline as the targets above (the two new
+# `acq_pre_state_reload` / `acq_pre_notlocked_cas` seam call-sites in
+# async_mutex.hpp's async_lock() are FIXPP_ASYNC_MUTEX_TEST_SEAM-gated).
+add_executable(test_async_mutex_acquire_livelock
+  test_async_mutex_acquire_livelock.cpp)
+target_compile_definitions(test_async_mutex_acquire_livelock PRIVATE
+  FIXPP_ASYNC_MUTEX_TEST_SEAM)
+target_include_directories(test_async_mutex_acquire_livelock PRIVATE
+  "${CMAKE_SOURCE_DIR}/include"
+)
+target_link_libraries(test_async_mutex_acquire_livelock PRIVATE
+  asio::asio
+  GTest::gtest
+  GTest::gtest_main
+)
+add_test(NAME sync_async_mutex_acquire_livelock
+  COMMAND test_async_mutex_acquire_livelock)
+set_tests_properties(sync_async_mutex_acquire_livelock PROPERTIES TIMEOUT 60)
+
+# ── 058-async-mutex-hardening Gate-B MAJOR-1: chain-walk CAS-loss ──────────
+# deterministic seam witnesses (unlock()'s residual-walk and fresh-FIFO-walk
+# `queued -> granted` CAS-loss arms, previously waived as coverage-design
+# W-7 / re-labelled W-12 in the verify doc). Same standalone / zero-
+# fixpp_sync-linkage ODR discipline as the targets above (the two new
+# `unlock_pre_grant_cas_residual` / `unlock_pre_grant_cas_fifo` seam
+# call-sites in async_mutex.hpp's unlock() are FIXPP_ASYNC_MUTEX_TEST_SEAM-
+# gated). Uses test_seam_mutable_slot (T026 accessor) read-only for the
+# ref-balance oracle.
+add_executable(test_async_mutex_chain_walk_cas_loss
+  test_async_mutex_chain_walk_cas_loss.cpp)
+target_compile_definitions(test_async_mutex_chain_walk_cas_loss PRIVATE
+  FIXPP_ASYNC_MUTEX_TEST_SEAM)
+target_include_directories(test_async_mutex_chain_walk_cas_loss PRIVATE
+  "${CMAKE_SOURCE_DIR}/include"
+)
+target_link_libraries(test_async_mutex_chain_walk_cas_loss PRIVATE
+  asio::asio
+  GTest::gtest
+  GTest::gtest_main
+)
+add_test(NAME sync_async_mutex_chain_walk_cas_loss
+  COMMAND test_async_mutex_chain_walk_cas_loss)
+set_tests_properties(sync_async_mutex_chain_walk_cas_loss PROPERTIES TIMEOUT 60)
+
 # ── 058-async-mutex-hardening T020/T021/T022: AM-P2-3 bounded exhaustion ────
 # research.md D-4/D-7: test_seam_preset_waiter_pool_next /
 # test_seam_waiter_pool_next / test_seam_slot_attached_awaiter are

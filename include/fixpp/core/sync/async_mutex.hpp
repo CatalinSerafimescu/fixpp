@@ -859,6 +859,38 @@ enum class async_mutex_seam_phase : std::uint8_t {
     // F6 0/all-trials) — see test_async_mutex_terminal_cas_recursive_unlock.cpp.
     unlock_pre_terminal_cas_fast,  // F4: no-waiters fast path (:1379 CAS)
     unlock_pre_terminal_cas_fifo,  // F6: FIFO walk exhausted, all cancelled (:1439 CAS)
+
+    // 058 Gate-B MAJOR-2 (async_mutex.hpp contended-acquire loop, ~:1250):
+    // deterministic reproduction of the pre-fix `old_state` staleness
+    // livelock. Two cooperating phases pin the SAME acquirer thread twice:
+    //   - acq_pre_state_reload: immediately BEFORE the loop's initial
+    //     `old_state = state_.load()` — lets the test release a temporary
+    //     holder with zero waiters queued, so the reload deterministically
+    //     observes `not_locked`.
+    //   - acq_pre_notlocked_cas: immediately AFTER the loop observes
+    //     `old_state == not_locked`, BEFORE the not_locked -> locked_no_waiters
+    //     CAS — lets a second thread win the lock first, forcing the pinned
+    //     acquirer's CAS to fail. Pre-fix, the CAS's `exp2` local is discarded
+    //     on failure and the loop retries against the stale `old_state`
+    //     forever (busy-spin, never re-queues). Post-fix, the CAS operates
+    //     directly on `old_state`, which is refreshed on failure, and the
+    //     next iteration correctly falls through to the queueing branch.
+    //     See test_async_mutex_acquire_livelock.cpp.
+    acq_pre_state_reload,
+    acq_pre_notlocked_cas,
+
+    // 058 Gate-B MAJOR-1 (unlock() chain-walk CAS-loss, residual walk
+    // ~:1345 / fresh FIFO walk ~:1426): pin unlock() immediately AFTER it
+    // loads a waiter's `phase_` as `queued`, BEFORE the `queued -> granted`
+    // CAS, so a concurrent `on_cancel()` can win the `queued -> cancelled`
+    // race first — the `ph = expected_ph` arm the coverage-design doc had
+    // waived as "hard to force" (2026-07-03 Gate-B correction: reachable,
+    // must be witnessed, not waived). Both list walks get their own phase
+    // since they are structurally distinct code (residual FIFO chain vs.
+    // the fresh LIFO->FIFO reversal). See
+    // test_async_mutex_chain_walk_cas_loss.cpp.
+    unlock_pre_grant_cas_residual,
+    unlock_pre_grant_cas_fifo,
 };
 
 inline void (*async_mutex_test_seam)(async_mutex_seam_phase) noexcept = nullptr;
@@ -1247,12 +1279,36 @@ fixpp::sync::async_mutex::async_lock(std::pmr::memory_resource* mr) noexcept {
                 return;
             }
 
+#ifdef FIXPP_ASYNC_MUTEX_TEST_SEAM
+            // 058 Gate-B MAJOR-2: see async_mutex_seam_phase::acq_pre_state_reload.
+            if (detail::async_mutex_test_seam) {
+                detail::async_mutex_test_seam(detail::async_mutex_seam_phase::acq_pre_state_reload);
+            }
+#endif
             uintptr_t old_state = state_.load(std::memory_order_acquire);
 
             while (true) {
                 if (old_state == not_locked) {
-                    uintptr_t exp2 = not_locked;
-                    if (state_.compare_exchange_weak(exp2, locked_no_waiters,
+#ifdef FIXPP_ASYNC_MUTEX_TEST_SEAM
+                    // 058 Gate-B MAJOR-2: see
+                    // async_mutex_seam_phase::acq_pre_notlocked_cas.
+                    if (detail::async_mutex_test_seam) {
+                        detail::async_mutex_test_seam(
+                            detail::async_mutex_seam_phase::acq_pre_notlocked_cas);
+                    }
+#endif
+                    // 058 Gate-B MAJOR-2 fix: CAS directly on `old_state` (not a
+                    // fresh local) so a failed CAS refreshes `old_state` with the
+                    // actual current value. Pre-fix, a fresh `exp2 = not_locked`
+                    // local was discarded on failure, leaving the outer
+                    // `old_state` permanently stale at `not_locked` — the loop
+                    // then retried the same doomed not_locked -> locked_no_waiters
+                    // CAS forever instead of re-observing the real (now-held)
+                    // state and falling through to the queueing branch below
+                    // (busy-spin livelock; deadlock on a shared/oversubscribed
+                    // single-thread executor). See
+                    // test_async_mutex_acquire_livelock.cpp.
+                    if (state_.compare_exchange_weak(old_state, locked_no_waiters,
                                                      std::memory_order_acquire,
                                                      std::memory_order_acquire)) {
                         active_holders_count_.fetch_add(1, std::memory_order_relaxed);
@@ -1342,6 +1398,14 @@ inline void fixpp::sync::async_mutex::unlock() noexcept {
             waiter_phase ph = cur->phase_.load(std::memory_order_acquire);
             if (ph == waiter_phase::queued) {
                 waiter_phase expected_ph = waiter_phase::queued;
+#ifdef FIXPP_ASYNC_MUTEX_TEST_SEAM
+                // 058 Gate-B MAJOR-1: see
+                // async_mutex_seam_phase::unlock_pre_grant_cas_residual.
+                if (detail::async_mutex_test_seam) {
+                    detail::async_mutex_test_seam(
+                        detail::async_mutex_seam_phase::unlock_pre_grant_cas_residual);
+                }
+#endif
                 if (cur->phase_.compare_exchange_strong(expected_ph, waiter_phase::granted,
                                                         std::memory_order_acq_rel,
                                                         std::memory_order_acquire)) {
@@ -1423,6 +1487,14 @@ inline void fixpp::sync::async_mutex::unlock() noexcept {
         waiter_phase ph = fifo_cur->phase_.load(std::memory_order_acquire);
         if (ph == waiter_phase::queued) {
             waiter_phase expected_ph = waiter_phase::queued;
+#ifdef FIXPP_ASYNC_MUTEX_TEST_SEAM
+            // 058 Gate-B MAJOR-1: see
+            // async_mutex_seam_phase::unlock_pre_grant_cas_fifo.
+            if (detail::async_mutex_test_seam) {
+                detail::async_mutex_test_seam(
+                    detail::async_mutex_seam_phase::unlock_pre_grant_cas_fifo);
+            }
+#endif
             if (fifo_cur->phase_.compare_exchange_strong(expected_ph, waiter_phase::granted,
                                                          std::memory_order_acq_rel,
                                                          std::memory_order_acquire)) {
