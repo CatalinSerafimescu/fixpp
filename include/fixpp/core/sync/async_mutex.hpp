@@ -334,6 +334,14 @@ private:
 
     static constexpr std::size_t waiter_pool_capacity_ = 512;
     static constexpr std::size_t waiter_record_storage_size_ = 256;
+    // 058 Gate-B (Fable MINOR-1): the generation-tagged free-list packs the slot
+    // index into 10 bits with `detail::free_list_empty_index` (0x3FF) as the
+    // empty sentinel. A capacity at/above the sentinel would let a real index
+    // alias the sentinel or be truncated by `pack_free_list_head`, silently
+    // corrupting the free list. Guard the coupling (512 < 1023 today).
+    static_assert(waiter_pool_capacity_ < detail::free_list_empty_index,
+                  "fixpp::sync: waiter_pool_capacity_ must stay below the 10-bit "
+                  "free-list slot-index sentinel (detail::free_list_empty_index).");
 
     // 058 T003 (data-model.md; research.md D-1): `free_link` is PERSISTENT
     // per-slot metadata (mutex-lifetime), not a `waiter_record` member — it
