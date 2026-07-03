@@ -1002,4 +1002,53 @@ TEST_F(SendPathTest, AdminEmit_HeartbeatReply_SeqnumOverflow_DoesNotEmit_Reaches
         << "[gate-b/r2-red: RC#G F-10]";
 }
 
+// ── gate-b/r1 FQ-1 scope-expansion witness ───────────────────────────────────
+//
+// Session::send's guard was broadened from the closed 3-code set to
+// is_persistent_retain_fatal ([56,65)). send_impl's assign_outbound() overflow
+// return (store_seqnum_overflow=60, session.cpp:4488) is NOT a store-retain
+// failure — it is a pure in-memory counter check that reuses a store-block
+// error code (data-model.md:30 E3) — but it now falls inside that range too,
+// so Session::send itself must newly Disconnect on outbound-seqnum overflow.
+// This brings Session::send in line with the session-fatal-on-overflow
+// disposition Cell7 (test_acceptor_logon_sending_time.cpp) and RC#G (above)
+// already enforce on other call paths, regardless of store persistence (both
+// run on a null/volatile store).
+TEST_F(SendPathTest, Send_SeqnumOverflow_ReturnsError_ReachesDisconnected_NoTransmit) {
+    std::vector<std::vector<std::byte>> transport_frames;
+
+    auto cfg = make_cfg("FIX.4.4");
+    cfg.transport_send = [&](std::span<const std::byte> frame) {
+        transport_frames.emplace_back(frame.begin(), frame.end());
+    };
+
+    Session sess(engine, cfg);
+    drive_to_active(sess, "FIX.4.4");
+    ASSERT_EQ(sess.state(), fsm_state::Active);
+    const std::size_t frames_before = transport_frames.size();
+
+    // Seed the outbound counter to seqnum_max so the next assign_outbound()
+    // overflows (preserve the current inbound counter — unused here).
+    auto& mgr = sess.seqnum_mgr_test_access();
+    mgr.set_counters_for_test(mgr.next_inbound_unsafe(), seqnum_max);
+
+    auto payload = make_min_app_payload();
+    auto fut = asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
+    ioc.run_for(200ms);
+    ioc.restart();
+    auto send_r = fut.get();
+
+    EXPECT_FALSE(send_r.has_value()) << "Session::send must fail when the outbound "
+                                        "seqnum counter overflows";
+    if (!send_r.has_value()) {
+        EXPECT_EQ(send_r.error(), fixpp::core::error::store_seqnum_overflow)
+            << "the overflow error code must propagate un-coerced";
+    }
+    EXPECT_EQ(sess.state(), fsm_state::Disconnected)
+        << "Session must be Disconnected after outbound-seqnum overflow via Session::send; "
+        << "got state=" << static_cast<int>(sess.state());
+    EXPECT_EQ(transport_frames.size(), frames_before)
+        << "no frame must be transmitted when assign_outbound() overflows";
+}
+
 }  // namespace fixpp::session::test

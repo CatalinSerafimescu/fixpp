@@ -4020,6 +4020,19 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
 //
 // Stack buffer: 4096 bytes. app_payload larger than ~3800 bytes returns wire_frame_too_large.
 // [const §VIII.5]: no heap allocation on this path.
+//
+// gate-b/r1 FQ-1 (RC#1): the persistent store-retain fatal class, matching
+// store_then_emit's durability-classified gate (session.cpp ~:4804) rather
+// than the closed 3-code set the pre-fix guard hard-coded. Range [56,65) is
+// EVERY store_* code except cancellation-class store_cancelled(65); sound
+// only because of the contiguity static_assert at error.hpp:775 (10 variants
+// 56..65) — an inserted 11th store code would shift store_cancelled and this
+// range must move with it. [contracts/store-then-emit-disposition.md item 3]
+static bool is_persistent_retain_fatal(fixpp::core::error e) noexcept {
+    using fixpp::core::error;
+    return e >= error::store_io_failure && e < error::store_cancelled;
+}
+
 asio::awaitable<fixpp::core::expected_t<void>> Session::send(
     std::span<const std::byte> app_payload) noexcept {
     using fixpp::core::error;
@@ -4040,13 +4053,29 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send(
     // propagate (std::terminate). [F5 drift fix;
     // [[feedback_async_mutex_us3_asio_cancel_and_subagent_seams]]]
     try {
-        auto impl_r = co_await send_impl(app_payload);
+        // gate-b/r2 FQ-1: disconnect_required carries PROVENANCE out of send_impl —
+        // set true ONLY at the two commit-region producer sites (assign_outbound
+        // overflow, store_then_emit fatal). Transition on origin, not on the
+        // returned error VALUE: a toApp passthrough can carry the identical
+        // store-block error value (session.hpp `Application::toApp` contract
+        // allows any error::* return) without having reached the commit region,
+        // and must stay Active per INV-5/SC-004.
+        bool disconnect_required = false;
+        auto impl_r = co_await send_impl(app_payload, disconnect_required);
         // F9 (Round-A drift): if store_then_emit converted an operation_aborted throw
         // into dispatch_aborted expected_t error, transition to Disconnected per US1 AC3.
-        if (!impl_r && impl_r.error() == error::dispatch_aborted) {
-            record_state_transition_(fsm_state::Disconnected);  // [spec.md US1 AC3; F9 drift fix]
+        // dispatch_aborted(55) is outside is_persistent_retain_fatal's [56,65) range, so
+        // it is not covered by disconnect_required — kept as a value residual to
+        // preserve the exact pre-059 converted-cancellation disposition unchanged.
+        // Residual (documented, not fixed — out of 059's scope): a toApp returning
+        // unexpected(dispatch_aborted) still spuriously disconnects here; pre-existing
+        // since before 059 (the guard was always `== dispatch_aborted`), and
+        // dispatch_aborted is an internal cancellation sentinel an app should never
+        // return. [gate-b/r2 FQ-1; contracts/store-then-emit-disposition.md item 3]
+        if (disconnect_required || (!impl_r && impl_r.error() == error::dispatch_aborted)) {
+            record_state_transition_(fsm_state::Disconnected);  // [spec.md US1 AC3; F9 drift fix; gate-b/r2 FQ-1]
         }
-        co_return impl_r;
+        co_return impl_r;  // value un-coerced
     } catch (const asio::system_error& e) {
         if (e.code() == asio::error::operation_aborted) {
             // Uncaught operation_aborted from a co_await inside send_impl —
@@ -4098,7 +4127,7 @@ static bool has_boundary_token(std::string_view sv, std::string_view tok) noexce
 }
 
 asio::awaitable<fixpp::core::expected_t<void>> Session::send_impl(
-    std::span<const std::byte> app_payload) {
+    std::span<const std::byte> app_payload, bool& disconnect_required) {
     using fixpp::core::error;
 
     // ── T010: Opaque-payload validation — BEFORE seqnum peek/assign/stamp ──────
@@ -4477,6 +4506,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send_impl(
     {
         auto assign_r = co_await seqnum_mgr_.assign_outbound();
         if (!assign_r) {
+            // gate-b/r2 FQ-1: commit-region producer site — set provenance flag here,
+            // not classified by value at the Session::send caller.
+            disconnect_required = is_persistent_retain_fatal(assign_r.error());
             co_return std::unexpected(assign_r.error());  // store_seqnum_overflow (I-8)
         }
         // The assigned value must equal the peeked seq (single-strand, no race).
@@ -4485,7 +4517,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send_impl(
 
     // (4) store(outbound) BEFORE transport ([2e §4.1]).
     // Pass the stamped seqnum explicitly (RC#A: next_outbound_seq_ removed).
-    co_return co_await store_then_emit(seq, std::span<const std::byte>(buf.data(), pos));
+    // gate-b/r2 FQ-1: commit-region producer site — set provenance flag from the
+    // store's own error before returning it un-coerced.
+    auto emit_r = co_await store_then_emit(seq, std::span<const std::byte>(buf.data(), pos));
+    disconnect_required = !emit_r.has_value() && is_persistent_retain_fatal(emit_r.error());
+    co_return emit_r;  // store's own error, un-coerced
 }
 
 fsm_state Session::state() const noexcept { return fsm_state_; }
@@ -4784,10 +4820,38 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::store_then_emit(
         // cancellation. Without this, the throw propagates out of the noexcept
         // store_then_emit frame → std::terminate.
         // [F5 drift fix; [[feedback_async_mutex_us3_asio_cancel_and_subagent_seams]]]
+        // 059 T006/T010: disposition on the returned store_r (contracts/
+        // store-then-emit-disposition.md item 3). `fatal_err` is set ONLY on a
+        // genuine failure (excludes store_cancelled, D7) on a persistent store
+        // (store_is_persistent_); success, store_cancelled, and volatile-store
+        // failures fall through unchanged (logged-then-proceed, I-07/FR-003).
+        std::optional<fixpp::core::error> fatal_err;
         try {
             auto store_r =
                 co_await store_->store(stamped_seq, span_to_store, direction_t::outbound);
-            (void)store_r;  // store errors → logged-then-proceed (I-07)
+            if (!store_r.has_value() && store_is_persistent_ &&
+                store_r.error() != fixpp::core::error::store_cancelled) {
+                // Genuine persistent-store failure: capture the error FIRST
+                // (NEW-P3, D2) — before the best-effort reconcile read — so a
+                // reconcile-time throw cannot pre-empt the intended error code.
+                // The reconcile runs in its OWN nested try/catch: a throw there
+                // must be absorbed WITHOUT escaping to the outer catch(...) below,
+                // which would otherwise fall through to Step 2 and transmit the
+                // un-retained frame (fail-closed violation). [D2/D4/D7]
+                fatal_err = store_r.error();
+                try {
+                    auto dk = co_await store_->next_seqnum(direction_t::outbound, false);
+                    if (dk.has_value()) {
+                        (void)co_await seqnum_mgr_.set_next_outbound(*dk);
+                    }
+                } catch (...) {  // NOLINT(bugprone-empty-catch) — reconcile is
+                    // best-effort (D4); reconcile failure does not change the
+                    // already-captured fatal_err, and the disconnect still proceeds.
+                }
+            }
+            // else: success, store_cancelled (D7 — cancellation-class, keeps
+            // today's absorb→proceed), or a volatile-store failure (FR-003) —
+            // logged-then-proceed, unchanged.
         } catch (const asio::system_error& e) {
             if (e.code() == asio::error::operation_aborted) {
                 // Cancellation won before the store committed. Per US1 AC3 and I-07:
@@ -4797,6 +4861,14 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::store_then_emit(
             // Non-abort system_error: absorb (I-07 logged-then-proceed on store path).
         } catch (...) {  // NOLINT(bugprone-empty-catch) — noexcept-window absorption:
             // any other exception from the store awaitable is absorbed (I-07).
+        }
+        if (fatal_err.has_value()) {
+            // Fail closed BEFORE Step 2 transmit (D3): same shape as the existing
+            // transport-write-failure return below (:4820-4822) — no internal
+            // record_state_transition_; the Disconnected transition is caller-owned.
+            // [contracts/store-then-emit-disposition.md item 3;
+            //  feedback_mirror_existing_failclosed_disposition]
+            co_return std::unexpected(*fatal_err);
         }
     }
 

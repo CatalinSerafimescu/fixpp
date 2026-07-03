@@ -288,6 +288,80 @@ fixpp_add_store_test(store_seqnum_out_of_order SOURCES
 # FIXPP_TEST_HOOKS enables test_set_counter() for the overflow test (B3).
 target_compile_definitions(store_seqnum_out_of_order PRIVATE FIXPP_TEST_HOOKS)
 
+# ── 059-outbound-store-fail-closed (S-P1-1/S-P2-1) — T005/T005a US1 RED ─────
+# T005: the W1 flagship cascade witness. Session + real FileStore over
+# thread_pool{2} (mirrors test_credential_store_redaction.cpp) — the store
+# path is strand-confined + async_mutex-guarded, a single-threaded harness
+# would mask races. FIXPP_TEST_HOOKS exposes the T003/T004 pwrite
+# fault-injection seam + seqnum_mgr_test_access().
+fixpp_add_store_test(store_fail_closed_persistent SOURCES
+  test_store_fail_closed_persistent.cpp
+  EXTRA_LIBS fixpp_mock_clock
+)
+target_compile_definitions(store_fail_closed_persistent PRIVATE FIXPP_TEST_HOOKS)
+
+# T009: W2 regression pin — a bounded MemoryStore (volatile) filled to its
+# outbound capacity hits real capacity exhaustion (no mock/seam needed);
+# asserts the volatile arm is unchanged (FR-003 / SC-003).
+fixpp_add_store_test(store_fail_open_volatile SOURCES
+  test_store_fail_open_volatile.cpp
+  EXTRA_LIBS fixpp_mock_clock
+)
+
+# T011: W3 reconcile-from-durable witness (US3 / FR-007 / SC-004) — three
+# HONEST policy variants (plain / reset_on_logon / bilateral_strict default)
+# driven via an in-process Session::drive_reconnect() over a mock_transport
+# (the reconcile only mutates the in-memory counter; a fresh-Session restart
+# would bypass it). FIXPP_TEST_HOOKS exposes the T003/T004 pwrite
+# fault-injection seam + seqnum_mgr_test_access().
+fixpp_add_store_test(store_fail_reconcile SOURCES
+  test_store_fail_reconcile.cpp
+  EXTRA_LIBS fixpp_mock_clock
+)
+target_compile_definitions(store_fail_reconcile PRIVATE FIXPP_TEST_HOOKS)
+
+# T005a: FR-004 breadth witness (classified by durability, not error code) —
+# a minimal in-memory persistent-store double armed to return each of the
+# three store-fatal codes in turn (table-driven / TEST_P). No FileStore /
+# FIXPP_TEST_HOOKS needed (the double is self-contained).
+fixpp_add_store_test(store_fail_reconcile_breadth SOURCES
+  test_store_fail_reconcile_breadth.cpp
+  EXTRA_LIBS fixpp_mock_clock
+)
+
+# /speckit-verify coverage witness — the reconcile else-arm (dk.has_value()
+# ==false) and the store_cancelled false-leg (`!= store_cancelled`), which
+# W1/W3/breadth cannot reach (their reconcile read always succeeds; the
+# FileStore seam serves next_seqnum from a still-valid in-memory counter). A
+# persistent store DOUBLE additionally faults the reconcile read. No FileStore
+# / FIXPP_TEST_HOOKS needed. See 059-...-coverage-design.md Arm (a)/(b).
+fixpp_add_store_test(store_fail_reconcile_readfail SOURCES
+  test_store_fail_reconcile_readfail.cpp
+  EXTRA_LIBS fixpp_mock_clock
+)
+
+# gate-b/r1 FQ-1 (RC#1): the fatal-class predicate unification RED witness —
+# a minimal persistent store double armed to return an OUT-OF-SET store code
+# (outside the pre-fix closed 3-code Session::send guard) in turn. Fresh
+# fixture, authored separately from store_fail_reconcile_breadth.cpp per the
+# gate-b/r1 brief. No FileStore / FIXPP_TEST_HOOKS needed.
+fixpp_add_store_test(store_fail_reconcile_outofset SOURCES
+  test_store_fail_reconcile_outofset.cpp
+  EXTRA_LIBS fixpp_mock_clock
+)
+
+# gate-b/r2 FQ-1 (P1): a toApp veto carrying a store-block error VALUE (on a
+# persistent store) must stay Active — the disconnect is decided by
+# provenance (did send_impl reach the commit region?), not by re-classifying
+# the returned value. Uses seqnum_mgr_test_access() to assert no seqnum
+# consumption, so FIXPP_TEST_HOOKS is required. No FileStore needed (a
+# minimal always-succeeding persistent store double).
+fixpp_add_store_test(send_toapp_store_collision SOURCES
+  test_send_toapp_store_collision.cpp
+  EXTRA_LIBS fixpp_mock_clock
+)
+target_compile_definitions(send_toapp_store_collision PRIVATE FIXPP_TEST_HOOKS)
+
 # ── T044–T045 US4 (Phase 6) QuickFIX compat seam registrations ───────────────
 
 # T044 — seam 11: Path-B compile-time guard (FR-032 / AC US4 #2)
