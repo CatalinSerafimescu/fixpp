@@ -26,6 +26,9 @@
 #include <asio/use_awaitable.hpp>
 #include <asio/use_future.hpp>
 #include <chrono>
+#include <cstdio>
+#include <cstdlib>
+#include <exception>
 #include <fixpp/core/sync/async_mutex.hpp>
 #include <memory>
 
@@ -41,6 +44,30 @@ using fixpp::sync::expected_t;
 using fixpp::sync::test::yield_n;
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Portable death-banner marker. The default std::terminate() banner is NOT
+// portable — "terminate called ..." on libstdc++, "libc++abi: terminating" on
+// libc++, and neither on MSVC — so matching it makes EXPECT_DEATH pass only on
+// the libstdc++ lane (the trap that surfaced when Tier-2/Tier-3 first ran,
+// 2026-07-03). The async_mutex destructor guard fires via the bare
+// std::terminate() idiom (D-5) on ALL platforms; each death-test child installs
+// its OWN terminate handler that emits a fixed, fixpp-owned marker then
+// abort()s. Matching this marker is portable BY CONSTRUCTION (std::terminate
+// dispatches to the current handler on every conforming stdlib, incl. MSVC) and
+// still excludes an incidental SIGABRT (glibc malloc-corruption abort bypasses
+// std::terminate → the handler is NOT invoked → the marker is absent → RED),
+// preserving the original "exclude an unrelated crash" discriminator intent.
+inline constexpr const char* kGuardTerminateMarker = "FIXPP_ASYNC_MUTEX_GUARD_TERMINATE";
+
+inline void install_guard_terminate_marker() {
+    std::set_terminate([] {
+        std::fputs(kGuardTerminateMarker, stderr);
+        std::fputc('\n', stderr);
+        std::fflush(stderr);
+        std::abort();
+    });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Helper functions for death-test children.
 // EXPECT_DEATH forks a child process and runs the statement there.
 // We use static helper functions to avoid issues with braced initializer lists
@@ -49,6 +76,7 @@ using fixpp::sync::test::yield_n;
 
 // Trigger: holder acquires, waiter parks, mutex is destroyed → terminate.
 static void destroy_with_live_waiter() {
+    install_guard_terminate_marker();
     auto* mtx = new async_mutex{};
     asio::io_context ioc;
 
@@ -84,6 +112,7 @@ static void destroy_with_live_waiter() {
 
 // Trigger: holder acquires and never unlocks; mutex destroyed → terminate.
 static void destroy_while_held() {
+    install_guard_terminate_marker();
     auto* mtx = new async_mutex{};
     asio::io_context ioc;
 
@@ -109,7 +138,7 @@ static void destroy_while_held() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 TEST(SeamDestructorReleaseDeath, DestroyWithLiveWaiterTerminates) {
-    EXPECT_DEATH(destroy_with_live_waiter(), "");
+    EXPECT_DEATH(destroy_with_live_waiter(), kGuardTerminateMarker);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -117,7 +146,7 @@ TEST(SeamDestructorReleaseDeath, DestroyWithLiveWaiterTerminates) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 TEST(SeamDestructorReleaseDeath, DestroyWhileHeldTerminates) {
-    EXPECT_DEATH(destroy_while_held(), "");
+    EXPECT_DEATH(destroy_while_held(), kGuardTerminateMarker);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -144,14 +173,15 @@ TEST(SeamDestructorReleaseDeath, DestroyWhileHeldTerminates) {
 // `EXPECT_DEATH` requires `ExitedUnsuccessfully` (nonzero exit OR killed by
 // a signal); a clean exit(0) fails that predicate — RED, and RED because the
 // guard did not fire (not because of an unrelated crash the matcher happened
-// to accept). The `"terminate called"` regex (libstdc++'s default terminate
-// handler banner, stable on the `linux-clang-debug` lane) additionally
-// excludes an incidental SIGABRT (e.g. glibc malloc-corruption abort) from
-// being accepted as a false-positive match, WITHOUT claiming the regex
-// identifies which OR-term fired (all three arms share the bare
-// `std::terminate()` idiom post-T017 — D-5 — so stderr is byte-identical
-// across arms; the discriminator is the manufactured PRECONDITION STATE,
-// not the message text).
+// to accept). The death-banner matcher is the fixpp-owned `kGuardTerminateMarker`
+// (installed by install_guard_terminate_marker in each child) rather than the
+// stdlib's default terminate banner, which is NOT portable — see that helper's
+// note — additionally excluding an incidental SIGABRT (e.g. glibc
+// malloc-corruption abort) from being accepted as a false-positive match,
+// WITHOUT claiming the marker identifies which OR-term fired (all three arms
+// share the bare `std::terminate()` idiom post-T017 — D-5 — so stderr is
+// byte-identical across arms; the discriminator is the manufactured
+// PRECONDITION STATE, not the message text).
 // ─────────────────────────────────────────────────────────────────────────────
 
 // T013: cancel-delivered-then-destroy.
@@ -161,6 +191,7 @@ TEST(SeamDestructorReleaseDeath, DestroyWhileHeldTerminates) {
 // and restores state_ == not_locked / next_drain_head_ == nullptr -- the
 // CURRENT guard reads only those two and sees a "fully drained" mutex.
 static void cancel_delivered_then_destroy() {
+    install_guard_terminate_marker();
     auto* mtx = new async_mutex{};
     asio::io_context ioc;
     asio::cancellation_signal cancel_sig;
@@ -227,6 +258,7 @@ static void cancel_delivered_then_destroy() {
 // on this non-ASan debug lane; this construction avoids that entirely by
 // never letting the posted runner run at all).
 static void grant_delivered_then_destroy() {
+    install_guard_terminate_marker();
     auto* mtx = new async_mutex{};
     asio::io_context ioc;
 
@@ -286,6 +318,7 @@ static void grant_delivered_then_destroy() {
 // residual term is always masked by the held/granted state_ term in this
 // shape.
 static void grant_with_tail_then_destroy() {
+    install_guard_terminate_marker();
     auto* mtx = new async_mutex{};
     asio::io_context ioc;
 
@@ -330,7 +363,7 @@ static void grant_with_tail_then_destroy() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 TEST(SeamDestructorReleaseDeath, CancelDeliveredThenDestroyTerminates) {
-    EXPECT_DEATH(cancel_delivered_then_destroy(), "terminate called");
+    EXPECT_DEATH(cancel_delivered_then_destroy(), kGuardTerminateMarker);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -338,7 +371,7 @@ TEST(SeamDestructorReleaseDeath, CancelDeliveredThenDestroyTerminates) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 TEST(SeamDestructorReleaseDeath, GrantDeliveredThenDestroyTerminates) {
-    EXPECT_DEATH(grant_delivered_then_destroy(), "terminate called");
+    EXPECT_DEATH(grant_delivered_then_destroy(), kGuardTerminateMarker);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -346,7 +379,7 @@ TEST(SeamDestructorReleaseDeath, GrantDeliveredThenDestroyTerminates) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 TEST(SeamDestructorReleaseDeath, GrantWithTailThenDestroyTerminates) {
-    EXPECT_DEATH(grant_with_tail_then_destroy(), "terminate called");
+    EXPECT_DEATH(grant_with_tail_then_destroy(), kGuardTerminateMarker);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
