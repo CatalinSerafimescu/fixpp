@@ -272,6 +272,11 @@ protected:
         fixpp::core::expected_t<void> send_r;
         std::vector<std::vector<std::byte>> wire;
         fsm_state state;
+        // Captured from the store double BEFORE ~Session frees it (the store is
+        // owned by the Session; reading factory->last_store after drive() returns
+        // is a use-after-free).
+        bool store_fired = false;
+        bool read_fired = false;
     };
 
     Driven drive(std::shared_ptr<ReconcileFaultStoreFactory> factory) {
@@ -316,6 +321,14 @@ protected:
         out.send_r = send_fut.get();
         out.state = sess->state();
 
+        // Capture the store-double flags while the store is still alive (owned
+        // by sess, freed at ~Session below).
+        EXPECT_NE(factory->last_store, nullptr) << "the factory must have minted a store";
+        if (factory->last_store != nullptr) {
+            out.store_fired = factory->last_store->store_fired();
+            out.read_fired = factory->last_store->read_fired();
+        }
+
         // Terminal close (drain the async_mutex before ~Session).
         asio::co_spawn(ioc, sess->close(fixpp::session::close_mode::terminal), asio::use_future);
         ioc.run_for(200ms);
@@ -339,10 +352,8 @@ TEST_F(StoreFailReconcileReadFailTest, ReconcileReadFails_StillFailsClosed_Error
 
     auto d = drive(factory);
 
-    ASSERT_NE(factory->last_store, nullptr);
-    ASSERT_TRUE(factory->last_store->store_fired())
-        << "the store() fault must have fired for seq " << kFailAtSeq;
-    ASSERT_TRUE(factory->last_store->read_fired())
+    ASSERT_TRUE(d.store_fired) << "the store() fault must have fired for seq " << kFailAtSeq;
+    ASSERT_TRUE(d.read_fired)
         << "the reconcile-read fault (else-arm stimulus) must have fired — otherwise this "
            "witness proves nothing about the dk.has_value()==false branch "
            "(feedback_strand_local_drain_witness_stimulus_must_reach_codepath)";
@@ -378,9 +389,8 @@ TEST_F(StoreFailReconcileReadFailTest, StoreCancelled_NotFatal_StaysActiveAndTra
 
     auto d = drive(factory);
 
-    ASSERT_NE(factory->last_store, nullptr);
-    ASSERT_TRUE(factory->last_store->store_fired())
-        << "the store() fault must have fired with store_cancelled for seq " << kFailAtSeq;
+    ASSERT_TRUE(d.store_fired) << "the store() fault must have fired with store_cancelled for seq "
+                               << kFailAtSeq;
 
     // store_cancelled is excluded (`!= store_cancelled` FALSE) → unchanged path.
     EXPECT_TRUE(d.send_r.has_value())
