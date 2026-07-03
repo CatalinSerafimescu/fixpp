@@ -288,6 +288,47 @@ fixpp_add_store_test(store_seqnum_out_of_order SOURCES
 # FIXPP_TEST_HOOKS enables test_set_counter() for the overflow test (B3).
 target_compile_definitions(store_seqnum_out_of_order PRIVATE FIXPP_TEST_HOOKS)
 
+# ── 059-outbound-store-fail-closed (S-P1-1/S-P2-1) — T005/T005a US1 RED ─────
+# T005: the W1 flagship cascade witness. Session + real FileStore over
+# thread_pool{2} (mirrors test_credential_store_redaction.cpp) — the store
+# path is strand-confined + async_mutex-guarded, a single-threaded harness
+# would mask races. FIXPP_TEST_HOOKS exposes the T003/T004 pwrite
+# fault-injection seam + seqnum_mgr_test_access().
+fixpp_add_store_test(store_fail_closed_persistent SOURCES
+  test_store_fail_closed_persistent.cpp
+  EXTRA_LIBS fixpp_mock_clock
+)
+target_compile_definitions(store_fail_closed_persistent PRIVATE FIXPP_TEST_HOOKS)
+
+# T009: W2 regression pin — a bounded MemoryStore (volatile) filled to its
+# outbound capacity hits real capacity exhaustion (no mock/seam needed);
+# asserts the volatile arm is unchanged (FR-003 / SC-003).
+fixpp_add_store_test(store_fail_open_volatile SOURCES
+  test_store_fail_open_volatile.cpp
+  EXTRA_LIBS fixpp_mock_clock
+)
+
+# T011: W3 reconcile-from-durable witness (US3 / FR-007 / SC-004) — three
+# HONEST policy variants (plain / reset_on_logon / bilateral_strict default)
+# driven via an in-process Session::drive_reconnect() over a mock_transport
+# (the reconcile only mutates the in-memory counter; a fresh-Session restart
+# would bypass it). FIXPP_TEST_HOOKS exposes the T003/T004 pwrite
+# fault-injection seam + seqnum_mgr_test_access().
+fixpp_add_store_test(store_fail_reconcile SOURCES
+  test_store_fail_reconcile.cpp
+  EXTRA_LIBS fixpp_mock_clock
+)
+target_compile_definitions(store_fail_reconcile PRIVATE FIXPP_TEST_HOOKS)
+
+# T005a: FR-004 breadth witness (classified by durability, not error code) —
+# a minimal in-memory persistent-store double armed to return each of the
+# three store-fatal codes in turn (table-driven / TEST_P). No FileStore /
+# FIXPP_TEST_HOOKS needed (the double is self-contained).
+fixpp_add_store_test(store_fail_reconcile_breadth SOURCES
+  test_store_fail_reconcile_breadth.cpp
+  EXTRA_LIBS fixpp_mock_clock
+)
+
 # ── T044–T045 US4 (Phase 6) QuickFIX compat seam registrations ───────────────
 
 # T044 — seam 11: Path-B compile-time guard (FR-032 / AC US4 #2)

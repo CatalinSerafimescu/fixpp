@@ -21,10 +21,10 @@
 5. **Thrown `operation_aborted`** (cancellation): unchanged — `co_return dispatch_aborted`.
 6. **Other throw:** unchanged — absorbed.
 
-**Caller contract (FR-006) — parity with the transport-failure return.** The persistent-fatal return is the same shape callers already handle on a transport-write failure, so no caller needs a new return-check beyond what already exists. Census of the 26 `store_then_emit` sites (`9305e69`):
-- **Propagating, broad guard `if (!emit_r) → Disconnected` (9):** `:864 :1781 :1825 :2496 :2820 :3379 :3542 :4615 :4673` — fail closed unchanged.
-- **Propagating, narrow guard `== dispatch_aborted` (1 — the residual):** `Session::send` (`:4046`, consuming `send_impl` `:4488`, the primary US1 app path). It misses the store class, so its guard is broadened to `dispatch_aborted || {store_io_failure, store_seqnum_out_of_order, store_capacity_exhausted}`, keeping app-veto (`app_do_not_send`/`app_payload_malformed`, `:4468-4470`) non-fatal. This is the one genuinely-new-in-059 call-site edit.
-- **Swallow-and-continue (16):** `:2130 :2344 :2656 :2680 :2742 :2869 :2921 :2959 :2982 :3176 :3233 :3687 :4902 :4963 :5221 :5264` — each `(void)`s the return and continues **identically to today's transport-failure return**; a pre-existing disposition (documented, not re-engineered). The un-retained frame is never transmitted on any of them.
+**Caller contract (FR-006) — parity with the transport-failure return.** The persistent-fatal return is the same shape callers already handle on a transport-write failure, so no caller needs a new return-check beyond what already exists. Census of the 26 `store_then_emit` sites (re-stamped post-T006/T007, T013a):
+- **Propagating, broad guard `if (!emit_r) → Disconnected` (9):** `:864 :1781 :1825 :2496 :2820 :3379 :3542 :4623 :4681` — fail closed unchanged.
+- **Propagating, narrow guard `== dispatch_aborted` (1 — the residual):** `Session::send` (`:4051`, consuming `send_impl` `:4496`, the primary US1 app path). It misses the store class, so its guard is broadened to `dispatch_aborted || {store_io_failure, store_seqnum_out_of_order, store_capacity_exhausted}`, keeping app-veto (`app_do_not_send`/`app_payload_malformed`, `:4049-4050`) non-fatal. This is the one genuinely-new-in-059 call-site edit.
+- **Swallow-and-continue (16):** `:2130 :2344 :2656 :2680 :2742 :2869 :2921 :2959 :2982 :3176 :3233 :3687 :4946 :5007 :5265 :5308` — each `(void)`s the return and continues **identically to today's transport-failure return**; a pre-existing disposition (documented, not re-engineered). The un-retained frame is never transmitted on any of them.
 (All classified in the SC-006 census.)
 
 ## Error channel (existing codes reused)

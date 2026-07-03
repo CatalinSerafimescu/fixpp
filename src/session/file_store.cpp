@@ -128,6 +128,23 @@ static std::atomic<int> g_retrieve_pread_count{0};
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::atomic<int> g_flush_datasync_count{0};
 
+// T003 fault-injection seam: makes the NEXT store() call's offloaded pwrite
+// sequence return false at the FIRST pwrite — before any durable byte is
+// written — so nothing is retained and the durable counter is not advanced,
+// faithfully modelling a real early raw_pwrite_all failure. Drives the same
+// store_io_failure gate a genuine pwrite failure would take. Consumed once
+// (auto-cleared on fire). Compiled unconditionally (like g_catch_fired);
+// declaration in file_store.hpp gated by FIXPP_TEST_HOOKS.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+static std::atomic<bool> g_force_store_pwrite_fail_once{false};
+// T004 probe counter — incremented each time g_force_store_pwrite_fail_once
+// actually fires (i.e. the injected failure took effect), so a test can
+// confirm the seam fired for the right reason rather than trust a bare RED.
+// Compiled unconditionally; declaration in file_store.hpp gated by
+// FIXPP_TEST_HOOKS. Exposed via read_and_reset_store_pwrite_fail_count().
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+static std::atomic<int> g_store_pwrite_fail_count{0};
+
 namespace fixpp::session {
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -295,6 +312,21 @@ void arm_force_abort_after_reset_lambda() noexcept {
 // Compiled unconditionally; declaration in file_store.hpp gated by FIXPP_TEST_HOOKS.
 void install_post_rename_reopen_fail_hook(bool (*hook)() noexcept) noexcept {
     g_post_rename_reopen_fail_hook.store(hook, std::memory_order_relaxed);
+}
+
+// T003: arm the one-shot flag so the NEXT store() call's pwrite sequence is
+// forced to fail. Compiled unconditionally; declaration in file_store.hpp
+// gated by FIXPP_TEST_HOOKS.
+void arm_force_store_pwrite_fail_once() noexcept {
+    g_force_store_pwrite_fail_once.store(true, std::memory_order_relaxed);
+}
+
+// T004: read and reset the store-pwrite-fail-fired counter. Returns the
+// number of times the T003 seam actually forced io_ok=false since the last
+// reset. Compiled unconditionally; declaration in file_store.hpp gated by
+// FIXPP_TEST_HOOKS.
+int read_and_reset_store_pwrite_fail_count() noexcept {
+    return g_store_pwrite_fail_count.exchange(0, std::memory_order_acq_rel);
 }
 
 // ── Record kinds ──────────────────────────────────────────────────────────────
@@ -1139,6 +1171,18 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::store(seqnum_t seq,
                 // In production probe_fn is nullptr; the branch is dead-code-eliminated.
                 if (probe_fn) {
                     probe_fn(std::this_thread::get_id());
+                }
+
+                // T003 fault-injection: return false at the FIRST pwrite — BEFORE
+                // any durable byte — so nothing is retained and the durable counter
+                // is not advanced (faithful early-failure model; NOT a post-offload
+                // io_ok flip, which would leave the frame + counter on disk and
+                // desync the durable counter). Statics have static storage duration
+                // (not captured); reachable on the pool thread.
+                if (g_force_store_pwrite_fail_once.exchange(
+                        false, std::memory_order_relaxed)) {
+                    g_store_pwrite_fail_count.fetch_add(1, std::memory_order_relaxed);
+                    return false;
                 }
 
                 // pwrite frame header at frame_off.

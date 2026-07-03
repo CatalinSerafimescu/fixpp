@@ -233,6 +233,17 @@ void install_post_rename_reopen_fail_hook(bool (*hook)() noexcept) noexcept;
 // FIXPP_TEST_HOOKS); only this declaration is gated so production callers cannot
 // reach it.
 int read_and_reset_flush_datasync_count() noexcept;
+// T003 fault-injection: arm a one-shot flag so the NEXT store() call's
+// offloaded pwrite sequence returns false at the FIRST pwrite — before any
+// durable byte is written, so nothing is retained and the durable counter is
+// not advanced (faithful to a real early pwrite failure). Drives the same
+// store_io_failure gate a genuine pwrite failure would take. Consumed once
+// (auto-cleared after the next store() call).
+void arm_force_store_pwrite_fail_once() noexcept;
+// T004: read and reset the store-pwrite-fail-fired counter. Returns the
+// number of times the T003 seam actually fired since the last reset. Used by
+// tests to confirm the seam fired for the right reason.
+int read_and_reset_store_pwrite_fail_count() noexcept;
 #endif  // FIXPP_TEST_HOOKS
 
 }  // namespace fixpp::session
