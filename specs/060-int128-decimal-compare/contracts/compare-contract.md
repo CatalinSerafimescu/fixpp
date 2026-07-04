@@ -39,19 +39,24 @@ are inside this library submodule and MUST land in the **same (library) PR**. Si
 parent-repo commit** — same convention as the 059 `remaining-work` close-out (`790e6b1`). Each site
 leads with the overflow bound proof and states semantics are unchanged:
 
-- [ ] `.specify/2a-decimal.md §6.3` — guarded algorithm + `k≥19` dominance + product `< 2^123` proof;
+- [x] `.specify/2a-decimal.md §6.3` — guarded algorithm + `k≥19` dominance + product `< 2^123` proof;
       retire "No multiplication, no wide-int dependency"; keep "no MSVC-vs-Clang **algorithm** split".
-- [ ] `specs/001-core-decimal/research.md D-5` — supersession note (v0.1 rejection was of the *unguarded*
-      scale; record bound proof + per-compiler-primitive decision).
-- [ ] `src/core/decimal.cpp` contract comment (`:240-242`) — drop "No `__int128`", cite amended §6.3.
-- [ ] **(parent-repo, post-merge)** `research/G19-fix-fpml-iso20022/phases/phase-9/perf-investigation/02-lowlatency-recommendations.md`
+      **Landed this PR** (`git diff main..HEAD` +29 lines).
+- [x] `specs/001-core-decimal/research.md D-5` — supersession note (v0.1 rejection was of the *unguarded*
+      scale; record bound proof + per-compiler-primitive decision). **Landed this PR** (D-5 marked
+      "SUPERSEDED 2026-07-04").
+- [x] `src/core/decimal.cpp` contract comment (`:240-242`) — drop "No `__int128`", cite amended §6.3.
+      **Landed this PR** (contract comment at `:244-252` cites amended §6.3 / research R2).
+- [ ] **(parent-repo, post-merge obligation — already tracked, 059 `790e6b1` precedent; do NOT tick until
+      the parent-repo commit lands)** `research/G19-fix-fpml-iso20022/phases/phase-9/perf-investigation/02-lowlatency-recommendations.md`
       — dated (2026-07-04) supersession note reclassifying C1 as a **default-path** swap at **all three**
       C1 framings, not just a cross-ref (a pointer does not neutralize the set-level preamble):
   - [ ] the **C1 Tier-C entry** (`:365+`);
   - [ ] the **Tier-C preamble caveat** (`:354-362`) — carve C1 out of the "None of them is a default-path
         change … opt-in low-latency MODE" set-level sentence;
   - [ ] the **"Considered and rejected: `__int128`" bullet** (`:600-611`).
-- [ ] **(parent-repo, post-merge)** `remaining-work/perf-and-hardening-findings.md` — reclassify C1 as
+- [ ] **(parent-repo, post-merge obligation — already tracked, 059 `790e6b1` precedent; do NOT tick until
+      the parent-repo commit lands)** `remaining-work/perf-and-hardening-findings.md` — reclassify C1 as
       default-path at **all three** sites (post-merge close-out, per the CLEANUP-phase checklist); update
       `[[project_decimal_cluster2_fixes]]` / catalogue:
   - [ ] the Cluster-2 residual line (`:62`);
