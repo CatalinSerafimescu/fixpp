@@ -29,6 +29,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <fixpp/wire/framer.hpp>
+#include <fixpp/wire/offset_table.hpp>
 #include <fixpp/wire/parser.hpp>
 #include <memory_resource>
 #include <span>
@@ -39,6 +40,17 @@
 #include "support/mock_dict_table.hpp"
 // Test-only factory — friend of frame_view.
 #include "support/frame_view_factory.hpp"
+// detail::set_overlay_seed_for_testing (W-P3-2) — declaration lives here, not
+// in the installed public offset_table.hpp.
+#include "support/wire_test_hooks.hpp"
+
+// Pin the overlay hash seed to a fixed value so crashes reproduce across runs
+// (the production seed is randomised per process — W-P3-2). Runtime hook, not a
+// build macro: a macro would compile a DIFFERENT offset_table.o than production.
+extern "C" int LLVMFuzzerInitialize(int* /*argc*/, char*** /*argv*/) {
+    fixpp::wire::detail::set_overlay_seed_for_testing(0xF1A9C0DEU);
+    return 0;
+}
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     using fixpp::wire::access_mode;
@@ -67,7 +79,13 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     std::pmr::monotonic_buffer_resource arena{arena_buf.data(), arena_buf.size(),
                                               std::pmr::null_memory_resource()};
 
+    // Seed a NON-EMPTY grammar so group_member_fn returns true for real tags:
+    // this drives the OffsetTable group sub-index (group_slices / field_start
+    // pointer arithmetic) under adversarial offsets — the wire layer's most
+    // intricate pointer math, previously never fuzzed because the harness built
+    // Parser from an EMPTY table_view (wire-hostile-input-review T-1).
     fixpp::dict::table_view tv{};
+    tv.set_group_first(453, 448).add_group_member(453, 447);  // NoPartyIDs group
     Parser<access_mode::Index> p{tv};
 
     // parse() is noexcept; any exception escape -> std::terminate -> libFuzzer
@@ -91,6 +109,11 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
 
         // Touch the build_status() path.
         (void)tbl.build_status();
+
+        // Exercise the group sub-index (materialization + field_start / slice
+        // pointer arithmetic) now that the grammar makes 453 a real group.
+        (void)tbl.group(453);
+        (void)tbl.group_slices(453);
 
         // Touch msg_type() / msg_seq_num().
         (void)mv.msg_type();

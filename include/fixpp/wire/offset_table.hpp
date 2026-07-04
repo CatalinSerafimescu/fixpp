@@ -154,6 +154,13 @@ private:
     // (0 = empty). Holds the FIRST occurrence per tag.
     std::pmr::vector<std::uint32_t> overlay_;
     core::expected_t<void> status_;
+    // Per-process overlay hash seed, snapshotted at build() and folded into
+    // mix() by both build() and find() so the open-address slot for a tag is
+    // unpredictable to a remote attacker — defeats the crafted-collision
+    // false-absent (W-P3-2 / HashDoS). Per-TABLE cache (not a find()-hot magic
+    // static). 0 on a default-constructed (never-built) table (unused: find()
+    // returns absent before hashing when overlay_ is empty).
+    std::uint32_t seed_ = 0;
     // Lazy mr-backed group slices. Append-only and reserved once to the
     // entry-count upper bound, so no push_back ever reallocates — every
     // span handed out stays valid for the message lifetime even when
@@ -170,3 +177,9 @@ private:
 };
 
 }  // namespace fixpp::wire
+
+// NOTE: the TEST/FUZZ-ONLY `detail::set_overlay_seed_for_testing` DECLARATION
+// (W-P3-2) has moved to the non-installed `tests/support/wire_test_hooks.hpp`
+// (Gate B PR #166 round-1 Finding 2b) so this installed public header exposes
+// no test-only hook. The DEFINITION stays in `src/wire/offset_table.cpp`
+// (external linkage unchanged).

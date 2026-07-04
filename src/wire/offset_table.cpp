@@ -3,8 +3,11 @@
 // robin-hood overlay + lazy group sub-index. All storage from the captured
 // per-message memory_resource; DoS caps enforced with bounded memory.
 
+#include <atomic>
+#include <chrono>  // noexcept seed fallback entropy (W-P3-2)
 #include <cstddef>
 #include <cstdint>
+#include <random>  // per-process overlay seed (W-P3-2)
 #include <fixpp/core/error.hpp>
 #include <fixpp/wire/errors.hpp>  // wire::err_* / fail<T> (module error vocab)
 #include <fixpp/wire/framer.hpp>
@@ -74,15 +77,57 @@ constexpr std::uint32_t field_start_from_val(std::byte const* frame_base,
     return p;
 }
 
-// FNV-1a-ish mix for a 16-bit tag — cheap, good enough for the overlay.
-constexpr std::uint32_t mix(std::uint16_t tag) noexcept {
-    std::uint32_t h = 2166136261U;
+// FNV-1a-ish mix for a 16-bit tag — cheap, good enough for the overlay. The
+// per-process `seed` is XORed into the FNV basis so the slot for a tag is
+// unpredictable across processes, defeating the crafted-collision false-absent
+// (W-P3-2). One XOR on constants the optimizer already folds — no hot-path cost.
+constexpr std::uint32_t mix(std::uint16_t tag, std::uint32_t seed) noexcept {
+    std::uint32_t h = 2166136261U ^ seed;
     h = (h ^ (tag & 0xFFU)) * 16777619U;
     h = (h ^ ((static_cast<std::uint32_t>(tag) >> 8U) & 0xFFU)) * 16777619U;
     return h;
 }
 
+// Compute the per-process overlay seed once. noexcept-safe: build() (and all
+// four ctors) are noexcept, so a throwing std::random_device must NOT escape and
+// std::terminate — fall back to a coarse entropy mix (steady_clock XOR an ASLR'd
+// address, splitmix-finalised). Either way the result is unpredictable to a
+// remote peer, which is all W-P3-2 needs (the reject-oracle is far too weak for
+// seed recovery at 16-bit tags / whole authenticated frames per probe).
+std::uint32_t compute_process_seed() noexcept {
+    try {
+        std::random_device rd;
+        return static_cast<std::uint32_t>(rd());
+    } catch (...) {
+        auto ticks = static_cast<std::uint64_t>(
+            std::chrono::steady_clock::now().time_since_epoch().count());
+        static int anchor = 0;
+        std::uint64_t x = ticks ^ static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(&anchor));
+        x ^= x >> 30U;
+        x *= 0xbf58476d1ce4e5b9ULL;
+        x ^= x >> 27U;
+        x *= 0x94d049bb133111ebULL;
+        x ^= x >> 31U;
+        return static_cast<std::uint32_t>(x);
+    }
+}
+
+// Process-wide seed storage (magic static init once). Read into each table's
+// seed_ at build() so find()'s hot path never touches the guard variable.
+// Atomic so the TEST/FUZZ-ONLY set_overlay_seed_for_testing() hook can never
+// race a concurrent build()'s read (Gate B PR #166 round-1 Finding 2c).
+std::atomic<std::uint32_t>& overlay_seed_storage() noexcept {
+    static std::atomic<std::uint32_t> seed{compute_process_seed()};
+    return seed;
+}
+
 }  // namespace
+
+namespace detail {
+void set_overlay_seed_for_testing(std::uint32_t seed) noexcept {
+    overlay_seed_storage().store(seed, std::memory_order_relaxed);
+}
+}  // namespace detail
 
 std::size_t OffsetTable::overlay_cap_for(std::size_t n) noexcept {
     std::size_t want = ((n * 5U) / 4U) + 1U;  // 1.25 * n
@@ -147,6 +192,7 @@ void OffsetTable::build(frame_view const& frame) noexcept {
     try {
         auto buf = frame.bytes();
         frame_base_ = buf.data();
+        seed_ = overlay_seed_storage().load(std::memory_order_relaxed);  // snapshot (W-P3-2)
         std::size_t i = 0;
         std::size_t const n = buf.size();
 
@@ -182,14 +228,46 @@ void OffsetTable::build(frame_view const& frame) noexcept {
             std::size_t const val_start = i;
             std::size_t val_len = 0;
 
-            // Length+Data: if a previous Length tag told us this Data tag has
-            // a fixed byte count, use it instead of scanning for SOH.
-            if (pending_data_tag != 0 && static_cast<std::uint16_t>(tag) == pending_data_tag) {
-                std::size_t const end = val_start + pending_data_len;
-                val_len = (end <= n) ? pending_data_len : n - val_start;
-                i = (end < n) ? end + 1U : n;  // skip trailing SOH if present
-                pending_data_tag = 0;
-                pending_data_len = 0;
+            // Capture and CONSUME the Length→Data carry up-front: it applies
+            // ONLY to the field immediately following its Length tag. Clearing
+            // it here means a non-adjacent later field can never inherit a stale
+            // count (W-P2-1b) — the else arm below re-arms it only for a Length
+            // tag's true successor.
+            std::uint16_t const carry_tag = pending_data_tag;
+            std::uint32_t const carry_len = pending_data_len;
+            pending_data_tag = 0;
+            pending_data_len = 0;
+
+            // Length+Data: if the previous field was a Length tag naming THIS
+            // Data tag, read it by fixed byte count instead of scanning for SOH.
+            if (carry_tag != 0 && static_cast<std::uint16_t>(tag) == carry_tag) {
+                // Bound via SUBTRACTION (val_start <= n always) so
+                // val_start + carry_len can never wrap size_t on ANY width — the
+                // latent 32-bit heap-OOB escalation (W-P2-1a). carry_len is
+                // already saturated to the frame size by accumulate_bounded.
+                if (carry_len > n - val_start) {
+                    // Declared length runs past the frame end: malformed.
+                    status_ = err_invalid_field_format();
+                    entries_.clear();
+                    return;
+                }
+                std::size_t const end = val_start + carry_len;  // <= n, no wrap
+                // FIX requires the byte after a counted Data value to be SOH.
+                // This whole-frame scanner always sees a trailing
+                // `10=NNN<SOH>` checksum field after the body (Framer-validated
+                // before build()), so a legitimate counted value can never
+                // reach exactly `n` — `end == n` swallows the checksum tail and
+                // is just as malformed as a non-SOH end byte (Gate B PR #166
+                // Finding 1 / B-004-6). Index accepts ONLY `end < n &&
+                // buf[end] == SOH`; reject otherwise rather than blindly skip
+                // and desync into the next field (W-P2-1a).
+                if (end >= n || buf[end] != SOH) {
+                    status_ = err_invalid_field_format();
+                    entries_.clear();
+                    return;
+                }
+                val_len = carry_len;
+                i = end + 1U;  // end < n verified above; step over the SOH
             } else {
                 while (i < n && buf[i] != SOH) {
                     ++i;
@@ -198,18 +276,22 @@ void OffsetTable::build(frame_view const& frame) noexcept {
                 if (i < n) {
                     ++i;  // step over SOH
                 }
-                // If this was a Length tag, record the expected data length
-                // for the immediately-following Data tag.
+                // If this was a Length tag, record the expected data length for
+                // the immediately-following Data tag. The length is bounded to
+                // the frame size: a lying over-large length saturates to n (=>
+                // the subtraction bound above rejects it) rather than wrapping
+                // uint32 (W-P2-1c / P3-1).
                 if (std::uint16_t const dt = data_tag_for(static_cast<std::uint16_t>(tag));
                     dt != 0) {
-                    // Parse the numeric value as the data length.
                     std::uint32_t dlen = 0;
+                    auto const cap =
+                        static_cast<std::uint32_t>(n > 0xFFFFFFFFULL ? 0xFFFFFFFFULL : n);
                     for (std::size_t k = val_start; k < val_start + val_len; ++k) {
                         auto const c = static_cast<unsigned char>(buf[k]);
                         if (c < '0' || c > '9') {
                             break;
                         }
-                        dlen = (dlen * 10U) + static_cast<std::uint32_t>(c - '0');
+                        (void)fixpp::wire::accumulate_bounded(dlen, c, cap);
                     }
                     pending_data_tag = dt;
                     pending_data_len = dlen;
@@ -242,7 +324,7 @@ void OffsetTable::build(frame_view const& frame) noexcept {
         constexpr std::size_t kMaxBuildProbe = 128;
         for (std::size_t e = 0; e < entries_.size(); ++e) {
             std::uint16_t const tag = entries_[e].tag;
-            std::uint32_t slot = mix(tag) & mask;
+            std::uint32_t slot = mix(tag, seed_) & mask;
             bool skip_insert = false;
             std::size_t probes = 0;
             while (overlay_[slot] != 0U) {
@@ -275,7 +357,7 @@ core::expected_t<OffsetTable::entry> OffsetTable::find(std::uint16_t tag) const 
         return err_required_field_missing<entry>();
     }
     auto const mask = static_cast<std::uint32_t>(overlay_.size() - 1U);
-    std::uint32_t slot = mix(tag) & mask;
+    std::uint32_t slot = mix(tag, seed_) & mask;
     std::size_t probes = 0;
     while (overlay_[slot] != 0U) {
         entry const& en = entries_[overlay_[slot] - 1U];

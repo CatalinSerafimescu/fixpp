@@ -292,6 +292,45 @@ TEST(ValidatorDomain, MalformedGroupCountRejected) {
         << static_cast<int>(result.error());
 }
 
+// (f) declared_count uint32 wrap (wire-hostile-input-review W-P3-1).
+//     NoPartyIDs = 4294967298 = (2^32 + 2), which wraps mod 2^32 to 2. Exactly
+//     2 real instances follow. The pre-fix unbounded accumulator computes
+//     declared_count == 2 == actual_count and ACCEPTS a wildly-over-declared
+//     count. The bounded accumulator saturates the declared count so it can
+//     never equal a plausible actual_count → rejected.
+TEST(ValidatorDomain, GroupCountUint32WrapRejected) {
+    auto gram = make_d_grammar();
+    dictionary_driven_validator v{std::move(gram)};
+
+    auto buf = make_frame(
+        "35=D\x01"
+        "49=SENDER\x01"
+        "56=TARGET\x01"
+        "34=1\x01"
+        "11=ORD-1\x01"
+        "55=AAPL\x01"
+        "54=1\x01"
+        "453=4294967298\x01"  // wraps mod 2^32 to 2
+        "448=PA\x01"
+        "447=D\x01"
+        "448=PB\x01"
+        "447=E\x01");  // exactly 2 real instances
+
+    std::array<std::byte, 4096> stack{};
+    std::pmr::monotonic_buffer_resource arena;
+    auto mv = parse_index(buf, stack, arena);
+
+    std::array<std::byte, kScratchSize> scratch_buf{};
+    std::pmr::monotonic_buffer_resource scratch_mr{scratch_buf.data(), scratch_buf.size(),
+                                                   std::pmr::null_memory_resource()};
+
+    auto result = v.validate(mv, &scratch_mr);
+    ASSERT_FALSE(result.has_value())
+        << "a group count that wraps uint32 to the real instance count must be rejected, "
+           "not accepted via the wrap";
+    EXPECT_EQ(result.error(), error::wire_required_field_missing);
+}
+
 // (f) Malformed repeating-group: wrong first field (not the delimiter).
 //     The first entry after the count is NOT the delimiter tag.
 TEST(ValidatorDomain, MalformedGroupFirstFieldRejected) {

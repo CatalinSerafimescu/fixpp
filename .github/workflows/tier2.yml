@@ -134,3 +134,32 @@ jobs:
   # NOTE: the "ABI golden — fixpp_decimal_t" abidiff job moved to tier1.yml
   # (2026-06-22) — it is a Linux C-ABI layout gate with nothing Windows-specific,
   # and belongs in the per-PR tier so C-ABI drift fails fast on every PR.
+
+  # ── Required aggregate — red-on-skip (mirrors tier1-required in tier1.yml) ──
+  # Tier 2 is green-on-skip: a PR without `run-tier2` skips the `windows` matrix
+  # and GitHub scores the skip as success, so "Tier 2" reports green having built
+  # nothing. This REQUIRED job is RED unless `filter` AND the `windows` matrix ran
+  # to success, so a PR cannot merge on a Windows matrix that never ran; fire
+  # `run-tier2` (or a workflow_dispatch) to run the matrix and turn it green.
+  # INERT until branch protection is set to REQUIRE the "tier2-required" check.
+  # Ref: feedback_ci_gate_observes_not_asserts_witness_skips_into_green.
+  tier2-required:
+    name: tier2-required
+    runs-on: ubuntu-latest
+    needs: [filter, windows]
+    if: always()
+    steps:
+      - name: Assert the Windows matrix ran to success (no skip-into-green)
+        run: |
+          f='${{ needs.filter.result }}'
+          w='${{ needs.windows.result }}'
+          echo "filter=$f  windows=$w"
+          fail=0
+          for kv in "filter=$f" "windows=$w"; do
+            if [ "${kv#*=}" != "success" ]; then
+              echo "::error::Tier 2 job '${kv%%=*}' did not run to success (got '${kv#*=}'). The Windows matrix must actually run — fire run-tier2 (or workflow_dispatch) before merge."
+              fail=1
+            fi
+          done
+          [ "$fail" = 0 ] || exit 1
+          echo "Tier 2 Windows matrix ran to success."
