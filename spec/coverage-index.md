@@ -866,7 +866,7 @@ Items that are normative in the spec but explicitly deferred from fixpp v1.0. Th
 > | `compare` different-exponent, `mul_u64_wide` general case | `decimal_compare_diff_oracle_test.cpp` witness matrix rows 3–7 + full-domain seed-42 corpus + Python-`Decimal` cross-exp oracle |
 > | `mul_u64_wide` native `__int128` path (production symbol, via `compare()`) | `decimal_compare_diff_oracle_test.cpp` differential oracle (seed-42 corpus + witness matrix) — the sole production caller of `mul_u64_wide` is `compare()` at `decimal.cpp:416`; `decimal_mul_u64_wide_test.cpp` is supplementary primitive-level coverage of a flag-identical TU-local copy (the `static inline` production symbol is not directly linkable — see `tests/core/CMakeLists.txt:165-169`) |
 > | `mul_u64_wide` portable `#else` path (production symbol, via `compare()`) | T013 `FIXPP_DECIMAL_FORCE_PORTABLE_MUL=ON` forced-portable differential oracle build; `decimal_mul_u64_wide_test_portable` is supplementary primitive-level coverage of the same flag-identical copy |
-> | `mul_u64_wide` MSVC `#elif` intrinsic path (`_umul128`/`__umulh`) | Tier-2 `windows-msvc-*` lane only (`run-tier2`, T014) — NOT run at T021; see L-060-1 |
+> | `mul_u64_wide` MSVC `#elif` intrinsic path (`_umul128`/`__umulh`) | MSVC x64 discharged **locally** (T014 — differential oracle 11/11 + mul-primitive 4/4 + `DecimalCompare.*` 16/16 witnesses green on `windows-msvc-debug`); full `run-tier2` 3-lane CI (debug/release/asan) still pending as belt-and-suspenders; see L-060-1 |
 > | Differential regression vs pre-060 reference | `fuzz_decimal_compare.cpp` + corpus (libFuzzer) |
 >
 > **Sanitizer/coverage.** ASan/UBSan/TSan clean on the default `__int128` build and the forced-portable
