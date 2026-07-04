@@ -862,10 +862,10 @@ Items that are normative in the spec but explicitly deferred from fixpp v1.0. Th
 >
 > | Source arm | Test coverage |
 > |---|---|
-> | `compare` different-exponent, `k≥19` dominance guard | `decimal_compare_diff_oracle_test.cpp` witness matrix rows 1–2 (dominance short-circuit both directions) |
+> | `compare` different-exponent, `k≥19` dominance guard | `decimal_compare_diff_oracle_test.cpp` `WitnessKBoundary` (`:341`) — k=19/k=20/k=38 cells, k=19 the exact dominance-guard boundary |
 > | `compare` different-exponent, `mul_u64_wide` general case | `decimal_compare_diff_oracle_test.cpp` witness matrix rows 3–7 + full-domain seed-42 corpus + Python-`Decimal` cross-exp oracle |
-> | `mul_u64_wide` native `__int128` path | `decimal_mul_u64_wide_test.cpp` (default build) |
-> | `mul_u64_wide` portable `#else` path | `decimal_mul_u64_wide_test_portable` (`FIXPP_DECIMAL_FORCE_PORTABLE_MUL` forced build) |
+> | `mul_u64_wide` native `__int128` path (production symbol, via `compare()`) | `decimal_compare_diff_oracle_test.cpp` differential oracle (seed-42 corpus + witness matrix) — the sole production caller of `mul_u64_wide` is `compare()` at `decimal.cpp:416`; `decimal_mul_u64_wide_test.cpp` is supplementary primitive-level coverage of a flag-identical TU-local copy (the `static inline` production symbol is not directly linkable — see `tests/core/CMakeLists.txt:165-169`) |
+> | `mul_u64_wide` portable `#else` path (production symbol, via `compare()`) | T013 `FIXPP_DECIMAL_FORCE_PORTABLE_MUL=ON` forced-portable differential oracle build; `decimal_mul_u64_wide_test_portable` is supplementary primitive-level coverage of the same flag-identical copy |
 > | `mul_u64_wide` MSVC `#elif` intrinsic path (`_umul128`/`__umulh`) | Tier-2 `windows-msvc-*` lane only (`run-tier2`, T014) — NOT run at T021; see L-060-1 |
 > | Differential regression vs pre-060 reference | `fuzz_decimal_compare.cpp` + corpus (libFuzzer) |
 >
