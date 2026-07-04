@@ -841,10 +841,11 @@ Items that are normative in the spec but explicitly deferred from fixpp v1.0. Th
 > `done` at T022 per the merged-tree completeness audit); this section is the coverage-index-side
 > exact-set diff `[const §VI.4]`, mirroring the 057 mechanism-section shape.
 >
-> **Source unit.** `include/fixpp/core/decimal.hpp` — `decimal_traits<pod_decimal>::compare`
+> **Source unit.** `src/core/decimal.cpp` — `decimal_traits<pod_decimal>::compare`
 > different-exponent arm (default `__int128` path; `FIXPP_DECIMAL_FORCE_PORTABLE_MUL`-gated portable
 > `#else`; MSVC `#elif` `_umul128`/`__umulh` intrinsic path, Tier-2-only — see L-060-1) +
-> `mul_u64_wide` 64×64→128 widening-multiply helper.
+> `mul_u64_wide` 64×64→128 widening-multiply helper (`include/fixpp/core/decimal.hpp` is
+> byte-unchanged — internal function body only).
 >
 > **Test files.**
 > - `tests/core/decimal_compare_diff_oracle_test.cpp` — seed-42 full-domain deterministic corpus,
