@@ -28,6 +28,7 @@
 #include <condition_variable>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <memory>
 #include <memory_resource>
 #include <mutex>
@@ -810,6 +811,67 @@ TEST(MessageWrite, SetIntAndDoubleSerialisation) {
     fixpp_engine_destroy(eng);
 }
 
+// D-P2-1: set_double serialises locale-independently in fixed notation (never
+// scientific), and fails closed for values the engine's own FLOAT parser rejects.
+// Old %.10g emitted "1e+10" / "1e-05" (parser rejects 'e') and honoured LC_NUMERIC.
+TEST(MessageWrite, SetDoubleFixedNotationAndFailClosed) {
+    fixpp_engine_t* eng = nullptr;
+    ASSERT_EQ(make_engine(&eng), FIXPP_ERR_OK);
+    fixpp_session_config_t* sc = make_session_cfg_app_dict("FIXSRV", "FIXCLI", FIXPP_ROLE_ACCEPTOR);
+    set_loopback_endpoint(sc, "127.0.0.1", 0);
+    fixpp_session_t* sess = nullptr;
+    ASSERT_EQ(fixpp_session_open(eng, sc, &sess), FIXPP_ERR_OK);
+    // NOT started — deterministic single-threaded.
+
+    // tag 38 (OrderQty) is QTY→Float. Each case: set, commit, inspect payload bytes.
+    struct Case {
+        double value;
+        const char* expect;  // exact fixed-notation field value
+    };
+    // 1e10 → "1e+10" under %g; 0.00001 → "1e-05" under %g. Both must be plain fixed.
+    for (const Case& c : {Case{1e10, "10000000000"}, Case{0.00001, "0.00001"},
+                          Case{-1234.5, "-1234.5"}, Case{2.5, "2.5"},
+                          Case{-0.0, "0"}}) {  // -0.0 canonicalised to "0", not "-0"
+        fixpp_msg_t* msg = nullptr;
+        ASSERT_EQ(fixpp_msg_create_outbound(sess, "D", 1, &msg), FIXPP_ERR_OK);
+        ASSERT_EQ(fixpp_msg_set_double(msg, 38, c.value), FIXPP_ERR_OK) << c.expect;
+        const uint8_t* payload = nullptr;
+        size_t len = 0;
+        ASSERT_EQ(fixpp_msg_commit(msg, &payload, &len), FIXPP_ERR_OK);
+        EXPECT_TRUE(span_has_field(payload, len, 38, c.expect))
+            << "set_double(" << c.value << ") must serialise as fixed '" << c.expect << "'";
+        // No scientific-notation escape anywhere in the field.
+        std::string_view hay{reinterpret_cast<const char*>(payload), len};
+        EXPECT_EQ(hay.find("38=1e"), std::string_view::npos) << "must not emit scientific '38=1e...'";
+        EXPECT_EQ(fixpp_msg_destroy(msg), FIXPP_ERR_OK);
+    }
+
+    // Fail-closed legs: non-finite and out-of-FIX-decimal-range → DECIMAL_INVALID,
+    // mirroring the set_decimal sibling; the setter never emits self-unparseable bytes.
+    {
+        fixpp_msg_t* msg = nullptr;
+        ASSERT_EQ(fixpp_msg_create_outbound(sess, "D", 1, &msg), FIXPP_ERR_OK);
+        EXPECT_EQ(fixpp_msg_set_double(msg, 38, std::numeric_limits<double>::quiet_NaN()),
+                  FIXPP_ERR_DECIMAL_INVALID);
+        EXPECT_EQ(fixpp_msg_set_double(msg, 38, std::numeric_limits<double>::infinity()),
+                  FIXPP_ERR_DECIMAL_INVALID);
+        // 1e19 > INT64_MAX (~9.2e18): fixed notation is "100000...0", which the FIX
+        // FLOAT parser overflows on → rejected by the round-trip guard.
+        EXPECT_EQ(fixpp_msg_set_double(msg, 38, 1e19), FIXPP_ERR_DECIMAL_INVALID);
+        // 1e100: fixed notation needs >64 chars → to_chars value_too_large branch.
+        EXPECT_EQ(fixpp_msg_set_double(msg, 38, 1e100), FIXPP_ERR_DECIMAL_INVALID);
+        // Non-zero |v| below ~1e-38 needs a 39th fractional digit → exponent < -38 →
+        // parser rejects (below-domain reject leg, documented in the header).
+        EXPECT_EQ(fixpp_msg_set_double(msg, 38, 1e-39), FIXPP_ERR_DECIMAL_INVALID);
+        EXPECT_EQ(fixpp_msg_destroy(msg), FIXPP_ERR_OK);
+    }
+    // NB: the locale (LC_NUMERIC) leg is closed by construction — std::to_chars is
+    // locale-independent per [charconv]; not separately exercised (CI locale-install
+    // portability), unlike the exponent leg which is asserted above.
+
+    fixpp_engine_destroy(eng);
+}
+
 // create_outbound on a msg_type absent from the dict → DICT_CONFIG
 TEST(MessageWrite, CreateOutboundAbsentMsgTypeReturnsDictConfig) {
     fixpp_engine_t* eng = nullptr;
@@ -1490,6 +1552,14 @@ TEST(MessageWrite, CheckBuilderAndEntryNull) {
     EXPECT_EQ(fixpp_entry_set_double(nullptr, 79, 1.0), FIXPP_ERR_NULL_HANDLE);
     fixpp_decimal_t d{};
     EXPECT_EQ(fixpp_entry_set_decimal(nullptr, 79, d), FIXPP_ERR_NULL_HANDLE);
+
+    // An INVALID value must not mask the null handle (handles.h NULL-first rule):
+    // value serialisation runs AFTER handle validation for both setters.
+    EXPECT_EQ(fixpp_entry_set_double(nullptr, 79, std::numeric_limits<double>::quiet_NaN()),
+              FIXPP_ERR_NULL_HANDLE);
+    fixpp_decimal_t bad{};
+    bad.exponent = 100;  // out-of-domain → fixpp_decimal_format would reject
+    EXPECT_EQ(fixpp_entry_set_decimal(nullptr, 79, bad), FIXPP_ERR_NULL_HANDLE);
 }
 
 // entry_set_string NULL value → NULL_HANDLE.
@@ -1518,6 +1588,11 @@ TEST(MessageWriteGroup, EntrySetDoubleAndDecimal) {
 
     // set_double: tag 80 (AllocQty, QTY in the richer dict)
     ASSERT_EQ(fixpp_entry_set_double(e0, 80, 42.5), FIXPP_ERR_OK);
+
+    // Framing tag + invalid value on a live entry: the framing-tag check precedes
+    // value serialisation, so a bad tag is reported even when the value is invalid.
+    EXPECT_EQ(fixpp_entry_set_double(e0, 8, std::numeric_limits<double>::quiet_NaN()),
+              FIXPP_ERR_MSG_FRAMING_TAG_FORBIDDEN);
 
     fixpp_entry_t* e1 = nullptr;
     ASSERT_EQ(fixpp_group_builder_add_entry(gb, &e1), FIXPP_ERR_OK);

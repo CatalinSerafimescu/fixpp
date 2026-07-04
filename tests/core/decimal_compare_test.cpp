@@ -129,6 +129,34 @@ TEST(DecimalCompare, NegativeDifferentMagnitudeBucketsOrderByMagnitude) {
               std::strong_ordering::greater);
 }
 
+// R3 hoisted same-raw-exponent fast path (perf-and-hardening R3). Mutation-tests
+// the hoist against the Gate-B-P1#1 misorder history: it must read RAW mantissas,
+// fire only on EQUAL raw exponents, and preserve signed ordering + equality for both
+// signs.
+TEST(DecimalCompare, R3SameRawExponentFastPath) {
+    // Positive, same exponent, trailing-zero mantissas: 1.00 vs 1.20 → less.
+    EXPECT_EQ(decimal_traits<pod_decimal>::compare(pod_decimal{100, -2}, pod_decimal{120, -2}),
+              std::strong_ordering::less);
+    EXPECT_EQ(decimal_traits<pod_decimal>::compare(pod_decimal{120, -2}, pod_decimal{100, -2}),
+              std::strong_ordering::greater);
+    // Negative, same exponent: -1.00 > -1.20 → greater. Kills a sign-flip mutant.
+    EXPECT_EQ(decimal_traits<pod_decimal>::compare(pod_decimal{-100, -2}, pod_decimal{-120, -2}),
+              std::strong_ordering::greater);
+    EXPECT_EQ(decimal_traits<pod_decimal>::compare(pod_decimal{-120, -2}, pod_decimal{-100, -2}),
+              std::strong_ordering::less);
+    // Same exponent, equal raw mantissas → equal.
+    EXPECT_EQ(decimal_traits<pod_decimal>::compare(pod_decimal{5, -1}, pod_decimal{5, -1}),
+              std::strong_ordering::equal);
+    // CRITICAL: cross-exponent equal values must NOT be hijacked by the hoist.
+    // {100,-2}=1.00 and {1,0}=1 have DIFFERENT raw exponents → they must fall to the
+    // canonicalizing path and compare EQUAL. A mutant firing the hoist on exponent
+    // inequality would compare 100<=>1 = greater and fail here.
+    EXPECT_EQ(decimal_traits<pod_decimal>::compare(pod_decimal{100, -2}, pod_decimal{1, 0}),
+              std::strong_ordering::equal);
+    EXPECT_EQ(decimal_traits<pod_decimal>::compare(pod_decimal{1, 0}, pod_decimal{100, -2}),
+              std::strong_ordering::equal);
+}
+
 // decimal<pod_decimal> operator== and operator<=> rely on compare
 TEST(DecimalCompare, DecimalWrapperOperators) {
     using fixpp::core::decimal;

@@ -348,7 +348,13 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_set_bytes(fixpp_msg_t* msg, uint16_t ta
  */
 FIXPP_API_EXPORT fixpp_error_t fixpp_msg_set_int(fixpp_msg_t* msg, uint16_t tag, int64_t value);
 
-/** Set a floating-point field (serialised via snprintf %.10g).
+/** Set a floating-point field. Serialised as the shortest round-tripping
+ *  locale-independent fixed-point ASCII form (never scientific notation; up to 17
+ *  significant digits — use fixpp_msg_set_decimal for controlled scale). Returns
+ *  FIXPP_ERR_DECIMAL_INVALID if the value is non-finite (NaN/Inf) or outside the
+ *  representable FIX-decimal range (|value| beyond ~9.2e18, or non-zero |value|
+ *  below ~1e-38) — the setter never emits bytes the engine's own FLOAT parser
+ *  would reject.
  *  Reentrancy: requires-session-lock
  */
 FIXPP_API_EXPORT fixpp_error_t fixpp_msg_set_double(fixpp_msg_t* msg, uint16_t tag, double value);
@@ -420,7 +426,9 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_entry_set_string(fixpp_entry_t* entry, uint
 /** Set an INTEGER field on the current entry. Reentrancy: requires-session-lock */
 FIXPP_API_EXPORT fixpp_error_t fixpp_entry_set_int(fixpp_entry_t* entry, uint16_t tag, int64_t value);
 
-/** Set a DOUBLE field on the current entry. Reentrancy: requires-session-lock */
+/** Set a DOUBLE field on the current entry. Serialised as locale-independent
+ *  fixed-point ASCII (never scientific); FIXPP_ERR_DECIMAL_INVALID for non-finite
+ *  or out-of-range values (see fixpp_msg_set_double). Reentrancy: requires-session-lock */
 FIXPP_API_EXPORT fixpp_error_t fixpp_entry_set_double(fixpp_entry_t* entry, uint16_t tag, double value);
 
 /** Set a DECIMAL field on the current entry. Reentrancy: requires-session-lock */

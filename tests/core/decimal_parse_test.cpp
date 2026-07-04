@@ -129,6 +129,37 @@ TEST(DecimalParse, SentinelCollision) {
     EXPECT_EQ(r.error(), error::decimal_overflow);
 }
 
+// L-001-4: exactly-representable values padded with capacity-exceeding trailing
+// fractional zeros are rejected (spec §6.1 step-5 preservation forces the mantissa
+// to accumulate every zero → overflow). Pins today's fail-closed behavior.
+TEST(DecimalParse, PaddedRepresentableTrailingZerosRejected) {
+    // "1." + 19 zeros — value 1.0, but the 19th fractional zero overflows the mantissa.
+    {
+        auto r = parse("1.0000000000000000000");
+        ASSERT_FALSE(r.has_value());
+        EXPECT_EQ(r.error(), error::decimal_overflow);
+    }
+    // INT64_MAX with one decimal place — value fits, but the padded form overflows.
+    {
+        auto r = parse("9223372036854775807.0");
+        ASSERT_FALSE(r.has_value());
+        EXPECT_EQ(r.error(), error::decimal_overflow);
+    }
+    // Contrast: the in-capacity neighbours parse fine.
+    {
+        auto r = parse("1.000000000000000000");  // 1 + 18 zeros → {10^18, -18}
+        ASSERT_TRUE(r.has_value());
+        EXPECT_EQ(r->mantissa, 1000000000000000000LL);
+        EXPECT_EQ(r->exponent, -18);
+    }
+    {
+        auto r = parse("9223372036854775807");  // INT64_MAX, no decimal
+        ASSERT_TRUE(r.has_value());
+        EXPECT_EQ(r->mantissa, 9223372036854775807LL);
+        EXPECT_EQ(r->exponent, 0);
+    }
+}
+
 // AC-P10: on failure, out is unmodified (expected_t carries no value on error)
 TEST(DecimalParse, FailureNoSideEffect) {
     auto r = parse("");

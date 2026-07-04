@@ -42,14 +42,16 @@
 #include <algorithm>
 #include <cassert>
 #include <charconv>
-#include <cstdio>
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <memory>
 #include <memory_resource>
 #include <new>
+#include <span>
 #include <string_view>
 
+#include <fixpp/core/decimal.hpp>  // decimal_traits<pod_decimal>::from_chars — set_double fail-closed guard
 #include <fixpp/dict/dictionary.hpp>
 #include <fixpp/dict/field_ref.hpp>
 #include <fixpp/session/session.hpp>  // session_arena()
@@ -506,6 +508,38 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_set_int(fixpp_msg_t* msg, uint16_t tag,
     return FIXPP_ERR_OK;
 }
 
+// ── set_double serialisation helper (D-P2-1) ─────────────────────────────────
+// Serialise a double to locale-independent FIX FLOAT bytes and fail closed.
+//
+// The prior "%.10g" path had two defects (perf-and-hardening D-P2-1): (a) %g
+// emits scientific notation for |v| >= 1e10 or |v| < 1e-4 ("1e+10", "1e-05"),
+// which fixpp's OWN FLOAT parser rejects (decimal.cpp: no 'e'/'E'); (b) %g
+// honours LC_NUMERIC, so a host under a comma-decimal locale writes "1,5",
+// silently read as 1 by a lenient peer = value corruption.
+//
+// std::to_chars(chars_format::fixed) is locale-independent AND never scientific
+// (shortest round-tripping fixed form). We then re-parse the produced bytes
+// through the engine's own from_chars: this guarantees the setter never emits
+// wire bytes fixpp itself would reject — closing the residual |v| beyond the
+// int64 mantissa range (~9.2e18), which fixed notation alone still renders as an
+// over-long integer the parser overflows on. Non-finite (NaN/Inf) is rejected.
+// On rejection: FIXPP_ERR_DECIMAL_INVALID, mirroring the set_decimal sibling.
+static fixpp_error_t serialise_double_fixed(double value, char* buf, std::size_t buf_size,
+                                            std::size_t* out_len) {
+    if (!std::isfinite(value)) return FIXPP_ERR_DECIMAL_INVALID;
+    if (value == 0.0) value = 0.0;  // canonicalise -0.0 → +0.0 (else to_chars emits "-0")
+    auto [ptr, ec] = std::to_chars(buf, buf + buf_size, value, std::chars_format::fixed);
+    if (ec != std::errc{}) return FIXPP_ERR_DECIMAL_INVALID;  // too large for buf → unrepresentable
+    const auto n = static_cast<std::size_t>(ptr - buf);
+    // Fail closed: the bytes must round-trip through the FIX FLOAT grammar.
+    if (!fixpp::core::decimal_traits<fixpp::core::pod_decimal>::from_chars(
+            std::span<const std::byte>{reinterpret_cast<const std::byte*>(buf), n}, nullptr)) {
+        return FIXPP_ERR_DECIMAL_INVALID;
+    }
+    *out_len = n;
+    return FIXPP_ERR_OK;
+}
+
 // ── fixpp_msg_set_double ──────────────────────────────────────────────────────
 FIXPP_API_EXPORT fixpp_error_t fixpp_msg_set_double(fixpp_msg_t* msg, uint16_t tag,
                                                     double value) {
@@ -515,15 +549,15 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_set_double(fixpp_msg_t* msg, uint16_t t
     auto* h = reinterpret_cast<fixpp_msg*>(msg);
     if (fixpp_error_t c = check_dict(h, tag, SetterFlavour::Float); c != FIXPP_ERR_OK) return c;
 
-    // Serialise double via snprintf "%.10g" (FIX convention for float fields).
     char buf[64];
-    int n = std::snprintf(buf, sizeof(buf), "%.10g", value);
-    if (n <= 0 || static_cast<std::size_t>(n) >= sizeof(buf)) return FIXPP_ERR_WIRE_INVALID_FRAME;  // LCOV_EXCL_LINE — impossible for finite doubles
+    std::size_t n = 0;
+    if (fixpp_error_t c = serialise_double_fixed(value, buf, sizeof(buf), &n); c != FIXPP_ERR_OK)
+        return c;
 
     auto& acc = *h->accumulator;
     auto& entry = upsert_entry(acc.entries, acc.arena_, tag);
     const auto* bdata = reinterpret_cast<const std::byte*>(buf);
-    entry.value_bytes.assign(bdata, bdata + static_cast<std::size_t>(n));
+    entry.value_bytes.assign(bdata, bdata + n);
     return FIXPP_ERR_OK;
 }
 
@@ -786,6 +820,16 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_group_builder_add_entry(fixpp_group_builder
 }
 
 // Shared entry-field setter: framing-tag reject (INV-3) + upsert into the instance.
+// Validate an entry handle + tag BEFORE a value is serialised, so a bad handle or a
+// framing tag is reported as such (handles.h: "checks NULL FIRST") rather than masked
+// by a value-serialisation error. entry_set_bytes_impl re-validates (+ group-collision).
+static fixpp_error_t precheck_entry_tag(fixpp_entry_t* entry, uint16_t tag) {
+    if (fixpp_error_t c = check_entry(reinterpret_cast<fixpp_entry*>(entry)); c != FIXPP_ERR_OK)
+        return c;
+    if (is_framing_tag(tag)) return FIXPP_ERR_MSG_FRAMING_TAG_FORBIDDEN;
+    return FIXPP_ERR_OK;
+}
+
 static fixpp_error_t entry_set_bytes_impl(fixpp_entry_t* entry, uint16_t tag,
                                           const std::byte* data, std::size_t len) {
     auto* e = reinterpret_cast<fixpp_entry*>(entry);
@@ -819,15 +863,20 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_entry_set_int(fixpp_entry_t* entry, uint16_
 
 FIXPP_API_EXPORT fixpp_error_t fixpp_entry_set_double(fixpp_entry_t* entry, uint16_t tag,
                                                  double value) {
+    if (fixpp_error_t c = precheck_entry_tag(entry, tag); c != FIXPP_ERR_OK) return c;
     char buf[64];
-    int n = std::snprintf(buf, sizeof(buf), "%.10g", value);
-    if (n <= 0 || static_cast<std::size_t>(n) >= sizeof(buf)) return FIXPP_ERR_WIRE_INVALID_FRAME;  // LCOV_EXCL_LINE — impossible for finite doubles
-    return entry_set_bytes_impl(entry, tag, reinterpret_cast<const std::byte*>(buf),
-                                static_cast<std::size_t>(n));
+    std::size_t n = 0;
+    if (fixpp_error_t c = serialise_double_fixed(value, buf, sizeof(buf), &n); c != FIXPP_ERR_OK)
+        return c;
+    return entry_set_bytes_impl(entry, tag, reinterpret_cast<const std::byte*>(buf), n);
 }
 
 FIXPP_API_EXPORT fixpp_error_t fixpp_entry_set_decimal(fixpp_entry_t* entry, uint16_t tag,
                                                   fixpp_decimal_t value) {
+    // Same handle-first ordering as fixpp_entry_set_double (handles.h): the pre-existing
+    // path serialised the decimal before validating the entry, so an out-of-domain value
+    // masked a null/invalid handle. Validate first.
+    if (fixpp_error_t c = precheck_entry_tag(entry, tag); c != FIXPP_ERR_OK) return c;
     char buf[64];
     std::size_t written = 0;
     fixpp_error_t rc = fixpp_decimal_format(value, buf, sizeof(buf), &written);
