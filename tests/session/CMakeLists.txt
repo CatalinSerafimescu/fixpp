@@ -169,6 +169,14 @@ fixpp_add_store_test(store_reset SOURCES
 )
 # (T019 — seam 17 — store_corpus_replay is registered in tests/conformance/CMakeLists.txt)
 
+# S-P2-2 — MemoryStore retrieve() reset-during-traversal generation guard
+# (mirror of FileStore T015; phase-9 outbound-store-retention-review.md §P2-2).
+# No FIXPP_TEST_HOOKS: the witness discriminates on the error code + frames_seen
+# + replayed bytes, not on an instrumentation counter.
+fixpp_add_store_test(store_memory_reset_during_retrieve SOURCES
+  test_memory_store_reset_during_retrieve.cpp
+)
+
 # ── T027–T029 US2 (Phase 4) store seam registrations ────────────────────────
 
 # T027 — seam 4: MemoryStore bounded-capacity exhaustion + storage-DoS guard
