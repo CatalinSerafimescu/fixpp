@@ -195,3 +195,32 @@ jobs:
           # job-level LD_LIBRARY_PATH so the soname resolves to it at runtime.
           LD_LIBRARY_PATH: ${{ runner.temp }}/libcxx-tsan:${{ env.LD_LIBRARY_PATH }}
         run: ctest --preset ${{ matrix.preset }} --output-on-failure
+
+  # ── Required aggregate — red-on-skip (mirrors tier1-required in tier1.yml) ──
+  # Tier 3 is green-on-skip: a PR without `run-tier3` skips the `libcxx` matrix
+  # and GitHub scores the skip as success, so "Tier 3" reports green having built
+  # nothing. This REQUIRED job is RED unless `filter` AND the `libcxx` matrix ran
+  # to success, so a PR cannot merge on a libc++ matrix that never ran; fire
+  # `run-tier3` (or a workflow_dispatch) to run the matrix and turn it green.
+  # INERT until branch protection is set to REQUIRE the "tier3-required" check.
+  # Ref: feedback_ci_gate_observes_not_asserts_witness_skips_into_green.
+  tier3-required:
+    name: tier3-required
+    runs-on: ubuntu-latest
+    needs: [filter, libcxx]
+    if: always()
+    steps:
+      - name: Assert the libc++ matrix ran to success (no skip-into-green)
+        run: |
+          f='${{ needs.filter.result }}'
+          l='${{ needs.libcxx.result }}'
+          echo "filter=$f  libcxx=$l"
+          fail=0
+          for kv in "filter=$f" "libcxx=$l"; do
+            if [ "${kv#*=}" != "success" ]; then
+              echo "::error::Tier 3 job '${kv%%=*}' did not run to success (got '${kv#*=}'). The libc++ matrix must actually run — fire run-tier3 (or workflow_dispatch) before merge."
+              fail=1
+            fi
+          done
+          [ "$fail" = 0 ] || exit 1
+          echo "Tier 3 libc++ matrix ran to success."
