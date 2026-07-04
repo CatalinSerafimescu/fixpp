@@ -17,7 +17,7 @@
 #include "fixpp/core/decimal_alias.hpp"
 #include "fixpp/core/error.hpp"
 
-#if defined(_MSC_VER)
+#ifdef _MSC_VER
 #include <intrin.h>
 #endif
 
@@ -412,7 +412,7 @@ std::strong_ordering decimal_traits<pod_decimal>::compare(pod_decimal const& a,
         // product is < 2^123 and fits the 128-bit (hi, lo) pair exactly
         // (research.md R1 bound proof). `hi` MUST be consulted — dropping it
         // silently narrows to 64 bits (data-model.md mul_u64_wide invariant).
-        std::uint64_t hi;
+        std::uint64_t hi = 0;  // mul_u64_wide writes it; init per cppcoreguidelines
         const std::uint64_t lo = mul_u64_wide(mag_scaled, kPow10[k], &hi);
         scaled_vs_other = (hi != 0 || lo > other) ? std::strong_ordering::greater
                                                   : (lo == other ? std::strong_ordering::equal
