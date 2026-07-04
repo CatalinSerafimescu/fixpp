@@ -162,7 +162,6 @@ public:
             // is a public interface; a user visitor may legitimately read post-suspend.
             first_bytes_after_suspend.assign(payload.begin(), payload.end());
         } else if (frames_seen == 2) {
-            second_seq = seq;
             second_bytes = seen;
         }
         co_return visit_result::cont;
@@ -176,7 +175,6 @@ public:
     int reset_result = -1;  // 0 = success, else error code
     bool stores_ok = false;
     seqnum_t first_seq = 0;
-    seqnum_t second_seq = 0;
     std::vector<std::byte> first_bytes;                // frame 1 bytes, read pre-suspend
     std::vector<std::byte> first_bytes_after_suspend;  // frame 1 bytes, read post-suspend
     std::vector<std::byte> second_bytes;

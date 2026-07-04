@@ -338,7 +338,7 @@ public:
         // The unbounded path already snapshots bytes into unbounded_payload_copy
         // under the mutex, so it needs no re-materialisation here.
         std::pmr::vector<std::byte> frame_scratch{std::pmr::polymorphic_allocator<std::byte>{mr_}};
-        if (cfg_.policy == capacity_policy::bounded) {
+        if (cfg_.policy == capacity_policy::bounded && !snapshots.empty()) {
             frame_scratch.reserve(cfg_.max_frame_bytes);
         }
 
