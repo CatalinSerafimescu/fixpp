@@ -81,7 +81,8 @@ public:
           ,
           unbounded_slab_(std::pmr::polymorphic_allocator<std::byte>{mr_}),
           inbound_entries_(std::pmr::polymorphic_allocator<Entry>{mr_}),
-          outbound_entries_(std::pmr::polymorphic_allocator<Entry>{mr_}) {
+          outbound_entries_(std::pmr::polymorphic_allocator<Entry>{mr_}),
+          retrieve_scratch_(std::pmr::polymorphic_allocator<std::byte>{mr_}) {
         if (cfg_.policy == capacity_policy::bounded) {
             // ONE PMR allocation for the fixed payload slab ([2e §4.2] line 486).
             // Layout: first inbound_capacity slots are inbound; next outbound_capacity slots are
@@ -95,6 +96,11 @@ public:
             // Reserve index arrays — they NEVER reallocate after ctor (zero-alloc invariant).
             inbound_entries_.reserve(cfg_.inbound_capacity);
             outbound_entries_.reserve(cfg_.outbound_capacity);
+            // One-time reserve so bounded retrieve() does ZERO per-call arena allocation
+            // for the payload scratch (the monotonic store arena never frees). Capacity ==
+            // max_frame_bytes >= any stored frame (store() rejects larger, see the size
+            // check in store()), so assign() in retrieve() never reallocates.
+            retrieve_scratch_.reserve(cfg_.max_frame_bytes);
         } else {
             // Unbounded: slab stays nullptr; growing PMR vector used for payloads.
             // Allocs permitted per FR-007 bounded-only zero-alloc contract.
@@ -333,15 +339,18 @@ public:
         // buffer BEFORE on_frame() means the view the visitor holds cannot be
         // corrupted mid-suspension — mirror of FileStore's read-into-scratch. The
         // generation re-check below guards the complementary case (a reset() that
-        // ALREADY ran before this frame). Reserved once to max_frame_bytes and
-        // reused per frame; store() rejects frames larger than that (see :169).
-        // The unbounded path already snapshots bytes into unbounded_payload_copy
-        // under the mutex, so it needs no re-materialisation here.
-        std::pmr::vector<std::byte> frame_scratch{std::pmr::polymorphic_allocator<std::byte>{mr_}};
-        if (cfg_.policy == capacity_policy::bounded && !snapshots.empty()) {
-            frame_scratch.reserve(cfg_.max_frame_bytes);
-        }
-
+        // ALREADY ran before this frame). retrieve_scratch_ is a member, reserved
+        // ONCE to max_frame_bytes at construction and reused per call (never a
+        // per-call local — the session store arena is a monotonic_buffer_resource
+        // that never frees, so a per-call local would burn max_frame_bytes of
+        // PERMANENT arena memory on every bounded retrieve()); store() rejects
+        // frames larger than max_frame_bytes (see :169), so assign() below never
+        // reallocates. Safe to share across calls because retrieve() is
+        // serialised under the single-session-serialisation-domain contract
+        // (message_store.hpp:98) — only one retrieve() walk runs at a time, and
+        // store() never touches this buffer. The unbounded path already
+        // snapshots bytes into unbounded_payload_copy under the mutex, so it
+        // needs no re-materialisation here.
         for (const auto& e : snapshots) {
             // S-P2-2: detect a reset() that ran during the prior visitor
             // suspension (it bumped generation_). NO co_await between this check
@@ -353,14 +362,14 @@ public:
             }
 
             // Resolve the payload span from stable storage.
-            // Bounded: materialise the slab bytes into frame_scratch (see above).
+            // Bounded: materialise the slab bytes into retrieve_scratch_ (see above).
             // Unbounded: unbounded_payload_copy holds the bytes snapshotted under
             // the mutex — read directly.
             std::span<const std::byte> frame_view;
             if (cfg_.policy == capacity_policy::bounded) {
                 const std::byte* src = slab_ + e.slab_offset;
-                frame_scratch.assign(src, src + e.bytes_len);
-                frame_view = std::span<const std::byte>(frame_scratch);
+                retrieve_scratch_.assign(src, src + e.bytes_len);
+                frame_view = std::span<const std::byte>(retrieve_scratch_);
             } else {
                 frame_view = std::span<const std::byte>(
                     unbounded_payload_copy.data() + e.slab_offset, e.bytes_len);
@@ -565,6 +574,17 @@ private:
     // Unbounded: empty at ctor, grow on demand (allocs permitted).
     std::pmr::vector<Entry> inbound_entries_;
     std::pmr::vector<Entry> outbound_entries_;
+
+    // Reusable per-frame materialisation buffer for the bounded retrieve() path
+    // (S-P2-2). Reserved ONCE to max_frame_bytes at construction (bounded policy)
+    // and assign()-ed per frame — mirror of FileStore's retrieve_scratch_. A
+    // per-call local would burn max_frame_bytes of PERMANENT store-arena memory on
+    // every bounded retrieve() because the session store_resource is a
+    // monotonic_buffer_resource (never frees until teardown). retrieve() is
+    // serialised under the single-session-serialisation-domain contract, so one
+    // shared buffer is safe (only one retrieve() walk at a time; store() writes the
+    // slab, never this buffer).
+    std::pmr::vector<std::byte> retrieve_scratch_;
 
     seqnum_t next_inbound_{seqnum_min};   // next expected inbound seqnum
     seqnum_t next_outbound_{seqnum_min};  // next expected outbound seqnum
