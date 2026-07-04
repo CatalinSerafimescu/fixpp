@@ -110,17 +110,21 @@ expected_t<pod_decimal> decimal_traits<pod_decimal>::from_chars(
         return std::unexpected{error::decimal_overflow};
     }
 
-    // Apply sign
+    // Apply sign. No overflow guard is needed here: the accumulation guard above
+    // caps |mantissa| at INT64_MAX, so mantissa ∈ [0, INT64_MAX] before negation.
     if (negative) {
-        if (mantissa > static_cast<std::int64_t>(INT64_MAX)) {
-            return std::unexpected{error::decimal_overflow};
-        }
         mantissa = -mantissa;
     }
 
-    // Sentinel collision: INT64_MIN is reserved for the invalid sentinel
+    // Sentinel collision (INT64_MIN reserved) is unreachable by construction: the
+    // load-bearing guard is the accumulation check above — the string
+    // "9223372036854775808" (INT64_MAX+1) overflows during accumulation before sign
+    // application, so mantissa is always in [-INT64_MAX, INT64_MAX] here (AC-P9,
+    // DecimalParse.SentinelCollision). Kept as a fail-closed net (not an assert, which
+    // would fail OPEN under NDEBUG and leak the sentinel as a valid value) in case a
+    // future refactor weakens the accumulation guard.
     if (mantissa == INT64_MIN) {
-        return std::unexpected{error::decimal_overflow};
+        return std::unexpected{error::decimal_overflow};  // LCOV_EXCL_LINE — unreachable, see above
     }
 
     return pod_decimal{.mantissa = mantissa, .exponent = exponent};

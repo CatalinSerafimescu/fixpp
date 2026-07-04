@@ -150,6 +150,10 @@ struct decimal_traits<pod_decimal> {
     static expected_t<pod_decimal> to_pod(pod_decimal const& v) noexcept;
     static std::strong_ordering compare(pod_decimal const& a, pod_decimal const& b) noexcept;
     static bool is_finite(pod_decimal const& v) noexcept;
+    // is_zero / is_negative are purely sign-of-mantissa: callers MUST gate validity
+    // with is_finite FIRST. The invalid sentinel (INT64_MIN) reports is_negative()==true
+    // yet compare() orders it strictly greater than every finite value (B-001-3), so a
+    // sign check on an unvalidated decimal disagrees with its ordering.
     static bool is_zero(pod_decimal const& v) noexcept;
     static bool is_negative(pod_decimal const& v) noexcept;
 };

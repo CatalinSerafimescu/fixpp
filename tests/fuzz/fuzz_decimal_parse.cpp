@@ -21,10 +21,15 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     // Invariant: the function either succeeded (valid pod_decimal) or returned
     // an error code. Neither path may terminate the process or access out-of-bounds.
     if (result.has_value()) {
-        // Ensure the result is in canonical domain (parser contract)
-        auto& v = result.value();
-        (void)v.mantissa;
-        (void)v.exponent;
+        // Parser contract: a successful parse MUST be in the canonical domain —
+        // exponent ∈ [-38, 0] and mantissa ≠ the INT64_MIN sentinel. Trap loudly if
+        // from_chars ever regresses to emit an out-of-domain value. Unconditional
+        // (__builtin_trap, not assert) so it fires even under NDEBUG fuzz builds
+        // (TV-1: the prior harness named this invariant but asserted nothing).
+        const auto& v = result.value();
+        if (v.mantissa == INT64_MIN || v.exponent < -38 || v.exponent > 0) {
+            __builtin_trap();
+        }
     }
     // All error paths are expected and acceptable — the fuzzer is looking for
     // crashes or sanitizer violations, not parse failures.
