@@ -84,7 +84,10 @@ inline constexpr len_data_pair length_data_table[] = {
         if (c < '0' || c > '9') {
             break;
         }
-        out = (out * 10U) + static_cast<std::uint32_t>(c - '0');
+        // Saturate at UINT32_MAX so a lying over-large Length value cannot wrap
+        // uint32 to a small count (W-P2-1c). The Iter counted-Data site then
+        // bounds it against the buffer via subtraction (no size_t wrap either).
+        (void)fixpp::wire::accumulate_bounded(out, c, 0xFFFFFFFFU);
     }
     return out;
 }
@@ -166,7 +169,16 @@ public:
             return *this;
         }
         [[nodiscard]] bool operator==(field_iterator const& o) const noexcept {
-            return pos_ == o.pos_ && done_ == o.done_;
+            // A done_ iterator is terminal and compares equal to end() (which is
+            // done_) REGARDLESS of pos_. The malformed-stop paths in advance()
+            // set done_ without advancing pos_ to buf.size(); without this a
+            // range-for (`begin() != end()`) would never terminate on a
+            // malformed frame — a latent Iter-API hang the Length+Data hardening
+            // would otherwise re-trigger via its SOH-mismatch stop (W-P2-1/-2).
+            if (done_ || o.done_) {
+                return done_ == o.done_;
+            }
+            return pos_ == o.pos_;
         }
 
     private:
@@ -361,15 +373,37 @@ void MessageView<Mode>::field_iterator::advance() noexcept {
     ++i;  // over '='
     std::size_t vstart = i;
 
-    // Length+Data: if the PREVIOUS field was a Length tag, this Data field's
-    // length is fixed by it (value may contain SOH).
-    if (prev_data_tag_ != 0 && static_cast<std::uint16_t>(tag) == prev_data_tag_) {
-        std::size_t end = vstart + prev_data_len_;
-        end = std::min(end, buf_.size());
-        cur_ = field{static_cast<std::uint16_t>(tag), buf_.subspan(vstart, end - vstart)};
-        next_ = (end < buf_.size()) ? end + 1 : end;  // skip trailing SOH
-        prev_data_tag_ = 0;
-        prev_data_len_ = 0;
+    // Capture and CONSUME the Length→Data carry up-front: it applies ONLY to the
+    // field immediately following its Length tag, so clearing it here prevents a
+    // non-adjacent later field inheriting a stale count (W-P2-1b).
+    std::uint16_t const carry_tag = prev_data_tag_;
+    std::uint32_t const carry_len = prev_data_len_;
+    prev_data_tag_ = 0;
+    prev_data_len_ = 0;
+
+    // Length+Data: if the PREVIOUS field was a Length tag naming THIS Data tag,
+    // its length is fixed (value may contain SOH). Iter is a best-effort,
+    // no-error-channel convenience API (production ingest uses Index): an
+    // over-long declared length clamps to the frame end, and a length that lands
+    // on a non-SOH boundary stops iteration (there is no way to signal reject).
+    if (carry_tag != 0 && static_cast<std::uint16_t>(tag) == carry_tag) {
+        std::size_t const avail = buf_.size() - vstart;  // vstart <= size always
+        if (carry_len > avail) {
+            // Declared length exceeds the frame: best-effort clamp to the end
+            // (subtraction bound => no size_t wrap on any width, W-P2-1a).
+            cur_ = field{static_cast<std::uint16_t>(tag), buf_.subspan(vstart, avail)};
+            next_ = buf_.size();
+            return;
+        }
+        std::size_t const end = vstart + carry_len;  // <= size, no wrap
+        if (end < buf_.size() && buf_[end] != SOH) {
+            // Non-SOH boundary: the declared length did not land on a field
+            // boundary. No error channel in Iter mode → stop (W-P2-1a).
+            done_ = true;
+            return;
+        }
+        cur_ = field{static_cast<std::uint16_t>(tag), buf_.subspan(vstart, carry_len)};
+        next_ = (end < buf_.size()) ? end + 1 : end;  // step over verified SOH
         return;
     }
 

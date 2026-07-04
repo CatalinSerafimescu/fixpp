@@ -34,7 +34,8 @@
 #include <type_traits>
 #include <utility>
 
-#include "parser.hpp"  // MessageView<Mode>, access_mode
+#include "parser.hpp"    // MessageView<Mode>, access_mode
+#include "tag_scan.hpp"  // accumulate_bounded (W-P3-1 declared_count bound)
 
 // T009 (041-validation-gate-wiring): complete-type includes replacing the
 // forward-declaration seam. §XV.9 guard confirmed: table_view.hpp and
@@ -198,7 +199,11 @@ public:
                 if (c < '0' || c > '9') {
                     break;
                 }
-                declared_count = declared_count * 10U + static_cast<std::uint32_t>(c - '0');
+                // Saturate at UINT32_MAX so an over-declared count cannot wrap
+                // uint32 down to the real instance count and spuriously pass the
+                // `declared_count == actual_count` check (W-P3-1). A saturated
+                // count can never equal a plausible actual_count → reject.
+                (void)fixpp::wire::accumulate_bounded(declared_count, c, 0xFFFFFFFFU);
             }
             // Walk entries after the count to count actual delimiter occurrences
             // and verify the first entry after the count is the delimiter.

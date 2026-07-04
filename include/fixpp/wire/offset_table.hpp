@@ -154,6 +154,13 @@ private:
     // (0 = empty). Holds the FIRST occurrence per tag.
     std::pmr::vector<std::uint32_t> overlay_;
     core::expected_t<void> status_;
+    // Per-process overlay hash seed, snapshotted at build() and folded into
+    // mix() by both build() and find() so the open-address slot for a tag is
+    // unpredictable to a remote attacker — defeats the crafted-collision
+    // false-absent (W-P3-2 / HashDoS). Per-TABLE cache (not a find()-hot magic
+    // static). 0 on a default-constructed (never-built) table (unused: find()
+    // returns absent before hashing when overlay_ is empty).
+    std::uint32_t seed_ = 0;
     // Lazy mr-backed group slices. Append-only and reserved once to the
     // entry-count upper bound, so no push_back ever reallocates — every
     // span handed out stays valid for the message lifetime even when
@@ -168,5 +175,15 @@ private:
     mutable std::pmr::vector<group_span> group_index_;
     mutable bool group_slices_reserved_ = false;
 };
+
+namespace detail {
+// TEST/FUZZ-ONLY: override the per-process overlay hash seed that mix() folds in
+// (W-P3-2). Lets the collision witness craft a deterministic 128-collision set
+// and the wire fuzzer stay reproducible WITHOUT compiling the library with a
+// fuzz-only macro (which would fuzz a different binary). MUST be called before
+// constructing the OffsetTable(s) under test. Never called on the production
+// path; the seed is otherwise randomised once per process.
+void set_overlay_seed_for_testing(std::uint32_t seed) noexcept;
+}  // namespace detail
 
 }  // namespace fixpp::wire
