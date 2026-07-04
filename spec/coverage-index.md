@@ -830,15 +830,15 @@ Items that are normative in the spec but explicitly deferred from fixpp v1.0. Th
 
 ---
 
-## 060 — int128 / exact wide-integer cross-exponent decimal compare (C1) (pre-merge — this PR)
+## 060 — int128 / exact wide-integer cross-exponent decimal compare (C1) (merged — PR #165, `122c95b6`)
 
 > **Mechanism (new catalogue row NFR-018).** 060 is Cluster-2 residual C1: it reverses the 001/2a
 > Gate-A "no `__int128`" decision by replacing `decimal_traits<pod_decimal>::compare`'s
 > different-exponent slow path with a branch-free `k≥19` order-of-magnitude dominance guard + one
 > `mul_u64_wide` 64×64→128 widening multiply. Bit-identical `strong_ordering`, default-path swap,
 > no runtime mode flag, no public/C-ABI/wire/error/layout change (`decimal.hpp` byte-identical). It
-> owns its own dedicated `feature-catalogue.md` row (**NFR-018**, `implementing` at T021 — flips to
-> `done` at T022 per the merged-tree completeness audit); this section is the coverage-index-side
+> owns its own dedicated `feature-catalogue.md` row (**NFR-018**, `done` — flipped at the T022
+> merged-tree completeness audit, PR #165); this section is the coverage-index-side
 > exact-set diff `[const §VI.4]`, mirroring the 057 mechanism-section shape.
 >
 > **Source unit.** `src/core/decimal.cpp` — `decimal_traits<pod_decimal>::compare`
