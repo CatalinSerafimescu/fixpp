@@ -258,17 +258,22 @@ void OffsetTable::build(frame_view const& frame) noexcept {
                     return;
                 }
                 std::size_t const end = val_start + carry_len;  // <= n, no wrap
-                // FIX requires the byte after a counted Data value to be SOH (or
-                // the frame to end). A non-SOH byte means the declared length did
-                // not land on a field boundary — reject rather than blindly skip
+                // FIX requires the byte after a counted Data value to be SOH.
+                // This whole-frame scanner always sees a trailing
+                // `10=NNN<SOH>` checksum field after the body (Framer-validated
+                // before build()), so a legitimate counted value can never
+                // reach exactly `n` — `end == n` swallows the checksum tail and
+                // is just as malformed as a non-SOH end byte (Gate B PR #166
+                // Finding 1 / B-004-6). Index accepts ONLY `end < n &&
+                // buf[end] == SOH`; reject otherwise rather than blindly skip
                 // and desync into the next field (W-P2-1a).
-                if (end < n && buf[end] != SOH) {
+                if (end >= n || buf[end] != SOH) {
                     status_ = err_invalid_field_format();
                     entries_.clear();
                     return;
                 }
                 val_len = carry_len;
-                i = (end < n) ? end + 1U : n;  // step over the verified trailing SOH
+                i = end + 1U;  // end < n verified above; step over the SOH
             } else {
                 while (i < n && buf[i] != SOH) {
                     ++i;

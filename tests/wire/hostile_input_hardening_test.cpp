@@ -83,6 +83,35 @@ TEST(HostileInputHardening, CountedDataNonSohBoundaryRejectedIndex) {
     EXPECT_EQ(s.error(), error::wire_invalid_field_format);
 }
 
+// ── Finding 1 (Gate B PR #166 round 1): counted Data whose declared length
+// lands EXACTLY at frame end, swallowing the trailing checksum ───────────────
+// 95=8 (RawDataLength) declares an 8-byte RawData(96) whose value spans one
+// filler byte plus the entire remainder of the frame — the real bytes there
+// are the appended "10=000\x01" checksum field. end == n exactly, so the
+// pre-fix `end < n && buf[end] != SOH` guard is vacuously false (end < n
+// fails) and the frame is silently ACCEPTED with tag 10 swallowed into 96's
+// value (find(10) would report absent-because-swallowed, not
+// absent-because-rejected). Per the whole-frame scanner contract a legitimate
+// counted value can never reach `n` (a Framer-validated frame always has a
+// trailing checksum field after the body), so `end == n` is always malformed.
+// The fix rejects it with wire_invalid_field_format.
+TEST(HostileInputHardening, CountedDataExactFrameEndSwallowsChecksumRejectedIndex) {
+    auto buf = make_raw_frame(
+        "95=8\x01"
+        "96=\x01");
+    auto fv = fixpp::wire::test::make_frame_view(buf);
+    ASSERT_TRUE(fv.has_value());
+
+    std::pmr::monotonic_buffer_resource arena;
+    OffsetTable t{*fv, &arena};
+
+    auto s = t.build_status();
+    ASSERT_FALSE(s.has_value())
+        << "a counted Data value whose declared length lands EXACTLY at frame "
+           "end (swallowing the trailing checksum) must be rejected";
+    EXPECT_EQ(s.error(), error::wire_invalid_field_format);
+}
+
 // ── regression: a TRUTHFUL RawDataLength (value carries an embedded SOH) ───────
 // 96 declared as 5 bytes = "a\x01b\x01c"; the trailing byte after those 5 IS a
 // SOH, so the field is well-formed. Must still parse: 96 findable with the full
