@@ -351,7 +351,7 @@ std::strong_ordering decimal_traits<pod_decimal>::compare(pod_decimal const& a,
     // digit_count divide-chains from the dominant same-exponent regime. Sentinel is
     // filtered at Step 0 and sign mismatch at Step 1, so both operands are finite and
     // same-signed here. (Values whose raw exponents differ but canonicalize to equal
-    // exponents still fall to the Step-4 paths below.)
+    // exponents still fall to the zero-filter + wide-integer compare below.)
     if (a.exponent == b.exponent) {
         return a.mantissa <=> b.mantissa;
     }
@@ -422,7 +422,8 @@ std::strong_ordering decimal_traits<pod_decimal>::compare(pod_decimal const& a,
 
     // scaled_vs_other compares (mag_scaled*10^k) vs other; if `a` is the
     // scaled side that's already a vs b, else it's b vs a and must be
-    // inverted. Sign flip mirrors the original :371-374 disposition.
+    // inverted. Sign flip mirrors the pre-swap comparator's end-of-function
+    // negative-magnitude disposition (the retained frozen reference).
     const std::strong_ordering mag_cmp = a_scales ? scaled_vs_other : invert(scaled_vs_other);
     return a_neg ? invert(mag_cmp) : mag_cmp;
 }

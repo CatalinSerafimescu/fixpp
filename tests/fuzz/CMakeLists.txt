@@ -20,6 +20,9 @@ add_executable(fuzz_decimal_compare fuzz_decimal_compare.cpp)
 target_link_libraries(fuzz_decimal_compare PRIVATE fixpp_core)
 target_compile_options(fuzz_decimal_compare PRIVATE -fsanitize=fuzzer,address,undefined)
 target_link_options(fuzz_decimal_compare PRIVATE -fsanitize=fuzzer,address,undefined)
+target_include_directories(fuzz_decimal_compare PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+)
 set_target_properties(fuzz_decimal_compare PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
 )

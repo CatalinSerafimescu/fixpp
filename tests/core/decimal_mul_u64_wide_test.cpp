@@ -35,7 +35,6 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
-#include <cstdlib>
 #include <random>
 
 namespace {
