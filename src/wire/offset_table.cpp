@@ -3,6 +3,7 @@
 // robin-hood overlay + lazy group sub-index. All storage from the captured
 // per-message memory_resource; DoS caps enforced with bounded memory.
 
+#include <atomic>
 #include <chrono>  // noexcept seed fallback entropy (W-P3-2)
 #include <cstddef>
 #include <cstdint>
@@ -113,15 +114,19 @@ std::uint32_t compute_process_seed() noexcept {
 
 // Process-wide seed storage (magic static init once). Read into each table's
 // seed_ at build() so find()'s hot path never touches the guard variable.
-std::uint32_t& overlay_seed_storage() noexcept {
-    static std::uint32_t seed = compute_process_seed();
+// Atomic so the TEST/FUZZ-ONLY set_overlay_seed_for_testing() hook can never
+// race a concurrent build()'s read (Gate B PR #166 round-1 Finding 2c).
+std::atomic<std::uint32_t>& overlay_seed_storage() noexcept {
+    static std::atomic<std::uint32_t> seed{compute_process_seed()};
     return seed;
 }
 
 }  // namespace
 
 namespace detail {
-void set_overlay_seed_for_testing(std::uint32_t seed) noexcept { overlay_seed_storage() = seed; }
+void set_overlay_seed_for_testing(std::uint32_t seed) noexcept {
+    overlay_seed_storage().store(seed, std::memory_order_relaxed);
+}
 }  // namespace detail
 
 std::size_t OffsetTable::overlay_cap_for(std::size_t n) noexcept {
@@ -187,7 +192,7 @@ void OffsetTable::build(frame_view const& frame) noexcept {
     try {
         auto buf = frame.bytes();
         frame_base_ = buf.data();
-        seed_ = overlay_seed_storage();  // snapshot per-process seed (W-P3-2)
+        seed_ = overlay_seed_storage().load(std::memory_order_relaxed);  // snapshot (W-P3-2)
         std::size_t i = 0;
         std::size_t const n = buf.size();
 
