@@ -265,6 +265,19 @@ std::strong_ordering decimal_traits<pod_decimal>::compare(pod_decimal const& a,
         return a_neg ? std::strong_ordering::less : std::strong_ordering::greater;
     }
 
+    // R3 fast path (hoisted above canonicalization): at EQUAL raw exponents,
+    // value = mantissa × 10^e with 10^e > 0, so value ordering is exactly the signed
+    // ordering of the raw mantissas — including equality, and including trailing-zero
+    // mantissas at the same stored exponent ({100,-2} vs {120,-2} → less). Reads RAW
+    // mantissa/exponent (before strip_zeros), removing both strip_zeros and both
+    // digit_count divide-chains from the dominant same-exponent regime. Sentinel is
+    // filtered at Step 0 and sign mismatch at Step 1, so both operands are finite and
+    // same-signed here. (Values whose raw exponents differ but canonicalize to equal
+    // exponents still fall to the Step-4 paths below.)
+    if (a.exponent == b.exponent) {
+        return a.mantissa <=> b.mantissa;
+    }
+
     // Step 2: canonicalize — strip trailing base-10 zeros from each mantissa
     // (equivalent to increasing exponent while dividing mantissa by 10)
     std::int64_t am = a.mantissa;
