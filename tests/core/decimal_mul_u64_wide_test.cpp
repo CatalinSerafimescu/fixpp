@@ -37,6 +37,10 @@
 #include <cstdint>
 #include <random>
 
+#ifdef _MSC_VER
+#include <intrin.h>  // _umul128 / __umulh (mul_u64_wide copy + golden reference)
+#endif
+
 namespace {
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -45,7 +49,7 @@ namespace {
 // exactly. The #else body below is copied VERBATIM from
 // src/core/decimal.cpp:264-286.
 static inline std::uint64_t mul_u64_wide(std::uint64_t a, std::uint64_t b,
-                                          std::uint64_t* hi) noexcept {
+                                         std::uint64_t* hi) noexcept {
 #if defined(__SIZEOF_INT128__) && !defined(FIXPP_DECIMAL_FORCE_PORTABLE_MUL)
     unsigned __int128 p = static_cast<unsigned __int128>(a) * b;
     *hi = static_cast<std::uint64_t>(p >> 64);
@@ -102,21 +106,32 @@ constexpr bool kForcePortableDefined = true;
 constexpr bool kForcePortableDefined = false;
 #endif
 
-// Golden reference: on Linux/Clang unsigned __int128 is always available
-// regardless of which branch mul_u64_wide itself takes in this TU — so the
-// golden computation is independent of the branch under test and validates
-// both the __int128 copy AND the #else schoolbook copy against the same
-// ground truth.
+// Golden reference: a wide multiply computed INDEPENDENTLY of the branch
+// mul_u64_wide itself takes in this TU, so it is valid ground truth for both
+// the __int128 copy AND the #else schoolbook copy. MSVC has no `__int128`
+// (error C4235), so we select per-platform: `unsigned __int128` on
+// GCC/Clang/clang-cl; `__umulh` (which the x64 CI runner has, and which is a
+// DIFFERENT intrinsic from the `_umul128` the x64 branch under test uses) on
+// MSVC. No platform in the test matrix reaches the #error (Linux has __int128,
+// Windows has __umulh).
 struct WideProduct {
     std::uint64_t hi;
     std::uint64_t lo;
 };
 
 WideProduct golden_wide_mul(std::uint64_t a, std::uint64_t b) {
-    unsigned __int128 g = static_cast<unsigned __int128>(a) * b;
     WideProduct r;
+#if defined(__SIZEOF_INT128__)
+    unsigned __int128 g = static_cast<unsigned __int128>(a) * b;
     r.hi = static_cast<std::uint64_t>(g >> 64);
     r.lo = static_cast<std::uint64_t>(g);
+#elif defined(_MSC_VER) && (defined(_M_X64) || defined(_M_ARM64))
+    r.hi = __umulh(a, b);
+    r.lo = a * b;
+#else
+#error \
+    "golden_wide_mul: no wide-multiply reference on this platform (expected __int128 or MSVC __umulh)"
+#endif
     return r;
 }
 
@@ -151,12 +166,10 @@ TEST(MulU64WideTest, BoundaryValues) {
     const std::uint64_t k1e18 = 1000000000000000000ULL;
 
     const std::uint64_t values[] = {
-        0ULL, 1ULL, 2ULL, 3ULL,
-        kPow2_32 - 1, kPow2_32, kPow2_32 + 1,
-        kI64Max, kI64Max + 1,  // 2^63
-        kU64Max - 1, kU64Max,
-        k1e18, k1e18 - 1, k1e18 + 1,
-        10ULL, 100ULL, 1000ULL, 99ULL,
+        0ULL,        1ULL,         2ULL,    3ULL,        kPow2_32 - 1,
+        kPow2_32,    kPow2_32 + 1, kI64Max, kI64Max + 1,  // 2^63
+        kU64Max - 1, kU64Max,      k1e18,   k1e18 - 1,   k1e18 + 1,
+        10ULL,       100ULL,       1000ULL, 99ULL,
     };
     for (std::uint64_t a : values) {
         for (std::uint64_t b : values) {
@@ -170,8 +183,7 @@ TEST(MulU64WideTest, BoundaryValues) {
 // convention — decimal_compare_diff_oracle_test.cpp).
 TEST(MulU64WideTest, DeterministicRandom) {
     std::mt19937_64 rng(42);
-    std::uniform_int_distribution<std::uint64_t> dist(
-        0ULL, 0xFFFFFFFFFFFFFFFFULL);
+    std::uniform_int_distribution<std::uint64_t> dist(0ULL, 0xFFFFFFFFFFFFFFFFULL);
     for (int i = 0; i < 5000; ++i) {
         const std::uint64_t a = dist(rng);
         const std::uint64_t b = dist(rng);
@@ -188,17 +200,16 @@ TEST(MulU64WideTest, ProductsCross2Pow64_HiNonZero) {
         std::uint64_t b;
     };
     const Case cases[] = {
-        {99ULL, 9223372036854775807ULL},              // R5 witness product (~9.9e19)
+        {99ULL, 9223372036854775807ULL},                 // R5 witness product (~9.9e19)
         {0xFFFFFFFFFFFFFFFFULL, 0xFFFFFFFFFFFFFFFFULL},  // UINT64_MAX^2
-        {1ULL << 40, 1ULL << 40},                       // 2^80
-        {1000000000000000000ULL, 100ULL},               // 1e20
+        {1ULL << 40, 1ULL << 40},                        // 2^80
+        {1000000000000000000ULL, 100ULL},                // 1e20
         {0x100000000ULL, 0x100000001ULL},                // just over 2^64
     };
     for (Case const& c : cases) {
         const WideProduct golden = golden_wide_mul(c.a, c.b);
-        ASSERT_NE(golden.hi, 0ULL)
-            << "test-setup error: golden hi is zero for a=" << c.a
-            << " b=" << c.b << " — case does not actually cross 2^64";
+        ASSERT_NE(golden.hi, 0ULL) << "test-setup error: golden hi is zero for a=" << c.a
+                                   << " b=" << c.b << " — case does not actually cross 2^64";
 
         std::uint64_t hi = 0;
         const std::uint64_t lo = mul_u64_wide(c.a, c.b, &hi);
