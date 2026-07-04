@@ -208,12 +208,19 @@ public:
     // unbounded awaitable_thread::pump() recursion (stack overflow at ~1000 frames).
     // Single-snapshot eliminates the loop entirely.
     //
-    // Bounded-policy snapshot: copies only Entry descriptors (24 B each), then
-    // reads payload bytes directly from the fixed slab without a per-frame copy.
+    // Bounded-policy snapshot: copies only Entry descriptors (24 B each) under the
+    // mutex; each frame's payload is then materialised from the fixed slab into a
+    // reusable scratch buffer just before on_frame() (S-P2-2), so the span the
+    // visitor holds is stable across its own suspension.
     // Unbounded-policy snapshot: still copies Entry descriptors; payload bytes are
-    // read from the growing unbounded_slab_ after mutex release (stable post-snap
-    // because entries reference offsets into a vector that can grow under store(),
-    // but the BYTES at existing offsets never change once written).
+    // copied under the mutex into unbounded_payload_copy (RC#1) — read from there
+    // after mutex release, stable regardless of concurrent store() growth.
+    //
+    // S-P2-2 reset-during-traversal guard: generation_ is snapshotted (g0) under
+    // the mutex and re-checked at the top of the visitor loop; a reset() that runs
+    // during a visitor suspension makes generation_ != g0 → fail closed with
+    // store_io_failure (mirror of FileStore's generation_; contract
+    // message_store.hpp:113-116).
     //
     // PMR-throw boundary: visitor exceptions caught and routed to
     // store_visitor_aborted (T043 / I-21).
@@ -234,7 +241,10 @@ public:
         // "releases the mutex BEFORE invoking visitor.on_frame's co_await".
         //
         // For bounded: slab_ is stable (fixed allocation); reading slab_ + offset
-        // after mutex release is safe — the slab is never reallocated.
+        // after mutex release is memory-safe — the slab is never reallocated. It
+        // CAN be overwritten by a mid-traversal reset()+store(); the S-P2-2
+        // generation guard + per-frame materialisation (in the visitor loop below)
+        // detect that and keep the visitor's span consistent.
         // For unbounded: we snapshot Entry descriptors (offsets + lengths); the
         // unbounded_slab_ data at those offsets is immutable once written (store()
         // only appends to the tail). Pointer recomputed at visitor time from
@@ -258,12 +268,18 @@ public:
         // PMR allocations are permitted for unbounded policy (FR-007).
         std::pmr::vector<std::byte> unbounded_payload_copy{
             std::pmr::polymorphic_allocator<std::byte>{mr_}};
+        std::uint64_t g0 = 0;  // S-P2-2: reset-epoch snapshot (set under the mutex)
         {
             auto guard_result = co_await mutex_.async_lock();
             if (!guard_result) {
                 co_return std::unexpected(fixpp::core::error::store_cancelled);
             }
             auto guard = std::move(*guard_result);
+
+            // S-P2-2: snapshot the reset epoch under the mutex, alongside the
+            // index snapshot. A reset() that runs AFTER this point (during a
+            // visitor.on_frame() suspension) bumps generation_, making g0 stale.
+            g0 = generation_;
 
             const seqnum_t cur_next = next_seq_for(dir);
             const seqnum_t tail_end =
@@ -310,13 +326,45 @@ public:
         // Walk pre-snapshotted entry descriptors WITHOUT holding mutex (I-03 / FR-017):
         //   allows concurrent store() calls from within the visitor body.
         // T043: wrap visitor call in try/catch → store_visitor_aborted (I-21).
+        //
+        // S-P2-2: per-frame materialisation scratch for the bounded slab path.
+        // The bounded slab is read directly, and reset()+store() can overwrite a
+        // slot during a visitor suspension. Copying the frame into this stable
+        // buffer BEFORE on_frame() means the view the visitor holds cannot be
+        // corrupted mid-suspension — mirror of FileStore's read-into-scratch. The
+        // generation re-check below guards the complementary case (a reset() that
+        // ALREADY ran before this frame). Reserved once to max_frame_bytes and
+        // reused per frame; store() rejects frames larger than that (see :169).
+        // The unbounded path already snapshots bytes into unbounded_payload_copy
+        // under the mutex, so it needs no re-materialisation here.
+        std::pmr::vector<std::byte> frame_scratch{std::pmr::polymorphic_allocator<std::byte>{mr_}};
+        if (cfg_.policy == capacity_policy::bounded) {
+            frame_scratch.reserve(cfg_.max_frame_bytes);
+        }
+
         for (const auto& e : snapshots) {
-            // Resolve payload span from stable storage (no per-frame alloc after this).
-            // For bounded: slab_ is a fixed PMR allocation that is never reallocated.
-            // For unbounded: unbounded_payload_copy holds the bytes snapshotted under mutex.
-            const std::byte* payload_base =
-                (cfg_.policy == capacity_policy::bounded) ? slab_ : unbounded_payload_copy.data();
-            std::span<const std::byte> frame_view{payload_base + e.slab_offset, e.bytes_len};
+            // S-P2-2: detect a reset() that ran during the prior visitor
+            // suspension (it bumped generation_). NO co_await between this check
+            // and the byte read below. Stale epoch → fail closed with
+            // store_io_failure — a data-integrity guard, distinct from
+            // store_seqnum_gap. Mirror of FileStore T015 / data-model §4.
+            if (generation_ != g0) {
+                co_return std::unexpected(fixpp::core::error::store_io_failure);
+            }
+
+            // Resolve the payload span from stable storage.
+            // Bounded: materialise the slab bytes into frame_scratch (see above).
+            // Unbounded: unbounded_payload_copy holds the bytes snapshotted under
+            // the mutex — read directly.
+            std::span<const std::byte> frame_view;
+            if (cfg_.policy == capacity_policy::bounded) {
+                const std::byte* src = slab_ + e.slab_offset;
+                frame_scratch.assign(src, src + e.bytes_len);
+                frame_view = std::span<const std::byte>(frame_scratch);
+            } else {
+                frame_view = std::span<const std::byte>(
+                    unbounded_payload_copy.data() + e.slab_offset, e.bytes_len);
+            }
 
             fixpp::core::expected_t<visit_result> vr{visit_result::cont};
             try {
@@ -400,6 +448,10 @@ public:
         }
         next_inbound_ = seqnum_min;
         next_outbound_ = seqnum_min;
+        // S-P2-2: bump the reset epoch (mutex held). Any retrieve() walk suspended
+        // in a visitor.on_frame() detects g0 != generation_ on its next iteration
+        // and fails closed with store_io_failure — mirror of FileStore T015.
+        ++generation_;
         co_return fixpp::core::expected_t<void>{};
     }
 
@@ -516,6 +568,20 @@ private:
 
     seqnum_t next_inbound_{seqnum_min};   // next expected inbound seqnum
     seqnum_t next_outbound_{seqnum_min};  // next expected outbound seqnum
+
+    // ── Reset epoch (S-P2-2) ──────────────────────────────────────────────
+    // Mirror of FileStore's generation_ (src/session/file_store.cpp) — a
+    // reset-during-traversal guard. Bumped under the writer mutex in reset();
+    // snapshotted (g0) under the mutex in retrieve(); re-checked at the top of
+    // the visitor loop with NO co_await between the check and the byte read. A
+    // reset() that runs during a visitor.on_frame() suspension bumps this, so
+    // the next iteration observes generation_ != g0 and retrieve() fails closed
+    // with store_io_failure BEFORE reading a slab slot the reset()+store() may
+    // have overwritten (message_store.hpp:113-116 "mid-traversal mutation is
+    // detected … without UB"). Plain std::uint64_t (no atomic): mutated and
+    // read only on the session strand (same discipline + rationale as FileStore
+    // Decision 3); the retrieve() read is off-mutex but strand-confined.
+    std::uint64_t generation_{0};
 };
 
 // Static asserts for the visit_result switch coverage guard
