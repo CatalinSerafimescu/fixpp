@@ -1,3 +1,3 @@
 {
-  "feature_directory": "specs/059-outbound-store-fail-closed"
+  "feature_directory": "specs/060-int128-decimal-compare"
 }
