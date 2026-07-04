@@ -348,11 +348,13 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_set_bytes(fixpp_msg_t* msg, uint16_t ta
  */
 FIXPP_API_EXPORT fixpp_error_t fixpp_msg_set_int(fixpp_msg_t* msg, uint16_t tag, int64_t value);
 
-/** Set a floating-point field. Serialised as locale-independent fixed-point
- *  ASCII (never scientific notation). Returns FIXPP_ERR_DECIMAL_INVALID if the
- *  value is non-finite (NaN/Inf) or outside the representable FIX-decimal range
- *  (|value| beyond ~9.2e18) — the setter never emits bytes the engine's own
- *  FLOAT parser would reject.
+/** Set a floating-point field. Serialised as the shortest round-tripping
+ *  locale-independent fixed-point ASCII form (never scientific notation; up to 17
+ *  significant digits — use fixpp_msg_set_decimal for controlled scale). Returns
+ *  FIXPP_ERR_DECIMAL_INVALID if the value is non-finite (NaN/Inf) or outside the
+ *  representable FIX-decimal range (|value| beyond ~9.2e18, or non-zero |value|
+ *  below ~1e-38) — the setter never emits bytes the engine's own FLOAT parser
+ *  would reject.
  *  Reentrancy: requires-session-lock
  */
 FIXPP_API_EXPORT fixpp_error_t fixpp_msg_set_double(fixpp_msg_t* msg, uint16_t tag, double value);

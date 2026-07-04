@@ -527,6 +527,7 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_set_int(fixpp_msg_t* msg, uint16_t tag,
 static fixpp_error_t serialise_double_fixed(double value, char* buf, std::size_t buf_size,
                                             std::size_t* out_len) {
     if (!std::isfinite(value)) return FIXPP_ERR_DECIMAL_INVALID;
+    if (value == 0.0) value = 0.0;  // canonicalise -0.0 → +0.0 (else to_chars emits "-0")
     auto [ptr, ec] = std::to_chars(buf, buf + buf_size, value, std::chars_format::fixed);
     if (ec != std::errc{}) return FIXPP_ERR_DECIMAL_INVALID;  // too large for buf → unrepresentable
     const auto n = static_cast<std::size_t>(ptr - buf);
@@ -819,6 +820,16 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_group_builder_add_entry(fixpp_group_builder
 }
 
 // Shared entry-field setter: framing-tag reject (INV-3) + upsert into the instance.
+// Validate an entry handle + tag BEFORE a value is serialised, so a bad handle or a
+// framing tag is reported as such (handles.h: "checks NULL FIRST") rather than masked
+// by a value-serialisation error. entry_set_bytes_impl re-validates (+ group-collision).
+static fixpp_error_t precheck_entry_tag(fixpp_entry_t* entry, uint16_t tag) {
+    if (fixpp_error_t c = check_entry(reinterpret_cast<fixpp_entry*>(entry)); c != FIXPP_ERR_OK)
+        return c;
+    if (is_framing_tag(tag)) return FIXPP_ERR_MSG_FRAMING_TAG_FORBIDDEN;
+    return FIXPP_ERR_OK;
+}
+
 static fixpp_error_t entry_set_bytes_impl(fixpp_entry_t* entry, uint16_t tag,
                                           const std::byte* data, std::size_t len) {
     auto* e = reinterpret_cast<fixpp_entry*>(entry);
@@ -852,6 +863,7 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_entry_set_int(fixpp_entry_t* entry, uint16_
 
 FIXPP_API_EXPORT fixpp_error_t fixpp_entry_set_double(fixpp_entry_t* entry, uint16_t tag,
                                                  double value) {
+    if (fixpp_error_t c = precheck_entry_tag(entry, tag); c != FIXPP_ERR_OK) return c;
     char buf[64];
     std::size_t n = 0;
     if (fixpp_error_t c = serialise_double_fixed(value, buf, sizeof(buf), &n); c != FIXPP_ERR_OK)
@@ -861,6 +873,10 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_entry_set_double(fixpp_entry_t* entry, uint
 
 FIXPP_API_EXPORT fixpp_error_t fixpp_entry_set_decimal(fixpp_entry_t* entry, uint16_t tag,
                                                   fixpp_decimal_t value) {
+    // Same handle-first ordering as fixpp_entry_set_double (handles.h): the pre-existing
+    // path serialised the decimal before validating the entry, so an out-of-domain value
+    // masked a null/invalid handle. Validate first.
+    if (fixpp_error_t c = precheck_entry_tag(entry, tag); c != FIXPP_ERR_OK) return c;
     char buf[64];
     std::size_t written = 0;
     fixpp_error_t rc = fixpp_decimal_format(value, buf, sizeof(buf), &written);

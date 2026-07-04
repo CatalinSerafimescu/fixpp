@@ -830,7 +830,8 @@ TEST(MessageWrite, SetDoubleFixedNotationAndFailClosed) {
     };
     // 1e10 → "1e+10" under %g; 0.00001 → "1e-05" under %g. Both must be plain fixed.
     for (const Case& c : {Case{1e10, "10000000000"}, Case{0.00001, "0.00001"},
-                          Case{-1234.5, "-1234.5"}, Case{2.5, "2.5"}}) {
+                          Case{-1234.5, "-1234.5"}, Case{2.5, "2.5"},
+                          Case{-0.0, "0"}}) {  // -0.0 canonicalised to "0", not "-0"
         fixpp_msg_t* msg = nullptr;
         ASSERT_EQ(fixpp_msg_create_outbound(sess, "D", 1, &msg), FIXPP_ERR_OK);
         ASSERT_EQ(fixpp_msg_set_double(msg, 38, c.value), FIXPP_ERR_OK) << c.expect;
@@ -859,6 +860,9 @@ TEST(MessageWrite, SetDoubleFixedNotationAndFailClosed) {
         EXPECT_EQ(fixpp_msg_set_double(msg, 38, 1e19), FIXPP_ERR_DECIMAL_INVALID);
         // 1e100: fixed notation needs >64 chars → to_chars value_too_large branch.
         EXPECT_EQ(fixpp_msg_set_double(msg, 38, 1e100), FIXPP_ERR_DECIMAL_INVALID);
+        // Non-zero |v| below ~1e-38 needs a 39th fractional digit → exponent < -38 →
+        // parser rejects (below-domain reject leg, documented in the header).
+        EXPECT_EQ(fixpp_msg_set_double(msg, 38, 1e-39), FIXPP_ERR_DECIMAL_INVALID);
         EXPECT_EQ(fixpp_msg_destroy(msg), FIXPP_ERR_OK);
     }
     // NB: the locale (LC_NUMERIC) leg is closed by construction — std::to_chars is
@@ -1548,6 +1552,14 @@ TEST(MessageWrite, CheckBuilderAndEntryNull) {
     EXPECT_EQ(fixpp_entry_set_double(nullptr, 79, 1.0), FIXPP_ERR_NULL_HANDLE);
     fixpp_decimal_t d{};
     EXPECT_EQ(fixpp_entry_set_decimal(nullptr, 79, d), FIXPP_ERR_NULL_HANDLE);
+
+    // An INVALID value must not mask the null handle (handles.h NULL-first rule):
+    // value serialisation runs AFTER handle validation for both setters.
+    EXPECT_EQ(fixpp_entry_set_double(nullptr, 79, std::numeric_limits<double>::quiet_NaN()),
+              FIXPP_ERR_NULL_HANDLE);
+    fixpp_decimal_t bad{};
+    bad.exponent = 100;  // out-of-domain → fixpp_decimal_format would reject
+    EXPECT_EQ(fixpp_entry_set_decimal(nullptr, 79, bad), FIXPP_ERR_NULL_HANDLE);
 }
 
 // entry_set_string NULL value → NULL_HANDLE.
@@ -1576,6 +1588,11 @@ TEST(MessageWriteGroup, EntrySetDoubleAndDecimal) {
 
     // set_double: tag 80 (AllocQty, QTY in the richer dict)
     ASSERT_EQ(fixpp_entry_set_double(e0, 80, 42.5), FIXPP_ERR_OK);
+
+    // Framing tag + invalid value on a live entry: the framing-tag check precedes
+    // value serialisation, so a bad tag is reported even when the value is invalid.
+    EXPECT_EQ(fixpp_entry_set_double(e0, 8, std::numeric_limits<double>::quiet_NaN()),
+              FIXPP_ERR_MSG_FRAMING_TAG_FORBIDDEN);
 
     fixpp_entry_t* e1 = nullptr;
     ASSERT_EQ(fixpp_group_builder_add_entry(gb, &e1), FIXPP_ERR_OK);
