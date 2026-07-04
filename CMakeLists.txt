@@ -144,6 +144,17 @@ enable_testing()
 
 # ── Modules (acyclic order per [arch §2.2]) ──────────────────────────────────
 add_subdirectory(src/core)
+
+# ── 060-int128-decimal-compare T002: force the portable mul_u64_wide path ────
+# FIXPP_DECIMAL_FORCE_PORTABLE_MUL forces decimal.cpp's mul_u64_wide 3-way #if
+# to its portable 32-bit-limb #else branch, so the Linux/Clang default build
+# (which otherwise always takes the __int128 branch) can compile+cover the
+# portable fallback (T012/T013). OFF by default — normal builds are unaffected.
+option(FIXPP_DECIMAL_FORCE_PORTABLE_MUL "Force decimal.cpp's mul_u64_wide portable 32-bit-limb fallback" OFF)
+if(FIXPP_DECIMAL_FORCE_PORTABLE_MUL)
+  target_compile_definitions(fixpp_core PRIVATE FIXPP_DECIMAL_FORCE_PORTABLE_MUL)
+endif()
+
 add_subdirectory(src/core/sync)   # fixpp_sync — 006-async-mutex (depends on fixpp_core + asio)
 add_subdirectory(src/dictionary)
 add_subdirectory(src/wire)

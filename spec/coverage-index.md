@@ -827,3 +827,48 @@ Items that are normative in the spec but explicitly deferred from fixpp v1.0. Th
 > - `tools/codegen/fixpp-codegen/emit_dispatch.cpp` (EDIT) — both emitters emit uniform `detail::owning_message_handle_from_frame` arms; application emitter emits length-first two-level dispatch (single-char switch + packed-uint16 switch, case labels mirroring the key exactly). Multi-char arms: v42=0, v44=34, v50sp2=105 (T009 forced-regen verified). `dict_reify_wire_body_not_ready` retired from all live producers.
 >
 > **Coverage note.** `tests/dictionary/reify_dispatch_test.cpp` (26): compile-time dispatch shape; `SevenAdminMsgTypesAllHit`/`MustIncludeSubsetAllHit` flipped to live-handle metadata oracles; 6 discriminating per-field round-trip witnesses (`ReifyRoundTrip.*` — v42/v44/v50sp2 ClOrdID, multi-char `AS` AllocID, source-buffer-reuse FR-005, in-frame ApplVerID(1128) drives resolution FR-003), each mutation-tested (skip deep-copy → all 6 RED, SC-003 confirmed); 6 error-contract witnesses (`ReifyErrorContract.*` — unknown single/multi-char, absent-35, `dict_reify_oom`, `dict_unresolved_application_version`, `dict_unknown_appl_ver_id`, exact codes); FIXT-admin end-to-end discriminating witness (`FixtAdminReify.DiscriminatingHeaderField`, SenderCompID round-trip); `reify_as<Msg>` typed path (`ReifyAsTyped.*` — match reads field, mismatch + absent-35 → `dict_reify_msg_type_mismatch`). Frame helpers added to `tests/support/reify_test_frame.hpp` (E-6). Regression sweep: `reify_test.cpp` (4) + `fixt_cross_vocabulary.cpp` (6) flipped off the retired placeholder to live behavior. Gates: `check_layers.py` green + bites (T019); codegen determinism + IFACE build-graph green (T020, byte-identical regen). No new wire/error/public-builder/C-ABI/dependency surface (FR-012). Generated `_dispatch/*.hpp` inline arms coverage-EXCLUDED as generated headers (representative-subset; only the two bridge wrappers carry the ≥95% target) — recorded LOW-risk waiver at `/speckit-verify` (T023). Full sanitizer/coverage matrix (ASan/UBSan/TSan one-at-a-time, WSL2) at `/speckit-verify`.
+
+---
+
+## 060 — int128 / exact wide-integer cross-exponent decimal compare (C1) (pre-merge — this PR)
+
+> **Mechanism (new catalogue row NFR-018).** 060 is Cluster-2 residual C1: it reverses the 001/2a
+> Gate-A "no `__int128`" decision by replacing `decimal_traits<pod_decimal>::compare`'s
+> different-exponent slow path with a branch-free `k≥19` order-of-magnitude dominance guard + one
+> `mul_u64_wide` 64×64→128 widening multiply. Bit-identical `strong_ordering`, default-path swap,
+> no runtime mode flag, no public/C-ABI/wire/error/layout change (`decimal.hpp` byte-identical). It
+> owns its own dedicated `feature-catalogue.md` row (**NFR-018**, `implementing` at T021 — flips to
+> `done` at T022 per the merged-tree completeness audit); this section is the coverage-index-side
+> exact-set diff `[const §VI.4]`, mirroring the 057 mechanism-section shape.
+>
+> **Source unit.** `src/core/decimal.cpp` — `decimal_traits<pod_decimal>::compare`
+> different-exponent arm (default `__int128` path; `FIXPP_DECIMAL_FORCE_PORTABLE_MUL`-gated portable
+> `#else`; MSVC `#elif` `_umul128`/`__umulh` intrinsic path, Tier-2-only — see L-060-1) +
+> `mul_u64_wide` 64×64→128 widening-multiply helper (`include/fixpp/core/decimal.hpp` is
+> byte-unchanged — internal function body only).
+>
+> **Test files.**
+> - `tests/core/decimal_compare_diff_oracle_test.cpp` — seed-42 full-domain deterministic corpus,
+>   7-row mutation-tested witness matrix (each row kills a distinct injected mutant), antisymmetry +
+>   transitivity property checks, and the kill-table proving every matrix row is discriminating.
+> - `tests/core/decimal_mul_u64_wide_test.cpp` (+ `_portable` variant under
+>   `FIXPP_DECIMAL_FORCE_PORTABLE_MUL`) — direct unit coverage of the 64×64→128 widening multiply
+>   primitive on both the native `__int128` path and the forced-portable `#else` path.
+> - `tests/fuzz/fuzz_decimal_compare.cpp` (+ corpus) — differential libFuzzer harness comparing the
+>   new compare against the retained pre-060 reference implementation (T003).
+> - `tests/oracle/decimal_compare_oracle_test.py` — extended with a Python-`Decimal` cross-exponent
+>   differential oracle (bit-for-bit `strong_ordering` agreement over the full-domain corpus).
+>
+> **Exact-set diff** `[const §VI.4]` — source arm ↔ test coverage:
+>
+> | Source arm | Test coverage |
+> |---|---|
+> | `compare` different-exponent, `k≥19` dominance guard | `decimal_compare_diff_oracle_test.cpp` `WitnessKBoundary` (`:341`) — k=19/k=20/k=38 cells, k=19 the exact dominance-guard boundary |
+> | `compare` different-exponent, `mul_u64_wide` general case | `decimal_compare_diff_oracle_test.cpp` witness matrix rows 3–7 + full-domain seed-42 corpus + Python-`Decimal` cross-exp oracle |
+> | `mul_u64_wide` native `__int128` path (production symbol, via `compare()`) | `decimal_compare_diff_oracle_test.cpp` differential oracle (seed-42 corpus + witness matrix) — the sole production caller of `mul_u64_wide` is `compare()` at `decimal.cpp:416`; `decimal_mul_u64_wide_test.cpp` is supplementary primitive-level coverage of a flag-identical TU-local copy (the `static inline` production symbol is not directly linkable — see `tests/core/CMakeLists.txt:165-169`) |
+> | `mul_u64_wide` portable `#else` path (production symbol, via `compare()`) | T013 `FIXPP_DECIMAL_FORCE_PORTABLE_MUL=ON` forced-portable differential oracle build; `decimal_mul_u64_wide_test_portable` is supplementary primitive-level coverage of the same flag-identical copy |
+> | `mul_u64_wide` MSVC `#elif` intrinsic path (`_umul128`/`__umulh`) | MSVC x64 discharged **locally** (T014 — differential oracle 11/11 + mul-primitive 4/4 + `DecimalCompare.*` 16/16 witnesses green on `windows-msvc-debug`); full `run-tier2` 3-lane CI (debug/release/asan) still pending as belt-and-suspenders; see L-060-1 |
+> | Differential regression vs pre-060 reference | `fuzz_decimal_compare.cpp` + corpus (libFuzzer) |
+>
+> **Sanitizer/coverage.** ASan/UBSan/TSan clean on the default `__int128` build and the forced-portable
+> `#else` build. Full sanitizer/coverage matrix at `/speckit-verify`.

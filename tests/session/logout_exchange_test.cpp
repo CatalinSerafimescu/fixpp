@@ -140,6 +140,34 @@ static std::string extract_field(std::span<const std::byte> frame, std::uint32_t
     return wire.substr(pos, end - pos);
 }
 
+// Bounded pump: drive `ioc` until `fut` is ready (10 s cap); returns whether it
+// became ready. Replaces the `ioc.run_for(FIXED); ioc.restart(); fut.get()`
+// idiom, which deadlocks when the awaited op posts its completion back to `ioc`
+// AFTER the fixed window closes and nothing pumps `ioc` again (observed as a
+// 120 s ctest timeout on slow MSVC-debug runs of the FileStore-offloaded test).
+// A work_guard keeps `ioc` alive across 20 ms slices; the trailing restart()
+// leaves it runnable for the next phase (a stopped context makes the next
+// run_for a silent no-op). Callers MUST check the bool BEFORE fut.get() so a
+// genuine lost-wake FAILs loudly at 10 s instead of hanging out the timeout.
+//
+// This is a TEST-harness utility: production drives the io_context with a
+// continuous ioc.run() on worker threads (src/capi/engine.cpp), so a real
+// client never encounters this — it is an artifact of use_future + a manually
+// pumped, fixed-window io_context. [[feedback_mock_clock_advance_before_timer_armed_race]]
+template <class Fut>
+[[nodiscard]] bool pump_until_ready(asio::io_context& ioc, Fut& fut) {
+    auto wg = asio::make_work_guard(ioc);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{10};
+    while (fut.wait_for(std::chrono::milliseconds{0}) != std::future_status::ready &&
+           std::chrono::steady_clock::now() < deadline) {
+        ioc.run_for(std::chrono::milliseconds{20});
+    }
+    wg.reset();
+    const bool ready = fut.wait_for(std::chrono::milliseconds{0}) == std::future_status::ready;
+    ioc.restart();
+    return ready;
+}
+
 }  // namespace
 
 // ── Test fixture ──────────────────────────────────────────────────────────────
@@ -176,16 +204,20 @@ protected:
     // Open a session and drive the ioc until the awaitable completes.
     fixpp::core::expected_t<void> open_session(Session& sess) {
         auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
-        ioc.run_for(200ms);
-        ioc.restart();
+        if (!pump_until_ready(ioc, fut)) {
+            ADD_FAILURE() << "open() did not complete within 10s";
+            return std::unexpected(fixpp::core::error::dispatch_aborted);
+        }
         return fut.get();
     }
 
     // Feed an inbound frame and wait for the FSM dispatch.
     fixpp::core::expected_t<void> feed_inbound(Session& sess, std::span<const std::byte> frame) {
         auto fut = asio::co_spawn(ioc, sess.on_inbound_frame(frame), asio::use_future);
-        ioc.run_for(200ms);
-        ioc.restart();
+        if (!pump_until_ready(ioc, fut)) {
+            ADD_FAILURE() << "on_inbound_frame() did not complete within 10s";
+            return std::unexpected(fixpp::core::error::dispatch_aborted);
+        }
         return fut.get();
     }
 
@@ -258,8 +290,7 @@ TEST_F(LogoutExchangeTest, GracefulBothDirections) {
     // Feed inbound Logout confirmation (peer seq=2, since we sent seq 1 for Logon).
     auto peer_logout = make_logout_frame("FIX.4.2", 2, "TW", "ISLD");
     auto inbound_r = asio::co_spawn(ioc, sess.on_inbound_frame(peer_logout), asio::use_future);
-    ioc.run_for(200ms);
-    ioc.restart();
+    ASSERT_TRUE(pump_until_ready(ioc, inbound_r)) << "inbound Logout did not complete within 10s";
     auto ir = inbound_r.get();
     EXPECT_TRUE(ir.has_value()) << "Inbound Logout should be accepted";
 
@@ -267,6 +298,7 @@ TEST_F(LogoutExchangeTest, GracefulBothDirections) {
     EXPECT_EQ(sess.state(), fsm_state::Disconnected);
 
     // close() should complete without error.
+    ASSERT_TRUE(pump_until_ready(ioc, close_fut)) << "close() did not complete within 10s";
     auto close_r = close_fut.get();
     EXPECT_TRUE(close_r.has_value()) << "close() should complete ok";
 }
@@ -292,10 +324,12 @@ TEST_F(LogoutExchangeTest, NeverConfirmedForceDisconnect) {
     ioc.run_for(100ms);
     ioc.restart();
 
-    // Advance clock past the 2 s graceful-close timeout.
+    // Advance clock past the 2 s graceful-close timeout, then pump until close
+    // completes (the timeout firing drives the FSM to Disconnected and resolves
+    // close_fut) rather than a fixed window that could close before the offload.
     clock->advance(std::chrono::seconds{3});
-    ioc.run_for(200ms);
-    ioc.restart();
+    ASSERT_TRUE(pump_until_ready(ioc, close_fut))
+        << "close() did not complete within 10s after the logout timeout fired";
 
     // Session should be Disconnected due to timeout.
     EXPECT_EQ(sess.state(), fsm_state::Disconnected);
@@ -345,8 +379,13 @@ TEST_F(LogoutExchangeTest, ConfigurableTimeoutHonored) {
     // 15% of the formerly-hardcoded 2000 ms. If hardcoded: still LogoutSent.
     // If configured correctly: Disconnected.
     clock->advance(std::chrono::milliseconds{300});
-    ioc.run_for(200ms);
-    ioc.restart();
+    // Pump until close completes. With the timeout correctly wired to the 200ms
+    // config, the 300ms advance fires it and close resolves promptly. If it were
+    // still hardcoded to 2s, the 300ms mock advance never reaches the deadline →
+    // close never completes → this FAILs loudly at 10s (the RC#D regression).
+    ASSERT_TRUE(pump_until_ready(ioc, close_fut))
+        << "RC#D: close() did not complete within 10s — the configured 200ms timeout "
+           "must fire at a 300ms clock advance (a hardcoded 2s timeout wedges here).";
 
     EXPECT_EQ(sess.state(), fsm_state::Disconnected)
         << "RC#D: configured 200ms timeout must fire at 300ms clock advance. "
@@ -514,8 +553,7 @@ TEST_F(LogoutExchangeTest, DisconnectedInboundLogoutIgnored) {
 
     // Force disconnect via terminal close.
     auto close_fut = asio::co_spawn(ioc, sess.close(close_mode::terminal), asio::use_future);
-    ioc.run_for(200ms);
-    ioc.restart();
+    ASSERT_TRUE(pump_until_ready(ioc, close_fut)) << "terminal close() did not complete within 10s";
     (void)close_fut.get();
 
     EXPECT_EQ(sess.state(), fsm_state::Disconnected);
@@ -557,8 +595,7 @@ TEST_F(LogoutExchangeTest, InitiateLogoutFromActive) {
 
     // Clean up: advance clock past timeout to complete close.
     clock->advance(std::chrono::seconds{3});
-    ioc.run_for(200ms);
-    ioc.restart();
+    ASSERT_TRUE(pump_until_ready(ioc, close_fut)) << "close() did not complete within 10s after timeout";
     (void)close_fut.get();
 }
 
@@ -641,8 +678,7 @@ TEST(SessionGracefulCloseFlushesFileStore, FlushRunsAndFramesDurableAfterClose) 
         // Drive to Active: open() → LogonSent → inbound Logon-ack → Active.
         {
             auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
-            ioc.run_for(200ms);
-            ioc.restart();
+            ASSERT_TRUE(pump_until_ready(ioc, fut)) << "open() did not complete within 10s";
             ASSERT_TRUE(fut.get().has_value()) << "open() should succeed";
             ASSERT_EQ(sess.state(), fixpp::session::fsm_state::LogonSent);
         }
@@ -652,8 +688,7 @@ TEST(SessionGracefulCloseFlushesFileStore, FlushRunsAndFramesDurableAfterClose) 
         auto logon_ack = make_logon_frame("FIX.4.2", 1, "TW", "ISLD", 30);
         {
             auto fut = asio::co_spawn(ioc, sess.on_inbound_frame(logon_ack), asio::use_future);
-            ioc.run_for(200ms);
-            ioc.restart();
+            ASSERT_TRUE(pump_until_ready(ioc, fut)) << "Logon-ack did not complete within 10s";
             ASSERT_TRUE(fut.get().has_value()) << "Logon-ack inbound should succeed";
             ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active);
         }
