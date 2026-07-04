@@ -17,6 +17,10 @@
 #include "fixpp/core/decimal_alias.hpp"
 #include "fixpp/core/error.hpp"
 
+#if defined(_MSC_VER)
+#include <intrin.h>
+#endif
+
 namespace fixpp::core {
 
 // Canonical pod_decimal exponent domain per 2a §4.2: exponent ∈ [kCanonicalExpMin,
@@ -237,9 +241,83 @@ expected_t<std::size_t> decimal_traits<pod_decimal>::to_chars(pod_decimal const&
     return len;
 }
 
+// ── 060-int128-decimal-compare T004: wide-multiply compare primitives ──────
+// Internal, TU-local. Unsigned 64x64->128 widening multiply: returns the low
+// 64 bits, writes the high 64 bits to *hi. Total, noexcept, no allocation on
+// any #if branch (data-model.md "Internal primitive" mul_u64_wide contract).
+// Selection order puts clang-cl (_MSC_VER **and** __SIZEOF_INT128__) on the
+// __int128 branch (research.md R2). FIXPP_DECIMAL_FORCE_PORTABLE_MUL is
+// defined BARE (no value) by CMakeLists.txt T002 — guard with defined(...),
+// never `#if FIXPP_DECIMAL_FORCE_PORTABLE_MUL` (that expands to `#if ` and
+// breaks the build when the option is ON).
+static inline std::uint64_t mul_u64_wide(std::uint64_t a, std::uint64_t b,
+                                          std::uint64_t* hi) noexcept {
+#if defined(__SIZEOF_INT128__) && !defined(FIXPP_DECIMAL_FORCE_PORTABLE_MUL)
+    unsigned __int128 p = static_cast<unsigned __int128>(a) * b;
+    *hi = static_cast<std::uint64_t>(p >> 64);
+    return static_cast<std::uint64_t>(p);
+#elif defined(_MSC_VER) && defined(_M_X64) && !defined(FIXPP_DECIMAL_FORCE_PORTABLE_MUL)
+    return _umul128(a, b, hi);
+#elif defined(_MSC_VER) && defined(_M_ARM64) && !defined(FIXPP_DECIMAL_FORCE_PORTABLE_MUL)
+    *hi = __umulh(a, b);
+    return a * b;
+#else
+    // Portable 32-bit-limb schoolbook (Hacker's Delight mulhilo): split a, b
+    // into hi/lo 32-bit halves, four partial products, combine carries into
+    // the full 128-bit product (hi, lo). No 64-bit intermediate overflows.
+    const std::uint64_t a_lo = a & 0xFFFFFFFFULL;
+    const std::uint64_t a_hi = a >> 32;
+    const std::uint64_t b_lo = b & 0xFFFFFFFFULL;
+    const std::uint64_t b_hi = b >> 32;
+
+    std::uint64_t t = a_lo * b_lo;
+    const std::uint64_t w0 = t & 0xFFFFFFFFULL;
+    std::uint64_t k = t >> 32;
+
+    t = a_hi * b_lo + k;
+    const std::uint64_t w1 = t & 0xFFFFFFFFULL;
+    const std::uint64_t w2 = t >> 32;
+
+    t = a_lo * b_hi + w1;
+    k = t >> 32;
+
+    *hi = a_hi * b_hi + w2 + k;
+    return (t << 32) | w0;
+#endif
+}
+
+// kPow10[k] = 10^k for k in [0, 18]; 10^18 < 2^63 fits uint64_t. Only indexed
+// for k <= 18 — the k >= 19 dominance guard in compare() caps the index
+// before any access (data-model.md kPow10 contract; no 10^19..10^38 entries
+// needed).
+static constexpr std::uint64_t kPow10[19] = {
+    1ULL,
+    10ULL,
+    100ULL,
+    1000ULL,
+    10000ULL,
+    100000ULL,
+    1000000ULL,
+    10000000ULL,
+    100000000ULL,
+    1000000000ULL,
+    10000000000ULL,
+    100000000000ULL,
+    1000000000000ULL,
+    10000000000000ULL,
+    100000000000000ULL,
+    1000000000000000ULL,
+    10000000000000000ULL,
+    100000000000000000ULL,
+    1000000000000000000ULL,
+};
+
 // ── T020: compare ────────────────────────────────────────────────────────────
-// Digit-string comparison per 2a §6.3 / research.md D-5.
-// No __int128. O(≤19 iterations). noexcept.
+// Same-exponent: direct signed-mantissa compare (R3 hoist, unchanged). Different-
+// exponent: exact wide-integer compare per amended 2a §6.3 / research.md R1 —
+// k >= 19 magnitude dominance (no multiply) else one mul_u64_wide 64x64->128
+// widening multiply + two-limb (hi,lo) compare, sign flip applied at the end.
+// noexcept. O(1) — no loops, no divisions.
 
 std::strong_ordering decimal_traits<pod_decimal>::compare(pod_decimal const& a,
                                                           pod_decimal const& b) noexcept {
@@ -278,118 +356,75 @@ std::strong_ordering decimal_traits<pod_decimal>::compare(pod_decimal const& a,
         return a.mantissa <=> b.mantissa;
     }
 
-    // Step 2: canonicalize — strip trailing base-10 zeros from each mantissa
-    // (equivalent to increasing exponent while dividing mantissa by 10)
-    std::int64_t am = a.mantissa;
-    std::int64_t bm = b.mantissa;
-    int ae = a.exponent;
-    int be = b.exponent;
-
-    auto strip_zeros = [](std::int64_t m, int& e) {
-        while (m != 0 && m % 10 == 0) {
-            m /= 10;
-            ++e;
-        }
-        return m;
-    };
-    am = strip_zeros(am, ae);
-    bm = strip_zeros(bm, be);
-
-    if (am == 0 && bm == 0) {
+    // Step 2: raw-mantissa zero filter — 0 x 10^e == 0 for any e, so a zero
+    // operand compares purely on the other operand's sign, with no scaling
+    // needed (data-model.md "Compare control flow (target state)" zero
+    // filter). Reads RAW mantissa (no canonicalization).
+    if (a.mantissa == 0 && b.mantissa == 0) {
         return std::strong_ordering::equal;
     }
-    if (am == 0) {
+    if (a.mantissa == 0) {
         return b_neg ? std::strong_ordering::greater : std::strong_ordering::less;
     }
-    if (bm == 0) {
+    if (b.mantissa == 0) {
         return a_neg ? std::strong_ordering::less : std::strong_ordering::greater;
     }
 
-    // Step 3: magnitude bucket — digit_count + exponent gives the integer-part magnitude
-    // digit_count(m) = floor(log10(|m|)) + 1
-    auto digit_count = [](std::int64_t m) -> int {
-        if (m < 0) {
-            m = -m;
+    // Step 3: exact wide-integer magnitude compare (research.md R1; T004/T005).
+    // Both mantissas are nonzero and non-sentinel (INT64_MIN excluded at
+    // Step 0) and same-signed (Step 1), so negation to an unsigned magnitude
+    // is safe.
+    const std::uint64_t mag_a =
+        static_cast<std::uint64_t>(a.mantissa < 0 ? -a.mantissa : a.mantissa);
+    const std::uint64_t mag_b =
+        static_cast<std::uint64_t>(b.mantissa < 0 ? -b.mantissa : b.mantissa);
+
+    // k computed in `int` (not int8_t) so an out-of-canonical-domain exponent
+    // difference cannot overflow — the comparator stays total beyond the
+    // canonical [-38, 0] domain (data-model.md pod_decimal note).
+    const int ae = a.exponent;
+    const int be = b.exponent;
+    const bool a_scales = ae > be;
+    const int k = a_scales ? (ae - be) : (be - ae);
+
+    // mag_scaled is the operand at the LARGER raw exponent — it must be
+    // scaled up by 10^k to compare against `other` at equal effective scale.
+    const std::uint64_t mag_scaled = a_scales ? mag_a : mag_b;
+    const std::uint64_t other = a_scales ? mag_b : mag_a;
+
+    auto invert = [](std::strong_ordering o) {
+        if (o == std::strong_ordering::less) {
+            return std::strong_ordering::greater;
         }
-        int n = 0;
-        while (m > 0) {
-            m /= 10;
-            ++n;
+        if (o == std::strong_ordering::greater) {
+            return std::strong_ordering::less;
         }
-        return n;
+        return std::strong_ordering::equal;
     };
-    const int a_mag = digit_count(am) + ae;
-    const int b_mag = digit_count(bm) + be;
 
-    if (a_mag != b_mag) {
-        bool a_greater = (a_mag > b_mag);
-        if (a_neg) {
-            a_greater = !a_greater;
-        }
-        return a_greater ? std::strong_ordering::greater : std::strong_ordering::less;
+    std::strong_ordering scaled_vs_other = std::strong_ordering::equal;
+    if (k >= 19) {
+        // Dominance, no multiply: mag_scaled >= 1 (zero filtered above) so
+        // mag_scaled * 10^19 >= 10^19 > INT64_MAX >= other (research.md R1).
+        scaled_vs_other = std::strong_ordering::greater;
+    } else {
+        // mag_scaled <= INT64_MAX < 2^63, kPow10[k] <= 10^18 < 2^60, so the
+        // product is < 2^123 and fits the 128-bit (hi, lo) pair exactly
+        // (research.md R1 bound proof). `hi` MUST be consulted — dropping it
+        // silently narrows to 64 bits (data-model.md mul_u64_wide invariant).
+        std::uint64_t hi;
+        const std::uint64_t lo = mul_u64_wide(mag_scaled, kPow10[k], &hi);
+        scaled_vs_other = (hi != 0 || lo > other)
+                              ? std::strong_ordering::greater
+                              : (lo == other ? std::strong_ordering::equal
+                                             : std::strong_ordering::less);
     }
 
-    // Step 4 fast path: same exponent — direct signed-mantissa compare.
-    // At equal exponent, value = mantissa × 10^ae, and 10^ae > 0, so the
-    // ordering of values is identical to the signed ordering of mantissas
-    // for both signs (and sign mismatch is already filtered at Step 1).
-    // This is the hot path hammered by BM_decimal_compare and most
-    // production traffic; restored after Gate B P1 #1's fix was scoped
-    // too broadly (correctness bug only existed when ae != be).
-    if (ae == be) {
-        if (am == bm) {
-            return std::strong_ordering::equal;
-        }
-        return (am < bm) ? std::strong_ordering::less : std::strong_ordering::greater;
-    }
-
-    // Step 4 slow path: same magnitude bucket but different exponents —
-    // lexicographic digit-string compare on absolute mantissas per
-    // 2a-decimal.md §6.3, with sign flip applied at the end. Operates on
-    // |mantissa| (signed compare would conflate sign with magnitude across
-    // different scales — see Gate B P1 #1: same-bucket negatives misordered).
-    // INT64_MIN already excluded at step 0, so negation is safe.
-    char a_digits[19];
-    char b_digits[19];
-    auto extract_digits = [](std::int64_t m, char buf[19]) -> int {
-        if (m < 0) {
-            m = -m;
-        }
-        int n = 0;
-        if (m == 0) {
-            return n;
-        }
-        while (m > 0) {
-            buf[n++] = static_cast<char>(m % 10);
-            m /= 10;
-        }
-        for (int i = 0, j = n - 1; i < j; ++i, --j) {
-            std::swap(buf[i], buf[j]);
-        }
-        return n;
-    };
-    const int a_n = extract_digits(am, a_digits);
-    const int b_n = extract_digits(bm, b_digits);
-
-    // Shorter string is right-padded with zeros to the longer's length;
-    // this aligns the MSDs (same magnitude bucket invariant) and walks
-    // toward less-significant digits. Max 19 iterations.
-    const int max_n = (a_n > b_n) ? a_n : b_n;
-    std::strong_ordering abs_cmp = std::strong_ordering::equal;
-    for (int i = 0; i < max_n; ++i) {
-        const char da = (i < a_n) ? a_digits[i] : char{0};
-        const char db = (i < b_n) ? b_digits[i] : char{0};
-        if (da != db) {
-            abs_cmp = (da < db) ? std::strong_ordering::less : std::strong_ordering::greater;
-            break;
-        }
-    }
-
-    if (a_neg && abs_cmp != std::strong_ordering::equal) {
-        abs_cmp = (abs_cmp == std::strong_ordering::less) ? std::strong_ordering::greater
-                                                          : std::strong_ordering::less;
-    }
-    return abs_cmp;
+    // scaled_vs_other compares (mag_scaled*10^k) vs other; if `a` is the
+    // scaled side that's already a vs b, else it's b vs a and must be
+    // inverted. Sign flip mirrors the original :371-374 disposition.
+    const std::strong_ordering mag_cmp = a_scales ? scaled_vs_other : invert(scaled_vs_other);
+    return a_neg ? invert(mag_cmp) : mag_cmp;
 }
 
 // ── T021: from_pod, to_pod, predicates ──────────────────────────────────────

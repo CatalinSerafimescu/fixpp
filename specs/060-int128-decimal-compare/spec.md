@@ -150,9 +150,13 @@ a forced-fallback build define in a unit test) so it is covered, not just the na
 - **Out-of-canonical-domain exponents**: the C++ `decimal` explicit constructor does not validate, so
   the comparator must stay **total** over any `int8` exponent (delta > 38 via int8 extremes), not just
   `[−38,0]`. `k` is computed in `int` so there is no `int8` overflow.
-- **Guard-constant one-step margin**: `k = 19` and `k = 20` both agree at the boundary (a `19→20`
-  mutant is semantically equivalent); the real breaking points are `k = 20` near `INT64_MAX` (guard
-  arm) and the `hi`-limb consultation — those are the witnesses to pin.
+- **Guard-constant one-step margin**: `k = 19` and `k = 20` agree in *result* at the boundary, but a
+  `19→20` mutant is **not** benign — `kPow10` is sized exactly to the `k ≥ 19` guard (19 entries, max
+  valid index 18), so `k ≥ 20` reads `kPow10[19]` out of bounds at k=19 (ASan-confirmed): the guard and
+  the table size are jointly load-bearing for **memory safety**, and the mutant is killed via the ASan
+  lane (measured at T009, superseding the earlier ex-ante "semantically equivalent" prediction). The
+  real breaking points are `k = 20` near `INT64_MAX` (guard arm), the k=19 dominance boundary, and the
+  `hi`-limb consultation — those are the witnesses to pin.
 - **Sign flip**: mixed signs decided by the (unchanged) sign filter; below it comparison is on
   magnitudes with the result flipped for negative — identical flip discipline to today's comparator
   (the Gate-B P1 #1 same-bucket-negatives lesson).
@@ -186,21 +190,30 @@ a forced-fallback build define in a unit test) so it is covered, not just the na
   bound proof (`k ≥ 19` dominance + product `< 2^123`) and recording that observable semantics are
   unchanged. Because this feature also **reclassifies C1 from an opt-in low-latency MODE candidate to a
   default-path, semantics-preserving speed swap** (no mode flag, per Overview `:19-21`), the amendment
-  MUST NOT merely add a cross-reference — it MUST land, in the same PR, a **dated supersession note
-  (2026-07-04)** at every site that still frames C1 as opt-in-mode, so no document contradicts the
-  default-path decision (SC-005). The amendment MUST touch:
+  MUST NOT merely add a cross-reference — it MUST land a **dated supersession note (2026-07-04)** at
+  every site that still frames C1 as opt-in-mode, so no document contradicts the default-path decision
+  (SC-005). The amendment MUST touch 5 sites, split by repository — sites 1–3
+  live inside this library submodule and MUST land in the same (library) PR as the code change; sites
+  4–5 live in the **parent monorepo** (`research/G19-fix-fpml-iso20022/phases/...` and
+  `.../remaining-work/...`, outside this submodule's git tree — confirmed via `git ls-files`, 2026-07-04)
+  and therefore **cannot** be part of the library PR by construction; they land as a **separate,
+  post-merge parent-repo commit** immediately following the submodule-pointer bump, per the established
+  close-out convention (precedent: `059-outbound-store-fail-closed` — PR #163 merged in `b48bcfd`, its
+  `remaining-work/perf-and-hardening-findings.md` update landed in the later parent commit
+  `790e6b1 docs(remaining-work): 059 close-out`). SC-005's "after merge" verification wording already
+  matches this split — no change needed there.
   - `.specify/2a-decimal.md §6.3` — guarded algorithm + bound proof (retire "No wide-int dependency").
   - `specs/001-core-decimal/research.md D-5` — supersession note.
   - the `src/core/decimal.cpp` contract comment — drop "No `__int128`", cite amended §6.3.
-  - `02-lowlatency-recommendations.md`, at **all three C1 framings**: the **C1 Tier-C entry** (`:365+`),
+  - **(parent-repo, post-merge)** `02-lowlatency-recommendations.md`, at **all three C1 framings**: the **C1 Tier-C entry** (`:365+`),
     the **Tier-C preamble caveat** (`:354-362` — the "None of them is a default-path change … opt-in
     low-latency MODE" set-level framing, which MUST be carved out for C1), and the **"Considered and
-    rejected: `__int128`" bullet** (`:357-359`) — a dated supersession note reclassifying C1 as a
+    rejected: `__int128`" bullet** (`:600-611`) — a dated supersession note reclassifying C1 as a
     default-path swap, not just a pointer.
-  - `remaining-work/perf-and-hardening-findings.md`, at **all three C1 sites**: the Cluster-2 residual
-    line (`:62`), the **C1 table row** (`:72`), and the **"Low-latency MODE" list entry** (`:141`). The
-    C1 row MUST be **rewritten** to state the default-path reclassification (semantics-preserving speed
-    swap), **not merely flipped to DONE**.
+  - **(parent-repo, post-merge)** `remaining-work/perf-and-hardening-findings.md`, at **all three C1
+    sites**: the Cluster-2 residual line (`:62`), the **C1 table row** (`:72`), and the **"Low-latency
+    MODE" list entry** (`:141`). The C1 row MUST be **rewritten** to state the default-path
+    reclassification (semantics-preserving speed swap), **not merely flipped to DONE**.
 - **FR-010**: Verification MUST include a **differential oracle** — a retained verbatim copy of the
   current digit-string comparator as a test-local reference — asserting `strong_ordering` agreement over
   (a) a **fixed-seed deterministic** full-domain corpus biased toward digit-count boundaries with in- and
@@ -242,8 +255,10 @@ a forced-fallback build define in a unit test) so it is covered, not just the na
   comparator and the digit-string reference across the fixed-seed deterministic full-domain corpus and
   the extended Python-`Decimal` corpus, **reproducibly** on a normal Tier-1 CI run.
 - **SC-002**: Every directed witness in the matrix passes, and each is demonstrated to **fail** when its
-  targeted mutant is introduced (mutation-tested), with the documented semantically-equivalent mutant
-  (`19→20`) recorded as an accepted no-kill.
+  targeted mutant is introduced (mutation-tested). The `19→20` guard mutant — predicted ex-ante as a
+  benign semantically-equivalent no-kill — was measured at T009 to be **result-equivalent but killed via
+  the ASan lane** (it reads `kPow10[19]` out of bounds; the guard and table size are jointly load-bearing
+  for memory safety), and is recorded as such in the kill table.
 - **SC-003**: The cross-exponent compare regime's measured instruction count (single-filter callgrind on
   `BM_decimal_compare_diff_exp`) **decreases** relative to the pre-feature baseline, with no regression
   on the same-exponent and diff-bucket benchmarks.

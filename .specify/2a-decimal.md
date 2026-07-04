@@ -332,7 +332,32 @@ Pre-condition: `exponent ∈ [-38, 0]` (the canonical domain). If a `pod_decimal
 
 ### 6.3 Equality and comparison (canonicalized, no overflow)
 
-Two `pod_decimal`s represent the same value if their numeric value matches: `{1, 0}` (= 1) equals `{10, -1}` (= 1.0) equals `{100, -2}` (= 1.00). Comparison is *not* implemented by scaling to a common exponent in a wider integer (the previous `__int128` fallback was unsound — see Codex P2 + Opus P1 #3). Instead:
+Two `pod_decimal`s represent the same value if their numeric value matches: `{1, 0}` (= 1) equals `{10, -1}` (= 1.0) equals `{100, -2}` (= 1.00).
+
+> **AMENDED 2026-07-04 (feature 060-int128-decimal-compare — reverses the v0.1 "no `__int128`" decision).**
+> The v0.1 rejection targeted an *unguarded* scale-to-common-exponent, which overflows even a 128-bit
+> integer at the full exponent delta (≈189 bits). That specific design was correctly rejected. But a
+> **guarded exact wide-integer compare is sound and is now the shipped different-exponent path**, proven
+> by these bounds (the bound proof leads):
+> - After the sentinel filter, sign filter, the same-exponent hoist, and the raw-mantissa zero filter,
+>   let `k = |ae − be|` (computed in `int`, so it is total over out-of-canonical `int8` exponents).
+> - **`k ≥ 19` ⇒ magnitude dominance, no multiply**: `|m|·10^19 ≥ 10^19 > INT64_MAX ≥ |other|`, so the
+>   higher-exponent operand strictly dominates (ordered by sign). A 19-entry `kPow10[0..18]` table is
+>   sized *exactly* to this guard — the guard constant `19` and the table size are jointly load-bearing
+>   for memory safety (indices never exceed 18).
+> - **`k ≤ 18` ⇒ one 64×64→128 widening multiply**: `|m|·10^k ≤ (2^63−1)·10^18 < 2^122.8 < 2^128`, i.e.
+>   `< 2^123` with >5 bits of headroom — fits an unsigned 128-bit product exactly, compared against the
+>   other magnitude via a two-limb `(hi, lo)` compare (`hi` MUST be consulted). Sign is applied by a final
+>   flip; comparison runs on magnitudes, so **no signed-128 is needed**.
+> The wide product is provided by one TU-local `mul_u64_wide` primitive selected per compiler at the
+> multiply *instruction* only (`unsigned __int128` on GCC/Clang/clang-cl; `_umul128` on MSVC x64;
+> `__umulh`+`a*b` on MSVC ARM64; a portable 32-bit-limb `#else` fallback). Result-identity vs the retained
+> digit-string reference is a hard Tier-1 differential-oracle gate over a full-domain corpus. See
+> `specs/060-int128-decimal-compare/` (spec/research R1/data-model/contract) and `[001 research D-5]`.
+> The pseudocode below is the **retained frozen reference** (the pre-060 digit-string algorithm) that the
+> new path is proven byte-identical to — it is NOT the shipped different-exponent path.
+
+Historically (v0.1), comparison was *not* implemented by scaling to a common exponent in a wider integer (the previous unguarded `__int128` fallback was unsound — see Codex P2 + Opus P1 #3); the frozen digit-string reference below realizes that v0.1 decision and now serves as the differential-oracle source of truth:
 
 ```
 compare(a, b):
@@ -372,7 +397,7 @@ compare(a, b):
 
 `pod_decimal_invalid` orders strictly greater than every finite value (and equal only to itself) — implemented by step 0 above. Convenient for sort stability of mixed valid/invalid arrays during debugging. Total order: `strong_ordering`.
 
-The algorithm runs in O(digit_count) = O(1) since digits ≤ 19. No multiplication, no wide-int dependency, no MSVC-vs-Clang algorithm split.
+The frozen reference above runs in O(digit_count) = O(1) since digits ≤ 19. **Retired 2026-07-04 (060):** the earlier "No multiplication, no wide-int dependency" property no longer describes the shipped different-exponent path (which now uses one guarded 64×64→128 widening multiply per the AMENDED note above); it still holds for the same-exponent hoist and the frozen reference. The **"no MSVC-vs-Clang algorithm split"** virtue is *retained and re-affirmed*: there is one algorithm across all toolchains, with a per-compiler primitive only at the multiply instruction (§ the `mul_u64_wide` selection).
 
 Tests pin the table from `[FIX50SP2 §3.3]` examples and cross-check against an arbitrary-precision oracle (Python `Decimal`, run in Tier 1 — see §9 seam #7).
 

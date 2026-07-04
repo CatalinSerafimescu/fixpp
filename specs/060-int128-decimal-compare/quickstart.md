@@ -10,8 +10,11 @@ All commands run from the library submodule root:
 # Deterministic C++ differential corpus + witness matrix + antisymmetry/transitivity
 ctest --test-dir build/<preset> -R decimal_compare_diff_oracle --output-on-failure
 
-# Existing unit regressions (AC-C1..C5) must stay green
-ctest --test-dir build/<preset> -R decimal_compare_test --output-on-failure
+# Existing unit regressions (AC-C1..C5) must stay green.
+# NOTE: these are gtest-discovered as `DecimalCompare.<Name>`, NOT a ctest target
+# named `decimal_compare_test` — a `-R decimal_compare_test` filter matches ZERO
+# tests and still exits 0 (false-green). Anchor on the discovered gtest name:
+ctest --test-dir build/<preset> -R '^DecimalCompare\.' --output-on-failure
 
 # Extended Python-Decimal oracle (seed=42 + cross-exponent pairs)
 ctest --test-dir build/<preset> -R decimal_compare_oracle --output-on-failure
@@ -47,11 +50,15 @@ cmake --build build/fuzz --target fuzz_decimal_compare -j2
 ## 5. Benchmark + baseline (Article VIII)
 
 ```bash
-# Primary win (diff-exp) + no-regression (same-exp, diff-bucket)
-./build/<release>/bin/decimal_bench --benchmark_filter='BM_decimal_compare'
-# Deterministic instruction count (the real gate; WSL2 ns is shape-only):
-valgrind --tool=callgrind --callgrind-out-file=cg.out \
-  ./build/<release>/bin/decimal_bench --benchmark_filter='BM_decimal_compare_diff_exp'
+# Primary win (diff-exp) + no-regression (same-exp, diff-bucket).
+# NOTE: bench/core/CMakeLists.txt overrides RUNTIME_OUTPUT_DIRECTORY, so the binary
+# is at build/<release>/bench/core/decimal_bench, NOT build/<release>/bin/.
+./build/<release>/bench/core/decimal_bench --benchmark_filter='BM_decimal_compare'
+# Deterministic instruction count (the real gate; WSL2 ns is shape-only). Add
+# --trace-children=yes (google-benchmark re-execs) + --benchmark_min_time=1000000x
+# so compare's self-Ir dominates one-time process init:
+valgrind --tool=callgrind --trace-children=yes --callgrind-out-file=cg.out \
+  ./build/<release>/bench/core/decimal_bench --benchmark_filter='^BM_decimal_compare_diff_exp$' --benchmark_min_time=1000000x
 # Update bench/baselines/decimal_baseline.json in this PR with rationale ([const §VIII.2/3])
 ```
 

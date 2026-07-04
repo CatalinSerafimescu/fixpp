@@ -1,9 +1,10 @@
 {
+  "_note": "060-int128-decimal-compare T018 perf gate (2026-07-04): compare()'s different-exponent path (BM_decimal_compare_diff_exp) replaced the digit-string canonicalize+lexicographic-walk slow path with a k>=19 magnitude-dominance guard + one mul_u64_wide 64x64->128 widening multiply (research.md R1). Deterministic callgrind self-Ir of compare() at --benchmark_min_time=1000000x (the real gate; WSL2 ns below is shape-only per NFR-001): BM_decimal_compare_diff_exp 205->69 Ir/call (-66.3%, the primary intended win); BM_decimal_compare 38->29 Ir/call (-23.7%, no regression) and BM_decimal_compare_diff_bucket 103->66 Ir/call (-35.9%, no regression) both IMPROVED rather than merely holding within +-5% -- the old digit_count-based magnitude-bucket early-exit (shared by the diff-bucket regime) was removed as part of the same replacement and now also routes through the single wide-multiply comparator. No benchmark regressed. Full pre/post Ir table + commands: specs/060-int128-decimal-compare/research.md R3 'post-change measurement (T018)'. Pre-change basis: same file, T001 section.",
   "context": {
-    "date": "2026-05-14T00:02:11+03:00",
+    "date": "2026-07-04T14:32:12+03:00",
     "host_name": "WSLUBUNTU24.04",
-    "executable": "./build/linux-clang-release/bench/core/decimal_bench",
-    "num_cpus": 8,
+    "executable": "build/linux-clang-release/bench/core/decimal_bench",
+    "num_cpus": 10,
     "mhz_per_cpu": 3593,
     "cpu_scaling_enabled": false,
     "aslr_enabled": false,
@@ -30,10 +31,14 @@
         "type": "Unified",
         "level": 3,
         "size": 16777216,
-        "num_sharing": 8
+        "num_sharing": 10
       }
     ],
-    "load_avg": [0.949707,0.611328,0.635742],
+    "load_avg": [
+      1.00586,
+      0.654297,
+      0.463379
+    ],
     "library_version": "v1.9.5",
     "library_build_type": "release",
     "json_schema_version": 1
@@ -48,11 +53,11 @@
       "repetitions": 1,
       "repetition_index": 0,
       "threads": 1,
-      "iterations": 92692148,
-      "real_time": 7.4403546889079166e+00,
-      "cpu_time": 7.7311931427028746e+00,
+      "iterations": 89261714,
+      "real_time": 7.642049725788357,
+      "cpu_time": 7.975434126214516,
       "time_unit": "ns",
-      "items_per_second": 1.2934614121545455e+08
+      "items_per_second": 125385024.0845313
     },
     {
       "name": "BM_decimal_format",
@@ -63,11 +68,11 @@
       "repetitions": 1,
       "repetition_index": 0,
       "threads": 1,
-      "iterations": 39358723,
-      "real_time": 1.6740600908194409e+01,
-      "cpu_time": 1.7395033065478270e+01,
+      "iterations": 39948897,
+      "real_time": 16.914031944351535,
+      "cpu_time": 17.69277086674008,
       "time_unit": "ns",
-      "items_per_second": 5.7487674569850281e+07
+      "items_per_second": 56520259.462572895
     },
     {
       "name": "BM_decimal_compare",
@@ -78,11 +83,11 @@
       "repetitions": 1,
       "repetition_index": 0,
       "threads": 1,
-      "iterations": 72720747,
-      "real_time": 9.2108590001422623e+00,
-      "cpu_time": 9.5710684187553845e+00,
+      "iterations": 396289559,
+      "real_time": 1.6490957285101642,
+      "cpu_time": 1.781189632603972,
       "time_unit": "ns",
-      "items_per_second": 1.0448154336044747e+08
+      "items_per_second": 561422535.644378
     },
     {
       "name": "BM_decimal_compare_diff_exp",
@@ -93,11 +98,11 @@
       "repetitions": 1,
       "repetition_index": 0,
       "threads": 1,
-      "iterations": 56580748,
-      "real_time": 1.2414822069890901e+01,
-      "cpu_time": 1.2882529654786468e+01,
+      "iterations": 166654273,
+      "real_time": 3.784241175743564,
+      "cpu_time": 4.087406969757087,
       "time_unit": "ns",
-      "items_per_second": 7.7624505962495714e+07
+      "items_per_second": 244653886.29002354
     },
     {
       "name": "BM_decimal_compare_diff_bucket",
@@ -108,11 +113,11 @@
       "repetitions": 1,
       "repetition_index": 0,
       "threads": 1,
-      "iterations": 124304476,
-      "real_time": 5.5121497234022110e+00,
-      "cpu_time": 5.7277177935249926e+00,
+      "iterations": 174189834,
+      "real_time": 3.751181656216588,
+      "cpu_time": 4.0516392133423835,
       "time_unit": "ns",
-      "items_per_second": 1.7458960724819037e+08
+      "items_per_second": 246813683.8805679
     }
   ]
 }

@@ -104,8 +104,8 @@ bench/baselines/decimal_baseline.json        # UPDATE in-PR with rationale ([con
 .specify/2a-decimal.md                        # AMEND §6.3 (algorithm + bound proof; semantics unchanged)
 specs/001-core-decimal/research.md            # AMEND D-5 (supersession note)
 # + src/core/decimal.cpp contract comment (drop "No __int128")
-# + research/.../perf-investigation/02-lowlatency-recommendations.md (dated (2026-07-04) supersession notes at all three C1 framings — Tier-C entry :365+, Tier-C preamble caveat :354-362, rejected-__int128 bullet :357-359 — not just a pointer)
-# + research/.../remaining-work/perf-and-hardening-findings.md (reclassify C1 default-path at all three sites: :62, :72 rewritten not just flipped, :141 Low-latency-MODE list — post-merge close-out)
+# + research/.../perf-investigation/02-lowlatency-recommendations.md (parent-repo, post-merge close-out — dated (2026-07-04) supersession notes at all three C1 framings — Tier-C entry :365+, Tier-C preamble caveat :354-362, rejected-__int128 bullet :600-611 — not just a pointer)
+# + research/.../remaining-work/perf-and-hardening-findings.md (parent-repo, post-merge close-out — reclassify C1 default-path at all three sites: :62, :72 rewritten not just flipped, :141 Low-latency-MODE list)
 ```
 
 **Structure Decision**: Single-project C++ library layout, already established. The change is confined

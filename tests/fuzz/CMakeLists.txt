@@ -11,6 +11,19 @@ set_target_properties(fuzz_decimal_parse PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
 )
 
+# T010 — 060-int128-decimal-compare — differential libFuzzer target.
+# Decodes two pod_decimals from the input and asserts the production
+# compare() agrees bit-for-bit with the FROZEN reference_compare (shared
+# with tests/core/decimal_compare_diff_oracle_test.cpp via
+# decimal_reference_compare.hpp); mismatch traps (SC-006).
+add_executable(fuzz_decimal_compare fuzz_decimal_compare.cpp)
+target_link_libraries(fuzz_decimal_compare PRIVATE fixpp_core)
+target_compile_options(fuzz_decimal_compare PRIVATE -fsanitize=fuzzer,address,undefined)
+target_link_options(fuzz_decimal_compare PRIVATE -fsanitize=fuzzer,address,undefined)
+set_target_properties(fuzz_decimal_compare PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+)
+
 # Seam #8 of `[2c §9]` — XmlLoader fuzzer for 002-dictionary-xml-loader per
 # `[const §VII.7]`. Added in Gate A round 1 per Opus root cause #3.
 # fixpp_dictionary link target lands when /implement wires up `src/dictionary/`;

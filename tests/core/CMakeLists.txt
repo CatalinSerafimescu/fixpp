@@ -137,3 +137,50 @@ target_link_libraries(error_020_completeness PRIVATE
 add_test(NAME error_020_completeness COMMAND error_020_completeness)
 set_tests_properties(error_020_completeness PROPERTIES
   LABELS "020;foundational;error_slots")
+
+# ── 060-int128-decimal-compare T003 — differential-oracle harness ──────────
+# Deterministic (seed=42) boundary-biased corpus asserting the production
+# decimal_traits<pod_decimal>::compare agrees with a FROZEN verbatim copy of
+# today's (pre-swap) digit-string comparator. Trivially green pre-T005;
+# becomes discriminating once T005 swaps the different-exponent slow path.
+# Own executable (not gtest_discover_tests) so `ctest -R decimal_compare_diff_oracle`
+# matches the ctest test name directly.
+add_executable(decimal_compare_diff_oracle_test decimal_compare_diff_oracle_test.cpp)
+target_link_libraries(decimal_compare_diff_oracle_test PRIVATE
+  fixpp_core
+  GTest::gtest
+  GTest::gtest_main
+)
+add_test(NAME decimal_compare_diff_oracle COMMAND decimal_compare_diff_oracle_test)
+set_tests_properties(decimal_compare_diff_oracle PROPERTIES
+  LABELS "060;foundational;decimal_compare"
+  TIMEOUT 120)
+
+# ── 060-int128-decimal-compare T008 — direct mul_u64_wide unit test ─────────
+# Two builds of the SAME .cpp: the default target compiles the __int128
+# branch of the flag-identical mul_u64_wide copy; the _portable target
+# forces FIXPP_DECIMAL_FORCE_PORTABLE_MUL so it compiles the #else
+# schoolbook branch instead. Self-contained (no fixpp_core dependency —
+# the primitive under test is copied inline); GTest only.
+add_executable(decimal_mul_u64_wide_test decimal_mul_u64_wide_test.cpp)
+target_link_libraries(decimal_mul_u64_wide_test PRIVATE
+  GTest::gtest
+  GTest::gtest_main
+)
+add_test(NAME decimal_mul_u64_wide COMMAND decimal_mul_u64_wide_test)
+set_tests_properties(decimal_mul_u64_wide PROPERTIES
+  LABELS "060;US2;decimal_compare"
+  TIMEOUT 120)
+
+add_executable(decimal_mul_u64_wide_test_portable decimal_mul_u64_wide_test.cpp)
+target_compile_definitions(decimal_mul_u64_wide_test_portable PRIVATE
+  FIXPP_DECIMAL_FORCE_PORTABLE_MUL
+)
+target_link_libraries(decimal_mul_u64_wide_test_portable PRIVATE
+  GTest::gtest
+  GTest::gtest_main
+)
+add_test(NAME decimal_mul_u64_wide_portable COMMAND decimal_mul_u64_wide_test_portable)
+set_tests_properties(decimal_mul_u64_wide_portable PROPERTIES
+  LABELS "060;US2;decimal_compare"
+  TIMEOUT 120)
