@@ -251,7 +251,7 @@ expected_t<std::size_t> decimal_traits<pod_decimal>::to_chars(pod_decimal const&
 // never `#if FIXPP_DECIMAL_FORCE_PORTABLE_MUL` (that expands to `#if ` and
 // breaks the build when the option is ON).
 static inline std::uint64_t mul_u64_wide(std::uint64_t a, std::uint64_t b,
-                                          std::uint64_t* hi) noexcept {
+                                         std::uint64_t* hi) noexcept {
 #if defined(__SIZEOF_INT128__) && !defined(FIXPP_DECIMAL_FORCE_PORTABLE_MUL)
     unsigned __int128 p = static_cast<unsigned __int128>(a) * b;
     *hi = static_cast<std::uint64_t>(p >> 64);
@@ -414,10 +414,9 @@ std::strong_ordering decimal_traits<pod_decimal>::compare(pod_decimal const& a,
         // silently narrows to 64 bits (data-model.md mul_u64_wide invariant).
         std::uint64_t hi;
         const std::uint64_t lo = mul_u64_wide(mag_scaled, kPow10[k], &hi);
-        scaled_vs_other = (hi != 0 || lo > other)
-                              ? std::strong_ordering::greater
-                              : (lo == other ? std::strong_ordering::equal
-                                             : std::strong_ordering::less);
+        scaled_vs_other = (hi != 0 || lo > other) ? std::strong_ordering::greater
+                                                  : (lo == other ? std::strong_ordering::equal
+                                                                 : std::strong_ordering::less);
     }
 
     // scaled_vs_other compares (mag_scaled*10^k) vs other; if `a` is the
