@@ -191,17 +191,6 @@ void OffsetTable::build(frame_view const& frame) noexcept {
         std::size_t i = 0;
         std::size_t const n = buf.size();
 
-        // R1: reserve entries_ to a tight upper bound so the push loop never
-        // doubles through the monotonic arena. The arena never frees, so vector
-        // doubling strands its old buffers (~16% of build Ir + D1 misses). Each
-        // field is at least 3 bytes ("t=<SOH>"), so n/3+1 bounds the count;
-        // clamp to the DoS cap so a large frame cannot over-reserve.
-        std::size_t reserve_est = (n / 3U) + 1U;
-        if (reserve_est > cfg_.max_offset_entries) {
-            reserve_est = cfg_.max_offset_entries;
-        }
-        entries_.reserve(reserve_est);
-
         // Length+Data carry: when the previous field was a Length tag, the
         // current (Data) field is read by fixed byte count rather than SOH
         // delimiter so embedded SOH inside Data values is handled correctly.
