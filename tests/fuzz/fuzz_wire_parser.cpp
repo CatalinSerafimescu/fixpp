@@ -29,7 +29,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <fixpp/wire/framer.hpp>
-#include <fixpp/wire/offset_table.hpp>  // detail::set_overlay_seed_for_testing (W-P3-2)
+#include <fixpp/wire/offset_table.hpp>
 #include <fixpp/wire/parser.hpp>
 #include <memory_resource>
 #include <span>
@@ -40,6 +40,9 @@
 #include "support/mock_dict_table.hpp"
 // Test-only factory — friend of frame_view.
 #include "support/frame_view_factory.hpp"
+// detail::set_overlay_seed_for_testing (W-P3-2) — declaration lives here, not
+// in the installed public offset_table.hpp.
+#include "support/wire_test_hooks.hpp"
 
 // Pin the overlay hash seed to a fixed value so crashes reproduce across runs
 // (the production seed is randomised per process — W-P3-2). Runtime hook, not a

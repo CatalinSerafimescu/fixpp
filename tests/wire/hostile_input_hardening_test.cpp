@@ -36,6 +36,7 @@
 #include <fixpp/wire/parser.hpp>
 
 #include "support/frame_view_factory.hpp"
+#include "support/wire_test_hooks.hpp"  // detail::set_overlay_seed_for_testing (W-P3-2)
 
 namespace {
 

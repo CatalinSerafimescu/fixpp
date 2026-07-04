@@ -176,14 +176,10 @@ private:
     mutable bool group_slices_reserved_ = false;
 };
 
-namespace detail {
-// TEST/FUZZ-ONLY: override the per-process overlay hash seed that mix() folds in
-// (W-P3-2). Lets the collision witness craft a deterministic 128-collision set
-// and the wire fuzzer stay reproducible WITHOUT compiling the library with a
-// fuzz-only macro (which would fuzz a different binary). MUST be called before
-// constructing the OffsetTable(s) under test. Never called on the production
-// path; the seed is otherwise randomised once per process.
-void set_overlay_seed_for_testing(std::uint32_t seed) noexcept;
-}  // namespace detail
-
 }  // namespace fixpp::wire
+
+// NOTE: the TEST/FUZZ-ONLY `detail::set_overlay_seed_for_testing` DECLARATION
+// (W-P3-2) has moved to the non-installed `tests/support/wire_test_hooks.hpp`
+// (Gate B PR #166 round-1 Finding 2b) so this installed public header exposes
+// no test-only hook. The DEFINITION stays in `src/wire/offset_table.cpp`
+// (external linkage unchanged).
