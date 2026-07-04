@@ -1019,3 +1019,46 @@ jobs:
       - name: Compare vs baseline (SOFT — exits 0 always)
         run: python3 tools/bench_compare.py bench/baselines/placeholder.json current.json
         continue-on-error: true  # SOFT gate this phase
+
+  # ── Required gate: the Tier 1 matrix must ACTUALLY have run green ──────────
+  # Closes the skip-into-green hole. The core build/test jobs are gated
+  # `if: needs.gate-precheck.outputs.proceed == 'true'`, and GitHub scores a
+  # SKIPPED job as success — so on any event that is NOT a fresh `run-tier1`
+  # label (every push/synchronize, or a `labeled` event for a different label)
+  # the matrix skips and the umbrella "Tier 1" check reports green having built
+  # and tested nothing. This REQUIRED job is RED unless the core jobs ran to
+  # success, so a PR cannot merge on a matrix that never ran; (re-)add the
+  # `run-tier1` label to fire the on-demand matrix and turn it green.
+  #
+  # INERT until branch protection is set to REQUIRE the "tier1-required" status
+  # check — that repo-settings change is a manual follow-up (see close-out).
+  # Ref: feedback_ci_gate_observes_not_asserts_witness_skips_into_green.
+  # tier2/tier3 share the green-on-skip family but have a DIFFERENT gate shape
+  # (per-label `filter` job, no `synchronize` trigger) — deferred to the CI batch.
+  tier1-required:
+    name: tier1-required
+    runs-on: ubuntu-latest
+    needs: [gate-precheck, linux, coverage, check-layers]
+    if: always()
+    steps:
+      - name: Assert the core Tier 1 matrix ran to success (no skip-into-green)
+        run: |
+          # A published release intentionally skips the C++ matrix (wheel-only).
+          if [ "${{ github.event_name }}" = "release" ]; then
+            echo "release event — C++ matrix intentionally skipped; gate not applicable."
+            exit 0
+          fi
+          gp='${{ needs.gate-precheck.result }}'
+          lx='${{ needs.linux.result }}'
+          cov='${{ needs.coverage.result }}'
+          cl='${{ needs.check-layers.result }}'
+          echo "gate-precheck=$gp  linux=$lx  coverage=$cov  check-layers=$cl"
+          fail=0
+          for kv in "gate-precheck=$gp" "linux=$lx" "coverage=$cov" "check-layers=$cl"; do
+            if [ "${kv#*=}" != "success" ]; then
+              echo "::error::Tier 1 job '${kv%%=*}' did not run to success (got '${kv#*=}'). The core build/test matrix must actually run — (re-)add the run-tier1 label to fire the on-demand matrix before merge."
+              fail=1
+            fi
+          done
+          [ "$fail" = 0 ] || exit 1
+          echo "Tier 1 core matrix ran to success."
