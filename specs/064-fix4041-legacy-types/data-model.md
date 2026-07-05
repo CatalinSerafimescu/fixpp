@@ -35,8 +35,8 @@ holds for all genuinely unknown types.
 
 ## E-2 — `field_data_type` (UNCHANGED — reference only)
 
-`include/fixpp/dict/field_ref.hpp:29` — the frozen `[FIX50SP2 §3.3]` enum. `UtcTimestamp` (`:22`) and
-`LocalMktDate` (`:25`) already exist; **no variant is added**. For the Phase-1 validator, both collapse to
+`include/fixpp/dict/field_ref.hpp:29` — the frozen `[FIX50SP2 §3.3]` enum. `UtcTimestamp` (`:50`) and
+`LocalMktDate` (`:53`) already exist; **no variant is added**. For the Phase-1 validator, both collapse to
 `field_type::String` via `field_type_from_data_type` (`field_type.hpp:98-114`) — so the E-1 additions are
 metadata-only, with no inbound-validation effect (research R4).
 

@@ -104,7 +104,7 @@ untouched.
 (`TAGNUM`, `LOCALMKTTIME`, `XID`, `XIDREF` → nearest enum). Those are *post-canonical* FIX 5.0 names; the
 two new rows are the *pre-canonical* legacy analogue. Same mechanism, same `resolve_field_type` linear
 scan, no new code path. `field_data_type::UtcTimestamp` and `::LocalMktDate` already exist
-(`include/fixpp/dict/field_ref.hpp:22,25`).
+(`include/fixpp/dict/field_ref.hpp:50,53`).
 
 **Scope of the AC-L8 relaxation** (recorded per FR-006/FR-007):
 - **AC-L8** (`specs/002-dictionary-xml-loader/data-model.md:297`, witness

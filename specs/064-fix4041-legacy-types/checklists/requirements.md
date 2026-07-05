@@ -33,6 +33,6 @@
 
 - The two type-mapping decisions (`TIME → UtcTimestamp`, `DATE → LocalMktDate`) were empirically verified
   and user-decided in-session; recorded under Clarifications rather than left as `[NEEDS CLARIFICATION]`.
-- `/speckit-clarify` still runs next per pipeline.md step 2 (mandatory for codegen/wire/session-adjacent
-  work) and per `[[feedback_always_invoke_speckit_clarify]]` — it may surface divergence the completeness
-  pass missed.
+- `/speckit-clarify` ran 2026-07-05 per pipeline.md step 2 (mandatory for codegen/wire/session-adjacent
+  work) and per `[[feedback_always_invoke_speckit_clarify]]`: 0 user questions, 1 factual resolution
+  recorded (the metadata-only / interop point; see spec.md Clarifications §2026-07-05 and plan.md).

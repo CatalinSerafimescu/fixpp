@@ -54,8 +54,8 @@ Spec-Kit feature with a Gate-A design review (user decision, 2026-07-05) — the
 | **VI §5** Normative References in `/specify` artifacts | `## Normative References` in spec.md | **PASS** — present; states no new OFFICIAL FIX rows, lists the AC-L8 anchor + `[const §I.1]`/`[FIX50SP2 §3.3]`. |
 | **IX §1** Coverage ≥95/85 on touched modules | Linux/Clang lcov on `xml_loader.cpp` | **PASS** — the two new rows are covered by the FIX40/41 load tests (both files use both types) and the typing assertions; no new uncovered branch. |
 | **IX §2** ASan/UBSan/TSan Tier-1 | loader parse path | **PASS** — no new allocation or unsafe op; the added rows are `constexpr` string_view compares. |
-| **IX §5 / X §3,§6** C-ABI frozen, abidiff | no C-ABI surface | **PASS** — no public header / C-ABI symbol / error variant touched (FR-008) → abidiff clean, no `/analyze` ABI-surface trigger. |
-| **XII** Field-type vocabulary / `[FIX50SP2 §3.3]` freeze | enum frozen; only alias rows added | **PASS** — the `field_data_type` **enum** is unchanged; the additions are `xml_name → existing-enum` collapse rows, the same mechanism as the existing post-canonical carve-out (research R5). The **relaxed contract is AC-L8** (a loader acceptance rule), reviewed by Gate A. |
+| **IX §5 / X §1,§6** C-ABI frozen, abidiff | no C-ABI surface | **PASS** — no public header / C-ABI symbol / error variant touched (FR-008) → abidiff clean, no `/analyze` ABI-surface trigger. |
+| **AC-L8** loader-acceptance contract (`specs/002-dictionary-xml-loader/data-model.md:297`) + `[FIX50SP2 §3.3]` enum contract | enum frozen; only alias rows added | **PASS** — the `field_data_type` **enum** is unchanged; the additions are `xml_name → existing-enum` collapse rows, the same mechanism as the existing post-canonical carve-out (research R5). The **relaxed contract is AC-L8** (a loader acceptance rule, not a constitution article — there is no field-type-freeze article), reviewed by Gate A. |
 | **XVI §3** `/clarify` mandatory before `/plan` | ran 2026-07-05 (0 user Q; 1 factual resolution) | **PASS** — both material decisions pre-resolved with the user; clarify surfaced + resolved the metadata-only/interop point. |
 | **XVII** Codex Gate A/B | AC-L8 relaxation | **PASS w/ obligation** — Gate A MUST review the AC-L8 relaxation + the QuickFIX `DATE` divergence; the bundle leads with the R2/R3 primary-source evidence + the R4 metadata-only proof. |
 | **XVIII §6** FIX 4.0/4.1 lowest priority, best-effort | runtime-XML only (no codegen) | **PASS** — scope is loadability + lookup only; no typed-message namespace / codegen (that stays post-v1.0 best-effort per §XVIII.6). |
@@ -131,4 +131,4 @@ refresh-recipe now includes FIX40/41).
 
 ## Gate A
 
-- _Pending — run `/gate-a 064-fix4041-legacy-types` next (pipeline step 4, before `/tasks`)._
+- Round 1 applied 2026-07-05: Codex P1=0 P2=1 P3=2; Opus post-judging P1=0 P2=1 P3=3; rewrite addresses RC (Constitution-Check Article XII mis-cite → AC-L8/[FIX50SP2 §3.3] governing source) + 3 P3 doc-consistency fixes (quickstart build targets, requirements.md clarify-past-tense, field_ref.hpp enum-variant line anchors). Reviews: research/reviews/codex_064-fix4041-legacy-types_gate_a_review.md, research/reviews/opus_064-fix4041-legacy-types_gate_a_adversarial_review.md.

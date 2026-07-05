@@ -23,7 +23,8 @@ done
 # Configure/build the dictionary test target (per the repo's Conan+CMake preset flow;
 # see feedback_conan_preset_build_infra_gotchas for the -of build/<preset> invocation).
 conan install . -of build/clang-debug --build=missing -s build_type=Debug
-cmake --preset clang-debug && cmake --build build/clang-debug --target dictionary_lookup_test -j2
+cmake --preset clang-debug && cmake --build build/clang-debug \
+  --target dictionary_lookup_test dictionary_negative_paths_test dictionary_xml_loader_test -j2
 ctest --test-dir build/clang-debug -R 'dictionary_(lookup|negative|xml_loader)' --output-on-failure
 ```
 
