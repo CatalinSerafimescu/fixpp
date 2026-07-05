@@ -42,12 +42,16 @@ diff against the prior pin is examined for grammar/schema drift).
 ## Refresh recipe
 
 When upstream lands a fix that we want to pick up (e.g., a corrected
-`<field>` declaration), refresh all nine files together at one new SHA:
+`<field>` declaration), refresh the seven **currently bundled** files together
+at one new SHA. Do NOT add `FIX40.xml` / `FIX41.xml` to this loop — they are
+D-004, deliberately not vendored until the loader accepts their legacy
+`DATE`/`TIME` types (see above); expand the loop to all nine only after that
+separate loader feature lands.
 
 ```bash
 SHA="<new-sha>"
 cd dictionaries
-for f in FIX40.xml FIX41.xml FIX42.xml FIX43.xml FIX44.xml \
+for f in FIX42.xml FIX43.xml FIX44.xml \
          FIX50.xml FIX50SP1.xml FIX50SP2.xml FIXT11.xml; do
   curl -sSL --fail \
     -o "$f" \
