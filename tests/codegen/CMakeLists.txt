@@ -25,6 +25,8 @@ set(FIXPP_CODEGEN_TESTS
   codegen_length_data_table_test
   codegen_group_entry_read_test
   codegen_nested_group_read_test
+  codegen_group_entry_alloc_gate_test
+  codegen_group_entry_generation_trap_test
 )
 
 foreach(target IN LISTS FIXPP_CODEGEN_TESTS)
@@ -47,6 +49,22 @@ foreach(target IN LISTS FIXPP_CODEGEN_TESTS)
   add_test(NAME ${target} COMMAND ${target})
   set_tests_properties(${target} PROPERTIES LABELS codegen)
 endforeach()
+
+# 062 T019: mallocnesia gate for codegen_group_entry_alloc_gate_test — re-runs
+# it under LD_PRELOAD so global malloc/calloc/realloc is intercepted (the
+# dual-gate: the in-band counting_resource above catches PMR-routed
+# allocation; this catches a non-PMR escape via global new, per
+# feedback_tracking_pmr_resource_false_pass). Absent mallocnesia.so → skipped
+# (the base ctest above is the fallback; the counting_resource + stack/NULL-
+# upstream arena still enforce the gate without interception).
+if(EXISTS "${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so")
+  add_test(
+    NAME codegen_group_entry_alloc_gate_test_mallocnesia
+    COMMAND python3 "${CMAKE_SOURCE_DIR}/tools/check_alloc.py"
+            "--binary" "$<TARGET_FILE:codegen_group_entry_alloc_gate_test>")
+  set_tests_properties(codegen_group_entry_alloc_gate_test_mallocnesia PROPERTIES
+    LABELS "codegen;alloc_guard;mallocnesia;062")
+endif()
 
 # T022 conformance — manifest-driven presence/shape over the curated
 # must-include CI subset (AC-G12). Runtime round-trip is R6-blocked (the
