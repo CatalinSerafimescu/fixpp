@@ -69,6 +69,22 @@ set_target_properties(fuzz_wire_parser PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
 )
 
+# 062 T024b — Seam #11 extension — the slice-scoped mid-frame nested-build
+# fuzzer. fuzz_wire_nested_slice: feed arbitrary bytes directly as a
+# non-enveloped {data, len+1} slice through OffsetTable::nested_group_slices
+# (T005/T006 dict-aware nested sub-view builder) — the new 062 input shape
+# fuzz_wire_parser.cpp never generates (full-frame only).
+add_executable(fuzz_wire_nested_slice fuzz_wire_nested_slice.cpp)
+target_link_libraries(fuzz_wire_nested_slice PRIVATE fixpp_wire fixpp_core)
+target_compile_options(fuzz_wire_nested_slice PRIVATE -fsanitize=fuzzer,address,undefined)
+target_link_options(fuzz_wire_nested_slice PRIVATE -fsanitize=fuzzer,address,undefined)
+target_include_directories(fuzz_wire_nested_slice PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+)
+set_target_properties(fuzz_wire_nested_slice PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+)
+
 # T026 — Seam #11 extension — Wire validator fuzzer for 041-validation-gate-wiring
 # per `[const §VII.7]`. Ends the feature-004 "US4 PAUSED" deferral.
 # fuzz_wire_validator: feed arbitrary bytes through the frame factory and

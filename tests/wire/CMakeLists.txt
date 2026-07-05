@@ -83,6 +83,18 @@ add_wire_test(wire_validator_per_version_test validator_per_version_test.cpp) # 
 # T055 — Coverage hardening: targeted error-path tests for writer / framer /
 # parser / validator to reach ≥90% line / ≥80% branch on wire scope.
 add_wire_test(wire_writer_error_path_test writer_error_path_test.cpp)         # T055
+
+# 062 T022 (Polish, FR-007/SC-004): top-level (non-group) read no-regression
+# guard — needs the build-tree generated fixpp/v44/Messages.hpp
+# (fixpp::v44::NewOrderSingle) + fixpp_dictionary (dict::decode_field
+# bodies), same seam as wire_repeating_group_equivalence_test above.
+add_wire_test(wire_toplevel_read_regression_test toplevel_read_regression_test.cpp)
+if(TARGET fixpp_codegen_generate)
+  add_dependencies(wire_toplevel_read_regression_test fixpp_codegen_generate)
+  target_include_directories(wire_toplevel_read_regression_test PRIVATE
+    "${CMAKE_BINARY_DIR}/_codegen/include")
+  target_link_libraries(wire_toplevel_read_regression_test PRIVATE fixpp_dictionary)
+endif()
 add_wire_test(wire_framer_error_path_test framer_error_path_test.cpp)         # T055
 add_wire_test(wire_parser_error_path_test parser_error_path_test.cpp)         # T055
 add_wire_test(wire_validator_type_check_test validator_type_check_test.cpp)   # T055

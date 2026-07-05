@@ -370,3 +370,20 @@ if(EXISTS "${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so")
         DEPENDS capi_message_field_iteration_test
     )
 endif()
+
+# 062 T022 (Polish, FR-007/SC-004) — C-ABI symbol-set + error-enum
+# no-regression guard: 062 is a wire+codegen-internal fix and must make NO
+# C-ABI / error-enum change. Reuses the frozen golden file the CI
+# abi-golden.yml workflow enforces (shells out to `nm` on the REAL built
+# fixpp_capi archive) rather than hand-maintaining a second symbol list.
+add_executable(capi_abi_symbol_golden_test abi_symbol_golden_test.cpp)
+target_link_libraries(capi_abi_symbol_golden_test PRIVATE
+  fixpp_capi
+  GTest::gtest
+  GTest::gtest_main
+)
+target_compile_definitions(capi_abi_symbol_golden_test PRIVATE
+  "FIXPP_CAPI_LIB=\"$<TARGET_FILE:fixpp_capi>\""
+  "FIXPP_CAPI_GOLDEN=\"${CMAKE_SOURCE_DIR}/tests/abi/golden/fixpp_capi_symbols.txt\""
+)
+add_test(NAME capi_abi_symbol_golden COMMAND capi_abi_symbol_golden_test)
