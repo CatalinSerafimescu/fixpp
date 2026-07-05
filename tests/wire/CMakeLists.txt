@@ -45,6 +45,16 @@ add_wire_test(wire_offset_table_test offset_table_test.cpp)            # T014
 add_wire_test(wire_lifetime_trap_test lifetime_trap_test.cpp)          # T015
 add_wire_test(wire_repeating_group_equivalence_test
   repeating_group_equivalence_test.cpp)                                # T016
+# 062 T010: GeneratedFlyweightOperatorEqualsIter needs the build-tree
+# generated fixpp/v44/Messages.hpp (fixpp::v44::NewOrderList/G_73) +
+# fixpp_dictionary (dict::decode_field bodies) — same seam as
+# wire_cutover_2b_gated_test below.
+if(TARGET fixpp_codegen_generate)
+  add_dependencies(wire_repeating_group_equivalence_test fixpp_codegen_generate)
+  target_include_directories(wire_repeating_group_equivalence_test PRIVATE
+    "${CMAKE_BINARY_DIR}/_codegen/include")
+  target_link_libraries(wire_repeating_group_equivalence_test PRIVATE fixpp_dictionary)
+endif()
 add_wire_test(wire_unknown_fields_test unknown_fields_test.cpp)        # T017
 add_wire_test(wire_three_arena_pinning_test
   three_arena_pinning_test.cpp)                                        # T018
