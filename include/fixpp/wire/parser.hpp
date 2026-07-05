@@ -259,16 +259,15 @@ template <std::uint16_t NoTag, class GroupT>
         // needs to read its own fields (span/outer_occurrence_id are
         // per-entry — group_view::operator[] fills those in from the SAME
         // instance slice it borrows). parent_cache_owner = THIS root
-        // OffsetTable (const_cast: nested_group_slices() is a const method
-        // that mutates only its own `mutable` cache state — see
-        // offset_table.hpp; entry_context's field is typed non-const so a
-        // nested descent could, in principle, reach a mutating overload).
+        // OffsetTable; the field is `const OffsetTable*` because the only
+        // method a nested descent ever reaches through it is the const
+        // nested_group_slices() (which mutates only its own `mutable` cache).
         entry_context ctx{};
         ctx.mr = mr_;
         ctx.opaque_dict = opaque_dict_;
         ctx.group_member_fn = group_member_fn_;
         ctx.gen = token();
-        ctx.parent_cache_owner = const_cast<OffsetTable*>(&table_);
+        ctx.parent_cache_owner = &table_;
         return group_view<GroupT>{table_.group_slices(NoTag), ctx};
     }
 

@@ -558,21 +558,28 @@ std::span<group_slice const> OffsetTable::nested_group_slices(
     if (slice_data == nullptr) {
         return {};
     }
-    // Exact-key hit: this (slice, no_tag) pair was already served.
+    // Single pass over the flat cache:
+    //  - exact (slice, no_tag) hit → serve immediately (build-once per pair);
+    //  - otherwise remember the FIRST row for this slice so a second distinct
+    //    no_tag on the SAME slice reuses its already-built sub-OffsetTable (one
+    //    sub-table indexes every nested group in the slice). FIRST-wins matches
+    //    the prior `break`-on-first-same-slice semantics exactly: a failed
+    //    build_nested_subview pushes a `table == nullptr` row, so a slice may
+    //    hold a null row followed by a non-null one — taking the first keeps
+    //    the build count identical (a stale null → one rebuild, as before).
+    OffsetTable* table = nullptr;
+    bool found_slice = false;
     for (auto const& row : nested_cache_) {
-        if (row.slice_data == slice_data && row.nested_no_tag == nested_no_tag) {
+        if (row.slice_data != slice_data) {
+            continue;
+        }
+        if (row.nested_no_tag == nested_no_tag) {
             return row.table != nullptr ? row.table->group_slices(nested_no_tag)
                                         : std::span<group_slice const>{};
         }
-    }
-    // Reuse an already-built sub-view over the SAME slice for a different
-    // no_tag: one sub-OffsetTable indexes every entry in the slice, so a
-    // second distinct nested group within the same entry needs no rebuild.
-    OffsetTable* table = nullptr;
-    for (auto const& row : nested_cache_) {
-        if (row.slice_data == slice_data) {
+        if (!found_slice) {
             table = row.table;
-            break;
+            found_slice = true;
         }
     }
     if (table == nullptr) {

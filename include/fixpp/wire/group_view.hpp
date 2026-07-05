@@ -34,7 +34,7 @@ struct entry_context {
     void const* opaque_dict = nullptr;        // dictionary handle (nested slicer)
     OffsetTable::group_member_fn_t group_member_fn = nullptr;  // dict-driven group-membership predicate
     detail::generation_token gen{};  // [2b §6.4] REQUIRED (N1) — never a default {} token
-    OffsetTable* parent_cache_owner = nullptr;  // root OffsetTable owning the single flat nested-view cache (RC2)
+    OffsetTable const* parent_cache_owner = nullptr;  // root OffsetTable owning the single flat nested-view cache (RC2); const — only ever calls the const nested_group_slices()
     std::byte const* outer_occurrence_id = nullptr;  // this entry slice's globally-unique data-pointer identity
 };
 

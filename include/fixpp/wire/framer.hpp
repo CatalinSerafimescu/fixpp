@@ -103,9 +103,11 @@ protected:
     // frame_view; both mint it through this protected ctor.
     friend class Framer;
     friend struct frame_view_access;
-    // 062 T003: distinct from frame_view_access (the CAPI-local production
-    // clone seam re-declared/defined per-TU in src/capi/message_write.cpp —
-    // NOT reusable here without an ODR/redefinition clash). This seam is
+    // 062 T003: distinct from frame_view_access, whose definition lives in
+    // src/capi/message_write.cpp (only its `friend` decl is visible here, not
+    // its body) so it is not *callable* from the wire layer — this follows the
+    // established per-TU-definition precedent, NOT an ODR necessity (token-
+    // identical seam definitions across TUs would be ODR-legal). This seam is
     // header-only for the wire layer's slice-scoped nested sub-view build
     // (T005/062): mints a frame_view over an arbitrary in-frame byte slice
     // (e.g. a repeating-group entry's own bytes) without widening this
