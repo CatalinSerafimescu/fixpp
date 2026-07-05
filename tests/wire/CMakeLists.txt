@@ -116,6 +116,11 @@ add_wire_test(wire_parser_overflow_test parser_overflow_test.cpp)               
 # (T005/T006) trailing-SOH / RC1 witness + FR-006 group-cap no-regression.
 add_wire_test(wire_group_slice_trailing_soh_test group_slice_trailing_soh_test.cpp)  # T008
 
+# 062-grouped-typed-read-fix — /speckit-verify coverage follow-up:
+# nested_group_slices() null-slice guard, flat-cache continue/reuse
+# branches, and the two bad_alloc degrade paths (offset_table.cpp:561-599).
+add_wire_test(wire_nested_group_slices_cache_test nested_group_slices_cache_test.cpp)
+
 # 041-validation-gate-wiring T009/T009a: compile-witness (production table_view,
 # no mock) + Float parse-error remap witness (garbage Float → wire_field_value_out_of_range).
 add_executable(wire_validator_production_table_view_test
