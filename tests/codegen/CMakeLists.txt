@@ -24,6 +24,7 @@ set(FIXPP_CODEGEN_TESTS
   codegen_validator_shape_test
   codegen_length_data_table_test
   codegen_group_entry_read_test
+  codegen_nested_group_read_test
 )
 
 foreach(target IN LISTS FIXPP_CODEGEN_TESTS)
