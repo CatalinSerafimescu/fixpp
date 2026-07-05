@@ -58,6 +58,16 @@ formally amended the Gate-A `no-__int128` decision rather than editing quietly.
   fail-closing. This matches the existing global `TAGNUM`/`LOCALMKTTIME`/`XID`/`XIDREF` collapse rows
   (which are likewise not gated on version) and is named explicitly in the decision record so Gate B does
   not raise it as a silently-widened fail-closed surface (FR-007, SC-006).
+- Resolved factually (not a user decision): the `DATE → LocalMktDate` choice is **metadata-only and
+  carries zero interop-rejection risk**. `field_type.hpp`'s `field_data_type → field_type` collapse
+  (`include/fixpp/dict/field_type.hpp:98-114`) maps **both** `UtcTimestamp` and `LocalMktDate` — and
+  `UtcDateOnly`, `DialectExtension`, and the `default` — to the **same** coarse `field_type::String`
+  category that the Phase-1 validator consumes; no date/timestamp value-format validation is keyed on the
+  fine-grained enum (the header comment records that a malformed tag-52 timestamp is "undetectable to the
+  Phase-1 validator"). Therefore our stronger typing does **not** reject any value QuickFIX's `TYPE::Unknown`
+  path accepts — the divergence is confined to what `field_ref::type()` *reports* to a consumer, not to
+  wire/validation behavior. This removes the only latent interop concern and is recorded so Gate A does not
+  re-raise it (FR-009, SC-005).
 
 ## Normative References
 
@@ -162,9 +172,12 @@ still throws `xml_parse_error` with `dict_xml_parse_failed`. (Extends the existi
   canonical `LOCALMKTDATE`/`UTCTIMESTAMP`), so no vendored file's resolved typing changes.
 - **Case sensitivity**: the loader matches type names by the existing table's convention; the two new
   rows follow that exact convention (no new case-handling path).
-- **QuickFIX behavioral divergence on `DATE`**: our loader ascribes `LocalMktDate` where QuickFIX ascribes
-  no type (`TYPE::Unknown`, no validation). This is a deliberate stronger-typing choice, not a defect, and
-  is recorded as a behaviors-and-limitations row (FR-009).
+- **QuickFIX divergence on `DATE`**: our loader ascribes `LocalMktDate` where QuickFIX ascribes no type
+  (`TYPE::Unknown`, no validation). This is a deliberate stronger-typing choice, not a defect. It is
+  **metadata-only**: `field_type.hpp` collapses `LocalMktDate` (and `UtcTimestamp`, `UtcDateOnly`,
+  `DialectExtension`) to `field_type::String`, so the Phase-1 validator applies no date-format check and
+  accepts exactly the values QuickFIX's `TYPE::Unknown` path accepts — the divergence shows only in
+  `field_ref::type()`. Recorded as a behaviors-and-limitations row (FR-009).
 - **`FutSettDate` absent in FIX 4.4**: not an issue here (FIX 4.4 already loads); noted only because the
   field-type cross-check used it — `FutSettDate` is `LOCALMKTDATE` in FIX 4.2/4.3 and dropped by 4.4.
 
@@ -201,8 +214,11 @@ still throws `xml_parse_error` with `dict_xml_parse_failed`. (Extends the existi
 - **FR-009**: The **divergence from QuickFIX** on the `DATE` type — QuickFIX resolves `DATE` to
   `TYPE::Unknown` (no validation) whereas this loader resolves it to `LocalMktDate` — MUST be recorded as
   a behaviors-and-limitations row in `spec/behaviors-and-limitations.md` (B-/L- convention), citing the
-  QuickFIX `XMLTypeToType` anchor and the FIX 4.2+ successor-typing rationale. The `TIME → UtcTimestamp`
-  mapping agrees with QuickFIX and needs no divergence row.
+  QuickFIX `XMLTypeToType` anchor and the FIX 4.2+ successor-typing rationale. The row MUST note the
+  divergence is **metadata-only** (no inbound value-format validation is keyed on the enum; both
+  `LocalMktDate` and `UtcTimestamp` collapse to `field_type::String` per
+  `include/fixpp/dict/field_type.hpp:98-114`), so no message accepted by QuickFIX is rejected by us. The
+  `TIME → UtcTimestamp` mapping agrees with QuickFIX and needs no divergence row.
 - **FR-010**: The feature-catalogue rows for **D-004** (FIX 4.0 / FIX 4.1) MUST be flipped to `done` with
   this PR as evidence, closing the A-5 "dictionary XMLs" work item and, with it, the last gap in
   `[const §I.1]`'s all-nine-versions runtime-XML commitment.
