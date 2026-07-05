@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // tests/dictionary/lookup_test.cpp
 //
-// AC-D1..D8 parameterized over four shipped FIX versions (FIX42, FIX44,
-// FIX50SP2, FIXT11). GoogleTest TEST_P fixture; each version is loaded fresh
-// per test via a 4 MiB monotonic_buffer_resource.
+// AC-D1..D8 parameterized over the seven currently-loadable v1.0 FIX versions:
+// the four codegen-target dictionaries (FIX42, FIX44, FIX50SP2, FIXT11) plus
+// the three runtime-XML-only versions vendored for D-005/006 (FIX43, FIX50,
+// FIX50SP1 — spec 002 §10 F1). FIX 4.0/4.1 (D-004) are excluded pending loader
+// legacy-type support (see the INSTANTIATE note). GoogleTest TEST_P fixture;
+// each version is loaded fresh per test via a 4 MiB monotonic_buffer_resource.
 
 #include <gtest/gtest.h>
 
@@ -396,13 +399,18 @@ TEST_P(DictionaryLookupFixture, RequiredFieldsAndLengthPairs) {
 
     // Call required_fields("A") on every version (exercises find_msg_required
     // + the required-pool offset path including the empty-run branch). The
-    // specific required-field set differs by version: pre-FIXT (4.2/4.4)
-    // and FIXT11 carry session fields (49/56) on Logon; the FIX 5.0SP2
-    // application overlay leaves Logon required-free because session fields
-    // moved to FIXT — see [FIX50SP2 §6].
+    // specific required-field set differs by version: pre-FIXT (4.2/4.4/4.3)
+    // and FIXT11 carry session fields (49/56) on Logon; the FIX 5.0 family
+    // (5.0 / 5.0SP1 / 5.0SP2) application overlays leave Logon required-free —
+    // indeed carry no Logon message at all — because session fields moved to
+    // FIXT — see [FIX50SP2 §6].
     auto const logon_required = dict().required_fields("A");
 
-    if (p.expected_version != fixpp::dict::session_version::v50sp2) {
+    bool const app_only_no_logon =
+        p.expected_version == fixpp::dict::session_version::v50 ||
+        p.expected_version == fixpp::dict::session_version::v50sp1 ||
+        p.expected_version == fixpp::dict::session_version::v50sp2;
+    if (!app_only_no_logon) {
         bool has_sender = false;
         bool has_target = false;
         for (auto const tag : logon_required) {
@@ -539,7 +547,7 @@ TEST(DictionaryAccessors, MovedFromDictionaryUsesNullHandleFallbacks) {
 // ---------------------------------------------------------------------------
 
 INSTANTIATE_TEST_SUITE_P(
-    FourShippedVersions, DictionaryLookupFixture,
+    AllRuntimeVersions, DictionaryLookupFixture,
     ::testing::Values(
         // ---- FIX 4.2 ----
         VersionParam{
@@ -590,6 +598,49 @@ INSTANTIATE_TEST_SUITE_P(
             // no Parties (verified against dictionaries/FIXT11.xml:104–113).
             .parties_expected = std::optional<bool>{false},
             .has_instrument = false,  // session-only; no Instrument
+        },
+        // ---- Runtime-XML-only versions (D-005/006, spec 002 §10 F1) ----
+        // Vendored data + headline tests only; no codegen namespace. Assertions
+        // verified against the fetched upstream XML (pinned SHA in UPSTREAM.txt).
+        // NOTE: FIX 4.0/4.1 (D-004) are NOT bundled here — the loader's
+        // [FIX50SP2 §3.3] field-type vocabulary fail-closes on their legacy
+        // `DATE`/`TIME` type names (deliberate freeze, research.md D-14). Adding
+        // those two legacy aliases reverses a design decision → its own Gate-A'd
+        // loader feature, tracked separately.
+        // ---- FIX 4.3 (D-005) ----
+        VersionParam{
+            .filename = "FIX43.xml",
+            .expected_version = fixpp::dict::session_version::v43,
+            .required_msg_types = {"0", "A", "D", "8", "W"},  // Parties/Instrument/MDIR era
+            .forbidden_msg_types = {},
+            .required_group_no_tags = {453u},  // NoPartyIDs — introduced in 4.3
+            .has_clordid = true,
+            .parties_expected = std::optional<bool>{true},
+            .has_instrument = true,
+        },
+        // ---- FIX 5.0 (D-006) ----
+        // Application layer only — the session messages (Logon 'A', Heartbeat
+        // '0', TestRequest '1') moved to FIXT.1.1, so they MUST be absent here.
+        VersionParam{
+            .filename = "FIX50.xml",
+            .expected_version = fixpp::dict::session_version::v50,
+            .required_msg_types = {"D", "8", "W"},
+            .forbidden_msg_types = {"A", "0"},  // session split → FIXT.1.1
+            .required_group_no_tags = {453u},
+            .has_clordid = true,
+            .parties_expected = std::optional<bool>{true},
+            .has_instrument = true,
+        },
+        // ---- FIX 5.0 SP1 (D-006) ----
+        VersionParam{
+            .filename = "FIX50SP1.xml",
+            .expected_version = fixpp::dict::session_version::v50sp1,
+            .required_msg_types = {"D", "8", "W"},
+            .forbidden_msg_types = {"A", "0"},
+            .required_group_no_tags = {453u},
+            .has_clordid = true,
+            .parties_expected = std::optional<bool>{true},
+            .has_instrument = true,
         }),
     [](::testing::TestParamInfo<VersionParam> const& info) {
         // Strip the ".xml" suffix to produce a clean test-suite suffix.
