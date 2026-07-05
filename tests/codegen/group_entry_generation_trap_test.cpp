@@ -175,6 +175,17 @@ TEST(GroupEntryGenerationTrapDeath, GenerationTokenTrapOnStaleEntryRead) {
     // default one.
     EXPECT_DEATH(nested_entry.bid_px(&arena), "")
         << "nested entry scalar read must trap after pool recycle (INV-G6)";
+
+    // A WARM re-descent (exact nested_cache_ hit on (slice_data, no_tag),
+    // OffsetTable::nested_group_slices ~:579-581) must ALSO trap after pool
+    // recycle. quote_set0.quote_entries() was already called above (line
+    // ~151), so this second call is a cache hit that historically returned
+    // the cached sub-table's group_slices() with NO liveness check against
+    // `gen` — silently serving a stale-but-plausible count/slice instead of
+    // fault-closing. Only the COLD build path (build_nested_subview) checked
+    // the token; the warm-hit early-return skipped it entirely.
+    EXPECT_DEATH((void)quote_set0.quote_entries().size(), "")
+        << "warm nested-cache-hit descent must trap after pool recycle (INV-G6)";
 }
 
 #else

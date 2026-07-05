@@ -561,6 +561,14 @@ std::span<group_slice const> OffsetTable::nested_group_slices(
     if (slice_data == nullptr) {
         return {};
     }
+    // Zero-length, alloc-free liveness check ([2b §6.4] INV-G6): the cache
+    // scan below can return on a WARM (slice_data, nested_no_tag) hit
+    // without ever touching `gen` again, so a stale token would otherwise be
+    // served silently instead of fault-closing. `.bytes()` -> check_alive()
+    // traps in debug on a stale token; no-op in release. Mirrors the mint at
+    // ~:540 (build_nested_subview) but with len=0 so it never builds/allocs
+    // — must not regress the FR-004b zero-alloc-on-repeat gate.
+    (void)frame_view_slice_access::make(slice_data, 0, gen).bytes();
     // Single pass over the flat cache:
     //  - exact (slice, no_tag) hit → serve immediately (build-once per pair);
     //  - otherwise remember the FIRST row for this slice so a second distinct
