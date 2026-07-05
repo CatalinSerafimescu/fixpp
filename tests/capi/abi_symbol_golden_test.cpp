@@ -52,6 +52,10 @@
 #error "FIXPP_CAPI_GOLDEN must be defined by CMake to the golden symbol file path"
 #endif
 
+// The exported-symbol golden shells out to `nm` on the Unix static archive —
+// POSIX-only (no nm / different archive + decoration on Windows), so the helpers
+// are compiled only there; the TEST that uses them GTEST_SKIPs on Windows.
+#ifndef _WIN32
 namespace {
 
 // Runs `nm --defined-only --extern-only <lib>`, extracts the LAST
@@ -98,8 +102,15 @@ std::set<std::string> read_golden(std::string const& path) {
 }
 
 }  // namespace
+#endif  // !_WIN32
 
 TEST(AbiSymbolGolden, CabiSymbolSetUnchanged) {
+#ifdef _WIN32
+    GTEST_SKIP() << "nm/.a exported-symbol golden is Linux-specific (no nm on Windows, "
+                    "different archive format + symbol decoration); the C-ABI symbol freeze "
+                    "is enforced on Linux by abi-golden.yml + Tier-1. The FR-007 error-enum "
+                    "guard (ErrorEnumUnchanged) runs cross-platform.";
+#else
     std::set<std::string> const golden = read_golden(FIXPP_CAPI_GOLDEN);
     ASSERT_FALSE(golden.empty()) << "golden file empty/unreadable: " << FIXPP_CAPI_GOLDEN;
 
@@ -128,6 +139,7 @@ TEST(AbiSymbolGolden, CabiSymbolSetUnchanged) {
     EXPECT_EQ(built, golden)
         << "C-ABI exported symbol set drifted from tests/abi/golden/fixpp_capi_symbols.txt "
            "(062 must make NO C-ABI change per FR-007)";
+#endif  // _WIN32
 }
 
 TEST(AbiSymbolGolden, ErrorEnumUnchanged) {
