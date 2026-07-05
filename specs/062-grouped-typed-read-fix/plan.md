@@ -15,7 +15,7 @@ Make typed field access on repeating-group **entries** compile and return correc
 
 *GATE: must pass before Phase 0 (passed — research complete) and re-checked post-design.*
 
-- **Appendix A mandatory triggers**: **Wire format/parser** (group entry read path, `OffsetTable`/`group_view` changes, `frame_view`-over-slice seam) AND **Codegen layout** (entry-class emission + forced regen) → run ALL four mandatory controls: `/clarify` (done, 2 sessions), `/analyze` (pending), Codex **Gate A** (pending), user **`/plan` sign-off** (pending). Full **Gate B** before merge.
+- **Appendix A mandatory triggers**: **Wire format/parser** (group entry read path, `OffsetTable`/`group_view` changes, `frame_view`-over-slice seam) AND **Codegen layout** (entry-class emission + forced regen) → run ALL four mandatory controls: `/clarify` (done — 1 session, 2 Q), `/analyze` (done — cross-artifact pass 2026-07-05; 0 CRITICAL, findings remediated into tasks.md/plan.md), Codex **Gate A** (done — CONVERGED round 3, `gate-a-done`, converged commit `628e35fd`, per `.specify/decisions/062-grouped-typed-read-fix-gatea.md`), user **`/plan` sign-off** (done 2026-07-05). Full **Gate B** before merge.
 - **Error semantics**: no new `fixpp_error_t` value; entry accessors reuse existing field-not-found/decode errors (FR-007).
 - **C-ABI**: unchanged (FR-007).
 - **Zero-alloc discipline** (`[const §VIII.5]` "Arena/PMR is the default", `[const §XV.1]` "arena/PMR for the rare materialise cases"): honored on the one-level scalar path (FR-004/FR-004a — zero heap alloc); nested descent materializes a bounded, cached-once **arena** sub-view (FR-004b, research §Cost reconciliation) — constitutionally permitted read-path arena/PMR materialisation (no global `new`/`delete` between parse and `fromApp`), surfaced at `/plan` sign-off as the intended nested cost.
@@ -69,6 +69,8 @@ Every AC/FR/SC maps to a named witness (Codex P2#4). Test **filenames are provis
 | US3 AC2 / INV-G1 (parent destroyed → documented-undefined entry lifetime) | doc-witness: `data-model.md` §Invariants INV-G1 + `contracts/group-entry-read.md` §Lifetime & stability | (documentation obligation, not a runtime UAF test) |
 | US3 AC1 / SC-002 (sanitizer lifetime) | above witnesses under the ASan/UBSan/TSan matrix | (matrix run, not a distinct test) |
 | FR-004 / FR-004a / FR-004b / SC-002 (alloc gate: one-level zero-alloc + nested cached-once, repeat zero) | `tests/codegen/group_entry_alloc_gate_test.cpp` | `OneLevelScalarZeroAlloc` + `NestedFirstDescentBoundedRepeatZero` |
+| INV-G7 (dict-aware nested slicer MANDATORY — never the dict-free fallback; added /analyze C1) | `tests/codegen/nested_group_read_test.cpp` | `NonLastNestedGroupTrailingFieldNotSwallowed` (outer field AFTER the nested group — fails under the dict-free fallback) |
+| INV-G6 (entry read never under a default `{}` generation token; added /analyze C2) | `tests/codegen/group_entry_alloc_gate_test.cpp` (or sibling `group_entry_generation_trap_test.cpp`) | `GenerationTokenTrapOnStaleEntryRead` (debug-mode; sanitizer matrix cannot catch — `pool_id==0` is untracked) |
 
 ## Complexity Tracking
 
@@ -83,6 +85,7 @@ Every AC/FR/SC maps to a named witness (Codex P2#4). Test **filenames are provis
 
 - Round 1 applied 2026-07-05: Codex P1=2 P2=3 P3=1; Opus post-judging P1=2 P2=5 P3=2; rewrite addresses root causes RC1 (slice-scoped SOH, drop whole-frame guard edit), RC2 (entry_context: parent-cache handle + occurrence identity + generation token + recursive ctx + span-scan field_view primitive), RC3 (split FR-004/SC-002 alloc contract), RC4 (Normative References + named witnesses + FR-003 mis-cite). Reviews: research/reviews/codex_062-grouped-typed-read-fix_gate_a_review.md, research/reviews/opus_062-grouped-typed-read-fix_gate_a_adversarial_review.md.
 - Round 2 applied 2026-07-05: Codex P1=0 P2=2 P3=0; Opus post-judging P1=0 P2=2 P3=2; rewrite addresses the depth-3/4 cache-keying collision (globally-unique slice-identity key, ordinal alternative deleted), the witness-map RC4 gaps (US3 AC2/INV-G1, FR-007/SC-004, alloc row names FR-004/004a/004b), the last-entry/group-cap edge witnesses, and the Normative-References 057-precedent clause. Reviews: research/reviews/codex_062-grouped-typed-read-fix_gate_a_2_review.md, research/reviews/opus_062-grouped-typed-read-fix_gate_a_2_adversarial_review.md.
+- Round 3 (2026-07-05): Codex P1=0 P2=0 P3=0 (zero findings); Opus post-judging P1=0 P2=0 P3=2 — **CONVERGED**. Opus independently re-certified the round-2 slice-identity keying fix against source (`offset_table.cpp:193-195,495-505`). `gate-a-done`; user-signed-off 2026-07-05; converged commit `628e35fd` (submodule) / `4172ad3` (parent). Reviews: research/reviews/codex_062-grouped-typed-read-fix_gate_a_3_review.md, research/reviews/opus_062-grouped-typed-read-fix_gate_a_3_adversarial_review.md. Evidence record: `.specify/decisions/062-grouped-typed-read-fix-gatea.md`.
 
 ### Round 1 — disagreements
 
