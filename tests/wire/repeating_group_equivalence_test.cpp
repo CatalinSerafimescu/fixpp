@@ -33,14 +33,14 @@ std::vector<std::byte> make_raw_frame(std::string const& body) {
     return out;
 }
 
-// A 2c-shaped group type: constructible from a sub-frame byte span; the wire
-// layer never decodes its fields, it only slices.
+// A 2c-shaped group type: constructible from an entry_context (062 T007 —
+// group_view::operator[]/iterator now mint an entry_context, not a bare
+// span); the wire layer never decodes its fields, it only slices.
 struct TestLeg {
-    explicit TestLeg(std::span<const std::byte> s) noexcept : data{s.data()}, len{s.size()} {}
-    std::byte const* data;
-    std::size_t len;
+    explicit TestLeg(fixpp::wire::entry_context ctx) noexcept : ctx_{ctx} {}
+    fixpp::wire::entry_context ctx_{};
     [[nodiscard]] std::string_view sv() const noexcept {
-        return {reinterpret_cast<char const*>(data), len};
+        return {reinterpret_cast<char const*>(ctx_.span.data()), ctx_.span.size()};
     }
     // Parse the first field from the sub-frame (tag=value<SOH>).
     // Returns {tag, value_sv} of the first field in the slice.
@@ -49,7 +49,7 @@ struct TestLeg {
         std::string_view value;
     };
     [[nodiscard]] first_field_result parse_first_field() const noexcept {
-        std::string_view raw{reinterpret_cast<char const*>(data), len};
+        std::string_view raw{reinterpret_cast<char const*>(ctx_.span.data()), ctx_.span.size()};
         auto eq = raw.find('=');
         if (eq == std::string_view::npos) {
             return {0, {}};

@@ -116,6 +116,7 @@ public:
           mr_{mr},
           opaque_dict_{opaque_dict},
           classify_fn_{classify_fn},
+          group_member_fn_{group_member_fn},
           unk_items_{mr} {}
 
     // FR-015 / [2b §1.2]: same as above but with caller-tunable caps.
@@ -129,6 +130,7 @@ public:
           mr_{mr},
           opaque_dict_{opaque_dict},
           classify_fn_{classify_fn},
+          group_member_fn_{group_member_fn},
           unk_items_{mr} {}
 
     MessageView(frame_view const& frame, std::pmr::memory_resource* mr) noexcept
@@ -252,7 +254,22 @@ template <std::uint16_t NoTag, class GroupT>
         // dictionary-driven nested-group refinement is layered by 2c's
         // GroupT). group_view only borrows the arena span — no thread-local,
         // no cross-view aliasing, zero-alloc after the first build.
-        return group_view<GroupT>{table_.group_slices(NoTag), token()};
+        //
+        // 062 T007: thread the base entry_context every generated entry
+        // needs to read its own fields (span/outer_occurrence_id are
+        // per-entry — group_view::operator[] fills those in from the SAME
+        // instance slice it borrows). parent_cache_owner = THIS root
+        // OffsetTable (const_cast: nested_group_slices() is a const method
+        // that mutates only its own `mutable` cache state — see
+        // offset_table.hpp; entry_context's field is typed non-const so a
+        // nested descent could, in principle, reach a mutating overload).
+        entry_context ctx{};
+        ctx.mr = mr_;
+        ctx.opaque_dict = opaque_dict_;
+        ctx.group_member_fn = group_member_fn_;
+        ctx.gen = token();
+        ctx.parent_cache_owner = const_cast<OffsetTable*>(&table_);
+        return group_view<GroupT>{table_.group_slices(NoTag), ctx};
     }
 
 // [2b §4.8] Contract: unknown_fields() uses the dict pointer threaded from the
@@ -328,6 +345,11 @@ private : [[nodiscard]] std::span<const std::byte> field_bytes(std::uint16_t tag
     // nullptr classify_fn_ = dict-free path (all non-framing = unknown).
     void const* opaque_dict_ = nullptr;
     classify_fn_t classify_fn_ = nullptr;
+    // 062 T007: threaded into every entry_context minted by group<>() below
+    // (the dict-driven group-membership predicate a nested descent needs to
+    // build a dict-aware sub-OffsetTable). Default nullptr on the dict-free
+    // ctors, matching table_'s own dict-free construction.
+    group_member_fn_t group_member_fn_ = nullptr;
     // unk_items_: lazily built unknown-fields kv list in the per-message arena.
     // An Index-mode ctor overrides this default with the real arena
     // (`unk_items_{mr}`), but a default-constructed view and EVERY Iter-mode view

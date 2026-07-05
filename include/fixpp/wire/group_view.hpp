@@ -53,16 +53,39 @@ public:
     // OffsetTable's per-message arena; group_view only borrows it.
     using slice = group_slice;
 
+    // Back-compat seam (062 T007): threads `gen` into a base entry_context so
+    // any future dict-free caller of this ctor still gets a real generation
+    // token on every minted entry (mr/opaque_dict/group_member_fn/
+    // parent_cache_owner stay null — no production caller uses this path;
+    // MessageView::group<>() uses the entry_context ctor below).
     group_view(std::span<slice const> instances, detail::generation_token gen) noexcept
         : View{instances.empty() ? nullptr : instances.front().data,
                instances.empty() ? 0 : instances.front().len, gen},
-          instances_{instances} {}
+          instances_{instances},
+          base_ctx_{.gen = gen} {}
+
+    // [2b §4.7] 062 T007: `base` carries everything a generated entry needs to
+    // read its own fields/nested groups (mr, opaque_dict, group_member_fn,
+    // generation token, parent_cache_owner = the root OffsetTable). Per-entry
+    // span/outer_occurrence_id are irrelevant on `base` — operator[]/iterator
+    // override both from the SAME instance slice below.
+    group_view(std::span<slice const> instances, entry_context base) noexcept
+        : View{instances.empty() ? nullptr : instances.front().data,
+               instances.empty() ? 0 : instances.front().len, base.gen},
+          instances_{instances},
+          base_ctx_{base} {}
 
     [[nodiscard]] std::size_t size() const noexcept { return instances_.size(); }
 
+    // Both operator[](i) and iterator::operator*() (which delegates to this)
+    // derive the per-entry entry_context from the SAME instance slice `i` —
+    // identical span + identical outer_occurrence_id (seam #8 / INV-G4).
     [[nodiscard]] GroupT operator[](std::size_t i) const noexcept [[clang::lifetimebound]] {
         auto const& s = instances_[i];
-        return GroupT{std::span<const std::byte>{s.data, s.len}};
+        entry_context ctx = base_ctx_;
+        ctx.span = std::span<const std::byte>{s.data, s.len};
+        ctx.outer_occurrence_id = s.data;
+        return GroupT{ctx};
     }
 
     class iterator {
@@ -94,6 +117,7 @@ public:
 
 private:
     std::span<slice const> instances_;
+    entry_context base_ctx_{};
 };
 
 }  // namespace fixpp::wire

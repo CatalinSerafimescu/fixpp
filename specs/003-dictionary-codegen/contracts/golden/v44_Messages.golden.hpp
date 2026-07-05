@@ -20,4445 +20,3833 @@ namespace fixpp::v44::groups {  // shared repeating-group flyweights (AC-G5/AC-G
     class G_627 {
     public:
         G_627() noexcept = default;
-        explicit G_627(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& v [[clang::lifetimebound]]) noexcept
-            : view_(&v) {}
+        explicit G_627(::fixpp::wire::entry_context ctx) noexcept
+            : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     hop_comp_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<628>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 628, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     hop_sending_time() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<629>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 629, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     hop_ref_id() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<630>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 630, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; return view_->get(tag); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
     private:
-        ::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const* view_ = nullptr;
+        ::fixpp::wire::entry_context ctx_{};
     };
     class G_199 {
     public:
         G_199() noexcept = default;
-        explicit G_199(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& v [[clang::lifetimebound]]) noexcept
-            : view_(&v) {}
+        explicit G_199(::fixpp::wire::entry_context ctx) noexcept
+            : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     ioi_qualifier() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<char>(view_->template get<104>()); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 104, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; return view_->get(tag); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
     private:
-        ::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const* view_ = nullptr;
+        ::fixpp::wire::entry_context ctx_{};
     };
     class G_215 {
     public:
         G_215() noexcept = default;
-        explicit G_215(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& v [[clang::lifetimebound]]) noexcept
-            : view_(&v) {}
+        explicit G_215(::fixpp::wire::entry_context ctx) noexcept
+            : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     routing_type() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<216>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 216, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     routing_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<217>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 217, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; return view_->get(tag); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
     private:
-        ::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const* view_ = nullptr;
+        ::fixpp::wire::entry_context ctx_{};
     };
     class G_232 {
     public:
         G_232() noexcept = default;
-        explicit G_232(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& v [[clang::lifetimebound]]) noexcept
-            : view_(&v) {}
+        explicit G_232(::fixpp::wire::entry_context ctx) noexcept
+            : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     stipulation_type() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<233>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 233, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     stipulation_value() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<234>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 234, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; return view_->get(tag); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
     private:
-        ::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const* view_ = nullptr;
+        ::fixpp::wire::entry_context ctx_{};
     };
     class G_454 {
     public:
         G_454() noexcept = default;
-        explicit G_454(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& v [[clang::lifetimebound]]) noexcept
-            : view_(&v) {}
+        explicit G_454(::fixpp::wire::entry_context ctx) noexcept
+            : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     security_alt_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<455>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 455, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     security_alt_id_source() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<456>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 456, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; return view_->get(tag); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
     private:
-        ::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const* view_ = nullptr;
+        ::fixpp::wire::entry_context ctx_{};
     };
     class G_457 {
     public:
         G_457() noexcept = default;
-        explicit G_457(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& v [[clang::lifetimebound]]) noexcept
-            : view_(&v) {}
+        explicit G_457(::fixpp::wire::entry_context ctx) noexcept
+            : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_security_alt_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<458>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 458, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_security_alt_id_source() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<459>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 459, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; return view_->get(tag); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
     private:
-        ::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const* view_ = nullptr;
+        ::fixpp::wire::entry_context ctx_{};
     };
     class G_604 {
     public:
         G_604() noexcept = default;
-        explicit G_604(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& v [[clang::lifetimebound]]) noexcept
-            : view_(&v) {}
+        explicit G_604(::fixpp::wire::entry_context ctx) noexcept
+            : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_security_alt_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<605>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 605, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_security_alt_id_source() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<606>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 606, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; return view_->get(tag); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
     private:
-        ::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const* view_ = nullptr;
+        ::fixpp::wire::entry_context ctx_{};
     };
     class G_683 {
     public:
         G_683() noexcept = default;
-        explicit G_683(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& v [[clang::lifetimebound]]) noexcept
-            : view_(&v) {}
+        explicit G_683(::fixpp::wire::entry_context ctx) noexcept
+            : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_stipulation_type() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<688>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 688, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_stipulation_value() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<689>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 689, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; return view_->get(tag); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
     private:
-        ::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const* view_ = nullptr;
+        ::fixpp::wire::entry_context ctx_{};
     };
     class G_804 {
     public:
         G_804() noexcept = default;
-        explicit G_804(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& v [[clang::lifetimebound]]) noexcept
-            : view_(&v) {}
+        explicit G_804(::fixpp::wire::entry_context ctx) noexcept
+            : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     nested_party_sub_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<545>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 545, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     nested_party_sub_id_type() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<805>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 805, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; return view_->get(tag); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
     private:
-        ::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const* view_ = nullptr;
+        ::fixpp::wire::entry_context ctx_{};
     };
     class G_539 {
     public:
         G_539() noexcept = default;
-        explicit G_539(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& v [[clang::lifetimebound]]) noexcept
-            : view_(&v) {}
+        explicit G_539(::fixpp::wire::entry_context ctx) noexcept
+            : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     nested_party_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<524>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 524, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     nested_party_id_source() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<char>(view_->template get<525>()); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 525, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     nested_party_role() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<538>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 538, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_804>
     nested_party_sub_i_ds() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return {}; return view_->template group<804, G_804>(); }
+    { if (ctx_.parent_cache_owner == nullptr) return {};
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 804, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      return ::fixpp::wire::group_view<G_804>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; return view_->get(tag); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
     private:
-        ::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const* view_ = nullptr;
+        ::fixpp::wire::entry_context ctx_{};
     };
     class G_806 {
     public:
         G_806() noexcept = default;
-        explicit G_806(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& v [[clang::lifetimebound]]) noexcept
-            : view_(&v) {}
+        explicit G_806(::fixpp::wire::entry_context ctx) noexcept
+            : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     nested2_party_sub_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<760>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 760, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     nested2_party_sub_id_type() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<807>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 807, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; return view_->get(tag); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
     private:
-        ::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const* view_ = nullptr;
+        ::fixpp::wire::entry_context ctx_{};
     };
     class G_756 {
     public:
         G_756() noexcept = default;
-        explicit G_756(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& v [[clang::lifetimebound]]) noexcept
-            : view_(&v) {}
+        explicit G_756(::fixpp::wire::entry_context ctx) noexcept
+            : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     nested2_party_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<757>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 757, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     nested2_party_id_source() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<char>(view_->template get<758>()); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 758, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     nested2_party_role() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<759>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 759, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_806>
     nested2_party_sub_i_ds() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return {}; return view_->template group<806, G_806>(); }
+    { if (ctx_.parent_cache_owner == nullptr) return {};
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 806, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      return ::fixpp::wire::group_view<G_806>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; return view_->get(tag); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
     private:
-        ::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const* view_ = nullptr;
+        ::fixpp::wire::entry_context ctx_{};
     };
     class G_670 {
     public:
         G_670() noexcept = default;
-        explicit G_670(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& v [[clang::lifetimebound]]) noexcept
-            : view_(&v) {}
+        explicit G_670(::fixpp::wire::entry_context ctx) noexcept
+            : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_alloc_account() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<671>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 671, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_individual_alloc_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<672>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 672, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     leg_alloc_qty(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<673>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 673, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_alloc_acct_id_source() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<674>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 674, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_settl_currency() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<675>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 675, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_756>
     nested2_party_i_ds() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return {}; return view_->template group<756, G_756>(); }
+    { if (ctx_.parent_cache_owner == nullptr) return {};
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 756, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      return ::fixpp::wire::group_view<G_756>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; return view_->get(tag); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
     private:
-        ::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const* view_ = nullptr;
+        ::fixpp::wire::entry_context ctx_{};
     };
     class G_555 {
     public:
         G_555() noexcept = default;
-        explicit G_555(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& v [[clang::lifetimebound]]) noexcept
-            : view_(&v) {}
+        explicit G_555(::fixpp::wire::entry_context ctx) noexcept
+            : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_coupon_payment_date() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<248>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 248, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_issue_date() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<249>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 249, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_repo_collateral_security_type() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<250>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 250, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     leg_repurchase_term() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<251>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 251, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     leg_repurchase_rate(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<252>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 252, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     leg_factor(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<253>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 253, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_redemption_date() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<254>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 254, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_credit_rating() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<257>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 257, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_currency() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<556>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 556, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_country_of_issue() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<596>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 596, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_state_or_province_of_issue() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<597>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 597, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_locale_of_issue() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<598>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 598, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_instr_registry() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<599>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 599, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_symbol() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<600>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 600, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_symbol_sfx() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<601>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 601, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_security_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<602>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 602, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_security_id_source() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<603>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 603, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     leg_product() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<607>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 607, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_cfi_code() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<608>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 608, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_security_type() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<609>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 609, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_maturity_month_year() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<610>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 610, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_maturity_date() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<611>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 611, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     leg_strike_price(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<612>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 612, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     leg_opt_attribute() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<char>(view_->template get<613>()); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 613, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     leg_contract_multiplier(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<614>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 614, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     leg_coupon_rate(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<615>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 615, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_security_exchange() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<616>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 616, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_issuer() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<617>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 617, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     encoded_leg_issuer_len() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<618>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 618, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     encoded_leg_issuer() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<619>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 619, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_security_desc() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<620>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 620, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     encoded_leg_security_desc_len() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<621>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 621, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     encoded_leg_security_desc() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<622>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 622, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     leg_ratio_qty(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<623>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 623, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     leg_side() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<char>(view_->template get<624>()); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 624, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_ioi_qty() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<682>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 682, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_dated_date() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<739>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 739, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_pool() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<740>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 740, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_security_sub_type() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<764>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 764, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_strike_currency() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<942>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 942, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_contract_settl_month() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<955>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 955, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_interest_accrual_date() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<956>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 956, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     leg_position_effect() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<char>(view_->template get<564>()); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 564, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     leg_covered_or_uncovered() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<565>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 565, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     leg_price(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<566>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 566, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     leg_settl_type() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<char>(view_->template get<587>()); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 587, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_settl_date() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<588>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 588, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     leg_last_px(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<637>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 637, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_ref_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<654>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 654, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     leg_qty(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<687>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 687, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     leg_swap_type() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<690>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 690, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_benchmark_curve_currency() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<676>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 676, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_benchmark_curve_name() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<677>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 677, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_benchmark_curve_point() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<678>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 678, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     leg_benchmark_price(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<679>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 679, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     leg_benchmark_price_type() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<680>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 680, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     leg_bid_px(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<681>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 681, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     leg_offer_px(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<684>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 684, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     leg_price_type() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<686>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 686, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_604>
     leg_security_alt_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return {}; return view_->template group<604, G_604>(); }
+    { if (ctx_.parent_cache_owner == nullptr) return {};
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 604, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      return ::fixpp::wire::group_view<G_604>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_683>
     leg_stipulations() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return {}; return view_->template group<683, G_683>(); }
+    { if (ctx_.parent_cache_owner == nullptr) return {};
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 683, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      return ::fixpp::wire::group_view<G_683>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_539>
     nested_party_i_ds() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return {}; return view_->template group<539, G_539>(); }
+    { if (ctx_.parent_cache_owner == nullptr) return {};
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 539, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      return ::fixpp::wire::group_view<G_539>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_670>
     leg_allocs() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return {}; return view_->template group<670, G_670>(); }
+    { if (ctx_.parent_cache_owner == nullptr) return {};
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 670, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      return ::fixpp::wire::group_view<G_670>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; return view_->get(tag); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
     private:
-        ::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const* view_ = nullptr;
+        ::fixpp::wire::entry_context ctx_{};
     };
     class G_887 {
     public:
         G_887() noexcept = default;
-        explicit G_887(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& v [[clang::lifetimebound]]) noexcept
-            : view_(&v) {}
+        explicit G_887(::fixpp::wire::entry_context ctx) noexcept
+            : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_stip_type() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<888>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 888, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_stip_value() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<889>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 889, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; return view_->get(tag); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
     private:
-        ::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const* view_ = nullptr;
+        ::fixpp::wire::entry_context ctx_{};
     };
     class G_711 {
     public:
         G_711() noexcept = default;
-        explicit G_711(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& v [[clang::lifetimebound]]) noexcept
-            : view_(&v) {}
+        explicit G_711(::fixpp::wire::entry_context ctx) noexcept
+            : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_coupon_payment_date() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<241>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 241, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_issue_date() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<242>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 242, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_repo_collateral_security_type() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<243>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 243, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     underlying_repurchase_term() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<244>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 244, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     underlying_repurchase_rate(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<245>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 245, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     underlying_factor(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<246>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 246, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_redemption_date() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<247>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 247, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_credit_rating() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<256>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 256, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_security_id_source() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<305>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 305, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_issuer() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<306>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 306, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_security_desc() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<307>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 307, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_security_exchange() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<308>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 308, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_security_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<309>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 309, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_security_type() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<310>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 310, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_symbol() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<311>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 311, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_symbol_sfx() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<312>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 312, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_maturity_month_year() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<313>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 313, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     underlying_put_or_call() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<315>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 315, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     underlying_strike_price(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<316>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 316, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     underlying_opt_attribute() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<char>(view_->template get<317>()); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 317, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_currency() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<318>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 318, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     encoded_underlying_issuer_len() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<362>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 362, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     encoded_underlying_issuer() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<363>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 363, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     encoded_underlying_security_desc_len() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<364>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 364, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     encoded_underlying_security_desc() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<365>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 365, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     underlying_coupon_rate(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<435>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 435, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     underlying_contract_multiplier(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<436>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 436, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     underlying_product() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<462>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 462, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_cfi_code() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<463>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 463, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_maturity_date() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<542>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 542, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_country_of_issue() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<592>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 592, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_state_or_province_of_issue() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<593>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 593, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_locale_of_issue() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<594>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 594, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_instr_registry() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<595>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 595, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_security_sub_type() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<763>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 763, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     underlying_px(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<810>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 810, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_cp_program() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<877>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 877, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_cp_reg_type() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<878>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 878, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     underlying_qty(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<879>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 879, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     underlying_dirty_price(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<882>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 882, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     underlying_end_price(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<883>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 883, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     underlying_start_value(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<884>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 884, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     underlying_current_value(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<885>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 885, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     underlying_end_value(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<886>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 886, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_strike_currency() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<941>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 941, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     underlying_settl_price(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<732>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 732, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     underlying_settl_price_type() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<733>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 733, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     coll_action() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<944>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 944, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     cl_ord_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<11>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 11, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     currency() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<15>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 15, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     price(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<44>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 44, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     side() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<char>(view_->template get<54>()); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 54, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     text() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<58>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 58, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     prev_close_px(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<140>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 140, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     encoded_text_len() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<354>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 354, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     encoded_text() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<355>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 355, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     secondary_cl_ord_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<526>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 526, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_457>
     underlying_security_alt_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return {}; return view_->template group<457, G_457>(); }
+    { if (ctx_.parent_cache_owner == nullptr) return {};
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 457, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      return ::fixpp::wire::group_view<G_457>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_887>
     underlying_stips() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return {}; return view_->template group<887, G_887>(); }
+    { if (ctx_.parent_cache_owner == nullptr) return {};
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 887, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      return ::fixpp::wire::group_view<G_887>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; return view_->get(tag); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
     private:
-        ::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const* view_ = nullptr;
+        ::fixpp::wire::entry_context ctx_{};
     };
     class G_864 {
     public:
         G_864() noexcept = default;
-        explicit G_864(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& v [[clang::lifetimebound]]) noexcept
-            : view_(&v) {}
+        explicit G_864(::fixpp::wire::entry_context ctx) noexcept
+            : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     event_type() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<865>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 865, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     event_date() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<866>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 866, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     event_px(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<867>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 867, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     event_text() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<868>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 868, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; return view_->get(tag); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
     private:
-        ::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const* view_ = nullptr;
+        ::fixpp::wire::entry_context ctx_{};
     };
     class G_136 {
     public:
         G_136() noexcept = default;
-        explicit G_136(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& v [[clang::lifetimebound]]) noexcept
-            : view_(&v) {}
+        explicit G_136(::fixpp::wire::entry_context ctx) noexcept
+            : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     misc_fee_amt(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<137>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 137, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     misc_fee_curr() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<138>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 138, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     misc_fee_type() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<139>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 139, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     misc_fee_basis() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<891>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 891, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; return view_->get(tag); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
     private:
-        ::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const* view_ = nullptr;
+        ::fixpp::wire::entry_context ctx_{};
     };
     class G_382 {
     public:
         G_382() noexcept = default;
-        explicit G_382(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& v [[clang::lifetimebound]]) noexcept
-            : view_(&v) {}
+        explicit G_382(::fixpp::wire::entry_context ctx) noexcept
+            : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     contra_trader() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<337>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 337, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     contra_broker() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<375>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 375, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     contra_trade_qty(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<437>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 437, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     contra_trade_time() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<438>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 438, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     contra_leg_ref_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<655>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 655, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; return view_->get(tag); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
     private:
-        ::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const* view_ = nullptr;
+        ::fixpp::wire::entry_context ctx_{};
     };
     class G_802 {
     public:
         G_802() noexcept = default;
-        explicit G_802(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& v [[clang::lifetimebound]]) noexcept
-            : view_(&v) {}
+        explicit G_802(::fixpp::wire::entry_context ctx) noexcept
+            : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     party_sub_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<523>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 523, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     party_sub_id_type() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<803>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 803, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; return view_->get(tag); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
     private:
-        ::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const* view_ = nullptr;
+        ::fixpp::wire::entry_context ctx_{};
     };
     class G_453 {
     public:
         G_453() noexcept = default;
-        explicit G_453(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& v [[clang::lifetimebound]]) noexcept
-            : view_(&v) {}
+        explicit G_453(::fixpp::wire::entry_context ctx) noexcept
+            : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     party_id_source() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<char>(view_->template get<447>()); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 447, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     party_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<448>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 448, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     party_role() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<452>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 452, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_802>
     party_sub_i_ds() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return {}; return view_->template group<802, G_802>(); }
+    { if (ctx_.parent_cache_owner == nullptr) return {};
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 802, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      return ::fixpp::wire::group_view<G_802>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; return view_->get(tag); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
     private:
-        ::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const* view_ = nullptr;
+        ::fixpp::wire::entry_context ctx_{};
     };
     class G_518 {
     public:
         G_518() noexcept = default;
-        explicit G_518(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& v [[clang::lifetimebound]]) noexcept
-            : view_(&v) {}
+        explicit G_518(::fixpp::wire::entry_context ctx) noexcept
+            : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     cont_amt_type() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<519>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 519, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     cont_amt_value(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<520>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 520, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     cont_amt_curr() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<521>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 521, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; return view_->get(tag); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
     private:
-        ::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const* view_ = nullptr;
+        ::fixpp::wire::entry_context ctx_{};
     };
     class G_384 {
     public:
         G_384() noexcept = default;
-        explicit G_384(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& v [[clang::lifetimebound]]) noexcept
-            : view_(&v) {}
+        explicit G_384(::fixpp::wire::entry_context ctx) noexcept
+            : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     ref_msg_type() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<372>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 372, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     msg_direction() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<char>(view_->template get<385>()); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 385, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; return view_->get(tag); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
     private:
-        ::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const* view_ = nullptr;
+        ::fixpp::wire::entry_context ctx_{};
     };
     class G_870 {
     public:
         G_870() noexcept = default;
-        explicit G_870(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& v [[clang::lifetimebound]]) noexcept
-            : view_(&v) {}
+        explicit G_870(::fixpp::wire::entry_context ctx) noexcept
+            : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     instr_attrib_type() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<871>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 871, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     instr_attrib_value() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<872>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 872, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; return view_->get(tag); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
     private:
-        ::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const* view_ = nullptr;
+        ::fixpp::wire::entry_context ctx_{};
     };
     class G_735 {
     public:
         G_735() noexcept = default;
-        explicit G_735(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& v [[clang::lifetimebound]]) noexcept
-            : view_(&v) {}
+        explicit G_735(::fixpp::wire::entry_context ctx) noexcept
+            : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     quote_qualifier() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<char>(view_->template get<695>()); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 695, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; return view_->get(tag); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
     private:
-        ::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const* view_ = nullptr;
+        ::fixpp::wire::entry_context ctx_{};
     };
     class G_146 {
     public:
         G_146() noexcept = default;
-        explicit G_146(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& v [[clang::lifetimebound]]) noexcept
-            : view_(&v) {}
+        explicit G_146(::fixpp::wire::entry_context ctx) noexcept
+            : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     currency() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<15>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 15, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     security_id_source() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<22>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 22, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     security_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<48>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 48, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     symbol() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<55>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 55, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     text() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<58>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 58, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     symbol_sfx() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<65>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 65, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     issuer() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<106>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 106, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     security_desc() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<107>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 107, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     security_type() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<167>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 167, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     maturity_month_year() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<200>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 200, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     put_or_call() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<201>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 201, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     strike_price(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<202>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 202, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     opt_attribute() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<char>(view_->template get<206>()); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 206, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     security_exchange() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<207>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 207, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     coupon_rate(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<223>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 223, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     coupon_payment_date() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<224>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 224, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     issue_date() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<225>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 225, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     repurchase_term() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<226>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 226, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     repurchase_rate(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<227>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 227, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     factor(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<228>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 228, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     contract_multiplier(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<231>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 231, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     repo_collateral_security_type() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<239>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 239, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     redemption_date() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<240>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 240, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     credit_rating() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<255>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 255, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     trading_session_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<336>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 336, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     encoded_issuer_len() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<348>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 348, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     encoded_issuer() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<349>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 349, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     encoded_security_desc_len() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<350>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 350, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     encoded_security_desc() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<351>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 351, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     encoded_text_len() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<354>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 354, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     encoded_text() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<355>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 355, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     product() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<460>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 460, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     cfi_code() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<461>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 461, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     country_of_issue() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<470>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 470, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     state_or_province_of_issue() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<471>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 471, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     locale_of_issue() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<472>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 472, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     maturity_date() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<541>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 541, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     instr_registry() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<543>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 543, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     trading_session_sub_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<625>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 625, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     contract_settl_month() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<667>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 667, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     delivery_form() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<668>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 668, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     pool() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<691>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 691, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     security_sub_type() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<762>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 762, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     expiration_cycle() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<827>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 827, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     pct_at_risk(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<869>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 869, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     dated_date() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<873>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 873, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     interest_accrual_date() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<874>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 874, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     cp_program() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<875>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 875, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     cp_reg_type() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<876>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 876, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     strike_currency() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<947>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 947, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     account() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<1>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 1, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     order_qty(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<38>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 38, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     ord_type() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<char>(view_->template get<40>()); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 40, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     price(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<44>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 44, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     side() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<char>(view_->template get<54>()); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 54, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     transact_time() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<60>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 60, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     settl_type() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<char>(view_->template get<63>()); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 63, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     settl_date() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<64>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 64, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     expire_time() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<126>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 126, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     prev_close_px(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<140>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 140, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     cash_order_qty(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<152>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 152, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     order_qty2(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<192>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 192, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     settl_date2() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<193>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 193, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     spread(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<218>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 218, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     benchmark_curve_currency() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<220>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 220, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     benchmark_curve_name() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<221>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 221, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     benchmark_curve_point() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<222>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 222, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     trade_origination_date() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<229>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 229, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     yield_type() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<235>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 235, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     yield(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<236>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 236, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     quote_request_type() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<303>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 303, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     price_type() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<423>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 423, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     rounding_direction() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<char>(view_->template get<468>()); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 468, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     rounding_modulus(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<469>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 469, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     order_percent(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<516>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 516, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     quote_type() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<537>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 537, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     account_type() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<581>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 581, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     price2(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<640>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 640, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     acct_id_source() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<660>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 660, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     benchmark_price(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<662>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 662, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     benchmark_price_type() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<663>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 663, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     quote_price_type() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<692>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 692, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     yield_redemption_date() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<696>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 696, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     yield_redemption_price(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<697>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 697, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     yield_redemption_price_type() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<698>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 698, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     benchmark_security_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<699>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 699, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     yield_calc_date() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<701>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 701, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     benchmark_security_id_source() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<761>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 761, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     termination_type() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<788>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 788, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     qty_type() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<854>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 854, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     margin_ratio(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<898>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 898, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     agreement_desc() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<913>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 913, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     agreement_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<914>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 914, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     agreement_date() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<915>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 915, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     start_date() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<916>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 916, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     end_date() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<917>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 917, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     agreement_currency() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<918>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 918, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     delivery_type() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<919>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 919, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     valid_until_time() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<62>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 62, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     round_lot(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<561>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 561, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     min_trade_vol(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<562>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 562, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_454>
     security_alt_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return {}; return view_->template group<454, G_454>(); }
+    { if (ctx_.parent_cache_owner == nullptr) return {};
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 454, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      return ::fixpp::wire::group_view<G_454>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_555>
     legs() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return {}; return view_->template group<555, G_555>(); }
+    { if (ctx_.parent_cache_owner == nullptr) return {};
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 555, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      return ::fixpp::wire::group_view<G_555>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_864>
     events() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return {}; return view_->template group<864, G_864>(); }
+    { if (ctx_.parent_cache_owner == nullptr) return {};
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 864, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      return ::fixpp::wire::group_view<G_864>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_870>
     instr_attrib() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return {}; return view_->template group<870, G_870>(); }
+    { if (ctx_.parent_cache_owner == nullptr) return {};
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 870, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      return ::fixpp::wire::group_view<G_870>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_232>
     stipulations() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return {}; return view_->template group<232, G_232>(); }
+    { if (ctx_.parent_cache_owner == nullptr) return {};
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 232, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      return ::fixpp::wire::group_view<G_232>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_453>
     party_i_ds() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return {}; return view_->template group<453, G_453>(); }
+    { if (ctx_.parent_cache_owner == nullptr) return {};
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 453, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      return ::fixpp::wire::group_view<G_453>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_711>
     underlyings() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return {}; return view_->template group<711, G_711>(); }
+    { if (ctx_.parent_cache_owner == nullptr) return {};
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 711, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      return ::fixpp::wire::group_view<G_711>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_735>
     quote_qualifiers() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return {}; return view_->template group<735, G_735>(); }
+    { if (ctx_.parent_cache_owner == nullptr) return {};
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 735, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      return ::fixpp::wire::group_view<G_735>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; return view_->get(tag); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
     private:
-        ::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const* view_ = nullptr;
+        ::fixpp::wire::entry_context ctx_{};
     };
     class G_952 {
     public:
         G_952() noexcept = default;
-        explicit G_952(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& v [[clang::lifetimebound]]) noexcept
-            : view_(&v) {}
+        explicit G_952(::fixpp::wire::entry_context ctx) noexcept
+            : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     nested3_party_sub_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<953>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 953, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     nested3_party_sub_id_type() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<954>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 954, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; return view_->get(tag); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
     private:
-        ::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const* view_ = nullptr;
+        ::fixpp::wire::entry_context ctx_{};
     };
     class G_948 {
     public:
         G_948() noexcept = default;
-        explicit G_948(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& v [[clang::lifetimebound]]) noexcept
-            : view_(&v) {}
+        explicit G_948(::fixpp::wire::entry_context ctx) noexcept
+            : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     nested3_party_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<949>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 949, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     nested3_party_id_source() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<char>(view_->template get<950>()); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 950, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     nested3_party_role() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<951>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 951, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_952>
     nested3_party_sub_i_ds() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return {}; return view_->template group<952, G_952>(); }
+    { if (ctx_.parent_cache_owner == nullptr) return {};
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 952, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      return ::fixpp::wire::group_view<G_952>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; return view_->get(tag); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
     private:
-        ::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const* view_ = nullptr;
+        ::fixpp::wire::entry_context ctx_{};
     };
     class G_801 {
     public:
         G_801() noexcept = default;
-        explicit G_801(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& v [[clang::lifetimebound]]) noexcept
-            : view_(&v) {}
+        explicit G_801(::fixpp::wire::entry_context ctx) noexcept
+            : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     settl_party_sub_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<785>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 785, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     settl_party_sub_id_type() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<786>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 786, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; return view_->get(tag); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
     private:
-        ::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const* view_ = nullptr;
+        ::fixpp::wire::entry_context ctx_{};
     };
     class G_781 {
     public:
         G_781() noexcept = default;
-        explicit G_781(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& v [[clang::lifetimebound]]) noexcept
-            : view_(&v) {}
+        explicit G_781(::fixpp::wire::entry_context ctx) noexcept
+            : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     settl_party_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<782>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 782, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     settl_party_id_source() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<char>(view_->template get<783>()); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 783, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     settl_party_role() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<784>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 784, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_801>
     settl_party_sub_i_ds() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return {}; return view_->template group<801, G_801>(); }
+    { if (ctx_.parent_cache_owner == nullptr) return {};
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 801, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      return ::fixpp::wire::group_view<G_801>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; return view_->get(tag); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
     private:
-        ::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const* view_ = nullptr;
+        ::fixpp::wire::entry_context ctx_{};
     };
     class G_85 {
     public:
         G_85() noexcept = default;
-        explicit G_85(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& v [[clang::lifetimebound]]) noexcept
-            : view_(&v) {}
+        explicit G_85(::fixpp::wire::entry_context ctx) noexcept
+            : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     settl_inst_source() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<char>(view_->template get<165>()); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 165, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     dlvy_inst_type() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<char>(view_->template get<787>()); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 787, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_781>
     settl_party_i_ds() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return {}; return view_->template group<781, G_781>(); }
+    { if (ctx_.parent_cache_owner == nullptr) return {};
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 781, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      return ::fixpp::wire::group_view<G_781>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; return view_->get(tag); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
     private:
-        ::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const* view_ = nullptr;
+        ::fixpp::wire::entry_context ctx_{};
     };
     class G_576 {
     public:
         G_576() noexcept = default;
-        explicit G_576(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& v [[clang::lifetimebound]]) noexcept
-            : view_(&v) {}
+        explicit G_576(::fixpp::wire::entry_context ctx) noexcept
+            : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     clearing_instruction() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<577>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 577, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; return view_->get(tag); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
     private:
-        ::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const* view_ = nullptr;
+        ::fixpp::wire::entry_context ctx_{};
     };
     class G_78 {
     public:
         G_78() noexcept = default;
-        explicit G_78(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& v [[clang::lifetimebound]]) noexcept
-            : view_(&v) {}
+        explicit G_78(::fixpp::wire::entry_context ctx) noexcept
+            : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     alloc_account() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<79>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 79, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     alloc_qty(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<80>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 80, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     individual_alloc_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<467>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 467, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     alloc_acct_id_source() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<661>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 661, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     alloc_settl_currency() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<736>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 736, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     commission(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<12>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 12, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     comm_type() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<char>(view_->template get<13>()); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 13, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     process_code() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<char>(view_->template get<81>()); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 81, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     settl_curr_amt(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<119>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 119, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     settl_currency() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<120>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 120, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     alloc_avg_px(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<153>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 153, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     alloc_net_money(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<154>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 154, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     settl_curr_fx_rate(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<155>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 155, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     settl_curr_fx_rate_calc() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<char>(view_->template get<156>()); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 156, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     alloc_text() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<161>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 161, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     stand_inst_db_type() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<169>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 169, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     stand_inst_db_name() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<170>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 170, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     stand_inst_db_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<171>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 171, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     settl_delivery_type() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<172>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 172, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<bool>
     notify_broker_of_credit() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<bool>(view_->template get<208>()); }
+    { return ::fixpp::dict::decode_field<bool>(::fixpp::wire::get(ctx_.span, 208, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     alloc_handl_inst() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<209>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 209, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     encoded_alloc_text_len() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<360>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 360, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     encoded_alloc_text() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<361>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 361, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     alloc_price(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<366>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 366, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     comm_currency() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<479>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 479, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     fund_renew_waiv() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<char>(view_->template get<497>()); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 497, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     match_status() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<char>(view_->template get<573>()); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 573, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     alloc_settl_curr_amt(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<737>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 737, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     alloc_interest_at_maturity(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<741>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 741, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     alloc_accrued_interest_amt(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<742>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 742, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     alloc_settl_inst_type() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<780>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 780, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     individual_alloc_rej_code() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<776>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 776, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_948>
     nested3_party_i_ds() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return {}; return view_->template group<948, G_948>(); }
+    { if (ctx_.parent_cache_owner == nullptr) return {};
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 948, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      return ::fixpp::wire::group_view<G_948>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_756>
     nested2_party_i_ds() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return {}; return view_->template group<756, G_756>(); }
+    { if (ctx_.parent_cache_owner == nullptr) return {};
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 756, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      return ::fixpp::wire::group_view<G_756>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_85>
     dlvy_inst() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return {}; return view_->template group<85, G_85>(); }
+    { if (ctx_.parent_cache_owner == nullptr) return {};
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 85, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      return ::fixpp::wire::group_view<G_85>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_136>
     misc_fees() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return {}; return view_->template group<136, G_136>(); }
+    { if (ctx_.parent_cache_owner == nullptr) return {};
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 136, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      return ::fixpp::wire::group_view<G_136>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_539>
     nested_party_i_ds() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return {}; return view_->template group<539, G_539>(); }
+    { if (ctx_.parent_cache_owner == nullptr) return {};
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 539, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      return ::fixpp::wire::group_view<G_539>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_576>
     clearing_instructions() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return {}; return view_->template group<576, G_576>(); }
+    { if (ctx_.parent_cache_owner == nullptr) return {};
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 576, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      return ::fixpp::wire::group_view<G_576>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; return view_->get(tag); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
     private:
-        ::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const* view_ = nullptr;
+        ::fixpp::wire::entry_context ctx_{};
     };
     class G_386 {
     public:
         G_386() noexcept = default;
-        explicit G_386(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& v [[clang::lifetimebound]]) noexcept
-            : view_(&v) {}
+        explicit G_386(::fixpp::wire::entry_context ctx) noexcept
+            : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     trading_session_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<336>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 336, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     trading_session_sub_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<625>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 625, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; return view_->get(tag); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
     private:
-        ::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const* view_ = nullptr;
+        ::fixpp::wire::entry_context ctx_{};
     };
     class G_580 {
     public:
         G_580() noexcept = default;
-        explicit G_580(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& v [[clang::lifetimebound]]) noexcept
-            : view_(&v) {}
+        explicit G_580(::fixpp::wire::entry_context ctx) noexcept
+            : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     transact_time() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<60>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 60, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     trade_date() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<75>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 75, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; return view_->get(tag); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
     private:
-        ::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const* view_ = nullptr;
+        ::fixpp::wire::entry_context ctx_{};
     };
     class G_552 {
     public:
         G_552() noexcept = default;
-        explicit G_552(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& v [[clang::lifetimebound]]) noexcept
-            : view_(&v) {}
+        explicit G_552(::fixpp::wire::entry_context ctx) noexcept
+            : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     account() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<1>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 1, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     cl_ord_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<11>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 11, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     commission(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<12>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 12, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     comm_type() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<char>(view_->template get<13>()); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 13, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     currency() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<15>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 15, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     exec_inst() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<18>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 18, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     order_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<37>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 37, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     ord_type() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<char>(view_->template get<40>()); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 40, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     side() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<char>(view_->template get<54>()); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 54, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     text() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<58>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 58, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     list_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<66>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 66, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     alloc_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<70>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 70, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     position_effect() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<char>(view_->template get<77>()); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 77, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     process_code() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<char>(view_->template get<81>()); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 81, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     net_money(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<118>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 118, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     settl_curr_amt(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<119>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 119, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     settl_currency() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<120>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 120, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     settl_curr_fx_rate(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<155>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 155, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     settl_curr_fx_rate_calc() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<char>(view_->template get<156>()); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 156, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     num_days_interest() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<157>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 157, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     accrued_interest_rate(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<158>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 158, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     accrued_interest_amt(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<159>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 159, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     secondary_order_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<198>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 198, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     ex_date() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<230>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 230, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     total_takedown(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<237>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 237, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     concession(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<238>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 238, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     trading_session_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<336>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 336, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     encoded_text_len() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<354>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 354, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     encoded_text() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<355>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 355, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     compliance_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<376>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 376, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<bool>
     solicited_flag() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<bool>(view_->template get<377>()); }
+    { return ::fixpp::dict::decode_field<bool>(::fixpp::wire::get(ctx_.span, 377, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     gross_trade_amt(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<381>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 381, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     comm_currency() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<479>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 479, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     trans_bkd_time() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<483>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 483, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     fund_renew_waiv() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<char>(view_->template get<497>()); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 497, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     secondary_cl_ord_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<526>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 526, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     order_capacity() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<char>(view_->template get<528>()); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 528, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     order_restrictions() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<529>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 529, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<bool>
     odd_lot() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<bool>(view_->template get<575>()); }
+    { return ::fixpp::dict::decode_field<bool>(::fixpp::wire::get(ctx_.span, 575, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     trade_input_source() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<578>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 578, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     trade_input_device() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<579>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 579, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     account_type() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<581>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 581, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     cust_order_capacity() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<582>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 582, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     prealloc_method() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<char>(view_->template get<591>()); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 591, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     trading_session_sub_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<625>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 625, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     acct_id_source() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<660>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 660, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     interest_at_maturity(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<738>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 738, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     side_multi_leg_reporting_type() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<752>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 752, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     order_input_device() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<821>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 821, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     exchange_rule() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<825>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 825, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     trade_alloc_indicator() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<826>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 826, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     end_accrued_interest_amt(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<920>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 920, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     start_cash(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<921>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 921, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     end_cash(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<922>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 922, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     time_bracket() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<943>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 943, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     order_qty(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<38>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 38, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     trade_date() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<75>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 75, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<bool>
     forex_req() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<bool>(view_->template get<121>()); }
+    { return ::fixpp::dict::decode_field<bool>(::fixpp::wire::get(ctx_.span, 121, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     cash_order_qty(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<152>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 152, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     covered_or_uncovered() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<203>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 203, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     trade_origination_date() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<229>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 229, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     rounding_direction() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<char>(view_->template get<468>()); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 468, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     rounding_modulus(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<469>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 469, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     order_percent(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<516>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 516, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     cash_margin() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<char>(view_->template get<544>()); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 544, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     cl_ord_link_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<583>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 583, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     day_booking_inst() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<char>(view_->template get<589>()); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 589, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     booking_unit() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<char>(view_->template get<590>()); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 590, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     clearing_fee_indicator() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<635>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 635, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     side_compliance_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<659>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 659, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     booking_type() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<775>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 775, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     qty_type() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<854>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 854, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     orig_cl_ord_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<41>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 41, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     orig_ord_mod_time() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<586>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 586, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_78>
     allocs() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return {}; return view_->template group<78, G_78>(); }
+    { if (ctx_.parent_cache_owner == nullptr) return {};
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 78, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      return ::fixpp::wire::group_view<G_78>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_136>
     misc_fees() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return {}; return view_->template group<136, G_136>(); }
+    { if (ctx_.parent_cache_owner == nullptr) return {};
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 136, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      return ::fixpp::wire::group_view<G_136>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_232>
     stipulations() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return {}; return view_->template group<232, G_232>(); }
+    { if (ctx_.parent_cache_owner == nullptr) return {};
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 232, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      return ::fixpp::wire::group_view<G_232>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_453>
     party_i_ds() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return {}; return view_->template group<453, G_453>(); }
+    { if (ctx_.parent_cache_owner == nullptr) return {};
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 453, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      return ::fixpp::wire::group_view<G_453>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_518>
     cont_amts() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return {}; return view_->template group<518, G_518>(); }
+    { if (ctx_.parent_cache_owner == nullptr) return {};
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 518, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      return ::fixpp::wire::group_view<G_518>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_576>
     clearing_instructions() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return {}; return view_->template group<576, G_576>(); }
+    { if (ctx_.parent_cache_owner == nullptr) return {};
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 576, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      return ::fixpp::wire::group_view<G_576>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; return view_->get(tag); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
     private:
-        ::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const* view_ = nullptr;
+        ::fixpp::wire::entry_context ctx_{};
     };
     class G_753 {
     public:
         G_753() noexcept = default;
-        explicit G_753(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& v [[clang::lifetimebound]]) noexcept
-            : view_(&v) {}
+        explicit G_753(::fixpp::wire::entry_context ctx) noexcept
+            : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     pos_amt_type() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<707>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 707, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     pos_amt(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<708>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 708, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; return view_->get(tag); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
     private:
-        ::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const* view_ = nullptr;
+        ::fixpp::wire::entry_context ctx_{};
     };
     class G_768 {
     public:
         G_768() noexcept = default;
-        explicit G_768(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& v [[clang::lifetimebound]]) noexcept
-            : view_(&v) {}
+        explicit G_768(::fixpp::wire::entry_context ctx) noexcept
+            : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     trd_reg_timestamp() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<769>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 769, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     trd_reg_timestamp_type() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<770>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 770, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     trd_reg_timestamp_origin() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<771>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 771, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; return view_->get(tag); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
     private:
-        ::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const* view_ = nullptr;
+        ::fixpp::wire::entry_context ctx_{};
     };
     class G_73 {
     public:
         G_73() noexcept = default;
-        explicit G_73(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& v [[clang::lifetimebound]]) noexcept
-            : view_(&v) {}
+        explicit G_73(::fixpp::wire::entry_context ctx) noexcept
+            : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     cl_ord_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<11>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 11, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     order_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<37>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 37, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     order_qty(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<38>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 38, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     list_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<66>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 66, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     secondary_order_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<198>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 198, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     secondary_cl_ord_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<526>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 526, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     order_avg_px(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<799>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 799, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     order_booking_qty(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<800>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 800, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     account() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<1>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 1, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     commission(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<12>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 12, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     comm_type() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<char>(view_->template get<13>()); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 13, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     currency() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<15>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 15, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     exec_inst() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<18>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 18, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     handl_inst() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<char>(view_->template get<21>()); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 21, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     security_id_source() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<22>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 22, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     ioiid() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<23>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 23, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     ord_type() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<char>(view_->template get<40>()); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 40, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     price(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<44>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 44, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     security_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<48>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 48, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     side() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<char>(view_->template get<54>()); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 54, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     symbol() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<55>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 55, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     text() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<58>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 58, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     time_in_force() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<char>(view_->template get<59>()); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 59, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     transact_time() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<60>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 60, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     settl_type() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<char>(view_->template get<63>()); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 63, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     settl_date() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<64>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 64, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     symbol_sfx() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<65>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 65, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     list_seq_no() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<67>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 67, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     alloc_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<70>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 70, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     trade_date() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<75>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 75, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     position_effect() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<char>(view_->template get<77>()); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 77, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     process_code() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<char>(view_->template get<81>()); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 81, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     stop_px(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<99>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 99, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     ex_destination() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<100>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 100, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     issuer() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<106>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 106, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     security_desc() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<107>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 107, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     min_qty(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<110>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 110, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     max_floor(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<111>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 111, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<bool>
     locate_reqd() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<bool>(view_->template get<114>()); }
+    { return ::fixpp::dict::decode_field<bool>(::fixpp::wire::get(ctx_.span, 114, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     quote_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<117>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 117, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     settl_currency() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<120>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 120, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<bool>
     forex_req() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<bool>(view_->template get<121>()); }
+    { return ::fixpp::dict::decode_field<bool>(::fixpp::wire::get(ctx_.span, 121, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     expire_time() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<126>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 126, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     prev_close_px(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<140>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 140, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     cash_order_qty(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<152>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 152, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     settl_inst_mode() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<char>(view_->template get<160>()); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 160, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     security_type() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<167>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 167, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     effective_time() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<168>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 168, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     order_qty2(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<192>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 192, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     settl_date2() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<193>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 193, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     maturity_month_year() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<200>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 200, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     put_or_call() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<201>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 201, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     strike_price(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<202>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 202, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     covered_or_uncovered() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<203>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 203, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     opt_attribute() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<char>(view_->template get<206>()); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 206, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     security_exchange() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<207>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 207, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     max_show(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<210>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 210, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     peg_offset_value(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<211>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 211, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     spread(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<218>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 218, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     benchmark_curve_currency() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<220>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 220, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     benchmark_curve_name() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<221>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 221, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     benchmark_curve_point() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<222>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 222, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     coupon_rate(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<223>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 223, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     coupon_payment_date() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<224>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 224, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     issue_date() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<225>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 225, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     repurchase_term() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<226>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 226, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     repurchase_rate(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<227>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 227, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     factor(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<228>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 228, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     trade_origination_date() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<229>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 229, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     contract_multiplier(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<231>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 231, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     yield_type() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<235>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 235, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     yield(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<236>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 236, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     repo_collateral_security_type() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<239>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 239, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     redemption_date() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<240>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 240, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     credit_rating() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<255>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 255, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     encoded_issuer_len() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<348>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 348, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     encoded_issuer() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<349>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 349, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     encoded_security_desc_len() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<350>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 350, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     encoded_security_desc() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<351>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 351, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     encoded_text_len() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<354>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 354, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     encoded_text() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<355>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 355, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     compliance_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<376>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 376, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<bool>
     solicited_flag() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<bool>(view_->template get<377>()); }
+    { return ::fixpp::dict::decode_field<bool>(::fixpp::wire::get(ctx_.span, 377, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     discretion_inst() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<char>(view_->template get<388>()); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 388, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     discretion_offset_value(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<389>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 389, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     side_value_ind() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<401>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 401, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     price_type() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<423>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 423, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     gt_booking_inst() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<427>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 427, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     expire_date() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<432>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 432, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     product() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<460>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 460, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     cfi_code() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<461>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 461, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     rounding_direction() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<char>(view_->template get<468>()); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 468, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     rounding_modulus(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<469>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 469, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     country_of_issue() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<470>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 470, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     state_or_province_of_issue() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<471>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 471, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     locale_of_issue() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<472>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 472, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     comm_currency() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<479>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 479, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     designation() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<494>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 494, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     fund_renew_waiv() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<char>(view_->template get<497>()); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 497, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     order_percent(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<516>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 516, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     order_capacity() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<char>(view_->template get<528>()); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 528, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     order_restrictions() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<529>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 529, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     maturity_date() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<541>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 541, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     instr_registry() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<543>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 543, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     cash_margin() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<char>(view_->template get<544>()); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 544, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     account_type() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<581>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 581, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     cust_order_capacity() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<582>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 582, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     cl_ord_link_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<583>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 583, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     day_booking_inst() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<char>(view_->template get<589>()); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 589, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     booking_unit() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<char>(view_->template get<590>()); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 590, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     prealloc_method() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<char>(view_->template get<591>()); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 591, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     clearing_fee_indicator() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<635>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 635, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     price2(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<640>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 640, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     acct_id_source() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<660>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 660, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     benchmark_price(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<662>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 662, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     benchmark_price_type() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<663>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 663, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     contract_settl_month() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<667>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 667, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     pool() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<691>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 691, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     yield_redemption_date() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<696>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 696, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     yield_redemption_price(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<697>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 697, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     yield_redemption_price_type() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<698>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 698, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     benchmark_security_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<699>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 699, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     yield_calc_date() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<701>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 701, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     benchmark_security_id_source() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<761>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 761, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     security_sub_type() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<762>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 762, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     booking_type() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<775>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 775, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     peg_move_type() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<835>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 835, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     peg_offset_type() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<836>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 836, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     peg_limit_type() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<837>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 837, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     peg_round_direction() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<838>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 838, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     peg_scope() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<840>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 840, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     discretion_move_type() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<841>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 841, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     discretion_offset_type() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<842>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 842, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     discretion_limit_type() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<843>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 843, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     discretion_round_direction() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<844>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 844, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     discretion_scope() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<846>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 846, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     target_strategy() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<847>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 847, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     target_strategy_parameters() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<848>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 848, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     participation_rate(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<849>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 849, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     qty_type() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<854>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 854, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     dated_date() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<873>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 873, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     interest_accrual_date() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<874>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 874, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     cp_program() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<875>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 875, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     cp_reg_type() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<876>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 876, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     strike_currency() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<947>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 947, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     avg_px(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<6>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 6, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     cum_qty(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<14>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 14, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     ord_status() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<char>(view_->template get<39>()); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 39, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     cxl_qty(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<84>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 84, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     ord_rej_reason() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<103>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 103, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     leaves_qty(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<151>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 151, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<bool>
     working_indicator() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<bool>(view_->template get<636>()); }
+    { return ::fixpp::dict::decode_field<bool>(::fixpp::wire::get(ctx_.span, 636, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_756>
     nested2_party_i_ds() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return {}; return view_->template group<756, G_756>(); }
+    { if (ctx_.parent_cache_owner == nullptr) return {};
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 756, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      return ::fixpp::wire::group_view<G_756>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_78>
     allocs() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return {}; return view_->template group<78, G_78>(); }
+    { if (ctx_.parent_cache_owner == nullptr) return {};
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 78, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      return ::fixpp::wire::group_view<G_78>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_232>
     stipulations() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return {}; return view_->template group<232, G_232>(); }
+    { if (ctx_.parent_cache_owner == nullptr) return {};
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 232, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      return ::fixpp::wire::group_view<G_232>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_386>
     trading_sessions() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return {}; return view_->template group<386, G_386>(); }
+    { if (ctx_.parent_cache_owner == nullptr) return {};
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 386, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      return ::fixpp::wire::group_view<G_386>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_453>
     party_i_ds() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return {}; return view_->template group<453, G_453>(); }
+    { if (ctx_.parent_cache_owner == nullptr) return {};
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 453, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      return ::fixpp::wire::group_view<G_453>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_454>
     security_alt_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return {}; return view_->template group<454, G_454>(); }
+    { if (ctx_.parent_cache_owner == nullptr) return {};
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 454, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      return ::fixpp::wire::group_view<G_454>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_711>
     underlyings() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return {}; return view_->template group<711, G_711>(); }
+    { if (ctx_.parent_cache_owner == nullptr) return {};
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 711, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      return ::fixpp::wire::group_view<G_711>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_864>
     events() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return {}; return view_->template group<864, G_864>(); }
+    { if (ctx_.parent_cache_owner == nullptr) return {};
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 864, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      return ::fixpp::wire::group_view<G_864>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; return view_->get(tag); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
     private:
-        ::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const* view_ = nullptr;
+        ::fixpp::wire::entry_context ctx_{};
     };
     class G_862 {
     public:
         G_862() noexcept = default;
-        explicit G_862(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& v [[clang::lifetimebound]]) noexcept
-            : view_(&v) {}
+        explicit G_862(::fixpp::wire::entry_context ctx) noexcept
+            : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     order_capacity() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<char>(view_->template get<528>()); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 528, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     order_restrictions() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<529>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 529, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     order_capacity_qty(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<863>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 863, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; return view_->get(tag); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
     private:
-        ::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const* view_ = nullptr;
+        ::fixpp::wire::entry_context ctx_{};
     };
     class G_702 {
     public:
         G_702() noexcept = default;
-        explicit G_702(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& v [[clang::lifetimebound]]) noexcept
-            : view_(&v) {}
+        explicit G_702(::fixpp::wire::entry_context ctx) noexcept
+            : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     pos_type() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<703>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 703, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     long_qty(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<704>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 704, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     short_qty(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<705>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 705, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     pos_qty_status() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<706>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 706, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_539>
     nested_party_i_ds() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return {}; return view_->template group<539, G_539>(); }
+    { if (ctx_.parent_cache_owner == nullptr) return {};
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 539, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      return ::fixpp::wire::group_view<G_539>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; return view_->get(tag); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
     private:
-        ::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const* view_ = nullptr;
+        ::fixpp::wire::entry_context ctx_{};
     };
     class G_124 {
     public:
         G_124() noexcept = default;
-        explicit G_124(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& v [[clang::lifetimebound]]) noexcept
-            : view_(&v) {}
+        explicit G_124(::fixpp::wire::entry_context ctx) noexcept
+            : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     exec_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<17>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 17, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     last_capacity() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<char>(view_->template get<29>()); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 29, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     last_px(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<31>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 31, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     last_qty(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<32>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 32, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     secondary_exec_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<527>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 527, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     last_par_px(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<669>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 669, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; return view_->get(tag); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
     private:
-        ::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const* view_ = nullptr;
+        ::fixpp::wire::entry_context ctx_{};
     };
     class G_897 {
     public:
         G_897() noexcept = default;
-        explicit G_897(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& v [[clang::lifetimebound]]) noexcept
-            : view_(&v) {}
+        explicit G_897(::fixpp::wire::entry_context ctx) noexcept
+            : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     trade_report_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<571>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 571, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     secondary_trade_report_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<818>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 818, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; return view_->get(tag); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
     private:
-        ::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const* view_ = nullptr;
+        ::fixpp::wire::entry_context ctx_{};
     };
     class G_33 {
     public:
         G_33() noexcept = default;
-        explicit G_33(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& v [[clang::lifetimebound]]) noexcept
-            : view_(&v) {}
+        explicit G_33(::fixpp::wire::entry_context ctx) noexcept
+            : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     text() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<58>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 58, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     encoded_text_len() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<354>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 354, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     encoded_text() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<355>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 355, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; return view_->get(tag); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
     private:
-        ::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const* view_ = nullptr;
+        ::fixpp::wire::entry_context ctx_{};
     };
     class G_938 {
     public:
         G_938() noexcept = default;
-        explicit G_938(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& v [[clang::lifetimebound]]) noexcept
-            : view_(&v) {}
+        explicit G_938(::fixpp::wire::entry_context ctx) noexcept
+            : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     coll_inquiry_qualifier() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<896>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 896, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; return view_->get(tag); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
     private:
-        ::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const* view_ = nullptr;
+        ::fixpp::wire::entry_context ctx_{};
     };
     class G_936 {
     public:
         G_936() noexcept = default;
-        explicit G_936(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& v [[clang::lifetimebound]]) noexcept
-            : view_(&v) {}
+        explicit G_936(::fixpp::wire::entry_context ctx) noexcept
+            : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     location_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<283>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 283, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     desk_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<284>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 284, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     ref_comp_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<930>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 930, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     ref_sub_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<931>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 931, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     status_value() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<928>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 928, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     status_text() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<929>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 929, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; return view_->get(tag); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
     private:
-        ::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const* view_ = nullptr;
+        ::fixpp::wire::entry_context ctx_{};
     };
     class G_778 {
     public:
         G_778() noexcept = default;
-        explicit G_778(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& v [[clang::lifetimebound]]) noexcept
-            : view_(&v) {}
+        explicit G_778(::fixpp::wire::entry_context ctx) noexcept
+            : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     side() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<char>(view_->template get<54>()); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 54, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     expire_time() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<126>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 126, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     settl_inst_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<162>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 162, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     settl_inst_trans_type() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<char>(view_->template get<163>()); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 163, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     security_type() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<167>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 167, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     effective_time() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<168>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 168, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     stand_inst_db_type() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<169>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 169, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     stand_inst_db_name() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<170>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 170, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     stand_inst_db_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<171>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 171, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     settl_delivery_type() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<172>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 172, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     settl_inst_ref_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<214>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 214, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     product() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<460>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 460, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     cfi_code() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<461>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 461, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     payment_ref() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<476>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 476, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     card_holder_name() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<488>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 488, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     card_number() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<489>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 489, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     card_exp_date() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<490>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 490, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     card_iss_num() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<491>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 491, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     payment_method() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<492>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 492, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     card_start_date() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<503>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 503, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     payment_date() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<504>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 504, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     payment_remitter_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<505>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 505, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     last_update_time() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<779>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 779, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_85>
     dlvy_inst() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return {}; return view_->template group<85, G_85>(); }
+    { if (ctx_.parent_cache_owner == nullptr) return {};
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 85, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      return ::fixpp::wire::group_view<G_85>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_453>
     party_i_ds() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return {}; return view_->template group<453, G_453>(); }
+    { if (ctx_.parent_cache_owner == nullptr) return {};
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 453, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      return ::fixpp::wire::group_view<G_453>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; return view_->get(tag); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
     private:
-        ::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const* view_ = nullptr;
+        ::fixpp::wire::entry_context ctx_{};
     };
     class G_267 {
     public:
         G_267() noexcept = default;
-        explicit G_267(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& v [[clang::lifetimebound]]) noexcept
-            : view_(&v) {}
+        explicit G_267(::fixpp::wire::entry_context ctx) noexcept
+            : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     md_entry_type() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<char>(view_->template get<269>()); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 269, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; return view_->get(tag); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
     private:
-        ::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const* view_ = nullptr;
+        ::fixpp::wire::entry_context ctx_{};
     };
     class G_268 {
     public:
         G_268() noexcept = default;
-        explicit G_268(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& v [[clang::lifetimebound]]) noexcept
-            : view_(&v) {}
+        explicit G_268(::fixpp::wire::entry_context ctx) noexcept
+            : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     currency() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<15>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 15, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     exec_inst() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<18>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 18, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     order_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<37>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 37, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     text() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<58>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 58, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     time_in_force() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<char>(view_->template get<59>()); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 59, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     min_qty(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<110>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 110, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     expire_time() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<126>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 126, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     md_entry_type() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<char>(view_->template get<269>()); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 269, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     md_entry_px(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<270>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 270, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     md_entry_size(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<271>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 271, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     md_entry_date() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<272>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 272, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     md_entry_time() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<273>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 273, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     tick_direction() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<char>(view_->template get<274>()); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 274, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     md_mkt() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<275>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 275, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     quote_condition() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<276>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 276, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     trade_condition() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<277>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 277, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     md_entry_originator() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<282>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 282, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     location_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<283>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 283, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     desk_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<284>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 284, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     open_close_settl_flag() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<286>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 286, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     seller_days() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<287>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 287, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     md_entry_buyer() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<288>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 288, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     md_entry_seller() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<289>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 289, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     md_entry_position_no() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<290>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 290, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     quote_entry_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<299>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 299, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     trading_session_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<336>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 336, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     number_of_orders() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<346>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 346, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     encoded_text_len() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<354>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 354, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     encoded_text() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<355>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 355, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     expire_date() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<432>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 432, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     scope() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<546>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 546, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     trading_session_sub_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<625>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 625, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     price_delta(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<811>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 811, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     security_id_source() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<22>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 22, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     security_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<48>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 48, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     symbol() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<55>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 55, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     symbol_sfx() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<65>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 65, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     issuer() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<106>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 106, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     security_desc() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<107>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 107, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     security_type() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<167>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 167, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     maturity_month_year() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<200>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 200, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     put_or_call() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<201>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 201, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     strike_price(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<202>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 202, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     opt_attribute() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<char>(view_->template get<206>()); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 206, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     security_exchange() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<207>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 207, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     coupon_rate(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<223>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 223, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     coupon_payment_date() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<224>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 224, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     issue_date() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<225>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 225, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     repurchase_term() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<226>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 226, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     repurchase_rate(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<227>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 227, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     factor(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<228>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 228, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     contract_multiplier(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<231>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 231, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     repo_collateral_security_type() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<239>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 239, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     redemption_date() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<240>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 240, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     credit_rating() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<255>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 255, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     md_entry_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<278>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 278, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     md_update_action() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<char>(view_->template get<279>()); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 279, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     md_entry_ref_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<280>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 280, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     delete_reason() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<char>(view_->template get<285>()); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 285, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     financial_status() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<291>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 291, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     corporate_action() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<292>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 292, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     encoded_issuer_len() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<348>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 348, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     encoded_issuer() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<349>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 349, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     encoded_security_desc_len() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<350>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 350, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     encoded_security_desc() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<351>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 351, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     net_chg_prev_day(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<451>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 451, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     product() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<460>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 460, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     cfi_code() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<461>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 461, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     country_of_issue() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<470>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 470, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     state_or_province_of_issue() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<471>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 471, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     locale_of_issue() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<472>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 472, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     maturity_date() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<541>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 541, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     instr_registry() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<543>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 543, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     contract_settl_month() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<667>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 667, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     pool() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<691>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 691, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     security_sub_type() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<762>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 762, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     dated_date() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<873>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 873, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     interest_accrual_date() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<874>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 874, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     cp_program() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<875>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 875, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     cp_reg_type() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<876>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 876, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     strike_currency() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<947>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 947, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_454>
     security_alt_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return {}; return view_->template group<454, G_454>(); }
+    { if (ctx_.parent_cache_owner == nullptr) return {};
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 454, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      return ::fixpp::wire::group_view<G_454>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_555>
     legs() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return {}; return view_->template group<555, G_555>(); }
+    { if (ctx_.parent_cache_owner == nullptr) return {};
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 555, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      return ::fixpp::wire::group_view<G_555>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_711>
     underlyings() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return {}; return view_->template group<711, G_711>(); }
+    { if (ctx_.parent_cache_owner == nullptr) return {};
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 711, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      return ::fixpp::wire::group_view<G_711>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_864>
     events() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return {}; return view_->template group<864, G_864>(); }
+    { if (ctx_.parent_cache_owner == nullptr) return {};
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 864, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      return ::fixpp::wire::group_view<G_864>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; return view_->get(tag); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
     private:
-        ::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const* view_ = nullptr;
+        ::fixpp::wire::entry_context ctx_{};
     };
     class G_816 {
     public:
         G_816() noexcept = default;
-        explicit G_816(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& v [[clang::lifetimebound]]) noexcept
-            : view_(&v) {}
+        explicit G_816(::fixpp::wire::entry_context ctx) noexcept
+            : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     alt_md_source_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<817>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 817, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; return view_->get(tag); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
     private:
-        ::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const* view_ = nullptr;
+        ::fixpp::wire::entry_context ctx_{};
     };
     class G_295 {
     public:
         G_295() noexcept = default;
-        explicit G_295(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& v [[clang::lifetimebound]]) noexcept
-            : view_(&v) {}
+        explicit G_295(::fixpp::wire::entry_context ctx) noexcept
+            : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     security_id_source() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<22>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 22, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     security_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<48>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 48, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     symbol() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<55>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 55, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     symbol_sfx() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<65>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 65, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     issuer() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<106>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 106, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     security_desc() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<107>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 107, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     security_type() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<167>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 167, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     maturity_month_year() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<200>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 200, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     put_or_call() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<201>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 201, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     strike_price(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<202>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 202, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     opt_attribute() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<char>(view_->template get<206>()); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 206, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     security_exchange() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<207>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 207, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     coupon_rate(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<223>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 223, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     coupon_payment_date() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<224>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 224, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     issue_date() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<225>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 225, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     repurchase_term() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<226>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 226, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     repurchase_rate(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<227>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 227, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     factor(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<228>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 228, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     contract_multiplier(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<231>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 231, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     repo_collateral_security_type() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<239>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 239, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     redemption_date() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<240>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 240, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     credit_rating() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<255>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 255, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     encoded_issuer_len() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<348>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 348, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     encoded_issuer() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<349>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 349, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     encoded_security_desc_len() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<350>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 350, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     encoded_security_desc() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<351>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 351, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     product() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<460>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 460, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     cfi_code() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<461>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 461, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     country_of_issue() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<470>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 470, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     state_or_province_of_issue() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<471>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 471, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     locale_of_issue() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<472>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 472, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     maturity_date() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<541>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 541, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     instr_registry() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<543>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 543, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     contract_settl_month() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<667>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 667, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     pool() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<691>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 691, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     security_sub_type() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<762>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 762, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     termination_type() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<788>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 788, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     dated_date() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<873>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 873, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     interest_accrual_date() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<874>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 874, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     cp_program() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<875>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 875, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     cp_reg_type() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<876>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 876, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     margin_ratio(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<898>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 898, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     agreement_desc() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<913>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 913, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     agreement_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<914>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 914, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     agreement_date() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<915>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 915, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     start_date() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<916>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 916, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     end_date() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<917>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 917, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     agreement_currency() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<918>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 918, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     delivery_type() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<919>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 919, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     strike_currency() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<947>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 947, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     currency() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<15>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 15, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     ord_type() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<char>(view_->template get<40>()); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 40, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     transact_time() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<60>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 60, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     valid_until_time() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<62>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 62, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     settl_date() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<64>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 64, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     bid_px(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<132>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 132, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     offer_px(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<133>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 133, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     bid_size(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<134>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 134, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     offer_size(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<135>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 135, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     bid_spot_rate(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<188>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 188, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     bid_forward_points(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<189>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 189, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     offer_spot_rate(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<190>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 190, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     offer_forward_points(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<191>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 191, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     order_qty2(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<192>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 192, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     settl_date2() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<193>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 193, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     quote_entry_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<299>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 299, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     trading_session_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<336>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 336, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     quote_entry_reject_reason() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<368>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 368, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     trading_session_sub_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<625>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 625, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     mid_px(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<631>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 631, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     bid_yield(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<632>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 632, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     mid_yield(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<633>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 633, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     offer_yield(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<634>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 634, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     bid_forward_points2(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<642>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 642, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     offer_forward_points2(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<643>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 643, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_454>
     security_alt_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return {}; return view_->template group<454, G_454>(); }
+    { if (ctx_.parent_cache_owner == nullptr) return {};
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 454, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      return ::fixpp::wire::group_view<G_454>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_555>
     legs() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return {}; return view_->template group<555, G_555>(); }
+    { if (ctx_.parent_cache_owner == nullptr) return {};
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 555, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      return ::fixpp::wire::group_view<G_555>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_711>
     underlyings() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return {}; return view_->template group<711, G_711>(); }
+    { if (ctx_.parent_cache_owner == nullptr) return {};
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 711, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      return ::fixpp::wire::group_view<G_711>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_864>
     events() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return {}; return view_->template group<864, G_864>(); }
+    { if (ctx_.parent_cache_owner == nullptr) return {};
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 864, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      return ::fixpp::wire::group_view<G_864>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; return view_->get(tag); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
     private:
-        ::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const* view_ = nullptr;
+        ::fixpp::wire::entry_context ctx_{};
     };
     class G_296 {
     public:
         G_296() noexcept = default;
-        explicit G_296(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& v [[clang::lifetimebound]]) noexcept
-            : view_(&v) {}
+        explicit G_296(::fixpp::wire::entry_context ctx) noexcept
+            : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_coupon_payment_date() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<241>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 241, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_issue_date() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<242>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 242, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_repo_collateral_security_type() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<243>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 243, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     underlying_repurchase_term() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<244>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 244, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     underlying_repurchase_rate(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<245>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 245, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     underlying_factor(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<246>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 246, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_redemption_date() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<247>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 247, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_credit_rating() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<256>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 256, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     quote_set_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<302>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 302, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     tot_no_quote_entries() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<304>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 304, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_security_id_source() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<305>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 305, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_issuer() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<306>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 306, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_security_desc() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<307>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 307, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_security_exchange() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<308>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 308, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_security_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<309>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 309, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_security_type() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<310>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 310, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_symbol() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<311>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 311, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_symbol_sfx() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<312>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 312, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_maturity_month_year() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<313>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 313, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     underlying_put_or_call() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<315>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 315, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     underlying_strike_price(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<316>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 316, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     underlying_opt_attribute() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<char>(view_->template get<317>()); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 317, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_currency() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<318>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 318, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     encoded_underlying_issuer_len() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<362>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 362, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     encoded_underlying_issuer() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<363>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 363, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     encoded_underlying_security_desc_len() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<364>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 364, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     encoded_underlying_security_desc() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<365>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 365, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     underlying_coupon_rate(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<435>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 435, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     underlying_contract_multiplier(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<436>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 436, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     underlying_product() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<462>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 462, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_cfi_code() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<463>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 463, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_maturity_date() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<542>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 542, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_country_of_issue() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<592>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 592, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_state_or_province_of_issue() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<593>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 593, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_locale_of_issue() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<594>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 594, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_instr_registry() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<595>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 595, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_security_sub_type() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<763>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 763, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     underlying_px(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<810>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 810, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_cp_program() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<877>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 877, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_cp_reg_type() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<878>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 878, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     underlying_qty(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<879>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 879, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     underlying_dirty_price(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<882>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 882, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     underlying_end_price(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<883>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 883, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     underlying_start_value(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<884>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 884, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     underlying_current_value(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<885>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 885, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     underlying_end_value(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<886>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 886, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<bool>
     last_fragment() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<bool>(view_->template get<893>()); }
+    { return ::fixpp::dict::decode_field<bool>(::fixpp::wire::get(ctx_.span, 893, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_strike_currency() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<941>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 941, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     quote_set_valid_until_time() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<367>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 367, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_295>
     quote_entries() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return {}; return view_->template group<295, G_295>(); }
+    { if (ctx_.parent_cache_owner == nullptr) return {};
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 295, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      return ::fixpp::wire::group_view<G_295>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_457>
     underlying_security_alt_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return {}; return view_->template group<457, G_457>(); }
+    { if (ctx_.parent_cache_owner == nullptr) return {};
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 457, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      return ::fixpp::wire::group_view<G_457>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_887>
     underlying_stips() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return {}; return view_->template group<887, G_887>(); }
+    { if (ctx_.parent_cache_owner == nullptr) return {};
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 887, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      return ::fixpp::wire::group_view<G_887>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; return view_->get(tag); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
     private:
-        ::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const* view_ = nullptr;
+        ::fixpp::wire::entry_context ctx_{};
     };
     class G_398 {
     public:
         G_398() noexcept = default;
-        explicit G_398(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& v [[clang::lifetimebound]]) noexcept
-            : view_(&v) {}
+        explicit G_398(::fixpp::wire::entry_context ctx) noexcept
+            : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     bid_descriptor_type() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<399>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 399, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     bid_descriptor() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<400>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 400, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     side_value_ind() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<401>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 401, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     liquidity_pct_low(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<402>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 402, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     liquidity_pct_high(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<403>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 403, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     liquidity_value(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<404>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 404, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     efp_tracking_error(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<405>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 405, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     fair_value(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<406>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 406, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     outside_index_pct(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<407>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 407, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     value_of_futures(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<408>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 408, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     liquidity_num_securities() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<441>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 441, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; return view_->get(tag); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
     private:
-        ::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const* view_ = nullptr;
+        ::fixpp::wire::entry_context ctx_{};
     };
     class G_420 {
     public:
         G_420() noexcept = default;
-        explicit G_420(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& v [[clang::lifetimebound]]) noexcept
-            : view_(&v) {}
+        explicit G_420(::fixpp::wire::entry_context ctx) noexcept
+            : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     account() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<1>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 1, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     side() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<char>(view_->template get<54>()); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 54, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     settl_type() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<char>(view_->template get<63>()); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 63, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     settl_date() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<64>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 64, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     list_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<66>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 66, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     trading_session_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<336>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 336, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     net_gross_ind() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<430>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 430, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     trading_session_sub_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<625>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 625, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     acct_id_source() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<660>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 660, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     commission(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<12>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 12, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     comm_type() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<char>(view_->template get<13>()); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 13, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     price(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<44>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 44, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     text() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<58>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 58, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     encoded_text_len() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<354>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 354, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     encoded_text() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<355>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 355, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     fair_value(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<406>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 406, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     country() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<421>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 421, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     price_type() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<423>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 423, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     comm_currency() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<479>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 479, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     fund_renew_waiv() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<char>(view_->template get<497>()); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 497, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; return view_->get(tag); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
     private:
-        ::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const* view_ = nullptr;
+        ::fixpp::wire::entry_context ctx_{};
     };
     class G_428 {
     public:
         G_428() noexcept = default;
-        explicit G_428(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& v [[clang::lifetimebound]]) noexcept
-            : view_(&v) {}
+        explicit G_428(::fixpp::wire::entry_context ctx) noexcept
+            : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     security_id_source() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<22>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 22, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     security_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<48>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 48, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     symbol() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<55>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 55, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     symbol_sfx() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<65>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 65, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     issuer() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<106>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 106, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     security_desc() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<107>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 107, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     security_type() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<167>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 167, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     maturity_month_year() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<200>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 200, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     put_or_call() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<201>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 201, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     strike_price(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<202>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 202, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     opt_attribute() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<char>(view_->template get<206>()); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 206, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     security_exchange() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<207>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 207, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     coupon_rate(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<223>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 223, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     coupon_payment_date() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<224>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 224, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     issue_date() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<225>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 225, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     repurchase_term() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<226>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 226, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     repurchase_rate(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<227>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 227, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     factor(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<228>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 228, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     contract_multiplier(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<231>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 231, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     repo_collateral_security_type() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<239>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 239, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     redemption_date() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<240>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 240, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     credit_rating() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<255>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 255, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     encoded_issuer_len() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<348>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 348, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     encoded_issuer() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<349>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 349, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     encoded_security_desc_len() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<350>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 350, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     encoded_security_desc() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<351>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 351, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     product() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<460>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 460, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     cfi_code() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<461>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 461, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     country_of_issue() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<470>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 470, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     state_or_province_of_issue() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<471>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 471, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     locale_of_issue() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<472>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 472, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     maturity_date() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<541>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 541, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     instr_registry() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<543>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 543, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     contract_settl_month() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<667>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 667, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     pool() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<691>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 691, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     security_sub_type() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<762>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 762, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     dated_date() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<873>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 873, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     interest_accrual_date() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<874>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 874, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     cp_program() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<875>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 875, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     cp_reg_type() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<876>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 876, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     strike_currency() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<947>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 947, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_454>
     security_alt_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return {}; return view_->template group<454, G_454>(); }
+    { if (ctx_.parent_cache_owner == nullptr) return {};
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 454, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      return ::fixpp::wire::group_view<G_454>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_864>
     events() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return {}; return view_->template group<864, G_864>(); }
+    { if (ctx_.parent_cache_owner == nullptr) return {};
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 864, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      return ::fixpp::wire::group_view<G_864>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; return view_->get(tag); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
     private:
-        ::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const* view_ = nullptr;
+        ::fixpp::wire::entry_context ctx_{};
     };
     class G_473 {
     public:
         G_473() noexcept = default;
-        explicit G_473(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& v [[clang::lifetimebound]]) noexcept
-            : view_(&v) {}
+        explicit G_473(::fixpp::wire::entry_context ctx) noexcept
+            : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     mailing_dtls() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<474>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 474, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     investor_country_of_residence() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<475>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 475, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     mailing_inst() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<482>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 482, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     date_of_birth() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<486>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 486, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     regist_dtls() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<509>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 509, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     regist_email() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<511>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 511, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     owner_type() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<522>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 522, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_539>
     nested_party_i_ds() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return {}; return view_->template group<539, G_539>(); }
+    { if (ctx_.parent_cache_owner == nullptr) return {};
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 539, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      return ::fixpp::wire::group_view<G_539>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; return view_->get(tag); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
     private:
-        ::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const* view_ = nullptr;
+        ::fixpp::wire::entry_context ctx_{};
     };
     class G_510 {
     public:
         G_510() noexcept = default;
-        explicit G_510(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& v [[clang::lifetimebound]]) noexcept
-            : view_(&v) {}
+        explicit G_510(::fixpp::wire::entry_context ctx) noexcept
+            : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     distrib_payment_method() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<477>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 477, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     cash_distrib_curr() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<478>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 478, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     cash_distrib_agent_name() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<498>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 498, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     cash_distrib_agent_code() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<499>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 499, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     cash_distrib_agent_acct_number() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<500>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 500, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     cash_distrib_pay_ref() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<501>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 501, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     cash_distrib_agent_acct_name() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<502>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 502, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     distrib_percentage(::std::pmr::memory_resource* mr) const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = view_->template get<512>(); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 512, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; return view_->get(tag); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
     private:
-        ::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const* view_ = nullptr;
+        ::fixpp::wire::entry_context ctx_{};
     };
     class G_534 {
     public:
         G_534() noexcept = default;
-        explicit G_534(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& v [[clang::lifetimebound]]) noexcept
-            : view_(&v) {}
+        explicit G_534(::fixpp::wire::entry_context ctx) noexcept
+            : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     orig_cl_ord_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<41>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 41, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     affected_order_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<535>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 535, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     affected_secondary_order_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<536>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 536, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; return view_->get(tag); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
     private:
-        ::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const* view_ = nullptr;
+        ::fixpp::wire::entry_context ctx_{};
     };
     class G_558 {
     public:
         G_558() noexcept = default;
-        explicit G_558(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& v [[clang::lifetimebound]]) noexcept
-            : view_(&v) {}
+        explicit G_558(::fixpp::wire::entry_context ctx) noexcept
+            : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     security_type() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<167>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 167, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     product() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<460>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 460, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     cfi_code() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<461>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 461, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     security_sub_type() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<762>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 762, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; return view_->get(tag); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
     private:
-        ::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const* view_ = nullptr;
+        ::fixpp::wire::entry_context ctx_{};
     };
 
 }  // namespace fixpp::v44::groups
