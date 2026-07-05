@@ -109,7 +109,16 @@ TEST(GroupEntryGenerationTrapDeath, GenerationTokenTrapOnStaleEntryRead) {
     // Keep the Framer alive across the parse (it owns the live pool_id/gen
     // slot); recycle_pool() below bumps THIS pool's generation.
     fixpp::wire::Framer framer;
-    std::pmr::monotonic_buffer_resource arena{16384};
+    // Stack-backed, NULL-upstream arena (mirrors group_entry_alloc_gate_test):
+    // all parse / carry / build_nested_subview storage is drawn from this
+    // std::array so NO global operator new fires. This keeps the death-test
+    // children — forked at each EXPECT_DEATH with the pre-trap nested sub-view
+    // already built — free of any heap block LeakSanitizer would report when
+    // the child dies mid-statement (it never reaches this arena's destructor).
+    // Overrun → null upstream → hard bad_alloc (visible), not a silent heap hit.
+    std::array<std::byte, 16384> arena_storage{};
+    std::pmr::monotonic_buffer_resource arena{arena_storage.data(), arena_storage.size(),
+                                              std::pmr::null_memory_resource()};
     fixpp::wire::pmr_carry_buffer carry{buf.size(), &arena};
     std::array<fixpp::wire::frame_view, 1> fvs{};
     auto framed = framer.feed(
@@ -121,9 +130,17 @@ TEST(GroupEntryGenerationTrapDeath, GenerationTokenTrapOnStaleEntryRead) {
     fixpp::wire::Parser<fixpp::wire::access_mode::Index> parser{dict};
     auto mv_exp = parser.parse((*framed)[0], &arena);
     ASSERT_TRUE(mv_exp.has_value());
-    auto mv = *mv_exp;
 
-    fixpp::v44::MassQuote mq{mv};
+    // Construct directly from *mv_exp — do NOT copy the MessageView into a
+    // local. A copy re-roots the OffsetTable's resource() to the default heap
+    // resource, so build_nested_subview would draw the nested sub-view from
+    // global operator new; a death-test child forked at the EXPECT_DEATHs
+    // below would then inherit that heap block and die before this arena's
+    // destructor runs, which LeakSanitizer reports. Building over *mv_exp keeps
+    // resource() == &arena (the stack-backed, NULL-upstream arena above), so
+    // no global heap block exists for a forked child to leak. (Matches
+    // nested_group_read_test / group_entry_alloc_gate_test, which never copy.)
+    fixpp::v44::MassQuote mq{*mv_exp};
     auto sets = mq.quote_sets();
     ASSERT_EQ(sets.size(), 1U);
     auto quote_set0 = sets[0];  // one-level entry, minted while the token is live

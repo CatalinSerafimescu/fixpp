@@ -106,7 +106,7 @@ description: "Task list — Grouped Typed-Read Path Fix (062)"
 
 ### Verification for User Story 3
 
-- [ ] T021 [US3] Run the full 062 witness set (T008–T019b) under the ASan / UBSan / TSan matrix and the allocation gate; assert SC-002: one-level scalar zero-alloc, nested cached-once/repeat-zero, sanitizers clean while the parent message is alive.
+- [X] T021 [US3] Run the full 062 witness set (T008–T019b) under the ASan / UBSan / TSan matrix and the allocation gate; assert SC-002: one-level scalar zero-alloc, nested cached-once/repeat-zero, sanitizers clean while the parent message is alive. **DONE 2026-07-05 (my-own-build-gated, all 3 legs force-regenerated from the fresh emitter — 118 entry_context refs each):** 8/8 GREEN under `linux-clang-asan`, `linux-clang-ubsan`, `linux-clang-tsan` (the 7 witness targets + the `_mallocnesia` alloc gate). ASan surfaced a real death-test/fork LeakSanitizer finding in the T019b trap (a forked EXPECT_DEATH child inherited a nested sub-view built from a heap-rooted resource); ROOT CAUSE = an intermediate `MessageView` copy re-rooting `OffsetTable::resource()` to the default heap resource — fixed test-side by constructing over `*mv_exp` directly + a stack-backed NULL-upstream arena (no production change; the identical alloc path is LSan-clean in the non-death nested + alloc-gate tests). The T008 `-Wreturn-stack-address` warning was disproven by ASan (returned `frame_view` borrows the buffer, not the parser).
 
 **Checkpoint**: Lifetime + allocation contract proven under the sanitizer + alloc-gate matrix.
 
