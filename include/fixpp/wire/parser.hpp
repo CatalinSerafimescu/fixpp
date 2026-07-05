@@ -30,6 +30,7 @@
 #include <string_view>
 #include <type_traits>
 
+#include "errors.hpp"  // wire::err_required_field_missing (062 T004)
 #include "field_view.hpp"
 #include "framer.hpp"
 #include "group_view.hpp"
@@ -417,6 +418,29 @@ void MessageView<Mode>::field_iterator::advance() noexcept {
         prev_data_tag_ = dt;
         prev_data_len_ = detail::parse_u32(cur_.value);
     }
+}
+
+// [2b §4.3] span-scan → token-bearing field_view helper (062 T004, N1). The
+// one wire primitive that did not exist yet: reuses the dict-free
+// field_iterator to locate `tag` within an arbitrary in-frame slice (e.g. a
+// repeating-group entry's own bytes) and mints a field_view carrying the
+// caller-supplied generation token via field_view_access::make — mirrors
+// MessageView<Index>::get(tag) (:212-219) minus the OffsetTable. No
+// sub-index, zero heap allocation; tolerates a missing final SOH (the
+// underlying field_iterator::advance() already falls through end==size,
+// :399/:405-406). On a miss, returns the SAME field-not-found error
+// MessageView::get returns (wire_required_field_missing, via table_.find).
+[[nodiscard]] inline core::expected_t<field_view> get(
+    std::span<const std::byte> span [[clang::lifetimebound]], std::uint16_t tag,
+    detail::generation_token gen) noexcept {
+    using iter_t = MessageView<access_mode::Iter>::field_iterator;
+    for (iter_t it{span, 0}, end{span, span.size()}; !(it == end); ++it) {
+        if ((*it).tag == tag) {
+            auto const& f = *it;
+            return field_view_access::make(f.value.data(), f.value.size(), gen);
+        }
+    }
+    return err_required_field_missing<field_view>();
 }
 
 template <access_mode Mode = access_mode::Index>

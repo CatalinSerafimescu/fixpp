@@ -8,11 +8,40 @@
 // Authority: .specify/2b-wire.md v0.2; shape oracle contracts/group_view.hpp.
 
 #include <cstddef>
+#include <memory_resource>
 #include <span>
+#include <type_traits>
 
+// 062 T002: entry_context needs OffsetTable::group_member_fn_t (a complete
+// nested typedef) + OffsetTable* (pointer-only). offset_table.hpp only
+// includes framer.hpp/view.hpp (no back-edge to this header), so this
+// include is a plain one-directional edge — not a cycle.
+#include "offset_table.hpp"
 #include "view.hpp"
 
 namespace fixpp::wire {
+
+// [2b §4.7] entry_context (062 T002): a by-value repeating-group entry
+// (generated `G_<no_tag>`) built from `{span}` alone structurally cannot
+// carry out its own read contract — no handle to the parent cache, no
+// stable occurrence identity, no token to mint views. entry_context threads
+// everything the entry needs, all borrowed/copied from the parent
+// OffsetTable/MessageView: trivially copyable, no allocation (data-model.md
+// §"entry read context `entry_context`", RC2/N1/N2).
+struct entry_context {
+    std::span<const std::byte> span;       // this entry's own slice bytes
+    std::pmr::memory_resource* mr = nullptr;  // parent per-message PMR arena
+    void const* opaque_dict = nullptr;        // dictionary handle (nested slicer)
+    OffsetTable::group_member_fn_t group_member_fn = nullptr;  // dict-driven group-membership predicate
+    detail::generation_token gen{};  // [2b §6.4] REQUIRED (N1) — never a default {} token
+    OffsetTable* parent_cache_owner = nullptr;  // root OffsetTable owning the single flat nested-view cache (RC2)
+    std::byte const* outer_occurrence_id = nullptr;  // this entry slice's globally-unique data-pointer identity
+};
+
+// FR-004 zero-alloc-by-value entry: entry_context (and therefore every
+// generated G_<no_tag> that stores one) must stay trivially copyable.
+static_assert(std::is_trivially_copyable_v<entry_context>,
+              "entry_context must be trivially copyable (FR-004 zero-alloc-by-value entry)");
 
 template <class GroupT>
 class group_view : public View {

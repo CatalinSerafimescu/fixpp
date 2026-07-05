@@ -141,9 +141,54 @@ public:
         return entries_.get_allocator().resource();
     }
 
+    // [2b §4.7] 062 T006: single flat nested-subview cache, owned ONLY by
+    // the ROOT OffsetTable (reached via entry_context.parent_cache_owner,
+    // threaded UNCHANGED at every descent depth — nested sub-tables own no
+    // cache of their own; data-model.md §"Nested sub-view cache", RC2/RC5,
+    // INV-G3). Keyed by `(slice_data, nested_no_tag)` where `slice_data` is
+    // the outer entry slice's globally-unique `data` pointer
+    // (`outer_occurrence_id`), collision-free at every nesting depth because
+    // every occurrence's slice is carved in place from the one parent frame
+    // buffer. Build-once / fetch-cached: on a first request for a given
+    // `(slice_data, nested_no_tag)` pair, builds a dict-aware sub-OffsetTable
+    // over the slice via `build_nested_subview` (T005, RC1 — slice-scoped
+    // `len+1`, the whole-frame `build()` guard and `group_slice.len` stay
+    // UNCHANGED) and caches it in THIS table's own per-message arena; a
+    // second distinct `nested_no_tag` over the SAME `slice_data` reuses the
+    // already-built sub-table (one sub-OffsetTable indexes every entry in
+    // the slice, so no rebuild is needed) — strictly fewer builds than
+    // INV-G3's "at most one per key" bound. Repeat requests for the same
+    // pair allocate zero (the returned span is served from the sub-table's
+    // own already-cached `group_slices()`). Empty span if the group is
+    // absent, the slice is null, or the sub-build failed (degrade, never
+    // throw/UB — mirrors `group_slices()`'s own degradation contract).
+    [[nodiscard]] std::span<group_slice const> nested_group_slices(
+        std::byte const* slice_data [[clang::lifetimebound]], std::size_t slice_len,
+        std::uint16_t nested_no_tag, void const* opaque_dict, group_member_fn_t group_member_fn,
+        detail::generation_token gen) const noexcept [[clang::lifetimebound]];
+
 private:
     [[nodiscard]] static std::size_t overlay_cap_for(std::size_t n) noexcept;
     void build(frame_view const& frame) noexcept;  // shared build impl (both ctors)
+
+    // 062 T005: dict-aware sub-view-over-slice builder. Placement-constructs
+    // a sub-OffsetTable into `mr` (an arena-owned pointer; never freed
+    // individually — reclaimed wholesale with the arena, same lifetime
+    // contract as `group_slices_`) over the slice-scoped `{data, len+1}`
+    // bytes via the dict-aware ctor (`opaque_dict`/`group_member_fn`
+    // threaded — MANDATORY, INV-G7; the dict-free fallback is never taken on
+    // this path). RC1: the terminal SOH at `data+len` is provably already
+    // present in the parent frame buffer (the slice is interior to a
+    // well-formed, checksum-terminated frame in which every field is
+    // SOH-terminated), so widening THIS build's input span by one byte lets
+    // a counted Length+Data last field pass the UNCHANGED whole-frame
+    // `build()` guard (`offset_table.cpp:264-268`) without relaxing it and
+    // without widening the shared `group_slice.len`. Returns nullptr on
+    // allocation failure (degrade, never throw).
+    [[nodiscard]] static OffsetTable* build_nested_subview(
+        std::byte const* data, std::size_t len, std::pmr::memory_resource* mr,
+        void const* opaque_dict, group_member_fn_t group_member_fn,
+        detail::generation_token gen) noexcept;
 
     std::byte const* frame_base_ = nullptr;  // for group_slice (ptr,len)
     Config cfg_{};                           // caller-tunable caps (FR-015 / [2b §1.2])
@@ -174,6 +219,17 @@ private:
     mutable std::pmr::vector<group_slice> group_slices_;
     mutable std::pmr::vector<group_span> group_index_;
     mutable bool group_slices_reserved_ = false;
+
+    // 062 T006: single flat nested-subview cache row — see
+    // `nested_group_slices()` above for the ownership/keying contract.
+    // `table` is arena-allocated by `build_nested_subview` (T005) and never
+    // individually freed (reclaimed with the arena).
+    struct nested_cache_row {
+        std::byte const* slice_data;
+        std::uint16_t nested_no_tag;
+        OffsetTable* table;
+    };
+    mutable std::pmr::vector<nested_cache_row> nested_cache_;
 };
 
 }  // namespace fixpp::wire

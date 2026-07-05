@@ -144,7 +144,8 @@ OffsetTable::OffsetTable(frame_view const& frame, std::pmr::memory_resource* mr)
       entries_(mr),
       overlay_(mr),
       group_slices_(mr),
-      group_index_(mr) {
+      group_index_(mr),
+      nested_cache_(mr) {
     build(frame);
 }
 
@@ -156,7 +157,8 @@ OffsetTable::OffsetTable(frame_view const& frame, std::pmr::memory_resource* mr,
       entries_(mr),
       overlay_(mr),
       group_slices_(mr),
-      group_index_(mr) {
+      group_index_(mr),
+      nested_cache_(mr) {
     build(frame);
 }
 
@@ -167,7 +169,8 @@ OffsetTable::OffsetTable(frame_view const& frame, std::pmr::memory_resource* mr,
       entries_(mr),
       overlay_(mr),
       group_slices_(mr),
-      group_index_(mr) {
+      group_index_(mr),
+      nested_cache_(mr) {
     build(frame);
 }
 
@@ -179,7 +182,8 @@ OffsetTable::OffsetTable(frame_view const& frame, std::pmr::memory_resource* mr,
       entries_(mr),
       overlay_(mr),
       group_slices_(mr),
-      group_index_(mr) {
+      group_index_(mr),
+      nested_cache_(mr) {
     build(frame);
 }
 
@@ -514,6 +518,75 @@ std::span<group_slice const> OffsetTable::group_slices(std::uint16_t no_tag) con
     } catch (std::bad_alloc const&) {
         return {};  // degrade to "no instances", never throw (noexcept)
     }
+}
+
+// 062 T005: dict-aware sub-view-over-slice builder (see offset_table.hpp for
+// the ownership/lifetime/RC1 contract). Placement-constructs into `mr`,
+// mirroring the established `mr->allocate(size, align)` + placement-new
+// arena pattern (include/fixpp/core/sync/async_mutex.hpp:1160-1164).
+OffsetTable* OffsetTable::build_nested_subview(std::byte const* data, std::size_t len,
+                                               std::pmr::memory_resource* mr,
+                                               void const* opaque_dict,
+                                               group_member_fn_t group_member_fn,
+                                               detail::generation_token gen) noexcept {
+    try {
+        // RC1: slice-scoped `len+1` — the terminal SOH is provably already
+        // present in the parent frame buffer at `data+len` (the slice is
+        // interior to a well-formed, checksum-terminated frame in which
+        // every field is SOH-terminated). This widens ONLY this build's
+        // input span, not the shared `group_slice.len` — the whole-frame
+        // `build()` guard above (`end >= n || buf[end] != SOH`) is untouched
+        // and passes because the widened span's last byte IS that SOH.
+        frame_view const fv = frame_view_slice_access::make(data, len + 1U, gen);
+        void* mem = mr->allocate(sizeof(OffsetTable), alignof(OffsetTable));
+        // Dict-aware ctor is MANDATORY on the nested-descent path (INV-G7);
+        // never the dict-free fallback.
+        return ::new (mem) OffsetTable(fv, mr, opaque_dict, group_member_fn);
+    } catch (std::bad_alloc const&) {
+        return nullptr;  // degrade: caller serves absent rather than throw
+    }
+}
+
+// 062 T006: single flat nested-subview cache (see offset_table.hpp for the
+// full keying/ownership contract — ROOT-owned, keyed by
+// `(slice_data, nested_no_tag)`, dedupes the sub-table build across distinct
+// no_tags on the same slice).
+std::span<group_slice const> OffsetTable::nested_group_slices(
+    std::byte const* slice_data, std::size_t slice_len, std::uint16_t nested_no_tag,
+    void const* opaque_dict, group_member_fn_t group_member_fn,
+    detail::generation_token gen) const noexcept {
+    if (slice_data == nullptr) {
+        return {};
+    }
+    // Exact-key hit: this (slice, no_tag) pair was already served.
+    for (auto const& row : nested_cache_) {
+        if (row.slice_data == slice_data && row.nested_no_tag == nested_no_tag) {
+            return row.table != nullptr ? row.table->group_slices(nested_no_tag)
+                                        : std::span<group_slice const>{};
+        }
+    }
+    // Reuse an already-built sub-view over the SAME slice for a different
+    // no_tag: one sub-OffsetTable indexes every entry in the slice, so a
+    // second distinct nested group within the same entry needs no rebuild.
+    OffsetTable* table = nullptr;
+    for (auto const& row : nested_cache_) {
+        if (row.slice_data == slice_data) {
+            table = row.table;
+            break;
+        }
+    }
+    if (table == nullptr) {
+        table = build_nested_subview(slice_data, slice_len, resource(), opaque_dict,
+                                     group_member_fn, gen);
+    }
+    try {
+        nested_cache_.push_back(nested_cache_row{
+            .slice_data = slice_data, .nested_no_tag = nested_no_tag, .table = table});
+    } catch (std::bad_alloc const&) {
+        // Cache insert failed; still serve this call from the built table —
+        // degrade to "rebuild next time" rather than lose this result.
+    }
+    return table != nullptr ? table->group_slices(nested_no_tag) : std::span<group_slice const>{};
 }
 
 }  // namespace fixpp::wire

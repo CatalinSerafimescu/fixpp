@@ -90,6 +90,10 @@ add_wire_test(wire_hostile_input_hardening_test hostile_input_hardening_test.cpp
 add_wire_test(wire_offset_table_overflow_test offset_table_overflow_test.cpp)    # T008/T012
 add_wire_test(wire_parser_overflow_test parser_overflow_test.cpp)                # T009/T012
 
+# 062-grouped-typed-read-fix — T008 Foundational seam gate: nested_group_slices
+# (T005/T006) trailing-SOH / RC1 witness + FR-006 group-cap no-regression.
+add_wire_test(wire_group_slice_trailing_soh_test group_slice_trailing_soh_test.cpp)  # T008
+
 # 041-validation-gate-wiring T009/T009a: compile-witness (production table_view,
 # no mock) + Float parse-error remap witness (garbage Float → wire_field_value_out_of_range).
 add_executable(wire_validator_production_table_view_test

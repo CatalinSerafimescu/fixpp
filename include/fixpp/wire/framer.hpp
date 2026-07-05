@@ -103,10 +103,31 @@ protected:
     // frame_view; both mint it through this protected ctor.
     friend class Framer;
     friend struct frame_view_access;
+    // 062 T003: distinct from frame_view_access (the CAPI-local production
+    // clone seam re-declared/defined per-TU in src/capi/message_write.cpp —
+    // NOT reusable here without an ODR/redefinition clash). This seam is
+    // header-only for the wire layer's slice-scoped nested sub-view build
+    // (T005/062): mints a frame_view over an arbitrary in-frame byte slice
+    // (e.g. a repeating-group entry's own bytes) without widening this
+    // public ctor.
+    friend struct frame_view_slice_access;
 
 private:
     std::size_t body_off_ = 0;
     std::size_t body_len_ = 0;
+};
+
+// Friend seam (062 T003): mint a frame_view over a raw {data,len} byte
+// slice + a caller-supplied generation token — mirrors the frame_view_access
+// production precedent (src/capi/message_write.cpp:63-74) in shape only.
+// body_off/body_len are irrelevant to the consumer (OffsetTable::build scans
+// frame.bytes(), never body()) so the whole slice is exposed as the "body"
+// too. Does NOT build a sub-view/OffsetTable — mint capability only (T005).
+struct frame_view_slice_access {
+    static frame_view make(std::byte const* data, std::size_t len,
+                           detail::generation_token gen) noexcept {
+        return frame_view{data, len, /*body_off=*/0, /*body_len=*/len, gen};
+    }
 };
 
 class Framer {
