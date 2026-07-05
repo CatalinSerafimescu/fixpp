@@ -56,7 +56,7 @@ A developer reads a repeating group that is itself nested inside a group entry (
 
 A developer holds a group entry (by value) and reads from it while the parent parsed message is alive, without dangling references and without a per-access memory-arena cost.
 
-**Why this priority**: A lifetime bug (dangling entry) or a per-access allocation would make the fixed API unsafe or unsuitable for the hot path (FR-003 zero-alloc discipline).
+**Why this priority**: A lifetime bug (dangling entry) or a per-access allocation would make the fixed API unsafe or unsuitable for the hot path (FR-004/FR-004a zero-alloc discipline; FR-003 is the `operator[]`/`iter()` equivalence requirement).
 
 **Independent Test**: Under the sanitizer matrix (ASan/UBSan/TSan) and an allocation-tracking gate, iterate a group, hold and read entries, and observe no use-after-free and no per-access heap allocation while the parent message is alive.
 
@@ -80,10 +80,11 @@ A developer holds a group entry (by value) and reads from it while the parent pa
 - **FR-001**: A group entry obtained from `group_view<G>` via `operator[]`, `iter()`, `begin()/end()`, or range-for MUST expose the same typed field accessors as the generated entry class (scalars: string/char/int/decimal; `field_value(tag)`), each returning the exact value for that entry's slice, with the existing fail-closed error semantics for absent fields.
 - **FR-002**: Entry accessors for **nested** repeating groups MUST work recursively (an entry's `group<c, G_c>()` returns a usable `group_view` whose entries are themselves readable).
 - **FR-003**: `operator[]` and `iter()` MUST enumerate identical entries in identical order (preserve the seam-#8 invariant already asserted in `repeating_group_equivalence_test.cpp`).
-- **FR-004**: Entry read access MUST be lifetime-safe (an entry borrows the parent parsed message; no dangling when the parent is alive) and MUST NOT incur a per-access heap allocation (preserve zero-alloc hot-path discipline).
+- **FR-004**: Entry read access MUST be lifetime-safe (an entry borrows the parent parsed message; no dangling when the parent is alive). A **one-level scalar** entry read MUST NOT incur any heap allocation (preserve zero-alloc hot-path discipline). (Nested-descent allocation is governed by FR-004b, not this blanket rule.)
 - **FR-004a** (hot-path posture, per Clarifications 2026-07-05): reading a **scalar** field of a **one-level** (non-nested) group entry MUST NOT build a per-entry sub-index — the common one-level path (e.g. MarketData `NoMDEntries`) stays on the cheap path. A per-entry sub-index MAY be built only when a caller descends into a **nested** group, and then lazily and bounded (not eagerly at parse for groups never read typed). This is a REQUIREMENT, not a plan-optional tradeoff.
+- **FR-004b** (nested-descent allocation contract): the FIRST descent into a nested group of a given stable outer occurrence MAY perform ONE bounded arena/PMR sub-view build; repeated nested reads on the SAME occurrence MUST allocate zero (reuse the cached sub-view). This read-path arena/PMR materialisation is constitutionally permitted — `[const §XV.1]` sanctions "arena/PMR for the rare materialise cases" and `[const §VIII.5]` makes arena/PMR the default with zero global `new`/`delete` between parse and `fromApp` (the ban is on global heap, which the arena build does not touch).
 - **FR-005**: The codegen entry-class contract and the `group_view` entry contract MUST be aligned so a generated entry flyweight is directly obtainable from `group_view` — closing the type mismatch. The affected codegen output (entry classes in the shared `fixpp::<ns>::groups` namespace) MUST be regenerated deterministically from the codegen tool.
-- **FR-006**: Discriminating witnesses MUST exercise **generated** flyweights (not hand-written stubs), covering at least: a single-level group with per-entry scalar + decimal fields, a nested-group case, an empty group, and the `operator[]`↔`iter()` equivalence — and MUST include a regression guard that fails the build/test if the entry-read contract regresses.
+- **FR-006**: Discriminating witnesses MUST exercise **generated** flyweights (not hand-written stubs), covering at least: a single-level group with per-entry scalar + decimal fields; an **absent** entry field returning the typed not-found error (US1 AC2 / FR-001 — reading a *present* field does not exercise the absent arm); the **absent-vs-present-but-empty** edge case; a nested-group case; a **depth-3+ discriminating witness** that reads from a **non-first** outer occurrence (e.g. MassQuote `NoQuoteSets[1] → NoQuoteEntries[0] → NoLegs[k]`) and asserts its leg field value differs from `NoQuoteSets[0]`'s — proving the nested cache key does NOT collide across repeated outer occurrences (would pass under a colliding `ordinal-i` key only for `[0]`, so the witness MUST target `[1]`); an empty group; the **single-entry / last-entry delimiter-extent** edge; the **group-cap / oversized-count no-regression** edge; and the `operator[]`↔`iter()` equivalence — and MUST include a regression guard that fails the build/test if the entry-read contract regresses.
 - **FR-007**: The change MUST NOT alter the C-ABI, the error enum, the wire framing/parsing of top-level fields, or the top-level message flyweight read behaviour, beyond what the group-entry read path strictly requires. No typed builders and no writer are added here.
 
 ### Out of Scope
@@ -103,7 +104,7 @@ A developer holds a group entry (by value) and reads from it while the parent pa
 ### Measurable Outcomes
 
 - **SC-001**: Typed reads of repeating-group entries (single-level and nested) compile and return exact wire values over generated flyweights — demonstrated for at least 2 distinct grouped messages including one with a nested group.
-- **SC-002**: The sanitizer matrix (ASan/UBSan/TSan) is clean on the new entry-read witnesses, and the allocation gate shows zero per-access allocations while the parent message is alive.
+- **SC-002**: The sanitizer matrix (ASan/UBSan/TSan) is clean on the new entry-read witnesses, and the allocation gate shows (a) **zero** allocations for one-level scalar entry reads (FR-004/FR-004a), and (b) **at most one** bounded arena/PMR build per stable outer occurrence on first nested descent, with **zero** allocation on repeat nested reads of the same occurrence (FR-004b) — all while the parent message is alive.
 - **SC-003**: A regression guard exists such that reverting the fix breaks the build or a test (proven by construction — the guard exercises a generated entry through `operator[]`/`iter()`).
 - **SC-004**: No change to C-ABI symbols, error enum, or top-level message read behaviour; existing Tier-1 suites remain green after codegen regeneration.
 
@@ -114,3 +115,19 @@ A developer holds a group entry (by value) and reads from it while the parent pa
 - Prerequisite 057 (reify + multi-char dispatch, PR #161) is merged.
 - The codegen force-regen trap applies: after editing `emit_messages.cpp`, the tool must be rebuilt and `_codegen` markers cleared to force regeneration (configure-time `execute_process`, blind to emitter edits).
 - This feature trips the Appendix A mandatory triggers **Wire format/parser** and **Codegen layout** → full mandatory controls (`/clarify`, `/analyze`, Codex Gate A, user `/plan` sign-off) and full Gate B before merge.
+
+## Normative References
+
+Per `[const §VI.5]`, the coverage-index / inherited-design entries that inform this spec, in `[DocAbbrev §X.Y.Z] Title` shape. Following the merged-057 precedent (`specs/057-behavioral-reify-unblock/spec.md` §Normative References), **062 is a mechanism / enabling feature, so it introduces NO new FIX-spec normative section** — the informing entries are the architecture / constitution / design-doc anchors listed below, not new FIX-message catalogue rows (those belong to feature 061).
+
+062 is a **prerequisite / unblocking** feature, not a catalogue-row close-out: it removes a compile blocker so feature 061's typed grouped-message read/round-trip witnesses can be written. It does **not** itself mark any `spec/feature-catalogue.md` row `done`. It unblocks:
+
+- Catalogue rows **A-001..A-013 / M-001..M-012 / P-001..P-003** (feature 061 typed application messages) — grouped messages whose typed entry reads cannot compile today.
+- **QuickFIX C++ / QuickFIX-J parity** for recursive nested typed group classes — the reference behaviour driving FR-002 (verified 2026-07-05: MassQuote `NoQuoteSets`→`NoQuoteEntries` (BidPx/OfferPx/BidSize/OfferSize), `NoPartyIDs`→`NoPartySubIDs`, `NoLegs`→`NoLegSecurityAltID`; see research.md §Reference-engine parity).
+
+Constitution / architecture anchors informing this spec:
+
+- `[const §VI.5]` — Spec Coverage Discipline: every `/specify` artifact must include this Normative References section.
+- `[const §XV.1]` (Banned Patterns — "arena/PMR for the rare materialise cases") + `[const §VIII.5]` (Performance Budgets — "Arena/PMR is the default", zero global `new`/`delete` between parse and `fromApp`) — sanction the FR-004b nested-descent arena build.
+- `.specify/constitution.md` **Appendix A** — Wire format/parser + Codegen layout mandatory triggers (see Assumptions).
+- `[2b §4.7]` — `group_view` seam-#8 (`operator[]` == `iter()`); `[2b §6.4]` — flyweight generation-token lifetime/generation trap (informs FR-004 lifetime + the entry read context's generation token).

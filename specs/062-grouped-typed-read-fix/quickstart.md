@@ -29,7 +29,7 @@ for (auto set : sets) {
         EXPECT_EQ(*qe.offer_px(&arena), ...);
     }
 }
-// Nested descent builds one cached sub-view per (group, instance); repeat reads reuse it.
+// Nested descent builds one cached sub-view per (outer occurrence, nested group); repeat reads reuse it.
 ```
 
 ## Empty group
