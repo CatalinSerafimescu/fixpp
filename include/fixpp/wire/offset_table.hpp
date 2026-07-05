@@ -185,10 +185,11 @@ private:
     // `build()` guard (`offset_table.cpp:264-268`) without relaxing it and
     // without widening the shared `group_slice.len`. Returns nullptr on
     // allocation failure (degrade, never throw).
-    [[nodiscard]] static OffsetTable* build_nested_subview(
-        std::byte const* data, std::size_t len, std::pmr::memory_resource* mr,
-        void const* opaque_dict, group_member_fn_t group_member_fn,
-        detail::generation_token gen) noexcept;
+    [[nodiscard]] static OffsetTable* build_nested_subview(std::byte const* data, std::size_t len,
+                                                           std::pmr::memory_resource* mr,
+                                                           void const* opaque_dict,
+                                                           group_member_fn_t group_member_fn,
+                                                           detail::generation_token gen) noexcept;
 
     std::byte const* frame_base_ = nullptr;  // for group_slice (ptr,len)
     Config cfg_{};                           // caller-tunable caps (FR-015 / [2b §1.2])

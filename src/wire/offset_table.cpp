@@ -540,7 +540,10 @@ OffsetTable* OffsetTable::build_nested_subview(std::byte const* data, std::size_
         frame_view const fv = frame_view_slice_access::make(data, len + 1U, gen);
         void* mem = mr->allocate(sizeof(OffsetTable), alignof(OffsetTable));
         // Dict-aware ctor is MANDATORY on the nested-descent path (INV-G7);
-        // never the dict-free fallback.
+        // never the dict-free fallback. Placement-new into arena (`mr`) memory:
+        // the sub-OffsetTable is owned by the per-message arena and freed with
+        // it, not heap-owned (gsl::owner not adopted in this codebase).
+        // NOLINTNEXTLINE(cppcoreguidelines-owning-memory)
         return ::new (mem) OffsetTable(fv, mr, opaque_dict, group_member_fn);
     } catch (std::bad_alloc const&) {
         return nullptr;  // degrade: caller serves absent rather than throw

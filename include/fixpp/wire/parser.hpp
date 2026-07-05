@@ -451,9 +451,10 @@ void MessageView<Mode>::field_iterator::advance() noexcept {
 // underlying field_iterator::advance() already falls through end==size,
 // :399/:405-406). On a miss, returns the SAME field-not-found error
 // MessageView::get returns (wire_required_field_missing, via table_.find).
-[[nodiscard]] inline core::expected_t<field_view> get(
-    std::span<const std::byte> span [[clang::lifetimebound]], std::uint16_t tag,
-    detail::generation_token gen) noexcept {
+[[nodiscard]] inline core::expected_t<field_view> get(std::span<const std::byte> span
+                                                      [[clang::lifetimebound]],
+                                                      std::uint16_t tag,
+                                                      detail::generation_token gen) noexcept {
     using iter_t = MessageView<access_mode::Iter>::field_iterator;
     for (iter_t it{span, 0}, end{span, span.size()}; !(it == end); ++it) {
         if ((*it).tag == tag) {

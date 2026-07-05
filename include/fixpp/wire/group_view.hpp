@@ -29,13 +29,17 @@ namespace fixpp::wire {
 // OffsetTable/MessageView: trivially copyable, no allocation (data-model.md
 // §"entry read context `entry_context`", RC2/N1/N2).
 struct entry_context {
-    std::span<const std::byte> span;       // this entry's own slice bytes
+    std::span<const std::byte> span;          // this entry's own slice bytes
     std::pmr::memory_resource* mr = nullptr;  // parent per-message PMR arena
     void const* opaque_dict = nullptr;        // dictionary handle (nested slicer)
-    OffsetTable::group_member_fn_t group_member_fn = nullptr;  // dict-driven group-membership predicate
+    OffsetTable::group_member_fn_t group_member_fn =
+        nullptr;                     // dict-driven group-membership predicate
     detail::generation_token gen{};  // [2b §6.4] REQUIRED (N1) — never a default {} token
-    OffsetTable const* parent_cache_owner = nullptr;  // root OffsetTable owning the single flat nested-view cache (RC2); const — only ever calls the const nested_group_slices()
-    std::byte const* outer_occurrence_id = nullptr;  // this entry slice's globally-unique data-pointer identity
+    OffsetTable const* parent_cache_owner =
+        nullptr;  // root OffsetTable owning the single flat nested-view cache (RC2); const — only
+                  // ever calls the const nested_group_slices()
+    std::byte const* outer_occurrence_id =
+        nullptr;  // this entry slice's globally-unique data-pointer identity
 };
 
 // FR-004 zero-alloc-by-value entry: entry_context (and therefore every
