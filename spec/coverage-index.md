@@ -872,3 +872,65 @@ Items that are normative in the spec but explicitly deferred from fixpp v1.0. Th
 >
 > **Sanitizer/coverage.** ASan/UBSan/TSan clean on the default `__int128` build and the forced-portable
 > `#else` build. Full sanitizer/coverage matrix at `/speckit-verify`.
+
+---
+
+## 062 — Grouped Typed-Read Path Fix (repeating-group ENTRY read mechanism)
+
+> **Mechanism (no new catalogue row — enabling/prerequisite feature).** 062 removes the compile
+> blocker where typed reads of repeating-group ENTRIES did not compile (`group_view::operator[]`
+> span-ctor vs the generated `G_<n>` `MessageView`-ctor). It owns **NO** dedicated OFFICIAL
+> `feature-catalogue.md` row: the A-001..013 / M-001..012 / P-001..003 typed-application-message rows
+> it *unblocks* are closed by feature **061**, not here (spec §Normative References; the `A-062` row
+> at `feature-catalogue.md:450` is an unrelated *message* row — PartyRiskLimitCheckRequestAck 35=DG —
+> not this feature). This section is the coverage-index-side traceability for the enabling seams,
+> mirroring the 057 mechanism-section shape. **Catalogue-row exemption recorded (T025); no row flip.**
+>
+> **Enabling seams (source units).**
+> - `include/fixpp/wire/group_view.hpp` (EDIT) — `struct entry_context` (trivially-copyable: entry
+>   `span`, `mr`, `opaque_dict`, `group_member_fn`, generation token, root `parent_cache_owner`,
+>   `outer_occurrence_id` = the slice's globally-unique `data` identity); `group_view<G>` threads it;
+>   `operator[]`/`iterator::operator*` build `GroupT{slice_span, ctx}` (seam-#8 `operator[]`↔`iter()`
+>   preserved).
+> - `include/fixpp/wire/parser.hpp` (EDIT) — `get(std::span<const std::byte>, tag, generation_token)
+>   → expected_t<field_view>` span-scan helper (reuses `field_iterator`, mints a token-bearing
+>   `field_view`, zero sub-index, tolerates a missing final SOH); `MessageView::group<>()` populates
+>   the `entry_context`.
+> - `include/fixpp/wire/framer.hpp` (EDIT) — `frame_view_slice_access` friend-seam mints a
+>   `frame_view` over `{slice.data, len+1}` without widening the public ctor.
+> - `src/wire/offset_table.cpp` + `.hpp` (EDIT) — `build_nested_subview` (slice-scoped `len+1`
+>   dict-aware sub-`OffsetTable`, `bad_alloc→nullptr` degrade; whole-frame `build()` guard +
+>   `group_slice.len` UNCHANGED — RC1) + `nested_group_slices` (ROOT-owned single flat cache keyed
+>   `(outer-slice `data`, nested_no_tag)`, build-once/fetch-cached, collision-free at every depth).
+> - `tools/codegen/fixpp-codegen/emit_messages.cpp` (EDIT) — entry class `G_<no_tag>` stores
+>   `entry_context ctx_`; scalar accessors span-scan via the parser helper; nested accessor builds the
+>   lazy cached sub-view with a recursively-threaded `entry_context` (root cache owner unchanged).
+>   Deterministic forced-regen of `Messages.hpp` (golden updated, `codegen_determinism_test` green).
+>
+> **Test files (FR-006 discriminating witnesses over GENERATED flyweights + FR-004 alloc gate).**
+> - `tests/codegen/group_entry_read_test.cpp` — one-level scalar+decimal exact reads, absent-field
+>   typed error, absent-vs-empty, empty-group size-0, last-entry delimiter extent (NewOrderList
+>   `orders`/`G_73`).
+> - `tests/codegen/nested_group_read_test.cpp` — `Depth3NonFirstOuterOccurrenceNoCollision` +
+>   `NonLastNestedGroupTrailingFieldNotSwallowed` (single-entry-per-occurrence nested mechanism, INV-G7
+>   dict-aware discriminator); `NestedQuoteEntriesPerInstancePrices` (multi-entry) `GTEST_SKIP` →
+>   063 (L-062-1/2).
+> - `tests/codegen/typed_accessor_test.cpp` — `GeneratedEntryOperatorSubscriptInstantiates` FR-006/
+>   SC-003 compile-level regression guard.
+> - `tests/wire/repeating_group_equivalence_test.cpp` — `GeneratedFlyweightOperatorEqualsIter`
+>   (FR-003 seam-#8 over a generated flyweight).
+> - `tests/wire/group_slice_trailing_soh_test.cpp` — `WholeFrameParseUnchanged` +
+>   `NestedSliceBuildCountedLastField` (mutation-proven on `len→len+1`) + `OversizedCountPerInstanceCapPreserved`.
+> - `tests/codegen/group_entry_alloc_gate_test.cpp` — `OneLevelScalarZeroAlloc` (FR-004a) +
+>   `NestedFirstDescentBoundedRepeatZero` (FR-004b/SC-002), dual-gated (NULL-upstream stack arena +
+>   mallocnesia `_mallocnesia` LD_PRELOAD gate).
+> - `tests/codegen/group_entry_generation_trap_test.cpp` — `GenerationTokenTrapOnStaleEntryRead`
+>   (INV-G6, debug-mode `EXPECT_DEATH`: entry scalar read + nested descent both trap after pool recycle).
+> - FR-007 no-regression guards (T022): `tests/capi/abi_symbol_golden_test.cpp` + `tests/wire/toplevel_read_regression_test.cpp`; T024b fuzz seed for the mid-frame slice-scoped `{data, len+1}` build.
+>
+> **Scope boundary.** Nested-read MECHANISM + single-entry-per-occurrence nested reads delivered and
+> proven; MULTI-ENTRY nested + real-`Dictionary::as_table_view()` reads deferred to prerequisite 063
+> (pre-existing upstream Defects A/B — L-062-1/2; spec FR-002/SC-001 scope notes).
+>
+> **Sanitizer/coverage.** The full 062 witness set is ASan/UBSan/TSan clean (8/8 each leg) + the
+> mallocnesia alloc gate — SC-002. Full matrix re-confirmed at `/speckit-verify`.
