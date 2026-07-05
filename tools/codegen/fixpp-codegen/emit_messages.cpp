@@ -211,8 +211,13 @@ void emit_group_class(TemplateWriter& w, MemberMap const& mm, GroupPlan const& g
     w.line("() noexcept = default;");
     // 062 T012: the entry stores `entry_context` by value (FR-004
     // zero-alloc-by-value) — no null-guard needed, a default-constructed
-    // `ctx_` has an empty span and every accessor below degrades to
-    // field-absent, mirroring the retired `view_` pointer's null-guard.
+    // `ctx_` has an empty span and every accessor below calls
+    // `wire::get(ctx_.span, ...)` unconditionally, which degrades to
+    // `wire_required_field_missing` (the field-absent sentinel), NOT the
+    // retired `view_` pointer's `dict_xml_parse_failed` null-guard. A
+    // default-constructed `G_<n>` is out-of-contract/unspecified —
+    // `group_view::operator[]` never hands a caller one — so this is an
+    // incidental degrade, not a guaranteed error code.
     w.raw("        explicit ");
     w.raw(cls);
     w.line("(::fixpp::wire::entry_context ctx) noexcept");
