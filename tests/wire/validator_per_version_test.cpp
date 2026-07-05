@@ -285,6 +285,63 @@ TEST_P(ValidatorPerVersion, MalformedGroupCountRejected) {
         << static_cast<int>(result.error());
 }
 
+// ── 6. Zero-count repeating group (NoXXX=0) is ACCEPTED — TC-018 ──────────────
+// QuickFIX-cpp acceptance test 21 (RepeatingGroupSpecifierWithValueOfZero,
+// CBOEDirect semantics), adopted as conformance fixture TC-018
+// (research/spec/session-test-cases.md). A present-but-empty repeating group
+// (count field = 0, no member fields following) is well-formed and must NOT be
+// rejected as a malformed group-count / required-field-missing error.
+//
+// Discriminating witness for the validator.hpp `declared_count == 0`
+// short-circuit: NoHops (627) = 0 with a NON-member field (112, TestReqID)
+// immediately following. The validator must (a) accept the message, and the
+// parser must (c) read that trailing non-member field as a normal scalar (not
+// walk it into the group). Mutation-discrimination: delete the short-circuit
+// and the delimiter check rejects 112 (tag 112 != delimiter 628) as a missing
+// first delimiter → this test goes RED, proving the branch is live.
+//
+// (b) "typed group view yields zero entries" is already witnessed dict-aware
+// (GroupEntryRead.EmptyGroupSizeZeroNoDeref; capi
+// MessageReadGroup.NestedGroupEmptyGroupCountLastField) — not re-witnessed here
+// (do_validate parses dict-FREE, whose group-boundary fallback intentionally
+// differs; see offset_table.cpp:440-443).
+TEST_P(ValidatorPerVersion, ZeroCountGroupAccepted) {
+    auto const& p = GetParam();
+    SCOPED_TRACE(p.label);
+
+    dictionary_driven_validator v{make_heartbeat_grammar_with_group()};
+
+    // 627=0 declares an empty NoHops group; 112 (TestReqID, a NON-member) follows.
+    auto buf = make_versioned_frame(p.tag8_value,
+                                    "35=0\x01"
+                                    "49=SENDER\x01"
+                                    "56=TARGET\x01"
+                                    "34=1\x01"
+                                    "627=0\x01"
+                                    "112=HELLO\x01");
+
+    // (a) The empty group must be accepted — no false reject.
+    auto result = do_validate(v, buf);
+    EXPECT_TRUE(result.has_value())
+        << p.label << ": NoHops=0 (empty group) must validate OK; error="
+        << (result.has_value() ? 0 : static_cast<int>(result.error()));
+
+    // (c)+(d): the trailing non-member field reads as a normal scalar, and the
+    // zero count field itself is preserved/readable verbatim.
+    std::array<std::byte, kParseArenaSize> stack{};
+    std::pmr::monotonic_buffer_resource arena;
+    auto mv = parse_index(buf, stack, arena);
+
+    auto testreqid = mv.get(112);
+    ASSERT_TRUE(testreqid.has_value())
+        << p.label << ": field after NoHops=0 must read normally (not swallowed into the group)";
+    EXPECT_EQ(testreqid->as_string(), "HELLO");
+
+    auto nohops = mv.get(627);
+    ASSERT_TRUE(nohops.has_value()) << p.label << ": NoHops count field must be present";
+    EXPECT_EQ(nohops->as_string(), "0") << p.label << ": zero count must be preserved verbatim";
+}
+
 INSTANTIATE_TEST_SUITE_P(AllVersions, ValidatorPerVersion, ::testing::ValuesIn(kVersions),
                          [](::testing::TestParamInfo<VersionParam> const& info) {
                              // Replace dots with underscores for valid GTest name.

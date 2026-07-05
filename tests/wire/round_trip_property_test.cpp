@@ -248,6 +248,25 @@ TEST(RoundTripProperty, RepeatedTagOrderPreservation) {
         << "repeated-tag document order not preserved";
 }
 
+// TC-018 (d): a zero-count repeating group (NoXXX=0) re-encodes verbatim.
+// The count field 627=0 declares a present-but-empty group; the structural
+// (dict-free) round-trip must re-emit the "627=0" field in document order,
+// byte-identical, and NOT drop or rewrite it — and the trailing non-member
+// field (112) must survive unchanged after it. Complements the validator-accept
+// witness (validator_per_version_test.cpp ZeroCountGroupAccepted).
+TEST(RoundTripProperty, ZeroCountGroupPreservedByteIdentical) {
+    auto original = make_frame(
+        "35=0\x01"
+        "34=1\x01"
+        "627=0\x01"      // NoHops=0 — present-but-empty group
+        "112=HELLO\x01");  // non-member field following the zero count
+    std::vector<std::byte> scratch_buf;
+    auto round_tripped = structural_round_trip(original, scratch_buf);
+    ASSERT_EQ(round_tripped.size(), original.size()) << "zero-count round-trip size mismatch";
+    EXPECT_EQ(std::memcmp(round_tripped.data(), original.data(), original.size()), 0)
+        << "NoXXX=0 (empty group) not preserved byte-identical after round-trip";
+}
+
 // Too-small buffer must return a defined error (no OOB write).
 TEST(RoundTripProperty, TooSmallBufferReturnsError) {
     std::array<std::byte, 4> tiny_buf{};
