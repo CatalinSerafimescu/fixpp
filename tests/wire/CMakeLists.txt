@@ -45,6 +45,16 @@ add_wire_test(wire_offset_table_test offset_table_test.cpp)            # T014
 add_wire_test(wire_lifetime_trap_test lifetime_trap_test.cpp)          # T015
 add_wire_test(wire_repeating_group_equivalence_test
   repeating_group_equivalence_test.cpp)                                # T016
+# 062 T010: GeneratedFlyweightOperatorEqualsIter needs the build-tree
+# generated fixpp/v44/Messages.hpp (fixpp::v44::NewOrderList/G_73) +
+# fixpp_dictionary (dict::decode_field bodies) — same seam as
+# wire_cutover_2b_gated_test below.
+if(TARGET fixpp_codegen_generate)
+  add_dependencies(wire_repeating_group_equivalence_test fixpp_codegen_generate)
+  target_include_directories(wire_repeating_group_equivalence_test PRIVATE
+    "${CMAKE_BINARY_DIR}/_codegen/include")
+  target_link_libraries(wire_repeating_group_equivalence_test PRIVATE fixpp_dictionary)
+endif()
 add_wire_test(wire_unknown_fields_test unknown_fields_test.cpp)        # T017
 add_wire_test(wire_three_arena_pinning_test
   three_arena_pinning_test.cpp)                                        # T018
@@ -73,6 +83,18 @@ add_wire_test(wire_validator_per_version_test validator_per_version_test.cpp) # 
 # T055 — Coverage hardening: targeted error-path tests for writer / framer /
 # parser / validator to reach ≥90% line / ≥80% branch on wire scope.
 add_wire_test(wire_writer_error_path_test writer_error_path_test.cpp)         # T055
+
+# 062 T022 (Polish, FR-007/SC-004): top-level (non-group) read no-regression
+# guard — needs the build-tree generated fixpp/v44/Messages.hpp
+# (fixpp::v44::NewOrderSingle) + fixpp_dictionary (dict::decode_field
+# bodies), same seam as wire_repeating_group_equivalence_test above.
+add_wire_test(wire_toplevel_read_regression_test toplevel_read_regression_test.cpp)
+if(TARGET fixpp_codegen_generate)
+  add_dependencies(wire_toplevel_read_regression_test fixpp_codegen_generate)
+  target_include_directories(wire_toplevel_read_regression_test PRIVATE
+    "${CMAKE_BINARY_DIR}/_codegen/include")
+  target_link_libraries(wire_toplevel_read_regression_test PRIVATE fixpp_dictionary)
+endif()
 add_wire_test(wire_framer_error_path_test framer_error_path_test.cpp)         # T055
 add_wire_test(wire_parser_error_path_test parser_error_path_test.cpp)         # T055
 add_wire_test(wire_validator_type_check_test validator_type_check_test.cpp)   # T055
@@ -89,6 +111,15 @@ add_wire_test(wire_hostile_input_hardening_test hostile_input_hardening_test.cpp
 # 040-inbound-tag-overflow-hardening — Phase 4 US2 site-1/site-2 witnesses (T008/T009/T012)
 add_wire_test(wire_offset_table_overflow_test offset_table_overflow_test.cpp)    # T008/T012
 add_wire_test(wire_parser_overflow_test parser_overflow_test.cpp)                # T009/T012
+
+# 062-grouped-typed-read-fix — T008 Foundational seam gate: nested_group_slices
+# (T005/T006) trailing-SOH / RC1 witness + FR-006 group-cap no-regression.
+add_wire_test(wire_group_slice_trailing_soh_test group_slice_trailing_soh_test.cpp)  # T008
+
+# 062-grouped-typed-read-fix — /speckit-verify coverage follow-up:
+# nested_group_slices() null-slice guard, flat-cache continue/reuse
+# branches, and the two bad_alloc degrade paths (offset_table.cpp:561-599).
+add_wire_test(wire_nested_group_slices_cache_test nested_group_slices_cache_test.cpp)
 
 # 041-validation-gate-wiring T009/T009a: compile-witness (production table_view,
 # no mock) + Float parse-error remap witness (garbage Float → wire_field_value_out_of_range).

@@ -61,8 +61,11 @@ std::string_view kind_cpp_type(TypeKind k) {
 }
 
 // One scalar typed accessor. `ptr` selects the access form: a top-level
-// flyweight holds `view_` by reference (direct); a nested group flyweight
-// holds `view_` as a nullable pointer (null-guarded).
+// flyweight holds `view_` by reference (direct get<Tag>()); a group-entry
+// flyweight (062 T012) holds `ctx_` by value and span-scans via the
+// `fixpp::wire::get(span, tag, gen)` free helper — a default-constructed
+// `ctx_` has an empty span, so the scan reports the field absent with no
+// null-guard needed (unlike the retired `view_` pointer form).
 void emit_scalar(TemplateWriter& w, std::string_view name, std::uint16_t tag, TypeKind k,
                  bool ptr) {
     if (k == TypeKind::Decimal) {
@@ -70,16 +73,16 @@ void emit_scalar(TemplateWriter& w, std::string_view name, std::uint16_t tag, Ty
         w.raw(name);
         w.raw("(::std::pmr::memory_resource* mr) const noexcept\n    { ");
         if (ptr) {
-            w.raw(
-                "if (!view_) return "
-                "::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; auto fv = "
-                "view_->template get<");
+            w.raw("auto fv = ::fixpp::wire::get(ctx_.span, ");
+            w.num(tag);
+            w.raw(", ctx_.gen);");
         } else {
             w.raw("auto fv = view_.template get<");
+            w.num(tag);
+            w.raw(">();");
         }
-        w.num(tag);
         w.raw(
-            ">(); if (!fv) return ::std::unexpected{fv.error()};\n      return "
+            " if (!fv) return ::std::unexpected{fv.error()};\n      return "
             "::fixpp::decimal_t::parse(fv->bytes(), mr); }");
         w.line();
         return;
@@ -93,20 +96,19 @@ void emit_scalar(TemplateWriter& w, std::string_view name, std::uint16_t tag, Ty
     if (k == TypeKind::String) {
         w.raw(" [[clang::lifetimebound]]");
     }
-    w.raw("\n    { ");
+    w.raw("\n    { return ::fixpp::dict::decode_field<");
+    w.raw(ct);
+    w.raw(">(");
     if (ptr) {
-        w.raw(
-            "if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};\n  "
-            "    return ::fixpp::dict::decode_field<");
-        w.raw(ct);
-        w.raw(">(view_->template get<");
+        w.raw("::fixpp::wire::get(ctx_.span, ");
+        w.num(tag);
+        w.raw(", ctx_.gen)");
     } else {
-        w.raw("return ::fixpp::dict::decode_field<");
-        w.raw(ct);
-        w.raw(">(view_.template get<");
+        w.raw("view_.template get<");
+        w.num(tag);
+        w.raw(">()");
     }
-    w.num(tag);
-    w.raw(">()); }");
+    w.raw("); }");
     w.line();
 }
 
@@ -114,9 +116,7 @@ void emit_field_value(TemplateWriter& w, bool ptr) {
     w.raw("    [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>\n");
     w.raw("    field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]\n    { ");
     if (ptr) {
-        w.raw(
-            "if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; "
-            "return view_->get(tag); }");
+        w.raw("return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }");
     } else {
         w.raw("return view_.get(tag); }");
     }
@@ -209,12 +209,19 @@ void emit_group_class(TemplateWriter& w, MemberMap const& mm, GroupPlan const& g
     w.raw("        ");
     w.raw(cls);
     w.line("() noexcept = default;");
+    // 062 T012: the entry stores `entry_context` by value (FR-004
+    // zero-alloc-by-value) — no null-guard needed, a default-constructed
+    // `ctx_` has an empty span and every accessor below calls
+    // `wire::get(ctx_.span, ...)` unconditionally, which degrades to
+    // `wire_required_field_missing` (the field-absent sentinel), NOT the
+    // retired `view_` pointer's `dict_xml_parse_failed` null-guard. A
+    // default-constructed `G_<n>` is out-of-contract/unspecified —
+    // `group_view::operator[]` never hands a caller one — so this is an
+    // incidental degrade, not a guaranteed error code.
     w.raw("        explicit ");
     w.raw(cls);
-    w.raw("(");
-    w.raw(kMessageView);
-    w.line(" const& v [[clang::lifetimebound]]) noexcept");
-    w.line("            : view_(&v) {}");
+    w.line("(::fixpp::wire::entry_context ctx) noexcept");
+    w.line("            : ctx_(ctx) {}");
 
     std::unordered_set<std::string> used;
     auto uniq = [&](std::string base, std::uint16_t tag) {
@@ -240,25 +247,33 @@ void emit_group_class(TemplateWriter& w, MemberMap const& mm, GroupPlan const& g
             FieldIR const* d = find_member(mm, no_tag, c);
             std::string const acc =
                 uniq(to_accessor(strip_no_prefix(d != nullptr ? d->name : group_cls(c))), c);
+            // 062 T016: descend via the ROOT OffsetTable's flat nested-cache
+            // seam (T006), keyed by (this entry's own occurrence identity,
+            // nested no_tag) — build-once / fetch-cached. `parent_cache_owner`
+            // is threaded UNCHANGED into the returned group_view's base
+            // context (recursive descent stays keyed off the SAME root at
+            // every depth — INV-G3/N2).
             w.raw("    [[nodiscard]] inline ::fixpp::wire::group_view<");
             w.raw(group_cls(c));
             w.raw(">\n    ");
             w.raw(acc);
             w.raw(
-                "() const noexcept [[clang::lifetimebound]]\n    { if (!view_) return {}; return "
-                "view_->template group<");
+                "() const noexcept [[clang::lifetimebound]]\n    { if (ctx_.parent_cache_owner "
+                "== nullptr) return {};\n      auto const nested = "
+                "ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, "
+                "ctx_.span.size(), ");
             w.num(c);
-            w.raw(", ");
+            w.raw(
+                ", ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);\n      return "
+                "::fixpp::wire::group_view<");
             w.raw(group_cls(c));
-            w.raw(">(); }");
+            w.raw(">{nested, ctx_}; }");
             w.line();
         }
     }
     emit_field_value(w, true);
     w.line("    private:");
-    w.raw("        ");
-    w.raw(kMessageView);
-    w.line(" const* view_ = nullptr;");
+    w.line("        ::fixpp::wire::entry_context ctx_{};");
     w.line("    };");
 }
 

@@ -9,17 +9,55 @@
 // round-trip arrives when 2b swaps in the real body — spec §11 R6).
 #include <gtest/gtest.h>
 
+#include <cstddef>
+#include <cstdio>
+#include <cstring>
 #include <fixpp/core/decimal_alias.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/v44/Messages.hpp>
 #include <fixpp/wire/message_view_contract.hpp>
+#include <fixpp/wire/parser.hpp>
 #include <memory_resource>
+#include <span>
+#include <string>
 #include <string_view>
 #include <type_traits>
+#include <vector>
 
 namespace {
 using MV = fixpp::wire::MessageView<fixpp::wire::access_mode::Index>;
+
+// 062 T011 helper — build a real (dict-free) frame the same way
+// tests/codegen/group_entry_read_test.cpp does, so operator[] instantiates
+// against an ACTUAL entry, not a default-constructed group_view.
+std::vector<std::byte> make_frame_062(std::string_view body) {
+    std::string pre =
+        "8=FIX.4.4\x01" + std::string("9=") + std::to_string(body.size()) + "\x01" +
+        std::string(body);
+    unsigned sum = 0;
+    for (unsigned char c : pre) {
+        sum += c;
+    }
+    char checksum[16]{};
+    std::snprintf(checksum, sizeof(checksum), "10=%03u\x01", sum % 256U);
+    std::string full = pre + checksum;
+    std::vector<std::byte> out(full.size());
+    std::memcpy(out.data(), full.data(), full.size());
+    return out;
 }
+
+MV parse_frame_062(std::vector<std::byte> const& buf, std::pmr::memory_resource* mr) {
+    fixpp::wire::pmr_carry_buffer carry{buf.size(), mr};
+    fixpp::wire::Framer fr{};
+    fixpp::wire::frame_view fvs[1]{};
+    auto framed = fr.feed(
+        std::span<const std::byte>{buf.data(), buf.size()}, carry,
+        std::span<fixpp::wire::frame_view>{fvs, 1});
+    EXPECT_TRUE(framed.has_value()) << "Framer::feed failed";
+    EXPECT_FALSE(framed->empty()) << "Framer produced no frames";
+    return MV{(*framed)[0], mr};
+}
+}  // namespace
 
 TEST(CodegenTypedAccessor, MsgTypeAndVersionAreConstexpr) {
     static_assert(fixpp::v44::NewOrderSingle::msg_type_v == "D");  // AC-G2
@@ -71,4 +109,40 @@ TEST(CodegenTypedAccessor, RepeatingGroupFlyweight) {
     auto gfv = g.field_value(448);  // AC-G6 (nested)
     static_assert(std::is_same_v<decltype(gfv), fixpp::core::expected_t<fixpp::wire::field_view>>);
     EXPECT_FALSE(gfv.has_value());
+}
+
+// 062 T011 — FR-006 / SC-003 regression guard: instantiate operator[]/iter()
+// on a GENERATED entry (NewOrderList orders() / G_73) over a REAL parsed
+// frame and read a field. Before 062 T007/T012, `group_view<G_73>::operator[]`
+// could not build a `G_73` at all (it stored `MessageView<Index> const*`,
+// not an `entry_context`) — this test's mere COMPILATION plus a correct
+// executed assertion is the revert-detector: reverting the entry-ctor change
+// re-breaks the build/test, it does not silently skip.
+TEST(CodegenTypedAccessor, GeneratedEntryOperatorSubscriptInstantiates) {
+    std::string body =
+        "35=E\x01"
+        "73=1\x01"
+        "11=REVERT-DETECTOR\x01"
+        "54=1\x01";
+    auto buf = make_frame_062(body);
+    std::pmr::monotonic_buffer_resource arena{4096};
+    auto mv = parse_frame_062(buf, &arena);
+
+    fixpp::v44::NewOrderList nol{mv};
+    auto orders = nol.orders();
+    ASSERT_EQ(orders.size(), 1U);
+
+    // operator[] instantiation + real read.
+    auto entry_via_index = orders[0];
+    auto cl_via_index = entry_via_index.cl_ord_id();
+    ASSERT_TRUE(cl_via_index.has_value());
+    EXPECT_EQ(*cl_via_index, "REVERT-DETECTOR");
+
+    // iter() instantiation + real read (both entry-construction paths).
+    auto it = orders.iter();
+    ASSERT_FALSE(it == orders.end());
+    auto entry_via_iter = *it;
+    auto cl_via_iter = entry_via_iter.cl_ord_id();
+    ASSERT_TRUE(cl_via_iter.has_value());
+    EXPECT_EQ(*cl_via_iter, "REVERT-DETECTOR");
 }

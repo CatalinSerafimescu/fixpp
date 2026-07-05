@@ -20,25 +20,22 @@ namespace fixpp::vt11::groups {  // shared repeating-group flyweights (AC-G5/AC-
     class G_627 {
     public:
         G_627() noexcept = default;
-        explicit G_627(::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const& v [[clang::lifetimebound]]) noexcept
-            : view_(&v) {}
+        explicit G_627(::fixpp::wire::entry_context ctx) noexcept
+            : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     hop_comp_id() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<628>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 628, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     hop_sending_time() const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::string_view>(view_->template get<629>()); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 629, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     hop_ref_id() const noexcept
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed};
-      return ::fixpp::dict::decode_field<::std::int32_t>(view_->template get<630>()); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 630, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { if (!view_) return ::std::unexpected{::fixpp::core::error::dict_xml_parse_failed}; return view_->get(tag); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
     private:
-        ::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index> const* view_ = nullptr;
+        ::fixpp::wire::entry_context ctx_{};
     };
 
 }  // namespace fixpp::vt11::groups

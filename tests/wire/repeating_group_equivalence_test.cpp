@@ -10,6 +10,7 @@
 
 #include <cstddef>
 #include <cstring>
+#include <fixpp/v44/Messages.hpp>
 #include <fixpp/wire/parser.hpp>
 #include <memory_resource>
 #include <span>
@@ -33,14 +34,14 @@ std::vector<std::byte> make_raw_frame(std::string const& body) {
     return out;
 }
 
-// A 2c-shaped group type: constructible from a sub-frame byte span; the wire
-// layer never decodes its fields, it only slices.
+// A 2c-shaped group type: constructible from an entry_context (062 T007 —
+// group_view::operator[]/iterator now mint an entry_context, not a bare
+// span); the wire layer never decodes its fields, it only slices.
 struct TestLeg {
-    explicit TestLeg(std::span<const std::byte> s) noexcept : data{s.data()}, len{s.size()} {}
-    std::byte const* data;
-    std::size_t len;
+    explicit TestLeg(fixpp::wire::entry_context ctx) noexcept : ctx_{ctx} {}
+    fixpp::wire::entry_context ctx_{};
     [[nodiscard]] std::string_view sv() const noexcept {
-        return {reinterpret_cast<char const*>(data), len};
+        return {reinterpret_cast<char const*>(ctx_.span.data()), ctx_.span.size()};
     }
     // Parse the first field from the sub-frame (tag=value<SOH>).
     // Returns {tag, value_sv} of the first field in the slice.
@@ -49,7 +50,7 @@ struct TestLeg {
         std::string_view value;
     };
     [[nodiscard]] first_field_result parse_first_field() const noexcept {
-        std::string_view raw{reinterpret_cast<char const*>(data), len};
+        std::string_view raw{reinterpret_cast<char const*>(ctx_.span.data()), ctx_.span.size()};
         auto eq = raw.find('=');
         if (eq == std::string_view::npos) {
             return {0, {}};
@@ -178,6 +179,69 @@ TEST(WireRepeatingGroupEquivalence, GroupViewsDoNotAliasAcrossCalls) {
     auto legs_again = mv->template group<555, TestLeg>();
     ASSERT_EQ(legs_again.size(), 2U);
     EXPECT_EQ(std::string(legs_again[0].sv()), leg0_before);
+}
+
+// 062 T010: US1 AC3 / FR-003 — the SAME seam-#8 equivalence, but over a
+// GENERATED flyweight (NewOrderList `orders()` / G_73) instead of the
+// hand-written TestLeg. operator[] and iter() must enumerate identical
+// entries in identical order AND read identical typed field values.
+TEST(WireRepeatingGroupEquivalence, GeneratedFlyweightOperatorEqualsIter) {
+    auto buf = make_raw_frame(
+        "35=E\x01"
+        "73=2\x01"
+        "11=CLORD-0\x01"
+        "37=ORDID-0\x01"
+        "54=1\x01"
+        "11=CLORD-1\x01"
+        "37=ORDID-1\x01"
+        "54=2\x01");
+    auto fv = fixpp::wire::test::make_frame_view(buf);
+    ASSERT_TRUE(fv.has_value());
+
+    std::pmr::monotonic_buffer_resource arena;
+    Parser<access_mode::Index> parser{};
+    auto mv = parser.parse(*fv, &arena);
+    ASSERT_TRUE(mv.has_value());
+
+    fixpp::v44::NewOrderList nol{*mv};
+    auto orders = nol.orders();
+    ASSERT_EQ(orders.size(), 2U);
+
+    // Path A: operator[] random access — read BOTH scalar fields per entry.
+    std::vector<std::string> via_index_cl_ord_id;
+    std::vector<std::string> via_index_order_id;
+    for (std::size_t i = 0; i < orders.size(); ++i) {
+        auto entry = orders[i];
+        auto cl = entry.cl_ord_id();
+        ASSERT_TRUE(cl.has_value());
+        via_index_cl_ord_id.emplace_back(*cl);
+        auto oid = entry.order_id();
+        ASSERT_TRUE(oid.has_value());
+        via_index_order_id.emplace_back(*oid);
+    }
+
+    // Path B: iter()/end() streaming (no sub-index build).
+    std::vector<std::string> via_iter_cl_ord_id;
+    std::vector<std::string> via_iter_order_id;
+    for (auto it = orders.iter(); !(it == orders.end()); ++it) {
+        auto entry = *it;
+        auto cl = entry.cl_ord_id();
+        ASSERT_TRUE(cl.has_value());
+        via_iter_cl_ord_id.emplace_back(*cl);
+        auto oid = entry.order_id();
+        ASSERT_TRUE(oid.has_value());
+        via_iter_order_id.emplace_back(*oid);
+    }
+
+    EXPECT_EQ(via_index_cl_ord_id, via_iter_cl_ord_id)
+        << "seam #8: iter() and operator[] must enumerate identical values (ClOrdID)";
+    EXPECT_EQ(via_index_order_id, via_iter_order_id)
+        << "seam #8: iter() and operator[] must enumerate identical values (OrderID)";
+
+    // Discriminating: per-instance values are DISTINCT, so a bug that always
+    // reads entry 0 (or reverses order) fails.
+    EXPECT_EQ(via_index_cl_ord_id, (std::vector<std::string>{"CLORD-0", "CLORD-1"}));
+    EXPECT_EQ(via_index_order_id, (std::vector<std::string>{"ORDID-0", "ORDID-1"}));
 }
 
 }  // namespace

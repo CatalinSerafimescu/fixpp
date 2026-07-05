@@ -30,6 +30,7 @@
 #include <string_view>
 #include <type_traits>
 
+#include "errors.hpp"  // wire::err_required_field_missing (062 T004)
 #include "field_view.hpp"
 #include "framer.hpp"
 #include "group_view.hpp"
@@ -115,6 +116,7 @@ public:
           mr_{mr},
           opaque_dict_{opaque_dict},
           classify_fn_{classify_fn},
+          group_member_fn_{group_member_fn},
           unk_items_{mr} {}
 
     // FR-015 / [2b §1.2]: same as above but with caller-tunable caps.
@@ -128,6 +130,7 @@ public:
           mr_{mr},
           opaque_dict_{opaque_dict},
           classify_fn_{classify_fn},
+          group_member_fn_{group_member_fn},
           unk_items_{mr} {}
 
     MessageView(frame_view const& frame, std::pmr::memory_resource* mr) noexcept
@@ -251,7 +254,21 @@ template <std::uint16_t NoTag, class GroupT>
         // dictionary-driven nested-group refinement is layered by 2c's
         // GroupT). group_view only borrows the arena span — no thread-local,
         // no cross-view aliasing, zero-alloc after the first build.
-        return group_view<GroupT>{table_.group_slices(NoTag), token()};
+        //
+        // 062 T007: thread the base entry_context every generated entry
+        // needs to read its own fields (span/outer_occurrence_id are
+        // per-entry — group_view::operator[] fills those in from the SAME
+        // instance slice it borrows). parent_cache_owner = THIS root
+        // OffsetTable; the field is `const OffsetTable*` because the only
+        // method a nested descent ever reaches through it is the const
+        // nested_group_slices() (which mutates only its own `mutable` cache).
+        entry_context ctx{};
+        ctx.mr = mr_;
+        ctx.opaque_dict = opaque_dict_;
+        ctx.group_member_fn = group_member_fn_;
+        ctx.gen = token();
+        ctx.parent_cache_owner = &table_;
+        return group_view<GroupT>{table_.group_slices(NoTag), ctx};
     }
 
 // [2b §4.8] Contract: unknown_fields() uses the dict pointer threaded from the
@@ -327,6 +344,11 @@ private : [[nodiscard]] std::span<const std::byte> field_bytes(std::uint16_t tag
     // nullptr classify_fn_ = dict-free path (all non-framing = unknown).
     void const* opaque_dict_ = nullptr;
     classify_fn_t classify_fn_ = nullptr;
+    // 062 T007: threaded into every entry_context minted by group<>() below
+    // (the dict-driven group-membership predicate a nested descent needs to
+    // build a dict-aware sub-OffsetTable). Default nullptr on the dict-free
+    // ctors, matching table_'s own dict-free construction.
+    group_member_fn_t group_member_fn_ = nullptr;
     // unk_items_: lazily built unknown-fields kv list in the per-message arena.
     // An Index-mode ctor overrides this default with the real arena
     // (`unk_items_{mr}`), but a default-constructed view and EVERY Iter-mode view
@@ -417,6 +439,30 @@ void MessageView<Mode>::field_iterator::advance() noexcept {
         prev_data_tag_ = dt;
         prev_data_len_ = detail::parse_u32(cur_.value);
     }
+}
+
+// [2b §4.3] span-scan → token-bearing field_view helper (062 T004, N1). The
+// one wire primitive that did not exist yet: reuses the dict-free
+// field_iterator to locate `tag` within an arbitrary in-frame slice (e.g. a
+// repeating-group entry's own bytes) and mints a field_view carrying the
+// caller-supplied generation token via field_view_access::make — mirrors
+// MessageView<Index>::get(tag) (:212-219) minus the OffsetTable. No
+// sub-index, zero heap allocation; tolerates a missing final SOH (the
+// underlying field_iterator::advance() already falls through end==size,
+// :399/:405-406). On a miss, returns the SAME field-not-found error
+// MessageView::get returns (wire_required_field_missing, via table_.find).
+[[nodiscard]] inline core::expected_t<field_view> get(std::span<const std::byte> span
+                                                      [[clang::lifetimebound]],
+                                                      std::uint16_t tag,
+                                                      detail::generation_token gen) noexcept {
+    using iter_t = MessageView<access_mode::Iter>::field_iterator;
+    for (iter_t it{span, 0}, end{span, span.size()}; !(it == end); ++it) {
+        if ((*it).tag == tag) {
+            auto const& f = *it;
+            return field_view_access::make(f.value.data(), f.value.size(), gen);
+        }
+    }
+    return err_required_field_missing<field_view>();
 }
 
 template <access_mode Mode = access_mode::Index>
