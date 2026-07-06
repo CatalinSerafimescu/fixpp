@@ -3,7 +3,7 @@ name: Tier 3 — Linux libc++ CI
 # Triggered by:
 #   - push to main (mandatory merge-gate; also populates the README badge)
 #   - workflow_dispatch (manual run from Actions UI)
-#   - PR labeled `run-tier3` (on-demand; standardised run-tierN scheme)
+#   - (PRs: dispatch manually via workflow_dispatch — no label/PR trigger)
 # No nightly cron — outside of main, Tier 3 is on-demand to conserve CI minutes.
 # OTel is not built on this lane (with_otel=False + FIXPP_BUILD_OTEL=OFF via
 # the preset) — the OTel-enabled libc++ run is validated locally before merge.
@@ -11,16 +11,16 @@ name: Tier 3 — Linux libc++ CI
 on:
   push:
     branches: ["main"]
-  pull_request:
-    branches: ["**"]
-    types: [labeled]
+  # DISPATCH-ONLY on PRs (see tier1.yml) — no pull_request / label trigger.
+  # Validate a PR with `gh workflow run "Tier 3 — Linux libc++ CI" --ref <branch>`;
+  # the tier3-required check lands on the head SHA. Retires the run-tier3 label.
   workflow_dispatch:
 
 env:
   CONAN_HOME: ~/.conan2
 
 jobs:
-  # Run on push to main, workflow_dispatch, or PRs labeled 'run-tier3'
+  # Runs on push:main or workflow_dispatch (dispatch-only; no PR/label trigger)
   filter:
     name: "Check trigger"
     runs-on: ubuntu-24.04
@@ -29,19 +29,9 @@ jobs:
     steps:
       - id: check
         run: |
-          # One-shot: fire only when run-tier3 is the FRESHLY-ADDED label (a
-          # `labeled` event whose label IS run-tier3) — NOT whenever the label is
-          # merely present. The `contains(labels,…)` form re-ran the full matrix on
-          # every subsequent label change while run-tier3 sat on the PR (e.g. adding
-          # gate-b-done). Matches the Tier-1 run-trigger; re-run = remove + re-add.
-          if [[ "${{ github.event_name }}" == "push" ]] || \
-             [[ "${{ github.event_name }}" == "workflow_dispatch" ]] || \
-             { [[ "${{ github.event.action }}" == "labeled" ]] && \
-               [[ "${{ github.event.label.name }}" == "run-tier3" ]]; }; then
-            echo "should_run=true" >> $GITHUB_OUTPUT
-          else
-            echo "should_run=false" >> $GITHUB_OUTPUT
-          fi
+          # Dispatch-only: the only triggers are push:main and workflow_dispatch,
+          # both of which run the libc++ matrix. (run-tier3 label scheme retired.)
+          echo "should_run=true" >> $GITHUB_OUTPUT
 
   # ── libc++ build / test matrix ───────────────────────────────────────────
   libcxx:
@@ -209,11 +199,11 @@ jobs:
         run: ctest --preset ${{ matrix.preset }} --output-on-failure
 
   # ── Required aggregate — red-on-skip (mirrors tier1-required in tier1.yml) ──
-  # Tier 3 is green-on-skip: a PR without `run-tier3` skips the `libcxx` matrix
-  # and GitHub scores the skip as success, so "Tier 3" reports green having built
-  # nothing. This REQUIRED job is RED unless `filter` AND the `libcxx` matrix ran
-  # to success, so a PR cannot merge on a libc++ matrix that never ran; fire
-  # `run-tier3` (or a workflow_dispatch) to run the matrix and turn it green.
+  # Tier 3 is green-on-skip: an un-dispatched PR runs no `libcxx` matrix
+  # and GitHub scores the absent/skip as success, so "Tier 3" reports green having
+  # built nothing. This REQUIRED job is RED unless `filter` AND the `libcxx` matrix
+  # ran to success, so a PR cannot merge on a libc++ matrix that never ran;
+  # dispatch Tier 3 (workflow_dispatch) on the branch to run the matrix.
   # INERT until branch protection is set to REQUIRE the "tier3-required" check.
   # Ref: feedback_ci_gate_observes_not_asserts_witness_skips_into_green.
   tier3-required:
@@ -230,7 +220,7 @@ jobs:
           fail=0
           for kv in "filter=$f" "libcxx=$l"; do
             if [ "${kv#*=}" != "success" ]; then
-              echo "::error::Tier 3 job '${kv%%=*}' did not run to success (got '${kv#*=}'). The libc++ matrix must actually run — fire run-tier3 (or workflow_dispatch) before merge."
+              echo "::error::Tier 3 job '${kv%%=*}' did not run to success (got '${kv#*=}'). The libc++ matrix must actually run — dispatch Tier 3 (workflow_dispatch) on the branch before merge."
               fail=1
             fi
           done

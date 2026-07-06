@@ -3,14 +3,12 @@ name: Tier 1 — Linux CI
 on:
   push:
     branches: ["main"]
-  pull_request:
-    # `labeled`/`unlabeled` are load-bearing: the gate-precheck job below
-    # skips the heavy matrix until gate-a/gate-b labels are present. Without
-    # these event types, adding `gate-b-done` after /gate-b would NOT
-    # re-trigger Tier 1 and the PR would wedge with the matrix permanently
-    # skipped. Mirrors the trigger set in gate-a.yml / gate-b.yml.
-    types: [opened, reopened, synchronize, labeled, unlabeled, edited]
-    branches: ["**"]
+  # DISPATCH-ONLY on PRs — Tier 1 does NOT run on pull_request / label events.
+  # Validate a PR with `gh workflow run "Tier 1 — Linux CI" --ref <branch>`; the
+  # tier1-required check lands on the head SHA and satisfies branch protection.
+  # This retires the run-tier1 label scheme (sequential run-tier* labels could
+  # never make all 3 tiers green-latest — each labeled event re-fired every tier
+  # workflow into a skip). push:main remains the post-merge gate + README badge.
   workflow_dispatch:
   # 056 REL-1: on a published GitHub release, the python-wheel-release job below
   # attaches the single cp310-abi3 wheel as a release asset (no PyPI — REL-2).
@@ -92,131 +90,15 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          set -o pipefail
-
-          # ── Python-relevance path-filter (computed for ALL events) ──
-          # The python jobs (python-bindings + python-wheel-{build,test}) gate on
-          # `proceed` (gates satisfied + run-tier1 requested) AND this relevance
-          # flag: on a PR they run only once the gates clear, and then only when
-          # the diff touches the binding/C-ABI surface — so a pure-C++ PR or a
-          # pre-gate PR skips the ~7-min container wheel build + the sanitizer
-          # legs. A merge to main (push), workflow_dispatch, and release build
-          # them UNCONDITIONALLY (full build on main; PRs stay path-gated).
-          PY_RE='^(bindings/python/|include/fix/c_api|.*\.i$)'
-          PYTHON_TOUCHED=false
-          EV="${{ github.event_name }}"
-          if [ "$EV" = "pull_request" ]; then
-            git diff --name-only "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}" > /tmp/py_changed.txt || true
-          else
-            # push:main (merge), workflow_dispatch, release, other trusted events:
-            # build EVERYTHING including the python wheel + binding sanitizer legs,
-            # regardless of what the merge touched. Only PRs are path-gated (above).
-            # (user 2026-07-03 — full build on every main push.)
-            PYTHON_TOUCHED=true
-          fi
-          if [ "$PYTHON_TOUCHED" != true ] && [ -s /tmp/py_changed.txt ] && grep -qE "$PY_RE" /tmp/py_changed.txt; then
-            PYTHON_TOUCHED=true
-          fi
-          echo "python jobs relevant (python_touched)=$PYTHON_TOUCHED"
-          echo "python_touched=$PYTHON_TOUCHED" >> "$GITHUB_OUTPUT"
-
-          # ── Non-PR events: trusted, always run ──────────────────────────
-          if [ "${{ github.event_name }}" != "pull_request" ]; then
-            echo "Event '${{ github.event_name }}' is not a pull_request — Tier 1 runs unconditionally."
-            echo "proceed=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          BASE_SHA="${{ github.event.pull_request.base.sha }}"
-          HEAD_SHA="${{ github.event.pull_request.head.sha }}"
-          PR_NUMBER="${{ github.event.pull_request.number }}"
-          git diff --name-only "$BASE_SHA" "$HEAD_SHA" > /tmp/changed.txt
-          echo "Changed files:"; cat /tmp/changed.txt
-
-          # ── Shared auto-waive (mirror gate-a.yml / gate-b.yml §6) ───────
-          WS_EMPTY=false
-          if [ -z "$(git diff -w "$BASE_SHA" "$HEAD_SHA")" ]; then
-            WS_EMPTY=true
-          fi
-          NON_DOC=$(grep -Ev '^[^/]*\.md$|^docs/|^book/|^README' /tmp/changed.txt || true)
-          SPECIFY_DOCS=$(grep -E '^\.specify/[^/]+\.md$' /tmp/changed.txt || true)
-          PURE_DOC=false
-          if [ -z "$NON_DOC" ] && [ -z "$SPECIFY_DOCS" ]; then
-            PURE_DOC=true
-          fi
-
-          LABELS=$(gh pr view "$PR_NUMBER" --json labels --jq '.labels[].name' || true)
-          BODY=$(gh pr view "$PR_NUMBER" --json body --jq '.body' || true)
-
-          # ── Gate A (mirror gate-a.yml) ──────────────────────────────────
-          GATE_A_OK=false
-          if [ "$WS_EMPTY" = true ] || [ "$PURE_DOC" = true ]; then
-            echo "Gate A: auto-waived (whitespace-only or pure-doc)."
-            GATE_A_OK=true
-          else
-            TRIGGER_RE='^(include/|src/|codegen/|\.specify/[^/]+\.md$)'
-            if [ -z "$(grep -E "$TRIGGER_RE" /tmp/changed.txt || true)" ]; then
-              echo "Gate A: no trigger paths touched — does not apply."
-              GATE_A_OK=true
-            elif echo "$LABELS" | grep -qx 'gate-a-done'; then
-              echo "Gate A: gate-a-done present."
-              GATE_A_OK=true
-            elif echo "$LABELS" | grep -qx 'gate-a-waived' && echo "$BODY" | awk '
-                BEGIN { found = 0; rationale = 0 }
-                /^##+[[:space:]]*[Gg]ate[[:space:]]*[Aa]/ { found = 1; next }
-                found && /[^[:space:]]/ { rationale = 1 }
-                END { exit (rationale ? 0 : 1) }'; then
-              echo "Gate A: waived with rationale in PR body."
-              GATE_A_OK=true
-            else
-              echo "Gate A: NOT satisfied (trigger paths touched, no gate-a-done/waived)."
-            fi
-          fi
-
-          # ── Gate B (mirror gate-b.yml) ──────────────────────────────────
-          GATE_B_OK=false
-          if [ "$WS_EMPTY" = true ] || [ "$PURE_DOC" = true ]; then
-            echo "Gate B: auto-waived (whitespace-only or pure-doc)."
-            GATE_B_OK=true
-          elif echo "$LABELS" | grep -qx 'gate-b-done'; then
-            echo "Gate B: gate-b-done present."
-            GATE_B_OK=true
-          elif echo "$LABELS" | grep -qx 'gate-b-waived' && echo "$BODY" | awk '
-              BEGIN { found = 0; rationale = 0 }
-              /^##+[[:space:]]*[Gg]ate[[:space:]]*[Bb]/ { found = 1; next }
-              found && /[^[:space:]]/ { rationale = 1 }
-              END { exit (rationale ? 0 : 1) }'; then
-            echo "Gate B: waived with rationale in PR body."
-            GATE_B_OK=true
-          else
-            echo "Gate B: NOT satisfied (no gate-b-done/waived)."
-          fi
-
-          # ── Run-trigger gate (Tier-1-SPECIFIC — NOT part of the gate-a/gate-b
-          # mirror above). The heavy matrix is on-demand: it runs ONLY when the
-          # `run-tier1` label is freshly ADDED (a `labeled` event), never on a
-          # plain push/synchronize — so we stop burning 1-2 full matrices before
-          # the run we actually want. Re-run = remove + re-add `run-tier1`
-          # (mirrors the Tier 2/3/4 run-tierN on-demand pattern). Non-PR events
-          # (push:main, workflow_dispatch) bypassed this via the early-exit above.
-          RUN_TRIGGER=false
-          if [ "${{ github.event.action }}" = "labeled" ] && \
-             [ "${{ github.event.label.name }}" = "run-tier1" ]; then
-            RUN_TRIGGER=true
-          fi
-
-          # ── Verdict (this job stays green either way) ────────────────────
-          if [ "$GATE_A_OK" = true ] && [ "$GATE_B_OK" = true ] && [ "$RUN_TRIGGER" = true ]; then
-            echo "Gates satisfied + run-tier1 requested — Tier 1 matrix will run."
-            echo "proceed=true" >> "$GITHUB_OUTPUT"
-          elif [ "$GATE_A_OK" = true ] && [ "$GATE_B_OK" = true ]; then
-            echo "::notice::Gates satisfied — add the 'run-tier1' label when ready to run the matrix (on-demand; skipped now to save CI)."
-            echo "proceed=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "::notice::Gates not yet satisfied (A=$GATE_A_OK B=$GATE_B_OK) — Tier 1 heavy jobs SKIPPED to save CI. Run /gate-a + /gate-b and add the labels. Red enforcement (if any) comes from the gate-a / gate-b workflows."
-            echo "proceed=false" >> "$GITHUB_OUTPUT"
-          fi
-          exit 0
+          # DISPATCH-ONLY model: Tier 1 fires only on push:main, workflow_dispatch,
+          # and release — all trusted events. The heavy matrix always proceeds and
+          # the python jobs always build (no PR path-gating, no run-tier1 label
+          # gate — both retired with the pull_request trigger). Gate A/B label
+          # enforcement lives in gate-a.yml / gate-b.yml (the required checks);
+          # this job just green-lights the matrix.
+          echo "Event '${{ github.event_name }}' — Tier 1 runs unconditionally (dispatch-only)."
+          echo "python_touched=true" >> "$GITHUB_OUTPUT"
+          echo "proceed=true" >> "$GITHUB_OUTPUT"
 
   # ── Linux build / test matrix ────────────────────────────────────────────
   linux:
@@ -1077,7 +959,7 @@ jobs:
           fail=0
           for kv in "gate-precheck=$gp" "linux=$lx" "coverage=$cov" "check-layers=$cl"; do
             if [ "${kv#*=}" != "success" ]; then
-              echo "::error::Tier 1 job '${kv%%=*}' did not run to success (got '${kv#*=}'). The core build/test matrix must actually run — (re-)add the run-tier1 label to fire the on-demand matrix before merge."
+              echo "::error::Tier 1 job '${kv%%=*}' did not run to success (got '${kv#*=}'). The core build/test matrix must actually run — dispatch Tier 1 (workflow_dispatch) on the branch before merge."
               fail=1
             fi
           done
