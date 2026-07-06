@@ -602,11 +602,36 @@ INSTANTIATE_TEST_SUITE_P(
         // ---- Runtime-XML-only versions (D-005/006, spec 002 §10 F1) ----
         // Vendored data + headline tests only; no codegen namespace. Assertions
         // verified against the fetched upstream XML (pinned SHA in UPSTREAM.txt).
-        // NOTE: FIX 4.0/4.1 (D-004) are NOT bundled here — the loader's
-        // [FIX50SP2 §3.3] field-type vocabulary fail-closes on their legacy
-        // `DATE`/`TIME` type names (deliberate freeze, research.md D-14). Adding
-        // those two legacy aliases reverses a design decision → its own Gate-A'd
-        // loader feature, tracked separately.
+        // ---- FIX 4.0 / FIX 4.1 (D-004, 064-fix4041-legacy-types) ----
+        // Pre-FIXT: the session messages (Logon 'A', Heartbeat '0', ...) live IN
+        // this dictionary, so they are asserted PRESENT — the inverse of the FIX
+        // 5.0/5.0SP1 app-only shape below (session moved to FIXT.1.1). Loadable
+        // now that the loader accepts their legacy `TIME`/`DATE` field types
+        // (064). FIX 4.0/4.1 predate <component>s and NUMINGROUP-typed group
+        // counters (their NoXxx fields are type='INT'), so has_instrument and
+        // parties_expected are false and there are no registered NoXxx delimiter
+        // groups. Every field below verified against the vendored files.
+        VersionParam{
+            .filename = "FIX40.xml",
+            .expected_version = fixpp::dict::session_version::v40,
+            .required_msg_types = {"D", "8", "A", "0",
+                                   "3"},   // app D/8 + PRESENT pre-FIXT session A/0
+            .forbidden_msg_types = {},     // session lives in-dict (pre-FIXT)
+            .required_group_no_tags = {},  // NoXxx are type='INT', not NUMINGROUP
+            .has_clordid = true,
+            .parties_expected = std::optional<bool>{false},  // Parties added in 4.3
+            .has_instrument = false,                         // no <component> declarations
+        },
+        VersionParam{
+            .filename = "FIX41.xml",
+            .expected_version = fixpp::dict::session_version::v41,
+            .required_msg_types = {"D", "8", "A", "0", "3"},
+            .forbidden_msg_types = {},
+            .required_group_no_tags = {},
+            .has_clordid = true,
+            .parties_expected = std::optional<bool>{false},
+            .has_instrument = false,
+        },
         // ---- FIX 4.3 (D-005) ----
         VersionParam{
             .filename = "FIX43.xml",

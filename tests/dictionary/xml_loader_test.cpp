@@ -236,3 +236,44 @@ TEST(XmlLoaderLoad, Fix44Headlines) {
     EXPECT_TRUE(msg_types.count("0")) << "Missing Heartbeat (0)";
     EXPECT_TRUE(msg_types.count("3")) << "Missing Reject (3)";
 }
+
+// US1 (064-fix4041-legacy-types / D-004): FIX 4.0/4.1 load to completion once
+// the loader accepts the legacy field types TIME/DATE, and both resolve to
+// their sanctioned enum (TIME -> UtcTimestamp, DATE -> LocalMktDate — mapping
+// rationale lives on the kFieldTypeTable rows in src/dictionary/xml_loader.cpp).
+// RED-before/GREEN-after: before those two rows land, load() throws
+// xml_parse_error on the first TIME/DATE field and this test fails; after, the
+// load completes and the field_ref() types match. (US1 scenarios 1,3,4; SC-001)
+namespace {
+
+void expect_fix4x_legacy_load(std::string_view filename, fixpp::dict::session_version expected) {
+    SCOPED_TRACE(filename);
+    auto const path = std::filesystem::path{FIXPP_DICT_DATA_DIR} / filename;
+
+    std::array<std::byte, k1MiB> buffer{};
+    std::pmr::monotonic_buffer_resource mr{buffer.data(), buffer.size()};
+
+    // An uncaught xml_parse_error here fails the test — the RED-first witness
+    // that the file no longer fail-closes on its TIME/DATE fields (SC-001).
+    auto const d = fixpp::dict::XmlLoader{}.load(path, &mr);
+
+    EXPECT_EQ(d.which_session_version(), expected);
+    EXPECT_FALSE(d.messages().empty());
+
+    // TIME field: SendingTime (tag 52, header) under NewOrderSingle "D".
+    EXPECT_EQ(d.field_ref("D", std::uint16_t{52}).type, fixpp::dict::field_data_type::UtcTimestamp)
+        << "SendingTime (TIME) must resolve to UtcTimestamp";
+    // DATE field: FutSettDate (tag 64) under NewOrderSingle "D".
+    EXPECT_EQ(d.field_ref("D", std::uint16_t{64}).type, fixpp::dict::field_data_type::LocalMktDate)
+        << "FutSettDate (DATE) must resolve to LocalMktDate, NOT UtcDateOnly (retired hypothesis)";
+}
+
+}  // namespace
+
+TEST(XmlLoaderLoad, Fix40LoadsLegacyTypes) {
+    expect_fix4x_legacy_load("FIX40.xml", fixpp::dict::session_version::v40);
+}
+
+TEST(XmlLoaderLoad, Fix41LoadsLegacyTypes) {
+    expect_fix4x_legacy_load("FIX41.xml", fixpp::dict::session_version::v41);
+}

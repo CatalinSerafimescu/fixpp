@@ -102,6 +102,15 @@ constexpr FieldTypeEntry kFieldTypeTable[] = {
     {.xml_name = "LOCALMKTTIME", .enum_value = field_data_type::LocalMktDate},
     {.xml_name = "XID", .enum_value = field_data_type::String},
     {.xml_name = "XIDREF", .enum_value = field_data_type::String},
+    // FIX 4.0 / 4.1 pre-canonical legacy field types (064-fix4041-legacy-types /
+    // D-004). Same collapse mechanism as the post-canonical rows above; the enum
+    // stays locked to [FIX50SP2 §3.3]. TIME -> UtcTimestamp agrees with QuickFIX
+    // DataDictionary::XMLTypeToType (research R2). DATE -> LocalMktDate is a
+    // deliberate stronger-typing choice over QuickFIX (which has no DATE branch ->
+    // TYPE::Unknown, no validation); metadata-only, since field_type_from_data_type
+    // collapses both to field_type::String (research R3/R4, spec.md FR-009).
+    {.xml_name = "TIME", .enum_value = field_data_type::UtcTimestamp},
+    {.xml_name = "DATE", .enum_value = field_data_type::LocalMktDate},
 };
 
 [[nodiscard]] bool resolve_field_type(std::string_view name, field_data_type& out) noexcept {

@@ -243,6 +243,37 @@ TEST(NegativePaths, AC_L8_UnknownFieldTypeThrowsXmlParseError) {
 }
 
 // ---------------------------------------------------------------------------
+// US3 (064-fix4041-legacy-types / D-004) — LegacyDateTimeTypesAccepted
+//
+// Companion to AC-L8 above: the AC-L8 relaxation admits EXACTLY the two named
+// legacy aliases `DATE`/`TIME` (FIX 4.0/4.1) and nothing else. A minimal dict
+// using them loads WITHOUT throwing — the inverse of the AC_L8 UNKNOWN_TYPE
+// case directly above, which still throws (that witness is unmodified). Held
+// together they prove the relaxation is two named additions, not a permissive
+// hole. Mutation intuition (SC-003): deleting either kFieldTypeTable collapse
+// row makes the corresponding FIX40/41 load throw again — proven RED-first by
+// XmlLoaderLoad.Fix40LoadsLegacyTypes / Fix41LoadsLegacyTypes.
+// ---------------------------------------------------------------------------
+TEST(NegativePaths, LegacyDateTimeTypesAccepted) {
+    Arena a;
+    fixpp::dict::XmlLoader loader;
+    constexpr std::string_view kXml = R"(<fix type='FIX' major='4' minor='0' servicepack='0'>)"
+                                      R"(<fields>)"
+                                      R"(<field number='75' name='TradeDate' type='DATE'/>)"
+                                      R"(<field number='52' name='SendingTime' type='TIME'/>)"
+                                      R"(</fields><messages/></fix>)";
+    ASSERT_NO_THROW({
+        auto d = loader.load_from_string(kXml, &a.mr);
+        // Discriminating: the DATE/TIME fields were parsed and accepted into the
+        // field table, not silently dropped (a bare no-throw could false-pass).
+        EXPECT_TRUE(d.field_by_name("TradeDate").has_value())
+            << "DATE-typed field must be accepted into the dictionary";
+        EXPECT_TRUE(d.field_by_name("SendingTime").has_value())
+            << "TIME-typed field must be accepted into the dictionary";
+    });
+}
+
+// ---------------------------------------------------------------------------
 // AC-L10 — LoadFromStringEquivalentForMalformed
 //
 // load_from_string with the same malformed XML that load(path, ...) would
