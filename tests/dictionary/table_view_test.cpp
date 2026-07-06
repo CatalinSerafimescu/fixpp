@@ -341,6 +341,9 @@ TEST(TableViewTest, FieldTypeFromDataTypeUtcTimestampMapsToString) {
         << "UtcTimeOnly must map to String";
     EXPECT_EQ(field_type_from_data_type(field_data_type::UtcDateOnly), field_type::String)
         << "UtcDateOnly must map to String";
+    EXPECT_EQ(field_type_from_data_type(field_data_type::LocalMktDate), field_type::String)
+        << "LocalMktDate must map to String (064 AC-L8: same coarse collapse as "
+           "UtcTimestamp, so DATE->LocalMktDate introduces no new rejections)";
 }
 
 // ── Phase 9.H (proxy_corrupt C2) viability gate ──────────────────────────────
