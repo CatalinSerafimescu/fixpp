@@ -235,6 +235,21 @@ jobs:
       group: tier1-${{ github.event.pull_request.number || github.ref }}-${{ matrix.preset }}
       cancel-in-progress: true
 
+    # ccache across CI runs: cache compiler output so unchanged TUs (the bulk of
+    # the tree on an incremental PR / a rebuilt main) are served from cache
+    # instead of recompiled. CMake reads CMAKE_<LANG>_COMPILER_LAUNCHER from the
+    # env when a fresh build tree is first configured (CI always builds fresh).
+    # CCACHE_COMPILERCHECK=content rehashes the compiler BINARY each run (not
+    # mtime) so a re-installed clang-22/gcc-13 can never serve a stale object —
+    # a fail-closed guard against the stale-object false-green class
+    # (feedback_stale_build_objects_false_green_masks_pins). Coverage is a
+    # separate job and is deliberately left UNCACHED to protect coverage-mapping
+    # integrity.
+    env:
+      CMAKE_CXX_COMPILER_LAUNCHER: ccache
+      CMAKE_C_COMPILER_LAUNCHER: ccache
+      CCACHE_COMPILERCHECK: content
+
     strategy:
       fail-fast: false
       matrix:
@@ -337,6 +352,12 @@ jobs:
             -pr conan/profiles/${{ matrix.preset }} \
             --build=missing \
             -of build/${{ matrix.preset }}
+
+      - name: ccache (restore + save compiler cache)
+        uses: hendrikmuhs/ccache-action@v1.2.23
+        with:
+          key: tier1-${{ matrix.preset }}
+          max-size: 500M
 
       - name: Configure
         run: cmake --preset ${{ matrix.preset }}
