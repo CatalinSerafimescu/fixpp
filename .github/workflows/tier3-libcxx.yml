@@ -77,6 +77,9 @@ jobs:
       CMAKE_CXX_COMPILER_LAUNCHER: ccache
       CMAKE_C_COMPILER_LAUNCHER: ccache
       CCACHE_COMPILERCHECK: content
+      # Keep ccache outside the checkout so source-cleanliness tests do not see
+      # the action's default .ccache directory as an untracked repo file.
+      CCACHE_DIR: /tmp/fixpp-ccache-${{ matrix.preset }}
 
     steps:
       - uses: actions/checkout@v6
