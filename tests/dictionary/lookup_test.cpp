@@ -614,9 +614,10 @@ INSTANTIATE_TEST_SUITE_P(
         VersionParam{
             .filename = "FIX40.xml",
             .expected_version = fixpp::dict::session_version::v40,
-            .required_msg_types = {"D", "8", "A", "0", "3"},  // app D/8 + PRESENT pre-FIXT session A/0
-            .forbidden_msg_types = {},                        // session lives in-dict (pre-FIXT)
-            .required_group_no_tags = {},                     // NoXxx are type='INT', not NUMINGROUP
+            .required_msg_types = {"D", "8", "A", "0",
+                                   "3"},   // app D/8 + PRESENT pre-FIXT session A/0
+            .forbidden_msg_types = {},     // session lives in-dict (pre-FIXT)
+            .required_group_no_tags = {},  // NoXxx are type='INT', not NUMINGROUP
             .has_clordid = true,
             .parties_expected = std::optional<bool>{false},  // Parties added in 4.3
             .has_instrument = false,                         // no <component> declarations
