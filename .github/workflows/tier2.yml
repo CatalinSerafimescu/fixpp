@@ -60,6 +60,13 @@ jobs:
 
     env:
       CONAN_HOME: C:\Users\runneradmin\.conan2
+      # sccache across CI runs — sccache (not ccache) for its stronger MSVC
+      # support. Requires embedded debug info (/Z7, set on the Configure line via
+      # CMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded): sccache cannot cache
+      # objects built with /Zi (the default, separate/shared PDB). CMake reads
+      # CMAKE_<LANG>_COMPILER_LAUNCHER from the env on a fresh configure.
+      CMAKE_CXX_COMPILER_LAUNCHER: sccache
+      CMAKE_C_COMPILER_LAUNCHER: sccache
 
     strategy:
       fail-fast: false
@@ -119,9 +126,16 @@ jobs:
             --build=missing ^
             -of build/${{ matrix.preset }}
 
+      - name: sccache (restore + save compiler cache)
+        uses: hendrikmuhs/ccache-action@v1.2.23
+        with:
+          variant: sccache
+          key: tier2-${{ matrix.preset }}
+          max-size: 500M
+
       - name: Configure (OTel-OFF)
         shell: cmd
-        run: cmake --preset ${{ matrix.preset }} -DFIXPP_BUILD_OTEL=OFF
+        run: cmake --preset ${{ matrix.preset }} -DFIXPP_BUILD_OTEL=OFF -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded
 
       - name: Build
         shell: cmd
