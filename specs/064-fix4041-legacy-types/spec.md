@@ -249,16 +249,22 @@ still throws `xml_parse_error` with `dict_xml_parse_failed`. (Extends the existi
   aliases**, not a hole (mutation intuition: deleting either new row re-fails the corresponding
   dictionary; adding neither leaves both dictionaries fail-closing).
 - **SC-004**: No public API, C-ABI, wire, error-enum, or layout surface changes (verifiable: the diff
-  touches only `src/dictionary/xml_loader.cpp`, `dictionaries/`, `spec/`, `specs/064-*/`, and dictionary
-  test files; no header/ABI/wire file is modified).
+  touches only `src/dictionary/xml_loader.cpp`, `dictionaries/`, `spec/behaviors-and-limitations.md`,
+  `spec/feature-catalogue.md`, `specs/064-*/`, and dictionary test files; no header/ABI/wire file is
+  modified, and no other `spec/*` file — notably `spec/coverage-index.md` — is touched, since this feature
+  adds no new OFFICIAL FIX coverage-index row).
 - **SC-005**: The QuickFIX `DATE` divergence and the verified `TIME`/`DATE` mappings are recorded in
   `research.md`, `data-model.md`, and a `behaviors-and-limitations.md` row, each citing the QuickFIX
   `XMLTypeToType` anchor and the successor-typing evidence — grep-verifiable that no project document
   claims `DATE → UtcDateOnly` (the retired hypothesis) or leaves the divergence unstated.
 - **SC-006**: The decision record explicitly states the relaxation is global and consistent with the
   existing collapse rows; the vendored FIX 4.2+ dictionaries' resolved typing is unchanged by the addition
-  (they use no `DATE`/`TIME` type names) — verifiable by loading them before/after and diffing resolved
-  types.
+  — verifiable by statically enumerating `<field type=…>` attributes across the seven already-vendored
+  FIX 4.2+ dictionaries and confirming zero occurrences of `type='DATE'`/`type='TIME'` (a name the loader
+  never encounters cannot change what it resolves to). This is distinct from, and does not require, a
+  runtime before/after diff of resolved `field_data_type` values — the existing `dictionary_lookup_test`
+  `VersionParam` rows assert message/group/component structure, not per-field `field_data_type`, so they
+  are not the mechanism that discharges this criterion.
 - **SC-007**: The D-004 feature-catalogue rows read `done` with this PR as evidence, and no open tracker
   still lists FIX 4.0/4.1 runtime-XML as an unmet `[const §I.1]` gap.
 
