@@ -2,7 +2,7 @@
 
 **Feature Branch**: `063-nested-group-parse-correctness`
 **Created**: 2026-07-07
-**Status**: Draft
+**Status**: Tasks Generated (Gate A converged R3; `/speckit-tasks` complete — 32 tasks)
 **Input**: Fix two pre-existing, production-reachable defects that block multi-instance / tag-reused nested repeating-group typed reads against the real dictionary, so that typed grouped reads (and feature 061's grouped read + round-trip witnesses) parse via `Dictionary::as_table_view()` with correct membership and extents.
 
 **Sources**: `research/G19-fix-fpml-iso20022/research/findings/dict-group-tag-collision-2026-07-05.md` (authoritative — consolidated 063 scope sketch for both defects); `spec/behaviors-and-limitations.md` `L-062` (the two limitations this feature clears); feature 062 (`PR #168`, `9d5ac6cb`) US2 MassQuote nested witnesses that surfaced both defects. Prerequisite-of: feature 061 (typed application messages — grouped reads parse via the real dictionary).

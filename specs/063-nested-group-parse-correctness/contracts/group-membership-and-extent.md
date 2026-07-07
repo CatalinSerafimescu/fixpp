@@ -30,7 +30,7 @@ Observable contracts the fix must satisfy. These are behavioural; Gate-A Round 1
 ## C-6 · Census completeness (FR-002)
 - **Given** all nine runtime XMLs **incl. FIXT.1.1**,
 - **When** the loader-faithful (component-expanding) census runs,
-- **Then** it enumerates every `NumInGroup` tag reused with differing membership (≥ the 12 FIX44 / 22 FIX50SP2 observed; + FIXT.1.1 session groups e.g. NoMsgTypes 384), **each with a discriminating regression guard** resolving to its context-correct variant. This is a **completeness/correctness aid**, not a soundness gate — a declaration-order census cannot bound the order-independent wire (B-004-1), so it neither adjudicates nor gates the design; Option A makes membership exact independently.
+- **Then** it enumerates every `NumInGroup` tag reused with differing membership (≥ the 12 FIX44 / 21 FIX50SP2 observed; + FIXT.1.1 session groups e.g. NoMsgTypes 384), **each with a discriminating regression guard** resolving to its context-correct variant. This is a **completeness/correctness aid**, not a soundness gate — a declaration-order census cannot bound the order-independent wire (B-004-1), so it neither adjudicates nor gates the design; Option A makes membership exact independently.
 
 ## Design decision (Gate A Round 1)
 - **Resolved to Option A (exact context-scoped membership)**. Option B (union-per-no_tag) was rejected as unsound for the parser: a union false-positive is swallowed into the slice at `offset_table.cpp:447`, corrupting extent and nested-count detection; and the census cannot discharge the risk under order-independent acceptance. Contracts C-1…C-6 are stated for Option A.
