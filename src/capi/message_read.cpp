@@ -551,15 +551,20 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_group_get_nested_group(const fixpp_group_t*
             if (f.tag == delim_tag) {
                 if (in_instance) {
                     // Close previous instance: ends just before this delimiter's tag=.
-                    // LCOV_EXCL_START — structurally unreachable via the public API:
-                    // OffsetTable::group() tracks `seen_in_instance` for every member tag;
-                    // when any member tag (including the nested delimiter) repeats within the
-                    // same outer entry, it closes the outer entry boundary — so an outer
-                    // entry slice produced by `group_slices()` can never contain ≥2
-                    // occurrences of the nested-group delimiter tag.  Verified empirically:
-                    // both "flat" dict (524/525 as members of 453) and "proper" dict
-                    // (524/525 only under 539) return nc=0 on a 539=2 wire — the outer
-                    // slice is truncated before the second 524 in both cases.
+                    // LCOV_EXCL_START — reachable post-063 but the divergent fix is
+                    // DEFERRED (see L-063-2). 063's nesting-aware OffsetTable::group()
+                    // removed the flat `seen_in_instance` heuristic (which formerly
+                    // truncated the outer slice before a nested group's 2nd entry, making
+                    // this ≥2-instance branch unreachable). The outer entry slice now
+                    // correctly spans ALL nested entries, so this branch is reachable. This
+                    // positional (membership-free) scan then closes the LAST instance at the
+                    // outer slice end, so a trailing outer member AFTER the nested group can
+                    // leak into the last instance (the T025 divergence). A correct bound
+                    // needs nested-group membership, which this path deliberately lacks
+                    // (plan.md Round-2 rejected plumbing dict/context through the C-ABI
+                    // cursor) — the fix is a membership-aware C-ABI follow-up. Excluded from
+                    // coverage pending that fix; the divergence is pinned by the GTEST_SKIP'd
+                    // witness NestedGroupLastInstanceExtentDoesNotAbsorbTrailingOuterMember.
                     const std::byte* vp = f.value.data();
                     const std::byte* eq = vp - 1;
                     const std::byte* tp = eq;

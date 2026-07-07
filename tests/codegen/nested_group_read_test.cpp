@@ -216,6 +216,138 @@ TEST(NestedGroupRead, Depth3NonFirstOuterOccurrenceNoCollision) {
     EXPECT_EQ(*sec1, "LEGB");
 }
 
+// 063 Phase 4 (US2 Defect B) — depth-3 AC3: multiple entries at MORE THAN ONE
+// level simultaneously (no cross-level truncation). QuoteSets[0] has ONE
+// QuoteEntry holding TWO Legs (multi-entry at the DEEPEST level, 555);
+// QuoteSets[1] has TWO QuoteEntries, each holding ONE Leg (multi-entry at the
+// MIDDLE level, 295). Every level's entry count and every entry's own fields
+// are asserted, so a walk that truncates ANY one nested extent (at either
+// level, in either QuoteSet) fails a concrete assertion below — this is the
+// exact recursion-bug exposer the advisor flagged (spec US2 AC3 / Edge Cases
+// "depth >=3/4"): the pre-063 flat walk could truncate at the first
+// repeated tag it saw, regardless of which nesting level it belonged to.
+TEST(NestedGroupRead, Depth3MultiEntryAtMultipleLevelsNoCrossLevelTruncation) {
+    std::string body =
+        "35=i\x01"
+        "296=2\x01"
+        // QuoteSets[0]: 1 QuoteEntry, that entry holds 2 Legs.
+        "302=SET0\x01"
+        "295=1\x01"
+        "299=E00\x01"
+        "132=10.10\x01"
+        "133=10.20\x01"
+        "555=2\x01"
+        "602=LEG000\x01"
+        "602=LEG001\x01"
+        // QuoteSets[1]: 2 QuoteEntries, each holding 1 Leg.
+        "302=SET1\x01"
+        "295=2\x01"
+        "299=E10\x01"
+        "132=20.10\x01"
+        "133=20.20\x01"
+        "555=1\x01"
+        "602=LEG100\x01"
+        "299=E11\x01"
+        "132=21.10\x01"
+        "133=21.20\x01"
+        "555=1\x01"
+        "602=LEG110\x01";
+
+    std::pmr::monotonic_buffer_resource arena{16384};
+    auto dict = make_correct_massquote_dict();
+
+    auto buf = make_frame(body);
+    fixpp::wire::pmr_carry_buffer carry{buf.size(), &arena};
+    fixpp::wire::Framer fr{};
+    fixpp::wire::frame_view fvs[1]{};
+    auto framed = fr.feed(
+        std::span<const std::byte>{buf.data(), buf.size()}, carry,
+        std::span<fixpp::wire::frame_view>{fvs, 1});
+    ASSERT_TRUE(framed.has_value());
+    ASSERT_FALSE(framed->empty());
+
+    fixpp::wire::Parser<fixpp::wire::access_mode::Index> parser{dict};
+    auto mv_exp = parser.parse((*framed)[0], &arena);
+    ASSERT_TRUE(mv_exp.has_value());
+
+    fixpp::v44::MassQuote mq{*mv_exp};
+    auto sets = mq.quote_sets();
+    ASSERT_EQ(sets.size(), 2U) << "level 1 (296): both QuoteSets present";
+
+    // QuoteSets[0]: 1 QuoteEntry x 2 Legs.
+    auto set0 = sets[0];
+    auto set0_id = set0.quote_set_id();
+    ASSERT_TRUE(set0_id.has_value());
+    EXPECT_EQ(*set0_id, "SET0");
+
+    auto set0_entries = set0.quote_entries();
+    ASSERT_EQ(set0_entries.size(), 1U) << "level 2 (295) under QuoteSets[0]: exactly 1 entry";
+    auto set0_entry0 = set0_entries[0];
+    auto s0e0_id = set0_entry0.quote_entry_id();
+    ASSERT_TRUE(s0e0_id.has_value());
+    EXPECT_EQ(*s0e0_id, "E00");
+    auto s0e0_bid = set0_entry0.bid_px(&arena);
+    ASSERT_TRUE(s0e0_bid.has_value());
+    EXPECT_EQ(*s0e0_bid, parse_decimal("10.10", &arena));
+    auto s0e0_offer = set0_entry0.offer_px(&arena);
+    ASSERT_TRUE(s0e0_offer.has_value());
+    EXPECT_EQ(*s0e0_offer, parse_decimal("10.20", &arena));
+
+    auto set0_legs = set0_entry0.legs();
+    ASSERT_EQ(set0_legs.size(), 2U)
+        << "level 3 (555) under QuoteSets[0].quote_entries()[0]: BOTH legs present — "
+           "no truncation at the deepest level";
+    auto s0_leg_entry0 = set0_legs[0];
+    auto s0_leg0 = s0_leg_entry0.leg_security_id();
+    ASSERT_TRUE(s0_leg0.has_value());
+    EXPECT_EQ(*s0_leg0, "LEG000");
+    auto s0_leg_entry1 = set0_legs[1];
+    auto s0_leg1 = s0_leg_entry1.leg_security_id();
+    ASSERT_TRUE(s0_leg1.has_value());
+    EXPECT_EQ(*s0_leg1, "LEG001");
+
+    // QuoteSets[1]: 2 QuoteEntries x 1 Leg each.
+    auto set1 = sets[1];
+    auto set1_id = set1.quote_set_id();
+    ASSERT_TRUE(set1_id.has_value());
+    EXPECT_EQ(*set1_id, "SET1");
+
+    auto set1_entries = set1.quote_entries();
+    ASSERT_EQ(set1_entries.size(), 2U)
+        << "level 2 (295) under QuoteSets[1]: BOTH entries present — no truncation "
+           "at the middle level, and no bleed from QuoteSets[0]'s own content";
+
+    auto set1_entry0 = set1_entries[0];
+    auto s1e0_id = set1_entry0.quote_entry_id();
+    ASSERT_TRUE(s1e0_id.has_value());
+    EXPECT_EQ(*s1e0_id, "E10");
+    auto s1e0_bid = set1_entry0.bid_px(&arena);
+    ASSERT_TRUE(s1e0_bid.has_value());
+    EXPECT_EQ(*s1e0_bid, parse_decimal("20.10", &arena));
+    auto s1e0_legs = set1_entry0.legs();
+    ASSERT_EQ(s1e0_legs.size(), 1U);
+    auto s1e0_leg_entry0 = s1e0_legs[0];
+    auto s1e0_leg0 = s1e0_leg_entry0.leg_security_id();
+    ASSERT_TRUE(s1e0_leg0.has_value());
+    EXPECT_EQ(*s1e0_leg0, "LEG100");
+
+    auto set1_entry1 = set1_entries[1];
+    auto s1e1_id = set1_entry1.quote_entry_id();
+    ASSERT_TRUE(s1e1_id.has_value());
+    EXPECT_EQ(*s1e1_id, "E11");
+    auto s1e1_bid = set1_entry1.bid_px(&arena);
+    ASSERT_TRUE(s1e1_bid.has_value());
+    EXPECT_EQ(*s1e1_bid, parse_decimal("21.10", &arena));
+    auto s1e1_legs = set1_entry1.legs();
+    ASSERT_EQ(s1e1_legs.size(), 1U)
+        << "QuoteSets[1].quote_entries()[1] (the LAST entry at the middle level) must "
+           "keep its own distinct Leg, not the sibling entry[0]'s";
+    auto s1e1_leg_entry0 = s1e1_legs[0];
+    auto s1e1_leg0 = s1e1_leg_entry0.leg_security_id();
+    ASSERT_TRUE(s1e1_leg0.has_value());
+    EXPECT_EQ(*s1e1_leg0, "LEG110");
+}
+
 // INV-G7 — dict-aware nested-slicer discriminator. One QuoteSet, one
 // QuoteEntry, and a QuoteSet-level scalar field QuoteSetValidUntilTime(367)
 // placed AFTER the nested NoQuoteEntries(295) group in WIRE order (367 is

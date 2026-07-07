@@ -33,6 +33,23 @@
 // window so only entry reads / nested descent are measured. Expected decimal
 // values are pre-computed from an UNTRACKED arena so the comparison itself
 // never pollutes the measured counting_resource.
+//
+// 063 T023 — NestedMultiEntryWalkZeroAlloc (below) proves the Defect-B
+// multi-entry nested extent walk (OffsetTable::consume_group_extent, 063
+// T021 — pure stack-only index recursion, [const §VIII.5]) allocates ZERO
+// GLOBAL heap. Per the task brief this witness uses the TU-local global
+// operator-new counter + mallocnesia markers (NOT a tracking-PMR resource) —
+// same dual-gate shape as
+// tests/dictionary/group_context_lookup_alloc_gate_test.cpp — since the
+// concern here is any escape to the global heap, not PMR-routed accounting
+// (the descent's own bounded PMR sub-view build is expected/allowed, FR-004b).
+//
+// Mutation-proof (performed manually during implementation, NOT shipped as a
+// permanent second test): a `new int` was temporarily inserted inside
+// NestedMultiEntryWalkZeroAlloc's measured window; both (a) the TU-local
+// counter assertion and (b) the mallocnesia ctest
+// (codegen_group_entry_alloc_gate_test_mallocnesia) were confirmed to go
+// RED, then the injection was reverted and both confirmed GREEN again.
 
 #include <gtest/gtest.h>
 
@@ -40,6 +57,7 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <fixpp/core/decimal_alias.hpp>
 #include <fixpp/core/error.hpp>
@@ -54,6 +72,53 @@
 
 // mallocnesia replaces these weak no-ops with its interceptor scope markers.
 #include "support/alloc_guard_markers.hpp"
+
+// ── 063 T023: TU-local global operator-new counter ──────────────────────
+// Same shape as tests/dictionary/group_context_lookup_alloc_gate_test.cpp —
+// guarded under FIXPP_SANITIZER_REPLACES_NEW so it compiles out under
+// ASan/TSan/MSan (which ship their own strong operator new).
+#if defined(__has_feature)
+#if __has_feature(address_sanitizer) || __has_feature(thread_sanitizer) || \
+    __has_feature(memory_sanitizer)
+#define FIXPP_SANITIZER_REPLACES_NEW 1
+#endif
+#endif
+#if !defined(FIXPP_SANITIZER_REPLACES_NEW) && \
+    (defined(__SANITIZE_ADDRESS__) || defined(__SANITIZE_THREAD__))
+#define FIXPP_SANITIZER_REPLACES_NEW 1
+#endif
+#ifndef FIXPP_SANITIZER_REPLACES_NEW
+#define FIXPP_SANITIZER_REPLACES_NEW 0
+#endif
+
+#if !FIXPP_SANITIZER_REPLACES_NEW
+namespace {
+std::atomic<long> g_nested_extent_alloc_count{0};
+}  // namespace
+
+void* operator new(std::size_t size) {
+    ++g_nested_extent_alloc_count;
+    void* p = std::malloc(size);
+    if (!p) {
+        throw std::bad_alloc{};
+    }
+    return p;
+}
+
+void* operator new[](std::size_t size) {
+    ++g_nested_extent_alloc_count;
+    void* p = std::malloc(size);
+    if (!p) {
+        throw std::bad_alloc{};
+    }
+    return p;
+}
+
+void operator delete(void* p) noexcept { std::free(p); }
+void operator delete[](void* p) noexcept { std::free(p); }
+void operator delete(void* p, std::size_t) noexcept { std::free(p); }
+void operator delete[](void* p, std::size_t) noexcept { std::free(p); }
+#endif  // !FIXPP_SANITIZER_REPLACES_NEW
 
 namespace {
 
@@ -308,4 +373,97 @@ TEST(GroupEntryAllocGate, NestedFirstDescentBoundedRepeatZero) {
     EXPECT_EQ(counted.allocate_count(), after_first)
         << "repeat nested descent on the SAME outer occurrence must allocate "
            "ZERO beyond the first descent (cache hit, FR-004b/SC-002)";
+}
+
+// 063 T023 — Defect-B multi-entry nested extent walk (consume_group_extent)
+// must perform ZERO global-heap allocation. Same frame shape as the
+// pre-063-escalated tests/codegen/nested_group_read_test.cpp
+// `NestedQuoteEntriesPerInstancePrices` case (now correctly handled): ONE
+// QuoteSet holding TWO QuoteEntries (nested count 295=2). Dual gate per the
+// file header: TU-local global operator-new counter (NOT a tracking-PMR
+// resource) + the whole-binary mallocnesia re-run
+// (codegen_group_entry_alloc_gate_test_mallocnesia).
+TEST(GroupEntryAllocGate, NestedMultiEntryWalkZeroAlloc) {
+    std::string body =
+        "35=i\x01"
+        "296=1\x01"
+        "302=SET0\x01"
+        "295=2\x01"
+        "299=E0\x01"
+        "132=10.10\x01"
+        "133=10.20\x01"
+        "299=E1\x01"
+        "132=20.10\x01"
+        "133=20.20\x01";
+
+    auto dict = make_massquote_dict();
+
+    // Untracked arena for expected decimal values, computed BEFORE the
+    // measured window.
+    std::pmr::monotonic_buffer_resource exp_arena{4096};
+    decimal_t const bid0_expected = parse_decimal("10.10", &exp_arena);
+    decimal_t const offer0_expected = parse_decimal("10.20", &exp_arena);
+    decimal_t const bid1_expected = parse_decimal("20.10", &exp_arena);
+    decimal_t const offer1_expected = parse_decimal("20.20", &exp_arena);
+
+    // Stack-backed, NULL-upstream arena for the message itself — any overrun
+    // is a hard bad_alloc failure, so a passing test also guarantees no
+    // PMR-side overflow to the global heap.
+    std::array<std::byte, 8192> storage{};
+    std::pmr::monotonic_buffer_resource backing{storage.data(), storage.size(),
+                                                std::pmr::null_memory_resource()};
+
+    auto buf = make_frame(body);
+    fixpp::wire::pmr_carry_buffer carry{buf.size(), &backing};
+    fixpp::wire::Framer fr{};
+    fixpp::wire::frame_view fvs[1]{};
+    auto framed = fr.feed(
+        std::span<const std::byte>{buf.data(), buf.size()}, carry,
+        std::span<fixpp::wire::frame_view>{fvs, 1});
+    ASSERT_TRUE(framed.has_value());
+    ASSERT_FALSE(framed->empty());
+
+    fixpp::wire::Parser<fixpp::wire::access_mode::Index> parser{dict};
+    auto mv_exp = parser.parse((*framed)[0], &backing);
+    ASSERT_TRUE(mv_exp.has_value());
+
+    fixpp::v44::MassQuote mq{*mv_exp};
+    auto sets = mq.quote_sets();  // materializes group_slices(296) — BEFORE the window
+    ASSERT_EQ(sets.size(), 1U);
+    auto quote_set0 = sets[0];
+
+#if !FIXPP_SANITIZER_REPLACES_NEW
+    g_nested_extent_alloc_count.store(0, std::memory_order_relaxed);
+#endif
+    if (alloc_guard_start) alloc_guard_start();
+
+    // Exercises the multi-entry nested extent walk (consume_group_extent) —
+    // the outer occurrence's extent must enclose BOTH QuoteEntries.
+    auto entries = quote_set0.quote_entries();
+    ASSERT_EQ(entries.size(), 2U) << "063 Defect-B fix: the nesting-aware extent walk must not "
+                                     "truncate the 2nd QuoteEntry";
+
+    auto entry0 = entries[0];
+    auto bid0 = entry0.bid_px(&backing);
+    ASSERT_TRUE(bid0.has_value());
+    EXPECT_EQ(*bid0, bid0_expected);
+    auto offer0 = entry0.offer_px(&backing);
+    ASSERT_TRUE(offer0.has_value());
+    EXPECT_EQ(*offer0, offer0_expected);
+
+    auto entry1 = entries[1];
+    auto bid1 = entry1.bid_px(&backing);
+    ASSERT_TRUE(bid1.has_value());
+    EXPECT_EQ(*bid1, bid1_expected);
+    auto offer1 = entry1.offer_px(&backing);
+    ASSERT_TRUE(offer1.has_value());
+    EXPECT_EQ(*offer1, offer1_expected);
+
+    if (alloc_guard_end) alloc_guard_end();
+
+#if !FIXPP_SANITIZER_REPLACES_NEW
+    EXPECT_EQ(g_nested_extent_alloc_count.load(std::memory_order_relaxed), 0)
+        << "multi-entry nested extent walk (consume_group_extent) must be alloc-free "
+           "(stack-only index recursion, [const §VIII.5]) — zero GLOBAL heap escape";
+#endif
 }

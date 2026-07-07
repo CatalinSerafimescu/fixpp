@@ -121,6 +121,11 @@ add_wire_test(wire_group_slice_trailing_soh_test group_slice_trailing_soh_test.c
 # branches, and the two bad_alloc degrade paths (offset_table.cpp:561-599).
 add_wire_test(wire_nested_group_slices_cache_test nested_group_slices_cache_test.cpp)
 
+# 063-nested-group-parse-correctness — Phase 4 (US2 Defect B) T019/T020/T022:
+# nesting-aware OffsetTable::group()/group_slices() extent-walk multi-entry
+# guard + regressions + K=16 depth-overflow.
+add_wire_test(wire_nested_group_extent_test nested_group_extent_test.cpp)
+
 # 041-validation-gate-wiring T009/T009a: compile-witness (production table_view,
 # no mock) + Float parse-error remap witness (garbage Float → wire_field_value_out_of_range).
 add_executable(wire_validator_production_table_view_test
