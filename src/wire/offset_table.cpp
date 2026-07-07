@@ -518,7 +518,9 @@ core::expected_t<OffsetTable::group_index> OffsetTable::group(std::uint16_t no_t
     std::size_t group_end = first;
     if (opaque_dict_ != nullptr && group_member_fn_ != nullptr) {
         // This table's stored membership context (msg_type + bounded parent
-        // path), seeded at MessageView::group<>() / build_nested_subview.
+        // path). A ROOT table is seeded at `MessageView` construction time
+        // (`MessageView::group<>()` re-applies the same value, idempotent);
+        // a NESTED sub-table is seeded once by `build_nested_subview`.
         group_context const ctx = stored_group_context();
         // Validate that `no_tag` is actually a group count field by confirming
         // the dictionary recognises `delim` (the tag immediately following the

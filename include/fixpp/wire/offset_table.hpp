@@ -157,12 +157,14 @@ public:
 
     // 063 T006: sets this table's stored context (msg_type + bounded
     // parent-no_tag path), read by group()'s membership predicate calls. The
-    // ROOT table is seeded from `MessageView::group<>()` with
-    // `{msg_type, path=[]}` (parser.hpp) before its first group_slices() call
-    // this parse; a NESTED sub-table is seeded once by `build_nested_subview`
-    // at construction. Mutable/const like the table's other lazily-set state
-    // (group_slices_/nested_cache_) — safe to call repeatedly with the SAME
-    // value within one parse (context is constant per parse, FR-005).
+    // ROOT table is seeded with `{msg_type, path=[]}` at `MessageView`
+    // construction time (parser.hpp), before any group_slices() call this
+    // parse; `MessageView::group<>()` re-applies the same root context
+    // (idempotent) before its typed read. A NESTED sub-table is seeded once
+    // by `build_nested_subview` at construction. Mutable/const like the
+    // table's other lazily-set state (group_slices_/nested_cache_) — safe to
+    // call repeatedly with the SAME value within one parse (context is
+    // constant per parse, FR-005).
     void set_group_context(group_context const& ctx) const noexcept;
 
     // Repeating-group instance slices for `no_tag`, in document order,
