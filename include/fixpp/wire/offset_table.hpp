@@ -137,6 +137,24 @@ public:
 
     [[nodiscard]] core::expected_t<group_index> group(std::uint16_t no_tag) const noexcept;  // lazy
 
+    // 063 Defect B (T021): nesting-aware extent walk. Consumes the FULL byte
+    // extent (all declared instances) of the group whose NumInGroup count
+    // field sits at entries_ index `count_idx`, under membership context
+    // `ctx` (the context in which THIS group's membership is registered).
+    // Recurses into nested group counts (a member tag that itself heads a
+    // group in-context) so a multi-entry nested group's repeated delimiter is
+    // NOT mistaken for an outer-instance boundary (the pre-063 flat
+    // `seen_in_instance` truncation bug). Approach A: reads each nested
+    // group's DECLARED count and consumes exactly that many instances,
+    // fail-closed (bounded by entries_.size(); declared-vs-actual mismatch is
+    // the validator's job per plan.md). Alloc-free (stack-only index
+    // recursion). On depth > kMaxGroupDepth or a per-level entry-cap breach,
+    // sets `overflow = true` (caller returns err_group_too_large, T022).
+    // Returns the entries_ index one-past the group's last field.
+    [[nodiscard]] std::size_t consume_group_extent(
+        std::size_t count_idx, group_context const& ctx, std::uint8_t depth,
+        bool& overflow) const noexcept;
+
     // 063 T006: sets this table's stored context (msg_type + bounded
     // parent-no_tag path), read by group()'s membership predicate calls. The
     // ROOT table is seeded from `MessageView::group<>()` with
