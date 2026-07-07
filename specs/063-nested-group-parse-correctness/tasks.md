@@ -106,13 +106,13 @@ Single-library layout, all paths relative to the library submodule root `researc
 
 ### Tests for User Story 3
 
-- [ ] T026 [P] [US3] SC-001a: remove the `GTEST_SKIP()` from `tests/codegen/nested_group_read_test.cpp:353` `NestedQuoteEntriesPerInstancePrices` **UNCHANGED** (hand-built `make_correct_massquote_dict()`) and confirm it passes green — Defect B proven in isolation.
-- [ ] T027 [P] [US3] SC-001b: ADD a net-new real-`Dictionary::as_table_view()` witness in `tests/codegen/nested_group_read_test.cpp` — load real `FIX44.xml`, parse a MassQuote with a QuoteSet holding 2 QuoteEntries, assert `quote_entries().size()==2` and both entries' exact 299/132/133 (Defect A + B end-to-end, C-3).
+- [X] T026 [P] [US3] SC-001a: remove the `GTEST_SKIP()` from `tests/codegen/nested_group_read_test.cpp:353` `NestedQuoteEntriesPerInstancePrices` **UNCHANGED** (hand-built `make_correct_massquote_dict()`) and confirm it passes green — Defect B proven in isolation.
+- [X] T027 [P] [US3] SC-001b: ADD a net-new real-`Dictionary::as_table_view()` witness in `tests/codegen/nested_group_read_test.cpp` — load real `FIX44.xml`, parse a MassQuote with a QuoteSet holding 2 QuoteEntries, assert `quote_entries().size()==2` and both entries' exact 299/132/133 (Defect A + B end-to-end, C-3).
 
 ### Close-out for User Story 3
 
-- [ ] T028 [US3] Verify C-ABI stability (SC-005 / C-4): `ctest -R "abi_symbol_golden|capi_freeze"` passes unchanged — no exported group symbol added/changed, while `fixpp_msg_get_group`'s nested-group output is now correct.
-- [ ] T029 [US3] Retire the two `L-062` rows (A: reused-tag wrong membership; B: multi-entry nested truncation) in `spec/behaviors-and-limitations.md`, marked resolved with this feature's evidence reference (FR-007 / SC-004).
+- [X] T028 [US3] Verify C-ABI stability (SC-005 / C-4): `ctest -R "abi_symbol_golden|capi_freeze"` passes unchanged — no exported group symbol added/changed, while `fixpp_msg_get_group`'s nested-group output is now correct.
+- [X] T029 [US3] Retire the two `L-062` rows (A: reused-tag wrong membership; B: multi-entry nested truncation) in `spec/behaviors-and-limitations.md`, marked resolved with this feature's evidence reference (FR-007 / SC-004).
 
 **Checkpoint**: Both defects proven end-to-end; L-062 cleared; feature 061 unblocked.
 
