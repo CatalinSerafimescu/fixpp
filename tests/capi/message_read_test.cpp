@@ -18,8 +18,10 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <memory_resource>
 #include <string>
@@ -53,6 +55,21 @@ namespace {
 std::vector<std::byte> make_raw_frame(std::string const& body) {
     std::string nine = "9=" + std::to_string(body.size()) + "\x01";
     std::string full = "8=FIX.4.4\x01" + nine + body + "10=000\x01";
+    std::vector<std::byte> out(full.size());
+    std::memcpy(out.data(), full.data(), full.size());
+    return out;
+}
+
+std::vector<std::byte> make_checked_frame(std::string_view body) {
+    std::string pre = "8=FIX.4.4\x01" + std::string("9=") + std::to_string(body.size()) + "\x01" +
+                      std::string(body);
+    unsigned sum = 0;
+    for (unsigned char c : pre) {
+        sum += c;
+    }
+    char checksum[16]{};
+    std::snprintf(checksum, sizeof(checksum), "10=%03u\x01", sum % 256U);
+    std::string full = pre + checksum;
     std::vector<std::byte> out(full.size());
     std::memcpy(out.data(), full.data(), full.size());
     return out;
@@ -599,6 +616,56 @@ TEST(MessageRead, ZeroGlobalHeapGroupCursorGuard) {
     }
     if (alloc_guard_end) alloc_guard_end();
 }
+
+#ifndef NDEBUG
+
+TEST(MessageReadGroupDeath, StaleTopLevelGroupCursorMetadataTrapsAfterRecycle) {
+    auto dict = make_group_dict();
+    auto buf = make_checked_frame(
+        "35=D\x01"
+        "34=1\x01"
+        "453=1\x01"
+        "448=PA\x01"
+        "447=D\x01");
+
+    fixpp::wire::Framer framer;
+    alignas(std::max_align_t) std::byte arena_buf[16384];
+    std::pmr::monotonic_buffer_resource arena{arena_buf, sizeof(arena_buf),
+                                              std::pmr::null_memory_resource()};
+    fixpp::wire::pmr_carry_buffer carry{buf.size(), &arena};
+    std::array<fixpp::wire::frame_view, 1> frames{};
+    auto framed = framer.feed(std::span<const std::byte>{buf.data(), buf.size()}, carry,
+                              std::span<fixpp::wire::frame_view>{frames});
+    ASSERT_TRUE(framed.has_value());
+    ASSERT_GE(framed->size(), 1U);
+
+    Parser<access_mode::Index> parser{dict};
+    auto mv_res = parser.parse((*framed)[0], &arena);
+    ASSERT_TRUE(mv_res.has_value());
+
+    InboundHandle h;
+    h.msg.view = &mv_res.value();
+
+    {
+        const fixpp_group_t* grp = nullptr;
+        size_t count = 0;
+        ASSERT_EQ(fixpp_msg_get_group(h.ptr(), 453, &grp, &count), FIXPP_ERR_OK);
+        ASSERT_NE(grp, nullptr);
+        ASSERT_EQ(count, 1U);
+    }
+
+    framer.recycle_pool();
+
+    EXPECT_DEATH(
+        {
+            const fixpp_group_t* grp = nullptr;
+            size_t count = 0;
+            (void)fixpp_msg_get_group(h.ptr(), 453, &grp, &count);
+        },
+        "");
+}
+
+#endif
 
 TEST(MessageReadGroup, GetGroupCount) {
     auto dict = make_group_dict();

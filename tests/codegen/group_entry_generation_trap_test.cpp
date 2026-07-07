@@ -164,6 +164,13 @@ TEST(GroupEntryGenerationTrapDeath, GenerationTokenTrapOnStaleEntryRead) {
     // Every entry_context minted above still carries the PREVIOUS token.
     framer.recycle_pool();
 
+    // Discriminating witness for issue #169 guard A: builds the group_view via
+    // top-level OffsetTable::group_slices() but does NOT call size()/operator[]
+    // on the returned held view, so it dies ONLY if the OffsetTable-layer
+    // liveness guard fires before the cache-hit/materialize path returns.
+    EXPECT_DEATH((void)mq.quote_sets(), "")
+        << "top-level group_slices() metadata read must trap after pool recycle";
+
     // After recycling: the one-level entry's own scalar read must trap. A
     // bug that silently reads under a default {} token (pool_id==0, which
     // NEVER traps) would make this EXPECT_DEATH fail to observe a death.

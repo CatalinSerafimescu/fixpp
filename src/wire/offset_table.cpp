@@ -139,7 +139,11 @@ std::size_t OffsetTable::overlay_cap_for(std::size_t n) noexcept {
 }
 
 OffsetTable::OffsetTable(frame_view const& frame, std::pmr::memory_resource* mr) noexcept
-    : cfg_{},
+    :
+#ifndef NDEBUG
+      gen_{frame.token()},
+#endif
+      cfg_{},
 
       entries_(mr),
       overlay_(mr),
@@ -151,7 +155,11 @@ OffsetTable::OffsetTable(frame_view const& frame, std::pmr::memory_resource* mr)
 
 OffsetTable::OffsetTable(frame_view const& frame, std::pmr::memory_resource* mr,
                          void const* opaque_dict, group_member_fn_t group_member_fn) noexcept
-    : cfg_{},
+    :
+#ifndef NDEBUG
+      gen_{frame.token()},
+#endif
+      cfg_{},
       opaque_dict_{opaque_dict},
       group_member_fn_{group_member_fn},
       entries_(mr),
@@ -164,7 +172,11 @@ OffsetTable::OffsetTable(frame_view const& frame, std::pmr::memory_resource* mr,
 
 OffsetTable::OffsetTable(frame_view const& frame, std::pmr::memory_resource* mr,
                          Config cfg) noexcept
-    : cfg_{cfg},
+    :
+#ifndef NDEBUG
+      gen_{frame.token()},
+#endif
+      cfg_{cfg},
 
       entries_(mr),
       overlay_(mr),
@@ -176,7 +188,11 @@ OffsetTable::OffsetTable(frame_view const& frame, std::pmr::memory_resource* mr,
 
 OffsetTable::OffsetTable(frame_view const& frame, std::pmr::memory_resource* mr, Config cfg,
                          void const* opaque_dict, group_member_fn_t group_member_fn) noexcept
-    : cfg_{cfg},
+    :
+#ifndef NDEBUG
+      gen_{frame.token()},
+#endif
+      cfg_{cfg},
       opaque_dict_{opaque_dict},
       group_member_fn_{group_member_fn},
       entries_(mr),
@@ -376,7 +392,14 @@ core::expected_t<OffsetTable::entry> OffsetTable::find(std::uint16_t tag) const 
     return err_required_field_missing<entry>();
 }
 
+void OffsetTable::check_alive() const noexcept {
+#ifndef NDEBUG
+    (void)frame_view_slice_access::make(frame_base_, 0, gen_).bytes();
+#endif
+}
+
 core::expected_t<OffsetTable::group_index> OffsetTable::group(std::uint16_t no_tag) const noexcept {
+    check_alive();
     if (!status_) {
         return fail<group_index>(status_.error());
     }
@@ -458,6 +481,7 @@ core::expected_t<OffsetTable::group_index> OffsetTable::group(std::uint16_t no_t
 }
 
 std::span<group_slice const> OffsetTable::group_slices(std::uint16_t no_tag) const noexcept {
+    check_alive();
     // Already materialized for this no_tag — return the stable cached span.
     for (auto const& gs : group_index_) {
         if (gs.no_tag == no_tag) {
