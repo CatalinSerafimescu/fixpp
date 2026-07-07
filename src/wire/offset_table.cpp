@@ -11,6 +11,7 @@
 #include <fixpp/core/error.hpp>
 #include <fixpp/wire/errors.hpp>  // wire::err_* / fail<T> (module error vocab)
 #include <fixpp/wire/framer.hpp>
+#include <fixpp/wire/group_view.hpp>  // group_context complete type (063 T006/T008)
 #include <fixpp/wire/offset_table.hpp>
 #include <fixpp/wire/tag_scan.hpp>  // accumulate_tag_digit (SC-004 / 040-inbound-tag-overflow)
 #include <fixpp/wire/view.hpp>  // group_slice
@@ -399,6 +400,22 @@ void OffsetTable::check_alive() const noexcept {
 #endif
 }
 
+// 063 T006: set/read the stored group_context (msg_type + bounded
+// parent-no_tag path) — see offset_table.hpp for the ownership/seeding
+// contract. Copies the constituent fields (never the `group_context` type
+// itself, which offset_table.hpp only forward-declares).
+void OffsetTable::set_group_context(group_context const& ctx) const noexcept {
+    group_ctx_msg_type_ = ctx.msg_type;
+    group_ctx_parent_path_ = ctx.parent_path;
+    group_ctx_depth_ = ctx.depth;
+}
+
+group_context OffsetTable::stored_group_context() const noexcept {
+    return group_context{.msg_type = group_ctx_msg_type_,
+                         .parent_path = group_ctx_parent_path_,
+                         .depth = group_ctx_depth_};
+}
+
 core::expected_t<OffsetTable::group_index> OffsetTable::group(std::uint16_t no_tag) const noexcept {
     check_alive();
     if (!status_) {
@@ -423,6 +440,11 @@ core::expected_t<OffsetTable::group_index> OffsetTable::group(std::uint16_t no_t
     std::uint16_t const delim = entries_[first].tag;
     std::size_t group_end = first;
     if (opaque_dict_ != nullptr && group_member_fn_ != nullptr) {
+        // 063 T006: this table's stored context — carried but functionally
+        // UNUSED until US1 re-keys the membership store (Phase 2 seam; the
+        // predicate still resolves membership from bare no_tag, byte-identical
+        // to main).
+        group_context const ctx = stored_group_context();
         // Validate that `no_tag` is actually a group count field by confirming
         // the dictionary recognises `delim` (the tag immediately following the
         // count field) as a member of `no_tag`'s group.  If the dict does NOT
@@ -430,7 +452,7 @@ core::expected_t<OffsetTable::group_index> OffsetTable::group(std::uint16_t no_t
         // SenderCompID=49) and we must return an absent result so that
         // group_slices() yields an empty span → the thunk can report
         // TYPE_MISMATCH (E-2 / CA-010-read contract).
-        if (!group_member_fn_(opaque_dict_, no_tag, delim)) {
+        if (!group_member_fn_(opaque_dict_, ctx, no_tag, delim)) {
             return err_required_field_missing<group_index>();
         }
         std::size_t k = first;
@@ -444,7 +466,7 @@ core::expected_t<OffsetTable::group_index> OffsetTable::group(std::uint16_t no_t
                 if (entries_[k].tag == delim) {
                     break;  // next instance
                 }
-                if (!group_member_fn_(opaque_dict_, no_tag, entries_[k].tag)) {
+                if (!group_member_fn_(opaque_dict_, ctx, no_tag, entries_[k].tag)) {
                     break;
                 }
                 bool seen_in_instance = false;
@@ -553,7 +575,8 @@ OffsetTable* OffsetTable::build_nested_subview(std::byte const* data, std::size_
                                                std::pmr::memory_resource* mr,
                                                void const* opaque_dict,
                                                group_member_fn_t group_member_fn,
-                                               detail::generation_token gen) noexcept {
+                                               detail::generation_token gen,
+                                               group_context const& ctx) noexcept {
     try {
         // RC1: slice-scoped `len+1` — the terminal SOH is provably already
         // present in the parent frame buffer at `data+len` (the slice is
@@ -569,7 +592,11 @@ OffsetTable* OffsetTable::build_nested_subview(std::byte const* data, std::size_
         // the sub-OffsetTable is owned by the per-message arena and freed with
         // it, not heap-owned (gsl::owner not adopted in this codebase).
         // NOLINTNEXTLINE(cppcoreguidelines-owning-memory)
-        return ::new (mem) OffsetTable(fv, mr, opaque_dict, group_member_fn);
+        auto* table = ::new (mem) OffsetTable(fv, mr, opaque_dict, group_member_fn);
+        // 063 T008: seed the new sub-table's stored context VERBATIM (no
+        // further push — see nested_group_slices()'s doc comment).
+        table->set_group_context(ctx);
+        return table;
     } catch (std::bad_alloc const&) {
         return nullptr;  // degrade: caller serves absent rather than throw
     }
@@ -581,8 +608,8 @@ OffsetTable* OffsetTable::build_nested_subview(std::byte const* data, std::size_
 // no_tags on the same slice).
 std::span<group_slice const> OffsetTable::nested_group_slices(
     std::byte const* slice_data, std::size_t slice_len, std::uint16_t nested_no_tag,
-    void const* opaque_dict, group_member_fn_t group_member_fn,
-    detail::generation_token gen) const noexcept {
+    void const* opaque_dict, group_member_fn_t group_member_fn, detail::generation_token gen,
+    group_context const& ctx) const noexcept {
     if (slice_data == nullptr) {
         return {};
     }
@@ -620,7 +647,7 @@ std::span<group_slice const> OffsetTable::nested_group_slices(
     }
     if (table == nullptr) {
         table = build_nested_subview(slice_data, slice_len, resource(), opaque_dict,
-                                     group_member_fn, gen);
+                                     group_member_fn, gen, ctx);
     }
     try {
         nested_cache_.push_back(nested_cache_row{

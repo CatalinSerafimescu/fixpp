@@ -7,9 +7,12 @@
 // (byte span + generation token); the wire layer never decodes fields.
 // Authority: .specify/2b-wire.md v0.2; shape oracle contracts/group_view.hpp.
 
+#include <array>
 #include <cstddef>
+#include <cstdint>
 #include <memory_resource>
 #include <span>
+#include <string_view>
 #include <type_traits>
 
 // 062 T002: entry_context needs OffsetTable::group_member_fn_t (a complete
@@ -20,6 +23,48 @@
 #include "view.hpp"
 
 namespace fixpp::wire {
+
+// [2b §4.7] 063 T004: the context-scoped membership key — `(msg_type,
+// bounded parent-no_tag-path)` — Gate A Round-1/-2 Option A (data-model.md
+// §"GroupMembership", plan.md Complexity Tracking). `no_tag` itself is NOT
+// part of this struct: it is the separate argument every group_member_fn_t
+// call already carries, so the key a predicate answers is
+// `(group_context, no_tag) -> members`. Defined HERE (not offset_table.hpp)
+// per 063 data-model.md/tasks.md T004; offset_table.hpp only forward-declares
+// this type (a plain one-directional edge, group_view.hpp -> offset_table.hpp,
+// stays intact — OffsetTable stores the constituent fields raw, never a
+// `group_context` by value, to avoid a header cycle back into this file).
+//
+// Trivially copyable, fixed-size (K=16 mirrors codegen's kMaxGroupDepth,
+// emit_messages.cpp:137) — no allocation, by-value ride-along in
+// entry_context (FR-004).
+struct group_context {
+    std::string_view msg_type{};  // aliases the MESSAGE WIRE BUFFER (data-model.md:28) — NOT
+                                   // dictionary scratch; outlives every nested entry (one-parse,
+                                   // ROOT-owned lifetime, same as entry_context::span).
+    std::array<std::uint16_t, 16> parent_path{};  // bounded parent-no_tag chain
+    std::uint8_t depth = 0;                       // valid prefix length of parent_path
+
+    // Returns a NEW context with `no_tag` appended to the parent path — used
+    // when minting the entry_context for a group's own occurrences (the
+    // entry's "own" context = its container path + its own no_tag), so a
+    // later nested descent from that entry seeds the correct sub-table
+    // context (plan.md Context-propagation mechanism). Silently clamps at
+    // K=16 (depth stays put, no_tag dropped) rather than overflow the fixed
+    // array; the fail-closed K=16 overflow disposition (err_group_too_large)
+    // is a US2 (063 T022) concern, not this plumbing seam.
+    [[nodiscard]] constexpr group_context pushed(std::uint16_t no_tag) const noexcept {
+        group_context out = *this;
+        if (out.depth < parent_path.size()) {
+            out.parent_path[out.depth] = no_tag;
+            ++out.depth;
+        }
+        return out;
+    }
+};
+
+static_assert(std::is_trivially_copyable_v<group_context>,
+              "group_context must be trivially copyable (FR-004 zero-alloc-by-value context)");
 
 // [2b §4.7] entry_context (062 T002): a by-value repeating-group entry
 // (generated `G_<no_tag>`) built from `{span}` alone structurally cannot
@@ -40,6 +85,12 @@ struct entry_context {
                   // ever calls the const nested_group_slices()
     std::byte const* outer_occurrence_id =
         nullptr;  // this entry slice's globally-unique data-pointer identity
+    // 063 T005: the context-scoped membership key (msg_type + bounded parent
+    // path) this entry's OWN group occurs under — carried but functionally
+    // UNUSED until US1 re-keys the membership store (Phase 2 seam; the
+    // predicate still resolves membership from bare no_tag, byte-identical
+    // to main). See group_context above.
+    group_context group_context{};
 };
 
 // FR-004 zero-alloc-by-value entry: entry_context (and therefore every

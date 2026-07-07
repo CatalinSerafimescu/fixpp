@@ -9,11 +9,13 @@
 // wire_tag_out_of_range, wire_group_too_large — bounded memory, no
 // unbounded growth ([2b §1.2]).
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <fixpp/core/error.hpp>
 #include <memory_resource>
 #include <span>
+#include <string_view>
 #include <vector>
 
 #include "framer.hpp"
@@ -24,9 +26,23 @@ namespace fixpp::wire {
 inline constexpr std::size_t default_max_offset_entries = 4096;  // occ space
 inline constexpr std::size_t default_max_group_entries_per_instance = 4096;
 
+// 063 T004/T006: the context-scoped membership key (msg_type + bounded
+// parent-no_tag path) — full definition lives in group_view.hpp (data-model.md
+// §"GroupMembership"/§"entry_context"). Forward-declared here: the typedef and
+// method signatures below only need `group_context const&` (reference
+// parameter — complete type not required for a declaration), and completing it
+// here would require including group_view.hpp, which itself includes THIS
+// header — a cycle the file's one-directional include edge (see
+// group_view.hpp:15-18) must not acquire. OffsetTable stores the constituent
+// fields raw (never a `group_context` member by value) for the same reason;
+// the .cpp includes group_view.hpp for the complete type where it is
+// actually constructed/consumed.
+struct group_context;
+
 class OffsetTable {
 public:
-    using group_member_fn_t = bool (*)(void const*, std::uint16_t, std::uint16_t) noexcept;
+    using group_member_fn_t = bool (*)(void const*, group_context const&, std::uint16_t,
+                                       std::uint16_t) noexcept;
 
     // Caller-tunable DoS caps (FR-015 / [2b §1.2] "configurable").
     // Defaults match the module-level inline constexpr above.
@@ -121,6 +137,16 @@ public:
 
     [[nodiscard]] core::expected_t<group_index> group(std::uint16_t no_tag) const noexcept;  // lazy
 
+    // 063 T006: sets this table's stored context (msg_type + bounded
+    // parent-no_tag path), read by group()'s membership predicate calls. The
+    // ROOT table is seeded from `MessageView::group<>()` with
+    // `{msg_type, path=[]}` (parser.hpp) before its first group_slices() call
+    // this parse; a NESTED sub-table is seeded once by `build_nested_subview`
+    // at construction. Mutable/const like the table's other lazily-set state
+    // (group_slices_/nested_cache_) — safe to call repeatedly with the SAME
+    // value within one parse (context is constant per parse, FR-005).
+    void set_group_context(group_context const& ctx) const noexcept;
+
     // Repeating-group instance slices for `no_tag`, in document order,
     // materialized once into this table's per-message mr arena (append-only,
     // reserved once → no reallocation), then cached per no_tag. The returned
@@ -162,10 +188,19 @@ public:
     // own already-cached `group_slices()`). Empty span if the group is
     // absent, the slice is null, or the sub-build failed (degrade, never
     // throw/UB — mirrors `group_slices()`'s own degradation contract).
+    // 063 T008: `ctx` is the calling entry's OWN context (its container path
+    // + its own no_tag, e.g. {msg_type,[296],1} for a QuoteSet entry) — it is
+    // seeded VERBATIM as the new/reused sub-table's stored context (no
+    // further push here: the sub-table answers `group(nested_no_tag)`, whose
+    // key is `(ctx, nested_no_tag)` — `nested_no_tag` is a separate argument,
+    // not part of the stored path). Ignored on a warm cache hit (a built
+    // sub-table's context was already seeded once at cold-build time and is
+    // invariant for the rest of this parse, FR-005).
     [[nodiscard]] std::span<group_slice const> nested_group_slices(
         std::byte const* slice_data [[clang::lifetimebound]], std::size_t slice_len,
         std::uint16_t nested_no_tag, void const* opaque_dict, group_member_fn_t group_member_fn,
-        detail::generation_token gen) const noexcept [[clang::lifetimebound]];
+        detail::generation_token gen, group_context const& ctx) const noexcept
+        [[clang::lifetimebound]];
 
 private:
     [[nodiscard]] static std::size_t overlay_cap_for(std::size_t n) noexcept;
@@ -186,11 +221,22 @@ private:
     // `build()` guard (`offset_table.cpp:264-268`) without relaxing it and
     // without widening the shared `group_slice.len`. Returns nullptr on
     // allocation failure (degrade, never throw).
+    // 063 T008: `ctx` seeds the new sub-table's stored context (via
+    // set_group_context) immediately after construction — see
+    // nested_group_slices()'s doc comment above for what `ctx` means.
     [[nodiscard]] static OffsetTable* build_nested_subview(std::byte const* data, std::size_t len,
                                                            std::pmr::memory_resource* mr,
                                                            void const* opaque_dict,
                                                            group_member_fn_t group_member_fn,
-                                                           detail::generation_token gen) noexcept;
+                                                           detail::generation_token gen,
+                                                           group_context const& ctx) noexcept;
+
+    // 063 T006: builds an actual `group_context` value from the raw fields
+    // below (needs the complete type — defined in offset_table.cpp, which
+    // includes group_view.hpp).
+    [[nodiscard]] group_context stored_group_context() const noexcept;
+
+    static constexpr std::uint8_t kMaxGroupDepth = 16;  // mirror emit_messages.cpp:137
 
     std::byte const* frame_base_ = nullptr;  // for group_slice (ptr,len)
 #ifndef NDEBUG
@@ -199,6 +245,19 @@ private:
     Config cfg_{};                           // caller-tunable caps (FR-015 / [2b §1.2])
     void const* opaque_dict_ = nullptr;
     group_member_fn_t group_member_fn_ = nullptr;
+    // 063 T006: raw storage for the stored group_context (msg_type + bounded
+    // parent-no_tag path). Stored as constituent fields, NOT a `group_context`
+    // member by value — `group_context` is only forward-declared in this
+    // header (see the forward-decl comment above); storing it by value would
+    // need the complete type here, which would require including
+    // group_view.hpp and cycle back to THIS header. Set via
+    // set_group_context() (mutable — same lazy-const-method idiom as
+    // group_slices_/nested_cache_ below); default-empty on a table that never
+    // calls it (dict-free ctors — group_member_fn_ is null there, so this
+    // state is never read).
+    mutable std::string_view group_ctx_msg_type_{};
+    mutable std::array<std::uint16_t, kMaxGroupDepth> group_ctx_parent_path_{};
+    mutable std::uint8_t group_ctx_depth_ = 0;
     std::pmr::vector<entry> entries_;
     // Open-address robin-hood overlay: slot value = index into entries_ + 1
     // (0 = empty). Holds the FIRST occurrence per tag.

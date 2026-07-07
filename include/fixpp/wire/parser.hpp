@@ -262,12 +262,22 @@ template <std::uint16_t NoTag, class GroupT>
         // OffsetTable; the field is `const OffsetTable*` because the only
         // method a nested descent ever reaches through it is the const
         // nested_group_slices() (which mutates only its own `mutable` cache).
+        // 063 T007: the ROOT context — {msg_type, path=[]} — is this message's
+        // own context (depth 0, plan.md Context-propagation mechanism). Set on
+        // `table_` BEFORE group_slices() so group()'s membership predicate
+        // calls see it; the entry_context each returned entry carries gets the
+        // context PUSHED with NoTag (its own container path + own no_tag), so
+        // a later nested descent from one of these entries seeds the correct
+        // sub-table context (offset_table.hpp/.cpp T008).
+        group_context const root_ctx{.msg_type = msg_type()};
+        table_.set_group_context(root_ctx);
         entry_context ctx{};
         ctx.mr = mr_;
         ctx.opaque_dict = opaque_dict_;
         ctx.group_member_fn = group_member_fn_;
         ctx.gen = token();
         ctx.parent_cache_owner = &table_;
+        ctx.group_context = root_ctx.pushed(NoTag);
         return group_view<GroupT>{table_.group_slices(NoTag), ctx};
     }
 
@@ -482,7 +492,12 @@ public:
               return static_cast<dict_t const*>(d)->field_valid_for(mt, t);
           }},
           group_member_fn_{
-              [](void const* d, std::uint16_t no_tag, std::uint16_t tag) noexcept -> bool {
+              // 063 T003/T007: widened to accept `group_context const&` (the
+              // new group_member_fn_t param) — IGNORED here, matching Phase 2
+              // scope: the membership store stays bare-no_tag-keyed until US1
+              // re-keys it (byte-identical behaviour, context carried-but-unused).
+              [](void const* d, group_context const& /*ctx*/, std::uint16_t no_tag,
+                 std::uint16_t tag) noexcept -> bool {
                   using dict_t = std::remove_reference_t<TV>;
                   auto const members = static_cast<dict_t const*>(d)->group_member_tags(no_tag);
                   for (auto const member_tag : members) {

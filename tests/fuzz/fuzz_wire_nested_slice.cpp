@@ -44,6 +44,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <fixpp/wire/group_view.hpp>  // group_context (063 T003)
 #include <fixpp/wire/offset_table.hpp>
 #include <fixpp/wire/view.hpp>
 #include <memory_resource>
@@ -59,7 +60,10 @@ namespace {
 // (nested_group_slices() calls group_slices() on the freshly built
 // sub-table before returning), without needing a real dictionary — the
 // bytes under test are the slice content, not the dict membership rules.
-bool always_group_member(void const*, std::uint16_t, std::uint16_t) noexcept {
+// 063 T003: widened with an ignored `group_context const&` param to match the
+// widened group_member_fn_t (Phase 2 seam — context carried-but-unused).
+bool always_group_member(void const*, fixpp::wire::group_context const&, std::uint16_t,
+                         std::uint16_t) noexcept {
     return true;
 }
 
@@ -110,18 +114,21 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
         static_cast<std::uint16_t>(data[0]) |
         (size > 1U ? (static_cast<std::uint16_t>(data[1]) << 8) : 0U));
 
+    // 063 T008: the new context arg — carried but unused in Phase 2.
+    fixpp::wire::group_context const ctx{};
+
     // nested_group_slices() is noexcept; any exception escape -> terminate
     // -> libFuzzer crash report.
     auto slices = root.nested_group_slices(slice_data, slice_len, nested_no_tag, &dict_token,
                                            &always_group_member,
-                                           fixpp::wire::detail::generation_token{});
+                                           fixpp::wire::detail::generation_token{}, ctx);
     (void)slices;
 
     // Second call with the SAME (slice, no_tag) key exercises the T006
     // build-once/fetch-cached path over the same adversarial content.
     auto slices_again = root.nested_group_slices(slice_data, slice_len, nested_no_tag, &dict_token,
                                                  &always_group_member,
-                                                 fixpp::wire::detail::generation_token{});
+                                                 fixpp::wire::detail::generation_token{}, ctx);
     (void)slices_again;
 
     return 0;

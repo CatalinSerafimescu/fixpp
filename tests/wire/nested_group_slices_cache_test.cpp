@@ -58,7 +58,10 @@ std::vector<std::byte> make_raw_frame(std::string const& body) {
 
 // Same shape as group_slice_trailing_soh_test.cpp's dict_group_member — the
 // test's own copy of the group_member_fn_t Parser would otherwise capture.
-bool dict_group_member(void const* d, std::uint16_t no_tag, std::uint16_t tag) noexcept {
+// 063 T003: widened with an ignored `group_context const&` param (Phase 2
+// seam — context carried-but-unused).
+bool dict_group_member(void const* d, fixpp::wire::group_context const& /*ctx*/,
+                       std::uint16_t no_tag, std::uint16_t tag) noexcept {
     auto const* dict = static_cast<fixpp::dict::table_view const*>(d);
     for (auto const member_tag : dict->group_member_tags(no_tag)) {
         if (member_tag == tag) {
@@ -71,9 +74,13 @@ bool dict_group_member(void const* d, std::uint16_t no_tag, std::uint16_t tag) n
 // Trivial group-member predicate for the null-slice test, which needs no
 // real dictionary membership semantics (nested_group_slices returns before
 // touching the dict at all on the null-slice path).
-bool always_group_member(void const*, std::uint16_t, std::uint16_t) noexcept {
+bool always_group_member(void const*, fixpp::wire::group_context const&, std::uint16_t,
+                         std::uint16_t) noexcept {
     return true;
 }
+
+// 063 T008: the new context arg — carried but unused in Phase 2.
+fixpp::wire::group_context const kTestCtx{.msg_type = "D"};
 
 }  // namespace
 
@@ -93,7 +100,7 @@ TEST(NestedGroupSlicesCache, NullSliceDataReturnsEmptySpan) {
                                      // reaches dict-aware code.
     int dict_token = 0;
     auto slices = root.nested_group_slices(nullptr, 0, /*nested_no_tag=*/802, &dict_token,
-                                           &always_group_member, fv->token());
+                                           &always_group_member, fv->token(), kTestCtx);
     EXPECT_TRUE(slices.empty());
 }
 
@@ -153,7 +160,7 @@ TEST(NestedGroupSlicesCache, DifferentSliceContinuesThenSameSliceReusesSubTable)
     // (sliceA, 802): first request — builds + caches a sub-table over
     // sliceA. Cache is empty, so the loop body never executes at all yet.
     auto a802 = root.nested_group_slices(sliceA.data, sliceA.len, /*nested_no_tag=*/802, &dict,
-                                         &dict_group_member, fv->token());
+                                         &dict_group_member, fv->token(), kTestCtx);
     ASSERT_EQ(a802.size(), 1U);
     auto a523 = fixpp::wire::get({a802[0].data, a802[0].len}, /*tag=*/523, fv->token());
     ASSERT_TRUE(a523.has_value());
@@ -165,7 +172,7 @@ TEST(NestedGroupSlicesCache, DifferentSliceContinuesThenSameSliceReusesSubTable)
     // (offset_table.cpp:576-577) before falling through to build a fresh
     // sub-table for sliceB.
     auto b802 = root.nested_group_slices(sliceB.data, sliceB.len, /*nested_no_tag=*/802, &dict,
-                                         &dict_group_member, fv->token());
+                                         &dict_group_member, fv->token(), kTestCtx);
     ASSERT_EQ(b802.size(), 1U);
     auto b523 = fixpp::wire::get({b802[0].data, b802[0].len}, /*tag=*/523, fv->token());
     ASSERT_TRUE(b523.has_value());
@@ -180,7 +187,7 @@ TEST(NestedGroupSlicesCache, DifferentSliceContinuesThenSameSliceReusesSubTable)
     // sub-OffsetTable over sliceA indexes every nested group in that
     // slice).
     auto a900 = root.nested_group_slices(sliceA.data, sliceA.len, /*nested_no_tag=*/900, &dict,
-                                         &dict_group_member, fv->token());
+                                         &dict_group_member, fv->token(), kTestCtx);
     ASSERT_EQ(a900.size(), 1U);
     auto a901 = fixpp::wire::get({a900[0].data, a900[0].len}, /*tag=*/901, fv->token());
     ASSERT_TRUE(a901.has_value());
@@ -266,7 +273,7 @@ TEST(NestedGroupSlicesCache, BuildNestedSubviewAllocFailureDegradesToEmpty) {
     auto outer = root.group_slices(453);
     ASSERT_EQ(outer.size(), 1U);
     auto inner = root.nested_group_slices(outer[0].data, outer[0].len, /*nested_no_tag=*/802,
-                                          &dict, &dict_group_member, fv->token());
+                                          &dict, &dict_group_member, fv->token(), kTestCtx);
     EXPECT_TRUE(inner.empty()) << "build_nested_subview's object allocation failing must "
                                   "degrade to an empty span (offset_table.cpp:548-550)";
 }
@@ -328,7 +335,7 @@ TEST(NestedGroupSlicesCache, CacheInsertAllocFailureServesWithoutCaching) {
 
         auto inner1 = root.nested_group_slices(outer[0].data, outer[0].len,
                                                /*nested_no_tag=*/802, &dict, &dict_group_member,
-                                               fv->token());
+                                               fv->token(), kTestCtx);
         if (inner1.size() != 1U) {
             continue;  // failure landed inside build_nested_subview itself
         }
@@ -345,7 +352,7 @@ TEST(NestedGroupSlicesCache, CacheInsertAllocFailureServesWithoutCaching) {
         auto const calls_after_first = mr.allocate_calls();
         auto inner2 = root.nested_group_slices(outer[0].data, outer[0].len,
                                                /*nested_no_tag=*/802, &dict, &dict_group_member,
-                                               fv->token());
+                                               fv->token(), kTestCtx);
         ASSERT_EQ(inner2.size(), 1U);
         auto const calls_after_second = mr.allocate_calls();
 
