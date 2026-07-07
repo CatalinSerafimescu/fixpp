@@ -31,6 +31,15 @@ set(FIXPP_DICT_TESTS
   # 063-nested-group-parse-correctness T010 [US1]: Defect-A context-scoped
   # group-membership discriminating guard (real FIX44.xml, MassQuote 295).
   dictionary_defect_a_group_context_test
+  # 063 T016 [US1]: loader-faithful reused-NumInGroup-tag census over all
+  # nine runtime XMLs (collision report + table-size report, [pin#3-report]).
+  dictionary_reused_tag_census_test
+  # 063 T017 [US1]: per-collision discriminating regression guards, driven
+  # by the T016 census, parameterized across all nine dict families.
+  dictionary_collision_membership_guards_test
+  # 063 T018 [US1]: no-alloc gate for repeated group_member_fn / context-
+  # store lookups [pin#3-noalloc].
+  dictionary_group_context_lookup_alloc_gate_test
 )
 
 foreach(target IN LISTS FIXPP_DICT_TESTS)
@@ -54,6 +63,24 @@ endforeach()
 # T028: round_trip_test directly parses XML fixtures via pugixml to build the
 # ground-truth (msg_type, tag) pair set for exact exhaustiveness comparison.
 target_link_libraries(dictionary_round_trip_test PRIVATE pugixml::pugixml)
+
+# 063 T016: the census's delimiter-variance scan (question 2) directly parses
+# the raw XML via pugixml (bounded read-only scan; see file header) — same
+# precedent as dictionary_round_trip_test above.
+target_link_libraries(dictionary_reused_tag_census_test PRIVATE pugixml::pugixml)
+
+# 063 T018: mallocnesia gate for the group-context lookup no-alloc test —
+# re-runs it under LD_PRELOAD so global malloc/calloc/realloc is intercepted
+# (dual gate alongside the in-TU global operator-new counter; absent
+# libmallocnesia.so → skipped, per feedback_tracking_pmr_resource_false_pass).
+if(EXISTS "${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so")
+  add_test(
+    NAME dictionary_group_context_lookup_alloc_gate_test_mallocnesia
+    COMMAND python3 "${CMAKE_SOURCE_DIR}/tools/check_alloc.py"
+            "--binary" "$<TARGET_FILE:dictionary_group_context_lookup_alloc_gate_test>")
+  set_tests_properties(dictionary_group_context_lookup_alloc_gate_test_mallocnesia PROPERTIES
+    LABELS "dictionary;alloc_guard;mallocnesia;063")
+endif()
 
 # ── US2 Reify tests (T028-T031) ─────────────────────────────────────────────
 # These tests include generated <vXX>/Reify.hpp (build-tree only, AC-C4).
