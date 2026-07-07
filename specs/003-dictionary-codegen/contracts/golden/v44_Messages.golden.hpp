@@ -187,7 +187,7 @@ namespace fixpp::v44::groups {  // shared repeating-group flyweights (AC-G5/AC-G
     [[nodiscard]] inline ::fixpp::wire::group_view<G_804>
     nested_party_sub_i_ds() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 804, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 804, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
       return ::fixpp::wire::group_view<G_804>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
@@ -229,7 +229,7 @@ namespace fixpp::v44::groups {  // shared repeating-group flyweights (AC-G5/AC-G
     [[nodiscard]] inline ::fixpp::wire::group_view<G_806>
     nested2_party_sub_i_ds() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 806, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 806, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
       return ::fixpp::wire::group_view<G_806>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
@@ -261,7 +261,7 @@ namespace fixpp::v44::groups {  // shared repeating-group flyweights (AC-G5/AC-G
     [[nodiscard]] inline ::fixpp::wire::group_view<G_756>
     nested2_party_i_ds() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 756, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 756, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
       return ::fixpp::wire::group_view<G_756>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
@@ -466,22 +466,22 @@ namespace fixpp::v44::groups {  // shared repeating-group flyweights (AC-G5/AC-G
     [[nodiscard]] inline ::fixpp::wire::group_view<G_604>
     leg_security_alt_id() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 604, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 604, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
       return ::fixpp::wire::group_view<G_604>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_683>
     leg_stipulations() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 683, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 683, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
       return ::fixpp::wire::group_view<G_683>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_539>
     nested_party_i_ds() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 539, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 539, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
       return ::fixpp::wire::group_view<G_539>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_670>
     leg_allocs() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 670, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 670, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
       return ::fixpp::wire::group_view<G_670>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
@@ -700,12 +700,12 @@ namespace fixpp::v44::groups {  // shared repeating-group flyweights (AC-G5/AC-G
     [[nodiscard]] inline ::fixpp::wire::group_view<G_457>
     underlying_security_alt_id() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 457, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 457, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
       return ::fixpp::wire::group_view<G_457>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_887>
     underlying_stips() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 887, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 887, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
       return ::fixpp::wire::group_view<G_887>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
@@ -822,7 +822,7 @@ namespace fixpp::v44::groups {  // shared repeating-group flyweights (AC-G5/AC-G
     [[nodiscard]] inline ::fixpp::wire::group_view<G_802>
     party_sub_i_ds() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 802, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 802, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
       return ::fixpp::wire::group_view<G_802>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
@@ -1231,42 +1231,42 @@ namespace fixpp::v44::groups {  // shared repeating-group flyweights (AC-G5/AC-G
     [[nodiscard]] inline ::fixpp::wire::group_view<G_454>
     security_alt_id() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 454, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 454, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
       return ::fixpp::wire::group_view<G_454>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_555>
     legs() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 555, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 555, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
       return ::fixpp::wire::group_view<G_555>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_864>
     events() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 864, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 864, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
       return ::fixpp::wire::group_view<G_864>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_870>
     instr_attrib() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 870, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 870, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
       return ::fixpp::wire::group_view<G_870>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_232>
     stipulations() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 232, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 232, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
       return ::fixpp::wire::group_view<G_232>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_453>
     party_i_ds() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 453, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 453, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
       return ::fixpp::wire::group_view<G_453>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_711>
     underlyings() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 711, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 711, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
       return ::fixpp::wire::group_view<G_711>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_735>
     quote_qualifiers() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 735, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 735, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
       return ::fixpp::wire::group_view<G_735>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
@@ -1308,7 +1308,7 @@ namespace fixpp::v44::groups {  // shared repeating-group flyweights (AC-G5/AC-G
     [[nodiscard]] inline ::fixpp::wire::group_view<G_952>
     nested3_party_sub_i_ds() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 952, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 952, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
       return ::fixpp::wire::group_view<G_952>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
@@ -1350,7 +1350,7 @@ namespace fixpp::v44::groups {  // shared repeating-group flyweights (AC-G5/AC-G
     [[nodiscard]] inline ::fixpp::wire::group_view<G_801>
     settl_party_sub_i_ds() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 801, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 801, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
       return ::fixpp::wire::group_view<G_801>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
@@ -1372,7 +1372,7 @@ namespace fixpp::v44::groups {  // shared repeating-group flyweights (AC-G5/AC-G
     [[nodiscard]] inline ::fixpp::wire::group_view<G_781>
     settl_party_i_ds() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 781, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 781, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
       return ::fixpp::wire::group_view<G_781>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
@@ -1508,32 +1508,32 @@ namespace fixpp::v44::groups {  // shared repeating-group flyweights (AC-G5/AC-G
     [[nodiscard]] inline ::fixpp::wire::group_view<G_948>
     nested3_party_i_ds() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 948, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 948, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
       return ::fixpp::wire::group_view<G_948>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_756>
     nested2_party_i_ds() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 756, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 756, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
       return ::fixpp::wire::group_view<G_756>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_85>
     dlvy_inst() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 85, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 85, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
       return ::fixpp::wire::group_view<G_85>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_136>
     misc_fees() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 136, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 136, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
       return ::fixpp::wire::group_view<G_136>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_539>
     nested_party_i_ds() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 539, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 539, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
       return ::fixpp::wire::group_view<G_539>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_576>
     clearing_instructions() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 576, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 576, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
       return ::fixpp::wire::group_view<G_576>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
@@ -1822,32 +1822,32 @@ namespace fixpp::v44::groups {  // shared repeating-group flyweights (AC-G5/AC-G
     [[nodiscard]] inline ::fixpp::wire::group_view<G_78>
     allocs() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 78, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 78, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
       return ::fixpp::wire::group_view<G_78>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_136>
     misc_fees() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 136, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 136, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
       return ::fixpp::wire::group_view<G_136>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_232>
     stipulations() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 232, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 232, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
       return ::fixpp::wire::group_view<G_232>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_453>
     party_i_ds() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 453, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 453, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
       return ::fixpp::wire::group_view<G_453>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_518>
     cont_amts() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 518, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 518, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
       return ::fixpp::wire::group_view<G_518>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_576>
     clearing_instructions() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 576, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 576, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
       return ::fixpp::wire::group_view<G_576>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
@@ -2388,42 +2388,42 @@ namespace fixpp::v44::groups {  // shared repeating-group flyweights (AC-G5/AC-G
     [[nodiscard]] inline ::fixpp::wire::group_view<G_756>
     nested2_party_i_ds() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 756, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 756, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
       return ::fixpp::wire::group_view<G_756>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_78>
     allocs() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 78, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 78, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
       return ::fixpp::wire::group_view<G_78>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_232>
     stipulations() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 232, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 232, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
       return ::fixpp::wire::group_view<G_232>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_386>
     trading_sessions() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 386, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 386, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
       return ::fixpp::wire::group_view<G_386>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_453>
     party_i_ds() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 453, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 453, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
       return ::fixpp::wire::group_view<G_453>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_454>
     security_alt_id() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 454, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 454, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
       return ::fixpp::wire::group_view<G_454>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_711>
     underlyings() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 711, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 711, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
       return ::fixpp::wire::group_view<G_711>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_864>
     events() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 864, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 864, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
       return ::fixpp::wire::group_view<G_864>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
@@ -2474,7 +2474,7 @@ namespace fixpp::v44::groups {  // shared repeating-group flyweights (AC-G5/AC-G
     [[nodiscard]] inline ::fixpp::wire::group_view<G_539>
     nested_party_i_ds() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 539, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 539, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
       return ::fixpp::wire::group_view<G_539>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
@@ -2671,12 +2671,12 @@ namespace fixpp::v44::groups {  // shared repeating-group flyweights (AC-G5/AC-G
     [[nodiscard]] inline ::fixpp::wire::group_view<G_85>
     dlvy_inst() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 85, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 85, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
       return ::fixpp::wire::group_view<G_85>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_453>
     party_i_ds() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 453, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 453, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
       return ::fixpp::wire::group_view<G_453>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
@@ -2959,22 +2959,22 @@ namespace fixpp::v44::groups {  // shared repeating-group flyweights (AC-G5/AC-G
     [[nodiscard]] inline ::fixpp::wire::group_view<G_454>
     security_alt_id() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 454, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 454, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
       return ::fixpp::wire::group_view<G_454>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_555>
     legs() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 555, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 555, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
       return ::fixpp::wire::group_view<G_555>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_711>
     underlyings() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 711, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 711, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
       return ::fixpp::wire::group_view<G_711>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_864>
     events() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 864, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 864, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
       return ::fixpp::wire::group_view<G_864>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
@@ -3250,22 +3250,22 @@ namespace fixpp::v44::groups {  // shared repeating-group flyweights (AC-G5/AC-G
     [[nodiscard]] inline ::fixpp::wire::group_view<G_454>
     security_alt_id() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 454, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 454, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
       return ::fixpp::wire::group_view<G_454>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_555>
     legs() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 555, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 555, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
       return ::fixpp::wire::group_view<G_555>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_711>
     underlyings() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 711, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 711, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
       return ::fixpp::wire::group_view<G_711>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_864>
     events() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 864, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 864, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
       return ::fixpp::wire::group_view<G_864>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
@@ -3440,17 +3440,17 @@ namespace fixpp::v44::groups {  // shared repeating-group flyweights (AC-G5/AC-G
     [[nodiscard]] inline ::fixpp::wire::group_view<G_295>
     quote_entries() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 295, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 295, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
       return ::fixpp::wire::group_view<G_295>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_457>
     underlying_security_alt_id() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 457, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 457, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
       return ::fixpp::wire::group_view<G_457>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_887>
     underlying_stips() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 887, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 887, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
       return ::fixpp::wire::group_view<G_887>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
@@ -3719,12 +3719,12 @@ namespace fixpp::v44::groups {  // shared repeating-group flyweights (AC-G5/AC-G
     [[nodiscard]] inline ::fixpp::wire::group_view<G_454>
     security_alt_id() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 454, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 454, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
       return ::fixpp::wire::group_view<G_454>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_864>
     events() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 864, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 864, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
       return ::fixpp::wire::group_view<G_864>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
@@ -3761,7 +3761,7 @@ namespace fixpp::v44::groups {  // shared repeating-group flyweights (AC-G5/AC-G
     [[nodiscard]] inline ::fixpp::wire::group_view<G_539>
     nested_party_i_ds() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 539, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen);
+      auto const nested = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 539, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
       return ::fixpp::wire::group_view<G_539>{nested, ctx_}; }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]

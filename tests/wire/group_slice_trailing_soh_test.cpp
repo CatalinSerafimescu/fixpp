@@ -55,7 +55,11 @@ std::vector<std::byte> make_raw_frame(std::string const& body) {
 // group_member_fn_ are private on MessageView/Parser; the test drives
 // `dict` directly instead, which is exactly the pointer Parser would have
 // captured).
-bool dict_group_member(void const* d, std::uint16_t no_tag, std::uint16_t tag) noexcept {
+// 063 T003: widened with an ignored `group_context const&` param to match the
+// widened group_member_fn_t (Phase 2 seam — context carried-but-unused; the
+// store stays bare-no_tag-keyed until US1).
+bool dict_group_member(void const* d, fixpp::wire::group_context const& /*ctx*/,
+                       std::uint16_t no_tag, std::uint16_t tag) noexcept {
     auto const* dict = static_cast<fixpp::dict::table_view const*>(d);
     for (auto const member_tag : dict->group_member_tags(no_tag)) {
         if (member_tag == tag) {
@@ -173,8 +177,12 @@ TEST(GroupSliceTrailingSoh, NestedSliceBuildCountedLastField) {
 
     // Drive the T005/T006 seam through the PUBLIC nested_group_slices() API
     // on the ROOT OffsetTable, over this outer occurrence's slice.
+    // 063 T008: the new context arg — carried but unused in Phase 2 (the
+    // predicate ignores it); a plausible root context is enough.
+    fixpp::wire::group_context const test_ctx{.msg_type = "D"};
     auto inner_slices = mv->offsets().nested_group_slices(
-        outer0.data, outer0.len, /*nested_no_tag=*/802, &dict, &dict_group_member, fv->token());
+        outer0.data, outer0.len, /*nested_no_tag=*/802, &dict, &dict_group_member, fv->token(),
+        test_ctx);
     ASSERT_EQ(inner_slices.size(), 1U)
         << "nested sub-view build over a counted-last-field, frame-tail entry must succeed";
 
@@ -187,7 +195,7 @@ TEST(GroupSliceTrailingSoh, NestedSliceBuildCountedLastField) {
     // A second call with the SAME (slice, no_tag) key must be served from
     // the cache and return the same content (build-once / fetch-cached).
     auto inner_slices_again = mv->offsets().nested_group_slices(
-        outer0.data, outer0.len, 802, &dict, &dict_group_member, fv->token());
+        outer0.data, outer0.len, 802, &dict, &dict_group_member, fv->token(), test_ctx);
     ASSERT_EQ(inner_slices_again.size(), 1U);
     EXPECT_EQ(inner_slices_again[0].data, inner0.data);
     EXPECT_EQ(inner_slices_again[0].len, inner0.len);

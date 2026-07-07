@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// tests/codegen/nested_group_read_test.cpp — 062 T015/T018 [US2]
+// tests/codegen/nested_group_read_test.cpp — 062 T015/T018 [US2] + 063 T026/T027 [US3]
 //
 // US2 AC1 / FR-002 / INV-G3 / INV-G7 / SC-001: typed reads through the
 // GENERATED nested-group descent chain (MassQuote `NoQuoteSets(296) ->
@@ -19,11 +19,17 @@
 // component definitions, so these witnesses prove the 062 slicer/cache
 // mechanism (`OffsetTable::nested_group_slices`, T005/T006/T016) over
 // GENERATED flyweights (`fixpp::v44::MassQuote`); the real-XML-dictionary
-// path for MassQuote is L-062-* limited pending 063.
+// path for MassQuote **was** L-062-* limited pending 063 — **RESOLVED**: see
+// `spec/behaviors-and-limitations.md` L-062-1/L-062-2 (marked resolved,
+// commits `0caafd23`/`88ad2763`) and the net-new
+// `RealDictionaryMassQuoteTwoQuoteEntriesPerInstancePrices` witness at the
+// end of this file (063 T027), which proves the real-dictionary path
+// end-to-end.
 //
-// ESCALATED (out of scope for 062, see final TEST below):
-// `NestedQuoteEntriesPerInstancePrices` (>=2 QuoteEntries within ONE
-// QuoteSet occurrence) cannot be made to pass without a change to
+// ESCALATED under 062 (out of scope for 062 at the time; see the retained
+// paragraph below for the original root-cause analysis) — **RESOLVED under
+// 063 T026**: `NestedQuoteEntriesPerInstancePrices` (>=2 QuoteEntries within
+// ONE QuoteSet occurrence) cannot be made to pass without a change to
 // PRE-EXISTING `OffsetTable::group()` (src/wire/offset_table.cpp — present
 // unmodified on `main`, confirmed via `git show main:src/wire/
 // offset_table.cpp | grep seen_in_instance` and `git log main..HEAD --
@@ -43,8 +49,9 @@
 // expose (US2 is the first caller to descend a nested group with >1 entry
 // via this exact codepath); fixing `OffsetTable::group()` is a production
 // wire-layer change outside 062's T015/T018 (test-only, no production
-// source) scope. See the trailing TEST (GTEST_SKIP, not a fake pass) for
-// the frame bytes / expected-vs-actual proof.
+// source) scope — 063's Defect-B fix (`consume_group_extent`,
+// src/wire/offset_table.cpp) makes it pass; the test's `GTEST_SKIP()` was
+// removed and it is now un-skipped and green (063 T026).
 //
 // Test-only: no production/codegen/dictionary source is modified by this
 // file.
@@ -55,9 +62,12 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <fixpp/core/decimal_alias.hpp>
 #include <fixpp/core/error.hpp>
+#include <fixpp/dict/dictionary.hpp>
 #include <fixpp/dict/table_view.hpp>
+#include <fixpp/dict/xml_loader.hpp>
 #include <fixpp/v44/Messages.hpp>
 #include <fixpp/wire/parser.hpp>
 #include <memory_resource>
@@ -216,6 +226,138 @@ TEST(NestedGroupRead, Depth3NonFirstOuterOccurrenceNoCollision) {
     EXPECT_EQ(*sec1, "LEGB");
 }
 
+// 063 Phase 4 (US2 Defect B) — depth-3 AC3: multiple entries at MORE THAN ONE
+// level simultaneously (no cross-level truncation). QuoteSets[0] has ONE
+// QuoteEntry holding TWO Legs (multi-entry at the DEEPEST level, 555);
+// QuoteSets[1] has TWO QuoteEntries, each holding ONE Leg (multi-entry at the
+// MIDDLE level, 295). Every level's entry count and every entry's own fields
+// are asserted, so a walk that truncates ANY one nested extent (at either
+// level, in either QuoteSet) fails a concrete assertion below — this is the
+// exact recursion-bug exposer the advisor flagged (spec US2 AC3 / Edge Cases
+// "depth >=3/4"): the pre-063 flat walk could truncate at the first
+// repeated tag it saw, regardless of which nesting level it belonged to.
+TEST(NestedGroupRead, Depth3MultiEntryAtMultipleLevelsNoCrossLevelTruncation) {
+    std::string body =
+        "35=i\x01"
+        "296=2\x01"
+        // QuoteSets[0]: 1 QuoteEntry, that entry holds 2 Legs.
+        "302=SET0\x01"
+        "295=1\x01"
+        "299=E00\x01"
+        "132=10.10\x01"
+        "133=10.20\x01"
+        "555=2\x01"
+        "602=LEG000\x01"
+        "602=LEG001\x01"
+        // QuoteSets[1]: 2 QuoteEntries, each holding 1 Leg.
+        "302=SET1\x01"
+        "295=2\x01"
+        "299=E10\x01"
+        "132=20.10\x01"
+        "133=20.20\x01"
+        "555=1\x01"
+        "602=LEG100\x01"
+        "299=E11\x01"
+        "132=21.10\x01"
+        "133=21.20\x01"
+        "555=1\x01"
+        "602=LEG110\x01";
+
+    std::pmr::monotonic_buffer_resource arena{16384};
+    auto dict = make_correct_massquote_dict();
+
+    auto buf = make_frame(body);
+    fixpp::wire::pmr_carry_buffer carry{buf.size(), &arena};
+    fixpp::wire::Framer fr{};
+    fixpp::wire::frame_view fvs[1]{};
+    auto framed = fr.feed(
+        std::span<const std::byte>{buf.data(), buf.size()}, carry,
+        std::span<fixpp::wire::frame_view>{fvs, 1});
+    ASSERT_TRUE(framed.has_value());
+    ASSERT_FALSE(framed->empty());
+
+    fixpp::wire::Parser<fixpp::wire::access_mode::Index> parser{dict};
+    auto mv_exp = parser.parse((*framed)[0], &arena);
+    ASSERT_TRUE(mv_exp.has_value());
+
+    fixpp::v44::MassQuote mq{*mv_exp};
+    auto sets = mq.quote_sets();
+    ASSERT_EQ(sets.size(), 2U) << "level 1 (296): both QuoteSets present";
+
+    // QuoteSets[0]: 1 QuoteEntry x 2 Legs.
+    auto set0 = sets[0];
+    auto set0_id = set0.quote_set_id();
+    ASSERT_TRUE(set0_id.has_value());
+    EXPECT_EQ(*set0_id, "SET0");
+
+    auto set0_entries = set0.quote_entries();
+    ASSERT_EQ(set0_entries.size(), 1U) << "level 2 (295) under QuoteSets[0]: exactly 1 entry";
+    auto set0_entry0 = set0_entries[0];
+    auto s0e0_id = set0_entry0.quote_entry_id();
+    ASSERT_TRUE(s0e0_id.has_value());
+    EXPECT_EQ(*s0e0_id, "E00");
+    auto s0e0_bid = set0_entry0.bid_px(&arena);
+    ASSERT_TRUE(s0e0_bid.has_value());
+    EXPECT_EQ(*s0e0_bid, parse_decimal("10.10", &arena));
+    auto s0e0_offer = set0_entry0.offer_px(&arena);
+    ASSERT_TRUE(s0e0_offer.has_value());
+    EXPECT_EQ(*s0e0_offer, parse_decimal("10.20", &arena));
+
+    auto set0_legs = set0_entry0.legs();
+    ASSERT_EQ(set0_legs.size(), 2U)
+        << "level 3 (555) under QuoteSets[0].quote_entries()[0]: BOTH legs present — "
+           "no truncation at the deepest level";
+    auto s0_leg_entry0 = set0_legs[0];
+    auto s0_leg0 = s0_leg_entry0.leg_security_id();
+    ASSERT_TRUE(s0_leg0.has_value());
+    EXPECT_EQ(*s0_leg0, "LEG000");
+    auto s0_leg_entry1 = set0_legs[1];
+    auto s0_leg1 = s0_leg_entry1.leg_security_id();
+    ASSERT_TRUE(s0_leg1.has_value());
+    EXPECT_EQ(*s0_leg1, "LEG001");
+
+    // QuoteSets[1]: 2 QuoteEntries x 1 Leg each.
+    auto set1 = sets[1];
+    auto set1_id = set1.quote_set_id();
+    ASSERT_TRUE(set1_id.has_value());
+    EXPECT_EQ(*set1_id, "SET1");
+
+    auto set1_entries = set1.quote_entries();
+    ASSERT_EQ(set1_entries.size(), 2U)
+        << "level 2 (295) under QuoteSets[1]: BOTH entries present — no truncation "
+           "at the middle level, and no bleed from QuoteSets[0]'s own content";
+
+    auto set1_entry0 = set1_entries[0];
+    auto s1e0_id = set1_entry0.quote_entry_id();
+    ASSERT_TRUE(s1e0_id.has_value());
+    EXPECT_EQ(*s1e0_id, "E10");
+    auto s1e0_bid = set1_entry0.bid_px(&arena);
+    ASSERT_TRUE(s1e0_bid.has_value());
+    EXPECT_EQ(*s1e0_bid, parse_decimal("20.10", &arena));
+    auto s1e0_legs = set1_entry0.legs();
+    ASSERT_EQ(s1e0_legs.size(), 1U);
+    auto s1e0_leg_entry0 = s1e0_legs[0];
+    auto s1e0_leg0 = s1e0_leg_entry0.leg_security_id();
+    ASSERT_TRUE(s1e0_leg0.has_value());
+    EXPECT_EQ(*s1e0_leg0, "LEG100");
+
+    auto set1_entry1 = set1_entries[1];
+    auto s1e1_id = set1_entry1.quote_entry_id();
+    ASSERT_TRUE(s1e1_id.has_value());
+    EXPECT_EQ(*s1e1_id, "E11");
+    auto s1e1_bid = set1_entry1.bid_px(&arena);
+    ASSERT_TRUE(s1e1_bid.has_value());
+    EXPECT_EQ(*s1e1_bid, parse_decimal("21.10", &arena));
+    auto s1e1_legs = set1_entry1.legs();
+    ASSERT_EQ(s1e1_legs.size(), 1U)
+        << "QuoteSets[1].quote_entries()[1] (the LAST entry at the middle level) must "
+           "keep its own distinct Leg, not the sibling entry[0]'s";
+    auto s1e1_leg_entry0 = s1e1_legs[0];
+    auto s1e1_leg0 = s1e1_leg_entry0.leg_security_id();
+    ASSERT_TRUE(s1e1_leg0.has_value());
+    EXPECT_EQ(*s1e1_leg0, "LEG110");
+}
+
 // INV-G7 — dict-aware nested-slicer discriminator. One QuoteSet, one
 // QuoteEntry, and a QuoteSet-level scalar field QuoteSetValidUntilTime(367)
 // placed AFTER the nested NoQuoteEntries(295) group in WIRE order (367 is
@@ -300,68 +442,28 @@ TEST(NestedGroupRead, NonLastNestedGroupTrailingFieldNotSwallowed) {
     EXPECT_EQ(swallowed.error(), fixpp::core::error::wire_required_field_missing);
 }
 
-// ESCALATED — NOT a fake pass. US2 AC1 / FR-002 / SC-001 originally called
-// for this case to assert per-instance DISTINCT BidPx/OfferPx across TWO
-// QuoteEntries nested within a SINGLE QuoteSet occurrence. Empirically
-// (verified via a standalone OffsetTable-level probe reproducing the exact
-// production callpath `MessageView::group<296,G_296>()` ->
-// `OffsetTable::group_slices(296)`, parser.hpp:248-273), this frame layout
-// cannot be made to parse correctly through the CURRENT, unmodified
-// `OffsetTable::group()` (src/wire/offset_table.cpp, present on `main`
-// unchanged — confirmed via `git show main:src/wire/offset_table.cpp | grep
-// seen_in_instance` and `git log main..HEAD -- src/wire/offset_table.cpp`,
-// which shows 062 only ADDED build_nested_subview()/nested_group_slices(),
-// never touched group()).
-//
-// Root cause: group()'s per-top-level-occurrence boundary walk
-// (offset_table.cpp:~412-438) uses a "has this tag already appeared since
-// the last delimiter" heuristic (`seen_in_instance`) with no notion of
-// nesting depth. For the outer QuoteSet's byte-span to extend far enough to
-// cover a nested QuoteEntry's fields at all, 299/132/133 MUST be registered
-// as transitive members of group 296 (confirmed empirically: omitting them
-// truncates the outer slice immediately after "295=2", inner group entirely
-// empty). But once registered, a SECOND occurrence of 299 (E1's QuoteEntryID
-// — legitimate, since QuoteSet[0] here has 2 QuoteEntries) is
-// indistinguishable, at the flat top-level scan, from "this tag repeated
-// without the outer delimiter (302) reappearing" — group() takes it as a
-// signal to stop the current instance, one nested entry early.
+// 063 Phase 5 (US3 / T026, SC-001a) — UN-SKIPPED. This is the same hand-built
+// `make_correct_massquote_dict()` witness that was escalated under 062 as
+// `GTEST_SKIP()`'d (see the file-header comment for the original root-cause
+// analysis, retained unchanged for history). 063 US2 (Defect B) replaced the
+// flat `seen_in_instance` walk in `OffsetTable::group()`
+// (src/wire/offset_table.cpp) with a nesting-aware, depth-bounded extent
+// walk (`consume_group_extent`) that correctly consumes a nested group's
+// full declared-count extent (here 295=2) before resuming the outer
+// boundary scan — so the outer QuoteSet[0] slice now covers BOTH nested
+// QuoteEntries, and this hand-built-dict witness (Defect B proven in
+// isolation, membership declared explicitly rather than sourced from the
+// real loader) goes GREEN unchanged.
 //
 // Frame (this test's `body`):
 //   35=i, 296=1, 302=SET0, 295=2,
 //   299=E0, 132=10.10, 133=10.20,
 //   299=E1, 132=20.10, 133=20.20
 //
-// Expected: quote_sets()[0].quote_entries().size() == 2, with entries[0]
-// reading BidPx=10.10/OfferPx=10.20 and entries[1] reading
+// Expected (now delivered): quote_sets()[0].quote_entries().size() == 2,
+// with entries[0] reading BidPx=10.10/OfferPx=10.20 and entries[1] reading
 // BidPx=20.10/OfferPx=20.20.
-//
-// Actual (probed against the exact production callpath, hand-built dict
-// with the transitive membership required for the boundary walk to extend
-// past the nested group's own count field at all): group_slices(296)
-// returns ONE outer slice truncated to
-// "302=SET0\x01295=2\x01299=E0\x01132=10.10\x01133=10.20" (entry_count()==5)
-// — ending right after E0's OfferPx, BEFORE E1's QuoteEntryID(299). The
-// nested sub-view build for 295 over this truncated slice therefore finds
-// only ONE QuoteEntry (E0); `quote_entries().size() == 1`, not 2.
-//
-// This is a genuine PRE-EXISTING wire-layer limitation that 062 US2 is the
-// first feature to expose (the first caller to descend a nested group with
-// >1 entry through this exact codepath); fixing `OffsetTable::group()` is a
-// production wire-layer change outside T015/T018's test-only scope (062's
-// brief: "do NOT modify production/codegen/dictionary source"). Escalated
-// to the orchestrator rather than worked around; NOT marked passing.
 TEST(NestedGroupRead, NestedQuoteEntriesPerInstancePrices) {
-    GTEST_SKIP() << "ESCALATED: pre-existing OffsetTable::group() "
-                    "seen_in_instance heuristic (src/wire/offset_table.cpp) "
-                    "truncates a QuoteSet occurrence's byte span at the "
-                    "SECOND nested QuoteEntry (repeated QuoteEntryID(299) "
-                    "tag looks like a new top-level instance at the flat "
-                    "scan level). Confirmed present unmodified on `main`; "
-                    "out of scope for 062 (test-only, no production source "
-                    "changes permitted). See the file-header comment and "
-                    "this test's own comment block for frame bytes / "
-                    "expected-vs-actual / root-cause location.";
-
     std::string body =
         "35=i\x01"
         "296=1\x01"
@@ -414,4 +516,175 @@ TEST(NestedGroupRead, NestedQuoteEntriesPerInstancePrices) {
     auto offer1 = e1.offer_px(&arena);
     ASSERT_TRUE(offer1.has_value()) << "entries[1].offer_px() must have value";
     EXPECT_EQ(*offer1, parse_decimal("20.20", &arena));
+}
+
+// 063 Phase 5 (US3 / T027, SC-001b / contract C-3) — the headline end-to-end
+// acceptance witness: real `FIX44.xml`, loaded via the shipped
+// `fixpp::dict::XmlLoader`, projected through `Dictionary::as_table_view()`
+// (NOT a hand-built `table_view` — every other witness in this file declares
+// membership explicitly to isolate Defect B; this one sources membership
+// from the actual dictionary, so it also exercises Defect A's fix: FIX44's
+// tag 295 is REUSED between `QuotCxlEntriesGrp` and MassQuote's
+// `QuotEntryGrp`, and only the context-scoped registration
+// (`Dictionary::as_table_view()` + `group_context`) resolves it to the
+// correct variant for MassQuote). Same frame shape as the T026 witness above
+// (QuoteSet[0] holding two QuoteEntries with distinct prices), so a
+// regression in EITHER defect's fix — wrong 295 membership (Defect A) or a
+// truncated outer extent (Defect B) — fails a concrete assertion below:
+//   - wrong membership (Defect A regression) would resolve 295 to
+//     QuotCxlEntriesGrp, which carries none of 299/132/133 directly, so the
+//     generated accessors would read absent/wrong-typed;
+//   - a truncated extent (Defect B regression) would report
+//     `quote_entries().size() == 1`, not 2.
+//
+// Run under both the debug preset and ASan (per the phase-5 brief): the
+// `group_context::msg_type` is a `string_view` aliasing the parsed message's
+// wire buffer (data-model.md:28) and must outlive every nested entry read
+// below — a dangling-view lifetime bug here would be invisible in a plain
+// debug build but would fault under ASan.
+TEST(NestedGroupRead, RealDictionaryMassQuoteTwoQuoteEntriesPerInstancePrices) {
+    std::string body =
+        "35=i\x01"
+        "296=1\x01"
+        "302=SET0\x01"
+        "295=2\x01"
+        "299=E0\x01"
+        "132=10.10\x01"
+        "133=10.20\x01"
+        "299=E1\x01"
+        "132=20.10\x01"
+        "133=20.20\x01";
+
+    std::pmr::monotonic_buffer_resource arena{16384};
+
+    auto const dict_path = std::filesystem::path{FIXPP_DICT_DATA_DIR} / "FIX44.xml";
+    fixpp::dict::XmlLoader loader;
+    auto dict = loader.load(dict_path, &arena);
+    auto tv = dict.as_table_view();
+
+    auto buf = make_frame(body);
+    fixpp::wire::pmr_carry_buffer carry{buf.size(), &arena};
+    fixpp::wire::Framer fr{};
+    fixpp::wire::frame_view fvs[1]{};
+    auto framed = fr.feed(
+        std::span<const std::byte>{buf.data(), buf.size()}, carry,
+        std::span<fixpp::wire::frame_view>{fvs, 1});
+    ASSERT_TRUE(framed.has_value());
+    ASSERT_FALSE(framed->empty());
+
+    fixpp::wire::Parser<fixpp::wire::access_mode::Index> parser{tv};
+    auto mv_exp = parser.parse((*framed)[0], &arena);
+    ASSERT_TRUE(mv_exp.has_value());
+
+    fixpp::v44::MassQuote mq{*mv_exp};
+    auto sets = mq.quote_sets();
+    ASSERT_EQ(sets.size(), 1U);
+
+    auto quote_set0 = sets[0];
+    auto entries = quote_set0.quote_entries();
+    ASSERT_EQ(entries.size(), 2U)
+        << "real-dictionary Defect A+B end-to-end: QuoteSet[0] must report BOTH "
+           "nested QuoteEntries (295 resolved to MassQuote's QuotEntryGrp, and the "
+           "outer extent must cover both entries' bytes)";
+
+    auto e0 = entries[0];
+    auto id0 = e0.quote_entry_id();
+    ASSERT_TRUE(id0.has_value()) << "entries[0].quote_entry_id() must have value";
+    EXPECT_EQ(*id0, "E0");
+    auto bid0 = e0.bid_px(&arena);
+    ASSERT_TRUE(bid0.has_value()) << "entries[0].bid_px() must have value";
+    EXPECT_EQ(*bid0, parse_decimal("10.10", &arena));
+    auto offer0 = e0.offer_px(&arena);
+    ASSERT_TRUE(offer0.has_value()) << "entries[0].offer_px() must have value";
+    EXPECT_EQ(*offer0, parse_decimal("10.20", &arena));
+
+    auto e1 = entries[1];
+    auto id1 = e1.quote_entry_id();
+    ASSERT_TRUE(id1.has_value()) << "entries[1].quote_entry_id() must have value";
+    EXPECT_EQ(*id1, "E1");
+    auto bid1 = e1.bid_px(&arena);
+    ASSERT_TRUE(bid1.has_value()) << "entries[1].bid_px() must have value";
+    EXPECT_EQ(*bid1, parse_decimal("20.10", &arena));
+    auto offer1 = e1.offer_px(&arena);
+    ASSERT_TRUE(offer1.has_value()) << "entries[1].offer_px() must have value";
+    EXPECT_EQ(*offer1, parse_decimal("20.20", &arena));
+}
+
+// Gate B PR#176 r1, fix queue item 1(i): cache-poison counter-test. Real
+// FIX44.xml top-level tag 296 (NoQuoteSets) collides between MassQuote's
+// QuotSetGrp (members incl. QuoteSetValidUntilTime(367), declared SECOND in
+// FIX44.xml:3350) and MassQuoteAcknowledgement's QuotSetAckGrp (no 367,
+// declared FIRST, FIX44.xml:3341) — so the legacy bare/global-first-seen
+// store resolves 296 to the Ack member set. Before the root-context ctor
+// seed (parser.hpp dict-aware MessageView ctors), a RAW
+// `offsets().group_slices(296)` call — issued before any typed group<>()
+// seeds the context — ran under the empty `{msg_type=""}` context, missed
+// the context-scoped store, fell back to bare/Ack membership, and truncated
+// the QuoteSet extent before 367. Because `group_slices()` caches by no_tag
+// ONLY (offset_table.cpp), that wrong/truncated slice was then also served,
+// stale, to the CORRECTLY-seeded typed `mv.group<296,...>()` call that
+// followed — poisoning the very path 063 claims to have fixed.
+//
+// Mutation-proven: reverting the ctor seed in parser.hpp (both dict-aware
+// MessageView ctors) makes BOTH assertions below fail — the raw slice omits
+// 367 (`raw_sv.find("367=")` == npos) AND the typed accessor loses it
+// (cache-poisoned by the raw call).
+TEST(NestedGroupRead, RealDictionaryMassQuote296RootContextSeededAtCtorNoCachePoison) {
+    std::string body =
+        "35=i\x01"
+        "117=Q1\x01"
+        "296=1\x01"
+        "302=SET0\x01"
+        "367=20260101-00:00:00\x01"
+        "304=1\x01"
+        "295=1\x01"
+        "299=E0\x01"
+        "132=10.10\x01"
+        "133=10.20\x01";
+
+    std::pmr::monotonic_buffer_resource arena{16384};
+
+    auto const dict_path = std::filesystem::path{FIXPP_DICT_DATA_DIR} / "FIX44.xml";
+    fixpp::dict::XmlLoader loader;
+    auto dict = loader.load(dict_path, &arena);
+    auto tv = dict.as_table_view();
+
+    auto buf = make_frame(body);
+    fixpp::wire::pmr_carry_buffer carry{buf.size(), &arena};
+    fixpp::wire::Framer fr{};
+    fixpp::wire::frame_view fvs[1]{};
+    auto framed = fr.feed(
+        std::span<const std::byte>{buf.data(), buf.size()}, carry,
+        std::span<fixpp::wire::frame_view>{fvs, 1});
+    ASSERT_TRUE(framed.has_value());
+    ASSERT_FALSE(framed->empty());
+
+    fixpp::wire::Parser<fixpp::wire::access_mode::Index> parser{tv};
+    auto mv_exp = parser.parse((*framed)[0], &arena);
+    ASSERT_TRUE(mv_exp.has_value());
+
+    // 1) The RAW offsets().group_slices(296) call, issued BEFORE any typed
+    //    group<>() call on this view, must already resolve the full
+    //    QuotSetGrp membership (incl. 367) — proving the ROOT context is
+    //    seeded at construction, not lazily by group<>().
+    auto raw_slices = mv_exp->offsets().group_slices(296);
+    ASSERT_EQ(raw_slices.size(), 1U);
+    std::string_view const raw_sv{reinterpret_cast<char const*>(raw_slices[0].data),
+                                  raw_slices[0].len};
+    EXPECT_NE(raw_sv.find("367="), std::string_view::npos)
+        << "raw offsets().group_slices(296), called before any typed group<>() seed, must "
+           "resolve the full MassQuote QuotSetGrp membership (incl. 367) — got: "
+        << raw_sv;
+
+    // 2) The typed path, called AFTER the raw call above, must NOT inherit a
+    //    poisoned no_tag-keyed cache entry from it.
+    fixpp::v44::MassQuote mq{*mv_exp};
+    auto sets = mq.quote_sets();
+    ASSERT_EQ(sets.size(), 1U);
+    auto qs0 = sets[0];
+    auto vut = qs0.quote_set_valid_until_time();
+    ASSERT_TRUE(vut.has_value())
+        << "typed QuoteSet[0].quote_set_valid_until_time() (367) must resolve — cache-poisoned "
+           "by the preceding raw group_slices(296) call if absent";
+    EXPECT_EQ(*vut, "20260101-00:00:00");
 }

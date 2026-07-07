@@ -15,6 +15,7 @@
 #include <optional>
 #include <span>
 #include <string_view>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -318,23 +319,116 @@ table_view Dictionary::as_table_view() const {
             }
         }
 
-        // ── group structure ──────────────────────────────────────────────
+        // ── group structure (legacy bare-no_tag store — PRE-063 UNCHANGED) ──
+        // Dual-store amendment #1 (orchestrator-approved, commit 0caafd23):
+        // as_table_view() populates BOTH this legacy bare store AND the
+        // context-scoped store below. The bare store is REQUIRED — the frozen
+        // `Validator::group_first_field(no_tag)` pure-virtual ([const §XIV.2]
+        // 5-virtual cap) is production-wired here and must answer from a
+        // context-free store; see the DUAL-STORE INVARIANT on table_view.hpp's
+        // context accessors. This loop is byte-identical to pre-063 `main`; it
+        // feeds only the bare fallback that context-aware call sites use on a
+        // context-miss (which degrades to exactly `main`'s pre-063 resolution,
+        // not worse — L-063-3), never overriding the CONTEXT store that the
+        // parser lambda / validator query first.
         for (auto const& fr : all_fields) {
-            // NumInGroup / NUMINGROUP fields mark group count fields.
+            if (fr.type != field_data_type::NumInGroup) {
+                continue;
+            }
+            std::uint16_t const legacy_no_tag = fr.tag;
+            std::uint16_t const legacy_first = group_first_field(legacy_no_tag);
+            if (legacy_first == 0) {
+                continue;
+            }
+            tv.set_group_first(legacy_no_tag, legacy_first);
+            for (auto const& gfr : group_fields(legacy_no_tag)) {
+                tv.add_group_member(legacy_no_tag, gfr.tag);
+            }
+        }
+
+        // ── group structure (063 Defect-A: context-scoped, per-message) ───
+        // Bare no_tag-keyed `group_first_field(no_tag)`/`group_fields(no_tag)`
+        // (the Dictionary handle's OWN global, first-seen-wins accessors) are
+        // deliberately NOT used here: a NumInGroup tag reused with different
+        // membership across contexts (e.g. FIX44 295 — MassQuote's
+        // QuotEntryGrp vs QuotCxlEntriesGrp) would silently resolve to
+        // whichever variant the loader saw FIRST across the whole dictionary
+        // (Defect A). Instead, derive membership from THIS message's own
+        // per-message expansion (`all_fields = message_fields(mt)`, already
+        // fetched above): `FieldRef.group_no_tag` (field_ref.hpp:88) persists
+        // each field's IMMEDIATE enclosing group's no_tag within this
+        // specific message's expansion — a pre-dedup context that survives
+        // finalize() (data-model.md "GroupMembership", Option A).
+        //
+        // 1) immediate_parent[G] = the enclosing group of G's OWN count-tag
+        //    entry (0 = top level) — this is exactly `fr.group_no_tag` on the
+        //    FieldRef whose `.tag == G` and `.type == NumInGroup`.
+        std::unordered_map<std::uint16_t, std::uint16_t> immediate_parent;
+        for (auto const& fr : all_fields) {
+            if (fr.type == field_data_type::NumInGroup) {
+                immediate_parent[fr.tag] = fr.group_no_tag;
+            }
+        }
+        for (auto const& fr : all_fields) {
             if (fr.type != field_data_type::NumInGroup) {
                 continue;
             }
             std::uint16_t const no_tag = fr.tag;
-            std::uint16_t const first = group_first_field(no_tag);
-            if (first == 0) {
-                continue;
-            }
-            tv.set_group_first(no_tag, first);
 
-            // Project group_fields() FieldRef spans → uint16_t member tags.
-            auto const gf = group_fields(no_tag);
-            for (auto const& gfr : gf) {
-                tv.add_group_member(no_tag, gfr.tag);
+            // 2) Members of `no_tag` IN THIS MESSAGE = every FieldRef whose
+            //    immediate enclosing group is `no_tag`. This per-message set is
+            //    context-exact (the Defect-A fix) — NOT the global, deduped
+            //    `group_fields(no_tag)`. `all_fields` (message_fields) is
+            //    tag-SORTED (xml_loader.cpp), so `members` is a SET, not
+            //    declaration order; the DELIMITER is taken separately in (4).
+            std::vector<std::uint16_t> members;
+            for (auto const& m : all_fields) {
+                if (m.group_no_tag == no_tag) {
+                    members.push_back(m.tag);
+                }
+            }
+            if (members.empty()) {
+                continue;  // not a real group in this message (plain scalar reuse of the tag)
+            }
+
+            // 3) Full parent-no_tag path (outermost first, EXCLUDING no_tag
+            //    itself): walk the immediate_parent chain up from no_tag's
+            //    OWN enclosing group to the root (0). For FIX44 295 in
+            //    MassQuote: fr.group_no_tag == 296 (295's count-field's own
+            //    enclosing group), immediate_parent[296] == 0 (296 is
+            //    top-level) → path == [296].
+            std::vector<std::uint16_t> path;
+            std::uint16_t cur = fr.group_no_tag;
+            while (cur != 0) {
+                path.push_back(cur);
+                auto const pit = immediate_parent.find(cur);
+                cur = (pit != immediate_parent.end()) ? pit->second : std::uint16_t{0};
+            }
+            std::reverse(path.begin(), path.end());
+
+            // 4) Delimiter = the group's DECLARATION first field, from the
+            //    dictionary's GroupRef (group_first_field), NOT members.front():
+            //    `all_fields` is tag-sorted, so members.front() is the lowest-tag
+            //    member, not the delimiter (e.g. FIX44 NoPartyIDs(453): lowest
+            //    member PartyIDSource(447), real delimiter PartyID(448)). Using
+            //    members.front() made the validator reject valid real-dict groups.
+            //    group_first_field() is GroupRef.first_field_tag — the first
+            //    child in declaration order (xml_loader.cpp). It is global (one
+            //    GroupRef per no_tag, first-seen for reused tags), so a reused
+            //    tag with divergent per-context delimiters is an L-063-3 residual;
+            //    the per-context MEMBER SET above stays exact regardless. Fall
+            //    back to members.front() only if the dict has no GroupRef.
+            std::uint16_t const gr_delim = group_first_field(no_tag);
+            std::uint16_t const delim = gr_delim != 0 ? gr_delim : members.front();
+
+            // Register into the CONTEXT-KEYED store (in ADDITION to the
+            // legacy bare store populated above — see the escalation note
+            // there). Every context-aware consumer (parser lambda,
+            // validator.hpp) queries THIS store first, so Defect A stays
+            // fixed on those call sites regardless of the legacy loop above.
+            tv.set_group_first_ctx(mt, path, no_tag, delim);
+            for (auto const member_tag : members) {
+                tv.add_group_member_ctx(mt, path, no_tag, member_tag);
             }
         }
     }

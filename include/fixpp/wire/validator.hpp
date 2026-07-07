@@ -181,10 +181,30 @@ public:
         //   (b) the first field after the count field is the delimiter (not a
         //       different field injected before the first instance)
         // Walk the offset table entries in document order.
+        //
+        // 063 T014: this flat, non-recursive walk has no notion of nesting
+        // depth (that is Defect B / US2, out of scope here) — every lookup
+        // below queries the ROOT context (`{msg_type, path=[]}`). For
+        // top-level groups (the overwhelming majority, and every group this
+        // loop could previously validate correctly) the ROOT context is
+        // exactly how `Dictionary::as_table_view()` registers them, so
+        // behaviour is unchanged and Defect A stays fixed. A genuinely
+        // NESTED group's own no_tag is registered only under its real
+        // (non-root) parent path, so a ROOT-context query here misses; per
+        // the amended hardening invariant (table_view.hpp doc), the
+        // context-aware accessor then falls back to the LEGACY bare-`no_tag`
+        // store, which `as_table_view()` also populates (byte-identical to
+        // pre-063 `main`) — so a nested reused tag here degrades to exactly
+        // `main`'s pre-existing (Defect-A-affected) resolution, not a NEW
+        // failure mode; fixing it is Defect B / US2's nesting-aware walk.
+        // Hand-built bare-API table_view fixtures are unaffected: they never
+        // populate the context store, so the query falls straight through
+        // to the (unchanged) legacy bare-`no_tag` lookup.
         auto const ents = msg.offsets().entries();
+        std::span<std::uint16_t const> const root_path{};
         for (std::size_t i = 0; i < ents.size(); ++i) {
             std::uint16_t const no_tag = ents[i].tag;
-            std::uint16_t const delim_tag = dict_.group_first_field(no_tag);
+            std::uint16_t const delim_tag = dict_.group_first_field(msg_type, root_path, no_tag);
             if (delim_tag == 0) {
                 continue;  // not a group count field in this dict
             }
@@ -193,18 +213,11 @@ public:
                 // The offset table's raw pointer into the frame buffer:
                 // bytes().data() is the frame start, entry.offset is value offset.
                 msg.bytes().data() + ents[i].offset, ents[i].length};
-            std::uint32_t declared_count = 0;
-            for (auto b : count_bytes) {
-                auto c = static_cast<unsigned char>(b);
-                if (c < '0' || c > '9') {
-                    break;
-                }
-                // Saturate at UINT32_MAX so an over-declared count cannot wrap
-                // uint32 down to the real instance count and spuriously pass the
-                // `declared_count == actual_count` check (W-P3-1). A saturated
-                // count can never equal a plausible actual_count → reject.
-                (void)fixpp::wire::accumulate_bounded(declared_count, c, 0xFFFFFFFFU);
-            }
+            // Saturate at UINT32_MAX so an over-declared count cannot wrap uint32
+            // down to the real instance count and spuriously pass the
+            // `declared_count == actual_count` check (W-P3-1). A saturated count
+            // can never equal a plausible actual_count → reject.
+            std::uint32_t const declared_count = fixpp::wire::parse_bounded_u32(count_bytes);
             // Walk entries after the count to count actual delimiter occurrences
             // and verify the first entry after the count is the delimiter.
             if (declared_count == 0) {
@@ -216,7 +229,7 @@ public:
                                               core::error::wire_required_field_missing};
             }
 
-            auto const member_tags = dict_.group_member_tags(no_tag);
+            auto const member_tags = dict_.group_member_tags(msg_type, root_path, no_tag);
             auto const is_member = [&](std::uint16_t tag) noexcept {
                 for (auto const member_tag : member_tags) {
                     if (member_tag == tag) {

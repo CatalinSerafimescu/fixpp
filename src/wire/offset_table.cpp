@@ -11,6 +11,7 @@
 #include <fixpp/core/error.hpp>
 #include <fixpp/wire/errors.hpp>  // wire::err_* / fail<T> (module error vocab)
 #include <fixpp/wire/framer.hpp>
+#include <fixpp/wire/group_view.hpp>  // group_context complete type (063 T006/T008)
 #include <fixpp/wire/offset_table.hpp>
 #include <fixpp/wire/tag_scan.hpp>  // accumulate_tag_digit (SC-004 / 040-inbound-tag-overflow)
 #include <fixpp/wire/view.hpp>  // group_slice
@@ -399,6 +400,99 @@ void OffsetTable::check_alive() const noexcept {
 #endif
 }
 
+// 063 T006: set/read the stored group_context (msg_type + bounded
+// parent-no_tag path) — see offset_table.hpp for the ownership/seeding
+// contract. Copies the constituent fields (never the `group_context` type
+// itself, which offset_table.hpp only forward-declares).
+void OffsetTable::set_group_context(group_context const& ctx) const noexcept {
+    group_ctx_msg_type_ = ctx.msg_type;
+    group_ctx_parent_path_ = ctx.parent_path;
+    group_ctx_depth_ = ctx.depth;
+}
+
+group_context OffsetTable::stored_group_context() const noexcept {
+    return group_context{.msg_type = group_ctx_msg_type_,
+                         .parent_path = group_ctx_parent_path_,
+                         .depth = group_ctx_depth_};
+}
+
+// 063 Defect B (T021): parse a NumInGroup count field's DECLARED value from
+// the frame bytes via the shared saturating scanner (parse_bounded_u32,
+// tag_scan.hpp). Non-digit bytes stop accumulation; the actual instance scan
+// is separately bounded by entries_.size(), so a malformed/lying count can
+// never over-consume.
+static std::uint32_t parse_declared_count(std::byte const* base,
+                                          OffsetTable::entry const& e) noexcept {
+    return parse_bounded_u32(std::span<std::byte const>{base + e.offset, e.length});
+}
+
+std::size_t OffsetTable::consume_group_extent(std::size_t count_idx,
+                                              group_context const& ctx,
+                                              std::uint8_t depth,
+                                              bool& overflow) const noexcept {
+    if (depth >= kMaxGroupDepth) {
+        overflow = true;  // T022: nesting deeper than K=16 -> err_group_too_large
+        return count_idx;
+    }
+    std::size_t const first = count_idx + 1U;
+    if (first >= entries_.size()) {
+        return first;  // count field is last entry -> empty group
+    }
+    if (opaque_dict_ == nullptr || group_member_fn_ == nullptr) {
+        return first;  // dict-free callers have no membership to walk
+    }
+    std::uint16_t const group_no_tag = entries_[count_idx].tag;
+    std::uint16_t const delim = entries_[first].tag;
+    // Confirm this count field really heads a group in-context (its delimiter
+    // is a member); otherwise it is a plain scalar -> zero extent.
+    if (!group_member_fn_(opaque_dict_, ctx, group_no_tag, delim)) {
+        return first;
+    }
+    std::uint32_t const declared = parse_declared_count(frame_base_, entries_[count_idx]);
+    if (declared == 0U) {
+        return first;  // zero-count consumes no extent (B-004-7)
+    }
+    // Context under which THIS group's nested members are registered
+    // (its container path + its own no_tag).
+    group_context const child = ctx.pushed(group_no_tag);
+    std::size_t k = first;
+    std::uint32_t inst = 0;
+    // Consume exactly `declared` instances (Approach A), each delimited by
+    // `delim`; the scan is also hard-bounded by entries_.size() so a lying
+    // declared count can never run off the end (fail-closed). Declared-vs-
+    // actual mismatch flagging is the validator's job (plan.md).
+    while (k < entries_.size() && inst < declared && entries_[k].tag == delim) {
+        std::size_t const inst_start = k;
+        ++k;  // consume the delimiter
+        while (k < entries_.size() && entries_[k].tag != delim) {
+            std::uint16_t const t = entries_[k].tag;
+            if (!group_member_fn_(opaque_dict_, ctx, group_no_tag, t)) {
+                break;  // non-member ends this instance (and the group)
+            }
+            // Nested group count? A member tag whose immediately-following
+            // entry is a member of ITS OWN group (in the child context). If so
+            // consume its full extent so its repeated delimiter is NOT mistaken
+            // for an outer-instance boundary (the Defect-B truncation).
+            if (k + 1U < entries_.size() &&
+                group_member_fn_(opaque_dict_, child, t, entries_[k + 1U].tag)) {
+                k = consume_group_extent(k, child,
+                                         static_cast<std::uint8_t>(depth + 1U), overflow);
+                if (overflow) {
+                    return k;
+                }
+            } else {
+                ++k;  // ordinary scalar member
+            }
+        }
+        if ((k - inst_start) > cfg_.max_group_entries_per_instance) {
+            overflow = true;  // T022: per-level entry cap breach
+            return k;
+        }
+        ++inst;
+    }
+    return k;
+}
+
 core::expected_t<OffsetTable::group_index> OffsetTable::group(std::uint16_t no_tag) const noexcept {
     check_alive();
     if (!status_) {
@@ -423,6 +517,11 @@ core::expected_t<OffsetTable::group_index> OffsetTable::group(std::uint16_t no_t
     std::uint16_t const delim = entries_[first].tag;
     std::size_t group_end = first;
     if (opaque_dict_ != nullptr && group_member_fn_ != nullptr) {
+        // This table's stored membership context (msg_type + bounded parent
+        // path). A ROOT table is seeded at `MessageView` construction time
+        // (`MessageView::group<>()` re-applies the same value, idempotent);
+        // a NESTED sub-table is seeded once by `build_nested_subview`.
+        group_context const ctx = stored_group_context();
         // Validate that `no_tag` is actually a group count field by confirming
         // the dictionary recognises `delim` (the tag immediately following the
         // count field) as a member of `no_tag`'s group.  If the dict does NOT
@@ -430,36 +529,18 @@ core::expected_t<OffsetTable::group_index> OffsetTable::group(std::uint16_t no_t
         // SenderCompID=49) and we must return an absent result so that
         // group_slices() yields an empty span → the thunk can report
         // TYPE_MISMATCH (E-2 / CA-010-read contract).
-        if (!group_member_fn_(opaque_dict_, no_tag, delim)) {
+        if (!group_member_fn_(opaque_dict_, ctx, no_tag, delim)) {
             return err_required_field_missing<group_index>();
         }
-        std::size_t k = first;
-        while (k < entries_.size()) {
-            if (entries_[k].tag != delim) {
-                break;
-            }
-            std::size_t const inst_start = k;
-            ++k;  // consume delimiter
-            while (k < entries_.size()) {
-                if (entries_[k].tag == delim) {
-                    break;  // next instance
-                }
-                if (!group_member_fn_(opaque_dict_, no_tag, entries_[k].tag)) {
-                    break;
-                }
-                bool seen_in_instance = false;
-                for (std::size_t m = inst_start + 1U; m < k; ++m) {
-                    if (entries_[m].tag == entries_[k].tag) {
-                        seen_in_instance = true;
-                        break;
-                    }
-                }
-                if (seen_in_instance) {
-                    break;
-                }
-                ++k;
-            }
-            group_end = k;
+        // 063 Defect B: nesting-aware extent. The pre-063 flat
+        // `seen_in_instance` heuristic truncated a multi-entry NESTED group at
+        // its 2nd entry (its repeated delimiter looked like a new outer
+        // instance). consume_group_extent recursively consumes each nested
+        // group's full declared extent so the outer slice encloses all of it.
+        bool overflow = false;
+        group_end = consume_group_extent(count_idx, ctx, ctx.depth, overflow);
+        if (overflow) {
+            return err_group_too_large<group_index>();
         }
     } else {
         // Dict-free fallback kept for non-dictionary callers.
@@ -553,7 +634,8 @@ OffsetTable* OffsetTable::build_nested_subview(std::byte const* data, std::size_
                                                std::pmr::memory_resource* mr,
                                                void const* opaque_dict,
                                                group_member_fn_t group_member_fn,
-                                               detail::generation_token gen) noexcept {
+                                               detail::generation_token gen,
+                                               group_context const& ctx) noexcept {
     try {
         // RC1: slice-scoped `len+1` — the terminal SOH is provably already
         // present in the parent frame buffer at `data+len` (the slice is
@@ -569,7 +651,11 @@ OffsetTable* OffsetTable::build_nested_subview(std::byte const* data, std::size_
         // the sub-OffsetTable is owned by the per-message arena and freed with
         // it, not heap-owned (gsl::owner not adopted in this codebase).
         // NOLINTNEXTLINE(cppcoreguidelines-owning-memory)
-        return ::new (mem) OffsetTable(fv, mr, opaque_dict, group_member_fn);
+        auto* table = ::new (mem) OffsetTable(fv, mr, opaque_dict, group_member_fn);
+        // 063 T008: seed the new sub-table's stored context VERBATIM (no
+        // further push — see nested_group_slices()'s doc comment).
+        table->set_group_context(ctx);
+        return table;
     } catch (std::bad_alloc const&) {
         return nullptr;  // degrade: caller serves absent rather than throw
     }
@@ -581,8 +667,8 @@ OffsetTable* OffsetTable::build_nested_subview(std::byte const* data, std::size_
 // no_tags on the same slice).
 std::span<group_slice const> OffsetTable::nested_group_slices(
     std::byte const* slice_data, std::size_t slice_len, std::uint16_t nested_no_tag,
-    void const* opaque_dict, group_member_fn_t group_member_fn,
-    detail::generation_token gen) const noexcept {
+    void const* opaque_dict, group_member_fn_t group_member_fn, detail::generation_token gen,
+    group_context const& ctx) const noexcept {
     if (slice_data == nullptr) {
         return {};
     }
@@ -620,7 +706,7 @@ std::span<group_slice const> OffsetTable::nested_group_slices(
     }
     if (table == nullptr) {
         table = build_nested_subview(slice_data, slice_len, resource(), opaque_dict,
-                                     group_member_fn, gen);
+                                     group_member_fn, gen, ctx);
     }
     try {
         nested_cache_.push_back(nested_cache_row{

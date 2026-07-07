@@ -78,21 +78,6 @@ inline constexpr len_data_pair length_data_table[] = {
     return 0;
 }
 
-[[nodiscard]] inline std::uint32_t parse_u32(std::span<const std::byte> v) noexcept {
-    std::uint32_t out = 0;
-    for (auto b : v) {
-        auto c = static_cast<unsigned char>(b);
-        if (c < '0' || c > '9') {
-            break;
-        }
-        // Saturate at UINT32_MAX so a lying over-large Length value cannot wrap
-        // uint32 to a small count (W-P2-1c). The Iter counted-Data site then
-        // bounds it against the buffer via subtraction (no size_t wrap either).
-        (void)fixpp::wire::accumulate_bounded(out, c, 0xFFFFFFFFU);
-    }
-    return out;
-}
-
 }  // namespace detail
 
 template <access_mode Mode>
@@ -117,7 +102,17 @@ public:
           opaque_dict_{opaque_dict},
           classify_fn_{classify_fn},
           group_member_fn_{group_member_fn},
-          unk_items_{mr} {}
+          unk_items_{mr} {
+        // Gate B PR#176 r1 root cause #1: seed the ROOT group_context ({msg_type,
+        // path=[]}) HERE, unconditionally, rather than lazily only in group<>()
+        // below. Every root group_slices(N) caller (C-ABI fixpp_msg_get_group,
+        // direct offsets().group_slices(), and the typed group<>() path) must
+        // agree on context so the no_tag-keyed cache (offset_table.cpp
+        // group_slices_) can never be poisoned by an unseeded call that runs
+        // before the typed path seeds it (table_ is fully built by this point —
+        // msg_type() reads via table_.find(35), valid post-construction).
+        table_.set_group_context(group_context{.msg_type = msg_type()});
+    }
 
     // FR-015 / [2b §1.2]: same as above but with caller-tunable caps.
     MessageView(frame_view const& frame, std::pmr::memory_resource* mr, OffsetTable::Config cfg,
@@ -131,7 +126,11 @@ public:
           opaque_dict_{opaque_dict},
           classify_fn_{classify_fn},
           group_member_fn_{group_member_fn},
-          unk_items_{mr} {}
+          unk_items_{mr} {
+        // See the sibling ctor above — same root group_context seed, same
+        // rationale (Gate B PR#176 r1 root cause #1).
+        table_.set_group_context(group_context{.msg_type = msg_type()});
+    }
 
     MessageView(frame_view const& frame, std::pmr::memory_resource* mr) noexcept
         requires(Mode == access_mode::Index)
@@ -151,7 +150,7 @@ public:
     }
     [[nodiscard]] std::uint32_t msg_seq_num() const noexcept {
         auto b = field_bytes(detail::tag_msg_seq_num);
-        return detail::parse_u32(b);
+        return parse_bounded_u32(b);
     }
 
     // ---- Iter streaming, dict-free ----------------------------------------
@@ -262,12 +261,22 @@ template <std::uint16_t NoTag, class GroupT>
         // OffsetTable; the field is `const OffsetTable*` because the only
         // method a nested descent ever reaches through it is the const
         // nested_group_slices() (which mutates only its own `mutable` cache).
+        // 063 T007: the ROOT context — {msg_type, path=[]} — is this message's
+        // own context (depth 0, plan.md Context-propagation mechanism). Set on
+        // `table_` BEFORE group_slices() so group()'s membership predicate
+        // calls see it; the entry_context each returned entry carries gets the
+        // context PUSHED with NoTag (its own container path + own no_tag), so
+        // a later nested descent from one of these entries seeds the correct
+        // sub-table context (offset_table.hpp/.cpp T008).
+        group_context const root_ctx{.msg_type = msg_type()};
+        table_.set_group_context(root_ctx);
         entry_context ctx{};
         ctx.mr = mr_;
         ctx.opaque_dict = opaque_dict_;
         ctx.group_member_fn = group_member_fn_;
         ctx.gen = token();
         ctx.parent_cache_owner = &table_;
+        ctx.group_ctx = root_ctx.pushed(NoTag);
         return group_view<GroupT>{table_.group_slices(NoTag), ctx};
     }
 
@@ -437,7 +446,7 @@ void MessageView<Mode>::field_iterator::advance() noexcept {
 
     if (std::uint16_t dt = detail::data_tag_for_length(static_cast<std::uint16_t>(tag)); dt != 0) {
         prev_data_tag_ = dt;
-        prev_data_len_ = detail::parse_u32(cur_.value);
+        prev_data_len_ = parse_bounded_u32(cur_.value);
     }
 }
 
@@ -482,9 +491,26 @@ public:
               return static_cast<dict_t const*>(d)->field_valid_for(mt, t);
           }},
           group_member_fn_{
-              [](void const* d, std::uint16_t no_tag, std::uint16_t tag) noexcept -> bool {
+              // 063 T015: resolves via the stored `group_context` (msg_type +
+              // bounded parent-no_tag path) — the context-scoped membership
+              // key (data-model.md "GroupMembership", Option A). Fixes
+              // Defect A: a reused NumInGroup tag (e.g. FIX44 295) now
+              // resolves to the members it has in THIS message/parent-path,
+              // not whichever variant the loader saw first, PROVIDED the
+              // context (msg_type + full parent-no_tag path) is supplied —
+              // which it always is on this call site (ctx comes from the
+              // stored OffsetTable context, seeded at MessageView::group<>()
+              // / build_nested_subview(), parser.hpp / offset_table.cpp).
+              // `table_view`'s context accessor falls back to the legacy
+              // bare-`no_tag` store on a MISS (table_view.hpp doc, amended
+              // hardening invariant) — unreachable HERE because this call
+              // site's ctx always matches the exact registration key.
+              [](void const* d, group_context const& ctx, std::uint16_t no_tag,
+                 std::uint16_t tag) noexcept -> bool {
                   using dict_t = std::remove_reference_t<TV>;
-                  auto const members = static_cast<dict_t const*>(d)->group_member_tags(no_tag);
+                  auto const members = static_cast<dict_t const*>(d)->group_member_tags(
+                      ctx.msg_type,
+                      std::span<std::uint16_t const>{ctx.parent_path.data(), ctx.depth}, no_tag);
                   for (auto const member_tag : members) {
                       if (member_tag == tag) {
                           return true;

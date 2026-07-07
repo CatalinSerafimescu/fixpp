@@ -78,6 +78,39 @@ fixpp::dict::Dictionary load_tiny_dict(std::pmr::memory_resource* mr) {
     return fixpp::dict::XmlLoader{}.load_from_string(kXml, mr);
 }
 
+// Dictionary with a repeating group whose DECLARATION delimiter is NOT its
+// lowest-tag member: NoThings(100) → [delimiter ThingA(200), then ThingB(150)].
+// message_fields() is tag-sorted (xml_loader.cpp), so the per-context member
+// list is [150, 200] and members.front() is 150 — NOT the real delimiter 200.
+// Mirrors real dicts (e.g. FIX44 NoPartyIDs(453): delimiter PartyID(448) but
+// lowest member PartyIDSource(447)).
+fixpp::dict::Dictionary load_group_dict(std::pmr::memory_resource* mr) {
+    constexpr std::string_view kXml = R"(<fix type='FIX' major='4' minor='4' servicepack='0'>)"
+                                      R"(<fields>)"
+                                      R"(<field number='8'  name='BeginString' type='STRING'/>)"
+                                      R"(<field number='9'  name='BodyLength'  type='LENGTH'/>)"
+                                      R"(<field number='10' name='CheckSum'    type='STRING'/>)"
+                                      R"(<field number='35' name='MsgType'     type='STRING'/>)"
+                                      R"(<field number='100' name='NoThings'   type='NUMINGROUP'/>)"
+                                      R"(<field number='150' name='ThingB'     type='INT'/>)"
+                                      R"(<field number='200' name='ThingA'     type='STRING'/>)"
+                                      R"(</fields>)"
+                                      R"(<messages>)"
+                                      R"(<message name='Things' msgtype='U' msgcat='app'>)"
+                                      R"(  <field name='BeginString'   required='N'/>)"
+                                      R"(  <field name='BodyLength'    required='N'/>)"
+                                      R"(  <field name='CheckSum'      required='N'/>)"
+                                      R"(  <field name='MsgType' required='N'/>)"
+                                      R"(  <group name='NoThings' required='N'>)"
+                                      R"(    <field name='ThingA' required='N'/>)"  // 200 = delimiter
+                                      R"(    <field name='ThingB' required='N'/>)"  // 150
+                                      R"(  </group>)"
+                                      R"(</message>)"
+                                      R"(</messages>)"
+                                      R"(</fix>)";
+    return fixpp::dict::XmlLoader{}.load_from_string(kXml, mr);
+}
+
 // Build a complete FIX frame from body fields (8/9/10 framing added).
 std::string make_checksum_field(unsigned chk) {
     std::string s = "10=";
@@ -138,6 +171,44 @@ TEST(ValidatorProductionTableView, InstantiatesFromProductionTableView) {
     EXPECT_TRUE(v.field_valid_for("A", 98))
         << "EncryptMethod(98) must be valid for Logon via production table_view";
     EXPECT_FALSE(v.field_valid_for("A", 9999)) << "unknown tag must not be valid for Logon";
+}
+
+// ── Regression: group delimiter must come from the WIRE, not the tag-sorted
+//    member list (063 tag-sort delimiter bug) ──────────────────────────────
+// The per-context store's group_first is set from members.front(), but
+// members come from tag-sorted message_fields(), so it is the lowest-tag
+// member (150), not the declaration delimiter (200). A valid single-instance
+// group [delimiter 200, then 150] must VALIDATE. Pre-fix, validate() used the
+// stored group_first(=150) as the expected delimiter and rejected ents[i+1]=200
+// with wire_required_field_missing — a false rejection of a valid real-dict
+// group (e.g. any FIX44 message carrying a NoPartyIDs(453) Parties group).
+TEST(ValidatorProductionTableView, GroupDelimiterFromWireNotTagSortedMember) {
+    std::vector<std::byte> buf(2u * 1024u * 1024u);
+    std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
+    auto dict = load_group_dict(&mr);
+    auto tv = dict.as_table_view();
+    dictionary_driven_validator v{std::move(tv)};
+
+    // One valid instance: delimiter ThingA(200) first, then ThingB(150).
+    auto frame = make_frame(
+        "35=U\x01"
+        "100=1\x01"
+        "200=x\x01"
+        "150=7\x01");
+    std::array<std::byte, 4096> stack{};
+    std::pmr::monotonic_buffer_resource arena;
+    auto mv = parse_index(frame, stack, arena);
+
+    std::array<std::byte, 2048> scratch_buf{};
+    std::pmr::monotonic_buffer_resource scratch_mr{scratch_buf.data(), scratch_buf.size(),
+                                                   std::pmr::null_memory_resource()};
+
+    auto result = v.validate(mv, &scratch_mr);
+    EXPECT_TRUE(result.has_value())
+        << "valid single-instance group (delimiter 200 first) must validate; "
+        << "pre-fix the validator used tag-sorted members.front()=150 as the "
+        << "expected delimiter and rejected the real delimiter 200; slot "
+        << (result.has_value() ? -1 : static_cast<int>(result.error()));
 }
 
 // ── T009a-1 RED→GREEN: Float garbage value → wire_field_value_out_of_range ───

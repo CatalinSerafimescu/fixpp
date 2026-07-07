@@ -43,6 +43,8 @@
 #include "support/frame_view_factory.hpp"
 #include "support/mock_dict_table.hpp"  // has group_member_tags interface
 #include <fixpp/dict/table_view.hpp>
+#include <fixpp/dict/dictionary.hpp>
+#include <fixpp/dict/xml_loader.hpp>
 
 using fixpp::wire::MessageView;
 using fixpp::wire::access_mode;
@@ -1052,6 +1054,140 @@ TEST(MessageReadGroup, NestedGroupDescentTwoOuterEntries) {
     EXPECT_EQ(std::string_view(val, vlen), "C1");
 }
 
+// 063 Round-2 tasks-pins §5 [pin#5] — C-ABI last-nested-instance-extent
+// MassQuote-shaped witness: a MULTI-ENTRY nested group (539=2) followed by an
+// OUTER member (999) that appears AFTER the nested group within the SAME
+// outer occurrence. Targets the newly-activated delimiter-bounded
+// multi-instance branch in fixpp_group_get_nested_group
+// (src/capi/message_read.cpp, "close previous instance" — the pre-063
+// OffsetTable::group() flat `seen_in_instance` walk could never produce an
+// outer occurrence slice containing >=2 occurrences of a nested delimiter,
+// so that branch's LCOV_EXCL_START marking is now STALE: it IS reachable
+// post-063, since consume_group_extent's outer-extent walk now correctly
+// encloses the FULL multi-entry nested group).
+//
+// ESCALATED — CONFIRMED DIVERGENCE, NOT a fake pass. Empirically RUN (not
+// just traced): this exact frame/dict, with the assertions below LIVE (not
+// skipped), produces:
+//   fixpp_group_get_field_string(nested, /*i=*/1, /*tag=*/999, ...)
+//     == FIXPP_ERR_OK, value "TRAIL"   (expected: FIXPP_ERR_TAG_NOT_FOUND)
+// i.e. the trailing outer member 999 IS reachable through the LAST nested
+// instance's own span — a real, reachable leak, not a hypothetical.
+//
+// Root cause: fixpp_group_get_nested_group's Phase-2 scan (message_read.cpp)
+// is POSITIONAL / dictionary-membership-free by design (plan.md Round-2:
+// Opus rejected threading `group_context` + dict through the C-ABI cursor as
+// a gratuitous ABI-adjacent rewrite the fix does not require). It closes the
+// LAST nested instance at `sl->data + sl->len` (the end of the OUTER
+// occurrence's own — now correctly, post-063, membership-bounded — slice),
+// not at the nested group's OWN extent end. When the outer slice legitimately
+// contains trailing content AFTER the nested group (a sibling scalar that is
+// a member of the OUTER group but not of the nested one), that trailing
+// content is swallowed into the last nested instance's span. Every positional
+// (membership-free) heuristic considered (assume uniform per-instance
+// byte-width from instance 0; stop on first tag not seen in an earlier
+// sibling instance) is unanchored and wrong in general for groups with
+// optional/variable fields — inventing one would be exactly the kind of
+// unauthorized enforcement the escalation policy forbids. A CORRECT fix
+// requires nested-group membership, which this C-ABI path deliberately
+// lacks (Opus Round-2 disposition, plan.md:97). This contradicts the Round-2
+// tasks-pins §5 prediction ("corrects transitively, no fix needed") and is
+// reported here rather than worked around; NOT marked passing. See the 063
+// Phase-4 phase-implementer report for the orchestrator decision (options:
+// (a) accept as a documented L-063-* limitation/waiver, (b) a positional
+// heuristic with an explicit documented limitation, (c) plumb
+// `group_context`+dict through the C-ABI cursor, reversing the Round-2
+// rejection).
+TEST(MessageReadGroup, NestedGroupLastInstanceExtentDoesNotAbsorbTrailingOuterMember) {
+    GTEST_SKIP() << "ESCALATED: confirmed divergence — fixpp_group_get_nested_group's "
+                    "positional (membership-free) Phase-2 scan closes the LAST nested "
+                    "instance at the end of the OUTER occurrence's slice, not at the "
+                    "nested group's own extent, so a trailing outer-level member "
+                    "AFTER a multi-entry nested group leaks into the last nested "
+                    "instance's span (fixpp_group_get_field_string(nested,1,999,...) "
+                    "== FIXPP_ERR_OK/\"TRAIL\" instead of FIXPP_ERR_TAG_NOT_FOUND). "
+                    "See this test's own comment block for the root-cause / options; "
+                    "reported to the orchestrator rather than worked around.";
+
+    fixpp::dict::table_view dict;
+    dict.add_valid("D", 35)
+        .add_valid("D", 453)
+        .add_valid("D", 448)
+        .add_valid("D", 447)
+        .add_valid("D", 539)
+        .add_valid("D", 524)
+        .add_valid("D", 525)
+        .add_valid("D", 999)
+        .set_group_first(453, 448)
+        .add_group_member(453, 447)
+        .add_group_member(453, 539)
+        .add_group_member(453, 524)   // transitively under 453 (nested delim)
+        .add_group_member(453, 525)   // transitively under 453 (nested member)
+        .add_group_member(453, 999)   // outer trailing scalar, AFTER the nested group
+        .set_group_first(539, 524)
+        .add_group_member(539, 525);
+
+    auto buf = make_raw_frame(
+        "35=D\x01"
+        "453=1\x01"
+        "448=PA\x01"
+        "447=D\x01"
+        "539=2\x01"
+        "524=NPA0\x01"
+        "525=C0\x01"
+        "524=NPA1\x01"
+        "525=C1\x01"
+        "999=TRAIL\x01");
+    auto fv = fixpp::wire::test::make_frame_view(buf);
+    ASSERT_TRUE(fv.has_value());
+
+    std::pmr::monotonic_buffer_resource arena;
+    Parser<access_mode::Index> parser{dict};
+    auto mv_res = parser.parse(*fv, &arena);
+    ASSERT_TRUE(mv_res.has_value());
+    InboundHandle h;
+    h.msg.view = &mv_res.value();
+
+    const fixpp_group_t* grp = nullptr;
+    size_t count = 0;
+    ASSERT_EQ(fixpp_msg_get_group(h.ptr(), 453, &grp, &count), FIXPP_ERR_OK);
+    ASSERT_EQ(count, 1U);
+    ASSERT_NE(grp, nullptr);
+
+    // Sanity: 999 legitimately belongs to THIS outer occurrence (it was
+    // registered as a member of 453 and appears once, after the nested
+    // group) — proves the nested-exclusion assertion below is meaningful
+    // (999 is genuinely reachable at the outer level, not absent everywhere).
+    const char* val = nullptr;
+    size_t vlen = 0;
+    ASSERT_EQ(fixpp_group_get_field_string(grp, 0, 999, &val, &vlen), FIXPP_ERR_OK);
+    EXPECT_EQ(std::string_view(val, vlen), "TRAIL");
+
+    const fixpp_group_t* nested = nullptr;
+    size_t nested_count = 0;
+    ASSERT_EQ(fixpp_group_get_nested_group(grp, 0, 539, &nested, &nested_count), FIXPP_ERR_OK);
+    ASSERT_EQ(nested_count, 2U);
+    ASSERT_NE(nested, nullptr);
+
+    ASSERT_EQ(fixpp_group_get_field_string(nested, 0, 524, &val, &vlen), FIXPP_ERR_OK);
+    EXPECT_EQ(std::string_view(val, vlen), "NPA0");
+    ASSERT_EQ(fixpp_group_get_field_string(nested, 0, 525, &val, &vlen), FIXPP_ERR_OK);
+    EXPECT_EQ(std::string_view(val, vlen), "C0");
+
+    ASSERT_EQ(fixpp_group_get_field_string(nested, 1, 524, &val, &vlen), FIXPP_ERR_OK);
+    EXPECT_EQ(std::string_view(val, vlen), "NPA1");
+    ASSERT_EQ(fixpp_group_get_field_string(nested, 1, 525, &val, &vlen), FIXPP_ERR_OK);
+    EXPECT_EQ(std::string_view(val, vlen), "C1");
+
+    // DISCRIMINATOR: the LAST nested instance's own extent must NOT absorb
+    // the trailing outer member 999 — a naive "close last instance at the
+    // end of the outer slice" scan would leak 999 into nested[1]'s span.
+    size_t discard_len = 0;
+    EXPECT_EQ(fixpp_group_get_field_string(nested, 1, 999, &val, &discard_len),
+              FIXPP_ERR_TAG_NOT_FOUND)
+        << "999 must NOT be reachable through the last nested instance's own span";
+}
+
 // ── Coverage gap closers ──────────────────────────────────────────────────────
 
 // NULL out-pointer for EVERY accessor (one call each, all return NULL_HANDLE).
@@ -1580,6 +1716,97 @@ TEST(MessageReadGroup, NestedGroupEmptyGroupCountLastField) {
     // Count found but no delimiter follows → empty group → FIXPP_ERR_OK (count==0)
     EXPECT_EQ(fixpp_group_get_nested_group(grp, 0, 539, &nested, &nc), FIXPP_ERR_OK);
     EXPECT_EQ(nc, 0U);
+}
+
+// Gate B PR#176 r1, fix queue item 1(ii): C-ABI top-level colliding-group
+// read. Reproduces the real FIX44.xml reused-tag collision on top-level tag
+// 296 (NoQuoteSets) minimally: MassQuoteAcknowledgement's QuotSetAckGrp
+// (declared FIRST → wins the legacy bare/global-first-seen store; members
+// {302, 304}, no 367) vs MassQuote's QuotSetGrp (declared SECOND; members
+// {302, 367, 304}). Before the root-context ctor seed (parser.hpp dict-aware
+// MessageView ctors), `fixpp_msg_get_group()` (`offsets.group_slices()`
+// directly, no typed group<>() call anywhere on this path) ran under the
+// empty `{msg_type=""}` context, missed the context-scoped store, fell back
+// to bare/Ack membership, and truncated the QuoteSet extent before 367 —
+// so a real, valid MassQuote's 367 field was unreachable via the public
+// C-ABI. Mutation-proven: reverting the ctor seed makes
+// fixpp_group_get_field_string(grp, 0, 367, ...) return FIXPP_ERR_TAG_NOT_FOUND
+// instead of FIXPP_ERR_OK.
+TEST(MessageReadGroup, TopLevelCollidingGroup296CAbiReadsFullMassQuoteExtent) {
+    static constexpr std::string_view kMassQuote296CollisionXml = R"xml(
+<fix major="4" minor="4">
+  <header>
+    <field number="8"  name="BeginString"  required="Y"/>
+    <field number="9"  name="BodyLength"   required="Y"/>
+    <field number="35" name="MsgType"      required="Y"/>
+    <field number="10" name="CheckSum"     required="Y"/>
+  </header>
+  <trailer>
+    <field number="10" name="CheckSum" required="Y"/>
+  </trailer>
+  <messages>
+    <message name="MassQuoteAcknowledgement" msgtype="b" msgcat="app">
+      <group number="296" name="NoQuoteSets" required="N">
+        <field number="302" name="QuoteSetID" required="N"/>
+        <field number="304" name="TotNoQuoteEntries" required="N"/>
+      </group>
+    </message>
+    <message name="MassQuote" msgtype="i" msgcat="app">
+      <field number="117" name="QuoteID" required="Y"/>
+      <group number="296" name="NoQuoteSets" required="Y">
+        <field number="302" name="QuoteSetID" required="Y"/>
+        <field number="367" name="QuoteSetValidUntilTime" required="N"/>
+        <field number="304" name="TotNoQuoteEntries" required="Y"/>
+      </group>
+    </message>
+  </messages>
+  <fields>
+    <field number="8"   name="BeginString"  type="STRING"/>
+    <field number="9"   name="BodyLength"   type="INT"/>
+    <field number="35"  name="MsgType"      type="STRING"/>
+    <field number="10"  name="CheckSum"     type="STRING"/>
+    <field number="117" name="QuoteID"      type="STRING"/>
+    <field number="296" name="NoQuoteSets"  type="NUMINGROUP"/>
+    <field number="302" name="QuoteSetID"   type="STRING"/>
+    <field number="367" name="QuoteSetValidUntilTime" type="UTCTIMESTAMP"/>
+    <field number="304" name="TotNoQuoteEntries" type="INT"/>
+  </fields>
+</fix>
+)xml";
+
+    std::pmr::monotonic_buffer_resource arena;
+    auto dict = fixpp::dict::XmlLoader{}.load_from_string(kMassQuote296CollisionXml, &arena);
+    auto tv = dict.as_table_view();
+
+    auto buf = make_raw_frame(
+        "35=i\x01"
+        "117=Q1\x01"
+        "296=1\x01"
+        "302=SET0\x01"
+        "367=20260101-00:00:00\x01"
+        "304=1\x01");
+    auto fv = fixpp::wire::test::make_frame_view(buf);
+    ASSERT_TRUE(fv.has_value());
+
+    Parser<access_mode::Index> parser{tv};
+    auto mv_res = parser.parse(*fv, &arena);
+    ASSERT_TRUE(mv_res.has_value());
+
+    InboundHandle h;
+    h.msg.view = &mv_res.value();
+
+    const fixpp_group_t* grp = nullptr;
+    size_t count = 0;
+    ASSERT_EQ(fixpp_msg_get_group(h.ptr(), 296, &grp, &count), FIXPP_ERR_OK);
+    ASSERT_EQ(count, 1U);
+    ASSERT_NE(grp, nullptr);
+
+    const char* v = nullptr;
+    size_t vlen = 0;
+    ASSERT_EQ(fixpp_group_get_field_string(grp, 0, 367, &v, &vlen), FIXPP_ERR_OK)
+        << "fixpp_msg_get_group(296) on a real MassQuote must resolve the FULL QuotSetGrp "
+           "extent (incl. 367) via the C-ABI, not the colliding QuotSetAckGrp truncation";
+    EXPECT_EQ(std::string_view(v, vlen), "20260101-00:00:00");
 }
 
 }  // namespace

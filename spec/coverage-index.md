@@ -180,7 +180,7 @@ The application spec is version-specific (FIX 4.0 through FIX 5.0SP2); sections 
 | §3 (wire) | Tag=Value encoding — field format, SOH delimiter, ASCII | Y | W-001 | — |
 | §3.1 | Standard header (BeginString/8, BodyLength/9, MsgType/35, mandatory ordering) | Y | W-002, W-004, W-005 | — |
 | §3.1 | Standard trailer (CheckSum/10 mandatory last) | Y | W-003 | — |
-| §3.2 | Repeating groups (NoXxx delimiter, ordered field list, nested groups) | Y | W-006, W-007, D-010 | — |
+| §3.2 | Repeating groups (NoXxx delimiter, ordered field list, nested groups) | Y | W-006, W-007, D-010 | **063 (2026-07-07)** closes two pre-existing real-dictionary defects: context-scoped group membership for a reused `NumInGroup` tag (Defect A) + nesting-aware `OffsetTable::group()` extent for a multi-entry nested group (Defect B). Real-dict end-to-end witness (SC-001b, ASan); census over the 6 group-bearing dicts (FIX40/41/42 INT-typed-count carve-out L-063-1); C-ABI positional nested-read edge L-063-2. L-062-1/2 retired. See feature-catalogue W-007. |
 | §3.3 | Field data types (28 types: STRING, CHAR, INT, FLOAT, BOOLEAN, UTCTIMESTAMP, etc.) | Y | W-009 | — |
 | §3.3 | Data (raw bytes) field pairs (Length+Data atomicity) | Y | W-008 | — |
 | §3 | Message framing — pipelined messages on TCP stream | Y | W-010 | — |
