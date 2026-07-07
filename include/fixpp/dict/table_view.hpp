@@ -34,6 +34,8 @@
 
 #pragma once
 
+#include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <fixpp/dict/field_type.hpp>  // field_type (7-value enum)
@@ -68,6 +70,107 @@ struct string_hash {
         return std::hash<std::string_view>{}(s);
     }
 };
+
+// ── 063 Defect-A: context-scoped group-membership key ──────────────────────
+// (msg_type, bounded parent-no_tag-path, no_tag) → {group_first, members}.
+// data-model.md "GroupMembership" (Option A, Gate A round 1): a reused
+// NumInGroup tag (e.g. FIX44 295, MassQuote's QuotEntryGrp vs
+// QuotCxlEntriesGrp) resolves to the members it has AS THE MESSAGE USES IT,
+// keyed by the FULL parent-no_tag chain (outermost first, no_tag itself
+// excluded) + the owning msg_type (msg_type is mandatory: two message types
+// can share the identical parent path and differ only by msg_type).
+//
+// kMaxGroupContextDepth mirrors wire::group_context's K=16
+// (offset_table.hpp:239) NUMERICALLY only — this dict-layer header must not
+// depend on the wire layer (dictionary.hpp -> table_view.hpp is the sole
+// allowed edge; [const layer direction], never wire -> dict reversed here).
+// A path deeper than K silently clamps (drops depth beyond 16) rather than
+// growing unbounded; depth>=16 nesting is out of scope for 063 US1.
+inline constexpr std::size_t kMaxGroupContextDepth = 16;
+
+// Owned key, stored in table_view::group_ctx_.
+struct group_ctx_key {
+    std::string msg_type;
+    std::array<std::uint16_t, kMaxGroupContextDepth> parent_path{};
+    std::uint8_t depth = 0;
+    std::uint16_t no_tag = 0;
+};
+
+// Non-owning query form — lets group_ctx_hash/group_ctx_equal drive a
+// heterogeneous std::unordered_map::find() with ZERO allocation on the
+// lookup path [pin#3-hash / const §VIII.5, §XV.1]: the caller passes a
+// string_view + span, never constructing a temporary owned group_ctx_key.
+struct group_ctx_query {
+    std::string_view msg_type;
+    std::span<std::uint16_t const> parent_path;
+    std::uint16_t no_tag;
+};
+
+[[nodiscard]] inline std::size_t hash_group_ctx(std::string_view msg_type,
+                                                std::span<std::uint16_t const> parent_path,
+                                                std::uint16_t no_tag) noexcept {
+    std::size_t h = std::hash<std::string_view>{}(msg_type);
+    for (auto const t : parent_path) {
+        h = (h * 1099511628211ULL) ^ t;
+    }
+    h = (h * 1099511628211ULL) ^ no_tag;
+    return h;
+}
+
+struct group_ctx_hash {
+    using is_transparent = void;
+    [[nodiscard]] std::size_t operator()(group_ctx_key const& k) const noexcept {
+        return hash_group_ctx(k.msg_type, {k.parent_path.data(), k.depth}, k.no_tag);
+    }
+    [[nodiscard]] std::size_t operator()(group_ctx_query const& q) const noexcept {
+        return hash_group_ctx(q.msg_type, q.parent_path, q.no_tag);
+    }
+};
+
+struct group_ctx_equal {
+    using is_transparent = void;
+
+    [[nodiscard]] static bool eq(std::string_view a_mt, std::span<std::uint16_t const> a_path,
+                                 std::uint16_t a_no_tag, std::string_view b_mt,
+                                 std::span<std::uint16_t const> b_path,
+                                 std::uint16_t b_no_tag) noexcept {
+        return a_no_tag == b_no_tag && a_mt == b_mt &&
+               std::equal(a_path.begin(), a_path.end(), b_path.begin(), b_path.end());
+    }
+    [[nodiscard]] bool operator()(group_ctx_key const& a, group_ctx_key const& b) const noexcept {
+        return eq(a.msg_type, {a.parent_path.data(), a.depth}, a.no_tag, b.msg_type,
+                  {b.parent_path.data(), b.depth}, b.no_tag);
+    }
+    [[nodiscard]] bool operator()(group_ctx_key const& a, group_ctx_query const& b) const noexcept {
+        return eq(a.msg_type, {a.parent_path.data(), a.depth}, a.no_tag, b.msg_type, b.parent_path,
+                  b.no_tag);
+    }
+    [[nodiscard]] bool operator()(group_ctx_query const& a, group_ctx_key const& b) const noexcept {
+        return eq(a.msg_type, a.parent_path, a.no_tag, b.msg_type, {b.parent_path.data(), b.depth},
+                  b.no_tag);
+    }
+};
+
+// Per-context group payload: the delimiter tag + the full member-tag list
+// (declaration order; spans handed out by table_view alias this storage).
+struct group_ctx_entry {
+    std::uint16_t group_first = 0;
+    std::vector<std::uint16_t> members;
+};
+
+[[nodiscard]] inline group_ctx_key make_group_ctx_key(std::string_view msg_type,
+                                                      std::span<std::uint16_t const> parent_path,
+                                                      std::uint16_t no_tag) {
+    group_ctx_key key;
+    key.msg_type = std::string{msg_type};
+    key.no_tag = no_tag;
+    key.depth = static_cast<std::uint8_t>(
+        std::min<std::size_t>(parent_path.size(), kMaxGroupContextDepth));
+    for (std::uint8_t i = 0; i < key.depth; ++i) {
+        key.parent_path[i] = parent_path[i];
+    }
+    return key;
+}
 
 // Production value type exposing exactly the 6-method surface bound by
 // `wire::dictionary_driven_validator`. Owns its backing storage; spans
@@ -123,6 +226,60 @@ public:
             return {};
         }
         return {it->second.data(), it->second.size()};
+    }
+
+    // ── 063 Defect-A: context-scoped group accessors ─────────────────────
+    // `(msg_type, parent_path, no_tag)` overloads — the acceptance-gate
+    // surface `group_member_fn_t` (parser.hpp) and `Validator::validate()`
+    // (validator.hpp:187/219) call. Tries the context store FIRST; on a MISS
+    // falls back to the LEGACY bare-`no_tag` store above.
+    //
+    // AMENDED HARDENING INVARIANT (Gate-A round-1 escalation, PENDING
+    // orchestrator sign-off — see the phase-implementer escalation report):
+    // the original "Option 1, HARDENED" directive required
+    // `Dictionary::as_table_view()` to write ONLY `group_ctx_`, making this
+    // fallback provably unreachable for any real-Dictionary table_view.
+    // Empirically that broke `tests/dictionary/table_view_test.cpp`
+    // (pre-063, NOT a hand-built parser fixture) which calls THESE bare
+    // 1-arg accessors directly on a real `as_table_view()` result and
+    // asserts they resolve (e.g. NoContraBrokers=382, NoPartyIDs=453). So
+    // `as_table_view()` now ALSO populates the legacy bare store (byte-
+    // identical to pre-063 `main`) — see dictionary.cpp's "group structure
+    // (legacy bare-no_tag store — PRE-063 UNCHANGED)" block. Consequence:
+    // on a CONTEXT miss (e.g. a genuinely nested reused tag queried with the
+    // wrong/root path — `validator.hpp`'s non-nesting-aware walk), this
+    // fallback is REACHABLE for real dictionaries too and can return the
+    // globally-first-seen variant. That is NOT a regression versus `main`
+    // (which had only the single global-first-seen resolution everywhere)
+    // — Defect A stays FIXED wherever a caller supplies the exact context
+    // (the acceptance-gate site, `OffsetTable::group()` via the parser
+    // lambda), and callers that cannot supply an exact context (validator's
+    // flat walk) degrade to exactly `main`'s pre-existing behaviour, not a
+    // new failure mode. The fallback is otherwise reachable for hand-built
+    // test fixtures that call the bare API directly (pre-063 tests:
+    // tests/codegen/nested_group_read_test.cpp,
+    // tests/codegen/group_entry_alloc_gate_test.cpp,
+    // tests/codegen/group_entry_generation_trap_test.cpp,
+    // tests/wire/validator_domain_test.cpp — none of which populate
+    // `group_ctx_`), where it reproduces pre-063 behaviour byte-identically.
+    [[nodiscard]] std::uint16_t group_first_field(std::string_view msg_type,
+                                                  std::span<std::uint16_t const> parent_path,
+                                                  std::uint16_t no_tag) const noexcept {
+        auto const it = group_ctx_.find(group_ctx_query{msg_type, parent_path, no_tag});
+        if (it != group_ctx_.end()) {
+            return it->second.group_first;
+        }
+        return group_first_field(no_tag);  // legacy bare fallback — see doc above
+    }
+
+    [[nodiscard]] std::span<std::uint16_t const> group_member_tags(
+        std::string_view msg_type, std::span<std::uint16_t const> parent_path,
+        std::uint16_t no_tag) const noexcept {
+        auto const it = group_ctx_.find(group_ctx_query{msg_type, parent_path, no_tag});
+        if (it != group_ctx_.end()) {
+            return {it->second.members.data(), it->second.members.size()};
+        }
+        return group_member_tags(no_tag);  // legacy bare fallback — see doc above
     }
 
     // 7-value structural type category for `tag`. Defaults to String for
@@ -198,6 +355,28 @@ public:
     // (FR-005 — enum tables deferred to 2c work).
     table_view& add_enum(std::uint16_t /*tag*/, std::string_view /*value*/) { return *this; }
 
+    // ── 063 Defect-A: context-scoped population surface ───────────────────
+    // Used EXCLUSIVELY by Dictionary::as_table_view() (dictionary.cpp) — the
+    // hardening invariant documented on the context-aware accessors above
+    // depends on real dictionaries registering HERE and ONLY here (never via
+    // add_group_member/set_group_first).
+    void add_group_member_ctx(std::string_view msg_type, std::span<std::uint16_t const> parent_path,
+                              std::uint16_t no_tag, std::uint16_t member_tag) {
+        auto& entry = group_ctx_[make_group_ctx_key(msg_type, parent_path, no_tag)];
+        for (auto const t : entry.members) {
+            if (t == member_tag) return;  // dedup
+        }
+        entry.members.push_back(member_tag);
+    }
+
+    // Mirrors set_group_first's "sets the delimiter AND adds it as a member"
+    // behaviour, context-scoped.
+    void set_group_first_ctx(std::string_view msg_type, std::span<std::uint16_t const> parent_path,
+                             std::uint16_t no_tag, std::uint16_t first) {
+        group_ctx_[make_group_ctx_key(msg_type, parent_path, no_tag)].group_first = first;
+        add_group_member_ctx(msg_type, parent_path, no_tag, first);
+    }
+
 private:
     // Valid-tag set per msg_type (used by field_valid_for).
     // transparent hash+equality: find(string_view) is allocation-free
@@ -216,6 +395,14 @@ private:
 
     // Group member-tag lists (no_tag → member tags; spans stable).
     std::unordered_map<std::uint16_t, std::vector<std::uint16_t>> group_members_;
+
+    // 063 Defect-A context-scoped store: (msg_type, parent_path, no_tag) →
+    // {group_first, members}. Populated EXCLUSIVELY by
+    // Dictionary::as_table_view() via add_group_member_ctx/set_group_first_ctx
+    // — see the hardening-invariant comment on the context-aware accessors
+    // above. transparent hash+equality: find(group_ctx_query{...}) is
+    // allocation-free on the lookup path [pin#3-hash / const §VIII.5, §XV.1].
+    std::unordered_map<group_ctx_key, group_ctx_entry, group_ctx_hash, group_ctx_equal> group_ctx_;
 
     // Global tag → field_type map (built once from Dictionary).
     std::unordered_map<std::uint16_t, field_type> types_;

@@ -492,14 +492,26 @@ public:
               return static_cast<dict_t const*>(d)->field_valid_for(mt, t);
           }},
           group_member_fn_{
-              // 063 T003/T007: widened to accept `group_context const&` (the
-              // new group_member_fn_t param) — IGNORED here, matching Phase 2
-              // scope: the membership store stays bare-no_tag-keyed until US1
-              // re-keys it (byte-identical behaviour, context carried-but-unused).
-              [](void const* d, group_context const& /*ctx*/, std::uint16_t no_tag,
+              // 063 T015: resolves via the stored `group_context` (msg_type +
+              // bounded parent-no_tag path) — the context-scoped membership
+              // key (data-model.md "GroupMembership", Option A). Fixes
+              // Defect A: a reused NumInGroup tag (e.g. FIX44 295) now
+              // resolves to the members it has in THIS message/parent-path,
+              // not whichever variant the loader saw first, PROVIDED the
+              // context (msg_type + full parent-no_tag path) is supplied —
+              // which it always is on this call site (ctx comes from the
+              // stored OffsetTable context, seeded at MessageView::group<>()
+              // / build_nested_subview(), parser.hpp / offset_table.cpp).
+              // `table_view`'s context accessor falls back to the legacy
+              // bare-`no_tag` store on a MISS (table_view.hpp doc, amended
+              // hardening invariant) — unreachable HERE because this call
+              // site's ctx always matches the exact registration key.
+              [](void const* d, group_context const& ctx, std::uint16_t no_tag,
                  std::uint16_t tag) noexcept -> bool {
                   using dict_t = std::remove_reference_t<TV>;
-                  auto const members = static_cast<dict_t const*>(d)->group_member_tags(no_tag);
+                  auto const members = static_cast<dict_t const*>(d)->group_member_tags(
+                      ctx.msg_type,
+                      std::span<std::uint16_t const>{ctx.parent_path.data(), ctx.depth}, no_tag);
                   for (auto const member_tag : members) {
                       if (member_tag == tag) {
                           return true;

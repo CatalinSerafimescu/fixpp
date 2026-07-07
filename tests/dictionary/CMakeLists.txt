@@ -28,6 +28,9 @@ set(FIXPP_DICT_TESTS
   dictionary_version_registry_test
   # 041-validation-gate-wiring T007/T008: as_table_view() builder tests.
   dictionary_table_view_test
+  # 063-nested-group-parse-correctness T010 [US1]: Defect-A context-scoped
+  # group-membership discriminating guard (real FIX44.xml, MassQuote 295).
+  dictionary_defect_a_group_context_test
 )
 
 foreach(target IN LISTS FIXPP_DICT_TESTS)
