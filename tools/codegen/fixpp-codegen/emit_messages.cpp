@@ -265,7 +265,7 @@ void emit_group_class(TemplateWriter& w, MemberMap const& mm, GroupPlan const& g
             w.num(c);
             w.raw(
                 ", ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, "
-                "ctx_.group_context);\n      return "
+                "ctx_.group_ctx);\n      return "
                 "::fixpp::wire::group_view<");
             w.raw(group_cls(c));
             w.raw(">{nested, ctx_}; }");

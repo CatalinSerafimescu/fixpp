@@ -91,8 +91,8 @@ struct entry_context {
     // the group's no_tag) and threaded into nested_group_slices() on a nested
     // descent, which seeds the sub-table's stored context — so the membership
     // predicate resolves via this exact context (Defect A fixed), no longer
-    // the bare-no_tag global. See group_context above.
-    group_context group_context{};
+    // the bare-no_tag global. See the `group_context` type above.
+    group_context group_ctx{};
 };
 
 // FR-004 zero-alloc-by-value entry: entry_context (and therefore every

@@ -276,7 +276,7 @@ template <std::uint16_t NoTag, class GroupT>
         ctx.group_member_fn = group_member_fn_;
         ctx.gen = token();
         ctx.parent_cache_owner = &table_;
-        ctx.group_context = root_ctx.pushed(NoTag);
+        ctx.group_ctx = root_ctx.pushed(NoTag);
         return group_view<GroupT>{table_.group_slices(NoTag), ctx};
     }
 
