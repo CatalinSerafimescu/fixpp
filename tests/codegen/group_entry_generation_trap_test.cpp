@@ -193,6 +193,18 @@ TEST(GroupEntryGenerationTrapDeath, GenerationTokenTrapOnStaleEntryRead) {
     // the token; the warm-hit early-return skipped it entirely.
     EXPECT_DEATH((void)quote_set0.quote_entries().size(), "")
         << "warm nested-cache-hit descent must trap after pool recycle (INV-G6)";
+
+    // Discriminating witness for issue #169 guard B: `sets` (minted while the
+    // token was live, at line ~144) is a HELD group_view. Exercising its own
+    // size()/operator[]/end() directly must trap via View::check_alive() on
+    // the held view itself — none of these re-enter OffsetTable::group_slices()
+    // (that would only prove guard A again).
+    EXPECT_DEATH((void)sets.size(), "")
+        << "held group_view::size() must trap (guard B)";
+    EXPECT_DEATH((void)sets[0], "")
+        << "held group_view::operator[] must trap (guard B)";
+    EXPECT_DEATH((void)sets.end(), "")
+        << "held group_view::end() must trap (guard B)";
 }
 
 #else
