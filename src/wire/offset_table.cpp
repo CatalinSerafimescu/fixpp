@@ -417,21 +417,13 @@ group_context OffsetTable::stored_group_context() const noexcept {
 }
 
 // 063 Defect B (T021): parse a NumInGroup count field's DECLARED value from
-// the frame bytes (saturating accumulate). Non-digit bytes stop accumulation;
-// the actual instance scan is separately bounded by entries_.size(), so a
-// malformed/lying count can never over-consume.
+// the frame bytes via the shared saturating scanner (parse_bounded_u32,
+// tag_scan.hpp). Non-digit bytes stop accumulation; the actual instance scan
+// is separately bounded by entries_.size(), so a malformed/lying count can
+// never over-consume.
 static std::uint32_t parse_declared_count(std::byte const* base,
                                           OffsetTable::entry const& e) noexcept {
-    std::uint32_t acc = 0;
-    std::byte const* const p = base + e.offset;
-    for (std::uint32_t i = 0; i < e.length; ++i) {
-        auto const c = static_cast<unsigned char>(p[i]);
-        if (c < '0' || c > '9') {
-            break;
-        }
-        (void)accumulate_bounded(acc, c, 0xFFFFFFFFU);
-    }
-    return acc;
+    return parse_bounded_u32(std::span<std::byte const>{base + e.offset, e.length});
 }
 
 std::size_t OffsetTable::consume_group_extent(std::size_t count_idx,

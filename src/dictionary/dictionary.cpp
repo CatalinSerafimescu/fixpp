@@ -320,23 +320,17 @@ table_view Dictionary::as_table_view() const {
         }
 
         // ── group structure (legacy bare-no_tag store — PRE-063 UNCHANGED) ──
-        // ESCALATION (Gate-A round-1, awaiting orchestrator sign-off):
-        // Dictionary::as_table_view()'s own contract test
-        // (tests/dictionary/table_view_test.cpp — pre-063, NOT a hand-built
-        // parser fixture) calls the BARE 1-arg `group_first_field(no_tag)`/
-        // `group_member_tags(no_tag)` DIRECTLY on a real Dictionary-derived
-        // table_view and asserts they resolve (e.g. NoContraBrokers=382,
-        // NoPartyIDs=453 in FIX44). The "Option 1, HARDENED" invariant
-        // ("as_table_view() writes ONLY the context store") breaks this
-        // pre-existing contract test outright (bare store stays empty ⇒
-        // these calls return 0/empty). Keeping this legacy loop (byte-
-        // identical to pre-063 `main`) restores that contract; it does NOT
-        // reintroduce Defect A on any NEW context-aware call site (parser
-        // lambda / validator.hpp), which always query the CONTEXT store
-        // first — this loop only feeds the BARE fallback those call sites
-        // use on a context-miss, and that fallback already existed pre-063
-        // as the ONLY resolution mechanism (so a context-miss now degrades
-        // to exactly `main`'s pre-existing behaviour, not worse).
+        // Dual-store amendment #1 (orchestrator-approved, commit 0caafd23):
+        // as_table_view() populates BOTH this legacy bare store AND the
+        // context-scoped store below. The bare store is REQUIRED — the frozen
+        // `Validator::group_first_field(no_tag)` pure-virtual ([const §XIV.2]
+        // 5-virtual cap) is production-wired here and must answer from a
+        // context-free store; see the DUAL-STORE INVARIANT on table_view.hpp's
+        // context accessors. This loop is byte-identical to pre-063 `main`; it
+        // feeds only the bare fallback that context-aware call sites use on a
+        // context-miss (which degrades to exactly `main`'s pre-063 resolution,
+        // not worse — L-063-3), never overriding the CONTEXT store that the
+        // parser lambda / validator query first.
         for (auto const& fr : all_fields) {
             if (fr.type != field_data_type::NumInGroup) {
                 continue;
@@ -382,9 +376,11 @@ table_view Dictionary::as_table_view() const {
             std::uint16_t const no_tag = fr.tag;
 
             // 2) Members of `no_tag` IN THIS MESSAGE = every FieldRef whose
-            //    immediate enclosing group is `no_tag`, in declaration order
-            //    (the first is the delimiter). NOT the global, deduped
-            //    `group_fields(no_tag)` — that is exactly the Defect-A bug.
+            //    immediate enclosing group is `no_tag`. This per-message set is
+            //    context-exact (the Defect-A fix) — NOT the global, deduped
+            //    `group_fields(no_tag)`. `all_fields` (message_fields) is
+            //    tag-SORTED (xml_loader.cpp), so `members` is a SET, not
+            //    declaration order; the DELIMITER is taken separately in (4).
             std::vector<std::uint16_t> members;
             for (auto const& m : all_fields) {
                 if (m.group_no_tag == no_tag) {
@@ -410,12 +406,27 @@ table_view Dictionary::as_table_view() const {
             }
             std::reverse(path.begin(), path.end());
 
+            // 4) Delimiter = the group's DECLARATION first field, from the
+            //    dictionary's GroupRef (group_first_field), NOT members.front():
+            //    `all_fields` is tag-sorted, so members.front() is the lowest-tag
+            //    member, not the delimiter (e.g. FIX44 NoPartyIDs(453): lowest
+            //    member PartyIDSource(447), real delimiter PartyID(448)). Using
+            //    members.front() made the validator reject valid real-dict groups.
+            //    group_first_field() is GroupRef.first_field_tag — the first
+            //    child in declaration order (xml_loader.cpp). It is global (one
+            //    GroupRef per no_tag, first-seen for reused tags), so a reused
+            //    tag with divergent per-context delimiters is an L-063-3 residual;
+            //    the per-context MEMBER SET above stays exact regardless. Fall
+            //    back to members.front() only if the dict has no GroupRef.
+            std::uint16_t const gr_delim = group_first_field(no_tag);
+            std::uint16_t const delim = gr_delim != 0 ? gr_delim : members.front();
+
             // Register into the CONTEXT-KEYED store (in ADDITION to the
             // legacy bare store populated above — see the escalation note
             // there). Every context-aware consumer (parser lambda,
             // validator.hpp) queries THIS store first, so Defect A stays
             // fixed on those call sites regardless of the legacy loop above.
-            tv.set_group_first_ctx(mt, path, no_tag, members.front());
+            tv.set_group_first_ctx(mt, path, no_tag, delim);
             for (auto const member_tag : members) {
                 tv.add_group_member_ctx(mt, path, no_tag, member_tag);
             }

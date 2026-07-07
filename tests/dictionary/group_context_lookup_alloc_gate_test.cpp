@@ -59,6 +59,7 @@
 // mallocnesia replaces these weak no-ops with its interceptor scope markers
 // (POSIX only — see the header for the Windows no-op fallback).
 #include "support/alloc_guard_markers.hpp"
+#include "support/context_group_member_fn.hpp"
 
 // ── (a) TU-local global operator-new counter ────────────────────────────
 // See tests/session/test_business_messages_build.cpp for the identical
@@ -111,22 +112,11 @@ namespace {
 using fixpp::dict::table_view;
 using fixpp::wire::group_context;
 
-// Byte-identical copy of the group_member_fn_t installed by Parser's
-// dict-lvalue ctor (parser.hpp:494-517) — same established pattern as
-// tests/dictionary/defect_a_group_context_test.cpp and
-// tests/wire/nested_group_slices_cache_test.cpp's `dict_group_member`.
-bool group_member_fn(void const* d, group_context const& ctx, std::uint16_t no_tag,
-                     std::uint16_t tag) noexcept {
-    auto const* dict = static_cast<table_view const*>(d);
-    auto const members = dict->group_member_tags(
-        ctx.msg_type, std::span<std::uint16_t const>{ctx.parent_path.data(), ctx.depth}, no_tag);
-    for (auto const member_tag : members) {
-        if (member_tag == tag) {
-            return true;
-        }
-    }
-    return false;
-}
+// The context-aware group_member_fn_t is shared across tests — see
+// tests/support/context_group_member_fn.hpp. A reference alias keeps this
+// file's local name and preserves both call and &-address-of use sites.
+// Alloc-free (group_member_tags returns a span), so the alloc gate holds.
+constexpr auto& group_member_fn = fixpp_test_support::context_group_member_fn;
 
 }  // namespace
 

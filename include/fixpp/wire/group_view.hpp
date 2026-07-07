@@ -86,10 +86,12 @@ struct entry_context {
     std::byte const* outer_occurrence_id =
         nullptr;  // this entry slice's globally-unique data-pointer identity
     // 063 T005: the context-scoped membership key (msg_type + bounded parent
-    // path) this entry's OWN group occurs under — carried but functionally
-    // UNUSED until US1 re-keys the membership store (Phase 2 seam; the
-    // predicate still resolves membership from bare no_tag, byte-identical
-    // to main). See group_context above.
+    // path) this entry's OWN group occurs under. Live (US1): set when the
+    // entry is minted (parser.hpp seeds it as the container path PUSHED with
+    // the group's no_tag) and threaded into nested_group_slices() on a nested
+    // descent, which seeds the sub-table's stored context — so the membership
+    // predicate resolves via this exact context (Defect A fixed), no longer
+    // the bare-no_tag global. See group_context above.
     group_context group_context{};
 };
 

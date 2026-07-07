@@ -231,37 +231,33 @@ public:
     // ── 063 Defect-A: context-scoped group accessors ─────────────────────
     // `(msg_type, parent_path, no_tag)` overloads — the acceptance-gate
     // surface `group_member_fn_t` (parser.hpp) and `Validator::validate()`
-    // (validator.hpp:187/219) call. Tries the context store FIRST; on a MISS
-    // falls back to the LEGACY bare-`no_tag` store above.
+    // call. Tries the context store FIRST; on a MISS falls back to the
+    // LEGACY bare-`no_tag` store above.
     //
-    // AMENDED HARDENING INVARIANT (Gate-A round-1 escalation, PENDING
-    // orchestrator sign-off — see the phase-implementer escalation report):
-    // the original "Option 1, HARDENED" directive required
-    // `Dictionary::as_table_view()` to write ONLY `group_ctx_`, making this
-    // fallback provably unreachable for any real-Dictionary table_view.
-    // Empirically that broke `tests/dictionary/table_view_test.cpp`
-    // (pre-063, NOT a hand-built parser fixture) which calls THESE bare
-    // 1-arg accessors directly on a real `as_table_view()` result and
-    // asserts they resolve (e.g. NoContraBrokers=382, NoPartyIDs=453). So
-    // `as_table_view()` now ALSO populates the legacy bare store (byte-
-    // identical to pre-063 `main`) — see dictionary.cpp's "group structure
-    // (legacy bare-no_tag store — PRE-063 UNCHANGED)" block. Consequence:
-    // on a CONTEXT miss (e.g. a genuinely nested reused tag queried with the
-    // wrong/root path — `validator.hpp`'s non-nesting-aware walk), this
-    // fallback is REACHABLE for real dictionaries too and can return the
-    // globally-first-seen variant. That is NOT a regression versus `main`
-    // (which had only the single global-first-seen resolution everywhere)
-    // — Defect A stays FIXED wherever a caller supplies the exact context
-    // (the acceptance-gate site, `OffsetTable::group()` via the parser
-    // lambda), and callers that cannot supply an exact context (validator's
-    // flat walk) degrade to exactly `main`'s pre-existing behaviour, not a
-    // new failure mode. The fallback is otherwise reachable for hand-built
-    // test fixtures that call the bare API directly (pre-063 tests:
-    // tests/codegen/nested_group_read_test.cpp,
-    // tests/codegen/group_entry_alloc_gate_test.cpp,
-    // tests/codegen/group_entry_generation_trap_test.cpp,
-    // tests/wire/validator_domain_test.cpp — none of which populate
-    // `group_ctx_`), where it reproduces pre-063 behaviour byte-identically.
+    // DUAL-STORE INVARIANT (design amendment #1, orchestrator-approved —
+    // commit 0caafd23; tasks.md T013/T015). `Dictionary::as_table_view()`
+    // populates BOTH the bare store and `group_ctx_`. The bare store is
+    // REQUIRED, not a convenience: `Validator::group_first_field(no_tag)` is
+    // a FROZEN pure-virtual (validator.hpp; `[const §XIV.2]` 5-virtual cap,
+    // `[2b §4.6]` plugin interface), production-wired from `as_table_view()`
+    // (session.cpp), and generic `Validator*` callers hold no parent-path
+    // context — so it MUST answer from a context-free bare store. 063's
+    // clarify-sanctioned public-surface change was scoped to
+    // `group_member_fn_t` only, so widening this virtual was out of scope.
+    // The 041-era `table_view` bare-accessor contract (witness:
+    // tests/dictionary/table_view_test.cpp — real `as_table_view()`, bare
+    // 1-arg calls, e.g. NoContraBrokers=382/NoPartyIDs=453) exercises the
+    // same requirement.
+    //
+    // Consequence on a CONTEXT miss (a genuinely nested reused tag queried
+    // with the wrong/root path — e.g. validator.hpp's non-nesting-aware
+    // walk, L-063-3): this fallback returns the globally-first-seen variant
+    // — exactly `main`'s pre-063 resolution (which had only the single
+    // global-first-seen path everywhere), NOT a new failure mode. Defect A
+    // stays FIXED wherever a caller supplies the exact context (the parser
+    // lambda / `OffsetTable::group()`). Hand-built bare-API test fixtures
+    // never populate `group_ctx_`, so they fall straight through to the
+    // (unchanged) legacy bare lookup.
     [[nodiscard]] std::uint16_t group_first_field(std::string_view msg_type,
                                                   std::span<std::uint16_t const> parent_path,
                                                   std::uint16_t no_tag) const noexcept {

@@ -213,18 +213,11 @@ public:
                 // The offset table's raw pointer into the frame buffer:
                 // bytes().data() is the frame start, entry.offset is value offset.
                 msg.bytes().data() + ents[i].offset, ents[i].length};
-            std::uint32_t declared_count = 0;
-            for (auto b : count_bytes) {
-                auto c = static_cast<unsigned char>(b);
-                if (c < '0' || c > '9') {
-                    break;
-                }
-                // Saturate at UINT32_MAX so an over-declared count cannot wrap
-                // uint32 down to the real instance count and spuriously pass the
-                // `declared_count == actual_count` check (W-P3-1). A saturated
-                // count can never equal a plausible actual_count → reject.
-                (void)fixpp::wire::accumulate_bounded(declared_count, c, 0xFFFFFFFFU);
-            }
+            // Saturate at UINT32_MAX so an over-declared count cannot wrap uint32
+            // down to the real instance count and spuriously pass the
+            // `declared_count == actual_count` check (W-P3-1). A saturated count
+            // can never equal a plausible actual_count → reject.
+            std::uint32_t const declared_count = fixpp::wire::parse_bounded_u32(count_bytes);
             // Walk entries after the count to count actual delimiter occurrences
             // and verify the first entry after the count is the delimiter.
             if (declared_count == 0) {

@@ -41,25 +41,17 @@
 #include <string_view>
 #include <vector>
 
+#include "support/context_group_member_fn.hpp"
+
 namespace {
 
 using fixpp::dict::table_view;
 using fixpp::wire::group_context;
 
-// Byte-identical copy of the group_member_fn_t installed by Parser's
-// dict-lvalue ctor (include/fixpp/wire/parser.hpp:494-517) — see file header.
-bool group_member_fn(void const* d, group_context const& ctx, std::uint16_t no_tag,
-                     std::uint16_t tag) noexcept {
-    auto const* dict = static_cast<table_view const*>(d);
-    auto const members = dict->group_member_tags(
-        ctx.msg_type, std::span<std::uint16_t const>{ctx.parent_path.data(), ctx.depth}, no_tag);
-    for (auto const member_tag : members) {
-        if (member_tag == tag) {
-            return true;
-        }
-    }
-    return false;
-}
+// The context-aware group_member_fn_t is shared across tests — see
+// tests/support/context_group_member_fn.hpp. A reference alias keeps this
+// file's local name and preserves both call and &-address-of use sites.
+constexpr auto& group_member_fn = fixpp_test_support::context_group_member_fn;
 
 }  // namespace
 

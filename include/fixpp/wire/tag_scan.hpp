@@ -4,10 +4,12 @@
 // hand-rolled tag scanners call this helper instead of open-coding the bound.
 // Reference shapes: src/wire/framer.cpp:120 (BodyLength pre-multiply bound)
 //                   src/session/session.cpp:1588 (seqnum pre-multiply bound)
-// Dependency-free leaf: <cstdint> only (wire layer, no session/core includes).
+// Dependency-free leaf: std headers only (wire layer, no session/core includes).
 // Contract: contracts/tag-scan-helper.md; research: specs/040-*/research.md D-1.
 #pragma once
+#include <cstddef>
 #include <cstdint>
+#include <span>
 
 namespace fixpp::wire {
 
@@ -55,6 +57,25 @@ namespace fixpp::wire {
     }
     acc = (acc * 10U) + d;
     return true;
+}
+
+// Parses the leading run of ASCII decimal digits in `bytes` into a uint32,
+// SATURATING at UINT32_MAX (via accumulate_bounded) — a lying over-large
+// Length/count can never wrap down to a small plausible value. Accumulation
+// stops at the first non-digit byte. The single implementation shared by the
+// three numeric scanners named above (offset_table declared-count,
+// parser.hpp Length parse, validator declared_count); they previously each
+// hand-rolled this identical loop.
+[[nodiscard]] inline std::uint32_t parse_bounded_u32(std::span<std::byte const> bytes) noexcept {
+    std::uint32_t acc = 0;
+    for (auto const b : bytes) {
+        auto const c = static_cast<unsigned char>(b);
+        if (c < '0' || c > '9') {
+            break;
+        }
+        (void)accumulate_bounded(acc, c, 0xFFFFFFFFU);
+    }
+    return acc;
 }
 
 // ---------------------------------------------------------------------------

@@ -38,6 +38,7 @@
 #include <string_view>
 #include <vector>
 
+#include "support/context_group_member_fn.hpp"
 #include "support/frame_view_factory.hpp"
 #include "support/mock_dict_table.hpp"
 
@@ -66,18 +67,9 @@ std::vector<std::byte> make_raw_frame(std::string const& body) {
 // context store and fall back identically; BenignSameMembershipReuseAcross
 // Contexts below is the one test that populates group_ctx_ and so actually
 // exercises the context-store HIT path.
-bool dict_group_member(void const* d, fixpp::wire::group_context const& ctx, std::uint16_t no_tag,
-                       std::uint16_t tag) noexcept {
-    auto const* dict = static_cast<fixpp::dict::table_view const*>(d);
-    auto const members = dict->group_member_tags(
-        ctx.msg_type, std::span<std::uint16_t const>{ctx.parent_path.data(), ctx.depth}, no_tag);
-    for (auto const member_tag : members) {
-        if (member_tag == tag) {
-            return true;
-        }
-    }
-    return false;
-}
+// Shared definition: tests/support/context_group_member_fn.hpp. A reference
+// alias keeps this file's local name and preserves the &-address-of sites.
+constexpr auto& dict_group_member = fixpp_test_support::context_group_member_fn;
 
 }  // namespace
 
