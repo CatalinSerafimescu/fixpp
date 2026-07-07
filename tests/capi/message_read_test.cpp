@@ -663,6 +663,14 @@ TEST(MessageReadGroupDeath, StaleTopLevelGroupCursorMetadataTrapsAfterRecycle) {
             (void)fixpp_msg_get_group(h.ptr(), 453, &grp, &count);
         },
         "");
+
+    EXPECT_DEATH(
+        {
+            const fixpp_group_t* grp = nullptr;
+            size_t count = 0;
+            (void)fixpp_msg_get_group(h.ptr(), 9999, &grp, &count);  // absent tag → stale find() must trap
+        },
+        "");
 }
 
 #endif

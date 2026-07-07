@@ -370,6 +370,7 @@ void OffsetTable::build(frame_view const& frame) noexcept {
 }
 
 core::expected_t<OffsetTable::entry> OffsetTable::find(std::uint16_t tag) const noexcept {
+    check_alive();
     if (!status_) {
         return fail<entry>(status_.error());
     }
