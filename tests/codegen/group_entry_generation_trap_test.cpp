@@ -164,6 +164,13 @@ TEST(GroupEntryGenerationTrapDeath, GenerationTokenTrapOnStaleEntryRead) {
     // Every entry_context minted above still carries the PREVIOUS token.
     framer.recycle_pool();
 
+    // Discriminating witness for issue #169 guard A: builds the group_view via
+    // top-level OffsetTable::group_slices() but does NOT call size()/operator[]
+    // on the returned held view, so it dies ONLY if the OffsetTable-layer
+    // liveness guard fires before the cache-hit/materialize path returns.
+    EXPECT_DEATH((void)mq.quote_sets(), "")
+        << "top-level group_slices() metadata read must trap after pool recycle";
+
     // After recycling: the one-level entry's own scalar read must trap. A
     // bug that silently reads under a default {} token (pool_id==0, which
     // NEVER traps) would make this EXPECT_DEATH fail to observe a death.
@@ -186,6 +193,18 @@ TEST(GroupEntryGenerationTrapDeath, GenerationTokenTrapOnStaleEntryRead) {
     // the token; the warm-hit early-return skipped it entirely.
     EXPECT_DEATH((void)quote_set0.quote_entries().size(), "")
         << "warm nested-cache-hit descent must trap after pool recycle (INV-G6)";
+
+    // Discriminating witness for issue #169 guard B: `sets` (minted while the
+    // token was live, at line ~144) is a HELD group_view. Exercising its own
+    // size()/operator[]/end() directly must trap via View::check_alive() on
+    // the held view itself — none of these re-enter OffsetTable::group_slices()
+    // (that would only prove guard A again).
+    EXPECT_DEATH((void)sets.size(), "")
+        << "held group_view::size() must trap (guard B)";
+    EXPECT_DEATH((void)sets[0], "")
+        << "held group_view::operator[] must trap (guard B)";
+    EXPECT_DEATH((void)sets.end(), "")
+        << "held group_view::end() must trap (guard B)";
 }
 
 #else

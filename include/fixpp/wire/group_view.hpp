@@ -79,12 +79,16 @@ public:
           instances_{instances},
           base_ctx_{base} {}
 
-    [[nodiscard]] std::size_t size() const noexcept { return instances_.size(); }
+    [[nodiscard]] std::size_t size() const noexcept {
+        check_alive();
+        return instances_.size();
+    }
 
     // Both operator[](i) and iterator::operator*() (which delegates to this)
     // derive the per-entry entry_context from the SAME instance slice `i` —
     // identical span + identical outer_occurrence_id (seam #8 / INV-G4).
     [[nodiscard]] GroupT operator[](std::size_t i) const noexcept [[clang::lifetimebound]] {
+        check_alive();
         auto const& s = instances_[i];
         entry_context ctx = base_ctx_;
         ctx.span = std::span<const std::byte>{s.data, s.len};
@@ -116,6 +120,7 @@ public:
         return iterator{this, 0};
     }
     [[nodiscard]] iterator end() const noexcept [[clang::lifetimebound]] {
+        check_alive();
         return iterator{this, instances_.size()};
     }
 

@@ -3,15 +3,15 @@ name: Tier 2 — Windows CI
 # Triggered by:
 #   - push to main (mandatory merge-gate; also populates the README badge)
 #   - workflow_dispatch (manual run from Actions UI)
-#   - PR labeled `run-tier2` (on-demand; standardised run-tierN scheme)
+#   - (PRs: dispatch manually via workflow_dispatch — no label/PR trigger)
 # No nightly cron — outside of main, Tier 2 is on-demand to conserve CI minutes.
 
 on:
   push:
     branches: ["main"]
-  pull_request:
-    branches: ["**"]
-    types: [labeled]
+  # DISPATCH-ONLY on PRs (see tier1.yml) — no pull_request / label trigger.
+  # Validate a PR with `gh workflow run "Tier 2 — Windows CI" --ref <branch>`;
+  # the tier2-required check lands on the head SHA. Retires the run-tier2 label.
   workflow_dispatch:
 
 # CONAN_HOME is set on the Windows job ONLY (it is a Windows path). A
@@ -19,7 +19,7 @@ on:
 # value", so it is scoped to the windows job rather than set globally.
 
 jobs:
-  # Run on push to main, workflow_dispatch, or PRs labeled 'run-tier2'
+  # Runs on push:main or workflow_dispatch (dispatch-only; no PR/label trigger)
   filter:
     name: "Check trigger"
     runs-on: ubuntu-24.04
@@ -28,19 +28,9 @@ jobs:
     steps:
       - id: check
         run: |
-          # One-shot: fire only when run-tier2 is the FRESHLY-ADDED label (a
-          # `labeled` event whose label IS run-tier2) — NOT whenever the label is
-          # merely present. The `contains(labels,…)` form re-ran the full matrix on
-          # every subsequent label change while run-tier2 sat on the PR (e.g. adding
-          # gate-b-done). Matches the Tier-1 run-trigger; re-run = remove + re-add.
-          if [[ "${{ github.event_name }}" == "push" ]] || \
-             [[ "${{ github.event_name }}" == "workflow_dispatch" ]] || \
-             { [[ "${{ github.event.action }}" == "labeled" ]] && \
-               [[ "${{ github.event.label.name }}" == "run-tier2" ]]; }; then
-            echo "should_run=true" >> $GITHUB_OUTPUT
-          else
-            echo "should_run=false" >> $GITHUB_OUTPUT
-          fi
+          # Dispatch-only: the only triggers are push:main and workflow_dispatch,
+          # both of which run the Windows matrix. (run-tier2 label scheme retired.)
+          echo "should_run=true" >> $GITHUB_OUTPUT
 
   # ── Windows build / test matrix ──────────────────────────────────────────
   windows:
@@ -136,7 +126,7 @@ jobs:
   # and belongs in the per-PR tier so C-ABI drift fails fast on every PR.
 
   # ── Required aggregate — red-on-skip (mirrors tier1-required in tier1.yml) ──
-  # Tier 2 is green-on-skip: a PR without `run-tier2` skips the `windows` matrix
+  # Tier 2 is green-on-skip: an un-dispatched PR runs no `windows` matrix
   # and GitHub scores the skip as success, so "Tier 2" reports green having built
   # nothing. This REQUIRED job is RED unless `filter` AND the `windows` matrix ran
   # to success, so a PR cannot merge on a Windows matrix that never ran; fire
@@ -157,7 +147,7 @@ jobs:
           fail=0
           for kv in "filter=$f" "windows=$w"; do
             if [ "${kv#*=}" != "success" ]; then
-              echo "::error::Tier 2 job '${kv%%=*}' did not run to success (got '${kv#*=}'). The Windows matrix must actually run — fire run-tier2 (or workflow_dispatch) before merge."
+              echo "::error::Tier 2 job '${kv%%=*}' did not run to success (got '${kv#*=}'). The Windows matrix must actually run — dispatch Tier 2 (workflow_dispatch) on the branch before merge."
               fail=1
             fi
           done

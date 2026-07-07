@@ -170,6 +170,7 @@ public:
 private:
     [[nodiscard]] static std::size_t overlay_cap_for(std::size_t n) noexcept;
     void build(frame_view const& frame) noexcept;  // shared build impl (both ctors)
+    void check_alive() const noexcept;
 
     // 062 T005: dict-aware sub-view-over-slice builder. Placement-constructs
     // a sub-OffsetTable into `mr` (an arena-owned pointer; never freed
@@ -192,6 +193,9 @@ private:
                                                            detail::generation_token gen) noexcept;
 
     std::byte const* frame_base_ = nullptr;  // for group_slice (ptr,len)
+#ifndef NDEBUG
+    detail::generation_token gen_{};
+#endif
     Config cfg_{};                           // caller-tunable caps (FR-015 / [2b §1.2])
     void const* opaque_dict_ = nullptr;
     group_member_fn_t group_member_fn_ = nullptr;
