@@ -9,9 +9,16 @@ name: Tier 2 — Windows CI
 on:
   push:
     branches: ["main"]
-  # DISPATCH-ONLY on PRs (see tier1.yml) — no pull_request / label trigger.
-  # Validate a PR with `gh workflow run "Tier 2 — Windows CI" --ref <branch>`;
-  # the tier2-required check lands on the head SHA. Retires the run-tier2 label.
+  # PRs run in pull_request context so tier2-required counts toward branch
+  # protection (see tier1.yml — a workflow_dispatch run does NOT satisfy the PR
+  # merge gate). The Windows matrix stays on-demand via the `filter` job: it
+  # SKIPS until BOTH gate-a and gate-b are satisfied — the SAME (Gate A ∧ Gate B)
+  # condition as tier1/tier3, so the single gate-label event co-fires all three
+  # to green-latest (retires the run-tier2 label, whose sequential labeled events
+  # left the other tiers' latest run a skip). push:main is the post-merge gate.
+  pull_request:
+    types: [opened, reopened, synchronize, labeled, unlabeled, edited]
+    branches: ["**"]
   workflow_dispatch:
 
 # CONAN_HOME is set on the Windows job ONLY (it is a Windows path). A
@@ -19,18 +26,110 @@ on:
 # value", so it is scoped to the windows job rather than set globally.
 
 jobs:
-  # Runs on push:main or workflow_dispatch (dispatch-only; no PR/label trigger)
+  # Gate-precheck (UNIFORM with tier1/tier3): the Windows matrix runs on push:main
+  # and workflow_dispatch unconditionally, and on a PR only once BOTH gates clear
+  # (Gate A ∧ Gate B). Same logic as tier1's gate-precheck minus the python bits;
+  # keep the three copies in sync if the gate rules change.
   filter:
-    name: "Check trigger"
+    name: "Check trigger (Gate A + Gate B)"
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: read
     outputs:
       should_run: ${{ steps.check.outputs.should_run }}
     steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
       - id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          # Dispatch-only: the only triggers are push:main and workflow_dispatch,
-          # both of which run the Windows matrix. (run-tier2 label scheme retired.)
-          echo "should_run=true" >> $GITHUB_OUTPUT
+          set -o pipefail
+
+          # ── Non-PR events: trusted, always run ──────────────────────────
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "Event '${{ github.event_name }}' is not a pull_request — Tier 2 runs unconditionally."
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+          PR_NUMBER="${{ github.event.pull_request.number }}"
+          git diff --name-only "$BASE_SHA" "$HEAD_SHA" > /tmp/changed.txt
+          echo "Changed files:"; cat /tmp/changed.txt
+
+          # ── Shared auto-waive (mirror gate-a.yml / gate-b.yml §6) ───────
+          WS_EMPTY=false
+          if [ -z "$(git diff -w "$BASE_SHA" "$HEAD_SHA")" ]; then
+            WS_EMPTY=true
+          fi
+          NON_DOC=$(grep -Ev '^[^/]*\.md$|^docs/|^book/|^README' /tmp/changed.txt || true)
+          SPECIFY_DOCS=$(grep -E '^\.specify/[^/]+\.md$' /tmp/changed.txt || true)
+          PURE_DOC=false
+          if [ -z "$NON_DOC" ] && [ -z "$SPECIFY_DOCS" ]; then
+            PURE_DOC=true
+          fi
+
+          LABELS=$(gh pr view "$PR_NUMBER" --json labels --jq '.labels[].name' || true)
+          BODY=$(gh pr view "$PR_NUMBER" --json body --jq '.body' || true)
+
+          # ── Gate A (mirror gate-a.yml) ──────────────────────────────────
+          GATE_A_OK=false
+          if [ "$WS_EMPTY" = true ] || [ "$PURE_DOC" = true ]; then
+            echo "Gate A: auto-waived (whitespace-only or pure-doc)."
+            GATE_A_OK=true
+          else
+            TRIGGER_RE='^(include/|src/|codegen/|\.specify/[^/]+\.md$)'
+            if [ -z "$(grep -E "$TRIGGER_RE" /tmp/changed.txt || true)" ]; then
+              echo "Gate A: no trigger paths touched — does not apply."
+              GATE_A_OK=true
+            elif echo "$LABELS" | grep -qx 'gate-a-done'; then
+              echo "Gate A: gate-a-done present."
+              GATE_A_OK=true
+            elif echo "$LABELS" | grep -qx 'gate-a-waived' && echo "$BODY" | awk '
+                BEGIN { found = 0; rationale = 0 }
+                /^##+[[:space:]]*[Gg]ate[[:space:]]*[Aa]/ { found = 1; next }
+                found && /[^[:space:]]/ { rationale = 1 }
+                END { exit (rationale ? 0 : 1) }'; then
+              echo "Gate A: waived with rationale in PR body."
+              GATE_A_OK=true
+            else
+              echo "Gate A: NOT satisfied (trigger paths touched, no gate-a-done/waived)."
+            fi
+          fi
+
+          # ── Gate B (mirror gate-b.yml) ──────────────────────────────────
+          GATE_B_OK=false
+          if [ "$WS_EMPTY" = true ] || [ "$PURE_DOC" = true ]; then
+            echo "Gate B: auto-waived (whitespace-only or pure-doc)."
+            GATE_B_OK=true
+          elif echo "$LABELS" | grep -qx 'gate-b-done'; then
+            echo "Gate B: gate-b-done present."
+            GATE_B_OK=true
+          elif echo "$LABELS" | grep -qx 'gate-b-waived' && echo "$BODY" | awk '
+              BEGIN { found = 0; rationale = 0 }
+              /^##+[[:space:]]*[Gg]ate[[:space:]]*[Bb]/ { found = 1; next }
+              found && /[^[:space:]]/ { rationale = 1 }
+              END { exit (rationale ? 0 : 1) }'; then
+            echo "Gate B: waived with rationale in PR body."
+            GATE_B_OK=true
+          else
+            echo "Gate B: NOT satisfied (no gate-b-done/waived)."
+          fi
+
+          # ── Verdict — UNIFORM gate: run iff BOTH gates clear ─────────────
+          if [ "$GATE_A_OK" = true ] && [ "$GATE_B_OK" = true ]; then
+            echo "Gates satisfied — Tier 2 Windows matrix will run."
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::Gates not yet satisfied (A=$GATE_A_OK B=$GATE_B_OK) — Tier 2 SKIPPED to save CI. Red enforcement (if any) comes from the gate-a / gate-b workflows."
+            echo "should_run=false" >> "$GITHUB_OUTPUT"
+          fi
+          exit 0
 
   # ── Windows build / test matrix ──────────────────────────────────────────
   windows:
@@ -126,12 +225,12 @@ jobs:
   # and belongs in the per-PR tier so C-ABI drift fails fast on every PR.
 
   # ── Required aggregate — red-on-skip (mirrors tier1-required in tier1.yml) ──
-  # Tier 2 is green-on-skip: an un-dispatched PR runs no `windows` matrix
+  # Tier 2 is green-on-skip: a pre-gate PR runs no `windows` matrix
   # and GitHub scores the skip as success, so "Tier 2" reports green having built
   # nothing. This REQUIRED job is RED unless `filter` AND the `windows` matrix ran
-  # to success, so a PR cannot merge on a Windows matrix that never ran; fire
-  # `run-tier2` (or a workflow_dispatch) to run the matrix and turn it green.
-  # INERT until branch protection is set to REQUIRE the "tier2-required" check.
+  # to success, so a PR cannot merge on a Windows matrix that never ran; satisfy
+  # Gate A + Gate B (gate-a-done / gate-b-done) to fire the matrix and turn it
+  # green. Runs in pull_request context, so it satisfies branch protection.
   # Ref: feedback_ci_gate_observes_not_asserts_witness_skips_into_green.
   tier2-required:
     name: tier2-required
@@ -147,7 +246,7 @@ jobs:
           fail=0
           for kv in "filter=$f" "windows=$w"; do
             if [ "${kv#*=}" != "success" ]; then
-              echo "::error::Tier 2 job '${kv%%=*}' did not run to success (got '${kv#*=}'). The Windows matrix must actually run — dispatch Tier 2 (workflow_dispatch) on the branch before merge."
+              echo "::error::Tier 2 job '${kv%%=*}' did not run to success (got '${kv#*=}'). The Windows matrix must actually run — satisfy Gate A + Gate B (gate-a-done / gate-b-done) so the matrix fires before merge."
               fail=1
             fi
           done
