@@ -609,3 +609,82 @@ TEST(NestedGroupRead, RealDictionaryMassQuoteTwoQuoteEntriesPerInstancePrices) {
     ASSERT_TRUE(offer1.has_value()) << "entries[1].offer_px() must have value";
     EXPECT_EQ(*offer1, parse_decimal("20.20", &arena));
 }
+
+// Gate B PR#176 r1, fix queue item 1(i): cache-poison counter-test. Real
+// FIX44.xml top-level tag 296 (NoQuoteSets) collides between MassQuote's
+// QuotSetGrp (members incl. QuoteSetValidUntilTime(367), declared SECOND in
+// FIX44.xml:3350) and MassQuoteAcknowledgement's QuotSetAckGrp (no 367,
+// declared FIRST, FIX44.xml:3341) — so the legacy bare/global-first-seen
+// store resolves 296 to the Ack member set. Before the root-context ctor
+// seed (parser.hpp dict-aware MessageView ctors), a RAW
+// `offsets().group_slices(296)` call — issued before any typed group<>()
+// seeds the context — ran under the empty `{msg_type=""}` context, missed
+// the context-scoped store, fell back to bare/Ack membership, and truncated
+// the QuoteSet extent before 367. Because `group_slices()` caches by no_tag
+// ONLY (offset_table.cpp), that wrong/truncated slice was then also served,
+// stale, to the CORRECTLY-seeded typed `mv.group<296,...>()` call that
+// followed — poisoning the very path 063 claims to have fixed.
+//
+// Mutation-proven: reverting the ctor seed in parser.hpp (both dict-aware
+// MessageView ctors) makes BOTH assertions below fail — the raw slice omits
+// 367 (`raw_sv.find("367=")` == npos) AND the typed accessor loses it
+// (cache-poisoned by the raw call).
+TEST(NestedGroupRead, RealDictionaryMassQuote296RootContextSeededAtCtorNoCachePoison) {
+    std::string body =
+        "35=i\x01"
+        "117=Q1\x01"
+        "296=1\x01"
+        "302=SET0\x01"
+        "367=20260101-00:00:00\x01"
+        "304=1\x01"
+        "295=1\x01"
+        "299=E0\x01"
+        "132=10.10\x01"
+        "133=10.20\x01";
+
+    std::pmr::monotonic_buffer_resource arena{16384};
+
+    auto const dict_path = std::filesystem::path{FIXPP_DICT_DATA_DIR} / "FIX44.xml";
+    fixpp::dict::XmlLoader loader;
+    auto dict = loader.load(dict_path, &arena);
+    auto tv = dict.as_table_view();
+
+    auto buf = make_frame(body);
+    fixpp::wire::pmr_carry_buffer carry{buf.size(), &arena};
+    fixpp::wire::Framer fr{};
+    fixpp::wire::frame_view fvs[1]{};
+    auto framed = fr.feed(
+        std::span<const std::byte>{buf.data(), buf.size()}, carry,
+        std::span<fixpp::wire::frame_view>{fvs, 1});
+    ASSERT_TRUE(framed.has_value());
+    ASSERT_FALSE(framed->empty());
+
+    fixpp::wire::Parser<fixpp::wire::access_mode::Index> parser{tv};
+    auto mv_exp = parser.parse((*framed)[0], &arena);
+    ASSERT_TRUE(mv_exp.has_value());
+
+    // 1) The RAW offsets().group_slices(296) call, issued BEFORE any typed
+    //    group<>() call on this view, must already resolve the full
+    //    QuotSetGrp membership (incl. 367) — proving the ROOT context is
+    //    seeded at construction, not lazily by group<>().
+    auto raw_slices = mv_exp->offsets().group_slices(296);
+    ASSERT_EQ(raw_slices.size(), 1U);
+    std::string_view const raw_sv{reinterpret_cast<char const*>(raw_slices[0].data),
+                                  raw_slices[0].len};
+    EXPECT_NE(raw_sv.find("367="), std::string_view::npos)
+        << "raw offsets().group_slices(296), called before any typed group<>() seed, must "
+           "resolve the full MassQuote QuotSetGrp membership (incl. 367) — got: "
+        << raw_sv;
+
+    // 2) The typed path, called AFTER the raw call above, must NOT inherit a
+    //    poisoned no_tag-keyed cache entry from it.
+    fixpp::v44::MassQuote mq{*mv_exp};
+    auto sets = mq.quote_sets();
+    ASSERT_EQ(sets.size(), 1U);
+    auto qs0 = sets[0];
+    auto vut = qs0.quote_set_valid_until_time();
+    ASSERT_TRUE(vut.has_value())
+        << "typed QuoteSet[0].quote_set_valid_until_time() (367) must resolve — cache-poisoned "
+           "by the preceding raw group_slices(296) call if absent";
+    EXPECT_EQ(*vut, "20260101-00:00:00");
+}

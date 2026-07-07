@@ -43,6 +43,8 @@
 #include "support/frame_view_factory.hpp"
 #include "support/mock_dict_table.hpp"  // has group_member_tags interface
 #include <fixpp/dict/table_view.hpp>
+#include <fixpp/dict/dictionary.hpp>
+#include <fixpp/dict/xml_loader.hpp>
 
 using fixpp::wire::MessageView;
 using fixpp::wire::access_mode;
@@ -1714,6 +1716,97 @@ TEST(MessageReadGroup, NestedGroupEmptyGroupCountLastField) {
     // Count found but no delimiter follows → empty group → FIXPP_ERR_OK (count==0)
     EXPECT_EQ(fixpp_group_get_nested_group(grp, 0, 539, &nested, &nc), FIXPP_ERR_OK);
     EXPECT_EQ(nc, 0U);
+}
+
+// Gate B PR#176 r1, fix queue item 1(ii): C-ABI top-level colliding-group
+// read. Reproduces the real FIX44.xml reused-tag collision on top-level tag
+// 296 (NoQuoteSets) minimally: MassQuoteAcknowledgement's QuotSetAckGrp
+// (declared FIRST → wins the legacy bare/global-first-seen store; members
+// {302, 304}, no 367) vs MassQuote's QuotSetGrp (declared SECOND; members
+// {302, 367, 304}). Before the root-context ctor seed (parser.hpp dict-aware
+// MessageView ctors), `fixpp_msg_get_group()` (`offsets.group_slices()`
+// directly, no typed group<>() call anywhere on this path) ran under the
+// empty `{msg_type=""}` context, missed the context-scoped store, fell back
+// to bare/Ack membership, and truncated the QuoteSet extent before 367 —
+// so a real, valid MassQuote's 367 field was unreachable via the public
+// C-ABI. Mutation-proven: reverting the ctor seed makes
+// fixpp_group_get_field_string(grp, 0, 367, ...) return FIXPP_ERR_TAG_NOT_FOUND
+// instead of FIXPP_ERR_OK.
+TEST(MessageReadGroup, TopLevelCollidingGroup296CAbiReadsFullMassQuoteExtent) {
+    static constexpr std::string_view kMassQuote296CollisionXml = R"xml(
+<fix major="4" minor="4">
+  <header>
+    <field number="8"  name="BeginString"  required="Y"/>
+    <field number="9"  name="BodyLength"   required="Y"/>
+    <field number="35" name="MsgType"      required="Y"/>
+    <field number="10" name="CheckSum"     required="Y"/>
+  </header>
+  <trailer>
+    <field number="10" name="CheckSum" required="Y"/>
+  </trailer>
+  <messages>
+    <message name="MassQuoteAcknowledgement" msgtype="b" msgcat="app">
+      <group number="296" name="NoQuoteSets" required="N">
+        <field number="302" name="QuoteSetID" required="N"/>
+        <field number="304" name="TotNoQuoteEntries" required="N"/>
+      </group>
+    </message>
+    <message name="MassQuote" msgtype="i" msgcat="app">
+      <field number="117" name="QuoteID" required="Y"/>
+      <group number="296" name="NoQuoteSets" required="Y">
+        <field number="302" name="QuoteSetID" required="Y"/>
+        <field number="367" name="QuoteSetValidUntilTime" required="N"/>
+        <field number="304" name="TotNoQuoteEntries" required="Y"/>
+      </group>
+    </message>
+  </messages>
+  <fields>
+    <field number="8"   name="BeginString"  type="STRING"/>
+    <field number="9"   name="BodyLength"   type="INT"/>
+    <field number="35"  name="MsgType"      type="STRING"/>
+    <field number="10"  name="CheckSum"     type="STRING"/>
+    <field number="117" name="QuoteID"      type="STRING"/>
+    <field number="296" name="NoQuoteSets"  type="NUMINGROUP"/>
+    <field number="302" name="QuoteSetID"   type="STRING"/>
+    <field number="367" name="QuoteSetValidUntilTime" type="UTCTIMESTAMP"/>
+    <field number="304" name="TotNoQuoteEntries" type="INT"/>
+  </fields>
+</fix>
+)xml";
+
+    std::pmr::monotonic_buffer_resource arena;
+    auto dict = fixpp::dict::XmlLoader{}.load_from_string(kMassQuote296CollisionXml, &arena);
+    auto tv = dict.as_table_view();
+
+    auto buf = make_raw_frame(
+        "35=i\x01"
+        "117=Q1\x01"
+        "296=1\x01"
+        "302=SET0\x01"
+        "367=20260101-00:00:00\x01"
+        "304=1\x01");
+    auto fv = fixpp::wire::test::make_frame_view(buf);
+    ASSERT_TRUE(fv.has_value());
+
+    Parser<access_mode::Index> parser{tv};
+    auto mv_res = parser.parse(*fv, &arena);
+    ASSERT_TRUE(mv_res.has_value());
+
+    InboundHandle h;
+    h.msg.view = &mv_res.value();
+
+    const fixpp_group_t* grp = nullptr;
+    size_t count = 0;
+    ASSERT_EQ(fixpp_msg_get_group(h.ptr(), 296, &grp, &count), FIXPP_ERR_OK);
+    ASSERT_EQ(count, 1U);
+    ASSERT_NE(grp, nullptr);
+
+    const char* v = nullptr;
+    size_t vlen = 0;
+    ASSERT_EQ(fixpp_group_get_field_string(grp, 0, 367, &v, &vlen), FIXPP_ERR_OK)
+        << "fixpp_msg_get_group(296) on a real MassQuote must resolve the FULL QuotSetGrp "
+           "extent (incl. 367) via the C-ABI, not the colliding QuotSetAckGrp truncation";
+    EXPECT_EQ(std::string_view(v, vlen), "20260101-00:00:00");
 }
 
 }  // namespace

@@ -102,7 +102,17 @@ public:
           opaque_dict_{opaque_dict},
           classify_fn_{classify_fn},
           group_member_fn_{group_member_fn},
-          unk_items_{mr} {}
+          unk_items_{mr} {
+        // Gate B PR#176 r1 root cause #1: seed the ROOT group_context ({msg_type,
+        // path=[]}) HERE, unconditionally, rather than lazily only in group<>()
+        // below. Every root group_slices(N) caller (C-ABI fixpp_msg_get_group,
+        // direct offsets().group_slices(), and the typed group<>() path) must
+        // agree on context so the no_tag-keyed cache (offset_table.cpp
+        // group_slices_) can never be poisoned by an unseeded call that runs
+        // before the typed path seeds it (table_ is fully built by this point —
+        // msg_type() reads via table_.find(35), valid post-construction).
+        table_.set_group_context(group_context{.msg_type = msg_type()});
+    }
 
     // FR-015 / [2b §1.2]: same as above but with caller-tunable caps.
     MessageView(frame_view const& frame, std::pmr::memory_resource* mr, OffsetTable::Config cfg,
@@ -116,7 +126,11 @@ public:
           opaque_dict_{opaque_dict},
           classify_fn_{classify_fn},
           group_member_fn_{group_member_fn},
-          unk_items_{mr} {}
+          unk_items_{mr} {
+        // See the sibling ctor above — same root group_context seed, same
+        // rationale (Gate B PR#176 r1 root cause #1).
+        table_.set_group_context(group_context{.msg_type = msg_type()});
+    }
 
     MessageView(frame_view const& frame, std::pmr::memory_resource* mr) noexcept
         requires(Mode == access_mode::Index)
