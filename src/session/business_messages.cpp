@@ -239,6 +239,8 @@ namespace {
     for (const auto& order : params.orders) {
         auto entry = orders_g->add_entry();
         if (!entry.has_value()) return std::unexpected(entry.error());
+        if (order.cl_ord_id.empty())
+            return std::unexpected(fixpp::core::error::wire_required_field_missing);
         if (auto r = entry->set_string(11, order.cl_ord_id); !r.has_value())
             return std::unexpected(r.error());
         if (auto r = entry->set_int(67, order.list_seq_no); !r.has_value())
@@ -252,6 +254,8 @@ namespace {
         for (const auto& party : order.parties) {
             auto pentry = parties_g->add_entry();
             if (!pentry.has_value()) return std::unexpected(pentry.error());
+            if (party.party_id.empty())
+                return std::unexpected(fixpp::core::error::wire_required_field_missing);
             if (auto r = pentry->set_string(448, party.party_id); !r.has_value())
                 return std::unexpected(r.error());
             if (auto r = pentry->set_char(447, party.party_id_source); !r.has_value())
@@ -264,6 +268,8 @@ namespace {
             for (const auto& sub : party.sub_ids) {
                 auto sentry = subs_g->add_entry();
                 if (!sentry.has_value()) return std::unexpected(sentry.error());
+                if (sub.party_sub_id.empty())
+                    return std::unexpected(fixpp::core::error::wire_required_field_missing);
                 if (auto r = sentry->set_string(523, sub.party_sub_id); !r.has_value())
                     return std::unexpected(r.error());
                 if (auto r = sentry->set_int(803, sub.party_sub_id_type); !r.has_value())
@@ -273,6 +279,8 @@ namespace {
         }
         if (auto r = bb.group_end(*parties_g); !r.has_value()) return std::unexpected(r.error());
 
+        if (order.symbol.empty())
+            return std::unexpected(fixpp::core::error::wire_required_field_missing);
         if (auto r = entry->set_string(55, order.symbol); !r.has_value())
             return std::unexpected(r.error());
         // Validate side per-exemplar (FR-003 hand-validated char domain, mirrors D/8).
@@ -351,6 +359,8 @@ namespace {
     for (const auto& party : params.parties) {
         auto pentry = parties_g->add_entry();
         if (!pentry.has_value()) return std::unexpected(pentry.error());
+        if (party.party_id.empty())
+            return std::unexpected(fixpp::core::error::wire_required_field_missing);
         if (auto r = pentry->set_string(448, party.party_id); !r.has_value())
             return std::unexpected(r.error());
         if (auto r = pentry->set_char(447, party.party_id_source); !r.has_value())
@@ -363,6 +373,8 @@ namespace {
         for (const auto& sub : party.sub_ids) {
             auto sentry = subs_g->add_entry();
             if (!sentry.has_value()) return std::unexpected(sentry.error());
+            if (sub.party_sub_id.empty())
+                return std::unexpected(fixpp::core::error::wire_required_field_missing);
             if (auto r = sentry->set_string(523, sub.party_sub_id); !r.has_value())
                 return std::unexpected(r.error());
             if (auto r = sentry->set_int(803, sub.party_sub_id_type); !r.has_value())

@@ -226,6 +226,115 @@ TEST(ExemplarBuildFailClosed, FailClosed_EmptyRequiredString_LaterFields) {
     assert_unchanged(buf, "AS empty symbol");
 }
 
+// ── AC-2 case 1c: PER-ENTRY empty required/delimiter strings (gate-b/r2 RC#1)
+// FailClosed_EmptyRequiredString(_LaterFields) above pin the MESSAGE-LEVEL
+// required-string guards. This extends the SAME contract (FR-003/C4 empty-
+// required + C3/INV-5 delimiter-first) one nesting level deeper: the
+// per-ENTRY required/delimiter strings inside E's/AS's repeating groups
+// (business_messages.cpp build_new_order_list / build_allocation_report),
+// which previously reached wire::body_builder::set_string unguarded (an
+// empty value there is NOT rejected by INV-5's delimiter-first/non-empty-
+// instance check — is_clean_field_value("") is true) and so the malformed
+// empty-valued/empty-delimiter field silently made it onto the wire.
+TEST(ExemplarBuildFailClosed, FailClosed_EmptyRequiredString_PerEntry) {
+    std::pmr::monotonic_buffer_resource arena{4096};
+    auto qty = make_decimal("10", &arena);
+    auto px = make_decimal("50", &arena);
+
+    std::array<std::byte, kBufSize> buf{};
+
+    // (a) E: one order, EMPTY cl_ord_id(11, delimiter), else valid.
+    buf.fill(kSentinel);
+    {
+        fixpp::session::NewOrderListOrder order{
+            "", 1, '1', "MSFT", qty, std::span<const fixpp::session::NewOrderListParty>{}};
+        fixpp::session::NewOrderListParams params{
+            "LIST1", 3, 1, std::span<const fixpp::session::NewOrderListOrder>{&order, 1}};
+        auto r = fixpp::session::build_new_order_list(std::span<std::byte>{buf}, params);
+        ASSERT_FALSE(r.has_value()) << "E: order.cl_ord_id empty must fail-closed";
+        EXPECT_EQ(r.error(), fixpp::core::error::wire_required_field_missing);
+    }
+    assert_unchanged(buf, "E order.cl_ord_id empty");
+
+    // (b) E: one order, EMPTY symbol(55), else valid.
+    buf.fill(kSentinel);
+    {
+        fixpp::session::NewOrderListOrder order{
+            "ORD1", 1, '1', "", qty, std::span<const fixpp::session::NewOrderListParty>{}};
+        fixpp::session::NewOrderListParams params{
+            "LIST1", 3, 1, std::span<const fixpp::session::NewOrderListOrder>{&order, 1}};
+        auto r = fixpp::session::build_new_order_list(std::span<std::byte>{buf}, params);
+        ASSERT_FALSE(r.has_value()) << "E: order.symbol empty must fail-closed";
+        EXPECT_EQ(r.error(), fixpp::core::error::wire_required_field_missing);
+    }
+    assert_unchanged(buf, "E order.symbol empty");
+
+    // (c) E: one order with one present party, EMPTY party_id(448, delimiter).
+    buf.fill(kSentinel);
+    {
+        fixpp::session::NewOrderListParty party{
+            "", 'D', 1, std::span<const fixpp::session::NewOrderListPartySubId>{}};
+        fixpp::session::NewOrderListOrder order{
+            "ORD1", 1, '1', "MSFT", qty,
+            std::span<const fixpp::session::NewOrderListParty>{&party, 1}};
+        fixpp::session::NewOrderListParams params{
+            "LIST1", 3, 1, std::span<const fixpp::session::NewOrderListOrder>{&order, 1}};
+        auto r = fixpp::session::build_new_order_list(std::span<std::byte>{buf}, params);
+        ASSERT_FALSE(r.has_value()) << "E: party.party_id empty must fail-closed";
+        EXPECT_EQ(r.error(), fixpp::core::error::wire_required_field_missing);
+    }
+    assert_unchanged(buf, "E party.party_id empty");
+
+    // (d) E: one order, one present party, one present sub-id, EMPTY
+    // party_sub_id(523, delimiter).
+    buf.fill(kSentinel);
+    {
+        fixpp::session::NewOrderListPartySubId sub{"", 1};
+        fixpp::session::NewOrderListParty party{
+            "PID1", 'D', 1, std::span<const fixpp::session::NewOrderListPartySubId>{&sub, 1}};
+        fixpp::session::NewOrderListOrder order{
+            "ORD1", 1, '1', "MSFT", qty,
+            std::span<const fixpp::session::NewOrderListParty>{&party, 1}};
+        fixpp::session::NewOrderListParams params{
+            "LIST1", 3, 1, std::span<const fixpp::session::NewOrderListOrder>{&order, 1}};
+        auto r = fixpp::session::build_new_order_list(std::span<std::byte>{buf}, params);
+        ASSERT_FALSE(r.has_value()) << "E: sub.party_sub_id empty must fail-closed";
+        EXPECT_EQ(r.error(), fixpp::core::error::wire_required_field_missing);
+    }
+    assert_unchanged(buf, "E sub.party_sub_id empty");
+
+    // (e) AS: one present party, EMPTY party_id(448, delimiter).
+    buf.fill(kSentinel);
+    {
+        fixpp::session::AllocationReportParty party{
+            "", 'D', 1, std::span<const fixpp::session::AllocationReportPartySubId>{}};
+        AllocationReportParams params{
+            "RPT1", '0', 9, 0, 0, '1', qty, px, "20240101", "MSFT",
+            std::span<const AllocationReportParty>{&party, 1}};
+        auto r = fixpp::session::build_allocation_report(std::span<std::byte>{buf}, params);
+        ASSERT_FALSE(r.has_value()) << "AS: party.party_id empty must fail-closed";
+        EXPECT_EQ(r.error(), fixpp::core::error::wire_required_field_missing);
+    }
+    assert_unchanged(buf, "AS party.party_id empty");
+
+    // (f) AS: one present party, one present sub-id, EMPTY party_sub_id(523,
+    // delimiter).
+    buf.fill(kSentinel);
+    {
+        fixpp::session::AllocationReportPartySubId sub{"", 1};
+        fixpp::session::AllocationReportParty party{
+            "PID1", 'D', 1,
+            std::span<const fixpp::session::AllocationReportPartySubId>{&sub, 1}};
+        AllocationReportParams params{
+            "RPT1", '0', 9, 0, 0, '1', qty, px, "20240101", "MSFT",
+            std::span<const AllocationReportParty>{&party, 1}};
+        auto r = fixpp::session::build_allocation_report(std::span<std::byte>{buf}, params);
+        ASSERT_FALSE(r.has_value()) << "AS: sub.party_sub_id empty must fail-closed";
+        EXPECT_EQ(r.error(), fixpp::core::error::wire_required_field_missing);
+    }
+    assert_unchanged(buf, "AS sub.party_sub_id empty");
+}
+
 // ── AC-2 case 2: control byte / SOH in a value ────────────────────────────────
 // The shared guard (is_clean_field_value) lives in wire::body_builder::
 // append_string_field (src/wire/body_builder.cpp:72-74, invoked from field()/
