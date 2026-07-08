@@ -49,17 +49,15 @@
 // every builder's public API. Reachability was verified by grepping the call
 // sites in src/session/business_messages.cpp before writing each assertion
 // (cited per TEST below):
-//   - is_valid_side (business_messages.cpp is_valid_side, called at line 135
-//     [D] and line 192 [8] ONLY) is NOT called by build_order_cancel_reject,
-//     build_new_order_list, or build_allocation_report — 9 has no side field
-//     at all; E's NewOrderListOrder::side and AS's AllocationReportParams::side
-//     are serialized via entry->set_char()/bb.field(54,...), which route
-//     through body_builder::append_string_field (single-char string_view) —
-//     that guard only rejects non-printable/control bytes (is_clean_field_
-//     value), NOT the '1'/'2' domain. An out-of-range-but-printable side char
-//     (e.g. '9') on E/AS is therefore NOT rejected by the current builders —
-//     this file does NOT fabricate a passing negative test for that case; see
-//     the FailClosed_OutOfRangeSide comment below.
+//   - is_valid_side (business_messages.cpp is_valid_side) is called by
+//     build_new_order_single (D) and build_execution_report (8), AND by
+//     build_new_order_list (E, business_messages.cpp:279) and
+//     build_allocation_report (AS, business_messages.cpp:335) — 9 has no
+//     side field at all, so it is not exercised. All four side-bearing
+//     exemplars (D/8/E/AS) hand-validate the '1'/'2' domain before the
+//     value ever reaches body_builder's printable/non-control guard; an
+//     out-of-range-but-printable side char (e.g. '9') is rejected on every
+//     one of them — see FailClosed_OutOfRangeSide below.
 //   - is_valid_utc_timestamp (business_messages.cpp, called at line 139) is
 //     used ONLY by build_new_order_single — no other exemplar has a
 //     UTCTimestamp-typed field. FailClosed_MalformedTimestamp therefore
@@ -290,16 +288,13 @@ TEST(ExemplarBuildFailClosed, FailClosed_SohInValue) {
 }
 
 // ── AC-2 case 3: out-of-range char / side ─────────────────────────────────────
-// is_valid_side (business_messages.cpp:73) is called ONLY by build_new_order_
-// single (line 135) and build_execution_report (line 192). 9 has no side
-// field. E's NewOrderListOrder::side and AS's AllocationReportParams::side are
-// serialized via entry->set_char()/bb.field(54,...) directly into
-// body_builder, which only enforces "printable, non-control" (is_clean_field_
-// value) — NOT the '1'/'2' domain. A printable-but-out-of-range side (e.g.
-// '9') on E/AS is therefore NOT rejected by the current builders: this is a
-// genuine reachability gap (not fabricated), left for a future hardening
-// task — see the escalation note in this round's report. Only D/8 are
-// witnessed here.
+// is_valid_side (business_messages.cpp:73) is called by build_new_order_single
+// (D), build_execution_report (8), build_new_order_list (E,
+// business_messages.cpp:279), and build_allocation_report (AS,
+// business_messages.cpp:335) — 9 has no side field, so it is not exercised.
+// A printable-but-out-of-range side (e.g. '9') is rejected on all four
+// side-bearing exemplars: is_valid_side runs before the value ever reaches
+// body_builder's printable/non-control guard.
 TEST(ExemplarBuildFailClosed, FailClosed_OutOfRangeSide) {
     std::pmr::monotonic_buffer_resource arena{4096};
     auto qty = make_decimal("10", &arena);
