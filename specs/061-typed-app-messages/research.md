@@ -76,14 +76,20 @@ verified 2026-07-08 via CodeGraph/read against real headers + dictionary XML.
   `expected_t<std::span<std::byte>>`; on any invalid input or overflow, return a typed error and leave `out`
   untouched (all-or-nothing, INV-4). `body_builder` assembles into an internal buffer and copies to `out`
   only on full success — matching the 020 discipline (`scratch[1024]` → copy). **Buffer policy PINNED (was
-  an open item — the NEW-P2 allocation gap):** the internal buffer is a **fixed scratch capped at the C-ABI
-  `kFrameCap` (3800 B)**, and `body_builder` carries **no `memory_resource`** on its ctor or `commit()`. A
-  body that would exceed 3800 B fails closed (typed error, `out` untouched). This is the simplest lifetime-
-  correct option — no per-call monotonic arena ([[feedback_monotonic_arena_percall_pmr_vector_leaks]]) and no
-  unbounded growth ([[feedback_build_resource_cap_oom]]). The 5 exemplar bodies (incl. group-heavy E/AS) are
-  well under 3800 B. A growable accumulator is **rejected** here: it would force an `mr` onto the API and
-  ripple to all 5 builder signatures + FR-015a; if FR-015a ever needs one, its `mr` must be a reused/session
-  resource, never per-call — but that is an FR-015a decision, out of 061 scope.
+  an open item — the NEW-P2 allocation gap):** the **serialized body** is capped at the C-ABI `kFrameCap`
+  (3800 B); an over-cap body fails closed (typed error, `out` untouched). **AMENDED (implement-time,
+  user-ruled 2026-07-08):** the intermediate accumulation tree is held in an **internal fixed member buffer +
+  `monotonic_buffer_resource` (null upstream)** — zero global heap, bounded, no per-call arena burn (reused
+  member arena, freed at destruction — NOT the leaking per-call pattern of
+  [[feedback_monotonic_arena_percall_pmr_vector_leaks]]) and no unbounded growth
+  ([[feedback_build_resource_cap_oom]]; exhaustion → `bad_alloc` → caught → typed error). The original pin
+  ("no `memory_resource`, growable accumulator rejected") was superseded because count-precedence
+  grouped/nested accumulation needs a dynamic tree; the user chose to preserve zero-global-heap via a bounded
+  internal member arena (an mr, but not one on the API and not per-call) rather than accept global-heap
+  `std::vector`. `body_builder`'s public signature still carries NO `mr` param (the arena is a private
+  member), so no ripple to the 5 builder signatures or FR-015a. Gated by an honest global-`operator new`
+  counter test. `[const §VIII.5]` (zero heap) binds the inbound parse→fromApp path, not outbound builders —
+  this is a preserved-by-choice guarantee. The 5 exemplar bodies (incl. group-heavy E/AS) are well under 3800 B.
 - **Rationale**: caller-span is the 020 precedent, avoids allocator surprises, and is what FR-015a's
   generated builders will inherit.
 
@@ -119,7 +125,7 @@ verified 2026-07-08 via CodeGraph/read against real headers + dictionary XML.
   (`parser.hpp:135`). Factor a `tests/support/app_message_read_scaffold.hpp` (make_frame + dict-parse,
   BeginString-parameterized) so ~10 witnesses don't duplicate it.
 - **Rationale**: only the dict-backed path seeds root `group_context` + `group_member_fn`, so
-  `nol.orders()[i].parties()[j].party_id()`-style nested entry reads enumerate correctly (062/063). The
+  `nol.orders()[i].party_i_ds()[j].party_id()`-style nested entry reads enumerate correctly (062/063). The
   2-arg heuristic cannot slice groups. Entry accessor shapes (062/063): strings `[[clang::lifetimebound]]`
   no-arg; decimals take `std::pmr::memory_resource*`; char/int via `decode_field<T>`.
 
@@ -136,6 +142,8 @@ verified 2026-07-08 via CodeGraph/read against real headers + dictionary XML.
 ## Open items for `/speckit-plan` Phase 1 / `/tasks`
 - ~~Exact per-exemplar seed field lists~~ → **RESOLVED** (Gate A round 1): required-field-complete,
   `FIX44.xml`-cited seed tables now in `data-model.md` §3.1.
-- ~~`body_builder` internal-buffer sizing~~ → **RESOLVED** (Gate A round 1): fixed scratch capped at
-  `kFrameCap` (3800 B), no `memory_resource` (Decision 4).
+- ~~`body_builder` internal-buffer sizing~~ → **RESOLVED** (Gate A round 1; **AMENDED implement-time
+  2026-07-08 per user ruling** — see Decision 4): serialized body capped at `kFrameCap` (3800 B); intermediate
+  accumulation on an internal fixed member buffer + `monotonic_buffer_resource` (zero global heap, bounded,
+  fail-closed), NOT global-heap `std::vector` and NOT a per-call arena.
 - Golden provenance format (inline comment vs sidecar `.provenance`) → task detail.

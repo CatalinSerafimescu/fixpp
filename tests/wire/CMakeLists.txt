@@ -32,6 +32,7 @@ add_test(NAME wire_smoke COMMAND wire_smoke_test)
 # Foundational (Phase 2)
 add_wire_test(wire_view_test view_test.cpp)                            # T010
 add_wire_test(wire_conformance_test conformance/conformance_test.cpp)  # T009
+add_wire_test(wire_body_builder_test test_body_builder.cpp)            # 061-slim T005/T006
 
 # US1 / US2 / US3 / US4 test executables are registered as their
 # corresponding test tasks land (T011.. red-first per TDD).

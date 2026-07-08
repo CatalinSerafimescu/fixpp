@@ -30,12 +30,24 @@ to a caller span on success (fail-closed atomic). Mirrors the C-ABI `OutboundAcc
 called from `fixpp_msg_commit:727`). Because the exemplar author supplies `delimiter_tag`, `body_builder`
 enforces INV-5 with **no `wire→dictionary` edge**.
 
-**Buffer/allocation policy** (pinned — closes the research Decision 4 "fixed-scratch OR vector" open item):
-`body_builder` assembles into a **fixed internal scratch buffer capped at the C-ABI `kFrameCap` (3800 B)**
-and carries **no `memory_resource`** on the ctor or `commit()` — the simplest lifetime-correct option, no
-per-call arena ([[feedback_monotonic_arena_percall_pmr_vector_leaks]]). A body that would exceed the cap
-fails closed (typed error, `out` untouched). The 5 exemplar bodies are well under 3800 B; if FR-015a later
-needs a larger or growable accumulator, that is an FR-015a API decision, not 061's.
+**Buffer/allocation policy** (Decision 4, AMENDED at implement-time 2026-07-08 by user ruling — see below):
+`body_builder` accumulates its intermediate entry tree in an **internal fixed member buffer** (`std::array`,
+`kArenaCap`) via a member `std::pmr::monotonic_buffer_resource{buf, null_memory_resource()}` — **zero global
+heap** (`operator new` is never called; arena exhaustion throws → caught → fail-closed typed error), bounded,
+no per-call arena burn (the arena is a reused member, freed at object destruction, not a leaking per-call
+arena — [[feedback_monotonic_arena_percall_pmr_vector_leaks]]). The **serialized body** stays capped at the
+C-ABI `kFrameCap` (3800 B); an over-cap body fails closed (typed error, `out` untouched). This mirrors the
+C-ABI `OutboundAccumulator`'s arena model (which `body_builder` mirrors).
+
+> **Decision 4 amendment (implement-time, user-ruled 2026-07-08):** the original pin said "**no
+> `memory_resource`**, growable accumulator rejected." Implementation found that count-precedence
+> grouped/nested accumulation needs a dynamic tree; the as-first-built version used global-heap `std::vector`,
+> which broke the pre-existing D/8 no-heap guarantee (`Builder_NoHeap_CountingResource`, `[const §VIII.5]`).
+> The user ruled to **preserve zero-global-heap** by giving `body_builder` an INTERNAL fixed-buffer
+> `monotonic_buffer_resource` (an mr, but a bounded reused MEMBER one — Decision 4's *intent* of "no per-call
+> arena burn, bounded, fail-closed" is honored; only the literal "no mr" is superseded). Gated by an honest
+> global-`operator new` counter test. `[const §VIII.5]` (zero heap) binds the inbound parse→fromApp path, not
+> outbound builders, so this is a self-imposed guarantee preserved by choice, not a constitutional obligation.
 
 **Internal state** (not public): open-group LIFO stack; accumulated entries (recursive: scalar | group of
 instances, each instance a field list) — structurally the C-ABI `AccumulatorEntry`/`GroupInstance` shape.

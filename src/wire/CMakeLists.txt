@@ -9,6 +9,7 @@
 # and the dict::table_view value contract only.
 
 add_library(fixpp_wire STATIC
+  body_builder.cpp
   framer.cpp
   offset_table.cpp
   validator.cpp

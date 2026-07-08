@@ -1,0 +1,67 @@
+# API Requirements Quality Checklist: Typed Application Messages (061-slim)
+
+**Purpose**: Validate the *requirements* for the new public `wire::body_builder` + exemplar-builder surface and the fail-closed contract — quality, clarity, consistency, coverage — before implementation. Audience: Gate B reviewer.
+**Created**: 2026-07-08
+**Feature**: [spec.md](../spec.md) · [contracts/builder-shape-oracle.md](../contracts/builder-shape-oracle.md) · [data-model.md](../data-model.md)
+
+## Public Surface Definition & Boundary
+
+- [x] CHK001 Is the exact set of new public symbols enumerated (the `body_builder` members + the 3 new + 2 refactored exemplar builder declarations) and bounded against "no other new public surface"? [Completeness, Spec §FR-009, §SC-005] — PASS: FR-001 enumerates the `body_builder` member set (ctor/`field`×4/`group_begin`/`add_entry`/`entry_handle::set_*`/`entry.group_begin`/`group_end`/`commit`, cross-refed to data-model §1's table), FR-002 fixes the 5 exemplars (2 refactored D/8 + 3 new 9/E/AS) by name, and FR-009 closes the set ("MUST NOT introduce new wire-format, error-enum, or C-ABI surface beyond the `body_builder` + exemplar builder declarations and the header-install change"). Verified vs data-model §1/§2 tables — consistent.
+- [x] CHK002 Are the `body_builder` member signatures specified unambiguously and consistently between FR-001's prose and data-model §1's member table (post-F3 pointer)? [Consistency, Spec §FR-001, data-model §1] — PASS: FR-001 gives the free-function-shorthand form and explicitly forwards to data-model §1 for exact member signatures ("the exact member-function signatures are in `data-model.md` §1"); data-model §1's table matches FR-001's named members 1:1 (`group_begin(no_tag, delimiter_tag)`, `add_entry()`, `set_{string,char,int,decimal}`, nested `group_begin`, `group_end`, `commit(out)`). No drift found.
+- [x] CHK003 Is the layer placement of `body_builder` (`wire`, not `session`) and its permitted dependency edge (`wire→core` only, no `wire→dictionary`) stated as a requirement, not just a plan note? [Clarity, plan §Layer discipline, §FR-001] — PASS: FR-001 states "new header + TU under `include/fixpp/wire/`" (requirement-level, not just plan prose); plan.md §Layer discipline + data-model §1 Invariants both restate the `wire→core`-only edge (no `wire→dictionary`, delimiter author-supplied); tasks.md T007 makes it a gated check (`tools/check_layers.py` asserting only a `wire→core` edge). Requirement-level, plan-level, and task-level all agree.
+- [x] CHK004 Is the "MUST NOT reuse `wire::Writer` / MUST NOT invent a third group-write idiom" constraint stated in a way a reviewer can objectively check against the diff? [Measurability, Spec §FR-001] — PASS: FR-001's final sentence is a direct, diff-checkable negative assertion ("It MUST NOT reuse `wire::Writer`... and MUST NOT invent a third group-write idiom"); research.md Decision 3 gives the objective reason (`wire::Writer` always injects `8=/9=/10=`, `business_messages.cpp:24-27`, no body-only mode) — a reviewer greps the diff for a `wire::Writer` include/call in `body_builder.cpp` and for exactly one new group-write API surface.
+- [x] CHK005 Are the exemplar builder function signatures (return type `expected_t<span<byte>>`, `noexcept`, caller-span-first) specified for all 5, and consistent with the reused 020 D/8 signatures? [Consistency, data-model §2] — PASS: data-model §2 states the uniform signature `expected_t<span<byte>> build_<msg>(span<byte> out, <typed fields…>) noexcept`. Verified against the REAL existing 020 code (`src/session/business_messages.cpp:214-217`): `build_new_order_single(std::span<std::byte> out, ...) noexcept` returning `fixpp::core::expected_t<std::span<std::byte>>` — caller-span-first, `noexcept`, `expected_t<span<byte>>` return, exact match. `build_execution_report` (same file, :285) follows the identical shape.
+
+## Fail-Closed / Atomicity Contract (INV-4)
+
+- [x] CHK006 Is every invalid-input class that must fail closed enumerated (empty required string, control byte/SOH, out-of-range char/side, unformattable decimal, malformed UTCTimestamp, undersized buffer)? [Completeness, Spec §FR-003, contracts §C4] — PASS: FR-003 names the generic categories (empty required string, control byte/out-of-range char, unformattable decimal, malformed UTCTimestamp, insufficient buffer); contracts §C4 refines to the exact SOH/side wording and adds the named test-seam enumeration (`test_exemplar_build_failclosed.cpp`: empty required string, control-byte/SOH in value, out-of-range char/side, unformattable decimal, malformed UTCTimestamp, undersized buffer→untouched, group-still-open, empty instance, wrong-delimiter-first). "Control byte" is verified to already subsume SOH in the existing 020 code (`is_clean_field_value`, `business_messages.cpp:120`, which the 061 lift reuses per FR-001). Full set enumerated across FR-003+C4+tasks T016.
+- [x] CHK007 Is "leave the caller buffer untouched" defined precisely enough to be a discriminating assertion (no partial write, byte-for-byte unchanged) rather than a vague "atomic"? [Measurability, Spec §FR-003, §AC-2] — PASS: data-model §1 Invariants states INV-4 precisely ("all-or-nothing — no partial write to `out`"); contracts §C4 pins a named discriminating test case ("undersized buffer → **buffer untouched**") with its own test-seam home. Not a bare "atomic" adjective — the byte-for-byte-unchanged claim is directly testable and has a named assertion target.
+- [x] CHK008 Is the typed-error channel specified (which existing `wire_*` error is returned) without introducing a new `fixpp_error_t` value? [Clarity, Spec §FR-009, contracts §C6] — PASS: FR-009 + contracts §C6 both state "no new `fixpp_error_t` value" (objectively diff-checkable). The "existing `wire_*` error" channel is established by direct reuse of the 020 precedent — verified in the real code (`src/session/business_messages.cpp:219,226,231,236`: `wire_required_field_missing`, `wire_field_value_out_of_range`, `wire_invalid_field_format` already exist and are used today). Per-failure-case exact error-value selection (which of several existing `wire_*` values a given validation failure returns) is an implementation binding consistent with the 020 precedent, not a spec-level pin — matching how no prior feature pins that granularity either; the invariant that matters (typed error, no new enum value, buffer untouched) is fully specified.
+- [x] CHK009 Are the enum/char domains that each exemplar hand-validates specified per-exemplar (vs. deferred generic tables to FR-015a), so a reviewer knows the exact validation bar? [Coverage, Spec §FR-003] — PASS: FR-003's "hand-validated per exemplar (the 020 precedent); generic enum-range tables are out of scope (→ FR-015a)" is directly grounded in the REAL existing pattern (verified `is_valid_side`, `business_messages.cpp:125`, a hand-rolled per-field domain check) that the 3 new exemplars (9/E/AS) will extend for their own char/enum fields (e.g. OrdStatus/ExecType/PartyIDSource) — the representative-shape-oracle scoping (FR-002, "not every optional field") is the stated reason exhaustive per-value tables are deferred. A reviewer knows the bar: per-field hand checks mirroring 020, not generic dictionary-driven validation.
+
+## Group-Write API Grammar (INV-5)
+
+- [x] CHK010 Is the author-supplied `delimiter_tag` mechanism (no dictionary lookup) specified as the enforcement basis, and are the delimiter tags for `73/453/802` (→ `11/448/523`) stated? [Completeness, data-model §3, contracts §C3] — PASS: data-model §3.1 "Delimiter tags" states the exact mapping `NoOrders(73)→ClOrdID(11)`; `NoPartyIDs(453)→PartyID(448)`; `NoPartySubIDs(802)→PartySubID(523)`; contracts §C3 restates the mechanism ("author-supplied, no dictionary lookup") and the same E delimiter chain (`11,448,523`). Cross-verified against the real generated group entries (`G_73.cl_ord_id()`@tag 11, `G_453.party_id()`@tag 448, `G_802.party_sub_id()`@tag 523 in `Messages.hpp`) — the delimiter picks are each group's actual first-listed dictionary field.
+- [x] CHK011 Are the two `commit()` fail-closed group rejections (empty instance; first field ≠ `delimiter_tag`) stated as REQUIREMENTS with a named negative-witness home? [Clarity, Spec §FR-005, contracts §C4] — PASS: FR-001 states both legs as MUSTs ("`commit()` MUST fail-closed reject (a) an empty group instance and (b) an instance whose first field ≠ `delimiter_tag`"); contracts §C4 restates both with the named test home `tests/session/test_exemplar_build_failclosed.cpp` (also declared as a task, T016). Not merely implied — explicit REQUIREMENT wording + named file.
+- [x] CHK012 Is the LIFO open/close discipline (unbalanced group at `commit()` → typed error) specified, and distinguished from the count-of-zero and never-opened cases? [Consistency, data-model §1, contracts §C3] — PASS: data-model §1 Invariants (INV-4) states "`commit()` with any group still open → typed error" (LIFO-unbalanced case); contracts §C3's bracketed final sentence explicitly distinguishes it from BOTH other cases: `N==0` present-but-empty (optional group, count-0) vs. "never-opened → emit no `No<Group>` tag at all" (absent group). All three cases are named and kept textually distinct, not conflated.
+
+## Buffer / Allocation Policy
+
+- [x] CHK013 Is the buffer policy fully pinned (fixed internal scratch, 3800 B cap, NO `memory_resource`, over-cap → fail closed) with no residual "vector OR scratch" openness? [Clarity, data-model §Buffer/allocation policy] — PASS: data-model §1 "Buffer/allocation policy" is explicit and pinned ("fixed internal scratch buffer capped at the C-ABI `kFrameCap` (3800 B)... no `memory_resource`... A body that would exceed the cap fails closed"); research.md Decision 4 records this as CLOSING a prior open item ("Buffer policy PINNED (was an open item — the NEW-P2 allocation gap)") and explicitly REJECTS the growable-accumulator alternative. No residual openness.
+- [x] CHK014 Is the `kFrameCap` value's provenance clear that `body_builder` defines its OWN value-equal constant (the C-ABI symbol is TU-local, non-referenceable) — i.e., no false cross-TU dependency requirement? [Consistency, data-model §Buffer/allocation policy, tasks §T006] — PASS: tasks.md T006 states this precisely ("define `body_builder`'s own `constexpr std::size_t` value-equal to the C-ABI `kFrameCap`, which is file-`static`/TU-local at `src/capi/message_write.cpp:106` and NOT cross-TU referenceable; track hoisting a single shared constant as v1.x debt"). Verified against the real source: `static constexpr std::size_t kFrameCap = 3800;` at `src/capi/message_write.cpp:106` — genuinely file-static (no external linkage), confirming the "own constant, no false cross-TU dependency" framing is technically accurate, not merely asserted.
+
+## Packaging Surface (FR-008)
+
+- [x] CHK015 Is the header-install requirement scoped precisely (which `_codegen/include/fixpp/{v42,v44,v50sp2}` trees install; `_dispatch` + `vt11` excluded) and its consumability acceptance measurable (external TU compiles + links against installed tree)? [Completeness, Spec §FR-008, §SC-004] — PASS: FR-008 pins exactly `{v42,v44,v50sp2}` for install, `_dispatch`/`vt11` excluded; SC-004 states the measurable acceptance ("compiling and linking with no build-tree-private path"); research.md Decision 7 gives the concrete CMake mechanism (`install(DIRECTORY ... PATTERN "_dispatch" EXCLUDE`, `vt11` excluded). Verified against the real tree layout (`cmake/Codegen.cmake:6-7`: generated output is exactly `_codegen/include/fixpp/{v42,v44,v50sp2,vt11}/` + `_codegen/include/fixpp/_dispatch/`) — the named exclusions (`_dispatch`, `vt11`) are real, existing directories, not hypothetical.
+
+## Audit Result
+
+| Disposition | Count |
+|---|---|
+| PASS | 15 |
+| SPEC-FIXED | 0 |
+| DD-DECIDED | 0 |
+| WAIVED | 0 |
+| **Total** | 15 |
+
+### SPEC-FIXED items
+
+None.
+
+### DD-DECIDED items
+
+None.
+
+### WAIVED items
+
+None.
+
+Anchors spot-verified (all resolve against the real submodule tree, not merely "plausible"):
+- `src/capi/message_write.cpp:682-701` (`validate_group_grammar`) — exact function span confirmed.
+- `src/capi/message_write.cpp:106` (`kFrameCap = 3800`, file-`static`) — confirmed TU-local, non-referenceable.
+- `src/session/business_messages.cpp:214-217,285` (`build_new_order_single`/`build_execution_report` signatures) — confirmed `expected_t<span<byte>>(span<byte> out, ...) noexcept`.
+- `src/session/business_messages.cpp:120,125` (`is_clean_field_value`, `is_valid_side`) — confirmed real 020 hand-validation precedent.
+- `cmake/Codegen.cmake:6-7` (`_codegen/include/fixpp/{v42,v44,v50sp2,vt11}/`, `_dispatch/`) — confirmed real generated tree layout matches FR-008's named exclusions.
+- `Messages.hpp` generated accessors `G_73.cl_ord_id()`(11), `G_453.party_id()`(448), `G_802.party_sub_id()`(523) — confirmed the delimiter-tag picks in data-model §3.1 are each group's real first-listed field.
+
+Realizability sub-check: `wire::body_builder`, `group_handle`, `entry_handle` are value/handle types wholly OWNED by 061 (declared+defined within this feature's own header/TU, T005/T006) — no `unique_ptr<Dep>`/by-value member forward-declared to a type owned by a DIFFERENT deferred spec. Clean; see wire.md Audit Result for the full sub-check verdict (identical conclusion applies to both checklists' shared entities).

@@ -3,107 +3,55 @@
 // src/session/business_messages.cpp
 //
 // 020-g2-business-messages T008 — builder implementations.
+// 061-typed-app-messages (061-slim) T013/T014 — build_new_order_single and
+// build_execution_report refactored onto fixpp::wire::body_builder.
 //
-// Two minimal typed FIX 4.4 application-body builders:
+// Five typed FIX 4.4 application-body builders:
 //   build_new_order_single  — 35=D (NewOrderSingle, Limit-only, A-001)
 //   build_execution_report  — 35=8 (ExecutionReport, fully-filled, A-006)
+//   build_new_order_list, build_order_cancel_reject, build_allocation_report
+//     — 35=E/9/AS (061-typed-app-messages exemplars)
 //
-// Design (contracts/business-messages.md + data-model.md E1/E2 + INV-2/3/4):
+// Design (contracts/business-messages.md + data-model.md E1/E2 + INV-2/3/4;
+// 061 data-model.md §1/§2):
 //   - Emit the app BODY ONLY: lead with "35=MsgType\x01", then business fields.
 //   - NO session header tags (8/9/34/49/52/56) and NO "10=" trailer (INV-2).
 //     These are engine-stamped — this is intentional and differs from the admin
 //     builders (which use wire::Writer and produce complete frames).
-//   - Use a local stack scratch buffer; copy into caller `out` only on full
-//     success (INV-4 atomicity). On any failure, return std::unexpected and do
-//     NOT touch `out`.
+//   - Built on fixpp::wire::body_builder (include/fixpp/wire/body_builder.hpp):
+//     accumulates fields internally (own zero-global-heap arena) and copies
+//     into caller `out` only on full success at commit() (INV-4 atomicity).
+//     On any failure, returns std::unexpected and does NOT touch `out`.
+//   - Per-exemplar hand-validation (empty required string, SOH/control-byte
+//     injection, out-of-range side/enum char, ill-formed UTCTimestamp) runs
+//     BEFORE body_builder.field() calls (FR-003) — body_builder itself has no
+//     dictionary/semantic knowledge of individual tags.
 //   - Numeric fields: decimal_t::format(span) for canonical serialisation
-//     (FR-007/INV-3, locale-independent, no scientific notation).
-//   - Validate fail-closed: empty required string, out-of-range side/enum,
-//     unformattable decimal, ill-formed UTCTimestamp, too-small out → error.
+//     (FR-007/INV-3, locale-independent, no scientific notation), applied by
+//     body_builder at field()/commit() time.
+//   - Field order for D/8/9/AS is the QuickFIX-golden ascending-tag order
+//     (tests/session/golden/*.fix, PROVENANCE.md); E's is FIX44 dictionary
+//     order within each group entry (see build_new_order_list below).
 //
-// Wire::Writer is NOT used here. Writer always injects "8=BeginString\x01 9=...\x01"
-// on the first append_raw call and appends "10=CheckSum\x01" at commit(), so it
-// has no body-only mode. These builders write raw "tag=value\x01" fields directly.
+// Wire::Writer is NOT used here (nor by body_builder). Writer always injects
+// "8=BeginString\x01 9=...\x01" on the first append_raw call and appends
+// "10=CheckSum\x01" at commit(), so it has no body-only mode.
 //
 // Anchors: contracts/business-messages.md; data-model.md E1/E2; research.md D3/D4;
-//          spec FR-001..008; INV-2/3/4.
+//          spec FR-001..008; INV-2/3/4; specs/061-typed-app-messages/data-model.md §1/§2.
 
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <fixpp/core/error.hpp>
 #include <fixpp/session/business_messages.hpp>
+#include <fixpp/wire/body_builder.hpp>
 #include <span>
 #include <string_view>
 
 namespace fixpp::session {
 
 namespace {
-
-// SOH byte used as FIX field delimiter.
-inline constexpr std::byte kSOH{0x01U};
-
-// Stack scratch buffer size. Must be large enough for the largest possible
-// NOS/ExecRpt body. The maximum body is bounded by the sum of all field widths:
-//   - 35=D (4) + 11=<cl_ord_id≤64> + 55=<sym≤20> + 54=<1> + 38=<qty≤32> +
-//     40=2 (4) + 44=<px≤32> + 60=<tt≤21>
-// Well within 512 bytes. 1024 is generous and still stack-safe.
-inline constexpr std::size_t kScratchSize = 1024;
-
-// Append "tag=value\x01" into buf[pos..pos+needed-1].
-// Returns false if there is insufficient space. Does NOT write on overflow.
-[[nodiscard]] bool wfield(std::byte* buf, std::size_t buf_size, std::size_t& pos, std::uint16_t tag,
-                          std::string_view value) noexcept {
-    // Compute "tag=value\x01" byte count.
-    // tag digits: at most 3 chars for tags <= 999 (all FIX tags are <=1000).
-    char tag_str[8];
-    std::size_t tag_len = 0;
-    {
-        std::uint16_t t = tag;
-        char tmp[8];
-        std::size_t tl = 0;
-        if (t == 0) {
-            tmp[tl++] = '0';
-        } else {
-            while (t > 0) {
-                tmp[tl++] = static_cast<char>('0' + static_cast<int>(t % 10U));
-                t /= 10U;
-            }
-            // Reverse
-            for (std::size_t i = 0; i < tl / 2; ++i) {
-                char c = tmp[i];
-                tmp[i] = tmp[tl - 1 - i];
-                tmp[tl - 1 - i] = c;
-            }
-        }
-        tag_len = tl;
-        for (std::size_t i = 0; i < tl; ++i) tag_str[i] = tmp[i];
-    }
-
-    // Total bytes: tag_len + 1 ('=') + value.size() + 1 (SOH)
-    std::size_t needed = tag_len + 1 + value.size() + 1;
-    if (pos + needed > buf_size) return false;
-
-    // Write tag digits
-    for (std::size_t i = 0; i < tag_len; ++i) {
-        buf[pos++] = static_cast<std::byte>(tag_str[i]);
-    }
-    // '='
-    buf[pos++] = static_cast<std::byte>('=');
-    // value bytes
-    for (char c : value) {
-        buf[pos++] = static_cast<std::byte>(c);
-    }
-    // SOH
-    buf[pos++] = kSOH;
-    return true;
-}
-
-// Append a single-char field "tag=C\x01".
-[[nodiscard]] bool wchar(std::byte* buf, std::size_t buf_size, std::size_t& pos, std::uint16_t tag,
-                         char ch) noexcept {
-    return wfield(buf, buf_size, pos, tag, std::string_view{&ch, 1});
-}
 
 // Validate that a char is a printable non-control ASCII character (0x20..0x7E).
 // Used for exec_type and ord_status to reject NUL/control bytes.
@@ -154,63 +102,18 @@ inline constexpr std::size_t kScratchSize = 1024;
     return true;
 }
 
-// Append a decimal_t field into the scratch buffer.
-// Uses decimal_t::format(span) for canonical serialization (FR-007).
-// Returns false on overflow or format failure.
-[[nodiscard]] bool wdecimal(std::byte* buf, std::size_t buf_size, std::size_t& pos,
-                            std::uint16_t tag, const fixpp::decimal_t& val) noexcept {
-    // Write tag + '=' first, leaving room for the value.
-    // Strategy: write tag= into scratch, format decimal into a small local buffer,
-    // then write the formatted bytes + SOH.
-    char tag_str[8];
-    std::size_t tag_len = 0;
-    {
-        std::uint16_t t = tag;
-        char tmp[8];
-        std::size_t tl = 0;
-        if (t == 0) {
-            tmp[tl++] = '0';
-        } else {
-            while (t > 0) {
-                tmp[tl++] = static_cast<char>('0' + static_cast<int>(t % 10U));
-                t /= 10U;
-            }
-            for (std::size_t i = 0; i < tl / 2; ++i) {
-                char c = tmp[i];
-                tmp[i] = tmp[tl - 1 - i];
-                tmp[tl - 1 - i] = c;
-            }
-        }
-        tag_len = tl;
-        for (std::size_t i = 0; i < tl; ++i) tag_str[i] = tmp[i];
-    }
-
-    // Format the decimal value into a local stack buffer (max 64 bytes for any decimal).
-    std::byte val_buf[64];
-    auto fmt_r = val.format(std::span<std::byte>{val_buf});
-    if (!fmt_r.has_value()) return false;
-    std::size_t val_len = *fmt_r;
-
-    // Check capacity: tag_len + 1 + val_len + 1 (SOH)
-    std::size_t needed = tag_len + 1 + val_len + 1;
-    if (pos + needed > buf_size) return false;
-
-    for (std::size_t i = 0; i < tag_len; ++i) buf[pos++] = static_cast<std::byte>(tag_str[i]);
-    buf[pos++] = static_cast<std::byte>('=');
-    for (std::size_t i = 0; i < val_len; ++i) buf[pos++] = val_buf[i];
-    buf[pos++] = kSOH;
-    return true;
-}
-
 }  // namespace
 
 // ── NewOrderSingle (35=D) ────────────────────────────────────────────────────
-// Field order (contracts/business-messages.md):
-//   35=D 11=<cl_ord_id> 55=<symbol> 54=<side> 38=<order_qty> 40=2
-//   44=<price> 60=<transact_time>
+// Built on fixpp::wire::body_builder (data-model.md §1/§2), T013 refactor.
+// Field order matches the QuickFIX-authored golden
+// (tests/session/golden/new_order_single.fix — ascending tag order,
+// group-free message): 11,38,40,44,54,55,60 (see tasks.md T013 CORRECTION
+// note: this supersedes the legacy 020 byte order 11,55,54,38,40,44,60).
 //
 // INV-2: NO 8/9/34/49/52/56 and NO 10= (those are engine-stamped).
-// INV-4: build into scratch; copy to `out` only on full success.
+// INV-4: body_builder builds into its own internal scratch; copy to `out`
+// only on full success at commit().
 [[nodiscard]] fixpp::core::expected_t<std::span<std::byte>> build_new_order_single(
     std::span<std::byte> out, std::string_view cl_ord_id, std::string_view symbol, char side,
     const fixpp::decimal_t& order_qty, const fixpp::decimal_t& price,
@@ -221,7 +124,8 @@ inline constexpr std::size_t kScratchSize = 1024;
 
     // Reject control bytes (incl. SOH) in string fields to prevent SOH injection
     // (INV-2 / FR-004): a SOH inside cl_ord_id or symbol would forge a field
-    // boundary inside the body. [RC#1: gate-b/r1]
+    // boundary inside the body. [RC#1: gate-b/r1] (hand-validated here, per
+    // exemplar, BEFORE body_builder.field() — FR-003.)
     if (!is_clean_field_value(cl_ord_id))
         return std::unexpected(fixpp::core::error::wire_field_value_out_of_range);
     if (!is_clean_field_value(symbol))
@@ -235,53 +139,30 @@ inline constexpr std::size_t kScratchSize = 1024;
     if (!is_valid_utc_timestamp(transact_time))
         return std::unexpected(fixpp::core::error::wire_invalid_field_format);
 
-    // Build into local stack scratch buffer (INV-4 atomicity).
-    std::byte scratch[kScratchSize];
-    std::size_t pos = 0;
+    fixpp::wire::body_builder bb{"D"};
 
-    // 35=D
-    if (!wfield(scratch, kScratchSize, pos, 35, "D"))
-        return std::unexpected(fixpp::core::error::wire_frame_too_large);
-    // 11=<cl_ord_id>
-    if (!wfield(scratch, kScratchSize, pos, 11, cl_ord_id))
-        return std::unexpected(fixpp::core::error::wire_frame_too_large);
-    // 55=<symbol>
-    if (!wfield(scratch, kScratchSize, pos, 55, symbol))
-        return std::unexpected(fixpp::core::error::wire_frame_too_large);
-    // 54=<side>
-    if (!wchar(scratch, kScratchSize, pos, 54, side))
-        return std::unexpected(fixpp::core::error::wire_frame_too_large);
-    // 38=<order_qty>
-    if (!wdecimal(scratch, kScratchSize, pos, 38, order_qty)) {
-        // wdecimal returns false on both format failure and overflow.
-        // Format failure maps to decimal error; overflow maps to frame_too_large.
-        // Since we cannot distinguish here, and the scratch is large (1024), overflow
-        // is only possible for pathological inputs; treat as format error (FR-007).
+    // Ascending-tag order (golden): 11,38,40,44,54,55,60.
+    if (auto r = bb.field(11, cl_ord_id); !r.has_value()) return std::unexpected(r.error());
+    if (auto r = bb.field(38, order_qty); !r.has_value())
         return std::unexpected(fixpp::core::error::decimal_invalid_input);
-    }
     // 40=2 (OrdType fixed Limit)
-    if (!wfield(scratch, kScratchSize, pos, 40, "2"))
-        return std::unexpected(fixpp::core::error::wire_frame_too_large);
-    // 44=<price>
-    if (!wdecimal(scratch, kScratchSize, pos, 44, price)) {
+    if (auto r = bb.field(40, "2"); !r.has_value()) return std::unexpected(r.error());
+    if (auto r = bb.field(44, price); !r.has_value())
         return std::unexpected(fixpp::core::error::decimal_invalid_input);
-    }
-    // 60=<transact_time>
-    if (!wfield(scratch, kScratchSize, pos, 60, transact_time))
-        return std::unexpected(fixpp::core::error::wire_frame_too_large);
+    if (auto r = bb.field(54, side); !r.has_value()) return std::unexpected(r.error());
+    if (auto r = bb.field(55, symbol); !r.has_value()) return std::unexpected(r.error());
+    if (auto r = bb.field(60, transact_time); !r.has_value()) return std::unexpected(r.error());
 
-    // Check that caller-supplied `out` is large enough.
-    if (out.size() < pos) return std::unexpected(fixpp::core::error::wire_frame_too_large);
-
-    // Full success: copy scratch into out and return the written span.
-    for (std::size_t i = 0; i < pos; ++i) out[i] = scratch[i];
-    return out.subspan(0, pos);
+    return bb.commit(out);
 }
 
 // ── ExecutionReport (35=8) ───────────────────────────────────────────────────
-// Field order (contracts/business-messages.md):
-//   35=8 37=<order_id> 17=<exec_id> 150=<exec_type> 39=<ord_status>
-//   55=<symbol> 54=<side> 151=<leaves_qty> 14=<cum_qty> 6=<avg_px>
+// Built on fixpp::wire::body_builder (data-model.md §1/§2), T014 refactor.
+// Field order matches the QuickFIX-authored golden
+// (tests/session/golden/execution_report.fix — ascending tag order,
+// group-free message): 6,14,17,37,39,54,55,150,151 (see tasks.md T014
+// CORRECTION note: this supersedes the legacy 020 byte order
+// 37,17,150,39,55,54,151,14,6).
 [[nodiscard]] fixpp::core::expected_t<std::span<std::byte>> build_execution_report(
     std::span<std::byte> out, std::string_view order_id, std::string_view exec_id, char exec_type,
     char ord_status, std::string_view symbol, char side, const fixpp::decimal_t& leaves_qty,
@@ -292,7 +173,8 @@ inline constexpr std::size_t kScratchSize = 1024;
     if (symbol.empty()) return std::unexpected(fixpp::core::error::wire_required_field_missing);
 
     // Reject control bytes (incl. SOH) in string fields to prevent SOH injection
-    // (INV-2 / FR-004). [RC#1: gate-b/r1]
+    // (INV-2 / FR-004). [RC#1: gate-b/r1] (hand-validated here, per exemplar,
+    // BEFORE body_builder.field() — FR-003.)
     if (!is_clean_field_value(order_id))
         return std::unexpected(fixpp::core::error::wire_field_value_out_of_range);
     if (!is_clean_field_value(exec_id))
@@ -310,50 +192,194 @@ inline constexpr std::size_t kScratchSize = 1024;
     if (!is_valid_side(side))
         return std::unexpected(fixpp::core::error::wire_field_value_out_of_range);
 
-    // Build into local stack scratch buffer (INV-4 atomicity).
-    std::byte scratch[kScratchSize];
-    std::size_t pos = 0;
+    fixpp::wire::body_builder bb{"8"};
 
-    // 35=8
-    if (!wfield(scratch, kScratchSize, pos, 35, "8"))
-        return std::unexpected(fixpp::core::error::wire_frame_too_large);
-    // 37=<order_id>
-    if (!wfield(scratch, kScratchSize, pos, 37, order_id))
-        return std::unexpected(fixpp::core::error::wire_frame_too_large);
-    // 17=<exec_id>
-    if (!wfield(scratch, kScratchSize, pos, 17, exec_id))
-        return std::unexpected(fixpp::core::error::wire_frame_too_large);
-    // 150=<exec_type>
-    if (!wchar(scratch, kScratchSize, pos, 150, exec_type))
-        return std::unexpected(fixpp::core::error::wire_frame_too_large);
-    // 39=<ord_status>
-    if (!wchar(scratch, kScratchSize, pos, 39, ord_status))
-        return std::unexpected(fixpp::core::error::wire_frame_too_large);
-    // 55=<symbol>
-    if (!wfield(scratch, kScratchSize, pos, 55, symbol))
-        return std::unexpected(fixpp::core::error::wire_frame_too_large);
-    // 54=<side>
-    if (!wchar(scratch, kScratchSize, pos, 54, side))
-        return std::unexpected(fixpp::core::error::wire_frame_too_large);
-    // 151=<leaves_qty>
-    if (!wdecimal(scratch, kScratchSize, pos, 151, leaves_qty)) {
+    // Ascending-tag order (golden): 6,14,17,37,39,54,55,150,151.
+    if (auto r = bb.field(6, avg_px); !r.has_value())
         return std::unexpected(fixpp::core::error::decimal_invalid_input);
-    }
-    // 14=<cum_qty>
-    if (!wdecimal(scratch, kScratchSize, pos, 14, cum_qty)) {
+    if (auto r = bb.field(14, cum_qty); !r.has_value())
         return std::unexpected(fixpp::core::error::decimal_invalid_input);
-    }
-    // 6=<avg_px>
-    if (!wdecimal(scratch, kScratchSize, pos, 6, avg_px)) {
+    if (auto r = bb.field(17, exec_id); !r.has_value()) return std::unexpected(r.error());
+    if (auto r = bb.field(37, order_id); !r.has_value()) return std::unexpected(r.error());
+    if (auto r = bb.field(39, ord_status); !r.has_value()) return std::unexpected(r.error());
+    if (auto r = bb.field(54, side); !r.has_value()) return std::unexpected(r.error());
+    if (auto r = bb.field(55, symbol); !r.has_value()) return std::unexpected(r.error());
+    if (auto r = bb.field(150, exec_type); !r.has_value()) return std::unexpected(r.error());
+    if (auto r = bb.field(151, leaves_qty); !r.has_value())
         return std::unexpected(fixpp::core::error::decimal_invalid_input);
-    }
 
-    // Check that caller-supplied `out` is large enough.
-    if (out.size() < pos) return std::unexpected(fixpp::core::error::wire_frame_too_large);
+    return bb.commit(out);
+}
 
-    // Full success: copy scratch into out and return the written span.
-    for (std::size_t i = 0; i < pos; ++i) out[i] = scratch[i];
-    return out.subspan(0, pos);
+// ── NewOrderList (35=E) ──────────────────────────────────────────────────────
+// Built on fixpp::wire::body_builder (data-model.md §1/§2) — same primitive
+// D/8 were refactored onto by T013/T014. Field order matches the
+// QuickFIX-authored golden (tests/session/golden/new_order_list.fix): root
+// fields in ascending-tag order (66,68,73,394 — BidType(394) lands AFTER the
+// NoOrders group content because the group's entries are emitted in place of
+// tag 73's ascending position), order-entry fields in FIX44 dictionary order
+// (11,67,453,55,54,38 — NOT tag-ascending), party-entry fields (448,447,452,
+// 802), sub-entry fields (523,803).
+[[nodiscard]] fixpp::core::expected_t<std::span<std::byte>> build_new_order_list(
+    std::span<std::byte> out, const NewOrderListParams& params) noexcept {
+    if (params.list_id.empty())
+        return std::unexpected(fixpp::core::error::wire_required_field_missing);
+    if (params.orders.empty())
+        return std::unexpected(fixpp::core::error::wire_required_field_missing);
+
+    fixpp::wire::body_builder bb{"E"};
+
+    if (auto r = bb.field(66, params.list_id); !r.has_value()) return std::unexpected(r.error());
+    if (auto r = bb.field(68, params.tot_no_orders); !r.has_value())
+        return std::unexpected(r.error());
+
+    auto orders_g = bb.group_begin(73, 11);
+    if (!orders_g.has_value()) return std::unexpected(orders_g.error());
+
+    for (const auto& order : params.orders) {
+        auto entry = orders_g->add_entry();
+        if (!entry.has_value()) return std::unexpected(entry.error());
+        if (auto r = entry->set_string(11, order.cl_ord_id); !r.has_value())
+            return std::unexpected(r.error());
+        if (auto r = entry->set_int(67, order.list_seq_no); !r.has_value())
+            return std::unexpected(r.error());
+
+        // NoPartyIDs(453) -> NoPartySubIDs(802): always opened by this
+        // builder (an empty `parties` span emits 453=0, present-but-empty —
+        // data-model §3.1 "Count-of-zero witness target").
+        auto parties_g = entry->group_begin(453, 448);
+        if (!parties_g.has_value()) return std::unexpected(parties_g.error());
+        for (const auto& party : order.parties) {
+            auto pentry = parties_g->add_entry();
+            if (!pentry.has_value()) return std::unexpected(pentry.error());
+            if (auto r = pentry->set_string(448, party.party_id); !r.has_value())
+                return std::unexpected(r.error());
+            if (auto r = pentry->set_char(447, party.party_id_source); !r.has_value())
+                return std::unexpected(r.error());
+            if (auto r = pentry->set_int(452, party.party_role); !r.has_value())
+                return std::unexpected(r.error());
+
+            auto subs_g = pentry->group_begin(802, 523);
+            if (!subs_g.has_value()) return std::unexpected(subs_g.error());
+            for (const auto& sub : party.sub_ids) {
+                auto sentry = subs_g->add_entry();
+                if (!sentry.has_value()) return std::unexpected(sentry.error());
+                if (auto r = sentry->set_string(523, sub.party_sub_id); !r.has_value())
+                    return std::unexpected(r.error());
+                if (auto r = sentry->set_int(803, sub.party_sub_id_type); !r.has_value())
+                    return std::unexpected(r.error());
+            }
+            if (auto r = bb.group_end(*subs_g); !r.has_value()) return std::unexpected(r.error());
+        }
+        if (auto r = bb.group_end(*parties_g); !r.has_value()) return std::unexpected(r.error());
+
+        if (auto r = entry->set_string(55, order.symbol); !r.has_value())
+            return std::unexpected(r.error());
+        // Validate side per-exemplar (FR-003 hand-validated char domain, mirrors D/8).
+        if (!is_valid_side(order.side))
+            return std::unexpected(fixpp::core::error::wire_field_value_out_of_range);
+        if (auto r = entry->set_char(54, order.side); !r.has_value())
+            return std::unexpected(r.error());
+        if (auto r = entry->set_decimal(38, order.order_qty); !r.has_value())
+            return std::unexpected(r.error());
+    }
+    if (auto r = bb.group_end(*orders_g); !r.has_value()) return std::unexpected(r.error());
+
+    if (auto r = bb.field(394, params.bid_type); !r.has_value()) return std::unexpected(r.error());
+
+    return bb.commit(out);
+}
+
+// ── OrderCancelReject (35=9) ──────────────────────────────────────────────────
+// Field order (matches tests/session/golden/order_cancel_reject.fix — ascending
+// tag order at root, T011): 11,37,39,41,102,434. Group-free.
+[[nodiscard]] fixpp::core::expected_t<std::span<std::byte>> build_order_cancel_reject(
+    std::span<std::byte> out, std::string_view order_id, std::string_view cl_ord_id,
+    std::string_view orig_cl_ord_id, char ord_status, char cxl_rej_response_to,
+    std::int64_t cxl_rej_reason) noexcept {
+    if (order_id.empty()) return std::unexpected(fixpp::core::error::wire_required_field_missing);
+    if (cl_ord_id.empty()) return std::unexpected(fixpp::core::error::wire_required_field_missing);
+    if (orig_cl_ord_id.empty())
+        return std::unexpected(fixpp::core::error::wire_required_field_missing);
+
+    fixpp::wire::body_builder bb{"9"};
+
+    if (auto r = bb.field(11, cl_ord_id); !r.has_value()) return std::unexpected(r.error());
+    if (auto r = bb.field(37, order_id); !r.has_value()) return std::unexpected(r.error());
+    if (auto r = bb.field(39, ord_status); !r.has_value()) return std::unexpected(r.error());
+    if (auto r = bb.field(41, orig_cl_ord_id); !r.has_value()) return std::unexpected(r.error());
+    if (auto r = bb.field(102, cxl_rej_reason); !r.has_value()) return std::unexpected(r.error());
+    if (auto r = bb.field(434, cxl_rej_response_to); !r.has_value())
+        return std::unexpected(r.error());
+
+    return bb.commit(out);
+}
+
+// ── AllocationReport (35=AS) ─────────────────────────────────────────────────
+// Field order (matches tests/session/golden/allocation_report.fix — ascending
+// tag order at root, T012): 6,53,54,55,71,75,87,453(group+entries),755,794,857.
+[[nodiscard]] fixpp::core::expected_t<std::span<std::byte>> build_allocation_report(
+    std::span<std::byte> out, const AllocationReportParams& params) noexcept {
+    if (params.alloc_report_id.empty())
+        return std::unexpected(fixpp::core::error::wire_required_field_missing);
+    if (params.trade_date.empty())
+        return std::unexpected(fixpp::core::error::wire_required_field_missing);
+    if (params.symbol.empty())
+        return std::unexpected(fixpp::core::error::wire_required_field_missing);
+
+    fixpp::wire::body_builder bb{"AS"};
+
+    if (auto r = bb.field(6, params.avg_px); !r.has_value()) return std::unexpected(r.error());
+    if (auto r = bb.field(53, params.quantity); !r.has_value()) return std::unexpected(r.error());
+    // Validate side per-exemplar (FR-003 hand-validated char domain, mirrors D/8).
+    if (!is_valid_side(params.side))
+        return std::unexpected(fixpp::core::error::wire_field_value_out_of_range);
+    if (auto r = bb.field(54, params.side); !r.has_value()) return std::unexpected(r.error());
+    if (auto r = bb.field(55, params.symbol); !r.has_value()) return std::unexpected(r.error());
+    if (auto r = bb.field(71, params.alloc_trans_type); !r.has_value())
+        return std::unexpected(r.error());
+    if (auto r = bb.field(75, params.trade_date); !r.has_value()) return std::unexpected(r.error());
+    if (auto r = bb.field(87, params.alloc_status); !r.has_value())
+        return std::unexpected(r.error());
+
+    // NoPartyIDs(453) -> NoPartySubIDs(802): always opened by this builder
+    // (an empty `parties` span emits 453=0, present-but-empty — the count-of-
+    // zero case is already witnessed by E's ORD2, data-model §3.1 "Count-of-
+    // zero witness target").
+    auto parties_g = bb.group_begin(453, 448);
+    if (!parties_g.has_value()) return std::unexpected(parties_g.error());
+    for (const auto& party : params.parties) {
+        auto pentry = parties_g->add_entry();
+        if (!pentry.has_value()) return std::unexpected(pentry.error());
+        if (auto r = pentry->set_string(448, party.party_id); !r.has_value())
+            return std::unexpected(r.error());
+        if (auto r = pentry->set_char(447, party.party_id_source); !r.has_value())
+            return std::unexpected(r.error());
+        if (auto r = pentry->set_int(452, party.party_role); !r.has_value())
+            return std::unexpected(r.error());
+
+        auto subs_g = pentry->group_begin(802, 523);
+        if (!subs_g.has_value()) return std::unexpected(subs_g.error());
+        for (const auto& sub : party.sub_ids) {
+            auto sentry = subs_g->add_entry();
+            if (!sentry.has_value()) return std::unexpected(sentry.error());
+            if (auto r = sentry->set_string(523, sub.party_sub_id); !r.has_value())
+                return std::unexpected(r.error());
+            if (auto r = sentry->set_int(803, sub.party_sub_id_type); !r.has_value())
+                return std::unexpected(r.error());
+        }
+        if (auto r = bb.group_end(*subs_g); !r.has_value()) return std::unexpected(r.error());
+    }
+    if (auto r = bb.group_end(*parties_g); !r.has_value()) return std::unexpected(r.error());
+
+    if (auto r = bb.field(755, params.alloc_report_id); !r.has_value())
+        return std::unexpected(r.error());
+    if (auto r = bb.field(794, params.alloc_report_type); !r.has_value())
+        return std::unexpected(r.error());
+    if (auto r = bb.field(857, params.alloc_no_orders_type); !r.has_value())
+        return std::unexpected(r.error());
+
+    return bb.commit(out);
 }
 
 }  // namespace fixpp::session

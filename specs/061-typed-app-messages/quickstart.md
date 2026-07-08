@@ -8,7 +8,8 @@
 std::byte out[512];
 auto body = fixpp::session::build_order_cancel_reject(
     out, /*order_id=*/"ORD1", /*cl_ord_id=*/"C1",
-    /*orig_cl_ord_id=*/"C0", /*ord_status=*/'8', /*cxl_rej_response_to=*/'1');
+    /*orig_cl_ord_id=*/"C0", /*ord_status=*/'8', /*cxl_rej_response_to=*/'1',
+    /*cxl_rej_reason=*/1);
 // body -> span of "35=9\x0137=ORD1\x01...": body-only, no 8/9/34/49/52/56/10.
 // On invalid input or short buffer: body.error() set, `out` untouched.
 ```
@@ -62,8 +63,8 @@ auto body = b.commit(out).value();                  // fails closed: any group l
 auto frame = make_frame("FIX.4.4", body);
 auto mv    = parse_dict(frame, fix44_dict(), &mr);  // 5-arg dict-backed parse
 fixpp::v44::NewOrderList nol{mv};
-assert(nol.orders()[0].parties()[0].party_id().value() == "BROKER");
-assert(nol.orders()[0].parties()[0].party_sub_ids()[0].party_sub_id().value() == "DESK");
+assert(nol.orders()[0].party_i_ds()[0].party_id().value() == "BROKER");
+assert(nol.orders()[0].party_i_ds()[0].party_sub_i_ds()[0].party_sub_id().value() == "DESK");
 ```
 
 ## Verify against the external golden
