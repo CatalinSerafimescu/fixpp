@@ -244,6 +244,23 @@ jobs:
           restore-keys: |
             conan-${{ matrix.preset }}-
 
+      # ccache MUST be installed BEFORE "Conan install" on this lane. libc++ has
+      # no prebuilt Conan Center binaries, so `conan install --build=missing`
+      # compiles dependencies (crc32c, ...) from source using the job-level
+      # CMAKE_{C,CXX}_COMPILER_LAUNCHER=ccache. If ccache is not yet on PATH the
+      # dependency's compiler probe fails with exit 127 ("ccache" not found) and
+      # the whole lane goes red — this is exactly what broke Tier 3 while Tier 1
+      # (libstdc++, prebuilt deps → no compile during Conan install) stayed green.
+      # Runner images no longer ship ccache preinstalled, so we install it here
+      # (this action installs ccache + restores the cross-run cache) BEFORE the
+      # from-source dependency builds, which additionally lets those builds hit
+      # the cache. Ref: project_tier3_libcxx_crc32c_ccache127_infra.
+      - name: ccache (install + restore + save compiler cache)
+        uses: hendrikmuhs/ccache-action@v1.2.23
+        with:
+          key: tier3-${{ matrix.preset }}
+          max-size: 500M
+
       - name: Conan install
         run: |
           conan install . \
@@ -251,12 +268,6 @@ jobs:
             -o 'fixpp/*:with_otel=False' \
             --build=missing \
             -of build/${{ matrix.preset }}
-
-      - name: ccache (restore + save compiler cache)
-        uses: hendrikmuhs/ccache-action@v1.2.23
-        with:
-          key: tier3-${{ matrix.preset }}
-          max-size: 500M
 
       - name: Configure
         run: cmake --preset ${{ matrix.preset }}
