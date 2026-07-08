@@ -670,6 +670,20 @@ TEST(BusinessMessagesBuild, Builder_NoHeap_CountingResource) {
                     "(alloc-dealloc-mismatch) and TSan (multiple-definition of operator new); "
                     "the zero-alloc witness runs in debug/release/ubsan, with mallocnesia "
                     "LD_PRELOAD as the CI-tier cross-check";
+#elif defined(_ITERATOR_DEBUG_LEVEL) && _ITERATOR_DEBUG_LEVEL != 0
+    // MSVC debug STL only (_ITERATOR_DEBUG_LEVEL != 0). Each builder call
+    // constructs a fixpp::wire::body_builder whose std::pmr::vector members each
+    // heap-allocate a hidden _Container_proxy through GLOBAL ::operator new at
+    // construction under iterator debugging (not through the pmr arena) -- so the
+    // two builder calls bump this global-new counter by two, a debug-STL artifact
+    // rather than a real builder allocation. The heap-free contract is proven on
+    // libstdc++/libc++ and MSVC RELEASE (_ITERATOR_DEBUG_LEVEL == 0) PLUS by the
+    // mallocnesia LD_PRELOAD perf_*_alloc_guard cross-check on the CI tiers.
+    // See tests/support/msvc_debug_arena_skip.hpp (same _Container_proxy cause).
+    GTEST_SKIP() << "MSVC debug STL allocates a per-container _Container_proxy via global "
+                    "operator new at pmr-vector construction (debug-STL artifact); the "
+                    "heap-free builder contract is covered on all non-MSVC-debug lanes and "
+                    "by the mallocnesia LD_PRELOAD cross-check";
 #else
     std::pmr::monotonic_buffer_resource arena{4096};
 
@@ -707,55 +721,76 @@ TEST(BusinessMessagesBuild, Builder_NoHeap_CountingResource) {
 #endif  // FIXPP_SANITIZER_REPLACES_NEW
 }
 
-// ── INV-4 coverage: per-field scratch-overflow guards ──────────────────────────
-// Each builder serializes fields into a fixed 1024-byte scratch before copying to
-// `out`; every field write is overflow-guarded (wire_frame_too_large; decimal
-// fields surface as decimal_invalid_input because wdecimal cannot distinguish
-// overflow from format failure). The builders do not cap input field length, so
-// an oversized leading string field drives scratch overflow. Sweeping its length
-// walks the overflow point backward through the field sequence, exercising every
-// per-field guard. `out` is larger than scratch so the internal scratch guard
-// fires (not the out-size check). All cases must fail-closed (no value). (INV-4.)
+// ── INV-4 coverage: internal-scratch-cap overflow guard ─────────────────────────
+// [061-typed-app-messages T013/T014 update] D/8 are now built on
+// fixpp::wire::body_builder (include/fixpp/wire/body_builder.hpp), which
+// accumulates fields into a pmr arena and checks the TOTAL serialized body
+// against a single fixed internal cap (kBodyCap = 3800 B, body_builder.cpp,
+// TU-local) once, at commit() — not incrementally per field against a
+// 1024-byte scratch as the pre-061 hand-rolled wfield/wchar/wdecimal helpers
+// did. The old "sweep the overflow point backward through the field
+// sequence" narrative no longer applies (there is no per-field guard at
+// these sizes); this test now pins the NEW single-shot cap directly:
+//   - an oversized leading field pushes the TOTAL body past kBodyCap ->
+//     fail-closed (wire_frame_too_large), `out` untouched (INV-4 atomicity).
+//   - a large-but-under-cap field succeeds, proving the boundary is real
+//     (not merely "any big input fails").
+// `out` is sized > kBodyCap (4096) so the internal cap fires, not the
+// out-too-small check.
 //
-// RC#3 hardening (gate-b/r1): `out` is sentinel-prefilled with 0xCD; we spot-
-// check that the first byte of `out` is unchanged after each overflow failure,
-// confirming that the scratch guard fired BEFORE any copy to `out`.
+// RC#3 hardening (gate-b/r1, preserved): `out` is sentinel-prefilled with
+// 0xCD; the overflow case asserts the full buffer is unchanged, confirming
+// the cap guard fired BEFORE any copy to `out`.
 TEST(BusinessMessagesBuild, Builder_ScratchOverflow_PerFieldGuards) {
     std::pmr::monotonic_buffer_resource arena{4096};
     const auto qty = make_decimal("1", &arena);
     const auto px = make_decimal("1", &arena);
     const auto zero = make_decimal("0", &arena);
 
-    std::array<std::byte, 2048> out{};
-    out.fill(std::byte{0xCDU});
+    std::array<std::byte, 4096> out{};
 
-    // NOS scratch usage ≈ cl_ord_id_len + 55; overflow when > 1024 (len ≥ 970).
-    // Sweep walks the overflow point 60 → 44 → 40 → 38 → 54 → 55 → 11.
-    for (std::size_t len = 970; len <= 1020; ++len) {
+    // NOS body total ≈ cl_ord_id_len + 55; kBodyCap=3800 overflow when
+    // total > 3800 (len >= 3746).
+    for (std::size_t len : {3746U, 3760U, 3800U}) {
         out.fill(std::byte{0xCDU});
         const std::string big(len, 'A');
         const auto r = fixpp::session::build_new_order_single(std::span<std::byte>{out}, big, "S",
                                                               '1', qty, px, "20240101-10:00:00");
         EXPECT_FALSE(r.has_value())
-            << "NOS cl_ord_id len=" << len << " must overflow scratch and fail-closed";
-        // RC#3 (r2): full-buffer check — every byte of out must be unchanged.
+            << "NOS cl_ord_id len=" << len << " must overflow the internal body cap and fail-closed";
         EXPECT_TRUE(
             std::all_of(out.begin(), out.end(), [](std::byte b) { return b == std::byte{0xCDU}; }))
             << "NOS overflow must not write to out (INV-4 atomicity), len=" << len;
     }
+    // Under-cap large field: succeeds, proving the boundary above is real.
+    {
+        out.fill(std::byte{0xCDU});
+        const std::string big(3000, 'A');
+        const auto r = fixpp::session::build_new_order_single(std::span<std::byte>{out}, big, "S",
+                                                              '1', qty, px, "20240101-10:00:00");
+        EXPECT_TRUE(r.has_value()) << "NOS cl_ord_id len=3000 (under kBodyCap) must succeed";
+    }
 
-    // ExecRpt scratch usage ≈ order_id_len + 50; overflow when > 1024 (len ≥ 975).
-    // Sweep walks the overflow point 6 → 14 → 151 → 54 → 55 → 39 → 150 → 17 → 37.
-    for (std::size_t len = 975; len <= 1020; ++len) {
+    // ExecRpt body total ≈ order_id_len + 50; kBodyCap=3800 overflow when
+    // total > 3800 (len >= 3751).
+    for (std::size_t len : {3751U, 3760U, 3800U}) {
         out.fill(std::byte{0xCDU});
         const std::string big(len, 'A');
         const auto r = fixpp::session::build_execution_report(std::span<std::byte>{out}, big, "E",
                                                               'F', '2', "S", '1', zero, qty, px);
         EXPECT_FALSE(r.has_value())
-            << "ExecRpt order_id len=" << len << " must overflow scratch and fail-closed";
-        // RC#3 (r2): full-buffer check — every byte of out must be unchanged.
+            << "ExecRpt order_id len=" << len
+            << " must overflow the internal body cap and fail-closed";
         EXPECT_TRUE(
             std::all_of(out.begin(), out.end(), [](std::byte b) { return b == std::byte{0xCDU}; }))
             << "ExecRpt overflow must not write to out (INV-4 atomicity), len=" << len;
+    }
+    // Under-cap large field: succeeds, proving the boundary above is real.
+    {
+        out.fill(std::byte{0xCDU});
+        const std::string big(3000, 'A');
+        const auto r = fixpp::session::build_execution_report(std::span<std::byte>{out}, big, "E",
+                                                              'F', '2', "S", '1', zero, qty, px);
+        EXPECT_TRUE(r.has_value()) << "ExecRpt order_id len=3000 (under kBodyCap) must succeed";
     }
 }

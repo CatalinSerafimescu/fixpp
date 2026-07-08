@@ -131,13 +131,13 @@ note above. 018 also discharges the orthogonal 016 verify-YELLOW sanitizer waive
 
 | ID | Source | Category | Title | FIX version(s) | Spec ref | Status | /specify | PR | Tests | Verified |
 |---|---|---|---|---|---|---|---|---|---|---|
-| A-001 | OFFICIAL | wire | NewOrderSingle (35=D) | 4.0–5.0SP2 | [FIX50SP2] Single General Order Handling | backlog | — | — | — | — |
-| A-002 | OFFICIAL | wire | NewOrderList (35=E) | 4.0–5.0SP2 | [FIX50SP2] Program/List Trading | backlog | — | — | — | — |
+| A-001 | OFFICIAL | wire | NewOrderSingle (35=D) | 4.0–5.0SP2 | [FIX50SP2] Single General Order Handling | backlog | 061 (partial: v44 shape-oracle) | pending | `build_new_order_single` on `wire::body_builder` + `tests/session/{test_exemplar_roundtrip,test_exemplar_read,test_exemplar_build_failclosed}.cpp` + golden `golden/new_order_single.fix` | 061-slim shape-oracle; `backlog` for full-field/all-version → FR-015a |
+| A-002 | OFFICIAL | wire | NewOrderList (35=E) | 4.0–5.0SP2 | [FIX50SP2] Program/List Trading | backlog | 061 (partial: v44 shape-oracle) | pending | `build_new_order_list` on `wire::body_builder` (3-level 73→453→802) + `tests/session/{test_exemplar_roundtrip,test_exemplar_read,test_exemplar_build_failclosed}.cpp` + golden `golden/new_order_list.fix` | 061-slim shape-oracle; `backlog` for full coverage → FR-015a |
 | A-003 | OFFICIAL | wire | OrderCancelRequest (35=F) | 4.0–5.0SP2 | [FIX50SP2] Single General Order Handling | backlog | — | — | — | — |
 | A-004 | OFFICIAL | wire | OrderCancelReplaceRequest (35=G) — amend | 4.0–5.0SP2 | [FIX50SP2] Single General Order Handling | backlog | — | — | — | — |
 | A-005 | OFFICIAL | wire | OrderStatusRequest (35=H) | 4.0–5.0SP2 | [FIX50SP2] Single General Order Handling | backlog | — | — | — | — |
-| A-006 | OFFICIAL | wire | ExecutionReport (35=8) | 4.0–5.0SP2 | [FIX50SP2] Single General Order Handling | backlog | — | — | — | — |
-| A-007 | OFFICIAL | wire | OrderCancelReject (35=9) | 4.0–5.0SP2 | [FIX50SP2] Single General Order Handling | backlog | — | — | — | — |
+| A-006 | OFFICIAL | wire | ExecutionReport (35=8) | 4.0–5.0SP2 | [FIX50SP2] Single General Order Handling | backlog | 061 (partial: v44 shape-oracle) | pending | `build_execution_report` on `wire::body_builder` + `tests/session/{test_exemplar_roundtrip,test_exemplar_read,test_exemplar_build_failclosed}.cpp` + golden `golden/execution_report.fix` | 061-slim shape-oracle; `backlog` for full-field/all-version → FR-015a |
+| A-007 | OFFICIAL | wire | OrderCancelReject (35=9) | 4.0–5.0SP2 | [FIX50SP2] Single General Order Handling | backlog | 061 (partial: v44 shape-oracle) | pending | `build_order_cancel_reject` on `wire::body_builder` (group-free) + `tests/session/{test_exemplar_roundtrip,test_exemplar_read,test_exemplar_build_failclosed}.cpp` + golden `golden/order_cancel_reject.fix` | 061-slim shape-oracle; `backlog` for full coverage → FR-015a |
 | A-008 | OFFICIAL | wire | OrderMassCancelRequest (35=q) | 4.4–5.0SP2 | [FIX44] Order Mass Handling | backlog | — | — | — | — |
 | A-009 | OFFICIAL | wire | OrderMassCancelReport (35=r) | 4.4–5.0SP2 | [FIX44] Order Mass Handling | backlog | — | — | — | — |
 | A-010 | OFFICIAL | wire | OrderMassStatusRequest (35=AF) | 4.4–5.0SP2 | [FIX44] Order Mass Handling | backlog | — | — | — | — |
@@ -170,7 +170,7 @@ note above. 018 also discharges the orthogonal 016 verify-YELLOW sanitizer waive
 |---|---|---|---|---|---|---|---|---|---|---|
 | P-001 | OFFICIAL | wire | AllocationInstruction (35=J) | 4.0–5.0SP2 | [FIX50SP2] Allocation | backlog | — | — | — | — |
 | P-002 | OFFICIAL | wire | AllocationInstructionAck (35=P) | 4.1–5.0SP2 | [FIX50SP2] Allocation | backlog | — | — | — | — |
-| P-003 | OFFICIAL | wire | AllocationReport (35=AS) | 4.4–5.0SP2 | [FIX44] Allocation | backlog | — | — | — | — |
+| P-003 | OFFICIAL | wire | AllocationReport (35=AS) | 4.4–5.0SP2 | [FIX44] Allocation | backlog | 061 (partial: v44 shape-oracle) | pending | `build_allocation_report` on `wire::body_builder` (multi-char 35=AS, 2-level 453→802) + `tests/session/{test_exemplar_roundtrip,test_exemplar_read,test_exemplar_build_failclosed}.cpp` + golden `golden/allocation_report.fix` | 061-slim shape-oracle; `backlog` for full coverage → FR-015a |
 | P-004 | OFFICIAL | wire | AllocationReportAck (35=AT) | 4.4–5.0SP2 | [FIX44] Allocation | backlog | — | — | — | — |
 | P-005 | OFFICIAL | wire | Confirmation (35=AK) / ConfirmationAck (35=AU) / ConfirmationRequest (35=BH) | 4.4–5.0SP2 | [FIX44] Confirmation | backlog | — | — | — | — |
 | P-006 | OFFICIAL | wire | SettlementInstructions (35=T) | 4.0–5.0SP2 | [FIX50SP2] Settlement Instructions | backlog | — | — | — | — |

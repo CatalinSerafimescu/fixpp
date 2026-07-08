@@ -2327,6 +2327,102 @@ add_threading_test(session_forced_fallback_link test_session_forced_fallback_lin
 set_tests_properties(session_forced_fallback_link PROPERTIES
     LABELS "session;046;nfr017;fallback_link")
 
+# ── 061-typed-app-messages (061-slim) US2: E round-trip + external golden ────
+# T020 (E rows) — the pivotal grouped/nested exemplar's round-trip + golden
+# witness (contracts/builder-shape-oracle.md C5). Needs: fixpp_session (the
+# builder), fixpp_dictionary (dict-aware parse + generated v44 flyweight
+# headers), and tests/interop/support/golden_diff.{hpp,cpp} — compiled
+# directly as an extra source (NOT the interop_support target: tests/session
+# is add_subdirectory'd BEFORE tests/interop in the root CMakeLists.txt, so
+# interop_support does not exist yet at this point; golden_diff.cpp is
+# standard-library-only, so this is a cheap, ordering-independent way to reuse
+# it without touching golden_diff.{hpp,cpp} themselves).
+if(TARGET fixpp_codegen_generate)
+  set(_EXEMPLAR_CODEGEN_INC "${CMAKE_BINARY_DIR}/_codegen/include")
+
+  add_executable(test_exemplar_roundtrip
+    test_exemplar_roundtrip.cpp
+    "${CMAKE_SOURCE_DIR}/tests/interop/support/golden_diff.cpp"
+  )
+  add_dependencies(test_exemplar_roundtrip fixpp_codegen_generate)
+  target_link_libraries(test_exemplar_roundtrip PRIVATE
+    fixpp_session
+    fixpp_dictionary
+    GTest::gtest
+    GTest::gtest_main
+  )
+  target_include_directories(test_exemplar_roundtrip PRIVATE
+    "${_EXEMPLAR_CODEGEN_INC}"
+    "${CMAKE_SOURCE_DIR}/tests"
+    "${CMAKE_SOURCE_DIR}/tests/interop"
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+  )
+  target_compile_definitions(test_exemplar_roundtrip PRIVATE
+    "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
+    "FIXPP_REPO_ROOT=\"${CMAKE_SOURCE_DIR}\""
+  )
+  add_test(NAME test_exemplar_roundtrip COMMAND test_exemplar_roundtrip)
+  set_tests_properties(test_exemplar_roundtrip PROPERTIES
+    LABELS "061;us2;roundtrip;golden;E")
+else()
+  message(STATUS
+    "tests/session: fixpp_codegen_generate not available; skipping test_exemplar_roundtrip")
+endif()
+
+# ── 061-typed-app-messages (061-slim) US3: independent inbound-read ──────────
+# T022 — hand-authored wire bodies (NOT builder output) parsed via the SAME
+# dict-aware path and cross-checked against the v44 flyweight accessors
+# (FR-007). Read-only: needs fixpp_dictionary (dict-aware parse + generated
+# v44 flyweight headers) only — no fixpp_session / builder / golden-diff
+# dependency (that would defeat the "independent of the write path" point).
+if(TARGET fixpp_codegen_generate)
+  set(_EXEMPLAR_READ_CODEGEN_INC "${CMAKE_BINARY_DIR}/_codegen/include")
+
+  add_executable(test_exemplar_read
+    test_exemplar_read.cpp
+  )
+  add_dependencies(test_exemplar_read fixpp_codegen_generate)
+  target_link_libraries(test_exemplar_read PRIVATE
+    fixpp_dictionary
+    GTest::gtest
+    GTest::gtest_main
+  )
+  target_include_directories(test_exemplar_read PRIVATE
+    "${_EXEMPLAR_READ_CODEGEN_INC}"
+    "${CMAKE_SOURCE_DIR}/tests"
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+  )
+  target_compile_definitions(test_exemplar_read PRIVATE
+    "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
+  )
+  add_test(NAME test_exemplar_read COMMAND test_exemplar_read)
+  set_tests_properties(test_exemplar_read PROPERTIES
+    LABELS "061;us3;read")
+else()
+  message(STATUS
+    "tests/session: fixpp_codegen_generate not available; skipping test_exemplar_read")
+endif()
+
+# ── 061-typed-app-messages (061-slim) T016 — exemplar builder fail-closed
+# negatives (contracts/builder-shape-oracle.md §C4: INV-4/INV-5/AC-2). Pure
+# build-call negatives (no parse-back) — links fixpp_session only, same
+# minimal pattern as business_messages_build_test above (no codegen/
+# dictionary dependency needed).
+add_executable(test_exemplar_build_failclosed
+  test_exemplar_build_failclosed.cpp
+)
+target_link_libraries(test_exemplar_build_failclosed PRIVATE
+  fixpp_session
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(test_exemplar_build_failclosed PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+)
+add_test(NAME test_exemplar_build_failclosed COMMAND test_exemplar_build_failclosed)
+set_tests_properties(test_exemplar_build_failclosed PROPERTIES
+  LABELS "061;us2;failclosed;D;8;9;E;AS")
+
 # ── Conformance subdirectory (005 Q2 in-scope [FIX-TC] subset) ───────────────
 # Phase 3 adds tc_establishment_test.cpp (T020); later phases add more.
 add_subdirectory(conformance)

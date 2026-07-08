@@ -254,6 +254,38 @@ if(FIXPP_BUILD_TESTS)
   add_subdirectory(tests/sync)   # 006-async-mutex — 29 sync_* seams (T002)
   add_subdirectory(tests/conformance)  # 008-message-store — seam 17 store-side corpus replay (T019)
   add_subdirectory(tests/perf)         # 008-message-store — seam 14 mallocnesia alloc-guard (T050)
+
+  # 061-typed-app-messages (061-slim) T024 — FR-008/SC-004 external-consumer
+  # install witness. tests/consumer/ is a STANDALONE CMake project (its own
+  # project(), never add_subdirectory()'d — see tests/consumer/CMakeLists.txt)
+  # so it never inherits this file's directory-scoped
+  # include_directories("${CMAKE_SOURCE_DIR}/include"). Driven via cmake -P
+  # (mirrors the T039 codegen_build_graph_test.cmake pattern): stage-install
+  # this build, configure+build the consumer against the staged prefix only,
+  # run it, assert PASS. Requires the T023 install rule (FIXPP_BUILD_CODEGEN_TOOL).
+  if(FIXPP_BUILD_CODEGEN_TOOL)
+    add_test(
+      NAME "fixpp::consumer::install-witness"
+      COMMAND "${CMAKE_COMMAND}"
+        "-DFIXPP_MAIN_BUILD_DIR=${CMAKE_BINARY_DIR}"
+        "-DFIXPP_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+        "-DFIXPP_CONSUMER_SRC_DIR=${CMAKE_SOURCE_DIR}/tests/consumer"
+        "-DFIXPP_WITNESS_WORK_DIR=${CMAKE_BINARY_DIR}/_consumer_witness"
+        "-DFIXPP_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
+        "-DFIXPP_C_COMPILER=${CMAKE_C_COMPILER}"
+        # Build the consumer sub-build in the SAME config as this build. Conan
+        # resolves pugixml (a private link dep of fixpp_dictionary) for THIS
+        # build's build_type; a config mismatch leaves pugixml::pugixml with no
+        # imported location for the sub-build's config -> undefined pugixml refs
+        # from xml_loader.cpp.o at link. Single-config Ninja presets always set
+        # CMAKE_BUILD_TYPE; the run script defaults to Debug if it is empty.
+        "-DFIXPP_BUILD_TYPE=${CMAKE_BUILD_TYPE}"
+        -P "${CMAKE_SOURCE_DIR}/tests/consumer/run_consumer_witness.cmake"
+    )
+    set_tests_properties("fixpp::consumer::install-witness" PROPERTIES
+      LABELS consumer
+      TIMEOUT 300)
+  endif()
 endif()
 
 if(FIXPP_BUILD_FUZZ)
@@ -267,3 +299,19 @@ install(
   DIRECTORY "${CMAKE_SOURCE_DIR}/include/"
   DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
 )
+
+# 061-typed-app-messages (061-slim) T023 / FR-008 (research.md Decision 7):
+# install the configure-time-generated typed-message flyweight headers onto
+# the public installed include path. Previously these attached to the
+# fixpp::dict::{v42,v44,v50sp2,vt11} INTERFACE targets via $<BUILD_INTERFACE:>
+# only (cmake/Codegen.cmake) — an external consumer outside the build tree
+# could not #include them. _dispatch/ (build-tree-private reify bridge) and
+# vt11/ (FIXT.1.1, not part of the public v42/v44/v50sp2 set) are excluded.
+if(FIXPP_BUILD_CODEGEN_TOOL)
+  install(
+    DIRECTORY "${CMAKE_BINARY_DIR}/_codegen/include/"
+    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+    PATTERN "_dispatch" EXCLUDE
+    PATTERN "vt11" EXCLUDE
+  )
+endif()

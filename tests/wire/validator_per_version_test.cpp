@@ -132,7 +132,7 @@ MessageView<access_mode::Index> parse_index(std::vector<std::byte> const& buf,
         ADD_FAILURE() << "parser.parse failed: " << static_cast<int>(mv.error());
         return {};
     }
-    return *mv;
+    return std::move(*mv);
 }
 
 // ── Test parameter ────────────────────────────────────────────────────────────

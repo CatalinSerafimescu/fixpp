@@ -79,6 +79,25 @@ inline const std::set<int>& poss_dup_profile_excluded_tags()
     return tags;
 }
 
+// 061-typed-app-messages (061-slim): write shape-oracle normalization profile.
+//
+// Excludes ONLY the framing tags {8,9,10,34,52} — which a body-only builder
+// output never contains anyway — so EVERY seeded business field is matched
+// VERBATIM, including TransactTime(60). This is deliberately NOT
+// default_normalization_tags() ({9,10,34,52,60,112,122}), which drops business
+// tag 60 and is calibrated for live-interop transcript diffing — the wrong
+// calibration for a byte-exact write shape-oracle where the builder output is
+// the thing under test. Decimal comparison stays by-value (diff_transcripts
+// normalizes trailing zeros); the canonical decimal *format* is pinned
+// separately by each exemplar's byte-exact decimal assertion (FR-004).
+// Anchored to: specs/061-typed-app-messages/data-model.md §4; FR-006/contracts C5.
+// Usage: diff_transcripts(golden, {GoldenFrame{'>', body}}, shape_oracle_profile())
+inline const std::set<int>& shape_oracle_profile()
+{
+    static const std::set<int> tags{8, 9, 10, 34, 52};
+    return tags;
+}
+
 std::vector<GoldenFrame> parse_golden(std::string_view text);
 
 DiffResult diff_transcripts(std::span<const GoldenFrame> expected,

@@ -219,9 +219,11 @@ jobs:
     name: "${{ matrix.preset }}"
     runs-on: ubuntu-24.04
     # Backstop against a hung test wedging the runner. A clean sanitizer leg is
-    # ~24 min (build ~15 + test ~6 + setup); 45 caps a deadlock (e.g. a lost-wake
-    # in an async test) instead of letting it ride to GitHub's 6 h default.
-    timeout-minutes: 45
+    # ~24 min (build ~15 + test ~6 + setup); 60 caps a deadlock (e.g. a lost-wake
+    # in an async test) while giving the debug leg headroom on a COLD ccache run
+    # (first build of a new branch recompiles the whole tree — the debug leg hit
+    # exactly 45 min cold, before any test ran).
+    timeout-minutes: 60
     needs: gate-precheck
     # `&& github.event_name != 'release'`: a published release only needs the
     # wheel build+install-test lanes to attach the asset — the C++/sanitizer
@@ -345,18 +347,36 @@ jobs:
           restore-keys: |
             conan-${{ matrix.preset }}-
 
+      # ccache MUST be installed BEFORE "Conan install" on this lane. When a
+      # dependency has no prebuilt Conan Center binary for the resolved config,
+      # `conan install --build=missing` compiles it from source using the
+      # job-level CMAKE_{C,CXX}_COMPILER_LAUNCHER=ccache. If ccache is not yet on
+      # PATH the dependency's compiler probe fails with exit 127 ("ccache" not
+      # found) and the whole lane goes red. The earlier assumption that Tier 1
+      # (libstdc++) always resolves to prebuilt deps was NOT durable: abseil/
+      # 20260107.1 shipped with no linux-gcc-release binary and forced a
+      # from-source build that hit exit 127. Installing ccache here (this action
+      # installs ccache + restores the cross-run cache) BEFORE the from-source
+      # dependency builds fixes it and additionally lets those builds hit the
+      # cache. Same fix landed on Tier 3 in #177 — ref
+      # project_tier3_libcxx_crc32c_ccache127_infra.
+      - name: ccache (install + restore + save compiler cache)
+        uses: hendrikmuhs/ccache-action@v1.2.23
+        with:
+          key: tier1-${{ matrix.preset }}
+          # 500M was too small for the debug + sanitizer legs: their object cache
+          # exceeded it, so ccache thrashed (cache 99.93% full, 56 cleanups, only
+          # ~10% hit rate) and even warm runs recompiled ~everything, pushing the
+          # debug build to the full 45-min timeout. 2G holds a leg's full object
+          # set so warm runs actually hit.
+          max-size: 2G
+
       - name: Conan install
         run: |
           conan install . \
             -pr conan/profiles/${{ matrix.preset }} \
             --build=missing \
             -of build/${{ matrix.preset }}
-
-      - name: ccache (restore + save compiler cache)
-        uses: hendrikmuhs/ccache-action@v1.2.23
-        with:
-          key: tier1-${{ matrix.preset }}
-          max-size: 500M
 
       - name: Configure
         run: cmake --preset ${{ matrix.preset }}

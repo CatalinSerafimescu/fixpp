@@ -270,12 +270,12 @@ The application spec is version-specific (FIX 4.0 through FIX 5.0SP2); sections 
 | MsgType | Message | Catalogue ID | Gap note |
 |---|---|---|---|
 | D | NewOrderSingle | A-001 | Partial G2 interop evidence (020-g2-business-messages): minimal FIX-4.4 typed NOS builder + live both-role interop vs QuickFIX-J/cpp. Full-field + all-version (4.2/5.0SP2/FIXT.1.1) coverage deferred (FR-015a/FR-015b). Row stays backlog. |
-| E | NewOrderList | A-002 | — |
+| E | NewOrderList | A-002 | 061-slim shape-oracle: `build_new_order_list` on `wire::body_builder` (3-level `73→453→802`) + QuickFIX golden `golden/new_order_list.fix` + round-trip/read/fail-closed witnesses. Full-field + all-version coverage deferred (FR-015a/FR-015b). Row stays backlog. |
 | F | OrderCancelRequest | A-003 | — |
 | G | OrderCancelReplaceRequest | A-004 | — |
 | H | OrderStatusRequest | A-005 | — |
 | 8 | ExecutionReport | A-006 | Partial G2 interop evidence (020-g2-business-messages): minimal FIX-4.4 typed ExecRpt builder (fully-filled) + live both-role interop vs QuickFIX-J/cpp. Full-field + all-version (4.2/5.0SP2/FIXT.1.1) coverage deferred (FR-015a/FR-015b). Row stays backlog. |
-| 9 | OrderCancelReject | A-007 | — |
+| 9 | OrderCancelReject | A-007 | 061-slim shape-oracle: `build_order_cancel_reject` on `wire::body_builder` (group-free) + QuickFIX golden `golden/order_cancel_reject.fix` + round-trip/read/fail-closed witnesses. Full-field + all-version coverage deferred (FR-015a/FR-015b). Row stays backlog. |
 | K | ListCancelRequest | A-019 | — |
 | L | ListExecute | A-019 | — |
 | M | ListStatusRequest | A-019 | — |
@@ -315,7 +315,7 @@ The application spec is version-specific (FIX 4.0 through FIX 5.0SP2); sections 
 | AP | PositionReport | C-002 | — |
 | AQ | TradeCaptureReportRequestAck | P-008 | — |
 | AR | TradeCaptureReportAck | P-008 | — |
-| AS | AllocationReport | P-003 | — |
+| AS | AllocationReport | P-003 | 061-slim shape-oracle: `build_allocation_report` on `wire::body_builder` (multi-char `35=AS`, 2-level `453→802`) + QuickFIX golden `golden/allocation_report.fix` + round-trip/read/fail-closed witnesses. Full-field + all-version coverage deferred (FR-015a/FR-015b). Row stays backlog. |
 | AT | AllocationReportAck | P-004 | — |
 | AU | ConfirmationAck | P-005 | — |
 | AV | SettlementInstructionRequest | P-007 | — |
