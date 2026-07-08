@@ -388,6 +388,12 @@ expected_t<std::span<std::byte>> body_builder::commit(std::span<std::byte> out) 
     // INV-5: every group instance is non-empty and delimiter-first.
     if (auto r = validate_group_grammar(entries_); !r) return std::unexpected(r.error());
 
+    // C1/INV-2: the MsgType(35) framing value gets the same clean-value guard
+    // every other field value gets ([RC#2: gate-b/r2]) — is_clean_field_value("")
+    // is true, so the non-empty check is required alongside it.
+    if (msg_type_.empty() || !is_clean_field_value(msg_type_))
+        return std::unexpected(error::wire_field_value_out_of_range);
+
     std::size_t total = 3 + msg_type_.size() + 1;  // "35=" + msg_type + SOH
     total += compute_size(entries_);
 

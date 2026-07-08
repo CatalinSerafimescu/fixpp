@@ -164,6 +164,44 @@ TEST(BodyBuilder, Inv2_FramingTagRejected) {
     }
 }
 
+// ── C1/INV-2: MsgType(35) framing-injection rejected at commit() (gate-b/r2
+// RC#2) ──────────────────────────────────────────────────────────────────────
+// Every field VALUE routed through append_string_field gets the
+// is_clean_field_value guard (see Inv2_FramingTagRejected above for the
+// field()-level SOH/framing-tag reject); the MsgType(35) framing value itself
+// -- copied verbatim from the ctor arg into "35=<msg_type_>\x01" at commit()
+// -- was the one value-source that skipped it. A crafted msg_type containing
+// SOH + a forged tag (`"X\x0149=EVIL"`) would splice `49=EVIL` in right after
+// the MsgType, forging a framing tag past the body boundary (C1/INV-2).
+TEST(BodyBuilder, Inv2_MsgTypeFramingInjectionRejected) {
+    body_builder bb{"X\x01"
+                     "49=EVIL"};
+    ASSERT_TRUE(bb.field(11, std::string_view{"CLORD1"}).has_value());
+
+    std::array<std::byte, kBufSize> buf{};
+    fill_sentinel(buf);
+    auto r = bb.commit(std::span<std::byte>{buf});
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error(), fixpp::core::error::wire_field_value_out_of_range);
+    EXPECT_TRUE(all_sentinel(buf)) << "INV-4: out must be untouched on failure";
+}
+
+// ── C1/INV-2: empty MsgType(35) rejected at commit() (gate-b/r2 RC#2) ───────
+// is_clean_field_value("") is true (an empty range vacuously satisfies
+// all_of), so the non-empty check is a SEPARATE leg from the clean-value
+// check -- without it, an empty msg_type would emit the malformed "35=\x01".
+TEST(BodyBuilder, Inv2_EmptyMsgTypeRejected) {
+    body_builder bb{""};
+    ASSERT_TRUE(bb.field(11, std::string_view{"CLORD1"}).has_value());
+
+    std::array<std::byte, kBufSize> buf{};
+    fill_sentinel(buf);
+    auto r = bb.commit(std::span<std::byte>{buf});
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error(), fixpp::core::error::wire_field_value_out_of_range);
+    EXPECT_TRUE(all_sentinel(buf)) << "INV-4: out must be untouched on failure";
+}
+
 // ── INV-3: decimal canonical bytes (direct byte compare, C2) ────────────────
 // decimal_t canonicalizes at parse time (trailing zeros stripped: "190.50"
 // and "190.5" store identically, tests/session/test_business_messages_build.cpp
