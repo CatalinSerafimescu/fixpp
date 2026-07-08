@@ -1,60 +1,114 @@
-# Phase 0 Research: Typed Application Messages (061)
+# Phase 0 Research: Typed App Messages — write shape-oracle (061-slim)
 
-**Date**: 2026-07-05 | **Branch**: `061-typed-app-messages`
+**Date**: 2026-07-08 | **Branch**: `061-typed-app-messages`
+**Supersedes** the 2026-07-05 paused research (33-message scope, blocked-on-062). Prereqs 062 (PR #168) +
+063 (PR #176) merged; this re-scope follows the user-signed D3 decision (2026-07-07). All source claims
+verified 2026-07-08 via CodeGraph/read against real headers + dictionary XML.
 
-## Scope census (authoritative source: `spec/feature-catalogue.md` lines 134–204)
+## Decision 1 — exemplar set (5 messages, all `fixpp::v44`)
 
-- **A — Order Management (13 rows, 13 messages)**: D, E, F, G, H, 8, 9, q, r, AF, AC, t, u.
-- **M — Market Data / Ref Data / Quotation (12 rows, 17 distinct MsgTypes)**: V, W, X, Y, c, d, e, f, g, h, i, b, S, R, AG, Z, a. Note `35=b` is cited by both M-008 (MassQuoteAcknowledgement) and M-009 (QuoteAcknowledgement) — one flyweight, witnessed once.
-- **P — Allocation (3 rows, 3 messages)**: J, P, AS.
-- **Total: 33 distinct messages** across 28 rows.
+- **Decision**: D (NewOrderSingle), 8 (ExecutionReport), 9 (OrderCancelReject), E (NewOrderList),
+  AS (AllocationReport) — all in `fixpp::v44`.
+- **Rationale**: spans every hard write axis with minimal overlap while staying inside the OFFICIAL set
+  (rows A-001/A-006/A-007/A-002/P-003). Verified group structure (generated `v44/Messages.hpp`, dict `FIX44.xml`):
+  - **D** `Messages.hpp:18016`, **8** `Messages.hpp:5368` — flat-scalar exemplars (built with groups emitted
+    count-0); reuse the 020 builders; exercise string/char/int/decimal/UTCTimestamp typing.
+  - **9** `Messages.hpp:6188` — **genuinely group-free** app body → exercises the emitter's "no group
+    definitions at all" path, distinct from "groups present, count-0".
+  - **E** `Messages.hpp:18620` — one top-level `NoOrders(73)` nesting `NoPartyIDs(453)` nesting
+    `NoPartySubIDs(802)` → **the pivotal 3-level nested exemplar** (cleanest nesting in the candidate set).
+  - **AS** `Messages.hpp:13206` — **multi-char MsgType** (`35=AS`) + nested (73/78/453→802/555/711).
+- **Alternatives rejected**: (a) the 100pct-plan's original MassQuote(v42)/AllocationInstruction picks —
+  **invalidated**: v42 codegen emits ZERO typed groups (see Decision 2); AllocationInstruction is "busy"
+  (10 top-level groups) vs E's clean single-chain nesting. (b) Full 33-message hand-write — superseded by D3
+  (that is FR-015a's job).
+- **MUST re-verify at implement start**: grep `v44/Messages.hpp` for each flyweight + its group accessors
+  (planning existence claims are unreliable — [[feedback_planning_explore_existence_claims_unreliable]]).
 
-**C-/R- families and P-004..008, N-001 are DEFERRED post-v1.0** per the §I.3 triage (`research/findings/v1-official-row-triage-2026-06-22.md`, the "DEFER-POST-V1.0 (81)" list — C(3), R(5), P(5), N(1)). Constitution §XVIII.7's mention of "C-/R- families" as v1.0 typed-message scope is **stale relative to the triage** (a later signed user decision, 2026-06-22, which governs). → Doc-hygiene: amend §XVIII.7 to drop C-/R- from v1.0 typed-scope (tracked as a close-out nit, not this feature's work). **N-002/003 remain the separate FSM-dispatch follow-on.**
+## Decision 2 — namespace forced to v44 (v42 emits zero typed groups)
 
-## Decision: representative namespace per row
+- **Finding (verified)**: the v42 generated `Messages.hpp` emits `group_view` occurrences = 0 and
+  `nested_group_slices` = 0; `NoQuoteSets(296)` etc. surface only as scalar `int32` counts. The 296→295
+  nesting exists in `FIX42.xml` but never reaches a typed flyweight.
+- **Consequence**: no grouped/nested exemplar is expressible in v42 → all 5 exemplars use v44. Market-data
+  (M-row) grouped writes become an **FR-015a prerequisite** (v42 group codegen), out of 061-slim scope.
+  Flagged in spec Out-of-Scope + parent tracker.
 
-- **Decision**: one representative version namespace per row — **v44** for order-management (A) + allocation (P); **v42** for market-data (M).
-- **Rationale**: the row-done clarification fixed one representative namespace (FR-015b all-version deferred). v44 contains every A/P message (A-001..007 are 4.0–5.0SP2, A-008..013 + P-003 are 4.4+, P-001/002 are 4.0/4.1+ → all present in v44). v42 contains every M message (all M rows include 4.2, and M-009/M-010 are 4.0+ → present in v42). This gives one consistent namespace per family with the flyweight guaranteed to exist.
-- **Alternatives rejected**: (a) authority-tag-driven (mixed v42/v44/v50sp2 per the row's `[FIXxx]` spec-ref) — inconsistent within a family, no benefit; (b) all-three namespaces — that is the deferred FR-015b.
-- **MUST verify per message** at implementation start: grep the chosen namespace's generated `Messages.hpp` for each flyweight (planning existence claims are unreliable; verify vs real headers). Spot-checked 2026-07-05: v44 has NewOrderList/OrderCancelRequest/AllocationInstruction/QuoteRequest/MassQuote; v42 has MarketDataRequest/NewOrderList/QuoteRequest/MassQuote.
+## Decision 3 — `wire::body_builder` design (mirror the C-ABI `OutboundAccumulator`)
 
-## ⚠️ CRITICAL FINDING: typed repeating-group READ does not compile today
+- **Decision**: a new wire-layer, body-only serializer that (a) lifts 020's flat helpers
+  `wfield`/`wchar`/`wdecimal` out of `business_messages.cpp`'s anonymous namespace into a shared header,
+  and (b) adds a repeating-group API **structurally mirroring** the proven C-ABI accumulator so there is
+  no third group-write idiom:
+  - `group_begin(uint16_t no_tag) → group handle` · `add_entry() → entry handle` ·
+    `entry.set_{string,char,int,decimal}(tag, v)` · `entry.group_begin(no_tag)` (nested) · `group_end()` (LIFO).
+  - **Accumulate → serialize** (two-pass): collect entries, then emit `NoXXX=<count>\x01` FIRST followed by
+    each instance's fields (delimiter-first, INV-4) — because the `NoXXX` count must precede entries and is
+    unknown until all entries are added (the exact reason the C-ABI accumulator buffers).
+- **Rationale**: the C-ABI `OutboundAccumulator` (`src/capi/message_write.cpp`) already solved count-
+  precedence, LIFO discipline (`open_builders` stack, `group_end` requires `stack.back()==b`), nested groups
+  (`entry_group_begin`, `b->parent=e`), and the delimiter-first grammar. Mirroring its shape keeps the two
+  serializers conceptually convergent (and eases the tracked v1.x convergence debt).
+- **Simplification vs the C-ABI**: the hand-written exemplar author supplies fields in dictionary order, so
+  `body_builder` is a **dumb ordered serializer** — it does NOT need dictionary group-grammar validation
+  (`validate_group_grammar`) or `dict->group_first_field` lookups. Field-order correctness is guaranteed by
+  the exemplar author and **checked by the external golden** (Decision 5). This keeps `body_builder` in the
+  wire→core layer with no dictionary dependency. (If a later need arises, wire→dictionary is layer-legal.)
+- **`wire::Writer` rejected**: it always injects `8=`/`9=`/`10=` (full frame) — no body-only mode
+  (`business_messages.cpp:24-27`). Not reusable here.
 
-**Verified against source (not just the build tree):**
-- `include/fixpp/wire/group_view.hpp:34-37` — `group_view<GroupT>::operator[](i)` returns `GroupT{ std::span<const std::byte>{ s.data, s.len } }` (and `iterator::operator*` → same, `:42`).
-- `tools/codegen/fixpp-codegen/emit_messages.cpp:209-217` — every generated group-entry class `G_<no_tag>` emits ONLY `G_n() noexcept = default;` and `explicit G_n(MessageView<Index> const& v) noexcept : view_(&v) {}`. **There is no `std::span<std::byte>` constructor.**
+## Decision 4 — buffer/allocation policy: caller-span, fail-closed atomic
 
-**Consequence**: `group_view<G_n>::operator[]` / `begin()` / `*it` are ill-formed the moment they are ODR-instantiated on a generated flyweight. `msg.orders()` and `msg.orders().size()` compile (member functions of a class template instantiate lazily), but reading any group **entry field** (`msg.orders()[0].cl_ord_id()`) does **not** compile. Confirmed no existing test exercises it: `tests/wire/repeating_group_equivalence_test.cpp:39` uses a hand-written span-constructible `TestLeg`; `tests/codegen/typed_accessor_test.cpp:68-73` only calls `size()` and default-constructs an entry.
+- **Decision**: builders take a caller-provided `std::span<std::byte> out` and return
+  `expected_t<std::span<std::byte>>`; on any invalid input or overflow, return a typed error and leave `out`
+  untouched (all-or-nothing, INV-4). `body_builder` assembles into an internal buffer and copies to `out`
+  only on full success — matching the 020 discipline (`scratch[1024]` → copy). The internal buffer is sized
+  for the exemplars; group-heavy E/AS may exceed 1024B, so the internal buffer is either a larger fixed
+  scratch or an accumulate-then-serialize vector bounded by a commit cap analogous to the C-ABI `kFrameCap`
+  (3800B). **No per-call monotonic arena** ([[feedback_monotonic_arena_percall_pmr_vector_leaks]]) and no
+  unbounded growth ([[feedback_build_resource_cap_oom]] is a build concern, but the anti-OOM discipline
+  applies to buffers too).
+- **Rationale**: caller-span is the 020 precedent, avoids allocator surprises, and is what FR-015a's
+  generated builders will inherit.
 
-**Why it matters for 061**: the discriminating read/round-trip witnesses (FR-005/006) require typed group-entry field assertions for grouped messages. `group_view` today carries only `std::span<slice const>` + a generation token (`group_view.hpp:66-67`) — not the `memory_resource*` (and possibly dict/`group_member_fn`) needed to build a per-slice sub-`MessageView`. Fixing it means changing BOTH `group_view::operator[]` (construct an entry over a sub-view built from the slice + carried `mr`) AND the codegen entry-class contract in `emit_messages.cpp` (give `G_n` a matching ctor). This is a **wire-format/parser + codegen-layout change** (mandatory-trigger Appendix A) and a hard prerequisite for the grouped subset of the 33 messages. **Flat messages are unaffected.**
+## Decision 5 — external golden anchor (uniform, in-submodule, body-only)
 
-→ This is a scope fork surfaced to the user (see plan.md Summary / Complexity Tracking). Flat messages can ship now; grouped messages require this fix first.
+- **Decision**: all 5 exemplars anchored by **static checked-in body-only golden `.fix` files** under
+  `tests/session/golden/`, each authored once by serializing the same seed via **QuickFIX-cpp offline**
+  (reference engine cloned per [[project_reference_engines_setup]]). Diff via
+  `tests/interop/support/golden_diff.hpp::diff_transcripts` (decimal-by-value; non-deterministic tags
+  normalized/excluded). D & 8 get **new** body-only goldens too — the parent `phase-9-harness/BM-*`
+  transcripts are full-frame + out-of-submodule and are NOT consumed here.
+- **Rationale**: a pure build→parse round-trip is tautological (builder+parser co-wrong stay green — the
+  [[feedback_coverage_push_enshrines_bugs]] class); the external golden is the independent oracle that makes
+  each exemplar trustworthy as FR-015a's shape reference. Uniform in-submodule keeps the harness hermetic
+  (no runtime QuickFIX dependency, no cross-submodule reach).
+- **Authoring note**: the QuickFIX serialization emits a full frame; the golden is the extracted **body**
+  (fields after `9=` through before `10=`, minus session header tags) normalized to fixpp's canonical decimal
+  form. Record the exact QuickFIX version + seed in a golden-provenance comment/sidecar for reproducibility.
 
-## Repeating-group READ mechanics (once unblocked)
+## Decision 6 — read-back path: 5-arg dict-backed `Parser<Index>::parse`
 
-- Message-level accessor = a named group getter returning `wire::group_view<groups::G_<noTag>>`, e.g. `NewOrderList::orders()` → `view_.group<73, groups::G_73>()`. No separate count getter — the `NoXXX` count is `group_view::size()`.
-- Groups are shared once in `namespace fixpp::v<ver>::groups`, keyed by NoTag, reused across messages (`G_453`/`G_627` recur).
-- Entry flyweight per-field accessors return `core::expected_t<T>` (string→`string_view`, char, int32; decimal takes `memory_resource*`, e.g. `order_qty(mr)`). Nested groups exposed the same way on the entry.
+- **Decision**: the round-trip and inbound-read witnesses parse via the **5-arg dict-backed**
+  `MessageView`/`Parser<Index>{dict}.parse(frame, mr)` (`parser.hpp:95-115`), NOT the 2-arg heuristic
+  (`parser.hpp:135`). Factor a `tests/support/app_message_read_scaffold.hpp` (make_frame + dict-parse,
+  BeginString-parameterized) so ~10 witnesses don't duplicate it.
+- **Rationale**: only the dict-backed path seeds root `group_context` + `group_member_fn`, so
+  `nol.orders()[i].parties()[j].party_id()`-style nested entry reads enumerate correctly (062/063). The
+  2-arg heuristic cannot slice groups. Entry accessor shapes (062/063): strings `[[clang::lifetimebound]]`
+  no-arg; decimals take `std::pmr::memory_resource*`; char/int via `decode_field<T>`.
 
-## Repeating-group WRITE mechanics (hand-written builder)
+## Decision 7 — FR-008 header-install mechanics
 
-- Existing builders (`src/session/business_messages.cpp:55-203`) are flat, body-only, using **TU-local `static`** helpers `wfield`/`wchar`/`wdecimal` (anonymous namespace) — **not reusable** from another TU as-is.
-- A real group writer exists but is coupled to `wire::Writer` (`include/fixpp/wire/writer.hpp:102` `open_group`; `group_writer::append_field`), which always injects `8=`/`9=`/`10=` (full frame) — **no body-only mode**, so unusable by these body-only builders (noted at `business_messages.cpp:24-27`).
-- **Conclusion**: a body-only grouped builder must emit `NoXXX=<count>\x01` (int→ASCII via `wfield`) then a manual per-entry loop of `wfield`/`wchar`/`wdecimal` in dictionary tag order. The helpers must be **lifted out of the anonymous namespace** (into a shared internal header) or duplicated so grouped builders can reuse them. C-ABI reference impl for group encoding: `src/capi/message_write.cpp` (`fixpp_group_builder`).
+- **Decision**: add `install(DIRECTORY "${CMAKE_BINARY_DIR}/_codegen/include/" DESTINATION
+  "${CMAKE_INSTALL_INCLUDEDIR}")` with `PATTERN "_dispatch" EXCLUDE` (build-tree-private reify bridge) and
+  `vt11` excluded (FIXT.1.1, not part of the public v42/v44/v50sp2 set). Add a `tests/consumer/` external-TU
+  compile witness that includes an installed typed header. Generated headers currently attach to codegen
+  INTERFACE targets via BUILD_INTERFACE only (`cmake/Codegen.cmake`), with no install rule.
+- **Rationale**: §XVIII.7 "ships in v1.0" is only true if the generated headers are on the installed public
+  include path; this is orthogonal to builder count, so it belongs in 061-slim.
 
-## Read-test frame scaffold
-
-- `tests/session/test_business_messages_read.cpp`: `make_frame(body)` (`:43-59`) prepends `8=FIX.4.4\x01 9=<len>\x01`, appends `10=<sum%256,%03u>\x01` (`body` must start `35=<type>\x01`); `parse_frame(buf, mr)` (`:62-72`) drives the production `wire::Framer` and returns the **2-arg** `MessageView<Index>{frame, mr}` (no dict). Flyweight then `fixpp::v44::NewOrderSingle nos{mv};`.
-- **No shared session-read helper header exists** — the pair is duplicated inline. Replicating ~33× should **factor a small shared test-support header** (`tests/support/`), parameterised by BeginString (v42 needs `8=FIX.4.2`).
-- Grouped-witness caveat: group slices are cut by a first-field-reappearance heuristic in the `OffsetTable`; a dict-backed `Parser<Index>::parse` (5-arg `MessageView`) gives member-set-correct extents. `tests/support/frame_view_factory.hpp` (`make_frame_view`) + `Parser::parse` is the dict-capable path. Decide per grouped message whether the 2-arg heuristic slicing suffices or the dict path is needed — verify by reading `OffsetTable::group_slices` during the exemplar.
-
-## Header-install mechanics (FR-007)
-
-- Current install is a single header drop: `CMakeLists.txt:266-270` `install(DIRECTORY ${CMAKE_SOURCE_DIR}/include/ ...)`. No `install(TARGETS/EXPORT)`, no package config.
-- Generated headers live only at `${CMAKE_BINARY_DIR}/_codegen/include/fixpp/{v42,v44,v50sp2,vt11,_dispatch}/` (`cmake/Codegen.cmake:6-7,61`), attached to codegen INTERFACE targets via **BUILD_INTERFACE only** (`Codegen.cmake:264-276`), with an explicit "No install() rules — build-scaffolding" comment (`:258`).
-- **Fix**: add `install(DIRECTORY "${CMAKE_BINARY_DIR}/_codegen/include/" DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")` with **exclusions**: `PATTERN "_dispatch" EXCLUDE` (build-tree-private reify bridge) and an explicit keep/drop on `vt11` (FIXT.1.1, not part of the public v42/v44/v50sp2 set → exclude). No target-level `$<INSTALL_INTERFACE>` split needed (pure header drop, matching the existing model). Per-preset gotcha: install pulls from whichever preset is installed (no single canonical output dir) — acceptable; document it.
-
-## decimal / timestamp helpers
-
-- `decimal_t::format(std::span<std::byte> dst) -> expected_t<std::size_t>` (`include/fixpp/core/decimal.hpp:64`); existing `wdecimal` formats into a 64-byte stack buffer then copies (`business_messages.cpp:189-201`) — reuse verbatim.
-- Existing builders take `transact_time` **pre-formatted** as `string_view`, shape-validated by TU-local `is_valid_utc_timestamp` (17/21 chars, `business_messages.cpp:130-155`). If a builder must PRODUCE a UTCTimestamp: `fixpp::core::utc_time_to_fix_string(tp, …, span<char>)` (`include/fixpp/core/fix_time.hpp:68-89`).
+## Open items for `/speckit-plan` Phase 1 / `/tasks`
+- Exact per-exemplar seed field lists (representative shape-oracle, not full-field) → data-model.md seed tables.
+- `body_builder` internal-buffer sizing (larger fixed scratch vs bounded vector) → decide at first E impl.
+- Golden provenance format (inline comment vs sidecar `.provenance`) → task detail.
