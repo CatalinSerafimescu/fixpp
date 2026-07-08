@@ -528,3 +528,67 @@ TEST(BodyBuilder, ArenaExhaustion_FailsClosedNoTerminate) {
     fill_sentinel(std::span<std::byte>{buf});
     (void)bb.commit(std::span<std::byte>{buf});
 }
+
+// -- gate-b/r1 RC#2: default (null-owner) handles fail-closed, not UB ------
+// group_handle/entry_handle have PUBLIC default ctors (owner_ == nullptr).
+// Every forwarding op must reject rather than deref the null owner_.
+// Mutation-proof: reverting either `owner_ == nullptr` guard back out
+// reintroduces a null-pointer dereference (UB/crash under ASan), not a typed
+// error -- this test would fail to compile-time-detect that regression via
+// assertion alone, but a local revert-and-rerun under ASan crashes instead of
+// returning EXPECT_FALSE, confirming the guard is load-bearing.
+TEST(BodyBuilder, DefaultHandle_NullOwner_FailsClosed) {
+    fixpp::wire::group_handle default_group{};
+    auto add_r = default_group.add_entry();
+    EXPECT_FALSE(add_r.has_value());
+    EXPECT_EQ(add_r.error(), fixpp::core::error::wire_invalid_field_format);
+
+    fixpp::wire::entry_handle default_entry{};
+    auto set_str_r = default_entry.set_string(11, "x");
+    EXPECT_FALSE(set_str_r.has_value());
+    EXPECT_EQ(set_str_r.error(), fixpp::core::error::wire_invalid_field_format);
+
+    auto set_char_r = default_entry.set_char(11, 'x');
+    EXPECT_FALSE(set_char_r.has_value());
+    EXPECT_EQ(set_char_r.error(), fixpp::core::error::wire_invalid_field_format);
+
+    auto set_int_r = default_entry.set_int(11, 42);
+    EXPECT_FALSE(set_int_r.has_value());
+    EXPECT_EQ(set_int_r.error(), fixpp::core::error::wire_invalid_field_format);
+
+    decimal_t px = make_decimal("1.5", std::pmr::get_default_resource());
+    auto set_dec_r = default_entry.set_decimal(44, px);
+    EXPECT_FALSE(set_dec_r.has_value());
+    EXPECT_EQ(set_dec_r.error(), fixpp::core::error::wire_invalid_field_format);
+
+    auto nested_r = default_entry.group_begin(802, 523);
+    EXPECT_FALSE(nested_r.has_value());
+    EXPECT_EQ(nested_r.error(), fixpp::core::error::wire_invalid_field_format);
+}
+
+// -- gate-b/r1 RC#2: cross-builder group_end() must reject, not corrupt -----
+// Every body_builder starts next_open_seq_ at 1, so builder A's FIRST handle
+// (open_seq_ == 1) numerically collides with builder B's FIRST handle
+// (open_seq_ == 1) -- Codex's counter-test. Before the `handle.owner_ ==
+// this` guard, `b.group_end(*ga)` succeeded (popped B's open_stack_ using A's
+// handle), silently closing the wrong builder's group.
+TEST(BodyBuilder, CrossBuilder_GroupEnd_Rejected) {
+    body_builder a{"A"};
+    body_builder b{"B"};
+
+    auto ga = a.group_begin(453, 448);
+    ASSERT_TRUE(ga.has_value());
+    auto gb = b.group_begin(73, 11);
+    ASSERT_TRUE(gb.has_value());
+
+    // Sanity: both handles' open_seq_ is 1 (the collision precondition).
+    auto end_wrong = b.group_end(*ga);
+    EXPECT_FALSE(end_wrong.has_value())
+        << "builder B must reject builder A's handle, even with a colliding open_seq_";
+    EXPECT_EQ(end_wrong.error(), fixpp::core::error::wire_invalid_field_format);
+
+    // B's own group is still open (untouched by the rejected cross-builder call).
+    EXPECT_TRUE(b.group_end(*gb).has_value());
+    // A's own group is still open too.
+    EXPECT_TRUE(a.group_end(*ga).has_value());
+}

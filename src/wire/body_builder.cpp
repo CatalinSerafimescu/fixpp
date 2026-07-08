@@ -265,7 +265,13 @@ expected_t<group_handle> body_builder::entry_group_begin_impl(
 }
 
 expected_t<void> body_builder::group_end(group_handle handle) noexcept {
-    if (open_stack_.empty() || open_stack_.back() != handle.open_seq_) {
+    // [gate-b/r1 RC#2] `handle.owner_ == this` guards a default-constructed
+    // handle (owner_ == nullptr) AND a handle issued by a DIFFERENT
+    // body_builder: every builder starts `next_open_seq_` at 1, so builder
+    // A's handle (open_seq_ == 1) would otherwise collide with builder B's
+    // top-of-stack open_seq_ == 1 and close the wrong builder's group.
+    if (handle.owner_ != this || open_stack_.empty() ||
+        open_stack_.back() != handle.open_seq_) {
         return std::unexpected(error::wire_invalid_field_format);
     }
     open_stack_.pop_back();
@@ -273,12 +279,19 @@ expected_t<void> body_builder::group_end(group_handle handle) noexcept {
 }
 
 // ── group_handle / entry_handle forwarding members ──────────────────────────
+//
+// [gate-b/r1 RC#2] Every forwarding op guards `owner_ != nullptr` (a public
+// default-constructed handle otherwise UB-derefs a null owner_) before
+// touching the owning body_builder.
 
 expected_t<entry_handle> group_handle::add_entry() noexcept {
+    if (owner_ == nullptr) return std::unexpected(error::wire_invalid_field_format);
     return owner_->add_entry_impl(*this);
 }
 
 expected_t<void> entry_handle::set_string(std::uint16_t tag, std::string_view v) noexcept {
+    if (group_.owner_ == nullptr)
+        return std::unexpected(error::wire_invalid_field_format);
     return body_builder::append_string_field(group_.owner_->resolve_instance(*this)->fields, tag,
                                              v);
 }
@@ -288,16 +301,22 @@ expected_t<void> entry_handle::set_char(std::uint16_t tag, char c) noexcept {
 }
 
 expected_t<void> entry_handle::set_int(std::uint16_t tag, std::int64_t v) noexcept {
+    if (group_.owner_ == nullptr)
+        return std::unexpected(error::wire_invalid_field_format);
     return body_builder::append_int_field(group_.owner_->resolve_instance(*this)->fields, tag, v);
 }
 
 expected_t<void> entry_handle::set_decimal(std::uint16_t tag, const fixpp::decimal_t& v) noexcept {
+    if (group_.owner_ == nullptr)
+        return std::unexpected(error::wire_invalid_field_format);
     return body_builder::append_decimal_field(group_.owner_->resolve_instance(*this)->fields, tag,
                                               v);
 }
 
 expected_t<group_handle> entry_handle::group_begin(std::uint16_t no_tag,
                                                    std::uint16_t delimiter_tag) noexcept {
+    if (group_.owner_ == nullptr)
+        return std::unexpected(error::wire_invalid_field_format);
     return group_.owner_->entry_group_begin_impl(*this, no_tag, delimiter_tag);
 }
 
