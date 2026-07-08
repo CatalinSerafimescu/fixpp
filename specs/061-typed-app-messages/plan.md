@@ -29,7 +29,11 @@ QuickFIX-cpp (cloned reference engine) used **offline** to author the goldens, N
 **Project Type**: single C++ library.
 **Performance Goals**: N/A (correctness feature; builders are not on a measured hot path here).
 **Constraints**: fail-closed atomic builders (INV-4); caller-provided output span (no per-call arena burn);
-canonical decimals (INV-3); body-only output, no framing tags 8/9/34/49/52/56/10 (INV-2).
+`body_builder` internal buffer = **fixed scratch capped at the C-ABI `kFrameCap` (3800 B), no
+`memory_resource`** (pinned Gate A round 1; over-cap → fail closed); repeating-group grammar enforced —
+non-empty + delimiter-first via author-supplied `delimiter_tag` at `commit()` (INV-5, mirrors the C-ABI
+`validate_group_grammar`); canonical decimals (INV-3); body-only output, no framing tags 8/9/34/49/52/56/10
+(INV-2).
 **Scale/Scope**: 1 new `wire::body_builder` (header+TU) + 5 exemplar builders (3 new: 9, E, AS; 2 refactored: D, 8)
 + 1 witness harness + 5 goldens + 1 CMake install rule. Grouped/nested builders (E, AS) are the LoC-heavy part.
 
@@ -64,8 +68,9 @@ before `/tasks`** (per `.specify/pipeline.md` order), user `/plan` sign-off (thi
 - **Article XVII §8** — `/speckit-verify` mandatory after `/implement`, producing `.specify/decisions/061-verify.md`;
   `/gate-b` refuses without it.
 - **Layer discipline** (`tools/check_layers.py`): `wire` → {core, dictionary}; `session` → {…, wire}.
-  `wire::body_builder` lives in the wire layer (wire→core only; may consult `dictionary` for group ordering
-  if needed, also allowed). `session/business_messages` (session layer) depends on wire — clean.
+  `body_builder` is `wire→core` only in 061 — the delimiter is author-supplied, no dictionary lookup, no
+  `wire→dictionary` edge; a future dictionary-backed ordering would be FR-015a/future work (wire→dictionary
+  remains layer-legal if ever needed). `session/business_messages` (session layer) depends on wire — clean.
 
 **Gate result: PASS** (no unjustified violations; Gate A scheduled; §XVIII.7 amendment tracked as a separate PR).
 
@@ -93,9 +98,11 @@ src/wire/body_builder.cpp                   # NEW — impl (lifts 020 wfield/wch
 include/fixpp/session/business_messages.hpp # EXTEND — 5 exemplar builder declarations (3 new, 2 refactored)
 src/session/business_messages.cpp           # EXTEND — 5 exemplar builders on top of body_builder
 tests/support/app_message_read_scaffold.hpp # NEW — make_frame/parse (5-arg dict path), BeginString-parameterized
-tests/session/test_exemplar_roundtrip.cpp   # NEW — table-driven round-trip + golden-diff harness (5 exemplars)
+tests/session/test_exemplar_roundtrip.cpp   # NEW — table-driven round-trip + golden-diff harness (5 exemplars) + byte-exact decimal check (INV-3)
 tests/session/test_exemplar_read.cpp         # NEW — independent inbound read witnesses (hand-authored wire)
+tests/session/test_exemplar_build_failclosed.cpp # NEW — negative witnesses (INV-4 atomicity + INV-5 group grammar / AC-2): empty required string, SOH-in-value, out-of-range char/side, unformattable decimal, malformed UTCTimestamp, undersized buffer→untouched, commit() with group open, empty/wrong-delimiter instance
 tests/session/golden/*.fix                   # NEW — 5 static body-only QuickFIX-authored goldens
+tests/interop/support/golden_diff.hpp        # EXTEND — add shape_oracle_profile() (excludes only framing {8,9,10,34,52}; NOT default_normalization_tags())
 tests/consumer/                              # NEW — external-consumer compile witness (FR-008)
 CMakeLists.txt                               # EXTEND — install(DIRECTORY _codegen/include) (_dispatch + vt11 excluded)
 spec/feature-catalogue.md, coverage-index.md, behaviors-and-limitations.md  # FR-010 evidence + B/L rows
@@ -113,3 +120,8 @@ builders stay in the existing 020 `session/business_messages` TU/header (session
 | New `wire::body_builder` (3rd outbound serializer) | 020 helpers are TU-anon + flat-only; grouped body-only builders need a shared group-capable primitive; `wire::Writer` injects 8/9/10 (unusable body-only) | Mirrors C-ABI `OutboundAccumulator` LIFO (accumulate→serialize, count-precedence). **Tracked v1.x debt**: converge the 3 serializers (020 helpers / C-ABI accumulator / body_builder) onto one core — recorded, not done here (100pct-plan §Phase-2). |
 | §XVIII.7 amendment split into a separate PR | It is a constitution amendment (Article XX) needing its own Gate A + user sign-off; bundling it into a code diff muddies both reviews | FR-010 records the obligation; the amendment PR lands alongside/after 061-slim. |
 | v42-no-typed-groups → FR-015a prerequisite | Verified: v42 codegen emits zero typed groups, so market-data grouped writes are inexpressible in v42 today | Out of 061-slim scope; flagged in spec Out-of-Scope + parent tracker so FR-015a planning accounts for it. |
+
+## Gate A
+
+- Round 1 applied 2026-07-08: Codex P1=1 P2=4 P3=2; Opus post-judging P1=1 P2=6 P3=5; rewrite addresses root causes #1 (seed↔FIX44 required-field reconcile) + #2 (byte-exact 061 shape-oracle anchor) + grammar-enforcement + fail-closed-seam + allocation-policy + Normative-References + FR-010 amendment-scope. Reviews: research/reviews/codex_061-typed-app-messages_gate_a_review.md, research/reviews/opus_061-typed-app-messages_gate_a_adversarial_review.md.
+- Round 2 applied 2026-07-08: Codex P1=0 P2=2 P3=2; Opus post-judging P1=0 P2=3 P3=2; rewrite fixes the twin FIX-SL Normative-References cite (spec.md two sites → [FIX50SP2 §3.1] W-002..W-005), the stale D/8 count-0 phrase (research.md), the quickstart TRY/.value() slip, and the stale plan.md layer note. No design change; seed tables verified field-for-field vs FIX44.xml. Reviews: research/reviews/codex_061-typed-app-messages_gate_a_2_review.md, research/reviews/opus_061-typed-app-messages_gate_a_2_adversarial_review.md.

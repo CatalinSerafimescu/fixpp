@@ -15,29 +15,43 @@ auto body = fixpp::session::build_order_cancel_reject(
 
 ## Build a grouped/nested body (the pivotal E exemplar) via `wire::body_builder`
 
+`TRY(x)` below is shorthand for the project's expected-unwrap (propagate the error, else bind the value);
+in a test sample use explicit `.value()`. Every `group_begin` carries its **delimiter tag** (the group's
+first field), which `commit()` enforces (INV-5). The seed is the required-field-complete E set (§3.1):
+root `66,394,68`, per-order `11,67,55,54,38`.
+
 ```cpp
 #include <fixpp/wire/body_builder.hpp>
 
-fixpp::wire::body_builder b{"E"};                 // 35=E
-b.field(66, "LIST1");                              // ListID
-auto orders = b.group_begin(73);                   // NoOrders
+fixpp::wire::body_builder b{"E"};                  // 35=E
+b.field(66, "LIST1");                              // ListID   (required)
+b.field(394, std::int64_t{2});                     // BidType  (required, int)
+b.field(68,  std::int64_t{1});                     // TotNoOrders (required, int)
+auto orders = TRY(b.group_begin(73, /*delim=*/11)); // NoOrders, delimiter ClOrdID(11)
 {
-  auto e0 = orders->add_entry();
-  e0.set_string(11, "C1"); e0.set_string(55, "AAPL"); e0.set_char(54, '1');
-  auto parties = e0.group_begin(453);              // NoPartyIDs (nested)
+  auto e0 = TRY(orders.add_entry());
+  TRY(e0.set_string(11, "C1"));                    // ClOrdID  (delimiter — must be first)
+  TRY(e0.set_int(67, 1));                          // ListSeqNo (required, int)
+  TRY(e0.set_string(55, "AAPL"));                  // Symbol   (Instrument content)
+  TRY(e0.set_char(54, '1'));                       // Side     (required)
+  TRY(e0.set_decimal(38, decimal_t{"100"}));       // OrderQty (OrderQtyData content)
+  auto parties = TRY(e0.group_begin(453, /*delim=*/448)); // NoPartyIDs, delimiter PartyID(448)
   {
-    auto p0 = parties->add_entry();
-    p0.set_string(448, "BROKER"); p0.set_char(447, 'D');
-    auto subs = p0.group_begin(802);               // NoPartySubIDs (nested-in-nested)
-    subs->add_entry().set_string(523, "DESK");
-    p0.group_end(*subs);
+    auto p0 = TRY(parties.add_entry());
+    TRY(p0.set_string(448, "BROKER"));             // PartyID (delimiter)
+    TRY(p0.set_char(447, 'D'));                    // PartyIDSource
+    TRY(p0.set_int(452, 1));                       // PartyRole
+    auto subs = TRY(p0.group_begin(802, /*delim=*/523)); // NoPartySubIDs, delimiter PartySubID(523)
+    { auto s0 = TRY(subs.add_entry()); TRY(s0.set_string(523, "DESK")); TRY(s0.set_int(803, 2)); }
+    TRY(p0.group_end(subs));
   }
-  e0.group_end(*parties);
+  TRY(e0.group_end(parties));
 }
-b.group_end(*orders);
+TRY(b.group_end(orders));
 
 std::byte out[1024];
-auto body = b.commit(out);                          // fails closed if any group left open
+auto body = b.commit(out).value();                  // fails closed: any group left open, empty
+                                                    // instance, or wrong delimiter-first field
 ```
 
 ## Read it back (round-trip, dict-backed path)
@@ -45,7 +59,7 @@ auto body = b.commit(out);                          // fails closed if any group
 ```cpp
 #include "support/app_message_read_scaffold.hpp"
 
-auto frame = make_frame("FIX.4.4", body.value());
+auto frame = make_frame("FIX.4.4", body);
 auto mv    = parse_dict(frame, fix44_dict(), &mr);  // 5-arg dict-backed parse
 fixpp::v44::NewOrderList nol{mv};
 assert(nol.orders()[0].parties()[0].party_id().value() == "BROKER");
@@ -57,8 +71,21 @@ assert(nol.orders()[0].parties()[0].party_sub_ids()[0].party_sub_id().value() ==
 ```cpp
 #include "interop/support/golden_diff.hpp"
 auto expected = load_golden("tests/session/golden/new_order_list.fix");   // body-only, QuickFIX-authored
-auto diff = diff_transcripts(expected, body.value(), default_normalization_tags());
-assert(diff.status == DiffStatus::Match);   // decimal-by-value; non-deterministic tags excluded
+// 061-specific profile: excludes NO business tags (only framing {8,9,10,34,52}); NOT
+// default_normalization_tags(), which drops business tag 60 (TransactTime).
+auto diff = diff_transcripts(expected, body, shape_oracle_profile());
+assert(diff.status == DiffStatus::match);   // decimal-by-value; framing tags only excluded
+```
+
+## Byte-exact canonical-decimal check (INV-3, format pinned independently)
+
+The golden diff and the parse round-trip both compare decimals *by value*, so neither catches a wrong
+canonical *format* (`1.9E2` == `190.50` by value). Assert the raw bytes of ≥1 decimal field directly:
+
+```cpp
+// D exemplar: Price(44) seeded 190.50 → canonical bytes "44=190.50\x01" appear verbatim.
+auto d_body = fixpp::session::build_new_order_single(out, /*…seed…*/).value();
+assert(contains_bytes(d_body, "44=190.50\x01"));   // exact bytes, no scientific notation / locale drift
 ```
 
 ## Run the harness
