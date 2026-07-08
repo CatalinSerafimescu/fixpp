@@ -149,7 +149,7 @@ MessageView<access_mode::Index> parse_index(std::vector<std::byte> const& buf,
         ADD_FAILURE() << "parser.parse failed";
         return {};
     }
-    return *mv;
+    return std::move(*mv);
 }
 
 }  // namespace

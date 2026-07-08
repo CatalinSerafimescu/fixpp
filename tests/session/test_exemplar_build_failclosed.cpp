@@ -180,6 +180,54 @@ TEST(ExemplarBuildFailClosed, FailClosed_EmptyRequiredString) {
     assert_unchanged(buf, "AS empty alloc_report_id");
 }
 
+// ── AC-2 case 1b: LATER required-field guards ────────────────────────────────
+// FailClosed_EmptyRequiredString above exercises each message's FIRST required
+// check (which short-circuits). This pins the SUBSEQUENT guards, each reached
+// only when every earlier required field is valid: E `orders.empty()`
+// (business_messages.cpp:227-228), 9 `orig_cl_ord_id` (:302-303), AS
+// `trade_date` (:325-326) and AS `symbol` (:327-328).
+TEST(ExemplarBuildFailClosed, FailClosed_EmptyRequiredString_LaterFields) {
+    std::pmr::monotonic_buffer_resource arena{4096};
+    auto qty = make_decimal("10", &arena);
+    auto px = make_decimal("50", &arena);
+
+    std::array<std::byte, kBufSize> buf{};
+
+    // E: valid list_id, EMPTY orders span -> the second required guard fires.
+    buf.fill(kSentinel);
+    NewOrderListParams e_no_orders{"LIST1", 0, 0, std::span<const NewOrderListOrder>{}};
+    EXPECT_FALSE(
+        fixpp::session::build_new_order_list(std::span<std::byte>{buf}, e_no_orders).has_value())
+        << "E: empty orders must fail-closed";
+    assert_unchanged(buf, "E empty orders");
+
+    // 9: valid order_id + cl_ord_id, EMPTY orig_cl_ord_id -> the third guard fires.
+    buf.fill(kSentinel);
+    EXPECT_FALSE(fixpp::session::build_order_cancel_reject(std::span<std::byte>{buf}, "ORD1",
+                                                             "CLORD1", "", '8', '1', 0)
+                     .has_value())
+        << "9: empty orig_cl_ord_id must fail-closed";
+    assert_unchanged(buf, "9 empty orig_cl_ord_id");
+
+    // AS: valid alloc_report_id + symbol, EMPTY trade_date -> the second guard fires.
+    buf.fill(kSentinel);
+    AllocationReportParams as_no_td{
+        "RPT1", '0', 9, 0, 0, '1', qty, px, "", "MSFT", std::span<const AllocationReportParty>{}};
+    EXPECT_FALSE(
+        fixpp::session::build_allocation_report(std::span<std::byte>{buf}, as_no_td).has_value())
+        << "AS: empty trade_date must fail-closed";
+    assert_unchanged(buf, "AS empty trade_date");
+
+    // AS: valid alloc_report_id + trade_date, EMPTY symbol -> the third guard fires.
+    buf.fill(kSentinel);
+    AllocationReportParams as_no_sym{
+        "RPT1", '0', 9, 0, 0, '1', qty, px, "20240101", "", std::span<const AllocationReportParty>{}};
+    EXPECT_FALSE(
+        fixpp::session::build_allocation_report(std::span<std::byte>{buf}, as_no_sym).has_value())
+        << "AS: empty symbol must fail-closed";
+    assert_unchanged(buf, "AS empty symbol");
+}
+
 // ── AC-2 case 2: control byte / SOH in a value ────────────────────────────────
 // The shared guard (is_clean_field_value) lives in wire::body_builder::
 // append_string_field (src/wire/body_builder.cpp:72-74, invoked from field()/

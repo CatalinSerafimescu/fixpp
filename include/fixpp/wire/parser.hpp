@@ -85,6 +85,21 @@ class MessageView : public View {
 public:
     constexpr MessageView() noexcept = default;
 
+    // Move-only. A MessageView COPY runs std::pmr's
+    // select_on_container_copy_construction on the OffsetTable's containers,
+    // which returns a DEFAULT-constructed polymorphic_allocator (->
+    // new_delete_resource) — silently re-rooting `table_`'s allocator off the
+    // per-message arena. Its lazily-built nested sub-OffsetTables
+    // (placement-new'd, reclaimed wholesale with the arena, never individually
+    // freed — offset_table.cpp build_nested_subview) would then allocate from
+    // the global heap and LEAK on every nested read. Forbid copy; move
+    // preserves the source's arena allocator (move-construction of a pmr
+    // container adopts the source allocator). [061 L1 / B-06x]
+    MessageView(MessageView const&) = delete;
+    MessageView& operator=(MessageView const&) = delete;
+    MessageView(MessageView&&) noexcept = default;
+    MessageView& operator=(MessageView&&) noexcept = default;
+
     // [2b §4.3] Construct with type-erased dict opaque pointer + helper fns.
     // The dict is borrowed from the caller; the pointer/fns alias that
     // caller-owned object. No incomplete-type issues — uses void const* + fn

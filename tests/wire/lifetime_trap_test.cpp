@@ -113,7 +113,7 @@ TEST(WireLifetimeTrapDeath, ParserViewTrapsAfterArenaRecycle) {
     fixpp::wire::Parser<fixpp::wire::access_mode::Index> parser{};
     auto mv_result = parser.parse(fv, &arena);
     ASSERT_TRUE(mv_result.has_value()) << "parse must succeed";
-    auto mv = *mv_result;
+    auto mv = std::move(*mv_result);
 
     // Before recycling: bytes() is safe (same generation).
     EXPECT_FALSE(mv.bytes().empty()) << "MessageView must have bytes";

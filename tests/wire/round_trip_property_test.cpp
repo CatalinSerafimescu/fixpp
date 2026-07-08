@@ -77,7 +77,7 @@ MessageView<access_mode::Iter> parse_iter(std::span<const std::byte> buf) {
         ADD_FAILURE() << "parse_iter failed: " << static_cast<int>(mv.error());
         return MessageView<access_mode::Iter>{};
     }
-    return *mv;
+    return std::move(*mv);
 }
 
 // Structural round-trip: parse `original` → iterate all fields → re-emit
