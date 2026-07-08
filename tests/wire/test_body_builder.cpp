@@ -604,6 +604,80 @@ TEST(BodyBuilder, DefaultHandle_NullOwner_FailsClosed) {
     EXPECT_EQ(nested_r.error(), fixpp::core::error::wire_invalid_field_format);
 }
 
+// -- gate-b/r3: a closed group_handle must not append another instance -------
+// Mutation-proven: removing the add_entry_impl() innermost-open guard turns
+// this RED->GREEN regression back on; the stale add_entry() succeeds after
+// group_end(), creating an empty post-close instance that later fails only at
+// commit() grammar validation.
+TEST(BodyBuilder, ClosedGroupHandle_AddEntryRejected) {
+    body_builder bb{"X"};
+    auto g = bb.group_begin(453, 448);
+    ASSERT_TRUE(g.has_value());
+
+    auto e1 = g->add_entry();
+    ASSERT_TRUE(e1.has_value());
+    ASSERT_TRUE(e1->set_string(448, "P1").has_value());
+    ASSERT_TRUE(bb.group_end(*g).has_value());
+
+    auto stale_add = g->add_entry();
+    EXPECT_FALSE(stale_add.has_value());
+    EXPECT_EQ(stale_add.error(), fixpp::core::error::wire_invalid_field_format);
+}
+
+// -- gate-b/r3: a closed entry_handle must not append fields after close -----
+// Load-bearing leg from triage: grammar does NOT catch this one. Without the
+// new innermost-open guard, the stale set_string() succeeds, commit() stays
+// GREEN, and the already-closed instance silently serializes the extra field.
+TEST(BodyBuilder, ClosedEntryHandle_SetStringRejectedAndCommitUntouched) {
+    body_builder bb{"X"};
+    auto g = bb.group_begin(453, 448);
+    ASSERT_TRUE(g.has_value());
+
+    auto e1 = g->add_entry();
+    ASSERT_TRUE(e1.has_value());
+    ASSERT_TRUE(e1->set_string(448, "P1").has_value());
+    ASSERT_TRUE(bb.group_end(*g).has_value());
+
+    auto stale_set = e1->set_string(447, "D");
+    EXPECT_FALSE(stale_set.has_value());
+    EXPECT_EQ(stale_set.error(), fixpp::core::error::wire_invalid_field_format);
+
+    std::array<std::byte, kBufSize> buf{};
+    fill_sentinel(buf);
+    auto commit_r = bb.commit(std::span<std::byte>{buf});
+    ASSERT_TRUE(commit_r.has_value());
+    EXPECT_FALSE(all_sentinel(buf))
+        << "commit() should still serialize the pre-close fields after rejecting the stale write";
+}
+
+// -- gate-b/r3: STRICT innermost-open, not weaker present-anywhere ----------
+// While a nested group is still open, the outer entry handle is stale for
+// mutation purposes and must fail closed; a weaker \"present anywhere in the
+// stack\" check would wrongly accept this interleaving.
+TEST(BodyBuilder, OuterEntryMutationRejectedWhileInnerGroupOpen) {
+    body_builder bb{"X"};
+    auto orders_g = bb.group_begin(73, 11);
+    ASSERT_TRUE(orders_g.has_value());
+
+    auto order_e = orders_g->add_entry();
+    ASSERT_TRUE(order_e.has_value());
+    ASSERT_TRUE(order_e->set_string(11, "ORD1").has_value());
+
+    auto parties_g = order_e->group_begin(453, 448);
+    ASSERT_TRUE(parties_g.has_value());
+
+    auto stale_outer_set = order_e->set_string(55, "AAPL");
+    EXPECT_FALSE(stale_outer_set.has_value());
+    EXPECT_EQ(stale_outer_set.error(), fixpp::core::error::wire_invalid_field_format);
+
+    auto party_e = parties_g->add_entry();
+    ASSERT_TRUE(party_e.has_value());
+    ASSERT_TRUE(party_e->set_string(448, "P1").has_value());
+    ASSERT_TRUE(bb.group_end(*parties_g).has_value());
+    ASSERT_TRUE(order_e->set_string(55, "AAPL").has_value());
+    ASSERT_TRUE(bb.group_end(*orders_g).has_value());
+}
+
 // -- gate-b/r1 RC#2: cross-builder group_end() must reject, not corrupt -----
 // Every body_builder starts next_open_seq_ at 1, so builder A's FIRST handle
 // (open_seq_ == 1) numerically collides with builder B's FIRST handle

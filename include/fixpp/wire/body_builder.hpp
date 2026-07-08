@@ -229,6 +229,7 @@ private:
     // index path fresh from entries_ every call (reallocation-safe).
     entry_node* resolve_group(const group_handle& h) noexcept;
     group_instance* resolve_instance(const entry_handle& e) noexcept;
+    [[nodiscard]] bool is_innermost_open(std::uint32_t open_seq) const noexcept;
 
     // Shared validated-append helpers (INV-2 framing-tag reject + value
     // validation), used by both the top-level field()s and entry_handle's

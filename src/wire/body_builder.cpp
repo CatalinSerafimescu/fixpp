@@ -186,6 +186,10 @@ body_builder::group_instance* body_builder::resolve_instance(const entry_handle&
     return &g->instances[e.instance_index_];
 }
 
+bool body_builder::is_innermost_open(std::uint32_t open_seq) const noexcept {
+    return !open_stack_.empty() && open_stack_.back() == open_seq;
+}
+
 // ── group_begin / add_entry / group_end ────────────────────────────────────
 
 expected_t<group_handle> body_builder::group_begin(std::uint16_t no_tag,
@@ -216,6 +220,8 @@ expected_t<group_handle> body_builder::group_begin(std::uint16_t no_tag,
 }
 
 expected_t<entry_handle> body_builder::add_entry_impl(const group_handle& g) noexcept {
+    if (!is_innermost_open(g.open_seq_))
+        return std::unexpected(error::wire_invalid_field_format);
     entry_node* ge = resolve_group(g);
     std::size_t before = ge->instances.size();
     try {
@@ -234,6 +240,8 @@ expected_t<entry_handle> body_builder::add_entry_impl(const group_handle& g) noe
 expected_t<group_handle> body_builder::entry_group_begin_impl(
     const entry_handle& e, std::uint16_t no_tag, std::uint16_t delimiter_tag) noexcept {
     if (is_framing_tag(no_tag)) return std::unexpected(error::wire_field_value_out_of_range);
+    if (!is_innermost_open(e.group_.open_seq_))
+        return std::unexpected(error::wire_invalid_field_format);
     if (e.group_.levels_ >= kMaxGroupNestDepth - 1)
         return std::unexpected(
             error::wire_frame_too_large);  // LCOV_EXCL_LINE — defensive bound; 061-slim
@@ -292,6 +300,8 @@ expected_t<entry_handle> group_handle::add_entry() noexcept {
 expected_t<void> entry_handle::set_string(std::uint16_t tag, std::string_view v) noexcept {
     if (group_.owner_ == nullptr)
         return std::unexpected(error::wire_invalid_field_format);
+    if (!group_.owner_->is_innermost_open(group_.open_seq_))
+        return std::unexpected(error::wire_invalid_field_format);
     return body_builder::append_string_field(group_.owner_->resolve_instance(*this)->fields, tag,
                                              v);
 }
@@ -303,11 +313,15 @@ expected_t<void> entry_handle::set_char(std::uint16_t tag, char c) noexcept {
 expected_t<void> entry_handle::set_int(std::uint16_t tag, std::int64_t v) noexcept {
     if (group_.owner_ == nullptr)
         return std::unexpected(error::wire_invalid_field_format);
+    if (!group_.owner_->is_innermost_open(group_.open_seq_))
+        return std::unexpected(error::wire_invalid_field_format);
     return body_builder::append_int_field(group_.owner_->resolve_instance(*this)->fields, tag, v);
 }
 
 expected_t<void> entry_handle::set_decimal(std::uint16_t tag, const fixpp::decimal_t& v) noexcept {
     if (group_.owner_ == nullptr)
+        return std::unexpected(error::wire_invalid_field_format);
+    if (!group_.owner_->is_innermost_open(group_.open_seq_))
         return std::unexpected(error::wire_invalid_field_format);
     return body_builder::append_decimal_field(group_.owner_->resolve_instance(*this)->fields, tag,
                                               v);
