@@ -33,6 +33,16 @@ endforeach()
 set(_stage    "${FIXPP_WITNESS_WORK_DIR}/stage")
 set(_sub_build "${FIXPP_WITNESS_WORK_DIR}/build")
 
+# Build the consumer in the SAME config as the main build so the Conan-resolved
+# pugixml (a private link dep of fixpp_dictionary) has an imported location for
+# the sub-build's config. A Debug consumer against a Release main build leaves
+# pugixml::pugixml empty -> undefined pugixml refs from xml_loader.cpp.o.
+# FIXPP_BUILD_TYPE is passed by the top-level add_test; default to Debug if a
+# multi-config generator left CMAKE_BUILD_TYPE empty there.
+if(NOT DEFINED FIXPP_BUILD_TYPE OR FIXPP_BUILD_TYPE STREQUAL "")
+  set(FIXPP_BUILD_TYPE "Debug")
+endif()
+
 file(REMOVE_RECURSE "${_stage}" "${_sub_build}")
 
 # ── 1. Stage-install the main build ──────────────────────────────────────────
@@ -70,7 +80,7 @@ execute_process(
     -B "${_sub_build}"
     -G "Ninja"
     "-DCMAKE_TOOLCHAIN_FILE=${FIXPP_MAIN_BUILD_DIR}/conan_toolchain.cmake"
-    -DCMAKE_BUILD_TYPE=Debug
+    "-DCMAKE_BUILD_TYPE=${FIXPP_BUILD_TYPE}"
     "-DCMAKE_CXX_COMPILER=${FIXPP_CXX_COMPILER}"
     "-DCMAKE_C_COMPILER=${FIXPP_C_COMPILER}"
     "-DFIXPP_STAGE_PREFIX=${_stage}"
@@ -95,7 +105,13 @@ if(NOT _build_rc EQUAL 0)
 endif()
 
 # ── 4. Run it and check the output ────────────────────────────────────────────
+# Ninja single-config drops the exe at the sub-build root; the basename carries a
+# .exe suffix on Windows (this -P script has no CMAKE_EXECUTABLE_SUFFIX, so probe
+# both) and none on UNIX.
 set(_exe "${_sub_build}/consumer_witness")
+if(NOT EXISTS "${_exe}" AND EXISTS "${_exe}.exe")
+  set(_exe "${_exe}.exe")
+endif()
 if(NOT EXISTS "${_exe}")
   message(FATAL_ERROR "consumer_witness executable not found at ${_exe}")
 endif()

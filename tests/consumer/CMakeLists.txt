@@ -49,13 +49,27 @@ add_executable(consumer_witness consumer_witness.cpp)
 # ${CMAKE_SOURCE_DIR}/../../include or any _codegen/ build-tree path.
 target_include_directories(consumer_witness PRIVATE "${FIXPP_STAGE_PREFIX}/include")
 
+# Platform-correct archive filenames: libfixpp_*.a on GNU/Clang, fixpp_*.lib on
+# MSVC (CMAKE_STATIC_LIBRARY_{PREFIX,SUFFIX} expand per toolchain).
 set(_fixpp_lib "${FIXPP_BUILD_LIB_DIR}")
-target_link_libraries(consumer_witness PRIVATE
-  -Wl,--start-group
-  "${_fixpp_lib}/libfixpp_dictionary.a"
-  "${_fixpp_lib}/libfixpp_wire.a"
-  "${_fixpp_lib}/libfixpp_dict_dispatch_bridge.a"
-  "${_fixpp_lib}/libfixpp_core.a"
-  -Wl,--end-group
-  pugixml::pugixml
-)
+set(_fixpp_archives "")
+foreach(_l fixpp_dictionary fixpp_wire fixpp_dict_dispatch_bridge fixpp_core)
+  list(APPEND _fixpp_archives
+    "${_fixpp_lib}/${CMAKE_STATIC_LIBRARY_PREFIX}${_l}${CMAKE_STATIC_LIBRARY_SUFFIX}")
+endforeach()
+
+if(MSVC)
+  # MSVC's link.exe resolves inter-archive circular references across all inputs
+  # in a single invocation, so no group flags are needed (and --start-group is
+  # GNU-ld-only syntax MSVC would reject).
+  target_link_libraries(consumer_witness PRIVATE ${_fixpp_archives} pugixml::pugixml)
+else()
+  # GNU/Clang ld: the four fixpp archives have circular inter-references, so wrap
+  # them in a link group; pugixml comes after (fixpp_dictionary references it).
+  target_link_libraries(consumer_witness PRIVATE
+    -Wl,--start-group
+    ${_fixpp_archives}
+    -Wl,--end-group
+    pugixml::pugixml
+  )
+endif()

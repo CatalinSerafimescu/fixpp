@@ -273,6 +273,13 @@ if(FIXPP_BUILD_TESTS)
         "-DFIXPP_WITNESS_WORK_DIR=${CMAKE_BINARY_DIR}/_consumer_witness"
         "-DFIXPP_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
         "-DFIXPP_C_COMPILER=${CMAKE_C_COMPILER}"
+        # Build the consumer sub-build in the SAME config as this build. Conan
+        # resolves pugixml (a private link dep of fixpp_dictionary) for THIS
+        # build's build_type; a config mismatch leaves pugixml::pugixml with no
+        # imported location for the sub-build's config -> undefined pugixml refs
+        # from xml_loader.cpp.o at link. Single-config Ninja presets always set
+        # CMAKE_BUILD_TYPE; the run script defaults to Debug if it is empty.
+        "-DFIXPP_BUILD_TYPE=${CMAKE_BUILD_TYPE}"
         -P "${CMAKE_SOURCE_DIR}/tests/consumer/run_consumer_witness.cmake"
     )
     set_tests_properties("fixpp::consumer::install-witness" PROPERTIES

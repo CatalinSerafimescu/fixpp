@@ -670,6 +670,20 @@ TEST(BusinessMessagesBuild, Builder_NoHeap_CountingResource) {
                     "(alloc-dealloc-mismatch) and TSan (multiple-definition of operator new); "
                     "the zero-alloc witness runs in debug/release/ubsan, with mallocnesia "
                     "LD_PRELOAD as the CI-tier cross-check";
+#elif defined(_ITERATOR_DEBUG_LEVEL) && _ITERATOR_DEBUG_LEVEL != 0
+    // MSVC debug STL only (_ITERATOR_DEBUG_LEVEL != 0). Each builder call
+    // constructs a fixpp::wire::body_builder whose std::pmr::vector members each
+    // heap-allocate a hidden _Container_proxy through GLOBAL ::operator new at
+    // construction under iterator debugging (not through the pmr arena) -- so the
+    // two builder calls bump this global-new counter by two, a debug-STL artifact
+    // rather than a real builder allocation. The heap-free contract is proven on
+    // libstdc++/libc++ and MSVC RELEASE (_ITERATOR_DEBUG_LEVEL == 0) PLUS by the
+    // mallocnesia LD_PRELOAD perf_*_alloc_guard cross-check on the CI tiers.
+    // See tests/support/msvc_debug_arena_skip.hpp (same _Container_proxy cause).
+    GTEST_SKIP() << "MSVC debug STL allocates a per-container _Container_proxy via global "
+                    "operator new at pmr-vector construction (debug-STL artifact); the "
+                    "heap-free builder contract is covered on all non-MSVC-debug lanes and "
+                    "by the mallocnesia LD_PRELOAD cross-check";
 #else
     std::pmr::monotonic_buffer_resource arena{4096};
 

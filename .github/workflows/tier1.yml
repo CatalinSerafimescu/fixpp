@@ -219,9 +219,11 @@ jobs:
     name: "${{ matrix.preset }}"
     runs-on: ubuntu-24.04
     # Backstop against a hung test wedging the runner. A clean sanitizer leg is
-    # ~24 min (build ~15 + test ~6 + setup); 45 caps a deadlock (e.g. a lost-wake
-    # in an async test) instead of letting it ride to GitHub's 6 h default.
-    timeout-minutes: 45
+    # ~24 min (build ~15 + test ~6 + setup); 60 caps a deadlock (e.g. a lost-wake
+    # in an async test) while giving the debug leg headroom on a COLD ccache run
+    # (first build of a new branch recompiles the whole tree — the debug leg hit
+    # exactly 45 min cold, before any test ran).
+    timeout-minutes: 60
     needs: gate-precheck
     # `&& github.event_name != 'release'`: a published release only needs the
     # wheel build+install-test lanes to attach the asset — the C++/sanitizer
@@ -362,7 +364,12 @@ jobs:
         uses: hendrikmuhs/ccache-action@v1.2.23
         with:
           key: tier1-${{ matrix.preset }}
-          max-size: 500M
+          # 500M was too small for the debug + sanitizer legs: their object cache
+          # exceeded it, so ccache thrashed (cache 99.93% full, 56 cleanups, only
+          # ~10% hit rate) and even warm runs recompiled ~everything, pushing the
+          # debug build to the full 45-min timeout. 2G holds a leg's full object
+          # set so warm runs actually hit.
+          max-size: 2G
 
       - name: Conan install
         run: |
