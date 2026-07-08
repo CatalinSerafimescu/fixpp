@@ -14,6 +14,7 @@
 #include <memory_resource>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <vector>
 
 #include "support/frame_view_factory.hpp"
@@ -23,6 +24,21 @@ namespace {
 
 using fixpp::wire::access_mode;
 using fixpp::wire::MessageView;
+
+// gate-b/r1 RC#1 regression pin (named-invariant direct pin, mutation-proof):
+// MessageView<Index> must remain move-constructible (parse results flow by
+// move — B-061-4) but move-assignment is DELETED: std::pmr::polymorphic_
+// allocator does not propagate on move-assignment, so `mv = std::move(parsed)`
+// would keep the target's (possibly default-rooted) allocator and reopen the
+// nested-read arena leak (parser.hpp special-member comment). Compile-time
+// enforced — reverting the `= delete` back to `= default` fails this
+// static_assert.
+static_assert(std::is_move_constructible_v<MessageView<access_mode::Index>>,
+              "MessageView<Index> must stay move-constructible (arena-preserving parse result "
+              "flow)");
+static_assert(!std::is_move_assignable_v<MessageView<access_mode::Index>>,
+              "MessageView<Index> move-assignment must stay deleted (pmr allocator does not "
+              "propagate on move-assign -> reopens the nested-read arena leak)");
 
 // Build a raw FIX 4.4 frame with correct 9=BodyLength and 10=CheckSum so
 // the factory's boundary computation succeeds.
