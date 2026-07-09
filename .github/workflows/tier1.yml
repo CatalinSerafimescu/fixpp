@@ -554,8 +554,9 @@ jobs:
     name: python-bindings (${{ matrix.sanitizer }})
     runs-on: ubuntu-24.04
     # Backstop against a hung binding test (e.g. the FR-007 GIL/worker race)
-    # wedging the runner; see the `linux` job's timeout note.
-    timeout-minutes: 45
+    # wedging the runner; see the `linux` job's timeout note. 45->60 (2026-07-09):
+    # the sanitizer legs brushed the 45-min limit; matches the `linux` job's 60.
+    timeout-minutes: 60
     needs: gate-precheck
     # Gate-then-relevance (release-excluded): like the C++ matrix, the sanitizer
     # legs run ONLY once both gates are satisfied (`proceed`), and then only when
