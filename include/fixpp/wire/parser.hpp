@@ -24,6 +24,15 @@
 #include <fixpp/core/decimal_helpers.hpp>  // core::detail::trap_throw (C1)
 #include <fixpp/core/error.hpp>
 #include <fixpp/core/pmr_arena_upstream.hpp>  // detail::arena_upstream (MSVC-debug proxy)
+// 066-dict-backed-inbound-parse T003: MessageView::membership_copy() (below)
+// returns an OWNED table_view by value, needing it complete. table_view.hpp
+// has a deliberately minimal include graph (no mutex, no heavy asio — see
+// its own file header / validator.hpp:23,41's identical confirmation).
+// [arch §2.3]: wire -> dictionary is an explicitly allowed edge; no cycle
+// (table_view.hpp includes nothing from wire/). MUST stay at file scope
+// (outside `namespace fixpp::wire { ... }` below) — see the mid-namespace
+// pitfall note at membership_copy()'s out-of-line definition.
+#include <fixpp/dict/table_view.hpp>
 #include <memory>
 #include <memory_resource>
 #include <span>
@@ -39,9 +48,9 @@
 #include "unknown_fields.hpp"
 #include "view.hpp"
 
-namespace fixpp::dict {
-class table_view;  // value type, owned by 2c; only forward-declared here.
-}  // namespace fixpp::dict
+// fixpp::dict::table_view is fully included above (066 T003:
+// MessageView::membership_copy() returns it by value) — no forward
+// declaration needed here anymore.
 
 namespace fixpp::wire {
 
@@ -340,6 +349,22 @@ template <std::uint16_t NoTag, class GroupT>
             token()};
     }
 
+    // 066-dict-backed-inbound-parse T003 (mechanism (b)): the ONE internal
+    // membership-copy accessor shared by `fixpp_msg_clone` and the `reify`
+    // owning handle to propagate this view's dictionary membership into an
+    // OWNED, independently-lifetimed `table_view` — safe to outlive the
+    // source session/Dictionary (`table_view`'s copy ctor deep-copies its
+    // owned tables; table_view.hpp:185-192, spans "stable for lifetime"
+    // :204,221). Re-concretizes `opaque_dict_` back to a `table_view`
+    // (sound: every production dict-backed parse binds a real `table_view` —
+    // data-model.md "Reify owning handle" accessor precondition). A
+    // dict-free source (`opaque_dict_ == nullptr`) yields a
+    // default-constructed (empty) copy, so the clone/reify correctly stays
+    // dict-free — the correct degenerate case (contracts/inbound-parse.md
+    // C4). Defined out-of-line below (mirrors this file's existing
+    // out-of-line-in-header convention for `field_iterator::advance`).
+    [[nodiscard]] fixpp::dict::table_view membership_copy() const noexcept;
+
 private : [[nodiscard]] std::span<const std::byte> field_bytes(std::uint16_t tag) const noexcept {
         if constexpr (Mode == access_mode::Index) {
             auto e = table_.find(tag);
@@ -468,6 +493,25 @@ void MessageView<Mode>::field_iterator::advance() noexcept {
         prev_data_tag_ = dt;
         prev_data_len_ = parse_bounded_u32(cur_.value);
     }
+}
+
+// 066-dict-backed-inbound-parse T003: MessageView<Mode>::membership_copy()
+// out-of-line definition (mirrors field_iterator::advance's out-of-line-in-
+// header placement above). `table_view` is complete via the top-level
+// `#include <fixpp/dict/table_view.hpp>` above ([arch §2.3]: wire ->
+// dictionary is an explicitly allowed edge; no cycle — table_view.hpp does
+// not include anything from wire/). NOTE: that include must stay OUTSIDE
+// `namespace fixpp::wire { ... }` — placing it here (mid-namespace) would
+// nest <unordered_set>'s `namespace std` under `fixpp::wire::std`.
+template <access_mode Mode>
+fixpp::dict::table_view MessageView<Mode>::membership_copy() const noexcept {
+    if (opaque_dict_ == nullptr) {
+        return fixpp::dict::table_view{};
+    }
+    // Copy-constructs (deep-copies the owned tables, table_view.hpp:185-192)
+    // — the result is self-contained and outlives the source session/
+    // Dictionary/table_view.
+    return *static_cast<fixpp::dict::table_view const*>(opaque_dict_);
 }
 
 // [2b §4.3] span-scan → token-bearing field_view helper (062 T004, N1). The

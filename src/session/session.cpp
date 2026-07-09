@@ -930,6 +930,17 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
         co_return std::unexpected(error::invalid_session_config);
     }
 
+    // 066-dict-backed-inbound-parse T002 (data-model.md "Session inbound
+    // table_view"): build the once-built inbound dict-membership table
+    // HERE, immediately after the guard above — cfg_.dictionary is
+    // guaranteed non-null at this point. Mirrors the strict validator's own
+    // owned table_view build below (~:1171-1173/now further down). NOT YET
+    // consumed by parse_and_dispatch_ (session.cpp:316) — T006 flips the
+    // parser to use it; this member only lands the invariant that
+    // inbound_tv_.has_value() holds whenever a successfully-opened session
+    // later reaches parse_and_dispatch_ (both callers run post-open only).
+    inbound_tv_ = cfg_.dictionary->as_table_view();
+
     // RC#1 (gate-b/r1): default-constructed security_profile sentinel →
     // invalid_session_config (slot 53 / N-P2-3 / [const §XII.5] / FR-018).
     // The minimal-stub pattern (D-15 / D-21 amended) ships SecurityProfile

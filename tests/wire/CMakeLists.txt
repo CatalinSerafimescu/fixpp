@@ -145,3 +145,19 @@ add_test(NAME wire_validator_production_table_view_test
 # This test links fixpp_dictionary and uses live dictionary loading — not
 # registered under the pure wire label to avoid pulling dict deps into
 # wire-only suites.
+
+# 066-dict-backed-inbound-parse T003: MessageView::membership_copy()
+# (mechanism (b)) — membership-identity + outlives-source-Dictionary/
+# table_view witness. Links fixpp_dictionary for live XmlLoader::load_from_string
+# (same seam as wire_validator_production_table_view_test above).
+add_executable(wire_message_view_membership_copy_test
+  message_view_membership_copy_test.cpp)
+target_link_libraries(wire_message_view_membership_copy_test PRIVATE
+  fixpp_wire
+  fixpp_dictionary
+  GTest::gtest
+  GTest::gtest_main)
+target_include_directories(wire_message_view_membership_copy_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests")
+add_test(NAME wire_message_view_membership_copy_test
+  COMMAND wire_message_view_membership_copy_test)
