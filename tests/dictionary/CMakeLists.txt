@@ -106,6 +106,10 @@ if(TARGET fixpp_codegen_generate)
     # reified owning handle reads groups membership-bounded, identical to a
     # (destroyed) real-dict-backed source.
     reify_membership_identity_test
+    # gate-b/r1 FQ-1 (PR #181 round 1, Finding 1): OOM hardening witness for
+    # MessageView::membership_copy() (now NOT noexcept) — a bad_alloc during
+    # the table_view deep-copy must map to dict_reify_oom, not terminate.
+    reify_membership_copy_oom_test
   )
 
   foreach(target IN LISTS FIXPP_REIFY_TESTS)
@@ -135,6 +139,10 @@ if(TARGET fixpp_codegen_generate)
   # (and the T021/T022 coverage-index / completeness audit) picks this up
   # alongside the T007/T009 witnesses (which already carry "066").
   set_tests_properties(dictionary_reify_membership_identity_test PROPERTIES
+    LABELS "066;dictionary;us1")
+
+  # gate-b/r1 FQ-1: same 066/us1 grouping — OOM hardening witness.
+  set_tests_properties(dictionary_reify_membership_copy_oom_test PROPERTIES
     LABELS "066;dictionary;us1")
 else()
   message(STATUS

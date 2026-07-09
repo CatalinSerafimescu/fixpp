@@ -17,6 +17,7 @@
 // parse->fromApp window (FR-013, [arch §5.3]).
 
 #include <algorithm>
+#include <concepts>  // std::same_as (gate-b/r1 FQ-2 ctor constraint)
 #include <cstddef>
 #include <cstdint>
 #include <expected>                        // std::unexpect
@@ -363,7 +364,14 @@ template <std::uint16_t NoTag, class GroupT>
     // dict-free — the correct degenerate case (contracts/inbound-parse.md
     // C4). Defined out-of-line below (mirrors this file's existing
     // out-of-line-in-header convention for `field_iterator::advance`).
-    [[nodiscard]] fixpp::dict::table_view membership_copy() const noexcept;
+    // gate-b/r1 FQ-1 (PR #181 round 1): NOT noexcept — the copy-construction
+    // below can throw std::bad_alloc (table_view.hpp:188-189, "copy may throw
+    // on allocation failure"). A noexcept here would convert that catchable
+    // throw into std::terminate BEFORE either production caller's catch runs
+    // (src/capi/message_write.cpp `catch (...)` -> FIXPP_ERR_CAPI_CONFIG_INVALID;
+    // src/dictionary/reify.cpp `catch (std::bad_alloc const&)` -> dict_reify_oom),
+    // defeating the dedicated OOM error code and violating fail-closed.
+    [[nodiscard]] fixpp::dict::table_view membership_copy() const;
 
     // 066-dict-backed-inbound-parse T007/T008: companion predicate to
     // membership_copy() — true iff THIS view is itself dict-backed
@@ -517,7 +525,7 @@ void MessageView<Mode>::field_iterator::advance() noexcept {
 // `namespace fixpp::wire { ... }` — placing it here (mid-namespace) would
 // nest <unordered_set>'s `namespace std` under `fixpp::wire::std`.
 template <access_mode Mode>
-fixpp::dict::table_view MessageView<Mode>::membership_copy() const noexcept {
+fixpp::dict::table_view MessageView<Mode>::membership_copy() const {
     if (opaque_dict_ == nullptr) {
         return fixpp::dict::table_view{};
     }
@@ -561,7 +569,15 @@ public:
     // forwarding would be wrong, so missing-std-forward is a false positive here.
     // NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
     explicit Parser(TV&& dict_metadata) noexcept
-        requires(std::is_lvalue_reference_v<TV &&>)
+        // gate-b/r1 FQ-2 (PR #181 round 1): constrained to fixpp::dict::table_view
+        // (not merely any lvalue-referenced duck-typed dict). membership_copy()
+        // (above) unconditionally static_cast<table_view const*>(opaque_dict_) --
+        // sound by construction only if every dict-backed Parser<> is built over
+        // a real table_view. Census (src/+tests/+bench/): every construction site
+        // already passes a table_view (tests/support/mock_dict_table.hpp is a
+        // compatibility shim over table_view, not a distinct type).
+        requires(std::is_lvalue_reference_v<TV &&> &&
+                 std::same_as<std::remove_cvref_t<TV>, fixpp::dict::table_view>)
         : opaque_dict_{std::addressof(dict_metadata)},
           classify_fn_{[](void const* d, std::string_view mt, std::uint16_t t) noexcept -> bool {
               using dict_t = std::remove_reference_t<TV>;

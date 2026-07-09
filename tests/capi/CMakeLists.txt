@@ -470,3 +470,25 @@ target_compile_definitions(capi_dict066_clone_identity_test PRIVATE
 add_test(NAME capi_dict066_clone_identity COMMAND capi_dict066_clone_identity_test)
 set_tests_properties(capi_dict066_clone_identity PROPERTIES
   LABELS "066;us1;capi")
+
+# gate-b/r1 FQ-1 (PR #181 round 1, Finding 1): OOM hardening witness for
+# MessageView::membership_copy() (now NOT noexcept) — a bad_alloc during the
+# table_view deep-copy must map to FIXPP_ERR_CAPI_CONFIG_INVALID, not
+# terminate. In-process (InboundHandle) construction, no live engine needed.
+add_executable(capi_dict066_clone_membership_copy_oom_test
+  dict066_clone_membership_copy_oom_test.cpp)
+target_link_libraries(capi_dict066_clone_membership_copy_oom_test PRIVATE
+  fixpp_capi
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(capi_dict066_clone_membership_copy_oom_test PRIVATE
+  ${FIXPP_CAPI_FEATURE_B_INCLUDES}
+)
+target_compile_definitions(capi_dict066_clone_membership_copy_oom_test PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
+)
+add_test(NAME capi_dict066_clone_membership_copy_oom
+  COMMAND capi_dict066_clone_membership_copy_oom_test)
+set_tests_properties(capi_dict066_clone_membership_copy_oom PROPERTIES
+  LABELS "066;us1;capi")
