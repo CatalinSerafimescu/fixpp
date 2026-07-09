@@ -431,6 +431,28 @@ add_test(NAME capi_dict066_group_membership_red COMMAND capi_dict066_group_membe
 set_tests_properties(capi_dict066_group_membership_red PROPERTIES
   LABELS "066;us1;red;capi")
 
+# ── 065-cabi-nested-group-membership T009 — FR-011(b) engine-loopback ───────
+# nested-membership witness. Drives the issue-#179 FIX44 ExecutionReport(35=8)
+# NoLegs(555) -> NoLegSecurityAltID(604) x2 -> trailing LegQty(687) shape
+# through a real two-C-ABI-engine plaintext-TCP loopback (production dispatch
+# path), pinning the msg_type/parent-path context threading T008's direct
+# as_table_view() witness cannot reach.
+add_executable(capi_dict066_nested_membership_red_test dict066_nested_membership_red_test.cpp)
+target_link_libraries(capi_dict066_nested_membership_red_test PRIVATE
+  fixpp_capi
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(capi_dict066_nested_membership_red_test PRIVATE
+  ${FIXPP_CAPI_FEATURE_B_INCLUDES}
+)
+target_compile_definitions(capi_dict066_nested_membership_red_test PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
+)
+add_test(NAME capi_dict066_nested_membership_red COMMAND capi_dict066_nested_membership_red_test)
+set_tests_properties(capi_dict066_nested_membership_red PROPERTIES
+  LABELS "065;us1;red;capi" TIMEOUT 60)
+
 # ── 066-dict-backed-inbound-parse T010 — scalar-as-group witness ────────────
 # (C-ABI engine loopback). fixpp_msg_get_group(msg, 55, ...) on scalar tag
 # Symbol(55) must return FIXPP_ERR_TYPE_MISMATCH, never OK-with-a-spurious-
