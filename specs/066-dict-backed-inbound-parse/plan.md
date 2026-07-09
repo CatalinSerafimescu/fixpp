@@ -29,7 +29,7 @@
 
 *GATE: must pass before Phase 0 (passed — research complete) and re-checked post-design.*
 
-- **Appendix A mandatory triggers**: **Session inbound path** + **Wire/parser** (parse behavior change) → run mandatory controls: `/speckit-clarify` (done — 2 decisions recorded: strict membership accepted; clone/reify propagated), Codex **Gate A** (pending), `/speckit-analyze` (pending, after `/tasks`), user `/plan` sign-off (pending). Full **Gate B** before merge.
+- **Appendix A mandatory triggers**: **Session inbound path** + **Wire/parser** (parse behavior change) → run mandatory controls: `/speckit-clarify` (done — 2 decisions recorded: strict membership accepted; clone/reify propagated), Codex **Gate A** (done — converged round 2, user-signed-off 2026-07-09), `/speckit-analyze` (done 2026-07-09 — 0 CRITICAL, 3 fixes applied), checklist-audit step 9 (done — PASS 36/36), **user `/plan` sign-off (done 2026-07-09)**. Full **Gate B** before merge.
 - **Error semantics**: no new `fixpp_error_t`; restores the documented `TYPE_MISMATCH` for scalar-as-group and membership-bounded extents. Behavior change (strict in-group) documented (FR-008).
 - **C-ABI** (`[const §X.1]`, GA-frozen 1.5.0): no exported symbol/header/enum/version change; behavioral correction only (`tests/abi` golden unchanged).
 - **Zero-alloc discipline** (`[const §VIII.5]`): the `table_view` build is at `open()` (not the hot path); the per-message parse+read path adds no new global-heap allocation (membership lazy; sub-views from the per-message arena) — alloc-gate-verified.
