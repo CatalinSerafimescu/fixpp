@@ -1,8 +1,11 @@
 # Feature Specification: Dictionary-backed inbound receive parse
 
-**Feature Branch**: `066-dict-backed-inbound-parse`  
-**Created**: 2026-07-09  
-**Status**: Draft  
+**Feature Branch**: `066-dict-backed-inbound-parse`
+
+**Created**: 2026-07-09
+
+**Status**: Draft
+
 **Input**: Prerequisite for issue #179 / feature 065. Gate A on 065 (+ a Fable investigation, 2026-07-09) established that the shipped inbound receive parse is dictionary-free, so every `MessageView` delivered to an application callback (C-ABI and C++ typed) has no group membership — making all inbound repeating-group reads positional/membership-free on the real path. This feature threads the session's (already-required) dictionary into the inbound parse so inbound messages carry membership, which is the precondition for any correct grouped read.
 
 ## Clarifications
