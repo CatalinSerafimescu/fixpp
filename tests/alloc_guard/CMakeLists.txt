@@ -183,6 +183,45 @@ if(EXISTS "${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so")
   endforeach()
 endif()
 
+# 066-dict-backed-inbound-parse T013 (SC-004/FR-004): zero-GLOBAL-heap gate
+# for the dict-backed inbound parse+read path, measured at the
+# Parser<Index>{tv} + OffsetTable level (NOT through Session::on_inbound_frame
+# — see the file header's "MEASUREMENT SCOPE" note: a session-dispatch window
+# wraps co_spawn/ioc.run(), which is the same coroutine-frame/asio-run-loop
+# global-heap noise the "DELIBERATELY NOT GATED" note above already
+# documents for test_dispatch_alloc_guard/test_session_alloc_guard). Dual
+# gate: TU-local operator-new counter (this test) + mallocnesia below.
+add_executable(test_dict066_grouped_read_alloc_guard test_dict066_grouped_read_alloc_guard.cpp)
+target_link_libraries(test_dict066_grouped_read_alloc_guard PRIVATE
+  fixpp_wire
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(test_dict066_grouped_read_alloc_guard PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+)
+target_compile_definitions(test_dict066_grouped_read_alloc_guard PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
+)
+set_target_properties(test_dict066_grouped_read_alloc_guard PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+)
+# CTest NAME deliberately NOT alloc_guard_-prefixed by convention with the
+# other mallocnesia-driven binaries above (driven by tools/check_alloc.py
+# under LD_PRELOAD, not swept by a broader name-regex ctest selection).
+add_test(NAME dict066_grouped_read_alloc_guard COMMAND test_dict066_grouped_read_alloc_guard)
+set_tests_properties(dict066_grouped_read_alloc_guard PROPERTIES
+  LABELS "066;us3;alloc_guard")
+
+if(EXISTS "${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so")
+  add_test(
+    NAME dict066_grouped_read_alloc_guard_mallocnesia
+    COMMAND python3 "${CMAKE_SOURCE_DIR}/tools/check_alloc.py"
+            "--binary" "$<TARGET_FILE:test_dict066_grouped_read_alloc_guard>")
+  set_tests_properties(dict066_grouped_read_alloc_guard_mallocnesia PROPERTIES
+    LABELS "066;us3;alloc_guard;mallocnesia")
+endif()
+
 # ── item 13: recurrence guard — fail if any test/bench source reintroduces a
 # bodied alloc_guard_start/end definition (the local-symbol pattern that silently
 # disables LD_PRELOAD interception and made every gate false-green). Cheap static

@@ -2423,6 +2423,160 @@ add_test(NAME test_exemplar_build_failclosed COMMAND test_exemplar_build_failclo
 set_tests_properties(test_exemplar_build_failclosed PROPERTIES
   LABELS "061;us2;failclosed;D;8;9;E;AS")
 
+# ── 066-dict-backed-inbound-parse T001 — shared test-scaffolding smoke ───────
+# Compile/smoke check for the group-bearing FIX44 frame builders + the
+# real-Session-dispatch harness (tests/support/fix44_group_frame_bodies.hpp,
+# tests/support/fix44_dictionary.hpp, support/group_dispatch_fixture.hpp).
+# NO group-membership/extent assertions here (RED-first preservation for
+# T004/T010) — see the file header comment.
+add_executable(test_066_group_scaffold_smoke
+  test_066_group_scaffold_smoke_test.cpp
+)
+target_link_libraries(test_066_group_scaffold_smoke PRIVATE
+  fixpp_session
+  fixpp_mock_clock
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(test_066_group_scaffold_smoke PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+  "${CMAKE_CURRENT_SOURCE_DIR}"
+)
+target_compile_definitions(test_066_group_scaffold_smoke PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
+)
+add_test(NAME test_066_group_scaffold_smoke COMMAND test_066_group_scaffold_smoke)
+set_tests_properties(test_066_group_scaffold_smoke PROPERTIES
+  ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  LABELS "066;setup;scaffold")
+
+# ── 066-dict-backed-inbound-parse T004 — RED-first group-membership witness ──
+# (C++ real dispatch). MUST be observed RED against the current dict-free
+# parse (src/session/session.cpp:316) — T006 flips the parse site later.
+# See the file header comment for the two discriminating assertions.
+add_executable(test_066_group_membership_red
+  test_066_group_membership_red_test.cpp
+)
+target_link_libraries(test_066_group_membership_red PRIVATE
+  fixpp_session
+  fixpp_mock_clock
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(test_066_group_membership_red PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+  "${CMAKE_CURRENT_SOURCE_DIR}"
+)
+target_compile_definitions(test_066_group_membership_red PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
+)
+add_test(NAME test_066_group_membership_red COMMAND test_066_group_membership_red)
+set_tests_properties(test_066_group_membership_red PROPERTIES
+  ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  LABELS "066;us1;red")
+
+# ── 066-dict-backed-inbound-parse T010 — scalar-as-group witness ────────────
+# (C++ real dispatch). Querying scalar tag Symbol(55) as a group must yield
+# an EMPTY group_slices() span (TYPE_MISMATCH at the C-ABI layer), never a
+# spurious instance. GREEN on the current dict-backed parse; RED under the
+# T006 mutation (session.cpp:316 reverted to the default dict-free Parser).
+add_executable(test_066_scalar_as_group
+  test_066_scalar_as_group_test.cpp
+)
+target_link_libraries(test_066_scalar_as_group PRIVATE
+  fixpp_session
+  fixpp_mock_clock
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(test_066_scalar_as_group PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+  "${CMAKE_CURRENT_SOURCE_DIR}"
+)
+target_compile_definitions(test_066_scalar_as_group PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
+)
+add_test(NAME test_066_scalar_as_group COMMAND test_066_scalar_as_group)
+set_tests_properties(test_066_scalar_as_group PROPERTIES
+  ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  LABELS "066;us2")
+
+# ── 066-dict-backed-inbound-parse T009 — validator-ON grouped witness ────────
+# (FR-006). Proves the opt-in validator path (validate_inbound_messages=true)
+# observes the same membership-bounded extents as validator-OFF.
+add_executable(test_066_validator_on_grouped
+  test_066_validator_on_grouped_test.cpp
+)
+target_link_libraries(test_066_validator_on_grouped PRIVATE
+  fixpp_session
+  fixpp_mock_clock
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(test_066_validator_on_grouped PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+  "${CMAKE_CURRENT_SOURCE_DIR}"
+)
+target_compile_definitions(test_066_validator_on_grouped PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
+)
+add_test(NAME test_066_validator_on_grouped COMMAND test_066_validator_on_grouped)
+set_tests_properties(test_066_validator_on_grouped PROPERTIES
+  ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  LABELS "066;us1")
+
+# ── 066-dict-backed-inbound-parse T012 — admin / no-group witness ───────────
+# (SC-003/FR-005). Admin (Heartbeat) + no-group app (NewOrderSingle) dispatch
+# unaffected; a group-bearing message whose callback never reads the group
+# dispatches identically to a no-group message (corroborates the structural
+# lazy-membership-consultation argument cited in the file header).
+add_executable(test_066_admin_no_group
+  test_066_admin_no_group_test.cpp
+)
+target_link_libraries(test_066_admin_no_group PRIVATE
+  fixpp_session
+  fixpp_mock_clock
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(test_066_admin_no_group PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+  "${CMAKE_CURRENT_SOURCE_DIR}"
+)
+target_compile_definitions(test_066_admin_no_group PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
+)
+add_test(NAME test_066_admin_no_group COMMAND test_066_admin_no_group)
+set_tests_properties(test_066_admin_no_group PROPERTIES
+  ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  LABELS "066;us3")
+
+# ── 066-dict-backed-inbound-parse T014 — arena-fit witnesses ────────────────
+# (SC-004/FR-009). App-path fit within kInboundParseArena=16384, admin-path
+# fit within kAdminParseArena=8192, a near-cap/headroom probe, and a
+# pathological deeply-nested (>kMaxGroupDepth=16) message failing closed
+# (err_group_too_large, never over-read/corrupt).
+add_executable(test_066_arena_fit
+  test_066_arena_fit_test.cpp
+)
+target_link_libraries(test_066_arena_fit PRIVATE
+  fixpp_session
+  fixpp_mock_clock
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(test_066_arena_fit PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+  "${CMAKE_CURRENT_SOURCE_DIR}"
+)
+target_compile_definitions(test_066_arena_fit PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
+)
+add_test(NAME test_066_arena_fit COMMAND test_066_arena_fit)
+set_tests_properties(test_066_arena_fit PROPERTIES
+  ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  LABELS "066;us3")
+
 # ── Conformance subdirectory (005 Q2 in-scope [FIX-TC] subset) ───────────────
 # Phase 3 adds tc_establishment_test.cpp (T020); later phases add more.
 add_subdirectory(conformance)

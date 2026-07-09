@@ -17,6 +17,7 @@
 // parse->fromApp window (FR-013, [arch §5.3]).
 
 #include <algorithm>
+#include <concepts>  // std::same_as (gate-b/r1 FQ-2 ctor constraint)
 #include <cstddef>
 #include <cstdint>
 #include <expected>                        // std::unexpect
@@ -24,6 +25,15 @@
 #include <fixpp/core/decimal_helpers.hpp>  // core::detail::trap_throw (C1)
 #include <fixpp/core/error.hpp>
 #include <fixpp/core/pmr_arena_upstream.hpp>  // detail::arena_upstream (MSVC-debug proxy)
+// 066-dict-backed-inbound-parse T003: MessageView::membership_copy() (below)
+// returns an OWNED table_view by value, needing it complete. table_view.hpp
+// has a deliberately minimal include graph (no mutex, no heavy asio — see
+// its own file header / validator.hpp:23,41's identical confirmation).
+// [arch §2.3]: wire -> dictionary is an explicitly allowed edge; no cycle
+// (table_view.hpp includes nothing from wire/). MUST stay at file scope
+// (outside `namespace fixpp::wire { ... }` below) — see the mid-namespace
+// pitfall note at membership_copy()'s out-of-line definition.
+#include <fixpp/dict/table_view.hpp>
 #include <memory>
 #include <memory_resource>
 #include <span>
@@ -39,9 +49,9 @@
 #include "unknown_fields.hpp"
 #include "view.hpp"
 
-namespace fixpp::dict {
-class table_view;  // value type, owned by 2c; only forward-declared here.
-}  // namespace fixpp::dict
+// fixpp::dict::table_view is fully included above (066 T003:
+// MessageView::membership_copy() returns it by value) — no forward
+// declaration needed here anymore.
 
 namespace fixpp::wire {
 
@@ -340,6 +350,42 @@ template <std::uint16_t NoTag, class GroupT>
             token()};
     }
 
+    // 066-dict-backed-inbound-parse T003 (mechanism (b)): the ONE internal
+    // membership-copy accessor shared by `fixpp_msg_clone` and the `reify`
+    // owning handle to propagate this view's dictionary membership into an
+    // OWNED, independently-lifetimed `table_view` — safe to outlive the
+    // source session/Dictionary (`table_view`'s copy ctor deep-copies its
+    // owned tables; table_view.hpp:185-192, spans "stable for lifetime"
+    // :204,221). Re-concretizes `opaque_dict_` back to a `table_view`
+    // (sound: every production dict-backed parse binds a real `table_view` —
+    // data-model.md "Reify owning handle" accessor precondition). A
+    // dict-free source (`opaque_dict_ == nullptr`) yields a
+    // default-constructed (empty) copy, so the clone/reify correctly stays
+    // dict-free — the correct degenerate case (contracts/inbound-parse.md
+    // C4). Defined out-of-line below (mirrors this file's existing
+    // out-of-line-in-header convention for `field_iterator::advance`).
+    // gate-b/r1 FQ-1 (PR #181 round 1): NOT noexcept — the copy-construction
+    // below can throw std::bad_alloc (table_view.hpp:188-189, "copy may throw
+    // on allocation failure"). A noexcept here would convert that catchable
+    // throw into std::terminate BEFORE either production caller's catch runs
+    // (src/capi/message_write.cpp `catch (...)` -> FIXPP_ERR_CAPI_CONFIG_INVALID;
+    // src/dictionary/reify.cpp `catch (std::bad_alloc const&)` -> dict_reify_oom),
+    // defeating the dedicated OOM error code and violating fail-closed.
+    [[nodiscard]] fixpp::dict::table_view membership_copy() const;
+
+    // 066-dict-backed-inbound-parse T007/T008: companion predicate to
+    // membership_copy() — true iff THIS view is itself dict-backed
+    // (opaque_dict_ non-null). A clone/reify propagation site MUST bind its
+    // re-framed MessageView dict-backed ONLY when this is true: binding a
+    // non-null opaque_dict at an (empty) copy from a genuinely dict-free
+    // source would flip OffsetTable::group()/consume_group_extent from the
+    // positional dict-free fallback (gated on pointer NULLITY, not table
+    // content — offset_table.cpp:441/:519) to the membership walk, which
+    // fails closed on an empty table (err_required_field_missing) — NOT the
+    // "clone/reify stays dict-free" degenerate case data-model.md / contracts/
+    // inbound-parse.md C4 requires.
+    [[nodiscard]] bool is_dict_backed() const noexcept { return opaque_dict_ != nullptr; }
+
 private : [[nodiscard]] std::span<const std::byte> field_bytes(std::uint16_t tag) const noexcept {
         if constexpr (Mode == access_mode::Index) {
             auto e = table_.find(tag);
@@ -470,6 +516,25 @@ void MessageView<Mode>::field_iterator::advance() noexcept {
     }
 }
 
+// 066-dict-backed-inbound-parse T003: MessageView<Mode>::membership_copy()
+// out-of-line definition (mirrors field_iterator::advance's out-of-line-in-
+// header placement above). `table_view` is complete via the top-level
+// `#include <fixpp/dict/table_view.hpp>` above ([arch §2.3]: wire ->
+// dictionary is an explicitly allowed edge; no cycle — table_view.hpp does
+// not include anything from wire/). NOTE: that include must stay OUTSIDE
+// `namespace fixpp::wire { ... }` — placing it here (mid-namespace) would
+// nest <unordered_set>'s `namespace std` under `fixpp::wire::std`.
+template <access_mode Mode>
+fixpp::dict::table_view MessageView<Mode>::membership_copy() const {
+    if (opaque_dict_ == nullptr) {
+        return fixpp::dict::table_view{};
+    }
+    // Copy-constructs (deep-copies the owned tables, table_view.hpp:185-192)
+    // — the result is self-contained and outlives the source session/
+    // Dictionary/table_view.
+    return *static_cast<fixpp::dict::table_view const*>(opaque_dict_);
+}
+
 // [2b §4.3] span-scan → token-bearing field_view helper (062 T004, N1). The
 // one wire primitive that did not exist yet: reuses the dict-free
 // field_iterator to locate `tag` within an arbitrary in-frame slice (e.g. a
@@ -504,7 +569,15 @@ public:
     // forwarding would be wrong, so missing-std-forward is a false positive here.
     // NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
     explicit Parser(TV&& dict_metadata) noexcept
-        requires(std::is_lvalue_reference_v<TV &&>)
+        // gate-b/r1 FQ-2 (PR #181 round 1): constrained to fixpp::dict::table_view
+        // (not merely any lvalue-referenced duck-typed dict). membership_copy()
+        // (above) unconditionally static_cast<table_view const*>(opaque_dict_) --
+        // sound by construction only if every dict-backed Parser<> is built over
+        // a real table_view. Census (src/+tests/+bench/): every construction site
+        // already passes a table_view (tests/support/mock_dict_table.hpp is a
+        // compatibility shim over table_view, not a distinct type).
+        requires(std::is_lvalue_reference_v<TV &&> &&
+                 std::same_as<std::remove_cvref_t<TV>, fixpp::dict::table_view>)
         : opaque_dict_{std::addressof(dict_metadata)},
           classify_fn_{[](void const* d, std::string_view mt, std::uint16_t t) noexcept -> bool {
               using dict_t = std::remove_reference_t<TV>;

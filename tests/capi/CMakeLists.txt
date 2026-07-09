@@ -387,3 +387,108 @@ target_compile_definitions(capi_abi_symbol_golden_test PRIVATE
   "FIXPP_CAPI_GOLDEN=\"${CMAKE_SOURCE_DIR}/tests/abi/golden/fixpp_capi_symbols.txt\""
 )
 add_test(NAME capi_abi_symbol_golden COMMAND capi_abi_symbol_golden_test)
+
+# ── 066-dict-backed-inbound-parse T001 — C-ABI engine-loopback scaffold smoke ─
+# Compile/smoke check for capi_dict066_loopback_support.hpp (a real
+# two-C-ABI-engine plaintext loopback pair configured with the REAL FIX44
+# dictionary) + the group-bearing frame builders
+# (tests/support/fix44_group_frame_bodies.hpp). NO group-membership/extent
+# assertions here (RED-first preservation for T005) — see the file header
+# comment.
+add_executable(capi_dict066_group_loopback_smoke_test dict066_group_loopback_smoke_test.cpp)
+target_link_libraries(capi_dict066_group_loopback_smoke_test PRIVATE
+  fixpp_capi
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(capi_dict066_group_loopback_smoke_test PRIVATE
+  ${FIXPP_CAPI_FEATURE_B_INCLUDES}
+)
+target_compile_definitions(capi_dict066_group_loopback_smoke_test PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
+)
+add_test(NAME capi_dict066_group_loopback_smoke COMMAND capi_dict066_group_loopback_smoke_test)
+set_tests_properties(capi_dict066_group_loopback_smoke PROPERTIES
+  LABELS "066;setup;scaffold;capi")
+
+# ── 066-dict-backed-inbound-parse T005 — RED-first group-membership witness ──
+# (C-ABI engine loopback). MUST be observed RED against the current
+# dict-free parse (src/session/session.cpp:316) — T006 flips the parse site
+# later. See the file header comment for the discriminating assertion.
+add_executable(capi_dict066_group_membership_red_test dict066_group_membership_red_test.cpp)
+target_link_libraries(capi_dict066_group_membership_red_test PRIVATE
+  fixpp_capi
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(capi_dict066_group_membership_red_test PRIVATE
+  ${FIXPP_CAPI_FEATURE_B_INCLUDES}
+)
+target_compile_definitions(capi_dict066_group_membership_red_test PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
+)
+add_test(NAME capi_dict066_group_membership_red COMMAND capi_dict066_group_membership_red_test)
+set_tests_properties(capi_dict066_group_membership_red PROPERTIES
+  LABELS "066;us1;red;capi")
+
+# ── 066-dict-backed-inbound-parse T010 — scalar-as-group witness ────────────
+# (C-ABI engine loopback). fixpp_msg_get_group(msg, 55, ...) on scalar tag
+# Symbol(55) must return FIXPP_ERR_TYPE_MISMATCH, never OK-with-a-spurious-
+# instance. GREEN on the current dict-backed parse; RED under the T006
+# mutation (session.cpp:316 reverted to the default dict-free Parser).
+add_executable(capi_dict066_scalar_as_group_test dict066_scalar_as_group_test.cpp)
+target_link_libraries(capi_dict066_scalar_as_group_test PRIVATE
+  fixpp_capi
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(capi_dict066_scalar_as_group_test PRIVATE
+  ${FIXPP_CAPI_FEATURE_B_INCLUDES}
+)
+target_compile_definitions(capi_dict066_scalar_as_group_test PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
+)
+add_test(NAME capi_dict066_scalar_as_group COMMAND capi_dict066_scalar_as_group_test)
+set_tests_properties(capi_dict066_scalar_as_group PROPERTIES
+  LABELS "066;us2;capi")
+
+# ── 066-dict-backed-inbound-parse T007 — clone-identity witness ──────────────
+# RED before the clone-propagation edit (fixpp_msg_clone / capi_internal.hpp
+# owned_tv_): a dict-free clone absorbs the trailing tag. GREEN after T007.
+add_executable(capi_dict066_clone_identity_test dict066_clone_identity_test.cpp)
+target_link_libraries(capi_dict066_clone_identity_test PRIVATE
+  fixpp_capi
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(capi_dict066_clone_identity_test PRIVATE
+  ${FIXPP_CAPI_FEATURE_B_INCLUDES}
+)
+target_compile_definitions(capi_dict066_clone_identity_test PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
+)
+add_test(NAME capi_dict066_clone_identity COMMAND capi_dict066_clone_identity_test)
+set_tests_properties(capi_dict066_clone_identity PROPERTIES
+  LABELS "066;us1;capi")
+
+# gate-b/r1 FQ-1 (PR #181 round 1, Finding 1): OOM hardening witness for
+# MessageView::membership_copy() (now NOT noexcept) — a bad_alloc during the
+# table_view deep-copy must map to FIXPP_ERR_CAPI_CONFIG_INVALID, not
+# terminate. In-process (InboundHandle) construction, no live engine needed.
+add_executable(capi_dict066_clone_membership_copy_oom_test
+  dict066_clone_membership_copy_oom_test.cpp)
+target_link_libraries(capi_dict066_clone_membership_copy_oom_test PRIVATE
+  fixpp_capi
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(capi_dict066_clone_membership_copy_oom_test PRIVATE
+  ${FIXPP_CAPI_FEATURE_B_INCLUDES}
+)
+target_compile_definitions(capi_dict066_clone_membership_copy_oom_test PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
+)
+add_test(NAME capi_dict066_clone_membership_copy_oom
+  COMMAND capi_dict066_clone_membership_copy_oom_test)
+set_tests_properties(capi_dict066_clone_membership_copy_oom PROPERTIES
+  LABELS "066;us1;capi")

@@ -33,3 +33,26 @@
 #else
 #define FIXPP_SKIP_ON_MSVC_DEBUG_ARENA() ((void)0)
 #endif
+
+// FIXPP_SKIP_ON_MSVC_DEBUG_GLOBAL_HEAP_GUARD(): GTEST_SKIP a zero-GLOBAL-heap
+// assertion (a TU-local `operator new` counter that must read 0 across a
+// parse+read window) on the MSVC debug/asan lanes. Same _Container_proxy root
+// cause as the arena skip above: MSVC's debug STL (_ITERATOR_DEBUG_LEVEL >= 1)
+// heap-allocates a hidden _Container_proxy per std::pmr container at
+// construction THROUGH global operator new, so the counter observes those
+// proxy allocations (e.g. 8 for a top-level dict-backed read, 2 for a nested
+// descent) even though the code under test draws only from its stack arena.
+// The zero-global-heap DISCIPLINE is fully verified on windows-msvc-release
+// (no debug iterators, no proxy) and on ALL Linux lanes
+// (debug/asan/tsan/ubsan/libc++). Only the MSVC-debug-iterator interaction is
+// skipped. See feedback_operator_new_witness_breaks_sanitizers /
+// feedback_msvc_debug_container_proxy_null_memory_resource.
+#if defined(_MSC_VER) && defined(_ITERATOR_DEBUG_LEVEL) && (_ITERATOR_DEBUG_LEVEL >= 1)
+#define FIXPP_SKIP_ON_MSVC_DEBUG_GLOBAL_HEAP_GUARD()                                            \
+    GTEST_SKIP() << "MSVC debug STL heap-allocates a hidden _Container_proxy per std::pmr "     \
+                    "container via global operator new (_ITERATOR_DEBUG_LEVEL), so a "          \
+                    "zero-global-heap read guard cannot hold; the discipline is verified on "   \
+                    "windows-msvc-release + all Linux lanes (debug/asan/tsan/ubsan/libc++)"
+#else
+#define FIXPP_SKIP_ON_MSVC_DEBUG_GLOBAL_HEAP_GUARD() ((void)0)
+#endif

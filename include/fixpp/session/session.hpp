@@ -33,6 +33,14 @@
 #include <fixpp/core/session_executor.hpp>
 #include <fixpp/core/session_local.hpp>
 #include <fixpp/core/trace_context.hpp>
+// 066-dict-backed-inbound-parse T002: inbound_tv_ is a
+// std::optional<table_view> Session MEMBER (not a unique_ptr to an
+// incomplete type like validator_), so table_view must be complete here.
+// [const §XV.9] guard confirmed clean — table_view.hpp has a deliberately
+// minimal include graph (no mutex, no heavy asio; see its own file header
+// and validator.hpp:23,41's identical confirmation) — the check_no_std_mutex
+// _corpus Tier-1 gate (tests/sync/CMakeLists.txt) covers this file.
+#include <fixpp/dict/table_view.hpp>
 #include <fixpp/session/message_store.hpp>  // 008-message-store — MessageStore complete type
 #include <functional>
 #include <memory>
@@ -764,6 +772,29 @@ private:
     // session.cpp provides the delete expression where the full type is visible.
     // [041 T014; data-model E-2; research R-2; [const §VIII.5]/§XV.1]
     std::unique_ptr<fixpp::wire::dictionary_driven_validator> validator_;
+
+    // ── 066-dict-backed-inbound-parse T002 — inbound dict-membership table ──
+    //
+    // Built ONCE in open(), immediately after the non-null-dictionary guard
+    // (session.cpp ~:929), via cfg_.dictionary->as_table_view(). Mirrors the
+    // validator's owned table_view (above / session.cpp ~:1171-1173).
+    // Stable-address Session member (data-model.md "Session inbound
+    // table_view"): the dict-backed Parser ctor stores std::addressof of it
+    // (parser.hpp), so its address must not move for the session lifetime —
+    // a std::optional member (not reseated per message) satisfies this.
+    //
+    // Invariant: open() hard-fails (invalid_session_config) when
+    // cfg_.dictionary is null, BEFORE this member is built — so
+    // inbound_tv_.has_value() is GUARANTEED whenever parse_and_dispatch_
+    // runs (both callers, fire_to_admin_ and the receive loop, only run on a
+    // successfully-opened session). open() is single-invocation per session
+    // (state_ != never_opened rejects a second call) and reconnection is
+    // driven by ReconnectFsm::drive_reconnect_attempt(), which does NOT
+    // re-invoke open() — so no rebuild-during-parse hazard exists.
+    //
+    // NOT YET CONSUMED by parse_and_dispatch_ (T002 only adds+builds the
+    // member; T006 flips the parser to use it). No behavior change here.
+    std::optional<fixpp::dict::table_view> inbound_tv_;
 
     // ── 029-persistent-seqnum-hydrate awaitable declarations ─────────────────
     //

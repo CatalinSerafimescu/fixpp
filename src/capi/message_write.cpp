@@ -330,8 +330,12 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_destroy(fixpp_msg_t* msg) {
     h->dict_.reset();
 
     // Release clone-owned buffers (unique_ptrs auto-destruct if non-null).
+    // owned_view_ (the MessageView aliasing owned_tv_'s dict, when dict-backed
+    // — T007) is reset BEFORE owned_tv_ below, so the view never outlives the
+    // membership it was bound against.
     h->owned_view_.reset();
     h->owned_frame_.reset();
+    h->owned_tv_.reset();
 
     // The OutboundAccumulator is heap-allocated over the per-message arena; delete
     // it FIRST (its pmr members deallocate to arena_resource_, still alive here).
@@ -417,7 +421,7 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_clone(const fixpp_msg_t* src,
         // new_delete (graceful degrade if arena is exhausted, never null).
         // Destruction order: fixpp_msg_destroy resets owned_view_ (line ~338) BEFORE
         // arena_resource_ (line ~350), so MessageView destructs into a live arena.
-        auto* clone = new fixpp_msg{};
+        std::unique_ptr<fixpp_msg> clone{new fixpp_msg{}};
         constexpr std::size_t kCursorHeadroom = 4096;
         std::size_t clone_arena_size = frame_len + kCursorHeadroom;
         clone->arena_buf_ = std::make_unique<std::byte[]>(clone_arena_size);
@@ -425,11 +429,35 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_clone(const fixpp_msg_t* src,
             clone->arena_buf_.get(), clone_arena_size, std::pmr::new_delete_resource());
         auto* clone_mr = clone->arena_resource_.get();
 
-        // Build the owned dict-free MessageView<Index> over the cloned bytes.
+        // Build the clone's MessageView<Index> over the cloned bytes.
+        //
+        // 066-dict-backed-inbound-parse T007 (mechanism (b), FR-007/C4):
+        // propagate the source view's dictionary membership into a clone-owned
+        // table_view so the clone reads groups membership-bounded identically
+        // to its source. Bind dict-backed ONLY when the source itself is
+        // dict-backed (is_dict_backed()) — else stay dict-free (data-model.md
+        // degenerate case; binding a non-null-but-empty dict would instead flip
+        // OffsetTable::group() to a fail-closed empty-membership walk, NOT the
+        // dict-free positional fallback the source actually used).
         fixpp::wire::frame_view fv =
             maybe_fv.value_or(fixpp::wire::frame_view_access::make(owned_frame.get(), frame_len, 0, frame_len));
-        auto clone_view =
-            std::make_unique<fixpp::wire::MessageView<fixpp::wire::access_mode::Index>>(fv, clone_mr);
+        std::unique_ptr<fixpp::wire::MessageView<fixpp::wire::access_mode::Index>> clone_view;
+        if (h->view->is_dict_backed()) {
+            clone->owned_tv_ = h->view->membership_copy();
+            fixpp::wire::Parser<fixpp::wire::access_mode::Index> clone_parser{*clone->owned_tv_};
+            auto parsed = clone_parser.parse(fv, clone_mr);
+            if (parsed) {
+                clone_view = std::make_unique<fixpp::wire::MessageView<fixpp::wire::access_mode::Index>>(
+                    std::move(*parsed));
+            }
+        }
+        if (!clone_view) {
+            // Dict-free source, OR (practically unreachable — the same bytes the
+            // source already parsed successfully) the dict-backed re-parse
+            // failed: fall back to the dict-free 2-arg ctor (pre-066 behavior).
+            clone_view = std::make_unique<fixpp::wire::MessageView<fixpp::wire::access_mode::Index>>(
+                fv, clone_mr);
+        }
 
         clone->tag_ = FIXPP_HANDLE_TAG_MSG;
         clone->flavour = FixppMsgFlavour::inbound;  // reads via view (get_* API)
@@ -440,7 +468,7 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_clone(const fixpp_msg_t* src,
         clone->owned_frame_ = std::move(owned_frame);
         clone->owned_view_ = std::move(clone_view);
 
-        *clone_out = reinterpret_cast<fixpp_msg_t*>(clone);
+        *clone_out = reinterpret_cast<fixpp_msg_t*>(clone.release());
         return FIXPP_ERR_OK;
     } catch (...) {  // LCOV_EXCL_LINE — OOM during clone construction; untestable in unit tests
         return FIXPP_ERR_CAPI_CONFIG_INVALID;  // LCOV_EXCL_LINE

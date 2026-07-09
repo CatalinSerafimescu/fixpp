@@ -24,6 +24,7 @@
 #include <asio/steady_timer.hpp>
 #include <asio/this_coro.hpp>
 #include <asio/use_awaitable.hpp>
+#include <cassert>  // 066-dict-backed-inbound-parse T006: inbound_tv_ invariant assert
 #include <charconv>
 #include <chrono>
 #include <compare>  // NOLINT(misc-include-cleaner) — IWYU: strong_ordering/operator> via chrono spaceship
@@ -313,7 +314,11 @@ template <class CB>
     auto feed_r = pd_framer.feed(frame, carry, std::span<fixpp::wire::frame_view>{pd_out});
     if (!feed_r || feed_r->empty()) return fixpp::core::expected_t<void>{};  // parse error — skip
 
-    fixpp::wire::Parser<fixpp::wire::access_mode::Index> pd_parser;
+    // 066-dict-backed-inbound-parse T006: dict-backed parse — inbound_tv_ is
+    // GUARANTEED (see hpp comment above the member + open() ~:929/:942): both
+    // callers (fire_to_admin_ and the receive loop) run only post-open.
+    assert(inbound_tv_.has_value());
+    fixpp::wire::Parser<fixpp::wire::access_mode::Index> pd_parser{*inbound_tv_};
     auto mv_r = pd_parser.parse((*feed_r)[0], &pa_mr);
     if (!mv_r) return fixpp::core::expected_t<void>{};  // parse error — skip
 
@@ -929,6 +934,17 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
     if (!cfg_.dictionary) {
         co_return std::unexpected(error::invalid_session_config);
     }
+
+    // 066-dict-backed-inbound-parse T002 (data-model.md "Session inbound
+    // table_view"): build the once-built inbound dict-membership table
+    // HERE, immediately after the guard above — cfg_.dictionary is
+    // guaranteed non-null at this point. Mirrors the strict validator's own
+    // owned table_view build below (~:1171-1173/now further down). NOT YET
+    // consumed by parse_and_dispatch_ (session.cpp:316) — T006 flips the
+    // parser to use it; this member only lands the invariant that
+    // inbound_tv_.has_value() holds whenever a successfully-opened session
+    // later reaches parse_and_dispatch_ (both callers run post-open only).
+    inbound_tv_ = cfg_.dictionary->as_table_view();
 
     // RC#1 (gate-b/r1): default-constructed security_profile sentinel →
     // invalid_session_config (slot 53 / N-P2-3 / [const §XII.5] / FR-018).
