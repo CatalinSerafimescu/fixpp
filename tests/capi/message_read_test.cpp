@@ -23,6 +23,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <expected>
 #include <memory_resource>
 #include <string>
 #include <string_view>
@@ -1765,6 +1766,299 @@ TEST(MessageReadGroup, TopLevelCollidingGroup296CAbiReadsFullMassQuoteExtent) {
         << "fixpp_msg_get_group(296) on a real MassQuote must resolve the FULL QuotSetGrp "
            "extent (incl. 367) via the C-ABI, not the colliding QuotSetAckGrp truncation";
     EXPECT_EQ(std::string_view(v, vlen), "20260101-00:00:00");
+}
+
+// 065 T008 — FR-011(a)/SC-005/contract C7(a). DIRECT `as_table_view()`
+// extent-arithmetic witness, following the inline-XML precedent above
+// (TopLevelCollidingGroup296CAbiReadsFullMassQuoteExtent). Reproduces the
+// real issue-#179 shape on the REAL FIX44 tag numbers: ExecutionReport(35=8)
+// NoLegs(555) -> NoLegSecurityAltID(604) [multi-entry nested] -> trailing
+// LegQty(687), declared AFTER the nested group in NoLegs' own field list
+// (mirrors dictionaries/FIX44.xml: InstrmtLegExecGrp component's NoLegs
+// group nests InstrumentLeg's LegSecAltIDGrp component (NoLegSecurityAltID)
+// then LegQty as a direct NoLegs member).
+//
+// C-ABI == C++ typed equivalence (SC-005) is expressed via a HAND-ROLLED
+// entry_context-based flyweight pair (G555Entry/G604Entry) rather than the
+// codegen-generated fixpp::v44::ExecutionReport/groups::G_555/G_604 —
+// `capi_message_read_test` has no `_codegen/include` path (no CMakeLists
+// change permitted; see quickstart.md §6(a)). The hand-rolled classes call
+// the IDENTICAL production primitives codegen emits
+// (fixpp::wire::get()/OffsetTable::nested_group_slices() via
+// MessageView::group<Tag,GroupT>()/group_view<GroupT>), so they exercise the
+// SAME typed-read plumbing — precedent: tests/wire/
+// repeating_group_equivalence_test.cpp::TestLeg (hand-rolled entry_context
+// flyweight used with `mv->template group<555, TestLeg>()`, no codegen).
+//
+// Per the quickstart §6(a) writability caveat, the trailing tag 687 is NOT a
+// member of the nested G_604 flyweight, so equivalence is expressed as: (a)
+// genuine nested member values + nested count agree between C-ABI and typed,
+// and (b) 687 is ABSENT from the typed nested[last] entry via the
+// `field_value()` escape hatch — NOT by asking a typed accessor for 687
+// directly.
+TEST(MessageReadGroup, NestedTrailingMemberExcluded_Fix44LegsAsTableView) {
+    static constexpr std::string_view kExecReportNoLegsXml = R"xml(
+<fix major="4" minor="4">
+  <header>
+    <field number="8"  name="BeginString"  required="Y"/>
+    <field number="9"  name="BodyLength"   required="Y"/>
+    <field number="35" name="MsgType"      required="Y"/>
+    <field number="10" name="CheckSum"     required="Y"/>
+  </header>
+  <trailer>
+    <field number="10" name="CheckSum" required="Y"/>
+  </trailer>
+  <messages>
+    <message name="ExecutionReport" msgtype="8" msgcat="app">
+      <group number="555" name="NoLegs" required="N">
+        <field number="600" name="LegSymbol" required="N"/>
+        <group number="604" name="NoLegSecurityAltID" required="N">
+          <field number="605" name="LegSecurityAltID" required="N"/>
+          <field number="606" name="LegSecurityAltIDSource" required="N"/>
+        </group>
+        <field number="687" name="LegQty" required="N"/>
+      </group>
+    </message>
+  </messages>
+  <fields>
+    <field number="8"   name="BeginString"  type="STRING"/>
+    <field number="9"   name="BodyLength"   type="INT"/>
+    <field number="35"  name="MsgType"      type="STRING"/>
+    <field number="10"  name="CheckSum"     type="STRING"/>
+    <field number="555" name="NoLegs"       type="NUMINGROUP"/>
+    <field number="600" name="LegSymbol"    type="STRING"/>
+    <field number="604" name="NoLegSecurityAltID" type="NUMINGROUP"/>
+    <field number="605" name="LegSecurityAltID" type="STRING"/>
+    <field number="606" name="LegSecurityAltIDSource" type="STRING"/>
+    <field number="687" name="LegQty"       type="QTY"/>
+  </fields>
+</fix>
+)xml";
+
+    std::pmr::monotonic_buffer_resource arena;
+    auto dict = fixpp::dict::XmlLoader{}.load_from_string(kExecReportNoLegsXml, &arena);
+    auto tv = dict.as_table_view();
+
+    auto buf = make_raw_frame(
+        "35=8\x01"
+        "555=1\x01"
+        "600=LEG0\x01"
+        "604=2\x01"
+        "605=ALT0\x01"
+        "606=S0\x01"
+        "605=ALT1\x01"
+        "606=S1\x01"
+        "687=100\x01");
+    auto fv = fixpp::wire::test::make_frame_view(buf);
+    ASSERT_TRUE(fv.has_value());
+
+    Parser<access_mode::Index> parser{tv};
+    auto mv_res = parser.parse(*fv, &arena);
+    ASSERT_TRUE(mv_res.has_value());
+
+    InboundHandle h;
+    h.msg.view = &mv_res.value();
+
+    // ── C-ABI descent ──────────────────────────────────────────────────
+    const fixpp_group_t* outer = nullptr;
+    size_t outer_count = 0;
+    ASSERT_EQ(fixpp_msg_get_group(h.ptr(), 555, &outer, &outer_count), FIXPP_ERR_OK);
+    ASSERT_EQ(outer_count, 1U);
+    ASSERT_NE(outer, nullptr);
+
+    // Sanity: the outer entry's own delimiter field (600) reads correctly.
+    const char* v = nullptr;
+    size_t vlen = 0;
+    ASSERT_EQ(fixpp_group_get_field_string(outer, 0, 600, &v, &vlen), FIXPP_ERR_OK);
+    EXPECT_EQ(std::string_view(v, vlen), "LEG0");
+
+    const fixpp_group_t* nested = nullptr;
+    size_t nested_count = 0;
+    ASSERT_EQ(fixpp_group_get_nested_group(outer, 0, 604, &nested, &nested_count), FIXPP_ERR_OK);
+    ASSERT_EQ(nested_count, 2U);
+    ASSERT_NE(nested, nullptr);
+
+    ASSERT_EQ(fixpp_group_get_field_string(nested, 0, 605, &v, &vlen), FIXPP_ERR_OK);
+    EXPECT_EQ(std::string_view(v, vlen), "ALT0");
+    ASSERT_EQ(fixpp_group_get_field_string(nested, 0, 606, &v, &vlen), FIXPP_ERR_OK);
+    EXPECT_EQ(std::string_view(v, vlen), "S0");
+
+    ASSERT_EQ(fixpp_group_get_field_string(nested, 1, 605, &v, &vlen), FIXPP_ERR_OK);
+    EXPECT_EQ(std::string_view(v, vlen), "ALT1");
+    ASSERT_EQ(fixpp_group_get_field_string(nested, 1, 606, &v, &vlen), FIXPP_ERR_OK);
+    EXPECT_EQ(std::string_view(v, vlen), "S1");
+
+    // DISCRIMINATOR: the LAST nested instance's own extent must NOT absorb
+    // the trailing outer member 687 (LegQty).
+    EXPECT_EQ(fixpp_group_get_field_string(nested, 1, 687, &v, &vlen), FIXPP_ERR_TAG_NOT_FOUND)
+        << "687 (LegQty) must NOT be reachable through the last nested "
+           "NoLegSecurityAltID instance's own span";
+
+    // 687 legitimately belongs to the OUTER NoLegs occurrence.
+    ASSERT_EQ(fixpp_group_get_field_string(outer, 0, 687, &v, &vlen), FIXPP_ERR_OK);
+    EXPECT_EQ(std::string_view(v, vlen), "100");
+
+    // ── C++ typed equivalence (SC-005 / FR-011(a)) ─────────────────────
+    struct G604Entry {
+        explicit G604Entry(fixpp::wire::entry_context ctx) noexcept : ctx_(ctx) {}
+        [[nodiscard]] fixpp::core::expected_t<std::string_view> leg_security_alt_id()
+            const noexcept {
+            auto f = fixpp::wire::get(ctx_.span, 605, ctx_.gen);
+            if (!f) {
+                return std::unexpected{f.error()};
+            }
+            return f->as_string();
+        }
+        [[nodiscard]] fixpp::core::expected_t<std::string_view> leg_security_alt_id_source()
+            const noexcept {
+            auto f = fixpp::wire::get(ctx_.span, 606, ctx_.gen);
+            if (!f) {
+                return std::unexpected{f.error()};
+            }
+            return f->as_string();
+        }
+        [[nodiscard]] fixpp::core::expected_t<fixpp::wire::field_view> field_value(
+            std::uint16_t tag) const noexcept {
+            return fixpp::wire::get(ctx_.span, tag, ctx_.gen);
+        }
+        fixpp::wire::entry_context ctx_{};
+    };
+    struct G555Entry {
+        explicit G555Entry(fixpp::wire::entry_context ctx) noexcept : ctx_(ctx) {}
+        [[nodiscard]] fixpp::wire::group_view<G604Entry> leg_security_alt_id_group()
+            const noexcept {
+            if (ctx_.parent_cache_owner == nullptr) {
+                return {};
+            }
+            auto const nested_slices = ctx_.parent_cache_owner->nested_group_slices(
+                ctx_.outer_occurrence_id, ctx_.span.size(), 604, ctx_.opaque_dict,
+                ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
+            return fixpp::wire::group_view<G604Entry>{nested_slices, ctx_};
+        }
+        [[nodiscard]] fixpp::core::expected_t<fixpp::wire::field_view> field_value(
+            std::uint16_t tag) const noexcept {
+            return fixpp::wire::get(ctx_.span, tag, ctx_.gen);
+        }
+        fixpp::wire::entry_context ctx_{};
+    };
+
+    auto legs = mv_res.value().template group<555, G555Entry>();
+    ASSERT_EQ(legs.size(), 1U) << "typed outer NoLegs count must agree with C-ABI outer_count";
+    auto leg0 = legs[0];
+
+    auto nested_typed = leg0.leg_security_alt_id_group();
+    ASSERT_EQ(nested_typed.size(), 2U) << "typed nested count must agree with C-ABI nested_count";
+
+    auto n0 = nested_typed[0];
+    auto id0 = n0.leg_security_alt_id();
+    ASSERT_TRUE(id0.has_value());
+    EXPECT_EQ(*id0, "ALT0");
+    auto src0 = n0.leg_security_alt_id_source();
+    ASSERT_TRUE(src0.has_value());
+    EXPECT_EQ(*src0, "S0");
+
+    auto n1 = nested_typed[1];
+    auto id1 = n1.leg_security_alt_id();
+    ASSERT_TRUE(id1.has_value());
+    EXPECT_EQ(*id1, "ALT1");
+    auto src1 = n1.leg_security_alt_id_source();
+    ASSERT_TRUE(src1.has_value());
+    EXPECT_EQ(*src1, "S1");
+
+    // Typed discriminator: the LAST nested entry's own field_value(687)
+    // escape hatch must be ABSENT — matching the C-ABI TAG_NOT_FOUND above.
+    // G604Entry has NO accessor for 687 (not its member); asking via the
+    // escape hatch is the only way to express this equivalence (§6(a)
+    // writability caveat).
+    auto swallowed = n1.field_value(687);
+    EXPECT_FALSE(swallowed.has_value())
+        << "typed nested[last].field_value(687) must be absent, matching the C-ABI "
+           "FIXPP_ERR_TAG_NOT_FOUND result above";
+
+    // The outer typed entry's own field_value(687) IS present (matches the
+    // C-ABI outer OK/"100" result above).
+    auto outer_687 = leg0.field_value(687);
+    ASSERT_TRUE(outer_687.has_value());
+    EXPECT_EQ(outer_687->as_string(), "100");
+}
+
+// 065 T011 — FR-008 dict-free degradation pin (research Decision 3; /analyze
+// E-1 named-safety-invariant needing a DIRECT regression witness). Parses
+// the SAME nested-trailing-member layout as
+// NestedGroupLastInstanceExtentDoesNotAbsorbTrailingOuterMember above (outer
+// 453 -> nested 539 x2 -> trailing outer member 999) with a genuinely
+// dict-free Parser (default ctor: opaque_dict_==nullptr,
+// group_member_fn_==nullptr — no membership oracle at all). Confirms:
+//   (i) no crash / clean run under ASan+UBSan descending via the C-ABI, and
+//  (ii) the result is BYTE-IDENTICAL to today's (pre-065) positional
+//       behavior — the trailing outer member IS STILL absorbed into the
+//       last nested instance (FIXPP_ERR_OK, not TAG_NOT_FOUND). This is the
+//       OPPOSITE disposition of the dict-aware witness above, deliberately:
+//       with no membership predicate, OffsetTable::group()'s dict-free
+//       fallback (src/wire/offset_table.cpp:554-557,
+//       `group_end = entries_.size();`) and the corresponding
+//       build_nested_subview() null-predicate path reproduce the OLD
+//       positional scanner exactly (research Decision 3), so a dict-free
+//       caller sees NO regression relative to pre-065 behavior — satisfying
+//       FR-008's "no worse than today" bar. Asserting FIXPP_ERR_OK here (not
+//       TAG_NOT_FOUND) pins that documented degradation as a regression
+//       guard: if a future change made the dict-free path ALSO exclude the
+//       trailing member, this test would need to change deliberately, not
+//       silently.
+TEST(MessageReadGroup, DictFreeNestedReadDegradesToPositional) {
+    auto buf = make_raw_frame(
+        "35=D\x01"
+        "453=1\x01"
+        "448=PA\x01"
+        "447=D\x01"
+        "539=2\x01"
+        "524=NPA0\x01"
+        "525=C0\x01"
+        "524=NPA1\x01"
+        "525=C1\x01"
+        "999=TRAIL\x01");
+    auto fv = fixpp::wire::test::make_frame_view(buf);
+    ASSERT_TRUE(fv.has_value());
+
+    std::pmr::monotonic_buffer_resource arena;
+    // Default ctor — dict-free: opaque_dict_ == nullptr, group_member_fn_ ==
+    // nullptr (confirmed constructible; mirrors
+    // tests/wire/message_view_membership_copy_test.cpp:195).
+    Parser<access_mode::Index> parser{};
+    auto mv_res = parser.parse(*fv, &arena);
+    ASSERT_TRUE(mv_res.has_value());
+    InboundHandle h;
+    h.msg.view = &mv_res.value();
+
+    const fixpp_group_t* grp = nullptr;
+    size_t count = 0;
+    ASSERT_EQ(fixpp_msg_get_group(h.ptr(), 453, &grp, &count), FIXPP_ERR_OK);
+    ASSERT_EQ(count, 1U);
+    ASSERT_NE(grp, nullptr);
+
+    const fixpp_group_t* nested = nullptr;
+    size_t nested_count = 0;
+    ASSERT_EQ(fixpp_group_get_nested_group(grp, 0, 539, &nested, &nested_count), FIXPP_ERR_OK);
+    ASSERT_EQ(nested_count, 2U);
+    ASSERT_NE(nested, nullptr);
+
+    const char* val = nullptr;
+    size_t vlen = 0;
+    // Genuine nested members still read correctly (no crash / clean run).
+    ASSERT_EQ(fixpp_group_get_field_string(nested, 0, 524, &val, &vlen), FIXPP_ERR_OK);
+    EXPECT_EQ(std::string_view(val, vlen), "NPA0");
+    ASSERT_EQ(fixpp_group_get_field_string(nested, 1, 524, &val, &vlen), FIXPP_ERR_OK);
+    EXPECT_EQ(std::string_view(val, vlen), "NPA1");
+
+    // FR-008 discriminator: dict-free degradation is the documented,
+    // intentional NON-regression vs. pre-065 positional behavior, NOT the
+    // 065 membership-aware fix (which requires a dictionary). The trailing
+    // outer member 999 IS STILL absorbed into nested[last]'s own span.
+    EXPECT_EQ(fixpp_group_get_field_string(nested, 1, 999, &val, &vlen), FIXPP_ERR_OK)
+        << "dict-free degradation: without a membership oracle, the trailing outer "
+           "member is (as before 065) absorbed into the last nested instance — the "
+           "documented safe fallback (research Decision 3), not a regression";
+    EXPECT_EQ(std::string_view(val, vlen), "TRAIL");
 }
 
 }  // namespace
