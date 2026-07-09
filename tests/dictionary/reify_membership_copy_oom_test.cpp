@@ -73,7 +73,25 @@
 #define FIXPP_SANITIZER_REPLACES_NEW 0
 #endif
 
-#if !FIXPP_SANITIZER_REPLACES_NEW
+// ── libstdc++ gate (gate-b CI-fix, PR #181 Tier 2 MSVC + Tier 3 libc++). ─────
+// The fault-injection ordinal below (see file header) is derived from a
+// libstdc++-specific GLOBAL-allocation sequence; libc++ (Tier 3) and MSVC's STL
+// (Tier 2) allocate a different number/order of internal blocks, so the armed
+// ordinal no longer lands inside membership_copy()'s table_view copy and the
+// witness mis-fires. The behaviour it guards (membership_copy() no longer
+// noexcept; dict::reify() translates the bad_alloc to dict_reify_oom, not
+// std::terminate) is a source-level guarantee independent of the STL and is
+// mutation-proven on libstdc++ (the reify success-path is covered under
+// libc++/MSVC by reify_membership_identity_test + the libc++-ASan lane), so
+// restrict this ordinal-calibrated witness to libstdc++.
+// (extends feedback_operator_new_witness_breaks_sanitizers)
+#if !FIXPP_SANITIZER_REPLACES_NEW && defined(__GLIBCXX__)
+#define FIXPP_OOM_WITNESS_ENABLED 1
+#else
+#define FIXPP_OOM_WITNESS_ENABLED 0
+#endif
+
+#if FIXPP_OOM_WITNESS_ENABLED
 namespace {
 std::atomic<long> g_alloc_count{0};
 std::atomic<long> g_fail_at{-1};  // -1 = never fail
@@ -101,7 +119,7 @@ void operator delete(void* p) noexcept { std::free(p); }
 void operator delete[](void* p) noexcept { std::free(p); }
 void operator delete(void* p, std::size_t) noexcept { std::free(p); }
 void operator delete[](void* p, std::size_t) noexcept { std::free(p); }
-#endif  // !FIXPP_SANITIZER_REPLACES_NEW
+#endif  // FIXPP_OOM_WITNESS_ENABLED
 
 namespace {
 
@@ -147,7 +165,7 @@ fixpp::core::expected_t<owning_message_handle> reify_execution_report(
 
 }  // namespace
 
-#if !FIXPP_SANITIZER_REPLACES_NEW
+#if FIXPP_OOM_WITNESS_ENABLED
 TEST(ReifyMembershipCopyOom, TableViewCopyOomYieldsDictReifyOom) {
     auto dict = fixpp::test_support::make_fix44_dictionary();
     auto tv = dict->as_table_view();
@@ -213,4 +231,4 @@ TEST(ReifyMembershipCopyOom, TableViewCopyOomYieldsDictReifyOom) {
     EXPECT_EQ(r_inj->error(), fixpp::core::error::dict_reify_oom)
         << "bad_alloc during membership_copy()'s table_view copy must map to dict_reify_oom";
 }
-#endif  // !FIXPP_SANITIZER_REPLACES_NEW
+#endif  // FIXPP_OOM_WITNESS_ENABLED
