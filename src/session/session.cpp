@@ -24,6 +24,7 @@
 #include <asio/steady_timer.hpp>
 #include <asio/this_coro.hpp>
 #include <asio/use_awaitable.hpp>
+#include <cassert>  // 066-dict-backed-inbound-parse T006: inbound_tv_ invariant assert
 #include <charconv>
 #include <chrono>
 #include <compare>  // NOLINT(misc-include-cleaner) — IWYU: strong_ordering/operator> via chrono spaceship
@@ -313,7 +314,11 @@ template <class CB>
     auto feed_r = pd_framer.feed(frame, carry, std::span<fixpp::wire::frame_view>{pd_out});
     if (!feed_r || feed_r->empty()) return fixpp::core::expected_t<void>{};  // parse error — skip
 
-    fixpp::wire::Parser<fixpp::wire::access_mode::Index> pd_parser;
+    // 066-dict-backed-inbound-parse T006: dict-backed parse — inbound_tv_ is
+    // GUARANTEED (see hpp comment above the member + open() ~:929/:942): both
+    // callers (fire_to_admin_ and the receive loop) run only post-open.
+    assert(inbound_tv_.has_value());
+    fixpp::wire::Parser<fixpp::wire::access_mode::Index> pd_parser{*inbound_tv_};
     auto mv_r = pd_parser.parse((*feed_r)[0], &pa_mr);
     if (!mv_r) return fixpp::core::expected_t<void>{};  // parse error — skip
 

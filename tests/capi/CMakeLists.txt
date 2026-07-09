@@ -410,3 +410,23 @@ target_compile_definitions(capi_dict066_group_loopback_smoke_test PRIVATE
 add_test(NAME capi_dict066_group_loopback_smoke COMMAND capi_dict066_group_loopback_smoke_test)
 set_tests_properties(capi_dict066_group_loopback_smoke PROPERTIES
   LABELS "066;setup;scaffold;capi")
+
+# ── 066-dict-backed-inbound-parse T005 — RED-first group-membership witness ──
+# (C-ABI engine loopback). MUST be observed RED against the current
+# dict-free parse (src/session/session.cpp:316) — T006 flips the parse site
+# later. See the file header comment for the discriminating assertion.
+add_executable(capi_dict066_group_membership_red_test dict066_group_membership_red_test.cpp)
+target_link_libraries(capi_dict066_group_membership_red_test PRIVATE
+  fixpp_capi
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(capi_dict066_group_membership_red_test PRIVATE
+  ${FIXPP_CAPI_FEATURE_B_INCLUDES}
+)
+target_compile_definitions(capi_dict066_group_membership_red_test PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
+)
+add_test(NAME capi_dict066_group_membership_red COMMAND capi_dict066_group_membership_red_test)
+set_tests_properties(capi_dict066_group_membership_red PROPERTIES
+  LABELS "066;us1;red;capi")

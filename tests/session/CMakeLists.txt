@@ -2450,6 +2450,31 @@ set_tests_properties(test_066_group_scaffold_smoke PROPERTIES
   ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
   LABELS "066;setup;scaffold")
 
+# ── 066-dict-backed-inbound-parse T004 — RED-first group-membership witness ──
+# (C++ real dispatch). MUST be observed RED against the current dict-free
+# parse (src/session/session.cpp:316) — T006 flips the parse site later.
+# See the file header comment for the two discriminating assertions.
+add_executable(test_066_group_membership_red
+  test_066_group_membership_red_test.cpp
+)
+target_link_libraries(test_066_group_membership_red PRIVATE
+  fixpp_session
+  fixpp_mock_clock
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(test_066_group_membership_red PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+  "${CMAKE_CURRENT_SOURCE_DIR}"
+)
+target_compile_definitions(test_066_group_membership_red PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
+)
+add_test(NAME test_066_group_membership_red COMMAND test_066_group_membership_red)
+set_tests_properties(test_066_group_membership_red PROPERTIES
+  ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  LABELS "066;us1;red")
+
 # ── Conformance subdirectory (005 Q2 in-scope [FIX-TC] subset) ───────────────
 # Phase 3 adds tc_establishment_test.cpp (T020); later phases add more.
 add_subdirectory(conformance)
