@@ -129,18 +129,16 @@ wire::MessageView<wire::access_mode::Index> const& owning_message_handle::view()
             // Parser<Index>{table_view} template instantiation the shipped
             // Session inbound path (T006) and the C-ABI clone path (T007)
             // already exercise — no duplicated classify_fn/group_member_fn.
-            std::optional<wire::MessageView<wire::access_mode::Index>> reframed;
+            bool dict_framed = false;
             if (pimpl_->owned_tv_) {
                 wire::Parser<wire::access_mode::Index> parser{*pimpl_->owned_tv_};
-                auto parsed =
-                    parser.parse((*framed)[0], pimpl_->bytes_.get_allocator().resource());
-                if (parsed) {
-                    reframed.emplace(std::move(*parsed));
+                if (auto parsed =
+                        parser.parse((*framed)[0], pimpl_->bytes_.get_allocator().resource())) {
+                    pimpl_->view_cache_.emplace(std::move(*parsed));
+                    dict_framed = true;
                 }
             }
-            if (reframed) {
-                pimpl_->view_cache_.emplace(std::move(*reframed));
-            } else {
+            if (!dict_framed) {
                 // Dict-free source, OR (practically unreachable — the same
                 // bytes the source already parsed successfully) the
                 // dict-backed re-parse failed: fall back to the dict-free
