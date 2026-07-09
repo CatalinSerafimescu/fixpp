@@ -25,7 +25,7 @@ This is a bounded, single-defect read-path correctness fix on the GA-frozen (`1.
 ## Decision 2 — Carry the nested-descent context on the **internal** `fixpp_group` cursor (zero public-ABI)
 
 **Decision**: Add one `fixpp::wire::group_context group_ctx{}` field to `struct fixpp_group` (`src/capi/capi_internal.hpp:291`). Seed it at the two cursor-mint sites:
-- `fixpp_msg_get_group(group_tag)`: `grp->group_ctx = view->offsets().stored_group_context().pushed(group_tag)`.
+- `fixpp_msg_get_group(group_tag)`: `grp->group_ctx = view->offsets().group_context_for(group_tag)` — a new public C++ (non-C-ABI) accessor `OffsetTable::group_context_for(std::uint16_t no_tag) const noexcept` returning `stored_group_context().pushed(no_tag)`. `stored_group_context()` is `private` (`offset_table.hpp:257`) so the non-member C-ABI free function `fixpp_msg_get_group` cannot call it directly; `group_context_for` is DECLARED in `offset_table.hpp` and DEFINED OUT-OF-LINE in `src/wire/offset_table.cpp` (the `.pushed()` body needs the complete `group_context` type, only forward-declared in the header — same out-of-line rule as `stored_group_context()`).
 - `fixpp_group_get_nested_group(outer, i, nested_tag)`: pass `outer->group_ctx` as the `ctx` to `nested_group_slices` (the context under which `nested_tag`'s members are registered at depth-1), and set the returned nested cursor's `nested->group_ctx = outer->group_ctx.pushed(nested_tag)` (the arithmetically-correct full path — see Decision 7 for the depth-scope reasoning).
 
 **Rationale**:

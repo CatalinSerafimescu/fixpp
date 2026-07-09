@@ -23,7 +23,7 @@ No new persisted or wire data. This feature adds one field to an existing intern
 - `group_ctx: group_context` — the nested-descent context for *this* cursor = the context of an entry of this group (container path pushed with this group's own no_tag). Default `{}` (msg_type empty, depth 0) for any cursor minted without a context (degrades safely, research Decision 3).
 
 **Invariant (context propagation)**:
-- Top-level cursor (`fixpp_msg_get_group(group_tag)`): `group_ctx = parent_view->offsets().stored_group_context().pushed(group_tag)` = `{msg_type, [group_tag]}`.
+- Top-level cursor (`fixpp_msg_get_group(group_tag)`): `group_ctx = parent_view->offsets().group_context_for(group_tag)` = `{msg_type, [group_tag]}` — `group_context_for(std::uint16_t) const noexcept` is a new public C++ (non-C-ABI) accessor returning `stored_group_context().pushed(no_tag)` (raw `stored_group_context()` is `private`; declared in `offset_table.hpp`, defined out-of-line in `src/wire/offset_table.cpp` — see research Decision 2/4).
 - Nested cursor (`fixpp_group_get_nested_group(parent, i, nested_tag)`): descent passes `parent->group_ctx` as the `ctx` arg to `nested_group_slices`; the returned cursor's `group_ctx = parent->group_ctx.pushed(nested_tag)`.
 - At depth-1 this is identical to how the generated typed accessor threads context (`emit_messages.cpp:263-268` passes `ctx_.group_ctx`), so C-ABI and C++ agree by construction on the represented layout. **Depth scope**: the pushed path is the *arithmetically-correct* full path; at depth ≥ 2 the typed path has a pre-existing unpushed-context gap (research Decision 7), so depth-≥2 read correctness/equivalence is out of scope and unasserted here.
 
@@ -36,7 +36,7 @@ No new persisted or wire data. This feature adds one field to an existing intern
 ## Reused, unchanged
 
 - `OffsetTable::nested_group_slices` (7-arg), `build_nested_subview`, `consume_group_extent`, the ROOT-owned `(slice_data, nested_no_tag)` cache — algorithms and keying untouched (FR-005). A new 4-arg overload forwards to the 7-arg one with the table's own `opaque_dict_`/`group_member_fn_` and a **build-mode-safe** generation token via a private helper `token_for_nested_cache() const noexcept` (`#ifndef NDEBUG return gen_; #else return {};`) — because `gen_` exists only under `#ifndef NDEBUG` (`offset_table.hpp:262-264`), forwarding `gen_` directly would not compile in release. With the helper the overload compiles in both build modes (research Decision 4).
-- `OffsetTable::stored_group_context()` — read to seed the top-level cursor.
+- `OffsetTable::stored_group_context()` (private, unchanged) — read to seed the top-level cursor, now via the new public out-of-line accessor `OffsetTable::group_context_for(std::uint16_t no_tag) const noexcept` (returns `stored_group_context().pushed(no_tag)`; declared in `offset_table.hpp`, defined in `src/wire/offset_table.cpp` because `group_context` is only forward-declared in the header — research Decision 2/4).
 
 ## State transitions
 
