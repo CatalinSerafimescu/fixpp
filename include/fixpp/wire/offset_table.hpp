@@ -256,6 +256,17 @@ private:
     // includes group_view.hpp).
     [[nodiscard]] group_context stored_group_context() const noexcept;
 
+    // Tight upper bound on the total number of top-level group instances that
+    // can ever be appended to `group_slices_` (summed over every top-level group
+    // tag a caller may read): the sum of the DECLARED counts of the top-level
+    // group count-fields, clamped to `entries_.size()`. Used to `reserve()`
+    // `group_slices_` ONCE so it never reallocates (held spans stay valid) while
+    // keeping the lazy materialization inside the fixed parse arena on
+    // toolchains with larger STL metadata (MSVC release — PR #181 Tier-2
+    // arena_fit; the loose `entries_.size()` reserve over-allocated ~3x and
+    // exhausted the 16 KiB null-upstream arena there). See offset_table.cpp.
+    [[nodiscard]] std::uint32_t group_slices_reserve_bound() const noexcept;
+
     static constexpr std::uint8_t kMaxGroupDepth = 16;  // mirror emit_messages.cpp:137
 
     std::byte const* frame_base_ = nullptr;  // for group_slice (ptr,len)

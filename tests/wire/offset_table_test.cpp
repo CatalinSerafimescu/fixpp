@@ -313,6 +313,87 @@ TEST(WireOffsetTable, GroupExtentExcludesTrailingTopLevelFields) {
         << "slice[0] must NOT include trailing 55=AAPL; content: " << sv0;
 }
 
+// Witnesses the group_slices_ reserve invariant directly (PR #181 arena_fit
+// follow-up): reading a SECOND top-level group tag must not reallocate the
+// shared group_slices_ vector that an earlier tag's span already points into.
+// The reserve-once bound (group_slices_reserve_bound()) must cover the SUM of
+// both groups' instances. If it under-provisions, the B-read reallocates
+// group_slices_ into a fresh buffer — the earlier span `a` then points at the
+// stranded old buffer while a re-fetch of the same tag returns the NEW buffer,
+// so their .data() pointers diverge. (The parse arena is a
+// monotonic_buffer_resource, which never frees, so a stale span stays readable
+// — the harm of a reallocation is the STRANDED buffer that exhausts the fixed
+// arena, i.e. the exact arena_fit failure. A pointer-stability check, not ASan,
+// is therefore the discriminating witness.) Mutation-proven: shrinking the
+// reserve to 2 makes the B-read reallocate and this test RED.
+TEST(WireOffsetTable, TwoTopLevelGroupsSpanStableAcrossReads) {
+    fixpp::dict::table_view dict;
+    dict.add_valid("D", 35)
+        .add_valid("D", 34)
+        .add_valid("D", 453)
+        .add_valid("D", 448)
+        .add_valid("D", 447)
+        .add_valid("D", 555)
+        .add_valid("D", 600)
+        .add_valid("D", 624)
+        .set_group_first(453, 448)
+        .add_group_member(453, 447)
+        .set_group_first(555, 600)
+        .add_group_member(555, 624);
+
+    // Two top-level groups: NoPartyIDs(453)=2 then NoLegs(555)=3.
+    auto buf = make_raw_frame(
+        "35=D\x01"
+        "34=1\x01"
+        "453=2\x01"
+        "448=PA\x01"
+        "447=D\x01"
+        "448=PB\x01"
+        "447=D\x01"
+        "555=3\x01"
+        "600=L0\x01"
+        "624=1\x01"
+        "600=L1\x01"
+        "624=1\x01"
+        "600=L2\x01"
+        "624=1\x01");
+    auto fv = fixpp::wire::test::make_frame_view(buf);
+    ASSERT_TRUE(fv.has_value());
+
+    std::pmr::monotonic_buffer_resource arena;
+    auto mv = [&]() {
+        Parser<access_mode::Index> parser{dict};
+        return parser.parse(*fv, &arena);
+    }();
+    ASSERT_TRUE(mv.has_value());
+    auto const& t = mv->offsets();
+
+    // Read group A and HOLD its span. a.data() is a pointer INTO group_slices_
+    // (its backing vector), captured now.
+    auto a = t.group_slices(453);
+    ASSERT_EQ(a.size(), 2U);
+    auto const* const a_backing_before = a.data();
+
+    // Read group B (different tag) — appends 3 instances to group_slices_. With
+    // the reserve bound = declared(453)+declared(555)=5, this must NOT reallocate.
+    auto b = t.group_slices(555);
+    ASSERT_EQ(b.size(), 3U);
+
+    // Re-fetch group A (cached): line 570 recomputes the span from the CURRENT
+    // group_slices_.data(). If the B-read reallocated, this points into the new
+    // buffer and diverges from the held pointer.
+    auto a2 = t.group_slices(453);
+    ASSERT_EQ(a2.size(), 2U);
+    EXPECT_EQ(a2.data(), a_backing_before)
+        << "reading a second top-level group reallocated group_slices_ (reserve bound too "
+           "small) — the buffer must be stable so it does not strand memory in the fixed arena";
+
+    // Content sanity: A's slices still read correctly (data pointers are into the
+    // stable frame regardless).
+    std::string_view const a0{reinterpret_cast<char const*>(a2[0].data), a2[0].len};
+    EXPECT_EQ(a0.substr(0, 4), "448=");
+}
+
 TEST(WireOffsetTable, GroupExtentSupportsMoreThanThirtyTwoDistinctMembers) {
     fixpp::dict::table_view dict;
     dict.add_valid("D", 35)

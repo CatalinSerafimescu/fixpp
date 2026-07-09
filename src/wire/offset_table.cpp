@@ -562,6 +562,43 @@ core::expected_t<OffsetTable::group_index> OffsetTable::group(std::uint16_t no_t
     return group_index{no_tag, first, group_end - first};
 }
 
+std::uint32_t OffsetTable::group_slices_reserve_bound() const noexcept {
+    // Dict-free callers have no membership oracle to identify count fields —
+    // keep the conservative entry-count bound (unchanged behaviour).
+    if (opaque_dict_ == nullptr || group_member_fn_ == nullptr) {
+        return static_cast<std::uint32_t>(entries_.size());
+    }
+    // Sum the DECLARED instance count of every TOP-LEVEL group count-field,
+    // using the SAME predicate group() gates a push on: the dictionary
+    // recognises entries_[e].tag as a group (under this table's ROOT context)
+    // whose first member is the immediately following tag. So every tag that can
+    // push into group_slices_ is counted here, and each contributes ≥ its actual
+    // pushes (consume_group_extent caps instances at `declared`). Nested count
+    // fields resolve under a different group_context and do not match the ROOT
+    // ctx (their instances live in nested_cache_, not group_slices_). The
+    // `parse_declared_count(e) > 0` prefilter prunes string/absent fields without
+    // a membership call.
+    group_context const ctx = stored_group_context();
+    std::uint64_t total = 0;
+    for (std::size_t e = 0; e + 1U < entries_.size(); ++e) {
+        std::uint32_t const declared = parse_declared_count(frame_base_, entries_[e]);
+        if (declared == 0U) {
+            continue;
+        }
+        std::uint16_t const delim = entries_[e + 1U].tag;
+        if (group_member_fn_(opaque_dict_, ctx, entries_[e].tag, delim)) {
+            total += declared;
+        }
+    }
+    // Clamp to entries_.size(): total instances ≤ total entries (each instance
+    // needs ≥1 entry), so this is still a valid upper bound AND never exceeds the
+    // old reserve — a huge/malicious declared count cannot inflate it.
+    if (total > entries_.size()) {
+        total = entries_.size();
+    }
+    return static_cast<std::uint32_t>(total);
+}
+
 std::span<group_slice const> OffsetTable::group_slices(std::uint16_t no_tag) const noexcept {
     check_alive();
     // Already materialized for this no_tag — return the stable cached span.
@@ -571,11 +608,15 @@ std::span<group_slice const> OffsetTable::group_slices(std::uint16_t no_tag) con
         }
     }
     try {
-        // Reserve once to the entry-count upper bound (total instances across
-        // all groups ≤ entry count): subsequent appends never reallocate, so
-        // every previously returned span stays valid.
+        // Reserve once to a tight upper bound (sum of top-level declared counts,
+        // clamped to entry count): subsequent appends never reallocate, so every
+        // previously returned span stays valid. The old `entries_.size()` bound
+        // over-reserved ~3x (fields, not instances) and exhausted the fixed
+        // null-upstream parse arena on MSVC-release, silently degrading large
+        // groups to empty (PR #181 Tier-2 arena_fit). See
+        // group_slices_reserve_bound().
         if (!group_slices_reserved_) {
-            group_slices_.reserve(entries_.size());
+            group_slices_.reserve(group_slices_reserve_bound());
             group_slices_reserved_ = true;
         }
         auto const start = static_cast<std::uint32_t>(group_slices_.size());
