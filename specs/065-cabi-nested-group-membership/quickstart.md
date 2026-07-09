@@ -54,12 +54,16 @@ Expect: no delta in `tests/abi/golden/fixpp_capi_symbols.txt`; `capi_freeze.sha2
 
 ## 6. C++ ≡ C-ABI equivalence (SC-005) — MANDATORY (FR-011)
 
-This witness is **mandatory**, not optional. Add a new test to `tests/capi/message_read_test.cpp` that:
+Two witnesses are **mandatory** [clarify 2026-07-09], not optional.
+
+**(a) Direct `as_table_view()` witness** — add a new test to `tests/capi/message_read_test.cpp` that:
 
 - Builds the dictionary from the **real FIX44 dictionary** via `Dictionary::as_table_view()` (NOT a hand-built single-`msg_type` `table_view`) — this is what pins that real msg_type/parent-path context is threaded correctly on the C-ABI path (the empty-`msg_type` class that regressed in 063 Gate-B RC#1).
 - Parses a FIX44 `ExecutionReport` carrying `NoLegs(555)` → `NoLegSecurityAltID(604) ×2` (multi-entry nested group) → trailing `LegQty(687)`.
 - Asserts the C-ABI reads `FIXPP_ERR_TAG_NOT_FOUND` for `687` on the **last** nested instance (the discriminator), and `FIXPP_ERR_OK` + the correct value for `687` at the **outer** index.
-- Asserts **C-ABI ≡ typed** equivalence.
+- Asserts **C-ABI ≡ typed** equivalence (see the writability caveat below).
+
+**(b) Engine-loopback witness** — add a `GroupMembershipCapiRed`-style test that drives the **same** FIX44 `ExecutionReport` frame through the **066 C-ABI dispatch path** using `tests/capi/capi_dict066_loopback_support.hpp` (two-C-ABI-engine plaintext-TCP loopback to a registered receive callback), then descends the delivered handle to the last `NoLegSecurityAltID(604)` nested instance and asserts `FIXPP_ERR_TAG_NOT_FOUND` for `687`. This exercises membership reaching the nested cursor through the *production* dispatch/`membership_copy()` path — not a directly-constructed view — so it pins the dispatch-side context-threading that the direct witness (a) cannot reach.
 
 **Writability caveat (the typed path cannot be asked for a non-member tag):** the generated typed nested flyweight has **no accessor for `687`** (it is not a member of the nested group `G_604`), so "C-ABI == typed for the trailing tag" is not directly expressible. Express the equivalence instead as: (a) the genuine nested member values + the nested count/extent agree between the two paths, AND (b) the trailing tag is **absent** from the typed nested entry's corrected extent — probe it via the `field_value()` escape hatch (post-fix, L-062-3's whole-slice first-occurrence scan over the corrected entry slice excludes `687`, so `field_value(687)` on the typed nested entry is absent, matching the C-ABI `TAG_NOT_FOUND`). Do NOT assert equivalence by asking the typed nested accessor for `687` directly.
 

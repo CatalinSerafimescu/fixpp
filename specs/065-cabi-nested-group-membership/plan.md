@@ -79,9 +79,12 @@ include/fixpp/wire/offset_table.hpp  # + nested_group_slices(slice_data, slice_l
 
 tests/capi/message_read_test.cpp   # UN-SKIP NestedGroupLastInstanceExtentDoesNotAbsorbTrailingOuterMember (:1101) — FR-010/SC-001;
                               #   remove its GTEST_SKIP + escalation comment; keep all its positive assertions; mutation-prove RED on pre-fix code.
-                              #   ADD (FR-011/SC-005): real-as_table_view() FIX44 NoLegs(555)→NoLegSecurityAltID(604)→trailing LegQty(687)
-                              #     C-ABI witness — trailing member TAG_NOT_FOUND on last nested instance + C-ABI==C++ typed read equivalence
-                              #     (pins real msg_type/parent-path context threading — the 063 Gate-B RC#1 empty-msg_type class).
+                              #   ADD (FR-011/SC-005) — TWO witnesses [clarify 2026-07-09]:
+                              #     (a) DIRECT real-as_table_view() FIX44 NoLegs(555)→NoLegSecurityAltID(604)→trailing LegQty(687) C-ABI witness —
+                              #         trailing member TAG_NOT_FOUND on last nested instance + C-ABI==C++ typed read equivalence (isolates extent arithmetic).
+                              #     (b) ENGINE-LOOPBACK witness (GroupMembershipCapiRed-style, via tests/capi/capi_dict066_loopback_support.hpp) driving
+                              #         the same frame through the 066 C-ABI dispatch path — trailing member TAG_NOT_FOUND on last nested instance via the
+                              #         PRODUCTION context path (pins real msg_type/parent-path threading — the 063 Gate-B RC#1 empty-msg_type class).
                               #   NO membership-collision test — C5 is a SCOPE LIMITATION (value-based predicate cannot exclude a same-valued
                               #     trailing tag), tracked as L-062-3 / L-063-4 / issue #180; the disjoint (distinct-tag) behavior is already
                               #     covered by the primary witness (tag 999) + the FR-011 witness (687).  DEPTH-1 ONLY (research Decision 7).
@@ -106,7 +109,7 @@ tests/abi/                    # capi_freeze.sha256 + fixpp_capi_symbols.txt UNCH
 ## Phase notes
 - **Phase 0** (done): research.md — 7 decisions (reuse primitive; internal-cursor context; by-construction degradation; convenience overload; 063-reversal sanction; absent-vs-empty probe; **depth-1 scope + surfaced pre-existing typed depth-2 gap**).
 - **Phase 1** (done): data-model.md (cursor context propagation + nested-extent entities), contracts/cabi-nested-read.md (observable C-ABI contract, before/after, depth-1 scope), quickstart.md (the witness + full C-ABI suite + ABI freeze verify). Agent-context marker refresh.
-- **Phase 2** (`/speckit-tasks`, later): tasks.md — overload; cursor field + include; seed at get_group; rework nested read + presence probe; child-context propagation (`.pushed`); un-skip witness (mutation-proven RED first); ADD real-`as_table_view()` FIX44-legs C-ABI==typed equivalence witness (FR-011, equivalence via member values/extent + `field_value()` absence — NOT a typed accessor for the non-member trailing tag); grep existing NestedGroup* for old-positional-nc pins on a non-terminal zero/short count before un-skipping (SC-002); re-run existing nested tests; ABI freeze verify; alloc/sanitizer gates; B&L L-063-2 retire + record candidate L-065-1 (depth-2 C-ABI-vs-typed divergence / typed gap follow-up) + close-out. NO membership-collision test (C5 is a scope limitation — L-062-3 / L-063-4 / #180).
+- **Phase 2** (`/speckit-tasks`, later): tasks.md — overload; cursor field + include; seed at get_group; rework nested read + presence probe; child-context propagation (`.pushed`); un-skip witness (mutation-proven RED first); ADD two FR-011 witnesses [clarify 2026-07-09] — (a) direct `as_table_view()` FIX44-legs C-ABI==typed equivalence (via member values/extent + `field_value()` absence — NOT a typed accessor for the non-member trailing tag) and (b) an engine-loopback dispatch-path witness via `capi_dict066_loopback_support.hpp`; grep existing NestedGroup* for old-positional-nc pins on a non-terminal zero/short count before un-skipping (SC-002); re-run existing nested tests; ABI freeze verify; alloc/sanitizer gates; B&L L-063-2 retire + record candidate L-065-1 (depth-2 C-ABI-vs-typed divergence / typed gap follow-up) + close-out. NO membership-collision test (C5 is a scope limitation — L-062-3 / L-063-4 / #180).
 
 **Scope boundary**: this feature is **depth-1** (issue #179). Research Decision 7 surfaced a *pre-existing* typed-path context-threading gap at depth ≥ 2 (generated nested accessor threads the parent's unpushed context) — recorded as candidate `L-065-1` + a follow-up, **not fixed here** (would require emitter change + forced golden regen). SC-005 equivalence is scoped to the depth-1 layout.
 
