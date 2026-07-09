@@ -12,7 +12,7 @@
 
 ## Requirement Completeness
 
-- [x] No [NEEDS CLARIFICATION] markers remain (the one genuine decision — the permissive→strict behavior change — is called out as a `/speckit-clarify` item, FR-008)
+- [x] No [NEEDS CLARIFICATION] markers remain — both `/speckit-clarify` decisions are **RESOLVED** (2026-07-09): the permissive→strict in-group behavior change is **accepted** (FR-008), and clone/reify **propagate** the dictionary membership (FR-007). Remaining open items are implementation/test-design risks (below), not clarification markers.
 - [x] Requirements are testable and unambiguous
 - [x] Success criteria are measurable
 - [x] All acceptance scenarios are defined
@@ -30,4 +30,4 @@
 ## Notes
 
 - This is a session-hot-path correctness feature; the spec names concrete FIX/library artifacts (Parser, OffsetTable membership, error codes) because those are the observable contract of a wire library, not gratuitous implementation detail. The mechanism (where the table_view member lives, which parse sites) is confined to plan/research.
-- The one genuine open decision — confirming the permissive→strict unknown-field-in-group behavior change (FR-008) and the clone/reify policy (FR-007) — is deliberately routed to `/speckit-clarify`, not pre-decided.
+- Both clarify decisions are now **RESOLVED** (Session 2026-07-09): permissive→strict unknown-field-in-group accepted (FR-008); clone/reify propagate membership (FR-007). The remaining Gate-A risks are **implementation/test-design** risks, not open clarifications: (a) the reify propagation mechanism = mechanism (b) (a `MessageView` membership-copy accessor, no public-API/codegen change) — see plan Gate A; (b) FIX 4.0/4.1/4.2 group-blindness (L-063-1) → correctness scoped to group-registering dicts + a dedicated FIX4x limitation row; (c) arena-fit is a witnessed requirement (app 16 KiB + admin 8 KiB + near-cap + pathological fail-closed); (d) `vg_parser` dict-backing (FR-006) is an implement-time assessment, not a Gate-A blocker.

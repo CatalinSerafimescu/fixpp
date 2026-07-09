@@ -34,7 +34,11 @@ Witness: clone an inbound dict-backed message (`fixpp_msg_clone`) and read the s
 ctest --test-dir build/linux-clang-debug -R 'alloc' --output-on-failure
 ```
 
-Confirm no new global-heap allocation on the inbound parse+read path (the `table_view` is built once at `open()`; per-message membership + nested sub-views come from the per-message stack arena), and a representative group-bearing message parses+reads within `kInboundParseArena` (16 KiB).
+Confirm no new global-heap allocation on the inbound parse+read path (the `table_view` is built once at `open()`; per-message membership + nested sub-views come from the per-message stack arena). Arena fit is **witnessed** (SC-004 / FR-009), because dict-backed nested reads build sub-`OffsetTable`s from the stack arena — a NEW cost the dict-free path never incurred, landing on BOTH arenas:
+- a representative group-bearing **app** message parses+reads within `kInboundParseArena` (16 KiB) — no heap fallback, successful read;
+- a group-bearing **admin** message parses+reads within the tighter `kAdminParseArena` (8 KiB) — no heap fallback, successful read;
+- a **near-cap / headroom probe** (a message approaching the arena bound still succeeds);
+- a **pathological deeply-nested** message **fails closed** within the group-depth (`kMaxGroupDepth=16`) / entry caps and the arena — never over-read or corrupt (FR-009).
 
 ## 5. C-ABI freeze unchanged (SC-003)
 
