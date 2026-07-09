@@ -387,3 +387,26 @@ target_compile_definitions(capi_abi_symbol_golden_test PRIVATE
   "FIXPP_CAPI_GOLDEN=\"${CMAKE_SOURCE_DIR}/tests/abi/golden/fixpp_capi_symbols.txt\""
 )
 add_test(NAME capi_abi_symbol_golden COMMAND capi_abi_symbol_golden_test)
+
+# ── 066-dict-backed-inbound-parse T001 — C-ABI engine-loopback scaffold smoke ─
+# Compile/smoke check for capi_dict066_loopback_support.hpp (a real
+# two-C-ABI-engine plaintext loopback pair configured with the REAL FIX44
+# dictionary) + the group-bearing frame builders
+# (tests/support/fix44_group_frame_bodies.hpp). NO group-membership/extent
+# assertions here (RED-first preservation for T005) — see the file header
+# comment.
+add_executable(capi_dict066_group_loopback_smoke_test dict066_group_loopback_smoke_test.cpp)
+target_link_libraries(capi_dict066_group_loopback_smoke_test PRIVATE
+  fixpp_capi
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(capi_dict066_group_loopback_smoke_test PRIVATE
+  ${FIXPP_CAPI_FEATURE_B_INCLUDES}
+)
+target_compile_definitions(capi_dict066_group_loopback_smoke_test PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
+)
+add_test(NAME capi_dict066_group_loopback_smoke COMMAND capi_dict066_group_loopback_smoke_test)
+set_tests_properties(capi_dict066_group_loopback_smoke PROPERTIES
+  LABELS "066;setup;scaffold;capi")

@@ -2423,6 +2423,33 @@ add_test(NAME test_exemplar_build_failclosed COMMAND test_exemplar_build_failclo
 set_tests_properties(test_exemplar_build_failclosed PROPERTIES
   LABELS "061;us2;failclosed;D;8;9;E;AS")
 
+# ── 066-dict-backed-inbound-parse T001 — shared test-scaffolding smoke ───────
+# Compile/smoke check for the group-bearing FIX44 frame builders + the
+# real-Session-dispatch harness (tests/support/fix44_group_frame_bodies.hpp,
+# tests/support/fix44_dictionary.hpp, support/group_dispatch_fixture.hpp).
+# NO group-membership/extent assertions here (RED-first preservation for
+# T004/T010) — see the file header comment.
+add_executable(test_066_group_scaffold_smoke
+  test_066_group_scaffold_smoke_test.cpp
+)
+target_link_libraries(test_066_group_scaffold_smoke PRIVATE
+  fixpp_session
+  fixpp_mock_clock
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(test_066_group_scaffold_smoke PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+  "${CMAKE_CURRENT_SOURCE_DIR}"
+)
+target_compile_definitions(test_066_group_scaffold_smoke PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
+)
+add_test(NAME test_066_group_scaffold_smoke COMMAND test_066_group_scaffold_smoke)
+set_tests_properties(test_066_group_scaffold_smoke PROPERTIES
+  ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  LABELS "066;setup;scaffold")
+
 # ── Conformance subdirectory (005 Q2 in-scope [FIX-TC] subset) ───────────────
 # Phase 3 adds tc_establishment_test.cpp (T020); later phases add more.
 add_subdirectory(conformance)

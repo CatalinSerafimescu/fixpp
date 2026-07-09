@@ -25,7 +25,7 @@ Single library. Source at `src/` + `include/fixpp/`; tests at `tests/`; docs at 
 
 **Purpose**: shared test scaffolding reused by every witness.
 
-- [ ] T001 [P] Add shared test-support in `tests/session/` + `tests/capi/` support headers: a group-bearing FIX44 frame builder (e.g. `ExecutionReport` 35=8 with `NoLegs(555)`×2 carrying leg members, followed by a **trailing outer field** such as 60=…) **and a variant frame carrying an undeclared tag INTERIOR to a group instance** (between two declared members of `NoLegs` entry #1) — for the FR-008/C3 interior-truncation witness; a **real-`Session`-dispatch** harness (mock transport → `parse_and_dispatch_` → application callback capture), and a **C-ABI engine-loopback** harness (registered receive callback reachable via `fixpp_msg_*`/`fixpp_group_*`). Shared by US1/US2/US3.
+- [X] T001 [P] Add shared test-support in `tests/session/` + `tests/capi/` support headers: a group-bearing FIX44 frame builder (e.g. `ExecutionReport` 35=8 with `NoLegs(555)`×2 carrying leg members, followed by a **trailing outer field** such as 60=…) **and a variant frame carrying an undeclared tag INTERIOR to a group instance** (between two declared members of `NoLegs` entry #1) — for the FR-008/C3 interior-truncation witness; a **real-`Session`-dispatch** harness (mock transport → `parse_and_dispatch_` → application callback capture), and a **C-ABI engine-loopback** harness (registered receive callback reachable via `fixpp_msg_*`/`fixpp_group_*`). Shared by US1/US2/US3.
 
 ---
 
