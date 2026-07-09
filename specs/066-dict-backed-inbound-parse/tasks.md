@@ -25,7 +25,7 @@ Single library. Source at `src/` + `include/fixpp/`; tests at `tests/`; docs at 
 
 **Purpose**: shared test scaffolding reused by every witness.
 
-- [ ] T001 [P] Add shared test-support in `tests/session/` + `tests/capi/` support headers: a group-bearing FIX44 frame builder (e.g. `ExecutionReport` 35=8 with `NoLegs(555)`×2 carrying leg members, followed by a **trailing outer field** such as 60=…), a **real-`Session`-dispatch** harness (mock transport → `parse_and_dispatch_` → application callback capture), and a **C-ABI engine-loopback** harness (registered receive callback reachable via `fixpp_msg_*`/`fixpp_group_*`). Shared by US1/US2/US3.
+- [ ] T001 [P] Add shared test-support in `tests/session/` + `tests/capi/` support headers: a group-bearing FIX44 frame builder (e.g. `ExecutionReport` 35=8 with `NoLegs(555)`×2 carrying leg members, followed by a **trailing outer field** such as 60=…) **and a variant frame carrying an undeclared tag INTERIOR to a group instance** (between two declared members of `NoLegs` entry #1) — for the FR-008/C3 interior-truncation witness; a **real-`Session`-dispatch** harness (mock transport → `parse_and_dispatch_` → application callback capture), and a **C-ABI engine-loopback** harness (registered receive callback reachable via `fixpp_msg_*`/`fixpp_group_*`). Shared by US1/US2/US3.
 
 ---
 
@@ -36,7 +36,7 @@ Single library. Source at `src/` + `include/fixpp/`; tests at `tests/`; docs at 
 **⚠️ CRITICAL**: US1/US2 cannot be completed until this phase is complete.
 
 - [ ] T002 Add a stable-address `std::optional<fixpp::dict::table_view> inbound_tv_` member to `include/fixpp/session/session.hpp` and build it **once** in `open()` (`src/session/session.cpp`, after the non-null-dictionary guard ~:929/1160) via `cfg_.dictionary->as_table_view()`. Not yet consumed by `parse_and_dispatch_` → no behavior change. Mirror the validator's owned `table_view` ownership (`session.cpp:1173`). Guard the `open()`-on-reconnect rebuild to occur between (never during) parses (data-model §Invariant).
-- [ ] T003 Add the new **internal `MessageView` membership-copy accessor** (returns an OWNED `table_view` copy of the source view's membership by re-concretizing `opaque_dict_`; a dict-free source → empty copy) in the wire layer (`include/fixpp/wire/message_view.hpp` / `offset_table`), respecting `tools/check_layers.py` (wire→dictionary allowed). Add a focused unit test proving (a) the copy answers membership identically to the source, and (b) the copy **outlives the source `Dictionary`** (destroy the `Dictionary`, the copy still reads — the lifetime claim mechanism (b) rests on). `tests/wire/`.
+- [ ] T003 Add the new **internal `MessageView` membership-copy accessor** (returns an OWNED `table_view` copy of the source view's membership by re-concretizing `opaque_dict_`; a dict-free source → empty copy) on `class MessageView` in `include/fixpp/wire/parser.hpp` (~:84 — NOT a new `message_view.hpp`; that file does not exist), respecting `tools/check_layers.py:23` (wire→dictionary allowed). Add a focused unit test proving (a) the copy answers membership identically to the source, and (b) the copy **outlives the source `Dictionary`** (destroy the `Dictionary`, the copy still reads — the lifetime claim mechanism (b) rests on). `tests/wire/`.
 
 **Checkpoint**: enabling members + the shared accessor exist; inbound behavior still unchanged.
 
@@ -49,7 +49,7 @@ Single library. Source at `src/` + `include/fixpp/`; tests at `tests/`; docs at 
 **Independent Test**: drive the group-bearing frame through real `Session` dispatch; a trailing outer field queried on the LAST group instance is absent / `TAG_NOT_FOUND`, and each instance's own members read correctly with the wire instance count.
 
 ### Tests for User Story 1 (RED-first) ⚠️
-- [ ] T004 [P] [US1] RED witness (C++ real dispatch) in `tests/session/`: through `Session` dispatch, assert the trailing outer field on the last group instance is absent, each instance's members correct, count matches. Run against the current dict-free parse and confirm it is **RED** (extent runs to end-of-message). (SC-001)
+- [ ] T004 [P] [US1] RED witness (C++ real dispatch) in `tests/session/`, TWO assertions through `Session` dispatch, both RED on the current dict-free parse: (a) **trailing** — a trailing outer field on the last group instance is absent, each instance's members correct, count matches (extent runs to end-of-message pre-fix); (b) **interior-truncation** — using the T001 interior-undeclared-tag variant, a declared group member appearing AFTER an undeclared interior tag is absent / `TAG_NOT_FOUND` (the FR-008/C3 permissive→strict headline behavior — the accepted, clarified change gets a DIRECT shipped-path pin, not a `Parser{dict}` unit-tier inference). (SC-001, FR-008/C3)
 - [ ] T005 [P] [US1] RED witness (C-ABI engine loopback) in `tests/capi/`: same message via `fixpp_group_get_field_*` in a registered receive callback → `FIXPP_ERR_TAG_NOT_FOUND` on the trailing tag at the last instance. Confirm **RED** pre-change. (SC-001/FR-003)
 
 ### Implementation for User Story 1
@@ -95,7 +95,7 @@ Single library. Source at `src/` + `include/fixpp/`; tests at `tests/`; docs at 
 
 ## Phase 6: Polish & Cross-Cutting Concerns
 
-- [ ] T018 [P] FR-008 Behaviors & Limitations: add the **B-066/L-066** row to `spec/behaviors-and-limitations.md` — permissive→strict in-group membership (QuickFIX/J-aligned) + the extension story (dictionary currency now; `dialect_overlay`/D-009 is backlog) — AND a **FIX4x negative row (L-066-x)**: FIX40/41/42 register zero groups (L-063-1: legacy `INT` counts; `dictionary.cpp:335` NumInGroup gate), so their inbound group reads become `TYPE_MISMATCH` under dict-backing (structural INT-count registration out of scope for 066). Add a release note.
+- [ ] T018 [P] FR-008 Behaviors & Limitations: add the **B-066/L-066** row to `spec/behaviors-and-limitations.md` — permissive→strict in-group membership (QuickFIX/J-aligned) + the extension story (dictionary currency now; `dialect_overlay`/D-009 is backlog) — AND a **FIX4x negative row (L-066-x)**: FIX40/41/42 register zero groups (L-063-1: legacy `INT` counts; `dictionary.cpp:335` NumInGroup gate), so their inbound group reads become `TYPE_MISMATCH` under dict-backing (structural INT-count registration out of scope for 066). Add a release note. (The strict interior-truncation runtime behavior this row documents is directly proven on the shipped path by T004(b) — documentation of a test-proven behavior, not an unverified claim.)
 - [ ] T019 [P] FR-010: amend the **L-063-2** row in `spec/behaviors-and-limitations.md` (the "C++ typed read path is unaffected" claim is false on the shipped path until 066), and confirm the issue **#179** amendment comment (posted 2026-07-09) reflects the final resolution.
 - [ ] T020 [P] Run `quickstart.md` end-to-end validation (§1 RED reproduction → §7 065 prerequisite note).
 - [ ] T021 [P] **Catalogue close-out**: flip every 066-owned OFFICIAL row in `spec/feature-catalogue.md` → `done` (with PR/evidence ref) AND add/update its matching `spec/coverage-index.md` entry. (Gate-B precondition, Article XVII §8.)
