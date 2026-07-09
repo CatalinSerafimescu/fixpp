@@ -19,14 +19,23 @@ After the change (session `inbound_tv_` built at `open()`; `parse_and_dispatch_`
 ```bash
 cmake --preset linux-clang-debug
 cmake --build build/linux-clang-debug -j2
+# The new 066 witnesses are ctest-labeled `LABELS "066;..."` and their binary
+# names all contain the literal substring `066` (session-side `test_066_*`,
+# C-ABI `capi_dict066_*`, alloc-guard `dict066_grouped_read_alloc_guard*`) —
+# `-R '066'` selects exactly and only that set (verified: 12/12 tests, no
+# false negatives from a `-R 'session|...'` name-substring miss, since none
+# of the `test_066_*` binary names contain the literal word "session").
+ctest --test-dir build/linux-clang-debug -R '066' --output-on-failure
+# Then the broader regression sweep (existing session/interop/C-ABI suites,
+# unaffected by 066's own naming):
 ctest --test-dir build/linux-clang-debug -R 'session|capi|interop' --output-on-failure
 ```
 
-Expect: the new real-dispatch witnesses PASS (trailing field `TAG_NOT_FOUND` on the last instance; scalar-as-group `TYPE_MISMATCH`), and the existing session/interop/C-ABI suites remain green (each intended behavior delta an explicit, reviewed edit — no silent breakage).
+Expect: the new real-dispatch witnesses PASS (`test_066_group_membership_red`'s `TrailingFieldAbsentFromLastInstance` + `InteriorUndeclaredTagTruncatesInstance`, and their C-ABI mirror `capi_dict066_group_membership_red`: trailing field `TAG_NOT_FOUND` on the last instance; `test_066_scalar_as_group` / `capi_dict066_scalar_as_group`: scalar-as-group `TYPE_MISMATCH`), and the existing session/interop/C-ABI suites remain green (each intended behavior delta an explicit, reviewed edit — no silent breakage).
 
 ## 3. Clone / reify identity (FR-007)
 
-Witness: clone an inbound dict-backed message (`fixpp_msg_clone`) and read the same group from the clone — assert the clone's result equals the source's (membership-bounded), not a positional divergence. Same for a `reify` owning handle.
+Witness: clone an inbound dict-backed message (`fixpp_msg_clone`) and read the same group from the clone — assert the clone's result equals the source's (membership-bounded), not a positional divergence (`tests/capi/dict066_clone_identity_test.cpp::GroupMembershipCloneIdentity.CloneTrailingFieldAbsentFromLastInstance`). Same for a `reify` owning handle (`tests/dictionary/reify_membership_identity_test.cpp::ReifyMembershipIdentity.GroupMembershipSurvivesSourceDestruction`) and the shared T003 accessor it rests on (`tests/wire/message_view_membership_copy_test.cpp`).
 
 ## 4. No new global heap; arena fit (SC-004)
 
