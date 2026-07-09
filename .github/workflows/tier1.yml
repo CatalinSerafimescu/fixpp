@@ -219,11 +219,11 @@ jobs:
     name: "${{ matrix.preset }}"
     runs-on: ubuntu-24.04
     # Backstop against a hung test wedging the runner. A clean sanitizer leg is
-    # ~24 min (build ~15 + test ~6 + setup); 60 caps a deadlock (e.g. a lost-wake
-    # in an async test) while giving the debug leg headroom on a COLD ccache run
-    # (first build of a new branch recompiles the whole tree — the debug leg hit
-    # exactly 45 min cold, before any test ran).
-    timeout-minutes: 60
+    # ~24 min (build ~15 + test ~6 + setup); the debug leg hit ~45 min cold (whole
+    # tree recompile on a new branch). 60->90 (2026-07-09): the tsan leg hit the
+    # 60-min cap on a cold run and was cancelled — 90 gives the cold sanitizer
+    # legs headroom while still capping a genuine deadlock.
+    timeout-minutes: 90
     needs: gate-precheck
     # `&& github.event_name != 'release'`: a published release only needs the
     # wheel build+install-test lanes to attach the asset — the C++/sanitizer
@@ -393,6 +393,9 @@ jobs:
   coverage:
     name: linux-clang-coverage
     runs-on: ubuntu-24.04
+    # Backstop against a hung coverage build; matches the `linux` job's 90 for
+    # cold-ccache headroom (previously inherited GitHub's 360-min default).
+    timeout-minutes: 90
     needs: gate-precheck  # runs in parallel with matrix, after the gate check
     # Skipped on release (see the `linux` job note) — coverage doesn't gate the asset.
     if: needs.gate-precheck.outputs.proceed == 'true' && github.event_name != 'release'
@@ -402,6 +405,19 @@ jobs:
 
     steps:
       - uses: actions/checkout@v6
+
+      # Heavy build on the ~14 GB free-disk ceiling; reclaim the preinstalled
+      # SDKs we don't use (~30 GB). Mirrors the `linux` job's identical step.
+      - name: Free up disk space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: false
+          docker-images: true
+          swap-storage: false
 
       - name: Install Clang 22 (apt.llvm.org) + Ninja
         run: |
@@ -554,9 +570,10 @@ jobs:
     name: python-bindings (${{ matrix.sanitizer }})
     runs-on: ubuntu-24.04
     # Backstop against a hung binding test (e.g. the FR-007 GIL/worker race)
-    # wedging the runner; see the `linux` job's timeout note. 45->60 (2026-07-09):
-    # the sanitizer legs brushed the 45-min limit; matches the `linux` job's 60.
-    timeout-minutes: 60
+    # wedging the runner; see the `linux` job's timeout note. 45->60->90
+    # (2026-07-09): the sanitizer legs brushed 45 then 60 cold; matches the
+    # `linux` job's 90 for cold-ccache headroom.
+    timeout-minutes: 90
     needs: gate-precheck
     # Gate-then-relevance (release-excluded): like the C++ matrix, the sanitizer
     # legs run ONLY once both gates are satisfied (`proceed`), and then only when
@@ -592,6 +609,23 @@ jobs:
 
     steps:
       - uses: actions/checkout@v6
+
+      # The Debug+sanitizer legs build the same ~1987 instrumented executables as
+      # the `linux` job and sit at the runner's ~14 GB free-disk ceiling. The
+      # ubsan leg (larger binaries from its type-check metadata) tipped over and
+      # failed `ld: final link failed: No space left on device`. Reclaim the
+      # preinstalled SDKs we don't use (~30 GB) to restore margin — mirrors the
+      # identical step in the `linux` job above.
+      - name: Free up disk space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: false
+          docker-images: true
+          swap-storage: false
 
       - name: Install Clang 22 (apt.llvm.org) + SWIG + Ninja
         run: |
@@ -739,6 +773,19 @@ jobs:
 
     steps:
       - uses: actions/checkout@v6
+
+      # cibuildwheel builds the whole engine + static OpenSSL in-container onto the
+      # host disk; reclaim the preinstalled SDKs we don't use (~30 GB) for margin.
+      - name: Free up disk space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: false
+          docker-images: true
+          swap-storage: false
 
       # NBC-1 (T017): the C-ABI surface is byte-frozen (0->1 GA freeze). Pure-text,
       # so it runs first and fails fast — no point building a wheel if the frozen
@@ -965,6 +1012,9 @@ jobs:
   bench:
     name: bench (soft)
     runs-on: ubuntu-24.04
+    # Backstop against a hung bench build; matches the `linux` job's 90
+    # (previously inherited GitHub's 360-min default).
+    timeout-minutes: 90
     needs: gate-precheck
     # Skipped on release (see the `linux` job note) — bench is a soft gate, not an asset gate.
     if: needs.gate-precheck.outputs.proceed == 'true' && github.event_name != 'release'
@@ -974,6 +1024,19 @@ jobs:
 
     steps:
       - uses: actions/checkout@v6
+
+      # Heavy build on the ~14 GB free-disk ceiling; reclaim the preinstalled
+      # SDKs we don't use (~30 GB). Mirrors the `linux` job's identical step.
+      - name: Free up disk space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: false
+          docker-images: true
+          swap-storage: false
 
       - name: Install Clang 22 (apt.llvm.org) + Ninja
         run: |
