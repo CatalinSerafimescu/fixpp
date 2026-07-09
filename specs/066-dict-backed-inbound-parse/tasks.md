@@ -85,9 +85,9 @@ Single library. Source at `src/` + `include/fixpp/`; tests at `tests/`; docs at 
 - [X] T012 [P] [US3] Admin/no-group witness in `tests/session/`: an admin message (Logon/Heartbeat) and a no-repeating-group app message dispatch with unchanged behavior/cost (membership consulted lazily, only on a group read). (SC-003/FR-005)
 - [X] T013 [P] [US3] Alloc-gate in `tests/alloc_guard/`: zero new **global-heap** allocation on the inbound parse+read path (membership lazy; sub-views from the per-message stack arena). (SC-004/FR-004)
 - [X] T014 [P] [US3] Arena-fit witnesses in `tests/session/`: a representative group-bearing message parses+reads within `kInboundParseArena=16384` AND (admin path) `kAdminParseArena=8192`; a **near-cap/headroom** probe; a **pathological deeply-nested** message **fails closed** within the depth (`kMaxGroupDepth=16`)/entry caps — never over-read/corrupt. (SC-004/FR-009)
-- [ ] T015 [US3] Sanitizer lifetime: ASan/UBSan/TSan over the session/clone/reify membership-ownership paths (`inbound_tv_` stable address bound by the Parser, clone-owned `table_view`, reify owned copy) — treat any finding as a real defect.
-- [ ] T016 [P] [US3] ABI-freeze witness in `tests/abi/`: exported-symbol golden + `capi_freeze.sha256` byte-identical (no exported C symbol/header/enum/version change — behavioral only). (SC-003/C-ABI GA freeze)
-- [ ] T017 [US3] Captured group-bearing interop fixture driven through the interop harness (`tests/interop/`), or record in quickstart/research why no such external fixture is available. (SC-003)
+- [X] T015 [US3] Sanitizer lifetime: ASan/UBSan/TSan over the session/clone/reify membership-ownership paths (`inbound_tv_` stable address bound by the Parser, clone-owned `table_view`, reify owned copy) — treat any finding as a real defect.
+- [X] T016 [P] [US3] ABI-freeze witness in `tests/abi/`: exported-symbol golden + `capi_freeze.sha256` byte-identical (no exported C symbol/header/enum/version change — behavioral only). (SC-003/C-ABI GA freeze)
+- [X] T017 [US3] Captured group-bearing interop fixture driven through the interop harness (`tests/interop/`), or record in quickstart/research why no such external fixture is available. (SC-003)
 
 **Checkpoint**: all three P1 stories independently pass; no regressions.
 

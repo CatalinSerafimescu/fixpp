@@ -55,3 +55,18 @@ No delta in the exported-symbol golden / `capi_freeze.sha256` — the change is 
 ## 7. Prerequisite check for 065 (SC-005)
 
 After 066 lands, re-plan 065 and run its real-dispatch C-ABI nested-read witness (issue #179 layout, `555 → 604 ×2 → 687`): RED before 066+065, GREEN after — confirming the dictionary-backed root is the precondition that makes the C-ABI cursor fix actually repair the shipped path.
+
+## 8. T017 — captured group-bearing interop fixture assessment (SC-003)
+
+**Path (b) taken — no captured fixture added; rationale recorded.**
+
+`tests/interop/` (016-interop-harness) has two kinds of drivers, neither of which yields a usable *captured* (static, byte-frozen) group-bearing fixture:
+
+1. `tests/interop/happy/`, `parity/`, `thorny/` — session-layer scenarios (Logon/Heartbeat/TestRequest/ResendRequest/SequenceReset/reject/framing cells). FIX session-admin messages carry no repeating groups, so this tier structurally cannot exercise C1/C3 group-membership behavior. Its captured `.fix` goldens under `tests/interop/happy/golden/` are all session-admin traffic (Logon/Heartbeat/idle-cadence/etc.) — none carry a `NoXXX` repeating group.
+2. `tests/interop/test_business_message_interop.cpp` — the one business-message cell (NewOrderSingle→ExecutionReport), but (a) its `ExecutionReport` does not carry a repeating group (no `NoLegs`/`NoAllocs` etc.), and (b) every cell is **live-counterparty-driven**: it `GTEST_SKIP()`s unless a real QuickFIX-J/QuickFIX-cpp counterparty process is reachable via `INTEROP_<TOKEN>_PORT` env vars (orchestration lives in the gitignored parent `../phase-9-harness/`, not in this submodule). No such counterparty is running in this environment, and none of its cells are "captured" (pre-recorded, replayable) fixtures — they require the live process each run.
+
+Searched the parent `phase-9-harness/results/` tree (perf-workload archive) for a prior group-bearing capture: `wl-05-nos-er-medium-groups` (fixpp-tls/-plain, quickfix-cpp, quickfixj) confirms group-bearing NOS/ExecutionReport traffic (with `NoLegs`-style groups) *has* been exchanged live against both reference engines historically — corroborating that such traffic is realistic and QuickFIX-interoperable — but that archive retains only `latency.hgrm`/`summary.json` perf artifacts, not wire-byte captures, so there is nothing there to lift into a correctness fixture either.
+
+Spinning up a live QuickFIX-J/QuickFIX-cpp counterparty to capture a *new* group-bearing `.fix` golden is a live-infra operation (JVM/Maven or native counterparty process bring-up under `phase-9-harness/`) outside this task's "test/fixture/doc additions only" scope and the WSL2 build-resource cap; it is not undertaken here.
+
+**Why this is not a coverage gap**: T004 (`tests/session/test_066_group_membership_red_test.cpp`) and T005 (`tests/capi/dict066_group_membership_red_test.cpp`) already drive a real group-bearing `ExecutionReport`/`NoLegs` frame end-to-end through the actual shipped dispatch path (real `Session::parse_and_dispatch_` and the C-ABI engine-loopback receive callback respectively) and assert the exact membership-bounded contract (C1/C3) this feature restores. These are the "real dispatch" witnesses SC-003 calls out by name; a QuickFIX-counterparty-driven fixture would exercise the identical shipped parse path with the same assertions, wrapped in TLS/live-process transport plumbing that adds no additional coverage of the 066 delta itself (the delta is purely in `parse_and_dispatch_`'s dictionary binding, not in transport/wire framing, which 066 does not touch).
