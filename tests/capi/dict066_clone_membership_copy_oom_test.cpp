@@ -78,6 +78,16 @@
 namespace {
 std::atomic<long> g_alloc_count{0};
 std::atomic<long> g_fail_at{-1};  // -1 = never fail
+// gate-b/r2 FQ-1: a dedicated LIVE-object counter, distinct from
+// g_alloc_count. g_alloc_count is bumped by the fault-injector BEFORE the
+// fail_at check and BEFORE std::malloc, so the faulting call itself never
+// allocates/frees anything -- a `g_alloc_count - g_free_count` net would
+// carry a phantom +1 through both pre- and post-fix runs. g_live is
+// incremented ONLY after a successful std::malloc (i.e. below the
+// fail_at throw), so it tracks real live heap objects and must return to
+// its pre-call baseline once the RAII fix deletes the leaked clone shell
+// on unwind.
+std::atomic<long> g_live{0};
 }  // namespace
 
 void* operator new(std::size_t size) {
@@ -87,6 +97,7 @@ void* operator new(std::size_t size) {
     }
     void* p = std::malloc(size);
     if (!p) throw std::bad_alloc{};
+    ++g_live;
     return p;
 }
 void* operator new[](std::size_t size) {
@@ -96,12 +107,25 @@ void* operator new[](std::size_t size) {
     }
     void* p = std::malloc(size);
     if (!p) throw std::bad_alloc{};
+    ++g_live;
     return p;
 }
-void operator delete(void* p) noexcept { std::free(p); }
-void operator delete[](void* p) noexcept { std::free(p); }
-void operator delete(void* p, std::size_t) noexcept { std::free(p); }
-void operator delete[](void* p, std::size_t) noexcept { std::free(p); }
+void operator delete(void* p) noexcept {
+    if (p != nullptr) --g_live;
+    std::free(p);
+}
+void operator delete[](void* p) noexcept {
+    if (p != nullptr) --g_live;
+    std::free(p);
+}
+void operator delete(void* p, std::size_t) noexcept {
+    if (p != nullptr) --g_live;
+    std::free(p);
+}
+void operator delete[](void* p, std::size_t) noexcept {
+    if (p != nullptr) --g_live;
+    std::free(p);
+}
 #endif  // !FIXPP_SANITIZER_REPLACES_NEW
 
 namespace {
@@ -186,6 +210,7 @@ TEST(CloneMembershipCopyOom, TableViewCopyOomYieldsCapiConfigInvalid) {
     // membership_copy()'s table_view copy ctor. ─────────────────────────────
     g_alloc_count.store(0);
     g_fail_at.store(t_dict - 1);
+    long const live_before = g_live.load();
     fixpp_msg_t* clone_injected = nullptr;
     bool threw = false;
     fixpp_error_t rc_injected = FIXPP_ERR_UNKNOWN;
@@ -195,6 +220,19 @@ TEST(CloneMembershipCopyOom, TableViewCopyOomYieldsCapiConfigInvalid) {
         threw = true;
     }
     g_fail_at.store(-1);  // disarm before any further allocation (test teardown)
+    long const live_after = g_live.load();
+
+    // gate-b/r2 FQ-1: the OOM path must not leak the partially-built clone
+    // shell (or its arena_buf_ / arena_resource_ members). Pre-fix (raw
+    // `new fixpp_msg{}` with no delete on the catch(...) unwind), live_after
+    // is strictly greater than live_before. Post-fix (RAII
+    // std::unique_ptr<fixpp_msg>), the implicit destructor runs on unwind
+    // and live_after == live_before.
+    EXPECT_EQ(live_after, live_before)
+        << "gate-b/r2 FQ-1: fixpp_msg_clone() leaked " << (live_after - live_before)
+        << " live heap object(s) on the membership_copy() OOM path -- the clone shell "
+           "(and/or its arena_buf_/arena_resource_ members) must be freed via RAII on "
+           "the catch(...) unwind.";
 
     EXPECT_FALSE(threw)
         << "gate-b/r1 FQ-1: a bad_alloc during membership_copy()'s table_view deep-copy "

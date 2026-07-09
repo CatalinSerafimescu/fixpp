@@ -421,7 +421,7 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_clone(const fixpp_msg_t* src,
         // new_delete (graceful degrade if arena is exhausted, never null).
         // Destruction order: fixpp_msg_destroy resets owned_view_ (line ~338) BEFORE
         // arena_resource_ (line ~350), so MessageView destructs into a live arena.
-        auto* clone = new fixpp_msg{};
+        std::unique_ptr<fixpp_msg> clone{new fixpp_msg{}};
         constexpr std::size_t kCursorHeadroom = 4096;
         std::size_t clone_arena_size = frame_len + kCursorHeadroom;
         clone->arena_buf_ = std::make_unique<std::byte[]>(clone_arena_size);
@@ -468,7 +468,7 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_clone(const fixpp_msg_t* src,
         clone->owned_frame_ = std::move(owned_frame);
         clone->owned_view_ = std::move(clone_view);
 
-        *clone_out = reinterpret_cast<fixpp_msg_t*>(clone);
+        *clone_out = reinterpret_cast<fixpp_msg_t*>(clone.release());
         return FIXPP_ERR_OK;
     } catch (...) {  // LCOV_EXCL_LINE — OOM during clone construction; untestable in unit tests
         return FIXPP_ERR_CAPI_CONFIG_INVALID;  // LCOV_EXCL_LINE
