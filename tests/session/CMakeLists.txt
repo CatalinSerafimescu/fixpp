@@ -2525,6 +2525,58 @@ set_tests_properties(test_066_validator_on_grouped PROPERTIES
   ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
   LABELS "066;us1")
 
+# ── 066-dict-backed-inbound-parse T012 — admin / no-group witness ───────────
+# (SC-003/FR-005). Admin (Heartbeat) + no-group app (NewOrderSingle) dispatch
+# unaffected; a group-bearing message whose callback never reads the group
+# dispatches identically to a no-group message (corroborates the structural
+# lazy-membership-consultation argument cited in the file header).
+add_executable(test_066_admin_no_group
+  test_066_admin_no_group_test.cpp
+)
+target_link_libraries(test_066_admin_no_group PRIVATE
+  fixpp_session
+  fixpp_mock_clock
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(test_066_admin_no_group PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+  "${CMAKE_CURRENT_SOURCE_DIR}"
+)
+target_compile_definitions(test_066_admin_no_group PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
+)
+add_test(NAME test_066_admin_no_group COMMAND test_066_admin_no_group)
+set_tests_properties(test_066_admin_no_group PROPERTIES
+  ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  LABELS "066;us3")
+
+# ── 066-dict-backed-inbound-parse T014 — arena-fit witnesses ────────────────
+# (SC-004/FR-009). App-path fit within kInboundParseArena=16384, admin-path
+# fit within kAdminParseArena=8192, a near-cap/headroom probe, and a
+# pathological deeply-nested (>kMaxGroupDepth=16) message failing closed
+# (err_group_too_large, never over-read/corrupt).
+add_executable(test_066_arena_fit
+  test_066_arena_fit_test.cpp
+)
+target_link_libraries(test_066_arena_fit PRIVATE
+  fixpp_session
+  fixpp_mock_clock
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(test_066_arena_fit PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+  "${CMAKE_CURRENT_SOURCE_DIR}"
+)
+target_compile_definitions(test_066_arena_fit PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
+)
+add_test(NAME test_066_arena_fit COMMAND test_066_arena_fit)
+set_tests_properties(test_066_arena_fit PROPERTIES
+  ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  LABELS "066;us3")
+
 # ── Conformance subdirectory (005 Q2 in-scope [FIX-TC] subset) ───────────────
 # Phase 3 adds tc_establishment_test.cpp (T020); later phases add more.
 add_subdirectory(conformance)
