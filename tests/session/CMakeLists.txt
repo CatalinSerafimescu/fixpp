@@ -2475,6 +2475,30 @@ set_tests_properties(test_066_group_membership_red PROPERTIES
   ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
   LABELS "066;us1;red")
 
+# ── 066-dict-backed-inbound-parse T009 — validator-ON grouped witness ────────
+# (FR-006). Proves the opt-in validator path (validate_inbound_messages=true)
+# observes the same membership-bounded extents as validator-OFF.
+add_executable(test_066_validator_on_grouped
+  test_066_validator_on_grouped_test.cpp
+)
+target_link_libraries(test_066_validator_on_grouped PRIVATE
+  fixpp_session
+  fixpp_mock_clock
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(test_066_validator_on_grouped PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+  "${CMAKE_CURRENT_SOURCE_DIR}"
+)
+target_compile_definitions(test_066_validator_on_grouped PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
+)
+add_test(NAME test_066_validator_on_grouped COMMAND test_066_validator_on_grouped)
+set_tests_properties(test_066_validator_on_grouped PROPERTIES
+  ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  LABELS "066;us1")
+
 # ── Conformance subdirectory (005 Q2 in-scope [FIX-TC] subset) ───────────────
 # Phase 3 adds tc_establishment_test.cpp (T020); later phases add more.
 add_subdirectory(conformance)

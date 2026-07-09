@@ -265,6 +265,25 @@ struct fixpp_msg {
     // nullptr for inbound dispatch-window handles (they do not need validation).
     std::shared_ptr<const fixpp::dict::Dictionary> dict_;
 
+    // 066-dict-backed-inbound-parse T007 (mechanism (b), FR-007/C4): clone-owned
+    // membership copy, populated ONLY when the source view is dict-backed
+    // (MessageView::is_dict_backed()) via MessageView::membership_copy()
+    // (parser.hpp) — the same accessor `reify` uses. nullopt => the clone binds
+    // its MessageView dict-free, exactly mirroring a dict-free source
+    // (data-model.md "Clone-owned table_view" degenerate case). Heap-owned
+    // (table_view's own containers use the default/global allocator),
+    // independent of arena_buf_/owned_frame_'s per-clone arena; a STABLE
+    // address for the clone shell's lifetime (owned_view_'s dict-backed ctor
+    // aliases it — mirrors Session::inbound_tv_). Declared BEFORE
+    // owned_frame_/owned_view_ so implicit member-destruction order (reverse
+    // declaration order) destroys owned_view_ (the MessageView pointing into
+    // it) before owned_tv_ — mirrors owned_view_/arena_resource_'s existing
+    // "MessageView destructs into a live arena" ordering below. In practice
+    // fixpp_msg_destroy resets owned_view_ explicitly before this member (see
+    // message_write.cpp), so this ordering is defense-in-depth for any other
+    // teardown path (e.g. shell deletion on a construction-time exception).
+    std::optional<fixpp::dict::table_view> owned_tv_;
+
     // Clone-owned storage: allocated by fixpp_msg_clone; nullptr for
     // non-clone handles.  Owned by the shell; destroyed at fixpp_msg_destroy.
     std::unique_ptr<std::byte[]>

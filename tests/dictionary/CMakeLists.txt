@@ -102,6 +102,10 @@ if(TARGET fixpp_codegen_generate)
     # (seam #15a/#15b/#15c/#10c; AC-D1..D3/D6/D7). Dispatch-consuming TU —
     # includes the generated _dispatch/ headers (Entity 8 / I-11).
     reify_dispatch_test
+    # 066-dict-backed-inbound-parse T008 [US1]: reify-identity witness — the
+    # reified owning handle reads groups membership-bounded, identical to a
+    # (destroyed) real-dict-backed source.
+    reify_membership_identity_test
   )
 
   foreach(target IN LISTS FIXPP_REIFY_TESTS)
@@ -126,6 +130,12 @@ if(TARGET fixpp_codegen_generate)
   # reify_cross_strand_test is a TSan target per [const §IX.2] / AC-R5/AC-T3.
   set_tests_properties(dictionary_reify_cross_strand_test PROPERTIES
     LABELS "dictionary;tsan")
+
+  # 066-dict-backed-inbound-parse T008: label override so `ctest -L 066`
+  # (and the T021/T022 coverage-index / completeness audit) picks this up
+  # alongside the T007/T009 witnesses (which already carry "066").
+  set_tests_properties(dictionary_reify_membership_identity_test PROPERTIES
+    LABELS "066;dictionary;us1")
 else()
   message(STATUS
     "tests/dictionary: fixpp_codegen_generate not available; skipping US2 reify tests")

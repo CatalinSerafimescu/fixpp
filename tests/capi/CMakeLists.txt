@@ -430,3 +430,22 @@ target_compile_definitions(capi_dict066_group_membership_red_test PRIVATE
 add_test(NAME capi_dict066_group_membership_red COMMAND capi_dict066_group_membership_red_test)
 set_tests_properties(capi_dict066_group_membership_red PROPERTIES
   LABELS "066;us1;red;capi")
+
+# ── 066-dict-backed-inbound-parse T007 — clone-identity witness ──────────────
+# RED before the clone-propagation edit (fixpp_msg_clone / capi_internal.hpp
+# owned_tv_): a dict-free clone absorbs the trailing tag. GREEN after T007.
+add_executable(capi_dict066_clone_identity_test dict066_clone_identity_test.cpp)
+target_link_libraries(capi_dict066_clone_identity_test PRIVATE
+  fixpp_capi
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(capi_dict066_clone_identity_test PRIVATE
+  ${FIXPP_CAPI_FEATURE_B_INCLUDES}
+)
+target_compile_definitions(capi_dict066_clone_identity_test PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
+)
+add_test(NAME capi_dict066_clone_identity COMMAND capi_dict066_clone_identity_test)
+set_tests_properties(capi_dict066_clone_identity PROPERTIES
+  LABELS "066;us1;capi")

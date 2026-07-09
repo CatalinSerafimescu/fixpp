@@ -365,6 +365,19 @@ template <std::uint16_t NoTag, class GroupT>
     // out-of-line-in-header convention for `field_iterator::advance`).
     [[nodiscard]] fixpp::dict::table_view membership_copy() const noexcept;
 
+    // 066-dict-backed-inbound-parse T007/T008: companion predicate to
+    // membership_copy() — true iff THIS view is itself dict-backed
+    // (opaque_dict_ non-null). A clone/reify propagation site MUST bind its
+    // re-framed MessageView dict-backed ONLY when this is true: binding a
+    // non-null opaque_dict at an (empty) copy from a genuinely dict-free
+    // source would flip OffsetTable::group()/consume_group_extent from the
+    // positional dict-free fallback (gated on pointer NULLITY, not table
+    // content — offset_table.cpp:441/:519) to the membership walk, which
+    // fails closed on an empty table (err_required_field_missing) — NOT the
+    // "clone/reify stays dict-free" degenerate case data-model.md / contracts/
+    // inbound-parse.md C4 requires.
+    [[nodiscard]] bool is_dict_backed() const noexcept { return opaque_dict_ != nullptr; }
+
 private : [[nodiscard]] std::span<const std::byte> field_bytes(std::uint16_t tag) const noexcept {
         if constexpr (Mode == access_mode::Index) {
             auto e = table_.find(tag);
