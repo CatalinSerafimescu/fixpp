@@ -69,7 +69,7 @@ Single library. Source at `src/` + `include/fixpp/`; tests at `tests/`; docs at 
 **Independent Test**: through real dispatch, `fixpp_msg_get_group(msg, <scalar tag>, …)` → `FIXPP_ERR_TYPE_MISMATCH`.
 
 ### Tests for User Story 2 (RED-first) ⚠️
-- [ ] T010 [P] [US2] RED-first witness (real dispatch + C-ABI loopback) in `tests/session/` + `tests/capi/`: query a scalar tag as a group on a dispatched inbound message. **RED** on the dict-free parse (bogus instance to end-of-message); **GREEN** after T006 restores the delimiter-membership check → `FIXPP_ERR_TYPE_MISMATCH`. (SC-002)
+- [X] T010 [P] [US2] RED-first witness (real dispatch + C-ABI loopback) in `tests/session/` + `tests/capi/`: query a scalar tag as a group on a dispatched inbound message. **RED** on the dict-free parse (bogus instance to end-of-message); **GREEN** after T006 restores the delimiter-membership check → `FIXPP_ERR_TYPE_MISMATCH`. (SC-002)
 
 **Checkpoint**: the scalar-as-group contract is restored on the shipped path (no new implementation beyond T006's dict-backing).
 

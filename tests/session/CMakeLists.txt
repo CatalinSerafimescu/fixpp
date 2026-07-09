@@ -2475,6 +2475,32 @@ set_tests_properties(test_066_group_membership_red PROPERTIES
   ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
   LABELS "066;us1;red")
 
+# ── 066-dict-backed-inbound-parse T010 — scalar-as-group witness ────────────
+# (C++ real dispatch). Querying scalar tag Symbol(55) as a group must yield
+# an EMPTY group_slices() span (TYPE_MISMATCH at the C-ABI layer), never a
+# spurious instance. GREEN on the current dict-backed parse; RED under the
+# T006 mutation (session.cpp:316 reverted to the default dict-free Parser).
+add_executable(test_066_scalar_as_group
+  test_066_scalar_as_group_test.cpp
+)
+target_link_libraries(test_066_scalar_as_group PRIVATE
+  fixpp_session
+  fixpp_mock_clock
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(test_066_scalar_as_group PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+  "${CMAKE_CURRENT_SOURCE_DIR}"
+)
+target_compile_definitions(test_066_scalar_as_group PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
+)
+add_test(NAME test_066_scalar_as_group COMMAND test_066_scalar_as_group)
+set_tests_properties(test_066_scalar_as_group PROPERTIES
+  ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  LABELS "066;us2")
+
 # ── 066-dict-backed-inbound-parse T009 — validator-ON grouped witness ────────
 # (FR-006). Proves the opt-in validator path (validate_inbound_messages=true)
 # observes the same membership-bounded extents as validator-OFF.

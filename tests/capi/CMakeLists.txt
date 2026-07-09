@@ -431,6 +431,27 @@ add_test(NAME capi_dict066_group_membership_red COMMAND capi_dict066_group_membe
 set_tests_properties(capi_dict066_group_membership_red PROPERTIES
   LABELS "066;us1;red;capi")
 
+# ── 066-dict-backed-inbound-parse T010 — scalar-as-group witness ────────────
+# (C-ABI engine loopback). fixpp_msg_get_group(msg, 55, ...) on scalar tag
+# Symbol(55) must return FIXPP_ERR_TYPE_MISMATCH, never OK-with-a-spurious-
+# instance. GREEN on the current dict-backed parse; RED under the T006
+# mutation (session.cpp:316 reverted to the default dict-free Parser).
+add_executable(capi_dict066_scalar_as_group_test dict066_scalar_as_group_test.cpp)
+target_link_libraries(capi_dict066_scalar_as_group_test PRIVATE
+  fixpp_capi
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(capi_dict066_scalar_as_group_test PRIVATE
+  ${FIXPP_CAPI_FEATURE_B_INCLUDES}
+)
+target_compile_definitions(capi_dict066_scalar_as_group_test PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
+)
+add_test(NAME capi_dict066_scalar_as_group COMMAND capi_dict066_scalar_as_group_test)
+set_tests_properties(capi_dict066_scalar_as_group PROPERTIES
+  LABELS "066;us2;capi")
+
 # ── 066-dict-backed-inbound-parse T007 — clone-identity witness ──────────────
 # RED before the clone-propagation edit (fixpp_msg_clone / capi_internal.hpp
 # owned_tv_): a dict-free clone absorbs the trailing tag. GREEN after T007.
