@@ -1057,58 +1057,16 @@ TEST(MessageReadGroup, NestedGroupDescentTwoOuterEntries) {
 // 063 Round-2 tasks-pins §5 [pin#5] — C-ABI last-nested-instance-extent
 // MassQuote-shaped witness: a MULTI-ENTRY nested group (539=2) followed by an
 // OUTER member (999) that appears AFTER the nested group within the SAME
-// outer occurrence. Targets the newly-activated delimiter-bounded
-// multi-instance branch in fixpp_group_get_nested_group
-// (src/capi/message_read.cpp, "close previous instance" — the pre-063
-// OffsetTable::group() flat `seen_in_instance` walk could never produce an
-// outer occurrence slice containing >=2 occurrences of a nested delimiter,
-// so that branch's LCOV_EXCL_START marking is now STALE: it IS reachable
-// post-063, since consume_group_extent's outer-extent walk now correctly
-// encloses the FULL multi-entry nested group).
+// outer occurrence.
 //
-// ESCALATED — CONFIRMED DIVERGENCE, NOT a fake pass. Empirically RUN (not
-// just traced): this exact frame/dict, with the assertions below LIVE (not
-// skipped), produces:
-//   fixpp_group_get_field_string(nested, /*i=*/1, /*tag=*/999, ...)
-//     == FIXPP_ERR_OK, value "TRAIL"   (expected: FIXPP_ERR_TAG_NOT_FOUND)
-// i.e. the trailing outer member 999 IS reachable through the LAST nested
-// instance's own span — a real, reachable leak, not a hypothetical.
-//
-// Root cause: fixpp_group_get_nested_group's Phase-2 scan (message_read.cpp)
-// is POSITIONAL / dictionary-membership-free by design (plan.md Round-2:
-// Opus rejected threading `group_context` + dict through the C-ABI cursor as
-// a gratuitous ABI-adjacent rewrite the fix does not require). It closes the
-// LAST nested instance at `sl->data + sl->len` (the end of the OUTER
-// occurrence's own — now correctly, post-063, membership-bounded — slice),
-// not at the nested group's OWN extent end. When the outer slice legitimately
-// contains trailing content AFTER the nested group (a sibling scalar that is
-// a member of the OUTER group but not of the nested one), that trailing
-// content is swallowed into the last nested instance's span. Every positional
-// (membership-free) heuristic considered (assume uniform per-instance
-// byte-width from instance 0; stop on first tag not seen in an earlier
-// sibling instance) is unanchored and wrong in general for groups with
-// optional/variable fields — inventing one would be exactly the kind of
-// unauthorized enforcement the escalation policy forbids. A CORRECT fix
-// requires nested-group membership, which this C-ABI path deliberately
-// lacks (Opus Round-2 disposition, plan.md:97). This contradicts the Round-2
-// tasks-pins §5 prediction ("corrects transitively, no fix needed") and is
-// reported here rather than worked around; NOT marked passing. See the 063
-// Phase-4 phase-implementer report for the orchestrator decision (options:
-// (a) accept as a documented L-063-* limitation/waiver, (b) a positional
-// heuristic with an explicit documented limitation, (c) plumb
-// `group_context`+dict through the C-ABI cursor, reversing the Round-2
-// rejection).
+// FIXED by 065-cabi-nested-group-membership: fixpp_group_get_nested_group no
+// longer runs a positional (membership-free) scan. It now delegates to
+// OffsetTable::nested_group_slices (062) + consume_group_extent (063), bound
+// by the parent cursor's own group_ctx, so the last nested instance's extent
+// is membership-bounded and a trailing outer member is never absorbed into
+// it. See src/capi/message_read.cpp::fixpp_group_get_nested_group and
+// specs/065-cabi-nested-group-membership/ for the fix.
 TEST(MessageReadGroup, NestedGroupLastInstanceExtentDoesNotAbsorbTrailingOuterMember) {
-    GTEST_SKIP() << "ESCALATED: confirmed divergence — fixpp_group_get_nested_group's "
-                    "positional (membership-free) Phase-2 scan closes the LAST nested "
-                    "instance at the end of the OUTER occurrence's slice, not at the "
-                    "nested group's own extent, so a trailing outer-level member "
-                    "AFTER a multi-entry nested group leaks into the last nested "
-                    "instance's span (fixpp_group_get_field_string(nested,1,999,...) "
-                    "== FIXPP_ERR_OK/\"TRAIL\" instead of FIXPP_ERR_TAG_NOT_FOUND). "
-                    "See this test's own comment block for the root-cause / options; "
-                    "reported to the orchestrator rather than worked around.";
-
     fixpp::dict::table_view dict;
     dict.add_valid("D", 35)
         .add_valid("D", 453)

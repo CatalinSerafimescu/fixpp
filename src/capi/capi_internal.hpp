@@ -311,6 +311,16 @@ struct fixpp_group {
     std::span<const fixpp::wire::group_slice> slices{};  // borrowed from parent OffsetTable arena
     const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>* parent_view = nullptr;
     std::pmr::memory_resource* arena = nullptr;  // scratch arena for nested OffsetTables
+    // 065 T002: the dictionary-membership context this cursor's own group
+    // occurs under (its container path + its own no_tag). Seeded at mint time
+    // (fixpp_msg_get_group for the top-level cursor via
+    // OffsetTable::group_context_for(); fixpp_group_get_nested_group for a
+    // nested cursor via parent->group_ctx.pushed(nested_tag)) and threaded
+    // into OffsetTable::nested_group_slices() on a further nested descent, so
+    // the membership predicate resolves via the exact context (065 research
+    // Decision 2). Default `{}` (empty msg_type/depth 0) is a safe
+    // degradation for any cursor never explicitly seeded (FR-008).
+    fixpp::wire::group_context group_ctx{};
 };
 
 // OutboundAccumulator — the ordered, mutable structure (E-3).
