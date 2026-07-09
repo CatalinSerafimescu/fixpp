@@ -82,6 +82,7 @@
 #include "support/app_message_read_scaffold.hpp"  // fixpp_test_support::make_frame
 #include "support/fix44_dictionary.hpp"
 #include "support/fix44_group_frame_bodies.hpp"
+#include "support/msvc_debug_arena_skip.hpp"  // FIXPP_SKIP_ON_MSVC_DEBUG_GLOBAL_HEAP_GUARD
 
 // mallocnesia replaces these weak no-ops with its interceptor scope markers.
 #include "support/alloc_guard_markers.hpp"
@@ -174,6 +175,7 @@ bool parse_and_read(fixpp::dict::table_view const& tv, std::vector<std::byte> co
 
 // ── Test 1: top-level group (NoLegs) parse+read, zero GLOBAL heap ──────────
 TEST(Dict066GroupedReadAllocGuard, TopLevelGroupParseAndReadZeroGlobalHeap) {
+    FIXPP_SKIP_ON_MSVC_DEBUG_GLOBAL_HEAP_GUARD();
     auto dict = fixpp::test_support::make_fix44_dictionary();
     auto tv = dict->as_table_view();
 
@@ -234,6 +236,7 @@ struct MinimalQuoteSetEntry {
 // See file header SCOPE NOTE — this does not re-litigate cache-hit/miss cost,
 // only that 066's flip doesn't introduce a global-heap escape on this path.
 TEST(Dict066GroupedReadAllocGuard, NestedGroupParseAndReadZeroGlobalHeap) {
+    FIXPP_SKIP_ON_MSVC_DEBUG_GLOBAL_HEAP_GUARD();
     auto dict = fixpp::test_support::make_fix44_dictionary();
     auto tv = dict->as_table_view();
 
