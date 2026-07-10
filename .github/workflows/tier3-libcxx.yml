@@ -11,6 +11,16 @@ name: Tier 3 — Linux libc++ CI
 on:
   push:
     branches: ["main"]
+    # Docs-only pushes to main don't affect the build — skip the full tier
+    # matrix. Fail-safe DENYLIST (see tier1.yml): skipped only when EVERY
+    # changed file is provably non-build. push: ONLY, never pull_request (a
+    # path-skipped required check never reports → PR blocked forever).
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - "specs/**"
+      - ".specify/**"
+      - "LICENSE"
   # PRs run in pull_request context so tier3-required counts toward branch
   # protection (see tier1.yml — a workflow_dispatch run does NOT satisfy the PR
   # merge gate). The libc++ matrix stays on-demand via the `filter` job: it
