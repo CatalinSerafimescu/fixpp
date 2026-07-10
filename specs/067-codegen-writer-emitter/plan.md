@@ -7,7 +7,7 @@
 
 Add a codegen **write** surface to `tools/codegen/fixpp-codegen/`: a new `emit_builders(ir)` emitter producing `Builders.hpp` per version, with a generated `build_<Msg>(out, const <Msg>Args&)` free function per OFFICIAL application message that serializes through the single `wire::body_builder` core, plus a generated `validate_<Msg>(args)` required-presence routine over emitter-derived level-scoped presence tables. The pivotal correctness pin: for the 5 exemplar MsgTypes (D/8/9/E/AS in v44) the generated body is **byte-identical** to the frozen 061 hand exemplar AND the QuickFIX golden. Generate builders for all **33** OFFICIAL distinct MsgTypes (exact-set gate). Validation is required-presence ONLY (enum/conditional cut), recursive into group entries, as a SEPARATE step off the serialize path. No read-path / wire-semantics / C-ABI / Python change; no new error value.
 
-Technical approach is fully derived in [research.md](./research.md): field-order two-regime rule (R1), IR carries group-child presence (R2), emit new level-scoped header-excluded **per-occurrence** tables not the flat `<Msg>_rules` (R3), free-function+args-struct API (R4), W/X paired + grouped QuickFIX goldens (R5), the exact 33 (R6), **per-message group plan + shared type/name helpers, NOT the read emitter's version-wide `MemberMap`** (R7), constitution triggers (R8).
+Technical approach is fully derived in [research.md](./research.md): field-order two-regime rule (R1), required-presence tables need no IR add — order-independent from `m.fields` (R2), emit new level-scoped header-excluded **per-occurrence** tables not the flat `<Msg>_rules` (R3), free-function+args-struct API (R4), W/X paired + grouped QuickFIX goldens (R5), the exact 33 (R6), **per-message group plan + shared type/name helpers, NOT the read emitter's version-wide `MemberMap`** (R7), constitution triggers (R8), and the **codegen-local `MessageIR.group_order` declaration-order walk that supplies the group delimiter + member order (RC#7 — `m.fields` is tag-sorted so it cannot)** (R9).
 
 ## Technical Context
 
@@ -18,7 +18,7 @@ Technical approach is fully derived in [research.md](./research.md): field-order
 **Target Platform**: Linux/Clang Tier 1 (gate); MSVC/libc++ Tier 2/3 CI.
 **Project Type**: C++ library + codegen tool (single project; the library submodule).
 **Performance Goals**: no new budget; outbound builder inherits `body_builder`'s zero-global-heap fixed arena. No regression to existing codegen/build benches.
-**Constraints**: body-only output (INV-2); canonical decimals (INV-3); fail-closed atomic commit (INV-4); group grammar (INV-5); byte-identical shape-oracle; C-ABI 1.5.0 frozen (FR-009); Emitter-Lite (no `emit_enums`, no IR addition — R2/R3).
+**Constraints**: body-only output (INV-2); canonical decimals (INV-3); fail-closed atomic commit (INV-4); group grammar (INV-5); byte-identical shape-oracle; C-ABI 1.5.0 frozen (FR-009); Emitter-Lite (no `emit_enums`). **IR addition (RC#7/R9)**: a codegen-tool-local `MessageIR.group_order` (declaration-order XML walk) IS added — required for the group delimiter/member order because `m.fields` is tag-sorted; the required-presence tables still need no IR add (order-independent, R2/R3). This addition is entirely inside the codegen tool — **NO runtime `Dictionary`/`GroupRef`/C-ABI/Python change** (FR-009 intact).
 **Scale/Scope**: 33 OFFICIAL MsgTypes × 1 representative namespace (v44). Emitter delta ≈ one new `emit_builders.cpp` + a runtime `validate` header + witness harness; generated header count +1 per version (`Builders.hpp`).
 
 ## Constitution Check
@@ -29,7 +29,7 @@ Technical approach is fully derived in [research.md](./research.md): field-order
 |---|---|---|
 | **Appendix A — triggers** | Wire format (validator changes) + Codegen layout | **All four controls required.** `/clarify` DONE; `/analyze` at step 6; **Codex Gate A after /plan**; user `/plan` sign-off pending. |
 | **XVI §3 — /clarify mandatory** | wire + codegen touched | DONE (2 questions; `## Clarifications` recorded). |
-| **X — ABI policy** | must stay unchanged | FR-009: no C-ABI symbol/signature/error-code change. Verify `nm`, abidiff, `check_capi_occupancy.sh`, `error_codes_v1.txt` unchanged; C-ABI 1.5.0 byte-identical. |
+| **X — ABI policy** | must stay unchanged | FR-009: no C-ABI symbol/signature/error-code change. The RC#7 `MessageIR.group_order` addition is **codegen-tool-local** (`ir.hpp`/`ir.cpp` + `emit_builders.cpp`) — it touches NO runtime `Dictionary`/`GroupRef`/C-ABI/Python symbol. Verify `nm`, abidiff, `check_capi_occupancy.sh`, `error_codes_v1.txt` unchanged; C-ABI 1.5.0 byte-identical. Art X clean. |
 | **Error semantics (Appendix A)** | reuse existing wire error | `wire_required_field_missing`(=38) pre-exists; NO new `fixpp_error_t`. Not a trigger; verify no addition. |
 | **VI — 100% FIX rule** | advances OFFICIAL write coverage | `## Normative References` section present in spec.md (added Gate A round 1 — the 33 rows' `[FIX44]`/catalogue refs + 061/063 design authority); /tasks MUST emit coverage-index + feature-catalogue close-out tasks for the 33 write rows BEFORE any row closes (see Open items); Gate A + Gate B before any row closes. |
 | **VII — testing (TDD)** | new emitter + runtime + generated code | Tests-first: shape-oracle byte-equality, round-trip, fail-closed, exact-set completeness, validate-required (top-level + group depth). |
@@ -38,6 +38,8 @@ Technical approach is fully derived in [research.md](./research.md): field-order
 | **XV — banned patterns** | no silent loss / no sync-hot-path-log | body_builder fail-closed (INV-4); no app-message drop; no new banned pattern. |
 | **XVII §8 — verify gate** | before Gate B | `/speckit-verify` + feature-completeness audit non-failing precede Gate B; evidence in `.specify/decisions/067-*-verify.md`. |
 | **XVIII — roadmap** | Emitter-Lite v1.0 slice | in-roadmap (typed-message v1.0); FR-015b/families/Orchestra explicitly out of scope (spec Out of Scope). |
+
+**RC#7 IR-addition note (Gate A round 2):** the round-1 "no IR addition" premise is CORRECTED — a codegen-tool-local `MessageIR.group_order` (declaration-order XML walk in `ir.cpp`) IS added, because `MessageIR.fields` is loader-tag-sorted (`xml_loader.cpp:695-702`) and so cannot supply the group delimiter/member order (R9). This is NOT a Constitution violation: it is host-build-tool-only, adds no runtime type/symbol, and leaves FR-009 (C-ABI 1.5.0 freeze, read path, Python) byte-identical. The required-presence tables are unaffected (still order-independent from `m.fields`, R2/R3). No Complexity Tracking entry needed (no new abstraction, no cross-layer edge — the walk stays inside the codegen tool).
 
 **Codegen-specific mandatory controls (from prior codegen features 003/057/062/063):** forced codegen regeneration + the codegen build-graph cleanliness gate (`git`-clean after regen; `feedback_codegen_build_graph_cleanliness_gate`); re-index CodeGraph after code-changing phases; watch codegen emitter staleness in non-debug build dirs (`project_codegen_emitter_staleness`) — sanitizer/coverage builds compile a fresh `_codegen`, so regenerate before those runs.
 
@@ -64,9 +66,11 @@ specs/067-codegen-writer-emitter/
 tools/codegen/fixpp-codegen/
 ├── emit_builders.cpp        # NEW — the write emitter (emit_builders(ir) -> Builders.hpp)
 ├── emit.hpp                 # + declare emit_builders(const VersionIR&)
+├── ir.hpp                   # + MessageIR.group_order (NEW codegen-local field: per-occurrence delimiter + declaration-ordered members, recursive) — RC#7/R9
+├── ir.cpp                   # + raw-XML declaration-order walk populating group_order (owns its XmlLoader over xml_path, ir.cpp:67-69); does NOT tag-sort/dedup — RC#7/R9
 ├── main.cpp                 # + write_file(base/"Builders.hpp", emit_builders(ir))
 ├── gen_util.hpp             # reuse kind_of / to_accessor / to_identifier (+ maybe a shared kind→setter map)
-└── emit_messages.cpp        # reuse type/name helpers only (kind_of/to_accessor/to_identifier); the group planner is per-message in emit_builders.cpp, NOT the version-wide MemberMap (RC#1)
+└── emit_messages.cpp        # reuse type/name helpers only (kind_of/to_accessor/to_identifier); the group planner is per-message in emit_builders.cpp, delimiter/order from group_order (R9), NOT m.fields, NOT the version-wide MemberMap (RC#1)
 
 include/fixpp/wire/
 └── builder_validate.hpp     # NEW — generic runtime required-presence validate() over the emitted level-scoped tables (header-only, template over writer_traits)
@@ -88,7 +92,7 @@ tests/session/
     └── mass_quote.fix                  # NEW (R5) — checked-in grouped golden
 
 tests/codegen/
-└── test_067_emit_builders_unit.cpp     # NEW — emitter unit tests: order rule, exclusion set, and the RC#1 pin — ONE no_tag (268) yields DISTINCT per-message delimiter/member-order/required plans in W vs X (a version-wide plan is impossible); codegen source has no covering tests today
+└── test_067_emit_builders_unit.cpp     # NEW — emitter unit tests: order rule, exclusion set, the RC#1 pin (ONE no_tag 268 → DISTINCT per-message plans in W vs X), AND the RC#7 group_order pin — the ir.cpp declaration-order XML walk captures W delimiter=269 vs X delimiter=279 (NOT tag-sorted 269 for both) and E NoOrders member order 55-before-54 (NOT tag-sorted 54 55); codegen source has no covering tests today
 ```
 
 **Structure Decision**: Single-project library layout. The emitter grows by one `.cpp` (+ one `emit.hpp` decl + one `main.cpp` line); the runtime validate is one header; generated output is one new header per version; tests live beside the 061 harness in `tests/session/` (reusing `exemplar_seeds.hpp`, `shape_oracle_profile()`, golden-diff support) plus emitter unit tests in `tests/codegen/`. The 061 hand exemplars in `src/session/business_messages.cpp` are untouched (frozen oracle).
@@ -103,6 +107,12 @@ The write group model is per-occurrence (research R7/R3); a version-wide plan pe
 
 - **CONFIRMED: `NoMDEntries(268)`** — W/`MDFullGrp` (`FIX44.xml:3023`, delimiter `MDEntryType(269)`, required 269) vs X/`MDIncGrp` (`FIX44.xml:3060`, delimiter `MDUpdateAction(279)`, required 279, 269 demoted to optional). This is the RC#1 pin (W/X paired goldens + the emitter unit test).
 - Other shared `no_tag`s across the 33 (e.g. `NoPartyIDs(453)`, `NoQuoteEntries`, `NoRelatedSym`) are the same mechanism; the emitter unit test asserts the planner is per-message so any divergent occurrence is handled by construction, not by an enumerated allow-list. /tasks emits a task to dump the per-message group plans and confirm no version-wide collapse.
+
+### N3 — `append_run` tag-dedup collapse census (RC#7-adjacent, /tasks must run)
+
+`append_run` (`xml_loader.cpp:695-702`) sorts the WHOLE per-message run by tag and then `unique`-dedups by tag (first-seen). If one tag appears in **two contexts within a single message** — e.g. the same tag both top-level and inside a group, or in two different groups of one message — the dedup collapses them into ONE `FieldRef`, keeping a single `group_no_tag`. Two exposures:
+- **Group membership/order view**: side-stepped by design — the RC#7 `group_order` XML walk does NOT tag-dedup, so it captures every member at its true level/order. `group_order` is the authority for group delimiter + membership + order.
+- **The required SET derived from the deduped `m.fields`** (top-level body set AND per-occurrence group set) COULD be missing a field the dedup dropped to the other level. This is NOT solved here — it is a mandatory /tasks census: enumerate the 33 OFFICIAL messages for any tag appearing at ≥2 levels within one message and confirm the `m.fields`-derived required sets miss nothing (if any collapse is found, source the affected required set from `group_order` too). Flag, don't hand-wave.
 
 ## Open items carried to /tasks
 
@@ -122,3 +132,9 @@ The write group model is per-occurrence (research R7/R3); a version-wide plan pe
 ### Rounds
 
 - **Round 1 applied 2026-07-10: Codex P1=5 P2=5 P3=1; Opus post-judging P1=3 P2=6 P3=3; rewrite addresses root causes RC#1 (per-occurrence group model — overturns R7 union premise), RC#2 (optional-group absent vs N==0), RC#3 (Bool Y/N + Length+Data), RC#4 (Normative References + Art VI close-out), RC#5 (FR/SC/completeness-gate reconcile), RC#6 (generated-wrapper fail-closed home). Reviews: research/reviews/codex_067-codegen-writer-emitter_gate_a_review.md, research/reviews/opus_067-codegen-writer-emitter_gate_a_adversarial_review.md.**
+
+### Round 2 — RC#7 (re-/plan)
+
+- **Round 2 (2026-07-10): Codex P1=1 P2=0 P3=1; Opus adversarial pass concurring.** The confirmed P1 (RC#7) is a **structural defect in the round-1 rewrite itself**: R1/R7 had the write emitter derive each group's delimiter + member order from `MessageIR.fields`, but the loader **tag-sorts + tag-dedups** the per-message run before it reaches the IR (`xml_loader.cpp:695-702`, copied `ir.cpp:98-100`) — so `m.fields` is tag-sorted and declaration order is LOST. This breaks (a) the group **delimiter** (X `NoMDEntries` delimiter must be `MDUpdateAction(279)` but tag-sort surfaces the optional `MDEntryType(269)` first since 269 < 279 — `FIX44.xml:3060-3061` vs W's genuine 269 delimiter at `:3023-3024`), and (b) group-entry **ORDER** on an exemplar (golden E `new_order_list.fix` `NoOrders` is `55` before `54`; tag-sort inverts to `54 55`), failing the headline FR-003/G2/SC-002 byte-equality pin.
+- **Loop exited to re-/plan (user 2026-07-10).** The round-1 RC#1–6 fixes are CORRECT and preserved; only the group-order mechanism (RC#7) + two residuals (the RC#5 P3 US1-Independent-Test "typed field setters" wording; the N3 `append_run` dedup census) are re-derived.
+- **Fix = codegen-local `MessageIR.group_order`** (research R9): a raw-XML declaration-order walk in `ir.cpp` (which owns its own `XmlLoader` over `xml_path`, `ir.cpp:67-69`) captures, per (message, group-occurrence), the delimiter (first declared member) + members in declaration order, recursively, resolving THIS message's own `<component>` refs. The global `Dictionary`/`GroupRef`/`group_fields` cannot serve this — they are `no_tag`-deduped first-seen (`xml_loader.cpp:485-486`; L-063-3) and cannot distinguish W's vs X's `NoMDEntries`; 063 deferred the delimiter (`specs/063-nested-group-parse-correctness/tasks.md:62`). The required-presence tables are UNAFFECTED (order-independent, still from `m.fields`, R2/R3). The addition is codegen-tool-local: NO runtime `Dictionary`/`GroupRef`/C-ABI/Python change (FR-009 intact). This FALSIFIES the round-1 "no IR addition" premise for the delimiter/order — corrected across research R2/R7/R9, data-model §3, this plan, spec FR-006a/FR-007.

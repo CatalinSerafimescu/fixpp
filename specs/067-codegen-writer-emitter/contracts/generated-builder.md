@@ -20,10 +20,12 @@ This is the feature's reason to exist. If any exemplar fails, the emitter is wro
 
 Generated output orders fields by the two-regime rule (research R1), independent of `<Msg>Args` member declaration or caller supply:
 
-- **Top-level (`group_no_tag==0`): tag ascending.** A group's `No<G>` count tag occupies its ascending-tag position; the group's instances immediately follow it.
-- **Within a group entry: THIS message's dictionary member order** (the per-message member enumeration), NOT tag order. Nested `No<sub>` sits at its member position; instances follow.
+- **Top-level (`group_no_tag==0`): tag ascending** — served by the tag-sorted `m.fields` run. A group's `No<G>` count tag occupies its ascending-tag position; the group's instances immediately follow it.
+- **Within a group entry: THIS group's DECLARATION member order** (from `MessageIR.group_order`, the codegen-local declaration-order XML walk — research R9), NOT tag order and **NOT the tag-sorted `m.fields` run**. Nested `No<sub>` sits at its member position; instances follow.
 
-**Per-occurrence, NOT version-wide (RC#1):** the delimiter and member order for a group come from the group's occurrence in THIS message's own IR field run, not a version-wide `MemberMap` union. The same `no_tag` differs across messages — `NoMDEntries(268)` is delimiter-269 / `MDEntryType`-first in W but delimiter-279 / `MDUpdateAction`-first in X. Pinned by G2 on the 5 exemplars (goldens encode the rule), by the **W/X paired byte-goldens** (G6, the shared-`no_tag` discriminator), and by G6 byte-structural asserts on the rest.
+**Per-occurrence, NOT version-wide (RC#1); declaration-order source, NOT `m.fields` (RC#7):** the delimiter and member order for a group come from `MessageIR.group_order` — the group's DECLARED order in THIS message's own XML — NOT from the tag-sorted `m.fields` (which loses declaration order — `xml_loader.cpp:695-702`) and NOT from a version-wide `MemberMap` union. The same `no_tag` differs across messages — `NoMDEntries(268)` is delimiter-269 / `MDEntryType`-first in W but delimiter-279 / `MDUpdateAction`-first in X; because X tag-sorts 269 before 279, an `m.fields`-derived delimiter would wrongly pick 269 for X (the RC#7 defect). Pinned by G2 on the 5 exemplars (goldens encode the rule), by the **W/X paired byte-goldens** (G6, the shared-`no_tag` discriminator), and by G6 byte-structural asserts on the rest.
+
+**Discriminating pins (RC#7):** the W/X paired goldens assert the generated X builder's `NoMDEntries(268)` delimiter is **`MDUpdateAction(279)`** (NOT 269), and the E exemplar golden asserts the `NoOrders` entry emits **`Symbol(55)` before `Side(54)`** (declaration order, NOT the tag-sorted `54 55`). Either would regress if the emitter sourced group order from the tag-sorted `m.fields` instead of `group_order`.
 
 ## G4 — Completeness: exact set over the 33 OFFICIAL MsgTypes (FR-004)
 
@@ -41,7 +43,7 @@ A generated `validate_<Msg>(args)` (SEPARATE from `build_`; `commit()` output is
 - checks the **top-level body** required set = `{group_no_tag==0 ∧ rule==Required ∧ tag ∉ {8,9,10,34,35,49,52,56}}` (header/framing excluded), AND
 - recursively checks **every present group entry** against its **per-occurrence** required set = `{f ∈ THIS message's fields : group_no_tag==<group> ∧ rule==Required}` — per (message, group occurrence), NOT a single version-wide table per `no_tag`. The same `no_tag` differs across messages: `NoMDEntries(268)` requires `MDEntryType(269)` in W but `MDUpdateAction(279)` in X; a version-wide table would over/under-reject;
 - rejects a **required** group (non-optional span) with `size()==0` (`size() > 0`); an **optional** group (`std::optional<std::span>`) that is `nullopt` or engaged-empty is allowed;
-- derives both sets from IR `FieldRef.rule` off the message's own field run (NOT from the header-polluted, level-flattened `Validator.hpp` `<Msg>_rules`, NOT from the read emitter's version-wide `MemberMap`);
+- derives both required SETs from IR `FieldRef.rule` + `FieldRef.group_no_tag` off the message's own `m.fields` run (order-independent — the tag-sort of that run does not affect set membership; NOT from the header-polluted, level-flattened `Validator.hpp` `<Msg>_rules`, NOT from the read emitter's version-wide `MemberMap`). Note the required SET (this contract) comes from `m.fields`; the group **delimiter + member order** used by `build_` (G3) come instead from `MessageIR.group_order` — the two are different axes (SET vs ORDER), only the latter needs the declaration-order walk (RC#7/R9);
 - enum-value-domain and conditional-required are NOT checked (cut for v1.0).
 
 ## G6 — Non-tautological round-trip witness (FR-008)
