@@ -495,6 +495,33 @@ TEST(Group067EmitBuilders, HeaderFramingTagsNeverPassedToFieldCall) {
     }
 }
 
+// Header/trailer-provenance exclusion follow-up (data-model.md §2.1,
+// contracts/generated-builder.md G9): the loader merges the ENTIRE
+// <header>/<trailer> into every message's m.fields, but the write emitter
+// is body-only — a body field lookalike derived from a header/trailer tag
+// (Signature(89), SecureData(91), SignatureLength(93) — none of which are
+// in the 8-tag kFramingTags floor) must NOT surface as a settable
+// NewOrderSingleArgs member / `bb.field(<tag>, ...)` call. A genuine BODY
+// field (ClOrdID(11)) is the positive control — it MUST still be present,
+// proving the exclusion is provenance-scoped, not a body-emptying overreach.
+TEST(Group067EmitBuilders, HeaderTrailerFieldsExcludedFromBodyOnlyArgs) {
+    std::string const out = fixpp::codegen::emit_builders(fix44_ir());
+    ASSERT_FALSE(out.empty()) << "emit_builders() output is empty (Phase 3b not landed yet)";
+    std::string const region = extract_region(out, "NewOrderSingle", "NewOrderList");
+    ASSERT_FALSE(region.empty()) << "no NewOrderSingle builder region found in emit_builders() output";
+
+    for (int tag : {89, 91, 93}) {
+        std::string const needle = "field(" + std::to_string(tag) + ",";
+        EXPECT_EQ(region.find(needle), std::string::npos)
+            << "found forbidden header/trailer-provenance field() call for tag " << tag
+            << " (Signature/SecureData/SignatureLength) in the NewOrderSingle body-only region";
+    }
+
+    EXPECT_NE(region.find("field(11,"), std::string::npos)
+        << "positive control: ClOrdID(11) is a genuine BODY field and MUST remain a "
+           "NewOrderSingleArgs member — its absence would mean the exclusion overreached";
+}
+
 // T014(d): RC#1 per-message planner pin — ONE no_tag (268) yields DISTINCT
 // per-message group_begin(no_tag, delimiter_tag) calls in W (delimiter 269)
 // vs X (delimiter 279); a version-wide MemberMap-style plan would collapse

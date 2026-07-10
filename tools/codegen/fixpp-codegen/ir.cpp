@@ -2,6 +2,7 @@
 // tools/codegen/fixpp-codegen/ir.cpp — T014 (see ir.hpp banner).
 #include "ir.hpp"
 
+#include <algorithm>
 #include <cstdint>
 #include <filesystem>
 #include <fixpp/dict/dictionary.hpp>
@@ -98,11 +99,49 @@ void walk_level(pugi::xml_node const& node, ComponentIndex const& comps,
     }
 }
 
+// Recursively collects every field/group tag reachable from `node` into
+// `out` (component refs resolved via `comps`; a <group> child contributes
+// its own NoXXX tag AND everything nested inside it). Used to flatten the
+// top-level <header>/<trailer> elements into their full tag set — order is
+// irrelevant here (unlike walk_level's group_order), only membership.
+// NOLINTNEXTLINE(misc-no-recursion)
+void collect_tags(pugi::xml_node const& node, ComponentIndex const& comps,
+                  fixpp::dict::Dictionary const& dict, std::unordered_set<std::uint16_t>& out) {
+    for (auto const& child : node.children()) {
+        std::string_view const tag_name{child.name()};
+        if (tag_name == "field") {
+            auto const fname = std::string{child.attribute("name").as_string("")};
+            auto const tag_opt = dict.field_by_name(fname);
+            if (tag_opt) {
+                out.insert(*tag_opt);
+            }
+        } else if (tag_name == "component") {
+            auto const cname = std::string{child.attribute("name").as_string("")};
+            auto const it = comps.by_name.find(cname);
+            if (it != comps.by_name.end()) {
+                collect_tags(it->second, comps, dict, out);
+            }
+        } else if (tag_name == "group") {
+            auto const gname = std::string{child.attribute("name").as_string("")};
+            auto const no_tag_opt = dict.field_by_name(gname);
+            if (no_tag_opt) {
+                out.insert(*no_tag_opt);
+            }
+            collect_tags(child, comps, dict, out);
+        }
+        // Ignore unknown child elements (forwards-compat, mirrors the loader).
+    }
+}
+
 // Populates `group_order` on every MessageIR in `ir`, rooted at each
 // message's own <message> XML node (NOT header/trailer — the write emitter
-// is body-only, INV-2). Throws std::runtime_error if the re-parse of
-// `xml_path` fails (should be unreachable: XmlLoader already parsed the same
-// file successfully to build `dict`).
+// is body-only, INV-2), and `ir.header_trailer_tags` from the top-level
+// <header>/<trailer> elements (recursively resolved through
+// <component>/<group> refs — the header/trailer-provenance exclusion
+// follow-up). Both are populated from the SAME parse pass (parse-once).
+// Throws std::runtime_error if the re-parse of `xml_path` fails (should be
+// unreachable: XmlLoader already parsed the same file successfully to build
+// `dict`).
 void populate_group_order(std::filesystem::path const& xml_path, fixpp::dict::Dictionary const& dict,
                           VersionIR& ir) {
     std::ifstream in(xml_path, std::ios::binary);
@@ -118,6 +157,12 @@ void populate_group_order(std::filesystem::path const& xml_path, fixpp::dict::Di
     }
     auto const root = doc.child("fix");
     auto const comps = build_component_index(root);
+
+    std::unordered_set<std::uint16_t> header_trailer;
+    collect_tags(root.child("header"), comps, dict, header_trailer);
+    collect_tags(root.child("trailer"), comps, dict, header_trailer);
+    ir.header_trailer_tags.assign(header_trailer.begin(), header_trailer.end());
+    std::sort(ir.header_trailer_tags.begin(), ir.header_trailer_tags.end());
 
     std::unordered_map<std::string, pugi::xml_node> msg_node_by_type;
     for (auto const& m : root.child("messages").children("message")) {

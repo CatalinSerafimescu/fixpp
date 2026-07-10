@@ -89,6 +89,13 @@ struct VersionIR {
     std::string ns;                   // "v42" / "v44" / "v50sp2" / "vt11"
     std::vector<MessageIR> messages;  // bytewise-sorted (002 D-6)
     std::vector<LengthPairIR> length_pairs;
+
+    // Tags declared under the top-level <header>/<trailer> elements,
+    // resolved recursively through <component>/<group> refs (sorted,
+    // unique) — excluded from body-only <Msg>Args by provenance (the write
+    // emitter's header/trailer-exclusion follow-up; supersedes the 8-tag
+    // kFramingTags floor as the primary exclusion set).
+    std::vector<std::uint16_t> header_trailer_tags;
 };
 
 // Per-message top-level fields (group_no_tag == 0), deduped by tag in

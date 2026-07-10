@@ -61,17 +61,27 @@ bool is_official(std::string_view msg_type) {
     return std::find(kOfficial33.begin(), kOfficial33.end(), msg_type) != kOfficial33.end();
 }
 
-// Body-only framing exclusion set (data-model.md §2.1 / contract G9): the
-// framer/session envelope the body builder must never emit — BeginString(8),
-// BodyLength(9), CheckSum(10), MsgSeqNum(34), MsgType(35, stamped by the
-// body_builder ctor), SenderCompID(49), SendingTime(52), TargetCompID(56).
-// NOTE: this is the 8-tag envelope only; other <header>/<trailer> fields the
-// loader merges into m.fields (e.g. Signature(89)) are NOT excluded here —
-// see the header/trailer-provenance exclusion follow-up.
+// Defensive floor: the 8-tag framer envelope — BeginString(8), BodyLength(9),
+// CheckSum(10), MsgSeqNum(34), MsgType(35, stamped by the body_builder ctor),
+// SenderCompID(49), SendingTime(52), TargetCompID(56). The PRIMARY exclusion
+// is now provenance-based (VersionIR::header_trailer_tags, is_header_trailer
+// below), which is a superset of this floor for any dict with a <header>;
+// kFramingTags stays as a floor for a dict with no <header> at all.
 constexpr std::array<std::uint16_t, 8> kFramingTags = {8, 9, 10, 34, 35, 49, 52, 56};
 
 bool is_framing_tag(std::uint16_t tag) {
     return std::find(kFramingTags.begin(), kFramingTags.end(), tag) != kFramingTags.end();
+}
+
+// Provenance-based exclusion (data-model.md §2.1 / contract G5): true if
+// `tag` is declared under the source dict's top-level <header>/<trailer>
+// (VersionIR::header_trailer_tags — sorted, unique, recursively resolved
+// through <component>/<group> refs by ir.cpp). Excludes the FULL
+// header/trailer envelope (Signature(89), SecureData(91),
+// SignatureLength(93), routing fields, etc.), not just the 8-tag framer
+// floor above.
+bool is_header_trailer(std::uint16_t tag, std::vector<std::uint16_t> const& header_trailer_tags) {
+    return std::binary_search(header_trailer_tags.begin(), header_trailer_tags.end(), tag);
 }
 
 std::string_view args_cpp_type(TypeKind k) {
@@ -305,12 +315,15 @@ void emit_build_fn(TemplateWriter& w, std::string const& msg_id, std::string con
 }
 
 // Top-level (group_no_tag==0) synthetic declaration-order member list: the
-// tag-sorted, framing-excluded run from collect_top_fields (R1/R7 — the
-// top-level regime IS tag-ascending, served by the tag-sorted m.fields run).
-std::vector<GroupOrderMember> top_level_synthetic_members(MessageIR const& m) {
+// tag-sorted, header/trailer-excluded run from collect_top_fields (R1/R7 —
+// the top-level regime IS tag-ascending, served by the tag-sorted m.fields
+// run). Exclusion is by PROVENANCE (`header_trailer_tags`), with
+// `kFramingTags` retained as a defensive floor.
+std::vector<GroupOrderMember> top_level_synthetic_members(
+    MessageIR const& m, std::vector<std::uint16_t> const& header_trailer_tags) {
     std::vector<GroupOrderMember> out;
     for (FieldIR const* f : collect_top_fields(m)) {
-        if (is_framing_tag(f->ref.tag)) {
+        if (is_framing_tag(f->ref.tag) || is_header_trailer(f->ref.tag, header_trailer_tags)) {
             continue;
         }
         bool const is_grp = f->ref.type == fixpp::dict::field_data_type::NumInGroup;
@@ -662,7 +675,8 @@ std::string emit_builders(VersionIR const& ir) {
         }
 
         std::string const msg_id = to_identifier(m.name);
-        std::vector<GroupOrderMember> const top_members = top_level_synthetic_members(m);
+        std::vector<GroupOrderMember> const top_members =
+            top_level_synthetic_members(m, ir.header_trailer_tags);
         LevelPlan const plan = resolve_level(w, m, field_by_tag, /*path=*/{}, top_members, msg_id);
         emit_args_struct(w, msg_id + "Args", plan);
         emit_build_fn(w, msg_id, m.msg_type, plan);

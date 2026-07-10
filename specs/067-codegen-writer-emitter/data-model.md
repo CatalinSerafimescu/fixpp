@@ -9,7 +9,7 @@ This feature has no runtime persistent state. "Data model" here = the shape of t
 For each of the 33 OFFICIAL messages `<Msg>` (class-identifier via `to_identifier`, R7):
 
 ### 1.1 `struct <Msg>Args`
-The typed input aggregate (R4). One member per **direct** field (top-level or, for a group's `Args`, that group's members):
+The typed input aggregate (R4). One member per **direct** field — a **body** field (top-level or, for a group's `Args`, that group's members); any tag declared under the source dict's top-level `<header>`/`<trailer>` (resolved recursively through `<component>`/`<group>` refs — `VersionIR::header_trailer_tags`) is excluded by **provenance**, not just the 8-tag framer floor (§2.1):
 
 | Field kind (`kind_of`) | `<Msg>Args` member type | Presence / wire semantics |
 |---|---|---|
@@ -50,7 +50,7 @@ Emitted in `Builders.hpp` (or a sibling), reusing the `rule_row`-style shape but
 ```
 inline constexpr std::array<std::uint16_t, N> <Msg>_required_body = { … };
 ```
-Membership rule (emitter): `{ f.ref.tag : f ∈ m.fields, f.ref.group_no_tag == 0, f.ref.rule == Required, f.ref.tag ∉ {8,9,10,34,35,49,52,56} }`.
+Membership rule (emitter): `{ f.ref.tag : f ∈ m.fields, f.ref.group_no_tag == 0, f.ref.rule == Required, f.ref.tag ∉ {8,9,10,34,35,49,52,56} ∪ header_trailer_tags }` — the 8-tag set is a defensive floor; the primary exclusion is `header_trailer_tags` (§3), the FULL provenance-resolved `<header>`/`<trailer>` tag set (e.g. also excludes Signature(89), SecureData(91), SignatureLength(93), and routing fields such as OnBehalfOfCompID(115)/PossDupFlag(43)/OrigSendingTime(122)).
 
 ### 2.2 Per-occurrence group required set — per message, per group occurrence
 ```
@@ -70,6 +70,8 @@ Membership rule: `{ f.ref.tag : f ∈ THIS message's m.fields, f.ref.group_no_ta
 **Shared verbatim** (type/name helpers only): `kind_of`, `to_accessor`, `to_identifier`, `strip_no_prefix`, `uniquify_accessor` (R7). **NOT reused verbatim**: the read emitter's version-wide `MemberMap` (group_no_tag → union-deduped members, first-encounter-wins across the whole message list) — that is correct for read (membership decided per-context at parse time by 062/063) but unsound for write, which has no runtime scoping. Instead the write emitter builds a **per-message group planner** whose delimiter + member ORDER come from the new `MessageIR.group_order` (below), and whose per-occurrence required SET comes from `m.fields` filtered by `group_no_tag` (order-independent — R3). This is the codegen-time analogue of 063's per-context keying, resolved at codegen time from static per-message IR (no runtime membership).
 
 **`MessageIR.group_order` (NEW — codegen-tool-local IR field; research R9)**: per message, per repeating-group OCCURRENCE (keyed `(message, parent-path, no_tag)`), a record carrying the group's **delimiter tag** (first declared member) and its **members in DECLARATION order** (recursive — a nested group's own delimiter + ordered members are captured at every depth). Built by a codegen-tool-local **pugixml re-parse of `xml_path`** in `ir.cpp` (which already owns `xml_path`, `ir.cpp:67-69` — but NOT the parsed tree; pugixml is TU-local to `xml_loader.cpp`, D-15, and the codegen tool has no pugixml today, so this is a NEW codegen-tool pugixml dependency, NOT a runtime dict/loader accessor), resolving THAT message's own `<component>` refs (W→`MDFullGrp`→269-first; X→`MDIncGrp`→279-first) and NOT tag-sorting/deduping. Necessary because `MessageIR.fields` is tag-sorted (`xml_loader.cpp:695-702`, copied `ir.cpp:98-100`) — declaration order is lost, so `m.fields` CANNOT supply group delimiter/order (RC#7). **Codegen-tool-local only: no runtime `Dictionary`/`GroupRef`/C-ABI change** (FR-009 intact).
+
+**`VersionIR::header_trailer_tags` (NEW — sibling field, header/trailer-provenance exclusion follow-up)**: the SAME re-parse pass additionally flattens the top-level `<header>`/`<trailer>` elements into a sorted-unique tag set (recursively resolved through `<component>`/`<group>` refs, reusing the same `ComponentIndex`) — the exclusion set used by §1.1/§2.1 in place of the too-narrow 8-tag framer floor. Parse-once: no second file open.
 
 New: a `kind → body_builder-call` mapping — `Decimal→field(tag,decimal_t)`, `Char→field(tag,char)`, `Int32→field(tag,int64_t)`, **`Bool→field(tag, x?'Y':'N')` (char overload, FR-007a)**, `String→field(tag,string_view)`, **Length+Data pair→ auto-derive length + string path (FR-007a)**; group-entry variants use `entry->set_decimal/set_char/set_int/set_string` (Bool via `set_char('Y'/'N')`).
 
