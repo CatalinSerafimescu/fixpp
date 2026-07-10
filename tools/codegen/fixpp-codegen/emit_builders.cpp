@@ -4,8 +4,10 @@
 // 067-codegen-writer-emitter — the write emitter: build_<Msg>(out,args) /
 // <Msg>Args over wire::body_builder, for every OFFICIAL message
 // (data-model.md §1-§3; contracts/generated-builder.md G1-G4/G9). T016/T017:
-// per-message GROUP PLANNER + <Msg>Args/build_<Msg> emission. `validate_`
-// (US3/T022-T025) is a LATER phase, not emitted here.
+// per-message GROUP PLANNER + <Msg>Args/build_<Msg> emission. This file also
+// emits `validate_` (US3/T022-T025): the `writer_traits<T>` specializations
+// and the thin `validate_<Msg>` wrappers over
+// `::fixpp::wire::validate_required<T>` (see below), off the serialize path.
 //
 // Scope: v44 only (research.md R6 — the 33-OFFICIAL-MsgTypes set is verified
 // against FIX44.xml specifically; other codegen versions get no Builders.hpp

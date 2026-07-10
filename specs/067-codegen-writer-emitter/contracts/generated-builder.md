@@ -33,7 +33,7 @@ The generated builder set for v44 covers **exactly** these 33 distinct MsgTypes 
 
 `D E F G H 8 9 q r AF AC t u` (A, 13) · `V W X Y c d e f g h i b S R AG Z a` (M, 17) · `J P AS` (P, 3).
 
-The completeness gate asserts set-equality of the generated **MsgType→builder registry keys** (the MsgType wire strings, multi-char `AF/AC/AG/AS` included) against this literal 33-element expected set. It does NOT compare `build_<Identifier>` symbol names (`build_NewOrderSingle`) to MsgType strings (`D`) — those are different namespaces (identifiers via `to_identifier`; the MsgType string reaches only the `body_builder{"D"}` ctor). The emitter therefore emits a registry mapping each MsgType string to its builder so the gate keys on MsgType.
+The completeness gate asserts set-equality of the generated **MsgType→builder registry keys** (the MsgType wire strings, multi-char `AF/AC/AG/AS` included) against this literal 33-element expected set. It does NOT compare `build_<Identifier>` symbol names (`build_NewOrderSingle`) to MsgType strings (`D`) — those are different namespaces (identifiers via `to_identifier`; the MsgType string reaches only the `body_builder{"D"}` ctor). The emitter therefore emits a MsgType-keyed registry (the MsgType wire strings) so the gate keys on MsgType.
 
 ## G5 — Level-scoped required-presence validation (FR-006/FR-006a, INV-VALIDATE)
 
