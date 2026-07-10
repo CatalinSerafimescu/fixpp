@@ -1,48 +1,68 @@
 # tests/dictionary/CMakeLists.txt
-# 002-dictionary-xml-loader test targets per quickstart.md §2. Each test
-# target is labelled `dictionary` so `ctest -L dictionary` exercises the
-# whole suite.
+# 068-test-binary-grouping: isolation-safe dictionary tests are grouped into
+# gtest_discover_tests binaries (bucketed by shared link-deps ∩ the "dictionary"
+# label); isolation-sensitive tests stay standalone. Every grouped case
+# re-applies LABELS "dictionary" so `ctest -L dictionary` selects the whole
+# suite exactly as before. Dispositions + `-R`→`-L` replacements are recorded in
+# specs/068-test-binary-grouping/dispositions.md. Reference precedent:
+# tests/core/CMakeLists.txt.
 
 find_package(GTest CONFIG REQUIRED)
 find_package(pugixml CONFIG REQUIRED)
+include(GoogleTest)
 
 # Path to vendored XML fixtures so tests can locate them regardless of
 # build-tree depth (used by load(path, mr) AC-L1 / AC-L2 paths and the
 # round-trip / determinism / dictionary_lookup suites).
 set(FIXPP_DICT_DATA_DIR "${CMAKE_SOURCE_DIR}/dictionaries")
 
-set(FIXPP_DICT_TESTS
-  dictionary_ref_shape_test
-  dictionary_xml_loader_test
-  dictionary_pmr_allocation_test
-  dictionary_round_trip_test
-  dictionary_determinism_test
-  dictionary_concurrent_readers_test
-  dictionary_negative_paths_test
-  dictionary_parser_error_test
-  dictionary_oom_injection_test
-  dictionary_lookup_test
-  # 003-dictionary-codegen — Foundational shape tests T004-T006 (RC#1).
-  dictionary_version_profile_test
-  dictionary_field_traits_test
-  dictionary_version_registry_test
-  # 041-validation-gate-wiring T007/T008: as_table_view() builder tests.
-  dictionary_table_view_test
-  # 063-nested-group-parse-correctness T010 [US1]: Defect-A context-scoped
-  # group-membership discriminating guard (real FIX44.xml, MassQuote 295).
-  dictionary_defect_a_group_context_test
-  # 063 T016 [US1]: loader-faithful reused-NumInGroup-tag census over all
-  # nine runtime XMLs (collision report + table-size report, [pin#3-report]).
-  dictionary_reused_tag_census_test
-  # 063 T017 [US1]: per-collision discriminating regression guards, driven
-  # by the T016 census, parameterized across all nine dict families.
-  dictionary_collision_membership_guards_test
-  # 063 T018 [US1]: no-alloc gate for repeated group_member_fn / context-
-  # store lookups [pin#3-noalloc].
-  dictionary_group_context_lookup_alloc_gate_test
+# ── Grouped bucket: pure/stateless dictionary tests (15 .cpp → 1 binary) ──────
+# Label-homogeneous "dictionary". pugixml is unioned in for round_trip and
+# reused_tag_census (raw-XML ground-truth scans); harmless for the others.
+add_executable(dictionary_pure_tests
+  ref_shape_test.cpp
+  xml_loader_test.cpp
+  round_trip_test.cpp
+  determinism_test.cpp
+  negative_paths_test.cpp
+  parser_error_test.cpp
+  lookup_test.cpp
+  version_profile_test.cpp
+  field_traits_test.cpp
+  version_registry_test.cpp
+  table_view_test.cpp
+  defect_a_group_context_test.cpp
+  reused_tag_census_test.cpp
+  collision_membership_guards_test.cpp
+  oom_injection_test.cpp          # local failing_pmr_resource seam — no global state
 )
+target_link_libraries(dictionary_pure_tests PRIVATE
+  fixpp_dictionary
+  pugixml::pugixml
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(dictionary_pure_tests PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests")
+target_compile_definitions(dictionary_pure_tests PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${FIXPP_DICT_DATA_DIR}\"")
+# DISCOVERY_TIMEOUT raised from the 5s default: the grouped binary is large
+# (15 TUs) and slow to start under TSan/coverage instrumentation, so the
+# build-time `--gtest_list_tests` enumeration needs more headroom (068 rollout
+# lesson — sanitizer discovery of grouped binaries).
+gtest_discover_tests(dictionary_pure_tests
+  PROPERTIES LABELS dictionary
+  DISCOVERY_TIMEOUT 120)
 
-foreach(target IN LISTS FIXPP_DICT_TESTS)
+# ── Standalone: isolation-sensitive dictionary tests (FR-002) ─────────────────
+# Each keeps its own executable + add_test(NAME <target>) so its name, labels,
+# and special properties survive. Reasons in dispositions.md.
+set(FIXPP_DICT_STANDALONE
+  dictionary_pmr_allocation_test                   # in-TU global-new alloc counting
+  dictionary_concurrent_readers_test              # genuinely concurrent (std::thread)
+  dictionary_group_context_lookup_alloc_gate_test # alloc gate + mallocnesia -R by name
+)
+foreach(target IN LISTS FIXPP_DICT_STANDALONE)
   string(REGEX REPLACE "^dictionary_" "" src_stem "${target}")
   add_executable(${target} "${src_stem}.cpp")
   target_link_libraries(${target} PRIVATE
@@ -51,27 +71,16 @@ foreach(target IN LISTS FIXPP_DICT_TESTS)
     GTest::gtest_main
   )
   target_include_directories(${target} PRIVATE
-    "${CMAKE_SOURCE_DIR}/tests"
-  )
+    "${CMAKE_SOURCE_DIR}/tests")
   target_compile_definitions(${target} PRIVATE
-    "FIXPP_DICT_DATA_DIR=\"${FIXPP_DICT_DATA_DIR}\""
-  )
+    "FIXPP_DICT_DATA_DIR=\"${FIXPP_DICT_DATA_DIR}\"")
   add_test(NAME ${target} COMMAND ${target})
   set_tests_properties(${target} PROPERTIES LABELS dictionary)
 endforeach()
 
-# T028: round_trip_test directly parses XML fixtures via pugixml to build the
-# ground-truth (msg_type, tag) pair set for exact exhaustiveness comparison.
-target_link_libraries(dictionary_round_trip_test PRIVATE pugixml::pugixml)
-
-# 063 T016: the census's delimiter-variance scan (question 2) directly parses
-# the raw XML via pugixml (bounded read-only scan; see file header) — same
-# precedent as dictionary_round_trip_test above.
-target_link_libraries(dictionary_reused_tag_census_test PRIVATE pugixml::pugixml)
-
-# 063 T018: mallocnesia gate for the group-context lookup no-alloc test —
-# re-runs it under LD_PRELOAD so global malloc/calloc/realloc is intercepted
-# (dual gate alongside the in-TU global operator-new counter; absent
+# mallocnesia gate for the group-context lookup no-alloc test — re-runs the
+# standalone binary under LD_PRELOAD so global malloc/calloc/realloc is
+# intercepted (dual gate alongside the in-TU global operator-new counter; absent
 # libmallocnesia.so → skipped, per feedback_tracking_pmr_resource_false_pass).
 if(EXISTS "${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so")
   add_test(
@@ -82,37 +91,46 @@ if(EXISTS "${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so")
     LABELS "dictionary;alloc_guard;mallocnesia;063")
 endif()
 
-# ── US2 Reify tests (T028-T031) ─────────────────────────────────────────────
+# ── US2 Reify tests ─────────────────────────────────────────────────────────
 # These tests include generated <vXX>/Reify.hpp (build-tree only, AC-C4).
 # fixpp_codegen_generate is defined in tests/codegen/CMakeLists.txt, which is
-# add_subdirectory'd BEFORE tests/dictionary in the top-level CMakeLists.txt
-# (reordered at T028-T031 — previously dictionary came first).
-# The generated include dir is ${CMAKE_BINARY_DIR}/_codegen/include (mirrors
-# FIXPP_CODEGEN_OUT in tests/codegen/CMakeLists.txt).
-
+# add_subdirectory'd BEFORE tests/dictionary in the top-level CMakeLists.txt.
+# The generated include dir is ${CMAKE_BINARY_DIR}/_codegen/include.
 if(TARGET fixpp_codegen_generate)
   set(_REIFY_CODEGEN_INC "${CMAKE_BINARY_DIR}/_codegen/include")
 
-  set(FIXPP_REIFY_TESTS
-    reify_test
-    reify_move_test
-    reify_cross_strand_test
-    reify_oom_test
-    # T034 [US3]: runtime-dispatch + FIXT cross-vocabulary dispatch shape tests
-    # (seam #15a/#15b/#15c/#10c; AC-D1..D3/D6/D7). Dispatch-consuming TU —
-    # includes the generated _dispatch/ headers (Entity 8 / I-11).
-    reify_dispatch_test
-    # 066-dict-backed-inbound-parse T008 [US1]: reify-identity witness — the
-    # reified owning handle reads groups membership-bounded, identical to a
-    # (destroyed) real-dict-backed source.
-    reify_membership_identity_test
-    # gate-b/r1 FQ-1 (PR #181 round 1, Finding 1): OOM hardening witness for
-    # MessageView::membership_copy() (now NOT noexcept) — a bad_alloc during
-    # the table_view deep-copy must map to dict_reify_oom, not terminate.
-    reify_membership_copy_oom_test
+  # Grouped reify bucket (4 .cpp → 1 binary), label "dictionary". All four use
+  # only local pmr seams / anon-namespace helpers (isolation-safe, D3/D5).
+  add_executable(dictionary_reify_tests
+    reify_test.cpp
+    reify_move_test.cpp
+    reify_dispatch_test.cpp
+    reify_oom_test.cpp            # local failing/counting pmr — no global new-handler
   )
+  add_dependencies(dictionary_reify_tests fixpp_codegen_generate)
+  target_link_libraries(dictionary_reify_tests PRIVATE
+    fixpp_dictionary
+    GTest::gtest
+    GTest::gtest_main
+  )
+  target_include_directories(dictionary_reify_tests PRIVATE
+    "${_REIFY_CODEGEN_INC}"
+    "${CMAKE_SOURCE_DIR}/tests")
+  target_compile_definitions(dictionary_reify_tests PRIVATE
+    "FIXPP_DICT_DATA_DIR=\"${FIXPP_DICT_DATA_DIR}\"")
+  gtest_discover_tests(dictionary_reify_tests
+    PROPERTIES LABELS dictionary
+    DISCOVERY_TIMEOUT 120)
 
-  foreach(target IN LISTS FIXPP_REIFY_TESTS)
+  # Standalone reify tests (FR-002): a TSan seam + two label-heterogeneous 066
+  # witnesses (their distinct label set forbids grouping under the "dictionary"
+  # bucket — over-selection guard, D4).
+  set(FIXPP_REIFY_STANDALONE
+    reify_cross_strand_test           # TSan target (LABELS dictionary;tsan) + threads
+    reify_membership_identity_test    # label-heterogeneous 066;dictionary;us1
+    reify_membership_copy_oom_test    # global-new alloc counting + 066;dictionary;us1
+  )
+  foreach(target IN LISTS FIXPP_REIFY_STANDALONE)
     add_executable(dictionary_${target} "${target}.cpp")
     add_dependencies(dictionary_${target} fixpp_codegen_generate)
     target_link_libraries(dictionary_${target} PRIVATE
@@ -122,11 +140,9 @@ if(TARGET fixpp_codegen_generate)
     )
     target_include_directories(dictionary_${target} PRIVATE
       "${_REIFY_CODEGEN_INC}"
-      "${CMAKE_SOURCE_DIR}/tests"
-    )
+      "${CMAKE_SOURCE_DIR}/tests")
     target_compile_definitions(dictionary_${target} PRIVATE
-      "FIXPP_DICT_DATA_DIR=\"${FIXPP_DICT_DATA_DIR}\""
-    )
+      "FIXPP_DICT_DATA_DIR=\"${FIXPP_DICT_DATA_DIR}\"")
     add_test(NAME dictionary_${target} COMMAND dictionary_${target})
     set_tests_properties(dictionary_${target} PROPERTIES LABELS dictionary)
   endforeach()
@@ -136,12 +152,9 @@ if(TARGET fixpp_codegen_generate)
     LABELS "dictionary;tsan")
 
   # 066-dict-backed-inbound-parse T008: label override so `ctest -L 066`
-  # (and the T021/T022 coverage-index / completeness audit) picks this up
-  # alongside the T007/T009 witnesses (which already carry "066").
+  # (and the T021/T022 coverage-index / completeness audit) picks these up.
   set_tests_properties(dictionary_reify_membership_identity_test PROPERTIES
     LABELS "066;dictionary;us1")
-
-  # gate-b/r1 FQ-1: same 066/us1 grouping — OOM hardening witness.
   set_tests_properties(dictionary_reify_membership_copy_oom_test PROPERTIES
     LABELS "066;dictionary;us1")
 else()
