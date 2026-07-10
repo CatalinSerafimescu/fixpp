@@ -6,7 +6,7 @@
 
 ## Content Quality
 
-- [x] No implementation details (languages, frameworks, APIs)
+- [N/A] No implementation details — **not applicable for this internal codegen spec; named anchors ARE the observable contract** (see Note below). Substituted item: *implementation anchors named in the spec are the reproduced/observable contract, not prescribed HOW.*
 - [x] Focused on user value and business needs
 - [x] Written for non-technical stakeholders
 - [x] All mandatory sections completed
