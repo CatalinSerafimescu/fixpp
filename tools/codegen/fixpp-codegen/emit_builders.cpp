@@ -61,9 +61,13 @@ bool is_official(std::string_view msg_type) {
     return std::find(kOfficial33.begin(), kOfficial33.end(), msg_type) != kOfficial33.end();
 }
 
-// Body-only framing exclusion set (data-model.md §2.1 / contract G9): a
-// body-only write emitter never calls field()/set_*() for a session-header
-// or trailer tag (those are engine-stamped).
+// Body-only framing exclusion set (data-model.md §2.1 / contract G9): the
+// framer/session envelope the body builder must never emit — BeginString(8),
+// BodyLength(9), CheckSum(10), MsgSeqNum(34), MsgType(35, stamped by the
+// body_builder ctor), SenderCompID(49), SendingTime(52), TargetCompID(56).
+// NOTE: this is the 8-tag envelope only; other <header>/<trailer> fields the
+// loader merges into m.fields (e.g. Signature(89)) are NOT excluded here —
+// see the header/trailer-provenance exclusion follow-up.
 constexpr std::array<std::uint16_t, 8> kFramingTags = {8, 9, 10, 34, 35, 49, 52, 56};
 
 bool is_framing_tag(std::uint16_t tag) {
@@ -276,14 +280,9 @@ void emit_level_body(TemplateWriter& w, LevelPlan const& plan, std::string const
             emit_level_body(w, *item.child_plan, loop_var, eh, /*top_level=*/false, uid);
         }
         w.line("        }");
-        w.raw("        auto ge");
-        w.raw(std::to_string(id));
-        w.raw(" = bb.group_end(*");
-        w.raw(gh);
-        w.line(");");
-        w.raw("        if (!ge");
-        w.raw(std::to_string(id));
-        w.line(") return ::std::unexpected(ge" + std::to_string(id) + ".error());");
+        std::string const ge = "ge" + std::to_string(id);
+        w.line("        auto " + ge + " = bb.group_end(*" + gh + ");");
+        w.line("        if (!" + ge + ") return ::std::unexpected(" + ge + ".error());");
         w.line("    }");
     }
 }
