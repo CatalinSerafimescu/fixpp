@@ -92,6 +92,124 @@ function(add_threading_test name)
   set_tests_properties(${name} PROPERTIES TIMEOUT 120)
 endfunction()
 
+# ── 068-test-binary-grouping: whole-binary add_test grouping ───────────────
+# Isolation-safe session tests are grouped into two whole-binary add_test
+# executables (bucketed by shared link-deps + no-label empty set); every
+# thread_pool/std::thread-spawning test, every uniquely-labeled feature
+# witness, every global-alloc-counting/OOM/TSan-specific/name-selected test
+# stays standalone (conservative — this module has a HEAVY standalone set).
+# See specs/068-test-binary-grouping/dispositions.md (Module: session) for
+# the full per-.cpp disposition + ODR pre-check (no renames were needed — all
+# potential cross-file symbol collisions were already anonymous-namespace- or
+# static-scoped in the source). Reference precedent: tests/dictionary/CMakeLists.txt.
+
+# ── Grouped bucket: session_pure_tests (41 .cpp → 1 binary) ─────────────────
+# Single-threaded co_spawn(ioc,...)+ioc.run() FSM/builder/handshake/reconnect/
+# compid-binding witnesses — no thread_pool/std::thread spawn, no LABELS
+# override (each was previously an unlabeled add_threading_test entry), same
+# ENVIRONMENT/TIMEOUT as add_threading_test's uniform default.
+add_executable(session_pure_tests
+  test_cancellation_parse_to_fromapp.cpp
+  test_cancellation_fromapp_to_close.cpp
+  test_backpressure_drop_oldest_banned.cpp
+  test_version_registry_missing_routes_to_dict_layer.cpp
+  test_session_open_rejects_unset_security_profile.cpp
+  seqnum_t_handoff_test.cpp
+  fix_time_roundtrip_test.cpp
+  logon_handshake_test.cpp
+  coverage_adversarial_test.cpp
+  logon_received_observability_test.cpp
+  session_send_invalid_state_test.cpp
+  cfg_lifetime_safety_test.cpp
+  seqnum_gap_fatal_test.cpp
+  durable_before_transmit_test.cpp
+  heartbeat_testrequest_test.cpp
+  cancellation_two_phase_test.cpp
+  session_reject_test.cpp
+  sending_time_test.cpp
+  fsm_transition_matrix_test.cpp
+  test_session_layering.cpp
+  send_path_test.cpp
+  test_seqnum_drain_on_close.cpp
+  fsm_matrix_witness_test.cpp
+  admin_builder_distinct_now_test.cpp
+  admin_emit_mixed_path_test.cpp
+  initiator_transport_throw_test.cpp
+  test_reconnect_happy_path.cpp
+  test_recovery_admin_span_gapfill.cpp
+  test_inbound_sequence_reset.cpp
+  test_recovery_store_horizon.cpp
+  test_reset_seqnum_policy_matrix.cpp
+  test_heartbeat_cadence_8cell.cpp
+  test_logout_timeout.cpp
+  test_compid_binding_default_deny.cpp
+  test_compid_binding_principal_extraction.cpp
+  test_compid_binding_symmetric.cpp
+  test_session_invariant_counter_witness.cpp
+  test_compid_binding_mtls_fail_closed.cpp
+  test_session_event_ring_overflow.cpp
+  test_reload_credentials_in_flight.cpp
+  test_live_outbound_serialized.cpp
+  $<TARGET_OBJECTS:session_test_support>
+)
+target_link_libraries(session_pure_tests PRIVATE
+  fixpp_session
+  fixpp_mock_clock
+  fixpp_transport
+  fixpp_tls
+  "${FIXPP_TRANSPORT_OPENSSL_SSL_LIB}"
+  "${FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB}"
+  "${FIXPP_TRANSPORT_ZLIB_LIB}"
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(session_pure_tests PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+  "${CMAKE_SOURCE_DIR}/src"   # session_invariant_counter_witness: "transport/asio_listener.hpp"
+)
+target_compile_definitions(session_pure_tests PRIVATE
+  FIXPP_TEST_HOOKS   # send_path / seqnum_drain_on_close / admin_emit_mixed_path /
+                     # inbound_sequence_reset / reset_seqnum_policy_matrix accessors
+  FIXPP_TEST_BINARY_DIR="${CMAKE_BINARY_DIR}"   # session_layering nm/grep probe
+  FIXPP_TEST_SOURCE_DIR="${CMAKE_SOURCE_DIR}"   # session_layering nm/grep probe
+  FIXPP_TLS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/tls/fixtures"  # invariant_counter_witness
+)
+add_test(NAME session_pure_tests COMMAND session_pure_tests)
+set_tests_properties(session_pure_tests PROPERTIES
+  ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  TIMEOUT 120)
+
+# ── Grouped bucket: session_store_tests (6 .cpp → 1 binary) ────────────────
+# Store-family witnesses that neither construct an asio::thread_pool nor carry
+# a LABELS override: the three reconcile fault-double table-driven witnesses,
+# the toApp store-collision provenance witness, the Path-B compile-time guard
+# (build-is-the-test static_asserts), and the SeqnumManager unit test.
+add_executable(session_store_tests
+  test_store_fail_reconcile_breadth.cpp
+  test_store_fail_reconcile_readfail.cpp
+  test_store_fail_reconcile_outofset.cpp
+  test_send_toapp_store_collision.cpp
+  test_quickfix_compat_path_b_guard.cpp
+  seqnum_manager_test.cpp
+)
+target_link_libraries(session_store_tests PRIVATE
+  fixpp_session
+  fixpp_mock_clock
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(session_store_tests PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+)
+target_compile_definitions(session_store_tests PRIVATE
+  FIXPP_TEST_HOOKS   # send_toapp_store_collision / session_seqnum_manager accessors
+)
+add_test(NAME session_store_tests COMMAND session_store_tests)
+set_tests_properties(session_store_tests PROPERTIES
+  ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp")
+
+
+
 # ── US1 (Phase 3) seam registrations ────────────────────────────────────────
 add_threading_test(threading_strand_serialisation       test_strand_serialisation.cpp)  # seam 2 (TSan)
 add_threading_test(threading_executor_compat            test_executor_compat.cpp)        # seam 3
@@ -102,17 +220,11 @@ add_threading_test(threading_heartbeat_under_mock_clock test_heartbeat_under_moc
 add_threading_test(threading_clock_injection_corpus     test_clock_injection_corpus.cpp)      # seam 11
 
 # ── US3 (Phase 5) seam registrations ────────────────────────────────────────
-add_threading_test(threading_cancellation_parse_to_fromapp test_cancellation_parse_to_fromapp.cpp)  # seam 4
-add_threading_test(threading_cancellation_fromapp_to_close test_cancellation_fromapp_to_close.cpp)  # seam 5
 
 # ── US5 (Phase 7) seam registrations ────────────────────────────────────────
-add_threading_test(threading_backpressure_drop_oldest_banned     test_backpressure_drop_oldest_banned.cpp)               # seam 13
-add_threading_test(threading_version_registry_missing_dict_layer test_version_registry_missing_routes_to_dict_layer.cpp)  # seam 20
 
 # ── gate-b/r1 RC#1: SecurityProfile sentinel rejection seam ─────────────────
 # FR-018 / N-P2-3 / [const §XII.5] — Session::open() rejects kind::unset.
-add_threading_test(threading_session_open_rejects_unset_security_profile
-  test_session_open_rejects_unset_security_profile.cpp)  # gate-b/r1
 
 # ── 008-message-store seam registrations (T003 helper) ──────────────────────
 # Mirrors add_threading_test pattern; store seams use CTest prefix `store_`
@@ -332,10 +444,6 @@ target_compile_definitions(store_fail_reconcile PRIVATE FIXPP_TEST_HOOKS)
 # a minimal in-memory persistent-store double armed to return each of the
 # three store-fatal codes in turn (table-driven / TEST_P). No FileStore /
 # FIXPP_TEST_HOOKS needed (the double is self-contained).
-fixpp_add_store_test(store_fail_reconcile_breadth SOURCES
-  test_store_fail_reconcile_breadth.cpp
-  EXTRA_LIBS fixpp_mock_clock
-)
 
 # /speckit-verify coverage witness — the reconcile else-arm (dk.has_value()
 # ==false) and the store_cancelled false-leg (`!= store_cancelled`), which
@@ -343,20 +451,12 @@ fixpp_add_store_test(store_fail_reconcile_breadth SOURCES
 # FileStore seam serves next_seqnum from a still-valid in-memory counter). A
 # persistent store DOUBLE additionally faults the reconcile read. No FileStore
 # / FIXPP_TEST_HOOKS needed. See 059-...-coverage-design.md Arm (a)/(b).
-fixpp_add_store_test(store_fail_reconcile_readfail SOURCES
-  test_store_fail_reconcile_readfail.cpp
-  EXTRA_LIBS fixpp_mock_clock
-)
 
 # gate-b/r1 FQ-1 (RC#1): the fatal-class predicate unification RED witness —
 # a minimal persistent store double armed to return an OUT-OF-SET store code
 # (outside the pre-fix closed 3-code Session::send guard) in turn. Fresh
 # fixture, authored separately from store_fail_reconcile_breadth.cpp per the
 # gate-b/r1 brief. No FileStore / FIXPP_TEST_HOOKS needed.
-fixpp_add_store_test(store_fail_reconcile_outofset SOURCES
-  test_store_fail_reconcile_outofset.cpp
-  EXTRA_LIBS fixpp_mock_clock
-)
 
 # gate-b/r2 FQ-1 (P1): a toApp veto carrying a store-block error VALUE (on a
 # persistent store) must stay Active — the disconnect is decided by
@@ -364,19 +464,11 @@ fixpp_add_store_test(store_fail_reconcile_outofset SOURCES
 # the returned value. Uses seqnum_mgr_test_access() to assert no seqnum
 # consumption, so FIXPP_TEST_HOOKS is required. No FileStore needed (a
 # minimal always-succeeding persistent store double).
-fixpp_add_store_test(send_toapp_store_collision SOURCES
-  test_send_toapp_store_collision.cpp
-  EXTRA_LIBS fixpp_mock_clock
-)
-target_compile_definitions(send_toapp_store_collision PRIVATE FIXPP_TEST_HOOKS)
 
 # ── T044–T045 US4 (Phase 6) QuickFIX compat seam registrations ───────────────
 
 # T044 — seam 11: Path-B compile-time guard (FR-032 / AC US4 #2)
 # The build IS the test: static_asserts at file scope fire on regression.
-fixpp_add_store_test(store_quickfix_compat_path_b_guard SOURCES
-  test_quickfix_compat_path_b_guard.cpp
-)
 
 # T045 — seam 12: cfg_loader happy path + CompID-validation defense-in-depth
 # (FR-008 / FR-030 / AC US4 #1 / SC-009 / [2e §D.4] defense-in-depth mirror)
@@ -436,31 +528,25 @@ target_compile_definitions(store_file_concurrent_tsan PRIVATE FIXPP_TEST_HOOKS)
 # these two scaffolding seams — they test pure-value types).
 
 # Seam #13: T007 seqnum_t handoff test.
-add_threading_test(session_seqnum_t_handoff seqnum_t_handoff_test.cpp)
 
 # Seam #9: T009 fix_time roundtrip test. fixpp_core provides the implementation
 # (fix_time.cpp compiled into fixpp_core at T011 / src/core/CMakeLists.txt).
-add_threading_test(session_fix_time_roundtrip fix_time_roundtrip_test.cpp)
 
 # ── 005 Phase 3 (US1) — seam #2: Logon handshake test (T019) ────────────────
 # Red-first TDD: authored before T021–T026 implementation; must turn green
 # at T026. Links fixpp_mock_clock for deterministic SendingTime assertions.
-add_threading_test(session_logon_handshake logon_handshake_test.cpp)
 
 # ── 005 Phase 8 /speckit-verify Step 4 coverage uplift ──────────────────────
 # Adversarial-input tests for defensive code paths that the well-formed
 # seam corpus doesn't exercise: builder buffer-too-small, parser malformed
 # field fallback, Logon-ack seq=0, Logout cancel_sleeps mid-graceful.
-add_threading_test(session_coverage_adversarial coverage_adversarial_test.cpp)
 # FR-003 (010-session-cfg-lifetime): W-5 ASan skip removed. The
 # stack-use-after-scope at cfg_ is fixed by the by-value member change
 # (T008/T009). session_coverage_adversarial now runs under ASan clean.
 
 # ── 010-session-cfg-lifetime T012 — FR-004 / D-2: LogonReceived observability ──
-add_threading_test(session_logon_received_observability logon_received_observability_test.cpp)
 
 # ── 010-session-cfg-lifetime T013/T014 — FR-005 / D-3: send invalid-state gate ─
-add_threading_test(session_send_invalid_state session_send_invalid_state_test.cpp)
 
 # ── 010-session-cfg-lifetime T007 — FR-001 / FR-002 / SC-001 ─────────────────
 # Lifetime safety tests for by-value SessionConfig cfg_ member (W-5 fix).
@@ -468,7 +554,6 @@ add_threading_test(session_send_invalid_state session_send_invalid_state_test.cp
 #   A. CallerCfgDropsAfterCtor_SessionContinuesWithoutUAF
 #   B. CallerMutatesCfgAfterCtor_SessionUnaffected
 #   C. MultipleSessionsFromSameCfgEvolveIndependently
-add_threading_test(session_cfg_lifetime_safety cfg_lifetime_safety_test.cpp)
 
 # ── 005 Phase 4 (US2) — seam #3/#4/#10: seqnum tests (T027/T028/T029) ───────
 # Red-first TDD: authored before T031–T036 implementation.
@@ -478,31 +563,16 @@ add_threading_test(session_cfg_lifetime_safety cfg_lifetime_safety_test.cpp)
 
 # Seam #3: SeqnumManager increment/overflow/fatal checks (T027).
 # FIXPP_TEST_HOOKS enables set_counters_for_test() for the overflow test.
-add_executable(session_seqnum_manager seqnum_manager_test.cpp)
-target_link_libraries(session_seqnum_manager PRIVATE
-  fixpp_session
-  GTest::gtest
-  GTest::gtest_main
-)
-target_include_directories(session_seqnum_manager PRIVATE
-  "${CMAKE_SOURCE_DIR}/tests"
-)
-target_compile_definitions(session_seqnum_manager PRIVATE FIXPP_TEST_HOOKS)
-add_test(NAME session_seqnum_manager COMMAND session_seqnum_manager)
-set_tests_properties(session_seqnum_manager PROPERTIES ENVIRONMENT
-  "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp")
+# (068: session_seqnum_manager moved into the session_store_tests bucket above.)
 
 # Seam #4: Too-high gap fatal disposition (T028).
-add_threading_test(session_seqnum_gap_fatal seqnum_gap_fatal_test.cpp)
 
 # Seam #10: Durable-before-transmit ordering (T029).
-add_threading_test(session_durable_before_transmit durable_before_transmit_test.cpp)
 
 # ── 005 Phase 5 (US3) — seam #5: Heartbeat/TestRequest test (T037) ───────────
 # Red-first TDD: authored before T039–T042 implementation; turns green at T042.
 # Tests: build_heartbeat/build_test_request builders; inbound TestRequest echo;
 # HeartBtInt=0 disable; unanswered-TR disconnect; inbound Heartbeat liveness.
-add_threading_test(session_heartbeat_testrequest heartbeat_testrequest_test.cpp)
 
 # ── 005 Phase 6 (US4) — seam #6/#11: Logout exchange + cancellation (T043/T044)
 # Red-first TDD: authored before T046–T048; turns green at T049.
@@ -512,36 +582,25 @@ add_threading_test(session_heartbeat_testrequest heartbeat_testrequest_test.cpp)
 #           close(terminal) skips phase 1.
 add_threading_test(session_logout_exchange logout_exchange_test.cpp)
 target_compile_definitions(session_logout_exchange PRIVATE FIXPP_TEST_HOOKS)
-add_threading_test(session_cancellation_two_phase cancellation_two_phase_test.cpp)
 
 # ── 005 Phase 7 (US5) — seam #7/#8: Reject + SendingTime tests (T050/T051) ────
 # Red-first TDD: authored before T054/T056 implementation; turns green at T057.
 # seam #7: session_reject — build_reject shape; no-reject-loop (I-5); type-invalid-for-state.
 # seam #8: sending_time  — check_sending_time unit tests; Q3 integration (Active + Logon paths).
-add_threading_test(session_reject      session_reject_test.cpp)
-add_threading_test(session_sending_time sending_time_test.cpp)
 
 # ── 005 Phase 8 — T058: Seam #1 FSM transition matrix (FR-001 / I-1) ────────
 # Meta-attestation that every state×event cell is defined (no UB / no silent
 # no-op). Detailed per-cell behaviour is the per-US seam suite's coverage.
-add_threading_test(session_fsm_transition_matrix fsm_transition_matrix_test.cpp)
 
 # ── 005 Phase 8 — T060: noexcept window + no-C++-across-C-ABI layering ──────
 # Compile-time static_assert + nm/grep checks for FR-015 / [const §X.2].
 # Needs FIXPP_TEST_BINARY_DIR + FIXPP_TEST_SOURCE_DIR for the nm/grep probes.
-add_threading_test(session_layering test_session_layering.cpp)
-target_compile_definitions(session_layering PRIVATE
-  FIXPP_TEST_BINARY_DIR="${CMAKE_BINARY_DIR}"
-  FIXPP_TEST_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 
 # ── 009-session-fsm-finalize T006 — Session::send path test (US1 FR-001) ────
 # TDD red: T006 authors RED (compile + fail); T007 + T008 turn GREEN.
 # Uses session_test_support OBJECT library (T005 frame_field_extract helper).
 # F3 (Round-A drift): FIXPP_TEST_HOOKS enables seqnum_mgr_test_access() on Session
 # so tests can verify SeqnumManager counter consistency after send().
-add_threading_test(session_send_path send_path_test.cpp
-  $<TARGET_OBJECTS:session_test_support>)
-target_compile_definitions(session_send_path PRIVATE FIXPP_TEST_HOOKS)
 
 # ── 009-session-fsm-finalize Phase 6 (US4) — T019/T021 ──────────────────────
 
@@ -561,28 +620,21 @@ add_threading_test(session_test_request_id_cross_session_race
 # RED before T022 (close() does not call drain); GREEN after T022.
 # FIXPP_TEST_HOOKS: exposes seqnum_mgr_test_access() on Session and
 # mutex_test_access() on SeqnumManager (needed for holder-during-drain scenario).
-add_threading_test(session_seqnum_drain_on_close
-  test_seqnum_drain_on_close.cpp)
-target_compile_definitions(session_seqnum_drain_on_close PRIVATE FIXPP_TEST_HOOKS)
 
 # ── 010-session-cfg-lifetime Phase 5 (US3) — T016/T017/T018/T019/T020 ────────
 
 # T016+T017 — FSM matrix per-cell witness (FR-006 / SC-002).
 # One TEST per enumerated (state×event) cell; uses fsm_visit_history() to
 # confirm intermediate and final state transitions.
-add_threading_test(session_fsm_matrix_witness fsm_matrix_witness_test.cpp)
 
 # T018 — admin builders per-message-distinct SendingTime (FR-007 / SC-006).
 # Exercises the branch where clock advances between two emits yield distinct
 # SendingTime(52) values for Heartbeat / Reject / Logout / Logon builders.
-add_threading_test(session_admin_builder_distinct_now admin_builder_distinct_now_test.cpp)
 
 # T019 — admin emit mixed-path permutations (FR-008 / SC-005 / RC#G).
 # Exercises gated-emit success/failure combinations at Site 1 (Q3 path) and
 # Site 2 (Active×Logout confirming emit). Requires FIXPP_TEST_HOOKS for
 # SeqnumManager::set_counters_for_test() overflow injection.
-add_threading_test(session_admin_emit_mixed_path admin_emit_mixed_path_test.cpp)
-target_compile_definitions(session_admin_emit_mixed_path PRIVATE FIXPP_TEST_HOOKS)
 
 # ── 036-admin-emit-toadmin-coverage T004/T013 (Invocation 1) ────────────────
 # Vertical-slice proof: wire fire_to_admin_ at emit_session_reject_ (T015) and
@@ -675,7 +727,6 @@ set_tests_properties(session_resend_reply_possdup PROPERTIES
 # Symmetric to the acceptor-side witness in session_send_path (send_path_test.cpp).
 # Exercises Session::open() when transport.send() throws during Logon emit;
 # asserts dispatch_aborted return and LogonSent FSM end-state per 005 design.
-add_threading_test(session_initiator_transport_throw initiator_transport_throw_test.cpp)
 
 # ── T040 (012 US4 seam #6) — Session FSM via mock_transport ─────────────────
 # Compile-time smoke that the public mock_transport test header is consumable
@@ -703,30 +754,21 @@ set_tests_properties(session_fsm_via_mock_transport PROPERTIES
 # CTest label filter: ctest -R 'reconnect|recovery|reset_seqnum|heartbeat_cadence|logout_timeout'
 
 # T014 — seam reconnect-happy-path: AwaitingResend flag + ResendRequest emit.
-add_threading_test(reconnect_happy_path test_reconnect_happy_path.cpp)
 
 # T015 — seam recovery-admin-span-gapfill: all-admin ResendRequest → SequenceReset-GapFill.
-add_threading_test(recovery_admin_span_gapfill test_recovery_admin_span_gapfill.cpp)
 
 # S-023: inbound SequenceReset(35=4) NewSeqNo(36) application (GapFill + Reset
 # arms). FIXPP_TEST_HOOKS exposes seqnum_mgr_test_access() to read next-inbound.
-add_threading_test(session_inbound_sequence_reset test_inbound_sequence_reset.cpp)
-target_compile_definitions(session_inbound_sequence_reset PRIVATE FIXPP_TEST_HOOKS)
 
 # T016 — seam recovery-store-horizon: pre-horizon GapFill + PossDupFlag replay.
-add_threading_test(recovery_store_horizon test_recovery_store_horizon.cpp)
 
 # T017 — seam reset-seqnum-policy-matrix: 3 modes × 2 roles (6 cells).
 # FIXPP_TEST_HOOKS: exposes seqnum_mgr_test_access() on Session for RC#C-1
 # counter assertions (gate-b/r2: verify both counters reset to 1 after 141=Y).
-add_threading_test(reset_seqnum_policy_matrix test_reset_seqnum_policy_matrix.cpp)
-target_compile_definitions(reset_seqnum_policy_matrix PRIVATE FIXPP_TEST_HOOKS)
 
 # T018 — seam heartbeat-cadence-8cell: 4 axes × 2 executor modes.
-add_threading_test(heartbeat_cadence_8cell test_heartbeat_cadence_8cell.cpp)
 
 # T019 — seam logout-timeout: initiator + acceptor symmetric cells.
-add_threading_test(logout_timeout test_logout_timeout.cpp)
 
 # ── 013-session-reconnect-binding Phase 4 (US2) test registrations ──────────
 # T029–T032: CompID↔TLS-identity authorization at Logon. Authored RED-first
@@ -734,57 +776,29 @@ add_threading_test(logout_timeout test_logout_timeout.cpp)
 # CTest filter: ctest -R 'compid_binding'
 
 # T029 — FR-023 / US2 AC6: empty policy rejects ALL Logons (default-deny).
-add_threading_test(compid_binding_default_deny
-  test_compid_binding_default_deny.cpp)
 
 # T030 — FR-022 / US2 AC5: 4-cell principal-extraction order matrix.
-add_threading_test(compid_binding_principal_extraction
-  test_compid_binding_principal_extraction.cpp)
 
 # T031 — FR-024 / US2 AC4: symmetric acceptor + initiator coverage.
-add_threading_test(compid_binding_symmetric
-  test_compid_binding_symmetric.cpp)
 
 # T032 + T021 — [[feedback_half_restructure_symmetric_api]]: invariant-counter witness.
 # T021 (014 FR-013a): adds live loopback load_credentials() == 1 counter cell;
 # requires fixpp_transport + fixpp_tls + loopback_tls_fixture include path.
-add_threading_test(session_invariant_counter_witness
-  test_session_invariant_counter_witness.cpp)
-target_link_libraries(session_invariant_counter_witness PRIVATE
-  fixpp_transport
-  fixpp_tls
-  "${FIXPP_TRANSPORT_OPENSSL_SSL_LIB}"
-  "${FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB}"
-  "${FIXPP_TRANSPORT_ZLIB_LIB}"
-)
-target_include_directories(session_invariant_counter_witness PRIVATE
-  "${CMAKE_SOURCE_DIR}/src"   # for "transport/asio_listener.hpp"
-)
-target_compile_definitions(session_invariant_counter_witness PRIVATE
-  FIXPP_TLS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/tls/fixtures"
-)
 
 # RC#A (gate-b/r1) — fail-closed mTLS CompID footgun fix counter-test.
 # Asserts: mTLS profile + no peer_identity → Disconnected + event.
 # Asserts: one_way_ca (non-mTLS) + no override → still reaches Active.
-add_threading_test(compid_binding_mtls_fail_closed
-  test_compid_binding_mtls_fail_closed.cpp)
 
 # ── 013-session-reconnect-binding Phase 5 (US3) — T040 ring-overflow tests ───
 # FR-035 / data-model §E-6: both Session and ListenerEvents rings have capacity
 # kSessionEventRingCapacity = 16; emit 17 → oldest dropped, last-16 retained.
 # T040 also adds asio_listener::recent_events() (T039 accessor test) but those
 # integration cells live in tests/transport/ (transport_tls_validation_failed_taxonomy).
-add_threading_test(session_event_ring_overflow
-  test_session_event_ring_overflow.cpp)
-target_link_libraries(session_event_ring_overflow PRIVATE fixpp_transport)
 
 # ── 013-session-reconnect-binding Phase 6 (US4) — T042 credential rotation ───
 # FR-030 / FR-031 / FR-032 / FR-033 / US4 AC1+AC2+AC3 / Clarifications Q4=A
 # Tests: null-reject, forwarder-delegates, strong-ref invariant, call-count witness.
 # TSan critical: atomic-swap + snapshot read race-free under cross-strand calls.
-add_threading_test(session_reload_credentials_in_flight
-  test_reload_credentials_in_flight.cpp)
 
 # ── 014-transport-active-binding Phase 3 (US1) — T006/T007/T008 ─────────────
 # TDD RED-first per [const §VII.3]; turns GREEN when T009/T010 impl lands.
@@ -1216,10 +1230,6 @@ set_tests_properties(engine_lifecycle PROPERTIES
 # and (1b) at most one async_write is in-flight per Transport (≤1-in-flight
 # contract, transport.hpp:47-50). Uses custom transport doubles (no live TLS).
 # CTest filter: ctest -R 'live_outbound_serialized'
-add_threading_test(live_outbound_serialized test_live_outbound_serialized.cpp)
-target_include_directories(live_outbound_serialized PRIVATE
-  "${CMAKE_SOURCE_DIR}/tests"
-)
 
 # ── 016-interop-harness T007/T008 — reconnect-policy / down-peer stop() witness ──
 # RED witness for the 015 down-peer carry-forward: Engine::stop() must return within
