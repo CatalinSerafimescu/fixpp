@@ -2,9 +2,9 @@
 
 **What the codegen writer-emitter's output MUST satisfy.** This EXTENDS the frozen 061 write shape-oracle (`specs/061-typed-app-messages/contracts/builder-shape-oracle.md`, C1–C6) — every 061 guarantee still holds for generated output; this contract adds the emitter-specific obligations (ordering, completeness, level-scoped validation). The 5 exemplar builders + `body_builder` remain the byte-for-byte reference.
 
-## G1 — Inherits 061 C1–C6 verbatim
+## G1 — Inherits 061 C1–C4, C6 verbatim (C5 extended by G2/G6 below)
 
-Every generated `build_<Msg>(out, args)` output satisfies 061 C1 (body-only framing, no `{8,9,34,49,52,56,10}`, `35=<MsgType>\x01` first, multi-char OK), C2 (canonical decimals + the ≥1-decimal byte-exact pin), C3 (repeating-group grammar: `No<G>=<N>` count-first, delimiter-first non-empty instances, nested depth), C4 (fail-closed atomicity: typed `wire_*` error + `out` untouched), C6 (no new public error/C-ABI/wire-semantics surface). These are enforced by the single `wire::body_builder` core (FR-002) — the emitter adds no second serializer.
+Every generated `build_<Msg>(out, args)` output satisfies 061 C1 (body-only framing, no `{8,9,34,49,52,56,10}`, `35=<MsgType>\x01` first, multi-char OK), C2 (canonical decimals + the ≥1-decimal byte-exact pin), C3 (repeating-group grammar: `No<G>=<N>` count-first, delimiter-first non-empty instances, nested depth), C4 (fail-closed atomicity: typed `wire_*` error + `out` untouched), C6 (no new public error/C-ABI/wire-semantics surface). 061 C5 (round-trip + external-golden agreement) is not inherited as-is but **superseded and widened** by this contract's G2 (shape-oracle byte-equality) + G6 (non-tautological round-trip witness), which extend the guarantee from the 5 exemplars to all 33 OFFICIAL messages. These are enforced by the single `wire::body_builder` core (FR-002) — the emitter adds no second serializer.
 
 ## G2 — Shape-oracle byte-equality (the headline pin, FR-003)
 
