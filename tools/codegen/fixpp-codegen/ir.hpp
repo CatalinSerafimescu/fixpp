@@ -35,10 +35,47 @@ struct FieldIR {
     std::string name;  // FIX field name, e.g. "ClOrdID"
 };
 
+// One member of a repeating-group occurrence's DECLARATION-order member list
+// (067-codegen-writer-emitter T004/R9). `is_group` marks a nested repeating
+// group (its own occurrence lives elsewhere in MessageIR::group_order, keyed
+// by this entry's no_tag appended to the current occurrence's parent_path).
+struct GroupOrderMember {
+    std::uint16_t tag = 0;
+    bool is_group = false;
+};
+
+// One repeating-group OCCURRENCE within a single message, keyed
+// (message [implicit — owning MessageIR], parent_path, no_tag) — mirrors
+// 063's per-context keying. `parent_path` is the chain of enclosing groups'
+// no_tags from outermost to (excluding) this group; empty for a top-level
+// group. `delimiter_tag` = the group's first DECLARED member (research R9,
+// R7 delimiter note) = `members.front().tag` when non-empty. `members` is
+// this level's OWN members in raw XML declaration order (component refs
+// resolved inline; a nested `<group>` child contributes ONE marker member
+// here with `is_group=true`, and its own members are a SEPARATE
+// GroupOrderEntry in this same vector, recursively). NOT tag-sorted, NOT
+// tag-deduped (side-steps the `append_run` collapse — N3/plan.md).
+struct GroupOrderEntry {
+    std::vector<std::uint16_t> parent_path;
+    std::uint16_t no_tag = 0;
+    std::uint16_t delimiter_tag = 0;
+    std::vector<GroupOrderMember> members;
+};
+
 struct MessageIR {
     std::string msg_type;         // FIX MsgType (e.g. "D")
     std::string name;             // English name (diagnostics / NormativeRefs)
     std::vector<FieldIR> fields;  // full per-message run (required + optional)
+
+    // Codegen-tool-local declaration-order group plan (067 T004/R9): one
+    // GroupOrderEntry per repeating-group occurrence rooted at THIS
+    // message's own XML definition (recursive to every nesting depth). NOT
+    // derivable from `fields` above, which the loader tag-sorts + tag-dedups
+    // (xml_loader.cpp:695-702) — declaration order is lost there. Populated
+    // by build_ir()'s codegen-tool-local pugixml re-parse (ir.cpp, T008).
+    // Codegen-tool-local only: no runtime Dictionary/GroupRef/C-ABI change
+    // (FR-009 intact).
+    std::vector<GroupOrderEntry> group_order;
 };
 
 struct LengthPairIR {
@@ -52,6 +89,13 @@ struct VersionIR {
     std::string ns;                   // "v42" / "v44" / "v50sp2" / "vt11"
     std::vector<MessageIR> messages;  // bytewise-sorted (002 D-6)
     std::vector<LengthPairIR> length_pairs;
+
+    // Tags declared under the top-level <header>/<trailer> elements,
+    // resolved recursively through <component>/<group> refs (sorted,
+    // unique) — excluded from body-only <Msg>Args by provenance (the write
+    // emitter's header/trailer-exclusion follow-up; supersedes the 8-tag
+    // kFramingTags floor as the primary exclusion set).
+    std::vector<std::uint16_t> header_trailer_tags;
 };
 
 // Per-message top-level fields (group_no_tag == 0), deduped by tag in

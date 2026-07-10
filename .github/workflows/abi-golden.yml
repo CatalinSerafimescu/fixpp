@@ -29,6 +29,16 @@ name: ABI golden — C-ABI symbol-set drift (per-PR)
 on:
   push:
     branches: ["main"]
+    # Docs-only pushes to main can't change the ABI — skip. Fail-safe DENYLIST
+    # (see tier1.yml): skipped only when EVERY changed file is provably
+    # non-build. push: ONLY, never pull_request (a path-skipped required check
+    # never reports → PR blocked forever).
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - "specs/**"
+      - ".specify/**"
+      - "LICENSE"
   pull_request:
     types: [opened, reopened, synchronize]
     branches: ["**"]

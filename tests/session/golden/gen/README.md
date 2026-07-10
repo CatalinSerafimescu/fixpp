@@ -13,6 +13,9 @@ have the same reference). They are NOT compiled by the main build.
 | `qf_order_cancel_reject.cpp`| `../order_cancel_reject.fix`| 9 |
 | `qf_new_order_list.cpp`    | `../new_order_list.fix`    | E  |
 | `qf_allocation_report.cpp` | `../allocation_report.fix` | AS |
+| `qf_market_data.cpp` (067 T018 — R5 paired NoMDEntries(268) discriminator) | `../market_data_snapshot.fix` | W |
+| `qf_market_data.cpp` (067 T018 — same program, second message) | `../market_data_incremental.fix` | X |
+| `qf_mass_quote.cpp` (067 T018 — R5 deep-nested-group insurance) | `../mass_quote.fix` | i |
 
 ## Re-run recipe
 

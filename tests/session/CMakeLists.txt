@@ -2423,6 +2423,132 @@ add_test(NAME test_exemplar_build_failclosed COMMAND test_exemplar_build_failclo
 set_tests_properties(test_exemplar_build_failclosed PROPERTIES
   LABELS "061;us2;failclosed;D;8;9;E;AS")
 
+# ── 067-codegen-writer-emitter T011/T013/T015 [US1] [TESTS-FIRST] ───────────
+# References the NOT-YET-GENERATED fixpp::v44::build_<Msg>/<Msg>Args/
+# builder_registry (Phase 3b, T016/T017 emit Builders.hpp into
+# build/<preset>/_codegen/include/fixpp/v44/) — these three targets are RED
+# (compile/link failure) until then, by design (TDD Article VII;
+# feedback_fail_placeholder_red_test). Links fixpp_wire (not fixpp_session):
+# the generated builders serialize purely over wire::body_builder, the same
+# runtime dependency as the emitter itself (plan.md Project Structure) — no
+# fixpp_session/business_messages.hpp involvement (those are the FROZEN 061
+# hand exemplars, a separate US2 concern).
+if(TARGET fixpp_codegen_generate)
+  set(_067_CODEGEN_INC "${CMAKE_BINARY_DIR}/_codegen/include")
+
+  add_executable(test_067_completeness
+    test_067_completeness.cpp
+  )
+  add_dependencies(test_067_completeness fixpp_codegen_generate)
+  target_link_libraries(test_067_completeness PRIVATE
+    fixpp_wire
+    fixpp_dictionary
+    GTest::gtest
+    GTest::gtest_main
+  )
+  target_include_directories(test_067_completeness PRIVATE
+    "${_067_CODEGEN_INC}"
+    "${CMAKE_SOURCE_DIR}/tests"
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+  )
+  add_test(NAME test_067_completeness COMMAND test_067_completeness)
+  set_tests_properties(test_067_completeness PROPERTIES
+    LABELS "067;us1;completeness")
+
+  add_executable(test_067_builder_roundtrip
+    test_067_builder_roundtrip.cpp
+  )
+  add_dependencies(test_067_builder_roundtrip fixpp_codegen_generate)
+  target_link_libraries(test_067_builder_roundtrip PRIVATE
+    fixpp_wire
+    fixpp_dictionary
+    GTest::gtest
+    GTest::gtest_main
+  )
+  target_include_directories(test_067_builder_roundtrip PRIVATE
+    "${_067_CODEGEN_INC}"
+    "${CMAKE_SOURCE_DIR}/tests"
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+  )
+  target_compile_definitions(test_067_builder_roundtrip PRIVATE
+    "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
+  )
+  add_test(NAME test_067_builder_roundtrip COMMAND test_067_builder_roundtrip)
+  set_tests_properties(test_067_builder_roundtrip PROPERTIES
+    LABELS "067;us1;roundtrip")
+
+  add_executable(test_067_builder_failclosed
+    test_067_builder_failclosed.cpp
+  )
+  add_dependencies(test_067_builder_failclosed fixpp_codegen_generate)
+  target_link_libraries(test_067_builder_failclosed PRIVATE
+    fixpp_wire
+    GTest::gtest
+    GTest::gtest_main
+  )
+  target_include_directories(test_067_builder_failclosed PRIVATE
+    "${_067_CODEGEN_INC}"
+    "${CMAKE_SOURCE_DIR}/tests"
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+  )
+  add_test(NAME test_067_builder_failclosed COMMAND test_067_builder_failclosed)
+  set_tests_properties(test_067_builder_failclosed PROPERTIES
+    LABELS "067;us1;failclosed")
+
+  # ── 067-codegen-writer-emitter T022 [US3] [TESTS-FIRST] — validate_<Msg>
+  # required-presence witnesses. Links fixpp_wire only (matches
+  # test_067_builder_failclosed — no dict parsing needed).
+  add_executable(test_067_builder_validate
+    test_067_builder_validate.cpp
+  )
+  add_dependencies(test_067_builder_validate fixpp_codegen_generate)
+  target_link_libraries(test_067_builder_validate PRIVATE
+    fixpp_wire
+    GTest::gtest
+    GTest::gtest_main
+  )
+  target_include_directories(test_067_builder_validate PRIVATE
+    "${_067_CODEGEN_INC}"
+    "${CMAKE_SOURCE_DIR}/tests"
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+  )
+  add_test(NAME test_067_builder_validate COMMAND test_067_builder_validate)
+  set_tests_properties(test_067_builder_validate PROPERTIES
+    LABELS "067;us3;validate")
+
+  # ── 067-codegen-writer-emitter T020 [US2] [TESTS-FIRST] — the HEADLINE
+  # shape-oracle byte-equality pin. Links fixpp_session (the frozen 061 hand
+  # exemplars, fixpp::session::build_new_order_single/… ) AND fixpp_wire (the
+  # generated fixpp::v44::build_<Msg> path) + golden_diff.cpp (shape_oracle_
+  # profile()) — mirrors test_exemplar_roundtrip's dependency shape.
+  add_executable(test_067_builder_shape_oracle
+    test_067_builder_shape_oracle.cpp
+    "${CMAKE_SOURCE_DIR}/tests/interop/support/golden_diff.cpp"
+  )
+  add_dependencies(test_067_builder_shape_oracle fixpp_codegen_generate)
+  target_link_libraries(test_067_builder_shape_oracle PRIVATE
+    fixpp_session
+    fixpp_wire
+    GTest::gtest
+    GTest::gtest_main
+  )
+  target_include_directories(test_067_builder_shape_oracle PRIVATE
+    "${_067_CODEGEN_INC}"
+    "${CMAKE_SOURCE_DIR}/tests"
+    "${CMAKE_SOURCE_DIR}/tests/interop"
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+  )
+  target_compile_definitions(test_067_builder_shape_oracle PRIVATE
+    "FIXPP_REPO_ROOT=\"${CMAKE_SOURCE_DIR}\""
+  )
+  add_test(NAME test_067_builder_shape_oracle COMMAND test_067_builder_shape_oracle)
+  set_tests_properties(test_067_builder_shape_oracle PROPERTIES
+    LABELS "067;us2;shape_oracle;golden;D;8;9;E;AS")
+else()
+  message(STATUS
+    "tests/session: fixpp_codegen_generate not available; skipping 067 US1 suites")
+endif()
+
 # ── 066-dict-backed-inbound-parse T001 — shared test-scaffolding smoke ───────
 # Compile/smoke check for the group-bearing FIX44 frame builders + the
 # real-Session-dispatch harness (tests/support/fix44_group_frame_bodies.hpp,

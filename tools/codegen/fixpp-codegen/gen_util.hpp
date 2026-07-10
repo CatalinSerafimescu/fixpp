@@ -189,6 +189,59 @@ inline TypeKind kind_of(fixpp::dict::field_data_type t) noexcept {
 inline constexpr std::string_view kMessageView =
     "::fixpp::wire::MessageView<::fixpp::wire::access_mode::Index>";
 
+// 067-codegen-writer-emitter T006/R7: which wire::body_builder overload /
+// entry_handle set_* variant serves a given TypeKind at serialize time.
+// String/Char/Int32/Decimal route to the like-named overload; Bool ALSO
+// routes to Char — FIX Boolean is the literal wire byte `Y`/`N`
+// (`x ? 'Y' : 'N'`), never the int64 `1`/`0` path (FR-007a). Skip
+// (DialectExtension) has no setter — the emitter omits it entirely. The
+// Length+Data pair is NOT a TypeKind of its own: the DATA half's `kind_of()`
+// is already String (auto-derived Length is emitted alongside it, coupled,
+// by the emitter's Length+Data pairing logic — data-model.md §1.1/§3), so
+// this map does not need a distinct case for it.
+enum class BuilderCallKind { String, Char, Int32, Decimal, None };
+
+inline BuilderCallKind builder_call_kind(TypeKind k) noexcept {
+    switch (k) {
+        case TypeKind::String:
+            return BuilderCallKind::String;
+        case TypeKind::Char:
+            return BuilderCallKind::Char;
+        case TypeKind::Bool:
+            return BuilderCallKind::Char;  // Y/N via the char overload — FR-007a
+        case TypeKind::Int32:
+            return BuilderCallKind::Int32;
+        case TypeKind::Decimal:
+            return BuilderCallKind::Decimal;
+        case TypeKind::Skip:
+            return BuilderCallKind::None;
+    }
+    return BuilderCallKind::None;
+}
+
+// Top-level (`body_builder::field(tag, ...)`) is overloaded on the C++
+// parameter type, so no name-suffix is needed there — overload resolution
+// picks the right one once the emitter passes the right argument shape
+// (string_view / char / int64_t / decimal_t). `entry_handle` (group-entry
+// setters) is NOT overloaded — it exposes distinctly-named
+// set_string/set_char/set_int/set_decimal (body_builder.hpp) — this gives
+// the emitter that name.
+inline std::string_view entry_set_name(BuilderCallKind k) noexcept {
+    switch (k) {
+        case BuilderCallKind::String:
+            return "set_string";
+        case BuilderCallKind::Char:
+            return "set_char";
+        case BuilderCallKind::Int32:
+            return "set_int";
+        case BuilderCallKind::Decimal:
+            return "set_decimal";
+        case BuilderCallKind::None:
+            return "";
+    }
+    return "";
+}
+
 // FIX application-version enum token for a codegen namespace tag. vt11
 // (FIXT.1.1 session layer) has application axis Unknown; v42/v44/v50sp2
 // map verbatim. Was a verbatim copy in emit_messages.cpp + emit_reify.cpp.
