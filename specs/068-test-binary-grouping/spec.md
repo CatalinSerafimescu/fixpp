@@ -16,7 +16,7 @@ A validated spike (dictionary, 2026-07-10) grouped 14 pure tests into one binary
 ### Session 2026-07-10
 
 - Q: How should tests be bucketed into grouped binaries within a module? → A: Bucketed by (shared link-deps ∩ label-homogeneous) — multiple grouped binaries per module, not one giant per-module binary — to bound incremental-relink blast radius (matches the `tests/core` precedent).
-- Q: What CI unfiltered-ctest wall-time regression per preset is acceptable? → A: ≤ 10% per preset, target net-neutral-or-better; measured on the pilot and confirmed on `session`.
+- Q: What CI unfiltered-ctest wall-time regression per preset is acceptable? → A: ≤ 10% per preset, target net-neutral-or-better; measured on the pilot and confirmed on `session`. *(Operationalized in SC-005 as the affected module's `ctest -L <module>` subset — the discriminating launch-overhead proxy for the preset-wide bound; a whole-preset delta over ~25–160 of ~462 binaries is noise-dominated.)*
 - Q: Which module is the US1 pilot (full 3-metric validation before the session rollout)? → A: `dictionary` (already partially spiked); keep the disk + ctest-wall-time + incremental-relink measurement on it.
 - Q: When two grouped `.cpp` files have an ODR/symbol collision, what is the resolution policy? → A: Prefer renaming the colliding helper/global **within test source** to keep the test grouped; carve to standalone only when the collision is a gtest `Suite.Name` (coverage-index keys on those — must not rename) or is otherwise unresolvable.
 
@@ -81,14 +81,14 @@ As a maintainer, I guarantee that grouping changes **nothing** observable to the
 - **A death test that `abort()`s/`_exit()`s at top level** (not via gtest's fork-based `EXPECT_DEATH`) → would kill sibling tests in the same process; stays standalone.
 - **A `.cpp` compiled twice with different `-D`** (e.g. `decimal_mul_u64_wide` vs `_portable`) → cannot share one object; stays as separate targets.
 - **A preset that does not build a given test** (e.g. TSan-only or release-only targets) → grouping must not change which tests each preset builds/runs.
-- **`gtest_discover_tests` post-build discovery** runs the binary at build time to enumerate cases → a binary that crashes on `--gtest_list_tests` breaks discovery; caught by the pilot before rollout.
+- **`gtest_discover_tests` post-build discovery** runs the binary at build time to enumerate cases → a binary that crashes on `--gtest_list_tests` breaks discovery (the build fails loudly, so this cannot regress silently); the offending `.cpp` is carved out of that bucket to standalone, using the same carve-out policy as an unresolvable ODR collision (FR-012), and the carve-out is recorded in the disposition ledger. Caught by the pilot before rollout.
 
 ## Requirements *(mandatory)*
 
 ### Functional Requirements
 
 - **FR-001**: The build MUST group isolation-safe (pure, stateless, side-effect-free) tests within a module into one or more shared executables that enumerate their cases via `gtest_discover_tests`, so each gtest case remains an individually selectable ctest entry.
-- **FR-002**: The build MUST keep the following categories as standalone executables (one per test), each disposition recorded with its reason: allocation-counting / `alloc_guard` tests (in-TU global-new counters, mallocnesia `LD_PRELOAD` gates); OOM-injection tests; TSan-specific targets and any test carrying a per-target `ENVIRONMENT`; death tests that terminate the process at top level or override link mode; genuinely-concurrent / global-singleton-freshness tests; per-target compile-definition variants; completeness-gate tests asserting exact-set equality with precise feature labels; and any test a documented procedure selects by `ctest -R <target-name>`.
+- **FR-002**: The build MUST keep the following categories as standalone executables (one per test), each disposition recorded with its reason: allocation-counting / `alloc_guard` tests (in-TU global-new counters, mallocnesia `LD_PRELOAD` gates); OOM-injection tests; TSan-specific targets and any test carrying a per-test **heterogeneous** `ENVIRONMENT` (a test whose required `ENVIRONMENT` is shared by its whole bucket may be grouped, carrying that `ENVIRONMENT` on the grouped binary — see Research §D3); death tests that terminate the process at top level or override link mode; genuinely-concurrent / global-singleton-freshness tests; per-target compile-definition variants; completeness-gate tests asserting exact-set equality with precise feature labels; and any test a documented procedure selects by `ctest -R <target-name>`.
 - **FR-003**: Every grouped bucket MUST be **label-homogeneous** — all cases in one grouped binary share the same intended `ctest` LABEL set — and the build MUST re-apply those LABELS to the grouped binary's discovered cases so `ctest -L <label>` selects exactly the intended cases (no over- or under-selection).
 - **FR-004**: The coverage-index (`spec/coverage-index.md`) and the feature-completeness audits (`.specify/decisions/<feature>-completeness.md`) MUST remain green and unmodified in substance; grouping MUST NOT require renaming any `.cpp` source or any gtest `Suite.Name`, since those are the identities those gates key on.
 - **FR-005**: Grouping MUST preserve, per test, every per-target link dependency (unioned into the grouped binary), `TIMEOUT`, and `ENVIRONMENT`; where a required property cannot be represented on a shared binary, that test MUST stay standalone.
@@ -103,7 +103,7 @@ As a maintainer, I guarantee that grouping changes **nothing** observable to the
 
 ### Key Entities *(include if feature involves data)*
 
-- **Test module**: a `tests/<module>/` directory with its own `CMakeLists.txt` (23 total; `tests/abi/` is fixtures-only — no `.cpp`/`CMakeLists.txt` — and is not a module); the unit of rollout.
+- **Test module**: a `tests/<module>/` directory with its own `CMakeLists.txt` (23 total, out of 25 `tests/` subdirectories; `tests/abi/` and `tests/support/` are each fixtures-only — no `.cpp`/`CMakeLists.txt` — and neither is a module); the unit of rollout.
 - **Grouped bucket**: a set of isolation-safe, label-homogeneous, link-compatible test `.cpp` files compiled into one `gtest_discover_tests` executable.
 - **Standalone test**: a test that must remain its own executable per the FR-002 taxonomy; carries its own ctest name, labels, and properties.
 - **Disposition record**: per-test decision (grouped-into-<bucket> | standalone:<reason>), the audit trail proving FR-011.
@@ -113,11 +113,11 @@ As a maintainer, I guarantee that grouping changes **nothing** observable to the
 
 ### Measurable Outcomes
 
-- **SC-001**: After full rollout, the total test-binary footprint per sanitizer preset is reduced several-fold on the grouped portion versus the 2026-07-10 baseline, with the per-module and total deltas recorded.
+- **SC-001**: After full rollout, the total test-binary footprint per sanitizer preset is reduced several-fold on the grouped portion versus the 2026-07-10 baseline. This is a **recorded-observation outcome, not a numeric pass/fail bar** — the enforced gates are FR-008 (every module's delta captured) and SC-006 (100% dispositioned); "several-fold" documents the expected order of magnitude (the dictionary spike measured 7.1×–8.3×) for the rollup in `measurements.md`, not a threshold a module must clear to pass.
 - **SC-002**: All 8 presets are `ctest`-green after every module, with zero new sanitizer findings introduced by grouping.
 - **SC-003**: The coverage-index and every feature-completeness audit remain green and unmodified in substance across the whole feature.
 - **SC-004**: Every documented `ctest -L <label>` and `ctest -R <name>` selection resolves to the same logical set of tests after grouping as before.
-- **SC-005**: CI unfiltered `ctest` wall-time per preset does not regress by more than **10%** (target net-neutral-or-better) — measured on the pilot (`dictionary`) and confirmed on the largest module (`session`).
+- **SC-005**: `ctest` wall-time regression per preset does not exceed **10%** (target net-neutral-or-better). Measurement scope is the affected module's own subset (`ctest -L <module>`, before vs after grouping that module), not a full-preset unfiltered timing — grouping only ~25–160 of ~462 binaries per module makes a whole-preset delta too small to discriminate from noise. This module-subset delta is used as the launch-overhead proxy for the preset-wide bound; measured on the pilot (`dictionary`) and confirmed at scale on the largest module (`session`), per Research §D6.
 - **SC-006**: 100% of tests across all 23 modules are accounted for as either grouped or standalone-with-reason at feature close.
 
 ## Assumptions
@@ -125,7 +125,7 @@ As a maintainer, I guarantee that grouping changes **nothing** observable to the
 - **Pilot module** *(clarified)*: US1 pilot is **`dictionary`** (already partially spiked); it carries the full 3-metric harness (disk + ctest wall-time + incremental relink). The `session` module (largest, 36% of binaries) leads the US2 rollout and re-confirms the wall-time bound at scale.
 - **Grouping granularity** *(clarified)*: **bucketed** — one grouped binary per (shared-link-deps ∩ label-homogeneous) group within a module, not one giant per-module binary — to bound incremental-relink blast radius (FR-013). Refine bucket boundaries against the pilot's measured relink numbers.
 - **ctest entry model**: grouped binaries use `gtest_discover_tests` (per-case ctest entries) rather than a single coarse `add_test`, to preserve `-L`/`-R` case-level selectability, accepting the additional per-case process launches — quantified on the pilot against the wall-time bound below.
-- **Acceptable CI wall-time regression bound** *(clarified)*: **≤ 10%** per-preset unfiltered-ctest wall-time increase, target net-neutral-or-better (SC-005).
+- **Acceptable CI wall-time regression bound** *(clarified)*: **≤ 10%** ctest wall-time increase, target net-neutral-or-better — measured on the affected module's `ctest -L <module>` subset (the discriminating launch-overhead proxy), per SC-005 / Research §D6.
 - **No production/library code changes**: this feature touches only `tests/**/CMakeLists.txt` and test source only where a within-test-code rename is needed to resolve an ODR collision; no `src/`, no public headers, no C-ABI, no runtime behavior.
 - **Precedent**: `tests/core/CMakeLists.txt` is the reference implementation for the grouped + standalone coexistence pattern.
 - **Measurement environment**: local WSL2 clang presets are the measurement basis (matching the baseline capture); build parallelism is capped at `-j2` per the project's OOM constraint.

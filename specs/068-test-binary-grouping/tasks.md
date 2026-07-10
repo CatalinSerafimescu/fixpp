@@ -17,7 +17,7 @@
 
 ## Phase 2: Foundational
 
-- [ ] T003 Codify the census signal-set in `specs/068-test-binary-grouping/dispositions.md` (header note): the grep signals that force **standalone** per FR-002/D3 — `operator new`/global-new counter, `mallocnesia`/`alloc_guard`, OOM/new-handler injection, per-test-heterogeneous `ENVIRONMENT`/`TSAN_OPTIONS`/suppressions, top-level `abort()`/`_exit()` (NOT `EXPECT_DEATH` — groupable, D3), per-target `target_compile_definitions` variants, exact-set completeness gates with a precise `-L` label, and any `ctest -R <target>` selected in a quickstart/tasks doc — plus the bucket key `(sorted link-libs, sorted labels)` (D4).
+- [ ] T003 Codify the census signal-set in `specs/068-test-binary-grouping/dispositions.md` (header note): the grep signals that force **standalone** per FR-002/D3 — `operator new`/global-new counter, `mallocnesia`/`alloc_guard`, OOM/new-handler injection, per-test-heterogeneous `ENVIRONMENT`/`TSAN_OPTIONS`/suppressions, top-level `abort()`/`_exit()` (NOT `EXPECT_DEATH` — groupable, D3), per-target `target_compile_definitions` variants, exact-set completeness gates with a precise `-L` label, genuinely-concurrent / global-singleton-freshness tests (signal: spawns `std::thread`/`std::jthread`/`std::async`, or mutates a function-local `static`/process-global registry read by other `TEST`s in the file — no reliable grep, flag for manual review when suspected), and any `ctest -R <target>` selected in a quickstart/tasks doc — plus the bucket key `(sorted link-libs, sorted labels)` (D4).
 
 ---
 
@@ -69,7 +69,7 @@
 
 - [ ] T026 [US3] Whole-tree coverage-index check: `spec/coverage-index.md` green & substantively unmodified (keys on `.cpp` stem + `Suite.Name`, unchanged). Confirm no `.cpp` was renamed and no `Suite.Name` changed across the feature (git diff of `tests/**/*.cpp` limited to ODR-helper renames recorded in `dispositions.md`).
 - [ ] T027 [US3] Whole-tree completeness-audit check: every existing feature's `.specify/decisions/*-completeness.md` gtest-case citations still resolve (no `Suite.Name` drift).
-- [ ] T028 [US3] Selection-preservation audit: enumerate every documented `ctest -L <label>` / `-R <name>` in `specs/*/quickstart.md`, `specs/*/tasks.md`, and `.claude/commands/speckit-verify.md`; run each against the grouped tree; assert the same logical test set resolves (SC-004). Record any `-R <target>` that changed and the standalone/relabel remedy applied.
+- [ ] T028 [US3] Selection-preservation audit: enumerate every documented `ctest -L <label>` / `-R <name>` in `specs/*/quickstart.md`, `specs/*/tasks.md`, and `../../../.claude/skills/speckit-verify/SKILL.md` (parent-repo Spec-Kit skill file, 3 levels above the `library/` submodule cwd — verified path, not `.claude/commands/...`); run each against the grouped tree; assert the same logical test set resolves (SC-004). Record any `-R <target>` that changed and the standalone/relabel remedy applied.
 - [ ] T029 [US3] Full-matrix green on the whole grouped tree: `ctest --preset <p>` for all 8 presets, unfiltered, all green with no new sanitizer findings (FR-006, CI backstop parity). *(Resource gate: AskUserQuestion first.)*
 
 **Checkpoint**: all gates + selections proven intact on the final tree.

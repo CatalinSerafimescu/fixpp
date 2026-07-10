@@ -15,7 +15,7 @@ Reduce the 66.9 GB test-binary matrix (462 one-`.cpp`-per-executable binaries ×
 **Testing**: the existing GoogleTest suite, run unchanged via `ctest --preset <p>` across all 8 presets; behavior-preservation is the acceptance signal
 **Target Platform**: Linux/Clang (Tier 1) primary; must not change what any preset builds/runs
 **Project Type**: library — internal test infrastructure
-**Performance Goals**: several-fold disk reduction on the grouped portion (SC-001); CI unfiltered-ctest wall-time regression ≤ 10% per preset, target net-neutral (SC-005)
+**Performance Goals**: several-fold disk reduction on the grouped portion (SC-001, recorded observation not a numeric bar); module-subset (`ctest -L <module>`) wall-time regression ≤ 10% as the preset-wide launch-overhead proxy, target net-neutral (SC-005)
 **Constraints**: no `src/`, `include/`, C-ABI, Python, or runtime change; preserve coverage-index + completeness audits + `ctest -L`/`-R` selectability; test source edited only to resolve an ODR collision (FR-012); local build parallelism capped `-j2` (WSL2 OOM); measurement env = local WSL2 clang presets
 **Scale/Scope**: 23 test modules, ~462 binaries/preset, 8 presets
 

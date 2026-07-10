@@ -15,6 +15,7 @@ For `tests/<module>/`, classify each `.cpp`:
   - top-level `abort()`/`_exit()` (NOT `EXPECT_DEATH` — those group, D3)
   - per-target `target_compile_definitions` variants of one `.cpp`
   - completeness gate with a precise `-L` feature label
+  - genuinely-concurrent / global-singleton-freshness: spawns `std::thread`/`std::jthread`/`std::async`, or mutates a function-local `static`/process-global registry read by other `TEST`s in the file — no reliable grep signal; flag for manual review when suspected
   - selected by `ctest -R <target>` in any quickstart/tasks doc
 - Else **groupable**.
 
