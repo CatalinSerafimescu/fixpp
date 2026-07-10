@@ -82,6 +82,30 @@ target_compile_definitions(codegen_conformance_test PRIVATE
 add_test(NAME codegen_conformance_test COMMAND codegen_conformance_test)
 set_tests_properties(codegen_conformance_test PROPERTIES LABELS codegen)
 
+# 067-codegen-writer-emitter T007/T009: emit_builders unit tests — link the
+# codegen tool's ir.cpp/gen_util.hpp DIRECTLY (not via the generated headers)
+# to inspect MessageIR.group_order pre-emission. Mirrors fixpp-codegen's own
+# dependencies (fixpp::dictionary + pugixml, PRIVATE, host-tool-only).
+find_package(pugixml CONFIG REQUIRED)
+add_executable(codegen_067_emit_builders_unit_test
+  test_067_emit_builders_unit.cpp
+  "${CMAKE_SOURCE_DIR}/tools/codegen/fixpp-codegen/ir.cpp"
+)
+target_include_directories(codegen_067_emit_builders_unit_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tools/codegen/fixpp-codegen"
+)
+target_link_libraries(codegen_067_emit_builders_unit_test PRIVATE
+  fixpp_dictionary
+  pugixml::pugixml
+  GTest::gtest
+  GTest::gtest_main
+)
+target_compile_definitions(codegen_067_emit_builders_unit_test PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
+)
+add_test(NAME codegen_067_emit_builders_unit_test COMMAND codegen_067_emit_builders_unit_test)
+set_tests_properties(codegen_067_emit_builders_unit_test PROPERTIES LABELS "codegen;067")
+
 # T041: determinism_test — NFR-003-7 / AC-T1 / AC-T2
 #
 # Three assertions:

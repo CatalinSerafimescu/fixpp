@@ -74,6 +74,7 @@ int main(int argc, char** argv) {
             write_file(base / "Validator.hpp", fixpp::codegen::emit_validator(ir));
             write_file(base / "Reify.hpp", fixpp::codegen::emit_reify(ir));
             write_file(base / "NormativeReferences.md", fixpp::codegen::emit_normative_refs(ir));
+            write_file(base / "Builders.hpp", fixpp::codegen::emit_builders(ir));
             all.push_back(std::move(ir));
         }
         // Shared dispatch headers -- emitted once over the union ([2c §4.8]).
