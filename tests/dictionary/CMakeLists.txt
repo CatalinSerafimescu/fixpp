@@ -1,15 +1,14 @@
 # tests/dictionary/CMakeLists.txt
 # 068-test-binary-grouping: isolation-safe dictionary tests are grouped into
-# gtest_discover_tests binaries (bucketed by shared link-deps ∩ the "dictionary"
-# label); isolation-sensitive tests stay standalone. Every grouped case
-# re-applies LABELS "dictionary" so `ctest -L dictionary` selects the whole
-# suite exactly as before. Dispositions + `-R`→`-L` replacements are recorded in
-# specs/068-test-binary-grouping/dispositions.md. Reference precedent:
-# tests/core/CMakeLists.txt.
+# whole-binary add_test executables (bucketed by shared link-deps ∩ the
+# "dictionary" label); isolation-sensitive tests stay standalone. Each grouped
+# binary carries LABELS "dictionary" so `ctest -L dictionary` selects the
+# grouped entries which each run all their cases. Dispositions + `-R`→`-L`
+# replacements are recorded in specs/068-test-binary-grouping/dispositions.md.
+# Reference precedent: tests/core/CMakeLists.txt.
 
 find_package(GTest CONFIG REQUIRED)
 find_package(pugixml CONFIG REQUIRED)
-include(GoogleTest)
 
 # Path to vendored XML fixtures so tests can locate them regardless of
 # build-tree depth (used by load(path, mr) AC-L1 / AC-L2 paths and the
@@ -46,13 +45,8 @@ target_include_directories(dictionary_pure_tests PRIVATE
   "${CMAKE_SOURCE_DIR}/tests")
 target_compile_definitions(dictionary_pure_tests PRIVATE
   "FIXPP_DICT_DATA_DIR=\"${FIXPP_DICT_DATA_DIR}\"")
-# DISCOVERY_TIMEOUT raised from the 5s default: the grouped binary is large
-# (15 TUs) and slow to start under TSan/coverage instrumentation, so the
-# build-time `--gtest_list_tests` enumeration needs more headroom (068 rollout
-# lesson — sanitizer discovery of grouped binaries).
-gtest_discover_tests(dictionary_pure_tests
-  PROPERTIES LABELS dictionary
-  DISCOVERY_TIMEOUT 120)
+add_test(NAME dictionary_pure_tests COMMAND dictionary_pure_tests)
+set_tests_properties(dictionary_pure_tests PROPERTIES LABELS dictionary)
 
 # ── Standalone: isolation-sensitive dictionary tests (FR-002) ─────────────────
 # Each keeps its own executable + add_test(NAME <target>) so its name, labels,
@@ -118,9 +112,8 @@ if(TARGET fixpp_codegen_generate)
     "${CMAKE_SOURCE_DIR}/tests")
   target_compile_definitions(dictionary_reify_tests PRIVATE
     "FIXPP_DICT_DATA_DIR=\"${FIXPP_DICT_DATA_DIR}\"")
-  gtest_discover_tests(dictionary_reify_tests
-    PROPERTIES LABELS dictionary
-    DISCOVERY_TIMEOUT 120)
+  add_test(NAME dictionary_reify_tests COMMAND dictionary_reify_tests)
+  set_tests_properties(dictionary_reify_tests PROPERTIES LABELS dictionary)
 
   # Standalone reify tests (FR-002): a TSan seam + two label-heterogeneous 066
   # witnesses (their distinct label set forbids grouping under the "dictionary"
