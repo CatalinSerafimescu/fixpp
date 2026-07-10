@@ -100,6 +100,13 @@ struct LevelItem {
     TypeKind kind = TypeKind::Skip;
     bool coupled = false;  // Length+Data pair folded into one Args member
     std::uint16_t data_tag = 0;
+    // 067 US3/T025 (R3/G5): this scalar's own FieldRef.rule==Required (the
+    // Length tag's rule, OR'd with the Data tag's rule when coupled — either
+    // half being Required makes the ONE coupled Args member required).
+    // group_no_tag/header-exclusion are already baked in by construction:
+    // top-level items are the framing-excluded run (top_level_synthetic_
+    // members), group items never carry a framing tag at all.
+    bool required = false;
 
     // ── group ──
     std::string group_type_name;  // fully-qualified nested <Msg>...Args name
@@ -421,6 +428,8 @@ LevelPlan resolve_level(TemplateWriter& w, MessageIR const& m,
             item.kind = TypeKind::String;
             item.accessor =
                 uniquify_accessor(used_accessors, to_accessor(dit->second->name), data_tag);
+            item.required = f->ref.rule == fixpp::dict::field_presence::Required ||
+                            dit->second->ref.rule == fixpp::dict::field_presence::Required;
             plan.push_back(std::move(item));
             continue;
         }
@@ -434,9 +443,173 @@ LevelPlan resolve_level(TemplateWriter& w, MessageIR const& m,
         item.tag = gm.tag;
         item.kind = k;
         item.accessor = uniquify_accessor(used_accessors, to_accessor(f->name), gm.tag);
+        item.required = f->ref.rule == fixpp::dict::field_presence::Required;
         plan.push_back(std::move(item));
     }
     return plan;
+}
+
+// 067 US3/T025 (data-model.md §1.3/§1.4, G5) — flattens a message's level
+// tree into POST-ORDER (children before their parent), by (type_name, plan)
+// pairs. `plan` is copied (small, one-shot host-tool run) so the pairs
+// outlive the per-message loop in emit_builders. The post-order is what
+// lets emit_writer_traits_for_level below assume every group child's own
+// `writer_traits<Child>` specialization + helper functions are ALREADY
+// fully emitted before it emits the parent's group_check functions (which
+// call `::fixpp::wire::validate_required<Child>` — a template that needs
+// `writer_traits<Child>` to be a COMPLETE specialization at first use, not
+// merely the undefined primary template; [temp.expl.spec]).
+// NOLINTNEXTLINE(misc-no-recursion)
+void collect_levels_postorder(std::string const& type_name, LevelPlan const& plan,
+                              std::vector<std::pair<std::string, LevelPlan>>& out) {
+    for (auto const& item : plan) {
+        if (item.is_group) {
+            collect_levels_postorder(item.group_type_name, *item.child_plan, out);
+        }
+    }
+    out.emplace_back(type_name, plan);
+}
+
+// 067 US3/T025 — emits, for ONE level (top-level `<Msg>Args` OR one nested
+// `<Msg>...Args` group-entry type), the required-field presence-check
+// functions, the group count()/validate_entry() functions, and the
+// `writer_traits<T>` specialization (data-model.md §1.4) that binds them —
+// all THREE pieces sourced purely from `plan` (already derived from IR
+// `FieldRef.rule`/`group_no_tag` by resolve_level — R3, no new IR/table
+// source). MUST be called inside `namespace fixpp::wire { ... }` (writer_
+// traits is declared there; an explicit specialization must be declared in
+// a namespace enclosing its primary template's namespace — [temp.expl.spec]
+// — `fixpp::<ns>` is a SIBLING of `fixpp::wire`, not an enclosing namespace,
+// so this cannot be emitted from inside the `fixpp::<ns> { ... }` block).
+void emit_writer_traits_for_level(TemplateWriter& w, std::string const& ns,
+                                  std::string const& type_name, LevelPlan const& plan) {
+    std::string const qtype = "::fixpp::" + ns + "::" + type_name;
+
+    // Required-field presence-check functions for THIS level (top-level
+    // body OR one group-entry level — both already framing-excluded /
+    // level-scoped by construction of `plan`, R3/data-model §2).
+    for (auto const& item : plan) {
+        if (item.is_group || !item.required) {
+            continue;
+        }
+        w.raw("inline bool ");
+        w.raw(type_name);
+        w.raw("_required_");
+        w.num(item.tag);
+        w.raw("(");
+        w.raw(qtype);
+        w.raw(" const& a) noexcept { return a.");
+        w.raw(item.accessor);
+        w.line(".has_value(); }");
+    }
+
+    // Group count()/validate_entry() functions for THIS level's own group
+    // children (per-occurrence — data-model.md §2.2).
+    for (auto const& item : plan) {
+        if (!item.is_group) {
+            continue;
+        }
+        w.raw("inline ::std::optional<::std::size_t> ");
+        w.raw(type_name);
+        w.raw("_count_");
+        w.raw(item.accessor);
+        w.raw("(");
+        w.raw(qtype);
+        w.raw(" const& a) noexcept { ");
+        if (item.group_required) {
+            w.raw("return a.");
+            w.raw(item.accessor);
+            w.line(".size(); }");
+        } else {
+            w.raw("if (!a.");
+            w.raw(item.accessor);
+            w.raw(") { return ::std::nullopt; } return a.");
+            w.raw(item.accessor);
+            w.line("->size(); }");
+        }
+
+        w.raw("inline ::fixpp::core::expected_t<void> ");
+        w.raw(type_name);
+        w.raw("_validate_entry_");
+        w.raw(item.accessor);
+        w.raw("(");
+        w.raw(qtype);
+        w.raw(" const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required(");
+        if (item.group_required) {
+            w.raw("a.");
+            w.raw(item.accessor);
+            w.line("[i]); }");
+        } else {
+            w.raw("(*a.");
+            w.raw(item.accessor);
+            w.line(")[i]); }");
+        }
+    }
+
+    std::size_t const n_required =
+        static_cast<std::size_t>(std::count_if(plan.begin(), plan.end(), [](LevelItem const& it) {
+            return !it.is_group && it.required;
+        }));
+    std::size_t const n_groups = static_cast<std::size_t>(
+        std::count_if(plan.begin(), plan.end(), [](LevelItem const& it) { return it.is_group; }));
+
+    w.raw("template <> struct writer_traits<");
+    w.raw(qtype);
+    w.line("> {");
+
+    w.raw("    static constexpr ::std::array<::fixpp::wire::required_check<");
+    w.raw(qtype);
+    w.raw(">, ");
+    w.num(n_required);
+    w.raw("> required_checks = ");
+    if (n_required == 0) {
+        w.line("{};");
+    } else {
+        w.line("{{");
+        for (auto const& item : plan) {
+            if (item.is_group || !item.required) {
+                continue;
+            }
+            w.raw("        {");
+            w.num(item.tag);
+            w.raw(", &");
+            w.raw(type_name);
+            w.raw("_required_");
+            w.num(item.tag);
+            w.line("},");
+        }
+        w.line("    }};");
+    }
+
+    w.raw("    static constexpr ::std::array<::fixpp::wire::group_check<");
+    w.raw(qtype);
+    w.raw(">, ");
+    w.num(n_groups);
+    w.raw("> group_checks = ");
+    if (n_groups == 0) {
+        w.line("{};");
+    } else {
+        w.line("{{");
+        for (auto const& item : plan) {
+            if (!item.is_group) {
+                continue;
+            }
+            w.raw("        {");
+            w.raw(item.group_required ? "true" : "false");
+            w.raw(", &");
+            w.raw(type_name);
+            w.raw("_count_");
+            w.raw(item.accessor);
+            w.raw(", &");
+            w.raw(type_name);
+            w.raw("_validate_entry_");
+            w.raw(item.accessor);
+            w.line("},");
+        }
+        w.line("    }};");
+    }
+    w.line("};");
+    w.line();
 }
 
 }  // namespace
@@ -461,6 +634,7 @@ std::string emit_builders(VersionIR const& ir) {
     w.line("#include <fixpp/core/decimal_alias.hpp>");
     w.line("#include <fixpp/core/error.hpp>");
     w.line("#include <fixpp/wire/body_builder.hpp>");
+    w.line("#include <fixpp/wire/builder_validate.hpp>");
     w.line("#include <optional>");
     w.line("#include <span>");
     w.line("#include <string_view>");
@@ -472,6 +646,12 @@ std::string emit_builders(VersionIR const& ir) {
     w.line();
 
     std::vector<std::string> registry_msg_types;
+    std::vector<std::string> official_msg_ids;
+    // 067 US3/T025 — every level (top-level <Msg>Args + every nested group
+    // <Msg>...Args), across all 33 OFFICIAL messages, in GLOBAL post-order
+    // (children before parents, both within one message's own tree and
+    // across the message list) — see collect_levels_postorder.
+    std::vector<std::pair<std::string, LevelPlan>> all_levels;
 
     for (auto const& m : ir.messages) {
         if (!is_official(m.msg_type)) {
@@ -489,6 +669,8 @@ std::string emit_builders(VersionIR const& ir) {
         emit_build_fn(w, msg_id, m.msg_type, plan);
 
         registry_msg_types.push_back(m.msg_type);
+        official_msg_ids.push_back(msg_id);
+        collect_levels_postorder(msg_id + "Args", plan, all_levels);
     }
 
     w.line("struct builder_registry_entry { ::std::string_view msg_type; };");
@@ -503,6 +685,45 @@ std::string emit_builders(VersionIR const& ir) {
     w.line("}};");
     w.line();
 
+    w.raw("}  // namespace fixpp::");
+    w.line(ir.ns);
+    w.line();
+
+    // 067 US3/T025 (data-model.md §1.3/§1.4, G5) — writer_traits<T>
+    // specializations + their required-field/group helper functions, one
+    // level at a time, in the post-order collected above. MUST live in
+    // `fixpp::wire` (writer_traits's own namespace — [temp.expl.spec]) and
+    // MUST come after `fixpp::<ns>` closes (the Args types it specializes
+    // over must already be complete) and BEFORE the validate_<Msg> thin
+    // wrappers below (which instantiate validate_required<TopLevelArgs>,
+    // requiring writer_traits<TopLevelArgs> to already be a complete
+    // specialization at that point).
+    w.line("namespace fixpp::wire {");
+    w.line();
+    for (auto const& [type_name, plan] : all_levels) {
+        emit_writer_traits_for_level(w, std::string{ir.ns}, type_name, plan);
+    }
+    w.line("}  // namespace fixpp::wire");
+    w.line();
+
+    // validate_<Msg> — the per-message public entry point (FR-006), a THIN
+    // wrapper over the generic ::fixpp::wire::validate_required<T> walk
+    // (builder_validate.hpp, T024) driven by the writer_traits<T>
+    // specialization just emitted above.
+    w.raw("namespace fixpp::");
+    w.raw(ir.ns);
+    w.line(" {");
+    w.line();
+    for (auto const& msg_id : official_msg_ids) {
+        w.raw("inline ::fixpp::core::expected_t<void> validate_");
+        w.raw(msg_id);
+        w.raw("(");
+        w.raw(msg_id);
+        w.line("Args const& args) noexcept {");
+        w.line("    return ::fixpp::wire::validate_required(args);");
+        w.line("}");
+    }
+    w.line();
     w.raw("}  // namespace fixpp::");
     w.line(ir.ns);
     return std::move(w).take();

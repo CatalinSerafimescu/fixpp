@@ -2495,6 +2495,27 @@ if(TARGET fixpp_codegen_generate)
   set_tests_properties(test_067_builder_failclosed PROPERTIES
     LABELS "067;us1;failclosed")
 
+  # ── 067-codegen-writer-emitter T022 [US3] [TESTS-FIRST] — validate_<Msg>
+  # required-presence witnesses. Links fixpp_wire only (matches
+  # test_067_builder_failclosed — no dict parsing needed).
+  add_executable(test_067_builder_validate
+    test_067_builder_validate.cpp
+  )
+  add_dependencies(test_067_builder_validate fixpp_codegen_generate)
+  target_link_libraries(test_067_builder_validate PRIVATE
+    fixpp_wire
+    GTest::gtest
+    GTest::gtest_main
+  )
+  target_include_directories(test_067_builder_validate PRIVATE
+    "${_067_CODEGEN_INC}"
+    "${CMAKE_SOURCE_DIR}/tests"
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+  )
+  add_test(NAME test_067_builder_validate COMMAND test_067_builder_validate)
+  set_tests_properties(test_067_builder_validate PROPERTIES
+    LABELS "067;us3;validate")
+
   # ── 067-codegen-writer-emitter T020 [US2] [TESTS-FIRST] — the HEADLINE
   # shape-oracle byte-equality pin. Links fixpp_session (the frozen 061 hand
   # exemplars, fixpp::session::build_new_order_single/… ) AND fixpp_wire (the

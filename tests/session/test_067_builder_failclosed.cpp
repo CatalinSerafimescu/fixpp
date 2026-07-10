@@ -16,8 +16,9 @@
 //   - W-vs-X per-occurrence NoMDEntries(268) delimiter discrimination
 //     (RC#1) — generated W and X builders emit DISTINCT delimiter/order
 //     from the SAME no_tag.
-// (The required-group-zero row is US3/T023, added once validate_ exists —
-// out of scope here.)
+//   - T023 [US3]: a REQUIRED group with size()==0 fails validate_* with
+//     wire_required_field_missing; an OPTIONAL group nullopt omits No<G>
+//     from the wire entirely (RC#2/G9).
 //
 // MUST FAIL FIRST: references `fixpp::v44::build_NewOrderSingle` /
 // `NewOrderSingleArgs` / `build_MarketDataSnapshotFullRefresh` /
@@ -228,4 +229,53 @@ TEST(BuilderFailClosed067, WvsXPerOccurrenceDelimiterDiscrimination) {
             << "X's NoMDEntries delimiter must be MDUpdateAction(279) FIRST — a version-wide plan "
                "sharing W's delimiter would wrongly put MDEntryType(269) first here too";
     }
+}
+
+// ── T023 [US3]/RC#2/G9 — a REQUIRED group (non-optional span) with
+// size()==0 fails validate_* with wire_required_field_missing ─────────────
+TEST(BuilderFailClosed067, RequiredGroupZero_ValidateRejects) {
+    using namespace fixpp_test_support::seeds067;
+    auto const& seed = kNewOrderListSeed;
+
+    fixpp::v44::NewOrderListArgs args{};
+    args.list_id = seed.list_id;
+    args.bid_type = seed.bid_type;
+    args.tot_no_orders = seed.tot_no_orders;
+    // orders left as a zero-length span: E's NoOrders(73) group is REQUIRED
+    // (dictionaries/FIX44.xml:2944 `<group name='NoOrders' required='Y'>`).
+    args.orders = std::span<const fixpp::v44::NewOrderListOrdersArgs>{};
+
+    auto r = fixpp::v44::validate_NewOrderList(args);
+    ASSERT_FALSE(r.has_value()) << "a REQUIRED group with size()==0 must fail validate_";
+    EXPECT_EQ(r.error(), fixpp::core::error::wire_required_field_missing);
+}
+
+// ── T023 [US3]/RC#2/G9 — an OPTIONAL group nullopt omits No<G> from the
+// wire entirely (build_-path discriminating byte witness) ─────────────────
+TEST(BuilderFailClosed067, OptionalGroupNullopt_OmitsNoGroupTagEntirely) {
+    using namespace fixpp_test_support::seeds067;
+    auto const& seed = kNewOrderListSeed;
+
+    fixpp::v44::NewOrderListOrdersArgs order_args{};
+    order_args.cl_ord_id = seed.order.cl_ord_id;
+    order_args.list_seq_no = seed.order.list_seq_no;
+    order_args.side = seed.order.side;
+    order_args.symbol = seed.order.symbol;
+    // party_i_ds (NoPartyIDs(453), OPTIONAL at order depth) intentionally
+    // left nullopt (its default).
+    std::array<fixpp::v44::NewOrderListOrdersArgs, 1> orders{order_args};
+
+    fixpp::v44::NewOrderListArgs args{};
+    args.list_id = seed.list_id;
+    args.bid_type = seed.bid_type;
+    args.tot_no_orders = seed.tot_no_orders;
+    args.orders = std::span<const fixpp::v44::NewOrderListOrdersArgs>{orders};
+
+    std::array<std::byte, 2048> out{};
+    auto r = fixpp::v44::build_NewOrderList(std::span<std::byte>{out}, args);
+    ASSERT_TRUE(r.has_value()) << "build_NewOrderList failed";
+    std::string body = bytes_to_string(*r);
+    EXPECT_EQ(body.find("\x01" "453="), std::string::npos)
+        << "an OPTIONAL group left nullopt must omit its No<G> tag (453=NoPartyIDs) from the "
+           "wire entirely";
 }
