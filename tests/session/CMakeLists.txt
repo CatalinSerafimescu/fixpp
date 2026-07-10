@@ -2494,6 +2494,35 @@ if(TARGET fixpp_codegen_generate)
   add_test(NAME test_067_builder_failclosed COMMAND test_067_builder_failclosed)
   set_tests_properties(test_067_builder_failclosed PROPERTIES
     LABELS "067;us1;failclosed")
+
+  # ── 067-codegen-writer-emitter T020 [US2] [TESTS-FIRST] — the HEADLINE
+  # shape-oracle byte-equality pin. Links fixpp_session (the frozen 061 hand
+  # exemplars, fixpp::session::build_new_order_single/… ) AND fixpp_wire (the
+  # generated fixpp::v44::build_<Msg> path) + golden_diff.cpp (shape_oracle_
+  # profile()) — mirrors test_exemplar_roundtrip's dependency shape.
+  add_executable(test_067_builder_shape_oracle
+    test_067_builder_shape_oracle.cpp
+    "${CMAKE_SOURCE_DIR}/tests/interop/support/golden_diff.cpp"
+  )
+  add_dependencies(test_067_builder_shape_oracle fixpp_codegen_generate)
+  target_link_libraries(test_067_builder_shape_oracle PRIVATE
+    fixpp_session
+    fixpp_wire
+    GTest::gtest
+    GTest::gtest_main
+  )
+  target_include_directories(test_067_builder_shape_oracle PRIVATE
+    "${_067_CODEGEN_INC}"
+    "${CMAKE_SOURCE_DIR}/tests"
+    "${CMAKE_SOURCE_DIR}/tests/interop"
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+  )
+  target_compile_definitions(test_067_builder_shape_oracle PRIVATE
+    "FIXPP_REPO_ROOT=\"${CMAKE_SOURCE_DIR}\""
+  )
+  add_test(NAME test_067_builder_shape_oracle COMMAND test_067_builder_shape_oracle)
+  set_tests_properties(test_067_builder_shape_oracle PROPERTIES
+    LABELS "067;us2;shape_oracle;golden;D;8;9;E;AS")
 else()
   message(STATUS
     "tests/session: fixpp_codegen_generate not available; skipping 067 US1 suites")
