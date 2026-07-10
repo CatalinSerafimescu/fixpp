@@ -7,9 +7,9 @@
 
 ## Overview *(context)*
 
-The test suite currently builds **one executable per test `.cpp`** (462 binaries per preset), each statically linking the fixpp stack. Across 8 build presets this is **66.9 GB** of test binaries (baseline captured 2026-07-10 in `research/test-grouping-baseline/`, re-runnable via `inventory.sh`). The dominant cost is identical instrumented library code duplicated hundreds of times per preset. This is the top disk consumer on the developer machine and inflates clean-build link time and CI storage.
+The test suite currently builds **one executable per test `.cpp`** (462 binaries per preset), each statically linking the fixpp stack. Across 8 build presets this is **66.9 GB** of test binaries (baseline captured 2026-07-10 in `../research/test-grouping-baseline/` — the **parent repo**, one level above the `library/` submodule; `research/` is gitignored + CI-guarded inside `library/` per Article XV §18, so it correctly lives in the parent — re-runnable via `inventory.sh`). The dominant cost is identical instrumented library code duplicated hundreds of times per preset. This is the top disk consumer on the developer machine and inflates clean-build link time and CI storage.
 
-A validated spike (dictionary, 2026-07-10) grouped 14 pure tests into one binary: **debug 85.3→12.0 MB (7.1×), asan 150.0→18.1 MB (8.3×)**, 251 tests green in one process, per-test granularity preserved, no ODR collisions. `tests/core/CMakeLists.txt` already uses this pattern in production (`gtest_discover_tests` for `fixpp_core_tests`/`fixpp_capi_tests`, standalone `add_test` for tests needing name-selection or special properties). This feature generalizes that proven pattern across **all 24 test modules**, one module at a time, with **before/after measurement** and **zero regression** to any existing gate or test guarantee.
+A validated spike (dictionary, 2026-07-10) grouped 14 pure tests into one binary: **debug 85.3→12.0 MB (7.1×), asan 150.0→18.1 MB (8.3×)**, 251 tests green in one process, per-test granularity preserved, no ODR collisions. `tests/core/CMakeLists.txt` already uses this pattern in production (`gtest_discover_tests` for `fixpp_core_tests`/`fixpp_capi_tests`, standalone `add_test` for tests needing name-selection or special properties). This feature generalizes that proven pattern across **all 23 test modules**, one module at a time, with **before/after measurement** and **zero regression** to any existing gate or test guarantee.
 
 ## Clarifications
 
@@ -103,7 +103,7 @@ As a maintainer, I guarantee that grouping changes **nothing** observable to the
 
 ### Key Entities *(include if feature involves data)*
 
-- **Test module**: a `tests/<module>/` directory with its own `CMakeLists.txt` (24 total); the unit of rollout.
+- **Test module**: a `tests/<module>/` directory with its own `CMakeLists.txt` (23 total; `tests/abi/` is fixtures-only — no `.cpp`/`CMakeLists.txt` — and is not a module); the unit of rollout.
 - **Grouped bucket**: a set of isolation-safe, label-homogeneous, link-compatible test `.cpp` files compiled into one `gtest_discover_tests` executable.
 - **Standalone test**: a test that must remain its own executable per the FR-002 taxonomy; carries its own ctest name, labels, and properties.
 - **Disposition record**: per-test decision (grouped-into-<bucket> | standalone:<reason>), the audit trail proving FR-011.
@@ -118,7 +118,7 @@ As a maintainer, I guarantee that grouping changes **nothing** observable to the
 - **SC-003**: The coverage-index and every feature-completeness audit remain green and unmodified in substance across the whole feature.
 - **SC-004**: Every documented `ctest -L <label>` and `ctest -R <name>` selection resolves to the same logical set of tests after grouping as before.
 - **SC-005**: CI unfiltered `ctest` wall-time per preset does not regress by more than **10%** (target net-neutral-or-better) — measured on the pilot (`dictionary`) and confirmed on the largest module (`session`).
-- **SC-006**: 100% of tests across all 24 modules are accounted for as either grouped or standalone-with-reason at feature close.
+- **SC-006**: 100% of tests across all 23 modules are accounted for as either grouped or standalone-with-reason at feature close.
 
 ## Assumptions
 

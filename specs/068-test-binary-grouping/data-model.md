@@ -5,7 +5,7 @@ No runtime data model (build-infra feature). The "entities" are the build/measur
 ## Entities
 
 ### Test module
-- **What**: a `tests/<module>/` directory with its own `CMakeLists.txt`. 24 total. The unit of rollout.
+- **What**: a `tests/<module>/` directory with its own `CMakeLists.txt`. 23 total (`tests/abi/` is fixtures-only, not a module). The unit of rollout.
 - **Attributes**: `name`; `groupable_cpp[]`; `standalone_cpp[]`; `buckets[]`; per-preset baseline size (from CSV).
 - **Lifecycle**: `baseline → grouped (buckets + carve-outs defined) → verified (8 presets green, delta recorded) → done`.
 

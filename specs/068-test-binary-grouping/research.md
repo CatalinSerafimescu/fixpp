@@ -44,7 +44,7 @@ Two spec categories were **narrowed** by the census — more tests are groupable
 
 ## D6 — Measurement harness (the 3 deltas)
 
-- **Disk** (every module, FR-008): `research/test-grouping-baseline/inventory.sh <out.csv>` before/after, diff vs `baseline-2026-07-10.csv` for the module's rows.
+- **Disk** (every module, FR-008): `../research/test-grouping-baseline/inventory.sh <out.csv>` (parent repo, from `library/` cwd) before/after, diff vs `baseline-2026-07-10.csv` for the module's rows.
 - **ctest wall-time** (pilot + session, FR-009/SC-005): `time ctest --preset <p> -L <module>` (or the module's test subset) before vs after; assert ≤10%/preset. Captures the POST_BUILD per-case launch overhead.
 - **Incremental relink** (pilot, FR-009): `touch` one grouped test's `.cpp`, time `cmake --build --target <bucket> -j2`; compare to the pre-grouping single-binary relink — validates the bucket blast-radius choice (D4).
 

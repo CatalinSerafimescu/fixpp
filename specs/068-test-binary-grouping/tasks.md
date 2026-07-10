@@ -12,7 +12,7 @@
 
 ## Phase 1: Setup
 
-- [ ] T001 Confirm the baseline is intact and reproducible: `research/test-grouping-baseline/baseline-2026-07-10.csv` + `BASELINE.md` present; re-run `bash research/test-grouping-baseline/inventory.sh /tmp/before-check.csv` and confirm per-preset totals match the committed baseline (drift = investigate before proceeding).
+- [ ] T001 Confirm the baseline is intact and reproducible. **Path note:** the baseline lives in the **parent repo** at `../research/test-grouping-baseline/` (from the `library/` submodule cwd where all Spec-Kit tasks run) — NOT `library/research/…` (gitignored + CI-guarded, Art XV §18). Confirm `../research/test-grouping-baseline/baseline-2026-07-10.csv` + `BASELINE.md` present; re-run `bash ../research/test-grouping-baseline/inventory.sh /tmp/before-check.csv` and confirm per-preset totals match the committed baseline (drift = investigate before proceeding).
 - [ ] T002 Create the disposition ledger `specs/068-test-binary-grouping/dispositions.md` with a per-module table skeleton (columns: `.cpp` | decision `grouped:<bucket>`/`standalone:<reason>` | odr_action) — the FR-011 audit trail.
 
 ## Phase 2: Foundational
@@ -78,7 +78,7 @@
 
 ## Phase 6: Polish & Cross-Cutting Concerns
 
-- [ ] T030 [P] Roll up totals in `specs/068-test-binary-grouping/measurements.md`: per-module and grand-total per-preset disk delta vs baseline (SC-001), the session wall-time confirmation (SC-005), and the total binary-count reduction. Update `research/test-grouping-baseline/BASELINE.md` with the "after" column.
+- [ ] T030 [P] Roll up totals in `specs/068-test-binary-grouping/measurements.md`: per-module and grand-total per-preset disk delta vs baseline (SC-001), the session wall-time confirmation (SC-005), and the total binary-count reduction. Update `../research/test-grouping-baseline/BASELINE.md` (parent repo) with the "after" column.
 - [ ] T031 [P] Update project memory `project_test_binary_grouping_disk_win` and `CLAUDE.md` SPECKIT block with the realized numbers at feature close.
 - [ ] T032 Run `/speckit-verify 068-test-binary-grouping` (Article XVII §8) — serial 8-preset matrix mirror; produce `.specify/decisions/068-test-binary-grouping-verify.md`. For this test-infra feature the polish checks are: full-matrix ctest green (behavior preservation), disk delta recorded, gates/selectability preserved. *(Resource gate: AskUserQuestion first.)*
 

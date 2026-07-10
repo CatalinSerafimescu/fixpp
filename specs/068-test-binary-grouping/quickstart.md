@@ -4,7 +4,7 @@ The repeatable procedure applied per module (FR-010, one at a time, descending d
 
 ## 0. Preconditions
 - Tree clean; all 8 presets built at the current baseline.
-- `research/test-grouping-baseline/baseline-2026-07-10.csv` present (the *before* reference).
+- `../research/test-grouping-baseline/baseline-2026-07-10.csv` present (the *before* reference). **All paths below are from the `library/` submodule cwd; the baseline lives in the PARENT repo (`../research/…`), never inside `library/` (gitignored + CI-guarded, Art XV §18).**
 
 ## 1. Census the module
 For `tests/<module>/`, classify each `.cpp`:
@@ -56,7 +56,7 @@ PASS = every preset green, no new sanitizer finding (FR-006), and the built/run 
 
 ## 6. Measure & record (FR-008)
 ```bash
-bash research/test-grouping-baseline/inventory.sh /tmp/after.csv
+bash ../research/test-grouping-baseline/inventory.sh /tmp/after.csv
 # diff this module's rows vs baseline-2026-07-10.csv → record delta
 ```
 **Pilot (`dictionary`) additionally** (FR-009/SC-005):

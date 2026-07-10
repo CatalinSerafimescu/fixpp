@@ -11,13 +11,13 @@ Reduce the 66.9 GB test-binary matrix (462 one-`.cpp`-per-executable binaries ×
 
 **Language/Version**: CMake (build system) driving Clang 22 / GCC test compiles; no C++ production source changed
 **Primary Dependencies**: CMake ≥ (repo min), GoogleTest + `include(GoogleTest)` → `gtest_discover_tests`, CTest
-**Storage**: N/A (build artifacts only; baseline CSV in `research/test-grouping-baseline/`)
+**Storage**: N/A (build artifacts only; baseline CSV in `../research/test-grouping-baseline/` — parent repo, one level above the `library/` submodule)
 **Testing**: the existing GoogleTest suite, run unchanged via `ctest --preset <p>` across all 8 presets; behavior-preservation is the acceptance signal
 **Target Platform**: Linux/Clang (Tier 1) primary; must not change what any preset builds/runs
 **Project Type**: library — internal test infrastructure
 **Performance Goals**: several-fold disk reduction on the grouped portion (SC-001); CI unfiltered-ctest wall-time regression ≤ 10% per preset, target net-neutral (SC-005)
 **Constraints**: no `src/`, `include/`, C-ABI, Python, or runtime change; preserve coverage-index + completeness audits + `ctest -L`/`-R` selectability; test source edited only to resolve an ODR collision (FR-012); local build parallelism capped `-j2` (WSL2 OOM); measurement env = local WSL2 clang presets
-**Scale/Scope**: 24 test modules, ~462 binaries/preset, 8 presets
+**Scale/Scope**: 23 test modules, ~462 binaries/preset, 8 presets
 
 *No NEEDS CLARIFICATION remain — resolved in spec `## Clarifications` (2026-07-10).*
 
@@ -63,17 +63,17 @@ specs/068-test-binary-grouping/
 
 ```text
 tests/
-├── <module>/CMakeLists.txt   # THE edit surface (24 modules); grouped + standalone target defs
+├── <module>/CMakeLists.txt   # THE edit surface (23 modules); grouped + standalone target defs
 ├── core/CMakeLists.txt       # reference precedent (already grouped)
 └── ...                       # test .cpp edited ONLY on ODR collision (FR-012)
 
-research/test-grouping-baseline/
-├── BASELINE.md               # per-module/per-preset baseline (2026-07-10)
-├── baseline-2026-07-10.csv   # comparison basis
-└── inventory.sh              # re-runnable before/after measurement
+../research/test-grouping-baseline/   # PARENT REPO (one level above library/ — research/ is
+├── BASELINE.md                       #   gitignored + CI-guarded inside library/, Art XV §18)
+├── baseline-2026-07-10.csv           # comparison basis
+└── inventory.sh                      # re-runnable before/after measurement
 ```
 
-**Structure Decision**: Single edit surface — `tests/**/CMakeLists.txt`. No `src/`, `include/`, `bindings/`, `bench/`, or codegen change. Measurement artifacts live under the parent-repo `research/` tree with the CSV/script committed into the feature evidence at close.
+**Structure Decision**: Single edit surface — `tests/**/CMakeLists.txt` inside the `library/` submodule. No `src/`, `include/`, `bindings/`, `bench/`, or codegen change. Measurement artifacts live under the **parent-repo** `research/` tree (`../research/test-grouping-baseline/` from library cwd — never inside `library/`, which gitignores + CI-guards `research/`); every executable command that touches them uses the `../research/…` path.
 
 ## Complexity Tracking
 
