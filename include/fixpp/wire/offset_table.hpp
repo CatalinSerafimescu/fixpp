@@ -167,6 +167,15 @@ public:
     // constant per parse, FR-005).
     void set_group_context(group_context const& ctx) const noexcept;
 
+    // 065 T003: public seed accessor for a C-ABI group cursor's OWN context
+    // (its container path + its own no_tag) — `stored_group_context().pushed(
+    // no_tag)` (private helper `:257`, out-of-line def next to it in
+    // offset_table.cpp — `group_context` is only forward-declared above, so
+    // an inline `.pushed()` body would not compile). Used by
+    // `fixpp_msg_get_group` to seed the top-level cursor's `group_ctx`
+    // (research Decision 2; data-model.md §Invariant).
+    [[nodiscard]] group_context group_context_for(std::uint16_t no_tag) const noexcept;
+
     // Repeating-group instance slices for `no_tag`, in document order,
     // materialized once into this table's per-message mr arena (append-only,
     // reserved once → no reallocation), then cached per no_tag. The returned
@@ -222,6 +231,20 @@ public:
         detail::generation_token gen, group_context const& ctx) const noexcept
         [[clang::lifetimebound]];
 
+    // 065 T004: convenience overload forwarding to the 7-arg
+    // `nested_group_slices` above using THIS table's own `opaque_dict_` /
+    // `group_member_fn_` and a build-mode-safe token (`token_for_nested_cache()`
+    // `:private below` — `gen_` exists only `#ifndef NDEBUG`, so forwarding it
+    // directly would not compile in release). The 7-arg algorithm + cache
+    // keying stay UNTOUCHED (FR-005). Out-of-line in offset_table.cpp (needs
+    // the complete `group_context` type, only forward-declared here — same
+    // rule as `group_context_for()` above). Used by the C-ABI nested read
+    // (research Decision 4; data-model.md §Reused).
+    [[nodiscard]] std::span<group_slice const> nested_group_slices(
+        std::byte const* slice_data [[clang::lifetimebound]], std::size_t slice_len,
+        std::uint16_t nested_no_tag, group_context const& ctx) const noexcept
+        [[clang::lifetimebound]];
+
 private:
     [[nodiscard]] static std::size_t overlay_cap_for(std::size_t n) noexcept;
     void build(frame_view const& frame) noexcept;  // shared build impl (both ctors)
@@ -273,6 +296,18 @@ private:
 #ifndef NDEBUG
     detail::generation_token gen_{};
 #endif
+
+    // 065 T004: build-mode-safe token forward for the 4-arg
+    // `nested_group_slices` convenience overload — `gen_` above exists only
+    // `#ifndef NDEBUG`, so a release TU cannot name it directly.
+    [[nodiscard]] detail::generation_token token_for_nested_cache() const noexcept {
+#ifndef NDEBUG
+        return gen_;
+#else
+        return {};
+#endif
+    }
+
     Config cfg_{};                           // caller-tunable caps (FR-015 / [2b §1.2])
     void const* opaque_dict_ = nullptr;
     group_member_fn_t group_member_fn_ = nullptr;

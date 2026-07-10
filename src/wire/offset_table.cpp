@@ -416,6 +416,15 @@ group_context OffsetTable::stored_group_context() const noexcept {
                          .depth = group_ctx_depth_};
 }
 
+// 065 T003: public seed accessor for a C-ABI group cursor's OWN context
+// (this table's stored context, pushed with `no_tag`) — see offset_table.hpp
+// for the full contract. Out-of-line: `group_context` is only forward-declared
+// in the header, so `.pushed()` needs the complete type (available here via
+// group_view.hpp).
+group_context OffsetTable::group_context_for(std::uint16_t no_tag) const noexcept {
+    return stored_group_context().pushed(no_tag);
+}
+
 // 063 Defect B (T021): parse a NumInGroup count field's DECLARED value from
 // the frame bytes via the shared saturating scanner (parse_bounded_u32,
 // tag_scan.hpp). Non-digit bytes stop accumulation; the actual instance scan
@@ -757,6 +766,18 @@ std::span<group_slice const> OffsetTable::nested_group_slices(
         // degrade to "rebuild next time" rather than lose this result.
     }
     return table != nullptr ? table->group_slices(nested_no_tag) : std::span<group_slice const>{};
+}
+
+// 065 T004: convenience overload — forwards to the 7-arg overload above using
+// THIS table's own `opaque_dict_`/`group_member_fn_` and a build-mode-safe
+// token (`token_for_nested_cache()`). The 7-arg algorithm + cache keying stay
+// UNTOUCHED. Out-of-line: needs the complete `group_context` type (only
+// forward-declared in the header).
+std::span<group_slice const> OffsetTable::nested_group_slices(
+    std::byte const* slice_data, std::size_t slice_len, std::uint16_t nested_no_tag,
+    group_context const& ctx) const noexcept {
+    return nested_group_slices(slice_data, slice_len, nested_no_tag, opaque_dict_,
+                               group_member_fn_, token_for_nested_cache(), ctx);
 }
 
 }  // namespace fixpp::wire
