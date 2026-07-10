@@ -64,6 +64,9 @@ ctest --test-dir build/linux-clang-debug -R 067_builder_roundtrip --output-on-fa
 # required-presence: top-level + group-entry depth
 ctest --test-dir build/linux-clang-debug -R 067_builder_validate --output-on-failure
 
+# generated-wrapper fail-closed (undersized out untouched, SOH/control byte, Bool Y/N, Length+Data coupling, required-group-zero, W-vs-X delimiter)
+ctest --test-dir build/linux-clang-debug -R 067_builder_failclosed --output-on-failure
+
 # exact-set completeness over the 33 OFFICIAL MsgTypes
 ctest --test-dir build/linux-clang-debug -R 067_completeness --output-on-failure
 
