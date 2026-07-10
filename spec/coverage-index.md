@@ -219,13 +219,13 @@ The application spec is version-specific (FIX 4.0 through FIX 5.0SP2); sections 
 | 7 | Advertisement | R-003 | — |
 | B | News | R-004 | — |
 | C | Email | R-005 | — |
-| R | QuoteRequest | M-010 | — |
-| S | Quote | M-009 | — |
-| Z | QuoteCancel | M-011 | — |
-| a | QuoteStatusRequest | M-012 | — |
-| b | MassQuoteAcknowledgement | M-008 | — |
-| i | MassQuote | M-008 | — |
-| AG | QuoteRequestReject | M-010 | — |
+| R | QuoteRequest | M-010 | 067: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite; byte-oracle / round-trip / required-presence). Full-field all-version (FR-015b) future. |
+| S | Quote | M-009 | 067: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite; byte-oracle / round-trip / required-presence). Full-field all-version (FR-015b) future. |
+| Z | QuoteCancel | M-011 | 067: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite; byte-oracle / round-trip / required-presence). Full-field all-version (FR-015b) future. |
+| a | QuoteStatusRequest | M-012 | 067: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite; byte-oracle / round-trip / required-presence). Full-field all-version (FR-015b) future. |
+| b | MassQuoteAcknowledgement | M-008 | 067: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite; byte-oracle / round-trip / required-presence). Full-field all-version (FR-015b) future. |
+| i | MassQuote | M-008 | 067: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite; byte-oracle / round-trip / required-presence). Full-field all-version (FR-015b) future. |
+| AG | QuoteRequestReject | M-010 | 067: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite; byte-oracle / round-trip / required-presence). Full-field all-version (FR-015b) future. |
 | AH | RFQRequest | A-021 | — |
 | AI | QuoteStatusReport | A-021 | — |
 | AJ | QuoteResponse | A-021 | — |
@@ -234,21 +234,21 @@ The application spec is version-specific (FIX 4.0 through FIX 5.0SP2); sections 
 
 | MsgType | Message | Catalogue ID | Gap note |
 |---|---|---|---|
-| V | MarketDataRequest | M-001 | — |
-| W | MarketDataSnapshotFullRefresh | M-002 | — |
-| X | MarketDataIncrementalRefresh | M-003 | — |
-| Y | MarketDataRequestReject | M-004 | — |
-| e | SecurityStatusRequest | M-006 | — |
-| f | SecurityStatus | M-006 | — |
-| g | TradingSessionStatusRequest | M-007 | — |
-| h | TradingSessionStatus | M-007 | — |
+| V | MarketDataRequest | M-001 | 067: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite; byte-oracle / round-trip / required-presence). Full-field all-version (FR-015b) future. |
+| W | MarketDataSnapshotFullRefresh | M-002 | 067: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite; byte-oracle / round-trip / required-presence). Full-field all-version (FR-015b) future. |
+| X | MarketDataIncrementalRefresh | M-003 | 067: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite; byte-oracle / round-trip / required-presence). Full-field all-version (FR-015b) future. |
+| Y | MarketDataRequestReject | M-004 | 067: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite; byte-oracle / round-trip / required-presence). Full-field all-version (FR-015b) future. |
+| e | SecurityStatusRequest | M-006 | 067: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite; byte-oracle / round-trip / required-presence). Full-field all-version (FR-015b) future. |
+| f | SecurityStatus | M-006 | 067: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite; byte-oracle / round-trip / required-presence). Full-field all-version (FR-015b) future. |
+| g | TradingSessionStatusRequest | M-007 | 067: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite; byte-oracle / round-trip / required-presence). Full-field all-version (FR-015b) future. |
+| h | TradingSessionStatus | M-007 | 067: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite; byte-oracle / round-trip / required-presence). Full-field all-version (FR-015b) future. |
 
 ### Application Messages — Reference Data
 
 | MsgType | Message | Catalogue ID | Gap note |
 |---|---|---|---|
-| c | SecurityDefinitionRequest | M-005 | — |
-| d | SecurityDefinition | M-005 | — |
+| c | SecurityDefinitionRequest | M-005 | 067: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite; byte-oracle / round-trip / required-presence). Full-field all-version (FR-015b) future. |
+| d | SecurityDefinition | M-005 | 067: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite; byte-oracle / round-trip / required-presence). Full-field all-version (FR-015b) future. |
 | v | SecurityTypeRequest | A-025 | — |
 | w | SecurityTypes | A-025 | — |
 | x | SecurityListRequest | A-025 | — |
@@ -265,17 +265,27 @@ The application spec is version-specific (FIX 4.0 through FIX 5.0SP2); sections 
 | BU | MarketDefinition | A-028 | — |
 | BV | MarketDefinitionUpdateReport | A-028 | — |
 
+<!-- ART VI §3 DISPOSITION (067-codegen-writer-emitter, 2026-07-10): the 33 OFFICIAL
+     application-message write rows advanced by 067 (Trade A-001..A-013 / Market Data &
+     Quote M-001..M-012 / Post-Trade P-001..P-003) carry only MESSAGE-LEVEL normative refs
+     (`[FIX44]`/`[FIX50SP2]` DocAbbrev), NOT section-granular `[DocAbbrev §X.Y.Z]` refs.
+     This is a DELIBERATE Art VI §3 `[impl]`/design-authority disposition — consistent with
+     the pre-existing project-wide convention for the whole FIX44 application-message domain
+     (every app-message row here is message-level) — NOT an omission. The frozen 061 shape-oracle
+     + QuickFIX goldens + `body_builder` are the design authority 067 reproduces byte-for-byte
+     (see spec.md `## Normative References`, "Design authority" block). Recorded per T029(c). -->
+
 ### Application Messages — Trade (FIX 4.0+)
 
 | MsgType | Message | Catalogue ID | Gap note |
 |---|---|---|---|
-| D | NewOrderSingle | A-001 | Partial G2 interop evidence (020-g2-business-messages): minimal FIX-4.4 typed NOS builder + live both-role interop vs QuickFIX-J/cpp. Full-field + all-version (4.2/5.0SP2/FIXT.1.1) coverage deferred (FR-015a/FR-015b). Row stays backlog. |
-| E | NewOrderList | A-002 | 061-slim shape-oracle: `build_new_order_list` on `wire::body_builder` (3-level `73→453→802`) + QuickFIX golden `golden/new_order_list.fix` + round-trip/read/fail-closed witnesses. Full-field + all-version coverage deferred (FR-015a/FR-015b). Row stays backlog. |
-| F | OrderCancelRequest | A-003 | — |
-| G | OrderCancelReplaceRequest | A-004 | — |
-| H | OrderStatusRequest | A-005 | — |
-| 8 | ExecutionReport | A-006 | Partial G2 interop evidence (020-g2-business-messages): minimal FIX-4.4 typed ExecRpt builder (fully-filled) + live both-role interop vs QuickFIX-J/cpp. Full-field + all-version (4.2/5.0SP2/FIXT.1.1) coverage deferred (FR-015a/FR-015b). Row stays backlog. |
-| 9 | OrderCancelReject | A-007 | 061-slim shape-oracle: `build_order_cancel_reject` on `wire::body_builder` (group-free) + QuickFIX golden `golden/order_cancel_reject.fix` + round-trip/read/fail-closed witnesses. Full-field + all-version coverage deferred (FR-015a/FR-015b). Row stays backlog. |
+| D | NewOrderSingle | A-001 | Partial G2 interop evidence (020-g2-business-messages): minimal FIX-4.4 typed NOS builder + live both-role interop vs QuickFIX-J/cpp. Full-field + all-version (4.2/5.0SP2/FIXT.1.1) coverage deferred (FR-015b, all-version). Full-field v44 codegen write now **done** via 067: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite; byte-oracle / round-trip / required-presence). Full-field all-version (FR-015b) future. |
+| E | NewOrderList | A-002 | 061-slim shape-oracle: `build_new_order_list` on `wire::body_builder` (3-level `73→453→802`) + QuickFIX golden `golden/new_order_list.fix` + round-trip/read/fail-closed witnesses. Full-field + all-version coverage deferred (FR-015b, all-version). Full-field v44 codegen write now **done** via 067: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite; byte-oracle / round-trip / required-presence). Full-field all-version (FR-015b) future. |
+| F | OrderCancelRequest | A-003 | 067: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite; byte-oracle / round-trip / required-presence). Full-field all-version (FR-015b) future. |
+| G | OrderCancelReplaceRequest | A-004 | 067: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite; byte-oracle / round-trip / required-presence). Full-field all-version (FR-015b) future. |
+| H | OrderStatusRequest | A-005 | 067: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite; byte-oracle / round-trip / required-presence). Full-field all-version (FR-015b) future. |
+| 8 | ExecutionReport | A-006 | Partial G2 interop evidence (020-g2-business-messages): minimal FIX-4.4 typed ExecRpt builder (fully-filled) + live both-role interop vs QuickFIX-J/cpp. Full-field + all-version (4.2/5.0SP2/FIXT.1.1) coverage deferred (FR-015b, all-version). Full-field v44 codegen write now **done** via 067: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite; byte-oracle / round-trip / required-presence). Full-field all-version (FR-015b) future. |
+| 9 | OrderCancelReject | A-007 | 061-slim shape-oracle: `build_order_cancel_reject` on `wire::body_builder` (group-free) + QuickFIX golden `golden/order_cancel_reject.fix` + round-trip/read/fail-closed witnesses. Full-field + all-version coverage deferred (FR-015b, all-version). Full-field v44 codegen write now **done** via 067: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite; byte-oracle / round-trip / required-presence). Full-field all-version (FR-015b) future. |
 | K | ListCancelRequest | A-019 | — |
 | L | ListExecute | A-019 | — |
 | M | ListStatusRequest | A-019 | — |
@@ -284,14 +294,14 @@ The application spec is version-specific (FIX 4.0 through FIX 5.0SP2); sections 
 | k | BidRequest | A-020 | — |
 | l | BidResponse | A-020 | — |
 | m | ListStrikePrice | A-020 | — |
-| q | OrderMassCancelRequest | A-008 | — |
-| r | OrderMassCancelReport | A-009 | — |
+| q | OrderMassCancelRequest | A-008 | 067: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite; byte-oracle / round-trip / required-presence). Full-field all-version (FR-015b) future. |
+| r | OrderMassCancelReport | A-009 | 067: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite; byte-oracle / round-trip / required-presence). Full-field all-version (FR-015b) future. |
 | s | NewOrderCross | A-016 | — |
-| t | CrossOrderCancelReplaceRequest | A-012 | — |
-| u | CrossOrderCancelRequest | A-013 | — |
+| t | CrossOrderCancelReplaceRequest | A-012 | 067: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite; byte-oracle / round-trip / required-presence). Full-field all-version (FR-015b) future. |
+| u | CrossOrderCancelRequest | A-013 | 067: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite; byte-oracle / round-trip / required-presence). Full-field all-version (FR-015b) future. |
 | AB | NewOrderMultileg | A-017 | — |
-| AC | MultilegOrderCancelReplace | A-011 | — |
-| AF | OrderMassStatusRequest | A-010 | — |
+| AC | MultilegOrderCancelReplace | A-011 | 067: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite; byte-oracle / round-trip / required-presence). Full-field all-version (FR-015b) future. |
+| AF | OrderMassStatusRequest | A-010 | 067: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite; byte-oracle / round-trip / required-presence). Full-field all-version (FR-015b) future. |
 | BN | ExecutionAcknowledgement | A-018, A-024 | note: A-018 and A-024 are duplicates (same MsgType BN); see gap note |
 | BZ | OrderMassActionReport | A-023 | — |
 | CA | OrderMassActionRequest | A-023 | — |
@@ -300,8 +310,8 @@ The application spec is version-specific (FIX 4.0 through FIX 5.0SP2); sections 
 
 | MsgType | Message | Catalogue ID | Gap note |
 |---|---|---|---|
-| J | AllocationInstruction | P-001 | — |
-| P | AllocationInstructionAck | P-002 | — |
+| J | AllocationInstruction | P-001 | 067: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite; byte-oracle / round-trip / required-presence). Full-field all-version (FR-015b) future. |
+| P | AllocationInstructionAck | P-002 | 067: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite; byte-oracle / round-trip / required-presence). Full-field all-version (FR-015b) future. |
 | T | SettlementInstructions | P-006 | — |
 | o | RegistrationInstructions | R-001 | — |
 | p | RegistrationInstructionsResponse | R-001 | — |
@@ -315,7 +325,7 @@ The application spec is version-specific (FIX 4.0 through FIX 5.0SP2); sections 
 | AP | PositionReport | C-002 | — |
 | AQ | TradeCaptureReportRequestAck | P-008 | — |
 | AR | TradeCaptureReportAck | P-008 | — |
-| AS | AllocationReport | P-003 | 061-slim shape-oracle: `build_allocation_report` on `wire::body_builder` (multi-char `35=AS`, 2-level `453→802`) + QuickFIX golden `golden/allocation_report.fix` + round-trip/read/fail-closed witnesses. Full-field + all-version coverage deferred (FR-015a/FR-015b). Row stays backlog. |
+| AS | AllocationReport | P-003 | 061-slim shape-oracle: `build_allocation_report` on `wire::body_builder` (multi-char `35=AS`, 2-level `453→802`) + QuickFIX golden `golden/allocation_report.fix` + round-trip/read/fail-closed witnesses. Full-field + all-version coverage deferred (FR-015b, all-version). Full-field v44 codegen write now **done** via 067: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite; byte-oracle / round-trip / required-presence). Full-field all-version (FR-015b) future. |
 | AT | AllocationReportAck | P-004 | — |
 | AU | ConfirmationAck | P-005 | — |
 | AV | SettlementInstructionRequest | P-007 | — |
