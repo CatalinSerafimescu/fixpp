@@ -162,11 +162,14 @@ set(_v42_marker    "${CMAKE_BINARY_DIR}/_codegen/include/fixpp/v42/Messages.hpp"
 set(_v44_marker    "${CMAKE_BINARY_DIR}/_codegen/include/fixpp/v44/Messages.hpp")
 set(_v50sp2_marker "${CMAKE_BINARY_DIR}/_codegen/include/fixpp/v50sp2/Messages.hpp")
 set(_vt11_marker   "${CMAKE_BINARY_DIR}/_codegen/include/fixpp/vt11/Messages.hpp")
+# 067-codegen-writer-emitter: Builders.hpp is emitted for v44 ONLY (other
+# versions get no Builders.hpp — see emit_builders.cpp scope note).
+set(_v44_builders_marker "${CMAKE_BINARY_DIR}/_codegen/include/fixpp/v44/Builders.hpp")
 
 set(_need_generate FALSE)
 
 # Missing output?
-foreach(_marker IN ITEMS "${_v42_marker}" "${_v44_marker}" "${_v50sp2_marker}" "${_vt11_marker}")
+foreach(_marker IN ITEMS "${_v42_marker}" "${_v44_marker}" "${_v50sp2_marker}" "${_vt11_marker}" "${_v44_builders_marker}")
   if(NOT EXISTS "${_marker}")
     set(_need_generate TRUE)
     break()
@@ -348,6 +351,7 @@ set(FIXPP_CODEGEN_MARKER_v44    \"${CMAKE_BINARY_DIR}/_codegen/include/fixpp/v44
 set(FIXPP_CODEGEN_MARKER_v50sp2 \"${CMAKE_BINARY_DIR}/_codegen/include/fixpp/v50sp2/Messages.hpp\")
 set(FIXPP_CODEGEN_MARKER_vt11   \"${CMAKE_BINARY_DIR}/_codegen/include/fixpp/vt11/Messages.hpp\")
 set(FIXPP_CODEGEN_DISPATCH_MARKER \"${CMAKE_BINARY_DIR}/_codegen/include/fixpp/_dispatch/reify_dispatch_fixt.hpp\")
+set(FIXPP_CODEGEN_BUILDERS_MARKER_v44 \"${CMAKE_BINARY_DIR}/_codegen/include/fixpp/v44/Builders.hpp\")
 
 # (b) Configure-time flag: generation ran at CMake configure time (not build time).
 # This file itself is evidence — it is written by cmake/Codegen.cmake during the

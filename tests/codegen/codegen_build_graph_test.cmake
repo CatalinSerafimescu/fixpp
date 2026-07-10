@@ -72,6 +72,7 @@ foreach(_var IN ITEMS
     FIXPP_CODEGEN_MARKER_v50sp2
     FIXPP_CODEGEN_MARKER_vt11
     FIXPP_CODEGEN_DISPATCH_MARKER
+    FIXPP_CODEGEN_BUILDERS_MARKER_v44
     FIXPP_CODEGEN_CONFIGURE_TIME
     FIXPP_DICT_V42_IFACE_INC
     FIXPP_DICT_V44_IFACE_INC
@@ -111,6 +112,16 @@ if(EXISTS "${FIXPP_CODEGEN_DISPATCH_MARKER}")
 else()
   message(STATUS "[T039]   MISSING  ${FIXPP_CODEGEN_DISPATCH_MARKER}")
   _assert(FALSE "_dispatch/reify_dispatch_fixt.hpp must exist post-configure: ${FIXPP_CODEGEN_DISPATCH_MARKER}")
+endif()
+
+# v44/Builders.hpp marker (067-codegen-writer-emitter — v44 ONLY, not a
+# per-version loop; other codegen versions get no Builders.hpp).
+if(EXISTS "${FIXPP_CODEGEN_BUILDERS_MARKER_v44}")
+  message(STATUS "[T039]   OK  ${FIXPP_CODEGEN_BUILDERS_MARKER_v44}")
+  _assert(TRUE "v44/Builders.hpp exists")
+else()
+  message(STATUS "[T039]   MISSING  ${FIXPP_CODEGEN_BUILDERS_MARKER_v44}")
+  _assert(FALSE "v44/Builders.hpp must exist post-configure: ${FIXPP_CODEGEN_BUILDERS_MARKER_v44}")
 endif()
 
 # ── (b) Configure-time flag ───────────────────────────────────────────────────
