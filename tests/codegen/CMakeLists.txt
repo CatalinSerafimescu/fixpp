@@ -90,6 +90,7 @@ find_package(pugixml CONFIG REQUIRED)
 add_executable(codegen_067_emit_builders_unit_test
   test_067_emit_builders_unit.cpp
   "${CMAKE_SOURCE_DIR}/tools/codegen/fixpp-codegen/ir.cpp"
+  "${CMAKE_SOURCE_DIR}/tools/codegen/fixpp-codegen/emit_builders.cpp"
 )
 target_include_directories(codegen_067_emit_builders_unit_test PRIVATE
   "${CMAKE_SOURCE_DIR}/tools/codegen/fixpp-codegen"

@@ -40,6 +40,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include "emit.hpp"
 #include "ir.hpp"
 
 #ifndef FIXPP_DICT_DATA_DIR
@@ -359,4 +360,155 @@ TEST(Group067Census, CensusWalkDetectsSyntheticCrossLevelCollapse) {
            "if this failed";
     EXPECT_TRUE(it->second.contains(0));
     EXPECT_TRUE(it->second.contains(73));
+}
+
+// ---------------------------------------------------------------------------
+// T014 [US1] [TESTS-FIRST] — emit_builders(ir) OUTPUT-TEXT unit tests.
+//
+// MUST FAIL FIRST: emit_builders() is T005 empty-output scaffolding today
+// (returns "") — every assertion below finds nothing and goes RED. Phase 3b
+// (T016/T017) makes these GREEN.
+//
+// Assertions are deliberately SEMANTIC-TOKEN, not exact-whitespace/format:
+// numeric tag literals located as digit-boundary-safe substrings (immune to
+// surrounding whitespace/formatting choices Phase 3b has not made yet), and
+// call-shape substrings taken VERBATIM from data-model.md §1.2/quickstart.md
+// (`bb.field(tag, ...)`, `bb.group_begin(no_tag, delimiter_tag)`) — not an
+// invented format (feedback: "over-constraining the emitted text now means
+// 3b can't turn it green later").
+// ---------------------------------------------------------------------------
+namespace {
+
+// Locate the first digit-boundary-safe occurrence of `tag` (as a decimal
+// literal) at or after `from`. Guards against a substring collision, e.g.
+// searching "11" must not match inside "111" or "211".
+std::size_t find_tag_token(std::string const& text, int tag, std::size_t from = 0) {
+    std::string const needle = std::to_string(tag);
+    while (from <= text.size()) {
+        auto const pos = text.find(needle, from);
+        if (pos == std::string::npos) {
+            return pos;
+        }
+        bool const boundary_before =
+            (pos == 0) || (std::isdigit(static_cast<unsigned char>(text[pos - 1])) == 0);
+        bool const boundary_after = (pos + needle.size() >= text.size()) ||
+                                     (std::isdigit(static_cast<unsigned char>(
+                                          text[pos + needle.size()])) == 0);
+        if (boundary_before && boundary_after) {
+            return pos;
+        }
+        from = pos + 1;
+    }
+    return std::string::npos;
+}
+
+// Whitespace-collapsed copy of `text` (all ASCII whitespace removed), so a
+// call-shape substring search (e.g. "group_begin(268,269") is immune to
+// Phase 3b's eventual spacing/line-wrap choices.
+std::string collapse_whitespace(std::string const& text) {
+    std::string out;
+    out.reserve(text.size());
+    for (char c : text) {
+        if (std::isspace(static_cast<unsigned char>(c)) == 0) {
+            out.push_back(c);
+        }
+    }
+    return out;
+}
+
+// Extract the substring window starting at the first occurrence of
+// `start_marker` (e.g. a message's class/function identifier) up to (but
+// excluding) the next occurrence of `next_marker` at or after that point, or
+// to the end of `text` if `next_marker` does not recur. Scopes a token
+// search to ONE message's emitted region, avoiding cross-message
+// contamination (tag 11/ClOrdID, e.g., recurs in many messages).
+std::string extract_region(std::string const& text, std::string_view start_marker,
+                            std::string_view next_marker) {
+    auto const start = text.find(start_marker);
+    if (start == std::string::npos) {
+        return {};
+    }
+    auto const next = text.find(next_marker, start + start_marker.size());
+    return text.substr(start, next == std::string::npos ? std::string::npos : next - start);
+}
+
+}  // namespace
+
+// T014(a): top-level emission order is tag-ascending. D (NewOrderSingle)'s
+// top-level tags ClOrdID(11) < OrderQty(38) < OrdType(40) < Price(44) <
+// Side(54) < Symbol(55) < TransactTime(60) must be found in that byte
+// order within the NewOrderSingle builder's emitted region.
+TEST(Group067EmitBuilders, TopLevelEmissionOrderTagAscending) {
+    std::string const out = fixpp::codegen::emit_builders(fix44_ir());
+    std::string const region = extract_region(out, "NewOrderSingle", "NewOrderList");
+    ASSERT_FALSE(region.empty()) << "no NewOrderSingle builder region found in emit_builders() output "
+                                     "(empty until Phase 3b lands T016/T017)";
+
+    static constexpr std::array<int, 7> kAscendingTags = {11, 38, 40, 44, 54, 55, 60};
+    std::size_t last_pos = 0;
+    for (int tag : kAscendingTags) {
+        auto const pos = find_tag_token(region, tag, last_pos);
+        ASSERT_NE(pos, std::string::npos) << "tag " << tag << " not found in NewOrderSingle region";
+        EXPECT_GE(pos, last_pos) << "tag " << tag << " out of tag-ascending order";
+        last_pos = pos;
+    }
+}
+
+// T014(b): group-entry order is DECLARATION order (from group_order),
+// NOT tag order. E (NewOrderList)'s NoOrders(73) entry must emit
+// Symbol(55) BEFORE Side(54) (tag-sort would invert this to 54, 55 —
+// research.md R1/R9, T007(b)'s IR-level pin, here at the EMITTED-TEXT
+// level).
+TEST(Group067EmitBuilders, GroupEntryOrderIsDeclarationOrderNotTagSorted) {
+    std::string const out = fixpp::codegen::emit_builders(fix44_ir());
+    std::string const region = extract_region(out, "NewOrderList", "OrderCancelRequest");
+    ASSERT_FALSE(region.empty()) << "no NewOrderList builder region found in emit_builders() output";
+
+    // Scope to AFTER the NoOrders(73) group tag is first mentioned, so the
+    // 55/54 search targets the group-entry emission, not any top-level
+    // occurrence.
+    auto const group_pos = find_tag_token(region, 73);
+    ASSERT_NE(group_pos, std::string::npos) << "NoOrders(73) not found in NewOrderList region";
+    std::string const entry_region = region.substr(group_pos);
+
+    auto const pos55 = find_tag_token(entry_region, 55);
+    auto const pos54 = find_tag_token(entry_region, 54);
+    ASSERT_NE(pos55, std::string::npos) << "Symbol(55) not found in NoOrders entry region";
+    ASSERT_NE(pos54, std::string::npos) << "Side(54) not found in NoOrders entry region";
+    EXPECT_LT(pos55, pos54) << "Symbol(55) must precede Side(54) in the NoOrders entry (declaration "
+                                "order) — tag-sort would wrongly invert this to 54, 55";
+}
+
+// T014(c): header/framing exclusion set {8,9,10,34,35,49,52,56} — the
+// generated builders never call `bb.field(<tag>, ...)` for a framing tag
+// (data-model.md §1.2's documented call shape verbatim). A body-only
+// builder that DID emit e.g. `field(8, ...)` would violate body_builder's
+// own INV-2 framing-tag reject unconditionally.
+TEST(Group067EmitBuilders, HeaderFramingTagsNeverPassedToFieldCall) {
+    std::string const out = fixpp::codegen::emit_builders(fix44_ir());
+    ASSERT_FALSE(out.empty()) << "emit_builders() output is empty (Phase 3b not landed yet)";
+
+    for (int tag : {8, 9, 10, 34, 35, 49, 52, 56}) {
+        std::string const needle = "field(" + std::to_string(tag) + ",";
+        EXPECT_EQ(out.find(needle), std::string::npos)
+            << "found forbidden framing-tag field() call for tag " << tag;
+    }
+}
+
+// T014(d): RC#1 per-message planner pin — ONE no_tag (268) yields DISTINCT
+// per-message group_begin(no_tag, delimiter_tag) calls in W (delimiter 269)
+// vs X (delimiter 279); a version-wide MemberMap-style plan would collapse
+// both to the same (wrong-for-one) delimiter. Call shape verbatim from
+// data-model.md §1.2 ("bb.group_begin(no_tag, delimiter_tag)").
+TEST(Group067EmitBuilders, RC1PerMessagePlannerDistinctDelimiterWvsX) {
+    std::string const out = fixpp::codegen::emit_builders(fix44_ir());
+    ASSERT_FALSE(out.empty()) << "emit_builders() output is empty (Phase 3b not landed yet)";
+    std::string const collapsed = collapse_whitespace(out);
+
+    EXPECT_NE(collapsed.find("group_begin(268,269"), std::string::npos)
+        << "W (MarketDataSnapshotFullRefresh) must open NoMDEntries(268) with delimiter "
+           "MDEntryType(269)";
+    EXPECT_NE(collapsed.find("group_begin(268,279"), std::string::npos)
+        << "X (MarketDataIncrementalRefresh) must open NoMDEntries(268) with delimiter "
+           "MDUpdateAction(279) — DISTINCT from W's 269 despite the SAME no_tag";
 }
