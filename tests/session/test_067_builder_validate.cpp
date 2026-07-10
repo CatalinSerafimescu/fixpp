@@ -261,3 +261,28 @@ TEST(BuilderValidate067, ZeroRequiredFieldMessage_EmptyArgs_ValidatesSuccess) {
         << "SecurityStatus has zero required application fields; an EMPTY Args must validate "
            "successfully (spec.md Edge Case, no-op required-presence path)";
 }
+
+// ── (f) Quote (35=S): an ENGAGED-EMPTY OPTIONAL group must validate clean --
+// distinct from a REQUIRED empty group, which IS rejected ((b) above /
+// RequiredGroupZero_ValidateRejects in test_067_builder_failclosed.cpp).
+// party_i_ds is an OPTIONAL group on QuoteArgs (writer_traits<QuoteArgs>::
+// group_checks: {false, &QuoteArgs_count_party_i_ds, ...}); engaging it with
+// a zero-length span drives `gc.count(args)` to `optional<size_t>(0)` (NOT
+// nullopt -- that would take the disengaged-skip branch instead) so
+// builder_validate.hpp:85's `gc.required && *n == 0` guard evaluates its
+// `gc.required` (false) leg -- the previously-uncovered BRDA:85,0 outcome --
+// and falls through to the (zero-iteration) entry loop -- clean. This kills
+// the mutant that drops the `gc.required &&` guard (`if (*n == 0) return
+// reject`), which would wrongly reject a legitimately engaged-empty optional
+// group. Anchors: spec.md G5 / Edge Case (engaged-empty optional group is
+// allowed); builder_validate.hpp:85.
+TEST(BuilderValidate067, Quote_EngagedEmptyOptionalGroup_ValidatesClean) {
+    fixpp::v44::QuoteArgs args{};
+    args.quote_id = "Q1";  // the sole required top-level field (117)
+    args.party_i_ds =
+        std::span<const fixpp::v44::QuotePartyIDsArgs>{};  // engaged (has_value), count()==0
+    auto r = fixpp::v44::validate_Quote(args);
+    EXPECT_TRUE(r.has_value())
+        << "engaged-empty OPTIONAL group must validate clean (G5) -- distinct from a REQUIRED "
+           "empty group, which is rejected";
+}
