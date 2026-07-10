@@ -32,7 +32,7 @@ As a maintainer, I convert one representative module's isolation-safe tests into
 
 **Acceptance Scenarios**:
 
-1. **Given** a module with a mix of pure and isolation-sensitive tests, **When** grouping is applied, **Then** every pure/stateless test is grouped into a `gtest_discover_tests` binary and every isolation-sensitive test remains its own executable, each disposition recorded with a reason.
+1. **Given** a module with a mix of pure and isolation-sensitive tests, **When** grouping is applied, **Then** every pure/stateless test is grouped into a whole-binary `add_test` executable and every isolation-sensitive test remains its own executable, each disposition recorded with a reason.
 2. **Given** the grouped module, **When** each of the 8 presets is built and `ctest --preset <p>` is run, **Then** the full test set passes on every preset with no new sanitizer findings and no isolation regressions.
 3. **Given** the grouped module, **When** `inventory.sh` is re-run, **Then** the module's per-preset binary size is measurably reduced versus baseline and the delta is recorded.
 4. **Given** the grouped module, **When** ctest wall-time and a single-test incremental relink are measured, **Then** both are recorded against the pre-grouping values and the granularity decision is justified from those numbers.
@@ -81,7 +81,7 @@ As a maintainer, I guarantee that grouping changes **nothing** observable to the
 - **A death test that `abort()`s/`_exit()`s at top level** (not via gtest's fork-based `EXPECT_DEATH`) → would kill sibling tests in the same process; stays standalone.
 - **A `.cpp` compiled twice with different `-D`** (e.g. `decimal_mul_u64_wide` vs `_portable`) → cannot share one object; stays as separate targets.
 - **A preset that does not build a given test** (e.g. TSan-only or release-only targets) → grouping must not change which tests each preset builds/runs.
-- **`gtest_discover_tests` post-build discovery** runs the binary at build time to enumerate cases → a binary that crashes on `--gtest_list_tests` breaks discovery (the build fails loudly, so this cannot regress silently); the offending `.cpp` is carved out of that bucket to standalone, using the same carve-out policy as an unresolvable ODR collision (FR-012), and the carve-out is recorded in the disposition ledger. Caught by the pilot before rollout.
+- **(Superseded — applied to the rejected `gtest_discover_tests` mechanism, moot under the chosen whole-binary `add_test`, which has no build-time discovery step.)** `gtest_discover_tests` post-build discovery runs the binary at build time to enumerate cases → a binary that crashes on `--gtest_list_tests` breaks discovery (the build fails loudly, so this cannot regress silently); the offending `.cpp` would be carved out of that bucket to standalone, using the same carve-out policy as an unresolvable ODR collision (FR-012), and the carve-out recorded in the disposition ledger. Caught by the pilot before rollout (see measurements.md §(b)).
 
 ## Requirements *(mandatory)*
 
