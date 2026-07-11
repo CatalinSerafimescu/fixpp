@@ -551,3 +551,70 @@ spot-checked in the post-grouping run) is untouched. No historical
 `capi_version`, `capi_error_surface`, `capi_config_builders`,
 `capi_thunk_split`, `capi_abi_symbol_golden` were never referenced by name in
 a quickstart/tasks `-R` selector).
+
+## Module: `config` (9 `.cpp`) — US2
+
+044-toml-session-config / 045-config-logging TOML loader tests. Every `.cpp`
+carries exactly one of two LABELS strings — `"config;044"` (5 members) or
+`"config;045"` (4 members) — a clean D4 partition. No thread/global-alloc/
+`int main(`/duplicate-`Suite.Name` anywhere in the module (grepped all 9).
+`-R '^config'` matches nothing (the module's target names never started with
+`config_` before this change) — `-L config` is the only selector that ever
+worked here, per the orchestrator's module note; unaffected by grouping
+(still 044 → 1 entry, 045 → 1 entry, both label-preserved).
+
+### ODR pre-check (§3)
+
+No `int main(` in any `.cpp`. No duplicate `TEST`/`TEST_F`/`TEST_P`
+`Suite.Name` across the 9. Every file wraps its content in an anonymous
+namespace; the only free functions found textually outside that span
+(`test_load_logger_negative.cpp`: `neg_fixture`, `full_load`,
+`parse_logger_inline`) are already declared `static` (internal linkage).
+Zero FR-012 renames.
+
+### Grouped
+
+**Bucket `config_044_tests`** — 5 `.cpp`, label `"config;044"`, link
+`fixpp::config_toml` + `fixpp::session` + `fixpp::core` + `fixpp::tls` +
+`fixpp::dictionary` + `fixpp::transport` + OpenSSL/ZLIB + gtest (union —
+`test_quickfix_parity_table.cpp` needs only gtest per its own "Pure data
+test — no loader link needed" comment; the extra libs are a harmless no-op
+for it):
+
+| `.cpp` | decision | odr_action |
+|---|---|---|
+| `test_load_happy_path.cpp` | grouped:044 | none |
+| `test_load_negative_battery.cpp` | grouped:044 | none |
+| `test_load_selectors.cpp` | grouped:044 | none |
+| `test_load_multisession_defaults.cpp` | grouped:044 | none |
+| `test_quickfix_parity_table.cpp` | grouped:044 | none |
+
+**Bucket `config_045_tests`** — 4 `.cpp`, label `"config;045"`, link the
+044-bucket set + `fixpp::log` + `tomlplusplus::tomlplusplus` (+
+`fixpp::log_otlp`/`FIXPP_CONFIG_HAS_OTLP` when `TARGET fixpp::log_otlp`
+exists) + gtest, include `src/config` (private headers; needed by 3 of the 4
+white-box members, harmless additive for `test_load_deferred_surface.cpp`):
+
+| `.cpp` | decision | odr_action |
+|---|---|---|
+| `test_load_logger.cpp` | grouped:045 | none |
+| `test_load_logger_negative.cpp` | grouped:045 | none (3 free helpers already `static`) |
+| `test_load_logger_overrides.cpp` | grouped:045 | none |
+| `test_load_deferred_surface.cpp` | grouped:045 | none |
+
+### Standalone (0)
+
+None — the entire module groups into 2 buckets.
+
+**Sum:** 5 + 4 grouped = **9** ✓ (100% dispositioned).
+
+### `-R`/`-L` selectability (SC-004 / Scenario-3)
+
+`ctest -L config` selects 3 entries post-grouping (`config_044_tests`,
+`config_045_tests`, plus the pre-existing unrelated
+`transport_asio_plain_transport_config` — labeled `"config"` for a different
+reason, untouched by this module); `-L 044` and `-L 045` each select exactly
+1 entry, matching the pre-grouping 5-entry/4-entry sets collapsed into their
+respective buckets. No historical `-R`-by-target-name idiom targeted any of
+the 9 grouped names (`-R '^config'` was already documented as matching
+nothing per the module's own note).
