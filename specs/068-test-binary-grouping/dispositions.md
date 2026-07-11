@@ -742,3 +742,89 @@ grouped names (the module's own header documents `-R '^sync_'` as the only
 supported selector, and that prefix is preserved verbatim by every
 standalone entry; the grouped bucket's own name, `sync_pure_tests`, also
 matches `^sync_`).
+
+## Module: `transport` (20 `.cpp`) — US2 — 0 grouped (audited, no viable bucket)
+
+**Expectation-gap note:** the module brief predicted "rich per-test labels
+— keep buckets strictly label-homogeneous; likely several small
+label-buckets." The full audit found **zero** duplicate-label pairs — see
+the census below — so the outcome is 0 grouped / 20 standalone, not an
+omission. `CMakeLists.txt` is **unchanged** (no CMake edit this module);
+this section documents the full per-file audit and the ctest baseline run.
+
+### Census
+
+17 of the 20 `.cpp` carry a `LABELS` property via `set_tests_properties`;
+every one of those 17 strings is **unique** (verified: `sort | uniq -c` over
+the `LABELS "..."` lines emits count `1` for each of the 17 — no two
+`transport_*` tests share a label class, so every labeled test is a D4
+bucket-of-one → standalone regardless of mechanism).
+
+The remaining 3 `.cpp` carry **no** `LABELS` at all (a shared empty-label
+class, the only possible D4 partition in this module):
+`transport_smoke_test.cpp`, `test_transport_factory_paths.cpp`,
+`test_asio_tls_transport_error_paths.cpp`. Grepped all 3 for socket/thread
+usage:
+
+- `test_transport_factory_paths.cpp` and `test_asio_tls_transport_error_paths.cpp`
+  both bind real `asio::ip::tcp::acceptor`s on `127.0.0.1:0` and
+  `async_connect()` real client sockets (`MakeAcceptedAdoptsRealAcceptedSocketAndHandshakes`,
+  `ConnectRefusedMapsToTransportConnectRefused`,
+  `HandshakeTimeoutMapsToTransportHandshakeTimeout`, etc.) — real-socket
+  live-I/O tests, forced standalone per the orchestrator's explicit
+  "Socket/port/thread tests stay standalone" module note (same conservative
+  rule applied to interop's TLS live cells).
+- `transport_smoke_test.cpp` (pure `static_assert` slot-range check, no
+  socket/thread) is the lone survivor of the no-label class — a bucket-of-1
+  yields no disk win (D4), so it stays standalone too. No CMake change
+  needed for it.
+
+Grepped all 20 `.cpp` for `std::thread|std::jthread|std::async|thread_pool`:
+2 hits (`test_listener_acceptor.cpp`, `test_transport_factory_cert_source_publish_acquire.cpp`)
+— both already forced standalone by unique-label D4 (and the latter also
+carries a heterogeneous `ENVIRONMENT` `TSAN_OPTIONS=...` override — the
+procedure's explicit "heterogeneous per-test ... TSAN_OPTIONS ..." STANDALONE
+criterion). `test_tls_validation_failed_taxonomy.cpp` links `GTest::gtest`
+**without** `GTest::gtest_main` (i.e. brings its own `main()`) — reinforcing
+that it could never have joined a `gtest_main`-linked bucket even absent its
+unique label. No duplicate `TEST`/`TEST_F`/`TEST_P` `Suite.Name`; no global
+`operator new`/`set_new_handler` anywhere in the module.
+
+### Grouped
+
+None.
+
+### Standalone (20)
+
+| `.cpp` | reason |
+|---|---|
+| `transport_smoke_test.cpp` | no-label class, but the sole survivor after the other 2 no-label members were disqualified by the real-socket rule — bucket-of-1, no win (D4) |
+| `test_tls_handshake_pinset_rotation.cpp` | label-heterogeneous, sole `012;us1;seam7;tls` |
+| `test_durable_before_transmit_ordering.cpp` | label-heterogeneous, sole `012;us1;seam8` |
+| `test_compid_tls_identity_binding.cpp` | label-heterogeneous, sole `012;us1;seam9;tls` |
+| `test_inflight_exclusivity.cpp` | label-heterogeneous, sole `012;us1;seam15;gate-b-witness;rc-e` |
+| `test_reconnect_policy_schedule.cpp` | label-heterogeneous, sole `012;us2;seam13;reconnect` |
+| `test_backpressure.cpp` | label-heterogeneous, sole `012;us4;seam10;mock` |
+| `test_listener_acceptor.cpp` | label-heterogeneous, sole `012;us3;seam14;gate-b-witness;rc-a`; also genuinely concurrent (`std::thread`) and real-socket loopback |
+| `test_cancellation_propagation.cpp` | label-heterogeneous, sole `012;us1;seam5` |
+| `test_listener_accept_error_cancel.cpp` | label-heterogeneous, sole `012;us3;seam14;accept-error;cancel` |
+| `test_transport_factory_paths.cpp` | no-label class, but real-socket (`tcp::acceptor`/`async_connect` on `127.0.0.1`) — forced standalone per module's socket/port rule |
+| `test_load_credentials_seam13_witness.cpp` | label-heterogeneous, sole `012;gate-b-witness;seam13;tls` |
+| `test_close_truncated_mapping.cpp` | label-heterogeneous, sole `012;gate-b-witness;rc-d;sc006` |
+| `test_tls_validation_failed_taxonomy.cpp` | label-heterogeneous, sole `013;us3;tls;taxonomy;gate-b-witness`; explicit `TIMEOUT 60`; own `main()` (no `GTest::gtest_main` link) |
+| `test_verify_peer_pmr_oom.cpp` | label-heterogeneous, sole `012;gate-b-witness;rc-c;pmr-oom;tls` |
+| `test_asio_tls_transport_error_paths.cpp` | no-label class, but real-socket (`tcp::acceptor`/`async_connect` on `127.0.0.1`) — forced standalone per module's socket/port rule |
+| `test_asio_plain_transport.cpp` | label-heterogeneous, sole `043;us1;sc001;plain`; explicit `TIMEOUT 60`; real-socket loopback (live-I/O witness) |
+| `test_asio_plain_transport_config.cpp` | label-heterogeneous, sole `043;us1;sc008;plain;config`; explicit `TIMEOUT 60`; real-socket loopback |
+| `test_transport_factory_cert_source_publish_acquire.cpp` | label-heterogeneous, sole `046;nfr017;publish_acquire`; genuinely concurrent (`std::thread` writer/reader); heterogeneous `ENVIRONMENT` `TSAN_OPTIONS=...`; explicit `TIMEOUT 30` |
+| `test_transport_forced_fallback_link.cpp` | label-heterogeneous, sole `046;nfr017;fallback_link` |
+
+**Sum:** 0 grouped + 20 standalone = **20** ✓ (100% dispositioned).
+
+### `-R`/`-L` selectability (SC-004 / Scenario-3)
+
+No change — `CMakeLists.txt` is byte-identical to pre-068. `ctest -L
+transport` baseline run (post-068, unchanged file): 20/20 pass, matching the
+20 `.cpp` census 1:1 (`Label Time Summary` shows every `012`/`013`/`043`/`046`
+sub-label at its pre-existing count). No `-R`-by-target-name idiom applies
+(nothing changed).
