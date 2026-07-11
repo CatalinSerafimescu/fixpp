@@ -1,15 +1,11 @@
 # tests/core/CMakeLists.txt
+# 068-test-binary-grouping: isolation-safe core tests are grouped into
+# whole-binary add_test executables (bucketed by shared link-deps, no
+# LABELS on any of them). Isolation-sensitive tests (threading_* TSan
+# seams, per-`-D` decimal_mul_u64_wide variants, exact-set completeness
+# gates, the live-name decimal_compare_diff_oracle) stay standalone.
+# Dispositions in specs/068-test-binary-grouping/dispositions.md.
 find_package(GTest CONFIG REQUIRED)
-include(GoogleTest)
-
-# Existing Phase 3 smoke test
-add_executable(core_smoke_test core_smoke_test.cpp)
-target_link_libraries(core_smoke_test PRIVATE
-  fixpp_core
-  GTest::gtest
-  GTest::gtest_main
-)
-gtest_discover_tests(core_smoke_test)
 
 # 007-threading-clock seam 19 — session_executor round-trip + the
 # executor_not_serialised enforcement point + the N5 open-path arm. Links
@@ -68,8 +64,11 @@ add_threading_core_test(threading_session_executor_accessor_survives_erasure tes
 add_threading_core_test(threading_trace_context_engine_fallback
   test_trace_context_engine_fallback.cpp)  # gate-b/r1
 
-# Phase 4: fixpp_core_tests — pure C++ US1/US2/US4 tests (no C-ABI header dependency)
+# Phase 4: fixpp_core_tests — pure C++ US1/US2/US4 tests (no C-ABI header
+# dependency). 068: whole-binary add_test (converted from gtest_discover_tests);
+# core_smoke_test.cpp folded in (068 US2) — same link-deps, no LABELS.
 add_executable(fixpp_core_tests
+  core_smoke_test.cpp
   decimal_parse_test.cpp
   decimal_format_test.cpp
   decimal_compare_test.cpp
@@ -86,10 +85,11 @@ target_link_libraries(fixpp_core_tests PRIVATE
   GTest::gtest
   GTest::gtest_main
 )
-gtest_discover_tests(fixpp_core_tests)
+add_test(NAME fixpp_core_tests COMMAND fixpp_core_tests)
 
 # Phase 4: fixpp_capi_tests — tests that require the C-ABI header (US3)
 # Split prevents US1/US2 builds from blocking on US3 header creation (T033)
+# 068: whole-binary add_test (converted from gtest_discover_tests).
 add_executable(fixpp_capi_tests
   decimal_capi_layout_test.cpp
   decimal_capi_error_test.cpp
@@ -100,7 +100,7 @@ target_link_libraries(fixpp_capi_tests PRIVATE
   GTest::gtest
   GTest::gtest_main
 )
-gtest_discover_tests(fixpp_capi_tests)
+add_test(NAME fixpp_capi_tests COMMAND fixpp_capi_tests)
 
 # ── 017-log-otel T008 — error completeness gate ─────────────────────────────
 # Asserts exactly 7 new enumerators at slots 122–128 with exact-SET equality

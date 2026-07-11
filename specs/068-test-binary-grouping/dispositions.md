@@ -828,3 +828,109 @@ transport` baseline run (post-068, unchanged file): 20/20 pass, matching the
 20 `.cpp` census 1:1 (`Label Time Summary` shows every `012`/`013`/`043`/`046`
 sub-label at its pre-existing count). No `-R`-by-target-name idiom applies
 (nothing changed).
+
+## Module: `core` (25 `.cpp`) — US2
+
+Two `gtest_discover_tests` binaries (`fixpp_core_tests`, `fixpp_capi_tests`)
+predate 068 and already grouped their member `.cpp` at the *per-case*
+granularity — the pattern superseded by the procedure's whole-binary
+`add_test` (per-case discovery = 5.77× serial ctest regression, per
+IMPLEMENTATION-PROCEDURE.md). Converted both to whole-binary `add_test(NAME
+<t> COMMAND <t>)`; removed `include(GoogleTest)` (dead after the conversion —
+nothing else in this file used `gtest_discover_tests`). Neither target
+carried any LABELS before the conversion, so none were lost. The pre-existing
+standalone `core_smoke_test.cpp` (also no LABELS, identical link-deps —
+`fixpp_core` + gtest — to `fixpp_core_tests`) was folded into the
+`fixpp_core_tests` bucket as the "remaining standalone-but-groupable pure
+core test" per the module brief; its separate `add_executable`/
+`gtest_discover_tests` registration was removed.
+
+### ODR pre-check (§3)
+
+No `int main(` in any of the 8 `fixpp_core_tests` sources or the 3
+`fixpp_capi_tests` sources. No duplicate `TEST(Suite,Name)` across either
+bucket (verified: `CoreSmoke`, `DecimalParse`, `DecimalFormat`,
+`DecimalCompare`, `DecimalRoundtrip`, `DecimalCrossTraits`, `DecimalAlias`,
+`DecimalPredicates`/`DecimalTrapThrow`/`DecimalToPod`/`DecimalFromPod` suites
+in `fixpp_core_tests`; `DecimalCABILayout`/`DecimalCABIChecked`,
+`DecimalCAPIErrorPaths`, `DecimalReservedTolerance` in `fixpp_capi_tests` —
+all unique prefixes, no overlap). `decimal_cross_traits_test.cpp` opens
+`namespace fixpp::core::test { struct decimal_wide {...}; }` and injects an
+explicit `decimal_traits<test::decimal_wide>` specialization at namespace
+scope (not `static`/anon-ns) — safe because `decimal_wide` is a type defined
+only in this TU (no other bucket member names or specializes it), so no ODR
+collision. `decimal_parse_test.cpp`'s `parse()`,
+`decimal_format_test.cpp`'s `fmt()`, and
+`decimal_roundtrip_property_test.cpp`'s `check_roundtrip()` are all inside
+anonymous namespaces (internal linkage) — no collision. Shared header
+`tests/support/mock_decimal_traits.hpp` (used only by
+`decimal_cross_traits_test.cpp` in this module) is `#pragma once` +
+header-only. Zero FR-012 renames.
+
+### Grouped
+
+**Bucket `fixpp_core_tests`** — 8 `.cpp` (converted `gtest_discover_tests` →
+whole-binary `add_test`; `core_smoke_test.cpp` folded in), no LABELS, link
+`fixpp_core` + gtest, include `tests/support` (needed by
+`decimal_cross_traits_test.cpp`; harmless additive for the other 7):
+
+| `.cpp` | decision | odr_action |
+|---|---|---|
+| `core_smoke_test` | grouped:pure (folded in from standalone `gtest_discover_tests`) | none |
+| `decimal_parse_test` | grouped:pure (gtest_discover→add_test) | none (anon-ns `parse()`) |
+| `decimal_format_test` | grouped:pure (gtest_discover→add_test) | none (anon-ns `fmt()`) |
+| `decimal_compare_test` | grouped:pure (gtest_discover→add_test) | none |
+| `decimal_roundtrip_property_test` | grouped:pure (gtest_discover→add_test) | none (anon-ns `check_roundtrip()`) |
+| `decimal_cross_traits_test` | grouped:pure (gtest_discover→add_test) | none (TU-local `decimal_wide` specialization) |
+| `decimal_alias_test` | grouped:pure (gtest_discover→add_test) | none |
+| `decimal_predicates_test` | grouped:pure (gtest_discover→add_test) | none |
+
+**Bucket `fixpp_capi_tests`** — 3 `.cpp` (converted `gtest_discover_tests` →
+whole-binary `add_test`), no LABELS, link `fixpp_capi` + gtest:
+
+| `.cpp` | decision | odr_action |
+|---|---|---|
+| `decimal_capi_layout_test` | grouped:pure (gtest_discover→add_test) | none |
+| `decimal_capi_error_test` | grouped:pure (gtest_discover→add_test) | none |
+| `decimal_reserved_tolerance_test` | grouped:pure (gtest_discover→add_test) | none |
+
+### Standalone (14)
+
+| `.cpp` | reason |
+|---|---|
+| `test_session_executor_round_trip` (`threading_session_executor_round_trip`) | threading_* seam — kept standalone per module brief (isolation-sensitive TSan-suppressed seam family) |
+| `test_mock_clock_determinism` (`threading_mock_clock_determinism`) | threading_* seam, per-test `TSAN_OPTIONS` ENV via `add_threading_core_test` |
+| `test_sleep_cancel_race` (`threading_sleep_cancel_race`) | threading_* seam (TSan+ASan), per-test `TSAN_OPTIONS` ENV |
+| `test_engine_shutdown_order` (`threading_engine_shutdown_order`) | threading_* seam, per-test `TSAN_OPTIONS` ENV |
+| `test_third_party_clock_conformance` (`threading_third_party_clock_conformance`) | threading_* seam, per-test `TSAN_OPTIONS` ENV |
+| `test_trace_context_resume` (`threading_trace_context_resume`) | threading_* seam, per-test `TSAN_OPTIONS` ENV |
+| `test_session_local_lifetime` (`threading_session_local_lifetime`) | threading_* seam (TSan), per-test `TSAN_OPTIONS` ENV |
+| `test_session_executor_accessor_survives_erasure` (`threading_session_executor_accessor_survives_erasure`) | threading_* seam, per-test `TSAN_OPTIONS` ENV |
+| `test_trace_context_engine_fallback` (`threading_trace_context_engine_fallback`) | threading_* seam, per-test `TSAN_OPTIONS` ENV |
+| `test_017_error_completeness` (`error_017_completeness`) | exact-set completeness gate |
+| `test_019_error_completeness` (`error_019_completeness`) | exact-set completeness gate, label-heterogeneous (`019;foundational;error_slots`) |
+| `test_020_error_completeness` (`error_020_completeness`) | exact-set completeness gate, label-heterogeneous (`020;foundational;error_slots`) |
+| `decimal_compare_diff_oracle_test` | live `ctest -R decimal_compare_diff_oracle` name-selection idiom (own executable, not `gtest_discover_tests`, by design per its own header comment) |
+| `decimal_mul_u64_wide_test` | per-`-D` compile variants of one `.cpp` (`decimal_mul_u64_wide` / `decimal_mul_u64_wide_portable`, `FIXPP_DECIMAL_FORCE_PORTABLE_MUL`) — counted once (1 `.cpp` file, 2 targets) |
+
+**Sum:** 8 + 3 grouped (11) + 14 standalone = **25** ✓ (100% dispositioned).
+
+### `-R`/`-L` selectability (SC-004 / Scenario-3)
+
+Neither `fixpp_core_tests` nor `fixpp_capi_tests` (nor the folded-in
+`core_smoke_test`) ever carried a `LABELS` property, so no `-L` selector is
+affected. `gtest_discover_tests` previously registered these 11 `.cpp` as
+84 + 30 = 114 individually-addressable `ctest -R <Suite.Case>` entries (spot-
+verified via `--gtest_list_tests`: `fixpp_core_tests` lists 84 cases,
+`fixpp_capi_tests` 30) — under whole-binary `add_test` those per-case `-R`
+selectors no longer resolve as separate ctest entries (the same expected
+Scenario-3 tradeoff as every other grouped bucket in this ledger); the
+equivalent replacement is running the 2 named binaries directly
+(`ctest -R '^fixpp_core_tests$'` / `^fixpp_capi_tests$'`) or via
+`--gtest_filter` against the binary. No pre-existing `-L`/`-R`-by-target-name
+idiom in any quickstart/tasks doc targeted individual cases inside these two
+binaries (they were always referenced as `fixpp_core_tests`/
+`fixpp_capi_tests` at the module level). `threading_*`'s 9 standalone targets,
+the 3 completeness gates, and the 2 `decimal_mul_u64_wide*`/
+`decimal_compare_diff_oracle` live-name idioms are all unaffected (unchanged
+target names/properties).
