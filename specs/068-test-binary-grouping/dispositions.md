@@ -1224,3 +1224,105 @@ docs select tests via `-L tls`/`-L 011`, never by individual target name);
 `tls_handshake_alloc_guard`'s exact name is preserved (live-name mallocnesia
 dependency), so `tls_handshake_alloc_guard_mallocnesia`'s
 `$<TARGET_FILE:tls_handshake_alloc_guard>` reference is unaffected.
+
+## Module: `log` (12 `.cpp`) — US2 — 0 grouped (audited, no viable bucket)
+
+**Expectation-gap note:** the module brief predicted "group log-formatting/
+otel-log tests sharing link-deps+label." The full audit found a
+module-dominating threading hazard the brief hadn't anticipated — see
+below — so the outcome is 0 grouped / 12 standalone, not an omission. Same
+shape as the `transport` module (0/20). `CMakeLists.txt` is **unchanged**
+(no CMake edit this module); this section documents the full per-file audit.
+
+### The drain-thread finding
+
+`fixpp::log::Logger::Impl`'s constructor **unconditionally** spawns a real
+OS thread (`src/log/logger.cpp:180`: `drain_thread_ = std::thread([this] {
+drain_loop(); });`) — every single `Logger` construction, regardless of
+sink count or configuration, is genuinely concurrent from that point on
+(joined cleanly in `~Impl()`/`shutdown()`, but the procedure's D3
+"genuinely-concurrent" trigger is the spawn itself, not whether teardown is
+clean — same reasoning the `sync` module ledger already applied: "Under
+TSan's default halt-on-first-race, one race in a grouped process would
+abort before every OTHER test in that bucket runs, silently blinding the
+gate for the rest," so **spawns a real OS thread → standalone, regardless
+of link-deps/ENV homogeneity**). Grepped all 12 `.cpp` for
+`fixpp::log::Logger`/`log::Logger`: 9 of the 12 construct at least one
+`Logger` instance (`test_overflow_drop_newest.cpp`,
+`test_level_and_category_filter.cpp`, `test_shutdown_async_flush.cpp`,
+`test_block_overflow_raw_thread.cpp`, `test_compile_cutoff_zero_alloc.cpp`,
+`test_file_sink_rotation.cpp`, `test_file_sink_async_fsync.cpp`,
+`test_trace_correlation.cpp`, `test_log0_raw_thread.cpp`) — all 9 force
+standalone by this rule alone, independent of any other reason.
+
+**Global-state cross-check (advisor-flagged risk, cleared):** grepped for a
+process-global logger/sink singleton (`static Logger`, `g_logger`,
+`default_logger`, `::instance(`, `singleton`) across `include/fixpp/log/*.hpp`
+— zero hits. Every test constructs its own local `Logger` via
+`std::make_unique<fixpp::log::Logger>(...)` (per-instance, not a shared
+singleton). `format_registry.cpp`'s `get_registry()` is a function-local
+`static const` table populated once from a fixed compile-time array
+(read-only after first construction, never mutated by tests) — no
+cross-test state leakage. So the standalone forcing is **specifically**
+the real-thread-per-instance hazard, not a global-singleton-freshness issue
+(the two halves of the D3 criterion are independently checked; the thread
+half alone is sufficient to force standalone even though the
+global-singleton half is clean).
+
+### Census
+
+The remaining 3 `.cpp` do not construct a `Logger` (grepped `fixpp::log::Logger`/
+`log::Logger`/` Logger(`: zero hits in each; also verified no local `"..."`
+fixture-header include that could hide a transitive `Logger` construction —
+all three include only public `<...>` headers):
+
+- `log_smoke_test.cpp` — no `Logger`, unconditional, no LABELS. Bucket-of-1
+  in its own build class (same as `otel_smoke_test` precedent) — no other
+  unconditional non-`Logger`-constructing log test to union with (D4, no win).
+- `test_otlp_log_sink.cpp` — no `Logger`, gated
+  `if(TARGET opentelemetry-cpp::api AND TARGET fixpp_log_otlp)`, distinct
+  link-deps (`fixpp_log_otlp` + `opentelemetry-cpp::logs/exporter_otlp_http_log/
+  otlp_recordable`). Sole member of its conditional-guard class — D4 bucket-of-1.
+- `test_syslog_sink.cpp` — no `Logger`, but calls real POSIX `openlog()`/
+  `syslog()`/`sink.open()`/`sink.close()` against the live system syslog
+  (UNIX-domain datagram socket to `/dev/log`, `LOG_LOCAL7` facility chosen
+  specifically "to avoid clobbering daemon log" per its own header comment)
+  — real-IPC, kept standalone per "when unsure → standalone"; would be a
+  bucket-of-1 regardless (no other non-`Logger` test to union with without
+  mixing a real-IPC test into a trivial smoke test).
+
+No `int main(` in any of the 12. No duplicate `TEST`/`TEST_F`/`TEST_P`
+`Suite.Name`. No LABELS anywhere in the module (`grep LABELS CMakeLists.txt`
+— zero hits) — every `-L`-selection concern is moot.
+
+### Grouped
+
+None.
+
+### Standalone (12)
+
+| `.cpp` | reason |
+|---|---|
+| `log_smoke_test` | bucket-of-1 (no `Logger`, unconditional, no other non-`Logger` unconditional member) — D4, no win |
+| `test_overflow_drop_newest` | constructs `fixpp::log::Logger` (unconditional real drain-thread spawn) |
+| `test_level_and_category_filter` | constructs `fixpp::log::Logger` (unconditional real drain-thread spawn) |
+| `test_shutdown_async_flush` | constructs `fixpp::log::Logger` (unconditional real drain-thread spawn) |
+| `test_block_overflow_raw_thread` | constructs `fixpp::log::Logger` (drain thread) + explicit raw `std::thread` in the test itself |
+| `test_compile_cutoff_zero_alloc` (`log_alloc_test`) | constructs `fixpp::log::Logger` (drain thread) + live `$<TARGET_FILE:log_alloc_test>` name-selection (mallocnesia sidecar) + per-target `FIXPP_LOG_MIN_LEVEL=3` compile-def (would silently alter macro cutoff behavior for any other member sharing the binary) |
+| `test_file_sink_rotation` | constructs `fixpp::log::Logger` (unconditional real drain-thread spawn) |
+| `test_file_sink_async_fsync` | constructs `fixpp::log::Logger` (unconditional real drain-thread spawn); test itself compares `std::thread::id` values (drain-thread identity), not a self-spawned thread |
+| `test_syslog_sink` | real syslog IPC (UNIX-domain socket to `/dev/log`); bucket-of-1 |
+| `test_trace_correlation` | constructs `fixpp::log::Logger` (unconditional real drain-thread spawn) |
+| `test_log0_raw_thread` | constructs `fixpp::log::Logger` (drain thread) + explicit raw `std::thread` in the test itself |
+| `test_otlp_log_sink` | OTel-gated bucket-of-1, distinct link-deps (`fixpp_log_otlp` + OTel exporter targets) |
+
+**Sum:** 0 grouped + 12 standalone = **12** ✓ (100% dispositioned).
+
+### `-R`/`-L` selectability (SC-004 / Scenario-3)
+
+No change — `CMakeLists.txt` is byte-identical to pre-068. No `.cpp` in this
+module ever carried a `LABELS` property, so no `-L` selector is affected
+(module-level `ctest -L log` never existed). `ctest -R '^log_'`/`-R '^ts10_'`
+baseline (post-068, unchanged file): all 12 (+ the mallocnesia sidecar)
+pass, matching the 12 `.cpp` census 1:1. No historical `-R`-by-target-name
+idiom applies (nothing changed).
