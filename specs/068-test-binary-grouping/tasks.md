@@ -80,7 +80,7 @@
 
 - [X] T030 [P] Roll up totals in `specs/068-test-binary-grouping/measurements.md`: per-module and grand-total per-preset disk delta vs baseline (SC-001), the session wall-time confirmation (SC-005), and the total binary-count reduction. Update `../research/test-grouping-baseline/BASELINE.md` (parent repo) with the "after" column.
 - [X] T031 [P] Update project memory `project_test_binary_grouping_disk_win` and `CLAUDE.md` SPECKIT block with the realized numbers at feature close.
-- [X] T032 Run `/speckit-verify 068-test-binary-grouping` (Article XVII §8) — serial 8-preset matrix mirror; produce `.specify/decisions/068-test-binary-grouping-verify.md`. For this test-infra feature the polish checks are: full-matrix ctest green (behavior preservation), disk delta recorded, gates/selectability preserved. *(Resource gate: AskUserQuestion first.)*
+- [ ] T032 Run `/speckit-verify 068-test-binary-grouping` (Article XVII §8) — serial 8-preset matrix mirror; produce `.specify/decisions/068-test-binary-grouping-verify.md`. For this test-infra feature the polish checks are: full-matrix ctest green (behavior preservation), disk delta recorded, gates/selectability preserved. *(Resource gate: AskUserQuestion first.)* **NOT DONE as of close-out**: the `/speckit-verify` skill itself was never invoked and `-verify.md` does not exist; `measurements.md` §"Full 8-preset verification (US3)" is a manually-run equivalent (not the skill's own artifact). This is a hard `/gate-b` precondition (Article XVII §8) — still owed before `/gate-b` can run.
 
 ### Mandatory close-out tasks (ALWAYS emit — Gate-B preconditions, Article XVII §8)
 
