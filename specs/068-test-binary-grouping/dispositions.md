@@ -1437,3 +1437,290 @@ down from 2 pre-grouping — both gtest `Suite.Name` sets (7 cases in
 `FixtCrossVocabulary` + 2 in `MultiSessionMultiVersion` = 9 total) run
 inside the one process. No historical `-R`-by-target-name idiom targeted
 either of the 2 grouped names.
+
+## Module: `alloc_guard` (8 `.cpp`) — US2 — 0 grouped (audited, no viable bucket)
+
+The module's entire purpose is process-global allocation assertion. All 8
+`.cpp` implement the **same** mechanism: a pair of weak, LD_PRELOAD-replaceable
+`alloc_guard_start()`/`alloc_guard_end()` marker symbols (comment: "mallocnesia
+replaces these weak no-ops with its interceptor scope markers") bracketing a
+window whose GLOBAL heap activity mallocnesia counts — i.e. every file is the
+**global allocation-counting** standalone trigger by construction (D3's first
+bullet), independent of link-deps/labels. `CMakeLists.txt` is **unchanged**
+(no CMake edit this module) — this section documents the full per-file audit,
+per FR-011 (near-empty grouping recorded in full, not skipped).
+
+### Census
+
+Grepped all 8 for `alloc_guard_start`/`alloc_guard_end`/`LD_PRELOAD`: all 8
+hit. `test_dict066_grouped_read_alloc_guard.cpp` additionally has a **local**
+in-TU global `operator new` counter as a first-layer gate ("dual gate: TU-local
+operator-new counter + mallocnesia below") — still forced standalone by the
+mallocnesia leg alone. 6 of the 8 (`decimal_alloc_guard_test`,
+`wire_alloc_guard_test`, `sync_alloc_guard_test`,
+`test_validate_gate_alloc_guard.cpp` → `test_validate_gate_alloc_guard`,
+`test_dict066_grouped_read_alloc_guard.cpp` →
+`test_dict066_grouped_read_alloc_guard`, and the shared `item13` loop over
+decimal/wire/sync) carry a live `$<TARGET_FILE:...>` mallocnesia-sidecar
+`add_test` that names the target explicitly — the exact-name-selection D3
+trigger applies to those directly; the remaining 2
+(`test_dispatch_alloc_guard`, `test_clock_sleep_alloc_guard`,
+`test_session_alloc_guard` — DELIBERATELY-NOT-GATED per the file's own
+item-13 comment, no mallocnesia sidecar) are still standalone via the
+underlying global-marker mechanism itself, not the sidecar.
+
+No `int main(` in any of the 8. No duplicate `TEST`/`TEST_F`/`Suite.Name`.
+LABELS are heterogeneous across the 8 anyway (`041;alloc_guard;validation-gate;t014`,
+`066;us3;alloc_guard`, none on the other 6) — a secondary, independent D4
+bucket-of-1 forcing even setting the mechanism aside.
+
+### Grouped
+
+None.
+
+### Standalone (8)
+
+| `.cpp` | reason |
+|---|---|
+| `decimal_alloc_guard_test.cpp` | global `alloc_guard_start`/`end` marker mechanism (mallocnesia) + live `$<TARGET_FILE:decimal_alloc_guard_test>` sidecar |
+| `wire_alloc_guard_test.cpp` | global `alloc_guard_start`/`end` marker mechanism (mallocnesia) + live `$<TARGET_FILE:wire_alloc_guard_test>` sidecar |
+| `sync_alloc_guard_test.cpp` | global `alloc_guard_start`/`end` marker mechanism (mallocnesia) + live `$<TARGET_FILE:sync_alloc_guard_test>` sidecar |
+| `test_dispatch_alloc_guard.cpp` | global `alloc_guard_start`/`end` marker mechanism (mallocnesia); no sidecar currently wired (item-13 DELIBERATELY-NOT-GATED) but the marker mechanism itself is the trigger |
+| `test_clock_sleep_alloc_guard.cpp` | global `alloc_guard_start`/`end` marker mechanism (mallocnesia); item-13 DELIBERATELY-NOT-GATED, same reasoning |
+| `test_session_alloc_guard.cpp` | global `alloc_guard_start`/`end` marker mechanism (mallocnesia); item-13 DELIBERATELY-NOT-GATED, same reasoning |
+| `test_validate_gate_alloc_guard.cpp` | global `alloc_guard_start`/`end` marker mechanism (mallocnesia) + live `$<TARGET_FILE:test_validate_gate_alloc_guard>` sidecar; LABELS `041;alloc_guard;validation-gate;t014` (also label-heterogeneous, D4) |
+| `test_dict066_grouped_read_alloc_guard.cpp` | in-TU global `operator new` counter + global `alloc_guard_start`/`end` marker mechanism (dual mallocnesia gate) + live `$<TARGET_FILE:test_dict066_grouped_read_alloc_guard>` sidecar; LABELS `066;us3;alloc_guard` (also label-heterogeneous, D4) |
+
+**Sum:** 0 grouped + 8 standalone = **8** ✓ (100% dispositioned).
+
+### `-R`/`-L` selectability (SC-004 / Scenario-3)
+
+No change — `CMakeLists.txt` is byte-identical to pre-068. Every
+`$<TARGET_FILE:...>` mallocnesia-sidecar reference in the file (6 of them,
+including the `item13` `foreach`) still resolves to its unchanged target
+name. `ctest -R '^alloc_guard'`/`-R '^decimal_alloc_guard'`/etc. and
+`-L alloc_guard` selections are all unaffected (nothing changed).
+
+## Module: `perf` (4 `.cpp`) — US2 — 0 grouped (audited, no viable bucket)
+
+Bench-adjacent alloc-guard cells for 008/012/013. `CMakeLists.txt` is
+**unchanged** (no CMake edit this module).
+
+### Census
+
+All 4 use the same weak `alloc_guard_start`/`alloc_guard_end` global marker
+mechanism as the `alloc_guard` module above
+(`test_session_recovery_alloc_guard.cpp`, `test_store_alloc_guard.cpp`,
+`test_transport_read_alloc_guard.cpp`) EXCEPT `test_socket_option_defaults.cpp`,
+which has no alloc-guard markers at all (pure socket-option assertion). Even
+setting the mechanism aside, all 4 are **label-heterogeneous** — no two share
+a LABELS set:
+
+- `perf_transport_read_alloc_guard`: `"transport;012;us1;seam4;perf"` + a
+  direct (non-sidecar) `LD_PRELOAD=libmallocnesia.so` baked into its own
+  `ENVIRONMENT` — a **heterogeneous per-test ENVIRONMENT** D3 trigger on its
+  own (grouping it would silently interpose mallocnesia over every other
+  bucket member).
+- `perf_socket_option_defaults`: `"transport;012;us1;us3;fr029"` — distinct
+  set, no alloc-guard mechanism, but a link-dep outlier too
+  (`fixpp_transport`+`fixpp_tls`+OpenSSL/ZLIB vs the others' `fixpp_session`).
+- `perf_session_recovery_alloc_guard`: `"session;013;us1;perf;alloc_guard"` +
+  a `TSAN_OPTIONS` suppression `ENVIRONMENT` not shared by any other member.
+- `perf_store_alloc_guard` (via `fixpp_add_store_test`): no LABELS at all
+  (default), but the shared macro DOES set a homogeneous `TSAN_OPTIONS`
+  `ENVIRONMENT` — moot since it has zero label overlap with any other member.
+
+No `int main(` in any of the 4. No duplicate `Suite.Name`.
+
+### Grouped
+
+None.
+
+### Standalone (4)
+
+| `.cpp` | reason |
+|---|---|
+| `test_session_recovery_alloc_guard.cpp` | global `alloc_guard_start`/`end` marker mechanism + label-heterogeneous sole `session;013;us1;perf;alloc_guard` member (D4) |
+| `test_socket_option_defaults.cpp` | label-heterogeneous sole `transport;012;us1;us3;fr029` member (D4); distinct link-deps (`fixpp_transport`+`fixpp_tls`+OpenSSL/ZLIB) |
+| `test_store_alloc_guard.cpp` | global `alloc_guard_start`/`end` marker mechanism; no LABELS at all (D4 bucket-of-1 by omission) |
+| `test_transport_read_alloc_guard.cpp` | global `alloc_guard_start`/`end` marker mechanism + heterogeneous direct `ENVIRONMENT` (`LD_PRELOAD=libmallocnesia.so` baked onto itself, not a sidecar) + label-heterogeneous sole `transport;012;us1;seam4;perf` member (D4) |
+
+**Sum:** 0 grouped + 4 standalone = **4** ✓ (100% dispositioned).
+
+### `-R`/`-L` selectability (SC-004 / Scenario-3)
+
+No change — `CMakeLists.txt` is byte-identical to pre-068. `-L perf` never
+existed as a module-wide label (each member's LABELS are feature-scoped, not
+`perf`-scoped); unaffected either way.
+
+## Module: `conformance` (3 `.cpp`) — US2 — 0 grouped (audited, no viable bucket)
+
+FIX/TLS conformance corpus-replay cells for 008/011/012. `CMakeLists.txt` is
+**unchanged** (no CMake edit this module).
+
+### Census
+
+All 3 are label-heterogeneous AND link-dep-heterogeneous — no two share
+either axis:
+
+- `test_fixs_rotation.cpp` (`tls_fixs_rotation`): LABELS `"tls;011;conformance"`,
+  links `fixpp::tls` only.
+- `test_store_corpus_replay.cpp` (`store_corpus_replay`, via
+  `fixpp_add_store_test` + an extra `test_double_fsm.cpp` fixture TU): no
+  LABELS at all, links `fixpp_session`.
+- `test_transport_interop.cpp` (`transport_interop_conformance`): LABELS
+  `"transport;012;us1;seam1;conformance"`, links
+  `fixpp_transport`+`fixpp_tls`+`fixpp_wire`. Mostly `DISABLED_` TC-001..017
+  cells (Phase-8 QuickFIX peer pending) + one live scaffolding cell.
+
+No thread/global-alloc mechanism in any of the 3 (grepped). No `int main(`.
+No duplicate `Suite.Name`.
+
+### Grouped
+
+None.
+
+### Standalone (3)
+
+| `.cpp` | reason |
+|---|---|
+| `test_fixs_rotation.cpp` | label-heterogeneous sole `tls;011;conformance` member (D4); distinct link-deps (`fixpp::tls` only) |
+| `test_store_corpus_replay.cpp` | label-heterogeneous sole no-LABELS member (D4); distinct link-deps (`fixpp_session` + extra `test_double_fsm.cpp` fixture TU) |
+| `test_transport_interop.cpp` | label-heterogeneous sole `transport;012;us1;seam1;conformance` member (D4); distinct link-deps (`fixpp_transport`+`fixpp_tls`+`fixpp_wire`); mostly `DISABLED_` TC-* cells pending a live QuickFIX peer |
+
+**Sum:** 0 grouped + 3 standalone = **3** ✓ (100% dispositioned).
+
+### `-R`/`-L` selectability (SC-004 / Scenario-3)
+
+No change — `CMakeLists.txt` is byte-identical to pre-068. `-L conformance`
+never existed as a module-wide label; `-L tls`/`-L 011`/`-L transport`/
+`-L 012` selections on the individual members are unaffected (nothing
+changed).
+
+## Module: `tap` (1 `.cpp`) — US2 — 0 grouped (bucket-of-1, no CMake change)
+
+`tap_smoke_test.cpp` (target `tap_smoke_test`, ctest name `tap_smoke`) is the
+module's only test — an unconditional `SUCCEED()` compile/link smoke check,
+no LABELS. Sole member, D4 bucket-of-1 (no partner to union with) — no win.
+`CMakeLists.txt` is **unchanged**.
+
+### Standalone (1)
+
+| `.cpp` | reason |
+|---|---|
+| `tap_smoke_test.cpp` | bucket-of-1 — sole `.cpp` in the module, no LABELS, no partner (D4) |
+
+**Sum:** 0 grouped + 1 standalone = **1** ✓ (100% dispositioned). No `-R`/`-L`
+change (byte-identical file).
+
+## Module: `service` (1 `.cpp`) — US2 — 0 grouped (bucket-of-1, no CMake change)
+
+`service_smoke_test.cpp` (target `service_smoke_test`, ctest name
+`service_smoke`) is the module's only test — same unconditional `SUCCEED()`
+smoke-check pattern as `tap`. Sole member, D4 bucket-of-1. `CMakeLists.txt`
+is **unchanged**.
+
+### Standalone (1)
+
+| `.cpp` | reason |
+|---|---|
+| `service_smoke_test.cpp` | bucket-of-1 — sole `.cpp` in the module, no LABELS, no partner (D4) |
+
+**Sum:** 0 grouped + 1 standalone = **1** ✓ (100% dispositioned). No `-R`/`-L`
+change (byte-identical file).
+
+## Module: `consumer` (1 `.cpp`) — US2 — N/A, standalone-by-nature (no CMake change)
+
+`consumer_witness.cpp` is NOT a gtest binary at all — it does not link
+`GTest::gtest`/`GTest::gtest_main` anywhere. `tests/consumer/CMakeLists.txt`
+is a deliberately **separate CMake `project()`** (never `add_subdirectory()`'d
+from the main build — see its own header comment) that is invoked as a
+standalone `cmake -S/-B` sub-build by `tests/consumer/run_consumer_witness.cmake`,
+which is in turn driven by exactly ONE `add_test` at the TOP-LEVEL
+`CMakeLists.txt` (`NAME "fixpp::consumer::install-witness"`, LABELS
+`consumer`) — a compile+link witness for 061-slim FR-008/SC-004 (proves the
+staged `cmake --install` header layout is sufficient for an external
+consumer, deliberately isolated from the build-tree's own include paths).
+There is no whole-binary `add_test`-per-`.cpp` pattern to convert here: the
+module IS already exactly one `add_test` wrapping the entire sub-build.
+`CMakeLists.txt` (both the sub-project's and the top-level's) is
+**unchanged**.
+
+### Standalone (1)
+
+| `.cpp` | reason |
+|---|---|
+| `consumer_witness.cpp` | install-witness sub-build by nature — separate `cmake project()`, no GTest link, driven by one top-level `add_test` wrapping a `cmake -P` configure+build+run script; nothing to bucket (already bucket-of-1 with zero gtest-discovery surface) |
+
+**Sum:** 0 grouped + 1 standalone = **1** ✓ (100% dispositioned). No `-R`/`-L`
+change (byte-identical files).
+
+## Module: `fuzz` (13 `.cpp`) — US2 — N/A, standalone-by-nature (no CMake change)
+
+All 13 are libFuzzer harnesses (grepped: all 13 define
+`LLVMFuzzerTestOneInput`; none link GTest; none has an `add_test` — `grep -c
+add_test tests/fuzz/CMakeLists.txt` = 0). Each is compiled with
+`-fsanitize=fuzzer,address[,undefined]` (Clang-only), which supplies its own
+libFuzzer `main()` driver — mutually exclusive with `GTest::gtest_main`
+(ODR-fatal to combine two `main()`-providing drivers in one binary) and with
+the whole-binary `add_test` grouping pattern this feature targets (fuzzers
+are invoked by a corpus-driven fuzzing procedure, not `ctest` case
+selection). Built only when `FIXPP_BUILD_FUZZ=ON`. `CMakeLists.txt` is
+**unchanged**.
+
+### Standalone (13)
+
+| `.cpp` | reason |
+|---|---|
+| `fuzz_decimal_parse.cpp` | libFuzzer harness — own `LLVMFuzzerTestOneInput` entry point, no `add_test`, mutually exclusive with `gtest_main` |
+| `fuzz_decimal_compare.cpp` | libFuzzer harness (differential oracle) — same |
+| `fuzz_dict_xml_loader.cpp` | libFuzzer harness — same |
+| `fuzz_wire_framer.cpp` | libFuzzer harness — same |
+| `fuzz_wire_parser.cpp` | libFuzzer harness — same |
+| `fuzz_wire_nested_slice.cpp` | libFuzzer harness — same |
+| `fuzz_wire_validator.cpp` | libFuzzer harness — same |
+| `fuzz_session_cancellation.cpp` | libFuzzer harness — same |
+| `fuzz_file_cert_source.cpp` | libFuzzer harness — same |
+| `fuzz_message_store.cpp` | libFuzzer harness — same |
+| `fuzz_transport_read_path.cpp` | libFuzzer harness — same |
+| `fuzz_transport_handshake.cpp` | libFuzzer harness — same |
+| `fuzz_session_recovery_admin_parse.cpp` | libFuzzer harness — same |
+
+**Sum:** 0 grouped + 13 standalone = **13** ✓ (100% dispositioned). No
+`-R`/`-L` change (byte-identical file; no `add_test`/LABELS existed to
+begin with).
+
+## Module: `link` (2 `.cpp`) — US2 — N/A, standalone-by-nature (no CMake change)
+
+`tu_a.cpp`/`tu_b.cpp` are NOT `add_executable()`'d in
+`tests/link/CMakeLists.txt` at all — they are raw TUs fed directly to
+`check_expected_failure.py` (invoked by the sole `add_test(NAME
+decimal_alias_mismatch_link ...)`), which compiles them itself (outside
+CMake's target graph) specifically to PROVE they fail to LINK together
+(conflicting `FIXPP_DECIMAL_T` aliases must produce an "undefined reference
+to ... decimal_alias_sentinel ..." mismatch-type diagnostic — AC-B3). There
+is no gtest binary here to convert to whole-binary `add_test`; the module's
+one `add_test` already wraps the entire negative-link probe.
+`CMakeLists.txt` is **unchanged**.
+
+### Standalone (2)
+
+| `.cpp` | reason |
+|---|---|
+| `tu_a.cpp` | not a CMake target — raw TU compiled directly by the Python link-failure probe (`check_expected_failure.py`), not a gtest binary |
+| `tu_b.cpp` | same — the two TUs together are the WILL_FAIL link-negative probe by nature |
+
+**Sum:** 0 grouped + 2 standalone = **2** ✓ (100% dispositioned). No `-R`/`-L`
+change (byte-identical file).
+
+## Module: `oracle` (0 `.cpp`) — US2 — N/A, no test `.cpp` (Python-only, no CMake change)
+
+`tests/oracle/` has **zero** `.cpp` files. Its sole test artifact is
+`decimal_compare_oracle_test.py` (a `pytest` differential oracle vs Python's
+`decimal.Decimal`), wired by exactly one `add_test` (`decimal_compare_oracle`,
+`COMMAND python3 -m pytest ...`) guarded off on sanitizer presets (ASan/UBSan/
+TSan — sanitizer runtimes aren't preloaded for `ctypes.dlopen`). Not a gtest
+module; nothing to disposition or group. `CMakeLists.txt` is **unchanged**.
+
+**Sum:** 0 grouped + 0 standalone = **0** ✓ (N/A — no test `.cpp` in this
+module; not part of the `.cpp`-census denominator).
