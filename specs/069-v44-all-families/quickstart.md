@@ -9,7 +9,7 @@ cmake --preset linux-clang-debug
 cmake --build build/linux-clang-debug -j2
 ```
 
-The generated `build/linux-clang-debug/_codegen/include/fixpp/v44/Builders.hpp` now contains `build_<Msg>`/`validate_<Msg>` for all 81 in-scope FIX44 application messages (33 OFFICIAL + ~48 families).
+The generated `build/linux-clang-debug/_codegen/include/fixpp/v44/Builders.hpp` now contains `build_<Msg>`/`validate_<Msg>` for all **83 in-scope** FIX44 application messages (33 OFFICIAL + **50 families**).
 
 ## Opt down to OFFICIAL-only (bound compile cost)
 
@@ -38,27 +38,32 @@ No runtime, C-ABI, or Python surface changes — this is a compile-time typed co
 
 ## Run the verification
 
+Tests are selected by label (`ctest -L <label>`, never `-R <exe-name>` — Article VII §8):
+
 ```bash
-# Differential round-trip over ALL emitted application builders
-ctest --test-dir build/linux-clang-debug -L codegen -R 069 --output-on-failure
+# Differential round-trip over ALL emitted application builders (labels 069;all_families;roundtrip)
+ctest --test-dir build/linux-clang-debug -L roundtrip --output-on-failure
 
-# The exemplar-per-family external-golden anchor
-ctest --test-dir build/linux-clang-debug -R family_exemplar_golden --output-on-failure
+# The exemplar-per-family external-golden anchor (labels 069;family_golden)
+ctest --test-dir build/linux-clang-debug -L family_golden --output-on-failure
 
-# 33-OFFICIAL byte-identical regression (official mode) + completeness pin
-ctest --test-dir build/linux-clang-debug -R 067_emit_builders_unit --output-on-failure
+# Mode-count assertion — all→83, official→33 (labels 069;mode_count)
+ctest --test-dir build/linux-clang-debug -L mode_count --output-on-failure
+
+# Emitted-set completeness pin (standalone per §8) + 33-OFFICIAL byte-identity — label 069
+ctest --test-dir build/linux-clang-debug -L 069 --output-on-failure
 ```
 
 ## Acceptance quick-checks (map to Success Criteria)
 
 | Check | Command / observation | SC |
 |---|---|---|
-| All in-scope families have a builder | `grep -c 'build_' …/v44/Builders.hpp` == 81 under `all` | SC-001 |
-| Every builder round-trips | `069_all_families_roundtrip` green (0 skips) | SC-002 |
+| All in-scope families have a builder | `grep -c 'build_' …/v44/Builders.hpp` == 83 under `all` | SC-001 |
+| Every builder round-trips | `-L roundtrip` green (0 skips) | SC-002 |
 | 33 OFFICIAL unchanged | `official`-mode `Builders.hpp` diff vs pre-069 == empty | SC-003 |
-| Mode selection works | `all` → 81 builders, `official` → 33 builders | SC-004 |
+| Mode selection works | `-L mode_count`: `all` → 83 builders, `official` → 33 builders | SC-004 |
 | Typed API reachable w/o runtime path | the developer snippet above compiles & runs | SC-005 |
-| External oracle green | `family_exemplar_golden` bytes match QuickFIX goldens | SC-006 |
+| External oracle green | `-L family_golden` bytes match QuickFIX goldens | SC-006 |
 | Enum limitation recorded | `L-069-*` present in `spec/behaviors-and-limitations.md` | SC-007 |
 
 ## Verify (Tier-1, before PR)
