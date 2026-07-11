@@ -1002,3 +1002,130 @@ cases in one process — 4 from E2 + 9 from TS-12-full, verified via
 `--gtest_list_tests`). The 4 standalone targets keep their exact pre-existing
 ctest names (`ts11_dual_metric_export`, `otel_smoke`, `otel_exporters`,
 `ts12_session_spans`) — unaffected.
+
+## Module: `wire` (34 `.cpp`) — US2
+
+004-wire-codec test suite. The `add_wire_test(name src...)` helper (already
+multi-value `SOURCES`-capable, same shape as `interop`'s
+`fixpp_add_interop_test`) sets a **homogeneous** `ENVIRONMENT
+FIXPP_WIRE_CONFORMANCE_DIR=...` on every registration and no `LABELS` at all
+across the full 34-file census (grepped `LABELS` in `CMakeLists.txt` — zero
+hits) — no D4 label partitioning needed; buckets are keyed purely on
+link-deps / conditional-guard / compile-def. Key discriminator: fork-based
+`EXPECT_DEATH` groups (D3) — `view_test.cpp`/`lifetime_trap_test.cpp`; a
+*local* `std::pmr::memory_resource` counting subclass groups —
+`three_arena_pinning_test.cpp`'s `counting_resource` (its
+`DISABLED_ZeroGlobalNewAcrossParseToFromApp` case, never run by default, is
+the only place a *global* new/delete shim is even discussed, and it isn't
+implemented in this file); `test_body_builder.cpp`'s **actual** file-scope
+`void* operator new(std::size_t)` / `operator new[]` override (lines 83/92)
+is a *global* allocation-counting mechanism (not a local pmr resource) — the
+one true D3 standalone in this module.
+
+### ODR pre-check (§3)
+
+No `int main(` in any of the 34 `.cpp`. Full `TEST`/`TEST_F`/`TEST_P`
+`Suite.Name` census (219 cases) has zero duplicates module-wide (`sort |
+uniq -d` empty). An initial naive column-0 free-function grep flagged
+apparent collisions (`make_checksum_field`/`make_frame`/`append_checksum_field`
+repeated across `accessor_smoke_test.cpp`, `message_view_membership_copy_test.cpp`,
+`validator_production_table_view_test.cpp`, `checksum_bodylength_corruption_test.cpp`,
+`framer_partial_read_test.cpp`, `parser_error_path_test.cpp`,
+`validator_type_check_test.cpp`) — verified false positives by checking each
+file for `namespace {`: every one of the 28 `wire_pure_tests` members (and
+both `wire_dict_tests` members) wraps its content in an anonymous namespace
+(internal linkage), so the repeated names never collide across TUs (same
+"naive grep, brace-nesting blind" false-positive class the `session` ledger
+already documented). `wire_smoke_test.cpp` has no anon-namespace wrapper but
+contains only `TEST(WireSmoke, Compiles)` — no free symbols to collide.
+`nested_group_slices_cache_test.cpp` has two separate anon-namespace blocks
+(still internal linkage, no issue). Zero FR-012 renames.
+
+### Grouped
+
+**Bucket `wire_pure_tests`** — 28 `.cpp`, no LABELS, link `fixpp_wire` +
+gtest, include `tests/`, homogeneous `ENVIRONMENT
+FIXPP_WIRE_CONFORMANCE_DIR=<tests/wire/conformance>` (the `add_wire_test`
+baseline — a harmless no-op for `wire_smoke_test.cpp`, the only member that
+doesn't reference it):
+
+| `.cpp` | decision | odr_action |
+|---|---|---|
+| `wire_smoke_test` | grouped:pure (former standalone R6 smoke, folded in — same link-deps, no LABELS) | none |
+| `view_test` | grouped:pure (fork-based `EXPECT_DEATH`, D3 groupable) | none (anon-ns) |
+| `conformance/conformance_test` | grouped:pure | none (anon-ns) |
+| `framer_partial_read_test` | grouped:pure | none (anon-ns) |
+| `checksum_bodylength_corruption_test` | grouped:pure | none (anon-ns) |
+| `parser_index_test` | grouped:pure | none (anon-ns) |
+| `parser_iter_test` | grouped:pure | none (anon-ns) |
+| `offset_table_test` | grouped:pure | none (anon-ns) |
+| `lifetime_trap_test` | grouped:pure (fork-based `EXPECT_DEATH`, D3 groupable) | none (anon-ns) |
+| `unknown_fields_test` | grouped:pure | none (anon-ns) |
+| `three_arena_pinning_test` | grouped:pure (local `counting_resource` pmr subclass; the global-new `DISABLED_...` case never runs) | none (anon-ns) |
+| `noexcept_trap_test` | grouped:pure | none (anon-ns) |
+| `round_trip_property_test` | grouped:pure | none (anon-ns) |
+| `validator_domain_test` | grouped:pure | none (anon-ns) |
+| `validator_per_version_test` | grouped:pure | none (anon-ns) |
+| `writer_error_path_test` | grouped:pure | none (anon-ns) |
+| `framer_error_path_test` | grouped:pure | none (anon-ns) |
+| `parser_error_path_test` | grouped:pure | none (anon-ns) |
+| `validator_type_check_test` | grouped:pure | none (anon-ns) |
+| `offset_table_error_path_test` | grouped:pure | none (anon-ns) |
+| `accessor_smoke_test` | grouped:pure | none (anon-ns) |
+| `tag_scan_test` | grouped:pure | none (anon-ns) |
+| `hostile_input_hardening_test` | grouped:pure | none (anon-ns) |
+| `offset_table_overflow_test` | grouped:pure | none (anon-ns) |
+| `parser_overflow_test` | grouped:pure | none (anon-ns) |
+| `group_slice_trailing_soh_test` | grouped:pure | none (anon-ns) |
+| `nested_group_slices_cache_test` | grouped:pure | none (2 anon-ns blocks) |
+| `nested_group_extent_test` | grouped:pure | none (anon-ns) |
+
+**Bucket `wire_codegen_tests`** — 3 `.cpp`, no LABELS, link `fixpp_wire` +
+gtest (unconditional target creation, matching the pre-068 per-`.cpp`
+behavior exactly), homogeneous `ENVIRONMENT` (`add_wire_test` baseline),
+`if(TARGET fixpp_codegen_generate)`-gated `add_dependencies` + generated
+include dir + `fixpp_dictionary` link (FR-007 conditional block preserved):
+
+| `.cpp` | decision | odr_action |
+|---|---|---|
+| `repeating_group_equivalence_test` | grouped:codegen | none (anon-ns) |
+| `cutover_2b_gated_test` | grouped:codegen | none (anon-ns) |
+| `toplevel_read_regression_test` | grouped:codegen | none (anon-ns) |
+
+**Bucket `wire_dict_tests`** — 2 `.cpp`, no LABELS, link `fixpp_wire` +
+`fixpp_dictionary` + gtest, include `tests/`, compile-def
+`FIXPP_DICT_DATA_DIR` (pre-existing on `validator_production_table_view_test`
+only; unioned onto the bucket as a harmless no-op — neither member actually
+references the macro, both use inline-XML `XmlLoader::load_from_string`):
+
+| `.cpp` | decision | odr_action |
+|---|---|---|
+| `validator_production_table_view_test` | grouped:dict | none (anon-ns) |
+| `message_view_membership_copy_test` | grouped:dict | none (anon-ns) |
+
+### Standalone (1)
+
+| `.cpp` | reason |
+|---|---|
+| `test_body_builder` (`wire_body_builder_test`) | global allocation-counting: in-TU `void* operator new(std::size_t)` / `operator new[]` override (D3) |
+
+**Sum:** 28 + 3 + 2 grouped (33) + 1 standalone = **34** ✓ (100% dispositioned).
+
+### `-R`/`-L` selectability (SC-004 / Scenario-3)
+
+No `.cpp` in this module ever carried a `LABELS` property, so no `-L`
+selector is affected (module-level `ctest -L wire` never existed). The
+quickstart-documented `ctest -R '^wire_'` idiom still selects the full
+module: every grouped bucket's ctest NAME (`wire_pure_tests`,
+`wire_codegen_tests`, `wire_dict_tests`) and the sole standalone
+(`wire_body_builder_test`) all match the `^wire_` prefix, same as every
+pre-068 per-`.cpp` target name — verified via the post-grouping `ctest -R
+'^wire_'` run: 6 entries pass (the 4 from this module + 2 pre-existing
+unrelated `wire_alloc_guard_test`/`wire_alloc_guard_test_mallocnesia`
+sidecars from `tests/alloc_guard/`, untouched). `--gtest_list_tests` spot
+check: `wire_pure_tests` lists 230 cases (28 files' worth, including the
+31-case parameterized conformance corpus, confirmed to still resolve
+`FIXPP_WIRE_CONFORMANCE_DIR` correctly via the bucket's `ENVIRONMENT`),
+`wire_codegen_tests` 6, `wire_dict_tests` 7. No historical `-R`-by-target-name
+idiom targeted any of the 33 grouped names individually (all referenced only
+via the `^wire_` prefix per the module's own header comment).
