@@ -1,24 +1,45 @@
+# 068-test-binary-grouping: isolation-safe otel tests are grouped into a
+# whole-binary add_test executable (bucketed by shared conditional-guard
+# ∩ label — none of the 6 carry LABELS). Real-socket (fixed/ephemeral-port
+# HTTP server) and genuinely-concurrent (std::thread) tests stay standalone.
+# Dispositions in specs/068-test-binary-grouping/dispositions.md.
 find_package(GTest CONFIG REQUIRED)
 find_package(asio CONFIG REQUIRED)
 
-# ── E2 (T044): test_engine_close_teardown ─────────────────────────────────────
-# Regression: Engine::stop() invokes TracerProvider::shutdown(),
-# MeterProvider::shutdown(), and Logger sink flush before returning.
-# FR-014 / T044 / [2k §6.6] / NO session-FSM edit.
+# ── E2 (T044) + TS-12-full: otel_e2_spans_tests ───────────────────────────────
+# Grouped whole-binary bucket (068 US2): test_engine_close_teardown (E2 T044 —
+# Engine::stop() invokes TracerProvider::shutdown()/MeterProvider::shutdown()/
+# Logger sink flush; single-threaded ioc.run(), no real socket, same pattern
+# as the already-grouped session_pure_tests precedent) + test_session_spans_full
+# (SessionSpans ctor/dtor/span coverage; no thread, no socket). Union link-deps.
 if(TARGET opentelemetry-cpp::api)
-  add_executable(test_engine_close_teardown test_engine_close_teardown.cpp)
-  target_link_libraries(test_engine_close_teardown PRIVATE
+  add_executable(otel_e2_spans_tests
+    test_engine_close_teardown.cpp
+    test_session_spans_full.cpp
+  )
+  target_link_libraries(otel_e2_spans_tests PRIVATE
     fixpp_otel
     fixpp_session
     fixpp_mock_clock
     opentelemetry-cpp::api
     opentelemetry-cpp::trace
     opentelemetry-cpp::metrics
+    opentelemetry-cpp::exporter_in_memory  # may be header-only in Conan config
     asio::asio
     GTest::gtest
     GTest::gtest_main
   )
-  add_test(NAME e2_engine_close_teardown COMMAND test_engine_close_teardown)
+  # Direct link of the in-memory exporter static lib (Conan LIBS list is empty
+  # even though the .a exists; link it explicitly to resolve the Factory symbol
+  # — needed by test_session_spans_full.cpp).
+  find_library(OTEL_EXPORTER_IN_MEMORY_LIB
+    NAMES opentelemetry_exporter_in_memory
+    HINTS ${opentelemetry-cpp_LIB_DIRS_DEBUG} ${opentelemetry-cpp_LIB_DIRS}
+  )
+  if(OTEL_EXPORTER_IN_MEMORY_LIB)
+    target_link_libraries(otel_e2_spans_tests PRIVATE ${OTEL_EXPORTER_IN_MEMORY_LIB})
+  endif()
+  add_test(NAME otel_e2_spans_tests COMMAND otel_e2_spans_tests)
 endif()
 
 # ── TS-11: test_dual_metric_export ────────────────────────────────────────────
@@ -70,34 +91,6 @@ if(TARGET opentelemetry-cpp::api)
     target_link_libraries(test_session_spans PRIVATE ${OTEL_EXPORTER_IN_MEMORY_LIB})
   endif()
   add_test(NAME ts12_session_spans COMMAND test_session_spans)
-endif()
-
-# ── test_session_spans_full ───────────────────────────────────────────────────
-# Coverage-remediation: exercises SessionSpans ctor/dtor, make_store_span,
-# make_dispatch_span, session_trace_context (from_span_context), the
-# to_span_context non-zero path, StoreSpan and DispatchSpan ok/error branches.
-# Uses fixpp::otel::TracerProvider with tracer_factory_for_test injection.
-if(TARGET opentelemetry-cpp::api)
-  add_executable(test_session_spans_full test_session_spans_full.cpp)
-  target_link_libraries(test_session_spans_full PRIVATE
-    fixpp_otel
-    opentelemetry-cpp::exporter_in_memory
-    opentelemetry-cpp::trace
-    GTest::gtest
-    GTest::gtest_main
-  )
-  if(OTEL_EXPORTER_IN_MEMORY_LIB)
-    target_link_libraries(test_session_spans_full PRIVATE ${OTEL_EXPORTER_IN_MEMORY_LIB})
-  else()
-    find_library(OTEL_EXPORTER_IN_MEMORY_LIB_2
-      NAMES opentelemetry_exporter_in_memory
-      HINTS ${opentelemetry-cpp_LIB_DIRS_DEBUG} ${opentelemetry-cpp_LIB_DIRS}
-    )
-    if(OTEL_EXPORTER_IN_MEMORY_LIB_2)
-      target_link_libraries(test_session_spans_full PRIVATE ${OTEL_EXPORTER_IN_MEMORY_LIB_2})
-    endif()
-  endif()
-  add_test(NAME ts12_session_spans_full COMMAND test_session_spans_full)
 endif()
 
 # ── test_exporters ────────────────────────────────────────────────────────────

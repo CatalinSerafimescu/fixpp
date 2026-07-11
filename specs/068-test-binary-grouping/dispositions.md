@@ -934,3 +934,71 @@ binaries (they were always referenced as `fixpp_core_tests`/
 the 3 completeness gates, and the 2 `decimal_mul_u64_wide*`/
 `decimal_compare_diff_oracle` live-name idioms are all unaffected (unchanged
 target names/properties).
+
+## Module: `otel` (6 `.cpp`) — US2
+
+None of the 6 carry a `LABELS` property. Two are gated `if(TARGET
+opentelemetry-cpp::api)`, three are additionally guarded (same `if`), one
+(`otel_smoke_test`) is unconditional. Key discriminator applied per-file:
+real-socket HTTP server (fixed **or** ephemeral port — same conservative
+rule the `transport`/`interop` modules already established: a `PrometheusExporter`
+binding a real civetweb listener on `127.0.0.1:0` is still a real socket)
+and genuinely-concurrent (`std::thread`) force standalone; `fixpp::session::Engine`
+driven by a single-threaded `engine.start()` + `ioc.run()` on the calling
+thread (no real socket, no OS thread) is the same isolation-safe pattern
+already established by `session_pure_tests`/`interop`'s `ParityAcceptorFixture`
+precedent → groupable.
+
+### ODR pre-check (§3)
+
+No `int main(` in either grouped file. No duplicate `TEST`/`TEST_F` `Suite.Name`
+between `test_engine_close_teardown.cpp` (`EngineCloseTeardown`) and
+`test_session_spans_full.cpp` (`SessionSpansFullTest`, `TracerProviderE3`-family
+absent from this file). `test_engine_close_teardown.cpp`'s `CountingSpanExporter`/
+`SpySink`/`SlowFlushSink` are inside an anonymous namespace (internal linkage).
+`test_session_spans_full.cpp`'s `SessionSpansFullTest` fixture class and its
+`static find_span`/`get_latency_ns` helpers are file-scope (non-`static`
+class, `static` methods) but unique — no collision with any anon-ns symbol
+in the other member. Neither file calls `opentelemetry::trace::Provider::
+SetTracerProvider`/`metrics::Provider::SetMeterProvider` (grepped module-wide,
+zero hits) — no process-global OTel provider-registry mutation, so no
+cross-test state leakage risk inside the bucket. Zero FR-012 renames.
+
+### Grouped
+
+**Bucket `otel_e2_spans_tests`** — 2 `.cpp`, no LABELS, gated
+`if(TARGET opentelemetry-cpp::api)`, link `fixpp_otel` + `fixpp_session` +
+`fixpp_mock_clock` + `opentelemetry-cpp::api/trace/metrics` +
+`opentelemetry-cpp::exporter_in_memory` + the direct
+`opentelemetry_exporter_in_memory` static-lib `find_library` fallback (needed
+by `test_session_spans_full.cpp`; harmless additive for the other member) +
+`asio::asio` + gtest (union of both members' pre-existing deps):
+
+| `.cpp` | decision | odr_action |
+|---|---|---|
+| `test_engine_close_teardown` | grouped:e2_spans (single-threaded `engine.start()`+`ioc.run()`, no real socket — same pattern as `session_pure_tests`) | none (anon-ns helpers) |
+| `test_session_spans_full` | grouped:e2_spans (no thread, no socket) | none (unique fixture/helper names) |
+
+### Standalone (4)
+
+| `.cpp` | reason |
+|---|---|
+| `otel_smoke_test` | bucket-of-1 — sole member of the unconditional (no `opentelemetry-cpp::api` guard) build class; no other unconditional otel test to union with (D4, no win) |
+| `test_dual_metric_export` | real-socket: binds a fixed-port (`:9464`) civetweb HTTP server + performs a live `GET` scrape (FR-017/SC-005); port-collision-sensitive by its own header comment |
+| `test_exporters` | real-socket: `PrometheusExporter` binds a real civetweb listener on `127.0.0.1:0` (ephemeral port) — conservative standalone per the transport/interop real-socket precedent, even though the port is OS-assigned |
+| `test_session_spans` | genuinely concurrent (`std::thread worker{...}` in `ParseChildOnDifferentThreadParentsCorrectly`, line 175) |
+
+**Sum:** 2 grouped + 4 standalone = **6** ✓ (100% dispositioned).
+
+### `-R`/`-L` selectability (SC-004 / Scenario-3)
+
+None of the 6 `.cpp` ever carried a `LABELS` property, so no `-L` selector is
+affected. No historical `-R`-by-target-name idiom targeted `test_engine_close_teardown`
+or `test_session_spans_full` (their ctest names were `e2_engine_close_teardown`
+and `ts12_session_spans_full` respectively — neither referenced in any
+quickstart/tasks `-R` selector); both collapse into the single
+`otel_e2_spans_tests` entry (`ctest -R '^otel_e2_spans_tests$'` runs all 13
+cases in one process — 4 from E2 + 9 from TS-12-full, verified via
+`--gtest_list_tests`). The 4 standalone targets keep their exact pre-existing
+ctest names (`ts11_dual_metric_export`, `otel_smoke`, `otel_exporters`,
+`ts12_session_spans`) — unaffected.
