@@ -146,3 +146,14 @@ and disk (`inventory.sh`, per preset):
 local build-dir/env artifact (stale tsan lib, stale `_codegen` ×2, missing local
 `pytest`), all of which CI builds/installs fresh → CI-green. Grouping's real
 risks (ODR = link-time, memory isolation = ASan, races = TSan) are all clean.
+
+## MSVC (windows-msvc-debug) verification — 2026-07-11
+
+Build: **1392/1392 targets built clean** (0 compile/link errors) — grouping
+compiles + links under MSVC. Grouped buckets **pass** (e.g. `capi_pure_tests`
+green). Unfiltered ctest: 294/307 pass; the 13 failures are ALL pre-existing
+**standalone** tests using Linux-only tooling my local Windows box lacks —
+`LD_PRELOAD` mallocnesia (×8), bash `.sh` census (×1), `pytest` (×2), C-ABI
+negative tests (×2); none is a grouped bucket, and 068 changed none of their
+definitions (empty `git diff main..HEAD`). CI's MSVC leg runs a curated `-R`
+subset that excludes these. **No grouping defect under MSVC.**
