@@ -164,3 +164,21 @@ add_test(
 )
 set_tests_properties("fixpp::dict::codegen-build-graph-check" PROPERTIES
   LABELS codegen)
+
+# Gate B PR#187 round 3 F1: seed a stale-tool scenario by mutating a generator
+# source, re-running configure without rebuilding the main-tree binary, and
+# proving Codegen.cmake rebuilds the bootstrap tool before regeneration.
+add_test(
+  NAME "fixpp::dict::codegen-source-staleness-check"
+  COMMAND "${CMAKE_COMMAND}"
+    "-DFIXPP_CMAKE_COMMAND=${CMAKE_COMMAND}"
+    "-DFIXPP_CONFIGURE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+    "-DFIXPP_CONFIGURE_BINARY_DIR=${CMAKE_BINARY_DIR}"
+    "-DFIXPP_CODEGEN_MAIN_BIN=$<TARGET_FILE:fixpp-codegen>"
+    "-DFIXPP_CODEGEN_BOOTSTRAP_BIN=${CMAKE_BINARY_DIR}/_codegen_bootstrap/bin/fixpp-codegen${CMAKE_EXECUTABLE_SUFFIX}"
+    "-DFIXPP_GENERATOR_SOURCE=${CMAKE_SOURCE_DIR}/tools/codegen/fixpp-codegen/emit_builders.cpp"
+    "-DFIXPP_BUILDERS_HEADER=${CMAKE_BINARY_DIR}/_codegen/include/fixpp/v44/Builders.hpp"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/codegen_source_staleness_test.cmake"
+)
+set_tests_properties("fixpp::dict::codegen-source-staleness-check" PROPERTIES
+  LABELS codegen)
