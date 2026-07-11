@@ -3,11 +3,12 @@ name: Tier 1 — Linux CI
 on:
   push:
     branches: ["main"]
-    # Docs-only pushes to main don't affect the build — skip the full tier
-    # matrix. This is a fail-safe DENYLIST (paths-ignore): a push is skipped
-    # only when EVERY changed file is provably non-build (docs). Anything not
-    # listed — code, CMakeLists/CMakePresets, .github CI, dictionaries/,
-    # tools/codegen — still triggers a build. Applied to push: ONLY, never
+    # Docs/tooling-only pushes to main don't affect the build — skip the full
+    # tier matrix. This is a fail-safe DENYLIST (paths-ignore): a push is skipped
+    # only when EVERY changed file is provably non-build (docs, git config
+    # .gitignore/.gitattributes, and .claude/** Claude tooling that CI never
+    # reads). Anything not listed — code, CMakeLists/CMakePresets, .github CI,
+    # dictionaries/, tools/codegen — still triggers a build. Applied to push: ONLY, never
     # pull_request: a path-skipped REQUIRED check never reports a conclusion,
     # which would block every PR forever (PR-side cost is already controlled by
     # the gate-precheck skip below).
@@ -17,6 +18,9 @@ on:
       - "specs/**"
       - ".specify/**"
       - "LICENSE"
+      - ".gitignore"
+      - ".gitattributes"
+      - ".claude/**"
   # PRs run in pull_request context so the tier1-required check counts toward
   # branch protection (a workflow_dispatch run does NOT satisfy the PR merge gate
   # — only pull_request-context check-runs do). The heavy matrix stays on-demand

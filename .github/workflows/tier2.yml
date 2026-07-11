@@ -19,6 +19,9 @@ on:
       - "specs/**"
       - ".specify/**"
       - "LICENSE"
+      - ".gitignore"
+      - ".gitattributes"
+      - ".claude/**"
   # PRs run in pull_request context so tier2-required counts toward branch
   # protection (see tier1.yml — a workflow_dispatch run does NOT satisfy the PR
   # merge gate). The Windows matrix stays on-demand via the `filter` job: it
