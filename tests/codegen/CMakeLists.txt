@@ -163,7 +163,8 @@ add_test(
     -P "${CMAKE_CURRENT_SOURCE_DIR}/codegen_build_graph_test.cmake"
 )
 set_tests_properties("fixpp::dict::codegen-build-graph-check" PROPERTIES
-  LABELS codegen)
+  LABELS codegen
+  RESOURCE_LOCK codegen_source_tree)
 
 # Gate B PR#187 round 3 F1: seed a stale-tool scenario by mutating a generator
 # source, re-running configure without rebuilding the main-tree binary, and
@@ -181,4 +182,6 @@ add_test(
     -P "${CMAKE_CURRENT_SOURCE_DIR}/codegen_source_staleness_test.cmake"
 )
 set_tests_properties("fixpp::dict::codegen-source-staleness-check" PROPERTIES
-  LABELS codegen)
+  LABELS codegen
+  RUN_SERIAL TRUE
+  RESOURCE_LOCK codegen_source_tree)
