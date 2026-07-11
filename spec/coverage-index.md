@@ -275,6 +275,29 @@ The application spec is version-specific (FIX 4.0 through FIX 5.0SP2); sections 
      + QuickFIX goldens + `body_builder` are the design authority 067 reproduces byte-for-byte
      (see spec.md `## Normative References`, "Design authority" block). Recorded per T029(c). -->
 
+<!-- 069-v44-all-families COVERAGE-CLAIM LEGEND (Gate B PR#187 round 1 F2,
+     2026-07-11): wherever a row below carries the 069 gap-note phrase
+     "differential round-trip + required-presence fail-closed", the two
+     claims are NOT equally granular. "Differential round-trip" IS per-row —
+     `AllFamiliesRoundtrip069` (tests/session/test_069_all_families_roundtrip.cpp)
+     builds, wire-encodes, independently re-parses, and per-tag reads back
+     EACH of the 83 builders individually. "Required-presence fail-closed" is
+     ONE generated code path (`validate_<Msg>`'s presence table,
+     include/fixpp/wire/builder_validate.hpp) shared by all 83 messages,
+     witnessed directly by exactly TWO discriminating negative exemplars —
+     TradeCaptureReport/AE (nested/empty-required-group,
+     `wire_required_field_missing` at builder_validate.hpp:86) and
+     BusinessMessageReject/j (flat/missing-required-scalar, :77) — not by a
+     dedicated negative test per row. Each message's own required-field SET
+     is independently pinned present (not the rejection BEHAVIOR) by the
+     non-circular completeness census (test_067_completeness.cpp /
+     contracts/coverage-and-completeness.md C2). A negative test per row
+     would exercise the identical generated code path with ~zero additional
+     discriminating power (feedback_coverage_push_enshrines_bugs) — not
+     undertaken; this is the same representative-witness methodology already
+     used by the 33 merged 067 rows above. Recorded per Gate B PR#187 round-1
+     triage F2 (research/reviews/opus_pr187_1_triage.md). -->
+
 ### Application Messages — Trade (FIX 4.0+)
 
 | MsgType | Message | Catalogue ID | Gap note |

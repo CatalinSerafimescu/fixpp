@@ -1760,7 +1760,7 @@ Spec: `specs/060-int128-decimal-compare/`.
 
 ## 069-v44-all-families (widen the 067 writer-emitter from 33 OFFICIAL to ALL 83 in-scope v44 application messages, 2026-07-11)
 
-069 widens the 067 codegen writer-emitter's selection predicate from the 33-message `kOfficial33` allow-list to all 83 in-scope (`msgcat='app'` minus the N-002/N-003 `{BE,BF}` session-FSM pair) FIX44 application messages, default-on via `FIXPP_CODEGEN_V44_FAMILIES=all` (opt-down to `official`=33 for cost-sensitive builds). The 33 OFFICIAL messages stay byte-identical (SC-003); every emitted builder is proven by a differential round-trip against the independent runtime-XML path plus an 8-exemplar external-golden anchor. Spec: `specs/069-v44-all-families/`.
+069 widens the 067 codegen writer-emitter's selection predicate from the 33-message `kOfficial33` allow-list to all 83 in-scope (`msgcat='app'` minus the N-002/N-003 `{BE,BF}` session-FSM pair) FIX44 application messages, default-on via `FIXPP_CODEGEN_V44_FAMILIES=all` (opt-down to `official`=33 for cost-sensitive builds). The 33 OFFICIAL messages stay byte-identical (SC-003); every emitted builder is proven by a differential round-trip against the independent runtime-XML path (all 83, SC-002); group-shape parity is additionally anchored via 8 external QuickFIX-golden exemplars (SC-006) — not all 83, since seeding every required group across all 83 messages is optional hardening (contract C4), not a shipped guarantee. Spec: `specs/069-v44-all-families/`.
 
 ### Limitations
 
