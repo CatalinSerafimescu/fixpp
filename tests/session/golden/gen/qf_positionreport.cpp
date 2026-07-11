@@ -10,19 +10,15 @@
 // (component, required='Y'; internal group NoPositions(702) itself
 // required='N') is populated — 1 entry (PosType, LongQty) — per C4's table
 // note.
-#include <iostream>
 #include <quickfix/fix44/PositionReport.h>
 
+#include <iostream>
+
 int main() {
-    FIX44::PositionReport pr(
-        FIX::PosMaintRptID("POSRPT1"),
-        FIX::PosReqResult(0),
-        FIX::ClearingBusinessDate("20240101"),
-        FIX::Account("ACCT1"),
-        FIX::AccountType(1),
-        FIX::SettlPrice(100.5),
-        FIX::SettlPriceType(1),
-        FIX::PriorSettlPrice(99.75));
+    FIX44::PositionReport pr(FIX::PosMaintRptID("POSRPT1"), FIX::PosReqResult(0),
+                             FIX::ClearingBusinessDate("20240101"), FIX::Account("ACCT1"),
+                             FIX::AccountType(1), FIX::SettlPrice(100.5), FIX::SettlPriceType(1),
+                             FIX::PriorSettlPrice(99.75));
 
     // NoPositions (702, optional group — populated per C4's table note).
     {

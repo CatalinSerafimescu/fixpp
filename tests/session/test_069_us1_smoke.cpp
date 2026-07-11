@@ -53,8 +53,7 @@ std::string bytes_to_string(std::span<const std::byte> b) {
 // NoSides(552) group (required, >=1 entry; entry-level Side(54)/OrderID(37)
 // required, dictionaries/FIX44.xml:3536-3538).
 fixpp::v44::TradeCaptureReportArgs make_valid_args(
-    std::pmr::memory_resource* mr,
-    std::span<const fixpp::v44::TradeCaptureReportSidesArgs> sides) {
+    std::pmr::memory_resource* mr, std::span<const fixpp::v44::TradeCaptureReportSidesArgs> sides) {
     fixpp::v44::TradeCaptureReportArgs args{};
     args.trade_report_id = "TRR-1";
     args.previously_reported = false;

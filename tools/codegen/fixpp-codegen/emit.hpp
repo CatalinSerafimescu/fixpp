@@ -34,7 +34,8 @@ enum class CoverageMode { All, Official };
 // `mode` (069-v44-all-families). Returns "" for non-v44 versions
 // (writer-emitter is v44-scoped for v1.0); `write_file`'s empty-skip then
 // writes no Builders.hpp for those versions.
-[[nodiscard]] std::string emit_builders(VersionIR const& ir, CoverageMode mode);  // <vXX>/Builders.hpp
+[[nodiscard]] std::string emit_builders(VersionIR const& ir,
+                                        CoverageMode mode);  // <vXX>/Builders.hpp
 
 // Shared dispatch headers ([2c §4.8]/[2c §6.3]) — emitted once over ALL
 // codegen versions, not per-version. _dispatch/reify_dispatch_{fixt,application}.hpp

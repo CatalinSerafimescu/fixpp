@@ -52,9 +52,10 @@ namespace {
 // [[maybe_unused]]: only referenced under the `official`-mode #if branch
 // below; unused (with no warning) when this TU defaults to `all` mode.
 [[maybe_unused]] constexpr std::array<std::string_view, 33> kExpectedOfficial33 = {
-    "D", "E", "F", "G", "H", "8", "9", "q", "r", "AF", "AC", "t", "u",  // A (13)
-    "V", "W", "X", "Y", "c", "d", "e", "f", "g", "h", "i", "b", "S", "R", "AG", "Z", "a",  // M (17)
-    "J", "P", "AS",  // P (3)
+    "D", "E",  "F",  "G", "H", "8", "9", "q", "r", "AF", "AC", "t", "u",  // A (13)
+    "V", "W",  "X",  "Y", "c", "d", "e", "f", "g", "h",  "i",  "b", "S",
+    "R", "AG", "Z",  "a",  // M (17)
+    "J", "P",  "AS",       // P (3)
 };
 
 // data-model.md "N-002/N-003 exclusion set" — the members PRESENT in the
@@ -93,18 +94,19 @@ std::set<std::string> census_all_mode_expected_set() {
 }
 
 std::set<std::string> const& all_mode_expected_set() {
-    static std::set<std::string> const expected = [] {
-        auto s = census_all_mode_expected_set();
-        // Self-asserting cardinality (data-model.md / C2): the vendored
-        // FIX44.xml MUST census to exactly 83 app-msgcat messages minus
-        // {BE, BF}. A census-code bug (wrong node path, wrong attribute)
-        // must not silently produce a different-but-plausible count.
-        EXPECT_EQ(s.size(), 83U)
-            << "independent FIX44.xml app-message census (minus BE/BF) must be 83; "
-               "got "
-            << s.size() << " — census logic itself may be broken (non-circularity check)";
-        return s;
-    }();
+    static std::set<std::string> const expected =
+        [] {
+            auto s = census_all_mode_expected_set();
+            // Self-asserting cardinality (data-model.md / C2): the vendored
+            // FIX44.xml MUST census to exactly 83 app-msgcat messages minus
+            // {BE, BF}. A census-code bug (wrong node path, wrong attribute)
+            // must not silently produce a different-but-plausible count.
+            EXPECT_EQ(s.size(), 83U)
+                << "independent FIX44.xml app-message census (minus BE/BF) must be 83; "
+                   "got "
+                << s.size() << " — census logic itself may be broken (non-circularity check)";
+            return s;
+        }();
     return expected;
 }
 

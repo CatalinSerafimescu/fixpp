@@ -13,17 +13,14 @@
 // LegSymbol(600)) to exercise the group-heavy/nested exemplar per C4's table
 // note. NoPartyIDs(453) nested inside the NoSides entry demonstrates real
 // group-in-group nesting (Side/OrderID's group carries a party sub-group).
-#include <iostream>
 #include <quickfix/fix44/TradeCaptureReport.h>
 
+#include <iostream>
+
 int main() {
-    FIX44::TradeCaptureReport tcr(
-        FIX::TradeReportID("TCR001"),
-        FIX::PreviouslyReported(false),
-        FIX::LastQty(100),
-        FIX::LastPx(50.25),
-        FIX::TradeDate("20240101"),
-        FIX::TransactTime(FIX::UtcTimeStamp(0, 0, 0, 1, 1, 2024)));
+    FIX44::TradeCaptureReport tcr(FIX::TradeReportID("TCR001"), FIX::PreviouslyReported(false),
+                                  FIX::LastQty(100), FIX::LastPx(50.25), FIX::TradeDate("20240101"),
+                                  FIX::TransactTime(FIX::UtcTimeStamp(0, 0, 0, 1, 1, 2024)));
     tcr.set(FIX::Symbol("MSFT"));
 
     // NoSides (552, required): 1 entry, Side + OrderID + nested NoPartyIDs.

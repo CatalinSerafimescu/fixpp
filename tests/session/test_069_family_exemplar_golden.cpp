@@ -64,7 +64,8 @@ void assert_golden_match(std::string_view golden_relpath, std::span<const std::b
     std::vector<GoldenFrame> expected = parse_golden(golden_text);
     ASSERT_EQ(expected.size(), 1U);
 
-    std::vector<GoldenFrame> actual{GoldenFrame{'>', std::vector<std::byte>{body.begin(), body.end()}}};
+    std::vector<GoldenFrame> actual{
+        GoldenFrame{'>', std::vector<std::byte>{body.begin(), body.end()}}};
     auto diff = diff_transcripts(expected, actual, shape_oracle_profile());
     EXPECT_TRUE(static_cast<bool>(diff)) << "golden diff mismatch: " << diff.detail;
 }
@@ -103,8 +104,9 @@ TEST(FamilyGolden069, TradeCaptureReport_AE) {
     fixpp::v44::TradeCaptureReportSidesArgs side{};
     side.side = '1';
     side.order_id = "ORDER1";
-    side.party_i_ds = std::optional<std::span<const fixpp::v44::TradeCaptureReportSidesPartyIDsArgs>>{
-        std::span<const fixpp::v44::TradeCaptureReportSidesPartyIDsArgs>{parties}};
+    side.party_i_ds =
+        std::optional<std::span<const fixpp::v44::TradeCaptureReportSidesPartyIDsArgs>>{
+            std::span<const fixpp::v44::TradeCaptureReportSidesPartyIDsArgs>{parties}};
     std::array<fixpp::v44::TradeCaptureReportSidesArgs, 1> sides{side};
 
     fixpp::v44::TradeCaptureReportLegsArgs leg{};
@@ -241,8 +243,9 @@ TEST(FamilyGolden069, RegistrationInstructions_O) {
     std::array<fixpp::v44::RegistrationInstructionsRegistDtlsArgs, 1> dtls{dtl};
 
     fixpp::v44::RegistrationInstructionsArgs args{};
-    args.regist_dtls = std::optional<std::span<const fixpp::v44::RegistrationInstructionsRegistDtlsArgs>>{
-        std::span<const fixpp::v44::RegistrationInstructionsRegistDtlsArgs>{dtls}};
+    args.regist_dtls =
+        std::optional<std::span<const fixpp::v44::RegistrationInstructionsRegistDtlsArgs>>{
+            std::span<const fixpp::v44::RegistrationInstructionsRegistDtlsArgs>{dtls}};
     args.regist_ref_id = "REGREF1";
     args.regist_id = "REGID1";
     args.regist_trans_type = '0';

@@ -9,17 +9,13 @@
 // group (dictionaries/FIX44.xml:3138 group required='Y') — 1 entry,
 // ClOrdID(11)+CumQty(14)+OrdStatus(39)+LeavesQty(151)+CxlQty(84), all
 // required='Y' within the group.
-#include <iostream>
 #include <quickfix/fix44/ListStatus.h>
 
+#include <iostream>
+
 int main() {
-    FIX44::ListStatus ls(
-        FIX::ListID("LIST1"),
-        FIX::ListStatusType(1),
-        FIX::NoRpts(1),
-        FIX::ListOrderStatus(1),
-        FIX::RptSeq(1),
-        FIX::TotNoOrders(1));
+    FIX44::ListStatus ls(FIX::ListID("LIST1"), FIX::ListStatusType(1), FIX::NoRpts(1),
+                         FIX::ListOrderStatus(1), FIX::RptSeq(1), FIX::TotNoOrders(1));
 
     // NoOrders (73, required group): 1 entry.
     {

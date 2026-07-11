@@ -7,14 +7,14 @@
 // RegistrationInstructions ctor): RegistID(513), RegistTransType(514),
 // RegistRefID(508). RgstDtlsGrp/NoRegistDtls(473) is required='N' but
 // populated — 1 entry, RegistDtls(509) — per C4's table note.
-#include <iostream>
 #include <quickfix/fix44/RegistrationInstructions.h>
 
+#include <iostream>
+
 int main() {
-    FIX44::RegistrationInstructions ri(
-        FIX::RegistID("REGID1"),
-        FIX::RegistTransType(FIX::RegistTransType_NEW),
-        FIX::RegistRefID("REGREF1"));
+    FIX44::RegistrationInstructions ri(FIX::RegistID("REGID1"),
+                                       FIX::RegistTransType(FIX::RegistTransType_NEW),
+                                       FIX::RegistRefID("REGREF1"));
 
     // NoRegistDtls (473, optional group — populated per C4's table note).
     {

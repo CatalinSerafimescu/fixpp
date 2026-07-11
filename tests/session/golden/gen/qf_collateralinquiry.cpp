@@ -8,8 +8,9 @@
 // QuickFIX header's default-constructible ctor, no required-args overload).
 // Seed a sane illustrative set: Account(1), AccountType(581),
 // CollInquiryID(909), NoCollInquiryQualifier(938, 1 entry).
-#include <iostream>
 #include <quickfix/fix44/CollateralInquiry.h>
+
+#include <iostream>
 
 int main() {
     FIX44::CollateralInquiry ci;

@@ -481,7 +481,8 @@ std::string extract_region(std::string const& text, std::string_view start_marke
 // Side(54) < Symbol(55) < TransactTime(60) must be found in that byte
 // order within the NewOrderSingle builder's emitted region.
 TEST(Group067EmitBuilders, TopLevelEmissionOrderTagAscending) {
-    std::string const out = fixpp::codegen::emit_builders(fix44_ir(), fixpp::codegen::CoverageMode::Official);
+    std::string const out =
+        fixpp::codegen::emit_builders(fix44_ir(), fixpp::codegen::CoverageMode::Official);
     std::string const region = extract_region(out, "NewOrderSingle", "NewOrderList");
     ASSERT_FALSE(region.empty()) << "no NewOrderSingle builder region found in emit_builders() output "
                                      "(empty until Phase 3b lands T016/T017)";
@@ -502,7 +503,8 @@ TEST(Group067EmitBuilders, TopLevelEmissionOrderTagAscending) {
 // research.md R1/R9, T007(b)'s IR-level pin, here at the EMITTED-TEXT
 // level).
 TEST(Group067EmitBuilders, GroupEntryOrderIsDeclarationOrderNotTagSorted) {
-    std::string const out = fixpp::codegen::emit_builders(fix44_ir(), fixpp::codegen::CoverageMode::Official);
+    std::string const out =
+        fixpp::codegen::emit_builders(fix44_ir(), fixpp::codegen::CoverageMode::Official);
     std::string const region = extract_region(out, "NewOrderList", "OrderCancelRequest");
     ASSERT_FALSE(region.empty()) << "no NewOrderList builder region found in emit_builders() output";
 
@@ -527,7 +529,8 @@ TEST(Group067EmitBuilders, GroupEntryOrderIsDeclarationOrderNotTagSorted) {
 // builder that DID emit e.g. `field(8, ...)` would violate body_builder's
 // own INV-2 framing-tag reject unconditionally.
 TEST(Group067EmitBuilders, HeaderFramingTagsNeverPassedToFieldCall) {
-    std::string const out = fixpp::codegen::emit_builders(fix44_ir(), fixpp::codegen::CoverageMode::Official);
+    std::string const out =
+        fixpp::codegen::emit_builders(fix44_ir(), fixpp::codegen::CoverageMode::Official);
     ASSERT_FALSE(out.empty()) << "emit_builders() output is empty (Phase 3b not landed yet)";
 
     for (int tag : {8, 9, 10, 34, 35, 49, 52, 56}) {
@@ -547,7 +550,8 @@ TEST(Group067EmitBuilders, HeaderFramingTagsNeverPassedToFieldCall) {
 // field (ClOrdID(11)) is the positive control — it MUST still be present,
 // proving the exclusion is provenance-scoped, not a body-emptying overreach.
 TEST(Group067EmitBuilders, HeaderTrailerFieldsExcludedFromBodyOnlyArgs) {
-    std::string const out = fixpp::codegen::emit_builders(fix44_ir(), fixpp::codegen::CoverageMode::Official);
+    std::string const out =
+        fixpp::codegen::emit_builders(fix44_ir(), fixpp::codegen::CoverageMode::Official);
     ASSERT_FALSE(out.empty()) << "emit_builders() output is empty (Phase 3b not landed yet)";
     std::string const region = extract_region(out, "NewOrderSingle", "NewOrderList");
     ASSERT_FALSE(region.empty()) << "no NewOrderSingle builder region found in emit_builders() output";
@@ -570,7 +574,8 @@ TEST(Group067EmitBuilders, HeaderTrailerFieldsExcludedFromBodyOnlyArgs) {
 // both to the same (wrong-for-one) delimiter. Call shape verbatim from
 // data-model.md §1.2 ("bb.group_begin(no_tag, delimiter_tag)").
 TEST(Group067EmitBuilders, RC1PerMessagePlannerDistinctDelimiterWvsX) {
-    std::string const out = fixpp::codegen::emit_builders(fix44_ir(), fixpp::codegen::CoverageMode::Official);
+    std::string const out =
+        fixpp::codegen::emit_builders(fix44_ir(), fixpp::codegen::CoverageMode::Official);
     ASSERT_FALSE(out.empty()) << "emit_builders() output is empty (Phase 3b not landed yet)";
     std::string const collapsed = collapse_whitespace(out);
 

@@ -5,13 +5,13 @@
 //
 // Required='Y' fields (dictionaries/FIX44.xml:956-964): RefMsgType(372),
 // BusinessRejectReason(380).
-#include <iostream>
 #include <quickfix/fix44/BusinessMessageReject.h>
 
+#include <iostream>
+
 int main() {
-    FIX44::BusinessMessageReject bmr(
-        FIX::RefMsgType("D"),
-        FIX::BusinessRejectReason(3));  // 3 = UnsupportedMessageType
+    FIX44::BusinessMessageReject bmr(FIX::RefMsgType("D"),
+                                     FIX::BusinessRejectReason(3));  // 3 = UnsupportedMessageType
 
     bmr.getHeader().setField(FIX::BeginString("FIX.4.4"));
     bmr.getHeader().setField(FIX::SenderCompID("S"));

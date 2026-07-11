@@ -11,23 +11,17 @@
 // (dictionaries/FIX44.xml:2799 group required='Y') — 1 entry,
 // OrderCapacity(528)+OrderCapacityQty(863), both required='Y' within the
 // group.
-#include <iostream>
 #include <quickfix/fix44/Confirmation.h>
 
+#include <iostream>
+
 int main() {
-    FIX44::Confirmation conf(
-        FIX::ConfirmID("CONF1"),
-        FIX::ConfirmTransType(0),
-        FIX::ConfirmType(1),
-        FIX::ConfirmStatus(1),
-        FIX::TransactTime(FIX::UtcTimeStamp(0, 0, 0, 1, 1, 2024)),
-        FIX::TradeDate("20240101"),
-        FIX::AllocQty(100),
-        FIX::Side(FIX::Side_BUY),
-        FIX::AllocAccount("ACCT1"),
-        FIX::AvgPx(50.25),
-        FIX::GrossTradeAmt(5025),
-        FIX::NetMoney(5025));
+    FIX44::Confirmation conf(FIX::ConfirmID("CONF1"), FIX::ConfirmTransType(0), FIX::ConfirmType(1),
+                             FIX::ConfirmStatus(1),
+                             FIX::TransactTime(FIX::UtcTimeStamp(0, 0, 0, 1, 1, 2024)),
+                             FIX::TradeDate("20240101"), FIX::AllocQty(100),
+                             FIX::Side(FIX::Side_BUY), FIX::AllocAccount("ACCT1"),
+                             FIX::AvgPx(50.25), FIX::GrossTradeAmt(5025), FIX::NetMoney(5025));
 
     // NoCapacities (862, required group): 1 entry.
     {

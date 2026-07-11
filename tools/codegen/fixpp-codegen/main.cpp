@@ -63,7 +63,7 @@ int main(int argc, char** argv) {
                 families_mode = fixpp::codegen::CoverageMode::Official;
             } else {
                 std::cerr << "fixpp-codegen: --families must be 'all' or 'official', got '" << v
-                           << "'\n";
+                          << "'\n";
                 return 2;
             }
         }

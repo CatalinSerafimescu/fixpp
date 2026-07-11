@@ -111,7 +111,7 @@ void expect_wire_decimal(IndexView const& mv, std::uint16_t tag, std::string_vie
 // returning the value up to the next SOH/end-of-slice. Uniform across every
 // group-entry readback in this file (currently just the AE/NoSides exemplar).
 std::optional<std::string_view> scan_slice_for_tag(std::span<const std::byte> slice,
-                                                    std::uint16_t tag) {
+                                                   std::uint16_t tag) {
     std::string_view sv{reinterpret_cast<char const*>(slice.data()), slice.size()};
     std::size_t pos = 0;
     while (pos < sv.size()) {
@@ -123,7 +123,10 @@ std::optional<std::string_view> scan_slice_for_tag(std::span<const std::byte> sl
         std::uint16_t parsed_tag = 0;
         bool ok = !tag_sv.empty();
         for (char c : tag_sv) {
-            if (c < '0' || c > '9') { ok = false; break; }
+            if (c < '0' || c > '9') {
+                ok = false;
+                break;
+            }
             parsed_tag = static_cast<std::uint16_t>(parsed_tag * 10 + (c - '0'));
         }
         if (ok && parsed_tag == tag) {
@@ -148,9 +151,9 @@ std::optional<std::string_view> scan_slice_for_tag(std::span<const std::byte> sl
 // caller-owned and must outlive the returned view).
 template <typename BuildFn>
 std::optional<IndexView> build_and_parse(BuildFn&& build_fn, std::span<std::byte> out,
-                                          std::string& body_out, fixpp::dict::table_view const& tv,
-                                          std::pmr::memory_resource* read_arena,
-                                          std::vector<std::byte>& frame_storage) {
+                                         std::string& body_out, fixpp::dict::table_view const& tv,
+                                         std::pmr::memory_resource* read_arena,
+                                         std::vector<std::byte>& frame_storage) {
     auto built = build_fn(out);
     if (!built.has_value()) {
         ADD_FAILURE() << "build_<Msg> failed";
@@ -175,7 +178,7 @@ std::optional<IndexView> build_and_parse(BuildFn&& build_fn, std::span<std::byte
 // construction: tv_ (the view) is destroyed before dict_ (its backing
 // dictionary) before dict_arena_ (dict_'s backing allocator).
 class AllFamiliesRoundtrip069 : public ::testing::Test {
-   protected:
+protected:
     static void SetUpTestSuite() {
         dict_arena_ = new std::pmr::monotonic_buffer_resource(16384);
         dict_ = new fixpp::dict::Dictionary(fixpp_test_support::load_fix44(dict_arena_));
@@ -224,8 +227,7 @@ TEST_F(AllFamiliesRoundtrip069, IOI) {
     args.ioi_trans_type = '1';
     args.side = '1';
     args.ioi_qty = "6_ioi_qty";
-    auto mv_opt = parse(
-        [&](std::span<std::byte> o) { return fixpp::v44::build_IOI(o, args); });
+    auto mv_opt = parse([&](std::span<std::byte> o) { return fixpp::v44::build_IOI(o, args); });
     ASSERT_TRUE(mv_opt.has_value()) << "build/parse pipeline failed";
     auto const& mv = *mv_opt;
     expect_wire_text(mv, 23, "6_ioiid", "ioiid");
@@ -246,8 +248,8 @@ TEST_F(AllFamiliesRoundtrip069, Advertisement) {
     args.adv_trans_type = "7_adv_trans_type";
     args.adv_side = '1';
     args.quantity = make_decimal("10.5", &arena);
-    auto mv_opt = parse(
-        [&](std::span<std::byte> o) { return fixpp::v44::build_Advertisement(o, args); });
+    auto mv_opt =
+        parse([&](std::span<std::byte> o) { return fixpp::v44::build_Advertisement(o, args); });
     ASSERT_TRUE(mv_opt.has_value()) << "build/parse pipeline failed";
     auto const& mv = *mv_opt;
     expect_wire_text(mv, 2, "7_adv_id", "adv_id");
@@ -276,8 +278,8 @@ TEST_F(AllFamiliesRoundtrip069, ExecutionReport) {
     args.leaves_qty = make_decimal("10.5", &arena);
     args.cum_qty = make_decimal("10.5", &arena);
     args.avg_px = make_decimal("10.5", &arena);
-    auto mv_opt = parse(
-        [&](std::span<std::byte> o) { return fixpp::v44::build_ExecutionReport(o, args); });
+    auto mv_opt =
+        parse([&](std::span<std::byte> o) { return fixpp::v44::build_ExecutionReport(o, args); });
     ASSERT_TRUE(mv_opt.has_value()) << "build/parse pipeline failed";
     auto const& mv = *mv_opt;
     expect_wire_text(mv, 37, "8_order_id", "order_id");
@@ -303,8 +305,8 @@ TEST_F(AllFamiliesRoundtrip069, OrderCancelReject) {
     args.orig_cl_ord_id = "9_orig_cl_ord_id";
     args.ord_status = '1';
     args.cxl_rej_response_to = '1';
-    auto mv_opt = parse(
-        [&](std::span<std::byte> o) { return fixpp::v44::build_OrderCancelReject(o, args); });
+    auto mv_opt =
+        parse([&](std::span<std::byte> o) { return fixpp::v44::build_OrderCancelReject(o, args); });
     ASSERT_TRUE(mv_opt.has_value()) << "build/parse pipeline failed";
     auto const& mv = *mv_opt;
     expect_wire_text(mv, 37, "9_order_id", "order_id");
@@ -343,8 +345,8 @@ TEST_F(AllFamiliesRoundtrip069, NewOrderMultileg) {
     args.side = '1';
     args.transact_time = "AB_transact_time";
     args.ord_type = '1';
-    auto mv_opt = parse(
-        [&](std::span<std::byte> o) { return fixpp::v44::build_NewOrderMultileg(o, args); });
+    auto mv_opt =
+        parse([&](std::span<std::byte> o) { return fixpp::v44::build_NewOrderMultileg(o, args); });
     ASSERT_TRUE(mv_opt.has_value()) << "build/parse pipeline failed";
     auto const& mv = *mv_opt;
     expect_wire_text(mv, 11, "AB_cl_ord_id", "cl_ord_id");
@@ -366,8 +368,9 @@ TEST_F(AllFamiliesRoundtrip069, MultilegOrderCancelReplace) {
     args.side = '1';
     args.transact_time = "AC_transact_time";
     args.ord_type = '1';
-    auto mv_opt = parse(
-        [&](std::span<std::byte> o) { return fixpp::v44::build_MultilegOrderCancelReplace(o, args); });
+    auto mv_opt = parse([&](std::span<std::byte> o) {
+        return fixpp::v44::build_MultilegOrderCancelReplace(o, args);
+    });
     ASSERT_TRUE(mv_opt.has_value()) << "build/parse pipeline failed";
     auto const& mv = *mv_opt;
     expect_wire_text(mv, 41, "AC_orig_cl_ord_id", "orig_cl_ord_id");
@@ -384,8 +387,9 @@ TEST_F(AllFamiliesRoundtrip069, TradeCaptureReportRequest) {
     fixpp::v44::TradeCaptureReportRequestArgs args{};
     args.trade_request_id = "AD_trade_request_id";
     args.trade_request_type = 569;
-    auto mv_opt = parse(
-        [&](std::span<std::byte> o) { return fixpp::v44::build_TradeCaptureReportRequest(o, args); });
+    auto mv_opt = parse([&](std::span<std::byte> o) {
+        return fixpp::v44::build_TradeCaptureReportRequest(o, args);
+    });
     ASSERT_TRUE(mv_opt.has_value()) << "build/parse pipeline failed";
     auto const& mv = *mv_opt;
     expect_wire_text(mv, 568, "AD_trade_request_id", "trade_request_id");
@@ -473,8 +477,8 @@ TEST_F(AllFamiliesRoundtrip069, RFQRequest) {
     fixpp::v44::RFQRequestArgs args{};
     args.rfq_req_id = "AH_rfq_req_id";
     args.subscription_request_type = '1';
-    auto mv_opt = parse(
-        [&](std::span<std::byte> o) { return fixpp::v44::build_RFQRequest(o, args); });
+    auto mv_opt =
+        parse([&](std::span<std::byte> o) { return fixpp::v44::build_RFQRequest(o, args); });
     ASSERT_TRUE(mv_opt.has_value()) << "build/parse pipeline failed";
     auto const& mv = *mv_opt;
     expect_wire_text(mv, 644, "AH_rfq_req_id", "rfq_req_id");
@@ -488,8 +492,8 @@ TEST_F(AllFamiliesRoundtrip069, QuoteStatusReport) {
     fixpp::v44::QuoteStatusReportArgs args{};
     args.quote_id = "AI_quote_id";
     args.account = "AI_account";
-    auto mv_opt = parse(
-        [&](std::span<std::byte> o) { return fixpp::v44::build_QuoteStatusReport(o, args); });
+    auto mv_opt =
+        parse([&](std::span<std::byte> o) { return fixpp::v44::build_QuoteStatusReport(o, args); });
     ASSERT_TRUE(mv_opt.has_value()) << "build/parse pipeline failed";
     auto const& mv = *mv_opt;
     expect_wire_text(mv, 117, "AI_quote_id", "quote_id");
@@ -503,8 +507,8 @@ TEST_F(AllFamiliesRoundtrip069, QuoteResponse) {
     fixpp::v44::QuoteResponseArgs args{};
     args.quote_resp_id = "AJ_quote_resp_id";
     args.quote_resp_type = 694;
-    auto mv_opt = parse(
-        [&](std::span<std::byte> o) { return fixpp::v44::build_QuoteResponse(o, args); });
+    auto mv_opt =
+        parse([&](std::span<std::byte> o) { return fixpp::v44::build_QuoteResponse(o, args); });
     ASSERT_TRUE(mv_opt.has_value()) << "build/parse pipeline failed";
     auto const& mv = *mv_opt;
     expect_wire_text(mv, 693, "AJ_quote_resp_id", "quote_resp_id");
@@ -539,8 +543,8 @@ TEST_F(AllFamiliesRoundtrip069, Confirmation) {
     args.avg_px = make_decimal("10.5", &arena);
     args.gross_trade_amt = make_decimal("10.5", &arena);
     args.net_money = make_decimal("10.5", &arena);
-    auto mv_opt = parse(
-        [&](std::span<std::byte> o) { return fixpp::v44::build_Confirmation(o, args); });
+    auto mv_opt =
+        parse([&](std::span<std::byte> o) { return fixpp::v44::build_Confirmation(o, args); });
     ASSERT_TRUE(mv_opt.has_value()) << "build/parse pipeline failed";
     auto const& mv = *mv_opt;
     expect_wire_text(mv, 664, "AK_confirm_id", "confirm_id");
@@ -574,8 +578,9 @@ TEST_F(AllFamiliesRoundtrip069, PositionMaintenanceRequest) {
     args.account = "AL_account";
     args.account_type = 581;
     args.transact_time = "AL_transact_time";
-    auto mv_opt = parse(
-        [&](std::span<std::byte> o) { return fixpp::v44::build_PositionMaintenanceRequest(o, args); });
+    auto mv_opt = parse([&](std::span<std::byte> o) {
+        return fixpp::v44::build_PositionMaintenanceRequest(o, args);
+    });
     ASSERT_TRUE(mv_opt.has_value()) << "build/parse pipeline failed";
     auto const& mv = *mv_opt;
     expect_wire_text(mv, 710, "AL_pos_req_id", "pos_req_id");
@@ -608,8 +613,9 @@ TEST_F(AllFamiliesRoundtrip069, PositionMaintenanceReport) {
     args.account = "AM_account";
     args.account_type = 581;
     args.transact_time = "AM_transact_time";
-    auto mv_opt = parse(
-        [&](std::span<std::byte> o) { return fixpp::v44::build_PositionMaintenanceReport(o, args); });
+    auto mv_opt = parse([&](std::span<std::byte> o) {
+        return fixpp::v44::build_PositionMaintenanceReport(o, args);
+    });
     ASSERT_TRUE(mv_opt.has_value()) << "build/parse pipeline failed";
     auto const& mv = *mv_opt;
     expect_wire_text(mv, 721, "AM_pos_maint_rpt_id", "pos_maint_rpt_id");
@@ -694,8 +700,8 @@ TEST_F(AllFamiliesRoundtrip069, PositionReport) {
     args.settl_price = make_decimal("10.5", &arena);
     args.settl_price_type = 731;
     args.prior_settl_price = make_decimal("10.5", &arena);
-    auto mv_opt = parse(
-        [&](std::span<std::byte> o) { return fixpp::v44::build_PositionReport(o, args); });
+    auto mv_opt =
+        parse([&](std::span<std::byte> o) { return fixpp::v44::build_PositionReport(o, args); });
     ASSERT_TRUE(mv_opt.has_value()) << "build/parse pipeline failed";
     auto const& mv = *mv_opt;
     expect_wire_text(mv, 721, "AP_pos_maint_rpt_id", "pos_maint_rpt_id");
@@ -719,8 +725,9 @@ TEST_F(AllFamiliesRoundtrip069, TradeCaptureReportRequestAck) {
     args.trade_request_type = 569;
     args.trade_request_result = 749;
     args.trade_request_status = 750;
-    auto mv_opt = parse(
-        [&](std::span<std::byte> o) { return fixpp::v44::build_TradeCaptureReportRequestAck(o, args); });
+    auto mv_opt = parse([&](std::span<std::byte> o) {
+        return fixpp::v44::build_TradeCaptureReportRequestAck(o, args);
+    });
     ASSERT_TRUE(mv_opt.has_value()) << "build/parse pipeline failed";
     auto const& mv = *mv_opt;
     expect_wire_text(mv, 568, "AQ_trade_request_id", "trade_request_id");
@@ -766,8 +773,8 @@ TEST_F(AllFamiliesRoundtrip069, AllocationReport) {
     args.quantity = make_decimal("10.5", &arena);
     args.avg_px = make_decimal("10.5", &arena);
     args.trade_date = "AS_trade_date";
-    auto mv_opt = parse(
-        [&](std::span<std::byte> o) { return fixpp::v44::build_AllocationReport(o, args); });
+    auto mv_opt =
+        parse([&](std::span<std::byte> o) { return fixpp::v44::build_AllocationReport(o, args); });
     ASSERT_TRUE(mv_opt.has_value()) << "build/parse pipeline failed";
     auto const& mv = *mv_opt;
     expect_wire_text(mv, 755, "AS_alloc_report_id", "alloc_report_id");
@@ -813,8 +820,8 @@ TEST_F(AllFamiliesRoundtrip069, ConfirmationAck) {
     args.trade_date = "AU_trade_date";
     args.transact_time = "AU_transact_time";
     args.affirm_status = 940;
-    auto mv_opt = parse(
-        [&](std::span<std::byte> o) { return fixpp::v44::build_ConfirmationAck(o, args); });
+    auto mv_opt =
+        parse([&](std::span<std::byte> o) { return fixpp::v44::build_ConfirmationAck(o, args); });
     ASSERT_TRUE(mv_opt.has_value()) << "build/parse pipeline failed";
     auto const& mv = *mv_opt;
     expect_wire_text(mv, 664, "AU_confirm_id", "confirm_id");
@@ -830,8 +837,9 @@ TEST_F(AllFamiliesRoundtrip069, SettlementInstructionRequest) {
     fixpp::v44::SettlementInstructionRequestArgs args{};
     args.settl_inst_req_id = "AV_settl_inst_req_id";
     args.transact_time = "AV_transact_time";
-    auto mv_opt = parse(
-        [&](std::span<std::byte> o) { return fixpp::v44::build_SettlementInstructionRequest(o, args); });
+    auto mv_opt = parse([&](std::span<std::byte> o) {
+        return fixpp::v44::build_SettlementInstructionRequest(o, args);
+    });
     ASSERT_TRUE(mv_opt.has_value()) << "build/parse pipeline failed";
     auto const& mv = *mv_opt;
     expect_wire_text(mv, 791, "AV_settl_inst_req_id", "settl_inst_req_id");
@@ -864,8 +872,8 @@ TEST_F(AllFamiliesRoundtrip069, AssignmentReport) {
     args.settl_sess_id = "AW_settl_sess_id";
     args.settl_sess_sub_id = "AW_settl_sess_sub_id";
     args.clearing_business_date = "AW_clearing_business_date";
-    auto mv_opt = parse(
-        [&](std::span<std::byte> o) { return fixpp::v44::build_AssignmentReport(o, args); });
+    auto mv_opt =
+        parse([&](std::span<std::byte> o) { return fixpp::v44::build_AssignmentReport(o, args); });
     ASSERT_TRUE(mv_opt.has_value()) << "build/parse pipeline failed";
     auto const& mv = *mv_opt;
     expect_wire_text(mv, 833, "AW_asgn_rpt_id", "asgn_rpt_id");
@@ -890,8 +898,8 @@ TEST_F(AllFamiliesRoundtrip069, CollateralRequest) {
     args.coll_req_id = "AX_coll_req_id";
     args.coll_asgn_reason = 895;
     args.transact_time = "AX_transact_time";
-    auto mv_opt = parse(
-        [&](std::span<std::byte> o) { return fixpp::v44::build_CollateralRequest(o, args); });
+    auto mv_opt =
+        parse([&](std::span<std::byte> o) { return fixpp::v44::build_CollateralRequest(o, args); });
     ASSERT_TRUE(mv_opt.has_value()) << "build/parse pipeline failed";
     auto const& mv = *mv_opt;
     expect_wire_text(mv, 894, "AX_coll_req_id", "coll_req_id");
@@ -951,8 +959,7 @@ TEST_F(AllFamiliesRoundtrip069, News) {
     fixpp::v44::NewsArgs args{};
     args.headline = "B_headline";
     args.orig_time = "B_orig_time";
-    auto mv_opt = parse(
-        [&](std::span<std::byte> o) { return fixpp::v44::build_News(o, args); });
+    auto mv_opt = parse([&](std::span<std::byte> o) { return fixpp::v44::build_News(o, args); });
     ASSERT_TRUE(mv_opt.has_value()) << "build/parse pipeline failed";
     auto const& mv = *mv_opt;
     expect_wire_text(mv, 148, "B_headline", "headline");
@@ -966,8 +973,8 @@ TEST_F(AllFamiliesRoundtrip069, CollateralReport) {
     fixpp::v44::CollateralReportArgs args{};
     args.coll_rpt_id = "BA_coll_rpt_id";
     args.coll_status = 910;
-    auto mv_opt = parse(
-        [&](std::span<std::byte> o) { return fixpp::v44::build_CollateralReport(o, args); });
+    auto mv_opt =
+        parse([&](std::span<std::byte> o) { return fixpp::v44::build_CollateralReport(o, args); });
     ASSERT_TRUE(mv_opt.has_value()) << "build/parse pipeline failed";
     auto const& mv = *mv_opt;
     expect_wire_text(mv, 908, "BA_coll_rpt_id", "coll_rpt_id");
@@ -981,8 +988,8 @@ TEST_F(AllFamiliesRoundtrip069, CollateralInquiry) {
     fixpp::v44::CollateralInquiryArgs args{};
     args.account = "BB_account";
     args.cl_ord_id = "BB_cl_ord_id";
-    auto mv_opt = parse(
-        [&](std::span<std::byte> o) { return fixpp::v44::build_CollateralInquiry(o, args); });
+    auto mv_opt =
+        parse([&](std::span<std::byte> o) { return fixpp::v44::build_CollateralInquiry(o, args); });
     ASSERT_TRUE(mv_opt.has_value()) << "build/parse pipeline failed";
     auto const& mv = *mv_opt;
     expect_wire_text(mv, 1, "BB_account", "account");
@@ -996,8 +1003,9 @@ TEST_F(AllFamiliesRoundtrip069, NetworkCounterpartySystemStatusRequest) {
     fixpp::v44::NetworkCounterpartySystemStatusRequestArgs args{};
     args.network_request_type = 935;
     args.network_request_id = "BC_network_request_id";
-    auto mv_opt = parse(
-        [&](std::span<std::byte> o) { return fixpp::v44::build_NetworkCounterpartySystemStatusRequest(o, args); });
+    auto mv_opt = parse([&](std::span<std::byte> o) {
+        return fixpp::v44::build_NetworkCounterpartySystemStatusRequest(o, args);
+    });
     ASSERT_TRUE(mv_opt.has_value()) << "build/parse pipeline failed";
     auto const& mv = *mv_opt;
     expect_wire_text(mv, 935, "935", "network_request_type");
@@ -1011,8 +1019,9 @@ TEST_F(AllFamiliesRoundtrip069, NetworkCounterpartySystemStatusResponse) {
     fixpp::v44::NetworkCounterpartySystemStatusResponseArgs args{};
     args.network_status_response_type = 937;
     args.network_response_id = "BD_network_response_id";
-    auto mv_opt = parse(
-        [&](std::span<std::byte> o) { return fixpp::v44::build_NetworkCounterpartySystemStatusResponse(o, args); });
+    auto mv_opt = parse([&](std::span<std::byte> o) {
+        return fixpp::v44::build_NetworkCounterpartySystemStatusResponse(o, args);
+    });
     ASSERT_TRUE(mv_opt.has_value()) << "build/parse pipeline failed";
     auto const& mv = *mv_opt;
     expect_wire_text(mv, 937, "937", "network_status_response_type");
@@ -1061,8 +1070,7 @@ TEST_F(AllFamiliesRoundtrip069, Email) {
     args.email_thread_id = "C_email_thread_id";
     args.email_type = '1';
     args.subject = "C_subject";
-    auto mv_opt = parse(
-        [&](std::span<std::byte> o) { return fixpp::v44::build_Email(o, args); });
+    auto mv_opt = parse([&](std::span<std::byte> o) { return fixpp::v44::build_Email(o, args); });
     ASSERT_TRUE(mv_opt.has_value()) << "build/parse pipeline failed";
     auto const& mv = *mv_opt;
     expect_wire_text(mv, 164, "C_email_thread_id", "email_thread_id");
@@ -1081,8 +1089,8 @@ TEST_F(AllFamiliesRoundtrip069, NewOrderSingle) {
     args.side = '1';
     args.transact_time = "D_transact_time";
     args.ord_type = '1';
-    auto mv_opt = parse(
-        [&](std::span<std::byte> o) { return fixpp::v44::build_NewOrderSingle(o, args); });
+    auto mv_opt =
+        parse([&](std::span<std::byte> o) { return fixpp::v44::build_NewOrderSingle(o, args); });
     ASSERT_TRUE(mv_opt.has_value()) << "build/parse pipeline failed";
     auto const& mv = *mv_opt;
     expect_wire_text(mv, 11, "D_cl_ord_id", "cl_ord_id");
@@ -1100,8 +1108,8 @@ TEST_F(AllFamiliesRoundtrip069, NewOrderList) {
     args.list_id = "E_list_id";
     args.bid_type = 394;
     args.tot_no_orders = 68;
-    auto mv_opt = parse(
-        [&](std::span<std::byte> o) { return fixpp::v44::build_NewOrderList(o, args); });
+    auto mv_opt =
+        parse([&](std::span<std::byte> o) { return fixpp::v44::build_NewOrderList(o, args); });
     ASSERT_TRUE(mv_opt.has_value()) << "build/parse pipeline failed";
     auto const& mv = *mv_opt;
     expect_wire_text(mv, 66, "E_list_id", "list_id");
@@ -1143,8 +1151,9 @@ TEST_F(AllFamiliesRoundtrip069, OrderCancelReplaceRequest) {
     args.side = '1';
     args.transact_time = "G_transact_time";
     args.ord_type = '1';
-    auto mv_opt = parse(
-        [&](std::span<std::byte> o) { return fixpp::v44::build_OrderCancelReplaceRequest(o, args); });
+    auto mv_opt = parse([&](std::span<std::byte> o) {
+        return fixpp::v44::build_OrderCancelReplaceRequest(o, args);
+    });
     ASSERT_TRUE(mv_opt.has_value()) << "build/parse pipeline failed";
     auto const& mv = *mv_opt;
     expect_wire_text(mv, 41, "G_orig_cl_ord_id", "orig_cl_ord_id");
@@ -1210,8 +1219,8 @@ TEST_F(AllFamiliesRoundtrip069, ListCancelRequest) {
     fixpp::v44::ListCancelRequestArgs args{};
     args.list_id = "K_list_id";
     args.transact_time = "K_transact_time";
-    auto mv_opt = parse(
-        [&](std::span<std::byte> o) { return fixpp::v44::build_ListCancelRequest(o, args); });
+    auto mv_opt =
+        parse([&](std::span<std::byte> o) { return fixpp::v44::build_ListCancelRequest(o, args); });
     ASSERT_TRUE(mv_opt.has_value()) << "build/parse pipeline failed";
     auto const& mv = *mv_opt;
     expect_wire_text(mv, 66, "K_list_id", "list_id");
@@ -1225,8 +1234,8 @@ TEST_F(AllFamiliesRoundtrip069, ListExecute) {
     fixpp::v44::ListExecuteArgs args{};
     args.list_id = "L_list_id";
     args.transact_time = "L_transact_time";
-    auto mv_opt = parse(
-        [&](std::span<std::byte> o) { return fixpp::v44::build_ListExecute(o, args); });
+    auto mv_opt =
+        parse([&](std::span<std::byte> o) { return fixpp::v44::build_ListExecute(o, args); });
     ASSERT_TRUE(mv_opt.has_value()) << "build/parse pipeline failed";
     auto const& mv = *mv_opt;
     expect_wire_text(mv, 66, "L_list_id", "list_id");
@@ -1240,8 +1249,8 @@ TEST_F(AllFamiliesRoundtrip069, ListStatusRequest) {
     fixpp::v44::ListStatusRequestArgs args{};
     args.list_id = "M_list_id";
     args.text = "M_text";
-    auto mv_opt = parse(
-        [&](std::span<std::byte> o) { return fixpp::v44::build_ListStatusRequest(o, args); });
+    auto mv_opt =
+        parse([&](std::span<std::byte> o) { return fixpp::v44::build_ListStatusRequest(o, args); });
     ASSERT_TRUE(mv_opt.has_value()) << "build/parse pipeline failed";
     auto const& mv = *mv_opt;
     expect_wire_text(mv, 66, "M_list_id", "list_id");
@@ -1263,8 +1272,8 @@ TEST_F(AllFamiliesRoundtrip069, ListStatus) {
     args.list_order_status = 431;
     args.rpt_seq = 83;
     args.tot_no_orders = 68;
-    auto mv_opt = parse(
-        [&](std::span<std::byte> o) { return fixpp::v44::build_ListStatus(o, args); });
+    auto mv_opt =
+        parse([&](std::span<std::byte> o) { return fixpp::v44::build_ListStatus(o, args); });
     ASSERT_TRUE(mv_opt.has_value()) << "build/parse pipeline failed";
     auto const& mv = *mv_opt;
     expect_wire_text(mv, 66, "N_list_id", "list_id");
@@ -1284,8 +1293,9 @@ TEST_F(AllFamiliesRoundtrip069, AllocationInstructionAck) {
     args.alloc_id = "P_alloc_id";
     args.transact_time = "P_transact_time";
     args.alloc_status = 87;
-    auto mv_opt = parse(
-        [&](std::span<std::byte> o) { return fixpp::v44::build_AllocationInstructionAck(o, args); });
+    auto mv_opt = parse([&](std::span<std::byte> o) {
+        return fixpp::v44::build_AllocationInstructionAck(o, args);
+    });
     ASSERT_TRUE(mv_opt.has_value()) << "build/parse pipeline failed";
     auto const& mv = *mv_opt;
     expect_wire_text(mv, 70, "P_alloc_id", "alloc_id");
@@ -1304,8 +1314,8 @@ TEST_F(AllFamiliesRoundtrip069, DontKnowTrade) {
     args.exec_id = "Q_exec_id";
     args.dk_reason = '1';
     args.side = '1';
-    auto mv_opt = parse(
-        [&](std::span<std::byte> o) { return fixpp::v44::build_DontKnowTrade(o, args); });
+    auto mv_opt =
+        parse([&](std::span<std::byte> o) { return fixpp::v44::build_DontKnowTrade(o, args); });
     ASSERT_TRUE(mv_opt.has_value()) << "build/parse pipeline failed";
     auto const& mv = *mv_opt;
     expect_wire_text(mv, 37, "Q_order_id", "order_id");
@@ -1321,8 +1331,8 @@ TEST_F(AllFamiliesRoundtrip069, QuoteRequest) {
     fixpp::v44::QuoteRequestArgs args{};
     args.quote_req_id = "R_quote_req_id";
     args.cl_ord_id = "R_cl_ord_id";
-    auto mv_opt = parse(
-        [&](std::span<std::byte> o) { return fixpp::v44::build_QuoteRequest(o, args); });
+    auto mv_opt =
+        parse([&](std::span<std::byte> o) { return fixpp::v44::build_QuoteRequest(o, args); });
     ASSERT_TRUE(mv_opt.has_value()) << "build/parse pipeline failed";
     auto const& mv = *mv_opt;
     expect_wire_text(mv, 131, "R_quote_req_id", "quote_req_id");
@@ -1336,8 +1346,7 @@ TEST_F(AllFamiliesRoundtrip069, Quote) {
     fixpp::v44::QuoteArgs args{};
     args.quote_id = "S_quote_id";
     args.account = "S_account";
-    auto mv_opt = parse(
-        [&](std::span<std::byte> o) { return fixpp::v44::build_Quote(o, args); });
+    auto mv_opt = parse([&](std::span<std::byte> o) { return fixpp::v44::build_Quote(o, args); });
     ASSERT_TRUE(mv_opt.has_value()) << "build/parse pipeline failed";
     auto const& mv = *mv_opt;
     expect_wire_text(mv, 117, "S_quote_id", "quote_id");
@@ -1371,8 +1380,8 @@ TEST_F(AllFamiliesRoundtrip069, MarketDataRequest) {
     args.md_req_id = "V_md_req_id";
     args.subscription_request_type = '1';
     args.market_depth = 264;
-    auto mv_opt = parse(
-        [&](std::span<std::byte> o) { return fixpp::v44::build_MarketDataRequest(o, args); });
+    auto mv_opt =
+        parse([&](std::span<std::byte> o) { return fixpp::v44::build_MarketDataRequest(o, args); });
     ASSERT_TRUE(mv_opt.has_value()) << "build/parse pipeline failed";
     auto const& mv = *mv_opt;
     expect_wire_text(mv, 262, "V_md_req_id", "md_req_id");
@@ -1387,8 +1396,9 @@ TEST_F(AllFamiliesRoundtrip069, MarketDataSnapshotFullRefresh) {
     fixpp::v44::MarketDataSnapshotFullRefreshArgs args{};
     args.security_id_source = "W_security_id_source";
     args.security_id = "W_security_id";
-    auto mv_opt = parse(
-        [&](std::span<std::byte> o) { return fixpp::v44::build_MarketDataSnapshotFullRefresh(o, args); });
+    auto mv_opt = parse([&](std::span<std::byte> o) {
+        return fixpp::v44::build_MarketDataSnapshotFullRefresh(o, args);
+    });
     ASSERT_TRUE(mv_opt.has_value()) << "build/parse pipeline failed";
     auto const& mv = *mv_opt;
     expect_wire_text(mv, 22, "W_security_id_source", "security_id_source");
@@ -1402,8 +1412,9 @@ TEST_F(AllFamiliesRoundtrip069, MarketDataIncrementalRefresh) {
     fixpp::v44::MarketDataIncrementalRefreshArgs args{};
     args.md_req_id = "X_md_req_id";
     args.appl_queue_depth = 813;
-    auto mv_opt = parse(
-        [&](std::span<std::byte> o) { return fixpp::v44::build_MarketDataIncrementalRefresh(o, args); });
+    auto mv_opt = parse([&](std::span<std::byte> o) {
+        return fixpp::v44::build_MarketDataIncrementalRefresh(o, args);
+    });
     ASSERT_TRUE(mv_opt.has_value()) << "build/parse pipeline failed";
     auto const& mv = *mv_opt;
     expect_wire_text(mv, 262, "X_md_req_id", "md_req_id");
@@ -1432,8 +1443,8 @@ TEST_F(AllFamiliesRoundtrip069, QuoteCancel) {
     fixpp::v44::QuoteCancelArgs args{};
     args.quote_id = "Z_quote_id";
     args.quote_cancel_type = 298;
-    auto mv_opt = parse(
-        [&](std::span<std::byte> o) { return fixpp::v44::build_QuoteCancel(o, args); });
+    auto mv_opt =
+        parse([&](std::span<std::byte> o) { return fixpp::v44::build_QuoteCancel(o, args); });
     ASSERT_TRUE(mv_opt.has_value()) << "build/parse pipeline failed";
     auto const& mv = *mv_opt;
     expect_wire_text(mv, 117, "Z_quote_id", "quote_id");
@@ -1462,8 +1473,9 @@ TEST_F(AllFamiliesRoundtrip069, MassQuoteAcknowledgement) {
     fixpp::v44::MassQuoteAcknowledgementArgs args{};
     args.quote_status = 297;
     args.account = "b_account";
-    auto mv_opt = parse(
-        [&](std::span<std::byte> o) { return fixpp::v44::build_MassQuoteAcknowledgement(o, args); });
+    auto mv_opt = parse([&](std::span<std::byte> o) {
+        return fixpp::v44::build_MassQuoteAcknowledgement(o, args);
+    });
     ASSERT_TRUE(mv_opt.has_value()) << "build/parse pipeline failed";
     auto const& mv = *mv_opt;
     expect_wire_text(mv, 297, "297", "quote_status");
@@ -1477,8 +1489,9 @@ TEST_F(AllFamiliesRoundtrip069, SecurityDefinitionRequest) {
     fixpp::v44::SecurityDefinitionRequestArgs args{};
     args.security_req_id = "c_security_req_id";
     args.security_request_type = 321;
-    auto mv_opt = parse(
-        [&](std::span<std::byte> o) { return fixpp::v44::build_SecurityDefinitionRequest(o, args); });
+    auto mv_opt = parse([&](std::span<std::byte> o) {
+        return fixpp::v44::build_SecurityDefinitionRequest(o, args);
+    });
     ASSERT_TRUE(mv_opt.has_value()) << "build/parse pipeline failed";
     auto const& mv = *mv_opt;
     expect_wire_text(mv, 320, "c_security_req_id", "security_req_id");
@@ -1525,8 +1538,8 @@ TEST_F(AllFamiliesRoundtrip069, SecurityStatus) {
     fixpp::v44::SecurityStatusArgs args{};
     args.currency = "f_currency";
     args.security_id_source = "f_security_id_source";
-    auto mv_opt = parse(
-        [&](std::span<std::byte> o) { return fixpp::v44::build_SecurityStatus(o, args); });
+    auto mv_opt =
+        parse([&](std::span<std::byte> o) { return fixpp::v44::build_SecurityStatus(o, args); });
     ASSERT_TRUE(mv_opt.has_value()) << "build/parse pipeline failed";
     auto const& mv = *mv_opt;
     expect_wire_text(mv, 15, "f_currency", "currency");
@@ -1540,8 +1553,9 @@ TEST_F(AllFamiliesRoundtrip069, TradingSessionStatusRequest) {
     fixpp::v44::TradingSessionStatusRequestArgs args{};
     args.trad_ses_req_id = "g_trad_ses_req_id";
     args.subscription_request_type = '1';
-    auto mv_opt = parse(
-        [&](std::span<std::byte> o) { return fixpp::v44::build_TradingSessionStatusRequest(o, args); });
+    auto mv_opt = parse([&](std::span<std::byte> o) {
+        return fixpp::v44::build_TradingSessionStatusRequest(o, args);
+    });
     ASSERT_TRUE(mv_opt.has_value()) << "build/parse pipeline failed";
     auto const& mv = *mv_opt;
     expect_wire_text(mv, 335, "g_trad_ses_req_id", "trad_ses_req_id");
@@ -1570,8 +1584,8 @@ TEST_F(AllFamiliesRoundtrip069, MassQuote) {
     fixpp::v44::MassQuoteArgs args{};
     args.quote_id = "i_quote_id";
     args.account = "i_account";
-    auto mv_opt = parse(
-        [&](std::span<std::byte> o) { return fixpp::v44::build_MassQuote(o, args); });
+    auto mv_opt =
+        parse([&](std::span<std::byte> o) { return fixpp::v44::build_MassQuote(o, args); });
     ASSERT_TRUE(mv_opt.has_value()) << "build/parse pipeline failed";
     auto const& mv = *mv_opt;
     expect_wire_text(mv, 117, "i_quote_id", "quote_id");
@@ -1608,8 +1622,8 @@ TEST_F(AllFamiliesRoundtrip069, BidRequest) {
     args.bid_type = 394;
     args.bid_trade_type = '1';
     args.basis_px_type = '1';
-    auto mv_opt = parse(
-        [&](std::span<std::byte> o) { return fixpp::v44::build_BidRequest(o, args); });
+    auto mv_opt =
+        parse([&](std::span<std::byte> o) { return fixpp::v44::build_BidRequest(o, args); });
     ASSERT_TRUE(mv_opt.has_value()) << "build/parse pipeline failed";
     auto const& mv = *mv_opt;
     expect_wire_text(mv, 391, "k_client_bid_id", "client_bid_id");
@@ -1627,8 +1641,8 @@ TEST_F(AllFamiliesRoundtrip069, BidResponse) {
     fixpp::v44::BidResponseArgs args{};
     args.bid_id = "l_bid_id";
     args.client_bid_id = "l_client_bid_id";
-    auto mv_opt = parse(
-        [&](std::span<std::byte> o) { return fixpp::v44::build_BidResponse(o, args); });
+    auto mv_opt =
+        parse([&](std::span<std::byte> o) { return fixpp::v44::build_BidResponse(o, args); });
     ASSERT_TRUE(mv_opt.has_value()) << "build/parse pipeline failed";
     auto const& mv = *mv_opt;
     expect_wire_text(mv, 390, "l_bid_id", "bid_id");
@@ -1642,8 +1656,8 @@ TEST_F(AllFamiliesRoundtrip069, ListStrikePrice) {
     fixpp::v44::ListStrikePriceArgs args{};
     args.list_id = "m_list_id";
     args.tot_no_strikes = 422;
-    auto mv_opt = parse(
-        [&](std::span<std::byte> o) { return fixpp::v44::build_ListStrikePrice(o, args); });
+    auto mv_opt =
+        parse([&](std::span<std::byte> o) { return fixpp::v44::build_ListStrikePrice(o, args); });
     ASSERT_TRUE(mv_opt.has_value()) << "build/parse pipeline failed";
     auto const& mv = *mv_opt;
     expect_wire_text(mv, 66, "m_list_id", "list_id");
@@ -1659,8 +1673,9 @@ TEST_F(AllFamiliesRoundtrip069, RegistrationInstructions) {
     args.regist_id = "o_regist_id";
     args.regist_trans_type = '1';
     args.regist_ref_id = "o_regist_ref_id";
-    auto mv_opt = parse(
-        [&](std::span<std::byte> o) { return fixpp::v44::build_RegistrationInstructions(o, args); });
+    auto mv_opt = parse([&](std::span<std::byte> o) {
+        return fixpp::v44::build_RegistrationInstructions(o, args);
+    });
     ASSERT_TRUE(mv_opt.has_value()) << "build/parse pipeline failed";
     auto const& mv = *mv_opt;
     expect_wire_text(mv, 513, "o_regist_id", "regist_id");
@@ -1679,8 +1694,9 @@ TEST_F(AllFamiliesRoundtrip069, RegistrationInstructionsResponse) {
     args.regist_trans_type = '1';
     args.regist_ref_id = "p_regist_ref_id";
     args.regist_status = '1';
-    auto mv_opt = parse(
-        [&](std::span<std::byte> o) { return fixpp::v44::build_RegistrationInstructionsResponse(o, args); });
+    auto mv_opt = parse([&](std::span<std::byte> o) {
+        return fixpp::v44::build_RegistrationInstructionsResponse(o, args);
+    });
     ASSERT_TRUE(mv_opt.has_value()) << "build/parse pipeline failed";
     auto const& mv = *mv_opt;
     expect_wire_text(mv, 513, "p_regist_id", "regist_id");
@@ -1738,8 +1754,8 @@ TEST_F(AllFamiliesRoundtrip069, NewOrderCross) {
     args.cross_prioritization = 550;
     args.transact_time = "s_transact_time";
     args.ord_type = '1';
-    auto mv_opt = parse(
-        [&](std::span<std::byte> o) { return fixpp::v44::build_NewOrderCross(o, args); });
+    auto mv_opt =
+        parse([&](std::span<std::byte> o) { return fixpp::v44::build_NewOrderCross(o, args); });
     ASSERT_TRUE(mv_opt.has_value()) << "build/parse pipeline failed";
     auto const& mv = *mv_opt;
     expect_wire_text(mv, 548, "s_cross_id", "cross_id");
@@ -1764,8 +1780,9 @@ TEST_F(AllFamiliesRoundtrip069, CrossOrderCancelReplaceRequest) {
     args.cross_prioritization = 550;
     args.transact_time = "t_transact_time";
     args.ord_type = '1';
-    auto mv_opt = parse(
-        [&](std::span<std::byte> o) { return fixpp::v44::build_CrossOrderCancelReplaceRequest(o, args); });
+    auto mv_opt = parse([&](std::span<std::byte> o) {
+        return fixpp::v44::build_CrossOrderCancelReplaceRequest(o, args);
+    });
     ASSERT_TRUE(mv_opt.has_value()) << "build/parse pipeline failed";
     auto const& mv = *mv_opt;
     expect_wire_text(mv, 548, "t_cross_id", "cross_id");
@@ -1824,8 +1841,8 @@ TEST_F(AllFamiliesRoundtrip069, SecurityTypes) {
     args.security_req_id = "w_security_req_id";
     args.security_response_id = "w_security_response_id";
     args.security_response_type = 323;
-    auto mv_opt = parse(
-        [&](std::span<std::byte> o) { return fixpp::v44::build_SecurityTypes(o, args); });
+    auto mv_opt =
+        parse([&](std::span<std::byte> o) { return fixpp::v44::build_SecurityTypes(o, args); });
     ASSERT_TRUE(mv_opt.has_value()) << "build/parse pipeline failed";
     auto const& mv = *mv_opt;
     expect_wire_text(mv, 320, "w_security_req_id", "security_req_id");
@@ -1857,8 +1874,8 @@ TEST_F(AllFamiliesRoundtrip069, SecurityList) {
     args.security_req_id = "y_security_req_id";
     args.security_response_id = "y_security_response_id";
     args.security_request_result = 560;
-    auto mv_opt = parse(
-        [&](std::span<std::byte> o) { return fixpp::v44::build_SecurityList(o, args); });
+    auto mv_opt =
+        parse([&](std::span<std::byte> o) { return fixpp::v44::build_SecurityList(o, args); });
     ASSERT_TRUE(mv_opt.has_value()) << "build/parse pipeline failed";
     auto const& mv = *mv_opt;
     expect_wire_text(mv, 320, "y_security_req_id", "security_req_id");
@@ -1873,8 +1890,9 @@ TEST_F(AllFamiliesRoundtrip069, DerivativeSecurityListRequest) {
     fixpp::v44::DerivativeSecurityListRequestArgs args{};
     args.security_req_id = "z_security_req_id";
     args.security_list_request_type = 559;
-    auto mv_opt = parse(
-        [&](std::span<std::byte> o) { return fixpp::v44::build_DerivativeSecurityListRequest(o, args); });
+    auto mv_opt = parse([&](std::span<std::byte> o) {
+        return fixpp::v44::build_DerivativeSecurityListRequest(o, args);
+    });
     ASSERT_TRUE(mv_opt.has_value()) << "build/parse pipeline failed";
     auto const& mv = *mv_opt;
     expect_wire_text(mv, 320, "z_security_req_id", "security_req_id");
@@ -1889,11 +1907,12 @@ TEST_F(AllFamiliesRoundtrip069, DerivativeSecurityListRequest) {
 // (e.g. 70/83 green) -- feedback_completeness_gate_exact_set_not_subset.
 TEST_F(AllFamiliesRoundtrip069, CoverageSetEqualityOverAllEmittedBuilders) {
     static constexpr std::array<std::string_view, 83> kSeedMsgTypes = {
-        "6", "7", "8", "9", "AA", "AB", "AC", "AD", "AE", "AF", "AG", "AH", "AI", "AJ", "AK", "AL",
-        "AM", "AN", "AO", "AP", "AQ", "AR", "AS", "AT", "AU", "AV", "AW", "AX", "AY", "AZ", "B",
-        "BA", "BB", "BC", "BD", "BG", "BH", "C", "D", "E", "F", "G", "H", "J", "K", "L", "M", "N",
-        "P", "Q", "R", "S", "T", "V", "W", "X", "Y", "Z", "a", "b", "c", "d", "e", "f", "g", "h",
-        "i", "j", "k", "l", "m", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z",
+        "6",  "7",  "8",  "9",  "AA", "AB", "AC", "AD", "AE", "AF", "AG", "AH", "AI", "AJ",
+        "AK", "AL", "AM", "AN", "AO", "AP", "AQ", "AR", "AS", "AT", "AU", "AV", "AW", "AX",
+        "AY", "AZ", "B",  "BA", "BB", "BC", "BD", "BG", "BH", "C",  "D",  "E",  "F",  "G",
+        "H",  "J",  "K",  "L",  "M",  "N",  "P",  "Q",  "R",  "S",  "T",  "V",  "W",  "X",
+        "Y",  "Z",  "a",  "b",  "c",  "d",  "e",  "f",  "g",  "h",  "i",  "j",  "k",  "l",
+        "m",  "o",  "p",  "q",  "r",  "s",  "t",  "u",  "v",  "w",  "x",  "y",  "z",
     };
 
     std::set<std::string> seeded;
@@ -1901,18 +1920,22 @@ TEST_F(AllFamiliesRoundtrip069, CoverageSetEqualityOverAllEmittedBuilders) {
     ASSERT_EQ(seeded.size(), kSeedMsgTypes.size()) << "duplicate MsgType in kSeedMsgTypes";
 
     std::set<std::string> emitted;
-    for (auto const& entry : fixpp::v44::builder_registry) emitted.insert(std::string{entry.msg_type});
+    for (auto const& entry : fixpp::v44::builder_registry)
+        emitted.insert(std::string{entry.msg_type});
 
     std::vector<std::string> missing;
     std::set_difference(emitted.begin(), emitted.end(), seeded.begin(), seeded.end(),
-                         std::back_inserter(missing));
+                        std::back_inserter(missing));
     std::vector<std::string> extra;
     std::set_difference(seeded.begin(), seeded.end(), emitted.begin(), emitted.end(),
-                         std::back_inserter(extra));
+                        std::back_inserter(extra));
 
     auto join = [](std::vector<std::string> const& v) {
         std::string s;
-        for (auto const& x : v) { s += x; s += ' '; }
+        for (auto const& x : v) {
+            s += x;
+            s += ' ';
+        }
         return s;
     };
     EXPECT_TRUE(missing.empty())
@@ -1947,7 +1970,8 @@ TEST(AllFamiliesFailClosed069, TradeCaptureReport_NoSidesEntry_MissingSide) {
     fixpp::v44::TradeCaptureReportSidesArgs side_entry{};
     // side_entry.side intentionally left unset (nullopt) -- the ONE omitted
     // required entry field.
-    side_entry.order_id = "AE_NoSides_OrderID";  // present, so the reject is attributable to Side alone
+    side_entry.order_id =
+        "AE_NoSides_OrderID";  // present, so the reject is attributable to Side alone
     std::array<fixpp::v44::TradeCaptureReportSidesArgs, 1> sides_arr{side_entry};
     args.sides = std::span<const fixpp::v44::TradeCaptureReportSidesArgs>{sides_arr};
 
@@ -1963,10 +1987,10 @@ TEST(AllFamiliesFailClosed069, BusinessMessageReject_MissingRefMsgType) {
     fixpp::v44::BusinessMessageRejectArgs args{};
     // args.ref_msg_type intentionally left unset (nullopt) -- the ONE omitted
     // required field.
-    args.business_reject_reason = 380;  // present, so the reject is attributable to RefMsgType alone
+    args.business_reject_reason =
+        380;  // present, so the reject is attributable to RefMsgType alone
 
     auto r = fixpp::v44::validate_BusinessMessageReject(args);
     ASSERT_FALSE(r.has_value()) << "omitting required RefMsgType(372) must fail validate_";
     EXPECT_EQ(r.error(), fixpp::core::error::wire_required_field_missing);
 }
-

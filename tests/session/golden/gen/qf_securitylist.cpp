@@ -7,14 +7,13 @@
 // SecurityResponseID(322), SecurityRequestResult(560) (FIX44::SecurityList
 // ctor). SecListGrp/NoRelatedSym(146) is required='N' but populated — 1
 // entry, Symbol(55) — per C4's table note.
-#include <iostream>
 #include <quickfix/fix44/SecurityList.h>
 
+#include <iostream>
+
 int main() {
-    FIX44::SecurityList sl(
-        FIX::SecurityReqID("SECREQ1"),
-        FIX::SecurityResponseID("SECRESP1"),
-        FIX::SecurityRequestResult(0));
+    FIX44::SecurityList sl(FIX::SecurityReqID("SECREQ1"), FIX::SecurityResponseID("SECRESP1"),
+                           FIX::SecurityRequestResult(0));
 
     // NoRelatedSym (146, optional group — populated per C4's table note).
     {

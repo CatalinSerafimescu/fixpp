@@ -685,8 +685,8 @@ std::string emit_builders(VersionIR const& ir, CoverageMode mode) {
         // byte (FR-005/SC-003); `all` widens to every application message
         // minus the N-002/N-003 exclusion set (FR-002/FR-003).
         bool const in_scope = mode == CoverageMode::Official
-                                   ? is_official(m.msg_type)
-                                   : (m.is_application && !is_n002_n003_excluded(m.msg_type));
+                                  ? is_official(m.msg_type)
+                                  : (m.is_application && !is_n002_n003_excluded(m.msg_type));
         if (!in_scope) {
             continue;
         }
