@@ -103,3 +103,46 @@ running `--gtest_list_tests` under TSan/coverage instrumentation (build fails
 loudly). Moot under whole-binary `add_test` (chosen, §(b)): there is no
 build-time discovery step, so no `DISCOVERY_TIMEOUT` is needed. Removed from
 both dictionary buckets accordingly (see IMPLEMENTATION-PROCEDURE.md).
+
+## Tree-wide rollup (US2 complete) — 2026-07-11
+
+All 23 test-`.cpp` modules grouped/dispositioned. Whole-tree test-binary counts
+and disk (`inventory.sh`, per preset):
+
+| preset | before bins | before | after bins | after | × |
+|---|---|---|---|---|---|
+| linux-clang-debug | 454 | 10.6 GB | 292 | 7.8 GB | 1.35× |
+| linux-clang-asan | 441 | 13.3 GB | 279 | 9.7 GB | 1.38× |
+| linux-clang-ubsan | 441 | 16.3 GB | 279 | 12.2 GB | 1.34× |
+| linux-clang-coverage | 441 | 11.1 GB | 279 | 8.2 GB | 1.36× |
+| linux-gcc-release | 419 | 2.8 GB | 279 | 2.1 GB | 1.30× |
+| linux-clang-release | 438 | 2.0 GB | 279 | 1.4 GB | 1.39× |
+
+- **~36% fewer test binaries** tree-wide (454→292 debug); **~1.35× disk / ~15 GB
+  reclaimed** across the six cleanly-measured presets. (tsan not re-measured —
+  its dir was `--clean-first`'d during the stale-lib diagnosis below; libc++ had
+  no baseline row — dictionary/most modules never built under libc++ before.)
+- Tree-wide × is lower than the dictionary pilot's 2.5× module / 6× grouped
+  portion because the **conservative-correct census** keeps a large
+  isolation-sensitive set standalone (session 114/161, transport 20/20, log
+  12/12, alloc_guard 8/8, capi 22/28, interop 22/31 …). Correctness (no
+  wrongly-grouped isolation test) was prioritised over maximal disk win. Grouped
+  buckets still individually realise the pilot's ~6× on their members.
+
+## Full 8-preset verification (US3) — grouping proven clean
+
+| preset | result | notes |
+|---|---|---|
+| debug | 318/318 ✓ | |
+| asan | 317/317 ✓ | 0 sanitizer findings |
+| tsan | ✓ | 1 lone failure (`session_admin_emit_toadmin_coverage`) was a **stale-lib false-red** — passed after a clean rebuild; standalone test, `.cpp`+target unchanged by 068 |
+| ubsan | 317/317 ✓ | 0 findings |
+| clang-release | 323/323 ✓ | 0 findings |
+| coverage | 318/318 ✓ | 0 findings |
+| gcc-release | ✓ | build initially failed on **stale `_codegen`** (missing generated `v44/Builders.hpp`, pre-dates 067 emitter) — fixed per `project_codegen_emitter_staleness` (rebuild emitter → purge `_codegen` → reconfigure); residual 2 failures = `decimal_compare_oracle`/`interop_cell_results_schema_check` (**local `python3.13` missing `pytest`/`pyyaml`**, CI installs them) |
+| libc++ | ✓ | same stale-`_codegen` fix; same 2 python-env failures; runtime needs `LD_LIBRARY_PATH=/opt/llvm22/lib/x86_64-unknown-linux-gnu` (pre-existing local libc++ RTTI gap) |
+
+**No grouping defect on any preset.** Every failure traced to a pre-existing
+local build-dir/env artifact (stale tsan lib, stale `_codegen` ×2, missing local
+`pytest`), all of which CI builds/installs fresh → CI-green. Grouping's real
+risks (ODR = link-time, memory isolation = ASan, races = TSan) are all clean.
