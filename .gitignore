@@ -99,8 +99,11 @@ book/
 # pipeline.md step-9 checklist-audit routing + step-5a phase-implementer
 # binding; speckit-analyze/SKILL.md carries the pipeline.md [I] (2026-05-22)
 # spec-analyzer-agent canonical-executor binding (both have LOCAL PATCH
-# headers). Re-include each path level, re-exclude its contents, whitelist
-# the file.
+# headers); speckit-tasks/SKILL.md carries the mandatory close-out tasks
+# (catalogue-flip + feature-completeness audit, Gate-B preconditions per
+# Article XVII §8 — mirrors the tracked tasks-template.md block). Tracked so
+# a spec-kit `integration upgrade` cannot silently revert them to vanilla.
+# Re-include each path level, re-exclude its contents, whitelist the file.
 !.claude/
 .claude/*
 !.claude/skills/
@@ -111,6 +114,9 @@ book/
 !.claude/skills/speckit-analyze/
 .claude/skills/speckit-analyze/*
 !.claude/skills/speckit-analyze/SKILL.md
+!.claude/skills/speckit-tasks/
+.claude/skills/speckit-tasks/*
+!.claude/skills/speckit-tasks/SKILL.md
 
 # libFuzzer corpus (regenerated on each fuzz run; not source of truth)
 tests/fuzz/corpus/message_store/
@@ -123,3 +129,6 @@ wheelhouse/
 # 069-v44-all-families local byte-identity baseline (reproducible via
 # `fixpp-codegen --families official`; not a source-of-truth artifact)
 specs/069-v44-all-families/baseline/
+
+# spec-kit CLI catalog cache (ephemeral, regenerated)
+.specify/integrations/.cache/
