@@ -465,3 +465,89 @@ individually (D4 requires bucket label-homogeneity), so `-L interop`,
 Summary` shows `016 → 12 tests`, `us3 → 5 tests`, `recovery → 4 tests`,
 `framing → 2 tests` — all consistent with the pre-grouping per-cell counts).
 No historical `-R`-by-target-name idiom targeted any of the 9 grouped names.
+
+## Module: `capi` (28 `.cpp`/`.c`) — US2
+
+C-ABI test suite (050/051/052/062/065/066 layers). Key discriminator: the
+C-ABI `fixpp_engine` (`src/capi/capi_internal.hpp`) owns
+`std::vector<std::thread> workers_` — calling `fixpp_engine_start()` on a
+validly-configured engine spawns **real background worker threads**
+(genuinely concurrent, forces standalone). Grepped every `.cpp` for
+`fixpp_engine_start`; every file that calls it (successfully) stays
+standalone. `capi_occupancy_negative` / `capi_reentrancy_negative` are bash
+script invocations (`tools/test_capi_{occupancy,reentrancy}_negative.sh`),
+not `.cpp`/gtest binaries — outside grouping scope, unchanged.
+
+### ODR pre-check (§3)
+
+No `int main(` in the bucket's 6 `.cpp` (the 2 `.c` files DO have their own
+`main()` but were never gtest binaries — they don't link `GTest::gtest_main`
+at all, so they were never groupable candidates in the first place). No
+duplicate `TEST`/`TEST_F` `Suite.Name`. `error_surface_test.cpp`'s
+`load_csv()`/`symbol_to_code()` and `thunk_split_test.cpp`'s
+`abort_trap_handler`/`g_abort_jmp`/`g_abort_caught`/`ScopedAbortTrap`/
+`open_unstarted_session` are all wrapped in an anonymous namespace (internal
+linkage) — verified via bracket-matched `namespace { … }` spans, not name
+collisions with any other bucket member. Zero FR-012 renames.
+
+### Grouped
+
+**Bucket `capi_pure_tests`** — 6 `.cpp`, no LABELS (unset before AND after —
+none of the 6 previously carried any label, so `-L capi` selection is
+unaffected), link `fixpp_capi` + gtest, include `FIXPP_CAPI_FEATURE_B_INCLUDES`
+(harmless additive for the 4 members that don't need it), compile-defs
+`FIXPP_CAPI_DATA_DIR` + `FIXPP_TEST_HOOKS` + `FIXPP_CAPI_LIB` + `FIXPP_CAPI_GOLDEN`
+(union — each a no-op for the members that don't reference it):
+
+| `.cpp` | decision | odr_action |
+|---|---|---|
+| `capi_smoke_test.cpp` | grouped:pure | none |
+| `version_test.cpp` | grouped:pure | none |
+| `error_surface_test.cpp` | grouped:pure | none (anon-ns helpers) |
+| `config_builders_test.cpp` | grouped:pure ("Pure builder unit tests — no engine, no event loop" per file header; never calls `fixpp_engine_start`) | none |
+| `thunk_split_test.cpp` | grouped:pure (in-process SIGABRT trap via sigaction/sigsetjmp+siglongjmp, explicitly NOT gtest fork `EXPECT_DEATH` but scoped/restored per-`TEST` via `ScopedAbortTrap` RAII — same cross-test isolation argument the procedure grants fork-based death tests; only constructs an UNSTARTED engine/session) | none (anon-ns helpers) |
+| `abi_symbol_golden_test.cpp` | grouped:pure (read-only `nm`-vs-golden-file + error-enum-boundary check; no global mutable state; no `-L` selector to break) | none |
+
+### Standalone (22)
+
+| `.cpp`/`.c` | reason |
+|---|---|
+| `capi_version_smoke.c` | pure-C compile-smoke gate — not a gtest binary (no `GTest::gtest_main` link, has its own `main()`) |
+| `handles_compile_test.c` | pure-C compile-smoke gate — same reason |
+| `error_block_test.cpp` | calls `fixpp_engine_start()` (real engine worker threads) |
+| `lifecycle_test.cpp` | calls `fixpp_engine_start()` (real engine worker threads) |
+| `lifecycle_negative_test.cpp` | calls `fixpp_engine_start()` successfully in 3 of its REJECTION arms (real engine worker threads) |
+| `send_recv_test.cpp` | real two-C-ABI-engine loopback + explicit drain **thread** + ASan-conditional `WILL_FAIL` split into 2 `--gtest_filter`-selected ctest entries (live-name selection + heterogeneous ASan-only property) |
+| `recv_alloc_guard_test.cpp` | `$<TARGET_FILE:capi_recv_alloc_guard_test>` live name-selection (mallocnesia sidecar) |
+| `error_live_test.cpp` | calls `fixpp_engine_start()`; label-heterogeneous sole `capi;050` |
+| `message_read_test.cpp` | `$<TARGET_FILE:capi_message_read_test>` live name-selection (mallocnesia sidecar) |
+| `message_write_test.cpp` | `$<TARGET_FILE:capi_message_write_test>` live name-selection (mallocnesia sidecar); calls `fixpp_engine_start()` |
+| `msg_clone_cross_strand_test.cpp` | calls `fixpp_engine_start()` (real engine worker threads; cross-strand concurrency witness) |
+| `toapp_callback_test.cpp` | calls `fixpp_engine_start()` (real engine worker threads) |
+| `toapp_alloc_guard_test.cpp` | `$<TARGET_FILE:capi_toapp_alloc_guard_test>` live name-selection (mallocnesia sidecar) |
+| `public_roundtrip_test.cpp` | calls `fixpp_engine_start()` (real two-engine TCP loopback round-trip) |
+| `message_field_iteration_test.cpp` | `$<TARGET_FILE:capi_message_field_iteration_test>` live name-selection (mallocnesia sidecar) + explicit `TIMEOUT 120` (heterogeneous property) |
+| `dictionary_load_test.cpp` | genuinely concurrent (`std::thread` — "sequential + concurrent double-destroy (TSan)" per file header) |
+| `dict066_group_loopback_smoke_test.cpp` | calls `fixpp_engine_start()`; label-heterogeneous sole `066;setup;scaffold;capi` |
+| `dict066_group_membership_red_test.cpp` | calls `fixpp_engine_start()`; label-heterogeneous sole `066;us1;red;capi` |
+| `dict066_nested_membership_red_test.cpp` | calls `fixpp_engine_start()`; label-heterogeneous sole `065;us1;red;capi`; explicit `TIMEOUT 60` |
+| `dict066_scalar_as_group_test.cpp` | calls `fixpp_engine_start()`; label-heterogeneous sole `066;us2;capi` |
+| `dict066_clone_identity_test.cpp` | calls `fixpp_engine_start()`; shares label `066;us1;capi` with the next row but real-engine-thread concern dominates |
+| `dict066_clone_membership_copy_oom_test.cpp` | **global** `operator new`/`operator new[]` override (process-wide allocation-counting seam) — forces standalone regardless of the shared `066;us1;capi` label (D3 global-alloc-counting rule) |
+
+**Sum:** 6 grouped + 22 standalone = **28** ✓ (100% dispositioned).
+
+### `-R`/`-L` selectability (SC-004 / Scenario-3)
+
+`ctest -R '^capi'` selects 31 entries both before (28 `.cpp`/`.c`-derived +
+1 occupancy + 1 reentrancy + up to 5 mallocnesia sidecars, gated on
+`libmallocnesia.so`) and after (23 executables — 6 folded into
+`capi_pure_tests` + 22 unaffected standalone/script/sidecar entries — same
+31 total once the 6 collapse to 1). `ctest -L capi` is unaffected: none of
+the 6 grouped `.cpp` previously carried the `capi` label (verified — the
+bucket carries none either), so the pre-existing `-L capi` set (20 entries,
+spot-checked in the post-grouping run) is untouched. No historical
+`-R`-by-target-name idiom targeted any of the 6 grouped names (`capi_smoke`,
+`capi_version`, `capi_error_surface`, `capi_config_builders`,
+`capi_thunk_split`, `capi_abi_symbol_golden` were never referenced by name in
+a quickstart/tasks `-R` selector).
