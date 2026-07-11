@@ -196,38 +196,24 @@ fixpp_add_interop_test(
     TLS
 )
 
-# ── US3 parity GAP-closure witnesses (T023-T025) ──────────────────────────────
+# ── US3 parity GAP-closure witnesses (T023-T025) — 068 grouped bucket ────────
 # Standalone (no counterparty, no live transport): drive crafted admin frames
 # through Session::on_inbound_frame() over the sync transport_send_ path and
 # observe fixpp's recovery behavior. Run green locally (interop-parity label).
+# All 4 share LABEL "interop;016;interop-parity;us3" + link-deps (no TLS, just
+# fixpp_mock_clock) → one whole-binary add_test (068 US2, D4 bucket key).
+# FIX-TC / QuickFIX reference-suite coverage-gap characterization witnesses
+# (fix_tc_coverage_gaps_test.cpp) close/document fix-tc-coverage-audit.md rows
+# (2b/2t/15/EndSeqNo-over-range) in the same bucket.
 fixpp_add_interop_test(
-    NAME interop_parity_resend_abort_on_failing_write_test
+    NAME interop_parity_us3_tests
     GROUP parity
     LABEL "interop;016;interop-parity;us3"
-    SOURCES parity/resend_abort_on_failing_write_test.cpp
-    EXTRA_LIBS fixpp_mock_clock
-)
-fixpp_add_interop_test(
-    NAME interop_parity_inbound_sequencereset_arms_test
-    GROUP parity
-    LABEL "interop;016;interop-parity;us3"
-    SOURCES parity/inbound_sequencereset_arms_test.cpp
-    EXTRA_LIBS fixpp_mock_clock
-)
-fixpp_add_interop_test(
-    NAME interop_parity_replay_subsumes_reorder_queue_test
-    GROUP parity
-    LABEL "interop;016;interop-parity;us3"
-    SOURCES parity/replay_subsumes_reorder_queue_test.cpp
-    EXTRA_LIBS fixpp_mock_clock
-)
-# FIX-TC / QuickFIX reference-suite coverage-gap characterization witnesses.
-# Closes/documents fix-tc-coverage-audit.md rows (2b/2t/15/EndSeqNo-over-range).
-fixpp_add_interop_test(
-    NAME interop_parity_fix_tc_coverage_gaps_test
-    GROUP parity
-    LABEL "interop;016;interop-parity;us3"
-    SOURCES parity/fix_tc_coverage_gaps_test.cpp
+    SOURCES
+        parity/resend_abort_on_failing_write_test.cpp
+        parity/inbound_sequencereset_arms_test.cpp
+        parity/replay_subsumes_reorder_queue_test.cpp
+        parity/fix_tc_coverage_gaps_test.cpp
     EXTRA_LIBS fixpp_mock_clock
 )
 
@@ -275,48 +261,39 @@ fixpp_add_interop_test(
     TLS
 )
 
-# ── US2 thorny-corpus P1 witnesses (T020-T021) ────────────────────────────────
-# Standalone provenance-linked replays of upstream closed-with-fix bugs; reuse the
-# parity ParityAcceptorFixture (parity/parity_support.hpp) — no counterparty, no
-# live transport. Each asserts fixpp's spec-conformant outcome (FR-018).
+# ── US2 thorny-corpus P1 witnesses (T020-T021) + Gate-B/r1 (C-101/C-102) ──────
+# 068 grouped buckets. Standalone provenance-linked replays of upstream
+# closed-with-fix bugs; reuse the parity ParityAcceptorFixture
+# (parity/parity_support.hpp) — no counterparty, no live transport. Each
+# asserts fixpp's spec-conformant outcome (FR-018).
 # Provenance + bucketing: thorny/CORPUS-INDEX.md.
+#
+# recovery/ bucket (3 .cpp): qfj-750, qfj-271, and the Gate-B/r1 qfj-626
+# witness all share LABEL "interop;016;interop-thorny;us2;recovery" +
+# link-deps (068 US2, D4 bucket key).
 fixpp_add_interop_test(
-    NAME interop_thorny_qfj750_logout_seqnum_mismatch_test
+    NAME interop_thorny_recovery_us2_tests
     GROUP thorny
     LABEL "interop;016;interop-thorny;us2;recovery"
-    SOURCES thorny/recovery/qfj-750-logout-seqnum-mismatch_test.cpp
+    SOURCES
+        thorny/recovery/qfj-750-logout-seqnum-mismatch_test.cpp
+        thorny/recovery/qfj-271-sequencereset-large-gapfill_test.cpp
+        thorny/recovery/qfj-626-resend-recomputes-checksum_test.cpp
     EXTRA_LIBS fixpp_mock_clock
 )
+# framing/ bucket (2 .cpp): qfj-603 + qfj-721 share
+# LABEL "interop;016;interop-thorny;us2;framing" + link-deps (068 US2).
 fixpp_add_interop_test(
-    NAME interop_thorny_qfj603_unsupported_beginstring_test
+    NAME interop_thorny_framing_us2_tests
     GROUP thorny
     LABEL "interop;016;interop-thorny;us2;framing"
-    SOURCES thorny/framing/qfj-603-unsupported-beginstring_test.cpp
+    SOURCES
+        thorny/framing/qfj-603-unsupported-beginstring_test.cpp
+        thorny/framing/qfj-721-non-logon-first-message_test.cpp
     EXTRA_LIBS fixpp_mock_clock
 )
-fixpp_add_interop_test(
-    NAME interop_thorny_qfj721_non_logon_first_message_test
-    GROUP thorny
-    LABEL "interop;016;interop-thorny;us2;framing"
-    SOURCES thorny/framing/qfj-721-non-logon-first-message_test.cpp
-    EXTRA_LIBS fixpp_mock_clock
-)
-fixpp_add_interop_test(
-    NAME interop_thorny_qfj271_sequencereset_large_gapfill_test
-    GROUP thorny
-    LABEL "interop;016;interop-thorny;us2;recovery"
-    SOURCES thorny/recovery/qfj-271-sequencereset-large-gapfill_test.cpp
-    EXTRA_LIBS fixpp_mock_clock
-)
-
-# ── Gate-B/r1 thorny witnesses: C-101 (qfj#626) + C-102 (qfj#557) ───────────
-fixpp_add_interop_test(
-    NAME interop_thorny_qfj626_resend_recomputes_checksum_test
-    GROUP thorny
-    LABEL "interop;016;interop-thorny;us2;recovery"
-    SOURCES thorny/recovery/qfj-626-resend-recomputes-checksum_test.cpp
-    EXTRA_LIBS fixpp_mock_clock
-)
+# reject/ (qfj-557): sole member of its label class ("...;reject") →
+# standalone (068 D4 — a bucket-of-one yields no disk win).
 fixpp_add_interop_test(
     NAME interop_thorny_qfj557_generatereject_advances_seqnum_test
     GROUP thorny

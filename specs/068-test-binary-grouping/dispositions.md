@@ -350,3 +350,118 @@ standalone. The one live name-selection idiom in this module —
 No historical `-R`-by-target-name idiom targeted any of the 47 grouped names
 (they were `add_threading_test`/`fixpp_add_store_test` seam registrations, not
 named in any quickstart/tasks `-R` selector); nothing to replace.
+
+## Module: `interop` (31 `.cpp`) — US2
+
+Session-layer interop gate (016-interop-harness). Uses the module's own
+`fixpp_add_interop_test(NAME... GROUP... LABEL... SOURCES...)` helper, which
+already accepts multi-value `SOURCES` — grouped buckets are built by passing
+multiple `.cpp` to one call (no hand-rolled `add_executable`), which
+preserves the `interop_<happy|thorny|parity>` aggregation-target wiring
+(`add_dependencies`) the helper performs per NAME. `interop_cell_results_schema_check`
+is a `pytest` invocation over `cell_results_schema_check_test.py` (US4 T028),
+not a `.cpp`/gtest binary — outside grouping scope, unchanged (mirrors how
+the `session` ledger notes `conformance/` as a separate module).
+
+**Key discriminator (conservative, per orchestrator note + "when unsure →
+standalone"):** every TLS-linked cell (`happy/*`, TLS `thorny/*` 021/022,
+`test_business_message_interop.cpp`) builds a real
+`fixpp::transport::TransportFactory` (`make_interop_tls_factory`) and calls
+`Engine::start()`, which binds/connects a **real TCP socket** (localhost,
+env-selected or OS-assigned port) — kept standalone even where two TLS cells
+share an identical LABEL (`hp_fix44_testrequest_echo_test` /
+`hp_fix44_reject_invalid_admin_test`, both `"interop;016;interop-happy;us1"`).
+Non-TLS `parity/*` and non-TLS `thorny/*` cells use `ParityAcceptorFixture`
+(`parity/parity_support.hpp`) or an equivalent local fixture (`qfj-626`) that
+overrides `transport_send` with an in-process capture lambda and pumps a
+private `asio::io_context` via `ioc.run_for()+ioc.restart()` on the calling
+thread only — no real socket, no `std::thread`/`thread_pool` anywhere in the
+module (grepped) — isolation-safe, same pattern as the already-grouped
+`session_pure_tests`/`session_store_tests` precedent.
+
+### ODR pre-check (§3)
+
+No `int main(` in any `.cpp`. No duplicate `TEST`/`TEST_F`/`TEST_P`
+`Suite.Name` across the module. `thorny/{framing,recovery,reject}/*.cpp` each
+declare a local `using Thorny*Fixture = fixpp::interop::parity::ParityAcceptorFixture;`
+type alias — a compile-time-only alias with no linkable symbol, safe to
+repeat verbatim across TUs linked into the same bucket (not an ODR
+violation). Free non-`static` helpers found in bucket sources
+(`any_reject_value_incorrect` in `inbound_sequencereset_arms_test.cpp`;
+`frame_from_body`/`any_frame_contains`/`frame_has` in
+`fix_tc_coverage_gaps_test.cpp`) are wrapped in an anonymous namespace
+(internal linkage) — verified no name collides with any other bucket member
+(`qfj-626`'s helpers are already `static`). Zero FR-012 renames.
+
+### Grouped
+
+**Bucket `interop_parity_us3_tests`** — 4 `.cpp`, label
+`"interop;016;interop-parity;us3"`, link `interop_support` + `fixpp_mock_clock`
++ gtest (no TLS):
+
+| `.cpp` | decision | odr_action |
+|---|---|---|
+| `parity/resend_abort_on_failing_write_test.cpp` | grouped:parity_us3 | none |
+| `parity/inbound_sequencereset_arms_test.cpp` | grouped:parity_us3 | none (anon-ns helper) |
+| `parity/replay_subsumes_reorder_queue_test.cpp` | grouped:parity_us3 | none |
+| `parity/fix_tc_coverage_gaps_test.cpp` | grouped:parity_us3 | none (anon-ns helpers) |
+
+**Bucket `interop_thorny_recovery_us2_tests`** — 3 `.cpp`, label
+`"interop;016;interop-thorny;us2;recovery"`, link `interop_support` +
+`fixpp_mock_clock` + gtest (no TLS):
+
+| `.cpp` | decision | odr_action |
+|---|---|---|
+| `thorny/recovery/qfj-750-logout-seqnum-mismatch_test.cpp` | grouped:thorny_recovery_us2 | none |
+| `thorny/recovery/qfj-271-sequencereset-large-gapfill_test.cpp` | grouped:thorny_recovery_us2 | none |
+| `thorny/recovery/qfj-626-resend-recomputes-checksum_test.cpp` | grouped:thorny_recovery_us2 | none (local static helpers) |
+
+**Bucket `interop_thorny_framing_us2_tests`** — 2 `.cpp`, label
+`"interop;016;interop-thorny;us2;framing"`, link `interop_support` +
+`fixpp_mock_clock` + gtest (no TLS):
+
+| `.cpp` | decision | odr_action |
+|---|---|---|
+| `thorny/framing/qfj-603-unsupported-beginstring_test.cpp` | grouped:thorny_framing_us2 | none |
+| `thorny/framing/qfj-721-non-logon-first-message_test.cpp` | grouped:thorny_framing_us2 | none |
+
+### Standalone (22)
+
+| `.cpp` | reason |
+|---|---|
+| `support_smoke_test.cpp` | label-heterogeneous (sole `"interop;016;interop-support"`) |
+| `happy/hp_fix44_logon_hb_logout_test.cpp` | real-socket TLS cell (label-heterogeneous, sole `us1;smoke`) |
+| `happy/hp_fixt50sp2_logon_hb_logout_test.cpp` | real-socket TLS cell (label-heterogeneous, sole `033;us3;fixt;fix50sp2`) |
+| `happy/hp_down_peer_stop_watchdog_test.cpp` | real-socket TLS cell (label-heterogeneous, sole `us1;down-peer;watchdog`) |
+| `happy/hp_fix44_testrequest_echo_test.cpp` | real-socket TLS cell — conservative standalone despite shared label `"interop;016;interop-happy;us1"` with the next row (bind/connect real localhost port; orchestrator note + "when unsure → standalone") |
+| `happy/hp_fix44_reject_invalid_admin_test.cpp` | real-socket TLS cell — same shared-label pair, same conservative reason |
+| `happy/hp_fix44_seqnum_recovery_test.cpp` | real-socket TLS cell (label-heterogeneous, sole `us1;us3`) |
+| `happy/hp_fix44_recovery_outbound_answer_test.cpp` | real-socket TLS cell (label-heterogeneous, sole `018;us3`) |
+| `happy/hp_fix44_idle_heartbeat_cadence_test.cpp` | real-socket TLS cell (label-heterogeneous, sole `018;us2`) |
+| `happy/hp_fix44_disconnect_reconnect_noreset_test.cpp` | real-socket TLS cell (label-heterogeneous, sole `us1;reconnect`) |
+| `happy/hp_fix44_reset_on_logon_test.cpp` (024) | real-socket TLS cell (label-heterogeneous, sole `024;...;reset-on-logon`) |
+| `happy/hp_fix44_received_reset_test.cpp` (030) | real-socket TLS cell (label-heterogeneous, sole `030;...;received-reset`) |
+| `happy/hp_fix44_nanos_sendingtime_test.cpp` (026) | real-socket TLS cell (label-heterogeneous, sole `026;...;nanos`) |
+| `thorny/reject/qfj-557-generatereject-advances-seqnum_test.cpp` | label-heterogeneous — sole member of `"...;reject"` (D4 bucket-of-one) |
+| `thorny/recovery/021-poss-dup-replay-survives_test.cpp` | real-socket TLS cell (label-heterogeneous, sole `021;us1;...;poss-dup`) |
+| `thorny/recovery/021-poss-dup-malformed-dup-rejected_test.cpp` | real-socket TLS cell (label-heterogeneous, sole `021;us2;...;poss-dup`) |
+| `thorny/framing/022-allow-pos-dup-strip-send_test.cpp` | real-socket TLS cell (label-heterogeneous, sole `022;...;allow-pos-dup`) |
+| `thorny/recovery/022-poss-resend-deliver_test.cpp` | real-socket TLS cell (label-heterogeneous, sole `022;...;poss-resend`) |
+| `test_business_message_interop.cpp` | real-socket TLS cell + codegen-gated + explicit `TIMEOUT 30` (label-heterogeneous, sole `020;us2;us3;business-message`) |
+| `happy/hp_fix44_next_expected_test.cpp` (027) | real-socket TLS cell (label-heterogeneous, sole `027;...;next-expected-msgseqnum`) |
+| `happy/hp_fix44_validation_compat_test.cpp` (028) | real-socket TLS cell (label-heterogeneous, sole `028;...;validation-compat;...`) |
+| `happy/hp_fix44_restart_resume_test.cpp` (029) | real-socket TLS cell (label-heterogeneous, sole `029;...;restart-resume`) |
+
+**Sum:** 4 + 3 + 2 grouped (9) + 22 standalone = **31** ✓ (100% dispositioned).
+
+### `-R`/`-L` selectability (SC-004 / Scenario-3)
+
+Every `ctest -L <feature>` selector is preserved: the 3 new bucket targets
+carry the exact same LABEL string every member previously carried
+individually (D4 requires bucket label-homogeneity), so `-L interop`,
+`-L 016`, `-L interop-parity`, `-L interop-thorny`, `-L us2`, `-L us3`,
+`-L recovery`, `-L framing` all select the same logical case set as before
+(spot-checked via `ctest -L interop`: 26 entries, 100% pass, `Label Time
+Summary` shows `016 → 12 tests`, `us3 → 5 tests`, `recovery → 4 tests`,
+`framing → 2 tests` — all consistent with the pre-grouping per-cell counts).
+No historical `-R`-by-target-name idiom targeted any of the 9 grouped names.
