@@ -56,10 +56,14 @@ namespace fs = std::filesystem;
 #ifndef FIXPP_CODEGEN_GOLDEN_DIR
 #error "FIXPP_CODEGEN_GOLDEN_DIR must be set by CMake target_compile_definitions"
 #endif
+#ifndef FIXPP_CODEGEN_069_OFFICIAL_GOLDEN_DIR
+#error "FIXPP_CODEGEN_069_OFFICIAL_GOLDEN_DIR must be set by CMake target_compile_definitions"
+#endif
 
 static constexpr const char* kBin = FIXPP_CODEGEN_BIN;
 static constexpr const char* kDictDir = FIXPP_DICT_DATA_DIR;
 static constexpr const char* kGoldenDir = FIXPP_CODEGEN_GOLDEN_DIR;
+static constexpr const char* kOfficialBuildersGoldenDir = FIXPP_CODEGEN_069_OFFICIAL_GOLDEN_DIR;
 
 // XMLs in the exact order the tool accepts them (matches Codegen.cmake)
 static constexpr std::array<const char*, 4> kXmls = {"FIX42.xml", "FIX44.xml", "FIX50SP2.xml",
@@ -147,6 +151,16 @@ static int run_codegen(const fs::path& out_dir) {
         cmd += " --xml " + quote(xml_path.string());
         cmd += " --out " + quote(out_dir.string());
     }
+    return run_system(cmd);
+}
+
+// Gate B PR#187 round 1 F3: regenerate v44 only, under `--families official`.
+static int run_codegen_v44_official(const fs::path& out_dir) {
+    std::string cmd = quote(kBin);
+    fs::path xml_path = fs::path(kDictDir) / "FIX44.xml";
+    cmd += " --xml " + quote(xml_path.string());
+    cmd += " --out " + quote(out_dir.string());
+    cmd += " --families official";
     return run_system(cmd);
 }
 
@@ -359,6 +373,39 @@ TEST_F(DeterminismTest, GeneratedMatchesGolden) {
             << " --out <golden-dir> && cp <golden-dir>/" << kVersions[i] << "/Messages.hpp "
             << golden.string();
     }
+}
+
+// ── Gate B PR#187 round 1 F3: official-mode byte identity (SC-003) ──────────
+//
+// test_069_mode_count.cpp (tests/session/) pins only builder_registry.size()
+// (33 under `official`), not the actual byte content. tasks.md T009 verified
+// byte-identity locally against a captured pre-069 baseline
+// (specs/069-v44-all-families/baseline/Builders.OFFICIAL.baseline.hpp,
+// gitignored — a local/manual procedure). This test promotes that same
+// verified content (copied byte-for-byte into the checked-in golden below)
+// into a CI-automated gate, mirroring GeneratedMatchesGolden above.
+
+TEST_F(DeterminismTest, OfficialModeBuildersMatchesGolden) {
+    TempDir run("fixpp_det_official");
+    int rc = run_codegen_v44_official(run.path);
+    ASSERT_EQ(rc, 0) << "official-mode codegen run failed (exit " << rc << ")";
+
+    fs::path generated = run.path / "v44" / "Builders.hpp";
+    fs::path golden = fs::path(kOfficialBuildersGoldenDir) / "v44_Builders_official.golden.hpp";
+
+    ASSERT_TRUE(fs::exists(generated)) << "Generated file missing: " << generated;
+    ASSERT_TRUE(fs::exists(golden)) << "Golden not found: " << golden;
+
+    std::string gen_bytes = read_file_binary(generated);
+    std::string golden_bytes = read_file_binary(golden);
+
+    EXPECT_EQ(gen_bytes, golden_bytes)
+        << "SC-003 violated: `--families official` v44/Builders.hpp diverged "
+           "from the byte-identity baseline (generated "
+        << gen_bytes.size() << " bytes, golden " << golden_bytes.size() << " bytes).\n"
+        << "  generated: " << generated << "\n"
+        << "  golden:    " << golden << "\n"
+        << "  Run 'diff " << generated.string() << " " << golden.string() << "' to see the diff.";
 }
 
 TEST(CodegenGenUtil, AccessorNormalizationCoversKeywordsDigitsAndFallback) {

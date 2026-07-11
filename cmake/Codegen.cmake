@@ -227,6 +227,23 @@ if(NOT _need_generate)
   endforeach()
 endif()
 
+# Gate B PR#187 round 1 F1: the checks above know about XML inputs and the
+# all<->official mode switch, but NOT about the generator's OWN source. A
+# same-mode edit to tools/codegen/fixpp-codegen/*.{cpp,hpp} that gets rebuilt
+# into ${_codegen_tool} (fast path above picks up the newer main-build binary
+# on the NEXT reconfigure) would otherwise leave a stale v44/Builders.hpp on
+# disk — the emitter changed but nothing here noticed. Compare the resolved
+# tool binary's mtime against the builders marker (the file this class of
+# edit changes the emission of) and force a re-run when the tool is newer.
+if(NOT _need_generate AND EXISTS "${_codegen_tool}")
+  if("${_codegen_tool}" IS_NEWER_THAN "${_v44_builders_marker}")
+    set(_need_generate TRUE)
+    message(STATUS
+      "[Codegen] fixpp-codegen tool binary is newer than generated headers "
+      "(generator-source change); forcing codegen re-run.")
+  endif()
+endif()
+
 # 046-atomic-shared-ptr (NFR-017): under -stdlib=libc++ the bootstrap/main
 # fixpp-codegen is a libc++-linked HOST tool. At configure-time execution the
 # dynamic loader may pick a SYSTEM libc++.so.1 that lacks newer symbols (e.g.
