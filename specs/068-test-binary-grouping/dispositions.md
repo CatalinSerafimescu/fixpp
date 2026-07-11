@@ -618,3 +618,127 @@ reason, untouched by this module); `-L 044` and `-L 045` each select exactly
 respective buckets. No historical `-R`-by-target-name idiom targeted any of
 the 9 grouped names (`-R '^config'` was already documented as matching
 nothing per the module's own note).
+
+## Module: `sync` (46 `.cpp`) — US2
+
+async_mutex concurrency-primitive test suite. `linux-clang-tsan` is this
+module's **mandatory non-waivable gate** — the discriminator here is
+genuinely-concurrent-vs-single-threaded, NOT label (the `add_sync_test`
+helper sets no LABELS at all). Under TSan's default halt-on-first-race, one
+race in a grouped process would abort before every OTHER test in that bucket
+runs, silently blinding the gate for the rest — the same "binary-wide
+WILL_FAIL masks a real finding" hazard the capi module's `send_recv` split
+already defends against. So: **spawns a real OS thread → standalone,
+regardless of link-deps/ENV homogeneity** (grepped
+`std::thread|std::jthread|std::async|thread_pool` across all 46; every hit
+stays standalone). Single-threaded-coroutine seams (driven entirely by
+`ioc.run()`/`co_spawn` on the calling thread — the `session_pure_tests`/
+`interop` `ParityAcceptorFixture` precedent) are the groupable set.
+
+The shared `SYNC_FIXTURES_DIR`/`SYNC_GREP_GATE_SCRIPT` `ENVIRONMENT` the
+`add_sync_test` helper sets on every registration is homogeneous across the
+whole family (orchestrator note) and rides the grouped bucket via
+`set_tests_properties(... ENVIRONMENT ...)`; almost none of the 29 grouped
+`.cpp` actually reference those two env vars (only the CI-grep-gate driver
+does, and it stays standalone for its own *extended*, heterogeneous
+`ENVIRONMENT`), so it is a harmless no-op for the rest.
+
+Verified per the advisor's flagged hazard: `async_mutex`'s `waiter_pool_storage_`
+(`include/fixpp/core/sync/async_mutex.hpp:355`) is a **per-instance** member
+(`std::array<waiter_pool_slot, waiter_pool_capacity_>`), not a process-global/
+`static` pool — each test constructs its own `async_mutex mtx;`, so no
+cross-test pool-state leakage is possible inside the grouped bucket.
+
+### ODR pre-check (§3)
+
+No `int main(` anywhere. No duplicate `TEST`/`TEST_F`/`TEST_P` `Suite.Name`
+across all 46 `.cpp` (grouped + standalone). All 29 grouped `.cpp` wrap their
+content in an anonymous namespace; the sole file-scope symbol found outside
+that span is `fixpp_consumer_contract_link_probe()` in
+`test_consumer_contract_compile.cpp` (non-`static`, `[[maybe_unused]]`,
+never executed — a deliberate link-completeness probe) — verified unique
+(grepped) across the bucket, so no rename needed (FR-012 only requires a
+rename on an actual name collision). `g_constinit_mutex` in the same file is
+inside its anonymous namespace (internal linkage). Zero FR-012 renames.
+
+### Grouped
+
+**Bucket `sync_pure_tests`** — 29 `.cpp`, no LABELS, link `fixpp_sync` +
+gtest, include `tests/` + `SYNC_FIXTURES_DIR`, `ENVIRONMENT`
+`SYNC_FIXTURES_DIR=...;SYNC_GREP_GATE_SCRIPT=...` (the `add_sync_test`
+baseline, unioned onto the bucket):
+
+| `.cpp` | decision | odr_action |
+|---|---|---|
+| `test_uncontended_latency.cpp` | grouped:pure | none |
+| `test_contended_latency.cpp` | grouped:pure | none |
+| `test_fifo_fairness.cpp` | grouped:pure | none |
+| `test_fifo_across_cycles.cpp` | grouped:pure | none |
+| `test_contention_stress.cpp` | grouped:pure | none |
+| `test_executor_compat.cpp` | grouped:pure | none |
+| `test_dispatch_vs_post.cpp` | grouped:pure | none |
+| `test_cross_strand_acquire.cpp` | grouped:pure | none |
+| `test_guard_destructive_move.cpp` | grouped:pure | none |
+| `test_unlock_reaper_splice.cpp` | grouped:pure | none |
+| `test_residual_cancel_graceful.cpp` | grouped:pure | none |
+| `test_tsan_clean.cpp` | grouped:pure (coroutine-only; "TSan-clean" is a PRESET property, not a per-test toggle) | none |
+| `test_asan_clean.cpp` | grouped:pure (same as above, ASan) | none |
+| `test_halo_firing.cpp` | grouped:pure | none |
+| `test_pmr_fallback.cpp` | grouped:pure | none |
+| `test_slot_allocator_storage.cpp` | grouped:pure | none |
+| `test_cancel_and_drain.cpp` | grouped:pure | none |
+| `test_cancel_and_drain_concurrent.cpp` | grouped:pure (name notwithstanding — coroutine-interleaved, no OS thread) | none |
+| `test_drain_latch_holder_lifecycle.cpp` | grouped:pure | none |
+| `test_in_flight_acquirer_coverage.cpp` | grouped:pure | none |
+| `test_drain_awaitable_cancellation.cpp` | grouped:pure | none |
+| `test_drain_strand_local_reap.cpp` | grouped:pure | none |
+| `test_drain_immediate_destroy_after_reap.cpp` | grouped:pure | none |
+| `test_drain_reentrant_during_active.cpp` | grouped:pure | none |
+| `test_drain_onstrand_cancel_during_reap.cpp` | grouped:pure | none |
+| `test_drain_predrain_holder.cpp` | grouped:pure | none |
+| `test_async_mutex_layout_golden.cpp` | grouped:pure (pure `sizeof`/`alignof` static assertions) | none |
+| `test_consumer_contract_compile.cpp` | grouped:pure (compile-only static_assert/SFINAE TU) | none (`fixpp_consumer_contract_link_probe` verified unique) |
+| `test_atomic_shared_ptr_primitive.cpp` | grouped:pure (single-threaded correctness of the primitive type) | none |
+
+### Standalone (17)
+
+| `.cpp` | reason |
+|---|---|
+| `test_async_mutex_aba_interleave.cpp` | zero-`fixpp_sync`-linkage ODR isolation (`FIXPP_ASYNC_MUTEX_TEST_SEAM` alters class layout) + genuinely concurrent + documented-legitimate pre-fix TSan race |
+| `test_async_mutex_terminal_cas_recursive_unlock.cpp` | zero-linkage ODR isolation + genuinely concurrent + `TIMEOUT 60` |
+| `test_async_mutex_acquire_livelock.cpp` | zero-linkage ODR isolation + genuinely concurrent + `TIMEOUT 60` |
+| `test_async_mutex_chain_walk_cas_loss.cpp` | zero-linkage ODR isolation + genuinely concurrent + `TIMEOUT 60` |
+| `test_pool_exhaustion_reuse.cpp` | zero-linkage ODR isolation (per-target `FIXPP_ASYNC_MUTEX_TEST_SEAM` compile-def) |
+| `test_am_p3_impossible_state_traps.cpp` | zero-linkage ODR isolation + fork-based `EXPECT_DEATH` |
+| `test_async_mutex_mt_hammer.cpp` | genuinely concurrent (OS-thread hammer) + heterogeneous `TIMEOUT` (120/300 under coverage) + conditional compile-def |
+| `test_result_write_race.cpp` | genuinely concurrent (`std::thread`) |
+| `test_cancellation_mid_wait.cpp` | genuinely concurrent (`std::thread`) |
+| `test_race_cancel_pre_drain.cpp` | genuinely concurrent (`std::thread`) |
+| `test_race_multi_cancel.cpp` | genuinely concurrent (`std::thread`) |
+| `test_race_cancel_during_resume.cpp` | genuinely concurrent (`std::thread`) |
+| `test_destructor_release_death.cpp` | fork-based `EXPECT_DEATH` + release-linkage override |
+| `test_drain_destroy_inflight_mt.cpp` | genuinely concurrent (cross-executor `std::thread`) |
+| `test_arm64_weak_memory.cpp` | genuinely concurrent (`std::thread`) + heterogeneous `TIMEOUT 120` |
+| `test_atomic_shared_ptr_concurrency.cpp` | genuinely concurrent (`std::thread`) |
+| `test_no_std_mutex_ci_gate.cpp` | heterogeneous `ENVIRONMENT` (extends the baseline with `SYNC_GATE_INC`/`SYNC_ASIO_INC`, unique to this seam) |
+
+**Sum:** 29 grouped + 17 standalone = **46** ✓ (100% dispositioned). Two
+bash-script `add_test` entries (`check_no_std_mutex_corpus`,
+`census_no_raw_atomic_shared_ptr` + its mutation twin) plus the
+`FIXPP_LIBCXX_LANE`-gated `check_no_std_mutex_corpus_libcxx`/
+`check_libcxx_active` are not `.cpp`/gtest binaries — outside grouping scope,
+unchanged.
+
+### `-R`/`-L` selectability (SC-004 / Scenario-3)
+
+`ctest -R '^sync_'` selects 19 entries post-grouping (1 grouped bucket + 17
+standalone `sync_*`-prefixed tests, keyed exactly as before, + the
+pre-existing unrelated `sync_alloc_guard_test_mallocnesia`) versus 46
+`sync_*` + 1 unrelated pre-grouping — same case SET, fewer *entries*, per
+the procedure's whole-binary-`add_test` design. No LABELS existed on any
+`add_sync_test` registration before or after, so no `-L` selector is
+affected. No historical `-R`-by-target-name idiom targeted any of the 29
+grouped names (the module's own header documents `-R '^sync_'` as the only
+supported selector, and that prefix is preserved verbatim by every
+standalone entry; the grouped bucket's own name, `sync_pure_tests`, also
+matches `^sync_`).

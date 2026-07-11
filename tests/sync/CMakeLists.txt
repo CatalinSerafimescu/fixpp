@@ -13,6 +13,22 @@
 # Seam→file binding is one-to-one and glob-free ([const §VI.4]; plan.md
 # Test-seam map).  Registrations are added as each seam file lands red-first
 # per TDD ([const §VII.3]) — mirrors the tests/wire incremental precedent.
+#
+# 068-test-binary-grouping US2: the single-threaded-coroutine seams (never
+# spawn std::thread/thread_pool — driven entirely by ioc.run()/co_spawn on the
+# calling thread, verified by grep) are folded into one whole-binary
+# `sync_pure_tests` add_test below, carrying the shared SYNC_FIXTURES_DIR/
+# SYNC_GREP_GATE_SCRIPT ENVIRONMENT (homogeneous — most members don't even
+# reference it; harmless no-op). Every genuinely-multithreaded seam (spawns a
+# real OS thread) stays standalone: under the mandatory non-waivable
+# `linux-clang-tsan` gate, TSan's default halt-on-first-race would abort the
+# whole process on the first race, silently blinding every OTHER test sharing
+# that process — grouping race-capable tests would degrade the one gate this
+# module must not weaken. Death tests, the release-linkage-override seam, the
+# heterogeneous-ENV CI-grep-gate driver, and the 6 FIXPP_ASYNC_MUTEX_TEST_SEAM
+# zero-fixpp_sync-linkage ODR-isolated witnesses also stay standalone (see
+# specs/068-test-binary-grouping/dispositions.md "Module: sync" for the full
+# per-file disposition table).
 find_package(GTest CONFIG REQUIRED)
 
 # Labelled fixture corpus for seam #14 (the [const §XV.9] grep gate).
@@ -41,17 +57,62 @@ function(add_sync_test name)
     ENVIRONMENT "SYNC_FIXTURES_DIR=${SYNC_FIXTURES_DIR};SYNC_GREP_GATE_SCRIPT=${SYNC_GREP_GATE_SCRIPT}")
 endfunction()
 
-# ── US1 seam registrations (T016–T025) ──────────────────────────────────────
-add_sync_test(sync_uncontended_latency   test_uncontended_latency.cpp)
-add_sync_test(sync_contended_latency     test_contended_latency.cpp)
-add_sync_test(sync_fifo_fairness         test_fifo_fairness.cpp)
+# ── 068 US2: sync_pure_tests grouped bucket (29 .cpp) ────────────────────────
+# Single-threaded-coroutine seams — no std::thread/std::jthread/std::async/
+# thread_pool anywhere in these 29 files (grepped). Carries the same baseline
+# ENVIRONMENT the add_sync_test helper sets (SYNC_FIXTURES_DIR +
+# SYNC_GREP_GATE_SCRIPT) — homogeneous across the family per FR-005; almost
+# none of these 29 actually reference those env vars (only the CI-grep-gate
+# driver does, and it stays standalone below for its own heterogeneous-ENV
+# reason), so the bucket-wide ENVIRONMENT is a harmless no-op for the rest.
+add_executable(sync_pure_tests
+  test_uncontended_latency.cpp
+  test_contended_latency.cpp
+  test_fifo_fairness.cpp
+  test_fifo_across_cycles.cpp
+  test_contention_stress.cpp
+  test_executor_compat.cpp
+  test_dispatch_vs_post.cpp
+  test_cross_strand_acquire.cpp
+  test_guard_destructive_move.cpp
+  test_unlock_reaper_splice.cpp
+  test_residual_cancel_graceful.cpp
+  test_tsan_clean.cpp
+  test_asan_clean.cpp
+  test_halo_firing.cpp
+  test_pmr_fallback.cpp
+  test_slot_allocator_storage.cpp
+  test_cancel_and_drain.cpp
+  test_cancel_and_drain_concurrent.cpp
+  test_drain_latch_holder_lifecycle.cpp
+  test_in_flight_acquirer_coverage.cpp
+  test_drain_awaitable_cancellation.cpp
+  test_drain_strand_local_reap.cpp
+  test_drain_immediate_destroy_after_reap.cpp
+  test_drain_reentrant_during_active.cpp
+  test_drain_onstrand_cancel_during_reap.cpp
+  test_drain_predrain_holder.cpp
+  test_async_mutex_layout_golden.cpp
+  test_consumer_contract_compile.cpp
+  test_atomic_shared_ptr_primitive.cpp
+)
+target_link_libraries(sync_pure_tests PRIVATE
+  fixpp_sync
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(sync_pure_tests PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+  "${SYNC_FIXTURES_DIR}"
+)
+add_test(NAME sync_pure_tests COMMAND sync_pure_tests)
+set_tests_properties(sync_pure_tests PROPERTIES
+  ENVIRONMENT "SYNC_FIXTURES_DIR=${SYNC_FIXTURES_DIR};SYNC_GREP_GATE_SCRIPT=${SYNC_GREP_GATE_SCRIPT}")
+
+# ── US1 seam registrations (T016–T025) — standalone (genuinely-MT / thread) ──
 # 058 T032 (US5, T-7): FIFO fairness ACROSS drain cycles (the residual-vs-
-# later-arrival straddle) — sync_fifo_fairness above only covers WITHIN a
-# single drain cycle. See file header for the deterministic poll_one()/gate
-# driver design (a determinism contract, not a race — deliberate deviation
-# from the T027-T031 genuinely-MT idiom).
-add_sync_test(sync_fifo_across_cycles    test_fifo_across_cycles.cpp)
-add_sync_test(sync_contention_stress     test_contention_stress.cpp)
+# later-arrival straddle) folded into sync_pure_tests above (single-threaded
+# deterministic poll_one()/gate driver — a determinism contract, not a race).
 # 058 T040 (US5, Phase 7.5 coverage-design-gate addition): H-A genuinely-MT
 # hammer — organic (seam-OFF, coverage-lane-visible) coverage of the
 # free-list pop/bump-counter/release_ref-push CAS-retry loops, the
@@ -62,6 +123,10 @@ add_sync_test(sync_contention_stress     test_contention_stress.cpp)
 # hardening-coverage-design.md. Ordinary add_sync_test linkage (no
 # FIXPP_ASYNC_MUTEX_TEST_SEAM) so it runs on every preset including the
 # seam-OFF coverage lane.
+#
+# STANDALONE (068): spawns real OS threads (H-A hammer) + heterogeneous
+# TIMEOUT (120/300 under coverage) + conditional compile-def — none of which
+# a bucket can carry uniformly.
 #
 # Dual config (file header has the full rationale): the default (debug/TSan/
 # ASan) build uses the brief-literal light config; FIXPP_ENABLE_COVERAGE
@@ -78,42 +143,43 @@ if(FIXPP_ENABLE_COVERAGE)
     FIXPP_ASYNC_MUTEX_MT_HAMMER_COVERAGE_BURST)
   set_tests_properties(sync_async_mutex_mt_hammer PROPERTIES TIMEOUT 300)
 endif()
-add_sync_test(sync_executor_compat       test_executor_compat.cpp)
-add_sync_test(sync_dispatch_vs_post      test_dispatch_vs_post.cpp)
-add_sync_test(sync_cross_strand_acquire  test_cross_strand_acquire.cpp)
-add_sync_test(sync_guard_destructive_move test_guard_destructive_move.cpp)
-add_sync_test(sync_unlock_reaper_splice  test_unlock_reaper_splice.cpp)
+# sync_result_write_race — standalone (068): spawns real OS threads.
 add_sync_test(sync_result_write_race     test_result_write_race.cpp)
 
-# ── US2 seam registrations (T033–T037) ──────────────────────────────────────
+# ── US2 seam registrations (T033–T037) — standalone (genuinely-MT / thread) ──
+# 068: all four spawn real OS threads (race/cancellation witnesses) — TSan
+# halt-on-first-race isolation argument (see file header). Only
+# sync_residual_cancel_graceful is single-threaded — folded into
+# sync_pure_tests above.
 add_sync_test(sync_cancellation_mid_wait     test_cancellation_mid_wait.cpp)
 add_sync_test(sync_race_cancel_pre_drain     test_race_cancel_pre_drain.cpp)
 add_sync_test(sync_race_multi_cancel         test_race_multi_cancel.cpp)
 add_sync_test(sync_race_cancel_during_resume test_race_cancel_during_resume.cpp)
-add_sync_test(sync_residual_cancel_graceful  test_residual_cancel_graceful.cpp)
 
-# ── US4 seam registrations (T053–T057) ──────────────────────────────────────
-add_sync_test(sync_tsan_clean              test_tsan_clean.cpp)
-add_sync_test(sync_asan_clean              test_asan_clean.cpp)
-add_sync_test(sync_halo_firing             test_halo_firing.cpp)
-add_sync_test(sync_pmr_fallback            test_pmr_fallback.cpp)
-add_sync_test(sync_slot_allocator_storage  test_slot_allocator_storage.cpp)
+# ── US4 seam registrations (T053–T057) — folded into sync_pure_tests above ───
+# (sync_tsan_clean / sync_asan_clean / sync_halo_firing / sync_pmr_fallback /
+# sync_slot_allocator_storage — all single-threaded coroutine witnesses; the
+# "TSan-clean" / "ASan-clean" property is enforced by the ACTIVE PRESET
+# re-verifying this same functional-correctness binary, not by any per-test
+# sanitizer toggle in this file.)
 
 # ── US3 seam registrations (T041–T047) ──────────────────────────────────────
 # Seam #5: destructor release-linkage death test.
 # Note: EXPECT_DEATH fires std::terminate() in the child process; this
 # registration runs under the active preset (debug or release). Full
 # release-linkage CI execution is wired at T050/T052 by the parent.
+# STANDALONE (068): fork-based death test + release-linkage override (both
+# named exceptions in the module's grouping brief).
 add_sync_test(sync_destructor_release_death      test_destructor_release_death.cpp)
 # 058 T015 (US2): genuinely multi-threaded, cross-executor drain-then-destroy
 # HB-observation witness (research.md D-2). See file header for the coordination
 # design (deterministic single-threaded park + genuinely-threaded reap/destroy).
+# STANDALONE (068): spawns real OS threads.
 add_sync_test(sync_drain_destroy_inflight_mt     test_drain_destroy_inflight_mt.cpp)
-add_sync_test(sync_cancel_and_drain              test_cancel_and_drain.cpp)
-add_sync_test(sync_cancel_and_drain_concurrent   test_cancel_and_drain_concurrent.cpp)
-add_sync_test(sync_drain_latch_holder_lifecycle  test_drain_latch_holder_lifecycle.cpp)
-add_sync_test(sync_in_flight_acquirer_coverage   test_in_flight_acquirer_coverage.cpp)
-add_sync_test(sync_drain_awaitable_cancellation  test_drain_awaitable_cancellation.cpp)
+# sync_cancel_and_drain / sync_cancel_and_drain_concurrent /
+# sync_drain_latch_holder_lifecycle / sync_in_flight_acquirer_coverage /
+# sync_drain_awaitable_cancellation — folded into sync_pure_tests above
+# (single-threaded coroutine witnesses).
 # sync_drain_reaper_abort_subscribers — RETIRED (048 Erratum E-5): tested
 # cross-thread abort-subscriber machinery (drain_latch_state::signal_abort()/
 # subscriber channel) which is REMOVED by 048. The drain is now uninterruptible
@@ -152,27 +218,24 @@ add_sync_test(sync_drain_awaitable_cancellation  test_drain_awaitable_cancellati
 # Tests removed cross-thread UAF window. Replaced by sync_drain_immediate_destroy (T010).
 
 # ── 048 strand-local-reap witness registrations (T009–T013, T020) ────────────
+# All 6 folded into sync_pure_tests above (single-threaded strand-local reap /
+# UAF-guard / layout-golden witnesses — no OS thread spawn).
 # T009: SC-001 stress — N waiters on one strand, cancel_and_drain() reaps all,
 #   no hang, internal 5s self-deadline.
-add_sync_test(sync_drain_strand_local_reap        test_drain_strand_local_reap.cpp)
 # T010: UAF guard — destroy mutex immediately after drain returns; ASan proves
 #   in_flight_resumers_==0 held at drain return (INV-D).
-add_sync_test(sync_drain_immediate_destroy        test_drain_immediate_destroy_after_reap.cpp)
 # T011: reentrant drain — second cancel_and_drain() while first suspended awaits
 #   draining_complete_, returns ok (not false-success).
-add_sync_test(sync_drain_reentrant_during_active  test_drain_reentrant_during_active.cpp)
 # T012: on-strand cancel during reap — CAS single-winner; each waiter resolved
 #   exactly once; TSan-libstdc++ clean.
-add_sync_test(sync_drain_onstrand_cancel          test_drain_onstrand_cancel_during_reap.cpp)
 # T013: pre-drain holder — loop yields until holder unlocks; drain finalizes.
-add_sync_test(sync_drain_predrain_holder          test_drain_predrain_holder.cpp)
 # T020: layout golden — alignof==16; sizeof < 047 baseline (131152).
-add_sync_test(sync_async_mutex_layout_golden      test_async_mutex_layout_golden.cpp)
 
 # ── Polish seam registrations (T068, T078) ───────────────────────────────────
 # Seam #18: weak-memory contention stress verifying the I-01..I-31 ordering
 # spec under a multi-threaded io_context (TSan is the portable check; native
 # ARM64 execution recorded host-unavailable in the verify doc — T068).
+# STANDALONE (068): spawns real OS threads + heterogeneous TIMEOUT 120.
 add_sync_test(sync_arm64_weak_memory test_arm64_weak_memory.cpp)
 # 058 T045: three new genuinely-MT D-2 discriminator epochs (20/20/15 reps,
 # each spinning two dedicated OS threads + bounded wait_ready deadlines) were
@@ -181,16 +244,16 @@ add_sync_test(sync_arm64_weak_memory test_arm64_weak_memory.cpp)
 # per-test backstop against the ctest default (1500s) per
 # feedback_ci_hung_test_no_timeout_burns_6h — cheap insurance, not a fix.
 set_tests_properties(sync_arm64_weak_memory PROPERTIES TIMEOUT 120)
-# T078: consumer compile/link contract — SC-008 / [2e §3.1] hand-off gate.
-# Compile-only static_assert/SFINAE TU over the SHIPPED headers; links
-# fixpp_sync to confirm non-inline surface link-completeness.
-add_sync_test(sync_consumer_contract_compile test_consumer_contract_compile.cpp)
+# T078: consumer compile/link contract — folded into sync_pure_tests above
+# (compile-only static_assert/SFINAE TU; no runtime threading).
 
 # ── 046-atomic-shared-ptr seam registrations (NFR-017) ───────────────────────
 # Primitive-level gtest ports of the locked research harness (18/18).
 # Runs on both native and forced-fallback presets; the ff preset supplies
 # -DFIXPP_FORCE_ATOMIC_SHARED_PTR_FALLBACK=ON so FIXPP_ATOMIC_SHARED_PTR_NATIVE_ACTIVE=0.
-add_sync_test(sync_atomic_shared_ptr_primitive  test_atomic_shared_ptr_primitive.cpp)
+# sync_atomic_shared_ptr_primitive — folded into sync_pure_tests above
+# (single-threaded correctness checks of the primitive type itself).
+# sync_atomic_shared_ptr_concurrency — standalone (068): spawns real OS threads.
 add_sync_test(sync_atomic_shared_ptr_concurrency test_atomic_shared_ptr_concurrency.cpp)
 
 # ── US5 seam registration (T062) ─────────────────────────────────────────────
@@ -199,6 +262,8 @@ add_sync_test(sync_atomic_shared_ptr_concurrency test_atomic_shared_ptr_concurre
 # add_sync_test sets a baseline ENVIRONMENT with SYNC_FIXTURES_DIR and
 # SYNC_GREP_GATE_SCRIPT; the explicit set_tests_properties below extends it
 # with the two include paths the gate script needs (project + asio).
+# STANDALONE (068): heterogeneous ENVIRONMENT (extends the baseline with
+# SYNC_GATE_INC/SYNC_ASIO_INC, not shared by any other seam).
 # WAIVED on Windows (cross-platform sign-off 2026-06-22): both the gate driver
 # below and the corpus ctest shell out to `bash` running the POSIX lint script
 # tools/check_no_std_mutex_in_awaitable_headers.sh, which has no Windows analog.
@@ -329,6 +394,13 @@ endif()
 # neither is an unexpected sanitizer gate failure; do not suppress or waive
 # the TSan report generically. Post-fix (T009/T010 landed) both phases are
 # clean on every lane, TSan included.
+#
+# STANDALONE (068): all 6 targets in this ODR-isolated family (zero
+# fixpp_sync linkage, FIXPP_ASYNC_MUTEX_TEST_SEAM-gated class layout) stay
+# standalone — the per-target compile-def is itself a disqualifier (D3 "per-
+# target compile-definitions variant"), independent of the TSan-race-window
+# isolation argument (aba_interleave is documented to legitimately race
+# pre-fix) and the fork-based death test (am_p3_impossible_state_traps).
 add_executable(test_async_mutex_aba_interleave
   test_async_mutex_aba_interleave.cpp)
 target_compile_definitions(test_async_mutex_aba_interleave PRIVATE
