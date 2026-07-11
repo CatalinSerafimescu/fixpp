@@ -56,10 +56,52 @@ if(NOT FIXPP_BUILD_CODEGEN_TOOL)
   return()
 endif()
 
+# ── 069-v44-all-families T015 (US3, C1): v44 typed-builder coverage control ──
+# CACHE STRING (not option() — the domain is {all, official}, not boolean).
+# `all` (default, 83 in-scope FIX44 msgcat='app' builders) vs `official`
+# (opt-down to the pre-069 33-builder cost, byte-identical output). Fails
+# closed at configure time on any out-of-domain value, before codegen runs.
+#
+# FR-008 durability note: CI's Tier-1 matrix relies on every *verifying*
+# preset staying on the default `all` (no preset in CMakePresets.json
+# currently sets this variable — see tier1.yml's post-Configure assertion
+# step, which fails loudly if a preset silently overrides to `official`).
+set(FIXPP_CODEGEN_V44_FAMILIES "all" CACHE STRING
+  "v44 typed-builder coverage: all (default, 83) | official (33)")
+set_property(CACHE FIXPP_CODEGEN_V44_FAMILIES PROPERTY STRINGS all official)
+
+if(NOT FIXPP_CODEGEN_V44_FAMILIES STREQUAL "all"
+   AND NOT FIXPP_CODEGEN_V44_FAMILIES STREQUAL "official")
+  message(FATAL_ERROR
+    "[Codegen] FIXPP_CODEGEN_V44_FAMILIES must be 'all' or 'official' "
+    "(got '${FIXPP_CODEGEN_V44_FAMILIES}').")
+endif()
+
 # ── Paths ─────────────────────────────────────────────────────────────────────
 set(FIXPP_CODEGEN_BOOTSTRAP_DIR  "${CMAKE_BINARY_DIR}/_codegen_bootstrap")
 set(FIXPP_CODEGEN_OUT_DIR        "${CMAKE_BINARY_DIR}/_codegen/include/fixpp")
 set(_xml_dir                     "${CMAKE_SOURCE_DIR}/dictionaries")
+set(_codegen_src_dir             "${CMAKE_SOURCE_DIR}/tools/codegen/fixpp-codegen")
+
+file(GLOB _codegen_source_files
+  "${_codegen_src_dir}/*.cpp"
+  "${_codegen_src_dir}/*.hpp")
+list(SORT _codegen_source_files)
+
+set(_codegen_source_fingerprint_input "")
+foreach(_codegen_src IN LISTS _codegen_source_files)
+  file(SHA256 "${_codegen_src}" _codegen_src_sha256)
+  string(APPEND _codegen_source_fingerprint_input
+    "${_codegen_src}:${_codegen_src_sha256}\n")
+endforeach()
+string(SHA256 _codegen_source_fingerprint "${_codegen_source_fingerprint_input}")
+set(_codegen_source_fingerprint_changed FALSE)
+if(DEFINED FIXPP_CODEGEN_TOOL_SOURCES_LAST_USED_SHA256
+   AND NOT "${FIXPP_CODEGEN_TOOL_SOURCES_LAST_USED_SHA256}" STREQUAL "${_codegen_source_fingerprint}")
+  set(_codegen_source_fingerprint_changed TRUE)
+  message(STATUS
+    "[Codegen] Generator-source fingerprint changed; checking codegen tool freshness.")
+endif()
 
 # Resolution order for the codegen binary (see BOOTSTRAP MECHANISM above):
 #   1. Main build tree ${CMAKE_BINARY_DIR}/bin/fixpp-codegen
@@ -72,17 +114,59 @@ set(_xml_dir                     "${CMAKE_SOURCE_DIR}/dictionaries")
 set(_codegen_tool_main       "${CMAKE_BINARY_DIR}/bin/fixpp-codegen${CMAKE_EXECUTABLE_SUFFIX}")
 set(_codegen_tool_bootstrap  "${FIXPP_CODEGEN_BOOTSTRAP_DIR}/bin/fixpp-codegen${CMAKE_EXECUTABLE_SUFFIX}")
 
-# ── Locate or build fixpp-codegen ─────────────────────────────────────────────
+set(_codegen_tool_main_stale FALSE)
 if(EXISTS "${_codegen_tool_main}")
+  foreach(_codegen_src IN LISTS _codegen_source_files)
+    if(NOT "${_codegen_tool_main}" IS_NEWER_THAN "${_codegen_src}")
+      set(_codegen_tool_main_stale TRUE)
+      break()
+    endif()
+  endforeach()
+endif()
+
+set(_codegen_tool_bootstrap_stale FALSE)
+if(EXISTS "${_codegen_tool_bootstrap}")
+  foreach(_codegen_src IN LISTS _codegen_source_files)
+    if(NOT "${_codegen_tool_bootstrap}" IS_NEWER_THAN "${_codegen_src}")
+      set(_codegen_tool_bootstrap_stale TRUE)
+      break()
+    endif()
+  endforeach()
+endif()
+
+# ── Locate or build fixpp-codegen ─────────────────────────────────────────────
+if(EXISTS "${_codegen_tool_main}" AND NOT _codegen_tool_main_stale)
   # Fast path: main build already has a compiled binary (incremental reconfigures).
   set(_codegen_tool "${_codegen_tool_main}")
   message(STATUS "[Codegen] Using fixpp-codegen from main build: ${_codegen_tool}")
-elseif(EXISTS "${_codegen_tool_bootstrap}")
+elseif(EXISTS "${_codegen_tool_main}" AND _codegen_tool_main_stale)
+  message(STATUS
+    "[Codegen] Main-build fixpp-codegen is stale relative to generator sources; "
+    "rebuilding bootstrap tool.")
+endif()
+
+set(_need_bootstrap_configure FALSE)
+set(_need_bootstrap_build FALSE)
+
+if(NOT DEFINED _codegen_tool)
+  if(EXISTS "${_codegen_tool_bootstrap}" AND NOT _codegen_tool_bootstrap_stale)
   # Bootstrap binary exists from a previous configure.
-  set(_codegen_tool "${_codegen_tool_bootstrap}")
-  message(STATUS "[Codegen] Using fixpp-codegen from bootstrap: ${_codegen_tool}")
-else()
-  # Neither exists — run the bootstrap sub-build.
+    set(_codegen_tool "${_codegen_tool_bootstrap}")
+    message(STATUS "[Codegen] Using fixpp-codegen from bootstrap: ${_codegen_tool}")
+  else()
+    if(EXISTS "${_codegen_tool_bootstrap}" AND _codegen_tool_bootstrap_stale)
+      message(STATUS
+        "[Codegen] Bootstrap fixpp-codegen is stale relative to generator sources; "
+        "rebuilding bootstrap tool.")
+    endif()
+    set(_need_bootstrap_build TRUE)
+    if(NOT EXISTS "${FIXPP_CODEGEN_BOOTSTRAP_DIR}/CMakeCache.txt")
+      set(_need_bootstrap_configure TRUE)
+    endif()
+  endif()
+endif()
+
+if(_need_bootstrap_configure)
   message(STATUS "[Codegen] Bootstrap: configuring fixpp-codegen in ${FIXPP_CODEGEN_BOOTSTRAP_DIR}")
 
   # Inherit the same build type and toolchain so Conan packages are found
@@ -131,6 +215,9 @@ else()
       "${_cfg_output}\n${_cfg_error}")
   endif()
 
+endif()
+
+if(_need_bootstrap_build)
   message(STATUS "[Codegen] Bootstrap: building fixpp-codegen target")
   execute_process(
     COMMAND "${CMAKE_COMMAND}" --build "${FIXPP_CODEGEN_BOOTSTRAP_DIR}"
@@ -168,6 +255,26 @@ set(_v44_builders_marker "${CMAKE_BINARY_DIR}/_codegen/include/fixpp/v44/Builder
 
 set(_need_generate FALSE)
 
+# 069 T015 (US3) regen-guard invalidation: the marker/xml-mtime checks below
+# know nothing about the coverage mode, so switching FIXPP_CODEGEN_V44_FAMILIES
+# between configures (all <-> official) would otherwise leave a stale
+# Builders.hpp on disk. Track the last-used value in an INTERNAL cache
+# variable and force a re-run whenever it differs from the current value.
+if(DEFINED FIXPP_CODEGEN_V44_FAMILIES_LAST_USED
+   AND NOT "${FIXPP_CODEGEN_V44_FAMILIES_LAST_USED}" STREQUAL "${FIXPP_CODEGEN_V44_FAMILIES}")
+  set(_need_generate TRUE)
+  message(STATUS
+    "[Codegen] FIXPP_CODEGEN_V44_FAMILIES changed "
+    "(${FIXPP_CODEGEN_V44_FAMILIES_LAST_USED} -> ${FIXPP_CODEGEN_V44_FAMILIES}); "
+    "forcing codegen re-run.")
+endif()
+set(FIXPP_CODEGEN_V44_FAMILIES_LAST_USED "${FIXPP_CODEGEN_V44_FAMILIES}" CACHE INTERNAL
+  "Regen-guard: last FIXPP_CODEGEN_V44_FAMILIES value used for codegen generation.")
+
+if(_codegen_source_fingerprint_changed)
+  set(_need_generate TRUE)
+endif()
+
 # Missing output?
 foreach(_marker IN ITEMS "${_v42_marker}" "${_v44_marker}" "${_v50sp2_marker}" "${_vt11_marker}" "${_v44_builders_marker}")
   if(NOT EXISTS "${_marker}")
@@ -188,6 +295,23 @@ if(NOT _need_generate)
       break()
     endif()
   endforeach()
+endif()
+
+# Gate B PR#187 round 1 F1: the checks above know about XML inputs and the
+# all<->official mode switch, but NOT about the generator's OWN source. A
+# same-mode edit to tools/codegen/fixpp-codegen/*.{cpp,hpp} that gets rebuilt
+# into ${_codegen_tool} (fast path above picks up the newer main-build binary
+# on the NEXT reconfigure) would otherwise leave a stale v44/Builders.hpp on
+# disk — the emitter changed but nothing here noticed. Compare the resolved
+# tool binary's mtime against the builders marker (the file this class of
+# edit changes the emission of) and force a re-run when the tool is newer.
+if(NOT _need_generate AND EXISTS "${_codegen_tool}")
+  if(NOT "${_v44_builders_marker}" IS_NEWER_THAN "${_codegen_tool}")
+    set(_need_generate TRUE)
+    message(STATUS
+      "[Codegen] fixpp-codegen tool binary is not older than generated headers "
+      "(generator-source change); forcing codegen re-run.")
+  endif()
 endif()
 
 # 046-atomic-shared-ptr (NFR-017): under -stdlib=libc++ the bootstrap/main
@@ -222,6 +346,7 @@ if(_need_generate)
             --xml "${_xml_dir}/FIX44.xml"    --out "${FIXPP_CODEGEN_OUT_DIR}"
             --xml "${_xml_dir}/FIX50SP2.xml" --out "${FIXPP_CODEGEN_OUT_DIR}"
             --xml "${_xml_dir}/FIXT11.xml"   --out "${FIXPP_CODEGEN_OUT_DIR}"
+            --families ${FIXPP_CODEGEN_V44_FAMILIES}
     RESULT_VARIABLE _gen_result
     OUTPUT_VARIABLE _gen_output
     ERROR_VARIABLE  _gen_error
@@ -235,6 +360,9 @@ if(_need_generate)
 else()
   message(STATUS "[Codegen] Generated headers up-to-date; skipping re-run.")
 endif()
+
+set(FIXPP_CODEGEN_TOOL_SOURCES_LAST_USED_SHA256 "${_codegen_source_fingerprint}" CACHE INTERNAL
+  "Regen-guard: last generator-source fingerprint used for codegen generation.")
 
 # Verify all expected outputs exist
 foreach(_ver IN ITEMS v42 v44 v50sp2 vt11)

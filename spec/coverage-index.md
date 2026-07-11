@@ -215,10 +215,10 @@ The application spec is version-specific (FIX 4.0 through FIX 5.0SP2); sections 
 
 | MsgType | Message | Catalogue ID | Gap note |
 |---|---|---|---|
-| 6 | IndicationOfInterest | R-002 | — |
-| 7 | Advertisement | R-003 | — |
-| B | News | R-004 | — |
-| C | Email | R-005 | — |
+| 6 | IndicationOfInterest | R-002 | 069: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite widened to all 83 in-scope; differential round-trip + required-presence fail-closed). Full-field all-version (FR-015b) future; enum value-domain unbacked (FR-013 — see L-069-1). |
+| 7 | Advertisement | R-003 | 069: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite widened to all 83 in-scope; differential round-trip + required-presence fail-closed). Full-field all-version (FR-015b) future; enum value-domain unbacked (FR-013 — see L-069-1). |
+| B | News | R-004 | 069: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite widened to all 83 in-scope; differential round-trip + required-presence fail-closed). Full-field all-version (FR-015b) future; enum value-domain unbacked (FR-013 — see L-069-1). |
+| C | Email | R-005 | 069: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite widened to all 83 in-scope; differential round-trip + required-presence fail-closed). Full-field all-version (FR-015b) future; enum value-domain unbacked (FR-013 — see L-069-1). |
 | R | QuoteRequest | M-010 | 067: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite; byte-oracle / round-trip / required-presence). Full-field all-version (FR-015b) future. |
 | S | Quote | M-009 | 067: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite; byte-oracle / round-trip / required-presence). Full-field all-version (FR-015b) future. |
 | Z | QuoteCancel | M-011 | 067: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite; byte-oracle / round-trip / required-presence). Full-field all-version (FR-015b) future. |
@@ -226,9 +226,9 @@ The application spec is version-specific (FIX 4.0 through FIX 5.0SP2); sections 
 | b | MassQuoteAcknowledgement | M-008 | 067: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite; byte-oracle / round-trip / required-presence). Full-field all-version (FR-015b) future. |
 | i | MassQuote | M-008 | 067: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite; byte-oracle / round-trip / required-presence). Full-field all-version (FR-015b) future. |
 | AG | QuoteRequestReject | M-010 | 067: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite; byte-oracle / round-trip / required-presence). Full-field all-version (FR-015b) future. |
-| AH | RFQRequest | A-021 | — |
-| AI | QuoteStatusReport | A-021 | — |
-| AJ | QuoteResponse | A-021 | — |
+| AH | RFQRequest | A-021 | 069: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite widened to all 83 in-scope; differential round-trip + required-presence fail-closed). Full-field all-version (FR-015b) future; enum value-domain unbacked (FR-013 — see L-069-1). |
+| AI | QuoteStatusReport | A-021 | 069: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite widened to all 83 in-scope; differential round-trip + required-presence fail-closed). Full-field all-version (FR-015b) future; enum value-domain unbacked (FR-013 — see L-069-1). |
+| AJ | QuoteResponse | A-021 | 069: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite widened to all 83 in-scope; differential round-trip + required-presence fail-closed). Full-field all-version (FR-015b) future; enum value-domain unbacked (FR-013 — see L-069-1). |
 
 ### Application Messages — Market Data (FIX 4.2+)
 
@@ -249,12 +249,12 @@ The application spec is version-specific (FIX 4.0 through FIX 5.0SP2); sections 
 |---|---|---|---|
 | c | SecurityDefinitionRequest | M-005 | 067: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite; byte-oracle / round-trip / required-presence). Full-field all-version (FR-015b) future. |
 | d | SecurityDefinition | M-005 | 067: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite; byte-oracle / round-trip / required-presence). Full-field all-version (FR-015b) future. |
-| v | SecurityTypeRequest | A-025 | — |
-| w | SecurityTypes | A-025 | — |
-| x | SecurityListRequest | A-025 | — |
-| y | SecurityList | A-025 | — |
-| z | DerivativeSecurityListRequest | A-026 | — |
-| AA | DerivativeSecurityList | A-026 | — |
+| v | SecurityTypeRequest | A-025 | 069: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite widened to all 83 in-scope; differential round-trip + required-presence fail-closed). Full-field all-version (FR-015b) future; enum value-domain unbacked (FR-013 — see L-069-1). |
+| w | SecurityTypes | A-025 | 069: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite widened to all 83 in-scope; differential round-trip + required-presence fail-closed). Full-field all-version (FR-015b) future; enum value-domain unbacked (FR-013 — see L-069-1). |
+| x | SecurityListRequest | A-025 | 069: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite widened to all 83 in-scope; differential round-trip + required-presence fail-closed). Full-field all-version (FR-015b) future; enum value-domain unbacked (FR-013 — see L-069-1). |
+| y | SecurityList | A-025 | 069: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite widened to all 83 in-scope; differential round-trip + required-presence fail-closed + exemplar external-golden anchor, SC-006). Full-field all-version (FR-015b) future; enum value-domain unbacked (FR-013 — see L-069-1). |
+| z | DerivativeSecurityListRequest | A-026 | 069: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite widened to all 83 in-scope; differential round-trip + required-presence fail-closed). Full-field all-version (FR-015b) future; enum value-domain unbacked (FR-013 — see L-069-1). |
+| AA | DerivativeSecurityList | A-026 | 069: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite widened to all 83 in-scope; differential round-trip + required-presence fail-closed). Full-field all-version (FR-015b) future; enum value-domain unbacked (FR-013 — see L-069-1). |
 | BK | SecurityListUpdateReport | A-029 | — |
 | BP | SecurityDefinitionUpdateReport | A-029 | — |
 | BR | DerivativeSecurityListUpdateReport | A-026 | — |
@@ -275,6 +275,29 @@ The application spec is version-specific (FIX 4.0 through FIX 5.0SP2); sections 
      + QuickFIX goldens + `body_builder` are the design authority 067 reproduces byte-for-byte
      (see spec.md `## Normative References`, "Design authority" block). Recorded per T029(c). -->
 
+<!-- 069-v44-all-families COVERAGE-CLAIM LEGEND (Gate B PR#187 round 1 F2,
+     2026-07-11): wherever a row below carries the 069 gap-note phrase
+     "differential round-trip + required-presence fail-closed", the two
+     claims are NOT equally granular. "Differential round-trip" IS per-row —
+     `AllFamiliesRoundtrip069` (tests/session/test_069_all_families_roundtrip.cpp)
+     builds, wire-encodes, independently re-parses, and per-tag reads back
+     EACH of the 83 builders individually. "Required-presence fail-closed" is
+     ONE generated code path (`validate_<Msg>`'s presence table,
+     include/fixpp/wire/builder_validate.hpp) shared by all 83 messages,
+     witnessed directly by exactly TWO discriminating negative exemplars —
+     TradeCaptureReport/AE (nested/empty-required-group,
+     `wire_required_field_missing` at builder_validate.hpp:86) and
+     BusinessMessageReject/j (flat/missing-required-scalar, :77) — not by a
+     dedicated negative test per row. Each message's own required-field SET
+     is independently pinned present (not the rejection BEHAVIOR) by the
+     non-circular completeness census (test_067_completeness.cpp /
+     contracts/coverage-and-completeness.md C2). A negative test per row
+     would exercise the identical generated code path with ~zero additional
+     discriminating power (feedback_coverage_push_enshrines_bugs) — not
+     undertaken; this is the same representative-witness methodology already
+     used by the 33 merged 067 rows above. Recorded per Gate B PR#187 round-1
+     triage F2 (research/reviews/opus_pr187_1_triage.md). -->
+
 ### Application Messages — Trade (FIX 4.0+)
 
 | MsgType | Message | Catalogue ID | Gap note |
@@ -286,20 +309,20 @@ The application spec is version-specific (FIX 4.0 through FIX 5.0SP2); sections 
 | H | OrderStatusRequest | A-005 | 067: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite; byte-oracle / round-trip / required-presence). Full-field all-version (FR-015b) future. |
 | 8 | ExecutionReport | A-006 | Partial G2 interop evidence (020-g2-business-messages): minimal FIX-4.4 typed ExecRpt builder (fully-filled) + live both-role interop vs QuickFIX-J/cpp. Full-field + all-version (4.2/5.0SP2/FIXT.1.1) coverage deferred (FR-015b, all-version). Full-field v44 codegen write now **done** via 067: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite; byte-oracle / round-trip / required-presence). Full-field all-version (FR-015b) future. |
 | 9 | OrderCancelReject | A-007 | 061-slim shape-oracle: `build_order_cancel_reject` on `wire::body_builder` (group-free) + QuickFIX golden `golden/order_cancel_reject.fix` + round-trip/read/fail-closed witnesses. Full-field + all-version coverage deferred (FR-015b, all-version). Full-field v44 codegen write now **done** via 067: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite; byte-oracle / round-trip / required-presence). Full-field all-version (FR-015b) future. |
-| K | ListCancelRequest | A-019 | — |
-| L | ListExecute | A-019 | — |
-| M | ListStatusRequest | A-019 | — |
-| N | ListStatus | A-019 | — |
-| Q | DontKnowTrade | A-015 | — |
-| k | BidRequest | A-020 | — |
-| l | BidResponse | A-020 | — |
-| m | ListStrikePrice | A-020 | — |
+| K | ListCancelRequest | A-019 | 069: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite widened to all 83 in-scope; differential round-trip + required-presence fail-closed). Full-field all-version (FR-015b) future; enum value-domain unbacked (FR-013 — see L-069-1). |
+| L | ListExecute | A-019 | 069: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite widened to all 83 in-scope; differential round-trip + required-presence fail-closed). Full-field all-version (FR-015b) future; enum value-domain unbacked (FR-013 — see L-069-1). |
+| M | ListStatusRequest | A-019 | 069: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite widened to all 83 in-scope; differential round-trip + required-presence fail-closed). Full-field all-version (FR-015b) future; enum value-domain unbacked (FR-013 — see L-069-1). |
+| N | ListStatus | A-019 | 069: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite widened to all 83 in-scope; differential round-trip + required-presence fail-closed + exemplar external-golden anchor, SC-006). Full-field all-version (FR-015b) future; enum value-domain unbacked (FR-013 — see L-069-1). |
+| Q | DontKnowTrade | A-015 | 069: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite widened to all 83 in-scope; differential round-trip + required-presence fail-closed). Full-field all-version (FR-015b) future; enum value-domain unbacked (FR-013 — see L-069-1). |
+| k | BidRequest | A-020 | 069: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite widened to all 83 in-scope; differential round-trip + required-presence fail-closed). Full-field all-version (FR-015b) future; enum value-domain unbacked (FR-013 — see L-069-1). |
+| l | BidResponse | A-020 | 069: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite widened to all 83 in-scope; differential round-trip + required-presence fail-closed). Full-field all-version (FR-015b) future; enum value-domain unbacked (FR-013 — see L-069-1). |
+| m | ListStrikePrice | A-020 | 069: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite widened to all 83 in-scope; differential round-trip + required-presence fail-closed). Full-field all-version (FR-015b) future; enum value-domain unbacked (FR-013 — see L-069-1). |
 | q | OrderMassCancelRequest | A-008 | 067: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite; byte-oracle / round-trip / required-presence). Full-field all-version (FR-015b) future. |
 | r | OrderMassCancelReport | A-009 | 067: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite; byte-oracle / round-trip / required-presence). Full-field all-version (FR-015b) future. |
-| s | NewOrderCross | A-016 | — |
+| s | NewOrderCross | A-016 | 069: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite widened to all 83 in-scope; differential round-trip + required-presence fail-closed). Full-field all-version (FR-015b) future; enum value-domain unbacked (FR-013 — see L-069-1). |
 | t | CrossOrderCancelReplaceRequest | A-012 | 067: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite; byte-oracle / round-trip / required-presence). Full-field all-version (FR-015b) future. |
 | u | CrossOrderCancelRequest | A-013 | 067: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite; byte-oracle / round-trip / required-presence). Full-field all-version (FR-015b) future. |
-| AB | NewOrderMultileg | A-017 | — |
+| AB | NewOrderMultileg | A-017 | 069: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite widened to all 83 in-scope; differential round-trip + required-presence fail-closed). Full-field all-version (FR-015b) future; enum value-domain unbacked (FR-013 — see L-069-1). |
 | AC | MultilegOrderCancelReplace | A-011 | 067: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite; byte-oracle / round-trip / required-presence). Full-field all-version (FR-015b) future. |
 | AF | OrderMassStatusRequest | A-010 | 067: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite; byte-oracle / round-trip / required-presence). Full-field all-version (FR-015b) future. |
 | BN | ExecutionAcknowledgement | A-018, A-024 | note: A-018 and A-024 are duplicates (same MsgType BN); see gap note |
@@ -312,31 +335,31 @@ The application spec is version-specific (FIX 4.0 through FIX 5.0SP2); sections 
 |---|---|---|---|
 | J | AllocationInstruction | P-001 | 067: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite; byte-oracle / round-trip / required-presence). Full-field all-version (FR-015b) future. |
 | P | AllocationInstructionAck | P-002 | 067: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite; byte-oracle / round-trip / required-presence). Full-field all-version (FR-015b) future. |
-| T | SettlementInstructions | P-006 | — |
-| o | RegistrationInstructions | R-001 | — |
-| p | RegistrationInstructionsResponse | R-001 | — |
-| AD | TradeCaptureReportRequest | P-008 | — |
-| AE | TradeCaptureReport | P-008 | — |
-| AK | Confirmation | P-005 | — |
-| AL | PositionMaintenanceRequest | C-002 | — |
-| AM | PositionMaintenanceReport | C-002 | — |
-| AN | RequestForPositions | C-002 | — |
-| AO | RequestForPositionsAck | C-002 | — |
-| AP | PositionReport | C-002 | — |
-| AQ | TradeCaptureReportRequestAck | P-008 | — |
-| AR | TradeCaptureReportAck | P-008 | — |
+| T | SettlementInstructions | P-006 | 069: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite widened to all 83 in-scope; differential round-trip + required-presence fail-closed). Full-field all-version (FR-015b) future; enum value-domain unbacked (FR-013 — see L-069-1). |
+| o | RegistrationInstructions | R-001 | 069: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite widened to all 83 in-scope; differential round-trip + required-presence fail-closed + exemplar external-golden anchor, SC-006). Full-field all-version (FR-015b) future; enum value-domain unbacked (FR-013 — see L-069-1). |
+| p | RegistrationInstructionsResponse | R-001 | 069: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite widened to all 83 in-scope; differential round-trip + required-presence fail-closed). Full-field all-version (FR-015b) future; enum value-domain unbacked (FR-013 — see L-069-1). |
+| AD | TradeCaptureReportRequest | P-008 | 069: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite widened to all 83 in-scope; differential round-trip + required-presence fail-closed). Full-field all-version (FR-015b) future; enum value-domain unbacked (FR-013 — see L-069-1). |
+| AE | TradeCaptureReport | P-008 | 069: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite widened to all 83 in-scope; differential round-trip + required-presence fail-closed + exemplar external-golden anchor, SC-006). Full-field all-version (FR-015b) future; enum value-domain unbacked (FR-013 — see L-069-1). |
+| AK | Confirmation | P-005 | 069: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite widened to all 83 in-scope; differential round-trip + required-presence fail-closed + exemplar external-golden anchor, SC-006). Full-field all-version (FR-015b) future; enum value-domain unbacked (FR-013 — see L-069-1). |
+| AL | PositionMaintenanceRequest | C-002 | 069: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite widened to all 83 in-scope; differential round-trip + required-presence fail-closed). Full-field all-version (FR-015b) future; enum value-domain unbacked (FR-013 — see L-069-1). |
+| AM | PositionMaintenanceReport | C-002 | 069: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite widened to all 83 in-scope; differential round-trip + required-presence fail-closed). Full-field all-version (FR-015b) future; enum value-domain unbacked (FR-013 — see L-069-1). |
+| AN | RequestForPositions | C-002 | 069: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite widened to all 83 in-scope; differential round-trip + required-presence fail-closed). Full-field all-version (FR-015b) future; enum value-domain unbacked (FR-013 — see L-069-1). |
+| AO | RequestForPositionsAck | C-002 | 069: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite widened to all 83 in-scope; differential round-trip + required-presence fail-closed). Full-field all-version (FR-015b) future; enum value-domain unbacked (FR-013 — see L-069-1). |
+| AP | PositionReport | C-002 | 069: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite widened to all 83 in-scope; differential round-trip + required-presence fail-closed + exemplar external-golden anchor, SC-006). Full-field all-version (FR-015b) future; enum value-domain unbacked (FR-013 — see L-069-1). |
+| AQ | TradeCaptureReportRequestAck | P-008 | 069: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite widened to all 83 in-scope; differential round-trip + required-presence fail-closed). Full-field all-version (FR-015b) future; enum value-domain unbacked (FR-013 — see L-069-1). |
+| AR | TradeCaptureReportAck | P-008 | 069: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite widened to all 83 in-scope; differential round-trip + required-presence fail-closed). Full-field all-version (FR-015b) future; enum value-domain unbacked (FR-013 — see L-069-1). |
 | AS | AllocationReport | P-003 | 061-slim shape-oracle: `build_allocation_report` on `wire::body_builder` (multi-char `35=AS`, 2-level `453→802`) + QuickFIX golden `golden/allocation_report.fix` + round-trip/read/fail-closed witnesses. Full-field + all-version coverage deferred (FR-015b, all-version). Full-field v44 codegen write now **done** via 067: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite; byte-oracle / round-trip / required-presence). Full-field all-version (FR-015b) future. |
-| AT | AllocationReportAck | P-004 | — |
-| AU | ConfirmationAck | P-005 | — |
-| AV | SettlementInstructionRequest | P-007 | — |
-| AW | AssignmentReport | A-022 | — |
-| AX | CollateralRequest | C-001 | — |
-| AY | CollateralAssignment | C-001 | — |
-| AZ | CollateralResponse | C-001 | — |
-| BA | CollateralReport | C-001 | — |
-| BB | CollateralInquiry | C-001 | — |
-| BG | CollateralInquiryAck | C-001 | — |
-| BH | ConfirmationRequest | P-005 | — |
+| AT | AllocationReportAck | P-004 | 069: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite widened to all 83 in-scope; differential round-trip + required-presence fail-closed). Full-field all-version (FR-015b) future; enum value-domain unbacked (FR-013 — see L-069-1). |
+| AU | ConfirmationAck | P-005 | 069: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite widened to all 83 in-scope; differential round-trip + required-presence fail-closed). Full-field all-version (FR-015b) future; enum value-domain unbacked (FR-013 — see L-069-1). |
+| AV | SettlementInstructionRequest | P-007 | 069: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite widened to all 83 in-scope; differential round-trip + required-presence fail-closed). Full-field all-version (FR-015b) future; enum value-domain unbacked (FR-013 — see L-069-1). |
+| AW | AssignmentReport | A-022 | 069: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite widened to all 83 in-scope; differential round-trip + required-presence fail-closed). Full-field all-version (FR-015b) future; enum value-domain unbacked (FR-013 — see L-069-1). |
+| AX | CollateralRequest | C-001 | 069: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite widened to all 83 in-scope; differential round-trip + required-presence fail-closed). Full-field all-version (FR-015b) future; enum value-domain unbacked (FR-013 — see L-069-1). |
+| AY | CollateralAssignment | C-001 | 069: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite widened to all 83 in-scope; differential round-trip + required-presence fail-closed). Full-field all-version (FR-015b) future; enum value-domain unbacked (FR-013 — see L-069-1). |
+| AZ | CollateralResponse | C-001 | 069: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite widened to all 83 in-scope; differential round-trip + required-presence fail-closed). Full-field all-version (FR-015b) future; enum value-domain unbacked (FR-013 — see L-069-1). |
+| BA | CollateralReport | C-001 | 069: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite widened to all 83 in-scope; differential round-trip + required-presence fail-closed). Full-field all-version (FR-015b) future; enum value-domain unbacked (FR-013 — see L-069-1). |
+| BB | CollateralInquiry | C-001 | 069: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite widened to all 83 in-scope; differential round-trip + required-presence fail-closed + exemplar external-golden anchor, SC-006). Full-field all-version (FR-015b) future; enum value-domain unbacked (FR-013 — see L-069-1). |
+| BG | CollateralInquiryAck | C-001 | 069: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite widened to all 83 in-scope; differential round-trip + required-presence fail-closed). Full-field all-version (FR-015b) future; enum value-domain unbacked (FR-013 — see L-069-1). |
+| BH | ConfirmationRequest | P-005 | 069: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite widened to all 83 in-scope; differential round-trip + required-presence fail-closed). Full-field all-version (FR-015b) future; enum value-domain unbacked (FR-013 — see L-069-1). |
 | BL | AdjustedPositionReport | C-002 | — |
 | BM | AllocationInstructionAlert | A-031 | — |
 | BO | ContraryIntentionReport | A-022 | — |
@@ -346,10 +369,10 @@ The application spec is version-specific (FIX 4.0 through FIX 5.0SP2); sections 
 
 | MsgType | Message | Catalogue ID | Gap note |
 |---|---|---|---|
-| j | BusinessMessageReject | A-014 | — |
+| j | BusinessMessageReject | A-014 | 069: v44 codegen `build_BusinessMessageReject` + `validate_BusinessMessageReject` (FR-015a-lite widened to all 83 in-scope; differential round-trip + required-field fail-closed omitting RefMsgType(372) + exemplar external-golden anchor, SC-006), additive alongside the 019 hand-written `build_business_message_reject()` production emitter (unchanged, see A-014). Full-field all-version (FR-015b) future; enum value-domain unbacked (FR-013 — see L-069-1). |
 | n | XMLnonFIX | A-034 | — |
-| BC | NetworkCounterpartySystemStatusRequest | N-001 | — |
-| BD | NetworkCounterpartySystemStatusResponse | N-001 | — |
+| BC | NetworkCounterpartySystemStatusRequest | N-001 | 069: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite widened to all 83 in-scope; differential round-trip + required-presence fail-closed). Full-field all-version (FR-015b) future; enum value-domain unbacked (FR-013 — see L-069-1). |
+| BD | NetworkCounterpartySystemStatusResponse | N-001 | 069: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite widened to all 83 in-scope; differential round-trip + required-presence fail-closed). Full-field all-version (FR-015b) future; enum value-domain unbacked (FR-013 — see L-069-1). |
 | BE | UserRequest | N-002 | — |
 | BF | UserResponse | N-002 | — |
 | BW | ApplicationMessageRequest | N-003 | — |

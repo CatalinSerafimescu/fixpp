@@ -119,3 +119,7 @@ tests/config/fuzz/corpus/*
 
 # Python wheel build output (cibuildwheel / build-wheel.sh)
 wheelhouse/
+
+# 069-v44-all-families local byte-identity baseline (reproducible via
+# `fixpp-codegen --families official`; not a source-of-truth artifact)
+specs/069-v44-all-families/baseline/

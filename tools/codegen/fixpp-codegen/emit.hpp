@@ -22,11 +22,20 @@ namespace fixpp::codegen {
 [[nodiscard]] std::string emit_reify(VersionIR const& ir);           // <vXX>/Reify.hpp
 [[nodiscard]] std::string emit_normative_refs(VersionIR const& ir);  // <vXX>/NormativeReferences.md
 
+// 069-v44-all-families (data-model.md Entity "Coverage mode"): which message
+// set the write emitter covers. `Official` = the frozen 33-element kOfficial33
+// set (byte-identical to pre-069 output, FR-005/SC-003). `All` = every
+// `msgcat='app'` message minus the N-002/N-003 exclusion set (data-model.md
+// Entity "N-002/N-003 exclusion set").
+enum class CoverageMode { All, Official };
+
 // 067-codegen-writer-emitter: the write emitter — build_<Msg>/<Msg>Args/
-// validate_<Msg> over wire::body_builder, for every OFFICIAL message. Returns
-// "" for non-v44 versions (writer-emitter is v44-scoped for v1.0); `write_file`'s
-// empty-skip then writes no Builders.hpp for those versions.
-[[nodiscard]] std::string emit_builders(VersionIR const& ir);  // <vXX>/Builders.hpp
+// validate_<Msg> over wire::body_builder, for every message selected by
+// `mode` (069-v44-all-families). Returns "" for non-v44 versions
+// (writer-emitter is v44-scoped for v1.0); `write_file`'s empty-skip then
+// writes no Builders.hpp for those versions.
+[[nodiscard]] std::string emit_builders(VersionIR const& ir,
+                                        CoverageMode mode);  // <vXX>/Builders.hpp
 
 // Shared dispatch headers ([2c §4.8]/[2c §6.3]) — emitted once over ALL
 // codegen versions, not per-version. _dispatch/reify_dispatch_{fixt,application}.hpp

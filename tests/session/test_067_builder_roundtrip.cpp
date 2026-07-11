@@ -51,18 +51,8 @@
 namespace {
 
 using fixpp::decimal_t;
-
-decimal_t make_decimal(std::string_view sv, std::pmr::memory_resource* mr) {
-    auto bytes =
-        std::span<const std::byte>{reinterpret_cast<const std::byte*>(sv.data()), sv.size()};
-    auto r = decimal_t::parse(bytes, mr);
-    EXPECT_TRUE(r.has_value()) << "make_decimal failed for: " << sv;
-    return r.value_or(decimal_t{});
-}
-
-std::string bytes_to_string(std::span<const std::byte> b) {
-    return std::string{reinterpret_cast<const char*>(b.data()), b.size()};
-}
+using fixpp_test_support::bytes_to_string;  // shared with test_069 (same binary)
+using fixpp_test_support::make_decimal;
 
 // Generic single-line field-assertion helper (works for string_view/char/
 // int32_t/bool read-back accessors compared against any comparable seed

@@ -362,6 +362,48 @@ TEST(Group067Census, CensusWalkDetectsSyntheticCrossLevelCollapse) {
     EXPECT_TRUE(it->second.contains(73));
 }
 
+// 069-v44-all-families T004 — msgcat fail-closed witness (data-model.md
+// Entity 1). A synthetic <message> lacking the msgcat attribute must make
+// build_ir() reject the dictionary (fail-closed loader error, NOT a
+// default-guessed category) — mirrors the synthetic-XML discriminating-witness
+// pattern above. build_ir() only accepts a filesystem path (not a string), so
+// the synthetic XML is written to a temp file (determinism_test.cpp TempDir
+// precedent, inlined here to keep this TU self-contained).
+TEST(Group069MsgCat, MissingMsgcatFailsClosed) {
+    static constexpr char kSyntheticXml[] =
+        "<fix type='FIX' major='4' minor='4' servicepack='0'>"
+        " <fields>"
+        "  <field number='55' name='Symbol' type='STRING' />"
+        " </fields>"
+        " <messages>"
+        "  <message name='NoMsgCat' msgtype='ZZ'>"
+        "   <field name='Symbol' required='N' />"
+        "  </message>"
+        " </messages>"
+        "</fix>";
+
+    auto const tmp_path =
+        std::filesystem::temp_directory_path() / "fixpp_codegen_069_missing_msgcat_test.xml";
+    {
+        std::ofstream out(tmp_path, std::ios::binary | std::ios::trunc);
+        ASSERT_TRUE(static_cast<bool>(out)) << "cannot create " << tmp_path;
+        out << kSyntheticXml;
+    }
+
+    std::pmr::monotonic_buffer_resource arena;
+    try {
+        (void)fixpp::codegen::build_ir(tmp_path, &arena);
+        FAIL() << "build_ir() must fail closed on a <message> missing msgcat, not "
+                  "default-guess its category";
+    } catch (fixpp::dict::xml_parse_error const& e) {
+        EXPECT_NE(std::string{e.what()}.find("ZZ"), std::string::npos)
+            << "error should name the offending msgtype — what()=" << e.what();
+    }
+
+    std::error_code ec;
+    std::filesystem::remove(tmp_path, ec);
+}
+
 // ---------------------------------------------------------------------------
 // T014 [US1] [TESTS-FIRST] — emit_builders(ir) OUTPUT-TEXT unit tests.
 //
@@ -439,7 +481,8 @@ std::string extract_region(std::string const& text, std::string_view start_marke
 // Side(54) < Symbol(55) < TransactTime(60) must be found in that byte
 // order within the NewOrderSingle builder's emitted region.
 TEST(Group067EmitBuilders, TopLevelEmissionOrderTagAscending) {
-    std::string const out = fixpp::codegen::emit_builders(fix44_ir());
+    std::string const out =
+        fixpp::codegen::emit_builders(fix44_ir(), fixpp::codegen::CoverageMode::Official);
     std::string const region = extract_region(out, "NewOrderSingle", "NewOrderList");
     ASSERT_FALSE(region.empty()) << "no NewOrderSingle builder region found in emit_builders() output "
                                      "(empty until Phase 3b lands T016/T017)";
@@ -460,7 +503,8 @@ TEST(Group067EmitBuilders, TopLevelEmissionOrderTagAscending) {
 // research.md R1/R9, T007(b)'s IR-level pin, here at the EMITTED-TEXT
 // level).
 TEST(Group067EmitBuilders, GroupEntryOrderIsDeclarationOrderNotTagSorted) {
-    std::string const out = fixpp::codegen::emit_builders(fix44_ir());
+    std::string const out =
+        fixpp::codegen::emit_builders(fix44_ir(), fixpp::codegen::CoverageMode::Official);
     std::string const region = extract_region(out, "NewOrderList", "OrderCancelRequest");
     ASSERT_FALSE(region.empty()) << "no NewOrderList builder region found in emit_builders() output";
 
@@ -485,7 +529,8 @@ TEST(Group067EmitBuilders, GroupEntryOrderIsDeclarationOrderNotTagSorted) {
 // builder that DID emit e.g. `field(8, ...)` would violate body_builder's
 // own INV-2 framing-tag reject unconditionally.
 TEST(Group067EmitBuilders, HeaderFramingTagsNeverPassedToFieldCall) {
-    std::string const out = fixpp::codegen::emit_builders(fix44_ir());
+    std::string const out =
+        fixpp::codegen::emit_builders(fix44_ir(), fixpp::codegen::CoverageMode::Official);
     ASSERT_FALSE(out.empty()) << "emit_builders() output is empty (Phase 3b not landed yet)";
 
     for (int tag : {8, 9, 10, 34, 35, 49, 52, 56}) {
@@ -505,7 +550,8 @@ TEST(Group067EmitBuilders, HeaderFramingTagsNeverPassedToFieldCall) {
 // field (ClOrdID(11)) is the positive control — it MUST still be present,
 // proving the exclusion is provenance-scoped, not a body-emptying overreach.
 TEST(Group067EmitBuilders, HeaderTrailerFieldsExcludedFromBodyOnlyArgs) {
-    std::string const out = fixpp::codegen::emit_builders(fix44_ir());
+    std::string const out =
+        fixpp::codegen::emit_builders(fix44_ir(), fixpp::codegen::CoverageMode::Official);
     ASSERT_FALSE(out.empty()) << "emit_builders() output is empty (Phase 3b not landed yet)";
     std::string const region = extract_region(out, "NewOrderSingle", "NewOrderList");
     ASSERT_FALSE(region.empty()) << "no NewOrderSingle builder region found in emit_builders() output";
@@ -528,7 +574,8 @@ TEST(Group067EmitBuilders, HeaderTrailerFieldsExcludedFromBodyOnlyArgs) {
 // both to the same (wrong-for-one) delimiter. Call shape verbatim from
 // data-model.md §1.2 ("bb.group_begin(no_tag, delimiter_tag)").
 TEST(Group067EmitBuilders, RC1PerMessagePlannerDistinctDelimiterWvsX) {
-    std::string const out = fixpp::codegen::emit_builders(fix44_ir());
+    std::string const out =
+        fixpp::codegen::emit_builders(fix44_ir(), fixpp::codegen::CoverageMode::Official);
     ASSERT_FALSE(out.empty()) << "emit_builders() output is empty (Phase 3b not landed yet)";
     std::string const collapsed = collapse_whitespace(out);
 

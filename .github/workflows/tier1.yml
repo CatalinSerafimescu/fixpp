@@ -395,6 +395,23 @@ jobs:
       - name: Configure
         run: cmake --preset ${{ matrix.preset }}
 
+      # 069-v44-all-families T017 (FR-008): this Tier-1 matrix is the CI
+      # invariant that keeps >=1 preset continuously verifying the FULL v44
+      # builder set (83, via `ctest -L roundtrip|family_golden|mode_count`
+      # below with no -L filter). No preset here currently overrides
+      # FIXPP_CODEGEN_V44_FAMILIES (see cmake/Codegen.cmake), so every leg
+      # defaults to `all` — assert that durably so a future preset addition
+      # can't silently flip a verifying job to `official` (33) without CI
+      # noticing.
+      - name: Verify full v44 coverage preset (FR-008)
+        run: |
+          value=$(grep '^FIXPP_CODEGEN_V44_FAMILIES:' "build/${{ matrix.preset }}/CMakeCache.txt" | cut -d= -f2)
+          if [ "$value" != "all" ]; then
+            echo "::error::Tier-1 preset ${{ matrix.preset }} configured FIXPP_CODEGEN_V44_FAMILIES='$value', not 'all'. FR-008 requires at least one CI preset to continuously verify the full 83-builder v44 coverage set — do not let a verifying preset silently opt down to 'official'."
+            exit 1
+          fi
+          echo "OK: FIXPP_CODEGEN_V44_FAMILIES=all (full v44 coverage verified) on ${{ matrix.preset }}"
+
       - name: Build
         run: cmake --build --preset ${{ matrix.preset }}
 
@@ -503,6 +520,17 @@ jobs:
 
       - name: Configure
         run: cmake --preset linux-clang-coverage
+
+      # 069-v44-all-families T017 (FR-008): see the "linux" job's identical
+      # step for the durability rationale.
+      - name: Verify full v44 coverage preset (FR-008)
+        run: |
+          value=$(grep '^FIXPP_CODEGEN_V44_FAMILIES:' build/linux-clang-coverage/CMakeCache.txt | cut -d= -f2)
+          if [ "$value" != "all" ]; then
+            echo "::error::linux-clang-coverage configured FIXPP_CODEGEN_V44_FAMILIES='$value', not 'all'. FR-008 requires at least one CI preset to continuously verify the full 83-builder v44 coverage set."
+            exit 1
+          fi
+          echo "OK: FIXPP_CODEGEN_V44_FAMILIES=all (full v44 coverage verified) on linux-clang-coverage"
 
       - name: Build
         run: cmake --build --preset linux-clang-coverage

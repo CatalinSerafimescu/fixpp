@@ -118,10 +118,13 @@ set_tests_properties(codegen_067_emit_builders_unit_test PROPERTIES LABELS "code
 
 # T041: determinism_test — NFR-003-7 / AC-T1 / AC-T2
 #
-# Three assertions:
+# Assertions:
 #   (1) Run fixpp-codegen twice into separate temp dirs; assert byte-identical.
 #   (2) Assert no source-tree write (mtime/file-count snapshot of dictionaries/).
 #   (3) Assert generated Messages.hpp == checked-in golden for all 4 versions.
+#   (4) Gate B PR#187 r1 F3 (SC-003): `--families official` v44/Builders.hpp
+#       == checked-in golden (promotes the 069 T009 local byte-identity
+#       procedure into a CI-automated gate).
 #
 # The binary path is injected at CMake configure time via $<TARGET_FILE:fixpp-codegen>
 # (a generator expression) so it resolves to the correct preset-specific path.
@@ -136,6 +139,7 @@ target_compile_definitions(codegen_determinism_test PRIVATE
   "FIXPP_CODEGEN_BIN=\"$<TARGET_FILE:fixpp-codegen>\""
   "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
   "FIXPP_CODEGEN_GOLDEN_DIR=\"${CMAKE_SOURCE_DIR}/specs/003-dictionary-codegen/contracts/golden\""
+  "FIXPP_CODEGEN_069_OFFICIAL_GOLDEN_DIR=\"${CMAKE_SOURCE_DIR}/specs/069-v44-all-families/contracts/golden\""
 )
 add_test(NAME codegen_determinism_test COMMAND codegen_determinism_test)
 set_tests_properties(codegen_determinism_test PROPERTIES LABELS codegen)
@@ -159,4 +163,25 @@ add_test(
     -P "${CMAKE_CURRENT_SOURCE_DIR}/codegen_build_graph_test.cmake"
 )
 set_tests_properties("fixpp::dict::codegen-build-graph-check" PROPERTIES
-  LABELS codegen)
+  LABELS codegen
+  RESOURCE_LOCK codegen_source_tree)
+
+# Gate B PR#187 round 3 F1: seed a stale-tool scenario by mutating a generator
+# source, re-running configure without rebuilding the main-tree binary, and
+# proving Codegen.cmake rebuilds the bootstrap tool before regeneration.
+add_test(
+  NAME "fixpp::dict::codegen-source-staleness-check"
+  COMMAND "${CMAKE_COMMAND}"
+    "-DFIXPP_CMAKE_COMMAND=${CMAKE_COMMAND}"
+    "-DFIXPP_CONFIGURE_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+    "-DFIXPP_CONFIGURE_BINARY_DIR=${CMAKE_BINARY_DIR}"
+    "-DFIXPP_CODEGEN_MAIN_BIN=$<TARGET_FILE:fixpp-codegen>"
+    "-DFIXPP_CODEGEN_BOOTSTRAP_BIN=${CMAKE_BINARY_DIR}/_codegen_bootstrap/bin/fixpp-codegen${CMAKE_EXECUTABLE_SUFFIX}"
+    "-DFIXPP_GENERATOR_SOURCE=${CMAKE_SOURCE_DIR}/tools/codegen/fixpp-codegen/emit_builders.cpp"
+    "-DFIXPP_BUILDERS_HEADER=${CMAKE_BINARY_DIR}/_codegen/include/fixpp/v44/Builders.hpp"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/codegen_source_staleness_test.cmake"
+)
+set_tests_properties("fixpp::dict::codegen-source-staleness-check" PROPERTIES
+  LABELS codegen
+  RUN_SERIAL TRUE
+  RESOURCE_LOCK codegen_source_tree)

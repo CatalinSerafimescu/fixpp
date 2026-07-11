@@ -176,6 +176,23 @@ void populate_group_order(std::filesystem::path const& xml_path, fixpp::dict::Di
         }
         std::vector<GroupOrderMember> top_members;  // discarded — top-level order is R1 tag-sorted.
         walk_level(it->second, comps, dict, {}, top_members, msg.group_order);
+
+        // 069-v44-all-families T005 (data-model.md Entity 1): msgcat is not
+        // exposed by the runtime Dictionary (FR-009 — no runtime API change),
+        // so it is read from this same codegen-tool-local re-parse. Fail
+        // closed on a missing/unrecognized value — never default-guess the
+        // category (that would be exactly the silent-drop/silent-add surface
+        // the completeness pin exists to catch).
+        std::string_view const msgcat{it->second.attribute("msgcat").as_string("")};
+        if (msgcat == "app") {
+            msg.is_application = true;
+        } else if (msgcat == "admin") {
+            msg.is_application = false;
+        } else {
+            throw fixpp::dict::xml_parse_error(
+                "dict::xml_parse_error: <message msgtype=\"" + msg.msg_type +
+                "\"> missing or unrecognized msgcat attribute (expected 'app' or 'admin')");
+        }
     }
 }
 

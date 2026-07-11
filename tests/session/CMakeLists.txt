@@ -2446,13 +2446,25 @@ set_tests_properties(test_exemplar_build_failclosed PROPERTIES
 if(TARGET fixpp_codegen_generate)
   set(_067_CODEGEN_INC "${CMAKE_BINARY_DIR}/_codegen/include")
 
+  # 069-v44-all-families T014 [US2]: the generalized completeness pin needs
+  # an independent raw FIX44.xml census (pugixml), distinct from the
+  # emitter's own VersionIR/build_ir — non-circularity requirement (C2).
+  find_package(pugixml CONFIG REQUIRED)
+
   add_executable(test_067_completeness
     test_067_completeness.cpp
+    # 069-v44-all-families T016 [US3]: joins this existing binary (Article
+    # VII §8 -- no new executable, no gtest_discover_tests). This host is
+    # mode-agnostic under BOTH FIXPP_CODEGEN_V44_FAMILIES values (unlike the
+    # roundtrip/us1_smoke hosts, which reference specific non-OFFICIAL typed
+    # builder symbols and cannot compile under `official`).
+    test_069_mode_count.cpp
   )
   add_dependencies(test_067_completeness fixpp_codegen_generate)
   target_link_libraries(test_067_completeness PRIVATE
     fixpp_wire
     fixpp_dictionary
+    pugixml::pugixml
     GTest::gtest
     GTest::gtest_main
   )
@@ -2461,12 +2473,29 @@ if(TARGET fixpp_codegen_generate)
     "${CMAKE_SOURCE_DIR}/tests"
     "${CMAKE_CURRENT_SOURCE_DIR}"
   )
+  target_compile_definitions(test_067_completeness PRIVATE
+    "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
+  )
+  # 069-v44-all-families T015 (US3): flip this pin's intended-set/count to the
+  # 33-OFFICIAL mode when the codegen was configured with
+  # FIXPP_CODEGEN_V44_FAMILIES=official (see test_067_completeness.cpp's
+  # FIXPP_CODEGEN_V44_FAMILIES_OFFICIAL #if). Absent in the default `all`
+  # build, so the pin stays at 83 there.
+  if(FIXPP_CODEGEN_V44_FAMILIES STREQUAL "official")
+    target_compile_definitions(test_067_completeness PRIVATE
+      FIXPP_CODEGEN_V44_FAMILIES_OFFICIAL)
+  endif()
   add_test(NAME test_067_completeness COMMAND test_067_completeness)
   set_tests_properties(test_067_completeness PROPERTIES
-    LABELS "067;us1;completeness")
+    LABELS "067;us1;completeness;069;mode_count")
 
   add_executable(test_067_builder_roundtrip
     test_067_builder_roundtrip.cpp
+    # 069-v44-all-families T010/T013 [US2]: joins this existing binary
+    # (Article VII §8 — isolation-safe TU, no new executable, no
+    # gtest_discover_tests). Needs the SAME deps (fixpp_wire, fixpp_dictionary,
+    # the dict-aware read scaffold) as the 067 typed roundtrip above.
+    test_069_all_families_roundtrip.cpp
   )
   add_dependencies(test_067_builder_roundtrip fixpp_codegen_generate)
   target_link_libraries(test_067_builder_roundtrip PRIVATE
@@ -2485,10 +2514,14 @@ if(TARGET fixpp_codegen_generate)
   )
   add_test(NAME test_067_builder_roundtrip COMMAND test_067_builder_roundtrip)
   set_tests_properties(test_067_builder_roundtrip PROPERTIES
-    LABELS "067;us1;roundtrip")
+    LABELS "067;us1;roundtrip;069;all_families;failclosed")
 
   add_executable(test_067_builder_failclosed
     test_067_builder_failclosed.cpp
+    # 069-v44-all-families T008 [US1] — joins this existing binary (Article
+    # VII §8: no new executable, no gtest_discover_tests); needs only
+    # fixpp_wire, same as the failclosed witnesses above.
+    test_069_us1_smoke.cpp
   )
   add_dependencies(test_067_builder_failclosed fixpp_codegen_generate)
   target_link_libraries(test_067_builder_failclosed PRIVATE
@@ -2503,7 +2536,7 @@ if(TARGET fixpp_codegen_generate)
   )
   add_test(NAME test_067_builder_failclosed COMMAND test_067_builder_failclosed)
   set_tests_properties(test_067_builder_failclosed PROPERTIES
-    LABELS "067;us1;failclosed")
+    LABELS "067;us1;failclosed;069;all_families;us1_smoke")
 
   # ── 067-codegen-writer-emitter T022 [US3] [TESTS-FIRST] — validate_<Msg>
   # required-presence witnesses. Links fixpp_wire only (matches
@@ -2533,6 +2566,11 @@ if(TARGET fixpp_codegen_generate)
   # profile()) — mirrors test_exemplar_roundtrip's dependency shape.
   add_executable(test_067_builder_shape_oracle
     test_067_builder_shape_oracle.cpp
+    # 069-v44-all-families T012 [US2]: joins this existing binary (Article
+    # VII §8 — isolation-safe TU, no new executable, no
+    # gtest_discover_tests). Needs the SAME deps (fixpp_wire, golden_diff.cpp)
+    # as the 067 shape-oracle above — the 8 external-golden exemplars (C4).
+    test_069_family_exemplar_golden.cpp
     "${CMAKE_SOURCE_DIR}/tests/interop/support/golden_diff.cpp"
   )
   add_dependencies(test_067_builder_shape_oracle fixpp_codegen_generate)
@@ -2553,7 +2591,7 @@ if(TARGET fixpp_codegen_generate)
   )
   add_test(NAME test_067_builder_shape_oracle COMMAND test_067_builder_shape_oracle)
   set_tests_properties(test_067_builder_shape_oracle PROPERTIES
-    LABELS "067;us2;shape_oracle;golden;D;8;9;E;AS")
+    LABELS "067;us2;shape_oracle;golden;D;8;9;E;AS;069;family_golden")
 else()
   message(STATUS
     "tests/session: fixpp_codegen_generate not available; skipping 067 US1 suites")

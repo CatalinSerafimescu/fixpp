@@ -67,6 +67,14 @@ struct MessageIR {
     std::string name;             // English name (diagnostics / NormativeRefs)
     std::vector<FieldIR> fields;  // full per-message run (required + optional)
 
+    // 069-v44-all-families T003: the <message msgcat='app'|'admin'> XML
+    // attribute (data-model.md Entity 1). Populated by build_ir()'s
+    // codegen-tool-local pugixml re-parse (ir.cpp); every <message> in a
+    // FIX44 dictionary MUST carry msgcat — a message missing it (or carrying
+    // an unrecognized value) is a build_ir() loader error (fail-closed, no
+    // default-guess — data-model.md Entity 1 Validation).
+    bool is_application = false;
+
     // Codegen-tool-local declaration-order group plan (067 T004/R9): one
     // GroupOrderEntry per repeating-group occurrence rooted at THIS
     // message's own XML definition (recursive to every nesting depth). NOT
