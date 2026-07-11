@@ -1,6 +1,6 @@
 # Quickstart: Grouping One Module
 
-The repeatable procedure applied per module (FR-010, one at a time, descending disk order). Reference implementation: `tests/core/CMakeLists.txt`.
+The repeatable procedure applied per module (FR-010, one at a time, descending disk order). Reference implementation: `tests/dictionary/CMakeLists.txt`. **Authoritative pattern: `IMPLEMENTATION-PROCEDURE.md`** — whole-binary `add_test`, not `gtest_discover_tests` (dropped after the pilot: per-case discovery regressed serial ctest 5.77×). The steps below are aligned to that pattern.
 
 ## 0. Preconditions
 - Tree clean; all 8 presets built at the current baseline.
@@ -20,18 +20,18 @@ For `tests/<module>/`, classify each `.cpp`:
 - Else **groupable**.
 
 ## 2. Bucket the groupable set (D4)
-Partition by key `(sorted link-libs, sorted labels)`. Each partition → one bucket:
+Partition by key `(sorted link-libs, sorted labels)`. Each partition → one whole-binary target — **NO `gtest_discover_tests`, NO `include(GoogleTest)`** (per-case discovery regresses serial ctest, see above):
 ```cmake
-include(GoogleTest)  # once per file
 add_executable(<module>_<bucketkey>_tests  a.cpp b.cpp c.cpp)
 target_link_libraries(<module>_<bucketkey>_tests PRIVATE
   <union-of-member-link-libs>  GTest::gtest GTest::gtest_main)
 target_include_directories(<module>_<bucketkey>_tests PRIVATE "${CMAKE_SOURCE_DIR}/tests")
 # homogeneous compile-defs / ENVIRONMENT only:
 target_compile_definitions(<module>_<bucketkey>_tests PRIVATE <shared-defs>)
-gtest_discover_tests(<module>_<bucketkey>_tests
-  PROPERTIES LABELS "<shared-labels>"            # re-apply for ctest -L (FR-003)
-             ENVIRONMENT "<shared-env-if-any>")  # only if homogeneous (D3)
+add_test(NAME <module>_<bucketkey>_tests COMMAND <module>_<bucketkey>_tests)
+set_tests_properties(<module>_<bucketkey>_tests PROPERTIES
+  LABELS "<shared-labels>"                       # the selector for ctest -L (FR-003)
+  ENVIRONMENT "<shared-env-if-any>")              # only if homogeneous (D3)
 ```
 Leave standalone tests exactly as they are (`add_executable` + `add_test(NAME ...)` + `set_tests_properties`).
 
@@ -53,7 +53,7 @@ PASS = every preset green, no new sanitizer finding (FR-006), and the built/run 
 
 ## 5. Preservation checks (FR-004 / SC-003 / SC-004)
 - Coverage-index + completeness audits: unchanged & green (they key on `.cpp` stem + `Suite.Name`).
-- Selectability: run the module's documented `ctest -L <label>` / `-R <name>` — same logical set as before.
+- Selectability: run `ctest -L <label>` — same logical case set as before. Grouped binaries no longer have a per-`.cpp` target name, so `-L <label>` is the stable selector going forward; do not rely on `ctest -R <exe-name>` (only genuine standalone targets keep an exact-match name, per §1's `-R <target>` carve-out).
 
 ## 6. Measure & record (FR-008)
 ```bash
