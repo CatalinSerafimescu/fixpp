@@ -1724,3 +1724,109 @@ module; nothing to disposition or group. `CMakeLists.txt` is **unchanged**.
 
 **Sum:** 0 grouped + 0 standalone = **0** ✓ (N/A — no test `.cpp` in this
 module; not part of the `.cpp`-census denominator).
+
+---
+
+## T026/T027 — Whole-tree preservation checks (close-out, 2026-07-11)
+
+**T026 (coverage-index).** `git diff --stat main..HEAD -- spec/coverage-index.md`
+is **empty** — the file is byte-identical to `main`. `git diff --name-status
+main..HEAD -- 'tests/**/*.cpp'` is **also empty** — no test `.cpp` was added,
+renamed, deleted, or even content-modified anywhere in the feature (confirms
+the "0 ODR renames" every rollout commit reported; FR-012's rename escape
+hatch was never exercised end to end). Since coverage-index keys on `.cpp`
+stem + gtest `Suite.Name`, and neither changed anywhere, FR-004/SC-003 hold by
+construction, not just by spot-check.
+
+**T027 (completeness audits).** `git diff --stat main..HEAD -- .specify/decisions/`
+is **empty** — no existing `*-completeness.md` record was touched by 068. Their
+gtest `Suite.Name` citations therefore still resolve (T026's zero-`.cpp`-diff
+finding is the reason why, not a separate check).
+
+**Aside — unrelated branch drift, not a 068 defect.** The unfiltered
+`git diff --stat main..HEAD` also shows `dictionaries/QUICKFIX_LICENSE.txt`
+(deleted) and `dictionaries/README.md` (reverted) — this is **not** a 068
+change. 068's branch point (`git merge-base main HEAD`) predates `main`'s
+commit `2c0b4947` ("dictionaries: correct license"); diffing against a `main`
+that has since moved forward makes that later, unrelated commit appear as a
+"revert" in the `main..HEAD` diff. No 068 commit touches `dictionaries/`
+(confirmed via `git log --oneline main..HEAD`, `git diff --stat` per-068-commit).
+Flagged for the orchestrator: rebase 068 onto current `main` before opening the
+PR so this drift doesn't show up in the PR diff; not something this close-out
+subagent should do mid-build.
+
+---
+
+## T028 — Whole-tree selectability audit (close-out, 2026-07-11)
+
+Static audit only (no ctest run — a concurrent MSVC build holds `build/`); basis
+is `grep`/`git show` of current `add_test(NAME …)` / `PROPERTIES LABELS` entries
+per module `CMakeLists.txt`, cross-referenced against every documented
+`ctest -L`/`-R` idiom named in per-module sections above.
+
+**`-L <label>` (SC-004 primary selector) — preserved everywhere.** Every
+per-module section above that had a live `-L` selector re-verified it
+(spot-checks already on record: `-L session` → 8 both before/after, `-L 019` →
+12, `-L 066` → 15, `-L dictionary` → same case set via `--gtest_list_tests`,
+`-L config` documented as the only working selector for that module). No
+module's `-L` audit found a regression. This is the FR-003/SC-004 guarantee
+grouping actually rests on.
+
+**`-R <name>`-by-name — correction to the top-of-file policy (lines 37–53) and
+the dictionary replacement table (lines 107–117).** Both were written against
+the *rejected* per-case `gtest_discover_tests` design (where every grouped
+`.cpp`'s cases become `Suite.Case` ctest entries, so any target-name/prefix
+`-R` idiom necessarily stops resolving). FR-001 was amended to whole-binary
+`add_test` in 63a0dd82 (dictionary pilot) but that commit did not touch this
+ledger, so the pre-pivot framing was never corrected here. Under the **shipped**
+whole-binary design the picture is more nuanced than "always -L-superseded":
+
+- **068-authored buckets carry the `<module>_` prefix by construction**
+  (`dictionary_pure_tests`, `dictionary_reify_tests`, `session_<bucket>_tests`,
+  etc. — see IMPLEMENTATION-PROCEDURE.md §2's naming convention), and standalone
+  entries keep their pre-existing `<module>_<name>` names unchanged. A
+  **module-prefix** idiom like `-R '^dictionary_'` therefore still matches
+  every one of that module's current ctest entries and still selects the same
+  underlying gtest-case set — it was **not actually broken** by 068's
+  grouping, contrary to the dictionary table's "breaks (prefix — breaks under
+  any grouping)" line. The `-L dictionary` replacement recorded there remains
+  valid too (belt-and-suspenders), just not strictly required for that specific
+  idiom.
+- **This does NOT generalize to every module.** `tests/core`'s `fixpp_core_tests`
+  / `fixpp_capi_tests` are the documented exception: that grouping **predates**
+  068 (spec.md — "already partially grouped" precedent) and its bucket names do
+  **not** carry a `core_`/`decimal_` prefix. 068's T017 only converted their
+  *mechanism* (`gtest_discover_tests` → whole-binary `add_test`, commit
+  94f4cf2a); a `-R '^decimal_'`-style idiom against `fixpp_core_tests` would not
+  have matched the target name **either before or after** 068 (pre-068 it
+  produced per-case entries with PascalCase gtest `Suite` names, e.g.
+  `DecimalParse.EmptyInput`, not lowercase `decimal_*` — so this class of
+  selector was already non-functional against fixpp_core_tests before 068 and
+  is not a 068 regression).
+- **Truly-broken selectors are exact per-`.cpp`-target-name or per-case
+  `Suite.Case` references** where that `.cpp` was folded into a bucket — those
+  are precisely the ones FR-002/D3's "live `ctest -R <target-name>`" criterion
+  keeps standalone (e.g. `group_context_lookup_alloc_gate_test`'s mallocnesia
+  `$<TARGET_FILE:…>` sidecar), or where the per-module section above already
+  recorded the `-L` replacement (dictionary's non-prefix idioms:
+  `-R determinism_test`, `-R reify_dispatch`, etc. — those target gtest
+  Suite/Case names, not the module prefix, and genuinely stop resolving as
+  separate ctest entries once folded into a bucket).
+
+**`/speckit-verify` selector (`../../../.claude/skills/speckit-verify/SKILL.md`,
+parent-repo, out of 068's edit surface).** Its generic Step 0e/Step 3 selector
+is **`ctest -R '^<prefix>_'`** (a per-feature name-prefix inferred from
+`plan.md`/`tasks.md`), not literally `-L` — this is a documentation-convention
+mismatch against the newly-ratified Constitution §VII.8 wording ("selected by
+`ctest -L <label>`, never `-R <exe-name>`"), flagged here as a follow-up for
+whoever next touches that skill file; not fixed as part of 068 (out of this
+feature's edit surface — `tests/**/CMakeLists.txt` only). Per the `core`
+finding above, its own Appendix A worked example (`ctest -R '^decimal_'` for
+`001-core-decimal`) is **already stale independent of 068** (predates the
+`fixpp_core_tests` PascalCase-suite grouping).
+
+**Verdict:** SC-004 holds — every live `-L` selector resolves to the same
+logical set; every `-R`-by-target-name idiom either still resolves (module-
+prefix idioms riding 068-authored buckets) or was correctly carved to
+standalone / given a recorded `-L` replacement (genuine per-case/per-target
+idioms). No selection command silently broke.
