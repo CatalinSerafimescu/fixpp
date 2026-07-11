@@ -63,6 +63,18 @@ bool is_official(std::string_view msg_type) {
     return std::find(kOfficial33.begin(), kOfficial33.end(), msg_type) != kOfficial33.end();
 }
 
+// 069-v44-all-families (data-model.md Entity "N-002/N-003 exclusion set"):
+// session-FSM-dispatch messages, a different work class, remain the separate
+// v1.0-tagging gate (FR-003). They are `msgcat='app'` so the app/admin filter
+// alone does not exclude them; BW/BX/BY are FIX 5.0 messages absent from the
+// vendored FIX44 dictionary (a harmless no-op here, kept for forward-compat).
+constexpr std::array<std::string_view, 5> kN002N003Excluded = {"BE", "BF", "BW", "BX", "BY"};
+
+bool is_n002_n003_excluded(std::string_view msg_type) {
+    return std::find(kN002N003Excluded.begin(), kN002N003Excluded.end(), msg_type) !=
+           kN002N003Excluded.end();
+}
+
 // Defensive floor: the 8-tag framer envelope — BeginString(8), BodyLength(9),
 // CheckSum(10), MsgSeqNum(34), MsgType(35, stamped by the body_builder ctor),
 // SenderCompID(49), SendingTime(52), TargetCompID(56). The PRIMARY exclusion
@@ -628,7 +640,7 @@ void emit_writer_traits_for_level(TemplateWriter& w, std::string const& ns,
 
 }  // namespace
 
-std::string emit_builders(VersionIR const& ir) {
+std::string emit_builders(VersionIR const& ir, CoverageMode mode) {
     // 067 scope: v44 only (research.md R6 — the 33-OFFICIAL-MsgTypes set is
     // verified against FIX44.xml specifically).
     if (ir.ns != "v44") {
@@ -668,7 +680,14 @@ std::string emit_builders(VersionIR const& ir) {
     std::vector<std::pair<std::string, LevelPlan>> all_levels;
 
     for (auto const& m : ir.messages) {
-        if (!is_official(m.msg_type)) {
+        // 069-v44-all-families (data-model.md Entity "Coverage mode"):
+        // `official` reproduces the frozen kOfficial33-only gate byte-for-
+        // byte (FR-005/SC-003); `all` widens to every application message
+        // minus the N-002/N-003 exclusion set (FR-002/FR-003).
+        bool const in_scope = mode == CoverageMode::Official
+                                   ? is_official(m.msg_type)
+                                   : (m.is_application && !is_n002_n003_excluded(m.msg_type));
+        if (!in_scope) {
             continue;
         }
         std::unordered_map<std::uint16_t, FieldIR const*> field_by_tag;

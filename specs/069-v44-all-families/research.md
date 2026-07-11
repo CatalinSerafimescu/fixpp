@@ -1,6 +1,6 @@
 # Phase 0 Research: v44 all-families typed codegen coverage
 
-All items resolved from the measure-first spike (`../../remaining-work/v44-all-families-measure-spike.md`) + direct source inspection of the 067 emitter. No open NEEDS CLARIFICATION.
+All items resolved from the measure-first spike (`research/G19-fix-fpml-iso20022/remaining-work/v44-all-families-measure-spike.md`) + direct source inspection of the 067 emitter. No open NEEDS CLARIFICATION.
 
 ## R1 — Message selection: allowlist → coverage-mode predicate
 

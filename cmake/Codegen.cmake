@@ -56,6 +56,27 @@ if(NOT FIXPP_BUILD_CODEGEN_TOOL)
   return()
 endif()
 
+# ── 069-v44-all-families T015 (US3, C1): v44 typed-builder coverage control ──
+# CACHE STRING (not option() — the domain is {all, official}, not boolean).
+# `all` (default, 83 in-scope FIX44 msgcat='app' builders) vs `official`
+# (opt-down to the pre-069 33-builder cost, byte-identical output). Fails
+# closed at configure time on any out-of-domain value, before codegen runs.
+#
+# FR-008 durability note: CI's Tier-1 matrix relies on every *verifying*
+# preset staying on the default `all` (no preset in CMakePresets.json
+# currently sets this variable — see tier1.yml's post-Configure assertion
+# step, which fails loudly if a preset silently overrides to `official`).
+set(FIXPP_CODEGEN_V44_FAMILIES "all" CACHE STRING
+  "v44 typed-builder coverage: all (default, 83) | official (33)")
+set_property(CACHE FIXPP_CODEGEN_V44_FAMILIES PROPERTY STRINGS all official)
+
+if(NOT FIXPP_CODEGEN_V44_FAMILIES STREQUAL "all"
+   AND NOT FIXPP_CODEGEN_V44_FAMILIES STREQUAL "official")
+  message(FATAL_ERROR
+    "[Codegen] FIXPP_CODEGEN_V44_FAMILIES must be 'all' or 'official' "
+    "(got '${FIXPP_CODEGEN_V44_FAMILIES}').")
+endif()
+
 # ── Paths ─────────────────────────────────────────────────────────────────────
 set(FIXPP_CODEGEN_BOOTSTRAP_DIR  "${CMAKE_BINARY_DIR}/_codegen_bootstrap")
 set(FIXPP_CODEGEN_OUT_DIR        "${CMAKE_BINARY_DIR}/_codegen/include/fixpp")
@@ -168,6 +189,22 @@ set(_v44_builders_marker "${CMAKE_BINARY_DIR}/_codegen/include/fixpp/v44/Builder
 
 set(_need_generate FALSE)
 
+# 069 T015 (US3) regen-guard invalidation: the marker/xml-mtime checks below
+# know nothing about the coverage mode, so switching FIXPP_CODEGEN_V44_FAMILIES
+# between configures (all <-> official) would otherwise leave a stale
+# Builders.hpp on disk. Track the last-used value in an INTERNAL cache
+# variable and force a re-run whenever it differs from the current value.
+if(DEFINED FIXPP_CODEGEN_V44_FAMILIES_LAST_USED
+   AND NOT "${FIXPP_CODEGEN_V44_FAMILIES_LAST_USED}" STREQUAL "${FIXPP_CODEGEN_V44_FAMILIES}")
+  set(_need_generate TRUE)
+  message(STATUS
+    "[Codegen] FIXPP_CODEGEN_V44_FAMILIES changed "
+    "(${FIXPP_CODEGEN_V44_FAMILIES_LAST_USED} -> ${FIXPP_CODEGEN_V44_FAMILIES}); "
+    "forcing codegen re-run.")
+endif()
+set(FIXPP_CODEGEN_V44_FAMILIES_LAST_USED "${FIXPP_CODEGEN_V44_FAMILIES}" CACHE INTERNAL
+  "Regen-guard: last FIXPP_CODEGEN_V44_FAMILIES value used for codegen generation.")
+
 # Missing output?
 foreach(_marker IN ITEMS "${_v42_marker}" "${_v44_marker}" "${_v50sp2_marker}" "${_vt11_marker}" "${_v44_builders_marker}")
   if(NOT EXISTS "${_marker}")
@@ -222,6 +259,7 @@ if(_need_generate)
             --xml "${_xml_dir}/FIX44.xml"    --out "${FIXPP_CODEGEN_OUT_DIR}"
             --xml "${_xml_dir}/FIX50SP2.xml" --out "${FIXPP_CODEGEN_OUT_DIR}"
             --xml "${_xml_dir}/FIXT11.xml"   --out "${FIXPP_CODEGEN_OUT_DIR}"
+            --families ${FIXPP_CODEGEN_V44_FAMILIES}
     RESULT_VARIABLE _gen_result
     OUTPUT_VARIABLE _gen_output
     ERROR_VARIABLE  _gen_error

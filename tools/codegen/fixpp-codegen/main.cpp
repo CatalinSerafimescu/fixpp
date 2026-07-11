@@ -45,12 +45,27 @@ int main(int argc, char** argv) {
     std::vector<Job> jobs;
     std::filesystem::path cur_xml;
     std::filesystem::path cur_out;
+    // 069-v44-all-families T007 (data-model.md Entity "Coverage mode"):
+    // default `all` — the 83-in-scope write surface is on by default; opt
+    // down to `official` (the frozen 33) via --families.
+    fixpp::codegen::CoverageMode families_mode = fixpp::codegen::CoverageMode::All;
     for (int i = 1; i < argc; ++i) {
         std::string_view const a = argv[i];
         if (a == "--xml" && i + 1 < argc) {
             cur_xml = argv[++i];
         } else if (a == "--out" && i + 1 < argc) {
             cur_out = argv[++i];
+        } else if (a == "--families" && i + 1 < argc) {
+            std::string_view const v = argv[++i];
+            if (v == "all") {
+                families_mode = fixpp::codegen::CoverageMode::All;
+            } else if (v == "official") {
+                families_mode = fixpp::codegen::CoverageMode::Official;
+            } else {
+                std::cerr << "fixpp-codegen: --families must be 'all' or 'official', got '" << v
+                           << "'\n";
+                return 2;
+            }
         }
         if (!cur_xml.empty() && !cur_out.empty()) {
             jobs.push_back({.xml = cur_xml, .out = cur_out});
@@ -74,7 +89,7 @@ int main(int argc, char** argv) {
             write_file(base / "Validator.hpp", fixpp::codegen::emit_validator(ir));
             write_file(base / "Reify.hpp", fixpp::codegen::emit_reify(ir));
             write_file(base / "NormativeReferences.md", fixpp::codegen::emit_normative_refs(ir));
-            write_file(base / "Builders.hpp", fixpp::codegen::emit_builders(ir));
+            write_file(base / "Builders.hpp", fixpp::codegen::emit_builders(ir, families_mode));
             all.push_back(std::move(ir));
         }
         // Shared dispatch headers -- emitted once over the union ([2c §4.8]).

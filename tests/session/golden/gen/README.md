@@ -16,6 +16,14 @@ have the same reference). They are NOT compiled by the main build.
 | `qf_market_data.cpp` (067 T018 — R5 paired NoMDEntries(268) discriminator) | `../market_data_snapshot.fix` | W |
 | `qf_market_data.cpp` (067 T018 — same program, second message) | `../market_data_incremental.fix` | X |
 | `qf_mass_quote.cpp` (067 T018 — R5 deep-nested-group insurance) | `../mass_quote.fix` | i |
+| `qf_tradecapturereport.cpp` (069 T011 — group-heavy/nested NoSides/NoLegs) | `../069_tradecapturereport_ae.fix` | AE |
+| `qf_positionreport.cpp` (069 T011 — NoPositions group) | `../069_positionreport_ap.fix` | AP |
+| `qf_collateralinquiry.cpp` (069 T011 — no required fields; NoCollInquiryQualifier) | `../069_collateralinquiry_bb.fix` | BB |
+| `qf_securitylist.cpp` (069 T011 — NoRelatedSym group) | `../069_securitylist_y.fix` | y |
+| `qf_confirmation.cpp` (069 T011 — required NoCapacities group) | `../069_confirmation_ak.fix` | AK |
+| `qf_registrationinstructions.cpp` (069 T011 — nested NoRegistDtls) | `../069_registrationinstructions_o.fix` | o |
+| `qf_liststatus.cpp` (069 T011 — required NoOrders group) | `../069_liststatus_n.fix` | N |
+| `qf_businessmessagereject.cpp` (069 T011 — flat, ref-tag echo) | `../069_businessmessagereject_j.fix` | j |
 
 ## Re-run recipe
 
