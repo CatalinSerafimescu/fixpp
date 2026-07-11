@@ -20,53 +20,36 @@ find_package(GTest CONFIG REQUIRED)
 
 set(_CODEGEN_INC "${CMAKE_BINARY_DIR}/_codegen/include")
 
-# ── US3 (T035): Seam #10b — FIXT cross-vocabulary end-to-end ─────────────────
-set(FIXPP_INTEGRATION_TESTS
-  integration_fixt_cross_vocabulary
-)
-
-foreach(target IN LISTS FIXPP_INTEGRATION_TESTS)
-  string(REGEX REPLACE "^integration_" "" src_stem "${target}")
-  add_executable(${target} "${src_stem}.cpp")
-  add_dependencies(${target} fixpp_codegen_generate)
-  target_link_libraries(${target} PRIVATE
-    fixpp_dictionary
-    GTest::gtest
-    GTest::gtest_main
-  )
-  target_include_directories(${target} PRIVATE
-    "${_CODEGEN_INC}"
-    "${CMAKE_SOURCE_DIR}/tests"
-  )
-  target_compile_definitions(${target} PRIVATE
-    "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
-  )
-  add_test(NAME ${target} COMMAND ${target})
-  set_tests_properties(${target} PROPERTIES LABELS integration)
-endforeach()
-
-# ── US4 (T038): Seam #10a — multi-version coexistence (AC-C1..C3) ────────────
-# A single TU includes both fixpp/v42/Messages.hpp and fixpp/v50sp2/Messages.hpp.
-# All assertions are static_assert (compile-time) — NOT R6-blocked.
-# Links fixpp::dict::v42 and fixpp::dict::v50sp2 INTERFACE targets so that each
-# per-version include root is reachable via its dedicated target.  This also
-# demonstrates AC-C2: the two targets carry independent INTERFACE_INCLUDE_DIRECTORIES
-# and do NOT transitively pull in each other's logical version targets.
-add_executable(integration_multi_session_multi_version
+# 068-test-binary-grouping US2: both integration tests are pure (no threads,
+# no global/main, no ODR collisions — verified TEST() suite names distinct)
+# and share LABELS "integration"; union their link-deps into one binary.
+# US3 (T035): Seam #10b — FIXT cross-vocabulary end-to-end.
+# US4 (T038): Seam #10a — multi-version coexistence (AC-C1..C3); a single TU
+# includes both fixpp/v42/Messages.hpp and fixpp/v50sp2/Messages.hpp, all
+# assertions are static_assert (compile-time) — NOT R6-blocked. Linking
+# fixpp::dict::v42 and fixpp::dict::v50sp2 INTERFACE targets demonstrates
+# AC-C2: the two targets carry independent INTERFACE_INCLUDE_DIRECTORIES and
+# do NOT transitively pull in each other's logical version targets.
+# Dispositions + `-R`→`-L` replacements recorded in
+# specs/068-test-binary-grouping/dispositions.md.
+add_executable(integration_pure_tests
+  fixt_cross_vocabulary.cpp
   multi_session_multi_version.cpp
 )
-add_dependencies(integration_multi_session_multi_version fixpp_codegen_generate)
-target_link_libraries(integration_multi_session_multi_version PRIVATE
+add_dependencies(integration_pure_tests fixpp_codegen_generate)
+target_link_libraries(integration_pure_tests PRIVATE
+  fixpp_dictionary
   fixpp::dict::v42
   fixpp::dict::v50sp2
-  fixpp_dictionary
   GTest::gtest
   GTest::gtest_main
 )
-target_include_directories(integration_multi_session_multi_version PRIVATE
+target_include_directories(integration_pure_tests PRIVATE
+  "${_CODEGEN_INC}"
   "${CMAKE_SOURCE_DIR}/tests"
 )
-add_test(NAME integration_multi_session_multi_version
-  COMMAND integration_multi_session_multi_version)
-set_tests_properties(integration_multi_session_multi_version PROPERTIES
-  LABELS integration)
+target_compile_definitions(integration_pure_tests PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
+)
+add_test(NAME integration_pure_tests COMMAND integration_pure_tests)
+set_tests_properties(integration_pure_tests PROPERTIES LABELS integration)

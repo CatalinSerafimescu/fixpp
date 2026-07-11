@@ -1,36 +1,6 @@
 # tests/capi/CMakeLists.txt
 find_package(GTest CONFIG REQUIRED)
 
-add_executable(capi_smoke_test capi_smoke_test.cpp)
-target_link_libraries(capi_smoke_test PRIVATE
-  fixpp_capi
-  GTest::gtest
-  GTest::gtest_main
-)
-add_test(NAME capi_smoke COMMAND capi_smoke_test)
-
-# T004 (US1) — GTest version accessor tests
-add_executable(capi_version_test version_test.cpp)
-target_link_libraries(capi_version_test PRIVATE
-  fixpp_capi
-  GTest::gtest
-  GTest::gtest_main
-)
-add_test(NAME capi_version COMMAND capi_version_test)
-
-# T009 (US2, SC-002/006) — error-surface correctness oracle: drives the 116
-# fixpp::core::error enumerators through translate() against the checked-in
-# expected_error_map.csv; FIXPP_CAPI_DATA_DIR points the test at the CSV.
-add_executable(capi_error_surface_test error_surface_test.cpp)
-target_link_libraries(capi_error_surface_test PRIVATE
-  fixpp_capi
-  GTest::gtest
-  GTest::gtest_main
-)
-target_compile_definitions(capi_error_surface_test PRIVATE
-  FIXPP_CAPI_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
-add_test(NAME capi_error_surface COMMAND capi_error_surface_test)
-
 # T015 (US2, SC-004) — occupancy-gate negative test: clean tree passes, a
 # redefined/collided published slot makes tools/check_capi_occupancy.sh fail
 # deterministically.
@@ -75,6 +45,47 @@ set(FIXPP_CAPI_FEATURE_B_INCLUDES
   "${CMAKE_SOURCE_DIR}/tests"            # support/minimal_dictionary.hpp
 )
 
+# ── 068-test-binary-grouping US2: capi_pure_tests grouped bucket (6 .cpp) ────
+# No LABELS on any member (unset before AND after — preserves `-L capi`
+# selectability exactly, since none of these 6 previously matched it). None
+# calls fixpp_engine_start() (no C-ABI Engine worker threads spawned — see
+# src/capi/capi_internal.hpp's `std::vector<std::thread> workers_`, the
+# genuinely-concurrent discriminator for this module) and none touches global
+# allocation state:
+#   - capi_smoke_test / version_test / error_surface_test: no engine at all.
+#   - config_builders_test: "Pure builder unit tests — no engine, no event
+#     loop" (file header) — only uses the dict-handle helpers from
+#     capi_loopback_support.hpp, never engine_start/session_open.
+#   - thunk_split_test: an IN-PROCESS SIGABRT trap (sigaction/sigsetjmp +
+#     siglongjmp), explicitly NOT gtest fork EXPECT_DEATH but scoped/restored
+#     per-TEST via ScopedAbortTrap RAII — safe alongside sibling tests in one
+#     process (same isolation argument the procedure grants fork-based
+#     EXPECT_DEATH). Only constructs an UNSTARTED engine/session.
+#   - abi_symbol_golden_test: a read-only `nm`-vs-golden-file + error-enum-
+#     boundary completeness check — no global mutable state, no LABEL-scoped
+#     `-L` selector to break.
+add_executable(capi_pure_tests
+  capi_smoke_test.cpp
+  version_test.cpp
+  error_surface_test.cpp
+  config_builders_test.cpp
+  thunk_split_test.cpp
+  abi_symbol_golden_test.cpp
+)
+target_link_libraries(capi_pure_tests PRIVATE
+  fixpp_capi
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(capi_pure_tests PRIVATE ${FIXPP_CAPI_FEATURE_B_INCLUDES})
+target_compile_definitions(capi_pure_tests PRIVATE
+  FIXPP_CAPI_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+  FIXPP_TEST_HOOKS
+  "FIXPP_CAPI_LIB=\"$<TARGET_FILE:fixpp_capi>\""
+  "FIXPP_CAPI_GOLDEN=\"${CMAKE_SOURCE_DIR}/tests/abi/golden/fixpp_capi_symbols.txt\""
+)
+add_test(NAME capi_pure_tests COMMAND capi_pure_tests)
+
 # T004 (US1, SC-004) — 051 error-block foundational oracle (translate re-point +
 # strerror + per-code-minor downgrade).  T022 (US5) appends live end-to-end arms
 # over loopback — uses capi_internal.hpp (check_session seam) + the loopback
@@ -98,17 +109,6 @@ target_link_libraries(capi_lifecycle_test PRIVATE
 target_include_directories(capi_lifecycle_test PRIVATE ${FIXPP_CAPI_FEATURE_B_INCLUDES})
 add_test(NAME capi_lifecycle COMMAND capi_lifecycle_test)
 
-# T012 (US1, CA-005) — exhaustive config-builder contract: per-setter null-handle
-# guards, eager validation arms (CONFIG_INVALID), enum mappings, happy paths.
-add_executable(capi_config_builders_test config_builders_test.cpp)
-target_link_libraries(capi_config_builders_test PRIVATE
-  fixpp_capi
-  GTest::gtest
-  GTest::gtest_main
-)
-target_include_directories(capi_config_builders_test PRIVATE ${FIXPP_CAPI_FEATURE_B_INCLUDES})
-add_test(NAME capi_config_builders COMMAND capi_config_builders_test)
-
 # T015/T019/T025/T031 (US1/US2/US3) — engine+session lifecycle/op REJECTION arms:
 # null-handle guards, register-before-start (FR-004/FR-011), major gate, clock /
 # double-start surfacing, eager send validation, never-established close.
@@ -120,18 +120,6 @@ target_link_libraries(capi_lifecycle_negative_test PRIVATE
 )
 target_include_directories(capi_lifecycle_negative_test PRIVATE ${FIXPP_CAPI_FEATURE_B_INCLUDES})
 add_test(NAME capi_lifecycle_negative COMMAND capi_lifecycle_negative_test)
-
-# T024 (US2, SC-006) — thunk split: in-process SIGABRT trap + construction-time
-# no-abort discipline + the steady-state send-throw seam (FIXPP_TEST_HOOKS).
-add_executable(capi_thunk_split_test thunk_split_test.cpp)
-target_link_libraries(capi_thunk_split_test PRIVATE
-  fixpp_capi
-  GTest::gtest
-  GTest::gtest_main
-)
-target_include_directories(capi_thunk_split_test PRIVATE ${FIXPP_CAPI_FEATURE_B_INCLUDES})
-target_compile_definitions(capi_thunk_split_test PRIVATE FIXPP_TEST_HOOKS)
-add_test(NAME capi_thunk_split COMMAND capi_thunk_split_test)
 
 # T028/T029/T030 (US3, SC-001/SC-008/FR-013a) — headline two-C-ABI-engine
 # plaintext round-trip with the drain-thread reply path.
@@ -370,23 +358,6 @@ if(EXISTS "${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so")
         DEPENDS capi_message_field_iteration_test
     )
 endif()
-
-# 062 T022 (Polish, FR-007/SC-004) — C-ABI symbol-set + error-enum
-# no-regression guard: 062 is a wire+codegen-internal fix and must make NO
-# C-ABI / error-enum change. Reuses the frozen golden file the CI
-# abi-golden.yml workflow enforces (shells out to `nm` on the REAL built
-# fixpp_capi archive) rather than hand-maintaining a second symbol list.
-add_executable(capi_abi_symbol_golden_test abi_symbol_golden_test.cpp)
-target_link_libraries(capi_abi_symbol_golden_test PRIVATE
-  fixpp_capi
-  GTest::gtest
-  GTest::gtest_main
-)
-target_compile_definitions(capi_abi_symbol_golden_test PRIVATE
-  "FIXPP_CAPI_LIB=\"$<TARGET_FILE:fixpp_capi>\""
-  "FIXPP_CAPI_GOLDEN=\"${CMAKE_SOURCE_DIR}/tests/abi/golden/fixpp_capi_symbols.txt\""
-)
-add_test(NAME capi_abi_symbol_golden COMMAND capi_abi_symbol_golden_test)
 
 # ── 066-dict-backed-inbound-parse T001 — C-ABI engine-loopback scaffold smoke ─
 # Compile/smoke check for capi_dict066_loopback_support.hpp (a real

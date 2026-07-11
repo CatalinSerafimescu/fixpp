@@ -1,0 +1,1832 @@
+# Disposition Ledger — 068-test-binary-grouping
+
+The FR-011 audit trail: every test `.cpp` in every processed module is recorded
+here as `grouped:<bucket>` or `standalone:<reason>`. Per-module the sum of rows
+MUST equal the module's `.cpp` count.
+
+## Census signal-set (FR-002 / Research §D3) — forces **standalone**
+
+A `.cpp` stays standalone if it matches any of these (classify by **mechanism**,
+not filename):
+
+- **allocation-counting** — in-TU global-`operator new` counter, `mallocnesia`
+  `LD_PRELOAD` gate, `alloc_guard`. Grep: `operator new` / `set_new_handler` /
+  global `alloc_count`. *(A **local** `std::pmr::memory_resource` subclass with a
+  per-instance counter passed explicitly is isolation-safe → groupable.)*
+- **OOM-injection via global mechanism** — process-wide new-handler / injection
+  toggle. *(Local failing-`pmr` passed explicitly → groupable.)*
+- **TSan-specific target** / any test carrying a **heterogeneous** per-test
+  `ENVIRONMENT` / `TSAN_OPTIONS` / suppression file. *(A homogeneous
+  `ENVIRONMENT` shared by the whole bucket may ride the grouped binary — D3.)*
+- **top-level `abort()`/`_exit()`** death (NOT gtest fork-based `EXPECT_DEATH`,
+  which groups — D3), or link-mode override.
+- **genuinely-concurrent / global-singleton-freshness** — spawns
+  `std::thread`/`std::jthread`/`std::async`, or mutates a function-local
+  `static`/process-global registry read by other `TEST`s. No reliable grep;
+  manual-review flag.
+- **per-target `target_compile_definitions` variants** of one `.cpp` (e.g.
+  `_wide` vs `_portable`).
+- **exact-set completeness gate** with a precise `-L` feature label.
+- **`ctest -R <target-name>` by name** — see the `-R` policy below.
+- **label-heterogeneous** — the sole groupable member of its label class (a
+  bucket-of-one yields no disk win → standalone; D4 label-homogeneity).
+
+**Bucket key (D4):** partition the groupable set by `(sorted link-libs, sorted
+labels)`; each partition → one `gtest_discover_tests` binary.
+
+## `-R`-by-name policy (SC-004 / Scenario-3 reconciliation)
+
+Grouping renames ctest entries from the target name (`dictionary_lookup_test`)
+to per-case `Suite.Case` (`DictionaryLookupFixture.…`). Every documented
+`ctest -R <target-name>` / `-R '^<module>_'` / `-R '<module>|…'` idiom in a
+**merged-feature** quickstart/tasks doc therefore stops resolving. A literal
+reading of SC-004 ("every `-R` resolves to the same set") is **unachievable
+under any grouping** — a module-prefix idiom like `-R '^dictionary_'` can only
+be satisfied by grouping nothing.
+
+**Policy (user decision 2026-07-10):** preserve every `ctest -L <label>`
+selection (labels re-applied at case granularity via `gtest_discover_tests
+PROPERTIES LABELS`); for each historical `-R`-by-name idiom that grouping
+breaks, record the **equivalent `-L` replacement** here — the "equivalent
+selection documented as its replacement" branch of Scenario-3. A test is kept
+standalone for `-R` reasons only when a *live* procedure (active tooling, not a
+merged-feature snapshot) selects it by exact target name.
+
+---
+
+## Module: `dictionary` (25 `.cpp`) — PILOT (US1)
+
+### Grouped
+
+**Bucket `dictionary_pure_tests`** — 15 `.cpp`, label `dictionary`, link
+`fixpp_dictionary` + `pugixml::pugixml` (union for `round_trip` /
+`reused_tag_census` raw-XML scans) + gtest:
+
+| `.cpp` | decision | odr_action |
+|---|---|---|
+| `ref_shape_test` | grouped:pure | none |
+| `xml_loader_test` | grouped:pure | none |
+| `round_trip_test` | grouped:pure (needs pugixml) | none |
+| `determinism_test` | grouped:pure | none |
+| `negative_paths_test` | grouped:pure | none |
+| `parser_error_test` | grouped:pure | none |
+| `lookup_test` | grouped:pure | none |
+| `version_profile_test` | grouped:pure | none |
+| `field_traits_test` | grouped:pure | none |
+| `version_registry_test` | grouped:pure | none |
+| `table_view_test` | grouped:pure | none |
+| `defect_a_group_context_test` | grouped:pure | none |
+| `reused_tag_census_test` | grouped:pure (needs pugixml) | none |
+| `collision_membership_guards_test` | grouped:pure | none |
+| `oom_injection_test` | grouped:pure (local failing-`pmr`, no global) | none |
+
+**Bucket `dictionary_reify_tests`** — 4 `.cpp`, label `dictionary`, link
+`fixpp_dictionary` + gtest, include `_codegen/include`, depends
+`fixpp_codegen_generate`:
+
+| `.cpp` | decision | odr_action |
+|---|---|---|
+| `reify_test` | grouped:reify | none (helpers in anon-ns) |
+| `reify_move_test` | grouped:reify | none |
+| `reify_dispatch_test` | grouped:reify (local null-`pmr` OOM) | none (helpers in anon-ns) |
+| `reify_oom_test` | grouped:reify (local failing/counting-`pmr`) | none (helpers in anon-ns) |
+
+### Standalone (6)
+
+| `.cpp` | reason |
+|---|---|
+| `pmr_allocation_test` | allocation-counting (in-TU global `operator new`) |
+| `concurrent_readers_test` | genuinely concurrent (`std::thread`) |
+| `group_context_lookup_alloc_gate_test` | alloc gate + `mallocnesia` add_test keyed by `$<TARGET_FILE:…>` (live name-selection) |
+| `reify_cross_strand_test` | TSan target (`LABELS dictionary;tsan`) + threads |
+| `reify_membership_identity_test` | label-heterogeneous (`066;dictionary;us1`) — sole groupable member of its label class → standalone (D4) |
+| `reify_membership_copy_oom_test` | allocation-counting (global `operator new`) + `066;dictionary;us1` |
+
+**Sum:** 15 + 4 grouped + 6 standalone = **25** ✓ (100% dispositioned).
+
+### `-R` replacements documented (SC-004 / Scenario-3)
+
+| historical idiom (doc) | breaks under grouping? | equivalent replacement |
+|---|---|---|
+| `-R '^dictionary_'` (002 quickstart:27) | yes (prefix — breaks under any grouping) | `-L dictionary` |
+| `-R 'dictionary\|wire\|codegen\|…'` (063 quickstart:20, tasks:26) | yes (lowercase substring vs `Dictionary…` suites) | `-L dictionary` (+ existing `-L`/`-R` for wire/codegen) |
+| `-R 'dictionary_(lookup\|negative\|xml_loader)'` (064 quickstart:28, tasks:97) | yes | `-L dictionary` |
+| `-R determinism_test` (003 quickstart:78) | yes (`Determinism.*`) | `-L dictionary` (or `-R Determinism`) |
+| `-R reify_dispatch` (057 quickstart:42) | yes (`ReifyDispatch*`) | `-L dictionary` (or `-R ReifyDispatch`) |
+| `-R 'determinism\|build_graph'` (057 quickstart:50, tasks:97) | determinism yes; `build_graph` is a codegen-module test (unaffected) | `-L dictionary` for determinism |
+| `-R '^dictionary_concurrent_readers_test$'` (002 quickstart:78) | **no** — stays standalone, name preserved | — (unchanged) |
+
+## Module: `session` (161 `.cpp`) — US2
+
+Largest module (~160 test binaries/preset); HEAVY standalone set per plan —
+classified conservatively by MECHANISM (not filename). Two whole-binary
+`add_test` buckets formed from the empty-label subset that neither spawns an
+`asio::thread_pool`/`std::thread` nor is selected by exact target name; every
+uniquely-labeled feature witness (the module carries ~76 distinct compound
+LABELS strings — 010/012/013/014/015/016/019/020/021/022/023/024/025/026/
+027/028/029/033/034/036/037/038/040/041/043/046/059/061/065/066/067/…),
+every thread_pool/std::thread-spawning test, every global-alloc-counting /
+OOM / TSan-specific / name-selected test stays standalone (D3/D4). Note:
+`conformance/` (6 `tc_*.cpp`) has its own `CMakeLists.txt` — separate module,
+out of scope here.
+
+### ODR pre-check (§3)
+
+No renames were needed. Grep census across both bucket candidate sets found:
+no own `int main(`; no duplicate `TEST(Suite,Name)`. Two apparent file-scope
+class-name collisions (`OutboundCapture` × 7, `OrderingStore` × 2) were
+verified by namespace-bound analysis to be **already** anonymous-namespace-
+scoped per-TU (internal linkage) — false positives from a naive column-0
+class/struct grep that does not track brace/namespace nesting. All free
+helper functions in the two buckets are `static`. Zero FR-012 renames.
+
+### Grouped
+
+**Bucket `session_pure_tests`** — 41 `.cpp`, no LABELS, link `fixpp_session` +
+`fixpp_mock_clock` + `fixpp_transport` + `fixpp_tls` + OpenSSL/ZLIB (union of
+member needs) + gtest, include `tests/` + `src/`, compile-defs `FIXPP_TEST_HOOKS`
++ `FIXPP_TEST_BINARY_DIR`/`FIXPP_TEST_SOURCE_DIR` + `FIXPP_TLS_FIXTURE_DIR`
+(union of member needs — harmless no-ops for members that don't reference
+them), `ENVIRONMENT`/`TIMEOUT 120` identical to every member's pre-existing
+`add_threading_test` macro defaults (FR-005 preserved exactly). Single-
+threaded `co_spawn(ioc,…)`+`ioc.run()` FSM/builder/handshake/reconnect/
+compid-binding/store-recovery witnesses — no `asio::thread_pool`/`std::thread`.
+
+| `.cpp` | decision | odr_action |
+|---|---|---|
+| `admin_builder_distinct_now_test` | grouped:pure | none |
+| `admin_emit_mixed_path_test` | grouped:pure | none |
+| `cancellation_two_phase_test` | grouped:pure | none |
+| `cfg_lifetime_safety_test` | grouped:pure | none |
+| `coverage_adversarial_test` | grouped:pure | none |
+| `durable_before_transmit_test` | grouped:pure | none |
+| `fix_time_roundtrip_test` | grouped:pure | none |
+| `fsm_matrix_witness_test` | grouped:pure | none |
+| `fsm_transition_matrix_test` | grouped:pure | none |
+| `heartbeat_testrequest_test` | grouped:pure | none |
+| `initiator_transport_throw_test` | grouped:pure | none |
+| `logon_handshake_test` | grouped:pure | none |
+| `logon_received_observability_test` | grouped:pure | none |
+| `send_path_test` | grouped:pure | none |
+| `sending_time_test` | grouped:pure | none |
+| `seqnum_gap_fatal_test` | grouped:pure | none |
+| `seqnum_t_handoff_test` | grouped:pure | none |
+| `session_reject_test` | grouped:pure | none |
+| `session_send_invalid_state_test` | grouped:pure | none |
+| `test_backpressure_drop_oldest_banned` | grouped:pure | none |
+| `test_cancellation_fromapp_to_close` | grouped:pure | none |
+| `test_cancellation_parse_to_fromapp` | grouped:pure | none |
+| `test_compid_binding_default_deny` | grouped:pure | none |
+| `test_compid_binding_mtls_fail_closed` | grouped:pure | none |
+| `test_compid_binding_principal_extraction` | grouped:pure | none |
+| `test_compid_binding_symmetric` | grouped:pure | none |
+| `test_heartbeat_cadence_8cell` | grouped:pure | none |
+| `test_inbound_sequence_reset` | grouped:pure | none |
+| `test_live_outbound_serialized` | grouped:pure | none |
+| `test_logout_timeout` | grouped:pure | none |
+| `test_reconnect_happy_path` | grouped:pure | none |
+| `test_recovery_admin_span_gapfill` | grouped:pure | none |
+| `test_recovery_store_horizon` | grouped:pure | none |
+| `test_reload_credentials_in_flight` | grouped:pure | none |
+| `test_reset_seqnum_policy_matrix` | grouped:pure | none |
+| `test_seqnum_drain_on_close` | grouped:pure | none |
+| `test_session_event_ring_overflow` | grouped:pure | none |
+| `test_session_invariant_counter_witness` | grouped:pure | none |
+| `test_session_layering` | grouped:pure | none |
+| `test_session_open_rejects_unset_security_profile` | grouped:pure | none |
+| `test_version_registry_missing_routes_to_dict_layer` | grouped:pure | none |
+
+**Bucket `session_store_tests`** — 6 `.cpp`, no LABELS, link `fixpp_session` +
+`fixpp_mock_clock` (union) + gtest, include `tests/`, compile-def
+`FIXPP_TEST_HOOKS` (union), `ENVIRONMENT` identical to `fixpp_add_store_test`'s
+default (no `TIMEOUT` — none of the 6 had one; not introduced). Store-family
+witnesses that construct no `asio::thread_pool`: three reconcile fault-double
+table-driven witnesses, the toApp store-collision provenance witness, the
+Path-B compile-time guard (build-is-the-test static_asserts), the SeqnumManager
+unit test.
+
+| `.cpp` | decision | odr_action |
+|---|---|---|
+| `seqnum_manager_test` | grouped:store | none |
+| `test_quickfix_compat_path_b_guard` | grouped:store | none |
+| `test_send_toapp_store_collision` | grouped:store | none |
+| `test_store_fail_reconcile_breadth` | grouped:store | none |
+| `test_store_fail_reconcile_outofset` | grouped:store | none |
+| `test_store_fail_reconcile_readfail` | grouped:store | none |
+
+### Standalone (114)
+
+| `.cpp` | reason |
+|---|---|
+| `engine_acceptor_failclosed_test` | label-heterogeneous (LABELS "015;us1;live_tls;acceptor;failclosed") |
+| `engine_acceptor_test` | label-heterogeneous (LABELS "015;us1;live_tls;acceptor") |
+| `engine_connect_test` | label-heterogeneous (LABELS "015;us2;live_tls;connect") |
+| `engine_firstframe_test` | label-heterogeneous (LABELS "015;us1;live_tls;firstframe;window") |
+| `engine_harness_compile_smoke_test` | label-heterogeneous (LABELS "015;foundational;harness;compile_smoke") |
+| `engine_lifecycle_test` | label-heterogeneous (LABELS "015;us3;live_tls;lifecycle") |
+| `engine_readpump_test` | label-heterogeneous (LABELS "015;us2;live_tls;readpump") |
+| `engine_seam_removal_test` | label-heterogeneous (LABELS "015;us4;compid;seam_removal") |
+| `engine_session_id_test` | label-heterogeneous (LABELS "015;foundational;session_id") |
+| `interpret_logon_overflow_test` | label-heterogeneous (LABELS "040;sc001;overflow-hardening;foundational") |
+| `logout_exchange_test` | genuinely concurrent (asio::thread_pool/std::thread) |
+| `reconnect_policy_witness_test` | label-heterogeneous (LABELS "016;us-foundational;reconnect;down-peer;watchdog") |
+| `scan_first_frame_ids_overflow_test` | label-heterogeneous (LABELS "040;us2;scan_first_frame_ids;overflow") |
+| `scan_frame_header_overflow_test` | label-heterogeneous (LABELS "040;us1;scan_frame_header;overflow") |
+| `security_profile_insecure_plain_tcp_deprecated_negative` | compile-negative harness: add_test COMMAND is `cmake --build ... --target session_security_profile_insecure_plain_deprecated_negative` with WILL_FAIL TRUE (asserts the target FAILS to compile); label-heterogeneous (LABELS "043;us2;sc005;compile_negative;friction") |
+| `session_smoke_test` | manual-review: kept standalone (raw add_executable, no TIMEOUT/ENV set; avoids introducing property drift into a bucket) |
+| `test_017_session_config_amendment` | manual-review: kept standalone (raw add_executable, no TIMEOUT/ENV set; avoids introducing property drift into a bucket) |
+| `test_019_application_compile_smoke` | label-heterogeneous (LABELS "019;foundational;compile_smoke;application") |
+| `test_019_g2_enablement_witness` | label-heterogeneous (LABELS "019;phase7;g2;witness;live_tls") |
+| `test_019_msgtype_classifier` | label-heterogeneous (LABELS "019;foundational;classifier") |
+| `test_066_admin_no_group_test` | label-heterogeneous (LABELS "066;us3") |
+| `test_066_arena_fit_test` | label-heterogeneous (LABELS "066;us3") |
+| `test_066_group_membership_red_test` | label-heterogeneous (LABELS "066;us1;red") |
+| `test_066_group_scaffold_smoke_test` | label-heterogeneous (LABELS "066;setup;scaffold") |
+| `test_066_scalar_as_group_test` | label-heterogeneous (LABELS "066;us2") |
+| `test_066_validator_on_grouped_test` | label-heterogeneous (LABELS "066;us1") |
+| `test_067_builder_failclosed` | label-heterogeneous (LABELS "067;us1;failclosed") |
+| `test_067_builder_roundtrip` | label-heterogeneous (LABELS "067;us1;roundtrip") |
+| `test_067_builder_shape_oracle` | label-heterogeneous (LABELS "067;us2;shape_oracle;golden;D;8;9;E;AS") |
+| `test_067_builder_validate` | label-heterogeneous (LABELS "067;us3;validate") |
+| `test_067_completeness` | label-heterogeneous (LABELS "067;us1;completeness") |
+| `test_acceptor_logon_sending_time` | label-heterogeneous (LABELS "038;s019;acceptor-logon-sendingtime") |
+| `test_admin_emit_toadmin_coverage` | label-heterogeneous (LABELS "036;us1;us2;us3;bmr;toadmin_coverage;toapp") |
+| `test_application_business_reject` | label-heterogeneous (LABELS "019;us1;business_reject;application") |
+| `test_application_engine_send` | genuinely concurrent (asio::thread_pool/std::thread); label-heterogeneous (LABELS "019;gate_b;engine_send;application;live_tls") |
+| `test_application_inbound` | label-heterogeneous (LABELS "019;us1;inbound;application") |
+| `test_application_lifecycle` | label-heterogeneous (LABELS "019;us3;lifecycle;application") |
+| `test_application_outbound` | label-heterogeneous (LABELS "019;us2;outbound;application") |
+| `test_application_strand` | label-heterogeneous (LABELS "019;phase6;strand;drain;application") |
+| `test_application_throw` | label-heterogeneous (LABELS "019;phase6;throw;application") |
+| `test_business_messages_build` | genuinely concurrent (asio::thread_pool/std::thread); label-heterogeneous (LABELS "020;us1;build;builder") |
+| `test_business_messages_read` | label-heterogeneous (LABELS "020;us1;read;flyweight") |
+| `test_business_messages_roundtrip` | genuinely concurrent (asio::thread_pool/std::thread); label-heterogeneous (LABELS "020;us1;roundtrip;send_path;inv1;inv5;inv7;inv8") |
+| `test_clock_injection_corpus` | genuinely concurrent (asio::thread_pool/std::thread) |
+| `test_compid_binding_seam` | label-heterogeneous (LABELS "014;us2;compid;seam") |
+| `test_credential_store_redaction` | genuinely concurrent (asio::thread_pool/std::thread); $<TARGET_FILE:> name-selected by credential_store_redaction_mallocnesia sidecar |
+| `test_credentials_rotated_emit` | label-heterogeneous (LABELS "014;us3;live_tls;credentials_rotated") |
+| `test_direct_executor_reentrancy` | genuinely concurrent (asio::thread_pool/std::thread) |
+| `test_engine_clock_gate` | label-heterogeneous (LABELS "041;t017;t018;us3;clock-gate;session") |
+| `test_engine_reader_snapshot_publish_acquire` | genuinely concurrent (asio::thread_pool/std::thread); label-heterogeneous (LABELS "session;015;046;nfr017;publish_acquire") |
+| `test_engine_session_strand` | genuinely concurrent (asio::thread_pool/std::thread); label-heterogeneous (LABELS "023;session;control_strand;tsan") |
+| `test_executor_compat` | genuinely concurrent (asio::thread_pool/std::thread) |
+| `test_exemplar_build_failclosed` | label-heterogeneous (LABELS "061;us2;failclosed;D;8;9;E;AS") |
+| `test_exemplar_read` | label-heterogeneous (LABELS "061;us3;read") |
+| `test_exemplar_roundtrip` | label-heterogeneous (LABELS "061;us2;roundtrip;golden;E") |
+| `test_file_store_cancellation` | genuinely concurrent (asio::thread_pool/std::thread) |
+| `test_file_store_compid_validation` | genuinely concurrent (asio::thread_pool/std::thread) |
+| `test_file_store_concurrent_tsan` | genuinely concurrent (asio::thread_pool/std::thread) |
+| `test_file_store_coverage_uplift` | genuinely concurrent (asio::thread_pool/std::thread) |
+| `test_file_store_crash_survival` | genuinely concurrent (asio::thread_pool/std::thread); heterogeneous TSan ENV override (die_after_fork=0, fork+thread_pool child) |
+| `test_file_store_flush_for_session_close` | genuinely concurrent (asio::thread_pool/std::thread) |
+| `test_file_store_offload_thread` | genuinely concurrent (asio::thread_pool/std::thread) |
+| `test_file_store_torn_write` | genuinely concurrent (asio::thread_pool/std::thread) |
+| `test_fixt_credentials` | label-heterogeneous (LABELS "033;s022;fixt-credentials;foundational") |
+| `test_fixt_logon_establishment` | label-heterogeneous (LABELS "033;s020;s025;fixt-logon-establishment;foundational") |
+| `test_heartbeat_under_mock_clock` | genuinely concurrent (asio::thread_pool/std::thread) |
+| `test_inbound_poss_dup_tolerance` | label-heterogeneous (LABELS "021;us1;possdup;tolerance;inv1;inv2;inv5") |
+| `test_inbound_poss_dup_validation` | label-heterogeneous (LABELS "021;us2;possdup;validation;armc;armd;arme") |
+| `test_inbound_poss_resend` | label-heterogeneous (LABELS "022;us1;possresend") |
+| `test_interpret_logon_encrypt_method` | label-heterogeneous (LABELS "043;fr009;xii7;encrypt-method") |
+| `test_live_identity_binding` | label-heterogeneous (LABELS "014;us2;live_tls;identity_binding") |
+| `test_memory_store_capacity` | genuinely concurrent (asio::thread_pool/std::thread) |
+| `test_memory_store_reset_during_retrieve` | genuinely concurrent (asio::thread_pool/std::thread) |
+| `test_memory_store_round_trip` | genuinely concurrent (asio::thread_pool/std::thread) |
+| `test_memory_store_zero_allocator_calls` | genuinely concurrent (asio::thread_pool/std::thread) |
+| `test_next_expected_msgseqnum` | label-heterogeneous (LABELS "027;s031;next-expected-msgseqnum;foundational") |
+| `test_outbound_store_post_commit` | genuinely concurrent (asio::thread_pool/std::thread) |
+| `test_persistent_seqnum_hydrate` | label-heterogeneous (LABELS "029;s042;persistent-seqnum-hydrate;setup") |
+| `test_quickfix_compat_cfg_loader` | genuinely concurrent (asio::thread_pool/std::thread) |
+| `test_reconnect_backoff_cap` | label-heterogeneous (LABELS "014;us1;reconnect") |
+| `test_reconnect_cancel_mid_handshake` | label-heterogeneous (LABELS "014;us1;reconnect;cancel") |
+| `test_reconnect_live_happy_path` | label-heterogeneous (LABELS "014;us1;live_tls;reconnect") |
+| `test_refresh_on_logon` | label-heterogeneous (LABELS "025;s018;refresh-on-logon;setup") |
+| `test_resend_reply_possdup` | label-heterogeneous (LABELS "037;us1;possdup;gapfill") |
+| `test_reset_on_lifecycle` | label-heterogeneous (LABELS "024;s017;reset-knobs") |
+| `test_retrieve_visitor` | genuinely concurrent (asio::thread_pool/std::thread) |
+| `test_retrieve_with_gaps` | genuinely concurrent (asio::thread_pool/std::thread) |
+| `test_send_allow_pos_dup_strip` | label-heterogeneous (LABELS "022;us2;allowposdup;strip") |
+| `test_sending_time_precision` | label-heterogeneous (LABELS "026;s039;sending-time-precision") |
+| `test_session_forced_fallback_link` | label-heterogeneous (LABELS "session;046;nfr017;fallback_link") |
+| `test_session_fsm_via_mock_transport` | label-heterogeneous (LABELS "session;012;us4;seam6;mock") |
+| `test_session_no_implicit_insecure_plain_tcp` | label-heterogeneous (LABELS "043;us2;sc002;no_implicit_default") |
+| `test_session_plaintext_authz` | label-heterogeneous (LABELS "043;t008;us1;plaintext;authz") |
+| `test_session_plaintext_factory_mismatch` | label-heterogeneous (LABELS "043;t021;t022;us3;sc003;fr008;mismatch") |
+| `test_session_plaintext_reconnect` | label-heterogeneous (LABELS "043;us1;plaintext;reconnect") |
+| `test_session_plaintext_roundtrip` | label-heterogeneous (LABELS "043;t007;us1;plaintext;roundtrip;live_plain") |
+| `test_store_cancellation_contract` | genuinely concurrent (asio::thread_pool/std::thread) |
+| `test_store_fail_closed_persistent` | genuinely concurrent (asio::thread_pool/std::thread) |
+| `test_store_fail_open_volatile` | genuinely concurrent (asio::thread_pool/std::thread) |
+| `test_store_fail_reconcile` | genuinely concurrent (asio::thread_pool/std::thread) |
+| `test_store_fifo_fair` | genuinely concurrent (asio::thread_pool/std::thread) |
+| `test_store_pmr_poison_retrieve` | genuinely concurrent (asio::thread_pool/std::thread) |
+| `test_store_reset` | genuinely concurrent (asio::thread_pool/std::thread) |
+| `test_store_reset_crash_cut` | genuinely concurrent (asio::thread_pool/std::thread); heterogeneous TSan ENV override (die_after_fork=0, fork+thread_pool child) |
+| `test_store_seqnum_out_of_order` | genuinely concurrent (asio::thread_pool/std::thread) |
+| `test_store_shutdown_ordering` | genuinely concurrent (asio::thread_pool/std::thread) |
+| `test_strand_serialisation` | genuinely concurrent (asio::thread_pool/std::thread) |
+| `test_test_request_id_cross_session_race` | genuinely concurrent (asio::thread_pool/std::thread) |
+| `test_trace_context_accessors` | manual-review: kept standalone (raw add_executable, no TIMEOUT/ENV set; avoids introducing property drift into a bucket) |
+| `test_validate_gate_default_off` | label-heterogeneous (LABELS "041;t015;t016;us2;validation-gate;default-off;session") |
+| `test_validate_gate_inbound` | label-heterogeneous (LABELS "041;t012;t014;validation-gate;inbound;foundational") |
+| `test_validate_gate_logon_arm` | label-heterogeneous (LABELS "041;t013;t014;validation-gate;logon-arm;foundational") |
+| `test_validation_compat_toggles` | label-heterogeneous (LABELS "028;s040;s041;validation-compat-toggles;setup") |
+| `test_validation_gate_config` | label-heterogeneous (LABELS "041;t003;t004;validation-gate;foundational") |
+
+**Sum:** 41 + 6 grouped + 114 standalone = **161** ✓ (100% dispositioned).
+
+### `-R`/`-L` selectability (SC-004 / Scenario-3)
+
+`ctest -L session` selects 8 tests both before and after (unchanged —
+`-L <regex>` substring-matches any label containing "session"; none of the
+47 grouped `.cpp` previously carried any label, and the two new bucket
+targets carry none either, so the pre-existing 8-test set is untouched).
+Every uniquely-labeled feature `-L <feature>` selector (spot-checked: `-L 019`
+→ 12, `-L 066` → 15, `-L 034` → 1) is unaffected since those tests stayed
+standalone. The one live name-selection idiom in this module —
+`$<TARGET_FILE:credential_store_redaction>` consumed by the
+`credential_store_redaction_mallocnesia` sidecar — is preserved by keeping
+`credential_store_redaction` standalone under its exact original name.
+No historical `-R`-by-target-name idiom targeted any of the 47 grouped names
+(they were `add_threading_test`/`fixpp_add_store_test` seam registrations, not
+named in any quickstart/tasks `-R` selector); nothing to replace.
+
+## Module: `interop` (31 `.cpp`) — US2
+
+Session-layer interop gate (016-interop-harness). Uses the module's own
+`fixpp_add_interop_test(NAME... GROUP... LABEL... SOURCES...)` helper, which
+already accepts multi-value `SOURCES` — grouped buckets are built by passing
+multiple `.cpp` to one call (no hand-rolled `add_executable`), which
+preserves the `interop_<happy|thorny|parity>` aggregation-target wiring
+(`add_dependencies`) the helper performs per NAME. `interop_cell_results_schema_check`
+is a `pytest` invocation over `cell_results_schema_check_test.py` (US4 T028),
+not a `.cpp`/gtest binary — outside grouping scope, unchanged (mirrors how
+the `session` ledger notes `conformance/` as a separate module).
+
+**Key discriminator (conservative, per orchestrator note + "when unsure →
+standalone"):** every TLS-linked cell (`happy/*`, TLS `thorny/*` 021/022,
+`test_business_message_interop.cpp`) builds a real
+`fixpp::transport::TransportFactory` (`make_interop_tls_factory`) and calls
+`Engine::start()`, which binds/connects a **real TCP socket** (localhost,
+env-selected or OS-assigned port) — kept standalone even where two TLS cells
+share an identical LABEL (`hp_fix44_testrequest_echo_test` /
+`hp_fix44_reject_invalid_admin_test`, both `"interop;016;interop-happy;us1"`).
+Non-TLS `parity/*` and non-TLS `thorny/*` cells use `ParityAcceptorFixture`
+(`parity/parity_support.hpp`) or an equivalent local fixture (`qfj-626`) that
+overrides `transport_send` with an in-process capture lambda and pumps a
+private `asio::io_context` via `ioc.run_for()+ioc.restart()` on the calling
+thread only — no real socket, no `std::thread`/`thread_pool` anywhere in the
+module (grepped) — isolation-safe, same pattern as the already-grouped
+`session_pure_tests`/`session_store_tests` precedent.
+
+### ODR pre-check (§3)
+
+No `int main(` in any `.cpp`. No duplicate `TEST`/`TEST_F`/`TEST_P`
+`Suite.Name` across the module. `thorny/{framing,recovery,reject}/*.cpp` each
+declare a local `using Thorny*Fixture = fixpp::interop::parity::ParityAcceptorFixture;`
+type alias — a compile-time-only alias with no linkable symbol, safe to
+repeat verbatim across TUs linked into the same bucket (not an ODR
+violation). Free non-`static` helpers found in bucket sources
+(`any_reject_value_incorrect` in `inbound_sequencereset_arms_test.cpp`;
+`frame_from_body`/`any_frame_contains`/`frame_has` in
+`fix_tc_coverage_gaps_test.cpp`) are wrapped in an anonymous namespace
+(internal linkage) — verified no name collides with any other bucket member
+(`qfj-626`'s helpers are already `static`). Zero FR-012 renames.
+
+### Grouped
+
+**Bucket `interop_parity_us3_tests`** — 4 `.cpp`, label
+`"interop;016;interop-parity;us3"`, link `interop_support` + `fixpp_mock_clock`
++ gtest (no TLS):
+
+| `.cpp` | decision | odr_action |
+|---|---|---|
+| `parity/resend_abort_on_failing_write_test.cpp` | grouped:parity_us3 | none |
+| `parity/inbound_sequencereset_arms_test.cpp` | grouped:parity_us3 | none (anon-ns helper) |
+| `parity/replay_subsumes_reorder_queue_test.cpp` | grouped:parity_us3 | none |
+| `parity/fix_tc_coverage_gaps_test.cpp` | grouped:parity_us3 | none (anon-ns helpers) |
+
+**Bucket `interop_thorny_recovery_us2_tests`** — 3 `.cpp`, label
+`"interop;016;interop-thorny;us2;recovery"`, link `interop_support` +
+`fixpp_mock_clock` + gtest (no TLS):
+
+| `.cpp` | decision | odr_action |
+|---|---|---|
+| `thorny/recovery/qfj-750-logout-seqnum-mismatch_test.cpp` | grouped:thorny_recovery_us2 | none |
+| `thorny/recovery/qfj-271-sequencereset-large-gapfill_test.cpp` | grouped:thorny_recovery_us2 | none |
+| `thorny/recovery/qfj-626-resend-recomputes-checksum_test.cpp` | grouped:thorny_recovery_us2 | none (local static helpers) |
+
+**Bucket `interop_thorny_framing_us2_tests`** — 2 `.cpp`, label
+`"interop;016;interop-thorny;us2;framing"`, link `interop_support` +
+`fixpp_mock_clock` + gtest (no TLS):
+
+| `.cpp` | decision | odr_action |
+|---|---|---|
+| `thorny/framing/qfj-603-unsupported-beginstring_test.cpp` | grouped:thorny_framing_us2 | none |
+| `thorny/framing/qfj-721-non-logon-first-message_test.cpp` | grouped:thorny_framing_us2 | none |
+
+### Standalone (22)
+
+| `.cpp` | reason |
+|---|---|
+| `support_smoke_test.cpp` | label-heterogeneous (sole `"interop;016;interop-support"`) |
+| `happy/hp_fix44_logon_hb_logout_test.cpp` | real-socket TLS cell (label-heterogeneous, sole `us1;smoke`) |
+| `happy/hp_fixt50sp2_logon_hb_logout_test.cpp` | real-socket TLS cell (label-heterogeneous, sole `033;us3;fixt;fix50sp2`) |
+| `happy/hp_down_peer_stop_watchdog_test.cpp` | real-socket TLS cell (label-heterogeneous, sole `us1;down-peer;watchdog`) |
+| `happy/hp_fix44_testrequest_echo_test.cpp` | real-socket TLS cell — conservative standalone despite shared label `"interop;016;interop-happy;us1"` with the next row (bind/connect real localhost port; orchestrator note + "when unsure → standalone") |
+| `happy/hp_fix44_reject_invalid_admin_test.cpp` | real-socket TLS cell — same shared-label pair, same conservative reason |
+| `happy/hp_fix44_seqnum_recovery_test.cpp` | real-socket TLS cell (label-heterogeneous, sole `us1;us3`) |
+| `happy/hp_fix44_recovery_outbound_answer_test.cpp` | real-socket TLS cell (label-heterogeneous, sole `018;us3`) |
+| `happy/hp_fix44_idle_heartbeat_cadence_test.cpp` | real-socket TLS cell (label-heterogeneous, sole `018;us2`) |
+| `happy/hp_fix44_disconnect_reconnect_noreset_test.cpp` | real-socket TLS cell (label-heterogeneous, sole `us1;reconnect`) |
+| `happy/hp_fix44_reset_on_logon_test.cpp` (024) | real-socket TLS cell (label-heterogeneous, sole `024;...;reset-on-logon`) |
+| `happy/hp_fix44_received_reset_test.cpp` (030) | real-socket TLS cell (label-heterogeneous, sole `030;...;received-reset`) |
+| `happy/hp_fix44_nanos_sendingtime_test.cpp` (026) | real-socket TLS cell (label-heterogeneous, sole `026;...;nanos`) |
+| `thorny/reject/qfj-557-generatereject-advances-seqnum_test.cpp` | label-heterogeneous — sole member of `"...;reject"` (D4 bucket-of-one) |
+| `thorny/recovery/021-poss-dup-replay-survives_test.cpp` | real-socket TLS cell (label-heterogeneous, sole `021;us1;...;poss-dup`) |
+| `thorny/recovery/021-poss-dup-malformed-dup-rejected_test.cpp` | real-socket TLS cell (label-heterogeneous, sole `021;us2;...;poss-dup`) |
+| `thorny/framing/022-allow-pos-dup-strip-send_test.cpp` | real-socket TLS cell (label-heterogeneous, sole `022;...;allow-pos-dup`) |
+| `thorny/recovery/022-poss-resend-deliver_test.cpp` | real-socket TLS cell (label-heterogeneous, sole `022;...;poss-resend`) |
+| `test_business_message_interop.cpp` | real-socket TLS cell + codegen-gated + explicit `TIMEOUT 30` (label-heterogeneous, sole `020;us2;us3;business-message`) |
+| `happy/hp_fix44_next_expected_test.cpp` (027) | real-socket TLS cell (label-heterogeneous, sole `027;...;next-expected-msgseqnum`) |
+| `happy/hp_fix44_validation_compat_test.cpp` (028) | real-socket TLS cell (label-heterogeneous, sole `028;...;validation-compat;...`) |
+| `happy/hp_fix44_restart_resume_test.cpp` (029) | real-socket TLS cell (label-heterogeneous, sole `029;...;restart-resume`) |
+
+**Sum:** 4 + 3 + 2 grouped (9) + 22 standalone = **31** ✓ (100% dispositioned).
+
+### `-R`/`-L` selectability (SC-004 / Scenario-3)
+
+Every `ctest -L <feature>` selector is preserved: the 3 new bucket targets
+carry the exact same LABEL string every member previously carried
+individually (D4 requires bucket label-homogeneity), so `-L interop`,
+`-L 016`, `-L interop-parity`, `-L interop-thorny`, `-L us2`, `-L us3`,
+`-L recovery`, `-L framing` all select the same logical case set as before
+(spot-checked via `ctest -L interop`: 26 entries, 100% pass, `Label Time
+Summary` shows `016 → 12 tests`, `us3 → 5 tests`, `recovery → 4 tests`,
+`framing → 2 tests` — all consistent with the pre-grouping per-cell counts).
+No historical `-R`-by-target-name idiom targeted any of the 9 grouped names.
+
+## Module: `capi` (28 `.cpp`/`.c`) — US2
+
+C-ABI test suite (050/051/052/062/065/066 layers). Key discriminator: the
+C-ABI `fixpp_engine` (`src/capi/capi_internal.hpp`) owns
+`std::vector<std::thread> workers_` — calling `fixpp_engine_start()` on a
+validly-configured engine spawns **real background worker threads**
+(genuinely concurrent, forces standalone). Grepped every `.cpp` for
+`fixpp_engine_start`; every file that calls it (successfully) stays
+standalone. `capi_occupancy_negative` / `capi_reentrancy_negative` are bash
+script invocations (`tools/test_capi_{occupancy,reentrancy}_negative.sh`),
+not `.cpp`/gtest binaries — outside grouping scope, unchanged.
+
+### ODR pre-check (§3)
+
+No `int main(` in the bucket's 6 `.cpp` (the 2 `.c` files DO have their own
+`main()` but were never gtest binaries — they don't link `GTest::gtest_main`
+at all, so they were never groupable candidates in the first place). No
+duplicate `TEST`/`TEST_F` `Suite.Name`. `error_surface_test.cpp`'s
+`load_csv()`/`symbol_to_code()` and `thunk_split_test.cpp`'s
+`abort_trap_handler`/`g_abort_jmp`/`g_abort_caught`/`ScopedAbortTrap`/
+`open_unstarted_session` are all wrapped in an anonymous namespace (internal
+linkage) — verified via bracket-matched `namespace { … }` spans, not name
+collisions with any other bucket member. Zero FR-012 renames.
+
+### Grouped
+
+**Bucket `capi_pure_tests`** — 6 `.cpp`, no LABELS (unset before AND after —
+none of the 6 previously carried any label, so `-L capi` selection is
+unaffected), link `fixpp_capi` + gtest, include `FIXPP_CAPI_FEATURE_B_INCLUDES`
+(harmless additive for the 4 members that don't need it), compile-defs
+`FIXPP_CAPI_DATA_DIR` + `FIXPP_TEST_HOOKS` + `FIXPP_CAPI_LIB` + `FIXPP_CAPI_GOLDEN`
+(union — each a no-op for the members that don't reference it):
+
+| `.cpp` | decision | odr_action |
+|---|---|---|
+| `capi_smoke_test.cpp` | grouped:pure | none |
+| `version_test.cpp` | grouped:pure | none |
+| `error_surface_test.cpp` | grouped:pure | none (anon-ns helpers) |
+| `config_builders_test.cpp` | grouped:pure ("Pure builder unit tests — no engine, no event loop" per file header; never calls `fixpp_engine_start`) | none |
+| `thunk_split_test.cpp` | grouped:pure (in-process SIGABRT trap via sigaction/sigsetjmp+siglongjmp, explicitly NOT gtest fork `EXPECT_DEATH` but scoped/restored per-`TEST` via `ScopedAbortTrap` RAII — same cross-test isolation argument the procedure grants fork-based death tests; only constructs an UNSTARTED engine/session) | none (anon-ns helpers) |
+| `abi_symbol_golden_test.cpp` | grouped:pure (read-only `nm`-vs-golden-file + error-enum-boundary check; no global mutable state; no `-L` selector to break) | none |
+
+### Standalone (22)
+
+| `.cpp`/`.c` | reason |
+|---|---|
+| `capi_version_smoke.c` | pure-C compile-smoke gate — not a gtest binary (no `GTest::gtest_main` link, has its own `main()`) |
+| `handles_compile_test.c` | pure-C compile-smoke gate — same reason |
+| `error_block_test.cpp` | calls `fixpp_engine_start()` (real engine worker threads) |
+| `lifecycle_test.cpp` | calls `fixpp_engine_start()` (real engine worker threads) |
+| `lifecycle_negative_test.cpp` | calls `fixpp_engine_start()` successfully in 3 of its REJECTION arms (real engine worker threads) |
+| `send_recv_test.cpp` | real two-C-ABI-engine loopback + explicit drain **thread** + ASan-conditional `WILL_FAIL` split into 2 `--gtest_filter`-selected ctest entries (live-name selection + heterogeneous ASan-only property) |
+| `recv_alloc_guard_test.cpp` | `$<TARGET_FILE:capi_recv_alloc_guard_test>` live name-selection (mallocnesia sidecar) |
+| `error_live_test.cpp` | calls `fixpp_engine_start()`; label-heterogeneous sole `capi;050` |
+| `message_read_test.cpp` | `$<TARGET_FILE:capi_message_read_test>` live name-selection (mallocnesia sidecar) |
+| `message_write_test.cpp` | `$<TARGET_FILE:capi_message_write_test>` live name-selection (mallocnesia sidecar); calls `fixpp_engine_start()` |
+| `msg_clone_cross_strand_test.cpp` | calls `fixpp_engine_start()` (real engine worker threads; cross-strand concurrency witness) |
+| `toapp_callback_test.cpp` | calls `fixpp_engine_start()` (real engine worker threads) |
+| `toapp_alloc_guard_test.cpp` | `$<TARGET_FILE:capi_toapp_alloc_guard_test>` live name-selection (mallocnesia sidecar) |
+| `public_roundtrip_test.cpp` | calls `fixpp_engine_start()` (real two-engine TCP loopback round-trip) |
+| `message_field_iteration_test.cpp` | `$<TARGET_FILE:capi_message_field_iteration_test>` live name-selection (mallocnesia sidecar) + explicit `TIMEOUT 120` (heterogeneous property) |
+| `dictionary_load_test.cpp` | genuinely concurrent (`std::thread` — "sequential + concurrent double-destroy (TSan)" per file header) |
+| `dict066_group_loopback_smoke_test.cpp` | calls `fixpp_engine_start()`; label-heterogeneous sole `066;setup;scaffold;capi` |
+| `dict066_group_membership_red_test.cpp` | calls `fixpp_engine_start()`; label-heterogeneous sole `066;us1;red;capi` |
+| `dict066_nested_membership_red_test.cpp` | calls `fixpp_engine_start()`; label-heterogeneous sole `065;us1;red;capi`; explicit `TIMEOUT 60` |
+| `dict066_scalar_as_group_test.cpp` | calls `fixpp_engine_start()`; label-heterogeneous sole `066;us2;capi` |
+| `dict066_clone_identity_test.cpp` | calls `fixpp_engine_start()`; shares label `066;us1;capi` with the next row but real-engine-thread concern dominates |
+| `dict066_clone_membership_copy_oom_test.cpp` | **global** `operator new`/`operator new[]` override (process-wide allocation-counting seam) — forces standalone regardless of the shared `066;us1;capi` label (D3 global-alloc-counting rule) |
+
+**Sum:** 6 grouped + 22 standalone = **28** ✓ (100% dispositioned).
+
+### `-R`/`-L` selectability (SC-004 / Scenario-3)
+
+`ctest -R '^capi'` selects 31 entries both before (28 `.cpp`/`.c`-derived +
+1 occupancy + 1 reentrancy + up to 5 mallocnesia sidecars, gated on
+`libmallocnesia.so`) and after (23 executables — 6 folded into
+`capi_pure_tests` + 22 unaffected standalone/script/sidecar entries — same
+31 total once the 6 collapse to 1). `ctest -L capi` is unaffected: none of
+the 6 grouped `.cpp` previously carried the `capi` label (verified — the
+bucket carries none either), so the pre-existing `-L capi` set (20 entries,
+spot-checked in the post-grouping run) is untouched. No historical
+`-R`-by-target-name idiom targeted any of the 6 grouped names (`capi_smoke`,
+`capi_version`, `capi_error_surface`, `capi_config_builders`,
+`capi_thunk_split`, `capi_abi_symbol_golden` were never referenced by name in
+a quickstart/tasks `-R` selector).
+
+## Module: `config` (9 `.cpp`) — US2
+
+044-toml-session-config / 045-config-logging TOML loader tests. Every `.cpp`
+carries exactly one of two LABELS strings — `"config;044"` (5 members) or
+`"config;045"` (4 members) — a clean D4 partition. No thread/global-alloc/
+`int main(`/duplicate-`Suite.Name` anywhere in the module (grepped all 9).
+`-R '^config'` matches nothing (the module's target names never started with
+`config_` before this change) — `-L config` is the only selector that ever
+worked here, per the orchestrator's module note; unaffected by grouping
+(still 044 → 1 entry, 045 → 1 entry, both label-preserved).
+
+### ODR pre-check (§3)
+
+No `int main(` in any `.cpp`. No duplicate `TEST`/`TEST_F`/`TEST_P`
+`Suite.Name` across the 9. Every file wraps its content in an anonymous
+namespace; the only free functions found textually outside that span
+(`test_load_logger_negative.cpp`: `neg_fixture`, `full_load`,
+`parse_logger_inline`) are already declared `static` (internal linkage).
+Zero FR-012 renames.
+
+### Grouped
+
+**Bucket `config_044_tests`** — 5 `.cpp`, label `"config;044"`, link
+`fixpp::config_toml` + `fixpp::session` + `fixpp::core` + `fixpp::tls` +
+`fixpp::dictionary` + `fixpp::transport` + OpenSSL/ZLIB + gtest (union —
+`test_quickfix_parity_table.cpp` needs only gtest per its own "Pure data
+test — no loader link needed" comment; the extra libs are a harmless no-op
+for it):
+
+| `.cpp` | decision | odr_action |
+|---|---|---|
+| `test_load_happy_path.cpp` | grouped:044 | none |
+| `test_load_negative_battery.cpp` | grouped:044 | none |
+| `test_load_selectors.cpp` | grouped:044 | none |
+| `test_load_multisession_defaults.cpp` | grouped:044 | none |
+| `test_quickfix_parity_table.cpp` | grouped:044 | none |
+
+**Bucket `config_045_tests`** — 4 `.cpp`, label `"config;045"`, link the
+044-bucket set + `fixpp::log` + `tomlplusplus::tomlplusplus` (+
+`fixpp::log_otlp`/`FIXPP_CONFIG_HAS_OTLP` when `TARGET fixpp::log_otlp`
+exists) + gtest, include `src/config` (private headers; needed by 3 of the 4
+white-box members, harmless additive for `test_load_deferred_surface.cpp`):
+
+| `.cpp` | decision | odr_action |
+|---|---|---|
+| `test_load_logger.cpp` | grouped:045 | none |
+| `test_load_logger_negative.cpp` | grouped:045 | none (3 free helpers already `static`) |
+| `test_load_logger_overrides.cpp` | grouped:045 | none |
+| `test_load_deferred_surface.cpp` | grouped:045 | none |
+
+### Standalone (0)
+
+None — the entire module groups into 2 buckets.
+
+**Sum:** 5 + 4 grouped = **9** ✓ (100% dispositioned).
+
+### `-R`/`-L` selectability (SC-004 / Scenario-3)
+
+`ctest -L config` selects 3 entries post-grouping (`config_044_tests`,
+`config_045_tests`, plus the pre-existing unrelated
+`transport_asio_plain_transport_config` — labeled `"config"` for a different
+reason, untouched by this module); `-L 044` and `-L 045` each select exactly
+1 entry, matching the pre-grouping 5-entry/4-entry sets collapsed into their
+respective buckets. No historical `-R`-by-target-name idiom targeted any of
+the 9 grouped names (`-R '^config'` was already documented as matching
+nothing per the module's own note).
+
+## Module: `sync` (46 `.cpp`) — US2
+
+async_mutex concurrency-primitive test suite. `linux-clang-tsan` is this
+module's **mandatory non-waivable gate** — the discriminator here is
+genuinely-concurrent-vs-single-threaded, NOT label (the `add_sync_test`
+helper sets no LABELS at all). Under TSan's default halt-on-first-race, one
+race in a grouped process would abort before every OTHER test in that bucket
+runs, silently blinding the gate for the rest — the same "binary-wide
+WILL_FAIL masks a real finding" hazard the capi module's `send_recv` split
+already defends against. So: **spawns a real OS thread → standalone,
+regardless of link-deps/ENV homogeneity** (grepped
+`std::thread|std::jthread|std::async|thread_pool` across all 46; every hit
+stays standalone). Single-threaded-coroutine seams (driven entirely by
+`ioc.run()`/`co_spawn` on the calling thread — the `session_pure_tests`/
+`interop` `ParityAcceptorFixture` precedent) are the groupable set.
+
+The shared `SYNC_FIXTURES_DIR`/`SYNC_GREP_GATE_SCRIPT` `ENVIRONMENT` the
+`add_sync_test` helper sets on every registration is homogeneous across the
+whole family (orchestrator note) and rides the grouped bucket via
+`set_tests_properties(... ENVIRONMENT ...)`; almost none of the 29 grouped
+`.cpp` actually reference those two env vars (only the CI-grep-gate driver
+does, and it stays standalone for its own *extended*, heterogeneous
+`ENVIRONMENT`), so it is a harmless no-op for the rest.
+
+Verified per the advisor's flagged hazard: `async_mutex`'s `waiter_pool_storage_`
+(`include/fixpp/core/sync/async_mutex.hpp:355`) is a **per-instance** member
+(`std::array<waiter_pool_slot, waiter_pool_capacity_>`), not a process-global/
+`static` pool — each test constructs its own `async_mutex mtx;`, so no
+cross-test pool-state leakage is possible inside the grouped bucket.
+
+### ODR pre-check (§3)
+
+No `int main(` anywhere. No duplicate `TEST`/`TEST_F`/`TEST_P` `Suite.Name`
+across all 46 `.cpp` (grouped + standalone). All 29 grouped `.cpp` wrap their
+content in an anonymous namespace; the sole file-scope symbol found outside
+that span is `fixpp_consumer_contract_link_probe()` in
+`test_consumer_contract_compile.cpp` (non-`static`, `[[maybe_unused]]`,
+never executed — a deliberate link-completeness probe) — verified unique
+(grepped) across the bucket, so no rename needed (FR-012 only requires a
+rename on an actual name collision). `g_constinit_mutex` in the same file is
+inside its anonymous namespace (internal linkage). Zero FR-012 renames.
+
+### Grouped
+
+**Bucket `sync_pure_tests`** — 29 `.cpp`, no LABELS, link `fixpp_sync` +
+gtest, include `tests/` + `SYNC_FIXTURES_DIR`, `ENVIRONMENT`
+`SYNC_FIXTURES_DIR=...;SYNC_GREP_GATE_SCRIPT=...` (the `add_sync_test`
+baseline, unioned onto the bucket):
+
+| `.cpp` | decision | odr_action |
+|---|---|---|
+| `test_uncontended_latency.cpp` | grouped:pure | none |
+| `test_contended_latency.cpp` | grouped:pure | none |
+| `test_fifo_fairness.cpp` | grouped:pure | none |
+| `test_fifo_across_cycles.cpp` | grouped:pure | none |
+| `test_contention_stress.cpp` | grouped:pure | none |
+| `test_executor_compat.cpp` | grouped:pure | none |
+| `test_dispatch_vs_post.cpp` | grouped:pure | none |
+| `test_cross_strand_acquire.cpp` | grouped:pure | none |
+| `test_guard_destructive_move.cpp` | grouped:pure | none |
+| `test_unlock_reaper_splice.cpp` | grouped:pure | none |
+| `test_residual_cancel_graceful.cpp` | grouped:pure | none |
+| `test_tsan_clean.cpp` | grouped:pure (coroutine-only; "TSan-clean" is a PRESET property, not a per-test toggle) | none |
+| `test_asan_clean.cpp` | grouped:pure (same as above, ASan) | none |
+| `test_halo_firing.cpp` | grouped:pure | none |
+| `test_pmr_fallback.cpp` | grouped:pure | none |
+| `test_slot_allocator_storage.cpp` | grouped:pure | none |
+| `test_cancel_and_drain.cpp` | grouped:pure | none |
+| `test_cancel_and_drain_concurrent.cpp` | grouped:pure (name notwithstanding — coroutine-interleaved, no OS thread) | none |
+| `test_drain_latch_holder_lifecycle.cpp` | grouped:pure | none |
+| `test_in_flight_acquirer_coverage.cpp` | grouped:pure | none |
+| `test_drain_awaitable_cancellation.cpp` | grouped:pure | none |
+| `test_drain_strand_local_reap.cpp` | grouped:pure | none |
+| `test_drain_immediate_destroy_after_reap.cpp` | grouped:pure | none |
+| `test_drain_reentrant_during_active.cpp` | grouped:pure | none |
+| `test_drain_onstrand_cancel_during_reap.cpp` | grouped:pure | none |
+| `test_drain_predrain_holder.cpp` | grouped:pure | none |
+| `test_async_mutex_layout_golden.cpp` | grouped:pure (pure `sizeof`/`alignof` static assertions) | none |
+| `test_consumer_contract_compile.cpp` | grouped:pure (compile-only static_assert/SFINAE TU) | none (`fixpp_consumer_contract_link_probe` verified unique) |
+| `test_atomic_shared_ptr_primitive.cpp` | grouped:pure (single-threaded correctness of the primitive type) | none |
+
+### Standalone (17)
+
+| `.cpp` | reason |
+|---|---|
+| `test_async_mutex_aba_interleave.cpp` | zero-`fixpp_sync`-linkage ODR isolation (`FIXPP_ASYNC_MUTEX_TEST_SEAM` alters class layout) + genuinely concurrent + documented-legitimate pre-fix TSan race |
+| `test_async_mutex_terminal_cas_recursive_unlock.cpp` | zero-linkage ODR isolation + genuinely concurrent + `TIMEOUT 60` |
+| `test_async_mutex_acquire_livelock.cpp` | zero-linkage ODR isolation + genuinely concurrent + `TIMEOUT 60` |
+| `test_async_mutex_chain_walk_cas_loss.cpp` | zero-linkage ODR isolation + genuinely concurrent + `TIMEOUT 60` |
+| `test_pool_exhaustion_reuse.cpp` | zero-linkage ODR isolation (per-target `FIXPP_ASYNC_MUTEX_TEST_SEAM` compile-def) |
+| `test_am_p3_impossible_state_traps.cpp` | zero-linkage ODR isolation + fork-based `EXPECT_DEATH` |
+| `test_async_mutex_mt_hammer.cpp` | genuinely concurrent (OS-thread hammer) + heterogeneous `TIMEOUT` (120/300 under coverage) + conditional compile-def |
+| `test_result_write_race.cpp` | genuinely concurrent (`std::thread`) |
+| `test_cancellation_mid_wait.cpp` | genuinely concurrent (`std::thread`) |
+| `test_race_cancel_pre_drain.cpp` | genuinely concurrent (`std::thread`) |
+| `test_race_multi_cancel.cpp` | genuinely concurrent (`std::thread`) |
+| `test_race_cancel_during_resume.cpp` | genuinely concurrent (`std::thread`) |
+| `test_destructor_release_death.cpp` | fork-based `EXPECT_DEATH` + release-linkage override |
+| `test_drain_destroy_inflight_mt.cpp` | genuinely concurrent (cross-executor `std::thread`) |
+| `test_arm64_weak_memory.cpp` | genuinely concurrent (`std::thread`) + heterogeneous `TIMEOUT 120` |
+| `test_atomic_shared_ptr_concurrency.cpp` | genuinely concurrent (`std::thread`) |
+| `test_no_std_mutex_ci_gate.cpp` | heterogeneous `ENVIRONMENT` (extends the baseline with `SYNC_GATE_INC`/`SYNC_ASIO_INC`, unique to this seam) |
+
+**Sum:** 29 grouped + 17 standalone = **46** ✓ (100% dispositioned). Two
+bash-script `add_test` entries (`check_no_std_mutex_corpus`,
+`census_no_raw_atomic_shared_ptr` + its mutation twin) plus the
+`FIXPP_LIBCXX_LANE`-gated `check_no_std_mutex_corpus_libcxx`/
+`check_libcxx_active` are not `.cpp`/gtest binaries — outside grouping scope,
+unchanged.
+
+### `-R`/`-L` selectability (SC-004 / Scenario-3)
+
+`ctest -R '^sync_'` selects 19 entries post-grouping (1 grouped bucket + 17
+standalone `sync_*`-prefixed tests, keyed exactly as before, + the
+pre-existing unrelated `sync_alloc_guard_test_mallocnesia`) versus 46
+`sync_*` + 1 unrelated pre-grouping — same case SET, fewer *entries*, per
+the procedure's whole-binary-`add_test` design. No LABELS existed on any
+`add_sync_test` registration before or after, so no `-L` selector is
+affected. No historical `-R`-by-target-name idiom targeted any of the 29
+grouped names (the module's own header documents `-R '^sync_'` as the only
+supported selector, and that prefix is preserved verbatim by every
+standalone entry; the grouped bucket's own name, `sync_pure_tests`, also
+matches `^sync_`).
+
+## Module: `transport` (20 `.cpp`) — US2 — 0 grouped (audited, no viable bucket)
+
+**Expectation-gap note:** the module brief predicted "rich per-test labels
+— keep buckets strictly label-homogeneous; likely several small
+label-buckets." The full audit found **zero** duplicate-label pairs — see
+the census below — so the outcome is 0 grouped / 20 standalone, not an
+omission. `CMakeLists.txt` is **unchanged** (no CMake edit this module);
+this section documents the full per-file audit and the ctest baseline run.
+
+### Census
+
+17 of the 20 `.cpp` carry a `LABELS` property via `set_tests_properties`;
+every one of those 17 strings is **unique** (verified: `sort | uniq -c` over
+the `LABELS "..."` lines emits count `1` for each of the 17 — no two
+`transport_*` tests share a label class, so every labeled test is a D4
+bucket-of-one → standalone regardless of mechanism).
+
+The remaining 3 `.cpp` carry **no** `LABELS` at all (a shared empty-label
+class, the only possible D4 partition in this module):
+`transport_smoke_test.cpp`, `test_transport_factory_paths.cpp`,
+`test_asio_tls_transport_error_paths.cpp`. Grepped all 3 for socket/thread
+usage:
+
+- `test_transport_factory_paths.cpp` and `test_asio_tls_transport_error_paths.cpp`
+  both bind real `asio::ip::tcp::acceptor`s on `127.0.0.1:0` and
+  `async_connect()` real client sockets (`MakeAcceptedAdoptsRealAcceptedSocketAndHandshakes`,
+  `ConnectRefusedMapsToTransportConnectRefused`,
+  `HandshakeTimeoutMapsToTransportHandshakeTimeout`, etc.) — real-socket
+  live-I/O tests, forced standalone per the orchestrator's explicit
+  "Socket/port/thread tests stay standalone" module note (same conservative
+  rule applied to interop's TLS live cells).
+- `transport_smoke_test.cpp` (pure `static_assert` slot-range check, no
+  socket/thread) is the lone survivor of the no-label class — a bucket-of-1
+  yields no disk win (D4), so it stays standalone too. No CMake change
+  needed for it.
+
+Grepped all 20 `.cpp` for `std::thread|std::jthread|std::async|thread_pool`:
+2 hits (`test_listener_acceptor.cpp`, `test_transport_factory_cert_source_publish_acquire.cpp`)
+— both already forced standalone by unique-label D4 (and the latter also
+carries a heterogeneous `ENVIRONMENT` `TSAN_OPTIONS=...` override — the
+procedure's explicit "heterogeneous per-test ... TSAN_OPTIONS ..." STANDALONE
+criterion). `test_tls_validation_failed_taxonomy.cpp` links `GTest::gtest`
+**without** `GTest::gtest_main` (i.e. brings its own `main()`) — reinforcing
+that it could never have joined a `gtest_main`-linked bucket even absent its
+unique label. No duplicate `TEST`/`TEST_F`/`TEST_P` `Suite.Name`; no global
+`operator new`/`set_new_handler` anywhere in the module.
+
+### Grouped
+
+None.
+
+### Standalone (20)
+
+| `.cpp` | reason |
+|---|---|
+| `transport_smoke_test.cpp` | no-label class, but the sole survivor after the other 2 no-label members were disqualified by the real-socket rule — bucket-of-1, no win (D4) |
+| `test_tls_handshake_pinset_rotation.cpp` | label-heterogeneous, sole `012;us1;seam7;tls` |
+| `test_durable_before_transmit_ordering.cpp` | label-heterogeneous, sole `012;us1;seam8` |
+| `test_compid_tls_identity_binding.cpp` | label-heterogeneous, sole `012;us1;seam9;tls` |
+| `test_inflight_exclusivity.cpp` | label-heterogeneous, sole `012;us1;seam15;gate-b-witness;rc-e` |
+| `test_reconnect_policy_schedule.cpp` | label-heterogeneous, sole `012;us2;seam13;reconnect` |
+| `test_backpressure.cpp` | label-heterogeneous, sole `012;us4;seam10;mock` |
+| `test_listener_acceptor.cpp` | label-heterogeneous, sole `012;us3;seam14;gate-b-witness;rc-a`; also genuinely concurrent (`std::thread`) and real-socket loopback |
+| `test_cancellation_propagation.cpp` | label-heterogeneous, sole `012;us1;seam5` |
+| `test_listener_accept_error_cancel.cpp` | label-heterogeneous, sole `012;us3;seam14;accept-error;cancel` |
+| `test_transport_factory_paths.cpp` | no-label class, but real-socket (`tcp::acceptor`/`async_connect` on `127.0.0.1`) — forced standalone per module's socket/port rule |
+| `test_load_credentials_seam13_witness.cpp` | label-heterogeneous, sole `012;gate-b-witness;seam13;tls` |
+| `test_close_truncated_mapping.cpp` | label-heterogeneous, sole `012;gate-b-witness;rc-d;sc006` |
+| `test_tls_validation_failed_taxonomy.cpp` | label-heterogeneous, sole `013;us3;tls;taxonomy;gate-b-witness`; explicit `TIMEOUT 60`; own `main()` (no `GTest::gtest_main` link) |
+| `test_verify_peer_pmr_oom.cpp` | label-heterogeneous, sole `012;gate-b-witness;rc-c;pmr-oom;tls` |
+| `test_asio_tls_transport_error_paths.cpp` | no-label class, but real-socket (`tcp::acceptor`/`async_connect` on `127.0.0.1`) — forced standalone per module's socket/port rule |
+| `test_asio_plain_transport.cpp` | label-heterogeneous, sole `043;us1;sc001;plain`; explicit `TIMEOUT 60`; real-socket loopback (live-I/O witness) |
+| `test_asio_plain_transport_config.cpp` | label-heterogeneous, sole `043;us1;sc008;plain;config`; explicit `TIMEOUT 60`; real-socket loopback |
+| `test_transport_factory_cert_source_publish_acquire.cpp` | label-heterogeneous, sole `046;nfr017;publish_acquire`; genuinely concurrent (`std::thread` writer/reader); heterogeneous `ENVIRONMENT` `TSAN_OPTIONS=...`; explicit `TIMEOUT 30` |
+| `test_transport_forced_fallback_link.cpp` | label-heterogeneous, sole `046;nfr017;fallback_link` |
+
+**Sum:** 0 grouped + 20 standalone = **20** ✓ (100% dispositioned).
+
+### `-R`/`-L` selectability (SC-004 / Scenario-3)
+
+No change — `CMakeLists.txt` is byte-identical to pre-068. `ctest -L
+transport` baseline run (post-068, unchanged file): 20/20 pass, matching the
+20 `.cpp` census 1:1 (`Label Time Summary` shows every `012`/`013`/`043`/`046`
+sub-label at its pre-existing count). No `-R`-by-target-name idiom applies
+(nothing changed).
+
+## Module: `core` (25 `.cpp`) — US2
+
+Two `gtest_discover_tests` binaries (`fixpp_core_tests`, `fixpp_capi_tests`)
+predate 068 and already grouped their member `.cpp` at the *per-case*
+granularity — the pattern superseded by the procedure's whole-binary
+`add_test` (per-case discovery = 5.77× serial ctest regression, per
+IMPLEMENTATION-PROCEDURE.md). Converted both to whole-binary `add_test(NAME
+<t> COMMAND <t>)`; removed `include(GoogleTest)` (dead after the conversion —
+nothing else in this file used `gtest_discover_tests`). Neither target
+carried any LABELS before the conversion, so none were lost. The pre-existing
+standalone `core_smoke_test.cpp` (also no LABELS, identical link-deps —
+`fixpp_core` + gtest — to `fixpp_core_tests`) was folded into the
+`fixpp_core_tests` bucket as the "remaining standalone-but-groupable pure
+core test" per the module brief; its separate `add_executable`/
+`gtest_discover_tests` registration was removed.
+
+### ODR pre-check (§3)
+
+No `int main(` in any of the 8 `fixpp_core_tests` sources or the 3
+`fixpp_capi_tests` sources. No duplicate `TEST(Suite,Name)` across either
+bucket (verified: `CoreSmoke`, `DecimalParse`, `DecimalFormat`,
+`DecimalCompare`, `DecimalRoundtrip`, `DecimalCrossTraits`, `DecimalAlias`,
+`DecimalPredicates`/`DecimalTrapThrow`/`DecimalToPod`/`DecimalFromPod` suites
+in `fixpp_core_tests`; `DecimalCABILayout`/`DecimalCABIChecked`,
+`DecimalCAPIErrorPaths`, `DecimalReservedTolerance` in `fixpp_capi_tests` —
+all unique prefixes, no overlap). `decimal_cross_traits_test.cpp` opens
+`namespace fixpp::core::test { struct decimal_wide {...}; }` and injects an
+explicit `decimal_traits<test::decimal_wide>` specialization at namespace
+scope (not `static`/anon-ns) — safe because `decimal_wide` is a type defined
+only in this TU (no other bucket member names or specializes it), so no ODR
+collision. `decimal_parse_test.cpp`'s `parse()`,
+`decimal_format_test.cpp`'s `fmt()`, and
+`decimal_roundtrip_property_test.cpp`'s `check_roundtrip()` are all inside
+anonymous namespaces (internal linkage) — no collision. Shared header
+`tests/support/mock_decimal_traits.hpp` (used only by
+`decimal_cross_traits_test.cpp` in this module) is `#pragma once` +
+header-only. Zero FR-012 renames.
+
+### Grouped
+
+**Bucket `fixpp_core_tests`** — 8 `.cpp` (converted `gtest_discover_tests` →
+whole-binary `add_test`; `core_smoke_test.cpp` folded in), no LABELS, link
+`fixpp_core` + gtest, include `tests/support` (needed by
+`decimal_cross_traits_test.cpp`; harmless additive for the other 7):
+
+| `.cpp` | decision | odr_action |
+|---|---|---|
+| `core_smoke_test` | grouped:pure (folded in from standalone `gtest_discover_tests`) | none |
+| `decimal_parse_test` | grouped:pure (gtest_discover→add_test) | none (anon-ns `parse()`) |
+| `decimal_format_test` | grouped:pure (gtest_discover→add_test) | none (anon-ns `fmt()`) |
+| `decimal_compare_test` | grouped:pure (gtest_discover→add_test) | none |
+| `decimal_roundtrip_property_test` | grouped:pure (gtest_discover→add_test) | none (anon-ns `check_roundtrip()`) |
+| `decimal_cross_traits_test` | grouped:pure (gtest_discover→add_test) | none (TU-local `decimal_wide` specialization) |
+| `decimal_alias_test` | grouped:pure (gtest_discover→add_test) | none |
+| `decimal_predicates_test` | grouped:pure (gtest_discover→add_test) | none |
+
+**Bucket `fixpp_capi_tests`** — 3 `.cpp` (converted `gtest_discover_tests` →
+whole-binary `add_test`), no LABELS, link `fixpp_capi` + gtest:
+
+| `.cpp` | decision | odr_action |
+|---|---|---|
+| `decimal_capi_layout_test` | grouped:pure (gtest_discover→add_test) | none |
+| `decimal_capi_error_test` | grouped:pure (gtest_discover→add_test) | none |
+| `decimal_reserved_tolerance_test` | grouped:pure (gtest_discover→add_test) | none |
+
+### Standalone (14)
+
+| `.cpp` | reason |
+|---|---|
+| `test_session_executor_round_trip` (`threading_session_executor_round_trip`) | threading_* seam — kept standalone per module brief (isolation-sensitive TSan-suppressed seam family) |
+| `test_mock_clock_determinism` (`threading_mock_clock_determinism`) | threading_* seam, per-test `TSAN_OPTIONS` ENV via `add_threading_core_test` |
+| `test_sleep_cancel_race` (`threading_sleep_cancel_race`) | threading_* seam (TSan+ASan), per-test `TSAN_OPTIONS` ENV |
+| `test_engine_shutdown_order` (`threading_engine_shutdown_order`) | threading_* seam, per-test `TSAN_OPTIONS` ENV |
+| `test_third_party_clock_conformance` (`threading_third_party_clock_conformance`) | threading_* seam, per-test `TSAN_OPTIONS` ENV |
+| `test_trace_context_resume` (`threading_trace_context_resume`) | threading_* seam, per-test `TSAN_OPTIONS` ENV |
+| `test_session_local_lifetime` (`threading_session_local_lifetime`) | threading_* seam (TSan), per-test `TSAN_OPTIONS` ENV |
+| `test_session_executor_accessor_survives_erasure` (`threading_session_executor_accessor_survives_erasure`) | threading_* seam, per-test `TSAN_OPTIONS` ENV |
+| `test_trace_context_engine_fallback` (`threading_trace_context_engine_fallback`) | threading_* seam, per-test `TSAN_OPTIONS` ENV |
+| `test_017_error_completeness` (`error_017_completeness`) | exact-set completeness gate |
+| `test_019_error_completeness` (`error_019_completeness`) | exact-set completeness gate, label-heterogeneous (`019;foundational;error_slots`) |
+| `test_020_error_completeness` (`error_020_completeness`) | exact-set completeness gate, label-heterogeneous (`020;foundational;error_slots`) |
+| `decimal_compare_diff_oracle_test` | live `ctest -R decimal_compare_diff_oracle` name-selection idiom (own executable, not `gtest_discover_tests`, by design per its own header comment) |
+| `decimal_mul_u64_wide_test` | per-`-D` compile variants of one `.cpp` (`decimal_mul_u64_wide` / `decimal_mul_u64_wide_portable`, `FIXPP_DECIMAL_FORCE_PORTABLE_MUL`) — counted once (1 `.cpp` file, 2 targets) |
+
+**Sum:** 8 + 3 grouped (11) + 14 standalone = **25** ✓ (100% dispositioned).
+
+### `-R`/`-L` selectability (SC-004 / Scenario-3)
+
+Neither `fixpp_core_tests` nor `fixpp_capi_tests` (nor the folded-in
+`core_smoke_test`) ever carried a `LABELS` property, so no `-L` selector is
+affected. `gtest_discover_tests` previously registered these 11 `.cpp` as
+84 + 30 = 114 individually-addressable `ctest -R <Suite.Case>` entries (spot-
+verified via `--gtest_list_tests`: `fixpp_core_tests` lists 84 cases,
+`fixpp_capi_tests` 30) — under whole-binary `add_test` those per-case `-R`
+selectors no longer resolve as separate ctest entries (the same expected
+Scenario-3 tradeoff as every other grouped bucket in this ledger); the
+equivalent replacement is running the 2 named binaries directly
+(`ctest -R '^fixpp_core_tests$'` / `^fixpp_capi_tests$'`) or via
+`--gtest_filter` against the binary. No pre-existing `-L`/`-R`-by-target-name
+idiom in any quickstart/tasks doc targeted individual cases inside these two
+binaries (they were always referenced as `fixpp_core_tests`/
+`fixpp_capi_tests` at the module level). `threading_*`'s 9 standalone targets,
+the 3 completeness gates, and the 2 `decimal_mul_u64_wide*`/
+`decimal_compare_diff_oracle` live-name idioms are all unaffected (unchanged
+target names/properties).
+
+## Module: `otel` (6 `.cpp`) — US2
+
+None of the 6 carry a `LABELS` property. Two are gated `if(TARGET
+opentelemetry-cpp::api)`, three are additionally guarded (same `if`), one
+(`otel_smoke_test`) is unconditional. Key discriminator applied per-file:
+real-socket HTTP server (fixed **or** ephemeral port — same conservative
+rule the `transport`/`interop` modules already established: a `PrometheusExporter`
+binding a real civetweb listener on `127.0.0.1:0` is still a real socket)
+and genuinely-concurrent (`std::thread`) force standalone; `fixpp::session::Engine`
+driven by a single-threaded `engine.start()` + `ioc.run()` on the calling
+thread (no real socket, no OS thread) is the same isolation-safe pattern
+already established by `session_pure_tests`/`interop`'s `ParityAcceptorFixture`
+precedent → groupable.
+
+### ODR pre-check (§3)
+
+No `int main(` in either grouped file. No duplicate `TEST`/`TEST_F` `Suite.Name`
+between `test_engine_close_teardown.cpp` (`EngineCloseTeardown`) and
+`test_session_spans_full.cpp` (`SessionSpansFullTest`, `TracerProviderE3`-family
+absent from this file). `test_engine_close_teardown.cpp`'s `CountingSpanExporter`/
+`SpySink`/`SlowFlushSink` are inside an anonymous namespace (internal linkage).
+`test_session_spans_full.cpp`'s `SessionSpansFullTest` fixture class and its
+`static find_span`/`get_latency_ns` helpers are file-scope (non-`static`
+class, `static` methods) but unique — no collision with any anon-ns symbol
+in the other member. Neither file calls `opentelemetry::trace::Provider::
+SetTracerProvider`/`metrics::Provider::SetMeterProvider` (grepped module-wide,
+zero hits) — no process-global OTel provider-registry mutation, so no
+cross-test state leakage risk inside the bucket. Zero FR-012 renames.
+
+### Grouped
+
+**Bucket `otel_e2_spans_tests`** — 2 `.cpp`, no LABELS, gated
+`if(TARGET opentelemetry-cpp::api)`, link `fixpp_otel` + `fixpp_session` +
+`fixpp_mock_clock` + `opentelemetry-cpp::api/trace/metrics` +
+`opentelemetry-cpp::exporter_in_memory` + the direct
+`opentelemetry_exporter_in_memory` static-lib `find_library` fallback (needed
+by `test_session_spans_full.cpp`; harmless additive for the other member) +
+`asio::asio` + gtest (union of both members' pre-existing deps):
+
+| `.cpp` | decision | odr_action |
+|---|---|---|
+| `test_engine_close_teardown` | grouped:e2_spans (single-threaded `engine.start()`+`ioc.run()`, no real socket — same pattern as `session_pure_tests`) | none (anon-ns helpers) |
+| `test_session_spans_full` | grouped:e2_spans (no thread, no socket) | none (unique fixture/helper names) |
+
+### Standalone (4)
+
+| `.cpp` | reason |
+|---|---|
+| `otel_smoke_test` | bucket-of-1 — sole member of the unconditional (no `opentelemetry-cpp::api` guard) build class; no other unconditional otel test to union with (D4, no win) |
+| `test_dual_metric_export` | real-socket: binds a fixed-port (`:9464`) civetweb HTTP server + performs a live `GET` scrape (FR-017/SC-005); port-collision-sensitive by its own header comment |
+| `test_exporters` | real-socket: `PrometheusExporter` binds a real civetweb listener on `127.0.0.1:0` (ephemeral port) — conservative standalone per the transport/interop real-socket precedent, even though the port is OS-assigned |
+| `test_session_spans` | genuinely concurrent (`std::thread worker{...}` in `ParseChildOnDifferentThreadParentsCorrectly`, line 175) |
+
+**Sum:** 2 grouped + 4 standalone = **6** ✓ (100% dispositioned).
+
+### `-R`/`-L` selectability (SC-004 / Scenario-3)
+
+None of the 6 `.cpp` ever carried a `LABELS` property, so no `-L` selector is
+affected. No historical `-R`-by-target-name idiom targeted `test_engine_close_teardown`
+or `test_session_spans_full` (their ctest names were `e2_engine_close_teardown`
+and `ts12_session_spans_full` respectively — neither referenced in any
+quickstart/tasks `-R` selector); both collapse into the single
+`otel_e2_spans_tests` entry (`ctest -R '^otel_e2_spans_tests$'` runs all 13
+cases in one process — 4 from E2 + 9 from TS-12-full, verified via
+`--gtest_list_tests`). The 4 standalone targets keep their exact pre-existing
+ctest names (`ts11_dual_metric_export`, `otel_smoke`, `otel_exporters`,
+`ts12_session_spans`) — unaffected.
+
+## Module: `wire` (34 `.cpp`) — US2
+
+004-wire-codec test suite. The `add_wire_test(name src...)` helper (already
+multi-value `SOURCES`-capable, same shape as `interop`'s
+`fixpp_add_interop_test`) sets a **homogeneous** `ENVIRONMENT
+FIXPP_WIRE_CONFORMANCE_DIR=...` on every registration and no `LABELS` at all
+across the full 34-file census (grepped `LABELS` in `CMakeLists.txt` — zero
+hits) — no D4 label partitioning needed; buckets are keyed purely on
+link-deps / conditional-guard / compile-def. Key discriminator: fork-based
+`EXPECT_DEATH` groups (D3) — `view_test.cpp`/`lifetime_trap_test.cpp`; a
+*local* `std::pmr::memory_resource` counting subclass groups —
+`three_arena_pinning_test.cpp`'s `counting_resource` (its
+`DISABLED_ZeroGlobalNewAcrossParseToFromApp` case, never run by default, is
+the only place a *global* new/delete shim is even discussed, and it isn't
+implemented in this file); `test_body_builder.cpp`'s **actual** file-scope
+`void* operator new(std::size_t)` / `operator new[]` override (lines 83/92)
+is a *global* allocation-counting mechanism (not a local pmr resource) — the
+one true D3 standalone in this module.
+
+### ODR pre-check (§3)
+
+No `int main(` in any of the 34 `.cpp`. Full `TEST`/`TEST_F`/`TEST_P`
+`Suite.Name` census (219 cases) has zero duplicates module-wide (`sort |
+uniq -d` empty). An initial naive column-0 free-function grep flagged
+apparent collisions (`make_checksum_field`/`make_frame`/`append_checksum_field`
+repeated across `accessor_smoke_test.cpp`, `message_view_membership_copy_test.cpp`,
+`validator_production_table_view_test.cpp`, `checksum_bodylength_corruption_test.cpp`,
+`framer_partial_read_test.cpp`, `parser_error_path_test.cpp`,
+`validator_type_check_test.cpp`) — verified false positives by checking each
+file for `namespace {`: every one of the 28 `wire_pure_tests` members (and
+both `wire_dict_tests` members) wraps its content in an anonymous namespace
+(internal linkage), so the repeated names never collide across TUs (same
+"naive grep, brace-nesting blind" false-positive class the `session` ledger
+already documented). `wire_smoke_test.cpp` has no anon-namespace wrapper but
+contains only `TEST(WireSmoke, Compiles)` — no free symbols to collide.
+`nested_group_slices_cache_test.cpp` has two separate anon-namespace blocks
+(still internal linkage, no issue). Zero FR-012 renames.
+
+### Grouped
+
+**Bucket `wire_pure_tests`** — 28 `.cpp`, no LABELS, link `fixpp_wire` +
+gtest, include `tests/`, homogeneous `ENVIRONMENT
+FIXPP_WIRE_CONFORMANCE_DIR=<tests/wire/conformance>` (the `add_wire_test`
+baseline — a harmless no-op for `wire_smoke_test.cpp`, the only member that
+doesn't reference it):
+
+| `.cpp` | decision | odr_action |
+|---|---|---|
+| `wire_smoke_test` | grouped:pure (former standalone R6 smoke, folded in — same link-deps, no LABELS) | none |
+| `view_test` | grouped:pure (fork-based `EXPECT_DEATH`, D3 groupable) | none (anon-ns) |
+| `conformance/conformance_test` | grouped:pure | none (anon-ns) |
+| `framer_partial_read_test` | grouped:pure | none (anon-ns) |
+| `checksum_bodylength_corruption_test` | grouped:pure | none (anon-ns) |
+| `parser_index_test` | grouped:pure | none (anon-ns) |
+| `parser_iter_test` | grouped:pure | none (anon-ns) |
+| `offset_table_test` | grouped:pure | none (anon-ns) |
+| `lifetime_trap_test` | grouped:pure (fork-based `EXPECT_DEATH`, D3 groupable) | none (anon-ns) |
+| `unknown_fields_test` | grouped:pure | none (anon-ns) |
+| `three_arena_pinning_test` | grouped:pure (local `counting_resource` pmr subclass; the global-new `DISABLED_...` case never runs) | none (anon-ns) |
+| `noexcept_trap_test` | grouped:pure | none (anon-ns) |
+| `round_trip_property_test` | grouped:pure | none (anon-ns) |
+| `validator_domain_test` | grouped:pure | none (anon-ns) |
+| `validator_per_version_test` | grouped:pure | none (anon-ns) |
+| `writer_error_path_test` | grouped:pure | none (anon-ns) |
+| `framer_error_path_test` | grouped:pure | none (anon-ns) |
+| `parser_error_path_test` | grouped:pure | none (anon-ns) |
+| `validator_type_check_test` | grouped:pure | none (anon-ns) |
+| `offset_table_error_path_test` | grouped:pure | none (anon-ns) |
+| `accessor_smoke_test` | grouped:pure | none (anon-ns) |
+| `tag_scan_test` | grouped:pure | none (anon-ns) |
+| `hostile_input_hardening_test` | grouped:pure | none (anon-ns) |
+| `offset_table_overflow_test` | grouped:pure | none (anon-ns) |
+| `parser_overflow_test` | grouped:pure | none (anon-ns) |
+| `group_slice_trailing_soh_test` | grouped:pure | none (anon-ns) |
+| `nested_group_slices_cache_test` | grouped:pure | none (2 anon-ns blocks) |
+| `nested_group_extent_test` | grouped:pure | none (anon-ns) |
+
+**Bucket `wire_codegen_tests`** — 3 `.cpp`, no LABELS, link `fixpp_wire` +
+gtest (unconditional target creation, matching the pre-068 per-`.cpp`
+behavior exactly), homogeneous `ENVIRONMENT` (`add_wire_test` baseline),
+`if(TARGET fixpp_codegen_generate)`-gated `add_dependencies` + generated
+include dir + `fixpp_dictionary` link (FR-007 conditional block preserved):
+
+| `.cpp` | decision | odr_action |
+|---|---|---|
+| `repeating_group_equivalence_test` | grouped:codegen | none (anon-ns) |
+| `cutover_2b_gated_test` | grouped:codegen | none (anon-ns) |
+| `toplevel_read_regression_test` | grouped:codegen | none (anon-ns) |
+
+**Bucket `wire_dict_tests`** — 2 `.cpp`, no LABELS, link `fixpp_wire` +
+`fixpp_dictionary` + gtest, include `tests/`, compile-def
+`FIXPP_DICT_DATA_DIR` (pre-existing on `validator_production_table_view_test`
+only; unioned onto the bucket as a harmless no-op — neither member actually
+references the macro, both use inline-XML `XmlLoader::load_from_string`):
+
+| `.cpp` | decision | odr_action |
+|---|---|---|
+| `validator_production_table_view_test` | grouped:dict | none (anon-ns) |
+| `message_view_membership_copy_test` | grouped:dict | none (anon-ns) |
+
+### Standalone (1)
+
+| `.cpp` | reason |
+|---|---|
+| `test_body_builder` (`wire_body_builder_test`) | global allocation-counting: in-TU `void* operator new(std::size_t)` / `operator new[]` override (D3) |
+
+**Sum:** 28 + 3 + 2 grouped (33) + 1 standalone = **34** ✓ (100% dispositioned).
+
+### `-R`/`-L` selectability (SC-004 / Scenario-3)
+
+No `.cpp` in this module ever carried a `LABELS` property, so no `-L`
+selector is affected (module-level `ctest -L wire` never existed). The
+quickstart-documented `ctest -R '^wire_'` idiom still selects the full
+module: every grouped bucket's ctest NAME (`wire_pure_tests`,
+`wire_codegen_tests`, `wire_dict_tests`) and the sole standalone
+(`wire_body_builder_test`) all match the `^wire_` prefix, same as every
+pre-068 per-`.cpp` target name — verified via the post-grouping `ctest -R
+'^wire_'` run: 6 entries pass (the 4 from this module + 2 pre-existing
+unrelated `wire_alloc_guard_test`/`wire_alloc_guard_test_mallocnesia`
+sidecars from `tests/alloc_guard/`, untouched). `--gtest_list_tests` spot
+check: `wire_pure_tests` lists 230 cases (28 files' worth, including the
+31-case parameterized conformance corpus, confirmed to still resolve
+`FIXPP_WIRE_CONFORMANCE_DIR` correctly via the bucket's `ENVIRONMENT`),
+`wire_codegen_tests` 6, `wire_dict_tests` 7. No historical `-R`-by-target-name
+idiom targeted any of the 33 grouped names individually (all referenced only
+via the `^wire_` prefix per the module's own header comment).
+
+## Module: `tls` (23 `.cpp`) — US2
+
+011-tls-policy test suite. The `fixpp_add_tls_test(NAME... SOURCES...)`
+helper (already multi-value `SOURCES`-capable) sets `LABELS "tls;011"` on
+every registration by default — a clean D4 label-homogeneous partition for
+the 14 members that never override it. A few registrations override with
+more specific compound labels (`046;nfr017;publish_acquire`,
+`046;nfr017;fallback_link`, `compile_negative`, `alloc_guard`) — those are
+label-heterogeneous and/or bucket-of-1 (D4), consistent with the
+`transport` module's identical `046;nfr017;fallback_link` precedent for
+`test_tls_forced_fallback_link.cpp`. Key discriminator: real OS-thread
+spawn (`std::thread`/`asio::thread_pool`) forces standalone regardless of
+label; a *local* `std::pmr::monotonic_buffer_resource` with
+`null_memory_resource()` upstream (the two PMR-failure witnesses) is
+isolation-safe (D3 groupable) — same rule already applied to `dictionary`'s
+`oom_injection_test`/`reify_oom_test`. `test_load_credentials_cancellation.cpp`'s
+`asio::bind_cancellation_slot`/`asio::use_future` usage is single-threaded
+(`asio::io_context ioc; ... ioc.run(); ... fut.get();` on the calling thread
+only, verified — same pattern as `otel`'s `test_engine_close_teardown`/
+`session_pure_tests`/`interop`'s `ParityAcceptorFixture`) — groupable, not
+genuinely concurrent.
+
+### ODR pre-check (§3)
+
+No `int main(` in any of the 14 grouped `.cpp` (the 2 compile-negative
+sources — `cipher_policy_banned_negative.cpp`,
+`security_profile_deprecated_negative.cpp` — DO have their own `main()`,
+confirming they were never groupable candidates: `EXCLUDE_FROM_ALL` +
+`WILL_FAIL`-driven `cmake --build --target` invocations, not linked against
+`gtest_main`). Full `TEST`/`TEST_F`/`TEST_P` `Suite.Name` census across the
+14-file bucket (100 cases) has zero duplicates. 12 of the 14 wrap their
+content in an anonymous namespace; the remaining 2
+(`test_cipher_allow_list_static_assert.cpp`, `test_certificate_lifetimebound.cpp`)
+have no file-scope free functions/globals at all — `test_certificate_lifetimebound.cpp`'s
+`inline_stub` class is declared *inside* a `TEST` function body (function-local,
+no linkable symbol) — no collision risk. Zero FR-012 renames.
+
+### Grouped
+
+**Bucket `tls_pure_tests`** — 14 `.cpp`, label `"tls;011"` (unmodified
+`fixpp_add_tls_test` default), link `fixpp::tls` + `OpenSSL::Crypto/SSL` +
+`ZLIB::ZLIB` + gtest, compile-def `FIXPP_TLS_FIXTURE_DIR` (union — pre-existing
+on 4 of the 14, harmless no-op for the other 10):
+
+| `.cpp` | decision | odr_action |
+|---|---|---|
+| `test_pinset_single_thread_ordering` | grouped:pure | none (anon-ns) |
+| `test_pinset_add_then_remove_deterministic` | grouped:pure | none (anon-ns) |
+| `test_pinset_snapshot_outlives_pinset` | grouped:pure | none (anon-ns) |
+| `test_pinset_per_counterparty_sharing` | grouped:pure | none (anon-ns) |
+| `test_pinset_add_pmr_fail` | grouped:pure (local `monotonic_buffer_resource`+`null_memory_resource`, no global new) | none (anon-ns) |
+| `test_make_file_cert_source_factory` | grouped:pure | none (anon-ns) |
+| `test_load_credentials_cancellation` | grouped:pure (single-threaded `ioc.run()`, no real socket) | none (anon-ns) |
+| `test_file_cert_source_pmr_fail` | grouped:pure (local `monotonic_buffer_resource`+`null_memory_resource`, no global new) | none (anon-ns) |
+| `test_cipher_allow_list_static_assert` | grouped:pure | none (no file-scope symbols) |
+| `test_security_profile_mapping` | grouped:pure | none (anon-ns) |
+| `test_tls_error_variants` | grouped:pure (`asio/thread_pool.hpp` included but never instantiated) | none (anon-ns) |
+| `test_verify_peer_t039` | grouped:pure | none (anon-ns) |
+| `test_security_profile_empty_pinset` | grouped:pure | none (anon-ns) |
+| `test_certificate_lifetimebound` | grouped:pure | none (function-local class only) |
+
+### Standalone (9)
+
+| `.cpp` | reason |
+|---|---|
+| `test_pinset_add_then_remove_stress` | genuinely concurrent (`std::thread finder{...}`, TSan stress) |
+| `test_pinset_rotation_does_not_affect_in_flight` | genuinely concurrent (`std::thread rotator{...}`) |
+| `test_pin_view_lifetime_under_rotation` | genuinely concurrent (`std::thread reader{...}`) |
+| `test_tls_handshake_alloc_guard` (`tls_handshake_alloc_guard`) | live `$<TARGET_FILE:tls_handshake_alloc_guard>` name-selection (mallocnesia sidecar) — local `counting_resource` mechanism itself would otherwise be groupable |
+| `test_hsm_async_signer_mock` | genuinely concurrent (`asio::thread_pool hsm_pool{1}`) |
+| `cipher_policy_banned_negative` (`tls_cipher_banned_negative_compile`) | compile-negative: own `main()`, `EXCLUDE_FROM_ALL`, `WILL_FAIL` `cmake --build` invocation, label-heterogeneous `compile_negative` |
+| `security_profile_deprecated_negative` (`tls_security_profile_deprecated_negative`) | compile-negative: own `main()`, `EXCLUDE_FROM_ALL`, `WILL_FAIL` `cmake --build` invocation, label-heterogeneous `compile_negative` |
+| `test_pinset_snapshot_publish_acquire` | genuinely concurrent (`std::thread`) + heterogeneous `TSAN_OPTIONS` ENV + label-heterogeneous `046;nfr017;publish_acquire` |
+| `test_tls_forced_fallback_link` | label-heterogeneous, sole `046;nfr017;fallback_link` (D4 bucket-of-1 — same pattern as `transport`'s `test_transport_forced_fallback_link`) |
+
+**Sum:** 14 grouped + 9 standalone = **23** ✓ (100% dispositioned).
+
+### `-R`/`-L` selectability (SC-004 / Scenario-3)
+
+`ctest -L tls` / `-L 011` both select the grouped `tls_pure_tests` entry plus
+every standalone target that still carries `tls`/`011` in its LABELS
+(all 9 standalone targets do — `fixpp_add_tls_test`'s default is never
+fully replaced, only extended) — verified via the post-grouping run:
+`-L 011` → 12 tests (12/12 pass), `-L tls` → 12 tests, `-L 046` → 2,
+`-L compile_negative` → 2, `-L alloc_guard` → 1, `-L fallback_link` → 1,
+`-L publish_acquire` → 1 (each label count unchanged from its pre-grouping
+per-`.cpp` value, since only the 14 same-label pure tests collapsed into
+one entry). `--gtest_list_tests` on `tls_pure_tests`: 100 cases, matching
+the 14-file census sum exactly. No historical `-R`-by-target-name idiom
+targeted any of the 14 grouped names (the module's own tasks/quickstart
+docs select tests via `-L tls`/`-L 011`, never by individual target name);
+`tls_handshake_alloc_guard`'s exact name is preserved (live-name mallocnesia
+dependency), so `tls_handshake_alloc_guard_mallocnesia`'s
+`$<TARGET_FILE:tls_handshake_alloc_guard>` reference is unaffected.
+
+## Module: `log` (12 `.cpp`) — US2 — 0 grouped (audited, no viable bucket)
+
+**Expectation-gap note:** the module brief predicted "group log-formatting/
+otel-log tests sharing link-deps+label." The full audit found a
+module-dominating threading hazard the brief hadn't anticipated — see
+below — so the outcome is 0 grouped / 12 standalone, not an omission. Same
+shape as the `transport` module (0/20). `CMakeLists.txt` is **unchanged**
+(no CMake edit this module); this section documents the full per-file audit.
+
+### The drain-thread finding
+
+`fixpp::log::Logger::Impl`'s constructor **unconditionally** spawns a real
+OS thread (`src/log/logger.cpp:180`: `drain_thread_ = std::thread([this] {
+drain_loop(); });`) — every single `Logger` construction, regardless of
+sink count or configuration, is genuinely concurrent from that point on
+(joined cleanly in `~Impl()`/`shutdown()`, but the procedure's D3
+"genuinely-concurrent" trigger is the spawn itself, not whether teardown is
+clean — same reasoning the `sync` module ledger already applied: "Under
+TSan's default halt-on-first-race, one race in a grouped process would
+abort before every OTHER test in that bucket runs, silently blinding the
+gate for the rest," so **spawns a real OS thread → standalone, regardless
+of link-deps/ENV homogeneity**). Grepped all 12 `.cpp` for
+`fixpp::log::Logger`/`log::Logger`: 9 of the 12 construct at least one
+`Logger` instance (`test_overflow_drop_newest.cpp`,
+`test_level_and_category_filter.cpp`, `test_shutdown_async_flush.cpp`,
+`test_block_overflow_raw_thread.cpp`, `test_compile_cutoff_zero_alloc.cpp`,
+`test_file_sink_rotation.cpp`, `test_file_sink_async_fsync.cpp`,
+`test_trace_correlation.cpp`, `test_log0_raw_thread.cpp`) — all 9 force
+standalone by this rule alone, independent of any other reason.
+
+**Global-state cross-check (advisor-flagged risk, cleared):** grepped for a
+process-global logger/sink singleton (`static Logger`, `g_logger`,
+`default_logger`, `::instance(`, `singleton`) across `include/fixpp/log/*.hpp`
+— zero hits. Every test constructs its own local `Logger` via
+`std::make_unique<fixpp::log::Logger>(...)` (per-instance, not a shared
+singleton). `format_registry.cpp`'s `get_registry()` is a function-local
+`static const` table populated once from a fixed compile-time array
+(read-only after first construction, never mutated by tests) — no
+cross-test state leakage. So the standalone forcing is **specifically**
+the real-thread-per-instance hazard, not a global-singleton-freshness issue
+(the two halves of the D3 criterion are independently checked; the thread
+half alone is sufficient to force standalone even though the
+global-singleton half is clean).
+
+### Census
+
+The remaining 3 `.cpp` do not construct a `Logger` (grepped `fixpp::log::Logger`/
+`log::Logger`/` Logger(`: zero hits in each; also verified no local `"..."`
+fixture-header include that could hide a transitive `Logger` construction —
+all three include only public `<...>` headers):
+
+- `log_smoke_test.cpp` — no `Logger`, unconditional, no LABELS. Bucket-of-1
+  in its own build class (same as `otel_smoke_test` precedent) — no other
+  unconditional non-`Logger`-constructing log test to union with (D4, no win).
+- `test_otlp_log_sink.cpp` — no `Logger`, gated
+  `if(TARGET opentelemetry-cpp::api AND TARGET fixpp_log_otlp)`, distinct
+  link-deps (`fixpp_log_otlp` + `opentelemetry-cpp::logs/exporter_otlp_http_log/
+  otlp_recordable`). Sole member of its conditional-guard class — D4 bucket-of-1.
+- `test_syslog_sink.cpp` — no `Logger`, but calls real POSIX `openlog()`/
+  `syslog()`/`sink.open()`/`sink.close()` against the live system syslog
+  (UNIX-domain datagram socket to `/dev/log`, `LOG_LOCAL7` facility chosen
+  specifically "to avoid clobbering daemon log" per its own header comment)
+  — real-IPC, kept standalone per "when unsure → standalone"; would be a
+  bucket-of-1 regardless (no other non-`Logger` test to union with without
+  mixing a real-IPC test into a trivial smoke test).
+
+No `int main(` in any of the 12. No duplicate `TEST`/`TEST_F`/`TEST_P`
+`Suite.Name`. No LABELS anywhere in the module (`grep LABELS CMakeLists.txt`
+— zero hits) — every `-L`-selection concern is moot.
+
+### Grouped
+
+None.
+
+### Standalone (12)
+
+| `.cpp` | reason |
+|---|---|
+| `log_smoke_test` | bucket-of-1 (no `Logger`, unconditional, no other non-`Logger` unconditional member) — D4, no win |
+| `test_overflow_drop_newest` | constructs `fixpp::log::Logger` (unconditional real drain-thread spawn) |
+| `test_level_and_category_filter` | constructs `fixpp::log::Logger` (unconditional real drain-thread spawn) |
+| `test_shutdown_async_flush` | constructs `fixpp::log::Logger` (unconditional real drain-thread spawn) |
+| `test_block_overflow_raw_thread` | constructs `fixpp::log::Logger` (drain thread) + explicit raw `std::thread` in the test itself |
+| `test_compile_cutoff_zero_alloc` (`log_alloc_test`) | constructs `fixpp::log::Logger` (drain thread) + live `$<TARGET_FILE:log_alloc_test>` name-selection (mallocnesia sidecar) + per-target `FIXPP_LOG_MIN_LEVEL=3` compile-def (would silently alter macro cutoff behavior for any other member sharing the binary) |
+| `test_file_sink_rotation` | constructs `fixpp::log::Logger` (unconditional real drain-thread spawn) |
+| `test_file_sink_async_fsync` | constructs `fixpp::log::Logger` (unconditional real drain-thread spawn); test itself compares `std::thread::id` values (drain-thread identity), not a self-spawned thread |
+| `test_syslog_sink` | real syslog IPC (UNIX-domain socket to `/dev/log`); bucket-of-1 |
+| `test_trace_correlation` | constructs `fixpp::log::Logger` (unconditional real drain-thread spawn) |
+| `test_log0_raw_thread` | constructs `fixpp::log::Logger` (drain thread) + explicit raw `std::thread` in the test itself |
+| `test_otlp_log_sink` | OTel-gated bucket-of-1, distinct link-deps (`fixpp_log_otlp` + OTel exporter targets) |
+
+**Sum:** 0 grouped + 12 standalone = **12** ✓ (100% dispositioned).
+
+### `-R`/`-L` selectability (SC-004 / Scenario-3)
+
+No change — `CMakeLists.txt` is byte-identical to pre-068. No `.cpp` in this
+module ever carried a `LABELS` property, so no `-L` selector is affected
+(module-level `ctest -L log` never existed). `ctest -R '^log_'`/`-R '^ts10_'`
+baseline (post-068, unchanged file): all 12 (+ the mallocnesia sidecar)
+pass, matching the 12 `.cpp` census 1:1. No historical `-R`-by-target-name
+idiom applies (nothing changed).
+
+## Module: `codegen` (12 `.cpp`) — US2
+
+003-dictionary-codegen typed-accessor/shape suites + 062 group-entry seams +
+067 emit-builders unit test + T041 determinism + T022 conformance. The whole
+file is guarded by a top-level `if(NOT TARGET fixpp_codegen_generate) return()
+endif()` (unchanged — grouping preserves the built set per FR-007).
+
+### ODR pre-check (§3)
+
+No `int main(` in any of the 12 (grepped). No duplicate `TEST`/`TEST_F`
+`Suite.Name` across the grouped 9 (verified — `group_entry_generation_trap_test.cpp`
+textually has 2 `TEST(` macros but they are mutually exclusive
+`#ifndef NDEBUG ... #else ... #endif` branches, so only one compiles per
+config; no collision). All 9 grouped files wrap content in an anonymous
+namespace or declare no file-scope symbols. Zero FR-012 renames.
+
+### Grouped
+
+**Bucket `codegen_pure_tests`** — 9 `.cpp`, label `"codegen"`, link
+`fixpp_dictionary` + `GTest::gtest`/`GTest::gtest_main`, `add_dependencies`
+`fixpp_codegen_generate`:
+
+| `.cpp` | decision | odr_action |
+|---|---|---|
+| `typed_accessor_test.cpp` | grouped:pure | none (anon-ns) |
+| `flyweight_shape_test.cpp` | grouped:pure | none (anon-ns) |
+| `msgtype_boundary_test.cpp` | grouped:pure | none (anon-ns) |
+| `validator_shape_test.cpp` | grouped:pure | none (no file-scope symbols) |
+| `length_data_table_test.cpp` | grouped:pure | none (no file-scope symbols) |
+| `group_entry_read_test.cpp` | grouped:pure | none (anon-ns) |
+| `nested_group_read_test.cpp` | grouped:pure | none (anon-ns) |
+| `group_entry_generation_trap_test.cpp` | grouped:pure (`EXPECT_DEATH` only — gtest fork, isolation-safe per procedure) | none (anon-ns; mutually-exclusive `#ifndef NDEBUG` TEST pair, not a collision) |
+| `conformance/conformance_test.cpp` | grouped:pure | none (anon-ns) |
+
+`FIXPP_CODEGEN_MANIFEST` (needed only by `conformance_test.cpp`) is added to
+the bucket's shared compile-definitions — harmless to the other 8 members
+(same pattern as the dictionary pilot's single-consumer `FIXPP_DICT_DATA_DIR`).
+
+### Standalone (3)
+
+| `.cpp` | reason |
+|---|---|
+| `group_entry_alloc_gate_test.cpp` (`codegen_group_entry_alloc_gate_test`) | in-TU global `operator new`/`operator new[]` counter (`g_nested_extent_alloc_count`) + live `$<TARGET_FILE:codegen_group_entry_alloc_gate_test>` mallocnesia sidecar — must keep its exact name |
+| `test_067_emit_builders_unit.cpp` (`codegen_067_emit_builders_unit_test`) | label-heterogeneous, sole `"codegen;067"` member (D4 bucket-of-1); distinct link-deps (compiles `tools/codegen/fixpp-codegen/ir.cpp`+`emit_builders.cpp` directly + `pugixml::pugixml`) |
+| `determinism_test.cpp` (`codegen_determinism_test`) | live procedure selects the external `fixpp-codegen` tool binary via `$<TARGET_FILE:fixpp-codegen>` (compile-def injection) and shells out to it twice via `std::system()` — brief-mandated KEEP standalone |
+
+Not a `.cpp`, unaffected either way: `codegen_build_graph_test.cmake` (the
+`fixpp::dict::codegen-build-graph-check` `cmake -P` git-status-cleanliness
+gate — brief-mandated KEEP standalone; not a gtest binary).
+
+**Sum:** 9 grouped + 3 standalone = **12** ✓ (100% dispositioned).
+
+### `-R`/`-L` selectability (SC-004 / Scenario-3)
+
+`ctest -L codegen` selects 6 entries post-grouping (`codegen_pure_tests`,
+`codegen_group_entry_alloc_gate_test`,
+`codegen_group_entry_alloc_gate_test_mallocnesia`,
+`codegen_067_emit_builders_unit_test`, `codegen_determinism_test`,
+`fixpp::dict::codegen-build-graph-check`) — same label-count contract as
+before (the 9 same-label pure tests collapsed into one entry).
+`--gtest_list_tests` on `codegen_pure_tests`: 29 cases, matching the 9-file
+census (30 textual `TEST(` occurrences minus the 1 that never compiles in
+this config, per the ODR note above). No historical `-R`-by-target-name
+idiom applies (module tasks select via `-L codegen`, never individual
+target name, except the two brief-mandated `$<TARGET_FILE:>` live
+selections above, both preserved standalone).
+
+## Module: `integration` (2 `.cpp`) — US2
+
+003-dictionary-codegen US3 (T035, Seam #10b FIXT cross-vocabulary) + US4
+(T038, Seam #10a multi-version coexistence). Both share LABELS
+`"integration"` and both need `fixpp_codegen_generate` — genuine 2-file
+grouping candidate (not the "likely bucket-of-1" the module brief predicted;
+the full audit found a real pair).
+
+### ODR pre-check (§3)
+
+No `int main(`, no thread/global-alloc mechanism, no duplicate
+`TEST`/`Suite.Name` (`FixtCrossVocabulary` vs `MultiSessionMultiVersion` —
+disjoint). Both wrap content in an anonymous namespace. Zero FR-012 renames.
+
+### Grouped
+
+**Bucket `integration_pure_tests`** — 2 `.cpp`, label `"integration"`, link
+union `fixpp_dictionary` + `fixpp::dict::v42` + `fixpp::dict::v50sp2` +
+`GTest::gtest`/`GTest::gtest_main`, `add_dependencies` `fixpp_codegen_generate`:
+
+| `.cpp` | decision | odr_action |
+|---|---|---|
+| `fixt_cross_vocabulary.cpp` | grouped:pure | none (anon-ns) |
+| `multi_session_multi_version.cpp` | grouped:pure | none (anon-ns; all assertions `static_assert`) |
+
+`FIXPP_DICT_DATA_DIR` (needed only by `fixt_cross_vocabulary.cpp`) is added
+to the bucket's shared compile-definitions — unused by (harmless to)
+`multi_session_multi_version.cpp` (grepped: neither file previously used it
+in the multi-version target, which had no compile-def at all).
+
+### Standalone (0)
+
+None — the entire module groups into 1 bucket.
+
+**Sum:** 2 grouped + 0 standalone = **2** ✓ (100% dispositioned).
+
+### `-R`/`-L` selectability (SC-004 / Scenario-3)
+
+`ctest -L integration` selects 1 entry post-grouping (`integration_pure_tests`),
+down from 2 pre-grouping — both gtest `Suite.Name` sets (7 cases in
+`FixtCrossVocabulary` + 2 in `MultiSessionMultiVersion` = 9 total) run
+inside the one process. No historical `-R`-by-target-name idiom targeted
+either of the 2 grouped names.
+
+## Module: `alloc_guard` (8 `.cpp`) — US2 — 0 grouped (audited, no viable bucket)
+
+The module's entire purpose is process-global allocation assertion. All 8
+`.cpp` implement the **same** mechanism: a pair of weak, LD_PRELOAD-replaceable
+`alloc_guard_start()`/`alloc_guard_end()` marker symbols (comment: "mallocnesia
+replaces these weak no-ops with its interceptor scope markers") bracketing a
+window whose GLOBAL heap activity mallocnesia counts — i.e. every file is the
+**global allocation-counting** standalone trigger by construction (D3's first
+bullet), independent of link-deps/labels. `CMakeLists.txt` is **unchanged**
+(no CMake edit this module) — this section documents the full per-file audit,
+per FR-011 (near-empty grouping recorded in full, not skipped).
+
+### Census
+
+Grepped all 8 for `alloc_guard_start`/`alloc_guard_end`/`LD_PRELOAD`: all 8
+hit. `test_dict066_grouped_read_alloc_guard.cpp` additionally has a **local**
+in-TU global `operator new` counter as a first-layer gate ("dual gate: TU-local
+operator-new counter + mallocnesia below") — still forced standalone by the
+mallocnesia leg alone. 6 of the 8 (`decimal_alloc_guard_test`,
+`wire_alloc_guard_test`, `sync_alloc_guard_test`,
+`test_validate_gate_alloc_guard.cpp` → `test_validate_gate_alloc_guard`,
+`test_dict066_grouped_read_alloc_guard.cpp` →
+`test_dict066_grouped_read_alloc_guard`, and the shared `item13` loop over
+decimal/wire/sync) carry a live `$<TARGET_FILE:...>` mallocnesia-sidecar
+`add_test` that names the target explicitly — the exact-name-selection D3
+trigger applies to those directly; the remaining 2
+(`test_dispatch_alloc_guard`, `test_clock_sleep_alloc_guard`,
+`test_session_alloc_guard` — DELIBERATELY-NOT-GATED per the file's own
+item-13 comment, no mallocnesia sidecar) are still standalone via the
+underlying global-marker mechanism itself, not the sidecar.
+
+No `int main(` in any of the 8. No duplicate `TEST`/`TEST_F`/`Suite.Name`.
+LABELS are heterogeneous across the 8 anyway (`041;alloc_guard;validation-gate;t014`,
+`066;us3;alloc_guard`, none on the other 6) — a secondary, independent D4
+bucket-of-1 forcing even setting the mechanism aside.
+
+### Grouped
+
+None.
+
+### Standalone (8)
+
+| `.cpp` | reason |
+|---|---|
+| `decimal_alloc_guard_test.cpp` | global `alloc_guard_start`/`end` marker mechanism (mallocnesia) + live `$<TARGET_FILE:decimal_alloc_guard_test>` sidecar |
+| `wire_alloc_guard_test.cpp` | global `alloc_guard_start`/`end` marker mechanism (mallocnesia) + live `$<TARGET_FILE:wire_alloc_guard_test>` sidecar |
+| `sync_alloc_guard_test.cpp` | global `alloc_guard_start`/`end` marker mechanism (mallocnesia) + live `$<TARGET_FILE:sync_alloc_guard_test>` sidecar |
+| `test_dispatch_alloc_guard.cpp` | global `alloc_guard_start`/`end` marker mechanism (mallocnesia); no sidecar currently wired (item-13 DELIBERATELY-NOT-GATED) but the marker mechanism itself is the trigger |
+| `test_clock_sleep_alloc_guard.cpp` | global `alloc_guard_start`/`end` marker mechanism (mallocnesia); item-13 DELIBERATELY-NOT-GATED, same reasoning |
+| `test_session_alloc_guard.cpp` | global `alloc_guard_start`/`end` marker mechanism (mallocnesia); item-13 DELIBERATELY-NOT-GATED, same reasoning |
+| `test_validate_gate_alloc_guard.cpp` | global `alloc_guard_start`/`end` marker mechanism (mallocnesia) + live `$<TARGET_FILE:test_validate_gate_alloc_guard>` sidecar; LABELS `041;alloc_guard;validation-gate;t014` (also label-heterogeneous, D4) |
+| `test_dict066_grouped_read_alloc_guard.cpp` | in-TU global `operator new` counter + global `alloc_guard_start`/`end` marker mechanism (dual mallocnesia gate) + live `$<TARGET_FILE:test_dict066_grouped_read_alloc_guard>` sidecar; LABELS `066;us3;alloc_guard` (also label-heterogeneous, D4) |
+
+**Sum:** 0 grouped + 8 standalone = **8** ✓ (100% dispositioned).
+
+### `-R`/`-L` selectability (SC-004 / Scenario-3)
+
+No change — `CMakeLists.txt` is byte-identical to pre-068. Every
+`$<TARGET_FILE:...>` mallocnesia-sidecar reference in the file (6 of them,
+including the `item13` `foreach`) still resolves to its unchanged target
+name. `ctest -R '^alloc_guard'`/`-R '^decimal_alloc_guard'`/etc. and
+`-L alloc_guard` selections are all unaffected (nothing changed).
+
+## Module: `perf` (4 `.cpp`) — US2 — 0 grouped (audited, no viable bucket)
+
+Bench-adjacent alloc-guard cells for 008/012/013. `CMakeLists.txt` is
+**unchanged** (no CMake edit this module).
+
+### Census
+
+All 4 use the same weak `alloc_guard_start`/`alloc_guard_end` global marker
+mechanism as the `alloc_guard` module above
+(`test_session_recovery_alloc_guard.cpp`, `test_store_alloc_guard.cpp`,
+`test_transport_read_alloc_guard.cpp`) EXCEPT `test_socket_option_defaults.cpp`,
+which has no alloc-guard markers at all (pure socket-option assertion). Even
+setting the mechanism aside, all 4 are **label-heterogeneous** — no two share
+a LABELS set:
+
+- `perf_transport_read_alloc_guard`: `"transport;012;us1;seam4;perf"` + a
+  direct (non-sidecar) `LD_PRELOAD=libmallocnesia.so` baked into its own
+  `ENVIRONMENT` — a **heterogeneous per-test ENVIRONMENT** D3 trigger on its
+  own (grouping it would silently interpose mallocnesia over every other
+  bucket member).
+- `perf_socket_option_defaults`: `"transport;012;us1;us3;fr029"` — distinct
+  set, no alloc-guard mechanism, but a link-dep outlier too
+  (`fixpp_transport`+`fixpp_tls`+OpenSSL/ZLIB vs the others' `fixpp_session`).
+- `perf_session_recovery_alloc_guard`: `"session;013;us1;perf;alloc_guard"` +
+  a `TSAN_OPTIONS` suppression `ENVIRONMENT` not shared by any other member.
+- `perf_store_alloc_guard` (via `fixpp_add_store_test`): no LABELS at all
+  (default), but the shared macro DOES set a homogeneous `TSAN_OPTIONS`
+  `ENVIRONMENT` — moot since it has zero label overlap with any other member.
+
+No `int main(` in any of the 4. No duplicate `Suite.Name`.
+
+### Grouped
+
+None.
+
+### Standalone (4)
+
+| `.cpp` | reason |
+|---|---|
+| `test_session_recovery_alloc_guard.cpp` | global `alloc_guard_start`/`end` marker mechanism + label-heterogeneous sole `session;013;us1;perf;alloc_guard` member (D4) |
+| `test_socket_option_defaults.cpp` | label-heterogeneous sole `transport;012;us1;us3;fr029` member (D4); distinct link-deps (`fixpp_transport`+`fixpp_tls`+OpenSSL/ZLIB) |
+| `test_store_alloc_guard.cpp` | global `alloc_guard_start`/`end` marker mechanism; no LABELS at all (D4 bucket-of-1 by omission) |
+| `test_transport_read_alloc_guard.cpp` | global `alloc_guard_start`/`end` marker mechanism + heterogeneous direct `ENVIRONMENT` (`LD_PRELOAD=libmallocnesia.so` baked onto itself, not a sidecar) + label-heterogeneous sole `transport;012;us1;seam4;perf` member (D4) |
+
+**Sum:** 0 grouped + 4 standalone = **4** ✓ (100% dispositioned).
+
+### `-R`/`-L` selectability (SC-004 / Scenario-3)
+
+No change — `CMakeLists.txt` is byte-identical to pre-068. `-L perf` never
+existed as a module-wide label (each member's LABELS are feature-scoped, not
+`perf`-scoped); unaffected either way.
+
+## Module: `conformance` (3 `.cpp`) — US2 — 0 grouped (audited, no viable bucket)
+
+FIX/TLS conformance corpus-replay cells for 008/011/012. `CMakeLists.txt` is
+**unchanged** (no CMake edit this module).
+
+### Census
+
+All 3 are label-heterogeneous AND link-dep-heterogeneous — no two share
+either axis:
+
+- `test_fixs_rotation.cpp` (`tls_fixs_rotation`): LABELS `"tls;011;conformance"`,
+  links `fixpp::tls` only.
+- `test_store_corpus_replay.cpp` (`store_corpus_replay`, via
+  `fixpp_add_store_test` + an extra `test_double_fsm.cpp` fixture TU): no
+  LABELS at all, links `fixpp_session`.
+- `test_transport_interop.cpp` (`transport_interop_conformance`): LABELS
+  `"transport;012;us1;seam1;conformance"`, links
+  `fixpp_transport`+`fixpp_tls`+`fixpp_wire`. Mostly `DISABLED_` TC-001..017
+  cells (Phase-8 QuickFIX peer pending) + one live scaffolding cell.
+
+No thread/global-alloc mechanism in any of the 3 (grepped). No `int main(`.
+No duplicate `Suite.Name`.
+
+### Grouped
+
+None.
+
+### Standalone (3)
+
+| `.cpp` | reason |
+|---|---|
+| `test_fixs_rotation.cpp` | label-heterogeneous sole `tls;011;conformance` member (D4); distinct link-deps (`fixpp::tls` only) |
+| `test_store_corpus_replay.cpp` | label-heterogeneous sole no-LABELS member (D4); distinct link-deps (`fixpp_session` + extra `test_double_fsm.cpp` fixture TU) |
+| `test_transport_interop.cpp` | label-heterogeneous sole `transport;012;us1;seam1;conformance` member (D4); distinct link-deps (`fixpp_transport`+`fixpp_tls`+`fixpp_wire`); mostly `DISABLED_` TC-* cells pending a live QuickFIX peer |
+
+**Sum:** 0 grouped + 3 standalone = **3** ✓ (100% dispositioned).
+
+### `-R`/`-L` selectability (SC-004 / Scenario-3)
+
+No change — `CMakeLists.txt` is byte-identical to pre-068. `-L conformance`
+never existed as a module-wide label; `-L tls`/`-L 011`/`-L transport`/
+`-L 012` selections on the individual members are unaffected (nothing
+changed).
+
+## Module: `tap` (1 `.cpp`) — US2 — 0 grouped (bucket-of-1, no CMake change)
+
+`tap_smoke_test.cpp` (target `tap_smoke_test`, ctest name `tap_smoke`) is the
+module's only test — an unconditional `SUCCEED()` compile/link smoke check,
+no LABELS. Sole member, D4 bucket-of-1 (no partner to union with) — no win.
+`CMakeLists.txt` is **unchanged**.
+
+### Standalone (1)
+
+| `.cpp` | reason |
+|---|---|
+| `tap_smoke_test.cpp` | bucket-of-1 — sole `.cpp` in the module, no LABELS, no partner (D4) |
+
+**Sum:** 0 grouped + 1 standalone = **1** ✓ (100% dispositioned). No `-R`/`-L`
+change (byte-identical file).
+
+## Module: `service` (1 `.cpp`) — US2 — 0 grouped (bucket-of-1, no CMake change)
+
+`service_smoke_test.cpp` (target `service_smoke_test`, ctest name
+`service_smoke`) is the module's only test — same unconditional `SUCCEED()`
+smoke-check pattern as `tap`. Sole member, D4 bucket-of-1. `CMakeLists.txt`
+is **unchanged**.
+
+### Standalone (1)
+
+| `.cpp` | reason |
+|---|---|
+| `service_smoke_test.cpp` | bucket-of-1 — sole `.cpp` in the module, no LABELS, no partner (D4) |
+
+**Sum:** 0 grouped + 1 standalone = **1** ✓ (100% dispositioned). No `-R`/`-L`
+change (byte-identical file).
+
+## Module: `consumer` (1 `.cpp`) — US2 — N/A, standalone-by-nature (no CMake change)
+
+`consumer_witness.cpp` is NOT a gtest binary at all — it does not link
+`GTest::gtest`/`GTest::gtest_main` anywhere. `tests/consumer/CMakeLists.txt`
+is a deliberately **separate CMake `project()`** (never `add_subdirectory()`'d
+from the main build — see its own header comment) that is invoked as a
+standalone `cmake -S/-B` sub-build by `tests/consumer/run_consumer_witness.cmake`,
+which is in turn driven by exactly ONE `add_test` at the TOP-LEVEL
+`CMakeLists.txt` (`NAME "fixpp::consumer::install-witness"`, LABELS
+`consumer`) — a compile+link witness for 061-slim FR-008/SC-004 (proves the
+staged `cmake --install` header layout is sufficient for an external
+consumer, deliberately isolated from the build-tree's own include paths).
+There is no whole-binary `add_test`-per-`.cpp` pattern to convert here: the
+module IS already exactly one `add_test` wrapping the entire sub-build.
+`CMakeLists.txt` (both the sub-project's and the top-level's) is
+**unchanged**.
+
+### Standalone (1)
+
+| `.cpp` | reason |
+|---|---|
+| `consumer_witness.cpp` | install-witness sub-build by nature — separate `cmake project()`, no GTest link, driven by one top-level `add_test` wrapping a `cmake -P` configure+build+run script; nothing to bucket (already bucket-of-1 with zero gtest-discovery surface) |
+
+**Sum:** 0 grouped + 1 standalone = **1** ✓ (100% dispositioned). No `-R`/`-L`
+change (byte-identical files).
+
+## Module: `fuzz` (13 `.cpp`) — US2 — N/A, standalone-by-nature (no CMake change)
+
+All 13 are libFuzzer harnesses (grepped: all 13 define
+`LLVMFuzzerTestOneInput`; none link GTest; none has an `add_test` — `grep -c
+add_test tests/fuzz/CMakeLists.txt` = 0). Each is compiled with
+`-fsanitize=fuzzer,address[,undefined]` (Clang-only), which supplies its own
+libFuzzer `main()` driver — mutually exclusive with `GTest::gtest_main`
+(ODR-fatal to combine two `main()`-providing drivers in one binary) and with
+the whole-binary `add_test` grouping pattern this feature targets (fuzzers
+are invoked by a corpus-driven fuzzing procedure, not `ctest` case
+selection). Built only when `FIXPP_BUILD_FUZZ=ON`. `CMakeLists.txt` is
+**unchanged**.
+
+### Standalone (13)
+
+| `.cpp` | reason |
+|---|---|
+| `fuzz_decimal_parse.cpp` | libFuzzer harness — own `LLVMFuzzerTestOneInput` entry point, no `add_test`, mutually exclusive with `gtest_main` |
+| `fuzz_decimal_compare.cpp` | libFuzzer harness (differential oracle) — same |
+| `fuzz_dict_xml_loader.cpp` | libFuzzer harness — same |
+| `fuzz_wire_framer.cpp` | libFuzzer harness — same |
+| `fuzz_wire_parser.cpp` | libFuzzer harness — same |
+| `fuzz_wire_nested_slice.cpp` | libFuzzer harness — same |
+| `fuzz_wire_validator.cpp` | libFuzzer harness — same |
+| `fuzz_session_cancellation.cpp` | libFuzzer harness — same |
+| `fuzz_file_cert_source.cpp` | libFuzzer harness — same |
+| `fuzz_message_store.cpp` | libFuzzer harness — same |
+| `fuzz_transport_read_path.cpp` | libFuzzer harness — same |
+| `fuzz_transport_handshake.cpp` | libFuzzer harness — same |
+| `fuzz_session_recovery_admin_parse.cpp` | libFuzzer harness — same |
+
+**Sum:** 0 grouped + 13 standalone = **13** ✓ (100% dispositioned). No
+`-R`/`-L` change (byte-identical file; no `add_test`/LABELS existed to
+begin with).
+
+## Module: `link` (2 `.cpp`) — US2 — N/A, standalone-by-nature (no CMake change)
+
+`tu_a.cpp`/`tu_b.cpp` are NOT `add_executable()`'d in
+`tests/link/CMakeLists.txt` at all — they are raw TUs fed directly to
+`check_expected_failure.py` (invoked by the sole `add_test(NAME
+decimal_alias_mismatch_link ...)`), which compiles them itself (outside
+CMake's target graph) specifically to PROVE they fail to LINK together
+(conflicting `FIXPP_DECIMAL_T` aliases must produce an "undefined reference
+to ... decimal_alias_sentinel ..." mismatch-type diagnostic — AC-B3). There
+is no gtest binary here to convert to whole-binary `add_test`; the module's
+one `add_test` already wraps the entire negative-link probe.
+`CMakeLists.txt` is **unchanged**.
+
+### Standalone (2)
+
+| `.cpp` | reason |
+|---|---|
+| `tu_a.cpp` | not a CMake target — raw TU compiled directly by the Python link-failure probe (`check_expected_failure.py`), not a gtest binary |
+| `tu_b.cpp` | same — the two TUs together are the WILL_FAIL link-negative probe by nature |
+
+**Sum:** 0 grouped + 2 standalone = **2** ✓ (100% dispositioned). No `-R`/`-L`
+change (byte-identical file).
+
+## Module: `oracle` (0 `.cpp`) — US2 — N/A, no test `.cpp` (Python-only, no CMake change)
+
+`tests/oracle/` has **zero** `.cpp` files. Its sole test artifact is
+`decimal_compare_oracle_test.py` (a `pytest` differential oracle vs Python's
+`decimal.Decimal`), wired by exactly one `add_test` (`decimal_compare_oracle`,
+`COMMAND python3 -m pytest ...`) guarded off on sanitizer presets (ASan/UBSan/
+TSan — sanitizer runtimes aren't preloaded for `ctypes.dlopen`). Not a gtest
+module; nothing to disposition or group. `CMakeLists.txt` is **unchanged**.
+
+**Sum:** 0 grouped + 0 standalone = **0** ✓ (N/A — no test `.cpp` in this
+module; not part of the `.cpp`-census denominator).
+
+---
+
+## T026/T027 — Whole-tree preservation checks (close-out, 2026-07-11)
+
+**T026 (coverage-index).** `git diff --stat main..HEAD -- spec/coverage-index.md`
+is **empty** — the file is byte-identical to `main`. `git diff --name-status
+main..HEAD -- 'tests/**/*.cpp'` is **also empty** — no test `.cpp` was added,
+renamed, deleted, or even content-modified anywhere in the feature (confirms
+the "0 ODR renames" every rollout commit reported; FR-012's rename escape
+hatch was never exercised end to end). Since coverage-index keys on `.cpp`
+stem + gtest `Suite.Name`, and neither changed anywhere, FR-004/SC-003 hold by
+construction, not just by spot-check.
+
+**T027 (completeness audits).** `git diff --stat main..HEAD -- .specify/decisions/`
+is **empty** — no existing `*-completeness.md` record was touched by 068. Their
+gtest `Suite.Name` citations therefore still resolve (T026's zero-`.cpp`-diff
+finding is the reason why, not a separate check).
+
+**Aside — unrelated branch drift, not a 068 defect.** The unfiltered
+`git diff --stat main..HEAD` also shows `dictionaries/QUICKFIX_LICENSE.txt`
+(deleted) and `dictionaries/README.md` (reverted) — this is **not** a 068
+change. 068's branch point (`git merge-base main HEAD`) predates `main`'s
+commit `2c0b4947` ("dictionaries: correct license"); diffing against a `main`
+that has since moved forward makes that later, unrelated commit appear as a
+"revert" in the `main..HEAD` diff. No 068 commit touches `dictionaries/`
+(confirmed via `git log --oneline main..HEAD`, `git diff --stat` per-068-commit).
+Flagged for the orchestrator: rebase 068 onto current `main` before opening the
+PR so this drift doesn't show up in the PR diff; not something this close-out
+subagent should do mid-build.
+
+---
+
+## T028 — Whole-tree selectability audit (close-out, 2026-07-11)
+
+Static audit only (no ctest run — a concurrent MSVC build holds `build/`); basis
+is `grep`/`git show` of current `add_test(NAME …)` / `PROPERTIES LABELS` entries
+per module `CMakeLists.txt`, cross-referenced against every documented
+`ctest -L`/`-R` idiom named in per-module sections above.
+
+**`-L <label>` (SC-004 primary selector) — preserved everywhere.** Every
+per-module section above that had a live `-L` selector re-verified it
+(spot-checks already on record: `-L session` → 8 both before/after, `-L 019` →
+12, `-L 066` → 15, `-L dictionary` → same case set via `--gtest_list_tests`,
+`-L config` documented as the only working selector for that module). No
+module's `-L` audit found a regression. This is the FR-003/SC-004 guarantee
+grouping actually rests on.
+
+**`-R <name>`-by-name — correction to the top-of-file policy (lines 37–53) and
+the dictionary replacement table (lines 107–117).** Both were written against
+the *rejected* per-case `gtest_discover_tests` design (where every grouped
+`.cpp`'s cases become `Suite.Case` ctest entries, so any target-name/prefix
+`-R` idiom necessarily stops resolving). FR-001 was amended to whole-binary
+`add_test` in 63a0dd82 (dictionary pilot) but that commit did not touch this
+ledger, so the pre-pivot framing was never corrected here. Under the **shipped**
+whole-binary design the picture is more nuanced than "always -L-superseded":
+
+- **068-authored buckets carry the `<module>_` prefix by construction**
+  (`dictionary_pure_tests`, `dictionary_reify_tests`, `session_<bucket>_tests`,
+  etc. — see IMPLEMENTATION-PROCEDURE.md §2's naming convention), and standalone
+  entries keep their pre-existing `<module>_<name>` names unchanged. A
+  **module-prefix** idiom like `-R '^dictionary_'` therefore still matches
+  every one of that module's current ctest entries and still selects the same
+  underlying gtest-case set — it was **not actually broken** by 068's
+  grouping, contrary to the dictionary table's "breaks (prefix — breaks under
+  any grouping)" line. The `-L dictionary` replacement recorded there remains
+  valid too (belt-and-suspenders), just not strictly required for that specific
+  idiom.
+- **This does NOT generalize to every module.** `tests/core`'s `fixpp_core_tests`
+  / `fixpp_capi_tests` are the documented exception: that grouping **predates**
+  068 (spec.md — "already partially grouped" precedent) and its bucket names do
+  **not** carry a `core_`/`decimal_` prefix. 068's T017 only converted their
+  *mechanism* (`gtest_discover_tests` → whole-binary `add_test`, commit
+  94f4cf2a); a `-R '^decimal_'`-style idiom against `fixpp_core_tests` would not
+  have matched the target name **either before or after** 068 (pre-068 it
+  produced per-case entries with PascalCase gtest `Suite` names, e.g.
+  `DecimalParse.EmptyInput`, not lowercase `decimal_*` — so this class of
+  selector was already non-functional against fixpp_core_tests before 068 and
+  is not a 068 regression).
+- **Truly-broken selectors are exact per-`.cpp`-target-name or per-case
+  `Suite.Case` references** where that `.cpp` was folded into a bucket — those
+  are precisely the ones FR-002/D3's "live `ctest -R <target-name>`" criterion
+  keeps standalone (e.g. `group_context_lookup_alloc_gate_test`'s mallocnesia
+  `$<TARGET_FILE:…>` sidecar), or where the per-module section above already
+  recorded the `-L` replacement (dictionary's non-prefix idioms:
+  `-R determinism_test`, `-R reify_dispatch`, etc. — those target gtest
+  Suite/Case names, not the module prefix, and genuinely stop resolving as
+  separate ctest entries once folded into a bucket).
+
+**`/speckit-verify` selector (`../../../.claude/skills/speckit-verify/SKILL.md`,
+parent-repo, out of 068's edit surface).** Its generic Step 0e/Step 3 selector
+is **`ctest -R '^<prefix>_'`** (a per-feature name-prefix inferred from
+`plan.md`/`tasks.md`), not literally `-L` — this is a documentation-convention
+mismatch against the newly-ratified Constitution §VII.8 wording ("selected by
+`ctest -L <label>`, never `-R <exe-name>`"), flagged here as a follow-up for
+whoever next touches that skill file; not fixed as part of 068 (out of this
+feature's edit surface — `tests/**/CMakeLists.txt` only). Per the `core`
+finding above, its own Appendix A worked example (`ctest -R '^decimal_'` for
+`001-core-decimal`) is **already stale independent of 068** (predates the
+`fixpp_core_tests` PascalCase-suite grouping).
+
+**Verdict:** SC-004 holds — every live `-L` selector resolves to the same
+logical set; every `-R`-by-target-name idiom either still resolves (module-
+prefix idioms riding 068-authored buckets) or was correctly carved to
+standalone / given a recorded `-L` replacement (genuine per-case/per-target
+idioms). No selection command silently broke.

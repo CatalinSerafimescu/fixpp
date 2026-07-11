@@ -62,15 +62,41 @@ function(fixpp_add_tls_test)
     set_tests_properties(${ARG_NAME} PROPERTIES LABELS "tls;011")
 endfunction()
 
-# ── Phase 3 (US1) tests ───────────────────────────────────────────────────────
+# ── Grouped bucket: pure TLS tests (14 .cpp → 1 binary) ──────────────────────
+# 068-test-binary-grouping: all 14 share LABELS "tls;011" (the fixpp_add_tls_test
+# default, unmodified) — no genuinely-concurrent thread/thread_pool, no
+# real socket, no global allocation-counting (PMR failure witnesses use a
+# LOCAL std::pmr::monotonic_buffer_resource with null_memory_resource
+# upstream, per-instance — isolation-safe, D3 groupable). OpenSSL::Crypto/SSL
+# + ZLIB::ZLIB + FIXPP_TLS_FIXTURE_DIR are unioned onto every member — a
+# harmless no-op for the ones that don't reference them (same pattern as the
+# `config`/`dictionary` module buckets). Dispositions in
+# specs/068-test-binary-grouping/dispositions.md.
+fixpp_add_tls_test(NAME tls_pure_tests
+    SOURCES
+        test_pinset_single_thread_ordering.cpp         # T011 seam #9
+        test_pinset_add_then_remove_deterministic.cpp  # T012 seam #1
+        test_pinset_snapshot_outlives_pinset.cpp        # T016 seam #18
+        test_pinset_per_counterparty_sharing.cpp        # T017 FR-009a
+        test_pinset_add_pmr_fail.cpp                    # T019 PMR failure witness (local pmr)
+        test_make_file_cert_source_factory.cpp          # T026 seam #17
+        test_load_credentials_cancellation.cpp          # T028 seam #13 (single-threaded ioc.run())
+        test_file_cert_source_pmr_fail.cpp              # T029 cold-path PMR witness (local pmr)
+        test_cipher_allow_list_static_assert.cpp         # T035 seam #10
+        test_security_profile_mapping.cpp                # T036 seam #11
+        test_tls_error_variants.cpp                      # T037 seam #12
+        test_verify_peer_t039.cpp                         # T038/T020 seam #14
+        test_security_profile_empty_pinset.cpp            # T039 /clarify Q2
+        test_certificate_lifetimebound.cpp                # T040 FR-017
+)
+target_compile_definitions(tls_pure_tests PRIVATE
+    FIXPP_TLS_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
+# OpenSSL::Crypto resolves via Conan Release data even in Debug cmake build;
+# use OPENSSL_CRYPTO_LIBRARY which is set by find_package(OpenSSL).
+target_link_libraries(tls_pure_tests PRIVATE
+    "${FIXPP_OPENSSL_CRYPTO_LIB}" "${FIXPP_OPENSSL_SSL_LIB}" "${FIXPP_ZLIB_LIB}")
 
-# T011 — seam #9: single-thread ordering
-fixpp_add_tls_test(NAME tls_pinset_single_thread_ordering
-    SOURCES test_pinset_single_thread_ordering.cpp)
-
-# T012 — seam #1: deterministic add-then-remove
-fixpp_add_tls_test(NAME tls_pinset_add_then_remove_deterministic
-    SOURCES test_pinset_add_then_remove_deterministic.cpp)
+# ── Phase 3 (US1) standalone tests (FR-002) ──────────────────────────────────
 
 # T013 — seam #2: TSan stress (concurrent add/remove + find)
 fixpp_add_tls_test(NAME tls_pinset_add_then_remove_stress
@@ -84,63 +110,21 @@ fixpp_add_tls_test(NAME tls_pinset_rotation_does_not_affect_in_flight
 fixpp_add_tls_test(NAME tls_pin_view_lifetime_under_rotation
     SOURCES test_pin_view_lifetime_under_rotation.cpp)
 
-# T016 — seam #18: snapshot outlives Pinset
-fixpp_add_tls_test(NAME tls_pinset_snapshot_outlives_pinset
-    SOURCES test_pinset_snapshot_outlives_pinset.cpp)
-
-# T017 — FR-009a: per-counterparty sharing
-fixpp_add_tls_test(NAME tls_pinset_per_counterparty_sharing
-    SOURCES test_pinset_per_counterparty_sharing.cpp)
-
 # T018 — seam #7: zero-alloc dual gate (counting_resource + mallocnesia)
 fixpp_add_tls_test(NAME tls_handshake_alloc_guard
     SOURCES test_tls_handshake_alloc_guard.cpp)
 target_include_directories(tls_handshake_alloc_guard PRIVATE
     "${CMAKE_SOURCE_DIR}/tests")
 
-# T019 — PMR failure witness (tls_pinset_alloc_failed)
-fixpp_add_tls_test(NAME tls_pinset_add_pmr_fail
-    SOURCES test_pinset_add_pmr_fail.cpp)
-
-# ── Phase 4 (US2) tests ───────────────────────────────────────────────────────
+# ── Phase 4 (US2) standalone tests ───────────────────────────────────────────
 # Note: Phase 4 tests that use file_cert_source (which uses OpenSSL) must
 # explicitly link OpenSSL::Crypto (PRIVATE in fixpp_tls, not auto-propagated).
 
-# T026 — seam #17: make_file_cert_source factory parity
-fixpp_add_tls_test(NAME tls_make_file_cert_source_factory
-    SOURCES test_make_file_cert_source_factory.cpp)
-target_compile_definitions(tls_make_file_cert_source_factory PRIVATE
-    FIXPP_TLS_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
-# OpenSSL::Crypto resolves via Conan Release data even in Debug cmake build;
-# use OPENSSL_CRYPTO_LIBRARY which is set by find_package(OpenSSL).
-target_link_libraries(tls_make_file_cert_source_factory PRIVATE
-    "${FIXPP_OPENSSL_CRYPTO_LIB}" "${FIXPP_OPENSSL_SSL_LIB}" "${FIXPP_ZLIB_LIB}")
-
-# T027 — seam #8: HSM-style async_signer_ref mock (header-only types, no OpenSSL)
+# T027 — seam #8: HSM-style async_signer_ref mock (asio::thread_pool)
 fixpp_add_tls_test(NAME tls_hsm_async_signer_mock
     SOURCES test_hsm_async_signer_mock.cpp)
 
-# T028 — seam #13: load_credentials cancellation recipe
-fixpp_add_tls_test(NAME tls_load_credentials_cancellation
-    SOURCES test_load_credentials_cancellation.cpp)
-target_link_libraries(tls_load_credentials_cancellation PRIVATE
-    "${FIXPP_OPENSSL_CRYPTO_LIB}" "${FIXPP_OPENSSL_SSL_LIB}" "${FIXPP_ZLIB_LIB}")
-
-# T029 — cold-path PMR failure witness for file_cert_source
-fixpp_add_tls_test(NAME tls_file_cert_source_pmr_fail
-    SOURCES test_file_cert_source_pmr_fail.cpp)
-target_compile_definitions(tls_file_cert_source_pmr_fail PRIVATE
-    FIXPP_TLS_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
-target_link_libraries(tls_file_cert_source_pmr_fail PRIVATE
-    "${FIXPP_OPENSSL_CRYPTO_LIB}" "${FIXPP_OPENSSL_SSL_LIB}" "${FIXPP_ZLIB_LIB}")
-
-# ── Phase 5 (US3) tests ───────────────────────────────────────────────────────
-
-# T035 — seam #10: CipherPolicy allow-list static_assert witnesses.
-fixpp_add_tls_test(NAME tls_cipher_allow_list_static_assert
-    SOURCES test_cipher_allow_list_static_assert.cpp)
-target_link_libraries(tls_cipher_allow_list_static_assert PRIVATE
-    "${FIXPP_OPENSSL_CRYPTO_LIB}" "${FIXPP_OPENSSL_SSL_LIB}" "${FIXPP_ZLIB_LIB}")
+# ── Phase 5 (US3) standalone tests ───────────────────────────────────────────
 
 # T035 negative-compile: source in cipher_policy_banned_negative.cpp contains a
 # banned CBC token and MUST fail with a static_assert at build time (FR-011).
@@ -184,43 +168,8 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
     )
 endif()
 
-# T036 — seam #11: SecurityProfile-to-OpenSSL-mode row mapping.
-# Needs OpenSSL because fixpp_tls static lib embeds certificate.cpp (OpenSSL).
-# FIXPP_TLS_FIXTURE_DIR needed by the ExtractCapsReadsFileCertSourceConfig test
-# (added in /speckit-verify coverage remediation — covers F-04 dynamic_cast path).
-fixpp_add_tls_test(NAME tls_security_profile_mapping
-    SOURCES test_security_profile_mapping.cpp)
-target_compile_definitions(tls_security_profile_mapping PRIVATE
-    FIXPP_TLS_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
-target_link_libraries(tls_security_profile_mapping PRIVATE
-    "${FIXPP_OPENSSL_CRYPTO_LIB}" "${FIXPP_OPENSSL_SSL_LIB}" "${FIXPP_ZLIB_LIB}")
-
-# T037 — seam #12: all tls_* error variants exercised.
-fixpp_add_tls_test(NAME tls_error_variants
-    SOURCES test_tls_error_variants.cpp)
-target_link_libraries(tls_error_variants PRIVATE
-    "${FIXPP_OPENSSL_CRYPTO_LIB}" "${FIXPP_OPENSSL_SSL_LIB}" "${FIXPP_ZLIB_LIB}")
-
-# T038 — seam #14: verify_peer cert-parameter validation + short-circuit order.
-# + T020 (014 FR-012): real Ed25519 fixture cell (sigalg_disallowed via real cert).
-fixpp_add_tls_test(NAME tls_verify_peer_t039
-    SOURCES test_verify_peer_t039.cpp)
-target_link_libraries(tls_verify_peer_t039 PRIVATE
-    "${FIXPP_OPENSSL_CRYPTO_LIB}" "${FIXPP_OPENSSL_SSL_LIB}" "${FIXPP_ZLIB_LIB}")
-target_compile_definitions(tls_verify_peer_t039 PRIVATE
-    FIXPP_TLS_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
-
-# T039 — /clarify Q2: empty Pinset rejection.
-fixpp_add_tls_test(NAME tls_security_profile_empty_pinset
-    SOURCES test_security_profile_empty_pinset.cpp)
-target_link_libraries(tls_security_profile_empty_pinset PRIVATE
-    "${FIXPP_OPENSSL_CRYPTO_LIB}" "${FIXPP_OPENSSL_SSL_LIB}" "${FIXPP_ZLIB_LIB}")
-
-# T040 — FR-017: [[clang::lifetimebound]] smoke test.
-fixpp_add_tls_test(NAME tls_certificate_lifetimebound
-    SOURCES test_certificate_lifetimebound.cpp)
-target_link_libraries(tls_certificate_lifetimebound PRIVATE
-    "${FIXPP_OPENSSL_CRYPTO_LIB}" "${FIXPP_OPENSSL_SSL_LIB}" "${FIXPP_ZLIB_LIB}")
+# T036 / T037 / T038 / T020 / T039 / T040 registered in the tls_pure_tests
+# bucket above (068-test-binary-grouping).
 
 # ── 046-atomic-shared-ptr (NFR-017) TLS consumer witnesses ───────────────────
 
