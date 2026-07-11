@@ -18,21 +18,37 @@
 // mirror tests/codegen/CMakeLists.txt:47) so load_fix44() resolves FIX44.xml.
 #pragma once
 
+#include <gtest/gtest.h>
+
 #include <cstddef>
 #include <cstring>
+#include <fixpp/core/decimal_alias.hpp>
+#include <fixpp/dict/dictionary.hpp>
+#include <fixpp/dict/xml_loader.hpp>
+#include <fixpp/wire/parser.hpp>
 #include <memory_resource>
 #include <span>
 #include <string>
 #include <string_view>
 #include <vector>
 
-#include <gtest/gtest.h>
-
-#include <fixpp/dict/dictionary.hpp>
-#include <fixpp/dict/xml_loader.hpp>
-#include <fixpp/wire/parser.hpp>
-
 namespace fixpp_test_support {
+
+// Parse an ASCII decimal literal into a decimal_t backed by `mr`. ADD_FAILURE on
+// a malformed literal (test-only helper; shared by the 067/069 builder round-trip
+// TUs, which compile into one binary — one definition, not per-TU copies).
+inline fixpp::decimal_t make_decimal(std::string_view sv, std::pmr::memory_resource* mr) {
+    auto bytes =
+        std::span<const std::byte>{reinterpret_cast<const std::byte*>(sv.data()), sv.size()};
+    auto r = fixpp::decimal_t::parse(bytes, mr);
+    EXPECT_TRUE(r.has_value()) << "make_decimal failed for: " << sv;
+    return r.value_or(fixpp::decimal_t{});
+}
+
+// View a byte span as a std::string (raw copy; SOH bytes preserved verbatim).
+inline std::string bytes_to_string(std::span<const std::byte> b) {
+    return std::string{reinterpret_cast<const char*>(b.data()), b.size()};
+}
 
 // Assemble a complete FIX frame "8=<begin_string>\x01 9=<len>\x01 <body> 10=<chk>\x01"
 // from a body that already leads with "35=<MsgType>\x01". BodyLength = byte count
