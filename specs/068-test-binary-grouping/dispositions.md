@@ -1326,3 +1326,114 @@ module ever carried a `LABELS` property, so no `-L` selector is affected
 baseline (post-068, unchanged file): all 12 (+ the mallocnesia sidecar)
 pass, matching the 12 `.cpp` census 1:1. No historical `-R`-by-target-name
 idiom applies (nothing changed).
+
+## Module: `codegen` (12 `.cpp`) — US2
+
+003-dictionary-codegen typed-accessor/shape suites + 062 group-entry seams +
+067 emit-builders unit test + T041 determinism + T022 conformance. The whole
+file is guarded by a top-level `if(NOT TARGET fixpp_codegen_generate) return()
+endif()` (unchanged — grouping preserves the built set per FR-007).
+
+### ODR pre-check (§3)
+
+No `int main(` in any of the 12 (grepped). No duplicate `TEST`/`TEST_F`
+`Suite.Name` across the grouped 9 (verified — `group_entry_generation_trap_test.cpp`
+textually has 2 `TEST(` macros but they are mutually exclusive
+`#ifndef NDEBUG ... #else ... #endif` branches, so only one compiles per
+config; no collision). All 9 grouped files wrap content in an anonymous
+namespace or declare no file-scope symbols. Zero FR-012 renames.
+
+### Grouped
+
+**Bucket `codegen_pure_tests`** — 9 `.cpp`, label `"codegen"`, link
+`fixpp_dictionary` + `GTest::gtest`/`GTest::gtest_main`, `add_dependencies`
+`fixpp_codegen_generate`:
+
+| `.cpp` | decision | odr_action |
+|---|---|---|
+| `typed_accessor_test.cpp` | grouped:pure | none (anon-ns) |
+| `flyweight_shape_test.cpp` | grouped:pure | none (anon-ns) |
+| `msgtype_boundary_test.cpp` | grouped:pure | none (anon-ns) |
+| `validator_shape_test.cpp` | grouped:pure | none (no file-scope symbols) |
+| `length_data_table_test.cpp` | grouped:pure | none (no file-scope symbols) |
+| `group_entry_read_test.cpp` | grouped:pure | none (anon-ns) |
+| `nested_group_read_test.cpp` | grouped:pure | none (anon-ns) |
+| `group_entry_generation_trap_test.cpp` | grouped:pure (`EXPECT_DEATH` only — gtest fork, isolation-safe per procedure) | none (anon-ns; mutually-exclusive `#ifndef NDEBUG` TEST pair, not a collision) |
+| `conformance/conformance_test.cpp` | grouped:pure | none (anon-ns) |
+
+`FIXPP_CODEGEN_MANIFEST` (needed only by `conformance_test.cpp`) is added to
+the bucket's shared compile-definitions — harmless to the other 8 members
+(same pattern as the dictionary pilot's single-consumer `FIXPP_DICT_DATA_DIR`).
+
+### Standalone (3)
+
+| `.cpp` | reason |
+|---|---|
+| `group_entry_alloc_gate_test.cpp` (`codegen_group_entry_alloc_gate_test`) | in-TU global `operator new`/`operator new[]` counter (`g_nested_extent_alloc_count`) + live `$<TARGET_FILE:codegen_group_entry_alloc_gate_test>` mallocnesia sidecar — must keep its exact name |
+| `test_067_emit_builders_unit.cpp` (`codegen_067_emit_builders_unit_test`) | label-heterogeneous, sole `"codegen;067"` member (D4 bucket-of-1); distinct link-deps (compiles `tools/codegen/fixpp-codegen/ir.cpp`+`emit_builders.cpp` directly + `pugixml::pugixml`) |
+| `determinism_test.cpp` (`codegen_determinism_test`) | live procedure selects the external `fixpp-codegen` tool binary via `$<TARGET_FILE:fixpp-codegen>` (compile-def injection) and shells out to it twice via `std::system()` — brief-mandated KEEP standalone |
+
+Not a `.cpp`, unaffected either way: `codegen_build_graph_test.cmake` (the
+`fixpp::dict::codegen-build-graph-check` `cmake -P` git-status-cleanliness
+gate — brief-mandated KEEP standalone; not a gtest binary).
+
+**Sum:** 9 grouped + 3 standalone = **12** ✓ (100% dispositioned).
+
+### `-R`/`-L` selectability (SC-004 / Scenario-3)
+
+`ctest -L codegen` selects 6 entries post-grouping (`codegen_pure_tests`,
+`codegen_group_entry_alloc_gate_test`,
+`codegen_group_entry_alloc_gate_test_mallocnesia`,
+`codegen_067_emit_builders_unit_test`, `codegen_determinism_test`,
+`fixpp::dict::codegen-build-graph-check`) — same label-count contract as
+before (the 9 same-label pure tests collapsed into one entry).
+`--gtest_list_tests` on `codegen_pure_tests`: 29 cases, matching the 9-file
+census (30 textual `TEST(` occurrences minus the 1 that never compiles in
+this config, per the ODR note above). No historical `-R`-by-target-name
+idiom applies (module tasks select via `-L codegen`, never individual
+target name, except the two brief-mandated `$<TARGET_FILE:>` live
+selections above, both preserved standalone).
+
+## Module: `integration` (2 `.cpp`) — US2
+
+003-dictionary-codegen US3 (T035, Seam #10b FIXT cross-vocabulary) + US4
+(T038, Seam #10a multi-version coexistence). Both share LABELS
+`"integration"` and both need `fixpp_codegen_generate` — genuine 2-file
+grouping candidate (not the "likely bucket-of-1" the module brief predicted;
+the full audit found a real pair).
+
+### ODR pre-check (§3)
+
+No `int main(`, no thread/global-alloc mechanism, no duplicate
+`TEST`/`Suite.Name` (`FixtCrossVocabulary` vs `MultiSessionMultiVersion` —
+disjoint). Both wrap content in an anonymous namespace. Zero FR-012 renames.
+
+### Grouped
+
+**Bucket `integration_pure_tests`** — 2 `.cpp`, label `"integration"`, link
+union `fixpp_dictionary` + `fixpp::dict::v42` + `fixpp::dict::v50sp2` +
+`GTest::gtest`/`GTest::gtest_main`, `add_dependencies` `fixpp_codegen_generate`:
+
+| `.cpp` | decision | odr_action |
+|---|---|---|
+| `fixt_cross_vocabulary.cpp` | grouped:pure | none (anon-ns) |
+| `multi_session_multi_version.cpp` | grouped:pure | none (anon-ns; all assertions `static_assert`) |
+
+`FIXPP_DICT_DATA_DIR` (needed only by `fixt_cross_vocabulary.cpp`) is added
+to the bucket's shared compile-definitions — unused by (harmless to)
+`multi_session_multi_version.cpp` (grepped: neither file previously used it
+in the multi-version target, which had no compile-def at all).
+
+### Standalone (0)
+
+None — the entire module groups into 1 bucket.
+
+**Sum:** 2 grouped + 0 standalone = **2** ✓ (100% dispositioned).
+
+### `-R`/`-L` selectability (SC-004 / Scenario-3)
+
+`ctest -L integration` selects 1 entry post-grouping (`integration_pure_tests`),
+down from 2 pre-grouping — both gtest `Suite.Name` sets (7 cases in
+`FixtCrossVocabulary` + 2 in `MultiSessionMultiVersion` = 9 total) run
+inside the one process. No historical `-R`-by-target-name idiom targeted
+either of the 2 grouped names.
