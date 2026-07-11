@@ -1129,3 +1129,98 @@ check: `wire_pure_tests` lists 230 cases (28 files' worth, including the
 `wire_codegen_tests` 6, `wire_dict_tests` 7. No historical `-R`-by-target-name
 idiom targeted any of the 33 grouped names individually (all referenced only
 via the `^wire_` prefix per the module's own header comment).
+
+## Module: `tls` (23 `.cpp`) — US2
+
+011-tls-policy test suite. The `fixpp_add_tls_test(NAME... SOURCES...)`
+helper (already multi-value `SOURCES`-capable) sets `LABELS "tls;011"` on
+every registration by default — a clean D4 label-homogeneous partition for
+the 14 members that never override it. A few registrations override with
+more specific compound labels (`046;nfr017;publish_acquire`,
+`046;nfr017;fallback_link`, `compile_negative`, `alloc_guard`) — those are
+label-heterogeneous and/or bucket-of-1 (D4), consistent with the
+`transport` module's identical `046;nfr017;fallback_link` precedent for
+`test_tls_forced_fallback_link.cpp`. Key discriminator: real OS-thread
+spawn (`std::thread`/`asio::thread_pool`) forces standalone regardless of
+label; a *local* `std::pmr::monotonic_buffer_resource` with
+`null_memory_resource()` upstream (the two PMR-failure witnesses) is
+isolation-safe (D3 groupable) — same rule already applied to `dictionary`'s
+`oom_injection_test`/`reify_oom_test`. `test_load_credentials_cancellation.cpp`'s
+`asio::bind_cancellation_slot`/`asio::use_future` usage is single-threaded
+(`asio::io_context ioc; ... ioc.run(); ... fut.get();` on the calling thread
+only, verified — same pattern as `otel`'s `test_engine_close_teardown`/
+`session_pure_tests`/`interop`'s `ParityAcceptorFixture`) — groupable, not
+genuinely concurrent.
+
+### ODR pre-check (§3)
+
+No `int main(` in any of the 14 grouped `.cpp` (the 2 compile-negative
+sources — `cipher_policy_banned_negative.cpp`,
+`security_profile_deprecated_negative.cpp` — DO have their own `main()`,
+confirming they were never groupable candidates: `EXCLUDE_FROM_ALL` +
+`WILL_FAIL`-driven `cmake --build --target` invocations, not linked against
+`gtest_main`). Full `TEST`/`TEST_F`/`TEST_P` `Suite.Name` census across the
+14-file bucket (100 cases) has zero duplicates. 12 of the 14 wrap their
+content in an anonymous namespace; the remaining 2
+(`test_cipher_allow_list_static_assert.cpp`, `test_certificate_lifetimebound.cpp`)
+have no file-scope free functions/globals at all — `test_certificate_lifetimebound.cpp`'s
+`inline_stub` class is declared *inside* a `TEST` function body (function-local,
+no linkable symbol) — no collision risk. Zero FR-012 renames.
+
+### Grouped
+
+**Bucket `tls_pure_tests`** — 14 `.cpp`, label `"tls;011"` (unmodified
+`fixpp_add_tls_test` default), link `fixpp::tls` + `OpenSSL::Crypto/SSL` +
+`ZLIB::ZLIB` + gtest, compile-def `FIXPP_TLS_FIXTURE_DIR` (union — pre-existing
+on 4 of the 14, harmless no-op for the other 10):
+
+| `.cpp` | decision | odr_action |
+|---|---|---|
+| `test_pinset_single_thread_ordering` | grouped:pure | none (anon-ns) |
+| `test_pinset_add_then_remove_deterministic` | grouped:pure | none (anon-ns) |
+| `test_pinset_snapshot_outlives_pinset` | grouped:pure | none (anon-ns) |
+| `test_pinset_per_counterparty_sharing` | grouped:pure | none (anon-ns) |
+| `test_pinset_add_pmr_fail` | grouped:pure (local `monotonic_buffer_resource`+`null_memory_resource`, no global new) | none (anon-ns) |
+| `test_make_file_cert_source_factory` | grouped:pure | none (anon-ns) |
+| `test_load_credentials_cancellation` | grouped:pure (single-threaded `ioc.run()`, no real socket) | none (anon-ns) |
+| `test_file_cert_source_pmr_fail` | grouped:pure (local `monotonic_buffer_resource`+`null_memory_resource`, no global new) | none (anon-ns) |
+| `test_cipher_allow_list_static_assert` | grouped:pure | none (no file-scope symbols) |
+| `test_security_profile_mapping` | grouped:pure | none (anon-ns) |
+| `test_tls_error_variants` | grouped:pure (`asio/thread_pool.hpp` included but never instantiated) | none (anon-ns) |
+| `test_verify_peer_t039` | grouped:pure | none (anon-ns) |
+| `test_security_profile_empty_pinset` | grouped:pure | none (anon-ns) |
+| `test_certificate_lifetimebound` | grouped:pure | none (function-local class only) |
+
+### Standalone (9)
+
+| `.cpp` | reason |
+|---|---|
+| `test_pinset_add_then_remove_stress` | genuinely concurrent (`std::thread finder{...}`, TSan stress) |
+| `test_pinset_rotation_does_not_affect_in_flight` | genuinely concurrent (`std::thread rotator{...}`) |
+| `test_pin_view_lifetime_under_rotation` | genuinely concurrent (`std::thread reader{...}`) |
+| `test_tls_handshake_alloc_guard` (`tls_handshake_alloc_guard`) | live `$<TARGET_FILE:tls_handshake_alloc_guard>` name-selection (mallocnesia sidecar) — local `counting_resource` mechanism itself would otherwise be groupable |
+| `test_hsm_async_signer_mock` | genuinely concurrent (`asio::thread_pool hsm_pool{1}`) |
+| `cipher_policy_banned_negative` (`tls_cipher_banned_negative_compile`) | compile-negative: own `main()`, `EXCLUDE_FROM_ALL`, `WILL_FAIL` `cmake --build` invocation, label-heterogeneous `compile_negative` |
+| `security_profile_deprecated_negative` (`tls_security_profile_deprecated_negative`) | compile-negative: own `main()`, `EXCLUDE_FROM_ALL`, `WILL_FAIL` `cmake --build` invocation, label-heterogeneous `compile_negative` |
+| `test_pinset_snapshot_publish_acquire` | genuinely concurrent (`std::thread`) + heterogeneous `TSAN_OPTIONS` ENV + label-heterogeneous `046;nfr017;publish_acquire` |
+| `test_tls_forced_fallback_link` | label-heterogeneous, sole `046;nfr017;fallback_link` (D4 bucket-of-1 — same pattern as `transport`'s `test_transport_forced_fallback_link`) |
+
+**Sum:** 14 grouped + 9 standalone = **23** ✓ (100% dispositioned).
+
+### `-R`/`-L` selectability (SC-004 / Scenario-3)
+
+`ctest -L tls` / `-L 011` both select the grouped `tls_pure_tests` entry plus
+every standalone target that still carries `tls`/`011` in its LABELS
+(all 9 standalone targets do — `fixpp_add_tls_test`'s default is never
+fully replaced, only extended) — verified via the post-grouping run:
+`-L 011` → 12 tests (12/12 pass), `-L tls` → 12 tests, `-L 046` → 2,
+`-L compile_negative` → 2, `-L alloc_guard` → 1, `-L fallback_link` → 1,
+`-L publish_acquire` → 1 (each label count unchanged from its pre-grouping
+per-`.cpp` value, since only the 14 same-label pure tests collapsed into
+one entry). `--gtest_list_tests` on `tls_pure_tests`: 100 cases, matching
+the 14-file census sum exactly. No historical `-R`-by-target-name idiom
+targeted any of the 14 grouped names (the module's own tasks/quickstart
+docs select tests via `-L tls`/`-L 011`, never by individual target name);
+`tls_handshake_alloc_guard`'s exact name is preserved (live-name mallocnesia
+dependency), so `tls_handshake_alloc_guard_mallocnesia`'s
+`$<TARGET_FILE:tls_handshake_alloc_guard>` reference is unaffected.
