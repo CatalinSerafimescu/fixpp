@@ -8,6 +8,15 @@
 
 **Input**: User description: "FIX 4.4 closeout — implement the remaining unimplemented FIX 4.4 session-negotiation fields plus XMLnonFIX passthrough, closing catalogue rows S-029, S-030, S-037, and A-034."
 
+## Clarifications
+
+### Session 2026-07-12
+
+- Q: S-029 — when posture enforcement is ON and an inbound Logon omits TestMessageIndicator(464), how is absence treated? → A: Absent = production (symmetric). `464=Y` ⇒ test; absent or `464=N` ⇒ production. A production-posture session rejects only `464=Y`; a test-posture session rejects absent/`464=N`. Blocks both cross-connect directions.
+- Q: S-030 — which enforcement direction for the negotiated MaxMessageSize(383)? → A: Inbound-only hard enforce (disconnect a peer exceeding the size we advertised); capture the peer's advertised 383 for observability but no hard outbound block this feature. (Reference: QuickFIX-cpp implements neither enforcement nor advertisement — field defined, zero Session logic — so there is no interop pressure to build the outbound guard now.)
+- Q: S-037 — source of the advertised supported-MsgTypes list? → A: Explicit operator-provided config list of (MsgDirection, MsgType) pairs; empty by default (no 384 group emitted). No auto-derivation from the dictionary. (Reference: QuickFIX-cpp does not advertise NoMsgTypes at all.)
+- Q: A-034 — behavior of an inbound 35=n when opt-in dictionary validation is ENABLED? → A: The validator accepts a well-formed XMLnonFIX regardless of the `validate_inbound_messages` setting — correct passthrough in all configs.
+
 ## User Scenarios & Testing *(mandatory)*
 
 This feature closes the last four open FIX 4.4 catalogue rows. Three are session-layer
@@ -143,7 +152,7 @@ with no other story.
 - **FR-008**: The engine MUST support a per-session **supported-MsgTypes advertisement** list of (MsgDirection, MsgType) entries; when non-empty, the outbound Logon(A) MUST include a well-formed NoMsgTypes(384) group whose members (MsgDirection(385) + RefMsgType(372)) reflect the list in order; when empty (default), no 384 group is emitted.
 - **FR-009**: An inbound 35=n (XMLnonFIX) message MUST be delivered to the application-message callback (not the admin callback) with all fields — including the length-delimited XmlData(213) — byte-exact, preserving any embedded SOH/'=' bytes in the payload.
 - **FR-010**: An inbound 35=n MUST NOT be rejected on the default (validation-off) inbound path.
-- **FR-011**: The behavior of an inbound 35=n under opt-in dictionary validation MUST be defined and tested — either the validator accepts a well-formed XMLnonFIX, or the "passthrough assumes validation-off" contract is documented and asserted.
+- **FR-011**: An inbound well-formed 35=n (XMLnonFIX) MUST be accepted by the inbound dictionary validator when opt-in validation is enabled — i.e. the validator MUST NOT reject XMLnonFIX regardless of the `validate_inbound_messages` setting. A discriminating test MUST exercise the validation-enabled path.
 - **FR-012**: All four capabilities MUST be opt-in / additive: with none of the new settings configured, engine behavior MUST be byte-for-byte and disposition-for-disposition identical to the pre-feature baseline (no regression to existing session/wire tests).
 - **FR-013**: The public/C-ABI surface MUST NOT change (C-ABI is GA-frozen at 1.5.0); new configuration is exposed only through the existing C++ session-config surface.
 - **FR-014**: Each capability MUST ship with a discriminating, red-provable test that fails against the pre-feature code and passes after.
@@ -169,10 +178,10 @@ with no other story.
 
 ## Assumptions
 
-- **S-029 conflict rule**: "Mismatch" means the peer's test/production indication (464=Y ⇒ test; 464=N or absent ⇒ production) differs from the locally configured posture. This symmetric rule is the reasonable default; the exact rule and whether absence-of-464 counts as "production" is a candidate for /clarify.
-- **S-030 enforcement direction**: The primary, MUST-enforced behavior is **inbound** (disconnect a peer exceeding the size *we* advertised). Respecting the peer's advertised 383 on our **outbound** side (never sending them a larger message) is captured as available state (FR-007) but its enforcement strength (hard guard vs best-effort) is a /clarify candidate; default is to capture-and-expose without a hard outbound block in this feature.
+- **S-029 conflict rule** (resolved — see Clarifications): "Mismatch" means the peer's test/production indication (464=Y ⇒ test; 464=N or absent ⇒ production) differs from the locally configured posture. Symmetric — a production-posture session rejects only 464=Y; a test-posture session rejects absent/464=N.
+- **S-030 enforcement direction** (resolved — see Clarifications): The MUST-enforced behavior is **inbound-only** (disconnect a peer exceeding the size *we* advertised). The peer's advertised 383 is captured as observable state (FR-007) but there is **no hard outbound guard** in this feature. Reference QuickFIX-cpp implements neither, so there is no interop pressure to add the outbound guard now.
 - **S-030 vs backstop**: The absolute `max_frame_bytes` frame cap is retained unchanged as the outer backstop; the negotiated limit is an inner, per-session bound.
-- **S-037 source**: The supported-MsgTypes set is an explicit operator-provided configuration list, not auto-derived from the loaded dictionary. Auto-derivation is out of scope for this feature.
-- **A-034 validation-enabled**: Default is validation-off (the shipped default), under which 35=n passes through. The validation-on behavior is defined by FR-011 and finalized in design.
+- **S-037 source** (resolved — see Clarifications): The supported-MsgTypes set is an explicit operator-provided configuration list, not auto-derived from the loaded dictionary. Auto-derivation is out of scope. Reference QuickFIX-cpp does not advertise NoMsgTypes at all.
+- **A-034 validation-enabled** (resolved — see Clarifications): 35=n passes through on the default validation-off path; additionally, per FR-011, the validator MUST accept a well-formed XMLnonFIX when validation is enabled (no rejection in any config).
 - **Scope boundaries**: S-032 residual (standalone initiator-driven 141=Y mid-session origination) is explicitly deferred to its own later feature; v50sp2 typed codegen, C-ABI changes, and Python bindings are out of scope.
 - **Dependencies**: reuses the existing Logon builder (`build_logon`), inbound-Logon handler, header scanner, framer/length-delimited-field parser, and the `fromApp` dispatch surface — all already present; no new subsystem is introduced.
