@@ -18,7 +18,7 @@
 - [x] Success criteria are measurable
 - [x] Success criteria are technology-agnostic — *SC-006 references the GA-frozen C-ABI `1.5.0`; domain-essential, not a tooling detail*
 - [x] All acceptance scenarios are defined
-- [x] Edge cases are identified — incl. the load-bearing US2-witness-must-pass-US1-guard coupling
+- [x] Edge cases are identified — incl. the **independent** Part A / Part B fixtures: Part A = an inline-XML load-reject fixture driven through `XmlLoader::load_*`; Part B = a real generated `v44::MassQuote` + a hand-built `table_view` that **bypasses** `XmlLoader::load_*` (so it never encounters US1's guard). The two share no fixture.
 - [x] Scope is clearly bounded — #184 (L-065-2) explicitly out of scope; guard scope limited to L-063-4 delimiter only
 - [x] Dependencies and assumptions identified
 
@@ -32,5 +32,5 @@
 ## Notes
 
 - **RESOLVED (`/speckit-clarify` Session 2026-07-12)**: the guard's enforcement seam is the `XmlLoader::load_*` load path (throw a new distinct typed `dict::` error during load; `as_table_view()` stays non-throwing; the loader gains the parent-chain walk). See spec `## Clarifications` + FR-003/FR-005.
-- **Design coupling to carry into `/plan`**: the US2 witness dialect must jointly satisfy US1's delimiter guard (distinct per-level delimiters) AND carry a divergent-membership reused count-`no_tag` (to be RED pre-fix). Drafting the two parts independently would produce a witness the guard rejects at load.
+- **Design note (independent fixtures — CORRECTED post-research)**: Part A's guard witness uses an inline XML loaded through `XmlLoader::load_*`; Part B's discrimination witness uses a real generated `v44::MassQuote` type over a **hand-built `table_view`** that bypasses `XmlLoader::load_*` entirely. The two share **no** test fixture. The earlier "US2 witness dialect must jointly satisfy US1's delimiter guard" coupling is **wrong** — a hand-built `table_view` never passes through the loader, so the guard is never invoked on it. See spec Edge Cases (US2 witness decoupled) + research D-B6.
 - All items pass; spec ready for `/speckit-clarify`.

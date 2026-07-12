@@ -7,7 +7,7 @@ All commands run with cwd = `research/G19-fix-fpml-iso20022/library`.
 ## Part A — census + load guard
 
 1. **Census pins trip on a bad dict (TDD red first)**
-   - Temporarily introduce a nested==parent-delimiter and a shared parent/child scalar member in a throwaway inline XML; assert FR-001/FR-002 logic flags it. Then the permanent assertions over the 9 shipped dicts pass (0 collisions), **non-vacuously** (each dict reports > 0 groups; FIX40/41/42 included via the structural walk).
+   - Temporarily introduce a nested==parent-delimiter and a shared parent/child scalar member in a throwaway inline XML; assert FR-001/FR-002 logic flags it. Then the permanent assertions over the 9 shipped dicts pass (0 collisions), **non-vacuously** (each dict reports > 0 group-declaration sites; FIX40/41/42 included via the raw per-`<group>` walk with parent-delimiter threading + `<component>`-ref expansion — NOT the guard's first-seen `groups_` seam).
    - `ctest -L dictionary` (grouped) → `reused_tag_census` green; assertions observed > 0 groups per dict.
 
 2. **Load-rejection witness**
@@ -19,11 +19,11 @@ All commands run with cwd = `research/G19-fix-fpml-iso20022/library`.
 ## Part B — typed depth-3 pushed context
 
 1. **Depth-3 discrimination witness (mutation-proven RED first)**
-   - Build a `v44::MassQuote` read over a **hand-built `table_view`** whose grandchild group `555` context store `(MassQuote,[296,295],555)` and bare `555` store carry *different* member sets.
+   - Build a `v44::MassQuote` read over a **hand-built `table_view`** whose grandchild group `555` context store — registered `add_group_member_ctx("i", [296,295], 555, …)` under the **wire `MsgType` value `"i"`** (not "MassQuote", else the read misses the store and false-greens) — and bare `555` store carry *different* member sets.
    - On the **pre-fix** emitter output the witness reads the wrong bare-fallback member → RED. Apply the emitter push (`emit_messages.cpp:270-271`) → GREEN.
    - If constructible on the same hand-built dict, assert the C-ABI depth-3 read agrees (SC-004).
 
-2. **Validator witness**: a depth-≥2 membership scenario where the flat-context validator previously missed → passes post-fix.
+2. **Validator witness** (`ValidatorNestedMembership_Depth2ContextMissUnderFlatWalk`): a depth-≥2 membership scenario the current flat-context walk (hardcoded `root_path={}`) validates **wrong** → RED pre-rewrite, GREEN after the nesting-aware recursive rewrite (mutation-proven). Note the FR-010 **SPLIT-TRIGGER**: if the rewrite proves unbounded it moves to its own feature and L-063-3 stays tracked.
 
 3. **Clean codegen reconfigure (no stale header)**
    - `rm -rf <build>/_codegen` && reconfigure so the changed emitter regenerates all 4 codegen-input dicts.
