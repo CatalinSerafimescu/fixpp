@@ -157,6 +157,104 @@ TEST(ValidatorNestedMembership, Depth2ContextMissUnderFlatWalk) {
         << (result.has_value() ? -1 : static_cast<int>(result.error()));
 }
 
+// FR-010 Gate B r2 fix: `validate_group_level` was a LEVEL SCANNER
+// (`while (i < end)` over the whole remaining range) but was ALSO invoked as
+// the "consume this ONE nested group" routine from a parent instance's body.
+// After consuming the nested group's own declared instances, the recursive
+// call kept scanning to `end` -- over-running into sibling fields, the next
+// parent delimiter, and LATER PARENT INSTANCES. A multi-instance parent
+// (296=2) where EACH instance contains a nested group (295) reproduces this:
+// the first instance's 295-recursion swallows BOTH instances' 295 groups and
+// returns i=end, so 296's own actual_count stays 1 against declared_count=2
+// -> false-reject (wire_required_field_missing, slot 38). Mutation-proven RED
+// on the pre-split validator.hpp, GREEN after the consume_group/
+// validate_group_level split.
+TEST(ValidatorNestedMembership, MultiInstanceParentWithNestedGroupNotFalseRejected) {
+    auto tv = make_nested_membership_dict();
+    dictionary_driven_validator v{std::move(tv)};
+
+    // Valid MassQuote-shaped message: TWO QuoteSet instances, each with its
+    // own QuoteEntry+Leg nested groups fully self-contained.
+    auto frame = make_frame(
+        "35=i\x01"
+        "296=2\x01"
+        "302=SET0\x01"
+        "295=1\x01"
+        "299=E0\x01"
+        "132=10.10\x01"
+        "133=10.20\x01"
+        "555=1\x01"
+        "602=LEGX\x01"
+        "603=SRCX\x01"
+        "302=SET1\x01"
+        "295=1\x01"
+        "299=E1\x01"
+        "132=20.10\x01"
+        "133=20.20\x01"
+        "555=1\x01"
+        "602=LEGY\x01"
+        "603=SRCY\x01");
+
+    std::array<std::byte, 8192> stack{};
+    std::pmr::monotonic_buffer_resource arena{stack.data(), stack.size(),
+                                              std::pmr::null_memory_resource()};
+    auto mv = parse_index(frame, arena);
+
+    std::array<std::byte, 2048> scratch_buf{};
+    std::pmr::monotonic_buffer_resource scratch_mr{scratch_buf.data(), scratch_buf.size(),
+                                                   std::pmr::null_memory_resource()};
+
+    auto const result = v.validate(mv, &scratch_mr);
+    EXPECT_TRUE(result.has_value())
+        << "a valid 296=2 message (each instance with a self-contained nested 295/555 group) "
+           "must validate; the pre-split validate_group_level over-runs past the first "
+           "instance's nested-295 recursion into the second instance, under-counting 296's "
+           "actual_count against declared_count=2. slot="
+        << (result.has_value() ? -1 : static_cast<int>(result.error()));
+}
+
+// Sibling reproduction at a DIFFERENT nesting shape: a single top-level
+// parent (296=1) whose nested group itself has MULTIPLE instances (295=2),
+// where only the FIRST instance contains a deeper nested group (555). The
+// pre-split recursion into 555 over-runs past 295's own remaining instances,
+// under-counting 295's actual_count against declared_count=2.
+TEST(ValidatorNestedMembership, MultiEntryNestedGroupFirstEntryDeeperNestedNotFalseRejected) {
+    auto tv = make_nested_membership_dict();
+    dictionary_driven_validator v{std::move(tv)};
+
+    auto frame = make_frame(
+        "35=i\x01"
+        "296=1\x01"
+        "302=SET0\x01"
+        "295=2\x01"
+        "299=E0\x01"
+        "132=10.10\x01"
+        "133=10.20\x01"
+        "555=1\x01"
+        "602=LEGX\x01"
+        "603=SRCX\x01"
+        "299=E1\x01"
+        "132=20.10\x01"
+        "133=20.20\x01");
+
+    std::array<std::byte, 8192> stack{};
+    std::pmr::monotonic_buffer_resource arena{stack.data(), stack.size(),
+                                              std::pmr::null_memory_resource()};
+    auto mv = parse_index(frame, arena);
+
+    std::array<std::byte, 2048> scratch_buf{};
+    std::pmr::monotonic_buffer_resource scratch_mr{scratch_buf.data(), scratch_buf.size(),
+                                                   std::pmr::null_memory_resource()};
+
+    auto const result = v.validate(mv, &scratch_mr);
+    EXPECT_TRUE(result.has_value())
+        << "a valid 295=2 nested group (only the first entry containing a deeper 555 group) "
+           "must validate; the pre-split validate_group_level over-runs past the first entry's "
+           "555-recursion into 295's second entry, under-counting 295's actual_count against "
+           "declared_count=2. slot="
+        << (result.has_value() ? -1 : static_cast<int>(result.error()));
+}
+
 namespace {
 
 // Minimal synthetic dialect reproducing L-063-3 residual (b): a NumInGroup
