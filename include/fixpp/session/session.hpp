@@ -286,6 +286,14 @@ public:
     // PLACEHOLDER — returns NotConnected until Phase 3 wires the FSM field.
     [[nodiscard]] fsm_state state() const noexcept;
 
+    // 070-fix44-closeout S-030 (FR-007): the peer's advertised MaxMessageSize(383)
+    // read from its inbound Logon (nullopt ⇒ peer advertised none). Observability
+    // only in this feature — captured to inform the deferred outbound-respect
+    // behavior; there is no hard outbound guard here (see spec Assumptions).
+    [[nodiscard]] std::optional<std::uint32_t> peer_max_message_size() const noexcept {
+        return peer_advertised_max_message_size_;
+    }
+
     // FR-004 / D-2 — set of recent FSM transitions (capacity ≤16).
     // Returns a std::span view over the underlying std::array<fsm_state, 16>
     // in PHYSICAL-BUFFER ORDER (index 0..15).
@@ -601,6 +609,15 @@ private:
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> reset_seqnums_to_one_durable(
         reset_disposition disposition) noexcept;  // wired in T007/T008/T014
 
+    // 070-fix44-closeout S-029: refuse an inbound Logon on a TestMessageIndicator(464)
+    // posture mismatch (or malformed 464). Emits a Logout(35=5) carrying reason_text
+    // (fire toAdmin → assign_outbound → store_then_emit), then transitions to
+    // Disconnected — the session never reaches Active. Mirrors the Logon-time
+    // Logout+disconnect disposition (session.cpp:2692-2714). Called from both the
+    // acceptor inbound-Logon and the initiator inbound-Logon-ack paths. [FR-002; D-F]
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> refuse_logon_with_logout_(
+        std::string_view reason_text) noexcept;
+
     const fixpp::core::EngineConfig& engine_;
     SessionConfig cfg_;  // FR-001 / D-1 — by-value copy (W-5 lifetime fix, 010); caller may drop or
                          // mutate the config after the ctor returns without causing UAF
@@ -676,6 +693,10 @@ private:
     // Separate from the lifecycle state_ above (that tracks open/close lifecycle;
     // this tracks the FIX protocol state).
     fsm_state fsm_state_ = fsm_state::NotConnected;
+
+    // 070-fix44-closeout S-030 (FR-007): peer's advertised MaxMessageSize(383),
+    // parsed from its inbound Logon. Observability only (no outbound guard here).
+    std::optional<std::uint32_t> peer_advertised_max_message_size_;
 
     // ── FR-004 / D-2 — FSM transition ring-buffer (capacity 16) ──────────────
     // Stores the last ≤16 fsm_state values recorded via record_state_transition_.

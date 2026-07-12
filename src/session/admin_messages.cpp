@@ -24,9 +24,14 @@
 #include <expected>
 #include <fixpp/core/error.hpp>
 #include <fixpp/core/pmr_arena_upstream.hpp>  // detail::arena_upstream (MSVC-debug proxy)
-#include <fixpp/dict/version_profile.hpp>  // render_appl_ver_id — T016/033
+#include <fixpp/dict/version_profile.hpp>     // render_appl_ver_id — T016/033
 #include <fixpp/session/admin_messages.hpp>
 #include <fixpp/session/seqnum.hpp>
+// 070-fix44-closeout S-037: the build_logon body iterates opts.supported_msg_types
+// and reads supported_msg_type::{direction,msg_type} + msg_direction — the COMPLETE
+// definitions come from the light session_types.hpp (also included via
+// admin_messages.hpp; direct include here for IWYU). Avoids the heavy session_config.hpp.
+#include <fixpp/session/session_types.hpp>  // supported_msg_type, msg_direction (complete)
 #include <fixpp/wire/tag_scan.hpp>  // accumulate_tag_digit (SC-004 / 040-inbound-tag-overflow)
 #include <fixpp/wire/writer.hpp>
 #include <memory_resource>
@@ -81,8 +86,13 @@ namespace {
     std::string_view target_comp_id, std::string_view begin_string, int heartbt_int,
     std::string_view sending_time, bool reset_seqnum, std::optional<seqnum_t> next_expected_seq,
     std::optional<fixpp::dict::application_version> default_appl_ver_id,
-    std::optional<std::string_view> username, std::optional<std::string_view> password) noexcept {
+    std::optional<std::string_view> username, std::optional<std::string_view> password,
+    const logon_advertise_options& opts) noexcept {
     // NOLINTEND(bugprone-easily-swappable-parameters)
+    // 070-fix44-closeout: opts drives the S-029/S-030/S-037 advertise fields
+    // (464 / 383 / 384-group). Emitted near the end (after 789) in contract
+    // order 383 → 384-group → 464 (C-3.4). Empty opts ⇒ none emitted ⇒
+    // byte-identical baseline (FR-012). US1 lands 464; US2/US3 land 383/384.
     // Group scratch: no groups in Logon, so a bounded no-heap upstream
     // (arena_upstream() = null on release/Linux, new_delete under MSVC debug).
     fixpp::wire::Writer w(out, ::fixpp::detail::arena_upstream());
@@ -202,6 +212,81 @@ namespace {
             return std::unexpected(fixpp::core::error::wire_field_value_truncated);
         }
         if (auto r = w.append_raw(789, sv_to_bytes(sv)); !r) {
+            return std::unexpected(r.error());
+        }
+    }
+
+    // 383=MaxMessageSize — 070-fix44-closeout S-030 advertise: emitted only when
+    // opts.max_message_size set (local advertised_max_message_size). Contract C-3.4
+    // order: after 789, before the 384 group and 464. Absent ⇒ no 383 ⇒
+    // byte-identical baseline. [FR-004 advertise side]
+    if (opts.max_message_size.has_value()) {
+        char nbuf[12];
+        auto sv = render_u32(*opts.max_message_size, nbuf, sizeof(nbuf));
+        if (sv.empty()) {
+            return std::unexpected(fixpp::core::error::wire_field_value_truncated);
+        }
+        if (auto r = w.append_raw(383, sv_to_bytes(sv)); !r) {
+            return std::unexpected(r.error());
+        }
+    }
+
+    // 384=NoMsgTypes group — 070-fix44-closeout S-037 advertise: emitted only when
+    // opts.supported_msg_types is non-empty. `384=k` then k contiguous (372,385)
+    // member pairs (RefMsgType then MsgDirection, per the FIX44 group delimiter
+    // order). Contract C-3.4 order: after 383, before 464. Empty ⇒ no group ⇒
+    // byte-identical baseline. Each field appended through the bound-checked Writer
+    // (fail-closed on overflow → std::unexpected, no partial frame, no heap —
+    // Article VIII §5 / XV.1). msg_direction renders to 'S'/'R'; an off-enum value
+    // is runtime-checked and fails closed (std::unexpected) rather than being
+    // unrepresentable by construction (Gate B PR #189 P1 #1). [FR-008]
+    if (!opts.supported_msg_types.empty()) {
+        char nbuf[12];
+        auto kv = render_u32(static_cast<std::uint32_t>(opts.supported_msg_types.size()), nbuf,
+                             sizeof(nbuf));
+        if (kv.empty()) {
+            return std::unexpected(fixpp::core::error::wire_field_value_truncated);
+        }
+        if (auto r = w.append_raw(384, sv_to_bytes(kv)); !r) {
+            return std::unexpected(r.error());
+        }
+        for (const auto& entry : opts.supported_msg_types) {
+            // 372=RefMsgType (group delimiter — first member).
+            if (auto r = w.append_raw(372, sv_to_bytes(entry.msg_type)); !r) {
+                return std::unexpected(r.error());
+            }
+            // 385=MsgDirection: 'S' (send) / 'R' (receive). An off-enum value
+            // (e.g. static_cast<msg_direction>(2)) IS constructible in C++ despite
+            // the design premise otherwise (Gate B PR #189 P1 #1) — the exhaustive
+            // switch covers both enumerators (no -Wswitch); no default: (no
+            // -Wcovered-switch-default); the post-switch sentinel check catches any
+            // off-enum value and fails closed rather than laundering it to 'R'.
+            char dir_ch = 0;
+            switch (entry.direction) {
+                case msg_direction::send:
+                    dir_ch = 'S';
+                    break;
+                case msg_direction::receive:
+                    dir_ch = 'R';
+                    break;
+            }
+            if (dir_ch == 0) {
+                return std::unexpected(fixpp::core::error::invalid_session_config);
+            }
+            std::byte dir[] = {static_cast<std::byte>(dir_ch)};
+            if (auto r = w.append_raw(385, std::span<const std::byte>{dir}); !r) {
+                return std::unexpected(r.error());
+            }
+        }
+    }
+
+    // 464=Y (TestMessageIndicator) — 070-fix44-closeout S-029 advertise: emitted
+    // only when opts.test_message_indicator (i.e. local posture==test). Contract
+    // C-3.4 order: after 789, 383, and the 384 group.
+    // Flag false ⇒ no 464 ⇒ byte-identical baseline. [FR-002 advertise side]
+    if (opts.test_message_indicator) {
+        std::byte val[] = {static_cast<std::byte>('Y')};
+        if (auto r = w.append_raw(464, std::span<const std::byte>{val}); !r) {
             return std::unexpected(r.error());
         }
     }
@@ -398,8 +483,10 @@ namespace {
         return std::unexpected(fixpp::core::error::session_invalid_logon);
     }
 
-    return logon_interpret_result{.heartbt_int=heartbt_int_found, .default_appl_ver_id=default_appl_ver_id_found, .username=username_found,
-                                  .password=password_found};
+    return logon_interpret_result{.heartbt_int = heartbt_int_found,
+                                  .default_appl_ver_id = default_appl_ver_id_found,
+                                  .username = username_found,
+                                  .password = password_found};
 }
 
 // ── Logout (35=5) ────────────────────────────────────────────────────────────────

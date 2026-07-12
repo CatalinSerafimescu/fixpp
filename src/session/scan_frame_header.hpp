@@ -44,13 +44,15 @@ struct FrameHeader {
     std::string_view sending_time;  // tag 52 raw string value (T055 US5)
     std::string_view test_req_id;   // tag 112 raw string value (T041 US3)
     // 013 Phase 3 — recovery / reset fields
-    std::string_view begin_seqno;        // tag 7 (BeginSeqNo in ResendRequest)
-    std::string_view end_seqno;          // tag 16 (EndSeqNo in ResendRequest)
-    std::string_view new_seqno;          // tag 36 (NewSeqNo in SequenceReset)
-    std::string_view poss_dup_flag;      // tag 43 (PossDupFlag "Y"/"N")
-    std::string_view orig_sending_time;  // tag 122 (OrigSendingTime) — 021 PossDup
-    std::string_view gap_fill_flag;      // tag 123 (GapFillFlag in SequenceReset)
-    std::string_view reset_seqnum_flag;  // tag 141 (ResetSeqNumFlag in Logon)
+    std::string_view begin_seqno;             // tag 7 (BeginSeqNo in ResendRequest)
+    std::string_view end_seqno;               // tag 16 (EndSeqNo in ResendRequest)
+    std::string_view new_seqno;               // tag 36 (NewSeqNo in SequenceReset)
+    std::string_view poss_dup_flag;           // tag 43 (PossDupFlag "Y"/"N")
+    std::string_view orig_sending_time;       // tag 122 (OrigSendingTime) — 021 PossDup
+    std::string_view gap_fill_flag;           // tag 123 (GapFillFlag in SequenceReset)
+    std::string_view reset_seqnum_flag;       // tag 141 (ResetSeqNumFlag in Logon)
+    std::string_view test_message_indicator;  // tag 464 (TestMessageIndicator) — 070 E5
+    std::string_view max_message_size;        // tag 383 (MaxMessageSize) — 070 E5
     std::string_view
         next_expected_msg_seq_num;  // tag 789 value (may be empty if field present-but-empty) — 027
     bool next_expected_present =
@@ -143,6 +145,12 @@ struct FrameHeader {
             case 141:
                 h.reset_seqnum_flag = val;
                 break;  // T027 ResetSeqNumFlag
+            case 383:
+                h.max_message_size = val;
+                break;  // 070 E5 MaxMessageSize
+            case 464:
+                h.test_message_indicator = val;
+                break;  // 070 E5 TestMessageIndicator
             case 789:
                 h.next_expected_msg_seq_num = val;
                 h.next_expected_present =

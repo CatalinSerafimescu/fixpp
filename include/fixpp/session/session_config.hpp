@@ -23,6 +23,7 @@
 #include <cstdint>
 #include <fixpp/core/trace_context.hpp>
 #include <fixpp/session/compid_authorization_policy.hpp>  // value-typed member ⇒ complete type (013 T011)
+#include <fixpp/session/session_types.hpp>  // 070: session_posture/msg_direction/supported_msg_type (shared w/ admin_messages.hpp)
 #include <fixpp/session/message_store_factory.hpp>  // shared_ptr member ⇒ complete type (FR-001a)
 #include <fixpp/session/security_profile.hpp>       // value-typed member ⇒ complete type
 #include <fixpp/tap/tap_consumer.hpp>               // value-typed member ⇒ complete type
@@ -113,6 +114,12 @@ enum class session_role : std::uint8_t {
     initiator = 0,
     acceptor = 1,
 };
+
+// 070-fix44-closeout — session_posture / msg_direction / supported_msg_type are
+// defined in the light shared header fixpp/session/session_types.hpp (included at
+// the TOP of this file, outside the namespace) so admin_messages.hpp can obtain the
+// COMPLETE supported_msg_type for its logon_advertise_options `std::span` member
+// (MSVC's std::span rejects span<incomplete-type> with C2036). [data-model E1/E3]
 
 // Portable "closed enum" attribute (no-op where unsupported). Placed after
 // the enum name per the Clang spelling; a static_assert at every switch site
@@ -463,6 +470,44 @@ struct SessionConfig {
     //   [033 data-model.md E3; FR-008a; INV-FIXT-4]
     std::optional<std::string> username;
     std::optional<std::string> password;
+
+    // ── 070-fix44-closeout S-029 / data-model E1 — local test/production posture ──
+    // posture: enables TestMessageIndicator(464) mismatch enforcement on the Logon
+    //   handshake. `nullopt` (default) ⇒ enforcement DISABLED — no new rejection path
+    //   fires and no 464 is advertised (byte/disposition-identical baseline, FR-012).
+    //   `production` ⇒ refuse an inbound Logon marked test (464=Y); advertise nothing.
+    //   `test` ⇒ refuse an inbound Logon marked production (464=N or absent); advertise
+    //   464=Y on our outbound Logon. Symmetric rule (research.md D-A):
+    //     mismatch := (posture==production && peer_is_test) ||
+    //                 (posture==test && !peer_is_test),   peer_is_test := (464=="Y").
+    //   A non-empty 464 value ∉ {Y,N} is malformed → refused (explicit value check,
+    //   before the posture comparison; 464 is BOOLEAN domain {Y,N} in FIX44.xml).
+    //   No new include: session_posture is defined above at namespace scope;
+    //   std::optional already used (§XV.9 N/A). [FR-001/FR-002/FR-003]
+    std::optional<session_posture> posture;
+
+    // ── 070-fix44-closeout S-030 / data-model E2 — negotiated MaxMessageSize(383) ──
+    // advertised_max_message_size: when set, the engine advertises MaxMessageSize(383)
+    //   =<value> on its outbound Logon and, once the session is established (Active),
+    //   DISCONNECTS a peer whose inbound frame exceeds this many bytes (the peer
+    //   violated the size it agreed to). `nullopt` (default) ⇒ no 383 emitted and no
+    //   negotiated enforcement — byte/disposition-identical baseline (FR-012). This
+    //   NEGOTIATED limit is distinct from and never weakens the absolute framer
+    //   backstop (wire::Framer::max_frame_bytes); the effective inbound cap is
+    //   min(value, max_frame_bytes). No new include: std::optional already used.
+    //   [FR-004/FR-005/FR-006/FR-007]
+    std::optional<std::uint32_t> advertised_max_message_size;
+
+    // ── 070-fix44-closeout S-037 / data-model E3 — advertised supported MsgTypes ──
+    // supported_msg_types: an ordered list of (MsgDirection, MsgType) pairs the engine
+    //   advertises via the NoMsgTypes(384) repeating group on its outbound Logon —
+    //   emitted as `384=k` then k contiguous `372=<MsgType>` `385=<S|R>` member pairs
+    //   (RefMsgType-then-MsgDirection, per the FIX44 group delimiter order). Empty
+    //   (default) ⇒ no 384 group emitted ⇒ byte-identical baseline (FR-012). The typed
+    //   msg_direction enum renders to 'S'/'R', fail-closed (no off-enum value can reach
+    //   the wire). supported_msg_type keeps SessionConfig copy-constructible. No new
+    //   include: <vector>/<string> already used. [FR-008]
+    std::vector<supported_msg_type> supported_msg_types;
 
     // FIXT session predicate: true iff begin_string=="FIXT.1.1" AND
     // default_appl_ver_id is set (E3 / FR-001). Must hold for the engine to emit
