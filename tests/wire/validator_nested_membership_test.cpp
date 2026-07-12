@@ -26,7 +26,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <fixpp/dict/dictionary.hpp>
 #include <fixpp/dict/table_view.hpp>
+#include <fixpp/dict/xml_loader.hpp>
 #include <fixpp/wire/parser.hpp>
 #include <fixpp/wire/validator.hpp>
 #include <memory_resource>
@@ -152,5 +154,94 @@ TEST(ValidatorNestedMembership, Depth2ContextMissUnderFlatWalk) {
            "grandchild 555 at root -> bare delimiter 299 -> false-rejects the real 602-delimited "
            "leg. Nesting-aware query-before-push resolves 555 under [296,295] -> delimiter 602. "
            "slot="
+        << (result.has_value() ? -1 : static_cast<int>(result.error()));
+}
+
+namespace {
+
+// Minimal synthetic dialect reproducing L-063-3 residual (b): a NumInGroup
+// tag (600) reused across TWO different top-level messages with GENUINELY
+// DIFFERENT declared delimiters. Message "U1" (lexically first in
+// <messages>, so first-seen) declares NoX(600) with delimiter FieldA(610).
+// Message "U2" declares the SAME NoX(600) with delimiter FieldB(620). Per
+// `Dictionary::as_table_view()` (dictionary.cpp :421), the per-context
+// `group_first` is populated from `group_first_field(no_tag)` — the
+// dictionary's single GLOBAL, first-seen `GroupRef.first_field_tag` — so
+// BOTH contexts' stored delimiter is 610 (U1's), even though U2's real
+// declared delimiter is 620. No nested group is involved, so the 072
+// nested==parent delimiter load guard (finalize(), parent_group_no_tag==0
+// here) does not fire and this dialect loads cleanly.
+constexpr std::string_view kReusedTagDivergentDelimXml =
+    R"(<fix type='FIX' major='4' minor='4' servicepack='0'>)"
+    R"(<fields>)"
+    R"(<field number='35' name='MsgType' type='STRING'/>)"
+    R"(<field number='600' name='NoX' type='NUMINGROUP'/>)"
+    R"(<field number='610' name='FieldA' type='STRING'/>)"
+    R"(<field number='620' name='FieldB' type='STRING'/>)"
+    R"(</fields>)"
+    R"(<messages>)"
+    R"(<message name='U1Msg' msgtype='U1' msgcat='app'>)"
+    R"(<field name='MsgType' required='N'/>)"
+    R"(<group name='NoX' required='N'>)"
+    R"(<field name='FieldA' required='N'/>)"  // U1's delimiter = 610 (first-seen globally)
+    R"(</group></message>)"
+    R"(<message name='U2Msg' msgtype='U2' msgcat='app'>)"
+    R"(<field name='MsgType' required='N'/>)"
+    R"(<group name='NoX' required='N'>)"
+    R"(<field name='FieldB' required='N'/>)"  // U2's REAL delimiter = 620, corrupted to 610
+    R"(</group></message>)"
+    R"(</messages></fix>)";
+
+}  // namespace
+
+// L-063-3 residual (b) — GTEST_SKIP pending witness, un-skip lifecycle mirrors
+// L-063-2 (spec/behaviors-and-limitations.md). 072 fixed ONLY the flat-walk
+// residual (a); the global-delimiter residual (b) is UNCHANGED and reachable
+// on shipped dictionaries (FIX44 NoMDEntries(268): 269 in MDFullGrp/35=W vs
+// 279 in MDIncGrp/35=X). This synthetic dialect reproduces the same class at
+// minimum scale via a real `XmlLoader::load_from_string` + `as_table_view()`
+// (not a hand-built table_view, per Codex's original observation that a
+// hand-built table_view proves only that the recursion CAN consume good
+// data, not that the real loader SUPPLIES it).
+TEST(ValidatorNestedMembership, PerContextDelimiterResidual_L063_3b_SkipPending) {
+    GTEST_SKIP() << "L-063-3(b) per-context group delimiter residual — as_table_view() stores "
+                    "the global first-seen delimiter (dictionary.cpp :421), not a per-context "
+                    "one. A GREEN assert here would ENSHRINE the bug (see "
+                    "feedback_coverage_push_enshrines_bugs). Un-skip when the per-context-"
+                    "delimiter follow-up lands (tracked via L-063-3 in "
+                    "spec/behaviors-and-limitations.md).";
+
+    std::vector<std::byte> buf(2u * 1024u * 1024u);
+    std::pmr::monotonic_buffer_resource dict_mr{buf.data(), buf.size()};
+    auto dict = fixpp::dict::XmlLoader{}.load_from_string(kReusedTagDivergentDelimXml, &dict_mr);
+    auto tv = dict.as_table_view();
+    dictionary_driven_validator v{std::move(tv)};
+
+    // U2's own declaration says the group's delimiter is FieldB(620); a
+    // single valid instance is 600=1, 620=<value>. This is a CONFORMING
+    // message under U2's real dialect declaration.
+    auto frame = make_frame(
+        "35=U2\x01"
+        "600=1\x01"
+        "620=B0\x01");
+
+    std::array<std::byte, 8192> stack{};
+    std::pmr::monotonic_buffer_resource arena{stack.data(), stack.size(),
+                                              std::pmr::null_memory_resource()};
+    auto mv = parse_index(frame, arena);
+
+    std::array<std::byte, 2048> scratch_buf{};
+    std::pmr::monotonic_buffer_resource scratch_mr{scratch_buf.data(), scratch_buf.size(),
+                                                   std::pmr::null_memory_resource()};
+
+    auto const result = v.validate(mv, &scratch_mr);
+    // CURRENT (pre-fix) behavior: result.has_value() == false — the corrupted
+    // global delimiter (610, from U1) is checked against the wire's real
+    // first field after 600= (620), which mismatches -> wire_required_field_missing.
+    // POST-FIX target (per-context delimiter correctly resolves U2 -> 620):
+    EXPECT_TRUE(result.has_value())
+        << "a valid U2 instance (delimiter FieldB=620 per U2's own declaration) must validate "
+           "once as_table_view() derives a per-context delimiter instead of the dictionary's "
+           "single global first-seen GroupRef.first_field_tag; slot="
         << (result.has_value() ? -1 : static_cast<int>(result.error()));
 }

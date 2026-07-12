@@ -984,6 +984,6 @@ Latent-correctness hardening on the doubly-nested-group surface; all inert on sh
 - `include/fixpp/wire/validator.hpp` — Step-3 rewritten `validate_group_level` (query-before-push recursive descent, K=16 depth-bounded), replacing the flat root-context pass + `seen_in_instance` heuristic (FR-010). SPLIT-TRIGGER did NOT fire (stayed in `validator.hpp`, existing primitives only).
 - `tests/wire/validator_nested_membership_test.cpp` — `ValidatorNestedMembership.Depth2ContextMissUnderFlatWalk`, mutation-proven RED slot-38 → GREEN; no regression across wire_pure/codegen/dict + test_066_validator_on_grouped.
 
-**B&L rows resolved:** L-063-4 (pinned + load-guarded), L-062-3 (census-pinned), L-065-1 (fixed + depth-3 model corrected), L-063-3 (fixed). Recorded residuals: FR-005a/b (guard scope), FR-004 (scalar not load-enforced), census reach bound (FR-013e).
+**B&L rows resolved:** L-063-4 (pinned + load-guarded), L-062-3 (census-pinned), L-065-1 (fixed + depth-3 model corrected), L-063-3(a) flat-walk/nesting FIXED; L-063-3(b) per-context delimiter REMAINS (shipped-reachable, opt-in-validator-only, pre-existing — follow-up). Recorded residuals: FR-005a/b (guard scope), FR-004 (scalar not load-enforced), census reach bound (FR-013e).
 
 **Sanitizer/coverage.** Debug legs green; full ASan/UBSan/TSan + coverage + clean-reconfigure-across-configs matrix (SC-005) re-confirmed at `/speckit-verify`.
