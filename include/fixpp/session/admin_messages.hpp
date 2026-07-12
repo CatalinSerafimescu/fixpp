@@ -23,18 +23,18 @@
 #include <fixpp/core/error.hpp>
 #include <fixpp/dict/version_profile.hpp>  // dict::application_version — T016/033
 #include <fixpp/session/seqnum.hpp>
+#include <fixpp/session/session_types.hpp>  // supported_msg_type/msg_direction (COMPLETE type — logon_advertise_options's std::span member needs it; MSVC rejects span<incomplete> C2036)
 #include <optional>
 #include <span>
 #include <string_view>
 
 namespace fixpp::session {
 
-// Forward declaration only ([const §XV.9]: session_config.hpp pulls in
-// asio/any_io_executor.hpp + tap_consumer.hpp — too heavy for this header,
-// which stays asio/mutex-free by contract). supported_msg_type is defined in
-// session_config.hpp (070-fix44-closeout data-model E3); logon_advertise_options
-// below only needs it as a std::span element type.
-struct supported_msg_type;
+// supported_msg_type / msg_direction come from the light session_types.hpp include
+// above (COMPLETE definition — the std::span<const supported_msg_type> member below
+// needs it; a forward decl compiled on libstdc++/libc++ but MSVC's std::span
+// rejects span<incomplete-type> with C2036). session_types.hpp stays asio/mutex-free
+// so this header keeps its [const §XV.9] lightweight contract.
 
 // 070-fix44-closeout T003 / data-model E4 — build_logon advertise options.
 // Non-owning (const&, span into caller's vector) so build_logon stays

@@ -114,25 +114,12 @@ enum class session_role : std::uint8_t {
     acceptor = 1,
 };
 
-// 070-fix44-closeout T002 / data-model E1 — local test/production posture.
-// SessionConfig::posture (US1 field, not added yet) compares against the
-// inbound peer's TestMessageIndicator(464). Foundational phase adds the type
-// only; no field, no behavior — [const §XV.9] N/A (no std::mutex reachable).
-enum class session_posture { production, test };
-
-// 070-fix44-closeout T002 / data-model E3 — NoMsgTypes(384) member direction.
-// Renders send→'S', receive→'R' on the wire (FIX44 CHAR domain,
-// FIX44.xml:4997-5000); an out-of-enum value is unrepresentable, so an
-// invalid 385 cannot reach the wire (fail-closed by construction).
-enum class msg_direction { send, receive };
-
-// 070-fix44-closeout T002 / data-model E3 — one NoMsgTypes(384) advertise
-// entry: RefMsgType(372) + MsgDirection(385). SessionConfig::supported_msg_types
-// (US3 field, not added yet) is an ordered std::vector<supported_msg_type>.
-struct supported_msg_type {
-    msg_direction direction;  // MsgDirection(385)
-    std::string msg_type;     // RefMsgType(372)
-};
+// 070-fix44-closeout — session_posture / msg_direction / supported_msg_type now
+// live in a dependency-light shared header so admin_messages.hpp can obtain the
+// COMPLETE supported_msg_type for its logon_advertise_options `std::span` member
+// (MSVC's std::span rejects span<incomplete-type> with C2036; a forward decl
+// compiled on libstdc++/libc++ but broke the Tier-2 MSVC build). [data-model E1/E3]
+#include <fixpp/session/session_types.hpp>
 
 // Portable "closed enum" attribute (no-op where unsupported). Placed after
 // the enum name per the Clang spelling; a static_assert at every switch site

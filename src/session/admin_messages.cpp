@@ -28,10 +28,10 @@
 #include <fixpp/session/admin_messages.hpp>
 #include <fixpp/session/seqnum.hpp>
 // 070-fix44-closeout S-037: the build_logon body iterates opts.supported_msg_types
-// and reads supported_msg_type::{direction,msg_type} + msg_direction — these are
-// forward-declared in admin_messages.hpp (to keep that header light) but need the
-// COMPLETE definition here. session_config.hpp defines them at namespace scope.
-#include <fixpp/session/session_config.hpp>  // supported_msg_type, msg_direction (complete)
+// and reads supported_msg_type::{direction,msg_type} + msg_direction — the COMPLETE
+// definitions come from the light session_types.hpp (also included via
+// admin_messages.hpp; direct include here for IWYU). Avoids the heavy session_config.hpp.
+#include <fixpp/session/session_types.hpp>  // supported_msg_type, msg_direction (complete)
 #include <fixpp/wire/tag_scan.hpp>  // accumulate_tag_digit (SC-004 / 040-inbound-tag-overflow)
 #include <fixpp/wire/writer.hpp>
 #include <memory_resource>
