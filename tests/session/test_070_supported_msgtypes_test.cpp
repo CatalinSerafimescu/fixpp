@@ -75,5 +75,15 @@ TEST(SupportedMsgTypes, OverflowFailsClosed) {
     EXPECT_FALSE(r.has_value()) << "oversized group must fail closed, not emit a partial frame";
 }
 
+// (d) Gate B PR #189 P1 #1 — an off-enum MsgDirection (constructible in C++ despite
+// the design premise otherwise) must fail closed, never launder to '385=R'.
+TEST(SupportedMsgTypes, OffEnumDirectionFailsClosed) {
+    std::array<std::byte, 512> buf{};
+    std::vector<supported_msg_type> bad{{static_cast<msg_direction>(2), "D"}};
+    auto r = build(std::span<std::byte>{buf.data(), buf.size()}, bad);
+    ASSERT_FALSE(r.has_value()) << "off-enum MsgDirection must fail closed, not emit 385=R";
+    EXPECT_EQ(r.error(), fixpp::core::error::invalid_session_config);
+}
+
 }  // namespace
 }  // namespace fixpp::session::test

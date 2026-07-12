@@ -237,8 +237,9 @@ namespace {
     // order). Contract C-3.4 order: after 383, before 464. Empty ⇒ no group ⇒
     // byte-identical baseline. Each field appended through the bound-checked Writer
     // (fail-closed on overflow → std::unexpected, no partial frame, no heap —
-    // Article VIII §5 / XV.1). msg_direction renders to 'S'/'R', fail-closed via the
-    // typed enum (no off-enum value can reach the wire). [FR-008]
+    // Article VIII §5 / XV.1). msg_direction renders to 'S'/'R'; an off-enum value
+    // is runtime-checked and fails closed (std::unexpected) rather than being
+    // unrepresentable by construction (Gate B PR #189 P1 #1). [FR-008]
     if (!opts.supported_msg_types.empty()) {
         char nbuf[12];
         auto kv = render_u32(static_cast<std::uint32_t>(opts.supported_msg_types.size()), nbuf,
@@ -254,9 +255,25 @@ namespace {
             if (auto r = w.append_raw(372, sv_to_bytes(entry.msg_type)); !r) {
                 return std::unexpected(r.error());
             }
-            // 385=MsgDirection: 'S' (send) / 'R' (receive), fail-closed via the enum.
-            std::byte dir[] = {
-                static_cast<std::byte>(entry.direction == msg_direction::send ? 'S' : 'R')};
+            // 385=MsgDirection: 'S' (send) / 'R' (receive). An off-enum value
+            // (e.g. static_cast<msg_direction>(2)) IS constructible in C++ despite
+            // the design premise otherwise (Gate B PR #189 P1 #1) — the exhaustive
+            // switch covers both enumerators (no -Wswitch); no default: (no
+            // -Wcovered-switch-default); the post-switch sentinel check catches any
+            // off-enum value and fails closed rather than laundering it to 'R'.
+            char dir_ch = 0;
+            switch (entry.direction) {
+                case msg_direction::send:
+                    dir_ch = 'S';
+                    break;
+                case msg_direction::receive:
+                    dir_ch = 'R';
+                    break;
+            }
+            if (dir_ch == 0) {
+                return std::unexpected(fixpp::core::error::invalid_session_config);
+            }
+            std::byte dir[] = {static_cast<std::byte>(dir_ch)};
             if (auto r = w.append_raw(385, std::span<const std::byte>{dir}); !r) {
                 return std::unexpected(r.error());
             }
