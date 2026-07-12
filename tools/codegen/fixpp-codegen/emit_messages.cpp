@@ -263,12 +263,26 @@ void emit_group_class(TemplateWriter& w, MemberMap const& mm, GroupPlan const& g
                 "ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, "
                 "ctx_.span.size(), ");
             w.num(c);
+            // 072 FR-007: the nested_group_slices CALL-ARG stays ctx_.group_ctx
+            // (the parent's own path is the correct slicing context for the
+            // immediate child, identical to the C-ABI). But the RETURNED child
+            // view's STORED context must push the nested group's own no_tag, so a
+            // further descent (a depth-3 grandchild) resolves membership under the
+            // full path [...parent, child] — reconciling the typed path UP to the
+            // already-correct C-ABI cursor (message_read.cpp:506). The push
+            // happens exactly once, here at mint; group_view::operator[] stays a
+            // verbatim base_ctx_ copy (pushing there too would double-push).
             w.raw(
                 ", ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, "
-                "ctx_.group_ctx);\n      return "
+                "ctx_.group_ctx);\n"
+                "      ::fixpp::wire::entry_context child_ctx = ctx_;\n"
+                "      child_ctx.group_ctx = ctx_.group_ctx.pushed(");
+            w.num(c);
+            w.raw(
+                ");\n      return "
                 "::fixpp::wire::group_view<");
             w.raw(group_cls(c));
-            w.raw(">{nested, ctx_}; }");
+            w.raw(">{nested, child_ctx}; }");
             w.line();
         }
     }
