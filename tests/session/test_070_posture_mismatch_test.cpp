@@ -329,6 +329,36 @@ TEST_F(PostureTest, AcceptorRefusalUsesDurableOutboundSeq) {
            "post-hydration), not the un-hydrated construction default";
 }
 
+// Gate B PR #189 FQ-5 — null-clock refusal witness. EngineConfig::clock is
+// left unset (nullptr default per engine_config.hpp:127); Session::open()
+// only RESOLVES effective_clock_ = cfg_.clock_override ?: engine_.clock
+// (session.cpp:1160-1165) — validate_engine_config()'s clock_not_set gate is
+// an Engine::open()-level precondition this direct-Session harness never
+// calls, so effective_clock_ == nullptr reaches refuse_logon_with_logout_.
+// Pre-fix, that helper unconditionally dereferenced *effective_clock_ →
+// crash; post-fix it degrades to an empty SendingTimeStamp (mirrors the
+// guarded ternary at session.cpp ~L3034) and the refusal completes normally.
+TEST_F(PostureTest, RefusalSurvivesNullClock) {
+    fixpp::core::EngineConfig no_clock_engine{};
+    no_clock_engine.executor = ioc.get_executor();
+    // no_clock_engine.clock intentionally left null.
+
+    auto cfg = make_acceptor_cfg(fixpp::session::session_posture::production);
+    fixpp::session::Session sess(no_clock_engine, cfg);
+    ASSERT_TRUE(open_sync(sess).has_value());
+
+    auto frame = make_logon_frame_464("FIX.4.4", 1, "TW", "ISLD", 30, std::string_view{"Y"});
+    feed_sync(sess, std::span<const std::byte>{frame});
+
+    EXPECT_EQ(sess.state(), fsm_state::Disconnected);
+    ASSERT_EQ(captured_frames.size(), 1u)
+        << "exactly one outbound frame (the refusal Logout) — no crash, no partial emit";
+    const auto& lo = captured_frames.front();
+    EXPECT_EQ(extract_field(lo, 35), "5") << "refusal disposition must be Logout(35=5)";
+    EXPECT_EQ(extract_field(lo, 58), "TestMessageIndicator posture mismatch");
+    EXPECT_EQ(extract_field(lo, 52), "") << "degraded/empty SendingTime under a null clock";
+}
+
 // Advertise side: build_logon emits 464=Y iff opts.test_message_indicator.
 TEST(PostureAdvertise, BuildLogonEmits464YWhenTest) {
     std::array<std::byte, 512> buf{};

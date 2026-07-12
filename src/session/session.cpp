@@ -1805,7 +1805,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::refuse_logon_with_logout
     std::string_view reason_text) noexcept {
     std::array<std::byte, 256> lo_buf{};
     const seqnum_t lo_seq = seqnum_mgr_.peek_outbound();
-    const auto st = stamp_sending_time(*effective_clock_, cfg_.sending_time_precision);
+    // gate-b/r2 FQ-5: guard the clock deref — a clock-less direct-Session posture
+    // refusal must not null-deref; mirrors the guarded ternary at ~L3034.
+    const auto st = effective_clock_
+                        ? stamp_sending_time(*effective_clock_, cfg_.sending_time_precision)
+                        : SendingTimeStamp{};
     auto lo_result = fixpp::session::build_logout(
         std::span<std::byte>{lo_buf.data(), lo_buf.size()}, lo_seq, cfg_.sender_comp_id,
         cfg_.target_comp_id, reason_text, cfg_.begin_string, st.value);
