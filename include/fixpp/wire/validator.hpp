@@ -193,8 +193,8 @@ public:
         // then pushes the group's own no_tag only to recurse into a nested child
         // — so typed read and strict validation now agree on depth-≥2 membership.
         auto const ents = msg.offsets().entries();
-        auto const grp = validate_group_level(ents, msg_type, std::span<std::uint16_t const>{},
-                                              msg.bytes().data(), 0, ents.size());
+        group_context const root_ctx{.msg_type = msg_type};  // depth 0, empty parent path
+        auto const grp = validate_group_level(ents, root_ctx, msg.bytes().data(), 0, ents.size());
         if (!grp) {
             return core::expected_t<void>{std::unexpect, grp.error()};
         }
@@ -216,13 +216,19 @@ public:
     // level beyond which membership context cannot be represented), so stack use
     // is O(min(depth,16)) with no heap.
     [[nodiscard]] core::expected_t<std::size_t> validate_group_level(
-        std::span<OffsetTable::entry const> ents, std::string_view msg_type,
-        std::span<std::uint16_t const> parent_path, std::byte const* frame_base, std::size_t begin,
-        std::size_t end) const noexcept {
+        std::span<OffsetTable::entry const> ents, group_context const& ctx,
+        std::byte const* frame_base, std::size_t begin, std::size_t end) const noexcept {
+        // `ctx` IS the membership context at this nesting level: its msg_type +
+        // bounded parent-no_tag path are exactly the lookup key each group here
+        // is resolved under (query-before-push). Recursing uses ctx.pushed(no_tag)
+        // — the same K=16-clamped push the parser/accessor use — so there is no
+        // hand-rolled depth clamp here.
+        std::span<std::uint16_t const> const parent_path{ctx.parent_path.data(), ctx.depth};
         std::size_t i = begin;
         while (i < end) {
             std::uint16_t const no_tag = ents[i].tag;
-            std::uint16_t const delim_tag = dict_.group_first_field(msg_type, parent_path, no_tag);
+            std::uint16_t const delim_tag =
+                dict_.group_first_field(ctx.msg_type, parent_path, no_tag);
             if (delim_tag == 0) {
                 ++i;
                 continue;  // not a group count field at this nesting level
@@ -241,7 +247,7 @@ public:
                 return core::expected_t<std::size_t>{std::unexpect,
                                                      core::error::wire_required_field_missing};
             }
-            auto const member_tags = dict_.group_member_tags(msg_type, parent_path, no_tag);
+            auto const member_tags = dict_.group_member_tags(ctx.msg_type, parent_path, no_tag);
             auto const is_member = [&](std::uint16_t tag) noexcept {
                 for (auto const m : member_tags) {
                     if (m == tag) {
@@ -250,20 +256,12 @@ public:
                 }
                 return false;
             };
-            // child_path = parent_path + this group's own no_tag (bounded K=16),
-            // used ONLY to recurse into nested children (query-before-push).
-            std::array<std::uint16_t, 16> child_buf{};
-            std::size_t child_len = 0;
-            for (auto const t : parent_path) {
-                if (child_len < child_buf.size()) {
-                    child_buf[child_len++] = t;
-                }
-            }
-            bool const can_descend = child_len < child_buf.size();
-            if (can_descend) {
-                child_buf[child_len++] = no_tag;
-            }
-            std::span<std::uint16_t const> const child_path{child_buf.data(), child_len};
+            // Child context = this level + this group's own no_tag, used ONLY to
+            // recurse into nested children. `pushed` clamps at K=16 (child.depth
+            // == ctx.depth means the cap was hit -> stop descending).
+            group_context const child = ctx.pushed(no_tag);
+            bool const can_descend = child.depth > ctx.depth;
+            std::span<std::uint16_t const> const child_path{child.parent_path.data(), child.depth};
 
             std::uint32_t actual_count = 0;
             while (i < end && ents[i].tag == delim_tag) {
@@ -275,9 +273,8 @@ public:
                     }
                     // Query-before-push: is `t` itself a nested group under the
                     // pushed child path? (depth-bounded by K=16.)
-                    if (can_descend && dict_.group_first_field(msg_type, child_path, t) != 0) {
-                        auto const nested =
-                            validate_group_level(ents, msg_type, child_path, frame_base, i, end);
+                    if (can_descend && dict_.group_first_field(ctx.msg_type, child_path, t) != 0) {
+                        auto const nested = validate_group_level(ents, child, frame_base, i, end);
                         if (!nested) {
                             return nested;  // propagate the nested failure slot
                         }

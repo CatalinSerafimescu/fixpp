@@ -440,11 +440,11 @@ struct Fr002Result {
     std::vector<std::string> collisions;    // scalar tag shared parent <-> nested child
 };
 
-void walk_fr002_group(pugi::xml_node group_node, ComponentIndex const& cidx,
+// `parent` is this group's ALREADY-collected level (computed once by the caller).
+// Check each nested child's scalar members are disjoint from this level's, then
+// recurse with the child level (so each group's `collect_level` runs exactly once).
+void walk_fr002_group(LevelContents const& parent, ComponentIndex const& cidx,
                       Dictionary const& dict, Fr002Result& r) {
-    std::set<std::string_view> stack;
-    LevelContents parent;
-    collect_level(group_node, cidx, dict, stack, parent);
     ++r.member_sets_examined;
     for (auto const& cg : parent.child_groups) {
         std::set<std::string_view> cstack;
@@ -459,7 +459,7 @@ void walk_fr002_group(pugi::xml_node group_node, ComponentIndex const& cidx,
                 r.collisions.push_back(oss.str());
             }
         }
-        walk_fr002_group(cg, cidx, dict, r);  // recurse for deeper parent/child pairs
+        walk_fr002_group(child, cidx, dict, r);  // recurse for deeper parent/child pairs
     }
 }
 
@@ -472,7 +472,10 @@ Fr002Result census_fr002(pugi::xml_document const& doc, Dictionary const& dict) 
         LevelContents top;
         collect_level(container, cidx, dict, stack, top);
         for (auto const& g : top.child_groups) {
-            walk_fr002_group(g, cidx, dict, r);
+            std::set<std::string_view> gstack;
+            LevelContents glevel;
+            collect_level(g, cidx, dict, gstack, glevel);
+            walk_fr002_group(glevel, cidx, dict, r);
         }
     };
     for (char const* section : {"header", "trailer"}) {
