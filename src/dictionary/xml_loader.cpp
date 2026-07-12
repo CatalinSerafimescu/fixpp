@@ -814,8 +814,7 @@ detail::dict_metadata_handle_ptr LoaderState::finalize() {
         }
         auto const& parent = groups_[pit->second];
         if (g.first_field_tag != 0 && g.first_field_tag == parent.first_field_tag) {
-            throw group_delimiter_collision_error::make(g.no_tag, g.first_field_tag,
-                                                        parent.no_tag);
+            throw group_delimiter_collision_error::make(g.no_tag, g.first_field_tag, parent.no_tag);
         }
     }
 

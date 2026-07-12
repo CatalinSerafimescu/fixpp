@@ -85,9 +85,8 @@ using fixpp::decimal_t;
 // Build a well-formed FIX frame: "8=FIX.4.4<SOH> 9=<len><SOH> <body> 10=<chk><SOH>"
 // body must already begin with "35=X<SOH>" and contain SOH-delimited fields.
 std::vector<std::byte> make_frame(std::string_view body) {
-    std::string pre =
-        "8=FIX.4.4\x01" + std::string("9=") + std::to_string(body.size()) + "\x01" +
-        std::string(body);
+    std::string pre = "8=FIX.4.4\x01" + std::string("9=") + std::to_string(body.size()) + "\x01" +
+                      std::string(body);
     unsigned sum = 0;
     for (unsigned char c : pre) {
         sum += c;
@@ -187,9 +186,8 @@ TEST(NestedGroupRead, Depth3NonFirstOuterOccurrenceNoCollision) {
     fixpp::wire::pmr_carry_buffer carry{buf.size(), &arena};
     fixpp::wire::Framer fr{};
     fixpp::wire::frame_view fvs[1]{};
-    auto framed = fr.feed(
-        std::span<const std::byte>{buf.data(), buf.size()}, carry,
-        std::span<fixpp::wire::frame_view>{fvs, 1});
+    auto framed = fr.feed(std::span<const std::byte>{buf.data(), buf.size()}, carry,
+                          std::span<fixpp::wire::frame_view>{fvs, 1});
     ASSERT_TRUE(framed.has_value());
     ASSERT_FALSE(framed->empty());
 
@@ -271,9 +269,8 @@ TEST(NestedGroupRead, Depth3MultiEntryAtMultipleLevelsNoCrossLevelTruncation) {
     fixpp::wire::pmr_carry_buffer carry{buf.size(), &arena};
     fixpp::wire::Framer fr{};
     fixpp::wire::frame_view fvs[1]{};
-    auto framed = fr.feed(
-        std::span<const std::byte>{buf.data(), buf.size()}, carry,
-        std::span<fixpp::wire::frame_view>{fvs, 1});
+    auto framed = fr.feed(std::span<const std::byte>{buf.data(), buf.size()}, carry,
+                          std::span<fixpp::wire::frame_view>{fvs, 1});
     ASSERT_TRUE(framed.has_value());
     ASSERT_FALSE(framed->empty());
 
@@ -402,9 +399,8 @@ TEST(NestedGroupRead, NonLastNestedGroupTrailingFieldNotSwallowed) {
     fixpp::wire::pmr_carry_buffer carry{buf.size(), &arena};
     fixpp::wire::Framer fr{};
     fixpp::wire::frame_view fvs[1]{};
-    auto framed = fr.feed(
-        std::span<const std::byte>{buf.data(), buf.size()}, carry,
-        std::span<fixpp::wire::frame_view>{fvs, 1});
+    auto framed = fr.feed(std::span<const std::byte>{buf.data(), buf.size()}, carry,
+                          std::span<fixpp::wire::frame_view>{fvs, 1});
     ASSERT_TRUE(framed.has_value());
     ASSERT_FALSE(framed->empty());
 
@@ -484,9 +480,8 @@ TEST(NestedGroupRead, NestedQuoteEntriesPerInstancePrices) {
     fixpp::wire::pmr_carry_buffer carry{buf.size(), &arena};
     fixpp::wire::Framer fr{};
     fixpp::wire::frame_view fvs[1]{};
-    auto framed = fr.feed(
-        std::span<const std::byte>{buf.data(), buf.size()}, carry,
-        std::span<fixpp::wire::frame_view>{fvs, 1});
+    auto framed = fr.feed(std::span<const std::byte>{buf.data(), buf.size()}, carry,
+                          std::span<fixpp::wire::frame_view>{fvs, 1});
     ASSERT_TRUE(framed.has_value());
     ASSERT_FALSE(framed->empty());
 
@@ -567,9 +562,8 @@ TEST(NestedGroupRead, RealDictionaryMassQuoteTwoQuoteEntriesPerInstancePrices) {
     fixpp::wire::pmr_carry_buffer carry{buf.size(), &arena};
     fixpp::wire::Framer fr{};
     fixpp::wire::frame_view fvs[1]{};
-    auto framed = fr.feed(
-        std::span<const std::byte>{buf.data(), buf.size()}, carry,
-        std::span<fixpp::wire::frame_view>{fvs, 1});
+    auto framed = fr.feed(std::span<const std::byte>{buf.data(), buf.size()}, carry,
+                          std::span<fixpp::wire::frame_view>{fvs, 1});
     ASSERT_TRUE(framed.has_value());
     ASSERT_FALSE(framed->empty());
 
@@ -654,9 +648,8 @@ TEST(NestedGroupRead, RealDictionaryMassQuote296RootContextSeededAtCtorNoCachePo
     fixpp::wire::pmr_carry_buffer carry{buf.size(), &arena};
     fixpp::wire::Framer fr{};
     fixpp::wire::frame_view fvs[1]{};
-    auto framed = fr.feed(
-        std::span<const std::byte>{buf.data(), buf.size()}, carry,
-        std::span<fixpp::wire::frame_view>{fvs, 1});
+    auto framed = fr.feed(std::span<const std::byte>{buf.data(), buf.size()}, carry,
+                          std::span<fixpp::wire::frame_view>{fvs, 1});
     ASSERT_TRUE(framed.has_value());
     ASSERT_FALSE(framed->empty());
 

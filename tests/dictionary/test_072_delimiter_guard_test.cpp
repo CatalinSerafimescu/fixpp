@@ -36,9 +36,9 @@ constexpr std::string_view kCollidingXml =
     R"(<messages><message name='Bad' msgtype='U' msgcat='app'>)"
     R"(<field name='MsgType' required='N'/>)"
     R"(<group name='NoOuter' required='N'>)"
-    R"(<field name='SharedDelim' required='N'/>)"      // outer delimiter = 150
+    R"(<field name='SharedDelim' required='N'/>)"  // outer delimiter = 150
     R"(<group name='NoInner' required='N'>)"
-    R"(<field name='SharedDelim' required='N'/>)"      // inner delimiter = 150 == outer -> reject
+    R"(<field name='SharedDelim' required='N'/>)"  // inner delimiter = 150 == outer -> reject
     R"(<field name='InnerData' required='N'/>)"
     R"(</group></group></message></messages></fix>)";
 
@@ -55,9 +55,9 @@ constexpr std::string_view kConformingXml =
     R"(<messages><message name='Ok' msgtype='U' msgcat='app'>)"
     R"(<field name='MsgType' required='N'/>)"
     R"(<group name='NoOuter' required='N'>)"
-    R"(<field name='SharedDelim' required='N'/>)"      // outer delimiter = 150
+    R"(<field name='SharedDelim' required='N'/>)"  // outer delimiter = 150
     R"(<group name='NoInner' required='N'>)"
-    R"(<field name='InnerData' required='N'/>)"        // inner delimiter = 250 != 150 -> loads
+    R"(<field name='InnerData' required='N'/>)"  // inner delimiter = 250 != 150 -> loads
     R"(<field name='SharedDelim' required='N'/>)"
     R"(</group></group></message></messages></fix>)";
 
@@ -78,11 +78,11 @@ constexpr std::string_view kSharedScalarDisjointDelimXml =
     R"(<messages><message name='Ok' msgtype='U' msgcat='app'>)"
     R"(<field name='MsgType' required='N'/>)"
     R"(<group name='NoOuter' required='N'>)"
-    R"(<field name='OuterDelim' required='N'/>)"       // outer delimiter = 150
-    R"(<field name='SharedScalar' required='N'/>)"     // 300 in parent
+    R"(<field name='OuterDelim' required='N'/>)"    // outer delimiter = 150
+    R"(<field name='SharedScalar' required='N'/>)"  // 300 in parent
     R"(<group name='NoInner' required='N'>)"
-    R"(<field name='InnerDelim' required='N'/>)"        // inner delimiter = 250 (disjoint)
-    R"(<field name='SharedScalar' required='N'/>)"     // 300 in child — shared scalar, NOT enforced
+    R"(<field name='InnerDelim' required='N'/>)"    // inner delimiter = 250 (disjoint)
+    R"(<field name='SharedScalar' required='N'/>)"  // 300 in child — shared scalar, NOT enforced
     R"(</group></group></message></messages></fix>)";
 
 std::pmr::monotonic_buffer_resource make_arena(std::array<std::byte, (1UZ << 20)>& buf) {
@@ -110,7 +110,8 @@ TEST(Delimiter072Guard, CollidingDialectCatchableAsXmlParseError) {
         (void)fixpp::dict::XmlLoader{}.load_from_string(kCollidingXml, &mr);
     } catch (fixpp::dict::xml_parse_error const& e) {
         threw_as_base = true;
-        EXPECT_NE(std::string_view{e.what()}.find("group_delimiter_collision"), std::string_view::npos);
+        EXPECT_NE(std::string_view{e.what()}.find("group_delimiter_collision"),
+                  std::string_view::npos);
     }
     EXPECT_TRUE(threw_as_base) << "guard error must be catchable as dict::xml_parse_error";
 }

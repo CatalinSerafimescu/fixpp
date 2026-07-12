@@ -41,6 +41,8 @@
 // delimiter-variance finding here does not indicate a live parsing defect
 // — see the printed report for the full reasoning.
 
+#include "reused_tag_census.hpp"
+
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -60,8 +62,6 @@
 #include <string>
 #include <string_view>
 #include <vector>
-
-#include "reused_tag_census.hpp"
 
 namespace {
 
@@ -112,7 +112,7 @@ DelimiterScan delimiter_scan_for(std::filesystem::path const& xml_path, Dictiona
     auto const result = doc.load_file(xml_path.c_str());
     if (!result) {
         return scan;  // reported as empty; the primary Dictionary load already
-                       // exercised the same file successfully above.
+                      // exercised the same file successfully above.
     }
     walk_groups(doc.root(), dict, scan);
     return scan;
@@ -226,15 +226,16 @@ TEST(ReusedTagCensus, AllNineRuntimeDictsCensused) {
 
             auto const dit = scan.delimiters_by_no_tag.find(no_tag);
             if (dit == scan.delimiters_by_no_tag.end() || dit->second.empty()) {
-                std::cout << "    delimiter-scan: no raw <group> declaration site found (unexpected)\n";
+                std::cout
+                    << "    delimiter-scan: no raw <group> declaration site found (unexpected)\n";
                 continue;
             }
             auto const site_n = scan.site_count.at(no_tag);
             if (dit->second.size() > 1) {
                 any_delimiter_varies = true;
                 std::ostringstream oss;
-                oss << dc.name << " no_tag=" << no_tag << " (" << site_n
-                    << " raw <group> sites, " << dit->second.size() << " distinct delimiters)";
+                oss << dc.name << " no_tag=" << no_tag << " (" << site_n << " raw <group> sites, "
+                    << dit->second.size() << " distinct delimiters)";
                 delimiter_variance_notes.push_back(oss.str());
                 std::cout << "    delimiter-scan: VARIES across " << site_n
                           << " raw <group> declaration sites (" << dit->second.size()
@@ -253,8 +254,10 @@ TEST(ReusedTagCensus, AllNineRuntimeDictsCensused) {
                 for (auto const& v : it295->second) {
                     bool const has299 =
                         std::find(v.members.begin(), v.members.end(), 299) != v.members.end();
-                    if (has299) has_quote_entry_variant = true;
-                    else has_quote_cxl_variant = true;
+                    if (has299)
+                        has_quote_entry_variant = true;
+                    else
+                        has_quote_cxl_variant = true;
                 }
                 saw_fix44_295_collision = has_quote_entry_variant && has_quote_cxl_variant;
             }
@@ -264,7 +267,8 @@ TEST(ReusedTagCensus, AllNineRuntimeDictsCensused) {
     std::cout << "=== Q1: max nesting depth (parent-path length) at which any collision occurs: "
               << max_collision_depth << " ===\n";
     std::cout << "=== Q2: delimiter variance across colliding no_tags: "
-              << (any_delimiter_varies ? "AT LEAST ONE VARIES" : "ALL SHARE A DELIMITER") << " ===\n";
+              << (any_delimiter_varies ? "AT LEAST ONE VARIES" : "ALL SHARE A DELIMITER")
+              << " ===\n";
     for (auto const& note : delimiter_variance_notes) {
         std::cout << "    varying: " << note << "\n";
     }
@@ -348,8 +352,8 @@ std::optional<std::uint16_t> resolve_leading_field(pugi::xml_node node, Componen
 }
 
 struct Fr001Result {
-    std::size_t sites = 0;                  // group-declaration sites observed
-    std::vector<std::string> collisions;    // nested delim == parent delim
+    std::size_t sites = 0;                // group-declaration sites observed
+    std::vector<std::string> collisions;  // nested delim == parent delim
 };
 
 // Recursive descent from a wire usage container (message/header/trailer),
@@ -375,7 +379,8 @@ void walk_fr001(pugi::xml_node node, std::optional<std::uint16_t> parent_delim,
             std::string_view const cn = child.attribute("name").value();
             auto const it = cidx.find(cn);
             if (it != cidx.end() && comp_stack.insert(cn).second) {
-                walk_fr001(it->second, parent_delim, cidx, dict, comp_stack, r);  // keep parent delim
+                walk_fr001(it->second, parent_delim, cidx, dict, comp_stack,
+                           r);  // keep parent delim
                 comp_stack.erase(cn);
             }
         } else {
@@ -437,7 +442,7 @@ void collect_level(pugi::xml_node node, ComponentIndex const& cidx, Dictionary c
 
 struct Fr002Result {
     std::size_t member_sets_examined = 0;
-    std::vector<std::string> collisions;    // scalar tag shared parent <-> nested child
+    std::vector<std::string> collisions;  // scalar tag shared parent <-> nested child
 };
 
 // `parent` is this group's ALREADY-collected level (computed once by the caller).
@@ -454,7 +459,8 @@ void walk_fr002_group(LevelContents const& parent, ComponentIndex const& cidx,
             if (child.scalar_fields.contains(t)) {
                 auto const cno = dict.field_by_name(cg.attribute("name").value());
                 std::ostringstream oss;
-                oss << "scalar tag " << t << " shared between a parent group and nested child no_tag="
+                oss << "scalar tag " << t
+                    << " shared between a parent group and nested child no_tag="
                     << (cno ? *cno : 0);
                 r.collisions.push_back(oss.str());
             }
@@ -518,9 +524,9 @@ TEST(NestedGroupDelimiterCensus, NoNestedGroupDelimiterEqualsParentDelimiter) {
             R"(<messages><message name='Bad' msgtype='U' msgcat='app'>)"
             R"(<field name='MsgType' required='N'/>)"
             R"(<group name='NoOuter' required='N'>)"
-            R"(<field name='SharedDelim' required='N'/>)"      // outer delimiter = 150
+            R"(<field name='SharedDelim' required='N'/>)"  // outer delimiter = 150
             R"(<group name='NoInner' required='N'>)"
-            R"(<field name='SharedDelim' required='N'/>)"      // inner delimiter = 150 == outer
+            R"(<field name='SharedDelim' required='N'/>)"  // inner delimiter = 150 == outer
             R"(<field name='InnerData' required='N'/>)"
             R"(</group></group></message></messages></fix>)";
         std::array<std::byte, 1UZ << 20> buf{};
@@ -544,7 +550,7 @@ TEST(NestedGroupDelimiterCensus, NoNestedGroupDelimiterEqualsParentDelimiter) {
             R"(<group name='NoOuter' required='N'>)"
             R"(<field name='SharedDelim' required='N'/>)"
             R"(<group name='NoInner' required='N'>)"
-            R"(<field name='InnerData' required='N'/>)"       // distinct delimiter 250 → loads
+            R"(<field name='InnerData' required='N'/>)"  // distinct delimiter 250 → loads
             R"(<field name='SharedDelim' required='N'/>)"
             R"(</group></group></message></messages></fix>)";
         auto dict = fixpp::dict::XmlLoader{}.load_from_string(kNamesOnly, &mr);
@@ -597,11 +603,11 @@ TEST(NestedGroupScalarMemberCensus, NoSharedParentChildScalarMember) {
             R"(<messages><message name='Bad' msgtype='U' msgcat='app'>)"
             R"(<field name='MsgType' required='N'/>)"
             R"(<group name='NoOuter' required='N'>)"
-            R"(<field name='OuterDelim' required='N'/>)"       // outer delim 150 (disjoint)
-            R"(<field name='SharedScalar' required='N'/>)"     // 300 in parent
+            R"(<field name='OuterDelim' required='N'/>)"    // outer delim 150 (disjoint)
+            R"(<field name='SharedScalar' required='N'/>)"  // 300 in parent
             R"(<group name='NoInner' required='N'>)"
-            R"(<field name='InnerDelim' required='N'/>)"       // inner delim 250 (disjoint)
-            R"(<field name='SharedScalar' required='N'/>)"     // 300 in child — SHARED
+            R"(<field name='InnerDelim' required='N'/>)"    // inner delim 250 (disjoint)
+            R"(<field name='SharedScalar' required='N'/>)"  // 300 in child — SHARED
             R"(</group></group></message></messages></fix>)";
         std::array<std::byte, 1UZ << 20> buf{};
         std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};

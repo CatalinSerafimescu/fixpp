@@ -79,11 +79,11 @@ MessageView<access_mode::Index> parse_index(std::vector<std::byte> const& buf,
 // flat root-context walk mis-validates it.
 table_view make_nested_membership_dict() {
     table_view tv;
-    for (std::uint16_t const t : {std::uint16_t{8}, std::uint16_t{9}, std::uint16_t{10},
-                                  std::uint16_t{35}, std::uint16_t{296}, std::uint16_t{302},
-                                  std::uint16_t{295}, std::uint16_t{299}, std::uint16_t{132},
-                                  std::uint16_t{133}, std::uint16_t{555}, std::uint16_t{602},
-                                  std::uint16_t{603}}) {
+    for (std::uint16_t const t :
+         {std::uint16_t{8}, std::uint16_t{9}, std::uint16_t{10}, std::uint16_t{35},
+          std::uint16_t{296}, std::uint16_t{302}, std::uint16_t{295}, std::uint16_t{299},
+          std::uint16_t{132}, std::uint16_t{133}, std::uint16_t{555}, std::uint16_t{602},
+          std::uint16_t{603}}) {
         tv.add_valid("i", t);
     }
 
@@ -151,5 +151,6 @@ TEST(ValidatorNestedMembership, Depth2ContextMissUnderFlatWalk) {
         << "a valid depth-3 nested message must validate; the flat root-context walk queries "
            "grandchild 555 at root -> bare delimiter 299 -> false-rejects the real 602-delimited "
            "leg. Nesting-aware query-before-push resolves 555 under [296,295] -> delimiter 602. "
-           "slot=" << (result.has_value() ? -1 : static_cast<int>(result.error()));
+           "slot="
+        << (result.has_value() ? -1 : static_cast<int>(result.error()));
 }
