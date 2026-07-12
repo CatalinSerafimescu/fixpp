@@ -35,14 +35,14 @@
 #include <expected>
 #include <fixpp/core/clock.hpp>  // Clock::steady_now / sleep_until
 #include <fixpp/core/engine_config.hpp>
-#include <fixpp/core/error.hpp>     // expected_t, error values
-#include <fixpp/core/fix_time.hpp>  // 005 US5: fix_string_to_utc_time (T055/T056)
+#include <fixpp/core/error.hpp>               // expected_t, error values
+#include <fixpp/core/fix_time.hpp>            // 005 US5: fix_string_to_utc_time (T055/T056)
 #include <fixpp/core/pmr_arena_upstream.hpp>  // detail::arena_upstream (MSVC-debug proxy)
 #include <fixpp/core/session_executor.hpp>
 #include <fixpp/core/session_local.hpp>
 #include <fixpp/core/trace_context.hpp>
-#include <fixpp/session/admin_messages.hpp>         // 005 US1: interpret_logon / T046: build_logout
-#include <fixpp/session/direction.hpp>              // 005 US4: direction_t (store outbound)
+#include <fixpp/session/admin_messages.hpp>  // 005 US1: interpret_logon / T046: build_logout
+#include <fixpp/session/direction.hpp>       // 005 US4: direction_t (store outbound)
 #include <fixpp/session/logon_credentials.hpp>  // 034: frame_has_genuine_tag554 / mask_tag554_same_length_inplace
 #include <fixpp/session/message_store.hpp>          // 008-message-store — store_ unique_ptr dtor
 #include <fixpp/session/message_store_factory.hpp>  // 008-message-store — make() call site
@@ -127,9 +127,11 @@ struct logon_fixt_fields {
         return {};
     }
     return logon_fixt_fields{
-        .default_appl_ver_id=cfg.default_appl_ver_id,
-        .username=cfg.username.has_value() ? std::optional<std::string_view>{*cfg.username} : std::nullopt,
-        .password=cfg.password.has_value() ? std::optional<std::string_view>{*cfg.password} : std::nullopt,
+        .default_appl_ver_id = cfg.default_appl_ver_id,
+        .username = cfg.username.has_value() ? std::optional<std::string_view>{*cfg.username}
+                                             : std::nullopt,
+        .password = cfg.password.has_value() ? std::optional<std::string_view>{*cfg.password}
+                                             : std::nullopt,
     };
 }
 
@@ -152,7 +154,8 @@ Session::Session(const fixpp::core::EngineConfig& engine, const SessionConfig& c
     : engine_(engine),
       cfg_(cfg),
       session_arena_(resolve_session_arena(engine, cfg)),
-      app_version_registry_(app_version_registry), reconnect_fsm_(
+      app_version_registry_(app_version_registry),
+      reconnect_fsm_(
           cfg.transport_factory_override.get(),  // non-owning raw ptr; factory owned by cfg_
           resolve_reconnect_policy(cfg, session_arena_),  // 016 T008: was empty
                                                           // ReconnectPolicy{} (busy-spin)
@@ -166,7 +169,6 @@ Session::Session(const fixpp::core::EngineConfig& engine, const SessionConfig& c
     // null for test/FIX.4.x paths that don't need serviceability checks).
     // Assignment in body (not member-init) to match declaration order in session.hpp
     // (app_version_registry_ is declared after reconnect_fsm_'s logical grouping).
-    
 }
 
 // D-23: release any per-session Clock state (system_clock_source's reusable
@@ -195,11 +197,16 @@ std::pmr::memory_resource* Session::session_arena() const noexcept {
 // [033 data-model.md E2; FR-005; SC-006/W5; INV-FIXT-2]
 fixpp::dict::version_profile Session::negotiated_version_profile() const noexcept {
     if (negotiated_appl_version_ == fixpp::dict::application_version::Unknown) {
-        return fixpp::dict::version_profile{.session=fixpp::dict::session_version::Unknown,
-                                            .default_appl=fixpp::dict::application_version::Unknown, .has_per_message_override=false, ._reserved=0};
+        return fixpp::dict::version_profile{
+            .session = fixpp::dict::session_version::Unknown,
+            .default_appl = fixpp::dict::application_version::Unknown,
+            .has_per_message_override = false,
+            ._reserved = 0};
     }
-    return fixpp::dict::version_profile{.session=fixpp::dict::session_version::vt11,
-                                        .default_appl=negotiated_appl_version_, .has_per_message_override=false, ._reserved=0};
+    return fixpp::dict::version_profile{.session = fixpp::dict::session_version::vt11,
+                                        .default_appl = negotiated_appl_version_,
+                                        .has_per_message_override = false,
+                                        ._reserved = 0};
 }
 
 // ── FR-004 / D-2 — FSM transition ring-buffer helpers ────────────────────
@@ -835,11 +842,13 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::emit_initiator_logon_() 
     // 033 T017/T023: thread the FIXT-only Logon fields (1137 + optional 553/554) into the
     // initiator emit — all-nullopt for FIX.4.x → byte-identical (INV-FIXT-1 / SC-002 / W4).
     const auto initr_fixt = derive_logon_fixt_fields(cfg_);
+    // 070-fix44-closeout T004: empty opts ⇒ no 383/464/384 ⇒ byte-identical
+    // baseline (FR-012). Populated from cfg_ per-story (US1/US2/US3).
     auto logon_result = fixpp::session::build_logon(
         std::span<std::byte>{logon_buf.data(), logon_buf.size()}, logon_seq, cfg_.sender_comp_id,
         cfg_.target_comp_id, cfg_.begin_string, heartbt_sec, sending_time_view, initr_reset_seqnum,
         initr_next_expected, initr_fixt.default_appl_ver_id, initr_fixt.username,
-        initr_fixt.password);
+        initr_fixt.password, fixpp::session::logon_advertise_options{});
     if (!logon_result) {
         // build_logon failed (oversized IDs → wire_frame_too_large).
         // Session-fatal — initiator handshake never reached the wire; transition
@@ -969,8 +978,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
             if (!plain_factory_r) {
                 co_return std::unexpected(plain_factory_r.error());
             }
-            resolved_transport_factory = std::shared_ptr<fixpp::transport::TransportFactory>(
-                std::move(*plain_factory_r));
+            resolved_transport_factory =
+                std::shared_ptr<fixpp::transport::TransportFactory>(std::move(*plain_factory_r));
         } else {
             resolved_transport_factory = cfg_.transport_factory_override
                                              ? cfg_.transport_factory_override
@@ -1690,7 +1699,7 @@ struct SendingTimeStamp {
         const std::size_t vstart = i;
         while (i < n && stored[i] != SOH) ++i;
         std::span<const std::byte> val{stored.data() + vstart, i - vstart};
-        if (i < n) ++i;                       // skip SOH
+        if (i < n) ++i;  // skip SOH
         if (tag == 9 || tag == 10 || tag == 43 || tag == 122)
             continue;  // 9/10 recomputed; 43/122 re-added below (037 FR-004 dedup)
         if (tag == 52) {
@@ -2050,7 +2059,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 //     OUTBOUND reply still stays seq 1 (independent counter; 030 FR-003).
                 // The two are mutually exclusive (the post-check arm guards on !reset_on_logon),
                 // so exactly one store reset fires per path (C5.1 / witness 7).
-                // [024 data-model acceptor row; Gate A notes (a)/(d); C2.2/C2.6; FR-001; 030 FR-001]
+                // [024 data-model acceptor row; Gate A notes (a)/(d); C2.2/C2.6; FR-001; 030
+                // FR-001]
                 peer_sent_reset = (hdr.reset_seqnum_flag == "Y");
 
                 // 029 T007/T011 — call site 2 (acceptor): hydrate at the first counter
@@ -2313,8 +2323,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     reject_reason = 1;  // RequiredTagMissing
                 } else {
                     const fixpp::dict::version_profile vt11_profile{
-                        .session=fixpp::dict::session_version::vt11,
-                        .default_appl=fixpp::dict::application_version::Unknown, .has_per_message_override=false, ._reserved=0};
+                        .session = fixpp::dict::session_version::vt11,
+                        .default_appl = fixpp::dict::application_version::Unknown,
+                        .has_per_message_override = false,
+                        ._reserved = 0};
                     auto resolved = fixpp::dict::resolve_application_version(
                         vt11_profile, *result->default_appl_ver_id);
                     const bool serviceable =
@@ -2487,11 +2499,15 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 // the acceptor reply — all-nullopt for FIX.4.x → byte-identical (INV-FIXT-1/W4);
                 // the acceptor advertises its OWN config (FR-002 / R1).
                 const auto acpt_fixt = derive_logon_fixt_fields(cfg_);
+                // 070-fix44-closeout T004: empty opts ⇒ no 383/464/384 ⇒
+                // byte-identical baseline (FR-012). Populated from cfg_
+                // per-story (US1/US2/US3).
                 auto reply_logon = fixpp::session::build_logon(
                     std::span<std::byte>{reply_buf.data(), reply_buf.size()}, reply_seq,
                     cfg_.sender_comp_id, cfg_.target_comp_id, cfg_.begin_string, heartbt_sec,
                     reply_sending_time_view, acpt_reset_seqnum, acpt_next_expected,
-                    acpt_fixt.default_appl_ver_id, acpt_fixt.username, acpt_fixt.password);
+                    acpt_fixt.default_appl_ver_id, acpt_fixt.username, acpt_fixt.password,
+                    fixpp::session::logon_advertise_options{});
                 if (!reply_logon) {
                     // Build failed (oversized IDs → wire_frame_too_large).
                     // RC#B: must NOT reach Active — Disconnected, propagate error.
@@ -3937,8 +3953,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             // [033 contracts C3; data-model E2; FR-004a; research R1]
             if (cfg_.is_fixt() && result->default_appl_ver_id.has_value()) {
                 const fixpp::dict::version_profile vt11_profile{
-                    .session=fixpp::dict::session_version::vt11, .default_appl=fixpp::dict::application_version::Unknown,
-                    .has_per_message_override=false, ._reserved=0};
+                    .session = fixpp::dict::session_version::vt11,
+                    .default_appl = fixpp::dict::application_version::Unknown,
+                    .has_per_message_override = false,
+                    ._reserved = 0};
                 auto resolved = fixpp::dict::resolve_application_version(
                     vt11_profile, *result->default_appl_ver_id);
                 if (resolved.has_value()) {
@@ -4089,7 +4107,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send(
         // dispatch_aborted is an internal cancellation sentinel an app should never
         // return. [gate-b/r2 FQ-1; contracts/store-then-emit-disposition.md item 3]
         if (disconnect_required || (!impl_r && impl_r.error() == error::dispatch_aborted)) {
-            record_state_transition_(fsm_state::Disconnected);  // [spec.md US1 AC3; F9 drift fix; gate-b/r2 FQ-1]
+            record_state_transition_(
+                fsm_state::Disconnected);  // [spec.md US1 AC3; F9 drift fix; gate-b/r2 FQ-1]
         }
         co_return impl_r;  // value un-coerced
     } catch (const asio::system_error& e) {
@@ -4819,7 +4838,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::store_then_emit(
             // defense for both roles. This branch is reachable ONLY via the
             // store_then_emit_test_access() FIXPP_TEST_HOOKS seam (T010 earns its
             // BRDA by injecting a hand-crafted >256-byte 35=A frame; see plan.md
-            // ## Gate A deviation #1). [C2 step-2 / R3 / I-07; [[feedback_symmetric_api_claim_unreachable_arm]]]
+            // ## Gate A deviation #1). [C2 step-2 / R3 / I-07;
+            // [[feedback_symmetric_api_claim_unreachable_arm]]]
             skip_store = true;
         } else {
             std::memcpy(mask_buf.data(), frame.data(), frame.size());

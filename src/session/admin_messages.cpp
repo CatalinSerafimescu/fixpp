@@ -24,7 +24,7 @@
 #include <expected>
 #include <fixpp/core/error.hpp>
 #include <fixpp/core/pmr_arena_upstream.hpp>  // detail::arena_upstream (MSVC-debug proxy)
-#include <fixpp/dict/version_profile.hpp>  // render_appl_ver_id — T016/033
+#include <fixpp/dict/version_profile.hpp>     // render_appl_ver_id — T016/033
 #include <fixpp/session/admin_messages.hpp>
 #include <fixpp/session/seqnum.hpp>
 #include <fixpp/wire/tag_scan.hpp>  // accumulate_tag_digit (SC-004 / 040-inbound-tag-overflow)
@@ -81,8 +81,13 @@ namespace {
     std::string_view target_comp_id, std::string_view begin_string, int heartbt_int,
     std::string_view sending_time, bool reset_seqnum, std::optional<seqnum_t> next_expected_seq,
     std::optional<fixpp::dict::application_version> default_appl_ver_id,
-    std::optional<std::string_view> username, std::optional<std::string_view> password) noexcept {
+    std::optional<std::string_view> username, std::optional<std::string_view> password,
+    const logon_advertise_options& opts) noexcept {
     // NOLINTEND(bugprone-easily-swappable-parameters)
+    // 070-fix44-closeout T004 / Foundational: opts is threaded through but not
+    // yet consumed — no 383/464/384 emission here (that lands per-story, US1-3).
+    // Silences an unused-parameter warning under -Werror until then.
+    (void)opts;
     // Group scratch: no groups in Logon, so a bounded no-heap upstream
     // (arena_upstream() = null on release/Linux, new_delete under MSVC debug).
     fixpp::wire::Writer w(out, ::fixpp::detail::arena_upstream());
@@ -398,8 +403,10 @@ namespace {
         return std::unexpected(fixpp::core::error::session_invalid_logon);
     }
 
-    return logon_interpret_result{.heartbt_int=heartbt_int_found, .default_appl_ver_id=default_appl_ver_id_found, .username=username_found,
-                                  .password=password_found};
+    return logon_interpret_result{.heartbt_int = heartbt_int_found,
+                                  .default_appl_ver_id = default_appl_ver_id_found,
+                                  .username = username_found,
+                                  .password = password_found};
 }
 
 // ── Logout (35=5) ────────────────────────────────────────────────────────────────

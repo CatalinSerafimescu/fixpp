@@ -19,6 +19,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>  // std::uint32_t — logon_advertise_options::max_message_size (070)
 #include <fixpp/core/error.hpp>
 #include <fixpp/dict/version_profile.hpp>  // dict::application_version — T016/033
 #include <fixpp/session/seqnum.hpp>
@@ -27,6 +28,23 @@
 #include <string_view>
 
 namespace fixpp::session {
+
+// Forward declaration only ([const §XV.9]: session_config.hpp pulls in
+// asio/any_io_executor.hpp + tap_consumer.hpp — too heavy for this header,
+// which stays asio/mutex-free by contract). supported_msg_type is defined in
+// session_config.hpp (070-fix44-closeout data-model E3); logon_advertise_options
+// below only needs it as a std::span element type.
+struct supported_msg_type;
+
+// 070-fix44-closeout T003 / data-model E4 — build_logon advertise options.
+// Non-owning (const&, span into caller's vector) so build_logon stays
+// noexcept + zero-alloc (Article XV.1). Default-constructed {} emits none of
+// 383/464/384 (FR-012 baseline). Emission logic lands per-story.
+struct logon_advertise_options {
+    std::optional<std::uint32_t> max_message_size{};            // 383, emit when set
+    bool test_message_indicator = false;                        // 464=Y when true
+    std::span<const supported_msg_type> supported_msg_types{};  // 384 group; empty ⇒ omit
+};
 
 // ── Logon (35=A) ─────────────────────────────────────────────────────────────
 // FR-002/003/004/011, [FIX-SL §4.2]/§4.3. S-001/S-015/S-016/S-020.
@@ -51,6 +69,10 @@ namespace fixpp::session {
 // 033 T022 (US2): optional Username(553)/Password(554) params — emitted after 1137,
 //   before 141, when set (data-model E4). Absent (nullopt) ⇒ no 553/554 emitted
 //   ⇒ FIX.4.x callers pass nullopt and remain byte-identical (INV-FIXT-1/W4).
+// opts: 070-fix44-closeout T003 / data-model E4 — trailing, defaulted advertise
+//   options (383/464/384). Default-constructed opts ⇒ none of the three fields
+//   are emitted ⇒ byte-identical to the pre-feature Logon (FR-012). Emission
+//   logic itself lands per-story (Foundational phase adds the parameter only).
 [[nodiscard]] fixpp::core::expected_t<std::span<std::byte>> build_logon(
     std::span<std::byte> out, seqnum_t seq, std::string_view sender_comp_id,
     std::string_view target_comp_id, std::string_view begin_string, int heartbt_int,
@@ -58,7 +80,8 @@ namespace fixpp::session {
     std::optional<seqnum_t> next_expected_seq = std::nullopt,
     std::optional<fixpp::dict::application_version> default_appl_ver_id = std::nullopt,
     std::optional<std::string_view> username = std::nullopt,
-    std::optional<std::string_view> password = std::nullopt) noexcept;
+    std::optional<std::string_view> password = std::nullopt,
+    const logon_advertise_options& opts = {}) noexcept;
 
 // 033 T007 / data-model E5 — interpret_logon return type extension.
 // Carries the validated HeartBtInt plus optional FIXT-specific fields scanned
