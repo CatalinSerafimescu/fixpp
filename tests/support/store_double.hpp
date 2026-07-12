@@ -141,6 +141,13 @@ public:
     // corrupt the store (vs. the trivial store==1 a fresh StoreDouble gives).
     void seed_inbound(seqnum_t n) noexcept { next_in_ = n; }
 
+    // Gate B PR #189 FQ-4: set next_out_ to a given N>1 WITHOUT counting a
+    // reset(). Mirrors seed_inbound() — used to establish a durable
+    // next-outbound value N BEFORE a session hydrates from this store, so a
+    // witness can distinguish "the emitted frame's seq came from the durable
+    // store" from "the un-hydrated construction default (seqnum_min)".
+    void seed_outbound(seqnum_t n) noexcept { next_out_ = n; }
+
     [[nodiscard]] std::size_t stored_inbound_count() const noexcept { return inbound_.size(); }
     [[nodiscard]] std::size_t stored_outbound_count() const noexcept { return outbound_.size(); }
 

@@ -2123,15 +2123,6 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 auto hdr = scan_frame_header(frame);
                 peer_789_raw = hdr.next_expected_msg_seq_num;
                 peer_789_present = hdr.next_expected_present;
-                // 070-fix44-closeout S-029: TestMessageIndicator(464) posture-mismatch
-                // refusal on the acceptor's inbound Logon, BEFORE any seqnum/reset
-                // processing. Opt-in — cfg_.posture unset ⇒ inert, byte-identical
-                // baseline (FR-012). Mismatch/malformed ⇒ Logout+disconnect. [FR-002]
-                if (cfg_.posture.has_value() &&
-                    should_refuse_posture(*cfg_.posture, hdr.test_message_indicator)) {
-                    co_return co_await refuse_logon_with_logout_(
-                        "TestMessageIndicator posture mismatch");
-                }
                 // 070-fix44-closeout S-030 (FR-007): capture the peer's advertised
                 // MaxMessageSize(383) from its inbound Logon (observability only).
                 peer_advertised_max_message_size_ = parse_u32_opt(hdr.max_message_size);
@@ -2187,6 +2178,23 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         // ensure_hydrated_ already transitioned to Disconnected (C2.3).
                         co_return std::unexpected(h_r.error());
                     }
+                }
+
+                // 070-fix44-closeout S-029: TestMessageIndicator(464) posture-mismatch
+                // refusal on the acceptor's inbound Logon. Opt-in — cfg_.posture unset
+                // ⇒ inert, byte-identical baseline (FR-012). Mismatch/malformed ⇒
+                // Logout+disconnect. [FR-002]
+                //
+                // Guard placement (Gate B PR #189 New P2 / FQ-3): AFTER ensure_hydrated_
+                // (block above) — same rationale as the 038 SendingTime guard immediately
+                // below — so seqnum_mgr_.peek_outbound() inside refuse_logon_with_logout_
+                // returns the durable next-outbound N (not the un-hydrated default) when
+                // building the refusal Logout for a persistent/reconnect acceptor. Still
+                // BEFORE reset_on_logon/check_inbound so inbound is NOT advanced on reject.
+                if (cfg_.posture.has_value() &&
+                    should_refuse_posture(*cfg_.posture, hdr.test_message_indicator)) {
+                    co_return co_await refuse_logon_with_logout_(
+                        "TestMessageIndicator posture mismatch");
                 }
 
                 // ── 038 T006: US1 — AcceptorLogon SendingTime(52) MaxLatency guard ──

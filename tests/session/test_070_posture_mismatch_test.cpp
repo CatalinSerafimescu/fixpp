@@ -29,9 +29,12 @@
 #include <fixpp/core/error.hpp>
 #include <fixpp/core/test/mock_clock.hpp>
 #include <fixpp/session/admin_messages.hpp>
+#include <fixpp/session/message_store.hpp>
+#include <fixpp/session/message_store_factory.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/session/session_fsm.hpp>
+#include <memory>
 #include <optional>
 #include <span>
 #include <string>
@@ -40,11 +43,59 @@
 
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
+#include "support/store_double.hpp"
 
 namespace fixpp::session::test {
 namespace {
 
 using fixpp::session::fsm_state;
+
+// ── Gate B PR #189 FQ-4 — StoreDouble-backed persistent store factory ─────────
+//
+// Minimal duplication of the tests/session/test_reset_on_lifecycle.cpp
+// SharedStoreWrapper/StoreDoubleFactory pattern (internal linkage via the
+// enclosing anonymous namespace — no ODR clash across translation units).
+// Gives the test a shared_ptr<StoreDouble> so seed_outbound() can establish a
+// durable next-outbound value BEFORE the acceptor's Logon-branch hydration
+// runs, distinguishing "the refusal Logout's seq came from the durable store"
+// from "the un-hydrated construction default" (the FQ-3 regression this
+// witness pins).
+class SharedStoreWrapper final : public MessageStore {
+public:
+    explicit SharedStoreWrapper(std::shared_ptr<StoreDouble> delegate) noexcept
+        : MessageStore(flush_thunk_for<SharedStoreWrapper>()), delegate_(std::move(delegate)) {}
+
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> store(
+        seqnum_t seq, std::span<const std::byte> frame, direction_t dir) noexcept override {
+        return delegate_->store(seq, frame, dir);
+    }
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> retrieve(
+        seqnum_t begin, seqnum_t end, direction_t dir,
+        retrieve_visitor& visitor) noexcept override {
+        return delegate_->retrieve(begin, end, dir, visitor);
+    }
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<seqnum_t>> next_seqnum(
+        direction_t dir, bool increment) noexcept override {
+        return delegate_->next_seqnum(dir, increment);
+    }
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> reset() noexcept override {
+        return delegate_->reset();
+    }
+
+private:
+    std::shared_ptr<StoreDouble> delegate_;
+};
+
+class StoreDoubleFactory final : public MessageStoreFactory {
+public:
+    std::shared_ptr<StoreDouble> store = std::make_shared<StoreDouble>();
+
+    [[nodiscard]] fixpp::core::expected_t<std::unique_ptr<MessageStore>> make(
+        std::string_view, std::string_view, std::pmr::memory_resource*, std::size_t,
+        asio::any_io_executor) noexcept override {
+        return std::make_unique<SharedStoreWrapper>(store);
+    }
+};
 
 // Build an inbound Logon frame, optionally carrying TestMessageIndicator(464).
 std::vector<std::byte> make_logon_frame_464(std::string_view begin_string,
@@ -100,6 +151,11 @@ protected:
     std::shared_ptr<fixpp::core::mock_clock> clock;
     fixpp::core::EngineConfig engine{};
 
+    // Gate B PR #189 FQ-4: all outbound frames captured by transport_send, so a
+    // test can assert the NAMED FR-002 postcondition (Logout(35=5)+58=<text>)
+    // directly rather than the fsm_state::Disconnected proxy.
+    std::vector<std::vector<std::byte>> captured_frames;
+
     void SetUp() override {
         using namespace std::chrono;
         auto utc = system_clock::time_point{} + seconds{1704067200};
@@ -123,6 +179,30 @@ protected:
         cfg.role = fixpp::session::session_role::acceptor;
         cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
         cfg.posture = posture;
+        cfg.transport_send = [this](std::span<const std::byte> frame) {
+            captured_frames.emplace_back(frame.begin(), frame.end());
+        };
+        return cfg;
+    }
+
+    // Initiator (sender=TW, target=ISLD) — exercises the S-029 initiator arm
+    // (session.cpp ~3776-3783), untested before Gate B PR #189 FQ-4.
+    fixpp::session::SessionConfig make_initiator_cfg(
+        std::optional<fixpp::session::session_posture> posture) {
+        fixpp::session::SessionConfig cfg;
+        cfg.sender_comp_id = "TW";
+        cfg.target_comp_id = "ISLD";
+        cfg.begin_string = "FIX.4.4";
+        cfg.heartbeat_interval = std::chrono::seconds{30};
+        cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
+        cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
+        cfg.executor_override = ioc.get_executor();
+        cfg.role = fixpp::session::session_role::initiator;
+        cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
+        cfg.posture = posture;
+        cfg.transport_send = [this](std::span<const std::byte> frame) {
+            captured_frames.emplace_back(frame.begin(), frame.end());
+        };
         return cfg;
     }
 
@@ -152,10 +232,19 @@ protected:
     }
 };
 
-// (a) production posture refuses a test-marked peer.
+// (a) production posture refuses a test-marked peer. Gate B PR #189 FQ-4:
+// assert the NAMED FR-002 postcondition — exactly one outbound frame, a
+// Logout(35=5) carrying the exact posture-mismatch text — not just the
+// terminal fsm_state proxy (a silent disconnect, missing/empty 58, or wrong
+// disposition would all have passed the state-only assertion alone).
 TEST_F(PostureTest, ProductionRefusesTestPeer) {
     EXPECT_EQ(run(fixpp::session::session_posture::production, std::string_view{"Y"}),
               fsm_state::Disconnected);
+    ASSERT_EQ(captured_frames.size(), 1u)
+        << "exactly one outbound frame (the refusal Logout) — no partial/extra emit";
+    const auto& lo = captured_frames.front();
+    EXPECT_EQ(extract_field(lo, 35), "5") << "refusal disposition must be Logout(35=5)";
+    EXPECT_EQ(extract_field(lo, 58), "TestMessageIndicator posture mismatch");
 }
 
 // (b) test posture refuses a production peer — explicit 464=N and absent-464.
@@ -185,6 +274,59 @@ TEST_F(PostureTest, UnsetPostureIgnores464) {
 TEST_F(PostureTest, ProductionRefusesMalformed464) {
     EXPECT_EQ(run(fixpp::session::session_posture::production, std::string_view{"foo"}),
               fsm_state::Disconnected);
+}
+
+// Gate B PR #189 FQ-4 — initiator-role posture-mismatch witness. The initiator
+// arm (session.cpp ~3776-3783) fires on the peer's inbound Logon-ack; it was
+// completely uncovered before this change. Same discriminating assertions as
+// (a) above: exactly one NEW outbound frame (the refusal Logout) with the
+// named 35=5/58=<text> shape, plus Disconnected.
+TEST_F(PostureTest, InitiatorRefusesPostureMismatchedLogonAck) {
+    auto cfg = make_initiator_cfg(fixpp::session::session_posture::production);
+    fixpp::session::Session sess(engine, cfg);
+    ASSERT_TRUE(open_sync(sess).has_value());
+    ASSERT_EQ(sess.state(), fsm_state::LogonSent);
+    const auto frames_before_ack = captured_frames.size();  // the initial outbound Logon
+
+    // Peer (acceptor ISLD→TW) sends a test-marked Logon-ack while we run production.
+    auto ack = make_logon_frame_464("FIX.4.4", 1, "ISLD", "TW", 30, std::string_view{"Y"});
+    feed_sync(sess, std::span<const std::byte>{ack});
+
+    EXPECT_EQ(sess.state(), fsm_state::Disconnected);
+    ASSERT_EQ(captured_frames.size(), frames_before_ack + 1)
+        << "exactly one NEW outbound frame (the refusal Logout)";
+    const auto& lo = captured_frames.back();
+    EXPECT_EQ(extract_field(lo, 35), "5") << "refusal disposition must be Logout(35=5)";
+    EXPECT_EQ(extract_field(lo, 58), "TestMessageIndicator posture mismatch");
+}
+
+// Gate B PR #189 New P2 / FQ-3 — persistent-store seqnum witness. Seeds a
+// durable next-outbound N>1 into the store BEFORE the acceptor's Logon-branch
+// hydration runs, then asserts the refusal Logout carries 34=N — NOT the
+// un-hydrated construction default (seqnum_min=1). This is RED against the
+// pre-FQ-3 placement (posture check ran before ensure_hydrated_, so
+// peek_outbound() returned 1 regardless of the seeded store) and GREEN after
+// (FQ-3 relocates the posture check to after ensure_hydrated_).
+TEST_F(PostureTest, AcceptorRefusalUsesDurableOutboundSeq) {
+    constexpr fixpp::session::seqnum_t kDurableNextOutbound = 7;
+    auto factory = std::make_shared<StoreDoubleFactory>();
+    factory->store->seed_outbound(kDurableNextOutbound);
+
+    auto cfg = make_acceptor_cfg(fixpp::session::session_posture::production);
+    cfg.store_factory = factory;
+    fixpp::session::Session sess(engine, cfg);
+    ASSERT_TRUE(open_sync(sess).has_value());
+
+    auto frame = make_logon_frame_464("FIX.4.4", 1, "TW", "ISLD", 30, std::string_view{"Y"});
+    feed_sync(sess, std::span<const std::byte>{frame});
+
+    EXPECT_EQ(sess.state(), fsm_state::Disconnected);
+    ASSERT_EQ(captured_frames.size(), 1u);
+    const auto& lo = captured_frames.front();
+    EXPECT_EQ(extract_field(lo, 35), "5") << "refusal disposition must be Logout(35=5)";
+    EXPECT_EQ(extract_field(lo, 34), std::to_string(kDurableNextOutbound))
+        << "refusal Logout must carry the durable next-outbound seq (peek_outbound() "
+           "post-hydration), not the un-hydrated construction default";
 }
 
 // Advertise side: build_logon emits 464=Y iff opts.test_message_indicator.
