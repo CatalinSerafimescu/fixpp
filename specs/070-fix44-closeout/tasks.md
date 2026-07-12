@@ -16,7 +16,7 @@ Single C++23 library `fixpp`. Source: `include/fixpp/`, `src/`. Tests: `tests/se
 
 ## Phase 1: Setup (Shared Infrastructure)
 
-- [ ] T001 Register the four new test targets in `tests/session/CMakeLists.txt` (`test_070_posture_mismatch_test`, `test_070_max_message_size_test`, `test_070_supported_msgtypes_test`, `test_070_xmlnonfix_passthrough_test`) following the feature-068 whole-binary grouping convention (group with the SAFE session tests, select by `ctest -L session`; do NOT create standalone binaries).
+- [X] T001 Register the four new test targets in `tests/session/CMakeLists.txt` (`test_070_posture_mismatch_test`, `test_070_max_message_size_test`, `test_070_supported_msgtypes_test`, `test_070_xmlnonfix_passthrough_test`) following the feature-068 whole-binary grouping convention (group with the SAFE session tests, select by `ctest -L session`; do NOT create standalone binaries).
 
 ---
 
@@ -103,12 +103,12 @@ Single C++23 library `fixpp`. Source: `include/fixpp/`, `src/`. Tests: `tests/se
 
 ## Phase 7: Polish & Cross-Cutting Concerns
 
-- [ ] T022 [P] Confirm no new alloc on the build_logon hot path (the opts struct is read-only; the 384 loop uses append_raw only) and that SessionConfig remains copy-constructible (static_assert green). Update `quickstart.md` if any config name drifted from the plan.
-- [ ] T023 Run the full local verification the feature warrants (clang debug + a sanitizer leg over `ctest -L session`) to confirm the four capabilities + zero regression before `/speckit-verify`.
+- [X] T022 [P] Confirm no new alloc on the build_logon hot path (the opts struct is read-only; the 384 loop uses append_raw only) and that SessionConfig remains copy-constructible (static_assert green). Update `quickstart.md` if any config name drifted from the plan.
+- [X] T023 Run the full local verification the feature warrants (clang debug + a sanitizer leg over `ctest -L session`) to confirm the four capabilities + zero regression before `/speckit-verify`.
 
 ### Mandatory close-out tasks (ALWAYS emit — Gate-B preconditions, Article XVII §8)
-- [ ] T024 Catalogue close-out: flip `spec/feature-catalogue.md` rows S-029, S-030, S-037, A-034 → `done` (feature `070-fix44-closeout`, PR #, tests), and add/point matching `spec/coverage-index.md` entries.
-- [ ] T025 **(FINAL)** Feature-completeness audit: verify every `tasks.md` row is `[X]` or explicitly waived; every FR-/SC- maps to a landed test AND landed implementation; every feature-owned OFFICIAL catalogue row is `done` with a coverage-index entry. Record the verdict (100% or fully-waived) in `.specify/decisions/070-fix44-closeout-verify.md` (`## Completeness`) — a hard `/gate-b` precondition.
+- [X] T024 Catalogue close-out: flip `spec/feature-catalogue.md` rows S-029, S-030, S-037, A-034 → `done` (feature `070-fix44-closeout`, PR #, tests), and add/point matching `spec/coverage-index.md` entries.
+- [X] T025 **(FINAL)** Feature-completeness audit: verify every `tasks.md` row is `[X]` or explicitly waived; every FR-/SC- maps to a landed test AND landed implementation; every feature-owned OFFICIAL catalogue row is `done` with a coverage-index entry. Record the verdict (100% or fully-waived) in `.specify/decisions/070-fix44-closeout-verify.md` (`## Completeness`) — a hard `/gate-b` precondition.
 
 ---
 

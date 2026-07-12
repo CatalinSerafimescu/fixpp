@@ -41,16 +41,16 @@ Section structure sourced from fixtrading.org/standards/fix-session-layer-online
 | §4.2.4 | Additional fields available for peer identification (SubID, LocationID) | Y | S-016 | — |
 | §4.3 | Establishing a FIX connection | Y | S-001, S-015, S-021, S-022 | **S-022 `backlog → done` via 033**: `Username(553)`/`Password(554)` emit (when configured) + inbound parse + surface via `authorize_logon` seam; `554` redacted. Unit witnesses green (`test_fixt_credentials.cpp` W6/W7); live interop (SC-003/SC-004) deferred to `/speckit-verify` self-run. |
 | §4.3.1 | Transport layer requirements (TCP/IP, FIXS mandatory) | Y | T-001, T-002, T-042 | **T-042 (2026-06-17):** `asio_plain_transport` adds plain TCP transport (`insecure_plain_tcp` profile). The mandatory-TLS requirement of FIXS applies to production links; the plaintext path is gated behind a loud `[[deprecated]]` opt-in for colo/VPN-secured environments. See L-043-1, L-043-2. |
-| §4.3.2 | Using the TestMessageIndicator(464) | Y | S-029 | — |
+| §4.3.2 | Using the TestMessageIndicator(464) | Y | S-029 | **done** (070-fix44-closeout): symmetric posture-mismatch reject, `test_070_posture_mismatch_test.cpp`. |
 | §4.3.3 | Application layer encryption (deprecated EncryptMethod) | Y | S-021, T-042 | **S-021 amended by 043 T030 (2026-06-17):** `interpret_logon` now rejects inbound `98≠"0"`; present-but-malformed also fails closed. Unconditional / all profiles. Witness `tests/session/test_interpret_logon_encrypt_method.cpp` (4 cells). See B-043-1. |
 | §4.3.4 | Heartbeat interval | Y | S-015 | — |
 | §4.3.5 | Heartbeat interval determination | Y | S-015 | — |
 | §4.3.5.1 | Acceptor requires specific heartbeat interval | Y | S-015 | — |
 | §4.3.5.2 | Acceptor requires initiator specify range value | Y | S-015 | — |
 | §4.3.5.3 | Acceptor accepts initiator specified interval | Y | S-015 | — |
-| §4.3.6 | Maximum message size (MaxMessageSize 383) | Y | S-030 | — |
+| §4.3.6 | Maximum message size (MaxMessageSize 383) | Y | S-030 | **done** (070-fix44-closeout): advertise + inbound-only negotiated enforce, `test_070_max_message_size_test.cpp`. |
 | §4.3.7 | Specifying application version (DefaultApplVerID 1137 / FIXT) | Y | S-025, S-026 | **S-025 `backlog → done` via 033**: FIXT.1.1 session establishment — `DefaultApplVerID(1137)` emit/parse/enforce (FR-001–FR-006); missing-1137 → `Reject(371=1137, 373=1)` (FR-003); unserviceable-1137 acceptor-side → `Reject` + Disconnect (NOT a Logout message) (FR-004a); `negotiated_version_profile()` accessor (FR-005). Unit witnesses green (`test_fixt_logon_establishment.cpp` W1/W2/W3/W5). **S-026 remains `backlog`**: inbound `ApplVerID(1128)` is TOLERATED per FR-010 (witness W8); per-message routing is a follow-on feature (L-033-1). Live interop (SC-004/SC-006) deferred to `/speckit-verify` self-run (US3 T025-T028). |
-| §4.3.8 | Specifying supported message types (NoMsgTypes in Logon) | Y | S-037 | MISSING → row added (see Gap Summary) |
+| §4.3.8 | Specifying supported message types (NoMsgTypes in Logon) | Y | S-037 | **done** (070-fix44-closeout): NoMsgTypes(384) advertise from config, `test_070_supported_msgtypes_test.cpp`. |
 | §4.3.9 | Identification of application system and FIX session processor | Y | — | MISSING → row added (S-038) |
 | §4.3.10 | Responding to FIX session establishment request (acceptor Logon ack / Logout reject) | Y | S-001 | — |
 | §4.3.11 | Initial synchronization of messages (Logon seqnum check, ResendRequest on gap) | Y | S-014 | — |
@@ -370,7 +370,7 @@ The application spec is version-specific (FIX 4.0 through FIX 5.0SP2); sections 
 | MsgType | Message | Catalogue ID | Gap note |
 |---|---|---|---|
 | j | BusinessMessageReject | A-014 | 069: v44 codegen `build_BusinessMessageReject` + `validate_BusinessMessageReject` (FR-015a-lite widened to all 83 in-scope; differential round-trip + required-field fail-closed omitting RefMsgType(372) + exemplar external-golden anchor, SC-006), additive alongside the 019 hand-written `build_business_message_reject()` production emitter (unchanged, see A-014). Full-field all-version (FR-015b) future; enum value-domain unbacked (FR-013 — see L-069-1). |
-| n | XMLnonFIX | A-034 | — |
+| n | XMLnonFIX | A-034 | **done** (070-fix44-closeout, test-only): fromApp passthrough, byte-exact 213, accepted under validation; `test_070_xmlnonfix_passthrough_test.cpp`. |
 | BC | NetworkCounterpartySystemStatusRequest | N-001 | 069: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite widened to all 83 in-scope; differential round-trip + required-presence fail-closed). Full-field all-version (FR-015b) future; enum value-domain unbacked (FR-013 — see L-069-1). |
 | BD | NetworkCounterpartySystemStatusResponse | N-001 | 069: v44 codegen `build_<Msg>` + `validate_<Msg>` (FR-015a-lite widened to all 83 in-scope; differential round-trip + required-presence fail-closed). Full-field all-version (FR-015b) future; enum value-domain unbacked (FR-013 — see L-069-1). |
 | BE | UserRequest | N-002 | — |
