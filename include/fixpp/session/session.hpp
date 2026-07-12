@@ -601,6 +601,15 @@ private:
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> reset_seqnums_to_one_durable(
         reset_disposition disposition) noexcept;  // wired in T007/T008/T014
 
+    // 070-fix44-closeout S-029: refuse an inbound Logon on a TestMessageIndicator(464)
+    // posture mismatch (or malformed 464). Emits a Logout(35=5) carrying reason_text
+    // (fire toAdmin → assign_outbound → store_then_emit), then transitions to
+    // Disconnected — the session never reaches Active. Mirrors the Logon-time
+    // Logout+disconnect disposition (session.cpp:2692-2714). Called from both the
+    // acceptor inbound-Logon and the initiator inbound-Logon-ack paths. [FR-002; D-F]
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> refuse_logon_with_logout_(
+        std::string_view reason_text) noexcept;
+
     const fixpp::core::EngineConfig& engine_;
     SessionConfig cfg_;  // FR-001 / D-1 — by-value copy (W-5 lifetime fix, 010); caller may drop or
                          // mutate the config after the ctor returns without causing UAF

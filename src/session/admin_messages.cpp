@@ -84,10 +84,10 @@ namespace {
     std::optional<std::string_view> username, std::optional<std::string_view> password,
     const logon_advertise_options& opts) noexcept {
     // NOLINTEND(bugprone-easily-swappable-parameters)
-    // 070-fix44-closeout T004 / Foundational: opts is threaded through but not
-    // yet consumed — no 383/464/384 emission here (that lands per-story, US1-3).
-    // Silences an unused-parameter warning under -Werror until then.
-    (void)opts;
+    // 070-fix44-closeout: opts drives the S-029/S-030/S-037 advertise fields
+    // (464 / 383 / 384-group). Emitted near the end (after 789) in contract
+    // order 383 → 384-group → 464 (C-3.4). Empty opts ⇒ none emitted ⇒
+    // byte-identical baseline (FR-012). US1 lands 464; US2/US3 land 383/384.
     // Group scratch: no groups in Logon, so a bounded no-heap upstream
     // (arena_upstream() = null on release/Linux, new_delete under MSVC debug).
     fixpp::wire::Writer w(out, ::fixpp::detail::arena_upstream());
@@ -207,6 +207,17 @@ namespace {
             return std::unexpected(fixpp::core::error::wire_field_value_truncated);
         }
         if (auto r = w.append_raw(789, sv_to_bytes(sv)); !r) {
+            return std::unexpected(r.error());
+        }
+    }
+
+    // 464=Y (TestMessageIndicator) — 070-fix44-closeout S-029 advertise: emitted
+    // only when opts.test_message_indicator (i.e. local posture==test). Contract
+    // C-3.4 order: after 789 (383 and the 384 group precede it once US2/US3 land).
+    // Flag false ⇒ no 464 ⇒ byte-identical baseline. [FR-002 advertise side]
+    if (opts.test_message_indicator) {
+        std::byte val[] = {static_cast<std::byte>('Y')};
+        if (auto r = w.append_raw(464, std::span<const std::byte>{val}); !r) {
             return std::unexpected(r.error());
         }
     }

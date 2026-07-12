@@ -622,6 +622,21 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::reset_seqnums_to_one_dur
     co_return fixpp::core::expected_t<void>{};
 }
 
+// 070-fix44-closeout S-029 — pure decision helper: given the local posture and the
+// raw TestMessageIndicator(464) value from the inbound Logon, does the session refuse?
+// Symmetric rule (research.md D-A): 464=Y ⇒ peer test; 464=N or empty/absent ⇒ peer
+// production. A non-empty 464 value ∉ {Y,N} is malformed → refuse. Only called when
+// posture.has_value() (enforcement enabled). [FR-002; data-model E1]
+static bool should_refuse_posture(session_posture posture, std::string_view tmi_464) noexcept {
+    const bool malformed = !tmi_464.empty() && tmi_464 != "Y" && tmi_464 != "N";
+    if (malformed) {
+        return true;
+    }
+    const bool peer_is_test = (tmi_464 == "Y");
+    return (posture == session_posture::production && peer_is_test) ||
+           (posture == session_posture::test && !peer_is_test);
+}
+
 // 029 T007 — one-shot cold-open hydration gate (C2.1–C2.6 / INV-H3/H4/H5/H6).
 //
 // Called at:
@@ -848,7 +863,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::emit_initiator_logon_() 
         std::span<std::byte>{logon_buf.data(), logon_buf.size()}, logon_seq, cfg_.sender_comp_id,
         cfg_.target_comp_id, cfg_.begin_string, heartbt_sec, sending_time_view, initr_reset_seqnum,
         initr_next_expected, initr_fixt.default_appl_ver_id, initr_fixt.username,
-        initr_fixt.password, fixpp::session::logon_advertise_options{});
+        initr_fixt.password,
+        // 070-fix44-closeout S-029: advertise 464=Y when local posture==test; unset
+        // ⇒ no 464 ⇒ byte-identical baseline (FR-012). 383/384 land per-story.
+        fixpp::session::logon_advertise_options{
+            .test_message_indicator = (cfg_.posture == session_posture::test)});
     if (!logon_result) {
         // build_logon failed (oversized IDs → wire_frame_too_large).
         // Session-fatal — initiator handshake never reached the wire; transition
@@ -1760,6 +1779,38 @@ public:
 
 }  // namespace
 
+// 070-fix44-closeout S-029 — refuse an inbound Logon on a 464 posture mismatch (or
+// malformed 464): emit Logout(35=5) carrying reason_text, then Disconnected — the
+// session never reaches Active. Mirrors the Logon-time Logout+disconnect disposition
+// at session.cpp (SendingTime-accuracy path). Defined after the file-local
+// stamp_sending_time helper so it is in scope. [FR-002; data-model D-F]
+asio::awaitable<fixpp::core::expected_t<void>> Session::refuse_logon_with_logout_(
+    std::string_view reason_text) noexcept {
+    std::array<std::byte, 256> lo_buf{};
+    const seqnum_t lo_seq = seqnum_mgr_.peek_outbound();
+    const auto st = stamp_sending_time(*effective_clock_, cfg_.sending_time_precision);
+    auto lo_result = fixpp::session::build_logout(
+        std::span<std::byte>{lo_buf.data(), lo_buf.size()}, lo_seq, cfg_.sender_comp_id,
+        cfg_.target_comp_id, reason_text, cfg_.begin_string, st.value);
+    if (lo_result) {
+        // toAdmin before transmit; a throwing callback → terminal-close +
+        // app_callback_threw.
+        if (!fire_to_admin_(*lo_result)) {
+            record_state_transition_(fsm_state::Disconnected);
+            co_return std::unexpected(fixpp::core::error::app_callback_threw);
+        }
+        auto assign_r = co_await seqnum_mgr_.assign_outbound();
+        if (!assign_r) {
+            record_state_transition_(fsm_state::Disconnected);
+            co_return std::unexpected(assign_r.error());
+        }
+        auto emit_r = co_await store_then_emit(lo_seq, *lo_result);
+        (void)emit_r;  // store-side errors: logged-then-proceed (I-07)
+    }
+    record_state_transition_(fsm_state::Disconnected);
+    co_return fixpp::core::expected_t<void>{};
+}
+
 // ── emit_session_reject_ ─────────────────────────────────────────────────────
 //
 // Builds and emits a session Reject(35=3, RefTagID=0, reason=3) for an inbound
@@ -2039,6 +2090,15 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 auto hdr = scan_frame_header(frame);
                 peer_789_raw = hdr.next_expected_msg_seq_num;
                 peer_789_present = hdr.next_expected_present;
+                // 070-fix44-closeout S-029: TestMessageIndicator(464) posture-mismatch
+                // refusal on the acceptor's inbound Logon, BEFORE any seqnum/reset
+                // processing. Opt-in — cfg_.posture unset ⇒ inert, byte-identical
+                // baseline (FR-012). Mismatch/malformed ⇒ Logout+disconnect. [FR-002]
+                if (cfg_.posture.has_value() &&
+                    should_refuse_posture(*cfg_.posture, hdr.test_message_indicator)) {
+                    co_return co_await refuse_logon_with_logout_(
+                        "TestMessageIndicator posture mismatch");
+                }
                 const seqnum_t seq = parse_seqnum(hdr.msg_seq_num);
                 if (seq == 0) {
                     // Cannot parse seq — treat as invalid (fatal for protocol safety).
@@ -2499,15 +2559,16 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 // the acceptor reply — all-nullopt for FIX.4.x → byte-identical (INV-FIXT-1/W4);
                 // the acceptor advertises its OWN config (FR-002 / R1).
                 const auto acpt_fixt = derive_logon_fixt_fields(cfg_);
-                // 070-fix44-closeout T004: empty opts ⇒ no 383/464/384 ⇒
-                // byte-identical baseline (FR-012). Populated from cfg_
-                // per-story (US1/US2/US3).
+                // 070-fix44-closeout: advertise 464=Y when local posture==test (S-029).
+                // posture unset ⇒ test_message_indicator false ⇒ no 464 ⇒ byte-identical
+                // baseline (FR-012). 383/384 advertise lands per-story (US2/US3).
                 auto reply_logon = fixpp::session::build_logon(
                     std::span<std::byte>{reply_buf.data(), reply_buf.size()}, reply_seq,
                     cfg_.sender_comp_id, cfg_.target_comp_id, cfg_.begin_string, heartbt_sec,
                     reply_sending_time_view, acpt_reset_seqnum, acpt_next_expected,
                     acpt_fixt.default_appl_ver_id, acpt_fixt.username, acpt_fixt.password,
-                    fixpp::session::logon_advertise_options{});
+                    fixpp::session::logon_advertise_options{
+                        .test_message_indicator = (cfg_.posture == session_posture::test)});
                 if (!reply_logon) {
                     // Build failed (oversized IDs → wire_frame_too_large).
                     // RC#B: must NOT reach Active — Disconnected, propagate error.
@@ -3664,6 +3725,15 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 // these cells transitions to Disconnected (with Logout in US4).
                 record_state_transition_(fsm_state::Disconnected);
                 co_return fixpp::core::expected_t<void>{};
+            }
+
+            // 070-fix44-closeout S-029: symmetric posture-mismatch refusal on the
+            // initiator's inbound Logon-ack (peer is the acceptor). Opt-in — cfg_.posture
+            // unset ⇒ inert, byte-identical baseline (FR-012). [FR-002]
+            if (cfg_.posture.has_value() &&
+                should_refuse_posture(*cfg_.posture, hdr.test_message_indicator)) {
+                co_return co_await refuse_logon_with_logout_(
+                    "TestMessageIndicator posture mismatch");
             }
 
             // ── Guard (3): SendingTime MaxLatency — Logon-path special case ───

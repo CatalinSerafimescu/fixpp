@@ -117,6 +117,7 @@ add_executable(session_pure_tests
   seqnum_t_handoff_test.cpp
   fix_time_roundtrip_test.cpp
   logon_handshake_test.cpp
+  test_070_posture_mismatch_test.cpp
   coverage_adversarial_test.cpp
   logon_received_observability_test.cpp
   session_send_invalid_state_test.cpp

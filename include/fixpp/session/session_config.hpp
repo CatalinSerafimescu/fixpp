@@ -484,6 +484,21 @@ struct SessionConfig {
     std::optional<std::string> username;
     std::optional<std::string> password;
 
+    // ── 070-fix44-closeout S-029 / data-model E1 — local test/production posture ──
+    // posture: enables TestMessageIndicator(464) mismatch enforcement on the Logon
+    //   handshake. `nullopt` (default) ⇒ enforcement DISABLED — no new rejection path
+    //   fires and no 464 is advertised (byte/disposition-identical baseline, FR-012).
+    //   `production` ⇒ refuse an inbound Logon marked test (464=Y); advertise nothing.
+    //   `test` ⇒ refuse an inbound Logon marked production (464=N or absent); advertise
+    //   464=Y on our outbound Logon. Symmetric rule (research.md D-A):
+    //     mismatch := (posture==production && peer_is_test) ||
+    //                 (posture==test && !peer_is_test),   peer_is_test := (464=="Y").
+    //   A non-empty 464 value ∉ {Y,N} is malformed → refused (explicit value check,
+    //   before the posture comparison; 464 is BOOLEAN domain {Y,N} in FIX44.xml).
+    //   No new include: session_posture is defined above at namespace scope;
+    //   std::optional already used (§XV.9 N/A). [FR-001/FR-002/FR-003]
+    std::optional<session_posture> posture;
+
     // FIXT session predicate: true iff begin_string=="FIXT.1.1" AND
     // default_appl_ver_id is set (E3 / FR-001). Must hold for the engine to emit
     // 1137 on the outbound Logon and to enforce its presence inbound (FR-004/FR-004a).

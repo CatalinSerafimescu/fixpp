@@ -38,13 +38,13 @@ Single C++23 library `fixpp`. Source: `include/fixpp/`, `src/`. Tests: `tests/se
 **Independent test**: production-posture session + inbound `464=Y` ⇒ refused; test-posture + `464=N`/absent ⇒ refused; matched ⇒ proceeds; default (unset) ⇒ unchanged.
 
 ### Tests for User Story 1 (write first, prove RED)
-- [ ] T006 [P] [US1] Write `tests/session/test_070_posture_mismatch_test.cpp`: (a) production-posture + inbound `464=Y` ⇒ Logout emitted + Disconnected, not Active; (b) test-posture + `464=N` AND absent ⇒ refused; (c) production-posture + `464=N`/absent ⇒ Active (no false reject); (d) default unset ⇒ baseline (no new path); (e) malformed `464=foo` ⇒ refused-as-malformed. Prove RED against current code.
+- [X] T006 [P] [US1] Write `tests/session/test_070_posture_mismatch_test.cpp`: (a) production-posture + inbound `464=Y` ⇒ Logout emitted + Disconnected, not Active; (b) test-posture + `464=N` AND absent ⇒ refused; (c) production-posture + `464=N`/absent ⇒ Active (no false reject); (d) default unset ⇒ baseline (no new path); (e) malformed `464=foo` ⇒ refused-as-malformed. Prove RED against current code.
 
 ### Implementation for User Story 1
-- [ ] T007 [US1] Add `std::optional<session_posture> session_posture_cfg;` (name per data-model) config field to `include/fixpp/session/session_config.hpp` with the symmetric-rule doc comment.
-- [ ] T008 [US1] In `src/session/session.cpp`, after `interpret_logon` success + header scan and BEFORE the acceptor reply build (~`:2490`) / initiator establishment, add the posture check: validate `464` value ∈ {Y,N} (else malformed-refuse); compute `peer_is_test = (464=="Y")`; if enforcement enabled and `peer_is_test != (cfg posture==test)`, refuse via the Logon-time Logout+disconnect disposition (mirror `session.cpp:2676-2702`) with a distinct posture-mismatch reason. Empty/absent 464 ⇒ production.
-- [ ] T009 [US1] Emit `464=Y` in the outbound Logon when local `posture==test`: set `opts.test_message_indicator` at the two call sites and emit `464=Y` in `build_logon` (`admin_messages.cpp`) in the correct Logon-body position, when the flag is set.
-- [ ] T010 [US1] Run `test_070_posture_mismatch_test` GREEN; run the full existing `ctest -L session` suite to confirm no regression (FR-012).
+- [X] T007 [US1] Add `std::optional<session_posture> session_posture_cfg;` (name per data-model) config field to `include/fixpp/session/session_config.hpp` with the symmetric-rule doc comment.
+- [X] T008 [US1] In `src/session/session.cpp`, after `interpret_logon` success + header scan and BEFORE the acceptor reply build (~`:2490`) / initiator establishment, add the posture check: validate `464` value ∈ {Y,N} (else malformed-refuse); compute `peer_is_test = (464=="Y")`; if enforcement enabled and `peer_is_test != (cfg posture==test)`, refuse via the Logon-time Logout+disconnect disposition (mirror `session.cpp:2676-2702`) with a distinct posture-mismatch reason. Empty/absent 464 ⇒ production.
+- [X] T009 [US1] Emit `464=Y` in the outbound Logon when local `posture==test`: set `opts.test_message_indicator` at the two call sites and emit `464=Y` in `build_logon` (`admin_messages.cpp`) in the correct Logon-body position, when the flag is set.
+- [X] T010 [US1] Run `test_070_posture_mismatch_test` GREEN; run the full existing `ctest -L session` suite to confirm no regression (FR-012).
 
 **Checkpoint**: US1 independently testable and green.
 
