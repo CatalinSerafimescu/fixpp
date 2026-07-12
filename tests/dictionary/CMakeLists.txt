@@ -33,6 +33,7 @@ add_executable(dictionary_pure_tests
   defect_a_group_context_test.cpp
   reused_tag_census_test.cpp
   collision_membership_guards_test.cpp
+  test_072_delimiter_guard_test.cpp  # 072 US1: load-time nested==parent delimiter guard witness
   oom_injection_test.cpp          # local failing_pmr_resource seam — no global state
 )
 target_link_libraries(dictionary_pure_tests PRIVATE

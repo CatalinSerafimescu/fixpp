@@ -14,10 +14,21 @@
 // accessible via `.code()`. The variants are appended to `fixpp::core::error`
 // in `include/fixpp/core/error.hpp` (additive; non-shape-changing per
 // `[const §X.4]` forwards-compat — see research.md D-3 / D-10).
+//
+// Alternative pattern (no enum append): a new error may instead DERIVE from an
+// existing exception here and REUSE that base's inherited `.code()`, being
+// discriminated by CATCH TYPE rather than by a distinct `code()` value. `code()`
+// is non-virtual, so a base-typed catch cannot observe a derived `code()` anyway
+// — the catch type is the only discriminator that works. This keeps a new,
+// narrowly-scoped load error out of the `core::error` enum entirely (avoiding the
+// no-`default` `error_message()` `-Wswitch`/`-Werror` co-edit and the
+// `test_020_error_completeness.cpp` slot pin). See `group_delimiter_collision_error`
+// below and 072-nested-group-hardening research D-A1.
 
 #pragma once
 
 #include <fixpp/core/error.hpp>
+#include <cstdint>
 #include <new>
 #include <stdexcept>
 #include <string>
@@ -38,6 +49,38 @@ public:
     // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
     [[nodiscard]] fixpp::core::error code() const noexcept {
         return fixpp::core::error::dict_xml_parse_failed;
+    }
+};
+
+// Thrown by `XmlLoader::load*` when a nested repeating group's delimiter
+// (`first_field_tag`, the first declared field) equals its immediate parent
+// group's delimiter — a structural convention the nested-group read machinery
+// relies on (a flat instance splitter would mis-split the outer group's
+// boundaries). Rejecting such a dialect at load closes a public-API path to a
+// silent wire-corruption mis-split (072-nested-group-hardening FR-003 / L-063-4).
+//
+// DERIVES from `xml_parse_error` (so existing `catch (xml_parse_error&)`
+// bad-dictionary handlers still catch it) and REUSES the inherited `code()`
+// (`dict_xml_parse_failed`) — it does NOT append a `fixpp::core::error` variant
+// (see the header note above and research D-A1). Callers that need to
+// distinguish it discriminate by catch type: `catch (group_delimiter_collision_error&)`.
+class group_delimiter_collision_error : public xml_parse_error {
+public:
+    explicit group_delimiter_collision_error(const std::string& message)
+        : xml_parse_error(message) {}
+
+    // Build a message naming the offending group's no_tag, the shared delimiter,
+    // and the parent group's no_tag — the three facts an operator needs to fix
+    // the offending dialect.
+    [[nodiscard]] static group_delimiter_collision_error make(std::uint16_t no_tag,
+                                                              std::uint16_t delimiter,
+                                                              std::uint16_t parent_no_tag) {
+        return group_delimiter_collision_error(
+            std::string("fixpp::dict::group_delimiter_collision_error: nested group ") +
+            std::to_string(no_tag) + " has delimiter (first_field_tag) " +
+            std::to_string(delimiter) + " equal to its parent group " +
+            std::to_string(parent_no_tag) +
+            "'s delimiter; a nested group's delimiter must differ from its parent's");
     }
 };
 

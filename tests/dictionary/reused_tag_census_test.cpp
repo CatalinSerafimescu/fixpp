@@ -282,3 +282,352 @@ TEST(ReusedTagCensus, AllNineRuntimeDictsCensused) {
         << "FIX44 tag 295 must show ≥2 variants, one containing QuoteEntryID(299) and one not "
            "— the census must reproduce the discriminator T010 already proved by hand";
 }
+
+// ============================================================================
+// 072-nested-group-hardening — FR-001 / FR-002 structural census (Part A).
+//
+// These two PERMANENT, CI-tripping assertions pin the two structural dictionary
+// conventions the nested-group read relies on, across ALL membership contexts —
+// deliberately a strictly-stronger walk than the FR-003 load guard's first-seen
+// `groups_` seam (research D-A3). They are derived from a RAW per-`<group>` XML
+// walk that (i) threads the immediate-enclosing-group's delimiter down the
+// recursion, (ii) expands `<component>` references so cross-component nesting is
+// parent-linked, and (iii) resolves each group's OWN delimiter POST-component-
+// expansion (first field of the fully-expanded member list, mirroring the
+// loader's `expand_field_list`) — NOT the first literal `<field>` child. This
+// walk is count-field-type-agnostic (keys on the raw `<group>` element, not on
+// `NumInGroup`), so it covers FIX40/41/42 (whose INT-typed count fields register
+// ZERO groups under `as_table_view()`/`census_for`) non-vacuously.
+//
+// Each assertion carries a POSITIVE CONTROL (an injected-bad inline dict that
+// MUST be flagged) as a permanent trip-proof — a never-red census proves nothing
+// (Constitution Art VII §3).
+// ============================================================================
+
+namespace {
+
+using fixpp::dict::Dictionary;
+
+// Component-name -> definition node, built once per document.
+using ComponentIndex = std::map<std::string_view, pugi::xml_node>;
+
+ComponentIndex build_component_index(pugi::xml_node const& fix_root) {
+    ComponentIndex idx;
+    for (auto const& c : fix_root.child("components").children("component")) {
+        idx.emplace(std::string_view{c.attribute("name").value()}, c);
+    }
+    return idx;
+}
+
+// Resolve the leading field tag of a group/component member list, expanding
+// `<component>` refs (mirrors the loader's post-component-expansion delimiter).
+// A leading `<group>` member contributes its own count field (the NoX tag).
+// `stack` guards `<component>` cycles.
+std::optional<std::uint16_t> resolve_leading_field(pugi::xml_node node, ComponentIndex const& cidx,
+                                                   Dictionary const& dict,
+                                                   std::set<std::string_view>& stack) {
+    for (auto const& child : node.children()) {
+        std::string_view const n = child.name();
+        if (n == "field" || n == "group") {
+            if (auto t = dict.field_by_name(child.attribute("name").value())) {
+                return t;
+            }
+        } else if (n == "component") {
+            std::string_view const cn = child.attribute("name").value();
+            auto const it = cidx.find(cn);
+            if (it != cidx.end() && stack.insert(cn).second) {
+                auto const r = resolve_leading_field(it->second, cidx, dict, stack);
+                stack.erase(cn);
+                if (r) {
+                    return r;
+                }
+            }
+        }
+    }
+    return std::nullopt;
+}
+
+struct Fr001Result {
+    std::size_t sites = 0;                  // group-declaration sites observed
+    std::vector<std::string> collisions;    // nested delim == parent delim
+};
+
+// Recursive descent from a wire usage container (message/header/trailer),
+// threading the immediate-enclosing-group's delimiter (`parent_delim`).
+void walk_fr001(pugi::xml_node node, std::optional<std::uint16_t> parent_delim,
+                ComponentIndex const& cidx, Dictionary const& dict,
+                std::set<std::string_view>& comp_stack, Fr001Result& r) {
+    for (auto const& child : node.children()) {
+        std::string_view const n = child.name();
+        if (n == "group") {
+            ++r.sites;
+            std::set<std::string_view> seen;
+            auto const own_delim = resolve_leading_field(child, cidx, dict, seen);
+            if (parent_delim && own_delim && *parent_delim == *own_delim) {
+                auto const own_no_tag = dict.field_by_name(child.attribute("name").value());
+                std::ostringstream oss;
+                oss << "nested group no_tag=" << (own_no_tag ? *own_no_tag : 0) << " delimiter "
+                    << *own_delim << " == parent group delimiter";
+                r.collisions.push_back(oss.str());
+            }
+            walk_fr001(child, own_delim, cidx, dict, comp_stack, r);  // own_delim is the new parent
+        } else if (n == "component") {
+            std::string_view const cn = child.attribute("name").value();
+            auto const it = cidx.find(cn);
+            if (it != cidx.end() && comp_stack.insert(cn).second) {
+                walk_fr001(it->second, parent_delim, cidx, dict, comp_stack, r);  // keep parent delim
+                comp_stack.erase(cn);
+            }
+        } else {
+            walk_fr001(child, parent_delim, cidx, dict, comp_stack, r);  // container: same context
+        }
+    }
+}
+
+// Run the FR-001 census over a raw XML document + its loaded Dictionary,
+// walking only the wire usage contexts (header/trailer/messages) so component
+// refs are expanded at their real enclosing-group site.
+Fr001Result census_fr001(pugi::xml_document const& doc, Dictionary const& dict) {
+    auto const fix = doc.document_element();
+    auto const cidx = build_component_index(fix);
+    Fr001Result r;
+    std::set<std::string_view> comp_stack;
+    for (char const* section : {"header", "trailer"}) {
+        if (auto s = fix.child(section)) {
+            walk_fr001(s, std::nullopt, cidx, dict, comp_stack, r);
+        }
+    }
+    for (auto const& m : fix.child("messages").children("message")) {
+        walk_fr001(m, std::nullopt, cidx, dict, comp_stack, r);
+    }
+    return r;
+}
+
+// Contents at one group level (component-expanded, NOT descending into nested
+// groups): the scalar field tags declared at this level, plus the nested child
+// `<group>` nodes for pairwise disjointness + recursion.
+struct LevelContents {
+    std::set<std::uint16_t> scalar_fields;
+    std::vector<pugi::xml_node> child_groups;
+};
+
+void collect_level(pugi::xml_node node, ComponentIndex const& cidx, Dictionary const& dict,
+                   std::set<std::string_view>& stack, LevelContents& out) {
+    for (auto const& child : node.children()) {
+        std::string_view const n = child.name();
+        if (n == "field") {
+            if (auto t = dict.field_by_name(child.attribute("name").value())) {
+                out.scalar_fields.insert(*t);
+            }
+        } else if (n == "group") {
+            if (auto t = dict.field_by_name(child.attribute("name").value())) {
+                out.scalar_fields.insert(*t);  // the nested group's count is a scalar of THIS level
+            }
+            out.child_groups.push_back(child);  // but its members belong to the child level
+        } else if (n == "component") {
+            std::string_view const cn = child.attribute("name").value();
+            auto const it = cidx.find(cn);
+            if (it != cidx.end() && stack.insert(cn).second) {
+                collect_level(it->second, cidx, dict, stack, out);
+                stack.erase(cn);
+            }
+        }
+    }
+}
+
+struct Fr002Result {
+    std::size_t member_sets_examined = 0;
+    std::vector<std::string> collisions;    // scalar tag shared parent <-> nested child
+};
+
+void walk_fr002_group(pugi::xml_node group_node, ComponentIndex const& cidx,
+                      Dictionary const& dict, Fr002Result& r) {
+    std::set<std::string_view> stack;
+    LevelContents parent;
+    collect_level(group_node, cidx, dict, stack, parent);
+    ++r.member_sets_examined;
+    for (auto const& cg : parent.child_groups) {
+        std::set<std::string_view> cstack;
+        LevelContents child;
+        collect_level(cg, cidx, dict, cstack, child);
+        for (auto const t : parent.scalar_fields) {
+            if (child.scalar_fields.contains(t)) {
+                auto const cno = dict.field_by_name(cg.attribute("name").value());
+                std::ostringstream oss;
+                oss << "scalar tag " << t << " shared between a parent group and nested child no_tag="
+                    << (cno ? *cno : 0);
+                r.collisions.push_back(oss.str());
+            }
+        }
+        walk_fr002_group(cg, cidx, dict, r);  // recurse for deeper parent/child pairs
+    }
+}
+
+Fr002Result census_fr002(pugi::xml_document const& doc, Dictionary const& dict) {
+    auto const fix = doc.document_element();
+    auto const cidx = build_component_index(fix);
+    Fr002Result r;
+    auto const process = [&](pugi::xml_node container) {
+        std::set<std::string_view> stack;
+        LevelContents top;
+        collect_level(container, cidx, dict, stack, top);
+        for (auto const& g : top.child_groups) {
+            walk_fr002_group(g, cidx, dict, r);
+        }
+    };
+    for (char const* section : {"header", "trailer"}) {
+        if (auto s = fix.child(section)) {
+            process(s);
+        }
+    }
+    for (auto const& m : fix.child("messages").children("message")) {
+        process(m);
+    }
+    return r;
+}
+
+// Load a raw XML doc from a fixture path (read-only pugixml, same as
+// delimiter_scan_for above).
+pugi::xml_document load_raw(std::filesystem::path const& xml_path) {
+    pugi::xml_document doc;
+    (void)doc.load_file(xml_path.c_str());
+    return doc;
+}
+
+}  // namespace
+
+// FR-001: no nested repeating group's delimiter equals its immediate parent
+// group's delimiter, in EVERY membership context, across all 9 runtime dicts,
+// NON-VACUOUSLY (>0 group-declaration sites per dict). Positive control first.
+TEST(NestedGroupDelimiterCensus, NoNestedGroupDelimiterEqualsParentDelimiter) {
+    // ---- Positive control (permanent trip-proof): an injected nested==parent
+    // delimiter MUST be flagged, else this census could pass vacuously. ----
+    {
+        constexpr std::string_view kBad =
+            R"(<fix type='FIX' major='4' minor='4' servicepack='0'>)"
+            R"(<fields>)"
+            R"(<field number='35' name='MsgType' type='STRING'/>)"
+            R"(<field number='100' name='NoOuter' type='NUMINGROUP'/>)"
+            R"(<field number='150' name='SharedDelim' type='INT'/>)"
+            R"(<field number='200' name='NoInner' type='NUMINGROUP'/>)"
+            R"(<field number='250' name='InnerData' type='STRING'/>)"
+            R"(</fields>)"
+            R"(<messages><message name='Bad' msgtype='U' msgcat='app'>)"
+            R"(<field name='MsgType' required='N'/>)"
+            R"(<group name='NoOuter' required='N'>)"
+            R"(<field name='SharedDelim' required='N'/>)"      // outer delimiter = 150
+            R"(<group name='NoInner' required='N'>)"
+            R"(<field name='SharedDelim' required='N'/>)"      // inner delimiter = 150 == outer
+            R"(<field name='InnerData' required='N'/>)"
+            R"(</group></group></message></messages></fix>)";
+        std::array<std::byte, 1UZ << 20> buf{};
+        std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
+        // NOTE: the load itself would throw under the FR-003 guard; the census is
+        // a pure XML+Dictionary analysis, so parse the raw doc directly and build
+        // a Dictionary via load_from_string is not possible (guard throws). Build
+        // the Dictionary from a guard-free CONFORMING twin (distinct delimiters)
+        // so field_by_name resolves, then run the census over the BAD raw doc.
+        constexpr std::string_view kNamesOnly =
+            R"(<fix type='FIX' major='4' minor='4' servicepack='0'>)"
+            R"(<fields>)"
+            R"(<field number='35' name='MsgType' type='STRING'/>)"
+            R"(<field number='100' name='NoOuter' type='NUMINGROUP'/>)"
+            R"(<field number='150' name='SharedDelim' type='INT'/>)"
+            R"(<field number='200' name='NoInner' type='NUMINGROUP'/>)"
+            R"(<field number='250' name='InnerData' type='STRING'/>)"
+            R"(</fields>)"
+            R"(<messages><message name='Ok' msgtype='U' msgcat='app'>)"
+            R"(<field name='MsgType' required='N'/>)"
+            R"(<group name='NoOuter' required='N'>)"
+            R"(<field name='SharedDelim' required='N'/>)"
+            R"(<group name='NoInner' required='N'>)"
+            R"(<field name='InnerData' required='N'/>)"       // distinct delimiter 250 → loads
+            R"(<field name='SharedDelim' required='N'/>)"
+            R"(</group></group></message></messages></fix>)";
+        auto dict = fixpp::dict::XmlLoader{}.load_from_string(kNamesOnly, &mr);
+        pugi::xml_document bad_doc;
+        ASSERT_TRUE(bad_doc.load_string(std::string{kBad}.c_str()));
+        auto const control = census_fr001(bad_doc, dict);
+        EXPECT_GT(control.sites, 0U) << "positive control must observe group sites";
+        EXPECT_FALSE(control.collisions.empty())
+            << "FR-001 census FAILED to flag an injected nested==parent delimiter — a never-red "
+               "census proves nothing";
+    }
+
+    // ---- Real census: all 9 shipped dicts clean + non-vacuous. ----
+    constexpr std::size_t kArenaBytes = 32UZ * 1024UZ * 1024UZ;
+    auto storage = std::make_unique<std::byte[]>(kArenaBytes);
+    std::pmr::monotonic_buffer_resource mr{storage.get(), kArenaBytes};
+
+    for (auto const& fname : kRuntimeDicts) {
+        auto const path = std::filesystem::path{FIXPP_DICT_DATA_DIR} / std::string{fname};
+        auto dict = fixpp::dict::XmlLoader{}.load(path, &mr);
+        ASSERT_FALSE(dict.messages().empty()) << fname << " failed to load";
+        auto const doc = load_raw(path);
+        auto const res = census_fr001(doc, dict);
+        EXPECT_GT(res.sites, 0U) << fname
+                                 << ": FR-001 census observed 0 group-declaration sites (vacuous)";
+        for (auto const& c : res.collisions) {
+            ADD_FAILURE() << fname << ": FR-001 delimiter collision — " << c;
+        }
+    }
+}
+
+// FR-002: no scalar member tag shared between a parent group and its nested
+// child group, across all dicts it can cover, NON-VACUOUSLY (>0 member-sets
+// examined). The structural walk recovers per-group member sets for all 9 dicts
+// including FIX40/41/42 (it keys on the raw `<group>` element, not NumInGroup),
+// so no dict is left as an unpinned residual here (FR-013d fallback unneeded).
+TEST(NestedGroupScalarMemberCensus, NoSharedParentChildScalarMember) {
+    // ---- Positive control: injected shared parent/child scalar MUST be flagged. ----
+    {
+        constexpr std::string_view kBad =
+            R"(<fix type='FIX' major='4' minor='4' servicepack='0'>)"
+            R"(<fields>)"
+            R"(<field number='35' name='MsgType' type='STRING'/>)"
+            R"(<field number='100' name='NoOuter' type='NUMINGROUP'/>)"
+            R"(<field number='150' name='OuterDelim' type='INT'/>)"
+            R"(<field number='300' name='SharedScalar' type='STRING'/>)"
+            R"(<field number='200' name='NoInner' type='NUMINGROUP'/>)"
+            R"(<field number='250' name='InnerDelim' type='STRING'/>)"
+            R"(</fields>)"
+            R"(<messages><message name='Bad' msgtype='U' msgcat='app'>)"
+            R"(<field name='MsgType' required='N'/>)"
+            R"(<group name='NoOuter' required='N'>)"
+            R"(<field name='OuterDelim' required='N'/>)"       // outer delim 150 (disjoint)
+            R"(<field name='SharedScalar' required='N'/>)"     // 300 in parent
+            R"(<group name='NoInner' required='N'>)"
+            R"(<field name='InnerDelim' required='N'/>)"       // inner delim 250 (disjoint)
+            R"(<field name='SharedScalar' required='N'/>)"     // 300 in child — SHARED
+            R"(</group></group></message></messages></fix>)";
+        std::array<std::byte, 1UZ << 20> buf{};
+        std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
+        // Delimiters are disjoint (150 vs 250), so this dict LOADS (FR-004
+        // asymmetry) — build the Dictionary from it directly.
+        auto dict = fixpp::dict::XmlLoader{}.load_from_string(kBad, &mr);
+        pugi::xml_document doc;
+        ASSERT_TRUE(doc.load_string(std::string{kBad}.c_str()));
+        auto const control = census_fr002(doc, dict);
+        EXPECT_GT(control.member_sets_examined, 0U);
+        EXPECT_FALSE(control.collisions.empty())
+            << "FR-002 census FAILED to flag an injected shared parent/child scalar member";
+    }
+
+    // ---- Real census: all 9 shipped dicts clean + non-vacuous. ----
+    constexpr std::size_t kArenaBytes = 32UZ * 1024UZ * 1024UZ;
+    auto storage = std::make_unique<std::byte[]>(kArenaBytes);
+    std::pmr::monotonic_buffer_resource mr{storage.get(), kArenaBytes};
+
+    for (auto const& fname : kRuntimeDicts) {
+        auto const path = std::filesystem::path{FIXPP_DICT_DATA_DIR} / std::string{fname};
+        auto dict = fixpp::dict::XmlLoader{}.load(path, &mr);
+        ASSERT_FALSE(dict.messages().empty()) << fname << " failed to load";
+        auto const doc = load_raw(path);
+        auto const res = census_fr002(doc, dict);
+        EXPECT_GT(res.member_sets_examined, 0U)
+            << fname << ": FR-002 census examined 0 member-sets (vacuous)";
+        for (auto const& c : res.collisions) {
+            ADD_FAILURE() << fname << ": FR-002 scalar-member collision — " << c;
+        }
+    }
+}
