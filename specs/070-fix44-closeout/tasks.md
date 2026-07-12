@@ -94,8 +94,8 @@ Single C++23 library `fixpp`. Source: `include/fixpp/`, `src/`. Tests: `tests/se
 **Independent test**: inbound 35=n with `213` containing SOH ⇒ `fromApp`, tag 213 byte-exact; validator-on ⇒ accepted.
 
 ### Tests for User Story 4 (write first, prove they exercise the real path)
-- [ ] T020 [P] [US4] Write `tests/session/test_070_xmlnonfix_passthrough_test.cpp`: (a) inbound `35=n` with `212=len`/`213=<xml containing 0x01 SOH>` ⇒ delivered on the `fromApp` (application) callback, NOT `fromAdmin`, NOT rejected; tag 213 reads back byte-exact incl. embedded SOH; (b) with `validate_inbound_messages=true` ⇒ still accepted (FR-011), not rejected. Confirm the test genuinely exercises delivery (mutation-check: it must fail if 35=n were mis-routed/rejected).
-- [ ] T021 [US4] Run `test_070_xmlnonfix_passthrough_test` GREEN. (No source change expected; if the validator-on case is red, add the minimal validator allowance and record it — but per Gate A, 212/213 are FIX44 header fields so acceptance is expected.)
+- [X] T020 [P] [US4] Write `tests/session/test_070_xmlnonfix_passthrough_test.cpp`: (a) inbound `35=n` with `212=len`/`213=<xml containing 0x01 SOH>` ⇒ delivered on the `fromApp` (application) callback, NOT `fromAdmin`, NOT rejected; tag 213 reads back byte-exact incl. embedded SOH; (b) with `validate_inbound_messages=true` ⇒ still accepted (FR-011), not rejected. Confirm the test genuinely exercises delivery (mutation-check: it must fail if 35=n were mis-routed/rejected).
+- [X] T021 [US4] Run `test_070_xmlnonfix_passthrough_test` GREEN. (No source change expected; if the validator-on case is red, add the minimal validator allowance and record it — but per Gate A, 212/213 are FIX44 header fields so acceptance is expected.)
 
 **Checkpoint**: US4 independently testable and green.
 
