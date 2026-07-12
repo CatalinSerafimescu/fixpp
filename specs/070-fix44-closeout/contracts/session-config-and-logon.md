@@ -17,7 +17,7 @@ to the pre-feature baseline.
 |------|------|---------|----------|----|
 | `posture` | `std::optional<session_posture>` (`enum class session_posture { production, test }`) | `nullopt` | Enables S-029 enforcement; drives inbound refusal + outbound `464=Y` advertise. | FR-001 |
 | `advertised_max_message_size` | `std::optional<std::uint32_t>` | `nullopt` | Emits `383` outbound; hard-enforces inbound size. | FR-004, FR-005 |
-| `supported_msg_types` | `std::vector<supported_msg_type>` (`{char direction; std::string msg_type;}`) | `{}` | Emits the `384` group outbound in order. | FR-008 |
+| `supported_msg_types` | `std::vector<supported_msg_type>` (`{msg_direction direction; std::string msg_type;}`, `enum class msg_direction { send, receive }`) | `{}` | Emits the `384` group outbound in order. | FR-008 |
 
 **C-1.1** All three additions keep `SessionConfig` copy-constructible (`static_assert` at
 `:483-487` must still compile). No C-ABI exposure (FR-013) — C++ config surface only.
@@ -66,19 +66,33 @@ each emitted **only when its `opts` member is active**:
 |-----|--------------|-------|----|
 | `MaxMessageSize(383)` | `opts.max_message_size.has_value()` | decimal `<value>` | FR-004 |
 | `TestMessageIndicator(464)` | `opts.test_message_indicator == true` (i.e. `cfg_.posture == test`) | `Y` (never `N`) | FR-002 (advertise side) |
-| `NoMsgTypes(384)=k` then k × (`MsgDirection(385)=<dir>` `RefMsgType(372)=<type>`) | `!opts.supported_msg_types.empty()` (`k = size`) | count + contiguous member pairs in config order | FR-008 |
+| `NoMsgTypes(384)=k` then k × (`RefMsgType(372)=<type>` `MsgDirection(385)=<dir>`) | `!opts.supported_msg_types.empty()` (`k = size`) | count + contiguous member pairs (RefMsgType then MsgDirection, per dictionary delimiter order) in config order | FR-008 |
 
 **C-3.1 (omission = baseline).** When a member is inactive, its tag(s) are **absent** — no
 `383`, no `464`, no `384` (not even `384=0`). This is the FR-012 default path.
 
 **C-3.2 (384 group shape / SC-004).** For a k-entry list, the emitted group is
-`384=k` immediately followed by exactly k `(385,372)` pairs, contiguous, in vector order.
-Parsing the emitted Logon back yields exactly k members equal to the configured pairs, in
-order (exact-set + order round-trip, not subset).
+`384=k` immediately followed by exactly k `(372,385)` pairs, contiguous, in vector order —
+each entry leads with `RefMsgType(372)` (the group delimiter, declared first in
+`FIX44.xml:286-289`) then `MsgDirection(385)`. Parsing the emitted Logon back yields exactly k
+members equal to the configured pairs, in order (exact-set + order round-trip, not subset).
+Emitting `385` before `372`, or interleaving `383`/`464` between `384=k` and its member pairs,
+would corrupt the group delimiter and risk strict-parser rejection.
 
-**C-3.3 (385 value / research.md D-D).** `385` is written verbatim from `direction` (operator
-`char`); the FIX44-conformant domain is `{'S','R'}` (`FIX44.xml:4997-5000`). No advertise-side
-enum validation is performed this feature.
+**C-3.3 (385 value / research.md D-D).** `385` is rendered from the typed `msg_direction` enum:
+`send`→`'S'`, `receive`→`'R'` (the FIX44-conformant domain `{'S','R'}`, `FIX44.xml:4997-5000`).
+An out-of-enum direction is **unrepresentable**, so an invalid `385` cannot reach the wire —
+fail-closed by construction (no advertise-side runtime guard needed). This replaces the earlier
+raw-`char` design.
+
+**C-3.4 (body position / wire order — Gate A r1).** The three new fields are appended in the
+Logon **body** (not the header; `383`/`384`/`464` are Logon-message body fields per
+`FIX44.xml:278-292`, whereas the header carries only `212`/`213`). Emit them contiguously, after
+the existing `789` append, in dictionary-relative order: `MaxMessageSize(383)`, then the
+`NoMsgTypes(384)` group, then `TestMessageIndicator(464)`. (The existing builder already emits
+some body fields out of strict dictionary order — `553`/`554` before `141`/`789` — so peers are
+empirically order-lenient; the explicit position here is to guarantee the `384` group is never
+split by an interleaved `383`/`464`, per C-3.2.)
 
 ---
 
@@ -88,8 +102,9 @@ enum validation is performed this feature.
 header scan (`scan_frame_header`, which now reads `464`), and **before** the acceptor reply
 Logon is built (`session.cpp:2490`) — the session must not reach Active/Established (FR-002).
 
-**C-4.2 (rule).** When `cfg_.posture.has_value()`, compute `peer_is_test := (hdr.test_message_indicator == "Y")`;
-`"N"` or empty ⇒ peer production. Mismatch := `(posture==production && peer_is_test) || (posture==test && !peer_is_test)` (symmetric, research.md D-A).
+**C-4.2 (rule).** When `cfg_.posture.has_value()`, first apply the value check (C-4.5), then
+compute `peer_is_test := (hdr.test_message_indicator == "Y")`; `"N"`, empty (`464=`), or absent
+⇒ peer production. Mismatch := `(posture==production && peer_is_test) || (posture==test && !peer_is_test)` (symmetric, research.md D-A).
 
 **C-4.3 (disposition on mismatch).** Mirror the Logon-time Logout+disconnect at
 `session.cpp:2676-2702`:
@@ -102,25 +117,38 @@ path (`session.cpp:1998-2007`), which emits no wire notification (research.md D-
 **C-4.4 (match ⇒ unchanged).** When posture matches (or `464` maps to the same posture), the
 Logon proceeds exactly as today (FR-003, SC-002 zero false rejections).
 
-**C-4.5 (malformed 464).** A `464` value not in `{Y,N}` is malformed and handled by the
-existing malformed-header disposition, not by posture logic (Edge Cases / S-029).
+**C-4.5 (malformed 464 — explicit value check).** A `464` present with a **non-empty** value
+not in `{Y, N}` is malformed → refuse via an **explicit value check on the Logon posture path**,
+evaluated before the posture comparison (C-4.2). Tag 464 is newly scanned by this feature and is
+validated nowhere today, so there is **no** existing malformed-header disposition to inherit —
+the check is added here, not delegated. Empty (`464=`) or absent 464 is **not** malformed: both
+map to peer-production (symmetric rule); empty ≡ absent is safe because the clarification already
+accepts "absent ⇒ production", so no presence bit is stored.
 
 ---
 
 ## C-5 — Inbound S-030 disposition (negotiated size exceeded)
 
-**C-5.1 (placement).** At the **top of `on_inbound_frame`** (`session.cpp:1961`), before FSM
-/ seqnum / interpret work, applied to every inbound frame in every state.
+**C-5.1 (placement + state gate).** At the **top of `on_inbound_frame`** (`session.cpp:1961`),
+before FSM / seqnum / interpret work — but the negotiated check fires **only in the established
+state**. FR-005 scopes enforcement to an *established* session; enforcing during the Logon
+handshake would let an acceptor disconnect the peer's initial Logon before either side has
+advertised `383` (and "our Logon sent" is not a sufficient gate — an initiator advertises first
+and then has a pre-establishment window). Gating on the established/Active FSM state (the same
+boundary as C-4.1) requires **no new session-state flag**.
 
-**C-5.2 (rule).** When `cfg_.advertised_max_message_size.has_value()` and
-`frame.size() > *cfg_.advertised_max_message_size`: `record_state_transition_(fsm_state::Disconnected)`
-with the distinct "negotiated max message size exceeded" reason; refuse the frame (do not
-interpret/dispatch it). Boundary: `frame.size() == N` accepted, `N+1` disconnects (FR-005, SC-003).
+**C-5.2 (rule).** When the session is established, `cfg_.advertised_max_message_size.has_value()`,
+and `frame.size() > *cfg_.advertised_max_message_size`:
+`record_state_transition_(fsm_state::Disconnected)` with the distinct "negotiated max message
+size exceeded" reason; refuse the frame (do not interpret/dispatch it). Boundary:
+`frame.size() == N` accepted, `N+1` disconnects (FR-005, SC-003).
 
 **C-5.3 (independence from backstop / FR-006).** This check is additional to and never weakens
 the absolute framer backstop (`framer.hpp:21` `default_max_frame_bytes`, `framer.cpp` — both
 UNCHANGED). A frame larger than the backstop is already rejected at framing, before
-`on_inbound_frame`. If configured `N` exceeds the backstop, the backstop governs (research.md D-C).
+`on_inbound_frame`. The two limits compose by min-semantics — effective inbound cap =
+`min(N, max_frame_bytes)`; a configured `N` MAY exceed the backstop, which then governs first
+(research.md D-C). No clamp of `N` is applied.
 
 **C-5.4 (peer 383 capture / FR-007).** On an inbound Logon carrying `383`, capture the value
 (`hdr.max_message_size`) into `Session::peer_max_message_size_` (observability only). No hard

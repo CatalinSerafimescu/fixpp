@@ -24,9 +24,9 @@ enum class session_posture { production, test };
 **Validation rules.**
 - No value is invalid; a two-valued enum wrapped in `optional` is total.
 - Interpretation of the inbound peer indication (not stored — computed per Logon):
-  `peer_is_test := (464 == "Y")`; `464 == "N"` or absent ⇒ `peer_is_production`.
+  `peer_is_test := (464 == "Y")`; `464 == "N"`, empty (`464=`), or absent ⇒ `peer_is_production`.
   Mismatch := `(posture == production && peer_is_test) || (posture == test && !peer_is_test)`.
-- A `464` present with a value other than `Y`/`N` ⇒ malformed (Edge Cases / S-029), handled by the existing malformed-header path — **not** by posture logic. (464 is `type='BOOLEAN'` domain `{Y,N}` in `FIX44.xml:5246-5249`.)
+- A `464` present with a **non-empty** value not in `{Y, N}` ⇒ malformed → reject via an **explicit value check on the Logon posture path**, evaluated *before* the posture comparison. (464 is `type='BOOLEAN'` domain `{Y,N}` in `FIX44.xml:5246-5249`.) This feature is the first to scan tag 464; it is not validated anywhere today, so there is **no** pre-existing malformed-header validator to inherit — the check is added here, not delegated. An empty (`464=`) or absent 464 is **not** malformed (both ⇒ production under the symmetric rule); empty ≡ absent is safe because the clarification already accepts "absent ⇒ production", so no presence bit is stored.
 
 ---
 
@@ -36,11 +36,12 @@ enum class session_posture { production, test };
 
 | Field | Type | Default | Semantics | FR |
 |-------|------|---------|-----------|----|
-| `SessionConfig::advertised_max_message_size` | `std::optional<std::uint32_t>` | `std::nullopt` | Bytes. When set: (a) emit `MaxMessageSize(383)=<value>` in our outbound Logon; (b) hard-enforce inbound — disconnect any inbound frame whose `frame.size()` exceeds this value. `nullopt` ⇒ no 383 emitted, no negotiated enforcement (only the absolute framer backstop applies). | FR-004, FR-005 |
+| `SessionConfig::advertised_max_message_size` | `std::optional<std::uint32_t>` | `std::nullopt` | Bytes. When set: (a) emit `MaxMessageSize(383)=<value>` in our outbound Logon; (b) hard-enforce inbound **once the session is established** — disconnect any inbound frame whose `frame.size()` exceeds this value. `nullopt` ⇒ no 383 emitted, no negotiated enforcement (only the absolute framer backstop applies). | FR-004, FR-005 |
 
 **Validation rules.**
 - `uint32_t` is the on-wire domain match for `MaxMessageSize` (`type='LENGTH'`, `FIX44.xml:4995`).
-- No clamp against the framer backstop (`default_max_frame_bytes` 256 KiB, `framer.hpp:21`): if the configured value exceeds the backstop, the framer still governs the outer envelope (research.md D-C / Edge Cases S-030). The negotiated bound only ever tightens.
+- No clamp against the framer backstop (`default_max_frame_bytes` 256 KiB, `framer.hpp:21`): a configured `N` MAY exceed the backstop. The two limits compose by min-semantics — effective inbound cap = `min(N, max_frame_bytes)` — with the framer rejecting the outer envelope first (research.md D-C / Edge Cases S-030). The negotiated bound only ever tightens.
+- Enforcement is gated on the **established** session state (FR-005 "established session"): the negotiated check does not fire during the Logon handshake, so it never disconnects a peer's initial Logon before either side has advertised. Pre-establishment oversize is covered by the framer backstop.
 - Boundary: exactly `N` accepted; `N+1` disconnects (SC-003).
 
 ---
@@ -50,21 +51,24 @@ enum class session_posture { production, test };
 **Location.** `include/fixpp/session/session_config.hpp`.
 
 ```cpp
+enum class msg_direction { send, receive };   // renders send→'S', receive→'R' (FIX44 CHAR domain)
+
 struct supported_msg_type {
-    char        direction;   // MsgDirection(385) — on-wire CHAR; conformant {'S','R'}
-    std::string msg_type;    // RefMsgType(372)   — MsgType string, e.g. "D", "8"
+    msg_direction direction;   // MsgDirection(385) — typed; builder renders to 'S'/'R'
+    std::string   msg_type;    // RefMsgType(372)   — MsgType string, e.g. "D", "8"
 };
 ```
 
 | Field | Type | Default | Semantics | FR |
 |-------|------|---------|-----------|----|
-| `SessionConfig::supported_msg_types` | `std::vector<supported_msg_type>` | `{}` (empty) | Ordered advertise list. Non-empty ⇒ emit `NoMsgTypes(384)=k` + k `(385,372)` member pairs in this order in the outbound Logon. Empty ⇒ no 384 group emitted at all (no `384=0`). | FR-008 |
+| `SessionConfig::supported_msg_types` | `std::vector<supported_msg_type>` | `{}` (empty) | Ordered advertise list. Non-empty ⇒ emit `NoMsgTypes(384)=k` + k `(372,385)` member pairs (RefMsgType then MsgDirection, per dictionary delimiter order) in this order in the outbound Logon. Empty ⇒ no 384 group emitted at all (no `384=0`). | FR-008 |
 
 **Validation rules.**
-- `direction` is written verbatim (operator-supplied `char`); conformant values are `S`/`R` (`FIX44.xml:4997-5000`). No advertise-side enum guard this feature (research.md D-D) — supply `S`/`R`.
+- `direction` is a typed `msg_direction` enum; the builder renders `send`→`'S'`, `receive`→`'R'` (`FIX44.xml:4997-5000`). An out-of-enum direction **cannot be constructed**, so no invalid `385` value can reach the wire — fail-closed by construction (research.md D-D). This replaces the earlier raw-`char` design, which allowed an operator to emit an off-enum `385` (e.g. `'0'`) that still "passed" the builder.
 - `msg_type` is written verbatim as the `372` value.
-- Order is significant: the emitted group members appear in vector order (SC-004 exact-set + order round-trip).
-- **Copy-constructibility.** `supported_msg_type` (a `char` + `std::string`) and `std::vector<supported_msg_type>` are copy-constructible; `std::optional<session_posture>` and `std::optional<std::uint32_t>` are copy-constructible. The `static_assert(std::is_copy_constructible_v<SessionConfig>)` at `session_config.hpp:483-487` **continues to hold** — no field breaks the by-value `Session::cfg_` membership (FR-001 / 010 W-5).
+- **Wire member order.** The `NoMsgTypes(384)` group delimiter is `RefMsgType(372)` (declared FIRST in `FIX44.xml:286-289`), so each entry emits `372=<type>` then `385=<dir>`, contiguous. Emitting `385` first would risk strict-parser rejection / group-delimiter misparse.
+- Order is significant: the emitted group entries appear in vector order (SC-004 exact-set + order round-trip).
+- **Copy-constructibility.** `supported_msg_type` (an `enum class` + `std::string`) and `std::vector<supported_msg_type>` are copy-constructible; the `msg_direction` enum is trivially copyable; `std::optional<session_posture>` and `std::optional<std::uint32_t>` are copy-constructible. The `static_assert(std::is_copy_constructible_v<SessionConfig>)` at `session_config.hpp:483-487` **continues to hold** — no field breaks the by-value `Session::cfg_` membership (FR-001 / 010 W-5).
 
 ---
 
@@ -85,7 +89,7 @@ struct logon_advertise_options {
 |--------|------|---------|-------|
 | `max_message_size` | `std::optional<std::uint32_t>` | `nullopt` | `MaxMessageSize(383)=<value>` when set |
 | `test_message_indicator` | `bool` | `false` | `TestMessageIndicator(464)=Y` when `true` (never emits `464=N`) |
-| `supported_msg_types` | `std::span<const supported_msg_type>` | `{}` | `NoMsgTypes(384)=k` + k `(385,372)` pairs when non-empty |
+| `supported_msg_types` | `std::span<const supported_msg_type>` | `{}` | `NoMsgTypes(384)=k` + k `(372,385)` pairs (RefMsgType then MsgDirection) when non-empty |
 
 **Signature change.** `build_logon` gains **one** trailing parameter:
 ```cpp
@@ -137,6 +141,6 @@ set on the inbound Logon path in `src/session/session.cpp`.
 
 - **INV-070-1 (default no-op).** `posture == nullopt` ∧ `advertised_max_message_size == nullopt` ∧ `supported_msg_types.empty()` ⇒ every new code path is inert and the engine is byte/disposition-identical to baseline (FR-012, SC-006).
 - **INV-070-2 (advertise ⇒ config-driven `opts`).** The outbound Logon's 383/464/384 fields are a pure function of `SessionConfig` (`opts` derived at the two `build_logon` call sites, `session.cpp:838` initiator / `:2490` acceptor); `test_message_indicator` in `opts` is `(cfg_.posture == session_posture::test)`.
-- **INV-070-3 (inbound-only 383 enforcement).** Only `advertised_max_message_size` (ours) gates the inbound disconnect; `peer_max_message_size_` (E6) never triggers a disconnect this feature.
+- **INV-070-3 (inbound-only, established-gated 383 enforcement).** Only `advertised_max_message_size` (ours) gates the inbound disconnect, and only in the **established** state (FR-005); `peer_max_message_size_` (E6) never triggers a disconnect this feature.
 - **INV-070-4 (layered size limits).** Framer backstop (`framer.hpp:21`, unchanged) ⊇ negotiated bound; the negotiated check only tightens (research.md D-C).
 - **INV-070-5 (copy-constructible config).** All new `SessionConfig` fields keep `static_assert(is_copy_constructible_v<SessionConfig>)` (`:483`) true.

@@ -81,20 +81,21 @@ disconnects citing a "negotiated max message size exceeded" reason. Testable wit
 ### User Story 3 - Advertise supported message types in Logon (Priority: P2)
 
 An endpoint tells its counterparty which message types it supports and in which direction, by
-including the NoMsgTypes(384) repeating group (MsgDirection(385) + RefMsgType(372) members) in
-the Logon(A) it sends. The supported set comes from an explicit configuration source. This lets
+including the NoMsgTypes(384) repeating group (RefMsgType(372) + MsgDirection(385) members, in
+that dictionary order) in the Logon(A) it sends. The supported set comes from an explicit configuration source. This lets
 a counterparty tailor what it sends.
 
 **Why this priority**: An interop nicety improving negotiation transparency; inbound parsing of
 the group is already tolerated, so only the advertise side is missing and nothing breaks without it.
 
-**Independent Test**: Configure a supported-type list `[(D, send), (8, receive), …]`; assert the
-outbound Logon contains a well-formed `NoMsgTypes(384)=k` group with matching `385`/`372` members
-in order. Testable with no other story.
+**Independent Test**: Configure a supported-type list `[(send, "D"), (receive, "8"), …]` (typed
+`msg_direction` enum + MsgType string); assert the outbound Logon contains a well-formed
+`NoMsgTypes(384)=k` group with matching `372`/`385` member pairs (RefMsgType then MsgDirection,
+per dictionary order) in configuration order. Testable with no other story.
 
 **Acceptance Scenarios**:
 
-1. **Given** a configured supported-type list of k entries, **When** the session sends its Logon, **Then** the Logon carries `NoMsgTypes(384)=k` followed by k well-formed `385`/`372` member pairs in configuration order.
+1. **Given** a configured supported-type list of k entries, **When** the session sends its Logon, **Then** the Logon carries `NoMsgTypes(384)=k` followed by k well-formed `372`/`385` member pairs (RefMsgType then MsgDirection, per dictionary order) in configuration order.
 2. **Given** no supported-type list is configured (default), **When** the session sends its Logon, **Then** no `384` group is emitted (behavior unchanged from today).
 3. **Given** a configured list, **When** the outbound Logon is parsed back, **Then** every advertised `(MsgDirection, RefMsgType)` pair round-trips exactly.
 
@@ -128,10 +129,10 @@ with no other story.
 
 ### Edge Cases
 
-- **S-029**: 464 present with an invalid value (not Y/N) → treated as malformed and rejected consistently with existing malformed-header handling.
+- **S-029**: 464 present with a non-empty value not in `{Y, N}` → rejected as malformed by an **explicit value check on the Logon posture path**. Tag 464 is newly scanned by this feature and is not validated anywhere today, so there is no pre-existing malformed-header validator to inherit — the value check is added here. An empty (`464=`) or absent 464 is **not** malformed: both map to peer-production under the symmetric rule (empty ≡ absent is safe precisely because the clarification already accepts "absent ⇒ production", so an empty-present 464 introduces no hazard beyond the accepted risk model — no presence bit is required).
 - **S-029**: posture enforcement off (default) must be a strict superset-compatible no-op — no regression to any existing Logon test.
 - **S-030**: a message exactly equal to the negotiated size N is accepted; N+1 disconnects (boundary).
-- **S-030**: our advertised negotiated `383=N` must never be larger than the absolute frame backstop; if a configured N exceeds the backstop, the backstop still governs.
+- **S-030**: a configured `383=N` MAY exceed the absolute frame backstop — no clamp of N is applied. The two limits compose by **min-semantics**: the effective inbound cap is `min(N, max_frame_bytes)`. A frame larger than the backstop is already rejected at framing (before the negotiated check ever runs), so the negotiated bound only ever *tightens*; N > backstop simply means the backstop governs first.
 - **S-030**: peer advertises no 383 → no outbound-guard obligation toward that peer.
 - **S-037**: empty configured list → group omitted entirely (no `384=0`).
 - **S-037**: the advertised group must not violate the existing Logon builder's zero-alloc / bounded-buffer discipline for large k.
@@ -149,7 +150,7 @@ with no other story.
 - **FR-005**: When an advertised MaxMessageSize N is set, the engine MUST disconnect an established session if the peer transmits a message whose total on-wire length exceeds N, surfacing a distinct negotiated-max-exceeded reason.
 - **FR-006**: The negotiated MaxMessageSize enforcement MUST be independent of and never weaken the pre-existing absolute frame-size backstop; the absolute backstop remains in force unchanged.
 - **FR-007**: On an inbound Logon(A), the engine MUST read the peer's advertised MaxMessageSize(383) when present and make it available to session state (for the outbound-respect behavior scoped in Assumptions).
-- **FR-008**: The engine MUST support a per-session **supported-MsgTypes advertisement** list of (MsgDirection, MsgType) entries; when non-empty, the outbound Logon(A) MUST include a well-formed NoMsgTypes(384) group whose members (MsgDirection(385) + RefMsgType(372)) reflect the list in order; when empty (default), no 384 group is emitted.
+- **FR-008**: The engine MUST support a per-session **supported-MsgTypes advertisement** list of (MsgDirection, MsgType) entries; when non-empty, the outbound Logon(A) MUST include a well-formed NoMsgTypes(384) group whose members (RefMsgType(372) + MsgDirection(385), in that dictionary delimiter order) reflect the list in order; when empty (default), no 384 group is emitted.
 - **FR-009**: An inbound 35=n (XMLnonFIX) message MUST be delivered to the application-message callback (not the admin callback) with all fields — including the length-delimited XmlData(213) — byte-exact, preserving any embedded SOH/'=' bytes in the payload.
 - **FR-010**: An inbound 35=n MUST NOT be rejected on the default (validation-off) inbound path.
 - **FR-011**: An inbound well-formed 35=n (XMLnonFIX) MUST be accepted by the inbound dictionary validator when opt-in validation is enabled — i.e. the validator MUST NOT reject XMLnonFIX regardless of the `validate_inbound_messages` setting. A discriminating test MUST exercise the validation-enabled path.
@@ -162,7 +163,7 @@ with no other story.
 - **Session posture**: a per-session enumeration {production, test, unset}. Drives S-029 enforcement; default unset (disabled).
 - **Advertised MaxMessageSize**: a per-session non-negative size (bytes) our endpoint advertises and enforces on inbound; default unset. Distinct from the absolute frame backstop.
 - **Peer MaxMessageSize**: the peer's advertised 383 captured from its Logon; informs the outbound-respect behavior (scope in Assumptions).
-- **Supported-MsgTypes advertisement**: an ordered list of (direction, MsgType) pairs advertised via NoMsgTypes(384); default empty.
+- **Supported-MsgTypes advertisement**: an ordered list of (direction, MsgType) pairs advertised via NoMsgTypes(384), where `direction` is a typed `msg_direction` enum {send, receive} rendering to the FIX44 CHAR domain {'S','R'} on the wire; default empty.
 - **XMLnonFIX message**: an application (fromApp) message whose XML payload rides in XmlDataLen(212)/XmlData(213); delivered opaque.
 
 ## Success Criteria *(mandatory)*
@@ -185,3 +186,22 @@ with no other story.
 - **A-034 validation-enabled** (resolved — see Clarifications): 35=n passes through on the default validation-off path; additionally, per FR-011, the validator MUST accept a well-formed XMLnonFIX when validation is enabled (no rejection in any config).
 - **Scope boundaries**: S-032 residual (standalone initiator-driven 141=Y mid-session origination) is explicitly deferred to its own later feature; v50sp2 typed codegen, C-ABI changes, and Python bindings are out of scope.
 - **Dependencies**: reuses the existing Logon builder (`build_logon`), inbound-Logon handler, header scanner, framer/length-delimited-field parser, and the `fromApp` dispatch surface — all already present; no new subsystem is introduced.
+
+## Normative References
+
+Per constitution Article VI §5, the exact citations this feature closes (strings verified
+against `spec/coverage-index.md`), split into coverage-index section refs and dictionary anchors:
+
+**Coverage-index references** (canonical `[DocAbbrev §X.Y.Z] Title` strings, mirrored exactly
+from `spec/coverage-index.md`):
+
+- **S-029** — `[FIX-SL §4.3.2] Using the TestMessageIndicator(464)` (`spec/coverage-index.md:44`).
+- **S-030** — `[FIX-SL §4.3.6] Maximum message size (MaxMessageSize 383)` (`spec/coverage-index.md:51`).
+- **S-037** — `[FIX-SL §4.3.8] Specifying supported message types (NoMsgTypes in Logon)` (`spec/coverage-index.md:53`).
+
+**Dictionary references** (message-level `[FIX44]` DocAbbrev + MsgType granularity, per the
+convention documented at `spec/coverage-index.md:268-276`; NOT a coverage-index FIX-SL section ref):
+
+- **A-034** — `[FIX44] XMLnonFIX (MsgType n)` — the FIX44 application-dictionary message definition
+  (`dictionaries/FIX44.xml:1008`, `msgtype='n' msgcat='admin'`; XmlDataLen(212)/XmlData(213) resident
+  in `<header>`). Dictionary anchor only; catalogue row at `spec/coverage-index.md:373`.

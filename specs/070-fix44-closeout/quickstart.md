@@ -38,9 +38,12 @@ cfg.advertised_max_message_size = 65536;   // bytes; std::optional<std::uint32_t
 
 **On the wire (outbound Logon):** carries `383=65536`.
 
-**What triggers a disconnect (inbound):** any inbound frame whose total on-wire length
-exceeds the value **you advertised** disconnects the session with a distinct
-"negotiated max message size exceeded" reason. Exactly-`N` bytes is accepted; `N+1` disconnects.
+**What triggers a disconnect (inbound):** once the session is **established**, any inbound frame
+whose total on-wire length exceeds the value **you advertised** disconnects the session with a
+distinct "negotiated max message size exceeded" reason. Exactly-`N` bytes is accepted; `N+1`
+disconnects. (Enforcement is gated on the established state, so a peer's initial Logon is never
+disconnected by this check before negotiation completes; oversize handshake frames are still
+caught by the absolute backstop.)
 
 **Relationship to the absolute cap:** this negotiated limit is a stricter *inner* bound. The
 engine's absolute frame backstop (`default_max_frame_bytes`, 256 KiB) is unchanged and always
@@ -58,19 +61,22 @@ create an outbound guard in this release.
 Provide an explicit, ordered list of `(direction, MsgType)` pairs. Empty ⇒ nothing emitted.
 
 ```cpp
+using fixpp::session::msg_direction;
 cfg.supported_msg_types = {
-    { 'S', "D" },   // we SEND NewOrderSingle(D)
-    { 'R', "8" },   // we RECEIVE ExecutionReport(8)
-    { 'R', "9" },   // we RECEIVE OrderCancelReject(9)
+    { msg_direction::send,    "D" },   // we SEND NewOrderSingle(D)
+    { msg_direction::receive, "8" },   // we RECEIVE ExecutionReport(8)
+    { msg_direction::receive, "9" },   // we RECEIVE OrderCancelReject(9)
 };
 ```
 
-`direction` is `MsgDirection(385)` — use **`'S'` (send)** or **`'R'` (receive)** (the FIX 4.4
-conformant values). `msg_type` is `RefMsgType(372)`.
+`direction` is a typed `msg_direction` enum — **`send`** renders to `MsgDirection(385)=S`,
+**`receive`** to `385=R` (the FIX 4.4 conformant values; an off-enum direction is
+unrepresentable). `msg_type` is `RefMsgType(372)`.
 
 **On the wire (outbound Logon):** carries `NoMsgTypes(384)=3` followed by three contiguous
-member pairs `385=S 372=D`, `385=R 372=8`, `385=R 372=9`, in this order. Parsing the Logon back
-round-trips the list exactly (same count, same pairs, same order).
+member pairs `372=D 385=S`, `372=8 385=R`, `372=9 385=R`, in this order — RefMsgType(372) leads
+each entry because it is the group delimiter in `FIX44.xml`. Parsing the Logon back round-trips
+the list exactly (same count, same pairs, same order).
 
 An empty list emits **no** 384 group at all (not even `384=0`) — byte-identical to today.
 
