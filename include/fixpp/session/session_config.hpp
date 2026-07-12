@@ -23,6 +23,7 @@
 #include <cstdint>
 #include <fixpp/core/trace_context.hpp>
 #include <fixpp/session/compid_authorization_policy.hpp>  // value-typed member ⇒ complete type (013 T011)
+#include <fixpp/session/session_types.hpp>  // 070: session_posture/msg_direction/supported_msg_type (shared w/ admin_messages.hpp)
 #include <fixpp/session/message_store_factory.hpp>  // shared_ptr member ⇒ complete type (FR-001a)
 #include <fixpp/session/security_profile.hpp>       // value-typed member ⇒ complete type
 #include <fixpp/tap/tap_consumer.hpp>               // value-typed member ⇒ complete type
@@ -114,12 +115,11 @@ enum class session_role : std::uint8_t {
     acceptor = 1,
 };
 
-// 070-fix44-closeout — session_posture / msg_direction / supported_msg_type now
-// live in a dependency-light shared header so admin_messages.hpp can obtain the
+// 070-fix44-closeout — session_posture / msg_direction / supported_msg_type are
+// defined in the light shared header fixpp/session/session_types.hpp (included at
+// the TOP of this file, outside the namespace) so admin_messages.hpp can obtain the
 // COMPLETE supported_msg_type for its logon_advertise_options `std::span` member
-// (MSVC's std::span rejects span<incomplete-type> with C2036; a forward decl
-// compiled on libstdc++/libc++ but broke the Tier-2 MSVC build). [data-model E1/E3]
-#include <fixpp/session/session_types.hpp>
+// (MSVC's std::span rejects span<incomplete-type> with C2036). [data-model E1/E3]
 
 // Portable "closed enum" attribute (no-op where unsupported). Placed after
 // the enum name per the Clang spelling; a static_assert at every switch site
