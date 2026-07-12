@@ -182,102 +182,118 @@ public:
         //       different field injected before the first instance)
         // Walk the offset table entries in document order.
         //
-        // 063 T014: this flat, non-recursive walk has no notion of nesting
-        // depth (that is Defect B / US2, out of scope here) — every lookup
-        // below queries the ROOT context (`{msg_type, path=[]}`). For
-        // top-level groups (the overwhelming majority, and every group this
-        // loop could previously validate correctly) the ROOT context is
-        // exactly how `Dictionary::as_table_view()` registers them, so
-        // behaviour is unchanged and Defect A stays fixed. A genuinely
-        // NESTED group's own no_tag is registered only under its real
-        // (non-root) parent path, so a ROOT-context query here misses; per
-        // the amended hardening invariant (table_view.hpp doc), the
-        // context-aware accessor then falls back to the LEGACY bare-`no_tag`
-        // store, which `as_table_view()` also populates (byte-identical to
-        // pre-063 `main`) — so a nested reused tag here degrades to exactly
-        // `main`'s pre-existing (Defect-A-affected) resolution, not a NEW
-        // failure mode; fixing it is Defect B / US2's nesting-aware walk.
-        // Hand-built bare-API table_view fixtures are unaffected: they never
-        // populate the context store, so the query falls straight through
-        // to the (unchanged) legacy bare-`no_tag` lookup.
+        // 072 FR-010 (L-063-3): nesting-aware, query-before-push recursive group
+        // validation. The pre-072 walk was FLAT — it iterated every entry and
+        // queried each group at the ROOT context (`{msg_type, path=[]}`), so a
+        // genuinely NESTED reused group missed the context store and degraded to
+        // the bare-`no_tag` (first-seen) resolution, and its hand-rolled
+        // `seen_in_instance` boundary heuristic had no notion of nesting depth
+        // (could not span a multi-entry nested group). `validate_group_level`
+        // below resolves each candidate group under its REAL parent path first,
+        // then pushes the group's own no_tag only to recurse into a nested child
+        // — so typed read and strict validation now agree on depth-≥2 membership.
         auto const ents = msg.offsets().entries();
-        std::span<std::uint16_t const> const root_path{};
-        for (std::size_t i = 0; i < ents.size(); ++i) {
+        auto const grp = validate_group_level(ents, msg_type, std::span<std::uint16_t const>{},
+                                              msg.bytes().data(), 0, ents.size());
+        if (!grp) {
+            return core::expected_t<void>{std::unexpect, grp.error()};
+        }
+
+        return {};
+    }
+
+    // 072 FR-010 (L-063-3): nesting-aware, query-before-push recursive group
+    // validation. Validates every group appearing in entries [begin,end) at the
+    // nesting level given by `parent_path` (which EXCLUDES each candidate group's
+    // own no_tag), returning the entry index one-past the consumed range. Each
+    // candidate group is resolved under `parent_path` FIRST (group_first_field /
+    // group_member_tags); its own no_tag is pushed onto the path only to recurse
+    // into a nested child — mirroring `consume_group_extent` (query-under-ctx
+    // before forming `child = ctx.pushed(no_tag)`) and the typed accessor's
+    // `group_ctx.pushed(no_tag)`. Per-level extents come from the recursion, not
+    // the old flat `seen_in_instance` heuristic. Recursion depth is bounded by
+    // the group_context K=16 clamp (nested descent stops past depth 16, the same
+    // level beyond which membership context cannot be represented), so stack use
+    // is O(min(depth,16)) with no heap.
+    [[nodiscard]] core::expected_t<std::size_t> validate_group_level(
+        std::span<OffsetTable::entry const> ents, std::string_view msg_type,
+        std::span<std::uint16_t const> parent_path, std::byte const* frame_base, std::size_t begin,
+        std::size_t end) const noexcept {
+        std::size_t i = begin;
+        while (i < end) {
             std::uint16_t const no_tag = ents[i].tag;
-            std::uint16_t const delim_tag = dict_.group_first_field(msg_type, root_path, no_tag);
+            std::uint16_t const delim_tag = dict_.group_first_field(msg_type, parent_path, no_tag);
             if (delim_tag == 0) {
-                continue;  // not a group count field in this dict
+                ++i;
+                continue;  // not a group count field at this nesting level
             }
-            // Parse the declared count.
-            std::span<std::byte const> const count_bytes{
-                // The offset table's raw pointer into the frame buffer:
-                // bytes().data() is the frame start, entry.offset is value offset.
-                msg.bytes().data() + ents[i].offset, ents[i].length};
-            // Saturate at UINT32_MAX so an over-declared count cannot wrap uint32
-            // down to the real instance count and spuriously pass the
-            // `declared_count == actual_count` check (W-P3-1). A saturated count
-            // can never equal a plausible actual_count → reject.
+            // Saturate at UINT32_MAX (W-P3-1) so an over-declared count cannot
+            // wrap down to the real instance count and spuriously pass.
+            std::span<std::byte const> const count_bytes{frame_base + ents[i].offset,
+                                                         ents[i].length};
             std::uint32_t const declared_count = fixpp::wire::parse_bounded_u32(count_bytes);
-            // Walk entries after the count to count actual delimiter occurrences
-            // and verify the first entry after the count is the delimiter.
+            ++i;  // consume the count field
             if (declared_count == 0) {
                 continue;  // zero-count group: nothing to verify
             }
-            // Entry i+1 must be the delimiter (first field of first instance).
-            if (i + 1 >= ents.size() || ents[i + 1].tag != delim_tag) {
-                return core::expected_t<void>{std::unexpect,
-                                              core::error::wire_required_field_missing};
+            // First instance must open with the delimiter.
+            if (i >= end || ents[i].tag != delim_tag) {
+                return core::expected_t<std::size_t>{std::unexpect,
+                                                     core::error::wire_required_field_missing};
             }
-
-            auto const member_tags = dict_.group_member_tags(msg_type, root_path, no_tag);
+            auto const member_tags = dict_.group_member_tags(msg_type, parent_path, no_tag);
             auto const is_member = [&](std::uint16_t tag) noexcept {
-                for (auto const member_tag : member_tags) {
-                    if (member_tag == tag) {
+                for (auto const m : member_tags) {
+                    if (m == tag) {
                         return true;
                     }
                 }
                 return false;
             };
+            // child_path = parent_path + this group's own no_tag (bounded K=16),
+            // used ONLY to recurse into nested children (query-before-push).
+            std::array<std::uint16_t, 16> child_buf{};
+            std::size_t child_len = 0;
+            for (auto const t : parent_path) {
+                if (child_len < child_buf.size()) {
+                    child_buf[child_len++] = t;
+                }
+            }
+            bool const can_descend = child_len < child_buf.size();
+            if (can_descend) {
+                child_buf[child_len++] = no_tag;
+            }
+            std::span<std::uint16_t const> const child_path{child_buf.data(), child_len};
 
-            std::size_t actual_count = 0;
-            std::size_t group_body_end = i + 1U;
-            std::size_t k = i + 1U;
-            while (k < ents.size()) {
-                if (ents[k].tag != delim_tag) {
-                    break;
-                }
-                std::size_t const inst_start = k;
-                ++k;  // consume delimiter
-                while (k < ents.size()) {
-                    if (ents[k].tag == delim_tag) {
-                        break;  // next instance
+            std::uint32_t actual_count = 0;
+            while (i < end && ents[i].tag == delim_tag) {
+                ++i;  // consume this instance's delimiter
+                while (i < end && ents[i].tag != delim_tag) {
+                    std::uint16_t const t = ents[i].tag;
+                    if (!is_member(t)) {
+                        break;  // end of this group's extent
                     }
-                    if (!is_member(ents[k].tag)) {
-                        break;
-                    }
-                    bool seen_in_instance = false;
-                    for (std::size_t m = inst_start + 1U; m < k; ++m) {
-                        if (ents[m].tag == ents[k].tag) {
-                            seen_in_instance = true;
-                            break;
+                    // Query-before-push: is `t` itself a nested group under the
+                    // pushed child path? (depth-bounded by K=16.)
+                    if (can_descend && dict_.group_first_field(msg_type, child_path, t) != 0) {
+                        auto const nested =
+                            validate_group_level(ents, msg_type, child_path, frame_base, i, end);
+                        if (!nested) {
+                            return nested;  // propagate the nested failure slot
                         }
+                        i = *nested;  // advance past the consumed nested group
+                    } else {
+                        ++i;  // ordinary scalar member (or depth cap reached)
                     }
-                    if (seen_in_instance) {
-                        break;
-                    }
-                    ++k;
                 }
-                group_body_end = k;
                 ++actual_count;
             }
-
             if (actual_count != declared_count) {
-                return core::expected_t<void>{std::unexpect,
-                                              core::error::wire_required_field_missing};
+                return core::expected_t<std::size_t>{std::unexpect,
+                                                     core::error::wire_required_field_missing};
             }
         }
-
-        return {};
+        return i;
     }
 
     // Single-field check: enum + type, no msg_type context.
