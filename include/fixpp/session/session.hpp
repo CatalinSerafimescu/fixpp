@@ -286,6 +286,14 @@ public:
     // PLACEHOLDER — returns NotConnected until Phase 3 wires the FSM field.
     [[nodiscard]] fsm_state state() const noexcept;
 
+    // 070-fix44-closeout S-030 (FR-007): the peer's advertised MaxMessageSize(383)
+    // read from its inbound Logon (nullopt ⇒ peer advertised none). Observability
+    // only in this feature — captured to inform the deferred outbound-respect
+    // behavior; there is no hard outbound guard here (see spec Assumptions).
+    [[nodiscard]] std::optional<std::uint32_t> peer_max_message_size() const noexcept {
+        return peer_advertised_max_message_size_;
+    }
+
     // FR-004 / D-2 — set of recent FSM transitions (capacity ≤16).
     // Returns a std::span view over the underlying std::array<fsm_state, 16>
     // in PHYSICAL-BUFFER ORDER (index 0..15).
@@ -685,6 +693,10 @@ private:
     // Separate from the lifecycle state_ above (that tracks open/close lifecycle;
     // this tracks the FIX protocol state).
     fsm_state fsm_state_ = fsm_state::NotConnected;
+
+    // 070-fix44-closeout S-030 (FR-007): peer's advertised MaxMessageSize(383),
+    // parsed from its inbound Logon. Observability only (no outbound guard here).
+    std::optional<std::uint32_t> peer_advertised_max_message_size_;
 
     // ── FR-004 / D-2 — FSM transition ring-buffer (capacity 16) ──────────────
     // Stores the last ≤16 fsm_state values recorded via record_state_transition_.

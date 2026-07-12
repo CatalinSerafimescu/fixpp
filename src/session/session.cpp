@@ -637,6 +637,21 @@ static bool should_refuse_posture(session_posture posture, std::string_view tmi_
            (posture == session_posture::test && !peer_is_test);
 }
 
+// 070-fix44-closeout S-030 — parse a raw MaxMessageSize(383) wire value to uint32.
+// Returns nullopt for empty/malformed/overflowing input (peer advertised nothing
+// usable). [FR-007]
+static std::optional<std::uint32_t> parse_u32_opt(std::string_view sv) noexcept {
+    if (sv.empty()) {
+        return std::nullopt;
+    }
+    std::uint32_t v = 0;
+    auto [p, ec] = std::from_chars(sv.data(), sv.data() + sv.size(), v);
+    if (ec != std::errc{} || p != sv.data() + sv.size()) {
+        return std::nullopt;
+    }
+    return v;
+}
+
 // 029 T007 — one-shot cold-open hydration gate (C2.1–C2.6 / INV-H3/H4/H5/H6).
 //
 // Called at:
@@ -867,6 +882,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::emit_initiator_logon_() 
         // 070-fix44-closeout S-029: advertise 464=Y when local posture==test; unset
         // ⇒ no 464 ⇒ byte-identical baseline (FR-012). 383/384 land per-story.
         fixpp::session::logon_advertise_options{
+            .max_message_size = cfg_.advertised_max_message_size,
             .test_message_indicator = (cfg_.posture == session_posture::test)});
     if (!logon_result) {
         // build_logon failed (oversized IDs → wire_frame_too_large).
@@ -2020,6 +2036,22 @@ std::optional<Session::RejectDecision> Session::validate_inbound_(
 // LogoutSent / Disconnected: all inbound silently drained (defined cells).
 asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
     std::span<const std::byte> frame) noexcept {
+    // 070-fix44-closeout S-030: negotiated MaxMessageSize(383) enforcement. Once
+    // established (Active), an inbound frame exceeding the size WE advertised is a
+    // negotiated-contract violation → disconnect (distinct from the absolute
+    // max_frame_bytes framer backstop, which stays in force and rejects larger
+    // frames upstream). Fires only post-establishment: the Logon that establishes
+    // the session arrives pre-Active, so it is never size-checked here (the peer
+    // has not yet seen our 383). Because the framer backstop guarantees
+    // frame.size() ≤ max_frame_bytes for every frame that reaches us,
+    // frame.size() > N is equivalent to frame.size() > min(N, max_frame_bytes) for
+    // all reachable frames. Opt-in: advertised_max unset ⇒ inert (FR-012).
+    // [FR-004/FR-005/FR-006; data-model D-F; contract C-4b]
+    if (fsm_state_ == fsm_state::Active && cfg_.advertised_max_message_size.has_value() &&
+        frame.size() > *cfg_.advertised_max_message_size) {
+        record_state_transition_(fsm_state::Disconnected);
+        co_return fixpp::core::expected_t<void>{};
+    }
     switch (fsm_state_) {
         case fsm_state::NotConnected: {
             // ── 041-validation-gate-wiring T014: validate-first gate ──────────────
@@ -2099,6 +2131,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     co_return co_await refuse_logon_with_logout_(
                         "TestMessageIndicator posture mismatch");
                 }
+                // 070-fix44-closeout S-030 (FR-007): capture the peer's advertised
+                // MaxMessageSize(383) from its inbound Logon (observability only).
+                peer_advertised_max_message_size_ = parse_u32_opt(hdr.max_message_size);
                 const seqnum_t seq = parse_seqnum(hdr.msg_seq_num);
                 if (seq == 0) {
                     // Cannot parse seq — treat as invalid (fatal for protocol safety).
@@ -2568,6 +2603,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     reply_sending_time_view, acpt_reset_seqnum, acpt_next_expected,
                     acpt_fixt.default_appl_ver_id, acpt_fixt.username, acpt_fixt.password,
                     fixpp::session::logon_advertise_options{
+                        .max_message_size = cfg_.advertised_max_message_size,
                         .test_message_indicator = (cfg_.posture == session_posture::test)});
                 if (!reply_logon) {
                     // Build failed (oversized IDs → wire_frame_too_large).
@@ -3735,6 +3771,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 co_return co_await refuse_logon_with_logout_(
                     "TestMessageIndicator posture mismatch");
             }
+            // 070-fix44-closeout S-030 (FR-007): capture the peer's advertised
+            // MaxMessageSize(383) from its inbound Logon-ack (observability only).
+            peer_advertised_max_message_size_ = parse_u32_opt(hdr.max_message_size);
 
             // ── Guard (3): SendingTime MaxLatency — Logon-path special case ───
             // D-3 / FR-009 / RC#5: if the inbound Logon's SendingTime is absent,

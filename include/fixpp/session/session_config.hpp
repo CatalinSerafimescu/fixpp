@@ -499,6 +499,18 @@ struct SessionConfig {
     //   std::optional already used (§XV.9 N/A). [FR-001/FR-002/FR-003]
     std::optional<session_posture> posture;
 
+    // ── 070-fix44-closeout S-030 / data-model E2 — negotiated MaxMessageSize(383) ──
+    // advertised_max_message_size: when set, the engine advertises MaxMessageSize(383)
+    //   =<value> on its outbound Logon and, once the session is established (Active),
+    //   DISCONNECTS a peer whose inbound frame exceeds this many bytes (the peer
+    //   violated the size it agreed to). `nullopt` (default) ⇒ no 383 emitted and no
+    //   negotiated enforcement — byte/disposition-identical baseline (FR-012). This
+    //   NEGOTIATED limit is distinct from and never weakens the absolute framer
+    //   backstop (wire::Framer::max_frame_bytes); the effective inbound cap is
+    //   min(value, max_frame_bytes). No new include: std::optional already used.
+    //   [FR-004/FR-005/FR-006/FR-007]
+    std::optional<std::uint32_t> advertised_max_message_size;
+
     // FIXT session predicate: true iff begin_string=="FIXT.1.1" AND
     // default_appl_ver_id is set (E3 / FR-001). Must hold for the engine to emit
     // 1137 on the outbound Logon and to enforce its presence inbound (FR-004/FR-004a).

@@ -211,9 +211,24 @@ namespace {
         }
     }
 
+    // 383=MaxMessageSize — 070-fix44-closeout S-030 advertise: emitted only when
+    // opts.max_message_size set (local advertised_max_message_size). Contract C-3.4
+    // order: after 789, before the 384 group and 464. Absent ⇒ no 383 ⇒
+    // byte-identical baseline. [FR-004 advertise side]
+    if (opts.max_message_size.has_value()) {
+        char nbuf[12];
+        auto sv = render_u32(*opts.max_message_size, nbuf, sizeof(nbuf));
+        if (sv.empty()) {
+            return std::unexpected(fixpp::core::error::wire_field_value_truncated);
+        }
+        if (auto r = w.append_raw(383, sv_to_bytes(sv)); !r) {
+            return std::unexpected(r.error());
+        }
+    }
+
     // 464=Y (TestMessageIndicator) — 070-fix44-closeout S-029 advertise: emitted
     // only when opts.test_message_indicator (i.e. local posture==test). Contract
-    // C-3.4 order: after 789 (383 and the 384 group precede it once US2/US3 land).
+    // C-3.4 order: after 789 and 383 (the 384 group precedes it once US3 lands).
     // Flag false ⇒ no 464 ⇒ byte-identical baseline. [FR-002 advertise side]
     if (opts.test_message_indicator) {
         std::byte val[] = {static_cast<std::byte>('Y')};

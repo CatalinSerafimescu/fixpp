@@ -57,13 +57,13 @@ Single C++23 library `fixpp`. Source: `include/fixpp/`, `src/`. Tests: `tests/se
 **Independent test**: advertise `383=N` on the wire; established peer frame of N accepted, N+1 disconnects; default unset ⇒ no 383, no enforcement.
 
 ### Tests for User Story 2 (write first, prove RED)
-- [ ] T011 [P] [US2] Write `tests/session/test_070_max_message_size_test.cpp`: (a) advertised config ⇒ outbound Logon carries `383=N` (assert on sent wire via `extract_field`); (b) established session, inbound frame length == N accepted, N+1 ⇒ Disconnected with the negotiated-max reason; (c) a pre-establishment oversized frame is NOT disconnected on the negotiated rule (only the framer backstop governs); (d) default unset ⇒ no `383`, no enforcement. Prove RED.
+- [X] T011 [P] [US2] Write `tests/session/test_070_max_message_size_test.cpp`: (a) advertised config ⇒ outbound Logon carries `383=N` (assert on sent wire via `extract_field`); (b) established session, inbound frame length == N accepted, N+1 ⇒ Disconnected with the negotiated-max reason; (c) a pre-establishment oversized frame is NOT disconnected on the negotiated rule (only the framer backstop governs); (d) default unset ⇒ no `383`, no enforcement. Prove RED.
 
 ### Implementation for User Story 2
-- [ ] T012 [US2] Add `std::optional<std::uint32_t> advertised_max_message_size;` config field to `include/fixpp/session/session_config.hpp` (doc: negotiated inbound cap; effective = min(N, max_frame_bytes)).
-- [ ] T013 [US2] Emit `383=<N>` in `build_logon` (`admin_messages.cpp`) when `opts.max_message_size` set; set it at the two call sites from config. Capture the peer's advertised `383` (from `FrameHeader.max_message_size`) into a new session-state field for observability (FR-007).
-- [ ] T014 [US2] Add the established-state inbound enforcement in `src/session/session.cpp` `on_inbound_frame` (~`:1961`): when the FSM is established/Active AND `advertised_max_message_size` is set, if `frame.size() > min(N, max_frame_bytes)` ⇒ `record_state_transition_(Disconnected)` with a distinct "negotiated max message size exceeded" reason. Never fires pre-establishment; never weakens the framer backstop.
-- [ ] T015 [US2] Run `test_070_max_message_size_test` GREEN; full `ctest -L session` no regression.
+- [X] T012 [US2] Add `std::optional<std::uint32_t> advertised_max_message_size;` config field to `include/fixpp/session/session_config.hpp` (doc: negotiated inbound cap; effective = min(N, max_frame_bytes)).
+- [X] T013 [US2] Emit `383=<N>` in `build_logon` (`admin_messages.cpp`) when `opts.max_message_size` set; set it at the two call sites from config. Capture the peer's advertised `383` (from `FrameHeader.max_message_size`) into a new session-state field for observability (FR-007).
+- [X] T014 [US2] Add the established-state inbound enforcement in `src/session/session.cpp` `on_inbound_frame` (~`:1961`): when the FSM is established/Active AND `advertised_max_message_size` is set, if `frame.size() > min(N, max_frame_bytes)` ⇒ `record_state_transition_(Disconnected)` with a distinct "negotiated max message size exceeded" reason. Never fires pre-establishment; never weakens the framer backstop.
+- [X] T015 [US2] Run `test_070_max_message_size_test` GREEN; full `ctest -L session` no regression.
 
 **Checkpoint**: US2 independently testable and green.
 
