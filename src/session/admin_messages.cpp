@@ -27,6 +27,11 @@
 #include <fixpp/dict/version_profile.hpp>     // render_appl_ver_id — T016/033
 #include <fixpp/session/admin_messages.hpp>
 #include <fixpp/session/seqnum.hpp>
+// 070-fix44-closeout S-037: the build_logon body iterates opts.supported_msg_types
+// and reads supported_msg_type::{direction,msg_type} + msg_direction — these are
+// forward-declared in admin_messages.hpp (to keep that header light) but need the
+// COMPLETE definition here. session_config.hpp defines them at namespace scope.
+#include <fixpp/session/session_config.hpp>  // supported_msg_type, msg_direction (complete)
 #include <fixpp/wire/tag_scan.hpp>  // accumulate_tag_digit (SC-004 / 040-inbound-tag-overflow)
 #include <fixpp/wire/writer.hpp>
 #include <memory_resource>
@@ -226,9 +231,41 @@ namespace {
         }
     }
 
+    // 384=NoMsgTypes group — 070-fix44-closeout S-037 advertise: emitted only when
+    // opts.supported_msg_types is non-empty. `384=k` then k contiguous (372,385)
+    // member pairs (RefMsgType then MsgDirection, per the FIX44 group delimiter
+    // order). Contract C-3.4 order: after 383, before 464. Empty ⇒ no group ⇒
+    // byte-identical baseline. Each field appended through the bound-checked Writer
+    // (fail-closed on overflow → std::unexpected, no partial frame, no heap —
+    // Article VIII §5 / XV.1). msg_direction renders to 'S'/'R', fail-closed via the
+    // typed enum (no off-enum value can reach the wire). [FR-008]
+    if (!opts.supported_msg_types.empty()) {
+        char nbuf[12];
+        auto kv = render_u32(static_cast<std::uint32_t>(opts.supported_msg_types.size()), nbuf,
+                             sizeof(nbuf));
+        if (kv.empty()) {
+            return std::unexpected(fixpp::core::error::wire_field_value_truncated);
+        }
+        if (auto r = w.append_raw(384, sv_to_bytes(kv)); !r) {
+            return std::unexpected(r.error());
+        }
+        for (const auto& entry : opts.supported_msg_types) {
+            // 372=RefMsgType (group delimiter — first member).
+            if (auto r = w.append_raw(372, sv_to_bytes(entry.msg_type)); !r) {
+                return std::unexpected(r.error());
+            }
+            // 385=MsgDirection: 'S' (send) / 'R' (receive), fail-closed via the enum.
+            std::byte dir[] = {
+                static_cast<std::byte>(entry.direction == msg_direction::send ? 'S' : 'R')};
+            if (auto r = w.append_raw(385, std::span<const std::byte>{dir}); !r) {
+                return std::unexpected(r.error());
+            }
+        }
+    }
+
     // 464=Y (TestMessageIndicator) — 070-fix44-closeout S-029 advertise: emitted
     // only when opts.test_message_indicator (i.e. local posture==test). Contract
-    // C-3.4 order: after 789 and 383 (the 384 group precedes it once US3 lands).
+    // C-3.4 order: after 789, 383, and the 384 group.
     // Flag false ⇒ no 464 ⇒ byte-identical baseline. [FR-002 advertise side]
     if (opts.test_message_indicator) {
         std::byte val[] = {static_cast<std::byte>('Y')};

@@ -883,7 +883,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::emit_initiator_logon_() 
         // ⇒ no 464 ⇒ byte-identical baseline (FR-012). 383/384 land per-story.
         fixpp::session::logon_advertise_options{
             .max_message_size = cfg_.advertised_max_message_size,
-            .test_message_indicator = (cfg_.posture == session_posture::test)});
+            .test_message_indicator = (cfg_.posture == session_posture::test),
+            .supported_msg_types = cfg_.supported_msg_types});
     if (!logon_result) {
         // build_logon failed (oversized IDs → wire_frame_too_large).
         // Session-fatal — initiator handshake never reached the wire; transition
@@ -2604,7 +2605,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     acpt_fixt.default_appl_ver_id, acpt_fixt.username, acpt_fixt.password,
                     fixpp::session::logon_advertise_options{
                         .max_message_size = cfg_.advertised_max_message_size,
-                        .test_message_indicator = (cfg_.posture == session_posture::test)});
+                        .test_message_indicator = (cfg_.posture == session_posture::test),
+                        .supported_msg_types = cfg_.supported_msg_types});
                 if (!reply_logon) {
                     // Build failed (oversized IDs → wire_frame_too_large).
                     // RC#B: must NOT reach Active — Disconnected, propagate error.

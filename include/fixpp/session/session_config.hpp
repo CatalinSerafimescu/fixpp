@@ -511,6 +511,17 @@ struct SessionConfig {
     //   [FR-004/FR-005/FR-006/FR-007]
     std::optional<std::uint32_t> advertised_max_message_size;
 
+    // ── 070-fix44-closeout S-037 / data-model E3 — advertised supported MsgTypes ──
+    // supported_msg_types: an ordered list of (MsgDirection, MsgType) pairs the engine
+    //   advertises via the NoMsgTypes(384) repeating group on its outbound Logon —
+    //   emitted as `384=k` then k contiguous `372=<MsgType>` `385=<S|R>` member pairs
+    //   (RefMsgType-then-MsgDirection, per the FIX44 group delimiter order). Empty
+    //   (default) ⇒ no 384 group emitted ⇒ byte-identical baseline (FR-012). The typed
+    //   msg_direction enum renders to 'S'/'R', fail-closed (no off-enum value can reach
+    //   the wire). supported_msg_type keeps SessionConfig copy-constructible. No new
+    //   include: <vector>/<string> already used. [FR-008]
+    std::vector<supported_msg_type> supported_msg_types;
+
     // FIXT session predicate: true iff begin_string=="FIXT.1.1" AND
     // default_appl_ver_id is set (E3 / FR-001). Must hold for the engine to emit
     // 1137 on the outbound Logon and to enforce its presence inbound (FR-004/FR-004a).

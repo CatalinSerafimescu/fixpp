@@ -76,12 +76,12 @@ Single C++23 library `fixpp`. Source: `include/fixpp/`, `src/`. Tests: `tests/se
 **Independent test**: configured list ⇒ well-formed `384` group in the sent Logon, parse-back equals config in order; empty ⇒ no group.
 
 ### Tests for User Story 3 (write first, prove RED)
-- [ ] T016 [P] [US3] Write `tests/session/test_070_supported_msgtypes_test.cpp`: (a) configured `[(send,"D"),(receive,"8")]` ⇒ outbound Logon carries `384=2` then contiguous `372=D,385=S,372=8,385=R` (RefMsgType-then-MsgDirection, delimiter order), parse-back exact-set-equal in order; (b) empty ⇒ no `384`; (c) bounded-buffer fail-closed for a large list (assert error, no partial/garbage frame). Prove RED.
+- [X] T016 [P] [US3] Write `tests/session/test_070_supported_msgtypes_test.cpp`: (a) configured `[(send,"D"),(receive,"8")]` ⇒ outbound Logon carries `384=2` then contiguous `372=D,385=S,372=8,385=R` (RefMsgType-then-MsgDirection, delimiter order), parse-back exact-set-equal in order; (b) empty ⇒ no `384`; (c) bounded-buffer fail-closed for a large list (assert error, no partial/garbage frame). Prove RED.
 
 ### Implementation for User Story 3
-- [ ] T017 [US3] Add `std::vector<supported_msg_type> supported_msg_types;` config field to `include/fixpp/session/session_config.hpp` (default empty; keep copy-constructible static_assert green).
-- [ ] T018 [US3] Emit the NoMsgTypes group in `build_logon` (`admin_messages.cpp`) when `opts.supported_msg_types` non-empty: append `384=k`, then per entry `372=<msg_type>` then `385=<S|R>` (render `msg_direction`), contiguous, in config order, via the existing bound-checked `append_raw` (fail-closed on overflow → `std::unexpected`, no heap), mirroring the 553/554/789 append pattern (`admin_messages.cpp:174-207`). Wire it at the two call sites from config.
-- [ ] T019 [US3] Run `test_070_supported_msgtypes_test` GREEN; full `ctest -L session` no regression.
+- [X] T017 [US3] Add `std::vector<supported_msg_type> supported_msg_types;` config field to `include/fixpp/session/session_config.hpp` (default empty; keep copy-constructible static_assert green).
+- [X] T018 [US3] Emit the NoMsgTypes group in `build_logon` (`admin_messages.cpp`) when `opts.supported_msg_types` non-empty: append `384=k`, then per entry `372=<msg_type>` then `385=<S|R>` (render `msg_direction`), contiguous, in config order, via the existing bound-checked `append_raw` (fail-closed on overflow → `std::unexpected`, no heap), mirroring the 553/554/789 append pattern (`admin_messages.cpp:174-207`). Wire it at the two call sites from config.
+- [X] T019 [US3] Run `test_070_supported_msgtypes_test` GREEN; full `ctest -L session` no regression.
 
 **Checkpoint**: US3 independently testable and green.
 
