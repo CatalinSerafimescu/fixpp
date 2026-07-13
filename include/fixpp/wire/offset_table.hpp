@@ -408,17 +408,27 @@ private:
     };
     mutable std::pmr::vector<nested_cache_row> nested_cache_;
 
-    // 073 T001: TEST-ONLY nested_cache_ introspection seam, forward-declared
-    // here for friendship only (mirrors the frame_view_access /
-    // frame_view_slice_access split — framer.hpp:104-115): the DEFINITION
-    // lives in tests/support/wire_test_hooks.hpp (never installed), so no
-    // test-only accessor code ships in this public header. Resolves the
-    // sub-table ALREADY built for a (slice_data, nested_no_tag) pair without
-    // triggering a build — used by the wire-level primitive witness to pin
-    // research.md §D2 mode (a)/(b)/(c) by introspecting the real sub-table
-    // rather than a `sizeof(OffsetTable)`-tuned cap band (not portable
-    // across toolchains, research.md "Platform-robust mode pinning").
+    // 073 T001 / gate-b/r1 FQ-2: TEST-ONLY nested_cache_ introspection seam,
+    // forward-declared here for friendship only. Unlike frame_view_access /
+    // frame_view_slice_access (framer.hpp:104-115), which are PRODUCTION
+    // seams the parser/wire layer mints views through at runtime and so
+    // cannot be gated, this friend is test-only (the definition itself says
+    // "Never called from production code",
+    // tests/support/wire_test_hooks.hpp:38) — it follows the repo's
+    // FIXPP_TEST_HOOKS test-only-gating convention instead (see
+    // session/file_store.hpp, session/seqnum_manager.hpp, session/session.hpp,
+    // core/system_clock_source.hpp; [const §XV.9]). The DEFINITION lives in
+    // tests/support/wire_test_hooks.hpp (never installed), so no test-only
+    // accessor code ships in this public header, and the friendship itself is
+    // now only granted to FIXPP_TEST_HOOKS builds. Resolves the sub-table
+    // ALREADY built for a (slice_data, nested_no_tag) pair without triggering
+    // a build — used by the wire-level primitive witness to pin research.md
+    // §D2 mode (a)/(b)/(c) by introspecting the real sub-table rather than a
+    // `sizeof(OffsetTable)`-tuned cap band (not portable across toolchains,
+    // research.md "Platform-robust mode pinning").
+#ifdef FIXPP_TEST_HOOKS
     friend struct nested_cache_access_for_testing;
+#endif  // FIXPP_TEST_HOOKS
 };
 
 }  // namespace fixpp::wire

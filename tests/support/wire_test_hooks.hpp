@@ -28,14 +28,18 @@ void set_overlay_seed_for_testing(std::uint32_t seed) noexcept;
 
 namespace fixpp::wire {
 
-// 073 T001: TEST-ONLY nested_cache_ introspection (declared as a friend of
-// OffsetTable in offset_table.hpp; see that header for the rationale). Given
-// a ROOT table, resolves the sub-table already cached for
-// `(slice_data, nested_no_tag)` in `nested_cache_`, or `nullptr` if no
-// matching row exists (never requested, OR the row's build itself failed —
-// research.md §D2 mode (a)). Does NOT trigger a build: the caller must
-// already have invoked `nested_group_slices(slice_data, ..., nested_no_tag,
-// ...)` once so the row exists. Never called from production code.
+// 073 T001 / gate-b/r1 FQ-2: TEST-ONLY nested_cache_ introspection (declared
+// as a friend of OffsetTable in offset_table.hpp, gated behind
+// FIXPP_TEST_HOOKS; see that header for the rationale). Given a ROOT table,
+// resolves the sub-table already cached for `(slice_data, nested_no_tag)` in
+// `nested_cache_`, or `nullptr` if no matching row exists (never requested,
+// OR the row's build itself failed — research.md §D2 mode (a)). Does NOT
+// trigger a build: the caller must already have invoked
+// `nested_group_slices(slice_data, ..., nested_no_tag, ...)` once so the row
+// exists. Never called from production code. The definition itself is gated
+// behind FIXPP_TEST_HOOKS so it never attempts to access the (now ungranted)
+// private OffsetTable::nested_cache_ member in a non-test-hooks build.
+#ifdef FIXPP_TEST_HOOKS
 struct nested_cache_access_for_testing {
     [[nodiscard]] static OffsetTable const* resolve(OffsetTable const& root,
                                                     std::byte const* slice_data,
@@ -48,5 +52,6 @@ struct nested_cache_access_for_testing {
         return nullptr;
     }
 };
+#endif  // FIXPP_TEST_HOOKS
 
 }  // namespace fixpp::wire

@@ -63,6 +63,11 @@ add_wire_test(wire_pure_tests
   nested_group_extent_test.cpp                                        # T019/T020/T022 (063)
   nested_group_slices_failloud_test.cpp                               # T001 (073)
 )
+# nested_group_slices_failloud_test.cpp (T001) needs FIXPP_TEST_HOOKS to reach
+# the nested_cache_access_for_testing friend seam (gate-b/r1 FQ-2 — the friend
+# is now gated behind FIXPP_TEST_HOOKS, matching the session-layer test-only
+# convention rather than shipping ungated in the installed public header).
+target_compile_definitions(wire_pure_tests PRIVATE FIXPP_TEST_HOOKS)
 
 # ── Standalone: 061-slim body-builder alloc gate (FR-002) ────────────────────
 # in-TU global ::operator new / ::operator new[] allocation counter (D3).
