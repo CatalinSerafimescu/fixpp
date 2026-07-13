@@ -173,6 +173,24 @@ std::span<FieldRef const> dict_metadata_handle::group_fields_impl(
     return std::span<FieldRef const>{group_fields_.data() + gr.first_field_index, gr.field_count};
 }
 
+// 074-orchestra-native-reader (FR-002): enum {value, description} pairs for a
+// codeset-backed field, keyed by tag. Binary-search the per-tag runs (sorted by
+// tag) → a span into the flat enum_values_ store. Empty for tags with no
+// codeset and for dictionaries that populate no enum store (all XmlLoader ones).
+std::span<EnumValueRef const> dict_metadata_handle::enum_values_impl(
+    std::uint16_t tag) const noexcept {
+    auto const it = std::ranges::lower_bound(enum_runs_, tag, {},
+                                             [](EnumRun const& r) noexcept { return r.tag; });
+    if (it == enum_runs_.end() || it->tag != tag) {
+        return {};
+    }
+    auto const& run = *it;
+    if (run.count == 0 || run.start + run.count > enum_values_.size()) {
+        return {};
+    }
+    return std::span<EnumValueRef const>{enum_values_.data() + run.start, run.count};
+}
+
 // 003-dictionary-codegen (RC#5 — F1 IR data path). Build-time codegen-
 // enumeration; not on any runtime hot path.
 std::span<FieldRef const> dict_metadata_handle::message_fields_impl(
@@ -279,6 +297,11 @@ std::span<FieldRef const> Dictionary::message_fields(std::string_view msg_type) 
 
 std::string_view Dictionary::field_name(std::uint16_t tag) const noexcept {
     return handle_ ? handle_->field_name_impl(tag) : std::string_view{};
+}
+
+// 074-orchestra-native-reader (FR-002): additive read-only codeset enum surface.
+std::span<EnumValueRef const> Dictionary::enum_values(std::uint16_t tag) const noexcept {
+    return handle_ ? handle_->enum_values_impl(tag) : std::span<EnumValueRef const>{};
 }
 
 // 041-validation-gate-wiring T008: build a `dict::table_view` from this

@@ -69,6 +69,14 @@ struct NamedIndex {
     std::uint32_t index{0};
 };
 
+// 074-orchestra-native-reader (FR-002): per-tag run into the flat enum-value
+// store. Sorted by `tag` ascending; binary-searched by `enum_values_impl`.
+struct EnumRun {
+    std::uint16_t tag{0};
+    std::uint32_t start{0};
+    std::uint32_t count{0};
+};
+
 // Field-name → tag entry (sorted by name bytewise).
 struct FieldNameEntry {
     // cppcheck-suppress unusedStructMember  // read via lambda in dictionary.cpp field_by_name_impl
@@ -91,6 +99,8 @@ public:
           component_fields_(mr),
           groups_(mr),
           group_fields_(mr),
+          enum_values_(mr),
+          enum_runs_(mr),
           messages_(mr),
           field_by_name_(mr) {}
 
@@ -141,6 +151,10 @@ public:
     // Returns empty span if the group has no fields recorded.
     [[nodiscard]] std::span<FieldRef const> group_fields_impl(std::uint16_t no_tag) const noexcept;
 
+    // 074 (FR-002): enum {value, description} pairs for `tag`; empty span if the
+    // tag has no codeset entry. Binary-searches `enum_runs_` (sorted by tag).
+    [[nodiscard]] std::span<EnumValueRef const> enum_values_impl(std::uint16_t tag) const noexcept;
+
     [[nodiscard]] std::span<MessageEntry const> messages_impl() const noexcept {
         return std::span<MessageEntry const>{messages_};
     }
@@ -189,6 +203,12 @@ public:
     // Flat FieldRef table for per-group field runs.
     // GroupRef::first_field_index / field_count index into this vector.
     std::pmr::vector<FieldRef> group_fields_;
+
+    // 074 (FR-002): flat enum-value store (value+description string_views into
+    // the FROZEN name_pool_ — bound in finalize() after the pool is stable) and
+    // the per-tag runs index (sorted by tag). Empty for XmlLoader dictionaries.
+    std::pmr::vector<EnumValueRef> enum_values_;
+    std::pmr::vector<EnumRun> enum_runs_;
 
     // Messages (sorted bytewise by `msg_type`).
     std::pmr::vector<MessageEntry> messages_;

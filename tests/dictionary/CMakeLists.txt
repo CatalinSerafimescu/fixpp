@@ -73,6 +73,50 @@ foreach(target IN LISTS FIXPP_DICT_STANDALONE)
   set_tests_properties(${target} PROPERTIES LABELS dictionary)
 endforeach()
 
+# ── 074-orchestra-native-reader: native Orchestra reader test bucket ─────────
+# Grouped whole-binary executable (const §VII.8), LABELS "dictionary;orchestra";
+# selected by `ctest -L orchestra`. NO gtest_discover_tests. pugixml is unioned
+# in for raw-XML ground-truth scans (T012/T022). FIXPP_ORCHESTRA_DATA_DIR points
+# at the vendored OrchestraFIXLatest.xml; FIXPP_DICT_DATA_DIR kept for the
+# T024/T022 QuickFIX-XML no-regression + wrong-grammar pins.
+set(FIXPP_ORCHESTRA_DATA_DIR "${CMAKE_SOURCE_DIR}/dictionaries/orchestra")
+
+# 074 T021 (FR-007/SC-007) — supply-chain integrity gate: recompute the sha1 of
+# the vendored OrchestraFIXLatest.xml at configure time (portable file(SHA1),
+# Linux + MSVC) and hard-fail if it drifts from the spike's grade-1 pin. This is
+# the "scripted check" arm of T021; the gtest OrchestraProvenance covers the
+# UPSTREAM/LICENSE/NOTICE artifacts.
+set(FIXPP_ORCHESTRA_XML "${FIXPP_ORCHESTRA_DATA_DIR}/OrchestraFIXLatest.xml")
+set(FIXPP_ORCHESTRA_SHA1_PIN "26f60db1c1f52d169d3b6825ac68800abf487fde")
+if(NOT EXISTS "${FIXPP_ORCHESTRA_XML}")
+  message(FATAL_ERROR "074: vendored Orchestra source missing: ${FIXPP_ORCHESTRA_XML}")
+endif()
+file(SHA1 "${FIXPP_ORCHESTRA_XML}" _fixpp_orchestra_sha1)
+if(NOT _fixpp_orchestra_sha1 STREQUAL "${FIXPP_ORCHESTRA_SHA1_PIN}")
+  message(FATAL_ERROR
+    "074 supply-chain integrity FAIL: ${FIXPP_ORCHESTRA_XML}\n"
+    "  computed sha1 = ${_fixpp_orchestra_sha1}\n"
+    "  pinned  sha1 = ${FIXPP_ORCHESTRA_SHA1_PIN}\n"
+    "  The vendored file is wrong or tampered — do NOT proceed; re-vendor from the pinned commit.")
+endif()
+
+add_executable(dictionary_orchestra_tests
+  orchestra_loader_test.cpp
+)
+target_link_libraries(dictionary_orchestra_tests PRIVATE
+  fixpp_dictionary
+  pugixml::pugixml
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(dictionary_orchestra_tests PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests")
+target_compile_definitions(dictionary_orchestra_tests PRIVATE
+  "FIXPP_ORCHESTRA_DATA_DIR=\"${FIXPP_ORCHESTRA_DATA_DIR}\""
+  "FIXPP_DICT_DATA_DIR=\"${FIXPP_DICT_DATA_DIR}\"")
+add_test(NAME dictionary_orchestra_tests COMMAND dictionary_orchestra_tests)
+set_tests_properties(dictionary_orchestra_tests PROPERTIES LABELS "dictionary;orchestra")
+
 # mallocnesia gate for the group-context lookup no-alloc test — re-runs the
 # standalone binary under LD_PRELOAD so global malloc/calloc/realloc is
 # intercepted (dual gate alongside the in-TU global operator-new counter; absent
