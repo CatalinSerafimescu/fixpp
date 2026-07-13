@@ -195,11 +195,15 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_get_msg_type(const fixpp_msg_t* msg,
  * do NOT destroy.
  *
  * Error codes:
- *   FIXPP_ERR_TAG_NOT_FOUND      — group or field absent
- *   FIXPP_ERR_TYPE_MISMATCH      — group_tag is present but is not a group delimiter
- *                                  (i.e. the tag is found in the message but has no
- *                                  group slices — a scalar field used as a group tag)
- *   FIXPP_ERR_INDEX_OUT_OF_RANGE — entry_index >= count
+ *   FIXPP_ERR_TAG_NOT_FOUND       — group or field absent
+ *   FIXPP_ERR_TYPE_MISMATCH       — group_tag is present but is not a group delimiter
+ *                                   (i.e. the tag is found in the message but has no
+ *                                   group slices — a scalar field used as a group tag)
+ *   FIXPP_ERR_INDEX_OUT_OF_RANGE  — entry_index >= count
+ *   FIXPP_ERR_WIRE_LIMIT_EXCEEDED — (fixpp_group_get_nested_group only) the nested
+ *                                   sub-view allocation failed under parse-arena
+ *                                   exhaustion; distinct from a legitimately absent
+ *                                   or empty nested group (073 T007)
  */
 
 /** Obtain the group cursor and instance count for group_tag (the NoXxx count field).
@@ -243,6 +247,16 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_group_get_field_decimal(const fixpp_group_t
 
 /** Descend into a nested group `nested_tag` within entry `i` of cursor `g`.
  *  *nested_out aliases the parent cursor's backing; lifetime bounded by it.
+ *
+ *  Returns:
+ *    FIXPP_ERR_OK                  — nested group resolved (*nested_count_out may be 0
+ *                                    if nested_tag is present but declares 0 instances)
+ *    FIXPP_ERR_NULL_HANDLE         — g, nested_out, or nested_count_out is NULL
+ *    FIXPP_ERR_INDEX_OUT_OF_RANGE  — i >= entry count of g
+ *    FIXPP_ERR_TAG_NOT_FOUND       — nested_tag entirely absent from entry i
+ *    FIXPP_ERR_WIRE_LIMIT_EXCEEDED — nested sub-view allocation failed under parse-arena
+ *                                    exhaustion (073 T007); reported before the presence
+ *                                    probe, so it is never mistaken for TAG_NOT_FOUND
  *
  *  Reentrancy: requires-session-lock
  */
