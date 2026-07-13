@@ -20,7 +20,8 @@ This is the **read path only** (Orchestra XML → internal `Dictionary`). It is 
 
 ### Session 2026-07-13
 
-- Q: How much of the FIX Latest version-identity surface should this read-path feature take on? → A: Full identity — define `session_version::vlatest` + a version-table entry **and** a distinct FIX Latest `ApplVerID` enumerator in this feature (matches spike Deliverable #6 item 2 verbatim). Only session-layer `DefaultApplVerID` **negotiation wiring** into the FIXT session FSM stays deferred to the session/runtime follow-on; the identity artifacts (including the `ApplVerID` wire enumerator value) are defined here.
+- Q: How much of the FIX Latest version-identity surface should this read-path feature take on? → A: (initial) Full identity including a distinct `ApplVerID` enumerator. **SUPERSEDED by the reconcile below** once a factual check showed FIX Latest has no distinct wire ApplVerID.
+- Q: FIX Latest has no distinct ApplVerID(1128) wire value (the enum caps at 9 = FIX50SP2; Extension Packs are signalled by ApplExtID(1156)=303, not a new ApplVerID) — how should version identity be modelled? → A: **`session_version::vlatest` only.** Add a distinct `session_version::vlatest` for the dictionary/codegen identity; model the **wire application version as the existing `v50sp2` (ApplVerID = 9)** — do **not** add an `application_version::vlatest` member and do **not** change `render_appl_ver_id` (keeps it injective / Gate-A-safe). FIX Latest's real on-wire differentiator, **ApplExtID(1156)=303, is deferred and explicitly scheduled for a next phase/round** (tracked in `REMAINING-WORK.md`). Session-layer negotiation wiring remains deferred.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -66,7 +67,7 @@ FIX Latest is loaded under its **own** version identity derived from `version="F
 **Acceptance Scenarios**:
 
 1. **Given** `OrchestraFIXLatest.xml` with its genuine `version="FIX.Latest_EP303"`, **When** the reader resolves the version, **Then** it yields the new FIX Latest version identity, distinct from all nine legacy identities.
-2. **Given** the new FIX Latest identity, **When** a caller asks for its `ApplVerID` enum value, **Then** a distinct FIX Latest enumerator is returned (defined so FIX Latest is nameable; session-layer negotiation wiring is out of scope — see Non-Goals).
+2. **Given** the new FIX Latest identity, **When** its wire application version is resolved, **Then** it maps to the existing `v50sp2` (ApplVerID = 9) — FIX Latest has no distinct ApplVerID(1128) value, so no new `application_version` enumerator is introduced and `render_appl_ver_id` is unchanged. (FIX Latest's ApplExtID(1156)=303 differentiation and session-layer negotiation are out of scope — see Non-Goals.)
 
 ---
 
@@ -102,7 +103,7 @@ The FIX Latest source artifact is vendored into the repository from the Apache-2
 - **FR-002**: The reader MUST map Orchestra constructs to the internal model as follows: Orchestra datatype names → internal field datatype (reusing the existing `kFieldTypeTable` mapping logic); codesets → per-field enumerated values with values **and** descriptions preserved; `unionDataType` second arm → **dropped** (minimal model); Orchestra `<group>` and `<component>` (resolved transitively) → the internal group/component definitions.
 - **FR-003**: Loading the vendored FIX Latest artifact MUST yield exactly **181 messages** with zero drops at any stage.
 - **FR-004**: The reader MUST produce group-context tables that build without throwing or truncating and that resolve **queryably** for (a) the deepest FIX Latest group (the depth-7 `MassQuoteAck` chain, within the `K=16` context-depth cap) and (b) reused group tags disambiguated by parent-path context key (e.g. tag 555 reused under multiple parents).
-- **FR-005**: The reader MUST establish a **real** FIX Latest version identity derived from `version="FIX.Latest_EP303"` — a distinct internal `session_version` value plus its supporting version-table entry — and MUST NOT relabel the artifact as `FIX.5.0SP2`. It MUST define a distinct FIX Latest `ApplVerID` enumerator so FIX Latest is nameable. (This subsumes spike catalogue #0.)
+- **FR-005**: The reader MUST establish a **real** FIX Latest version identity — a distinct internal `session_version::vlatest` value, derived from the Orchestra root `version="FIX.Latest_EP303"` — and MUST NOT relabel the artifact as `FIX.5.0SP2`. (This subsumes spike catalogue #0.) The **wire application version** for FIX Latest MUST be the existing `v50sp2` (ApplVerID = 9): FIX Latest has no distinct ApplVerID(1128) value, so this feature MUST NOT add an `application_version::vlatest` member and MUST NOT change `render_appl_ver_id`. FIX Latest's on-wire differentiator **ApplExtID(1156)=303 is out of scope for this feature and scheduled for a next phase** (see Non-Goals + Clarifications 2026-07-13).
 - **FR-006**: The reader MUST fail closed (throw a dictionary parse error) on a genuinely-unknown Orchestra datatype rather than silently dropping or mis-mapping it. The set of unknown-vs-known tokens is bounded and enumerable; none occur in EP303.
 - **FR-007**: The FIX Latest source artifact MUST be vendored and pinned by upstream commit and content hash, with Apache-2.0 §4 attribution and an `UPSTREAM.txt` recording the Extension Pack.
 - **FR-008**: The change MUST be strictly **additive**: the nine vendored QuickFIX-XML dictionaries and the existing `XmlLoader`'s behavior are unchanged, and runtime-XML coverage of all nine legacy versions does not regress.
@@ -112,7 +113,7 @@ The FIX Latest source artifact is vendored into the repository from the Apache-2
 
 - **Orchestra repository document** (`fixr:repository`): the official machine-readable FIX standard file. Sub-entities consumed by the reader: datatypes, codesets, fields, components, groups, messages.
 - **Internal Dictionary**: fixpp's version-agnostic representation of a FIX dictionary (fields, datatypes, required-ness, group/component structure, group-context tables). The reader's sole output; the contract boundary with everything downstream.
-- **FIX Latest version identity**: the new distinct version value (`session_version::vlatest`-equivalent) + its version-table entry + its `ApplVerID` enumerator, derived from `FIX.Latest_EP303`.
+- **FIX Latest version identity**: the new distinct `session_version::vlatest` value, derived from the Orchestra root `version="FIX.Latest_EP303"`. Its wire application version is the existing `v50sp2` (ApplVerID = 9); no distinct ApplVerID exists for FIX Latest.
 - **Vendored provenance record**: the pinned artifact plus `UPSTREAM.txt` (repo, commit, sha, Extension Pack) and Apache-2.0 attribution.
 
 ## Success Criteria *(mandatory)*
@@ -131,11 +132,20 @@ The FIX Latest source artifact is vendored into the repository from the Apache-2
 
 - **Read-path / dictionary scope only.** This feature is Orchestra XML → internal `Dictionary`. Typed `owning_<Message>` codegen for the 181 FIX Latest classes, live wire-message validation, and round-trip/field-accessor correctness are explicitly out of scope (see Non-Goals) — consistent with the spike's "Not exercised" section.
 - **Minimal semantic-richness dial.** v1.0 reproduces today's flattened model: codeset values as per-field enums, `unionDataType` second arm dropped, scenarios N/A for EP303. The "richer" dial (codesets-as-typed-enums, scenario-aware typing) is a later, demand-driven step enabled by native ingestion — not part of this feature.
-- **ApplVerID scope = identity definition, not session negotiation** *(ratified — Clarifications 2026-07-13)*. This feature defines the full FIX Latest version identity: `session_version::vlatest`, its version-table entry, and a distinct `ApplVerID` enumerator so FIX Latest is nameable/distinguishable. Only wiring session-layer `DefaultApplVerID` **negotiation** into the FIXT session FSM is a separate session/runtime surface and is **deferred** (see Non-Goals).
+- **Version identity = `session_version::vlatest` only; wire app-version = `v50sp2`** *(reconciled — Clarifications 2026-07-13)*. This feature adds `session_version::vlatest` as the distinct dictionary/codegen identity. Because FIX Latest has no distinct ApplVerID(1128) wire value (the enum caps at 9 = FIX50SP2; Extension Packs use ApplExtID(1156)), the wire application version is the existing `v50sp2`/ApplVerID 9 — **no** new `application_version` member, **no** `render_appl_ver_id` change. FIX Latest's ApplExtID(1156)=303 wire differentiation **and** session-layer `DefaultApplVerID` negotiation are deferred; ApplExtID(1156)=303 is explicitly **scheduled for a next phase** (`REMAINING-WORK.md`).
 - **pugixml is reused, not added.** pugixml (already vendored at 1.15, MIT; consumed only in the dictionary loader TU) is the parsing library for the new reader. No new third-party dependency. (Per the dependency-management rule, confirm the current pinned pugixml version at `/speckit-plan` time.)
 - **Pinned artifact = EP303.** `OrchestraFIXLatest.xml` from the Apache channel (`FIXTradingCommunity/orchestrations`), commit `236d4a4054f0818f1931601713f7a6a68b275df7`, root `version="FIX.Latest_EP303"` (Orchestra v1.0, created 2026-06-03).
 - **Legacy stays QuickFIX-sourced.** Official Orchestra files exist only for 4.2/4.4/Latest; the nine legacy dictionaries remain QuickFIX-sourced. Native Orchestra makes **FIX Latest** independent of QuickFIX; it does not free the legacy dicts.
 - **Verification method (durable invariants).** Success is anchored on durable, reproducible invariants (message count 181, zero unknown datatypes, depth-7 + reused-tag group resolution, downstream surfaces unchanged, fail-closed proven RED). Any differential comparison against the spike's throwaway transposed dict is a plan-level *method* only — the transpose artifact lived in a disposable scratchpad worktree and may no longer exist; it is **not** a success criterion.
+
+## Normative References
+
+*(Article VI §5. Coverage-index `[DocAbbrev §X.Y.Z]` slugs for the Orchestra/FIX-Latest source are not yet assigned — creating them + the bidirectional `coverage-index.md` entries for the D-011 / A-035..A-065 rows this feature absorbs is a Gate-A / `/speckit-analyze` reconciliation item, per Article VI §4.)*
+
+- **FIX Orchestra v1.0** — machine-readable standard schema (`fixr:repository`: datatypes, codesets, fields, components, groups, messages). The parse contract for the reader.
+- **FIX Latest, Extension Pack 303 (EP303)** — the message/field/group content set (`OrchestraFIXLatest.xml`, Apache channel `FIXTradingCommunity/orchestrations` @ `236d4a4054f0818f1931601713f7a6a68b275df7`, root `version="FIX.Latest_EP303"`, Orchestra v1.0, 2026-06-03).
+- **FIXT.1.1 / FIX 5.0 SP2 application layer** — FIX Latest's wire base (ApplVerID = 9); FIX Latest extends it via backward-compatible Extension Packs signalled by **ApplExtID(1156)** (out of scope here — scheduled follow-on).
+- **Apache License 2.0 §4** — attribution obligation for the vendored Orchestra source.
 
 ## Dependencies
 
@@ -149,7 +159,8 @@ The FIX Latest source artifact is vendored into the repository from the Apache-2
 - **Typed `owning_<Message>` codegen for the 181 FIX Latest classes.** A separate follow-on feature, gated on the still-open "per-version typed generation must be a build OPTION" decision (compile-time / binary-size / sanitizer-matrix cost). Not this feature.
 - **Live FIX Latest wire-message validation.** Feeding live FIX Latest messages through the `dictionary_driven_validator` needs message fixtures and belongs to the FIX-Latest runtime feature's test surface. This feature only proves the validator's *input* (the `table_view`) builds and is queryable.
 - **Round-trip / field-accessor correctness on FIX Latest content.** Not attempted here.
-- **Session-layer `DefaultApplVerID` negotiation.** Identity + enumerator are defined here; wiring negotiation into the FIXT session FSM is deferred to the session/runtime surface.
+- **ApplExtID(1156)=303 wire differentiation — scheduled for a next phase.** FIX Latest's real on-wire version differentiator is ApplExtID(1156)=303 (not a new ApplVerID). Modelling/emitting/validating it is out of scope here and **explicitly scheduled** as a follow-on round (`REMAINING-WORK.md`).
+- **Session-layer `DefaultApplVerID` negotiation.** The `session_version::vlatest` dictionary identity is defined here; wiring version negotiation into the FIXT session FSM is deferred to the session/runtime surface.
 - **Richer semantic modeling** (codesets-as-typed-enums, scenario-aware typing, Orchestra workflow/actors/rules). Minimal flattened model only.
 - **Regenerating or replacing the nine legacy QuickFIX dictionaries.** Legacy stays QuickFIX-sourced (strictly additive per FR-008).
 - **The QuickFIX-dict license README correction / top-level `NOTICE`.** Tracked separately (`REMAINING-WORK.md` row 15d; README already corrected on submodule branch `docs/dict-license-fix`, commit `2c0b4947`). Not carried drive-by in this feature.
