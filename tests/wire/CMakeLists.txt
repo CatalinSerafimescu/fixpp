@@ -97,6 +97,7 @@ endif()
 # on the first member, not removed).
 add_executable(wire_dict_tests
   validator_production_table_view_test.cpp
+  validator_nested_membership_test.cpp
   message_view_membership_copy_test.cpp)
 target_link_libraries(wire_dict_tests PRIVATE
   fixpp_wire

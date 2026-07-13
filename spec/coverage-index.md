@@ -967,3 +967,23 @@ Items that are normative in the spec but explicitly deferred from fixpp v1.0. Th
 >
 > **Sanitizer/coverage.** The full 062 witness set is ASan/UBSan/TSan clean (8/8 each leg) + the
 > mallocnesia alloc gate — SC-002. Full matrix re-confirmed at `/speckit-verify`.
+
+## 072-nested-group-hardening — Harden doubly-nested repeating-group correctness (bundles #180 census+guard / #183 typed depth-≥2 context) — Implemented (branch `072-nested-group-hardening`, 2026-07-13; pre-Gate-B)
+
+Latent-correctness hardening on the doubly-nested-group surface; all inert on shipped dicts (require a constructed/dialect dictionary to trigger). Zero C-ABI change (frozen 1.5.0 — no `capi/`, `core/error.hpp`, or `test_020` touched; SC-006/FR-012).
+
+**Part A — census pins + load-time delimiter guard (#180 / L-063-4, L-062-3):**
+- `include/fixpp/dict/error.hpp` — new `dict::group_delimiter_collision_error` (derives `xml_parse_error`, reuses inherited `code()`, discriminated by catch type; NO `core::error` append — FR-003/D-A1).
+- `src/dictionary/xml_loader.cpp` `LoaderState::finalize()` — parent-chain walk rejects a nested==parent delimiter before `groups_` sort / before any `table_view`; `as_table_view()` stays non-throwing (FR-003/FR-005).
+- `tests/dictionary/reused_tag_census_test.cpp` — FR-001 `NestedGroupDelimiterCensus.NoNestedGroupDelimiterEqualsParentDelimiter` (raw per-`<group>` walk, parent-delim threaded + component-expanded, post-expansion delimiter) + FR-002 `NestedGroupScalarMemberCensus.NoSharedParentChildScalarMember`, both over all 9 runtime dicts, non-vacuous, each with a permanent injected positive-control trip-proof. Structural walk covers FIX40/41/42 (no unpinned residual).
+- `tests/dictionary/test_072_delimiter_guard_test.cpp` — `Delimiter072Guard.{CollidingDialectThrowsSpecificError,CollidingDialectCatchableAsXmlParseError,ConformingDialectLoads,SharedScalarWithDisjointDelimitersLoads}` (SC-002 + FR-004 asymmetry). Mutation-proven: guard-off ⇒ both CollidingDialect witnesses RED.
+
+**Part B — typed depth-3 pushed context (#183 / L-065-1) + validator (L-063-3 / FR-010):**
+- `tools/codegen/fixpp-codegen/emit_messages.cpp` — view-mint pushes the nested group's own no_tag onto the RETURNED child view's stored context (`child_ctx.group_ctx = ctx_.group_ctx.pushed(c)`); call-arg + `operator[]` unchanged; reconciled UP to the C-ABI cursor (FR-007/FR-008). Verified by clean `_codegen` reconfigure (SC-005) **and by regenerating the checked-in read goldens** `specs/003-dictionary-codegen/contracts/golden/{v44,v50sp2}_Messages.golden.hpp` (research D-B5's "no checked-in golden" premise was WRONG — `codegen_determinism_test` byte-pins the generated headers against those goldens; v42/vt11 + 069 builders golden unchanged, read-accessor-only).
+- `tests/codegen/nested_group_read_test.cpp` — `NestedGroupRead.Depth3TypedPushedContextResolvesGrandchildMemberNotBareFallback` (v44::MassQuote 296→295→555 + hand-built divergent `table_view`, wire MsgType "i"); mutation-proven RED pre-fix → GREEN post-reconfigure, 30/30 no regression (FR-011/SC-003).
+- `include/fixpp/wire/validator.hpp` — Step-3 rewritten `validate_group_level` (query-before-push recursive descent, K=16 depth-bounded), replacing the flat root-context pass + `seen_in_instance` heuristic (FR-010). SPLIT-TRIGGER did NOT fire (stayed in `validator.hpp`, existing primitives only).
+- `tests/wire/validator_nested_membership_test.cpp` — `ValidatorNestedMembership.Depth2ContextMissUnderFlatWalk`, mutation-proven RED slot-38 → GREEN; no regression across wire_pure/codegen/dict + test_066_validator_on_grouped.
+
+**B&L rows resolved:** L-063-4 (pinned + load-guarded), L-062-3 (census-pinned), L-065-1 (fixed + depth-3 model corrected), L-063-3(a) flat-walk/nesting FIXED; L-063-3(b) per-context delimiter REMAINS (shipped-reachable, opt-in-validator-only, pre-existing — follow-up). Recorded residuals: FR-005a/b (guard scope), FR-004 (scalar not load-enforced), census reach bound (FR-013e).
+
+**Sanitizer/coverage.** Debug legs green; full ASan/UBSan/TSan + coverage + clean-reconfigure-across-configs matrix (SC-005) re-confirmed at `/speckit-verify`.

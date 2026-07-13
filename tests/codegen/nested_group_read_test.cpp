@@ -58,6 +58,7 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -84,9 +85,8 @@ using fixpp::decimal_t;
 // Build a well-formed FIX frame: "8=FIX.4.4<SOH> 9=<len><SOH> <body> 10=<chk><SOH>"
 // body must already begin with "35=X<SOH>" and contain SOH-delimited fields.
 std::vector<std::byte> make_frame(std::string_view body) {
-    std::string pre =
-        "8=FIX.4.4\x01" + std::string("9=") + std::to_string(body.size()) + "\x01" +
-        std::string(body);
+    std::string pre = "8=FIX.4.4\x01" + std::string("9=") + std::to_string(body.size()) + "\x01" +
+                      std::string(body);
     unsigned sum = 0;
     for (unsigned char c : pre) {
         sum += c;
@@ -186,9 +186,8 @@ TEST(NestedGroupRead, Depth3NonFirstOuterOccurrenceNoCollision) {
     fixpp::wire::pmr_carry_buffer carry{buf.size(), &arena};
     fixpp::wire::Framer fr{};
     fixpp::wire::frame_view fvs[1]{};
-    auto framed = fr.feed(
-        std::span<const std::byte>{buf.data(), buf.size()}, carry,
-        std::span<fixpp::wire::frame_view>{fvs, 1});
+    auto framed = fr.feed(std::span<const std::byte>{buf.data(), buf.size()}, carry,
+                          std::span<fixpp::wire::frame_view>{fvs, 1});
     ASSERT_TRUE(framed.has_value());
     ASSERT_FALSE(framed->empty());
 
@@ -270,9 +269,8 @@ TEST(NestedGroupRead, Depth3MultiEntryAtMultipleLevelsNoCrossLevelTruncation) {
     fixpp::wire::pmr_carry_buffer carry{buf.size(), &arena};
     fixpp::wire::Framer fr{};
     fixpp::wire::frame_view fvs[1]{};
-    auto framed = fr.feed(
-        std::span<const std::byte>{buf.data(), buf.size()}, carry,
-        std::span<fixpp::wire::frame_view>{fvs, 1});
+    auto framed = fr.feed(std::span<const std::byte>{buf.data(), buf.size()}, carry,
+                          std::span<fixpp::wire::frame_view>{fvs, 1});
     ASSERT_TRUE(framed.has_value());
     ASSERT_FALSE(framed->empty());
 
@@ -401,9 +399,8 @@ TEST(NestedGroupRead, NonLastNestedGroupTrailingFieldNotSwallowed) {
     fixpp::wire::pmr_carry_buffer carry{buf.size(), &arena};
     fixpp::wire::Framer fr{};
     fixpp::wire::frame_view fvs[1]{};
-    auto framed = fr.feed(
-        std::span<const std::byte>{buf.data(), buf.size()}, carry,
-        std::span<fixpp::wire::frame_view>{fvs, 1});
+    auto framed = fr.feed(std::span<const std::byte>{buf.data(), buf.size()}, carry,
+                          std::span<fixpp::wire::frame_view>{fvs, 1});
     ASSERT_TRUE(framed.has_value());
     ASSERT_FALSE(framed->empty());
 
@@ -483,9 +480,8 @@ TEST(NestedGroupRead, NestedQuoteEntriesPerInstancePrices) {
     fixpp::wire::pmr_carry_buffer carry{buf.size(), &arena};
     fixpp::wire::Framer fr{};
     fixpp::wire::frame_view fvs[1]{};
-    auto framed = fr.feed(
-        std::span<const std::byte>{buf.data(), buf.size()}, carry,
-        std::span<fixpp::wire::frame_view>{fvs, 1});
+    auto framed = fr.feed(std::span<const std::byte>{buf.data(), buf.size()}, carry,
+                          std::span<fixpp::wire::frame_view>{fvs, 1});
     ASSERT_TRUE(framed.has_value());
     ASSERT_FALSE(framed->empty());
 
@@ -566,9 +562,8 @@ TEST(NestedGroupRead, RealDictionaryMassQuoteTwoQuoteEntriesPerInstancePrices) {
     fixpp::wire::pmr_carry_buffer carry{buf.size(), &arena};
     fixpp::wire::Framer fr{};
     fixpp::wire::frame_view fvs[1]{};
-    auto framed = fr.feed(
-        std::span<const std::byte>{buf.data(), buf.size()}, carry,
-        std::span<fixpp::wire::frame_view>{fvs, 1});
+    auto framed = fr.feed(std::span<const std::byte>{buf.data(), buf.size()}, carry,
+                          std::span<fixpp::wire::frame_view>{fvs, 1});
     ASSERT_TRUE(framed.has_value());
     ASSERT_FALSE(framed->empty());
 
@@ -653,9 +648,8 @@ TEST(NestedGroupRead, RealDictionaryMassQuote296RootContextSeededAtCtorNoCachePo
     fixpp::wire::pmr_carry_buffer carry{buf.size(), &arena};
     fixpp::wire::Framer fr{};
     fixpp::wire::frame_view fvs[1]{};
-    auto framed = fr.feed(
-        std::span<const std::byte>{buf.data(), buf.size()}, carry,
-        std::span<fixpp::wire::frame_view>{fvs, 1});
+    auto framed = fr.feed(std::span<const std::byte>{buf.data(), buf.size()}, carry,
+                          std::span<fixpp::wire::frame_view>{fvs, 1});
     ASSERT_TRUE(framed.has_value());
     ASSERT_FALSE(framed->empty());
 
@@ -687,4 +681,117 @@ TEST(NestedGroupRead, RealDictionaryMassQuote296RootContextSeededAtCtorNoCachePo
         << "typed QuoteSet[0].quote_set_valid_until_time() (367) must resolve — cache-poisoned "
            "by the preceding raw group_slices(296) call if absent";
     EXPECT_EQ(*vut, "20260101-00:00:00");
+}
+
+// ============================================================================
+// 072-nested-group-hardening Part B (US2 / FR-011 / SC-003) — depth-3 typed
+// pushed-context DISCRIMINATION witness.
+//
+// The generated typed nested accessor re-wraps the parent membership context
+// UNPUSHED at the emitter view-mint (emit_messages.cpp:270-271), so a depth-3
+// grandchild-group (555) slice queries membership one level too short. This
+// witness makes that observable with a HAND-BUILT table_view whose grandchild
+// group 555 is registered DIVERGENTLY:
+//   - BARE store  add_group_member(555, 602)                      -> {602}
+//   - CONTEXT store add_group_member_ctx("i",[296,295],555, {602,603})
+// The wire leg carries a TRAILING member 603 (LegSecurityIDSource). Because the
+// LAST nested instance's extent is bounded by membership (065):
+//   - post-fix (pushed path [296,295]) -> context HIT {602,603} -> 603 in the
+//     leg's extent -> leg_security_id_source() PRESENT ("SRCX").
+//   - pre-fix  (frozen path [296])     -> context MISS -> bare {602} -> 603
+//     EXCLUDED from the leg -> leg_security_id_source() ABSENT (RED).
+// The msg_type token is the WIRE value "i" (FIX44.xml MassQuote msgtype='i'),
+// NOT "MassQuote" — the runtime read seeds root_ctx.msg_type = msg_type() (the
+// 35= value), so registering under the name would miss the store and false-green
+// the witness (research D-B6 / data-model NEW-3).
+namespace {
+
+fixpp::dict::table_view make_depth3_divergent_dict() {
+    fixpp::dict::table_view dict;
+    // Outer 296 + middle 295 carry FULL transitive membership (incl. 602/603) so
+    // the QuoteSet/QuoteEntries slices span every nested byte — mirrors what
+    // as_table_view()'s recursive expand_field_list produces (bare store; the
+    // parser's context queries for 296/295 MISS and fall back here, which is
+    // CORRECT at depth 1/2 — the bug is depth-3 only).
+    dict.add_group_member(296, 302)
+        .add_group_member(296, 295)
+        .add_group_member(296, 299)
+        .add_group_member(296, 132)
+        .add_group_member(296, 133)
+        .add_group_member(296, 555)
+        .add_group_member(296, 602)
+        .add_group_member(296, 603)
+        .add_group_member(295, 299)
+        .add_group_member(295, 132)
+        .add_group_member(295, 133)
+        .add_group_member(295, 555)
+        .add_group_member(295, 602)
+        .add_group_member(295, 603);
+    // Grandchild 555 BARE (WRONG): delimiter 602 only — 603 is NOT a member.
+    dict.set_group_first(555, 602);
+    // Grandchild 555 CONTEXT (CORRECT), under lookup key ("i",[296,295],555):
+    // delimiter 602 + the trailing member 603.
+    std::array<std::uint16_t, 2> const path555{296, 295};
+    dict.set_group_first_ctx("i", path555, 555, 602);
+    dict.add_group_member_ctx("i", path555, 555, 603);
+    return dict;
+}
+
+}  // namespace
+
+// SC-003: a depth-3 grandchild-group member resolves under the FULL parent path
+// [296,295] (context store), not the frozen too-short [296] (bare fallback).
+// Mutation-proven RED on the pre-fix (unpushed) emitter output.
+TEST(NestedGroupRead, Depth3TypedPushedContextResolvesGrandchildMemberNotBareFallback) {
+    std::string body =
+        "35=i\x01"
+        "296=1\x01"
+        "302=SET0\x01"
+        "295=1\x01"
+        "299=E0\x01"
+        "132=10.10\x01"
+        "133=10.20\x01"
+        "555=1\x01"
+        "602=LEGX\x01"
+        "603=SRCX\x01";  // trailing depth-3 member — in-extent only under the correct context path
+
+    std::pmr::monotonic_buffer_resource arena{16384};
+    auto dict = make_depth3_divergent_dict();
+
+    auto buf = make_frame(body);
+    fixpp::wire::pmr_carry_buffer carry{buf.size(), &arena};
+    fixpp::wire::Framer fr{};
+    fixpp::wire::frame_view fvs[1]{};
+    auto framed = fr.feed(std::span<const std::byte>{buf.data(), buf.size()}, carry,
+                          std::span<fixpp::wire::frame_view>{fvs, 1});
+    ASSERT_TRUE(framed.has_value());
+    ASSERT_FALSE(framed->empty());
+
+    fixpp::wire::Parser<fixpp::wire::access_mode::Index> parser{dict};
+    auto mv_exp = parser.parse((*framed)[0], &arena);
+    ASSERT_TRUE(mv_exp.has_value());
+
+    fixpp::v44::MassQuote mq{*mv_exp};
+    auto sets = mq.quote_sets();
+    ASSERT_EQ(sets.size(), 1U);
+    auto entries = sets[0].quote_entries();
+    ASSERT_EQ(entries.size(), 1U);
+    auto legs = entries[0].legs();
+    ASSERT_EQ(legs.size(), 1U);
+    auto leg = legs[0];
+
+    // 602 is the delimiter — present under BOTH stores (sanity anchor).
+    auto sec = leg.leg_security_id();
+    ASSERT_TRUE(sec.has_value()) << "leg delimiter 602 must always resolve";
+    EXPECT_EQ(*sec, "LEGX");
+
+    // 603 is the DISCRIMINATOR: present only when 555 resolves under the full
+    // context path [296,295] (post-fix). Pre-fix the frozen [296] path misses
+    // the context store, falls back to bare {602}, and 603 is excluded -> RED.
+    auto src = leg.leg_security_id_source();
+    ASSERT_TRUE(src.has_value())
+        << "depth-3 leg member 603 must resolve under the pushed context path [296,295]; a frozen "
+           "[296] read misses the context store, falls back to the bare {602} set, and excludes "
+           "603 (the pre-fix unpushed-emitter defect this witness pins)";
+    EXPECT_EQ(*src, "SRCX");
 }

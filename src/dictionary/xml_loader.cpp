@@ -794,6 +794,30 @@ detail::dict_metadata_handle_ptr LoaderState::finalize() {
         h.components_.push_back(cr);
     }
 
+    // Load-time delimiter guard (072-nested-group-hardening FR-003 / L-063-4):
+    // reject a dialect in which any nested group's delimiter (`first_field_tag`)
+    // equals its immediate parent group's delimiter — a layout the flat instance
+    // splitter mis-splits, silently corrupting the outer group's boundaries.
+    // Runs here, BEFORE `groups_` is sorted by no_tag (which would stale
+    // `group_index_by_no_tag_`, whose indices are pre-sort), and before any
+    // `table_view` is built (that happens later in `as_table_view()`, which stays
+    // allocation-only / non-throwing). The whole load fails on a collision. This
+    // is the guard's first-seen `groups_` seam (one GroupDef per no_tag); the
+    // strictly-stronger all-contexts census lives in the test suite (FR-001).
+    for (auto const& g : groups_) {
+        if (g.parent_group_no_tag == 0) {
+            continue;
+        }
+        auto const pit = group_index_by_no_tag_.find(g.parent_group_no_tag);
+        if (pit == group_index_by_no_tag_.end()) {
+            continue;
+        }
+        auto const& parent = groups_[pit->second];
+        if (g.first_field_tag != 0 && g.first_field_tag == parent.first_field_tag) {
+            throw group_delimiter_collision_error::make(g.no_tag, g.first_field_tag, parent.no_tag);
+        }
+    }
+
     // Emit groups sorted by no_tag.
     // For each group, walk its fields via expand_field_list to populate the
     // per-group flat field table (group_fields_), recording first_field_index
