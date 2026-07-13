@@ -724,6 +724,30 @@ OffsetTable* OffsetTable::build_nested_subview(std::byte const* data, std::size_
     }
 }
 
+// 073 (D2): resolve a built (or failed) nested sub-table pointer to the
+// status-bearing result, OR-ing all THREE arena-exhaustion origins in ONE
+// place so both empty-returning exits of nested_group_slices share a single
+// definition — the two-exit drift this centralises is exactly the class of
+// bug the T004 checklist audit caught (cache-hit vs final exit diverging).
+//   (a) t == nullptr           — shell alloc failed / cached failed build;
+//   (c) build_status() OOM     — ctor build() degraded to out_of_memory
+//                                (offset_table.cpp:366-370); scoped to OOM so
+//                                a malformed-data degradation stays not-failed
+//                                (FR-007 disjointness);
+//   (b) group_slices_status()  — the sub-table's own slice materialization
+//                                caught bad_alloc (feedback_status_origin_
+//                                must_cover_all_alloc_catch_sites).
+static nested_slices_result resolve_nested_result(OffsetTable const* table,
+                                                  std::uint16_t nested_no_tag) noexcept {
+    if (table == nullptr) {
+        return nested_slices_result{{}, true};  // mode (a)
+    }
+    bool const sub_build_oom =  // mode (c)
+        !table->build_status() && table->build_status().error() == core::error::out_of_memory;
+    auto const s = table->group_slices_status(nested_no_tag);  // mode (b)
+    return nested_slices_result{s.slices, s.alloc_failed || sub_build_oom};
+}
+
 // 062 T006: single flat nested-subview cache (see offset_table.hpp for the
 // full keying/ownership contract — ROOT-owned, keyed by
 // `(slice_data, nested_no_tag)`, dedupes the sub-table build across distinct
@@ -765,25 +789,8 @@ nested_slices_result OffsetTable::nested_group_slices(
             // `!found_slice` branch below, which does not run for a matching
             // row). Using the local here would report alloc_failed=true on
             // every warm cache-hit of a healthy group (FR-006/FR-007
-            // violation).
-            if (row.table == nullptr) {
-                return nested_slices_result{{}, true};  // cached failed build (mode a)
-            }
-            // 073 (Gate-A r1 P1 recurrence, feedback_status_origin_must_cover_
-            // all_alloc_catch_sites): a non-null sub-table whose OWN internal
-            // build() degraded on bad_alloc (offset_table.cpp:366-370,
-            // status_ = out_of_memory) is a THIRD alloc-failure origin,
-            // distinct from (a) the shell allocation (build_nested_subview ->
-            // nullptr) and (b) group_slices_status()'s own catch. A degraded
-            // table's group() calls return `out_of_memory` too, so
-            // group_slices_status() reports {empty, false} (no throw at ITS
-            // own call site) — silently indistinguishable from a legitimately
-            // absent/count-0 group without this check.
-            bool const sub_build_oom =
-                !row.table->build_status() &&
-                row.table->build_status().error() == core::error::out_of_memory;
-            auto const s = row.table->group_slices_status(nested_no_tag);  // mode (b)
-            return nested_slices_result{s.slices, s.alloc_failed || sub_build_oom};
+            // violation). All three origins are OR'd inside resolve_nested_result.
+            return resolve_nested_result(row.table, nested_no_tag);
         }
         if (!found_slice) {
             table = row.table;
@@ -801,16 +808,9 @@ nested_slices_result OffsetTable::nested_group_slices(
         // Cache insert failed; still serve this call from the built table —
         // degrade to "rebuild next time" rather than lose this result.
     }
-    // 073 T004 (D2 final exit): resolve against the post-build local `table`.
-    if (table == nullptr) {
-        return nested_slices_result{{}, true};  // build failed (mode a)
-    }
-    // Same third origin as the cache-hit exit above (mode c): a non-null
-    // `table` whose own build() degraded on bad_alloc.
-    bool const sub_build_oom =
-        !table->build_status() && table->build_status().error() == core::error::out_of_memory;
-    auto const s = table->group_slices_status(nested_no_tag);  // mode (b)
-    return nested_slices_result{s.slices, s.alloc_failed || sub_build_oom};
+    // 073 T004 (D2 final exit): resolve against the post-build local `table`
+    // (same three-origin OR as the cache-hit exit, shared via the helper).
+    return resolve_nested_result(table, nested_no_tag);
 }
 
 // 065 T004: convenience overload — forwards to the 7-arg overload above using
