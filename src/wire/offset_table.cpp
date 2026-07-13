@@ -623,7 +623,7 @@ group_slices_result OffsetTable::group_slices_status(std::uint16_t no_tag) const
     // Already materialized for this no_tag — return the stable cached span.
     for (auto const& gs : group_index_) {
         if (gs.no_tag == no_tag) {
-            return {{group_slices_.data() + gs.start, gs.count}, false};
+            return {.slices = {group_slices_.data() + gs.start, gs.count}, .alloc_failed = false};
         }
     }
     try {
@@ -680,12 +680,12 @@ group_slices_result OffsetTable::group_slices_status(std::uint16_t no_tag) const
         }
         auto const count = static_cast<std::uint32_t>(group_slices_.size()) - start;
         group_index_.push_back(group_span{.no_tag = no_tag, .start = start, .count = count});
-        return {{group_slices_.data() + start, count}, false};
+        return {.slices = {group_slices_.data() + start, count}, .alloc_failed = false};
     } catch (std::bad_alloc const&) {
         // 073 T003: this is the mode-(b) origin (FR-002) — the sub-table
         // built non-null but its own slice materialization exhausted the
         // arena. Degrade to "no instances", never throw (noexcept).
-        return {{}, true};
+        return {.slices = {}, .alloc_failed = true};
     }
 }
 
@@ -740,12 +740,12 @@ OffsetTable* OffsetTable::build_nested_subview(std::byte const* data, std::size_
 static nested_slices_result resolve_nested_result(OffsetTable const* table,
                                                   std::uint16_t nested_no_tag) noexcept {
     if (table == nullptr) {
-        return nested_slices_result{{}, true};  // mode (a)
+        return nested_slices_result{.slices = {}, .alloc_failed = true};  // mode (a)
     }
     bool const sub_build_oom =  // mode (c)
         !table->build_status() && table->build_status().error() == core::error::out_of_memory;
     auto const s = table->group_slices_status(nested_no_tag);  // mode (b)
-    return nested_slices_result{s.slices, s.alloc_failed || sub_build_oom};
+    return nested_slices_result{.slices = s.slices, .alloc_failed = s.alloc_failed || sub_build_oom};
 }
 
 // 062 T006: single flat nested-subview cache (see offset_table.hpp for the
@@ -757,7 +757,7 @@ nested_slices_result OffsetTable::nested_group_slices(
     void const* opaque_dict, group_member_fn_t group_member_fn, detail::generation_token gen,
     group_context const& ctx) const noexcept {
     if (slice_data == nullptr) {
-        return nested_slices_result{{}, false};  // absent, not a failure
+        return nested_slices_result{.slices = {}, .alloc_failed = false};  // absent, not a failure
     }
     // Zero-length, alloc-free liveness check ([2b §6.4] INV-G6): the cache
     // scan below can return on a WARM (slice_data, nested_no_tag) hit
