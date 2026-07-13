@@ -1,0 +1,155 @@
+# Feature Specification: Native Orchestra Reader (FIX Latest)
+
+**Feature Branch**: `074-orchestra-native-reader`
+
+**Created**: 2026-07-13
+
+**Status**: Draft
+
+**Input**: User description: "native Orchestra reader — scope: spike-doc Deliverable #6 (`research/G19-fix-fpml-iso20022/remaining-work/orchestra-fix-latest-spike-and-plan.md`)"
+
+## Overview *(context — not a template section)*
+
+fixpp currently learns every FIX version it supports from **QuickFIX-format XML** dictionaries (the vendored "supported nine": FIX 4.0–5.0SP2 + FIXT.1.1). The Orchestra transpose spike (2026-07-10, verdict **GO**) proved that **FIX Latest (Extension Pack 303)** content — 181 messages, a depth-7 nested-group chain, heavily-reused group tags, 32 datatype tokens — fits fixpp's internal `Dictionary` model with zero structural blocker. The spike used a throwaway QuickFIX transpose as a *de-risk vehicle only*.
+
+This feature delivers the chosen end-state: fixpp ingests the **official** FIX Trading Community machine-readable standard — `OrchestraFIXLatest.xml`, sourced from the Apache-2.0 channel — **natively**, via a new reader (sibling to the existing `XmlLoader`) that builds fixpp's own internal `Dictionary` **directly**, with no transpose, no QuickFIX-DataDictionary intermediate, and no dependency on any QuickFIX-community tool. Because the reader targets the *same* internal `Dictionary`, everything downstream (the validator, the runtime `table_view`, codegen, the C-ABI) is unchanged.
+
+This is the **read path only** (Orchestra XML → internal `Dictionary`). It is v1.0-gating (`REMAINING-WORK.md` §A row 4b, user decision 2026-07-13).
+
+## Clarifications
+
+### Session 2026-07-13
+
+- Q: How much of the FIX Latest version-identity surface should this read-path feature take on? → A: Full identity — define `session_version::vlatest` + a version-table entry **and** a distinct FIX Latest `ApplVerID` enumerator in this feature (matches spike Deliverable #6 item 2 verbatim). Only session-layer `DefaultApplVerID` **negotiation wiring** into the FIXT session FSM stays deferred to the session/runtime follow-on; the identity artifacts (including the `ApplVerID` wire enumerator value) are defined here.
+
+## User Scenarios & Testing *(mandatory)*
+
+### User Story 1 - Load FIX Latest natively from the official Orchestra file (Priority: P1)
+
+A fixpp user (or a downstream fixpp subsystem) points the library at the official `OrchestraFIXLatest.xml` and gets a fully-populated internal `Dictionary` for FIX Latest — fields, datatypes, codeset values, components, and groups — queryable exactly like any of the existing nine dictionaries. No QuickFIX transpose, no external tool, no intermediate file.
+
+**Why this priority**: This is the feature. Without it there is no native FIX Latest support and v1.0 cannot ship (row 4b). Every other story is a property *of* this one.
+
+**Independent Test**: Load the vendored `OrchestraFIXLatest.xml` through the new reader and assert the resulting `Dictionary` reports 181 messages and answers field/group queries — delivering a usable FIX Latest dictionary on its own.
+
+**Acceptance Scenarios**:
+
+1. **Given** the vendored `OrchestraFIXLatest.xml`, **When** the native reader loads it, **Then** the resulting `Dictionary` reports exactly 181 messages with zero drops.
+2. **Given** a loaded FIX Latest `Dictionary`, **When** a caller queries an ordinary field by tag, **Then** it returns the field's datatype, name, required-ness, and (for codeset fields) the enumerated values with their descriptions.
+3. **Given** a loaded FIX Latest `Dictionary`, **When** downstream code builds the runtime `table_view` and validator input from it, **Then** those surfaces behave with no code change (the internal `Dictionary` is the same shape the existing loader produces).
+
+---
+
+### User Story 2 - Deep and reused group shapes resolve queryably (Priority: P1)
+
+The spike's discriminating result was not "the XML parsed" but "the runtime group-context machinery represents FIX Latest's deep and heavily-reused groups queryably." A user validating FIX Latest messages must be able to resolve the members and first-field of a group even when that group sits seven levels deep, and even when its tag is reused under many different parents.
+
+**Why this priority**: Group-context correctness is the load-bearing invariant the validator depends on; a reader that parses but mis-represents groups is silently broken. Co-P1 with Story 1.
+
+**Independent Test**: Query the deepest group of `MassQuoteAck` (msgtype `b`, the depth-7 chain) and a reused group tag (e.g. `NoLegs`/555, reused under many parents) and assert non-empty member lists and correct first-field via the context-keyed lookup.
+
+**Acceptance Scenarios**:
+
+1. **Given** a loaded FIX Latest `Dictionary`, **When** the group-context tables are built, **Then** they build without throwing or truncating (depth 7 is well within the `K=16` context-depth cap).
+2. **Given** the built context tables, **When** a caller looks up the members of the depth-7 group by its parent-path context key, **Then** the lookup returns the expected members and first field, and a reused-tag lookup (e.g. 555) resolves non-empty under each distinct parent.
+
+---
+
+### User Story 3 - FIX Latest carries a real, distinct version identity (Priority: P2)
+
+FIX Latest is loaded under its **own** version identity derived from `version="FIX.Latest_EP303"` — not disguised as `FIX.5.0SP2`. An honestly-labelled FIX Latest dictionary is recognised as FIX Latest and does not collide with any of the legacy nine.
+
+**Why this priority**: The spike relabelled FIX Latest to `FIX.5.0SP2` as a hack to slip past the version gate; the real feature must give FIX Latest a genuine identity so it is nameable and distinguishable. This subsumes spike catalogue #0 (the single required loader change). It is P2 because Story 1 can load content first; the identity makes that load honest.
+
+**Independent Test**: Load the real FIX Latest artifact and assert its resolved version identity is the new FIX Latest identity (not `v50sp2`), and that loading it does not require or produce the `FIX.5.0SP2` relabel.
+
+**Acceptance Scenarios**:
+
+1. **Given** `OrchestraFIXLatest.xml` with its genuine `version="FIX.Latest_EP303"`, **When** the reader resolves the version, **Then** it yields the new FIX Latest version identity, distinct from all nine legacy identities.
+2. **Given** the new FIX Latest identity, **When** a caller asks for its `ApplVerID` enum value, **Then** a distinct FIX Latest enumerator is returned (defined so FIX Latest is nameable; session-layer negotiation wiring is out of scope — see Non-Goals).
+
+---
+
+### User Story 4 - Source is vendored, pinned, and attributed (Priority: P2)
+
+The FIX Latest source artifact is vendored into the repository from the Apache-2.0 channel, pinned by upstream commit + content hash, and carries the Apache-2.0 §4 attribution plus an `UPSTREAM.txt` recording the Extension Pack. Builds are reproducible and license-clean.
+
+**Why this priority**: Reproducibility and license hygiene are release-gating obligations, but they follow the reader existing. Independent of Stories 1–3's runtime behavior.
+
+**Independent Test**: Inspect the vendored artifact + its provenance metadata and confirm the recorded commit/sha match the pinned upstream and the Apache-2.0 attribution is present.
+
+**Acceptance Scenarios**:
+
+1. **Given** the vendored `OrchestraFIXLatest.xml`, **When** its provenance is inspected, **Then** `UPSTREAM.txt` records the Apache-channel repo, commit `236d4a4054f0818f1931601713f7a6a68b275df7`, the file sha1, and the Extension Pack (EP303).
+2. **Given** the vendored artifact, **When** the repository's attribution files are inspected, **Then** the Apache-2.0 §4 attribution for the Orchestra source is present.
+
+---
+
+### Edge Cases
+
+- **Genuinely-unknown Orchestra datatype**: A datatype token with no fixpp equivalent must fail closed (thrown parse error), not silently drop or mis-map. EP303 has zero such tokens, so this is proven with a synthetic input, not a real one.
+- **Orchestra union datatype** (`unionDataType`, e.g. `SettlType = SettlTypeCodeSet ∪ Tenor`): the minimal model keeps the codeset base type and **drops** the second (union) arm — deterministically, without error.
+- **Codeset abstraction**: Orchestra names and shares codesets; the minimal model flattens each into per-field enumerated values (values + descriptions preserved), losing only the shared-codeset naming abstraction.
+- **Scenarios**: EP303 declares zero `scenario=` variants; the reader has nothing to flatten. (Re-audit per future EP.)
+- **A legacy (QuickFIX-XML) dictionary fed to the native reader, or an Orchestra file fed to the QuickFIX loader**: each reader targets its own format; cross-feeding is not a supported path and must fail closed rather than mis-parse.
+- **Malformed / truncated Orchestra XML, missing required attributes, dangling component references**: fail closed with a thrown parse error (mirror the existing loader's fail-closed dispositions).
+
+## Requirements *(mandatory)*
+
+### Functional Requirements
+
+- **FR-001**: The system MUST provide a native Orchestra reader — a sibling to the existing `XmlLoader` — that parses an `OrchestraFIXLatest.xml` (`fixr:repository` schema: datatypes, codesets, components, groups, messages) **directly** into the *same* internal `Dictionary` the existing loader produces, so the validator, runtime `table_view`, codegen, and C-ABI are unchanged downstream.
+- **FR-002**: The reader MUST map Orchestra constructs to the internal model as follows: Orchestra datatype names → internal field datatype (reusing the existing `kFieldTypeTable` mapping logic); codesets → per-field enumerated values with values **and** descriptions preserved; `unionDataType` second arm → **dropped** (minimal model); Orchestra `<group>` and `<component>` (resolved transitively) → the internal group/component definitions.
+- **FR-003**: Loading the vendored FIX Latest artifact MUST yield exactly **181 messages** with zero drops at any stage.
+- **FR-004**: The reader MUST produce group-context tables that build without throwing or truncating and that resolve **queryably** for (a) the deepest FIX Latest group (the depth-7 `MassQuoteAck` chain, within the `K=16` context-depth cap) and (b) reused group tags disambiguated by parent-path context key (e.g. tag 555 reused under multiple parents).
+- **FR-005**: The reader MUST establish a **real** FIX Latest version identity derived from `version="FIX.Latest_EP303"` — a distinct internal `session_version` value plus its supporting version-table entry — and MUST NOT relabel the artifact as `FIX.5.0SP2`. It MUST define a distinct FIX Latest `ApplVerID` enumerator so FIX Latest is nameable. (This subsumes spike catalogue #0.)
+- **FR-006**: The reader MUST fail closed (throw a dictionary parse error) on a genuinely-unknown Orchestra datatype rather than silently dropping or mis-mapping it. The set of unknown-vs-known tokens is bounded and enumerable; none occur in EP303.
+- **FR-007**: The FIX Latest source artifact MUST be vendored and pinned by upstream commit and content hash, with Apache-2.0 §4 attribution and an `UPSTREAM.txt` recording the Extension Pack.
+- **FR-008**: The change MUST be strictly **additive**: the nine vendored QuickFIX-XML dictionaries and the existing `XmlLoader`'s behavior are unchanged, and runtime-XML coverage of all nine legacy versions does not regress.
+- **FR-009**: The reader MUST fail closed on inputs outside its format contract (malformed/truncated XML, missing required attributes, dangling references, or a wrong-format file), mirroring the existing loader's fail-closed dispositions — never a silent partial load.
+
+### Key Entities
+
+- **Orchestra repository document** (`fixr:repository`): the official machine-readable FIX standard file. Sub-entities consumed by the reader: datatypes, codesets, fields, components, groups, messages.
+- **Internal Dictionary**: fixpp's version-agnostic representation of a FIX dictionary (fields, datatypes, required-ness, group/component structure, group-context tables). The reader's sole output; the contract boundary with everything downstream.
+- **FIX Latest version identity**: the new distinct version value (`session_version::vlatest`-equivalent) + its version-table entry + its `ApplVerID` enumerator, derived from `FIX.Latest_EP303`.
+- **Vendored provenance record**: the pinned artifact plus `UPSTREAM.txt` (repo, commit, sha, Extension Pack) and Apache-2.0 attribution.
+
+## Success Criteria *(mandatory)*
+
+### Measurable Outcomes
+
+- **SC-001**: The native reader loads the vendored `OrchestraFIXLatest.xml` and reports exactly **181 messages, zero drops** — matching the spike baseline.
+- **SC-002**: **Zero** unknown-datatype failures occur on EP303 (every datatype token maps), and the fail-closed path is **proven RED** on a synthetic input carrying a genuinely-unknown Orchestra datatype.
+- **SC-003**: The depth-7 `MassQuoteAck` group and a reused group tag (e.g. 555) each resolve to a **non-empty** member set and correct first field via the parent-path context-keyed lookup.
+- **SC-004**: Every downstream surface (validator, runtime `table_view`, codegen, C-ABI) is **unchanged** — no downstream API or behavior change is required to consume a natively-read FIX Latest dictionary.
+- **SC-005**: An honestly-labelled FIX Latest dictionary loads under a **distinct** version identity (not `v50sp2`) and does not collide with any of the nine legacy identities; the `FIX.5.0SP2` relabel hack is not used anywhere.
+- **SC-006**: All nine legacy QuickFIX-XML dictionaries continue to load with **unchanged** message counts and group-query results (no regression).
+- **SC-007**: The vendored artifact is pinned (upstream commit + content hash recorded) and carries Apache-2.0 §4 attribution and an `UPSTREAM.txt` naming EP303.
+
+## Assumptions
+
+- **Read-path / dictionary scope only.** This feature is Orchestra XML → internal `Dictionary`. Typed `owning_<Message>` codegen for the 181 FIX Latest classes, live wire-message validation, and round-trip/field-accessor correctness are explicitly out of scope (see Non-Goals) — consistent with the spike's "Not exercised" section.
+- **Minimal semantic-richness dial.** v1.0 reproduces today's flattened model: codeset values as per-field enums, `unionDataType` second arm dropped, scenarios N/A for EP303. The "richer" dial (codesets-as-typed-enums, scenario-aware typing) is a later, demand-driven step enabled by native ingestion — not part of this feature.
+- **ApplVerID scope = identity definition, not session negotiation** *(ratified — Clarifications 2026-07-13)*. This feature defines the full FIX Latest version identity: `session_version::vlatest`, its version-table entry, and a distinct `ApplVerID` enumerator so FIX Latest is nameable/distinguishable. Only wiring session-layer `DefaultApplVerID` **negotiation** into the FIXT session FSM is a separate session/runtime surface and is **deferred** (see Non-Goals).
+- **pugixml is reused, not added.** pugixml (already vendored at 1.15, MIT; consumed only in the dictionary loader TU) is the parsing library for the new reader. No new third-party dependency. (Per the dependency-management rule, confirm the current pinned pugixml version at `/speckit-plan` time.)
+- **Pinned artifact = EP303.** `OrchestraFIXLatest.xml` from the Apache channel (`FIXTradingCommunity/orchestrations`), commit `236d4a4054f0818f1931601713f7a6a68b275df7`, root `version="FIX.Latest_EP303"` (Orchestra v1.0, created 2026-06-03).
+- **Legacy stays QuickFIX-sourced.** Official Orchestra files exist only for 4.2/4.4/Latest; the nine legacy dictionaries remain QuickFIX-sourced. Native Orchestra makes **FIX Latest** independent of QuickFIX; it does not free the legacy dicts.
+- **Verification method (durable invariants).** Success is anchored on durable, reproducible invariants (message count 181, zero unknown datatypes, depth-7 + reused-tag group resolution, downstream surfaces unchanged, fail-closed proven RED). Any differential comparison against the spike's throwaway transposed dict is a plan-level *method* only — the transpose artifact lived in a disposable scratchpad worktree and may no longer exist; it is **not** a success criterion.
+
+## Dependencies
+
+- **Constitution amendment (process dependency).** v1.0 scope is currently locked to FIX 4.0–5.0SP2 + FIXT.1.1 (`[const §I.1]`, `[const §XVIII.1]`). Adding FIX Latest as a supported (runtime/dictionary-tier) version requires a constitution amendment, expected to be folded at Gate A per the row-4b v1.0-gating promotion (precedent: 035/043/068/069 Gate-A-folded amendments).
+- **Mandatory-trigger controls (Appendix A).** This feature touches the **dictionary loader / multi-version coexistence** (Appendix A "Codegen layout" trigger) and version/wire identity. Therefore all four mandatory controls apply: `/clarify`, `/analyze`, Codex Gate A, and user `/plan` sign-off (`[const §XVII]`, `[const §XVIII.3]`, Appendix A).
+- **Existing internal model.** Reuses the internal `Dictionary`/`VersionIR`, the `table_view` group-context machinery (`kMaxGroupContextDepth = 16`), and the `kFieldTypeTable` datatype-mapping logic — none of which this feature changes in shape.
+- **Vendored source.** Requires the Apache-channel `OrchestraFIXLatest.xml` vendored into the repository (FR-007).
+
+## Non-Goals *(explicit — bounds the read-path scope)*
+
+- **Typed `owning_<Message>` codegen for the 181 FIX Latest classes.** A separate follow-on feature, gated on the still-open "per-version typed generation must be a build OPTION" decision (compile-time / binary-size / sanitizer-matrix cost). Not this feature.
+- **Live FIX Latest wire-message validation.** Feeding live FIX Latest messages through the `dictionary_driven_validator` needs message fixtures and belongs to the FIX-Latest runtime feature's test surface. This feature only proves the validator's *input* (the `table_view`) builds and is queryable.
+- **Round-trip / field-accessor correctness on FIX Latest content.** Not attempted here.
+- **Session-layer `DefaultApplVerID` negotiation.** Identity + enumerator are defined here; wiring negotiation into the FIXT session FSM is deferred to the session/runtime surface.
+- **Richer semantic modeling** (codesets-as-typed-enums, scenario-aware typing, Orchestra workflow/actors/rules). Minimal flattened model only.
+- **Regenerating or replacing the nine legacy QuickFIX dictionaries.** Legacy stays QuickFIX-sourced (strictly additive per FR-008).
+- **The QuickFIX-dict license README correction / top-level `NOTICE`.** Tracked separately (`REMAINING-WORK.md` row 15d; README already corrected on submodule branch `docs/dict-license-fix`, commit `2c0b4947`). Not carried drive-by in this feature.
