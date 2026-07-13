@@ -61,6 +61,7 @@ add_wire_test(wire_pure_tests
   group_slice_trailing_soh_test.cpp                                   # T008 (062)
   nested_group_slices_cache_test.cpp                                  # /speckit-verify cov (062)
   nested_group_extent_test.cpp                                        # T019/T020/T022 (063)
+  nested_group_slices_failloud_test.cpp                               # T001 (073)
 )
 
 # ── Standalone: 061-slim body-builder alloc gate (FR-002) ────────────────────
@@ -77,6 +78,7 @@ add_wire_test(wire_codegen_tests
   repeating_group_equivalence_test.cpp                                 # T016 (062 T010)
   cutover_2b_gated_test.cpp                                            # T019 (T059)
   toplevel_read_regression_test.cpp                                    # 062 T022
+  group_view_failloud_test.cpp                                         # T008 (073)
 )
 if(TARGET fixpp_codegen_generate)
   add_dependencies(wire_codegen_tests fixpp_codegen_generate)

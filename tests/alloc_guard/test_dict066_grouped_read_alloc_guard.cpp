@@ -225,9 +225,10 @@ struct MinimalQuoteSetEntry {
     explicit MinimalQuoteSetEntry(fixpp::wire::entry_context c) noexcept : ctx(c) {}
 
     [[nodiscard]] std::span<fixpp::wire::group_slice const> quote_entries() const noexcept {
-        return ctx.parent_cache_owner->nested_group_slices(
-            ctx.span.data(), ctx.span.size(), /*nested_no_tag=*/295, ctx.opaque_dict,
-            ctx.group_member_fn, ctx.gen, ctx.group_ctx);
+        return ctx.parent_cache_owner
+            ->nested_group_slices(ctx.span.data(), ctx.span.size(), /*nested_no_tag=*/295,
+                                  ctx.opaque_dict, ctx.group_member_fn, ctx.gen, ctx.group_ctx)
+            .slices;
     }
 };
 

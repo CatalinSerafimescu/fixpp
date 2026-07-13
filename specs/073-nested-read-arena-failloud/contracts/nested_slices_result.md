@@ -27,8 +27,8 @@ struct nested_slices_result {           // trivially copyable
 
 **Postconditions**
 - `alloc_failed == false, slices == <occurrences>` — present group, sub-view built non-null AND its `group_slices_status()` returned occurrences without throwing (or served from a warm non-null cache row with a materialized span).
-- `alloc_failed == false, slices.empty()` — group absent (`slice_data == nullptr`) OR count-0 / zero-len (non-null table, `group_slices_status()` returned empty **without** throwing).
-- `alloc_failed == true, slices.empty()` — present group whose sub-view allocation failed via **either** sub-mode: (a) the sub-`OffsetTable` build failed (`build_nested_subview → nullptr`), OR (b) the sub-table built non-null but its own `group_slices()` slice materialization caught `bad_alloc` (`offset_table.cpp:674-675`). Holds at first read AND every subsequent read — mode (a) serves the cached null row; mode (b) re-materializes from the cached non-null row and re-throws (nothing cached in the sub-table's `group_index_` on the first throw).
+- `alloc_failed == false, slices.empty()` — group absent (`slice_data == nullptr`) OR count-0 / zero-len (non-null, `build_status()`-ok table, `group_slices_status()` returned empty **without** throwing).
+- `alloc_failed == true, slices.empty()` — present group whose sub-view allocation failed via **any of three** sub-modes: (a) the sub-`OffsetTable` shell alloc failed (`build_nested_subview → nullptr`), (b) the sub-table built non-null but its own `group_slices()` slice materialization caught `bad_alloc` (`offset_table.cpp:674-675`), OR (c) the sub-table built non-null but its ctor's own `build()` degraded to `out_of_memory` (`offset_table.cpp:366-370`; `build_status().error() == out_of_memory`) — found at `/speckit-implement`. Holds at first read AND every subsequent read — mode (a) serves the cached null row; mode (b) re-materializes from the cached non-null row and re-throws; mode (c) rides the persistent `build_status() == out_of_memory` on the cached count-0 row (no re-throw).
 - `noexcept` preserved (no throw across the boundary).
 
 ## Internal status split — `OffsetTable::group_slices` (D2 mode (b))

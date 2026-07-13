@@ -122,7 +122,7 @@ TEST(NestedGroupExtent, MultiEntryNestedExtentGuard) {
 
     fixpp::wire::group_context const ctx{.msg_type = "D"};
     auto nested_slices = mv->offsets().nested_group_slices(
-        outer0.data, outer0.len, /*nested_no_tag=*/802, &dict, &dict_group_member, fv->token(), ctx);
+        outer0.data, outer0.len, /*nested_no_tag=*/802, &dict, &dict_group_member, fv->token(), ctx).slices;
     ASSERT_EQ(nested_slices.size(), 2U)
         << "INV-B: the nested group's full 2-entry extent must be enclosed by the outer";
 
@@ -178,7 +178,7 @@ TEST(NestedGroupExtent, SingleEntryNestedNoOverConsumption) {
 
     fixpp::wire::group_context const ctx{.msg_type = "D"};
     auto nested_slices = mv->offsets().nested_group_slices(
-        outer0.data, outer0.len, 802, &dict, &dict_group_member, fv->token(), ctx);
+        outer0.data, outer0.len, 802, &dict, &dict_group_member, fv->token(), ctx).slices;
     ASSERT_EQ(nested_slices.size(), 1U);
     auto field = fixpp::wire::get({nested_slices[0].data, nested_slices[0].len}, 524, fv->token());
     ASSERT_TRUE(field.has_value());
@@ -229,7 +229,7 @@ TEST(NestedGroupExtent, CountOfZeroNestedConsumesNoExtent) {
 
     fixpp::wire::group_context const ctx{.msg_type = "D"};
     auto nested_slices = mv->offsets().nested_group_slices(
-        outer0.data, outer0.len, 802, &dict, &dict_group_member, fv->token(), ctx);
+        outer0.data, outer0.len, 802, &dict, &dict_group_member, fv->token(), ctx).slices;
     EXPECT_TRUE(nested_slices.empty()) << "802=0 must yield zero nested instances";
 }
 
@@ -318,7 +318,7 @@ TEST(NestedGroupExtent, MultipleOccurrencesOfSameGroupNoCollision) {
     fixpp::wire::group_context const ctx{.msg_type = "D"};
 
     auto nested0 = mv->offsets().nested_group_slices(outer_slices[0].data, outer_slices[0].len, 802,
-                                                      &dict, &dict_group_member, fv->token(), ctx);
+                                                      &dict, &dict_group_member, fv->token(), ctx).slices;
     ASSERT_EQ(nested0.size(), 2U);
     auto v00 = fixpp::wire::get({nested0[0].data, nested0[0].len}, 524, fv->token());
     ASSERT_TRUE(v00.has_value());
@@ -328,7 +328,7 @@ TEST(NestedGroupExtent, MultipleOccurrencesOfSameGroupNoCollision) {
     EXPECT_EQ(v01->as_string(), "V01");
 
     auto nested1 = mv->offsets().nested_group_slices(outer_slices[1].data, outer_slices[1].len, 802,
-                                                      &dict, &dict_group_member, fv->token(), ctx);
+                                                      &dict, &dict_group_member, fv->token(), ctx).slices;
     ASSERT_EQ(nested1.size(), 2U);
     auto v10 = fixpp::wire::get({nested1[0].data, nested1[0].len}, 524, fv->token());
     ASSERT_TRUE(v10.has_value());
@@ -402,7 +402,7 @@ TEST(NestedGroupExtent, BenignSameMembershipReuseAcrossContexts) {
     // 453-instance), NOT the bare root context.
     fixpp::wire::group_context const ctx_d{.msg_type = "D", .parent_path = {453}, .depth = 1};
     auto nested_d = mv_d->offsets().nested_group_slices(outer_d[0].data, outer_d[0].len, 802, &dict,
-                                                        &dict_group_member, fv_d->token(), ctx_d);
+                                                        &dict_group_member, fv_d->token(), ctx_d).slices;
     ASSERT_EQ(nested_d.size(), 2U) << "context (\"D\",[453],802) must resolve its own membership";
     auto d0 = fixpp::wire::get({nested_d[0].data, nested_d[0].len}, 524, fv_d->token());
     ASSERT_TRUE(d0.has_value());
@@ -432,7 +432,7 @@ TEST(NestedGroupExtent, BenignSameMembershipReuseAcrossContexts) {
     ASSERT_EQ(outer_8.size(), 1U);
     fixpp::wire::group_context const ctx_8{.msg_type = "8", .parent_path = {460}, .depth = 1};
     auto nested_8 = mv_8->offsets().nested_group_slices(outer_8[0].data, outer_8[0].len, 802, &dict,
-                                                        &dict_group_member, fv_8->token(), ctx_8);
+                                                        &dict_group_member, fv_8->token(), ctx_8).slices;
     ASSERT_EQ(nested_8.size(), 2U) << "context (\"8\",[460],802) must resolve its own membership";
     auto e0 = fixpp::wire::get({nested_8[0].data, nested_8[0].len}, 524, fv_8->token());
     ASSERT_TRUE(e0.has_value());

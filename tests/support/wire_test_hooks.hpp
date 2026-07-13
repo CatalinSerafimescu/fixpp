@@ -10,7 +10,9 @@
 // ships in libfixpp) — only the declaration moves here, into a non-installed
 // test-support header, so production consumers never see it.
 
+#include <cstddef>
 #include <cstdint>
+#include <fixpp/wire/offset_table.hpp>
 
 namespace fixpp::wire::detail {
 
@@ -23,3 +25,28 @@ namespace fixpp::wire::detail {
 void set_overlay_seed_for_testing(std::uint32_t seed) noexcept;
 
 }  // namespace fixpp::wire::detail
+
+namespace fixpp::wire {
+
+// 073 T001: TEST-ONLY nested_cache_ introspection (declared as a friend of
+// OffsetTable in offset_table.hpp; see that header for the rationale). Given
+// a ROOT table, resolves the sub-table already cached for
+// `(slice_data, nested_no_tag)` in `nested_cache_`, or `nullptr` if no
+// matching row exists (never requested, OR the row's build itself failed —
+// research.md §D2 mode (a)). Does NOT trigger a build: the caller must
+// already have invoked `nested_group_slices(slice_data, ..., nested_no_tag,
+// ...)` once so the row exists. Never called from production code.
+struct nested_cache_access_for_testing {
+    [[nodiscard]] static OffsetTable const* resolve(OffsetTable const& root,
+                                                     std::byte const* slice_data,
+                                                     std::uint16_t nested_no_tag) noexcept {
+        for (auto const& row : root.nested_cache_) {
+            if (row.slice_data == slice_data && row.nested_no_tag == nested_no_tag) {
+                return row.table;
+            }
+        }
+        return nullptr;
+    }
+};
+
+}  // namespace fixpp::wire

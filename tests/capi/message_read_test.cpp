@@ -1930,10 +1930,10 @@ TEST(MessageReadGroup, NestedTrailingMemberExcluded_Fix44LegsAsTableView) {
             if (ctx_.parent_cache_owner == nullptr) {
                 return {};
             }
-            auto const nested_slices = ctx_.parent_cache_owner->nested_group_slices(
+            auto const r = ctx_.parent_cache_owner->nested_group_slices(
                 ctx_.outer_occurrence_id, ctx_.span.size(), 604, ctx_.opaque_dict,
                 ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
-            return fixpp::wire::group_view<G604Entry>{nested_slices, ctx_};
+            return fixpp::wire::group_view<G604Entry>{r.slices, ctx_, r.alloc_failed};
         }
         [[nodiscard]] fixpp::core::expected_t<fixpp::wire::field_view> field_value(
             std::uint16_t tag) const noexcept {

@@ -16,6 +16,14 @@ public:
 
     class iterator;   // forward iterator; .iter() skips sub-index build
     [[nodiscard]] iterator iter() const noexcept [[clang::lifetimebound]];
+
+    // 073 (#184): fail-loud on a NESTED sub-view arena-exhaustion failure.
+    // true ⇒ this nested group is present but its sub-OffsetTable could not be
+    // allocated (present-but-truncated), distinct from an empty group
+    // (size()==0 && !alloc_failed()). Set by the codegen-emitted nested
+    // accessor from nested_slices_result::alloc_failed. Value/status only — no
+    // throw across the noexcept boundary.
+    [[nodiscard]] bool alloc_failed() const noexcept;
 };
 
 }  // namespace fixpp::wire

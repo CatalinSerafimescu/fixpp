@@ -16,6 +16,7 @@
 #include <memory_resource>
 #include <span>
 #include <string_view>
+#include <type_traits>
 #include <vector>
 
 #include "framer.hpp"
@@ -38,6 +39,40 @@ inline constexpr std::size_t default_max_group_entries_per_instance = 4096;
 // the .cpp includes group_view.hpp for the complete type where it is
 // actually constructed/consumed.
 struct group_context;
+
+// 073 T002: status-bearing return of both `nested_group_slices` overloads
+// (data-model.md §"nested_slices_result"; contracts/nested_slices_result.md).
+// `alloc_failed == true` iff a sub-view allocation failed via any of THREE
+// origins (research.md §D2, extended per
+// feedback_status_origin_must_cover_all_alloc_catch_sites): (a) the
+// sub-OffsetTable shell allocation failed (`build_nested_subview` -> nullptr),
+// (b) the sub-table built non-null but its own `group_slices_status()` caught
+// `bad_alloc` during slice materialization, or (c) the sub-table built
+// non-null but its OWN internal `build()` degraded on bad_alloc
+// (`status_ = out_of_memory`, offset_table.cpp:366-370) — a noexcept ctor
+// degrade that never returns nullptr, so `nested_group_slices` must check
+// `table->build_status()` explicitly at both resolution exits (mode (c) is
+// otherwise silently indistinguishable from a legitimately absent/count-0
+// group, since a degraded table's `group()` call returns without throwing).
+// Trivially copyable (span + bool) — zero-alloc wire-read discipline
+// preserved.
+struct nested_slices_result {
+    std::span<group_slice const> slices{};
+    bool alloc_failed = false;
+};
+static_assert(std::is_trivially_copyable_v<nested_slices_result>);
+
+// 073 T002: INTERNAL status-bearing form of `OffsetTable::group_slices`
+// (research.md §D2 mode (b), FR-002 originate-at-failure). Only
+// `nested_group_slices` consumes this — NOT a public return type. The public
+// `group_slices(no_tag)` stays a span-returning one-line wrapper so every
+// top-level caller (C-ABI top-level group getter, `MessageView::group<>()`)
+// is unaffected (L-073-1, deferred).
+struct group_slices_result {
+    std::span<group_slice const> slices{};
+    bool alloc_failed = false;
+};
+static_assert(std::is_trivially_copyable_v<group_slices_result>);
 
 class OffsetTable {
 public:
@@ -186,6 +221,16 @@ public:
     [[nodiscard]] std::span<group_slice const> group_slices(std::uint16_t no_tag) const noexcept
         [[clang::lifetimebound]];
 
+    // 073 T002/T003: INTERNAL status-bearing form of group_slices() above
+    // (data-model.md §"Internal group_slices_result"; research.md §D2 mode
+    // (b), FR-002). Only `nested_group_slices` consumes this. Sets
+    // `alloc_failed = true` in the `catch (std::bad_alloc)` degrade path;
+    // `false` on a warm cache hit or a genuine (possibly count-0) materialized
+    // span. The public `group_slices()` above is unchanged and is a one-line
+    // wrapper: `return group_slices_status(no_tag).slices;`.
+    [[nodiscard]] group_slices_result group_slices_status(std::uint16_t no_tag) const noexcept
+        [[clang::lifetimebound]];
+
     // [D5 deviation] Cross-layer getter: returns the memory_resource backing this
     // table's arena (the per-message PMR resource captured at construction time).
     // Used by the capi layer (fixpp_msg_get_group / fixpp_group_get_nested_group)
@@ -225,7 +270,7 @@ public:
     // not part of the stored path). Ignored on a warm cache hit (a built
     // sub-table's context was already seeded once at cold-build time and is
     // invariant for the rest of this parse, FR-005).
-    [[nodiscard]] std::span<group_slice const> nested_group_slices(
+    [[nodiscard]] nested_slices_result nested_group_slices(
         std::byte const* slice_data [[clang::lifetimebound]], std::size_t slice_len,
         std::uint16_t nested_no_tag, void const* opaque_dict, group_member_fn_t group_member_fn,
         detail::generation_token gen, group_context const& ctx) const noexcept
@@ -240,7 +285,7 @@ public:
     // the complete `group_context` type, only forward-declared here — same
     // rule as `group_context_for()` above). Used by the C-ABI nested read
     // (research Decision 4; data-model.md §Reused).
-    [[nodiscard]] std::span<group_slice const> nested_group_slices(
+    [[nodiscard]] nested_slices_result nested_group_slices(
         std::byte const* slice_data [[clang::lifetimebound]], std::size_t slice_len,
         std::uint16_t nested_no_tag, group_context const& ctx) const noexcept
         [[clang::lifetimebound]];
@@ -360,6 +405,18 @@ private:
         OffsetTable* table;
     };
     mutable std::pmr::vector<nested_cache_row> nested_cache_;
+
+    // 073 T001: TEST-ONLY nested_cache_ introspection seam, forward-declared
+    // here for friendship only (mirrors the frame_view_access /
+    // frame_view_slice_access split — framer.hpp:104-115): the DEFINITION
+    // lives in tests/support/wire_test_hooks.hpp (never installed), so no
+    // test-only accessor code ships in this public header. Resolves the
+    // sub-table ALREADY built for a (slice_data, nested_no_tag) pair without
+    // triggering a build — used by the wire-level primitive witness to pin
+    // research.md §D2 mode (a)/(b)/(c) by introspecting the real sub-table
+    // rather than a `sizeof(OffsetTable)`-tuned cap band (not portable
+    // across toolchains, research.md "Platform-robust mode pinning").
+    friend struct nested_cache_access_for_testing;
 };
 
 }  // namespace fixpp::wire

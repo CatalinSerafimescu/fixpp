@@ -486,9 +486,16 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_group_get_nested_group(const fixpp_group_t*
     // absorbed into it (research Decision 1/6; contract C1). Storage for the
     // returned slices lives in the parent OffsetTable's own per-message arena
     // (FR-007) — no separate copy needed.
-    auto slices = parent_grp->parent_view->offsets().nested_group_slices(
+    auto r = parent_grp->parent_view->offsets().nested_group_slices(
         sl->data, sl->len, nested_tag, parent_grp->group_ctx);
 
+    // 073 T007 (D5): a present group whose sub-view allocation failed (either
+    // sub-mode, contracts/nested_slices_result.md) is fail-loud, distinct from
+    // legitimately absent/count-0 — reported BEFORE the presence probe below
+    // so it is never mistaken for TAG_NOT_FOUND.
+    if (r.alloc_failed) return FIXPP_ERR_WIRE_LIMIT_EXCEEDED;
+
+    auto slices = r.slices;
     if (slices.empty()) {
         // Membership-free presence probe over the parent entry slice
         // (contract C3): nested_tag entirely absent -> TAG_NOT_FOUND

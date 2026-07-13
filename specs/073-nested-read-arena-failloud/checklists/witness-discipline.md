@@ -12,7 +12,7 @@
 
 ## Discrimination / mutation-proof
 
-- [x] CHK020 - Is each witness required to be authored RED-first and mutation-proven, with the specific mutant named (null-only predicate leaves mode (b) RED; final-exit-only leaves read-2 RED)? [Measurability, research §D2/§D6 / tasks §T001] — PASS: tasks T001 names both mutants verbatim ("a null-only alloc_failed predicate must leave sub-mode (b) RED; instrumenting only the final exit must leave read-2 RED"); research §D6 item 5 and quickstart.md Scenario 5 restate the mutation-proof precisely.
+- [x] CHK020 - Is each witness required to be authored RED-first and mutation-proven, with the specific mutants named, AND is mode discrimination pinned platform-robustly? [Measurability, research §D2/§D6 / tasks §T001] — SPEC-FIXED (implement-time): originally named a **two-mutant** matrix (null-only → mode (b) RED; final-exit-only → read-2 RED). With mode (c) added (see CHK001 / correctness-and-abi), tasks T001 is updated to a **three-mutant** matrix: M1 null-only → modes (b) AND (c) RED; M2 drop the `|| build_status()==out_of_memory` term (the old 2-mode formula) → mode (c) RED (the mode-c discriminator); M3 final-exit-only → read-2 RED. **Also fixed a platform-fragility gap the original overlooked**: a cap tuned to hit mode (c) via `sizeof(OffsetTable)` (clang-debug-specific, 280 B) can silently land in mode (a) or succeed on gcc-release / MSVC, making M2 vacuous across the 3-tier CI ([[feedback_local_verify_clang_only_misses_gcc_release_ci_job]]). T001 now pins each mode by **introspection on the sub-table** (`table==nullptr` / `build_status()`-ok+throw / `build_status()==out_of_memory`) so the discriminator fails loud instead of false-passing when a platform's cap lands elsewhere; T006/T008 (which cannot introspect) use wide-margin fixtures. Each mutant's RED must be SEEN.
 - [x] CHK021 - Is the mode-(b) "second-loss" witness required to read the group TWICE (to pin the cache-hit exit), with the reason (2nd read served from cached non-null row re-throws) recorded? [Completeness, research §D6 / tasks §T001/T008] — PASS: research.md §D6 item 5 spells out the read-twice rationale in detail; tasks T001/T008 both require the repeated-read assertion; quickstart.md Scenario 5 "Why read twice" paragraph gives the same rationale for an implementer.
 - [x] CHK022 - Is the requirement to assert the distinct signal DIRECTLY (C-ABI `WIRE_LIMIT_EXCEEDED`; typed `group_view.alloc_failed()`) — NOT via an `nc==0` / empty-span proxy — stated? [Clarity, Spec §SC-001/§SC-002 / tasks §T006/T008] — PASS: Spec §SC-001/§SC-002 state the code/witness must be proven RED/GREEN directly; tasks T006 ("Assert the code DIRECTLY (not an nc==0 proxy)") and T008 ("Assert alloc_failed() DIRECTLY") state it explicitly.
 
@@ -32,14 +32,14 @@
 
 | Disposition | Count |
 |---|---|
-| PASS | 12 |
-| SPEC-FIXED | 0 |
+| PASS | 11 |
+| SPEC-FIXED | 1 |
 | DD-DECIDED | 0 |
 | WAIVED | 0 |
 | **Total** | 12 |
 
 ### SPEC-FIXED items
-None.
+- CHK020 — **SPEC-FIXED at `/speckit-implement`**: the mutant matrix went from two mutants to three (added M2, the mode-(c) discriminator) after mode (c) surfaced, AND T001 mode discrimination was moved from cap-band tuning to sub-table introspection to stay valid across the 3-tier CI (clang-debug / gcc-release / MSVC). Affected: `tasks.md#T001`, `tasks.md#T008`, research §D2/§D6.
 
 ### DD-DECIDED items
 None.
