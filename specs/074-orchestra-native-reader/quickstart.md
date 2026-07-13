@@ -5,7 +5,7 @@ How to build and prove the feature end-to-end. Details of the interface and mapp
 ## Prerequisites
 
 - The library submodule build toolchain (Conan + CMake ≥ 3.28 + Ninja), same as `fixpp_dictionary`.
-- The vendored source present at `dictionaries/orchestra/OrchestraFIXLatest.xml` (pinned `FIXTradingCommunity/orchestrations @ 236d4a405…`, EP303). The sha1 `26f60db1…` is **provisional/unverified** (carried from the disposable spike scratchpad, not the official file). Fetching the file is the gating first implementation task (requires network); **compute** its sha1 from the fetched bytes and **record** the true value — do not hard-code the provisional constant.
+- The vendored source present at `dictionaries/orchestra/OrchestraFIXLatest.xml` (pinned `FIXTradingCommunity/orchestrations @ 236d4a405…`, EP303). The sha1 `26f60db1c1f52d169d3b6825ac68800abf487fde` is the spike's grade-1 recorded sha1 of the **OFFICIAL** file (spike-and-plan doc line 36, NOT the relabelled `OrchestraFIXLatest_relabeled.xml`) — a supply-chain integrity pin. Fetching the file is the gating first implementation task (requires network); **compute** its sha1 from the fetched bytes and **assert it equals this pinned value** (mismatch → STOP and investigate, do not proceed) — do not silently drop the check.
 - pugixml already resolved (`pugixml/1.15`, PRIVATE dep of `fixpp_dictionary`).
 
 ## Build
@@ -39,9 +39,8 @@ The whole bucket runs via its label; per-scenario narrowing is a **binary gtest 
 
 ```bash
 cat dictionaries/orchestra/UPSTREAM.txt        # repo @ SHA tag= date=, EP303, + the recorded sha1
-# Recompute + compare against the sha1 RECORDED in UPSTREAM.txt at fetch time
-# (do NOT assert against a pre-filled constant — the 26f60db1… value is provisional until the first real fetch):
-sha1sum dictionaries/orchestra/OrchestraFIXLatest.xml   # must match UPSTREAM.txt's recorded sha1
+# The fetched official file MUST match the spike's grade-1 recorded sha1 (integrity pin):
+sha1sum dictionaries/orchestra/OrchestraFIXLatest.xml   # == 26f60db1c1f52d169d3b6825ac68800abf487fde (also recorded in UPSTREAM.txt)
 ls dictionaries/orchestra/{LICENSE,NOTICE}     # Apache-2.0 text + §4 attribution present
 ```
 
