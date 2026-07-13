@@ -59,6 +59,21 @@ THEN  neither path raises the failure signal
       C-ABI: (a) TAG_NOT_FOUND, (b) OK/nc=0 ; typed: alloc_failed()==false, size()==0
 ```
 
+## Scenario 5 — Second-loss: sub-table builds, its `group_slices()` fails (D2 mode (b))
+
+```
+GIVEN a cap tuned so the sub-OffsetTable BUILDS (non-null: sizeof(OffsetTable) + ctor fit)
+      but its group_slices() reserve/push_back then exhausts the arena (:674 catch)
+WHEN  the present nested group is read TWICE
+THEN  BOTH reads fail loud
+      read 1 → final exit (:768): alloc_failed (typed) / WIRE_LIMIT_EXCEEDED (C-ABI)
+      read 2 → cache-hit exit (:748-750), cached non-null row re-materializes → re-throws → same signal
+```
+Why read twice: a single read pins only the final exit; a fixer who wires `group_slices_status` at `:768`
+but forgets to OR it at the cache-hit exit would pass a one-read witness while silently truncating the second read.
+Mutation proof: use the D2-null-only formula (`alloc_failed = table == nullptr`) → both reads go RED (report empty
+with a non-null table); the OR-with-`group_slices_status().alloc_failed` fix makes both GREEN (fail-loud).
+
 ## Regression / parity gate
 
 ```bash

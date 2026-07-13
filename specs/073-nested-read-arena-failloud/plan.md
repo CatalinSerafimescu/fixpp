@@ -6,11 +6,11 @@
 
 ## Summary
 
-Close limitation **L-065-2** (GitHub #184): a nested repeating-group read whose sub-`OffsetTable` allocation fails under fixed-parse-arena exhaustion currently degrades to an empty result, indistinguishable from a legitimately absent / count-0 group, and the C-ABI reports it as `OK`/nc=0 — a silent truncation. Fix by widening the shared primitive `OffsetTable::nested_group_slices` (both overloads) to a **status-bearing return type** (`nested_slices_result { span slices; bool alloc_failed; }`), setting `alloc_failed` at **every** empty-returning exit (cache-hit early return + final return), and consuming it symmetrically on **both** read paths: the C-ABI (`message_read.cpp` → `FIXPP_ERR_WIRE_LIMIT_EXCEEDED` before the presence probe) and the typed path (a new `group_view::alloc_failed()` status bit threaded by the codegen emitter). Fail-loud only — no arena-sizing change. See [research.md](./research.md) for the verified seam and the eight design decisions (D1–D8).
+Close limitation **L-065-2** (GitHub #184): a nested repeating-group read whose sub-`OffsetTable` allocation fails under fixed-parse-arena exhaustion currently degrades to an empty result, indistinguishable from a legitimately absent / count-0 group, and the C-ABI reports it as `OK`/nc=0 — a silent truncation. Fix by widening the shared primitive `OffsetTable::nested_group_slices` (both overloads) to a **status-bearing return type** (`nested_slices_result { span slices; bool alloc_failed; }`), setting `alloc_failed` at **every** empty-returning exit (cache-hit early return + final return) as the **OR** of both arena-exhaustion sub-modes — the sub-table build failing (`build_nested_subview → nullptr`) and the built sub-table's own `group_slices()` slice-materialization catching `bad_alloc` (surfaced via an internal `group_slices_status`, D2) — and consuming it symmetrically on **both** read paths: the C-ABI (`message_read.cpp` → `FIXPP_ERR_WIRE_LIMIT_EXCEEDED` before the presence probe) and the typed path (a new `group_view::alloc_failed()` status bit threaded by the codegen emitter). Fail-loud only — no arena-sizing change. See [research.md](./research.md) for the verified seam and the eight design decisions (D1–D8).
 
 ## Technical Context
 
-**Language/Version**: C++20 (per Article II).
+**Language/Version**: C++23 (per Article II / `.specify/constitution.md:51`). The facilities this feature uses (`std::span`, `std::pmr`, a trivially-copyable result struct + `bool`) are ordinary, standard-era C++ — no C++23-only feature is required.
 
 **Primary Dependencies**: standard library only (`<span>`, `<memory_resource>`); the codegen tool (`tools/codegen/fixpp-codegen`).
 
@@ -34,7 +34,7 @@ Close limitation **L-065-2** (GitHub #184): a nested repeating-group read whose 
 
 | Article | Gate | Disposition |
 |---------|------|-------------|
-| II — Language/Compilers | C++20, clang+gcc+MSVC | PASS — no new language features; trivially-copyable struct + bool. |
+| II — Language/Compilers | C++23, clang+gcc+MSVC | PASS — no new language features; trivially-copyable struct + bool (ordinary standard-era facilities). |
 | VI — Spec Coverage | 100% FIX rule | N/A — no dictionary/message-coverage change; read-behavior hardening only. |
 | VII — Testing (TDD) | RED-first, mutation-proven | PASS — D6 witnesses authored failing-first; repeated-read discriminator for the cache exit. |
 | IX — Coverage/Sanitizers/Static | full matrix on diff | PASS — `bad_alloc`/arena path is ASan/UBSan-relevant; `/speckit-verify` + Tier-1 matrix planned. |
@@ -101,3 +101,7 @@ specs/004-wire-codec/contracts/
 | Return-type change on a widely-called primitive (~20 test-site edits) | A status-bearing **return** is the only shape that makes the failure un-ignorable by default (D1) — an out-param defaulting to `nullptr` keeps silent-drop as the default path and re-inherits the exact bug this feature kills. | Out-param `bool* = nullptr` rejected: default-silent, fails a hostile Gate A on "fixed silent truncation with an opt-in flag that defaults to silent". |
 | Public `group_view::alloc_failed()` addition | The typed nested accessor's only observable is the returned `group_view`; there is no error channel on the typed path (FR-004: value/status, no throw across `noexcept`). | No alternative — a throw terminates; an out-param on a generated value-returning accessor is not observable by a typed caller. |
 | Article X PASS-with-note (C-ABI behavior change) | Returning `WIRE_LIMIT_EXCEEDED` where the read formerly returned `OK`/nc=0 is a *behavioral* change on the frozen C-ABI, even though no symbol/layout changes. | Leaving it silent is the defect; a new dedicated code would add macro/completeness churn for no correctness gain (clarified FR-008). Confirm at Gate A. |
+
+## Gate A
+
+- Round 1 applied 2026-07-13: Codex P1=1 P2=0 P3=1; Opus post-judging P1=1 P2=0 P3=3; rewrite addresses root cause "status origin too narrow — group_slices() second bad_alloc path" (widen alloc_failed to OR the sub-table group_slices status at both nested_group_slices exits) + C++23 cite + L-073-1 scope note + second-loss read-twice witness. Reviews: research/reviews/codex_073-nested-read-arena-failloud_gate_a_review.md, research/reviews/opus_073-nested-read-arena-failloud_gate_a_adversarial_review.md.

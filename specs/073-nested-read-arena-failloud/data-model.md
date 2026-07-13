@@ -11,18 +11,21 @@ The status-bearing return of both `OffsetTable::nested_group_slices` overloads (
 | Field | Type | Meaning |
 |-------|------|---------|
 | `slices` | `std::span<group_slice const>` | The nested group's occurrence slices (borrowed from the parent per-message arena). Empty for absent / count-0 / failed-build. |
-| `alloc_failed` | `bool` (default `false`) | `true` **iff** a sub-`OffsetTable` build was needed but its allocation failed (D2). Distinguishes "empty because alloc failed" from "empty because absent/count-0". |
+| `alloc_failed` | `bool` (default `false`) | `true` **iff** a sub-view allocation failed via **either** sub-mode (D2): (a) the sub-`OffsetTable` build failed (`build_nested_subview → nullptr`), OR (b) the sub-table built non-null but its own `group_slices()` slice materialization caught `bad_alloc`. Distinguishes "empty because alloc failed" from "empty because absent/count-0". |
 
 **Invariants**
-- `alloc_failed == true` ⇒ `slices.empty()` (a failed build yields no slices).
+- `alloc_failed == true` ⇒ `slices.empty()` (a failed build or a caught `bad_alloc` in slice materialization yields no slices).
 - `alloc_failed == false` with `slices.empty()` ⇒ legitimately absent or count-0 (FR-007 disjointness).
 - Trivially copyable (`static_assert(std::is_trivially_copyable_v<nested_slices_result>)`) — span + bool, no allocation.
 
 **Set-condition (both empty-returning exits, D2)**
-`alloc_failed = (slice_data != nullptr) && (resolved sub-table pointer == nullptr)`, evaluated at:
-- the cache-hit early return (`offset_table.cpp:748-750`) — a cached null `row.table` is a cached failed build;
+`alloc_failed = (resolved sub-table pointer == nullptr) || table->group_slices_status(nested_no_tag).alloc_failed`, guarded by `slice_data != nullptr`, evaluated at:
+- the cache-hit early return (`offset_table.cpp:748-750`) — a cached null `row.table` is a cached failed build; a cached non-null `row.table` whose `group_slices_status()` re-throws is mode (b);
 - the final return (`offset_table.cpp:768`).
-The `slice_data == nullptr` guard (`:722`) returns `{ {}, false }` (absent). A non-null table with an empty `group_slices()` returns `{ empty, false }` (count-0).
+The `slice_data == nullptr` guard (`:722`) returns `{ {}, false }` (absent). A non-null table whose `group_slices_status()` returns a count-0 span **without** throwing returns `{ empty, false }` (count-0).
+
+**Internal `group_slices_result` (NEW — `fixpp::wire`, `offset_table.hpp`; not a public return)**
+`group_slices_status(std::uint16_t no_tag) -> group_slices_result { std::span<group_slice const> slices; bool alloc_failed; }` is the status-bearing form of `OffsetTable::group_slices`: its `catch (std::bad_alloc)` at `offset_table.cpp:674-675` sets `alloc_failed = true`; a warm-cache hit or a genuine count-0 return sets `alloc_failed = false`. The **public `group_slices(no_tag)` stays a one-line span wrapper** returning `.slices` — every top-level caller is unchanged (FR-002 originate-at-failure; no ABI/behaviour change). Only `nested_group_slices` consumes the status (mode (b)).
 
 ## `group_view<GroupT>` status extension (CHANGED — `group_view.hpp`)
 
