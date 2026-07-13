@@ -682,6 +682,91 @@ TEST(OrchestraFailClosed, NumInGroupIdNotDeclaredThrows) {
     EXPECT_THROW((void)loader.load_from_string(kXml, &mr), fixpp::dict::orchestra_parse_error);
 }
 
+// (u) Gate B FQ-1 — a duplicate <fixr:field id="1"> declaration must throw
+// (fail-closed parity with XmlLoader's duplicate <field number> reject,
+// xml_loader.cpp:351-354). Otherwise-valid skeleton; the throw is
+// attributable only to the duplicate id.
+TEST(OrchestraFailClosed, DuplicateFieldIdThrows) {
+    constexpr std::string_view kXml = R"xml(
+<fixr:repository version="FIX.Latest_EP303">
+  <fixr:fields>
+    <fixr:field id="1" name="Account" type="String"/>
+    <fixr:field id="1" name="AccountDup" type="String"/>
+  </fixr:fields>
+  <fixr:messages>
+    <fixr:message id="1" name="Heartbeat" msgType="0">
+      <fixr:structure><fixr:fieldRef id="1"/></fixr:structure>
+    </fixr:message>
+  </fixr:messages>
+</fixr:repository>
+)xml";
+    std::pmr::monotonic_buffer_resource mr;
+    fixpp::dict::OrchestraLoader loader;
+    EXPECT_THROW((void)loader.load_from_string(kXml, &mr), fixpp::dict::orchestra_parse_error);
+}
+
+// (v) Gate B FQ-1 — a duplicate <fixr:component id="1000"> declaration must
+// throw (fail-closed parity with XmlLoader's duplicate <component name>
+// reject, xml_loader.cpp:372-375; also removes the phantom-top-level-
+// ComponentRef corruption an unconditional push_back would otherwise cause).
+TEST(OrchestraFailClosed, DuplicateComponentIdThrows) {
+    constexpr std::string_view kXml = R"xml(
+<fixr:repository version="FIX.Latest_EP303">
+  <fixr:fields>
+    <fixr:field id="1" name="Account" type="String"/>
+  </fixr:fields>
+  <fixr:components>
+    <fixr:component id="1000" name="CompA">
+      <fixr:fieldRef id="1"/>
+    </fixr:component>
+    <fixr:component id="1000" name="CompB">
+      <fixr:fieldRef id="1"/>
+    </fixr:component>
+  </fixr:components>
+  <fixr:messages>
+    <fixr:message id="1" name="Heartbeat" msgType="0">
+      <fixr:structure><fixr:componentRef id="1000"/></fixr:structure>
+    </fixr:message>
+  </fixr:messages>
+</fixr:repository>
+)xml";
+    std::pmr::monotonic_buffer_resource mr;
+    fixpp::dict::OrchestraLoader loader;
+    EXPECT_THROW((void)loader.load_from_string(kXml, &mr), fixpp::dict::orchestra_parse_error);
+}
+
+// (w) Gate B FQ-1 — a duplicate <fixr:group id="10"> declaration must throw.
+// No direct QuickFIX-XML sibling (groups are inline there), but the same
+// FR-009 fail-closed-on-malformed-structural-id obligation applies.
+TEST(OrchestraFailClosed, DuplicateGroupIdThrows) {
+    constexpr std::string_view kXml = R"xml(
+<fixr:repository version="FIX.Latest_EP303">
+  <fixr:fields>
+    <fixr:field id="100" name="NoA" type="NumInGroup"/>
+    <fixr:field id="200" name="Shared" type="String"/>
+  </fixr:fields>
+  <fixr:groups>
+    <fixr:group id="10" name="GroupA">
+      <fixr:numInGroup id="100"/>
+      <fixr:fieldRef id="200"/>
+    </fixr:group>
+    <fixr:group id="10" name="GroupADup">
+      <fixr:numInGroup id="100"/>
+      <fixr:fieldRef id="200"/>
+    </fixr:group>
+  </fixr:groups>
+  <fixr:messages>
+    <fixr:message id="1" name="Heartbeat" msgType="0">
+      <fixr:structure><fixr:groupRef id="10"/></fixr:structure>
+    </fixr:message>
+  </fixr:messages>
+</fixr:repository>
+)xml";
+    std::pmr::monotonic_buffer_resource mr;
+    fixpp::dict::OrchestraLoader loader;
+    EXPECT_THROW((void)loader.load_from_string(kXml, &mr), fixpp::dict::orchestra_parse_error);
+}
+
 // T021 — US4/FR-007/SC-007: provenance + Apache-2.0 attribution artifacts are
 // present and correct. The cryptographic sha1 pin is enforced at configure time
 // (tests/dictionary/CMakeLists.txt file(SHA1) gate); this test covers the

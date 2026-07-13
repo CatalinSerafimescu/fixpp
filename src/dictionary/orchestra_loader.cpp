@@ -308,6 +308,10 @@ void OrchestraLoaderState::collect_fields(pugi::xml_node const& root) {
     }
     for (auto const& f : fields_node.children("fixr:field")) {
         auto const tag = parse_orchestra_id(f.attribute("id"), "<fixr:field>");
+        if (fields_by_tag_.contains(tag)) {
+            throw orchestra_parse_error("dict::orchestra_parse_error: duplicate <fixr:field id=\"" +
+                                        std::to_string(tag) + "\">");
+        }
         OrchestraFieldInfo info{};
         info.tag = tag;
         info.name = std::string{f.attribute("name").as_string("")};
@@ -324,7 +328,7 @@ void OrchestraLoaderState::collect_fields(pugi::xml_node const& root) {
         } else {
             info.type = resolve_datatype(type_attr);  // throws orchestra_parse_error on unknown
         }
-        fields_by_tag_[tag] = std::move(info);
+        fields_by_tag_.emplace(tag, std::move(info));
     }
 }
 
@@ -335,6 +339,11 @@ void OrchestraLoaderState::collect_components(pugi::xml_node const& root) {
     }
     for (auto const& c : comps.children("fixr:component")) {
         auto const xml_id = parse_orchestra_id(c.attribute("id"), "<fixr:component>");
+        if (component_index_by_xml_id_.contains(xml_id)) {
+            throw orchestra_parse_error(
+                "dict::orchestra_parse_error: duplicate <fixr:component id=\"" +
+                std::to_string(xml_id) + "\">");
+        }
         std::string const name{c.attribute("name").as_string("")};
         auto const idx = static_cast<std::uint16_t>(components_.size());
         components_.push_back({.name = name, .node = c});
@@ -369,6 +378,10 @@ void OrchestraLoaderState::collect_groups(pugi::xml_node const& root) {
     }
     for (auto const& g : groups_node.children("fixr:group")) {
         auto const xml_id = parse_orchestra_id(g.attribute("id"), "<fixr:group>");
+        if (group_by_xml_id_.contains(xml_id)) {
+            throw orchestra_parse_error("dict::orchestra_parse_error: duplicate <fixr:group id=\"" +
+                                        std::to_string(xml_id) + "\">");
+        }
         group_by_xml_id_.emplace(xml_id, g);
     }
 }
