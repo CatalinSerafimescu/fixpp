@@ -73,8 +73,9 @@
 #include <fixpp/wire/parser.hpp>
 
 // Test support
-#include "support/frame_view_factory.hpp"
 #include <fixpp/dict/table_view.hpp>
+
+#include "support/frame_view_factory.hpp"
 
 using fixpp::wire::access_mode;
 using fixpp::wire::Parser;
@@ -124,9 +125,7 @@ fixpp::dict::table_view make_nested_group_dict() {
 // (identical pattern to message_read_test.cpp::InboundHandle).
 struct InboundHandle {
     fixpp_msg msg{};
-    const fixpp_msg_t* ptr() const noexcept {
-        return reinterpret_cast<const fixpp_msg_t*>(&msg);
-    }
+    const fixpp_msg_t* ptr() const noexcept { return reinterpret_cast<const fixpp_msg_t*>(&msg); }
 };
 
 // Raw frame bytes for "a present outer group (453=1) with a present,
@@ -145,7 +144,9 @@ std::vector<std::byte> present_nested_group_frame() {
         "447=D\x01";
     body += "539=" + std::to_string(kNestedInstances) + "\x01";
     for (int i = 0; i < kNestedInstances; ++i) {
-        body += "524=N" + std::to_string(i) + "\x01" "525=C\x01";
+        body += "524=N" + std::to_string(i) +
+                "\x01"
+                "525=C\x01";
     }
     return make_raw_frame(body);
 }
@@ -168,7 +169,7 @@ std::vector<std::byte> present_nested_group_frame() {
 TEST(MessageReadFailloud, PresentNestedGroup_ArenaExhausted_ReturnsWireLimitExceeded) {
     std::vector<std::byte> arena_buf(kTinyCap);
     std::pmr::monotonic_buffer_resource arena{arena_buf.data(), arena_buf.size(),
-                                               std::pmr::null_memory_resource()};
+                                              std::pmr::null_memory_resource()};
 
     auto dict = make_nested_group_dict();
     auto buf = present_nested_group_frame();
@@ -207,7 +208,7 @@ TEST(MessageReadFailloud, PresentNestedGroup_ArenaExhausted_ReturnsWireLimitExce
 TEST(MessageReadFailloud, RepeatedReadAfterArenaExhaustion_SignalsFailureBothTimes) {
     std::vector<std::byte> arena_buf(kTinyCap);
     std::pmr::monotonic_buffer_resource arena{arena_buf.data(), arena_buf.size(),
-                                               std::pmr::null_memory_resource()};
+                                              std::pmr::null_memory_resource()};
 
     auto dict = make_nested_group_dict();
     auto buf = present_nested_group_frame();
@@ -236,8 +237,7 @@ TEST(MessageReadFailloud, RepeatedReadAfterArenaExhaustion_SignalsFailureBothTim
     size_t nc2 = 0;
     fixpp_error_t err2 = fixpp_group_get_nested_group(grp, 0, 539, &nested2, &nc2);
     EXPECT_EQ(err2, FIXPP_ERR_WIRE_LIMIT_EXCEEDED)
-        << "read #2 (cached-row exit): actual err=" << static_cast<int>(err2)
-        << " nc=" << nc2;
+        << "read #2 (cached-row exit): actual err=" << static_cast<int>(err2) << " nc=" << nc2;
 }
 
 // ── SC-003 controls: legitimate emptiness must NOT raise the failure signal ─

@@ -818,9 +818,10 @@ nested_slices_result OffsetTable::nested_group_slices(
 // token (`token_for_nested_cache()`). The 7-arg algorithm + cache keying stay
 // UNTOUCHED. Out-of-line: needs the complete `group_context` type (only
 // forward-declared in the header).
-nested_slices_result OffsetTable::nested_group_slices(
-    std::byte const* slice_data, std::size_t slice_len, std::uint16_t nested_no_tag,
-    group_context const& ctx) const noexcept {
+nested_slices_result OffsetTable::nested_group_slices(std::byte const* slice_data,
+                                                      std::size_t slice_len,
+                                                      std::uint16_t nested_no_tag,
+                                                      group_context const& ctx) const noexcept {
     return nested_group_slices(slice_data, slice_len, nested_no_tag, opaque_dict_,
                                group_member_fn_, token_for_nested_cache(), ctx);
 }

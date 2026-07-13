@@ -285,9 +285,11 @@ public:
     // the complete `group_context` type, only forward-declared here — same
     // rule as `group_context_for()` above). Used by the C-ABI nested read
     // (research Decision 4; data-model.md §Reused).
-    [[nodiscard]] nested_slices_result nested_group_slices(
-        std::byte const* slice_data [[clang::lifetimebound]], std::size_t slice_len,
-        std::uint16_t nested_no_tag, group_context const& ctx) const noexcept
+    [[nodiscard]] nested_slices_result nested_group_slices(std::byte const* slice_data
+                                                           [[clang::lifetimebound]],
+                                                           std::size_t slice_len,
+                                                           std::uint16_t nested_no_tag,
+                                                           group_context const& ctx) const noexcept
         [[clang::lifetimebound]];
 
 private:

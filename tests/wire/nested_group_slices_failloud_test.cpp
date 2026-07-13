@@ -75,14 +75,14 @@ std::vector<std::byte> make_raw_frame(std::string const& body) {
 constexpr auto& dict_group_member = fixpp_test_support::context_group_member_fn;
 
 constexpr group_context kTestCtx{.msg_type = "D"};
-constexpr std::uint16_t kOuterNoTag = 453;   // outer group count field
-constexpr std::uint16_t kOuterDelim = 448;   // outer group first member
-constexpr std::uint16_t kInnerNoTag = 802;   // nested group count field
-constexpr std::uint16_t kInnerDelim = 523;   // nested group first (only) member
-constexpr int kInnerInstances = 20;          // sized so a fully-built sub-table's
-                                              // own group_slices_ reserve() is
-                                              // large enough to isolate mode (b)
-                                              // from mode (c) by cap alone.
+constexpr std::uint16_t kOuterNoTag = 453;  // outer group count field
+constexpr std::uint16_t kOuterDelim = 448;  // outer group first member
+constexpr std::uint16_t kInnerNoTag = 802;  // nested group count field
+constexpr std::uint16_t kInnerDelim = 523;  // nested group first (only) member
+constexpr int kInnerInstances = 20;         // sized so a fully-built sub-table's
+                                            // own group_slices_ reserve() is
+                                            // large enough to isolate mode (b)
+                                            // from mode (c) by cap alone.
 
 fixpp::dict::table_view make_dict() {
     fixpp::dict::table_view dict;
@@ -102,7 +102,9 @@ fixpp::dict::table_view make_dict() {
 // One outer (453/448) occurrence containing a nested group (802/523) with
 // `kInnerInstances` instances — genuinely present, non-trivial extent.
 std::string make_present_body() {
-    std::string body = "35=D\x01" "34=1\x01";
+    std::string body =
+        "35=D\x01"
+        "34=1\x01";
     body += std::to_string(kOuterNoTag) + "=1\x01";
     body += std::to_string(kOuterDelim) + "=PA\x01";
     body += std::to_string(kInnerNoTag) + "=" + std::to_string(kInnerInstances) + "\x01";
@@ -137,8 +139,8 @@ TEST(NestedGroupSlicesFailLoud, ModeA_ShellAllocNullReportsFailLoud) {
     // THIS build, before trusting the observable contract.
     auto const* sub = nested_cache_access_for_testing::resolve(root, slice.data, kInnerNoTag);
     ASSERT_EQ(sub, nullptr) << "cap did not land in mode (a) on this build -- "
-                                "sizeof(OffsetTable)/allocator behaviour drifted; "
-                                "re-derive kCapModeA";
+                               "sizeof(OffsetTable)/allocator behaviour drifted; "
+                               "re-derive kCapModeA";
 
     EXPECT_TRUE(r1.alloc_failed);
     EXPECT_TRUE(r1.slices.empty());
@@ -171,9 +173,9 @@ TEST(NestedGroupSlicesFailLoud, ModeC_CtorDegradedOutOfMemoryReportsFailLoud) {
 
     auto const* sub = nested_cache_access_for_testing::resolve(root, slice.data, kInnerNoTag);
     ASSERT_NE(sub, nullptr) << "cap did not land in mode (c) on this build (shell alloc itself "
-                                "failed -- mode (a)); re-derive kCapModeC";
+                               "failed -- mode (a)); re-derive kCapModeC";
     ASSERT_FALSE(sub->build_status()) << "cap did not land in mode (c) on this build (sub-table "
-                                          "ctor build() succeeded); re-derive kCapModeC";
+                                         "ctor build() succeeded); re-derive kCapModeC";
     ASSERT_EQ(sub->build_status().error(), error::out_of_memory)
         << "sub-table degraded for a NON-arena reason (malformed data), not mode (c)";
 
@@ -212,12 +214,12 @@ TEST(NestedGroupSlicesFailLoud, ModeB_SubTableGroupSlicesThrowsReportsFailLoud) 
 
     auto const* sub = nested_cache_access_for_testing::resolve(root, slice.data, kInnerNoTag);
     ASSERT_NE(sub, nullptr) << "cap did not land in mode (b) on this build (shell alloc itself "
-                                "failed -- mode (a)); re-derive kCapModeB";
+                               "failed -- mode (a)); re-derive kCapModeB";
     ASSERT_TRUE(sub->build_status()) << "cap did not land in mode (b) on this build (sub-table "
-                                         "ctor build() degraded -- mode (c)); re-derive kCapModeB";
+                                        "ctor build() degraded -- mode (c)); re-derive kCapModeB";
     auto const gs = sub->group_slices_status(kInnerNoTag);
     ASSERT_TRUE(gs.alloc_failed) << "cap did not land in mode (b) on this build (sub-table's own "
-                                     "group_slices_status() succeeded); re-derive kCapModeB";
+                                    "group_slices_status() succeeded); re-derive kCapModeB";
 
     EXPECT_TRUE(r1.alloc_failed);
     EXPECT_TRUE(r1.slices.empty());
@@ -248,7 +250,9 @@ TEST(NestedGroupSlicesFailLoud, ControlAbsentSliceDataNullNeverFails) {
 }
 
 TEST(NestedGroupSlicesFailLoud, ControlGenuineCountZeroNonNullOkNeverFails) {
-    std::string body = "35=D\x01" "34=1\x01";
+    std::string body =
+        "35=D\x01"
+        "34=1\x01";
     body += std::to_string(kOuterNoTag) + "=1\x01";
     body += std::to_string(kOuterDelim) + "=PA\x01";
     body += std::to_string(kInnerNoTag) + "=0\x01";  // genuinely empty nested group

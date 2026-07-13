@@ -38,8 +38,8 @@ namespace fixpp::wire {
 // ...)` once so the row exists. Never called from production code.
 struct nested_cache_access_for_testing {
     [[nodiscard]] static OffsetTable const* resolve(OffsetTable const& root,
-                                                     std::byte const* slice_data,
-                                                     std::uint16_t nested_no_tag) noexcept {
+                                                    std::byte const* slice_data,
+                                                    std::uint16_t nested_no_tag) noexcept {
         for (auto const& row : root.nested_cache_) {
             if (row.slice_data == slice_data && row.nested_no_tag == nested_no_tag) {
                 return row.table;

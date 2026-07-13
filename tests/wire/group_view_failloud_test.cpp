@@ -143,14 +143,16 @@ TEST(GroupViewFailloud, PresentNestedGroup_ArenaExhausted_AllocFailedTrue) {
 
     std::vector<std::byte> arena_buf(kTinyCap);
     std::pmr::monotonic_buffer_resource arena{arena_buf.data(), arena_buf.size(),
-                                               std::pmr::null_memory_resource()};
+                                              std::pmr::null_memory_resource()};
     Parser<access_mode::Index> parser{dict};
     auto mv_res = parser.parse(*fv, &arena);
-    ASSERT_TRUE(mv_res.has_value()) << "top-level parse must succeed at kTinyCap (fixture invariant)";
+    ASSERT_TRUE(mv_res.has_value())
+        << "top-level parse must succeed at kTinyCap (fixture invariant)";
 
     fixpp::v44::MassQuote mq{*mv_res};
     auto sets = mq.quote_sets();
-    ASSERT_EQ(sets.size(), 1U) << "outer group(296) read must succeed at kTinyCap (fixture invariant)";
+    ASSERT_EQ(sets.size(), 1U)
+        << "outer group(296) read must succeed at kTinyCap (fixture invariant)";
 
     // Not a throw / no crash: reaching this line proves the noexcept
     // accessor returned a value rather than terminating on the underlying
@@ -176,7 +178,7 @@ TEST(GroupViewFailloud, RepeatedReadAfterArenaExhaustion_AllocFailedBothTimes) {
 
     std::vector<std::byte> arena_buf(kTinyCap);
     std::pmr::monotonic_buffer_resource arena{arena_buf.data(), arena_buf.size(),
-                                               std::pmr::null_memory_resource()};
+                                              std::pmr::null_memory_resource()};
     Parser<access_mode::Index> parser{dict};
     auto mv_res = parser.parse(*fv, &arena);
     ASSERT_TRUE(mv_res.has_value());
