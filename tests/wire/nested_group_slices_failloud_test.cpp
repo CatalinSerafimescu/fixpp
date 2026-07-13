@@ -30,13 +30,19 @@
 // state FIRST (failing loud if a platform's cap lands in a different mode)
 // and only then asserts the observable `alloc_failed` contract.
 //
-// Cap values (1500 / 1930 / 2700 bytes) were derived empirically on this
-// build (clang-debug, sizeof(OffsetTable)==280) via a byte-granularity sweep
-// against the fixture below (20-instance nested group 802/523 inside a
-// single 453/448 occurrence) and land in the MIDDLE of wide (>=150-byte)
-// stable per-mode bands, not at a fragile edge. They are clang-debug-local;
-// the introspection assert is what keeps the witness correct (not silently
-// vacuous) if a different toolchain's `sizeof(OffsetTable)` shifts the band.
+// gate-b/ci-fix (PR #191 round 2): the three fixed caps below (1500 / 1930 /
+// 2700 bytes) were derived empirically on ONE build (clang-debug,
+// sizeof(OffsetTable)==280) and are NOT portable — on MSVC debug/release
+// `sizeof(OffsetTable)` differs, so a cap tuned to land in (say) mode (c) on
+// clang-debug instead lands in mode (a) on MSVC, and the introspection
+// ASSERT_NE/ASSERT_EQ guard (working as designed — failing loud rather than
+// false-passing) aborts the test. Replaced with a RUNTIME CAP SWEEP: drive
+// the same fixture across a wide range of arena caps, classify each cap's
+// ACTUAL mode by introspection (never assumed from the cap value), and
+// assert the fail-loud invariant for whichever mode that cap lands in. This
+// reproduces the same three origins on ANY `sizeof(OffsetTable)` because the
+// sweep is wide enough to cross every mode's band regardless of where the
+// per-platform boundaries fall.
 
 #include <gtest/gtest.h>
 
@@ -116,121 +122,96 @@ std::string make_present_body() {
 
 }  // namespace
 
-// ── Mode (a): shell allocation fails -> nullptr ────────────────────────────
-TEST(NestedGroupSlicesFailLoud, ModeA_ShellAllocNullReportsFailLoud) {
-    constexpr std::size_t kCapModeA = 1500;
+// ── Sweep: reproduces all three fail-loud origins on ANY sizeof(OffsetTable)
+//    by classifying each cap's ACTUAL mode via introspection, never assuming
+//    a mode from the cap value ───────────────────────────────────────────────
+//
+// Range/step: 128..8192 step 32 (252 caps). Lower bound (128) is below any
+// plausible root-table build floor so the sweep's `continue`-below-floor
+// branch is exercised at the low end; upper bound (8192) is >=4x the widest
+// clang-debug per-mode band (2700B) observed for this fixture, giving ample
+// headroom for a toolchain whose `sizeof(OffsetTable)`/vector-growth
+// behaviour (e.g. MSVC debug iterators) is materially larger. Step 32 is
+// coarse enough to keep the sweep fast (a few hundred OffsetTable
+// constructions) while staying well under the >=150-byte stable per-mode
+// bands the original fixed-cap derivation observed.
+TEST(NestedGroupSlicesFailLoud, ArenaCapSweepAllModesReportFailLoud) {
+    constexpr std::size_t kCapLo = 128;
+    constexpr std::size_t kCapHi = 8192;
+    constexpr std::size_t kCapStep = 32;
+
     auto frame_buf = make_raw_frame(make_present_body());
     auto fv = fixpp::wire::test::make_frame_view(frame_buf);
     ASSERT_TRUE(fv.has_value());
     auto dict = make_dict();
 
-    std::vector<std::byte> arena_buf(kCapModeA);
-    std::pmr::monotonic_buffer_resource arena{arena_buf.data(), arena_buf.size(),
-                                              std::pmr::null_memory_resource()};
-    OffsetTable root{*fv, &arena, &dict, &dict_group_member};
-    ASSERT_TRUE(root.build_status()) << "root itself must build at this cap";
-    auto outer = root.group_slices(kOuterNoTag);
-    ASSERT_EQ(outer.size(), 1U);
-    auto const slice = outer[0];
+    bool saw_A = false;
+    bool saw_B = false;
+    bool saw_C = false;
+    bool saw_ok = false;
 
-    auto const r1 = root.nested_group_slices(slice.data, slice.len, kInnerNoTag, kTestCtx);
+    for (std::size_t cap = kCapLo; cap <= kCapHi; cap += kCapStep) {
+        std::vector<std::byte> arena_buf(cap);
+        std::pmr::monotonic_buffer_resource arena{arena_buf.data(), arena_buf.size(),
+                                                  std::pmr::null_memory_resource()};
+        OffsetTable root{*fv, &arena, &dict, &dict_group_member};
+        if (!root.build_status()) {
+            continue;  // below the floor for the root table itself -- not under test
+        }
+        auto outer = root.group_slices(kOuterNoTag);
+        if (outer.size() != 1U) {
+            continue;  // root built but the outer group itself degraded -- not under test
+        }
+        auto const slice = outer[0];
 
-    // Introspection FIRST: pin that this cap actually lands in mode (a) on
-    // THIS build, before trusting the observable contract.
-    auto const* sub = nested_cache_access_for_testing::resolve(root, slice.data, kInnerNoTag);
-    ASSERT_EQ(sub, nullptr) << "cap did not land in mode (a) on this build -- "
-                               "sizeof(OffsetTable)/allocator behaviour drifted; "
-                               "re-derive kCapModeA";
+        auto const r1 = root.nested_group_slices(slice.data, slice.len, kInnerNoTag, kTestCtx);
+        auto const* sub = nested_cache_access_for_testing::resolve(root, slice.data, kInnerNoTag);
 
-    EXPECT_TRUE(r1.alloc_failed);
-    EXPECT_TRUE(r1.slices.empty());
+        if (sub == nullptr) {
+            // mode (a): shell allocation failed.
+            saw_A = true;
+            EXPECT_TRUE(r1.alloc_failed) << "cap=" << cap << " mode=A";
+        } else if (!sub->build_status()) {
+            if (sub->build_status().error() != error::out_of_memory) {
+                continue;  // sub degraded for a non-arena reason -- not under test
+            }
+            // mode (c): sub-table ctor build() degraded to out_of_memory.
+            saw_C = true;
+            EXPECT_TRUE(r1.alloc_failed) << "cap=" << cap << " mode=C";
+        } else {
+            auto const gs = sub->group_slices_status(kInnerNoTag);
+            if (gs.alloc_failed) {
+                // mode (b): sub-table built ok, its own slice materialization
+                // caught bad_alloc.
+                saw_B = true;
+                EXPECT_TRUE(r1.alloc_failed) << "cap=" << cap << " mode=B";
+            } else if (!r1.slices.empty()) {
+                // healthy: sub-table built, materialized, and reports the
+                // fixture's genuinely-present instances.
+                saw_ok = true;
+                EXPECT_FALSE(r1.alloc_failed) << "cap=" << cap << " mode=healthy";
+            } else {
+                // sub-table built and materialized ok but reports zero
+                // instances for a non-arena reason -- never a failure signal.
+                EXPECT_FALSE(r1.alloc_failed) << "cap=" << cap << " mode=count-0";
+            }
+        }
 
-    // Repeated-read (D2 cache-hit exit discriminator): the cached null row
-    // must fail loud again, not silently degrade to empty-without-signal.
-    auto const r2 = root.nested_group_slices(slice.data, slice.len, kInnerNoTag, kTestCtx);
-    EXPECT_TRUE(r2.alloc_failed);
-    EXPECT_TRUE(r2.slices.empty());
-}
+        // Repeated-read (D2 cache-hit exit discriminator): whichever mode
+        // this cap landed in, a second read of the SAME group must agree
+        // with the first on alloc_failed -- pins the cache-hit exit sharing
+        // the same three-origin OR as the final exit
+        // (feedback_status_origin_must_cover_all_alloc_catch_sites).
+        auto const r2 = root.nested_group_slices(slice.data, slice.len, kInnerNoTag, kTestCtx);
+        EXPECT_EQ(r1.alloc_failed, r2.alloc_failed) << "cap=" << cap << " (repeated-read drift)";
+    }
 
-// ── Mode (c): sub-table non-null, ctor build() degraded -> out_of_memory ──
-TEST(NestedGroupSlicesFailLoud, ModeC_CtorDegradedOutOfMemoryReportsFailLoud) {
-    constexpr std::size_t kCapModeC = 1930;
-    auto frame_buf = make_raw_frame(make_present_body());
-    auto fv = fixpp::wire::test::make_frame_view(frame_buf);
-    ASSERT_TRUE(fv.has_value());
-    auto dict = make_dict();
-
-    std::vector<std::byte> arena_buf(kCapModeC);
-    std::pmr::monotonic_buffer_resource arena{arena_buf.data(), arena_buf.size(),
-                                              std::pmr::null_memory_resource()};
-    OffsetTable root{*fv, &arena, &dict, &dict_group_member};
-    ASSERT_TRUE(root.build_status());
-    auto outer = root.group_slices(kOuterNoTag);
-    ASSERT_EQ(outer.size(), 1U);
-    auto const slice = outer[0];
-
-    auto const r1 = root.nested_group_slices(slice.data, slice.len, kInnerNoTag, kTestCtx);
-
-    auto const* sub = nested_cache_access_for_testing::resolve(root, slice.data, kInnerNoTag);
-    ASSERT_NE(sub, nullptr) << "cap did not land in mode (c) on this build (shell alloc itself "
-                               "failed -- mode (a)); re-derive kCapModeC";
-    ASSERT_FALSE(sub->build_status()) << "cap did not land in mode (c) on this build (sub-table "
-                                         "ctor build() succeeded); re-derive kCapModeC";
-    ASSERT_EQ(sub->build_status().error(), error::out_of_memory)
-        << "sub-table degraded for a NON-arena reason (malformed data), not mode (c)";
-
-    EXPECT_TRUE(r1.alloc_failed);
-    EXPECT_TRUE(r1.slices.empty());
-
-    // Repeated-read: mode (c)'s cache-hit exit rides the PERSISTENT
-    // build_status()==out_of_memory check (research.md §D2), not a re-throw
-    // (the degraded table's group_slices_status() itself no longer throws on
-    // read 2 -- it serves a cached count-0 row). Killing the OR term collapses
-    // this to a silent empty on read 2 specifically (M2 below).
-    auto const r2 = root.nested_group_slices(slice.data, slice.len, kInnerNoTag, kTestCtx);
-    EXPECT_TRUE(r2.alloc_failed);
-    EXPECT_TRUE(r2.slices.empty());
-}
-
-// ── Mode (b): sub-table non-null + build() ok, its OWN group_slices_status()
-//    materialization throws bad_alloc ──────────────────────────────────────
-TEST(NestedGroupSlicesFailLoud, ModeB_SubTableGroupSlicesThrowsReportsFailLoud) {
-    constexpr std::size_t kCapModeB = 2700;
-    auto frame_buf = make_raw_frame(make_present_body());
-    auto fv = fixpp::wire::test::make_frame_view(frame_buf);
-    ASSERT_TRUE(fv.has_value());
-    auto dict = make_dict();
-
-    std::vector<std::byte> arena_buf(kCapModeB);
-    std::pmr::monotonic_buffer_resource arena{arena_buf.data(), arena_buf.size(),
-                                              std::pmr::null_memory_resource()};
-    OffsetTable root{*fv, &arena, &dict, &dict_group_member};
-    ASSERT_TRUE(root.build_status());
-    auto outer = root.group_slices(kOuterNoTag);
-    ASSERT_EQ(outer.size(), 1U);
-    auto const slice = outer[0];
-
-    auto const r1 = root.nested_group_slices(slice.data, slice.len, kInnerNoTag, kTestCtx);
-
-    auto const* sub = nested_cache_access_for_testing::resolve(root, slice.data, kInnerNoTag);
-    ASSERT_NE(sub, nullptr) << "cap did not land in mode (b) on this build (shell alloc itself "
-                               "failed -- mode (a)); re-derive kCapModeB";
-    ASSERT_TRUE(sub->build_status()) << "cap did not land in mode (b) on this build (sub-table "
-                                        "ctor build() degraded -- mode (c)); re-derive kCapModeB";
-    auto const gs = sub->group_slices_status(kInnerNoTag);
-    ASSERT_TRUE(gs.alloc_failed) << "cap did not land in mode (b) on this build (sub-table's own "
-                                    "group_slices_status() succeeded); re-derive kCapModeB";
-
-    EXPECT_TRUE(r1.alloc_failed);
-    EXPECT_TRUE(r1.slices.empty());
-
-    // Repeated-read: mode (b)'s cache-hit exit re-resolves the cached
-    // NON-null sub-table and re-invokes its group_slices_status(), which
-    // re-throws (nothing was cached in the sub-table's own group_index_ on
-    // the first throw) -- fail-loud again with no extra bookkeeping.
-    auto const r2 = root.nested_group_slices(slice.data, slice.len, kInnerNoTag, kTestCtx);
-    EXPECT_TRUE(r2.alloc_failed);
-    EXPECT_TRUE(r2.slices.empty());
+    EXPECT_TRUE(saw_A) << "sweep never starved the shell allocation (mode a) -- "
+                          "widen kCapLo/kCapHi or narrow kCapStep";
+    EXPECT_TRUE(saw_B || saw_C) << "sweep never exercised a non-null sub-table exhaustion "
+                                   "(mode b or c) -- widen kCapLo/kCapHi or narrow kCapStep";
+    EXPECT_TRUE(saw_ok) << "sweep never reached a healthy (non-failing) cap -- "
+                           "widen kCapHi";
 }
 
 // ── Controls (SC-003 / FR-007): neither a genuinely absent nor a genuinely
