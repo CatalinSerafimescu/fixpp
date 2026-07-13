@@ -289,6 +289,10 @@ void OrchestraLoaderState::collect_codesets(pugi::xml_node const& root) {
         if (name.empty()) {
             throw orchestra_parse_error("dict::orchestra_parse_error: <fixr:codeSet> missing name");
         }
+        if (codesets_by_name_.contains(name)) {
+            throw orchestra_parse_error(
+                "dict::orchestra_parse_error: duplicate <fixr:codeSet name=\"" + name + "\">");
+        }
         OrchestraCodeSet info{};
         info.base_type = std::string{cs.attribute("type").as_string("")};
         for (auto const& code : cs.children("fixr:code")) {

@@ -767,6 +767,36 @@ TEST(OrchestraFailClosed, DuplicateGroupIdThrows) {
     EXPECT_THROW((void)loader.load_from_string(kXml, &mr), fixpp::dict::orchestra_parse_error);
 }
 
+// (x) Gate B FQ-1 follow-on — a duplicate <fixr:codeSet name="..."> declaration
+// must throw (same duplicate-structural-id class as (u)/(v)/(w); no direct
+// XmlLoader sibling — codesets are QuickFIX-XML's inline <field><value/></field>
+// enums — but the same FR-009 fail-closed obligation applies).
+TEST(OrchestraFailClosed, DuplicateCodeSetNameThrows) {
+    constexpr std::string_view kXml = R"xml(
+<fixr:repository version="FIX.Latest_EP303">
+  <fixr:codeSets>
+    <fixr:codeSet name="AdvSideCodeSet" type="char">
+      <fixr:code id="1" name="Buy" value="B"/>
+    </fixr:codeSet>
+    <fixr:codeSet name="AdvSideCodeSet" type="char">
+      <fixr:code id="1" name="Sell" value="S"/>
+    </fixr:codeSet>
+  </fixr:codeSets>
+  <fixr:fields>
+    <fixr:field id="1" name="Account" type="String"/>
+  </fixr:fields>
+  <fixr:messages>
+    <fixr:message id="1" name="Heartbeat" msgType="0">
+      <fixr:structure><fixr:fieldRef id="1"/></fixr:structure>
+    </fixr:message>
+  </fixr:messages>
+</fixr:repository>
+)xml";
+    std::pmr::monotonic_buffer_resource mr;
+    fixpp::dict::OrchestraLoader loader;
+    EXPECT_THROW((void)loader.load_from_string(kXml, &mr), fixpp::dict::orchestra_parse_error);
+}
+
 // T021 — US4/FR-007/SC-007: provenance + Apache-2.0 attribution artifacts are
 // present and correct. The cryptographic sha1 pin is enforced at configure time
 // (tests/dictionary/CMakeLists.txt file(SHA1) gate); this test covers the
