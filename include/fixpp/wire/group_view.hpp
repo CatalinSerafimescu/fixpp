@@ -115,27 +115,41 @@ public:
     // token on every minted entry (mr/opaque_dict/group_member_fn/
     // parent_cache_owner stay null — no production caller uses this path;
     // MessageView::group<>() uses the entry_context ctor below).
-    group_view(std::span<slice const> instances, detail::generation_token gen) noexcept
+    // 073 T009: trailing `alloc_failed` (defaulted false) — set from
+    // `nested_slices_result::alloc_failed` by the codegen-emitted nested
+    // accessor (data-model.md §"group_view<GroupT> status extension").
+    group_view(std::span<slice const> instances, detail::generation_token gen,
+               bool alloc_failed = false) noexcept
         : View{instances.empty() ? nullptr : instances.front().data,
                instances.empty() ? 0 : instances.front().len, gen},
           instances_{instances},
-          base_ctx_{.gen = gen} {}
+          base_ctx_{.gen = gen},
+          alloc_failed_{alloc_failed} {}
 
     // [2b §4.7] 062 T007: `base` carries everything a generated entry needs to
     // read its own fields/nested groups (mr, opaque_dict, group_member_fn,
     // generation token, parent_cache_owner = the root OffsetTable). Per-entry
     // span/outer_occurrence_id are irrelevant on `base` — operator[]/iterator
     // override both from the SAME instance slice below.
-    group_view(std::span<slice const> instances, entry_context base) noexcept
+    // 073 T009: trailing `alloc_failed` (defaulted false), see above.
+    group_view(std::span<slice const> instances, entry_context base,
+               bool alloc_failed = false) noexcept
         : View{instances.empty() ? nullptr : instances.front().data,
                instances.empty() ? 0 : instances.front().len, base.gen},
           instances_{instances},
-          base_ctx_{base} {}
+          base_ctx_{base},
+          alloc_failed_{alloc_failed} {}
 
     [[nodiscard]] std::size_t size() const noexcept {
         check_alive();
         return instances_.size();
     }
+
+    // 073 T009: true iff this nested group's sub-view allocation failed
+    // (present-but-truncated) — distinct from a legitimately empty group
+    // (`size() == 0 && !alloc_failed()`). data-model.md §"Relationship to
+    // size()".
+    [[nodiscard]] bool alloc_failed() const noexcept { return alloc_failed_; }
 
     // Both operator[](i) and iterator::operator*() (which delegates to this)
     // derive the per-entry entry_context from the SAME instance slice `i` —
@@ -180,6 +194,7 @@ public:
 private:
     std::span<slice const> instances_;
     entry_context base_ctx_{};
+    bool alloc_failed_ = false;
 };
 
 }  // namespace fixpp::wire

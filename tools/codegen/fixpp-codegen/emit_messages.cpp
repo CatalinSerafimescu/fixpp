@@ -259,7 +259,7 @@ void emit_group_class(TemplateWriter& w, MemberMap const& mm, GroupPlan const& g
             w.raw(acc);
             w.raw(
                 "() const noexcept [[clang::lifetimebound]]\n    { if (ctx_.parent_cache_owner "
-                "== nullptr) return {};\n      auto const nested = "
+                "== nullptr) return {};\n      auto const r = "
                 "ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, "
                 "ctx_.span.size(), ");
             w.num(c);
@@ -272,6 +272,11 @@ void emit_group_class(TemplateWriter& w, MemberMap const& mm, GroupPlan const& g
             // already-correct C-ABI cursor (message_read.cpp:506). The push
             // happens exactly once, here at mint; group_view::operator[] stays a
             // verbatim base_ctx_ copy (pushing there too would double-push).
+            // 073 T010: `r` is the status-bearing `nested_slices_result`
+            // (contracts/nested_slices_result.md) — `r.alloc_failed` is
+            // threaded into the returned group_view so a typed caller can
+            // distinguish a legitimately-empty group from a failed sub-view
+            // allocation (D4).
             w.raw(
                 ", ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, "
                 "ctx_.group_ctx);\n"
@@ -282,7 +287,7 @@ void emit_group_class(TemplateWriter& w, MemberMap const& mm, GroupPlan const& g
                 ");\n      return "
                 "::fixpp::wire::group_view<");
             w.raw(group_cls(c));
-            w.raw(">{nested, child_ctx}; }");
+            w.raw(">{r.slices, child_ctx, r.alloc_failed}; }");
             w.line();
         }
     }

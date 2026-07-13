@@ -968,6 +968,23 @@ Items that are normative in the spec but explicitly deferred from fixpp v1.0. Th
 > **Sanitizer/coverage.** The full 062 witness set is ASan/UBSan/TSan clean (8/8 each leg) + the
 > mallocnesia alloc gate — SC-002. Full matrix re-confirmed at `/speckit-verify`.
 
+## 073-nested-read-arena-failloud — Fail-loud on nested-read sub-table allocation failure (L-065-2 / #184) — Implemented (branch `073-nested-read-arena-failloud`, 2026-07-13; pre-Gate-B)
+
+Closes L-065-2: a nested repeating-group read whose sub-`OffsetTable` allocation fails under fixed-parse-arena (16 KiB null-upstream) exhaustion previously degraded to an empty result indistinguishable from absent/count-0 (C-ABI `OK`/nc=0 = silent truncation). Now **fail-loud on both nested read consumers**. Fail-loud-only (FR-009 — NO arena-sizing/growability change). Zero C-ABI symbol/struct/signature/macro change (frozen 1.5.0 — reuses the existing `FIXPP_ERR_WIRE_LIMIT_EXCEEDED` return VALUE in a formerly-`OK`/nc=0 edge; Article X behavioral bug-fix).
+
+**Shared primitive widening (Foundational):**
+- `include/fixpp/wire/offset_table.hpp` — new trivially-copyable `nested_slices_result{ std::span<group_slice const> slices; bool alloc_failed }` (public return of both `nested_group_slices` overloads) + internal `group_slices_result` + `group_slices_status(no_tag)` decl; public `group_slices(no_tag)` span signature UNCHANGED (one-line wrapper → top-level callers untouched, L-073-1).
+- `src/wire/offset_table.cpp` — `group_slices_status()` sets `alloc_failed=true` in its `:674` `catch(bad_alloc)`; both `nested_group_slices` exits (cache-hit early return via `row.table`, final return via local `table`) OR **THREE** arena-exhaustion origins: (a) `build_nested_subview → nullptr`, (b) `group_slices_status().alloc_failed`, (c) sub-table ctor `build()` degraded to `out_of_memory` (`build_status().error() == out_of_memory`, found at implement — see research §D2, Gate-A record addendum; scoped to OOM so malformed-data degradation stays not-failed, FR-007).
+- `tests/wire/nested_group_slices_failloud_test.cpp` — wire-level primitive witness pinning each of the 3 modes by **introspection** on the sub-table (test-only `nested_cache_access_for_testing` friend seam, mirrors `frame_view_access`), + repeated-read + controls; **three-mutant matrix all SEEN RED** (M1 null-only → (b)+(c) RED; M2 drop OOM term → (c) RED; M3 final-exit-only → read-2 RED).
+
+**US1 — C-ABI (`message_read.cpp`):** `fixpp_group_get_nested_group` returns `FIXPP_ERR_WIRE_LIMIT_EXCEEDED` before the presence probe on `r.alloc_failed`. Witness `tests/capi/message_read_failloud_test.cpp` (wide-margin fixture, cross-tier-verified clang-debug + gcc-release), controls (absent → `TAG_NOT_FOUND`, count-0 → `OK`/nc=0).
+
+**US2 — typed (`emit_messages.cpp` → `group_view`):** `group_view<G>` gains `alloc_failed()` (private bit + defaulted ctor param, stays trivially copyable, seam #8 intact); the codegen-emitted nested accessor threads `r.alloc_failed`. Goldens `specs/003-dictionary-codegen/contracts/golden/{v44,v50sp2}_Messages.golden.hpp` regenerated (v42/vt11 no-op). Shape oracle `specs/004-wire-codec/contracts/group_view.hpp` updated (Article XVI). Witness `tests/wire/group_view_failloud_test.cpp` (typed, wide-margin, mutation-proven — drop emitter threading → RED).
+
+**B&L rows:** L-065-2 ADDRESSED (nested path, both consumers); L-073-1 recorded (top-level reads remain silent — deferred, FR-009).
+
+**Sanitizer/coverage.** Debug full-ctest no-regression gate (SC-004) at `/implement`; full ASan/UBSan matrix (the `bad_alloc`/arena path) + the 3-tier CI at `/speckit-verify` / Gate B. **Handed loud to Gate B: origin count went 2→3 at implement — verify the `bad_alloc`-catch census (`offset_table.cpp:366`/`:684`/`:722`) is complete.**
+
 ## 072-nested-group-hardening — Harden doubly-nested repeating-group correctness (bundles #180 census+guard / #183 typed depth-≥2 context) — Implemented (branch `072-nested-group-hardening`, 2026-07-13; pre-Gate-B)
 
 Latent-correctness hardening on the doubly-nested-group surface; all inert on shipped dicts (require a constructed/dialect dictionary to trigger). Zero C-ABI change (frozen 1.5.0 — no `capi/`, `core/error.hpp`, or `test_020` touched; SC-006/FR-012).

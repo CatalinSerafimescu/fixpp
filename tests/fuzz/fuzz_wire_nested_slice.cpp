@@ -141,14 +141,14 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     // -> libFuzzer crash report.
     auto slices = root.nested_group_slices(slice_data, slice_len, nested_no_tag, &dict_token,
                                            &always_group_member,
-                                           fixpp::wire::detail::generation_token{}, ctx);
+                                           fixpp::wire::detail::generation_token{}, ctx).slices;
     (void)slices;
 
     // Second call with the SAME (slice, no_tag) key exercises the T006
     // build-once/fetch-cached path over the same adversarial content.
     auto slices_again = root.nested_group_slices(slice_data, slice_len, nested_no_tag, &dict_token,
                                                  &always_group_member,
-                                                 fixpp::wire::detail::generation_token{}, ctx);
+                                                 fixpp::wire::detail::generation_token{}, ctx).slices;
     (void)slices_again;
 
     // Third call with a DIFFERENT no_tag over the same slice content widens
@@ -161,7 +161,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
                   : ~nested_no_tag);
     auto slices2 = root.nested_group_slices(slice_data, slice_len, nested_no_tag2, &dict_token,
                                             &always_group_member,
-                                            fixpp::wire::detail::generation_token{}, ctx);
+                                            fixpp::wire::detail::generation_token{}, ctx).slices;
     (void)slices2;
 
     // Deterministic zero-count exposer (T024): a FIXED "<no_tag>=0<SOH>"
@@ -182,7 +182,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     }
     auto zc_slices = root.nested_group_slices(zc_buf.data(), prefix_len + suffix_len, kZeroCountTag,
                                               &dict_token, &always_group_member,
-                                              fixpp::wire::detail::generation_token{}, ctx);
+                                              fixpp::wire::detail::generation_token{}, ctx).slices;
     (void)zc_slices;
 
     return 0;

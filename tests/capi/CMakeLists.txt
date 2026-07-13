@@ -198,6 +198,18 @@ target_include_directories(capi_message_read_test PRIVATE ${FIXPP_CAPI_FEATURE_B
 add_test(NAME capi_message_read COMMAND capi_message_read_test)
 set_tests_properties(capi_message_read PROPERTIES LABELS "capi;051")
 
+# message_read_failloud_test — 073 (L-065-2, #184) T006: nested-read
+# arena-exhaustion fail-loud witness (RED-first against pristine source).
+add_executable(capi_message_read_failloud_test message_read_failloud_test.cpp)
+target_link_libraries(capi_message_read_failloud_test PRIVATE
+  fixpp_capi
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(capi_message_read_failloud_test PRIVATE ${FIXPP_CAPI_FEATURE_B_INCLUDES})
+add_test(NAME capi_message_read_failloud COMMAND capi_message_read_failloud_test)
+set_tests_properties(capi_message_read_failloud PROPERTIES LABELS "capi;073")
+
 # message_write_test — CA-009/CA-010-write: outbound construct/populate/commit + group builder
 add_executable(capi_message_write_test message_write_test.cpp)
 target_link_libraries(capi_message_write_test PRIVATE

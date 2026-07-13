@@ -608,12 +608,22 @@ std::uint32_t OffsetTable::group_slices_reserve_bound() const noexcept {
     return static_cast<std::uint32_t>(total);
 }
 
+// 073 T003: public span wrapper — UNCHANGED signature, one-line delegation.
+// Every top-level caller (C-ABI top-level group getter, MessageView::group<>())
+// keeps compiling and behaving identically (L-073-1, deferred).
 std::span<group_slice const> OffsetTable::group_slices(std::uint16_t no_tag) const noexcept {
+    return group_slices_status(no_tag).slices;
+}
+
+// 073 T003: status-bearing internal form (research.md §D2 mode (b), FR-002
+// originate-at-failure). Body is the former `group_slices()` verbatim, with
+// each exit widened to also report `alloc_failed`.
+group_slices_result OffsetTable::group_slices_status(std::uint16_t no_tag) const noexcept {
     check_alive();
     // Already materialized for this no_tag — return the stable cached span.
     for (auto const& gs : group_index_) {
         if (gs.no_tag == no_tag) {
-            return {group_slices_.data() + gs.start, gs.count};
+            return {.slices = {group_slices_.data() + gs.start, gs.count}, .alloc_failed = false};
         }
     }
     try {
@@ -670,9 +680,12 @@ std::span<group_slice const> OffsetTable::group_slices(std::uint16_t no_tag) con
         }
         auto const count = static_cast<std::uint32_t>(group_slices_.size()) - start;
         group_index_.push_back(group_span{.no_tag = no_tag, .start = start, .count = count});
-        return {group_slices_.data() + start, count};
+        return {.slices = {group_slices_.data() + start, count}, .alloc_failed = false};
     } catch (std::bad_alloc const&) {
-        return {};  // degrade to "no instances", never throw (noexcept)
+        // 073 T003: this is the mode-(b) origin (FR-002) — the sub-table
+        // built non-null but its own slice materialization exhausted the
+        // arena. Degrade to "no instances", never throw (noexcept).
+        return {.slices = {}, .alloc_failed = true};
     }
 }
 
@@ -711,16 +724,40 @@ OffsetTable* OffsetTable::build_nested_subview(std::byte const* data, std::size_
     }
 }
 
+// 073 (D2): resolve a built (or failed) nested sub-table pointer to the
+// status-bearing result, OR-ing all THREE arena-exhaustion origins in ONE
+// place so both empty-returning exits of nested_group_slices share a single
+// definition — the two-exit drift this centralises is exactly the class of
+// bug the T004 checklist audit caught (cache-hit vs final exit diverging).
+//   (a) t == nullptr           — shell alloc failed / cached failed build;
+//   (c) build_status() OOM     — ctor build() degraded to out_of_memory
+//                                (offset_table.cpp:366-370); scoped to OOM so
+//                                a malformed-data degradation stays not-failed
+//                                (FR-007 disjointness);
+//   (b) group_slices_status()  — the sub-table's own slice materialization
+//                                caught bad_alloc (feedback_status_origin_
+//                                must_cover_all_alloc_catch_sites).
+static nested_slices_result resolve_nested_result(OffsetTable const* table,
+                                                  std::uint16_t nested_no_tag) noexcept {
+    if (table == nullptr) {
+        return nested_slices_result{.slices = {}, .alloc_failed = true};  // mode (a)
+    }
+    bool const sub_build_oom =  // mode (c)
+        !table->build_status() && table->build_status().error() == core::error::out_of_memory;
+    auto const s = table->group_slices_status(nested_no_tag);  // mode (b)
+    return nested_slices_result{.slices = s.slices, .alloc_failed = s.alloc_failed || sub_build_oom};
+}
+
 // 062 T006: single flat nested-subview cache (see offset_table.hpp for the
 // full keying/ownership contract — ROOT-owned, keyed by
 // `(slice_data, nested_no_tag)`, dedupes the sub-table build across distinct
 // no_tags on the same slice).
-std::span<group_slice const> OffsetTable::nested_group_slices(
+nested_slices_result OffsetTable::nested_group_slices(
     std::byte const* slice_data, std::size_t slice_len, std::uint16_t nested_no_tag,
     void const* opaque_dict, group_member_fn_t group_member_fn, detail::generation_token gen,
     group_context const& ctx) const noexcept {
     if (slice_data == nullptr) {
-        return {};
+        return nested_slices_result{.slices = {}, .alloc_failed = false};  // absent, not a failure
     }
     // Zero-length, alloc-free liveness check ([2b §6.4] INV-G6): the cache
     // scan below can return on a WARM (slice_data, nested_no_tag) hit
@@ -746,8 +783,14 @@ std::span<group_slice const> OffsetTable::nested_group_slices(
             continue;
         }
         if (row.nested_no_tag == nested_no_tag) {
-            return row.table != nullptr ? row.table->group_slices(nested_no_tag)
-                                        : std::span<group_slice const>{};
+            // 073 T004 (D2 cache-hit exit): resolve against `row.table`, NOT
+            // the function-scope local `table` — the local is still nullptr
+            // for a same-no_tag match (only assigned from `row.table` in the
+            // `!found_slice` branch below, which does not run for a matching
+            // row). Using the local here would report alloc_failed=true on
+            // every warm cache-hit of a healthy group (FR-006/FR-007
+            // violation). All three origins are OR'd inside resolve_nested_result.
+            return resolve_nested_result(row.table, nested_no_tag);
         }
         if (!found_slice) {
             table = row.table;
@@ -765,7 +808,9 @@ std::span<group_slice const> OffsetTable::nested_group_slices(
         // Cache insert failed; still serve this call from the built table —
         // degrade to "rebuild next time" rather than lose this result.
     }
-    return table != nullptr ? table->group_slices(nested_no_tag) : std::span<group_slice const>{};
+    // 073 T004 (D2 final exit): resolve against the post-build local `table`
+    // (same three-origin OR as the cache-hit exit, shared via the helper).
+    return resolve_nested_result(table, nested_no_tag);
 }
 
 // 065 T004: convenience overload — forwards to the 7-arg overload above using
@@ -773,9 +818,10 @@ std::span<group_slice const> OffsetTable::nested_group_slices(
 // token (`token_for_nested_cache()`). The 7-arg algorithm + cache keying stay
 // UNTOUCHED. Out-of-line: needs the complete `group_context` type (only
 // forward-declared in the header).
-std::span<group_slice const> OffsetTable::nested_group_slices(
-    std::byte const* slice_data, std::size_t slice_len, std::uint16_t nested_no_tag,
-    group_context const& ctx) const noexcept {
+nested_slices_result OffsetTable::nested_group_slices(std::byte const* slice_data,
+                                                      std::size_t slice_len,
+                                                      std::uint16_t nested_no_tag,
+                                                      group_context const& ctx) const noexcept {
     return nested_group_slices(slice_data, slice_len, nested_no_tag, opaque_dict_,
                                group_member_fn_, token_for_nested_cache(), ctx);
 }

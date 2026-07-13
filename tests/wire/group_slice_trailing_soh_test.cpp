@@ -182,7 +182,7 @@ TEST(GroupSliceTrailingSoh, NestedSliceBuildCountedLastField) {
     fixpp::wire::group_context const test_ctx{.msg_type = "D"};
     auto inner_slices = mv->offsets().nested_group_slices(
         outer0.data, outer0.len, /*nested_no_tag=*/802, &dict, &dict_group_member, fv->token(),
-        test_ctx);
+        test_ctx).slices;
     ASSERT_EQ(inner_slices.size(), 1U)
         << "nested sub-view build over a counted-last-field, frame-tail entry must succeed";
 
@@ -195,7 +195,7 @@ TEST(GroupSliceTrailingSoh, NestedSliceBuildCountedLastField) {
     // A second call with the SAME (slice, no_tag) key must be served from
     // the cache and return the same content (build-once / fetch-cached).
     auto inner_slices_again = mv->offsets().nested_group_slices(
-        outer0.data, outer0.len, 802, &dict, &dict_group_member, fv->token(), test_ctx);
+        outer0.data, outer0.len, 802, &dict, &dict_group_member, fv->token(), test_ctx).slices;
     ASSERT_EQ(inner_slices_again.size(), 1U);
     EXPECT_EQ(inner_slices_again[0].data, inner0.data);
     EXPECT_EQ(inner_slices_again[0].len, inner0.len);
