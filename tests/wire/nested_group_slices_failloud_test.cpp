@@ -21,28 +21,42 @@
 // ([[feedback_fault_injection_posthoc_flag_unfaithful]]).
 //
 // `sizeof(OffsetTable)` (≈280 B on clang-debug) shifts across toolchains, so a
-// cap tuned to one mode here is NOT portable — this witness therefore pins
-// each mode by INTROSPECTION on the actual built sub-table
-// (`nested_cache_access_for_testing::resolve`, a TEST-ONLY friend seam
-// declared in offset_table.hpp / defined in wire_test_hooks.hpp — mirrors the
-// frame_view_access / frame_view_slice_access split, framer.hpp:104-115),
-// NOT by cap band alone: every mode test asserts the introspected sub-table
-// state FIRST (failing loud if a platform's cap lands in a different mode)
-// and only then asserts the observable `alloc_failed` contract.
+// cap tuned to one mode here is NOT portable.
 //
-// gate-b/ci-fix (PR #191 round 2): the three fixed caps below (1500 / 1930 /
-// 2700 bytes) were derived empirically on ONE build (clang-debug,
-// sizeof(OffsetTable)==280) and are NOT portable — on MSVC debug/release
+// gate-b/ci-fix (PR #191 round 1): the three original fixed caps (1500 /
+// 1930 / 2700 bytes) were derived empirically on ONE build (clang-debug,
+// sizeof(OffsetTable)==280) and were NOT portable — on MSVC debug/release
 // `sizeof(OffsetTable)` differs, so a cap tuned to land in (say) mode (c) on
-// clang-debug instead lands in mode (a) on MSVC, and the introspection
+// clang-debug instead landed in mode (a) on MSVC, tripping an introspection
 // ASSERT_NE/ASSERT_EQ guard (working as designed — failing loud rather than
-// false-passing) aborts the test. Replaced with a RUNTIME CAP SWEEP: drive
-// the same fixture across a wide range of arena caps, classify each cap's
-// ACTUAL mode by introspection (never assumed from the cap value), and
-// assert the fail-loud invariant for whichever mode that cap lands in. This
-// reproduces the same three origins on ANY `sizeof(OffsetTable)` because the
-// sweep is wide enough to cross every mode's band regardless of where the
-// per-platform boundaries fall.
+// false-passing) and aborting the test. Replaced with a RUNTIME CAP SWEEP
+// (below): drive the same fixture across a wide range of arena caps.
+//
+// gate-b/ci-fix (PR #191 round 2): round 1's sweep still used cache-row
+// INTROSPECTION (`nested_cache_access_for_testing::resolve` +
+// `build_status()` + `group_slices_status()`) to classify each cap's mode
+// and GATE a per-cap `EXPECT_TRUE`/`EXPECT_FALSE(alloc_failed)` assertion on
+// that classification. That introspection is ambiguous at the exact
+// boundary where `OffsetTable::nested_cache_.push_back()` itself throws
+// bad_alloc (the code degrades gracefully — "still serve this call from the
+// built table" — but no cache ROW is recorded, so `resolve()` returns
+// nullptr both for genuine mode (a) AND for "a non-null, possibly-healthy
+// table whose cache row never landed"), which is exactly the class of
+// platform-timing fragility this fix targets. Round 2 replaces the
+// classification-gated per-cap assertion with a CAP- AND
+// PLATFORM-INDEPENDENT invariant intrinsic to this fixture: the nested
+// group is genuinely present with `kInnerInstances` (>=1) instances, so a
+// materialized read yields a non-empty span and an EMPTY read can only mean
+// arena-exhaustion failure —
+// `alloc_failed == slices.empty()` — asserted on BOTH reads (r1 AND r2)
+// independently at every above-floor cap, with NO cross-read equality
+// requirement (a cross-read `r1.alloc_failed == r2.alloc_failed` check is
+// itself fragile over the monotonic, non-freeing arena: if read 1's cache
+// insert fails, read 2 rebuilds against a MORE-consumed arena and can
+// legitimately diverge from read 1 without either read being wrong).
+// Introspection is retained ONLY to tally saw_A/saw_B/saw_C/saw_ok
+// (non-vacuity of the sweep across all three origins plus a healthy cap) —
+// it never gates a per-cap pass/fail assertion.
 
 #include <gtest/gtest.h>
 
@@ -123,8 +137,8 @@ std::string make_present_body() {
 }  // namespace
 
 // ── Sweep: reproduces all three fail-loud origins on ANY sizeof(OffsetTable)
-//    by classifying each cap's ACTUAL mode via introspection, never assuming
-//    a mode from the cap value ───────────────────────────────────────────────
+//    via a cap- and platform-independent `alloc_failed == slices.empty()`
+//    invariant (round 2); introspection tallies non-vacuity only ──────────
 //
 // Range/step: 128..8192 step 32 (252 caps). Lower bound (128) is below any
 // plausible root-table build floor so the sweep's `continue`-below-floor
@@ -165,45 +179,40 @@ TEST(NestedGroupSlicesFailLoud, ArenaCapSweepAllModesReportFailLoud) {
         auto const slice = outer[0];
 
         auto const r1 = root.nested_group_slices(slice.data, slice.len, kInnerNoTag, kTestCtx);
-        auto const* sub = nested_cache_access_for_testing::resolve(root, slice.data, kInnerNoTag);
-
-        if (sub == nullptr) {
-            // mode (a): shell allocation failed.
-            saw_A = true;
-            EXPECT_TRUE(r1.alloc_failed) << "cap=" << cap << " mode=A";
-        } else if (!sub->build_status()) {
-            if (sub->build_status().error() != error::out_of_memory) {
-                continue;  // sub degraded for a non-arena reason -- not under test
-            }
-            // mode (c): sub-table ctor build() degraded to out_of_memory.
-            saw_C = true;
-            EXPECT_TRUE(r1.alloc_failed) << "cap=" << cap << " mode=C";
-        } else {
-            auto const gs = sub->group_slices_status(kInnerNoTag);
-            if (gs.alloc_failed) {
-                // mode (b): sub-table built ok, its own slice materialization
-                // caught bad_alloc.
-                saw_B = true;
-                EXPECT_TRUE(r1.alloc_failed) << "cap=" << cap << " mode=B";
-            } else if (!r1.slices.empty()) {
-                // healthy: sub-table built, materialized, and reports the
-                // fixture's genuinely-present instances.
-                saw_ok = true;
-                EXPECT_FALSE(r1.alloc_failed) << "cap=" << cap << " mode=healthy";
-            } else {
-                // sub-table built and materialized ok but reports zero
-                // instances for a non-arena reason -- never a failure signal.
-                EXPECT_FALSE(r1.alloc_failed) << "cap=" << cap << " mode=count-0";
-            }
-        }
-
-        // Repeated-read (D2 cache-hit exit discriminator): whichever mode
-        // this cap landed in, a second read of the SAME group must agree
-        // with the first on alloc_failed -- pins the cache-hit exit sharing
-        // the same three-origin OR as the final exit
-        // (feedback_status_origin_must_cover_all_alloc_catch_sites).
         auto const r2 = root.nested_group_slices(slice.data, slice.len, kInnerNoTag, kTestCtx);
-        EXPECT_EQ(r1.alloc_failed, r2.alloc_failed) << "cap=" << cap << " (repeated-read drift)";
+
+        // Core, cap- and platform-independent invariant: the fixture's
+        // nested group is GENUINELY present with kInnerInstances (>=1)
+        // instances, so a materialized read yields a non-empty span and an
+        // EMPTY read can only mean arena-exhaustion failure. This holds for
+        // EVERY above-floor cap on ANY platform/sizeof(OffsetTable) --
+        // unlike a mode classified by cache-row introspection (which can be
+        // ambiguous at the exact boundary where the nested_cache_ insert
+        // itself throws -- gate-b/ci-fix round 2 residual). Asserted on
+        // BOTH reads independently: read 2 (typically served from the
+        // cache-hit exit once a row exists) must satisfy the SAME
+        // invariant, which is what actually pins that exit -- not a
+        // cross-read equality that can legitimately diverge over the
+        // monotonic (non-freeing) arena if read 1's cache insert failed and
+        // read 2 rebuilds against a more-consumed arena.
+        EXPECT_EQ(r1.alloc_failed, r1.slices.empty()) << "cap=" << cap << " read=1";
+        EXPECT_EQ(r2.alloc_failed, r2.slices.empty()) << "cap=" << cap << " read=2";
+
+        // Introspection ONLY for the saw_A/B/C/ok non-vacuity tally below --
+        // never gates a per-cap assertion (that ambiguity is exactly the
+        // residual this round replaces).
+        auto const* sub = nested_cache_access_for_testing::resolve(root, slice.data, kInnerNoTag);
+        if (sub == nullptr) {
+            saw_A = true;
+        } else if (!sub->build_status()) {
+            if (sub->build_status().error() == error::out_of_memory) {
+                saw_C = true;
+            }
+        } else if (sub->group_slices_status(kInnerNoTag).alloc_failed) {
+            saw_B = true;
+        } else if (!r1.slices.empty()) {
+            saw_ok = true;
+        }
     }
 
     EXPECT_TRUE(saw_A) << "sweep never starved the shell allocation (mode a) -- "
