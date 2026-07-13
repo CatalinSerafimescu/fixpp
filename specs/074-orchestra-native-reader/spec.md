@@ -12,7 +12,7 @@
 
 fixpp currently learns every FIX version it supports from **QuickFIX-format XML** dictionaries (the vendored "supported nine": FIX 4.0–5.0SP2 + FIXT.1.1). The Orchestra transpose spike (2026-07-10, verdict **GO**) proved that **FIX Latest (Extension Pack 303)** content — 181 messages, a depth-7 nested-group chain, heavily-reused group tags, 32 datatype tokens — fits fixpp's internal `Dictionary` model with zero structural blocker. The spike used a throwaway QuickFIX transpose as a *de-risk vehicle only*.
 
-This feature delivers the chosen end-state: fixpp ingests the **official** FIX Trading Community machine-readable standard — `OrchestraFIXLatest.xml`, sourced from the Apache-2.0 channel — **natively**, via a new reader (sibling to the existing `XmlLoader`) that builds fixpp's own internal `Dictionary` **directly**, with no transpose, no QuickFIX-DataDictionary intermediate, and no dependency on any QuickFIX-community tool. Because the reader targets the *same* internal `Dictionary`, everything downstream (the validator, the runtime `table_view`, codegen, the C-ABI) is unchanged.
+This feature delivers the chosen end-state: fixpp ingests the **official** FIX Trading Community machine-readable standard — `OrchestraFIXLatest.xml`, sourced from the Apache-2.0 channel — **natively**, via a new reader (sibling to the existing `XmlLoader`) that builds fixpp's own internal `Dictionary` **directly**, with no transpose, no QuickFIX-DataDictionary intermediate, and no dependency on any QuickFIX-community tool. Because the reader targets the *same* internal `Dictionary`, everything downstream that **consumes it on the read path** (the validator, the runtime `table_view`, the C-ABI read path) is unchanged. Codegen source is likewise untouched, but codegen does **not** consume a `vlatest` dictionary (`build_ir` throws on the unmapped session, `ir.cpp:265-270`) — typed FIX Latest codegen is a scheduled follow-on (see Non-Goals).
 
 This is the **read path only** (Orchestra XML → internal `Dictionary`). It is v1.0-gating (`REMAINING-WORK.md` §A row 4b, user decision 2026-07-13).
 
@@ -22,6 +22,10 @@ This is the **read path only** (Orchestra XML → internal `Dictionary`). It is 
 
 - Q: How much of the FIX Latest version-identity surface should this read-path feature take on? → A: (initial) Full identity including a distinct `ApplVerID` enumerator. **SUPERSEDED by the reconcile below** once a factual check showed FIX Latest has no distinct wire ApplVerID.
 - Q: FIX Latest has no distinct ApplVerID(1128) wire value (the enum caps at 9 = FIX50SP2; Extension Packs are signalled by ApplExtID(1156)=303, not a new ApplVerID) — how should version identity be modelled? → A: **`session_version::vlatest` only.** Add a distinct `session_version::vlatest` for the dictionary/codegen identity; model the **wire application version as the existing `v50sp2` (ApplVerID = 9)** — do **not** add an `application_version::vlatest` member and do **not** change `render_appl_ver_id` (keeps it injective / Gate-A-safe). FIX Latest's real on-wire differentiator, **ApplExtID(1156)=303, is deferred and explicitly scheduled for a next phase/round** (tracked in `REMAINING-WORK.md`). Session-layer negotiation wiring remains deferred.
+
+### Session 2026-07-13 (Gate A round 1)
+
+- Q: `session_to_application(vlatest)` maps FIX Latest onto the **existing** `application_version::v50sp2` slot (idx 8) of the 9-slot `version_registry` (keyed by `application_version`), whose ctor is documented silent last-writer-wins (`version_registry.cpp:71-72`). Since the ApplExtID-aware registry **re-keying** is deferred by the spike RECONCILE (`orchestra-fix-latest-spike-and-plan.md` L145-146), how should this feature avoid a silent registry-slot collapse when both a real FIX50SP2 dict and a FIX Latest dict are registered? → A: **Interim fail-loud guard, re-keying still deferred.** Add **FR-010**: a `version_registry` carrying both a FIX50SP2 and a FIX Latest dictionary MUST fail loud (release-effective — abort/fatal-in-ctor or an error-returning `build_version_registry`, not an NDEBUG-stripped `assert`), never silently overwrite one on the shared `v50sp2` slot. Record the shared-slot coexistence as a **Known Limitation** (L-074-1); full ApplExtID(1156)=303-aware re-keying stays scheduled for the follow-on phase. `SC-005` is reworded to scope "does not collide with the nine legacy identities" to the `session_version` (dictionary) layer and cross-reference FR-010 for the `application_version` registry-slot layer.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -37,7 +41,7 @@ A fixpp user (or a downstream fixpp subsystem) points the library at the officia
 
 1. **Given** the vendored `OrchestraFIXLatest.xml`, **When** the native reader loads it, **Then** the resulting `Dictionary` reports exactly 181 messages with zero drops.
 2. **Given** a loaded FIX Latest `Dictionary`, **When** a caller queries an ordinary field by tag, **Then** it returns the field's datatype, name, required-ness, and (for codeset fields) the enumerated values with their descriptions.
-3. **Given** a loaded FIX Latest `Dictionary`, **When** downstream code builds the runtime `table_view` and validator input from it, **Then** those surfaces behave with no code change (the internal `Dictionary` is the same shape the existing loader produces).
+3. **Given** a loaded FIX Latest `Dictionary`, **When** downstream **read-path** code builds the runtime `table_view` and validator input from it, **Then** those surfaces behave with no code change (the internal `Dictionary` is the same shape the existing loader produces). (Codegen `build_ir` is **not** a consuming surface here — it throws on an unmapped session for `vlatest`, `ir.cpp:265-270`; typed FIX Latest codegen is a separate follow-on — see Non-Goals.)
 
 ---
 
@@ -47,7 +51,7 @@ The spike's discriminating result was not "the XML parsed" but "the runtime grou
 
 **Why this priority**: Group-context correctness is the load-bearing invariant the validator depends on; a reader that parses but mis-represents groups is silently broken. Co-P1 with Story 1.
 
-**Independent Test**: Query the deepest group of `MassQuoteAck` (msgtype `b`, the depth-7 chain) and a reused group tag (e.g. `NoLegs`/555, reused under many parents) and assert non-empty member lists and correct first-field via the context-keyed lookup.
+**Independent Test**: Query the deepest group of `MassQuoteAck` (msgtype `b`, the depth-7 chain) via its full parent path `296→295→555→40241→41686→41680→41683` and a reused group tag (e.g. `NoLegs`/555, reused under many parents) and assert the expected member lists and correct first-field via the context-keyed lookup (full-path for the depth-7 chain; non-empty-per-parent for the reused tag).
 
 **Acceptance Scenarios**:
 
@@ -58,7 +62,7 @@ The spike's discriminating result was not "the XML parsed" but "the runtime grou
 
 ### User Story 3 - FIX Latest carries a real, distinct version identity (Priority: P2)
 
-FIX Latest is loaded under its **own** version identity derived from `version="FIX.Latest_EP303"` — not disguised as `FIX.5.0SP2`. An honestly-labelled FIX Latest dictionary is recognised as FIX Latest and does not collide with any of the legacy nine.
+FIX Latest is loaded under its **own** version identity derived from `version="FIX.Latest_EP303"` — not disguised as `FIX.5.0SP2`. An honestly-labelled FIX Latest dictionary is recognised as FIX Latest and does not collide with any of the legacy nine **at the `session_version` (dictionary) identity layer**. (Its wire `application_version` deliberately maps to the existing `v50sp2`; the interim guard against silent registry-slot double-registration is **FR-010**.)
 
 **Why this priority**: The spike relabelled FIX Latest to `FIX.5.0SP2` as a hack to slip past the version gate; the real feature must give FIX Latest a genuine identity so it is nameable and distinguishable. This subsumes spike catalogue #0 (the single required loader change). It is P2 because Story 1 can load content first; the identity makes that load honest.
 
@@ -99,7 +103,7 @@ The FIX Latest source artifact is vendored into the repository from the Apache-2
 
 ### Functional Requirements
 
-- **FR-001**: The system MUST provide a native Orchestra reader — a sibling to the existing `XmlLoader` — that parses an `OrchestraFIXLatest.xml` (`fixr:repository` schema: datatypes, codesets, components, groups, messages) **directly** into the *same* internal `Dictionary` the existing loader produces, so the validator, runtime `table_view`, codegen, and C-ABI are unchanged downstream.
+- **FR-001**: The system MUST provide a native Orchestra reader — a sibling to the existing `XmlLoader` — that parses an `OrchestraFIXLatest.xml` (`fixr:repository` schema: datatypes, codesets, components, groups, messages) **directly** into the *same* internal `Dictionary` the existing loader produces, so the validator, runtime `table_view`, and C-ABI read path are unchanged downstream (codegen source is likewise untouched, but does not consume a `vlatest` dictionary — typed FIX Latest codegen is a follow-on).
 - **FR-002**: The reader MUST map Orchestra constructs to the internal model as follows: Orchestra datatype names → internal field datatype (reusing the existing `kFieldTypeTable` mapping logic); codesets → per-field enumerated values with values **and** descriptions preserved; `unionDataType` second arm → **dropped** (minimal model); Orchestra `<group>` and `<component>` (resolved transitively) → the internal group/component definitions.
 - **FR-003**: Loading the vendored FIX Latest artifact MUST yield exactly **181 messages** with zero drops at any stage.
 - **FR-004**: The reader MUST produce group-context tables that build without throwing or truncating and that resolve **queryably** for (a) the deepest FIX Latest group (the depth-7 `MassQuoteAck` chain, within the `K=16` context-depth cap) and (b) reused group tags disambiguated by parent-path context key (e.g. tag 555 reused under multiple parents).
@@ -108,6 +112,7 @@ The FIX Latest source artifact is vendored into the repository from the Apache-2
 - **FR-007**: The FIX Latest source artifact MUST be vendored and pinned by upstream commit and content hash, with Apache-2.0 §4 attribution and an `UPSTREAM.txt` recording the Extension Pack.
 - **FR-008**: The change MUST be strictly **additive**: the nine vendored QuickFIX-XML dictionaries and the existing `XmlLoader`'s behavior are unchanged, and runtime-XML coverage of all nine legacy versions does not regress.
 - **FR-009**: The reader MUST fail closed on inputs outside its format contract (malformed/truncated XML, missing required attributes, dangling references, or a wrong-format file), mirroring the existing loader's fail-closed dispositions — never a silent partial load.
+- **FR-010**: Because `session_to_application(vlatest)` maps FIX Latest onto the **existing** `application_version::v50sp2` registry slot (idx 8; FIX Latest has no distinct ApplVerID — FR-005) of the 9-slot `application_version`-keyed `version_registry`, a `version_registry` that carries **both** a real FIX50SP2 dictionary and a FIX Latest dictionary MUST **fail loud** — it MUST NOT silently last-writer-wins overwrite one on the shared `v50sp2` slot (`version_registry.cpp:71-72`). This is an **interim guard** and MUST be **release-effective** (a fatal-in-ctor or an error-returning `build_version_registry`, **not** an NDEBUG-stripped `assert`; the ctor is currently `noexcept`, so the guard surfaces via abort/fatal or an error-returning builder, not a thrown exception — exact mechanism chosen at `/speckit-tasks`). Preferred mechanism (to be finalized at `/speckit-tasks`): the **contained fatal-in-ctor** variant (keeps the change additive within the dictionary/registry layer); an error-returning `build_version_registry` is the fallback only if a non-fatal path is required, and would extend into the engine-construction layer. Full ApplExtID(1156)=303-aware registry **re-keying** stays deferred to the follow-on phase (see Known Limitations + Non-Goals). Single-dictionary configurations (FIX Latest alone, or FIX50SP2 alone) are unaffected.
 
 ### Key Entities
 
@@ -122,9 +127,9 @@ The FIX Latest source artifact is vendored into the repository from the Apache-2
 
 - **SC-001**: The native reader loads the vendored `OrchestraFIXLatest.xml` and reports exactly **181 messages, zero drops** — matching the spike baseline.
 - **SC-002**: **Zero** unknown-datatype failures occur on EP303 (every datatype token maps), and the fail-closed path is **proven RED** on a synthetic input carrying a genuinely-unknown Orchestra datatype.
-- **SC-003**: The depth-7 `MassQuoteAck` group and a reused group tag (e.g. 555) each resolve to a **non-empty** member set and correct first field via the parent-path context-keyed lookup.
-- **SC-004**: Every downstream surface (validator, runtime `table_view`, codegen, C-ABI) is **unchanged** — no downstream API or behavior change is required to consume a natively-read FIX Latest dictionary.
-- **SC-005**: An honestly-labelled FIX Latest dictionary loads under a **distinct** version identity (not `v50sp2`) and does not collide with any of the nine legacy identities; the `FIX.5.0SP2` relabel hack is not used anywhere.
+- **SC-003**: The depth-7 `MassQuoteAck` group resolves via its **full parent path** `296→295→555→40241→41686→41680→41683` (asserted end-to-end, not merely a non-empty lookup) to the expected member set and correct first field; a reused group tag (e.g. 555) resolves non-empty under each distinct parent via the parent-path context key.
+- **SC-004**: Every downstream **read-path** consuming surface (validator, runtime `table_view`, C-ABI read path) is **unchanged** — no API or behavior change is required to consume a natively-read FIX Latest dictionary. Codegen consumption of `OrchestraLoader` output is **out of scope** (`build_ir` throws on `vlatest`, `ir.cpp:265-270`) until the follow-on `fixpp::vlatest` namespace feature; the invariant here is only that **codegen tests do not regress** (they run over the nine dicts). No downstream source code changes.
+- **SC-005**: An honestly-labelled FIX Latest dictionary loads under a **distinct** `session_version` (dictionary) identity (`vlatest ≠ v50sp2`) and does not collide with any of the nine legacy identities **at the `session_version` layer**; the `FIX.5.0SP2` relabel hack is not used anywhere. At the `application_version` **registry-slot** layer FIX Latest deliberately shares `v50sp2`/ApplVerID 9 (the intended consequence of the ApplVerID reconcile, not a dictionary-layer collision); the interim fail-loud guard against silent same-slot double-registration is **FR-010**, and full ApplExtID-aware re-keying is deferred (Known Limitations + Non-Goals).
 - **SC-006**: All nine legacy QuickFIX-XML dictionaries continue to load with **unchanged** message counts and group-query results (no regression).
 - **SC-007**: The vendored artifact is pinned (upstream commit + content hash recorded) and carries Apache-2.0 §4 attribution and an `UPSTREAM.txt` naming EP303.
 
@@ -140,7 +145,7 @@ The FIX Latest source artifact is vendored into the repository from the Apache-2
 
 ## Normative References
 
-*(Article VI §5. Coverage-index `[DocAbbrev §X.Y.Z]` slugs for the Orchestra/FIX-Latest source are not yet assigned — creating them + the bidirectional `coverage-index.md` entries for the D-011 / A-035..A-065 rows this feature absorbs is a Gate-A / `/speckit-analyze` reconciliation item, per Article VI §4.)*
+*(Article VI §5. The registered `coverage-index.md` DocAbbrev **`FIX-Latest`** (FIX Latest living online standard) and the existing catalogue anchors — the **D-011** row ("FIX Orchestra / Rules of Engagement machine-readable format", Post-1.0 Gap Registry) and the **A-035..A-065** FIX Latest MsgType rows — are the real anchors this feature builds on and are cited below. The FIX Orchestra `fixr:repository` machine-readable **schema** has no registered `[DocAbbrev §X.Y.Z]` section slugs (it is a schema, not a §-numbered prose document), so no such slugs are manufactured here. **Pre-implement (before-land) obligation, per Article VI §4:** register an Orchestra-schema DocAbbrev in the `coverage-index.md` registry and add the bidirectional `coverage-index.md` entries promoting D-011 (from Post-1.0 Gap → in-scope for FIX Latest read-path) and linking the A-035..A-065 rows to this feature. Tracked as a `/speckit-analyze` (pipeline step 6) reconciliation item; the plan's Constitution-Check Article VI row is marked **CONDITIONAL** accordingly — not an unbacked PASS.)*
 
 - **FIX Orchestra v1.0** — machine-readable standard schema (`fixr:repository`: datatypes, codesets, fields, components, groups, messages). The parse contract for the reader.
 - **FIX Latest, Extension Pack 303 (EP303)** — the message/field/group content set (`OrchestraFIXLatest.xml`, Apache channel `FIXTradingCommunity/orchestrations` @ `236d4a4054f0818f1931601713f7a6a68b275df7`, root `version="FIX.Latest_EP303"`, Orchestra v1.0, 2026-06-03).
@@ -164,3 +169,7 @@ The FIX Latest source artifact is vendored into the repository from the Apache-2
 - **Richer semantic modeling** (codesets-as-typed-enums, scenario-aware typing, Orchestra workflow/actors/rules). Minimal flattened model only.
 - **Regenerating or replacing the nine legacy QuickFIX dictionaries.** Legacy stays QuickFIX-sourced (strictly additive per FR-008).
 - **The QuickFIX-dict license README correction / top-level `NOTICE`.** Tracked separately (`REMAINING-WORK.md` row 15d; README already corrected on submodule branch `docs/dict-license-fix`, commit `2c0b4947`). Not carried drive-by in this feature.
+
+## Known Limitations *(operator-facing — behaviors-and-limitations style)*
+
+- **L-074-1 (interim `v50sp2` registry-slot coexistence).** FIX Latest and real FIX 5.0SP2 share the single `application_version::v50sp2` `version_registry` slot (`session_to_application(vlatest)→v50sp2`; the enum is not re-keyed in this feature — deferred per the spike RECONCILE, `orchestra-fix-latest-spike-and-plan.md` L145-146). Until the ApplExtID(1156)=303-aware registry re-keying lands (follow-on, `REMAINING-WORK.md` row 4b), an `EngineConfig` MUST NOT carry **both** a FIX50SP2 and a FIX Latest dictionary in one `version_registry`: FR-010's fail-loud guard rejects that combination rather than silently dropping one (the QuickFIX-style last-writer-wins documented at `version_registry.cpp:71-72`). Single-dictionary use (FIX Latest alone, or FIX50SP2 alone) is unaffected. To be promoted to a `behaviors-and-limitations.md` L-row at land.

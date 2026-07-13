@@ -5,7 +5,7 @@ How to build and prove the feature end-to-end. Details of the interface and mapp
 ## Prerequisites
 
 - The library submodule build toolchain (Conan + CMake ≥ 3.28 + Ninja), same as `fixpp_dictionary`.
-- The vendored source present at `dictionaries/orchestra/OrchestraFIXLatest.xml` (pinned `FIXTradingCommunity/orchestrations @ 236d4a405…`, sha1 `26f60db1…`, EP303). Fetching it is the first implementation task (requires network); verify the sha1 on landing.
+- The vendored source present at `dictionaries/orchestra/OrchestraFIXLatest.xml` (pinned `FIXTradingCommunity/orchestrations @ 236d4a405…`, EP303). The sha1 `26f60db1…` is **provisional/unverified** (carried from the disposable spike scratchpad, not the official file). Fetching the file is the gating first implementation task (requires network); **compute** its sha1 from the fetched bytes and **record** the true value — do not hard-code the provisional constant.
 - pugixml already resolved (`pugixml/1.15`, PRIVATE dep of `fixpp_dictionary`).
 
 ## Build
@@ -21,21 +21,27 @@ cmake --build --preset linux-clang-debug --target fixpp_dictionary dictionary_or
 
 Each maps to a Success Criterion; all live in `tests/dictionary/orchestra_loader_test.cpp` (grouped bucket, label `orchestra`).
 
+The whole bucket runs via its label; per-scenario narrowing is a **binary gtest filter argument** (Article VII §8 — buckets are selected by `-L <label>`, never `ctest -R <exe/case>`). Bucket run: `ctest --preset linux-clang-debug -L orchestra`. Locate the binary once: ``ORCH_BIN=$(find build -name dictionary_orchestra_tests -type f)``.
+
 | # | Scenario | Command | Expected |
 |---|---|---|---|
-| 1 | **Load 181 messages** (SC-001) | `ctest --preset linux-clang-debug -L orchestra -R OrchestraLoad` | `messages().size() == 181`, `which_session_version() == vlatest` |
-| 2 | **Group resolution** (SC-003) | `ctest … -R OrchestraGroups` | depth-7 `MassQuoteAck` (path `296→295→555→40241→41686→41680→41683`) member set + first field non-empty; reused tag 555 resolves non-empty under multiple parents via context key |
-| 3 | **Fail-closed on unknown datatype, proven RED** (SC-002) | `ctest … -R OrchestraFailClosed` | synthetic Orchestra XML with an unknown `<fixr:datatype>` throws `orchestra_parse_error`; valid EP303 has zero unknown tokens |
-| 4 | **Distinct version identity** (SC-005) | `ctest … -R OrchestraVersionIdentity` | `vlatest` distinct from all nine legacy identities; `session_to_application(vlatest) == v50sp2`; no `FIX.5.0SP2` relabel |
-| 5 | **Legacy no-regression** (SC-006) | `ctest --preset linux-clang-debug -L dictionary` | all nine QuickFIX dicts load through `XmlLoader` with unchanged message counts + group queries |
-| 6 | **Downstream unchanged** (SC-004) | full `ctest --preset linux-clang-debug` (dictionary + wire + codegen labels) | validator / `as_table_view` / codegen consume the Orchestra `Dictionary` with no code change |
-| 7 | **Fuzz harness** (Article VII §7) | `cmake --build … --target orchestra_loader_fuzz && ./orchestra_loader_fuzz -max_total_time=600 corpus/` | no crash / no leak on the parser over ≥10 min |
+| 1 | **Load 181 messages** (SC-001) | `$ORCH_BIN --gtest_filter=OrchestraLoader.Load181` | `messages().size() == 181`, `which_session_version() == vlatest` |
+| 2 | **Group resolution** (SC-003) | `$ORCH_BIN --gtest_filter=OrchestraLoader.Groups` | depth-7 `MassQuoteAck` resolves the **full parent path** `296→295→555→40241→41686→41680→41683` (asserted, not just non-empty); reused tag 555 resolves non-empty under multiple parents via context key |
+| 3 | **Codeset values + descriptions** (FR-002) | `$ORCH_BIN --gtest_filter=OrchestraCodesets.PreservesValuesAndDescriptions` | a known EP303 codeset field: **both** enum value bytes AND description text survive |
+| 4 | **Fail-closed on unknown datatype, proven RED** (SC-002) | `$ORCH_BIN --gtest_filter='OrchestraFailClosed.*'` | field that **uses** `type="<unknown>"` throws `orchestra_parse_error`; **unused** unknown `<fixr:datatype>` decl does NOT fail; `unionDataType` with an unknown **primary/base** arm still throws; valid EP303 (zero unknown tokens) does NOT throw |
+| 5 | **Distinct version identity** (SC-005) | `$ORCH_BIN --gtest_filter=OrchestraVersionIdentity.Distinct` | `vlatest` distinct at the `session_version` layer; `session_to_application(vlatest) == v50sp2`; no `FIX.5.0SP2` relabel |
+| 6 | **Registry fail-loud guard** (FR-010) | `ctest --preset linux-clang-debug -L orchestra` (runs the guard test) | co-registering a FIX50SP2 + a FIX Latest dict fires the fail-loud guard (abort/error), never silent last-writer-wins |
+| 7 | **Legacy no-regression** (SC-006) | `ctest --preset linux-clang-debug -L dictionary` | all nine QuickFIX dicts load through `XmlLoader` with unchanged message counts + group queries |
+| 8 | **Downstream read-path unchanged** (SC-004) | full `ctest --preset linux-clang-debug` (dictionary + wire + codegen labels) | validator / `as_table_view` / C-ABI read path consume the Orchestra `Dictionary` with no source change; **codegen tests do not regress** (codegen does not consume a `vlatest` dict — `build_ir` throws on it) |
+| 9 | **Fuzz harness** (Article VII §7) | `cmake --build … --target orchestra_loader_fuzz && ./orchestra_loader_fuzz -max_total_time=600 corpus/` | no crash / no leak on the parser over ≥10 min |
 
 ## Provenance / license check (SC-007)
 
 ```bash
-cat dictionaries/orchestra/UPSTREAM.txt        # repo @ SHA tag= date=, EP303
-sha1sum dictionaries/orchestra/OrchestraFIXLatest.xml   # == 26f60db1c1f52d169d3b6825ac68800abf487fde
+cat dictionaries/orchestra/UPSTREAM.txt        # repo @ SHA tag= date=, EP303, + the recorded sha1
+# Recompute + compare against the sha1 RECORDED in UPSTREAM.txt at fetch time
+# (do NOT assert against a pre-filled constant — the 26f60db1… value is provisional until the first real fetch):
+sha1sum dictionaries/orchestra/OrchestraFIXLatest.xml   # must match UPSTREAM.txt's recorded sha1
 ls dictionaries/orchestra/{LICENSE,NOTICE}     # Apache-2.0 text + §4 attribution present
 ```
 

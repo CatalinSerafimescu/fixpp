@@ -6,7 +6,7 @@
 
 ## Content Quality
 
-- [x] No implementation details (languages, frameworks, APIs)
+- [~] No implementation details (languages, frameworks, APIs) — **accepted Spec-Kit deviation** for a protocol/library dictionary-loader design bundle: the spec names FIX-domain vocabulary + the contract boundary (`OrchestraFIXLatest.xml`, internal `Dictionary`, `table_view`, `kFieldTypeTable`, `session_version`, `render_appl_ver_id`, pugixml as a *pre-existing* dep) — problem-domain vocabulary and preserved contract, not chosen implementation tech. Qualified per the Content-quality caveat in Notes; not an unqualified pass.
 - [x] Focused on user value and business needs
 - [x] Written for non-technical stakeholders
 - [x] All mandatory sections completed
@@ -27,7 +27,7 @@
 - [x] All functional requirements have clear acceptance criteria
 - [x] User scenarios cover primary flows
 - [x] Feature meets measurable outcomes defined in Success Criteria
-- [x] No implementation details leak into specification
+- [~] No implementation details leak into specification — same **accepted Spec-Kit deviation** as Content Quality item 1 (domain vocabulary + contract boundary only; see Notes caveat).
 
 ## Notes
 

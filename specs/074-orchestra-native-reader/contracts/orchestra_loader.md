@@ -1,6 +1,6 @@
 # Contract: `dict::OrchestraLoader` public surface
 
-The reader exposes one public class whose signatures are **source-compatible with `dict::XmlLoader`** so callers, tests, and (later) codegen `build_ir` can consume it identically. It targets the same `Dictionary`.
+The reader exposes one public class whose signatures are **source-compatible with `dict::XmlLoader`** so callers and tests consume it identically. It targets the same `Dictionary`. (**Follow-on API work, NOT this feature:** codegen `build_ir` is *not* loader-polymorphic today — it takes a path via `XmlLoader` and throws on the unmapped `vlatest` session, `ir.cpp:249-251,265-270`; consuming `OrchestraLoader` output through codegen is a separate `fixpp::vlatest`-namespace feature.)
 
 ## Public interface (`include/fixpp/dict/orchestra_loader.hpp`)
 
@@ -36,7 +36,7 @@ public:
 | **Output** | A fully-populated `Dictionary` (move-only) equivalent in shape to an `XmlLoader`-produced one: `messages()`, `field_ref()`, `required_fields()`, `component()/component_fields()`, `group()/group_first_field()/group_fields()`, `as_table_view()`, `which_session_version()` all work unchanged. |
 | **Version identity** | `which_session_version() == session_version::vlatest`. Wire application version = `application_version::v50sp2` (via `session_to_application`). No distinct ApplVerID. |
 | **Message count** | Exactly 181 for EP303 (`messages().size() == 181`). |
-| **Groups** | Depth ≤ 7 (≤ `kMaxGroupContextDepth`=16); reused group tags disambiguated by parent-path context key in `as_table_view`. Nested delimiter collision fails closed at load. |
+| **Groups** | Depth ≤ 7 (≤ `kMaxGroupContextDepth`=16); the depth-7 `MassQuoteAck` chain resolves via the **full parent path** `296→295→555→40241→41686→41680→41683`; reused group tags disambiguated by parent-path context key in `as_table_view`; the `NumInGroup` count field is emitted into the parent run with `type==NumInGroup`, and component-contained groups take their parent-path from the expansion site (see data-model §A). Nested delimiter collision fails closed at load. |
 | **Datatypes** | Every Orchestra `type=` token maps via `kOrchestraTypeTable` to `field_data_type`; a genuinely-unknown token throws `orchestra_parse_error`. Union second arm dropped; codeset flattened to per-field enum values (values+descriptions kept). |
 | **Memory** | All allocation on the supplied `mr`; PMR `bad_alloc` → `xml_oom_error`. `assert(mr != nullptr)`. |
 | **Fail-closed** | Wrong root (`!= fixr:repository`), malformed/truncated XML, missing required attributes, dangling component ref, unknown datatype, or a QuickFIX-XML file fed here → thrown error, never a silent partial `Dictionary`. |
@@ -46,8 +46,10 @@ public:
 
 | Input | Expected |
 |---|---|
-| Valid `OrchestraFIXLatest.xml` (EP303) | `load` OK, 181 msgs, `vlatest` |
-| Synthetic Orchestra XML with an unknown `<fixr:datatype>` used by a field | `orchestra_parse_error` (SC-002, proven RED) |
+| Valid `OrchestraFIXLatest.xml` (EP303) | `load` OK, 181 msgs, `vlatest` (negative arm — no throw) |
+| Synthetic Orchestra XML with an unknown `<fixr:datatype>` **used** by a field's `type=` | `orchestra_parse_error` (SC-002, discriminating proven RED) |
+| Synthetic Orchestra XML declaring an **unused** unknown `<fixr:datatype>` no field references | `load` OK — does NOT fail (if unreachable; the mapping only triggers on a field `type=` resolution) |
+| Synthetic Orchestra XML with a `unionDataType` whose **primary/base** arm is an unknown datatype | `orchestra_parse_error` — the drop-second-arm rule must NOT mask an unknown base type |
 | Orchestra XML with non-`fixr:repository` root | `orchestra_parse_error` |
 | Orchestra XML with `version=` not FIX Latest | `unknown_version_error` |
 | A QuickFIX `FIX44.xml` fed to `OrchestraLoader` | thrown error (wrong grammar), never mis-parse |
