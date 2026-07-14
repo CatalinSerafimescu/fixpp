@@ -37,6 +37,13 @@ The full matrix × {normal, ASan/UBSan, TSan} (FR-019) + the thorny corpus, run 
 
 - archive per-scenario captures + goldens;
 - emit the **interop badge** (FR-024): `Interop verified against QuickFIX-cpp v1.16.0 / QuickFIX-J 3.0.1` + transcript links + the documented-limitations list.
+- **[075-live-wire-enum-validation T009] Run the QuickFIX enum-domain golden regen-and-diff.** With the same locally built `reference-engines/quickfix-cpp` this release-prep pass already owns, also run:
+  ```bash
+  cd research/G19-fix-fpml-iso20022/library
+  cmake -S . -B build/<preset> -DFIXPP_BUILD_QUICKFIX_GOLDEN=ON
+  cmake --build build/<preset> --target quickfix_enum_golden_regen_diff -j2
+  ```
+  This rebuilds `tools/quickfix_enum_golden/golden.csv` (the FR-018 corpus of 13 boundary frames) against the real QuickFIX on this machine and fails loudly on any byte drift from the checked-in file — this is the ONLY mechanism that can catch drift against a **newer QuickFIX** than v1.16.0 (the CI manifest gate, `enum_golden_manifest_test`/`ctest -L "075;golden;manifest"`, has no QuickFIX to compare against by design and provably cannot detect this). **A diff here is a RELEASE-BLOCKING finding**: investigate whether it is a genuine QuickFIX-version-driven behavior change before accepting the regenerated file, and if accepted, fold the new divergence into `contracts/enum-domain.md`'s C-6 register with an argued disposition before the tag. Reconfigure with `-DFIXPP_BUILD_QUICKFIX_GOLDEN=OFF` afterward (the default) so the option does not linger in a shared build tree.
 
 ## 4. Verify before Gate B
 

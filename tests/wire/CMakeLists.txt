@@ -116,3 +116,28 @@ target_include_directories(wire_dict_tests PRIVATE
 target_compile_definitions(wire_dict_tests PRIVATE
   "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\"")
 add_test(NAME wire_dict_tests COMMAND wire_dict_tests)
+
+# ── Standalone: 075 T007 QuickFIX enum-golden manifest gate ─────────────────
+# Isolation-sensitive per [const §VII.8] (a data-driven exact-hash gate) —
+# stays standalone rather than joining a grouped bucket. LABELS "075;golden;
+# manifest" so it is ctest -L selectable. Links NO QuickFIX and NEVER touches
+# reference-engines/: it only hashes checked-in files (dictionaries/*.xml,
+# tools/quickfix_enum_golden/main.cpp) and re-parses the checked-in
+# golden.csv, so it builds and runs identically whether or not
+# reference-engines/ is present on the machine.
+find_package(OpenSSL 3.0 REQUIRED)
+add_executable(enum_golden_manifest_test enum_golden_manifest_test.cpp)
+target_link_libraries(enum_golden_manifest_test PRIVATE
+  OpenSSL::Crypto
+  GTest::gtest
+  GTest::gtest_main
+)
+target_compile_definitions(enum_golden_manifest_test PRIVATE
+  "FIXPP_GOLDEN_CSV_PATH=\"${CMAKE_SOURCE_DIR}/tools/quickfix_enum_golden/golden.csv\""
+  "FIXPP_GOLDEN_MAIN_CPP_PATH=\"${CMAKE_SOURCE_DIR}/tools/quickfix_enum_golden/main.cpp\""
+  "FIXPP_GOLDEN_DICT_FIX44_PATH=\"${CMAKE_SOURCE_DIR}/dictionaries/FIX44.xml\""
+  "FIXPP_GOLDEN_DICT_FIX41_PATH=\"${CMAKE_SOURCE_DIR}/dictionaries/FIX41.xml\""
+  "FIXPP_GOLDEN_DICT_FIX42_PATH=\"${CMAKE_SOURCE_DIR}/dictionaries/FIX42.xml\""
+)
+add_test(NAME enum_golden_manifest_test COMMAND enum_golden_manifest_test)
+set_tests_properties(enum_golden_manifest_test PROPERTIES LABELS "075;golden;manifest")

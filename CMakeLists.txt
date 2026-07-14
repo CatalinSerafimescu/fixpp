@@ -201,6 +201,11 @@ if(FIXPP_BUILD_CODEGEN_TOOL)
   include(cmake/Codegen.cmake)
 endif()
 
+# ── 075-live-wire-enum-validation Phase 0.5 golden generator (local-only) ────
+# Guarded OFF by default (FIXPP_BUILD_QUICKFIX_GOLDEN, declared inside this
+# subdirectory's own CMakeLists.txt). Never enabled in CI; see T002.
+add_subdirectory(tools/quickfix_enum_golden)
+
 # ── Bindings ─────────────────────────────────────────────────────────────────
 if(FIXPP_BUILD_PYTHON)
   add_subdirectory(bindings/python)
