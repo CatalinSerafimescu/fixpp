@@ -16,6 +16,11 @@
 //  W6: conformant message               → dispatched (no Reject emitted)
 //  W7: seqnum NOT advanced on reject     → C-3 (validate before seqnum gate)
 //
+// 075 T020a (FR-006 RefTagID delivery): W2/W3/W4 additionally assert
+// RefTagID(371) on the emitted Reject frame, proving the offending tag
+// reaches the WIRE (not just validate()'s ref_tag_out return value — see
+// tests/wire/validator_enum_domain_test.cpp for the validator-level pin).
+//
 // NOTE (T009a): the Float garbage-value (e.g. "abc") test is NOT reason=6 —
 // decimal_invalid_input remaps to wire_field_value_out_of_range (40) → reason=5.
 // Reason=6 is ONLY for decimal_precision_loss, tested via a high-precision decimal
@@ -225,6 +230,25 @@ struct ValidateGateFixture {
         }
         return false;
     }
+
+    // 075 T020a (FR-006): returns the RefTagID(371) of the first Reject(35=3)
+    // frame with the given SessionRejectReason(373), or -1 when no matching
+    // reject frame carries a 371 (either no matching reject, or 371 omitted).
+    int reject_ref_tag_id(int reason) const {
+        for (auto const& frame : transport.sent_frames()) {
+            if (extract_field(frame, 35) == "3") {
+                auto r373 = extract_field(frame, 373);
+                if (!r373.empty() && std::stoi(r373) == reason) {
+                    auto r371 = extract_field(frame, 371);
+                    if (r371.empty()) {
+                        return -1;
+                    }
+                    return std::stoi(r371);
+                }
+            }
+        }
+        return -1;
+    }
 };
 
 // ── W1: header-out-of-order → reason=14 ──────────────────────────────────────
@@ -287,6 +311,10 @@ TEST(ValidateGateInbound, UnexpectedTag_Reason2) {
     fix.feed(sess, frame);
 
     EXPECT_TRUE(fix.has_reject_with_reason(2)) << "W2: undefined-tag must produce Reject(373=2)";
+    // 075 T020a (FR-006): the outbound Reject must carry RefTagID(371)=44 —
+    // proves the tag reaches the WIRE, not just validate()'s return value.
+    EXPECT_EQ(fix.reject_ref_tag_id(2), 44)
+        << "W2: Reject(373=2) must carry RefTagID(371)=44 (the undefined Price tag)";
 }
 
 // ── W3: required-field-missing → reason=1 ────────────────────────────────────
@@ -311,6 +339,9 @@ TEST(ValidateGateInbound, RequiredFieldMissing_Reason1) {
 
     EXPECT_TRUE(fix.has_reject_with_reason(1))
         << "W3: required-field-missing must produce Reject(373=1)";
+    // 075 T020a (FR-006): RefTagID(371)=11 — the missing ClOrdID tag.
+    EXPECT_EQ(fix.reject_ref_tag_id(1), 11)
+        << "W3: Reject(373=1) must carry RefTagID(371)=11 (the missing ClOrdID tag)";
 }
 
 // ── W4: type-nonconformant (Int field with non-numeric chars) → reason=5 ─────
@@ -330,6 +361,9 @@ TEST(ValidateGateInbound, TypeNonconformant_Int_Reason5) {
 
     EXPECT_TRUE(fix.has_reject_with_reason(5))
         << "W4: type-nonconformant Int must produce Reject(373=5)";
+    // 075 T020a (FR-006): RefTagID(371)=38 — the malformed OrderQty tag.
+    EXPECT_EQ(fix.reject_ref_tag_id(5), 38)
+        << "W4: Reject(373=5) must carry RefTagID(371)=38 (the malformed OrderQty tag)";
 }
 
 // ── W5: Float garbage value → reason=5 (via decimal_invalid_input remap, T009a)

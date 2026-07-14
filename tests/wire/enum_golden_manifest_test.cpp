@@ -14,12 +14,16 @@
 //   (i)  TREE DRIFT — a dictionary / corpus-input / generator-source change
 //        that golden.csv was not regenerated against (any of the five
 //        input-side hashes goes stale).
-//   (ii) A CARELESS HAND-EDIT of the checked-in verdict/reason/asserted
-//        columns — this is what `golden_output_hash` exists to catch. The
-//        other five manifest fields (three dictionary_sha1, the generator
-//        hash, the corpus input hash) ALL stay valid under such an edit —
-//        none of them are computed over the verdict columns — so without a
-//        hash over the verdicts specifically, this gate would be decorative.
+//   (ii) A CARELESS HAND-EDIT of the checked-in verdict/reason/ref_tag_id/
+//        asserted columns — this is what `golden_output_hash` exists to
+//        catch. The other five manifest fields (three dictionary_sha1, the
+//        generator hash, the corpus input hash) ALL stay valid under such an
+//        edit — none of them are computed over the verdict/RefTagID columns
+//        — so without a hash over them specifically, this gate would be
+//        decorative. 075 T005a extended `golden_output_hash` to also cover
+//        `quickfix_ref_tag_id` (it originally covered only
+//        verdict/reason/asserted): a hand-edited RefTagID was invisible to
+//        every manifest field until this extension.
 //
 // What this gate CANNOT catch: drift against a NEWER QuickFIX release.
 // `quickfix_version`/`quickfix_soname` are recorded in the manifest but are
@@ -145,6 +149,7 @@ struct GoldenRow {
     std::string asserted;
     std::string verdict;
     std::string reason;
+    std::string ref_tag_id;  // 075 T005a
     std::string note;
 };
 
@@ -196,8 +201,8 @@ ParsedGolden parse_golden_csv(const std::string &path) {
     }
     for (std::size_t i = 1; i < csv_lines.size(); ++i) {
         std::vector<std::string> f = split_csv_line(csv_lines[i]);
-        if (f.size() != 10) {
-            ADD_FAILURE() << "golden.csv row " << i << " has " << f.size() << " fields, expected 10: '"
+        if (f.size() != 11) {
+            ADD_FAILURE() << "golden.csv row " << i << " has " << f.size() << " fields, expected 11: '"
                            << csv_lines[i] << "'";
             continue;
         }
@@ -211,7 +216,8 @@ ParsedGolden parse_golden_csv(const std::string &path) {
         row.asserted = f[6];
         row.verdict = f[7];
         row.reason = f[8];
-        row.note = f[9];
+        row.ref_tag_id = f[9];
+        row.note = f[10];
         result.rows.push_back(std::move(row));
     }
     return result;
@@ -229,15 +235,16 @@ std::string recompute_corpus_input_hash(const std::vector<GoldenRow> &rows) {
 }
 
 // Recomputes golden_output_hash per the same documented format: for row ids
-// ascending, the exact bytes "{id}|{verdict}|{reason}|{asserted}\n". THIS IS
-// THE LOAD-BEARING HASH (FR-024): it is the only one of the six manifest
-// fields computed over the verdict/reason/asserted columns, so it is the
-// only one that can catch a hand-edited verdict — every other field stays
-// byte-identical under such an edit.
+// ascending, the exact bytes "{id}|{verdict}|{reason}|{ref_tag_id}|{asserted}\n".
+// THIS IS THE LOAD-BEARING HASH (FR-024): it is the only one of the six
+// manifest fields computed over the verdict/reason/ref_tag_id/asserted
+// columns, so it is the only one that can catch a hand-edited verdict OR a
+// hand-edited RefTagID (075 T005a) — every other field stays byte-identical
+// under such an edit.
 std::string recompute_golden_output_hash(const std::vector<GoldenRow> &rows) {
     std::ostringstream buf;
     for (const GoldenRow &r : rows) {
-        buf << r.id << "|" << r.verdict << "|" << r.reason << "|" << r.asserted << "\n";
+        buf << r.id << "|" << r.verdict << "|" << r.reason << "|" << r.ref_tag_id << "|" << r.asserted << "\n";
     }
     return sha1_hex(buf.str());
 }
@@ -317,15 +324,19 @@ TEST_F(EnumGoldenManifestTest, CorpusInputHashMatches) {
 }
 
 // ⚠️ THE LOAD-BEARING CHECK (FR-024). Every OTHER hash in this file stays
-// valid if someone hand-edits a quickfix_verdict/quickfix_reason/asserted
-// column in the checked-in CSV — this is the only one that is computed over
-// those columns, so it is the only one that can catch that class of edit.
-// Proven RED under exactly that mutation at T008 (quickstart S-7 step 5).
+// valid if someone hand-edits a quickfix_verdict/quickfix_reason/
+// quickfix_ref_tag_id/asserted column in the checked-in CSV — this is the
+// only one that is computed over those columns, so it is the only one that
+// can catch that class of edit. Proven RED under a verdict/reason mutation
+// at T008 (quickstart S-7 step 5), and RE-PROVEN RED under a
+// RefTagID-ONLY mutation at T005a (verdict and reason left untouched) —
+// before T005a's hash extension, that specific edit was invisible to every
+// field in this file.
 TEST_F(EnumGoldenManifestTest, GoldenOutputHashMatches) {
     std::string recomputed = recompute_golden_output_hash(golden_.rows);
     EXPECT_EQ(recomputed, manifest_value(golden_, "golden_output_hash"))
-        << "a checked-in quickfix_verdict/quickfix_reason/asserted value was hand-edited (or the corpus "
-           "changed) without regenerating golden.csv from a real QuickFIX run";
+        << "a checked-in quickfix_verdict/quickfix_reason/quickfix_ref_tag_id/asserted value was "
+           "hand-edited (or the corpus changed) without regenerating golden.csv from a real QuickFIX run";
 }
 
 }  // namespace

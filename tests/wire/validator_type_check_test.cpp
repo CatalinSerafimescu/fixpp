@@ -442,7 +442,7 @@ TEST(ValidatorTypeCheck, ValidateWithBadIntFieldRejected) {
     std::pmr::monotonic_buffer_resource scratch_mr{scratch_buf.data(), scratch_buf.size(),
                                                    std::pmr::null_memory_resource()};
 
-    auto result = v.validate(mv, &scratch_mr);
+    auto result = v.validate(mv, &scratch_mr, nullptr);
     ASSERT_FALSE(result.has_value()) << "validate() with bad Int field must return error";
     EXPECT_EQ(result.error(), error::wire_field_value_out_of_range);
 }
@@ -465,7 +465,7 @@ TEST(ValidatorTypeCheck, ValidateWithValidFloatFieldAccepted) {
     std::pmr::monotonic_buffer_resource scratch_mr{scratch_buf.data(), scratch_buf.size(),
                                                    std::pmr::null_memory_resource()};
 
-    auto result = v.validate(mv, &scratch_mr);
+    auto result = v.validate(mv, &scratch_mr, nullptr);
     EXPECT_TRUE(result.has_value()) << "validate() with valid Float field must succeed; err="
                                     << (result.has_value() ? 0 : static_cast<int>(result.error()));
 }
@@ -486,7 +486,7 @@ TEST(ValidatorTypeCheck, ValidateWithInvalidFloatFieldRejected) {
     std::pmr::monotonic_buffer_resource scratch_mr{scratch_buf.data(), scratch_buf.size(),
                                                    std::pmr::null_memory_resource()};
 
-    auto result = v.validate(mv, &scratch_mr);
+    auto result = v.validate(mv, &scratch_mr, nullptr);
     ASSERT_FALSE(result.has_value()) << "validate() with invalid Float must return error";
 }
 
@@ -574,7 +574,7 @@ TEST(ValidatorTypeCheck, ValidateUnexpectedTagReturnsError) {
     std::pmr::monotonic_buffer_resource scratch_mr{scratch_buf.data(), scratch_buf.size(),
                                                    std::pmr::null_memory_resource()};
 
-    auto result = v.validate(mv, &scratch_mr);
+    auto result = v.validate(mv, &scratch_mr, nullptr);
     ASSERT_FALSE(result.has_value()) << "validate() must reject an unexpected tag";
     EXPECT_EQ(result.error(), error::wire_unexpected_tag)
         << "expected wire_unexpected_tag (slot 42)";
@@ -600,7 +600,7 @@ TEST(ValidatorTypeCheck, ValidateRequiredFieldMissingReturnsError) {
     std::pmr::monotonic_buffer_resource scratch_mr{scratch_buf.data(), scratch_buf.size(),
                                                    std::pmr::null_memory_resource()};
 
-    auto result = v.validate(mv, &scratch_mr);
+    auto result = v.validate(mv, &scratch_mr, nullptr);
     ASSERT_FALSE(result.has_value()) << "validate() must reject when a required field is missing";
     EXPECT_EQ(result.error(), error::wire_required_field_missing)
         << "expected wire_required_field_missing (slot 38)";

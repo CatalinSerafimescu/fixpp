@@ -1,13 +1,16 @@
 // tools/quickfix_enum_golden/main.cpp
 //
-// 075-live-wire-enum-validation — Phase 0.5, T002/T003/T004/T005.
+// 075-live-wire-enum-validation — Phase 0.5, T002/T003/T004/T005/T005a.
 //
 // Local-only golden generator. Links a real, locally built QuickFIX v1.16.0
 // (root = the validated CMake cache variable FIXPP_QUICKFIX_ROOT, target
 // guarded OFF by default via FIXPP_BUILD_QUICKFIX_GOLDEN — T002) and runs a
 // 13-row corpus of boundary FIX frames through the REAL
 // `FIX::DataDictionary::validate()`, recording QuickFIX's MEASURED verdict +
-// reject reason for each row into the checked-in `golden.csv`.
+// reject reason + RefTagID (T005a) for each row into the checked-in
+// `golden.csv`. RefTagID is captured from the REAL exception's `.field`
+// member (IncorrectTagValue/NoTagValue/IncorrectDataFormat/etc.) — never
+// from foreknowledge of which tag a row's frame-builder set.
 //
 // THE ONE RULE THAT MATTERS: every verdict this program writes to golden.csv
 // is the literal, measured output of a real QuickFIX validate() call over a
@@ -92,14 +95,23 @@
 //
 //   golden_output_hash      = SHA-1 over the concatenation, for row ids
 //                            1..13 in ascending order, of the exact bytes
-//                              "{id}|{verdict}|{reason}|{asserted}\n"
+//                              "{id}|{verdict}|{reason}|{ref_tag_id}|{asserted}\n"
 //                            where verdict in {"accept","reject"}, reason is
-//                            the decimal SessionRejectReason for a reject
-//                            row or the empty string for an accept row, and
-//                            asserted in {"true","false"}. Computed over the
-//                            OUTPUT rows only — excludes the manifest block
-//                            it lives in (FR-024), so it is not
-//                            self-referential.
+//                            the decimal SessionRejectReason for a reject row
+//                            or the empty string for an accept row,
+//                            ref_tag_id is the decimal RefTagID QuickFIX's
+//                            own validation exception reported (its `.field`
+//                            member) for a reject row or the empty string
+//                            for an accept row (075 T005a — an accept row
+//                            has no exception and therefore no RefTagID,
+//                            exactly parallel to reason), and asserted in
+//                            {"true","false"}. Computed over the OUTPUT rows
+//                            only — excludes the manifest block it lives in
+//                            (FR-024), so it is not self-referential.
+//                            ⚠️ T005a: this hash is what makes a
+//                            hand-edited RefTagID visible to the manifest
+//                            gate — none of the other five manifest fields
+//                            cover it.
 //
 // ─────────────────────────────────────────────────────────────────────────
 
@@ -169,6 +181,7 @@ std::string read_file_bytes(const std::string &path) {
 struct RowResult {
     bool is_accept = false;
     int reason = -1;          // -1 == no reason (accept)
+    int ref_tag_id = -1;      // -1 == no RefTagID (accept) — 075 T005a
     std::string detail;       // human-readable, for the stdout report only
 };
 
@@ -215,30 +228,39 @@ RowResult classify(const FIX::DataDictionary &dd, FIX::Message &parsed) {
         return r;
     } catch (FIX::IncorrectTagValue &e) {
         r.reason = FIX::SessionRejectReason_VALUE_IS_INCORRECT;  // 5
+        r.ref_tag_id = e.field;
         r.detail = "REJECT reason=5 (IncorrectTagValue) field=" + std::to_string(e.field);
     } catch (FIX::NoTagValue &e) {
         r.reason = FIX::SessionRejectReason_TAG_SPECIFIED_WITHOUT_A_VALUE;  // 4
+        r.ref_tag_id = e.field;
         r.detail = "REJECT reason=4 (NoTagValue) field=" + std::to_string(e.field);
     } catch (FIX::TagNotDefinedForMessage &e) {
         r.reason = FIX::SessionRejectReason_TAG_NOT_DEFINED_FOR_THIS_MESSAGE_TYPE;  // 2
+        r.ref_tag_id = e.field;
         r.detail = "REJECT reason=2 (TagNotDefinedForMessage) field=" + std::to_string(e.field);
     } catch (FIX::RequiredTagMissing &e) {
         r.reason = FIX::SessionRejectReason_REQUIRED_TAG_MISSING;  // 1
+        r.ref_tag_id = e.field;
         r.detail = "REJECT reason=1 (RequiredTagMissing) field=" + std::to_string(e.field);
     } catch (FIX::IncorrectDataFormat &e) {
         r.reason = FIX::SessionRejectReason_INCORRECT_DATA_FORMAT_FOR_VALUE;  // 6
+        r.ref_tag_id = e.field;
         r.detail = "REJECT reason=6 (IncorrectDataFormat) field=" + std::to_string(e.field);
     } catch (FIX::InvalidTagNumber &e) {
         r.reason = FIX::SessionRejectReason_INVALID_TAG_NUMBER;  // 0
+        r.ref_tag_id = e.field;
         r.detail = "REJECT reason=0 (InvalidTagNumber) field=" + std::to_string(e.field);
     } catch (FIX::TagOutOfOrder &e) {
         r.reason = FIX::SessionRejectReason_TAG_SPECIFIED_OUT_OF_REQUIRED_ORDER;  // 14
+        r.ref_tag_id = e.field;
         r.detail = "REJECT reason=14 (TagOutOfOrder) field=" + std::to_string(e.field);
     } catch (FIX::RepeatedTag &e) {
         r.reason = FIX::SessionRejectReason_TAG_APPEARS_MORE_THAN_ONCE;  // 13
+        r.ref_tag_id = e.field;
         r.detail = "REJECT reason=13 (RepeatedTag) field=" + std::to_string(e.field);
     } catch (FIX::RepeatingGroupCountMismatch &e) {
         r.reason = FIX::SessionRejectReason_INCORRECT_NUMINGROUP_COUNT_FOR_REPEATING_GROUP;  // 16
+        r.ref_tag_id = e.field;
         r.detail = "REJECT reason=16 (RepeatingGroupCountMismatch) field=" + std::to_string(e.field);
     } catch (FIX::Exception &e) {
         // Any exception type outside the above set is UNEXPECTED for this
@@ -542,9 +564,10 @@ int main() {
     for (const OutRow &o : out) {
         output_buf << o.row->id << "|" << (o.result.is_accept ? "accept" : "reject") << "|"
                     << (o.result.is_accept ? "" : std::to_string(o.result.reason)) << "|"
+                    << (o.result.is_accept ? "" : std::to_string(o.result.ref_tag_id)) << "|"
                     << (o.row->asserted ? "true" : "false") << "\n";
     }
-    const std::string golden_output_hash = sha1_hex(output_buf.str());
+    const std::string golden_output_hash = sha1_hex(output_buf.str());  // 075 T005a: now covers ref_tag_id too
 
     // ── Write golden.csv ─────────────────────────────────────────────────
     std::ofstream out_file(FIXPP_GOLDEN_OUTPUT_CSV, std::ios::binary | std::ios::trunc);
@@ -584,10 +607,14 @@ int main() {
     out_file << "#   line ending after EVERY row including the 13th, value = the raw wire value\n";
     out_file << "#   byte-for-byte including embedded spaces, empty string for an empty-value row).\n";
     out_file << "# golden_output_hash: over the concatenation, for row ids 1..13 ascending, of the\n";
-    out_file << "#   exact bytes \"{id}|{verdict}|{reason}|{asserted}\\n\" (verdict in\n";
+    out_file << "#   exact bytes \"{id}|{verdict}|{reason}|{ref_tag_id}|{asserted}\\n\" (verdict in\n";
     out_file << "#   {accept,reject}, reason = decimal SessionRejectReason or empty string for\n";
-    out_file << "#   accept, asserted in {true,false}). Computed over the OUTPUT ROWS ONLY --\n";
-    out_file << "#   excludes this manifest block (FR-024), so it is not self-referential.\n";
+    out_file << "#   accept, ref_tag_id = decimal RefTagID (the offending tag QuickFIX's own\n";
+    out_file << "#   validation exception reported, its `.field` member) or empty string for\n";
+    out_file << "#   accept (075 T005a), asserted in {true,false}). Computed over the OUTPUT\n";
+    out_file << "#   ROWS ONLY -- excludes this manifest block (FR-024), so it is not\n";
+    out_file << "#   self-referential. This is the ONLY manifest field that covers RefTagID --\n";
+    out_file << "#   a hand-edited quickfix_ref_tag_id is invisible to every other field.\n";
     out_file << "#\n";
     out_file << "# CORPUS NOTE: 13 rows, not FR-018's original 12. Row 13 is a supplementary\n";
     out_file << "# DV-5 characterization row (asserted:false), split out of the original row 6\n";
@@ -609,7 +636,8 @@ int main() {
     out_file << "#\n";
     out_file << "# No asserted:true row disagrees with its predicted verdict as of this run.\n";
     out_file << "#\n";
-    out_file << "row,dictionary,begin_string,msg_type,tag,value,asserted,quickfix_verdict,quickfix_reason,note\n";
+    out_file << "row,dictionary,begin_string,msg_type,tag,value,asserted,quickfix_verdict,quickfix_reason,"
+                 "quickfix_ref_tag_id,note\n";
 
     auto csv_quote = [](const std::string &s) {
         std::string q = "\"";
@@ -629,6 +657,7 @@ int main() {
                   << o.row->tag << "," << csv_quote(o.row->value) << "," << (o.row->asserted ? "true" : "false")
                   << "," << (o.result.is_accept ? "accept" : "reject") << ","
                   << (o.result.is_accept ? "" : std::to_string(o.result.reason)) << ","
+                  << (o.result.is_accept ? "" : std::to_string(o.result.ref_tag_id)) << ","
                   << csv_quote(o.row->note) << "\n";
     }
 

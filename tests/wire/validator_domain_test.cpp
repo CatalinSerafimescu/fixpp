@@ -193,7 +193,7 @@ TEST(ValidatorDomain, ConformingMessageAccepted) {
     std::pmr::monotonic_buffer_resource scratch_mr{scratch_buf.data(), scratch_buf.size(),
                                                    std::pmr::null_memory_resource()};
 
-    auto result = v.validate(mv, &scratch_mr);
+    auto result = v.validate(mv, &scratch_mr, nullptr);
     EXPECT_TRUE(result.has_value()) << "conforming NewOrderSingle must validate OK; error="
                                     << (result.has_value() ? 0 : static_cast<int>(result.error()));
 }
@@ -220,7 +220,7 @@ TEST(ValidatorDomain, MissingRequiredFieldRejected) {
     std::pmr::monotonic_buffer_resource scratch_mr{scratch_buf.data(), scratch_buf.size(),
                                                    std::pmr::null_memory_resource()};
 
-    auto result = v.validate(mv, &scratch_mr);
+    auto result = v.validate(mv, &scratch_mr, nullptr);
     ASSERT_FALSE(result.has_value())
         << "message with missing required ClOrdID (11) must be rejected";
     EXPECT_EQ(result.error(), error::wire_required_field_missing)
@@ -251,7 +251,7 @@ TEST(ValidatorDomain, UnexpectedTagRejected) {
     std::pmr::monotonic_buffer_resource scratch_mr{scratch_buf.data(), scratch_buf.size(),
                                                    std::pmr::null_memory_resource()};
 
-    auto result = v.validate(mv, &scratch_mr);
+    auto result = v.validate(mv, &scratch_mr, nullptr);
     ASSERT_FALSE(result.has_value()) << "message with unexpected tag 9999 must be rejected";
     EXPECT_EQ(result.error(), error::wire_unexpected_tag)
         << "expected wire_unexpected_tag (42), got " << static_cast<int>(result.error());
@@ -285,7 +285,7 @@ TEST(ValidatorDomain, MalformedGroupCountRejected) {
     std::pmr::monotonic_buffer_resource scratch_mr{scratch_buf.data(), scratch_buf.size(),
                                                    std::pmr::null_memory_resource()};
 
-    auto result = v.validate(mv, &scratch_mr);
+    auto result = v.validate(mv, &scratch_mr, nullptr);
     ASSERT_FALSE(result.has_value()) << "group count=2 with only 1 instance must be rejected";
     EXPECT_EQ(result.error(), error::wire_required_field_missing)
         << "expected wire_required_field_missing for count mismatch, got "
@@ -324,7 +324,7 @@ TEST(ValidatorDomain, GroupCountUint32WrapRejected) {
     std::pmr::monotonic_buffer_resource scratch_mr{scratch_buf.data(), scratch_buf.size(),
                                                    std::pmr::null_memory_resource()};
 
-    auto result = v.validate(mv, &scratch_mr);
+    auto result = v.validate(mv, &scratch_mr, nullptr);
     ASSERT_FALSE(result.has_value())
         << "a group count that wraps uint32 to the real instance count must be rejected, "
            "not accepted via the wrap";
@@ -358,7 +358,7 @@ TEST(ValidatorDomain, MalformedGroupFirstFieldRejected) {
     std::pmr::monotonic_buffer_resource scratch_mr{scratch_buf.data(), scratch_buf.size(),
                                                    std::pmr::null_memory_resource()};
 
-    auto result = v.validate(mv, &scratch_mr);
+    auto result = v.validate(mv, &scratch_mr, nullptr);
     ASSERT_FALSE(result.has_value()) << "group with non-delimiter first field must be rejected";
     EXPECT_EQ(result.error(), error::wire_required_field_missing)
         << "expected wire_required_field_missing for wrong first field, got "
@@ -392,7 +392,7 @@ TEST(ValidatorDomain, WellFormedGroupAccepted) {
     std::pmr::monotonic_buffer_resource scratch_mr{scratch_buf.data(), scratch_buf.size(),
                                                    std::pmr::null_memory_resource()};
 
-    auto result = v.validate(mv, &scratch_mr);
+    auto result = v.validate(mv, &scratch_mr, nullptr);
     EXPECT_TRUE(result.has_value()) << "well-formed 2-instance group must validate OK; error="
                                     << (result.has_value() ? 0 : static_cast<int>(result.error()));
 }
@@ -428,7 +428,7 @@ TEST(ValidatorDomain, GroupThenTopLevelFieldNotOverCounted) {
     std::pmr::monotonic_buffer_resource scratch_mr{scratch_buf.data(), scratch_buf.size(),
                                                    std::pmr::null_memory_resource()};
 
-    auto result = v.validate(mv, &scratch_mr);
+    auto result = v.validate(mv, &scratch_mr, nullptr);
     EXPECT_TRUE(result.has_value())
         << "well-formed group (1 instance) followed by top-level 55=AAPL must "
            "validate OK — top-level field must NOT be counted as an extra group "
@@ -479,7 +479,7 @@ TEST(ValidatorDomain, TrailingTopLevelFieldSharingMemberTagIsNotAbsorbed) {
     std::pmr::monotonic_buffer_resource scratch_mr{scratch_buf.data(), scratch_buf.size(),
                                                    std::pmr::null_memory_resource()};
 
-    auto result = v.validate(mv, &scratch_mr);
+    auto result = v.validate(mv, &scratch_mr, nullptr);
     EXPECT_TRUE(result.has_value())
         << "a trailing top-level 447 field must not be absorbed into the "
            "preceding 453 group instance";
@@ -547,7 +547,7 @@ TEST(ValidatorDomain, NestedMalformedGroupRejected) {
     std::pmr::monotonic_buffer_resource scratch_mr{scratch_buf.data(), scratch_buf.size(),
                                                    std::pmr::null_memory_resource()};
 
-    auto result = v.validate(mv, &scratch_mr);
+    auto result = v.validate(mv, &scratch_mr, nullptr);
     ASSERT_FALSE(result.has_value()) << "inner group 460=2 with only 1 delimiter must be rejected";
     EXPECT_EQ(result.error(), error::wire_required_field_missing)
         << "expected wire_required_field_missing for inner group count mismatch, got "
@@ -586,7 +586,7 @@ TEST(ValidatorDomain, EnumViolationRejected) {
     std::pmr::monotonic_buffer_resource scratch_mr{scratch_buf.data(), scratch_buf.size(),
                                                    std::pmr::null_memory_resource()};
 
-    auto result = v.validate(mv, &scratch_mr);
+    auto result = v.validate(mv, &scratch_mr, nullptr);
     ASSERT_FALSE(result.has_value()) << "Side=X (undeclared enum value) must be rejected (FR-006)";
     EXPECT_EQ(result.error(), error::wire_field_value_out_of_range)
         << "expected wire_field_value_out_of_range (SessionRejectReason 5), got "

@@ -341,7 +341,7 @@ TEST_P(WireConformance, BehavioralDispatch) {
         std::pmr::monotonic_buffer_resource scratch_mr{scratch_buf.data(), scratch_buf.size(),
                                                        std::pmr::null_memory_resource()};
 
-        auto val_result = validator.validate(*mv_result, &scratch_mr);
+        auto val_result = validator.validate(*mv_result, &scratch_mr, nullptr);
         if (r.expect_ok) {
             EXPECT_TRUE(val_result.has_value())
                 << "validator rejected a conforming message; error="

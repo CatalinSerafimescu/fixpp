@@ -135,7 +135,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
                                                    std::pmr::null_memory_resource()};
 
     // validate() is noexcept. Any exception escape → std::terminate → crash.
-    auto validate_result = validator.validate(mv, &scratch_mr);
+    auto validate_result = validator.validate(mv, &scratch_mr, nullptr);
 
     if (!validate_result) {
         // Invariant: every rejection must be one of the five wire_* slots.

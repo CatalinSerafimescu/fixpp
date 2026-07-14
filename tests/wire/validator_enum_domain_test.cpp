@@ -12,17 +12,17 @@
 //         FR-015/FR-023, SC-001/SC-004/SC-009
 //   tasks: specs/075-live-wire-enum-validation/tasks.md T022/T022a/T023
 //
-// RefTagID note (escalated, see phase report): `dictionary_driven_validator::
-// validate()` returns a bare `core::expected_t<void>` — no per-tag
-// provenance — and `session.cpp:1977` hardcodes `RejectDecision{reason, 0}`
-// for every validate()-driven reject (pre-existing 041-era limitation, out
-// of 075's Phase-2 scope; src/session/session.cpp is untouchable this
-// round). So "RefTagID=54" etc. is witnessed BY CONSTRUCTION instead of by
-// reading a literal RefTagID value out of the API: each reject frame below
-// is built so the offending tag is the ONLY field that can trip
-// wire_field_value_out_of_range (every other field is field_valid_for +
-// type-valid + in-domain, so no other tag can produce that error code), and
-// "reason 5" is pinned directly via wire_error_to_session_reject_reason().
+// RefTagID note (075 T020a, FR-006 delivery): `dictionary_driven_validator::
+// validate()` now threads the offending tag out via a required
+// `std::uint16_t* ref_tag_out` parameter (see include/fixpp/wire/
+// validator.hpp), and `session.cpp`'s `validate_inbound_` reads it into
+// `RejectDecision::ref_tag_id`, which the session emits as the outbound
+// Reject's tag 371. Below, "RefTagID=54" etc. is asserted by reading the
+// LITERAL value written to `ref_tag_out`, not "by construction" — see also
+// the session-level 371-on-the-wire witnesses in
+// tests/session/test_validate_gate_inbound.cpp (W2/W3/W4), which prove the
+// tag actually reaches the emitted frame, not just that validate() reports
+// it.
 
 #include <gtest/gtest.h>
 
@@ -147,12 +147,9 @@ std::string nos_prefix() {
 
 }  // namespace
 
-// ── T022: Side(54)=Z out-of-domain -> reject/5 ──────────────────────────────
-// AC US1 #1/#2, SC-001/FR-006. Side(54) is the ONLY field appended after the
-// known-valid nos_prefix(), so it is the only field that can trip
-// wire_field_value_out_of_range here — that is the "offending tag by
-// construction" argument (RefTagID=54 is not literally readable from
-// validate(), see file header).
+// ── T022: Side(54)=Z out-of-domain -> reject/5, RefTagID=54 ────────────────
+// AC US1 #1/#2, SC-001/FR-006. RefTagID is asserted by reading the literal
+// value validate() writes to ref_tag_out (075 T020a).
 TEST(ValidatorEnumDomain, Side54OutOfDomainRejectsReason5) {
     auto tv = load_shipped_table_view("FIX44.xml");
     dictionary_driven_validator v{std::move(tv)};
@@ -166,13 +163,15 @@ TEST(ValidatorEnumDomain, Side54OutOfDomainRejectsReason5) {
     std::array<std::byte, 2048> scratch_buf{};
     std::pmr::monotonic_buffer_resource scratch_mr{scratch_buf.data(), scratch_buf.size(),
                                                    std::pmr::null_memory_resource()};
-    auto result = v.validate(mv, &scratch_mr);
+    std::uint16_t ref_tag = 0;
+    auto result = v.validate(mv, &scratch_mr, &ref_tag);
     ASSERT_FALSE(result.has_value()) << "Side(54)=Z is not one of the 16 declared FIX44 codes "
                                         "(1-9,A-G) and must reject";
     EXPECT_EQ(result.error(), error::wire_field_value_out_of_range)
         << "got slot " << static_cast<int>(result.error());
     EXPECT_EQ(wire_error_to_session_reject_reason(result.error()), 5)
         << "wire_field_value_out_of_range must map to SessionRejectReason 5";
+    EXPECT_EQ(ref_tag, 54) << "FR-006: RefTagID must name the offending tag (Side/54)";
 }
 
 TEST(ValidatorEnumDomain, Side54InDomainAccepts) {
@@ -188,7 +187,7 @@ TEST(ValidatorEnumDomain, Side54InDomainAccepts) {
     std::array<std::byte, 2048> scratch_buf{};
     std::pmr::monotonic_buffer_resource scratch_mr{scratch_buf.data(), scratch_buf.size(),
                                                    std::pmr::null_memory_resource()};
-    auto result = v.validate(mv, &scratch_mr);
+    auto result = v.validate(mv, &scratch_mr, nullptr);
     EXPECT_TRUE(result.has_value()) << "Side(54)=1 is a declared code and must accept; slot "
                                      << (result.has_value() ? -1 : static_cast<int>(result.error()));
 }
@@ -256,13 +255,15 @@ TEST(ValidatorEnumDomain, PossDupFlag43HeaderFieldOutOfDomainRejectsReason5) {
     std::array<std::byte, 2048> scratch_buf{};
     std::pmr::monotonic_buffer_resource scratch_mr{scratch_buf.data(), scratch_buf.size(),
                                                    std::pmr::null_memory_resource()};
-    auto result = v.validate(mv, &scratch_mr);
+    std::uint16_t ref_tag = 0;
+    auto result = v.validate(mv, &scratch_mr, &ref_tag);
     ASSERT_FALSE(result.has_value())
         << "PossDupFlag(43)=X is not Y/N -- a body-only walk would silently accept this "
            "(FR-015/SC-009), and validate() must reject it";
     EXPECT_EQ(result.error(), error::wire_field_value_out_of_range)
         << "got slot " << static_cast<int>(result.error());
     EXPECT_EQ(wire_error_to_session_reject_reason(result.error()), 5);
+    EXPECT_EQ(ref_tag, 43) << "FR-006: RefTagID must name the offending header tag (PossDupFlag/43)";
 }
 
 // ═══ T022a: the empty-value witness (FR-008, DV-1/DV-2) ════════════════════
@@ -273,6 +274,9 @@ TEST(ValidatorEnumDomain, PossDupFlag43HeaderFieldOutOfDomainRejectsReason5) {
 
 // DV-1: Side(54)="" (empty x Char) -> reject, but via the TYPE arm
 // (value.size() != 1), not the enum arm. Parity with QuickFIX by coincidence.
+// RefTagID assertion is a 075 T020a side benefit: the TYPE arm now carries
+// RefTagID too (pre-existing 041-era type-arm rejects previously shipped
+// without 371 at all).
 TEST(ValidatorEnumDomain, EmptyValueCharRejectsViaTypeArmNotEnumArm) {
     auto tv = load_shipped_table_view("FIX44.xml");
     dictionary_driven_validator v{std::move(tv)};
@@ -286,10 +290,13 @@ TEST(ValidatorEnumDomain, EmptyValueCharRejectsViaTypeArmNotEnumArm) {
     std::array<std::byte, 2048> scratch_buf{};
     std::pmr::monotonic_buffer_resource scratch_mr{scratch_buf.data(), scratch_buf.size(),
                                                    std::pmr::null_memory_resource()};
-    auto result = v.validate(mv, &scratch_mr);
+    std::uint16_t ref_tag = 0;
+    auto result = v.validate(mv, &scratch_mr, &ref_tag);
     ASSERT_FALSE(result.has_value()) << "Side(54)= (empty x Char) must reject (DV-1)";
     EXPECT_EQ(result.error(), error::wire_field_value_out_of_range)
         << "got slot " << static_cast<int>(result.error());
+    EXPECT_EQ(ref_tag, 54)
+        << "FR-006 side benefit: the TYPE arm must also carry RefTagID (Side/54)";
 }
 
 // DV-2: ExecInst(18)="" (empty x String) -> ACCEPT. This is the assertion
@@ -309,7 +316,7 @@ TEST(ValidatorEnumDomain, EmptyValueStringAcceptsViaBypassedEnumCheck) {
     std::array<std::byte, 2048> scratch_buf{};
     std::pmr::monotonic_buffer_resource scratch_mr{scratch_buf.data(), scratch_buf.size(),
                                                    std::pmr::null_memory_resource()};
-    auto result = v.validate(mv, &scratch_mr);
+    auto result = v.validate(mv, &scratch_mr, nullptr);
     EXPECT_TRUE(result.has_value())
         << "ExecInst(18)= (empty x String) must ACCEPT (DV-2): the enum check is bypassed "
            "on empty values (FR-008) and the String type arm imposes no constraint; slot "
@@ -339,13 +346,17 @@ TEST(ValidatorEnumDomain, GroupMemberOutOfDomainRejectsReason5) {
     std::array<std::byte, 2048> scratch_buf{};
     std::pmr::monotonic_buffer_resource scratch_mr{scratch_buf.data(), scratch_buf.size(),
                                                    std::pmr::null_memory_resource()};
-    auto result = v.validate(mv, &scratch_mr);
+    std::uint16_t ref_tag = 0;
+    auto result = v.validate(mv, &scratch_mr, &ref_tag);
     ASSERT_FALSE(result.has_value())
         << "PartyRole(452)=9999 inside a NoPartyIDs(453) group member must reject (DV-3): "
            "fixpp enum-checks group members at every depth (QuickFIX never does)";
     EXPECT_EQ(result.error(), error::wire_field_value_out_of_range)
         << "got slot " << static_cast<int>(result.error());
     EXPECT_EQ(wire_error_to_session_reject_reason(result.error()), 5);
+    EXPECT_EQ(ref_tag, 452)
+        << "FR-006: RefTagID must name the offending GROUP MEMBER tag (PartyRole/452), not the "
+           "group's count tag (NoPartyIDs/453)";
 }
 
 // Same shape but a fully in-domain group must still accept (paired positive
@@ -368,7 +379,7 @@ TEST(ValidatorEnumDomain, GroupMemberInDomainAccepts) {
     std::array<std::byte, 2048> scratch_buf{};
     std::pmr::monotonic_buffer_resource scratch_mr{scratch_buf.data(), scratch_buf.size(),
                                                    std::pmr::null_memory_resource()};
-    auto result = v.validate(mv, &scratch_mr);
+    auto result = v.validate(mv, &scratch_mr, nullptr);
     EXPECT_TRUE(result.has_value())
         << "a fully in-domain group must accept; slot "
         << (result.has_value() ? -1 : static_cast<int>(result.error()));
@@ -396,13 +407,16 @@ TEST(ValidatorEnumDomain, NestedGroupMemberOutOfDomainRejectsReason5) {
     std::array<std::byte, 2048> scratch_buf{};
     std::pmr::monotonic_buffer_resource scratch_mr{scratch_buf.data(), scratch_buf.size(),
                                                    std::pmr::null_memory_resource()};
-    auto result = v.validate(mv, &scratch_mr);
+    std::uint16_t ref_tag = 0;
+    auto result = v.validate(mv, &scratch_mr, &ref_tag);
     ASSERT_FALSE(result.has_value())
         << "PartySubIDType(803)=999 inside a depth-2 nested group member must reject (DV-3, "
            "at depth): pins that fixpp's flat Step-1 walk reaches every depth";
     EXPECT_EQ(result.error(), error::wire_field_value_out_of_range)
         << "got slot " << static_cast<int>(result.error());
     EXPECT_EQ(wire_error_to_session_reject_reason(result.error()), 5);
+    EXPECT_EQ(ref_tag, 803)
+        << "FR-006: RefTagID must name the offending NESTED group member tag (PartySubIDType/803)";
 }
 
 TEST(ValidatorEnumDomain, NestedGroupMemberInDomainAccepts) {
@@ -425,8 +439,41 @@ TEST(ValidatorEnumDomain, NestedGroupMemberInDomainAccepts) {
     std::array<std::byte, 2048> scratch_buf{};
     std::pmr::monotonic_buffer_resource scratch_mr{scratch_buf.data(), scratch_buf.size(),
                                                    std::pmr::null_memory_resource()};
-    auto result = v.validate(mv, &scratch_mr);
+    auto result = v.validate(mv, &scratch_mr, nullptr);
     EXPECT_TRUE(result.has_value())
         << "a fully in-domain depth-2 nested group must accept; slot "
         << (result.has_value() ? -1 : static_cast<int>(result.error()));
+}
+
+// ═══ T020a: Step-3 group-structure failure -- RefTagID = the group's own
+// delimiter tag (the known-missing field), NOT the group's NoXXX count tag ═
+// NoPartyIDs(453)=1 declares one PartyID group instance, but the delimiter
+// PartyID(448) never appears -- consume_group's "first instance must open
+// with the delimiter" branch (validator.hpp) fires wire_required_field_missing
+// (reason=1). RefTagID must name 448 (the missing delimiter), not 453 (the
+// count field, which IS present).
+TEST(ValidatorEnumDomain, GroupMissingDelimiterRejectsReason1RefTagIsDelimiter) {
+    auto tv = load_shipped_table_view("FIX44.xml");
+    dictionary_driven_validator v{std::move(tv)};
+
+    auto body = nos_prefix() + "54=1\x01";
+    body += "453=1\x01";  // NoPartyIDs=1, but PartyID(448) never follows.
+    auto frame = make_fix44_frame(body);
+    std::array<std::byte, 4096> stack{};
+    std::pmr::monotonic_buffer_resource arena;
+    auto mv = parse_index(frame, stack, arena);
+
+    std::array<std::byte, 2048> scratch_buf{};
+    std::pmr::monotonic_buffer_resource scratch_mr{scratch_buf.data(), scratch_buf.size(),
+                                                   std::pmr::null_memory_resource()};
+    std::uint16_t ref_tag = 0;
+    auto result = v.validate(mv, &scratch_mr, &ref_tag);
+    ASSERT_FALSE(result.has_value())
+        << "NoPartyIDs(453)=1 with no PartyID(448) delimiter must reject";
+    EXPECT_EQ(result.error(), error::wire_required_field_missing)
+        << "got slot " << static_cast<int>(result.error());
+    EXPECT_EQ(wire_error_to_session_reject_reason(result.error()), 1);
+    EXPECT_EQ(ref_tag, 448)
+        << "FR-006: Step-3 group-structure RefTagID must name the missing delimiter "
+           "(PartyID/448), not the count tag (NoPartyIDs/453)";
 }

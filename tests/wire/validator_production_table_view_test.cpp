@@ -203,7 +203,7 @@ TEST(ValidatorProductionTableView, GroupDelimiterFromWireNotTagSortedMember) {
     std::pmr::monotonic_buffer_resource scratch_mr{scratch_buf.data(), scratch_buf.size(),
                                                    std::pmr::null_memory_resource()};
 
-    auto result = v.validate(mv, &scratch_mr);
+    auto result = v.validate(mv, &scratch_mr, nullptr);
     EXPECT_TRUE(result.has_value())
         << "valid single-instance group (delimiter 200 first) must validate; "
         << "pre-fix the validator used tag-sorted members.front()=150 as the "
@@ -240,7 +240,7 @@ TEST(ValidatorProductionTableView, FloatGarbageValueRemappedToWireOutOfRange) {
     std::pmr::monotonic_buffer_resource scratch_mr{scratch_buf.data(), scratch_buf.size(),
                                                    std::pmr::null_memory_resource()};
 
-    auto result = v.validate(mv, &scratch_mr);
+    auto result = v.validate(mv, &scratch_mr, nullptr);
     ASSERT_FALSE(result.has_value()) << "validate() with garbage Float value must return an error";
     EXPECT_EQ(result.error(), error::wire_field_value_out_of_range)
         << "garbage Float must map to wire_field_value_out_of_range (slot 40), "

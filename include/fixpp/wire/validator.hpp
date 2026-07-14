@@ -58,9 +58,20 @@ public:
 
     // Unconditional validate over every dictionary-known field present in
     // `msg` (NOT per-accessor). Working set is drawn from `scratch_mr`.
+    //
+    // `ref_tag_out` (075 T020a, FR-006 RefTagID delivery): REQUIRED parameter
+    // (not defaulted — a default on a virtual is statically bound per-call-
+    // site, not inherited, so a default here would silently NOT apply through
+    // a base-class call; [[feedback_noexcept_boundary_user_callback_terminate]]-
+    // class trap, same "virtual defaults are a trap" family). Pass `nullptr`
+    // when the caller does not need per-tag provenance. On failure, an
+    // implementation SHOULD write the offending tag to `*ref_tag_out` (when
+    // non-null) IF AND ONLY IF a specific tag is genuinely known at the
+    // failure site; otherwise it MUST leave `*ref_tag_out` untouched (never
+    // invent a tag). On success, `*ref_tag_out` is left untouched.
     [[nodiscard]] virtual core::expected_t<void> validate(
-        MessageView<access_mode::Index> const& msg,
-        std::pmr::memory_resource* scratch_mr) const noexcept = 0;
+        MessageView<access_mode::Index> const& msg, std::pmr::memory_resource* scratch_mr,
+        std::uint16_t* ref_tag_out) const noexcept = 0;
 
     [[nodiscard]] virtual core::expected_t<void> validate_field(
         std::uint16_t tag, std::span<const std::byte> value) const noexcept = 0;
@@ -106,8 +117,8 @@ public:
     // scratch_mr is threaded only to the Float/decimal parse path. Well within
     // the ≤ ~600 B [2b §6.5] working-set bound (no new/delete on any path).
     [[nodiscard]] core::expected_t<void> validate(
-        MessageView<access_mode::Index> const& msg,
-        std::pmr::memory_resource* scratch_mr) const noexcept override {
+        MessageView<access_mode::Index> const& msg, std::pmr::memory_resource* scratch_mr,
+        std::uint16_t* ref_tag_out) const noexcept override {
         std::string_view const msg_type = msg.msg_type();
 
         // ── Step 0: header-order check ([2b §6.5.1], W-002) ─────────────
@@ -141,11 +152,17 @@ public:
 
             // (a) Unexpected tag check
             if (!dict_.field_valid_for(msg_type, fld.tag)) {
+                if (ref_tag_out) {
+                    *ref_tag_out = fld.tag;
+                }
                 return core::expected_t<void>{std::unexpect, core::error::wire_unexpected_tag};
             }
 
             // (b) Enum validity check
             if (!dict_.enum_valid(fld.tag, fld.value)) {
+                if (ref_tag_out) {
+                    *ref_tag_out = fld.tag;
+                }
                 return core::expected_t<void>{std::unexpect,
                                               core::error::wire_field_value_out_of_range};
             }
@@ -153,6 +170,9 @@ public:
             // (c) Type structural check ([2b §6.5 rule 3])
             auto const check = check_field_type(fld.tag, fld.value, scratch_mr);
             if (!check) {
+                if (ref_tag_out) {
+                    *ref_tag_out = fld.tag;
+                }
                 return check;
             }
         }
@@ -169,6 +189,9 @@ public:
                 continue;  // framing-guaranteed — always present
             }
             if (!msg.get(req_tag).has_value()) {
+                if (ref_tag_out) {
+                    *ref_tag_out = req_tag;
+                }
                 return core::expected_t<void>{std::unexpect,
                                               core::error::wire_required_field_missing};
             }
@@ -196,7 +219,8 @@ public:
         // on depth-≥2 membership.
         auto const ents = msg.offsets().entries();
         group_context const root_ctx{.msg_type = msg_type};  // depth 0, empty parent path
-        auto const grp = validate_group_level(ents, root_ctx, msg.bytes().data(), 0, ents.size());
+        auto const grp =
+            validate_group_level(ents, root_ctx, msg.bytes().data(), 0, ents.size(), ref_tag_out);
         if (!grp) {
             return core::expected_t<void>{std::unexpect, grp.error()};
         }
@@ -224,9 +248,15 @@ public:
     // group_context K=16 clamp (nested descent stops past depth 16, the same
     // level beyond which membership context cannot be represented), so stack
     // use is O(min(depth,16)) with no heap.
+    // `ref_tag_out` (075 T020a): non-owning, threaded through from validate();
+    // may be nullptr. Set to `delim_tag` at the two wire_required_field_missing
+    // returns below — the known-missing tag is the group's own delimiter field
+    // (either its first instance never opened, or a declared instance never
+    // materialised).
     [[nodiscard]] core::expected_t<std::size_t> consume_group(
         std::span<OffsetTable::entry const> ents, group_context const& ctx,
-        std::byte const* frame_base, std::size_t pos, std::size_t end) const noexcept {
+        std::byte const* frame_base, std::size_t pos, std::size_t end,
+        std::uint16_t* ref_tag_out) const noexcept {
         std::span<std::uint16_t const> const parent_path{ctx.parent_path.data(), ctx.depth};
         std::uint16_t const no_tag = ents[pos].tag;
         std::uint16_t const delim_tag = dict_.group_first_field(ctx.msg_type, parent_path, no_tag);
@@ -241,6 +271,9 @@ public:
         }
         // First instance must open with the delimiter.
         if (i >= end || ents[i].tag != delim_tag) {
+            if (ref_tag_out) {
+                *ref_tag_out = delim_tag;
+            }
             return core::expected_t<std::size_t>{std::unexpect,
                                                  core::error::wire_required_field_missing};
         }
@@ -274,7 +307,8 @@ public:
                     // Consume EXACTLY this ONE nested-group occurrence (never a
                     // level scan) so the return index lands one-past ITS
                     // extent, not the whole remaining range.
-                    auto const nested = consume_group(ents, child, frame_base, i, end);
+                    auto const nested =
+                        consume_group(ents, child, frame_base, i, end, ref_tag_out);
                     if (!nested) {
                         return nested;  // propagate the nested failure slot
                     }
@@ -286,6 +320,9 @@ public:
             ++actual_count;
         }
         if (actual_count != declared_count) {
+            if (ref_tag_out) {
+                *ref_tag_out = delim_tag;
+            }
             return core::expected_t<std::size_t>{std::unexpect,
                                                  core::error::wire_required_field_missing};
         }
@@ -302,7 +339,8 @@ public:
     // `consume_group`'s job — so there is no double-duty and no over-run.
     [[nodiscard]] core::expected_t<std::size_t> validate_group_level(
         std::span<OffsetTable::entry const> ents, group_context const& ctx,
-        std::byte const* frame_base, std::size_t begin, std::size_t end) const noexcept {
+        std::byte const* frame_base, std::size_t begin, std::size_t end,
+        std::uint16_t* ref_tag_out) const noexcept {
         std::span<std::uint16_t const> const parent_path{ctx.parent_path.data(), ctx.depth};
         std::size_t i = begin;
         while (i < end) {
@@ -310,7 +348,7 @@ public:
                 ++i;
                 continue;  // not a group count field at this nesting level
             }
-            auto const consumed = consume_group(ents, ctx, frame_base, i, end);
+            auto const consumed = consume_group(ents, ctx, frame_base, i, end, ref_tag_out);
             if (!consumed) {
                 return consumed;
             }

@@ -165,7 +165,7 @@ fixpp::core::expected_t<void> do_validate(dictionary_driven_validator const& v,
     std::pmr::monotonic_buffer_resource scratch_mr{scratch_buf.data(), scratch_buf.size(),
                                                    std::pmr::null_memory_resource()};
 
-    return v.validate(mv, &scratch_mr);
+    return v.validate(mv, &scratch_mr, nullptr);
 }
 
 // ── 1. Conforming Heartbeat is accepted ───────────────────────────────────────
