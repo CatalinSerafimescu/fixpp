@@ -463,3 +463,49 @@ TEST(DictEnumCensus, SC011_StoreOnlyEnumBackedTagsAreNeverMultiValueTyped) {
            "if this is zero, either the dictionary set changed or the reachability walk above no "
            "longer mirrors production; either way this test's own precondition needs re-examination.";
 }
+
+// ============================================================================
+// T044 — exact-set blast-radius pin for the QuickFIX-parity CHAR->String
+// relaxation (src/dictionary/xml_loader.cpp resolve_field_type(),
+// legacy_char_is_string). Asserts, AGAINST THE SHIPPED XML (not a
+// hand-maintained list), that the set of dictionaries declaring
+// BeginString(8) OR CheckSum(10) as type='CHAR' is EXACTLY {FIX40.xml,
+// FIX41.xml} — the two pre-FIX.4.2 dictionaries QuickFIX's
+// `m_beginString < "FIX.4.2"` rule targets (DataDictionary.cpp:589-592).
+//
+// This is an EXACT-SET predicate
+// (`[[feedback_completeness_gate_exact_set_not_subset]]`), not a
+// subset/presence check: a future dictionary refresh that adds a THIRD
+// dictionary typing tag 8/10 as CHAR (which would need the same relaxation
+// wired for it) or that removes CHAR from FIX40/FIX41's tag 8/10 (making the
+// relaxation dead code) must fail the BUILD, not pass silently. Pins the
+// exact blast radius the T044 fix is scoped to.
+// ============================================================================
+TEST(DictEnumCensus, T044_CharTypedBeginStringOrCheckSumIsExactlyFix40AndFix41) {
+    std::cout << "\n=== 075 T044: BeginString(8)/CheckSum(10) type='CHAR' census (nine QuickFIX "
+                 "dicts) ===\n";
+
+    std::set<std::string> found;
+    for (auto const& fname : kRuntimeDicts) {
+        auto const path = std::filesystem::path{FIXPP_DICT_DATA_DIR} / std::string{fname};
+        auto const raw_fields = scan_quickfix_fields(path);
+        ASSERT_FALSE(raw_fields.empty()) << fname << ": raw <fields> scan found nothing";
+
+        for (auto const& rf : raw_fields) {
+            if ((rf.tag == 8 || rf.tag == 10) && rf.type == "CHAR") {
+                found.insert(std::string{fname});
+                std::cout << "  " << fname << ": tag " << rf.tag << " (" << rf.name
+                          << ") declared type='CHAR'\n";
+            }
+        }
+    }
+
+    std::set<std::string> const expected{"FIX40.xml", "FIX41.xml"};
+    EXPECT_EQ(found, expected)
+        << "the set of shipped dictionaries declaring BeginString(8) or CheckSum(10) as "
+           "type='CHAR' must be EXACTLY {FIX40.xml, FIX41.xml} — xml_loader.cpp's "
+           "legacy_char_is_string relaxation (T044, QuickFIX DataDictionary.cpp:589-592 parity) "
+           "is scoped to precisely this set; a drift here means either a new dictionary needs "
+           "the same relaxation wired for it, or FIX40/FIX41 no longer need it (the relaxation "
+           "would be dead code) — either way, re-examine, don't silently absorb.";
+}

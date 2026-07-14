@@ -114,7 +114,23 @@ constexpr FieldTypeEntry kFieldTypeTable[] = {
     {.xml_name = "DATE", .enum_value = field_data_type::LocalMktDate},
 };
 
-[[nodiscard]] bool resolve_field_type(std::string_view name, field_data_type& out) noexcept {
+// T044 (075-live-wire-enum-validation, /clarify disposition "mirror QuickFIX"):
+// pre-FIX.4.2 dictionaries (FIX40.xml, FIX41.xml) declare `BeginString(8)` and
+// `CheckSum(10)` — and, dictionary-wide, every other CHAR-typed field — as
+// `CHAR` even though `8=FIX.4.1`/`10=047` are multi-byte. Our XML is a
+// byte-exact vendored copy of QuickFIX's own `spec/FIX41.xml`; the fix is NOT
+// in the data, it is in how the loader interprets `CHAR` for old dictionaries.
+// QuickFIX applies the exact same dictionary-wide relaxation at load time —
+// `DataDictionary::XMLTypeToType`, src/C++/DataDictionary.cpp:589-592:
+//     if (m_beginString < "FIX.4.2" && type == "CHAR") return TYPE::String;
+// `legacy_char_is_string` mirrors that condition. Do NOT "clean this up" —
+// this is deliberate reference-engine parity, not a bug.
+[[nodiscard]] bool resolve_field_type(std::string_view name, bool legacy_char_is_string,
+                                      field_data_type& out) noexcept {
+    if (legacy_char_is_string && name == "CHAR") {
+        out = field_data_type::String;
+        return true;
+    }
     for (auto const& row : kFieldTypeTable) {
         // cppcheck-suppress useStlAlgorithm  // linear search over a small constexpr table;
         // std::find_if's predicate-wrap isn't a win here
@@ -335,6 +351,15 @@ void LoaderState::parse_global_fields(pugi::xml_node const& root) {
     if (!fields) {
         throw xml_parse_error("dict::xml_parse_error: missing <fields> block under <fix>");
     }
+    // T044: `version_` (set by parse_version(), which always runs first —
+    // see parse_document()) is resolved via kVersionTable's exact
+    // type_attr+major+minor+servicepack match, so this equality check
+    // already accounts for the "FIX" vs "FIXT" family split that a raw
+    // major/minor-only comparison would get wrong (FIXT.1.1 has major=1,
+    // minor=1 and must NOT be treated as pre-FIX.4.2). Scoped to exactly the
+    // two pre-FIX.4.2 dictionaries QuickFIX's own rule targets.
+    bool const legacy_char_is_string =
+        version_ == session_version::v40 || version_ == session_version::v41;
     for (auto const& f : fields.children("field")) {
         auto const number_attr = f.attribute("number");
         if (!number_attr) {
@@ -356,7 +381,7 @@ void LoaderState::parse_global_fields(pugi::xml_node const& root) {
                                   "\"> missing name attribute");
         }
         field_data_type ft{};
-        if (!resolve_field_type(type_s, ft)) {
+        if (!resolve_field_type(type_s, legacy_char_is_string, ft)) {
             throw xml_parse_error("dict::xml_parse_error: <field type=\"" + type_s +
                                   "\"> outside [FIX50SP2 §3.3] vocabulary");
         }

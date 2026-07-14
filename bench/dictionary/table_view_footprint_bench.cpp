@@ -38,6 +38,27 @@
 // Both `dictionary` objects are loaded ONCE outside the timed loop (XML
 // parse cost is excluded — see xml_loader_bench.cpp for that figure
 // separately); only `as_table_view()` itself is timed.
+//
+// ─── MEASURED POST-CHANGE (T032, commit 51b8644c + T030/T032/T033 wip,
+//     linux-clang-release, WSL2 host, 10 X 3593 MHz CPUs) ─────────────────
+//   sizeof(fixpp::dict::table_view):            392 bytes  (336 + the owned
+//                                                enum-domain table, T017)
+//
+//   BM_TableView_BuildFix50SP2  (10 repetitions):
+//     mean:    275081 us  (~275.1 ms)  — +0.11% vs the 274789 us baseline
+//     median:  273860 us  (~273.9 ms)
+//     stddev:    7422 us  (cv 2.70%)
+//
+//   BM_TableView_BuildFix44     (10 repetitions):
+//     mean:      2697 us  (~2.70 ms)   — +5.06% vs the 2567 us baseline
+//     median:    2700 us  (~2.70 ms)
+//     stddev:    38.9 us  (cv 1.44%)
+//
+// Both deltas are single-digit-% or smaller — expected given the added enum-
+// domain projection walks the store once at build time (T015). The FIX50SP2/
+// FIX44 build-time ratio stays ~102x (was ~107x pre-change) — the superlinear
+// build-time shape observed at T011 is pre-existing and unaffected by 075
+// (T011's note: NOT 075's doing, not 075's to fix).
 // ─────────────────────────────────────────────────────────────────────────
 
 #include <fixpp/dict/dictionary.hpp>

@@ -154,6 +154,7 @@ add_executable(session_pure_tests
   test_session_event_ring_overflow.cpp
   test_reload_credentials_in_flight.cpp
   test_live_outbound_serialized.cpp
+  test_enum_validation_logon.cpp                                        # T030 (075)
   $<TARGET_OBJECTS:session_test_support>
 )
 target_link_libraries(session_pure_tests PRIVATE
@@ -177,11 +178,19 @@ target_compile_definitions(session_pure_tests PRIVATE
   FIXPP_TEST_BINARY_DIR="${CMAKE_BINARY_DIR}"   # session_layering nm/grep probe
   FIXPP_TEST_SOURCE_DIR="${CMAKE_SOURCE_DIR}"   # session_layering nm/grep probe
   FIXPP_TLS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/tls/fixtures"  # invariant_counter_witness
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""  # test_enum_validation_logon (075 T030)
 )
 add_test(NAME session_pure_tests COMMAND session_pure_tests)
 set_tests_properties(session_pure_tests PROPERTIES
   ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
   TIMEOUT 120)
+# 075 (tasks.md Test-binary discipline note): sets LABELS on the buckets it
+# joins/adds. session_pure_tests is a grouped add_test binary — one label set
+# covers the whole executable, not per-.cpp; the pre-existing 41 members ride
+# along (name-selectable via `-R session_pure_tests` as before, now ALSO
+# `ctest -L 075` / `-L session` selectable — mirrors tests/wire/CMakeLists.txt's
+# wire_dict_tests precedent).
+set_tests_properties(session_pure_tests PROPERTIES LABELS "075;session")
 
 # ── Grouped bucket: session_store_tests (6 .cpp → 1 binary) ────────────────
 # Store-family witnesses that neither construct an asio::thread_pool nor carry
