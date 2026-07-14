@@ -55,7 +55,6 @@ inline void set_ref_tag(std::uint16_t* out, std::uint16_t tag) noexcept {
     }
 }
 
-
 // [2b §4.6] runtime-virtual validation plugin. EXACTLY 5 pure-virtual.
 class Validator {
 public:
@@ -307,8 +306,7 @@ public:
                     // Consume EXACTLY this ONE nested-group occurrence (never a
                     // level scan) so the return index lands one-past ITS
                     // extent, not the whole remaining range.
-                    auto const nested =
-                        consume_group(ents, child, frame_base, i, end, ref_tag_out);
+                    auto const nested = consume_group(ents, child, frame_base, i, end, ref_tag_out);
                     if (!nested) {
                         return nested;  // propagate the nested failure slot
                     }

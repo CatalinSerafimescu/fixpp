@@ -164,8 +164,8 @@ struct group_ctx_entry {
 // (dictionary.hpp:193-205); aliasing would silently turn that into a
 // use-after-free no existing test would catch (Complexity row 2).
 struct enum_domain {
-    std::vector<std::string> codes;   // sorted bytewise ascending, deduped
-    bool multi_value{false};          // FR-005: MultiCharValue/MultiStringValue
+    std::vector<std::string> codes;  // sorted bytewise ascending, deduped
+    bool multi_value{false};         // FR-005: MultiCharValue/MultiStringValue
 };
 
 [[nodiscard]] inline group_ctx_key make_group_ctx_key(std::string_view msg_type,
@@ -174,8 +174,8 @@ struct enum_domain {
     group_ctx_key key;
     key.msg_type = std::string{msg_type};
     key.no_tag = no_tag;
-    key.depth = static_cast<std::uint8_t>(
-        std::min<std::size_t>(parent_path.size(), kMaxGroupContextDepth));
+    key.depth =
+        static_cast<std::uint8_t>(std::min<std::size_t>(parent_path.size(), kMaxGroupContextDepth));
     for (std::uint8_t i = 0; i < key.depth; ++i) {
         key.parent_path[i] = parent_path[i];
     }
@@ -407,7 +407,7 @@ public:
     // deduped, so enum_valid's binary search is valid regardless of call order.
     table_view& add_enum(std::uint16_t tag, std::string_view value) {
         auto& codes = enums_[tag].codes;
-        auto const pos = std::lower_bound(codes.begin(), codes.end(), value, code_less);
+        auto const pos = std::ranges::lower_bound(codes, value, code_less);
         if (pos == codes.end() || *pos != value) {
             codes.emplace(pos, value);  // std::string{value} — owned copy
         }
@@ -448,15 +448,20 @@ private:
     // O(log C) byte-exact, whole-token lookup over a sorted code list — no
     // case folding, no prefix matching. `token` is a slice of the caller's
     // buffer; no temporary std::string is constructed.
-    // Heterogeneous comparator: compares an owned code against a wire-value
-    // slice without materializing a std::string (enum_valid is allocation-free).
-    static bool code_less(std::string const& a, std::string_view b) noexcept {
-        return std::string_view{a} < b;
-    }
+    // Heterogeneous comparator: orders owned codes against a wire-value slice
+    // without materializing a std::string (enum_valid is allocation-free).
+    // Transparent so std::ranges::lower_bound accepts it in both directions.
+    struct code_less_t {
+        using is_transparent = void;
+        [[nodiscard]] bool operator()(std::string_view a, std::string_view b) const noexcept {
+            return a < b;
+        }
+    };
+    static constexpr code_less_t code_less{};
 
     [[nodiscard]] static bool code_declared(std::vector<std::string> const& codes,
                                             std::string_view token) noexcept {
-        auto const lb = std::lower_bound(codes.begin(), codes.end(), token, code_less);
+        auto const lb = std::ranges::lower_bound(codes, token, code_less);
         return lb != codes.end() && std::string_view{*lb} == token;
     }
 
@@ -467,11 +472,11 @@ private:
     // (DataDictionary.h:265-275) — required for interop parity, not merely
     // permitted; do not invent a more forgiving tokenizer.
     [[nodiscard]] static std::string_view next_token(std::string_view value,
-                                                      std::size_t& start) noexcept {
+                                                     std::size_t& start) noexcept {
         auto const space_pos = value.find(' ', start);
         std::string_view const token = (space_pos == std::string_view::npos)
-            ? value.substr(start)
-            : value.substr(start, space_pos - start);
+                                           ? value.substr(start)
+                                           : value.substr(start, space_pos - start);
         start = (space_pos == std::string_view::npos) ? value.size() + 1 : space_pos + 1;
         return token;
     }
@@ -479,14 +484,14 @@ private:
     // Valid-tag set per msg_type (used by field_valid_for).
     // transparent hash+equality: find(string_view) is allocation-free
     // [const §VIII.5 / §XV.1 — on the validate-ON hot path].
-    std::unordered_map<std::string, std::unordered_set<std::uint16_t>,
-                       string_hash, std::equal_to<>> valid_;
+    std::unordered_map<std::string, std::unordered_set<std::uint16_t>, string_hash, std::equal_to<>>
+        valid_;
 
     // Required-tag list per msg_type (insertion order preserved; spans stable).
     // transparent hash+equality: find(string_view) is allocation-free
     // [const §VIII.5 / §XV.1 — on the validate-ON hot path].
-    std::unordered_map<std::string, std::vector<std::uint16_t>,
-                       string_hash, std::equal_to<>> required_;
+    std::unordered_map<std::string, std::vector<std::uint16_t>, string_hash, std::equal_to<>>
+        required_;
 
     // Group first-delimiter (no_tag → first member tag).
     std::unordered_map<std::uint16_t, std::uint16_t> group_first_;

@@ -221,7 +221,7 @@ struct GlobalFieldInfo {
     std::uint16_t tag{0};
     std::string name;
     field_data_type type{};
-    std::uint16_t length_pair_data_tag{0};  // populated post-parse
+    std::uint16_t length_pair_data_tag{0};    // populated post-parse
     std::vector<PendingEnumCode> enum_codes;  // T012 — declaration-order, deduped by value
 };
 
