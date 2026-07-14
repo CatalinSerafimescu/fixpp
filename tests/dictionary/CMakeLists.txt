@@ -22,6 +22,7 @@ add_executable(dictionary_pure_tests
   ref_shape_test.cpp
   xml_loader_test.cpp
   xml_loader_enum_test.cpp        # 075 T012/T013: enum-value parse + loader strictness
+  xml_enum_codeset_test.cpp       # 075 T028: enum_values() census + exposure witness
   round_trip_test.cpp
   determinism_test.cpp
   negative_paths_test.cpp
@@ -129,6 +130,27 @@ target_compile_definitions(dictionary_orchestra_tests PRIVATE
   "FIXPP_DICT_DATA_DIR=\"${FIXPP_DICT_DATA_DIR}\"")
 add_test(NAME dictionary_orchestra_tests COMMAND dictionary_orchestra_tests)
 set_tests_properties(dictionary_orchestra_tests PROPERTIES LABELS "dictionary;orchestra")
+
+# ── 075-live-wire-enum-validation T021: dictionary census gates ──────────────
+# STANDALONE (const §VII.8) — an exact-set completeness gate is
+# isolation-sensitive. Scans the shipped dictionaries/*.xml directly via
+# pugixml (SC-010/SC-011) rather than a hand-maintained expectation list.
+# Reuses reused_tag_census.hpp's kRuntimeDicts (the nine) and
+# FIXPP_ORCHESTRA_DATA_DIR (set above by the 074 block).
+add_executable(dictionary_dict_enum_census_test dict_enum_census_test.cpp)
+target_link_libraries(dictionary_dict_enum_census_test PRIVATE
+  fixpp_dictionary
+  pugixml::pugixml
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(dictionary_dict_enum_census_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests")
+target_compile_definitions(dictionary_dict_enum_census_test PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${FIXPP_DICT_DATA_DIR}\""
+  "FIXPP_ORCHESTRA_DATA_DIR=\"${FIXPP_ORCHESTRA_DATA_DIR}\"")
+add_test(NAME dictionary_dict_enum_census_test COMMAND dictionary_dict_enum_census_test)
+set_tests_properties(dictionary_dict_enum_census_test PROPERTIES LABELS "075;dictionary;census")
 
 # mallocnesia gate for the group-context lookup no-alloc test — re-runs the
 # standalone binary under LD_PRELOAD so global malloc/calloc/realloc is

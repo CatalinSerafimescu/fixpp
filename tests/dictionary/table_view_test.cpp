@@ -253,20 +253,81 @@ TEST(TableViewTest, FieldTypeOfAgreesWithDictionary) {
         << "unknown tag must default to field_type::String";
 }
 
-// ── T007-6: enum_valid always true (Phase-1 / FR-005) ───────────────────────
+// ── T007-6 / 075-live-wire-enum-validation FR-021 artifact #4 (T025) ────────
+// FLIPPED at T025: enum_valid() is now REAL (075 T017). The ORIGINAL fixture
+// (`load_test_dictionary`) declares Side(54) with ZERO <value> children, so
+// this test previously passed VACUOUSLY — it sat on the Floor-1 empty-codeset
+// accept path and "proved" nothing about the real domain check
+// ([[feedback_coverage_push_enshrines_bugs]]). Rewritten to load a SEPARATE
+// fixture carrying a real Side(54) codeset ({"1","2"}) and assert the actual
+// domain check, while KEEPING a direct pin on the absent-tag/empty-codeset
+// accept floor (FR-003) using ClOrdID(11), which carries no codeset in either
+// fixture.
+fixpp::dict::Dictionary load_test_dictionary_with_side_enum(std::pmr::memory_resource* mr) {
+    constexpr std::string_view kXml =
+        R"(<fix type='FIX' major='4' minor='4' servicepack='0'>)"
+        R"(<fields>)"
+        R"(<field number='8'   name='BeginString'      type='STRING'/>)"
+        R"(<field number='9'   name='BodyLength'       type='LENGTH'/>)"
+        R"(<field number='10'  name='CheckSum'         type='STRING'/>)"
+        R"(<field number='11'  name='ClOrdID'          type='STRING'/>)"
+        R"(<field number='21'  name='HandlInst'        type='CHAR'/>)"
+        R"(<field number='35'  name='MsgType'          type='STRING'/>)"
+        R"(<field number='49'  name='SenderCompID'     type='STRING'/>)"
+        R"(<field number='54'  name='Side'             type='CHAR'>)"
+        R"(<value enum='1' description='Buy'/>)"
+        R"(<value enum='2' description='Sell'/>)"
+        R"(</field>)"
+        R"(<field number='55'  name='Symbol'           type='STRING'/>)"
+        R"(<field number='56'  name='TargetCompID'     type='STRING'/>)"
+        R"(</fields>)"
+        R"(<messages>)"
+        R"(<message name='NewOrderSingle' msgtype='D' msgcat='app'>)"
+        R"(  <field name='BeginString'  required='N'/>)"
+        R"(  <field name='BodyLength'   required='N'/>)"
+        R"(  <field name='CheckSum'     required='N'/>)"
+        R"(  <field name='MsgType'      required='N'/>)"
+        R"(  <field name='ClOrdID'      required='Y'/>)"
+        R"(  <field name='HandlInst'    required='Y'/>)"
+        R"(  <field name='Side'         required='Y'/>)"
+        R"(  <field name='Symbol'       required='Y'/>)"
+        R"(</message>)"
+        R"(</messages>)"
+        R"(</fix>)";
+    return fixpp::dict::XmlLoader{}.load_from_string(kXml, mr);
+}
 
-TEST(TableViewTest, EnumValidAlwaysTrue) {
+TEST(TableViewTest, EnumValidRealDomainCheck) {
     std::vector<std::byte> buf(2u * 1024u * 1024u);
     std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
-    auto dict = load_test_dictionary(&mr);
+    auto dict = load_test_dictionary_with_side_enum(&mr);
     auto tv = dict.as_table_view();
 
-    // enum_valid must return true for any tag and any value (Phase-1 stub).
+    // In-domain value ("1" — Buy) must be accepted.
+    std::array<std::byte, 1> const one{std::byte{'1'}};
+    EXPECT_TRUE(tv.enum_valid(54, std::span<const std::byte>{one.data(), one.size()}))
+        << "Side(54)=1 is declared and must be accepted";
+
+    // Out-of-domain value ("Z") must be rejected — the real domain check.
+    std::array<std::byte, 1> const z{std::byte{'Z'}};
+    EXPECT_FALSE(tv.enum_valid(54, std::span<const std::byte>{z.data(), z.size()}))
+        << "Side(54)=Z is not in {1,2} and must be rejected (FR-003/FR-006)";
+}
+
+TEST(TableViewTest, EnumValidAbsentTagAcceptFloor) {
+    // FR-003: a tag absent from the enum store (or with an empty codeset)
+    // must accept regardless of value — the anti-reject-everything floor.
+    // ClOrdID(11) carries no <value> children in this fixture.
+    std::vector<std::byte> buf(2u * 1024u * 1024u);
+    std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
+    auto dict = load_test_dictionary_with_side_enum(&mr);
+    auto tv = dict.as_table_view();
+
     std::array<std::byte, 1> val{std::byte{0}};
-    EXPECT_TRUE(tv.enum_valid(54, std::span<const std::byte>{val.data(), val.size()}))
-        << "enum_valid must always return true (Phase-1)";
+    EXPECT_TRUE(tv.enum_valid(11, std::span<const std::byte>{val.data(), val.size()}))
+        << "ClOrdID(11) has no codeset — the absent-codeset accept floor must hold (FR-003)";
     EXPECT_TRUE(tv.enum_valid(9999, std::span<const std::byte>{}))
-        << "enum_valid must always return true for any tag";
+        << "an unknown tag must accept — absent-tag accept floor must hold (FR-003)";
 }
 
 // ── T007-7: spans remain valid (table_view owns its storage) ────────────────

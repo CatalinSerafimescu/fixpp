@@ -555,21 +555,20 @@ TEST(ValidatorDomain, NestedMalformedGroupRejected) {
 }
 
 // (d) Out-of-range enum value → wire_field_value_out_of_range.
-// ── Phase-1 enum behavior (FR-005, 041-validation-gate-wiring) ───────────────
-// Enum-value checking is OUT OF SCOPE for Phase-1; enum_valid() always returns
-// true. A field value that violates a registered enum is accepted (passes
-// through) — only structural type checks apply. This pins the Phase-1
-// pass-through behavior so a future 2c enum-table PR can un-skip this.
-// The original rejection assertion is preserved as a comment for Phase-2:
-//   ASSERT_FALSE(result.has_value()) << "Side=X must be rejected in Phase-2";
-//   EXPECT_EQ(result.error(), error::wire_field_value_out_of_range);
-TEST(ValidatorDomain, EnumViolationPassedInPhase1) {
+// ── 075-live-wire-enum-validation FR-021 artifact #1 (T025) ─────────────────
+// FLIPPED at T025: enum_valid() is now REAL (075 T017). Side (tag 54) is
+// registered via make_d_grammar()'s add_enum(54,"1").add_enum(54,"2"), so
+// "X" is a genuine out-of-domain value and MUST reject with
+// wire_field_value_out_of_range / SessionRejectReason 5 (FR-006). Previously
+// (Phase-1 stub) this asserted the OPPOSITE — accept — per FR-012 that
+// re-baseline is called out explicitly here, not silently.
+TEST(ValidatorDomain, EnumViolationRejected) {
     auto gram = make_d_grammar();
     dictionary_driven_validator v{std::move(gram)};
 
     // Side (tag 54) has value "X" which is not in the {"1","2"} enum set.
-    // Phase-1: enum_valid always true → accepted (not rejected).
-    // Side(54) is type Char, "X" is 1 byte → structural Char check passes.
+    // Side(54) is type Char, "X" is 1 byte → structural Char check would
+    // pass; only the enum arm catches this.
     auto buf = make_frame(
         "35=D\x01"
         "49=SENDER\x01"
@@ -588,8 +587,10 @@ TEST(ValidatorDomain, EnumViolationPassedInPhase1) {
                                                    std::pmr::null_memory_resource()};
 
     auto result = v.validate(mv, &scratch_mr);
-    EXPECT_TRUE(result.has_value())
-        << "Phase-1: enum_valid always true; Side=X must be accepted (FR-005)";
+    ASSERT_FALSE(result.has_value()) << "Side=X (undeclared enum value) must be rejected (FR-006)";
+    EXPECT_EQ(result.error(), error::wire_field_value_out_of_range)
+        << "expected wire_field_value_out_of_range (SessionRejectReason 5), got "
+        << static_cast<int>(result.error());
 }
 
 }  // namespace

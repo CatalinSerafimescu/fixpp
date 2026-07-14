@@ -105,7 +105,9 @@ endif()
 add_executable(wire_dict_tests
   validator_production_table_view_test.cpp
   validator_nested_membership_test.cpp
-  message_view_membership_copy_test.cpp)
+  message_view_membership_copy_test.cpp
+  validator_enum_domain_test.cpp                                      # T022/T022a/T023 (075)
+  validator_enum_multivalue_test.cpp)                                 # T027 (075)
 target_link_libraries(wire_dict_tests PRIVATE
   fixpp_wire
   fixpp_dictionary
@@ -116,6 +118,12 @@ target_include_directories(wire_dict_tests PRIVATE
 target_compile_definitions(wire_dict_tests PRIVATE
   "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\"")
 add_test(NAME wire_dict_tests COMMAND wire_dict_tests)
+# 075 (tasks.md Test-binary discipline note): sets LABELS on the buckets it
+# joins/adds. wire_dict_tests is a grouped add_test binary — one label set
+# covers the whole executable, not per-.cpp; the 3 pre-existing members ride
+# along (name-selectable via `-R wire_dict_tests` as before, now ALSO
+# `ctest -L 075` / `-L wire` selectable).
+set_tests_properties(wire_dict_tests PROPERTIES LABELS "075;wire")
 
 # ── Standalone: 075 T007 QuickFIX enum-golden manifest gate ─────────────────
 # Isolation-sensitive per [const §VII.8] (a data-driven exact-hash gate) —
