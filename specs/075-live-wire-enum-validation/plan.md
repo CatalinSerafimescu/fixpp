@@ -73,7 +73,7 @@ Parity with QuickFIX is **derived from** a checked-in golden generated from the 
 
 ```text
 specs/075-live-wire-enum-validation/
-├── spec.md              # 24 FRs, 11 SCs, 2 clarification sessions, Normative References
+├── spec.md              # 24 FRs, 11 SCs, 3 clarification sessions, Normative References
 ├── plan.md              # This file
 ├── research.md          # Phase 0 — R-1..R-12 + open items
 ├── data-model.md        # Phase 1
