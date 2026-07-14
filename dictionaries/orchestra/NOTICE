@@ -1,0 +1,17 @@
+This product includes the FIX Orchestra machine-readable standard file
+OrchestraFIXLatest.xml (FIX Latest, Extension Pack 303).
+
+  Copyright (c) FIX Protocol Ltd. All Rights Reserved.
+
+Obtained from the FIX Trading Community "orchestrations" repository
+(https://github.com/FIXTradingCommunity/orchestrations) at commit
+236d4a4054f0818f1931601713f7a6a68b275df7, path "FIX Standard/OrchestraFIXLatest.xml".
+
+Licensed under the Apache License, Version 2.0 (the "License"); you may not
+use this file except in compliance with the License. A copy of the License is
+provided in the adjacent LICENSE file and may also be obtained at
+http://www.apache.org/licenses/LICENSE-2.0.
+
+This NOTICE file is provided pursuant to Section 4(d) of the Apache License,
+Version 2.0. It is vendored unmodified; the byte-for-byte content is pinned by
+the sha1 recorded in UPSTREAM.txt.

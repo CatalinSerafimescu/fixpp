@@ -59,6 +59,17 @@ struct MessageEntry {
     std::string_view name;  // English message name. Diagnostics-only.
 };
 
+// 074-orchestra-native-reader (FR-002): one enumerated {value, description}
+// pair of a codeset-backed field, returned by `Dictionary::enum_values(tag)`.
+// The string_views alias the metadata-handle's name-string pool. `description`
+// is the Orchestra `<fixr:code name=...>` symbolic name (the
+// QuickFIX-`description`-equivalent). Populated only by OrchestraLoader;
+// XmlLoader-produced dictionaries carry an empty enum store.
+struct EnumValueRef {
+    std::string_view value;        // the `<fixr:code value=...>` wire bytes
+    std::string_view description;  // the `<fixr:code name=...>` symbolic name
+};
+
 class Dictionary {
 public:
     // Move-only per `[2c §4.3]`; copying deleted (would silently duplicate
@@ -170,6 +181,15 @@ public:
     [[nodiscard]] std::string_view field_name(std::uint16_t tag) const noexcept
         [[clang::lifetimebound]];
 
+    // 074-orchestra-native-reader (FR-002): the enumerated {value, description}
+    // pairs of a codeset-backed field, keyed by `tag`. Empty span if `tag` has
+    // no codeset, or for any dictionary that does not populate the enum store
+    // (all XmlLoader/QuickFIX dictionaries). Additive, read-only, orthogonal to
+    // `table_view::enum_valid` (unchanged Phase-1 stub). Aliases the
+    // metadata-handle name pool (lifetime = this Dictionary).
+    [[nodiscard]] std::span<EnumValueRef const> enum_values(std::uint16_t tag) const noexcept
+        [[clang::lifetimebound]];
+
     // 041-validation-gate-wiring T008: build a `dict::table_view` from this
     // Dictionary for use by `wire::dictionary_driven_validator`. The returned
     // `table_view` owns its tables; all validator method calls on it are O(1)
@@ -186,6 +206,7 @@ public:
 
 private:
     friend class XmlLoader;
+    friend class OrchestraLoader;  // 074: native Orchestra reader shares the private handle-ctor
 
     // Constructed from inside XmlLoader::load*; ctor body lives in the .cpp.
     Dictionary() noexcept = default;

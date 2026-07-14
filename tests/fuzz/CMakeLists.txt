@@ -39,6 +39,16 @@ set_target_properties(fuzz_dict_xml_loader PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
 )
 
+# 074-orchestra-native-reader — OrchestraLoader fuzzer, sibling to
+# fuzz_dict_xml_loader (Seam #8 of `[2c §9]`) per `[const §VII.7]`.
+add_executable(fuzz_orchestra_loader fuzz_orchestra_loader.cpp)
+target_link_libraries(fuzz_orchestra_loader PRIVATE fixpp_dictionary fixpp_core)
+target_compile_options(fuzz_orchestra_loader PRIVATE -fsanitize=fuzzer,address)
+target_link_options(fuzz_orchestra_loader PRIVATE -fsanitize=fuzzer,address)
+set_target_properties(fuzz_orchestra_loader PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+)
+
 # T050 — Seam #11 — Wire framer fuzzer for 004-wire-codec per `[const §VII.7]`.
 # fuzz_wire_framer: feed arbitrary bytes to Framer::feed; assert bounded carry,
 # no OOB/UB, all rejections are defined wire_* errors.

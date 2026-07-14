@@ -1,0 +1,8 @@
+FIXTradingCommunity/orchestrations @ 236d4a4054f0818f1931601713f7a6a68b275df7 tag=FIX.Latest_EP303 date=2026-06-03
+
+OrchestraFIXLatest.xml
+  path=FIX Standard/OrchestraFIXLatest.xml
+  bytes=7525180
+  sha1=26f60db1c1f52d169d3b6825ac68800abf487fde
+  edition=FIX Latest as of Extension Pack 303 (EP303)
+  license=Apache-2.0 (see LICENSE, NOTICE)

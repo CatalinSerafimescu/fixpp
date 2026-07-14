@@ -31,15 +31,17 @@ namespace fixpp::dict {
 // the five runtime-XML-only versions.
 enum class session_version : std::uint8_t {
     Unknown = 0,
-    v40 = 1,     // runtime-XML only (no codegen namespace) — F1
-    v41 = 2,     // runtime-XML only — F1
-    v42 = 3,     // codegen + runtime-XML
-    v43 = 4,     // runtime-XML only — F1
-    v44 = 5,     // codegen + runtime-XML
-    v50 = 6,     // runtime-XML only — F1
-    v50sp1 = 7,  // runtime-XML only — F1
-    v50sp2 = 8,  // codegen + runtime-XML
-    vt11 = 9,    // codegen (FIXT.1.1 session-layer)
+    v40 = 1,       // runtime-XML only (no codegen namespace) — F1
+    v41 = 2,       // runtime-XML only — F1
+    v42 = 3,       // codegen + runtime-XML
+    v43 = 4,       // runtime-XML only — F1
+    v44 = 5,       // codegen + runtime-XML
+    v50 = 6,       // runtime-XML only — F1
+    v50sp1 = 7,    // runtime-XML only — F1
+    v50sp2 = 8,    // codegen + runtime-XML
+    vt11 = 9,      // codegen (FIXT.1.1 session-layer)
+    vlatest = 10,  // 074: FIX Latest (Orchestra EP303) — runtime-dictionary read tier
+                   // only; wire application version maps to v50sp2 (no distinct ApplVerID).
 };
 
 // The *default application* version a FIXT.1.1 session resolves to when

@@ -17,6 +17,7 @@
 | `FIX40`…`FIX50SP2` | FIX application spec per version (classic tag=value) | fixtrading.org/standards/ |
 | `FIX-TC` | FIX Session Layer Test Cases (online ed.) | fixtrading.org/standards/fix-session-testcases-online/ |
 | `FIX-Latest` | FIX Latest (living online standard) | fixtrading.org/standards/fix-latest-online/ |
+| `FIX-Orchestra` | FIX Orchestra machine-readable standard — `fixr:repository` schema (datatypes, codesets, fields, components, groups, messages) | fixtrading.org/standards/fix-orchestra-online/ |
 
 **Note on FIXT:** FIXT.1.1 is not a separate online document; its normative content is embedded in `FIX-SL §4` (session rules apply to all profiles) and described in `FIX-SL §5.3` (FIXT session profile). References use `[FIX-SL §5.3.x]` for FIXT-specific items and `[FIX-SL §4.x]` for shared session rules.
 
@@ -577,6 +578,8 @@ Both A-018 and A-024 in the catalogue reference MsgType BN (ExecutionAcknowledge
 
 Scope: confirm A-035–A-065 account for all new MsgTypes in FIX Latest not present in FIX 5.0SP2. EP-level field additions to existing messages are a post-1.0 gap (see Post-1.0 Gap Registry).
 
+> **074-orchestra-native-reader link (read/dictionary tier).** All 31 FIX Latest new MsgTypes (A-035–A-065) are now **queryable at the runtime-dictionary read tier** via `dict::OrchestraLoader` (feature 074): they are among the 181 messages of `OrchestraFIXLatest.xml` (EP303) loaded under `session_version::vlatest`, with fields / codesets / group shapes resolvable through the standard `Dictionary`/`table_view` surface. This is the **read/dictionary tier only** — typed `owning_<Message>` codegen, live-wire validation, and ApplExtID(1156)=303 differentiation for these MsgTypes remain **backlog** (post-1.0; see each row's status + Non-Goals in `specs/074-orchestra-native-reader/spec.md`). The catalogue rows below therefore stay `backlog` (they track the typed/wire delivery, not the read tier).
+
 | MsgType | Message | Catalogue ID | Gap note |
 |---|---|---|---|
 | CF | PartyDetailsListRequest | A-043 | — |
@@ -698,7 +701,7 @@ Items that are normative in the spec but explicitly deferred from fixpp v1.0. Th
 | FIX-SL §7 Attachment group (alt-encoded payloads over FIX envelope) | FIX-SL §7 | SOFH framing (W-016) is the practical path; attachment group is legacy | post-v1.1 (SOFH milestone) |
 | FIXS §3.6 Application-specific TLS (ALPN / SNI extensions) | FIXS §3.6 | Operational/infrastructure concern; not required by any known FIX venue for v1.0 | v1.3 (if requested) |
 | LFIXT succinct mode interoperability (S-028) | FIX-SL §5.4.5 | Non-interoperable with standard FIXT; no known production demand for v1.0 | v1.x (on demand) |
-| FIX Orchestra / Rules of Engagement machine-readable format (D-011) | FIX Orchestra spec | Future direction; QuickFIX XML sufficient for v1.0 | v1.2+ |
+| FIX Orchestra / Rules of Engagement machine-readable format (D-011) — **read/dictionary tier PROMOTED → in-scope, delivered by 074-orchestra-native-reader (v1.0)**; only the typed-codegen / live-wire / ApplExtID(1156)=303 / session-negotiation tiers remain deferred | FIX Orchestra spec (`[FIX-Orchestra]`) | Read/dictionary tier: DELIVERED in v1.0 by 074 (`dict::OrchestraLoader` → `session_version::vlatest`). Remaining tiers: typed codegen for the 181 FIX Latest classes + wire-level differentiation stay post-1.0 (constitution Article I §1, v0.6 amendment; row 4b) | v1.2+ (typed/wire tiers only) |
 | FIXP binary session layer framing (W-015) | FIXP spec | Separate protocol; addressed in v1.4 | v1.4 |
 | SBE (Simple Binary Encoding) wire format (OSS-012, OSS-013) | Aeron SBE spec | Separate encoding; addressed in v1.3 | v1.3 |
 | FAST encoding (OSS-011) | OpenFAST spec | Separate encoding; addressed in v1.5 | v1.5 |

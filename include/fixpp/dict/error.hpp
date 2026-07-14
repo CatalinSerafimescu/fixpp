@@ -84,6 +84,22 @@ public:
     }
 };
 
+// Thrown by `OrchestraLoader::load*` (074-orchestra-native-reader) on any
+// malformed / wrong-grammar Orchestra input: non-`fixr:repository` root,
+// unknown `<fixr:datatype>` token used by a field, dangling component ref,
+// truncated/malformed XML, or a QuickFIX-XML file fed to the Orchestra reader.
+//
+// DERIVES from `xml_parse_error` (so existing `catch (xml_parse_error&)` /
+// `catch (std::exception&)` bad-dictionary handlers still catch it) and REUSES
+// the inherited `code()` (`dict_xml_parse_failed`) — it does NOT append a
+// `fixpp::core::error` variant, NO C-ABI change (the
+// `group_delimiter_collision_error` precedent, 072). Callers that need to
+// distinguish it discriminate by catch type: `catch (orchestra_parse_error&)`.
+class orchestra_parse_error : public xml_parse_error {
+public:
+    using xml_parse_error::xml_parse_error;
+};
+
 // Thrown by `XmlLoader::load*` when the XML's
 // `<fix major="..." minor="..." [servicepack="..."]>` header does not resolve
 // to one of the nine v1.0-supported FIX versions per `[2c §1.3]` (AC-L4).
