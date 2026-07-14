@@ -21,6 +21,7 @@ set(FIXPP_DICT_DATA_DIR "${CMAKE_SOURCE_DIR}/dictionaries")
 add_executable(dictionary_pure_tests
   ref_shape_test.cpp
   xml_loader_test.cpp
+  xml_loader_enum_test.cpp        # 075 T012/T013: enum-value parse + loader strictness
   round_trip_test.cpp
   determinism_test.cpp
   negative_paths_test.cpp
@@ -47,7 +48,7 @@ target_include_directories(dictionary_pure_tests PRIVATE
 target_compile_definitions(dictionary_pure_tests PRIVATE
   "FIXPP_DICT_DATA_DIR=\"${FIXPP_DICT_DATA_DIR}\"")
 add_test(NAME dictionary_pure_tests COMMAND dictionary_pure_tests)
-set_tests_properties(dictionary_pure_tests PROPERTIES LABELS dictionary)
+set_tests_properties(dictionary_pure_tests PROPERTIES LABELS "dictionary;075")
 
 # ── Standalone: isolation-sensitive dictionary tests (FR-002) ─────────────────
 # Each keeps its own executable + add_test(NAME <target>) so its name, labels,
@@ -72,6 +73,18 @@ foreach(target IN LISTS FIXPP_DICT_STANDALONE)
   add_test(NAME ${target} COMMAND ${target})
   set_tests_properties(${target} PROPERTIES LABELS dictionary)
 endforeach()
+
+# ── 075-live-wire-enum-validation: table_view::enum_valid unit witnesses ─────
+# Standalone (new; needs its own "075" label so `ctest -L 075` selects it
+# without widening the "dictionary"-only pure bucket's LABELS). T017/T018/T019.
+add_executable(dictionary_table_view_enum_domain_test table_view_enum_domain_test.cpp)
+target_link_libraries(dictionary_table_view_enum_domain_test PRIVATE
+  fixpp_dictionary
+  GTest::gtest
+  GTest::gtest_main
+)
+add_test(NAME dictionary_table_view_enum_domain_test COMMAND dictionary_table_view_enum_domain_test)
+set_tests_properties(dictionary_table_view_enum_domain_test PROPERTIES LABELS "075;dictionary")
 
 # ── 074-orchestra-native-reader: native Orchestra reader test bucket ─────────
 # Grouped whole-binary executable (const §VII.8), LABELS "dictionary;orchestra";

@@ -13,7 +13,8 @@
 // headers to satisfy test TUs that still include "support/mock_dict_table.hpp"
 // before validator.hpp. The production `table_view` provides the same 6-method
 // validator surface AND the chain-style builder API (add_required, add_valid,
-// set_type, set_group_first, add_group_member, add_enum) that these tests use.
+// set_type, set_group_first, add_group_member, add_enum, set_multi_value) that
+// these tests use.
 //
 // No test changes are required to keep existing wire validator tests working.
 // Tests that want to migrate to the production header directly may include
