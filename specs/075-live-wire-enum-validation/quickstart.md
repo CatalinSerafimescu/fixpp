@@ -32,7 +32,7 @@ The scenario that breaks **conformant, shipped** traffic if FR-004/FR-005 are bo
 3. Feed `18=1 ZZ 6` (middle token undeclared). **Expect: reject, reason 5, RefTagID 18.**
 4. Feed `18=1` (single token). **Expect: accept.**
 5. Degenerate forms (FR-014, QuickFIX parity): `18=1  G` (double space) and `18=1 ` (trailing space) → **reject** (the empty token is never a declared code).
-6. Repeat across the full multi-value census — FIX44: `18, 276, 277, 286, 291, 292, 529, 546`; FIX50/SP1 add `1031, 1035`.
+6. Repeat across the full multi-value census — FIX44: `18, 276, 277, 286, 291, 292, 529, 546`; FIX50/SP1 add `1031, 1035`; **FIX50SP2 has 9** (tag `1035` is `MULTIPLESTRINGVALUE` but declares zero `<value>` children, so it is not enum-backed).
 
 **Mutation check**: replace the tokenizer with a whole-string lookup. Step 2 **must** flip to reject. A green step 2 under that mutation means tokenization is not being exercised.
 
