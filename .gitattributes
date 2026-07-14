@@ -4,3 +4,11 @@
 # runners) does not CRLF-convert them and break the byte-exact determinism gate
 # (tests/codegen/determinism_test.cpp — DeterminismTest.GeneratedMatchesGolden).
 *.golden.hpp -text
+
+# 074-orchestra-native-reader: the vendored FIX Orchestra source is pinned by a
+# byte-exact sha1 supply-chain gate (tests/dictionary/CMakeLists.txt file(SHA1)
+# vs 26f60db1…). A Windows checkout (core.autocrlf=true on the windows-msvc
+# runners) CRLF-converts it → different bytes → different sha1 → the gate
+# FATAL_ERRORs at configure. Pin it to LF so it is byte-identical on all
+# platforms (same class as the golden fixtures above).
+dictionaries/orchestra/OrchestraFIXLatest.xml -text
