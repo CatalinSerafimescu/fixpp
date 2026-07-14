@@ -402,16 +402,12 @@ public:
         return *this;
     }
 
-    // T019 [FR-021]: real enum-domain population — inserts an OWNED COPY of
-    // `value`'s bytes into `tag`'s sorted, deduped code list. The table owns
-    // its bytes (see `enum_domain` above); never aliases the caller's buffer
-    // or the dictionary's name_pool_. Sorted-on-insert so enum_valid's binary
-    // search is always valid regardless of call order.
+    // Inserts an OWNED COPY of `value`'s bytes into `tag`'s code list (see
+    // `enum_domain` above for why the table owns them). Sorted-on-insert and
+    // deduped, so enum_valid's binary search is valid regardless of call order.
     table_view& add_enum(std::uint16_t tag, std::string_view value) {
         auto& codes = enums_[tag].codes;
-        auto const pos = std::lower_bound(
-            codes.begin(), codes.end(), value,
-            [](std::string const& a, std::string_view b) noexcept { return std::string_view{a} < b; });
+        auto const pos = std::lower_bound(codes.begin(), codes.end(), value, code_less);
         if (pos == codes.end() || *pos != value) {
             codes.emplace(pos, value);  // std::string{value} — owned copy
         }
@@ -452,11 +448,15 @@ private:
     // O(log C) byte-exact, whole-token lookup over a sorted code list — no
     // case folding, no prefix matching. `token` is a slice of the caller's
     // buffer; no temporary std::string is constructed.
+    // Heterogeneous comparator: compares an owned code against a wire-value
+    // slice without materializing a std::string (enum_valid is allocation-free).
+    static bool code_less(std::string const& a, std::string_view b) noexcept {
+        return std::string_view{a} < b;
+    }
+
     [[nodiscard]] static bool code_declared(std::vector<std::string> const& codes,
                                             std::string_view token) noexcept {
-        auto const lb = std::lower_bound(
-            codes.begin(), codes.end(), token,
-            [](std::string const& a, std::string_view b) noexcept { return std::string_view{a} < b; });
+        auto const lb = std::lower_bound(codes.begin(), codes.end(), token, code_less);
         return lb != codes.end() && std::string_view{*lb} == token;
     }
 

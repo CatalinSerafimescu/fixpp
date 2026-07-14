@@ -492,20 +492,11 @@ table_view Dictionary::as_table_view() const {
     // ACCEPTING out-of-domain values through a frozen public API, an FR-003
     // (normative MUST) violation. This is the C3-1 fix.
     //
-    // `enum_runs_` is sorted by tag with each run's codes contiguous in
-    // `enum_values_` (dictionary_internal.hpp) — walked directly, once, here
-    // ([const §XV.1]/[const §VIII.5]: config-time build, never per message).
-    // `add_enum` copies the code bytes into `table_view`'s own storage — it
-    // does NOT alias `handle_->name_pool_`, so the returned `table_view`
-    // remains valid even after this `Dictionary` (and its metadata handle)
-    // is destroyed (dictionary.hpp:193-205 — a currently-legal
-    // table_view-outlives-Dictionary usage).
+    // Built once here, never per message ([const §XV.1], [const §VIII.5]).
+    // `add_enum` copies the code bytes; see `enum_domain` (table_view.hpp) for
+    // why the table must own them rather than alias `handle_->name_pool_`.
     for (auto const& run : handle_->enum_runs_) {
-        if (run.count == 0 || run.start + run.count > handle_->enum_values_.size()) {
-            continue;
-        }
-        for (std::uint32_t i = 0; i < run.count; ++i) {
-            auto const& ev = handle_->enum_values_[run.start + i];
+        for (auto const& ev : enum_values(run.tag)) {
             tv.add_enum(run.tag, ev.value);
         }
     }

@@ -46,6 +46,16 @@
 
 namespace fixpp::wire {
 
+// Record the offending tag for FR-006's RefTagID(371), when the caller asked
+// for it. A null `out` is the "don't care" sentinel, so every failure site can
+// report unconditionally without repeating the guard.
+inline void set_ref_tag(std::uint16_t* out, std::uint16_t tag) noexcept {
+    if (out != nullptr) {
+        *out = tag;
+    }
+}
+
+
 // [2b §4.6] runtime-virtual validation plugin. EXACTLY 5 pure-virtual.
 class Validator {
 public:
@@ -152,17 +162,13 @@ public:
 
             // (a) Unexpected tag check
             if (!dict_.field_valid_for(msg_type, fld.tag)) {
-                if (ref_tag_out) {
-                    *ref_tag_out = fld.tag;
-                }
+                set_ref_tag(ref_tag_out, fld.tag);
                 return core::expected_t<void>{std::unexpect, core::error::wire_unexpected_tag};
             }
 
             // (b) Enum validity check
             if (!dict_.enum_valid(fld.tag, fld.value)) {
-                if (ref_tag_out) {
-                    *ref_tag_out = fld.tag;
-                }
+                set_ref_tag(ref_tag_out, fld.tag);
                 return core::expected_t<void>{std::unexpect,
                                               core::error::wire_field_value_out_of_range};
             }
@@ -170,9 +176,7 @@ public:
             // (c) Type structural check ([2b §6.5 rule 3])
             auto const check = check_field_type(fld.tag, fld.value, scratch_mr);
             if (!check) {
-                if (ref_tag_out) {
-                    *ref_tag_out = fld.tag;
-                }
+                set_ref_tag(ref_tag_out, fld.tag);
                 return check;
             }
         }
@@ -189,9 +193,7 @@ public:
                 continue;  // framing-guaranteed — always present
             }
             if (!msg.get(req_tag).has_value()) {
-                if (ref_tag_out) {
-                    *ref_tag_out = req_tag;
-                }
+                set_ref_tag(ref_tag_out, req_tag);
                 return core::expected_t<void>{std::unexpect,
                                               core::error::wire_required_field_missing};
             }
@@ -271,9 +273,7 @@ public:
         }
         // First instance must open with the delimiter.
         if (i >= end || ents[i].tag != delim_tag) {
-            if (ref_tag_out) {
-                *ref_tag_out = delim_tag;
-            }
+            set_ref_tag(ref_tag_out, delim_tag);
             return core::expected_t<std::size_t>{std::unexpect,
                                                  core::error::wire_required_field_missing};
         }
@@ -320,9 +320,7 @@ public:
             ++actual_count;
         }
         if (actual_count != declared_count) {
-            if (ref_tag_out) {
-                *ref_tag_out = delim_tag;
-            }
+            set_ref_tag(ref_tag_out, delim_tag);
             return core::expected_t<std::size_t>{std::unexpect,
                                                  core::error::wire_required_field_missing};
         }
