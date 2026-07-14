@@ -20,6 +20,22 @@ set_target_properties(xml_loader_bench PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bench/dictionary"
 )
 
+# ── T011: table_view_footprint_bench ────────────────────────────────────────
+# 075-live-wire-enum-validation SC-006 pre-change baseline: as_table_view()
+# build time + sizeof(table_view) on FIX50SP2 (largest) and FIX44 (mid-size).
+add_executable(table_view_footprint_bench table_view_footprint_bench.cpp)
+target_link_libraries(table_view_footprint_bench PRIVATE
+  fixpp_dictionary
+  benchmark::benchmark
+  benchmark::benchmark_main
+)
+target_compile_definitions(table_view_footprint_bench PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${FIXPP_DICT_DATA_DIR}\""
+)
+set_target_properties(table_view_footprint_bench PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bench/dictionary"
+)
+
 # ── T047: reify_bench ────────────────────────────────────────────────────────
 # NFR-003-3 dict::reify_as / dict::reify latency harness (seam #5/#6).
 # Includes generated Reify.hpp and _dispatch/ headers (build-tree, AC-C4).
