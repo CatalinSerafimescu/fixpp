@@ -166,7 +166,26 @@ struct group_ctx_entry {
 struct enum_domain {
     std::vector<std::string> codes;  // sorted bytewise ascending, deduped
     bool multi_value{false};         // FR-005: MultiCharValue/MultiStringValue
+
+    // Tier-2 single-char fast path (perf round): when EVERY declared code is
+    // exactly one byte (69.7% of all codes across the 10 shipped dicts;
+    // 1530 of 1894 enum fields are all-single-char), membership collapses to
+    // one bit test in this 256-bit mask instead of a binary search over
+    // `codes`. `all_single_char` starts true and is cleared by add_enum the
+    // first time a code with size != 1 is inserted; when it is false the mask
+    // is unused and `codes` (the byte-exact fallback) drives the check — so
+    // mixed/multi-char sets (305 mixed + 59 all-multi fields) stay byte-exact.
+    // `codes` is ALWAYS maintained (both representations of the same set) so
+    // the fallback and the mutation witnesses are unaffected.
+    bool all_single_char{true};
+    std::array<std::uint64_t, 4> single_char_mask{};  // bit b set ⟺ 1-byte code b declared
 };
+
+[[nodiscard]] inline bool mask_has(std::array<std::uint64_t, 4> const& m,
+                                   unsigned char b) noexcept {
+    return ((m[static_cast<std::size_t>(b) >> 6U] >> (static_cast<std::size_t>(b) & 63U)) & 1U) !=
+           0U;
+}
 
 [[nodiscard]] inline group_ctx_key make_group_ctx_key(std::string_view msg_type,
                                                       std::span<std::uint16_t const> parent_path,
@@ -360,9 +379,17 @@ public:
         enum_domain const& domain = it->second;
 
         if (!domain.multi_value) {
-            // Single-value: byte-exact whole-token binary search. No case
-            // folding, no prefix matching (FR-009) — MatchType(574)=A must
-            // reject on a codeset declaring A1..A5 but not bare A.
+            // Single-value: byte-exact whole-token match. No case folding, no
+            // prefix matching (FR-009) — MatchType(574)=A must reject on a
+            // codeset declaring A1..A5 but not bare A.
+            if (domain.all_single_char) {
+                // Tier-2 fast path: every declared code is 1 byte, so any
+                // value of length != 1 cannot match (whole-token), and a
+                // 1-byte value is a single mask bit test. Byte-exact-identical
+                // to code_declared over an all-1-byte sorted set.
+                return sv.size() == 1 &&
+                       mask_has(domain.single_char_mask, static_cast<unsigned char>(sv[0]));
+            }
             return code_declared(domain.codes, sv);
         }
 
@@ -372,7 +399,18 @@ public:
         std::size_t start = 0;
         while (start <= sv.size()) {
             std::string_view const token = next_token(sv, start);
-            if (!code_declared(domain.codes, token)) {
+            bool declared;
+            if (domain.all_single_char) {
+                // Same fast path per token. A multi-char token cannot exist as
+                // a declared code in an all-single-char set (guard: size != 1
+                // ⇒ reject), and an empty token (size 0) rejects — byte-exact
+                // with the fallback's "empty token is never declared".
+                declared = token.size() == 1 &&
+                           mask_has(domain.single_char_mask, static_cast<unsigned char>(token[0]));
+            } else {
+                declared = code_declared(domain.codes, token);
+            }
+            if (!declared) {
                 return false;
             }
         }
@@ -440,10 +478,23 @@ public:
     // deduped, so enum_valid's binary search is valid regardless of call order.
     table_view& add_enum(std::uint16_t tag, std::string_view value) {
         set_enum_bit(tag);
-        auto& codes = enums_[tag].codes;
+        auto& domain = enums_[tag];
+        auto& codes = domain.codes;
         auto const pos = std::ranges::lower_bound(codes, value, code_less);
         if (pos == codes.end() || *pos != value) {
             codes.emplace(pos, value);  // std::string{value} — owned copy
+        }
+        // Tier-2 single-char mask maintenance (idempotent; safe on dup calls).
+        // A 1-byte code sets its bit; ANY code with size != 1 (including the
+        // empty string, were it ever inserted) permanently clears the
+        // fast-path flag so the byte-exact `codes` fallback drives the check.
+        if (value.size() == 1) {
+            domain.single_char_mask[static_cast<std::size_t>(static_cast<unsigned char>(value[0])) >>
+                                    6U] |=
+                (std::uint64_t{1}
+                 << (static_cast<std::size_t>(static_cast<unsigned char>(value[0])) & 63U));
+        } else {
+            domain.all_single_char = false;
         }
         return *this;
     }
