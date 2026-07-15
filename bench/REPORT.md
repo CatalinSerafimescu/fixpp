@@ -53,14 +53,29 @@ the timed loop; only `validate()` itself is timed. Baseline:
 | BM_Validator_Validate_NewOrderSingle | FIX44 D, Side/OrdType/TimeInForce enums | ≤ 200 ns | **1214 ns** |
 | BM_Validator_Validate_NewOrderSingleMultiValueExecInst | FIX44 D + ExecInst(18)="1 G 6" (multi-value) | ≤ 200 ns | **1265 ns** |
 
-**FINDING (flagged for the orchestrator, NOT fixed in this bench-only PR):**
-all four cases exceed the `[2b §6.6]` ≤200 ns ceiling — the smallest fixture
-(Heartbeat, header fields only, zero enum-backed body fields) already runs
-~2.8x over ceiling, and both `NewOrderSingle` cases exceed 1 microsecond
-(~6x over ceiling). This bench round is scoped to adding the harness itself
-(Article VIII §3 compliance); the ceiling breach is a real perf regression
-finding for the orchestrator to triage, not something this round's
-bench-only mandate permits fixing.
+**FINDING — TRIAGED (Gate B PR #193, 2026-07-15).** All four cases exceed the
+`[2b §6.6]` ≤200 ns ceiling. Isolation (rebuilding this same bench with
+`enum_valid()` reverted to `return true`) splits the cause in two:
+
+| Case | pre-075 (`enum_valid→true`) | 075 (real) | 075 delta |
+|---|---|---|---|
+| Heartbeat | 489 ns | 568 ns | +79 ns (+16%) |
+| Logon | 741 ns | 848 ns | +107 ns (+14%) |
+| NewOrderSingle | 910 ns | 1214 ns | +304 ns (+33%) |
+| NOS + multi-value | 986 ns | 1265 ns | +279 ns (+28%) |
+
+1. **The ceiling breach is PRE-EXISTING** — `validate()` is 489–986 ns (2.4–4.9×
+   over 200 ns) *with enum-checking off*; the Heartbeat fixture (zero enum-backed
+   body fields) proves it. Not introduced by 075.
+2. **075 adds a real +16%–+33%** on the enum path (default-off; only
+   `validate_inbound_messages=true` sessions pay it).
+
+**075 is NOT blocked**: Article VIII §3 (bench must exist) is satisfied by this
+harness; §2 (±5% vs baseline) has no prior validator baseline to regress against
+— this SEEDS it; §4's ≤200 ns is a v1.0 *target* and the breach is pre-existing.
+**User disposition (2026-07-15):** accept + merge; optimize BOTH the pre-existing
+walk and the enum delta toward 200 ns as a scheduled v1.0 step (after Orchestra) —
+`research/G19-fix-fpml-iso20022/remaining-work/validator-perf-optimization.md`.
 
 ## PR68-08 — Release baseline follow-up (gate-b/r1, 2026-05-17)
 
