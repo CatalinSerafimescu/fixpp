@@ -12,3 +12,16 @@
 # FATAL_ERRORs at configure. Pin it to LF so it is byte-identical on all
 # platforms (same class as the golden fixtures above).
 dictionaries/orchestra/OrchestraFIXLatest.xml -text
+
+# 075-live-wire-enum-validation: the enum-golden manifest gate raw-byte-SHA1s
+# these vendored/pinned text files (tests/wire/enum_golden_manifest_test.cpp
+# DictionarySha1{Fix44,Fix41,Fix42}Matches + GeneratorSourceHashMatches). A
+# Windows checkout (core.autocrlf=true on the windows-msvc runners) CRLF-converts
+# them → different bytes → different sha1 → the manifest test fails (it passed
+# locally only because the rsync-populated MSVC sandbox carries LF files, which
+# cannot reproduce a real Windows git checkout). Pin to LF (same class as above).
+dictionaries/FIX44.xml -text
+dictionaries/FIX41.xml -text
+dictionaries/FIX42.xml -text
+tools/quickfix_enum_golden/main.cpp -text
+tools/quickfix_enum_golden/golden.csv -text
