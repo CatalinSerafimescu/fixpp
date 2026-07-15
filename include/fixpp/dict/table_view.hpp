@@ -327,6 +327,13 @@ public:
     // Two DISTINCT accept-floors — not the same rule, both required:
     [[nodiscard]] bool enum_valid(std::uint16_t tag,
                                   std::span<const std::byte> value) const noexcept {
+        // perf pre-filter (exact — see enum_bits_ doc): a clear bit proves
+        // enums_ has no entry for `tag`, which is Floor 1's accept arm, so
+        // skip the hash probe entirely. Most fields of most messages are not
+        // enum-backed; this makes them hash-free.
+        if (!enum_bit(tag)) {
+            return true;
+        }
         auto const it = enums_.find(tag);
 
         // Floor 1 [FR-003]: tag absent from the enum store, OR its declared
@@ -432,6 +439,7 @@ public:
     // `enum_domain` above for why the table owns them). Sorted-on-insert and
     // deduped, so enum_valid's binary search is valid regardless of call order.
     table_view& add_enum(std::uint16_t tag, std::string_view value) {
+        set_enum_bit(tag);
         auto& codes = enums_[tag].codes;
         auto const pos = std::ranges::lower_bound(codes, value, code_less);
         if (pos == codes.end() || *pos != value) {
@@ -444,6 +452,7 @@ public:
     // carry — without this, FR-004's tokenizer (T018) has no unit-level
     // witness that does not require a full XML load.
     table_view& set_multi_value(std::uint16_t tag, bool multi = true) {
+        set_enum_bit(tag);
         enums_[tag].multi_value = multi;
         return *this;
     }
@@ -561,6 +570,24 @@ private:
 
     // Global tag → field_type map (built once from Dictionary).
     std::unordered_map<std::uint16_t, field_type> types_;
+
+    // perf pre-filter over enums_ (same exact-superset pattern as
+    // group_bits_ above): bit `tag` is set by BOTH population paths
+    // (add_enum / set_multi_value). A clear bit ⟹ enums_.find(tag) misses
+    // ⟹ enum_valid's Floor-1 accept — the filter only skips the hash
+    // probe, never changes an answer. NOTE for future editors: any NEW
+    // population path into enums_ MUST call set_enum_bit(tag).
+    std::array<std::uint64_t, 1024> enum_bits_{};
+
+    [[nodiscard]] bool enum_bit(std::uint16_t tag) const noexcept {
+        return ((enum_bits_[static_cast<std::size_t>(tag) >> 6U] >>
+                 (static_cast<std::size_t>(tag) & 63U)) &
+                1U) != 0U;
+    }
+    void set_enum_bit(std::uint16_t tag) noexcept {
+        enum_bits_[static_cast<std::size_t>(tag) >> 6U] |=
+            (std::uint64_t{1} << (static_cast<std::size_t>(tag) & 63U));
+    }
 
     // T017/T019 (data-model.md Entity B): enum-domain table, tag → owned
     // sorted/deduped code list + multi-value bit. Populated by add_enum /
