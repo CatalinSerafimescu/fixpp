@@ -284,6 +284,14 @@ public:
     [[nodiscard]] std::uint16_t group_first_field(std::string_view msg_type,
                                                   std::span<std::uint16_t const> parent_path,
                                                   std::uint16_t no_tag) const noexcept {
+        // perf pre-filter (exact, not heuristic — see group_bits_ doc): a
+        // clear bit proves BOTH stores miss this no_tag, so skip the
+        // string+path hash of the context probe AND the bare probe entirely.
+        // The validator's Step-3 walk calls this for EVERY offset-table
+        // entry; on group-free traffic every call short-circuits here.
+        if (!group_bit(no_tag)) {
+            return 0;
+        }
         auto const it = group_ctx_.find(group_ctx_query{msg_type, parent_path, no_tag});
         if (it != group_ctx_.end()) {
             return it->second.group_first;
@@ -294,6 +302,9 @@ public:
     [[nodiscard]] std::span<std::uint16_t const> group_member_tags(
         std::string_view msg_type, std::span<std::uint16_t const> parent_path,
         std::uint16_t no_tag) const noexcept {
+        if (!group_bit(no_tag)) {  // same exact pre-filter as above
+            return {};
+        }
         auto const it = group_ctx_.find(group_ctx_query{msg_type, parent_path, no_tag});
         if (it != group_ctx_.end()) {
             return {it->second.members.data(), it->second.members.size()};
@@ -382,6 +393,7 @@ public:
 
     // add_group_member returns *this for chaining (mirrors mock surface).
     table_view& add_group_member(std::uint16_t no_tag, std::uint16_t member_tag) {
+        set_group_bit(no_tag);
         auto& members = group_members_[no_tag];
         for (auto const t : members) {
             if (t == member_tag) return *this;  // dedup
@@ -410,6 +422,7 @@ public:
     // set_group_first: sets the first-delimiter tag AND adds it as a member
     // (mirrors the mock's set_group_first behaviour exactly).
     table_view& set_group_first(std::uint16_t no_tag, std::uint16_t first) {
+        set_group_bit(no_tag);
         group_first_[no_tag] = first;
         add_group_member(no_tag, first);
         return *this;
@@ -442,6 +455,7 @@ public:
     // add_group_member/set_group_first).
     void add_group_member_ctx(std::string_view msg_type, std::span<std::uint16_t const> parent_path,
                               std::uint16_t no_tag, std::uint16_t member_tag) {
+        set_group_bit(no_tag);
         auto& entry = group_ctx_[make_group_ctx_key(msg_type, parent_path, no_tag)];
         for (auto const t : entry.members) {
             if (t == member_tag) return;  // dedup
@@ -453,6 +467,7 @@ public:
     // behaviour, context-scoped.
     void set_group_first_ctx(std::string_view msg_type, std::span<std::uint16_t const> parent_path,
                              std::uint16_t no_tag, std::uint16_t first) {
+        set_group_bit(no_tag);
         group_ctx_[make_group_ctx_key(msg_type, parent_path, no_tag)].group_first = first;
         add_group_member_ctx(msg_type, parent_path, no_tag, first);
     }
@@ -511,6 +526,30 @@ private:
 
     // Group member-tag lists (no_tag → member tags; spans stable).
     std::unordered_map<std::uint16_t, std::vector<std::uint16_t>> group_members_;
+
+    // perf pre-filter over BOTH group stores (bare + context): bit `no_tag`
+    // is set by EVERY population path that can make a group accessor answer
+    // non-empty for that no_tag (set_group_first / add_group_member /
+    // set_group_first_ctx / add_group_member_ctx — all four, so the filter
+    // is exact for ANY population pattern, including context-only test
+    // fixtures and the dictionary.cpp members.front() fallback case where
+    // the bare loop skips a no_tag the ctx loop registers). A clear bit ⟹
+    // both stores miss ⟹ the accessors' current behaviour is already
+    // "return 0 / empty span" — the filter only skips the (string+path)
+    // hash probes, never changes an answer. 8 KiB, value-init to zero.
+    // NOTE for future editors: any NEW population path into group_first_ /
+    // group_members_ / group_ctx_ MUST call set_group_bit(no_tag).
+    std::array<std::uint64_t, 1024> group_bits_{};
+
+    [[nodiscard]] bool group_bit(std::uint16_t no_tag) const noexcept {
+        return ((group_bits_[static_cast<std::size_t>(no_tag) >> 6U] >>
+                 (static_cast<std::size_t>(no_tag) & 63U)) &
+                1U) != 0U;
+    }
+    void set_group_bit(std::uint16_t no_tag) noexcept {
+        group_bits_[static_cast<std::size_t>(no_tag) >> 6U] |=
+            (std::uint64_t{1} << (static_cast<std::size_t>(no_tag) & 63U));
+    }
 
     // 063 Defect-A context-scoped store: (msg_type, parent_path, no_tag) →
     // {group_first, members}. Populated EXCLUSIVELY by
