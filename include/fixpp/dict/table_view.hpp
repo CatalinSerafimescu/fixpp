@@ -210,6 +210,19 @@ public:
         return it != valid_.end() && it->second.contains(tag);
     }
 
+    // Hot-path hoist (validator perf round): the per-msg_type valid-tag set,
+    // fetched ONCE per message so validate()'s per-field loop pays a uint16
+    // set-membership test instead of re-hashing the loop-invariant msg_type
+    // on every field. nullptr ⟺ msg_type unknown — field_valid_for would
+    // return false for every tag, and the caller must treat nullptr the same
+    // way. The pointer aliases storage owned by this table_view (stable for
+    // its lifetime; the map is immutable after construction).
+    [[nodiscard]] std::unordered_set<std::uint16_t> const* valid_tags_for(
+        std::string_view msg_type) const noexcept {
+        auto const it = valid_.find(msg_type);
+        return it == valid_.end() ? nullptr : &it->second;
+    }
+
     // Tags that are required for `msg_type`. Empty span if unknown.
     // The span aliases storage owned by this table_view (stable for lifetime).
     [[nodiscard]] std::span<std::uint16_t const> required_fields(

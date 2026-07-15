@@ -156,11 +156,16 @@ public:
         }
 
         // ── Step 1: iterate every present field ──────────────────────────
+        // Hoist (perf): `field_valid_for(msg_type, tag)` re-hashes the
+        // loop-invariant msg_type on every field (valid_.find(msg_type)).
+        // Fetch the tag set once; nullptr (unknown msg_type) is handled
+        // identically to field_valid_for returning false for every tag.
+        auto const* const valid_tags = dict_.valid_tags_for(msg_type);
         for (auto it = msg.begin(); !(it == msg.end()); ++it) {
             auto const& fld = *it;
 
             // (a) Unexpected tag check
-            if (!dict_.field_valid_for(msg_type, fld.tag)) {
+            if (valid_tags == nullptr || !valid_tags->contains(fld.tag)) {
                 set_ref_tag(ref_tag_out, fld.tag);
                 return core::expected_t<void>{std::unexpect, core::error::wire_unexpected_tag};
             }
