@@ -166,6 +166,55 @@ struct group_ctx_entry {
 struct enum_domain {
     std::vector<std::string> codes;  // sorted bytewise ascending, deduped
     bool multi_value{false};         // FR-005: MultiCharValue/MultiStringValue
+
+    // Tier-2 single-char fast path (perf round): when EVERY declared code is
+    // exactly one byte (69.7% of all codes across the 10 shipped dicts;
+    // 1530 of 1894 enum fields are all-single-char), membership collapses to
+    // one bit test in this 256-bit mask instead of a binary search over
+    // `codes`. `all_single_char` starts true and is cleared by add_enum the
+    // first time a code with size != 1 is inserted; when it is false the mask
+    // is unused and `codes` (the byte-exact fallback) drives the check — so
+    // mixed/multi-char sets (305 mixed + 59 all-multi fields) stay byte-exact.
+    // `codes` is ALWAYS maintained (both representations of the same set) so
+    // the fallback and the mutation witnesses are unaffected.
+    bool all_single_char{true};
+    std::array<std::uint64_t, 4> single_char_mask{};  // bit b set ⟺ 1-byte code b declared
+};
+
+[[nodiscard]] inline bool mask_has(std::array<std::uint64_t, 4> const& m,
+                                   unsigned char b) noexcept {
+    return ((m[static_cast<std::size_t>(b) >> 6U] >> (static_cast<std::size_t>(b) & 63U)) & 1U) !=
+           0U;
+}
+
+// Gate B r1/r2 (PR #194 FIX 2 / P3) — encapsulates `table_view::valid_tags_for()`'s
+// backing container. Returned BY VALUE (a single pointer, trivially copyable)
+// so a future flat-vector/perfect-hash swap for `valid_` changes only this
+// class's body, never `table_view`'s or `dictionary_driven_validator`'s
+// public surface. The default-constructed (empty) view makes `contains()`
+// return false for every tag — byte-identical to the pre-encapsulation
+// nullptr-check-then-`unordered_set::contains` call site in validator.hpp.
+// noexcept + alloc-free: a raw pointer member, no owning state.
+//
+// The backing pointer is PRIVATE — only `contains()` is public surface; the
+// container type never appears outside this class's own definition. Only
+// `table_view` (its sole producer, via `valid_tags_for()`) may construct a
+// non-empty view.
+class valid_tag_set_view {
+public:
+    valid_tag_set_view() noexcept = default;
+
+    [[nodiscard]] bool contains(std::uint16_t tag) const noexcept {
+        return set_ != nullptr && set_->contains(tag);
+    }
+
+private:
+    friend class table_view;
+
+    explicit valid_tag_set_view(std::unordered_set<std::uint16_t> const* set) noexcept
+        : set_{set} {}
+
+    std::unordered_set<std::uint16_t> const* set_ = nullptr;
 };
 
 [[nodiscard]] inline group_ctx_key make_group_ctx_key(std::string_view msg_type,
@@ -208,6 +257,19 @@ public:
                                        std::uint16_t tag) const noexcept {
         auto it = valid_.find(msg_type);
         return it != valid_.end() && it->second.contains(tag);
+    }
+
+    // Hot-path hoist (validator perf round): the per-msg_type valid-tag set,
+    // fetched ONCE per message so validate()'s per-field loop pays a uint16
+    // set-membership test instead of re-hashing the loop-invariant msg_type
+    // on every field. An unknown msg_type yields a view whose `contains()`
+    // returns false for every tag — the same behaviour as field_valid_for
+    // returning false for every tag on an unknown msg_type. The view aliases
+    // storage owned by this table_view (stable for its lifetime; the map is
+    // immutable after construction).
+    [[nodiscard]] valid_tag_set_view valid_tags_for(std::string_view msg_type) const noexcept {
+        auto const it = valid_.find(msg_type);
+        return it == valid_.end() ? valid_tag_set_view{} : valid_tag_set_view{&it->second};
     }
 
     // Tags that are required for `msg_type`. Empty span if unknown.
@@ -271,6 +333,14 @@ public:
     [[nodiscard]] std::uint16_t group_first_field(std::string_view msg_type,
                                                   std::span<std::uint16_t const> parent_path,
                                                   std::uint16_t no_tag) const noexcept {
+        // perf pre-filter (exact, not heuristic — see group_bits_ doc): a
+        // clear bit proves BOTH stores miss this no_tag, so skip the
+        // string+path hash of the context probe AND the bare probe entirely.
+        // The validator's Step-3 walk calls this for EVERY offset-table
+        // entry; on group-free traffic every call short-circuits here.
+        if (!group_bit(no_tag)) {
+            return 0;
+        }
         auto const it = group_ctx_.find(group_ctx_query{msg_type, parent_path, no_tag});
         if (it != group_ctx_.end()) {
             return it->second.group_first;
@@ -281,6 +351,9 @@ public:
     [[nodiscard]] std::span<std::uint16_t const> group_member_tags(
         std::string_view msg_type, std::span<std::uint16_t const> parent_path,
         std::uint16_t no_tag) const noexcept {
+        if (!group_bit(no_tag)) {  // same exact pre-filter as above
+            return {};
+        }
         auto const it = group_ctx_.find(group_ctx_query{msg_type, parent_path, no_tag});
         if (it != group_ctx_.end()) {
             return {it->second.members.data(), it->second.members.size()};
@@ -303,6 +376,13 @@ public:
     // Two DISTINCT accept-floors — not the same rule, both required:
     [[nodiscard]] bool enum_valid(std::uint16_t tag,
                                   std::span<const std::byte> value) const noexcept {
+        // perf pre-filter (exact — see enum_bits_ doc): a clear bit proves
+        // enums_ has no entry for `tag`, which is Floor 1's accept arm, so
+        // skip the hash probe entirely. Most fields of most messages are not
+        // enum-backed; this makes them hash-free.
+        if (!enum_bit(tag)) {
+            return true;
+        }
         auto const it = enums_.find(tag);
 
         // Floor 1 [FR-003]: tag absent from the enum store, OR its declared
@@ -329,9 +409,17 @@ public:
         enum_domain const& domain = it->second;
 
         if (!domain.multi_value) {
-            // Single-value: byte-exact whole-token binary search. No case
-            // folding, no prefix matching (FR-009) — MatchType(574)=A must
-            // reject on a codeset declaring A1..A5 but not bare A.
+            // Single-value: byte-exact whole-token match. No case folding, no
+            // prefix matching (FR-009) — MatchType(574)=A must reject on a
+            // codeset declaring A1..A5 but not bare A.
+            if (domain.all_single_char) {
+                // Tier-2 fast path: every declared code is 1 byte, so any
+                // value of length != 1 cannot match (whole-token), and a
+                // 1-byte value is a single mask bit test. Byte-exact-identical
+                // to code_declared over an all-1-byte sorted set.
+                return sv.size() == 1 &&
+                       mask_has(domain.single_char_mask, static_cast<unsigned char>(sv[0]));
+            }
             return code_declared(domain.codes, sv);
         }
 
@@ -341,7 +429,18 @@ public:
         std::size_t start = 0;
         while (start <= sv.size()) {
             std::string_view const token = next_token(sv, start);
-            if (!code_declared(domain.codes, token)) {
+            bool declared;
+            if (domain.all_single_char) {
+                // Same fast path per token. A multi-char token cannot exist as
+                // a declared code in an all-single-char set (guard: size != 1
+                // ⇒ reject), and an empty token (size 0) rejects — byte-exact
+                // with the fallback's "empty token is never declared".
+                declared = token.size() == 1 &&
+                           mask_has(domain.single_char_mask, static_cast<unsigned char>(token[0]));
+            } else {
+                declared = code_declared(domain.codes, token);
+            }
+            if (!declared) {
                 return false;
             }
         }
@@ -369,6 +468,7 @@ public:
 
     // add_group_member returns *this for chaining (mirrors mock surface).
     table_view& add_group_member(std::uint16_t no_tag, std::uint16_t member_tag) {
+        set_group_bit(no_tag);
         auto& members = group_members_[no_tag];
         for (auto const t : members) {
             if (t == member_tag) return *this;  // dedup
@@ -397,6 +497,7 @@ public:
     // set_group_first: sets the first-delimiter tag AND adds it as a member
     // (mirrors the mock's set_group_first behaviour exactly).
     table_view& set_group_first(std::uint16_t no_tag, std::uint16_t first) {
+        set_group_bit(no_tag);
         group_first_[no_tag] = first;
         add_group_member(no_tag, first);
         return *this;
@@ -406,10 +507,24 @@ public:
     // `enum_domain` above for why the table owns them). Sorted-on-insert and
     // deduped, so enum_valid's binary search is valid regardless of call order.
     table_view& add_enum(std::uint16_t tag, std::string_view value) {
-        auto& codes = enums_[tag].codes;
+        set_enum_bit(tag);
+        auto& domain = enums_[tag];
+        auto& codes = domain.codes;
         auto const pos = std::ranges::lower_bound(codes, value, code_less);
         if (pos == codes.end() || *pos != value) {
             codes.emplace(pos, value);  // std::string{value} — owned copy
+        }
+        // Tier-2 single-char mask maintenance (idempotent; safe on dup calls).
+        // A 1-byte code sets its bit; ANY code with size != 1 (including the
+        // empty string, were it ever inserted) permanently clears the
+        // fast-path flag so the byte-exact `codes` fallback drives the check.
+        if (value.size() == 1) {
+            domain.single_char_mask[static_cast<std::size_t>(static_cast<unsigned char>(value[0])) >>
+                                    6U] |=
+                (std::uint64_t{1}
+                 << (static_cast<std::size_t>(static_cast<unsigned char>(value[0])) & 63U));
+        } else {
+            domain.all_single_char = false;
         }
         return *this;
     }
@@ -418,6 +533,7 @@ public:
     // carry — without this, FR-004's tokenizer (T018) has no unit-level
     // witness that does not require a full XML load.
     table_view& set_multi_value(std::uint16_t tag, bool multi = true) {
+        set_enum_bit(tag);
         enums_[tag].multi_value = multi;
         return *this;
     }
@@ -429,6 +545,7 @@ public:
     // add_group_member/set_group_first).
     void add_group_member_ctx(std::string_view msg_type, std::span<std::uint16_t const> parent_path,
                               std::uint16_t no_tag, std::uint16_t member_tag) {
+        set_group_bit(no_tag);
         auto& entry = group_ctx_[make_group_ctx_key(msg_type, parent_path, no_tag)];
         for (auto const t : entry.members) {
             if (t == member_tag) return;  // dedup
@@ -440,6 +557,7 @@ public:
     // behaviour, context-scoped.
     void set_group_first_ctx(std::string_view msg_type, std::span<std::uint16_t const> parent_path,
                              std::uint16_t no_tag, std::uint16_t first) {
+        set_group_bit(no_tag);
         group_ctx_[make_group_ctx_key(msg_type, parent_path, no_tag)].group_first = first;
         add_group_member_ctx(msg_type, parent_path, no_tag, first);
     }
@@ -499,6 +617,40 @@ private:
     // Group member-tag lists (no_tag → member tags; spans stable).
     std::unordered_map<std::uint16_t, std::vector<std::uint16_t>> group_members_;
 
+    // perf pre-filter over BOTH group stores (bare + context): bit `no_tag`
+    // is set by EVERY population path that can make a group accessor answer
+    // non-empty for that no_tag (set_group_first / add_group_member /
+    // set_group_first_ctx / add_group_member_ctx — all four, so the filter
+    // is exact for ANY population pattern, including context-only test
+    // fixtures and the dictionary.cpp members.front() fallback case where
+    // the bare loop skips a no_tag the ctx loop registers). A clear bit ⟹
+    // both stores miss ⟹ the accessors' current behaviour is already
+    // "return 0 / empty span" — the filter only skips the (string+path)
+    // hash probes, never changes an answer. 8 KiB, value-init to zero.
+    // NOTE for future editors: any NEW population path into group_first_ /
+    // group_members_ / group_ctx_ MUST call set_group_bit(no_tag).
+    // FOOTPRINT-VARIANT (Task B experiment): config-time-sized vector instead
+    // of a fixed 8 KiB array — sized to (max populated no_tag>>6)+1 words, so
+    // real dictionaries cost a few hundred bytes per table_view copy, not 8 KiB.
+    // Hot-path reads stay alloc-free (bounds-check + index); growth is only in
+    // set_group_bit at config time.
+    std::vector<std::uint64_t> group_bits_;
+
+    [[nodiscard]] bool group_bit(std::uint16_t no_tag) const noexcept {
+        std::size_t const w = static_cast<std::size_t>(no_tag) >> 6U;
+        if (w >= group_bits_.size()) {
+            return false;  // beyond populated range ⟹ bit clear ⟹ not a group
+        }
+        return ((group_bits_[w] >> (static_cast<std::size_t>(no_tag) & 63U)) & 1U) != 0U;
+    }
+    void set_group_bit(std::uint16_t no_tag) {
+        std::size_t const w = static_cast<std::size_t>(no_tag) >> 6U;
+        if (w >= group_bits_.size()) {
+            group_bits_.resize(w + 1, 0);
+        }
+        group_bits_[w] |= (std::uint64_t{1} << (static_cast<std::size_t>(no_tag) & 63U));
+    }
+
     // 063 Defect-A context-scoped store: (msg_type, parent_path, no_tag) →
     // {group_first, members}. Populated EXCLUSIVELY by
     // Dictionary::as_table_view() via add_group_member_ctx/set_group_first_ctx
@@ -509,6 +661,29 @@ private:
 
     // Global tag → field_type map (built once from Dictionary).
     std::unordered_map<std::uint16_t, field_type> types_;
+
+    // perf pre-filter over enums_ (same exact-superset pattern as
+    // group_bits_ above): bit `tag` is set by BOTH population paths
+    // (add_enum / set_multi_value). A clear bit ⟹ enums_.find(tag) misses
+    // ⟹ enum_valid's Floor-1 accept — the filter only skips the hash
+    // probe, never changes an answer. NOTE for future editors: any NEW
+    // population path into enums_ MUST call set_enum_bit(tag).
+    std::vector<std::uint64_t> enum_bits_;  // FOOTPRINT-VARIANT: see group_bits_
+
+    [[nodiscard]] bool enum_bit(std::uint16_t tag) const noexcept {
+        std::size_t const w = static_cast<std::size_t>(tag) >> 6U;
+        if (w >= enum_bits_.size()) {
+            return false;  // beyond populated range ⟹ bit clear ⟹ Floor-1 accept
+        }
+        return ((enum_bits_[w] >> (static_cast<std::size_t>(tag) & 63U)) & 1U) != 0U;
+    }
+    void set_enum_bit(std::uint16_t tag) {
+        std::size_t const w = static_cast<std::size_t>(tag) >> 6U;
+        if (w >= enum_bits_.size()) {
+            enum_bits_.resize(w + 1, 0);
+        }
+        enum_bits_[w] |= (std::uint64_t{1} << (static_cast<std::size_t>(tag) & 63U));
+    }
 
     // T017/T019 (data-model.md Entity B): enum-domain table, tag → owned
     // sorted/deduped code list + multi-value bit. Populated by add_enum /

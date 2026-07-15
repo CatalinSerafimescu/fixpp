@@ -131,6 +131,71 @@ TEST(TableViewEnumDomainTest, SingleValueFieldWithSpaceIsNotTokenized) {
     EXPECT_FALSE(tv.enum_valid(166, as_bytes("ISO")));
 }
 
+// ── Gate B r1 (PR #194 FIX 1.c): 256-bit single-char enum-code mask ─────────
+// equivalence witnesses. Every codeset used above (add_enum(54,"1")/(54,"2")/
+// (18,"1")/(18,"G")/(18,"6") etc.) is already all-single-char, so the tests
+// above already exercise the mask path — these add the specific properties
+// the mask arithmetic must get right: whole-token (not prefix) matching, and
+// unsigned-char indexing (a signed-char bug corrupts the shift/index for any
+// code byte >= 0x80).
+
+TEST(TableViewEnumDomainTest, SingleCharMaskTwoByteTokenRejects) {
+    table_view tv;
+    tv.add_enum(54, "1").add_enum(54, "2");
+    EXPECT_TRUE(tv.enum_valid(54, as_bytes("1")));
+    // A 2-byte token must not match the declared 1-byte code "1" by prefix —
+    // enum_valid's Tier-2 path guards on sv.size()==1 before the mask test.
+    EXPECT_FALSE(tv.enum_valid(54, as_bytes("11")));
+}
+
+TEST(TableViewEnumDomainTest, SingleCharMaskHighByteDeclaredAccepts) {
+    table_view tv;
+    std::string const high_byte(1, static_cast<char>(0xC3));  // 195 >= 0x80
+    tv.add_enum(54, high_byte);
+    EXPECT_TRUE(tv.enum_valid(54, as_bytes(high_byte)))
+        << "a declared byte >= 0x80 must be accepted -- proves mask_has indexes "
+           "via unsigned char, not signed char (a signed-char bug would corrupt "
+           "the bit index for high bytes)";
+    EXPECT_FALSE(tv.enum_valid(54, as_bytes("C")))  // ASCII 'C' = 0x43, undeclared
+        << "an undeclared byte must still reject when a high byte is declared";
+}
+
+TEST(TableViewEnumDomainTest, SingleCharMaskMultiValueHighByteTokenAccepts) {
+    table_view tv;
+    std::string const high_byte(1, static_cast<char>(0xC3));
+    tv.add_enum(18, "1").add_enum(18, high_byte);
+    tv.set_multi_value(18);
+    std::string const value = std::string("1 ") + high_byte;
+    EXPECT_TRUE(tv.enum_valid(18, as_bytes(value)))
+        << "a multi-value token equal to a declared high byte must be accepted";
+}
+
+// ── Sorted-vector fallback equivalence (mixed-length codeset; all_single_char
+// cleared by a code with size != 1) — same properties, byte-exact `codes`
+// path instead of the mask. ─────────────────────────────────────────────────
+
+TEST(TableViewEnumDomainTest, SortedVectorFallbackMixedLengthWholeTokenMatch) {
+    table_view tv;
+    // "A1" (2 bytes) clears all_single_char for tag 574.
+    tv.add_enum(574, "A1").add_enum(574, "1");
+    EXPECT_TRUE(tv.enum_valid(574, as_bytes("1")))
+        << "declared 1-byte code must accept via the fallback path too";
+    EXPECT_TRUE(tv.enum_valid(574, as_bytes("A1"))) << "declared 2-byte code must accept";
+    EXPECT_FALSE(tv.enum_valid(574, as_bytes("A2"))) << "undeclared 2-byte code must reject";
+    EXPECT_FALSE(tv.enum_valid(574, as_bytes("11")))
+        << "a 2-byte token must not match the declared 1-byte code \"1\" by prefix "
+           "in the fallback path either";
+}
+
+TEST(TableViewEnumDomainTest, SortedVectorFallbackMixedLengthHighByteAccepts) {
+    table_view tv;
+    std::string const high_byte(1, static_cast<char>(0xC3));
+    tv.add_enum(574, "A1").add_enum(574, high_byte);  // mixed lengths -> fallback path
+    EXPECT_TRUE(tv.enum_valid(574, as_bytes(high_byte)))
+        << "a declared high byte must accept via the byte-exact fallback";
+    EXPECT_FALSE(tv.enum_valid(574, as_bytes("C"))) << "an undeclared byte must reject";
+}
+
 // ── T019: add_enum / set_multi_value population surface ───────────────────
 
 TEST(TableViewEnumDomainTest, AddEnumDedupesDuplicateCodes) {

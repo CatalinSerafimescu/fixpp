@@ -1,5 +1,5 @@
 {
-  "_note": "Baseline seed — linux-clang-RELEASE (2026-07-15), 075 Gate B r1 (Article VIII §3 un-pause of 'US4 PAUSED — validator_bench omitted'). Real fixpp::dict::table_view loaded from the shipped dictionaries/FIX44.xml via dict::XmlLoader -> Dictionary::as_table_view() (NOT support/mock_dict_table.hpp), so enum_valid()'s tag lookup + code-domain binary search + [multi-value] space-tokenization are genuinely exercised. Each fixture is pre-framed + pre-parsed ONCE outside the timed loop; only dictionary_driven_validator::validate() is timed. measured_release_ns_mean_10rep is the mean over 10 --benchmark_repetitions runs; measured_release_ns_single_run is one --benchmark_format=json capture. FINDING: all four cases exceed the [2b §6.6] <=200 ns ceiling (Heartbeat ~2.8x over; both NewOrderSingle cases exceed 1 microsecond) -- flagged in bench/REPORT.md for the orchestrator, NOT fixed in this PR (bench-only Gate B round; no production code touched).",
+  "_note": "Re-baseline — linux-clang-RELEASE (2026-07-15), Gate B r1 of perf/validator-hot-path-fable (PR #194, Article VIII §2 re-baseline after an intentional perf change). Supersedes the 075 Gate B r1 seed baseline captured BEFORE this PR's five optimizations landed (config-time msg_type-hash hoist out of the Step-1 walk; exact 8KiB/config-time-vector no_tag presence pre-filter over both group stores; exact enum-presence pre-filter in enum_valid; Tier-2 256-bit single-char enum-code mask; footprint-variant vector-backed presence bits). Real fixpp::dict::table_view loaded from the shipped dictionaries/FIX44.xml via dict::XmlLoader -> Dictionary::as_table_view() (NOT support/mock_dict_table.hpp), so enum_valid()'s tag lookup + code-domain fast-path/binary-search + [multi-value] space-tokenization are genuinely exercised. Each fixture is pre-framed + pre-parsed ONCE outside the timed loop; only dictionary_driven_validator::validate() is timed. measured_release_ns_mean_10rep is the mean over 10 --benchmark_repetitions runs; measured_release_ns_single_run is one --benchmark_format=json capture. FINDING: all four cases still exceed the [2b §6.6] <=200 ns ceiling, but by a substantially narrower margin than the pre-optimization baseline (Heartbeat 568->253 ns, Logon 848->309 ns, NewOrderSingle 1214->372 ns, NewOrderSingleMultiValueExecInst 1265->434 ns — roughly 2.2x-3.3x faster per case). The residual gap above ceiling is accepted+scheduled as v1.0 perf row 15c (per CLAUDE.md 075 merge note), NOT a blocker for this PR.",
   "context": {
     "date": "2026-07-15",
     "host_name": "WSLUBUNTU24.04",
@@ -16,10 +16,10 @@
       "ceiling_ns": 200,
       "ceiling_source": "[2b §6.6]: Validator::validate, ≤ 200 ns",
       "ceiling_tolerance_pct": 5,
-      "measured_release_ns_mean_10rep": 568,
-      "measured_release_ns_median_10rep": 566,
-      "measured_release_ns_single_run": 551.98,
-      "measured_release_note": "EXCEEDS ceiling by ~2.8x (mean 568 ns vs 200 ns ceiling) — flagged, not fixed, in this bench-only PR."
+      "measured_release_ns_mean_10rep": 253,
+      "measured_release_ns_median_10rep": 255,
+      "measured_release_ns_single_run": 262.15,
+      "measured_release_note": "perf/validator-hot-path-fable landed: 568 ns -> 253 ns mean (~2.24x faster). Still exceeds the 200 ns ceiling by ~1.27x — residual gap accepted+scheduled as v1.0 perf row 15c, not a blocker."
     },
     {
       "name": "BM_Validator_Validate_Logon",
@@ -27,10 +27,10 @@
       "ceiling_ns": 200,
       "ceiling_source": "[2b §6.6]: Validator::validate, ≤ 200 ns",
       "ceiling_tolerance_pct": 5,
-      "measured_release_ns_mean_10rep": 848,
-      "measured_release_ns_median_10rep": 849,
-      "measured_release_ns_single_run": 864.66,
-      "measured_release_note": "EXCEEDS ceiling by ~4.2x — flagged, not fixed, in this bench-only PR."
+      "measured_release_ns_mean_10rep": 309,
+      "measured_release_ns_median_10rep": 309,
+      "measured_release_ns_single_run": 325.86,
+      "measured_release_note": "perf/validator-hot-path-fable landed: 848 ns -> 309 ns mean (~2.74x faster). Still exceeds the 200 ns ceiling by ~1.54x — residual gap accepted+scheduled as v1.0 perf row 15c, not a blocker."
     },
     {
       "name": "BM_Validator_Validate_NewOrderSingle",
@@ -38,10 +38,10 @@
       "ceiling_ns": 200,
       "ceiling_source": "[2b §6.6]: Validator::validate, ≤ 200 ns",
       "ceiling_tolerance_pct": 5,
-      "measured_release_ns_mean_10rep": 1214,
-      "measured_release_ns_median_10rep": 1206,
-      "measured_release_ns_single_run": 1065.26,
-      "measured_release_note": "EXCEEDS ceiling by ~6x and exceeds 1 microsecond — flagged, not fixed, in this bench-only PR."
+      "measured_release_ns_mean_10rep": 372,
+      "measured_release_ns_median_10rep": 372,
+      "measured_release_ns_single_run": 373.32,
+      "measured_release_note": "perf/validator-hot-path-fable landed: 1214 ns -> 372 ns mean (~3.26x faster) — no longer exceeds 1 microsecond. Still exceeds the 200 ns ceiling by ~1.86x — residual gap accepted+scheduled as v1.0 perf row 15c, not a blocker."
     },
     {
       "name": "BM_Validator_Validate_NewOrderSingleMultiValueExecInst",
@@ -49,10 +49,10 @@
       "ceiling_ns": 200,
       "ceiling_source": "[2b §6.6]: Validator::validate, ≤ 200 ns",
       "ceiling_tolerance_pct": 5,
-      "measured_release_ns_mean_10rep": 1265,
-      "measured_release_ns_median_10rep": 1233,
-      "measured_release_ns_single_run": 1198.23,
-      "measured_release_note": "EXCEEDS ceiling by ~6.3x and exceeds 1 microsecond — flagged, not fixed, in this bench-only PR."
+      "measured_release_ns_mean_10rep": 434,
+      "measured_release_ns_median_10rep": 432,
+      "measured_release_ns_single_run": 427.76,
+      "measured_release_note": "perf/validator-hot-path-fable landed: 1265 ns -> 434 ns mean (~2.91x faster) — no longer exceeds 1 microsecond. Still exceeds the 200 ns ceiling by ~2.17x — residual gap accepted+scheduled as v1.0 perf row 15c, not a blocker."
     }
   ],
   "hffix_comparison": "hffix NOT wired into build. D-14 records this as 'measured-not-blocker' (see bench/REPORT.md)."

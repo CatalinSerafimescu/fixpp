@@ -46,7 +46,7 @@ carries no enum store). Each fixture is pre-framed + pre-parsed ONCE outside
 the timed loop; only `validate()` itself is timed. Baseline:
 `bench/baselines/wire/validator_bench.json`.
 
-| Bench | Fixture | Ceiling [2b §6.6] | Measured release (mean, 10 reps) |
+| Bench | Fixture | Ceiling [2b §6.6] | Measured release (mean, 10 reps), pre-`perf/validator-hot-path-fable` |
 |---|---|---|---|
 | BM_Validator_Validate_Heartbeat | admin Heartbeat(35=0), header only | ≤ 200 ns | **568 ns** |
 | BM_Validator_Validate_Logon | admin Logon(35=A), EncryptMethod(98) enum | ≤ 200 ns | **848 ns** |
@@ -76,6 +76,42 @@ harness; §2 (±5% vs baseline) has no prior validator baseline to regress again
 **User disposition (2026-07-15):** accept + merge; optimize BOTH the pre-existing
 walk and the enum delta toward 200 ns as a scheduled v1.0 step (after Orchestra) —
 `research/G19-fix-fpml-iso20022/remaining-work/validator-perf-optimization.md`.
+
+## Validator::validate — re-baselined (PR #194 `perf/validator-hot-path-fable`, gate-b/r1, 2026-07-15)
+
+`perf/validator-hot-path-fable` is the first step of the v1.0 perf follow-up
+scheduled above (`validator-perf-optimization.md`). Five commits target the
+`dictionary_driven_validator::validate()` / `table_view` hot path, none
+changing observable behaviour (Gate B: Codex found no semantic bug):
+
+1. Hoist the per-msg_type valid-tag lookup out of the Step-1 per-field walk
+   (`table_view::valid_tags_for()`, config-time-vector-backed, encapsulated
+   behind `valid_tag_set_view` — Gate B r1 FIX 2).
+2. An exact, config-time-sized vector presence pre-filter over both the bare
+   and context-scoped group stores (`group_bit`/`set_group_bit`), skipping the
+   (string+path) hash probe for the common group-free case.
+3. An exact presence pre-filter over the enum store (`enum_bit`/
+   `set_enum_bit`), skipping the enum hash probe for non-enum-backed fields.
+4. A Tier-2 256-bit single-char bitmask fast path for enum codesets where
+   every declared code is exactly one byte (69.7% of all codes across the ten
+   shipped dictionaries), replacing a binary search with one mask-bit test.
+
+Re-measured under the same `linux-clang-release` harness, real
+`fixpp::dict::table_view` from `dictionaries/FIX44.xml`, 10
+`--benchmark_repetitions`. New baseline: `bench/baselines/wire/validator_bench.json`.
+
+| Bench | Ceiling [2b §6.6] | Pre-optimization mean | Post-optimization mean | Speedup |
+|---|---|---|---|---|
+| BM_Validator_Validate_Heartbeat | ≤ 200 ns | 568 ns | **253 ns** | ~2.24x |
+| BM_Validator_Validate_Logon | ≤ 200 ns | 848 ns | **309 ns** | ~2.74x |
+| BM_Validator_Validate_NewOrderSingle | ≤ 200 ns | 1214 ns | **372 ns** | ~3.26x |
+| BM_Validator_Validate_NewOrderSingleMultiValueExecInst | ≤ 200 ns | 1265 ns | **434 ns** | ~2.91x |
+
+All four cases still exceed the `[2b §6.6]` ≤200 ns ceiling, but by a
+substantially narrower margin (both NewOrderSingle cases no longer exceed
+1 microsecond). Per Article VIII §2, this baseline supersedes the PR #193
+seed baseline. The residual ceiling gap remains accepted+scheduled as v1.0
+perf row 15c — not a blocker for this PR.
 
 ## PR68-08 — Release baseline follow-up (gate-b/r1, 2026-05-17)
 
