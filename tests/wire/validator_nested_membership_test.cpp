@@ -148,7 +148,7 @@ TEST(ValidatorNestedMembership, Depth2ContextMissUnderFlatWalk) {
     std::pmr::monotonic_buffer_resource scratch_mr{scratch_buf.data(), scratch_buf.size(),
                                                    std::pmr::null_memory_resource()};
 
-    auto const result = v.validate(mv, &scratch_mr);
+    auto const result = v.validate(mv, &scratch_mr, nullptr);
     EXPECT_TRUE(result.has_value())
         << "a valid depth-3 nested message must validate; the flat root-context walk queries "
            "grandchild 555 at root -> bare delimiter 299 -> false-rejects the real 602-delimited "
@@ -204,7 +204,7 @@ TEST(ValidatorNestedMembership, MultiInstanceParentWithNestedGroupNotFalseReject
     std::pmr::monotonic_buffer_resource scratch_mr{scratch_buf.data(), scratch_buf.size(),
                                                    std::pmr::null_memory_resource()};
 
-    auto const result = v.validate(mv, &scratch_mr);
+    auto const result = v.validate(mv, &scratch_mr, nullptr);
     EXPECT_TRUE(result.has_value())
         << "a valid 296=2 message (each instance with a self-contained nested 295/555 group) "
            "must validate; the pre-split validate_group_level over-runs past the first "
@@ -246,7 +246,7 @@ TEST(ValidatorNestedMembership, MultiEntryNestedGroupFirstEntryDeeperNestedNotFa
     std::pmr::monotonic_buffer_resource scratch_mr{scratch_buf.data(), scratch_buf.size(),
                                                    std::pmr::null_memory_resource()};
 
-    auto const result = v.validate(mv, &scratch_mr);
+    auto const result = v.validate(mv, &scratch_mr, nullptr);
     EXPECT_TRUE(result.has_value())
         << "a valid 295=2 nested group (only the first entry containing a deeper 555 group) "
            "must validate; the pre-split validate_group_level over-runs past the first entry's "
@@ -332,7 +332,7 @@ TEST(ValidatorNestedMembership, PerContextDelimiterResidual_L063_3b_SkipPending)
     std::pmr::monotonic_buffer_resource scratch_mr{scratch_buf.data(), scratch_buf.size(),
                                                    std::pmr::null_memory_resource()};
 
-    auto const result = v.validate(mv, &scratch_mr);
+    auto const result = v.validate(mv, &scratch_mr, nullptr);
     // CURRENT (pre-fix) behavior: result.has_value() == false — the corrupted
     // global delimiter (610, from U1) is checked against the wire's real
     // first field after 600= (620), which mismatches -> wire_required_field_missing.

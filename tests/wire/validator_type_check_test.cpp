@@ -38,6 +38,8 @@
 // clang-format on
 #include <fixpp/core/decimal_helpers.hpp>
 #include <fixpp/core/error.hpp>
+#include <fixpp/dict/dictionary.hpp>
+#include <fixpp/dict/xml_loader.hpp>
 #include <fixpp/wire/parser.hpp>
 #include <fixpp/wire/validator.hpp>
 
@@ -46,6 +48,7 @@
 namespace {
 
 using fixpp::core::error;
+using fixpp::dict::Dictionary;
 using fixpp::dict::field_type;
 using fixpp::dict::table_view;
 using fixpp::wire::access_mode;
@@ -254,26 +257,162 @@ TEST(ValidatorTypeCheck, DataFieldAccepted) {
     EXPECT_TRUE(rc.has_value()) << "Data field must be accepted (no structural check)";
 }
 
-// ── validate_field(): enum violation (Phase-1 behavior) ──────────────────────
-// FR-005 / 041-validation-gate-wiring: enum-value checking is OUT OF SCOPE for
-// Phase-1; enum_valid() always returns true regardless of registered enum
-// values. The add_enum() builder method is a no-op stub.
-// Phase-2 (2c enum tables) will restore the rejection behavior; this test
-// documents the Phase-1 pass-through so the behavioral change is pinned.
+// ── validate_field(): enum domain checking (075 FR-021 artifact #2, T024) ────
+// FR-020: enum_valid() is now REAL (075 T017); validate_field() calls it as
+// its FIRST statement (validator.hpp:325), so an out-of-domain value is now
+// genuinely rejected. Previously (Phase-1 stub) this test asserted the
+// OPPOSITE — accept — per FR-012 that re-baseline is called out explicitly
+// here, not silently.
 
-TEST(ValidatorTypeCheck, ValidateFieldEnumViolationPassedInPhase1) {
+TEST(ValidatorTypeCheck, ValidateFieldEnumInDomainAccepted) {
     table_view t;
     t.add_valid("D", 54).set_type(54, field_type::Char).add_enum(54, "1").add_enum(54, "2");
     dictionary_driven_validator v{std::move(t)};
 
-    // "X" is not in {"1","2"} — but Phase-1 enum_valid() always returns true.
+    auto val = bv("1");
+    auto rc = v.validate_field(54, std::span<const std::byte>{val.data(), val.size()});
+    EXPECT_TRUE(rc.has_value()) << "in-domain enum value must be accepted";
+}
+
+TEST(ValidatorTypeCheck, ValidateFieldEnumOutOfDomainRejected) {
+    table_view t;
+    t.add_valid("D", 54).set_type(54, field_type::Char).add_enum(54, "1").add_enum(54, "2");
+    dictionary_driven_validator v{std::move(t)};
+
+    // "X" is not in {"1","2"} — enum_valid() is real, so this must reject.
     auto val = bv("X");
     auto rc = v.validate_field(54, std::span<const std::byte>{val.data(), val.size()});
-    // Phase-1: enum violation is NOT rejected (enum check passes through).
-    // Only the Char structural check applies: "X" is 1 byte → passes.
-    EXPECT_TRUE(rc.has_value())
-        << "Phase-1: enum_valid always true; validate_field must accept value "
-           "that violates a registered enum (FR-005, 041-validation-gate-wiring)";
+    ASSERT_FALSE(rc.has_value())
+        << "out-of-domain enum value must be rejected (FR-020/FR-006)";
+    EXPECT_EQ(rc.error(), error::wire_field_value_out_of_range);
+}
+
+TEST(ValidatorTypeCheck, ValidateFieldEnumMultiValueAllDeclaredAccepted) {
+    table_view t;
+    t.add_valid("D", 18)
+        .set_type(18, field_type::String)
+        .add_enum(18, "1")
+        .add_enum(18, "6")
+        .add_enum(18, "G")
+        .set_multi_value(18, true);
+    dictionary_driven_validator v{std::move(t)};
+
+    auto val = bv("1 G 6");
+    auto rc = v.validate_field(18, std::span<const std::byte>{val.data(), val.size()});
+    EXPECT_TRUE(rc.has_value()) << "multi-value field with every token declared must be accepted";
+}
+
+TEST(ValidatorTypeCheck, ValidateFieldEnumMultiValueOneUndeclaredRejected) {
+    table_view t;
+    t.add_valid("D", 18)
+        .set_type(18, field_type::String)
+        .add_enum(18, "1")
+        .add_enum(18, "6")
+        .add_enum(18, "G")
+        .set_multi_value(18, true);
+    dictionary_driven_validator v{std::move(t)};
+
+    auto val = bv("1 ZZ 6");  // "ZZ" not declared
+    auto rc = v.validate_field(18, std::span<const std::byte>{val.data(), val.size()});
+    ASSERT_FALSE(rc.has_value())
+        << "multi-value field with one undeclared token must be rejected";
+    EXPECT_EQ(rc.error(), error::wire_field_value_out_of_range);
+}
+
+TEST(ValidatorTypeCheck, ValidateFieldEnumEmptyValueAccepted) {
+    // FR-008 Floor 2: empty field value bypasses the enum check unconditionally,
+    // even when the tag carries a non-empty codeset.
+    table_view t;
+    t.add_valid("D", 54).set_type(54, field_type::Char).add_enum(54, "1").add_enum(54, "2");
+    dictionary_driven_validator v{std::move(t)};
+
+    std::vector<std::byte> empty_val;
+    auto rc = v.validate_field(54, std::span<const std::byte>{empty_val.data(), empty_val.size()});
+    // validate_field's enum arm accepts the empty value (Floor 2); the Char
+    // structural check then rejects on length — so the overall result still
+    // rejects, but via check_field_type, not the enum arm. Assert that
+    // directly: a hand-crafted enum-only probe via table_view confirms the
+    // bypass (see TableViewTest.EnumValidRealDomainCheck for the direct pin).
+    EXPECT_FALSE(rc.has_value())
+        << "empty Char value rejects via the TYPE arm (Char requires exactly 1 byte), "
+           "not the enum arm (FR-008 Floor 2 bypasses the enum check unconditionally)";
+    EXPECT_EQ(rc.error(), error::wire_field_value_out_of_range);
+}
+
+// ── validate_field(): FIX50SP2 store-only tag (ApplVerID/1128) ──────────────
+// [FR-020] ApplVerID(1128) codes are 0-10 (measured, T001). It is declared in
+// the dictionary but ABSENT from message expansion — real FIX50SP2 messages
+// reference RefApplVerID(1130) instead. This synthetic XML reproduces that
+// exact shape: <field number='1128'> carries <value> children but no
+// <message> references it, so it is a genuine store-only tag once run
+// through the REAL production Dictionary::as_table_view() (dictionary.cpp),
+// not a hand-built mock table_view.
+//
+// ⚠️ Mutation (T015/C3-1 discriminator): build the enum-domain table only
+// from message_fields() (instead of walking the dictionary's OWN enum store,
+// dictionary.cpp:503-511) ⇒ store-only tags stay unconstrained ⇒ this test's
+// reject assertion MUST go RED. This is the ONLY witness in the bundle with
+// power against that regression — validate_field() calls enum_valid() as its
+// FIRST statement with NO field_valid_for precheck (validator.hpp:325-330),
+// so a reachability-built table would silently ACCEPT here.
+Dictionary load_appl_ver_id_store_only_dict(std::pmr::memory_resource* mr) {
+    constexpr std::string_view kXml =
+        R"(<fix type='FIX' major='5' minor='0' servicepack='2'>)"
+        R"(<fields>)"
+        R"(<field number='8'    name='BeginString' type='STRING'/>)"
+        R"(<field number='9'    name='BodyLength'  type='LENGTH'/>)"
+        R"(<field number='10'   name='CheckSum'    type='STRING'/>)"
+        R"(<field number='35'   name='MsgType'     type='STRING'/>)"
+        R"(<field number='1128' name='ApplVerID'   type='STRING'>)"
+        R"(<value enum='0'  description='FIX27'/>)"
+        R"(<value enum='1'  description='FIX30'/>)"
+        R"(<value enum='2'  description='FIX40'/>)"
+        R"(<value enum='3'  description='FIX41'/>)"
+        R"(<value enum='4'  description='FIX42'/>)"
+        R"(<value enum='5'  description='FIX43'/>)"
+        R"(<value enum='6'  description='FIX44'/>)"
+        R"(<value enum='7'  description='FIX50'/>)"
+        R"(<value enum='8'  description='FIX50SP1'/>)"
+        R"(<value enum='9'  description='FIX50SP2'/>)"
+        R"(<value enum='10' description='FIXLatest'/>)"
+        R"(</field>)"
+        R"(</fields>)"
+        R"(<messages>)"
+        R"(<message name='Heartbeat' msgtype='0' msgcat='admin'>)"
+        R"(  <field name='BeginString' required='N'/>)"
+        R"(  <field name='BodyLength'  required='N'/>)"
+        R"(  <field name='MsgType'     required='N'/>)"
+        R"(</message>)"
+        R"(</messages>)"
+        R"(</fix>)";
+    return fixpp::dict::XmlLoader{}.load_from_string(kXml, mr);
+}
+
+TEST(ValidatorTypeCheck, ValidateFieldStoreOnlyApplVerIdOutOfDomainRejected) {
+    std::vector<std::byte> buf(2u * 1024u * 1024u);
+    std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
+    auto dict = load_appl_ver_id_store_only_dict(&mr);
+    auto tv = dict.as_table_view();
+    dictionary_driven_validator v{std::move(tv)};
+
+    auto val = bv("bogus");
+    auto rc = v.validate_field(1128, std::span<const std::byte>{val.data(), val.size()});
+    ASSERT_FALSE(rc.has_value())
+        << "ApplVerID(1128)=bogus must be rejected — store-only tag must still "
+           "get a domain from the store-driven projection (T015/C3-1)";
+    EXPECT_EQ(rc.error(), error::wire_field_value_out_of_range);
+}
+
+TEST(ValidatorTypeCheck, ValidateFieldStoreOnlyApplVerIdInDomainAccepted) {
+    std::vector<std::byte> buf(2u * 1024u * 1024u);
+    std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
+    auto dict = load_appl_ver_id_store_only_dict(&mr);
+    auto tv = dict.as_table_view();
+    dictionary_driven_validator v{std::move(tv)};
+
+    auto val = bv("9");
+    auto rc = v.validate_field(1128, std::span<const std::byte>{val.data(), val.size()});
+    EXPECT_TRUE(rc.has_value()) << "ApplVerID(1128)=9 is declared (FIX50SP2) and must be accepted";
 }
 
 // ── validate() with Int structural error ──────────────────────────────────────
@@ -303,7 +442,7 @@ TEST(ValidatorTypeCheck, ValidateWithBadIntFieldRejected) {
     std::pmr::monotonic_buffer_resource scratch_mr{scratch_buf.data(), scratch_buf.size(),
                                                    std::pmr::null_memory_resource()};
 
-    auto result = v.validate(mv, &scratch_mr);
+    auto result = v.validate(mv, &scratch_mr, nullptr);
     ASSERT_FALSE(result.has_value()) << "validate() with bad Int field must return error";
     EXPECT_EQ(result.error(), error::wire_field_value_out_of_range);
 }
@@ -326,7 +465,7 @@ TEST(ValidatorTypeCheck, ValidateWithValidFloatFieldAccepted) {
     std::pmr::monotonic_buffer_resource scratch_mr{scratch_buf.data(), scratch_buf.size(),
                                                    std::pmr::null_memory_resource()};
 
-    auto result = v.validate(mv, &scratch_mr);
+    auto result = v.validate(mv, &scratch_mr, nullptr);
     EXPECT_TRUE(result.has_value()) << "validate() with valid Float field must succeed; err="
                                     << (result.has_value() ? 0 : static_cast<int>(result.error()));
 }
@@ -347,7 +486,7 @@ TEST(ValidatorTypeCheck, ValidateWithInvalidFloatFieldRejected) {
     std::pmr::monotonic_buffer_resource scratch_mr{scratch_buf.data(), scratch_buf.size(),
                                                    std::pmr::null_memory_resource()};
 
-    auto result = v.validate(mv, &scratch_mr);
+    auto result = v.validate(mv, &scratch_mr, nullptr);
     ASSERT_FALSE(result.has_value()) << "validate() with invalid Float must return error";
 }
 
@@ -435,7 +574,7 @@ TEST(ValidatorTypeCheck, ValidateUnexpectedTagReturnsError) {
     std::pmr::monotonic_buffer_resource scratch_mr{scratch_buf.data(), scratch_buf.size(),
                                                    std::pmr::null_memory_resource()};
 
-    auto result = v.validate(mv, &scratch_mr);
+    auto result = v.validate(mv, &scratch_mr, nullptr);
     ASSERT_FALSE(result.has_value()) << "validate() must reject an unexpected tag";
     EXPECT_EQ(result.error(), error::wire_unexpected_tag)
         << "expected wire_unexpected_tag (slot 42)";
@@ -461,7 +600,7 @@ TEST(ValidatorTypeCheck, ValidateRequiredFieldMissingReturnsError) {
     std::pmr::monotonic_buffer_resource scratch_mr{scratch_buf.data(), scratch_buf.size(),
                                                    std::pmr::null_memory_resource()};
 
-    auto result = v.validate(mv, &scratch_mr);
+    auto result = v.validate(mv, &scratch_mr, nullptr);
     ASSERT_FALSE(result.has_value()) << "validate() must reject when a required field is missing";
     EXPECT_EQ(result.error(), error::wire_required_field_missing)
         << "expected wire_required_field_missing (slot 38)";

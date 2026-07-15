@@ -293,7 +293,7 @@ TEST(ValidateGateAllocGuard, HotPathNoGlobalHeapAlloc) {
             return false;
         }
 
-        auto val_r = validator.validate(*vg_mv_r, &vg_scratch_mr);
+        auto val_r = validator.validate(*vg_mv_r, &vg_scratch_mr, nullptr);
         // Conformant Heartbeat: must validate cleanly (no error).
         return val_r.has_value();
     };
@@ -431,7 +431,7 @@ TEST(ValidateGateAllocGuard, LongMsgTypeNoGlobalHeapAlloc) {
             return false;
         }
 
-        auto val_r = validator.validate(*vg_mv_r, &vg_scratch_mr);
+        auto val_r = validator.validate(*vg_mv_r, &vg_scratch_mr, nullptr);
         return val_r.has_value();
     };
 

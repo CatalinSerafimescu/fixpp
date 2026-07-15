@@ -456,9 +456,14 @@ table_view Dictionary::as_table_view() const {
         }
     }
 
-    // ── global tag→field_type map ────────────────────────────────────────
+    // ── global tag→field_type map (+ T016 multi-value bit) ─────────────────
     // Walk every FieldRef across all message field runs; the first
     // non-NotDeclared occurrence of a tag wins (type is invariant in FIX).
+    // T016: a store-only tag (populated below, never seen by this loop)
+    // defaults to `multi_value = false` — `enum_domain`'s default member
+    // init (table_view.hpp) — since `set_multi_value` is only ever called
+    // from inside this loop, on tags this dictionary's message expansion
+    // actually reaches.
     for (auto const& msg_entry : msgs) {
         auto const all_fields = message_fields(msg_entry.msg_type);
         for (auto const& fr : all_fields) {
@@ -467,6 +472,32 @@ table_view Dictionary::as_table_view() const {
             }
             // Only record if not already mapped (first-seen wins; invariant).
             tv.set_field_type(fr.tag, field_type_from_data_type(fr.type));
+            if (fr.type == field_data_type::MultiCharValue ||
+                fr.type == field_data_type::MultiStringValue) {
+                tv.set_multi_value(fr.tag, true);
+            }
+        }
+    }
+
+    // ── enum-domain table (T015 — STORE-DRIVEN, not message_fields()-driven)
+    // Iterate the dictionary's OWN enum store (`enum_runs_` / `enum_values_`
+    // on the metadata handle — populated by XmlLoader/OrchestraLoader) so
+    // EVERY enum-backed tag gets a domain, including tags unreachable from
+    // message expansion (e.g. MsgType(35), EncryptMethod(98),
+    // MsgDirection(385), ApplVerID(1128), SessionStatus(1409) — 35 such tags
+    // across FIX50/SP1/SP2, the FIXT split). A message_fields()-only
+    // projection would leave those 35 with NO domain, and
+    // `table_view::validate_field()`'s first statement is `enum_valid()`
+    // with NO `field_valid_for` precheck (validator.hpp:323-330) — silently
+    // ACCEPTING out-of-domain values through a frozen public API, an FR-003
+    // (normative MUST) violation. This is the C3-1 fix.
+    //
+    // Built once here, never per message ([const §XV.1], [const §VIII.5]).
+    // `add_enum` copies the code bytes; see `enum_domain` (table_view.hpp) for
+    // why the table must own them rather than alias `handle_->name_pool_`.
+    for (auto const& run : handle_->enum_runs_) {
+        for (auto const& ev : enum_values(run.tag)) {
+            tv.add_enum(run.tag, ev.value);
         }
     }
 

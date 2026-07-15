@@ -13,7 +13,6 @@
 //
 // hffix comparison: hffix is NOT wired into the build.
 // D-14 says "measured-not-blocker"; see bench/REPORT.md.
-// Validator bench omitted (US4 PAUSED — deferred with US4).
 
 #include <benchmark/benchmark.h>
 

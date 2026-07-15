@@ -105,7 +105,9 @@ endif()
 add_executable(wire_dict_tests
   validator_production_table_view_test.cpp
   validator_nested_membership_test.cpp
-  message_view_membership_copy_test.cpp)
+  message_view_membership_copy_test.cpp
+  validator_enum_domain_test.cpp                                      # T022/T022a/T023 (075)
+  validator_enum_multivalue_test.cpp)                                 # T027 (075)
 target_link_libraries(wire_dict_tests PRIVATE
   fixpp_wire
   fixpp_dictionary
@@ -116,3 +118,78 @@ target_include_directories(wire_dict_tests PRIVATE
 target_compile_definitions(wire_dict_tests PRIVATE
   "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\"")
 add_test(NAME wire_dict_tests COMMAND wire_dict_tests)
+# 075 (tasks.md Test-binary discipline note): sets LABELS on the buckets it
+# joins/adds. wire_dict_tests is a grouped add_test binary — one label set
+# covers the whole executable, not per-.cpp; the 3 pre-existing members ride
+# along (name-selectable via `-R wire_dict_tests` as before, now ALSO
+# `ctest -L 075` / `-L wire` selectable).
+set_tests_properties(wire_dict_tests PROPERTIES LABELS "075;wire")
+
+# ── Standalone: 075 T007 QuickFIX enum-golden manifest gate ─────────────────
+# Isolation-sensitive per [const §VII.8] (a data-driven exact-hash gate) —
+# stays standalone rather than joining a grouped bucket. LABELS "075;golden;
+# manifest" so it is ctest -L selectable. Links NO QuickFIX and NEVER touches
+# reference-engines/: it only hashes checked-in files (dictionaries/*.xml,
+# tools/quickfix_enum_golden/main.cpp) and re-parses the checked-in
+# golden.csv, so it builds and runs identically whether or not
+# reference-engines/ is present on the machine.
+find_package(OpenSSL 3.0 REQUIRED)
+add_executable(enum_golden_manifest_test enum_golden_manifest_test.cpp)
+target_link_libraries(enum_golden_manifest_test PRIVATE
+  OpenSSL::Crypto
+  GTest::gtest
+  GTest::gtest_main
+)
+target_compile_definitions(enum_golden_manifest_test PRIVATE
+  "FIXPP_GOLDEN_CSV_PATH=\"${CMAKE_SOURCE_DIR}/tools/quickfix_enum_golden/golden.csv\""
+  "FIXPP_GOLDEN_MAIN_CPP_PATH=\"${CMAKE_SOURCE_DIR}/tools/quickfix_enum_golden/main.cpp\""
+  "FIXPP_GOLDEN_DICT_FIX44_PATH=\"${CMAKE_SOURCE_DIR}/dictionaries/FIX44.xml\""
+  "FIXPP_GOLDEN_DICT_FIX41_PATH=\"${CMAKE_SOURCE_DIR}/dictionaries/FIX41.xml\""
+  "FIXPP_GOLDEN_DICT_FIX42_PATH=\"${CMAKE_SOURCE_DIR}/dictionaries/FIX42.xml\""
+)
+add_test(NAME enum_golden_manifest_test COMMAND enum_golden_manifest_test)
+set_tests_properties(enum_golden_manifest_test PROPERTIES LABELS "075;golden;manifest")
+
+# ── Standalone: 075 T031 QuickFIX enum-golden PARITY gate (SC-009) ──────────
+# Isolation-sensitive per [const §VII.8] (a data-driven exact gate consuming
+# the checked-in golden + manifest) — stays standalone rather than joining
+# wire_dict_tests. LABELS "075;golden;parity". Links NO QuickFIX: it drives
+# fixpp's OWN production validate() (real dictionaries -> as_table_view() ->
+# dictionary_driven_validator) over the row data recorded in
+# tools/quickfix_enum_golden/golden.csv, so it builds and runs identically
+# whether or not reference-engines/ is present (same posture as
+# enum_golden_manifest_test).
+add_executable(enum_golden_parity_test enum_golden_parity_test.cpp)
+target_link_libraries(enum_golden_parity_test PRIVATE
+  fixpp_wire
+  fixpp_dictionary
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(enum_golden_parity_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests")
+target_compile_definitions(enum_golden_parity_test PRIVATE
+  "FIXPP_GOLDEN_CSV_PATH=\"${CMAKE_SOURCE_DIR}/tools/quickfix_enum_golden/golden.csv\""
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
+)
+add_test(NAME enum_golden_parity_test COMMAND enum_golden_parity_test)
+set_tests_properties(enum_golden_parity_test PROPERTIES LABELS "075;golden;parity")
+
+# ── Standalone: 075 T044 legacy CHAR->String (pre-FIX.4.2) witness ──────────
+# Drives fixpp's OWN production path (real FIX40.xml/FIX41.xml/FIX42.xml/
+# FIX44.xml -> XmlLoader -> as_table_view() -> dictionary_driven_validator)
+# rather than joining wire_dict_tests, mirroring enum_golden_parity_test's
+# posture (isolation-simple, no shared bucket state to reason about).
+add_executable(validator_legacy_char_type_test validator_legacy_char_type_test.cpp)
+target_link_libraries(validator_legacy_char_type_test PRIVATE
+  fixpp_wire
+  fixpp_dictionary
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(validator_legacy_char_type_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests")
+target_compile_definitions(validator_legacy_char_type_test PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\"")
+add_test(NAME validator_legacy_char_type_test COMMAND validator_legacy_char_type_test)
+set_tests_properties(validator_legacy_char_type_test PROPERTIES LABELS "075;wire;dictionary")

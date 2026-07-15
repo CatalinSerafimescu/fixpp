@@ -8,6 +8,11 @@
 // dictionary_driven_validator::validate() to the FIX SessionRejectReason value
 // for the Reject(35=3, 373=…) frame.
 //
+// 075-live-wire-enum-validation makes table_view::enum_valid() live (dictionary
+// -driven, no longer a stub): wire_field_value_out_of_range(40) is now raised
+// by BOTH the type arm (not type-conformant) and the enum arm (value outside
+// the dictionary-declared code set), both mapping to reason 5 below.
+//
 // Anchors: specs/041-validation-gate-wiring/data-model.md E-4;
 //          research.md R-3; [FIX50SP2 §2.1] (SessionRejectReason taxonomy).
 //
@@ -18,9 +23,10 @@
 //                                         structure failures, Phase-1 — the
 //                                         validator surfaces group errors as
 //                                         wire_required_field_missing)
-//   wire_field_value_out_of_range(40)→ 5 (value not type-conformant;
-//                                         type-arm only in Phase-1 since the
-//                                         enum arm is dead — enum_valid→true)
+//   wire_field_value_out_of_range(40)→ 5 (value not type-conformant — type
+//                                         arm — OR value outside the
+//                                         dictionary-declared enum domain —
+//                                         enum arm, live since 075)
 //   wire_field_value_truncated(41) →  6  (Float/decimal precision-loss ONLY;
 //                                         fired only on decimal_precision_loss
 //                                         remap, NOT a generic bad-format)
@@ -57,8 +63,9 @@ namespace fixpp::wire {
             // Reason 2: tag not defined for this message type.
             return 2;
         case error::wire_field_value_out_of_range:
-            // Reason 5: value is incorrect (not type-conformant — type arm;
-            // enum arm is dead Phase-1).
+            // Reason 5: value is incorrect — not type-conformant (type arm)
+            // OR outside the dictionary-declared enum domain (enum arm, live
+            // since 075-live-wire-enum-validation).
             return 5;
         case error::wire_field_value_truncated:
             // Reason 6: incorrect data format (Float/decimal precision-loss

@@ -1892,8 +1892,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::emit_session_reject_(
 //
 // validate() returns a wire_* error slot; the caller maps it via
 // wire_error_to_session_reject_reason() (T011) and passes the resulting reason
-// here. ref_tag_id == 0 → 371 omitted from the outbound Reject frame (the
-// validate gate has no per-tag provenance from validate(); it passes 0).
+// here. ref_tag_id == 0 → 371 omitted from the outbound Reject frame. As of
+// 075 T020a, validate() threads per-tag provenance out via a required
+// ref_tag_out parameter (set by validate_inbound_ below); ref_tag_id remains
+// 0 only when the failure site genuinely has no single offending tag (e.g.
+// Step-0 header-order).
 //
 // Identical Disconnected-on-failure handling to the zero-arg overload.
 // [041-validation-gate-wiring T010; data-model E-4; RC-C; FR-004]
@@ -1971,10 +1974,11 @@ std::optional<Session::RejectDecision> Session::validate_inbound_(
     if (!vg_mv_r) {
         return std::nullopt;
     }
-    auto val_r = validator_->validate(*vg_mv_r, &vg_scratch_mr);
+    std::uint16_t vg_ref_tag = 0;
+    auto val_r = validator_->validate(*vg_mv_r, &vg_scratch_mr, &vg_ref_tag);
     if (!val_r) {
         const int vg_reason = fixpp::wire::wire_error_to_session_reject_reason(val_r.error());
-        return RejectDecision{vg_reason, 0};
+        return RejectDecision{vg_reason, vg_ref_tag};
     }
     return std::nullopt;
 }

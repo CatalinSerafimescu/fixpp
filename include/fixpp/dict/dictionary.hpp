@@ -63,8 +63,9 @@ struct MessageEntry {
 // pair of a codeset-backed field, returned by `Dictionary::enum_values(tag)`.
 // The string_views alias the metadata-handle's name-string pool. `description`
 // is the Orchestra `<fixr:code name=...>` symbolic name (the
-// QuickFIX-`description`-equivalent). Populated only by OrchestraLoader;
-// XmlLoader-produced dictionaries carry an empty enum store.
+// QuickFIX-`description`-equivalent). Populated by OrchestraLoader AND, since
+// 075-live-wire-enum-validation, by XmlLoader (all nine QuickFIX-XML
+// dictionaries also carry their declared `<value>` code sets now).
 struct EnumValueRef {
     std::string_view value;        // the `<fixr:code value=...>` wire bytes
     std::string_view description;  // the `<fixr:code name=...>` symbolic name
@@ -183,22 +184,28 @@ public:
 
     // 074-orchestra-native-reader (FR-002): the enumerated {value, description}
     // pairs of a codeset-backed field, keyed by `tag`. Empty span if `tag` has
-    // no codeset, or for any dictionary that does not populate the enum store
-    // (all XmlLoader/QuickFIX dictionaries). Additive, read-only, orthogonal to
-    // `table_view::enum_valid` (unchanged Phase-1 stub). Aliases the
-    // metadata-handle name pool (lifetime = this Dictionary).
+    // no codeset. Since 075-live-wire-enum-validation, ALL ten dictionaries
+    // (the nine XmlLoader/QuickFIX dictionaries plus OrchestraLoader) populate
+    // the enum store. Additive, read-only; `table_view::enum_valid` (see
+    // `as_table_view()` below) now READS this same store — no longer the
+    // Phase-1 stub. Aliases the metadata-handle name pool (lifetime = this
+    // Dictionary).
     [[nodiscard]] std::span<EnumValueRef const> enum_values(std::uint16_t tag) const noexcept
         [[clang::lifetimebound]];
 
     // 041-validation-gate-wiring T008: build a `dict::table_view` from this
     // Dictionary for use by `wire::dictionary_driven_validator`. The returned
-    // `table_view` owns its tables; all validator method calls on it are O(1)
-    // and alloc-free (tables are built once here, not per-message).
+    // `table_view` owns its tables; all validator method calls on it are
+    // alloc-free (tables are built once here, not per-message). Most are
+    // O(1); `enum_valid` (see 075 below) binary-searches its sorted per-tag
+    // code set, O(log C).
     //
     // Builds: field-valid sets, required-field lists, group first/member tags,
     // global tag→`field_type` map (field_data_type collapsed via
-    // `field_type_from_data_type()`). `enum_valid` is stubbed to true (FR-005,
-    // enum tables deferred to 2c work).
+    // `field_type_from_data_type()`), and — since
+    // 075-live-wire-enum-validation — the enum-domain table `enum_valid()`
+    // checks against (store-driven projection of `enum_values()` above; no
+    // longer a stub).
     //
     // [const §XV.1]: construction only at config-time; the returned table_view
     // is immutable and must not be rebuilt on the per-message hot path.

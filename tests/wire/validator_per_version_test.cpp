@@ -165,7 +165,7 @@ fixpp::core::expected_t<void> do_validate(dictionary_driven_validator const& v,
     std::pmr::monotonic_buffer_resource scratch_mr{scratch_buf.data(), scratch_buf.size(),
                                                    std::pmr::null_memory_resource()};
 
-    return v.validate(mv, &scratch_mr);
+    return v.validate(mv, &scratch_mr, nullptr);
 }
 
 // ── 1. Conforming Heartbeat is accepted ───────────────────────────────────────
@@ -207,11 +207,14 @@ TEST_P(ValidatorPerVersion, MissingRequiredSenderRejected) {
         << static_cast<int>(result.error());
 }
 
-// ── 3. Enum violation — Phase-1 pass-through (FR-005, 041-validation-gate-wiring)
-// EncryptMethod (tag 98) = "9" is not in the {"0","1"} enum set.
-// Phase-1: enum_valid() always returns true; enum violations are accepted.
-// Phase-2 (2c enum tables) will restore the rejection behavior.
-TEST_P(ValidatorPerVersion, BadEnumEncryptMethodPassedInPhase1) {
+// ── 3. Enum violation → wire_field_value_out_of_range ─────────────────────────
+// 075-live-wire-enum-validation FR-021 artifact #3 (T025): enum_valid() is now
+// REAL (075 T017). EncryptMethod (tag 98) = "9" is not in the {"0","1"}
+// enum set registered by make_heartbeat_grammar(), so it MUST reject with
+// wire_field_value_out_of_range across all four wire versions. Previously
+// (Phase-1 stub) this asserted the OPPOSITE — accept — per FR-012 that
+// re-baseline is called out explicitly here, not silently.
+TEST_P(ValidatorPerVersion, BadEnumEncryptMethodRejected) {
     auto const& p = GetParam();
     SCOPED_TRACE(p.label);
 
@@ -225,10 +228,11 @@ TEST_P(ValidatorPerVersion, BadEnumEncryptMethodPassedInPhase1) {
                                     "98=9\x01");  // illegal enum value for EncryptMethod
 
     auto result = do_validate(v, buf);
-    // Phase-1: enum_valid always true → accepted, not rejected (FR-005).
-    EXPECT_TRUE(result.has_value()) << p.label
-                                    << ": Phase-1: enum_valid always true; EncryptMethod=9 must "
-                                       "be accepted (FR-005, enum-check deferred to 2c)";
+    ASSERT_FALSE(result.has_value())
+        << p.label << ": EncryptMethod=9 (undeclared enum value) must be rejected (FR-006)";
+    EXPECT_EQ(result.error(), error::wire_field_value_out_of_range)
+        << p.label << ": expected wire_field_value_out_of_range (40), got "
+        << static_cast<int>(result.error());
 }
 
 // ── 4. Unexpected tag → wire_unexpected_tag ───────────────────────────────────

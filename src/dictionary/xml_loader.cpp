@@ -40,6 +40,7 @@
 #include <string_view>
 #include <system_error>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -113,7 +114,23 @@ constexpr FieldTypeEntry kFieldTypeTable[] = {
     {.xml_name = "DATE", .enum_value = field_data_type::LocalMktDate},
 };
 
-[[nodiscard]] bool resolve_field_type(std::string_view name, field_data_type& out) noexcept {
+// T044 (075-live-wire-enum-validation, /clarify disposition "mirror QuickFIX"):
+// pre-FIX.4.2 dictionaries (FIX40.xml, FIX41.xml) declare `BeginString(8)` and
+// `CheckSum(10)` — and, dictionary-wide, every other CHAR-typed field — as
+// `CHAR` even though `8=FIX.4.1`/`10=047` are multi-byte. Our XML is a
+// byte-exact vendored copy of QuickFIX's own `spec/FIX41.xml`; the fix is NOT
+// in the data, it is in how the loader interprets `CHAR` for old dictionaries.
+// QuickFIX applies the exact same dictionary-wide relaxation at load time —
+// `DataDictionary::XMLTypeToType`, src/C++/DataDictionary.cpp:589-592:
+//     if (m_beginString < "FIX.4.2" && type == "CHAR") return TYPE::String;
+// `legacy_char_is_string` mirrors that condition. Do NOT "clean this up" —
+// this is deliberate reference-engine parity, not a bug.
+[[nodiscard]] bool resolve_field_type(std::string_view name, bool legacy_char_is_string,
+                                      field_data_type& out) noexcept {
+    if (legacy_char_is_string && name == "CHAR") {
+        out = field_data_type::String;
+        return true;
+    }
     for (auto const& row : kFieldTypeTable) {
         // cppcheck-suppress useStlAlgorithm  // linear search over a small constexpr table;
         // std::find_if's predicate-wrap isn't a win here
@@ -190,11 +207,22 @@ constexpr VersionEntry kVersionTable[] = {
 // caller observes, and that block lives on `mr`).
 // ----------------------------------------------------------------------------
 
+// 075-live-wire-enum-validation T012 (FR-001): one <value enum="X"
+// description="Y"/> child of a global <field>, pre-dedupe (FR-017) and
+// pre-intern. Plain std::string (not PMR) — matches the rest of this file's
+// build-time scaffolding, which is freed before the loader returns; only the
+// interned bytes in `dict_metadata_handle::name_pool_` survive.
+struct PendingEnumCode {
+    std::string value;
+    std::string description;
+};
+
 struct GlobalFieldInfo {
     std::uint16_t tag{0};
     std::string name;
     field_data_type type{};
-    std::uint16_t length_pair_data_tag{0};  // populated post-parse
+    std::uint16_t length_pair_data_tag{0};    // populated post-parse
+    std::vector<PendingEnumCode> enum_codes;  // T012 — declaration-order, deduped by value
 };
 
 struct ComponentDef {
@@ -323,6 +351,15 @@ void LoaderState::parse_global_fields(pugi::xml_node const& root) {
     if (!fields) {
         throw xml_parse_error("dict::xml_parse_error: missing <fields> block under <fix>");
     }
+    // T044: `version_` (set by parse_version(), which always runs first —
+    // see parse_document()) is resolved via kVersionTable's exact
+    // type_attr+major+minor+servicepack match, so this equality check
+    // already accounts for the "FIX" vs "FIXT" family split that a raw
+    // major/minor-only comparison would get wrong (FIXT.1.1 has major=1,
+    // minor=1 and must NOT be treated as pre-FIX.4.2). Scoped to exactly the
+    // two pre-FIX.4.2 dictionaries QuickFIX's own rule targets.
+    bool const legacy_char_is_string =
+        version_ == session_version::v40 || version_ == session_version::v41;
     for (auto const& f : fields.children("field")) {
         auto const number_attr = f.attribute("number");
         if (!number_attr) {
@@ -344,7 +381,7 @@ void LoaderState::parse_global_fields(pugi::xml_node const& root) {
                                   "\"> missing name attribute");
         }
         field_data_type ft{};
-        if (!resolve_field_type(type_s, ft)) {
+        if (!resolve_field_type(type_s, legacy_char_is_string, ft)) {
             throw xml_parse_error("dict::xml_parse_error: <field type=\"" + type_s +
                                   "\"> outside [FIX50SP2 §3.3] vocabulary");
         }
@@ -353,6 +390,30 @@ void LoaderState::parse_global_fields(pugi::xml_node const& root) {
                                   "\">");
         }
         GlobalFieldInfo info{.tag = tag, .name = name, .type = ft, .length_pair_data_tag = 0};
+
+        // T012/T013 (FR-001/FR-017): parse <value enum="X" description="Y"/>
+        // children into the enum-domain store. Duplicate `enum` values on one
+        // field are DEDUPED (union semantics, no error — QuickFIX's std::set
+        // membership is idempotent, research.md R-5); a `<value>` missing its
+        // `enum` attribute is a load failure (fail-closed, mirroring
+        // QuickFIX's ConfigError); a missing `description` is legal and
+        // yields an empty description view (diagnostics-only).
+        std::unordered_set<std::string> seen_codes;
+        for (auto const& v : f.children("value")) {
+            auto const enum_attr = v.attribute("enum");
+            if (!enum_attr) {
+                throw xml_parse_error("dict::xml_parse_error: <value> under <field number=\"" +
+                                      num_s + "\"> missing enum attribute");
+            }
+            std::string code_val{enum_attr.as_string("")};
+            if (!seen_codes.insert(code_val).second) {
+                continue;  // FR-017 dedupe
+            }
+            std::string desc{v.attribute("description").as_string("")};
+            info.enum_codes.push_back(
+                {.value = std::move(code_val), .description = std::move(desc)});
+        }
+
         by_tag_.emplace(tag, name);
         by_name_.emplace(name, std::move(info));
     }
@@ -655,6 +716,15 @@ detail::dict_metadata_handle_ptr LoaderState::finalize() {
     }
     for (auto const& [name, info] : by_name_) {
         pool_estimate += name.size();
+        // T014 (research.md R-4/R-10): the enum store's value+description
+        // bytes are interned into this same pool below — must be counted
+        // here or the reserve is short on every dictionary. Reserved TIGHT
+        // (exact byte count, not a loose upper bound) so a fixed/bounded
+        // upstream memory_resource is not over-committed
+        // ([[feedback_fixed_arena_over_reserve_silent_loss_larger_stl]]).
+        for (auto const& code : info.enum_codes) {
+            pool_estimate += code.value.size() + code.description.size();
+        }
     }
     h.name_pool_.reserve(pool_estimate + 1);
 
@@ -684,6 +754,39 @@ detail::dict_metadata_handle_ptr LoaderState::finalize() {
     };
     std::vector<PendingComponent> pending_components;
     pending_components.reserve(components_.size());
+
+    // T012 — enum store (research.md R-4): intern each code's value +
+    // description via offsets NOW (the pool may still reallocate — offsets
+    // are stable across that, pointers are not); the actual EnumValueRef
+    // string_views are bound only in the post-shrink_to_fit() pass below,
+    // mirroring orchestra_loader.cpp's PendingEnumRun/PendingEnumCode shape.
+    struct PendingEnumCodeSlice {
+        detail::NameSlice value{};
+        detail::NameSlice desc{};
+    };
+    struct PendingEnumRun {
+        std::uint16_t tag{0};
+        std::vector<PendingEnumCodeSlice> codes;
+    };
+    std::vector<PendingEnumRun> pending_enum_runs;
+    for (auto const& [name, info] : by_name_) {
+        if (info.enum_codes.empty()) {
+            continue;
+        }
+        PendingEnumRun per{};
+        per.tag = info.tag;
+        per.codes.reserve(info.enum_codes.size());
+        for (auto const& code : info.enum_codes) {
+            detail::NameSlice vs{};
+            vs.offset = intern_name_in_pool(h, code.value);
+            vs.length = static_cast<std::uint32_t>(code.value.size());
+            detail::NameSlice ds{};
+            ds.offset = intern_name_in_pool(h, code.description);
+            ds.length = static_cast<std::uint32_t>(code.description.size());
+            per.codes.push_back({.value = vs, .desc = ds});
+        }
+        pending_enum_runs.push_back(std::move(per));
+    }
 
     // Build the flat fields_ vector and the per-message offset table.
     auto append_run = [&](std::vector<FieldRef>& msg_fields,
@@ -889,6 +992,33 @@ detail::dict_metadata_handle_ptr LoaderState::finalize() {
                                             detail::FieldNameEntry const& b) noexcept {
         return detail::bytewise_compare(h.name_at(a.name), h.name_at(b.name)) < 0;
     });
+
+    // T012 — enum store (mirrors orchestra_loader.cpp's 074 shape). MUST run
+    // here, AFTER shrink_to_fit() has locked name_pool_.data() (research.md
+    // R-4) — binding these string_views during the parse would dangle on the
+    // next pool reallocation. `pending_enum_runs` was built while iterating
+    // `by_name_` (an unordered_map — NOT tag-ordered), so the explicit sort
+    // below is required for `enum_values_impl`'s binary-search precondition
+    // (unlike OrchestraLoader, which iterates a pre-sorted tag list).
+    std::size_t total_codes = 0;
+    for (auto const& per : pending_enum_runs) {
+        total_codes += per.codes.size();
+    }
+    h.enum_values_.reserve(total_codes);
+    h.enum_runs_.reserve(pending_enum_runs.size());
+    for (auto const& per : pending_enum_runs) {
+        detail::EnumRun run{};
+        run.tag = per.tag;
+        run.start = static_cast<std::uint32_t>(h.enum_values_.size());
+        run.count = static_cast<std::uint32_t>(per.codes.size());
+        for (auto const& code : per.codes) {
+            h.enum_values_.push_back(EnumValueRef{
+                .value = std::string_view{data + code.value.offset, code.value.length},
+                .description = std::string_view{data + code.desc.offset, code.desc.length}});
+        }
+        h.enum_runs_.push_back(run);
+    }
+    std::ranges::sort(h.enum_runs_, {}, &detail::EnumRun::tag);
 
     return handle;
 }

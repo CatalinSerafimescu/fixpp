@@ -17,7 +17,7 @@
 //   span<uint16_t const> group_member_tags(uint16_t no_tag)             const noexcept
 //   field_type   field_type_of(uint16_t tag)                            const noexcept
 //   bool         enum_valid(uint16_t tag, span<const byte> value)       const noexcept
-//       → Phase-1: always true (FR-005; enum tables deferred to 2c work)
+//       → 075: real dictionary-driven enum-domain check (FR-002/FR-003)
 //
 // STORAGE (E-2, data-model.md):
 // Owns its tables using std::vector / std::unordered_map. Constructed ONCE at
@@ -158,14 +158,24 @@ struct group_ctx_entry {
     std::vector<std::uint16_t> members;
 };
 
+// T017/T019 (data-model.md Entity B): enum-domain table entry. OWNS copies of
+// the code bytes — does NOT alias the source Dictionary's name_pool_.
+// as_table_view() may legally outlive the Dictionary it was built from
+// (dictionary.hpp:193-205); aliasing would silently turn that into a
+// use-after-free no existing test would catch (Complexity row 2).
+struct enum_domain {
+    std::vector<std::string> codes;  // sorted bytewise ascending, deduped
+    bool multi_value{false};         // FR-005: MultiCharValue/MultiStringValue
+};
+
 [[nodiscard]] inline group_ctx_key make_group_ctx_key(std::string_view msg_type,
                                                       std::span<std::uint16_t const> parent_path,
                                                       std::uint16_t no_tag) {
     group_ctx_key key;
     key.msg_type = std::string{msg_type};
     key.no_tag = no_tag;
-    key.depth = static_cast<std::uint8_t>(
-        std::min<std::size_t>(parent_path.size(), kMaxGroupContextDepth));
+    key.depth =
+        static_cast<std::uint8_t>(std::min<std::size_t>(parent_path.size(), kMaxGroupContextDepth));
     for (std::uint8_t i = 0; i < key.depth; ++i) {
         key.parent_path[i] = parent_path[i];
     }
@@ -285,11 +295,56 @@ public:
         return it == types_.end() ? field_type::String : it->second;
     }
 
-    // Phase-1: always true. Enum-value checking is deferred to the 2c work
-    // (FR-005). A field whose value is a wrong enum constant but a correct
-    // structural type is accepted.
-    [[nodiscard]] bool enum_valid(std::uint16_t /*tag*/,
-                                  std::span<const std::byte> /*value*/) const noexcept {
+    // T017 [FR-003/FR-004/FR-007/FR-008/FR-009/FR-014]: real enum-domain check.
+    // `noexcept`, allocation-free on every path: no std::string materialization
+    // of the wire value, no token vector — tokenization walks string_view
+    // slices of the caller's buffer (`enum-domain.md` C-3).
+    //
+    // Two DISTINCT accept-floors — not the same rule, both required:
+    [[nodiscard]] bool enum_valid(std::uint16_t tag,
+                                  std::span<const std::byte> value) const noexcept {
+        auto const it = enums_.find(tag);
+
+        // Floor 1 [FR-003]: tag absent from the enum store, OR its declared
+        // code set is empty ⇒ ACCEPT. The anti-reject-everything floor — the
+        // sole thing keeping FIXT11 working (its MsgType declares zero
+        // <value> children).
+        if (it == enums_.end() || it->second.codes.empty()) {
+            return true;
+        }
+
+        // Floor 2 [FR-008]: an EMPTY field value bypasses the enum check
+        // UNCONDITIONALLY — check_field_type decides instead. Distinct from
+        // Floor 1: a literal byte-exact compare with no empty guard would
+        // find "" absent from every codeset and reject via THIS arm, wrongly
+        // flipping empty x String (e.g. ExecInst(18)=) from accept to reject
+        // (contracts/enum-domain.md C-1 / DV-2). fixpp has no reason-4 slot,
+        // so routing empty through the enum check would manufacture a 5-vs-4
+        // divergence rather than achieve parity (FR-008 disposition (a)).
+        if (value.empty()) {
+            return true;
+        }
+
+        std::string_view const sv{reinterpret_cast<char const*>(value.data()), value.size()};
+        enum_domain const& domain = it->second;
+
+        if (!domain.multi_value) {
+            // Single-value: byte-exact whole-token binary search. No case
+            // folding, no prefix matching (FR-009) — MatchType(574)=A must
+            // reject on a codeset declaring A1..A5 but not bare A.
+            return code_declared(domain.codes, sv);
+        }
+
+        // Multi-value [FR-004]: tokenize on a single space (T018), requiring
+        // EVERY token be declared. An empty token (double/trailing space)
+        // is never a declared code, so it rejects.
+        std::size_t start = 0;
+        while (start <= sv.size()) {
+            std::string_view const token = next_token(sv, start);
+            if (!code_declared(domain.codes, token)) {
+                return false;
+            }
+        }
         return true;
     }
 
@@ -347,9 +402,25 @@ public:
         return *this;
     }
 
-    // Phase-1 enum stub: always returns true from enum_valid(); no storage
-    // (FR-005 — enum tables deferred to 2c work).
-    table_view& add_enum(std::uint16_t /*tag*/, std::string_view /*value*/) { return *this; }
+    // Inserts an OWNED COPY of `value`'s bytes into `tag`'s code list (see
+    // `enum_domain` above for why the table owns them). Sorted-on-insert and
+    // deduped, so enum_valid's binary search is valid regardless of call order.
+    table_view& add_enum(std::uint16_t tag, std::string_view value) {
+        auto& codes = enums_[tag].codes;
+        auto const pos = std::ranges::lower_bound(codes, value, code_less);
+        if (pos == codes.end() || *pos != value) {
+            codes.emplace(pos, value);  // std::string{value} — owned copy
+        }
+        return *this;
+    }
+
+    // T019 companion [FR-005]: the multi-value bit `add_enum` cannot itself
+    // carry — without this, FR-004's tokenizer (T018) has no unit-level
+    // witness that does not require a full XML load.
+    table_view& set_multi_value(std::uint16_t tag, bool multi = true) {
+        enums_[tag].multi_value = multi;
+        return *this;
+    }
 
     // ── 063 Defect-A: context-scoped population surface ───────────────────
     // Used EXCLUSIVELY by Dictionary::as_table_view() (dictionary.cpp) — the
@@ -374,17 +445,53 @@ public:
     }
 
 private:
+    // O(log C) byte-exact, whole-token lookup over a sorted code list — no
+    // case folding, no prefix matching. `token` is a slice of the caller's
+    // buffer; no temporary std::string is constructed.
+    // Heterogeneous comparator: orders owned codes against a wire-value slice
+    // without materializing a std::string (enum_valid is allocation-free).
+    // Transparent so std::ranges::lower_bound accepts it in both directions.
+    struct code_less_t {
+        using is_transparent = void;
+        [[nodiscard]] bool operator()(std::string_view a, std::string_view b) const noexcept {
+            return a < b;
+        }
+    };
+    static constexpr code_less_t code_less{};
+
+    [[nodiscard]] static bool code_declared(std::vector<std::string> const& codes,
+                                            std::string_view token) noexcept {
+        auto const lb = std::ranges::lower_bound(codes, token, code_less);
+        return lb != codes.end() && std::string_view{*lb} == token;
+    }
+
+    // T018 [FR-014]: locate the next single-space-delimited token in `value`
+    // starting at `start`, and advance `start` past it. Empty tokens are NOT
+    // skipped — a double space or a trailing space yields an empty token
+    // (never a declared code, so it rejects). Byte-for-byte QuickFIX
+    // (DataDictionary.h:265-275) — required for interop parity, not merely
+    // permitted; do not invent a more forgiving tokenizer.
+    [[nodiscard]] static std::string_view next_token(std::string_view value,
+                                                     std::size_t& start) noexcept {
+        auto const space_pos = value.find(' ', start);
+        std::string_view const token = (space_pos == std::string_view::npos)
+                                           ? value.substr(start)
+                                           : value.substr(start, space_pos - start);
+        start = (space_pos == std::string_view::npos) ? value.size() + 1 : space_pos + 1;
+        return token;
+    }
+
     // Valid-tag set per msg_type (used by field_valid_for).
     // transparent hash+equality: find(string_view) is allocation-free
     // [const §VIII.5 / §XV.1 — on the validate-ON hot path].
-    std::unordered_map<std::string, std::unordered_set<std::uint16_t>,
-                       string_hash, std::equal_to<>> valid_;
+    std::unordered_map<std::string, std::unordered_set<std::uint16_t>, string_hash, std::equal_to<>>
+        valid_;
 
     // Required-tag list per msg_type (insertion order preserved; spans stable).
     // transparent hash+equality: find(string_view) is allocation-free
     // [const §VIII.5 / §XV.1 — on the validate-ON hot path].
-    std::unordered_map<std::string, std::vector<std::uint16_t>,
-                       string_hash, std::equal_to<>> required_;
+    std::unordered_map<std::string, std::vector<std::uint16_t>, string_hash, std::equal_to<>>
+        required_;
 
     // Group first-delimiter (no_tag → first member tag).
     std::unordered_map<std::uint16_t, std::uint16_t> group_first_;
@@ -402,6 +509,12 @@ private:
 
     // Global tag → field_type map (built once from Dictionary).
     std::unordered_map<std::uint16_t, field_type> types_;
+
+    // T017/T019 (data-model.md Entity B): enum-domain table, tag → owned
+    // sorted/deduped code list + multi-value bit. Populated by add_enum /
+    // set_multi_value (Dictionary::as_table_view()) or directly by tests.
+    // Immutable after construction; enum_valid()'s sole backing store.
+    std::unordered_map<std::uint16_t, enum_domain> enums_;
 };
 
 }  // namespace fixpp::dict
