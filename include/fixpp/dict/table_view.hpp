@@ -599,16 +599,26 @@ private:
     // hash probes, never changes an answer. 8 KiB, value-init to zero.
     // NOTE for future editors: any NEW population path into group_first_ /
     // group_members_ / group_ctx_ MUST call set_group_bit(no_tag).
-    std::array<std::uint64_t, 1024> group_bits_{};
+    // FOOTPRINT-VARIANT (Task B experiment): config-time-sized vector instead
+    // of a fixed 8 KiB array — sized to (max populated no_tag>>6)+1 words, so
+    // real dictionaries cost a few hundred bytes per table_view copy, not 8 KiB.
+    // Hot-path reads stay alloc-free (bounds-check + index); growth is only in
+    // set_group_bit at config time.
+    std::vector<std::uint64_t> group_bits_;
 
     [[nodiscard]] bool group_bit(std::uint16_t no_tag) const noexcept {
-        return ((group_bits_[static_cast<std::size_t>(no_tag) >> 6U] >>
-                 (static_cast<std::size_t>(no_tag) & 63U)) &
-                1U) != 0U;
+        std::size_t const w = static_cast<std::size_t>(no_tag) >> 6U;
+        if (w >= group_bits_.size()) {
+            return false;  // beyond populated range ⟹ bit clear ⟹ not a group
+        }
+        return ((group_bits_[w] >> (static_cast<std::size_t>(no_tag) & 63U)) & 1U) != 0U;
     }
-    void set_group_bit(std::uint16_t no_tag) noexcept {
-        group_bits_[static_cast<std::size_t>(no_tag) >> 6U] |=
-            (std::uint64_t{1} << (static_cast<std::size_t>(no_tag) & 63U));
+    void set_group_bit(std::uint16_t no_tag) {
+        std::size_t const w = static_cast<std::size_t>(no_tag) >> 6U;
+        if (w >= group_bits_.size()) {
+            group_bits_.resize(w + 1, 0);
+        }
+        group_bits_[w] |= (std::uint64_t{1} << (static_cast<std::size_t>(no_tag) & 63U));
     }
 
     // 063 Defect-A context-scoped store: (msg_type, parent_path, no_tag) →
@@ -628,16 +638,21 @@ private:
     // ⟹ enum_valid's Floor-1 accept — the filter only skips the hash
     // probe, never changes an answer. NOTE for future editors: any NEW
     // population path into enums_ MUST call set_enum_bit(tag).
-    std::array<std::uint64_t, 1024> enum_bits_{};
+    std::vector<std::uint64_t> enum_bits_;  // FOOTPRINT-VARIANT: see group_bits_
 
     [[nodiscard]] bool enum_bit(std::uint16_t tag) const noexcept {
-        return ((enum_bits_[static_cast<std::size_t>(tag) >> 6U] >>
-                 (static_cast<std::size_t>(tag) & 63U)) &
-                1U) != 0U;
+        std::size_t const w = static_cast<std::size_t>(tag) >> 6U;
+        if (w >= enum_bits_.size()) {
+            return false;  // beyond populated range ⟹ bit clear ⟹ Floor-1 accept
+        }
+        return ((enum_bits_[w] >> (static_cast<std::size_t>(tag) & 63U)) & 1U) != 0U;
     }
-    void set_enum_bit(std::uint16_t tag) noexcept {
-        enum_bits_[static_cast<std::size_t>(tag) >> 6U] |=
-            (std::uint64_t{1} << (static_cast<std::size_t>(tag) & 63U));
+    void set_enum_bit(std::uint16_t tag) {
+        std::size_t const w = static_cast<std::size_t>(tag) >> 6U;
+        if (w >= enum_bits_.size()) {
+            enum_bits_.resize(w + 1, 0);
+        }
+        enum_bits_[w] |= (std::uint64_t{1} << (static_cast<std::size_t>(tag) & 63U));
     }
 
     // T017/T019 (data-model.md Entity B): enum-domain table, tag → owned
