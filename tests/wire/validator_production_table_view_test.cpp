@@ -257,6 +257,19 @@ TEST(ValidatorProductionTableView, UnknownMsgTypeRejectsLikePreHoistFieldValidFo
     EXPECT_FALSE(tv_direct.field_valid_for("Z", ref_tag))
         << "the tag validate() rejected (" << ref_tag
         << ") must ALSO be reported invalid by the un-hoisted field_valid_for path";
+    // Gate B r2 (P2): pin the EXACT offending tag, not just "some tag that is
+    // also invalid" (tag 0 — ref_tag's zero-init — would ALSO satisfy the
+    // field_valid_for("Z", ref_tag) check above for unknown "Z", so that
+    // assertion alone does not prove validate() actually wrote *ref_tag_out*
+    // on this path). make_frame's body is "35=Z\x01" "98=0\x01" prefixed with
+    // "8=FIX.4.4\x01" + the 9= length field; Step-1 walks msg.begin()..end()
+    // from byte 0, so the FIRST present field is BeginString(8) itself — the
+    // very first field validate() examines against the (empty, since "Z" is
+    // unknown) valid_tags view, hence the first (and only, since validate()
+    // returns on the first failure) rejection.
+    EXPECT_EQ(ref_tag, std::uint16_t{8})
+        << "validate() must report the FIRST field it examined (BeginString=8) as the "
+           "offending tag, not merely 'some tag that is also invalid for msg_type Z'";
 }
 
 // ── T009a-1 RED→GREEN: Float garbage value → wire_field_value_out_of_range ───

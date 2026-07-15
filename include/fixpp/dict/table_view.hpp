@@ -187,20 +187,34 @@ struct enum_domain {
            0U;
 }
 
-// Gate B r1 (PR #194 FIX 2) — encapsulates `table_view::valid_tags_for()`'s
+// Gate B r1/r2 (PR #194 FIX 2 / P3) — encapsulates `table_view::valid_tags_for()`'s
 // backing container. Returned BY VALUE (a single pointer, trivially copyable)
 // so a future flat-vector/perfect-hash swap for `valid_` changes only this
-// struct's body, never `table_view`'s or `dictionary_driven_validator`'s
-// public surface. `set_ == nullptr` (unknown msg_type) makes `contains()`
+// class's body, never `table_view`'s or `dictionary_driven_validator`'s
+// public surface. The default-constructed (empty) view makes `contains()`
 // return false for every tag — byte-identical to the pre-encapsulation
 // nullptr-check-then-`unordered_set::contains` call site in validator.hpp.
 // noexcept + alloc-free: a raw pointer member, no owning state.
-struct valid_tag_set_view {
-    std::unordered_set<std::uint16_t> const* set_ = nullptr;
+//
+// The backing pointer is PRIVATE — only `contains()` is public surface; the
+// container type never appears outside this class's own definition. Only
+// `table_view` (its sole producer, via `valid_tags_for()`) may construct a
+// non-empty view.
+class valid_tag_set_view {
+public:
+    valid_tag_set_view() noexcept = default;
 
     [[nodiscard]] bool contains(std::uint16_t tag) const noexcept {
         return set_ != nullptr && set_->contains(tag);
     }
+
+private:
+    friend class table_view;
+
+    explicit valid_tag_set_view(std::unordered_set<std::uint16_t> const* set) noexcept
+        : set_{set} {}
+
+    std::unordered_set<std::uint16_t> const* set_ = nullptr;
 };
 
 [[nodiscard]] inline group_ctx_key make_group_ctx_key(std::string_view msg_type,
