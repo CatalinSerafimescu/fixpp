@@ -211,6 +211,54 @@ TEST(ValidatorProductionTableView, GroupDelimiterFromWireNotTagSortedMember) {
         << (result.has_value() ? -1 : static_cast<int>(result.error()));
 }
 
+// ── Gate B r1 (PR #194 FIX 1.a): valid_tags_for nullptr-equivalence ─────────
+// through validate(). An unknown MsgType(35) must reject the SAME way the
+// pre-hoist per-field field_valid_for(msg_type, tag) path would: the hoisted
+// dict_.valid_tags_for(msg_type) view's contains() must be false for every
+// tag when msg_type is unknown, exactly like field_valid_for(msg_type, tag)
+// returning false for every tag. Frame carries a syntactically valid Logon
+// body (98=0) under an unregistered MsgType "Z" (only "A"/Logon is declared
+// in load_tiny_dict) — the body field IS a known tag (for "A"), so a bug that
+// silently fell back to "any known tag accepts" would NOT be caught by an
+// all-unknown-tags frame; this frame's body fields are otherwise-known tags,
+// per the brief.
+TEST(ValidatorProductionTableView, UnknownMsgTypeRejectsLikePreHoistFieldValidFor) {
+    std::vector<std::byte> buf(2u * 1024u * 1024u);
+    std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
+    auto dict = load_tiny_dict(&mr);
+    auto tv_direct = dict.as_table_view();  // separate copy for the direct assertion below
+    auto tv = dict.as_table_view();         // consumed by the validator below
+    dictionary_driven_validator v{std::move(tv)};
+
+    // "Z" is not a declared msg_type in load_tiny_dict; 98 IS a known tag
+    // (EncryptMethod, declared for Logon "A").
+    auto frame = make_frame(
+        "35=Z\x01"
+        "98=0\x01");
+    std::array<std::byte, 4096> stack{};
+    std::pmr::monotonic_buffer_resource arena;
+    auto mv = parse_index(frame, stack, arena);
+
+    std::array<std::byte, 2048> scratch_buf{};
+    std::pmr::monotonic_buffer_resource scratch_mr{scratch_buf.data(), scratch_buf.size(),
+                                                   std::pmr::null_memory_resource()};
+
+    std::uint16_t ref_tag = 0;
+    auto result = v.validate(mv, &scratch_mr, &ref_tag);
+    ASSERT_FALSE(result.has_value())
+        << "an unregistered MsgType must reject every field via validate()";
+    EXPECT_EQ(result.error(), error::wire_unexpected_tag)
+        << "an unregistered MsgType must reject with wire_unexpected_tag, exactly as the "
+           "pre-hoist per-field field_valid_for(msg_type, tag) path would for every tag";
+    // Direct equivalence: the reported offending tag must ALSO be reported as
+    // invalid by the un-hoisted field_valid_for("Z", ref_tag) — proving the
+    // hoisted valid_tags_for(...) view and the per-field lookup agree exactly
+    // at the tag validate() actually rejected on.
+    EXPECT_FALSE(tv_direct.field_valid_for("Z", ref_tag))
+        << "the tag validate() rejected (" << ref_tag
+        << ") must ALSO be reported invalid by the un-hoisted field_valid_for path";
+}
+
 // ── T009a-1 RED→GREEN: Float garbage value → wire_field_value_out_of_range ───
 // Data-model E-4 / FR-004 Float parse-error remap:
 //   decimal_t::parse("abc") → decimal_invalid_input (slot 10) — a non-wire_*

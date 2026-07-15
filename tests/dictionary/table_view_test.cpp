@@ -190,6 +190,35 @@ TEST(TableViewTest, GroupFirstFieldAgreesWithDictionary) {
         << "group_first_field for unknown no_tag must be 0";
 }
 
+// ── Gate B r1 (PR #194 FIX 1.a): valid_tags_for direct unit witness ─────────
+// valid_tags_for is the validator's per-message hoist (validator.hpp Step 1):
+// a known msg_type must yield a view whose contains() agrees with
+// field_valid_for, and an unknown msg_type must yield a view whose
+// contains() is false for every tag (the [FIX 2] valid_tag_set_view
+// encapsulation's nullptr-equivalent state).
+TEST(TableViewTest, ValidTagsForAgreesWithFieldValidFor) {
+    std::vector<std::byte> buf(2u * 1024u * 1024u);
+    std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
+    auto dict = load_test_dictionary(&mr);
+    auto tv = dict.as_table_view();
+
+    // Known msg_type: view must agree with field_valid_for for both a
+    // declared tag and an undeclared one.
+    auto const logon_view = tv.valid_tags_for("A");
+    EXPECT_TRUE(logon_view.contains(49)) << "SenderCompID(49) must be in Logon's valid_tags_for view";
+    EXPECT_TRUE(logon_view.contains(98)) << "EncryptMethod(98) must be in Logon's valid_tags_for view";
+    EXPECT_FALSE(logon_view.contains(11))
+        << "ClOrdID(11) is not declared for Logon; must NOT be in the view";
+    EXPECT_FALSE(logon_view.contains(9999)) << "unknown tag must NOT be in the view";
+
+    // Unknown msg_type: view must reject every tag, matching
+    // field_valid_for("Z", tag) == false for every tag.
+    auto const unknown_view = tv.valid_tags_for("Z");
+    EXPECT_FALSE(unknown_view.contains(49))
+        << "unknown msg_type's view must reject a tag that IS valid for another msg_type";
+    EXPECT_FALSE(unknown_view.contains(9999)) << "unknown msg_type's view must reject any tag";
+}
+
 // ── T007-4: group_member_tags agrees with source Dictionary ─────────────────
 
 TEST(TableViewTest, GroupMemberTagsAgreesWithDictionary) {
@@ -210,6 +239,53 @@ TEST(TableViewTest, GroupMemberTagsAgreesWithDictionary) {
     // Unknown no_tag → empty span.
     EXPECT_TRUE(tv.group_member_tags(9999).empty())
         << "group_member_tags for unknown no_tag must be empty";
+}
+
+// ── Gate B r1 (PR #194 FIX 1.b): group presence-bit counter-tests ──────────
+// `group_bit`/`set_group_bit` gate the 3-arg (msg_type, parent_path, no_tag)
+// context-aware accessors ONLY (validator.hpp Step 3 / the parser's
+// group_member_fn_t); the 1-arg bare accessors never consult the bit. A
+// no_tag registered EXCLUSIVELY via the context-scoped population surface
+// (set_group_first_ctx/add_group_member_ctx — no bare set_group_first/
+// add_group_member call at all) must still be found through the 3-arg
+// accessors, proving the bit is set on the context-only population path
+// (mirrors the context-only fixtures in
+// tests/wire/nested_group_extent_test.cpp::BenignSameMembershipReuseAcrossContexts
+// and tests/codegen/nested_group_read_test.cpp).
+TEST(TableViewTest, GroupContextOnlyRegistrationFoundThroughContextAccessor) {
+    fixpp::dict::table_view tv;
+    std::array<std::uint16_t, 1> const parent_path{453};
+    // Context-scoped ONLY — no add_group_member(802, ...) / set_group_first(802, ...).
+    tv.set_group_first_ctx("D", parent_path, 802, 523);
+    tv.add_group_member_ctx("D", parent_path, 802, 524);
+
+    // The context-aware 3-arg overloads must resolve this no_tag under the
+    // exact (msg_type, parent_path) it was registered with — proving the
+    // presence bit is SET on this population path.
+    EXPECT_EQ(tv.group_first_field("D", parent_path, 802), std::uint16_t{523})
+        << "context-only registration must be visible through the 3-arg accessor "
+           "(the bit gate must not have suppressed it)";
+    auto const members = tv.group_member_tags("D", parent_path, 802);
+    ASSERT_FALSE(members.empty()) << "context-only members must be visible through the 3-arg accessor";
+    bool has_524 = false;
+    for (auto t : members) {
+        if (t == 524) has_524 = true;
+    }
+    EXPECT_TRUE(has_524) << "member 524 registered via add_group_member_ctx must be present";
+
+    // The BARE (1-arg) legacy store was never populated for 802 — the bare
+    // accessors must return the empty/zero answer (distinct store, same bit).
+    EXPECT_EQ(tv.group_first_field(802), std::uint16_t{0})
+        << "the bare legacy store was never populated for 802 via add_group_member/"
+           "set_group_first — only the context store was";
+
+    // A no_tag NEVER populated by ANY path (clear-bit) must short-circuit to
+    // the empty/zero answer through the 3-arg accessors too.
+    EXPECT_EQ(tv.group_first_field("D", parent_path, std::uint16_t{7777}), std::uint16_t{0})
+        << "an entirely unregistered no_tag (clear bit) must return 0 through the 3-arg accessor";
+    EXPECT_TRUE(tv.group_member_tags("D", parent_path, std::uint16_t{7777}).empty())
+        << "an entirely unregistered no_tag (clear bit) must return an empty span through the "
+           "3-arg accessor";
 }
 
 // ── T007-5: field_type_of agrees with source Dictionary field_data_type ──────

@@ -187,6 +187,22 @@ struct enum_domain {
            0U;
 }
 
+// Gate B r1 (PR #194 FIX 2) — encapsulates `table_view::valid_tags_for()`'s
+// backing container. Returned BY VALUE (a single pointer, trivially copyable)
+// so a future flat-vector/perfect-hash swap for `valid_` changes only this
+// struct's body, never `table_view`'s or `dictionary_driven_validator`'s
+// public surface. `set_ == nullptr` (unknown msg_type) makes `contains()`
+// return false for every tag — byte-identical to the pre-encapsulation
+// nullptr-check-then-`unordered_set::contains` call site in validator.hpp.
+// noexcept + alloc-free: a raw pointer member, no owning state.
+struct valid_tag_set_view {
+    std::unordered_set<std::uint16_t> const* set_ = nullptr;
+
+    [[nodiscard]] bool contains(std::uint16_t tag) const noexcept {
+        return set_ != nullptr && set_->contains(tag);
+    }
+};
+
 [[nodiscard]] inline group_ctx_key make_group_ctx_key(std::string_view msg_type,
                                                       std::span<std::uint16_t const> parent_path,
                                                       std::uint16_t no_tag) {
@@ -232,14 +248,14 @@ public:
     // Hot-path hoist (validator perf round): the per-msg_type valid-tag set,
     // fetched ONCE per message so validate()'s per-field loop pays a uint16
     // set-membership test instead of re-hashing the loop-invariant msg_type
-    // on every field. nullptr ⟺ msg_type unknown — field_valid_for would
-    // return false for every tag, and the caller must treat nullptr the same
-    // way. The pointer aliases storage owned by this table_view (stable for
-    // its lifetime; the map is immutable after construction).
-    [[nodiscard]] std::unordered_set<std::uint16_t> const* valid_tags_for(
-        std::string_view msg_type) const noexcept {
+    // on every field. An unknown msg_type yields a view whose `contains()`
+    // returns false for every tag — the same behaviour as field_valid_for
+    // returning false for every tag on an unknown msg_type. The view aliases
+    // storage owned by this table_view (stable for its lifetime; the map is
+    // immutable after construction).
+    [[nodiscard]] valid_tag_set_view valid_tags_for(std::string_view msg_type) const noexcept {
         auto const it = valid_.find(msg_type);
-        return it == valid_.end() ? nullptr : &it->second;
+        return it == valid_.end() ? valid_tag_set_view{} : valid_tag_set_view{&it->second};
     }
 
     // Tags that are required for `msg_type`. Empty span if unknown.
