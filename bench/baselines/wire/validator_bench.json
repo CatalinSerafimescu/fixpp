@@ -1,0 +1,59 @@
+{
+  "_note": "Baseline seed — linux-clang-RELEASE (2026-07-15), 075 Gate B r1 (Article VIII §3 un-pause of 'US4 PAUSED — validator_bench omitted'). Real fixpp::dict::table_view loaded from the shipped dictionaries/FIX44.xml via dict::XmlLoader -> Dictionary::as_table_view() (NOT support/mock_dict_table.hpp), so enum_valid()'s tag lookup + code-domain binary search + [multi-value] space-tokenization are genuinely exercised. Each fixture is pre-framed + pre-parsed ONCE outside the timed loop; only dictionary_driven_validator::validate() is timed. measured_release_ns_mean_10rep is the mean over 10 --benchmark_repetitions runs; measured_release_ns_single_run is one --benchmark_format=json capture. FINDING: all four cases exceed the [2b §6.6] <=200 ns ceiling (Heartbeat ~2.8x over; both NewOrderSingle cases exceed 1 microsecond) -- flagged in bench/REPORT.md for the orchestrator, NOT fixed in this PR (bench-only Gate B round; no production code touched).",
+  "context": {
+    "date": "2026-07-15",
+    "host_name": "WSLUBUNTU24.04",
+    "executable": "build/linux-clang-release/bench/wire/validator_bench",
+    "build_type": "release",
+    "preset": "linux-clang-release",
+    "num_cpus": 10,
+    "mhz_per_cpu": 3593
+  },
+  "benchmarks": [
+    {
+      "name": "BM_Validator_Validate_Heartbeat",
+      "fixture": "admin Heartbeat(35=0), header fields only, no enum-backed body fields",
+      "ceiling_ns": 200,
+      "ceiling_source": "[2b §6.6]: Validator::validate, ≤ 200 ns",
+      "ceiling_tolerance_pct": 5,
+      "measured_release_ns_mean_10rep": 568,
+      "measured_release_ns_median_10rep": 566,
+      "measured_release_ns_single_run": 551.98,
+      "measured_release_note": "EXCEEDS ceiling by ~2.8x (mean 568 ns vs 200 ns ceiling) — flagged, not fixed, in this bench-only PR."
+    },
+    {
+      "name": "BM_Validator_Validate_Logon",
+      "fixture": "admin Logon(35=A), enum-backed EncryptMethod(98)=0",
+      "ceiling_ns": 200,
+      "ceiling_source": "[2b §6.6]: Validator::validate, ≤ 200 ns",
+      "ceiling_tolerance_pct": 5,
+      "measured_release_ns_mean_10rep": 848,
+      "measured_release_ns_median_10rep": 849,
+      "measured_release_ns_single_run": 864.66,
+      "measured_release_note": "EXCEEDS ceiling by ~4.2x — flagged, not fixed, in this bench-only PR."
+    },
+    {
+      "name": "BM_Validator_Validate_NewOrderSingle",
+      "fixture": "FIX44 app NewOrderSingle(35=D), enum-backed Side(54)/OrdType(40)/TimeInForce(59)",
+      "ceiling_ns": 200,
+      "ceiling_source": "[2b §6.6]: Validator::validate, ≤ 200 ns",
+      "ceiling_tolerance_pct": 5,
+      "measured_release_ns_mean_10rep": 1214,
+      "measured_release_ns_median_10rep": 1206,
+      "measured_release_ns_single_run": 1065.26,
+      "measured_release_note": "EXCEEDS ceiling by ~6x and exceeds 1 microsecond — flagged, not fixed, in this bench-only PR."
+    },
+    {
+      "name": "BM_Validator_Validate_NewOrderSingleMultiValueExecInst",
+      "fixture": "FIX44 app NewOrderSingle(35=D) plus multi-value ExecInst(18)=\"1 G 6\" (3 space-tokenized codes)",
+      "ceiling_ns": 200,
+      "ceiling_source": "[2b §6.6]: Validator::validate, ≤ 200 ns",
+      "ceiling_tolerance_pct": 5,
+      "measured_release_ns_mean_10rep": 1265,
+      "measured_release_ns_median_10rep": 1233,
+      "measured_release_ns_single_run": 1198.23,
+      "measured_release_note": "EXCEEDS ceiling by ~6.3x and exceeds 1 microsecond — flagged, not fixed, in this bench-only PR."
+    }
+  ],
+  "hffix_comparison": "hffix NOT wired into build. D-14 records this as 'measured-not-blocker' (see bench/REPORT.md)."
+}

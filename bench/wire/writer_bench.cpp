@@ -8,7 +8,6 @@
 //   Writer::commit   200-tag Instrument-heavy   ≤ 800 ns
 //
 // Baseline seed: bench/baselines/wire/writer_bench.json.
-// Validator bench omitted (US4 PAUSED — deferred with US4).
 
 #include <benchmark/benchmark.h>
 

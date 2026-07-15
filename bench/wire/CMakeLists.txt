@@ -95,5 +95,21 @@ set_target_properties(check_alive_bench PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bench/wire"
 )
 
-# NOTE: NO validator_bench per HARD CONSTRAINT (US4 PAUSED).
-# validator_bench.cpp is intentionally absent.
+# ── 075 Gate B r1: validator_bench (Article VIII §3) ─────────────────────────
+# [2b §6.6] Validator::validate ceiling: ≤ 200 ns. Uses a REAL FIX44.xml
+# table_view (not mock_dict_table.hpp) to exercise the enum_valid() path.
+set(FIXPP_DICT_DATA_DIR "${CMAKE_SOURCE_DIR}/dictionaries")
+
+add_executable(validator_bench validator_bench.cpp)
+target_link_libraries(validator_bench PRIVATE
+  fixpp_wire
+  fixpp_dictionary
+  benchmark::benchmark
+  benchmark::benchmark_main
+)
+target_compile_definitions(validator_bench PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${FIXPP_DICT_DATA_DIR}\""
+)
+set_target_properties(validator_bench PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bench/wire"
+)

@@ -9,7 +9,6 @@
 // Baseline seed: bench/baselines/wire/framer_bench.json (written on the first
 // green CI run that includes this bench).
 //
-// Validator bench omitted per HARD CONSTRAINT (US4 PAUSED): NO validator_bench.
 // hffix comparison: hffix is NOT wired into the build — D-14 says
 // "measured-not-blocker"; see bench/REPORT.md.
 
