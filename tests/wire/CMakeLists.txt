@@ -184,7 +184,11 @@ set_tests_properties(enum_golden_parity_test PROPERTIES LABELS "075;golden;parit
 # ctor — no fixpp_dictionary link needed); kept standalone rather than
 # joining wire_codegen_tests so `ctest -L vlatest_roundtrip` selects only
 # this TU, not the other 4 codegen-gated files' unrelated dictionary deps.
-if(TARGET fixpp_codegen_generate)
+# gate-b/r1 P1: also gated on FIXPP_CODEGEN_FIX_LATEST — with the tier OFF,
+# cmake/Codegen.cmake removes _codegen/include/fixpp/vlatest/ entirely, so
+# this target must not exist or the OFF build fails to compile
+# (FR-003/B-1 "build succeeds when OFF").
+if(TARGET fixpp_codegen_generate AND FIXPP_CODEGEN_FIX_LATEST)
   add_executable(wire_vlatest_reify_roundtrip_test vlatest_reify_roundtrip_test.cpp)
   add_dependencies(wire_vlatest_reify_roundtrip_test fixpp_codegen_generate)
   target_link_libraries(wire_vlatest_reify_roundtrip_test PRIVATE

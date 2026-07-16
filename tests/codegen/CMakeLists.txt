@@ -123,6 +123,12 @@ set_tests_properties(codegen_067_emit_builders_unit_test PROPERTIES LABELS "code
 # grouped into one binary since both are cheap/isolation-safe (unlike
 # Builders.hpp-dependent work, deliberately NOT attempted here — see the .cpp
 # file headers).
+#
+# gate-b/r1 P1: gated on FIXPP_CODEGEN_FIX_LATEST — with the tier OFF,
+# cmake/Codegen.cmake removes _codegen/include/fixpp/vlatest/ entirely, so
+# this target (and the two below) must not exist or the OFF build fails to
+# compile (FR-003/B-1 "build succeeds when OFF").
+if(FIXPP_CODEGEN_FIX_LATEST)
 add_executable(codegen_vlatest_tests
   vlatest_compile_smoke_test.cpp        # T008
   vlatest_dispatch_exclusion_test.cpp   # T011
@@ -184,6 +190,7 @@ target_compile_definitions(codegen_vlatest_manifest_class_test PRIVATE
 add_test(NAME codegen_vlatest_manifest_class_test COMMAND codegen_vlatest_manifest_class_test)
 set_tests_properties(codegen_vlatest_manifest_class_test PROPERTIES
   LABELS "codegen;076;vlatest_manifest_class")
+endif()  # FIXPP_CODEGEN_FIX_LATEST
 
 # T041: determinism_test — NFR-003-7 / AC-T1 / AC-T2
 #
