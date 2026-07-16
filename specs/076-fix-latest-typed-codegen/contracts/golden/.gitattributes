@@ -1,0 +1,5 @@
+# 076 codegen golden — byte-compared, LF-generated. Pin -text so a Windows
+# checkout cannot CRLF-rewrite them and false-break the byte-exact gate
+# (074/075 precedent — feedback_byte_exact_sha1_gate_needs_gitattributes_text).
+*.golden.hpp -text
+*.golden.txt -text

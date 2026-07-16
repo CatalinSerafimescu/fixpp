@@ -59,11 +59,19 @@ namespace fs = std::filesystem;
 #ifndef FIXPP_CODEGEN_069_OFFICIAL_GOLDEN_DIR
 #error "FIXPP_CODEGEN_069_OFFICIAL_GOLDEN_DIR must be set by CMake target_compile_definitions"
 #endif
+#ifndef FIXPP_CODEGEN_076_GOLDEN_DIR
+#error "FIXPP_CODEGEN_076_GOLDEN_DIR must be set by CMake target_compile_definitions"
+#endif
 
 static constexpr const char* kBin = FIXPP_CODEGEN_BIN;
 static constexpr const char* kDictDir = FIXPP_DICT_DATA_DIR;
 static constexpr const char* kGoldenDir = FIXPP_CODEGEN_GOLDEN_DIR;
 static constexpr const char* kOfficialBuildersGoldenDir = FIXPP_CODEGEN_069_OFFICIAL_GOLDEN_DIR;
+// 076-fix-latest-typed-codegen T017/T018: the vlatest golden lives in a
+// separate feature golden dir (specs/076-.../contracts/golden/), not
+// specs/003's — see cmake target_compile_definitions below.
+static constexpr const char* kVlatestGoldenDir = FIXPP_CODEGEN_076_GOLDEN_DIR;
+static constexpr const char* kVlatestGoldenFile = "vlatest_Messages.golden.hpp";
 
 // XMLs in the exact order the tool accepts them (matches Codegen.cmake)
 static constexpr std::array<const char*, 4> kXmls = {"FIX42.xml", "FIX44.xml", "FIX50SP2.xml",
@@ -164,6 +172,35 @@ static int run_codegen_v44_official(const fs::path& out_dir) {
     return run_system(cmd);
 }
 
+// 076-fix-latest-typed-codegen T017/T018: invoke the tool over ONLY the FIX
+// Latest Orchestra XML. It lives under dictionaries/orchestra/ (Codegen.cmake
+// :269), not directly under kDictDir like the 4 legacy XMLs in kXmls. Each
+// --xml/--out pair is an independent job (main.cpp's job loop), so a
+// single-job invocation still emits the full vlatest tier.
+static int run_codegen_vlatest_only(const fs::path& out_dir) {
+    std::string cmd = quote(kBin);
+    fs::path xml_path = fs::path(kDictDir) / "orchestra" / "OrchestraFIXLatest.xml";
+    cmd += " --xml " + quote(xml_path.string());
+    cmd += " --out " + quote(out_dir.string());
+    return run_system(cmd);
+}
+
+// T018: invoke the tool over all 5 XMLs (4 legacy + orchestra) — mirrors the
+// real Codegen.cmake ON configuration (FIXPP_CODEGEN_FIX_LATEST=ON, the
+// default; Codegen.cmake:373-380).
+static int run_codegen_with_vlatest(const fs::path& out_dir) {
+    std::string cmd = quote(kBin);
+    for (auto const* xml : kXmls) {
+        fs::path xml_path = fs::path(kDictDir) / xml;
+        cmd += " --xml " + quote(xml_path.string());
+        cmd += " --out " + quote(out_dir.string());
+    }
+    fs::path orchestra_path = fs::path(kDictDir) / "orchestra" / "OrchestraFIXLatest.xml";
+    cmd += " --xml " + quote(orchestra_path.string());
+    cmd += " --out " + quote(out_dir.string());
+    return run_system(cmd);
+}
+
 static int run_codegen_args(std::string_view args) {
     std::string cmd = quote(kBin);
     if (!args.empty()) {
@@ -222,6 +259,12 @@ protected:
         for (auto const* gf : kGoldenFiles) {
             ASSERT_TRUE(fs::exists(fs::path(kGoldenDir) / gf)) << "Golden not found: " << gf;
         }
+        // 076 T017/T018 prerequisites.
+        ASSERT_TRUE(fs::exists(fs::path(kDictDir) / "orchestra" / "OrchestraFIXLatest.xml"))
+            << "Orchestra XML not found under " << kDictDir << "/orchestra";
+        ASSERT_TRUE(fs::exists(kVlatestGoldenDir)) << "076 golden dir not found: " << kVlatestGoldenDir;
+        ASSERT_TRUE(fs::exists(fs::path(kVlatestGoldenDir) / kVlatestGoldenFile))
+            << "076 golden not found: " << kVlatestGoldenFile;
     }
 };
 
@@ -373,6 +416,136 @@ TEST_F(DeterminismTest, GeneratedMatchesGolden) {
             << " --out <golden-dir> && cp <golden-dir>/" << kVersions[i] << "/Messages.hpp "
             << golden.string();
     }
+}
+
+// ── 076-fix-latest-typed-codegen T017 [US3]: V-4 determinism — vlatest ──────
+//
+// FR-011/R8, contract V-4: extends the golden-anchor gate above
+// (GeneratedMatchesGolden) to the fixpp::vlatest tier — the freshly
+// generated vlatest/Messages.hpp must be byte-identical to the checked-in
+// golden under specs/076-fix-latest-typed-codegen/contracts/golden/. Runs
+// under the FULL ctest (not a narrow target) — a stale/non-deterministic
+// vlatest emit fails CI, exactly like the 4 legacy tiers already do.
+
+TEST_F(DeterminismTest, VlatestGeneratedMatchesGolden) {
+    TempDir run("fixpp_det_vlatest_golden");
+    int rc = run_codegen_vlatest_only(run.path);
+    ASSERT_EQ(rc, 0) << "vlatest codegen run failed (exit " << rc << ")";
+
+    fs::path generated = run.path / "vlatest" / "Messages.hpp";
+    fs::path golden = fs::path(kVlatestGoldenDir) / kVlatestGoldenFile;
+
+    ASSERT_TRUE(fs::exists(generated)) << "Generated file missing: " << generated;
+    ASSERT_TRUE(fs::exists(golden)) << "Golden file missing: " << golden;
+
+    std::string gen_bytes = read_file_binary(generated);
+    std::string golden_bytes = read_file_binary(golden);
+
+    EXPECT_EQ(gen_bytes, golden_bytes)
+        << "V-4 violated: vlatest/Messages.hpp diverged from the checked-in golden (generated "
+        << gen_bytes.size() << " bytes, golden " << golden_bytes.size() << " bytes).\n"
+        << "  generated: " << generated << "\n"
+        << "  golden:    " << golden << "\n"
+        << "  Run 'diff " << generated.string() << " " << golden.string()
+        << "' to see the diff.\n"
+        << "  Regenerate golden with:\n"
+        << "    " << kBin << " --xml "
+        << (fs::path(kDictDir) / "orchestra" / "OrchestraFIXLatest.xml").string()
+        << " --out <golden-dir> && cp <golden-dir>/vlatest/Messages.hpp " << golden.string();
+}
+
+// ── 076-fix-latest-typed-codegen T018 [US3]: V-7 additive OFF/ON byte-diff ──
+//
+// FR-004/SC-003, contract V-7: adding the fixpp::vlatest tier MUST NOT
+// perturb the legacy v42/v44/v50sp2/vt11 + _dispatch/ output. Two legs:
+//   (a) Absolute anchors — OFF-run legacy Messages.hpp x4 == the checked-in
+//       003 golden (re-verifies GeneratedMatchesGolden's claim holds even
+//       when the run genuinely never touches the orchestra XML); ON-run
+//       vlatest/Messages.hpp == the checked-in 076 golden.
+//   (b) Relative/additive discriminator — EVERY legacy file (Fields/
+//       Messages/Validator/Reify/NormativeReferences.md/Manifest.txt/
+//       Builders.hpp under v42/v44/v50sp2/vt11, plus the shared
+//       _dispatch/*.hpp) is byte-identical between the OFF-run and the
+//       ON-run. Neither specs/003 nor specs/069's golden dir carries a
+//       golden for _dispatch/ or for Fields/Validator/Reify/
+//       NormativeReferences.md/Manifest.txt (only Messages.hpp x4 and one
+//       v44/Builders.hpp under --families official are goldened) — this
+//       recursive walk is the ONLY gate covering those files' additivity.
+//       (Both OFF and ON runs here use the default `--families all` mode,
+//       matching the real Codegen.cmake invocation — official-mode
+//       Builders.hpp already has its own gate,
+//       OfficialModeBuildersMatchesGolden below, and is deliberately not
+//       reused here.)
+//
+// Folds T019 (build-option ON/OFF behavior witness, US3 acceptance
+// scenarios 1-2) in explicitly:
+//   US3-AC1 (OFF => no fixpp::vlatest tier): asserted directly below —
+//     off_run has no vlatest/ dir at all.
+//   US3-AC2 (ON => vlatest appears additively): asserted directly below —
+//     on_run has vlatest/Messages.hpp matching the golden AND every legacy
+//     file is unperturbed relative to the OFF-run.
+// A CMake-level toggle witness (reconfiguring the shared build tree with
+// -DFIXPP_CODEGEN_FIX_LATEST=OFF) is deliberately NOT used here — that would
+// need RUN_SERIAL against the codegen-build-graph-check git-cleanliness gate
+// (RESOURCE_LOCK codegen_source_tree) for no additional coverage; this
+// tool-into-temp-dir approach already discriminates both ON/OFF behaviors
+// and needs no serialization. Manual verification of the CMake-level toggle
+// (T015) was done separately by reconfiguring build/linux-clang-debug.
+TEST_F(DeterminismTest, AdditiveOffOnByteDiff) {
+    TempDir off_run("fixpp_det_off");
+    TempDir on_run("fixpp_det_on");
+
+    int rc_off = run_codegen(off_run.path);  // legacy only — OFF-path job
+    ASSERT_EQ(rc_off, 0) << "OFF-path codegen run failed (exit " << rc_off << ")";
+
+    int rc_on = run_codegen_with_vlatest(on_run.path);  // legacy + vlatest — ON-path job
+    ASSERT_EQ(rc_on, 0) << "ON-path codegen run failed (exit " << rc_on << ")";
+
+    // (a1) OFF-run legacy Messages.hpp == 003 golden.
+    for (std::size_t i = 0; i < kVersions.size(); ++i) {
+        fs::path generated = off_run.path / kVersions[i] / "Messages.hpp";
+        fs::path golden = fs::path(kGoldenDir) / kGoldenFiles[i];
+        ASSERT_TRUE(fs::exists(generated)) << "OFF-run missing: " << generated;
+        EXPECT_EQ(read_file_binary(generated), read_file_binary(golden))
+            << "V-7 OFF-path baseline mismatch for " << kVersions[i];
+    }
+
+    // (a2) US3-AC1 — OFF-run has NO vlatest/ dir at all.
+    EXPECT_FALSE(fs::exists(off_run.path / "vlatest"))
+        << "V-7 / US3-AC1 violated: vlatest/ present in the OFF-path job.";
+
+    // (a3) US3-AC2 (part) — ON-run vlatest/Messages.hpp == 076 golden.
+    fs::path on_vlatest = on_run.path / "vlatest" / "Messages.hpp";
+    ASSERT_TRUE(fs::exists(on_vlatest)) << "ON-run missing: " << on_vlatest;
+    EXPECT_EQ(read_file_binary(on_vlatest),
+              read_file_binary(fs::path(kVlatestGoldenDir) / kVlatestGoldenFile))
+        << "V-7 ON-path vlatest/Messages.hpp diverged from the 076 golden.";
+
+    // (b) US3-AC2 (part) — relative discriminator: recursively walk every
+    // file the OFF-run produced (v42/v44/v50sp2/vt11/_dispatch — no vlatest,
+    // since the OFF-run never generated it) and assert byte-identity
+    // against the SAME relative path under the ON-run.
+    std::error_code ec;
+    std::size_t compared = 0;
+    for (auto const& e : fs::recursive_directory_iterator(off_run.path, ec)) {
+        ASSERT_FALSE(ec) << "Iterator error walking OFF-run: " << ec.message();
+        if (!e.is_regular_file()) continue;
+        auto rel = fs::relative(e.path(), off_run.path, ec);
+        ASSERT_FALSE(ec);
+        fs::path on_counterpart = on_run.path / rel;
+        EXPECT_TRUE(fs::exists(on_counterpart)) << "V-7: legacy file missing from ON-run: " << rel;
+        if (!fs::exists(on_counterpart)) continue;
+        EXPECT_EQ(read_file_binary(e.path()), read_file_binary(on_counterpart))
+            << "V-7 additivity violated: " << rel << " differs between OFF-run and ON-run.";
+        ++compared;
+    }
+    // Sanity bound: v42/v50sp2/vt11 emit 5 artifacts each, v44 emits 6
+    // (+Builders.hpp), plus 2 shared _dispatch files == 23. A loose lower
+    // bound (not the exact count) so this doesn't need updating on every
+    // unrelated emitter-shape change, while still catching a degenerate
+    // walk that silently compares nothing.
+    EXPECT_GE(compared, 20u) << "V-7 walk compared suspiciously few files (" << compared
+                              << ") — codegen output shape may have changed.";
 }
 
 // ── Gate B PR#187 round 1 F3: official-mode byte identity (SC-003) ──────────

@@ -62,6 +62,26 @@ struct GroupOrderEntry {
     std::vector<GroupOrderMember> members;
 };
 
+// 076-fix-latest-typed-codegen T005 (research R2b output 4 / data-model.md
+// Entity 3, "Emitted set"): one field/count-field OCCURRENCE within a
+// single message's raw declaration-order structure — the lossless
+// occurrence-path record the census manifest (T012) is built from.
+// Distinct from FieldIR (tag-deduped; `FieldRef::group_no_tag` is a single
+// immediate-parent tag, so it cannot express a multi-level `group_path` or
+// a tag reused under different parents at depth > 1): a tag occurring twice
+// under two different group parents produces two OccurrenceIR entries here,
+// each with its own `group_path`. `group_path` is the chain of enclosing
+// groups' no_tags from outermost to innermost (empty = top-level) — the
+// SAME parent-path convention as `GroupOrderEntry::parent_path` above.
+// Populated only for an Orchestra-sourced `VersionIR` (empty for `<fix>`-
+// schema versions — the census manifest is vlatest-only per research R2b).
+struct OccurrenceIR {
+    std::vector<std::uint16_t> group_path;
+    std::uint16_t tag = 0;
+    fixpp::dict::field_presence rule{};
+    fixpp::dict::field_data_type datatype{};
+};
+
 struct MessageIR {
     std::string msg_type;         // FIX MsgType (e.g. "D")
     std::string name;             // English name (diagnostics / NormativeRefs)
@@ -72,7 +92,10 @@ struct MessageIR {
     // codegen-tool-local pugixml re-parse (ir.cpp); every <message> in a
     // FIX44 dictionary MUST carry msgcat — a message missing it (or carrying
     // an unrecognized value) is a build_ir() loader error (fail-closed, no
-    // default-guess — data-model.md Entity 1 Validation).
+    // default-guess — data-model.md Entity 1 Validation). For an Orchestra-
+    // sourced VersionIR this is instead derived from `category=` (data-model
+    // Entity 5): `category=="Session"` -> false (admin); anything else ->
+    // true (app) — same fail-closed discipline, different source attribute.
     bool is_application = false;
 
     // Codegen-tool-local declaration-order group plan (067 T004/R9): one
@@ -84,6 +107,13 @@ struct MessageIR {
     // Codegen-tool-local only: no runtime Dictionary/GroupRef/C-ABI change
     // (FR-009 intact).
     std::vector<GroupOrderEntry> group_order;
+
+    // 076-fix-latest-typed-codegen T005 (research R2b output 4): the
+    // lossless per-occurrence record for THIS message — populated ONLY by
+    // the Orchestra-native projection (`populate_orchestra_projection`,
+    // ir.cpp), empty for `<fix>`-schema versions. Feeds the T012 census
+    // manifest; NOT sourced from `fields` (lossy — see OccurrenceIR banner).
+    std::vector<OccurrenceIR> occurrences;
 };
 
 struct LengthPairIR {

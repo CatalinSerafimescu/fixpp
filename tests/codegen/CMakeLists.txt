@@ -116,6 +116,75 @@ target_compile_definitions(codegen_067_emit_builders_unit_test PRIVATE
 add_test(NAME codegen_067_emit_builders_unit_test COMMAND codegen_067_emit_builders_unit_test)
 set_tests_properties(codegen_067_emit_builders_unit_test PROPERTIES LABELS "codegen;067")
 
+# 076-fix-latest-typed-codegen T008/T011: vlatest compile-smoke +
+# dispatch-exclusion witnesses. T008 needs the vlatest {Fields,Messages,
+# Validator,Reify}.hpp read-tier headers (fixpp_codegen_generate); T011 needs
+# ONLY the existing v42/v44/v50sp2 _dispatch/ surface (fixpp_dictionary) —
+# grouped into one binary since both are cheap/isolation-safe (unlike
+# Builders.hpp-dependent work, deliberately NOT attempted here — see the .cpp
+# file headers).
+add_executable(codegen_vlatest_tests
+  vlatest_compile_smoke_test.cpp        # T008
+  vlatest_dispatch_exclusion_test.cpp   # T011
+)
+add_dependencies(codegen_vlatest_tests fixpp_codegen_generate)
+target_link_libraries(codegen_vlatest_tests PRIVATE
+  fixpp_dictionary
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(codegen_vlatest_tests PRIVATE
+  "${FIXPP_CODEGEN_OUT}"
+  "${CMAKE_SOURCE_DIR}/tests"
+)
+target_compile_definitions(codegen_vlatest_tests PRIVATE
+  "FIXPP_DISPATCH_APPLICATION_HEADER_PATH=\"${FIXPP_CODEGEN_OUT}/fixpp/_dispatch/reify_dispatch_application.hpp\""
+)
+add_test(NAME codegen_vlatest_tests COMMAND codegen_vlatest_tests)
+set_tests_properties(codegen_vlatest_tests PROPERTIES
+  LABELS "codegen;076;vlatest_smoke;vlatest_dispatch_exclusion")
+
+# 076-fix-latest-typed-codegen T013 [US2]: V-1 completeness census —
+# independent raw-XML walker (pugixml, no ir.cpp/ir.hpp/emit_manifest.cpp
+# dependency — see the .cpp file header for the non-circularity rationale)
+# diffed against the T012-emitted Manifest.txt. Needs pugixml (already
+# find_package'd above for codegen_067_emit_builders_unit_test) + the
+# generated manifest path.
+add_executable(codegen_vlatest_census_test vlatest_completeness_census_test.cpp)
+add_dependencies(codegen_vlatest_census_test fixpp_codegen_generate)
+target_link_libraries(codegen_vlatest_census_test PRIVATE
+  pugixml::pugixml
+  GTest::gtest
+  GTest::gtest_main
+)
+target_compile_definitions(codegen_vlatest_census_test PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
+  "FIXPP_CODEGEN_VLATEST_MANIFEST=\"${FIXPP_CODEGEN_OUT}/fixpp/vlatest/Manifest.txt\""
+)
+add_test(NAME codegen_vlatest_census_test COMMAND codegen_vlatest_census_test)
+set_tests_properties(codegen_vlatest_census_test PROPERTIES
+  LABELS "codegen;076;vlatest_census")
+
+# 076-fix-latest-typed-codegen T014 [US2]: V-1b manifest<->class
+# consistency gate — pure text parsing of the shipped Messages.hpp (class
+# side, non-circular w.r.t. ir.cpp/emit_manifest.cpp) diffed against a
+# from-scratch re-projection of the T012-emitted Manifest.txt (manifest
+# side). No pugixml / fixpp header dependency — see the .cpp file header
+# for the extraction/projection rules and non-circularity rationale.
+add_executable(codegen_vlatest_manifest_class_test vlatest_manifest_class_consistency_test.cpp)
+add_dependencies(codegen_vlatest_manifest_class_test fixpp_codegen_generate)
+target_link_libraries(codegen_vlatest_manifest_class_test PRIVATE
+  GTest::gtest
+  GTest::gtest_main
+)
+target_compile_definitions(codegen_vlatest_manifest_class_test PRIVATE
+  "FIXPP_CODEGEN_VLATEST_MANIFEST=\"${FIXPP_CODEGEN_OUT}/fixpp/vlatest/Manifest.txt\""
+  "FIXPP_CODEGEN_VLATEST_MESSAGES_HPP=\"${FIXPP_CODEGEN_OUT}/fixpp/vlatest/Messages.hpp\""
+)
+add_test(NAME codegen_vlatest_manifest_class_test COMMAND codegen_vlatest_manifest_class_test)
+set_tests_properties(codegen_vlatest_manifest_class_test PROPERTIES
+  LABELS "codegen;076;vlatest_manifest_class")
+
 # T041: determinism_test — NFR-003-7 / AC-T1 / AC-T2
 #
 # Assertions:
@@ -125,6 +194,12 @@ set_tests_properties(codegen_067_emit_builders_unit_test PROPERTIES LABELS "code
 #   (4) Gate B PR#187 r1 F3 (SC-003): `--families official` v44/Builders.hpp
 #       == checked-in golden (promotes the 069 T009 local byte-identity
 #       procedure into a CI-automated gate).
+#   (5) 076 T017 [US3] (V-4): generated vlatest/Messages.hpp == checked-in
+#       076 golden.
+#   (6) 076 T018/T019 [US3] (V-7/FR-004/SC-003): an OFF-path job (legacy
+#       XMLs only) and an ON-path job (legacy + orchestra) produce
+#       byte-identical legacy output, vlatest/ is absent OFF and present +
+#       golden-matching ON.
 #
 # The binary path is injected at CMake configure time via $<TARGET_FILE:fixpp-codegen>
 # (a generator expression) so it resolves to the correct preset-specific path.
@@ -140,6 +215,7 @@ target_compile_definitions(codegen_determinism_test PRIVATE
   "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
   "FIXPP_CODEGEN_GOLDEN_DIR=\"${CMAKE_SOURCE_DIR}/specs/003-dictionary-codegen/contracts/golden\""
   "FIXPP_CODEGEN_069_OFFICIAL_GOLDEN_DIR=\"${CMAKE_SOURCE_DIR}/specs/069-v44-all-families/contracts/golden\""
+  "FIXPP_CODEGEN_076_GOLDEN_DIR=\"${CMAKE_SOURCE_DIR}/specs/076-fix-latest-typed-codegen/contracts/golden\""
 )
 add_test(NAME codegen_determinism_test COMMAND codegen_determinism_test)
 set_tests_properties(codegen_determinism_test PROPERTIES LABELS codegen)

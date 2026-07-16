@@ -243,11 +243,18 @@ inline std::string_view entry_set_name(BuilderCallKind k) noexcept {
 }
 
 // FIX application-version enum token for a codegen namespace tag. vt11
-// (FIXT.1.1 session layer) has application axis Unknown; v42/v44/v50sp2
+// (FIXT.1.1 session layer) has application axis Unknown; vlatest (076: FIX
+// Latest / Orchestra EP303) has no distinct application_version enumerator
+// and resolves to v50sp2 (074 session_to_application(vlatest) -> v50sp2,
+// data-model.md Entity 1) — an unguarded `ns` would emit the non-existent
+// `application_version::vlatest`, a generated compile error; v42/v44/v50sp2
 // map verbatim. Was a verbatim copy in emit_messages.cpp + emit_reify.cpp.
 inline std::string_view app_version_enum(std::string_view ns) {
     if (ns == "vt11") {
         return "Unknown";
+    }
+    if (ns == "vlatest") {
+        return "v50sp2";
     }
     return ns;
 }

@@ -89,6 +89,7 @@ int main(int argc, char** argv) {
             write_file(base / "Validator.hpp", fixpp::codegen::emit_validator(ir));
             write_file(base / "Reify.hpp", fixpp::codegen::emit_reify(ir));
             write_file(base / "NormativeReferences.md", fixpp::codegen::emit_normative_refs(ir));
+            write_file(base / "Manifest.txt", fixpp::codegen::emit_manifest(ir));
             write_file(base / "Builders.hpp", fixpp::codegen::emit_builders(ir, families_mode));
             all.push_back(std::move(ir));
         }

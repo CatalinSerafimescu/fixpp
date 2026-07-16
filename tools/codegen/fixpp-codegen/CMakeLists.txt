@@ -29,6 +29,7 @@ add_executable(fixpp-codegen
   emit_validator.cpp
   emit_reify.cpp
   emit_normative_refs.cpp
+  emit_manifest.cpp
   emit_dispatch.cpp
   emit_builders.cpp
 )
