@@ -94,11 +94,29 @@ int main(int argc, char** argv) {
             // NumInGroup as legacy INT (not NUMINGROUP), so emit_builders
             // materializes ZERO typed groups for it -- a v42 build_<Msg>
             // would silently omit a required='Y' group, emitting invalid
-            // FIX 4.2. Exclude v42 at the DRIVER, not inside emit_builders
-            // (which stays version-agnostic per FR-005/T009). vt11
-            // self-skips via its own empty registry (emit_builders.cpp).
+            // FIX 4.2. v42 still has in-scope application messages (just no
+            // typed groups), so emit_builders(v42) does NOT self-skip via
+            // empty content -- it must be excluded at the DRIVER, not inside
+            // emit_builders (which stays version-agnostic per FR-005/T009).
+            // vt11 is the only version that self-skips via a truly empty
+            // registry (0 application messages, emit_builders.cpp).
             if (ir.ns != "v42") {
-                write_file(base / "Builders.hpp", fixpp::codegen::emit_builders(ir, families_mode));
+                // gate-b/r1 F2: empty-emit -> remove (rather than write_file's
+                // write-only no-op) keeps the no-emit contract build-tree-
+                // history-independent for every non-v42 version, including
+                // vt11 -- write_file only writes, it never deletes, so a
+                // stale Builders.hpp from a prior generation run would
+                // otherwise persist forever once the emitter stops producing
+                // content for it (quickstart V3 / FR-012 OFF-clean
+                // discipline).
+                std::string const builders_content =
+                    fixpp::codegen::emit_builders(ir, families_mode);
+                if (builders_content.empty()) {
+                    std::error_code ec;
+                    std::filesystem::remove(base / "Builders.hpp", ec);
+                } else {
+                    write_file(base / "Builders.hpp", builders_content);
+                }
             } else {
                 // Remove a stale Builders.hpp left on disk by a pre-077 (or
                 // pre-this-fix) generation run -- write_file only writes, it
