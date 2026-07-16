@@ -642,7 +642,19 @@ void emit_writer_traits_for_level(TemplateWriter& w, std::string const& ns,
 
 std::string emit_builders(VersionIR const& ir, CoverageMode mode) {
     // 067 scope: v44 only (research.md R6 — the 33-OFFICIAL-MsgTypes set is
-    // verified against FIX44.xml specifically).
+    // verified against FIX44.xml specifically). 076-fix-latest-typed-codegen
+    // originally widened this to `vlatest` (Option A builders for the FIX
+    // Latest application subset), but that DESCOPED: the per-message,
+    // non-deduplicated nested-group `Args` emitter — fine for FIX44's shallow
+    // groups — explodes combinatorially on FIX Latest's depth-7 reused
+    // components (StandardHeader/Instrument/Underlying/Leg), producing a
+    // 137MB / 53,590-struct `vlatest/Builders.hpp` that no consumer TU can
+    // compile (>21GB RSS). Typed `build_<Msg>`/`validate_<Msg>` for
+    // `fixpp::vlatest` are deferred to a follow-up feature with a proper
+    // component-identity Args-dedup design; the v44 builder tier and its
+    // 067/069 byte-identical golden stay untouched (this feature's additive
+    // guarantee, FR-004/FR-008/V-7). See specs/076-fix-latest-typed-codegen/
+    // spec.md (US1 descope note) + phases/phase-4 report.
     if (ir.ns != "v44") {
         return {};
     }

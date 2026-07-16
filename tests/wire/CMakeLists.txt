@@ -175,6 +175,35 @@ target_compile_definitions(enum_golden_parity_test PRIVATE
 add_test(NAME enum_golden_parity_test COMMAND enum_golden_parity_test)
 set_tests_properties(enum_golden_parity_test PROPERTIES LABELS "075;golden;parity")
 
+# ── Standalone: 076-fix-latest-typed-codegen T009(b) — vlatest reify
+# round-trip (universal reify/read-back leg only; see the .cpp file header
+# for the T009(a) Builders.hpp compile-cost escalation). Needs the
+# build-tree generated fixpp/vlatest/Reify.hpp (fixpp_codegen_generate,
+# defined in tests/codegen, add_subdirectory'd before tests/wire — same
+# guard as wire_codegen_tests above). Dict-free (Parser<Index>{} default
+# ctor — no fixpp_dictionary link needed); kept standalone rather than
+# joining wire_codegen_tests so `ctest -L vlatest_roundtrip` selects only
+# this TU, not the other 4 codegen-gated files' unrelated dictionary deps.
+# gate-b/r1 P1: also gated on FIXPP_CODEGEN_FIX_LATEST — with the tier OFF,
+# cmake/Codegen.cmake removes _codegen/include/fixpp/vlatest/ entirely, so
+# this target must not exist or the OFF build fails to compile
+# (FR-003/B-1 "build succeeds when OFF").
+if(TARGET fixpp_codegen_generate AND FIXPP_CODEGEN_FIX_LATEST)
+  add_executable(wire_vlatest_reify_roundtrip_test vlatest_reify_roundtrip_test.cpp)
+  add_dependencies(wire_vlatest_reify_roundtrip_test fixpp_codegen_generate)
+  target_link_libraries(wire_vlatest_reify_roundtrip_test PRIVATE
+    fixpp_wire
+    GTest::gtest
+    GTest::gtest_main
+  )
+  target_include_directories(wire_vlatest_reify_roundtrip_test PRIVATE
+    "${CMAKE_SOURCE_DIR}/tests"
+    "${CMAKE_BINARY_DIR}/_codegen/include"
+  )
+  add_test(NAME wire_vlatest_reify_roundtrip_test COMMAND wire_vlatest_reify_roundtrip_test)
+  set_tests_properties(wire_vlatest_reify_roundtrip_test PROPERTIES LABELS "076;vlatest_roundtrip")
+endif()
+
 # ── Standalone: 075 T044 legacy CHAR->String (pre-FIX.4.2) witness ──────────
 # Drives fixpp's OWN production path (real FIX40.xml/FIX41.xml/FIX42.xml/
 # FIX44.xml -> XmlLoader -> as_table_view() -> dictionary_driven_validator)

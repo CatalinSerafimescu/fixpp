@@ -22,6 +22,13 @@ namespace fixpp::codegen {
 [[nodiscard]] std::string emit_reify(VersionIR const& ir);           // <vXX>/Reify.hpp
 [[nodiscard]] std::string emit_normative_refs(VersionIR const& ir);  // <vXX>/NormativeReferences.md
 
+// 076-fix-latest-typed-codegen T012 (FR-006, data-model.md Entity 3): the
+// per-message census manifest sourced from T005's projection lossless
+// occurrence list (`MessageIR::occurrences`). Returns "" for versions with
+// no occurrences (every `<fix>`-schema tier) — `write_file`'s empty-skip
+// then writes no Manifest.txt for them.
+[[nodiscard]] std::string emit_manifest(VersionIR const& ir);  // <vXX>/Manifest.txt
+
 // 069-v44-all-families (data-model.md Entity "Coverage mode"): which message
 // set the write emitter covers. `Official` = the frozen 33-element kOfficial33
 // set (byte-identical to pre-069 output, FR-005/SC-003). `All` = every
