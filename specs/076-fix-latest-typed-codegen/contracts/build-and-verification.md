@@ -30,11 +30,15 @@
 
 ## V-2 — Typed round-trip (FR-007, SC-002)
 
-- **Application subset** (per the R2b category mapping): construct via `build_<Msg>` → serialize → read back → assert field-for-field equality. **Zero skips** within the app-subset. A skipped app message fails the gate.
-- **All 181** messages: round-trip through the universal **reify/read-back** path (emitted for every message, not app-gated) → assert field-for-field equality, zero skips.
-- Admin/session messages having no `build_<Msg>` is by design (FR-001 Option A), NOT a skip — they are still covered by the reify/read-back leg above.
+> **[DEFERRED 2026-07-16 — see spec.md Clarifications → Session 2026-07-16]** The application-subset `build_<Msg>` leg below (bullet 1) is deferred to a follow-up feature along with the whole typed builder tier (`emit_builders` stays v44-only; no `vlatest/Builders.hpp` is emitted). **What ships in this PR is bullet 2 only** — the universal reify/read-back leg (FR-007(b)), delivered and tested for all 181 messages.
+
+- **[DEFERRED 2026-07-16]** **Application subset** (per the R2b category mapping): construct via `build_<Msg>` → serialize → read back → assert field-for-field equality. **Zero skips** within the app-subset. A skipped app message fails the gate.
+- **[DELIVERED]** **All 181** messages: round-trip through the universal **reify/read-back** path (emitted for every message, not app-gated) → assert field-for-field equality, zero skips.
+- Admin/session messages having no `build_<Msg>` is by design (FR-001 Option A), NOT a skip — they are still covered by the reify/read-back leg above. *(Moot for this PR — no `build_<Msg>` at all is emitted for `vlatest`, admin or business, per the descope.)*
 
 ## V-2b — App-subset boundary pin (RC-B / FR-001 — closes the silent-misclassification gap)
+
+> **[DEFERRED 2026-07-16 — see spec.md Clarifications → Session 2026-07-16]** This entire gate is deferred to the follow-up builder feature: it exists to pin the admin/business boundary of the `build_<Msg>` app-subset, and this PR emits no `vlatest` typed builders at all (`emit_builders` stays v44-only), so there is no subset to misclassify. Retained below for traceability of the original design; re-activate verbatim when the builder tier lands.
 
 - The vlatest builder app-subset is the complement of the `category="Session"` set. A witness MUST assert the **admin complement** (messages with no emitted `build_<Msg>`) equals the **exact set** `{0,1,2,3,4,5,A,n}` (Heartbeat/TestRequest/ResendRequest/Reject/SequenceReset/Logout/Logon/XMLnonFIX). Rationale: the census (V-1) checks the manifest (emitted for all 181, ungated by the app filter) and V-2's build-leg only exercises whatever is already in the subset, so a message misclassified as admin would drop its builder with **no** other RED test — this exact-set pin is the discriminating gate. Proven RED if a business message is misclassified into the admin complement.
 

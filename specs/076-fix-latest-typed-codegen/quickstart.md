@@ -14,7 +14,7 @@ cmake --preset <preset>            # FIXPP_CODEGEN_FIX_LATEST defaults ON
 cmake --build --preset <preset>
 ```
 
-**Expected**: `${CMAKE_BINARY_DIR}/_codegen/include/fixpp/vlatest/{Fields,Messages,Validator,Reify,Builders}.hpp` exist and compile; `fixpp::vlatest` symbols present. (Contract B-1 ON.)
+**Expected**: `${CMAKE_BINARY_DIR}/_codegen/include/fixpp/vlatest/{Fields,Messages,Validator,Reify}.hpp` exist and compile; `fixpp::vlatest` symbols present. **No `Builders.hpp`** — the typed `build_<Msg>`/`validate_<Msg>` builder tier is DEFERRED to a follow-up feature (see spec.md Clarifications → Session 2026-07-16); `emit_builders` stays v44-only. The completeness census's `Manifest.txt` is emitted instead (Scenario 2). (Contract B-1 ON.)
 
 ## Scenario 2 — Completeness census (the load-bearing gate)
 
