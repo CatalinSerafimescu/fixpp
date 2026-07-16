@@ -96,7 +96,7 @@ A reviewer needs a non-circular guarantee that each version's builder tier cover
 - **A group shared across two messages** → exactly one shared Args struct and exactly one set of validation metadata (`writer_traits` specialization + required/count/entry-validation helpers); no duplicate or ODR-conflicting definitions.
 - **Cyclic or over-deep component reuse** → bounded like the read tier's depth cap; a bounded-out edge must never leave a referenced-but-undefined Args type.
 - **A version with no application messages (vt11)** → no builder output; not an error.
-- **A version with zero repeating groups in its application set (e.g. FIX 4.2 shallow set)** → builders still emit correctly; the dedup is a no-op there.
+- **A message (or hypothetical version) with zero repeating groups** → builders still emit correctly (flat scalar `Args`, no `groups::G_…` reference); the dedup is a no-op **for that message**. NB: no in-scope version is group-free — the `/plan` census (research.md R2/R3) shows even the shallowest, FIX 4.2, has 18 distinct `no_tag`s (7 multi-plan, a 38→29 / 1.3× dedup); this is therefore a per-message degenerate case, NOT a per-version one (the earlier "e.g. FIX 4.2 shallow set / no-op" framing conflated the v42 *read-tier* zero-flyweight metric with the builder's app-group census and is corrected here).
 - **Length+Data coupled fields, required-ness folding, framing/header-trailer exclusion** → preserved exactly as the current emitter handles them; dedup changes only where a group's Args is *defined*, not what it contains.
 - **`FIXPP_CODEGEN_FIX_LATEST=OFF`** → no vlatest builders (and no stale `vlatest/Builders.hpp` left behind); other versions' builders unaffected.
 

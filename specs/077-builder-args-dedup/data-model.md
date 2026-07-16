@@ -76,8 +76,13 @@ message-rooted structs.
 | FIX Latest | vlatest | full `is_application`, gated by `FIXPP_CODEGEN_FIX_LATEST` | 173 | — (all) |
 
 `is_application` = `MessageIR::is_application` (from `msgcat`/Orchestra
-`category`; ir.hpp:99) — the independent predicate FR-010 derives its expected
-set from.
+`category`; ir.hpp:99) is the rule the emitter's own IR uses to build this
+in-scope table. **FR-010's completeness census (contracts §C1) MUST NOT read
+this field directly** — doing so would re-derive `expected(V)` from the same
+`ir(V).messages` walk the emitter consumes (circular; see data-model Entity 6
+/ the 075/076 blind-corpus lesson). Instead the census independently
+RE-IMPLEMENTS the identical `msgcat`/`category` rule on a standalone raw-XML /
+Orchestra walk (`raw_walk(V)`, contracts §C1), evaluated outside `build_ir()`.
 
 ## Entity 5 — Builder golden(s)
 

@@ -147,9 +147,12 @@ single-TU deduped `Builders.hpp` in the ~10 MB regime is the expected outcome
   `{BE,BF}`; BW/BX/BY absent from FIX44), `official` = frozen 33. Both goldens
   regenerated to deduped output (FR-007a).
 
-`is_application` is the independent app/admin predicate (`MessageIR.is_application`,
-set from `msgcat`/`category` — ir.hpp:99) that the FR-010 completeness census
-derives its expected set from, non-circularly.
+`is_application` is the app/admin **rule** (read `msgcat`/`category`, set on
+`MessageIR.is_application` — ir.hpp:99) the emitter's own IR uses. The FR-010
+completeness census does **not** read `MessageIR.is_application` (that would be
+circular — the emitter's own IR); it independently re-implements the identical
+rule on a standalone raw-XML/Orchestra walk (contracts §C1's `raw_walk(V)`),
+which is what makes `expected(V)` non-circular.
 
 ## R5 — Determinism, ordering, and the fail-closed completeness gate
 
