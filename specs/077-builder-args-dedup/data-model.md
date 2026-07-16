@@ -48,10 +48,16 @@ One per distinct structural plan per version, in `fixpp::<ns>::groups`.
 | Members | scalars → `optional<cpp_type>`; child groups → `span<const G_…Args>` (required) / `optional<span<…>>` (optional) — unchanged shapes, only the referenced *name* changes to the shared one |
 | Companions (once per plan) | `writer_traits<G_…Args>` specialization + `_required_<tag>` / `_count_<acc>` / `_validate_entry_<acc>` helpers, in `fixpp::wire` |
 
-**Count per version** (research.md R3) — distinct `(no_tag, recursive_signature)`
-plans, the **exact** `/plan` census pair-count for the dictionaries measured (sole
-caveat = census-vs-emitter fidelity, pinned by the regenerated golden at
-`/implement` — research.md R3): v42 29 · v44 89 · v50sp2 558 · vlatest 578.
+**Count per version** — distinct `(no_tag, recursive_signature)` plans over the
+builder's real scope (`is_application`-filtered, header/trailer-excluded — the
+current v44 emitter's scope; Entity 4). **T005 (2026-07-16) CORRECTED** the
+research.md R3 figures (29/89/558/578), which were censused over ALL messages
+(app+admin, and for vlatest incl. header componentRefs): the app-scope pins are
+**v42 28 · v44 88 · v50sp2 558 · vlatest 576** (−1 `NoMsgTypes`/384 Logon on
+v42/v44; v50sp2 unchanged, 0 admin; vlatest −1 NoMsgTypes −1 `HopGrp`/627). Sole
+caveat = census-vs-emitter fidelity, pinned EXACTLY by the regenerated golden's
+`struct G_` count at `/implement` (T010/T014/T017) — investigate any deviation
+before freezing.
 
 ## Entity 3 — Per-message builder / validator (emitted artifact)
 
@@ -69,7 +75,7 @@ message-rooted structs.
 
 | Version | ns | in-scope app set | count | families knob |
 |---|---|---|---|---|
-| FIX 4.2 | v42 | full `is_application` | 39 | — (all) |
+| FIX 4.2 | v42 | **DEFERRED — no builders** (L-063-1: FIX 4.2 types `NumInGroup` as `INT` ⇒ 0 typed groups ⇒ a scalar-only builder would silently omit required groups; issue #196) | 0 | — |
 | FIX 4.4 | v44 | `all` = `is_application` − `{BE,BF,BW,BX,BY}` · `official` = frozen 33 | 83 / 33 | `FIXPP_CODEGEN_V44_FAMILIES` (retained) |
 | FIX 5.0 SP2 | v50sp2 | full `is_application` (no v44 exclusion) | 156 | — (all) |
 | FIXT.1.1 | vt11 | none (admin-only) | 0 | — (no Builders.hpp) |

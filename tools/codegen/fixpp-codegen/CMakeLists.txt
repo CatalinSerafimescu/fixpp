@@ -57,3 +57,35 @@ endif()
 
 # Build-only: explicitly excluded from install() (the top-level install()
 # ships include/ only; this target is never an install component).
+
+# 077-builder-args-dedup T024 (C3b) -- a SEPARATELY-compiled emitter binary
+# carrying the FIXPP_CODEGEN_DROP_BUILDER_MSGTYPE compile-define
+# (emit_builders.cpp's mutation seam), used ONLY by
+# builder_completeness_mutation_witness_test.cpp
+# (tests/codegen/CMakeLists.txt) to prove the T023 completeness census can
+# go RED. EXCLUDE_FROM_ALL -- never part of the normal build; the witness
+# test's CMake target adds an explicit build-time dependency on it. Drops
+# msgtype "D" (NewOrderSingle, a v44 in-scope OFFICIAL message) from
+# whatever version it is invoked against; the witness invokes it with
+# `--xml FIX44.xml` only (cheap: 83 v44 messages, ~3.7MB, matches the T007
+# 067-precedent size — never regenerate vlatest for this).
+add_executable(fixpp-codegen-drop-witness EXCLUDE_FROM_ALL
+  main.cpp
+  ir.cpp
+  emit_fields.cpp
+  emit_messages.cpp
+  emit_validator.cpp
+  emit_reify.cpp
+  emit_normative_refs.cpp
+  emit_manifest.cpp
+  emit_dispatch.cpp
+  emit_builders.cpp
+)
+target_include_directories(fixpp-codegen-drop-witness PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}"
+  "${CMAKE_SOURCE_DIR}/include"
+)
+target_link_libraries(fixpp-codegen-drop-witness PRIVATE fixpp::dictionary pugixml::pugixml)
+target_compile_definitions(fixpp-codegen-drop-witness PRIVATE
+  "FIXPP_CODEGEN_DROP_BUILDER_MSGTYPE=\"D\""
+)

@@ -95,23 +95,23 @@ TEST(FamilyGolden069, BusinessMessageReject_J) {
 // entry (PartyID="PARTY1", PartyIDSource='D', PartyRole=1); NoLegs: 1 entry
 // (LegSymbol="IBM") — the required group-in-group/nested exemplar.
 TEST(FamilyGolden069, TradeCaptureReport_AE) {
-    fixpp::v44::TradeCaptureReportSidesPartyIDsArgs party{};
+    fixpp::v44::groups::G_453Args party{};
     party.party_id = "PARTY1";
     party.party_id_source = 'D';
     party.party_role = 1;
-    std::array<fixpp::v44::TradeCaptureReportSidesPartyIDsArgs, 1> parties{party};
+    std::array<fixpp::v44::groups::G_453Args, 1> parties{party};
 
-    fixpp::v44::TradeCaptureReportSidesArgs side{};
+    fixpp::v44::groups::G_552_1Args side{};
     side.side = '1';
     side.order_id = "ORDER1";
     side.party_i_ds =
-        std::optional<std::span<const fixpp::v44::TradeCaptureReportSidesPartyIDsArgs>>{
-            std::span<const fixpp::v44::TradeCaptureReportSidesPartyIDsArgs>{parties}};
-    std::array<fixpp::v44::TradeCaptureReportSidesArgs, 1> sides{side};
+        std::optional<std::span<const fixpp::v44::groups::G_453Args>>{
+            std::span<const fixpp::v44::groups::G_453Args>{parties}};
+    std::array<fixpp::v44::groups::G_552_1Args, 1> sides{side};
 
-    fixpp::v44::TradeCaptureReportLegsArgs leg{};
+    fixpp::v44::groups::G_555_3Args leg{};
     leg.leg_symbol = "IBM";
-    std::array<fixpp::v44::TradeCaptureReportLegsArgs, 1> legs{leg};
+    std::array<fixpp::v44::groups::G_555_3Args, 1> legs{leg};
 
     std::pmr::monotonic_buffer_resource arena{4096};
     fixpp::v44::TradeCaptureReportArgs args{};
@@ -120,9 +120,9 @@ TEST(FamilyGolden069, TradeCaptureReport_AE) {
     args.symbol = "MSFT";
     args.transact_time = "20240101-00:00:00";
     args.trade_date = "20240101";
-    args.sides = std::span<const fixpp::v44::TradeCaptureReportSidesArgs>{sides};
-    args.legs = std::optional<std::span<const fixpp::v44::TradeCaptureReportLegsArgs>>{
-        std::span<const fixpp::v44::TradeCaptureReportLegsArgs>{legs}};
+    args.sides = std::span<const fixpp::v44::groups::G_552_1Args>{sides};
+    args.legs = std::optional<std::span<const fixpp::v44::groups::G_555_3Args>>{
+        std::span<const fixpp::v44::groups::G_555_3Args>{legs}};
     args.previously_reported = false;
     args.trade_report_id = "TCR001";
 
@@ -136,17 +136,17 @@ TEST(FamilyGolden069, TradeCaptureReport_AE) {
 // ── AP (PositionReport) — NoPositions group ─────────────────────────────────
 // Seed identical to golden/gen/qf_positionreport.cpp.
 TEST(FamilyGolden069, PositionReport_AP) {
-    fixpp::v44::PositionReportPositionsArgs pos{};
+    fixpp::v44::groups::G_702Args pos{};
     pos.pos_type = "TQ";
     std::pmr::monotonic_buffer_resource arena{4096};
     pos.long_qty = make_decimal("100", &arena);
-    std::array<fixpp::v44::PositionReportPositionsArgs, 1> positions{pos};
+    std::array<fixpp::v44::groups::G_702Args, 1> positions{pos};
 
     fixpp::v44::PositionReportArgs args{};
     args.account = "ACCT1";
     args.account_type = 1;
-    args.positions = std::optional<std::span<const fixpp::v44::PositionReportPositionsArgs>>{
-        std::span<const fixpp::v44::PositionReportPositionsArgs>{positions}};
+    args.positions = std::optional<std::span<const fixpp::v44::groups::G_702Args>>{
+        std::span<const fixpp::v44::groups::G_702Args>{positions}};
     args.clearing_business_date = "20240101";
     args.pos_maint_rpt_id = "POSRPT1";
     args.pos_req_result = 0;
@@ -164,17 +164,17 @@ TEST(FamilyGolden069, PositionReport_AP) {
 // ── BB (CollateralInquiry) — no required fields; NoCollInquiryQualifier ─────
 // Seed identical to golden/gen/qf_collateralinquiry.cpp.
 TEST(FamilyGolden069, CollateralInquiry_BB) {
-    fixpp::v44::CollateralInquiryCollInquiryQualifierArgs qual{};
+    fixpp::v44::groups::G_938Args qual{};
     qual.coll_inquiry_qualifier = 0;
-    std::array<fixpp::v44::CollateralInquiryCollInquiryQualifierArgs, 1> quals{qual};
+    std::array<fixpp::v44::groups::G_938Args, 1> quals{qual};
 
     fixpp::v44::CollateralInquiryArgs args{};
     args.account = "ACCT1";
     args.account_type = 1;
     args.coll_inquiry_id = "COLLINQ1";
     args.coll_inquiry_qualifier =
-        std::optional<std::span<const fixpp::v44::CollateralInquiryCollInquiryQualifierArgs>>{
-            std::span<const fixpp::v44::CollateralInquiryCollInquiryQualifierArgs>{quals}};
+        std::optional<std::span<const fixpp::v44::groups::G_938Args>>{
+            std::span<const fixpp::v44::groups::G_938Args>{quals}};
 
     std::array<std::byte, 1024> out{};
     auto r = fixpp::v44::build_CollateralInquiry(std::span<std::byte>{out}, args);
@@ -186,13 +186,13 @@ TEST(FamilyGolden069, CollateralInquiry_BB) {
 // ── y (SecurityList) — NoRelatedSym group ───────────────────────────────────
 // Seed identical to golden/gen/qf_securitylist.cpp.
 TEST(FamilyGolden069, SecurityList_Y) {
-    fixpp::v44::SecurityListRelatedSymArgs entry{};
+    fixpp::v44::groups::G_146_7Args entry{};
     entry.symbol = "MSFT";
-    std::array<fixpp::v44::SecurityListRelatedSymArgs, 1> related{entry};
+    std::array<fixpp::v44::groups::G_146_7Args, 1> related{entry};
 
     fixpp::v44::SecurityListArgs args{};
-    args.related_sym = std::optional<std::span<const fixpp::v44::SecurityListRelatedSymArgs>>{
-        std::span<const fixpp::v44::SecurityListRelatedSymArgs>{related}};
+    args.related_sym = std::optional<std::span<const fixpp::v44::groups::G_146_7Args>>{
+        std::span<const fixpp::v44::groups::G_146_7Args>{related}};
     args.security_req_id = "SECREQ1";
     args.security_response_id = "SECRESP1";
     args.security_request_result = 0;
@@ -207,11 +207,11 @@ TEST(FamilyGolden069, SecurityList_Y) {
 // ── AK (Confirmation) — required NoCapacities group ─────────────────────────
 // Seed identical to golden/gen/qf_confirmation.cpp.
 TEST(FamilyGolden069, Confirmation_AK) {
-    fixpp::v44::ConfirmationCapacitiesArgs cap{};
+    fixpp::v44::groups::G_862Args cap{};
     cap.order_capacity = 'A';
     std::pmr::monotonic_buffer_resource arena{4096};
     cap.order_capacity_qty = make_decimal("100", &arena);
-    std::array<fixpp::v44::ConfirmationCapacitiesArgs, 1> capacities{cap};
+    std::array<fixpp::v44::groups::G_862Args, 1> capacities{cap};
 
     fixpp::v44::ConfirmationArgs args{};
     args.avg_px = make_decimal("50.25", &arena);
@@ -226,7 +226,7 @@ TEST(FamilyGolden069, Confirmation_AK) {
     args.confirm_status = 1;
     args.confirm_trans_type = 0;
     args.confirm_type = 1;
-    args.capacities = std::span<const fixpp::v44::ConfirmationCapacitiesArgs>{capacities};
+    args.capacities = std::span<const fixpp::v44::groups::G_862Args>{capacities};
 
     std::array<std::byte, 1024> out{};
     auto r = fixpp::v44::build_Confirmation(std::span<std::byte>{out}, args);
@@ -238,14 +238,14 @@ TEST(FamilyGolden069, Confirmation_AK) {
 // ── o (RegistrationInstructions) — nested NoRegistDtls ──────────────────────
 // Seed identical to golden/gen/qf_registrationinstructions.cpp.
 TEST(FamilyGolden069, RegistrationInstructions_O) {
-    fixpp::v44::RegistrationInstructionsRegistDtlsArgs dtl{};
+    fixpp::v44::groups::G_473Args dtl{};
     dtl.regist_dtls = "DETAILS1";
-    std::array<fixpp::v44::RegistrationInstructionsRegistDtlsArgs, 1> dtls{dtl};
+    std::array<fixpp::v44::groups::G_473Args, 1> dtls{dtl};
 
     fixpp::v44::RegistrationInstructionsArgs args{};
     args.regist_dtls =
-        std::optional<std::span<const fixpp::v44::RegistrationInstructionsRegistDtlsArgs>>{
-            std::span<const fixpp::v44::RegistrationInstructionsRegistDtlsArgs>{dtls}};
+        std::optional<std::span<const fixpp::v44::groups::G_473Args>>{
+            std::span<const fixpp::v44::groups::G_473Args>{dtls}};
     args.regist_ref_id = "REGREF1";
     args.regist_id = "REGID1";
     args.regist_trans_type = '0';
@@ -260,19 +260,19 @@ TEST(FamilyGolden069, RegistrationInstructions_O) {
 // ── N (ListStatus) — required NoOrders group ────────────────────────────────
 // Seed identical to golden/gen/qf_liststatus.cpp.
 TEST(FamilyGolden069, ListStatus_N) {
-    fixpp::v44::ListStatusOrdersArgs order{};
+    fixpp::v44::groups::G_73_3Args order{};
     order.cl_ord_id = "ORD1";
     std::pmr::monotonic_buffer_resource arena{4096};
     order.cum_qty = make_decimal("100", &arena);
     order.ord_status = '2';
     order.leaves_qty = make_decimal("0", &arena);
     order.cxl_qty = make_decimal("0", &arena);
-    std::array<fixpp::v44::ListStatusOrdersArgs, 1> orders{order};
+    std::array<fixpp::v44::groups::G_73_3Args, 1> orders{order};
 
     fixpp::v44::ListStatusArgs args{};
     args.list_id = "LIST1";
     args.tot_no_orders = 1;
-    args.orders = std::span<const fixpp::v44::ListStatusOrdersArgs>{orders};
+    args.orders = std::span<const fixpp::v44::groups::G_73_3Args>{orders};
     args.no_rpts = 1;
     args.rpt_seq = 1;
     args.list_status_type = 1;

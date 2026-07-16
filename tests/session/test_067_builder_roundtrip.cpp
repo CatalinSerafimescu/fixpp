@@ -975,35 +975,35 @@ TEST(BuilderRoundtrip067, NewOrderListGrouped) {
     auto const& seed = kNewOrderListSeed;
     std::pmr::monotonic_buffer_resource arena{8192};
 
-    fixpp::v44::NewOrderListOrdersPartyIDsPartySubIDsArgs sub_args{};
+    fixpp::v44::groups::G_802Args sub_args{};
     sub_args.party_sub_id = seed.order.party.sub.party_sub_id;
     sub_args.party_sub_id_type = seed.order.party.sub.party_sub_id_type;
-    std::array<fixpp::v44::NewOrderListOrdersPartyIDsPartySubIDsArgs, 1> subs{sub_args};
+    std::array<fixpp::v44::groups::G_802Args, 1> subs{sub_args};
 
-    fixpp::v44::NewOrderListOrdersPartyIDsArgs party_args{};
+    fixpp::v44::groups::G_453Args party_args{};
     party_args.party_id = seed.order.party.party_id;
     party_args.party_id_source = seed.order.party.party_id_source;
     party_args.party_role = seed.order.party.party_role;
     party_args.party_sub_i_ds = std::optional<
-        std::span<const fixpp::v44::NewOrderListOrdersPartyIDsPartySubIDsArgs>>{
-        std::span<const fixpp::v44::NewOrderListOrdersPartyIDsPartySubIDsArgs>{subs}};
-    std::array<fixpp::v44::NewOrderListOrdersPartyIDsArgs, 1> parties{party_args};
+        std::span<const fixpp::v44::groups::G_802Args>>{
+        std::span<const fixpp::v44::groups::G_802Args>{subs}};
+    std::array<fixpp::v44::groups::G_453Args, 1> parties{party_args};
 
-    fixpp::v44::NewOrderListOrdersArgs order_args{};
+    fixpp::v44::groups::G_73_2Args order_args{};
     order_args.cl_ord_id = seed.order.cl_ord_id;
     order_args.list_seq_no = seed.order.list_seq_no;
     order_args.side = seed.order.side;
     order_args.symbol = seed.order.symbol;
     order_args.order_qty = make_decimal(seed.order.order_qty, &arena);
-    order_args.party_i_ds = std::optional<std::span<const fixpp::v44::NewOrderListOrdersPartyIDsArgs>>{
-        std::span<const fixpp::v44::NewOrderListOrdersPartyIDsArgs>{parties}};
-    std::array<fixpp::v44::NewOrderListOrdersArgs, 1> orders{order_args};
+    order_args.party_i_ds = std::optional<std::span<const fixpp::v44::groups::G_453Args>>{
+        std::span<const fixpp::v44::groups::G_453Args>{parties}};
+    std::array<fixpp::v44::groups::G_73_2Args, 1> orders{order_args};
 
     fixpp::v44::NewOrderListArgs args{};
     args.list_id = seed.list_id;
     args.bid_type = seed.bid_type;
     args.tot_no_orders = seed.tot_no_orders;
-    args.orders = std::span<const fixpp::v44::NewOrderListOrdersArgs>{orders};  // REQUIRED group
+    args.orders = std::span<const fixpp::v44::groups::G_73_2Args>{orders};  // REQUIRED group
 
     std::array<std::byte, 4096> out{};
     auto built = fixpp::v44::build_NewOrderList(std::span<std::byte>{out}, args);
@@ -1054,19 +1054,19 @@ TEST(BuilderRoundtrip067, AllocationReportGrouped) {
     auto const& seed = kAllocationReportSeed;
     std::pmr::monotonic_buffer_resource arena{8192};
 
-    fixpp::v44::AllocationReportPartyIDsPartySubIDsArgs sub_args{};
+    fixpp::v44::groups::G_802Args sub_args{};
     sub_args.party_sub_id = seed.party.sub.party_sub_id;
     sub_args.party_sub_id_type = seed.party.sub.party_sub_id_type;
-    std::array<fixpp::v44::AllocationReportPartyIDsPartySubIDsArgs, 1> subs{sub_args};
+    std::array<fixpp::v44::groups::G_802Args, 1> subs{sub_args};
 
-    fixpp::v44::AllocationReportPartyIDsArgs party_args{};
+    fixpp::v44::groups::G_453Args party_args{};
     party_args.party_id = seed.party.party_id;
     party_args.party_id_source = seed.party.party_id_source;
     party_args.party_role = seed.party.party_role;
     party_args.party_sub_i_ds =
-        std::optional<std::span<const fixpp::v44::AllocationReportPartyIDsPartySubIDsArgs>>{
-            std::span<const fixpp::v44::AllocationReportPartyIDsPartySubIDsArgs>{subs}};
-    std::array<fixpp::v44::AllocationReportPartyIDsArgs, 1> parties{party_args};
+        std::optional<std::span<const fixpp::v44::groups::G_802Args>>{
+            std::span<const fixpp::v44::groups::G_802Args>{subs}};
+    std::array<fixpp::v44::groups::G_453Args, 1> parties{party_args};
 
     fixpp::v44::AllocationReportArgs args{};
     args.alloc_report_id = seed.alloc_report_id;
@@ -1078,8 +1078,8 @@ TEST(BuilderRoundtrip067, AllocationReportGrouped) {
     args.avg_px = make_decimal(seed.avg_px, &arena);
     args.trade_date = seed.trade_date;
     args.symbol = seed.symbol;
-    args.party_i_ds = std::optional<std::span<const fixpp::v44::AllocationReportPartyIDsArgs>>{
-        std::span<const fixpp::v44::AllocationReportPartyIDsArgs>{parties}};
+    args.party_i_ds = std::optional<std::span<const fixpp::v44::groups::G_453Args>>{
+        std::span<const fixpp::v44::groups::G_453Args>{parties}};
 
     std::array<std::byte, 4096> out{};
     auto built = fixpp::v44::build_AllocationReport(std::span<std::byte>{out}, args);
@@ -1124,17 +1124,17 @@ TEST(BuilderRoundtrip067, MarketDataSnapshotFullRefreshGrouped) {
     auto const& seed = kMarketDataSnapshotFullRefreshSeed;
     std::pmr::monotonic_buffer_resource arena{4096};
 
-    fixpp::v44::MarketDataSnapshotFullRefreshMDEntriesArgs entry_args{};
+    fixpp::v44::groups::G_268_1Args entry_args{};
     entry_args.md_entry_type = seed.entry.md_entry_type;
     entry_args.md_entry_px = make_decimal(seed.entry.md_entry_px, &arena);
     entry_args.md_entry_size = make_decimal(seed.entry.md_entry_size, &arena);
-    std::array<fixpp::v44::MarketDataSnapshotFullRefreshMDEntriesArgs, 1> entries{entry_args};
+    std::array<fixpp::v44::groups::G_268_1Args, 1> entries{entry_args};
 
     fixpp::v44::MarketDataSnapshotFullRefreshArgs args{};
     args.symbol = seed.symbol;
     args.md_req_id = seed.md_req_id;
     args.md_entries =
-        std::span<const fixpp::v44::MarketDataSnapshotFullRefreshMDEntriesArgs>{entries};  // REQUIRED
+        std::span<const fixpp::v44::groups::G_268_1Args>{entries};  // REQUIRED
 
     std::array<std::byte, 2048> out{};
     auto built = fixpp::v44::build_MarketDataSnapshotFullRefresh(std::span<std::byte>{out}, args);
@@ -1171,16 +1171,16 @@ TEST(BuilderRoundtrip067, MarketDataIncrementalRefreshGrouped) {
     auto const& seed = kMarketDataIncrementalRefreshSeed;
     std::pmr::monotonic_buffer_resource arena{4096};
 
-    fixpp::v44::MarketDataIncrementalRefreshMDEntriesArgs entry_args{};
+    fixpp::v44::groups::G_268_2Args entry_args{};
     entry_args.md_update_action = seed.entry.md_update_action;
     entry_args.md_entry_type = seed.entry.md_entry_type;
     entry_args.md_entry_px = make_decimal(seed.entry.md_entry_px, &arena);
-    std::array<fixpp::v44::MarketDataIncrementalRefreshMDEntriesArgs, 1> entries{entry_args};
+    std::array<fixpp::v44::groups::G_268_2Args, 1> entries{entry_args};
 
     fixpp::v44::MarketDataIncrementalRefreshArgs args{};
     args.md_req_id = seed.md_req_id;
     args.md_entries =
-        std::span<const fixpp::v44::MarketDataIncrementalRefreshMDEntriesArgs>{entries};  // REQUIRED
+        std::span<const fixpp::v44::groups::G_268_2Args>{entries};  // REQUIRED
 
     std::array<std::byte, 2048> out{};
     auto built = fixpp::v44::build_MarketDataIncrementalRefresh(std::span<std::byte>{out}, args);
@@ -1223,22 +1223,22 @@ TEST(BuilderRoundtrip067, MassQuoteGrouped) {
     auto const& seed = kMassQuoteSeed;
     std::pmr::monotonic_buffer_resource arena{4096};
 
-    fixpp::v44::MassQuoteQuoteSetsQuoteEntriesArgs entry_args{};
+    fixpp::v44::groups::G_295_3Args entry_args{};
     entry_args.quote_entry_id = seed.set.entry.quote_entry_id;
     entry_args.bid_px = make_decimal(seed.set.entry.bid_px, &arena);
     entry_args.offer_px = make_decimal(seed.set.entry.offer_px, &arena);
-    std::array<fixpp::v44::MassQuoteQuoteSetsQuoteEntriesArgs, 1> entries{entry_args};
+    std::array<fixpp::v44::groups::G_295_3Args, 1> entries{entry_args};
 
-    fixpp::v44::MassQuoteQuoteSetsArgs set_args{};
+    fixpp::v44::groups::G_296_2Args set_args{};
     set_args.quote_set_id = seed.set.quote_set_id;
     set_args.tot_no_quote_entries = seed.set.tot_no_quote_entries;
     set_args.quote_entries =
-        std::span<const fixpp::v44::MassQuoteQuoteSetsQuoteEntriesArgs>{entries};  // REQUIRED
-    std::array<fixpp::v44::MassQuoteQuoteSetsArgs, 1> sets{set_args};
+        std::span<const fixpp::v44::groups::G_295_3Args>{entries};  // REQUIRED
+    std::array<fixpp::v44::groups::G_296_2Args, 1> sets{set_args};
 
     fixpp::v44::MassQuoteArgs args{};
     args.quote_id = seed.quote_id;
-    args.quote_sets = std::span<const fixpp::v44::MassQuoteQuoteSetsArgs>{sets};  // REQUIRED
+    args.quote_sets = std::span<const fixpp::v44::groups::G_296_2Args>{sets};  // REQUIRED
 
     std::array<std::byte, 2048> out{};
     auto built = fixpp::v44::build_MassQuote(std::span<std::byte>{out}, args);

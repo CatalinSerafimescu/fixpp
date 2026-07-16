@@ -1,5 +1,9 @@
 # Implementation Plan: Typed builder tier for all FIX versions via group-Args deduplication
 
+> **⚠️ /implement amendments (2026-07-16) — this doc's per-version numbers are superseded; the authoritative record is `.specify/decisions/077-builder-args-dedup-verify.md`:**
+> 1. **v42 builders DESCOPED** (user-decided, issue #196): FIX 4.2 types `NumInGroup` as legacy XML `INT`, so the emitter materializes 0 typed groups (L-063-1) and a scalar-only v42 builder would silently omit required groups (invalid FIX 4.2). **Builder-bearing versions = {v44, v50sp2, vlatest}**; v42 joins vt11 as non-builder-bearing. Any "v42" builder count/golden/round-trip below is void.
+> 2. **Plan-count correction (T005):** the 29/89/558/578 figures were an all-message census; the builder's app-scope counts are **v44 88 / v50sp2 558 / vlatest 576** (v42 descoped). The census pins (558/576) were CORRECT — an interim build-tree under-count (555/573) was a real bug fixed at T017 (`is_n002_n003_excluded` was applied version-unscoped, wrongly dropping BE/BF/BW/BX/BY from v50sp2/vlatest; scoped to v44). vlatest source size is ~77 MB (not the ~10 MB estimate; dedup collapsed 26,806→576 structs, so it compiles at ~3.7 GiB RSS — SC-002 size wording reconciled at T013/T015).
+
 **Branch**: `077-builder-args-dedup` | **Date**: 2026-07-16 | **Spec**: [spec.md](./spec.md)
 
 **Input**: Feature specification from `specs/077-builder-args-dedup/spec.md`

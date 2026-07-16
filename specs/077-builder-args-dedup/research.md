@@ -136,8 +136,14 @@ single-TU deduped `Builders.hpp` in the ~10 MB regime is the expected outcome
 
 - **vt11** — 0 application messages (8 admin/session). **No builder output**
   (consistent with clarify: admin builders are OUT). Not an error.
-- **v42 / v50sp2 / vlatest** — emit builders for their genuine
-  `is_application` set (39 / 156 / 173). The v44 `kN002N003Excluded`
+- **v42 — DEFERRED (discovered at /implement, issue #196):** FIX 4.2 types its
+  `NumInGroup` count fields as legacy XML `INT` (not `NUMINGROUP`), so the emitter
+  materializes **zero** typed repeating groups (L-063-1); a scalar-only v42 builder
+  would silently omit `required='Y'` groups (e.g. `NewOrderList`/`NoOrders`) → invalid
+  FIX 4.2. Fixing it regenerates the v42 read golden (out of FR-009 scope). v42 emits NO
+  builders in 077. **Builder-bearing versions are v44 / v50sp2 / vlatest.**
+- **v50sp2 / vlatest** — emit builders for their genuine
+  `is_application` set (156 / 173). The v44 `kN002N003Excluded`
   set `{BE,BF,BW,BX,BY}` is **v44-specific** (frozen for its 067/069 golden;
   BW/BX/BY are FIX 5.0 messages absent from FIX44). Per clarify, other versions
   do **not** inherit it — they emit their full application set. (v50sp2 has 0
@@ -180,3 +186,128 @@ codegen" post-1.0 carve-out for FIX Latest); delivering v42/v50sp2 builders
 reclassifies **Article XVIII §7** (v42/v50sp2 app-message builder widening,
 currently v1.x-deferred) as v1.0-delivered-by-077. Folded into Gate A per the
 074/075/076 precedent.
+
+## R2-recon (T005, /implement)
+
+Independent raw-XML/Orchestra walk (NOT `ir(V).messages` — a standalone
+Python re-implementation of `walk_level`/`walk_orchestra_level`'s
+declaration-order + component/group expansion, cross-checked against
+`ir.cpp` by source read), run against `dictionaries/FIX42.xml`,
+`dictionaries/FIX44.xml`, `dictionaries/FIX50SP2.xml`, and
+`dictionaries/orchestra/OrchestraFIXLatest.xml`.
+
+### (1) The assigned 58-vs-59 question — RESOLVED, and the R2 Scope Note's
+### guess was wrong about *which* group closes the gap
+
+`spec.md`'s "59 distinct read-tier group flyweights" is confirmed by direct
+count against the checked-in golden
+(`specs/003-dictionary-codegen/contracts/golden/v44_Messages.golden.hpp`:
+`grep -c '^class G_'` = 59, e.g. `class G_627 { … }` is present as the
+*first* group in the file).
+
+The R2 census's "58" is **not** "the application-message group set" as the
+Scope Note speculated. It is the distinct-`no_tag` count over **all 93 v44
+messages' BODY only** (app + admin, `<message>` node scope — the same scope
+`populate_group_order`/`MessageIR.group_order` uses, INV-2 body-only). The
+reconciling element between 58 and 59 is **`NoHops`/627** — a `<header>`-only
+group (`<header><group name="NoHops">…</group></header>`, present via the
+framing envelope on *every* message, admin or app) — not an admin-message
+body group. `NoHops` is excluded from `group_order`/the builder's scope by
+construction (body-only re-parse never visits `<header>`) but *is* read by
+the (whole-wire) read tier, hence it's in 59 but not 58.
+
+The admin-message body set contributes a **different** single group:
+`NoMsgTypes`/384 (`MsgTypeGrp`), found only in `Logon`(`A`)'s body. This is
+real but is the cause of a *different* discrepancy (below), not the
+58-vs-59 one.
+
+### (2) App-message counts — VERIFIED against raw XML/Orchestra (all four match the pinned values)
+
+| Version | raw-XML/Orchestra count | pinned | verified |
+|---|---|---|---|
+| v42 | `msgcat='app'` = 39 | 39 | ✓ |
+| v44 | `msgcat='app'` = 85, minus `{BE,BF}` (both confirmed `msgcat='app'`) = 83 | 83 | ✓ |
+| v50sp2 | `msgcat='app'` = 156 (0 admin messages — FIXT session split to FIXT11.xml, confirmed) | 156 | ✓ |
+| vlatest | `category != "Session"` = 173 (8 `Session`-category messages: `0,1,2,3,4,5,A,n` — matches v44's admin msgtype set exactly) | 173 | ✓ |
+
+### (3) Plan counts (29/89/558/578) — NOT app-only; census-derived; MATERIAL correction found; ⚠️ SCOPE-DECISION NEEDED before any golden freeze (T010/T013/T017/T023)
+
+Reproducing the R2/R3 recursive-signature census independently (delimiter +
+ordered `(tag, required, {child-signature})`, keyed `(no_tag, signature)`,
+exactly Entity 1's definition) over **ALL messages (app+admin) per version**
+reproduces the pinned figures **exactly**: v42 29 plans/18 no_tags, v44 89/58,
+v50sp2 558/505, vlatest (full `<fixr:structure>` incl. `StandardHeader`/
+`StandardTrailer`) 578/524 — confirming the census methodology is sound and
+matches R2/R3's own numbers bit-for-bit. **But this is the ALL-MESSAGES
+scope, not the builder's actual `is_application`-filtered emission scope**
+(data-model Entity 4; `vt11`'s "0 builders" edge case is exactly this
+principle already). Restricting the SAME census to **app-only** messages
+(matching what the current v44 emitter — and T009's per-version
+`is_application` predicate — actually visits) gives:
+
+| Version | ALL-messages plans (pinned) | APP-only plans (builder's actual scope) | delta | cause |
+|---|---|---|---|---|
+| v42 | 29 | **28** | −1 | `NoMsgTypes`/384 (Logon, admin-only) |
+| v44 | 89 | **88** | −1 | `NoMsgTypes`/384 (Logon, admin-only) |
+| v50sp2 | 558 | **558** | 0 | 0 admin messages — no delta |
+| vlatest | 578 | **576*** | −2 | `NoMsgTypes`/384 (Logon/Session, admin-only) **+** `HopGrp`/627 (`StandardHeader` componentRef id 1024, header-only — see methodology note below) |
+
+`*` vlatest additionally needed a **methodology correction**: the v42/v44/
+v50sp2 raw-XML walk starts at each `<message>` element (no `<header>`/
+`<trailer>` — those are separate top-level XML elements, never walked), so
+it was already body-only by construction. The first vlatest pass instead
+walked the *full* `<fixr:structure>` (Orchestra has no separate header/
+trailer elements — `StandardHeader`/`StandardTrailer` are ordinary
+`componentRef`s *inside* `<fixr:structure>`, `orchestra_loader.cpp:730-732`),
+which pulled in `HopGrp`/627 (`StandardHeader`'s `groupRef id="2085"`) —
+present on every message, admin or app. Re-running with the top-level
+`StandardHeader`(1024)/`StandardTrailer`(1025) `componentRef`s excluded
+(mirroring `emit_builders.cpp`'s `top_level_synthetic_members`
+header/trailer exclusion at the entry point, so the recursion never
+reaches `HopGrp`) gives 577 ALL-messages / **576 APP-only** — the number in
+the table above. This asymmetry (present only for vlatest's Orchestra walk)
+is now closed; v42/v44/v50sp2 needed no correction.
+
+**Why this is a scope-decision, not just a note-worthy delta**: T008 (the
+dedup mechanism) is unwritten as of this task. Whether the shipped golden's
+struct count is the ALL-messages figure or the APP-only figure depends
+entirely on **how T008 discovers/interns plans** — over `ir.messages`
+unfiltered, or over the same `is_application`-filtered set the emitter
+already visits per-message (mirroring the *existing* v44 emitter, which
+never touches `Logon`/`NoMsgTypes` today because `Logon` is `msgcat=admin`
+and out of the OFFICIAL/ALL builder scope). The current (pre-077) v44
+emitter's proven behavior and Entity 4's `vt11` edge case (0 application
+messages ⇒ 0 builders) both point toward APP-only discovery — which would
+make the **pinned 29/89/558/578 wrong by one (v42/v44/vlatest) or two
+(vlatest)**, and the corrected figures are **28/88/558/576**. But this
+census cannot itself decide T008's design; it can only show that the two
+candidate answers differ and by how much, and name the reason. **No golden
+expectation (T010, T013, T017) or completeness-census pin (T023) may be
+frozen against either set of numbers until the orchestrator names which
+discovery scope T008 uses** — recommend re-confirming against the T010
+regenerated golden's actual struct count once T008 lands, and updating
+Entity 2's "Count per version" table (data-model.md) to whichever this
+resolves to (currently reads 29/89/558/578, unverified against the
+builder's real is_application-filtered scope).
+
+### (4) T004 cross-reference — required-ness source for vlatest
+
+For the record (T004 detail, not re-litigated here): the *builder's*
+required-ness source is `MessageIR.fields[tag].ref.rule` (`ir.hpp`
+Entity-1-cited field), populated for vlatest via
+`dict.message_fields()` → `OrchestraLoaderState::expand_field_list`
+(`orchestra_loader.cpp:473-570`, `.rule` set at lines 494/543 per XML
+occurrence) → tag-deduped per message (`orchestra_loader.cpp:684-709`,
+`std::ranges::sort`+`unique` by tag, **not stable** — order among
+same-tag duplicates after sort is unspecified). This is a *different*,
+lossy path from `ir.cpp`'s own `occurrences[].rule` (076's lossless
+per-occurrence record, `populate_orchestra_projection`/
+`walk_orchestra_level`, `ir.cpp:350-358/392-400`), which the completeness
+census manifest uses but the builder does not read. An independent raw-XML
+census (same script as above) found **zero** intra-message tag-reuse with
+conflicting `presence` across all 181 EP303 messages — the tag-keyed lookup
+is empirically sound for the current corpus (mirrors v44's existing N3
+census finding), though the unstable-sort dedup remains an unguarded
+invariant (no load-time or build-time assertion) that a future EP303
+revision could silently violate. Not a T008 blocker; flagged as a residual
+risk, not fixed here (out of this task's scope).

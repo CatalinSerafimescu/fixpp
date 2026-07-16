@@ -31,11 +31,12 @@ Generated headers live at:
 ```
 build/<preset>/_codegen/include/fixpp/
   v42/     Messages.hpp  Fields.hpp  Validator.hpp  Reify.hpp  NormativeReferences.md
-  v44/     ...  + Builders.hpp        # typed build_<Msg>/validate_<Msg> — v44 ONLY
-  v50sp2/  ...
-  vt11/    ...                        # FIXT.1.1
-  vlatest/ ...  + Manifest.txt        # FIX Latest (EP303); only when FIXPP_CODEGEN_FIX_LATEST=ON
-                                      #   (no Builders.hpp yet — descoped, see L-076-1)
+                                      #   (NO Builders.hpp — v42 descoped, L-077-1/issue #196)
+  v44/     ...  + Builders.hpp        # typed build_<Msg>/validate_<Msg>, deduped
+  v50sp2/  ...  + Builders.hpp        # typed builders (077)
+  vt11/    ...                        # FIXT.1.1 (admin-only → NO Builders.hpp)
+  vlatest/ ...  + Manifest.txt + Builders.hpp   # FIX Latest (EP303); only when FIXPP_CODEGEN_FIX_LATEST=ON
+                                      #   (typed builders delivered by 077)
   _dispatch/
     reify_dispatch_fixt.hpp
     reify_dispatch_application.hpp
@@ -82,10 +83,21 @@ cmake --preset linux-clang-debug -DFIXPP_CODEGEN_FIX_LATEST=OFF
 cmake --preset linux-clang-debug -DFIXPP_CODEGEN_V44_FAMILIES=official
 ```
 
-> **Typed builders (`build_<Msg>`/`validate_<Msg>`) are emitted for `fixpp::v44`
-> only.** FIX Latest builders are descoped pending a group-`Args` dedup redesign
-> (see **L-076-1**); construct FIX Latest messages via the runtime
-> `wire::body_builder` / tag-keyed path for now.
+> **Typed builders (`build_<Msg>`/`validate_<Msg>`) are emitted for `fixpp::v44`,
+> `fixpp::v50sp2`, and `fixpp::vlatest`** (their full `is_application` sets:
+> 83 / 156 / 173; `vlatest` gated by `FIXPP_CODEGEN_FIX_LATEST`). Each repeating
+> group's input `Args` struct is **deduplicated** — emitted once per distinct
+> `(no_tag, recursive structural signature)` plan into `fixpp::<ns>::groups` as
+> `G_<no_tag>Args` (one plan) or `G_<no_tag>_1..kArgs` (≥2 plans) — which is what
+> makes the FIX Latest builder tier compile as a single TU (577-ish shared plans
+> vs 26,806 message-rooted structs; 077, resolving L-076-1). **`fixpp::vt11`**
+> (admin-only) and **`fixpp::v42`** (descoped — FIX 4.2 types `NumInGroup` as
+> legacy `INT`, so 0 typed groups materialize; L-077-1 / issue #196) emit NO
+> builders; construct v42 messages via the runtime `wire::body_builder` /
+> tag-keyed path. **Source-API note:** the v44 nested-group `Args` type names
+> changed from message-rooted (`NewOrderListOrdersArgs`) to shared
+> (`groups::G_73_1Args`) — a deliberate pre-1.0 break with no aliases; top-level
+> `<Msg>Args` names are unchanged.
 
 ### Determinism test
 

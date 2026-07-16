@@ -402,11 +402,11 @@ TEST_F(AllFamiliesRoundtrip069, TradeCaptureReport) {
     args.last_px = make_decimal("10.5", &arena);
     args.trade_date = "AE_trade_date";
     args.transact_time = "AE_transact_time";
-    fixpp::v44::TradeCaptureReportSidesArgs side_entry{};
+    fixpp::v44::groups::G_552_1Args side_entry{};
     side_entry.side = '1';
     side_entry.order_id = "AE_NoSides_OrderID";
-    std::array<fixpp::v44::TradeCaptureReportSidesArgs, 1> sides_arr{side_entry};
-    args.sides = std::span<const fixpp::v44::TradeCaptureReportSidesArgs>{sides_arr};
+    std::array<fixpp::v44::groups::G_552_1Args, 1> sides_arr{side_entry};
+    args.sides = std::span<const fixpp::v44::groups::G_552_1Args>{sides_arr};
     auto mv_opt = parse(
         [&](std::span<std::byte> o) { return fixpp::v44::build_TradeCaptureReport(o, args); });
     ASSERT_TRUE(mv_opt.has_value()) << "build/parse pipeline failed";
@@ -1957,13 +1957,13 @@ TEST(AllFamiliesFailClosed069, TradeCaptureReport_NoSidesEntry_MissingSide) {
     args.last_px = make_decimal("10.5", &arena);
     args.trade_date = "AE_trade_date";
     args.transact_time = "AE_transact_time";
-    fixpp::v44::TradeCaptureReportSidesArgs side_entry{};
+    fixpp::v44::groups::G_552_1Args side_entry{};
     // side_entry.side intentionally left unset (nullopt) -- the ONE omitted
     // required entry field.
     side_entry.order_id =
         "AE_NoSides_OrderID";  // present, so the reject is attributable to Side alone
-    std::array<fixpp::v44::TradeCaptureReportSidesArgs, 1> sides_arr{side_entry};
-    args.sides = std::span<const fixpp::v44::TradeCaptureReportSidesArgs>{sides_arr};
+    std::array<fixpp::v44::groups::G_552_1Args, 1> sides_arr{side_entry};
+    args.sides = std::span<const fixpp::v44::groups::G_552_1Args>{sides_arr};
 
     auto r = fixpp::v44::validate_TradeCaptureReport(args);
     ASSERT_FALSE(r.has_value()) << "a NoSides entry missing required Side(54) must fail validate_";

@@ -586,3 +586,170 @@ TEST(Group067EmitBuilders, RC1PerMessagePlannerDistinctDelimiterWvsX) {
         << "X (MarketDataIncrementalRefresh) must open NoMDEntries(268) with delimiter "
            "MDUpdateAction(279) — DISTINCT from W's 269 despite the SAME no_tag";
 }
+
+// ---------------------------------------------------------------------------
+// 077-builder-args-dedup T007 — dedup-soundness discriminating witness.
+//
+// MUST FAIL FIRST: the current emitter (pre-T008) names group Args structs by
+// message-rooted path (`resolve_level`, emit_builders.cpp:415-416) and never
+// emits a `groups::G_<no_tag>[_ord]Args` name at all — every "found" assertion
+// below is RED until T008 lands (data-model.md Entity 1; contracts
+// generated-builder-dedup.md G1/G1a/G1b).
+//
+// Synthetic IR (built by hand, not via XmlLoader) so the three cases below are
+// exact and independent of any real dictionary's structure:
+//   (a) DISCRIMINATION — no_tag 9001 occurs in two messages with the SAME
+//       delimiter (9101) but a DIFFERENT required-ness on that sole member
+//       -> two distinct recursive signatures -> BOTH must be ordinaled, bare
+//       name forbidden (G1a).
+//   (b) COLLAPSE — no_tag 9002 occurs in two messages with a BYTE-IDENTICAL
+//       signature (member 9201, same required-ness) -> ONE bare struct,
+//       emitted exactly once (G1b).
+//   (c) CROSS-no_tag SEPARATION — no_tag 9003 vs 9004, each with a single
+//       occurrence, coincidentally identical bodies (member 9301, same
+//       required-ness) -> stay SEPARATE bare plans; `no_tag` is part of the
+//       dedup key (data-model.md Entity 1).
+//
+// Mutation-grade: a wrong `no_tag`-ALONE key would wrongly COLLAPSE (a)'s two
+// distinct signatures into one struct — case (a) kills it. A wrong
+// SIGNATURE-ONLY key (dropping no_tag) would wrongly COLLAPSE (c)'s two
+// different no_tags into one struct — case (c) kills it. Together they pin
+// the exact `(no_tag, signature)` key; (b) additionally guards against an
+// over-eager key that never collapses (spurious ordinals on identical
+// bodies).
+// ---------------------------------------------------------------------------
+namespace {
+
+fixpp::codegen::FieldIR make_synth_field(std::uint16_t tag, std::string name,
+                                         fixpp::dict::field_data_type type,
+                                         fixpp::dict::field_presence rule,
+                                         std::uint16_t group_no_tag) {
+    fixpp::codegen::FieldIR f;
+    f.name = std::move(name);
+    f.ref.tag = tag;
+    f.ref.type = type;
+    f.ref.rule = rule;
+    f.ref.group_no_tag = group_no_tag;
+    return f;
+}
+
+// One message with a single top-level repeating group `no_tag`, containing
+// one scalar member `member_tag` (String) with the given required-ness. The
+// member is the group's delimiter (its sole/first declared member).
+MessageIR make_synth_group_message(std::string msg_type, std::uint16_t no_tag,
+                                   std::uint16_t member_tag, bool member_required) {
+    MessageIR m;
+    m.msg_type = msg_type;
+    m.name = "Synthetic" + msg_type;
+    m.is_application = true;
+
+    m.fields.push_back(make_synth_field(no_tag, "NoSynth" + std::to_string(no_tag),
+                                        fixpp::dict::field_data_type::NumInGroup,
+                                        fixpp::dict::field_presence::Required,
+                                        /*group_no_tag=*/0));
+    m.fields.push_back(make_synth_field(
+        member_tag, "SynthField" + std::to_string(member_tag), fixpp::dict::field_data_type::String,
+        member_required ? fixpp::dict::field_presence::Required
+                        : fixpp::dict::field_presence::Optional,
+        /*group_no_tag=*/no_tag));
+
+    GroupOrderEntry g;
+    g.no_tag = no_tag;
+    g.delimiter_tag = member_tag;
+    g.members = {fixpp::codegen::GroupOrderMember{.tag = member_tag, .is_group = false}};
+    m.group_order.push_back(std::move(g));
+    return m;
+}
+
+VersionIR build_dedup_soundness_ir() {
+    VersionIR ir;
+    ir.ns = "v44";
+    // (a) DISCRIMINATION — no_tag 9001, two distinct signatures (required
+    // differs).
+    ir.messages.push_back(
+        make_synth_group_message("ZDEDUP9001A", 9001, 9101, /*member_required=*/true));
+    ir.messages.push_back(
+        make_synth_group_message("ZDEDUP9001B", 9001, 9101, /*member_required=*/false));
+    // (b) COLLAPSE — no_tag 9002, byte-identical signature.
+    ir.messages.push_back(
+        make_synth_group_message("ZDEDUP9002A", 9002, 9201, /*member_required=*/true));
+    ir.messages.push_back(
+        make_synth_group_message("ZDEDUP9002B", 9002, 9201, /*member_required=*/true));
+    // (c) CROSS-no_tag SEPARATION — coincidentally identical bodies, different
+    // no_tags.
+    ir.messages.push_back(
+        make_synth_group_message("ZDEDUP9003A", 9003, 9301, /*member_required=*/true));
+    ir.messages.push_back(
+        make_synth_group_message("ZDEDUP9004A", 9004, 9301, /*member_required=*/true));
+    return ir;
+}
+
+VersionIR const& dedup_soundness_ir() {
+    static VersionIR const ir = build_dedup_soundness_ir();
+    return ir;
+}
+
+std::size_t count_occurrences(std::string const& text, std::string const& needle) {
+    std::size_t count = 0;
+    std::size_t pos = 0;
+    while ((pos = text.find(needle, pos)) != std::string::npos) {
+        ++count;
+        pos += needle.size();
+    }
+    return count;
+}
+
+}  // namespace
+
+TEST(Group077DedupSoundness, DiscriminatesDistinctSignaturesUnderSameNoTag) {
+    std::string const out =
+        fixpp::codegen::emit_builders(dedup_soundness_ir(), fixpp::codegen::CoverageMode::All);
+
+    EXPECT_NE(out.find("struct G_9001_1Args"), std::string::npos)
+        << "no_tag 9001 has TWO distinct recursive signatures (member 9101 required vs "
+           "optional) — expected ordinaled groups::G_9001_1Args (G1a)";
+    EXPECT_NE(out.find("struct G_9001_2Args"), std::string::npos)
+        << "expected ordinaled groups::G_9001_2Args for the second distinct signature";
+    EXPECT_EQ(out.find("G_9001Args"), std::string::npos)
+        << "no_tag 9001 has >=2 distinct signatures — G1a forbids a bare G_9001Args name "
+           "anywhere in the output (a wrong no_tag-ONLY dedup key would wrongly collapse "
+           "this)";
+    EXPECT_NE(out.find("groups::G_9001_1Args"), std::string::npos)
+        << "expected a qualified reference to groups::G_9001_1Args from its owning message";
+    EXPECT_NE(out.find("groups::G_9001_2Args"), std::string::npos)
+        << "expected a qualified reference to groups::G_9001_2Args from its owning message";
+}
+
+TEST(Group077DedupSoundness, CollapsesByteIdenticalSignaturesToOneStruct) {
+    std::string const out =
+        fixpp::codegen::emit_builders(dedup_soundness_ir(), fixpp::codegen::CoverageMode::All);
+
+    EXPECT_NE(out.find("struct G_9002Args"), std::string::npos)
+        << "no_tag 9002's two occurrences share a byte-identical signature — expected ONE "
+           "bare groups::G_9002Args (G1b)";
+    EXPECT_EQ(count_occurrences(out, "struct G_9002Args"), 1u)
+        << "the shared plan must be emitted EXACTLY ONCE, not once per referencing message";
+    EXPECT_EQ(out.find("G_9002_1Args"), std::string::npos)
+        << "identical signatures must NOT be spuriously ordinaled";
+    EXPECT_EQ(out.find("G_9002_2Args"), std::string::npos)
+        << "identical signatures must NOT be spuriously ordinaled";
+    EXPECT_GE(count_occurrences(out, "groups::G_9002Args"), 2u)
+        << "both ZDEDUP9002A and ZDEDUP9002B must reference the SAME shared plan by "
+           "qualified name";
+}
+
+TEST(Group077DedupSoundness, KeepsDifferentNoTagsSeparateDespiteIdenticalBodies) {
+    std::string const out =
+        fixpp::codegen::emit_builders(dedup_soundness_ir(), fixpp::codegen::CoverageMode::All);
+
+    EXPECT_NE(out.find("struct G_9003Args"), std::string::npos)
+        << "no_tag 9003's sole occurrence must emit a bare groups::G_9003Args";
+    EXPECT_NE(out.find("struct G_9004Args"), std::string::npos)
+        << "no_tag 9004's sole occurrence must emit a bare groups::G_9004Args — its body is "
+           "coincidentally identical to 9003's, but no_tag is part of the dedup key, so a "
+           "signature-ONLY key would wrongly collapse these into one struct";
+    EXPECT_EQ(out.find("G_9003_1Args"), std::string::npos)
+        << "no_tag 9003 has only one signature — no ordinal expected";
+    EXPECT_EQ(out.find("G_9004_1Args"), std::string::npos)
+        << "no_tag 9004 has only one signature — no ordinal expected";
+}

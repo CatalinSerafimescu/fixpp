@@ -29,22 +29,15 @@
 // tests/session/test_exemplar_roundtrip.cpp precedent) since decimal_t needs
 // a memory_resource to construct.
 //
-// ── Nested-group Args type naming (ESCALATION — no anchor pins this) ───────
-// data-model.md §1.1 says nested groups get a `<G>Args` type but does not
-// name G precisely for write (the read side's `groups::G_<no_tag>` is
-// EXPLICITLY the wrong model for write per R7 — write groups are
-// per-message, so a version-wide `G_<no_tag>` name would ODR-collide: W's
-// and X's NoMDEntries(268) have DIFFERENT member sets under the same
-// no_tag). This header assumes Phase 3b emits nested group Args types named
-// PER-MESSAGE-QUALIFIED: `<Msg><StrippedGroupIdentifier>Args`, e.g.
-// `NewOrderListOrdersArgs`, `NewOrderListOrdersPartyIDsArgs`,
-// `NewOrderListOrdersPartyIDsPartySubIDsArgs`, `AllocationReportPartyIDsArgs`,
-// `MarketDataSnapshotFullRefreshMDEntriesArgs`,
-// `MarketDataIncrementalRefreshMDEntriesArgs`, `MassQuoteQuoteSetsArgs`,
-// `MassQuoteQuoteSetsQuoteEntriesArgs` — where StrippedGroupIdentifier =
-// to_identifier(strip_no_prefix(FIX group field name)). This is a derived,
-// NOT anchor-pinned, naming choice; flagged to the orchestrator for Phase 3b
-// confirmation/rename.
+// ── Nested-group Args type naming (077-builder-args-dedup) ─────────────────
+// Nested repeating-group Args types are emitted DEDUPED per-plan as
+// `fixpp::v44::groups::G_<no_tag>Args` (single plan) or
+// `G_<no_tag>_<ordinal>Args` (≥2 distinct member-set plans sharing the same
+// no_tag — e.g. W's and X's NoMDEntries(268) have different member sets and
+// so land on different ordinals). This SUPERSEDES the earlier per-message-
+// qualified naming this comment used to describe (`NewOrderListOrdersArgs`
+// etc.); see specs/077-builder-args-dedup/contracts/golden/
+// v44_Builders_all.golden.hpp for the authoritative name map.
 #pragma once
 
 #include <cstdint>
