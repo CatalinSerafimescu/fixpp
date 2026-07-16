@@ -28,11 +28,12 @@
 - [x] Scope is clearly bounded
 - [x] Dependencies and assumptions identified
 
-> Two scope items are documented as **Assumptions flagged for `/speckit-clarify`**
-> (not blocking inline markers): (1) vt11/admin-message builders stay out of scope;
-> (2) whether a families-style breadth control generalizes beyond v44. Both have a
-> stated reasonable default; `/speckit-clarify` is the next step and the correct
-> place to confirm them.
+> The previously-flagged scope items are now **resolved** at `/speckit-clarify`
+> (Session 2026-07-16): admin/session builders are OUT (app-only); v44 keeps both
+> `all`+`official` families modes; each version's builder message-set is decided
+> per version at `/plan` (may include BW/BX/BY on 5.x). One item remains delegated
+> to `/plan` by design: the exact per-version application-message set + group
+> counts (drives golden sizes / test surface) — a planning detail, not a spec gap.
 
 ## Feature Readiness
 
