@@ -1,5 +1,7 @@
 # Phase 0 Research: FIX Latest Typed Codegen (`fixpp::vlatest`)
 
+> **⚠️ [DEFERRED 2026-07-16 — see spec.md Clarifications → Session 2026-07-16]** This is Phase-0 historical design reasoning, written BEFORE the typed **`build_<Msg>`/`validate_<Msg>` builder tier** (Option A / RC-B app-subset, R2c below, and every reference to `emit_builders`/"builder"/"Option A" in this file) was descoped to a follow-up feature. The decisions below correctly describe the ORIGINAL design intent and are retained verbatim for traceability, but the builder leg they describe was **NOT shipped** in this PR — `emit_builders` stays v44-only, no `vlatest/Builders.hpp` is emitted. Read every builder-related paragraph below as design record, not as a delivered-behavior claim; the shipped scope is the read/reify/args/readback + runtime-validator tier for all 181 messages plus the completeness census.
+
 All decisions below are grounded in the emitter code-read performed for this feature (see spec.md Context, grade-1 `file:line` facts) and 074's shipped `OrchestraLoader`. No open `NEEDS CLARIFICATION` remains after this phase.
 
 ---

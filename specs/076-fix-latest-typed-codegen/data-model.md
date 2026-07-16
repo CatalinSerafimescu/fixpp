@@ -1,5 +1,7 @@
 # Phase 1 Data Model: FIX Latest Typed Codegen (`fixpp::vlatest`)
 
+> **⚠️ [DEFERRED 2026-07-16 — see spec.md Clarifications → Session 2026-07-16]** The typed **`build_<Msg>`/`validate_<Msg>` builder tier** (Option A / RC-B app-subset) documented below as an entity/attribute of this feature is **deferred to a follow-up feature** (137 MB uncompilable `vlatest/Builders.hpp` from the non-deduped `emit_builders`). What ships in this PR is the **read/reify/args/readback + runtime-validator tier for all 181** messages, plus the completeness census (Entities 3/3b). Builder-specific sentences below are marked `[DEFERRED 2026-07-16]` inline and retained for traceability — do not read them as delivered.
+
 This feature adds no runtime data structures; its "entities" are codegen-time constructs and the verification sets. Documented for traceability.
 
 ## Entities
@@ -18,14 +20,14 @@ The codegen version-partition record (`tools/codegen/fixpp-codegen/ir.cpp:206-22
 
 ### 2. Generated typed message artifact (per FIX Latest message, ×181)
 
-Emitted into `namespace fixpp::vlatest` — **identical shape to the legacy tiers** (067/069), no new artifact kinds. **Scope split (Option A, RC-B):** the universal artifacts are emitted for **all 181** messages; `build_<Msg>`/`validate_<Msg>` are emitted for the **application subset** only (per the Entity 5 `category→is_application` mapping), exactly as 069 scopes builders.
+Emitted into `namespace fixpp::vlatest` — **identical shape to the legacy tiers** (067/069), no new artifact kinds. **Scope split (Option A, RC-B) — [DEFERRED 2026-07-16, see banner above]:** the universal artifacts are emitted for **all 181** messages; `build_<Msg>`/`validate_<Msg>` were DESIGNED to be emitted for the **application subset** only (per the Entity 5 `category→is_application` mapping), exactly as 069 scopes builders — **but this PR emits neither** (`emit_builders` stays v44-only; no `vlatest/Builders.hpp`).
 
-- **[all 181]** typed **args** struct — the message's typed field parameters.
-- **[all 181]** **readback** accessors — typed field reads.
-- **[all 181]** per-message `dict::reify()` round-trip participation.
-- **[all 181]** `version_v` member constant = `application_version::v50sp2` (R3).
-- **[app-subset]** `build_<Msg>(...)` — typed builder over `wire::body_builder`.
-- **[app-subset]** `validate_<Msg>(...)` — typed **required/group-presence** validator over the typed `Args` (thin wrapper over `wire::validate_required<T>`, `emit_builders.cpp:510-573`); **dict-free, no enum/type/domain check**. Enum/type/domain validation is the separate runtime `dictionary_driven_validator`, constructed with a caller-supplied `vlatest` `table_view` (`validator.hpp:111-112`) and run over a parsed `MessageView` (075) — not part of `validate_<Msg>`.
+- **[all 181, DELIVERED]** typed **args** struct — the message's typed field parameters.
+- **[all 181, DELIVERED]** **readback** accessors — typed field reads.
+- **[all 181, DELIVERED]** per-message `dict::reify()` round-trip participation.
+- **[all 181, DELIVERED]** `version_v` member constant = `application_version::v50sp2` (R3).
+- **[app-subset, DEFERRED 2026-07-16]** `build_<Msg>(...)` — typed builder over `wire::body_builder`.
+- **[app-subset, DEFERRED 2026-07-16]** `validate_<Msg>(...)` — typed **required/group-presence** validator over the typed `Args` (thin wrapper over `wire::validate_required<T>`, `emit_builders.cpp:510-573`); **dict-free, no enum/type/domain check**. Enum/type/domain validation is the separate runtime `dictionary_driven_validator`, constructed with a caller-supplied `vlatest` `table_view` (`validator.hpp:111-112`) and run over a parsed `MessageView` (075) — not part of `validate_<Msg>`.
 
 **Field membership** derives from the `vlatest` `Dictionary` (074): header + body + repeating-group members at all depths, components resolved. Codeset fields carry flattened enum values (minimal model, per 074); `unionDataType` second arm dropped.
 
@@ -46,7 +48,7 @@ The census (Entity 3) proves *manifest ≡ raw-XML*, but the **shipped typed rea
 
 ### 5. Orchestra `category → is_application` mapping (codegen-time, RC-A)
 
-Orchestra has **no `msgcat`**; it carries `category=` (30 message-level values). The IR projection (research R2b) maps each message's `category` to `is_application` via a **verified single-category rule**: the **8 `category="Session"` frames** — Heartbeat(0), TestRequest(1), ResendRequest(2), Reject(3), SequenceReset(4), Logout(5), Logon(A), XMLnonFIX(n) — → `admin` (`is_application=false`); **every other category** → `app` (`true`). NB `category="Testing"` (AlgoCertificate*/TestSuite*/TestAction*) is an **application** category, not session admin. It **fails closed** on an unmapped/absent category (mirrors the `msgcat` fail-closed at `ir.cpp:192-195`). This mapping is the sole source of the app-subset used by the vlatest builder coverage predicate (Entity 2 / FR-001); it is NOT pinned to a count. **INV-5 (admin-complement pin):** a witness asserts the derived admin complement equals the exact set `{0,1,2,3,4,5,A,n}`, so a category silently misclassified as admin (which would drop a `build_<Msg>` with no other RED test — the census manifest is emitted for all 181 ungated) fails loudly.
+Orchestra has **no `msgcat`**; it carries `category=` (30 message-level values). The IR projection (research R2b) maps each message's `category` to `is_application` via a **verified single-category rule**: the **8 `category="Session"` frames** — Heartbeat(0), TestRequest(1), ResendRequest(2), Reject(3), SequenceReset(4), Logout(5), Logon(A), XMLnonFIX(n) — → `admin` (`is_application=false`); **every other category** → `app` (`true`). NB `category="Testing"` (AlgoCertificate*/TestSuite*/TestAction*) is an **application** category, not session admin. It **fails closed** on an unmapped/absent category (mirrors the `msgcat` fail-closed at `ir.cpp:192-195`). This mapping was DESIGNED as the sole source of the app-subset used by the vlatest builder coverage predicate (Entity 2 / FR-001); it is NOT pinned to a count. **[DEFERRED 2026-07-16]** **INV-5 (admin-complement pin):** a witness asserts the derived admin complement equals the exact set `{0,1,2,3,4,5,A,n}`, so a category silently misclassified as admin (which would drop a `build_<Msg>` with no other RED test — the census manifest is emitted for all 181 ungated) fails loudly. **This whole entity is moot for the current PR** (no `build_<Msg>` at all is emitted for `vlatest`) — retained for the follow-up builder feature.
 
 ### 4. `FIXPP_CODEGEN_FIX_LATEST` build option
 
@@ -62,6 +64,6 @@ Orchestra has **no `msgcat`**; it carries `category=` (30 message-level values).
 - `vlatest` row (Entity 1) → enables Entity 2 emission → measured by Entity 3 census; gated by Entity 4 option.
 - **INV-1 (additive)**: toggling Entity 4 never alters v42/v44/v50sp2/vt11 generated bytes (FR-004/SC-003).
 - **INV-2 (injective wire-ApplVerID)**: Entity 2's `version_v = v50sp2` is an identity tag only; `vlatest` is NOT added to `dispatch_application`'s `kAppVersions`, so no duplicate `case application_version::v50sp2` exists (FR-009/SC-005).
-- **INV-3 (exact completeness, projection/builder surface)**: Entity 3 sets are equal (not subset) — no message or field dropped/added at occurrence-path granularity (FR-006/SC-001, census/V-1). This pins the projection + app-subset builder surface.
+- **INV-3 (exact completeness, projection/builder surface)**: Entity 3 sets are equal (not subset) — no message or field dropped/added at occurrence-path granularity (FR-006/SC-001, census/V-1). This pins the projection + app-subset builder surface — the "builder" half of that surface name is **[DEFERRED 2026-07-16]** (no builders are emitted in this PR); the census itself (projection ≡ raw-XML) is DELIVERED and holds regardless, since it never gates on the app-subset filter.
 - **INV-4 (determinism)**: Entity 2 output is byte-stable vs the checked-in golden (R8).
 - **INV-6 (read-surface completeness, non-circular)**: Entity 3b holds — the projection-sourced manifest's per-message field set equals the shipped read/reify/args class's reachable field set (message set 181==181, class-reachable-field granularity), so `class ≡ manifest ≡ raw-XML` pins the **universal read surface ≡ raw-XML** non-circularly (V-1b ∘ census). Proven RED under an `emit_messages`/reify class-side drop; the circular FR-007 round-trip cannot substitute (blind to an absent field). Closes the gap that INV-3 alone leaves for the read surface (FR-006/SC-001/US2 co-P1).

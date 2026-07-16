@@ -135,7 +135,7 @@ description: "Task list for 076-fix-latest-typed-codegen"
 
 ### User Story Dependencies
 
-- **US1 (P1)** and **US2 (P1)** are co-P1 and independent of each other once Foundational lands (US1 = builder/round-trip surface; US2 = manifest/census). Either can be the first delivered increment; US1 is the MVP.
+- **US1 (P1)** and **US2 (P1)** are co-P1 and independent of each other once Foundational lands (US1 = builder/round-trip surface **as originally planned — [DEFERRED 2026-07-16] the builder half; SHIPPED is the reify/read-back round-trip, see the descope banner above**; US2 = manifest/census). Either can be the first delivered increment; US1 is the MVP.
 - **US3 (P2)** is a cost-control / additive-guarantee refinement layered on the generated tier; its golden (T016) and byte-diff gates (T017/T018) need US1+US2 artifacts to exist.
 
 ### Parallel Opportunities
@@ -156,7 +156,7 @@ description: "Task list for 076-fix-latest-typed-codegen"
 ### Incremental Delivery
 
 1. Setup + Foundational → the vlatest read/reify/validator tier generates.
-2. US1 → typed builders + round-trip (MVP).
+2. US1 → typed builders + round-trip (MVP). **[DEFERRED 2026-07-16]** the "typed builders" half — shipped is the reify/read-back round-trip only (see the descope banner above).
 3. US2 → provable completeness (co-P1; ship together with US1 for a defensible coverage claim — US2's rationale is that shipping unproven-complete classes enshrines a gap).
 4. US3 → opt-in build gating + additive byte-diff proof.
 5. Polish → frozen-surface + governance + close-out.
