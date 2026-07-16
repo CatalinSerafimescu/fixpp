@@ -2,6 +2,12 @@
 
 **Feature**: 077-builder-args-dedup
 
+> **[SUPERSEDED — v42 builders DESCOPED post-Gate-A]** Where this document
+> lists `v42` as a builder-bearing version (e.g. G4a), that is superseded:
+> FIX 4.2 types NumInGroup as legacy `INT` ⇒ 0 typed groups (L-063-1), so v42
+> builders are DESCOPED and tracked as issue #196 / L-077-1 (waiver W-077-1).
+> Delivered builder-bearing versions are {v44, v50sp2, vlatest}.
+
 Governs the emitted per-version `<ns>/Builders.hpp` after structural-plan
 deduplication. Supersedes the message-rooted-Args shape of 067/069 for the
 `Args` struct *identity*; the serialize/validate *behavior* is unchanged.

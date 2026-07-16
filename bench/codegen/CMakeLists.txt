@@ -43,8 +43,8 @@ add_subdirectory(compile_time_bench)
 
 # ── 077-builder-args-dedup T015: vlatest_builders_compile_bench ────────────────
 # Script-based compile-resource ceiling measurement (SC-001/SC-002) for the
-# deduped vlatest typed builder tier (fixpp/vlatest/Builders.hpp — 573 shared
-# plans, ~74MB). Peak RSS is the hard gate (was >21GB/OOM pre-dedup, now
+# deduped vlatest typed builder tier (fixpp/vlatest/Builders.hpp — 576 shared
+# plans, ~78 MB). Peak RSS is the hard gate (was >21GB/OOM pre-dedup, now
 # low-single-digit GB); wall time vs the 003 T046 ≤3s single-version ceiling
 # is a recorded KNOWN_OVERAGE, not a failure.
 add_subdirectory(vlatest_builders_compile_bench)

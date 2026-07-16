@@ -6,6 +6,13 @@
 
 **Status**: Draft
 
+> **[SUPERSEDED — v42 builders DESCOPED post-Gate-A]** Where this document lists
+> `v42` as a builder-bearing version (e.g. FR-006 / struct-count tables / G4a /
+> C1), that is superseded: FIX 4.2 types NumInGroup as legacy `INT` ⇒ 0 typed
+> groups (L-063-1), so v42 builders are DESCOPED and tracked as issue #196 /
+> L-077-1 (waiver W-077-1). Delivered builder-bearing versions are
+> {v44, v50sp2, vlatest}.
+
 **Input**: User description: "Typed builder tier for FIX Latest via version-wide group-Args deduplication — redesign emit_builders to emit each repeating group's Args struct once per version (keyed by no_tag), apply uniformly across ALL versions, regenerate the v44 builder golden, re-enable the vlatest builder tier descoped by 076. Scope extended (user, 2026-07-16) to emit typed builders for ALL typed versions, not just v44 + vlatest."
 
 ## Overview

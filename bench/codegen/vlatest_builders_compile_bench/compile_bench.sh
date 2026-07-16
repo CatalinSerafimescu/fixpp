@@ -7,7 +7,7 @@
 # mechanism — Art VIII is runtime-only).
 #
 # Measures `clang++ -std=c++23 -fsyntax-only` peak RSS + wall time for a TU
-# that #includes ONLY fixpp/vlatest/Builders.hpp — the deduped (573-plan)
+# that #includes ONLY fixpp/vlatest/Builders.hpp — the deduped (576-plan)
 # typed builder tier. Pre-077 (076, message-rooted, ~26k structs / 137MB)
 # measured >21GB RSS / OOM-killed; SC-001 requires "low single-digit GB".
 #

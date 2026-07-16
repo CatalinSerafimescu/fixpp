@@ -2,6 +2,13 @@
 
 **Feature**: 077-builder-args-dedup
 
+> **[SUPERSEDED — v42 builders DESCOPED post-Gate-A]** Where this document
+> lists `v42` as a builder-bearing version with no exclusion (e.g. C1), that is
+> superseded: FIX 4.2 types NumInGroup as legacy `INT` ⇒ 0 typed groups
+> (L-063-1), so v42 builders are DESCOPED and tracked as issue #196 / L-077-1
+> (waiver W-077-1). Delivered builder-bearing versions are
+> {v44, v50sp2, vlatest}.
+
 Re-instates and generalizes 076's descoped V-2 / V-2b builder-completeness
 legs. Non-circular at 076's independence strength: the expected set is derived
 from a **raw-XML / Orchestra walk independent of `emit_builders`**, **not** from
