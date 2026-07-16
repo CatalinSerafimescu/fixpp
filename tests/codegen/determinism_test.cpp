@@ -548,6 +548,61 @@ TEST_F(DeterminismTest, AdditiveOffOnByteDiff) {
                               << ") — codegen output shape may have changed.";
 }
 
+// ── 076-fix-latest-typed-codegen T021 [Polish]: V-5 fail-closed on unknown ──
+//   datatype (FR-010, contract V-5).
+//
+// The codegen TOOL, run over a synthetic Orchestra fragment whose field
+// references a datatype token outside kOrchestraTypeTable, MUST fail closed:
+// non-zero exit, and NO tier emitted (never a mis-typed field). This is the
+// codegen-tool-level companion to the LOADER-level fail-closed already pinned
+// at the read tier (tests/dictionary/orchestra_loader_test.cpp
+// OrchestraFailClosed.UnknownDatatypeUsedByField, which asserts
+// OrchestraLoader::load throws dict::orchestra_parse_error); here we assert
+// that throw propagates through build_ir -> main() into a non-zero process
+// exit with no output, so a malformed dictionary can never silently emit a
+// tier with a defaulted/mis-typed field.
+TEST_F(DeterminismTest, VlatestFailClosedUnknownDatatype) {
+    // A field (id=2) typed with a token absent from kOrchestraTypeTable and
+    // from any codeset — collect_fields resolves every declared field's type
+    // eagerly, so resolve_datatype throws regardless of message references
+    // (mirrors orchestra_loader_test.cpp's UnknownDatatypeUsedByField).
+    static constexpr const char* kBadFragment =
+        "<fixr:repository version=\"FIX.Latest_EP303\">\n"
+        "  <fixr:fields>\n"
+        "    <fixr:field id=\"1\" name=\"Account\" type=\"String\"/>\n"
+        "    <fixr:field id=\"2\" name=\"Bogus\" type=\"TotallyBogusType\"/>\n"
+        "  </fixr:fields>\n"
+        "  <fixr:messages>\n"
+        "    <fixr:message id=\"1\" name=\"Heartbeat\" msgType=\"0\">\n"
+        "      <fixr:structure>\n"
+        "        <fixr:fieldRef id=\"1\"/>\n"
+        "        <fixr:fieldRef id=\"2\"/>\n"
+        "      </fixr:structure>\n"
+        "    </fixr:message>\n"
+        "  </fixr:messages>\n"
+        "</fixr:repository>\n";
+
+    TempDir run("fixpp_det_failclosed");
+    fs::path xml = run.path / "OrchestraBogus.xml";
+    fs::path out = run.path / "out";
+    fs::create_directories(out);
+    {
+        std::ofstream f(xml, std::ios::binary);
+        ASSERT_TRUE(f.good()) << "could not write synthetic fragment";
+        f << kBadFragment;
+    }
+
+    std::string cmd = "--xml " + quote(xml.string()) + " --out " + quote(out.string());
+    int rc = exit_code(run_codegen_args(cmd));
+
+    // Fail closed: non-zero exit (the orchestra_parse_error propagates out of
+    // build_ir -> main), and NO vlatest tier emitted.
+    EXPECT_NE(rc, 0) << "V-5 violated: codegen over an unmapped-datatype fragment must fail closed "
+                        "(non-zero exit), not emit a mis-typed field.";
+    EXPECT_FALSE(fs::exists(out / "vlatest" / "Messages.hpp"))
+        << "V-5 violated: a tier was emitted despite the unmapped datatype.";
+}
+
 // ── Gate B PR#187 round 1 F3: official-mode byte identity (SC-003) ──────────
 //
 // test_069_mode_count.cpp (tests/session/) pins only builder_registry.size()

@@ -30,13 +30,13 @@ ctest --preset <preset> -L codegen   # runs the vlatest completeness census
 - *V-1*: apply temporary mutations that (i) drop one message, (ii) drop one field, (iii) mis-parent a field (wrong-parent / wrong-depth), and (iv) reuse a tag under a different parent → the census MUST go RED on each. Revert. (Occurrence-path key is what makes (iii)/(iv) detectable.)
 - *V-1b (its OWN witness, not folded into V-1)*: apply a temporary **class-side** mutation on `emit_messages`/reify — drop one field or one message from the shipped class — → V-1b MUST go RED (the manifest still carries it, so `class ≠ manifest`). Revert. This is the leg the circular FR-007 round-trip cannot substitute (round-trip is blind to an absent field).
 
-## Scenario 3 — 181-message typed round-trip
+## Scenario 3 — 181-message typed reify round-trip
 
 ```bash
 ctest --preset <preset> -L vlatest_roundtrip
 ```
 
-**Expected**: PASS — the application subset constructs via `build_<Msg>` → serialize → read back field-for-field (zero skips within the subset), and all 181 messages round-trip via the universal reify/read-back path (zero skips). Admin/session frames have no `build_<Msg>` by design (Option A). (Contract V-2.)
+**Expected**: PASS — all 181 FIX Latest messages round-trip via the universal reify/read-back path (`owning_<Msg>::from_view()/view()`), field-for-field, zero skips. **Descoped 2026-07-16:** the typed `build_<Msg>` → serialize construction leg is deferred to a follow-up (see spec.md Clarifications → Session 2026-07-16); this scenario now validates the delivered read/reify surface (FR-007(b), contract V-2 leg (b)).
 
 ## Scenario 4 — Build option OFF is additive-clean
 
