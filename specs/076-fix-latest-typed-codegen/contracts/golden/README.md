@@ -18,15 +18,17 @@ The census **`Manifest.txt` is intentionally NOT goldened here**: its *correctne
 pinned by V-1 (`manifest ≡ raw-XML`) and V-1b (`manifest ≡ shipped class`) — strictly
 stronger than a byte snapshot. An 11.5 MB frozen copy would be pure redundancy.
 
-**Correction (gate-b/r2):** `Manifest.txt`'s (and the other non-`Messages.hpp` vlatest
-artifacts') run-to-run *determinism* is **not** independently pinned by `AC-T1`
-(`DeterminismTest.ByteIdenticalAcrossRuns`) — that test drives two runs via
-`run_codegen()`, which invokes the tool over the 4 legacy XMLs only and never the
-Orchestra XML, so it does not exercise `vlatest/` at all. `Manifest.txt` and its
-siblings (`Fields.hpp`/`Validator.hpp`/`Reify.hpp`/`NormativeReferences.md`) share the
-same deterministic emitter code path as the legacy tiers (no randomness/timestamps)
-but have no dedicated two-run byte-identity test today — a known, low-risk asymmetry
-vs. the legacy tiers, not a correctness gap. See
+**Run-to-run determinism (gate-b/r2 follow-up):** `Manifest.txt` and the other
+non-`Messages.hpp` vlatest artifacts (`Fields.hpp`/`Validator.hpp`/`Reify.hpp`/
+`NormativeReferences.md`) do not need a checked-in golden of their own — their
+run-to-run byte-stability is covered by the dedicated
+`DeterminismTest.VlatestByteIdenticalAcrossRuns` gate
+(`tests/codegen/determinism_test.cpp`), which drives two independent codegen runs
+over the Orchestra XML only (`run_codegen_vlatest_only()`) and byte-diffs every
+file the first run produced against the same relative path in the second — the
+same class of coverage `ByteIdenticalAcrossRuns` already gives the legacy tiers.
+`vlatest/Messages.hpp` is additionally pinned to this directory's checked-in
+golden by `VlatestGeneratedMatchesGolden`. See
 `specs/076-fix-latest-typed-codegen/contracts/build-and-verification.md` V-4 for the
 full accounting.
 
@@ -48,8 +50,9 @@ sandbox false-greens it; only real CI Windows catches it).
 - **V-4 determinism** (T017): `tests/codegen/determinism_test.cpp` — the freshly
   generated `vlatest/Messages.hpp` is byte-identical to `vlatest_Messages.golden.hpp`,
   under the FULL ctest run (a stale/non-deterministic emit fails CI). Run-to-run
-  byte-stability (`AC-T1`) as currently implemented (`ByteIdenticalAcrossRuns`)
-  covers the **legacy** tiers only, not `vlatest/` — see the Correction note above.
+  byte-stability across the legacy tiers is covered by `AC-T1`
+  (`ByteIdenticalAcrossRuns`); the whole `vlatest/` tier has the same class of
+  coverage via `VlatestByteIdenticalAcrossRuns` — see the note above.
 - **V-7 additive** (T018): OFF job (`FIXPP_CODEGEN_FIX_LATEST=OFF`) → legacy
   `v42/v44/v50sp2/vt11` `Messages.hpp` byte-identical to the existing 003/069
   goldens, `vlatest/` **absent** (there is no separate `fixpp::vlatest` CMake

@@ -454,6 +454,68 @@ TEST_F(DeterminismTest, VlatestGeneratedMatchesGolden) {
         << " --out <golden-dir> && cp <golden-dir>/vlatest/Messages.hpp " << golden.string();
 }
 
+// ── Gate B r2 follow-up: V-4 run-to-run determinism — vlatest tier ─────────
+//
+// AC-T1's ByteIdenticalAcrossRuns above drives run_codegen(), which iterates
+// ONLY kXmls (the 4 legacy XMLs) — it never exercises the Orchestra XML, so
+// it gives no run-to-run byte-identity coverage for vlatest/{Fields,Messages,
+// Validator,Reify,NormativeReferences.md,Manifest.txt}. This test closes that
+// gap directly, mirroring ByteIdenticalAcrossRuns but over
+// run_codegen_vlatest_only(): two independent runs into separate temp dirs,
+// every file produced in run1 compared byte-for-byte against the same
+// relative path in run2.
+TEST_F(DeterminismTest, VlatestByteIdenticalAcrossRuns) {
+    TempDir run1("fixpp_det_vlatest_run1");
+    TempDir run2("fixpp_det_vlatest_run2");
+
+    int rc1 = run_codegen_vlatest_only(run1.path);
+    ASSERT_EQ(rc1, 0) << "First vlatest codegen run failed (exit " << rc1 << ")";
+
+    int rc2 = run_codegen_vlatest_only(run2.path);
+    ASSERT_EQ(rc2, 0) << "Second vlatest codegen run failed (exit " << rc2 << ")";
+
+    // Walk every file produced in run1 and compare byte-for-byte with run2.
+    bool all_identical = true;
+    std::error_code ec;
+    for (auto const& e1 : fs::recursive_directory_iterator(run1.path, ec)) {
+        ASSERT_FALSE(ec) << "Iterator error in run1: " << ec.message();
+        if (!e1.is_regular_file()) continue;
+
+        // Corresponding path in run2: strip run1.path prefix, prepend run2.path.
+        auto rel = fs::relative(e1.path(), run1.path, ec);
+        ASSERT_FALSE(ec);
+        fs::path p2 = run2.path / rel;
+
+        EXPECT_TRUE(fs::exists(p2)) << "File missing in run2: " << rel;
+        if (!fs::exists(p2)) {
+            all_identical = false;
+            continue;
+        }
+
+        std::string bytes1 = read_file_binary(e1.path());
+        std::string bytes2 = read_file_binary(p2);
+        if (bytes1 != bytes2) {
+            ADD_FAILURE() << "Not byte-identical: " << rel << " (run1=" << bytes1.size()
+                          << " bytes, run2=" << bytes2.size() << " bytes)";
+            all_identical = false;
+        }
+    }
+    EXPECT_TRUE(all_identical) << "V-4 violated: at least one generated vlatest/ file differs "
+                                  "between the two codegen runs.";
+
+    // Sanity bound: vlatest emits Fields/Messages/Validator/Reify/
+    // NormativeReferences.md/Manifest.txt == 6 artifacts (no Builders.hpp —
+    // the typed builder tier is descoped, see golden/README.md). A loose
+    // lower bound so this doesn't need updating on an unrelated emitter-shape
+    // change, while still catching a degenerate walk that compares nothing.
+    std::size_t file_count = 0;
+    for (auto const& e1 : fs::recursive_directory_iterator(run1.path, ec)) {
+        if (!ec && e1.is_regular_file()) ++file_count;
+    }
+    EXPECT_GE(file_count, 5U) << "Vlatest run produced suspiciously few files (" << file_count
+                               << ") — codegen output shape may have changed.";
+}
+
 // ── 076-fix-latest-typed-codegen T018 [US3]: V-7 additive OFF/ON byte-diff ──
 //
 // FR-004/SC-003, contract V-7: adding the fixpp::vlatest tier MUST NOT
