@@ -63,7 +63,7 @@ Single-project C++ library + host codegen tool (the library submodule). Emitter 
 - [X] T014 [US1] Wire `vlatest` through the deduped emitter, gated by `FIXPP_CODEGEN_FIX_LATEST` (data-model Entity 4): emit its full `is_application` set (173) when ON. In `cmake/Codegen.cmake`, **remove 076's unconditional `vlatest/Builders.hpp` deletion** (the `if(NOT FIXPP_CODEGEN_FIX_LATEST) file(REMOVE_RECURSE …/vlatest) else() file(REMOVE …/vlatest/Builders.hpp) endif()` block at lines ~330–342 — NOT the regen-guard cache-tracking at ~264–298) and replace it with a **conditional OFF-clean**: when the option is OFF, the configure-time regen-guard deletes any previously-generated `vlatest/Builders.hpp` (no stale file); when ON, it emits and participates in the determinism/regen-guard discipline (FR-012). Makes T012/T013 GREEN. (FR-004, G4a)
 - [X] T015 [US1] Add the **compile-resource bench** (003 T046 decision-record convention — NOT an Article VIII mechanism), labelled `compile-budget`: a target that `clang++ -fsyntax-only` includes `vlatest/Builders.hpp` and captures peak RSS + wall time, asserting peak RSS in low single-digit GB (was >21 GB / OOM). Record the measured RSS/wall + the expected v50sp2/vlatest **KNOWN_OVERAGE** against the ≤3 s single-version syntax-only ceiling in `.specify/decisions/077-builder-args-dedup-verify.md`. (SC-001/SC-002, quickstart V1)
 
-**Checkpoint**: vlatest builders emit, dedup to ~578 plans, compile within budget, and round-trip — the MVP is usable.
+**Checkpoint**: vlatest builders emit, dedup to 576 plans, compile within budget, and round-trip — the MVP is usable.
 
 ---
 
@@ -145,7 +145,7 @@ Single-project C++ library + host codegen tool (the library submodule). Emitter 
 | FR-012 (vlatest gating + conditional OFF-clean) | T014, T019 |
 | FR-013 (goldens wired to CI gates) | T010, T017, T027 |
 | SC-001 (compile RSS low GB) | T015 |
-| SC-002 (source shrink ~10 MB / ~578) | T013, T015 |
+| SC-002 (source shrink ~78 MB / 576) | T013, T015 |
 | SC-003 (100% round-trip, 0 skips) | T012, T016 |
 | SC-004 (v44 renamed tests + byte differential + determinism) | T011, T020, T021 |
 | SC-005 (read tiers byte-identical) | T022 |
@@ -185,7 +185,7 @@ Single-project C++ library + host codegen tool (the library submodule). Emitter 
 
 1. Phase 1 Setup → baselines captured, amendment landed (v0.9).
 2. Phase 2 Foundational (CRITICAL) → deduped emitter is the sole path; v44 goldens regenerated; `tests/session` compiles against `groups::G_…Args`.
-3. Phase 3 US1 → vlatest builders emit, dedup to ~578, compile in low-GB RSS, round-trip.
+3. Phase 3 US1 → vlatest builders emit, dedup to 576, compile in low-GB RSS, round-trip.
 4. **STOP and VALIDATE**: US1 independently (T012/T013/T015 green) — the descoped 076 tier is restored.
 
 ### Incremental Delivery

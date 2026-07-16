@@ -87,4 +87,4 @@ ODR-conflicting definition across messages (FR-003).
 ## G5 — Compile-resource acceptance
 
 Each emitted `Builders.hpp` compiles as a single TU within low-single-digit-GB
-RSS (no >21 GB / OOM). Generated source ~10 MB order for vlatest (SC-001/002).
+RSS (no >21 GB / OOM). Generated source ~78 MB for vlatest (SC-001/002).

@@ -18,7 +18,7 @@ cmake --preset linux-clang-debug            # runs codegen (all versions + vlate
 # Emitted and deduped (each plan once; read-tier order, not 137 MB):
 ls -la build/linux-clang-debug/_codegen/include/fixpp/vlatest/Builders.hpp
 grep -c '^  struct G_' build/linux-clang-debug/_codegen/include/fixpp/vlatest/Builders.hpp
-#   expect ~578 shared group structs (NOT ~26k); file ~10 MB order
+#   expect 576 shared group structs (NOT ~26k); file ~78 MB
 
 # Compile-resource CONTRACT (not a manual snippet): a named compile-time bench,
 # modelled on 003's T046 compile-time bench, captures peak RSS + wall time for a

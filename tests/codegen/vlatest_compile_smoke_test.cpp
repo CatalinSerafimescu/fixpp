@@ -78,7 +78,7 @@ TEST(VlatestCompileSmoke076, FourReadTierHeadersCarryRealSymbols) {
 // This test's invariant is exactly reversed from 076: pin that the header
 // NOW EXISTS and has the deduped shape (bounded size -- NOT the pre-dedup
 // ~137MB; struct count is pinned precisely by
-// BuilderDedupCount077.VlatestStructCountIs573 in this same binary, T013).
+// BuilderDedupCount077.VlatestStructCountIs576 in this same binary, T013).
 TEST(VlatestCompileSmoke076, BuildersHeaderEmittedDeduped) {
     ASSERT_TRUE(std::filesystem::exists(FIXPP_CODEGEN_VLATEST_BUILDERS_HPP))
         << "fixpp::vlatest::Builders.hpp must be emitted -- 077 re-enables "
