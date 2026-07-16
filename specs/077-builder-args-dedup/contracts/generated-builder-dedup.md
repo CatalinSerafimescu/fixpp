@@ -22,12 +22,15 @@ namespace fixpp::v44::groups {
 }  // 89 structs for v44 (vs 730 message-rooted before)
 ```
 
-- **G1a** — Name (exact rule): if a version has **exactly one** structural plan
-  for a `no_tag`, the struct is `G_<no_tag>Args` (bare). If it has **≥2**
-  distinct plans, **all** of them are ordinaled `G_<no_tag>_1Args` …
-  `G_<no_tag>_kArgs` (NO bare name in the ≥2 case), ordinal by first-encounter
-  over the bytewise-sorted message list × declaration-order `group_order`. The
-  ordinal count is fixed per version, so naming is deterministic.
+- **G1a** — Name (exact rule): the dedup key is `(no_tag, recursive_signature)`
+  (data-model Entity 1). If a version has **exactly one** distinct signature
+  under a `no_tag`, the struct is `G_<no_tag>Args` (bare). If it has **≥2**
+  distinct signatures under the same `no_tag`, **all** of them are ordinaled
+  `G_<no_tag>_1Args` … `G_<no_tag>_kArgs` (NO bare name in the ≥2 case), ordinal
+  by first-encounter over the bytewise-sorted message list × declaration-order
+  `group_order`. Because `no_tag` is part of the key, two different count tags
+  never contend for the same name even if their bodies coincide. The ordinal
+  count is fixed per version, so naming is deterministic.
 - **G1b** — A group reused with **identical** structure across N messages/paths
   yields **one** struct. A group merely sharing a `no_tag` but structurally
   different yields **distinct** structs (FR-002).

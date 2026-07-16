@@ -59,6 +59,16 @@ group}) … ]`, then counted distinct signatures per `no_tag`.
 | vt11 | 0 | 8 | 0 | 0 | — |
 | vlatest | 173 | 8 | 524 | 22 | — |
 
+**Scope note (v44 58 vs spec.md read-tier 59).** This census's "distinct
+`no_tag`s = 58" is the **application-message** group set (the builder's scope);
+`spec.md:15`'s "v44 59 distinct read-tier group flyweights" counts the read
+tier, which covers **all** messages including the 8 admin/session ones — so the
++1 is most plausibly one admin-only group not in the app census. This direction
+is **not yet verified against source** (v50sp2 505 and vlatest 524 match exactly
+between the two, which is consistent with FIX50SP2/EP303 having admin split into
+FIXT11); `/tasks` reconciles it by re-running the app-only vs all-message count
+before pinning any golden expectation.
+
 These are **genuinely different groups** sharing a `NumInGroup` count tag:
 `NoOrders`/73 carries a full order in `NewOrderList`, status fields in
 `ListStatus`, alloc refs in `Allocation`. Forcing them into one shared struct
@@ -66,10 +76,16 @@ would corrupt serialization and validation.
 
 ## R3 — Design decision: key by recursive structural identity
 
-**Decision**: dedup builder group-Args by **full recursive structural
-identity**, emitted once into `fixpp::<ns>::groups`, named:
-- `G_<no_tag>Args` when a `no_tag` maps to exactly one structural plan; and
-- `G_<no_tag>_<ordinal>Args` for each additional distinct plan, ordinal assigned
+**Decision**: dedup builder group-Args by the key **`(no_tag, recursive
+structural signature)`** — the recursive signature (delimiter + ordered
+members + required-ness + child signatures) discriminates variants *within* a
+count tag; pairing it with `no_tag` closes the reverse direction the census
+below did not measure (two distinct `no_tag`s whose bodies share a byte-identical
+signature stay separate plans, since their count tags differ). Emitted once into
+`fixpp::<ns>::groups`, named:
+- `G_<no_tag>Args` when a `no_tag` maps to exactly one signature; and
+- when a `no_tag` maps to two or more signatures, no bare name and **all**
+  variants ordinaled `G_<no_tag>_1Args` … `G_<no_tag>_kArgs`, ordinal assigned
   by **first-encounter over the bytewise-sorted message list** (deterministic).
 
 `writer_traits<T>` specializations and the `_required_` / `_count_` /
@@ -80,7 +96,20 @@ message), in post-order (children before parents — preserves the existing
 **Rationale**: correct by construction (identical subtrees collapse; genuine
 variants stay distinct), and it *does* tame the blowup:
 
-| Version | naive per-path group structs | **distinct recursive plans (emit N)** | reduction |
+The **emit N** column is the `/plan` census's distinct-plan figure, counted as
+**distinct signatures per `no_tag`** (the R3 dedup key). Under the
+`(no_tag, signature)` key this IS the **exact** distinct-`(no_tag, signature)`-pair
+count for the dictionaries the census measured: summing distinct signatures per
+`no_tag` is by definition the count of distinct pairs, and two *distinct* `no_tag`s
+sharing a byte-identical signature are already two separate pairs (their count tags
+differ), already counted separately — nothing is under-counted, nothing ticks up.
+The only residual caveat is **census-model-vs-shipped-emitter fidelity** (this
+throwaway census's signature model vs the shipped emitter's dedup), which is
+**pinned deterministically by the regenerated golden at `/implement`** — the golden
+size, the completeness count, and the `G_<no_tag>[_ord]` naming all key off that
+regenerated figure.
+
+| Version | naive per-path group structs | **distinct `(no_tag, signature)` pairs (emit N)** | reduction |
 |---|---|---|---|
 | v42 | 38 | 29 | 1.3× |
 | v44 | 730 | 89 | 8× |

@@ -11,15 +11,25 @@ The identity a builder group-Args struct is deduplicated by.
 
 | Field | Source | Notes |
 |---|---|---|
-| `no_tag` | `GroupOrderEntry::no_tag` | the group's `NumInGroup` tag (naming prefix only) |
+| `no_tag` | `GroupOrderEntry::no_tag` | the group's `NumInGroup` tag — **part of the dedup key** (see below) AND the `G_<no_tag>` naming prefix |
 | `delimiter_tag` | `GroupOrderEntry::delimiter_tag` | first declared member |
 | ordered members | `GroupOrderEntry::members` (declaration order) | `(tag, is_group)` in order — NOT tag-sorted |
 | per-member required-ness | `MessageIR.fields[tag].ref.rule` | `Required` vs not — serialization-critical, invisible in the Args struct body (all scalars emit as `optional<T>`), lives only in `writer_traits` |
 | child plans | recursive | each `is_group` member contributes its own child plan's identity |
 
-**Signature** = `delimiter + [ (tag, required, {child-signature}?) … ]`, computed
-recursively. Two group occurrences are the **same plan** iff their signatures
-are byte-equal. This is the unit of deduplication (replaces the current
+**Recursive signature** = `delimiter + [ (tag, required, {child-signature}?) … ]`,
+computed recursively — the variant discriminator *within* a `no_tag`.
+
+**Dedup key = `(no_tag, recursive_signature)`.** Two group occurrences are the
+**same plan** iff they share the same `no_tag` **and** their recursive
+signatures are byte-equal. Including `no_tag` in the key (the recursive
+signature by itself excludes the group's own count tag) keeps the
+`G_<no_tag>[_ord]Args` naming contract (FR-001 / G1a) always well-defined and
+makes the distinct-plan counts mean exactly "# distinct `(no_tag, signature)`
+pairs" (Entity 2). Two *different* `no_tag`s whose bodies happen to share a
+byte-identical signature therefore stay separate plans (their count tags
+differ) — the cross-`no_tag` collision the census did not measure is closed by
+construction. This is the unit of deduplication (replaces the current
 message-rooted `type_prefix` naming in `resolve_level`, emit_builders.cpp:415).
 
 **Validation**: a plan's child must be fully emitted before the plan references
@@ -33,12 +43,15 @@ One per distinct structural plan per version, in `fixpp::<ns>::groups`.
 
 | Property | Value |
 |---|---|
-| Name | `G_<no_tag>Args` if the `no_tag` has one plan; `G_<no_tag>_<ordinal>Args` for each additional plan |
+| Name | `G_<no_tag>Args` if the `no_tag` has exactly one plan; if it has two or more plans, no bare name and ALL variants ordinaled `G_<no_tag>_1Args` … `G_<no_tag>_kArgs` |
 | Ordinal | first-encounter index over the **bytewise-sorted** `ir.messages` × declaration-order `group_order` (deterministic) |
 | Members | scalars → `optional<cpp_type>`; child groups → `span<const G_…Args>` (required) / `optional<span<…>>` (optional) — unchanged shapes, only the referenced *name* changes to the shared one |
 | Companions (once per plan) | `writer_traits<G_…Args>` specialization + `_required_<tag>` / `_count_<acc>` / `_validate_entry_<acc>` helpers, in `fixpp::wire` |
 
-**Count per version** (research.md R3): v42 29 · v44 89 · v50sp2 558 · vlatest 578.
+**Count per version** (research.md R3) — distinct `(no_tag, recursive_signature)`
+plans, the **exact** `/plan` census pair-count for the dictionaries measured (sole
+caveat = census-vs-emitter fidelity, pinned by the regenerated golden at
+`/implement` — research.md R3): v42 29 · v44 89 · v50sp2 558 · vlatest 578.
 
 ## Entity 3 — Per-message builder / validator (emitted artifact)
 
@@ -70,13 +83,21 @@ set from.
 
 Checked-in byte-exact deterministic reference output.
 
+Five goldens — one **regenerated** (v44 `official` already exists at the 069
+path), four **newly created** (there is NO checked-in `v44_Builders_all` golden
+today — 069 verified `all` mode by differential round-trip vs the runtime-XML
+path + 8 QuickFIX goldens, not a checked-in all-builder golden; and v42 /
+v50sp2 / vlatest are brand-new tiers). New goldens land under this feature's
+own `contracts/golden/` dir (plan.md:124). Naming follows the read-tier
+convention `<ns>_<Tier>[_variant].golden.hpp`.
+
 | Golden | Status | Path |
 |---|---|---|
 | v44 `official` | **regenerated** (deduped) | `specs/069-v44-all-families/contracts/golden/v44_Builders_official.golden.hpp` |
-| v44 `all` | **regenerated** (deduped) | (per 069 layout) |
-| v42 | **new** | `specs/077-builder-args-dedup/contracts/golden/` |
-| v50sp2 | **new** | ″ |
-| vlatest | **new** | ″ |
+| v44 `all` | **new** (no prior `all` golden existed) | `specs/077-builder-args-dedup/contracts/golden/v44_Builders_all.golden.hpp` |
+| v42 | **new** | `specs/077-builder-args-dedup/contracts/golden/v42_Builders.golden.hpp` |
+| v50sp2 | **new** | `specs/077-builder-args-dedup/contracts/golden/v50sp2_Builders.golden.hpp` |
+| vlatest | **new** | `specs/077-builder-args-dedup/contracts/golden/vlatest_Builders.golden.hpp` |
 
 ## Entity 6 — Builder-completeness census (FR-010)
 
@@ -84,8 +105,8 @@ Independent, non-circular check per builder-bearing version.
 
 | Property | Value |
 |---|---|
-| Expected set | `{ m.msg_type : m.is_application ∧ in-scope(version) }` derived from the IR app predicate (NOT the emitter's own walk) |
-| Actual set | `{ msg_type in builder_registry }` parsed from the emitted header/golden |
+| Expected set | `{ m.msg_type : m is application ∧ in-scope(version) }` derived from a **raw-XML / Orchestra walk independent of `emit_builders`** (a standalone parser over `FIX42/44/50SP2.xml` and the `<fixr:repository>`, the app/admin partition read from `msgcat`/`category` at the source, NOT from the emitter's own `ir(V).messages` walk) — mirroring 076's V-1 raw-XML census (N-1). See builder-completeness.md C1. |
+| Actual set | `{ msg_type : fixpp::<ns>::build_<Msg> ∧ validate_<Msg> exist }` — proven by a census TU that takes the **address of every expected `build_<Msg>`/`validate_<Msg>`** (compile-time ODR-use ⇒ existence, the entry points FR-010 names); the `builder_registry` text-parse is retained as a **secondary consistency check**, not the completeness measure (builder-completeness.md C2) |
 | Assertion | **exact-set equality** (not subset) |
-| Red-provable | dropping one message makes it fail (research.md R5) |
-| Re-instates | 076's descoped V-2 / V-2b legs, generalized to all builder-bearing versions |
+| Red-provable | a **committed test-only mutation seam** (drops one in-scope message from the emitter) makes it fail — a real mechanism, not "documented in the test" (research.md R5, builder-completeness.md C3b) |
+| Re-instates | 076's descoped V-2 / V-2b legs at 076's raw-XML independence strength, generalized to all builder-bearing versions |

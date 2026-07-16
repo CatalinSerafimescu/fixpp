@@ -8,9 +8,10 @@
 
 Redesign the builder emitter (`emit_builders.cpp`) so each repeating group's
 input `Args` struct is emitted **once per distinct recursive structural plan**
-into a shared `fixpp::<ns>::groups` namespace (named `G_<no_tag>Args`, or
-`G_<no_tag>_<ordinal>Args` for a `no_tag` carrying multiple plans), instead of
-once per message-path. This collapses the FIX Latest builder header from
+into a shared `fixpp::<ns>::groups` namespace (named `G_<no_tag>Args` for a
+`no_tag` with exactly one plan, or — for a `no_tag` carrying two or more plans —
+no bare name and all variants ordinaled `G_<no_tag>_1Args` … `G_<no_tag>_kArgs`),
+instead of once per message-path. This collapses the FIX Latest builder header from
 26,806 per-path structs (137 MB, uncompilable) to **578 distinct plans** (read-
 tier order, ~10 MB, single-TU-compilable), then re-enables the vlatest builder
 tier 076 descoped and extends builders to every application-bearing typed
@@ -18,7 +19,10 @@ version (v42/v44/v50sp2/vlatest; vt11 is admin-only → none). v44's shipped
 builder golden is deliberately regenerated to the deduped output; legacy read
 tiers stay byte-identical.
 
-The design key is **structural identity, not `no_tag`** — the `/plan` census
+The design key is **`(no_tag, recursive structural signature)`** — the signature
+(not `no_tag` alone) discriminates variants within a count tag, and pairing it
+with `no_tag` (which the signature by itself omits) keeps the naming
+deterministic and never collapses two distinct count tags. The `/plan` census
 (research.md R2) proved a single `no_tag` maps to up to 8 genuinely-different
 structures within one version, because a builder is order- and
 required-ness-sensitive where the read tier's union-by-tag is not.
@@ -54,14 +58,18 @@ envelope (the emitter change is O(occurrences) with a signature-hash map).
 
 **Constraints**: byte-deterministic emission (existing determinism gate);
 legacy read tiers byte-identical (FR-009); C-ABI frozen at 1.5.0 (no runtime
-surface change); Article VIII compile-budget — v50sp2/vlatest builder TUs are
-expected to join v50sp2's read tier as recorded `KNOWN_OVERAGE` against the
-≤3 s syntax-only ceiling (not a regression; measured + logged, mitigation
-tracked), see Complexity Tracking.
+surface change); **compile-time resource budget** — v50sp2/vlatest builder TUs
+are expected to join v50sp2's read tier as a recorded `KNOWN_OVERAGE` against the
+≤3 s single-version syntax-only ceiling, tracked via the **003 compile-bench /
+decision-record convention** (`.specify/decisions/003-dictionary-codegen-verify.md:101`,
+T046 compile-time bench — NOT an Article VIII mechanism; Article VIII is
+runtime-only). Measured + logged, mitigation tracked; see Complexity Tracking.
 
 **Scale/Scope**: 4 builder-bearing versions; in-scope app messages 39/83/156/173
-(v42/v44/v50sp2/vlatest); distinct emitted plans 29/89/558/578; 5 goldens
-(v44 all + v44 official regenerated; v42/v50sp2/vlatest new).
+(v42/v44/v50sp2/vlatest); distinct emitted plans (# distinct
+`(no_tag, signature)` pairs) 29/89/558/578; 5 goldens (v44 official
+**regenerated**; v44 all + v42/v50sp2/vlatest **new** — no `v44_Builders_all`
+golden exists today).
 
 ## Constitution Check
 
@@ -76,7 +84,7 @@ tracked), see Complexity Tracking.
 | X — ABI Policy | PASS | Header-only generated code; no C-ABI symbol/signature/error-code change (frozen 1.5.0). |
 | VI — 100% FIX / no silent omissions | PASS+ | FR-010 exact-set completeness census per version *strengthens* coverage; catalogue rows for v42/v50sp2/vlatest builders move to delivered. |
 | VII — Testing | PASS | Golden + determinism + round-trip + red-provable completeness gate (research.md R5). |
-| VIII — Perf budgets | PASS w/ recorded overage | Compile-time is the only budget touched; v50sp2/vlatest builder TUs recorded `KNOWN_OVERAGE` like the v50sp2 read tier (Complexity Tracking); runtime hot path untouched. |
+| VIII — Perf budgets | PASS | Article VIII is **runtime-only** (Google Benchmark, ±5% regression, hot-path allocator, latency targets) and the runtime hot path is untouched, so VIII trivially PASSes. Article VIII has **no** compile-time ceiling / `KNOWN_OVERAGE` hatch. The compile-time overage of the v50sp2/vlatest builder TUs is tracked separately via the **003 compile-bench / decision-record convention** (T046), cited in Complexity Tracking — not under this Article. |
 | IX — Coverage/sanitizers/static-analysis | PASS | Host tool + generated headers under existing tiers; new emitter code carries unit coverage. |
 | XVI — Spec Kit workflow | PASS | Pipeline order honored (Gate A after `/plan`, before `/tasks`). |
 
@@ -115,13 +123,17 @@ cmake/Codegen.cmake          # remove the vlatest/Builders.hpp deletion (076 des
                              #   wire per-version Builders.hpp into regen-guard/determinism
 
 tests/session/               # 067/069 v44 builder tests NAME message-rooted nested Args types
-                             #   (46 refs / 7 files, e.g. NewOrderListOrdersPartyIDsArgs) that dedup
-                             #   RENAMES to groups::G_<no_tag>Args — these sources will not compile
-                             #   on golden-update alone. Resolution = ALIAS vs BREAK (see below);
-                             #   plus new per-version round-trip + FR-010 completeness census tests
+                             #   (e.g. NewOrderListOrdersPartyIDsArgs) that dedup RENAMES to
+                             #   groups::G_<no_tag>Args — these sources will not compile on
+                             #   golden-update alone. Resolution = BREAK (see below); the exact
+                             #   rewrite surface (distinct old names + total occurrences) is
+                             #   RE-COUNTED at /tasks (the "46 refs / 7 files" note under-counts —
+                             #   ~96 occurrences / 6 files by partial grep); plus new per-version
+                             #   round-trip + FR-010 completeness census tests
 tests/codegen/               # codegen unit + determinism + completeness census
 
-specs/077-builder-args-dedup/contracts/golden/   # 5 goldens (v44×2 regen, v42/v50sp2/vlatest new)
+specs/077-builder-args-dedup/contracts/golden/   # 4 NEW goldens (v44_Builders_all, v42/v50sp2/vlatest);
+                             #   v44 official regenerated in place at specs/069-.../v44_Builders_official.golden.hpp
 docs/src/dictionary/codegen.md                    # update: builders now all-version + deduped
 spec/behaviors-and-limitations.md                 # L-076-1 → resolved-by-077
 ```
@@ -137,25 +149,38 @@ and doc/limitation updates — mirroring the read-tier dedup that already lives 
 |---|---|---|
 | Structural-identity key (recursive signature) instead of `no_tag` | `/plan` census: `no_tag` → up to 8 distinct builder structures/version; the builder is order- + required-ness-sensitive | `no_tag`-alone (spec's original framing) is **unsound** — would silently corrupt serialization/validation for the 22 colliding vlatest `no_tag`s |
 | `G_<no_tag>_<ordinal>Args` variant naming | genuine structural variants must not collide | one struct per `no_tag` re-introduces the union problem the builder cannot tolerate |
-| v50sp2 / vlatest builder-TU compile-time `KNOWN_OVERAGE` | ~558/578 plans × nested groups exceeds the ≤3 s syntax-only ceiling, exactly as the v50sp2 *read* tier already does | tightening now would block delivery; overage is recorded (Article VIII exit-0 `KNOWN_OVERAGE`), mitigation (fwd-decl/split-header/PCH) tracked with the read tier's existing note — not this feature's scope |
+| v50sp2 / vlatest builder-TU compile-time `KNOWN_OVERAGE` | ~558/578 plans × nested groups exceeds the ≤3 s single-version syntax-only ceiling, exactly as the v50sp2 *read* tier already does | tightening now would block delivery; overage is recorded via the **003 compile-bench / decision-record convention** (`.specify/decisions/003-dictionary-codegen-verify.md:101`, T046 — the SAME convention that recorded the v50sp2 read tier's ~8–9 s overage; NOT an Article VIII mechanism), captured RSS + wall time in the feature verify record, mitigation (fwd-decl/split-header/PCH) tracked with the read tier's existing note — not this feature's scope |
 
 ### Decision (resolved at `/plan` sign-off, 2026-07-16): **BREAK — no aliases, rewrite tests**
 
 **v44 nested-Args rename: backward-compat ALIAS vs. accept BREAK.** Dedup moves
-`fixpp::v44::<Msg>…Args` → `fixpp::v44::groups::G_<no_tag>[_ord]Args`. 46 refs
-across 7 v44 builder test files (and any example/doc snippets) name the old
-message-rooted types.
+`fixpp::v44::<Msg>…Args` → `fixpp::v44::groups::G_<no_tag>[_ord]Args`. The v44
+builder test files (and any example/doc snippets) name the old message-rooted
+types; the exact surface is **re-counted at `/tasks`** (the earlier "46 refs / 7
+files" estimate under-counts — a partial grep already finds ~96 occurrences
+across 6 files, before other group names or the 7th file).
 - **ALIAS** — emit `using <old name> = groups::G_<no_tag>[_ord]Args;` for v44's
   ~730 old per-path names in `fixpp::v44`. Existing sources compile unchanged;
   header gains ~730 typedef lines (cheap vs the struct-body win). Only v44 needs
   this (v42/v50sp2/vlatest are new).
-- **BREAK** — no aliases; rewrite the 7 v44 test files (46 refs, mechanical) to
-  name `groups::G_…Args`. Cleaner, full size win, source-breaking for the v44
-  builder API (defensible pre-1.0 — this feature already supersedes v44's
-  byte-identical golden guarantee). No user code exists yet (builders were fresh
-  in 067/069).
+- **BREAK** — no aliases; rewrite the v44 test files (mechanical, over the
+  `/tasks`-measured surface) to name `groups::G_…Args`. Cleaner, full size win,
+  source-breaking for the v44 builder API (defensible pre-1.0 — this feature
+  already supersedes v44's byte-identical golden guarantee). No user code exists
+  yet (builders were fresh in 067/069).
 
 **CHOSEN: BREAK** (user, 2026-07-16). `/tasks` includes a **test-rewrite task**
-(7 v44 files / 46 refs → `groups::G_…Args`), **no** alias-emission task. The v44
-builder type names `fixpp::v44::<Msg>…Args` are a source-breaking change; no
-downstream user code exists (builders were fresh in 067/069, pre-1.0).
+(rewrite the v44 builder test files' message-rooted Args names → `groups::G_…Args`),
+**no** alias-emission task. The v44 builder type names `fixpp::v44::<Msg>…Args`
+are a source-breaking change; no downstream user code exists (builders were
+fresh in 067/069, pre-1.0). **Scope RE-COUNT at `/tasks` (do not trust the
+"46 refs / 7 files" figure — it is unverified and appears to under-count: a
+partial grep already found ~96 occurrences across 6 files):** `/tasks` measures
+BOTH the distinct old type-names AND the total occurrences across the v44
+builder test/example/doc sources, and sizes the rewrite task from the measured
+number.
+
+## Gate A
+
+- Round 1 applied 2026-07-16: Codex P1=0 P2=6 P3=1; Opus post-judging P1=0 P2=6 P3=4; rewrite addresses Root cause #1 (dedup key → (no_tag, recursive_signature)), Root cause #2 (independent-derivation verification: raw-XML completeness census + mutation seam, extended v44 frozen-corpus differential, read-tier OFF/ON byte-diff), and the citation cluster (Article VIII compile-budget miscite → 003 compile-bench convention; golden inventory → 5 enumerated paths). Reviews: research/reviews/codex_077-builder-args-dedup_gate_a_review.md, research/reviews/opus_077-builder-args-dedup_gate_a_adversarial_review.md.
+- Round 2 applied 2026-07-16: Codex P1=0 P2=4 P3=0; Opus post-judging P1=0 P2=3 P3=1; rewrite addresses R2-A (delete stale "lower bound" count hedge — emit-N table is the exact distinct-(no_tag,signature)-pair count for measured dicts, sole caveat = census↔emitter fidelity via golden), R2-B (naming rule → G1a exact wording: ≥2 signatures ⇒ all ordinaled, no bare name, propagated to 5 loci), R2-C (completeness actual(V) → compile-time entry-point-existence census over build_<Msg>/validate_<Msg>, registry parse secondary), and the P3 (name FIXPP_CODEGEN_DROP_BUILDER_MSGTYPE + builder_completeness_mutation_witness as THE committed seam). Reviews: research/reviews/codex_077-builder-args-dedup_gate_a_2_review.md, research/reviews/opus_077-builder-args-dedup_gate_a_2_adversarial_review.md.
