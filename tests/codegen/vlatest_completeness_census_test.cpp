@@ -329,8 +329,8 @@ TEST(VlatestCompletenessCensus, StructuralKeyExactSetEquality) {
   std::set<std::string> actual_msgs;
   for (const auto& [key, rule] : c.actual.occ) actual_msgs.insert(std::get<0>(key));
 
-  EXPECT_EQ(actual_msgs.size(), 181u) << "raw-XML walk message count";
-  EXPECT_EQ(c.expected.msg_types.size(), 181u) << "manifest message count";
+  EXPECT_EQ(actual_msgs.size(), 181U) << "raw-XML walk message count";
+  EXPECT_EQ(c.expected.msg_types.size(), 181U) << "manifest message count";
 
   std::vector<std::string> only_actual_msg, only_expected_msg;
   std::set_difference(actual_msgs.begin(), actual_msgs.end(), c.expected.msg_types.begin(),
@@ -384,7 +384,7 @@ TEST(VlatestCompletenessCensus, DatatypeTokenBestEffortConsistency) {
       mismatches.push_back(oss.str());
     }
   }
-  EXPECT_GT(checked, 1000u) << "sanity: datatype check should cover most of the corpus";
+  EXPECT_GT(checked, 1000U) << "sanity: datatype check should cover most of the corpus";
   EXPECT_TRUE(mismatches.empty()) << mismatches.size() << " datatype mismatch(es), e.g.:\n"
                                    << (mismatches.empty() ? "" : mismatches.front());
 }

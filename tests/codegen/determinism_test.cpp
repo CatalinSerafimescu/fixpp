@@ -544,7 +544,7 @@ TEST_F(DeterminismTest, AdditiveOffOnByteDiff) {
     // bound (not the exact count) so this doesn't need updating on every
     // unrelated emitter-shape change, while still catching a degenerate
     // walk that silently compares nothing.
-    EXPECT_GE(compared, 20u) << "V-7 walk compared suspiciously few files (" << compared
+    EXPECT_GE(compared, 20U) << "V-7 walk compared suspiciously few files (" << compared
                               << ") — codegen output shape may have changed.";
 }
 

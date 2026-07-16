@@ -262,7 +262,7 @@ ManifestSide parse_manifest_projected(const std::string& path) {
   std::map<int, std::set<int>> member_tags;
   std::set<std::string> msg_types;
 
-  for (auto& line : lines) {
+  for (auto const& line : lines) {
     if (line.empty() || line[0] == '#') continue;
     const auto f = split_tab(line);
     if (f.empty()) continue;
@@ -346,8 +346,8 @@ TEST(VlatestManifestClassConsistency, MessageSetExact181) {
   Sides s;
   ASSERT_NO_THROW(s = build_sides());
 
-  EXPECT_EQ(s.cs.msg_types.size(), 181u) << "class-side (Messages.hpp) message count";
-  EXPECT_EQ(s.ms.msg_types.size(), 181u) << "manifest-side (projected Manifest.txt) message count";
+  EXPECT_EQ(s.cs.msg_types.size(), 181U) << "class-side (Messages.hpp) message count";
+  EXPECT_EQ(s.ms.msg_types.size(), 181U) << "manifest-side (projected Manifest.txt) message count";
 
   std::vector<std::string> only_class, only_manifest;
   std::set_difference(s.cs.msg_types.begin(), s.cs.msg_types.end(), s.ms.msg_types.begin(), s.ms.msg_types.end(),
@@ -357,7 +357,7 @@ TEST(VlatestManifestClassConsistency, MessageSetExact181) {
 
   auto join = [](const std::vector<std::string>& v) {
     std::ostringstream oss;
-    for (auto& x : v) oss << x << " ";
+    for (auto const& x : v) oss << x << " ";
     return oss.str();
   };
   EXPECT_TRUE(only_class.empty()) << "msg_types in class side (Messages.hpp) but NOT in manifest: " << join(only_class);
