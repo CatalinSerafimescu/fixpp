@@ -24,10 +24,12 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <iterator>
 #include <map>
 #include <sstream>
@@ -105,6 +107,37 @@ static std::string read_file_binary(const fs::path& p) {
     std::ostringstream ss;
     ss << f.rdbuf();
     return ss.str();
+}
+
+// Bounded byte-equality check for potentially-large generated artifacts.
+// A plain EXPECT_EQ on two multi-MB strings is a footgun: on mismatch gtest
+// builds a line-by-line unified diff over the FULL contents, which for a
+// ~75 MB / ~750k-line builder header balloons past 11 GB RAM and can OOM-kill
+// the host (observed 2026-07-16: a single crash-induced 1-byte-corrupted
+// v50sp2 builder golden drove this path to a 24 GB WSL2 kernel panic). This
+// reports the first differing byte offset + a short hex window and FAILS
+// CLEANLY at any file size — never materializing a whole-file diff.
+static void expect_bytes_equal(const std::string& actual, const std::string& expected,
+                               const std::string& context) {
+    if (actual == expected) return;  // fast path — no allocation, no diff
+    const std::size_t n = std::min(actual.size(), expected.size());
+    std::size_t off = 0;
+    while (off < n && actual[off] == expected[off]) ++off;
+    auto window = [](const std::string& s, std::size_t at) {
+        std::ostringstream o;
+        const std::size_t start = at > 8 ? at - 8 : 0;
+        const std::size_t end = std::min(s.size(), at + 9);
+        o << std::hex << std::setfill('0');
+        for (std::size_t i = start; i < end; ++i)
+            o << (i == at ? "[" : " ") << std::setw(2)
+              << static_cast<unsigned>(static_cast<unsigned char>(s[i])) << (i == at ? "]" : "");
+        return o.str();
+    };
+    ADD_FAILURE() << context << "\n  byte content differs: actual " << actual.size()
+                  << " B, expected " << expected.size() << " B; first difference at byte offset "
+                  << off << (off == n ? " (one is a prefix of the other)" : "")
+                  << "\n  actual  [" << off << "]:" << window(actual, off)
+                  << "\n  expected[" << off << "]:" << window(expected, off);
 }
 
 // Snapshot: path → last_write_time for every file reachable from root.
@@ -331,8 +364,8 @@ TEST_F(DeterminismTest, ByteIdenticalAcrossRuns) {
         fs::path b2 = run2.path / ver / "Builders.hpp";
         ASSERT_TRUE(fs::exists(b1)) << ver << "/Builders.hpp missing from run1";
         ASSERT_TRUE(fs::exists(b2)) << ver << "/Builders.hpp missing from run2";
-        EXPECT_EQ(read_file_binary(b1), read_file_binary(b2))
-            << ver << "/Builders.hpp not byte-identical across runs";
+        expect_bytes_equal(read_file_binary(b1), read_file_binary(b2),
+                           std::string(ver) + "/Builders.hpp not byte-identical across runs");
     }
 }
 
@@ -429,18 +462,13 @@ TEST_F(DeterminismTest, GeneratedMatchesGolden) {
         std::string gen_bytes = read_file_binary(generated);
         std::string golden_bytes = read_file_binary(golden);
 
-        EXPECT_EQ(gen_bytes, golden_bytes)
-            << "Golden mismatch for " << kVersions[i] << ": generated " << gen_bytes.size()
-            << " bytes"
-            << ", golden " << golden_bytes.size() << " bytes.\n"
-            << "  generated: " << generated << "\n"
-            << "  golden:    " << golden << "\n"
-            << "  Run 'diff " << generated.string() << " " << golden.string()
-            << "' to see the diff.\n"
-            << "  Regenerate golden with:\n"
-            << "    " << kBin << " --xml " << (fs::path(kDictDir) / kXmls[i]).string()
-            << " --out <golden-dir> && cp <golden-dir>/" << kVersions[i] << "/Messages.hpp "
-            << golden.string();
+        expect_bytes_equal(gen_bytes, golden_bytes,
+                           "Golden mismatch for " + std::string(kVersions[i]) +
+                               " Messages.hpp\n  generated: " + generated.string() +
+                               "\n  golden:    " + golden.string() + "\n  Regenerate: " + kBin +
+                               " --xml " + (fs::path(kDictDir) / kXmls[i]).string() +
+                               " --out <dir> && cp <dir>/" + kVersions[i] + "/Messages.hpp " +
+                               golden.string());
     }
 }
 
@@ -467,17 +495,13 @@ TEST_F(DeterminismTest, VlatestGeneratedMatchesGolden) {
     std::string gen_bytes = read_file_binary(generated);
     std::string golden_bytes = read_file_binary(golden);
 
-    EXPECT_EQ(gen_bytes, golden_bytes)
-        << "V-4 violated: vlatest/Messages.hpp diverged from the checked-in golden (generated "
-        << gen_bytes.size() << " bytes, golden " << golden_bytes.size() << " bytes).\n"
-        << "  generated: " << generated << "\n"
-        << "  golden:    " << golden << "\n"
-        << "  Run 'diff " << generated.string() << " " << golden.string()
-        << "' to see the diff.\n"
-        << "  Regenerate golden with:\n"
-        << "    " << kBin << " --xml "
-        << (fs::path(kDictDir) / "orchestra" / "OrchestraFIXLatest.xml").string()
-        << " --out <golden-dir> && cp <golden-dir>/vlatest/Messages.hpp " << golden.string();
+    expect_bytes_equal(gen_bytes, golden_bytes,
+                       "V-4 violated: vlatest/Messages.hpp diverged from the checked-in golden\n"
+                       "  generated: " +
+                           generated.string() + "\n  golden:    " + golden.string() +
+                           "\n  Regenerate: " + kBin + " --xml " +
+                           (fs::path(kDictDir) / "orchestra" / "OrchestraFIXLatest.xml").string() +
+                           " --out <dir> && cp <dir>/vlatest/Messages.hpp " + golden.string());
 }
 
 // ── Gate B r2 follow-up: V-4 run-to-run determinism — vlatest tier ─────────
@@ -540,8 +564,8 @@ TEST_F(DeterminismTest, VlatestByteIdenticalAcrossRuns) {
         fs::path b2 = run2.path / "vlatest" / "Builders.hpp";
         ASSERT_TRUE(fs::exists(b1)) << "vlatest/Builders.hpp missing from run1";
         ASSERT_TRUE(fs::exists(b2)) << "vlatest/Builders.hpp missing from run2";
-        EXPECT_EQ(read_file_binary(b1), read_file_binary(b2))
-            << "vlatest/Builders.hpp not byte-identical across runs";
+        expect_bytes_equal(read_file_binary(b1), read_file_binary(b2),
+                           "vlatest/Builders.hpp not byte-identical across runs");
     }
 
     // Sanity bound: vlatest emits Fields/Messages/Validator/Reify/
@@ -610,8 +634,8 @@ TEST_F(DeterminismTest, AdditiveOffOnByteDiff) {
         fs::path generated = off_run.path / kVersions[i] / "Messages.hpp";
         fs::path golden = fs::path(kGoldenDir) / kGoldenFiles[i];
         ASSERT_TRUE(fs::exists(generated)) << "OFF-run missing: " << generated;
-        EXPECT_EQ(read_file_binary(generated), read_file_binary(golden))
-            << "V-7 OFF-path baseline mismatch for " << kVersions[i];
+        expect_bytes_equal(read_file_binary(generated), read_file_binary(golden),
+                           "V-7 OFF-path baseline mismatch for " + std::string(kVersions[i]));
     }
 
     // (a2) US3-AC1 — OFF-run has NO vlatest/ dir at all.
@@ -621,9 +645,9 @@ TEST_F(DeterminismTest, AdditiveOffOnByteDiff) {
     // (a3) US3-AC2 (part) — ON-run vlatest/Messages.hpp == 076 golden.
     fs::path on_vlatest = on_run.path / "vlatest" / "Messages.hpp";
     ASSERT_TRUE(fs::exists(on_vlatest)) << "ON-run missing: " << on_vlatest;
-    EXPECT_EQ(read_file_binary(on_vlatest),
-              read_file_binary(fs::path(kVlatestGoldenDir) / kVlatestGoldenFile))
-        << "V-7 ON-path vlatest/Messages.hpp diverged from the 076 golden.";
+    expect_bytes_equal(read_file_binary(on_vlatest),
+                       read_file_binary(fs::path(kVlatestGoldenDir) / kVlatestGoldenFile),
+                       "V-7 ON-path vlatest/Messages.hpp diverged from the 076 golden.");
 
     // (b) US3-AC2 (part) — relative discriminator: recursively walk every
     // file the OFF-run produced (v42/v44/v50sp2/vt11/_dispatch — no vlatest,
@@ -639,8 +663,9 @@ TEST_F(DeterminismTest, AdditiveOffOnByteDiff) {
         fs::path on_counterpart = on_run.path / rel;
         EXPECT_TRUE(fs::exists(on_counterpart)) << "V-7: legacy file missing from ON-run: " << rel;
         if (!fs::exists(on_counterpart)) continue;
-        EXPECT_EQ(read_file_binary(e.path()), read_file_binary(on_counterpart))
-            << "V-7 additivity violated: " << rel << " differs between OFF-run and ON-run.";
+        expect_bytes_equal(read_file_binary(e.path()), read_file_binary(on_counterpart),
+                           "V-7 additivity violated: " + rel.string() +
+                               " differs between OFF-run and ON-run.");
         ++compared;
     }
     // Sanity bound: v42/v50sp2/vt11 emit 5 artifacts each, v44 emits 6
@@ -788,13 +813,10 @@ TEST_F(DeterminismTest, OfficialModeBuildersMatchesGolden) {
     std::string gen_bytes = read_file_binary(generated);
     std::string golden_bytes = read_file_binary(golden);
 
-    EXPECT_EQ(gen_bytes, golden_bytes)
-        << "SC-003 violated: `--families official` v44/Builders.hpp diverged "
-           "from the byte-identity baseline (generated "
-        << gen_bytes.size() << " bytes, golden " << golden_bytes.size() << " bytes).\n"
-        << "  generated: " << generated << "\n"
-        << "  golden:    " << golden << "\n"
-        << "  Run 'diff " << generated.string() << " " << golden.string() << "' to see the diff.";
+    expect_bytes_equal(gen_bytes, golden_bytes,
+                       "SC-003 violated: `--families official` v44/Builders.hpp diverged from the "
+                       "byte-identity baseline\n  generated: " +
+                           generated.string() + "\n  golden:    " + golden.string());
 }
 
 // ── 077-builder-args-dedup T027 [Polish]: checked-in-golden-diff gate for the
@@ -819,11 +841,10 @@ TEST_F(DeterminismTest, V44AllModeBuildersMatchesGolden) {
     ASSERT_TRUE(fs::exists(generated)) << "Generated file missing: " << generated;
     ASSERT_TRUE(fs::exists(golden)) << "Golden not found: " << golden;
 
-    EXPECT_EQ(read_file_binary(generated), read_file_binary(golden))
-        << "FR-013 violated: v44 `all`-mode Builders.hpp diverged from the checked-in golden.\n"
-        << "  generated: " << generated << "\n"
-        << "  golden:    " << golden << "\n"
-        << "  Run 'diff " << generated.string() << " " << golden.string() << "' to see the diff.";
+    expect_bytes_equal(read_file_binary(generated), read_file_binary(golden),
+                       "FR-013 violated: v44 `all`-mode Builders.hpp diverged from the checked-in "
+                       "golden.\n  generated: " +
+                           generated.string() + "\n  golden:    " + golden.string());
 }
 
 TEST_F(DeterminismTest, V50sp2BuildersMatchesGolden) {
@@ -837,11 +858,10 @@ TEST_F(DeterminismTest, V50sp2BuildersMatchesGolden) {
     ASSERT_TRUE(fs::exists(generated)) << "Generated file missing: " << generated;
     ASSERT_TRUE(fs::exists(golden)) << "Golden not found: " << golden;
 
-    EXPECT_EQ(read_file_binary(generated), read_file_binary(golden))
-        << "FR-013 violated: v50sp2 Builders.hpp diverged from the checked-in golden.\n"
-        << "  generated: " << generated << "\n"
-        << "  golden:    " << golden << "\n"
-        << "  Run 'diff " << generated.string() << " " << golden.string() << "' to see the diff.";
+    expect_bytes_equal(read_file_binary(generated), read_file_binary(golden),
+                       "FR-013 violated: v50sp2 Builders.hpp diverged from the checked-in "
+                       "golden.\n  generated: " +
+                           generated.string() + "\n  golden:    " + golden.string());
 }
 
 TEST_F(DeterminismTest, VlatestBuildersMatchesGolden) {
@@ -855,11 +875,10 @@ TEST_F(DeterminismTest, VlatestBuildersMatchesGolden) {
     ASSERT_TRUE(fs::exists(generated)) << "Generated file missing: " << generated;
     ASSERT_TRUE(fs::exists(golden)) << "Golden not found: " << golden;
 
-    EXPECT_EQ(read_file_binary(generated), read_file_binary(golden))
-        << "FR-013 violated: vlatest Builders.hpp diverged from the checked-in golden.\n"
-        << "  generated: " << generated << "\n"
-        << "  golden:    " << golden << "\n"
-        << "  Run 'diff " << generated.string() << " " << golden.string() << "' to see the diff.";
+    expect_bytes_equal(read_file_binary(generated), read_file_binary(golden),
+                       "FR-013 violated: vlatest Builders.hpp diverged from the checked-in "
+                       "golden.\n  generated: " +
+                           generated.string() + "\n  golden:    " + golden.string());
 }
 
 TEST(CodegenGenUtil, AccessorNormalizationCoversKeywordsDigitsAndFallback) {
