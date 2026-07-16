@@ -265,6 +265,12 @@ set(_vt11_marker   "${CMAKE_BINARY_DIR}/_codegen/include/fixpp/vt11/Messages.hpp
 # versions get no Builders.hpp — see emit_builders.cpp scope note); 077 adds
 # vlatest (below) through the same version-agnostic deduped path.
 set(_v44_builders_marker "${CMAKE_BINARY_DIR}/_codegen/include/fixpp/v44/Builders.hpp")
+# gate-b/r1 F1 (077-builder-args-dedup): v50sp2 also gets a deduped
+# Builders.hpp via the same version-agnostic emit_builders path (main.cpp
+# emits Builders.hpp for every ns != v42, so v50sp2 too); this marker must
+# participate in the same missing-output / regen-guard discipline as the
+# v44 builders marker above.
+set(_v50sp2_builders_marker "${CMAKE_BINARY_DIR}/_codegen/include/fixpp/v50sp2/Builders.hpp")
 # 076-fix-latest-typed-codegen T006: FIX Latest tier, gated by
 # FIXPP_CODEGEN_FIX_LATEST (default ON). Input lives under dictionaries/
 # orchestra/ (074), not dictionaries/ directly.
@@ -353,7 +359,7 @@ if(_codegen_source_fingerprint_changed)
 endif()
 
 # Missing output?
-foreach(_marker IN ITEMS "${_v42_marker}" "${_v44_marker}" "${_v50sp2_marker}" "${_vt11_marker}" "${_v44_builders_marker}")
+foreach(_marker IN ITEMS "${_v42_marker}" "${_v44_marker}" "${_v50sp2_marker}" "${_vt11_marker}" "${_v44_builders_marker}" "${_v50sp2_builders_marker}")
   if(NOT EXISTS "${_marker}")
     set(_need_generate TRUE)
     break()
@@ -490,6 +496,22 @@ if(FIXPP_CODEGEN_FIX_LATEST AND NOT EXISTS "${_vlatest_builders_marker}")
   message(FATAL_ERROR
     "[Codegen] Expected output missing after configure-time generation: "
     "${_vlatest_builders_marker}")
+endif()
+
+# gate-b/r1 F1 (077-builder-args-dedup): v44 and v50sp2 builder-tier outputs,
+# mirroring the vlatest builders assertion above — unconditional (not gated
+# on FIXPP_CODEGEN_FIX_LATEST) because v44/v50sp2 builders are part of the
+# always-generated legacy set (main.cpp emits Builders.hpp for every
+# ns != v42).
+if(NOT EXISTS "${_v44_builders_marker}")
+  message(FATAL_ERROR
+    "[Codegen] Expected output missing after configure-time generation: "
+    "${_v44_builders_marker}")
+endif()
+if(NOT EXISTS "${_v50sp2_builders_marker}")
+  message(FATAL_ERROR
+    "[Codegen] Expected output missing after configure-time generation: "
+    "${_v50sp2_builders_marker}")
 endif()
 
 # ── fixpp_codegen_generate — no-op build-time marker target ──────────────────
