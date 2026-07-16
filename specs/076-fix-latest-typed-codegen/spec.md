@@ -17,7 +17,7 @@ FIX Latest support has been delivered bottom-up, one tier per feature:
 - **074-orchestra-native-reader** (MERGED, PR #192) delivered the **read/dictionary tier**: a native `dict::OrchestraLoader` parses the pinned `dictionaries/orchestra/OrchestraFIXLatest.xml` (Extension Pack 303, **181 messages**) into a runtime `Dictionary` under a new, distinct `session_version::vlatest`. Wire application-version maps to the existing `v50sp2` (ApplVerID 9); **no** `application_version::vlatest` member exists and `render_appl_ver_id` is untouched (the wire-ApplVerID map stays injective).
 - **075-live-wire-enum-validation** (MERGED, PR #193) made runtime enum-domain checking real across all ten dictionaries, including the FIX Latest codeset store.
 
-What is still missing is the **typed ergonomic tier**: today a caller can load and runtime-validate FIX Latest messages, but cannot construct/validate/read them through the same typed `build_<Msg>` / `validate_<Msg>` / typed-args / readback API that every legacy version already has (delivered for v44 by 067/069). This feature adds that tier for FIX Latest.
+What is still missing is the **typed ergonomic tier**: today a caller can load and runtime-validate FIX Latest messages, but cannot read/reify them through the same typed args / readback API that every legacy version already has (delivered for v44 by 067/069). This feature closes that read-side gap for FIX Latest. (Typed `build_<Msg>` / `validate_<Msg>` construction is **deferred to a follow-up feature** — see Clarifications → Session 2026-07-16.)
 
 ### Source-verified facts (emitter code-read, this session — grade-1)
 
@@ -127,7 +127,7 @@ A downstream consumer who does not need FIX Latest can build fixpp without payin
 ### Key Entities *(include if feature involves data)*
 
 - **FIX Latest dictionary (`vlatest`)**: the runtime `Dictionary` 074 builds from `OrchestraFIXLatest.xml` (EP303, 181 messages), keyed by `session_version::vlatest`. Input to codegen.
-- **`fixpp::vlatest` typed message class**: the generated per-message artifact — typed builder, validator, typed args, readback — one per FIX Latest message.
+- **`fixpp::vlatest` typed message class**: the generated per-message artifact — typed validator, typed args, readback (+ reify) — one per FIX Latest message. The typed **builder** (`build_<Msg>`) is `[DEFERRED 2026-07-16]` — see Clarifications → Session 2026-07-16.
 - **Completeness census source**: the raw `OrchestraFIXLatest.xml`, read independently of the loader/Dictionary, providing the ground-truth message+field set for the exact-set equality check.
 - **FIX Latest codegen build option**: the CMake switch gating whether the vlatest tier is generated/compiled.
 
@@ -160,7 +160,7 @@ A downstream consumer who does not need FIX Latest can build fixpp without payin
 
 Per Constitution Article VI §5, the exact catalogue / coverage-index anchors (from `spec/feature-catalogue.md` + `spec/coverage-index.md`) this feature advances. FIX Latest content carries **message-level `[FIX-Latest]` DocAbbrev granularity** — the FIX Orchestra `fixr:repository` is a machine-readable schema, not a §-numbered prose document, so no section-granular `[DocAbbrev §X.Y.Z]` slugs are manufactured (the same disposition 074 recorded).
 
-- **A-035..A-065** (`[FIX-Latest]`; `feature-catalogue.md:425-455`, the 31 FIX Latest new-MsgType rows, e.g. A-035 `CrossRequest (35=DS)` … A-065 `QuoteAck (35=CW)`) — currently `backlog` at the typed-codegen tier (074 delivered only their read/dictionary tier; MsgType accounting at `coverage-index.md:579-617`). This feature delivers their typed `build_/validate_/args/readback` classes in `fixpp::vlatest`, advancing the typed-codegen column toward `done`.
+- **A-035..A-065** (`[FIX-Latest]`; `feature-catalogue.md:425-455`, the 31 FIX Latest new-MsgType rows, e.g. A-035 `CrossRequest (35=DS)` … A-065 `QuoteAck (35=CW)`) — currently `backlog` at the typed-codegen tier (074 delivered only their read/dictionary tier; MsgType accounting at `coverage-index.md:579-617`). This feature delivers their typed read/reify/args/readback classes in `fixpp::vlatest` (plus the runtime validator); the `build_<Msg>`/`validate_<Msg>` builder classes are `[DEFERRED 2026-07-16]` (see Clarifications → Session 2026-07-16), advancing the typed-codegen column toward `done`.
 - **D-011** (`[FIX-Orchestra]` `fixr:repository` schema / `[FIX-Latest]` EP303; `feature-catalogue.md:130`, `coverage-index.md:704`) — read/dictionary tier `done` (074), live-wire validation `done` (075); this feature delivers the **typed-codegen tier** of D-011 for the 181-message set, leaving only ApplExtID(1156)=303 differentiation + session negotiation post-1.0.
 - **FIX Latest, Extension Pack 303 (EP303)** — the pinned `dictionaries/orchestra/OrchestraFIXLatest.xml` message/field/group content set (181 messages) 074 vendored; the codegen input.
 - **FIXT.1.1 / FIX 5.0 SP2 application layer** — FIX Latest's wire base (ApplVerID 9); the ApplExtID(1156)=303 on-wire differentiation is out of scope (deferred follow-on).
