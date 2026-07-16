@@ -31,9 +31,11 @@ Generated headers live at:
 ```
 build/<preset>/_codegen/include/fixpp/
   v42/     Messages.hpp  Fields.hpp  Validator.hpp  Reify.hpp  NormativeReferences.md
-  v44/     ...
+  v44/     ...  + Builders.hpp        # typed build_<Msg>/validate_<Msg> — v44 ONLY
   v50sp2/  ...
-  vt11/    ...
+  vt11/    ...                        # FIXT.1.1
+  vlatest/ ...  + Manifest.txt        # FIX Latest (EP303); only when FIXPP_CODEGEN_FIX_LATEST=ON
+                                      #   (no Builders.hpp yet — descoped, see L-076-1)
   _dispatch/
     reify_dispatch_fixt.hpp
     reify_dispatch_application.hpp
@@ -52,6 +54,38 @@ cmake --build --preset linux-clang-debug --target fixpp-codegen
 # Then reconfigure to re-run codegen:
 cmake --preset linux-clang-debug
 ```
+
+### Selecting which FIX versions are generated (CMake options)
+
+**There is no per-version enable/disable flag for the legacy set.** The four
+legacy versions — **v42, v44, v50sp2, vt11 (FIXT.1.1)** — are generated
+*unconditionally* in a single tool invocation. Only **FIX Latest (`vlatest`,
+EP303)** has a generation toggle. A consumer selects which version(s) to *use*
+by which header directory it `#include`s (`#include <fixpp/v44/Messages.hpp>`);
+a generated-but-unincluded version costs nothing at the consumer's compile
+(the headers are header-only).
+
+| CMake option | Default | Effect |
+|---|---|---|
+| `FIXPP_BUILD_CODEGEN_TOOL` | `ON` | Build the `fixpp-codegen` host tool. |
+| `FIXPP_CODEGEN_FIX_LATEST` | `ON` | Generate the `fixpp::vlatest` (FIX Latest / EP303) read/reify/validator tier from `dictionaries/orchestra/OrchestraFIXLatest.xml`. `OFF` removes the `vlatest/` output dir entirely; the four legacy tiers are **byte-identical** either way. |
+| `FIXPP_CODEGEN_V44_FAMILIES` | `all` | Breadth of the v44 **builder** tier (`Builders.hpp`): `all` = 83 `msgcat='app'` messages; `official` = the frozen 33 OFFICIAL MsgTypes. Read tier is unaffected (always universal). |
+
+```bash
+# Default: v42/v44/v50sp2/vt11 + vlatest; v44 builders = all 83 app messages.
+cmake --preset linux-clang-debug
+
+# Legacy-only build (drop the FIX Latest tier):
+cmake --preset linux-clang-debug -DFIXPP_CODEGEN_FIX_LATEST=OFF
+
+# Restrict the v44 builder tier to the frozen 33 OFFICIAL MsgTypes:
+cmake --preset linux-clang-debug -DFIXPP_CODEGEN_V44_FAMILIES=official
+```
+
+> **Typed builders (`build_<Msg>`/`validate_<Msg>`) are emitted for `fixpp::v44`
+> only.** FIX Latest builders are descoped pending a group-`Args` dedup redesign
+> (see **L-076-1**); construct FIX Latest messages via the runtime
+> `wire::body_builder` / tag-keyed path for now.
 
 ### Determinism test
 
