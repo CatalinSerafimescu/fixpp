@@ -28,6 +28,7 @@
 
 #include <gtest/gtest.h>
 
+#include <filesystem>
 #include <fixpp/dict/field_ref.hpp>
 #include <fixpp/vlatest/Fields.hpp>
 #include <fixpp/vlatest/Messages.hpp>
@@ -60,4 +61,19 @@ TEST(VlatestCompileSmoke076, FourReadTierHeadersCarryRealSymbols) {
     EXPECT_GT(fixpp::vlatest::validator::Heartbeat_rules.size(), 0U);
     EXPECT_EQ(fixpp::vlatest::fields::Heartbeat_fields[4].tag, 35)
         << "MsgType(35) must be present in the generated Heartbeat field table";
+}
+
+// gate-b/r1 P2: the typed builder tier is descoped for 076 (spec.md
+// Clarifications, Session 2026-07-16) -- emit_builders stays v44-only and no
+// vlatest/Builders.hpp is emitted. write_file() (main.cpp) skips empty
+// emitter output, so a Builders.hpp written during pre-descope development
+// could otherwise survive on disk indefinitely across ON reconfigures
+// (cmake/Codegen.cmake only removes vlatest/ wholesale on an ON->OFF flip).
+// Pin the descope guarantee directly: no such file exists after a fresh ON
+// generation.
+TEST(VlatestCompileSmoke076, NoBuildersHeaderEmitted) {
+    EXPECT_FALSE(std::filesystem::exists(FIXPP_CODEGEN_VLATEST_BUILDERS_HPP))
+        << "fixpp::vlatest::Builders.hpp must NOT be emitted -- the typed "
+           "builder tier is descoped for 076 (spec.md Clarifications, "
+           "Session 2026-07-16); only read/reify/args/validator ship.";
 }

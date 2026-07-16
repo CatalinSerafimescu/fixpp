@@ -329,6 +329,16 @@ set(FIXPP_CODEGEN_FIX_LATEST_LAST_USED "${FIXPP_CODEGEN_FIX_LATEST}" CACHE INTER
 # genex to gate.
 if(NOT FIXPP_CODEGEN_FIX_LATEST)
   file(REMOVE_RECURSE "${FIXPP_CODEGEN_OUT_DIR}/vlatest")
+else()
+  # Gate B PR#195 round 1 P2: the typed builder tier was descoped for this
+  # feature (spec.md Clarifications, Session 2026-07-16) -- emit_builders
+  # stays v44-only, no vlatest/Builders.hpp is emitted. write_file()
+  # (main.cpp) skips empty emitter output, so a vlatest/Builders.hpp written
+  # during pre-descope development would otherwise survive indefinitely
+  # across ON reconfigures (nothing else in this file's regen-guards touches
+  # that specific stale file). Unconditional file(REMOVE ...) on a missing
+  # path is a no-op, so this runs harmlessly on every ON configure.
+  file(REMOVE "${FIXPP_CODEGEN_OUT_DIR}/vlatest/Builders.hpp")
 endif()
 
 if(_codegen_source_fingerprint_changed)

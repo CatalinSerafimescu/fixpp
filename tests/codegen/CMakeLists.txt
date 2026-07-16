@@ -145,6 +145,7 @@ target_include_directories(codegen_vlatest_tests PRIVATE
 )
 target_compile_definitions(codegen_vlatest_tests PRIVATE
   "FIXPP_DISPATCH_APPLICATION_HEADER_PATH=\"${FIXPP_CODEGEN_OUT}/fixpp/_dispatch/reify_dispatch_application.hpp\""
+  "FIXPP_CODEGEN_VLATEST_BUILDERS_HPP=\"${FIXPP_CODEGEN_OUT}/fixpp/vlatest/Builders.hpp\""
 )
 add_test(NAME codegen_vlatest_tests COMMAND codegen_vlatest_tests)
 set_tests_properties(codegen_vlatest_tests PROPERTIES
