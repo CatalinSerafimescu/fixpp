@@ -78,7 +78,7 @@ specs/076-fix-latest-typed-codegen/
 tools/codegen/fixpp-codegen/
 ├── ir.cpp               # build_ir: OrchestraLoader load branch + kCodegenVersions vlatest row + DOMINANT: Orchestra-native IR projection (research R2b) — fixr:-schema sibling to populate_group_order (which is <fix>-only, :158/:186) producing group_order + header_trailer_tags + category→is_application + lossless occurrence list
 ├── gen_util.hpp         # app_version_enum: "vlatest" special-case (mirror vt11→Unknown)
-├── emit_builders.cpp    # REQUIRED: widen the ir.ns=="v44" early-return gate (:646) to emit build_<Msg>+validate_<Msg> for the vlatest APP-SUBSET via a vlatest coverage predicate (NOT reusing FIX44 kOfficial33/kN002N003Excluded, :58-76); read/reify/args stay all-181 (does NOT generate for free — see research.md R-summary row 2b/2c)
+├── emit_builders.cpp    # [superseded 2026-07-16 — see spec.md Clarifications → Session 2026-07-16] AS PLANNED: widen the ir.ns=="v44" early-return gate (:646) to emit build_<Msg>+validate_<Msg> for the vlatest APP-SUBSET via a vlatest coverage predicate (NOT reusing FIX44 kOfficial33/kN002N003Excluded, :58-76); read/reify/args stay all-181 (does NOT generate for free — see research.md R-summary row 2b/2c). AS LANDED: NOT widened — emit_builders reverted to v44-only, no vlatest/Builders.hpp emitted (builder tier deferred to a follow-up)
 ├── emit_messages.cpp    # unchanged (keys on ir.ns → fixpp::vlatest for free)
 ├── emit_validator.cpp   # unchanged (keys on ir.ns → constexpr rule tables for free)
 ├── emit_dispatch.cpp    # unchanged — vlatest deliberately excluded from dispatch_application (FR-009)
@@ -91,8 +91,8 @@ cmake/
 dictionaries/orchestra/
 └── OrchestraFIXLatest.xml   # existing pinned input (074) — unchanged
 
-<build tree>/_codegen/include/fixpp/vlatest/   # generated: Fields/Messages/Validator/Reify/Builders.hpp + census Manifest
-specs/076-fix-latest-typed-codegen/contracts/golden/   # extend the checked-in codegen golden with vlatest + census manifest AND the legacy tiers + _dispatch/ inventory V-7 diffs against (goldens live under specs/<id>/contracts/golden/, e.g. specs/003-.../, specs/069-...; NOT tools/codegen/golden/, which does not exist)
+<build tree>/_codegen/include/fixpp/vlatest/   # generated: Fields/Messages/Validator/Reify.hpp + census Manifest (NO Builders.hpp — [superseded 2026-07-16 — see spec.md Clarifications → Session 2026-07-16 (builder tier descope)])
+specs/076-fix-latest-typed-codegen/contracts/golden/   # [superseded 2026-07-16 — see contracts/build-and-verification.md V-4/V-7 and contracts/golden/README.md] as landed: golden = vlatest_Messages.golden.hpp ONLY (matches the 003/069 Messages.hpp-only precedent); NO extended Fields/Validator/Reify/Builders/Manifest/legacy/_dispatch/ golden — additivity of those is proven by the OFF-vs-ON relative byte-diff walk instead (goldens live under specs/<id>/contracts/golden/, e.g. specs/003-.../, specs/069-...; NOT tools/codegen/golden/, which does not exist)
 
 tests/
 ├── codegen/             # completeness census (raw-XML exact-set) + determinism assertion
