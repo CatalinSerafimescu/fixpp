@@ -2617,7 +2617,10 @@ if(TARGET fixpp_codegen_generate)
   # removes _codegen/include/fixpp/vlatest/ entirely (076 gate-b/r1 P1
   # precedent: an ungated vlatest-including target fails to compile on an OFF
   # build).
-  if(FIXPP_CODEGEN_FIX_LATEST)
+  # Gated on FIXPP_BUILD_HEAVY_BUILDER_TESTS too (heavy-TU config gating —
+  # top-level CMakeLists): this TU #includes the ~78MB deduped vlatest
+  # Builders.hpp (~3.7-4.6 GiB RSS to compile).
+  if(FIXPP_CODEGEN_FIX_LATEST AND FIXPP_BUILD_HEAVY_BUILDER_TESTS)
     add_executable(test_077_vlatest_builder_roundtrip
       test_077_vlatest_builder_roundtrip.cpp
     )
@@ -2651,7 +2654,10 @@ if(TARGET fixpp_codegen_generate)
   # application set (156, no v44 exclusion inherited -- FR-006/T017). Its own
   # executable, not joined to test_067_builder_roundtrip above: this TU
   # #includes the ~75MB deduped fixpp::v50sp2::Builders.hpp (558 shared
-  # plans). v50sp2 is not gated by FIXPP_CODEGEN_FIX_LATEST (always emitted).
+  # plans). v50sp2 is not gated by FIXPP_CODEGEN_FIX_LATEST (always emitted), but
+  # IS gated on FIXPP_BUILD_HEAVY_BUILDER_TESTS (heavy-TU config gating —
+  # top-level CMakeLists).
+  if(FIXPP_BUILD_HEAVY_BUILDER_TESTS)
   add_executable(test_077_allversions_builder_roundtrip
     test_077_allversions_builder_roundtrip.cpp
   )
@@ -2674,6 +2680,7 @@ if(TARGET fixpp_codegen_generate)
     COMMAND test_077_allversions_builder_roundtrip)
   set_tests_properties(test_077_allversions_builder_roundtrip PROPERTIES
     LABELS "077;us2;builder-roundtrip;v50sp2")
+  endif()  # FIXPP_BUILD_HEAVY_BUILDER_TESTS
 
   # vlatest half of T016 -- kept in a SEPARATE TU/executable from the v50sp2
   # one above (not one combined "allversions" TU): compiling both the ~75MB
@@ -2681,8 +2688,9 @@ if(TARGET fixpp_codegen_generate)
   # their peak RSS past what a -j1 WSL2 build can survive (each alone is
   # already ~3.7-4.6 GiB per the T015 compile-resource bench;
   # feedback_build_resource_cap_oom). Gated on FIXPP_CODEGEN_FIX_LATEST like
-  # test_077_vlatest_builder_roundtrip above.
-  if(FIXPP_CODEGEN_FIX_LATEST)
+  # test_077_vlatest_builder_roundtrip above, + FIXPP_BUILD_HEAVY_BUILDER_TESTS
+  # (heavy-TU config gating — top-level CMakeLists).
+  if(FIXPP_CODEGEN_FIX_LATEST AND FIXPP_BUILD_HEAVY_BUILDER_TESTS)
     add_executable(test_077_allversions_builder_roundtrip_vlatest
       test_077_allversions_builder_roundtrip_vlatest.cpp
     )

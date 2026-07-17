@@ -186,6 +186,29 @@ if(FIXPP_BUILD_CODEGEN_TOOL)
   add_subdirectory(tools/codegen/fixpp-codegen)
 endif()
 
+# 077-builder-args-dedup: the v50sp2/vlatest builder completeness+roundtrip test
+# TUs each #include a ~75-78MB deduped Builders.hpp and peak at ~3.7-4.6 GiB RSS
+# to compile (~2x under gcc). Building them across the full sanitizer/coverage/
+# compiler matrix OOMs or times out the 16GB/4-core/90-min hosted runners
+# (feedback_build_resource_cap_oom): parallel giant compiles exhaust RAM
+# (gcc/ubsan/coverage) and serializing them past the 90-min cap (tsan,
+# windows-msvc-asan under the Ninja job pool). They add real signal only under
+# ASan (deep vlatest/v50sp2 group shapes exercise builder+wire memory paths the
+# v44 set never reaches) + a debug correctness/assert run + one MSVC
+# compile-coverage build (the C1128 /bigobj gate). TSan is worthless here (the
+# tests are single-threaded — no data race is possible), coverage of generated
+# builder code is vacuous (the completeness census already pins the set
+# structurally), and gcc-release / plain release / the libc++ variants are
+# redundant machinery already sanitized by the passing v44 (067/069) builder
+# tests. The 5 sources carry ZERO MSVC/platform-specific code, so dropping them
+# from windows-msvc-{asan,debug} loses no coverage. Default OFF (also spares
+# local WSL builds the 3.7 GiB compile); the three presets that add value turn
+# it ON: linux-clang-debug, linux-clang-asan, windows-msvc-release. The lighter
+# v44 (067/069) builder tests are NOT gated — they build everywhere.
+option(FIXPP_BUILD_HEAVY_BUILDER_TESTS
+  "Build the heavy v50sp2/vlatest builder completeness+roundtrip test TUs (~3.7-4.6 GiB RSS each to compile)"
+  OFF)
+
 # ── [2c §7.6] Configure-time codegen target graph (T016) ─────────────────────
 # cmake/Codegen.cmake:
 #   • Bootstrap-builds fixpp-codegen at configure time (execute_process into
