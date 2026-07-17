@@ -12,16 +12,24 @@
 // role).
 //
 // SCOPE NOTE: deliberately does NOT include fixpp/vlatest/Builders.hpp (nor
-// reference fixpp::vlatest::builder_registry). Builders.hpp is 131MB /
-// ~2.07M lines for the 173-message app-subset (its per-message,
-// non-deduplicated nested-group Args structs grow combinatorially with
-// nesting depth -- unlike v44/Builders.hpp: 83 messages / 3.7MB). A single
-// TU #including it was empirically measured (this implementer, 076 phase-3)
-// to exceed 22GB RSS and 6m51s wall-clock without finishing compilation,
-// SIGKILL'd to protect the 24GB build host. Escalated to the orchestrator;
-// T010/T009(a) (which need Builders.hpp) are not attempted in this phase.
-// This TU only needs the read-tier headers named in the task -- {Fields,
-// Messages,Validator,Reify} -- which are v50sp2-comparable in size/cost.
+// reference fixpp::vlatest::builder_registry). Builders.hpp was 131MB /
+// ~2.07M lines for the 173-message app-subset under 076's per-message,
+// non-deduplicated emitter (its nested-group Args structs grew
+// combinatorially with nesting depth -- unlike v44/Builders.hpp: 83
+// messages / 3.7MB) -- a single TU #including it was empirically measured
+// (076 phase-3) to exceed 22GB RSS and 6m51s wall-clock without finishing
+// compilation, SIGKILL'd to protect the 24GB build host.
+//
+// 077-builder-args-dedup re-enables the tier via component-identity Args
+// dedup (576 shared plans instead of ~26k message-rooted structs, ~78MB;
+// T017 fixed a version-unscoped N-002/N-003 exclusion bug that had put the
+// build-tree count at 573 -- see BuilderDedupCount077.VlatestStructCountIs576) --
+// see BuildersHeaderEmittedDeduped below (flipped to assert PRESENCE) and
+// tests/session/test_077_vlatest_builder_roundtrip.cpp / this binary's
+// BuilderDedupCount077.VlatestStructCountIs576 (T012/T013) for the
+// #include/compile leg this TU still deliberately avoids -- this TU only
+// needs the read-tier headers named in the task -- {Fields,Messages,
+// Validator,Reify} -- which are v50sp2-comparable in size/cost.
 //
 // Anchors: specs/076-fix-latest-typed-codegen/tasks.md T008;
 //          tests/session/test_069_us1_smoke.cpp (per-tier smoke precedent).
@@ -63,17 +71,22 @@ TEST(VlatestCompileSmoke076, FourReadTierHeadersCarryRealSymbols) {
         << "MsgType(35) must be present in the generated Heartbeat field table";
 }
 
-// gate-b/r1 P2: the typed builder tier is descoped for 076 (spec.md
-// Clarifications, Session 2026-07-16) -- emit_builders stays v44-only and no
-// vlatest/Builders.hpp is emitted. write_file() (main.cpp) skips empty
-// emitter output, so a Builders.hpp written during pre-descope development
-// could otherwise survive on disk indefinitely across ON reconfigures
-// (cmake/Codegen.cmake only removes vlatest/ wholesale on an ON->OFF flip).
-// Pin the descope guarantee directly: no such file exists after a fresh ON
-// generation.
-TEST(VlatestCompileSmoke076, NoBuildersHeaderEmitted) {
-    EXPECT_FALSE(std::filesystem::exists(FIXPP_CODEGEN_VLATEST_BUILDERS_HPP))
-        << "fixpp::vlatest::Builders.hpp must NOT be emitted -- the typed "
-           "builder tier is descoped for 076 (spec.md Clarifications, "
-           "Session 2026-07-16); only read/reify/args/validator ship.";
+// 077-builder-args-dedup T014 [US1]: the typed builder tier, descoped by 076
+// (gate-b/r1 P2 -- see the SCOPE NOTE above), is RE-ENABLED by 077's
+// component-identity Args-dedup emitter (cmake/Codegen.cmake no longer
+// deletes vlatest/Builders.hpp on an ON configure -- FR-004/FR-012, G4a).
+// This test's invariant is exactly reversed from 076: pin that the header
+// NOW EXISTS and has the deduped shape (bounded size -- NOT the pre-dedup
+// ~137MB; struct count is pinned precisely by
+// BuilderDedupCount077.VlatestStructCountIs576 in this same binary, T013).
+TEST(VlatestCompileSmoke076, BuildersHeaderEmittedDeduped) {
+    ASSERT_TRUE(std::filesystem::exists(FIXPP_CODEGEN_VLATEST_BUILDERS_HPP))
+        << "fixpp::vlatest::Builders.hpp must be emitted -- 077 re-enables "
+           "the typed builder tier via structural-plan dedup "
+           "(specs/077-builder-args-dedup/tasks.md T014).";
+    auto const size = std::filesystem::file_size(FIXPP_CODEGEN_VLATEST_BUILDERS_HPP);
+    EXPECT_LT(size, 100ull * 1024 * 1024)
+        << "vlatest/Builders.hpp is " << size
+        << " bytes -- dedup may have regressed toward the pre-077 ~137MB "
+           "message-rooted shape.";
 }

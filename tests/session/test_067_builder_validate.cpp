@@ -115,7 +115,7 @@ TEST(BuilderValidate067, NewOrderList_MissingClOrdIdInNoOrdersEntry_GroupDepthFa
     using namespace fixpp_test_support::seeds067;
     auto const& seed = kNewOrderListSeed;
 
-    fixpp::v44::NewOrderListOrdersArgs order_args{};
+    fixpp::v44::groups::G_73_2Args order_args{};
     // cl_ord_id intentionally left unset -- the discriminating missing
     // GROUP-ENTRY required field (list_seq_no/side ARE the entry's other
     // two required members, dictionaries/FIX44.xml:2945-2947; both set so
@@ -123,13 +123,13 @@ TEST(BuilderValidate067, NewOrderList_MissingClOrdIdInNoOrdersEntry_GroupDepthFa
     order_args.list_seq_no = seed.order.list_seq_no;
     order_args.side = seed.order.side;
     order_args.symbol = seed.order.symbol;
-    std::array<fixpp::v44::NewOrderListOrdersArgs, 1> orders{order_args};
+    std::array<fixpp::v44::groups::G_73_2Args, 1> orders{order_args};
 
     fixpp::v44::NewOrderListArgs args{};
     args.list_id = seed.list_id;
     args.bid_type = seed.bid_type;
     args.tot_no_orders = seed.tot_no_orders;
-    args.orders = std::span<const fixpp::v44::NewOrderListOrdersArgs>{orders};  // REQUIRED group
+    args.orders = std::span<const fixpp::v44::groups::G_73_2Args>{orders};  // REQUIRED group
 
     auto r = fixpp::v44::validate_NewOrderList(args);
     ASSERT_FALSE(r.has_value())
@@ -142,7 +142,7 @@ TEST(BuilderValidate067, NewOrderList_MissingClOrdIdInNoOrdersEntry_GroupDepthFa
     // unchanged and correct in both legs).
     order_args.cl_ord_id = seed.order.cl_ord_id;
     orders[0] = order_args;
-    args.orders = std::span<const fixpp::v44::NewOrderListOrdersArgs>{orders};
+    args.orders = std::span<const fixpp::v44::groups::G_73_2Args>{orders};
     auto r_ok = fixpp::v44::validate_NewOrderList(args);
     EXPECT_TRUE(r_ok.has_value())
         << "with ClOrdID present at group depth the identical shape must validate clean";
@@ -157,14 +157,14 @@ TEST(BuilderValidate067, WvsXPerOccurrenceRequiredSetDivergence) {
     // W: entry WITH MDEntryType(269) -> validates clean.
     {
         auto const& seed = kMarketDataSnapshotFullRefreshSeed;
-        fixpp::v44::MarketDataSnapshotFullRefreshMDEntriesArgs entry_args{};
+        fixpp::v44::groups::G_268_1Args entry_args{};
         entry_args.md_entry_type = seed.entry.md_entry_type;
-        std::array<fixpp::v44::MarketDataSnapshotFullRefreshMDEntriesArgs, 1> entries{entry_args};
+        std::array<fixpp::v44::groups::G_268_1Args, 1> entries{entry_args};
         fixpp::v44::MarketDataSnapshotFullRefreshArgs args{};
         args.symbol = seed.symbol;
         args.md_req_id = seed.md_req_id;
         args.md_entries =
-            std::span<const fixpp::v44::MarketDataSnapshotFullRefreshMDEntriesArgs>{entries};
+            std::span<const fixpp::v44::groups::G_268_1Args>{entries};
         auto r = fixpp::v44::validate_MarketDataSnapshotFullRefresh(args);
         EXPECT_TRUE(r.has_value()) << "W entry WITH MDEntryType(269) must validate clean";
     }
@@ -172,14 +172,14 @@ TEST(BuilderValidate067, WvsXPerOccurrenceRequiredSetDivergence) {
     {
         auto const& seed = kMarketDataSnapshotFullRefreshSeed;
         (void)seed;
-        fixpp::v44::MarketDataSnapshotFullRefreshMDEntriesArgs entry_args{};
+        fixpp::v44::groups::G_268_1Args entry_args{};
         // md_entry_type intentionally left unset.
-        std::array<fixpp::v44::MarketDataSnapshotFullRefreshMDEntriesArgs, 1> entries{entry_args};
+        std::array<fixpp::v44::groups::G_268_1Args, 1> entries{entry_args};
         fixpp::v44::MarketDataSnapshotFullRefreshArgs args{};
         args.symbol = "MSFT";
         args.md_req_id = "MDR-W1";
         args.md_entries =
-            std::span<const fixpp::v44::MarketDataSnapshotFullRefreshMDEntriesArgs>{entries};
+            std::span<const fixpp::v44::groups::G_268_1Args>{entries};
         auto r = fixpp::v44::validate_MarketDataSnapshotFullRefresh(args);
         ASSERT_FALSE(r.has_value())
             << "W entry MISSING MDEntryType(269) must fail (269 required in W)";
@@ -190,14 +190,14 @@ TEST(BuilderValidate067, WvsXPerOccurrenceRequiredSetDivergence) {
     // in X (the divergence from W).
     {
         auto const& seed = kMarketDataIncrementalRefreshSeed;
-        fixpp::v44::MarketDataIncrementalRefreshMDEntriesArgs entry_args{};
+        fixpp::v44::groups::G_268_2Args entry_args{};
         entry_args.md_update_action = seed.entry.md_update_action;
         // md_entry_type intentionally left unset (optional in X).
-        std::array<fixpp::v44::MarketDataIncrementalRefreshMDEntriesArgs, 1> entries{entry_args};
+        std::array<fixpp::v44::groups::G_268_2Args, 1> entries{entry_args};
         fixpp::v44::MarketDataIncrementalRefreshArgs args{};
         args.md_req_id = seed.md_req_id;
         args.md_entries =
-            std::span<const fixpp::v44::MarketDataIncrementalRefreshMDEntriesArgs>{entries};
+            std::span<const fixpp::v44::groups::G_268_2Args>{entries};
         auto r = fixpp::v44::validate_MarketDataIncrementalRefresh(args);
         EXPECT_TRUE(r.has_value())
             << "X entry WITHOUT MDEntryType(269) but WITH MDUpdateAction(279) must validate "
@@ -205,14 +205,14 @@ TEST(BuilderValidate067, WvsXPerOccurrenceRequiredSetDivergence) {
     }
     // X: entry MISSING MDUpdateAction(279) -> fails (279 required in X).
     {
-        fixpp::v44::MarketDataIncrementalRefreshMDEntriesArgs entry_args{};
+        fixpp::v44::groups::G_268_2Args entry_args{};
         entry_args.md_entry_type = '0';
         // md_update_action intentionally left unset.
-        std::array<fixpp::v44::MarketDataIncrementalRefreshMDEntriesArgs, 1> entries{entry_args};
+        std::array<fixpp::v44::groups::G_268_2Args, 1> entries{entry_args};
         fixpp::v44::MarketDataIncrementalRefreshArgs args{};
         args.md_req_id = "MDR-X1";
         args.md_entries =
-            std::span<const fixpp::v44::MarketDataIncrementalRefreshMDEntriesArgs>{entries};
+            std::span<const fixpp::v44::groups::G_268_2Args>{entries};
         auto r = fixpp::v44::validate_MarketDataIncrementalRefresh(args);
         ASSERT_FALSE(r.has_value())
             << "X entry MISSING MDUpdateAction(279) must fail (279 required in X)";
@@ -280,7 +280,7 @@ TEST(BuilderValidate067, Quote_EngagedEmptyOptionalGroup_ValidatesClean) {
     fixpp::v44::QuoteArgs args{};
     args.quote_id = "Q1";  // the sole required top-level field (117)
     args.party_i_ds =
-        std::span<const fixpp::v44::QuotePartyIDsArgs>{};  // engaged (has_value), count()==0
+        std::span<const fixpp::v44::groups::G_453Args>{};  // engaged (has_value), count()==0
     auto r = fixpp::v44::validate_Quote(args);
     EXPECT_TRUE(r.has_value())
         << "engaged-empty OPTIONAL group must validate clean (G5) -- distinct from a REQUIRED "

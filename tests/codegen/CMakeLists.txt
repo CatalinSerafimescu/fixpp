@@ -132,6 +132,16 @@ if(FIXPP_CODEGEN_FIX_LATEST)
 add_executable(codegen_vlatest_tests
   vlatest_compile_smoke_test.cpp        # T008
   vlatest_dispatch_exclusion_test.cpp   # T011
+  # 077-builder-args-dedup T013 [US1]: joins this existing binary
+  # ([const §VII.8] whole-binary grouping; 069's test_067_builder_roundtrip
+  # precedent). Pure text-parse of Builders.hpp (no #include of the heavy
+  # header, unlike the sources above) -- cheap, isolation-safe, reuses the
+  # FIXPP_CODEGEN_VLATEST_BUILDERS_HPP macro already defined below.
+  test_077_builder_dedup_count.cpp      # T013
+  # 077-builder-args-dedup T018 [US2]: vt11/v42 emit-no-builders witness +
+  # v44/v50sp2/vlatest positive control. Pure filesystem existence check --
+  # same isolation-safety rationale as T013 above.
+  test_077_builder_no_emit.cpp          # T018
 )
 add_dependencies(codegen_vlatest_tests fixpp_codegen_generate)
 target_link_libraries(codegen_vlatest_tests PRIVATE
@@ -146,10 +156,16 @@ target_include_directories(codegen_vlatest_tests PRIVATE
 target_compile_definitions(codegen_vlatest_tests PRIVATE
   "FIXPP_DISPATCH_APPLICATION_HEADER_PATH=\"${FIXPP_CODEGEN_OUT}/fixpp/_dispatch/reify_dispatch_application.hpp\""
   "FIXPP_CODEGEN_VLATEST_BUILDERS_HPP=\"${FIXPP_CODEGEN_OUT}/fixpp/vlatest/Builders.hpp\""
+  # 077-builder-args-dedup T018 [US2]: per-version Builders.hpp paths for the
+  # no-emit / positive-control witness (test_077_builder_no_emit.cpp).
+  "FIXPP_CODEGEN_V42_BUILDERS_HPP=\"${FIXPP_CODEGEN_OUT}/fixpp/v42/Builders.hpp\""
+  "FIXPP_CODEGEN_V44_BUILDERS_HPP=\"${FIXPP_CODEGEN_OUT}/fixpp/v44/Builders.hpp\""
+  "FIXPP_CODEGEN_V50SP2_BUILDERS_HPP=\"${FIXPP_CODEGEN_OUT}/fixpp/v50sp2/Builders.hpp\""
+  "FIXPP_CODEGEN_VT11_BUILDERS_HPP=\"${FIXPP_CODEGEN_OUT}/fixpp/vt11/Builders.hpp\""
 )
 add_test(NAME codegen_vlatest_tests COMMAND codegen_vlatest_tests)
 set_tests_properties(codegen_vlatest_tests PROPERTIES
-  LABELS "codegen;076;vlatest_smoke;vlatest_dispatch_exclusion")
+  LABELS "codegen;076;vlatest_smoke;vlatest_dispatch_exclusion;077;builder-dedup")
 
 # 076-fix-latest-typed-codegen T013 [US2]: V-1 completeness census —
 # independent raw-XML walker (pugixml, no ir.cpp/ir.hpp/emit_manifest.cpp
@@ -191,7 +207,150 @@ target_compile_definitions(codegen_vlatest_manifest_class_test PRIVATE
 add_test(NAME codegen_vlatest_manifest_class_test COMMAND codegen_vlatest_manifest_class_test)
 set_tests_properties(codegen_vlatest_manifest_class_test PROPERTIES
   LABELS "codegen;076;vlatest_manifest_class")
+
+# 077-builder-args-dedup T023 [US4]: vlatest builder-completeness census.
+# Own executable, gated on FIXPP_CODEGEN_FIX_LATEST (mirrors
+# test_077_vlatest_builder_roundtrip above the tier gate at T012) —
+# #includes the ~78MB deduped fixpp::vlatest::Builders.hpp; build THIS
+# target with -j1 (feedback_build_resource_cap_oom). Gated on
+# FIXPP_BUILD_HEAVY_BUILDER_TESTS (heavy-TU config gating — top-level CMakeLists).
+if(FIXPP_BUILD_HEAVY_BUILDER_TESTS)
+add_executable(codegen_077_vlatest_builder_completeness_test
+  test_077_vlatest_builder_completeness.cpp
+)
+add_dependencies(codegen_077_vlatest_builder_completeness_test fixpp_codegen_generate)
+target_link_libraries(codegen_077_vlatest_builder_completeness_test PRIVATE
+  fixpp_wire
+  fixpp_dictionary
+  pugixml::pugixml
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(codegen_077_vlatest_builder_completeness_test PRIVATE
+  "${FIXPP_CODEGEN_OUT}"
+)
+target_compile_definitions(codegen_077_vlatest_builder_completeness_test PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
+  "FIXPP_CODEGEN_VLATEST_BUILDERS_HPP=\"${FIXPP_CODEGEN_OUT}/fixpp/vlatest/Builders.hpp\""
+)
+# MSVC C1128: this TU takes the address of every vlatest build_/validate_ over
+# the ~78MB deduped Builders.hpp (173 plans); under debug/asan the section count
+# exceeds the default COFF object-format limit. /bigobj lifts the 2^16 cap.
+target_compile_options(codegen_077_vlatest_builder_completeness_test PRIVATE
+  $<$<CXX_COMPILER_ID:MSVC>:/bigobj>
+)
+add_test(NAME codegen_077_vlatest_builder_completeness_test COMMAND codegen_077_vlatest_builder_completeness_test)
+set_tests_properties(codegen_077_vlatest_builder_completeness_test PROPERTIES
+  LABELS "codegen;077;builder-completeness;vlatest")
+endif()  # FIXPP_BUILD_HEAVY_BUILDER_TESTS
 endif()  # FIXPP_CODEGEN_FIX_LATEST
+
+# 077-builder-args-dedup T023 [US4]: v44 builder-completeness census
+# (contracts/builder-completeness.md C1-C4) — address-of compile-time gate
+# over the generated fixpp::v44::Builders.hpp + the committed
+# generated/v44_builder_completeness_entries.def table, cross-checked at
+# runtime against an independent raw-XML walk (builder_completeness_common.hpp).
+add_executable(codegen_077_v44_builder_completeness_test
+  test_077_v44_builder_completeness.cpp
+)
+add_dependencies(codegen_077_v44_builder_completeness_test fixpp_codegen_generate)
+target_link_libraries(codegen_077_v44_builder_completeness_test PRIVATE
+  fixpp_wire
+  fixpp_dictionary
+  pugixml::pugixml
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(codegen_077_v44_builder_completeness_test PRIVATE
+  "${FIXPP_CODEGEN_OUT}"
+)
+target_compile_definitions(codegen_077_v44_builder_completeness_test PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
+  "FIXPP_CODEGEN_V44_BUILDERS_HPP=\"${FIXPP_CODEGEN_OUT}/fixpp/v44/Builders.hpp\""
+)
+add_test(NAME codegen_077_v44_builder_completeness_test COMMAND codegen_077_v44_builder_completeness_test)
+set_tests_properties(codegen_077_v44_builder_completeness_test PROPERTIES
+  LABELS "codegen;077;builder-completeness")
+
+# 077-builder-args-dedup T023 [US4]: v50sp2 builder-completeness census. Own
+# executable (not joined to the v44 target above) — #includes the ~75MB
+# deduped fixpp::v50sp2::Builders.hpp (RSS discipline, mirrors
+# tests/session/CMakeLists.txt's per-version builder-roundtrip split). Gated on
+# FIXPP_BUILD_HEAVY_BUILDER_TESTS (heavy-TU config gating — top-level CMakeLists).
+if(FIXPP_BUILD_HEAVY_BUILDER_TESTS)
+add_executable(codegen_077_v50sp2_builder_completeness_test
+  test_077_v50sp2_builder_completeness.cpp
+)
+add_dependencies(codegen_077_v50sp2_builder_completeness_test fixpp_codegen_generate)
+target_link_libraries(codegen_077_v50sp2_builder_completeness_test PRIVATE
+  fixpp_wire
+  fixpp_dictionary
+  pugixml::pugixml
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(codegen_077_v50sp2_builder_completeness_test PRIVATE
+  "${FIXPP_CODEGEN_OUT}"
+)
+target_compile_definitions(codegen_077_v50sp2_builder_completeness_test PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
+  "FIXPP_CODEGEN_V50SP2_BUILDERS_HPP=\"${FIXPP_CODEGEN_OUT}/fixpp/v50sp2/Builders.hpp\""
+)
+# MSVC C1128: this TU takes the address of every v50sp2 build_/validate_ over
+# the ~75MB deduped Builders.hpp (156 plans); under debug/asan the section count
+# exceeds the default COFF object-format limit. /bigobj lifts the 2^16 cap.
+target_compile_options(codegen_077_v50sp2_builder_completeness_test PRIVATE
+  $<$<CXX_COMPILER_ID:MSVC>:/bigobj>
+)
+add_test(NAME codegen_077_v50sp2_builder_completeness_test COMMAND codegen_077_v50sp2_builder_completeness_test)
+set_tests_properties(codegen_077_v50sp2_builder_completeness_test PROPERTIES
+  LABELS "codegen;077;builder-completeness")
+endif()  # FIXPP_BUILD_HEAVY_BUILDER_TESTS
+
+# 077-builder-args-dedup T026 [US4]: vt11 + v42 completeness (C3c) + the C4
+# structural-key safety pin. Cheap/ungated (no Builders.hpp #include —
+# filesystem existence + text parsing only).
+add_executable(codegen_077_v42_vt11_completeness_c4_test
+  test_077_v42_vt11_completeness_and_c4.cpp
+)
+add_dependencies(codegen_077_v42_vt11_completeness_c4_test fixpp_codegen_generate)
+target_link_libraries(codegen_077_v42_vt11_completeness_c4_test PRIVATE
+  pugixml::pugixml
+  GTest::gtest
+  GTest::gtest_main
+)
+target_compile_definitions(codegen_077_v42_vt11_completeness_c4_test PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
+  "FIXPP_CODEGEN_V42_BUILDERS_HPP=\"${FIXPP_CODEGEN_OUT}/fixpp/v42/Builders.hpp\""
+  "FIXPP_CODEGEN_VT11_BUILDERS_HPP=\"${FIXPP_CODEGEN_OUT}/fixpp/vt11/Builders.hpp\""
+  "FIXPP_CODEGEN_V50SP2_BUILDERS_HPP=\"${FIXPP_CODEGEN_OUT}/fixpp/v50sp2/Builders.hpp\""
+)
+add_test(NAME codegen_077_v42_vt11_completeness_c4_test COMMAND codegen_077_v42_vt11_completeness_c4_test)
+set_tests_properties(codegen_077_v42_vt11_completeness_c4_test PROPERTIES
+  LABELS "codegen;077;builder-completeness")
+
+# 077-builder-args-dedup T025 [US4]: builder_completeness_mutation_witness —
+# standalone, §8-EXEMPT (spawns a subprocess, writes a scratch temp dir; not
+# folded into a whole-binary target). Depends on the T024 seam's
+# fixpp-codegen-drop-witness binary (EXCLUDE_FROM_ALL — built only via this
+# dependency).
+add_executable(codegen_builder_completeness_mutation_witness_test
+  builder_completeness_mutation_witness_test.cpp
+)
+add_dependencies(codegen_builder_completeness_mutation_witness_test fixpp-codegen-drop-witness)
+target_link_libraries(codegen_builder_completeness_mutation_witness_test PRIVATE
+  pugixml::pugixml
+  GTest::gtest
+  GTest::gtest_main
+)
+target_compile_definitions(codegen_builder_completeness_mutation_witness_test PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
+  "FIXPP_CODEGEN_DROP_WITNESS_BIN=\"$<TARGET_FILE:fixpp-codegen-drop-witness>\""
+)
+add_test(NAME codegen_builder_completeness_mutation_witness_test
+  COMMAND codegen_builder_completeness_mutation_witness_test)
+set_tests_properties(codegen_builder_completeness_mutation_witness_test PROPERTIES
+  LABELS "codegen;077;builder-completeness;mutation-witness")
 
 # T041: determinism_test — NFR-003-7 / AC-T1 / AC-T2
 #
@@ -224,9 +383,22 @@ target_compile_definitions(codegen_determinism_test PRIVATE
   "FIXPP_CODEGEN_GOLDEN_DIR=\"${CMAKE_SOURCE_DIR}/specs/003-dictionary-codegen/contracts/golden\""
   "FIXPP_CODEGEN_069_OFFICIAL_GOLDEN_DIR=\"${CMAKE_SOURCE_DIR}/specs/069-v44-all-families/contracts/golden\""
   "FIXPP_CODEGEN_076_GOLDEN_DIR=\"${CMAKE_SOURCE_DIR}/specs/076-fix-latest-typed-codegen/contracts/golden\""
+  # 077-builder-args-dedup T027 [Polish]: v44 `all`-mode + v50sp2 + vlatest
+  # Builders.hpp checked-in-golden-diff gate (FR-013).
+  "FIXPP_CODEGEN_077_GOLDEN_DIR=\"${CMAKE_SOURCE_DIR}/specs/077-builder-args-dedup/contracts/golden\""
 )
 add_test(NAME codegen_determinism_test COMMAND codegen_determinism_test)
 set_tests_properties(codegen_determinism_test PROPERTIES LABELS codegen)
+
+# 077-builder-args-dedup T019 [US2]: only defined when THIS build was
+# configured with the tier ON -- MainTreeVlatestBuildersUnaffectedByOffPathWitness
+# in determinism_test.cpp is #ifdef-guarded on it, so an OFF-configured tree
+# (where _codegen/include/fixpp/vlatest/ doesn't exist at all) never sees a
+# spurious existence-check failure.
+if(FIXPP_CODEGEN_FIX_LATEST)
+  target_compile_definitions(codegen_determinism_test PRIVATE
+    "FIXPP_CODEGEN_MAIN_VLATEST_BUILDERS_HPP=\"${FIXPP_CODEGEN_OUT}/fixpp/vlatest/Builders.hpp\"")
+endif()
 
 # T039: cmake -P build-graph test — fixpp::dict::codegen-build-graph-check
 #
@@ -269,3 +441,19 @@ set_tests_properties("fixpp::dict::codegen-source-staleness-check" PROPERTIES
   LABELS codegen
   RUN_SERIAL TRUE
   RESOURCE_LOCK codegen_source_tree)
+
+# 077-builder-args-dedup T022 [US3] (FR-009/SC-005, T006 decision = FULL
+# 16-artifact recursive byte-diff): regenerates the legacy read tier into an
+# isolated scratch dir (NOT the shared _codegen tree -- no RUN_SERIAL/
+# RESOURCE_LOCK needed, mirrors codegen_determinism_test's TempDir pattern)
+# and SHA256-diffs all 16 artifacts against the pre-077 T001 baseline.
+add_test(
+  NAME "fixpp::dict::read-tier-byte-diff"
+  COMMAND "${CMAKE_COMMAND}"
+    "-DFIXPP_CODEGEN_BIN=$<TARGET_FILE:fixpp-codegen>"
+    "-DFIXPP_DICT_DATA_DIR=${CMAKE_SOURCE_DIR}/dictionaries"
+    "-DFIXPP_READ_TIER_OUT=${CMAKE_BINARY_DIR}/_read_tier_byte_diff_scratch"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/read_tier_byte_diff_test.cmake"
+)
+set_tests_properties("fixpp::dict::read-tier-byte-diff" PROPERTIES
+  LABELS "codegen;077;read-tier-byte-diff")

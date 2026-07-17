@@ -24,10 +24,12 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <iterator>
 #include <map>
 #include <sstream>
@@ -62,6 +64,9 @@ namespace fs = std::filesystem;
 #ifndef FIXPP_CODEGEN_076_GOLDEN_DIR
 #error "FIXPP_CODEGEN_076_GOLDEN_DIR must be set by CMake target_compile_definitions"
 #endif
+#ifndef FIXPP_CODEGEN_077_GOLDEN_DIR
+#error "FIXPP_CODEGEN_077_GOLDEN_DIR must be set by CMake target_compile_definitions"
+#endif
 
 static constexpr const char* kBin = FIXPP_CODEGEN_BIN;
 static constexpr const char* kDictDir = FIXPP_DICT_DATA_DIR;
@@ -72,6 +77,11 @@ static constexpr const char* kOfficialBuildersGoldenDir = FIXPP_CODEGEN_069_OFFI
 // specs/003's — see cmake target_compile_definitions below.
 static constexpr const char* kVlatestGoldenDir = FIXPP_CODEGEN_076_GOLDEN_DIR;
 static constexpr const char* kVlatestGoldenFile = "vlatest_Messages.golden.hpp";
+// 077-builder-args-dedup T027 [Polish]: the deduped v44 `all`-mode /
+// v50sp2 / vlatest Builders.hpp goldens live under this feature's own
+// contracts/golden/ dir (the `official`-mode v44 golden stays under 069's,
+// gated separately by OfficialModeBuildersMatchesGolden below).
+static constexpr const char* kBuilderDedupGoldenDir = FIXPP_CODEGEN_077_GOLDEN_DIR;
 
 // XMLs in the exact order the tool accepts them (matches Codegen.cmake)
 static constexpr std::array<const char*, 4> kXmls = {"FIX42.xml", "FIX44.xml", "FIX50SP2.xml",
@@ -97,6 +107,37 @@ static std::string read_file_binary(const fs::path& p) {
     std::ostringstream ss;
     ss << f.rdbuf();
     return ss.str();
+}
+
+// Bounded byte-equality check for potentially-large generated artifacts.
+// A plain EXPECT_EQ on two multi-MB strings is a footgun: on mismatch gtest
+// builds a line-by-line unified diff over the FULL contents, which for a
+// ~75 MB / ~750k-line builder header balloons past 11 GB RAM and can OOM-kill
+// the host (observed 2026-07-16: a single crash-induced 1-byte-corrupted
+// v50sp2 builder golden drove this path to a 24 GB WSL2 kernel panic). This
+// reports the first differing byte offset + a short hex window and FAILS
+// CLEANLY at any file size — never materializing a whole-file diff.
+static void expect_bytes_equal(const std::string& actual, const std::string& expected,
+                               const std::string& context) {
+    if (actual == expected) return;  // fast path — no allocation, no diff
+    const std::size_t n = std::min(actual.size(), expected.size());
+    std::size_t off = 0;
+    while (off < n && actual[off] == expected[off]) ++off;
+    auto window = [](const std::string& s, std::size_t at) {
+        std::ostringstream o;
+        const std::size_t start = at > 8 ? at - 8 : 0;
+        const std::size_t end = std::min(s.size(), at + 9);
+        o << std::hex << std::setfill('0');
+        for (std::size_t i = start; i < end; ++i)
+            o << (i == at ? "[" : " ") << std::setw(2)
+              << static_cast<unsigned>(static_cast<unsigned char>(s[i])) << (i == at ? "]" : "");
+        return o.str();
+    };
+    ADD_FAILURE() << context << "\n  byte content differs: actual " << actual.size()
+                  << " B, expected " << expected.size() << " B; first difference at byte offset "
+                  << off << (off == n ? " (one is a prefix of the other)" : "")
+                  << "\n  actual  [" << off << "]:" << window(actual, off)
+                  << "\n  expected[" << off << "]:" << window(expected, off);
 }
 
 // Snapshot: path → last_write_time for every file reachable from root.
@@ -265,6 +306,9 @@ protected:
         ASSERT_TRUE(fs::exists(kVlatestGoldenDir)) << "076 golden dir not found: " << kVlatestGoldenDir;
         ASSERT_TRUE(fs::exists(fs::path(kVlatestGoldenDir) / kVlatestGoldenFile))
             << "076 golden not found: " << kVlatestGoldenFile;
+        // 077-builder-args-dedup T027 prerequisites.
+        ASSERT_TRUE(fs::exists(kBuilderDedupGoldenDir))
+            << "077 golden dir not found: " << kBuilderDedupGoldenDir;
     }
 };
 
@@ -308,6 +352,21 @@ TEST_F(DeterminismTest, ByteIdenticalAcrossRuns) {
     }
     EXPECT_TRUE(all_identical) << "NFR-003-7 / AC-T1 violated: at least one "
                                   "generated file differs between the two codegen runs.";
+
+    // 077-builder-args-dedup T021 [US3] (FR-007/SC-004): the generic walk
+    // above passes vacuously if a builder-bearing version's Builders.hpp
+    // silently stopped being emitted (nothing to compare is not a failure).
+    // Assert explicitly, per version, that it exists in BOTH runs and is
+    // byte-identical -- v44 and v50sp2 are builder-bearing under the plain
+    // legacy-XML run_codegen() job set (v42/vt11 emit none, T017/T018).
+    for (auto const* ver : {"v44", "v50sp2"}) {
+        fs::path b1 = run1.path / ver / "Builders.hpp";
+        fs::path b2 = run2.path / ver / "Builders.hpp";
+        ASSERT_TRUE(fs::exists(b1)) << ver << "/Builders.hpp missing from run1";
+        ASSERT_TRUE(fs::exists(b2)) << ver << "/Builders.hpp missing from run2";
+        expect_bytes_equal(read_file_binary(b1), read_file_binary(b2),
+                           std::string(ver) + "/Builders.hpp not byte-identical across runs");
+    }
 }
 
 TEST_F(DeterminismTest, NoArgsExitsTwo) { EXPECT_EQ(exit_code(run_codegen_args("")), 2); }
@@ -403,18 +462,13 @@ TEST_F(DeterminismTest, GeneratedMatchesGolden) {
         std::string gen_bytes = read_file_binary(generated);
         std::string golden_bytes = read_file_binary(golden);
 
-        EXPECT_EQ(gen_bytes, golden_bytes)
-            << "Golden mismatch for " << kVersions[i] << ": generated " << gen_bytes.size()
-            << " bytes"
-            << ", golden " << golden_bytes.size() << " bytes.\n"
-            << "  generated: " << generated << "\n"
-            << "  golden:    " << golden << "\n"
-            << "  Run 'diff " << generated.string() << " " << golden.string()
-            << "' to see the diff.\n"
-            << "  Regenerate golden with:\n"
-            << "    " << kBin << " --xml " << (fs::path(kDictDir) / kXmls[i]).string()
-            << " --out <golden-dir> && cp <golden-dir>/" << kVersions[i] << "/Messages.hpp "
-            << golden.string();
+        expect_bytes_equal(gen_bytes, golden_bytes,
+                           "Golden mismatch for " + std::string(kVersions[i]) +
+                               " Messages.hpp\n  generated: " + generated.string() +
+                               "\n  golden:    " + golden.string() + "\n  Regenerate: " + kBin +
+                               " --xml " + (fs::path(kDictDir) / kXmls[i]).string() +
+                               " --out <dir> && cp <dir>/" + kVersions[i] + "/Messages.hpp " +
+                               golden.string());
     }
 }
 
@@ -441,17 +495,13 @@ TEST_F(DeterminismTest, VlatestGeneratedMatchesGolden) {
     std::string gen_bytes = read_file_binary(generated);
     std::string golden_bytes = read_file_binary(golden);
 
-    EXPECT_EQ(gen_bytes, golden_bytes)
-        << "V-4 violated: vlatest/Messages.hpp diverged from the checked-in golden (generated "
-        << gen_bytes.size() << " bytes, golden " << golden_bytes.size() << " bytes).\n"
-        << "  generated: " << generated << "\n"
-        << "  golden:    " << golden << "\n"
-        << "  Run 'diff " << generated.string() << " " << golden.string()
-        << "' to see the diff.\n"
-        << "  Regenerate golden with:\n"
-        << "    " << kBin << " --xml "
-        << (fs::path(kDictDir) / "orchestra" / "OrchestraFIXLatest.xml").string()
-        << " --out <golden-dir> && cp <golden-dir>/vlatest/Messages.hpp " << golden.string();
+    expect_bytes_equal(gen_bytes, golden_bytes,
+                       "V-4 violated: vlatest/Messages.hpp diverged from the checked-in golden\n"
+                       "  generated: " +
+                           generated.string() + "\n  golden:    " + golden.string() +
+                           "\n  Regenerate: " + kBin + " --xml " +
+                           (fs::path(kDictDir) / "orchestra" / "OrchestraFIXLatest.xml").string() +
+                           " --out <dir> && cp <dir>/vlatest/Messages.hpp " + golden.string());
 }
 
 // ── Gate B r2 follow-up: V-4 run-to-run determinism — vlatest tier ─────────
@@ -503,11 +553,27 @@ TEST_F(DeterminismTest, VlatestByteIdenticalAcrossRuns) {
     EXPECT_TRUE(all_identical) << "V-4 violated: at least one generated vlatest/ file differs "
                                   "between the two codegen runs.";
 
+    // 077-builder-args-dedup T021 [US3] (FR-007/SC-004): as of 077 the
+    // deduped emitter is version-agnostic (T009) and vlatest is
+    // builder-bearing (T014/T017, 576 shared plans) -- the generic walk
+    // above already covers vlatest/Builders.hpp run-to-run byte-identity,
+    // but a vacuous pass (Builders.hpp silently missing) wouldn't fail it.
+    // Assert explicitly.
+    {
+        fs::path b1 = run1.path / "vlatest" / "Builders.hpp";
+        fs::path b2 = run2.path / "vlatest" / "Builders.hpp";
+        ASSERT_TRUE(fs::exists(b1)) << "vlatest/Builders.hpp missing from run1";
+        ASSERT_TRUE(fs::exists(b2)) << "vlatest/Builders.hpp missing from run2";
+        expect_bytes_equal(read_file_binary(b1), read_file_binary(b2),
+                           "vlatest/Builders.hpp not byte-identical across runs");
+    }
+
     // Sanity bound: vlatest emits Fields/Messages/Validator/Reify/
-    // NormativeReferences.md/Manifest.txt == 6 artifacts (no Builders.hpp —
-    // the typed builder tier is descoped, see golden/README.md). A loose
-    // lower bound so this doesn't need updating on an unrelated emitter-shape
-    // change, while still catching a degenerate walk that compares nothing.
+    // NormativeReferences.md/Manifest.txt/Builders.hpp == 7 artifacts (was 6
+    // pre-077 -- the typed builder tier was descoped by 076, resolved by
+    // 077 T014/T017). A loose lower bound so this doesn't need updating on
+    // an unrelated emitter-shape change, while still catching a degenerate
+    // walk that compares nothing.
     std::size_t file_count = 0;
     for (auto const& e1 : fs::recursive_directory_iterator(run1.path, ec)) {
         if (!ec && e1.is_regular_file()) ++file_count;
@@ -568,8 +634,8 @@ TEST_F(DeterminismTest, AdditiveOffOnByteDiff) {
         fs::path generated = off_run.path / kVersions[i] / "Messages.hpp";
         fs::path golden = fs::path(kGoldenDir) / kGoldenFiles[i];
         ASSERT_TRUE(fs::exists(generated)) << "OFF-run missing: " << generated;
-        EXPECT_EQ(read_file_binary(generated), read_file_binary(golden))
-            << "V-7 OFF-path baseline mismatch for " << kVersions[i];
+        expect_bytes_equal(read_file_binary(generated), read_file_binary(golden),
+                           "V-7 OFF-path baseline mismatch for " + std::string(kVersions[i]));
     }
 
     // (a2) US3-AC1 — OFF-run has NO vlatest/ dir at all.
@@ -579,9 +645,9 @@ TEST_F(DeterminismTest, AdditiveOffOnByteDiff) {
     // (a3) US3-AC2 (part) — ON-run vlatest/Messages.hpp == 076 golden.
     fs::path on_vlatest = on_run.path / "vlatest" / "Messages.hpp";
     ASSERT_TRUE(fs::exists(on_vlatest)) << "ON-run missing: " << on_vlatest;
-    EXPECT_EQ(read_file_binary(on_vlatest),
-              read_file_binary(fs::path(kVlatestGoldenDir) / kVlatestGoldenFile))
-        << "V-7 ON-path vlatest/Messages.hpp diverged from the 076 golden.";
+    expect_bytes_equal(read_file_binary(on_vlatest),
+                       read_file_binary(fs::path(kVlatestGoldenDir) / kVlatestGoldenFile),
+                       "V-7 ON-path vlatest/Messages.hpp diverged from the 076 golden.");
 
     // (b) US3-AC2 (part) — relative discriminator: recursively walk every
     // file the OFF-run produced (v42/v44/v50sp2/vt11/_dispatch — no vlatest,
@@ -597,8 +663,9 @@ TEST_F(DeterminismTest, AdditiveOffOnByteDiff) {
         fs::path on_counterpart = on_run.path / rel;
         EXPECT_TRUE(fs::exists(on_counterpart)) << "V-7: legacy file missing from ON-run: " << rel;
         if (!fs::exists(on_counterpart)) continue;
-        EXPECT_EQ(read_file_binary(e.path()), read_file_binary(on_counterpart))
-            << "V-7 additivity violated: " << rel << " differs between OFF-run and ON-run.";
+        expect_bytes_equal(read_file_binary(e.path()), read_file_binary(on_counterpart),
+                           "V-7 additivity violated: " + rel.string() +
+                               " differs between OFF-run and ON-run.");
         ++compared;
     }
     // Sanity bound: v42/v50sp2/vt11 emit 5 artifacts each, v44 emits 6
@@ -665,6 +732,63 @@ TEST_F(DeterminismTest, VlatestFailClosedUnknownDatatype) {
         << "V-5 violated: a tier was emitted despite the unmapped datatype.";
 }
 
+// ── 077-builder-args-dedup T019 [US2]: OFF-path stale-file check ───────────
+//   (quickstart.md V3, FR-012).
+//
+// Mirrors AdditiveOffOnByteDiff's OFF-path job (run_codegen() -- the legacy
+// XMLs only, exactly what a FIXPP_CODEGEN_FIX_LATEST=OFF configure passes to
+// the tool; Codegen.cmake never adds the orchestra --xml job when OFF) but
+// asserts the BUILDER-specific claim: no stale vlatest/Builders.hpp survives
+// an OFF-path run, while the other builder-bearing versions (v44/v50sp2,
+// wired by 077 T008-T017) are unaffected by the option being OFF.
+//
+// Deliberately does NOT reconfigure the shared build tree (RUN_SERIAL vs the
+// codegen-build-graph-check git-cleanliness gate would be required for no
+// additional coverage, same rationale as AdditiveOffOnByteDiff above) --
+// this isolated tool-into-TempDir invocation already discriminates the
+// OFF-path behavior.
+TEST_F(DeterminismTest, BuildersOffPathNoStaleVlatestOthersUnaffected) {
+    TempDir off_run("fixpp_det_builders_off");
+    int rc = run_codegen(off_run.path);  // legacy XMLs only == OFF-path job set
+    ASSERT_EQ(rc, 0) << "OFF-path codegen run failed (exit " << rc << ")";
+
+    // FR-012: no vlatest/ dir at all when the option is OFF -- the
+    // conditional OFF-clean (cmake/Codegen.cmake:347-349) mirrored at the
+    // tool-invocation level: an OFF configure simply never adds the
+    // orchestra --xml job, so no vlatest/Builders.hpp (or any other
+    // vlatest/* artifact) is ever written to begin with.
+    EXPECT_FALSE(fs::exists(off_run.path / "vlatest"))
+        << "FR-012 violated: OFF-path job produced a vlatest/ dir -- a stale "
+           "vlatest/Builders.hpp could live here.";
+    EXPECT_FALSE(fs::exists(off_run.path / "vlatest" / "Builders.hpp"));
+
+    // Other builder-bearing versions are unaffected by the option being OFF
+    // (FIXPP_CODEGEN_FIX_LATEST gates vlatest only, per T014/G4a).
+    EXPECT_TRUE(fs::exists(off_run.path / "v44" / "Builders.hpp"))
+        << "v44/Builders.hpp missing from OFF-path job -- FR-012's gating must be vlatest-only.";
+    EXPECT_TRUE(fs::exists(off_run.path / "v50sp2" / "Builders.hpp"))
+        << "v50sp2/Builders.hpp missing from OFF-path job -- FR-012's gating must be vlatest-only.";
+
+    // v42 is DESCOPED independent of the FIX_LATEST option (T017/issue #196)
+    // -- confirm the OFF-path job doesn't accidentally emit it either.
+    EXPECT_FALSE(fs::exists(off_run.path / "v42" / "Builders.hpp"));
+}
+
+#ifdef FIXPP_CODEGEN_MAIN_VLATEST_BUILDERS_HPP
+// This whole suite drives the codegen TOOL directly into isolated TempDirs
+// (never reconfigures/touches the shared main build tree's _codegen/include
+// output). Confirm that holds: the main tree's vlatest/Builders.hpp
+// (present iff THIS build was configured with FIXPP_CODEGEN_FIX_LATEST=ON --
+// the macro itself is only defined by CMake in that case) still exists
+// after BuildersOffPathNoStaleVlatestOthersUnaffected above ran.
+TEST_F(DeterminismTest, MainTreeVlatestBuildersUnaffectedByOffPathWitness) {
+    EXPECT_TRUE(fs::exists(FIXPP_CODEGEN_MAIN_VLATEST_BUILDERS_HPP))
+        << "Main build tree's vlatest/Builders.hpp missing after the "
+           "OFF-path tool-invocation witness -- that witness must run "
+           "against an isolated TempDir only, never the shared tree.";
+}
+#endif
+
 // ── Gate B PR#187 round 1 F3: official-mode byte identity (SC-003) ──────────
 //
 // test_069_mode_count.cpp (tests/session/) pins only builder_registry.size()
@@ -689,13 +813,72 @@ TEST_F(DeterminismTest, OfficialModeBuildersMatchesGolden) {
     std::string gen_bytes = read_file_binary(generated);
     std::string golden_bytes = read_file_binary(golden);
 
-    EXPECT_EQ(gen_bytes, golden_bytes)
-        << "SC-003 violated: `--families official` v44/Builders.hpp diverged "
-           "from the byte-identity baseline (generated "
-        << gen_bytes.size() << " bytes, golden " << golden_bytes.size() << " bytes).\n"
-        << "  generated: " << generated << "\n"
-        << "  golden:    " << golden << "\n"
-        << "  Run 'diff " << generated.string() << " " << golden.string() << "' to see the diff.";
+    expect_bytes_equal(gen_bytes, golden_bytes,
+                       "SC-003 violated: `--families official` v44/Builders.hpp diverged from the "
+                       "byte-identity baseline\n  generated: " +
+                           generated.string() + "\n  golden:    " + golden.string());
+}
+
+// ── 077-builder-args-dedup T027 [Polish]: checked-in-golden-diff gate for the
+// three NEW deduped builder tiers (FR-013). Boundary vs T021: T021 wired the
+// run-to-run *determinism* assertions (ByteIdenticalAcrossRuns /
+// VlatestByteIdenticalAcrossRuns explicit per-version cells); these three
+// tests add the missing *generated-vs-checked-in-golden* leg, mirroring
+// GeneratedMatchesGolden / VlatestGeneratedMatchesGolden /
+// OfficialModeBuildersMatchesGolden above. The v44 `official`-mode golden
+// (regenerated in place at specs/069-.../contracts/golden/ by T010) is
+// already covered by OfficialModeBuildersMatchesGolden — no new test needed
+// for it, only for the three goldens that are new to 077.
+
+TEST_F(DeterminismTest, V44AllModeBuildersMatchesGolden) {
+    TempDir run("fixpp_det_v44_all_builders");
+    int rc = run_codegen(run.path);  // default families mode == All (88 structs)
+    ASSERT_EQ(rc, 0) << "codegen run failed (exit " << rc << ")";
+
+    fs::path generated = run.path / "v44" / "Builders.hpp";
+    fs::path golden = fs::path(kBuilderDedupGoldenDir) / "v44_Builders_all.golden.hpp";
+
+    ASSERT_TRUE(fs::exists(generated)) << "Generated file missing: " << generated;
+    ASSERT_TRUE(fs::exists(golden)) << "Golden not found: " << golden;
+
+    expect_bytes_equal(read_file_binary(generated), read_file_binary(golden),
+                       "FR-013 violated: v44 `all`-mode Builders.hpp diverged from the checked-in "
+                       "golden.\n  generated: " +
+                           generated.string() + "\n  golden:    " + golden.string());
+}
+
+TEST_F(DeterminismTest, V50sp2BuildersMatchesGolden) {
+    TempDir run("fixpp_det_v50sp2_builders");
+    int rc = run_codegen(run.path);
+    ASSERT_EQ(rc, 0) << "codegen run failed (exit " << rc << ")";
+
+    fs::path generated = run.path / "v50sp2" / "Builders.hpp";
+    fs::path golden = fs::path(kBuilderDedupGoldenDir) / "v50sp2_Builders.golden.hpp";
+
+    ASSERT_TRUE(fs::exists(generated)) << "Generated file missing: " << generated;
+    ASSERT_TRUE(fs::exists(golden)) << "Golden not found: " << golden;
+
+    expect_bytes_equal(read_file_binary(generated), read_file_binary(golden),
+                       "FR-013 violated: v50sp2 Builders.hpp diverged from the checked-in "
+                       "golden.\n  generated: " +
+                           generated.string() + "\n  golden:    " + golden.string());
+}
+
+TEST_F(DeterminismTest, VlatestBuildersMatchesGolden) {
+    TempDir run("fixpp_det_vlatest_builders_golden");
+    int rc = run_codegen_vlatest_only(run.path);
+    ASSERT_EQ(rc, 0) << "vlatest codegen run failed (exit " << rc << ")";
+
+    fs::path generated = run.path / "vlatest" / "Builders.hpp";
+    fs::path golden = fs::path(kBuilderDedupGoldenDir) / "vlatest_Builders.golden.hpp";
+
+    ASSERT_TRUE(fs::exists(generated)) << "Generated file missing: " << generated;
+    ASSERT_TRUE(fs::exists(golden)) << "Golden not found: " << golden;
+
+    expect_bytes_equal(read_file_binary(generated), read_file_binary(golden),
+                       "FR-013 violated: vlatest Builders.hpp diverged from the checked-in "
+                       "golden.\n  generated: " +
+                           generated.string() + "\n  golden:    " + golden.string());
 }
 
 TEST(CodegenGenUtil, AccessorNormalizationCoversKeywordsDigitsAndFallback) {

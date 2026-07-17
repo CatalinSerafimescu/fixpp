@@ -53,7 +53,7 @@ std::string bytes_to_string(std::span<const std::byte> b) {
 // NoSides(552) group (required, >=1 entry; entry-level Side(54)/OrderID(37)
 // required, dictionaries/FIX44.xml:3536-3538).
 fixpp::v44::TradeCaptureReportArgs make_valid_args(
-    std::pmr::memory_resource* mr, std::span<const fixpp::v44::TradeCaptureReportSidesArgs> sides) {
+    std::pmr::memory_resource* mr, std::span<const fixpp::v44::groups::G_552_1Args> sides) {
     fixpp::v44::TradeCaptureReportArgs args{};
     args.trade_report_id = "TRR-1";
     args.previously_reported = false;
@@ -72,10 +72,10 @@ fixpp::v44::TradeCaptureReportArgs make_valid_args(
 TEST(US1Smoke069TradeCaptureReport, BuildCarriesSeededFieldsWellFormed) {
     std::pmr::monotonic_buffer_resource arena{4096};
 
-    fixpp::v44::TradeCaptureReportSidesArgs side_args{};
+    fixpp::v44::groups::G_552_1Args side_args{};
     side_args.side = '1';
     side_args.order_id = "ORD-9";
-    std::array<fixpp::v44::TradeCaptureReportSidesArgs, 1> sides{side_args};
+    std::array<fixpp::v44::groups::G_552_1Args, 1> sides{side_args};
 
     auto const args = make_valid_args(&arena, sides);
 
@@ -124,7 +124,7 @@ TEST(US1Smoke069TradeCaptureReport, BuildCarriesSeededFieldsWellFormed) {
 TEST(US1Smoke069TradeCaptureReport, EmptyRequiredSidesGroup_ValidateRejects) {
     std::pmr::monotonic_buffer_resource arena{4096};
 
-    auto args = make_valid_args(&arena, std::span<const fixpp::v44::TradeCaptureReportSidesArgs>{});
+    auto args = make_valid_args(&arena, std::span<const fixpp::v44::groups::G_552_1Args>{});
 
     auto const r = fixpp::v44::validate_TradeCaptureReport(args);
     ASSERT_FALSE(r.has_value()) << "an empty REQUIRED NoSides(552) group must fail validate_";
@@ -136,10 +136,10 @@ TEST(US1Smoke069TradeCaptureReport, EmptyRequiredSidesGroup_ValidateRejects) {
 TEST(US1Smoke069TradeCaptureReport, MissingTradeReportID_ValidateRejects) {
     std::pmr::monotonic_buffer_resource arena{4096};
 
-    fixpp::v44::TradeCaptureReportSidesArgs side_args{};
+    fixpp::v44::groups::G_552_1Args side_args{};
     side_args.side = '1';
     side_args.order_id = "ORD-9";
-    std::array<fixpp::v44::TradeCaptureReportSidesArgs, 1> sides{side_args};
+    std::array<fixpp::v44::groups::G_552_1Args, 1> sides{side_args};
 
     auto args = make_valid_args(&arena, sides);
     args.trade_report_id = std::nullopt;

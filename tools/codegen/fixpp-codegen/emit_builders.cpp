@@ -29,15 +29,32 @@
 // order at every depth (G3/INV-ORDER). group_end is always issued via `bb`
 // (the root body_builder local) — group_handle::owner_ always points at the
 // root body_builder regardless of nesting depth (061 body_builder.hpp), so
-// a nested group_handle still closes correctly via `bb.group_end(...)`. The
-// <Msg>...Args STRUCT TYPES are still recursively pre-declared (children
-// before parents, for span-element-type completeness) — only the
-// serialization CODE is inlined, not factored into named functions.
+// a nested group_handle still closes correctly via `bb.group_end(...)`.
+//
+// 077-builder-args-dedup T008 — group Args STRUCT TYPES are no longer
+// message-rooted. Each distinct repeating-group STRUCTURAL PLAN (data-model
+// Entity 1: keyed by `(no_tag, recursive_signature)` — delimiter + ordered
+// members, each `(tag, required, {child-signature}?)`, computed bottom-up)
+// is interned ONCE per version and emitted ONCE in `fixpp::<ns>::groups` as
+// `G_<no_tag>Args` (a `no_tag` with exactly one distinct signature) or
+// ordinaled `G_<no_tag>_1Args..G_<no_tag>_kArgs` (>=2 signatures, no bare
+// name — G1a). Per-message top-level `<Msg>Args` stays per-message (not
+// deduped) and references shared group plans by qualified name
+// (`groups::G_...Args`); a plan's own nested-group members reference their
+// children unqualified (same `groups` namespace — mirrors emit_messages.cpp's
+// `G_<no_tag>` flyweight convention, generalized with a signature so
+// structurally-distinct occurrences of the same `no_tag` stay separate
+// plans — research.md R2/R3: a bare `no_tag` key is NOT sound, up to 8
+// distinct plans/no_tag observed). Interning is bottom-up (a child's plan is
+// always fully interned before its parent's signature — which embeds the
+// child's signature — is computed), so `PlanIntern::plans` is already
+// children-before-parents post-order by construction (FR-011/G1c) — no
+// separate topological pass is needed.
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <fixpp/dict/field_ref.hpp>
-#include <memory>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -70,9 +87,16 @@ bool is_official(std::string_view msg_type) {
 // vendored FIX44 dictionary (a harmless no-op here, kept for forward-compat).
 constexpr std::array<std::string_view, 5> kN002N003Excluded = {"BE", "BF", "BW", "BX", "BY"};
 
-bool is_n002_n003_excluded(std::string_view msg_type) {
-    return std::find(kN002N003Excluded.begin(), kN002N003Excluded.end(), msg_type) !=
-           kN002N003Excluded.end();
+// 077-builder-args-dedup T017 (research.md R4 / data-model.md Entity 4):
+// kN002N003Excluded is v44-SPECIFIC (frozen for its 067/069 golden). Other
+// builder-bearing versions do not inherit it -- BW/BX/BY are genuine FIX 5.0
+// SP2 application messages (ApplicationMessageRequest/Ack/Report), not a
+// session-FSM-dispatch class there, so v50sp2/vlatest emit their full
+// `is_application` set unfiltered.
+bool is_n002_n003_excluded(std::string_view ns, std::string_view msg_type) {
+    return ns == "v44" &&
+           std::find(kN002N003Excluded.begin(), kN002N003Excluded.end(), msg_type) !=
+               kN002N003Excluded.end();
 }
 
 // Defensive floor: the 8-tag framer envelope — BeginString(8), BodyLength(9),
@@ -137,12 +161,147 @@ struct LevelItem {
     bool required = false;
 
     // ── group ──
-    std::string group_type_name;  // fully-qualified nested <Msg>...Args name
+    // Reference to the shared plan this occurrence resolves to (filled by
+    // fill_group_type_names, PASS 3 below): the BARE `G_<no_tag>[_ord]Args`
+    // stem when referenced from within `fixpp::<ns>::groups` itself (a
+    // nested group's own members), or the `groups::`-qualified name when
+    // referenced from a per-message top-level `<Msg>Args` (G1/G2).
+    std::string group_type_name;
     std::uint16_t no_tag = 0;
     std::uint16_t delimiter_tag = 0;
     bool group_required = false;
-    std::shared_ptr<LevelPlan> child_plan;  // this group's own resolved members
+    // Index into PlanIntern::plans identifying this occurrence's interned
+    // structural plan (data-model Entity 1) — replaces the pre-077
+    // message-rooted `child_plan` pointer.
+    std::size_t plan_id = 0;
 };
+
+// One distinct structural plan (data-model Entity 1), interned once per
+// version. `members` are this plan's OWN resolved members (a group item
+// within references its child by `plan_id`, not by name — `name` is filled
+// in only after every plan is known, PASS 2/assign_plan_names below, since
+// bare-vs-ordinaled depends on the FINAL count of distinct signatures under
+// the same `no_tag`).
+struct InternedPlan {
+    std::uint16_t no_tag = 0;
+    std::uint16_t delimiter_tag = 0;
+    std::string signature;
+    LevelPlan members;
+    std::string name;  // "G_<no_tag>Args" or "G_<no_tag>_<ordinal>Args"
+};
+
+// PASS 1 intern table: `(no_tag, recursive_signature)` -> plan index
+// (data-model Entity 1 dedup key). Append-only — `LevelItem::plan_id` are
+// indices into `plans`, so plans must never be reordered after interning.
+class PlanIntern {
+public:
+    std::vector<InternedPlan> plans;
+
+    // Interns one group occurrence's already-resolved members. Returns the
+    // existing plan's index on a signature collision (the freshly-resolved
+    // `members` passed in is discarded — a byte-identical signature implies
+    // byte-identical members, since accessor names derive deterministically
+    // from tag -> field name within one version); otherwise appends a new
+    // plan and returns its (newly last) index.
+    std::size_t intern(std::uint16_t no_tag, std::uint16_t delimiter_tag,
+                       std::string signature, LevelPlan members) {
+        std::string key = std::to_string(no_tag) + ":" + signature;
+        auto const it = key_to_index_.find(key);
+        if (it != key_to_index_.end()) {
+            return it->second;
+        }
+        std::size_t const idx = plans.size();
+        plans.push_back(InternedPlan{no_tag, delimiter_tag, std::move(signature),
+                                     std::move(members), /*name=*/{}});
+        key_to_index_.emplace(std::move(key), idx);
+        return idx;
+    }
+
+private:
+    std::unordered_map<std::string, std::size_t> key_to_index_;
+};
+
+// Recursive structural signature (data-model Entity 1): `delimiter + ordered
+// members, each (tag, required, {child-signature}?)`. Does NOT include this
+// group's OWN `no_tag` (that is the other half of the dedup key, kept
+// separate so a `no_tag` with a single distinct signature can name bare —
+// G1a). A nested-group member's contribution embeds its CHILD's already-
+// interned signature (`intern.plans[item.plan_id].signature`) — available
+// because interning is bottom-up (the child is always interned before this,
+// its parent's, signature is computed). `kind`/`coupled`/`data_tag` are
+// technically redundant with the tag (deterministic per version) but are
+// included for a self-describing, unambiguous key.
+std::string compute_signature(std::uint16_t delimiter_tag, LevelPlan const& plan,
+                              PlanIntern const& intern) {
+    std::string sig = "D";
+    sig += std::to_string(delimiter_tag);
+    sig += ";";
+    for (auto const& item : plan) {
+        if (item.is_group) {
+            sig += "G";
+            sig += std::to_string(item.no_tag);
+            sig += ":";
+            sig += item.group_required ? "1" : "0";
+            sig += ":{";
+            sig += intern.plans[item.plan_id].signature;
+            sig += "};";
+        } else {
+            sig += "S";
+            sig += std::to_string(item.tag);
+            sig += ":";
+            sig += item.required ? "1" : "0";
+            sig += ":";
+            sig += std::to_string(static_cast<int>(item.kind));
+            sig += ":";
+            sig += item.coupled ? "1" : "0";
+            if (item.coupled) {
+                sig += ":";
+                sig += std::to_string(item.data_tag);
+            }
+            sig += ";";
+        }
+    }
+    return sig;
+}
+
+// PASS 2 — name assignment (data-model Entity 2 / contract G1a). Must run
+// AFTER discovery is complete: bare-vs-ordinaled depends on the FINAL
+// distinct-signature count per `no_tag`. Ordinal order = first-encounter,
+// i.e. `intern.plans`' own (already bytewise-sorted-message x declaration-
+// order) append order, filtered by `no_tag` — filtering an append-ordered
+// vector preserves relative order, so no separate sort is needed.
+void assign_plan_names(PlanIntern& intern) {
+    std::unordered_map<std::uint16_t, std::vector<std::size_t>> by_no_tag;
+    for (std::size_t i = 0; i < intern.plans.size(); ++i) {
+        by_no_tag[intern.plans[i].no_tag].push_back(i);
+    }
+    for (auto const& [no_tag, idxs] : by_no_tag) {
+        if (idxs.size() == 1) {
+            intern.plans[idxs[0]].name = "G_" + std::to_string(no_tag) + "Args";
+            continue;
+        }
+        for (std::size_t k = 0; k < idxs.size(); ++k) {
+            intern.plans[idxs[k]].name =
+                "G_" + std::to_string(no_tag) + "_" + std::to_string(k + 1) + "Args";
+        }
+    }
+}
+
+// PASS 3 — reference resolution (G1/G2): fills every group item's
+// `group_type_name` from its interned plan's now-final `name`. `qualified`
+// selects the `groups::`-qualified form (per-message top-level `<Msg>Args`,
+// emitted in `fixpp::<ns>`) vs the bare form (a plan's own members, emitted
+// inside `fixpp::<ns>::groups` itself, referencing a sibling by unqualified
+// name).
+void fill_group_type_names(LevelPlan& plan, PlanIntern const& intern, bool qualified) {
+    for (auto& item : plan) {
+        if (!item.is_group) {
+            continue;
+        }
+        std::string const& name = intern.plans[item.plan_id].name;
+        item.group_type_name = qualified ? ("groups::" + name) : name;
+    }
+}
 
 void emit_args_struct(TemplateWriter& w, std::string const& type_name, LevelPlan const& plan) {
     w.raw("struct ");
@@ -184,9 +343,14 @@ void emit_args_struct(TemplateWriter& w, std::string const& type_name, LevelPlan
 // handle / loop variable) at every depth a distinct name (nested groups
 // really do nest textually here, so shadowing must be avoided by
 // construction, not relied upon as legal-but-noisy shadowing).
+// `intern` resolves a nested group item's own members for the recursive
+// call, by `item.plan_id` (077-builder-args-dedup T008 — replaces the
+// pre-077 `item.child_plan` pointer; the shared plan's members are the same
+// regardless of which occurrence is currently being serialized).
 // NOLINTNEXTLINE(misc-no-recursion)
 void emit_level_body(TemplateWriter& w, LevelPlan const& plan, std::string const& accessor_expr,
-                     std::string const& owner_expr, bool top_level, int& uid) {
+                     std::string const& owner_expr, bool top_level, int& uid,
+                     PlanIntern const& intern) {
     for (auto const& item : plan) {
         if (!item.is_group) {
             w.raw("    if (");
@@ -300,8 +464,9 @@ void emit_level_body(TemplateWriter& w, LevelPlan const& plan, std::string const
         w.raw(" = *");
         w.raw(en);
         w.line(";");
-        if (item.child_plan != nullptr && !item.child_plan->empty()) {
-            emit_level_body(w, *item.child_plan, loop_var, eh, /*top_level=*/false, uid);
+        LevelPlan const& child_members = intern.plans[item.plan_id].members;
+        if (!child_members.empty()) {
+            emit_level_body(w, child_members, loop_var, eh, /*top_level=*/false, uid, intern);
         }
         w.line("        }");
         std::string const ge = "ge" + std::to_string(id);
@@ -312,7 +477,7 @@ void emit_level_body(TemplateWriter& w, LevelPlan const& plan, std::string const
 }
 
 void emit_build_fn(TemplateWriter& w, std::string const& msg_id, std::string const& msg_type,
-                   LevelPlan const& plan) {
+                   LevelPlan const& plan, PlanIntern const& intern) {
     w.raw("inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_");
     w.raw(msg_id);
     w.raw("(::std::span<::std::byte> out, ");
@@ -322,7 +487,7 @@ void emit_build_fn(TemplateWriter& w, std::string const& msg_id, std::string con
     w.raw(msg_type);
     w.line("\"};");
     int uid = 0;
-    emit_level_body(w, plan, "args", "bb", /*top_level=*/true, uid);
+    emit_level_body(w, plan, "args", "bb", /*top_level=*/true, uid, intern);
     w.line("    return bb.commit(out);");
     w.line("}");
     w.line();
@@ -356,19 +521,19 @@ GroupOrderEntry const* find_group_entry(MessageIR const& m, std::vector<std::uin
     return nullptr;
 }
 
-// Resolves ONE level's DECLARATION-order member list into a LevelPlan,
-// recursively emitting every nested group's Args struct type FIRST
-// (children fully defined before the parent references them as a span
-// element type — the serialization CODE is emitted separately/inline by
-// emit_level_body, not here). `path` is this level's own GroupOrderEntry
-// key (empty for top-level); `type_prefix` is the accumulated identifier
-// chain (e.g. "NewOrderListOrders") used to build each nested <G>Args name.
+// Resolves ONE level's DECLARATION-order member list into a LevelPlan.
+// 077-builder-args-dedup T008 — PASS 1 (discovery): no longer emits
+// anything (the pre-077 message-rooted `emit_args_struct` inline call is
+// gone); a nested group's own members are resolved recursively FIRST, then
+// its recursive signature (data-model Entity 1) is computed and interned
+// into `intern` (bottom-up — a child is always interned before its
+// parent's own signature, which embeds the child's, is computed). `path` is
+// this level's own GroupOrderEntry key (empty for top-level).
 // NOLINTNEXTLINE(misc-no-recursion)
-LevelPlan resolve_level(TemplateWriter& w, MessageIR const& m,
+LevelPlan resolve_level(MessageIR const& m,
                         std::unordered_map<std::uint16_t, FieldIR const*> const& field_by_tag,
                         std::vector<std::uint16_t> const& path,
-                        std::vector<GroupOrderMember> const& members,
-                        std::string const& type_prefix) {
+                        std::vector<GroupOrderMember> const& members, PlanIntern& intern) {
     std::unordered_set<std::uint16_t> level_tags;
     for (auto const& gm : members) {
         level_tags.insert(gm.tag);
@@ -412,23 +577,23 @@ LevelPlan resolve_level(TemplateWriter& w, MessageIR const& m,
             }
             FieldIR const* gf = fit->second;
             std::string const stripped{strip_no_prefix(gf->name)};
-            std::string const child_prefix = type_prefix + to_identifier(stripped);
-            std::string const child_type = child_prefix + "Args";
 
             std::vector<std::uint16_t> child_path = path;
             child_path.push_back(gm.tag);
-            auto child_plan = std::make_shared<LevelPlan>(
-                resolve_level(w, m, field_by_tag, child_path, nested->members, child_prefix));
-            emit_args_struct(w, child_type, *child_plan);
+            LevelPlan child_members =
+                resolve_level(m, field_by_tag, child_path, nested->members, intern);
+            std::string const signature =
+                compute_signature(nested->delimiter_tag, child_members, intern);
+            std::size_t const plan_id =
+                intern.intern(gm.tag, nested->delimiter_tag, signature, std::move(child_members));
 
             LevelItem item;
             item.is_group = true;
             item.accessor = uniquify_accessor(used_accessors, to_accessor(stripped), gm.tag);
-            item.group_type_name = child_type;
             item.no_tag = gm.tag;
             item.delimiter_tag = nested->delimiter_tag;
             item.group_required = gf->ref.rule == fixpp::dict::field_presence::Required;
-            item.child_plan = std::move(child_plan);
+            item.plan_id = plan_id;
             plan.push_back(std::move(item));
             continue;
         }
@@ -475,42 +640,27 @@ LevelPlan resolve_level(TemplateWriter& w, MessageIR const& m,
     return plan;
 }
 
-// 067 US3/T025 (data-model.md §1.3/§1.4, G5) — flattens a message's level
-// tree into POST-ORDER (children before their parent), by (type_name, plan)
-// pairs. `plan` is copied (small, one-shot host-tool run) so the pairs
-// outlive the per-message loop in emit_builders. The post-order is what
-// lets emit_writer_traits_for_level below assume every group child's own
-// `writer_traits<Child>` specialization + helper functions are ALREADY
-// fully emitted before it emits the parent's group_check functions (which
-// call `::fixpp::wire::validate_required<Child>` — a template that needs
-// `writer_traits<Child>` to be a COMPLETE specialization at first use, not
-// merely the undefined primary template; [temp.expl.spec]).
-// NOLINTNEXTLINE(misc-no-recursion)
-void collect_levels_postorder(std::string const& type_name, LevelPlan const& plan,
-                              std::vector<std::pair<std::string, LevelPlan>>& out) {
-    for (auto const& item : plan) {
-        if (item.is_group) {
-            collect_levels_postorder(item.group_type_name, *item.child_plan, out);
-        }
-    }
-    out.emplace_back(type_name, plan);
-}
-
-// 067 US3/T025 — emits, for ONE level (top-level `<Msg>Args` OR one nested
-// `<Msg>...Args` group-entry type), the required-field presence-check
-// functions, the group count()/validate_entry() functions, and the
-// `writer_traits<T>` specialization (data-model.md §1.4) that binds them —
-// all THREE pieces sourced purely from `plan` (already derived from IR
+// 067 US3/T025 — emits, for ONE level (top-level `<Msg>Args` OR one shared
+// `groups::G_...Args` plan), the required-field presence-check functions,
+// the group count()/validate_entry() functions, and the `writer_traits<T>`
+// specialization (data-model.md §1.4) that binds them — all THREE pieces
+// sourced purely from `plan` (already derived from IR
 // `FieldRef.rule`/`group_no_tag` by resolve_level — R3, no new IR/table
 // source). MUST be called inside `namespace fixpp::wire { ... }` (writer_
 // traits is declared there; an explicit specialization must be declared in
 // a namespace enclosing its primary template's namespace — [temp.expl.spec]
 // — `fixpp::<ns>` is a SIBLING of `fixpp::wire`, not an enclosing namespace,
 // so this cannot be emitted from inside the `fixpp::<ns> { ... }` block).
-void emit_writer_traits_for_level(TemplateWriter& w, std::string const& ns,
+// 077-builder-args-dedup T008 — the caller now supplies the fully-qualified
+// `qtype` directly (a shared group plan's is `::fixpp::<ns>::groups::G_...`,
+// a per-message top-level Args' is `::fixpp::<ns>::<Msg>Args`); `type_name`
+// is the bare identifier stem used to derive this level's helper function
+// names (no `::` — must be a valid identifier fragment). The CALLER is
+// responsible for calling this exactly ONCE per distinct `plan` (once per
+// interned group plan, once per message's top-level Args) — this is what
+// makes G3/FR-003's "no ODR conflict" hold under dedup.
+void emit_writer_traits_for_level(TemplateWriter& w, std::string const& qtype,
                                   std::string const& type_name, LevelPlan const& plan) {
-    std::string const qtype = "::fixpp::" + ns + "::" + type_name;
-
     // Required-field presence-check functions for THIS level (top-level
     // body OR one group-entry level — both already framing-excluded /
     // level-scoped by construction of `plan`, R3/data-model §2).
@@ -641,24 +791,17 @@ void emit_writer_traits_for_level(TemplateWriter& w, std::string const& ns,
 }  // namespace
 
 std::string emit_builders(VersionIR const& ir, CoverageMode mode) {
-    // 067 scope: v44 only (research.md R6 — the 33-OFFICIAL-MsgTypes set is
-    // verified against FIX44.xml specifically). 076-fix-latest-typed-codegen
-    // originally widened this to `vlatest` (Option A builders for the FIX
-    // Latest application subset), but that DESCOPED: the per-message,
-    // non-deduplicated nested-group `Args` emitter — fine for FIX44's shallow
-    // groups — explodes combinatorially on FIX Latest's depth-7 reused
-    // components (StandardHeader/Instrument/Underlying/Leg), producing a
-    // 137MB / 53,590-struct `vlatest/Builders.hpp` that no consumer TU can
-    // compile (>21GB RSS). Typed `build_<Msg>`/`validate_<Msg>` for
-    // `fixpp::vlatest` are deferred to a follow-up feature with a proper
-    // component-identity Args-dedup design; the v44 builder tier and its
-    // 067/069 byte-identical golden stay untouched (this feature's additive
-    // guarantee, FR-004/FR-008/V-7). See specs/076-fix-latest-typed-codegen/
-    // spec.md (US1 descope note) + phases/phase-4 report.
-    if (ir.ns != "v44") {
-        return {};
-    }
-
+    // 077-builder-args-dedup T009 — the per-message, non-deduplicated Args
+    // emitter that made 076 explode combinatorially on FIX Latest's depth-7
+    // reused components (StandardHeader/Instrument/Underlying/Leg) is gone:
+    // T008 introduced `PlanIntern`, which interns each distinct structural
+    // group plan ONCE (per no_tag+signature) and emits it as a shared
+    // `groups::G_<no_tag>[_ordN]Args` — the 53,590-struct/137MB blowup does
+    // not recur. The v44-only gate is therefore removed; this is now a
+    // single version-agnostic emitter. Per-version app-message scoping is
+    // handled entirely by the `in_scope` predicate below (already existed
+    // pre-T009) — no namespace/`ir.ns` gate is reintroduced. See
+    // specs/077-builder-args-dedup/spec.md + research.md.
     TemplateWriter w;
     w.line("// SPDX-License-Identifier: AGPL-3.0-or-later");
     w.line("// GENERATED by fixpp-codegen (067-codegen-writer-emitter). DO NOT EDIT.");
@@ -678,18 +821,14 @@ std::string emit_builders(VersionIR const& ir, CoverageMode mode) {
     w.line("#include <string_view>");
     w.line();
 
-    w.raw("namespace fixpp::");
-    w.raw(ir.ns);
-    w.line(" {");
-    w.line();
-
+    // 077-builder-args-dedup T008 — PASS 1: discover + intern every distinct
+    // group structural plan across the in-scope message set, in `ir.messages`
+    // order (already bytewise-sorted) x declaration-order `group_order`
+    // (deterministic — data-model Entity 1/2). Nothing is written to `w` yet.
+    PlanIntern intern;
     std::vector<std::string> registry_msg_types;
     std::vector<std::string> official_msg_ids;
-    // 067 US3/T025 — every level (top-level <Msg>Args + every nested group
-    // <Msg>...Args), across all 33 OFFICIAL messages, in GLOBAL post-order
-    // (children before parents, both within one message's own tree and
-    // across the message list) — see collect_levels_postorder.
-    std::vector<std::pair<std::string, LevelPlan>> all_levels;
+    std::vector<LevelPlan> top_level_plans;  // parallel to official_msg_ids
 
     for (auto const& m : ir.messages) {
         // 069-v44-all-families (data-model.md Entity "Coverage mode"):
@@ -698,10 +837,23 @@ std::string emit_builders(VersionIR const& ir, CoverageMode mode) {
         // minus the N-002/N-003 exclusion set (FR-002/FR-003).
         bool const in_scope = mode == CoverageMode::Official
                                   ? is_official(m.msg_type)
-                                  : (m.is_application && !is_n002_n003_excluded(m.msg_type));
+                                  : (m.is_application && !is_n002_n003_excluded(ir.ns, m.msg_type));
         if (!in_scope) {
             continue;
         }
+#ifdef FIXPP_CODEGEN_DROP_BUILDER_MSGTYPE
+        // 077-builder-args-dedup T024 (C3b) -- THE committed mutation seam
+        // for the builder-completeness census's (T023) proven-red witness
+        // (T025). Compiled ONLY into the fixpp-codegen-drop-witness binary
+        // (tools/codegen/fixpp-codegen/CMakeLists.txt), never the normal
+        // fixpp-codegen: drops exactly one already-in-scope message from
+        // the emitted builders + registry, so
+        // builder_completeness_mutation_witness_test.cpp can observe the
+        // completeness census go RED with the expected missing msg_type.
+        if (m.msg_type == FIXPP_CODEGEN_DROP_BUILDER_MSGTYPE) {
+            continue;
+        }
+#endif
         std::unordered_map<std::uint16_t, FieldIR const*> field_by_tag;
         for (auto const& f : m.fields) {
             field_by_tag.emplace(f.ref.tag, &f);
@@ -710,13 +862,68 @@ std::string emit_builders(VersionIR const& ir, CoverageMode mode) {
         std::string const msg_id = to_identifier(m.name);
         std::vector<GroupOrderMember> const top_members =
             top_level_synthetic_members(m, ir.header_trailer_tags);
-        LevelPlan const plan = resolve_level(w, m, field_by_tag, /*path=*/{}, top_members, msg_id);
-        emit_args_struct(w, msg_id + "Args", plan);
-        emit_build_fn(w, msg_id, m.msg_type, plan);
+        LevelPlan plan = resolve_level(m, field_by_tag, /*path=*/{}, top_members, intern);
 
         registry_msg_types.push_back(m.msg_type);
         official_msg_ids.push_back(msg_id);
-        collect_levels_postorder(msg_id + "Args", plan, all_levels);
+        top_level_plans.push_back(std::move(plan));
+    }
+
+    // 077-builder-args-dedup T009 (G4a) — vt11 has 0 application messages, so
+    // `in_scope` above never fires and the registry stays empty. Discard the
+    // header-only `w` content written above and return truly empty so
+    // `main.cpp`'s `write_file` empty-skip (content.empty()) leaves no
+    // `Builders.hpp` on disk for vt11, instead of an empty-but-nonempty-bytes
+    // file (empty groups namespace + a 0-entry builder_registry).
+    if (registry_msg_types.empty()) {
+        return {};
+    }
+
+    // PASS 2 — name assignment (bare vs ordinaled, G1a): must run only after
+    // discovery is complete (the final per-no_tag distinct-signature count is
+    // now known).
+    assign_plan_names(intern);
+
+    // PASS 3 — reference resolution (G1/G2): fill every group item's
+    // `group_type_name` now that every plan's final name is known. A shared
+    // plan's OWN members reference their (already-interned) children
+    // unqualified — both sides live in `fixpp::<ns>::groups`; a per-message
+    // top-level Args references a shared plan `groups::`-qualified.
+    for (auto& p : intern.plans) {
+        fill_group_type_names(p.members, intern, /*qualified=*/false);
+    }
+    for (auto& plan : top_level_plans) {
+        fill_group_type_names(plan, intern, /*qualified=*/true);
+    }
+
+    // PASS 4a — emit every distinct group plan exactly once, in
+    // `fixpp::<ns>::groups` (G1). `intern.plans` is already children-before-
+    // parents post-order by construction (a child is always interned before
+    // the parent whose signature embeds it — G1c/FR-011).
+    w.raw("namespace fixpp::");
+    w.raw(ir.ns);
+    w.line("::groups {");
+    w.line();
+    for (auto const& p : intern.plans) {
+        emit_args_struct(w, p.name, p.members);
+    }
+    w.raw("}  // namespace fixpp::");
+    w.raw(ir.ns);
+    w.line("::groups");
+    w.line();
+
+    // PASS 4b — per-message top-level `<Msg>Args` + `build_<Msg>` (G2,
+    // unchanged shape/serialize-logic; only the referenced group type names
+    // changed, resolved in PASS 3).
+    w.raw("namespace fixpp::");
+    w.raw(ir.ns);
+    w.line(" {");
+    w.line();
+    for (std::size_t i = 0; i < official_msg_ids.size(); ++i) {
+        std::string const& msg_id = official_msg_ids[i];
+        LevelPlan const& plan = top_level_plans[i];
+        emit_args_struct(w, msg_id + "Args", plan);
+        emit_build_fn(w, msg_id, registry_msg_types[i], plan, intern);
     }
 
     w.line("struct builder_registry_entry { ::std::string_view msg_type; };");
@@ -735,19 +942,28 @@ std::string emit_builders(VersionIR const& ir, CoverageMode mode) {
     w.line(ir.ns);
     w.line();
 
-    // 067 US3/T025 (data-model.md §1.3/§1.4, G5) — writer_traits<T>
-    // specializations + their required-field/group helper functions, one
-    // level at a time, in the post-order collected above. MUST live in
-    // `fixpp::wire` (writer_traits's own namespace — [temp.expl.spec]) and
-    // MUST come after `fixpp::<ns>` closes (the Args types it specializes
-    // over must already be complete) and BEFORE the validate_<Msg> thin
-    // wrappers below (which instantiate validate_required<TopLevelArgs>,
-    // requiring writer_traits<TopLevelArgs> to already be a complete
-    // specialization at that point).
+    // PASS 4c (067 US3/T025, data-model.md §1.3/§1.4, G5) — writer_traits<T>
+    // specializations + their required-field/group helper functions, ONCE
+    // PER DISTINCT PLAN (G3/FR-003 — no ODR conflict under dedup), shared
+    // group plans FIRST (post-order — a plan's child's writer_traits must be
+    // a complete specialization before the parent's `_validate_entry_`
+    // function, which instantiates `validate_required<Child>`, is defined —
+    // [temp.expl.spec]), then each message's own top-level Args (which may
+    // reference a shared plan's writer_traits via its group_check). MUST
+    // live in `fixpp::wire` (writer_traits's own namespace) and MUST come
+    // after `fixpp::<ns>`/`fixpp::<ns>::groups` close (the Args types it
+    // specializes over must already be complete) and BEFORE the
+    // validate_<Msg> thin wrappers below.
     w.line("namespace fixpp::wire {");
     w.line();
-    for (auto const& [type_name, plan] : all_levels) {
-        emit_writer_traits_for_level(w, std::string{ir.ns}, type_name, plan);
+    for (auto const& p : intern.plans) {
+        std::string const qtype = "::fixpp::" + std::string{ir.ns} + "::groups::" + p.name;
+        emit_writer_traits_for_level(w, qtype, p.name, p.members);
+    }
+    for (std::size_t i = 0; i < official_msg_ids.size(); ++i) {
+        std::string const type_name = official_msg_ids[i] + "Args";
+        std::string const qtype = "::fixpp::" + std::string{ir.ns} + "::" + type_name;
+        emit_writer_traits_for_level(w, qtype, type_name, top_level_plans[i]);
     }
     w.line("}  // namespace fixpp::wire");
     w.line();

@@ -15,21 +15,21 @@
 #include <span>
 #include <string_view>
 
-namespace fixpp::v44 {
+namespace fixpp::v44::groups {
 
-struct ExecutionReportMiscFeesArgs {
+struct G_136Args {
     ::std::optional<::fixpp::decimal_t> misc_fee_amt{};
     ::std::optional<::std::string_view> misc_fee_curr{};
     ::std::optional<::std::string_view> misc_fee_type{};
     ::std::optional<::std::int64_t> misc_fee_basis{};
 };
 
-struct ExecutionReportStipulationsArgs {
+struct G_232Args {
     ::std::optional<::std::string_view> stipulation_type{};
     ::std::optional<::std::string_view> stipulation_value{};
 };
 
-struct ExecutionReportContraBrokersArgs {
+struct G_382Args {
     ::std::optional<::std::string_view> contra_broker{};
     ::std::optional<::std::string_view> contra_trader{};
     ::std::optional<::fixpp::decimal_t> contra_trade_qty{};
@@ -37,57 +37,57 @@ struct ExecutionReportContraBrokersArgs {
     ::std::optional<::std::string_view> contra_leg_ref_id{};
 };
 
-struct ExecutionReportPartyIDsPartySubIDsArgs {
+struct G_802Args {
     ::std::optional<::std::string_view> party_sub_id{};
     ::std::optional<::std::int64_t> party_sub_id_type{};
 };
 
-struct ExecutionReportPartyIDsArgs {
+struct G_453Args {
     ::std::optional<::std::string_view> party_id{};
     ::std::optional<char> party_id_source{};
     ::std::optional<::std::int64_t> party_role{};
-    ::std::optional<::std::span<const ExecutionReportPartyIDsPartySubIDsArgs>> party_sub_i_ds{};
+    ::std::optional<::std::span<const G_802Args>> party_sub_i_ds{};
 };
 
-struct ExecutionReportSecurityAltIDArgs {
+struct G_454Args {
     ::std::optional<::std::string_view> security_alt_id{};
     ::std::optional<::std::string_view> security_alt_id_source{};
 };
 
-struct ExecutionReportContAmtsArgs {
+struct G_518Args {
     ::std::optional<::std::int64_t> cont_amt_type{};
     ::std::optional<::fixpp::decimal_t> cont_amt_value{};
     ::std::optional<::std::string_view> cont_amt_curr{};
 };
 
-struct ExecutionReportLegsLegSecurityAltIDArgs {
+struct G_604Args {
     ::std::optional<::std::string_view> leg_security_alt_id{};
     ::std::optional<::std::string_view> leg_security_alt_id_source{};
 };
 
-struct ExecutionReportLegsLegStipulationsArgs {
+struct G_683Args {
     ::std::optional<::std::string_view> leg_stipulation_type{};
     ::std::optional<::std::string_view> leg_stipulation_value{};
 };
 
-struct ExecutionReportLegsNestedPartyIDsNestedPartySubIDsArgs {
+struct G_804Args {
     ::std::optional<::std::string_view> nested_party_sub_id{};
     ::std::optional<::std::int64_t> nested_party_sub_id_type{};
 };
 
-struct ExecutionReportLegsNestedPartyIDsArgs {
+struct G_539Args {
     ::std::optional<::std::string_view> nested_party_id{};
     ::std::optional<char> nested_party_id_source{};
     ::std::optional<::std::int64_t> nested_party_role{};
-    ::std::optional<::std::span<const ExecutionReportLegsNestedPartyIDsNestedPartySubIDsArgs>> nested_party_sub_i_ds{};
+    ::std::optional<::std::span<const G_804Args>> nested_party_sub_i_ds{};
 };
 
-struct ExecutionReportLegsArgs {
+struct G_555_1Args {
     ::std::optional<::std::string_view> leg_symbol{};
     ::std::optional<::std::string_view> leg_symbol_sfx{};
     ::std::optional<::std::string_view> leg_security_id{};
     ::std::optional<::std::string_view> leg_security_id_source{};
-    ::std::optional<::std::span<const ExecutionReportLegsLegSecurityAltIDArgs>> leg_security_alt_id{};
+    ::std::optional<::std::span<const G_604Args>> leg_security_alt_id{};
     ::std::optional<::std::int64_t> leg_product{};
     ::std::optional<::std::string_view> leg_cfi_code{};
     ::std::optional<::std::string_view> leg_security_type{};
@@ -125,10 +125,10 @@ struct ExecutionReportLegsArgs {
     ::std::optional<::std::string_view> leg_interest_accrual_date{};
     ::std::optional<::fixpp::decimal_t> leg_qty{};
     ::std::optional<::std::int64_t> leg_swap_type{};
-    ::std::optional<::std::span<const ExecutionReportLegsLegStipulationsArgs>> leg_stipulations{};
+    ::std::optional<::std::span<const G_683Args>> leg_stipulations{};
     ::std::optional<char> leg_position_effect{};
     ::std::optional<::std::int64_t> leg_covered_or_uncovered{};
-    ::std::optional<::std::span<const ExecutionReportLegsNestedPartyIDsArgs>> nested_party_i_ds{};
+    ::std::optional<::std::span<const G_539Args>> nested_party_i_ds{};
     ::std::optional<::std::string_view> leg_ref_id{};
     ::std::optional<::fixpp::decimal_t> leg_price{};
     ::std::optional<char> leg_settl_type{};
@@ -136,22 +136,22 @@ struct ExecutionReportLegsArgs {
     ::std::optional<::fixpp::decimal_t> leg_last_px{};
 };
 
-struct ExecutionReportUnderlyingsUnderlyingSecurityAltIDArgs {
+struct G_457Args {
     ::std::optional<::std::string_view> underlying_security_alt_id{};
     ::std::optional<::std::string_view> underlying_security_alt_id_source{};
 };
 
-struct ExecutionReportUnderlyingsUnderlyingStipsArgs {
+struct G_887Args {
     ::std::optional<::std::string_view> underlying_stip_type{};
     ::std::optional<::std::string_view> underlying_stip_value{};
 };
 
-struct ExecutionReportUnderlyingsArgs {
+struct G_711Args {
     ::std::optional<::std::string_view> underlying_symbol{};
     ::std::optional<::std::string_view> underlying_symbol_sfx{};
     ::std::optional<::std::string_view> underlying_security_id{};
     ::std::optional<::std::string_view> underlying_security_id_source{};
-    ::std::optional<::std::span<const ExecutionReportUnderlyingsUnderlyingSecurityAltIDArgs>> underlying_security_alt_id{};
+    ::std::optional<::std::span<const G_457Args>> underlying_security_alt_id{};
     ::std::optional<::std::int64_t> underlying_product{};
     ::std::optional<::std::string_view> underlying_cfi_code{};
     ::std::optional<::std::string_view> underlying_security_type{};
@@ -191,15 +191,1271 @@ struct ExecutionReportUnderlyingsArgs {
     ::std::optional<::fixpp::decimal_t> underlying_start_value{};
     ::std::optional<::fixpp::decimal_t> underlying_current_value{};
     ::std::optional<::fixpp::decimal_t> underlying_end_value{};
-    ::std::optional<::std::span<const ExecutionReportUnderlyingsUnderlyingStipsArgs>> underlying_stips{};
+    ::std::optional<::std::span<const G_887Args>> underlying_stips{};
 };
 
-struct ExecutionReportEventsArgs {
+struct G_864Args {
     ::std::optional<::std::int64_t> event_type{};
     ::std::optional<::std::string_view> event_date{};
     ::std::optional<::fixpp::decimal_t> event_px{};
     ::std::optional<::std::string_view> event_text{};
 };
+
+struct G_952Args {
+    ::std::optional<::std::string_view> nested3_party_sub_id{};
+    ::std::optional<::std::int64_t> nested3_party_sub_id_type{};
+};
+
+struct G_948Args {
+    ::std::optional<::std::string_view> nested3_party_id{};
+    ::std::optional<char> nested3_party_id_source{};
+    ::std::optional<::std::int64_t> nested3_party_role{};
+    ::std::optional<::std::span<const G_952Args>> nested3_party_sub_i_ds{};
+};
+
+struct G_78_1Args {
+    ::std::optional<::std::string_view> alloc_account{};
+    ::std::optional<::std::int64_t> alloc_acct_id_source{};
+    ::std::optional<::std::string_view> alloc_settl_currency{};
+    ::std::optional<::std::string_view> individual_alloc_id{};
+    ::std::optional<::std::span<const G_948Args>> nested3_party_i_ds{};
+    ::std::optional<::fixpp::decimal_t> alloc_qty{};
+};
+
+struct G_386Args {
+    ::std::optional<::std::string_view> trading_session_id{};
+    ::std::optional<::std::string_view> trading_session_sub_id{};
+};
+
+struct G_806Args {
+    ::std::optional<::std::string_view> nested2_party_sub_id{};
+    ::std::optional<::std::int64_t> nested2_party_sub_id_type{};
+};
+
+struct G_756Args {
+    ::std::optional<::std::string_view> nested2_party_id{};
+    ::std::optional<char> nested2_party_id_source{};
+    ::std::optional<::std::int64_t> nested2_party_role{};
+    ::std::optional<::std::span<const G_806Args>> nested2_party_sub_i_ds{};
+};
+
+struct G_670Args {
+    ::std::optional<::std::string_view> leg_alloc_account{};
+    ::std::optional<::std::string_view> leg_individual_alloc_id{};
+    ::std::optional<::std::span<const G_756Args>> nested2_party_i_ds{};
+    ::std::optional<::fixpp::decimal_t> leg_alloc_qty{};
+    ::std::optional<::std::string_view> leg_alloc_acct_id_source{};
+    ::std::optional<::std::string_view> leg_settl_currency{};
+};
+
+struct G_555_2Args {
+    ::std::optional<::std::string_view> leg_symbol{};
+    ::std::optional<::std::string_view> leg_symbol_sfx{};
+    ::std::optional<::std::string_view> leg_security_id{};
+    ::std::optional<::std::string_view> leg_security_id_source{};
+    ::std::optional<::std::span<const G_604Args>> leg_security_alt_id{};
+    ::std::optional<::std::int64_t> leg_product{};
+    ::std::optional<::std::string_view> leg_cfi_code{};
+    ::std::optional<::std::string_view> leg_security_type{};
+    ::std::optional<::std::string_view> leg_security_sub_type{};
+    ::std::optional<::std::string_view> leg_maturity_month_year{};
+    ::std::optional<::std::string_view> leg_maturity_date{};
+    ::std::optional<::std::string_view> leg_coupon_payment_date{};
+    ::std::optional<::std::string_view> leg_issue_date{};
+    ::std::optional<::std::string_view> leg_repo_collateral_security_type{};
+    ::std::optional<::std::int64_t> leg_repurchase_term{};
+    ::std::optional<::fixpp::decimal_t> leg_repurchase_rate{};
+    ::std::optional<::fixpp::decimal_t> leg_factor{};
+    ::std::optional<::std::string_view> leg_credit_rating{};
+    ::std::optional<::std::string_view> leg_instr_registry{};
+    ::std::optional<::std::string_view> leg_country_of_issue{};
+    ::std::optional<::std::string_view> leg_state_or_province_of_issue{};
+    ::std::optional<::std::string_view> leg_locale_of_issue{};
+    ::std::optional<::std::string_view> leg_redemption_date{};
+    ::std::optional<::fixpp::decimal_t> leg_strike_price{};
+    ::std::optional<::std::string_view> leg_strike_currency{};
+    ::std::optional<char> leg_opt_attribute{};
+    ::std::optional<::fixpp::decimal_t> leg_contract_multiplier{};
+    ::std::optional<::fixpp::decimal_t> leg_coupon_rate{};
+    ::std::optional<::std::string_view> leg_security_exchange{};
+    ::std::optional<::std::string_view> leg_issuer{};
+    ::std::optional<::std::string_view> encoded_leg_issuer{};
+    ::std::optional<::std::string_view> leg_security_desc{};
+    ::std::optional<::std::string_view> encoded_leg_security_desc{};
+    ::std::optional<::fixpp::decimal_t> leg_ratio_qty{};
+    ::std::optional<char> leg_side{};
+    ::std::optional<::std::string_view> leg_currency{};
+    ::std::optional<::std::string_view> leg_pool{};
+    ::std::optional<::std::string_view> leg_dated_date{};
+    ::std::optional<::std::string_view> leg_contract_settl_month{};
+    ::std::optional<::std::string_view> leg_interest_accrual_date{};
+    ::std::optional<::fixpp::decimal_t> leg_qty{};
+    ::std::optional<::std::int64_t> leg_swap_type{};
+    ::std::optional<::std::span<const G_683Args>> leg_stipulations{};
+    ::std::optional<::std::span<const G_670Args>> leg_allocs{};
+    ::std::optional<char> leg_position_effect{};
+    ::std::optional<::std::int64_t> leg_covered_or_uncovered{};
+    ::std::optional<::std::span<const G_539Args>> nested_party_i_ds{};
+    ::std::optional<::std::string_view> leg_ref_id{};
+    ::std::optional<::fixpp::decimal_t> leg_price{};
+    ::std::optional<char> leg_settl_type{};
+    ::std::optional<::std::string_view> leg_settl_date{};
+};
+
+struct G_555_3Args {
+    ::std::optional<::std::string_view> leg_symbol{};
+    ::std::optional<::std::string_view> leg_symbol_sfx{};
+    ::std::optional<::std::string_view> leg_security_id{};
+    ::std::optional<::std::string_view> leg_security_id_source{};
+    ::std::optional<::std::span<const G_604Args>> leg_security_alt_id{};
+    ::std::optional<::std::int64_t> leg_product{};
+    ::std::optional<::std::string_view> leg_cfi_code{};
+    ::std::optional<::std::string_view> leg_security_type{};
+    ::std::optional<::std::string_view> leg_security_sub_type{};
+    ::std::optional<::std::string_view> leg_maturity_month_year{};
+    ::std::optional<::std::string_view> leg_maturity_date{};
+    ::std::optional<::std::string_view> leg_coupon_payment_date{};
+    ::std::optional<::std::string_view> leg_issue_date{};
+    ::std::optional<::std::string_view> leg_repo_collateral_security_type{};
+    ::std::optional<::std::int64_t> leg_repurchase_term{};
+    ::std::optional<::fixpp::decimal_t> leg_repurchase_rate{};
+    ::std::optional<::fixpp::decimal_t> leg_factor{};
+    ::std::optional<::std::string_view> leg_credit_rating{};
+    ::std::optional<::std::string_view> leg_instr_registry{};
+    ::std::optional<::std::string_view> leg_country_of_issue{};
+    ::std::optional<::std::string_view> leg_state_or_province_of_issue{};
+    ::std::optional<::std::string_view> leg_locale_of_issue{};
+    ::std::optional<::std::string_view> leg_redemption_date{};
+    ::std::optional<::fixpp::decimal_t> leg_strike_price{};
+    ::std::optional<::std::string_view> leg_strike_currency{};
+    ::std::optional<char> leg_opt_attribute{};
+    ::std::optional<::fixpp::decimal_t> leg_contract_multiplier{};
+    ::std::optional<::fixpp::decimal_t> leg_coupon_rate{};
+    ::std::optional<::std::string_view> leg_security_exchange{};
+    ::std::optional<::std::string_view> leg_issuer{};
+    ::std::optional<::std::string_view> encoded_leg_issuer{};
+    ::std::optional<::std::string_view> leg_security_desc{};
+    ::std::optional<::std::string_view> encoded_leg_security_desc{};
+    ::std::optional<::fixpp::decimal_t> leg_ratio_qty{};
+    ::std::optional<char> leg_side{};
+    ::std::optional<::std::string_view> leg_currency{};
+    ::std::optional<::std::string_view> leg_pool{};
+    ::std::optional<::std::string_view> leg_dated_date{};
+    ::std::optional<::std::string_view> leg_contract_settl_month{};
+    ::std::optional<::std::string_view> leg_interest_accrual_date{};
+    ::std::optional<::fixpp::decimal_t> leg_qty{};
+    ::std::optional<::std::int64_t> leg_swap_type{};
+    ::std::optional<char> leg_settl_type{};
+    ::std::optional<::std::string_view> leg_settl_date{};
+    ::std::optional<::std::span<const G_683Args>> leg_stipulations{};
+    ::std::optional<::std::span<const G_539Args>> nested_party_i_ds{};
+    ::std::optional<::std::string_view> leg_benchmark_curve_currency{};
+    ::std::optional<::std::string_view> leg_benchmark_curve_name{};
+    ::std::optional<::std::string_view> leg_benchmark_curve_point{};
+    ::std::optional<::fixpp::decimal_t> leg_benchmark_price{};
+    ::std::optional<::std::int64_t> leg_benchmark_price_type{};
+};
+
+struct G_735Args {
+    ::std::optional<char> quote_qualifier{};
+};
+
+struct G_146_1Args {
+    ::std::optional<::std::string_view> symbol{};
+    ::std::optional<::std::string_view> symbol_sfx{};
+    ::std::optional<::std::string_view> security_id{};
+    ::std::optional<::std::string_view> security_id_source{};
+    ::std::optional<::std::span<const G_454Args>> security_alt_id{};
+    ::std::optional<::std::int64_t> product{};
+    ::std::optional<::std::string_view> cfi_code{};
+    ::std::optional<::std::string_view> security_type{};
+    ::std::optional<::std::string_view> security_sub_type{};
+    ::std::optional<::std::string_view> maturity_month_year{};
+    ::std::optional<::std::string_view> maturity_date{};
+    ::std::optional<::std::int64_t> put_or_call{};
+    ::std::optional<::std::string_view> coupon_payment_date{};
+    ::std::optional<::std::string_view> issue_date{};
+    ::std::optional<::std::string_view> repo_collateral_security_type{};
+    ::std::optional<::std::int64_t> repurchase_term{};
+    ::std::optional<::fixpp::decimal_t> repurchase_rate{};
+    ::std::optional<::fixpp::decimal_t> factor{};
+    ::std::optional<::std::string_view> credit_rating{};
+    ::std::optional<::std::string_view> instr_registry{};
+    ::std::optional<::std::string_view> country_of_issue{};
+    ::std::optional<::std::string_view> state_or_province_of_issue{};
+    ::std::optional<::std::string_view> locale_of_issue{};
+    ::std::optional<::std::string_view> redemption_date{};
+    ::std::optional<::fixpp::decimal_t> strike_price{};
+    ::std::optional<::std::string_view> strike_currency{};
+    ::std::optional<char> opt_attribute{};
+    ::std::optional<::fixpp::decimal_t> contract_multiplier{};
+    ::std::optional<::fixpp::decimal_t> coupon_rate{};
+    ::std::optional<::std::string_view> security_exchange{};
+    ::std::optional<::std::string_view> issuer{};
+    ::std::optional<::std::string_view> encoded_issuer{};
+    ::std::optional<::std::string_view> security_desc{};
+    ::std::optional<::std::string_view> encoded_security_desc{};
+    ::std::optional<::std::string_view> pool{};
+    ::std::optional<::std::string_view> contract_settl_month{};
+    ::std::optional<::std::int64_t> cp_program{};
+    ::std::optional<::std::string_view> cp_reg_type{};
+    ::std::optional<::std::span<const G_864Args>> events{};
+    ::std::optional<::std::string_view> dated_date{};
+    ::std::optional<::std::string_view> interest_accrual_date{};
+    ::std::optional<::std::string_view> agreement_desc{};
+    ::std::optional<::std::string_view> agreement_id{};
+    ::std::optional<::std::string_view> agreement_date{};
+    ::std::optional<::std::string_view> agreement_currency{};
+    ::std::optional<::std::int64_t> termination_type{};
+    ::std::optional<::std::string_view> start_date{};
+    ::std::optional<::std::string_view> end_date{};
+    ::std::optional<::std::int64_t> delivery_type{};
+    ::std::optional<::fixpp::decimal_t> margin_ratio{};
+    ::std::optional<::std::span<const G_711Args>> underlyings{};
+    ::std::optional<::fixpp::decimal_t> prev_close_px{};
+    ::std::optional<::std::int64_t> quote_request_type{};
+    ::std::optional<::std::int64_t> quote_type{};
+    ::std::optional<::std::string_view> trading_session_id{};
+    ::std::optional<::std::string_view> trading_session_sub_id{};
+    ::std::optional<::std::string_view> trade_origination_date{};
+    ::std::optional<char> side{};
+    ::std::optional<::std::int64_t> qty_type{};
+    ::std::optional<::fixpp::decimal_t> order_qty{};
+    ::std::optional<::fixpp::decimal_t> cash_order_qty{};
+    ::std::optional<::fixpp::decimal_t> order_percent{};
+    ::std::optional<char> rounding_direction{};
+    ::std::optional<::fixpp::decimal_t> rounding_modulus{};
+    ::std::optional<char> settl_type{};
+    ::std::optional<::std::string_view> settl_date{};
+    ::std::optional<::std::string_view> settl_date2{};
+    ::std::optional<::fixpp::decimal_t> order_qty2{};
+    ::std::optional<::std::string_view> currency{};
+    ::std::optional<::std::span<const G_232Args>> stipulations{};
+    ::std::optional<::std::string_view> account{};
+    ::std::optional<::std::int64_t> acct_id_source{};
+    ::std::optional<::std::int64_t> account_type{};
+    ::std::optional<::std::span<const G_555_3Args>> legs{};
+    ::std::optional<::std::span<const G_735Args>> quote_qualifiers{};
+    ::std::optional<::std::int64_t> quote_price_type{};
+    ::std::optional<char> ord_type{};
+    ::std::optional<::std::string_view> expire_time{};
+    ::std::optional<::std::string_view> transact_time{};
+    ::std::optional<::fixpp::decimal_t> spread{};
+    ::std::optional<::std::string_view> benchmark_curve_currency{};
+    ::std::optional<::std::string_view> benchmark_curve_name{};
+    ::std::optional<::std::string_view> benchmark_curve_point{};
+    ::std::optional<::fixpp::decimal_t> benchmark_price{};
+    ::std::optional<::std::int64_t> benchmark_price_type{};
+    ::std::optional<::std::string_view> benchmark_security_id{};
+    ::std::optional<::std::string_view> benchmark_security_id_source{};
+    ::std::optional<::std::int64_t> price_type{};
+    ::std::optional<::fixpp::decimal_t> price{};
+    ::std::optional<::fixpp::decimal_t> price2{};
+    ::std::optional<::std::string_view> yield_type{};
+    ::std::optional<::fixpp::decimal_t> yield{};
+    ::std::optional<::std::string_view> yield_calc_date{};
+    ::std::optional<::std::string_view> yield_redemption_date{};
+    ::std::optional<::fixpp::decimal_t> yield_redemption_price{};
+    ::std::optional<::std::int64_t> yield_redemption_price_type{};
+    ::std::optional<::std::span<const G_453Args>> party_i_ds{};
+};
+
+struct G_73_1Args {
+    ::std::optional<::std::string_view> cl_ord_id{};
+    ::std::optional<::std::string_view> order_id{};
+    ::std::optional<::std::string_view> secondary_order_id{};
+    ::std::optional<::std::string_view> secondary_cl_ord_id{};
+    ::std::optional<::std::string_view> list_id{};
+    ::std::optional<::std::span<const G_756Args>> nested2_party_i_ds{};
+    ::std::optional<::fixpp::decimal_t> order_qty{};
+    ::std::optional<::fixpp::decimal_t> order_avg_px{};
+    ::std::optional<::fixpp::decimal_t> order_booking_qty{};
+};
+
+struct G_576Args {
+    ::std::optional<::std::int64_t> clearing_instruction{};
+};
+
+struct G_801Args {
+    ::std::optional<::std::string_view> settl_party_sub_id{};
+    ::std::optional<::std::int64_t> settl_party_sub_id_type{};
+};
+
+struct G_781Args {
+    ::std::optional<::std::string_view> settl_party_id{};
+    ::std::optional<char> settl_party_id_source{};
+    ::std::optional<::std::int64_t> settl_party_role{};
+    ::std::optional<::std::span<const G_801Args>> settl_party_sub_i_ds{};
+};
+
+struct G_85Args {
+    ::std::optional<char> settl_inst_source{};
+    ::std::optional<char> dlvy_inst_type{};
+    ::std::optional<::std::span<const G_781Args>> settl_party_i_ds{};
+};
+
+struct G_78_2Args {
+    ::std::optional<::std::string_view> alloc_account{};
+    ::std::optional<::std::int64_t> alloc_acct_id_source{};
+    ::std::optional<char> match_status{};
+    ::std::optional<::fixpp::decimal_t> alloc_price{};
+    ::std::optional<::fixpp::decimal_t> alloc_qty{};
+    ::std::optional<::std::string_view> individual_alloc_id{};
+    ::std::optional<char> process_code{};
+    ::std::optional<::std::span<const G_539Args>> nested_party_i_ds{};
+    ::std::optional<bool> notify_broker_of_credit{};
+    ::std::optional<::std::int64_t> alloc_handl_inst{};
+    ::std::optional<::std::string_view> alloc_text{};
+    ::std::optional<::std::string_view> encoded_alloc_text{};
+    ::std::optional<::fixpp::decimal_t> commission{};
+    ::std::optional<char> comm_type{};
+    ::std::optional<::std::string_view> comm_currency{};
+    ::std::optional<char> fund_renew_waiv{};
+    ::std::optional<::fixpp::decimal_t> alloc_avg_px{};
+    ::std::optional<::fixpp::decimal_t> alloc_net_money{};
+    ::std::optional<::fixpp::decimal_t> settl_curr_amt{};
+    ::std::optional<::fixpp::decimal_t> alloc_settl_curr_amt{};
+    ::std::optional<::std::string_view> settl_currency{};
+    ::std::optional<::std::string_view> alloc_settl_currency{};
+    ::std::optional<::fixpp::decimal_t> settl_curr_fx_rate{};
+    ::std::optional<char> settl_curr_fx_rate_calc{};
+    ::std::optional<::fixpp::decimal_t> alloc_accrued_interest_amt{};
+    ::std::optional<::fixpp::decimal_t> alloc_interest_at_maturity{};
+    ::std::optional<::std::span<const G_136Args>> misc_fees{};
+    ::std::optional<::std::span<const G_576Args>> clearing_instructions{};
+    ::std::optional<::std::int64_t> alloc_settl_inst_type{};
+    ::std::optional<::std::int64_t> settl_delivery_type{};
+    ::std::optional<::std::int64_t> stand_inst_db_type{};
+    ::std::optional<::std::string_view> stand_inst_db_name{};
+    ::std::optional<::std::string_view> stand_inst_db_id{};
+    ::std::optional<::std::span<const G_85Args>> dlvy_inst{};
+};
+
+struct G_124Args {
+    ::std::optional<::fixpp::decimal_t> last_qty{};
+    ::std::optional<::std::string_view> exec_id{};
+    ::std::optional<::std::string_view> secondary_exec_id{};
+    ::std::optional<::fixpp::decimal_t> last_px{};
+    ::std::optional<::fixpp::decimal_t> last_par_px{};
+    ::std::optional<char> last_capacity{};
+};
+
+struct G_555_4Args {
+    ::std::optional<::std::string_view> leg_symbol{};
+    ::std::optional<::std::string_view> leg_symbol_sfx{};
+    ::std::optional<::std::string_view> leg_security_id{};
+    ::std::optional<::std::string_view> leg_security_id_source{};
+    ::std::optional<::std::span<const G_604Args>> leg_security_alt_id{};
+    ::std::optional<::std::int64_t> leg_product{};
+    ::std::optional<::std::string_view> leg_cfi_code{};
+    ::std::optional<::std::string_view> leg_security_type{};
+    ::std::optional<::std::string_view> leg_security_sub_type{};
+    ::std::optional<::std::string_view> leg_maturity_month_year{};
+    ::std::optional<::std::string_view> leg_maturity_date{};
+    ::std::optional<::std::string_view> leg_coupon_payment_date{};
+    ::std::optional<::std::string_view> leg_issue_date{};
+    ::std::optional<::std::string_view> leg_repo_collateral_security_type{};
+    ::std::optional<::std::int64_t> leg_repurchase_term{};
+    ::std::optional<::fixpp::decimal_t> leg_repurchase_rate{};
+    ::std::optional<::fixpp::decimal_t> leg_factor{};
+    ::std::optional<::std::string_view> leg_credit_rating{};
+    ::std::optional<::std::string_view> leg_instr_registry{};
+    ::std::optional<::std::string_view> leg_country_of_issue{};
+    ::std::optional<::std::string_view> leg_state_or_province_of_issue{};
+    ::std::optional<::std::string_view> leg_locale_of_issue{};
+    ::std::optional<::std::string_view> leg_redemption_date{};
+    ::std::optional<::fixpp::decimal_t> leg_strike_price{};
+    ::std::optional<::std::string_view> leg_strike_currency{};
+    ::std::optional<char> leg_opt_attribute{};
+    ::std::optional<::fixpp::decimal_t> leg_contract_multiplier{};
+    ::std::optional<::fixpp::decimal_t> leg_coupon_rate{};
+    ::std::optional<::std::string_view> leg_security_exchange{};
+    ::std::optional<::std::string_view> leg_issuer{};
+    ::std::optional<::std::string_view> encoded_leg_issuer{};
+    ::std::optional<::std::string_view> leg_security_desc{};
+    ::std::optional<::std::string_view> encoded_leg_security_desc{};
+    ::std::optional<::fixpp::decimal_t> leg_ratio_qty{};
+    ::std::optional<char> leg_side{};
+    ::std::optional<::std::string_view> leg_currency{};
+    ::std::optional<::std::string_view> leg_pool{};
+    ::std::optional<::std::string_view> leg_dated_date{};
+    ::std::optional<::std::string_view> leg_contract_settl_month{};
+    ::std::optional<::std::string_view> leg_interest_accrual_date{};
+};
+
+struct G_870Args {
+    ::std::optional<::std::int64_t> instr_attrib_type{};
+    ::std::optional<::std::string_view> instr_attrib_value{};
+};
+
+struct G_78_3Args {
+    ::std::optional<::std::string_view> alloc_account{};
+    ::std::optional<::std::int64_t> alloc_acct_id_source{};
+    ::std::optional<::std::string_view> alloc_settl_currency{};
+    ::std::optional<::std::string_view> individual_alloc_id{};
+    ::std::optional<::std::span<const G_539Args>> nested_party_i_ds{};
+    ::std::optional<::fixpp::decimal_t> alloc_qty{};
+};
+
+struct G_73_2Args {
+    ::std::optional<::std::string_view> cl_ord_id{};
+    ::std::optional<::std::string_view> secondary_cl_ord_id{};
+    ::std::optional<::std::int64_t> list_seq_no{};
+    ::std::optional<::std::string_view> cl_ord_link_id{};
+    ::std::optional<char> settl_inst_mode{};
+    ::std::optional<::std::span<const G_453Args>> party_i_ds{};
+    ::std::optional<::std::string_view> trade_origination_date{};
+    ::std::optional<::std::string_view> trade_date{};
+    ::std::optional<::std::string_view> account{};
+    ::std::optional<::std::int64_t> acct_id_source{};
+    ::std::optional<::std::int64_t> account_type{};
+    ::std::optional<char> day_booking_inst{};
+    ::std::optional<char> booking_unit{};
+    ::std::optional<::std::string_view> alloc_id{};
+    ::std::optional<char> prealloc_method{};
+    ::std::optional<::std::span<const G_78_3Args>> allocs{};
+    ::std::optional<char> settl_type{};
+    ::std::optional<::std::string_view> settl_date{};
+    ::std::optional<char> cash_margin{};
+    ::std::optional<::std::string_view> clearing_fee_indicator{};
+    ::std::optional<char> handl_inst{};
+    ::std::optional<::std::string_view> exec_inst{};
+    ::std::optional<::fixpp::decimal_t> min_qty{};
+    ::std::optional<::fixpp::decimal_t> max_floor{};
+    ::std::optional<::std::string_view> ex_destination{};
+    ::std::optional<::std::span<const G_386Args>> trading_sessions{};
+    ::std::optional<char> process_code{};
+    ::std::optional<::std::string_view> symbol{};
+    ::std::optional<::std::string_view> symbol_sfx{};
+    ::std::optional<::std::string_view> security_id{};
+    ::std::optional<::std::string_view> security_id_source{};
+    ::std::optional<::std::span<const G_454Args>> security_alt_id{};
+    ::std::optional<::std::int64_t> product{};
+    ::std::optional<::std::string_view> cfi_code{};
+    ::std::optional<::std::string_view> security_type{};
+    ::std::optional<::std::string_view> security_sub_type{};
+    ::std::optional<::std::string_view> maturity_month_year{};
+    ::std::optional<::std::string_view> maturity_date{};
+    ::std::optional<::std::int64_t> put_or_call{};
+    ::std::optional<::std::string_view> coupon_payment_date{};
+    ::std::optional<::std::string_view> issue_date{};
+    ::std::optional<::std::string_view> repo_collateral_security_type{};
+    ::std::optional<::std::int64_t> repurchase_term{};
+    ::std::optional<::fixpp::decimal_t> repurchase_rate{};
+    ::std::optional<::fixpp::decimal_t> factor{};
+    ::std::optional<::std::string_view> credit_rating{};
+    ::std::optional<::std::string_view> instr_registry{};
+    ::std::optional<::std::string_view> country_of_issue{};
+    ::std::optional<::std::string_view> state_or_province_of_issue{};
+    ::std::optional<::std::string_view> locale_of_issue{};
+    ::std::optional<::std::string_view> redemption_date{};
+    ::std::optional<::fixpp::decimal_t> strike_price{};
+    ::std::optional<::std::string_view> strike_currency{};
+    ::std::optional<char> opt_attribute{};
+    ::std::optional<::fixpp::decimal_t> contract_multiplier{};
+    ::std::optional<::fixpp::decimal_t> coupon_rate{};
+    ::std::optional<::std::string_view> security_exchange{};
+    ::std::optional<::std::string_view> issuer{};
+    ::std::optional<::std::string_view> encoded_issuer{};
+    ::std::optional<::std::string_view> security_desc{};
+    ::std::optional<::std::string_view> encoded_security_desc{};
+    ::std::optional<::std::string_view> pool{};
+    ::std::optional<::std::string_view> contract_settl_month{};
+    ::std::optional<::std::int64_t> cp_program{};
+    ::std::optional<::std::string_view> cp_reg_type{};
+    ::std::optional<::std::span<const G_864Args>> events{};
+    ::std::optional<::std::string_view> dated_date{};
+    ::std::optional<::std::string_view> interest_accrual_date{};
+    ::std::optional<::std::span<const G_711Args>> underlyings{};
+    ::std::optional<::fixpp::decimal_t> prev_close_px{};
+    ::std::optional<char> side{};
+    ::std::optional<::std::int64_t> side_value_ind{};
+    ::std::optional<bool> locate_reqd{};
+    ::std::optional<::std::string_view> transact_time{};
+    ::std::optional<::std::span<const G_232Args>> stipulations{};
+    ::std::optional<::std::int64_t> qty_type{};
+    ::std::optional<::fixpp::decimal_t> order_qty{};
+    ::std::optional<::fixpp::decimal_t> cash_order_qty{};
+    ::std::optional<::fixpp::decimal_t> order_percent{};
+    ::std::optional<char> rounding_direction{};
+    ::std::optional<::fixpp::decimal_t> rounding_modulus{};
+    ::std::optional<char> ord_type{};
+    ::std::optional<::std::int64_t> price_type{};
+    ::std::optional<::fixpp::decimal_t> price{};
+    ::std::optional<::fixpp::decimal_t> stop_px{};
+    ::std::optional<::fixpp::decimal_t> spread{};
+    ::std::optional<::std::string_view> benchmark_curve_currency{};
+    ::std::optional<::std::string_view> benchmark_curve_name{};
+    ::std::optional<::std::string_view> benchmark_curve_point{};
+    ::std::optional<::fixpp::decimal_t> benchmark_price{};
+    ::std::optional<::std::int64_t> benchmark_price_type{};
+    ::std::optional<::std::string_view> benchmark_security_id{};
+    ::std::optional<::std::string_view> benchmark_security_id_source{};
+    ::std::optional<::std::string_view> yield_type{};
+    ::std::optional<::fixpp::decimal_t> yield{};
+    ::std::optional<::std::string_view> yield_calc_date{};
+    ::std::optional<::std::string_view> yield_redemption_date{};
+    ::std::optional<::fixpp::decimal_t> yield_redemption_price{};
+    ::std::optional<::std::int64_t> yield_redemption_price_type{};
+    ::std::optional<::std::string_view> currency{};
+    ::std::optional<::std::string_view> compliance_id{};
+    ::std::optional<bool> solicited_flag{};
+    ::std::optional<::std::string_view> ioiid{};
+    ::std::optional<::std::string_view> quote_id{};
+    ::std::optional<char> time_in_force{};
+    ::std::optional<::std::string_view> effective_time{};
+    ::std::optional<::std::string_view> expire_date{};
+    ::std::optional<::std::string_view> expire_time{};
+    ::std::optional<::std::int64_t> gt_booking_inst{};
+    ::std::optional<::fixpp::decimal_t> commission{};
+    ::std::optional<char> comm_type{};
+    ::std::optional<::std::string_view> comm_currency{};
+    ::std::optional<char> fund_renew_waiv{};
+    ::std::optional<char> order_capacity{};
+    ::std::optional<::std::string_view> order_restrictions{};
+    ::std::optional<::std::int64_t> cust_order_capacity{};
+    ::std::optional<bool> forex_req{};
+    ::std::optional<::std::string_view> settl_currency{};
+    ::std::optional<::std::int64_t> booking_type{};
+    ::std::optional<::std::string_view> text{};
+    ::std::optional<::std::string_view> encoded_text{};
+    ::std::optional<::std::string_view> settl_date2{};
+    ::std::optional<::fixpp::decimal_t> order_qty2{};
+    ::std::optional<::fixpp::decimal_t> price2{};
+    ::std::optional<char> position_effect{};
+    ::std::optional<::std::int64_t> covered_or_uncovered{};
+    ::std::optional<::fixpp::decimal_t> max_show{};
+    ::std::optional<::fixpp::decimal_t> peg_offset_value{};
+    ::std::optional<::std::int64_t> peg_move_type{};
+    ::std::optional<::std::int64_t> peg_offset_type{};
+    ::std::optional<::std::int64_t> peg_limit_type{};
+    ::std::optional<::std::int64_t> peg_round_direction{};
+    ::std::optional<::std::int64_t> peg_scope{};
+    ::std::optional<char> discretion_inst{};
+    ::std::optional<::fixpp::decimal_t> discretion_offset_value{};
+    ::std::optional<::std::int64_t> discretion_move_type{};
+    ::std::optional<::std::int64_t> discretion_offset_type{};
+    ::std::optional<::std::int64_t> discretion_limit_type{};
+    ::std::optional<::std::int64_t> discretion_round_direction{};
+    ::std::optional<::std::int64_t> discretion_scope{};
+    ::std::optional<::std::int64_t> target_strategy{};
+    ::std::optional<::std::string_view> target_strategy_parameters{};
+    ::std::optional<::fixpp::decimal_t> participation_rate{};
+    ::std::optional<::std::string_view> designation{};
+};
+
+struct G_78_4Args {
+    ::std::optional<::std::string_view> alloc_account{};
+    ::std::optional<::std::int64_t> alloc_acct_id_source{};
+    ::std::optional<::fixpp::decimal_t> alloc_price{};
+    ::std::optional<::std::string_view> individual_alloc_id{};
+    ::std::optional<::std::int64_t> individual_alloc_rej_code{};
+    ::std::optional<::std::string_view> alloc_text{};
+    ::std::optional<::std::string_view> encoded_alloc_text{};
+};
+
+struct G_146_2Args {
+    ::std::optional<::std::string_view> symbol{};
+    ::std::optional<::std::string_view> symbol_sfx{};
+    ::std::optional<::std::string_view> security_id{};
+    ::std::optional<::std::string_view> security_id_source{};
+    ::std::optional<::std::span<const G_454Args>> security_alt_id{};
+    ::std::optional<::std::int64_t> product{};
+    ::std::optional<::std::string_view> cfi_code{};
+    ::std::optional<::std::string_view> security_type{};
+    ::std::optional<::std::string_view> security_sub_type{};
+    ::std::optional<::std::string_view> maturity_month_year{};
+    ::std::optional<::std::string_view> maturity_date{};
+    ::std::optional<::std::int64_t> put_or_call{};
+    ::std::optional<::std::string_view> coupon_payment_date{};
+    ::std::optional<::std::string_view> issue_date{};
+    ::std::optional<::std::string_view> repo_collateral_security_type{};
+    ::std::optional<::std::int64_t> repurchase_term{};
+    ::std::optional<::fixpp::decimal_t> repurchase_rate{};
+    ::std::optional<::fixpp::decimal_t> factor{};
+    ::std::optional<::std::string_view> credit_rating{};
+    ::std::optional<::std::string_view> instr_registry{};
+    ::std::optional<::std::string_view> country_of_issue{};
+    ::std::optional<::std::string_view> state_or_province_of_issue{};
+    ::std::optional<::std::string_view> locale_of_issue{};
+    ::std::optional<::std::string_view> redemption_date{};
+    ::std::optional<::fixpp::decimal_t> strike_price{};
+    ::std::optional<::std::string_view> strike_currency{};
+    ::std::optional<char> opt_attribute{};
+    ::std::optional<::fixpp::decimal_t> contract_multiplier{};
+    ::std::optional<::fixpp::decimal_t> coupon_rate{};
+    ::std::optional<::std::string_view> security_exchange{};
+    ::std::optional<::std::string_view> issuer{};
+    ::std::optional<::std::string_view> encoded_issuer{};
+    ::std::optional<::std::string_view> security_desc{};
+    ::std::optional<::std::string_view> encoded_security_desc{};
+    ::std::optional<::std::string_view> pool{};
+    ::std::optional<::std::string_view> contract_settl_month{};
+    ::std::optional<::std::int64_t> cp_program{};
+    ::std::optional<::std::string_view> cp_reg_type{};
+    ::std::optional<::std::span<const G_864Args>> events{};
+    ::std::optional<::std::string_view> dated_date{};
+    ::std::optional<::std::string_view> interest_accrual_date{};
+    ::std::optional<::std::string_view> agreement_desc{};
+    ::std::optional<::std::string_view> agreement_id{};
+    ::std::optional<::std::string_view> agreement_date{};
+    ::std::optional<::std::string_view> agreement_currency{};
+    ::std::optional<::std::int64_t> termination_type{};
+    ::std::optional<::std::string_view> start_date{};
+    ::std::optional<::std::string_view> end_date{};
+    ::std::optional<::std::int64_t> delivery_type{};
+    ::std::optional<::fixpp::decimal_t> margin_ratio{};
+    ::std::optional<::std::span<const G_711Args>> underlyings{};
+    ::std::optional<::fixpp::decimal_t> prev_close_px{};
+    ::std::optional<::std::int64_t> quote_request_type{};
+    ::std::optional<::std::int64_t> quote_type{};
+    ::std::optional<::std::string_view> trading_session_id{};
+    ::std::optional<::std::string_view> trading_session_sub_id{};
+    ::std::optional<::std::string_view> trade_origination_date{};
+    ::std::optional<char> side{};
+    ::std::optional<::std::int64_t> qty_type{};
+    ::std::optional<::fixpp::decimal_t> order_qty{};
+    ::std::optional<::fixpp::decimal_t> cash_order_qty{};
+    ::std::optional<::fixpp::decimal_t> order_percent{};
+    ::std::optional<char> rounding_direction{};
+    ::std::optional<::fixpp::decimal_t> rounding_modulus{};
+    ::std::optional<char> settl_type{};
+    ::std::optional<::std::string_view> settl_date{};
+    ::std::optional<::std::string_view> settl_date2{};
+    ::std::optional<::fixpp::decimal_t> order_qty2{};
+    ::std::optional<::std::string_view> currency{};
+    ::std::optional<::std::span<const G_232Args>> stipulations{};
+    ::std::optional<::std::string_view> account{};
+    ::std::optional<::std::int64_t> acct_id_source{};
+    ::std::optional<::std::int64_t> account_type{};
+    ::std::optional<::std::span<const G_555_3Args>> legs{};
+    ::std::optional<::std::span<const G_735Args>> quote_qualifiers{};
+    ::std::optional<::std::int64_t> quote_price_type{};
+    ::std::optional<char> ord_type{};
+    ::std::optional<::std::string_view> valid_until_time{};
+    ::std::optional<::std::string_view> expire_time{};
+    ::std::optional<::std::string_view> transact_time{};
+    ::std::optional<::fixpp::decimal_t> spread{};
+    ::std::optional<::std::string_view> benchmark_curve_currency{};
+    ::std::optional<::std::string_view> benchmark_curve_name{};
+    ::std::optional<::std::string_view> benchmark_curve_point{};
+    ::std::optional<::fixpp::decimal_t> benchmark_price{};
+    ::std::optional<::std::int64_t> benchmark_price_type{};
+    ::std::optional<::std::string_view> benchmark_security_id{};
+    ::std::optional<::std::string_view> benchmark_security_id_source{};
+    ::std::optional<::std::int64_t> price_type{};
+    ::std::optional<::fixpp::decimal_t> price{};
+    ::std::optional<::fixpp::decimal_t> price2{};
+    ::std::optional<::std::string_view> yield_type{};
+    ::std::optional<::fixpp::decimal_t> yield{};
+    ::std::optional<::std::string_view> yield_calc_date{};
+    ::std::optional<::std::string_view> yield_redemption_date{};
+    ::std::optional<::fixpp::decimal_t> yield_redemption_price{};
+    ::std::optional<::std::int64_t> yield_redemption_price_type{};
+    ::std::optional<::std::span<const G_453Args>> party_i_ds{};
+};
+
+struct G_555_5Args {
+    ::std::optional<::std::string_view> leg_symbol{};
+    ::std::optional<::std::string_view> leg_symbol_sfx{};
+    ::std::optional<::std::string_view> leg_security_id{};
+    ::std::optional<::std::string_view> leg_security_id_source{};
+    ::std::optional<::std::span<const G_604Args>> leg_security_alt_id{};
+    ::std::optional<::std::int64_t> leg_product{};
+    ::std::optional<::std::string_view> leg_cfi_code{};
+    ::std::optional<::std::string_view> leg_security_type{};
+    ::std::optional<::std::string_view> leg_security_sub_type{};
+    ::std::optional<::std::string_view> leg_maturity_month_year{};
+    ::std::optional<::std::string_view> leg_maturity_date{};
+    ::std::optional<::std::string_view> leg_coupon_payment_date{};
+    ::std::optional<::std::string_view> leg_issue_date{};
+    ::std::optional<::std::string_view> leg_repo_collateral_security_type{};
+    ::std::optional<::std::int64_t> leg_repurchase_term{};
+    ::std::optional<::fixpp::decimal_t> leg_repurchase_rate{};
+    ::std::optional<::fixpp::decimal_t> leg_factor{};
+    ::std::optional<::std::string_view> leg_credit_rating{};
+    ::std::optional<::std::string_view> leg_instr_registry{};
+    ::std::optional<::std::string_view> leg_country_of_issue{};
+    ::std::optional<::std::string_view> leg_state_or_province_of_issue{};
+    ::std::optional<::std::string_view> leg_locale_of_issue{};
+    ::std::optional<::std::string_view> leg_redemption_date{};
+    ::std::optional<::fixpp::decimal_t> leg_strike_price{};
+    ::std::optional<::std::string_view> leg_strike_currency{};
+    ::std::optional<char> leg_opt_attribute{};
+    ::std::optional<::fixpp::decimal_t> leg_contract_multiplier{};
+    ::std::optional<::fixpp::decimal_t> leg_coupon_rate{};
+    ::std::optional<::std::string_view> leg_security_exchange{};
+    ::std::optional<::std::string_view> leg_issuer{};
+    ::std::optional<::std::string_view> encoded_leg_issuer{};
+    ::std::optional<::std::string_view> leg_security_desc{};
+    ::std::optional<::std::string_view> encoded_leg_security_desc{};
+    ::std::optional<::fixpp::decimal_t> leg_ratio_qty{};
+    ::std::optional<char> leg_side{};
+    ::std::optional<::std::string_view> leg_currency{};
+    ::std::optional<::std::string_view> leg_pool{};
+    ::std::optional<::std::string_view> leg_dated_date{};
+    ::std::optional<::std::string_view> leg_contract_settl_month{};
+    ::std::optional<::std::string_view> leg_interest_accrual_date{};
+    ::std::optional<::fixpp::decimal_t> leg_qty{};
+    ::std::optional<::std::int64_t> leg_swap_type{};
+    ::std::optional<char> leg_settl_type{};
+    ::std::optional<::std::string_view> leg_settl_date{};
+    ::std::optional<::std::span<const G_683Args>> leg_stipulations{};
+    ::std::optional<::std::span<const G_539Args>> nested_party_i_ds{};
+    ::std::optional<::std::int64_t> leg_price_type{};
+    ::std::optional<::fixpp::decimal_t> leg_bid_px{};
+    ::std::optional<::fixpp::decimal_t> leg_offer_px{};
+    ::std::optional<::std::string_view> leg_benchmark_curve_currency{};
+    ::std::optional<::std::string_view> leg_benchmark_curve_name{};
+    ::std::optional<::std::string_view> leg_benchmark_curve_point{};
+    ::std::optional<::fixpp::decimal_t> leg_benchmark_price{};
+    ::std::optional<::std::int64_t> leg_benchmark_price_type{};
+};
+
+struct G_146_3Args {
+    ::std::optional<::std::string_view> symbol{};
+    ::std::optional<::std::string_view> symbol_sfx{};
+    ::std::optional<::std::string_view> security_id{};
+    ::std::optional<::std::string_view> security_id_source{};
+    ::std::optional<::std::span<const G_454Args>> security_alt_id{};
+    ::std::optional<::std::int64_t> product{};
+    ::std::optional<::std::string_view> cfi_code{};
+    ::std::optional<::std::string_view> security_type{};
+    ::std::optional<::std::string_view> security_sub_type{};
+    ::std::optional<::std::string_view> maturity_month_year{};
+    ::std::optional<::std::string_view> maturity_date{};
+    ::std::optional<::std::int64_t> put_or_call{};
+    ::std::optional<::std::string_view> coupon_payment_date{};
+    ::std::optional<::std::string_view> issue_date{};
+    ::std::optional<::std::string_view> repo_collateral_security_type{};
+    ::std::optional<::std::int64_t> repurchase_term{};
+    ::std::optional<::fixpp::decimal_t> repurchase_rate{};
+    ::std::optional<::fixpp::decimal_t> factor{};
+    ::std::optional<::std::string_view> credit_rating{};
+    ::std::optional<::std::string_view> instr_registry{};
+    ::std::optional<::std::string_view> country_of_issue{};
+    ::std::optional<::std::string_view> state_or_province_of_issue{};
+    ::std::optional<::std::string_view> locale_of_issue{};
+    ::std::optional<::std::string_view> redemption_date{};
+    ::std::optional<::fixpp::decimal_t> strike_price{};
+    ::std::optional<::std::string_view> strike_currency{};
+    ::std::optional<char> opt_attribute{};
+    ::std::optional<::fixpp::decimal_t> contract_multiplier{};
+    ::std::optional<::fixpp::decimal_t> coupon_rate{};
+    ::std::optional<::std::string_view> security_exchange{};
+    ::std::optional<::std::string_view> issuer{};
+    ::std::optional<::std::string_view> encoded_issuer{};
+    ::std::optional<::std::string_view> security_desc{};
+    ::std::optional<::std::string_view> encoded_security_desc{};
+    ::std::optional<::std::string_view> pool{};
+    ::std::optional<::std::string_view> contract_settl_month{};
+    ::std::optional<::std::int64_t> cp_program{};
+    ::std::optional<::std::string_view> cp_reg_type{};
+    ::std::optional<::std::span<const G_864Args>> events{};
+    ::std::optional<::std::string_view> dated_date{};
+    ::std::optional<::std::string_view> interest_accrual_date{};
+    ::std::optional<::std::span<const G_711Args>> underlyings{};
+    ::std::optional<::std::span<const G_555_4Args>> legs{};
+};
+
+struct G_267Args {
+    ::std::optional<char> md_entry_type{};
+};
+
+struct G_268_1Args {
+    ::std::optional<char> md_entry_type{};
+    ::std::optional<::fixpp::decimal_t> md_entry_px{};
+    ::std::optional<::std::string_view> currency{};
+    ::std::optional<::fixpp::decimal_t> md_entry_size{};
+    ::std::optional<::std::string_view> md_entry_date{};
+    ::std::optional<::std::string_view> md_entry_time{};
+    ::std::optional<char> tick_direction{};
+    ::std::optional<::std::string_view> md_mkt{};
+    ::std::optional<::std::string_view> trading_session_id{};
+    ::std::optional<::std::string_view> trading_session_sub_id{};
+    ::std::optional<::std::string_view> quote_condition{};
+    ::std::optional<::std::string_view> trade_condition{};
+    ::std::optional<::std::string_view> md_entry_originator{};
+    ::std::optional<::std::string_view> location_id{};
+    ::std::optional<::std::string_view> desk_id{};
+    ::std::optional<::std::string_view> open_close_settl_flag{};
+    ::std::optional<char> time_in_force{};
+    ::std::optional<::std::string_view> expire_date{};
+    ::std::optional<::std::string_view> expire_time{};
+    ::std::optional<::fixpp::decimal_t> min_qty{};
+    ::std::optional<::std::string_view> exec_inst{};
+    ::std::optional<::std::int64_t> seller_days{};
+    ::std::optional<::std::string_view> order_id{};
+    ::std::optional<::std::string_view> quote_entry_id{};
+    ::std::optional<::std::string_view> md_entry_buyer{};
+    ::std::optional<::std::string_view> md_entry_seller{};
+    ::std::optional<::std::int64_t> number_of_orders{};
+    ::std::optional<::std::int64_t> md_entry_position_no{};
+    ::std::optional<::std::string_view> scope{};
+    ::std::optional<::fixpp::decimal_t> price_delta{};
+    ::std::optional<::std::string_view> text{};
+    ::std::optional<::std::string_view> encoded_text{};
+};
+
+struct G_268_2Args {
+    ::std::optional<char> md_update_action{};
+    ::std::optional<char> delete_reason{};
+    ::std::optional<char> md_entry_type{};
+    ::std::optional<::std::string_view> md_entry_id{};
+    ::std::optional<::std::string_view> md_entry_ref_id{};
+    ::std::optional<::std::string_view> symbol{};
+    ::std::optional<::std::string_view> symbol_sfx{};
+    ::std::optional<::std::string_view> security_id{};
+    ::std::optional<::std::string_view> security_id_source{};
+    ::std::optional<::std::span<const G_454Args>> security_alt_id{};
+    ::std::optional<::std::int64_t> product{};
+    ::std::optional<::std::string_view> cfi_code{};
+    ::std::optional<::std::string_view> security_type{};
+    ::std::optional<::std::string_view> security_sub_type{};
+    ::std::optional<::std::string_view> maturity_month_year{};
+    ::std::optional<::std::string_view> maturity_date{};
+    ::std::optional<::std::int64_t> put_or_call{};
+    ::std::optional<::std::string_view> coupon_payment_date{};
+    ::std::optional<::std::string_view> issue_date{};
+    ::std::optional<::std::string_view> repo_collateral_security_type{};
+    ::std::optional<::std::int64_t> repurchase_term{};
+    ::std::optional<::fixpp::decimal_t> repurchase_rate{};
+    ::std::optional<::fixpp::decimal_t> factor{};
+    ::std::optional<::std::string_view> credit_rating{};
+    ::std::optional<::std::string_view> instr_registry{};
+    ::std::optional<::std::string_view> country_of_issue{};
+    ::std::optional<::std::string_view> state_or_province_of_issue{};
+    ::std::optional<::std::string_view> locale_of_issue{};
+    ::std::optional<::std::string_view> redemption_date{};
+    ::std::optional<::fixpp::decimal_t> strike_price{};
+    ::std::optional<::std::string_view> strike_currency{};
+    ::std::optional<char> opt_attribute{};
+    ::std::optional<::fixpp::decimal_t> contract_multiplier{};
+    ::std::optional<::fixpp::decimal_t> coupon_rate{};
+    ::std::optional<::std::string_view> security_exchange{};
+    ::std::optional<::std::string_view> issuer{};
+    ::std::optional<::std::string_view> encoded_issuer{};
+    ::std::optional<::std::string_view> security_desc{};
+    ::std::optional<::std::string_view> encoded_security_desc{};
+    ::std::optional<::std::string_view> pool{};
+    ::std::optional<::std::string_view> contract_settl_month{};
+    ::std::optional<::std::int64_t> cp_program{};
+    ::std::optional<::std::string_view> cp_reg_type{};
+    ::std::optional<::std::span<const G_864Args>> events{};
+    ::std::optional<::std::string_view> dated_date{};
+    ::std::optional<::std::string_view> interest_accrual_date{};
+    ::std::optional<::std::span<const G_711Args>> underlyings{};
+    ::std::optional<::std::span<const G_555_4Args>> legs{};
+    ::std::optional<::std::string_view> financial_status{};
+    ::std::optional<::std::string_view> corporate_action{};
+    ::std::optional<::fixpp::decimal_t> md_entry_px{};
+    ::std::optional<::std::string_view> currency{};
+    ::std::optional<::fixpp::decimal_t> md_entry_size{};
+    ::std::optional<::std::string_view> md_entry_date{};
+    ::std::optional<::std::string_view> md_entry_time{};
+    ::std::optional<char> tick_direction{};
+    ::std::optional<::std::string_view> md_mkt{};
+    ::std::optional<::std::string_view> trading_session_id{};
+    ::std::optional<::std::string_view> trading_session_sub_id{};
+    ::std::optional<::std::string_view> quote_condition{};
+    ::std::optional<::std::string_view> trade_condition{};
+    ::std::optional<::std::string_view> md_entry_originator{};
+    ::std::optional<::std::string_view> location_id{};
+    ::std::optional<::std::string_view> desk_id{};
+    ::std::optional<::std::string_view> open_close_settl_flag{};
+    ::std::optional<char> time_in_force{};
+    ::std::optional<::std::string_view> expire_date{};
+    ::std::optional<::std::string_view> expire_time{};
+    ::std::optional<::fixpp::decimal_t> min_qty{};
+    ::std::optional<::std::string_view> exec_inst{};
+    ::std::optional<::std::int64_t> seller_days{};
+    ::std::optional<::std::string_view> order_id{};
+    ::std::optional<::std::string_view> quote_entry_id{};
+    ::std::optional<::std::string_view> md_entry_buyer{};
+    ::std::optional<::std::string_view> md_entry_seller{};
+    ::std::optional<::std::int64_t> number_of_orders{};
+    ::std::optional<::std::int64_t> md_entry_position_no{};
+    ::std::optional<::std::string_view> scope{};
+    ::std::optional<::fixpp::decimal_t> price_delta{};
+    ::std::optional<::fixpp::decimal_t> net_chg_prev_day{};
+    ::std::optional<::std::string_view> text{};
+    ::std::optional<::std::string_view> encoded_text{};
+};
+
+struct G_816Args {
+    ::std::optional<::std::string_view> alt_md_source_id{};
+};
+
+struct G_295_1Args {
+    ::std::optional<::std::string_view> symbol{};
+    ::std::optional<::std::string_view> symbol_sfx{};
+    ::std::optional<::std::string_view> security_id{};
+    ::std::optional<::std::string_view> security_id_source{};
+    ::std::optional<::std::span<const G_454Args>> security_alt_id{};
+    ::std::optional<::std::int64_t> product{};
+    ::std::optional<::std::string_view> cfi_code{};
+    ::std::optional<::std::string_view> security_type{};
+    ::std::optional<::std::string_view> security_sub_type{};
+    ::std::optional<::std::string_view> maturity_month_year{};
+    ::std::optional<::std::string_view> maturity_date{};
+    ::std::optional<::std::int64_t> put_or_call{};
+    ::std::optional<::std::string_view> coupon_payment_date{};
+    ::std::optional<::std::string_view> issue_date{};
+    ::std::optional<::std::string_view> repo_collateral_security_type{};
+    ::std::optional<::std::int64_t> repurchase_term{};
+    ::std::optional<::fixpp::decimal_t> repurchase_rate{};
+    ::std::optional<::fixpp::decimal_t> factor{};
+    ::std::optional<::std::string_view> credit_rating{};
+    ::std::optional<::std::string_view> instr_registry{};
+    ::std::optional<::std::string_view> country_of_issue{};
+    ::std::optional<::std::string_view> state_or_province_of_issue{};
+    ::std::optional<::std::string_view> locale_of_issue{};
+    ::std::optional<::std::string_view> redemption_date{};
+    ::std::optional<::fixpp::decimal_t> strike_price{};
+    ::std::optional<::std::string_view> strike_currency{};
+    ::std::optional<char> opt_attribute{};
+    ::std::optional<::fixpp::decimal_t> contract_multiplier{};
+    ::std::optional<::fixpp::decimal_t> coupon_rate{};
+    ::std::optional<::std::string_view> security_exchange{};
+    ::std::optional<::std::string_view> issuer{};
+    ::std::optional<::std::string_view> encoded_issuer{};
+    ::std::optional<::std::string_view> security_desc{};
+    ::std::optional<::std::string_view> encoded_security_desc{};
+    ::std::optional<::std::string_view> pool{};
+    ::std::optional<::std::string_view> contract_settl_month{};
+    ::std::optional<::std::int64_t> cp_program{};
+    ::std::optional<::std::string_view> cp_reg_type{};
+    ::std::optional<::std::span<const G_864Args>> events{};
+    ::std::optional<::std::string_view> dated_date{};
+    ::std::optional<::std::string_view> interest_accrual_date{};
+    ::std::optional<::std::string_view> agreement_desc{};
+    ::std::optional<::std::string_view> agreement_id{};
+    ::std::optional<::std::string_view> agreement_date{};
+    ::std::optional<::std::string_view> agreement_currency{};
+    ::std::optional<::std::int64_t> termination_type{};
+    ::std::optional<::std::string_view> start_date{};
+    ::std::optional<::std::string_view> end_date{};
+    ::std::optional<::std::int64_t> delivery_type{};
+    ::std::optional<::fixpp::decimal_t> margin_ratio{};
+    ::std::optional<::std::span<const G_711Args>> underlyings{};
+    ::std::optional<::std::span<const G_555_4Args>> legs{};
+};
+
+struct G_295_2Args {
+    ::std::optional<::std::string_view> quote_entry_id{};
+    ::std::optional<::std::string_view> symbol{};
+    ::std::optional<::std::string_view> symbol_sfx{};
+    ::std::optional<::std::string_view> security_id{};
+    ::std::optional<::std::string_view> security_id_source{};
+    ::std::optional<::std::span<const G_454Args>> security_alt_id{};
+    ::std::optional<::std::int64_t> product{};
+    ::std::optional<::std::string_view> cfi_code{};
+    ::std::optional<::std::string_view> security_type{};
+    ::std::optional<::std::string_view> security_sub_type{};
+    ::std::optional<::std::string_view> maturity_month_year{};
+    ::std::optional<::std::string_view> maturity_date{};
+    ::std::optional<::std::int64_t> put_or_call{};
+    ::std::optional<::std::string_view> coupon_payment_date{};
+    ::std::optional<::std::string_view> issue_date{};
+    ::std::optional<::std::string_view> repo_collateral_security_type{};
+    ::std::optional<::std::int64_t> repurchase_term{};
+    ::std::optional<::fixpp::decimal_t> repurchase_rate{};
+    ::std::optional<::fixpp::decimal_t> factor{};
+    ::std::optional<::std::string_view> credit_rating{};
+    ::std::optional<::std::string_view> instr_registry{};
+    ::std::optional<::std::string_view> country_of_issue{};
+    ::std::optional<::std::string_view> state_or_province_of_issue{};
+    ::std::optional<::std::string_view> locale_of_issue{};
+    ::std::optional<::std::string_view> redemption_date{};
+    ::std::optional<::fixpp::decimal_t> strike_price{};
+    ::std::optional<::std::string_view> strike_currency{};
+    ::std::optional<char> opt_attribute{};
+    ::std::optional<::fixpp::decimal_t> contract_multiplier{};
+    ::std::optional<::fixpp::decimal_t> coupon_rate{};
+    ::std::optional<::std::string_view> security_exchange{};
+    ::std::optional<::std::string_view> issuer{};
+    ::std::optional<::std::string_view> encoded_issuer{};
+    ::std::optional<::std::string_view> security_desc{};
+    ::std::optional<::std::string_view> encoded_security_desc{};
+    ::std::optional<::std::string_view> pool{};
+    ::std::optional<::std::string_view> contract_settl_month{};
+    ::std::optional<::std::int64_t> cp_program{};
+    ::std::optional<::std::string_view> cp_reg_type{};
+    ::std::optional<::std::span<const G_864Args>> events{};
+    ::std::optional<::std::string_view> dated_date{};
+    ::std::optional<::std::string_view> interest_accrual_date{};
+    ::std::optional<::std::span<const G_555_4Args>> legs{};
+    ::std::optional<::fixpp::decimal_t> bid_px{};
+    ::std::optional<::fixpp::decimal_t> offer_px{};
+    ::std::optional<::fixpp::decimal_t> bid_size{};
+    ::std::optional<::fixpp::decimal_t> offer_size{};
+    ::std::optional<::std::string_view> valid_until_time{};
+    ::std::optional<::fixpp::decimal_t> bid_spot_rate{};
+    ::std::optional<::fixpp::decimal_t> offer_spot_rate{};
+    ::std::optional<::fixpp::decimal_t> bid_forward_points{};
+    ::std::optional<::fixpp::decimal_t> offer_forward_points{};
+    ::std::optional<::fixpp::decimal_t> mid_px{};
+    ::std::optional<::fixpp::decimal_t> bid_yield{};
+    ::std::optional<::fixpp::decimal_t> mid_yield{};
+    ::std::optional<::fixpp::decimal_t> offer_yield{};
+    ::std::optional<::std::string_view> transact_time{};
+    ::std::optional<::std::string_view> trading_session_id{};
+    ::std::optional<::std::string_view> trading_session_sub_id{};
+    ::std::optional<::std::string_view> settl_date{};
+    ::std::optional<char> ord_type{};
+    ::std::optional<::std::string_view> settl_date2{};
+    ::std::optional<::fixpp::decimal_t> order_qty2{};
+    ::std::optional<::fixpp::decimal_t> bid_forward_points2{};
+    ::std::optional<::fixpp::decimal_t> offer_forward_points2{};
+    ::std::optional<::std::string_view> currency{};
+    ::std::optional<::std::int64_t> quote_entry_reject_reason{};
+};
+
+struct G_296_1Args {
+    ::std::optional<::std::string_view> quote_set_id{};
+    ::std::optional<::std::string_view> underlying_symbol{};
+    ::std::optional<::std::string_view> underlying_symbol_sfx{};
+    ::std::optional<::std::string_view> underlying_security_id{};
+    ::std::optional<::std::string_view> underlying_security_id_source{};
+    ::std::optional<::std::span<const G_457Args>> underlying_security_alt_id{};
+    ::std::optional<::std::int64_t> underlying_product{};
+    ::std::optional<::std::string_view> underlying_cfi_code{};
+    ::std::optional<::std::string_view> underlying_security_type{};
+    ::std::optional<::std::string_view> underlying_security_sub_type{};
+    ::std::optional<::std::string_view> underlying_maturity_month_year{};
+    ::std::optional<::std::string_view> underlying_maturity_date{};
+    ::std::optional<::std::int64_t> underlying_put_or_call{};
+    ::std::optional<::std::string_view> underlying_coupon_payment_date{};
+    ::std::optional<::std::string_view> underlying_issue_date{};
+    ::std::optional<::std::string_view> underlying_repo_collateral_security_type{};
+    ::std::optional<::std::int64_t> underlying_repurchase_term{};
+    ::std::optional<::fixpp::decimal_t> underlying_repurchase_rate{};
+    ::std::optional<::fixpp::decimal_t> underlying_factor{};
+    ::std::optional<::std::string_view> underlying_credit_rating{};
+    ::std::optional<::std::string_view> underlying_instr_registry{};
+    ::std::optional<::std::string_view> underlying_country_of_issue{};
+    ::std::optional<::std::string_view> underlying_state_or_province_of_issue{};
+    ::std::optional<::std::string_view> underlying_locale_of_issue{};
+    ::std::optional<::std::string_view> underlying_redemption_date{};
+    ::std::optional<::fixpp::decimal_t> underlying_strike_price{};
+    ::std::optional<::std::string_view> underlying_strike_currency{};
+    ::std::optional<char> underlying_opt_attribute{};
+    ::std::optional<::fixpp::decimal_t> underlying_contract_multiplier{};
+    ::std::optional<::fixpp::decimal_t> underlying_coupon_rate{};
+    ::std::optional<::std::string_view> underlying_security_exchange{};
+    ::std::optional<::std::string_view> underlying_issuer{};
+    ::std::optional<::std::string_view> encoded_underlying_issuer{};
+    ::std::optional<::std::string_view> underlying_security_desc{};
+    ::std::optional<::std::string_view> encoded_underlying_security_desc{};
+    ::std::optional<::std::string_view> underlying_cp_program{};
+    ::std::optional<::std::string_view> underlying_cp_reg_type{};
+    ::std::optional<::std::string_view> underlying_currency{};
+    ::std::optional<::fixpp::decimal_t> underlying_qty{};
+    ::std::optional<::fixpp::decimal_t> underlying_px{};
+    ::std::optional<::fixpp::decimal_t> underlying_dirty_price{};
+    ::std::optional<::fixpp::decimal_t> underlying_end_price{};
+    ::std::optional<::fixpp::decimal_t> underlying_start_value{};
+    ::std::optional<::fixpp::decimal_t> underlying_current_value{};
+    ::std::optional<::fixpp::decimal_t> underlying_end_value{};
+    ::std::optional<::std::span<const G_887Args>> underlying_stips{};
+    ::std::optional<::std::int64_t> tot_no_quote_entries{};
+    ::std::optional<bool> last_fragment{};
+    ::std::optional<::std::span<const G_295_2Args>> quote_entries{};
+};
+
+struct G_295_3Args {
+    ::std::optional<::std::string_view> quote_entry_id{};
+    ::std::optional<::std::string_view> symbol{};
+    ::std::optional<::std::string_view> symbol_sfx{};
+    ::std::optional<::std::string_view> security_id{};
+    ::std::optional<::std::string_view> security_id_source{};
+    ::std::optional<::std::span<const G_454Args>> security_alt_id{};
+    ::std::optional<::std::int64_t> product{};
+    ::std::optional<::std::string_view> cfi_code{};
+    ::std::optional<::std::string_view> security_type{};
+    ::std::optional<::std::string_view> security_sub_type{};
+    ::std::optional<::std::string_view> maturity_month_year{};
+    ::std::optional<::std::string_view> maturity_date{};
+    ::std::optional<::std::int64_t> put_or_call{};
+    ::std::optional<::std::string_view> coupon_payment_date{};
+    ::std::optional<::std::string_view> issue_date{};
+    ::std::optional<::std::string_view> repo_collateral_security_type{};
+    ::std::optional<::std::int64_t> repurchase_term{};
+    ::std::optional<::fixpp::decimal_t> repurchase_rate{};
+    ::std::optional<::fixpp::decimal_t> factor{};
+    ::std::optional<::std::string_view> credit_rating{};
+    ::std::optional<::std::string_view> instr_registry{};
+    ::std::optional<::std::string_view> country_of_issue{};
+    ::std::optional<::std::string_view> state_or_province_of_issue{};
+    ::std::optional<::std::string_view> locale_of_issue{};
+    ::std::optional<::std::string_view> redemption_date{};
+    ::std::optional<::fixpp::decimal_t> strike_price{};
+    ::std::optional<::std::string_view> strike_currency{};
+    ::std::optional<char> opt_attribute{};
+    ::std::optional<::fixpp::decimal_t> contract_multiplier{};
+    ::std::optional<::fixpp::decimal_t> coupon_rate{};
+    ::std::optional<::std::string_view> security_exchange{};
+    ::std::optional<::std::string_view> issuer{};
+    ::std::optional<::std::string_view> encoded_issuer{};
+    ::std::optional<::std::string_view> security_desc{};
+    ::std::optional<::std::string_view> encoded_security_desc{};
+    ::std::optional<::std::string_view> pool{};
+    ::std::optional<::std::string_view> contract_settl_month{};
+    ::std::optional<::std::int64_t> cp_program{};
+    ::std::optional<::std::string_view> cp_reg_type{};
+    ::std::optional<::std::span<const G_864Args>> events{};
+    ::std::optional<::std::string_view> dated_date{};
+    ::std::optional<::std::string_view> interest_accrual_date{};
+    ::std::optional<::std::span<const G_555_4Args>> legs{};
+    ::std::optional<::fixpp::decimal_t> bid_px{};
+    ::std::optional<::fixpp::decimal_t> offer_px{};
+    ::std::optional<::fixpp::decimal_t> bid_size{};
+    ::std::optional<::fixpp::decimal_t> offer_size{};
+    ::std::optional<::std::string_view> valid_until_time{};
+    ::std::optional<::fixpp::decimal_t> bid_spot_rate{};
+    ::std::optional<::fixpp::decimal_t> offer_spot_rate{};
+    ::std::optional<::fixpp::decimal_t> bid_forward_points{};
+    ::std::optional<::fixpp::decimal_t> offer_forward_points{};
+    ::std::optional<::fixpp::decimal_t> mid_px{};
+    ::std::optional<::fixpp::decimal_t> bid_yield{};
+    ::std::optional<::fixpp::decimal_t> mid_yield{};
+    ::std::optional<::fixpp::decimal_t> offer_yield{};
+    ::std::optional<::std::string_view> transact_time{};
+    ::std::optional<::std::string_view> trading_session_id{};
+    ::std::optional<::std::string_view> trading_session_sub_id{};
+    ::std::optional<::std::string_view> settl_date{};
+    ::std::optional<char> ord_type{};
+    ::std::optional<::std::string_view> settl_date2{};
+    ::std::optional<::fixpp::decimal_t> order_qty2{};
+    ::std::optional<::fixpp::decimal_t> bid_forward_points2{};
+    ::std::optional<::fixpp::decimal_t> offer_forward_points2{};
+    ::std::optional<::std::string_view> currency{};
+};
+
+struct G_296_2Args {
+    ::std::optional<::std::string_view> quote_set_id{};
+    ::std::optional<::std::string_view> underlying_symbol{};
+    ::std::optional<::std::string_view> underlying_symbol_sfx{};
+    ::std::optional<::std::string_view> underlying_security_id{};
+    ::std::optional<::std::string_view> underlying_security_id_source{};
+    ::std::optional<::std::span<const G_457Args>> underlying_security_alt_id{};
+    ::std::optional<::std::int64_t> underlying_product{};
+    ::std::optional<::std::string_view> underlying_cfi_code{};
+    ::std::optional<::std::string_view> underlying_security_type{};
+    ::std::optional<::std::string_view> underlying_security_sub_type{};
+    ::std::optional<::std::string_view> underlying_maturity_month_year{};
+    ::std::optional<::std::string_view> underlying_maturity_date{};
+    ::std::optional<::std::int64_t> underlying_put_or_call{};
+    ::std::optional<::std::string_view> underlying_coupon_payment_date{};
+    ::std::optional<::std::string_view> underlying_issue_date{};
+    ::std::optional<::std::string_view> underlying_repo_collateral_security_type{};
+    ::std::optional<::std::int64_t> underlying_repurchase_term{};
+    ::std::optional<::fixpp::decimal_t> underlying_repurchase_rate{};
+    ::std::optional<::fixpp::decimal_t> underlying_factor{};
+    ::std::optional<::std::string_view> underlying_credit_rating{};
+    ::std::optional<::std::string_view> underlying_instr_registry{};
+    ::std::optional<::std::string_view> underlying_country_of_issue{};
+    ::std::optional<::std::string_view> underlying_state_or_province_of_issue{};
+    ::std::optional<::std::string_view> underlying_locale_of_issue{};
+    ::std::optional<::std::string_view> underlying_redemption_date{};
+    ::std::optional<::fixpp::decimal_t> underlying_strike_price{};
+    ::std::optional<::std::string_view> underlying_strike_currency{};
+    ::std::optional<char> underlying_opt_attribute{};
+    ::std::optional<::fixpp::decimal_t> underlying_contract_multiplier{};
+    ::std::optional<::fixpp::decimal_t> underlying_coupon_rate{};
+    ::std::optional<::std::string_view> underlying_security_exchange{};
+    ::std::optional<::std::string_view> underlying_issuer{};
+    ::std::optional<::std::string_view> encoded_underlying_issuer{};
+    ::std::optional<::std::string_view> underlying_security_desc{};
+    ::std::optional<::std::string_view> encoded_underlying_security_desc{};
+    ::std::optional<::std::string_view> underlying_cp_program{};
+    ::std::optional<::std::string_view> underlying_cp_reg_type{};
+    ::std::optional<::std::string_view> underlying_currency{};
+    ::std::optional<::fixpp::decimal_t> underlying_qty{};
+    ::std::optional<::fixpp::decimal_t> underlying_px{};
+    ::std::optional<::fixpp::decimal_t> underlying_dirty_price{};
+    ::std::optional<::fixpp::decimal_t> underlying_end_price{};
+    ::std::optional<::fixpp::decimal_t> underlying_start_value{};
+    ::std::optional<::fixpp::decimal_t> underlying_current_value{};
+    ::std::optional<::fixpp::decimal_t> underlying_end_value{};
+    ::std::optional<::std::span<const G_887Args>> underlying_stips{};
+    ::std::optional<::std::string_view> quote_set_valid_until_time{};
+    ::std::optional<::std::int64_t> tot_no_quote_entries{};
+    ::std::optional<bool> last_fragment{};
+    ::std::span<const G_295_3Args> quote_entries{};
+};
+
+struct G_534Args {
+    ::std::optional<::std::string_view> orig_cl_ord_id{};
+    ::std::optional<::std::string_view> affected_order_id{};
+    ::std::optional<::std::string_view> affected_secondary_order_id{};
+};
+
+struct G_552_1Args {
+    ::std::optional<char> side{};
+    ::std::optional<::std::string_view> cl_ord_id{};
+    ::std::optional<::std::string_view> secondary_cl_ord_id{};
+    ::std::optional<::std::string_view> cl_ord_link_id{};
+    ::std::optional<::std::span<const G_453Args>> party_i_ds{};
+    ::std::optional<::std::string_view> trade_origination_date{};
+    ::std::optional<::std::string_view> trade_date{};
+    ::std::optional<::std::string_view> account{};
+    ::std::optional<::std::int64_t> acct_id_source{};
+    ::std::optional<::std::int64_t> account_type{};
+    ::std::optional<char> day_booking_inst{};
+    ::std::optional<char> booking_unit{};
+    ::std::optional<char> prealloc_method{};
+    ::std::optional<::std::string_view> alloc_id{};
+    ::std::optional<::std::span<const G_78_3Args>> allocs{};
+    ::std::optional<::std::int64_t> qty_type{};
+    ::std::optional<::fixpp::decimal_t> order_qty{};
+    ::std::optional<::fixpp::decimal_t> cash_order_qty{};
+    ::std::optional<::fixpp::decimal_t> order_percent{};
+    ::std::optional<char> rounding_direction{};
+    ::std::optional<::fixpp::decimal_t> rounding_modulus{};
+    ::std::optional<::fixpp::decimal_t> commission{};
+    ::std::optional<char> comm_type{};
+    ::std::optional<::std::string_view> comm_currency{};
+    ::std::optional<char> fund_renew_waiv{};
+    ::std::optional<char> order_capacity{};
+    ::std::optional<::std::string_view> order_restrictions{};
+    ::std::optional<::std::int64_t> cust_order_capacity{};
+    ::std::optional<bool> forex_req{};
+    ::std::optional<::std::string_view> settl_currency{};
+    ::std::optional<::std::int64_t> booking_type{};
+    ::std::optional<::std::string_view> text{};
+    ::std::optional<::std::string_view> encoded_text{};
+    ::std::optional<char> position_effect{};
+    ::std::optional<::std::int64_t> covered_or_uncovered{};
+    ::std::optional<char> cash_margin{};
+    ::std::optional<::std::string_view> clearing_fee_indicator{};
+    ::std::optional<bool> solicited_flag{};
+    ::std::optional<::std::string_view> side_compliance_id{};
+};
+
+struct G_552_2Args {
+    ::std::optional<char> side{};
+    ::std::optional<::std::string_view> orig_cl_ord_id{};
+    ::std::optional<::std::string_view> cl_ord_id{};
+    ::std::optional<::std::string_view> secondary_cl_ord_id{};
+    ::std::optional<::std::string_view> cl_ord_link_id{};
+    ::std::optional<::std::string_view> orig_ord_mod_time{};
+    ::std::optional<::std::span<const G_453Args>> party_i_ds{};
+    ::std::optional<::std::string_view> trade_origination_date{};
+    ::std::optional<::std::string_view> trade_date{};
+    ::std::optional<::fixpp::decimal_t> order_qty{};
+    ::std::optional<::fixpp::decimal_t> cash_order_qty{};
+    ::std::optional<::fixpp::decimal_t> order_percent{};
+    ::std::optional<char> rounding_direction{};
+    ::std::optional<::fixpp::decimal_t> rounding_modulus{};
+    ::std::optional<::std::string_view> compliance_id{};
+    ::std::optional<::std::string_view> text{};
+    ::std::optional<::std::string_view> encoded_text{};
+};
+
+}  // namespace fixpp::v44::groups
+
+namespace fixpp::v44 {
 
 struct ExecutionReportArgs {
     ::std::optional<::std::string_view> account{};
@@ -247,7 +1503,7 @@ struct ExecutionReportArgs {
     ::std::optional<::fixpp::decimal_t> settl_curr_amt{};
     ::std::optional<::std::string_view> settl_currency{};
     ::std::optional<::std::string_view> expire_time{};
-    ::std::optional<::std::span<const ExecutionReportMiscFeesArgs>> misc_fees{};
+    ::std::optional<::std::span<const groups::G_136Args>> misc_fees{};
     ::std::optional<char> exec_type{};
     ::std::optional<::fixpp::decimal_t> leaves_qty{};
     ::std::optional<::fixpp::decimal_t> cash_order_qty{};
@@ -283,7 +1539,7 @@ struct ExecutionReportArgs {
     ::std::optional<::std::string_view> trade_origination_date{};
     ::std::optional<::std::string_view> ex_date{};
     ::std::optional<::fixpp::decimal_t> contract_multiplier{};
-    ::std::optional<::std::span<const ExecutionReportStipulationsArgs>> stipulations{};
+    ::std::optional<::std::span<const groups::G_232Args>> stipulations{};
     ::std::optional<::std::string_view> yield_type{};
     ::std::optional<::fixpp::decimal_t> yield{};
     ::std::optional<::fixpp::decimal_t> total_takedown{};
@@ -302,7 +1558,7 @@ struct ExecutionReportArgs {
     ::std::optional<bool> solicited_flag{};
     ::std::optional<::std::int64_t> exec_restatement_reason{};
     ::std::optional<::fixpp::decimal_t> gross_trade_amt{};
-    ::std::optional<::std::span<const ExecutionReportContraBrokersArgs>> contra_brokers{};
+    ::std::optional<::std::span<const groups::G_382Args>> contra_brokers{};
     ::std::optional<char> discretion_inst{};
     ::std::optional<::fixpp::decimal_t> discretion_offset_value{};
     ::std::optional<::std::int64_t> price_type{};
@@ -312,8 +1568,8 @@ struct ExecutionReportArgs {
     ::std::optional<::std::int64_t> gt_booking_inst{};
     ::std::optional<::std::string_view> expire_date{};
     ::std::optional<char> multi_leg_reporting_type{};
-    ::std::optional<::std::span<const ExecutionReportPartyIDsArgs>> party_i_ds{};
-    ::std::optional<::std::span<const ExecutionReportSecurityAltIDArgs>> security_alt_id{};
+    ::std::optional<::std::span<const groups::G_453Args>> party_i_ds{};
+    ::std::optional<::std::span<const groups::G_454Args>> security_alt_id{};
     ::std::optional<::std::int64_t> product{};
     ::std::optional<::std::string_view> cfi_code{};
     ::std::optional<char> rounding_direction{};
@@ -332,7 +1588,7 @@ struct ExecutionReportArgs {
     ::std::optional<::std::string_view> regist_id{};
     ::std::optional<::std::string_view> exec_valuation_point{};
     ::std::optional<::fixpp::decimal_t> order_percent{};
-    ::std::optional<::std::span<const ExecutionReportContAmtsArgs>> cont_amts{};
+    ::std::optional<::std::span<const groups::G_518Args>> cont_amts{};
     ::std::optional<::std::string_view> secondary_cl_ord_id{};
     ::std::optional<::std::string_view> secondary_exec_id{};
     ::std::optional<char> order_capacity{};
@@ -343,7 +1599,7 @@ struct ExecutionReportArgs {
     ::std::optional<::std::string_view> cross_id{};
     ::std::optional<::std::int64_t> cross_type{};
     ::std::optional<::std::string_view> orig_cross_id{};
-    ::std::optional<::std::span<const ExecutionReportLegsArgs>> legs{};
+    ::std::optional<::std::span<const groups::G_555_1Args>> legs{};
     ::std::optional<::std::int64_t> account_type{};
     ::std::optional<::std::int64_t> cust_order_capacity{};
     ::std::optional<::std::string_view> cl_ord_link_id{};
@@ -371,7 +1627,7 @@ struct ExecutionReportArgs {
     ::std::optional<::std::int64_t> yield_redemption_price_type{};
     ::std::optional<::std::string_view> benchmark_security_id{};
     ::std::optional<::std::string_view> yield_calc_date{};
-    ::std::optional<::std::span<const ExecutionReportUnderlyingsArgs>> underlyings{};
+    ::std::optional<::std::span<const groups::G_711Args>> underlyings{};
     ::std::optional<::fixpp::decimal_t> interest_at_maturity{};
     ::std::optional<::std::string_view> benchmark_security_id_source{};
     ::std::optional<::std::string_view> security_sub_type{};
@@ -397,7 +1653,7 @@ struct ExecutionReportArgs {
     ::std::optional<::fixpp::decimal_t> target_strategy_performance{};
     ::std::optional<::std::int64_t> last_liquidity_ind{};
     ::std::optional<::std::int64_t> qty_type{};
-    ::std::optional<::std::span<const ExecutionReportEventsArgs>> events{};
+    ::std::optional<::std::span<const groups::G_864Args>> events{};
     ::std::optional<::std::string_view> dated_date{};
     ::std::optional<::std::string_view> interest_accrual_date{};
     ::std::optional<::std::int64_t> cp_program{};
@@ -2064,211 +3320,6 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_OrderCancelReje
     return bb.commit(out);
 }
 
-struct MultilegOrderCancelReplaceAllocsNested3PartyIDsNested3PartySubIDsArgs {
-    ::std::optional<::std::string_view> nested3_party_sub_id{};
-    ::std::optional<::std::int64_t> nested3_party_sub_id_type{};
-};
-
-struct MultilegOrderCancelReplaceAllocsNested3PartyIDsArgs {
-    ::std::optional<::std::string_view> nested3_party_id{};
-    ::std::optional<char> nested3_party_id_source{};
-    ::std::optional<::std::int64_t> nested3_party_role{};
-    ::std::optional<::std::span<const MultilegOrderCancelReplaceAllocsNested3PartyIDsNested3PartySubIDsArgs>> nested3_party_sub_i_ds{};
-};
-
-struct MultilegOrderCancelReplaceAllocsArgs {
-    ::std::optional<::std::string_view> alloc_account{};
-    ::std::optional<::std::int64_t> alloc_acct_id_source{};
-    ::std::optional<::std::string_view> alloc_settl_currency{};
-    ::std::optional<::std::string_view> individual_alloc_id{};
-    ::std::optional<::std::span<const MultilegOrderCancelReplaceAllocsNested3PartyIDsArgs>> nested3_party_i_ds{};
-    ::std::optional<::fixpp::decimal_t> alloc_qty{};
-};
-
-struct MultilegOrderCancelReplaceTradingSessionsArgs {
-    ::std::optional<::std::string_view> trading_session_id{};
-    ::std::optional<::std::string_view> trading_session_sub_id{};
-};
-
-struct MultilegOrderCancelReplacePartyIDsPartySubIDsArgs {
-    ::std::optional<::std::string_view> party_sub_id{};
-    ::std::optional<::std::int64_t> party_sub_id_type{};
-};
-
-struct MultilegOrderCancelReplacePartyIDsArgs {
-    ::std::optional<::std::string_view> party_id{};
-    ::std::optional<char> party_id_source{};
-    ::std::optional<::std::int64_t> party_role{};
-    ::std::optional<::std::span<const MultilegOrderCancelReplacePartyIDsPartySubIDsArgs>> party_sub_i_ds{};
-};
-
-struct MultilegOrderCancelReplaceSecurityAltIDArgs {
-    ::std::optional<::std::string_view> security_alt_id{};
-    ::std::optional<::std::string_view> security_alt_id_source{};
-};
-
-struct MultilegOrderCancelReplaceLegsLegSecurityAltIDArgs {
-    ::std::optional<::std::string_view> leg_security_alt_id{};
-    ::std::optional<::std::string_view> leg_security_alt_id_source{};
-};
-
-struct MultilegOrderCancelReplaceLegsLegStipulationsArgs {
-    ::std::optional<::std::string_view> leg_stipulation_type{};
-    ::std::optional<::std::string_view> leg_stipulation_value{};
-};
-
-struct MultilegOrderCancelReplaceLegsLegAllocsNested2PartyIDsNested2PartySubIDsArgs {
-    ::std::optional<::std::string_view> nested2_party_sub_id{};
-    ::std::optional<::std::int64_t> nested2_party_sub_id_type{};
-};
-
-struct MultilegOrderCancelReplaceLegsLegAllocsNested2PartyIDsArgs {
-    ::std::optional<::std::string_view> nested2_party_id{};
-    ::std::optional<char> nested2_party_id_source{};
-    ::std::optional<::std::int64_t> nested2_party_role{};
-    ::std::optional<::std::span<const MultilegOrderCancelReplaceLegsLegAllocsNested2PartyIDsNested2PartySubIDsArgs>> nested2_party_sub_i_ds{};
-};
-
-struct MultilegOrderCancelReplaceLegsLegAllocsArgs {
-    ::std::optional<::std::string_view> leg_alloc_account{};
-    ::std::optional<::std::string_view> leg_individual_alloc_id{};
-    ::std::optional<::std::span<const MultilegOrderCancelReplaceLegsLegAllocsNested2PartyIDsArgs>> nested2_party_i_ds{};
-    ::std::optional<::fixpp::decimal_t> leg_alloc_qty{};
-    ::std::optional<::std::string_view> leg_alloc_acct_id_source{};
-    ::std::optional<::std::string_view> leg_settl_currency{};
-};
-
-struct MultilegOrderCancelReplaceLegsNestedPartyIDsNestedPartySubIDsArgs {
-    ::std::optional<::std::string_view> nested_party_sub_id{};
-    ::std::optional<::std::int64_t> nested_party_sub_id_type{};
-};
-
-struct MultilegOrderCancelReplaceLegsNestedPartyIDsArgs {
-    ::std::optional<::std::string_view> nested_party_id{};
-    ::std::optional<char> nested_party_id_source{};
-    ::std::optional<::std::int64_t> nested_party_role{};
-    ::std::optional<::std::span<const MultilegOrderCancelReplaceLegsNestedPartyIDsNestedPartySubIDsArgs>> nested_party_sub_i_ds{};
-};
-
-struct MultilegOrderCancelReplaceLegsArgs {
-    ::std::optional<::std::string_view> leg_symbol{};
-    ::std::optional<::std::string_view> leg_symbol_sfx{};
-    ::std::optional<::std::string_view> leg_security_id{};
-    ::std::optional<::std::string_view> leg_security_id_source{};
-    ::std::optional<::std::span<const MultilegOrderCancelReplaceLegsLegSecurityAltIDArgs>> leg_security_alt_id{};
-    ::std::optional<::std::int64_t> leg_product{};
-    ::std::optional<::std::string_view> leg_cfi_code{};
-    ::std::optional<::std::string_view> leg_security_type{};
-    ::std::optional<::std::string_view> leg_security_sub_type{};
-    ::std::optional<::std::string_view> leg_maturity_month_year{};
-    ::std::optional<::std::string_view> leg_maturity_date{};
-    ::std::optional<::std::string_view> leg_coupon_payment_date{};
-    ::std::optional<::std::string_view> leg_issue_date{};
-    ::std::optional<::std::string_view> leg_repo_collateral_security_type{};
-    ::std::optional<::std::int64_t> leg_repurchase_term{};
-    ::std::optional<::fixpp::decimal_t> leg_repurchase_rate{};
-    ::std::optional<::fixpp::decimal_t> leg_factor{};
-    ::std::optional<::std::string_view> leg_credit_rating{};
-    ::std::optional<::std::string_view> leg_instr_registry{};
-    ::std::optional<::std::string_view> leg_country_of_issue{};
-    ::std::optional<::std::string_view> leg_state_or_province_of_issue{};
-    ::std::optional<::std::string_view> leg_locale_of_issue{};
-    ::std::optional<::std::string_view> leg_redemption_date{};
-    ::std::optional<::fixpp::decimal_t> leg_strike_price{};
-    ::std::optional<::std::string_view> leg_strike_currency{};
-    ::std::optional<char> leg_opt_attribute{};
-    ::std::optional<::fixpp::decimal_t> leg_contract_multiplier{};
-    ::std::optional<::fixpp::decimal_t> leg_coupon_rate{};
-    ::std::optional<::std::string_view> leg_security_exchange{};
-    ::std::optional<::std::string_view> leg_issuer{};
-    ::std::optional<::std::string_view> encoded_leg_issuer{};
-    ::std::optional<::std::string_view> leg_security_desc{};
-    ::std::optional<::std::string_view> encoded_leg_security_desc{};
-    ::std::optional<::fixpp::decimal_t> leg_ratio_qty{};
-    ::std::optional<char> leg_side{};
-    ::std::optional<::std::string_view> leg_currency{};
-    ::std::optional<::std::string_view> leg_pool{};
-    ::std::optional<::std::string_view> leg_dated_date{};
-    ::std::optional<::std::string_view> leg_contract_settl_month{};
-    ::std::optional<::std::string_view> leg_interest_accrual_date{};
-    ::std::optional<::fixpp::decimal_t> leg_qty{};
-    ::std::optional<::std::int64_t> leg_swap_type{};
-    ::std::optional<::std::span<const MultilegOrderCancelReplaceLegsLegStipulationsArgs>> leg_stipulations{};
-    ::std::optional<::std::span<const MultilegOrderCancelReplaceLegsLegAllocsArgs>> leg_allocs{};
-    ::std::optional<char> leg_position_effect{};
-    ::std::optional<::std::int64_t> leg_covered_or_uncovered{};
-    ::std::optional<::std::span<const MultilegOrderCancelReplaceLegsNestedPartyIDsArgs>> nested_party_i_ds{};
-    ::std::optional<::std::string_view> leg_ref_id{};
-    ::std::optional<::fixpp::decimal_t> leg_price{};
-    ::std::optional<char> leg_settl_type{};
-    ::std::optional<::std::string_view> leg_settl_date{};
-};
-
-struct MultilegOrderCancelReplaceUnderlyingsUnderlyingSecurityAltIDArgs {
-    ::std::optional<::std::string_view> underlying_security_alt_id{};
-    ::std::optional<::std::string_view> underlying_security_alt_id_source{};
-};
-
-struct MultilegOrderCancelReplaceUnderlyingsUnderlyingStipsArgs {
-    ::std::optional<::std::string_view> underlying_stip_type{};
-    ::std::optional<::std::string_view> underlying_stip_value{};
-};
-
-struct MultilegOrderCancelReplaceUnderlyingsArgs {
-    ::std::optional<::std::string_view> underlying_symbol{};
-    ::std::optional<::std::string_view> underlying_symbol_sfx{};
-    ::std::optional<::std::string_view> underlying_security_id{};
-    ::std::optional<::std::string_view> underlying_security_id_source{};
-    ::std::optional<::std::span<const MultilegOrderCancelReplaceUnderlyingsUnderlyingSecurityAltIDArgs>> underlying_security_alt_id{};
-    ::std::optional<::std::int64_t> underlying_product{};
-    ::std::optional<::std::string_view> underlying_cfi_code{};
-    ::std::optional<::std::string_view> underlying_security_type{};
-    ::std::optional<::std::string_view> underlying_security_sub_type{};
-    ::std::optional<::std::string_view> underlying_maturity_month_year{};
-    ::std::optional<::std::string_view> underlying_maturity_date{};
-    ::std::optional<::std::int64_t> underlying_put_or_call{};
-    ::std::optional<::std::string_view> underlying_coupon_payment_date{};
-    ::std::optional<::std::string_view> underlying_issue_date{};
-    ::std::optional<::std::string_view> underlying_repo_collateral_security_type{};
-    ::std::optional<::std::int64_t> underlying_repurchase_term{};
-    ::std::optional<::fixpp::decimal_t> underlying_repurchase_rate{};
-    ::std::optional<::fixpp::decimal_t> underlying_factor{};
-    ::std::optional<::std::string_view> underlying_credit_rating{};
-    ::std::optional<::std::string_view> underlying_instr_registry{};
-    ::std::optional<::std::string_view> underlying_country_of_issue{};
-    ::std::optional<::std::string_view> underlying_state_or_province_of_issue{};
-    ::std::optional<::std::string_view> underlying_locale_of_issue{};
-    ::std::optional<::std::string_view> underlying_redemption_date{};
-    ::std::optional<::fixpp::decimal_t> underlying_strike_price{};
-    ::std::optional<::std::string_view> underlying_strike_currency{};
-    ::std::optional<char> underlying_opt_attribute{};
-    ::std::optional<::fixpp::decimal_t> underlying_contract_multiplier{};
-    ::std::optional<::fixpp::decimal_t> underlying_coupon_rate{};
-    ::std::optional<::std::string_view> underlying_security_exchange{};
-    ::std::optional<::std::string_view> underlying_issuer{};
-    ::std::optional<::std::string_view> encoded_underlying_issuer{};
-    ::std::optional<::std::string_view> underlying_security_desc{};
-    ::std::optional<::std::string_view> encoded_underlying_security_desc{};
-    ::std::optional<::std::string_view> underlying_cp_program{};
-    ::std::optional<::std::string_view> underlying_cp_reg_type{};
-    ::std::optional<::std::string_view> underlying_currency{};
-    ::std::optional<::fixpp::decimal_t> underlying_qty{};
-    ::std::optional<::fixpp::decimal_t> underlying_px{};
-    ::std::optional<::fixpp::decimal_t> underlying_dirty_price{};
-    ::std::optional<::fixpp::decimal_t> underlying_end_price{};
-    ::std::optional<::fixpp::decimal_t> underlying_start_value{};
-    ::std::optional<::fixpp::decimal_t> underlying_current_value{};
-    ::std::optional<::fixpp::decimal_t> underlying_end_value{};
-    ::std::optional<::std::span<const MultilegOrderCancelReplaceUnderlyingsUnderlyingStipsArgs>> underlying_stips{};
-};
-
-struct MultilegOrderCancelReplaceEventsArgs {
-    ::std::optional<::std::int64_t> event_type{};
-    ::std::optional<::std::string_view> event_date{};
-    ::std::optional<::fixpp::decimal_t> event_px{};
-    ::std::optional<::std::string_view> event_text{};
-};
-
 struct MultilegOrderCancelReplaceArgs {
     ::std::optional<::std::string_view> account{};
     ::std::optional<::std::string_view> cl_ord_id{};
@@ -2296,7 +3347,7 @@ struct MultilegOrderCancelReplaceArgs {
     ::std::optional<::std::string_view> alloc_id{};
     ::std::optional<::std::string_view> trade_date{};
     ::std::optional<char> position_effect{};
-    ::std::optional<::std::span<const MultilegOrderCancelReplaceAllocsArgs>> allocs{};
+    ::std::optional<::std::span<const groups::G_78_1Args>> allocs{};
     ::std::optional<char> process_code{};
     ::std::optional<::fixpp::decimal_t> stop_px{};
     ::std::optional<::std::string_view> ex_destination{};
@@ -2337,14 +3388,14 @@ struct MultilegOrderCancelReplaceArgs {
     ::std::optional<::std::string_view> encoded_text{};
     ::std::optional<::std::string_view> compliance_id{};
     ::std::optional<bool> solicited_flag{};
-    ::std::optional<::std::span<const MultilegOrderCancelReplaceTradingSessionsArgs>> trading_sessions{};
+    ::std::optional<::std::span<const groups::G_386Args>> trading_sessions{};
     ::std::optional<char> discretion_inst{};
     ::std::optional<::fixpp::decimal_t> discretion_offset_value{};
     ::std::optional<::std::int64_t> price_type{};
     ::std::optional<::std::int64_t> gt_booking_inst{};
     ::std::optional<::std::string_view> expire_date{};
-    ::std::optional<::std::span<const MultilegOrderCancelReplacePartyIDsArgs>> party_i_ds{};
-    ::std::optional<::std::span<const MultilegOrderCancelReplaceSecurityAltIDArgs>> security_alt_id{};
+    ::std::optional<::std::span<const groups::G_453Args>> party_i_ds{};
+    ::std::optional<::std::span<const groups::G_454Args>> security_alt_id{};
     ::std::optional<::std::int64_t> product{};
     ::std::optional<::std::string_view> cfi_code{};
     ::std::optional<char> rounding_direction{};
@@ -2365,7 +3416,7 @@ struct MultilegOrderCancelReplaceArgs {
     ::std::optional<::std::string_view> maturity_date{};
     ::std::optional<::std::string_view> instr_registry{};
     ::std::optional<char> cash_margin{};
-    ::std::span<const MultilegOrderCancelReplaceLegsArgs> legs{};
+    ::std::span<const groups::G_555_2Args> legs{};
     ::std::optional<::std::int64_t> multi_leg_rpt_type_req{};
     ::std::optional<::std::int64_t> account_type{};
     ::std::optional<::std::int64_t> cust_order_capacity{};
@@ -2378,7 +3429,7 @@ struct MultilegOrderCancelReplaceArgs {
     ::std::optional<::std::int64_t> acct_id_source{};
     ::std::optional<::std::string_view> contract_settl_month{};
     ::std::optional<::std::string_view> pool{};
-    ::std::optional<::std::span<const MultilegOrderCancelReplaceUnderlyingsArgs>> underlyings{};
+    ::std::optional<::std::span<const groups::G_711Args>> underlyings{};
     ::std::optional<::std::string_view> security_sub_type{};
     ::std::optional<::std::int64_t> booking_type{};
     ::std::optional<::std::int64_t> peg_move_type{};
@@ -2395,7 +3446,7 @@ struct MultilegOrderCancelReplaceArgs {
     ::std::optional<::std::string_view> target_strategy_parameters{};
     ::std::optional<::fixpp::decimal_t> participation_rate{};
     ::std::optional<::std::int64_t> qty_type{};
-    ::std::optional<::std::span<const MultilegOrderCancelReplaceEventsArgs>> events{};
+    ::std::optional<::std::span<const groups::G_864Args>> events{};
     ::std::optional<::std::string_view> dated_date{};
     ::std::optional<::std::string_view> interest_accrual_date{};
     ::std::optional<::std::int64_t> cp_program{};
@@ -3671,40 +4722,6 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_MultilegOrderCa
     return bb.commit(out);
 }
 
-struct OrderMassStatusRequestPartyIDsPartySubIDsArgs {
-    ::std::optional<::std::string_view> party_sub_id{};
-    ::std::optional<::std::int64_t> party_sub_id_type{};
-};
-
-struct OrderMassStatusRequestPartyIDsArgs {
-    ::std::optional<::std::string_view> party_id{};
-    ::std::optional<char> party_id_source{};
-    ::std::optional<::std::int64_t> party_role{};
-    ::std::optional<::std::span<const OrderMassStatusRequestPartyIDsPartySubIDsArgs>> party_sub_i_ds{};
-};
-
-struct OrderMassStatusRequestSecurityAltIDArgs {
-    ::std::optional<::std::string_view> security_alt_id{};
-    ::std::optional<::std::string_view> security_alt_id_source{};
-};
-
-struct OrderMassStatusRequestUnderlyingSecurityAltIDArgs {
-    ::std::optional<::std::string_view> underlying_security_alt_id{};
-    ::std::optional<::std::string_view> underlying_security_alt_id_source{};
-};
-
-struct OrderMassStatusRequestEventsArgs {
-    ::std::optional<::std::int64_t> event_type{};
-    ::std::optional<::std::string_view> event_date{};
-    ::std::optional<::fixpp::decimal_t> event_px{};
-    ::std::optional<::std::string_view> event_text{};
-};
-
-struct OrderMassStatusRequestUnderlyingStipsArgs {
-    ::std::optional<::std::string_view> underlying_stip_type{};
-    ::std::optional<::std::string_view> underlying_stip_value{};
-};
-
 struct OrderMassStatusRequestArgs {
     ::std::optional<::std::string_view> account{};
     ::std::optional<::std::string_view> security_id_source{};
@@ -3758,9 +4775,9 @@ struct OrderMassStatusRequestArgs {
     ::std::optional<::std::string_view> encoded_underlying_security_desc{};
     ::std::optional<::fixpp::decimal_t> underlying_coupon_rate{};
     ::std::optional<::fixpp::decimal_t> underlying_contract_multiplier{};
-    ::std::optional<::std::span<const OrderMassStatusRequestPartyIDsArgs>> party_i_ds{};
-    ::std::optional<::std::span<const OrderMassStatusRequestSecurityAltIDArgs>> security_alt_id{};
-    ::std::optional<::std::span<const OrderMassStatusRequestUnderlyingSecurityAltIDArgs>> underlying_security_alt_id{};
+    ::std::optional<::std::span<const groups::G_453Args>> party_i_ds{};
+    ::std::optional<::std::span<const groups::G_454Args>> security_alt_id{};
+    ::std::optional<::std::span<const groups::G_457Args>> underlying_security_alt_id{};
     ::std::optional<::std::int64_t> product{};
     ::std::optional<::std::string_view> cfi_code{};
     ::std::optional<::std::int64_t> underlying_product{};
@@ -3784,7 +4801,7 @@ struct OrderMassStatusRequestArgs {
     ::std::optional<::std::string_view> security_sub_type{};
     ::std::optional<::std::string_view> underlying_security_sub_type{};
     ::std::optional<::fixpp::decimal_t> underlying_px{};
-    ::std::optional<::std::span<const OrderMassStatusRequestEventsArgs>> events{};
+    ::std::optional<::std::span<const groups::G_864Args>> events{};
     ::std::optional<::std::string_view> dated_date{};
     ::std::optional<::std::string_view> interest_accrual_date{};
     ::std::optional<::std::int64_t> cp_program{};
@@ -3797,7 +4814,7 @@ struct OrderMassStatusRequestArgs {
     ::std::optional<::fixpp::decimal_t> underlying_start_value{};
     ::std::optional<::fixpp::decimal_t> underlying_current_value{};
     ::std::optional<::fixpp::decimal_t> underlying_end_value{};
-    ::std::optional<::std::span<const OrderMassStatusRequestUnderlyingStipsArgs>> underlying_stips{};
+    ::std::optional<::std::span<const groups::G_887Args>> underlying_stips{};
     ::std::optional<::std::string_view> underlying_strike_currency{};
     ::std::optional<::std::string_view> strike_currency{};
 };
@@ -4297,277 +5314,10 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_OrderMassStatus
     return bb.commit(out);
 }
 
-struct QuoteRequestRejectRelatedSymSecurityAltIDArgs {
-    ::std::optional<::std::string_view> security_alt_id{};
-    ::std::optional<::std::string_view> security_alt_id_source{};
-};
-
-struct QuoteRequestRejectRelatedSymEventsArgs {
-    ::std::optional<::std::int64_t> event_type{};
-    ::std::optional<::std::string_view> event_date{};
-    ::std::optional<::fixpp::decimal_t> event_px{};
-    ::std::optional<::std::string_view> event_text{};
-};
-
-struct QuoteRequestRejectRelatedSymUnderlyingsUnderlyingSecurityAltIDArgs {
-    ::std::optional<::std::string_view> underlying_security_alt_id{};
-    ::std::optional<::std::string_view> underlying_security_alt_id_source{};
-};
-
-struct QuoteRequestRejectRelatedSymUnderlyingsUnderlyingStipsArgs {
-    ::std::optional<::std::string_view> underlying_stip_type{};
-    ::std::optional<::std::string_view> underlying_stip_value{};
-};
-
-struct QuoteRequestRejectRelatedSymUnderlyingsArgs {
-    ::std::optional<::std::string_view> underlying_symbol{};
-    ::std::optional<::std::string_view> underlying_symbol_sfx{};
-    ::std::optional<::std::string_view> underlying_security_id{};
-    ::std::optional<::std::string_view> underlying_security_id_source{};
-    ::std::optional<::std::span<const QuoteRequestRejectRelatedSymUnderlyingsUnderlyingSecurityAltIDArgs>> underlying_security_alt_id{};
-    ::std::optional<::std::int64_t> underlying_product{};
-    ::std::optional<::std::string_view> underlying_cfi_code{};
-    ::std::optional<::std::string_view> underlying_security_type{};
-    ::std::optional<::std::string_view> underlying_security_sub_type{};
-    ::std::optional<::std::string_view> underlying_maturity_month_year{};
-    ::std::optional<::std::string_view> underlying_maturity_date{};
-    ::std::optional<::std::int64_t> underlying_put_or_call{};
-    ::std::optional<::std::string_view> underlying_coupon_payment_date{};
-    ::std::optional<::std::string_view> underlying_issue_date{};
-    ::std::optional<::std::string_view> underlying_repo_collateral_security_type{};
-    ::std::optional<::std::int64_t> underlying_repurchase_term{};
-    ::std::optional<::fixpp::decimal_t> underlying_repurchase_rate{};
-    ::std::optional<::fixpp::decimal_t> underlying_factor{};
-    ::std::optional<::std::string_view> underlying_credit_rating{};
-    ::std::optional<::std::string_view> underlying_instr_registry{};
-    ::std::optional<::std::string_view> underlying_country_of_issue{};
-    ::std::optional<::std::string_view> underlying_state_or_province_of_issue{};
-    ::std::optional<::std::string_view> underlying_locale_of_issue{};
-    ::std::optional<::std::string_view> underlying_redemption_date{};
-    ::std::optional<::fixpp::decimal_t> underlying_strike_price{};
-    ::std::optional<::std::string_view> underlying_strike_currency{};
-    ::std::optional<char> underlying_opt_attribute{};
-    ::std::optional<::fixpp::decimal_t> underlying_contract_multiplier{};
-    ::std::optional<::fixpp::decimal_t> underlying_coupon_rate{};
-    ::std::optional<::std::string_view> underlying_security_exchange{};
-    ::std::optional<::std::string_view> underlying_issuer{};
-    ::std::optional<::std::string_view> encoded_underlying_issuer{};
-    ::std::optional<::std::string_view> underlying_security_desc{};
-    ::std::optional<::std::string_view> encoded_underlying_security_desc{};
-    ::std::optional<::std::string_view> underlying_cp_program{};
-    ::std::optional<::std::string_view> underlying_cp_reg_type{};
-    ::std::optional<::std::string_view> underlying_currency{};
-    ::std::optional<::fixpp::decimal_t> underlying_qty{};
-    ::std::optional<::fixpp::decimal_t> underlying_px{};
-    ::std::optional<::fixpp::decimal_t> underlying_dirty_price{};
-    ::std::optional<::fixpp::decimal_t> underlying_end_price{};
-    ::std::optional<::fixpp::decimal_t> underlying_start_value{};
-    ::std::optional<::fixpp::decimal_t> underlying_current_value{};
-    ::std::optional<::fixpp::decimal_t> underlying_end_value{};
-    ::std::optional<::std::span<const QuoteRequestRejectRelatedSymUnderlyingsUnderlyingStipsArgs>> underlying_stips{};
-};
-
-struct QuoteRequestRejectRelatedSymStipulationsArgs {
-    ::std::optional<::std::string_view> stipulation_type{};
-    ::std::optional<::std::string_view> stipulation_value{};
-};
-
-struct QuoteRequestRejectRelatedSymLegsLegSecurityAltIDArgs {
-    ::std::optional<::std::string_view> leg_security_alt_id{};
-    ::std::optional<::std::string_view> leg_security_alt_id_source{};
-};
-
-struct QuoteRequestRejectRelatedSymLegsLegStipulationsArgs {
-    ::std::optional<::std::string_view> leg_stipulation_type{};
-    ::std::optional<::std::string_view> leg_stipulation_value{};
-};
-
-struct QuoteRequestRejectRelatedSymLegsNestedPartyIDsNestedPartySubIDsArgs {
-    ::std::optional<::std::string_view> nested_party_sub_id{};
-    ::std::optional<::std::int64_t> nested_party_sub_id_type{};
-};
-
-struct QuoteRequestRejectRelatedSymLegsNestedPartyIDsArgs {
-    ::std::optional<::std::string_view> nested_party_id{};
-    ::std::optional<char> nested_party_id_source{};
-    ::std::optional<::std::int64_t> nested_party_role{};
-    ::std::optional<::std::span<const QuoteRequestRejectRelatedSymLegsNestedPartyIDsNestedPartySubIDsArgs>> nested_party_sub_i_ds{};
-};
-
-struct QuoteRequestRejectRelatedSymLegsArgs {
-    ::std::optional<::std::string_view> leg_symbol{};
-    ::std::optional<::std::string_view> leg_symbol_sfx{};
-    ::std::optional<::std::string_view> leg_security_id{};
-    ::std::optional<::std::string_view> leg_security_id_source{};
-    ::std::optional<::std::span<const QuoteRequestRejectRelatedSymLegsLegSecurityAltIDArgs>> leg_security_alt_id{};
-    ::std::optional<::std::int64_t> leg_product{};
-    ::std::optional<::std::string_view> leg_cfi_code{};
-    ::std::optional<::std::string_view> leg_security_type{};
-    ::std::optional<::std::string_view> leg_security_sub_type{};
-    ::std::optional<::std::string_view> leg_maturity_month_year{};
-    ::std::optional<::std::string_view> leg_maturity_date{};
-    ::std::optional<::std::string_view> leg_coupon_payment_date{};
-    ::std::optional<::std::string_view> leg_issue_date{};
-    ::std::optional<::std::string_view> leg_repo_collateral_security_type{};
-    ::std::optional<::std::int64_t> leg_repurchase_term{};
-    ::std::optional<::fixpp::decimal_t> leg_repurchase_rate{};
-    ::std::optional<::fixpp::decimal_t> leg_factor{};
-    ::std::optional<::std::string_view> leg_credit_rating{};
-    ::std::optional<::std::string_view> leg_instr_registry{};
-    ::std::optional<::std::string_view> leg_country_of_issue{};
-    ::std::optional<::std::string_view> leg_state_or_province_of_issue{};
-    ::std::optional<::std::string_view> leg_locale_of_issue{};
-    ::std::optional<::std::string_view> leg_redemption_date{};
-    ::std::optional<::fixpp::decimal_t> leg_strike_price{};
-    ::std::optional<::std::string_view> leg_strike_currency{};
-    ::std::optional<char> leg_opt_attribute{};
-    ::std::optional<::fixpp::decimal_t> leg_contract_multiplier{};
-    ::std::optional<::fixpp::decimal_t> leg_coupon_rate{};
-    ::std::optional<::std::string_view> leg_security_exchange{};
-    ::std::optional<::std::string_view> leg_issuer{};
-    ::std::optional<::std::string_view> encoded_leg_issuer{};
-    ::std::optional<::std::string_view> leg_security_desc{};
-    ::std::optional<::std::string_view> encoded_leg_security_desc{};
-    ::std::optional<::fixpp::decimal_t> leg_ratio_qty{};
-    ::std::optional<char> leg_side{};
-    ::std::optional<::std::string_view> leg_currency{};
-    ::std::optional<::std::string_view> leg_pool{};
-    ::std::optional<::std::string_view> leg_dated_date{};
-    ::std::optional<::std::string_view> leg_contract_settl_month{};
-    ::std::optional<::std::string_view> leg_interest_accrual_date{};
-    ::std::optional<::fixpp::decimal_t> leg_qty{};
-    ::std::optional<::std::int64_t> leg_swap_type{};
-    ::std::optional<char> leg_settl_type{};
-    ::std::optional<::std::string_view> leg_settl_date{};
-    ::std::optional<::std::span<const QuoteRequestRejectRelatedSymLegsLegStipulationsArgs>> leg_stipulations{};
-    ::std::optional<::std::span<const QuoteRequestRejectRelatedSymLegsNestedPartyIDsArgs>> nested_party_i_ds{};
-    ::std::optional<::std::string_view> leg_benchmark_curve_currency{};
-    ::std::optional<::std::string_view> leg_benchmark_curve_name{};
-    ::std::optional<::std::string_view> leg_benchmark_curve_point{};
-    ::std::optional<::fixpp::decimal_t> leg_benchmark_price{};
-    ::std::optional<::std::int64_t> leg_benchmark_price_type{};
-};
-
-struct QuoteRequestRejectRelatedSymQuoteQualifiersArgs {
-    ::std::optional<char> quote_qualifier{};
-};
-
-struct QuoteRequestRejectRelatedSymPartyIDsPartySubIDsArgs {
-    ::std::optional<::std::string_view> party_sub_id{};
-    ::std::optional<::std::int64_t> party_sub_id_type{};
-};
-
-struct QuoteRequestRejectRelatedSymPartyIDsArgs {
-    ::std::optional<::std::string_view> party_id{};
-    ::std::optional<char> party_id_source{};
-    ::std::optional<::std::int64_t> party_role{};
-    ::std::optional<::std::span<const QuoteRequestRejectRelatedSymPartyIDsPartySubIDsArgs>> party_sub_i_ds{};
-};
-
-struct QuoteRequestRejectRelatedSymArgs {
-    ::std::optional<::std::string_view> symbol{};
-    ::std::optional<::std::string_view> symbol_sfx{};
-    ::std::optional<::std::string_view> security_id{};
-    ::std::optional<::std::string_view> security_id_source{};
-    ::std::optional<::std::span<const QuoteRequestRejectRelatedSymSecurityAltIDArgs>> security_alt_id{};
-    ::std::optional<::std::int64_t> product{};
-    ::std::optional<::std::string_view> cfi_code{};
-    ::std::optional<::std::string_view> security_type{};
-    ::std::optional<::std::string_view> security_sub_type{};
-    ::std::optional<::std::string_view> maturity_month_year{};
-    ::std::optional<::std::string_view> maturity_date{};
-    ::std::optional<::std::int64_t> put_or_call{};
-    ::std::optional<::std::string_view> coupon_payment_date{};
-    ::std::optional<::std::string_view> issue_date{};
-    ::std::optional<::std::string_view> repo_collateral_security_type{};
-    ::std::optional<::std::int64_t> repurchase_term{};
-    ::std::optional<::fixpp::decimal_t> repurchase_rate{};
-    ::std::optional<::fixpp::decimal_t> factor{};
-    ::std::optional<::std::string_view> credit_rating{};
-    ::std::optional<::std::string_view> instr_registry{};
-    ::std::optional<::std::string_view> country_of_issue{};
-    ::std::optional<::std::string_view> state_or_province_of_issue{};
-    ::std::optional<::std::string_view> locale_of_issue{};
-    ::std::optional<::std::string_view> redemption_date{};
-    ::std::optional<::fixpp::decimal_t> strike_price{};
-    ::std::optional<::std::string_view> strike_currency{};
-    ::std::optional<char> opt_attribute{};
-    ::std::optional<::fixpp::decimal_t> contract_multiplier{};
-    ::std::optional<::fixpp::decimal_t> coupon_rate{};
-    ::std::optional<::std::string_view> security_exchange{};
-    ::std::optional<::std::string_view> issuer{};
-    ::std::optional<::std::string_view> encoded_issuer{};
-    ::std::optional<::std::string_view> security_desc{};
-    ::std::optional<::std::string_view> encoded_security_desc{};
-    ::std::optional<::std::string_view> pool{};
-    ::std::optional<::std::string_view> contract_settl_month{};
-    ::std::optional<::std::int64_t> cp_program{};
-    ::std::optional<::std::string_view> cp_reg_type{};
-    ::std::optional<::std::span<const QuoteRequestRejectRelatedSymEventsArgs>> events{};
-    ::std::optional<::std::string_view> dated_date{};
-    ::std::optional<::std::string_view> interest_accrual_date{};
-    ::std::optional<::std::string_view> agreement_desc{};
-    ::std::optional<::std::string_view> agreement_id{};
-    ::std::optional<::std::string_view> agreement_date{};
-    ::std::optional<::std::string_view> agreement_currency{};
-    ::std::optional<::std::int64_t> termination_type{};
-    ::std::optional<::std::string_view> start_date{};
-    ::std::optional<::std::string_view> end_date{};
-    ::std::optional<::std::int64_t> delivery_type{};
-    ::std::optional<::fixpp::decimal_t> margin_ratio{};
-    ::std::optional<::std::span<const QuoteRequestRejectRelatedSymUnderlyingsArgs>> underlyings{};
-    ::std::optional<::fixpp::decimal_t> prev_close_px{};
-    ::std::optional<::std::int64_t> quote_request_type{};
-    ::std::optional<::std::int64_t> quote_type{};
-    ::std::optional<::std::string_view> trading_session_id{};
-    ::std::optional<::std::string_view> trading_session_sub_id{};
-    ::std::optional<::std::string_view> trade_origination_date{};
-    ::std::optional<char> side{};
-    ::std::optional<::std::int64_t> qty_type{};
-    ::std::optional<::fixpp::decimal_t> order_qty{};
-    ::std::optional<::fixpp::decimal_t> cash_order_qty{};
-    ::std::optional<::fixpp::decimal_t> order_percent{};
-    ::std::optional<char> rounding_direction{};
-    ::std::optional<::fixpp::decimal_t> rounding_modulus{};
-    ::std::optional<char> settl_type{};
-    ::std::optional<::std::string_view> settl_date{};
-    ::std::optional<::std::string_view> settl_date2{};
-    ::std::optional<::fixpp::decimal_t> order_qty2{};
-    ::std::optional<::std::string_view> currency{};
-    ::std::optional<::std::span<const QuoteRequestRejectRelatedSymStipulationsArgs>> stipulations{};
-    ::std::optional<::std::string_view> account{};
-    ::std::optional<::std::int64_t> acct_id_source{};
-    ::std::optional<::std::int64_t> account_type{};
-    ::std::optional<::std::span<const QuoteRequestRejectRelatedSymLegsArgs>> legs{};
-    ::std::optional<::std::span<const QuoteRequestRejectRelatedSymQuoteQualifiersArgs>> quote_qualifiers{};
-    ::std::optional<::std::int64_t> quote_price_type{};
-    ::std::optional<char> ord_type{};
-    ::std::optional<::std::string_view> expire_time{};
-    ::std::optional<::std::string_view> transact_time{};
-    ::std::optional<::fixpp::decimal_t> spread{};
-    ::std::optional<::std::string_view> benchmark_curve_currency{};
-    ::std::optional<::std::string_view> benchmark_curve_name{};
-    ::std::optional<::std::string_view> benchmark_curve_point{};
-    ::std::optional<::fixpp::decimal_t> benchmark_price{};
-    ::std::optional<::std::int64_t> benchmark_price_type{};
-    ::std::optional<::std::string_view> benchmark_security_id{};
-    ::std::optional<::std::string_view> benchmark_security_id_source{};
-    ::std::optional<::std::int64_t> price_type{};
-    ::std::optional<::fixpp::decimal_t> price{};
-    ::std::optional<::fixpp::decimal_t> price2{};
-    ::std::optional<::std::string_view> yield_type{};
-    ::std::optional<::fixpp::decimal_t> yield{};
-    ::std::optional<::std::string_view> yield_calc_date{};
-    ::std::optional<::std::string_view> yield_redemption_date{};
-    ::std::optional<::fixpp::decimal_t> yield_redemption_price{};
-    ::std::optional<::std::int64_t> yield_redemption_price_type{};
-    ::std::optional<::std::span<const QuoteRequestRejectRelatedSymPartyIDsArgs>> party_i_ds{};
-};
-
 struct QuoteRequestRejectArgs {
     ::std::optional<::std::string_view> text{};
     ::std::optional<::std::string_view> quote_req_id{};
-    ::std::span<const QuoteRequestRejectRelatedSymArgs> related_sym{};
+    ::std::span<const groups::G_146_1Args> related_sym{};
     ::std::optional<::std::string_view> encoded_text{};
     ::std::optional<::std::string_view> rfq_req_id{};
     ::std::optional<::std::int64_t> quote_request_reject_reason{};
@@ -5609,257 +6359,6 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_QuoteRequestRej
     return bb.commit(out);
 }
 
-struct AllocationReportOrdersNested2PartyIDsNested2PartySubIDsArgs {
-    ::std::optional<::std::string_view> nested2_party_sub_id{};
-    ::std::optional<::std::int64_t> nested2_party_sub_id_type{};
-};
-
-struct AllocationReportOrdersNested2PartyIDsArgs {
-    ::std::optional<::std::string_view> nested2_party_id{};
-    ::std::optional<char> nested2_party_id_source{};
-    ::std::optional<::std::int64_t> nested2_party_role{};
-    ::std::optional<::std::span<const AllocationReportOrdersNested2PartyIDsNested2PartySubIDsArgs>> nested2_party_sub_i_ds{};
-};
-
-struct AllocationReportOrdersArgs {
-    ::std::optional<::std::string_view> cl_ord_id{};
-    ::std::optional<::std::string_view> order_id{};
-    ::std::optional<::std::string_view> secondary_order_id{};
-    ::std::optional<::std::string_view> secondary_cl_ord_id{};
-    ::std::optional<::std::string_view> list_id{};
-    ::std::optional<::std::span<const AllocationReportOrdersNested2PartyIDsArgs>> nested2_party_i_ds{};
-    ::std::optional<::fixpp::decimal_t> order_qty{};
-    ::std::optional<::fixpp::decimal_t> order_avg_px{};
-    ::std::optional<::fixpp::decimal_t> order_booking_qty{};
-};
-
-struct AllocationReportAllocsNestedPartyIDsNestedPartySubIDsArgs {
-    ::std::optional<::std::string_view> nested_party_sub_id{};
-    ::std::optional<::std::int64_t> nested_party_sub_id_type{};
-};
-
-struct AllocationReportAllocsNestedPartyIDsArgs {
-    ::std::optional<::std::string_view> nested_party_id{};
-    ::std::optional<char> nested_party_id_source{};
-    ::std::optional<::std::int64_t> nested_party_role{};
-    ::std::optional<::std::span<const AllocationReportAllocsNestedPartyIDsNestedPartySubIDsArgs>> nested_party_sub_i_ds{};
-};
-
-struct AllocationReportAllocsMiscFeesArgs {
-    ::std::optional<::fixpp::decimal_t> misc_fee_amt{};
-    ::std::optional<::std::string_view> misc_fee_curr{};
-    ::std::optional<::std::string_view> misc_fee_type{};
-    ::std::optional<::std::int64_t> misc_fee_basis{};
-};
-
-struct AllocationReportAllocsClearingInstructionsArgs {
-    ::std::optional<::std::int64_t> clearing_instruction{};
-};
-
-struct AllocationReportAllocsDlvyInstSettlPartyIDsSettlPartySubIDsArgs {
-    ::std::optional<::std::string_view> settl_party_sub_id{};
-    ::std::optional<::std::int64_t> settl_party_sub_id_type{};
-};
-
-struct AllocationReportAllocsDlvyInstSettlPartyIDsArgs {
-    ::std::optional<::std::string_view> settl_party_id{};
-    ::std::optional<char> settl_party_id_source{};
-    ::std::optional<::std::int64_t> settl_party_role{};
-    ::std::optional<::std::span<const AllocationReportAllocsDlvyInstSettlPartyIDsSettlPartySubIDsArgs>> settl_party_sub_i_ds{};
-};
-
-struct AllocationReportAllocsDlvyInstArgs {
-    ::std::optional<char> settl_inst_source{};
-    ::std::optional<char> dlvy_inst_type{};
-    ::std::optional<::std::span<const AllocationReportAllocsDlvyInstSettlPartyIDsArgs>> settl_party_i_ds{};
-};
-
-struct AllocationReportAllocsArgs {
-    ::std::optional<::std::string_view> alloc_account{};
-    ::std::optional<::std::int64_t> alloc_acct_id_source{};
-    ::std::optional<char> match_status{};
-    ::std::optional<::fixpp::decimal_t> alloc_price{};
-    ::std::optional<::fixpp::decimal_t> alloc_qty{};
-    ::std::optional<::std::string_view> individual_alloc_id{};
-    ::std::optional<char> process_code{};
-    ::std::optional<::std::span<const AllocationReportAllocsNestedPartyIDsArgs>> nested_party_i_ds{};
-    ::std::optional<bool> notify_broker_of_credit{};
-    ::std::optional<::std::int64_t> alloc_handl_inst{};
-    ::std::optional<::std::string_view> alloc_text{};
-    ::std::optional<::std::string_view> encoded_alloc_text{};
-    ::std::optional<::fixpp::decimal_t> commission{};
-    ::std::optional<char> comm_type{};
-    ::std::optional<::std::string_view> comm_currency{};
-    ::std::optional<char> fund_renew_waiv{};
-    ::std::optional<::fixpp::decimal_t> alloc_avg_px{};
-    ::std::optional<::fixpp::decimal_t> alloc_net_money{};
-    ::std::optional<::fixpp::decimal_t> settl_curr_amt{};
-    ::std::optional<::fixpp::decimal_t> alloc_settl_curr_amt{};
-    ::std::optional<::std::string_view> settl_currency{};
-    ::std::optional<::std::string_view> alloc_settl_currency{};
-    ::std::optional<::fixpp::decimal_t> settl_curr_fx_rate{};
-    ::std::optional<char> settl_curr_fx_rate_calc{};
-    ::std::optional<::fixpp::decimal_t> alloc_accrued_interest_amt{};
-    ::std::optional<::fixpp::decimal_t> alloc_interest_at_maturity{};
-    ::std::optional<::std::span<const AllocationReportAllocsMiscFeesArgs>> misc_fees{};
-    ::std::optional<::std::span<const AllocationReportAllocsClearingInstructionsArgs>> clearing_instructions{};
-    ::std::optional<::std::int64_t> alloc_settl_inst_type{};
-    ::std::optional<::std::int64_t> settl_delivery_type{};
-    ::std::optional<::std::int64_t> stand_inst_db_type{};
-    ::std::optional<::std::string_view> stand_inst_db_name{};
-    ::std::optional<::std::string_view> stand_inst_db_id{};
-    ::std::optional<::std::span<const AllocationReportAllocsDlvyInstArgs>> dlvy_inst{};
-};
-
-struct AllocationReportExecsArgs {
-    ::std::optional<::fixpp::decimal_t> last_qty{};
-    ::std::optional<::std::string_view> exec_id{};
-    ::std::optional<::std::string_view> secondary_exec_id{};
-    ::std::optional<::fixpp::decimal_t> last_px{};
-    ::std::optional<::fixpp::decimal_t> last_par_px{};
-    ::std::optional<char> last_capacity{};
-};
-
-struct AllocationReportStipulationsArgs {
-    ::std::optional<::std::string_view> stipulation_type{};
-    ::std::optional<::std::string_view> stipulation_value{};
-};
-
-struct AllocationReportPartyIDsPartySubIDsArgs {
-    ::std::optional<::std::string_view> party_sub_id{};
-    ::std::optional<::std::int64_t> party_sub_id_type{};
-};
-
-struct AllocationReportPartyIDsArgs {
-    ::std::optional<::std::string_view> party_id{};
-    ::std::optional<char> party_id_source{};
-    ::std::optional<::std::int64_t> party_role{};
-    ::std::optional<::std::span<const AllocationReportPartyIDsPartySubIDsArgs>> party_sub_i_ds{};
-};
-
-struct AllocationReportSecurityAltIDArgs {
-    ::std::optional<::std::string_view> security_alt_id{};
-    ::std::optional<::std::string_view> security_alt_id_source{};
-};
-
-struct AllocationReportLegsLegSecurityAltIDArgs {
-    ::std::optional<::std::string_view> leg_security_alt_id{};
-    ::std::optional<::std::string_view> leg_security_alt_id_source{};
-};
-
-struct AllocationReportLegsArgs {
-    ::std::optional<::std::string_view> leg_symbol{};
-    ::std::optional<::std::string_view> leg_symbol_sfx{};
-    ::std::optional<::std::string_view> leg_security_id{};
-    ::std::optional<::std::string_view> leg_security_id_source{};
-    ::std::optional<::std::span<const AllocationReportLegsLegSecurityAltIDArgs>> leg_security_alt_id{};
-    ::std::optional<::std::int64_t> leg_product{};
-    ::std::optional<::std::string_view> leg_cfi_code{};
-    ::std::optional<::std::string_view> leg_security_type{};
-    ::std::optional<::std::string_view> leg_security_sub_type{};
-    ::std::optional<::std::string_view> leg_maturity_month_year{};
-    ::std::optional<::std::string_view> leg_maturity_date{};
-    ::std::optional<::std::string_view> leg_coupon_payment_date{};
-    ::std::optional<::std::string_view> leg_issue_date{};
-    ::std::optional<::std::string_view> leg_repo_collateral_security_type{};
-    ::std::optional<::std::int64_t> leg_repurchase_term{};
-    ::std::optional<::fixpp::decimal_t> leg_repurchase_rate{};
-    ::std::optional<::fixpp::decimal_t> leg_factor{};
-    ::std::optional<::std::string_view> leg_credit_rating{};
-    ::std::optional<::std::string_view> leg_instr_registry{};
-    ::std::optional<::std::string_view> leg_country_of_issue{};
-    ::std::optional<::std::string_view> leg_state_or_province_of_issue{};
-    ::std::optional<::std::string_view> leg_locale_of_issue{};
-    ::std::optional<::std::string_view> leg_redemption_date{};
-    ::std::optional<::fixpp::decimal_t> leg_strike_price{};
-    ::std::optional<::std::string_view> leg_strike_currency{};
-    ::std::optional<char> leg_opt_attribute{};
-    ::std::optional<::fixpp::decimal_t> leg_contract_multiplier{};
-    ::std::optional<::fixpp::decimal_t> leg_coupon_rate{};
-    ::std::optional<::std::string_view> leg_security_exchange{};
-    ::std::optional<::std::string_view> leg_issuer{};
-    ::std::optional<::std::string_view> encoded_leg_issuer{};
-    ::std::optional<::std::string_view> leg_security_desc{};
-    ::std::optional<::std::string_view> encoded_leg_security_desc{};
-    ::std::optional<::fixpp::decimal_t> leg_ratio_qty{};
-    ::std::optional<char> leg_side{};
-    ::std::optional<::std::string_view> leg_currency{};
-    ::std::optional<::std::string_view> leg_pool{};
-    ::std::optional<::std::string_view> leg_dated_date{};
-    ::std::optional<::std::string_view> leg_contract_settl_month{};
-    ::std::optional<::std::string_view> leg_interest_accrual_date{};
-};
-
-struct AllocationReportUnderlyingsUnderlyingSecurityAltIDArgs {
-    ::std::optional<::std::string_view> underlying_security_alt_id{};
-    ::std::optional<::std::string_view> underlying_security_alt_id_source{};
-};
-
-struct AllocationReportUnderlyingsUnderlyingStipsArgs {
-    ::std::optional<::std::string_view> underlying_stip_type{};
-    ::std::optional<::std::string_view> underlying_stip_value{};
-};
-
-struct AllocationReportUnderlyingsArgs {
-    ::std::optional<::std::string_view> underlying_symbol{};
-    ::std::optional<::std::string_view> underlying_symbol_sfx{};
-    ::std::optional<::std::string_view> underlying_security_id{};
-    ::std::optional<::std::string_view> underlying_security_id_source{};
-    ::std::optional<::std::span<const AllocationReportUnderlyingsUnderlyingSecurityAltIDArgs>> underlying_security_alt_id{};
-    ::std::optional<::std::int64_t> underlying_product{};
-    ::std::optional<::std::string_view> underlying_cfi_code{};
-    ::std::optional<::std::string_view> underlying_security_type{};
-    ::std::optional<::std::string_view> underlying_security_sub_type{};
-    ::std::optional<::std::string_view> underlying_maturity_month_year{};
-    ::std::optional<::std::string_view> underlying_maturity_date{};
-    ::std::optional<::std::int64_t> underlying_put_or_call{};
-    ::std::optional<::std::string_view> underlying_coupon_payment_date{};
-    ::std::optional<::std::string_view> underlying_issue_date{};
-    ::std::optional<::std::string_view> underlying_repo_collateral_security_type{};
-    ::std::optional<::std::int64_t> underlying_repurchase_term{};
-    ::std::optional<::fixpp::decimal_t> underlying_repurchase_rate{};
-    ::std::optional<::fixpp::decimal_t> underlying_factor{};
-    ::std::optional<::std::string_view> underlying_credit_rating{};
-    ::std::optional<::std::string_view> underlying_instr_registry{};
-    ::std::optional<::std::string_view> underlying_country_of_issue{};
-    ::std::optional<::std::string_view> underlying_state_or_province_of_issue{};
-    ::std::optional<::std::string_view> underlying_locale_of_issue{};
-    ::std::optional<::std::string_view> underlying_redemption_date{};
-    ::std::optional<::fixpp::decimal_t> underlying_strike_price{};
-    ::std::optional<::std::string_view> underlying_strike_currency{};
-    ::std::optional<char> underlying_opt_attribute{};
-    ::std::optional<::fixpp::decimal_t> underlying_contract_multiplier{};
-    ::std::optional<::fixpp::decimal_t> underlying_coupon_rate{};
-    ::std::optional<::std::string_view> underlying_security_exchange{};
-    ::std::optional<::std::string_view> underlying_issuer{};
-    ::std::optional<::std::string_view> encoded_underlying_issuer{};
-    ::std::optional<::std::string_view> underlying_security_desc{};
-    ::std::optional<::std::string_view> encoded_underlying_security_desc{};
-    ::std::optional<::std::string_view> underlying_cp_program{};
-    ::std::optional<::std::string_view> underlying_cp_reg_type{};
-    ::std::optional<::std::string_view> underlying_currency{};
-    ::std::optional<::fixpp::decimal_t> underlying_qty{};
-    ::std::optional<::fixpp::decimal_t> underlying_px{};
-    ::std::optional<::fixpp::decimal_t> underlying_dirty_price{};
-    ::std::optional<::fixpp::decimal_t> underlying_end_price{};
-    ::std::optional<::fixpp::decimal_t> underlying_start_value{};
-    ::std::optional<::fixpp::decimal_t> underlying_current_value{};
-    ::std::optional<::fixpp::decimal_t> underlying_end_value{};
-    ::std::optional<::std::span<const AllocationReportUnderlyingsUnderlyingStipsArgs>> underlying_stips{};
-};
-
-struct AllocationReportEventsArgs {
-    ::std::optional<::std::int64_t> event_type{};
-    ::std::optional<::std::string_view> event_date{};
-    ::std::optional<::fixpp::decimal_t> event_px{};
-    ::std::optional<::std::string_view> event_text{};
-};
-
-struct AllocationReportInstrAttribArgs {
-    ::std::optional<::std::int64_t> instr_attrib_type{};
-    ::std::optional<::std::string_view> instr_attrib_value{};
-};
-
 struct AllocationReportArgs {
     ::std::optional<::fixpp::decimal_t> avg_px{};
     ::std::optional<::std::string_view> currency{};
@@ -5877,17 +6376,17 @@ struct AllocationReportArgs {
     ::std::optional<::std::string_view> alloc_id{};
     ::std::optional<char> alloc_trans_type{};
     ::std::optional<::std::string_view> ref_alloc_id{};
-    ::std::optional<::std::span<const AllocationReportOrdersArgs>> orders{};
+    ::std::optional<::std::span<const groups::G_73_1Args>> orders{};
     ::std::optional<::std::int64_t> avg_px_precision{};
     ::std::optional<::std::string_view> trade_date{};
     ::std::optional<char> position_effect{};
-    ::std::optional<::std::span<const AllocationReportAllocsArgs>> allocs{};
+    ::std::optional<::std::span<const groups::G_78_2Args>> allocs{};
     ::std::optional<::std::int64_t> alloc_status{};
     ::std::optional<::std::int64_t> alloc_rej_code{};
     ::std::optional<::std::string_view> issuer{};
     ::std::optional<::std::string_view> security_desc{};
     ::std::optional<::fixpp::decimal_t> net_money{};
-    ::std::optional<::std::span<const AllocationReportExecsArgs>> execs{};
+    ::std::optional<::std::span<const groups::G_124Args>> execs{};
     ::std::optional<::std::int64_t> num_days_interest{};
     ::std::optional<::fixpp::decimal_t> accrued_interest_rate{};
     ::std::optional<::fixpp::decimal_t> accrued_interest_amt{};
@@ -5911,7 +6410,7 @@ struct AllocationReportArgs {
     ::std::optional<::fixpp::decimal_t> factor{};
     ::std::optional<::std::string_view> trade_origination_date{};
     ::std::optional<::fixpp::decimal_t> contract_multiplier{};
-    ::std::optional<::std::span<const AllocationReportStipulationsArgs>> stipulations{};
+    ::std::optional<::std::span<const groups::G_232Args>> stipulations{};
     ::std::optional<::std::string_view> yield_type{};
     ::std::optional<::fixpp::decimal_t> yield{};
     ::std::optional<::fixpp::decimal_t> total_takedown{};
@@ -5925,8 +6424,8 @@ struct AllocationReportArgs {
     ::std::optional<::std::string_view> encoded_text{};
     ::std::optional<::fixpp::decimal_t> gross_trade_amt{};
     ::std::optional<::std::int64_t> price_type{};
-    ::std::optional<::std::span<const AllocationReportPartyIDsArgs>> party_i_ds{};
-    ::std::optional<::std::span<const AllocationReportSecurityAltIDArgs>> security_alt_id{};
+    ::std::optional<::std::span<const groups::G_453Args>> party_i_ds{};
+    ::std::optional<::std::span<const groups::G_454Args>> security_alt_id{};
     ::std::optional<::std::int64_t> product{};
     ::std::optional<::std::string_view> cfi_code{};
     ::std::optional<::std::string_view> booking_ref_id{};
@@ -5936,7 +6435,7 @@ struct AllocationReportArgs {
     ::std::optional<::fixpp::decimal_t> total_accrued_interest_amt{};
     ::std::optional<::std::string_view> maturity_date{};
     ::std::optional<::std::string_view> instr_registry{};
-    ::std::optional<::std::span<const AllocationReportLegsArgs>> legs{};
+    ::std::optional<::std::span<const groups::G_555_4Args>> legs{};
     ::std::optional<bool> previously_reported{};
     ::std::optional<::std::string_view> match_type{};
     ::std::optional<::std::string_view> trading_session_sub_id{};
@@ -5952,7 +6451,7 @@ struct AllocationReportArgs {
     ::std::optional<::std::string_view> benchmark_security_id{};
     ::std::optional<bool> reversal_indicator{};
     ::std::optional<::std::string_view> yield_calc_date{};
-    ::std::optional<::std::span<const AllocationReportUnderlyingsArgs>> underlyings{};
+    ::std::optional<::std::span<const groups::G_711Args>> underlyings{};
     ::std::optional<::fixpp::decimal_t> interest_at_maturity{};
     ::std::optional<bool> auto_accept_indicator{};
     ::std::optional<::std::string_view> alloc_report_id{};
@@ -5968,9 +6467,9 @@ struct AllocationReportArgs {
     ::std::optional<::std::int64_t> qty_type{};
     ::std::optional<::std::int64_t> alloc_no_orders_type{};
     ::std::optional<::fixpp::decimal_t> avg_par_px{};
-    ::std::optional<::std::span<const AllocationReportEventsArgs>> events{};
+    ::std::optional<::std::span<const groups::G_864Args>> events{};
     ::std::optional<::fixpp::decimal_t> pct_at_risk{};
-    ::std::optional<::std::span<const AllocationReportInstrAttribArgs>> instr_attrib{};
+    ::std::optional<::std::span<const groups::G_870Args>> instr_attrib{};
     ::std::optional<::std::string_view> dated_date{};
     ::std::optional<::std::string_view> interest_accrual_date{};
     ::std::optional<::std::int64_t> cp_program{};
@@ -7413,119 +7912,6 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_AllocationRepor
     return bb.commit(out);
 }
 
-struct NewOrderSingleAllocsNestedPartyIDsNestedPartySubIDsArgs {
-    ::std::optional<::std::string_view> nested_party_sub_id{};
-    ::std::optional<::std::int64_t> nested_party_sub_id_type{};
-};
-
-struct NewOrderSingleAllocsNestedPartyIDsArgs {
-    ::std::optional<::std::string_view> nested_party_id{};
-    ::std::optional<char> nested_party_id_source{};
-    ::std::optional<::std::int64_t> nested_party_role{};
-    ::std::optional<::std::span<const NewOrderSingleAllocsNestedPartyIDsNestedPartySubIDsArgs>> nested_party_sub_i_ds{};
-};
-
-struct NewOrderSingleAllocsArgs {
-    ::std::optional<::std::string_view> alloc_account{};
-    ::std::optional<::std::int64_t> alloc_acct_id_source{};
-    ::std::optional<::std::string_view> alloc_settl_currency{};
-    ::std::optional<::std::string_view> individual_alloc_id{};
-    ::std::optional<::std::span<const NewOrderSingleAllocsNestedPartyIDsArgs>> nested_party_i_ds{};
-    ::std::optional<::fixpp::decimal_t> alloc_qty{};
-};
-
-struct NewOrderSingleStipulationsArgs {
-    ::std::optional<::std::string_view> stipulation_type{};
-    ::std::optional<::std::string_view> stipulation_value{};
-};
-
-struct NewOrderSingleTradingSessionsArgs {
-    ::std::optional<::std::string_view> trading_session_id{};
-    ::std::optional<::std::string_view> trading_session_sub_id{};
-};
-
-struct NewOrderSinglePartyIDsPartySubIDsArgs {
-    ::std::optional<::std::string_view> party_sub_id{};
-    ::std::optional<::std::int64_t> party_sub_id_type{};
-};
-
-struct NewOrderSinglePartyIDsArgs {
-    ::std::optional<::std::string_view> party_id{};
-    ::std::optional<char> party_id_source{};
-    ::std::optional<::std::int64_t> party_role{};
-    ::std::optional<::std::span<const NewOrderSinglePartyIDsPartySubIDsArgs>> party_sub_i_ds{};
-};
-
-struct NewOrderSingleSecurityAltIDArgs {
-    ::std::optional<::std::string_view> security_alt_id{};
-    ::std::optional<::std::string_view> security_alt_id_source{};
-};
-
-struct NewOrderSingleUnderlyingsUnderlyingSecurityAltIDArgs {
-    ::std::optional<::std::string_view> underlying_security_alt_id{};
-    ::std::optional<::std::string_view> underlying_security_alt_id_source{};
-};
-
-struct NewOrderSingleUnderlyingsUnderlyingStipsArgs {
-    ::std::optional<::std::string_view> underlying_stip_type{};
-    ::std::optional<::std::string_view> underlying_stip_value{};
-};
-
-struct NewOrderSingleUnderlyingsArgs {
-    ::std::optional<::std::string_view> underlying_symbol{};
-    ::std::optional<::std::string_view> underlying_symbol_sfx{};
-    ::std::optional<::std::string_view> underlying_security_id{};
-    ::std::optional<::std::string_view> underlying_security_id_source{};
-    ::std::optional<::std::span<const NewOrderSingleUnderlyingsUnderlyingSecurityAltIDArgs>> underlying_security_alt_id{};
-    ::std::optional<::std::int64_t> underlying_product{};
-    ::std::optional<::std::string_view> underlying_cfi_code{};
-    ::std::optional<::std::string_view> underlying_security_type{};
-    ::std::optional<::std::string_view> underlying_security_sub_type{};
-    ::std::optional<::std::string_view> underlying_maturity_month_year{};
-    ::std::optional<::std::string_view> underlying_maturity_date{};
-    ::std::optional<::std::int64_t> underlying_put_or_call{};
-    ::std::optional<::std::string_view> underlying_coupon_payment_date{};
-    ::std::optional<::std::string_view> underlying_issue_date{};
-    ::std::optional<::std::string_view> underlying_repo_collateral_security_type{};
-    ::std::optional<::std::int64_t> underlying_repurchase_term{};
-    ::std::optional<::fixpp::decimal_t> underlying_repurchase_rate{};
-    ::std::optional<::fixpp::decimal_t> underlying_factor{};
-    ::std::optional<::std::string_view> underlying_credit_rating{};
-    ::std::optional<::std::string_view> underlying_instr_registry{};
-    ::std::optional<::std::string_view> underlying_country_of_issue{};
-    ::std::optional<::std::string_view> underlying_state_or_province_of_issue{};
-    ::std::optional<::std::string_view> underlying_locale_of_issue{};
-    ::std::optional<::std::string_view> underlying_redemption_date{};
-    ::std::optional<::fixpp::decimal_t> underlying_strike_price{};
-    ::std::optional<::std::string_view> underlying_strike_currency{};
-    ::std::optional<char> underlying_opt_attribute{};
-    ::std::optional<::fixpp::decimal_t> underlying_contract_multiplier{};
-    ::std::optional<::fixpp::decimal_t> underlying_coupon_rate{};
-    ::std::optional<::std::string_view> underlying_security_exchange{};
-    ::std::optional<::std::string_view> underlying_issuer{};
-    ::std::optional<::std::string_view> encoded_underlying_issuer{};
-    ::std::optional<::std::string_view> underlying_security_desc{};
-    ::std::optional<::std::string_view> encoded_underlying_security_desc{};
-    ::std::optional<::std::string_view> underlying_cp_program{};
-    ::std::optional<::std::string_view> underlying_cp_reg_type{};
-    ::std::optional<::std::string_view> underlying_currency{};
-    ::std::optional<::fixpp::decimal_t> underlying_qty{};
-    ::std::optional<::fixpp::decimal_t> underlying_px{};
-    ::std::optional<::fixpp::decimal_t> underlying_dirty_price{};
-    ::std::optional<::fixpp::decimal_t> underlying_end_price{};
-    ::std::optional<::fixpp::decimal_t> underlying_start_value{};
-    ::std::optional<::fixpp::decimal_t> underlying_current_value{};
-    ::std::optional<::fixpp::decimal_t> underlying_end_value{};
-    ::std::optional<::std::span<const NewOrderSingleUnderlyingsUnderlyingStipsArgs>> underlying_stips{};
-};
-
-struct NewOrderSingleEventsArgs {
-    ::std::optional<::std::int64_t> event_type{};
-    ::std::optional<::std::string_view> event_date{};
-    ::std::optional<::fixpp::decimal_t> event_px{};
-    ::std::optional<::std::string_view> event_text{};
-};
-
 struct NewOrderSingleArgs {
     ::std::optional<::std::string_view> account{};
     ::std::optional<::std::string_view> cl_ord_id{};
@@ -7551,7 +7937,7 @@ struct NewOrderSingleArgs {
     ::std::optional<::std::string_view> alloc_id{};
     ::std::optional<::std::string_view> trade_date{};
     ::std::optional<char> position_effect{};
-    ::std::optional<::std::span<const NewOrderSingleAllocsArgs>> allocs{};
+    ::std::optional<::std::span<const groups::G_78_3Args>> allocs{};
     ::std::optional<char> process_code{};
     ::std::optional<::fixpp::decimal_t> stop_px{};
     ::std::optional<::std::string_view> ex_destination{};
@@ -7590,7 +7976,7 @@ struct NewOrderSingleArgs {
     ::std::optional<::fixpp::decimal_t> factor{};
     ::std::optional<::std::string_view> trade_origination_date{};
     ::std::optional<::fixpp::decimal_t> contract_multiplier{};
-    ::std::optional<::std::span<const NewOrderSingleStipulationsArgs>> stipulations{};
+    ::std::optional<::std::span<const groups::G_232Args>> stipulations{};
     ::std::optional<::std::string_view> yield_type{};
     ::std::optional<::fixpp::decimal_t> yield{};
     ::std::optional<::std::string_view> repo_collateral_security_type{};
@@ -7601,14 +7987,14 @@ struct NewOrderSingleArgs {
     ::std::optional<::std::string_view> encoded_text{};
     ::std::optional<::std::string_view> compliance_id{};
     ::std::optional<bool> solicited_flag{};
-    ::std::optional<::std::span<const NewOrderSingleTradingSessionsArgs>> trading_sessions{};
+    ::std::optional<::std::span<const groups::G_386Args>> trading_sessions{};
     ::std::optional<char> discretion_inst{};
     ::std::optional<::fixpp::decimal_t> discretion_offset_value{};
     ::std::optional<::std::int64_t> price_type{};
     ::std::optional<::std::int64_t> gt_booking_inst{};
     ::std::optional<::std::string_view> expire_date{};
-    ::std::optional<::std::span<const NewOrderSinglePartyIDsArgs>> party_i_ds{};
-    ::std::optional<::std::span<const NewOrderSingleSecurityAltIDArgs>> security_alt_id{};
+    ::std::optional<::std::span<const groups::G_453Args>> party_i_ds{};
+    ::std::optional<::std::span<const groups::G_454Args>> security_alt_id{};
     ::std::optional<::std::int64_t> product{};
     ::std::optional<::std::string_view> cfi_code{};
     ::std::optional<char> rounding_direction{};
@@ -7647,7 +8033,7 @@ struct NewOrderSingleArgs {
     ::std::optional<::std::int64_t> yield_redemption_price_type{};
     ::std::optional<::std::string_view> benchmark_security_id{};
     ::std::optional<::std::string_view> yield_calc_date{};
-    ::std::optional<::std::span<const NewOrderSingleUnderlyingsArgs>> underlyings{};
+    ::std::optional<::std::span<const groups::G_711Args>> underlyings{};
     ::std::optional<::std::string_view> benchmark_security_id_source{};
     ::std::optional<::std::string_view> security_sub_type{};
     ::std::optional<::std::int64_t> booking_type{};
@@ -7666,7 +8052,7 @@ struct NewOrderSingleArgs {
     ::std::optional<::std::string_view> target_strategy_parameters{};
     ::std::optional<::fixpp::decimal_t> participation_rate{};
     ::std::optional<::std::int64_t> qty_type{};
-    ::std::optional<::std::span<const NewOrderSingleEventsArgs>> events{};
+    ::std::optional<::std::span<const groups::G_864Args>> events{};
     ::std::optional<::std::string_view> dated_date{};
     ::std::optional<::std::string_view> interest_accrual_date{};
     ::std::optional<::std::int64_t> cp_program{};
@@ -8701,271 +9087,11 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_NewOrderSingle(
     return bb.commit(out);
 }
 
-struct NewOrderListOrdersPartyIDsPartySubIDsArgs {
-    ::std::optional<::std::string_view> party_sub_id{};
-    ::std::optional<::std::int64_t> party_sub_id_type{};
-};
-
-struct NewOrderListOrdersPartyIDsArgs {
-    ::std::optional<::std::string_view> party_id{};
-    ::std::optional<char> party_id_source{};
-    ::std::optional<::std::int64_t> party_role{};
-    ::std::optional<::std::span<const NewOrderListOrdersPartyIDsPartySubIDsArgs>> party_sub_i_ds{};
-};
-
-struct NewOrderListOrdersAllocsNestedPartyIDsNestedPartySubIDsArgs {
-    ::std::optional<::std::string_view> nested_party_sub_id{};
-    ::std::optional<::std::int64_t> nested_party_sub_id_type{};
-};
-
-struct NewOrderListOrdersAllocsNestedPartyIDsArgs {
-    ::std::optional<::std::string_view> nested_party_id{};
-    ::std::optional<char> nested_party_id_source{};
-    ::std::optional<::std::int64_t> nested_party_role{};
-    ::std::optional<::std::span<const NewOrderListOrdersAllocsNestedPartyIDsNestedPartySubIDsArgs>> nested_party_sub_i_ds{};
-};
-
-struct NewOrderListOrdersAllocsArgs {
-    ::std::optional<::std::string_view> alloc_account{};
-    ::std::optional<::std::int64_t> alloc_acct_id_source{};
-    ::std::optional<::std::string_view> alloc_settl_currency{};
-    ::std::optional<::std::string_view> individual_alloc_id{};
-    ::std::optional<::std::span<const NewOrderListOrdersAllocsNestedPartyIDsArgs>> nested_party_i_ds{};
-    ::std::optional<::fixpp::decimal_t> alloc_qty{};
-};
-
-struct NewOrderListOrdersTradingSessionsArgs {
-    ::std::optional<::std::string_view> trading_session_id{};
-    ::std::optional<::std::string_view> trading_session_sub_id{};
-};
-
-struct NewOrderListOrdersSecurityAltIDArgs {
-    ::std::optional<::std::string_view> security_alt_id{};
-    ::std::optional<::std::string_view> security_alt_id_source{};
-};
-
-struct NewOrderListOrdersEventsArgs {
-    ::std::optional<::std::int64_t> event_type{};
-    ::std::optional<::std::string_view> event_date{};
-    ::std::optional<::fixpp::decimal_t> event_px{};
-    ::std::optional<::std::string_view> event_text{};
-};
-
-struct NewOrderListOrdersUnderlyingsUnderlyingSecurityAltIDArgs {
-    ::std::optional<::std::string_view> underlying_security_alt_id{};
-    ::std::optional<::std::string_view> underlying_security_alt_id_source{};
-};
-
-struct NewOrderListOrdersUnderlyingsUnderlyingStipsArgs {
-    ::std::optional<::std::string_view> underlying_stip_type{};
-    ::std::optional<::std::string_view> underlying_stip_value{};
-};
-
-struct NewOrderListOrdersUnderlyingsArgs {
-    ::std::optional<::std::string_view> underlying_symbol{};
-    ::std::optional<::std::string_view> underlying_symbol_sfx{};
-    ::std::optional<::std::string_view> underlying_security_id{};
-    ::std::optional<::std::string_view> underlying_security_id_source{};
-    ::std::optional<::std::span<const NewOrderListOrdersUnderlyingsUnderlyingSecurityAltIDArgs>> underlying_security_alt_id{};
-    ::std::optional<::std::int64_t> underlying_product{};
-    ::std::optional<::std::string_view> underlying_cfi_code{};
-    ::std::optional<::std::string_view> underlying_security_type{};
-    ::std::optional<::std::string_view> underlying_security_sub_type{};
-    ::std::optional<::std::string_view> underlying_maturity_month_year{};
-    ::std::optional<::std::string_view> underlying_maturity_date{};
-    ::std::optional<::std::int64_t> underlying_put_or_call{};
-    ::std::optional<::std::string_view> underlying_coupon_payment_date{};
-    ::std::optional<::std::string_view> underlying_issue_date{};
-    ::std::optional<::std::string_view> underlying_repo_collateral_security_type{};
-    ::std::optional<::std::int64_t> underlying_repurchase_term{};
-    ::std::optional<::fixpp::decimal_t> underlying_repurchase_rate{};
-    ::std::optional<::fixpp::decimal_t> underlying_factor{};
-    ::std::optional<::std::string_view> underlying_credit_rating{};
-    ::std::optional<::std::string_view> underlying_instr_registry{};
-    ::std::optional<::std::string_view> underlying_country_of_issue{};
-    ::std::optional<::std::string_view> underlying_state_or_province_of_issue{};
-    ::std::optional<::std::string_view> underlying_locale_of_issue{};
-    ::std::optional<::std::string_view> underlying_redemption_date{};
-    ::std::optional<::fixpp::decimal_t> underlying_strike_price{};
-    ::std::optional<::std::string_view> underlying_strike_currency{};
-    ::std::optional<char> underlying_opt_attribute{};
-    ::std::optional<::fixpp::decimal_t> underlying_contract_multiplier{};
-    ::std::optional<::fixpp::decimal_t> underlying_coupon_rate{};
-    ::std::optional<::std::string_view> underlying_security_exchange{};
-    ::std::optional<::std::string_view> underlying_issuer{};
-    ::std::optional<::std::string_view> encoded_underlying_issuer{};
-    ::std::optional<::std::string_view> underlying_security_desc{};
-    ::std::optional<::std::string_view> encoded_underlying_security_desc{};
-    ::std::optional<::std::string_view> underlying_cp_program{};
-    ::std::optional<::std::string_view> underlying_cp_reg_type{};
-    ::std::optional<::std::string_view> underlying_currency{};
-    ::std::optional<::fixpp::decimal_t> underlying_qty{};
-    ::std::optional<::fixpp::decimal_t> underlying_px{};
-    ::std::optional<::fixpp::decimal_t> underlying_dirty_price{};
-    ::std::optional<::fixpp::decimal_t> underlying_end_price{};
-    ::std::optional<::fixpp::decimal_t> underlying_start_value{};
-    ::std::optional<::fixpp::decimal_t> underlying_current_value{};
-    ::std::optional<::fixpp::decimal_t> underlying_end_value{};
-    ::std::optional<::std::span<const NewOrderListOrdersUnderlyingsUnderlyingStipsArgs>> underlying_stips{};
-};
-
-struct NewOrderListOrdersStipulationsArgs {
-    ::std::optional<::std::string_view> stipulation_type{};
-    ::std::optional<::std::string_view> stipulation_value{};
-};
-
-struct NewOrderListOrdersArgs {
-    ::std::optional<::std::string_view> cl_ord_id{};
-    ::std::optional<::std::string_view> secondary_cl_ord_id{};
-    ::std::optional<::std::int64_t> list_seq_no{};
-    ::std::optional<::std::string_view> cl_ord_link_id{};
-    ::std::optional<char> settl_inst_mode{};
-    ::std::optional<::std::span<const NewOrderListOrdersPartyIDsArgs>> party_i_ds{};
-    ::std::optional<::std::string_view> trade_origination_date{};
-    ::std::optional<::std::string_view> trade_date{};
-    ::std::optional<::std::string_view> account{};
-    ::std::optional<::std::int64_t> acct_id_source{};
-    ::std::optional<::std::int64_t> account_type{};
-    ::std::optional<char> day_booking_inst{};
-    ::std::optional<char> booking_unit{};
-    ::std::optional<::std::string_view> alloc_id{};
-    ::std::optional<char> prealloc_method{};
-    ::std::optional<::std::span<const NewOrderListOrdersAllocsArgs>> allocs{};
-    ::std::optional<char> settl_type{};
-    ::std::optional<::std::string_view> settl_date{};
-    ::std::optional<char> cash_margin{};
-    ::std::optional<::std::string_view> clearing_fee_indicator{};
-    ::std::optional<char> handl_inst{};
-    ::std::optional<::std::string_view> exec_inst{};
-    ::std::optional<::fixpp::decimal_t> min_qty{};
-    ::std::optional<::fixpp::decimal_t> max_floor{};
-    ::std::optional<::std::string_view> ex_destination{};
-    ::std::optional<::std::span<const NewOrderListOrdersTradingSessionsArgs>> trading_sessions{};
-    ::std::optional<char> process_code{};
-    ::std::optional<::std::string_view> symbol{};
-    ::std::optional<::std::string_view> symbol_sfx{};
-    ::std::optional<::std::string_view> security_id{};
-    ::std::optional<::std::string_view> security_id_source{};
-    ::std::optional<::std::span<const NewOrderListOrdersSecurityAltIDArgs>> security_alt_id{};
-    ::std::optional<::std::int64_t> product{};
-    ::std::optional<::std::string_view> cfi_code{};
-    ::std::optional<::std::string_view> security_type{};
-    ::std::optional<::std::string_view> security_sub_type{};
-    ::std::optional<::std::string_view> maturity_month_year{};
-    ::std::optional<::std::string_view> maturity_date{};
-    ::std::optional<::std::int64_t> put_or_call{};
-    ::std::optional<::std::string_view> coupon_payment_date{};
-    ::std::optional<::std::string_view> issue_date{};
-    ::std::optional<::std::string_view> repo_collateral_security_type{};
-    ::std::optional<::std::int64_t> repurchase_term{};
-    ::std::optional<::fixpp::decimal_t> repurchase_rate{};
-    ::std::optional<::fixpp::decimal_t> factor{};
-    ::std::optional<::std::string_view> credit_rating{};
-    ::std::optional<::std::string_view> instr_registry{};
-    ::std::optional<::std::string_view> country_of_issue{};
-    ::std::optional<::std::string_view> state_or_province_of_issue{};
-    ::std::optional<::std::string_view> locale_of_issue{};
-    ::std::optional<::std::string_view> redemption_date{};
-    ::std::optional<::fixpp::decimal_t> strike_price{};
-    ::std::optional<::std::string_view> strike_currency{};
-    ::std::optional<char> opt_attribute{};
-    ::std::optional<::fixpp::decimal_t> contract_multiplier{};
-    ::std::optional<::fixpp::decimal_t> coupon_rate{};
-    ::std::optional<::std::string_view> security_exchange{};
-    ::std::optional<::std::string_view> issuer{};
-    ::std::optional<::std::string_view> encoded_issuer{};
-    ::std::optional<::std::string_view> security_desc{};
-    ::std::optional<::std::string_view> encoded_security_desc{};
-    ::std::optional<::std::string_view> pool{};
-    ::std::optional<::std::string_view> contract_settl_month{};
-    ::std::optional<::std::int64_t> cp_program{};
-    ::std::optional<::std::string_view> cp_reg_type{};
-    ::std::optional<::std::span<const NewOrderListOrdersEventsArgs>> events{};
-    ::std::optional<::std::string_view> dated_date{};
-    ::std::optional<::std::string_view> interest_accrual_date{};
-    ::std::optional<::std::span<const NewOrderListOrdersUnderlyingsArgs>> underlyings{};
-    ::std::optional<::fixpp::decimal_t> prev_close_px{};
-    ::std::optional<char> side{};
-    ::std::optional<::std::int64_t> side_value_ind{};
-    ::std::optional<bool> locate_reqd{};
-    ::std::optional<::std::string_view> transact_time{};
-    ::std::optional<::std::span<const NewOrderListOrdersStipulationsArgs>> stipulations{};
-    ::std::optional<::std::int64_t> qty_type{};
-    ::std::optional<::fixpp::decimal_t> order_qty{};
-    ::std::optional<::fixpp::decimal_t> cash_order_qty{};
-    ::std::optional<::fixpp::decimal_t> order_percent{};
-    ::std::optional<char> rounding_direction{};
-    ::std::optional<::fixpp::decimal_t> rounding_modulus{};
-    ::std::optional<char> ord_type{};
-    ::std::optional<::std::int64_t> price_type{};
-    ::std::optional<::fixpp::decimal_t> price{};
-    ::std::optional<::fixpp::decimal_t> stop_px{};
-    ::std::optional<::fixpp::decimal_t> spread{};
-    ::std::optional<::std::string_view> benchmark_curve_currency{};
-    ::std::optional<::std::string_view> benchmark_curve_name{};
-    ::std::optional<::std::string_view> benchmark_curve_point{};
-    ::std::optional<::fixpp::decimal_t> benchmark_price{};
-    ::std::optional<::std::int64_t> benchmark_price_type{};
-    ::std::optional<::std::string_view> benchmark_security_id{};
-    ::std::optional<::std::string_view> benchmark_security_id_source{};
-    ::std::optional<::std::string_view> yield_type{};
-    ::std::optional<::fixpp::decimal_t> yield{};
-    ::std::optional<::std::string_view> yield_calc_date{};
-    ::std::optional<::std::string_view> yield_redemption_date{};
-    ::std::optional<::fixpp::decimal_t> yield_redemption_price{};
-    ::std::optional<::std::int64_t> yield_redemption_price_type{};
-    ::std::optional<::std::string_view> currency{};
-    ::std::optional<::std::string_view> compliance_id{};
-    ::std::optional<bool> solicited_flag{};
-    ::std::optional<::std::string_view> ioiid{};
-    ::std::optional<::std::string_view> quote_id{};
-    ::std::optional<char> time_in_force{};
-    ::std::optional<::std::string_view> effective_time{};
-    ::std::optional<::std::string_view> expire_date{};
-    ::std::optional<::std::string_view> expire_time{};
-    ::std::optional<::std::int64_t> gt_booking_inst{};
-    ::std::optional<::fixpp::decimal_t> commission{};
-    ::std::optional<char> comm_type{};
-    ::std::optional<::std::string_view> comm_currency{};
-    ::std::optional<char> fund_renew_waiv{};
-    ::std::optional<char> order_capacity{};
-    ::std::optional<::std::string_view> order_restrictions{};
-    ::std::optional<::std::int64_t> cust_order_capacity{};
-    ::std::optional<bool> forex_req{};
-    ::std::optional<::std::string_view> settl_currency{};
-    ::std::optional<::std::int64_t> booking_type{};
-    ::std::optional<::std::string_view> text{};
-    ::std::optional<::std::string_view> encoded_text{};
-    ::std::optional<::std::string_view> settl_date2{};
-    ::std::optional<::fixpp::decimal_t> order_qty2{};
-    ::std::optional<::fixpp::decimal_t> price2{};
-    ::std::optional<char> position_effect{};
-    ::std::optional<::std::int64_t> covered_or_uncovered{};
-    ::std::optional<::fixpp::decimal_t> max_show{};
-    ::std::optional<::fixpp::decimal_t> peg_offset_value{};
-    ::std::optional<::std::int64_t> peg_move_type{};
-    ::std::optional<::std::int64_t> peg_offset_type{};
-    ::std::optional<::std::int64_t> peg_limit_type{};
-    ::std::optional<::std::int64_t> peg_round_direction{};
-    ::std::optional<::std::int64_t> peg_scope{};
-    ::std::optional<char> discretion_inst{};
-    ::std::optional<::fixpp::decimal_t> discretion_offset_value{};
-    ::std::optional<::std::int64_t> discretion_move_type{};
-    ::std::optional<::std::int64_t> discretion_offset_type{};
-    ::std::optional<::std::int64_t> discretion_limit_type{};
-    ::std::optional<::std::int64_t> discretion_round_direction{};
-    ::std::optional<::std::int64_t> discretion_scope{};
-    ::std::optional<::std::int64_t> target_strategy{};
-    ::std::optional<::std::string_view> target_strategy_parameters{};
-    ::std::optional<::fixpp::decimal_t> participation_rate{};
-    ::std::optional<::std::string_view> designation{};
-};
-
 struct NewOrderListArgs {
     ::std::optional<::std::string_view> list_id{};
     ::std::optional<::std::int64_t> tot_no_orders{};
     ::std::optional<::std::string_view> list_exec_inst{};
-    ::std::span<const NewOrderListOrdersArgs> orders{};
+    ::std::span<const groups::G_73_2Args> orders{};
     ::std::optional<::std::string_view> encoded_list_exec_inst{};
     ::std::optional<::std::string_view> bid_id{};
     ::std::optional<::std::string_view> client_bid_id{};
@@ -10046,88 +10172,6 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_NewOrderList(::
     return bb.commit(out);
 }
 
-struct OrderCancelRequestPartyIDsPartySubIDsArgs {
-    ::std::optional<::std::string_view> party_sub_id{};
-    ::std::optional<::std::int64_t> party_sub_id_type{};
-};
-
-struct OrderCancelRequestPartyIDsArgs {
-    ::std::optional<::std::string_view> party_id{};
-    ::std::optional<char> party_id_source{};
-    ::std::optional<::std::int64_t> party_role{};
-    ::std::optional<::std::span<const OrderCancelRequestPartyIDsPartySubIDsArgs>> party_sub_i_ds{};
-};
-
-struct OrderCancelRequestSecurityAltIDArgs {
-    ::std::optional<::std::string_view> security_alt_id{};
-    ::std::optional<::std::string_view> security_alt_id_source{};
-};
-
-struct OrderCancelRequestUnderlyingsUnderlyingSecurityAltIDArgs {
-    ::std::optional<::std::string_view> underlying_security_alt_id{};
-    ::std::optional<::std::string_view> underlying_security_alt_id_source{};
-};
-
-struct OrderCancelRequestUnderlyingsUnderlyingStipsArgs {
-    ::std::optional<::std::string_view> underlying_stip_type{};
-    ::std::optional<::std::string_view> underlying_stip_value{};
-};
-
-struct OrderCancelRequestUnderlyingsArgs {
-    ::std::optional<::std::string_view> underlying_symbol{};
-    ::std::optional<::std::string_view> underlying_symbol_sfx{};
-    ::std::optional<::std::string_view> underlying_security_id{};
-    ::std::optional<::std::string_view> underlying_security_id_source{};
-    ::std::optional<::std::span<const OrderCancelRequestUnderlyingsUnderlyingSecurityAltIDArgs>> underlying_security_alt_id{};
-    ::std::optional<::std::int64_t> underlying_product{};
-    ::std::optional<::std::string_view> underlying_cfi_code{};
-    ::std::optional<::std::string_view> underlying_security_type{};
-    ::std::optional<::std::string_view> underlying_security_sub_type{};
-    ::std::optional<::std::string_view> underlying_maturity_month_year{};
-    ::std::optional<::std::string_view> underlying_maturity_date{};
-    ::std::optional<::std::int64_t> underlying_put_or_call{};
-    ::std::optional<::std::string_view> underlying_coupon_payment_date{};
-    ::std::optional<::std::string_view> underlying_issue_date{};
-    ::std::optional<::std::string_view> underlying_repo_collateral_security_type{};
-    ::std::optional<::std::int64_t> underlying_repurchase_term{};
-    ::std::optional<::fixpp::decimal_t> underlying_repurchase_rate{};
-    ::std::optional<::fixpp::decimal_t> underlying_factor{};
-    ::std::optional<::std::string_view> underlying_credit_rating{};
-    ::std::optional<::std::string_view> underlying_instr_registry{};
-    ::std::optional<::std::string_view> underlying_country_of_issue{};
-    ::std::optional<::std::string_view> underlying_state_or_province_of_issue{};
-    ::std::optional<::std::string_view> underlying_locale_of_issue{};
-    ::std::optional<::std::string_view> underlying_redemption_date{};
-    ::std::optional<::fixpp::decimal_t> underlying_strike_price{};
-    ::std::optional<::std::string_view> underlying_strike_currency{};
-    ::std::optional<char> underlying_opt_attribute{};
-    ::std::optional<::fixpp::decimal_t> underlying_contract_multiplier{};
-    ::std::optional<::fixpp::decimal_t> underlying_coupon_rate{};
-    ::std::optional<::std::string_view> underlying_security_exchange{};
-    ::std::optional<::std::string_view> underlying_issuer{};
-    ::std::optional<::std::string_view> encoded_underlying_issuer{};
-    ::std::optional<::std::string_view> underlying_security_desc{};
-    ::std::optional<::std::string_view> encoded_underlying_security_desc{};
-    ::std::optional<::std::string_view> underlying_cp_program{};
-    ::std::optional<::std::string_view> underlying_cp_reg_type{};
-    ::std::optional<::std::string_view> underlying_currency{};
-    ::std::optional<::fixpp::decimal_t> underlying_qty{};
-    ::std::optional<::fixpp::decimal_t> underlying_px{};
-    ::std::optional<::fixpp::decimal_t> underlying_dirty_price{};
-    ::std::optional<::fixpp::decimal_t> underlying_end_price{};
-    ::std::optional<::fixpp::decimal_t> underlying_start_value{};
-    ::std::optional<::fixpp::decimal_t> underlying_current_value{};
-    ::std::optional<::fixpp::decimal_t> underlying_end_value{};
-    ::std::optional<::std::span<const OrderCancelRequestUnderlyingsUnderlyingStipsArgs>> underlying_stips{};
-};
-
-struct OrderCancelRequestEventsArgs {
-    ::std::optional<::std::int64_t> event_type{};
-    ::std::optional<::std::string_view> event_date{};
-    ::std::optional<::fixpp::decimal_t> event_px{};
-    ::std::optional<::std::string_view> event_text{};
-};
-
 struct OrderCancelRequestArgs {
     ::std::optional<::std::string_view> account{};
     ::std::optional<::std::string_view> cl_ord_id{};
@@ -10165,8 +10209,8 @@ struct OrderCancelRequestArgs {
     ::std::optional<::std::string_view> encoded_security_desc{};
     ::std::optional<::std::string_view> encoded_text{};
     ::std::optional<::std::string_view> compliance_id{};
-    ::std::optional<::std::span<const OrderCancelRequestPartyIDsArgs>> party_i_ds{};
-    ::std::optional<::std::span<const OrderCancelRequestSecurityAltIDArgs>> security_alt_id{};
+    ::std::optional<::std::span<const groups::G_453Args>> party_i_ds{};
+    ::std::optional<::std::span<const groups::G_454Args>> security_alt_id{};
     ::std::optional<::std::int64_t> product{};
     ::std::optional<::std::string_view> cfi_code{};
     ::std::optional<char> rounding_direction{};
@@ -10184,10 +10228,10 @@ struct OrderCancelRequestArgs {
     ::std::optional<::std::int64_t> acct_id_source{};
     ::std::optional<::std::string_view> contract_settl_month{};
     ::std::optional<::std::string_view> pool{};
-    ::std::optional<::std::span<const OrderCancelRequestUnderlyingsArgs>> underlyings{};
+    ::std::optional<::std::span<const groups::G_711Args>> underlyings{};
     ::std::optional<::std::string_view> security_sub_type{};
     ::std::optional<::std::int64_t> termination_type{};
-    ::std::optional<::std::span<const OrderCancelRequestEventsArgs>> events{};
+    ::std::optional<::std::span<const groups::G_864Args>> events{};
     ::std::optional<::std::string_view> dated_date{};
     ::std::optional<::std::string_view> interest_accrual_date{};
     ::std::optional<::std::int64_t> cp_program{};
@@ -10799,114 +10843,6 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_OrderCancelRequ
     return bb.commit(out);
 }
 
-struct OrderCancelReplaceRequestAllocsNestedPartyIDsNestedPartySubIDsArgs {
-    ::std::optional<::std::string_view> nested_party_sub_id{};
-    ::std::optional<::std::int64_t> nested_party_sub_id_type{};
-};
-
-struct OrderCancelReplaceRequestAllocsNestedPartyIDsArgs {
-    ::std::optional<::std::string_view> nested_party_id{};
-    ::std::optional<char> nested_party_id_source{};
-    ::std::optional<::std::int64_t> nested_party_role{};
-    ::std::optional<::std::span<const OrderCancelReplaceRequestAllocsNestedPartyIDsNestedPartySubIDsArgs>> nested_party_sub_i_ds{};
-};
-
-struct OrderCancelReplaceRequestAllocsArgs {
-    ::std::optional<::std::string_view> alloc_account{};
-    ::std::optional<::std::int64_t> alloc_acct_id_source{};
-    ::std::optional<::std::string_view> alloc_settl_currency{};
-    ::std::optional<::std::string_view> individual_alloc_id{};
-    ::std::optional<::std::span<const OrderCancelReplaceRequestAllocsNestedPartyIDsArgs>> nested_party_i_ds{};
-    ::std::optional<::fixpp::decimal_t> alloc_qty{};
-};
-
-struct OrderCancelReplaceRequestTradingSessionsArgs {
-    ::std::optional<::std::string_view> trading_session_id{};
-    ::std::optional<::std::string_view> trading_session_sub_id{};
-};
-
-struct OrderCancelReplaceRequestPartyIDsPartySubIDsArgs {
-    ::std::optional<::std::string_view> party_sub_id{};
-    ::std::optional<::std::int64_t> party_sub_id_type{};
-};
-
-struct OrderCancelReplaceRequestPartyIDsArgs {
-    ::std::optional<::std::string_view> party_id{};
-    ::std::optional<char> party_id_source{};
-    ::std::optional<::std::int64_t> party_role{};
-    ::std::optional<::std::span<const OrderCancelReplaceRequestPartyIDsPartySubIDsArgs>> party_sub_i_ds{};
-};
-
-struct OrderCancelReplaceRequestSecurityAltIDArgs {
-    ::std::optional<::std::string_view> security_alt_id{};
-    ::std::optional<::std::string_view> security_alt_id_source{};
-};
-
-struct OrderCancelReplaceRequestUnderlyingsUnderlyingSecurityAltIDArgs {
-    ::std::optional<::std::string_view> underlying_security_alt_id{};
-    ::std::optional<::std::string_view> underlying_security_alt_id_source{};
-};
-
-struct OrderCancelReplaceRequestUnderlyingsUnderlyingStipsArgs {
-    ::std::optional<::std::string_view> underlying_stip_type{};
-    ::std::optional<::std::string_view> underlying_stip_value{};
-};
-
-struct OrderCancelReplaceRequestUnderlyingsArgs {
-    ::std::optional<::std::string_view> underlying_symbol{};
-    ::std::optional<::std::string_view> underlying_symbol_sfx{};
-    ::std::optional<::std::string_view> underlying_security_id{};
-    ::std::optional<::std::string_view> underlying_security_id_source{};
-    ::std::optional<::std::span<const OrderCancelReplaceRequestUnderlyingsUnderlyingSecurityAltIDArgs>> underlying_security_alt_id{};
-    ::std::optional<::std::int64_t> underlying_product{};
-    ::std::optional<::std::string_view> underlying_cfi_code{};
-    ::std::optional<::std::string_view> underlying_security_type{};
-    ::std::optional<::std::string_view> underlying_security_sub_type{};
-    ::std::optional<::std::string_view> underlying_maturity_month_year{};
-    ::std::optional<::std::string_view> underlying_maturity_date{};
-    ::std::optional<::std::int64_t> underlying_put_or_call{};
-    ::std::optional<::std::string_view> underlying_coupon_payment_date{};
-    ::std::optional<::std::string_view> underlying_issue_date{};
-    ::std::optional<::std::string_view> underlying_repo_collateral_security_type{};
-    ::std::optional<::std::int64_t> underlying_repurchase_term{};
-    ::std::optional<::fixpp::decimal_t> underlying_repurchase_rate{};
-    ::std::optional<::fixpp::decimal_t> underlying_factor{};
-    ::std::optional<::std::string_view> underlying_credit_rating{};
-    ::std::optional<::std::string_view> underlying_instr_registry{};
-    ::std::optional<::std::string_view> underlying_country_of_issue{};
-    ::std::optional<::std::string_view> underlying_state_or_province_of_issue{};
-    ::std::optional<::std::string_view> underlying_locale_of_issue{};
-    ::std::optional<::std::string_view> underlying_redemption_date{};
-    ::std::optional<::fixpp::decimal_t> underlying_strike_price{};
-    ::std::optional<::std::string_view> underlying_strike_currency{};
-    ::std::optional<char> underlying_opt_attribute{};
-    ::std::optional<::fixpp::decimal_t> underlying_contract_multiplier{};
-    ::std::optional<::fixpp::decimal_t> underlying_coupon_rate{};
-    ::std::optional<::std::string_view> underlying_security_exchange{};
-    ::std::optional<::std::string_view> underlying_issuer{};
-    ::std::optional<::std::string_view> encoded_underlying_issuer{};
-    ::std::optional<::std::string_view> underlying_security_desc{};
-    ::std::optional<::std::string_view> encoded_underlying_security_desc{};
-    ::std::optional<::std::string_view> underlying_cp_program{};
-    ::std::optional<::std::string_view> underlying_cp_reg_type{};
-    ::std::optional<::std::string_view> underlying_currency{};
-    ::std::optional<::fixpp::decimal_t> underlying_qty{};
-    ::std::optional<::fixpp::decimal_t> underlying_px{};
-    ::std::optional<::fixpp::decimal_t> underlying_dirty_price{};
-    ::std::optional<::fixpp::decimal_t> underlying_end_price{};
-    ::std::optional<::fixpp::decimal_t> underlying_start_value{};
-    ::std::optional<::fixpp::decimal_t> underlying_current_value{};
-    ::std::optional<::fixpp::decimal_t> underlying_end_value{};
-    ::std::optional<::std::span<const OrderCancelReplaceRequestUnderlyingsUnderlyingStipsArgs>> underlying_stips{};
-};
-
-struct OrderCancelReplaceRequestEventsArgs {
-    ::std::optional<::std::int64_t> event_type{};
-    ::std::optional<::std::string_view> event_date{};
-    ::std::optional<::fixpp::decimal_t> event_px{};
-    ::std::optional<::std::string_view> event_text{};
-};
-
 struct OrderCancelReplaceRequestArgs {
     ::std::optional<::std::string_view> account{};
     ::std::optional<::std::string_view> cl_ord_id{};
@@ -10934,7 +10870,7 @@ struct OrderCancelReplaceRequestArgs {
     ::std::optional<::std::string_view> alloc_id{};
     ::std::optional<::std::string_view> trade_date{};
     ::std::optional<char> position_effect{};
-    ::std::optional<::std::span<const OrderCancelReplaceRequestAllocsArgs>> allocs{};
+    ::std::optional<::std::span<const groups::G_78_3Args>> allocs{};
     ::std::optional<::fixpp::decimal_t> stop_px{};
     ::std::optional<::std::string_view> ex_destination{};
     ::std::optional<::std::string_view> issuer{};
@@ -10980,14 +10916,14 @@ struct OrderCancelReplaceRequestArgs {
     ::std::optional<::std::string_view> encoded_text{};
     ::std::optional<::std::string_view> compliance_id{};
     ::std::optional<bool> solicited_flag{};
-    ::std::optional<::std::span<const OrderCancelReplaceRequestTradingSessionsArgs>> trading_sessions{};
+    ::std::optional<::std::span<const groups::G_386Args>> trading_sessions{};
     ::std::optional<char> discretion_inst{};
     ::std::optional<::fixpp::decimal_t> discretion_offset_value{};
     ::std::optional<::std::int64_t> price_type{};
     ::std::optional<::std::int64_t> gt_booking_inst{};
     ::std::optional<::std::string_view> expire_date{};
-    ::std::optional<::std::span<const OrderCancelReplaceRequestPartyIDsArgs>> party_i_ds{};
-    ::std::optional<::std::span<const OrderCancelReplaceRequestSecurityAltIDArgs>> security_alt_id{};
+    ::std::optional<::std::span<const groups::G_453Args>> party_i_ds{};
+    ::std::optional<::std::span<const groups::G_454Args>> security_alt_id{};
     ::std::optional<::std::int64_t> product{};
     ::std::optional<::std::string_view> cfi_code{};
     ::std::optional<char> rounding_direction{};
@@ -11027,7 +10963,7 @@ struct OrderCancelReplaceRequestArgs {
     ::std::optional<::std::int64_t> yield_redemption_price_type{};
     ::std::optional<::std::string_view> benchmark_security_id{};
     ::std::optional<::std::string_view> yield_calc_date{};
-    ::std::optional<::std::span<const OrderCancelReplaceRequestUnderlyingsArgs>> underlyings{};
+    ::std::optional<::std::span<const groups::G_711Args>> underlyings{};
     ::std::optional<::std::string_view> benchmark_security_id_source{};
     ::std::optional<::std::string_view> security_sub_type{};
     ::std::optional<::std::int64_t> booking_type{};
@@ -11046,7 +10982,7 @@ struct OrderCancelReplaceRequestArgs {
     ::std::optional<::std::string_view> target_strategy_parameters{};
     ::std::optional<::fixpp::decimal_t> participation_rate{};
     ::std::optional<::std::int64_t> qty_type{};
-    ::std::optional<::std::span<const OrderCancelReplaceRequestEventsArgs>> events{};
+    ::std::optional<::std::span<const groups::G_864Args>> events{};
     ::std::optional<::std::string_view> dated_date{};
     ::std::optional<::std::string_view> interest_accrual_date{};
     ::std::optional<::std::int64_t> cp_program{};
@@ -12062,88 +11998,6 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_OrderCancelRepl
     return bb.commit(out);
 }
 
-struct OrderStatusRequestPartyIDsPartySubIDsArgs {
-    ::std::optional<::std::string_view> party_sub_id{};
-    ::std::optional<::std::int64_t> party_sub_id_type{};
-};
-
-struct OrderStatusRequestPartyIDsArgs {
-    ::std::optional<::std::string_view> party_id{};
-    ::std::optional<char> party_id_source{};
-    ::std::optional<::std::int64_t> party_role{};
-    ::std::optional<::std::span<const OrderStatusRequestPartyIDsPartySubIDsArgs>> party_sub_i_ds{};
-};
-
-struct OrderStatusRequestSecurityAltIDArgs {
-    ::std::optional<::std::string_view> security_alt_id{};
-    ::std::optional<::std::string_view> security_alt_id_source{};
-};
-
-struct OrderStatusRequestUnderlyingsUnderlyingSecurityAltIDArgs {
-    ::std::optional<::std::string_view> underlying_security_alt_id{};
-    ::std::optional<::std::string_view> underlying_security_alt_id_source{};
-};
-
-struct OrderStatusRequestUnderlyingsUnderlyingStipsArgs {
-    ::std::optional<::std::string_view> underlying_stip_type{};
-    ::std::optional<::std::string_view> underlying_stip_value{};
-};
-
-struct OrderStatusRequestUnderlyingsArgs {
-    ::std::optional<::std::string_view> underlying_symbol{};
-    ::std::optional<::std::string_view> underlying_symbol_sfx{};
-    ::std::optional<::std::string_view> underlying_security_id{};
-    ::std::optional<::std::string_view> underlying_security_id_source{};
-    ::std::optional<::std::span<const OrderStatusRequestUnderlyingsUnderlyingSecurityAltIDArgs>> underlying_security_alt_id{};
-    ::std::optional<::std::int64_t> underlying_product{};
-    ::std::optional<::std::string_view> underlying_cfi_code{};
-    ::std::optional<::std::string_view> underlying_security_type{};
-    ::std::optional<::std::string_view> underlying_security_sub_type{};
-    ::std::optional<::std::string_view> underlying_maturity_month_year{};
-    ::std::optional<::std::string_view> underlying_maturity_date{};
-    ::std::optional<::std::int64_t> underlying_put_or_call{};
-    ::std::optional<::std::string_view> underlying_coupon_payment_date{};
-    ::std::optional<::std::string_view> underlying_issue_date{};
-    ::std::optional<::std::string_view> underlying_repo_collateral_security_type{};
-    ::std::optional<::std::int64_t> underlying_repurchase_term{};
-    ::std::optional<::fixpp::decimal_t> underlying_repurchase_rate{};
-    ::std::optional<::fixpp::decimal_t> underlying_factor{};
-    ::std::optional<::std::string_view> underlying_credit_rating{};
-    ::std::optional<::std::string_view> underlying_instr_registry{};
-    ::std::optional<::std::string_view> underlying_country_of_issue{};
-    ::std::optional<::std::string_view> underlying_state_or_province_of_issue{};
-    ::std::optional<::std::string_view> underlying_locale_of_issue{};
-    ::std::optional<::std::string_view> underlying_redemption_date{};
-    ::std::optional<::fixpp::decimal_t> underlying_strike_price{};
-    ::std::optional<::std::string_view> underlying_strike_currency{};
-    ::std::optional<char> underlying_opt_attribute{};
-    ::std::optional<::fixpp::decimal_t> underlying_contract_multiplier{};
-    ::std::optional<::fixpp::decimal_t> underlying_coupon_rate{};
-    ::std::optional<::std::string_view> underlying_security_exchange{};
-    ::std::optional<::std::string_view> underlying_issuer{};
-    ::std::optional<::std::string_view> encoded_underlying_issuer{};
-    ::std::optional<::std::string_view> underlying_security_desc{};
-    ::std::optional<::std::string_view> encoded_underlying_security_desc{};
-    ::std::optional<::std::string_view> underlying_cp_program{};
-    ::std::optional<::std::string_view> underlying_cp_reg_type{};
-    ::std::optional<::std::string_view> underlying_currency{};
-    ::std::optional<::fixpp::decimal_t> underlying_qty{};
-    ::std::optional<::fixpp::decimal_t> underlying_px{};
-    ::std::optional<::fixpp::decimal_t> underlying_dirty_price{};
-    ::std::optional<::fixpp::decimal_t> underlying_end_price{};
-    ::std::optional<::fixpp::decimal_t> underlying_start_value{};
-    ::std::optional<::fixpp::decimal_t> underlying_current_value{};
-    ::std::optional<::fixpp::decimal_t> underlying_end_value{};
-    ::std::optional<::std::span<const OrderStatusRequestUnderlyingsUnderlyingStipsArgs>> underlying_stips{};
-};
-
-struct OrderStatusRequestEventsArgs {
-    ::std::optional<::std::int64_t> event_type{};
-    ::std::optional<::std::string_view> event_date{};
-    ::std::optional<::fixpp::decimal_t> event_px{};
-    ::std::optional<::std::string_view> event_text{};
-};
-
 struct OrderStatusRequestArgs {
     ::std::optional<::std::string_view> account{};
     ::std::optional<::std::string_view> cl_ord_id{};
@@ -12173,8 +12027,8 @@ struct OrderStatusRequestArgs {
     ::std::optional<::std::string_view> credit_rating{};
     ::std::optional<::std::string_view> encoded_issuer{};
     ::std::optional<::std::string_view> encoded_security_desc{};
-    ::std::optional<::std::span<const OrderStatusRequestPartyIDsArgs>> party_i_ds{};
-    ::std::optional<::std::span<const OrderStatusRequestSecurityAltIDArgs>> security_alt_id{};
+    ::std::optional<::std::span<const groups::G_453Args>> party_i_ds{};
+    ::std::optional<::std::span<const groups::G_454Args>> security_alt_id{};
     ::std::optional<::std::int64_t> product{};
     ::std::optional<::std::string_view> cfi_code{};
     ::std::optional<::std::string_view> country_of_issue{};
@@ -12187,11 +12041,11 @@ struct OrderStatusRequestArgs {
     ::std::optional<::std::int64_t> acct_id_source{};
     ::std::optional<::std::string_view> contract_settl_month{};
     ::std::optional<::std::string_view> pool{};
-    ::std::optional<::std::span<const OrderStatusRequestUnderlyingsArgs>> underlyings{};
+    ::std::optional<::std::span<const groups::G_711Args>> underlyings{};
     ::std::optional<::std::string_view> security_sub_type{};
     ::std::optional<::std::int64_t> termination_type{};
     ::std::optional<::std::string_view> ord_status_req_id{};
-    ::std::optional<::std::span<const OrderStatusRequestEventsArgs>> events{};
+    ::std::optional<::std::span<const groups::G_864Args>> events{};
     ::std::optional<::std::string_view> dated_date{};
     ::std::optional<::std::string_view> interest_accrual_date{};
     ::std::optional<::std::int64_t> cp_program{};
@@ -12753,257 +12607,6 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_OrderStatusRequ
     return bb.commit(out);
 }
 
-struct AllocationInstructionOrdersNested2PartyIDsNested2PartySubIDsArgs {
-    ::std::optional<::std::string_view> nested2_party_sub_id{};
-    ::std::optional<::std::int64_t> nested2_party_sub_id_type{};
-};
-
-struct AllocationInstructionOrdersNested2PartyIDsArgs {
-    ::std::optional<::std::string_view> nested2_party_id{};
-    ::std::optional<char> nested2_party_id_source{};
-    ::std::optional<::std::int64_t> nested2_party_role{};
-    ::std::optional<::std::span<const AllocationInstructionOrdersNested2PartyIDsNested2PartySubIDsArgs>> nested2_party_sub_i_ds{};
-};
-
-struct AllocationInstructionOrdersArgs {
-    ::std::optional<::std::string_view> cl_ord_id{};
-    ::std::optional<::std::string_view> order_id{};
-    ::std::optional<::std::string_view> secondary_order_id{};
-    ::std::optional<::std::string_view> secondary_cl_ord_id{};
-    ::std::optional<::std::string_view> list_id{};
-    ::std::optional<::std::span<const AllocationInstructionOrdersNested2PartyIDsArgs>> nested2_party_i_ds{};
-    ::std::optional<::fixpp::decimal_t> order_qty{};
-    ::std::optional<::fixpp::decimal_t> order_avg_px{};
-    ::std::optional<::fixpp::decimal_t> order_booking_qty{};
-};
-
-struct AllocationInstructionAllocsNestedPartyIDsNestedPartySubIDsArgs {
-    ::std::optional<::std::string_view> nested_party_sub_id{};
-    ::std::optional<::std::int64_t> nested_party_sub_id_type{};
-};
-
-struct AllocationInstructionAllocsNestedPartyIDsArgs {
-    ::std::optional<::std::string_view> nested_party_id{};
-    ::std::optional<char> nested_party_id_source{};
-    ::std::optional<::std::int64_t> nested_party_role{};
-    ::std::optional<::std::span<const AllocationInstructionAllocsNestedPartyIDsNestedPartySubIDsArgs>> nested_party_sub_i_ds{};
-};
-
-struct AllocationInstructionAllocsMiscFeesArgs {
-    ::std::optional<::fixpp::decimal_t> misc_fee_amt{};
-    ::std::optional<::std::string_view> misc_fee_curr{};
-    ::std::optional<::std::string_view> misc_fee_type{};
-    ::std::optional<::std::int64_t> misc_fee_basis{};
-};
-
-struct AllocationInstructionAllocsClearingInstructionsArgs {
-    ::std::optional<::std::int64_t> clearing_instruction{};
-};
-
-struct AllocationInstructionAllocsDlvyInstSettlPartyIDsSettlPartySubIDsArgs {
-    ::std::optional<::std::string_view> settl_party_sub_id{};
-    ::std::optional<::std::int64_t> settl_party_sub_id_type{};
-};
-
-struct AllocationInstructionAllocsDlvyInstSettlPartyIDsArgs {
-    ::std::optional<::std::string_view> settl_party_id{};
-    ::std::optional<char> settl_party_id_source{};
-    ::std::optional<::std::int64_t> settl_party_role{};
-    ::std::optional<::std::span<const AllocationInstructionAllocsDlvyInstSettlPartyIDsSettlPartySubIDsArgs>> settl_party_sub_i_ds{};
-};
-
-struct AllocationInstructionAllocsDlvyInstArgs {
-    ::std::optional<char> settl_inst_source{};
-    ::std::optional<char> dlvy_inst_type{};
-    ::std::optional<::std::span<const AllocationInstructionAllocsDlvyInstSettlPartyIDsArgs>> settl_party_i_ds{};
-};
-
-struct AllocationInstructionAllocsArgs {
-    ::std::optional<::std::string_view> alloc_account{};
-    ::std::optional<::std::int64_t> alloc_acct_id_source{};
-    ::std::optional<char> match_status{};
-    ::std::optional<::fixpp::decimal_t> alloc_price{};
-    ::std::optional<::fixpp::decimal_t> alloc_qty{};
-    ::std::optional<::std::string_view> individual_alloc_id{};
-    ::std::optional<char> process_code{};
-    ::std::optional<::std::span<const AllocationInstructionAllocsNestedPartyIDsArgs>> nested_party_i_ds{};
-    ::std::optional<bool> notify_broker_of_credit{};
-    ::std::optional<::std::int64_t> alloc_handl_inst{};
-    ::std::optional<::std::string_view> alloc_text{};
-    ::std::optional<::std::string_view> encoded_alloc_text{};
-    ::std::optional<::fixpp::decimal_t> commission{};
-    ::std::optional<char> comm_type{};
-    ::std::optional<::std::string_view> comm_currency{};
-    ::std::optional<char> fund_renew_waiv{};
-    ::std::optional<::fixpp::decimal_t> alloc_avg_px{};
-    ::std::optional<::fixpp::decimal_t> alloc_net_money{};
-    ::std::optional<::fixpp::decimal_t> settl_curr_amt{};
-    ::std::optional<::fixpp::decimal_t> alloc_settl_curr_amt{};
-    ::std::optional<::std::string_view> settl_currency{};
-    ::std::optional<::std::string_view> alloc_settl_currency{};
-    ::std::optional<::fixpp::decimal_t> settl_curr_fx_rate{};
-    ::std::optional<char> settl_curr_fx_rate_calc{};
-    ::std::optional<::fixpp::decimal_t> alloc_accrued_interest_amt{};
-    ::std::optional<::fixpp::decimal_t> alloc_interest_at_maturity{};
-    ::std::optional<::std::span<const AllocationInstructionAllocsMiscFeesArgs>> misc_fees{};
-    ::std::optional<::std::span<const AllocationInstructionAllocsClearingInstructionsArgs>> clearing_instructions{};
-    ::std::optional<::std::int64_t> alloc_settl_inst_type{};
-    ::std::optional<::std::int64_t> settl_delivery_type{};
-    ::std::optional<::std::int64_t> stand_inst_db_type{};
-    ::std::optional<::std::string_view> stand_inst_db_name{};
-    ::std::optional<::std::string_view> stand_inst_db_id{};
-    ::std::optional<::std::span<const AllocationInstructionAllocsDlvyInstArgs>> dlvy_inst{};
-};
-
-struct AllocationInstructionExecsArgs {
-    ::std::optional<::fixpp::decimal_t> last_qty{};
-    ::std::optional<::std::string_view> exec_id{};
-    ::std::optional<::std::string_view> secondary_exec_id{};
-    ::std::optional<::fixpp::decimal_t> last_px{};
-    ::std::optional<::fixpp::decimal_t> last_par_px{};
-    ::std::optional<char> last_capacity{};
-};
-
-struct AllocationInstructionStipulationsArgs {
-    ::std::optional<::std::string_view> stipulation_type{};
-    ::std::optional<::std::string_view> stipulation_value{};
-};
-
-struct AllocationInstructionPartyIDsPartySubIDsArgs {
-    ::std::optional<::std::string_view> party_sub_id{};
-    ::std::optional<::std::int64_t> party_sub_id_type{};
-};
-
-struct AllocationInstructionPartyIDsArgs {
-    ::std::optional<::std::string_view> party_id{};
-    ::std::optional<char> party_id_source{};
-    ::std::optional<::std::int64_t> party_role{};
-    ::std::optional<::std::span<const AllocationInstructionPartyIDsPartySubIDsArgs>> party_sub_i_ds{};
-};
-
-struct AllocationInstructionSecurityAltIDArgs {
-    ::std::optional<::std::string_view> security_alt_id{};
-    ::std::optional<::std::string_view> security_alt_id_source{};
-};
-
-struct AllocationInstructionLegsLegSecurityAltIDArgs {
-    ::std::optional<::std::string_view> leg_security_alt_id{};
-    ::std::optional<::std::string_view> leg_security_alt_id_source{};
-};
-
-struct AllocationInstructionLegsArgs {
-    ::std::optional<::std::string_view> leg_symbol{};
-    ::std::optional<::std::string_view> leg_symbol_sfx{};
-    ::std::optional<::std::string_view> leg_security_id{};
-    ::std::optional<::std::string_view> leg_security_id_source{};
-    ::std::optional<::std::span<const AllocationInstructionLegsLegSecurityAltIDArgs>> leg_security_alt_id{};
-    ::std::optional<::std::int64_t> leg_product{};
-    ::std::optional<::std::string_view> leg_cfi_code{};
-    ::std::optional<::std::string_view> leg_security_type{};
-    ::std::optional<::std::string_view> leg_security_sub_type{};
-    ::std::optional<::std::string_view> leg_maturity_month_year{};
-    ::std::optional<::std::string_view> leg_maturity_date{};
-    ::std::optional<::std::string_view> leg_coupon_payment_date{};
-    ::std::optional<::std::string_view> leg_issue_date{};
-    ::std::optional<::std::string_view> leg_repo_collateral_security_type{};
-    ::std::optional<::std::int64_t> leg_repurchase_term{};
-    ::std::optional<::fixpp::decimal_t> leg_repurchase_rate{};
-    ::std::optional<::fixpp::decimal_t> leg_factor{};
-    ::std::optional<::std::string_view> leg_credit_rating{};
-    ::std::optional<::std::string_view> leg_instr_registry{};
-    ::std::optional<::std::string_view> leg_country_of_issue{};
-    ::std::optional<::std::string_view> leg_state_or_province_of_issue{};
-    ::std::optional<::std::string_view> leg_locale_of_issue{};
-    ::std::optional<::std::string_view> leg_redemption_date{};
-    ::std::optional<::fixpp::decimal_t> leg_strike_price{};
-    ::std::optional<::std::string_view> leg_strike_currency{};
-    ::std::optional<char> leg_opt_attribute{};
-    ::std::optional<::fixpp::decimal_t> leg_contract_multiplier{};
-    ::std::optional<::fixpp::decimal_t> leg_coupon_rate{};
-    ::std::optional<::std::string_view> leg_security_exchange{};
-    ::std::optional<::std::string_view> leg_issuer{};
-    ::std::optional<::std::string_view> encoded_leg_issuer{};
-    ::std::optional<::std::string_view> leg_security_desc{};
-    ::std::optional<::std::string_view> encoded_leg_security_desc{};
-    ::std::optional<::fixpp::decimal_t> leg_ratio_qty{};
-    ::std::optional<char> leg_side{};
-    ::std::optional<::std::string_view> leg_currency{};
-    ::std::optional<::std::string_view> leg_pool{};
-    ::std::optional<::std::string_view> leg_dated_date{};
-    ::std::optional<::std::string_view> leg_contract_settl_month{};
-    ::std::optional<::std::string_view> leg_interest_accrual_date{};
-};
-
-struct AllocationInstructionUnderlyingsUnderlyingSecurityAltIDArgs {
-    ::std::optional<::std::string_view> underlying_security_alt_id{};
-    ::std::optional<::std::string_view> underlying_security_alt_id_source{};
-};
-
-struct AllocationInstructionUnderlyingsUnderlyingStipsArgs {
-    ::std::optional<::std::string_view> underlying_stip_type{};
-    ::std::optional<::std::string_view> underlying_stip_value{};
-};
-
-struct AllocationInstructionUnderlyingsArgs {
-    ::std::optional<::std::string_view> underlying_symbol{};
-    ::std::optional<::std::string_view> underlying_symbol_sfx{};
-    ::std::optional<::std::string_view> underlying_security_id{};
-    ::std::optional<::std::string_view> underlying_security_id_source{};
-    ::std::optional<::std::span<const AllocationInstructionUnderlyingsUnderlyingSecurityAltIDArgs>> underlying_security_alt_id{};
-    ::std::optional<::std::int64_t> underlying_product{};
-    ::std::optional<::std::string_view> underlying_cfi_code{};
-    ::std::optional<::std::string_view> underlying_security_type{};
-    ::std::optional<::std::string_view> underlying_security_sub_type{};
-    ::std::optional<::std::string_view> underlying_maturity_month_year{};
-    ::std::optional<::std::string_view> underlying_maturity_date{};
-    ::std::optional<::std::int64_t> underlying_put_or_call{};
-    ::std::optional<::std::string_view> underlying_coupon_payment_date{};
-    ::std::optional<::std::string_view> underlying_issue_date{};
-    ::std::optional<::std::string_view> underlying_repo_collateral_security_type{};
-    ::std::optional<::std::int64_t> underlying_repurchase_term{};
-    ::std::optional<::fixpp::decimal_t> underlying_repurchase_rate{};
-    ::std::optional<::fixpp::decimal_t> underlying_factor{};
-    ::std::optional<::std::string_view> underlying_credit_rating{};
-    ::std::optional<::std::string_view> underlying_instr_registry{};
-    ::std::optional<::std::string_view> underlying_country_of_issue{};
-    ::std::optional<::std::string_view> underlying_state_or_province_of_issue{};
-    ::std::optional<::std::string_view> underlying_locale_of_issue{};
-    ::std::optional<::std::string_view> underlying_redemption_date{};
-    ::std::optional<::fixpp::decimal_t> underlying_strike_price{};
-    ::std::optional<::std::string_view> underlying_strike_currency{};
-    ::std::optional<char> underlying_opt_attribute{};
-    ::std::optional<::fixpp::decimal_t> underlying_contract_multiplier{};
-    ::std::optional<::fixpp::decimal_t> underlying_coupon_rate{};
-    ::std::optional<::std::string_view> underlying_security_exchange{};
-    ::std::optional<::std::string_view> underlying_issuer{};
-    ::std::optional<::std::string_view> encoded_underlying_issuer{};
-    ::std::optional<::std::string_view> underlying_security_desc{};
-    ::std::optional<::std::string_view> encoded_underlying_security_desc{};
-    ::std::optional<::std::string_view> underlying_cp_program{};
-    ::std::optional<::std::string_view> underlying_cp_reg_type{};
-    ::std::optional<::std::string_view> underlying_currency{};
-    ::std::optional<::fixpp::decimal_t> underlying_qty{};
-    ::std::optional<::fixpp::decimal_t> underlying_px{};
-    ::std::optional<::fixpp::decimal_t> underlying_dirty_price{};
-    ::std::optional<::fixpp::decimal_t> underlying_end_price{};
-    ::std::optional<::fixpp::decimal_t> underlying_start_value{};
-    ::std::optional<::fixpp::decimal_t> underlying_current_value{};
-    ::std::optional<::fixpp::decimal_t> underlying_end_value{};
-    ::std::optional<::std::span<const AllocationInstructionUnderlyingsUnderlyingStipsArgs>> underlying_stips{};
-};
-
-struct AllocationInstructionEventsArgs {
-    ::std::optional<::std::int64_t> event_type{};
-    ::std::optional<::std::string_view> event_date{};
-    ::std::optional<::fixpp::decimal_t> event_px{};
-    ::std::optional<::std::string_view> event_text{};
-};
-
-struct AllocationInstructionInstrAttribArgs {
-    ::std::optional<::std::int64_t> instr_attrib_type{};
-    ::std::optional<::std::string_view> instr_attrib_value{};
-};
-
 struct AllocationInstructionArgs {
     ::std::optional<::fixpp::decimal_t> avg_px{};
     ::std::optional<::std::string_view> currency{};
@@ -13021,15 +12624,15 @@ struct AllocationInstructionArgs {
     ::std::optional<::std::string_view> alloc_id{};
     ::std::optional<char> alloc_trans_type{};
     ::std::optional<::std::string_view> ref_alloc_id{};
-    ::std::optional<::std::span<const AllocationInstructionOrdersArgs>> orders{};
+    ::std::optional<::std::span<const groups::G_73_1Args>> orders{};
     ::std::optional<::std::int64_t> avg_px_precision{};
     ::std::optional<::std::string_view> trade_date{};
     ::std::optional<char> position_effect{};
-    ::std::optional<::std::span<const AllocationInstructionAllocsArgs>> allocs{};
+    ::std::optional<::std::span<const groups::G_78_2Args>> allocs{};
     ::std::optional<::std::string_view> issuer{};
     ::std::optional<::std::string_view> security_desc{};
     ::std::optional<::fixpp::decimal_t> net_money{};
-    ::std::optional<::std::span<const AllocationInstructionExecsArgs>> execs{};
+    ::std::optional<::std::span<const groups::G_124Args>> execs{};
     ::std::optional<::std::int64_t> num_days_interest{};
     ::std::optional<::fixpp::decimal_t> accrued_interest_rate{};
     ::std::optional<::fixpp::decimal_t> accrued_interest_amt{};
@@ -13053,7 +12656,7 @@ struct AllocationInstructionArgs {
     ::std::optional<::fixpp::decimal_t> factor{};
     ::std::optional<::std::string_view> trade_origination_date{};
     ::std::optional<::fixpp::decimal_t> contract_multiplier{};
-    ::std::optional<::std::span<const AllocationInstructionStipulationsArgs>> stipulations{};
+    ::std::optional<::std::span<const groups::G_232Args>> stipulations{};
     ::std::optional<::std::string_view> yield_type{};
     ::std::optional<::fixpp::decimal_t> yield{};
     ::std::optional<::fixpp::decimal_t> total_takedown{};
@@ -13067,8 +12670,8 @@ struct AllocationInstructionArgs {
     ::std::optional<::std::string_view> encoded_text{};
     ::std::optional<::fixpp::decimal_t> gross_trade_amt{};
     ::std::optional<::std::int64_t> price_type{};
-    ::std::optional<::std::span<const AllocationInstructionPartyIDsArgs>> party_i_ds{};
-    ::std::optional<::std::span<const AllocationInstructionSecurityAltIDArgs>> security_alt_id{};
+    ::std::optional<::std::span<const groups::G_453Args>> party_i_ds{};
+    ::std::optional<::std::span<const groups::G_454Args>> security_alt_id{};
     ::std::optional<::std::int64_t> product{};
     ::std::optional<::std::string_view> cfi_code{};
     ::std::optional<::std::string_view> booking_ref_id{};
@@ -13078,7 +12681,7 @@ struct AllocationInstructionArgs {
     ::std::optional<::fixpp::decimal_t> total_accrued_interest_amt{};
     ::std::optional<::std::string_view> maturity_date{};
     ::std::optional<::std::string_view> instr_registry{};
-    ::std::optional<::std::span<const AllocationInstructionLegsArgs>> legs{};
+    ::std::optional<::std::span<const groups::G_555_4Args>> legs{};
     ::std::optional<bool> previously_reported{};
     ::std::optional<::std::string_view> match_type{};
     ::std::optional<::std::string_view> trading_session_sub_id{};
@@ -13095,7 +12698,7 @@ struct AllocationInstructionArgs {
     ::std::optional<::std::string_view> benchmark_security_id{};
     ::std::optional<bool> reversal_indicator{};
     ::std::optional<::std::string_view> yield_calc_date{};
-    ::std::optional<::std::span<const AllocationInstructionUnderlyingsArgs>> underlyings{};
+    ::std::optional<::std::span<const groups::G_711Args>> underlyings{};
     ::std::optional<::fixpp::decimal_t> interest_at_maturity{};
     ::std::optional<bool> auto_accept_indicator{};
     ::std::optional<::std::string_view> benchmark_security_id_source{};
@@ -13108,9 +12711,9 @@ struct AllocationInstructionArgs {
     ::std::optional<::std::int64_t> qty_type{};
     ::std::optional<::std::int64_t> alloc_no_orders_type{};
     ::std::optional<::fixpp::decimal_t> avg_par_px{};
-    ::std::optional<::std::span<const AllocationInstructionEventsArgs>> events{};
+    ::std::optional<::std::span<const groups::G_864Args>> events{};
     ::std::optional<::fixpp::decimal_t> pct_at_risk{};
-    ::std::optional<::std::span<const AllocationInstructionInstrAttribArgs>> instr_attrib{};
+    ::std::optional<::std::span<const groups::G_870Args>> instr_attrib{};
     ::std::optional<::std::string_view> dated_date{};
     ::std::optional<::std::string_view> interest_accrual_date{};
     ::std::optional<::std::int64_t> cp_program{};
@@ -14537,39 +14140,17 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_AllocationInstr
     return bb.commit(out);
 }
 
-struct AllocationInstructionAckAllocsArgs {
-    ::std::optional<::std::string_view> alloc_account{};
-    ::std::optional<::std::int64_t> alloc_acct_id_source{};
-    ::std::optional<::fixpp::decimal_t> alloc_price{};
-    ::std::optional<::std::string_view> individual_alloc_id{};
-    ::std::optional<::std::int64_t> individual_alloc_rej_code{};
-    ::std::optional<::std::string_view> alloc_text{};
-    ::std::optional<::std::string_view> encoded_alloc_text{};
-};
-
-struct AllocationInstructionAckPartyIDsPartySubIDsArgs {
-    ::std::optional<::std::string_view> party_sub_id{};
-    ::std::optional<::std::int64_t> party_sub_id_type{};
-};
-
-struct AllocationInstructionAckPartyIDsArgs {
-    ::std::optional<::std::string_view> party_id{};
-    ::std::optional<char> party_id_source{};
-    ::std::optional<::std::int64_t> party_role{};
-    ::std::optional<::std::span<const AllocationInstructionAckPartyIDsPartySubIDsArgs>> party_sub_i_ds{};
-};
-
 struct AllocationInstructionAckArgs {
     ::std::optional<::std::string_view> text{};
     ::std::optional<::std::string_view> transact_time{};
     ::std::optional<::std::string_view> alloc_id{};
     ::std::optional<::std::string_view> trade_date{};
-    ::std::optional<::std::span<const AllocationInstructionAckAllocsArgs>> allocs{};
+    ::std::optional<::std::span<const groups::G_78_4Args>> allocs{};
     ::std::optional<::std::int64_t> alloc_status{};
     ::std::optional<::std::int64_t> alloc_rej_code{};
     ::std::optional<::std::string_view> security_type{};
     ::std::optional<::std::string_view> encoded_text{};
-    ::std::optional<::std::span<const AllocationInstructionAckPartyIDsArgs>> party_i_ds{};
+    ::std::optional<::std::span<const groups::G_453Args>> party_i_ds{};
     ::std::optional<::std::int64_t> product{};
     ::std::optional<char> match_status{};
     ::std::optional<::std::int64_t> alloc_type{};
@@ -14719,279 +14300,11 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_AllocationInstr
     return bb.commit(out);
 }
 
-struct QuoteRequestRelatedSymSecurityAltIDArgs {
-    ::std::optional<::std::string_view> security_alt_id{};
-    ::std::optional<::std::string_view> security_alt_id_source{};
-};
-
-struct QuoteRequestRelatedSymEventsArgs {
-    ::std::optional<::std::int64_t> event_type{};
-    ::std::optional<::std::string_view> event_date{};
-    ::std::optional<::fixpp::decimal_t> event_px{};
-    ::std::optional<::std::string_view> event_text{};
-};
-
-struct QuoteRequestRelatedSymUnderlyingsUnderlyingSecurityAltIDArgs {
-    ::std::optional<::std::string_view> underlying_security_alt_id{};
-    ::std::optional<::std::string_view> underlying_security_alt_id_source{};
-};
-
-struct QuoteRequestRelatedSymUnderlyingsUnderlyingStipsArgs {
-    ::std::optional<::std::string_view> underlying_stip_type{};
-    ::std::optional<::std::string_view> underlying_stip_value{};
-};
-
-struct QuoteRequestRelatedSymUnderlyingsArgs {
-    ::std::optional<::std::string_view> underlying_symbol{};
-    ::std::optional<::std::string_view> underlying_symbol_sfx{};
-    ::std::optional<::std::string_view> underlying_security_id{};
-    ::std::optional<::std::string_view> underlying_security_id_source{};
-    ::std::optional<::std::span<const QuoteRequestRelatedSymUnderlyingsUnderlyingSecurityAltIDArgs>> underlying_security_alt_id{};
-    ::std::optional<::std::int64_t> underlying_product{};
-    ::std::optional<::std::string_view> underlying_cfi_code{};
-    ::std::optional<::std::string_view> underlying_security_type{};
-    ::std::optional<::std::string_view> underlying_security_sub_type{};
-    ::std::optional<::std::string_view> underlying_maturity_month_year{};
-    ::std::optional<::std::string_view> underlying_maturity_date{};
-    ::std::optional<::std::int64_t> underlying_put_or_call{};
-    ::std::optional<::std::string_view> underlying_coupon_payment_date{};
-    ::std::optional<::std::string_view> underlying_issue_date{};
-    ::std::optional<::std::string_view> underlying_repo_collateral_security_type{};
-    ::std::optional<::std::int64_t> underlying_repurchase_term{};
-    ::std::optional<::fixpp::decimal_t> underlying_repurchase_rate{};
-    ::std::optional<::fixpp::decimal_t> underlying_factor{};
-    ::std::optional<::std::string_view> underlying_credit_rating{};
-    ::std::optional<::std::string_view> underlying_instr_registry{};
-    ::std::optional<::std::string_view> underlying_country_of_issue{};
-    ::std::optional<::std::string_view> underlying_state_or_province_of_issue{};
-    ::std::optional<::std::string_view> underlying_locale_of_issue{};
-    ::std::optional<::std::string_view> underlying_redemption_date{};
-    ::std::optional<::fixpp::decimal_t> underlying_strike_price{};
-    ::std::optional<::std::string_view> underlying_strike_currency{};
-    ::std::optional<char> underlying_opt_attribute{};
-    ::std::optional<::fixpp::decimal_t> underlying_contract_multiplier{};
-    ::std::optional<::fixpp::decimal_t> underlying_coupon_rate{};
-    ::std::optional<::std::string_view> underlying_security_exchange{};
-    ::std::optional<::std::string_view> underlying_issuer{};
-    ::std::optional<::std::string_view> encoded_underlying_issuer{};
-    ::std::optional<::std::string_view> underlying_security_desc{};
-    ::std::optional<::std::string_view> encoded_underlying_security_desc{};
-    ::std::optional<::std::string_view> underlying_cp_program{};
-    ::std::optional<::std::string_view> underlying_cp_reg_type{};
-    ::std::optional<::std::string_view> underlying_currency{};
-    ::std::optional<::fixpp::decimal_t> underlying_qty{};
-    ::std::optional<::fixpp::decimal_t> underlying_px{};
-    ::std::optional<::fixpp::decimal_t> underlying_dirty_price{};
-    ::std::optional<::fixpp::decimal_t> underlying_end_price{};
-    ::std::optional<::fixpp::decimal_t> underlying_start_value{};
-    ::std::optional<::fixpp::decimal_t> underlying_current_value{};
-    ::std::optional<::fixpp::decimal_t> underlying_end_value{};
-    ::std::optional<::std::span<const QuoteRequestRelatedSymUnderlyingsUnderlyingStipsArgs>> underlying_stips{};
-};
-
-struct QuoteRequestRelatedSymStipulationsArgs {
-    ::std::optional<::std::string_view> stipulation_type{};
-    ::std::optional<::std::string_view> stipulation_value{};
-};
-
-struct QuoteRequestRelatedSymLegsLegSecurityAltIDArgs {
-    ::std::optional<::std::string_view> leg_security_alt_id{};
-    ::std::optional<::std::string_view> leg_security_alt_id_source{};
-};
-
-struct QuoteRequestRelatedSymLegsLegStipulationsArgs {
-    ::std::optional<::std::string_view> leg_stipulation_type{};
-    ::std::optional<::std::string_view> leg_stipulation_value{};
-};
-
-struct QuoteRequestRelatedSymLegsNestedPartyIDsNestedPartySubIDsArgs {
-    ::std::optional<::std::string_view> nested_party_sub_id{};
-    ::std::optional<::std::int64_t> nested_party_sub_id_type{};
-};
-
-struct QuoteRequestRelatedSymLegsNestedPartyIDsArgs {
-    ::std::optional<::std::string_view> nested_party_id{};
-    ::std::optional<char> nested_party_id_source{};
-    ::std::optional<::std::int64_t> nested_party_role{};
-    ::std::optional<::std::span<const QuoteRequestRelatedSymLegsNestedPartyIDsNestedPartySubIDsArgs>> nested_party_sub_i_ds{};
-};
-
-struct QuoteRequestRelatedSymLegsArgs {
-    ::std::optional<::std::string_view> leg_symbol{};
-    ::std::optional<::std::string_view> leg_symbol_sfx{};
-    ::std::optional<::std::string_view> leg_security_id{};
-    ::std::optional<::std::string_view> leg_security_id_source{};
-    ::std::optional<::std::span<const QuoteRequestRelatedSymLegsLegSecurityAltIDArgs>> leg_security_alt_id{};
-    ::std::optional<::std::int64_t> leg_product{};
-    ::std::optional<::std::string_view> leg_cfi_code{};
-    ::std::optional<::std::string_view> leg_security_type{};
-    ::std::optional<::std::string_view> leg_security_sub_type{};
-    ::std::optional<::std::string_view> leg_maturity_month_year{};
-    ::std::optional<::std::string_view> leg_maturity_date{};
-    ::std::optional<::std::string_view> leg_coupon_payment_date{};
-    ::std::optional<::std::string_view> leg_issue_date{};
-    ::std::optional<::std::string_view> leg_repo_collateral_security_type{};
-    ::std::optional<::std::int64_t> leg_repurchase_term{};
-    ::std::optional<::fixpp::decimal_t> leg_repurchase_rate{};
-    ::std::optional<::fixpp::decimal_t> leg_factor{};
-    ::std::optional<::std::string_view> leg_credit_rating{};
-    ::std::optional<::std::string_view> leg_instr_registry{};
-    ::std::optional<::std::string_view> leg_country_of_issue{};
-    ::std::optional<::std::string_view> leg_state_or_province_of_issue{};
-    ::std::optional<::std::string_view> leg_locale_of_issue{};
-    ::std::optional<::std::string_view> leg_redemption_date{};
-    ::std::optional<::fixpp::decimal_t> leg_strike_price{};
-    ::std::optional<::std::string_view> leg_strike_currency{};
-    ::std::optional<char> leg_opt_attribute{};
-    ::std::optional<::fixpp::decimal_t> leg_contract_multiplier{};
-    ::std::optional<::fixpp::decimal_t> leg_coupon_rate{};
-    ::std::optional<::std::string_view> leg_security_exchange{};
-    ::std::optional<::std::string_view> leg_issuer{};
-    ::std::optional<::std::string_view> encoded_leg_issuer{};
-    ::std::optional<::std::string_view> leg_security_desc{};
-    ::std::optional<::std::string_view> encoded_leg_security_desc{};
-    ::std::optional<::fixpp::decimal_t> leg_ratio_qty{};
-    ::std::optional<char> leg_side{};
-    ::std::optional<::std::string_view> leg_currency{};
-    ::std::optional<::std::string_view> leg_pool{};
-    ::std::optional<::std::string_view> leg_dated_date{};
-    ::std::optional<::std::string_view> leg_contract_settl_month{};
-    ::std::optional<::std::string_view> leg_interest_accrual_date{};
-    ::std::optional<::fixpp::decimal_t> leg_qty{};
-    ::std::optional<::std::int64_t> leg_swap_type{};
-    ::std::optional<char> leg_settl_type{};
-    ::std::optional<::std::string_view> leg_settl_date{};
-    ::std::optional<::std::span<const QuoteRequestRelatedSymLegsLegStipulationsArgs>> leg_stipulations{};
-    ::std::optional<::std::span<const QuoteRequestRelatedSymLegsNestedPartyIDsArgs>> nested_party_i_ds{};
-    ::std::optional<::std::string_view> leg_benchmark_curve_currency{};
-    ::std::optional<::std::string_view> leg_benchmark_curve_name{};
-    ::std::optional<::std::string_view> leg_benchmark_curve_point{};
-    ::std::optional<::fixpp::decimal_t> leg_benchmark_price{};
-    ::std::optional<::std::int64_t> leg_benchmark_price_type{};
-};
-
-struct QuoteRequestRelatedSymQuoteQualifiersArgs {
-    ::std::optional<char> quote_qualifier{};
-};
-
-struct QuoteRequestRelatedSymPartyIDsPartySubIDsArgs {
-    ::std::optional<::std::string_view> party_sub_id{};
-    ::std::optional<::std::int64_t> party_sub_id_type{};
-};
-
-struct QuoteRequestRelatedSymPartyIDsArgs {
-    ::std::optional<::std::string_view> party_id{};
-    ::std::optional<char> party_id_source{};
-    ::std::optional<::std::int64_t> party_role{};
-    ::std::optional<::std::span<const QuoteRequestRelatedSymPartyIDsPartySubIDsArgs>> party_sub_i_ds{};
-};
-
-struct QuoteRequestRelatedSymArgs {
-    ::std::optional<::std::string_view> symbol{};
-    ::std::optional<::std::string_view> symbol_sfx{};
-    ::std::optional<::std::string_view> security_id{};
-    ::std::optional<::std::string_view> security_id_source{};
-    ::std::optional<::std::span<const QuoteRequestRelatedSymSecurityAltIDArgs>> security_alt_id{};
-    ::std::optional<::std::int64_t> product{};
-    ::std::optional<::std::string_view> cfi_code{};
-    ::std::optional<::std::string_view> security_type{};
-    ::std::optional<::std::string_view> security_sub_type{};
-    ::std::optional<::std::string_view> maturity_month_year{};
-    ::std::optional<::std::string_view> maturity_date{};
-    ::std::optional<::std::int64_t> put_or_call{};
-    ::std::optional<::std::string_view> coupon_payment_date{};
-    ::std::optional<::std::string_view> issue_date{};
-    ::std::optional<::std::string_view> repo_collateral_security_type{};
-    ::std::optional<::std::int64_t> repurchase_term{};
-    ::std::optional<::fixpp::decimal_t> repurchase_rate{};
-    ::std::optional<::fixpp::decimal_t> factor{};
-    ::std::optional<::std::string_view> credit_rating{};
-    ::std::optional<::std::string_view> instr_registry{};
-    ::std::optional<::std::string_view> country_of_issue{};
-    ::std::optional<::std::string_view> state_or_province_of_issue{};
-    ::std::optional<::std::string_view> locale_of_issue{};
-    ::std::optional<::std::string_view> redemption_date{};
-    ::std::optional<::fixpp::decimal_t> strike_price{};
-    ::std::optional<::std::string_view> strike_currency{};
-    ::std::optional<char> opt_attribute{};
-    ::std::optional<::fixpp::decimal_t> contract_multiplier{};
-    ::std::optional<::fixpp::decimal_t> coupon_rate{};
-    ::std::optional<::std::string_view> security_exchange{};
-    ::std::optional<::std::string_view> issuer{};
-    ::std::optional<::std::string_view> encoded_issuer{};
-    ::std::optional<::std::string_view> security_desc{};
-    ::std::optional<::std::string_view> encoded_security_desc{};
-    ::std::optional<::std::string_view> pool{};
-    ::std::optional<::std::string_view> contract_settl_month{};
-    ::std::optional<::std::int64_t> cp_program{};
-    ::std::optional<::std::string_view> cp_reg_type{};
-    ::std::optional<::std::span<const QuoteRequestRelatedSymEventsArgs>> events{};
-    ::std::optional<::std::string_view> dated_date{};
-    ::std::optional<::std::string_view> interest_accrual_date{};
-    ::std::optional<::std::string_view> agreement_desc{};
-    ::std::optional<::std::string_view> agreement_id{};
-    ::std::optional<::std::string_view> agreement_date{};
-    ::std::optional<::std::string_view> agreement_currency{};
-    ::std::optional<::std::int64_t> termination_type{};
-    ::std::optional<::std::string_view> start_date{};
-    ::std::optional<::std::string_view> end_date{};
-    ::std::optional<::std::int64_t> delivery_type{};
-    ::std::optional<::fixpp::decimal_t> margin_ratio{};
-    ::std::optional<::std::span<const QuoteRequestRelatedSymUnderlyingsArgs>> underlyings{};
-    ::std::optional<::fixpp::decimal_t> prev_close_px{};
-    ::std::optional<::std::int64_t> quote_request_type{};
-    ::std::optional<::std::int64_t> quote_type{};
-    ::std::optional<::std::string_view> trading_session_id{};
-    ::std::optional<::std::string_view> trading_session_sub_id{};
-    ::std::optional<::std::string_view> trade_origination_date{};
-    ::std::optional<char> side{};
-    ::std::optional<::std::int64_t> qty_type{};
-    ::std::optional<::fixpp::decimal_t> order_qty{};
-    ::std::optional<::fixpp::decimal_t> cash_order_qty{};
-    ::std::optional<::fixpp::decimal_t> order_percent{};
-    ::std::optional<char> rounding_direction{};
-    ::std::optional<::fixpp::decimal_t> rounding_modulus{};
-    ::std::optional<char> settl_type{};
-    ::std::optional<::std::string_view> settl_date{};
-    ::std::optional<::std::string_view> settl_date2{};
-    ::std::optional<::fixpp::decimal_t> order_qty2{};
-    ::std::optional<::std::string_view> currency{};
-    ::std::optional<::std::span<const QuoteRequestRelatedSymStipulationsArgs>> stipulations{};
-    ::std::optional<::std::string_view> account{};
-    ::std::optional<::std::int64_t> acct_id_source{};
-    ::std::optional<::std::int64_t> account_type{};
-    ::std::optional<::std::span<const QuoteRequestRelatedSymLegsArgs>> legs{};
-    ::std::optional<::std::span<const QuoteRequestRelatedSymQuoteQualifiersArgs>> quote_qualifiers{};
-    ::std::optional<::std::int64_t> quote_price_type{};
-    ::std::optional<char> ord_type{};
-    ::std::optional<::std::string_view> valid_until_time{};
-    ::std::optional<::std::string_view> expire_time{};
-    ::std::optional<::std::string_view> transact_time{};
-    ::std::optional<::fixpp::decimal_t> spread{};
-    ::std::optional<::std::string_view> benchmark_curve_currency{};
-    ::std::optional<::std::string_view> benchmark_curve_name{};
-    ::std::optional<::std::string_view> benchmark_curve_point{};
-    ::std::optional<::fixpp::decimal_t> benchmark_price{};
-    ::std::optional<::std::int64_t> benchmark_price_type{};
-    ::std::optional<::std::string_view> benchmark_security_id{};
-    ::std::optional<::std::string_view> benchmark_security_id_source{};
-    ::std::optional<::std::int64_t> price_type{};
-    ::std::optional<::fixpp::decimal_t> price{};
-    ::std::optional<::fixpp::decimal_t> price2{};
-    ::std::optional<::std::string_view> yield_type{};
-    ::std::optional<::fixpp::decimal_t> yield{};
-    ::std::optional<::std::string_view> yield_calc_date{};
-    ::std::optional<::std::string_view> yield_redemption_date{};
-    ::std::optional<::fixpp::decimal_t> yield_redemption_price{};
-    ::std::optional<::std::int64_t> yield_redemption_price_type{};
-    ::std::optional<::std::span<const QuoteRequestRelatedSymPartyIDsArgs>> party_i_ds{};
-};
-
 struct QuoteRequestArgs {
     ::std::optional<::std::string_view> cl_ord_id{};
     ::std::optional<::std::string_view> text{};
     ::std::optional<::std::string_view> quote_req_id{};
-    ::std::span<const QuoteRequestRelatedSymArgs> related_sym{};
+    ::std::span<const groups::G_146_2Args> related_sym{};
     ::std::optional<::std::string_view> encoded_text{};
     ::std::optional<char> order_capacity{};
     ::std::optional<::std::string_view> rfq_req_id{};
@@ -16041,176 +15354,6 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_QuoteRequest(::
     return bb.commit(out);
 }
 
-struct QuoteStipulationsArgs {
-    ::std::optional<::std::string_view> stipulation_type{};
-    ::std::optional<::std::string_view> stipulation_value{};
-};
-
-struct QuotePartyIDsPartySubIDsArgs {
-    ::std::optional<::std::string_view> party_sub_id{};
-    ::std::optional<::std::int64_t> party_sub_id_type{};
-};
-
-struct QuotePartyIDsArgs {
-    ::std::optional<::std::string_view> party_id{};
-    ::std::optional<char> party_id_source{};
-    ::std::optional<::std::int64_t> party_role{};
-    ::std::optional<::std::span<const QuotePartyIDsPartySubIDsArgs>> party_sub_i_ds{};
-};
-
-struct QuoteSecurityAltIDArgs {
-    ::std::optional<::std::string_view> security_alt_id{};
-    ::std::optional<::std::string_view> security_alt_id_source{};
-};
-
-struct QuoteLegsLegSecurityAltIDArgs {
-    ::std::optional<::std::string_view> leg_security_alt_id{};
-    ::std::optional<::std::string_view> leg_security_alt_id_source{};
-};
-
-struct QuoteLegsLegStipulationsArgs {
-    ::std::optional<::std::string_view> leg_stipulation_type{};
-    ::std::optional<::std::string_view> leg_stipulation_value{};
-};
-
-struct QuoteLegsNestedPartyIDsNestedPartySubIDsArgs {
-    ::std::optional<::std::string_view> nested_party_sub_id{};
-    ::std::optional<::std::int64_t> nested_party_sub_id_type{};
-};
-
-struct QuoteLegsNestedPartyIDsArgs {
-    ::std::optional<::std::string_view> nested_party_id{};
-    ::std::optional<char> nested_party_id_source{};
-    ::std::optional<::std::int64_t> nested_party_role{};
-    ::std::optional<::std::span<const QuoteLegsNestedPartyIDsNestedPartySubIDsArgs>> nested_party_sub_i_ds{};
-};
-
-struct QuoteLegsArgs {
-    ::std::optional<::std::string_view> leg_symbol{};
-    ::std::optional<::std::string_view> leg_symbol_sfx{};
-    ::std::optional<::std::string_view> leg_security_id{};
-    ::std::optional<::std::string_view> leg_security_id_source{};
-    ::std::optional<::std::span<const QuoteLegsLegSecurityAltIDArgs>> leg_security_alt_id{};
-    ::std::optional<::std::int64_t> leg_product{};
-    ::std::optional<::std::string_view> leg_cfi_code{};
-    ::std::optional<::std::string_view> leg_security_type{};
-    ::std::optional<::std::string_view> leg_security_sub_type{};
-    ::std::optional<::std::string_view> leg_maturity_month_year{};
-    ::std::optional<::std::string_view> leg_maturity_date{};
-    ::std::optional<::std::string_view> leg_coupon_payment_date{};
-    ::std::optional<::std::string_view> leg_issue_date{};
-    ::std::optional<::std::string_view> leg_repo_collateral_security_type{};
-    ::std::optional<::std::int64_t> leg_repurchase_term{};
-    ::std::optional<::fixpp::decimal_t> leg_repurchase_rate{};
-    ::std::optional<::fixpp::decimal_t> leg_factor{};
-    ::std::optional<::std::string_view> leg_credit_rating{};
-    ::std::optional<::std::string_view> leg_instr_registry{};
-    ::std::optional<::std::string_view> leg_country_of_issue{};
-    ::std::optional<::std::string_view> leg_state_or_province_of_issue{};
-    ::std::optional<::std::string_view> leg_locale_of_issue{};
-    ::std::optional<::std::string_view> leg_redemption_date{};
-    ::std::optional<::fixpp::decimal_t> leg_strike_price{};
-    ::std::optional<::std::string_view> leg_strike_currency{};
-    ::std::optional<char> leg_opt_attribute{};
-    ::std::optional<::fixpp::decimal_t> leg_contract_multiplier{};
-    ::std::optional<::fixpp::decimal_t> leg_coupon_rate{};
-    ::std::optional<::std::string_view> leg_security_exchange{};
-    ::std::optional<::std::string_view> leg_issuer{};
-    ::std::optional<::std::string_view> encoded_leg_issuer{};
-    ::std::optional<::std::string_view> leg_security_desc{};
-    ::std::optional<::std::string_view> encoded_leg_security_desc{};
-    ::std::optional<::fixpp::decimal_t> leg_ratio_qty{};
-    ::std::optional<char> leg_side{};
-    ::std::optional<::std::string_view> leg_currency{};
-    ::std::optional<::std::string_view> leg_pool{};
-    ::std::optional<::std::string_view> leg_dated_date{};
-    ::std::optional<::std::string_view> leg_contract_settl_month{};
-    ::std::optional<::std::string_view> leg_interest_accrual_date{};
-    ::std::optional<::fixpp::decimal_t> leg_qty{};
-    ::std::optional<::std::int64_t> leg_swap_type{};
-    ::std::optional<char> leg_settl_type{};
-    ::std::optional<::std::string_view> leg_settl_date{};
-    ::std::optional<::std::span<const QuoteLegsLegStipulationsArgs>> leg_stipulations{};
-    ::std::optional<::std::span<const QuoteLegsNestedPartyIDsArgs>> nested_party_i_ds{};
-    ::std::optional<::std::int64_t> leg_price_type{};
-    ::std::optional<::fixpp::decimal_t> leg_bid_px{};
-    ::std::optional<::fixpp::decimal_t> leg_offer_px{};
-    ::std::optional<::std::string_view> leg_benchmark_curve_currency{};
-    ::std::optional<::std::string_view> leg_benchmark_curve_name{};
-    ::std::optional<::std::string_view> leg_benchmark_curve_point{};
-    ::std::optional<::fixpp::decimal_t> leg_benchmark_price{};
-    ::std::optional<::std::int64_t> leg_benchmark_price_type{};
-};
-
-struct QuoteUnderlyingsUnderlyingSecurityAltIDArgs {
-    ::std::optional<::std::string_view> underlying_security_alt_id{};
-    ::std::optional<::std::string_view> underlying_security_alt_id_source{};
-};
-
-struct QuoteUnderlyingsUnderlyingStipsArgs {
-    ::std::optional<::std::string_view> underlying_stip_type{};
-    ::std::optional<::std::string_view> underlying_stip_value{};
-};
-
-struct QuoteUnderlyingsArgs {
-    ::std::optional<::std::string_view> underlying_symbol{};
-    ::std::optional<::std::string_view> underlying_symbol_sfx{};
-    ::std::optional<::std::string_view> underlying_security_id{};
-    ::std::optional<::std::string_view> underlying_security_id_source{};
-    ::std::optional<::std::span<const QuoteUnderlyingsUnderlyingSecurityAltIDArgs>> underlying_security_alt_id{};
-    ::std::optional<::std::int64_t> underlying_product{};
-    ::std::optional<::std::string_view> underlying_cfi_code{};
-    ::std::optional<::std::string_view> underlying_security_type{};
-    ::std::optional<::std::string_view> underlying_security_sub_type{};
-    ::std::optional<::std::string_view> underlying_maturity_month_year{};
-    ::std::optional<::std::string_view> underlying_maturity_date{};
-    ::std::optional<::std::int64_t> underlying_put_or_call{};
-    ::std::optional<::std::string_view> underlying_coupon_payment_date{};
-    ::std::optional<::std::string_view> underlying_issue_date{};
-    ::std::optional<::std::string_view> underlying_repo_collateral_security_type{};
-    ::std::optional<::std::int64_t> underlying_repurchase_term{};
-    ::std::optional<::fixpp::decimal_t> underlying_repurchase_rate{};
-    ::std::optional<::fixpp::decimal_t> underlying_factor{};
-    ::std::optional<::std::string_view> underlying_credit_rating{};
-    ::std::optional<::std::string_view> underlying_instr_registry{};
-    ::std::optional<::std::string_view> underlying_country_of_issue{};
-    ::std::optional<::std::string_view> underlying_state_or_province_of_issue{};
-    ::std::optional<::std::string_view> underlying_locale_of_issue{};
-    ::std::optional<::std::string_view> underlying_redemption_date{};
-    ::std::optional<::fixpp::decimal_t> underlying_strike_price{};
-    ::std::optional<::std::string_view> underlying_strike_currency{};
-    ::std::optional<char> underlying_opt_attribute{};
-    ::std::optional<::fixpp::decimal_t> underlying_contract_multiplier{};
-    ::std::optional<::fixpp::decimal_t> underlying_coupon_rate{};
-    ::std::optional<::std::string_view> underlying_security_exchange{};
-    ::std::optional<::std::string_view> underlying_issuer{};
-    ::std::optional<::std::string_view> encoded_underlying_issuer{};
-    ::std::optional<::std::string_view> underlying_security_desc{};
-    ::std::optional<::std::string_view> encoded_underlying_security_desc{};
-    ::std::optional<::std::string_view> underlying_cp_program{};
-    ::std::optional<::std::string_view> underlying_cp_reg_type{};
-    ::std::optional<::std::string_view> underlying_currency{};
-    ::std::optional<::fixpp::decimal_t> underlying_qty{};
-    ::std::optional<::fixpp::decimal_t> underlying_px{};
-    ::std::optional<::fixpp::decimal_t> underlying_dirty_price{};
-    ::std::optional<::fixpp::decimal_t> underlying_end_price{};
-    ::std::optional<::fixpp::decimal_t> underlying_start_value{};
-    ::std::optional<::fixpp::decimal_t> underlying_current_value{};
-    ::std::optional<::fixpp::decimal_t> underlying_end_value{};
-    ::std::optional<::std::span<const QuoteUnderlyingsUnderlyingStipsArgs>> underlying_stips{};
-};
-
-struct QuoteQuoteQualifiersArgs {
-    ::std::optional<char> quote_qualifier{};
-};
-
-struct QuoteEventsArgs {
-    ::std::optional<::std::int64_t> event_type{};
-    ::std::optional<::std::string_view> event_date{};
-    ::std::optional<::fixpp::decimal_t> event_px{};
-    ::std::optional<::std::string_view> event_text{};
-};
-
 struct QuoteArgs {
     ::std::optional<::std::string_view> account{};
     ::std::optional<::fixpp::decimal_t> commission{};
@@ -16262,7 +15405,7 @@ struct QuoteArgs {
     ::std::optional<::fixpp::decimal_t> repurchase_rate{};
     ::std::optional<::fixpp::decimal_t> factor{};
     ::std::optional<::fixpp::decimal_t> contract_multiplier{};
-    ::std::optional<::std::span<const QuoteStipulationsArgs>> stipulations{};
+    ::std::optional<::std::span<const groups::G_232Args>> stipulations{};
     ::std::optional<::std::string_view> yield_type{};
     ::std::optional<::fixpp::decimal_t> yield{};
     ::std::optional<::std::string_view> repo_collateral_security_type{};
@@ -16274,8 +15417,8 @@ struct QuoteArgs {
     ::std::optional<::std::string_view> encoded_security_desc{};
     ::std::optional<::std::string_view> encoded_text{};
     ::std::optional<::std::int64_t> price_type{};
-    ::std::optional<::std::span<const QuotePartyIDsArgs>> party_i_ds{};
-    ::std::optional<::std::span<const QuoteSecurityAltIDArgs>> security_alt_id{};
+    ::std::optional<::std::span<const groups::G_453Args>> party_i_ds{};
+    ::std::optional<::std::span<const groups::G_454Args>> security_alt_id{};
     ::std::optional<::std::int64_t> product{};
     ::std::optional<::std::string_view> cfi_code{};
     ::std::optional<char> rounding_direction{};
@@ -16288,7 +15431,7 @@ struct QuoteArgs {
     ::std::optional<::std::int64_t> quote_type{};
     ::std::optional<::std::string_view> maturity_date{};
     ::std::optional<::std::string_view> instr_registry{};
-    ::std::optional<::std::span<const QuoteLegsArgs>> legs{};
+    ::std::optional<::std::span<const groups::G_555_5Args>> legs{};
     ::std::optional<::std::int64_t> account_type{};
     ::std::optional<::std::int64_t> cust_order_capacity{};
     ::std::optional<::std::string_view> trading_session_sub_id{};
@@ -16315,12 +15458,12 @@ struct QuoteArgs {
     ::std::optional<::std::int64_t> yield_redemption_price_type{};
     ::std::optional<::std::string_view> benchmark_security_id{};
     ::std::optional<::std::string_view> yield_calc_date{};
-    ::std::optional<::std::span<const QuoteUnderlyingsArgs>> underlyings{};
-    ::std::optional<::std::span<const QuoteQuoteQualifiersArgs>> quote_qualifiers{};
+    ::std::optional<::std::span<const groups::G_711Args>> underlyings{};
+    ::std::optional<::std::span<const groups::G_735Args>> quote_qualifiers{};
     ::std::optional<::std::string_view> benchmark_security_id_source{};
     ::std::optional<::std::string_view> security_sub_type{};
     ::std::optional<::std::int64_t> termination_type{};
-    ::std::optional<::std::span<const QuoteEventsArgs>> events{};
+    ::std::optional<::std::span<const groups::G_864Args>> events{};
     ::std::optional<::std::string_view> dated_date{};
     ::std::optional<::std::string_view> interest_accrual_date{};
     ::std::optional<::std::int64_t> cp_program{};
@@ -17453,189 +16596,16 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_Quote(::std::sp
     return bb.commit(out);
 }
 
-struct MarketDataRequestRelatedSymSecurityAltIDArgs {
-    ::std::optional<::std::string_view> security_alt_id{};
-    ::std::optional<::std::string_view> security_alt_id_source{};
-};
-
-struct MarketDataRequestRelatedSymEventsArgs {
-    ::std::optional<::std::int64_t> event_type{};
-    ::std::optional<::std::string_view> event_date{};
-    ::std::optional<::fixpp::decimal_t> event_px{};
-    ::std::optional<::std::string_view> event_text{};
-};
-
-struct MarketDataRequestRelatedSymUnderlyingsUnderlyingSecurityAltIDArgs {
-    ::std::optional<::std::string_view> underlying_security_alt_id{};
-    ::std::optional<::std::string_view> underlying_security_alt_id_source{};
-};
-
-struct MarketDataRequestRelatedSymUnderlyingsUnderlyingStipsArgs {
-    ::std::optional<::std::string_view> underlying_stip_type{};
-    ::std::optional<::std::string_view> underlying_stip_value{};
-};
-
-struct MarketDataRequestRelatedSymUnderlyingsArgs {
-    ::std::optional<::std::string_view> underlying_symbol{};
-    ::std::optional<::std::string_view> underlying_symbol_sfx{};
-    ::std::optional<::std::string_view> underlying_security_id{};
-    ::std::optional<::std::string_view> underlying_security_id_source{};
-    ::std::optional<::std::span<const MarketDataRequestRelatedSymUnderlyingsUnderlyingSecurityAltIDArgs>> underlying_security_alt_id{};
-    ::std::optional<::std::int64_t> underlying_product{};
-    ::std::optional<::std::string_view> underlying_cfi_code{};
-    ::std::optional<::std::string_view> underlying_security_type{};
-    ::std::optional<::std::string_view> underlying_security_sub_type{};
-    ::std::optional<::std::string_view> underlying_maturity_month_year{};
-    ::std::optional<::std::string_view> underlying_maturity_date{};
-    ::std::optional<::std::int64_t> underlying_put_or_call{};
-    ::std::optional<::std::string_view> underlying_coupon_payment_date{};
-    ::std::optional<::std::string_view> underlying_issue_date{};
-    ::std::optional<::std::string_view> underlying_repo_collateral_security_type{};
-    ::std::optional<::std::int64_t> underlying_repurchase_term{};
-    ::std::optional<::fixpp::decimal_t> underlying_repurchase_rate{};
-    ::std::optional<::fixpp::decimal_t> underlying_factor{};
-    ::std::optional<::std::string_view> underlying_credit_rating{};
-    ::std::optional<::std::string_view> underlying_instr_registry{};
-    ::std::optional<::std::string_view> underlying_country_of_issue{};
-    ::std::optional<::std::string_view> underlying_state_or_province_of_issue{};
-    ::std::optional<::std::string_view> underlying_locale_of_issue{};
-    ::std::optional<::std::string_view> underlying_redemption_date{};
-    ::std::optional<::fixpp::decimal_t> underlying_strike_price{};
-    ::std::optional<::std::string_view> underlying_strike_currency{};
-    ::std::optional<char> underlying_opt_attribute{};
-    ::std::optional<::fixpp::decimal_t> underlying_contract_multiplier{};
-    ::std::optional<::fixpp::decimal_t> underlying_coupon_rate{};
-    ::std::optional<::std::string_view> underlying_security_exchange{};
-    ::std::optional<::std::string_view> underlying_issuer{};
-    ::std::optional<::std::string_view> encoded_underlying_issuer{};
-    ::std::optional<::std::string_view> underlying_security_desc{};
-    ::std::optional<::std::string_view> encoded_underlying_security_desc{};
-    ::std::optional<::std::string_view> underlying_cp_program{};
-    ::std::optional<::std::string_view> underlying_cp_reg_type{};
-    ::std::optional<::std::string_view> underlying_currency{};
-    ::std::optional<::fixpp::decimal_t> underlying_qty{};
-    ::std::optional<::fixpp::decimal_t> underlying_px{};
-    ::std::optional<::fixpp::decimal_t> underlying_dirty_price{};
-    ::std::optional<::fixpp::decimal_t> underlying_end_price{};
-    ::std::optional<::fixpp::decimal_t> underlying_start_value{};
-    ::std::optional<::fixpp::decimal_t> underlying_current_value{};
-    ::std::optional<::fixpp::decimal_t> underlying_end_value{};
-    ::std::optional<::std::span<const MarketDataRequestRelatedSymUnderlyingsUnderlyingStipsArgs>> underlying_stips{};
-};
-
-struct MarketDataRequestRelatedSymLegsLegSecurityAltIDArgs {
-    ::std::optional<::std::string_view> leg_security_alt_id{};
-    ::std::optional<::std::string_view> leg_security_alt_id_source{};
-};
-
-struct MarketDataRequestRelatedSymLegsArgs {
-    ::std::optional<::std::string_view> leg_symbol{};
-    ::std::optional<::std::string_view> leg_symbol_sfx{};
-    ::std::optional<::std::string_view> leg_security_id{};
-    ::std::optional<::std::string_view> leg_security_id_source{};
-    ::std::optional<::std::span<const MarketDataRequestRelatedSymLegsLegSecurityAltIDArgs>> leg_security_alt_id{};
-    ::std::optional<::std::int64_t> leg_product{};
-    ::std::optional<::std::string_view> leg_cfi_code{};
-    ::std::optional<::std::string_view> leg_security_type{};
-    ::std::optional<::std::string_view> leg_security_sub_type{};
-    ::std::optional<::std::string_view> leg_maturity_month_year{};
-    ::std::optional<::std::string_view> leg_maturity_date{};
-    ::std::optional<::std::string_view> leg_coupon_payment_date{};
-    ::std::optional<::std::string_view> leg_issue_date{};
-    ::std::optional<::std::string_view> leg_repo_collateral_security_type{};
-    ::std::optional<::std::int64_t> leg_repurchase_term{};
-    ::std::optional<::fixpp::decimal_t> leg_repurchase_rate{};
-    ::std::optional<::fixpp::decimal_t> leg_factor{};
-    ::std::optional<::std::string_view> leg_credit_rating{};
-    ::std::optional<::std::string_view> leg_instr_registry{};
-    ::std::optional<::std::string_view> leg_country_of_issue{};
-    ::std::optional<::std::string_view> leg_state_or_province_of_issue{};
-    ::std::optional<::std::string_view> leg_locale_of_issue{};
-    ::std::optional<::std::string_view> leg_redemption_date{};
-    ::std::optional<::fixpp::decimal_t> leg_strike_price{};
-    ::std::optional<::std::string_view> leg_strike_currency{};
-    ::std::optional<char> leg_opt_attribute{};
-    ::std::optional<::fixpp::decimal_t> leg_contract_multiplier{};
-    ::std::optional<::fixpp::decimal_t> leg_coupon_rate{};
-    ::std::optional<::std::string_view> leg_security_exchange{};
-    ::std::optional<::std::string_view> leg_issuer{};
-    ::std::optional<::std::string_view> encoded_leg_issuer{};
-    ::std::optional<::std::string_view> leg_security_desc{};
-    ::std::optional<::std::string_view> encoded_leg_security_desc{};
-    ::std::optional<::fixpp::decimal_t> leg_ratio_qty{};
-    ::std::optional<char> leg_side{};
-    ::std::optional<::std::string_view> leg_currency{};
-    ::std::optional<::std::string_view> leg_pool{};
-    ::std::optional<::std::string_view> leg_dated_date{};
-    ::std::optional<::std::string_view> leg_contract_settl_month{};
-    ::std::optional<::std::string_view> leg_interest_accrual_date{};
-};
-
-struct MarketDataRequestRelatedSymArgs {
-    ::std::optional<::std::string_view> symbol{};
-    ::std::optional<::std::string_view> symbol_sfx{};
-    ::std::optional<::std::string_view> security_id{};
-    ::std::optional<::std::string_view> security_id_source{};
-    ::std::optional<::std::span<const MarketDataRequestRelatedSymSecurityAltIDArgs>> security_alt_id{};
-    ::std::optional<::std::int64_t> product{};
-    ::std::optional<::std::string_view> cfi_code{};
-    ::std::optional<::std::string_view> security_type{};
-    ::std::optional<::std::string_view> security_sub_type{};
-    ::std::optional<::std::string_view> maturity_month_year{};
-    ::std::optional<::std::string_view> maturity_date{};
-    ::std::optional<::std::int64_t> put_or_call{};
-    ::std::optional<::std::string_view> coupon_payment_date{};
-    ::std::optional<::std::string_view> issue_date{};
-    ::std::optional<::std::string_view> repo_collateral_security_type{};
-    ::std::optional<::std::int64_t> repurchase_term{};
-    ::std::optional<::fixpp::decimal_t> repurchase_rate{};
-    ::std::optional<::fixpp::decimal_t> factor{};
-    ::std::optional<::std::string_view> credit_rating{};
-    ::std::optional<::std::string_view> instr_registry{};
-    ::std::optional<::std::string_view> country_of_issue{};
-    ::std::optional<::std::string_view> state_or_province_of_issue{};
-    ::std::optional<::std::string_view> locale_of_issue{};
-    ::std::optional<::std::string_view> redemption_date{};
-    ::std::optional<::fixpp::decimal_t> strike_price{};
-    ::std::optional<::std::string_view> strike_currency{};
-    ::std::optional<char> opt_attribute{};
-    ::std::optional<::fixpp::decimal_t> contract_multiplier{};
-    ::std::optional<::fixpp::decimal_t> coupon_rate{};
-    ::std::optional<::std::string_view> security_exchange{};
-    ::std::optional<::std::string_view> issuer{};
-    ::std::optional<::std::string_view> encoded_issuer{};
-    ::std::optional<::std::string_view> security_desc{};
-    ::std::optional<::std::string_view> encoded_security_desc{};
-    ::std::optional<::std::string_view> pool{};
-    ::std::optional<::std::string_view> contract_settl_month{};
-    ::std::optional<::std::int64_t> cp_program{};
-    ::std::optional<::std::string_view> cp_reg_type{};
-    ::std::optional<::std::span<const MarketDataRequestRelatedSymEventsArgs>> events{};
-    ::std::optional<::std::string_view> dated_date{};
-    ::std::optional<::std::string_view> interest_accrual_date{};
-    ::std::optional<::std::span<const MarketDataRequestRelatedSymUnderlyingsArgs>> underlyings{};
-    ::std::optional<::std::span<const MarketDataRequestRelatedSymLegsArgs>> legs{};
-};
-
-struct MarketDataRequestMDEntryTypesArgs {
-    ::std::optional<char> md_entry_type{};
-};
-
-struct MarketDataRequestTradingSessionsArgs {
-    ::std::optional<::std::string_view> trading_session_id{};
-    ::std::optional<::std::string_view> trading_session_sub_id{};
-};
-
 struct MarketDataRequestArgs {
-    ::std::span<const MarketDataRequestRelatedSymArgs> related_sym{};
+    ::std::span<const groups::G_146_3Args> related_sym{};
     ::std::optional<::std::string_view> md_req_id{};
     ::std::optional<char> subscription_request_type{};
     ::std::optional<::std::int64_t> market_depth{};
     ::std::optional<::std::int64_t> md_update_type{};
     ::std::optional<bool> aggregated_book{};
-    ::std::span<const MarketDataRequestMDEntryTypesArgs> md_entry_types{};
+    ::std::span<const groups::G_267Args> md_entry_types{};
     ::std::optional<::std::string_view> open_close_settl_flag{};
-    ::std::optional<::std::span<const MarketDataRequestTradingSessionsArgs>> trading_sessions{};
+    ::std::optional<::std::span<const groups::G_386Args>> trading_sessions{};
     ::std::optional<::std::string_view> scope{};
     ::std::optional<bool> md_implicit_delete{};
     ::std::optional<::std::int64_t> appl_queue_max{};
@@ -18353,159 +17323,6 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_MarketDataReque
     return bb.commit(out);
 }
 
-struct MarketDataSnapshotFullRefreshMDEntriesArgs {
-    ::std::optional<char> md_entry_type{};
-    ::std::optional<::fixpp::decimal_t> md_entry_px{};
-    ::std::optional<::std::string_view> currency{};
-    ::std::optional<::fixpp::decimal_t> md_entry_size{};
-    ::std::optional<::std::string_view> md_entry_date{};
-    ::std::optional<::std::string_view> md_entry_time{};
-    ::std::optional<char> tick_direction{};
-    ::std::optional<::std::string_view> md_mkt{};
-    ::std::optional<::std::string_view> trading_session_id{};
-    ::std::optional<::std::string_view> trading_session_sub_id{};
-    ::std::optional<::std::string_view> quote_condition{};
-    ::std::optional<::std::string_view> trade_condition{};
-    ::std::optional<::std::string_view> md_entry_originator{};
-    ::std::optional<::std::string_view> location_id{};
-    ::std::optional<::std::string_view> desk_id{};
-    ::std::optional<::std::string_view> open_close_settl_flag{};
-    ::std::optional<char> time_in_force{};
-    ::std::optional<::std::string_view> expire_date{};
-    ::std::optional<::std::string_view> expire_time{};
-    ::std::optional<::fixpp::decimal_t> min_qty{};
-    ::std::optional<::std::string_view> exec_inst{};
-    ::std::optional<::std::int64_t> seller_days{};
-    ::std::optional<::std::string_view> order_id{};
-    ::std::optional<::std::string_view> quote_entry_id{};
-    ::std::optional<::std::string_view> md_entry_buyer{};
-    ::std::optional<::std::string_view> md_entry_seller{};
-    ::std::optional<::std::int64_t> number_of_orders{};
-    ::std::optional<::std::int64_t> md_entry_position_no{};
-    ::std::optional<::std::string_view> scope{};
-    ::std::optional<::fixpp::decimal_t> price_delta{};
-    ::std::optional<::std::string_view> text{};
-    ::std::optional<::std::string_view> encoded_text{};
-};
-
-struct MarketDataSnapshotFullRefreshSecurityAltIDArgs {
-    ::std::optional<::std::string_view> security_alt_id{};
-    ::std::optional<::std::string_view> security_alt_id_source{};
-};
-
-struct MarketDataSnapshotFullRefreshLegsLegSecurityAltIDArgs {
-    ::std::optional<::std::string_view> leg_security_alt_id{};
-    ::std::optional<::std::string_view> leg_security_alt_id_source{};
-};
-
-struct MarketDataSnapshotFullRefreshLegsArgs {
-    ::std::optional<::std::string_view> leg_symbol{};
-    ::std::optional<::std::string_view> leg_symbol_sfx{};
-    ::std::optional<::std::string_view> leg_security_id{};
-    ::std::optional<::std::string_view> leg_security_id_source{};
-    ::std::optional<::std::span<const MarketDataSnapshotFullRefreshLegsLegSecurityAltIDArgs>> leg_security_alt_id{};
-    ::std::optional<::std::int64_t> leg_product{};
-    ::std::optional<::std::string_view> leg_cfi_code{};
-    ::std::optional<::std::string_view> leg_security_type{};
-    ::std::optional<::std::string_view> leg_security_sub_type{};
-    ::std::optional<::std::string_view> leg_maturity_month_year{};
-    ::std::optional<::std::string_view> leg_maturity_date{};
-    ::std::optional<::std::string_view> leg_coupon_payment_date{};
-    ::std::optional<::std::string_view> leg_issue_date{};
-    ::std::optional<::std::string_view> leg_repo_collateral_security_type{};
-    ::std::optional<::std::int64_t> leg_repurchase_term{};
-    ::std::optional<::fixpp::decimal_t> leg_repurchase_rate{};
-    ::std::optional<::fixpp::decimal_t> leg_factor{};
-    ::std::optional<::std::string_view> leg_credit_rating{};
-    ::std::optional<::std::string_view> leg_instr_registry{};
-    ::std::optional<::std::string_view> leg_country_of_issue{};
-    ::std::optional<::std::string_view> leg_state_or_province_of_issue{};
-    ::std::optional<::std::string_view> leg_locale_of_issue{};
-    ::std::optional<::std::string_view> leg_redemption_date{};
-    ::std::optional<::fixpp::decimal_t> leg_strike_price{};
-    ::std::optional<::std::string_view> leg_strike_currency{};
-    ::std::optional<char> leg_opt_attribute{};
-    ::std::optional<::fixpp::decimal_t> leg_contract_multiplier{};
-    ::std::optional<::fixpp::decimal_t> leg_coupon_rate{};
-    ::std::optional<::std::string_view> leg_security_exchange{};
-    ::std::optional<::std::string_view> leg_issuer{};
-    ::std::optional<::std::string_view> encoded_leg_issuer{};
-    ::std::optional<::std::string_view> leg_security_desc{};
-    ::std::optional<::std::string_view> encoded_leg_security_desc{};
-    ::std::optional<::fixpp::decimal_t> leg_ratio_qty{};
-    ::std::optional<char> leg_side{};
-    ::std::optional<::std::string_view> leg_currency{};
-    ::std::optional<::std::string_view> leg_pool{};
-    ::std::optional<::std::string_view> leg_dated_date{};
-    ::std::optional<::std::string_view> leg_contract_settl_month{};
-    ::std::optional<::std::string_view> leg_interest_accrual_date{};
-};
-
-struct MarketDataSnapshotFullRefreshUnderlyingsUnderlyingSecurityAltIDArgs {
-    ::std::optional<::std::string_view> underlying_security_alt_id{};
-    ::std::optional<::std::string_view> underlying_security_alt_id_source{};
-};
-
-struct MarketDataSnapshotFullRefreshUnderlyingsUnderlyingStipsArgs {
-    ::std::optional<::std::string_view> underlying_stip_type{};
-    ::std::optional<::std::string_view> underlying_stip_value{};
-};
-
-struct MarketDataSnapshotFullRefreshUnderlyingsArgs {
-    ::std::optional<::std::string_view> underlying_symbol{};
-    ::std::optional<::std::string_view> underlying_symbol_sfx{};
-    ::std::optional<::std::string_view> underlying_security_id{};
-    ::std::optional<::std::string_view> underlying_security_id_source{};
-    ::std::optional<::std::span<const MarketDataSnapshotFullRefreshUnderlyingsUnderlyingSecurityAltIDArgs>> underlying_security_alt_id{};
-    ::std::optional<::std::int64_t> underlying_product{};
-    ::std::optional<::std::string_view> underlying_cfi_code{};
-    ::std::optional<::std::string_view> underlying_security_type{};
-    ::std::optional<::std::string_view> underlying_security_sub_type{};
-    ::std::optional<::std::string_view> underlying_maturity_month_year{};
-    ::std::optional<::std::string_view> underlying_maturity_date{};
-    ::std::optional<::std::int64_t> underlying_put_or_call{};
-    ::std::optional<::std::string_view> underlying_coupon_payment_date{};
-    ::std::optional<::std::string_view> underlying_issue_date{};
-    ::std::optional<::std::string_view> underlying_repo_collateral_security_type{};
-    ::std::optional<::std::int64_t> underlying_repurchase_term{};
-    ::std::optional<::fixpp::decimal_t> underlying_repurchase_rate{};
-    ::std::optional<::fixpp::decimal_t> underlying_factor{};
-    ::std::optional<::std::string_view> underlying_credit_rating{};
-    ::std::optional<::std::string_view> underlying_instr_registry{};
-    ::std::optional<::std::string_view> underlying_country_of_issue{};
-    ::std::optional<::std::string_view> underlying_state_or_province_of_issue{};
-    ::std::optional<::std::string_view> underlying_locale_of_issue{};
-    ::std::optional<::std::string_view> underlying_redemption_date{};
-    ::std::optional<::fixpp::decimal_t> underlying_strike_price{};
-    ::std::optional<::std::string_view> underlying_strike_currency{};
-    ::std::optional<char> underlying_opt_attribute{};
-    ::std::optional<::fixpp::decimal_t> underlying_contract_multiplier{};
-    ::std::optional<::fixpp::decimal_t> underlying_coupon_rate{};
-    ::std::optional<::std::string_view> underlying_security_exchange{};
-    ::std::optional<::std::string_view> underlying_issuer{};
-    ::std::optional<::std::string_view> encoded_underlying_issuer{};
-    ::std::optional<::std::string_view> underlying_security_desc{};
-    ::std::optional<::std::string_view> encoded_underlying_security_desc{};
-    ::std::optional<::std::string_view> underlying_cp_program{};
-    ::std::optional<::std::string_view> underlying_cp_reg_type{};
-    ::std::optional<::std::string_view> underlying_currency{};
-    ::std::optional<::fixpp::decimal_t> underlying_qty{};
-    ::std::optional<::fixpp::decimal_t> underlying_px{};
-    ::std::optional<::fixpp::decimal_t> underlying_dirty_price{};
-    ::std::optional<::fixpp::decimal_t> underlying_end_price{};
-    ::std::optional<::fixpp::decimal_t> underlying_start_value{};
-    ::std::optional<::fixpp::decimal_t> underlying_current_value{};
-    ::std::optional<::fixpp::decimal_t> underlying_end_value{};
-    ::std::optional<::std::span<const MarketDataSnapshotFullRefreshUnderlyingsUnderlyingStipsArgs>> underlying_stips{};
-};
-
-struct MarketDataSnapshotFullRefreshEventsArgs {
-    ::std::optional<::std::int64_t> event_type{};
-    ::std::optional<::std::string_view> event_date{};
-    ::std::optional<::fixpp::decimal_t> event_px{};
-    ::std::optional<::std::string_view> event_text{};
-};
-
 struct MarketDataSnapshotFullRefreshArgs {
     ::std::optional<::std::string_view> security_id_source{};
     ::std::optional<::std::string_view> security_id{};
@@ -18530,13 +17347,13 @@ struct MarketDataSnapshotFullRefreshArgs {
     ::std::optional<::std::string_view> redemption_date{};
     ::std::optional<::std::string_view> credit_rating{};
     ::std::optional<::std::string_view> md_req_id{};
-    ::std::span<const MarketDataSnapshotFullRefreshMDEntriesArgs> md_entries{};
+    ::std::span<const groups::G_268_1Args> md_entries{};
     ::std::optional<::std::string_view> financial_status{};
     ::std::optional<::std::string_view> corporate_action{};
     ::std::optional<::std::string_view> encoded_issuer{};
     ::std::optional<::std::string_view> encoded_security_desc{};
     ::std::optional<::fixpp::decimal_t> net_chg_prev_day{};
-    ::std::optional<::std::span<const MarketDataSnapshotFullRefreshSecurityAltIDArgs>> security_alt_id{};
+    ::std::optional<::std::span<const groups::G_454Args>> security_alt_id{};
     ::std::optional<::std::int64_t> product{};
     ::std::optional<::std::string_view> cfi_code{};
     ::std::optional<::std::string_view> country_of_issue{};
@@ -18544,14 +17361,14 @@ struct MarketDataSnapshotFullRefreshArgs {
     ::std::optional<::std::string_view> locale_of_issue{};
     ::std::optional<::std::string_view> maturity_date{};
     ::std::optional<::std::string_view> instr_registry{};
-    ::std::optional<::std::span<const MarketDataSnapshotFullRefreshLegsArgs>> legs{};
+    ::std::optional<::std::span<const groups::G_555_4Args>> legs{};
     ::std::optional<::std::string_view> contract_settl_month{};
     ::std::optional<::std::string_view> pool{};
-    ::std::optional<::std::span<const MarketDataSnapshotFullRefreshUnderlyingsArgs>> underlyings{};
+    ::std::optional<::std::span<const groups::G_711Args>> underlyings{};
     ::std::optional<::std::string_view> security_sub_type{};
     ::std::optional<::std::int64_t> appl_queue_depth{};
     ::std::optional<::std::int64_t> appl_queue_resolution{};
-    ::std::optional<::std::span<const MarketDataSnapshotFullRefreshEventsArgs>> events{};
+    ::std::optional<::std::span<const groups::G_864Args>> events{};
     ::std::optional<::std::string_view> dated_date{};
     ::std::optional<::std::string_view> interest_accrual_date{};
     ::std::optional<::std::int64_t> cp_program{};
@@ -19350,212 +18167,9 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_MarketDataSnaps
     return bb.commit(out);
 }
 
-struct MarketDataIncrementalRefreshMDEntriesSecurityAltIDArgs {
-    ::std::optional<::std::string_view> security_alt_id{};
-    ::std::optional<::std::string_view> security_alt_id_source{};
-};
-
-struct MarketDataIncrementalRefreshMDEntriesEventsArgs {
-    ::std::optional<::std::int64_t> event_type{};
-    ::std::optional<::std::string_view> event_date{};
-    ::std::optional<::fixpp::decimal_t> event_px{};
-    ::std::optional<::std::string_view> event_text{};
-};
-
-struct MarketDataIncrementalRefreshMDEntriesUnderlyingsUnderlyingSecurityAltIDArgs {
-    ::std::optional<::std::string_view> underlying_security_alt_id{};
-    ::std::optional<::std::string_view> underlying_security_alt_id_source{};
-};
-
-struct MarketDataIncrementalRefreshMDEntriesUnderlyingsUnderlyingStipsArgs {
-    ::std::optional<::std::string_view> underlying_stip_type{};
-    ::std::optional<::std::string_view> underlying_stip_value{};
-};
-
-struct MarketDataIncrementalRefreshMDEntriesUnderlyingsArgs {
-    ::std::optional<::std::string_view> underlying_symbol{};
-    ::std::optional<::std::string_view> underlying_symbol_sfx{};
-    ::std::optional<::std::string_view> underlying_security_id{};
-    ::std::optional<::std::string_view> underlying_security_id_source{};
-    ::std::optional<::std::span<const MarketDataIncrementalRefreshMDEntriesUnderlyingsUnderlyingSecurityAltIDArgs>> underlying_security_alt_id{};
-    ::std::optional<::std::int64_t> underlying_product{};
-    ::std::optional<::std::string_view> underlying_cfi_code{};
-    ::std::optional<::std::string_view> underlying_security_type{};
-    ::std::optional<::std::string_view> underlying_security_sub_type{};
-    ::std::optional<::std::string_view> underlying_maturity_month_year{};
-    ::std::optional<::std::string_view> underlying_maturity_date{};
-    ::std::optional<::std::int64_t> underlying_put_or_call{};
-    ::std::optional<::std::string_view> underlying_coupon_payment_date{};
-    ::std::optional<::std::string_view> underlying_issue_date{};
-    ::std::optional<::std::string_view> underlying_repo_collateral_security_type{};
-    ::std::optional<::std::int64_t> underlying_repurchase_term{};
-    ::std::optional<::fixpp::decimal_t> underlying_repurchase_rate{};
-    ::std::optional<::fixpp::decimal_t> underlying_factor{};
-    ::std::optional<::std::string_view> underlying_credit_rating{};
-    ::std::optional<::std::string_view> underlying_instr_registry{};
-    ::std::optional<::std::string_view> underlying_country_of_issue{};
-    ::std::optional<::std::string_view> underlying_state_or_province_of_issue{};
-    ::std::optional<::std::string_view> underlying_locale_of_issue{};
-    ::std::optional<::std::string_view> underlying_redemption_date{};
-    ::std::optional<::fixpp::decimal_t> underlying_strike_price{};
-    ::std::optional<::std::string_view> underlying_strike_currency{};
-    ::std::optional<char> underlying_opt_attribute{};
-    ::std::optional<::fixpp::decimal_t> underlying_contract_multiplier{};
-    ::std::optional<::fixpp::decimal_t> underlying_coupon_rate{};
-    ::std::optional<::std::string_view> underlying_security_exchange{};
-    ::std::optional<::std::string_view> underlying_issuer{};
-    ::std::optional<::std::string_view> encoded_underlying_issuer{};
-    ::std::optional<::std::string_view> underlying_security_desc{};
-    ::std::optional<::std::string_view> encoded_underlying_security_desc{};
-    ::std::optional<::std::string_view> underlying_cp_program{};
-    ::std::optional<::std::string_view> underlying_cp_reg_type{};
-    ::std::optional<::std::string_view> underlying_currency{};
-    ::std::optional<::fixpp::decimal_t> underlying_qty{};
-    ::std::optional<::fixpp::decimal_t> underlying_px{};
-    ::std::optional<::fixpp::decimal_t> underlying_dirty_price{};
-    ::std::optional<::fixpp::decimal_t> underlying_end_price{};
-    ::std::optional<::fixpp::decimal_t> underlying_start_value{};
-    ::std::optional<::fixpp::decimal_t> underlying_current_value{};
-    ::std::optional<::fixpp::decimal_t> underlying_end_value{};
-    ::std::optional<::std::span<const MarketDataIncrementalRefreshMDEntriesUnderlyingsUnderlyingStipsArgs>> underlying_stips{};
-};
-
-struct MarketDataIncrementalRefreshMDEntriesLegsLegSecurityAltIDArgs {
-    ::std::optional<::std::string_view> leg_security_alt_id{};
-    ::std::optional<::std::string_view> leg_security_alt_id_source{};
-};
-
-struct MarketDataIncrementalRefreshMDEntriesLegsArgs {
-    ::std::optional<::std::string_view> leg_symbol{};
-    ::std::optional<::std::string_view> leg_symbol_sfx{};
-    ::std::optional<::std::string_view> leg_security_id{};
-    ::std::optional<::std::string_view> leg_security_id_source{};
-    ::std::optional<::std::span<const MarketDataIncrementalRefreshMDEntriesLegsLegSecurityAltIDArgs>> leg_security_alt_id{};
-    ::std::optional<::std::int64_t> leg_product{};
-    ::std::optional<::std::string_view> leg_cfi_code{};
-    ::std::optional<::std::string_view> leg_security_type{};
-    ::std::optional<::std::string_view> leg_security_sub_type{};
-    ::std::optional<::std::string_view> leg_maturity_month_year{};
-    ::std::optional<::std::string_view> leg_maturity_date{};
-    ::std::optional<::std::string_view> leg_coupon_payment_date{};
-    ::std::optional<::std::string_view> leg_issue_date{};
-    ::std::optional<::std::string_view> leg_repo_collateral_security_type{};
-    ::std::optional<::std::int64_t> leg_repurchase_term{};
-    ::std::optional<::fixpp::decimal_t> leg_repurchase_rate{};
-    ::std::optional<::fixpp::decimal_t> leg_factor{};
-    ::std::optional<::std::string_view> leg_credit_rating{};
-    ::std::optional<::std::string_view> leg_instr_registry{};
-    ::std::optional<::std::string_view> leg_country_of_issue{};
-    ::std::optional<::std::string_view> leg_state_or_province_of_issue{};
-    ::std::optional<::std::string_view> leg_locale_of_issue{};
-    ::std::optional<::std::string_view> leg_redemption_date{};
-    ::std::optional<::fixpp::decimal_t> leg_strike_price{};
-    ::std::optional<::std::string_view> leg_strike_currency{};
-    ::std::optional<char> leg_opt_attribute{};
-    ::std::optional<::fixpp::decimal_t> leg_contract_multiplier{};
-    ::std::optional<::fixpp::decimal_t> leg_coupon_rate{};
-    ::std::optional<::std::string_view> leg_security_exchange{};
-    ::std::optional<::std::string_view> leg_issuer{};
-    ::std::optional<::std::string_view> encoded_leg_issuer{};
-    ::std::optional<::std::string_view> leg_security_desc{};
-    ::std::optional<::std::string_view> encoded_leg_security_desc{};
-    ::std::optional<::fixpp::decimal_t> leg_ratio_qty{};
-    ::std::optional<char> leg_side{};
-    ::std::optional<::std::string_view> leg_currency{};
-    ::std::optional<::std::string_view> leg_pool{};
-    ::std::optional<::std::string_view> leg_dated_date{};
-    ::std::optional<::std::string_view> leg_contract_settl_month{};
-    ::std::optional<::std::string_view> leg_interest_accrual_date{};
-};
-
-struct MarketDataIncrementalRefreshMDEntriesArgs {
-    ::std::optional<char> md_update_action{};
-    ::std::optional<char> delete_reason{};
-    ::std::optional<char> md_entry_type{};
-    ::std::optional<::std::string_view> md_entry_id{};
-    ::std::optional<::std::string_view> md_entry_ref_id{};
-    ::std::optional<::std::string_view> symbol{};
-    ::std::optional<::std::string_view> symbol_sfx{};
-    ::std::optional<::std::string_view> security_id{};
-    ::std::optional<::std::string_view> security_id_source{};
-    ::std::optional<::std::span<const MarketDataIncrementalRefreshMDEntriesSecurityAltIDArgs>> security_alt_id{};
-    ::std::optional<::std::int64_t> product{};
-    ::std::optional<::std::string_view> cfi_code{};
-    ::std::optional<::std::string_view> security_type{};
-    ::std::optional<::std::string_view> security_sub_type{};
-    ::std::optional<::std::string_view> maturity_month_year{};
-    ::std::optional<::std::string_view> maturity_date{};
-    ::std::optional<::std::int64_t> put_or_call{};
-    ::std::optional<::std::string_view> coupon_payment_date{};
-    ::std::optional<::std::string_view> issue_date{};
-    ::std::optional<::std::string_view> repo_collateral_security_type{};
-    ::std::optional<::std::int64_t> repurchase_term{};
-    ::std::optional<::fixpp::decimal_t> repurchase_rate{};
-    ::std::optional<::fixpp::decimal_t> factor{};
-    ::std::optional<::std::string_view> credit_rating{};
-    ::std::optional<::std::string_view> instr_registry{};
-    ::std::optional<::std::string_view> country_of_issue{};
-    ::std::optional<::std::string_view> state_or_province_of_issue{};
-    ::std::optional<::std::string_view> locale_of_issue{};
-    ::std::optional<::std::string_view> redemption_date{};
-    ::std::optional<::fixpp::decimal_t> strike_price{};
-    ::std::optional<::std::string_view> strike_currency{};
-    ::std::optional<char> opt_attribute{};
-    ::std::optional<::fixpp::decimal_t> contract_multiplier{};
-    ::std::optional<::fixpp::decimal_t> coupon_rate{};
-    ::std::optional<::std::string_view> security_exchange{};
-    ::std::optional<::std::string_view> issuer{};
-    ::std::optional<::std::string_view> encoded_issuer{};
-    ::std::optional<::std::string_view> security_desc{};
-    ::std::optional<::std::string_view> encoded_security_desc{};
-    ::std::optional<::std::string_view> pool{};
-    ::std::optional<::std::string_view> contract_settl_month{};
-    ::std::optional<::std::int64_t> cp_program{};
-    ::std::optional<::std::string_view> cp_reg_type{};
-    ::std::optional<::std::span<const MarketDataIncrementalRefreshMDEntriesEventsArgs>> events{};
-    ::std::optional<::std::string_view> dated_date{};
-    ::std::optional<::std::string_view> interest_accrual_date{};
-    ::std::optional<::std::span<const MarketDataIncrementalRefreshMDEntriesUnderlyingsArgs>> underlyings{};
-    ::std::optional<::std::span<const MarketDataIncrementalRefreshMDEntriesLegsArgs>> legs{};
-    ::std::optional<::std::string_view> financial_status{};
-    ::std::optional<::std::string_view> corporate_action{};
-    ::std::optional<::fixpp::decimal_t> md_entry_px{};
-    ::std::optional<::std::string_view> currency{};
-    ::std::optional<::fixpp::decimal_t> md_entry_size{};
-    ::std::optional<::std::string_view> md_entry_date{};
-    ::std::optional<::std::string_view> md_entry_time{};
-    ::std::optional<char> tick_direction{};
-    ::std::optional<::std::string_view> md_mkt{};
-    ::std::optional<::std::string_view> trading_session_id{};
-    ::std::optional<::std::string_view> trading_session_sub_id{};
-    ::std::optional<::std::string_view> quote_condition{};
-    ::std::optional<::std::string_view> trade_condition{};
-    ::std::optional<::std::string_view> md_entry_originator{};
-    ::std::optional<::std::string_view> location_id{};
-    ::std::optional<::std::string_view> desk_id{};
-    ::std::optional<::std::string_view> open_close_settl_flag{};
-    ::std::optional<char> time_in_force{};
-    ::std::optional<::std::string_view> expire_date{};
-    ::std::optional<::std::string_view> expire_time{};
-    ::std::optional<::fixpp::decimal_t> min_qty{};
-    ::std::optional<::std::string_view> exec_inst{};
-    ::std::optional<::std::int64_t> seller_days{};
-    ::std::optional<::std::string_view> order_id{};
-    ::std::optional<::std::string_view> quote_entry_id{};
-    ::std::optional<::std::string_view> md_entry_buyer{};
-    ::std::optional<::std::string_view> md_entry_seller{};
-    ::std::optional<::std::int64_t> number_of_orders{};
-    ::std::optional<::std::int64_t> md_entry_position_no{};
-    ::std::optional<::std::string_view> scope{};
-    ::std::optional<::fixpp::decimal_t> price_delta{};
-    ::std::optional<::fixpp::decimal_t> net_chg_prev_day{};
-    ::std::optional<::std::string_view> text{};
-    ::std::optional<::std::string_view> encoded_text{};
-};
-
 struct MarketDataIncrementalRefreshArgs {
     ::std::optional<::std::string_view> md_req_id{};
-    ::std::span<const MarketDataIncrementalRefreshMDEntriesArgs> md_entries{};
+    ::std::span<const groups::G_268_2Args> md_entries{};
     ::std::optional<::std::int64_t> appl_queue_depth{};
     ::std::optional<::std::int64_t> appl_queue_resolution{};
 };
@@ -20367,16 +18981,12 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_MarketDataIncre
     return bb.commit(out);
 }
 
-struct MarketDataRequestRejectAltMDSourceArgs {
-    ::std::optional<::std::string_view> alt_md_source_id{};
-};
-
 struct MarketDataRequestRejectArgs {
     ::std::optional<::std::string_view> text{};
     ::std::optional<::std::string_view> md_req_id{};
     ::std::optional<char> md_req_rej_reason{};
     ::std::optional<::std::string_view> encoded_text{};
-    ::std::optional<::std::span<const MarketDataRequestRejectAltMDSourceArgs>> alt_md_source{};
+    ::std::optional<::std::span<const groups::G_816Args>> alt_md_source{};
 };
 
 inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_MarketDataRequestReject(::std::span<::std::byte> out, MarketDataRequestRejectArgs const& args) noexcept {
@@ -20417,200 +19027,15 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_MarketDataReque
     return bb.commit(out);
 }
 
-struct QuoteCancelQuoteEntriesSecurityAltIDArgs {
-    ::std::optional<::std::string_view> security_alt_id{};
-    ::std::optional<::std::string_view> security_alt_id_source{};
-};
-
-struct QuoteCancelQuoteEntriesEventsArgs {
-    ::std::optional<::std::int64_t> event_type{};
-    ::std::optional<::std::string_view> event_date{};
-    ::std::optional<::fixpp::decimal_t> event_px{};
-    ::std::optional<::std::string_view> event_text{};
-};
-
-struct QuoteCancelQuoteEntriesUnderlyingsUnderlyingSecurityAltIDArgs {
-    ::std::optional<::std::string_view> underlying_security_alt_id{};
-    ::std::optional<::std::string_view> underlying_security_alt_id_source{};
-};
-
-struct QuoteCancelQuoteEntriesUnderlyingsUnderlyingStipsArgs {
-    ::std::optional<::std::string_view> underlying_stip_type{};
-    ::std::optional<::std::string_view> underlying_stip_value{};
-};
-
-struct QuoteCancelQuoteEntriesUnderlyingsArgs {
-    ::std::optional<::std::string_view> underlying_symbol{};
-    ::std::optional<::std::string_view> underlying_symbol_sfx{};
-    ::std::optional<::std::string_view> underlying_security_id{};
-    ::std::optional<::std::string_view> underlying_security_id_source{};
-    ::std::optional<::std::span<const QuoteCancelQuoteEntriesUnderlyingsUnderlyingSecurityAltIDArgs>> underlying_security_alt_id{};
-    ::std::optional<::std::int64_t> underlying_product{};
-    ::std::optional<::std::string_view> underlying_cfi_code{};
-    ::std::optional<::std::string_view> underlying_security_type{};
-    ::std::optional<::std::string_view> underlying_security_sub_type{};
-    ::std::optional<::std::string_view> underlying_maturity_month_year{};
-    ::std::optional<::std::string_view> underlying_maturity_date{};
-    ::std::optional<::std::int64_t> underlying_put_or_call{};
-    ::std::optional<::std::string_view> underlying_coupon_payment_date{};
-    ::std::optional<::std::string_view> underlying_issue_date{};
-    ::std::optional<::std::string_view> underlying_repo_collateral_security_type{};
-    ::std::optional<::std::int64_t> underlying_repurchase_term{};
-    ::std::optional<::fixpp::decimal_t> underlying_repurchase_rate{};
-    ::std::optional<::fixpp::decimal_t> underlying_factor{};
-    ::std::optional<::std::string_view> underlying_credit_rating{};
-    ::std::optional<::std::string_view> underlying_instr_registry{};
-    ::std::optional<::std::string_view> underlying_country_of_issue{};
-    ::std::optional<::std::string_view> underlying_state_or_province_of_issue{};
-    ::std::optional<::std::string_view> underlying_locale_of_issue{};
-    ::std::optional<::std::string_view> underlying_redemption_date{};
-    ::std::optional<::fixpp::decimal_t> underlying_strike_price{};
-    ::std::optional<::std::string_view> underlying_strike_currency{};
-    ::std::optional<char> underlying_opt_attribute{};
-    ::std::optional<::fixpp::decimal_t> underlying_contract_multiplier{};
-    ::std::optional<::fixpp::decimal_t> underlying_coupon_rate{};
-    ::std::optional<::std::string_view> underlying_security_exchange{};
-    ::std::optional<::std::string_view> underlying_issuer{};
-    ::std::optional<::std::string_view> encoded_underlying_issuer{};
-    ::std::optional<::std::string_view> underlying_security_desc{};
-    ::std::optional<::std::string_view> encoded_underlying_security_desc{};
-    ::std::optional<::std::string_view> underlying_cp_program{};
-    ::std::optional<::std::string_view> underlying_cp_reg_type{};
-    ::std::optional<::std::string_view> underlying_currency{};
-    ::std::optional<::fixpp::decimal_t> underlying_qty{};
-    ::std::optional<::fixpp::decimal_t> underlying_px{};
-    ::std::optional<::fixpp::decimal_t> underlying_dirty_price{};
-    ::std::optional<::fixpp::decimal_t> underlying_end_price{};
-    ::std::optional<::fixpp::decimal_t> underlying_start_value{};
-    ::std::optional<::fixpp::decimal_t> underlying_current_value{};
-    ::std::optional<::fixpp::decimal_t> underlying_end_value{};
-    ::std::optional<::std::span<const QuoteCancelQuoteEntriesUnderlyingsUnderlyingStipsArgs>> underlying_stips{};
-};
-
-struct QuoteCancelQuoteEntriesLegsLegSecurityAltIDArgs {
-    ::std::optional<::std::string_view> leg_security_alt_id{};
-    ::std::optional<::std::string_view> leg_security_alt_id_source{};
-};
-
-struct QuoteCancelQuoteEntriesLegsArgs {
-    ::std::optional<::std::string_view> leg_symbol{};
-    ::std::optional<::std::string_view> leg_symbol_sfx{};
-    ::std::optional<::std::string_view> leg_security_id{};
-    ::std::optional<::std::string_view> leg_security_id_source{};
-    ::std::optional<::std::span<const QuoteCancelQuoteEntriesLegsLegSecurityAltIDArgs>> leg_security_alt_id{};
-    ::std::optional<::std::int64_t> leg_product{};
-    ::std::optional<::std::string_view> leg_cfi_code{};
-    ::std::optional<::std::string_view> leg_security_type{};
-    ::std::optional<::std::string_view> leg_security_sub_type{};
-    ::std::optional<::std::string_view> leg_maturity_month_year{};
-    ::std::optional<::std::string_view> leg_maturity_date{};
-    ::std::optional<::std::string_view> leg_coupon_payment_date{};
-    ::std::optional<::std::string_view> leg_issue_date{};
-    ::std::optional<::std::string_view> leg_repo_collateral_security_type{};
-    ::std::optional<::std::int64_t> leg_repurchase_term{};
-    ::std::optional<::fixpp::decimal_t> leg_repurchase_rate{};
-    ::std::optional<::fixpp::decimal_t> leg_factor{};
-    ::std::optional<::std::string_view> leg_credit_rating{};
-    ::std::optional<::std::string_view> leg_instr_registry{};
-    ::std::optional<::std::string_view> leg_country_of_issue{};
-    ::std::optional<::std::string_view> leg_state_or_province_of_issue{};
-    ::std::optional<::std::string_view> leg_locale_of_issue{};
-    ::std::optional<::std::string_view> leg_redemption_date{};
-    ::std::optional<::fixpp::decimal_t> leg_strike_price{};
-    ::std::optional<::std::string_view> leg_strike_currency{};
-    ::std::optional<char> leg_opt_attribute{};
-    ::std::optional<::fixpp::decimal_t> leg_contract_multiplier{};
-    ::std::optional<::fixpp::decimal_t> leg_coupon_rate{};
-    ::std::optional<::std::string_view> leg_security_exchange{};
-    ::std::optional<::std::string_view> leg_issuer{};
-    ::std::optional<::std::string_view> encoded_leg_issuer{};
-    ::std::optional<::std::string_view> leg_security_desc{};
-    ::std::optional<::std::string_view> encoded_leg_security_desc{};
-    ::std::optional<::fixpp::decimal_t> leg_ratio_qty{};
-    ::std::optional<char> leg_side{};
-    ::std::optional<::std::string_view> leg_currency{};
-    ::std::optional<::std::string_view> leg_pool{};
-    ::std::optional<::std::string_view> leg_dated_date{};
-    ::std::optional<::std::string_view> leg_contract_settl_month{};
-    ::std::optional<::std::string_view> leg_interest_accrual_date{};
-};
-
-struct QuoteCancelQuoteEntriesArgs {
-    ::std::optional<::std::string_view> symbol{};
-    ::std::optional<::std::string_view> symbol_sfx{};
-    ::std::optional<::std::string_view> security_id{};
-    ::std::optional<::std::string_view> security_id_source{};
-    ::std::optional<::std::span<const QuoteCancelQuoteEntriesSecurityAltIDArgs>> security_alt_id{};
-    ::std::optional<::std::int64_t> product{};
-    ::std::optional<::std::string_view> cfi_code{};
-    ::std::optional<::std::string_view> security_type{};
-    ::std::optional<::std::string_view> security_sub_type{};
-    ::std::optional<::std::string_view> maturity_month_year{};
-    ::std::optional<::std::string_view> maturity_date{};
-    ::std::optional<::std::int64_t> put_or_call{};
-    ::std::optional<::std::string_view> coupon_payment_date{};
-    ::std::optional<::std::string_view> issue_date{};
-    ::std::optional<::std::string_view> repo_collateral_security_type{};
-    ::std::optional<::std::int64_t> repurchase_term{};
-    ::std::optional<::fixpp::decimal_t> repurchase_rate{};
-    ::std::optional<::fixpp::decimal_t> factor{};
-    ::std::optional<::std::string_view> credit_rating{};
-    ::std::optional<::std::string_view> instr_registry{};
-    ::std::optional<::std::string_view> country_of_issue{};
-    ::std::optional<::std::string_view> state_or_province_of_issue{};
-    ::std::optional<::std::string_view> locale_of_issue{};
-    ::std::optional<::std::string_view> redemption_date{};
-    ::std::optional<::fixpp::decimal_t> strike_price{};
-    ::std::optional<::std::string_view> strike_currency{};
-    ::std::optional<char> opt_attribute{};
-    ::std::optional<::fixpp::decimal_t> contract_multiplier{};
-    ::std::optional<::fixpp::decimal_t> coupon_rate{};
-    ::std::optional<::std::string_view> security_exchange{};
-    ::std::optional<::std::string_view> issuer{};
-    ::std::optional<::std::string_view> encoded_issuer{};
-    ::std::optional<::std::string_view> security_desc{};
-    ::std::optional<::std::string_view> encoded_security_desc{};
-    ::std::optional<::std::string_view> pool{};
-    ::std::optional<::std::string_view> contract_settl_month{};
-    ::std::optional<::std::int64_t> cp_program{};
-    ::std::optional<::std::string_view> cp_reg_type{};
-    ::std::optional<::std::span<const QuoteCancelQuoteEntriesEventsArgs>> events{};
-    ::std::optional<::std::string_view> dated_date{};
-    ::std::optional<::std::string_view> interest_accrual_date{};
-    ::std::optional<::std::string_view> agreement_desc{};
-    ::std::optional<::std::string_view> agreement_id{};
-    ::std::optional<::std::string_view> agreement_date{};
-    ::std::optional<::std::string_view> agreement_currency{};
-    ::std::optional<::std::int64_t> termination_type{};
-    ::std::optional<::std::string_view> start_date{};
-    ::std::optional<::std::string_view> end_date{};
-    ::std::optional<::std::int64_t> delivery_type{};
-    ::std::optional<::fixpp::decimal_t> margin_ratio{};
-    ::std::optional<::std::span<const QuoteCancelQuoteEntriesUnderlyingsArgs>> underlyings{};
-    ::std::optional<::std::span<const QuoteCancelQuoteEntriesLegsArgs>> legs{};
-};
-
-struct QuoteCancelPartyIDsPartySubIDsArgs {
-    ::std::optional<::std::string_view> party_sub_id{};
-    ::std::optional<::std::int64_t> party_sub_id_type{};
-};
-
-struct QuoteCancelPartyIDsArgs {
-    ::std::optional<::std::string_view> party_id{};
-    ::std::optional<char> party_id_source{};
-    ::std::optional<::std::int64_t> party_role{};
-    ::std::optional<::std::span<const QuoteCancelPartyIDsPartySubIDsArgs>> party_sub_i_ds{};
-};
-
 struct QuoteCancelArgs {
     ::std::optional<::std::string_view> account{};
     ::std::optional<::std::string_view> quote_id{};
     ::std::optional<::std::string_view> quote_req_id{};
-    ::std::optional<::std::span<const QuoteCancelQuoteEntriesArgs>> quote_entries{};
+    ::std::optional<::std::span<const groups::G_295_1Args>> quote_entries{};
     ::std::optional<::std::int64_t> quote_cancel_type{};
     ::std::optional<::std::int64_t> quote_response_level{};
     ::std::optional<::std::string_view> trading_session_id{};
-    ::std::optional<::std::span<const QuoteCancelPartyIDsArgs>> party_i_ds{};
+    ::std::optional<::std::span<const groups::G_453Args>> party_i_ds{};
     ::std::optional<::std::int64_t> account_type{};
     ::std::optional<::std::string_view> trading_session_sub_id{};
     ::std::optional<::std::int64_t> acct_id_source{};
@@ -21367,136 +19792,6 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_QuoteCancel(::s
     return bb.commit(out);
 }
 
-struct QuoteStatusRequestPartyIDsPartySubIDsArgs {
-    ::std::optional<::std::string_view> party_sub_id{};
-    ::std::optional<::std::int64_t> party_sub_id_type{};
-};
-
-struct QuoteStatusRequestPartyIDsArgs {
-    ::std::optional<::std::string_view> party_id{};
-    ::std::optional<char> party_id_source{};
-    ::std::optional<::std::int64_t> party_role{};
-    ::std::optional<::std::span<const QuoteStatusRequestPartyIDsPartySubIDsArgs>> party_sub_i_ds{};
-};
-
-struct QuoteStatusRequestSecurityAltIDArgs {
-    ::std::optional<::std::string_view> security_alt_id{};
-    ::std::optional<::std::string_view> security_alt_id_source{};
-};
-
-struct QuoteStatusRequestLegsLegSecurityAltIDArgs {
-    ::std::optional<::std::string_view> leg_security_alt_id{};
-    ::std::optional<::std::string_view> leg_security_alt_id_source{};
-};
-
-struct QuoteStatusRequestLegsArgs {
-    ::std::optional<::std::string_view> leg_symbol{};
-    ::std::optional<::std::string_view> leg_symbol_sfx{};
-    ::std::optional<::std::string_view> leg_security_id{};
-    ::std::optional<::std::string_view> leg_security_id_source{};
-    ::std::optional<::std::span<const QuoteStatusRequestLegsLegSecurityAltIDArgs>> leg_security_alt_id{};
-    ::std::optional<::std::int64_t> leg_product{};
-    ::std::optional<::std::string_view> leg_cfi_code{};
-    ::std::optional<::std::string_view> leg_security_type{};
-    ::std::optional<::std::string_view> leg_security_sub_type{};
-    ::std::optional<::std::string_view> leg_maturity_month_year{};
-    ::std::optional<::std::string_view> leg_maturity_date{};
-    ::std::optional<::std::string_view> leg_coupon_payment_date{};
-    ::std::optional<::std::string_view> leg_issue_date{};
-    ::std::optional<::std::string_view> leg_repo_collateral_security_type{};
-    ::std::optional<::std::int64_t> leg_repurchase_term{};
-    ::std::optional<::fixpp::decimal_t> leg_repurchase_rate{};
-    ::std::optional<::fixpp::decimal_t> leg_factor{};
-    ::std::optional<::std::string_view> leg_credit_rating{};
-    ::std::optional<::std::string_view> leg_instr_registry{};
-    ::std::optional<::std::string_view> leg_country_of_issue{};
-    ::std::optional<::std::string_view> leg_state_or_province_of_issue{};
-    ::std::optional<::std::string_view> leg_locale_of_issue{};
-    ::std::optional<::std::string_view> leg_redemption_date{};
-    ::std::optional<::fixpp::decimal_t> leg_strike_price{};
-    ::std::optional<::std::string_view> leg_strike_currency{};
-    ::std::optional<char> leg_opt_attribute{};
-    ::std::optional<::fixpp::decimal_t> leg_contract_multiplier{};
-    ::std::optional<::fixpp::decimal_t> leg_coupon_rate{};
-    ::std::optional<::std::string_view> leg_security_exchange{};
-    ::std::optional<::std::string_view> leg_issuer{};
-    ::std::optional<::std::string_view> encoded_leg_issuer{};
-    ::std::optional<::std::string_view> leg_security_desc{};
-    ::std::optional<::std::string_view> encoded_leg_security_desc{};
-    ::std::optional<::fixpp::decimal_t> leg_ratio_qty{};
-    ::std::optional<char> leg_side{};
-    ::std::optional<::std::string_view> leg_currency{};
-    ::std::optional<::std::string_view> leg_pool{};
-    ::std::optional<::std::string_view> leg_dated_date{};
-    ::std::optional<::std::string_view> leg_contract_settl_month{};
-    ::std::optional<::std::string_view> leg_interest_accrual_date{};
-};
-
-struct QuoteStatusRequestUnderlyingsUnderlyingSecurityAltIDArgs {
-    ::std::optional<::std::string_view> underlying_security_alt_id{};
-    ::std::optional<::std::string_view> underlying_security_alt_id_source{};
-};
-
-struct QuoteStatusRequestUnderlyingsUnderlyingStipsArgs {
-    ::std::optional<::std::string_view> underlying_stip_type{};
-    ::std::optional<::std::string_view> underlying_stip_value{};
-};
-
-struct QuoteStatusRequestUnderlyingsArgs {
-    ::std::optional<::std::string_view> underlying_symbol{};
-    ::std::optional<::std::string_view> underlying_symbol_sfx{};
-    ::std::optional<::std::string_view> underlying_security_id{};
-    ::std::optional<::std::string_view> underlying_security_id_source{};
-    ::std::optional<::std::span<const QuoteStatusRequestUnderlyingsUnderlyingSecurityAltIDArgs>> underlying_security_alt_id{};
-    ::std::optional<::std::int64_t> underlying_product{};
-    ::std::optional<::std::string_view> underlying_cfi_code{};
-    ::std::optional<::std::string_view> underlying_security_type{};
-    ::std::optional<::std::string_view> underlying_security_sub_type{};
-    ::std::optional<::std::string_view> underlying_maturity_month_year{};
-    ::std::optional<::std::string_view> underlying_maturity_date{};
-    ::std::optional<::std::int64_t> underlying_put_or_call{};
-    ::std::optional<::std::string_view> underlying_coupon_payment_date{};
-    ::std::optional<::std::string_view> underlying_issue_date{};
-    ::std::optional<::std::string_view> underlying_repo_collateral_security_type{};
-    ::std::optional<::std::int64_t> underlying_repurchase_term{};
-    ::std::optional<::fixpp::decimal_t> underlying_repurchase_rate{};
-    ::std::optional<::fixpp::decimal_t> underlying_factor{};
-    ::std::optional<::std::string_view> underlying_credit_rating{};
-    ::std::optional<::std::string_view> underlying_instr_registry{};
-    ::std::optional<::std::string_view> underlying_country_of_issue{};
-    ::std::optional<::std::string_view> underlying_state_or_province_of_issue{};
-    ::std::optional<::std::string_view> underlying_locale_of_issue{};
-    ::std::optional<::std::string_view> underlying_redemption_date{};
-    ::std::optional<::fixpp::decimal_t> underlying_strike_price{};
-    ::std::optional<::std::string_view> underlying_strike_currency{};
-    ::std::optional<char> underlying_opt_attribute{};
-    ::std::optional<::fixpp::decimal_t> underlying_contract_multiplier{};
-    ::std::optional<::fixpp::decimal_t> underlying_coupon_rate{};
-    ::std::optional<::std::string_view> underlying_security_exchange{};
-    ::std::optional<::std::string_view> underlying_issuer{};
-    ::std::optional<::std::string_view> encoded_underlying_issuer{};
-    ::std::optional<::std::string_view> underlying_security_desc{};
-    ::std::optional<::std::string_view> encoded_underlying_security_desc{};
-    ::std::optional<::std::string_view> underlying_cp_program{};
-    ::std::optional<::std::string_view> underlying_cp_reg_type{};
-    ::std::optional<::std::string_view> underlying_currency{};
-    ::std::optional<::fixpp::decimal_t> underlying_qty{};
-    ::std::optional<::fixpp::decimal_t> underlying_px{};
-    ::std::optional<::fixpp::decimal_t> underlying_dirty_price{};
-    ::std::optional<::fixpp::decimal_t> underlying_end_price{};
-    ::std::optional<::fixpp::decimal_t> underlying_start_value{};
-    ::std::optional<::fixpp::decimal_t> underlying_current_value{};
-    ::std::optional<::fixpp::decimal_t> underlying_end_value{};
-    ::std::optional<::std::span<const QuoteStatusRequestUnderlyingsUnderlyingStipsArgs>> underlying_stips{};
-};
-
-struct QuoteStatusRequestEventsArgs {
-    ::std::optional<::std::int64_t> event_type{};
-    ::std::optional<::std::string_view> event_date{};
-    ::std::optional<::fixpp::decimal_t> event_px{};
-    ::std::optional<::std::string_view> event_text{};
-};
-
 struct QuoteStatusRequestArgs {
     ::std::optional<::std::string_view> account{};
     ::std::optional<::std::string_view> security_id_source{};
@@ -21526,8 +19821,8 @@ struct QuoteStatusRequestArgs {
     ::std::optional<::std::string_view> trading_session_id{};
     ::std::optional<::std::string_view> encoded_issuer{};
     ::std::optional<::std::string_view> encoded_security_desc{};
-    ::std::optional<::std::span<const QuoteStatusRequestPartyIDsArgs>> party_i_ds{};
-    ::std::optional<::std::span<const QuoteStatusRequestSecurityAltIDArgs>> security_alt_id{};
+    ::std::optional<::std::span<const groups::G_453Args>> party_i_ds{};
+    ::std::optional<::std::span<const groups::G_454Args>> security_alt_id{};
     ::std::optional<::std::int64_t> product{};
     ::std::optional<::std::string_view> cfi_code{};
     ::std::optional<::std::string_view> country_of_issue{};
@@ -21535,17 +19830,17 @@ struct QuoteStatusRequestArgs {
     ::std::optional<::std::string_view> locale_of_issue{};
     ::std::optional<::std::string_view> maturity_date{};
     ::std::optional<::std::string_view> instr_registry{};
-    ::std::optional<::std::span<const QuoteStatusRequestLegsArgs>> legs{};
+    ::std::optional<::std::span<const groups::G_555_4Args>> legs{};
     ::std::optional<::std::int64_t> account_type{};
     ::std::optional<::std::string_view> trading_session_sub_id{};
     ::std::optional<::std::string_view> quote_status_req_id{};
     ::std::optional<::std::int64_t> acct_id_source{};
     ::std::optional<::std::string_view> contract_settl_month{};
     ::std::optional<::std::string_view> pool{};
-    ::std::optional<::std::span<const QuoteStatusRequestUnderlyingsArgs>> underlyings{};
+    ::std::optional<::std::span<const groups::G_711Args>> underlyings{};
     ::std::optional<::std::string_view> security_sub_type{};
     ::std::optional<::std::int64_t> termination_type{};
-    ::std::optional<::std::span<const QuoteStatusRequestEventsArgs>> events{};
+    ::std::optional<::std::span<const groups::G_864Args>> events{};
     ::std::optional<::std::string_view> dated_date{};
     ::std::optional<::std::string_view> interest_accrual_date{};
     ::std::optional<::std::int64_t> cp_program{};
@@ -22297,221 +20592,17 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_QuoteStatusRequ
     return bb.commit(out);
 }
 
-struct MassQuoteAcknowledgementQuoteSetsUnderlyingSecurityAltIDArgs {
-    ::std::optional<::std::string_view> underlying_security_alt_id{};
-    ::std::optional<::std::string_view> underlying_security_alt_id_source{};
-};
-
-struct MassQuoteAcknowledgementQuoteSetsUnderlyingStipsArgs {
-    ::std::optional<::std::string_view> underlying_stip_type{};
-    ::std::optional<::std::string_view> underlying_stip_value{};
-};
-
-struct MassQuoteAcknowledgementQuoteSetsQuoteEntriesSecurityAltIDArgs {
-    ::std::optional<::std::string_view> security_alt_id{};
-    ::std::optional<::std::string_view> security_alt_id_source{};
-};
-
-struct MassQuoteAcknowledgementQuoteSetsQuoteEntriesEventsArgs {
-    ::std::optional<::std::int64_t> event_type{};
-    ::std::optional<::std::string_view> event_date{};
-    ::std::optional<::fixpp::decimal_t> event_px{};
-    ::std::optional<::std::string_view> event_text{};
-};
-
-struct MassQuoteAcknowledgementQuoteSetsQuoteEntriesLegsLegSecurityAltIDArgs {
-    ::std::optional<::std::string_view> leg_security_alt_id{};
-    ::std::optional<::std::string_view> leg_security_alt_id_source{};
-};
-
-struct MassQuoteAcknowledgementQuoteSetsQuoteEntriesLegsArgs {
-    ::std::optional<::std::string_view> leg_symbol{};
-    ::std::optional<::std::string_view> leg_symbol_sfx{};
-    ::std::optional<::std::string_view> leg_security_id{};
-    ::std::optional<::std::string_view> leg_security_id_source{};
-    ::std::optional<::std::span<const MassQuoteAcknowledgementQuoteSetsQuoteEntriesLegsLegSecurityAltIDArgs>> leg_security_alt_id{};
-    ::std::optional<::std::int64_t> leg_product{};
-    ::std::optional<::std::string_view> leg_cfi_code{};
-    ::std::optional<::std::string_view> leg_security_type{};
-    ::std::optional<::std::string_view> leg_security_sub_type{};
-    ::std::optional<::std::string_view> leg_maturity_month_year{};
-    ::std::optional<::std::string_view> leg_maturity_date{};
-    ::std::optional<::std::string_view> leg_coupon_payment_date{};
-    ::std::optional<::std::string_view> leg_issue_date{};
-    ::std::optional<::std::string_view> leg_repo_collateral_security_type{};
-    ::std::optional<::std::int64_t> leg_repurchase_term{};
-    ::std::optional<::fixpp::decimal_t> leg_repurchase_rate{};
-    ::std::optional<::fixpp::decimal_t> leg_factor{};
-    ::std::optional<::std::string_view> leg_credit_rating{};
-    ::std::optional<::std::string_view> leg_instr_registry{};
-    ::std::optional<::std::string_view> leg_country_of_issue{};
-    ::std::optional<::std::string_view> leg_state_or_province_of_issue{};
-    ::std::optional<::std::string_view> leg_locale_of_issue{};
-    ::std::optional<::std::string_view> leg_redemption_date{};
-    ::std::optional<::fixpp::decimal_t> leg_strike_price{};
-    ::std::optional<::std::string_view> leg_strike_currency{};
-    ::std::optional<char> leg_opt_attribute{};
-    ::std::optional<::fixpp::decimal_t> leg_contract_multiplier{};
-    ::std::optional<::fixpp::decimal_t> leg_coupon_rate{};
-    ::std::optional<::std::string_view> leg_security_exchange{};
-    ::std::optional<::std::string_view> leg_issuer{};
-    ::std::optional<::std::string_view> encoded_leg_issuer{};
-    ::std::optional<::std::string_view> leg_security_desc{};
-    ::std::optional<::std::string_view> encoded_leg_security_desc{};
-    ::std::optional<::fixpp::decimal_t> leg_ratio_qty{};
-    ::std::optional<char> leg_side{};
-    ::std::optional<::std::string_view> leg_currency{};
-    ::std::optional<::std::string_view> leg_pool{};
-    ::std::optional<::std::string_view> leg_dated_date{};
-    ::std::optional<::std::string_view> leg_contract_settl_month{};
-    ::std::optional<::std::string_view> leg_interest_accrual_date{};
-};
-
-struct MassQuoteAcknowledgementQuoteSetsQuoteEntriesArgs {
-    ::std::optional<::std::string_view> quote_entry_id{};
-    ::std::optional<::std::string_view> symbol{};
-    ::std::optional<::std::string_view> symbol_sfx{};
-    ::std::optional<::std::string_view> security_id{};
-    ::std::optional<::std::string_view> security_id_source{};
-    ::std::optional<::std::span<const MassQuoteAcknowledgementQuoteSetsQuoteEntriesSecurityAltIDArgs>> security_alt_id{};
-    ::std::optional<::std::int64_t> product{};
-    ::std::optional<::std::string_view> cfi_code{};
-    ::std::optional<::std::string_view> security_type{};
-    ::std::optional<::std::string_view> security_sub_type{};
-    ::std::optional<::std::string_view> maturity_month_year{};
-    ::std::optional<::std::string_view> maturity_date{};
-    ::std::optional<::std::int64_t> put_or_call{};
-    ::std::optional<::std::string_view> coupon_payment_date{};
-    ::std::optional<::std::string_view> issue_date{};
-    ::std::optional<::std::string_view> repo_collateral_security_type{};
-    ::std::optional<::std::int64_t> repurchase_term{};
-    ::std::optional<::fixpp::decimal_t> repurchase_rate{};
-    ::std::optional<::fixpp::decimal_t> factor{};
-    ::std::optional<::std::string_view> credit_rating{};
-    ::std::optional<::std::string_view> instr_registry{};
-    ::std::optional<::std::string_view> country_of_issue{};
-    ::std::optional<::std::string_view> state_or_province_of_issue{};
-    ::std::optional<::std::string_view> locale_of_issue{};
-    ::std::optional<::std::string_view> redemption_date{};
-    ::std::optional<::fixpp::decimal_t> strike_price{};
-    ::std::optional<::std::string_view> strike_currency{};
-    ::std::optional<char> opt_attribute{};
-    ::std::optional<::fixpp::decimal_t> contract_multiplier{};
-    ::std::optional<::fixpp::decimal_t> coupon_rate{};
-    ::std::optional<::std::string_view> security_exchange{};
-    ::std::optional<::std::string_view> issuer{};
-    ::std::optional<::std::string_view> encoded_issuer{};
-    ::std::optional<::std::string_view> security_desc{};
-    ::std::optional<::std::string_view> encoded_security_desc{};
-    ::std::optional<::std::string_view> pool{};
-    ::std::optional<::std::string_view> contract_settl_month{};
-    ::std::optional<::std::int64_t> cp_program{};
-    ::std::optional<::std::string_view> cp_reg_type{};
-    ::std::optional<::std::span<const MassQuoteAcknowledgementQuoteSetsQuoteEntriesEventsArgs>> events{};
-    ::std::optional<::std::string_view> dated_date{};
-    ::std::optional<::std::string_view> interest_accrual_date{};
-    ::std::optional<::std::span<const MassQuoteAcknowledgementQuoteSetsQuoteEntriesLegsArgs>> legs{};
-    ::std::optional<::fixpp::decimal_t> bid_px{};
-    ::std::optional<::fixpp::decimal_t> offer_px{};
-    ::std::optional<::fixpp::decimal_t> bid_size{};
-    ::std::optional<::fixpp::decimal_t> offer_size{};
-    ::std::optional<::std::string_view> valid_until_time{};
-    ::std::optional<::fixpp::decimal_t> bid_spot_rate{};
-    ::std::optional<::fixpp::decimal_t> offer_spot_rate{};
-    ::std::optional<::fixpp::decimal_t> bid_forward_points{};
-    ::std::optional<::fixpp::decimal_t> offer_forward_points{};
-    ::std::optional<::fixpp::decimal_t> mid_px{};
-    ::std::optional<::fixpp::decimal_t> bid_yield{};
-    ::std::optional<::fixpp::decimal_t> mid_yield{};
-    ::std::optional<::fixpp::decimal_t> offer_yield{};
-    ::std::optional<::std::string_view> transact_time{};
-    ::std::optional<::std::string_view> trading_session_id{};
-    ::std::optional<::std::string_view> trading_session_sub_id{};
-    ::std::optional<::std::string_view> settl_date{};
-    ::std::optional<char> ord_type{};
-    ::std::optional<::std::string_view> settl_date2{};
-    ::std::optional<::fixpp::decimal_t> order_qty2{};
-    ::std::optional<::fixpp::decimal_t> bid_forward_points2{};
-    ::std::optional<::fixpp::decimal_t> offer_forward_points2{};
-    ::std::optional<::std::string_view> currency{};
-    ::std::optional<::std::int64_t> quote_entry_reject_reason{};
-};
-
-struct MassQuoteAcknowledgementQuoteSetsArgs {
-    ::std::optional<::std::string_view> quote_set_id{};
-    ::std::optional<::std::string_view> underlying_symbol{};
-    ::std::optional<::std::string_view> underlying_symbol_sfx{};
-    ::std::optional<::std::string_view> underlying_security_id{};
-    ::std::optional<::std::string_view> underlying_security_id_source{};
-    ::std::optional<::std::span<const MassQuoteAcknowledgementQuoteSetsUnderlyingSecurityAltIDArgs>> underlying_security_alt_id{};
-    ::std::optional<::std::int64_t> underlying_product{};
-    ::std::optional<::std::string_view> underlying_cfi_code{};
-    ::std::optional<::std::string_view> underlying_security_type{};
-    ::std::optional<::std::string_view> underlying_security_sub_type{};
-    ::std::optional<::std::string_view> underlying_maturity_month_year{};
-    ::std::optional<::std::string_view> underlying_maturity_date{};
-    ::std::optional<::std::int64_t> underlying_put_or_call{};
-    ::std::optional<::std::string_view> underlying_coupon_payment_date{};
-    ::std::optional<::std::string_view> underlying_issue_date{};
-    ::std::optional<::std::string_view> underlying_repo_collateral_security_type{};
-    ::std::optional<::std::int64_t> underlying_repurchase_term{};
-    ::std::optional<::fixpp::decimal_t> underlying_repurchase_rate{};
-    ::std::optional<::fixpp::decimal_t> underlying_factor{};
-    ::std::optional<::std::string_view> underlying_credit_rating{};
-    ::std::optional<::std::string_view> underlying_instr_registry{};
-    ::std::optional<::std::string_view> underlying_country_of_issue{};
-    ::std::optional<::std::string_view> underlying_state_or_province_of_issue{};
-    ::std::optional<::std::string_view> underlying_locale_of_issue{};
-    ::std::optional<::std::string_view> underlying_redemption_date{};
-    ::std::optional<::fixpp::decimal_t> underlying_strike_price{};
-    ::std::optional<::std::string_view> underlying_strike_currency{};
-    ::std::optional<char> underlying_opt_attribute{};
-    ::std::optional<::fixpp::decimal_t> underlying_contract_multiplier{};
-    ::std::optional<::fixpp::decimal_t> underlying_coupon_rate{};
-    ::std::optional<::std::string_view> underlying_security_exchange{};
-    ::std::optional<::std::string_view> underlying_issuer{};
-    ::std::optional<::std::string_view> encoded_underlying_issuer{};
-    ::std::optional<::std::string_view> underlying_security_desc{};
-    ::std::optional<::std::string_view> encoded_underlying_security_desc{};
-    ::std::optional<::std::string_view> underlying_cp_program{};
-    ::std::optional<::std::string_view> underlying_cp_reg_type{};
-    ::std::optional<::std::string_view> underlying_currency{};
-    ::std::optional<::fixpp::decimal_t> underlying_qty{};
-    ::std::optional<::fixpp::decimal_t> underlying_px{};
-    ::std::optional<::fixpp::decimal_t> underlying_dirty_price{};
-    ::std::optional<::fixpp::decimal_t> underlying_end_price{};
-    ::std::optional<::fixpp::decimal_t> underlying_start_value{};
-    ::std::optional<::fixpp::decimal_t> underlying_current_value{};
-    ::std::optional<::fixpp::decimal_t> underlying_end_value{};
-    ::std::optional<::std::span<const MassQuoteAcknowledgementQuoteSetsUnderlyingStipsArgs>> underlying_stips{};
-    ::std::optional<::std::int64_t> tot_no_quote_entries{};
-    ::std::optional<bool> last_fragment{};
-    ::std::optional<::std::span<const MassQuoteAcknowledgementQuoteSetsQuoteEntriesArgs>> quote_entries{};
-};
-
-struct MassQuoteAcknowledgementPartyIDsPartySubIDsArgs {
-    ::std::optional<::std::string_view> party_sub_id{};
-    ::std::optional<::std::int64_t> party_sub_id_type{};
-};
-
-struct MassQuoteAcknowledgementPartyIDsArgs {
-    ::std::optional<::std::string_view> party_id{};
-    ::std::optional<char> party_id_source{};
-    ::std::optional<::std::int64_t> party_role{};
-    ::std::optional<::std::span<const MassQuoteAcknowledgementPartyIDsPartySubIDsArgs>> party_sub_i_ds{};
-};
-
 struct MassQuoteAcknowledgementArgs {
     ::std::optional<::std::string_view> account{};
     ::std::optional<::std::string_view> text{};
     ::std::optional<::std::string_view> quote_id{};
     ::std::optional<::std::string_view> quote_req_id{};
-    ::std::optional<::std::span<const MassQuoteAcknowledgementQuoteSetsArgs>> quote_sets{};
+    ::std::optional<::std::span<const groups::G_296_1Args>> quote_sets{};
     ::std::optional<::std::int64_t> quote_status{};
     ::std::optional<::std::int64_t> quote_reject_reason{};
     ::std::optional<::std::int64_t> quote_response_level{};
     ::std::optional<::std::string_view> encoded_text{};
-    ::std::optional<::std::span<const MassQuoteAcknowledgementPartyIDsArgs>> party_i_ds{};
+    ::std::optional<::std::span<const groups::G_453Args>> party_i_ds{};
     ::std::optional<::std::int64_t> quote_type{};
     ::std::optional<::std::int64_t> account_type{};
     ::std::optional<::std::int64_t> acct_id_source{};
@@ -23354,129 +21445,6 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_MassQuoteAcknow
     return bb.commit(out);
 }
 
-struct SecurityDefinitionRequestSecurityAltIDArgs {
-    ::std::optional<::std::string_view> security_alt_id{};
-    ::std::optional<::std::string_view> security_alt_id_source{};
-};
-
-struct SecurityDefinitionRequestLegsLegSecurityAltIDArgs {
-    ::std::optional<::std::string_view> leg_security_alt_id{};
-    ::std::optional<::std::string_view> leg_security_alt_id_source{};
-};
-
-struct SecurityDefinitionRequestLegsArgs {
-    ::std::optional<::std::string_view> leg_symbol{};
-    ::std::optional<::std::string_view> leg_symbol_sfx{};
-    ::std::optional<::std::string_view> leg_security_id{};
-    ::std::optional<::std::string_view> leg_security_id_source{};
-    ::std::optional<::std::span<const SecurityDefinitionRequestLegsLegSecurityAltIDArgs>> leg_security_alt_id{};
-    ::std::optional<::std::int64_t> leg_product{};
-    ::std::optional<::std::string_view> leg_cfi_code{};
-    ::std::optional<::std::string_view> leg_security_type{};
-    ::std::optional<::std::string_view> leg_security_sub_type{};
-    ::std::optional<::std::string_view> leg_maturity_month_year{};
-    ::std::optional<::std::string_view> leg_maturity_date{};
-    ::std::optional<::std::string_view> leg_coupon_payment_date{};
-    ::std::optional<::std::string_view> leg_issue_date{};
-    ::std::optional<::std::string_view> leg_repo_collateral_security_type{};
-    ::std::optional<::std::int64_t> leg_repurchase_term{};
-    ::std::optional<::fixpp::decimal_t> leg_repurchase_rate{};
-    ::std::optional<::fixpp::decimal_t> leg_factor{};
-    ::std::optional<::std::string_view> leg_credit_rating{};
-    ::std::optional<::std::string_view> leg_instr_registry{};
-    ::std::optional<::std::string_view> leg_country_of_issue{};
-    ::std::optional<::std::string_view> leg_state_or_province_of_issue{};
-    ::std::optional<::std::string_view> leg_locale_of_issue{};
-    ::std::optional<::std::string_view> leg_redemption_date{};
-    ::std::optional<::fixpp::decimal_t> leg_strike_price{};
-    ::std::optional<::std::string_view> leg_strike_currency{};
-    ::std::optional<char> leg_opt_attribute{};
-    ::std::optional<::fixpp::decimal_t> leg_contract_multiplier{};
-    ::std::optional<::fixpp::decimal_t> leg_coupon_rate{};
-    ::std::optional<::std::string_view> leg_security_exchange{};
-    ::std::optional<::std::string_view> leg_issuer{};
-    ::std::optional<::std::string_view> encoded_leg_issuer{};
-    ::std::optional<::std::string_view> leg_security_desc{};
-    ::std::optional<::std::string_view> encoded_leg_security_desc{};
-    ::std::optional<::fixpp::decimal_t> leg_ratio_qty{};
-    ::std::optional<char> leg_side{};
-    ::std::optional<::std::string_view> leg_currency{};
-    ::std::optional<::std::string_view> leg_pool{};
-    ::std::optional<::std::string_view> leg_dated_date{};
-    ::std::optional<::std::string_view> leg_contract_settl_month{};
-    ::std::optional<::std::string_view> leg_interest_accrual_date{};
-};
-
-struct SecurityDefinitionRequestUnderlyingsUnderlyingSecurityAltIDArgs {
-    ::std::optional<::std::string_view> underlying_security_alt_id{};
-    ::std::optional<::std::string_view> underlying_security_alt_id_source{};
-};
-
-struct SecurityDefinitionRequestUnderlyingsUnderlyingStipsArgs {
-    ::std::optional<::std::string_view> underlying_stip_type{};
-    ::std::optional<::std::string_view> underlying_stip_value{};
-};
-
-struct SecurityDefinitionRequestUnderlyingsArgs {
-    ::std::optional<::std::string_view> underlying_symbol{};
-    ::std::optional<::std::string_view> underlying_symbol_sfx{};
-    ::std::optional<::std::string_view> underlying_security_id{};
-    ::std::optional<::std::string_view> underlying_security_id_source{};
-    ::std::optional<::std::span<const SecurityDefinitionRequestUnderlyingsUnderlyingSecurityAltIDArgs>> underlying_security_alt_id{};
-    ::std::optional<::std::int64_t> underlying_product{};
-    ::std::optional<::std::string_view> underlying_cfi_code{};
-    ::std::optional<::std::string_view> underlying_security_type{};
-    ::std::optional<::std::string_view> underlying_security_sub_type{};
-    ::std::optional<::std::string_view> underlying_maturity_month_year{};
-    ::std::optional<::std::string_view> underlying_maturity_date{};
-    ::std::optional<::std::int64_t> underlying_put_or_call{};
-    ::std::optional<::std::string_view> underlying_coupon_payment_date{};
-    ::std::optional<::std::string_view> underlying_issue_date{};
-    ::std::optional<::std::string_view> underlying_repo_collateral_security_type{};
-    ::std::optional<::std::int64_t> underlying_repurchase_term{};
-    ::std::optional<::fixpp::decimal_t> underlying_repurchase_rate{};
-    ::std::optional<::fixpp::decimal_t> underlying_factor{};
-    ::std::optional<::std::string_view> underlying_credit_rating{};
-    ::std::optional<::std::string_view> underlying_instr_registry{};
-    ::std::optional<::std::string_view> underlying_country_of_issue{};
-    ::std::optional<::std::string_view> underlying_state_or_province_of_issue{};
-    ::std::optional<::std::string_view> underlying_locale_of_issue{};
-    ::std::optional<::std::string_view> underlying_redemption_date{};
-    ::std::optional<::fixpp::decimal_t> underlying_strike_price{};
-    ::std::optional<::std::string_view> underlying_strike_currency{};
-    ::std::optional<char> underlying_opt_attribute{};
-    ::std::optional<::fixpp::decimal_t> underlying_contract_multiplier{};
-    ::std::optional<::fixpp::decimal_t> underlying_coupon_rate{};
-    ::std::optional<::std::string_view> underlying_security_exchange{};
-    ::std::optional<::std::string_view> underlying_issuer{};
-    ::std::optional<::std::string_view> encoded_underlying_issuer{};
-    ::std::optional<::std::string_view> underlying_security_desc{};
-    ::std::optional<::std::string_view> encoded_underlying_security_desc{};
-    ::std::optional<::std::string_view> underlying_cp_program{};
-    ::std::optional<::std::string_view> underlying_cp_reg_type{};
-    ::std::optional<::std::string_view> underlying_currency{};
-    ::std::optional<::fixpp::decimal_t> underlying_qty{};
-    ::std::optional<::fixpp::decimal_t> underlying_px{};
-    ::std::optional<::fixpp::decimal_t> underlying_dirty_price{};
-    ::std::optional<::fixpp::decimal_t> underlying_end_price{};
-    ::std::optional<::fixpp::decimal_t> underlying_start_value{};
-    ::std::optional<::fixpp::decimal_t> underlying_current_value{};
-    ::std::optional<::fixpp::decimal_t> underlying_end_value{};
-    ::std::optional<::std::span<const SecurityDefinitionRequestUnderlyingsUnderlyingStipsArgs>> underlying_stips{};
-};
-
-struct SecurityDefinitionRequestEventsArgs {
-    ::std::optional<::std::int64_t> event_type{};
-    ::std::optional<::std::string_view> event_date{};
-    ::std::optional<::fixpp::decimal_t> event_px{};
-    ::std::optional<::std::string_view> event_text{};
-};
-
-struct SecurityDefinitionRequestInstrAttribArgs {
-    ::std::optional<::std::int64_t> instr_attrib_type{};
-    ::std::optional<::std::string_view> instr_attrib_value{};
-};
-
 struct SecurityDefinitionRequestArgs {
     ::std::optional<::std::string_view> currency{};
     ::std::optional<::std::string_view> security_id_source{};
@@ -23509,7 +21477,7 @@ struct SecurityDefinitionRequestArgs {
     ::std::optional<::std::string_view> encoded_issuer{};
     ::std::optional<::std::string_view> encoded_security_desc{};
     ::std::optional<::std::string_view> encoded_text{};
-    ::std::optional<::std::span<const SecurityDefinitionRequestSecurityAltIDArgs>> security_alt_id{};
+    ::std::optional<::std::span<const groups::G_454Args>> security_alt_id{};
     ::std::optional<::std::int64_t> product{};
     ::std::optional<::std::string_view> cfi_code{};
     ::std::optional<::std::string_view> country_of_issue{};
@@ -23517,17 +21485,17 @@ struct SecurityDefinitionRequestArgs {
     ::std::optional<::std::string_view> locale_of_issue{};
     ::std::optional<::std::string_view> maturity_date{};
     ::std::optional<::std::string_view> instr_registry{};
-    ::std::optional<::std::span<const SecurityDefinitionRequestLegsArgs>> legs{};
+    ::std::optional<::std::span<const groups::G_555_4Args>> legs{};
     ::std::optional<::std::string_view> trading_session_sub_id{};
     ::std::optional<::std::string_view> contract_settl_month{};
     ::std::optional<::std::int64_t> delivery_form{};
     ::std::optional<::std::string_view> pool{};
-    ::std::optional<::std::span<const SecurityDefinitionRequestUnderlyingsArgs>> underlyings{};
+    ::std::optional<::std::span<const groups::G_711Args>> underlyings{};
     ::std::optional<::std::string_view> security_sub_type{};
     ::std::optional<::std::int64_t> expiration_cycle{};
-    ::std::optional<::std::span<const SecurityDefinitionRequestEventsArgs>> events{};
+    ::std::optional<::std::span<const groups::G_864Args>> events{};
     ::std::optional<::fixpp::decimal_t> pct_at_risk{};
-    ::std::optional<::std::span<const SecurityDefinitionRequestInstrAttribArgs>> instr_attrib{};
+    ::std::optional<::std::span<const groups::G_870Args>> instr_attrib{};
     ::std::optional<::std::string_view> dated_date{};
     ::std::optional<::std::string_view> interest_accrual_date{};
     ::std::optional<::std::int64_t> cp_program{};
@@ -24226,129 +22194,6 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_SecurityDefinit
     return bb.commit(out);
 }
 
-struct SecurityDefinitionSecurityAltIDArgs {
-    ::std::optional<::std::string_view> security_alt_id{};
-    ::std::optional<::std::string_view> security_alt_id_source{};
-};
-
-struct SecurityDefinitionLegsLegSecurityAltIDArgs {
-    ::std::optional<::std::string_view> leg_security_alt_id{};
-    ::std::optional<::std::string_view> leg_security_alt_id_source{};
-};
-
-struct SecurityDefinitionLegsArgs {
-    ::std::optional<::std::string_view> leg_symbol{};
-    ::std::optional<::std::string_view> leg_symbol_sfx{};
-    ::std::optional<::std::string_view> leg_security_id{};
-    ::std::optional<::std::string_view> leg_security_id_source{};
-    ::std::optional<::std::span<const SecurityDefinitionLegsLegSecurityAltIDArgs>> leg_security_alt_id{};
-    ::std::optional<::std::int64_t> leg_product{};
-    ::std::optional<::std::string_view> leg_cfi_code{};
-    ::std::optional<::std::string_view> leg_security_type{};
-    ::std::optional<::std::string_view> leg_security_sub_type{};
-    ::std::optional<::std::string_view> leg_maturity_month_year{};
-    ::std::optional<::std::string_view> leg_maturity_date{};
-    ::std::optional<::std::string_view> leg_coupon_payment_date{};
-    ::std::optional<::std::string_view> leg_issue_date{};
-    ::std::optional<::std::string_view> leg_repo_collateral_security_type{};
-    ::std::optional<::std::int64_t> leg_repurchase_term{};
-    ::std::optional<::fixpp::decimal_t> leg_repurchase_rate{};
-    ::std::optional<::fixpp::decimal_t> leg_factor{};
-    ::std::optional<::std::string_view> leg_credit_rating{};
-    ::std::optional<::std::string_view> leg_instr_registry{};
-    ::std::optional<::std::string_view> leg_country_of_issue{};
-    ::std::optional<::std::string_view> leg_state_or_province_of_issue{};
-    ::std::optional<::std::string_view> leg_locale_of_issue{};
-    ::std::optional<::std::string_view> leg_redemption_date{};
-    ::std::optional<::fixpp::decimal_t> leg_strike_price{};
-    ::std::optional<::std::string_view> leg_strike_currency{};
-    ::std::optional<char> leg_opt_attribute{};
-    ::std::optional<::fixpp::decimal_t> leg_contract_multiplier{};
-    ::std::optional<::fixpp::decimal_t> leg_coupon_rate{};
-    ::std::optional<::std::string_view> leg_security_exchange{};
-    ::std::optional<::std::string_view> leg_issuer{};
-    ::std::optional<::std::string_view> encoded_leg_issuer{};
-    ::std::optional<::std::string_view> leg_security_desc{};
-    ::std::optional<::std::string_view> encoded_leg_security_desc{};
-    ::std::optional<::fixpp::decimal_t> leg_ratio_qty{};
-    ::std::optional<char> leg_side{};
-    ::std::optional<::std::string_view> leg_currency{};
-    ::std::optional<::std::string_view> leg_pool{};
-    ::std::optional<::std::string_view> leg_dated_date{};
-    ::std::optional<::std::string_view> leg_contract_settl_month{};
-    ::std::optional<::std::string_view> leg_interest_accrual_date{};
-};
-
-struct SecurityDefinitionUnderlyingsUnderlyingSecurityAltIDArgs {
-    ::std::optional<::std::string_view> underlying_security_alt_id{};
-    ::std::optional<::std::string_view> underlying_security_alt_id_source{};
-};
-
-struct SecurityDefinitionUnderlyingsUnderlyingStipsArgs {
-    ::std::optional<::std::string_view> underlying_stip_type{};
-    ::std::optional<::std::string_view> underlying_stip_value{};
-};
-
-struct SecurityDefinitionUnderlyingsArgs {
-    ::std::optional<::std::string_view> underlying_symbol{};
-    ::std::optional<::std::string_view> underlying_symbol_sfx{};
-    ::std::optional<::std::string_view> underlying_security_id{};
-    ::std::optional<::std::string_view> underlying_security_id_source{};
-    ::std::optional<::std::span<const SecurityDefinitionUnderlyingsUnderlyingSecurityAltIDArgs>> underlying_security_alt_id{};
-    ::std::optional<::std::int64_t> underlying_product{};
-    ::std::optional<::std::string_view> underlying_cfi_code{};
-    ::std::optional<::std::string_view> underlying_security_type{};
-    ::std::optional<::std::string_view> underlying_security_sub_type{};
-    ::std::optional<::std::string_view> underlying_maturity_month_year{};
-    ::std::optional<::std::string_view> underlying_maturity_date{};
-    ::std::optional<::std::int64_t> underlying_put_or_call{};
-    ::std::optional<::std::string_view> underlying_coupon_payment_date{};
-    ::std::optional<::std::string_view> underlying_issue_date{};
-    ::std::optional<::std::string_view> underlying_repo_collateral_security_type{};
-    ::std::optional<::std::int64_t> underlying_repurchase_term{};
-    ::std::optional<::fixpp::decimal_t> underlying_repurchase_rate{};
-    ::std::optional<::fixpp::decimal_t> underlying_factor{};
-    ::std::optional<::std::string_view> underlying_credit_rating{};
-    ::std::optional<::std::string_view> underlying_instr_registry{};
-    ::std::optional<::std::string_view> underlying_country_of_issue{};
-    ::std::optional<::std::string_view> underlying_state_or_province_of_issue{};
-    ::std::optional<::std::string_view> underlying_locale_of_issue{};
-    ::std::optional<::std::string_view> underlying_redemption_date{};
-    ::std::optional<::fixpp::decimal_t> underlying_strike_price{};
-    ::std::optional<::std::string_view> underlying_strike_currency{};
-    ::std::optional<char> underlying_opt_attribute{};
-    ::std::optional<::fixpp::decimal_t> underlying_contract_multiplier{};
-    ::std::optional<::fixpp::decimal_t> underlying_coupon_rate{};
-    ::std::optional<::std::string_view> underlying_security_exchange{};
-    ::std::optional<::std::string_view> underlying_issuer{};
-    ::std::optional<::std::string_view> encoded_underlying_issuer{};
-    ::std::optional<::std::string_view> underlying_security_desc{};
-    ::std::optional<::std::string_view> encoded_underlying_security_desc{};
-    ::std::optional<::std::string_view> underlying_cp_program{};
-    ::std::optional<::std::string_view> underlying_cp_reg_type{};
-    ::std::optional<::std::string_view> underlying_currency{};
-    ::std::optional<::fixpp::decimal_t> underlying_qty{};
-    ::std::optional<::fixpp::decimal_t> underlying_px{};
-    ::std::optional<::fixpp::decimal_t> underlying_dirty_price{};
-    ::std::optional<::fixpp::decimal_t> underlying_end_price{};
-    ::std::optional<::fixpp::decimal_t> underlying_start_value{};
-    ::std::optional<::fixpp::decimal_t> underlying_current_value{};
-    ::std::optional<::fixpp::decimal_t> underlying_end_value{};
-    ::std::optional<::std::span<const SecurityDefinitionUnderlyingsUnderlyingStipsArgs>> underlying_stips{};
-};
-
-struct SecurityDefinitionEventsArgs {
-    ::std::optional<::std::int64_t> event_type{};
-    ::std::optional<::std::string_view> event_date{};
-    ::std::optional<::fixpp::decimal_t> event_px{};
-    ::std::optional<::std::string_view> event_text{};
-};
-
-struct SecurityDefinitionInstrAttribArgs {
-    ::std::optional<::std::int64_t> instr_attrib_type{};
-    ::std::optional<::std::string_view> instr_attrib_value{};
-};
-
 struct SecurityDefinitionArgs {
     ::std::optional<::std::string_view> currency{};
     ::std::optional<::std::string_view> security_id_source{};
@@ -24381,7 +22226,7 @@ struct SecurityDefinitionArgs {
     ::std::optional<::std::string_view> encoded_issuer{};
     ::std::optional<::std::string_view> encoded_security_desc{};
     ::std::optional<::std::string_view> encoded_text{};
-    ::std::optional<::std::span<const SecurityDefinitionSecurityAltIDArgs>> security_alt_id{};
+    ::std::optional<::std::span<const groups::G_454Args>> security_alt_id{};
     ::std::optional<::std::int64_t> product{};
     ::std::optional<::std::string_view> cfi_code{};
     ::std::optional<::std::string_view> country_of_issue{};
@@ -24389,19 +22234,19 @@ struct SecurityDefinitionArgs {
     ::std::optional<::std::string_view> locale_of_issue{};
     ::std::optional<::std::string_view> maturity_date{};
     ::std::optional<::std::string_view> instr_registry{};
-    ::std::optional<::std::span<const SecurityDefinitionLegsArgs>> legs{};
+    ::std::optional<::std::span<const groups::G_555_4Args>> legs{};
     ::std::optional<::fixpp::decimal_t> round_lot{};
     ::std::optional<::fixpp::decimal_t> min_trade_vol{};
     ::std::optional<::std::string_view> trading_session_sub_id{};
     ::std::optional<::std::string_view> contract_settl_month{};
     ::std::optional<::std::int64_t> delivery_form{};
     ::std::optional<::std::string_view> pool{};
-    ::std::optional<::std::span<const SecurityDefinitionUnderlyingsArgs>> underlyings{};
+    ::std::optional<::std::span<const groups::G_711Args>> underlyings{};
     ::std::optional<::std::string_view> security_sub_type{};
     ::std::optional<::std::int64_t> expiration_cycle{};
-    ::std::optional<::std::span<const SecurityDefinitionEventsArgs>> events{};
+    ::std::optional<::std::span<const groups::G_864Args>> events{};
     ::std::optional<::fixpp::decimal_t> pct_at_risk{};
-    ::std::optional<::std::span<const SecurityDefinitionInstrAttribArgs>> instr_attrib{};
+    ::std::optional<::std::span<const groups::G_870Args>> instr_attrib{};
     ::std::optional<::std::string_view> dated_date{};
     ::std::optional<::std::string_view> interest_accrual_date{};
     ::std::optional<::std::int64_t> cp_program{};
@@ -25108,129 +22953,6 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_SecurityDefinit
     return bb.commit(out);
 }
 
-struct SecurityStatusRequestSecurityAltIDArgs {
-    ::std::optional<::std::string_view> security_alt_id{};
-    ::std::optional<::std::string_view> security_alt_id_source{};
-};
-
-struct SecurityStatusRequestLegsLegSecurityAltIDArgs {
-    ::std::optional<::std::string_view> leg_security_alt_id{};
-    ::std::optional<::std::string_view> leg_security_alt_id_source{};
-};
-
-struct SecurityStatusRequestLegsArgs {
-    ::std::optional<::std::string_view> leg_symbol{};
-    ::std::optional<::std::string_view> leg_symbol_sfx{};
-    ::std::optional<::std::string_view> leg_security_id{};
-    ::std::optional<::std::string_view> leg_security_id_source{};
-    ::std::optional<::std::span<const SecurityStatusRequestLegsLegSecurityAltIDArgs>> leg_security_alt_id{};
-    ::std::optional<::std::int64_t> leg_product{};
-    ::std::optional<::std::string_view> leg_cfi_code{};
-    ::std::optional<::std::string_view> leg_security_type{};
-    ::std::optional<::std::string_view> leg_security_sub_type{};
-    ::std::optional<::std::string_view> leg_maturity_month_year{};
-    ::std::optional<::std::string_view> leg_maturity_date{};
-    ::std::optional<::std::string_view> leg_coupon_payment_date{};
-    ::std::optional<::std::string_view> leg_issue_date{};
-    ::std::optional<::std::string_view> leg_repo_collateral_security_type{};
-    ::std::optional<::std::int64_t> leg_repurchase_term{};
-    ::std::optional<::fixpp::decimal_t> leg_repurchase_rate{};
-    ::std::optional<::fixpp::decimal_t> leg_factor{};
-    ::std::optional<::std::string_view> leg_credit_rating{};
-    ::std::optional<::std::string_view> leg_instr_registry{};
-    ::std::optional<::std::string_view> leg_country_of_issue{};
-    ::std::optional<::std::string_view> leg_state_or_province_of_issue{};
-    ::std::optional<::std::string_view> leg_locale_of_issue{};
-    ::std::optional<::std::string_view> leg_redemption_date{};
-    ::std::optional<::fixpp::decimal_t> leg_strike_price{};
-    ::std::optional<::std::string_view> leg_strike_currency{};
-    ::std::optional<char> leg_opt_attribute{};
-    ::std::optional<::fixpp::decimal_t> leg_contract_multiplier{};
-    ::std::optional<::fixpp::decimal_t> leg_coupon_rate{};
-    ::std::optional<::std::string_view> leg_security_exchange{};
-    ::std::optional<::std::string_view> leg_issuer{};
-    ::std::optional<::std::string_view> encoded_leg_issuer{};
-    ::std::optional<::std::string_view> leg_security_desc{};
-    ::std::optional<::std::string_view> encoded_leg_security_desc{};
-    ::std::optional<::fixpp::decimal_t> leg_ratio_qty{};
-    ::std::optional<char> leg_side{};
-    ::std::optional<::std::string_view> leg_currency{};
-    ::std::optional<::std::string_view> leg_pool{};
-    ::std::optional<::std::string_view> leg_dated_date{};
-    ::std::optional<::std::string_view> leg_contract_settl_month{};
-    ::std::optional<::std::string_view> leg_interest_accrual_date{};
-};
-
-struct SecurityStatusRequestUnderlyingsUnderlyingSecurityAltIDArgs {
-    ::std::optional<::std::string_view> underlying_security_alt_id{};
-    ::std::optional<::std::string_view> underlying_security_alt_id_source{};
-};
-
-struct SecurityStatusRequestUnderlyingsUnderlyingStipsArgs {
-    ::std::optional<::std::string_view> underlying_stip_type{};
-    ::std::optional<::std::string_view> underlying_stip_value{};
-};
-
-struct SecurityStatusRequestUnderlyingsArgs {
-    ::std::optional<::std::string_view> underlying_symbol{};
-    ::std::optional<::std::string_view> underlying_symbol_sfx{};
-    ::std::optional<::std::string_view> underlying_security_id{};
-    ::std::optional<::std::string_view> underlying_security_id_source{};
-    ::std::optional<::std::span<const SecurityStatusRequestUnderlyingsUnderlyingSecurityAltIDArgs>> underlying_security_alt_id{};
-    ::std::optional<::std::int64_t> underlying_product{};
-    ::std::optional<::std::string_view> underlying_cfi_code{};
-    ::std::optional<::std::string_view> underlying_security_type{};
-    ::std::optional<::std::string_view> underlying_security_sub_type{};
-    ::std::optional<::std::string_view> underlying_maturity_month_year{};
-    ::std::optional<::std::string_view> underlying_maturity_date{};
-    ::std::optional<::std::int64_t> underlying_put_or_call{};
-    ::std::optional<::std::string_view> underlying_coupon_payment_date{};
-    ::std::optional<::std::string_view> underlying_issue_date{};
-    ::std::optional<::std::string_view> underlying_repo_collateral_security_type{};
-    ::std::optional<::std::int64_t> underlying_repurchase_term{};
-    ::std::optional<::fixpp::decimal_t> underlying_repurchase_rate{};
-    ::std::optional<::fixpp::decimal_t> underlying_factor{};
-    ::std::optional<::std::string_view> underlying_credit_rating{};
-    ::std::optional<::std::string_view> underlying_instr_registry{};
-    ::std::optional<::std::string_view> underlying_country_of_issue{};
-    ::std::optional<::std::string_view> underlying_state_or_province_of_issue{};
-    ::std::optional<::std::string_view> underlying_locale_of_issue{};
-    ::std::optional<::std::string_view> underlying_redemption_date{};
-    ::std::optional<::fixpp::decimal_t> underlying_strike_price{};
-    ::std::optional<::std::string_view> underlying_strike_currency{};
-    ::std::optional<char> underlying_opt_attribute{};
-    ::std::optional<::fixpp::decimal_t> underlying_contract_multiplier{};
-    ::std::optional<::fixpp::decimal_t> underlying_coupon_rate{};
-    ::std::optional<::std::string_view> underlying_security_exchange{};
-    ::std::optional<::std::string_view> underlying_issuer{};
-    ::std::optional<::std::string_view> encoded_underlying_issuer{};
-    ::std::optional<::std::string_view> underlying_security_desc{};
-    ::std::optional<::std::string_view> encoded_underlying_security_desc{};
-    ::std::optional<::std::string_view> underlying_cp_program{};
-    ::std::optional<::std::string_view> underlying_cp_reg_type{};
-    ::std::optional<::std::string_view> underlying_currency{};
-    ::std::optional<::fixpp::decimal_t> underlying_qty{};
-    ::std::optional<::fixpp::decimal_t> underlying_px{};
-    ::std::optional<::fixpp::decimal_t> underlying_dirty_price{};
-    ::std::optional<::fixpp::decimal_t> underlying_end_price{};
-    ::std::optional<::fixpp::decimal_t> underlying_start_value{};
-    ::std::optional<::fixpp::decimal_t> underlying_current_value{};
-    ::std::optional<::fixpp::decimal_t> underlying_end_value{};
-    ::std::optional<::std::span<const SecurityStatusRequestUnderlyingsUnderlyingStipsArgs>> underlying_stips{};
-};
-
-struct SecurityStatusRequestEventsArgs {
-    ::std::optional<::std::int64_t> event_type{};
-    ::std::optional<::std::string_view> event_date{};
-    ::std::optional<::fixpp::decimal_t> event_px{};
-    ::std::optional<::std::string_view> event_text{};
-};
-
-struct SecurityStatusRequestInstrAttribArgs {
-    ::std::optional<::std::int64_t> instr_attrib_type{};
-    ::std::optional<::std::string_view> instr_attrib_value{};
-};
-
 struct SecurityStatusRequestArgs {
     ::std::optional<::std::string_view> currency{};
     ::std::optional<::std::string_view> security_id_source{};
@@ -25260,7 +22982,7 @@ struct SecurityStatusRequestArgs {
     ::std::optional<::std::string_view> trading_session_id{};
     ::std::optional<::std::string_view> encoded_issuer{};
     ::std::optional<::std::string_view> encoded_security_desc{};
-    ::std::optional<::std::span<const SecurityStatusRequestSecurityAltIDArgs>> security_alt_id{};
+    ::std::optional<::std::span<const groups::G_454Args>> security_alt_id{};
     ::std::optional<::std::int64_t> product{};
     ::std::optional<::std::string_view> cfi_code{};
     ::std::optional<::std::string_view> country_of_issue{};
@@ -25268,16 +22990,16 @@ struct SecurityStatusRequestArgs {
     ::std::optional<::std::string_view> locale_of_issue{};
     ::std::optional<::std::string_view> maturity_date{};
     ::std::optional<::std::string_view> instr_registry{};
-    ::std::optional<::std::span<const SecurityStatusRequestLegsArgs>> legs{};
+    ::std::optional<::std::span<const groups::G_555_4Args>> legs{};
     ::std::optional<::std::string_view> trading_session_sub_id{};
     ::std::optional<::std::string_view> contract_settl_month{};
     ::std::optional<::std::int64_t> delivery_form{};
     ::std::optional<::std::string_view> pool{};
-    ::std::optional<::std::span<const SecurityStatusRequestUnderlyingsArgs>> underlyings{};
+    ::std::optional<::std::span<const groups::G_711Args>> underlyings{};
     ::std::optional<::std::string_view> security_sub_type{};
-    ::std::optional<::std::span<const SecurityStatusRequestEventsArgs>> events{};
+    ::std::optional<::std::span<const groups::G_864Args>> events{};
     ::std::optional<::fixpp::decimal_t> pct_at_risk{};
-    ::std::optional<::std::span<const SecurityStatusRequestInstrAttribArgs>> instr_attrib{};
+    ::std::optional<::std::span<const groups::G_870Args>> instr_attrib{};
     ::std::optional<::std::string_view> dated_date{};
     ::std::optional<::std::string_view> interest_accrual_date{};
     ::std::optional<::std::int64_t> cp_program{};
@@ -25958,129 +23680,6 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_SecurityStatusR
     return bb.commit(out);
 }
 
-struct SecurityStatusSecurityAltIDArgs {
-    ::std::optional<::std::string_view> security_alt_id{};
-    ::std::optional<::std::string_view> security_alt_id_source{};
-};
-
-struct SecurityStatusLegsLegSecurityAltIDArgs {
-    ::std::optional<::std::string_view> leg_security_alt_id{};
-    ::std::optional<::std::string_view> leg_security_alt_id_source{};
-};
-
-struct SecurityStatusLegsArgs {
-    ::std::optional<::std::string_view> leg_symbol{};
-    ::std::optional<::std::string_view> leg_symbol_sfx{};
-    ::std::optional<::std::string_view> leg_security_id{};
-    ::std::optional<::std::string_view> leg_security_id_source{};
-    ::std::optional<::std::span<const SecurityStatusLegsLegSecurityAltIDArgs>> leg_security_alt_id{};
-    ::std::optional<::std::int64_t> leg_product{};
-    ::std::optional<::std::string_view> leg_cfi_code{};
-    ::std::optional<::std::string_view> leg_security_type{};
-    ::std::optional<::std::string_view> leg_security_sub_type{};
-    ::std::optional<::std::string_view> leg_maturity_month_year{};
-    ::std::optional<::std::string_view> leg_maturity_date{};
-    ::std::optional<::std::string_view> leg_coupon_payment_date{};
-    ::std::optional<::std::string_view> leg_issue_date{};
-    ::std::optional<::std::string_view> leg_repo_collateral_security_type{};
-    ::std::optional<::std::int64_t> leg_repurchase_term{};
-    ::std::optional<::fixpp::decimal_t> leg_repurchase_rate{};
-    ::std::optional<::fixpp::decimal_t> leg_factor{};
-    ::std::optional<::std::string_view> leg_credit_rating{};
-    ::std::optional<::std::string_view> leg_instr_registry{};
-    ::std::optional<::std::string_view> leg_country_of_issue{};
-    ::std::optional<::std::string_view> leg_state_or_province_of_issue{};
-    ::std::optional<::std::string_view> leg_locale_of_issue{};
-    ::std::optional<::std::string_view> leg_redemption_date{};
-    ::std::optional<::fixpp::decimal_t> leg_strike_price{};
-    ::std::optional<::std::string_view> leg_strike_currency{};
-    ::std::optional<char> leg_opt_attribute{};
-    ::std::optional<::fixpp::decimal_t> leg_contract_multiplier{};
-    ::std::optional<::fixpp::decimal_t> leg_coupon_rate{};
-    ::std::optional<::std::string_view> leg_security_exchange{};
-    ::std::optional<::std::string_view> leg_issuer{};
-    ::std::optional<::std::string_view> encoded_leg_issuer{};
-    ::std::optional<::std::string_view> leg_security_desc{};
-    ::std::optional<::std::string_view> encoded_leg_security_desc{};
-    ::std::optional<::fixpp::decimal_t> leg_ratio_qty{};
-    ::std::optional<char> leg_side{};
-    ::std::optional<::std::string_view> leg_currency{};
-    ::std::optional<::std::string_view> leg_pool{};
-    ::std::optional<::std::string_view> leg_dated_date{};
-    ::std::optional<::std::string_view> leg_contract_settl_month{};
-    ::std::optional<::std::string_view> leg_interest_accrual_date{};
-};
-
-struct SecurityStatusUnderlyingsUnderlyingSecurityAltIDArgs {
-    ::std::optional<::std::string_view> underlying_security_alt_id{};
-    ::std::optional<::std::string_view> underlying_security_alt_id_source{};
-};
-
-struct SecurityStatusUnderlyingsUnderlyingStipsArgs {
-    ::std::optional<::std::string_view> underlying_stip_type{};
-    ::std::optional<::std::string_view> underlying_stip_value{};
-};
-
-struct SecurityStatusUnderlyingsArgs {
-    ::std::optional<::std::string_view> underlying_symbol{};
-    ::std::optional<::std::string_view> underlying_symbol_sfx{};
-    ::std::optional<::std::string_view> underlying_security_id{};
-    ::std::optional<::std::string_view> underlying_security_id_source{};
-    ::std::optional<::std::span<const SecurityStatusUnderlyingsUnderlyingSecurityAltIDArgs>> underlying_security_alt_id{};
-    ::std::optional<::std::int64_t> underlying_product{};
-    ::std::optional<::std::string_view> underlying_cfi_code{};
-    ::std::optional<::std::string_view> underlying_security_type{};
-    ::std::optional<::std::string_view> underlying_security_sub_type{};
-    ::std::optional<::std::string_view> underlying_maturity_month_year{};
-    ::std::optional<::std::string_view> underlying_maturity_date{};
-    ::std::optional<::std::int64_t> underlying_put_or_call{};
-    ::std::optional<::std::string_view> underlying_coupon_payment_date{};
-    ::std::optional<::std::string_view> underlying_issue_date{};
-    ::std::optional<::std::string_view> underlying_repo_collateral_security_type{};
-    ::std::optional<::std::int64_t> underlying_repurchase_term{};
-    ::std::optional<::fixpp::decimal_t> underlying_repurchase_rate{};
-    ::std::optional<::fixpp::decimal_t> underlying_factor{};
-    ::std::optional<::std::string_view> underlying_credit_rating{};
-    ::std::optional<::std::string_view> underlying_instr_registry{};
-    ::std::optional<::std::string_view> underlying_country_of_issue{};
-    ::std::optional<::std::string_view> underlying_state_or_province_of_issue{};
-    ::std::optional<::std::string_view> underlying_locale_of_issue{};
-    ::std::optional<::std::string_view> underlying_redemption_date{};
-    ::std::optional<::fixpp::decimal_t> underlying_strike_price{};
-    ::std::optional<::std::string_view> underlying_strike_currency{};
-    ::std::optional<char> underlying_opt_attribute{};
-    ::std::optional<::fixpp::decimal_t> underlying_contract_multiplier{};
-    ::std::optional<::fixpp::decimal_t> underlying_coupon_rate{};
-    ::std::optional<::std::string_view> underlying_security_exchange{};
-    ::std::optional<::std::string_view> underlying_issuer{};
-    ::std::optional<::std::string_view> encoded_underlying_issuer{};
-    ::std::optional<::std::string_view> underlying_security_desc{};
-    ::std::optional<::std::string_view> encoded_underlying_security_desc{};
-    ::std::optional<::std::string_view> underlying_cp_program{};
-    ::std::optional<::std::string_view> underlying_cp_reg_type{};
-    ::std::optional<::std::string_view> underlying_currency{};
-    ::std::optional<::fixpp::decimal_t> underlying_qty{};
-    ::std::optional<::fixpp::decimal_t> underlying_px{};
-    ::std::optional<::fixpp::decimal_t> underlying_dirty_price{};
-    ::std::optional<::fixpp::decimal_t> underlying_end_price{};
-    ::std::optional<::fixpp::decimal_t> underlying_start_value{};
-    ::std::optional<::fixpp::decimal_t> underlying_current_value{};
-    ::std::optional<::fixpp::decimal_t> underlying_end_value{};
-    ::std::optional<::std::span<const SecurityStatusUnderlyingsUnderlyingStipsArgs>> underlying_stips{};
-};
-
-struct SecurityStatusEventsArgs {
-    ::std::optional<::std::int64_t> event_type{};
-    ::std::optional<::std::string_view> event_date{};
-    ::std::optional<::fixpp::decimal_t> event_px{};
-    ::std::optional<::std::string_view> event_text{};
-};
-
-struct SecurityStatusInstrAttribArgs {
-    ::std::optional<::std::int64_t> instr_attrib_type{};
-    ::std::optional<::std::string_view> instr_attrib_value{};
-};
-
 struct SecurityStatusArgs {
     ::std::optional<::std::string_view> currency{};
     ::std::optional<::std::string_view> security_id_source{};
@@ -26125,7 +23724,7 @@ struct SecurityStatusArgs {
     ::std::optional<::std::string_view> encoded_issuer{};
     ::std::optional<::std::string_view> encoded_security_desc{};
     ::std::optional<::std::string_view> encoded_text{};
-    ::std::optional<::std::span<const SecurityStatusSecurityAltIDArgs>> security_alt_id{};
+    ::std::optional<::std::span<const groups::G_454Args>> security_alt_id{};
     ::std::optional<::std::int64_t> product{};
     ::std::optional<::std::string_view> cfi_code{};
     ::std::optional<::std::string_view> country_of_issue{};
@@ -26133,16 +23732,16 @@ struct SecurityStatusArgs {
     ::std::optional<::std::string_view> locale_of_issue{};
     ::std::optional<::std::string_view> maturity_date{};
     ::std::optional<::std::string_view> instr_registry{};
-    ::std::optional<::std::span<const SecurityStatusLegsArgs>> legs{};
+    ::std::optional<::std::span<const groups::G_555_4Args>> legs{};
     ::std::optional<::std::string_view> trading_session_sub_id{};
     ::std::optional<::std::string_view> contract_settl_month{};
     ::std::optional<::std::int64_t> delivery_form{};
     ::std::optional<::std::string_view> pool{};
-    ::std::optional<::std::span<const SecurityStatusUnderlyingsArgs>> underlyings{};
+    ::std::optional<::std::span<const groups::G_711Args>> underlyings{};
     ::std::optional<::std::string_view> security_sub_type{};
-    ::std::optional<::std::span<const SecurityStatusEventsArgs>> events{};
+    ::std::optional<::std::span<const groups::G_864Args>> events{};
     ::std::optional<::fixpp::decimal_t> pct_at_risk{};
-    ::std::optional<::std::span<const SecurityStatusInstrAttribArgs>> instr_attrib{};
+    ::std::optional<::std::span<const groups::G_870Args>> instr_attrib{};
     ::std::optional<::std::string_view> dated_date{};
     ::std::optional<::std::string_view> interest_accrual_date{};
     ::std::optional<::std::int64_t> cp_program{};
@@ -27013,219 +24612,15 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_TradingSessionS
     return bb.commit(out);
 }
 
-struct MassQuoteQuoteSetsUnderlyingSecurityAltIDArgs {
-    ::std::optional<::std::string_view> underlying_security_alt_id{};
-    ::std::optional<::std::string_view> underlying_security_alt_id_source{};
-};
-
-struct MassQuoteQuoteSetsUnderlyingStipsArgs {
-    ::std::optional<::std::string_view> underlying_stip_type{};
-    ::std::optional<::std::string_view> underlying_stip_value{};
-};
-
-struct MassQuoteQuoteSetsQuoteEntriesSecurityAltIDArgs {
-    ::std::optional<::std::string_view> security_alt_id{};
-    ::std::optional<::std::string_view> security_alt_id_source{};
-};
-
-struct MassQuoteQuoteSetsQuoteEntriesEventsArgs {
-    ::std::optional<::std::int64_t> event_type{};
-    ::std::optional<::std::string_view> event_date{};
-    ::std::optional<::fixpp::decimal_t> event_px{};
-    ::std::optional<::std::string_view> event_text{};
-};
-
-struct MassQuoteQuoteSetsQuoteEntriesLegsLegSecurityAltIDArgs {
-    ::std::optional<::std::string_view> leg_security_alt_id{};
-    ::std::optional<::std::string_view> leg_security_alt_id_source{};
-};
-
-struct MassQuoteQuoteSetsQuoteEntriesLegsArgs {
-    ::std::optional<::std::string_view> leg_symbol{};
-    ::std::optional<::std::string_view> leg_symbol_sfx{};
-    ::std::optional<::std::string_view> leg_security_id{};
-    ::std::optional<::std::string_view> leg_security_id_source{};
-    ::std::optional<::std::span<const MassQuoteQuoteSetsQuoteEntriesLegsLegSecurityAltIDArgs>> leg_security_alt_id{};
-    ::std::optional<::std::int64_t> leg_product{};
-    ::std::optional<::std::string_view> leg_cfi_code{};
-    ::std::optional<::std::string_view> leg_security_type{};
-    ::std::optional<::std::string_view> leg_security_sub_type{};
-    ::std::optional<::std::string_view> leg_maturity_month_year{};
-    ::std::optional<::std::string_view> leg_maturity_date{};
-    ::std::optional<::std::string_view> leg_coupon_payment_date{};
-    ::std::optional<::std::string_view> leg_issue_date{};
-    ::std::optional<::std::string_view> leg_repo_collateral_security_type{};
-    ::std::optional<::std::int64_t> leg_repurchase_term{};
-    ::std::optional<::fixpp::decimal_t> leg_repurchase_rate{};
-    ::std::optional<::fixpp::decimal_t> leg_factor{};
-    ::std::optional<::std::string_view> leg_credit_rating{};
-    ::std::optional<::std::string_view> leg_instr_registry{};
-    ::std::optional<::std::string_view> leg_country_of_issue{};
-    ::std::optional<::std::string_view> leg_state_or_province_of_issue{};
-    ::std::optional<::std::string_view> leg_locale_of_issue{};
-    ::std::optional<::std::string_view> leg_redemption_date{};
-    ::std::optional<::fixpp::decimal_t> leg_strike_price{};
-    ::std::optional<::std::string_view> leg_strike_currency{};
-    ::std::optional<char> leg_opt_attribute{};
-    ::std::optional<::fixpp::decimal_t> leg_contract_multiplier{};
-    ::std::optional<::fixpp::decimal_t> leg_coupon_rate{};
-    ::std::optional<::std::string_view> leg_security_exchange{};
-    ::std::optional<::std::string_view> leg_issuer{};
-    ::std::optional<::std::string_view> encoded_leg_issuer{};
-    ::std::optional<::std::string_view> leg_security_desc{};
-    ::std::optional<::std::string_view> encoded_leg_security_desc{};
-    ::std::optional<::fixpp::decimal_t> leg_ratio_qty{};
-    ::std::optional<char> leg_side{};
-    ::std::optional<::std::string_view> leg_currency{};
-    ::std::optional<::std::string_view> leg_pool{};
-    ::std::optional<::std::string_view> leg_dated_date{};
-    ::std::optional<::std::string_view> leg_contract_settl_month{};
-    ::std::optional<::std::string_view> leg_interest_accrual_date{};
-};
-
-struct MassQuoteQuoteSetsQuoteEntriesArgs {
-    ::std::optional<::std::string_view> quote_entry_id{};
-    ::std::optional<::std::string_view> symbol{};
-    ::std::optional<::std::string_view> symbol_sfx{};
-    ::std::optional<::std::string_view> security_id{};
-    ::std::optional<::std::string_view> security_id_source{};
-    ::std::optional<::std::span<const MassQuoteQuoteSetsQuoteEntriesSecurityAltIDArgs>> security_alt_id{};
-    ::std::optional<::std::int64_t> product{};
-    ::std::optional<::std::string_view> cfi_code{};
-    ::std::optional<::std::string_view> security_type{};
-    ::std::optional<::std::string_view> security_sub_type{};
-    ::std::optional<::std::string_view> maturity_month_year{};
-    ::std::optional<::std::string_view> maturity_date{};
-    ::std::optional<::std::int64_t> put_or_call{};
-    ::std::optional<::std::string_view> coupon_payment_date{};
-    ::std::optional<::std::string_view> issue_date{};
-    ::std::optional<::std::string_view> repo_collateral_security_type{};
-    ::std::optional<::std::int64_t> repurchase_term{};
-    ::std::optional<::fixpp::decimal_t> repurchase_rate{};
-    ::std::optional<::fixpp::decimal_t> factor{};
-    ::std::optional<::std::string_view> credit_rating{};
-    ::std::optional<::std::string_view> instr_registry{};
-    ::std::optional<::std::string_view> country_of_issue{};
-    ::std::optional<::std::string_view> state_or_province_of_issue{};
-    ::std::optional<::std::string_view> locale_of_issue{};
-    ::std::optional<::std::string_view> redemption_date{};
-    ::std::optional<::fixpp::decimal_t> strike_price{};
-    ::std::optional<::std::string_view> strike_currency{};
-    ::std::optional<char> opt_attribute{};
-    ::std::optional<::fixpp::decimal_t> contract_multiplier{};
-    ::std::optional<::fixpp::decimal_t> coupon_rate{};
-    ::std::optional<::std::string_view> security_exchange{};
-    ::std::optional<::std::string_view> issuer{};
-    ::std::optional<::std::string_view> encoded_issuer{};
-    ::std::optional<::std::string_view> security_desc{};
-    ::std::optional<::std::string_view> encoded_security_desc{};
-    ::std::optional<::std::string_view> pool{};
-    ::std::optional<::std::string_view> contract_settl_month{};
-    ::std::optional<::std::int64_t> cp_program{};
-    ::std::optional<::std::string_view> cp_reg_type{};
-    ::std::optional<::std::span<const MassQuoteQuoteSetsQuoteEntriesEventsArgs>> events{};
-    ::std::optional<::std::string_view> dated_date{};
-    ::std::optional<::std::string_view> interest_accrual_date{};
-    ::std::optional<::std::span<const MassQuoteQuoteSetsQuoteEntriesLegsArgs>> legs{};
-    ::std::optional<::fixpp::decimal_t> bid_px{};
-    ::std::optional<::fixpp::decimal_t> offer_px{};
-    ::std::optional<::fixpp::decimal_t> bid_size{};
-    ::std::optional<::fixpp::decimal_t> offer_size{};
-    ::std::optional<::std::string_view> valid_until_time{};
-    ::std::optional<::fixpp::decimal_t> bid_spot_rate{};
-    ::std::optional<::fixpp::decimal_t> offer_spot_rate{};
-    ::std::optional<::fixpp::decimal_t> bid_forward_points{};
-    ::std::optional<::fixpp::decimal_t> offer_forward_points{};
-    ::std::optional<::fixpp::decimal_t> mid_px{};
-    ::std::optional<::fixpp::decimal_t> bid_yield{};
-    ::std::optional<::fixpp::decimal_t> mid_yield{};
-    ::std::optional<::fixpp::decimal_t> offer_yield{};
-    ::std::optional<::std::string_view> transact_time{};
-    ::std::optional<::std::string_view> trading_session_id{};
-    ::std::optional<::std::string_view> trading_session_sub_id{};
-    ::std::optional<::std::string_view> settl_date{};
-    ::std::optional<char> ord_type{};
-    ::std::optional<::std::string_view> settl_date2{};
-    ::std::optional<::fixpp::decimal_t> order_qty2{};
-    ::std::optional<::fixpp::decimal_t> bid_forward_points2{};
-    ::std::optional<::fixpp::decimal_t> offer_forward_points2{};
-    ::std::optional<::std::string_view> currency{};
-};
-
-struct MassQuoteQuoteSetsArgs {
-    ::std::optional<::std::string_view> quote_set_id{};
-    ::std::optional<::std::string_view> underlying_symbol{};
-    ::std::optional<::std::string_view> underlying_symbol_sfx{};
-    ::std::optional<::std::string_view> underlying_security_id{};
-    ::std::optional<::std::string_view> underlying_security_id_source{};
-    ::std::optional<::std::span<const MassQuoteQuoteSetsUnderlyingSecurityAltIDArgs>> underlying_security_alt_id{};
-    ::std::optional<::std::int64_t> underlying_product{};
-    ::std::optional<::std::string_view> underlying_cfi_code{};
-    ::std::optional<::std::string_view> underlying_security_type{};
-    ::std::optional<::std::string_view> underlying_security_sub_type{};
-    ::std::optional<::std::string_view> underlying_maturity_month_year{};
-    ::std::optional<::std::string_view> underlying_maturity_date{};
-    ::std::optional<::std::int64_t> underlying_put_or_call{};
-    ::std::optional<::std::string_view> underlying_coupon_payment_date{};
-    ::std::optional<::std::string_view> underlying_issue_date{};
-    ::std::optional<::std::string_view> underlying_repo_collateral_security_type{};
-    ::std::optional<::std::int64_t> underlying_repurchase_term{};
-    ::std::optional<::fixpp::decimal_t> underlying_repurchase_rate{};
-    ::std::optional<::fixpp::decimal_t> underlying_factor{};
-    ::std::optional<::std::string_view> underlying_credit_rating{};
-    ::std::optional<::std::string_view> underlying_instr_registry{};
-    ::std::optional<::std::string_view> underlying_country_of_issue{};
-    ::std::optional<::std::string_view> underlying_state_or_province_of_issue{};
-    ::std::optional<::std::string_view> underlying_locale_of_issue{};
-    ::std::optional<::std::string_view> underlying_redemption_date{};
-    ::std::optional<::fixpp::decimal_t> underlying_strike_price{};
-    ::std::optional<::std::string_view> underlying_strike_currency{};
-    ::std::optional<char> underlying_opt_attribute{};
-    ::std::optional<::fixpp::decimal_t> underlying_contract_multiplier{};
-    ::std::optional<::fixpp::decimal_t> underlying_coupon_rate{};
-    ::std::optional<::std::string_view> underlying_security_exchange{};
-    ::std::optional<::std::string_view> underlying_issuer{};
-    ::std::optional<::std::string_view> encoded_underlying_issuer{};
-    ::std::optional<::std::string_view> underlying_security_desc{};
-    ::std::optional<::std::string_view> encoded_underlying_security_desc{};
-    ::std::optional<::std::string_view> underlying_cp_program{};
-    ::std::optional<::std::string_view> underlying_cp_reg_type{};
-    ::std::optional<::std::string_view> underlying_currency{};
-    ::std::optional<::fixpp::decimal_t> underlying_qty{};
-    ::std::optional<::fixpp::decimal_t> underlying_px{};
-    ::std::optional<::fixpp::decimal_t> underlying_dirty_price{};
-    ::std::optional<::fixpp::decimal_t> underlying_end_price{};
-    ::std::optional<::fixpp::decimal_t> underlying_start_value{};
-    ::std::optional<::fixpp::decimal_t> underlying_current_value{};
-    ::std::optional<::fixpp::decimal_t> underlying_end_value{};
-    ::std::optional<::std::span<const MassQuoteQuoteSetsUnderlyingStipsArgs>> underlying_stips{};
-    ::std::optional<::std::string_view> quote_set_valid_until_time{};
-    ::std::optional<::std::int64_t> tot_no_quote_entries{};
-    ::std::optional<bool> last_fragment{};
-    ::std::span<const MassQuoteQuoteSetsQuoteEntriesArgs> quote_entries{};
-};
-
-struct MassQuotePartyIDsPartySubIDsArgs {
-    ::std::optional<::std::string_view> party_sub_id{};
-    ::std::optional<::std::int64_t> party_sub_id_type{};
-};
-
-struct MassQuotePartyIDsArgs {
-    ::std::optional<::std::string_view> party_id{};
-    ::std::optional<char> party_id_source{};
-    ::std::optional<::std::int64_t> party_role{};
-    ::std::optional<::std::span<const MassQuotePartyIDsPartySubIDsArgs>> party_sub_i_ds{};
-};
-
 struct MassQuoteArgs {
     ::std::optional<::std::string_view> account{};
     ::std::optional<::std::string_view> quote_id{};
     ::std::optional<::std::string_view> quote_req_id{};
     ::std::optional<::fixpp::decimal_t> def_bid_size{};
     ::std::optional<::fixpp::decimal_t> def_offer_size{};
-    ::std::span<const MassQuoteQuoteSetsArgs> quote_sets{};
+    ::std::span<const groups::G_296_2Args> quote_sets{};
     ::std::optional<::std::int64_t> quote_response_level{};
-    ::std::optional<::std::span<const MassQuotePartyIDsArgs>> party_i_ds{};
+    ::std::optional<::std::span<const groups::G_453Args>> party_i_ds{};
     ::std::optional<::std::int64_t> quote_type{};
     ::std::optional<::std::int64_t> account_type{};
     ::std::optional<::std::int64_t> acct_id_source{};
@@ -28058,28 +25453,6 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_MassQuote(::std
     return bb.commit(out);
 }
 
-struct OrderMassCancelRequestSecurityAltIDArgs {
-    ::std::optional<::std::string_view> security_alt_id{};
-    ::std::optional<::std::string_view> security_alt_id_source{};
-};
-
-struct OrderMassCancelRequestUnderlyingSecurityAltIDArgs {
-    ::std::optional<::std::string_view> underlying_security_alt_id{};
-    ::std::optional<::std::string_view> underlying_security_alt_id_source{};
-};
-
-struct OrderMassCancelRequestEventsArgs {
-    ::std::optional<::std::int64_t> event_type{};
-    ::std::optional<::std::string_view> event_date{};
-    ::std::optional<::fixpp::decimal_t> event_px{};
-    ::std::optional<::std::string_view> event_text{};
-};
-
-struct OrderMassCancelRequestUnderlyingStipsArgs {
-    ::std::optional<::std::string_view> underlying_stip_type{};
-    ::std::optional<::std::string_view> underlying_stip_value{};
-};
-
 struct OrderMassCancelRequestArgs {
     ::std::optional<::std::string_view> cl_ord_id{};
     ::std::optional<::std::string_view> security_id_source{};
@@ -28136,8 +25509,8 @@ struct OrderMassCancelRequestArgs {
     ::std::optional<::std::string_view> encoded_underlying_security_desc{};
     ::std::optional<::fixpp::decimal_t> underlying_coupon_rate{};
     ::std::optional<::fixpp::decimal_t> underlying_contract_multiplier{};
-    ::std::optional<::std::span<const OrderMassCancelRequestSecurityAltIDArgs>> security_alt_id{};
-    ::std::optional<::std::span<const OrderMassCancelRequestUnderlyingSecurityAltIDArgs>> underlying_security_alt_id{};
+    ::std::optional<::std::span<const groups::G_454Args>> security_alt_id{};
+    ::std::optional<::std::span<const groups::G_457Args>> underlying_security_alt_id{};
     ::std::optional<::std::int64_t> product{};
     ::std::optional<::std::string_view> cfi_code{};
     ::std::optional<::std::int64_t> underlying_product{};
@@ -28160,7 +25533,7 @@ struct OrderMassCancelRequestArgs {
     ::std::optional<::std::string_view> security_sub_type{};
     ::std::optional<::std::string_view> underlying_security_sub_type{};
     ::std::optional<::fixpp::decimal_t> underlying_px{};
-    ::std::optional<::std::span<const OrderMassCancelRequestEventsArgs>> events{};
+    ::std::optional<::std::span<const groups::G_864Args>> events{};
     ::std::optional<::std::string_view> dated_date{};
     ::std::optional<::std::string_view> interest_accrual_date{};
     ::std::optional<::std::int64_t> cp_program{};
@@ -28173,7 +25546,7 @@ struct OrderMassCancelRequestArgs {
     ::std::optional<::fixpp::decimal_t> underlying_start_value{};
     ::std::optional<::fixpp::decimal_t> underlying_current_value{};
     ::std::optional<::fixpp::decimal_t> underlying_end_value{};
-    ::std::optional<::std::span<const OrderMassCancelRequestUnderlyingStipsArgs>> underlying_stips{};
+    ::std::optional<::std::span<const groups::G_887Args>> underlying_stips{};
     ::std::optional<::std::string_view> underlying_strike_currency{};
     ::std::optional<::std::string_view> strike_currency{};
 };
@@ -28641,34 +26014,6 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_OrderMassCancel
     return bb.commit(out);
 }
 
-struct OrderMassCancelReportSecurityAltIDArgs {
-    ::std::optional<::std::string_view> security_alt_id{};
-    ::std::optional<::std::string_view> security_alt_id_source{};
-};
-
-struct OrderMassCancelReportUnderlyingSecurityAltIDArgs {
-    ::std::optional<::std::string_view> underlying_security_alt_id{};
-    ::std::optional<::std::string_view> underlying_security_alt_id_source{};
-};
-
-struct OrderMassCancelReportAffectedOrdersArgs {
-    ::std::optional<::std::string_view> orig_cl_ord_id{};
-    ::std::optional<::std::string_view> affected_order_id{};
-    ::std::optional<::std::string_view> affected_secondary_order_id{};
-};
-
-struct OrderMassCancelReportEventsArgs {
-    ::std::optional<::std::int64_t> event_type{};
-    ::std::optional<::std::string_view> event_date{};
-    ::std::optional<::fixpp::decimal_t> event_px{};
-    ::std::optional<::std::string_view> event_text{};
-};
-
-struct OrderMassCancelReportUnderlyingStipsArgs {
-    ::std::optional<::std::string_view> underlying_stip_type{};
-    ::std::optional<::std::string_view> underlying_stip_value{};
-};
-
 struct OrderMassCancelReportArgs {
     ::std::optional<::std::string_view> cl_ord_id{};
     ::std::optional<::std::string_view> security_id_source{};
@@ -28727,8 +26072,8 @@ struct OrderMassCancelReportArgs {
     ::std::optional<::std::string_view> encoded_underlying_security_desc{};
     ::std::optional<::fixpp::decimal_t> underlying_coupon_rate{};
     ::std::optional<::fixpp::decimal_t> underlying_contract_multiplier{};
-    ::std::optional<::std::span<const OrderMassCancelReportSecurityAltIDArgs>> security_alt_id{};
-    ::std::optional<::std::span<const OrderMassCancelReportUnderlyingSecurityAltIDArgs>> underlying_security_alt_id{};
+    ::std::optional<::std::span<const groups::G_454Args>> security_alt_id{};
+    ::std::optional<::std::span<const groups::G_457Args>> underlying_security_alt_id{};
     ::std::optional<::std::int64_t> product{};
     ::std::optional<::std::string_view> cfi_code{};
     ::std::optional<::std::int64_t> underlying_product{};
@@ -28741,7 +26086,7 @@ struct OrderMassCancelReportArgs {
     ::std::optional<char> mass_cancel_response{};
     ::std::optional<::std::string_view> mass_cancel_reject_reason{};
     ::std::optional<::std::int64_t> total_affected_orders{};
-    ::std::optional<::std::span<const OrderMassCancelReportAffectedOrdersArgs>> affected_orders{};
+    ::std::optional<::std::span<const groups::G_534Args>> affected_orders{};
     ::std::optional<::std::string_view> maturity_date{};
     ::std::optional<::std::string_view> underlying_maturity_date{};
     ::std::optional<::std::string_view> instr_registry{};
@@ -28755,7 +26100,7 @@ struct OrderMassCancelReportArgs {
     ::std::optional<::std::string_view> security_sub_type{};
     ::std::optional<::std::string_view> underlying_security_sub_type{};
     ::std::optional<::fixpp::decimal_t> underlying_px{};
-    ::std::optional<::std::span<const OrderMassCancelReportEventsArgs>> events{};
+    ::std::optional<::std::span<const groups::G_864Args>> events{};
     ::std::optional<::std::string_view> dated_date{};
     ::std::optional<::std::string_view> interest_accrual_date{};
     ::std::optional<::std::int64_t> cp_program{};
@@ -28768,7 +26113,7 @@ struct OrderMassCancelReportArgs {
     ::std::optional<::fixpp::decimal_t> underlying_start_value{};
     ::std::optional<::fixpp::decimal_t> underlying_current_value{};
     ::std::optional<::fixpp::decimal_t> underlying_end_value{};
-    ::std::optional<::std::span<const OrderMassCancelReportUnderlyingStipsArgs>> underlying_stips{};
+    ::std::optional<::std::span<const groups::G_887Args>> underlying_stips{};
     ::std::optional<::std::string_view> underlying_strike_currency{};
     ::std::optional<::std::string_view> strike_currency{};
 };
@@ -29279,209 +26624,6 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_OrderMassCancel
     return bb.commit(out);
 }
 
-struct CrossOrderCancelReplaceRequestStipulationsArgs {
-    ::std::optional<::std::string_view> stipulation_type{};
-    ::std::optional<::std::string_view> stipulation_value{};
-};
-
-struct CrossOrderCancelReplaceRequestTradingSessionsArgs {
-    ::std::optional<::std::string_view> trading_session_id{};
-    ::std::optional<::std::string_view> trading_session_sub_id{};
-};
-
-struct CrossOrderCancelReplaceRequestSecurityAltIDArgs {
-    ::std::optional<::std::string_view> security_alt_id{};
-    ::std::optional<::std::string_view> security_alt_id_source{};
-};
-
-struct CrossOrderCancelReplaceRequestSidesPartyIDsPartySubIDsArgs {
-    ::std::optional<::std::string_view> party_sub_id{};
-    ::std::optional<::std::int64_t> party_sub_id_type{};
-};
-
-struct CrossOrderCancelReplaceRequestSidesPartyIDsArgs {
-    ::std::optional<::std::string_view> party_id{};
-    ::std::optional<char> party_id_source{};
-    ::std::optional<::std::int64_t> party_role{};
-    ::std::optional<::std::span<const CrossOrderCancelReplaceRequestSidesPartyIDsPartySubIDsArgs>> party_sub_i_ds{};
-};
-
-struct CrossOrderCancelReplaceRequestSidesAllocsNestedPartyIDsNestedPartySubIDsArgs {
-    ::std::optional<::std::string_view> nested_party_sub_id{};
-    ::std::optional<::std::int64_t> nested_party_sub_id_type{};
-};
-
-struct CrossOrderCancelReplaceRequestSidesAllocsNestedPartyIDsArgs {
-    ::std::optional<::std::string_view> nested_party_id{};
-    ::std::optional<char> nested_party_id_source{};
-    ::std::optional<::std::int64_t> nested_party_role{};
-    ::std::optional<::std::span<const CrossOrderCancelReplaceRequestSidesAllocsNestedPartyIDsNestedPartySubIDsArgs>> nested_party_sub_i_ds{};
-};
-
-struct CrossOrderCancelReplaceRequestSidesAllocsArgs {
-    ::std::optional<::std::string_view> alloc_account{};
-    ::std::optional<::std::int64_t> alloc_acct_id_source{};
-    ::std::optional<::std::string_view> alloc_settl_currency{};
-    ::std::optional<::std::string_view> individual_alloc_id{};
-    ::std::optional<::std::span<const CrossOrderCancelReplaceRequestSidesAllocsNestedPartyIDsArgs>> nested_party_i_ds{};
-    ::std::optional<::fixpp::decimal_t> alloc_qty{};
-};
-
-struct CrossOrderCancelReplaceRequestSidesArgs {
-    ::std::optional<char> side{};
-    ::std::optional<::std::string_view> cl_ord_id{};
-    ::std::optional<::std::string_view> secondary_cl_ord_id{};
-    ::std::optional<::std::string_view> cl_ord_link_id{};
-    ::std::optional<::std::span<const CrossOrderCancelReplaceRequestSidesPartyIDsArgs>> party_i_ds{};
-    ::std::optional<::std::string_view> trade_origination_date{};
-    ::std::optional<::std::string_view> trade_date{};
-    ::std::optional<::std::string_view> account{};
-    ::std::optional<::std::int64_t> acct_id_source{};
-    ::std::optional<::std::int64_t> account_type{};
-    ::std::optional<char> day_booking_inst{};
-    ::std::optional<char> booking_unit{};
-    ::std::optional<char> prealloc_method{};
-    ::std::optional<::std::string_view> alloc_id{};
-    ::std::optional<::std::span<const CrossOrderCancelReplaceRequestSidesAllocsArgs>> allocs{};
-    ::std::optional<::std::int64_t> qty_type{};
-    ::std::optional<::fixpp::decimal_t> order_qty{};
-    ::std::optional<::fixpp::decimal_t> cash_order_qty{};
-    ::std::optional<::fixpp::decimal_t> order_percent{};
-    ::std::optional<char> rounding_direction{};
-    ::std::optional<::fixpp::decimal_t> rounding_modulus{};
-    ::std::optional<::fixpp::decimal_t> commission{};
-    ::std::optional<char> comm_type{};
-    ::std::optional<::std::string_view> comm_currency{};
-    ::std::optional<char> fund_renew_waiv{};
-    ::std::optional<char> order_capacity{};
-    ::std::optional<::std::string_view> order_restrictions{};
-    ::std::optional<::std::int64_t> cust_order_capacity{};
-    ::std::optional<bool> forex_req{};
-    ::std::optional<::std::string_view> settl_currency{};
-    ::std::optional<::std::int64_t> booking_type{};
-    ::std::optional<::std::string_view> text{};
-    ::std::optional<::std::string_view> encoded_text{};
-    ::std::optional<char> position_effect{};
-    ::std::optional<::std::int64_t> covered_or_uncovered{};
-    ::std::optional<char> cash_margin{};
-    ::std::optional<::std::string_view> clearing_fee_indicator{};
-    ::std::optional<bool> solicited_flag{};
-    ::std::optional<::std::string_view> side_compliance_id{};
-};
-
-struct CrossOrderCancelReplaceRequestLegsLegSecurityAltIDArgs {
-    ::std::optional<::std::string_view> leg_security_alt_id{};
-    ::std::optional<::std::string_view> leg_security_alt_id_source{};
-};
-
-struct CrossOrderCancelReplaceRequestLegsArgs {
-    ::std::optional<::std::string_view> leg_symbol{};
-    ::std::optional<::std::string_view> leg_symbol_sfx{};
-    ::std::optional<::std::string_view> leg_security_id{};
-    ::std::optional<::std::string_view> leg_security_id_source{};
-    ::std::optional<::std::span<const CrossOrderCancelReplaceRequestLegsLegSecurityAltIDArgs>> leg_security_alt_id{};
-    ::std::optional<::std::int64_t> leg_product{};
-    ::std::optional<::std::string_view> leg_cfi_code{};
-    ::std::optional<::std::string_view> leg_security_type{};
-    ::std::optional<::std::string_view> leg_security_sub_type{};
-    ::std::optional<::std::string_view> leg_maturity_month_year{};
-    ::std::optional<::std::string_view> leg_maturity_date{};
-    ::std::optional<::std::string_view> leg_coupon_payment_date{};
-    ::std::optional<::std::string_view> leg_issue_date{};
-    ::std::optional<::std::string_view> leg_repo_collateral_security_type{};
-    ::std::optional<::std::int64_t> leg_repurchase_term{};
-    ::std::optional<::fixpp::decimal_t> leg_repurchase_rate{};
-    ::std::optional<::fixpp::decimal_t> leg_factor{};
-    ::std::optional<::std::string_view> leg_credit_rating{};
-    ::std::optional<::std::string_view> leg_instr_registry{};
-    ::std::optional<::std::string_view> leg_country_of_issue{};
-    ::std::optional<::std::string_view> leg_state_or_province_of_issue{};
-    ::std::optional<::std::string_view> leg_locale_of_issue{};
-    ::std::optional<::std::string_view> leg_redemption_date{};
-    ::std::optional<::fixpp::decimal_t> leg_strike_price{};
-    ::std::optional<::std::string_view> leg_strike_currency{};
-    ::std::optional<char> leg_opt_attribute{};
-    ::std::optional<::fixpp::decimal_t> leg_contract_multiplier{};
-    ::std::optional<::fixpp::decimal_t> leg_coupon_rate{};
-    ::std::optional<::std::string_view> leg_security_exchange{};
-    ::std::optional<::std::string_view> leg_issuer{};
-    ::std::optional<::std::string_view> encoded_leg_issuer{};
-    ::std::optional<::std::string_view> leg_security_desc{};
-    ::std::optional<::std::string_view> encoded_leg_security_desc{};
-    ::std::optional<::fixpp::decimal_t> leg_ratio_qty{};
-    ::std::optional<char> leg_side{};
-    ::std::optional<::std::string_view> leg_currency{};
-    ::std::optional<::std::string_view> leg_pool{};
-    ::std::optional<::std::string_view> leg_dated_date{};
-    ::std::optional<::std::string_view> leg_contract_settl_month{};
-    ::std::optional<::std::string_view> leg_interest_accrual_date{};
-};
-
-struct CrossOrderCancelReplaceRequestUnderlyingsUnderlyingSecurityAltIDArgs {
-    ::std::optional<::std::string_view> underlying_security_alt_id{};
-    ::std::optional<::std::string_view> underlying_security_alt_id_source{};
-};
-
-struct CrossOrderCancelReplaceRequestUnderlyingsUnderlyingStipsArgs {
-    ::std::optional<::std::string_view> underlying_stip_type{};
-    ::std::optional<::std::string_view> underlying_stip_value{};
-};
-
-struct CrossOrderCancelReplaceRequestUnderlyingsArgs {
-    ::std::optional<::std::string_view> underlying_symbol{};
-    ::std::optional<::std::string_view> underlying_symbol_sfx{};
-    ::std::optional<::std::string_view> underlying_security_id{};
-    ::std::optional<::std::string_view> underlying_security_id_source{};
-    ::std::optional<::std::span<const CrossOrderCancelReplaceRequestUnderlyingsUnderlyingSecurityAltIDArgs>> underlying_security_alt_id{};
-    ::std::optional<::std::int64_t> underlying_product{};
-    ::std::optional<::std::string_view> underlying_cfi_code{};
-    ::std::optional<::std::string_view> underlying_security_type{};
-    ::std::optional<::std::string_view> underlying_security_sub_type{};
-    ::std::optional<::std::string_view> underlying_maturity_month_year{};
-    ::std::optional<::std::string_view> underlying_maturity_date{};
-    ::std::optional<::std::int64_t> underlying_put_or_call{};
-    ::std::optional<::std::string_view> underlying_coupon_payment_date{};
-    ::std::optional<::std::string_view> underlying_issue_date{};
-    ::std::optional<::std::string_view> underlying_repo_collateral_security_type{};
-    ::std::optional<::std::int64_t> underlying_repurchase_term{};
-    ::std::optional<::fixpp::decimal_t> underlying_repurchase_rate{};
-    ::std::optional<::fixpp::decimal_t> underlying_factor{};
-    ::std::optional<::std::string_view> underlying_credit_rating{};
-    ::std::optional<::std::string_view> underlying_instr_registry{};
-    ::std::optional<::std::string_view> underlying_country_of_issue{};
-    ::std::optional<::std::string_view> underlying_state_or_province_of_issue{};
-    ::std::optional<::std::string_view> underlying_locale_of_issue{};
-    ::std::optional<::std::string_view> underlying_redemption_date{};
-    ::std::optional<::fixpp::decimal_t> underlying_strike_price{};
-    ::std::optional<::std::string_view> underlying_strike_currency{};
-    ::std::optional<char> underlying_opt_attribute{};
-    ::std::optional<::fixpp::decimal_t> underlying_contract_multiplier{};
-    ::std::optional<::fixpp::decimal_t> underlying_coupon_rate{};
-    ::std::optional<::std::string_view> underlying_security_exchange{};
-    ::std::optional<::std::string_view> underlying_issuer{};
-    ::std::optional<::std::string_view> encoded_underlying_issuer{};
-    ::std::optional<::std::string_view> underlying_security_desc{};
-    ::std::optional<::std::string_view> encoded_underlying_security_desc{};
-    ::std::optional<::std::string_view> underlying_cp_program{};
-    ::std::optional<::std::string_view> underlying_cp_reg_type{};
-    ::std::optional<::std::string_view> underlying_currency{};
-    ::std::optional<::fixpp::decimal_t> underlying_qty{};
-    ::std::optional<::fixpp::decimal_t> underlying_px{};
-    ::std::optional<::fixpp::decimal_t> underlying_dirty_price{};
-    ::std::optional<::fixpp::decimal_t> underlying_end_price{};
-    ::std::optional<::fixpp::decimal_t> underlying_start_value{};
-    ::std::optional<::fixpp::decimal_t> underlying_current_value{};
-    ::std::optional<::fixpp::decimal_t> underlying_end_value{};
-    ::std::optional<::std::span<const CrossOrderCancelReplaceRequestUnderlyingsUnderlyingStipsArgs>> underlying_stips{};
-};
-
-struct CrossOrderCancelReplaceRequestEventsArgs {
-    ::std::optional<::std::int64_t> event_type{};
-    ::std::optional<::std::string_view> event_date{};
-    ::std::optional<::fixpp::decimal_t> event_px{};
-    ::std::optional<::std::string_view> event_text{};
-};
-
 struct CrossOrderCancelReplaceRequestArgs {
     ::std::optional<::std::string_view> currency{};
     ::std::optional<::std::string_view> exec_inst{};
@@ -29529,7 +26671,7 @@ struct CrossOrderCancelReplaceRequestArgs {
     ::std::optional<::fixpp::decimal_t> repurchase_rate{};
     ::std::optional<::fixpp::decimal_t> factor{};
     ::std::optional<::fixpp::decimal_t> contract_multiplier{};
-    ::std::optional<::std::span<const CrossOrderCancelReplaceRequestStipulationsArgs>> stipulations{};
+    ::std::optional<::std::span<const groups::G_232Args>> stipulations{};
     ::std::optional<::std::string_view> yield_type{};
     ::std::optional<::fixpp::decimal_t> yield{};
     ::std::optional<::std::string_view> repo_collateral_security_type{};
@@ -29538,13 +26680,13 @@ struct CrossOrderCancelReplaceRequestArgs {
     ::std::optional<::std::string_view> encoded_issuer{};
     ::std::optional<::std::string_view> encoded_security_desc{};
     ::std::optional<::std::string_view> compliance_id{};
-    ::std::optional<::std::span<const CrossOrderCancelReplaceRequestTradingSessionsArgs>> trading_sessions{};
+    ::std::optional<::std::span<const groups::G_386Args>> trading_sessions{};
     ::std::optional<char> discretion_inst{};
     ::std::optional<::fixpp::decimal_t> discretion_offset_value{};
     ::std::optional<::std::int64_t> price_type{};
     ::std::optional<::std::int64_t> gt_booking_inst{};
     ::std::optional<::std::string_view> expire_date{};
-    ::std::optional<::std::span<const CrossOrderCancelReplaceRequestSecurityAltIDArgs>> security_alt_id{};
+    ::std::optional<::std::span<const groups::G_454Args>> security_alt_id{};
     ::std::optional<::std::int64_t> product{};
     ::std::optional<::std::string_view> cfi_code{};
     ::std::optional<::std::string_view> country_of_issue{};
@@ -29560,8 +26702,8 @@ struct CrossOrderCancelReplaceRequestArgs {
     ::std::optional<::std::int64_t> cross_type{};
     ::std::optional<::std::int64_t> cross_prioritization{};
     ::std::optional<::std::string_view> orig_cross_id{};
-    ::std::span<const CrossOrderCancelReplaceRequestSidesArgs> sides{};
-    ::std::optional<::std::span<const CrossOrderCancelReplaceRequestLegsArgs>> legs{};
+    ::std::span<const groups::G_552_1Args> sides{};
+    ::std::optional<::std::span<const groups::G_555_4Args>> legs{};
     ::std::optional<::fixpp::decimal_t> benchmark_price{};
     ::std::optional<::std::int64_t> benchmark_price_type{};
     ::std::optional<::std::string_view> contract_settl_month{};
@@ -29571,7 +26713,7 @@ struct CrossOrderCancelReplaceRequestArgs {
     ::std::optional<::std::int64_t> yield_redemption_price_type{};
     ::std::optional<::std::string_view> benchmark_security_id{};
     ::std::optional<::std::string_view> yield_calc_date{};
-    ::std::optional<::std::span<const CrossOrderCancelReplaceRequestUnderlyingsArgs>> underlyings{};
+    ::std::optional<::std::span<const groups::G_711Args>> underlyings{};
     ::std::optional<::std::string_view> benchmark_security_id_source{};
     ::std::optional<::std::string_view> security_sub_type{};
     ::std::optional<::std::int64_t> peg_move_type{};
@@ -29587,7 +26729,7 @@ struct CrossOrderCancelReplaceRequestArgs {
     ::std::optional<::std::int64_t> target_strategy{};
     ::std::optional<::std::string_view> target_strategy_parameters{};
     ::std::optional<::fixpp::decimal_t> participation_rate{};
-    ::std::optional<::std::span<const CrossOrderCancelReplaceRequestEventsArgs>> events{};
+    ::std::optional<::std::span<const groups::G_864Args>> events{};
     ::std::optional<::std::string_view> dated_date{};
     ::std::optional<::std::string_view> interest_accrual_date{};
     ::std::optional<::std::int64_t> cp_program{};
@@ -30791,156 +27933,6 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_CrossOrderCance
     return bb.commit(out);
 }
 
-struct CrossOrderCancelRequestSecurityAltIDArgs {
-    ::std::optional<::std::string_view> security_alt_id{};
-    ::std::optional<::std::string_view> security_alt_id_source{};
-};
-
-struct CrossOrderCancelRequestSidesPartyIDsPartySubIDsArgs {
-    ::std::optional<::std::string_view> party_sub_id{};
-    ::std::optional<::std::int64_t> party_sub_id_type{};
-};
-
-struct CrossOrderCancelRequestSidesPartyIDsArgs {
-    ::std::optional<::std::string_view> party_id{};
-    ::std::optional<char> party_id_source{};
-    ::std::optional<::std::int64_t> party_role{};
-    ::std::optional<::std::span<const CrossOrderCancelRequestSidesPartyIDsPartySubIDsArgs>> party_sub_i_ds{};
-};
-
-struct CrossOrderCancelRequestSidesArgs {
-    ::std::optional<char> side{};
-    ::std::optional<::std::string_view> orig_cl_ord_id{};
-    ::std::optional<::std::string_view> cl_ord_id{};
-    ::std::optional<::std::string_view> secondary_cl_ord_id{};
-    ::std::optional<::std::string_view> cl_ord_link_id{};
-    ::std::optional<::std::string_view> orig_ord_mod_time{};
-    ::std::optional<::std::span<const CrossOrderCancelRequestSidesPartyIDsArgs>> party_i_ds{};
-    ::std::optional<::std::string_view> trade_origination_date{};
-    ::std::optional<::std::string_view> trade_date{};
-    ::std::optional<::fixpp::decimal_t> order_qty{};
-    ::std::optional<::fixpp::decimal_t> cash_order_qty{};
-    ::std::optional<::fixpp::decimal_t> order_percent{};
-    ::std::optional<char> rounding_direction{};
-    ::std::optional<::fixpp::decimal_t> rounding_modulus{};
-    ::std::optional<::std::string_view> compliance_id{};
-    ::std::optional<::std::string_view> text{};
-    ::std::optional<::std::string_view> encoded_text{};
-};
-
-struct CrossOrderCancelRequestLegsLegSecurityAltIDArgs {
-    ::std::optional<::std::string_view> leg_security_alt_id{};
-    ::std::optional<::std::string_view> leg_security_alt_id_source{};
-};
-
-struct CrossOrderCancelRequestLegsArgs {
-    ::std::optional<::std::string_view> leg_symbol{};
-    ::std::optional<::std::string_view> leg_symbol_sfx{};
-    ::std::optional<::std::string_view> leg_security_id{};
-    ::std::optional<::std::string_view> leg_security_id_source{};
-    ::std::optional<::std::span<const CrossOrderCancelRequestLegsLegSecurityAltIDArgs>> leg_security_alt_id{};
-    ::std::optional<::std::int64_t> leg_product{};
-    ::std::optional<::std::string_view> leg_cfi_code{};
-    ::std::optional<::std::string_view> leg_security_type{};
-    ::std::optional<::std::string_view> leg_security_sub_type{};
-    ::std::optional<::std::string_view> leg_maturity_month_year{};
-    ::std::optional<::std::string_view> leg_maturity_date{};
-    ::std::optional<::std::string_view> leg_coupon_payment_date{};
-    ::std::optional<::std::string_view> leg_issue_date{};
-    ::std::optional<::std::string_view> leg_repo_collateral_security_type{};
-    ::std::optional<::std::int64_t> leg_repurchase_term{};
-    ::std::optional<::fixpp::decimal_t> leg_repurchase_rate{};
-    ::std::optional<::fixpp::decimal_t> leg_factor{};
-    ::std::optional<::std::string_view> leg_credit_rating{};
-    ::std::optional<::std::string_view> leg_instr_registry{};
-    ::std::optional<::std::string_view> leg_country_of_issue{};
-    ::std::optional<::std::string_view> leg_state_or_province_of_issue{};
-    ::std::optional<::std::string_view> leg_locale_of_issue{};
-    ::std::optional<::std::string_view> leg_redemption_date{};
-    ::std::optional<::fixpp::decimal_t> leg_strike_price{};
-    ::std::optional<::std::string_view> leg_strike_currency{};
-    ::std::optional<char> leg_opt_attribute{};
-    ::std::optional<::fixpp::decimal_t> leg_contract_multiplier{};
-    ::std::optional<::fixpp::decimal_t> leg_coupon_rate{};
-    ::std::optional<::std::string_view> leg_security_exchange{};
-    ::std::optional<::std::string_view> leg_issuer{};
-    ::std::optional<::std::string_view> encoded_leg_issuer{};
-    ::std::optional<::std::string_view> leg_security_desc{};
-    ::std::optional<::std::string_view> encoded_leg_security_desc{};
-    ::std::optional<::fixpp::decimal_t> leg_ratio_qty{};
-    ::std::optional<char> leg_side{};
-    ::std::optional<::std::string_view> leg_currency{};
-    ::std::optional<::std::string_view> leg_pool{};
-    ::std::optional<::std::string_view> leg_dated_date{};
-    ::std::optional<::std::string_view> leg_contract_settl_month{};
-    ::std::optional<::std::string_view> leg_interest_accrual_date{};
-};
-
-struct CrossOrderCancelRequestUnderlyingsUnderlyingSecurityAltIDArgs {
-    ::std::optional<::std::string_view> underlying_security_alt_id{};
-    ::std::optional<::std::string_view> underlying_security_alt_id_source{};
-};
-
-struct CrossOrderCancelRequestUnderlyingsUnderlyingStipsArgs {
-    ::std::optional<::std::string_view> underlying_stip_type{};
-    ::std::optional<::std::string_view> underlying_stip_value{};
-};
-
-struct CrossOrderCancelRequestUnderlyingsArgs {
-    ::std::optional<::std::string_view> underlying_symbol{};
-    ::std::optional<::std::string_view> underlying_symbol_sfx{};
-    ::std::optional<::std::string_view> underlying_security_id{};
-    ::std::optional<::std::string_view> underlying_security_id_source{};
-    ::std::optional<::std::span<const CrossOrderCancelRequestUnderlyingsUnderlyingSecurityAltIDArgs>> underlying_security_alt_id{};
-    ::std::optional<::std::int64_t> underlying_product{};
-    ::std::optional<::std::string_view> underlying_cfi_code{};
-    ::std::optional<::std::string_view> underlying_security_type{};
-    ::std::optional<::std::string_view> underlying_security_sub_type{};
-    ::std::optional<::std::string_view> underlying_maturity_month_year{};
-    ::std::optional<::std::string_view> underlying_maturity_date{};
-    ::std::optional<::std::int64_t> underlying_put_or_call{};
-    ::std::optional<::std::string_view> underlying_coupon_payment_date{};
-    ::std::optional<::std::string_view> underlying_issue_date{};
-    ::std::optional<::std::string_view> underlying_repo_collateral_security_type{};
-    ::std::optional<::std::int64_t> underlying_repurchase_term{};
-    ::std::optional<::fixpp::decimal_t> underlying_repurchase_rate{};
-    ::std::optional<::fixpp::decimal_t> underlying_factor{};
-    ::std::optional<::std::string_view> underlying_credit_rating{};
-    ::std::optional<::std::string_view> underlying_instr_registry{};
-    ::std::optional<::std::string_view> underlying_country_of_issue{};
-    ::std::optional<::std::string_view> underlying_state_or_province_of_issue{};
-    ::std::optional<::std::string_view> underlying_locale_of_issue{};
-    ::std::optional<::std::string_view> underlying_redemption_date{};
-    ::std::optional<::fixpp::decimal_t> underlying_strike_price{};
-    ::std::optional<::std::string_view> underlying_strike_currency{};
-    ::std::optional<char> underlying_opt_attribute{};
-    ::std::optional<::fixpp::decimal_t> underlying_contract_multiplier{};
-    ::std::optional<::fixpp::decimal_t> underlying_coupon_rate{};
-    ::std::optional<::std::string_view> underlying_security_exchange{};
-    ::std::optional<::std::string_view> underlying_issuer{};
-    ::std::optional<::std::string_view> encoded_underlying_issuer{};
-    ::std::optional<::std::string_view> underlying_security_desc{};
-    ::std::optional<::std::string_view> encoded_underlying_security_desc{};
-    ::std::optional<::std::string_view> underlying_cp_program{};
-    ::std::optional<::std::string_view> underlying_cp_reg_type{};
-    ::std::optional<::std::string_view> underlying_currency{};
-    ::std::optional<::fixpp::decimal_t> underlying_qty{};
-    ::std::optional<::fixpp::decimal_t> underlying_px{};
-    ::std::optional<::fixpp::decimal_t> underlying_dirty_price{};
-    ::std::optional<::fixpp::decimal_t> underlying_end_price{};
-    ::std::optional<::fixpp::decimal_t> underlying_start_value{};
-    ::std::optional<::fixpp::decimal_t> underlying_current_value{};
-    ::std::optional<::fixpp::decimal_t> underlying_end_value{};
-    ::std::optional<::std::span<const CrossOrderCancelRequestUnderlyingsUnderlyingStipsArgs>> underlying_stips{};
-};
-
-struct CrossOrderCancelRequestEventsArgs {
-    ::std::optional<::std::int64_t> event_type{};
-    ::std::optional<::std::string_view> event_date{};
-    ::std::optional<::fixpp::decimal_t> event_px{};
-    ::std::optional<::std::string_view> event_text{};
-};
-
 struct CrossOrderCancelRequestArgs {
     ::std::optional<::std::string_view> security_id_source{};
     ::std::optional<::std::string_view> order_id{};
@@ -30968,7 +27960,7 @@ struct CrossOrderCancelRequestArgs {
     ::std::optional<::std::string_view> credit_rating{};
     ::std::optional<::std::string_view> encoded_issuer{};
     ::std::optional<::std::string_view> encoded_security_desc{};
-    ::std::optional<::std::span<const CrossOrderCancelRequestSecurityAltIDArgs>> security_alt_id{};
+    ::std::optional<::std::span<const groups::G_454Args>> security_alt_id{};
     ::std::optional<::std::int64_t> product{};
     ::std::optional<::std::string_view> cfi_code{};
     ::std::optional<::std::string_view> country_of_issue{};
@@ -30980,13 +27972,13 @@ struct CrossOrderCancelRequestArgs {
     ::std::optional<::std::int64_t> cross_type{};
     ::std::optional<::std::int64_t> cross_prioritization{};
     ::std::optional<::std::string_view> orig_cross_id{};
-    ::std::span<const CrossOrderCancelRequestSidesArgs> sides{};
-    ::std::optional<::std::span<const CrossOrderCancelRequestLegsArgs>> legs{};
+    ::std::span<const groups::G_552_2Args> sides{};
+    ::std::optional<::std::span<const groups::G_555_4Args>> legs{};
     ::std::optional<::std::string_view> contract_settl_month{};
     ::std::optional<::std::string_view> pool{};
-    ::std::optional<::std::span<const CrossOrderCancelRequestUnderlyingsArgs>> underlyings{};
+    ::std::optional<::std::span<const groups::G_711Args>> underlyings{};
     ::std::optional<::std::string_view> security_sub_type{};
-    ::std::optional<::std::span<const CrossOrderCancelRequestEventsArgs>> events{};
+    ::std::optional<::std::span<const groups::G_864Args>> events{};
     ::std::optional<::std::string_view> dated_date{};
     ::std::optional<::std::string_view> interest_accrual_date{};
     ::std::optional<::std::int64_t> cp_program{};
@@ -31804,109 +28796,573 @@ inline constexpr ::std::array<builder_registry_entry, 33> builder_registry = {{
 
 namespace fixpp::wire {
 
-template <> struct writer_traits<::fixpp::v44::ExecutionReportMiscFeesArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::ExecutionReportMiscFeesArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::ExecutionReportMiscFeesArgs>, 0> group_checks = {};
+template <> struct writer_traits<::fixpp::v44::groups::G_136Args> {
+    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::groups::G_136Args>, 0> required_checks = {};
+    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::groups::G_136Args>, 0> group_checks = {};
 };
 
-template <> struct writer_traits<::fixpp::v44::ExecutionReportStipulationsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::ExecutionReportStipulationsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::ExecutionReportStipulationsArgs>, 0> group_checks = {};
+template <> struct writer_traits<::fixpp::v44::groups::G_232Args> {
+    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::groups::G_232Args>, 0> required_checks = {};
+    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::groups::G_232Args>, 0> group_checks = {};
 };
 
-template <> struct writer_traits<::fixpp::v44::ExecutionReportContraBrokersArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::ExecutionReportContraBrokersArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::ExecutionReportContraBrokersArgs>, 0> group_checks = {};
+template <> struct writer_traits<::fixpp::v44::groups::G_382Args> {
+    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::groups::G_382Args>, 0> required_checks = {};
+    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::groups::G_382Args>, 0> group_checks = {};
 };
 
-template <> struct writer_traits<::fixpp::v44::ExecutionReportPartyIDsPartySubIDsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::ExecutionReportPartyIDsPartySubIDsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::ExecutionReportPartyIDsPartySubIDsArgs>, 0> group_checks = {};
+template <> struct writer_traits<::fixpp::v44::groups::G_802Args> {
+    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::groups::G_802Args>, 0> required_checks = {};
+    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::groups::G_802Args>, 0> group_checks = {};
 };
 
-inline ::std::optional<::std::size_t> ExecutionReportPartyIDsArgs_count_party_sub_i_ds(::fixpp::v44::ExecutionReportPartyIDsArgs const& a) noexcept { if (!a.party_sub_i_ds) { return ::std::nullopt; } return a.party_sub_i_ds->size(); }
-inline ::fixpp::core::expected_t<void> ExecutionReportPartyIDsArgs_validate_entry_party_sub_i_ds(::fixpp::v44::ExecutionReportPartyIDsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.party_sub_i_ds)[i]); }
-template <> struct writer_traits<::fixpp::v44::ExecutionReportPartyIDsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::ExecutionReportPartyIDsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::ExecutionReportPartyIDsArgs>, 1> group_checks = {{
-        {false, &ExecutionReportPartyIDsArgs_count_party_sub_i_ds, &ExecutionReportPartyIDsArgs_validate_entry_party_sub_i_ds},
+inline ::std::optional<::std::size_t> G_453Args_count_party_sub_i_ds(::fixpp::v44::groups::G_453Args const& a) noexcept { if (!a.party_sub_i_ds) { return ::std::nullopt; } return a.party_sub_i_ds->size(); }
+inline ::fixpp::core::expected_t<void> G_453Args_validate_entry_party_sub_i_ds(::fixpp::v44::groups::G_453Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.party_sub_i_ds)[i]); }
+template <> struct writer_traits<::fixpp::v44::groups::G_453Args> {
+    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::groups::G_453Args>, 0> required_checks = {};
+    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::groups::G_453Args>, 1> group_checks = {{
+        {false, &G_453Args_count_party_sub_i_ds, &G_453Args_validate_entry_party_sub_i_ds},
     }};
 };
 
-template <> struct writer_traits<::fixpp::v44::ExecutionReportSecurityAltIDArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::ExecutionReportSecurityAltIDArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::ExecutionReportSecurityAltIDArgs>, 0> group_checks = {};
+template <> struct writer_traits<::fixpp::v44::groups::G_454Args> {
+    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::groups::G_454Args>, 0> required_checks = {};
+    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::groups::G_454Args>, 0> group_checks = {};
 };
 
-template <> struct writer_traits<::fixpp::v44::ExecutionReportContAmtsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::ExecutionReportContAmtsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::ExecutionReportContAmtsArgs>, 0> group_checks = {};
+template <> struct writer_traits<::fixpp::v44::groups::G_518Args> {
+    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::groups::G_518Args>, 0> required_checks = {};
+    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::groups::G_518Args>, 0> group_checks = {};
 };
 
-template <> struct writer_traits<::fixpp::v44::ExecutionReportLegsLegSecurityAltIDArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::ExecutionReportLegsLegSecurityAltIDArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::ExecutionReportLegsLegSecurityAltIDArgs>, 0> group_checks = {};
+template <> struct writer_traits<::fixpp::v44::groups::G_604Args> {
+    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::groups::G_604Args>, 0> required_checks = {};
+    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::groups::G_604Args>, 0> group_checks = {};
 };
 
-template <> struct writer_traits<::fixpp::v44::ExecutionReportLegsLegStipulationsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::ExecutionReportLegsLegStipulationsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::ExecutionReportLegsLegStipulationsArgs>, 0> group_checks = {};
+template <> struct writer_traits<::fixpp::v44::groups::G_683Args> {
+    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::groups::G_683Args>, 0> required_checks = {};
+    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::groups::G_683Args>, 0> group_checks = {};
 };
 
-template <> struct writer_traits<::fixpp::v44::ExecutionReportLegsNestedPartyIDsNestedPartySubIDsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::ExecutionReportLegsNestedPartyIDsNestedPartySubIDsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::ExecutionReportLegsNestedPartyIDsNestedPartySubIDsArgs>, 0> group_checks = {};
+template <> struct writer_traits<::fixpp::v44::groups::G_804Args> {
+    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::groups::G_804Args>, 0> required_checks = {};
+    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::groups::G_804Args>, 0> group_checks = {};
 };
 
-inline ::std::optional<::std::size_t> ExecutionReportLegsNestedPartyIDsArgs_count_nested_party_sub_i_ds(::fixpp::v44::ExecutionReportLegsNestedPartyIDsArgs const& a) noexcept { if (!a.nested_party_sub_i_ds) { return ::std::nullopt; } return a.nested_party_sub_i_ds->size(); }
-inline ::fixpp::core::expected_t<void> ExecutionReportLegsNestedPartyIDsArgs_validate_entry_nested_party_sub_i_ds(::fixpp::v44::ExecutionReportLegsNestedPartyIDsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.nested_party_sub_i_ds)[i]); }
-template <> struct writer_traits<::fixpp::v44::ExecutionReportLegsNestedPartyIDsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::ExecutionReportLegsNestedPartyIDsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::ExecutionReportLegsNestedPartyIDsArgs>, 1> group_checks = {{
-        {false, &ExecutionReportLegsNestedPartyIDsArgs_count_nested_party_sub_i_ds, &ExecutionReportLegsNestedPartyIDsArgs_validate_entry_nested_party_sub_i_ds},
+inline ::std::optional<::std::size_t> G_539Args_count_nested_party_sub_i_ds(::fixpp::v44::groups::G_539Args const& a) noexcept { if (!a.nested_party_sub_i_ds) { return ::std::nullopt; } return a.nested_party_sub_i_ds->size(); }
+inline ::fixpp::core::expected_t<void> G_539Args_validate_entry_nested_party_sub_i_ds(::fixpp::v44::groups::G_539Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.nested_party_sub_i_ds)[i]); }
+template <> struct writer_traits<::fixpp::v44::groups::G_539Args> {
+    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::groups::G_539Args>, 0> required_checks = {};
+    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::groups::G_539Args>, 1> group_checks = {{
+        {false, &G_539Args_count_nested_party_sub_i_ds, &G_539Args_validate_entry_nested_party_sub_i_ds},
     }};
 };
 
-inline ::std::optional<::std::size_t> ExecutionReportLegsArgs_count_leg_security_alt_id(::fixpp::v44::ExecutionReportLegsArgs const& a) noexcept { if (!a.leg_security_alt_id) { return ::std::nullopt; } return a.leg_security_alt_id->size(); }
-inline ::fixpp::core::expected_t<void> ExecutionReportLegsArgs_validate_entry_leg_security_alt_id(::fixpp::v44::ExecutionReportLegsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.leg_security_alt_id)[i]); }
-inline ::std::optional<::std::size_t> ExecutionReportLegsArgs_count_leg_stipulations(::fixpp::v44::ExecutionReportLegsArgs const& a) noexcept { if (!a.leg_stipulations) { return ::std::nullopt; } return a.leg_stipulations->size(); }
-inline ::fixpp::core::expected_t<void> ExecutionReportLegsArgs_validate_entry_leg_stipulations(::fixpp::v44::ExecutionReportLegsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.leg_stipulations)[i]); }
-inline ::std::optional<::std::size_t> ExecutionReportLegsArgs_count_nested_party_i_ds(::fixpp::v44::ExecutionReportLegsArgs const& a) noexcept { if (!a.nested_party_i_ds) { return ::std::nullopt; } return a.nested_party_i_ds->size(); }
-inline ::fixpp::core::expected_t<void> ExecutionReportLegsArgs_validate_entry_nested_party_i_ds(::fixpp::v44::ExecutionReportLegsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.nested_party_i_ds)[i]); }
-template <> struct writer_traits<::fixpp::v44::ExecutionReportLegsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::ExecutionReportLegsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::ExecutionReportLegsArgs>, 3> group_checks = {{
-        {false, &ExecutionReportLegsArgs_count_leg_security_alt_id, &ExecutionReportLegsArgs_validate_entry_leg_security_alt_id},
-        {false, &ExecutionReportLegsArgs_count_leg_stipulations, &ExecutionReportLegsArgs_validate_entry_leg_stipulations},
-        {false, &ExecutionReportLegsArgs_count_nested_party_i_ds, &ExecutionReportLegsArgs_validate_entry_nested_party_i_ds},
+inline ::std::optional<::std::size_t> G_555_1Args_count_leg_security_alt_id(::fixpp::v44::groups::G_555_1Args const& a) noexcept { if (!a.leg_security_alt_id) { return ::std::nullopt; } return a.leg_security_alt_id->size(); }
+inline ::fixpp::core::expected_t<void> G_555_1Args_validate_entry_leg_security_alt_id(::fixpp::v44::groups::G_555_1Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.leg_security_alt_id)[i]); }
+inline ::std::optional<::std::size_t> G_555_1Args_count_leg_stipulations(::fixpp::v44::groups::G_555_1Args const& a) noexcept { if (!a.leg_stipulations) { return ::std::nullopt; } return a.leg_stipulations->size(); }
+inline ::fixpp::core::expected_t<void> G_555_1Args_validate_entry_leg_stipulations(::fixpp::v44::groups::G_555_1Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.leg_stipulations)[i]); }
+inline ::std::optional<::std::size_t> G_555_1Args_count_nested_party_i_ds(::fixpp::v44::groups::G_555_1Args const& a) noexcept { if (!a.nested_party_i_ds) { return ::std::nullopt; } return a.nested_party_i_ds->size(); }
+inline ::fixpp::core::expected_t<void> G_555_1Args_validate_entry_nested_party_i_ds(::fixpp::v44::groups::G_555_1Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.nested_party_i_ds)[i]); }
+template <> struct writer_traits<::fixpp::v44::groups::G_555_1Args> {
+    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::groups::G_555_1Args>, 0> required_checks = {};
+    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::groups::G_555_1Args>, 3> group_checks = {{
+        {false, &G_555_1Args_count_leg_security_alt_id, &G_555_1Args_validate_entry_leg_security_alt_id},
+        {false, &G_555_1Args_count_leg_stipulations, &G_555_1Args_validate_entry_leg_stipulations},
+        {false, &G_555_1Args_count_nested_party_i_ds, &G_555_1Args_validate_entry_nested_party_i_ds},
     }};
 };
 
-template <> struct writer_traits<::fixpp::v44::ExecutionReportUnderlyingsUnderlyingSecurityAltIDArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::ExecutionReportUnderlyingsUnderlyingSecurityAltIDArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::ExecutionReportUnderlyingsUnderlyingSecurityAltIDArgs>, 0> group_checks = {};
+template <> struct writer_traits<::fixpp::v44::groups::G_457Args> {
+    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::groups::G_457Args>, 0> required_checks = {};
+    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::groups::G_457Args>, 0> group_checks = {};
 };
 
-template <> struct writer_traits<::fixpp::v44::ExecutionReportUnderlyingsUnderlyingStipsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::ExecutionReportUnderlyingsUnderlyingStipsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::ExecutionReportUnderlyingsUnderlyingStipsArgs>, 0> group_checks = {};
+template <> struct writer_traits<::fixpp::v44::groups::G_887Args> {
+    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::groups::G_887Args>, 0> required_checks = {};
+    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::groups::G_887Args>, 0> group_checks = {};
 };
 
-inline ::std::optional<::std::size_t> ExecutionReportUnderlyingsArgs_count_underlying_security_alt_id(::fixpp::v44::ExecutionReportUnderlyingsArgs const& a) noexcept { if (!a.underlying_security_alt_id) { return ::std::nullopt; } return a.underlying_security_alt_id->size(); }
-inline ::fixpp::core::expected_t<void> ExecutionReportUnderlyingsArgs_validate_entry_underlying_security_alt_id(::fixpp::v44::ExecutionReportUnderlyingsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.underlying_security_alt_id)[i]); }
-inline ::std::optional<::std::size_t> ExecutionReportUnderlyingsArgs_count_underlying_stips(::fixpp::v44::ExecutionReportUnderlyingsArgs const& a) noexcept { if (!a.underlying_stips) { return ::std::nullopt; } return a.underlying_stips->size(); }
-inline ::fixpp::core::expected_t<void> ExecutionReportUnderlyingsArgs_validate_entry_underlying_stips(::fixpp::v44::ExecutionReportUnderlyingsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.underlying_stips)[i]); }
-template <> struct writer_traits<::fixpp::v44::ExecutionReportUnderlyingsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::ExecutionReportUnderlyingsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::ExecutionReportUnderlyingsArgs>, 2> group_checks = {{
-        {false, &ExecutionReportUnderlyingsArgs_count_underlying_security_alt_id, &ExecutionReportUnderlyingsArgs_validate_entry_underlying_security_alt_id},
-        {false, &ExecutionReportUnderlyingsArgs_count_underlying_stips, &ExecutionReportUnderlyingsArgs_validate_entry_underlying_stips},
+inline ::std::optional<::std::size_t> G_711Args_count_underlying_security_alt_id(::fixpp::v44::groups::G_711Args const& a) noexcept { if (!a.underlying_security_alt_id) { return ::std::nullopt; } return a.underlying_security_alt_id->size(); }
+inline ::fixpp::core::expected_t<void> G_711Args_validate_entry_underlying_security_alt_id(::fixpp::v44::groups::G_711Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.underlying_security_alt_id)[i]); }
+inline ::std::optional<::std::size_t> G_711Args_count_underlying_stips(::fixpp::v44::groups::G_711Args const& a) noexcept { if (!a.underlying_stips) { return ::std::nullopt; } return a.underlying_stips->size(); }
+inline ::fixpp::core::expected_t<void> G_711Args_validate_entry_underlying_stips(::fixpp::v44::groups::G_711Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.underlying_stips)[i]); }
+template <> struct writer_traits<::fixpp::v44::groups::G_711Args> {
+    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::groups::G_711Args>, 0> required_checks = {};
+    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::groups::G_711Args>, 2> group_checks = {{
+        {false, &G_711Args_count_underlying_security_alt_id, &G_711Args_validate_entry_underlying_security_alt_id},
+        {false, &G_711Args_count_underlying_stips, &G_711Args_validate_entry_underlying_stips},
     }};
 };
 
-template <> struct writer_traits<::fixpp::v44::ExecutionReportEventsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::ExecutionReportEventsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::ExecutionReportEventsArgs>, 0> group_checks = {};
+template <> struct writer_traits<::fixpp::v44::groups::G_864Args> {
+    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::groups::G_864Args>, 0> required_checks = {};
+    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::groups::G_864Args>, 0> group_checks = {};
+};
+
+template <> struct writer_traits<::fixpp::v44::groups::G_952Args> {
+    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::groups::G_952Args>, 0> required_checks = {};
+    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::groups::G_952Args>, 0> group_checks = {};
+};
+
+inline ::std::optional<::std::size_t> G_948Args_count_nested3_party_sub_i_ds(::fixpp::v44::groups::G_948Args const& a) noexcept { if (!a.nested3_party_sub_i_ds) { return ::std::nullopt; } return a.nested3_party_sub_i_ds->size(); }
+inline ::fixpp::core::expected_t<void> G_948Args_validate_entry_nested3_party_sub_i_ds(::fixpp::v44::groups::G_948Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.nested3_party_sub_i_ds)[i]); }
+template <> struct writer_traits<::fixpp::v44::groups::G_948Args> {
+    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::groups::G_948Args>, 0> required_checks = {};
+    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::groups::G_948Args>, 1> group_checks = {{
+        {false, &G_948Args_count_nested3_party_sub_i_ds, &G_948Args_validate_entry_nested3_party_sub_i_ds},
+    }};
+};
+
+inline ::std::optional<::std::size_t> G_78_1Args_count_nested3_party_i_ds(::fixpp::v44::groups::G_78_1Args const& a) noexcept { if (!a.nested3_party_i_ds) { return ::std::nullopt; } return a.nested3_party_i_ds->size(); }
+inline ::fixpp::core::expected_t<void> G_78_1Args_validate_entry_nested3_party_i_ds(::fixpp::v44::groups::G_78_1Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.nested3_party_i_ds)[i]); }
+template <> struct writer_traits<::fixpp::v44::groups::G_78_1Args> {
+    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::groups::G_78_1Args>, 0> required_checks = {};
+    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::groups::G_78_1Args>, 1> group_checks = {{
+        {false, &G_78_1Args_count_nested3_party_i_ds, &G_78_1Args_validate_entry_nested3_party_i_ds},
+    }};
+};
+
+template <> struct writer_traits<::fixpp::v44::groups::G_386Args> {
+    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::groups::G_386Args>, 0> required_checks = {};
+    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::groups::G_386Args>, 0> group_checks = {};
+};
+
+template <> struct writer_traits<::fixpp::v44::groups::G_806Args> {
+    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::groups::G_806Args>, 0> required_checks = {};
+    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::groups::G_806Args>, 0> group_checks = {};
+};
+
+inline ::std::optional<::std::size_t> G_756Args_count_nested2_party_sub_i_ds(::fixpp::v44::groups::G_756Args const& a) noexcept { if (!a.nested2_party_sub_i_ds) { return ::std::nullopt; } return a.nested2_party_sub_i_ds->size(); }
+inline ::fixpp::core::expected_t<void> G_756Args_validate_entry_nested2_party_sub_i_ds(::fixpp::v44::groups::G_756Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.nested2_party_sub_i_ds)[i]); }
+template <> struct writer_traits<::fixpp::v44::groups::G_756Args> {
+    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::groups::G_756Args>, 0> required_checks = {};
+    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::groups::G_756Args>, 1> group_checks = {{
+        {false, &G_756Args_count_nested2_party_sub_i_ds, &G_756Args_validate_entry_nested2_party_sub_i_ds},
+    }};
+};
+
+inline ::std::optional<::std::size_t> G_670Args_count_nested2_party_i_ds(::fixpp::v44::groups::G_670Args const& a) noexcept { if (!a.nested2_party_i_ds) { return ::std::nullopt; } return a.nested2_party_i_ds->size(); }
+inline ::fixpp::core::expected_t<void> G_670Args_validate_entry_nested2_party_i_ds(::fixpp::v44::groups::G_670Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.nested2_party_i_ds)[i]); }
+template <> struct writer_traits<::fixpp::v44::groups::G_670Args> {
+    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::groups::G_670Args>, 0> required_checks = {};
+    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::groups::G_670Args>, 1> group_checks = {{
+        {false, &G_670Args_count_nested2_party_i_ds, &G_670Args_validate_entry_nested2_party_i_ds},
+    }};
+};
+
+inline ::std::optional<::std::size_t> G_555_2Args_count_leg_security_alt_id(::fixpp::v44::groups::G_555_2Args const& a) noexcept { if (!a.leg_security_alt_id) { return ::std::nullopt; } return a.leg_security_alt_id->size(); }
+inline ::fixpp::core::expected_t<void> G_555_2Args_validate_entry_leg_security_alt_id(::fixpp::v44::groups::G_555_2Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.leg_security_alt_id)[i]); }
+inline ::std::optional<::std::size_t> G_555_2Args_count_leg_stipulations(::fixpp::v44::groups::G_555_2Args const& a) noexcept { if (!a.leg_stipulations) { return ::std::nullopt; } return a.leg_stipulations->size(); }
+inline ::fixpp::core::expected_t<void> G_555_2Args_validate_entry_leg_stipulations(::fixpp::v44::groups::G_555_2Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.leg_stipulations)[i]); }
+inline ::std::optional<::std::size_t> G_555_2Args_count_leg_allocs(::fixpp::v44::groups::G_555_2Args const& a) noexcept { if (!a.leg_allocs) { return ::std::nullopt; } return a.leg_allocs->size(); }
+inline ::fixpp::core::expected_t<void> G_555_2Args_validate_entry_leg_allocs(::fixpp::v44::groups::G_555_2Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.leg_allocs)[i]); }
+inline ::std::optional<::std::size_t> G_555_2Args_count_nested_party_i_ds(::fixpp::v44::groups::G_555_2Args const& a) noexcept { if (!a.nested_party_i_ds) { return ::std::nullopt; } return a.nested_party_i_ds->size(); }
+inline ::fixpp::core::expected_t<void> G_555_2Args_validate_entry_nested_party_i_ds(::fixpp::v44::groups::G_555_2Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.nested_party_i_ds)[i]); }
+template <> struct writer_traits<::fixpp::v44::groups::G_555_2Args> {
+    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::groups::G_555_2Args>, 0> required_checks = {};
+    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::groups::G_555_2Args>, 4> group_checks = {{
+        {false, &G_555_2Args_count_leg_security_alt_id, &G_555_2Args_validate_entry_leg_security_alt_id},
+        {false, &G_555_2Args_count_leg_stipulations, &G_555_2Args_validate_entry_leg_stipulations},
+        {false, &G_555_2Args_count_leg_allocs, &G_555_2Args_validate_entry_leg_allocs},
+        {false, &G_555_2Args_count_nested_party_i_ds, &G_555_2Args_validate_entry_nested_party_i_ds},
+    }};
+};
+
+inline ::std::optional<::std::size_t> G_555_3Args_count_leg_security_alt_id(::fixpp::v44::groups::G_555_3Args const& a) noexcept { if (!a.leg_security_alt_id) { return ::std::nullopt; } return a.leg_security_alt_id->size(); }
+inline ::fixpp::core::expected_t<void> G_555_3Args_validate_entry_leg_security_alt_id(::fixpp::v44::groups::G_555_3Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.leg_security_alt_id)[i]); }
+inline ::std::optional<::std::size_t> G_555_3Args_count_leg_stipulations(::fixpp::v44::groups::G_555_3Args const& a) noexcept { if (!a.leg_stipulations) { return ::std::nullopt; } return a.leg_stipulations->size(); }
+inline ::fixpp::core::expected_t<void> G_555_3Args_validate_entry_leg_stipulations(::fixpp::v44::groups::G_555_3Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.leg_stipulations)[i]); }
+inline ::std::optional<::std::size_t> G_555_3Args_count_nested_party_i_ds(::fixpp::v44::groups::G_555_3Args const& a) noexcept { if (!a.nested_party_i_ds) { return ::std::nullopt; } return a.nested_party_i_ds->size(); }
+inline ::fixpp::core::expected_t<void> G_555_3Args_validate_entry_nested_party_i_ds(::fixpp::v44::groups::G_555_3Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.nested_party_i_ds)[i]); }
+template <> struct writer_traits<::fixpp::v44::groups::G_555_3Args> {
+    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::groups::G_555_3Args>, 0> required_checks = {};
+    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::groups::G_555_3Args>, 3> group_checks = {{
+        {false, &G_555_3Args_count_leg_security_alt_id, &G_555_3Args_validate_entry_leg_security_alt_id},
+        {false, &G_555_3Args_count_leg_stipulations, &G_555_3Args_validate_entry_leg_stipulations},
+        {false, &G_555_3Args_count_nested_party_i_ds, &G_555_3Args_validate_entry_nested_party_i_ds},
+    }};
+};
+
+template <> struct writer_traits<::fixpp::v44::groups::G_735Args> {
+    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::groups::G_735Args>, 0> required_checks = {};
+    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::groups::G_735Args>, 0> group_checks = {};
+};
+
+inline ::std::optional<::std::size_t> G_146_1Args_count_security_alt_id(::fixpp::v44::groups::G_146_1Args const& a) noexcept { if (!a.security_alt_id) { return ::std::nullopt; } return a.security_alt_id->size(); }
+inline ::fixpp::core::expected_t<void> G_146_1Args_validate_entry_security_alt_id(::fixpp::v44::groups::G_146_1Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.security_alt_id)[i]); }
+inline ::std::optional<::std::size_t> G_146_1Args_count_events(::fixpp::v44::groups::G_146_1Args const& a) noexcept { if (!a.events) { return ::std::nullopt; } return a.events->size(); }
+inline ::fixpp::core::expected_t<void> G_146_1Args_validate_entry_events(::fixpp::v44::groups::G_146_1Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.events)[i]); }
+inline ::std::optional<::std::size_t> G_146_1Args_count_underlyings(::fixpp::v44::groups::G_146_1Args const& a) noexcept { if (!a.underlyings) { return ::std::nullopt; } return a.underlyings->size(); }
+inline ::fixpp::core::expected_t<void> G_146_1Args_validate_entry_underlyings(::fixpp::v44::groups::G_146_1Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.underlyings)[i]); }
+inline ::std::optional<::std::size_t> G_146_1Args_count_stipulations(::fixpp::v44::groups::G_146_1Args const& a) noexcept { if (!a.stipulations) { return ::std::nullopt; } return a.stipulations->size(); }
+inline ::fixpp::core::expected_t<void> G_146_1Args_validate_entry_stipulations(::fixpp::v44::groups::G_146_1Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.stipulations)[i]); }
+inline ::std::optional<::std::size_t> G_146_1Args_count_legs(::fixpp::v44::groups::G_146_1Args const& a) noexcept { if (!a.legs) { return ::std::nullopt; } return a.legs->size(); }
+inline ::fixpp::core::expected_t<void> G_146_1Args_validate_entry_legs(::fixpp::v44::groups::G_146_1Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.legs)[i]); }
+inline ::std::optional<::std::size_t> G_146_1Args_count_quote_qualifiers(::fixpp::v44::groups::G_146_1Args const& a) noexcept { if (!a.quote_qualifiers) { return ::std::nullopt; } return a.quote_qualifiers->size(); }
+inline ::fixpp::core::expected_t<void> G_146_1Args_validate_entry_quote_qualifiers(::fixpp::v44::groups::G_146_1Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.quote_qualifiers)[i]); }
+inline ::std::optional<::std::size_t> G_146_1Args_count_party_i_ds(::fixpp::v44::groups::G_146_1Args const& a) noexcept { if (!a.party_i_ds) { return ::std::nullopt; } return a.party_i_ds->size(); }
+inline ::fixpp::core::expected_t<void> G_146_1Args_validate_entry_party_i_ds(::fixpp::v44::groups::G_146_1Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.party_i_ds)[i]); }
+template <> struct writer_traits<::fixpp::v44::groups::G_146_1Args> {
+    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::groups::G_146_1Args>, 0> required_checks = {};
+    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::groups::G_146_1Args>, 7> group_checks = {{
+        {false, &G_146_1Args_count_security_alt_id, &G_146_1Args_validate_entry_security_alt_id},
+        {false, &G_146_1Args_count_events, &G_146_1Args_validate_entry_events},
+        {false, &G_146_1Args_count_underlyings, &G_146_1Args_validate_entry_underlyings},
+        {false, &G_146_1Args_count_stipulations, &G_146_1Args_validate_entry_stipulations},
+        {false, &G_146_1Args_count_legs, &G_146_1Args_validate_entry_legs},
+        {false, &G_146_1Args_count_quote_qualifiers, &G_146_1Args_validate_entry_quote_qualifiers},
+        {false, &G_146_1Args_count_party_i_ds, &G_146_1Args_validate_entry_party_i_ds},
+    }};
+};
+
+inline ::std::optional<::std::size_t> G_73_1Args_count_nested2_party_i_ds(::fixpp::v44::groups::G_73_1Args const& a) noexcept { if (!a.nested2_party_i_ds) { return ::std::nullopt; } return a.nested2_party_i_ds->size(); }
+inline ::fixpp::core::expected_t<void> G_73_1Args_validate_entry_nested2_party_i_ds(::fixpp::v44::groups::G_73_1Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.nested2_party_i_ds)[i]); }
+template <> struct writer_traits<::fixpp::v44::groups::G_73_1Args> {
+    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::groups::G_73_1Args>, 0> required_checks = {};
+    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::groups::G_73_1Args>, 1> group_checks = {{
+        {false, &G_73_1Args_count_nested2_party_i_ds, &G_73_1Args_validate_entry_nested2_party_i_ds},
+    }};
+};
+
+template <> struct writer_traits<::fixpp::v44::groups::G_576Args> {
+    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::groups::G_576Args>, 0> required_checks = {};
+    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::groups::G_576Args>, 0> group_checks = {};
+};
+
+template <> struct writer_traits<::fixpp::v44::groups::G_801Args> {
+    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::groups::G_801Args>, 0> required_checks = {};
+    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::groups::G_801Args>, 0> group_checks = {};
+};
+
+inline ::std::optional<::std::size_t> G_781Args_count_settl_party_sub_i_ds(::fixpp::v44::groups::G_781Args const& a) noexcept { if (!a.settl_party_sub_i_ds) { return ::std::nullopt; } return a.settl_party_sub_i_ds->size(); }
+inline ::fixpp::core::expected_t<void> G_781Args_validate_entry_settl_party_sub_i_ds(::fixpp::v44::groups::G_781Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.settl_party_sub_i_ds)[i]); }
+template <> struct writer_traits<::fixpp::v44::groups::G_781Args> {
+    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::groups::G_781Args>, 0> required_checks = {};
+    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::groups::G_781Args>, 1> group_checks = {{
+        {false, &G_781Args_count_settl_party_sub_i_ds, &G_781Args_validate_entry_settl_party_sub_i_ds},
+    }};
+};
+
+inline ::std::optional<::std::size_t> G_85Args_count_settl_party_i_ds(::fixpp::v44::groups::G_85Args const& a) noexcept { if (!a.settl_party_i_ds) { return ::std::nullopt; } return a.settl_party_i_ds->size(); }
+inline ::fixpp::core::expected_t<void> G_85Args_validate_entry_settl_party_i_ds(::fixpp::v44::groups::G_85Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.settl_party_i_ds)[i]); }
+template <> struct writer_traits<::fixpp::v44::groups::G_85Args> {
+    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::groups::G_85Args>, 0> required_checks = {};
+    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::groups::G_85Args>, 1> group_checks = {{
+        {false, &G_85Args_count_settl_party_i_ds, &G_85Args_validate_entry_settl_party_i_ds},
+    }};
+};
+
+inline ::std::optional<::std::size_t> G_78_2Args_count_nested_party_i_ds(::fixpp::v44::groups::G_78_2Args const& a) noexcept { if (!a.nested_party_i_ds) { return ::std::nullopt; } return a.nested_party_i_ds->size(); }
+inline ::fixpp::core::expected_t<void> G_78_2Args_validate_entry_nested_party_i_ds(::fixpp::v44::groups::G_78_2Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.nested_party_i_ds)[i]); }
+inline ::std::optional<::std::size_t> G_78_2Args_count_misc_fees(::fixpp::v44::groups::G_78_2Args const& a) noexcept { if (!a.misc_fees) { return ::std::nullopt; } return a.misc_fees->size(); }
+inline ::fixpp::core::expected_t<void> G_78_2Args_validate_entry_misc_fees(::fixpp::v44::groups::G_78_2Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.misc_fees)[i]); }
+inline ::std::optional<::std::size_t> G_78_2Args_count_clearing_instructions(::fixpp::v44::groups::G_78_2Args const& a) noexcept { if (!a.clearing_instructions) { return ::std::nullopt; } return a.clearing_instructions->size(); }
+inline ::fixpp::core::expected_t<void> G_78_2Args_validate_entry_clearing_instructions(::fixpp::v44::groups::G_78_2Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.clearing_instructions)[i]); }
+inline ::std::optional<::std::size_t> G_78_2Args_count_dlvy_inst(::fixpp::v44::groups::G_78_2Args const& a) noexcept { if (!a.dlvy_inst) { return ::std::nullopt; } return a.dlvy_inst->size(); }
+inline ::fixpp::core::expected_t<void> G_78_2Args_validate_entry_dlvy_inst(::fixpp::v44::groups::G_78_2Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.dlvy_inst)[i]); }
+template <> struct writer_traits<::fixpp::v44::groups::G_78_2Args> {
+    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::groups::G_78_2Args>, 0> required_checks = {};
+    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::groups::G_78_2Args>, 4> group_checks = {{
+        {false, &G_78_2Args_count_nested_party_i_ds, &G_78_2Args_validate_entry_nested_party_i_ds},
+        {false, &G_78_2Args_count_misc_fees, &G_78_2Args_validate_entry_misc_fees},
+        {false, &G_78_2Args_count_clearing_instructions, &G_78_2Args_validate_entry_clearing_instructions},
+        {false, &G_78_2Args_count_dlvy_inst, &G_78_2Args_validate_entry_dlvy_inst},
+    }};
+};
+
+template <> struct writer_traits<::fixpp::v44::groups::G_124Args> {
+    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::groups::G_124Args>, 0> required_checks = {};
+    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::groups::G_124Args>, 0> group_checks = {};
+};
+
+inline ::std::optional<::std::size_t> G_555_4Args_count_leg_security_alt_id(::fixpp::v44::groups::G_555_4Args const& a) noexcept { if (!a.leg_security_alt_id) { return ::std::nullopt; } return a.leg_security_alt_id->size(); }
+inline ::fixpp::core::expected_t<void> G_555_4Args_validate_entry_leg_security_alt_id(::fixpp::v44::groups::G_555_4Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.leg_security_alt_id)[i]); }
+template <> struct writer_traits<::fixpp::v44::groups::G_555_4Args> {
+    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::groups::G_555_4Args>, 0> required_checks = {};
+    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::groups::G_555_4Args>, 1> group_checks = {{
+        {false, &G_555_4Args_count_leg_security_alt_id, &G_555_4Args_validate_entry_leg_security_alt_id},
+    }};
+};
+
+template <> struct writer_traits<::fixpp::v44::groups::G_870Args> {
+    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::groups::G_870Args>, 0> required_checks = {};
+    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::groups::G_870Args>, 0> group_checks = {};
+};
+
+inline ::std::optional<::std::size_t> G_78_3Args_count_nested_party_i_ds(::fixpp::v44::groups::G_78_3Args const& a) noexcept { if (!a.nested_party_i_ds) { return ::std::nullopt; } return a.nested_party_i_ds->size(); }
+inline ::fixpp::core::expected_t<void> G_78_3Args_validate_entry_nested_party_i_ds(::fixpp::v44::groups::G_78_3Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.nested_party_i_ds)[i]); }
+template <> struct writer_traits<::fixpp::v44::groups::G_78_3Args> {
+    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::groups::G_78_3Args>, 0> required_checks = {};
+    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::groups::G_78_3Args>, 1> group_checks = {{
+        {false, &G_78_3Args_count_nested_party_i_ds, &G_78_3Args_validate_entry_nested_party_i_ds},
+    }};
+};
+
+inline bool G_73_2Args_required_11(::fixpp::v44::groups::G_73_2Args const& a) noexcept { return a.cl_ord_id.has_value(); }
+inline bool G_73_2Args_required_67(::fixpp::v44::groups::G_73_2Args const& a) noexcept { return a.list_seq_no.has_value(); }
+inline bool G_73_2Args_required_54(::fixpp::v44::groups::G_73_2Args const& a) noexcept { return a.side.has_value(); }
+inline ::std::optional<::std::size_t> G_73_2Args_count_party_i_ds(::fixpp::v44::groups::G_73_2Args const& a) noexcept { if (!a.party_i_ds) { return ::std::nullopt; } return a.party_i_ds->size(); }
+inline ::fixpp::core::expected_t<void> G_73_2Args_validate_entry_party_i_ds(::fixpp::v44::groups::G_73_2Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.party_i_ds)[i]); }
+inline ::std::optional<::std::size_t> G_73_2Args_count_allocs(::fixpp::v44::groups::G_73_2Args const& a) noexcept { if (!a.allocs) { return ::std::nullopt; } return a.allocs->size(); }
+inline ::fixpp::core::expected_t<void> G_73_2Args_validate_entry_allocs(::fixpp::v44::groups::G_73_2Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.allocs)[i]); }
+inline ::std::optional<::std::size_t> G_73_2Args_count_trading_sessions(::fixpp::v44::groups::G_73_2Args const& a) noexcept { if (!a.trading_sessions) { return ::std::nullopt; } return a.trading_sessions->size(); }
+inline ::fixpp::core::expected_t<void> G_73_2Args_validate_entry_trading_sessions(::fixpp::v44::groups::G_73_2Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.trading_sessions)[i]); }
+inline ::std::optional<::std::size_t> G_73_2Args_count_security_alt_id(::fixpp::v44::groups::G_73_2Args const& a) noexcept { if (!a.security_alt_id) { return ::std::nullopt; } return a.security_alt_id->size(); }
+inline ::fixpp::core::expected_t<void> G_73_2Args_validate_entry_security_alt_id(::fixpp::v44::groups::G_73_2Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.security_alt_id)[i]); }
+inline ::std::optional<::std::size_t> G_73_2Args_count_events(::fixpp::v44::groups::G_73_2Args const& a) noexcept { if (!a.events) { return ::std::nullopt; } return a.events->size(); }
+inline ::fixpp::core::expected_t<void> G_73_2Args_validate_entry_events(::fixpp::v44::groups::G_73_2Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.events)[i]); }
+inline ::std::optional<::std::size_t> G_73_2Args_count_underlyings(::fixpp::v44::groups::G_73_2Args const& a) noexcept { if (!a.underlyings) { return ::std::nullopt; } return a.underlyings->size(); }
+inline ::fixpp::core::expected_t<void> G_73_2Args_validate_entry_underlyings(::fixpp::v44::groups::G_73_2Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.underlyings)[i]); }
+inline ::std::optional<::std::size_t> G_73_2Args_count_stipulations(::fixpp::v44::groups::G_73_2Args const& a) noexcept { if (!a.stipulations) { return ::std::nullopt; } return a.stipulations->size(); }
+inline ::fixpp::core::expected_t<void> G_73_2Args_validate_entry_stipulations(::fixpp::v44::groups::G_73_2Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.stipulations)[i]); }
+template <> struct writer_traits<::fixpp::v44::groups::G_73_2Args> {
+    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::groups::G_73_2Args>, 3> required_checks = {{
+        {11, &G_73_2Args_required_11},
+        {67, &G_73_2Args_required_67},
+        {54, &G_73_2Args_required_54},
+    }};
+    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::groups::G_73_2Args>, 7> group_checks = {{
+        {false, &G_73_2Args_count_party_i_ds, &G_73_2Args_validate_entry_party_i_ds},
+        {false, &G_73_2Args_count_allocs, &G_73_2Args_validate_entry_allocs},
+        {false, &G_73_2Args_count_trading_sessions, &G_73_2Args_validate_entry_trading_sessions},
+        {false, &G_73_2Args_count_security_alt_id, &G_73_2Args_validate_entry_security_alt_id},
+        {false, &G_73_2Args_count_events, &G_73_2Args_validate_entry_events},
+        {false, &G_73_2Args_count_underlyings, &G_73_2Args_validate_entry_underlyings},
+        {false, &G_73_2Args_count_stipulations, &G_73_2Args_validate_entry_stipulations},
+    }};
+};
+
+template <> struct writer_traits<::fixpp::v44::groups::G_78_4Args> {
+    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::groups::G_78_4Args>, 0> required_checks = {};
+    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::groups::G_78_4Args>, 0> group_checks = {};
+};
+
+inline ::std::optional<::std::size_t> G_146_2Args_count_security_alt_id(::fixpp::v44::groups::G_146_2Args const& a) noexcept { if (!a.security_alt_id) { return ::std::nullopt; } return a.security_alt_id->size(); }
+inline ::fixpp::core::expected_t<void> G_146_2Args_validate_entry_security_alt_id(::fixpp::v44::groups::G_146_2Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.security_alt_id)[i]); }
+inline ::std::optional<::std::size_t> G_146_2Args_count_events(::fixpp::v44::groups::G_146_2Args const& a) noexcept { if (!a.events) { return ::std::nullopt; } return a.events->size(); }
+inline ::fixpp::core::expected_t<void> G_146_2Args_validate_entry_events(::fixpp::v44::groups::G_146_2Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.events)[i]); }
+inline ::std::optional<::std::size_t> G_146_2Args_count_underlyings(::fixpp::v44::groups::G_146_2Args const& a) noexcept { if (!a.underlyings) { return ::std::nullopt; } return a.underlyings->size(); }
+inline ::fixpp::core::expected_t<void> G_146_2Args_validate_entry_underlyings(::fixpp::v44::groups::G_146_2Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.underlyings)[i]); }
+inline ::std::optional<::std::size_t> G_146_2Args_count_stipulations(::fixpp::v44::groups::G_146_2Args const& a) noexcept { if (!a.stipulations) { return ::std::nullopt; } return a.stipulations->size(); }
+inline ::fixpp::core::expected_t<void> G_146_2Args_validate_entry_stipulations(::fixpp::v44::groups::G_146_2Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.stipulations)[i]); }
+inline ::std::optional<::std::size_t> G_146_2Args_count_legs(::fixpp::v44::groups::G_146_2Args const& a) noexcept { if (!a.legs) { return ::std::nullopt; } return a.legs->size(); }
+inline ::fixpp::core::expected_t<void> G_146_2Args_validate_entry_legs(::fixpp::v44::groups::G_146_2Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.legs)[i]); }
+inline ::std::optional<::std::size_t> G_146_2Args_count_quote_qualifiers(::fixpp::v44::groups::G_146_2Args const& a) noexcept { if (!a.quote_qualifiers) { return ::std::nullopt; } return a.quote_qualifiers->size(); }
+inline ::fixpp::core::expected_t<void> G_146_2Args_validate_entry_quote_qualifiers(::fixpp::v44::groups::G_146_2Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.quote_qualifiers)[i]); }
+inline ::std::optional<::std::size_t> G_146_2Args_count_party_i_ds(::fixpp::v44::groups::G_146_2Args const& a) noexcept { if (!a.party_i_ds) { return ::std::nullopt; } return a.party_i_ds->size(); }
+inline ::fixpp::core::expected_t<void> G_146_2Args_validate_entry_party_i_ds(::fixpp::v44::groups::G_146_2Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.party_i_ds)[i]); }
+template <> struct writer_traits<::fixpp::v44::groups::G_146_2Args> {
+    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::groups::G_146_2Args>, 0> required_checks = {};
+    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::groups::G_146_2Args>, 7> group_checks = {{
+        {false, &G_146_2Args_count_security_alt_id, &G_146_2Args_validate_entry_security_alt_id},
+        {false, &G_146_2Args_count_events, &G_146_2Args_validate_entry_events},
+        {false, &G_146_2Args_count_underlyings, &G_146_2Args_validate_entry_underlyings},
+        {false, &G_146_2Args_count_stipulations, &G_146_2Args_validate_entry_stipulations},
+        {false, &G_146_2Args_count_legs, &G_146_2Args_validate_entry_legs},
+        {false, &G_146_2Args_count_quote_qualifiers, &G_146_2Args_validate_entry_quote_qualifiers},
+        {false, &G_146_2Args_count_party_i_ds, &G_146_2Args_validate_entry_party_i_ds},
+    }};
+};
+
+inline ::std::optional<::std::size_t> G_555_5Args_count_leg_security_alt_id(::fixpp::v44::groups::G_555_5Args const& a) noexcept { if (!a.leg_security_alt_id) { return ::std::nullopt; } return a.leg_security_alt_id->size(); }
+inline ::fixpp::core::expected_t<void> G_555_5Args_validate_entry_leg_security_alt_id(::fixpp::v44::groups::G_555_5Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.leg_security_alt_id)[i]); }
+inline ::std::optional<::std::size_t> G_555_5Args_count_leg_stipulations(::fixpp::v44::groups::G_555_5Args const& a) noexcept { if (!a.leg_stipulations) { return ::std::nullopt; } return a.leg_stipulations->size(); }
+inline ::fixpp::core::expected_t<void> G_555_5Args_validate_entry_leg_stipulations(::fixpp::v44::groups::G_555_5Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.leg_stipulations)[i]); }
+inline ::std::optional<::std::size_t> G_555_5Args_count_nested_party_i_ds(::fixpp::v44::groups::G_555_5Args const& a) noexcept { if (!a.nested_party_i_ds) { return ::std::nullopt; } return a.nested_party_i_ds->size(); }
+inline ::fixpp::core::expected_t<void> G_555_5Args_validate_entry_nested_party_i_ds(::fixpp::v44::groups::G_555_5Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.nested_party_i_ds)[i]); }
+template <> struct writer_traits<::fixpp::v44::groups::G_555_5Args> {
+    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::groups::G_555_5Args>, 0> required_checks = {};
+    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::groups::G_555_5Args>, 3> group_checks = {{
+        {false, &G_555_5Args_count_leg_security_alt_id, &G_555_5Args_validate_entry_leg_security_alt_id},
+        {false, &G_555_5Args_count_leg_stipulations, &G_555_5Args_validate_entry_leg_stipulations},
+        {false, &G_555_5Args_count_nested_party_i_ds, &G_555_5Args_validate_entry_nested_party_i_ds},
+    }};
+};
+
+inline ::std::optional<::std::size_t> G_146_3Args_count_security_alt_id(::fixpp::v44::groups::G_146_3Args const& a) noexcept { if (!a.security_alt_id) { return ::std::nullopt; } return a.security_alt_id->size(); }
+inline ::fixpp::core::expected_t<void> G_146_3Args_validate_entry_security_alt_id(::fixpp::v44::groups::G_146_3Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.security_alt_id)[i]); }
+inline ::std::optional<::std::size_t> G_146_3Args_count_events(::fixpp::v44::groups::G_146_3Args const& a) noexcept { if (!a.events) { return ::std::nullopt; } return a.events->size(); }
+inline ::fixpp::core::expected_t<void> G_146_3Args_validate_entry_events(::fixpp::v44::groups::G_146_3Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.events)[i]); }
+inline ::std::optional<::std::size_t> G_146_3Args_count_underlyings(::fixpp::v44::groups::G_146_3Args const& a) noexcept { if (!a.underlyings) { return ::std::nullopt; } return a.underlyings->size(); }
+inline ::fixpp::core::expected_t<void> G_146_3Args_validate_entry_underlyings(::fixpp::v44::groups::G_146_3Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.underlyings)[i]); }
+inline ::std::optional<::std::size_t> G_146_3Args_count_legs(::fixpp::v44::groups::G_146_3Args const& a) noexcept { if (!a.legs) { return ::std::nullopt; } return a.legs->size(); }
+inline ::fixpp::core::expected_t<void> G_146_3Args_validate_entry_legs(::fixpp::v44::groups::G_146_3Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.legs)[i]); }
+template <> struct writer_traits<::fixpp::v44::groups::G_146_3Args> {
+    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::groups::G_146_3Args>, 0> required_checks = {};
+    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::groups::G_146_3Args>, 4> group_checks = {{
+        {false, &G_146_3Args_count_security_alt_id, &G_146_3Args_validate_entry_security_alt_id},
+        {false, &G_146_3Args_count_events, &G_146_3Args_validate_entry_events},
+        {false, &G_146_3Args_count_underlyings, &G_146_3Args_validate_entry_underlyings},
+        {false, &G_146_3Args_count_legs, &G_146_3Args_validate_entry_legs},
+    }};
+};
+
+inline bool G_267Args_required_269(::fixpp::v44::groups::G_267Args const& a) noexcept { return a.md_entry_type.has_value(); }
+template <> struct writer_traits<::fixpp::v44::groups::G_267Args> {
+    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::groups::G_267Args>, 1> required_checks = {{
+        {269, &G_267Args_required_269},
+    }};
+    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::groups::G_267Args>, 0> group_checks = {};
+};
+
+inline bool G_268_1Args_required_269(::fixpp::v44::groups::G_268_1Args const& a) noexcept { return a.md_entry_type.has_value(); }
+template <> struct writer_traits<::fixpp::v44::groups::G_268_1Args> {
+    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::groups::G_268_1Args>, 1> required_checks = {{
+        {269, &G_268_1Args_required_269},
+    }};
+    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::groups::G_268_1Args>, 0> group_checks = {};
+};
+
+inline bool G_268_2Args_required_279(::fixpp::v44::groups::G_268_2Args const& a) noexcept { return a.md_update_action.has_value(); }
+inline ::std::optional<::std::size_t> G_268_2Args_count_security_alt_id(::fixpp::v44::groups::G_268_2Args const& a) noexcept { if (!a.security_alt_id) { return ::std::nullopt; } return a.security_alt_id->size(); }
+inline ::fixpp::core::expected_t<void> G_268_2Args_validate_entry_security_alt_id(::fixpp::v44::groups::G_268_2Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.security_alt_id)[i]); }
+inline ::std::optional<::std::size_t> G_268_2Args_count_events(::fixpp::v44::groups::G_268_2Args const& a) noexcept { if (!a.events) { return ::std::nullopt; } return a.events->size(); }
+inline ::fixpp::core::expected_t<void> G_268_2Args_validate_entry_events(::fixpp::v44::groups::G_268_2Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.events)[i]); }
+inline ::std::optional<::std::size_t> G_268_2Args_count_underlyings(::fixpp::v44::groups::G_268_2Args const& a) noexcept { if (!a.underlyings) { return ::std::nullopt; } return a.underlyings->size(); }
+inline ::fixpp::core::expected_t<void> G_268_2Args_validate_entry_underlyings(::fixpp::v44::groups::G_268_2Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.underlyings)[i]); }
+inline ::std::optional<::std::size_t> G_268_2Args_count_legs(::fixpp::v44::groups::G_268_2Args const& a) noexcept { if (!a.legs) { return ::std::nullopt; } return a.legs->size(); }
+inline ::fixpp::core::expected_t<void> G_268_2Args_validate_entry_legs(::fixpp::v44::groups::G_268_2Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.legs)[i]); }
+template <> struct writer_traits<::fixpp::v44::groups::G_268_2Args> {
+    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::groups::G_268_2Args>, 1> required_checks = {{
+        {279, &G_268_2Args_required_279},
+    }};
+    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::groups::G_268_2Args>, 4> group_checks = {{
+        {false, &G_268_2Args_count_security_alt_id, &G_268_2Args_validate_entry_security_alt_id},
+        {false, &G_268_2Args_count_events, &G_268_2Args_validate_entry_events},
+        {false, &G_268_2Args_count_underlyings, &G_268_2Args_validate_entry_underlyings},
+        {false, &G_268_2Args_count_legs, &G_268_2Args_validate_entry_legs},
+    }};
+};
+
+template <> struct writer_traits<::fixpp::v44::groups::G_816Args> {
+    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::groups::G_816Args>, 0> required_checks = {};
+    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::groups::G_816Args>, 0> group_checks = {};
+};
+
+inline ::std::optional<::std::size_t> G_295_1Args_count_security_alt_id(::fixpp::v44::groups::G_295_1Args const& a) noexcept { if (!a.security_alt_id) { return ::std::nullopt; } return a.security_alt_id->size(); }
+inline ::fixpp::core::expected_t<void> G_295_1Args_validate_entry_security_alt_id(::fixpp::v44::groups::G_295_1Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.security_alt_id)[i]); }
+inline ::std::optional<::std::size_t> G_295_1Args_count_events(::fixpp::v44::groups::G_295_1Args const& a) noexcept { if (!a.events) { return ::std::nullopt; } return a.events->size(); }
+inline ::fixpp::core::expected_t<void> G_295_1Args_validate_entry_events(::fixpp::v44::groups::G_295_1Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.events)[i]); }
+inline ::std::optional<::std::size_t> G_295_1Args_count_underlyings(::fixpp::v44::groups::G_295_1Args const& a) noexcept { if (!a.underlyings) { return ::std::nullopt; } return a.underlyings->size(); }
+inline ::fixpp::core::expected_t<void> G_295_1Args_validate_entry_underlyings(::fixpp::v44::groups::G_295_1Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.underlyings)[i]); }
+inline ::std::optional<::std::size_t> G_295_1Args_count_legs(::fixpp::v44::groups::G_295_1Args const& a) noexcept { if (!a.legs) { return ::std::nullopt; } return a.legs->size(); }
+inline ::fixpp::core::expected_t<void> G_295_1Args_validate_entry_legs(::fixpp::v44::groups::G_295_1Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.legs)[i]); }
+template <> struct writer_traits<::fixpp::v44::groups::G_295_1Args> {
+    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::groups::G_295_1Args>, 0> required_checks = {};
+    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::groups::G_295_1Args>, 4> group_checks = {{
+        {false, &G_295_1Args_count_security_alt_id, &G_295_1Args_validate_entry_security_alt_id},
+        {false, &G_295_1Args_count_events, &G_295_1Args_validate_entry_events},
+        {false, &G_295_1Args_count_underlyings, &G_295_1Args_validate_entry_underlyings},
+        {false, &G_295_1Args_count_legs, &G_295_1Args_validate_entry_legs},
+    }};
+};
+
+inline ::std::optional<::std::size_t> G_295_2Args_count_security_alt_id(::fixpp::v44::groups::G_295_2Args const& a) noexcept { if (!a.security_alt_id) { return ::std::nullopt; } return a.security_alt_id->size(); }
+inline ::fixpp::core::expected_t<void> G_295_2Args_validate_entry_security_alt_id(::fixpp::v44::groups::G_295_2Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.security_alt_id)[i]); }
+inline ::std::optional<::std::size_t> G_295_2Args_count_events(::fixpp::v44::groups::G_295_2Args const& a) noexcept { if (!a.events) { return ::std::nullopt; } return a.events->size(); }
+inline ::fixpp::core::expected_t<void> G_295_2Args_validate_entry_events(::fixpp::v44::groups::G_295_2Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.events)[i]); }
+inline ::std::optional<::std::size_t> G_295_2Args_count_legs(::fixpp::v44::groups::G_295_2Args const& a) noexcept { if (!a.legs) { return ::std::nullopt; } return a.legs->size(); }
+inline ::fixpp::core::expected_t<void> G_295_2Args_validate_entry_legs(::fixpp::v44::groups::G_295_2Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.legs)[i]); }
+template <> struct writer_traits<::fixpp::v44::groups::G_295_2Args> {
+    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::groups::G_295_2Args>, 0> required_checks = {};
+    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::groups::G_295_2Args>, 3> group_checks = {{
+        {false, &G_295_2Args_count_security_alt_id, &G_295_2Args_validate_entry_security_alt_id},
+        {false, &G_295_2Args_count_events, &G_295_2Args_validate_entry_events},
+        {false, &G_295_2Args_count_legs, &G_295_2Args_validate_entry_legs},
+    }};
+};
+
+inline ::std::optional<::std::size_t> G_296_1Args_count_underlying_security_alt_id(::fixpp::v44::groups::G_296_1Args const& a) noexcept { if (!a.underlying_security_alt_id) { return ::std::nullopt; } return a.underlying_security_alt_id->size(); }
+inline ::fixpp::core::expected_t<void> G_296_1Args_validate_entry_underlying_security_alt_id(::fixpp::v44::groups::G_296_1Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.underlying_security_alt_id)[i]); }
+inline ::std::optional<::std::size_t> G_296_1Args_count_underlying_stips(::fixpp::v44::groups::G_296_1Args const& a) noexcept { if (!a.underlying_stips) { return ::std::nullopt; } return a.underlying_stips->size(); }
+inline ::fixpp::core::expected_t<void> G_296_1Args_validate_entry_underlying_stips(::fixpp::v44::groups::G_296_1Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.underlying_stips)[i]); }
+inline ::std::optional<::std::size_t> G_296_1Args_count_quote_entries(::fixpp::v44::groups::G_296_1Args const& a) noexcept { if (!a.quote_entries) { return ::std::nullopt; } return a.quote_entries->size(); }
+inline ::fixpp::core::expected_t<void> G_296_1Args_validate_entry_quote_entries(::fixpp::v44::groups::G_296_1Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.quote_entries)[i]); }
+template <> struct writer_traits<::fixpp::v44::groups::G_296_1Args> {
+    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::groups::G_296_1Args>, 0> required_checks = {};
+    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::groups::G_296_1Args>, 3> group_checks = {{
+        {false, &G_296_1Args_count_underlying_security_alt_id, &G_296_1Args_validate_entry_underlying_security_alt_id},
+        {false, &G_296_1Args_count_underlying_stips, &G_296_1Args_validate_entry_underlying_stips},
+        {false, &G_296_1Args_count_quote_entries, &G_296_1Args_validate_entry_quote_entries},
+    }};
+};
+
+inline bool G_295_3Args_required_299(::fixpp::v44::groups::G_295_3Args const& a) noexcept { return a.quote_entry_id.has_value(); }
+inline ::std::optional<::std::size_t> G_295_3Args_count_security_alt_id(::fixpp::v44::groups::G_295_3Args const& a) noexcept { if (!a.security_alt_id) { return ::std::nullopt; } return a.security_alt_id->size(); }
+inline ::fixpp::core::expected_t<void> G_295_3Args_validate_entry_security_alt_id(::fixpp::v44::groups::G_295_3Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.security_alt_id)[i]); }
+inline ::std::optional<::std::size_t> G_295_3Args_count_events(::fixpp::v44::groups::G_295_3Args const& a) noexcept { if (!a.events) { return ::std::nullopt; } return a.events->size(); }
+inline ::fixpp::core::expected_t<void> G_295_3Args_validate_entry_events(::fixpp::v44::groups::G_295_3Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.events)[i]); }
+inline ::std::optional<::std::size_t> G_295_3Args_count_legs(::fixpp::v44::groups::G_295_3Args const& a) noexcept { if (!a.legs) { return ::std::nullopt; } return a.legs->size(); }
+inline ::fixpp::core::expected_t<void> G_295_3Args_validate_entry_legs(::fixpp::v44::groups::G_295_3Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.legs)[i]); }
+template <> struct writer_traits<::fixpp::v44::groups::G_295_3Args> {
+    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::groups::G_295_3Args>, 1> required_checks = {{
+        {299, &G_295_3Args_required_299},
+    }};
+    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::groups::G_295_3Args>, 3> group_checks = {{
+        {false, &G_295_3Args_count_security_alt_id, &G_295_3Args_validate_entry_security_alt_id},
+        {false, &G_295_3Args_count_events, &G_295_3Args_validate_entry_events},
+        {false, &G_295_3Args_count_legs, &G_295_3Args_validate_entry_legs},
+    }};
+};
+
+inline bool G_296_2Args_required_302(::fixpp::v44::groups::G_296_2Args const& a) noexcept { return a.quote_set_id.has_value(); }
+inline bool G_296_2Args_required_304(::fixpp::v44::groups::G_296_2Args const& a) noexcept { return a.tot_no_quote_entries.has_value(); }
+inline ::std::optional<::std::size_t> G_296_2Args_count_underlying_security_alt_id(::fixpp::v44::groups::G_296_2Args const& a) noexcept { if (!a.underlying_security_alt_id) { return ::std::nullopt; } return a.underlying_security_alt_id->size(); }
+inline ::fixpp::core::expected_t<void> G_296_2Args_validate_entry_underlying_security_alt_id(::fixpp::v44::groups::G_296_2Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.underlying_security_alt_id)[i]); }
+inline ::std::optional<::std::size_t> G_296_2Args_count_underlying_stips(::fixpp::v44::groups::G_296_2Args const& a) noexcept { if (!a.underlying_stips) { return ::std::nullopt; } return a.underlying_stips->size(); }
+inline ::fixpp::core::expected_t<void> G_296_2Args_validate_entry_underlying_stips(::fixpp::v44::groups::G_296_2Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.underlying_stips)[i]); }
+inline ::std::optional<::std::size_t> G_296_2Args_count_quote_entries(::fixpp::v44::groups::G_296_2Args const& a) noexcept { return a.quote_entries.size(); }
+inline ::fixpp::core::expected_t<void> G_296_2Args_validate_entry_quote_entries(::fixpp::v44::groups::G_296_2Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required(a.quote_entries[i]); }
+template <> struct writer_traits<::fixpp::v44::groups::G_296_2Args> {
+    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::groups::G_296_2Args>, 2> required_checks = {{
+        {302, &G_296_2Args_required_302},
+        {304, &G_296_2Args_required_304},
+    }};
+    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::groups::G_296_2Args>, 3> group_checks = {{
+        {false, &G_296_2Args_count_underlying_security_alt_id, &G_296_2Args_validate_entry_underlying_security_alt_id},
+        {false, &G_296_2Args_count_underlying_stips, &G_296_2Args_validate_entry_underlying_stips},
+        {true, &G_296_2Args_count_quote_entries, &G_296_2Args_validate_entry_quote_entries},
+    }};
+};
+
+template <> struct writer_traits<::fixpp::v44::groups::G_534Args> {
+    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::groups::G_534Args>, 0> required_checks = {};
+    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::groups::G_534Args>, 0> group_checks = {};
+};
+
+inline bool G_552_1Args_required_54(::fixpp::v44::groups::G_552_1Args const& a) noexcept { return a.side.has_value(); }
+inline bool G_552_1Args_required_11(::fixpp::v44::groups::G_552_1Args const& a) noexcept { return a.cl_ord_id.has_value(); }
+inline ::std::optional<::std::size_t> G_552_1Args_count_party_i_ds(::fixpp::v44::groups::G_552_1Args const& a) noexcept { if (!a.party_i_ds) { return ::std::nullopt; } return a.party_i_ds->size(); }
+inline ::fixpp::core::expected_t<void> G_552_1Args_validate_entry_party_i_ds(::fixpp::v44::groups::G_552_1Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.party_i_ds)[i]); }
+inline ::std::optional<::std::size_t> G_552_1Args_count_allocs(::fixpp::v44::groups::G_552_1Args const& a) noexcept { if (!a.allocs) { return ::std::nullopt; } return a.allocs->size(); }
+inline ::fixpp::core::expected_t<void> G_552_1Args_validate_entry_allocs(::fixpp::v44::groups::G_552_1Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.allocs)[i]); }
+template <> struct writer_traits<::fixpp::v44::groups::G_552_1Args> {
+    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::groups::G_552_1Args>, 2> required_checks = {{
+        {54, &G_552_1Args_required_54},
+        {11, &G_552_1Args_required_11},
+    }};
+    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::groups::G_552_1Args>, 2> group_checks = {{
+        {false, &G_552_1Args_count_party_i_ds, &G_552_1Args_validate_entry_party_i_ds},
+        {false, &G_552_1Args_count_allocs, &G_552_1Args_validate_entry_allocs},
+    }};
+};
+
+inline bool G_552_2Args_required_54(::fixpp::v44::groups::G_552_2Args const& a) noexcept { return a.side.has_value(); }
+inline bool G_552_2Args_required_41(::fixpp::v44::groups::G_552_2Args const& a) noexcept { return a.orig_cl_ord_id.has_value(); }
+inline bool G_552_2Args_required_11(::fixpp::v44::groups::G_552_2Args const& a) noexcept { return a.cl_ord_id.has_value(); }
+inline ::std::optional<::std::size_t> G_552_2Args_count_party_i_ds(::fixpp::v44::groups::G_552_2Args const& a) noexcept { if (!a.party_i_ds) { return ::std::nullopt; } return a.party_i_ds->size(); }
+inline ::fixpp::core::expected_t<void> G_552_2Args_validate_entry_party_i_ds(::fixpp::v44::groups::G_552_2Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.party_i_ds)[i]); }
+template <> struct writer_traits<::fixpp::v44::groups::G_552_2Args> {
+    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::groups::G_552_2Args>, 3> required_checks = {{
+        {54, &G_552_2Args_required_54},
+        {41, &G_552_2Args_required_41},
+        {11, &G_552_2Args_required_11},
+    }};
+    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::groups::G_552_2Args>, 1> group_checks = {{
+        {false, &G_552_2Args_count_party_i_ds, &G_552_2Args_validate_entry_party_i_ds},
+    }};
 };
 
 inline bool ExecutionReportArgs_required_6(::fixpp::v44::ExecutionReportArgs const& a) noexcept { return a.avg_px.has_value(); }
@@ -31975,145 +29431,6 @@ template <> struct writer_traits<::fixpp::v44::OrderCancelRejectArgs> {
     static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::OrderCancelRejectArgs>, 0> group_checks = {};
 };
 
-template <> struct writer_traits<::fixpp::v44::MultilegOrderCancelReplaceAllocsNested3PartyIDsNested3PartySubIDsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::MultilegOrderCancelReplaceAllocsNested3PartyIDsNested3PartySubIDsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::MultilegOrderCancelReplaceAllocsNested3PartyIDsNested3PartySubIDsArgs>, 0> group_checks = {};
-};
-
-inline ::std::optional<::std::size_t> MultilegOrderCancelReplaceAllocsNested3PartyIDsArgs_count_nested3_party_sub_i_ds(::fixpp::v44::MultilegOrderCancelReplaceAllocsNested3PartyIDsArgs const& a) noexcept { if (!a.nested3_party_sub_i_ds) { return ::std::nullopt; } return a.nested3_party_sub_i_ds->size(); }
-inline ::fixpp::core::expected_t<void> MultilegOrderCancelReplaceAllocsNested3PartyIDsArgs_validate_entry_nested3_party_sub_i_ds(::fixpp::v44::MultilegOrderCancelReplaceAllocsNested3PartyIDsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.nested3_party_sub_i_ds)[i]); }
-template <> struct writer_traits<::fixpp::v44::MultilegOrderCancelReplaceAllocsNested3PartyIDsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::MultilegOrderCancelReplaceAllocsNested3PartyIDsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::MultilegOrderCancelReplaceAllocsNested3PartyIDsArgs>, 1> group_checks = {{
-        {false, &MultilegOrderCancelReplaceAllocsNested3PartyIDsArgs_count_nested3_party_sub_i_ds, &MultilegOrderCancelReplaceAllocsNested3PartyIDsArgs_validate_entry_nested3_party_sub_i_ds},
-    }};
-};
-
-inline ::std::optional<::std::size_t> MultilegOrderCancelReplaceAllocsArgs_count_nested3_party_i_ds(::fixpp::v44::MultilegOrderCancelReplaceAllocsArgs const& a) noexcept { if (!a.nested3_party_i_ds) { return ::std::nullopt; } return a.nested3_party_i_ds->size(); }
-inline ::fixpp::core::expected_t<void> MultilegOrderCancelReplaceAllocsArgs_validate_entry_nested3_party_i_ds(::fixpp::v44::MultilegOrderCancelReplaceAllocsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.nested3_party_i_ds)[i]); }
-template <> struct writer_traits<::fixpp::v44::MultilegOrderCancelReplaceAllocsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::MultilegOrderCancelReplaceAllocsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::MultilegOrderCancelReplaceAllocsArgs>, 1> group_checks = {{
-        {false, &MultilegOrderCancelReplaceAllocsArgs_count_nested3_party_i_ds, &MultilegOrderCancelReplaceAllocsArgs_validate_entry_nested3_party_i_ds},
-    }};
-};
-
-template <> struct writer_traits<::fixpp::v44::MultilegOrderCancelReplaceTradingSessionsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::MultilegOrderCancelReplaceTradingSessionsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::MultilegOrderCancelReplaceTradingSessionsArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::MultilegOrderCancelReplacePartyIDsPartySubIDsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::MultilegOrderCancelReplacePartyIDsPartySubIDsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::MultilegOrderCancelReplacePartyIDsPartySubIDsArgs>, 0> group_checks = {};
-};
-
-inline ::std::optional<::std::size_t> MultilegOrderCancelReplacePartyIDsArgs_count_party_sub_i_ds(::fixpp::v44::MultilegOrderCancelReplacePartyIDsArgs const& a) noexcept { if (!a.party_sub_i_ds) { return ::std::nullopt; } return a.party_sub_i_ds->size(); }
-inline ::fixpp::core::expected_t<void> MultilegOrderCancelReplacePartyIDsArgs_validate_entry_party_sub_i_ds(::fixpp::v44::MultilegOrderCancelReplacePartyIDsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.party_sub_i_ds)[i]); }
-template <> struct writer_traits<::fixpp::v44::MultilegOrderCancelReplacePartyIDsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::MultilegOrderCancelReplacePartyIDsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::MultilegOrderCancelReplacePartyIDsArgs>, 1> group_checks = {{
-        {false, &MultilegOrderCancelReplacePartyIDsArgs_count_party_sub_i_ds, &MultilegOrderCancelReplacePartyIDsArgs_validate_entry_party_sub_i_ds},
-    }};
-};
-
-template <> struct writer_traits<::fixpp::v44::MultilegOrderCancelReplaceSecurityAltIDArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::MultilegOrderCancelReplaceSecurityAltIDArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::MultilegOrderCancelReplaceSecurityAltIDArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::MultilegOrderCancelReplaceLegsLegSecurityAltIDArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::MultilegOrderCancelReplaceLegsLegSecurityAltIDArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::MultilegOrderCancelReplaceLegsLegSecurityAltIDArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::MultilegOrderCancelReplaceLegsLegStipulationsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::MultilegOrderCancelReplaceLegsLegStipulationsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::MultilegOrderCancelReplaceLegsLegStipulationsArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::MultilegOrderCancelReplaceLegsLegAllocsNested2PartyIDsNested2PartySubIDsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::MultilegOrderCancelReplaceLegsLegAllocsNested2PartyIDsNested2PartySubIDsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::MultilegOrderCancelReplaceLegsLegAllocsNested2PartyIDsNested2PartySubIDsArgs>, 0> group_checks = {};
-};
-
-inline ::std::optional<::std::size_t> MultilegOrderCancelReplaceLegsLegAllocsNested2PartyIDsArgs_count_nested2_party_sub_i_ds(::fixpp::v44::MultilegOrderCancelReplaceLegsLegAllocsNested2PartyIDsArgs const& a) noexcept { if (!a.nested2_party_sub_i_ds) { return ::std::nullopt; } return a.nested2_party_sub_i_ds->size(); }
-inline ::fixpp::core::expected_t<void> MultilegOrderCancelReplaceLegsLegAllocsNested2PartyIDsArgs_validate_entry_nested2_party_sub_i_ds(::fixpp::v44::MultilegOrderCancelReplaceLegsLegAllocsNested2PartyIDsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.nested2_party_sub_i_ds)[i]); }
-template <> struct writer_traits<::fixpp::v44::MultilegOrderCancelReplaceLegsLegAllocsNested2PartyIDsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::MultilegOrderCancelReplaceLegsLegAllocsNested2PartyIDsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::MultilegOrderCancelReplaceLegsLegAllocsNested2PartyIDsArgs>, 1> group_checks = {{
-        {false, &MultilegOrderCancelReplaceLegsLegAllocsNested2PartyIDsArgs_count_nested2_party_sub_i_ds, &MultilegOrderCancelReplaceLegsLegAllocsNested2PartyIDsArgs_validate_entry_nested2_party_sub_i_ds},
-    }};
-};
-
-inline ::std::optional<::std::size_t> MultilegOrderCancelReplaceLegsLegAllocsArgs_count_nested2_party_i_ds(::fixpp::v44::MultilegOrderCancelReplaceLegsLegAllocsArgs const& a) noexcept { if (!a.nested2_party_i_ds) { return ::std::nullopt; } return a.nested2_party_i_ds->size(); }
-inline ::fixpp::core::expected_t<void> MultilegOrderCancelReplaceLegsLegAllocsArgs_validate_entry_nested2_party_i_ds(::fixpp::v44::MultilegOrderCancelReplaceLegsLegAllocsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.nested2_party_i_ds)[i]); }
-template <> struct writer_traits<::fixpp::v44::MultilegOrderCancelReplaceLegsLegAllocsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::MultilegOrderCancelReplaceLegsLegAllocsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::MultilegOrderCancelReplaceLegsLegAllocsArgs>, 1> group_checks = {{
-        {false, &MultilegOrderCancelReplaceLegsLegAllocsArgs_count_nested2_party_i_ds, &MultilegOrderCancelReplaceLegsLegAllocsArgs_validate_entry_nested2_party_i_ds},
-    }};
-};
-
-template <> struct writer_traits<::fixpp::v44::MultilegOrderCancelReplaceLegsNestedPartyIDsNestedPartySubIDsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::MultilegOrderCancelReplaceLegsNestedPartyIDsNestedPartySubIDsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::MultilegOrderCancelReplaceLegsNestedPartyIDsNestedPartySubIDsArgs>, 0> group_checks = {};
-};
-
-inline ::std::optional<::std::size_t> MultilegOrderCancelReplaceLegsNestedPartyIDsArgs_count_nested_party_sub_i_ds(::fixpp::v44::MultilegOrderCancelReplaceLegsNestedPartyIDsArgs const& a) noexcept { if (!a.nested_party_sub_i_ds) { return ::std::nullopt; } return a.nested_party_sub_i_ds->size(); }
-inline ::fixpp::core::expected_t<void> MultilegOrderCancelReplaceLegsNestedPartyIDsArgs_validate_entry_nested_party_sub_i_ds(::fixpp::v44::MultilegOrderCancelReplaceLegsNestedPartyIDsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.nested_party_sub_i_ds)[i]); }
-template <> struct writer_traits<::fixpp::v44::MultilegOrderCancelReplaceLegsNestedPartyIDsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::MultilegOrderCancelReplaceLegsNestedPartyIDsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::MultilegOrderCancelReplaceLegsNestedPartyIDsArgs>, 1> group_checks = {{
-        {false, &MultilegOrderCancelReplaceLegsNestedPartyIDsArgs_count_nested_party_sub_i_ds, &MultilegOrderCancelReplaceLegsNestedPartyIDsArgs_validate_entry_nested_party_sub_i_ds},
-    }};
-};
-
-inline ::std::optional<::std::size_t> MultilegOrderCancelReplaceLegsArgs_count_leg_security_alt_id(::fixpp::v44::MultilegOrderCancelReplaceLegsArgs const& a) noexcept { if (!a.leg_security_alt_id) { return ::std::nullopt; } return a.leg_security_alt_id->size(); }
-inline ::fixpp::core::expected_t<void> MultilegOrderCancelReplaceLegsArgs_validate_entry_leg_security_alt_id(::fixpp::v44::MultilegOrderCancelReplaceLegsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.leg_security_alt_id)[i]); }
-inline ::std::optional<::std::size_t> MultilegOrderCancelReplaceLegsArgs_count_leg_stipulations(::fixpp::v44::MultilegOrderCancelReplaceLegsArgs const& a) noexcept { if (!a.leg_stipulations) { return ::std::nullopt; } return a.leg_stipulations->size(); }
-inline ::fixpp::core::expected_t<void> MultilegOrderCancelReplaceLegsArgs_validate_entry_leg_stipulations(::fixpp::v44::MultilegOrderCancelReplaceLegsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.leg_stipulations)[i]); }
-inline ::std::optional<::std::size_t> MultilegOrderCancelReplaceLegsArgs_count_leg_allocs(::fixpp::v44::MultilegOrderCancelReplaceLegsArgs const& a) noexcept { if (!a.leg_allocs) { return ::std::nullopt; } return a.leg_allocs->size(); }
-inline ::fixpp::core::expected_t<void> MultilegOrderCancelReplaceLegsArgs_validate_entry_leg_allocs(::fixpp::v44::MultilegOrderCancelReplaceLegsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.leg_allocs)[i]); }
-inline ::std::optional<::std::size_t> MultilegOrderCancelReplaceLegsArgs_count_nested_party_i_ds(::fixpp::v44::MultilegOrderCancelReplaceLegsArgs const& a) noexcept { if (!a.nested_party_i_ds) { return ::std::nullopt; } return a.nested_party_i_ds->size(); }
-inline ::fixpp::core::expected_t<void> MultilegOrderCancelReplaceLegsArgs_validate_entry_nested_party_i_ds(::fixpp::v44::MultilegOrderCancelReplaceLegsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.nested_party_i_ds)[i]); }
-template <> struct writer_traits<::fixpp::v44::MultilegOrderCancelReplaceLegsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::MultilegOrderCancelReplaceLegsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::MultilegOrderCancelReplaceLegsArgs>, 4> group_checks = {{
-        {false, &MultilegOrderCancelReplaceLegsArgs_count_leg_security_alt_id, &MultilegOrderCancelReplaceLegsArgs_validate_entry_leg_security_alt_id},
-        {false, &MultilegOrderCancelReplaceLegsArgs_count_leg_stipulations, &MultilegOrderCancelReplaceLegsArgs_validate_entry_leg_stipulations},
-        {false, &MultilegOrderCancelReplaceLegsArgs_count_leg_allocs, &MultilegOrderCancelReplaceLegsArgs_validate_entry_leg_allocs},
-        {false, &MultilegOrderCancelReplaceLegsArgs_count_nested_party_i_ds, &MultilegOrderCancelReplaceLegsArgs_validate_entry_nested_party_i_ds},
-    }};
-};
-
-template <> struct writer_traits<::fixpp::v44::MultilegOrderCancelReplaceUnderlyingsUnderlyingSecurityAltIDArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::MultilegOrderCancelReplaceUnderlyingsUnderlyingSecurityAltIDArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::MultilegOrderCancelReplaceUnderlyingsUnderlyingSecurityAltIDArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::MultilegOrderCancelReplaceUnderlyingsUnderlyingStipsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::MultilegOrderCancelReplaceUnderlyingsUnderlyingStipsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::MultilegOrderCancelReplaceUnderlyingsUnderlyingStipsArgs>, 0> group_checks = {};
-};
-
-inline ::std::optional<::std::size_t> MultilegOrderCancelReplaceUnderlyingsArgs_count_underlying_security_alt_id(::fixpp::v44::MultilegOrderCancelReplaceUnderlyingsArgs const& a) noexcept { if (!a.underlying_security_alt_id) { return ::std::nullopt; } return a.underlying_security_alt_id->size(); }
-inline ::fixpp::core::expected_t<void> MultilegOrderCancelReplaceUnderlyingsArgs_validate_entry_underlying_security_alt_id(::fixpp::v44::MultilegOrderCancelReplaceUnderlyingsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.underlying_security_alt_id)[i]); }
-inline ::std::optional<::std::size_t> MultilegOrderCancelReplaceUnderlyingsArgs_count_underlying_stips(::fixpp::v44::MultilegOrderCancelReplaceUnderlyingsArgs const& a) noexcept { if (!a.underlying_stips) { return ::std::nullopt; } return a.underlying_stips->size(); }
-inline ::fixpp::core::expected_t<void> MultilegOrderCancelReplaceUnderlyingsArgs_validate_entry_underlying_stips(::fixpp::v44::MultilegOrderCancelReplaceUnderlyingsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.underlying_stips)[i]); }
-template <> struct writer_traits<::fixpp::v44::MultilegOrderCancelReplaceUnderlyingsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::MultilegOrderCancelReplaceUnderlyingsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::MultilegOrderCancelReplaceUnderlyingsArgs>, 2> group_checks = {{
-        {false, &MultilegOrderCancelReplaceUnderlyingsArgs_count_underlying_security_alt_id, &MultilegOrderCancelReplaceUnderlyingsArgs_validate_entry_underlying_security_alt_id},
-        {false, &MultilegOrderCancelReplaceUnderlyingsArgs_count_underlying_stips, &MultilegOrderCancelReplaceUnderlyingsArgs_validate_entry_underlying_stips},
-    }};
-};
-
-template <> struct writer_traits<::fixpp::v44::MultilegOrderCancelReplaceEventsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::MultilegOrderCancelReplaceEventsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::MultilegOrderCancelReplaceEventsArgs>, 0> group_checks = {};
-};
-
 inline bool MultilegOrderCancelReplaceArgs_required_11(::fixpp::v44::MultilegOrderCancelReplaceArgs const& a) noexcept { return a.cl_ord_id.has_value(); }
 inline bool MultilegOrderCancelReplaceArgs_required_40(::fixpp::v44::MultilegOrderCancelReplaceArgs const& a) noexcept { return a.ord_type.has_value(); }
 inline bool MultilegOrderCancelReplaceArgs_required_41(::fixpp::v44::MultilegOrderCancelReplaceArgs const& a) noexcept { return a.orig_cl_ord_id.has_value(); }
@@ -32152,40 +29469,6 @@ template <> struct writer_traits<::fixpp::v44::MultilegOrderCancelReplaceArgs> {
     }};
 };
 
-template <> struct writer_traits<::fixpp::v44::OrderMassStatusRequestPartyIDsPartySubIDsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::OrderMassStatusRequestPartyIDsPartySubIDsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::OrderMassStatusRequestPartyIDsPartySubIDsArgs>, 0> group_checks = {};
-};
-
-inline ::std::optional<::std::size_t> OrderMassStatusRequestPartyIDsArgs_count_party_sub_i_ds(::fixpp::v44::OrderMassStatusRequestPartyIDsArgs const& a) noexcept { if (!a.party_sub_i_ds) { return ::std::nullopt; } return a.party_sub_i_ds->size(); }
-inline ::fixpp::core::expected_t<void> OrderMassStatusRequestPartyIDsArgs_validate_entry_party_sub_i_ds(::fixpp::v44::OrderMassStatusRequestPartyIDsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.party_sub_i_ds)[i]); }
-template <> struct writer_traits<::fixpp::v44::OrderMassStatusRequestPartyIDsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::OrderMassStatusRequestPartyIDsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::OrderMassStatusRequestPartyIDsArgs>, 1> group_checks = {{
-        {false, &OrderMassStatusRequestPartyIDsArgs_count_party_sub_i_ds, &OrderMassStatusRequestPartyIDsArgs_validate_entry_party_sub_i_ds},
-    }};
-};
-
-template <> struct writer_traits<::fixpp::v44::OrderMassStatusRequestSecurityAltIDArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::OrderMassStatusRequestSecurityAltIDArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::OrderMassStatusRequestSecurityAltIDArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::OrderMassStatusRequestUnderlyingSecurityAltIDArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::OrderMassStatusRequestUnderlyingSecurityAltIDArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::OrderMassStatusRequestUnderlyingSecurityAltIDArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::OrderMassStatusRequestEventsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::OrderMassStatusRequestEventsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::OrderMassStatusRequestEventsArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::OrderMassStatusRequestUnderlyingStipsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::OrderMassStatusRequestUnderlyingStipsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::OrderMassStatusRequestUnderlyingStipsArgs>, 0> group_checks = {};
-};
-
 inline bool OrderMassStatusRequestArgs_required_584(::fixpp::v44::OrderMassStatusRequestArgs const& a) noexcept { return a.mass_status_req_id.has_value(); }
 inline bool OrderMassStatusRequestArgs_required_585(::fixpp::v44::OrderMassStatusRequestArgs const& a) noexcept { return a.mass_status_req_type.has_value(); }
 inline ::std::optional<::std::size_t> OrderMassStatusRequestArgs_count_party_i_ds(::fixpp::v44::OrderMassStatusRequestArgs const& a) noexcept { if (!a.party_i_ds) { return ::std::nullopt; } return a.party_i_ds->size(); }
@@ -32212,128 +29495,6 @@ template <> struct writer_traits<::fixpp::v44::OrderMassStatusRequestArgs> {
     }};
 };
 
-template <> struct writer_traits<::fixpp::v44::QuoteRequestRejectRelatedSymSecurityAltIDArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::QuoteRequestRejectRelatedSymSecurityAltIDArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::QuoteRequestRejectRelatedSymSecurityAltIDArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::QuoteRequestRejectRelatedSymEventsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::QuoteRequestRejectRelatedSymEventsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::QuoteRequestRejectRelatedSymEventsArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::QuoteRequestRejectRelatedSymUnderlyingsUnderlyingSecurityAltIDArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::QuoteRequestRejectRelatedSymUnderlyingsUnderlyingSecurityAltIDArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::QuoteRequestRejectRelatedSymUnderlyingsUnderlyingSecurityAltIDArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::QuoteRequestRejectRelatedSymUnderlyingsUnderlyingStipsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::QuoteRequestRejectRelatedSymUnderlyingsUnderlyingStipsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::QuoteRequestRejectRelatedSymUnderlyingsUnderlyingStipsArgs>, 0> group_checks = {};
-};
-
-inline ::std::optional<::std::size_t> QuoteRequestRejectRelatedSymUnderlyingsArgs_count_underlying_security_alt_id(::fixpp::v44::QuoteRequestRejectRelatedSymUnderlyingsArgs const& a) noexcept { if (!a.underlying_security_alt_id) { return ::std::nullopt; } return a.underlying_security_alt_id->size(); }
-inline ::fixpp::core::expected_t<void> QuoteRequestRejectRelatedSymUnderlyingsArgs_validate_entry_underlying_security_alt_id(::fixpp::v44::QuoteRequestRejectRelatedSymUnderlyingsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.underlying_security_alt_id)[i]); }
-inline ::std::optional<::std::size_t> QuoteRequestRejectRelatedSymUnderlyingsArgs_count_underlying_stips(::fixpp::v44::QuoteRequestRejectRelatedSymUnderlyingsArgs const& a) noexcept { if (!a.underlying_stips) { return ::std::nullopt; } return a.underlying_stips->size(); }
-inline ::fixpp::core::expected_t<void> QuoteRequestRejectRelatedSymUnderlyingsArgs_validate_entry_underlying_stips(::fixpp::v44::QuoteRequestRejectRelatedSymUnderlyingsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.underlying_stips)[i]); }
-template <> struct writer_traits<::fixpp::v44::QuoteRequestRejectRelatedSymUnderlyingsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::QuoteRequestRejectRelatedSymUnderlyingsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::QuoteRequestRejectRelatedSymUnderlyingsArgs>, 2> group_checks = {{
-        {false, &QuoteRequestRejectRelatedSymUnderlyingsArgs_count_underlying_security_alt_id, &QuoteRequestRejectRelatedSymUnderlyingsArgs_validate_entry_underlying_security_alt_id},
-        {false, &QuoteRequestRejectRelatedSymUnderlyingsArgs_count_underlying_stips, &QuoteRequestRejectRelatedSymUnderlyingsArgs_validate_entry_underlying_stips},
-    }};
-};
-
-template <> struct writer_traits<::fixpp::v44::QuoteRequestRejectRelatedSymStipulationsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::QuoteRequestRejectRelatedSymStipulationsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::QuoteRequestRejectRelatedSymStipulationsArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::QuoteRequestRejectRelatedSymLegsLegSecurityAltIDArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::QuoteRequestRejectRelatedSymLegsLegSecurityAltIDArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::QuoteRequestRejectRelatedSymLegsLegSecurityAltIDArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::QuoteRequestRejectRelatedSymLegsLegStipulationsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::QuoteRequestRejectRelatedSymLegsLegStipulationsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::QuoteRequestRejectRelatedSymLegsLegStipulationsArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::QuoteRequestRejectRelatedSymLegsNestedPartyIDsNestedPartySubIDsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::QuoteRequestRejectRelatedSymLegsNestedPartyIDsNestedPartySubIDsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::QuoteRequestRejectRelatedSymLegsNestedPartyIDsNestedPartySubIDsArgs>, 0> group_checks = {};
-};
-
-inline ::std::optional<::std::size_t> QuoteRequestRejectRelatedSymLegsNestedPartyIDsArgs_count_nested_party_sub_i_ds(::fixpp::v44::QuoteRequestRejectRelatedSymLegsNestedPartyIDsArgs const& a) noexcept { if (!a.nested_party_sub_i_ds) { return ::std::nullopt; } return a.nested_party_sub_i_ds->size(); }
-inline ::fixpp::core::expected_t<void> QuoteRequestRejectRelatedSymLegsNestedPartyIDsArgs_validate_entry_nested_party_sub_i_ds(::fixpp::v44::QuoteRequestRejectRelatedSymLegsNestedPartyIDsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.nested_party_sub_i_ds)[i]); }
-template <> struct writer_traits<::fixpp::v44::QuoteRequestRejectRelatedSymLegsNestedPartyIDsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::QuoteRequestRejectRelatedSymLegsNestedPartyIDsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::QuoteRequestRejectRelatedSymLegsNestedPartyIDsArgs>, 1> group_checks = {{
-        {false, &QuoteRequestRejectRelatedSymLegsNestedPartyIDsArgs_count_nested_party_sub_i_ds, &QuoteRequestRejectRelatedSymLegsNestedPartyIDsArgs_validate_entry_nested_party_sub_i_ds},
-    }};
-};
-
-inline ::std::optional<::std::size_t> QuoteRequestRejectRelatedSymLegsArgs_count_leg_security_alt_id(::fixpp::v44::QuoteRequestRejectRelatedSymLegsArgs const& a) noexcept { if (!a.leg_security_alt_id) { return ::std::nullopt; } return a.leg_security_alt_id->size(); }
-inline ::fixpp::core::expected_t<void> QuoteRequestRejectRelatedSymLegsArgs_validate_entry_leg_security_alt_id(::fixpp::v44::QuoteRequestRejectRelatedSymLegsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.leg_security_alt_id)[i]); }
-inline ::std::optional<::std::size_t> QuoteRequestRejectRelatedSymLegsArgs_count_leg_stipulations(::fixpp::v44::QuoteRequestRejectRelatedSymLegsArgs const& a) noexcept { if (!a.leg_stipulations) { return ::std::nullopt; } return a.leg_stipulations->size(); }
-inline ::fixpp::core::expected_t<void> QuoteRequestRejectRelatedSymLegsArgs_validate_entry_leg_stipulations(::fixpp::v44::QuoteRequestRejectRelatedSymLegsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.leg_stipulations)[i]); }
-inline ::std::optional<::std::size_t> QuoteRequestRejectRelatedSymLegsArgs_count_nested_party_i_ds(::fixpp::v44::QuoteRequestRejectRelatedSymLegsArgs const& a) noexcept { if (!a.nested_party_i_ds) { return ::std::nullopt; } return a.nested_party_i_ds->size(); }
-inline ::fixpp::core::expected_t<void> QuoteRequestRejectRelatedSymLegsArgs_validate_entry_nested_party_i_ds(::fixpp::v44::QuoteRequestRejectRelatedSymLegsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.nested_party_i_ds)[i]); }
-template <> struct writer_traits<::fixpp::v44::QuoteRequestRejectRelatedSymLegsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::QuoteRequestRejectRelatedSymLegsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::QuoteRequestRejectRelatedSymLegsArgs>, 3> group_checks = {{
-        {false, &QuoteRequestRejectRelatedSymLegsArgs_count_leg_security_alt_id, &QuoteRequestRejectRelatedSymLegsArgs_validate_entry_leg_security_alt_id},
-        {false, &QuoteRequestRejectRelatedSymLegsArgs_count_leg_stipulations, &QuoteRequestRejectRelatedSymLegsArgs_validate_entry_leg_stipulations},
-        {false, &QuoteRequestRejectRelatedSymLegsArgs_count_nested_party_i_ds, &QuoteRequestRejectRelatedSymLegsArgs_validate_entry_nested_party_i_ds},
-    }};
-};
-
-template <> struct writer_traits<::fixpp::v44::QuoteRequestRejectRelatedSymQuoteQualifiersArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::QuoteRequestRejectRelatedSymQuoteQualifiersArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::QuoteRequestRejectRelatedSymQuoteQualifiersArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::QuoteRequestRejectRelatedSymPartyIDsPartySubIDsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::QuoteRequestRejectRelatedSymPartyIDsPartySubIDsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::QuoteRequestRejectRelatedSymPartyIDsPartySubIDsArgs>, 0> group_checks = {};
-};
-
-inline ::std::optional<::std::size_t> QuoteRequestRejectRelatedSymPartyIDsArgs_count_party_sub_i_ds(::fixpp::v44::QuoteRequestRejectRelatedSymPartyIDsArgs const& a) noexcept { if (!a.party_sub_i_ds) { return ::std::nullopt; } return a.party_sub_i_ds->size(); }
-inline ::fixpp::core::expected_t<void> QuoteRequestRejectRelatedSymPartyIDsArgs_validate_entry_party_sub_i_ds(::fixpp::v44::QuoteRequestRejectRelatedSymPartyIDsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.party_sub_i_ds)[i]); }
-template <> struct writer_traits<::fixpp::v44::QuoteRequestRejectRelatedSymPartyIDsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::QuoteRequestRejectRelatedSymPartyIDsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::QuoteRequestRejectRelatedSymPartyIDsArgs>, 1> group_checks = {{
-        {false, &QuoteRequestRejectRelatedSymPartyIDsArgs_count_party_sub_i_ds, &QuoteRequestRejectRelatedSymPartyIDsArgs_validate_entry_party_sub_i_ds},
-    }};
-};
-
-inline ::std::optional<::std::size_t> QuoteRequestRejectRelatedSymArgs_count_security_alt_id(::fixpp::v44::QuoteRequestRejectRelatedSymArgs const& a) noexcept { if (!a.security_alt_id) { return ::std::nullopt; } return a.security_alt_id->size(); }
-inline ::fixpp::core::expected_t<void> QuoteRequestRejectRelatedSymArgs_validate_entry_security_alt_id(::fixpp::v44::QuoteRequestRejectRelatedSymArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.security_alt_id)[i]); }
-inline ::std::optional<::std::size_t> QuoteRequestRejectRelatedSymArgs_count_events(::fixpp::v44::QuoteRequestRejectRelatedSymArgs const& a) noexcept { if (!a.events) { return ::std::nullopt; } return a.events->size(); }
-inline ::fixpp::core::expected_t<void> QuoteRequestRejectRelatedSymArgs_validate_entry_events(::fixpp::v44::QuoteRequestRejectRelatedSymArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.events)[i]); }
-inline ::std::optional<::std::size_t> QuoteRequestRejectRelatedSymArgs_count_underlyings(::fixpp::v44::QuoteRequestRejectRelatedSymArgs const& a) noexcept { if (!a.underlyings) { return ::std::nullopt; } return a.underlyings->size(); }
-inline ::fixpp::core::expected_t<void> QuoteRequestRejectRelatedSymArgs_validate_entry_underlyings(::fixpp::v44::QuoteRequestRejectRelatedSymArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.underlyings)[i]); }
-inline ::std::optional<::std::size_t> QuoteRequestRejectRelatedSymArgs_count_stipulations(::fixpp::v44::QuoteRequestRejectRelatedSymArgs const& a) noexcept { if (!a.stipulations) { return ::std::nullopt; } return a.stipulations->size(); }
-inline ::fixpp::core::expected_t<void> QuoteRequestRejectRelatedSymArgs_validate_entry_stipulations(::fixpp::v44::QuoteRequestRejectRelatedSymArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.stipulations)[i]); }
-inline ::std::optional<::std::size_t> QuoteRequestRejectRelatedSymArgs_count_legs(::fixpp::v44::QuoteRequestRejectRelatedSymArgs const& a) noexcept { if (!a.legs) { return ::std::nullopt; } return a.legs->size(); }
-inline ::fixpp::core::expected_t<void> QuoteRequestRejectRelatedSymArgs_validate_entry_legs(::fixpp::v44::QuoteRequestRejectRelatedSymArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.legs)[i]); }
-inline ::std::optional<::std::size_t> QuoteRequestRejectRelatedSymArgs_count_quote_qualifiers(::fixpp::v44::QuoteRequestRejectRelatedSymArgs const& a) noexcept { if (!a.quote_qualifiers) { return ::std::nullopt; } return a.quote_qualifiers->size(); }
-inline ::fixpp::core::expected_t<void> QuoteRequestRejectRelatedSymArgs_validate_entry_quote_qualifiers(::fixpp::v44::QuoteRequestRejectRelatedSymArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.quote_qualifiers)[i]); }
-inline ::std::optional<::std::size_t> QuoteRequestRejectRelatedSymArgs_count_party_i_ds(::fixpp::v44::QuoteRequestRejectRelatedSymArgs const& a) noexcept { if (!a.party_i_ds) { return ::std::nullopt; } return a.party_i_ds->size(); }
-inline ::fixpp::core::expected_t<void> QuoteRequestRejectRelatedSymArgs_validate_entry_party_i_ds(::fixpp::v44::QuoteRequestRejectRelatedSymArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.party_i_ds)[i]); }
-template <> struct writer_traits<::fixpp::v44::QuoteRequestRejectRelatedSymArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::QuoteRequestRejectRelatedSymArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::QuoteRequestRejectRelatedSymArgs>, 7> group_checks = {{
-        {false, &QuoteRequestRejectRelatedSymArgs_count_security_alt_id, &QuoteRequestRejectRelatedSymArgs_validate_entry_security_alt_id},
-        {false, &QuoteRequestRejectRelatedSymArgs_count_events, &QuoteRequestRejectRelatedSymArgs_validate_entry_events},
-        {false, &QuoteRequestRejectRelatedSymArgs_count_underlyings, &QuoteRequestRejectRelatedSymArgs_validate_entry_underlyings},
-        {false, &QuoteRequestRejectRelatedSymArgs_count_stipulations, &QuoteRequestRejectRelatedSymArgs_validate_entry_stipulations},
-        {false, &QuoteRequestRejectRelatedSymArgs_count_legs, &QuoteRequestRejectRelatedSymArgs_validate_entry_legs},
-        {false, &QuoteRequestRejectRelatedSymArgs_count_quote_qualifiers, &QuoteRequestRejectRelatedSymArgs_validate_entry_quote_qualifiers},
-        {false, &QuoteRequestRejectRelatedSymArgs_count_party_i_ds, &QuoteRequestRejectRelatedSymArgs_validate_entry_party_i_ds},
-    }};
-};
-
 inline bool QuoteRequestRejectArgs_required_131(::fixpp::v44::QuoteRequestRejectArgs const& a) noexcept { return a.quote_req_id.has_value(); }
 inline bool QuoteRequestRejectArgs_required_658(::fixpp::v44::QuoteRequestRejectArgs const& a) noexcept { return a.quote_request_reject_reason.has_value(); }
 inline ::std::optional<::std::size_t> QuoteRequestRejectArgs_count_related_sym(::fixpp::v44::QuoteRequestRejectArgs const& a) noexcept { return a.related_sym.size(); }
@@ -32346,169 +29507,6 @@ template <> struct writer_traits<::fixpp::v44::QuoteRequestRejectArgs> {
     static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::QuoteRequestRejectArgs>, 1> group_checks = {{
         {true, &QuoteRequestRejectArgs_count_related_sym, &QuoteRequestRejectArgs_validate_entry_related_sym},
     }};
-};
-
-template <> struct writer_traits<::fixpp::v44::AllocationReportOrdersNested2PartyIDsNested2PartySubIDsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::AllocationReportOrdersNested2PartyIDsNested2PartySubIDsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::AllocationReportOrdersNested2PartyIDsNested2PartySubIDsArgs>, 0> group_checks = {};
-};
-
-inline ::std::optional<::std::size_t> AllocationReportOrdersNested2PartyIDsArgs_count_nested2_party_sub_i_ds(::fixpp::v44::AllocationReportOrdersNested2PartyIDsArgs const& a) noexcept { if (!a.nested2_party_sub_i_ds) { return ::std::nullopt; } return a.nested2_party_sub_i_ds->size(); }
-inline ::fixpp::core::expected_t<void> AllocationReportOrdersNested2PartyIDsArgs_validate_entry_nested2_party_sub_i_ds(::fixpp::v44::AllocationReportOrdersNested2PartyIDsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.nested2_party_sub_i_ds)[i]); }
-template <> struct writer_traits<::fixpp::v44::AllocationReportOrdersNested2PartyIDsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::AllocationReportOrdersNested2PartyIDsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::AllocationReportOrdersNested2PartyIDsArgs>, 1> group_checks = {{
-        {false, &AllocationReportOrdersNested2PartyIDsArgs_count_nested2_party_sub_i_ds, &AllocationReportOrdersNested2PartyIDsArgs_validate_entry_nested2_party_sub_i_ds},
-    }};
-};
-
-inline ::std::optional<::std::size_t> AllocationReportOrdersArgs_count_nested2_party_i_ds(::fixpp::v44::AllocationReportOrdersArgs const& a) noexcept { if (!a.nested2_party_i_ds) { return ::std::nullopt; } return a.nested2_party_i_ds->size(); }
-inline ::fixpp::core::expected_t<void> AllocationReportOrdersArgs_validate_entry_nested2_party_i_ds(::fixpp::v44::AllocationReportOrdersArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.nested2_party_i_ds)[i]); }
-template <> struct writer_traits<::fixpp::v44::AllocationReportOrdersArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::AllocationReportOrdersArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::AllocationReportOrdersArgs>, 1> group_checks = {{
-        {false, &AllocationReportOrdersArgs_count_nested2_party_i_ds, &AllocationReportOrdersArgs_validate_entry_nested2_party_i_ds},
-    }};
-};
-
-template <> struct writer_traits<::fixpp::v44::AllocationReportAllocsNestedPartyIDsNestedPartySubIDsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::AllocationReportAllocsNestedPartyIDsNestedPartySubIDsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::AllocationReportAllocsNestedPartyIDsNestedPartySubIDsArgs>, 0> group_checks = {};
-};
-
-inline ::std::optional<::std::size_t> AllocationReportAllocsNestedPartyIDsArgs_count_nested_party_sub_i_ds(::fixpp::v44::AllocationReportAllocsNestedPartyIDsArgs const& a) noexcept { if (!a.nested_party_sub_i_ds) { return ::std::nullopt; } return a.nested_party_sub_i_ds->size(); }
-inline ::fixpp::core::expected_t<void> AllocationReportAllocsNestedPartyIDsArgs_validate_entry_nested_party_sub_i_ds(::fixpp::v44::AllocationReportAllocsNestedPartyIDsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.nested_party_sub_i_ds)[i]); }
-template <> struct writer_traits<::fixpp::v44::AllocationReportAllocsNestedPartyIDsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::AllocationReportAllocsNestedPartyIDsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::AllocationReportAllocsNestedPartyIDsArgs>, 1> group_checks = {{
-        {false, &AllocationReportAllocsNestedPartyIDsArgs_count_nested_party_sub_i_ds, &AllocationReportAllocsNestedPartyIDsArgs_validate_entry_nested_party_sub_i_ds},
-    }};
-};
-
-template <> struct writer_traits<::fixpp::v44::AllocationReportAllocsMiscFeesArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::AllocationReportAllocsMiscFeesArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::AllocationReportAllocsMiscFeesArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::AllocationReportAllocsClearingInstructionsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::AllocationReportAllocsClearingInstructionsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::AllocationReportAllocsClearingInstructionsArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::AllocationReportAllocsDlvyInstSettlPartyIDsSettlPartySubIDsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::AllocationReportAllocsDlvyInstSettlPartyIDsSettlPartySubIDsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::AllocationReportAllocsDlvyInstSettlPartyIDsSettlPartySubIDsArgs>, 0> group_checks = {};
-};
-
-inline ::std::optional<::std::size_t> AllocationReportAllocsDlvyInstSettlPartyIDsArgs_count_settl_party_sub_i_ds(::fixpp::v44::AllocationReportAllocsDlvyInstSettlPartyIDsArgs const& a) noexcept { if (!a.settl_party_sub_i_ds) { return ::std::nullopt; } return a.settl_party_sub_i_ds->size(); }
-inline ::fixpp::core::expected_t<void> AllocationReportAllocsDlvyInstSettlPartyIDsArgs_validate_entry_settl_party_sub_i_ds(::fixpp::v44::AllocationReportAllocsDlvyInstSettlPartyIDsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.settl_party_sub_i_ds)[i]); }
-template <> struct writer_traits<::fixpp::v44::AllocationReportAllocsDlvyInstSettlPartyIDsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::AllocationReportAllocsDlvyInstSettlPartyIDsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::AllocationReportAllocsDlvyInstSettlPartyIDsArgs>, 1> group_checks = {{
-        {false, &AllocationReportAllocsDlvyInstSettlPartyIDsArgs_count_settl_party_sub_i_ds, &AllocationReportAllocsDlvyInstSettlPartyIDsArgs_validate_entry_settl_party_sub_i_ds},
-    }};
-};
-
-inline ::std::optional<::std::size_t> AllocationReportAllocsDlvyInstArgs_count_settl_party_i_ds(::fixpp::v44::AllocationReportAllocsDlvyInstArgs const& a) noexcept { if (!a.settl_party_i_ds) { return ::std::nullopt; } return a.settl_party_i_ds->size(); }
-inline ::fixpp::core::expected_t<void> AllocationReportAllocsDlvyInstArgs_validate_entry_settl_party_i_ds(::fixpp::v44::AllocationReportAllocsDlvyInstArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.settl_party_i_ds)[i]); }
-template <> struct writer_traits<::fixpp::v44::AllocationReportAllocsDlvyInstArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::AllocationReportAllocsDlvyInstArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::AllocationReportAllocsDlvyInstArgs>, 1> group_checks = {{
-        {false, &AllocationReportAllocsDlvyInstArgs_count_settl_party_i_ds, &AllocationReportAllocsDlvyInstArgs_validate_entry_settl_party_i_ds},
-    }};
-};
-
-inline ::std::optional<::std::size_t> AllocationReportAllocsArgs_count_nested_party_i_ds(::fixpp::v44::AllocationReportAllocsArgs const& a) noexcept { if (!a.nested_party_i_ds) { return ::std::nullopt; } return a.nested_party_i_ds->size(); }
-inline ::fixpp::core::expected_t<void> AllocationReportAllocsArgs_validate_entry_nested_party_i_ds(::fixpp::v44::AllocationReportAllocsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.nested_party_i_ds)[i]); }
-inline ::std::optional<::std::size_t> AllocationReportAllocsArgs_count_misc_fees(::fixpp::v44::AllocationReportAllocsArgs const& a) noexcept { if (!a.misc_fees) { return ::std::nullopt; } return a.misc_fees->size(); }
-inline ::fixpp::core::expected_t<void> AllocationReportAllocsArgs_validate_entry_misc_fees(::fixpp::v44::AllocationReportAllocsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.misc_fees)[i]); }
-inline ::std::optional<::std::size_t> AllocationReportAllocsArgs_count_clearing_instructions(::fixpp::v44::AllocationReportAllocsArgs const& a) noexcept { if (!a.clearing_instructions) { return ::std::nullopt; } return a.clearing_instructions->size(); }
-inline ::fixpp::core::expected_t<void> AllocationReportAllocsArgs_validate_entry_clearing_instructions(::fixpp::v44::AllocationReportAllocsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.clearing_instructions)[i]); }
-inline ::std::optional<::std::size_t> AllocationReportAllocsArgs_count_dlvy_inst(::fixpp::v44::AllocationReportAllocsArgs const& a) noexcept { if (!a.dlvy_inst) { return ::std::nullopt; } return a.dlvy_inst->size(); }
-inline ::fixpp::core::expected_t<void> AllocationReportAllocsArgs_validate_entry_dlvy_inst(::fixpp::v44::AllocationReportAllocsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.dlvy_inst)[i]); }
-template <> struct writer_traits<::fixpp::v44::AllocationReportAllocsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::AllocationReportAllocsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::AllocationReportAllocsArgs>, 4> group_checks = {{
-        {false, &AllocationReportAllocsArgs_count_nested_party_i_ds, &AllocationReportAllocsArgs_validate_entry_nested_party_i_ds},
-        {false, &AllocationReportAllocsArgs_count_misc_fees, &AllocationReportAllocsArgs_validate_entry_misc_fees},
-        {false, &AllocationReportAllocsArgs_count_clearing_instructions, &AllocationReportAllocsArgs_validate_entry_clearing_instructions},
-        {false, &AllocationReportAllocsArgs_count_dlvy_inst, &AllocationReportAllocsArgs_validate_entry_dlvy_inst},
-    }};
-};
-
-template <> struct writer_traits<::fixpp::v44::AllocationReportExecsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::AllocationReportExecsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::AllocationReportExecsArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::AllocationReportStipulationsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::AllocationReportStipulationsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::AllocationReportStipulationsArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::AllocationReportPartyIDsPartySubIDsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::AllocationReportPartyIDsPartySubIDsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::AllocationReportPartyIDsPartySubIDsArgs>, 0> group_checks = {};
-};
-
-inline ::std::optional<::std::size_t> AllocationReportPartyIDsArgs_count_party_sub_i_ds(::fixpp::v44::AllocationReportPartyIDsArgs const& a) noexcept { if (!a.party_sub_i_ds) { return ::std::nullopt; } return a.party_sub_i_ds->size(); }
-inline ::fixpp::core::expected_t<void> AllocationReportPartyIDsArgs_validate_entry_party_sub_i_ds(::fixpp::v44::AllocationReportPartyIDsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.party_sub_i_ds)[i]); }
-template <> struct writer_traits<::fixpp::v44::AllocationReportPartyIDsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::AllocationReportPartyIDsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::AllocationReportPartyIDsArgs>, 1> group_checks = {{
-        {false, &AllocationReportPartyIDsArgs_count_party_sub_i_ds, &AllocationReportPartyIDsArgs_validate_entry_party_sub_i_ds},
-    }};
-};
-
-template <> struct writer_traits<::fixpp::v44::AllocationReportSecurityAltIDArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::AllocationReportSecurityAltIDArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::AllocationReportSecurityAltIDArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::AllocationReportLegsLegSecurityAltIDArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::AllocationReportLegsLegSecurityAltIDArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::AllocationReportLegsLegSecurityAltIDArgs>, 0> group_checks = {};
-};
-
-inline ::std::optional<::std::size_t> AllocationReportLegsArgs_count_leg_security_alt_id(::fixpp::v44::AllocationReportLegsArgs const& a) noexcept { if (!a.leg_security_alt_id) { return ::std::nullopt; } return a.leg_security_alt_id->size(); }
-inline ::fixpp::core::expected_t<void> AllocationReportLegsArgs_validate_entry_leg_security_alt_id(::fixpp::v44::AllocationReportLegsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.leg_security_alt_id)[i]); }
-template <> struct writer_traits<::fixpp::v44::AllocationReportLegsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::AllocationReportLegsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::AllocationReportLegsArgs>, 1> group_checks = {{
-        {false, &AllocationReportLegsArgs_count_leg_security_alt_id, &AllocationReportLegsArgs_validate_entry_leg_security_alt_id},
-    }};
-};
-
-template <> struct writer_traits<::fixpp::v44::AllocationReportUnderlyingsUnderlyingSecurityAltIDArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::AllocationReportUnderlyingsUnderlyingSecurityAltIDArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::AllocationReportUnderlyingsUnderlyingSecurityAltIDArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::AllocationReportUnderlyingsUnderlyingStipsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::AllocationReportUnderlyingsUnderlyingStipsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::AllocationReportUnderlyingsUnderlyingStipsArgs>, 0> group_checks = {};
-};
-
-inline ::std::optional<::std::size_t> AllocationReportUnderlyingsArgs_count_underlying_security_alt_id(::fixpp::v44::AllocationReportUnderlyingsArgs const& a) noexcept { if (!a.underlying_security_alt_id) { return ::std::nullopt; } return a.underlying_security_alt_id->size(); }
-inline ::fixpp::core::expected_t<void> AllocationReportUnderlyingsArgs_validate_entry_underlying_security_alt_id(::fixpp::v44::AllocationReportUnderlyingsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.underlying_security_alt_id)[i]); }
-inline ::std::optional<::std::size_t> AllocationReportUnderlyingsArgs_count_underlying_stips(::fixpp::v44::AllocationReportUnderlyingsArgs const& a) noexcept { if (!a.underlying_stips) { return ::std::nullopt; } return a.underlying_stips->size(); }
-inline ::fixpp::core::expected_t<void> AllocationReportUnderlyingsArgs_validate_entry_underlying_stips(::fixpp::v44::AllocationReportUnderlyingsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.underlying_stips)[i]); }
-template <> struct writer_traits<::fixpp::v44::AllocationReportUnderlyingsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::AllocationReportUnderlyingsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::AllocationReportUnderlyingsArgs>, 2> group_checks = {{
-        {false, &AllocationReportUnderlyingsArgs_count_underlying_security_alt_id, &AllocationReportUnderlyingsArgs_validate_entry_underlying_security_alt_id},
-        {false, &AllocationReportUnderlyingsArgs_count_underlying_stips, &AllocationReportUnderlyingsArgs_validate_entry_underlying_stips},
-    }};
-};
-
-template <> struct writer_traits<::fixpp::v44::AllocationReportEventsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::AllocationReportEventsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::AllocationReportEventsArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::AllocationReportInstrAttribArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::AllocationReportInstrAttribArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::AllocationReportInstrAttribArgs>, 0> group_checks = {};
 };
 
 inline bool AllocationReportArgs_required_6(::fixpp::v44::AllocationReportArgs const& a) noexcept { return a.avg_px.has_value(); }
@@ -32566,85 +29564,6 @@ template <> struct writer_traits<::fixpp::v44::AllocationReportArgs> {
     }};
 };
 
-template <> struct writer_traits<::fixpp::v44::NewOrderSingleAllocsNestedPartyIDsNestedPartySubIDsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::NewOrderSingleAllocsNestedPartyIDsNestedPartySubIDsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::NewOrderSingleAllocsNestedPartyIDsNestedPartySubIDsArgs>, 0> group_checks = {};
-};
-
-inline ::std::optional<::std::size_t> NewOrderSingleAllocsNestedPartyIDsArgs_count_nested_party_sub_i_ds(::fixpp::v44::NewOrderSingleAllocsNestedPartyIDsArgs const& a) noexcept { if (!a.nested_party_sub_i_ds) { return ::std::nullopt; } return a.nested_party_sub_i_ds->size(); }
-inline ::fixpp::core::expected_t<void> NewOrderSingleAllocsNestedPartyIDsArgs_validate_entry_nested_party_sub_i_ds(::fixpp::v44::NewOrderSingleAllocsNestedPartyIDsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.nested_party_sub_i_ds)[i]); }
-template <> struct writer_traits<::fixpp::v44::NewOrderSingleAllocsNestedPartyIDsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::NewOrderSingleAllocsNestedPartyIDsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::NewOrderSingleAllocsNestedPartyIDsArgs>, 1> group_checks = {{
-        {false, &NewOrderSingleAllocsNestedPartyIDsArgs_count_nested_party_sub_i_ds, &NewOrderSingleAllocsNestedPartyIDsArgs_validate_entry_nested_party_sub_i_ds},
-    }};
-};
-
-inline ::std::optional<::std::size_t> NewOrderSingleAllocsArgs_count_nested_party_i_ds(::fixpp::v44::NewOrderSingleAllocsArgs const& a) noexcept { if (!a.nested_party_i_ds) { return ::std::nullopt; } return a.nested_party_i_ds->size(); }
-inline ::fixpp::core::expected_t<void> NewOrderSingleAllocsArgs_validate_entry_nested_party_i_ds(::fixpp::v44::NewOrderSingleAllocsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.nested_party_i_ds)[i]); }
-template <> struct writer_traits<::fixpp::v44::NewOrderSingleAllocsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::NewOrderSingleAllocsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::NewOrderSingleAllocsArgs>, 1> group_checks = {{
-        {false, &NewOrderSingleAllocsArgs_count_nested_party_i_ds, &NewOrderSingleAllocsArgs_validate_entry_nested_party_i_ds},
-    }};
-};
-
-template <> struct writer_traits<::fixpp::v44::NewOrderSingleStipulationsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::NewOrderSingleStipulationsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::NewOrderSingleStipulationsArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::NewOrderSingleTradingSessionsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::NewOrderSingleTradingSessionsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::NewOrderSingleTradingSessionsArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::NewOrderSinglePartyIDsPartySubIDsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::NewOrderSinglePartyIDsPartySubIDsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::NewOrderSinglePartyIDsPartySubIDsArgs>, 0> group_checks = {};
-};
-
-inline ::std::optional<::std::size_t> NewOrderSinglePartyIDsArgs_count_party_sub_i_ds(::fixpp::v44::NewOrderSinglePartyIDsArgs const& a) noexcept { if (!a.party_sub_i_ds) { return ::std::nullopt; } return a.party_sub_i_ds->size(); }
-inline ::fixpp::core::expected_t<void> NewOrderSinglePartyIDsArgs_validate_entry_party_sub_i_ds(::fixpp::v44::NewOrderSinglePartyIDsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.party_sub_i_ds)[i]); }
-template <> struct writer_traits<::fixpp::v44::NewOrderSinglePartyIDsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::NewOrderSinglePartyIDsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::NewOrderSinglePartyIDsArgs>, 1> group_checks = {{
-        {false, &NewOrderSinglePartyIDsArgs_count_party_sub_i_ds, &NewOrderSinglePartyIDsArgs_validate_entry_party_sub_i_ds},
-    }};
-};
-
-template <> struct writer_traits<::fixpp::v44::NewOrderSingleSecurityAltIDArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::NewOrderSingleSecurityAltIDArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::NewOrderSingleSecurityAltIDArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::NewOrderSingleUnderlyingsUnderlyingSecurityAltIDArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::NewOrderSingleUnderlyingsUnderlyingSecurityAltIDArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::NewOrderSingleUnderlyingsUnderlyingSecurityAltIDArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::NewOrderSingleUnderlyingsUnderlyingStipsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::NewOrderSingleUnderlyingsUnderlyingStipsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::NewOrderSingleUnderlyingsUnderlyingStipsArgs>, 0> group_checks = {};
-};
-
-inline ::std::optional<::std::size_t> NewOrderSingleUnderlyingsArgs_count_underlying_security_alt_id(::fixpp::v44::NewOrderSingleUnderlyingsArgs const& a) noexcept { if (!a.underlying_security_alt_id) { return ::std::nullopt; } return a.underlying_security_alt_id->size(); }
-inline ::fixpp::core::expected_t<void> NewOrderSingleUnderlyingsArgs_validate_entry_underlying_security_alt_id(::fixpp::v44::NewOrderSingleUnderlyingsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.underlying_security_alt_id)[i]); }
-inline ::std::optional<::std::size_t> NewOrderSingleUnderlyingsArgs_count_underlying_stips(::fixpp::v44::NewOrderSingleUnderlyingsArgs const& a) noexcept { if (!a.underlying_stips) { return ::std::nullopt; } return a.underlying_stips->size(); }
-inline ::fixpp::core::expected_t<void> NewOrderSingleUnderlyingsArgs_validate_entry_underlying_stips(::fixpp::v44::NewOrderSingleUnderlyingsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.underlying_stips)[i]); }
-template <> struct writer_traits<::fixpp::v44::NewOrderSingleUnderlyingsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::NewOrderSingleUnderlyingsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::NewOrderSingleUnderlyingsArgs>, 2> group_checks = {{
-        {false, &NewOrderSingleUnderlyingsArgs_count_underlying_security_alt_id, &NewOrderSingleUnderlyingsArgs_validate_entry_underlying_security_alt_id},
-        {false, &NewOrderSingleUnderlyingsArgs_count_underlying_stips, &NewOrderSingleUnderlyingsArgs_validate_entry_underlying_stips},
-    }};
-};
-
-template <> struct writer_traits<::fixpp::v44::NewOrderSingleEventsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::NewOrderSingleEventsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::NewOrderSingleEventsArgs>, 0> group_checks = {};
-};
-
 inline bool NewOrderSingleArgs_required_11(::fixpp::v44::NewOrderSingleArgs const& a) noexcept { return a.cl_ord_id.has_value(); }
 inline bool NewOrderSingleArgs_required_40(::fixpp::v44::NewOrderSingleArgs const& a) noexcept { return a.ord_type.has_value(); }
 inline bool NewOrderSingleArgs_required_54(::fixpp::v44::NewOrderSingleArgs const& a) noexcept { return a.side.has_value(); }
@@ -32681,119 +29600,6 @@ template <> struct writer_traits<::fixpp::v44::NewOrderSingleArgs> {
     }};
 };
 
-template <> struct writer_traits<::fixpp::v44::NewOrderListOrdersPartyIDsPartySubIDsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::NewOrderListOrdersPartyIDsPartySubIDsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::NewOrderListOrdersPartyIDsPartySubIDsArgs>, 0> group_checks = {};
-};
-
-inline ::std::optional<::std::size_t> NewOrderListOrdersPartyIDsArgs_count_party_sub_i_ds(::fixpp::v44::NewOrderListOrdersPartyIDsArgs const& a) noexcept { if (!a.party_sub_i_ds) { return ::std::nullopt; } return a.party_sub_i_ds->size(); }
-inline ::fixpp::core::expected_t<void> NewOrderListOrdersPartyIDsArgs_validate_entry_party_sub_i_ds(::fixpp::v44::NewOrderListOrdersPartyIDsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.party_sub_i_ds)[i]); }
-template <> struct writer_traits<::fixpp::v44::NewOrderListOrdersPartyIDsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::NewOrderListOrdersPartyIDsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::NewOrderListOrdersPartyIDsArgs>, 1> group_checks = {{
-        {false, &NewOrderListOrdersPartyIDsArgs_count_party_sub_i_ds, &NewOrderListOrdersPartyIDsArgs_validate_entry_party_sub_i_ds},
-    }};
-};
-
-template <> struct writer_traits<::fixpp::v44::NewOrderListOrdersAllocsNestedPartyIDsNestedPartySubIDsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::NewOrderListOrdersAllocsNestedPartyIDsNestedPartySubIDsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::NewOrderListOrdersAllocsNestedPartyIDsNestedPartySubIDsArgs>, 0> group_checks = {};
-};
-
-inline ::std::optional<::std::size_t> NewOrderListOrdersAllocsNestedPartyIDsArgs_count_nested_party_sub_i_ds(::fixpp::v44::NewOrderListOrdersAllocsNestedPartyIDsArgs const& a) noexcept { if (!a.nested_party_sub_i_ds) { return ::std::nullopt; } return a.nested_party_sub_i_ds->size(); }
-inline ::fixpp::core::expected_t<void> NewOrderListOrdersAllocsNestedPartyIDsArgs_validate_entry_nested_party_sub_i_ds(::fixpp::v44::NewOrderListOrdersAllocsNestedPartyIDsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.nested_party_sub_i_ds)[i]); }
-template <> struct writer_traits<::fixpp::v44::NewOrderListOrdersAllocsNestedPartyIDsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::NewOrderListOrdersAllocsNestedPartyIDsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::NewOrderListOrdersAllocsNestedPartyIDsArgs>, 1> group_checks = {{
-        {false, &NewOrderListOrdersAllocsNestedPartyIDsArgs_count_nested_party_sub_i_ds, &NewOrderListOrdersAllocsNestedPartyIDsArgs_validate_entry_nested_party_sub_i_ds},
-    }};
-};
-
-inline ::std::optional<::std::size_t> NewOrderListOrdersAllocsArgs_count_nested_party_i_ds(::fixpp::v44::NewOrderListOrdersAllocsArgs const& a) noexcept { if (!a.nested_party_i_ds) { return ::std::nullopt; } return a.nested_party_i_ds->size(); }
-inline ::fixpp::core::expected_t<void> NewOrderListOrdersAllocsArgs_validate_entry_nested_party_i_ds(::fixpp::v44::NewOrderListOrdersAllocsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.nested_party_i_ds)[i]); }
-template <> struct writer_traits<::fixpp::v44::NewOrderListOrdersAllocsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::NewOrderListOrdersAllocsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::NewOrderListOrdersAllocsArgs>, 1> group_checks = {{
-        {false, &NewOrderListOrdersAllocsArgs_count_nested_party_i_ds, &NewOrderListOrdersAllocsArgs_validate_entry_nested_party_i_ds},
-    }};
-};
-
-template <> struct writer_traits<::fixpp::v44::NewOrderListOrdersTradingSessionsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::NewOrderListOrdersTradingSessionsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::NewOrderListOrdersTradingSessionsArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::NewOrderListOrdersSecurityAltIDArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::NewOrderListOrdersSecurityAltIDArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::NewOrderListOrdersSecurityAltIDArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::NewOrderListOrdersEventsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::NewOrderListOrdersEventsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::NewOrderListOrdersEventsArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::NewOrderListOrdersUnderlyingsUnderlyingSecurityAltIDArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::NewOrderListOrdersUnderlyingsUnderlyingSecurityAltIDArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::NewOrderListOrdersUnderlyingsUnderlyingSecurityAltIDArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::NewOrderListOrdersUnderlyingsUnderlyingStipsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::NewOrderListOrdersUnderlyingsUnderlyingStipsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::NewOrderListOrdersUnderlyingsUnderlyingStipsArgs>, 0> group_checks = {};
-};
-
-inline ::std::optional<::std::size_t> NewOrderListOrdersUnderlyingsArgs_count_underlying_security_alt_id(::fixpp::v44::NewOrderListOrdersUnderlyingsArgs const& a) noexcept { if (!a.underlying_security_alt_id) { return ::std::nullopt; } return a.underlying_security_alt_id->size(); }
-inline ::fixpp::core::expected_t<void> NewOrderListOrdersUnderlyingsArgs_validate_entry_underlying_security_alt_id(::fixpp::v44::NewOrderListOrdersUnderlyingsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.underlying_security_alt_id)[i]); }
-inline ::std::optional<::std::size_t> NewOrderListOrdersUnderlyingsArgs_count_underlying_stips(::fixpp::v44::NewOrderListOrdersUnderlyingsArgs const& a) noexcept { if (!a.underlying_stips) { return ::std::nullopt; } return a.underlying_stips->size(); }
-inline ::fixpp::core::expected_t<void> NewOrderListOrdersUnderlyingsArgs_validate_entry_underlying_stips(::fixpp::v44::NewOrderListOrdersUnderlyingsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.underlying_stips)[i]); }
-template <> struct writer_traits<::fixpp::v44::NewOrderListOrdersUnderlyingsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::NewOrderListOrdersUnderlyingsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::NewOrderListOrdersUnderlyingsArgs>, 2> group_checks = {{
-        {false, &NewOrderListOrdersUnderlyingsArgs_count_underlying_security_alt_id, &NewOrderListOrdersUnderlyingsArgs_validate_entry_underlying_security_alt_id},
-        {false, &NewOrderListOrdersUnderlyingsArgs_count_underlying_stips, &NewOrderListOrdersUnderlyingsArgs_validate_entry_underlying_stips},
-    }};
-};
-
-template <> struct writer_traits<::fixpp::v44::NewOrderListOrdersStipulationsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::NewOrderListOrdersStipulationsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::NewOrderListOrdersStipulationsArgs>, 0> group_checks = {};
-};
-
-inline bool NewOrderListOrdersArgs_required_11(::fixpp::v44::NewOrderListOrdersArgs const& a) noexcept { return a.cl_ord_id.has_value(); }
-inline bool NewOrderListOrdersArgs_required_67(::fixpp::v44::NewOrderListOrdersArgs const& a) noexcept { return a.list_seq_no.has_value(); }
-inline bool NewOrderListOrdersArgs_required_54(::fixpp::v44::NewOrderListOrdersArgs const& a) noexcept { return a.side.has_value(); }
-inline ::std::optional<::std::size_t> NewOrderListOrdersArgs_count_party_i_ds(::fixpp::v44::NewOrderListOrdersArgs const& a) noexcept { if (!a.party_i_ds) { return ::std::nullopt; } return a.party_i_ds->size(); }
-inline ::fixpp::core::expected_t<void> NewOrderListOrdersArgs_validate_entry_party_i_ds(::fixpp::v44::NewOrderListOrdersArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.party_i_ds)[i]); }
-inline ::std::optional<::std::size_t> NewOrderListOrdersArgs_count_allocs(::fixpp::v44::NewOrderListOrdersArgs const& a) noexcept { if (!a.allocs) { return ::std::nullopt; } return a.allocs->size(); }
-inline ::fixpp::core::expected_t<void> NewOrderListOrdersArgs_validate_entry_allocs(::fixpp::v44::NewOrderListOrdersArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.allocs)[i]); }
-inline ::std::optional<::std::size_t> NewOrderListOrdersArgs_count_trading_sessions(::fixpp::v44::NewOrderListOrdersArgs const& a) noexcept { if (!a.trading_sessions) { return ::std::nullopt; } return a.trading_sessions->size(); }
-inline ::fixpp::core::expected_t<void> NewOrderListOrdersArgs_validate_entry_trading_sessions(::fixpp::v44::NewOrderListOrdersArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.trading_sessions)[i]); }
-inline ::std::optional<::std::size_t> NewOrderListOrdersArgs_count_security_alt_id(::fixpp::v44::NewOrderListOrdersArgs const& a) noexcept { if (!a.security_alt_id) { return ::std::nullopt; } return a.security_alt_id->size(); }
-inline ::fixpp::core::expected_t<void> NewOrderListOrdersArgs_validate_entry_security_alt_id(::fixpp::v44::NewOrderListOrdersArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.security_alt_id)[i]); }
-inline ::std::optional<::std::size_t> NewOrderListOrdersArgs_count_events(::fixpp::v44::NewOrderListOrdersArgs const& a) noexcept { if (!a.events) { return ::std::nullopt; } return a.events->size(); }
-inline ::fixpp::core::expected_t<void> NewOrderListOrdersArgs_validate_entry_events(::fixpp::v44::NewOrderListOrdersArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.events)[i]); }
-inline ::std::optional<::std::size_t> NewOrderListOrdersArgs_count_underlyings(::fixpp::v44::NewOrderListOrdersArgs const& a) noexcept { if (!a.underlyings) { return ::std::nullopt; } return a.underlyings->size(); }
-inline ::fixpp::core::expected_t<void> NewOrderListOrdersArgs_validate_entry_underlyings(::fixpp::v44::NewOrderListOrdersArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.underlyings)[i]); }
-inline ::std::optional<::std::size_t> NewOrderListOrdersArgs_count_stipulations(::fixpp::v44::NewOrderListOrdersArgs const& a) noexcept { if (!a.stipulations) { return ::std::nullopt; } return a.stipulations->size(); }
-inline ::fixpp::core::expected_t<void> NewOrderListOrdersArgs_validate_entry_stipulations(::fixpp::v44::NewOrderListOrdersArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.stipulations)[i]); }
-template <> struct writer_traits<::fixpp::v44::NewOrderListOrdersArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::NewOrderListOrdersArgs>, 3> required_checks = {{
-        {11, &NewOrderListOrdersArgs_required_11},
-        {67, &NewOrderListOrdersArgs_required_67},
-        {54, &NewOrderListOrdersArgs_required_54},
-    }};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::NewOrderListOrdersArgs>, 7> group_checks = {{
-        {false, &NewOrderListOrdersArgs_count_party_i_ds, &NewOrderListOrdersArgs_validate_entry_party_i_ds},
-        {false, &NewOrderListOrdersArgs_count_allocs, &NewOrderListOrdersArgs_validate_entry_allocs},
-        {false, &NewOrderListOrdersArgs_count_trading_sessions, &NewOrderListOrdersArgs_validate_entry_trading_sessions},
-        {false, &NewOrderListOrdersArgs_count_security_alt_id, &NewOrderListOrdersArgs_validate_entry_security_alt_id},
-        {false, &NewOrderListOrdersArgs_count_events, &NewOrderListOrdersArgs_validate_entry_events},
-        {false, &NewOrderListOrdersArgs_count_underlyings, &NewOrderListOrdersArgs_validate_entry_underlyings},
-        {false, &NewOrderListOrdersArgs_count_stipulations, &NewOrderListOrdersArgs_validate_entry_stipulations},
-    }};
-};
-
 inline bool NewOrderListArgs_required_66(::fixpp::v44::NewOrderListArgs const& a) noexcept { return a.list_id.has_value(); }
 inline bool NewOrderListArgs_required_68(::fixpp::v44::NewOrderListArgs const& a) noexcept { return a.tot_no_orders.has_value(); }
 inline bool NewOrderListArgs_required_394(::fixpp::v44::NewOrderListArgs const& a) noexcept { return a.bid_type.has_value(); }
@@ -32808,52 +29614,6 @@ template <> struct writer_traits<::fixpp::v44::NewOrderListArgs> {
     static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::NewOrderListArgs>, 1> group_checks = {{
         {true, &NewOrderListArgs_count_orders, &NewOrderListArgs_validate_entry_orders},
     }};
-};
-
-template <> struct writer_traits<::fixpp::v44::OrderCancelRequestPartyIDsPartySubIDsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::OrderCancelRequestPartyIDsPartySubIDsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::OrderCancelRequestPartyIDsPartySubIDsArgs>, 0> group_checks = {};
-};
-
-inline ::std::optional<::std::size_t> OrderCancelRequestPartyIDsArgs_count_party_sub_i_ds(::fixpp::v44::OrderCancelRequestPartyIDsArgs const& a) noexcept { if (!a.party_sub_i_ds) { return ::std::nullopt; } return a.party_sub_i_ds->size(); }
-inline ::fixpp::core::expected_t<void> OrderCancelRequestPartyIDsArgs_validate_entry_party_sub_i_ds(::fixpp::v44::OrderCancelRequestPartyIDsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.party_sub_i_ds)[i]); }
-template <> struct writer_traits<::fixpp::v44::OrderCancelRequestPartyIDsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::OrderCancelRequestPartyIDsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::OrderCancelRequestPartyIDsArgs>, 1> group_checks = {{
-        {false, &OrderCancelRequestPartyIDsArgs_count_party_sub_i_ds, &OrderCancelRequestPartyIDsArgs_validate_entry_party_sub_i_ds},
-    }};
-};
-
-template <> struct writer_traits<::fixpp::v44::OrderCancelRequestSecurityAltIDArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::OrderCancelRequestSecurityAltIDArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::OrderCancelRequestSecurityAltIDArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::OrderCancelRequestUnderlyingsUnderlyingSecurityAltIDArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::OrderCancelRequestUnderlyingsUnderlyingSecurityAltIDArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::OrderCancelRequestUnderlyingsUnderlyingSecurityAltIDArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::OrderCancelRequestUnderlyingsUnderlyingStipsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::OrderCancelRequestUnderlyingsUnderlyingStipsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::OrderCancelRequestUnderlyingsUnderlyingStipsArgs>, 0> group_checks = {};
-};
-
-inline ::std::optional<::std::size_t> OrderCancelRequestUnderlyingsArgs_count_underlying_security_alt_id(::fixpp::v44::OrderCancelRequestUnderlyingsArgs const& a) noexcept { if (!a.underlying_security_alt_id) { return ::std::nullopt; } return a.underlying_security_alt_id->size(); }
-inline ::fixpp::core::expected_t<void> OrderCancelRequestUnderlyingsArgs_validate_entry_underlying_security_alt_id(::fixpp::v44::OrderCancelRequestUnderlyingsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.underlying_security_alt_id)[i]); }
-inline ::std::optional<::std::size_t> OrderCancelRequestUnderlyingsArgs_count_underlying_stips(::fixpp::v44::OrderCancelRequestUnderlyingsArgs const& a) noexcept { if (!a.underlying_stips) { return ::std::nullopt; } return a.underlying_stips->size(); }
-inline ::fixpp::core::expected_t<void> OrderCancelRequestUnderlyingsArgs_validate_entry_underlying_stips(::fixpp::v44::OrderCancelRequestUnderlyingsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.underlying_stips)[i]); }
-template <> struct writer_traits<::fixpp::v44::OrderCancelRequestUnderlyingsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::OrderCancelRequestUnderlyingsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::OrderCancelRequestUnderlyingsArgs>, 2> group_checks = {{
-        {false, &OrderCancelRequestUnderlyingsArgs_count_underlying_security_alt_id, &OrderCancelRequestUnderlyingsArgs_validate_entry_underlying_security_alt_id},
-        {false, &OrderCancelRequestUnderlyingsArgs_count_underlying_stips, &OrderCancelRequestUnderlyingsArgs_validate_entry_underlying_stips},
-    }};
-};
-
-template <> struct writer_traits<::fixpp::v44::OrderCancelRequestEventsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::OrderCancelRequestEventsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::OrderCancelRequestEventsArgs>, 0> group_checks = {};
 };
 
 inline bool OrderCancelRequestArgs_required_11(::fixpp::v44::OrderCancelRequestArgs const& a) noexcept { return a.cl_ord_id.has_value(); }
@@ -32881,80 +29641,6 @@ template <> struct writer_traits<::fixpp::v44::OrderCancelRequestArgs> {
         {false, &OrderCancelRequestArgs_count_underlyings, &OrderCancelRequestArgs_validate_entry_underlyings},
         {false, &OrderCancelRequestArgs_count_events, &OrderCancelRequestArgs_validate_entry_events},
     }};
-};
-
-template <> struct writer_traits<::fixpp::v44::OrderCancelReplaceRequestAllocsNestedPartyIDsNestedPartySubIDsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::OrderCancelReplaceRequestAllocsNestedPartyIDsNestedPartySubIDsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::OrderCancelReplaceRequestAllocsNestedPartyIDsNestedPartySubIDsArgs>, 0> group_checks = {};
-};
-
-inline ::std::optional<::std::size_t> OrderCancelReplaceRequestAllocsNestedPartyIDsArgs_count_nested_party_sub_i_ds(::fixpp::v44::OrderCancelReplaceRequestAllocsNestedPartyIDsArgs const& a) noexcept { if (!a.nested_party_sub_i_ds) { return ::std::nullopt; } return a.nested_party_sub_i_ds->size(); }
-inline ::fixpp::core::expected_t<void> OrderCancelReplaceRequestAllocsNestedPartyIDsArgs_validate_entry_nested_party_sub_i_ds(::fixpp::v44::OrderCancelReplaceRequestAllocsNestedPartyIDsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.nested_party_sub_i_ds)[i]); }
-template <> struct writer_traits<::fixpp::v44::OrderCancelReplaceRequestAllocsNestedPartyIDsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::OrderCancelReplaceRequestAllocsNestedPartyIDsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::OrderCancelReplaceRequestAllocsNestedPartyIDsArgs>, 1> group_checks = {{
-        {false, &OrderCancelReplaceRequestAllocsNestedPartyIDsArgs_count_nested_party_sub_i_ds, &OrderCancelReplaceRequestAllocsNestedPartyIDsArgs_validate_entry_nested_party_sub_i_ds},
-    }};
-};
-
-inline ::std::optional<::std::size_t> OrderCancelReplaceRequestAllocsArgs_count_nested_party_i_ds(::fixpp::v44::OrderCancelReplaceRequestAllocsArgs const& a) noexcept { if (!a.nested_party_i_ds) { return ::std::nullopt; } return a.nested_party_i_ds->size(); }
-inline ::fixpp::core::expected_t<void> OrderCancelReplaceRequestAllocsArgs_validate_entry_nested_party_i_ds(::fixpp::v44::OrderCancelReplaceRequestAllocsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.nested_party_i_ds)[i]); }
-template <> struct writer_traits<::fixpp::v44::OrderCancelReplaceRequestAllocsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::OrderCancelReplaceRequestAllocsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::OrderCancelReplaceRequestAllocsArgs>, 1> group_checks = {{
-        {false, &OrderCancelReplaceRequestAllocsArgs_count_nested_party_i_ds, &OrderCancelReplaceRequestAllocsArgs_validate_entry_nested_party_i_ds},
-    }};
-};
-
-template <> struct writer_traits<::fixpp::v44::OrderCancelReplaceRequestTradingSessionsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::OrderCancelReplaceRequestTradingSessionsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::OrderCancelReplaceRequestTradingSessionsArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::OrderCancelReplaceRequestPartyIDsPartySubIDsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::OrderCancelReplaceRequestPartyIDsPartySubIDsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::OrderCancelReplaceRequestPartyIDsPartySubIDsArgs>, 0> group_checks = {};
-};
-
-inline ::std::optional<::std::size_t> OrderCancelReplaceRequestPartyIDsArgs_count_party_sub_i_ds(::fixpp::v44::OrderCancelReplaceRequestPartyIDsArgs const& a) noexcept { if (!a.party_sub_i_ds) { return ::std::nullopt; } return a.party_sub_i_ds->size(); }
-inline ::fixpp::core::expected_t<void> OrderCancelReplaceRequestPartyIDsArgs_validate_entry_party_sub_i_ds(::fixpp::v44::OrderCancelReplaceRequestPartyIDsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.party_sub_i_ds)[i]); }
-template <> struct writer_traits<::fixpp::v44::OrderCancelReplaceRequestPartyIDsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::OrderCancelReplaceRequestPartyIDsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::OrderCancelReplaceRequestPartyIDsArgs>, 1> group_checks = {{
-        {false, &OrderCancelReplaceRequestPartyIDsArgs_count_party_sub_i_ds, &OrderCancelReplaceRequestPartyIDsArgs_validate_entry_party_sub_i_ds},
-    }};
-};
-
-template <> struct writer_traits<::fixpp::v44::OrderCancelReplaceRequestSecurityAltIDArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::OrderCancelReplaceRequestSecurityAltIDArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::OrderCancelReplaceRequestSecurityAltIDArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::OrderCancelReplaceRequestUnderlyingsUnderlyingSecurityAltIDArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::OrderCancelReplaceRequestUnderlyingsUnderlyingSecurityAltIDArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::OrderCancelReplaceRequestUnderlyingsUnderlyingSecurityAltIDArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::OrderCancelReplaceRequestUnderlyingsUnderlyingStipsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::OrderCancelReplaceRequestUnderlyingsUnderlyingStipsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::OrderCancelReplaceRequestUnderlyingsUnderlyingStipsArgs>, 0> group_checks = {};
-};
-
-inline ::std::optional<::std::size_t> OrderCancelReplaceRequestUnderlyingsArgs_count_underlying_security_alt_id(::fixpp::v44::OrderCancelReplaceRequestUnderlyingsArgs const& a) noexcept { if (!a.underlying_security_alt_id) { return ::std::nullopt; } return a.underlying_security_alt_id->size(); }
-inline ::fixpp::core::expected_t<void> OrderCancelReplaceRequestUnderlyingsArgs_validate_entry_underlying_security_alt_id(::fixpp::v44::OrderCancelReplaceRequestUnderlyingsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.underlying_security_alt_id)[i]); }
-inline ::std::optional<::std::size_t> OrderCancelReplaceRequestUnderlyingsArgs_count_underlying_stips(::fixpp::v44::OrderCancelReplaceRequestUnderlyingsArgs const& a) noexcept { if (!a.underlying_stips) { return ::std::nullopt; } return a.underlying_stips->size(); }
-inline ::fixpp::core::expected_t<void> OrderCancelReplaceRequestUnderlyingsArgs_validate_entry_underlying_stips(::fixpp::v44::OrderCancelReplaceRequestUnderlyingsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.underlying_stips)[i]); }
-template <> struct writer_traits<::fixpp::v44::OrderCancelReplaceRequestUnderlyingsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::OrderCancelReplaceRequestUnderlyingsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::OrderCancelReplaceRequestUnderlyingsArgs>, 2> group_checks = {{
-        {false, &OrderCancelReplaceRequestUnderlyingsArgs_count_underlying_security_alt_id, &OrderCancelReplaceRequestUnderlyingsArgs_validate_entry_underlying_security_alt_id},
-        {false, &OrderCancelReplaceRequestUnderlyingsArgs_count_underlying_stips, &OrderCancelReplaceRequestUnderlyingsArgs_validate_entry_underlying_stips},
-    }};
-};
-
-template <> struct writer_traits<::fixpp::v44::OrderCancelReplaceRequestEventsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::OrderCancelReplaceRequestEventsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::OrderCancelReplaceRequestEventsArgs>, 0> group_checks = {};
 };
 
 inline bool OrderCancelReplaceRequestArgs_required_11(::fixpp::v44::OrderCancelReplaceRequestArgs const& a) noexcept { return a.cl_ord_id.has_value(); }
@@ -32992,52 +29678,6 @@ template <> struct writer_traits<::fixpp::v44::OrderCancelReplaceRequestArgs> {
     }};
 };
 
-template <> struct writer_traits<::fixpp::v44::OrderStatusRequestPartyIDsPartySubIDsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::OrderStatusRequestPartyIDsPartySubIDsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::OrderStatusRequestPartyIDsPartySubIDsArgs>, 0> group_checks = {};
-};
-
-inline ::std::optional<::std::size_t> OrderStatusRequestPartyIDsArgs_count_party_sub_i_ds(::fixpp::v44::OrderStatusRequestPartyIDsArgs const& a) noexcept { if (!a.party_sub_i_ds) { return ::std::nullopt; } return a.party_sub_i_ds->size(); }
-inline ::fixpp::core::expected_t<void> OrderStatusRequestPartyIDsArgs_validate_entry_party_sub_i_ds(::fixpp::v44::OrderStatusRequestPartyIDsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.party_sub_i_ds)[i]); }
-template <> struct writer_traits<::fixpp::v44::OrderStatusRequestPartyIDsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::OrderStatusRequestPartyIDsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::OrderStatusRequestPartyIDsArgs>, 1> group_checks = {{
-        {false, &OrderStatusRequestPartyIDsArgs_count_party_sub_i_ds, &OrderStatusRequestPartyIDsArgs_validate_entry_party_sub_i_ds},
-    }};
-};
-
-template <> struct writer_traits<::fixpp::v44::OrderStatusRequestSecurityAltIDArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::OrderStatusRequestSecurityAltIDArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::OrderStatusRequestSecurityAltIDArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::OrderStatusRequestUnderlyingsUnderlyingSecurityAltIDArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::OrderStatusRequestUnderlyingsUnderlyingSecurityAltIDArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::OrderStatusRequestUnderlyingsUnderlyingSecurityAltIDArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::OrderStatusRequestUnderlyingsUnderlyingStipsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::OrderStatusRequestUnderlyingsUnderlyingStipsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::OrderStatusRequestUnderlyingsUnderlyingStipsArgs>, 0> group_checks = {};
-};
-
-inline ::std::optional<::std::size_t> OrderStatusRequestUnderlyingsArgs_count_underlying_security_alt_id(::fixpp::v44::OrderStatusRequestUnderlyingsArgs const& a) noexcept { if (!a.underlying_security_alt_id) { return ::std::nullopt; } return a.underlying_security_alt_id->size(); }
-inline ::fixpp::core::expected_t<void> OrderStatusRequestUnderlyingsArgs_validate_entry_underlying_security_alt_id(::fixpp::v44::OrderStatusRequestUnderlyingsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.underlying_security_alt_id)[i]); }
-inline ::std::optional<::std::size_t> OrderStatusRequestUnderlyingsArgs_count_underlying_stips(::fixpp::v44::OrderStatusRequestUnderlyingsArgs const& a) noexcept { if (!a.underlying_stips) { return ::std::nullopt; } return a.underlying_stips->size(); }
-inline ::fixpp::core::expected_t<void> OrderStatusRequestUnderlyingsArgs_validate_entry_underlying_stips(::fixpp::v44::OrderStatusRequestUnderlyingsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.underlying_stips)[i]); }
-template <> struct writer_traits<::fixpp::v44::OrderStatusRequestUnderlyingsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::OrderStatusRequestUnderlyingsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::OrderStatusRequestUnderlyingsArgs>, 2> group_checks = {{
-        {false, &OrderStatusRequestUnderlyingsArgs_count_underlying_security_alt_id, &OrderStatusRequestUnderlyingsArgs_validate_entry_underlying_security_alt_id},
-        {false, &OrderStatusRequestUnderlyingsArgs_count_underlying_stips, &OrderStatusRequestUnderlyingsArgs_validate_entry_underlying_stips},
-    }};
-};
-
-template <> struct writer_traits<::fixpp::v44::OrderStatusRequestEventsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::OrderStatusRequestEventsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::OrderStatusRequestEventsArgs>, 0> group_checks = {};
-};
-
 inline bool OrderStatusRequestArgs_required_11(::fixpp::v44::OrderStatusRequestArgs const& a) noexcept { return a.cl_ord_id.has_value(); }
 inline bool OrderStatusRequestArgs_required_54(::fixpp::v44::OrderStatusRequestArgs const& a) noexcept { return a.side.has_value(); }
 inline ::std::optional<::std::size_t> OrderStatusRequestArgs_count_party_i_ds(::fixpp::v44::OrderStatusRequestArgs const& a) noexcept { if (!a.party_i_ds) { return ::std::nullopt; } return a.party_i_ds->size(); }
@@ -33059,169 +29699,6 @@ template <> struct writer_traits<::fixpp::v44::OrderStatusRequestArgs> {
         {false, &OrderStatusRequestArgs_count_underlyings, &OrderStatusRequestArgs_validate_entry_underlyings},
         {false, &OrderStatusRequestArgs_count_events, &OrderStatusRequestArgs_validate_entry_events},
     }};
-};
-
-template <> struct writer_traits<::fixpp::v44::AllocationInstructionOrdersNested2PartyIDsNested2PartySubIDsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::AllocationInstructionOrdersNested2PartyIDsNested2PartySubIDsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::AllocationInstructionOrdersNested2PartyIDsNested2PartySubIDsArgs>, 0> group_checks = {};
-};
-
-inline ::std::optional<::std::size_t> AllocationInstructionOrdersNested2PartyIDsArgs_count_nested2_party_sub_i_ds(::fixpp::v44::AllocationInstructionOrdersNested2PartyIDsArgs const& a) noexcept { if (!a.nested2_party_sub_i_ds) { return ::std::nullopt; } return a.nested2_party_sub_i_ds->size(); }
-inline ::fixpp::core::expected_t<void> AllocationInstructionOrdersNested2PartyIDsArgs_validate_entry_nested2_party_sub_i_ds(::fixpp::v44::AllocationInstructionOrdersNested2PartyIDsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.nested2_party_sub_i_ds)[i]); }
-template <> struct writer_traits<::fixpp::v44::AllocationInstructionOrdersNested2PartyIDsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::AllocationInstructionOrdersNested2PartyIDsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::AllocationInstructionOrdersNested2PartyIDsArgs>, 1> group_checks = {{
-        {false, &AllocationInstructionOrdersNested2PartyIDsArgs_count_nested2_party_sub_i_ds, &AllocationInstructionOrdersNested2PartyIDsArgs_validate_entry_nested2_party_sub_i_ds},
-    }};
-};
-
-inline ::std::optional<::std::size_t> AllocationInstructionOrdersArgs_count_nested2_party_i_ds(::fixpp::v44::AllocationInstructionOrdersArgs const& a) noexcept { if (!a.nested2_party_i_ds) { return ::std::nullopt; } return a.nested2_party_i_ds->size(); }
-inline ::fixpp::core::expected_t<void> AllocationInstructionOrdersArgs_validate_entry_nested2_party_i_ds(::fixpp::v44::AllocationInstructionOrdersArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.nested2_party_i_ds)[i]); }
-template <> struct writer_traits<::fixpp::v44::AllocationInstructionOrdersArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::AllocationInstructionOrdersArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::AllocationInstructionOrdersArgs>, 1> group_checks = {{
-        {false, &AllocationInstructionOrdersArgs_count_nested2_party_i_ds, &AllocationInstructionOrdersArgs_validate_entry_nested2_party_i_ds},
-    }};
-};
-
-template <> struct writer_traits<::fixpp::v44::AllocationInstructionAllocsNestedPartyIDsNestedPartySubIDsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::AllocationInstructionAllocsNestedPartyIDsNestedPartySubIDsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::AllocationInstructionAllocsNestedPartyIDsNestedPartySubIDsArgs>, 0> group_checks = {};
-};
-
-inline ::std::optional<::std::size_t> AllocationInstructionAllocsNestedPartyIDsArgs_count_nested_party_sub_i_ds(::fixpp::v44::AllocationInstructionAllocsNestedPartyIDsArgs const& a) noexcept { if (!a.nested_party_sub_i_ds) { return ::std::nullopt; } return a.nested_party_sub_i_ds->size(); }
-inline ::fixpp::core::expected_t<void> AllocationInstructionAllocsNestedPartyIDsArgs_validate_entry_nested_party_sub_i_ds(::fixpp::v44::AllocationInstructionAllocsNestedPartyIDsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.nested_party_sub_i_ds)[i]); }
-template <> struct writer_traits<::fixpp::v44::AllocationInstructionAllocsNestedPartyIDsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::AllocationInstructionAllocsNestedPartyIDsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::AllocationInstructionAllocsNestedPartyIDsArgs>, 1> group_checks = {{
-        {false, &AllocationInstructionAllocsNestedPartyIDsArgs_count_nested_party_sub_i_ds, &AllocationInstructionAllocsNestedPartyIDsArgs_validate_entry_nested_party_sub_i_ds},
-    }};
-};
-
-template <> struct writer_traits<::fixpp::v44::AllocationInstructionAllocsMiscFeesArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::AllocationInstructionAllocsMiscFeesArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::AllocationInstructionAllocsMiscFeesArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::AllocationInstructionAllocsClearingInstructionsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::AllocationInstructionAllocsClearingInstructionsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::AllocationInstructionAllocsClearingInstructionsArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::AllocationInstructionAllocsDlvyInstSettlPartyIDsSettlPartySubIDsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::AllocationInstructionAllocsDlvyInstSettlPartyIDsSettlPartySubIDsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::AllocationInstructionAllocsDlvyInstSettlPartyIDsSettlPartySubIDsArgs>, 0> group_checks = {};
-};
-
-inline ::std::optional<::std::size_t> AllocationInstructionAllocsDlvyInstSettlPartyIDsArgs_count_settl_party_sub_i_ds(::fixpp::v44::AllocationInstructionAllocsDlvyInstSettlPartyIDsArgs const& a) noexcept { if (!a.settl_party_sub_i_ds) { return ::std::nullopt; } return a.settl_party_sub_i_ds->size(); }
-inline ::fixpp::core::expected_t<void> AllocationInstructionAllocsDlvyInstSettlPartyIDsArgs_validate_entry_settl_party_sub_i_ds(::fixpp::v44::AllocationInstructionAllocsDlvyInstSettlPartyIDsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.settl_party_sub_i_ds)[i]); }
-template <> struct writer_traits<::fixpp::v44::AllocationInstructionAllocsDlvyInstSettlPartyIDsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::AllocationInstructionAllocsDlvyInstSettlPartyIDsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::AllocationInstructionAllocsDlvyInstSettlPartyIDsArgs>, 1> group_checks = {{
-        {false, &AllocationInstructionAllocsDlvyInstSettlPartyIDsArgs_count_settl_party_sub_i_ds, &AllocationInstructionAllocsDlvyInstSettlPartyIDsArgs_validate_entry_settl_party_sub_i_ds},
-    }};
-};
-
-inline ::std::optional<::std::size_t> AllocationInstructionAllocsDlvyInstArgs_count_settl_party_i_ds(::fixpp::v44::AllocationInstructionAllocsDlvyInstArgs const& a) noexcept { if (!a.settl_party_i_ds) { return ::std::nullopt; } return a.settl_party_i_ds->size(); }
-inline ::fixpp::core::expected_t<void> AllocationInstructionAllocsDlvyInstArgs_validate_entry_settl_party_i_ds(::fixpp::v44::AllocationInstructionAllocsDlvyInstArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.settl_party_i_ds)[i]); }
-template <> struct writer_traits<::fixpp::v44::AllocationInstructionAllocsDlvyInstArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::AllocationInstructionAllocsDlvyInstArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::AllocationInstructionAllocsDlvyInstArgs>, 1> group_checks = {{
-        {false, &AllocationInstructionAllocsDlvyInstArgs_count_settl_party_i_ds, &AllocationInstructionAllocsDlvyInstArgs_validate_entry_settl_party_i_ds},
-    }};
-};
-
-inline ::std::optional<::std::size_t> AllocationInstructionAllocsArgs_count_nested_party_i_ds(::fixpp::v44::AllocationInstructionAllocsArgs const& a) noexcept { if (!a.nested_party_i_ds) { return ::std::nullopt; } return a.nested_party_i_ds->size(); }
-inline ::fixpp::core::expected_t<void> AllocationInstructionAllocsArgs_validate_entry_nested_party_i_ds(::fixpp::v44::AllocationInstructionAllocsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.nested_party_i_ds)[i]); }
-inline ::std::optional<::std::size_t> AllocationInstructionAllocsArgs_count_misc_fees(::fixpp::v44::AllocationInstructionAllocsArgs const& a) noexcept { if (!a.misc_fees) { return ::std::nullopt; } return a.misc_fees->size(); }
-inline ::fixpp::core::expected_t<void> AllocationInstructionAllocsArgs_validate_entry_misc_fees(::fixpp::v44::AllocationInstructionAllocsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.misc_fees)[i]); }
-inline ::std::optional<::std::size_t> AllocationInstructionAllocsArgs_count_clearing_instructions(::fixpp::v44::AllocationInstructionAllocsArgs const& a) noexcept { if (!a.clearing_instructions) { return ::std::nullopt; } return a.clearing_instructions->size(); }
-inline ::fixpp::core::expected_t<void> AllocationInstructionAllocsArgs_validate_entry_clearing_instructions(::fixpp::v44::AllocationInstructionAllocsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.clearing_instructions)[i]); }
-inline ::std::optional<::std::size_t> AllocationInstructionAllocsArgs_count_dlvy_inst(::fixpp::v44::AllocationInstructionAllocsArgs const& a) noexcept { if (!a.dlvy_inst) { return ::std::nullopt; } return a.dlvy_inst->size(); }
-inline ::fixpp::core::expected_t<void> AllocationInstructionAllocsArgs_validate_entry_dlvy_inst(::fixpp::v44::AllocationInstructionAllocsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.dlvy_inst)[i]); }
-template <> struct writer_traits<::fixpp::v44::AllocationInstructionAllocsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::AllocationInstructionAllocsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::AllocationInstructionAllocsArgs>, 4> group_checks = {{
-        {false, &AllocationInstructionAllocsArgs_count_nested_party_i_ds, &AllocationInstructionAllocsArgs_validate_entry_nested_party_i_ds},
-        {false, &AllocationInstructionAllocsArgs_count_misc_fees, &AllocationInstructionAllocsArgs_validate_entry_misc_fees},
-        {false, &AllocationInstructionAllocsArgs_count_clearing_instructions, &AllocationInstructionAllocsArgs_validate_entry_clearing_instructions},
-        {false, &AllocationInstructionAllocsArgs_count_dlvy_inst, &AllocationInstructionAllocsArgs_validate_entry_dlvy_inst},
-    }};
-};
-
-template <> struct writer_traits<::fixpp::v44::AllocationInstructionExecsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::AllocationInstructionExecsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::AllocationInstructionExecsArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::AllocationInstructionStipulationsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::AllocationInstructionStipulationsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::AllocationInstructionStipulationsArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::AllocationInstructionPartyIDsPartySubIDsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::AllocationInstructionPartyIDsPartySubIDsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::AllocationInstructionPartyIDsPartySubIDsArgs>, 0> group_checks = {};
-};
-
-inline ::std::optional<::std::size_t> AllocationInstructionPartyIDsArgs_count_party_sub_i_ds(::fixpp::v44::AllocationInstructionPartyIDsArgs const& a) noexcept { if (!a.party_sub_i_ds) { return ::std::nullopt; } return a.party_sub_i_ds->size(); }
-inline ::fixpp::core::expected_t<void> AllocationInstructionPartyIDsArgs_validate_entry_party_sub_i_ds(::fixpp::v44::AllocationInstructionPartyIDsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.party_sub_i_ds)[i]); }
-template <> struct writer_traits<::fixpp::v44::AllocationInstructionPartyIDsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::AllocationInstructionPartyIDsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::AllocationInstructionPartyIDsArgs>, 1> group_checks = {{
-        {false, &AllocationInstructionPartyIDsArgs_count_party_sub_i_ds, &AllocationInstructionPartyIDsArgs_validate_entry_party_sub_i_ds},
-    }};
-};
-
-template <> struct writer_traits<::fixpp::v44::AllocationInstructionSecurityAltIDArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::AllocationInstructionSecurityAltIDArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::AllocationInstructionSecurityAltIDArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::AllocationInstructionLegsLegSecurityAltIDArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::AllocationInstructionLegsLegSecurityAltIDArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::AllocationInstructionLegsLegSecurityAltIDArgs>, 0> group_checks = {};
-};
-
-inline ::std::optional<::std::size_t> AllocationInstructionLegsArgs_count_leg_security_alt_id(::fixpp::v44::AllocationInstructionLegsArgs const& a) noexcept { if (!a.leg_security_alt_id) { return ::std::nullopt; } return a.leg_security_alt_id->size(); }
-inline ::fixpp::core::expected_t<void> AllocationInstructionLegsArgs_validate_entry_leg_security_alt_id(::fixpp::v44::AllocationInstructionLegsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.leg_security_alt_id)[i]); }
-template <> struct writer_traits<::fixpp::v44::AllocationInstructionLegsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::AllocationInstructionLegsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::AllocationInstructionLegsArgs>, 1> group_checks = {{
-        {false, &AllocationInstructionLegsArgs_count_leg_security_alt_id, &AllocationInstructionLegsArgs_validate_entry_leg_security_alt_id},
-    }};
-};
-
-template <> struct writer_traits<::fixpp::v44::AllocationInstructionUnderlyingsUnderlyingSecurityAltIDArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::AllocationInstructionUnderlyingsUnderlyingSecurityAltIDArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::AllocationInstructionUnderlyingsUnderlyingSecurityAltIDArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::AllocationInstructionUnderlyingsUnderlyingStipsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::AllocationInstructionUnderlyingsUnderlyingStipsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::AllocationInstructionUnderlyingsUnderlyingStipsArgs>, 0> group_checks = {};
-};
-
-inline ::std::optional<::std::size_t> AllocationInstructionUnderlyingsArgs_count_underlying_security_alt_id(::fixpp::v44::AllocationInstructionUnderlyingsArgs const& a) noexcept { if (!a.underlying_security_alt_id) { return ::std::nullopt; } return a.underlying_security_alt_id->size(); }
-inline ::fixpp::core::expected_t<void> AllocationInstructionUnderlyingsArgs_validate_entry_underlying_security_alt_id(::fixpp::v44::AllocationInstructionUnderlyingsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.underlying_security_alt_id)[i]); }
-inline ::std::optional<::std::size_t> AllocationInstructionUnderlyingsArgs_count_underlying_stips(::fixpp::v44::AllocationInstructionUnderlyingsArgs const& a) noexcept { if (!a.underlying_stips) { return ::std::nullopt; } return a.underlying_stips->size(); }
-inline ::fixpp::core::expected_t<void> AllocationInstructionUnderlyingsArgs_validate_entry_underlying_stips(::fixpp::v44::AllocationInstructionUnderlyingsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.underlying_stips)[i]); }
-template <> struct writer_traits<::fixpp::v44::AllocationInstructionUnderlyingsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::AllocationInstructionUnderlyingsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::AllocationInstructionUnderlyingsArgs>, 2> group_checks = {{
-        {false, &AllocationInstructionUnderlyingsArgs_count_underlying_security_alt_id, &AllocationInstructionUnderlyingsArgs_validate_entry_underlying_security_alt_id},
-        {false, &AllocationInstructionUnderlyingsArgs_count_underlying_stips, &AllocationInstructionUnderlyingsArgs_validate_entry_underlying_stips},
-    }};
-};
-
-template <> struct writer_traits<::fixpp::v44::AllocationInstructionEventsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::AllocationInstructionEventsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::AllocationInstructionEventsArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::AllocationInstructionInstrAttribArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::AllocationInstructionInstrAttribArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::AllocationInstructionInstrAttribArgs>, 0> group_checks = {};
 };
 
 inline bool AllocationInstructionArgs_required_6(::fixpp::v44::AllocationInstructionArgs const& a) noexcept { return a.avg_px.has_value(); }
@@ -33277,25 +29754,6 @@ template <> struct writer_traits<::fixpp::v44::AllocationInstructionArgs> {
     }};
 };
 
-template <> struct writer_traits<::fixpp::v44::AllocationInstructionAckAllocsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::AllocationInstructionAckAllocsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::AllocationInstructionAckAllocsArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::AllocationInstructionAckPartyIDsPartySubIDsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::AllocationInstructionAckPartyIDsPartySubIDsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::AllocationInstructionAckPartyIDsPartySubIDsArgs>, 0> group_checks = {};
-};
-
-inline ::std::optional<::std::size_t> AllocationInstructionAckPartyIDsArgs_count_party_sub_i_ds(::fixpp::v44::AllocationInstructionAckPartyIDsArgs const& a) noexcept { if (!a.party_sub_i_ds) { return ::std::nullopt; } return a.party_sub_i_ds->size(); }
-inline ::fixpp::core::expected_t<void> AllocationInstructionAckPartyIDsArgs_validate_entry_party_sub_i_ds(::fixpp::v44::AllocationInstructionAckPartyIDsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.party_sub_i_ds)[i]); }
-template <> struct writer_traits<::fixpp::v44::AllocationInstructionAckPartyIDsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::AllocationInstructionAckPartyIDsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::AllocationInstructionAckPartyIDsArgs>, 1> group_checks = {{
-        {false, &AllocationInstructionAckPartyIDsArgs_count_party_sub_i_ds, &AllocationInstructionAckPartyIDsArgs_validate_entry_party_sub_i_ds},
-    }};
-};
-
 inline bool AllocationInstructionAckArgs_required_60(::fixpp::v44::AllocationInstructionAckArgs const& a) noexcept { return a.transact_time.has_value(); }
 inline bool AllocationInstructionAckArgs_required_70(::fixpp::v44::AllocationInstructionAckArgs const& a) noexcept { return a.alloc_id.has_value(); }
 inline bool AllocationInstructionAckArgs_required_87(::fixpp::v44::AllocationInstructionAckArgs const& a) noexcept { return a.alloc_status.has_value(); }
@@ -33315,128 +29773,6 @@ template <> struct writer_traits<::fixpp::v44::AllocationInstructionAckArgs> {
     }};
 };
 
-template <> struct writer_traits<::fixpp::v44::QuoteRequestRelatedSymSecurityAltIDArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::QuoteRequestRelatedSymSecurityAltIDArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::QuoteRequestRelatedSymSecurityAltIDArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::QuoteRequestRelatedSymEventsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::QuoteRequestRelatedSymEventsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::QuoteRequestRelatedSymEventsArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::QuoteRequestRelatedSymUnderlyingsUnderlyingSecurityAltIDArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::QuoteRequestRelatedSymUnderlyingsUnderlyingSecurityAltIDArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::QuoteRequestRelatedSymUnderlyingsUnderlyingSecurityAltIDArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::QuoteRequestRelatedSymUnderlyingsUnderlyingStipsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::QuoteRequestRelatedSymUnderlyingsUnderlyingStipsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::QuoteRequestRelatedSymUnderlyingsUnderlyingStipsArgs>, 0> group_checks = {};
-};
-
-inline ::std::optional<::std::size_t> QuoteRequestRelatedSymUnderlyingsArgs_count_underlying_security_alt_id(::fixpp::v44::QuoteRequestRelatedSymUnderlyingsArgs const& a) noexcept { if (!a.underlying_security_alt_id) { return ::std::nullopt; } return a.underlying_security_alt_id->size(); }
-inline ::fixpp::core::expected_t<void> QuoteRequestRelatedSymUnderlyingsArgs_validate_entry_underlying_security_alt_id(::fixpp::v44::QuoteRequestRelatedSymUnderlyingsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.underlying_security_alt_id)[i]); }
-inline ::std::optional<::std::size_t> QuoteRequestRelatedSymUnderlyingsArgs_count_underlying_stips(::fixpp::v44::QuoteRequestRelatedSymUnderlyingsArgs const& a) noexcept { if (!a.underlying_stips) { return ::std::nullopt; } return a.underlying_stips->size(); }
-inline ::fixpp::core::expected_t<void> QuoteRequestRelatedSymUnderlyingsArgs_validate_entry_underlying_stips(::fixpp::v44::QuoteRequestRelatedSymUnderlyingsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.underlying_stips)[i]); }
-template <> struct writer_traits<::fixpp::v44::QuoteRequestRelatedSymUnderlyingsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::QuoteRequestRelatedSymUnderlyingsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::QuoteRequestRelatedSymUnderlyingsArgs>, 2> group_checks = {{
-        {false, &QuoteRequestRelatedSymUnderlyingsArgs_count_underlying_security_alt_id, &QuoteRequestRelatedSymUnderlyingsArgs_validate_entry_underlying_security_alt_id},
-        {false, &QuoteRequestRelatedSymUnderlyingsArgs_count_underlying_stips, &QuoteRequestRelatedSymUnderlyingsArgs_validate_entry_underlying_stips},
-    }};
-};
-
-template <> struct writer_traits<::fixpp::v44::QuoteRequestRelatedSymStipulationsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::QuoteRequestRelatedSymStipulationsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::QuoteRequestRelatedSymStipulationsArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::QuoteRequestRelatedSymLegsLegSecurityAltIDArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::QuoteRequestRelatedSymLegsLegSecurityAltIDArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::QuoteRequestRelatedSymLegsLegSecurityAltIDArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::QuoteRequestRelatedSymLegsLegStipulationsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::QuoteRequestRelatedSymLegsLegStipulationsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::QuoteRequestRelatedSymLegsLegStipulationsArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::QuoteRequestRelatedSymLegsNestedPartyIDsNestedPartySubIDsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::QuoteRequestRelatedSymLegsNestedPartyIDsNestedPartySubIDsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::QuoteRequestRelatedSymLegsNestedPartyIDsNestedPartySubIDsArgs>, 0> group_checks = {};
-};
-
-inline ::std::optional<::std::size_t> QuoteRequestRelatedSymLegsNestedPartyIDsArgs_count_nested_party_sub_i_ds(::fixpp::v44::QuoteRequestRelatedSymLegsNestedPartyIDsArgs const& a) noexcept { if (!a.nested_party_sub_i_ds) { return ::std::nullopt; } return a.nested_party_sub_i_ds->size(); }
-inline ::fixpp::core::expected_t<void> QuoteRequestRelatedSymLegsNestedPartyIDsArgs_validate_entry_nested_party_sub_i_ds(::fixpp::v44::QuoteRequestRelatedSymLegsNestedPartyIDsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.nested_party_sub_i_ds)[i]); }
-template <> struct writer_traits<::fixpp::v44::QuoteRequestRelatedSymLegsNestedPartyIDsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::QuoteRequestRelatedSymLegsNestedPartyIDsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::QuoteRequestRelatedSymLegsNestedPartyIDsArgs>, 1> group_checks = {{
-        {false, &QuoteRequestRelatedSymLegsNestedPartyIDsArgs_count_nested_party_sub_i_ds, &QuoteRequestRelatedSymLegsNestedPartyIDsArgs_validate_entry_nested_party_sub_i_ds},
-    }};
-};
-
-inline ::std::optional<::std::size_t> QuoteRequestRelatedSymLegsArgs_count_leg_security_alt_id(::fixpp::v44::QuoteRequestRelatedSymLegsArgs const& a) noexcept { if (!a.leg_security_alt_id) { return ::std::nullopt; } return a.leg_security_alt_id->size(); }
-inline ::fixpp::core::expected_t<void> QuoteRequestRelatedSymLegsArgs_validate_entry_leg_security_alt_id(::fixpp::v44::QuoteRequestRelatedSymLegsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.leg_security_alt_id)[i]); }
-inline ::std::optional<::std::size_t> QuoteRequestRelatedSymLegsArgs_count_leg_stipulations(::fixpp::v44::QuoteRequestRelatedSymLegsArgs const& a) noexcept { if (!a.leg_stipulations) { return ::std::nullopt; } return a.leg_stipulations->size(); }
-inline ::fixpp::core::expected_t<void> QuoteRequestRelatedSymLegsArgs_validate_entry_leg_stipulations(::fixpp::v44::QuoteRequestRelatedSymLegsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.leg_stipulations)[i]); }
-inline ::std::optional<::std::size_t> QuoteRequestRelatedSymLegsArgs_count_nested_party_i_ds(::fixpp::v44::QuoteRequestRelatedSymLegsArgs const& a) noexcept { if (!a.nested_party_i_ds) { return ::std::nullopt; } return a.nested_party_i_ds->size(); }
-inline ::fixpp::core::expected_t<void> QuoteRequestRelatedSymLegsArgs_validate_entry_nested_party_i_ds(::fixpp::v44::QuoteRequestRelatedSymLegsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.nested_party_i_ds)[i]); }
-template <> struct writer_traits<::fixpp::v44::QuoteRequestRelatedSymLegsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::QuoteRequestRelatedSymLegsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::QuoteRequestRelatedSymLegsArgs>, 3> group_checks = {{
-        {false, &QuoteRequestRelatedSymLegsArgs_count_leg_security_alt_id, &QuoteRequestRelatedSymLegsArgs_validate_entry_leg_security_alt_id},
-        {false, &QuoteRequestRelatedSymLegsArgs_count_leg_stipulations, &QuoteRequestRelatedSymLegsArgs_validate_entry_leg_stipulations},
-        {false, &QuoteRequestRelatedSymLegsArgs_count_nested_party_i_ds, &QuoteRequestRelatedSymLegsArgs_validate_entry_nested_party_i_ds},
-    }};
-};
-
-template <> struct writer_traits<::fixpp::v44::QuoteRequestRelatedSymQuoteQualifiersArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::QuoteRequestRelatedSymQuoteQualifiersArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::QuoteRequestRelatedSymQuoteQualifiersArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::QuoteRequestRelatedSymPartyIDsPartySubIDsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::QuoteRequestRelatedSymPartyIDsPartySubIDsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::QuoteRequestRelatedSymPartyIDsPartySubIDsArgs>, 0> group_checks = {};
-};
-
-inline ::std::optional<::std::size_t> QuoteRequestRelatedSymPartyIDsArgs_count_party_sub_i_ds(::fixpp::v44::QuoteRequestRelatedSymPartyIDsArgs const& a) noexcept { if (!a.party_sub_i_ds) { return ::std::nullopt; } return a.party_sub_i_ds->size(); }
-inline ::fixpp::core::expected_t<void> QuoteRequestRelatedSymPartyIDsArgs_validate_entry_party_sub_i_ds(::fixpp::v44::QuoteRequestRelatedSymPartyIDsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.party_sub_i_ds)[i]); }
-template <> struct writer_traits<::fixpp::v44::QuoteRequestRelatedSymPartyIDsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::QuoteRequestRelatedSymPartyIDsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::QuoteRequestRelatedSymPartyIDsArgs>, 1> group_checks = {{
-        {false, &QuoteRequestRelatedSymPartyIDsArgs_count_party_sub_i_ds, &QuoteRequestRelatedSymPartyIDsArgs_validate_entry_party_sub_i_ds},
-    }};
-};
-
-inline ::std::optional<::std::size_t> QuoteRequestRelatedSymArgs_count_security_alt_id(::fixpp::v44::QuoteRequestRelatedSymArgs const& a) noexcept { if (!a.security_alt_id) { return ::std::nullopt; } return a.security_alt_id->size(); }
-inline ::fixpp::core::expected_t<void> QuoteRequestRelatedSymArgs_validate_entry_security_alt_id(::fixpp::v44::QuoteRequestRelatedSymArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.security_alt_id)[i]); }
-inline ::std::optional<::std::size_t> QuoteRequestRelatedSymArgs_count_events(::fixpp::v44::QuoteRequestRelatedSymArgs const& a) noexcept { if (!a.events) { return ::std::nullopt; } return a.events->size(); }
-inline ::fixpp::core::expected_t<void> QuoteRequestRelatedSymArgs_validate_entry_events(::fixpp::v44::QuoteRequestRelatedSymArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.events)[i]); }
-inline ::std::optional<::std::size_t> QuoteRequestRelatedSymArgs_count_underlyings(::fixpp::v44::QuoteRequestRelatedSymArgs const& a) noexcept { if (!a.underlyings) { return ::std::nullopt; } return a.underlyings->size(); }
-inline ::fixpp::core::expected_t<void> QuoteRequestRelatedSymArgs_validate_entry_underlyings(::fixpp::v44::QuoteRequestRelatedSymArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.underlyings)[i]); }
-inline ::std::optional<::std::size_t> QuoteRequestRelatedSymArgs_count_stipulations(::fixpp::v44::QuoteRequestRelatedSymArgs const& a) noexcept { if (!a.stipulations) { return ::std::nullopt; } return a.stipulations->size(); }
-inline ::fixpp::core::expected_t<void> QuoteRequestRelatedSymArgs_validate_entry_stipulations(::fixpp::v44::QuoteRequestRelatedSymArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.stipulations)[i]); }
-inline ::std::optional<::std::size_t> QuoteRequestRelatedSymArgs_count_legs(::fixpp::v44::QuoteRequestRelatedSymArgs const& a) noexcept { if (!a.legs) { return ::std::nullopt; } return a.legs->size(); }
-inline ::fixpp::core::expected_t<void> QuoteRequestRelatedSymArgs_validate_entry_legs(::fixpp::v44::QuoteRequestRelatedSymArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.legs)[i]); }
-inline ::std::optional<::std::size_t> QuoteRequestRelatedSymArgs_count_quote_qualifiers(::fixpp::v44::QuoteRequestRelatedSymArgs const& a) noexcept { if (!a.quote_qualifiers) { return ::std::nullopt; } return a.quote_qualifiers->size(); }
-inline ::fixpp::core::expected_t<void> QuoteRequestRelatedSymArgs_validate_entry_quote_qualifiers(::fixpp::v44::QuoteRequestRelatedSymArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.quote_qualifiers)[i]); }
-inline ::std::optional<::std::size_t> QuoteRequestRelatedSymArgs_count_party_i_ds(::fixpp::v44::QuoteRequestRelatedSymArgs const& a) noexcept { if (!a.party_i_ds) { return ::std::nullopt; } return a.party_i_ds->size(); }
-inline ::fixpp::core::expected_t<void> QuoteRequestRelatedSymArgs_validate_entry_party_i_ds(::fixpp::v44::QuoteRequestRelatedSymArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.party_i_ds)[i]); }
-template <> struct writer_traits<::fixpp::v44::QuoteRequestRelatedSymArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::QuoteRequestRelatedSymArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::QuoteRequestRelatedSymArgs>, 7> group_checks = {{
-        {false, &QuoteRequestRelatedSymArgs_count_security_alt_id, &QuoteRequestRelatedSymArgs_validate_entry_security_alt_id},
-        {false, &QuoteRequestRelatedSymArgs_count_events, &QuoteRequestRelatedSymArgs_validate_entry_events},
-        {false, &QuoteRequestRelatedSymArgs_count_underlyings, &QuoteRequestRelatedSymArgs_validate_entry_underlyings},
-        {false, &QuoteRequestRelatedSymArgs_count_stipulations, &QuoteRequestRelatedSymArgs_validate_entry_stipulations},
-        {false, &QuoteRequestRelatedSymArgs_count_legs, &QuoteRequestRelatedSymArgs_validate_entry_legs},
-        {false, &QuoteRequestRelatedSymArgs_count_quote_qualifiers, &QuoteRequestRelatedSymArgs_validate_entry_quote_qualifiers},
-        {false, &QuoteRequestRelatedSymArgs_count_party_i_ds, &QuoteRequestRelatedSymArgs_validate_entry_party_i_ds},
-    }};
-};
-
 inline bool QuoteRequestArgs_required_131(::fixpp::v44::QuoteRequestArgs const& a) noexcept { return a.quote_req_id.has_value(); }
 inline ::std::optional<::std::size_t> QuoteRequestArgs_count_related_sym(::fixpp::v44::QuoteRequestArgs const& a) noexcept { return a.related_sym.size(); }
 inline ::fixpp::core::expected_t<void> QuoteRequestArgs_validate_entry_related_sym(::fixpp::v44::QuoteRequestArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required(a.related_sym[i]); }
@@ -33447,101 +29783,6 @@ template <> struct writer_traits<::fixpp::v44::QuoteRequestArgs> {
     static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::QuoteRequestArgs>, 1> group_checks = {{
         {true, &QuoteRequestArgs_count_related_sym, &QuoteRequestArgs_validate_entry_related_sym},
     }};
-};
-
-template <> struct writer_traits<::fixpp::v44::QuoteStipulationsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::QuoteStipulationsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::QuoteStipulationsArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::QuotePartyIDsPartySubIDsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::QuotePartyIDsPartySubIDsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::QuotePartyIDsPartySubIDsArgs>, 0> group_checks = {};
-};
-
-inline ::std::optional<::std::size_t> QuotePartyIDsArgs_count_party_sub_i_ds(::fixpp::v44::QuotePartyIDsArgs const& a) noexcept { if (!a.party_sub_i_ds) { return ::std::nullopt; } return a.party_sub_i_ds->size(); }
-inline ::fixpp::core::expected_t<void> QuotePartyIDsArgs_validate_entry_party_sub_i_ds(::fixpp::v44::QuotePartyIDsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.party_sub_i_ds)[i]); }
-template <> struct writer_traits<::fixpp::v44::QuotePartyIDsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::QuotePartyIDsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::QuotePartyIDsArgs>, 1> group_checks = {{
-        {false, &QuotePartyIDsArgs_count_party_sub_i_ds, &QuotePartyIDsArgs_validate_entry_party_sub_i_ds},
-    }};
-};
-
-template <> struct writer_traits<::fixpp::v44::QuoteSecurityAltIDArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::QuoteSecurityAltIDArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::QuoteSecurityAltIDArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::QuoteLegsLegSecurityAltIDArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::QuoteLegsLegSecurityAltIDArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::QuoteLegsLegSecurityAltIDArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::QuoteLegsLegStipulationsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::QuoteLegsLegStipulationsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::QuoteLegsLegStipulationsArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::QuoteLegsNestedPartyIDsNestedPartySubIDsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::QuoteLegsNestedPartyIDsNestedPartySubIDsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::QuoteLegsNestedPartyIDsNestedPartySubIDsArgs>, 0> group_checks = {};
-};
-
-inline ::std::optional<::std::size_t> QuoteLegsNestedPartyIDsArgs_count_nested_party_sub_i_ds(::fixpp::v44::QuoteLegsNestedPartyIDsArgs const& a) noexcept { if (!a.nested_party_sub_i_ds) { return ::std::nullopt; } return a.nested_party_sub_i_ds->size(); }
-inline ::fixpp::core::expected_t<void> QuoteLegsNestedPartyIDsArgs_validate_entry_nested_party_sub_i_ds(::fixpp::v44::QuoteLegsNestedPartyIDsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.nested_party_sub_i_ds)[i]); }
-template <> struct writer_traits<::fixpp::v44::QuoteLegsNestedPartyIDsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::QuoteLegsNestedPartyIDsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::QuoteLegsNestedPartyIDsArgs>, 1> group_checks = {{
-        {false, &QuoteLegsNestedPartyIDsArgs_count_nested_party_sub_i_ds, &QuoteLegsNestedPartyIDsArgs_validate_entry_nested_party_sub_i_ds},
-    }};
-};
-
-inline ::std::optional<::std::size_t> QuoteLegsArgs_count_leg_security_alt_id(::fixpp::v44::QuoteLegsArgs const& a) noexcept { if (!a.leg_security_alt_id) { return ::std::nullopt; } return a.leg_security_alt_id->size(); }
-inline ::fixpp::core::expected_t<void> QuoteLegsArgs_validate_entry_leg_security_alt_id(::fixpp::v44::QuoteLegsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.leg_security_alt_id)[i]); }
-inline ::std::optional<::std::size_t> QuoteLegsArgs_count_leg_stipulations(::fixpp::v44::QuoteLegsArgs const& a) noexcept { if (!a.leg_stipulations) { return ::std::nullopt; } return a.leg_stipulations->size(); }
-inline ::fixpp::core::expected_t<void> QuoteLegsArgs_validate_entry_leg_stipulations(::fixpp::v44::QuoteLegsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.leg_stipulations)[i]); }
-inline ::std::optional<::std::size_t> QuoteLegsArgs_count_nested_party_i_ds(::fixpp::v44::QuoteLegsArgs const& a) noexcept { if (!a.nested_party_i_ds) { return ::std::nullopt; } return a.nested_party_i_ds->size(); }
-inline ::fixpp::core::expected_t<void> QuoteLegsArgs_validate_entry_nested_party_i_ds(::fixpp::v44::QuoteLegsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.nested_party_i_ds)[i]); }
-template <> struct writer_traits<::fixpp::v44::QuoteLegsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::QuoteLegsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::QuoteLegsArgs>, 3> group_checks = {{
-        {false, &QuoteLegsArgs_count_leg_security_alt_id, &QuoteLegsArgs_validate_entry_leg_security_alt_id},
-        {false, &QuoteLegsArgs_count_leg_stipulations, &QuoteLegsArgs_validate_entry_leg_stipulations},
-        {false, &QuoteLegsArgs_count_nested_party_i_ds, &QuoteLegsArgs_validate_entry_nested_party_i_ds},
-    }};
-};
-
-template <> struct writer_traits<::fixpp::v44::QuoteUnderlyingsUnderlyingSecurityAltIDArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::QuoteUnderlyingsUnderlyingSecurityAltIDArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::QuoteUnderlyingsUnderlyingSecurityAltIDArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::QuoteUnderlyingsUnderlyingStipsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::QuoteUnderlyingsUnderlyingStipsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::QuoteUnderlyingsUnderlyingStipsArgs>, 0> group_checks = {};
-};
-
-inline ::std::optional<::std::size_t> QuoteUnderlyingsArgs_count_underlying_security_alt_id(::fixpp::v44::QuoteUnderlyingsArgs const& a) noexcept { if (!a.underlying_security_alt_id) { return ::std::nullopt; } return a.underlying_security_alt_id->size(); }
-inline ::fixpp::core::expected_t<void> QuoteUnderlyingsArgs_validate_entry_underlying_security_alt_id(::fixpp::v44::QuoteUnderlyingsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.underlying_security_alt_id)[i]); }
-inline ::std::optional<::std::size_t> QuoteUnderlyingsArgs_count_underlying_stips(::fixpp::v44::QuoteUnderlyingsArgs const& a) noexcept { if (!a.underlying_stips) { return ::std::nullopt; } return a.underlying_stips->size(); }
-inline ::fixpp::core::expected_t<void> QuoteUnderlyingsArgs_validate_entry_underlying_stips(::fixpp::v44::QuoteUnderlyingsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.underlying_stips)[i]); }
-template <> struct writer_traits<::fixpp::v44::QuoteUnderlyingsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::QuoteUnderlyingsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::QuoteUnderlyingsArgs>, 2> group_checks = {{
-        {false, &QuoteUnderlyingsArgs_count_underlying_security_alt_id, &QuoteUnderlyingsArgs_validate_entry_underlying_security_alt_id},
-        {false, &QuoteUnderlyingsArgs_count_underlying_stips, &QuoteUnderlyingsArgs_validate_entry_underlying_stips},
-    }};
-};
-
-template <> struct writer_traits<::fixpp::v44::QuoteQuoteQualifiersArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::QuoteQuoteQualifiersArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::QuoteQuoteQualifiersArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::QuoteEventsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::QuoteEventsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::QuoteEventsArgs>, 0> group_checks = {};
 };
 
 inline bool QuoteArgs_required_117(::fixpp::v44::QuoteArgs const& a) noexcept { return a.quote_id.has_value(); }
@@ -33574,83 +29815,6 @@ template <> struct writer_traits<::fixpp::v44::QuoteArgs> {
     }};
 };
 
-template <> struct writer_traits<::fixpp::v44::MarketDataRequestRelatedSymSecurityAltIDArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::MarketDataRequestRelatedSymSecurityAltIDArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::MarketDataRequestRelatedSymSecurityAltIDArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::MarketDataRequestRelatedSymEventsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::MarketDataRequestRelatedSymEventsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::MarketDataRequestRelatedSymEventsArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::MarketDataRequestRelatedSymUnderlyingsUnderlyingSecurityAltIDArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::MarketDataRequestRelatedSymUnderlyingsUnderlyingSecurityAltIDArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::MarketDataRequestRelatedSymUnderlyingsUnderlyingSecurityAltIDArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::MarketDataRequestRelatedSymUnderlyingsUnderlyingStipsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::MarketDataRequestRelatedSymUnderlyingsUnderlyingStipsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::MarketDataRequestRelatedSymUnderlyingsUnderlyingStipsArgs>, 0> group_checks = {};
-};
-
-inline ::std::optional<::std::size_t> MarketDataRequestRelatedSymUnderlyingsArgs_count_underlying_security_alt_id(::fixpp::v44::MarketDataRequestRelatedSymUnderlyingsArgs const& a) noexcept { if (!a.underlying_security_alt_id) { return ::std::nullopt; } return a.underlying_security_alt_id->size(); }
-inline ::fixpp::core::expected_t<void> MarketDataRequestRelatedSymUnderlyingsArgs_validate_entry_underlying_security_alt_id(::fixpp::v44::MarketDataRequestRelatedSymUnderlyingsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.underlying_security_alt_id)[i]); }
-inline ::std::optional<::std::size_t> MarketDataRequestRelatedSymUnderlyingsArgs_count_underlying_stips(::fixpp::v44::MarketDataRequestRelatedSymUnderlyingsArgs const& a) noexcept { if (!a.underlying_stips) { return ::std::nullopt; } return a.underlying_stips->size(); }
-inline ::fixpp::core::expected_t<void> MarketDataRequestRelatedSymUnderlyingsArgs_validate_entry_underlying_stips(::fixpp::v44::MarketDataRequestRelatedSymUnderlyingsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.underlying_stips)[i]); }
-template <> struct writer_traits<::fixpp::v44::MarketDataRequestRelatedSymUnderlyingsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::MarketDataRequestRelatedSymUnderlyingsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::MarketDataRequestRelatedSymUnderlyingsArgs>, 2> group_checks = {{
-        {false, &MarketDataRequestRelatedSymUnderlyingsArgs_count_underlying_security_alt_id, &MarketDataRequestRelatedSymUnderlyingsArgs_validate_entry_underlying_security_alt_id},
-        {false, &MarketDataRequestRelatedSymUnderlyingsArgs_count_underlying_stips, &MarketDataRequestRelatedSymUnderlyingsArgs_validate_entry_underlying_stips},
-    }};
-};
-
-template <> struct writer_traits<::fixpp::v44::MarketDataRequestRelatedSymLegsLegSecurityAltIDArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::MarketDataRequestRelatedSymLegsLegSecurityAltIDArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::MarketDataRequestRelatedSymLegsLegSecurityAltIDArgs>, 0> group_checks = {};
-};
-
-inline ::std::optional<::std::size_t> MarketDataRequestRelatedSymLegsArgs_count_leg_security_alt_id(::fixpp::v44::MarketDataRequestRelatedSymLegsArgs const& a) noexcept { if (!a.leg_security_alt_id) { return ::std::nullopt; } return a.leg_security_alt_id->size(); }
-inline ::fixpp::core::expected_t<void> MarketDataRequestRelatedSymLegsArgs_validate_entry_leg_security_alt_id(::fixpp::v44::MarketDataRequestRelatedSymLegsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.leg_security_alt_id)[i]); }
-template <> struct writer_traits<::fixpp::v44::MarketDataRequestRelatedSymLegsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::MarketDataRequestRelatedSymLegsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::MarketDataRequestRelatedSymLegsArgs>, 1> group_checks = {{
-        {false, &MarketDataRequestRelatedSymLegsArgs_count_leg_security_alt_id, &MarketDataRequestRelatedSymLegsArgs_validate_entry_leg_security_alt_id},
-    }};
-};
-
-inline ::std::optional<::std::size_t> MarketDataRequestRelatedSymArgs_count_security_alt_id(::fixpp::v44::MarketDataRequestRelatedSymArgs const& a) noexcept { if (!a.security_alt_id) { return ::std::nullopt; } return a.security_alt_id->size(); }
-inline ::fixpp::core::expected_t<void> MarketDataRequestRelatedSymArgs_validate_entry_security_alt_id(::fixpp::v44::MarketDataRequestRelatedSymArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.security_alt_id)[i]); }
-inline ::std::optional<::std::size_t> MarketDataRequestRelatedSymArgs_count_events(::fixpp::v44::MarketDataRequestRelatedSymArgs const& a) noexcept { if (!a.events) { return ::std::nullopt; } return a.events->size(); }
-inline ::fixpp::core::expected_t<void> MarketDataRequestRelatedSymArgs_validate_entry_events(::fixpp::v44::MarketDataRequestRelatedSymArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.events)[i]); }
-inline ::std::optional<::std::size_t> MarketDataRequestRelatedSymArgs_count_underlyings(::fixpp::v44::MarketDataRequestRelatedSymArgs const& a) noexcept { if (!a.underlyings) { return ::std::nullopt; } return a.underlyings->size(); }
-inline ::fixpp::core::expected_t<void> MarketDataRequestRelatedSymArgs_validate_entry_underlyings(::fixpp::v44::MarketDataRequestRelatedSymArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.underlyings)[i]); }
-inline ::std::optional<::std::size_t> MarketDataRequestRelatedSymArgs_count_legs(::fixpp::v44::MarketDataRequestRelatedSymArgs const& a) noexcept { if (!a.legs) { return ::std::nullopt; } return a.legs->size(); }
-inline ::fixpp::core::expected_t<void> MarketDataRequestRelatedSymArgs_validate_entry_legs(::fixpp::v44::MarketDataRequestRelatedSymArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.legs)[i]); }
-template <> struct writer_traits<::fixpp::v44::MarketDataRequestRelatedSymArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::MarketDataRequestRelatedSymArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::MarketDataRequestRelatedSymArgs>, 4> group_checks = {{
-        {false, &MarketDataRequestRelatedSymArgs_count_security_alt_id, &MarketDataRequestRelatedSymArgs_validate_entry_security_alt_id},
-        {false, &MarketDataRequestRelatedSymArgs_count_events, &MarketDataRequestRelatedSymArgs_validate_entry_events},
-        {false, &MarketDataRequestRelatedSymArgs_count_underlyings, &MarketDataRequestRelatedSymArgs_validate_entry_underlyings},
-        {false, &MarketDataRequestRelatedSymArgs_count_legs, &MarketDataRequestRelatedSymArgs_validate_entry_legs},
-    }};
-};
-
-inline bool MarketDataRequestMDEntryTypesArgs_required_269(::fixpp::v44::MarketDataRequestMDEntryTypesArgs const& a) noexcept { return a.md_entry_type.has_value(); }
-template <> struct writer_traits<::fixpp::v44::MarketDataRequestMDEntryTypesArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::MarketDataRequestMDEntryTypesArgs>, 1> required_checks = {{
-        {269, &MarketDataRequestMDEntryTypesArgs_required_269},
-    }};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::MarketDataRequestMDEntryTypesArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::MarketDataRequestTradingSessionsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::MarketDataRequestTradingSessionsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::MarketDataRequestTradingSessionsArgs>, 0> group_checks = {};
-};
-
 inline bool MarketDataRequestArgs_required_262(::fixpp::v44::MarketDataRequestArgs const& a) noexcept { return a.md_req_id.has_value(); }
 inline bool MarketDataRequestArgs_required_263(::fixpp::v44::MarketDataRequestArgs const& a) noexcept { return a.subscription_request_type.has_value(); }
 inline bool MarketDataRequestArgs_required_264(::fixpp::v44::MarketDataRequestArgs const& a) noexcept { return a.market_depth.has_value(); }
@@ -33671,60 +29835,6 @@ template <> struct writer_traits<::fixpp::v44::MarketDataRequestArgs> {
         {true, &MarketDataRequestArgs_count_md_entry_types, &MarketDataRequestArgs_validate_entry_md_entry_types},
         {false, &MarketDataRequestArgs_count_trading_sessions, &MarketDataRequestArgs_validate_entry_trading_sessions},
     }};
-};
-
-inline bool MarketDataSnapshotFullRefreshMDEntriesArgs_required_269(::fixpp::v44::MarketDataSnapshotFullRefreshMDEntriesArgs const& a) noexcept { return a.md_entry_type.has_value(); }
-template <> struct writer_traits<::fixpp::v44::MarketDataSnapshotFullRefreshMDEntriesArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::MarketDataSnapshotFullRefreshMDEntriesArgs>, 1> required_checks = {{
-        {269, &MarketDataSnapshotFullRefreshMDEntriesArgs_required_269},
-    }};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::MarketDataSnapshotFullRefreshMDEntriesArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::MarketDataSnapshotFullRefreshSecurityAltIDArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::MarketDataSnapshotFullRefreshSecurityAltIDArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::MarketDataSnapshotFullRefreshSecurityAltIDArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::MarketDataSnapshotFullRefreshLegsLegSecurityAltIDArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::MarketDataSnapshotFullRefreshLegsLegSecurityAltIDArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::MarketDataSnapshotFullRefreshLegsLegSecurityAltIDArgs>, 0> group_checks = {};
-};
-
-inline ::std::optional<::std::size_t> MarketDataSnapshotFullRefreshLegsArgs_count_leg_security_alt_id(::fixpp::v44::MarketDataSnapshotFullRefreshLegsArgs const& a) noexcept { if (!a.leg_security_alt_id) { return ::std::nullopt; } return a.leg_security_alt_id->size(); }
-inline ::fixpp::core::expected_t<void> MarketDataSnapshotFullRefreshLegsArgs_validate_entry_leg_security_alt_id(::fixpp::v44::MarketDataSnapshotFullRefreshLegsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.leg_security_alt_id)[i]); }
-template <> struct writer_traits<::fixpp::v44::MarketDataSnapshotFullRefreshLegsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::MarketDataSnapshotFullRefreshLegsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::MarketDataSnapshotFullRefreshLegsArgs>, 1> group_checks = {{
-        {false, &MarketDataSnapshotFullRefreshLegsArgs_count_leg_security_alt_id, &MarketDataSnapshotFullRefreshLegsArgs_validate_entry_leg_security_alt_id},
-    }};
-};
-
-template <> struct writer_traits<::fixpp::v44::MarketDataSnapshotFullRefreshUnderlyingsUnderlyingSecurityAltIDArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::MarketDataSnapshotFullRefreshUnderlyingsUnderlyingSecurityAltIDArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::MarketDataSnapshotFullRefreshUnderlyingsUnderlyingSecurityAltIDArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::MarketDataSnapshotFullRefreshUnderlyingsUnderlyingStipsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::MarketDataSnapshotFullRefreshUnderlyingsUnderlyingStipsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::MarketDataSnapshotFullRefreshUnderlyingsUnderlyingStipsArgs>, 0> group_checks = {};
-};
-
-inline ::std::optional<::std::size_t> MarketDataSnapshotFullRefreshUnderlyingsArgs_count_underlying_security_alt_id(::fixpp::v44::MarketDataSnapshotFullRefreshUnderlyingsArgs const& a) noexcept { if (!a.underlying_security_alt_id) { return ::std::nullopt; } return a.underlying_security_alt_id->size(); }
-inline ::fixpp::core::expected_t<void> MarketDataSnapshotFullRefreshUnderlyingsArgs_validate_entry_underlying_security_alt_id(::fixpp::v44::MarketDataSnapshotFullRefreshUnderlyingsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.underlying_security_alt_id)[i]); }
-inline ::std::optional<::std::size_t> MarketDataSnapshotFullRefreshUnderlyingsArgs_count_underlying_stips(::fixpp::v44::MarketDataSnapshotFullRefreshUnderlyingsArgs const& a) noexcept { if (!a.underlying_stips) { return ::std::nullopt; } return a.underlying_stips->size(); }
-inline ::fixpp::core::expected_t<void> MarketDataSnapshotFullRefreshUnderlyingsArgs_validate_entry_underlying_stips(::fixpp::v44::MarketDataSnapshotFullRefreshUnderlyingsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.underlying_stips)[i]); }
-template <> struct writer_traits<::fixpp::v44::MarketDataSnapshotFullRefreshUnderlyingsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::MarketDataSnapshotFullRefreshUnderlyingsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::MarketDataSnapshotFullRefreshUnderlyingsArgs>, 2> group_checks = {{
-        {false, &MarketDataSnapshotFullRefreshUnderlyingsArgs_count_underlying_security_alt_id, &MarketDataSnapshotFullRefreshUnderlyingsArgs_validate_entry_underlying_security_alt_id},
-        {false, &MarketDataSnapshotFullRefreshUnderlyingsArgs_count_underlying_stips, &MarketDataSnapshotFullRefreshUnderlyingsArgs_validate_entry_underlying_stips},
-    }};
-};
-
-template <> struct writer_traits<::fixpp::v44::MarketDataSnapshotFullRefreshEventsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::MarketDataSnapshotFullRefreshEventsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::MarketDataSnapshotFullRefreshEventsArgs>, 0> group_checks = {};
 };
 
 inline ::std::optional<::std::size_t> MarketDataSnapshotFullRefreshArgs_count_md_entries(::fixpp::v44::MarketDataSnapshotFullRefreshArgs const& a) noexcept { return a.md_entries.size(); }
@@ -33748,73 +29858,6 @@ template <> struct writer_traits<::fixpp::v44::MarketDataSnapshotFullRefreshArgs
     }};
 };
 
-template <> struct writer_traits<::fixpp::v44::MarketDataIncrementalRefreshMDEntriesSecurityAltIDArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::MarketDataIncrementalRefreshMDEntriesSecurityAltIDArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::MarketDataIncrementalRefreshMDEntriesSecurityAltIDArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::MarketDataIncrementalRefreshMDEntriesEventsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::MarketDataIncrementalRefreshMDEntriesEventsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::MarketDataIncrementalRefreshMDEntriesEventsArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::MarketDataIncrementalRefreshMDEntriesUnderlyingsUnderlyingSecurityAltIDArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::MarketDataIncrementalRefreshMDEntriesUnderlyingsUnderlyingSecurityAltIDArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::MarketDataIncrementalRefreshMDEntriesUnderlyingsUnderlyingSecurityAltIDArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::MarketDataIncrementalRefreshMDEntriesUnderlyingsUnderlyingStipsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::MarketDataIncrementalRefreshMDEntriesUnderlyingsUnderlyingStipsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::MarketDataIncrementalRefreshMDEntriesUnderlyingsUnderlyingStipsArgs>, 0> group_checks = {};
-};
-
-inline ::std::optional<::std::size_t> MarketDataIncrementalRefreshMDEntriesUnderlyingsArgs_count_underlying_security_alt_id(::fixpp::v44::MarketDataIncrementalRefreshMDEntriesUnderlyingsArgs const& a) noexcept { if (!a.underlying_security_alt_id) { return ::std::nullopt; } return a.underlying_security_alt_id->size(); }
-inline ::fixpp::core::expected_t<void> MarketDataIncrementalRefreshMDEntriesUnderlyingsArgs_validate_entry_underlying_security_alt_id(::fixpp::v44::MarketDataIncrementalRefreshMDEntriesUnderlyingsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.underlying_security_alt_id)[i]); }
-inline ::std::optional<::std::size_t> MarketDataIncrementalRefreshMDEntriesUnderlyingsArgs_count_underlying_stips(::fixpp::v44::MarketDataIncrementalRefreshMDEntriesUnderlyingsArgs const& a) noexcept { if (!a.underlying_stips) { return ::std::nullopt; } return a.underlying_stips->size(); }
-inline ::fixpp::core::expected_t<void> MarketDataIncrementalRefreshMDEntriesUnderlyingsArgs_validate_entry_underlying_stips(::fixpp::v44::MarketDataIncrementalRefreshMDEntriesUnderlyingsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.underlying_stips)[i]); }
-template <> struct writer_traits<::fixpp::v44::MarketDataIncrementalRefreshMDEntriesUnderlyingsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::MarketDataIncrementalRefreshMDEntriesUnderlyingsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::MarketDataIncrementalRefreshMDEntriesUnderlyingsArgs>, 2> group_checks = {{
-        {false, &MarketDataIncrementalRefreshMDEntriesUnderlyingsArgs_count_underlying_security_alt_id, &MarketDataIncrementalRefreshMDEntriesUnderlyingsArgs_validate_entry_underlying_security_alt_id},
-        {false, &MarketDataIncrementalRefreshMDEntriesUnderlyingsArgs_count_underlying_stips, &MarketDataIncrementalRefreshMDEntriesUnderlyingsArgs_validate_entry_underlying_stips},
-    }};
-};
-
-template <> struct writer_traits<::fixpp::v44::MarketDataIncrementalRefreshMDEntriesLegsLegSecurityAltIDArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::MarketDataIncrementalRefreshMDEntriesLegsLegSecurityAltIDArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::MarketDataIncrementalRefreshMDEntriesLegsLegSecurityAltIDArgs>, 0> group_checks = {};
-};
-
-inline ::std::optional<::std::size_t> MarketDataIncrementalRefreshMDEntriesLegsArgs_count_leg_security_alt_id(::fixpp::v44::MarketDataIncrementalRefreshMDEntriesLegsArgs const& a) noexcept { if (!a.leg_security_alt_id) { return ::std::nullopt; } return a.leg_security_alt_id->size(); }
-inline ::fixpp::core::expected_t<void> MarketDataIncrementalRefreshMDEntriesLegsArgs_validate_entry_leg_security_alt_id(::fixpp::v44::MarketDataIncrementalRefreshMDEntriesLegsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.leg_security_alt_id)[i]); }
-template <> struct writer_traits<::fixpp::v44::MarketDataIncrementalRefreshMDEntriesLegsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::MarketDataIncrementalRefreshMDEntriesLegsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::MarketDataIncrementalRefreshMDEntriesLegsArgs>, 1> group_checks = {{
-        {false, &MarketDataIncrementalRefreshMDEntriesLegsArgs_count_leg_security_alt_id, &MarketDataIncrementalRefreshMDEntriesLegsArgs_validate_entry_leg_security_alt_id},
-    }};
-};
-
-inline bool MarketDataIncrementalRefreshMDEntriesArgs_required_279(::fixpp::v44::MarketDataIncrementalRefreshMDEntriesArgs const& a) noexcept { return a.md_update_action.has_value(); }
-inline ::std::optional<::std::size_t> MarketDataIncrementalRefreshMDEntriesArgs_count_security_alt_id(::fixpp::v44::MarketDataIncrementalRefreshMDEntriesArgs const& a) noexcept { if (!a.security_alt_id) { return ::std::nullopt; } return a.security_alt_id->size(); }
-inline ::fixpp::core::expected_t<void> MarketDataIncrementalRefreshMDEntriesArgs_validate_entry_security_alt_id(::fixpp::v44::MarketDataIncrementalRefreshMDEntriesArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.security_alt_id)[i]); }
-inline ::std::optional<::std::size_t> MarketDataIncrementalRefreshMDEntriesArgs_count_events(::fixpp::v44::MarketDataIncrementalRefreshMDEntriesArgs const& a) noexcept { if (!a.events) { return ::std::nullopt; } return a.events->size(); }
-inline ::fixpp::core::expected_t<void> MarketDataIncrementalRefreshMDEntriesArgs_validate_entry_events(::fixpp::v44::MarketDataIncrementalRefreshMDEntriesArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.events)[i]); }
-inline ::std::optional<::std::size_t> MarketDataIncrementalRefreshMDEntriesArgs_count_underlyings(::fixpp::v44::MarketDataIncrementalRefreshMDEntriesArgs const& a) noexcept { if (!a.underlyings) { return ::std::nullopt; } return a.underlyings->size(); }
-inline ::fixpp::core::expected_t<void> MarketDataIncrementalRefreshMDEntriesArgs_validate_entry_underlyings(::fixpp::v44::MarketDataIncrementalRefreshMDEntriesArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.underlyings)[i]); }
-inline ::std::optional<::std::size_t> MarketDataIncrementalRefreshMDEntriesArgs_count_legs(::fixpp::v44::MarketDataIncrementalRefreshMDEntriesArgs const& a) noexcept { if (!a.legs) { return ::std::nullopt; } return a.legs->size(); }
-inline ::fixpp::core::expected_t<void> MarketDataIncrementalRefreshMDEntriesArgs_validate_entry_legs(::fixpp::v44::MarketDataIncrementalRefreshMDEntriesArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.legs)[i]); }
-template <> struct writer_traits<::fixpp::v44::MarketDataIncrementalRefreshMDEntriesArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::MarketDataIncrementalRefreshMDEntriesArgs>, 1> required_checks = {{
-        {279, &MarketDataIncrementalRefreshMDEntriesArgs_required_279},
-    }};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::MarketDataIncrementalRefreshMDEntriesArgs>, 4> group_checks = {{
-        {false, &MarketDataIncrementalRefreshMDEntriesArgs_count_security_alt_id, &MarketDataIncrementalRefreshMDEntriesArgs_validate_entry_security_alt_id},
-        {false, &MarketDataIncrementalRefreshMDEntriesArgs_count_events, &MarketDataIncrementalRefreshMDEntriesArgs_validate_entry_events},
-        {false, &MarketDataIncrementalRefreshMDEntriesArgs_count_underlyings, &MarketDataIncrementalRefreshMDEntriesArgs_validate_entry_underlyings},
-        {false, &MarketDataIncrementalRefreshMDEntriesArgs_count_legs, &MarketDataIncrementalRefreshMDEntriesArgs_validate_entry_legs},
-    }};
-};
-
 inline ::std::optional<::std::size_t> MarketDataIncrementalRefreshArgs_count_md_entries(::fixpp::v44::MarketDataIncrementalRefreshArgs const& a) noexcept { return a.md_entries.size(); }
 inline ::fixpp::core::expected_t<void> MarketDataIncrementalRefreshArgs_validate_entry_md_entries(::fixpp::v44::MarketDataIncrementalRefreshArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required(a.md_entries[i]); }
 template <> struct writer_traits<::fixpp::v44::MarketDataIncrementalRefreshArgs> {
@@ -33822,11 +29865,6 @@ template <> struct writer_traits<::fixpp::v44::MarketDataIncrementalRefreshArgs>
     static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::MarketDataIncrementalRefreshArgs>, 1> group_checks = {{
         {true, &MarketDataIncrementalRefreshArgs_count_md_entries, &MarketDataIncrementalRefreshArgs_validate_entry_md_entries},
     }};
-};
-
-template <> struct writer_traits<::fixpp::v44::MarketDataRequestRejectAltMDSourceArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::MarketDataRequestRejectAltMDSourceArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::MarketDataRequestRejectAltMDSourceArgs>, 0> group_checks = {};
 };
 
 inline bool MarketDataRequestRejectArgs_required_262(::fixpp::v44::MarketDataRequestRejectArgs const& a) noexcept { return a.md_req_id.has_value(); }
@@ -33838,84 +29876,6 @@ template <> struct writer_traits<::fixpp::v44::MarketDataRequestRejectArgs> {
     }};
     static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::MarketDataRequestRejectArgs>, 1> group_checks = {{
         {false, &MarketDataRequestRejectArgs_count_alt_md_source, &MarketDataRequestRejectArgs_validate_entry_alt_md_source},
-    }};
-};
-
-template <> struct writer_traits<::fixpp::v44::QuoteCancelQuoteEntriesSecurityAltIDArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::QuoteCancelQuoteEntriesSecurityAltIDArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::QuoteCancelQuoteEntriesSecurityAltIDArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::QuoteCancelQuoteEntriesEventsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::QuoteCancelQuoteEntriesEventsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::QuoteCancelQuoteEntriesEventsArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::QuoteCancelQuoteEntriesUnderlyingsUnderlyingSecurityAltIDArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::QuoteCancelQuoteEntriesUnderlyingsUnderlyingSecurityAltIDArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::QuoteCancelQuoteEntriesUnderlyingsUnderlyingSecurityAltIDArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::QuoteCancelQuoteEntriesUnderlyingsUnderlyingStipsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::QuoteCancelQuoteEntriesUnderlyingsUnderlyingStipsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::QuoteCancelQuoteEntriesUnderlyingsUnderlyingStipsArgs>, 0> group_checks = {};
-};
-
-inline ::std::optional<::std::size_t> QuoteCancelQuoteEntriesUnderlyingsArgs_count_underlying_security_alt_id(::fixpp::v44::QuoteCancelQuoteEntriesUnderlyingsArgs const& a) noexcept { if (!a.underlying_security_alt_id) { return ::std::nullopt; } return a.underlying_security_alt_id->size(); }
-inline ::fixpp::core::expected_t<void> QuoteCancelQuoteEntriesUnderlyingsArgs_validate_entry_underlying_security_alt_id(::fixpp::v44::QuoteCancelQuoteEntriesUnderlyingsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.underlying_security_alt_id)[i]); }
-inline ::std::optional<::std::size_t> QuoteCancelQuoteEntriesUnderlyingsArgs_count_underlying_stips(::fixpp::v44::QuoteCancelQuoteEntriesUnderlyingsArgs const& a) noexcept { if (!a.underlying_stips) { return ::std::nullopt; } return a.underlying_stips->size(); }
-inline ::fixpp::core::expected_t<void> QuoteCancelQuoteEntriesUnderlyingsArgs_validate_entry_underlying_stips(::fixpp::v44::QuoteCancelQuoteEntriesUnderlyingsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.underlying_stips)[i]); }
-template <> struct writer_traits<::fixpp::v44::QuoteCancelQuoteEntriesUnderlyingsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::QuoteCancelQuoteEntriesUnderlyingsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::QuoteCancelQuoteEntriesUnderlyingsArgs>, 2> group_checks = {{
-        {false, &QuoteCancelQuoteEntriesUnderlyingsArgs_count_underlying_security_alt_id, &QuoteCancelQuoteEntriesUnderlyingsArgs_validate_entry_underlying_security_alt_id},
-        {false, &QuoteCancelQuoteEntriesUnderlyingsArgs_count_underlying_stips, &QuoteCancelQuoteEntriesUnderlyingsArgs_validate_entry_underlying_stips},
-    }};
-};
-
-template <> struct writer_traits<::fixpp::v44::QuoteCancelQuoteEntriesLegsLegSecurityAltIDArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::QuoteCancelQuoteEntriesLegsLegSecurityAltIDArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::QuoteCancelQuoteEntriesLegsLegSecurityAltIDArgs>, 0> group_checks = {};
-};
-
-inline ::std::optional<::std::size_t> QuoteCancelQuoteEntriesLegsArgs_count_leg_security_alt_id(::fixpp::v44::QuoteCancelQuoteEntriesLegsArgs const& a) noexcept { if (!a.leg_security_alt_id) { return ::std::nullopt; } return a.leg_security_alt_id->size(); }
-inline ::fixpp::core::expected_t<void> QuoteCancelQuoteEntriesLegsArgs_validate_entry_leg_security_alt_id(::fixpp::v44::QuoteCancelQuoteEntriesLegsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.leg_security_alt_id)[i]); }
-template <> struct writer_traits<::fixpp::v44::QuoteCancelQuoteEntriesLegsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::QuoteCancelQuoteEntriesLegsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::QuoteCancelQuoteEntriesLegsArgs>, 1> group_checks = {{
-        {false, &QuoteCancelQuoteEntriesLegsArgs_count_leg_security_alt_id, &QuoteCancelQuoteEntriesLegsArgs_validate_entry_leg_security_alt_id},
-    }};
-};
-
-inline ::std::optional<::std::size_t> QuoteCancelQuoteEntriesArgs_count_security_alt_id(::fixpp::v44::QuoteCancelQuoteEntriesArgs const& a) noexcept { if (!a.security_alt_id) { return ::std::nullopt; } return a.security_alt_id->size(); }
-inline ::fixpp::core::expected_t<void> QuoteCancelQuoteEntriesArgs_validate_entry_security_alt_id(::fixpp::v44::QuoteCancelQuoteEntriesArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.security_alt_id)[i]); }
-inline ::std::optional<::std::size_t> QuoteCancelQuoteEntriesArgs_count_events(::fixpp::v44::QuoteCancelQuoteEntriesArgs const& a) noexcept { if (!a.events) { return ::std::nullopt; } return a.events->size(); }
-inline ::fixpp::core::expected_t<void> QuoteCancelQuoteEntriesArgs_validate_entry_events(::fixpp::v44::QuoteCancelQuoteEntriesArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.events)[i]); }
-inline ::std::optional<::std::size_t> QuoteCancelQuoteEntriesArgs_count_underlyings(::fixpp::v44::QuoteCancelQuoteEntriesArgs const& a) noexcept { if (!a.underlyings) { return ::std::nullopt; } return a.underlyings->size(); }
-inline ::fixpp::core::expected_t<void> QuoteCancelQuoteEntriesArgs_validate_entry_underlyings(::fixpp::v44::QuoteCancelQuoteEntriesArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.underlyings)[i]); }
-inline ::std::optional<::std::size_t> QuoteCancelQuoteEntriesArgs_count_legs(::fixpp::v44::QuoteCancelQuoteEntriesArgs const& a) noexcept { if (!a.legs) { return ::std::nullopt; } return a.legs->size(); }
-inline ::fixpp::core::expected_t<void> QuoteCancelQuoteEntriesArgs_validate_entry_legs(::fixpp::v44::QuoteCancelQuoteEntriesArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.legs)[i]); }
-template <> struct writer_traits<::fixpp::v44::QuoteCancelQuoteEntriesArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::QuoteCancelQuoteEntriesArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::QuoteCancelQuoteEntriesArgs>, 4> group_checks = {{
-        {false, &QuoteCancelQuoteEntriesArgs_count_security_alt_id, &QuoteCancelQuoteEntriesArgs_validate_entry_security_alt_id},
-        {false, &QuoteCancelQuoteEntriesArgs_count_events, &QuoteCancelQuoteEntriesArgs_validate_entry_events},
-        {false, &QuoteCancelQuoteEntriesArgs_count_underlyings, &QuoteCancelQuoteEntriesArgs_validate_entry_underlyings},
-        {false, &QuoteCancelQuoteEntriesArgs_count_legs, &QuoteCancelQuoteEntriesArgs_validate_entry_legs},
-    }};
-};
-
-template <> struct writer_traits<::fixpp::v44::QuoteCancelPartyIDsPartySubIDsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::QuoteCancelPartyIDsPartySubIDsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::QuoteCancelPartyIDsPartySubIDsArgs>, 0> group_checks = {};
-};
-
-inline ::std::optional<::std::size_t> QuoteCancelPartyIDsArgs_count_party_sub_i_ds(::fixpp::v44::QuoteCancelPartyIDsArgs const& a) noexcept { if (!a.party_sub_i_ds) { return ::std::nullopt; } return a.party_sub_i_ds->size(); }
-inline ::fixpp::core::expected_t<void> QuoteCancelPartyIDsArgs_validate_entry_party_sub_i_ds(::fixpp::v44::QuoteCancelPartyIDsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.party_sub_i_ds)[i]); }
-template <> struct writer_traits<::fixpp::v44::QuoteCancelPartyIDsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::QuoteCancelPartyIDsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::QuoteCancelPartyIDsArgs>, 1> group_checks = {{
-        {false, &QuoteCancelPartyIDsArgs_count_party_sub_i_ds, &QuoteCancelPartyIDsArgs_validate_entry_party_sub_i_ds},
     }};
 };
 
@@ -33934,66 +29894,6 @@ template <> struct writer_traits<::fixpp::v44::QuoteCancelArgs> {
         {false, &QuoteCancelArgs_count_quote_entries, &QuoteCancelArgs_validate_entry_quote_entries},
         {false, &QuoteCancelArgs_count_party_i_ds, &QuoteCancelArgs_validate_entry_party_i_ds},
     }};
-};
-
-template <> struct writer_traits<::fixpp::v44::QuoteStatusRequestPartyIDsPartySubIDsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::QuoteStatusRequestPartyIDsPartySubIDsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::QuoteStatusRequestPartyIDsPartySubIDsArgs>, 0> group_checks = {};
-};
-
-inline ::std::optional<::std::size_t> QuoteStatusRequestPartyIDsArgs_count_party_sub_i_ds(::fixpp::v44::QuoteStatusRequestPartyIDsArgs const& a) noexcept { if (!a.party_sub_i_ds) { return ::std::nullopt; } return a.party_sub_i_ds->size(); }
-inline ::fixpp::core::expected_t<void> QuoteStatusRequestPartyIDsArgs_validate_entry_party_sub_i_ds(::fixpp::v44::QuoteStatusRequestPartyIDsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.party_sub_i_ds)[i]); }
-template <> struct writer_traits<::fixpp::v44::QuoteStatusRequestPartyIDsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::QuoteStatusRequestPartyIDsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::QuoteStatusRequestPartyIDsArgs>, 1> group_checks = {{
-        {false, &QuoteStatusRequestPartyIDsArgs_count_party_sub_i_ds, &QuoteStatusRequestPartyIDsArgs_validate_entry_party_sub_i_ds},
-    }};
-};
-
-template <> struct writer_traits<::fixpp::v44::QuoteStatusRequestSecurityAltIDArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::QuoteStatusRequestSecurityAltIDArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::QuoteStatusRequestSecurityAltIDArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::QuoteStatusRequestLegsLegSecurityAltIDArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::QuoteStatusRequestLegsLegSecurityAltIDArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::QuoteStatusRequestLegsLegSecurityAltIDArgs>, 0> group_checks = {};
-};
-
-inline ::std::optional<::std::size_t> QuoteStatusRequestLegsArgs_count_leg_security_alt_id(::fixpp::v44::QuoteStatusRequestLegsArgs const& a) noexcept { if (!a.leg_security_alt_id) { return ::std::nullopt; } return a.leg_security_alt_id->size(); }
-inline ::fixpp::core::expected_t<void> QuoteStatusRequestLegsArgs_validate_entry_leg_security_alt_id(::fixpp::v44::QuoteStatusRequestLegsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.leg_security_alt_id)[i]); }
-template <> struct writer_traits<::fixpp::v44::QuoteStatusRequestLegsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::QuoteStatusRequestLegsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::QuoteStatusRequestLegsArgs>, 1> group_checks = {{
-        {false, &QuoteStatusRequestLegsArgs_count_leg_security_alt_id, &QuoteStatusRequestLegsArgs_validate_entry_leg_security_alt_id},
-    }};
-};
-
-template <> struct writer_traits<::fixpp::v44::QuoteStatusRequestUnderlyingsUnderlyingSecurityAltIDArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::QuoteStatusRequestUnderlyingsUnderlyingSecurityAltIDArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::QuoteStatusRequestUnderlyingsUnderlyingSecurityAltIDArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::QuoteStatusRequestUnderlyingsUnderlyingStipsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::QuoteStatusRequestUnderlyingsUnderlyingStipsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::QuoteStatusRequestUnderlyingsUnderlyingStipsArgs>, 0> group_checks = {};
-};
-
-inline ::std::optional<::std::size_t> QuoteStatusRequestUnderlyingsArgs_count_underlying_security_alt_id(::fixpp::v44::QuoteStatusRequestUnderlyingsArgs const& a) noexcept { if (!a.underlying_security_alt_id) { return ::std::nullopt; } return a.underlying_security_alt_id->size(); }
-inline ::fixpp::core::expected_t<void> QuoteStatusRequestUnderlyingsArgs_validate_entry_underlying_security_alt_id(::fixpp::v44::QuoteStatusRequestUnderlyingsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.underlying_security_alt_id)[i]); }
-inline ::std::optional<::std::size_t> QuoteStatusRequestUnderlyingsArgs_count_underlying_stips(::fixpp::v44::QuoteStatusRequestUnderlyingsArgs const& a) noexcept { if (!a.underlying_stips) { return ::std::nullopt; } return a.underlying_stips->size(); }
-inline ::fixpp::core::expected_t<void> QuoteStatusRequestUnderlyingsArgs_validate_entry_underlying_stips(::fixpp::v44::QuoteStatusRequestUnderlyingsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.underlying_stips)[i]); }
-template <> struct writer_traits<::fixpp::v44::QuoteStatusRequestUnderlyingsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::QuoteStatusRequestUnderlyingsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::QuoteStatusRequestUnderlyingsArgs>, 2> group_checks = {{
-        {false, &QuoteStatusRequestUnderlyingsArgs_count_underlying_security_alt_id, &QuoteStatusRequestUnderlyingsArgs_validate_entry_underlying_security_alt_id},
-        {false, &QuoteStatusRequestUnderlyingsArgs_count_underlying_stips, &QuoteStatusRequestUnderlyingsArgs_validate_entry_underlying_stips},
-    }};
-};
-
-template <> struct writer_traits<::fixpp::v44::QuoteStatusRequestEventsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::QuoteStatusRequestEventsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::QuoteStatusRequestEventsArgs>, 0> group_checks = {};
 };
 
 inline ::std::optional<::std::size_t> QuoteStatusRequestArgs_count_party_i_ds(::fixpp::v44::QuoteStatusRequestArgs const& a) noexcept { if (!a.party_i_ds) { return ::std::nullopt; } return a.party_i_ds->size(); }
@@ -34017,84 +29917,6 @@ template <> struct writer_traits<::fixpp::v44::QuoteStatusRequestArgs> {
     }};
 };
 
-template <> struct writer_traits<::fixpp::v44::MassQuoteAcknowledgementQuoteSetsUnderlyingSecurityAltIDArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::MassQuoteAcknowledgementQuoteSetsUnderlyingSecurityAltIDArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::MassQuoteAcknowledgementQuoteSetsUnderlyingSecurityAltIDArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::MassQuoteAcknowledgementQuoteSetsUnderlyingStipsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::MassQuoteAcknowledgementQuoteSetsUnderlyingStipsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::MassQuoteAcknowledgementQuoteSetsUnderlyingStipsArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::MassQuoteAcknowledgementQuoteSetsQuoteEntriesSecurityAltIDArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::MassQuoteAcknowledgementQuoteSetsQuoteEntriesSecurityAltIDArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::MassQuoteAcknowledgementQuoteSetsQuoteEntriesSecurityAltIDArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::MassQuoteAcknowledgementQuoteSetsQuoteEntriesEventsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::MassQuoteAcknowledgementQuoteSetsQuoteEntriesEventsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::MassQuoteAcknowledgementQuoteSetsQuoteEntriesEventsArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::MassQuoteAcknowledgementQuoteSetsQuoteEntriesLegsLegSecurityAltIDArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::MassQuoteAcknowledgementQuoteSetsQuoteEntriesLegsLegSecurityAltIDArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::MassQuoteAcknowledgementQuoteSetsQuoteEntriesLegsLegSecurityAltIDArgs>, 0> group_checks = {};
-};
-
-inline ::std::optional<::std::size_t> MassQuoteAcknowledgementQuoteSetsQuoteEntriesLegsArgs_count_leg_security_alt_id(::fixpp::v44::MassQuoteAcknowledgementQuoteSetsQuoteEntriesLegsArgs const& a) noexcept { if (!a.leg_security_alt_id) { return ::std::nullopt; } return a.leg_security_alt_id->size(); }
-inline ::fixpp::core::expected_t<void> MassQuoteAcknowledgementQuoteSetsQuoteEntriesLegsArgs_validate_entry_leg_security_alt_id(::fixpp::v44::MassQuoteAcknowledgementQuoteSetsQuoteEntriesLegsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.leg_security_alt_id)[i]); }
-template <> struct writer_traits<::fixpp::v44::MassQuoteAcknowledgementQuoteSetsQuoteEntriesLegsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::MassQuoteAcknowledgementQuoteSetsQuoteEntriesLegsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::MassQuoteAcknowledgementQuoteSetsQuoteEntriesLegsArgs>, 1> group_checks = {{
-        {false, &MassQuoteAcknowledgementQuoteSetsQuoteEntriesLegsArgs_count_leg_security_alt_id, &MassQuoteAcknowledgementQuoteSetsQuoteEntriesLegsArgs_validate_entry_leg_security_alt_id},
-    }};
-};
-
-inline ::std::optional<::std::size_t> MassQuoteAcknowledgementQuoteSetsQuoteEntriesArgs_count_security_alt_id(::fixpp::v44::MassQuoteAcknowledgementQuoteSetsQuoteEntriesArgs const& a) noexcept { if (!a.security_alt_id) { return ::std::nullopt; } return a.security_alt_id->size(); }
-inline ::fixpp::core::expected_t<void> MassQuoteAcknowledgementQuoteSetsQuoteEntriesArgs_validate_entry_security_alt_id(::fixpp::v44::MassQuoteAcknowledgementQuoteSetsQuoteEntriesArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.security_alt_id)[i]); }
-inline ::std::optional<::std::size_t> MassQuoteAcknowledgementQuoteSetsQuoteEntriesArgs_count_events(::fixpp::v44::MassQuoteAcknowledgementQuoteSetsQuoteEntriesArgs const& a) noexcept { if (!a.events) { return ::std::nullopt; } return a.events->size(); }
-inline ::fixpp::core::expected_t<void> MassQuoteAcknowledgementQuoteSetsQuoteEntriesArgs_validate_entry_events(::fixpp::v44::MassQuoteAcknowledgementQuoteSetsQuoteEntriesArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.events)[i]); }
-inline ::std::optional<::std::size_t> MassQuoteAcknowledgementQuoteSetsQuoteEntriesArgs_count_legs(::fixpp::v44::MassQuoteAcknowledgementQuoteSetsQuoteEntriesArgs const& a) noexcept { if (!a.legs) { return ::std::nullopt; } return a.legs->size(); }
-inline ::fixpp::core::expected_t<void> MassQuoteAcknowledgementQuoteSetsQuoteEntriesArgs_validate_entry_legs(::fixpp::v44::MassQuoteAcknowledgementQuoteSetsQuoteEntriesArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.legs)[i]); }
-template <> struct writer_traits<::fixpp::v44::MassQuoteAcknowledgementQuoteSetsQuoteEntriesArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::MassQuoteAcknowledgementQuoteSetsQuoteEntriesArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::MassQuoteAcknowledgementQuoteSetsQuoteEntriesArgs>, 3> group_checks = {{
-        {false, &MassQuoteAcknowledgementQuoteSetsQuoteEntriesArgs_count_security_alt_id, &MassQuoteAcknowledgementQuoteSetsQuoteEntriesArgs_validate_entry_security_alt_id},
-        {false, &MassQuoteAcknowledgementQuoteSetsQuoteEntriesArgs_count_events, &MassQuoteAcknowledgementQuoteSetsQuoteEntriesArgs_validate_entry_events},
-        {false, &MassQuoteAcknowledgementQuoteSetsQuoteEntriesArgs_count_legs, &MassQuoteAcknowledgementQuoteSetsQuoteEntriesArgs_validate_entry_legs},
-    }};
-};
-
-inline ::std::optional<::std::size_t> MassQuoteAcknowledgementQuoteSetsArgs_count_underlying_security_alt_id(::fixpp::v44::MassQuoteAcknowledgementQuoteSetsArgs const& a) noexcept { if (!a.underlying_security_alt_id) { return ::std::nullopt; } return a.underlying_security_alt_id->size(); }
-inline ::fixpp::core::expected_t<void> MassQuoteAcknowledgementQuoteSetsArgs_validate_entry_underlying_security_alt_id(::fixpp::v44::MassQuoteAcknowledgementQuoteSetsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.underlying_security_alt_id)[i]); }
-inline ::std::optional<::std::size_t> MassQuoteAcknowledgementQuoteSetsArgs_count_underlying_stips(::fixpp::v44::MassQuoteAcknowledgementQuoteSetsArgs const& a) noexcept { if (!a.underlying_stips) { return ::std::nullopt; } return a.underlying_stips->size(); }
-inline ::fixpp::core::expected_t<void> MassQuoteAcknowledgementQuoteSetsArgs_validate_entry_underlying_stips(::fixpp::v44::MassQuoteAcknowledgementQuoteSetsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.underlying_stips)[i]); }
-inline ::std::optional<::std::size_t> MassQuoteAcknowledgementQuoteSetsArgs_count_quote_entries(::fixpp::v44::MassQuoteAcknowledgementQuoteSetsArgs const& a) noexcept { if (!a.quote_entries) { return ::std::nullopt; } return a.quote_entries->size(); }
-inline ::fixpp::core::expected_t<void> MassQuoteAcknowledgementQuoteSetsArgs_validate_entry_quote_entries(::fixpp::v44::MassQuoteAcknowledgementQuoteSetsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.quote_entries)[i]); }
-template <> struct writer_traits<::fixpp::v44::MassQuoteAcknowledgementQuoteSetsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::MassQuoteAcknowledgementQuoteSetsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::MassQuoteAcknowledgementQuoteSetsArgs>, 3> group_checks = {{
-        {false, &MassQuoteAcknowledgementQuoteSetsArgs_count_underlying_security_alt_id, &MassQuoteAcknowledgementQuoteSetsArgs_validate_entry_underlying_security_alt_id},
-        {false, &MassQuoteAcknowledgementQuoteSetsArgs_count_underlying_stips, &MassQuoteAcknowledgementQuoteSetsArgs_validate_entry_underlying_stips},
-        {false, &MassQuoteAcknowledgementQuoteSetsArgs_count_quote_entries, &MassQuoteAcknowledgementQuoteSetsArgs_validate_entry_quote_entries},
-    }};
-};
-
-template <> struct writer_traits<::fixpp::v44::MassQuoteAcknowledgementPartyIDsPartySubIDsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::MassQuoteAcknowledgementPartyIDsPartySubIDsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::MassQuoteAcknowledgementPartyIDsPartySubIDsArgs>, 0> group_checks = {};
-};
-
-inline ::std::optional<::std::size_t> MassQuoteAcknowledgementPartyIDsArgs_count_party_sub_i_ds(::fixpp::v44::MassQuoteAcknowledgementPartyIDsArgs const& a) noexcept { if (!a.party_sub_i_ds) { return ::std::nullopt; } return a.party_sub_i_ds->size(); }
-inline ::fixpp::core::expected_t<void> MassQuoteAcknowledgementPartyIDsArgs_validate_entry_party_sub_i_ds(::fixpp::v44::MassQuoteAcknowledgementPartyIDsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.party_sub_i_ds)[i]); }
-template <> struct writer_traits<::fixpp::v44::MassQuoteAcknowledgementPartyIDsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::MassQuoteAcknowledgementPartyIDsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::MassQuoteAcknowledgementPartyIDsArgs>, 1> group_checks = {{
-        {false, &MassQuoteAcknowledgementPartyIDsArgs_count_party_sub_i_ds, &MassQuoteAcknowledgementPartyIDsArgs_validate_entry_party_sub_i_ds},
-    }};
-};
-
 inline bool MassQuoteAcknowledgementArgs_required_297(::fixpp::v44::MassQuoteAcknowledgementArgs const& a) noexcept { return a.quote_status.has_value(); }
 inline ::std::optional<::std::size_t> MassQuoteAcknowledgementArgs_count_quote_sets(::fixpp::v44::MassQuoteAcknowledgementArgs const& a) noexcept { if (!a.quote_sets) { return ::std::nullopt; } return a.quote_sets->size(); }
 inline ::fixpp::core::expected_t<void> MassQuoteAcknowledgementArgs_validate_entry_quote_sets(::fixpp::v44::MassQuoteAcknowledgementArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.quote_sets)[i]); }
@@ -34108,57 +29930,6 @@ template <> struct writer_traits<::fixpp::v44::MassQuoteAcknowledgementArgs> {
         {false, &MassQuoteAcknowledgementArgs_count_quote_sets, &MassQuoteAcknowledgementArgs_validate_entry_quote_sets},
         {false, &MassQuoteAcknowledgementArgs_count_party_i_ds, &MassQuoteAcknowledgementArgs_validate_entry_party_i_ds},
     }};
-};
-
-template <> struct writer_traits<::fixpp::v44::SecurityDefinitionRequestSecurityAltIDArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::SecurityDefinitionRequestSecurityAltIDArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::SecurityDefinitionRequestSecurityAltIDArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::SecurityDefinitionRequestLegsLegSecurityAltIDArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::SecurityDefinitionRequestLegsLegSecurityAltIDArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::SecurityDefinitionRequestLegsLegSecurityAltIDArgs>, 0> group_checks = {};
-};
-
-inline ::std::optional<::std::size_t> SecurityDefinitionRequestLegsArgs_count_leg_security_alt_id(::fixpp::v44::SecurityDefinitionRequestLegsArgs const& a) noexcept { if (!a.leg_security_alt_id) { return ::std::nullopt; } return a.leg_security_alt_id->size(); }
-inline ::fixpp::core::expected_t<void> SecurityDefinitionRequestLegsArgs_validate_entry_leg_security_alt_id(::fixpp::v44::SecurityDefinitionRequestLegsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.leg_security_alt_id)[i]); }
-template <> struct writer_traits<::fixpp::v44::SecurityDefinitionRequestLegsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::SecurityDefinitionRequestLegsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::SecurityDefinitionRequestLegsArgs>, 1> group_checks = {{
-        {false, &SecurityDefinitionRequestLegsArgs_count_leg_security_alt_id, &SecurityDefinitionRequestLegsArgs_validate_entry_leg_security_alt_id},
-    }};
-};
-
-template <> struct writer_traits<::fixpp::v44::SecurityDefinitionRequestUnderlyingsUnderlyingSecurityAltIDArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::SecurityDefinitionRequestUnderlyingsUnderlyingSecurityAltIDArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::SecurityDefinitionRequestUnderlyingsUnderlyingSecurityAltIDArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::SecurityDefinitionRequestUnderlyingsUnderlyingStipsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::SecurityDefinitionRequestUnderlyingsUnderlyingStipsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::SecurityDefinitionRequestUnderlyingsUnderlyingStipsArgs>, 0> group_checks = {};
-};
-
-inline ::std::optional<::std::size_t> SecurityDefinitionRequestUnderlyingsArgs_count_underlying_security_alt_id(::fixpp::v44::SecurityDefinitionRequestUnderlyingsArgs const& a) noexcept { if (!a.underlying_security_alt_id) { return ::std::nullopt; } return a.underlying_security_alt_id->size(); }
-inline ::fixpp::core::expected_t<void> SecurityDefinitionRequestUnderlyingsArgs_validate_entry_underlying_security_alt_id(::fixpp::v44::SecurityDefinitionRequestUnderlyingsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.underlying_security_alt_id)[i]); }
-inline ::std::optional<::std::size_t> SecurityDefinitionRequestUnderlyingsArgs_count_underlying_stips(::fixpp::v44::SecurityDefinitionRequestUnderlyingsArgs const& a) noexcept { if (!a.underlying_stips) { return ::std::nullopt; } return a.underlying_stips->size(); }
-inline ::fixpp::core::expected_t<void> SecurityDefinitionRequestUnderlyingsArgs_validate_entry_underlying_stips(::fixpp::v44::SecurityDefinitionRequestUnderlyingsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.underlying_stips)[i]); }
-template <> struct writer_traits<::fixpp::v44::SecurityDefinitionRequestUnderlyingsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::SecurityDefinitionRequestUnderlyingsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::SecurityDefinitionRequestUnderlyingsArgs>, 2> group_checks = {{
-        {false, &SecurityDefinitionRequestUnderlyingsArgs_count_underlying_security_alt_id, &SecurityDefinitionRequestUnderlyingsArgs_validate_entry_underlying_security_alt_id},
-        {false, &SecurityDefinitionRequestUnderlyingsArgs_count_underlying_stips, &SecurityDefinitionRequestUnderlyingsArgs_validate_entry_underlying_stips},
-    }};
-};
-
-template <> struct writer_traits<::fixpp::v44::SecurityDefinitionRequestEventsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::SecurityDefinitionRequestEventsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::SecurityDefinitionRequestEventsArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::SecurityDefinitionRequestInstrAttribArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::SecurityDefinitionRequestInstrAttribArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::SecurityDefinitionRequestInstrAttribArgs>, 0> group_checks = {};
 };
 
 inline bool SecurityDefinitionRequestArgs_required_320(::fixpp::v44::SecurityDefinitionRequestArgs const& a) noexcept { return a.security_req_id.has_value(); }
@@ -34185,57 +29956,6 @@ template <> struct writer_traits<::fixpp::v44::SecurityDefinitionRequestArgs> {
         {false, &SecurityDefinitionRequestArgs_count_events, &SecurityDefinitionRequestArgs_validate_entry_events},
         {false, &SecurityDefinitionRequestArgs_count_instr_attrib, &SecurityDefinitionRequestArgs_validate_entry_instr_attrib},
     }};
-};
-
-template <> struct writer_traits<::fixpp::v44::SecurityDefinitionSecurityAltIDArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::SecurityDefinitionSecurityAltIDArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::SecurityDefinitionSecurityAltIDArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::SecurityDefinitionLegsLegSecurityAltIDArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::SecurityDefinitionLegsLegSecurityAltIDArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::SecurityDefinitionLegsLegSecurityAltIDArgs>, 0> group_checks = {};
-};
-
-inline ::std::optional<::std::size_t> SecurityDefinitionLegsArgs_count_leg_security_alt_id(::fixpp::v44::SecurityDefinitionLegsArgs const& a) noexcept { if (!a.leg_security_alt_id) { return ::std::nullopt; } return a.leg_security_alt_id->size(); }
-inline ::fixpp::core::expected_t<void> SecurityDefinitionLegsArgs_validate_entry_leg_security_alt_id(::fixpp::v44::SecurityDefinitionLegsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.leg_security_alt_id)[i]); }
-template <> struct writer_traits<::fixpp::v44::SecurityDefinitionLegsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::SecurityDefinitionLegsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::SecurityDefinitionLegsArgs>, 1> group_checks = {{
-        {false, &SecurityDefinitionLegsArgs_count_leg_security_alt_id, &SecurityDefinitionLegsArgs_validate_entry_leg_security_alt_id},
-    }};
-};
-
-template <> struct writer_traits<::fixpp::v44::SecurityDefinitionUnderlyingsUnderlyingSecurityAltIDArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::SecurityDefinitionUnderlyingsUnderlyingSecurityAltIDArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::SecurityDefinitionUnderlyingsUnderlyingSecurityAltIDArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::SecurityDefinitionUnderlyingsUnderlyingStipsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::SecurityDefinitionUnderlyingsUnderlyingStipsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::SecurityDefinitionUnderlyingsUnderlyingStipsArgs>, 0> group_checks = {};
-};
-
-inline ::std::optional<::std::size_t> SecurityDefinitionUnderlyingsArgs_count_underlying_security_alt_id(::fixpp::v44::SecurityDefinitionUnderlyingsArgs const& a) noexcept { if (!a.underlying_security_alt_id) { return ::std::nullopt; } return a.underlying_security_alt_id->size(); }
-inline ::fixpp::core::expected_t<void> SecurityDefinitionUnderlyingsArgs_validate_entry_underlying_security_alt_id(::fixpp::v44::SecurityDefinitionUnderlyingsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.underlying_security_alt_id)[i]); }
-inline ::std::optional<::std::size_t> SecurityDefinitionUnderlyingsArgs_count_underlying_stips(::fixpp::v44::SecurityDefinitionUnderlyingsArgs const& a) noexcept { if (!a.underlying_stips) { return ::std::nullopt; } return a.underlying_stips->size(); }
-inline ::fixpp::core::expected_t<void> SecurityDefinitionUnderlyingsArgs_validate_entry_underlying_stips(::fixpp::v44::SecurityDefinitionUnderlyingsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.underlying_stips)[i]); }
-template <> struct writer_traits<::fixpp::v44::SecurityDefinitionUnderlyingsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::SecurityDefinitionUnderlyingsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::SecurityDefinitionUnderlyingsArgs>, 2> group_checks = {{
-        {false, &SecurityDefinitionUnderlyingsArgs_count_underlying_security_alt_id, &SecurityDefinitionUnderlyingsArgs_validate_entry_underlying_security_alt_id},
-        {false, &SecurityDefinitionUnderlyingsArgs_count_underlying_stips, &SecurityDefinitionUnderlyingsArgs_validate_entry_underlying_stips},
-    }};
-};
-
-template <> struct writer_traits<::fixpp::v44::SecurityDefinitionEventsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::SecurityDefinitionEventsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::SecurityDefinitionEventsArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::SecurityDefinitionInstrAttribArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::SecurityDefinitionInstrAttribArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::SecurityDefinitionInstrAttribArgs>, 0> group_checks = {};
 };
 
 inline bool SecurityDefinitionArgs_required_320(::fixpp::v44::SecurityDefinitionArgs const& a) noexcept { return a.security_req_id.has_value(); }
@@ -34266,57 +29986,6 @@ template <> struct writer_traits<::fixpp::v44::SecurityDefinitionArgs> {
     }};
 };
 
-template <> struct writer_traits<::fixpp::v44::SecurityStatusRequestSecurityAltIDArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::SecurityStatusRequestSecurityAltIDArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::SecurityStatusRequestSecurityAltIDArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::SecurityStatusRequestLegsLegSecurityAltIDArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::SecurityStatusRequestLegsLegSecurityAltIDArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::SecurityStatusRequestLegsLegSecurityAltIDArgs>, 0> group_checks = {};
-};
-
-inline ::std::optional<::std::size_t> SecurityStatusRequestLegsArgs_count_leg_security_alt_id(::fixpp::v44::SecurityStatusRequestLegsArgs const& a) noexcept { if (!a.leg_security_alt_id) { return ::std::nullopt; } return a.leg_security_alt_id->size(); }
-inline ::fixpp::core::expected_t<void> SecurityStatusRequestLegsArgs_validate_entry_leg_security_alt_id(::fixpp::v44::SecurityStatusRequestLegsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.leg_security_alt_id)[i]); }
-template <> struct writer_traits<::fixpp::v44::SecurityStatusRequestLegsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::SecurityStatusRequestLegsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::SecurityStatusRequestLegsArgs>, 1> group_checks = {{
-        {false, &SecurityStatusRequestLegsArgs_count_leg_security_alt_id, &SecurityStatusRequestLegsArgs_validate_entry_leg_security_alt_id},
-    }};
-};
-
-template <> struct writer_traits<::fixpp::v44::SecurityStatusRequestUnderlyingsUnderlyingSecurityAltIDArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::SecurityStatusRequestUnderlyingsUnderlyingSecurityAltIDArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::SecurityStatusRequestUnderlyingsUnderlyingSecurityAltIDArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::SecurityStatusRequestUnderlyingsUnderlyingStipsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::SecurityStatusRequestUnderlyingsUnderlyingStipsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::SecurityStatusRequestUnderlyingsUnderlyingStipsArgs>, 0> group_checks = {};
-};
-
-inline ::std::optional<::std::size_t> SecurityStatusRequestUnderlyingsArgs_count_underlying_security_alt_id(::fixpp::v44::SecurityStatusRequestUnderlyingsArgs const& a) noexcept { if (!a.underlying_security_alt_id) { return ::std::nullopt; } return a.underlying_security_alt_id->size(); }
-inline ::fixpp::core::expected_t<void> SecurityStatusRequestUnderlyingsArgs_validate_entry_underlying_security_alt_id(::fixpp::v44::SecurityStatusRequestUnderlyingsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.underlying_security_alt_id)[i]); }
-inline ::std::optional<::std::size_t> SecurityStatusRequestUnderlyingsArgs_count_underlying_stips(::fixpp::v44::SecurityStatusRequestUnderlyingsArgs const& a) noexcept { if (!a.underlying_stips) { return ::std::nullopt; } return a.underlying_stips->size(); }
-inline ::fixpp::core::expected_t<void> SecurityStatusRequestUnderlyingsArgs_validate_entry_underlying_stips(::fixpp::v44::SecurityStatusRequestUnderlyingsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.underlying_stips)[i]); }
-template <> struct writer_traits<::fixpp::v44::SecurityStatusRequestUnderlyingsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::SecurityStatusRequestUnderlyingsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::SecurityStatusRequestUnderlyingsArgs>, 2> group_checks = {{
-        {false, &SecurityStatusRequestUnderlyingsArgs_count_underlying_security_alt_id, &SecurityStatusRequestUnderlyingsArgs_validate_entry_underlying_security_alt_id},
-        {false, &SecurityStatusRequestUnderlyingsArgs_count_underlying_stips, &SecurityStatusRequestUnderlyingsArgs_validate_entry_underlying_stips},
-    }};
-};
-
-template <> struct writer_traits<::fixpp::v44::SecurityStatusRequestEventsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::SecurityStatusRequestEventsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::SecurityStatusRequestEventsArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::SecurityStatusRequestInstrAttribArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::SecurityStatusRequestInstrAttribArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::SecurityStatusRequestInstrAttribArgs>, 0> group_checks = {};
-};
-
 inline bool SecurityStatusRequestArgs_required_263(::fixpp::v44::SecurityStatusRequestArgs const& a) noexcept { return a.subscription_request_type.has_value(); }
 inline bool SecurityStatusRequestArgs_required_324(::fixpp::v44::SecurityStatusRequestArgs const& a) noexcept { return a.security_status_req_id.has_value(); }
 inline ::std::optional<::std::size_t> SecurityStatusRequestArgs_count_security_alt_id(::fixpp::v44::SecurityStatusRequestArgs const& a) noexcept { if (!a.security_alt_id) { return ::std::nullopt; } return a.security_alt_id->size(); }
@@ -34341,57 +30010,6 @@ template <> struct writer_traits<::fixpp::v44::SecurityStatusRequestArgs> {
         {false, &SecurityStatusRequestArgs_count_events, &SecurityStatusRequestArgs_validate_entry_events},
         {false, &SecurityStatusRequestArgs_count_instr_attrib, &SecurityStatusRequestArgs_validate_entry_instr_attrib},
     }};
-};
-
-template <> struct writer_traits<::fixpp::v44::SecurityStatusSecurityAltIDArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::SecurityStatusSecurityAltIDArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::SecurityStatusSecurityAltIDArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::SecurityStatusLegsLegSecurityAltIDArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::SecurityStatusLegsLegSecurityAltIDArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::SecurityStatusLegsLegSecurityAltIDArgs>, 0> group_checks = {};
-};
-
-inline ::std::optional<::std::size_t> SecurityStatusLegsArgs_count_leg_security_alt_id(::fixpp::v44::SecurityStatusLegsArgs const& a) noexcept { if (!a.leg_security_alt_id) { return ::std::nullopt; } return a.leg_security_alt_id->size(); }
-inline ::fixpp::core::expected_t<void> SecurityStatusLegsArgs_validate_entry_leg_security_alt_id(::fixpp::v44::SecurityStatusLegsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.leg_security_alt_id)[i]); }
-template <> struct writer_traits<::fixpp::v44::SecurityStatusLegsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::SecurityStatusLegsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::SecurityStatusLegsArgs>, 1> group_checks = {{
-        {false, &SecurityStatusLegsArgs_count_leg_security_alt_id, &SecurityStatusLegsArgs_validate_entry_leg_security_alt_id},
-    }};
-};
-
-template <> struct writer_traits<::fixpp::v44::SecurityStatusUnderlyingsUnderlyingSecurityAltIDArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::SecurityStatusUnderlyingsUnderlyingSecurityAltIDArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::SecurityStatusUnderlyingsUnderlyingSecurityAltIDArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::SecurityStatusUnderlyingsUnderlyingStipsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::SecurityStatusUnderlyingsUnderlyingStipsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::SecurityStatusUnderlyingsUnderlyingStipsArgs>, 0> group_checks = {};
-};
-
-inline ::std::optional<::std::size_t> SecurityStatusUnderlyingsArgs_count_underlying_security_alt_id(::fixpp::v44::SecurityStatusUnderlyingsArgs const& a) noexcept { if (!a.underlying_security_alt_id) { return ::std::nullopt; } return a.underlying_security_alt_id->size(); }
-inline ::fixpp::core::expected_t<void> SecurityStatusUnderlyingsArgs_validate_entry_underlying_security_alt_id(::fixpp::v44::SecurityStatusUnderlyingsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.underlying_security_alt_id)[i]); }
-inline ::std::optional<::std::size_t> SecurityStatusUnderlyingsArgs_count_underlying_stips(::fixpp::v44::SecurityStatusUnderlyingsArgs const& a) noexcept { if (!a.underlying_stips) { return ::std::nullopt; } return a.underlying_stips->size(); }
-inline ::fixpp::core::expected_t<void> SecurityStatusUnderlyingsArgs_validate_entry_underlying_stips(::fixpp::v44::SecurityStatusUnderlyingsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.underlying_stips)[i]); }
-template <> struct writer_traits<::fixpp::v44::SecurityStatusUnderlyingsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::SecurityStatusUnderlyingsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::SecurityStatusUnderlyingsArgs>, 2> group_checks = {{
-        {false, &SecurityStatusUnderlyingsArgs_count_underlying_security_alt_id, &SecurityStatusUnderlyingsArgs_validate_entry_underlying_security_alt_id},
-        {false, &SecurityStatusUnderlyingsArgs_count_underlying_stips, &SecurityStatusUnderlyingsArgs_validate_entry_underlying_stips},
-    }};
-};
-
-template <> struct writer_traits<::fixpp::v44::SecurityStatusEventsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::SecurityStatusEventsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::SecurityStatusEventsArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::SecurityStatusInstrAttribArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::SecurityStatusInstrAttribArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::SecurityStatusInstrAttribArgs>, 0> group_checks = {};
 };
 
 inline ::std::optional<::std::size_t> SecurityStatusArgs_count_security_alt_id(::fixpp::v44::SecurityStatusArgs const& a) noexcept { if (!a.security_alt_id) { return ::std::nullopt; } return a.security_alt_id->size(); }
@@ -34435,92 +30053,6 @@ template <> struct writer_traits<::fixpp::v44::TradingSessionStatusArgs> {
     static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::TradingSessionStatusArgs>, 0> group_checks = {};
 };
 
-template <> struct writer_traits<::fixpp::v44::MassQuoteQuoteSetsUnderlyingSecurityAltIDArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::MassQuoteQuoteSetsUnderlyingSecurityAltIDArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::MassQuoteQuoteSetsUnderlyingSecurityAltIDArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::MassQuoteQuoteSetsUnderlyingStipsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::MassQuoteQuoteSetsUnderlyingStipsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::MassQuoteQuoteSetsUnderlyingStipsArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::MassQuoteQuoteSetsQuoteEntriesSecurityAltIDArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::MassQuoteQuoteSetsQuoteEntriesSecurityAltIDArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::MassQuoteQuoteSetsQuoteEntriesSecurityAltIDArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::MassQuoteQuoteSetsQuoteEntriesEventsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::MassQuoteQuoteSetsQuoteEntriesEventsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::MassQuoteQuoteSetsQuoteEntriesEventsArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::MassQuoteQuoteSetsQuoteEntriesLegsLegSecurityAltIDArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::MassQuoteQuoteSetsQuoteEntriesLegsLegSecurityAltIDArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::MassQuoteQuoteSetsQuoteEntriesLegsLegSecurityAltIDArgs>, 0> group_checks = {};
-};
-
-inline ::std::optional<::std::size_t> MassQuoteQuoteSetsQuoteEntriesLegsArgs_count_leg_security_alt_id(::fixpp::v44::MassQuoteQuoteSetsQuoteEntriesLegsArgs const& a) noexcept { if (!a.leg_security_alt_id) { return ::std::nullopt; } return a.leg_security_alt_id->size(); }
-inline ::fixpp::core::expected_t<void> MassQuoteQuoteSetsQuoteEntriesLegsArgs_validate_entry_leg_security_alt_id(::fixpp::v44::MassQuoteQuoteSetsQuoteEntriesLegsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.leg_security_alt_id)[i]); }
-template <> struct writer_traits<::fixpp::v44::MassQuoteQuoteSetsQuoteEntriesLegsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::MassQuoteQuoteSetsQuoteEntriesLegsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::MassQuoteQuoteSetsQuoteEntriesLegsArgs>, 1> group_checks = {{
-        {false, &MassQuoteQuoteSetsQuoteEntriesLegsArgs_count_leg_security_alt_id, &MassQuoteQuoteSetsQuoteEntriesLegsArgs_validate_entry_leg_security_alt_id},
-    }};
-};
-
-inline bool MassQuoteQuoteSetsQuoteEntriesArgs_required_299(::fixpp::v44::MassQuoteQuoteSetsQuoteEntriesArgs const& a) noexcept { return a.quote_entry_id.has_value(); }
-inline ::std::optional<::std::size_t> MassQuoteQuoteSetsQuoteEntriesArgs_count_security_alt_id(::fixpp::v44::MassQuoteQuoteSetsQuoteEntriesArgs const& a) noexcept { if (!a.security_alt_id) { return ::std::nullopt; } return a.security_alt_id->size(); }
-inline ::fixpp::core::expected_t<void> MassQuoteQuoteSetsQuoteEntriesArgs_validate_entry_security_alt_id(::fixpp::v44::MassQuoteQuoteSetsQuoteEntriesArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.security_alt_id)[i]); }
-inline ::std::optional<::std::size_t> MassQuoteQuoteSetsQuoteEntriesArgs_count_events(::fixpp::v44::MassQuoteQuoteSetsQuoteEntriesArgs const& a) noexcept { if (!a.events) { return ::std::nullopt; } return a.events->size(); }
-inline ::fixpp::core::expected_t<void> MassQuoteQuoteSetsQuoteEntriesArgs_validate_entry_events(::fixpp::v44::MassQuoteQuoteSetsQuoteEntriesArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.events)[i]); }
-inline ::std::optional<::std::size_t> MassQuoteQuoteSetsQuoteEntriesArgs_count_legs(::fixpp::v44::MassQuoteQuoteSetsQuoteEntriesArgs const& a) noexcept { if (!a.legs) { return ::std::nullopt; } return a.legs->size(); }
-inline ::fixpp::core::expected_t<void> MassQuoteQuoteSetsQuoteEntriesArgs_validate_entry_legs(::fixpp::v44::MassQuoteQuoteSetsQuoteEntriesArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.legs)[i]); }
-template <> struct writer_traits<::fixpp::v44::MassQuoteQuoteSetsQuoteEntriesArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::MassQuoteQuoteSetsQuoteEntriesArgs>, 1> required_checks = {{
-        {299, &MassQuoteQuoteSetsQuoteEntriesArgs_required_299},
-    }};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::MassQuoteQuoteSetsQuoteEntriesArgs>, 3> group_checks = {{
-        {false, &MassQuoteQuoteSetsQuoteEntriesArgs_count_security_alt_id, &MassQuoteQuoteSetsQuoteEntriesArgs_validate_entry_security_alt_id},
-        {false, &MassQuoteQuoteSetsQuoteEntriesArgs_count_events, &MassQuoteQuoteSetsQuoteEntriesArgs_validate_entry_events},
-        {false, &MassQuoteQuoteSetsQuoteEntriesArgs_count_legs, &MassQuoteQuoteSetsQuoteEntriesArgs_validate_entry_legs},
-    }};
-};
-
-inline bool MassQuoteQuoteSetsArgs_required_302(::fixpp::v44::MassQuoteQuoteSetsArgs const& a) noexcept { return a.quote_set_id.has_value(); }
-inline bool MassQuoteQuoteSetsArgs_required_304(::fixpp::v44::MassQuoteQuoteSetsArgs const& a) noexcept { return a.tot_no_quote_entries.has_value(); }
-inline ::std::optional<::std::size_t> MassQuoteQuoteSetsArgs_count_underlying_security_alt_id(::fixpp::v44::MassQuoteQuoteSetsArgs const& a) noexcept { if (!a.underlying_security_alt_id) { return ::std::nullopt; } return a.underlying_security_alt_id->size(); }
-inline ::fixpp::core::expected_t<void> MassQuoteQuoteSetsArgs_validate_entry_underlying_security_alt_id(::fixpp::v44::MassQuoteQuoteSetsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.underlying_security_alt_id)[i]); }
-inline ::std::optional<::std::size_t> MassQuoteQuoteSetsArgs_count_underlying_stips(::fixpp::v44::MassQuoteQuoteSetsArgs const& a) noexcept { if (!a.underlying_stips) { return ::std::nullopt; } return a.underlying_stips->size(); }
-inline ::fixpp::core::expected_t<void> MassQuoteQuoteSetsArgs_validate_entry_underlying_stips(::fixpp::v44::MassQuoteQuoteSetsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.underlying_stips)[i]); }
-inline ::std::optional<::std::size_t> MassQuoteQuoteSetsArgs_count_quote_entries(::fixpp::v44::MassQuoteQuoteSetsArgs const& a) noexcept { return a.quote_entries.size(); }
-inline ::fixpp::core::expected_t<void> MassQuoteQuoteSetsArgs_validate_entry_quote_entries(::fixpp::v44::MassQuoteQuoteSetsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required(a.quote_entries[i]); }
-template <> struct writer_traits<::fixpp::v44::MassQuoteQuoteSetsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::MassQuoteQuoteSetsArgs>, 2> required_checks = {{
-        {302, &MassQuoteQuoteSetsArgs_required_302},
-        {304, &MassQuoteQuoteSetsArgs_required_304},
-    }};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::MassQuoteQuoteSetsArgs>, 3> group_checks = {{
-        {false, &MassQuoteQuoteSetsArgs_count_underlying_security_alt_id, &MassQuoteQuoteSetsArgs_validate_entry_underlying_security_alt_id},
-        {false, &MassQuoteQuoteSetsArgs_count_underlying_stips, &MassQuoteQuoteSetsArgs_validate_entry_underlying_stips},
-        {true, &MassQuoteQuoteSetsArgs_count_quote_entries, &MassQuoteQuoteSetsArgs_validate_entry_quote_entries},
-    }};
-};
-
-template <> struct writer_traits<::fixpp::v44::MassQuotePartyIDsPartySubIDsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::MassQuotePartyIDsPartySubIDsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::MassQuotePartyIDsPartySubIDsArgs>, 0> group_checks = {};
-};
-
-inline ::std::optional<::std::size_t> MassQuotePartyIDsArgs_count_party_sub_i_ds(::fixpp::v44::MassQuotePartyIDsArgs const& a) noexcept { if (!a.party_sub_i_ds) { return ::std::nullopt; } return a.party_sub_i_ds->size(); }
-inline ::fixpp::core::expected_t<void> MassQuotePartyIDsArgs_validate_entry_party_sub_i_ds(::fixpp::v44::MassQuotePartyIDsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.party_sub_i_ds)[i]); }
-template <> struct writer_traits<::fixpp::v44::MassQuotePartyIDsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::MassQuotePartyIDsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::MassQuotePartyIDsArgs>, 1> group_checks = {{
-        {false, &MassQuotePartyIDsArgs_count_party_sub_i_ds, &MassQuotePartyIDsArgs_validate_entry_party_sub_i_ds},
-    }};
-};
-
 inline bool MassQuoteArgs_required_117(::fixpp::v44::MassQuoteArgs const& a) noexcept { return a.quote_id.has_value(); }
 inline ::std::optional<::std::size_t> MassQuoteArgs_count_quote_sets(::fixpp::v44::MassQuoteArgs const& a) noexcept { return a.quote_sets.size(); }
 inline ::fixpp::core::expected_t<void> MassQuoteArgs_validate_entry_quote_sets(::fixpp::v44::MassQuoteArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required(a.quote_sets[i]); }
@@ -34534,26 +30066,6 @@ template <> struct writer_traits<::fixpp::v44::MassQuoteArgs> {
         {true, &MassQuoteArgs_count_quote_sets, &MassQuoteArgs_validate_entry_quote_sets},
         {false, &MassQuoteArgs_count_party_i_ds, &MassQuoteArgs_validate_entry_party_i_ds},
     }};
-};
-
-template <> struct writer_traits<::fixpp::v44::OrderMassCancelRequestSecurityAltIDArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::OrderMassCancelRequestSecurityAltIDArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::OrderMassCancelRequestSecurityAltIDArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::OrderMassCancelRequestUnderlyingSecurityAltIDArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::OrderMassCancelRequestUnderlyingSecurityAltIDArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::OrderMassCancelRequestUnderlyingSecurityAltIDArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::OrderMassCancelRequestEventsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::OrderMassCancelRequestEventsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::OrderMassCancelRequestEventsArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::OrderMassCancelRequestUnderlyingStipsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::OrderMassCancelRequestUnderlyingStipsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::OrderMassCancelRequestUnderlyingStipsArgs>, 0> group_checks = {};
 };
 
 inline bool OrderMassCancelRequestArgs_required_11(::fixpp::v44::OrderMassCancelRequestArgs const& a) noexcept { return a.cl_ord_id.has_value(); }
@@ -34579,31 +30091,6 @@ template <> struct writer_traits<::fixpp::v44::OrderMassCancelRequestArgs> {
         {false, &OrderMassCancelRequestArgs_count_events, &OrderMassCancelRequestArgs_validate_entry_events},
         {false, &OrderMassCancelRequestArgs_count_underlying_stips, &OrderMassCancelRequestArgs_validate_entry_underlying_stips},
     }};
-};
-
-template <> struct writer_traits<::fixpp::v44::OrderMassCancelReportSecurityAltIDArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::OrderMassCancelReportSecurityAltIDArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::OrderMassCancelReportSecurityAltIDArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::OrderMassCancelReportUnderlyingSecurityAltIDArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::OrderMassCancelReportUnderlyingSecurityAltIDArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::OrderMassCancelReportUnderlyingSecurityAltIDArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::OrderMassCancelReportAffectedOrdersArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::OrderMassCancelReportAffectedOrdersArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::OrderMassCancelReportAffectedOrdersArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::OrderMassCancelReportEventsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::OrderMassCancelReportEventsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::OrderMassCancelReportEventsArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::OrderMassCancelReportUnderlyingStipsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::OrderMassCancelReportUnderlyingStipsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::OrderMassCancelReportUnderlyingStipsArgs>, 0> group_checks = {};
 };
 
 inline bool OrderMassCancelReportArgs_required_37(::fixpp::v44::OrderMassCancelReportArgs const& a) noexcept { return a.order_id.has_value(); }
@@ -34632,116 +30119,6 @@ template <> struct writer_traits<::fixpp::v44::OrderMassCancelReportArgs> {
         {false, &OrderMassCancelReportArgs_count_events, &OrderMassCancelReportArgs_validate_entry_events},
         {false, &OrderMassCancelReportArgs_count_underlying_stips, &OrderMassCancelReportArgs_validate_entry_underlying_stips},
     }};
-};
-
-template <> struct writer_traits<::fixpp::v44::CrossOrderCancelReplaceRequestStipulationsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::CrossOrderCancelReplaceRequestStipulationsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::CrossOrderCancelReplaceRequestStipulationsArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::CrossOrderCancelReplaceRequestTradingSessionsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::CrossOrderCancelReplaceRequestTradingSessionsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::CrossOrderCancelReplaceRequestTradingSessionsArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::CrossOrderCancelReplaceRequestSecurityAltIDArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::CrossOrderCancelReplaceRequestSecurityAltIDArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::CrossOrderCancelReplaceRequestSecurityAltIDArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::CrossOrderCancelReplaceRequestSidesPartyIDsPartySubIDsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::CrossOrderCancelReplaceRequestSidesPartyIDsPartySubIDsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::CrossOrderCancelReplaceRequestSidesPartyIDsPartySubIDsArgs>, 0> group_checks = {};
-};
-
-inline ::std::optional<::std::size_t> CrossOrderCancelReplaceRequestSidesPartyIDsArgs_count_party_sub_i_ds(::fixpp::v44::CrossOrderCancelReplaceRequestSidesPartyIDsArgs const& a) noexcept { if (!a.party_sub_i_ds) { return ::std::nullopt; } return a.party_sub_i_ds->size(); }
-inline ::fixpp::core::expected_t<void> CrossOrderCancelReplaceRequestSidesPartyIDsArgs_validate_entry_party_sub_i_ds(::fixpp::v44::CrossOrderCancelReplaceRequestSidesPartyIDsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.party_sub_i_ds)[i]); }
-template <> struct writer_traits<::fixpp::v44::CrossOrderCancelReplaceRequestSidesPartyIDsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::CrossOrderCancelReplaceRequestSidesPartyIDsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::CrossOrderCancelReplaceRequestSidesPartyIDsArgs>, 1> group_checks = {{
-        {false, &CrossOrderCancelReplaceRequestSidesPartyIDsArgs_count_party_sub_i_ds, &CrossOrderCancelReplaceRequestSidesPartyIDsArgs_validate_entry_party_sub_i_ds},
-    }};
-};
-
-template <> struct writer_traits<::fixpp::v44::CrossOrderCancelReplaceRequestSidesAllocsNestedPartyIDsNestedPartySubIDsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::CrossOrderCancelReplaceRequestSidesAllocsNestedPartyIDsNestedPartySubIDsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::CrossOrderCancelReplaceRequestSidesAllocsNestedPartyIDsNestedPartySubIDsArgs>, 0> group_checks = {};
-};
-
-inline ::std::optional<::std::size_t> CrossOrderCancelReplaceRequestSidesAllocsNestedPartyIDsArgs_count_nested_party_sub_i_ds(::fixpp::v44::CrossOrderCancelReplaceRequestSidesAllocsNestedPartyIDsArgs const& a) noexcept { if (!a.nested_party_sub_i_ds) { return ::std::nullopt; } return a.nested_party_sub_i_ds->size(); }
-inline ::fixpp::core::expected_t<void> CrossOrderCancelReplaceRequestSidesAllocsNestedPartyIDsArgs_validate_entry_nested_party_sub_i_ds(::fixpp::v44::CrossOrderCancelReplaceRequestSidesAllocsNestedPartyIDsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.nested_party_sub_i_ds)[i]); }
-template <> struct writer_traits<::fixpp::v44::CrossOrderCancelReplaceRequestSidesAllocsNestedPartyIDsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::CrossOrderCancelReplaceRequestSidesAllocsNestedPartyIDsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::CrossOrderCancelReplaceRequestSidesAllocsNestedPartyIDsArgs>, 1> group_checks = {{
-        {false, &CrossOrderCancelReplaceRequestSidesAllocsNestedPartyIDsArgs_count_nested_party_sub_i_ds, &CrossOrderCancelReplaceRequestSidesAllocsNestedPartyIDsArgs_validate_entry_nested_party_sub_i_ds},
-    }};
-};
-
-inline ::std::optional<::std::size_t> CrossOrderCancelReplaceRequestSidesAllocsArgs_count_nested_party_i_ds(::fixpp::v44::CrossOrderCancelReplaceRequestSidesAllocsArgs const& a) noexcept { if (!a.nested_party_i_ds) { return ::std::nullopt; } return a.nested_party_i_ds->size(); }
-inline ::fixpp::core::expected_t<void> CrossOrderCancelReplaceRequestSidesAllocsArgs_validate_entry_nested_party_i_ds(::fixpp::v44::CrossOrderCancelReplaceRequestSidesAllocsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.nested_party_i_ds)[i]); }
-template <> struct writer_traits<::fixpp::v44::CrossOrderCancelReplaceRequestSidesAllocsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::CrossOrderCancelReplaceRequestSidesAllocsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::CrossOrderCancelReplaceRequestSidesAllocsArgs>, 1> group_checks = {{
-        {false, &CrossOrderCancelReplaceRequestSidesAllocsArgs_count_nested_party_i_ds, &CrossOrderCancelReplaceRequestSidesAllocsArgs_validate_entry_nested_party_i_ds},
-    }};
-};
-
-inline bool CrossOrderCancelReplaceRequestSidesArgs_required_54(::fixpp::v44::CrossOrderCancelReplaceRequestSidesArgs const& a) noexcept { return a.side.has_value(); }
-inline bool CrossOrderCancelReplaceRequestSidesArgs_required_11(::fixpp::v44::CrossOrderCancelReplaceRequestSidesArgs const& a) noexcept { return a.cl_ord_id.has_value(); }
-inline ::std::optional<::std::size_t> CrossOrderCancelReplaceRequestSidesArgs_count_party_i_ds(::fixpp::v44::CrossOrderCancelReplaceRequestSidesArgs const& a) noexcept { if (!a.party_i_ds) { return ::std::nullopt; } return a.party_i_ds->size(); }
-inline ::fixpp::core::expected_t<void> CrossOrderCancelReplaceRequestSidesArgs_validate_entry_party_i_ds(::fixpp::v44::CrossOrderCancelReplaceRequestSidesArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.party_i_ds)[i]); }
-inline ::std::optional<::std::size_t> CrossOrderCancelReplaceRequestSidesArgs_count_allocs(::fixpp::v44::CrossOrderCancelReplaceRequestSidesArgs const& a) noexcept { if (!a.allocs) { return ::std::nullopt; } return a.allocs->size(); }
-inline ::fixpp::core::expected_t<void> CrossOrderCancelReplaceRequestSidesArgs_validate_entry_allocs(::fixpp::v44::CrossOrderCancelReplaceRequestSidesArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.allocs)[i]); }
-template <> struct writer_traits<::fixpp::v44::CrossOrderCancelReplaceRequestSidesArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::CrossOrderCancelReplaceRequestSidesArgs>, 2> required_checks = {{
-        {54, &CrossOrderCancelReplaceRequestSidesArgs_required_54},
-        {11, &CrossOrderCancelReplaceRequestSidesArgs_required_11},
-    }};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::CrossOrderCancelReplaceRequestSidesArgs>, 2> group_checks = {{
-        {false, &CrossOrderCancelReplaceRequestSidesArgs_count_party_i_ds, &CrossOrderCancelReplaceRequestSidesArgs_validate_entry_party_i_ds},
-        {false, &CrossOrderCancelReplaceRequestSidesArgs_count_allocs, &CrossOrderCancelReplaceRequestSidesArgs_validate_entry_allocs},
-    }};
-};
-
-template <> struct writer_traits<::fixpp::v44::CrossOrderCancelReplaceRequestLegsLegSecurityAltIDArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::CrossOrderCancelReplaceRequestLegsLegSecurityAltIDArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::CrossOrderCancelReplaceRequestLegsLegSecurityAltIDArgs>, 0> group_checks = {};
-};
-
-inline ::std::optional<::std::size_t> CrossOrderCancelReplaceRequestLegsArgs_count_leg_security_alt_id(::fixpp::v44::CrossOrderCancelReplaceRequestLegsArgs const& a) noexcept { if (!a.leg_security_alt_id) { return ::std::nullopt; } return a.leg_security_alt_id->size(); }
-inline ::fixpp::core::expected_t<void> CrossOrderCancelReplaceRequestLegsArgs_validate_entry_leg_security_alt_id(::fixpp::v44::CrossOrderCancelReplaceRequestLegsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.leg_security_alt_id)[i]); }
-template <> struct writer_traits<::fixpp::v44::CrossOrderCancelReplaceRequestLegsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::CrossOrderCancelReplaceRequestLegsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::CrossOrderCancelReplaceRequestLegsArgs>, 1> group_checks = {{
-        {false, &CrossOrderCancelReplaceRequestLegsArgs_count_leg_security_alt_id, &CrossOrderCancelReplaceRequestLegsArgs_validate_entry_leg_security_alt_id},
-    }};
-};
-
-template <> struct writer_traits<::fixpp::v44::CrossOrderCancelReplaceRequestUnderlyingsUnderlyingSecurityAltIDArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::CrossOrderCancelReplaceRequestUnderlyingsUnderlyingSecurityAltIDArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::CrossOrderCancelReplaceRequestUnderlyingsUnderlyingSecurityAltIDArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::CrossOrderCancelReplaceRequestUnderlyingsUnderlyingStipsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::CrossOrderCancelReplaceRequestUnderlyingsUnderlyingStipsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::CrossOrderCancelReplaceRequestUnderlyingsUnderlyingStipsArgs>, 0> group_checks = {};
-};
-
-inline ::std::optional<::std::size_t> CrossOrderCancelReplaceRequestUnderlyingsArgs_count_underlying_security_alt_id(::fixpp::v44::CrossOrderCancelReplaceRequestUnderlyingsArgs const& a) noexcept { if (!a.underlying_security_alt_id) { return ::std::nullopt; } return a.underlying_security_alt_id->size(); }
-inline ::fixpp::core::expected_t<void> CrossOrderCancelReplaceRequestUnderlyingsArgs_validate_entry_underlying_security_alt_id(::fixpp::v44::CrossOrderCancelReplaceRequestUnderlyingsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.underlying_security_alt_id)[i]); }
-inline ::std::optional<::std::size_t> CrossOrderCancelReplaceRequestUnderlyingsArgs_count_underlying_stips(::fixpp::v44::CrossOrderCancelReplaceRequestUnderlyingsArgs const& a) noexcept { if (!a.underlying_stips) { return ::std::nullopt; } return a.underlying_stips->size(); }
-inline ::fixpp::core::expected_t<void> CrossOrderCancelReplaceRequestUnderlyingsArgs_validate_entry_underlying_stips(::fixpp::v44::CrossOrderCancelReplaceRequestUnderlyingsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.underlying_stips)[i]); }
-template <> struct writer_traits<::fixpp::v44::CrossOrderCancelReplaceRequestUnderlyingsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::CrossOrderCancelReplaceRequestUnderlyingsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::CrossOrderCancelReplaceRequestUnderlyingsArgs>, 2> group_checks = {{
-        {false, &CrossOrderCancelReplaceRequestUnderlyingsArgs_count_underlying_security_alt_id, &CrossOrderCancelReplaceRequestUnderlyingsArgs_validate_entry_underlying_security_alt_id},
-        {false, &CrossOrderCancelReplaceRequestUnderlyingsArgs_count_underlying_stips, &CrossOrderCancelReplaceRequestUnderlyingsArgs_validate_entry_underlying_stips},
-    }};
-};
-
-template <> struct writer_traits<::fixpp::v44::CrossOrderCancelReplaceRequestEventsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::CrossOrderCancelReplaceRequestEventsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::CrossOrderCancelReplaceRequestEventsArgs>, 0> group_checks = {};
 };
 
 inline bool CrossOrderCancelReplaceRequestArgs_required_40(::fixpp::v44::CrossOrderCancelReplaceRequestArgs const& a) noexcept { return a.ord_type.has_value(); }
@@ -34782,82 +30159,6 @@ template <> struct writer_traits<::fixpp::v44::CrossOrderCancelReplaceRequestArg
         {false, &CrossOrderCancelReplaceRequestArgs_count_underlyings, &CrossOrderCancelReplaceRequestArgs_validate_entry_underlyings},
         {false, &CrossOrderCancelReplaceRequestArgs_count_events, &CrossOrderCancelReplaceRequestArgs_validate_entry_events},
     }};
-};
-
-template <> struct writer_traits<::fixpp::v44::CrossOrderCancelRequestSecurityAltIDArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::CrossOrderCancelRequestSecurityAltIDArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::CrossOrderCancelRequestSecurityAltIDArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::CrossOrderCancelRequestSidesPartyIDsPartySubIDsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::CrossOrderCancelRequestSidesPartyIDsPartySubIDsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::CrossOrderCancelRequestSidesPartyIDsPartySubIDsArgs>, 0> group_checks = {};
-};
-
-inline ::std::optional<::std::size_t> CrossOrderCancelRequestSidesPartyIDsArgs_count_party_sub_i_ds(::fixpp::v44::CrossOrderCancelRequestSidesPartyIDsArgs const& a) noexcept { if (!a.party_sub_i_ds) { return ::std::nullopt; } return a.party_sub_i_ds->size(); }
-inline ::fixpp::core::expected_t<void> CrossOrderCancelRequestSidesPartyIDsArgs_validate_entry_party_sub_i_ds(::fixpp::v44::CrossOrderCancelRequestSidesPartyIDsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.party_sub_i_ds)[i]); }
-template <> struct writer_traits<::fixpp::v44::CrossOrderCancelRequestSidesPartyIDsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::CrossOrderCancelRequestSidesPartyIDsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::CrossOrderCancelRequestSidesPartyIDsArgs>, 1> group_checks = {{
-        {false, &CrossOrderCancelRequestSidesPartyIDsArgs_count_party_sub_i_ds, &CrossOrderCancelRequestSidesPartyIDsArgs_validate_entry_party_sub_i_ds},
-    }};
-};
-
-inline bool CrossOrderCancelRequestSidesArgs_required_54(::fixpp::v44::CrossOrderCancelRequestSidesArgs const& a) noexcept { return a.side.has_value(); }
-inline bool CrossOrderCancelRequestSidesArgs_required_41(::fixpp::v44::CrossOrderCancelRequestSidesArgs const& a) noexcept { return a.orig_cl_ord_id.has_value(); }
-inline bool CrossOrderCancelRequestSidesArgs_required_11(::fixpp::v44::CrossOrderCancelRequestSidesArgs const& a) noexcept { return a.cl_ord_id.has_value(); }
-inline ::std::optional<::std::size_t> CrossOrderCancelRequestSidesArgs_count_party_i_ds(::fixpp::v44::CrossOrderCancelRequestSidesArgs const& a) noexcept { if (!a.party_i_ds) { return ::std::nullopt; } return a.party_i_ds->size(); }
-inline ::fixpp::core::expected_t<void> CrossOrderCancelRequestSidesArgs_validate_entry_party_i_ds(::fixpp::v44::CrossOrderCancelRequestSidesArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.party_i_ds)[i]); }
-template <> struct writer_traits<::fixpp::v44::CrossOrderCancelRequestSidesArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::CrossOrderCancelRequestSidesArgs>, 3> required_checks = {{
-        {54, &CrossOrderCancelRequestSidesArgs_required_54},
-        {41, &CrossOrderCancelRequestSidesArgs_required_41},
-        {11, &CrossOrderCancelRequestSidesArgs_required_11},
-    }};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::CrossOrderCancelRequestSidesArgs>, 1> group_checks = {{
-        {false, &CrossOrderCancelRequestSidesArgs_count_party_i_ds, &CrossOrderCancelRequestSidesArgs_validate_entry_party_i_ds},
-    }};
-};
-
-template <> struct writer_traits<::fixpp::v44::CrossOrderCancelRequestLegsLegSecurityAltIDArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::CrossOrderCancelRequestLegsLegSecurityAltIDArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::CrossOrderCancelRequestLegsLegSecurityAltIDArgs>, 0> group_checks = {};
-};
-
-inline ::std::optional<::std::size_t> CrossOrderCancelRequestLegsArgs_count_leg_security_alt_id(::fixpp::v44::CrossOrderCancelRequestLegsArgs const& a) noexcept { if (!a.leg_security_alt_id) { return ::std::nullopt; } return a.leg_security_alt_id->size(); }
-inline ::fixpp::core::expected_t<void> CrossOrderCancelRequestLegsArgs_validate_entry_leg_security_alt_id(::fixpp::v44::CrossOrderCancelRequestLegsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.leg_security_alt_id)[i]); }
-template <> struct writer_traits<::fixpp::v44::CrossOrderCancelRequestLegsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::CrossOrderCancelRequestLegsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::CrossOrderCancelRequestLegsArgs>, 1> group_checks = {{
-        {false, &CrossOrderCancelRequestLegsArgs_count_leg_security_alt_id, &CrossOrderCancelRequestLegsArgs_validate_entry_leg_security_alt_id},
-    }};
-};
-
-template <> struct writer_traits<::fixpp::v44::CrossOrderCancelRequestUnderlyingsUnderlyingSecurityAltIDArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::CrossOrderCancelRequestUnderlyingsUnderlyingSecurityAltIDArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::CrossOrderCancelRequestUnderlyingsUnderlyingSecurityAltIDArgs>, 0> group_checks = {};
-};
-
-template <> struct writer_traits<::fixpp::v44::CrossOrderCancelRequestUnderlyingsUnderlyingStipsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::CrossOrderCancelRequestUnderlyingsUnderlyingStipsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::CrossOrderCancelRequestUnderlyingsUnderlyingStipsArgs>, 0> group_checks = {};
-};
-
-inline ::std::optional<::std::size_t> CrossOrderCancelRequestUnderlyingsArgs_count_underlying_security_alt_id(::fixpp::v44::CrossOrderCancelRequestUnderlyingsArgs const& a) noexcept { if (!a.underlying_security_alt_id) { return ::std::nullopt; } return a.underlying_security_alt_id->size(); }
-inline ::fixpp::core::expected_t<void> CrossOrderCancelRequestUnderlyingsArgs_validate_entry_underlying_security_alt_id(::fixpp::v44::CrossOrderCancelRequestUnderlyingsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.underlying_security_alt_id)[i]); }
-inline ::std::optional<::std::size_t> CrossOrderCancelRequestUnderlyingsArgs_count_underlying_stips(::fixpp::v44::CrossOrderCancelRequestUnderlyingsArgs const& a) noexcept { if (!a.underlying_stips) { return ::std::nullopt; } return a.underlying_stips->size(); }
-inline ::fixpp::core::expected_t<void> CrossOrderCancelRequestUnderlyingsArgs_validate_entry_underlying_stips(::fixpp::v44::CrossOrderCancelRequestUnderlyingsArgs const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.underlying_stips)[i]); }
-template <> struct writer_traits<::fixpp::v44::CrossOrderCancelRequestUnderlyingsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::CrossOrderCancelRequestUnderlyingsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::CrossOrderCancelRequestUnderlyingsArgs>, 2> group_checks = {{
-        {false, &CrossOrderCancelRequestUnderlyingsArgs_count_underlying_security_alt_id, &CrossOrderCancelRequestUnderlyingsArgs_validate_entry_underlying_security_alt_id},
-        {false, &CrossOrderCancelRequestUnderlyingsArgs_count_underlying_stips, &CrossOrderCancelRequestUnderlyingsArgs_validate_entry_underlying_stips},
-    }};
-};
-
-template <> struct writer_traits<::fixpp::v44::CrossOrderCancelRequestEventsArgs> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::CrossOrderCancelRequestEventsArgs>, 0> required_checks = {};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::CrossOrderCancelRequestEventsArgs>, 0> group_checks = {};
 };
 
 inline bool CrossOrderCancelRequestArgs_required_60(::fixpp::v44::CrossOrderCancelRequestArgs const& a) noexcept { return a.transact_time.has_value(); }

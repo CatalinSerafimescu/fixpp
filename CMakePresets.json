@@ -23,6 +23,7 @@
         "CMAKE_BUILD_TYPE": "Debug",
         "CMAKE_C_COMPILER": "clang",
         "CMAKE_CXX_COMPILER": "clang++",
+        "FIXPP_BUILD_HEAVY_BUILDER_TESTS": "ON",
         "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/build/linux-clang-debug/conan_toolchain.cmake"
       }
     },
@@ -49,6 +50,7 @@
         "CMAKE_CXX_COMPILER": "clang++",
         "FIXPP_ENABLE_ASAN": "ON",
         "BUILD_SHARED_LIBS": "ON",
+        "FIXPP_BUILD_HEAVY_BUILDER_TESTS": "ON",
         "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/build/linux-clang-asan/conan_toolchain.cmake"
       }
     },
@@ -193,6 +195,7 @@
       "inherits": "_base",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
+        "FIXPP_BUILD_HEAVY_BUILDER_TESTS": "ON",
         "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/build/windows-msvc-release/conan_toolchain.cmake"
       }
     },

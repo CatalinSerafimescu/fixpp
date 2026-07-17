@@ -177,17 +177,17 @@ TEST(BuilderFailClosed067, WvsXPerOccurrenceDelimiterDiscrimination) {
     // W: MDFullGrp NoMDEntries(268) delimiter MDEntryType(269).
     {
         auto const& seed = kMarketDataSnapshotFullRefreshSeed;
-        fixpp::v44::MarketDataSnapshotFullRefreshMDEntriesArgs entry_args{};
+        fixpp::v44::groups::G_268_1Args entry_args{};
         entry_args.md_entry_type = seed.entry.md_entry_type;
         entry_args.md_entry_px = make_decimal(seed.entry.md_entry_px, &arena);
         entry_args.md_entry_size = make_decimal(seed.entry.md_entry_size, &arena);
-        std::array<fixpp::v44::MarketDataSnapshotFullRefreshMDEntriesArgs, 1> entries{entry_args};
+        std::array<fixpp::v44::groups::G_268_1Args, 1> entries{entry_args};
 
         fixpp::v44::MarketDataSnapshotFullRefreshArgs args{};
         args.symbol = seed.symbol;
         args.md_req_id = seed.md_req_id;
         args.md_entries =
-            std::span<const fixpp::v44::MarketDataSnapshotFullRefreshMDEntriesArgs>{entries};
+            std::span<const fixpp::v44::groups::G_268_1Args>{entries};
 
         std::array<std::byte, 2048> out{};
         auto r = fixpp::v44::build_MarketDataSnapshotFullRefresh(std::span<std::byte>{out}, args);
@@ -206,16 +206,16 @@ TEST(BuilderFailClosed067, WvsXPerOccurrenceDelimiterDiscrimination) {
     // 269 < 279).
     {
         auto const& seed = kMarketDataIncrementalRefreshSeed;
-        fixpp::v44::MarketDataIncrementalRefreshMDEntriesArgs entry_args{};
+        fixpp::v44::groups::G_268_2Args entry_args{};
         entry_args.md_update_action = seed.entry.md_update_action;
         entry_args.md_entry_type = seed.entry.md_entry_type;
         entry_args.md_entry_px = make_decimal(seed.entry.md_entry_px, &arena);
-        std::array<fixpp::v44::MarketDataIncrementalRefreshMDEntriesArgs, 1> entries{entry_args};
+        std::array<fixpp::v44::groups::G_268_2Args, 1> entries{entry_args};
 
         fixpp::v44::MarketDataIncrementalRefreshArgs args{};
         args.md_req_id = seed.md_req_id;
         args.md_entries =
-            std::span<const fixpp::v44::MarketDataIncrementalRefreshMDEntriesArgs>{entries};
+            std::span<const fixpp::v44::groups::G_268_2Args>{entries};
 
         std::array<std::byte, 2048> out{};
         auto r = fixpp::v44::build_MarketDataIncrementalRefresh(std::span<std::byte>{out}, args);
@@ -243,7 +243,7 @@ TEST(BuilderFailClosed067, RequiredGroupZero_ValidateRejects) {
     args.tot_no_orders = seed.tot_no_orders;
     // orders left as a zero-length span: E's NoOrders(73) group is REQUIRED
     // (dictionaries/FIX44.xml:2944 `<group name='NoOrders' required='Y'>`).
-    args.orders = std::span<const fixpp::v44::NewOrderListOrdersArgs>{};
+    args.orders = std::span<const fixpp::v44::groups::G_73_2Args>{};
 
     auto r = fixpp::v44::validate_NewOrderList(args);
     ASSERT_FALSE(r.has_value()) << "a REQUIRED group with size()==0 must fail validate_";
@@ -256,20 +256,20 @@ TEST(BuilderFailClosed067, OptionalGroupNullopt_OmitsNoGroupTagEntirely) {
     using namespace fixpp_test_support::seeds067;
     auto const& seed = kNewOrderListSeed;
 
-    fixpp::v44::NewOrderListOrdersArgs order_args{};
+    fixpp::v44::groups::G_73_2Args order_args{};
     order_args.cl_ord_id = seed.order.cl_ord_id;
     order_args.list_seq_no = seed.order.list_seq_no;
     order_args.side = seed.order.side;
     order_args.symbol = seed.order.symbol;
     // party_i_ds (NoPartyIDs(453), OPTIONAL at order depth) intentionally
     // left nullopt (its default).
-    std::array<fixpp::v44::NewOrderListOrdersArgs, 1> orders{order_args};
+    std::array<fixpp::v44::groups::G_73_2Args, 1> orders{order_args};
 
     fixpp::v44::NewOrderListArgs args{};
     args.list_id = seed.list_id;
     args.bid_type = seed.bid_type;
     args.tot_no_orders = seed.tot_no_orders;
-    args.orders = std::span<const fixpp::v44::NewOrderListOrdersArgs>{orders};
+    args.orders = std::span<const fixpp::v44::groups::G_73_2Args>{orders};
 
     std::array<std::byte, 2048> out{};
     auto r = fixpp::v44::build_NewOrderList(std::span<std::byte>{out}, args);

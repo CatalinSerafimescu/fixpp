@@ -40,3 +40,11 @@ set_target_properties(typed_accessor_bench PROPERTIES
 # load-bearing ceiling in syntax-only mode (~8-9 s on typical hardware).
 # See bench/codegen/compile_time_bench/FINDINGS.md for the documented record.
 add_subdirectory(compile_time_bench)
+
+# ── 077-builder-args-dedup T015: vlatest_builders_compile_bench ────────────────
+# Script-based compile-resource ceiling measurement (SC-001/SC-002) for the
+# deduped vlatest typed builder tier (fixpp/vlatest/Builders.hpp — 576 shared
+# plans, ~78 MB). Peak RSS is the hard gate (was >21GB/OOM pre-dedup, now
+# low-single-digit GB); wall time vs the 003 T046 ≤3s single-version ceiling
+# is a recorded KNOWN_OVERAGE, not a failure.
+add_subdirectory(vlatest_builders_compile_bench)

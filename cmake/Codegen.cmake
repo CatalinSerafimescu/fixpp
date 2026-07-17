@@ -261,14 +261,28 @@ set(_v42_marker    "${CMAKE_BINARY_DIR}/_codegen/include/fixpp/v42/Messages.hpp"
 set(_v44_marker    "${CMAKE_BINARY_DIR}/_codegen/include/fixpp/v44/Messages.hpp")
 set(_v50sp2_marker "${CMAKE_BINARY_DIR}/_codegen/include/fixpp/v50sp2/Messages.hpp")
 set(_vt11_marker   "${CMAKE_BINARY_DIR}/_codegen/include/fixpp/vt11/Messages.hpp")
-# 067-codegen-writer-emitter: Builders.hpp is emitted for v44 ONLY (other
-# versions get no Builders.hpp — see emit_builders.cpp scope note).
+# 067-codegen-writer-emitter: Builders.hpp is emitted for v44 (other legacy
+# versions get no Builders.hpp — see emit_builders.cpp scope note); 077 adds
+# vlatest (below) through the same version-agnostic deduped path.
 set(_v44_builders_marker "${CMAKE_BINARY_DIR}/_codegen/include/fixpp/v44/Builders.hpp")
+# gate-b/r1 F1 (077-builder-args-dedup): v50sp2 also gets a deduped
+# Builders.hpp via the same version-agnostic emit_builders path (main.cpp
+# emits Builders.hpp for every ns != v42, so v50sp2 too); this marker must
+# participate in the same missing-output / regen-guard discipline as the
+# v44 builders marker above.
+set(_v50sp2_builders_marker "${CMAKE_BINARY_DIR}/_codegen/include/fixpp/v50sp2/Builders.hpp")
 # 076-fix-latest-typed-codegen T006: FIX Latest tier, gated by
 # FIXPP_CODEGEN_FIX_LATEST (default ON). Input lives under dictionaries/
 # orchestra/ (074), not dictionaries/ directly.
 set(_orchestra_xml "${_xml_dir}/orchestra/OrchestraFIXLatest.xml")
 set(_vlatest_marker "${CMAKE_BINARY_DIR}/_codegen/include/fixpp/vlatest/Messages.hpp")
+# 077-builder-args-dedup T014 [US1]: vlatest builder tier marker (FR-004/
+# FR-012, G4a) — separate from _vlatest_marker (Messages.hpp) because the
+# deduped emitter now emits Builders.hpp for vlatest too (T009 lifted the
+# v44-only gate) and this file must participate in the same missing-output /
+# regen-guard discipline as the other builder marker above, not just the
+# read-tier marker.
+set(_vlatest_builders_marker "${CMAKE_BINARY_DIR}/_codegen/include/fixpp/vlatest/Builders.hpp")
 
 set(_need_generate FALSE)
 
@@ -327,18 +341,17 @@ set(FIXPP_CODEGEN_FIX_LATEST_LAST_USED "${FIXPP_CODEGEN_FIX_LATEST}" CACHE INTER
 # "no vlatest/ subdir under that shared include root" — satisfied entirely
 # by the file(REMOVE_RECURSE) below; there is no separate target/include
 # genex to gate.
+#
+# 077-builder-args-dedup T014 [US1] (FR-012, G4a): the 076 Gate B P2 ON-branch
+# `file(REMOVE .../vlatest/Builders.hpp)` above this comment (previously the
+# `else()` arm here) is GONE — 077 re-enables the vlatest typed builder tier
+# (component-identity Args-dedup makes it compilable), so an ON configure
+# must now KEEP vlatest/Builders.hpp, not delete it. Only the OFF-path clean
+# remains; it already removes the whole vlatest/ subdir (Builders.hpp
+# included) unconditionally, satisfying "no stale file when OFF" without a
+# separate arm.
 if(NOT FIXPP_CODEGEN_FIX_LATEST)
   file(REMOVE_RECURSE "${FIXPP_CODEGEN_OUT_DIR}/vlatest")
-else()
-  # Gate B PR#195 round 1 P2: the typed builder tier was descoped for this
-  # feature (spec.md Clarifications, Session 2026-07-16) -- emit_builders
-  # stays v44-only, no vlatest/Builders.hpp is emitted. write_file()
-  # (main.cpp) skips empty emitter output, so a vlatest/Builders.hpp written
-  # during pre-descope development would otherwise survive indefinitely
-  # across ON reconfigures (nothing else in this file's regen-guards touches
-  # that specific stale file). Unconditional file(REMOVE ...) on a missing
-  # path is a no-op, so this runs harmlessly on every ON configure.
-  file(REMOVE "${FIXPP_CODEGEN_OUT_DIR}/vlatest/Builders.hpp")
 endif()
 
 if(_codegen_source_fingerprint_changed)
@@ -346,7 +359,7 @@ if(_codegen_source_fingerprint_changed)
 endif()
 
 # Missing output?
-foreach(_marker IN ITEMS "${_v42_marker}" "${_v44_marker}" "${_v50sp2_marker}" "${_vt11_marker}" "${_v44_builders_marker}")
+foreach(_marker IN ITEMS "${_v42_marker}" "${_v44_marker}" "${_v50sp2_marker}" "${_vt11_marker}" "${_v44_builders_marker}" "${_v50sp2_builders_marker}")
   if(NOT EXISTS "${_marker}")
     set(_need_generate TRUE)
     break()
@@ -356,6 +369,15 @@ endforeach()
 # 076 T006: FIX Latest marker, only when the tier is enabled (OFF-path
 # stale-dir cleanup on an ON->OFF flip is US3 T015, not this task).
 if(FIXPP_CODEGEN_FIX_LATEST AND NOT EXISTS "${_vlatest_marker}")
+  set(_need_generate TRUE)
+endif()
+
+# 077-builder-args-dedup T014 [US1] (FR-012): vlatest builder-tier marker,
+# same shape as the read-tier check above — a state where Messages.hpp
+# exists but Builders.hpp doesn't (e.g. right after this file's own
+# unconditional-delete removal is deployed on an existing build tree, or an
+# OFF->ON flip) must force a regen, or T012/T013 stay spuriously RED.
+if(FIXPP_CODEGEN_FIX_LATEST AND NOT EXISTS "${_vlatest_builders_marker}")
   set(_need_generate TRUE)
 endif()
 
@@ -466,6 +488,30 @@ if(FIXPP_CODEGEN_FIX_LATEST AND NOT EXISTS "${_vlatest_marker}")
   message(FATAL_ERROR
     "[Codegen] Expected output missing after configure-time generation: "
     "${_vlatest_marker}")
+endif()
+
+# 077-builder-args-dedup T014 [US1]: vlatest builder-tier output, mirrors the
+# read-tier assertion above.
+if(FIXPP_CODEGEN_FIX_LATEST AND NOT EXISTS "${_vlatest_builders_marker}")
+  message(FATAL_ERROR
+    "[Codegen] Expected output missing after configure-time generation: "
+    "${_vlatest_builders_marker}")
+endif()
+
+# gate-b/r1 F1 (077-builder-args-dedup): v44 and v50sp2 builder-tier outputs,
+# mirroring the vlatest builders assertion above — unconditional (not gated
+# on FIXPP_CODEGEN_FIX_LATEST) because v44/v50sp2 builders are part of the
+# always-generated legacy set (main.cpp emits Builders.hpp for every
+# ns != v42).
+if(NOT EXISTS "${_v44_builders_marker}")
+  message(FATAL_ERROR
+    "[Codegen] Expected output missing after configure-time generation: "
+    "${_v44_builders_marker}")
+endif()
+if(NOT EXISTS "${_v50sp2_builders_marker}")
+  message(FATAL_ERROR
+    "[Codegen] Expected output missing after configure-time generation: "
+    "${_v50sp2_builders_marker}")
 endif()
 
 # ── fixpp_codegen_generate — no-op build-time marker target ──────────────────

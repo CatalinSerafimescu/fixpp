@@ -31,9 +31,12 @@ Generated headers live at:
 ```
 build/<preset>/_codegen/include/fixpp/
   v42/     Messages.hpp  Fields.hpp  Validator.hpp  Reify.hpp  NormativeReferences.md
-  v44/     ...
-  v50sp2/  ...
-  vt11/    ...
+                                      #   (NO Builders.hpp — v42 descoped, L-077-1/issue #196)
+  v44/     ...  + Builders.hpp        # typed build_<Msg>/validate_<Msg>, deduped
+  v50sp2/  ...  + Builders.hpp        # typed builders (077)
+  vt11/    ...                        # FIXT.1.1 (admin-only → NO Builders.hpp)
+  vlatest/ ...  + Manifest.txt + Builders.hpp   # FIX Latest (EP303); only when FIXPP_CODEGEN_FIX_LATEST=ON
+                                      #   (typed builders delivered by 077)
   _dispatch/
     reify_dispatch_fixt.hpp
     reify_dispatch_application.hpp
@@ -52,6 +55,49 @@ cmake --build --preset linux-clang-debug --target fixpp-codegen
 # Then reconfigure to re-run codegen:
 cmake --preset linux-clang-debug
 ```
+
+### Selecting which FIX versions are generated (CMake options)
+
+**There is no per-version enable/disable flag for the legacy set.** The four
+legacy versions — **v42, v44, v50sp2, vt11 (FIXT.1.1)** — are generated
+*unconditionally* in a single tool invocation. Only **FIX Latest (`vlatest`,
+EP303)** has a generation toggle. A consumer selects which version(s) to *use*
+by which header directory it `#include`s (`#include <fixpp/v44/Messages.hpp>`);
+a generated-but-unincluded version costs nothing at the consumer's compile
+(the headers are header-only).
+
+| CMake option | Default | Effect |
+|---|---|---|
+| `FIXPP_BUILD_CODEGEN_TOOL` | `ON` | Build the `fixpp-codegen` host tool. |
+| `FIXPP_CODEGEN_FIX_LATEST` | `ON` | Generate the `fixpp::vlatest` (FIX Latest / EP303) read/reify/validator tier from `dictionaries/orchestra/OrchestraFIXLatest.xml`. `OFF` removes the `vlatest/` output dir entirely; the four legacy tiers are **byte-identical** either way. |
+| `FIXPP_CODEGEN_V44_FAMILIES` | `all` | Breadth of the v44 **builder** tier (`Builders.hpp`): `all` = 83 `msgcat='app'` messages; `official` = the frozen 33 OFFICIAL MsgTypes. Read tier is unaffected (always universal). |
+
+```bash
+# Default: v42/v44/v50sp2/vt11 + vlatest; v44 builders = all 83 app messages.
+cmake --preset linux-clang-debug
+
+# Legacy-only build (drop the FIX Latest tier):
+cmake --preset linux-clang-debug -DFIXPP_CODEGEN_FIX_LATEST=OFF
+
+# Restrict the v44 builder tier to the frozen 33 OFFICIAL MsgTypes:
+cmake --preset linux-clang-debug -DFIXPP_CODEGEN_V44_FAMILIES=official
+```
+
+> **Typed builders (`build_<Msg>`/`validate_<Msg>`) are emitted for `fixpp::v44`,
+> `fixpp::v50sp2`, and `fixpp::vlatest`** (their full `is_application` sets:
+> 83 / 156 / 173; `vlatest` gated by `FIXPP_CODEGEN_FIX_LATEST`). Each repeating
+> group's input `Args` struct is **deduplicated** — emitted once per distinct
+> `(no_tag, recursive structural signature)` plan into `fixpp::<ns>::groups` as
+> `G_<no_tag>Args` (one plan) or `G_<no_tag>_1..kArgs` (≥2 plans) — which is what
+> makes the FIX Latest builder tier compile as a single TU (577-ish shared plans
+> vs 26,806 message-rooted structs; 077, resolving L-076-1). **`fixpp::vt11`**
+> (admin-only) and **`fixpp::v42`** (descoped — FIX 4.2 types `NumInGroup` as
+> legacy `INT`, so 0 typed groups materialize; L-077-1 / issue #196) emit NO
+> builders; construct v42 messages via the runtime `wire::body_builder` /
+> tag-keyed path. **Source-API note:** the v44 nested-group `Args` type names
+> changed from message-rooted (`NewOrderListOrdersArgs`) to shared
+> (`groups::G_73_1Args`) — a deliberate pre-1.0 break with no aliases; top-level
+> `<Msg>Args` names are unchanged.
 
 ### Determinism test
 
