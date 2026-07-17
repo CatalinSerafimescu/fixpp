@@ -15,7 +15,7 @@ Per version `<ver>` ∈ {v44, v50sp2, vlatest}, two STATIC libraries, following 
 | `fixpp_validators_<ver>` | `fixpp::validators::<ver>` | the **disjoint** `messages/<Msg>.validator.cpp` set | `validate_<Msg>` objects + per-message top-level traits |
 
 The two source sets are **physically disjoint** — no `.cpp` is shared between the
-libs — so a builder-only link carries zero validator code (SC-003/SC-005) and
+libs — so a builder-only link carries zero validator code (SC-003) and
 linking both libs raises no duplicate-symbol clash (R1, R2a leg iii). The **shared
 group-plan traits** are `inline` in `validators/traits.hpp` (a header the
 `<Msg>.validator.{inl,cpp}` include), **not** a separately compiled "traits TU" —
@@ -31,7 +31,7 @@ being `inline` explicit specializations they contribute no standalone object.
   removal depend on (it re-creates one giant lib-compile TU per version). Treat it
   strictly as a fallback whose peak compile RSS must be **CI-measured, not
   assumed**, before use — it is not an equivalent path (New-5).
-- **Builder ⟂ validator (SC-005):** `fixpp_builders_<ver>` objects reference **no**
+- **Builder ⟂ validator (SC-003):** `fixpp_builders_<ver>` objects reference **no**
   validator symbol; enforced by the emitter invariant + `nm` witness + R2a probe.
 - **Generated at configure time** (existing `execute_process`, `Codegen.cmake:458`);
   the per-message `.cpp` files are added as target sources after generation.

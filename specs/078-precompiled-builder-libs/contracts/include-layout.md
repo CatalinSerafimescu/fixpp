@@ -57,7 +57,7 @@ fixpp/<ns>/
   `.builder.inl` / `.validator.inl` and reintroduce full-parse cost — by explicit choice.
 - **`validate_<Msg>` decl ≠ validator code.** Declaring it is free; a send-only
   consumer that never calls it and never links `fixpp_validators_<ver>` carries
-  zero validator machine code (SC-003/SC-005).
+  zero validator machine code (SC-003).
 - **Removed:** `fixpp/<ns>/Builders.hpp` no longer exists (FR-008, breaking; the
   tier is opt-in + not yet consumed in production).
 
@@ -69,7 +69,7 @@ fixpp/<ns>/
 - `FIXPP_VALIDATORS_HEADER_ONLY` — whole-TU validator-inline mode: pulls every
   `.validator.inl` (inline `validate_` body + per-message traits) instead of the
   `extern validate_` decl. Independent of the builder mode, so a builder-inline
-  TU never pulls validator traits (SC-005 on the inline path).
+  TU never pulls validator traits (SC-003 on the inline path).
 - Per-message override (exact spelling decided at `/implement`; e.g.
   `FIXPP_BUILDERS_HEADER_ONLY_<Msg>` / `FIXPP_VALIDATORS_HEADER_ONLY_<Msg>` or
   directly `#include ".../<Msg>.builder.inl"`) — force-inline a chosen subset per
@@ -83,7 +83,7 @@ fixpp/<ns>/
    compile-bench record).
 2. A builder-only include graph (`<Msg>.hpp` / `<Msg>.builder.inl` /
    `<Msg>.builder.cpp`) never reaches `validators/traits.hpp` or any `validate_`
-   symbol (SC-005) — enforced by the emitter invariant + `nm` witness + R2a.
+   symbol (SC-003) — enforced by the emitter invariant + `nm` witness + R2a.
 3. Link mode and inline mode agree for the same inputs, every message, every
    version — the builder produces **byte-identical** wire bytes, the validator is
    **result-identical** (same success/error + offending tag) (SC-004 / FR-009).

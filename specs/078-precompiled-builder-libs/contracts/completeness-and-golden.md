@@ -75,7 +75,7 @@ clean, `RESOURCE_LOCK codegen_source_tree`) and `codegen-source-staleness-check`
   `.o` granularity), not the whole version's set.
 - **SC-003 (zero validator):** a builder-only binary (links `fixpp_builders_<ver>`
   only) → `nm` shows **zero** `validate_<Msg>` / `writer_traits` symbols.
-- Both seed from the **R2a ODR/SC-005 probe** (a Phase-0 blocking prerequisite).
+- Both seed from the **R2a ODR / builder⟂validator (SC-003) probe** (a Phase-0 blocking prerequisite).
 
 ## ODR / mixing witnesses (FR-007) — both sides
 

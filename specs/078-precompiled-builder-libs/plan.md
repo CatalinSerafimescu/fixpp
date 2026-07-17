@@ -104,7 +104,7 @@ codegen re-narration — no separate amendment vote beyond the Gate-A-folded edi
 ```text
 specs/078-precompiled-builder-libs/
 ├── plan.md              # this file
-├── research.md          # Phase 0 — R1–R10 (layout, ODR/SC-005 probe, granularity, golden set, #197)
+├── research.md          # Phase 0 — R1–R10 (layout, ODR/SC-003 probe, granularity, golden set, #197)
 ├── data-model.md        # Phase 1 — emitted-artifact + target + golden-set entities
 ├── quickstart.md        # Phase 1 — validation scenarios (link, send-only, inline-mix, aggregator)
 ├── contracts/
@@ -181,11 +181,11 @@ change.
 
 | Item | Why | Simpler alternative rejected because |
 |---|---|---|
-| Per-message, **per-side** `.cpp` (`<Msg>.builder.cpp` / `<Msg>.validator.cpp`) instead of one `Builders.cpp` | SC-002 needs static-archive **object granularity** so the linker pulls only used messages; **disjoint** builder/validator objects are what keep a builder-only link validator-free (SC-003/SC-005) and let both libs link with no duplicate symbol (R1); also bounds per-TU compile RSS (SC-006) | one `Builders.o` pulls the whole ~18–20 MiB `.text` → SC-002 fails; a single `<Msg>.cpp` defining both `build_`+`validate_` → validator code leaks into a builder-only link AND both-libs link hard-fails on duplicate symbol |
+| Per-message, **per-side** `.cpp` (`<Msg>.builder.cpp` / `<Msg>.validator.cpp`) instead of one `Builders.cpp` | SC-002 needs static-archive **object granularity** so the linker pulls only used messages; **disjoint** builder/validator objects are what keep a builder-only link validator-free (SC-003) and let both libs link with no duplicate symbol (R1); also bounds per-TU compile RSS (SC-006) | one `Builders.o` pulls the whole ~18–20 MiB `.text` → SC-002 fails; a single `<Msg>.cpp` defining both `build_`+`validate_` → validator code leaks into a builder-only link AND both-libs link hard-fails on duplicate symbol |
 | Five-file per message (`.hpp` decl / `.builder.inl` / `.validator.inl` / `.builder.cpp` / `.validator.cpp`) | FR-004+FR-006 require **both** link mode (default) and header-only inline **from one generation**, and the builder/validator surfaces must be **physically separate on the inline path too** (force-inlining `build_` must not pull validator traits) | header-only-only (issue proposal 2) can't remove the test compile cost (SC-006); lib-only drops FR-006; a unified `.inl` re-creates root-cause-#1 on the inline path |
-| Two-tier validator traits — shared **group-plan** traits in `validators/traits.hpp` (inline) + per-message **top-level** traits in the per-message validator surface (R2) | group-plan traits are shared and must be one ODR-safe definition across linked-lib + force-inlined validators (FR-007); per-message top-level traits are **not** shared (one set per message); both must be **invisible to the builder graph** (SC-005/SC-001) | traits in the builder-included `groups.hpp` → parses into every builder TU (SC-001) + tri-doc contradiction; a whole-hog move of *all* traits into one shared header re-creates the parse-cost leak for the per-message half |
+| Two-tier validator traits — shared **group-plan** traits in `validators/traits.hpp` (inline) + per-message **top-level** traits in the per-message validator surface (R2) | group-plan traits are shared and must be one ODR-safe definition across linked-lib + force-inlined validators (FR-007); per-message top-level traits are **not** shared (one set per message); both must be **invisible to the builder graph** (SC-003/SC-001) | traits in the builder-included `groups.hpp` → parses into every builder TU (SC-001) + tri-doc contradiction; a whole-hog move of *all* traits into one shared header re-creates the parse-cost leak for the per-message half |
 | Golden as a file **set** + name/count determinism (R6) | the split multiplies files → a dropped/renamed message is a new failure mode a content-only diff misses | content-only diff on a single golden → silent omission across the split ([[feedback_codegen_golden_exists_narrow_verify_misses_it]]) |
-| #197 removal is **CI-gated**, not a blind delete (R8) | Article XVII §7 resource gate — "every leg fits without the pool" is CI-verified, not locally provable; gcc ~2× RSS + MSVC | delete-then-hope re-introduces the exit-143 OOM that motivated #197 |
+| #197 removal is **CI-gated**, not a blind delete (R8) | Article XVII §8 resource gate — "every leg fits without the pool" is CI-verified, not locally provable; gcc ~2× RSS + MSVC | delete-then-hope re-introduces the exit-143 OOM that motivated #197 |
 
 **Compile-time overage note (not an Article VIII item).** Any residual
 compile-RSS/wall figures (e.g. the per-message lib TUs, `all.hpp` header-only
@@ -199,7 +199,7 @@ same non-Article-VIII mechanism 077 used — captured in this feature's
 Codegen-layout change ⇒ Gate A **mandatory** (Appendix A). Run `/gate-a
 078-precompiled-builder-libs` after this `/plan`, before `/tasks`. Gate A must
 confirm: (1) the I §1 / XVIII §7 annotations vs. an edited clause; (2) the R2
-validator-traits placement + the R2a ODR/SC-005 probe as a blocking prerequisite;
+validator-traits placement + the R2a ODR / builder⟂validator (SC-003) probe as a blocking prerequisite;
 (3) the install-scope call (build-tree targets vs. `install(TARGETS)`/export, R3);
 (4) the #197-removal sequencing (R8). User `/plan` sign-off is one of the four
 mandatory controls.
