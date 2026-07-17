@@ -25,22 +25,28 @@ through a custom CMake script.
 | `fixpp-codegen` | The host-only code generator executable. |
 | `fixpp_codegen_generate` | Custom target that runs `fixpp-codegen` on all four XML dictionaries and writes headers into `${CMAKE_BINARY_DIR}/_codegen/include/fixpp/`. |
 | `fixpp_dictionary` | The user-facing library. **Depends on** `fixpp_codegen_generate` so generated headers are ready before any library TU compiles. |
+| `fixpp_builders_<ver>` / `fixpp::builders::<ver>` | Precompiled **STATIC** library holding every `build_<Msg>` body for version `<ver>` ∈ {v44, v50sp2, vlatest} (078). Always built. |
+| `fixpp_validators_<ver>` / `fixpp::validators::<ver>` | Precompiled **STATIC** library holding every `validate_<Msg>` body for version `<ver>` — a disjoint object set from the builder lib (078). Always built. |
 
 Generated headers live at:
 
 ```
 build/<preset>/_codegen/include/fixpp/
   v42/     Messages.hpp  Fields.hpp  Validator.hpp  Reify.hpp  NormativeReferences.md
-                                      #   (NO Builders.hpp — v42 descoped, L-077-1/issue #196)
-  v44/     ...  + Builders.hpp        # typed build_<Msg>/validate_<Msg>, deduped
-  v50sp2/  ...  + Builders.hpp        # typed builders (077)
-  vt11/    ...                        # FIXT.1.1 (admin-only → NO Builders.hpp)
-  vlatest/ ...  + Manifest.txt + Builders.hpp   # FIX Latest (EP303); only when FIXPP_CODEGEN_FIX_LATEST=ON
-                                      #   (typed builders delivered by 077)
+                                      #   (NO builder/validator tier — v42 descoped, L-077-1/issue #196)
+  v44/     ...  + groups.hpp  groups/  validators/  messages/  all.hpp   # typed builder/validator tier (078 split layout)
+  v50sp2/  ...  + groups.hpp  groups/  validators/  messages/  all.hpp   # typed builder/validator tier (078 split layout)
+  vt11/    ...                        # FIXT.1.1 (admin-only → no builder/validator tier)
+  vlatest/ ...  + Manifest.txt + groups.hpp  groups/  validators/  messages/  all.hpp
+                                      #   FIX Latest (EP303); only when FIXPP_CODEGEN_FIX_LATEST=ON
   _dispatch/
     reify_dispatch_fixt.hpp
     reify_dispatch_application.hpp
 ```
+
+The monolithic single-file `Builders.hpp` (077) is **removed** (FR-008, 078) — replaced by
+the split layout above. See [Precompiled Builder/Validator Libraries](#precompiled-buildervalidator-libraries-078)
+below.
 
 Nothing is written into the source tree (`AC-C4` / `AC-T2`).
 
@@ -97,7 +103,80 @@ cmake --preset linux-clang-debug -DFIXPP_CODEGEN_V44_FAMILIES=official
 > tag-keyed path. **Source-API note:** the v44 nested-group `Args` type names
 > changed from message-rooted (`NewOrderListOrdersArgs`) to shared
 > (`groups::G_73_1Args`) — a deliberate pre-1.0 break with no aliases; top-level
-> `<Msg>Args` names are unchanged.
+> `<Msg>Args` names are unchanged. **Since 078**, this dedup is unchanged but the
+> emitted *packaging* is a precompiled per-version library + slim per-message
+> headers rather than one monolithic `Builders.hpp` — see the next section.
+
+## Precompiled Builder/Validator Libraries (078)
+
+078 restructured 077's single-file `fixpp/<ns>/Builders.hpp` into a precompiled
+per-version library layout, for each builder-bearing version `<ns>` ∈ {v44,
+v50sp2, vlatest} (`vt11`/`v42` emit none):
+
+| File | Contents |
+|---|---|
+| `groups/<PlanName>.hpp` | One header per deduped group plan — `#pragma once`, includes its child-plan headers only. Data-only (no validator traits). |
+| `groups.hpp` | Umbrella `#include`ing every `groups/<PlanName>.hpp` — used by the validator surface and by any consumer that wants everything. |
+| `validators/traits.hpp` | Shared group-plan `inline writer_traits<T>` specializations (validator-only; includes the umbrella `groups.hpp`). |
+| `messages/<Msg>.hpp` | Slim declaration header: includes only the `groups/<Plan>.hpp` this message's `<Msg>Args` transitively needs, the `<Msg>Args` struct, and `extern build_<Msg>`/`validate_<Msg>` declarations (or a macro-gated `#include` of the `.inl` body — see inline mode below). |
+| `messages/<Msg>.{builder,validator}.inl` | Inline body for header-only mode — same generated body as the `.cpp` below, differing only in linkage. |
+| `messages/<Msg>.{builder,validator}.cpp` | External-linkage definition, compiled once into the per-version library. |
+| `all.hpp` | Aggregator: every `messages/<Msg>.hpp` for the version, plus the `builder_registry`. The "give me everything" entry point; replaces `Builders.hpp` (FR-008 — the old include path is **removed**, not aliased). |
+
+### Two always-built libraries per version
+
+`fixpp_builders_<ver>` (`fixpp::builders::<ver>`) and `fixpp_validators_<ver>`
+(`fixpp::validators::<ver>`) are always-built **STATIC** libraries with
+disjoint object sets — one `.o` per message per side. A consumer opts in
+**purely at link time**:
+
+```cmake
+target_link_libraries(my_app PRIVATE fixpp::builders::v44)   # builders only
+target_link_libraries(my_app PRIVATE fixpp::validators::v44) # validators only
+target_link_libraries(my_app PRIVATE fixpp::builders::v44 fixpp::validators::v44) # both — no duplicate-symbol clash
+```
+
+A builder-only link carries zero `validate_<Msg>` machine code, and vice versa
+(the builder surface never includes `validators/traits.hpp`).
+
+### Per-message header-only inline mode
+
+Each side is independently selectable, whole-TU or per-message:
+
+| Macro | Effect |
+|---|---|
+| `FIXPP_BUILDERS_HEADER_ONLY` | Every message's `build_<Msg>` in this TU is pulled inline from `.builder.inl` instead of resolved from the linked library. |
+| `FIXPP_BUILDERS_HEADER_ONLY_<Msg>` | Only `<Msg>`'s `build_<Msg>` is inlined; other messages still link. |
+| `FIXPP_VALIDATORS_HEADER_ONLY` | Every message's `validate_<Msg>` in this TU is inlined. |
+| `FIXPP_VALIDATORS_HEADER_ONLY_<Msg>` | Only `<Msg>`'s `validate_<Msg>` is inlined. |
+
+The builder and validator sides are independently gated — force-inlining
+`build_<Msg>` never pulls validator machine code. Mixing is safe: a TU may
+force-inline a chosen subset of messages while linking the library for the
+rest, with no duplicate-symbol error (each side's `.inl` and `.cpp` are the
+same generated body at different linkage).
+
+### SC-001 — consumer compile cost is closure-bounded, not universally order-of-magnitude
+
+Because 077's `<Msg>Args` embeds its group `Args` **by value**, the full
+transitive group-plan closure must be a complete type at the include site —
+the per-plan `groups/<PlanName>.hpp` split trims a message's include to only
+its own closure, but cannot trim the closure itself. Measured (`clang
+-fsyntax-only`, peak RSS, vs. the ~3.6 GiB monolith baseline):
+
+| Version | Result |
+|---|---|
+| v44 (small group set) | ~0.21 GiB for all messages — **order-of-magnitude MET** (~17×) |
+| v50sp2 / vlatest, median message | ~0.47 GiB (~7.9×) |
+| v50sp2 / vlatest, common message (e.g. NewOrderSingle) | ~0.88 GiB (~4.2×) |
+| v50sp2 / vlatest, group-densest message (e.g. TradeCaptureReport) | ~1.42 GiB (~2.6×) |
+
+All figures are materially below the monolith, but on the large versions
+**not** order-of-magnitude — the deduplicated group graph is densely
+connected (a typical large-version message's closure spans ~100–400 of ~560
+plans). A forward-declared / handle-based `Args` that would meet the
+universal order-of-magnitude target is a distinct API change, deferred to a
+follow-up (out of scope for 078). See L-078-1 in `spec/behaviors-and-limitations.md`.
 
 ### Determinism test
 

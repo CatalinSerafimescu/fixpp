@@ -2514,6 +2514,8 @@ if(TARGET fixpp_codegen_generate)
   target_link_libraries(test_067_builder_roundtrip PRIVATE
     fixpp_wire
     fixpp_dictionary
+    fixpp::builders::v44
+    fixpp::validators::v44
     GTest::gtest
     GTest::gtest_main
   )
@@ -2539,6 +2541,8 @@ if(TARGET fixpp_codegen_generate)
   add_dependencies(test_067_builder_failclosed fixpp_codegen_generate)
   target_link_libraries(test_067_builder_failclosed PRIVATE
     fixpp_wire
+    fixpp::builders::v44
+    fixpp::validators::v44
     GTest::gtest
     GTest::gtest_main
   )
@@ -2560,6 +2564,7 @@ if(TARGET fixpp_codegen_generate)
   add_dependencies(test_067_builder_validate fixpp_codegen_generate)
   target_link_libraries(test_067_builder_validate PRIVATE
     fixpp_wire
+    fixpp::validators::v44
     GTest::gtest
     GTest::gtest_main
   )
@@ -2590,6 +2595,7 @@ if(TARGET fixpp_codegen_generate)
   target_link_libraries(test_067_builder_shape_oracle PRIVATE
     fixpp_session
     fixpp_wire
+    fixpp::builders::v44
     GTest::gtest
     GTest::gtest_main
   )
@@ -2628,6 +2634,7 @@ if(TARGET fixpp_codegen_generate)
     target_link_libraries(test_077_vlatest_builder_roundtrip PRIVATE
       fixpp_wire
       fixpp_dictionary
+      fixpp::builders::vlatest
       GTest::gtest
       GTest::gtest_main
     )
@@ -2665,6 +2672,7 @@ if(TARGET fixpp_codegen_generate)
   target_link_libraries(test_077_allversions_builder_roundtrip PRIVATE
     fixpp_wire
     fixpp_dictionary
+    fixpp::builders::v50sp2
     GTest::gtest
     GTest::gtest_main
   )
@@ -2698,6 +2706,7 @@ if(TARGET fixpp_codegen_generate)
     target_link_libraries(test_077_allversions_builder_roundtrip_vlatest PRIVATE
       fixpp_wire
       fixpp_dictionary
+      fixpp::builders::vlatest
       GTest::gtest
       GTest::gtest_main
     )
@@ -2719,6 +2728,63 @@ if(TARGET fixpp_codegen_generate)
     set_tests_properties(test_077_allversions_builder_roundtrip_vlatest PROPERTIES
       LABELS "077;us2;builder-roundtrip;vlatest")
   endif()
+
+  # ── 078-precompiled-builder-libs T021 [US1]: byte-identical wire round-trip
+  # via the LINKED lib for representative v44 + v50sp2 messages (SC-004
+  # builder, link mode; FR-009). Each TEST includes ONLY its message's slim
+  # per-message header (not all.hpp) -- cheap, ungated by
+  # FIXPP_BUILD_HEAVY_BUILDER_TESTS. vlatest cell CI-deferred (lib not built
+  # locally).
+  add_executable(test_078_builder_roundtrip_linked_us1
+    test_078_builder_roundtrip_linked_us1.cpp
+  )
+  add_dependencies(test_078_builder_roundtrip_linked_us1 fixpp_codegen_generate
+    fixpp_builders_v44 fixpp_builders_v50sp2)
+  target_link_libraries(test_078_builder_roundtrip_linked_us1 PRIVATE
+    fixpp_wire
+    fixpp_dictionary
+    fixpp::builders::v44
+    fixpp::builders::v50sp2
+    GTest::gtest
+    GTest::gtest_main
+  )
+  target_include_directories(test_078_builder_roundtrip_linked_us1 PRIVATE
+    "${_067_CODEGEN_INC}"
+    "${CMAKE_SOURCE_DIR}/tests"
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+  )
+  target_compile_definitions(test_078_builder_roundtrip_linked_us1 PRIVATE
+    "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
+  )
+  add_test(NAME test_078_builder_roundtrip_linked_us1
+    COMMAND test_078_builder_roundtrip_linked_us1)
+  set_tests_properties(test_078_builder_roundtrip_linked_us1 PROPERTIES
+    LABELS "078;us1;builder-roundtrip;v44;v50sp2")
+
+  # ── 078-precompiled-builder-libs T025 [US2]: validator-linked behavior
+  # (FR-003/FR-004 AC2). Links fixpp::validators::v44 -- the US2 counterpart
+  # to T024's builder-only nm witness: this consumer DOES want the outbound
+  # required-field check and gets it by linking the validator lib.
+  add_executable(test_078_validator_linked_us2
+    test_078_validator_linked_us2.cpp
+  )
+  add_dependencies(test_078_validator_linked_us2 fixpp_codegen_generate
+    fixpp_validators_v44)
+  target_link_libraries(test_078_validator_linked_us2 PRIVATE
+    fixpp_wire
+    fixpp::validators::v44
+    GTest::gtest
+    GTest::gtest_main
+  )
+  target_include_directories(test_078_validator_linked_us2 PRIVATE
+    "${_067_CODEGEN_INC}"
+    "${CMAKE_SOURCE_DIR}/tests"
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+  )
+  add_test(NAME test_078_validator_linked_us2
+    COMMAND test_078_validator_linked_us2)
+  set_tests_properties(test_078_validator_linked_us2 PROPERTIES
+    LABELS "078;us2;validator-linked;v44")
 else()
   message(STATUS
     "tests/session: fixpp_codegen_generate not available; skipping 067 US1 suites")

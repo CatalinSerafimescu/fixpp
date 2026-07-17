@@ -32,7 +32,7 @@
 #include <fixpp/core/decimal_alias.hpp>
 #include <fixpp/dict/dictionary.hpp>
 #include <fixpp/dict/xml_loader.hpp>
-#include <fixpp/v50sp2/Builders.hpp>  // GENERATED (077) -- build_<Msg>/<Msg>Args
+#include <fixpp/v50sp2/all.hpp>  // GENERATED (077) -- build_<Msg>/<Msg>Args
 #include <fixpp/v50sp2/Messages.hpp>
 #include <memory_resource>
 #include <optional>

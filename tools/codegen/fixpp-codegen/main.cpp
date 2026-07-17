@@ -39,6 +39,20 @@ struct Job {
     std::filesystem::path out;
 };
 
+// 078-precompiled-builder-libs (data-model.md Entity 7 / quickstart V3) --
+// OFF-clean discipline for the split builder/validator file SET: `write_file`
+// only writes, it never deletes, so a version that emits no builders this
+// run (vt11's empty registry; v42 excluded below) must not leave a stale
+// split tree -- or a legacy pre-078 monolith -- from a prior generation run.
+void remove_builder_split_tree(std::filesystem::path const& base) {
+    std::error_code ec;
+    std::filesystem::remove(base / "Builders.hpp", ec);
+    std::filesystem::remove(base / "groups.hpp", ec);
+    std::filesystem::remove(base / "all.hpp", ec);
+    std::filesystem::remove_all(base / "validators", ec);
+    std::filesystem::remove_all(base / "messages", ec);
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -95,37 +109,44 @@ int main(int argc, char** argv) {
             // materializes ZERO typed groups for it -- a v42 build_<Msg>
             // would silently omit a required='Y' group, emitting invalid
             // FIX 4.2. v42 still has in-scope application messages (just no
-            // typed groups), so emit_builders(v42) does NOT self-skip via
-            // empty content -- it must be excluded at the DRIVER, not inside
-            // emit_builders (which stays version-agnostic per FR-005/T009).
-            // vt11 is the only version that self-skips via a truly empty
-            // registry (0 application messages, emit_builders.cpp).
+            // typed groups), so emit_builders(v42) does NOT self-skip via an
+            // empty file set -- it must be excluded at the DRIVER, not
+            // inside emit_builders (which stays version-agnostic per
+            // FR-005/T009). vt11 is the only version that self-skips via a
+            // truly empty registry (0 application messages,
+            // emit_builders.cpp).
+            //
+            // 078-precompiled-builder-libs T004: emit_builders now returns
+            // the split file SET (data-model.md Entities 1-5) instead of a
+            // single Builders.hpp string; write every file in the set, or
+            // (empty set / v42) clean any stale split tree.
             if (ir.ns != "v42") {
-                // gate-b/r1 F2: empty-emit -> remove (rather than write_file's
-                // write-only no-op) keeps the no-emit contract build-tree-
-                // history-independent for every non-v42 version, including
-                // vt11 -- write_file only writes, it never deletes, so a
-                // stale Builders.hpp from a prior generation run would
-                // otherwise persist forever once the emitter stops producing
-                // content for it (quickstart V3 / FR-012 OFF-clean
-                // discipline).
-                std::string const builders_content =
+                std::vector<fixpp::codegen::EmittedFile> const files =
                     fixpp::codegen::emit_builders(ir, families_mode);
-                if (builders_content.empty()) {
+                if (files.empty()) {
+                    remove_builder_split_tree(base);
+                } else {
+                    // 078 T031 finding: the split emitter no longer produces
+                    // Builders.hpp, but write_file only writes -- so a legacy
+                    // pre-078 (077-era) monolith left on disk by a prior run
+                    // would otherwise persist forever on an incrementally-
+                    // reconfigured build tree (fresh/CI trees are clean). The
+                    // empty-set branch cleans it via remove_builder_split_tree;
+                    // the non-empty branch must remove the one artifact it no
+                    // longer writes (quickstart V3 / FR-012 OFF-clean discipline).
                     std::error_code ec;
                     std::filesystem::remove(base / "Builders.hpp", ec);
-                } else {
-                    write_file(base / "Builders.hpp", builders_content);
+                    for (auto const& f : files) {
+                        write_file(base / f.rel, f.content);
+                    }
                 }
             } else {
-                // Remove a stale Builders.hpp left on disk by a pre-077 (or
-                // pre-this-fix) generation run -- write_file only writes, it
-                // never deletes, so a prior real v42 Builders.hpp would
-                // otherwise persist forever once this driver stops emitting
-                // it (quickstart V3 / FR-012 OFF-clean discipline, applied
-                // here to the v42 descope rather than a CMake toggle).
-                std::error_code ec;
-                std::filesystem::remove(base / "Builders.hpp", ec);
+                // Remove a stale split tree / legacy monolith left on disk
+                // by a prior generation run -- write_file only writes, it
+                // never deletes (quickstart V3 / FR-012 OFF-clean
+                // discipline, applied here to the v42 descope rather than a
+                // CMake toggle).
+                remove_builder_split_tree(base);
             }
             all.push_back(std::move(ir));
         }

@@ -1,0 +1,12 @@
+# 078 codegen golden SET — byte-compared, LF-generated (fixpp-codegen writes
+# with std::ios::binary). Unlike other features' goldens these files keep
+# their real emitted names (groups.hpp, all.hpp, messages/<Msg>.{hpp,builder.inl,
+# validator.inl,builder.cpp,validator.cpp}) rather than a `*.golden.hpp` suffix,
+# so the root .gitattributes' `*.golden.hpp -text` rule does not reach them.
+# Pin -text so a Windows checkout (core.autocrlf=true on windows-msvc runners)
+# cannot CRLF-rewrite them and false-break the byte-exact determinism gate
+# (tests/codegen/determinism_test.cpp — 074/075/076/077 precedent,
+# feedback_byte_exact_sha1_gate_needs_gitattributes_text).
+*.hpp -text
+*.inl -text
+*.cpp -text

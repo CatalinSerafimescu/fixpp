@@ -32,6 +32,7 @@
 #include <iomanip>
 #include <iterator>
 #include <map>
+#include <set>
 #include <sstream>
 #include <string>
 #include <system_error>
@@ -58,30 +59,29 @@ namespace fs = std::filesystem;
 #ifndef FIXPP_CODEGEN_GOLDEN_DIR
 #error "FIXPP_CODEGEN_GOLDEN_DIR must be set by CMake target_compile_definitions"
 #endif
-#ifndef FIXPP_CODEGEN_069_OFFICIAL_GOLDEN_DIR
-#error "FIXPP_CODEGEN_069_OFFICIAL_GOLDEN_DIR must be set by CMake target_compile_definitions"
-#endif
 #ifndef FIXPP_CODEGEN_076_GOLDEN_DIR
 #error "FIXPP_CODEGEN_076_GOLDEN_DIR must be set by CMake target_compile_definitions"
 #endif
-#ifndef FIXPP_CODEGEN_077_GOLDEN_DIR
-#error "FIXPP_CODEGEN_077_GOLDEN_DIR must be set by CMake target_compile_definitions"
+#ifndef FIXPP_CODEGEN_078_GOLDEN_DIR
+#error "FIXPP_CODEGEN_078_GOLDEN_DIR must be set by CMake target_compile_definitions"
 #endif
 
 static constexpr const char* kBin = FIXPP_CODEGEN_BIN;
 static constexpr const char* kDictDir = FIXPP_DICT_DATA_DIR;
 static constexpr const char* kGoldenDir = FIXPP_CODEGEN_GOLDEN_DIR;
-static constexpr const char* kOfficialBuildersGoldenDir = FIXPP_CODEGEN_069_OFFICIAL_GOLDEN_DIR;
 // 076-fix-latest-typed-codegen T017/T018: the vlatest golden lives in a
 // separate feature golden dir (specs/076-.../contracts/golden/), not
 // specs/003's — see cmake target_compile_definitions below.
 static constexpr const char* kVlatestGoldenDir = FIXPP_CODEGEN_076_GOLDEN_DIR;
 static constexpr const char* kVlatestGoldenFile = "vlatest_Messages.golden.hpp";
-// 077-builder-args-dedup T027 [Polish]: the deduped v44 `all`-mode /
-// v50sp2 / vlatest Builders.hpp goldens live under this feature's own
-// contracts/golden/ dir (the `official`-mode v44 golden stays under 069's,
-// gated separately by OfficialModeBuildersMatchesGolden below).
-static constexpr const char* kBuilderDedupGoldenDir = FIXPP_CODEGEN_077_GOLDEN_DIR;
+// 078-precompiled-builder-libs T007/T008 (R6/FR-010): the per-version builder-
+// tier golden SET (groups.hpp/all.hpp/validators/traits.hpp/messages/<Msg>.*)
+// lives under this feature's own contracts/golden/<ns>/ dir, replacing the
+// 077 single-file monolith goldens AND 069's `official`-mode byte golden
+// (Gate-A round-2 decision: the official 33 are a byte-identical subset of
+// the default-mode 83, already pinned here — `official` mode instead gets a
+// lighter STRUCTURAL witness, OfficialModeBuildersStructuralShape below).
+static constexpr const char* kBuilderGoldenDir = FIXPP_CODEGEN_078_GOLDEN_DIR;
 
 // XMLs in the exact order the tool accepts them (matches Codegen.cmake)
 static constexpr std::array<const char*, 4> kXmls = {"FIX42.xml", "FIX44.xml", "FIX50SP2.xml",
@@ -138,6 +138,106 @@ static void expect_bytes_equal(const std::string& actual, const std::string& exp
                   << off << (off == n ? " (one is a prefix of the other)" : "")
                   << "\n  actual  [" << off << "]:" << window(actual, off)
                   << "\n  expected[" << off << "]:" << window(expected, off);
+}
+
+// ── 078-precompiled-builder-libs T008 (R6/FR-010): builder-tier file SET ─────
+//
+// The split emitter interleaves builder-tier artifacts (groups.hpp, all.hpp,
+// validators/traits.hpp, groups/<Plan>.hpp, messages/<Msg>.*) with read-tier
+// artifacts (Fields.hpp, Messages.hpp, Validator.hpp, Reify.hpp,
+// NormativeReferences.md, Manifest.txt) under the same <ns>/ output dir.
+// These helpers isolate the builder-tier SUBSET so the SET+COUNT+content
+// invariant below is scoped correctly (the golden SET under
+// contracts/golden/<ns>/ holds only this subset, not the read tier — that
+// stays goldened by the 003/076 dirs).
+
+// Collect every builder-tier file under a version root, as paths relative to
+// that root (POSIX-style so they compare portably across the two roots being
+// diffed): "groups.hpp", "all.hpp", "validators/traits.hpp",
+// "groups/<relpath>" for everything under the SC-001 per-plan group headers
+// dir, and "messages/<relpath>" for everything under messages/.
+static std::set<std::string> collect_builder_tier_set(const fs::path& ver_root) {
+    std::set<std::string> out;
+    for (auto const* leaf : {"groups.hpp", "all.hpp"}) {
+        if (fs::exists(ver_root / leaf)) out.insert(leaf);
+    }
+    if (fs::exists(ver_root / "validators" / "traits.hpp")) out.insert("validators/traits.hpp");
+    std::error_code ec;
+    for (auto const* sub : {"groups", "messages"}) {
+        for (auto const& e : fs::recursive_directory_iterator(ver_root / sub, ec)) {
+            if (ec) break;
+            if (!e.is_regular_file(ec) || ec) continue;
+            auto rel = fs::relative(e.path(), ver_root, ec);
+            if (!ec) out.insert(rel.generic_string());
+        }
+        ec.clear();
+    }
+    return out;
+}
+
+// Assert two builder-tier file sets are IDENTICAL in NAME-SET + COUNT (a
+// dropped/renamed message is a distinct failure a content-only diff would
+// miss — R6) and that every common file's content is byte-identical.
+// `context` labels failures.
+static void expect_builder_sets_equal(const fs::path& a_root, const fs::path& b_root,
+                                      const std::string& context) {
+    auto a_set = collect_builder_tier_set(a_root);
+    auto b_set = collect_builder_tier_set(b_root);
+
+    std::vector<std::string> only_in_a, only_in_b;
+    std::set_difference(a_set.begin(), a_set.end(), b_set.begin(), b_set.end(),
+                        std::back_inserter(only_in_a));
+    std::set_difference(b_set.begin(), b_set.end(), a_set.begin(), a_set.end(),
+                        std::back_inserter(only_in_b));
+    for (auto const& rel : only_in_a)
+        ADD_FAILURE() << context << ": file present under " << a_root << " but missing under "
+                      << b_root << ": " << rel;
+    for (auto const& rel : only_in_b)
+        ADD_FAILURE() << context << ": file present under " << b_root << " but missing under "
+                      << a_root << ": " << rel;
+    EXPECT_EQ(a_set.size(), b_set.size())
+        << context << ": builder-tier file COUNT differs (" << a_root << "=" << a_set.size()
+        << ", " << b_root << "=" << b_set.size() << ")";
+
+    // Degenerate-walk guard: both sides empty (e.g. a wrong/missing messages/
+    // dir on both roots) would satisfy set-equality vacuously — fail loud
+    // instead of silently passing on a comparison of nothing.
+    EXPECT_GT(a_set.size(), 10U) << context << ": suspiciously few builder-tier files ("
+                                 << a_set.size() << ") under " << a_root
+                                 << " — codegen output shape may have changed.";
+
+    for (auto const& rel : a_set) {
+        if (!b_set.count(rel)) continue;  // already reported above
+        expect_bytes_equal(read_file_binary(a_root / rel), read_file_binary(b_root / rel),
+                           context + ": " + rel + " not byte-identical");
+    }
+}
+
+// Parse the declared size N out of a generated all.hpp's
+// `inline constexpr ::std::array<builder_registry_entry, N> builder_registry`
+// declaration (data-model.md Entity 5). Used only by the official-mode
+// structural witness below, which needs the array's cardinality, not its
+// msg_type contents (contrast tests/codegen/builder_completeness_common.hpp's
+// parse_registry_msgtypes, which extracts the full SET for the census — a
+// minimal local parse here avoids pulling in that header's pugixml
+// dependency for a single integer). Reports via ADD_FAILURE rather than
+// throwing so a malformed all.hpp fails the calling EXPECT_EQ cleanly.
+static std::size_t parse_registry_array_size(const fs::path& all_hpp_path) {
+    std::string const text = read_file_binary(all_hpp_path);
+    static const std::string kNeedle = "builder_registry_entry, ";
+    auto pos = text.find(kNeedle);
+    if (pos == std::string::npos) {
+        ADD_FAILURE() << "no builder_registry array declaration found in " << all_hpp_path;
+        return 0;
+    }
+    pos += kNeedle.size();
+    std::size_t end = pos;
+    while (end < text.size() && text[end] >= '0' && text[end] <= '9') ++end;
+    if (end == pos) {
+        ADD_FAILURE() << "malformed builder_registry array size in " << all_hpp_path;
+        return 0;
+    }
+    return static_cast<std::size_t>(std::stoul(text.substr(pos, end - pos)));
 }
 
 // Snapshot: path → last_write_time for every file reachable from root.
@@ -306,9 +406,15 @@ protected:
         ASSERT_TRUE(fs::exists(kVlatestGoldenDir)) << "076 golden dir not found: " << kVlatestGoldenDir;
         ASSERT_TRUE(fs::exists(fs::path(kVlatestGoldenDir) / kVlatestGoldenFile))
             << "076 golden not found: " << kVlatestGoldenFile;
-        // 077-builder-args-dedup T027 prerequisites.
-        ASSERT_TRUE(fs::exists(kBuilderDedupGoldenDir))
-            << "077 golden dir not found: " << kBuilderDedupGoldenDir;
+        // 078-precompiled-builder-libs T007/T008 prerequisites: the golden
+        // SET's per-version messages/ subdir existing is the cheapest signal
+        // that the set was actually checked in (not just an empty <ns>/ dir).
+        ASSERT_TRUE(fs::exists(kBuilderGoldenDir))
+            << "078 golden dir not found: " << kBuilderGoldenDir;
+        for (auto const* ver : {"v44", "v50sp2", "vlatest"}) {
+            ASSERT_TRUE(fs::exists(fs::path(kBuilderGoldenDir) / ver / "messages"))
+                << "078 golden set missing for " << ver << " under " << kBuilderGoldenDir;
+        }
     }
 };
 
@@ -353,19 +459,17 @@ TEST_F(DeterminismTest, ByteIdenticalAcrossRuns) {
     EXPECT_TRUE(all_identical) << "NFR-003-7 / AC-T1 violated: at least one "
                                   "generated file differs between the two codegen runs.";
 
-    // 077-builder-args-dedup T021 [US3] (FR-007/SC-004): the generic walk
-    // above passes vacuously if a builder-bearing version's Builders.hpp
-    // silently stopped being emitted (nothing to compare is not a failure).
-    // Assert explicitly, per version, that it exists in BOTH runs and is
-    // byte-identical -- v44 and v50sp2 are builder-bearing under the plain
+    // 078-precompiled-builder-libs T008 (R6/FR-010): the generic walk above
+    // passes vacuously if a builder-bearing version's file SET silently
+    // shrank/grew between runs (a content-only diff misses a dropped/renamed
+    // message — the split multiplies files). Assert explicitly, per version,
+    // that the builder-tier SET (groups.hpp/all.hpp/validators/traits.hpp/
+    // messages/**) is identical in NAME-SET, COUNT, and CONTENT between the
+    // two runs -- v44 and v50sp2 are builder-bearing under the plain
     // legacy-XML run_codegen() job set (v42/vt11 emit none, T017/T018).
     for (auto const* ver : {"v44", "v50sp2"}) {
-        fs::path b1 = run1.path / ver / "Builders.hpp";
-        fs::path b2 = run2.path / ver / "Builders.hpp";
-        ASSERT_TRUE(fs::exists(b1)) << ver << "/Builders.hpp missing from run1";
-        ASSERT_TRUE(fs::exists(b2)) << ver << "/Builders.hpp missing from run2";
-        expect_bytes_equal(read_file_binary(b1), read_file_binary(b2),
-                           std::string(ver) + "/Builders.hpp not byte-identical across runs");
+        expect_builder_sets_equal(run1.path / ver, run2.path / ver,
+                                  std::string(ver) + " builder-tier set not identical across runs");
     }
 }
 
@@ -553,27 +657,22 @@ TEST_F(DeterminismTest, VlatestByteIdenticalAcrossRuns) {
     EXPECT_TRUE(all_identical) << "V-4 violated: at least one generated vlatest/ file differs "
                                   "between the two codegen runs.";
 
-    // 077-builder-args-dedup T021 [US3] (FR-007/SC-004): as of 077 the
-    // deduped emitter is version-agnostic (T009) and vlatest is
-    // builder-bearing (T014/T017, 576 shared plans) -- the generic walk
-    // above already covers vlatest/Builders.hpp run-to-run byte-identity,
-    // but a vacuous pass (Builders.hpp silently missing) wouldn't fail it.
-    // Assert explicitly.
-    {
-        fs::path b1 = run1.path / "vlatest" / "Builders.hpp";
-        fs::path b2 = run2.path / "vlatest" / "Builders.hpp";
-        ASSERT_TRUE(fs::exists(b1)) << "vlatest/Builders.hpp missing from run1";
-        ASSERT_TRUE(fs::exists(b2)) << "vlatest/Builders.hpp missing from run2";
-        expect_bytes_equal(read_file_binary(b1), read_file_binary(b2),
-                           "vlatest/Builders.hpp not byte-identical across runs");
-    }
+    // 078-precompiled-builder-libs T008 (R6/FR-010): as of 078 the builder
+    // tier is a per-message file SET (groups.hpp/all.hpp/validators/
+    // traits.hpp/messages/**), not a single Builders.hpp -- the generic walk
+    // above already covers run-to-run byte-identity file-by-file, but a
+    // vacuous pass (the whole SET silently missing) wouldn't fail it. Assert
+    // explicitly that the SET is identical in NAME-SET, COUNT, and CONTENT.
+    expect_builder_sets_equal(run1.path / "vlatest", run2.path / "vlatest",
+                              "vlatest builder-tier set not identical across runs");
 
     // Sanity bound: vlatest emits Fields/Messages/Validator/Reify/
-    // NormativeReferences.md/Manifest.txt/Builders.hpp == 7 artifacts (was 6
-    // pre-077 -- the typed builder tier was descoped by 076, resolved by
-    // 077 T014/T017). A loose lower bound so this doesn't need updating on
-    // an unrelated emitter-shape change, while still catching a degenerate
-    // walk that compares nothing.
+    // NormativeReferences.md/Manifest.txt/groups.hpp/all.hpp + the
+    // messages/**/validators/ builder-tier set (was one monolithic
+    // Builders.hpp pre-078 -- the split multiplies files, T003-T005). A
+    // loose lower bound so this doesn't need updating on an unrelated
+    // emitter-shape change, while still catching a degenerate walk that
+    // compares nothing.
     std::size_t file_count = 0;
     for (auto const& e1 : fs::recursive_directory_iterator(run1.path, ec)) {
         if (!ec && e1.is_regular_file()) ++file_count;
@@ -596,14 +695,13 @@ TEST_F(DeterminismTest, VlatestByteIdenticalAcrossRuns) {
 //       _dispatch/*.hpp) is byte-identical between the OFF-run and the
 //       ON-run. Neither specs/003 nor specs/069's golden dir carries a
 //       golden for _dispatch/ or for Fields/Validator/Reify/
-//       NormativeReferences.md/Manifest.txt (only Messages.hpp x4 and one
-//       v44/Builders.hpp under --families official are goldened) — this
-//       recursive walk is the ONLY gate covering those files' additivity.
+//       NormativeReferences.md/Manifest.txt (only Messages.hpp x4 are
+//       goldened) — this recursive walk is the ONLY gate covering those
+//       files' additivity.
 //       (Both OFF and ON runs here use the default `--families all` mode,
-//       matching the real Codegen.cmake invocation — official-mode
-//       Builders.hpp already has its own gate,
-//       OfficialModeBuildersMatchesGolden below, and is deliberately not
-//       reused here.)
+//       matching the real Codegen.cmake invocation — official-mode already
+//       has its own structural gate, OfficialModeBuildersStructuralShape
+//       below, and is deliberately not reused here.)
 //
 // Folds T019 (build-option ON/OFF behavior witness, US3 acceptance
 // scenarios 1-2) in explicitly:
@@ -755,23 +853,26 @@ TEST_F(DeterminismTest, BuildersOffPathNoStaleVlatestOthersUnaffected) {
     // FR-012: no vlatest/ dir at all when the option is OFF -- the
     // conditional OFF-clean (cmake/Codegen.cmake:347-349) mirrored at the
     // tool-invocation level: an OFF configure simply never adds the
-    // orchestra --xml job, so no vlatest/Builders.hpp (or any other
-    // vlatest/* artifact) is ever written to begin with.
+    // orchestra --xml job, so no vlatest/all.hpp (or any other vlatest/*
+    // builder-tier artifact) is ever written to begin with. `all.hpp` is the
+    // 078 builder-tier aggregator (FR-008, replaces Builders.hpp) -- its
+    // presence is the split-era discriminator for "this version's builder
+    // tier emitted".
     EXPECT_FALSE(fs::exists(off_run.path / "vlatest"))
         << "FR-012 violated: OFF-path job produced a vlatest/ dir -- a stale "
-           "vlatest/Builders.hpp could live here.";
-    EXPECT_FALSE(fs::exists(off_run.path / "vlatest" / "Builders.hpp"));
+           "vlatest/all.hpp could live here.";
+    EXPECT_FALSE(fs::exists(off_run.path / "vlatest" / "all.hpp"));
 
     // Other builder-bearing versions are unaffected by the option being OFF
     // (FIXPP_CODEGEN_FIX_LATEST gates vlatest only, per T014/G4a).
-    EXPECT_TRUE(fs::exists(off_run.path / "v44" / "Builders.hpp"))
-        << "v44/Builders.hpp missing from OFF-path job -- FR-012's gating must be vlatest-only.";
-    EXPECT_TRUE(fs::exists(off_run.path / "v50sp2" / "Builders.hpp"))
-        << "v50sp2/Builders.hpp missing from OFF-path job -- FR-012's gating must be vlatest-only.";
+    EXPECT_TRUE(fs::exists(off_run.path / "v44" / "all.hpp"))
+        << "v44/all.hpp missing from OFF-path job -- FR-012's gating must be vlatest-only.";
+    EXPECT_TRUE(fs::exists(off_run.path / "v50sp2" / "all.hpp"))
+        << "v50sp2/all.hpp missing from OFF-path job -- FR-012's gating must be vlatest-only.";
 
     // v42 is DESCOPED independent of the FIX_LATEST option (T017/issue #196)
     // -- confirm the OFF-path job doesn't accidentally emit it either.
-    EXPECT_FALSE(fs::exists(off_run.path / "v42" / "Builders.hpp"));
+    EXPECT_FALSE(fs::exists(off_run.path / "v42" / "all.hpp"));
 }
 
 #ifdef FIXPP_CODEGEN_MAIN_VLATEST_BUILDERS_HPP
@@ -789,62 +890,74 @@ TEST_F(DeterminismTest, MainTreeVlatestBuildersUnaffectedByOffPathWitness) {
 }
 #endif
 
-// ── Gate B PR#187 round 1 F3: official-mode byte identity (SC-003) ──────────
+// ── 078-precompiled-builder-libs T008 (Gate-A round-2 decision): official-mode
+// STRUCTURAL witness, replacing the pre-078 byte-identity gate (Gate B PR#187
+// round 1 F3, SC-003) ─────────────────────────────────────────────────────
 //
-// test_069_mode_count.cpp (tests/session/) pins only builder_registry.size()
-// (33 under `official`), not the actual byte content. tasks.md T009 verified
-// byte-identity locally against a captured pre-069 baseline
-// (specs/069-v44-all-families/baseline/Builders.OFFICIAL.baseline.hpp,
-// gitignored — a local/manual procedure). This test promotes that same
-// verified content (copied byte-for-byte into the checked-in golden below)
-// into a CI-automated gate, mirroring GeneratedMatchesGolden above.
-
-TEST_F(DeterminismTest, OfficialModeBuildersMatchesGolden) {
+// Retirement rationale: `--families official` selects a strict 33-of-83
+// subset of the default `all`-mode messages, and the split's per-message
+// `.builder.cpp`/`.validator.cpp` bytes for those 33 are already pinned
+// byte-for-byte by V44AllModeBuildersMatchesGolden's golden-SET diff below —
+// a second byte-golden for the same bytes under a narrower selection would
+// add no coverage the R6 contract asks for, so no `v44-official/` golden set
+// is checked in.
+//
+// What IS new post-078 and NOT covered by the default-mode golden: the
+// per-MODE emitted file-SET *shape* (33 vs 83 messages) and the
+// official-mode `builder_registry` array's cardinality — a future emitter
+// regression that silently emitted the wrong subset under `official` (e.g.
+// dropped/duplicated a message during the `is_official` filter) would pass
+// the default-mode golden diff untouched. This test pins both directly
+// against a fresh, ISOLATED `--families official` tool invocation —
+// independent of whatever family mode the shared build tree happens to be
+// configured with (unlike test_069_mode_count.cpp's compiled-array pin,
+// which only sees the tree's *configured* mode).
+TEST_F(DeterminismTest, OfficialModeBuildersStructuralShape) {
     TempDir run("fixpp_det_official");
     int rc = run_codegen_v44_official(run.path);
     ASSERT_EQ(rc, 0) << "official-mode codegen run failed (exit " << rc << ")";
 
-    fs::path generated = run.path / "v44" / "Builders.hpp";
-    fs::path golden = fs::path(kOfficialBuildersGoldenDir) / "v44_Builders_official.golden.hpp";
+    // (i) file-SET shape: 33 messages x 5 files/message + groups.hpp +
+    // all.hpp + validators/traits.hpp + the SC-001 per-plan groups/<Plan>.hpp
+    // headers reachable from those 33 messages' closure (54, a deterministic
+    // function of the official message subset + the group-plan dedup graph)
+    // == 222.
+    constexpr std::size_t kExpectedOfficialMsgCount = 33;
+    constexpr std::size_t kExpectedOfficialGroupPlanCount = 54;
+    constexpr std::size_t kExpectedOfficialFileCount =
+        kExpectedOfficialMsgCount * 5 + kExpectedOfficialGroupPlanCount + 3;
+    auto const built_set = collect_builder_tier_set(run.path / "v44");
+    EXPECT_EQ(built_set.size(), kExpectedOfficialFileCount)
+        << "SC-003 violated: `--families official` v44 builder-tier file-set shape changed "
+           "(expected "
+        << kExpectedOfficialMsgCount << " messages x 5 files + " << kExpectedOfficialGroupPlanCount
+        << " group-plan headers + 3 shared = "
+        << kExpectedOfficialFileCount << ", got " << built_set.size() << ")";
 
-    ASSERT_TRUE(fs::exists(generated)) << "Generated file missing: " << generated;
-    ASSERT_TRUE(fs::exists(golden)) << "Golden not found: " << golden;
-
-    std::string gen_bytes = read_file_binary(generated);
-    std::string golden_bytes = read_file_binary(golden);
-
-    expect_bytes_equal(gen_bytes, golden_bytes,
-                       "SC-003 violated: `--families official` v44/Builders.hpp diverged from the "
-                       "byte-identity baseline\n  generated: " +
-                           generated.string() + "\n  golden:    " + golden.string());
+    // (ii) builder_registry cardinality — the `all.hpp` aggregate array's
+    // declared size (`::std::array<builder_registry_entry, N>`).
+    EXPECT_EQ(parse_registry_array_size(run.path / "v44" / "all.hpp"), kExpectedOfficialMsgCount)
+        << "SC-003 violated: `--families official` v44/all.hpp builder_registry array size != "
+        << kExpectedOfficialMsgCount;
 }
 
-// ── 077-builder-args-dedup T027 [Polish]: checked-in-golden-diff gate for the
-// three NEW deduped builder tiers (FR-013). Boundary vs T021: T021 wired the
-// run-to-run *determinism* assertions (ByteIdenticalAcrossRuns /
-// VlatestByteIdenticalAcrossRuns explicit per-version cells); these three
-// tests add the missing *generated-vs-checked-in-golden* leg, mirroring
-// GeneratedMatchesGolden / VlatestGeneratedMatchesGolden /
-// OfficialModeBuildersMatchesGolden above. The v44 `official`-mode golden
-// (regenerated in place at specs/069-.../contracts/golden/ by T010) is
-// already covered by OfficialModeBuildersMatchesGolden — no new test needed
-// for it, only for the three goldens that are new to 077.
+// ── 078-precompiled-builder-libs T007/T008: checked-in-golden-SET-diff gate
+// for the three builder-bearing versions (R6/FR-010, replaces 077 T027's
+// single-file monolith diff). Boundary vs T008's run-to-run *determinism*
+// cells above (ByteIdenticalAcrossRuns / VlatestByteIdenticalAcrossRuns): this
+// is the missing *generated-set-vs-checked-in-golden-set* leg (assertion 3 of
+// R6), mirroring GeneratedMatchesGolden / VlatestGeneratedMatchesGolden. The
+// v44 `official`-mode structural witness is a distinct, narrower mode gated
+// separately by OfficialModeBuildersStructuralShape above.
 
 TEST_F(DeterminismTest, V44AllModeBuildersMatchesGolden) {
     TempDir run("fixpp_det_v44_all_builders");
-    int rc = run_codegen(run.path);  // default families mode == All (88 structs)
+    int rc = run_codegen(run.path);  // default families mode == All (83 msgs)
     ASSERT_EQ(rc, 0) << "codegen run failed (exit " << rc << ")";
 
-    fs::path generated = run.path / "v44" / "Builders.hpp";
-    fs::path golden = fs::path(kBuilderDedupGoldenDir) / "v44_Builders_all.golden.hpp";
-
-    ASSERT_TRUE(fs::exists(generated)) << "Generated file missing: " << generated;
-    ASSERT_TRUE(fs::exists(golden)) << "Golden not found: " << golden;
-
-    expect_bytes_equal(read_file_binary(generated), read_file_binary(golden),
-                       "FR-013 violated: v44 `all`-mode Builders.hpp diverged from the checked-in "
-                       "golden.\n  generated: " +
-                           generated.string() + "\n  golden:    " + golden.string());
+    expect_builder_sets_equal(run.path / "v44", fs::path(kBuilderGoldenDir) / "v44",
+                              "R6/FR-010 violated: v44 `all`-mode builder-tier set diverged from "
+                              "the checked-in golden set");
 }
 
 TEST_F(DeterminismTest, V50sp2BuildersMatchesGolden) {
@@ -852,16 +965,9 @@ TEST_F(DeterminismTest, V50sp2BuildersMatchesGolden) {
     int rc = run_codegen(run.path);
     ASSERT_EQ(rc, 0) << "codegen run failed (exit " << rc << ")";
 
-    fs::path generated = run.path / "v50sp2" / "Builders.hpp";
-    fs::path golden = fs::path(kBuilderDedupGoldenDir) / "v50sp2_Builders.golden.hpp";
-
-    ASSERT_TRUE(fs::exists(generated)) << "Generated file missing: " << generated;
-    ASSERT_TRUE(fs::exists(golden)) << "Golden not found: " << golden;
-
-    expect_bytes_equal(read_file_binary(generated), read_file_binary(golden),
-                       "FR-013 violated: v50sp2 Builders.hpp diverged from the checked-in "
-                       "golden.\n  generated: " +
-                           generated.string() + "\n  golden:    " + golden.string());
+    expect_builder_sets_equal(run.path / "v50sp2", fs::path(kBuilderGoldenDir) / "v50sp2",
+                              "R6/FR-010 violated: v50sp2 builder-tier set diverged from the "
+                              "checked-in golden set");
 }
 
 TEST_F(DeterminismTest, VlatestBuildersMatchesGolden) {
@@ -869,16 +975,9 @@ TEST_F(DeterminismTest, VlatestBuildersMatchesGolden) {
     int rc = run_codegen_vlatest_only(run.path);
     ASSERT_EQ(rc, 0) << "vlatest codegen run failed (exit " << rc << ")";
 
-    fs::path generated = run.path / "vlatest" / "Builders.hpp";
-    fs::path golden = fs::path(kBuilderDedupGoldenDir) / "vlatest_Builders.golden.hpp";
-
-    ASSERT_TRUE(fs::exists(generated)) << "Generated file missing: " << generated;
-    ASSERT_TRUE(fs::exists(golden)) << "Golden not found: " << golden;
-
-    expect_bytes_equal(read_file_binary(generated), read_file_binary(golden),
-                       "FR-013 violated: vlatest Builders.hpp diverged from the checked-in "
-                       "golden.\n  generated: " +
-                           generated.string() + "\n  golden:    " + golden.string());
+    expect_builder_sets_equal(run.path / "vlatest", fs::path(kBuilderGoldenDir) / "vlatest",
+                              "R6/FR-010 violated: vlatest builder-tier set diverged from the "
+                              "checked-in golden set");
 }
 
 TEST(CodegenGenUtil, AccessorNormalizationCoversKeywordsDigitsAndFallback) {

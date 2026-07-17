@@ -36,7 +36,7 @@
 #include <cstdint>
 #include <fixpp/core/decimal_alias.hpp>
 #include <fixpp/dict/dictionary.hpp>
-#include <fixpp/v44/Builders.hpp>  // GENERATED (Phase 3b) — build_<Msg>/<Msg>Args/registry
+#include <fixpp/v44/all.hpp>  // GENERATED (Phase 3b) — build_<Msg>/<Msg>Args/registry
 #include <fixpp/v44/Messages.hpp>
 #include <memory_resource>
 #include <optional>

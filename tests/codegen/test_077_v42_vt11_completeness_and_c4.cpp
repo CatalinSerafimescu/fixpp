@@ -64,20 +64,21 @@
 #error "FIXPP_CODEGEN_V50SP2_BUILDERS_HPP must be set by CMake target_compile_definitions"
 #endif
 
-// C3c -- vt11: expected = ∅ (genuinely admin-only), no Builders.hpp emitted.
+// C3c -- vt11: expected = ∅ (genuinely admin-only), no all.hpp emitted
+// (078-precompiled-builder-libs: Builders.hpp -> all.hpp).
 TEST(BuilderCompleteness077Vt11V42, Vt11ExpectedEmptyNoFileEmitted) {
     using namespace fixpp_test::builder_completeness;
     std::set<std::string> const expected = legacy_expected_msgtypes(std::string(FIXPP_DICT_DATA_DIR) + "/FIXT11.xml");
     EXPECT_TRUE(expected.empty()) << "vt11 raw-XML walk should have zero application messages";
     EXPECT_FALSE(std::filesystem::exists(FIXPP_CODEGEN_VT11_BUILDERS_HPP))
-        << "vt11 is admin-only; no Builders.hpp should be emitted for it";
+        << "vt11 is admin-only; no all.hpp should be emitted for it";
 }
 
 // C3c-analog (T026 override, issue #196 / L-063-1) -- v42: 39 real
 // application messages exist (raw-XML walk, no `in_scope` exclusion
 // applied), but the builder-completeness census's expected(v42) is DEFINED
-// as ∅ because v42 is a non-builder-bearing version by policy. No
-// Builders.hpp is emitted for it.
+// as ∅ because v42 is a non-builder-bearing version by policy. No all.hpp
+// is emitted for it.
 TEST(BuilderCompleteness077Vt11V42, V42HasAppMessagesButIsNonBuilderBearingByPolicy) {
     using namespace fixpp_test::builder_completeness;
     std::set<std::string> const raw_app_messages =
@@ -92,14 +93,38 @@ TEST(BuilderCompleteness077Vt11V42, V42HasAppMessagesButIsNonBuilderBearingByPol
     std::set<std::string> const expected_for_census;
     EXPECT_TRUE(expected_for_census.empty());
     EXPECT_FALSE(std::filesystem::exists(FIXPP_CODEGEN_V42_BUILDERS_HPP))
-        << "v42 is DESCOPED (issue #196); no Builders.hpp should be emitted for it "
+        << "v42 is DESCOPED (issue #196); no all.hpp should be emitted for it "
            "despite having application messages";
 }
 
 // C4 -- structural-key safety pin, verified against the shipped v50sp2
 // golden (558 distinct plans, 75 with an ordinal suffix -- research.md R3).
+//
+// 078-precompiled-builder-libs re-point (census T017): the `G_...Args`
+// structs moved out of Builders.hpp into the data-only v50sp2/groups.hpp
+// (Entity 1) -- read that file, NOT all.hpp (which holds only #includes +
+// the builder_registry array). FIXPP_CODEGEN_V50SP2_BUILDERS_HPP now names
+// all.hpp; groups.hpp is a sibling in the same per-version directory.
 TEST(BuilderCompleteness077C4, OrdinalVariantsAreStructurallyDistinctAndBareNamesAreExclusive) {
-    std::string const text = fixpp_test::builder_completeness::read_file(FIXPP_CODEGEN_V50SP2_BUILDERS_HPP);
+    // 078-precompiled-builder-libs SC-001 fix: the G_...Args struct BODIES
+    // moved out of the umbrella groups.hpp (now just #includes) into
+    // one-per-file per-plan headers under the sibling groups/ directory.
+    // Concatenate them (the structural-key parse below is keyed by struct
+    // name, so concatenation order is irrelevant).
+    std::filesystem::path const kGroupsDir =
+        std::filesystem::path(FIXPP_CODEGEN_V50SP2_BUILDERS_HPP).parent_path() / "groups";
+    std::string text;
+    {
+        std::error_code ec;
+        for (auto const& e : std::filesystem::directory_iterator(kGroupsDir, ec)) {
+            if (e.path().extension() == ".hpp") {
+                text += fixpp_test::builder_completeness::read_file(e.path().string());
+            }
+        }
+        ASSERT_TRUE(std::filesystem::is_directory(kGroupsDir, ec))
+            << "per-plan groups/ dir not found at " << kGroupsDir
+            << " (078 SC-001 fix moved struct bodies here from the umbrella groups.hpp)";
+    }
 
     // Collect every `struct G_<no_tag>[_<ordinal>]Args { ... };` body,
     // keyed by its full struct name.

@@ -21,7 +21,7 @@
 #include <array>
 #include <cstddef>
 #include <fixpp/core/decimal_alias.hpp>
-#include <fixpp/v44/Builders.hpp>  // GENERATED (Phase 3) — build_<Msg>/<Msg>Args
+#include <fixpp/v44/all.hpp>  // GENERATED (Phase 3) — build_<Msg>/<Msg>Args
 #include <fstream>
 #include <memory_resource>
 #include <optional>

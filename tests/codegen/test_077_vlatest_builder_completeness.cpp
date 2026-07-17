@@ -20,7 +20,7 @@
 // Anchors: specs/077-builder-args-dedup/tasks.md T023;
 //          contracts/builder-completeness.md C1-C4.
 
-#include <fixpp/vlatest/Builders.hpp>  // GENERATED -- build_<Msg>/validate_<Msg>/builder_registry
+#include <fixpp/vlatest/all.hpp>  // GENERATED -- build_<Msg>/validate_<Msg>/builder_registry
 
 #include "builder_completeness_common.hpp"
 
@@ -99,7 +99,8 @@ TEST(BuilderCompleteness077Vlatest, BuildFnSignaturesMatchRawXmlWalk) {
     using namespace fixpp_test::builder_completeness;
     std::set<std::string> const expected =
         orchestra_expected_msgtypes(std::string(FIXPP_DICT_DATA_DIR) + "/orchestra/OrchestraFIXLatest.xml");
-    std::set<std::string> const build_idents = parse_build_fn_identifiers(FIXPP_CODEGEN_VLATEST_BUILDERS_HPP);
+    std::set<std::string> const build_idents = parse_build_fn_identifiers(
+        std::filesystem::path(FIXPP_CODEGEN_VLATEST_BUILDERS_HPP).parent_path().string());
 
     std::set<std::string> translated_msgtypes;
     for (auto const& ident : build_idents) {

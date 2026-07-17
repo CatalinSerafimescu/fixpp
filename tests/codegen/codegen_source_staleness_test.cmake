@@ -5,7 +5,7 @@
 #      the main-tree fixpp-codegen binary.
 #   2. Re-run configure on the SAME build tree.
 #   3. Assert Codegen.cmake rejects the stale main binary, rebuilds the
-#      bootstrap tool, and regenerates v44/Builders.hpp from a fresh tool.
+#      bootstrap tool, and regenerates v44/all.hpp from a fresh tool.
 #   4. Restore the source file and confirm a subsequent clean reconfigure
 #      settles back to "up-to-date".
 
@@ -94,7 +94,7 @@ endfunction()
 
 macro(_assert_registry_size_83)
   if(NOT EXISTS "${FIXPP_BUILDERS_HEADER}")
-    list(APPEND _FAIL_MSGS "  FAIL: Builders header missing: ${FIXPP_BUILDERS_HEADER}")
+    list(APPEND _FAIL_MSGS "  FAIL: all.hpp missing: ${FIXPP_BUILDERS_HEADER}")
     math(EXPR _FAIL_COUNT "${_FAIL_COUNT} + 1")
   else()
     file(READ "${FIXPP_BUILDERS_HEADER}" _builders_contents)
@@ -105,7 +105,7 @@ macro(_assert_registry_size_83)
       math(EXPR _PASS_COUNT "${_PASS_COUNT} + 1")
     else()
       list(APPEND _FAIL_MSGS
-        "  FAIL: v44/Builders.hpp does not expose builder_registry.size() == 83.")
+        "  FAIL: v44/all.hpp does not expose builder_registry.size() == 83.")
       math(EXPR _FAIL_COUNT "${_FAIL_COUNT} + 1")
     endif()
   endif()

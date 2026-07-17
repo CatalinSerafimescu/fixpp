@@ -134,8 +134,9 @@ add_executable(codegen_vlatest_tests
   vlatest_dispatch_exclusion_test.cpp   # T011
   # 077-builder-args-dedup T013 [US1]: joins this existing binary
   # ([const §VII.8] whole-binary grouping; 069's test_067_builder_roundtrip
-  # precedent). Pure text-parse of Builders.hpp (no #include of the heavy
-  # header, unlike the sources above) -- cheap, isolation-safe, reuses the
+  # precedent). Pure text-parse of groups.hpp (078: G_...Args structs' new
+  # data-only home; no #include of any heavy header, unlike the sources
+  # above) -- cheap, isolation-safe, reuses the
   # FIXPP_CODEGEN_VLATEST_BUILDERS_HPP macro already defined below.
   test_077_builder_dedup_count.cpp      # T013
   # 077-builder-args-dedup T018 [US2]: vt11/v42 emit-no-builders witness +
@@ -155,13 +156,15 @@ target_include_directories(codegen_vlatest_tests PRIVATE
 )
 target_compile_definitions(codegen_vlatest_tests PRIVATE
   "FIXPP_DISPATCH_APPLICATION_HEADER_PATH=\"${FIXPP_CODEGEN_OUT}/fixpp/_dispatch/reify_dispatch_application.hpp\""
-  "FIXPP_CODEGEN_VLATEST_BUILDERS_HPP=\"${FIXPP_CODEGEN_OUT}/fixpp/vlatest/Builders.hpp\""
-  # 077-builder-args-dedup T018 [US2]: per-version Builders.hpp paths for the
+  # 078-precompiled-builder-libs census re-point: Builders.hpp -> all.hpp
+  # (the monolith is gone, FR-008; all.hpp is the registry's new home).
+  "FIXPP_CODEGEN_VLATEST_BUILDERS_HPP=\"${FIXPP_CODEGEN_OUT}/fixpp/vlatest/all.hpp\""
+  # 077-builder-args-dedup T018 [US2]: per-version all.hpp paths for the
   # no-emit / positive-control witness (test_077_builder_no_emit.cpp).
-  "FIXPP_CODEGEN_V42_BUILDERS_HPP=\"${FIXPP_CODEGEN_OUT}/fixpp/v42/Builders.hpp\""
-  "FIXPP_CODEGEN_V44_BUILDERS_HPP=\"${FIXPP_CODEGEN_OUT}/fixpp/v44/Builders.hpp\""
-  "FIXPP_CODEGEN_V50SP2_BUILDERS_HPP=\"${FIXPP_CODEGEN_OUT}/fixpp/v50sp2/Builders.hpp\""
-  "FIXPP_CODEGEN_VT11_BUILDERS_HPP=\"${FIXPP_CODEGEN_OUT}/fixpp/vt11/Builders.hpp\""
+  "FIXPP_CODEGEN_V42_BUILDERS_HPP=\"${FIXPP_CODEGEN_OUT}/fixpp/v42/all.hpp\""
+  "FIXPP_CODEGEN_V44_BUILDERS_HPP=\"${FIXPP_CODEGEN_OUT}/fixpp/v44/all.hpp\""
+  "FIXPP_CODEGEN_V50SP2_BUILDERS_HPP=\"${FIXPP_CODEGEN_OUT}/fixpp/v50sp2/all.hpp\""
+  "FIXPP_CODEGEN_VT11_BUILDERS_HPP=\"${FIXPP_CODEGEN_OUT}/fixpp/vt11/all.hpp\""
 )
 add_test(NAME codegen_vlatest_tests COMMAND codegen_vlatest_tests)
 set_tests_properties(codegen_vlatest_tests PROPERTIES
@@ -218,11 +221,14 @@ if(FIXPP_BUILD_HEAVY_BUILDER_TESTS)
 add_executable(codegen_077_vlatest_builder_completeness_test
   test_077_vlatest_builder_completeness.cpp
 )
-add_dependencies(codegen_077_vlatest_builder_completeness_test fixpp_codegen_generate)
+add_dependencies(codegen_077_vlatest_builder_completeness_test fixpp_codegen_generate
+  fixpp_builders_vlatest fixpp_validators_vlatest)
 target_link_libraries(codegen_077_vlatest_builder_completeness_test PRIVATE
   fixpp_wire
   fixpp_dictionary
   pugixml::pugixml
+  fixpp::builders::vlatest
+  fixpp::validators::vlatest
   GTest::gtest
   GTest::gtest_main
 )
@@ -231,7 +237,8 @@ target_include_directories(codegen_077_vlatest_builder_completeness_test PRIVATE
 )
 target_compile_definitions(codegen_077_vlatest_builder_completeness_test PRIVATE
   "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
-  "FIXPP_CODEGEN_VLATEST_BUILDERS_HPP=\"${FIXPP_CODEGEN_OUT}/fixpp/vlatest/Builders.hpp\""
+  # 078-precompiled-builder-libs census re-point: Builders.hpp -> all.hpp.
+  "FIXPP_CODEGEN_VLATEST_BUILDERS_HPP=\"${FIXPP_CODEGEN_OUT}/fixpp/vlatest/all.hpp\""
 )
 # MSVC C1128: this TU takes the address of every vlatest build_/validate_ over
 # the ~78MB deduped Builders.hpp (173 plans); under debug/asan the section count
@@ -253,11 +260,14 @@ endif()  # FIXPP_CODEGEN_FIX_LATEST
 add_executable(codegen_077_v44_builder_completeness_test
   test_077_v44_builder_completeness.cpp
 )
-add_dependencies(codegen_077_v44_builder_completeness_test fixpp_codegen_generate)
+add_dependencies(codegen_077_v44_builder_completeness_test fixpp_codegen_generate
+  fixpp_builders_v44 fixpp_validators_v44)
 target_link_libraries(codegen_077_v44_builder_completeness_test PRIVATE
   fixpp_wire
   fixpp_dictionary
   pugixml::pugixml
+  fixpp::builders::v44
+  fixpp::validators::v44
   GTest::gtest
   GTest::gtest_main
 )
@@ -266,7 +276,8 @@ target_include_directories(codegen_077_v44_builder_completeness_test PRIVATE
 )
 target_compile_definitions(codegen_077_v44_builder_completeness_test PRIVATE
   "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
-  "FIXPP_CODEGEN_V44_BUILDERS_HPP=\"${FIXPP_CODEGEN_OUT}/fixpp/v44/Builders.hpp\""
+  # 078-precompiled-builder-libs census re-point: Builders.hpp -> all.hpp.
+  "FIXPP_CODEGEN_V44_BUILDERS_HPP=\"${FIXPP_CODEGEN_OUT}/fixpp/v44/all.hpp\""
 )
 add_test(NAME codegen_077_v44_builder_completeness_test COMMAND codegen_077_v44_builder_completeness_test)
 set_tests_properties(codegen_077_v44_builder_completeness_test PROPERTIES
@@ -281,11 +292,14 @@ if(FIXPP_BUILD_HEAVY_BUILDER_TESTS)
 add_executable(codegen_077_v50sp2_builder_completeness_test
   test_077_v50sp2_builder_completeness.cpp
 )
-add_dependencies(codegen_077_v50sp2_builder_completeness_test fixpp_codegen_generate)
+add_dependencies(codegen_077_v50sp2_builder_completeness_test fixpp_codegen_generate
+  fixpp_builders_v50sp2 fixpp_validators_v50sp2)
 target_link_libraries(codegen_077_v50sp2_builder_completeness_test PRIVATE
   fixpp_wire
   fixpp_dictionary
   pugixml::pugixml
+  fixpp::builders::v50sp2
+  fixpp::validators::v50sp2
   GTest::gtest
   GTest::gtest_main
 )
@@ -294,7 +308,8 @@ target_include_directories(codegen_077_v50sp2_builder_completeness_test PRIVATE
 )
 target_compile_definitions(codegen_077_v50sp2_builder_completeness_test PRIVATE
   "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
-  "FIXPP_CODEGEN_V50SP2_BUILDERS_HPP=\"${FIXPP_CODEGEN_OUT}/fixpp/v50sp2/Builders.hpp\""
+  # 078-precompiled-builder-libs census re-point: Builders.hpp -> all.hpp.
+  "FIXPP_CODEGEN_V50SP2_BUILDERS_HPP=\"${FIXPP_CODEGEN_OUT}/fixpp/v50sp2/all.hpp\""
 )
 # MSVC C1128: this TU takes the address of every v50sp2 build_/validate_ over
 # the ~75MB deduped Builders.hpp (156 plans); under debug/asan the section count
@@ -321,9 +336,12 @@ target_link_libraries(codegen_077_v42_vt11_completeness_c4_test PRIVATE
 )
 target_compile_definitions(codegen_077_v42_vt11_completeness_c4_test PRIVATE
   "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
-  "FIXPP_CODEGEN_V42_BUILDERS_HPP=\"${FIXPP_CODEGEN_OUT}/fixpp/v42/Builders.hpp\""
-  "FIXPP_CODEGEN_VT11_BUILDERS_HPP=\"${FIXPP_CODEGEN_OUT}/fixpp/vt11/Builders.hpp\""
-  "FIXPP_CODEGEN_V50SP2_BUILDERS_HPP=\"${FIXPP_CODEGEN_OUT}/fixpp/v50sp2/Builders.hpp\""
+  # 078-precompiled-builder-libs census re-point: Builders.hpp -> all.hpp
+  # (V50SP2 feeds the C4 group-struct text-parse, which derives sibling
+  # groups.hpp from this path -- see test_077_v42_vt11_completeness_and_c4.cpp).
+  "FIXPP_CODEGEN_V42_BUILDERS_HPP=\"${FIXPP_CODEGEN_OUT}/fixpp/v42/all.hpp\""
+  "FIXPP_CODEGEN_VT11_BUILDERS_HPP=\"${FIXPP_CODEGEN_OUT}/fixpp/vt11/all.hpp\""
+  "FIXPP_CODEGEN_V50SP2_BUILDERS_HPP=\"${FIXPP_CODEGEN_OUT}/fixpp/v50sp2/all.hpp\""
 )
 add_test(NAME codegen_077_v42_vt11_completeness_c4_test COMMAND codegen_077_v42_vt11_completeness_c4_test)
 set_tests_properties(codegen_077_v42_vt11_completeness_c4_test PROPERTIES
@@ -381,11 +399,11 @@ target_compile_definitions(codegen_determinism_test PRIVATE
   "FIXPP_CODEGEN_BIN=\"$<TARGET_FILE:fixpp-codegen>\""
   "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
   "FIXPP_CODEGEN_GOLDEN_DIR=\"${CMAKE_SOURCE_DIR}/specs/003-dictionary-codegen/contracts/golden\""
-  "FIXPP_CODEGEN_069_OFFICIAL_GOLDEN_DIR=\"${CMAKE_SOURCE_DIR}/specs/069-v44-all-families/contracts/golden\""
   "FIXPP_CODEGEN_076_GOLDEN_DIR=\"${CMAKE_SOURCE_DIR}/specs/076-fix-latest-typed-codegen/contracts/golden\""
-  # 077-builder-args-dedup T027 [Polish]: v44 `all`-mode + v50sp2 + vlatest
-  # Builders.hpp checked-in-golden-diff gate (FR-013).
-  "FIXPP_CODEGEN_077_GOLDEN_DIR=\"${CMAKE_SOURCE_DIR}/specs/077-builder-args-dedup/contracts/golden\""
+  # 078-precompiled-builder-libs T007/T008 (R6/FR-010): v44/v50sp2/vlatest
+  # builder-tier golden SET (groups.hpp/all.hpp/validators/traits.hpp/
+  # messages/<Msg>.*), replacing 077's single-file monolith goldens.
+  "FIXPP_CODEGEN_078_GOLDEN_DIR=\"${CMAKE_SOURCE_DIR}/specs/078-precompiled-builder-libs/contracts/golden\""
 )
 add_test(NAME codegen_determinism_test COMMAND codegen_determinism_test)
 set_tests_properties(codegen_determinism_test PROPERTIES LABELS codegen)
@@ -396,8 +414,9 @@ set_tests_properties(codegen_determinism_test PROPERTIES LABELS codegen)
 # (where _codegen/include/fixpp/vlatest/ doesn't exist at all) never sees a
 # spurious existence-check failure.
 if(FIXPP_CODEGEN_FIX_LATEST)
+  # 078-precompiled-builder-libs census re-point: Builders.hpp -> all.hpp.
   target_compile_definitions(codegen_determinism_test PRIVATE
-    "FIXPP_CODEGEN_MAIN_VLATEST_BUILDERS_HPP=\"${FIXPP_CODEGEN_OUT}/fixpp/vlatest/Builders.hpp\"")
+    "FIXPP_CODEGEN_MAIN_VLATEST_BUILDERS_HPP=\"${FIXPP_CODEGEN_OUT}/fixpp/vlatest/all.hpp\"")
 endif()
 
 # T039: cmake -P build-graph test — fixpp::dict::codegen-build-graph-check
@@ -434,7 +453,9 @@ add_test(
     "-DFIXPP_CODEGEN_MAIN_BIN=$<TARGET_FILE:fixpp-codegen>"
     "-DFIXPP_CODEGEN_BOOTSTRAP_BIN=${CMAKE_BINARY_DIR}/_codegen_bootstrap/bin/fixpp-codegen${CMAKE_EXECUTABLE_SUFFIX}"
     "-DFIXPP_GENERATOR_SOURCE=${CMAKE_SOURCE_DIR}/tools/codegen/fixpp-codegen/emit_builders.cpp"
-    "-DFIXPP_BUILDERS_HEADER=${CMAKE_BINARY_DIR}/_codegen/include/fixpp/v44/Builders.hpp"
+    # 078-precompiled-builder-libs census re-point: Builders.hpp -> all.hpp
+    # (builder_registry's new home, T011).
+    "-DFIXPP_BUILDERS_HEADER=${CMAKE_BINARY_DIR}/_codegen/include/fixpp/v44/all.hpp"
     -P "${CMAKE_CURRENT_SOURCE_DIR}/codegen_source_staleness_test.cmake"
 )
 set_tests_properties("fixpp::dict::codegen-source-staleness-check" PROPERTIES
@@ -457,3 +478,314 @@ add_test(
 )
 set_tests_properties("fixpp::dict::read-tier-byte-diff" PROPERTIES
   LABELS "codegen;077;read-tier-byte-diff")
+
+# 078-precompiled-builder-libs T002 (research.md R2a — Phase-0 BLOCKING
+# prerequisite): hand-written ~30-line ODR / builder⟂validator (SC-003) probe.
+# Hand-writes a MINIMAL MOCK of the intended split (test_078_odr_mock/) — the
+# real emitter split (T003+) does not exist yet — to settle R1 (disjoint
+# objects) and R2 (traits home) empirically before the emitter commits to the
+# layout. Independent of fixpp_codegen_generate; no codegen dependency.
+#
+# Two disjoint mock static libs, mirroring data-model.md Entity 4:
+#   test078_mock_builders   <- msg_a.builder.cpp,   msg_b.builder.cpp   (build_ only)
+#   test078_mock_validators <- msg_a.validator.cpp, msg_b.validator.cpp (validate_ + traits)
+add_library(test078_mock_builders STATIC
+  test_078_odr_mock/msg_a.builder.cpp
+  test_078_odr_mock/msg_b.builder.cpp
+)
+
+add_library(test078_mock_validators STATIC
+  test_078_odr_mock/msg_a.validator.cpp
+  test_078_odr_mock/msg_b.validator.cpp
+)
+
+# Legs (i) + (iii): the "both-linked" probe binary. Force-inlines
+# validate_MsgA (test_078_odr_mock/msg_a.validator.inl) while linking BOTH
+# mock libs and calling build_/validate_ from both messages — the test IS the
+# link succeeding (a duplicate-symbol regression fails the build, not an
+# assertion).
+add_executable(test078_odr_sc003_probe test_078_odr_sc003_probe.cpp)
+target_link_libraries(test078_odr_sc003_probe PRIVATE
+  test078_mock_builders
+  test078_mock_validators
+  GTest::gtest
+  GTest::gtest_main
+)
+add_test(NAME test078_odr_sc003_probe COMMAND test078_odr_sc003_probe)
+set_tests_properties(test078_odr_sc003_probe PROPERTIES
+  LABELS "codegen;078;test_078_odr")
+
+# Leg (ii): builder-only binary — links ONLY test078_mock_builders.
+add_executable(test078_odr_builder_only_probe test_078_odr_builder_only_nm_probe.cpp)
+target_link_libraries(test078_odr_builder_only_probe PRIVATE test078_mock_builders)
+
+# `nm --defined-only` on the builder-only binary must show zero
+# validate_/writer_traits symbols (SC-003).
+find_program(FIXPP_078_NM_TOOL nm)
+if(FIXPP_078_NM_TOOL)
+  add_test(
+    NAME test078_odr_sc003_probe_nm_builder_only
+    COMMAND "${CMAKE_COMMAND}"
+      "-DFIXPP_NM=${FIXPP_078_NM_TOOL}"
+      "-DFIXPP_BINARY=$<TARGET_FILE:test078_odr_builder_only_probe>"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/test_078_odr_nm_check.cmake"
+  )
+  set_tests_properties(test078_odr_sc003_probe_nm_builder_only PROPERTIES
+    LABELS "codegen;078;test_078_odr")
+else()
+  message(STATUS "tests/codegen: nm not found; skipping test078_odr_sc003_probe_nm_builder_only leg (ii)")
+endif()
+
+# ── 078-precompiled-builder-libs T020 [US1]: slim-header compile + link
+# witness (US1 AC1/AC2). Own OBJECT library so the nm discrimination check
+# below can inspect the compiled .o directly (before it is folded into the
+# test executable) -- links only fixpp::builders::v44 (the v44 lib is built
+# locally; vlatest is CI-deferred per the orchestrator brief).
+add_library(test078_slim_compile_us1_obj OBJECT test_078_slim_compile_us1.cpp)
+add_dependencies(test078_slim_compile_us1_obj fixpp_codegen_generate)
+target_include_directories(test078_slim_compile_us1_obj PRIVATE
+  "${FIXPP_CODEGEN_OUT}"
+)
+target_link_libraries(test078_slim_compile_us1_obj PRIVATE GTest::gtest)
+
+add_executable(test078_slim_compile_us1 $<TARGET_OBJECTS:test078_slim_compile_us1_obj>)
+add_dependencies(test078_slim_compile_us1 fixpp_builders_v44)
+target_link_libraries(test078_slim_compile_us1 PRIVATE
+  fixpp::builders::v44
+  GTest::gtest
+  GTest::gtest_main
+)
+add_test(NAME test078_slim_compile_us1 COMMAND test078_slim_compile_us1)
+set_tests_properties(test078_slim_compile_us1 PROPERTIES
+  LABELS "codegen;078;us1;slim-compile")
+
+# Discrimination (US1 AC1): the compiled OBJECT must carry zero DEFINED
+# build_ symbols and one UNDEFINED build_NewOrderSingle reference.
+if(FIXPP_078_NM_TOOL)
+  add_test(
+    NAME test078_slim_compile_us1_nm_object_check
+    COMMAND "${CMAKE_COMMAND}"
+      "-DFIXPP_NM=${FIXPP_078_NM_TOOL}"
+      "-DFIXPP_OBJECT=$<TARGET_OBJECTS:test078_slim_compile_us1_obj>"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/test_078_slim_object_nm_check.cmake"
+  )
+  set_tests_properties(test078_slim_compile_us1_nm_object_check PROPERTIES
+    LABELS "codegen;078;us1;slim-compile")
+else()
+  message(STATUS "tests/codegen: nm not found; skipping test078_slim_compile_us1_nm_object_check")
+endif()
+
+# ── 078-precompiled-builder-libs T022 [US1]: two-version no-symbol-collision
+# witness (US1 AC3). Links BOTH fixpp::builders::v44 and fixpp::builders::v50sp2
+# (both built locally; vlatest is CI-deferred).
+add_executable(test078_two_version_link_us1 test_078_two_version_link_us1.cpp)
+add_dependencies(test078_two_version_link_us1 fixpp_codegen_generate
+  fixpp_builders_v44 fixpp_builders_v50sp2)
+target_link_libraries(test078_two_version_link_us1 PRIVATE
+  fixpp::builders::v44
+  fixpp::builders::v50sp2
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(test078_two_version_link_us1 PRIVATE
+  "${FIXPP_CODEGEN_OUT}"
+)
+add_test(NAME test078_two_version_link_us1 COMMAND test078_two_version_link_us1)
+set_tests_properties(test078_two_version_link_us1 PROPERTIES
+  LABELS "codegen;078;us1;two-version-link")
+
+# ── 078-precompiled-builder-libs T024 [US2]: `nm` builder-only witness
+# (SC-003/FR-005). Links ONLY fixpp::builders::v44 -- NOT
+# fixpp::validators::v44 -- proving a send-only consumer carries zero
+# validator code. Real-lib counterpart to the T002 R2a probe's leg (ii).
+add_executable(test078_nm_builder_only_us2 test_078_nm_builder_only_us2.cpp)
+add_dependencies(test078_nm_builder_only_us2 fixpp_codegen_generate fixpp_builders_v44)
+target_link_libraries(test078_nm_builder_only_us2 PRIVATE
+  fixpp::builders::v44
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(test078_nm_builder_only_us2 PRIVATE
+  "${FIXPP_CODEGEN_OUT}"
+)
+add_test(NAME test078_nm_builder_only_us2 COMMAND test078_nm_builder_only_us2)
+set_tests_properties(test078_nm_builder_only_us2 PROPERTIES
+  LABELS "codegen;078;us2;nm-builder-only")
+
+# Discrimination (SC-003/FR-005): the LINKED BINARY must carry zero
+# fixpp::v44::validate_/writer_traits symbols. Uses a DEDICATED, more precise
+# check script (NOT the T002 leg (ii) script) -- see
+# test_078_nm_builder_only_us2_check.cmake for why: the T002 script's bare
+# "validate_" substring match false-positives against fixpp::wire::
+# body_builder::validate_group_grammar, a real symbol pulled in by this
+# binary's fixpp_wire dependency (never present in T002's hand-written mock).
+if(FIXPP_078_NM_TOOL)
+  add_test(
+    NAME test078_nm_builder_only_us2_nm_check
+    COMMAND "${CMAKE_COMMAND}"
+      "-DFIXPP_NM=${FIXPP_078_NM_TOOL}"
+      "-DFIXPP_BINARY=$<TARGET_FILE:test078_nm_builder_only_us2>"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/test_078_nm_builder_only_us2_check.cmake"
+  )
+  set_tests_properties(test078_nm_builder_only_us2_nm_check PROPERTIES
+    LABELS "codegen;078;us2;nm-builder-only")
+else()
+  message(STATUS "tests/codegen: nm not found; skipping test078_nm_builder_only_us2_nm_check")
+endif()
+
+# ── 078-precompiled-builder-libs T026 [US3]: builder-side mixing witness
+# (FR-007 headline / New-4). Own OBJECT library so the object-level nm
+# discrimination check below can inspect the compiled .o directly (before it
+# is folded into the test executable), mirroring T020's pattern -- force-
+# inlines NewOrderSingle while linking fixpp::builders::v44 for
+# ExecutionReport.
+add_library(test078_builder_mixing_us3_obj OBJECT test_078_builder_mixing_us3.cpp)
+add_dependencies(test078_builder_mixing_us3_obj fixpp_codegen_generate)
+target_link_libraries(test078_builder_mixing_us3_obj PRIVATE
+  fixpp_dictionary
+  GTest::gtest
+)
+target_include_directories(test078_builder_mixing_us3_obj PRIVATE
+  "${FIXPP_CODEGEN_OUT}"
+  "${CMAKE_SOURCE_DIR}/tests"
+)
+target_compile_definitions(test078_builder_mixing_us3_obj PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
+)
+
+add_executable(test078_builder_mixing_us3 $<TARGET_OBJECTS:test078_builder_mixing_us3_obj>)
+add_dependencies(test078_builder_mixing_us3 fixpp_builders_v44)
+target_link_libraries(test078_builder_mixing_us3 PRIVATE
+  fixpp::builders::v44
+  fixpp_dictionary
+  GTest::gtest
+  GTest::gtest_main
+)
+target_compile_definitions(test078_builder_mixing_us3 PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
+)
+add_test(NAME test078_builder_mixing_us3 COMMAND test078_builder_mixing_us3)
+set_tests_properties(test078_builder_mixing_us3 PROPERTIES
+  LABELS "codegen;078;us3;builder-mixing")
+
+# Discrimination (US3 AC1/FR-006/FR-007): the compiled OBJECT must show
+# build_NewOrderSingle DEFINED locally (force-inlined) and
+# build_ExecutionReport UNDEFINED (resolves only at final link).
+if(FIXPP_078_NM_TOOL)
+  add_test(
+    NAME test078_builder_mixing_us3_object_nm_check
+    COMMAND "${CMAKE_COMMAND}"
+      "-DFIXPP_NM=${FIXPP_078_NM_TOOL}"
+      "-DFIXPP_OBJECT=$<TARGET_OBJECTS:test078_builder_mixing_us3_obj>"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/test_078_builder_mixing_us3_object_nm_check.cmake"
+  )
+  set_tests_properties(test078_builder_mixing_us3_object_nm_check PROPERTIES
+    LABELS "codegen;078;us3;builder-mixing")
+else()
+  message(STATUS "tests/codegen: nm not found; skipping test078_builder_mixing_us3_object_nm_check")
+endif()
+
+# ── 078-precompiled-builder-libs T027 [US3]: validator-side mixing witness
+# (R2a leg i, at real-lib scale). Force-inlines validate_Email (shares the
+# G_33Args group plan) while linking fixpp::validators::v44 for validate_News.
+add_executable(test078_validator_mixing_us3 test_078_validator_mixing_us3.cpp)
+add_dependencies(test078_validator_mixing_us3 fixpp_codegen_generate fixpp_validators_v44)
+target_link_libraries(test078_validator_mixing_us3 PRIVATE
+  fixpp_wire
+  fixpp::validators::v44
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(test078_validator_mixing_us3 PRIVATE
+  "${FIXPP_CODEGEN_OUT}"
+)
+add_test(NAME test078_validator_mixing_us3 COMMAND test078_validator_mixing_us3)
+set_tests_properties(test078_validator_mixing_us3 PROPERTIES
+  LABELS "codegen;078;us3;validator-mixing")
+
+# ── 078-precompiled-builder-libs T028 [US3]: SC-002 `nm` link-only witness.
+# Calls a SUBSET (3) of v44's builders, linking fixpp::builders::v44 --
+# proves per-message .o archive granularity (the linker pulls only the 3
+# referenced .builder.o members, not the whole version-wide set).
+add_executable(test078_nm_link_only_us3 test_078_nm_link_only_us3.cpp)
+add_dependencies(test078_nm_link_only_us3 fixpp_codegen_generate fixpp_builders_v44)
+target_link_libraries(test078_nm_link_only_us3 PRIVATE
+  fixpp::builders::v44
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(test078_nm_link_only_us3 PRIVATE
+  "${FIXPP_CODEGEN_OUT}"
+)
+add_test(NAME test078_nm_link_only_us3 COMMAND test078_nm_link_only_us3)
+set_tests_properties(test078_nm_link_only_us3 PROPERTIES
+  LABELS "codegen;078;us3;nm-link-only")
+
+# Discrimination (SC-002): the LINKED BINARY must carry exactly the 3 called
+# build_ symbols and NOT the un-called 4th (build_OrderCancelRequest).
+if(FIXPP_078_NM_TOOL)
+  add_test(
+    NAME test078_nm_link_only_us3_nm_check
+    COMMAND "${CMAKE_COMMAND}"
+      "-DFIXPP_NM=${FIXPP_078_NM_TOOL}"
+      "-DFIXPP_BINARY=$<TARGET_FILE:test078_nm_link_only_us3>"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/test_078_nm_link_only_us3_check.cmake"
+  )
+  set_tests_properties(test078_nm_link_only_us3_nm_check PROPERTIES
+    LABELS "codegen;078;us3;nm-link-only")
+else()
+  message(STATUS "tests/codegen: nm not found; skipping test078_nm_link_only_us3_nm_check")
+endif()
+
+# ── 078-precompiled-builder-libs T029 [US4]: `all.hpp` full-set equivalence
+# (SC-005/FR-008/FR-012). #include's ONLY <fixpp/v44/all.hpp>; a full 83-entry
+# address-of census (reusing builder_completeness_common.hpp + the committed
+# generated/v44_builder_completeness_entries.def, mirrors codegen_077_v44_
+# builder_completeness_test's wiring) plus a representative byte-identical
+# sample.
+add_executable(test078_all_hpp_fullset_us4 test_078_all_hpp_fullset_us4.cpp)
+add_dependencies(test078_all_hpp_fullset_us4 fixpp_codegen_generate
+  fixpp_builders_v44 fixpp_validators_v44)
+target_link_libraries(test078_all_hpp_fullset_us4 PRIVATE
+  fixpp_wire
+  fixpp_dictionary
+  pugixml::pugixml
+  fixpp::builders::v44
+  fixpp::validators::v44
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(test078_all_hpp_fullset_us4 PRIVATE
+  "${FIXPP_CODEGEN_OUT}"
+  "${CMAKE_SOURCE_DIR}/tests"
+)
+target_compile_definitions(test078_all_hpp_fullset_us4 PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
+  "FIXPP_CODEGEN_V44_ALL_HPP=\"${FIXPP_CODEGEN_OUT}/fixpp/v44/all.hpp\""
+)
+add_test(NAME test078_all_hpp_fullset_us4 COMMAND test078_all_hpp_fullset_us4)
+set_tests_properties(test078_all_hpp_fullset_us4 PROPERTIES
+  LABELS "codegen;078;us4;all-hpp-fullset")
+
+# ── 078-precompiled-builder-libs T031 [US4]: negative check -- the old
+# include path (fixpp/<ns>/Builders.hpp) is gone (US4 AC2/SC-005 removal
+# leg). Compile-time __has_include guards (v44/v50sp2) + a runtime
+# filesystem sweep across all three builder-bearing versions. No builder
+# lib needed to link (pure #include/filesystem probe) -- only the codegen
+# generation dependency.
+add_executable(test078_builders_hpp_removed_us4 test_078_builders_hpp_removed_us4.cpp)
+add_dependencies(test078_builders_hpp_removed_us4 fixpp_codegen_generate)
+target_link_libraries(test078_builders_hpp_removed_us4 PRIVATE
+  fixpp_core
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(test078_builders_hpp_removed_us4 PRIVATE
+  "${FIXPP_CODEGEN_OUT}"
+)
+target_compile_definitions(test078_builders_hpp_removed_us4 PRIVATE
+  "FIXPP_CODEGEN_OUT_DIR=\"${FIXPP_CODEGEN_OUT}\""
+)
+add_test(NAME test078_builders_hpp_removed_us4 COMMAND test078_builders_hpp_removed_us4)
+set_tests_properties(test078_builders_hpp_removed_us4 PROPERTIES
+  LABELS "codegen;078;us4;builders-hpp-removed")

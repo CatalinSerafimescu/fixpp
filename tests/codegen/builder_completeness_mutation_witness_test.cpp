@@ -12,9 +12,10 @@
 // never observed red proves nothing): this test invokes the T024 mutation
 // seam's fixpp-codegen-drop-witness binary (built with
 // -DFIXPP_CODEGEN_DROP_BUILDER_MSGTYPE="D") in a SUBPROCESS against
-// FIX44.xml only, regenerating v44/Builders.hpp into an isolated temp dir
-// with msgtype "D" (NewOrderSingle) missing from both the builder_registry
-// array and its build_<Msg>/validate_<Msg> definitions. It then runs the
+// FIX44.xml only, regenerating v44/all.hpp (078-precompiled-builder-libs)
+// into an isolated temp dir with msgtype "D" (NewOrderSingle) missing from
+// both the builder_registry array and its build_<Msg>/validate_<Msg>
+// definitions. It then runs the
 // SAME runtime comparison the real census
 // (test_077_v44_builder_completeness.cpp ::RegistryExactSetEqualsRawXmlWalk
 // and ::BuildFnSignaturesMatchRawXmlWalk) performs -- via the SAME
@@ -143,8 +144,9 @@ TEST(BuilderCompletenessMutationWitness, DropOneMessageMakesCensusDetectItRed) {
     int const rc = exit_code(run_system(cmd));
     ASSERT_EQ(rc, 0) << "fixpp-codegen-drop-witness subprocess failed, cmd=" << cmd;
 
-    std::string const dropped_builders_hpp = (out.path / "v44" / "Builders.hpp").string();
-    ASSERT_TRUE(fs::exists(dropped_builders_hpp)) << "dropped v44/Builders.hpp was not emitted";
+    std::string const dropped_all_hpp = (out.path / "v44" / "all.hpp").string();
+    ASSERT_TRUE(fs::exists(dropped_all_hpp)) << "dropped v44/all.hpp was not emitted";
+    std::string const dropped_version_dir = (out.path / "v44").string();
 
     using namespace fixpp_test::builder_completeness;
     std::set<std::string> const expected =
@@ -153,7 +155,7 @@ TEST(BuilderCompletenessMutationWitness, DropOneMessageMakesCensusDetectItRed) {
 
     // Leg 1: registry-array parse (mirrors
     // BuilderCompleteness077V44.RegistryExactSetEqualsRawXmlWalk).
-    std::set<std::string> const dropped_registry = parse_registry_msgtypes(dropped_builders_hpp);
+    std::set<std::string> const dropped_registry = parse_registry_msgtypes(dropped_all_hpp);
     EXPECT_EQ(dropped_registry.count("D"), 0U) << "the drop seam did not remove \"D\" from builder_registry";
     EXPECT_NE(dropped_registry, expected) << "registry-vs-raw-XML-walk comparison did NOT go RED for the drop";
 
@@ -170,7 +172,7 @@ TEST(BuilderCompletenessMutationWitness, DropOneMessageMakesCensusDetectItRed) {
     // Leg 2: independent build_<Msg>( signature scan (mirrors
     // BuilderCompleteness077V44.BuildFnSignaturesMatchRawXmlWalk) -- also
     // catches the drop, via a differently-shaped parse than leg 1.
-    std::set<std::string> const dropped_build_idents = parse_build_fn_identifiers(dropped_builders_hpp);
+    std::set<std::string> const dropped_build_idents = parse_build_fn_identifiers(dropped_version_dir);
     EXPECT_EQ(dropped_build_idents.count("NewOrderSingle"), 0U)
         << "the drop seam did not remove build_NewOrderSingle( from the header";
     EXPECT_EQ(dropped_build_idents.size(), expected.size() - 1)

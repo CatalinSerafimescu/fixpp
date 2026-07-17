@@ -28,7 +28,7 @@
 #include <gtest/gtest.h>
 
 #include <cstddef>
-#include <fixpp/v44/Builders.hpp>  // GENERATED -- fixpp::v44::builder_registry
+#include <fixpp/v44/all.hpp>  // GENERATED -- fixpp::v44::builder_registry
 
 namespace {
 

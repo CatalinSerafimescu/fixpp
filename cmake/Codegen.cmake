@@ -264,13 +264,13 @@ set(_vt11_marker   "${CMAKE_BINARY_DIR}/_codegen/include/fixpp/vt11/Messages.hpp
 # 067-codegen-writer-emitter: Builders.hpp is emitted for v44 (other legacy
 # versions get no Builders.hpp — see emit_builders.cpp scope note); 077 adds
 # vlatest (below) through the same version-agnostic deduped path.
-set(_v44_builders_marker "${CMAKE_BINARY_DIR}/_codegen/include/fixpp/v44/Builders.hpp")
+set(_v44_builders_marker "${CMAKE_BINARY_DIR}/_codegen/include/fixpp/v44/all.hpp")
 # gate-b/r1 F1 (077-builder-args-dedup): v50sp2 also gets a deduped
 # Builders.hpp via the same version-agnostic emit_builders path (main.cpp
 # emits Builders.hpp for every ns != v42, so v50sp2 too); this marker must
 # participate in the same missing-output / regen-guard discipline as the
 # v44 builders marker above.
-set(_v50sp2_builders_marker "${CMAKE_BINARY_DIR}/_codegen/include/fixpp/v50sp2/Builders.hpp")
+set(_v50sp2_builders_marker "${CMAKE_BINARY_DIR}/_codegen/include/fixpp/v50sp2/all.hpp")
 # 076-fix-latest-typed-codegen T006: FIX Latest tier, gated by
 # FIXPP_CODEGEN_FIX_LATEST (default ON). Input lives under dictionaries/
 # orchestra/ (074), not dictionaries/ directly.
@@ -282,7 +282,7 @@ set(_vlatest_marker "${CMAKE_BINARY_DIR}/_codegen/include/fixpp/vlatest/Messages
 # v44-only gate) and this file must participate in the same missing-output /
 # regen-guard discipline as the other builder marker above, not just the
 # read-tier marker.
-set(_vlatest_builders_marker "${CMAKE_BINARY_DIR}/_codegen/include/fixpp/vlatest/Builders.hpp")
+set(_vlatest_builders_marker "${CMAKE_BINARY_DIR}/_codegen/include/fixpp/vlatest/all.hpp")
 
 set(_need_generate FALSE)
 
@@ -539,6 +539,42 @@ foreach(_ver IN ITEMS v42 v44 v50sp2 vt11)
   add_dependencies(${_tgt} fixpp_codegen_generate)
 endforeach()
 
+# ── Per-version builder/validator STATIC libraries ────────────────────────────
+# 078-precompiled-builder-libs T006 (contracts/cmake-targets.md; data-model.md
+# Entity 8): fixpp_builders_<ver> / fixpp_validators_<ver>, sources = the
+# disjoint per-message *.builder.cpp / *.validator.cpp sets emitted by T003-
+# T005 (SC-002 object granularity, SC-003 builder⟂validator, R1/R2a ODR
+# safety). Always built (FR-004) — consumer opt-in is link-time only.
+# Build-tree + in-tree consumers only; NO install() (R3, Gate A round 1) —
+# same "no install() rules" convention as fixpp_dict_<ver> above.
+foreach(_ver IN ITEMS v44 v50sp2 vlatest)
+  if(_ver STREQUAL "vlatest" AND NOT FIXPP_CODEGEN_FIX_LATEST)
+    continue()
+  endif()
+
+  file(GLOB _builder_sources CONFIGURE_DEPENDS
+    "${FIXPP_CODEGEN_OUT_DIR}/${_ver}/messages/*.builder.cpp")
+  add_library(fixpp_builders_${_ver} STATIC ${_builder_sources})
+  add_library(fixpp::builders::${_ver} ALIAS fixpp_builders_${_ver})
+  target_include_directories(fixpp_builders_${_ver} PUBLIC
+    "$<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/_codegen/include>"
+  )
+  target_link_libraries(fixpp_builders_${_ver} PUBLIC fixpp::wire)
+  add_dependencies(fixpp_builders_${_ver} fixpp_codegen_generate)
+
+  # Disjoint from _builder_sources (SC-003) — no .cpp is shared between the
+  # two libs (R1).
+  file(GLOB _validator_sources CONFIGURE_DEPENDS
+    "${FIXPP_CODEGEN_OUT_DIR}/${_ver}/messages/*.validator.cpp")
+  add_library(fixpp_validators_${_ver} STATIC ${_validator_sources})
+  add_library(fixpp::validators::${_ver} ALIAS fixpp_validators_${_ver})
+  target_include_directories(fixpp_validators_${_ver} PUBLIC
+    "$<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/_codegen/include>"
+  )
+  target_link_libraries(fixpp_validators_${_ver} PUBLIC fixpp::wire)
+  add_dependencies(fixpp_validators_${_ver} fixpp_codegen_generate)
+endforeach()
+
 # fixpp::dict::dispatch — shared _dispatch/ headers (Entity 8 / I-11).
 # Lives under the same _codegen/include tree; same include dir covers it.
 add_library(fixpp_dict_dispatch INTERFACE)
@@ -620,7 +656,7 @@ set(FIXPP_CODEGEN_MARKER_v44    \"${CMAKE_BINARY_DIR}/_codegen/include/fixpp/v44
 set(FIXPP_CODEGEN_MARKER_v50sp2 \"${CMAKE_BINARY_DIR}/_codegen/include/fixpp/v50sp2/Messages.hpp\")
 set(FIXPP_CODEGEN_MARKER_vt11   \"${CMAKE_BINARY_DIR}/_codegen/include/fixpp/vt11/Messages.hpp\")
 set(FIXPP_CODEGEN_DISPATCH_MARKER \"${CMAKE_BINARY_DIR}/_codegen/include/fixpp/_dispatch/reify_dispatch_fixt.hpp\")
-set(FIXPP_CODEGEN_BUILDERS_MARKER_v44 \"${CMAKE_BINARY_DIR}/_codegen/include/fixpp/v44/Builders.hpp\")
+set(FIXPP_CODEGEN_BUILDERS_MARKER_v44 \"${CMAKE_BINARY_DIR}/_codegen/include/fixpp/v44/all.hpp\")
 
 # (b) Configure-time flag: generation ran at CMake configure time (not build time).
 # This file itself is evidence — it is written by cmake/Codegen.cmake during the
