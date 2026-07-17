@@ -2556,14 +2556,17 @@ if(TARGET fixpp_codegen_generate)
     LABELS "067;us1;failclosed;069;all_families;us1_smoke")
 
   # ── 067-codegen-writer-emitter T022 [US3] [TESTS-FIRST] — validate_<Msg>
-  # required-presence witnesses. Links fixpp_wire only (matches
-  # test_067_builder_failclosed — no dict parsing needed).
+  # required-presence witnesses. Constructs each message via build_<Msg> then
+  # exercises validate_<Msg>, so it links BOTH prebuilt v44 libs
+  # (078-precompiled-builder-libs: builders for build_, validators for
+  # validate_ — the T019 relink; matches test_067_builder_roundtrip).
   add_executable(test_067_builder_validate
     test_067_builder_validate.cpp
   )
   add_dependencies(test_067_builder_validate fixpp_codegen_generate)
   target_link_libraries(test_067_builder_validate PRIVATE
     fixpp_wire
+    fixpp::builders::v44
     fixpp::validators::v44
     GTest::gtest
     GTest::gtest_main

@@ -458,20 +458,35 @@ std::string collapse_whitespace(std::string const& text) {
     return out;
 }
 
-// Extract the substring window starting at the first occurrence of
-// `start_marker` (e.g. a message's class/function identifier) up to (but
-// excluding) the next occurrence of `next_marker` at or after that point, or
-// to the end of `text` if `next_marker` does not recur. Scopes a token
-// search to ONE message's emitted region, avoiding cross-message
-// contamination (tag 11/ClOrdID, e.g., recurs in many messages).
-std::string extract_region(std::string const& text, std::string_view start_marker,
-                            std::string_view next_marker) {
-    auto const start = text.find(start_marker);
-    if (start == std::string::npos) {
-        return {};
+// 078-precompiled-builder-libs: emit_builders() now returns the SPLIT file
+// SET (std::vector<EmittedFile>) instead of one monolithic Builders.hpp
+// string. Concatenate every emitted file's content into one buffer for the
+// whole-output existence/absence/count checks (framing-tag exclusion,
+// group_begin delimiters, groups::G_<no_tag>Args dedup census).
+std::string concat_all(std::vector<fixpp::codegen::EmittedFile> const& files) {
+    std::string out;
+    for (auto const& f : files) {
+        out += f.content;
+        out += '\n';
     }
-    auto const next = text.find(next_marker, start + start_marker.size());
-    return text.substr(start, next == std::string::npos ? std::string::npos : next - start);
+    return out;
+}
+
+// Return ONE message's emitted build_<Msg> body — the per-message
+// `messages/<Msg>.builder.cpp` file (data-model.md Entity 4), which carries
+// the full `bb.field(...)`/`group_begin(...)` call sequence. Replaces the
+// pre-078 cross-message `extract_region(monolith, msg, next_msg)` window:
+// selecting the message's own file is order-independent and cannot bleed a
+// tag from a neighbouring message (tag 11/ClOrdID, e.g., recurs everywhere).
+std::string builder_body(std::vector<fixpp::codegen::EmittedFile> const& files,
+                         std::string_view msg_name) {
+    std::string const want = std::string(msg_name) + ".builder.cpp";
+    for (auto const& f : files) {
+        if (f.rel.filename().string() == want) {
+            return f.content;
+        }
+    }
+    return {};
 }
 
 }  // namespace
@@ -481,9 +496,9 @@ std::string extract_region(std::string const& text, std::string_view start_marke
 // Side(54) < Symbol(55) < TransactTime(60) must be found in that byte
 // order within the NewOrderSingle builder's emitted region.
 TEST(Group067EmitBuilders, TopLevelEmissionOrderTagAscending) {
-    std::string const out =
+    auto const files =
         fixpp::codegen::emit_builders(fix44_ir(), fixpp::codegen::CoverageMode::Official);
-    std::string const region = extract_region(out, "NewOrderSingle", "NewOrderList");
+    std::string const region = builder_body(files, "NewOrderSingle");
     ASSERT_FALSE(region.empty()) << "no NewOrderSingle builder region found in emit_builders() output "
                                      "(empty until Phase 3b lands T016/T017)";
 
@@ -503,9 +518,9 @@ TEST(Group067EmitBuilders, TopLevelEmissionOrderTagAscending) {
 // research.md R1/R9, T007(b)'s IR-level pin, here at the EMITTED-TEXT
 // level).
 TEST(Group067EmitBuilders, GroupEntryOrderIsDeclarationOrderNotTagSorted) {
-    std::string const out =
+    auto const files =
         fixpp::codegen::emit_builders(fix44_ir(), fixpp::codegen::CoverageMode::Official);
-    std::string const region = extract_region(out, "NewOrderList", "OrderCancelRequest");
+    std::string const region = builder_body(files, "NewOrderList");
     ASSERT_FALSE(region.empty()) << "no NewOrderList builder region found in emit_builders() output";
 
     // Scope to AFTER the NoOrders(73) group tag is first mentioned, so the
@@ -530,7 +545,7 @@ TEST(Group067EmitBuilders, GroupEntryOrderIsDeclarationOrderNotTagSorted) {
 // own INV-2 framing-tag reject unconditionally.
 TEST(Group067EmitBuilders, HeaderFramingTagsNeverPassedToFieldCall) {
     std::string const out =
-        fixpp::codegen::emit_builders(fix44_ir(), fixpp::codegen::CoverageMode::Official);
+        concat_all(fixpp::codegen::emit_builders(fix44_ir(), fixpp::codegen::CoverageMode::Official));
     ASSERT_FALSE(out.empty()) << "emit_builders() output is empty (Phase 3b not landed yet)";
 
     for (int tag : {8, 9, 10, 34, 35, 49, 52, 56}) {
@@ -550,10 +565,10 @@ TEST(Group067EmitBuilders, HeaderFramingTagsNeverPassedToFieldCall) {
 // field (ClOrdID(11)) is the positive control — it MUST still be present,
 // proving the exclusion is provenance-scoped, not a body-emptying overreach.
 TEST(Group067EmitBuilders, HeaderTrailerFieldsExcludedFromBodyOnlyArgs) {
-    std::string const out =
+    auto const files =
         fixpp::codegen::emit_builders(fix44_ir(), fixpp::codegen::CoverageMode::Official);
-    ASSERT_FALSE(out.empty()) << "emit_builders() output is empty (Phase 3b not landed yet)";
-    std::string const region = extract_region(out, "NewOrderSingle", "NewOrderList");
+    ASSERT_FALSE(files.empty()) << "emit_builders() output is empty (Phase 3b not landed yet)";
+    std::string const region = builder_body(files, "NewOrderSingle");
     ASSERT_FALSE(region.empty()) << "no NewOrderSingle builder region found in emit_builders() output";
 
     for (int tag : {89, 91, 93}) {
@@ -575,7 +590,7 @@ TEST(Group067EmitBuilders, HeaderTrailerFieldsExcludedFromBodyOnlyArgs) {
 // data-model.md §1.2 ("bb.group_begin(no_tag, delimiter_tag)").
 TEST(Group067EmitBuilders, RC1PerMessagePlannerDistinctDelimiterWvsX) {
     std::string const out =
-        fixpp::codegen::emit_builders(fix44_ir(), fixpp::codegen::CoverageMode::Official);
+        concat_all(fixpp::codegen::emit_builders(fix44_ir(), fixpp::codegen::CoverageMode::Official));
     ASSERT_FALSE(out.empty()) << "emit_builders() output is empty (Phase 3b not landed yet)";
     std::string const collapsed = collapse_whitespace(out);
 
@@ -703,7 +718,7 @@ std::size_t count_occurrences(std::string const& text, std::string const& needle
 
 TEST(Group077DedupSoundness, DiscriminatesDistinctSignaturesUnderSameNoTag) {
     std::string const out =
-        fixpp::codegen::emit_builders(dedup_soundness_ir(), fixpp::codegen::CoverageMode::All);
+        concat_all(fixpp::codegen::emit_builders(dedup_soundness_ir(), fixpp::codegen::CoverageMode::All));
 
     EXPECT_NE(out.find("struct G_9001_1Args"), std::string::npos)
         << "no_tag 9001 has TWO distinct recursive signatures (member 9101 required vs "
@@ -722,7 +737,7 @@ TEST(Group077DedupSoundness, DiscriminatesDistinctSignaturesUnderSameNoTag) {
 
 TEST(Group077DedupSoundness, CollapsesByteIdenticalSignaturesToOneStruct) {
     std::string const out =
-        fixpp::codegen::emit_builders(dedup_soundness_ir(), fixpp::codegen::CoverageMode::All);
+        concat_all(fixpp::codegen::emit_builders(dedup_soundness_ir(), fixpp::codegen::CoverageMode::All));
 
     EXPECT_NE(out.find("struct G_9002Args"), std::string::npos)
         << "no_tag 9002's two occurrences share a byte-identical signature — expected ONE "
@@ -740,7 +755,7 @@ TEST(Group077DedupSoundness, CollapsesByteIdenticalSignaturesToOneStruct) {
 
 TEST(Group077DedupSoundness, KeepsDifferentNoTagsSeparateDespiteIdenticalBodies) {
     std::string const out =
-        fixpp::codegen::emit_builders(dedup_soundness_ir(), fixpp::codegen::CoverageMode::All);
+        concat_all(fixpp::codegen::emit_builders(dedup_soundness_ir(), fixpp::codegen::CoverageMode::All));
 
     EXPECT_NE(out.find("struct G_9003Args"), std::string::npos)
         << "no_tag 9003's sole occurrence must emit a bare groups::G_9003Args";
