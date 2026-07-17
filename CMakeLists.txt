@@ -320,3 +320,38 @@ if(FIXPP_BUILD_CODEGEN_TOOL)
     PATTERN "vt11" EXCLUDE
   )
 endif()
+
+# ── 077-builder-args-dedup: heavy-builder-TU compile job pool ───────────────
+# Each test TU that #includes a deduped Builders.hpp instantiates every
+# build_/validate_ for its version. The v50sp2 (~75MB) and vlatest (~78MB)
+# headers peak at ~3.7-4.6 GiB RSS per TU (T015 compile-resource bench;
+# feedback_build_resource_cap_oom). At CI's default -j(nproc)=4 on a 16 GB
+# hosted runner, two-plus of these compiling concurrently exhausts RAM and the
+# OOM-killer takes the runner agent -> the job dies mid-build with exit 143
+# ("runner has received a shutdown signal"), no compile error. This reproducibly
+# reddened the heaviest libstdc++ linux legs (asan/debug/release/ubsan/coverage/
+# gcc) while the lighter libc++ + tsan legs and Windows passed.
+#
+# Cap concurrent compilation of the Builders.hpp-including TUs to 2 via a Ninja
+# job pool (the rest of the build stays at full -j, so unrelated compiles are
+# not throttled). Ninja-only: JOB_POOLS / JOB_POOL_COMPILE are silently ignored
+# by the MSVC and other generators. if(TARGET ...) guards the
+# FIXPP_CODEGEN_FIX_LATEST-gated targets and the -DBUILD_TESTING=OFF case.
+set_property(GLOBAL PROPERTY JOB_POOLS heavy_builder_compile=2)
+foreach(_fixpp_heavy_builder_tgt
+    codegen_077_v44_builder_completeness_test
+    codegen_077_v50sp2_builder_completeness_test
+    codegen_077_vlatest_builder_completeness_test
+    test_067_completeness
+    test_067_builder_roundtrip
+    test_067_builder_failclosed
+    test_067_builder_validate
+    test_067_builder_shape_oracle
+    test_077_vlatest_builder_roundtrip
+    test_077_allversions_builder_roundtrip
+    test_077_allversions_builder_roundtrip_vlatest)
+  if(TARGET ${_fixpp_heavy_builder_tgt})
+    set_target_properties(${_fixpp_heavy_builder_tgt}
+      PROPERTIES JOB_POOL_COMPILE heavy_builder_compile)
+  endif()
+endforeach()
