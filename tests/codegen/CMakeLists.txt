@@ -231,6 +231,12 @@ target_compile_definitions(codegen_077_vlatest_builder_completeness_test PRIVATE
   "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
   "FIXPP_CODEGEN_VLATEST_BUILDERS_HPP=\"${FIXPP_CODEGEN_OUT}/fixpp/vlatest/Builders.hpp\""
 )
+# MSVC C1128: this TU takes the address of every vlatest build_/validate_ over
+# the ~78MB deduped Builders.hpp (173 plans); under debug/asan the section count
+# exceeds the default COFF object-format limit. /bigobj lifts the 2^16 cap.
+target_compile_options(codegen_077_vlatest_builder_completeness_test PRIVATE
+  $<$<CXX_COMPILER_ID:MSVC>:/bigobj>
+)
 add_test(NAME codegen_077_vlatest_builder_completeness_test COMMAND codegen_077_vlatest_builder_completeness_test)
 set_tests_properties(codegen_077_vlatest_builder_completeness_test PROPERTIES
   LABELS "codegen;077;builder-completeness;vlatest")
@@ -284,6 +290,12 @@ target_include_directories(codegen_077_v50sp2_builder_completeness_test PRIVATE
 target_compile_definitions(codegen_077_v50sp2_builder_completeness_test PRIVATE
   "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
   "FIXPP_CODEGEN_V50SP2_BUILDERS_HPP=\"${FIXPP_CODEGEN_OUT}/fixpp/v50sp2/Builders.hpp\""
+)
+# MSVC C1128: this TU takes the address of every v50sp2 build_/validate_ over
+# the ~75MB deduped Builders.hpp (156 plans); under debug/asan the section count
+# exceeds the default COFF object-format limit. /bigobj lifts the 2^16 cap.
+target_compile_options(codegen_077_v50sp2_builder_completeness_test PRIVATE
+  $<$<CXX_COMPILER_ID:MSVC>:/bigobj>
 )
 add_test(NAME codegen_077_v50sp2_builder_completeness_test COMMAND codegen_077_v50sp2_builder_completeness_test)
 set_tests_properties(codegen_077_v50sp2_builder_completeness_test PROPERTIES
