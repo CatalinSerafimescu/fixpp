@@ -39,6 +39,8 @@ below.
 
 **Alternatives considered.** (a) Per-category folders — rejected, message granularity is what the cost analysis calls for (deep-group messages concentrate the cost; a client wants per-message). (b) One `Builders.cpp` per version instead of per-message `.cpp` — rejected for SC-002 (see R3). (c) Keep the monolith and add only per-message headers (issue #198 proposal 2 alone) — superseded by the precompiled-lib decision (A2), which is what actually removes the compile cost from the library's own tests (SC-006).
 
+**Optional structural variant (decide at `/implement` / Gate A) — single body source.** Instead of emitting the body twice (`.inl` inline + `.cpp` external), emit **one** body file that the header includes under a linkage macro (e.g. `#define FIXPP_BUILD_LINKAGE inline` for `.inl`-mode vs. external for the `.cpp` TU). This collapses the two emissions to a **single source of the body**, making SC-004 byte-identity **structural** rather than a regeneration-discipline assertion, and roughly halves the generated file count. Deferred as an implementation refinement — the acceptance bar (byte-identity both modes) is unchanged either way; flagged so Gate A / `/implement` can pick the single-source form if the emitter supports it cleanly.
+
 ## R2 — Placement of the validation machinery (`writer_traits`) — the ODR / SC-005 decision
 
 **Problem.** The real per-field validation logic is the plan-keyed `inline writer_traits<T>` specializations + `_required_`/`_count_` helpers, currently `inline` in `fixpp::wire` (`:957-968`). They are **shared** (keyed by interned plan, deduped across messages). Two hard constraints collide:

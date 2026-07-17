@@ -76,10 +76,10 @@ lib targets (3×{builders,validators}); ~4,500 vlatest validator specializations
 | **XVIII §7 — per-version builder tier** | **ANNOTATE (Gate A)** | §7 records the v44/v50sp2/vlatest builder tier "flow through 077's single … emitter". 078 restructures the *packaging* (libs, not a header); no message-set change (v42 still deferred to #196; vt11 none). Annotation only. |
 | Appendix A — **Codegen layout** trigger | **Satisfied** | Codegen-layout change ⇒ all four mandatory controls: `/clarify` ✓ (5 Q, done), `/analyze` (pipeline step 6, before `/implement`), Codex **Gate A** (after this `/plan`), user `/plan` sign-off. |
 | X — ABI Policy | **PASS** | Mangled C++ surface only; zero `c_api.h` change, C-ABI frozen 1.5.0; new libs absent from `fixpp_capi_symbols.txt`, untouched by `abi-golden.yml`. The C++ `Args`-ABI boundary is sound because fixpp is built-from-source in the client toolchain (A3); cross-toolchain = existing C-ABI runtime builder (out of scope). |
-| VI — 100% FIX / no silent omissions | **PASS+** | The completeness census is preserved (address-of-everything now proves **link**, with compile-proof at the lib target — R7); determinism now also asserts stable file **name-set + count** (R6), *strengthening* the no-silent-omission guarantee across the file split. |
+| VI — 100% FIX / no silent omissions | **PASS+** | The completeness census is preserved (address-of-everything now proves **link**, with compile-proof at the lib target — R7); determinism now also asserts stable file **name-set + count** (R6), *strengthening* the no-silent-omission guarantee across the file split. **Normative References:** none — this is a pure layout restructure of 077's already-delivered tier with **no new FIX coverage** (adds no `OFFICIAL` catalogue row); the spec omits a Normative-References section, matching 077's spec (also a codegen restructure, likewise omitted). `/analyze` confirms. |
 | VII — Testing (TDD, grouping) | **PASS** | Red-green per FR; new `nm` witnesses (SC-002/003), mixing/inline test (FR-007), regenerated golden set. Heavy TUs relink the libs; grouping/label rules (VII §8) preserved. |
 | VIII — Perf budgets | **PASS (N/A)** | Article VIII is **runtime-only** (Google Benchmark, ±5% regression, hot-path allocator, latency) and the runtime hot path is untouched → trivially PASS. The build-time/compile-RSS deltas (SC-001/006) are **not** an Article VIII surface; they go to the **003 compile-bench / decision-record convention** (R9), the same mechanism 077 used (`.specify/decisions/003-...-verify.md:101`, T046). Article VIII has no compile-time ceiling. |
-| IX — Coverage / sanitizers / static analysis | **PASS** | New emitter/host-tool code carries unit coverage; generated headers + new lib targets build under the existing sanitizer tiers. Touched-module coverage applies to any `tools/`/test code changed; no `src/`/`include/` change expected (like 077). |
+| IX — Coverage / sanitizers / static analysis | **PASS** | New emitter/host-tool code carries unit coverage; generated headers + new lib targets build under the existing sanitizer tiers. **Coverage scope note:** the generated per-message `.cpp` compile into the libs but live in `${CMAKE_BINARY_DIR}/_codegen/` (build tree), **outside** Article IX's touched-module scope (`include/fixpp/<mod>*`+`src/<mod>*`) — like the existing generated headers — so deep-group `build_`/`validate_` bodies do **not** fall under the 95/85 touched-module gate (verify at `/speckit-verify`). No `src/`/`include/` change expected (like 077). |
 | XV — Banned patterns | **PASS** | No hot-path alloc, no runtime-only validation (§6: typed constexpr metadata retained), runtime dictionary path still exists (§13). No new banned pattern. |
 | XVI — Spec Kit workflow | **PASS** | Pipeline order honored — Gate A after `/plan`, before `/tasks`; `/clarify` done; `/analyze` next. |
 | III — Build toolchain | **PASS** | CMake≥3.28+Ninja+Conan; `tools/` stays build-only (§5) — the codegen tool is not a user-link-time dependency; the new libs are ordinary compiled artifacts consumers link, not tooling. |
@@ -136,7 +136,15 @@ tests/codegen/          # rewrite determinism_test.cpp → multi-file set (name-
                         #   NEW nm symbol-witness test (SC-002 link-only / SC-003 zero-validator);
                         #   NEW ODR/mixing probe→test (R2a / FR-007); keep /bigobj (cheap insurance)
 tests/session/          # un-gate + relink the heavy roundtrip TUs (test_077_*_builder_roundtrip.cpp,
-                        #   :2609-2700) against the prebuilt libs; 067 v44 tier relinks too
+                        #   :2609-2700); ALSO relink the 067 v44 tier (test_067_*.cpp ×5) AND the 069
+                        #   v44 tier (test_069_{all_families_roundtrip,family_exemplar_golden,mode_count,
+                        #   us1_smoke}) — all #include <fixpp/v44/Builders.hpp> today. FULL migration
+                        #   surface = every TU that #includes <fixpp/<ns>/Builders.hpp>: 067×5, 069×5,
+                        #   077×6 — exact set + count RE-MEASURED at /tasks (census this session: ZERO
+                        #   in examples/, so no CI-exercised example break)
+bench/codegen/vlatest_builders_compile_bench/  # compile_bench.sh #includes fixpp/vlatest/Builders.hpp
+                        #   (:66) — repoint to the slim header; this harness BECOMES the SC-001
+                        #   slim-vs-monolith compile-RSS witness (R9 compile-bench record)
 
 specs/078-.../contracts/golden/   # regenerated golden SET per version (created at /implement)
 docs/src/dictionary/codegen.md    # document the split layout + link-time opt-in + inline mode
