@@ -183,3 +183,5 @@ validator-traits placement + the R2a ODR/SC-005 probe as a blocking prerequisite
 (3) the install-scope call (build-tree targets vs. `install(TARGETS)`/export, R3);
 (4) the #197-removal sequencing (R8). User `/plan` sign-off is one of the four
 mandatory controls.
+
+**User `/plan` sign-off: GRANTED 2026-07-17.** Proceeding to Gate A.
