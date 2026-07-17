@@ -313,8 +313,8 @@ TEST(AtomicSharedPtrLinearizability, SpotCheck) {
     enum class Kind { Store, Load, Exchange, Cas };
     Kind kind{Kind::Load};
     int thread_id{0};
-    int start_ns{0};
-    int end_ns{0};
+    long long start_ns{0};
+    long long end_ns{0};
     int arg_expected{-1};
     int arg_desired{-1};
     int observed_value{-1};
@@ -334,10 +334,15 @@ TEST(AtomicSharedPtrLinearizability, SpotCheck) {
     std::this_thread::sleep_for(std::chrono::microseconds(dist(rng)));
   };
 
-  auto now_ns = []() -> int {
-    const auto n = Clock::now().time_since_epoch();
-    return static_cast<int>(
-        std::chrono::duration_cast<std::chrono::nanoseconds>(n).count() & 0x7fffffff);
+  // Unmasked int64 ns. The previous `int` with `& 0x7fffffff` wrapped every
+  // 2^31 ns (~2.147 s); when the ~ms op window straddled a wrap boundary, later
+  // ops masked to a smaller value than earlier ops, injecting a spurious
+  // reversed real-time edge that excluded the true linearization — a ~0.7%
+  // single-shot false failure (issue #199, seen on windows-msvc-debug).
+  auto now_ns = []() -> long long {
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(
+               Clock::now().time_since_epoch())
+        .count();
   };
 
   auto id_of = [&](const std::shared_ptr<int>& p) -> int {
