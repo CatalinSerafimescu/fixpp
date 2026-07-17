@@ -154,7 +154,7 @@ tests/session/          # un-gate + relink the heavy roundtrip TUs (test_077_*_b
                         #   :2609-2700); ALSO relink the 067 v44 tier (test_067_*.cpp ×5) AND the 069
                         #   v44 tier (test_069_{all_families_roundtrip,family_exemplar_golden,mode_count,
                         #   us1_smoke}) — all #include <fixpp/v44/Builders.hpp> today. FULL migration
-                        #   surface = every TU that #includes <fixpp/<ns>/Builders.hpp>: 067×5, 069×5,
+                        #   surface = every TU that #includes <fixpp/<ns>/Builders.hpp>: 067×5, 069×4,
                         #   077×6 — exact set + count RE-MEASURED at /tasks (census this session: ZERO
                         #   in examples/, so no CI-exercised example break). ALSO a FAMILY of
                         #   NON-#include monolith-name gates (build-graph markers, existence
