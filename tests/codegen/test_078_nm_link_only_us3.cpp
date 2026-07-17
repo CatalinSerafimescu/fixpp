@@ -25,7 +25,7 @@
 // ALL THREE called `fixpp::v44::build_<Msg>` symbols ARE present AND that
 // the un-called `fixpp::v44::build_OrderCancelRequest` is ABSENT -- proving
 // the linker did not pull in the whole archive. See
-// test_078_nm_builder_only_us2_check.cmake for why a bare mangled
+// test_078_nm_assert.cmake's header comment for why a bare mangled
 // substring match is unsafe (fixpp::wire::body_builder carries an unrelated
 // validate_group_grammar() member, pulled in transitively via fixpp_wire).
 //

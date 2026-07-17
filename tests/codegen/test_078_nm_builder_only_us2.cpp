@@ -22,10 +22,10 @@
 //       `fixpp::v44::validate_`/`writer_traits` symbols -- not merely that
 //       the archive itself is clean (already true of libfixpp_builders_v44.a
 //       in isolation), but that nothing pulls a validator symbol in via the
-//       final link. Uses a DEDICATED check script
-//       (test_078_nm_builder_only_us2_check.cmake), NOT the T002 probe's
-//       test_078_odr_nm_check.cmake: that script's bare (mangled, undemangled)
-//       "validate_" substring match false-positives here --
+//       final link. Uses the shared test_078_nm_assert.cmake with its
+//       demangled default -- NOT the T002 probe's DEMANGLE=OFF invocation:
+//       a bare (mangled, undemangled) "validate_" substring match
+//       false-positives here --
 //       fixpp::wire::body_builder carries a genuinely-named
 //       validate_group_grammar() member (unrelated wire-grammar validation,
 //       pulled in transitively by this binary's fixpp_wire dependency via

@@ -41,14 +41,18 @@ struct Job {
 
 // 078-precompiled-builder-libs (data-model.md Entity 7 / quickstart V3) --
 // OFF-clean discipline for the split builder/validator file SET: `write_file`
-// only writes, it never deletes, so a version that emits no builders this
-// run (vt11's empty registry; v42 excluded below) must not leave a stale
-// split tree -- or a legacy pre-078 monolith -- from a prior generation run.
-void remove_builder_split_tree(std::filesystem::path const& base) {
+// only writes, it never deletes, so every generation run must sweep the
+// whole builder/validator output region -- Builders.hpp/groups.hpp/all.hpp
+// plus the groups/, validators/, messages/ dirs -- before (re)writing it.
+// Covers a version that emits no builders this run (vt11's empty registry;
+// v42 excluded below), a legacy pre-078 monolith, and a prior run's stale
+// per-plan groups/*.hpp.
+void remove_builder_output(std::filesystem::path const& base) {
     std::error_code ec;
     std::filesystem::remove(base / "Builders.hpp", ec);
     std::filesystem::remove(base / "groups.hpp", ec);
     std::filesystem::remove(base / "all.hpp", ec);
+    std::filesystem::remove_all(base / "groups", ec);
     std::filesystem::remove_all(base / "validators", ec);
     std::filesystem::remove_all(base / "messages", ec);
 }
@@ -118,35 +122,19 @@ int main(int argc, char** argv) {
             //
             // 078-precompiled-builder-libs T004: emit_builders now returns
             // the split file SET (data-model.md Entities 1-5) instead of a
-            // single Builders.hpp string; write every file in the set, or
-            // (empty set / v42) clean any stale split tree.
+            // single Builders.hpp string. v42 stays descoped (issue #196 /
+            // L-063-1) -- keep the existing ir.ns != "v42" predicate, it
+            // just yields an empty write set here instead of a separate
+            // branch. remove_builder_output sweeps the whole builder/
+            // validator output region unconditionally before writing, so
+            // every branch (empty set / v42 / non-empty) is OFF-clean.
+            std::vector<fixpp::codegen::EmittedFile> files;
             if (ir.ns != "v42") {
-                std::vector<fixpp::codegen::EmittedFile> const files =
-                    fixpp::codegen::emit_builders(ir, families_mode);
-                if (files.empty()) {
-                    remove_builder_split_tree(base);
-                } else {
-                    // 078 T031 finding: the split emitter no longer produces
-                    // Builders.hpp, but write_file only writes -- so a legacy
-                    // pre-078 (077-era) monolith left on disk by a prior run
-                    // would otherwise persist forever on an incrementally-
-                    // reconfigured build tree (fresh/CI trees are clean). The
-                    // empty-set branch cleans it via remove_builder_split_tree;
-                    // the non-empty branch must remove the one artifact it no
-                    // longer writes (quickstart V3 / FR-012 OFF-clean discipline).
-                    std::error_code ec;
-                    std::filesystem::remove(base / "Builders.hpp", ec);
-                    for (auto const& f : files) {
-                        write_file(base / f.rel, f.content);
-                    }
-                }
-            } else {
-                // Remove a stale split tree / legacy monolith left on disk
-                // by a prior generation run -- write_file only writes, it
-                // never deletes (quickstart V3 / FR-012 OFF-clean
-                // discipline, applied here to the v42 descope rather than a
-                // CMake toggle).
-                remove_builder_split_tree(base);
+                files = fixpp::codegen::emit_builders(ir, families_mode);
+            }
+            remove_builder_output(base);
+            for (auto const& f : files) {
+                write_file(base / f.rel, f.content);
             }
             all.push_back(std::move(ir));
         }

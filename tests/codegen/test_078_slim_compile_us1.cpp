@@ -12,8 +12,8 @@
 // feedback_fail_placeholder_red_test: no fake red-first cycle staged here.
 // The discrimination check lives in the companion nm probe wired in
 // tests/codegen/CMakeLists.txt (test078_slim_compile_us1_nm_object_check /
-// test_078_slim_object_nm_check.cmake): the compiled OBJECT for this TU
-// carries ZERO defined `build_` symbols (not even NewOrderSingle's own body
+// test_078_nm_assert.cmake): the compiled OBJECT for this TU carries ZERO
+// defined `fixpp::v44::build_` symbols (not even NewOrderSingle's own body
 // -- the slim header only declares it) and one UNDEFINED `build_NewOrderSingle`
 // reference (resolved at link time from the archive) -- proving AC1
 // ("object contains machine code only for the called builder", here strictly

@@ -94,26 +94,12 @@
 namespace {
 
 using fixpp_test_support::bytes_to_string;
+using fixpp_test_support::expect_decimal;
+using fixpp_test_support::expect_text;
 using fixpp_test_support::make_decimal;
 using fixpp_test_support::make_frame;
 using fixpp_test_support::parse_dict;
 using IndexView = fixpp::wire::MessageView<fixpp::wire::access_mode::Index>;
-
-void expect_text(IndexView const& mv, std::uint16_t tag, std::string_view expected,
-                  char const* label) {
-    SCOPED_TRACE(label);
-    auto fv = mv.get(tag);
-    ASSERT_TRUE(fv.has_value()) << "tag " << tag << " not found in parsed frame";
-    EXPECT_EQ(fv->as_string(), expected);
-}
-
-void expect_decimal(IndexView const& mv, std::uint16_t tag, std::string_view expected_ascii,
-                     std::pmr::memory_resource* mr, char const* label) {
-    SCOPED_TRACE(label);
-    auto got = mv.get_decimal(tag, mr);
-    ASSERT_TRUE(got.has_value()) << "tag " << tag << " not found/decodable in parsed frame";
-    EXPECT_EQ(*got, make_decimal(expected_ascii, mr));
-}
 
 }  // namespace
 

@@ -1048,15 +1048,23 @@ void emit_msg_hpp(TemplateWriter& w, std::string const& ns, std::string const& m
     w.line("#endif");
 }
 
-// Entity 3 -- <Msg>.builder.inl: the inline build_<Msg> definition, for
-// header-only builder mode. References groups.hpp data only (SC-003).
-void emit_msg_builder_inl(TemplateWriter& w, std::string const& ns, std::string const& msg_id,
-                          std::string const& msg_type, LevelPlan const& plan,
-                          PlanIntern const& intern) {
-    emit_generated_banner(w, ns, "messages/" + msg_id + ".builder.inl",
-                          "inline build_ body (data-model.md Entity 3); no validator symbol "
-                          "(SC-003).");
-    w.line("#pragma once");
+// Entity 3/4, builder side -- <Msg>.builder.{inl,cpp}: the build_<Msg>
+// definition, either inline (header-only builder mode; references groups.hpp
+// data only, SC-003) or external-linkage (compiled only into
+// fixpp_builders_<ver>). Same body either way (SC-004), differing only in
+// linkage -- parameterized on as_inline like emit_build_fn_def one level down.
+void emit_msg_builder(TemplateWriter& w, std::string const& ns, std::string const& msg_id,
+                      std::string const& msg_type, LevelPlan const& plan,
+                      PlanIntern const& intern, bool as_inline) {
+    std::string const ext = as_inline ? ".inl" : ".cpp";
+    std::string_view const desc = as_inline
+        ? "inline build_ body (data-model.md Entity 3); no validator symbol (SC-003)."
+        : "external-linkage build_ definition (data-model.md Entity 4), compiled only "
+          "into fixpp_builders_<ver>; no validator symbol (SC-003).";
+    emit_generated_banner(w, ns, "messages/" + msg_id + ".builder" + ext, desc);
+    if (as_inline) {
+        w.line("#pragma once");
+    }
     w.raw("#include \"");
     w.raw(msg_id);
     w.line(".hpp\"");
@@ -1066,45 +1074,29 @@ void emit_msg_builder_inl(TemplateWriter& w, std::string const& ns, std::string 
     w.raw(ns);
     w.line(" {");
     w.line();
-    emit_build_fn_def(w, msg_id, msg_type, plan, intern, /*as_inline=*/true);
+    emit_build_fn_def(w, msg_id, msg_type, plan, intern, as_inline);
     w.raw("}  // namespace fixpp::");
     w.line(ns);
 }
 
-// Entity 4, builder side -- <Msg>.builder.cpp: the external-linkage
-// build_<Msg> definition, compiled only into fixpp_builders_<ver>. Same body
-// as the .inl above (SC-004), differing only in linkage.
-void emit_msg_builder_cpp(TemplateWriter& w, std::string const& ns, std::string const& msg_id,
-                          std::string const& msg_type, LevelPlan const& plan,
-                          PlanIntern const& intern) {
-    emit_generated_banner(w, ns, "messages/" + msg_id + ".builder.cpp",
-                          "external-linkage build_ definition (data-model.md Entity 4), "
-                          "compiled only into fixpp_builders_<ver>; no validator symbol "
-                          "(SC-003).");
-    w.raw("#include \"");
-    w.raw(msg_id);
-    w.line(".hpp\"");
-    w.line("#include <fixpp/wire/body_builder.hpp>");
-    w.line();
-    w.raw("namespace fixpp::");
-    w.raw(ns);
-    w.line(" {");
-    w.line();
-    emit_build_fn_def(w, msg_id, msg_type, plan, intern, /*as_inline=*/false);
-    w.raw("}  // namespace fixpp::");
-    w.line(ns);
-}
-
-// Entity 3, validator side -- <Msg>.validator.inl: the inline validate_<Msg>
-// thin wrapper PLUS this message's own per-message top-level traits
+// Entity 3/4, validator side -- <Msg>.validator.{inl,cpp}: the validate_<Msg>
+// definition PLUS this message's own per-message top-level traits
 // (emit_writer_traits_for_level over `plan`); includes validators/traits.hpp
-// for the shared group-plan traits it references.
-void emit_msg_validator_inl(TemplateWriter& w, std::string const& ns, std::string const& msg_id,
-                            LevelPlan const& plan) {
-    emit_generated_banner(w, ns, "messages/" + msg_id + ".validator.inl",
-                          "inline validate_ body + this message's own top-level traits "
-                          "(data-model.md Entity 3).");
-    w.line("#pragma once");
+// for the shared group-plan traits it references. Inline = header-only
+// validator mode; external-linkage = compiled only into
+// fixpp_validators_<ver>. Same body either way, differing only in linkage.
+void emit_msg_validator(TemplateWriter& w, std::string const& ns, std::string const& msg_id,
+                        LevelPlan const& plan, bool as_inline) {
+    std::string const ext = as_inline ? ".inl" : ".cpp";
+    std::string_view const desc = as_inline
+        ? "inline validate_ body + this message's own top-level traits "
+          "(data-model.md Entity 3)."
+        : "external-linkage validate_ definition + this message's own top-level traits "
+          "(data-model.md Entity 4), compiled only into fixpp_validators_<ver>.";
+    emit_generated_banner(w, ns, "messages/" + msg_id + ".validator" + ext, desc);
+    if (as_inline) {
+        w.line("#pragma once");
+    }
     w.raw("#include \"");
     w.raw(msg_id);
     w.line(".hpp\"");
@@ -1121,37 +1113,7 @@ void emit_msg_validator_inl(TemplateWriter& w, std::string const& ns, std::strin
     w.raw(ns);
     w.line(" {");
     w.line();
-    emit_validate_fn_def(w, msg_id, /*as_inline=*/true);
-    w.raw("}  // namespace fixpp::");
-    w.line(ns);
-}
-
-// Entity 4, validator side -- <Msg>.validator.cpp: the external-linkage
-// validate_<Msg> definition + the same per-message top-level traits,
-// compiled only into fixpp_validators_<ver>. Same body as the .inl above.
-void emit_msg_validator_cpp(TemplateWriter& w, std::string const& ns, std::string const& msg_id,
-                            LevelPlan const& plan) {
-    emit_generated_banner(w, ns, "messages/" + msg_id + ".validator.cpp",
-                          "external-linkage validate_ definition + this message's own "
-                          "top-level traits (data-model.md Entity 4), compiled only into "
-                          "fixpp_validators_<ver>.");
-    w.raw("#include \"");
-    w.raw(msg_id);
-    w.line(".hpp\"");
-    w.line("#include \"../validators/traits.hpp\"");
-    w.line();
-    w.line("namespace fixpp::wire {");
-    w.line();
-    std::string const type_name = msg_id + "Args";
-    std::string const qtype = "::fixpp::" + ns + "::" + type_name;
-    emit_writer_traits_for_level(w, qtype, type_name, plan);
-    w.line("}  // namespace fixpp::wire");
-    w.line();
-    w.raw("namespace fixpp::");
-    w.raw(ns);
-    w.line(" {");
-    w.line();
-    emit_validate_fn_def(w, msg_id, /*as_inline=*/false);
+    emit_validate_fn_def(w, msg_id, as_inline);
     w.raw("}  // namespace fixpp::");
     w.line(ns);
 }
@@ -1363,25 +1325,25 @@ std::vector<EmittedFile> emit_builders(VersionIR const& ir, CoverageMode mode) {
         }
         {
             TemplateWriter bi;
-            emit_msg_builder_inl(bi, ir.ns, msg_id, msg_type, plan, intern);
+            emit_msg_builder(bi, ir.ns, msg_id, msg_type, plan, intern, /*as_inline=*/true);
             files.push_back({std::filesystem::path{"messages/" + msg_id + ".builder.inl"},
                              std::move(bi).take()});
         }
         {
             TemplateWriter vi;
-            emit_msg_validator_inl(vi, ir.ns, msg_id, plan);
+            emit_msg_validator(vi, ir.ns, msg_id, plan, /*as_inline=*/true);
             files.push_back({std::filesystem::path{"messages/" + msg_id + ".validator.inl"},
                              std::move(vi).take()});
         }
         {
             TemplateWriter bc;
-            emit_msg_builder_cpp(bc, ir.ns, msg_id, msg_type, plan, intern);
+            emit_msg_builder(bc, ir.ns, msg_id, msg_type, plan, intern, /*as_inline=*/false);
             files.push_back({std::filesystem::path{"messages/" + msg_id + ".builder.cpp"},
                              std::move(bc).take()});
         }
         {
             TemplateWriter vc;
-            emit_msg_validator_cpp(vc, ir.ns, msg_id, plan);
+            emit_msg_validator(vc, ir.ns, msg_id, plan, /*as_inline=*/false);
             files.push_back({std::filesystem::path{"messages/" + msg_id + ".validator.cpp"},
                              std::move(vc).take()});
         }

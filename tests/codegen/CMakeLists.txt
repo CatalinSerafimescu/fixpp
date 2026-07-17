@@ -527,8 +527,10 @@ if(FIXPP_078_NM_TOOL)
     NAME test078_odr_sc003_probe_nm_builder_only
     COMMAND "${CMAKE_COMMAND}"
       "-DFIXPP_NM=${FIXPP_078_NM_TOOL}"
-      "-DFIXPP_BINARY=$<TARGET_FILE:test078_odr_builder_only_probe>"
-      -P "${CMAKE_CURRENT_SOURCE_DIR}/test_078_odr_nm_check.cmake"
+      "-DFIXPP_TARGET=$<TARGET_FILE:test078_odr_builder_only_probe>"
+      "-DFIXPP_ABSENT=validate_|writer_traits"
+      "-DFIXPP_DEMANGLE=OFF"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/test_078_nm_assert.cmake"
   )
   set_tests_properties(test078_odr_sc003_probe_nm_builder_only PROPERTIES
     LABELS "codegen;078;test_078_odr")
@@ -566,8 +568,10 @@ if(FIXPP_078_NM_TOOL)
     NAME test078_slim_compile_us1_nm_object_check
     COMMAND "${CMAKE_COMMAND}"
       "-DFIXPP_NM=${FIXPP_078_NM_TOOL}"
-      "-DFIXPP_OBJECT=$<TARGET_OBJECTS:test078_slim_compile_us1_obj>"
-      -P "${CMAKE_CURRENT_SOURCE_DIR}/test_078_slim_object_nm_check.cmake"
+      "-DFIXPP_TARGET=$<TARGET_OBJECTS:test078_slim_compile_us1_obj>"
+      "-DFIXPP_ABSENT=fixpp::v44::build_"
+      "-DFIXPP_UNDEFINED_PRESENT=fixpp::v44::build_NewOrderSingle"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/test_078_nm_assert.cmake"
   )
   set_tests_properties(test078_slim_compile_us1_nm_object_check PROPERTIES
     LABELS "codegen;078;us1;slim-compile")
@@ -613,19 +617,20 @@ set_tests_properties(test078_nm_builder_only_us2 PROPERTIES
   LABELS "codegen;078;us2;nm-builder-only")
 
 # Discrimination (SC-003/FR-005): the LINKED BINARY must carry zero
-# fixpp::v44::validate_/writer_traits symbols. Uses a DEDICATED, more precise
-# check script (NOT the T002 leg (ii) script) -- see
-# test_078_nm_builder_only_us2_check.cmake for why: the T002 script's bare
-# "validate_" substring match false-positives against fixpp::wire::
-# body_builder::validate_group_grammar, a real symbol pulled in by this
-# binary's fixpp_wire dependency (never present in T002's hand-written mock).
+# fixpp::v44::validate_/writer_traits symbols. Demangled + namespace-anchored
+# (the shared test_078_nm_assert.cmake default) -- NOT the T002 leg (ii)
+# witness's bare-mangled "validate_" substring match, which false-positives
+# against fixpp::wire::body_builder::validate_group_grammar, a real symbol
+# pulled in by this binary's fixpp_wire dependency (never present in T002's
+# hand-written mock).
 if(FIXPP_078_NM_TOOL)
   add_test(
     NAME test078_nm_builder_only_us2_nm_check
     COMMAND "${CMAKE_COMMAND}"
       "-DFIXPP_NM=${FIXPP_078_NM_TOOL}"
-      "-DFIXPP_BINARY=$<TARGET_FILE:test078_nm_builder_only_us2>"
-      -P "${CMAKE_CURRENT_SOURCE_DIR}/test_078_nm_builder_only_us2_check.cmake"
+      "-DFIXPP_TARGET=$<TARGET_FILE:test078_nm_builder_only_us2>"
+      "-DFIXPP_ABSENT=fixpp::v44::validate_|writer_traits"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/test_078_nm_assert.cmake"
   )
   set_tests_properties(test078_nm_builder_only_us2_nm_check PROPERTIES
     LABELS "codegen;078;us2;nm-builder-only")
@@ -676,8 +681,11 @@ if(FIXPP_078_NM_TOOL)
     NAME test078_builder_mixing_us3_object_nm_check
     COMMAND "${CMAKE_COMMAND}"
       "-DFIXPP_NM=${FIXPP_078_NM_TOOL}"
-      "-DFIXPP_OBJECT=$<TARGET_OBJECTS:test078_builder_mixing_us3_obj>"
-      -P "${CMAKE_CURRENT_SOURCE_DIR}/test_078_builder_mixing_us3_object_nm_check.cmake"
+      "-DFIXPP_TARGET=$<TARGET_OBJECTS:test078_builder_mixing_us3_obj>"
+      "-DFIXPP_PRESENT=fixpp::v44::build_NewOrderSingle"
+      "-DFIXPP_ABSENT=fixpp::v44::build_ExecutionReport"
+      "-DFIXPP_UNDEFINED_PRESENT=fixpp::v44::build_ExecutionReport"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/test_078_nm_assert.cmake"
   )
   set_tests_properties(test078_builder_mixing_us3_object_nm_check PROPERTIES
     LABELS "codegen;078;us3;builder-mixing")
@@ -728,8 +736,10 @@ if(FIXPP_078_NM_TOOL)
     NAME test078_nm_link_only_us3_nm_check
     COMMAND "${CMAKE_COMMAND}"
       "-DFIXPP_NM=${FIXPP_078_NM_TOOL}"
-      "-DFIXPP_BINARY=$<TARGET_FILE:test078_nm_link_only_us3>"
-      -P "${CMAKE_CURRENT_SOURCE_DIR}/test_078_nm_link_only_us3_check.cmake"
+      "-DFIXPP_TARGET=$<TARGET_FILE:test078_nm_link_only_us3>"
+      "-DFIXPP_PRESENT=fixpp::v44::build_NewOrderSingle;fixpp::v44::build_ExecutionReport;fixpp::v44::build_News"
+      "-DFIXPP_ABSENT=fixpp::v44::build_OrderCancelRequest"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/test_078_nm_assert.cmake"
   )
   set_tests_properties(test078_nm_link_only_us3_nm_check PROPERTIES
     LABELS "codegen;078;us3;nm-link-only")
