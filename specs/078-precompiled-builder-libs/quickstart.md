@@ -44,13 +44,30 @@ Runnable validation scenarios proving the feature end-to-end. Detail lives in
 
 ## Scenario 4 — Force-inline a few, link the rest, ODR-safe (US3 / FR-007 / R2a)
 
-1. Build a consumer that force-inlines one `validate_<Msg>` (header-only, via the
-   per-message macro) which **shares a plan** with another, linked validator, and
-   also links `fixpp::validators::<ver>`.
-2. **Expect:** compiles + links with **no duplicate-symbol** error (shared traits
-   are the single `inline` definition in `groups.hpp`).
-3. Exercise the inlined message and a linked message with identical inputs →
-   **byte-identical** wire output (SC-004).
+**4a — validator-side mixing (R2a leg i):**
+1. Build a consumer that force-inlines one `validate_<Msg>` (header-only, via
+   `FIXPP_VALIDATORS_HEADER_ONLY_<Msg>`) which **shares a group-plan** with another,
+   linked validator, and also links `fixpp::validators::<ver>`.
+2. **Expect:** compiles + links with **no duplicate-symbol** error (the shared
+   group-plan trait is the single `inline` definition in `validators/traits.hpp`).
+3. Exercise the inlined `validate_<Msg>` and a linked `validate_<Msg>` with identical
+   `Args` → **result-identical** (same success/error and same offending tag; the
+   validator returns a validation result, not wire bytes — SC-004).
+
+**4b — builder-side mixing (New-4; FR-007's headline case):**
+1. Build a consumer that force-inlines one `build_<Msg>` (via
+   `FIXPP_BUILDERS_HEADER_ONLY_<Msg>`) and links the rest of `fixpp::builders::<ver>`.
+2. **Expect:** compiles + links with **no duplicate-symbol** error; the inlined
+   `build_<Msg>` body is available at the call site while every other `build_<Msg>`
+   resolves from the lib.
+3. `nm` the inlined-message object → the forced-inline `build_<Msg>` is defined
+   locally and pulls **no** validator symbol; the message's wire output is
+   **byte-identical** to its linked form (SC-004).
+
+**4c — both libs linked (R2a leg iii):** a consumer that links **both**
+`fixpp::builders::<ver>` and `fixpp::validators::<ver>` (the US1+US2 common case)
+compiles + links with **no duplicate-symbol** for `build_`/`validate_` (disjoint
+objects, R1).
 
 ## Scenario 5 — Aggregator = full set, byte-identical, stays slim (US4 / SC-005 / R5)
 
@@ -75,9 +92,23 @@ Runnable validation scenarios proving the feature end-to-end. Detail lives in
    `#include` slim `all.hpp` + **link** the prebuilt libs.
 2. **Expect:** their peak compile RSS is well under the 16 GB runner limit; the
    giant compile happened once at the lib target.
-3. **In CI (gating step, R8):** every tier1 leg (incl. `linux-gcc-release`) + tier2
-   MSVC green without `FIXPP_BUILD_HEAVY_BUILDER_TESTS` and without the job pool.
-   Only after that is green does the option/pool deletion land.
+3. **In CI (gating step, R8):** every tier1 C++ leg (incl. `linux-clang-asan`/
+   `ubsan`/`tsan` and `linux-gcc-release`), **the python-bindings `asan`/`ubsan`/
+   `tsan` legs** (they build the heavy TUs via the reused `linux-clang-debug`
+   preset), and tier2 MSVC green without `FIXPP_BUILD_HEAVY_BUILDER_TESTS` and
+   without the job pool. Only after that is green does the option/pool deletion land.
+   **The python-bindings legs are path-gated (`python_touched`, `tier1.yml:628-631`)
+   and SKIP on the 078 PR** (078 matches none of `PY_RE`, `:131`), so this evidence
+   must come from a **`workflow_dispatch` (or feature-branch `push`) run** — a
+   non-`pull_request` event sets `python_touched=true` unconditionally (`:141`) and
+   runs those legs against the post-split tree — **or** the deletion is split into a
+   follow-up PR that lands after a `push:main`/dispatch run proved them (Gate A round
+   2; do not broaden `PY_RE`).
+4. **Caveat:** `/speckit-verify` is **clang-only + local** and does **not** exercise
+   the python-bindings sanitizer legs (nor gcc-release / MSVC). The #197 removal is
+   gated on **actual CI** (the forced evidence run above) on those legs, not on the
+   local verify record — the main-CI OOM findings reproduced exactly there
+   (Clarifications — main-CI OOM + Gate A round 2).
 
 ## Full verification
 
