@@ -58,10 +58,10 @@ Expect: runtime and generated typed `validate_<Msg>` return identical verdicts f
 
 ## 6. Regression floor (no read-golden / ABI drift)
 
-These are whole-binary grouped buckets, so select them by **label** (Article VII §8 — `ctest -L`, never `-R <exe-name>`):
+These are whole-binary grouped buckets, so select them by **label** (Article VII §8 — `ctest -L`, never `-R <exe-name>`). The real shipped `LABELS` values are `codegen` (carries `codegen_determinism_test`), `dictionary` (carries `dictionary_pure_tests`), and `wire` (carries `wire_dict_tests`); `wire_pure_tests` currently carries **no** label — /tasks (T024) attaches a `wire` (or feature) label so it is selected here too:
 ```
-ctest --test-dir build/debug -L 'codegen_determinism|dictionary_pure|wire_pure|wire_dict' -j2
+ctest --test-dir build/debug -L 'codegen|dictionary|wire' -j2
 ```
-Expect: all green; v44/v42/vt11/v50sp2/vlatest read goldens byte-identical; no C-ABI change. (The exact label strings for these buckets follow the 068 grouping precedent — set in each module's CMakeLists, finalized at /tasks.)
+Expect: all green **and a non-zero test count selected** (a mis-typed `-L` regex matches nothing and ctest still exits 0 — a silent false-green; assert `>0` tests ran); v44/v42/vt11/v50sp2/vlatest read goldens byte-identical; no C-ABI change. (Bucket labels follow the 068 grouping precedent — set in each module's CMakeLists; the `wire_pure_tests` label is finalized at /tasks.)
 
 ## Success = all steps green, with step 3's census proven RED on BOTH witnesses (the `in_group` revert AND the synthetic optional-component injection), and the same-PR perf bench reported.
