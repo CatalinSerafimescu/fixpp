@@ -525,7 +525,24 @@ target_link_libraries(test078_odr_builder_only_probe PRIVATE test078_mock_builde
 
 # `nm --defined-only` on the builder-only binary must show zero
 # validate_/writer_traits symbols (SC-003).
-find_program(FIXPP_078_NM_TOOL nm)
+#
+# nm symbol witnesses (test_078_nm_assert.cmake) are a GNU/Itanium-toolchain
+# tool: they run `nm -C` (Itanium demangling) and match namespace-anchored
+# patterns like `fixpp::v44::build_`. On MSVC the objects are COFF with MSVC
+# name mangling, which `nm -C` cannot demangle, so the pattern matches fail
+# (windows-msvc-release CI). The SC-002/SC-003 link-granularity / builder⟂
+# validator ODR properties are witnessed on the Linux legs (nm available);
+# MSVC exercises the SAME split via its compile/link/roundtrip witnesses
+# (test078_slim_compile_us1, test078_builder_mixing_us3, test078_nm_link_only_us3,
+# test_078_builder_roundtrip_linked_us1 — all pass on MSVC). So do NOT register
+# the nm-check ctests on MSVC. Follow-up: a dumpbin-based witness could add
+# native MSVC SC-002/003 symbol coverage (see cross-platform-twin lesson).
+if(MSVC)
+  message(STATUS "tests/codegen: MSVC — skipping 078 nm symbol-witness ctests "
+                 "(GNU/Itanium `nm -C`; SC-002/003 witnessed on Linux legs + MSVC link/roundtrip)")
+else()
+  find_program(FIXPP_078_NM_TOOL nm)
+endif()
 if(FIXPP_078_NM_TOOL)
   add_test(
     NAME test078_odr_sc003_probe_nm_builder_only
