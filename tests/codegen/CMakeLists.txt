@@ -215,9 +215,7 @@ set_tests_properties(codegen_vlatest_manifest_class_test PROPERTIES
 # Own executable, gated on FIXPP_CODEGEN_FIX_LATEST (mirrors
 # test_077_vlatest_builder_roundtrip above the tier gate at T012) —
 # #includes the ~78MB deduped fixpp::vlatest::all.hpp; build THIS
-# target with -j1 (feedback_build_resource_cap_oom). Gated on
-# FIXPP_BUILD_HEAVY_BUILDER_TESTS (heavy-TU config gating — top-level CMakeLists).
-if(FIXPP_BUILD_HEAVY_BUILDER_TESTS)
+# target with -j1 (feedback_build_resource_cap_oom).
 add_executable(codegen_077_vlatest_builder_completeness_test
   test_077_vlatest_builder_completeness.cpp
 )
@@ -249,7 +247,6 @@ target_compile_options(codegen_077_vlatest_builder_completeness_test PRIVATE
 add_test(NAME codegen_077_vlatest_builder_completeness_test COMMAND codegen_077_vlatest_builder_completeness_test)
 set_tests_properties(codegen_077_vlatest_builder_completeness_test PROPERTIES
   LABELS "codegen;077;builder-completeness;vlatest")
-endif()  # FIXPP_BUILD_HEAVY_BUILDER_TESTS
 endif()  # FIXPP_CODEGEN_FIX_LATEST
 
 # 077-builder-args-dedup T023 [US4]: v44 builder-completeness census
@@ -286,9 +283,7 @@ set_tests_properties(codegen_077_v44_builder_completeness_test PROPERTIES
 # 077-builder-args-dedup T023 [US4]: v50sp2 builder-completeness census. Own
 # executable (not joined to the v44 target above) — #includes the ~75MB
 # deduped fixpp::v50sp2::all.hpp (RSS discipline, mirrors
-# tests/session/CMakeLists.txt's per-version builder-roundtrip split). Gated on
-# FIXPP_BUILD_HEAVY_BUILDER_TESTS (heavy-TU config gating — top-level CMakeLists).
-if(FIXPP_BUILD_HEAVY_BUILDER_TESTS)
+# tests/session/CMakeLists.txt's per-version builder-roundtrip split).
 add_executable(codegen_077_v50sp2_builder_completeness_test
   test_077_v50sp2_builder_completeness.cpp
 )
@@ -320,7 +315,6 @@ target_compile_options(codegen_077_v50sp2_builder_completeness_test PRIVATE
 add_test(NAME codegen_077_v50sp2_builder_completeness_test COMMAND codegen_077_v50sp2_builder_completeness_test)
 set_tests_properties(codegen_077_v50sp2_builder_completeness_test PROPERTIES
   LABELS "codegen;077;builder-completeness")
-endif()  # FIXPP_BUILD_HEAVY_BUILDER_TESTS
 
 # 077-builder-args-dedup T026 [US4]: vt11 + v42 completeness (C3c) + the C4
 # structural-key safety pin. Cheap/ungated (no Builders.hpp #include —

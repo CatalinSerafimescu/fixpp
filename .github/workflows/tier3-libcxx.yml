@@ -192,6 +192,7 @@ jobs:
       CMAKE_CXX_COMPILER_LAUNCHER: ccache
       CMAKE_C_COMPILER_LAUNCHER: ccache
       CCACHE_COMPILERCHECK: content
+      CCACHE_COMPRESSLEVEL: "5"   # see tier1.yml matrix job — shared 10 GB cache quota
       # Keep ccache outside the checkout so source-cleanliness tests do not see
       # the action's default .ccache directory as an untracked repo file.
       CCACHE_DIR: /tmp/fixpp-ccache-${{ matrix.preset }}
