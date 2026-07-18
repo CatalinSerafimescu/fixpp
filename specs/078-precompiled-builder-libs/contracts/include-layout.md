@@ -73,8 +73,13 @@ fixpp/<ns>/
 - Per-message override (exact spelling decided at `/implement`; e.g.
   `FIXPP_BUILDERS_HEADER_ONLY_<Msg>` / `FIXPP_VALIDATORS_HEADER_ONLY_<Msg>` or
   directly `#include ".../<Msg>.builder.inl"`) — force-inline a chosen subset per
-  side while linking the rest. Mixing is ODR-safe (R2/R2a): the shared group-plan
-  traits are the single `inline` definition in `validators/traits.hpp`.
+  side while linking the rest. Mixing DIFFERENT messages is ODR-safe (R2/R2a):
+  the shared group-plan traits are the single `inline` definition in
+  `validators/traits.hpp`. The switch is a **program-wide per-message** control,
+  however: the *same* message force-inlined in one TU and link-resolved
+  (strong external) in another TU within one program is **unsupported** — an
+  ODR violation under [dcl.inline]/4 (IFNDR, no diagnostic required) — and MUST
+  NOT be relied upon. See quickstart.md Scenario 4d and spec.md Edge Cases.
 
 ## Invariants (testable)
 
