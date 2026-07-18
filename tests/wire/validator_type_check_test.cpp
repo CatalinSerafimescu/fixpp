@@ -82,8 +82,9 @@ std::vector<std::byte> make_frame(std::string_view body_fields) {
     return out;
 }
 
+template <std::size_t N>
 MessageView<access_mode::Index> parse_index(std::vector<std::byte> const& buf,
-                                            std::array<std::byte, 4096>& stack_buf,
+                                            std::array<std::byte, N>& stack_buf,
                                             std::pmr::monotonic_buffer_resource& arena_out) {
     new (&arena_out) std::pmr::monotonic_buffer_resource{stack_buf.data(), stack_buf.size(),
                                                          std::pmr::null_memory_resource()};
@@ -691,6 +692,82 @@ TEST(ValidatorTypeCheck, Fixpp201GroupAllInstancesCompleteAccepted) {
     EXPECT_TRUE(result.has_value())
         << "conforming group (all instances complete) must be accepted; err="
         << (result.has_value() ? 0 : static_cast<int>(result.error()));
+}
+
+// ── T003: dynamic-width per-instance required-member check (079) ────────────
+// A synthetic group NoW(900) with delimiter 901 and 70 DIRECT required
+// members (tags 1000..1069) -- deliberately >64 to exercise the width past
+// the candidate's fixed uint64_t bitmask. Against the candidate's
+// `req_members.size() <= 64` guard, `check_required` is false for this group
+// so the whole per-instance required check is SKIPPED (fail-open) and an
+// instance omitting a required member is wrongly ACCEPTED. FR-004/data-model.md
+// "Group-instance membership check state" mandates universal, fail-closed
+// enforcement for every per-group required-member count.
+namespace {
+constexpr std::uint16_t kWideGroupNoTag = 900;
+constexpr std::uint16_t kWideGroupDelim = 901;
+constexpr std::uint16_t kWideGroupFirstMember = 1000;
+constexpr std::size_t kWideGroupMemberCount = 70;  // > 64
+
+table_view make_wide_group_grammar_201() {
+    table_view t;
+    t.add_valid("D", 8).add_valid("D", 9).add_valid("D", 10).add_valid("D", 35);
+    t.add_valid("D", kWideGroupNoTag).add_valid("D", kWideGroupDelim);
+    t.set_group_first(kWideGroupNoTag, kWideGroupDelim);  // also adds the delim as a member
+    for (std::size_t k = 0; k < kWideGroupMemberCount; ++k) {
+        std::uint16_t const tag = static_cast<std::uint16_t>(kWideGroupFirstMember + k);
+        t.add_valid("D", tag);
+        t.add_group_member(kWideGroupNoTag, tag);
+        t.add_group_required_member(kWideGroupNoTag, tag);  // ALL 70 direct-required
+    }
+    return t;
+}
+
+// One group instance body, optionally omitting `omit_tag` (0 = omit nothing).
+std::string wide_group_instance(std::uint16_t omit_tag) {
+    std::string out = std::to_string(kWideGroupDelim) + "=x\x01";
+    for (std::size_t k = 0; k < kWideGroupMemberCount; ++k) {
+        std::uint16_t const tag = static_cast<std::uint16_t>(kWideGroupFirstMember + k);
+        if (tag == omit_tag) {
+            continue;
+        }
+        out += std::to_string(tag) + "=v\x01";
+    }
+    return out;
+}
+}  // namespace
+
+TEST(ValidatorTypeCheck, Fixpp201GroupWideRequiredMaskInstanceMissingRequiredMemberRejected) {
+    dictionary_driven_validator v{make_wide_group_grammar_201()};
+    // Instance 1: complete (all 70 required members present).
+    // Instance 2: omits tag 1069 -- bit-index 69 within the required set,
+    // i.e. word 1 / bit 5 of the dynamic-width mask -- strictly PAST the old
+    // fixed uint64_t mask's 64-bit capacity (word 0 / bits 0-63). This is
+    // load-bearing: an implementation that merely stops skipping the check
+    // but still tracks presence in a single 64-bit word would satisfy word 0
+    // in full (indices 0-63 all present) and never notice the missing
+    // index-69 bit, so this test would wrongly PASS against such a
+    // regression unless the omitted index is >= 64.
+    constexpr std::uint16_t kOmitTag = 1069;
+    std::string const body = std::string("35=D\x01") + "900=2\x01" + wide_group_instance(0) +
+                             wide_group_instance(kOmitTag);
+    auto buf = make_frame(body);
+    // 146 offset-table entries for this synthetic wide group -- larger than
+    // the shared 4096-byte stack the other cases use.
+    std::array<std::byte, 16384> stack{};
+    std::pmr::monotonic_buffer_resource arena;
+    auto mv = parse_index(buf, stack, arena);
+
+    std::array<std::byte, kScratch> scratch_buf{};
+    std::pmr::monotonic_buffer_resource scratch_mr{scratch_buf.data(), scratch_buf.size(),
+                                                   std::pmr::null_memory_resource()};
+    std::uint16_t ref_tag = 0;
+    auto result = v.validate(mv, &scratch_mr, &ref_tag);
+    ASSERT_FALSE(result.has_value())
+        << ">64-required-member group instance omitting a required member must be "
+           "rejected (dynamic-width, fail-closed, FR-004)";
+    EXPECT_EQ(result.error(), error::wire_required_field_missing);
+    EXPECT_EQ(ref_tag, kOmitTag) << "ref tag must name the missing required member";
 }
 
 }  // namespace
