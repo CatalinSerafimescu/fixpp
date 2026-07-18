@@ -280,10 +280,22 @@ private:
     // MESSAGE-level `required_out` — QuickFIX composes message-level required-
     // ness top-level-scoped and checks group members per instance. `out` and
     // each FieldRef's `rule` are unaffected; only `required_out` membership is.
+    // `component_required` (079-required-presence-scope T020 fix; census
+    // T015 found this is NOT vacuous — 4 real sites): the running AND of
+    // every enclosing <component required=.../> usage's own `required`
+    // attribute (default "N"/optional, mirroring QuickFIX
+    // `DataDictionary.cpp:401-403,510` `componentRequired`) on the path from
+    // the message root to `parent`. A field/group's own `required='Y'` only
+    // reaches message-level `required_out` when `component_required` is ALSO
+    // true — an optional componentRef's contents must not leak into the
+    // message-level required set even when the nested field/group itself says
+    // `required='Y'`. Does NOT affect `FieldRef.rule` (per-field presence,
+    // FR-008) — only `required_out` membership.
     void expand_field_list(pugi::xml_node const& parent, std::vector<FieldRef>& out,
                            std::vector<std::uint16_t>& required_out,
                            std::uint16_t enclosing_group_no_tag,
-                           std::uint16_t enclosing_component_index, bool in_group = false);
+                           std::uint16_t enclosing_component_index, bool in_group = false,
+                           bool component_required = true);
 
     void detect_length_pairs(pugi::xml_node const& root);
 
@@ -492,7 +504,8 @@ void LoaderState::collect_messages(pugi::xml_node const& root) {
 void LoaderState::expand_field_list(pugi::xml_node const& parent, std::vector<FieldRef>& out,
                                     std::vector<std::uint16_t>& required_out,
                                     std::uint16_t enclosing_group_no_tag,
-                                    std::uint16_t enclosing_component_index, bool in_group) {
+                                    std::uint16_t enclosing_component_index, bool in_group,
+                                    bool component_required) {
     for (auto const& child : parent.children()) {
         std::string_view const tag_name{child.name()};
         if (tag_name == "field") {
@@ -515,8 +528,8 @@ void LoaderState::expand_field_list(pugi::xml_node const& parent, std::vector<Fi
             fr.component_index = enclosing_component_index;
             fr.length_pair_data_tag = info.length_pair_data_tag;
             out.push_back(fr);
-            if (req && !in_group) {  // fixpp#201: group-member requireds stay per-group
-                required_out.push_back(info.tag);
+            if (req && !in_group && component_required) {  // fixpp#201: group-member requireds
+                required_out.push_back(info.tag);  // stay per-group; 079: optional-component AND
             }
         } else if (tag_name == "component") {
             auto const cname = std::string{child.attribute("name").as_string("")};
@@ -526,8 +539,14 @@ void LoaderState::expand_field_list(pugi::xml_node const& parent, std::vector<Fi
                                       "\"> not defined in <components> block");
             }
             auto const& def = components_[cit->second];
+            // 079-required-presence-scope T020: componentRef's own `required`
+            // (default "N", QuickFIX `DataDictionary.cpp:401-403` parity) ANDs
+            // into the running component_required for the recursion.
+            bool const comp_req =
+                std::string_view{child.attribute("required").as_string("N")} == "Y";
             expand_field_list(def.node, out, required_out, enclosing_group_no_tag,
-                              static_cast<std::uint16_t>(cit->second + 1), in_group);
+                              static_cast<std::uint16_t>(cit->second + 1), in_group,
+                              component_required && comp_req);
         } else if (tag_name == "group") {
             auto const gname = std::string{child.attribute("name").as_string("")};
             auto const nit = by_name_.find(gname);
@@ -546,9 +565,9 @@ void LoaderState::expand_field_list(pugi::xml_node const& parent, std::vector<Fi
             no_fr.component_index = enclosing_component_index;
             no_fr.length_pair_data_tag = nit->second.length_pair_data_tag;
             out.push_back(no_fr);
-            if (greq && !in_group) {  // fixpp#201: a nested group's count field is not
-                required_out.push_back(no_tag);  // message-level required (per-instance instead)
-            }
+            if (greq && !in_group && component_required) {  // fixpp#201: a nested group's count
+                required_out.push_back(no_tag);  // field is not message-level required (per-
+            }  // instance instead); 079: optional-component AND
             // Record the GroupRef (deduplicated by no_tag — first-seen wins).
             if (!group_index_by_no_tag_.contains(no_tag)) {
                 std::uint16_t first_field_tag = 0;
@@ -594,8 +613,10 @@ void LoaderState::expand_field_list(pugi::xml_node const& parent, std::vector<Fi
             }
             // Recurse into group children with the group-context set. fixpp#201:
             // in_group=true so descendant requireds do NOT leak to message level.
+            // 079: component_required carries through unchanged (a group ref
+            // itself has no `required`-usage semantics on this axis).
             expand_field_list(child, out, required_out, no_tag, enclosing_component_index,
-                              /*in_group=*/true);
+                              /*in_group=*/true, component_required);
         }
         // Ignore unknown child elements (forwards-compat).
     }

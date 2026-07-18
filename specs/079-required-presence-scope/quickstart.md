@@ -10,7 +10,7 @@ How to prove the feature end-to-end. Assumes the library submodule cwd and the s
 
 ## 1. Group-scope fix (US1) — conforming message accepted
 
-US1's acceptance criterion is that a **conforming frame is accepted by the runtime `validate()`** — so this step runs the **real-frame accept regression** (Contract 4), not a set-membership check: parse a FIX44 PositionReport (AP) without NoUnderlyings and a FIX50SP2 TradeCaptureReport (AE) without NoSides and pass each through `dictionary_driven_validator::validate()`; expect **ACCEPT** (was: `wire_required_field_missing(732)` / tag 54). This is a grouped-bucket pin — its concrete target + `ctest -L <label>` are finalized at /tasks (Article VII §8: select by label, not exe-name). See [contracts Contract 4](./contracts/census-and-agreement.md).
+US1's acceptance criterion is that a **conforming frame is accepted by the runtime `validate()`** — so this step runs the **real-frame accept regression** (Contract 4), not a set-membership check: parse a FIX44 PositionReport (AP) without NoUnderlyings (and a FIX42 conforming frame) and pass each through `dictionary_driven_validator::validate()`; expect **ACCEPT** (was: `wire_required_field_missing(732)`). **The FIX50SP2 TradeCaptureReport (AE) leg is verified at the derivation tier (§1a), NOT full-frame `validate()`** — FIX50SPx ship an empty `<header/>` (FIXT app dict), so `validate()` rejects on tag 8 before the required scan (L-041-2 / #203); FIX44 carries the end-to-end frame accept. This is a grouped-bucket pin — its concrete target + `ctest -L <label>` are finalized at /tasks (Article VII §8: select by label, not exe-name). See [contracts Contract 4](./contracts/census-and-agreement.md).
 
 ## 1a. Required-set derivation unit check (supplementary)
 
@@ -34,7 +34,7 @@ The census is a standalone **exact-set completeness gate**, so it is selected li
 ```
 ctest --test-dir build/debug -R required_scope_census -V
 ```
-Expect: exact set-equality across all 10 dicts — the message-level set (runtime Step-2 probe surface + IR **data-structure** projection) **and** the per-group required-member set (Contract 1a), plus the shipped max per-group required-member count. To confirm it is not a tautology, prove **two** RED witnesses ([contracts Contract 1](./contracts/census-and-agreement.md)): (a) revert the `in_group` gate in `expand_field_list` → census RED; (b) inject a synthetic optional-component-`required='Y'` field → the stronger full-component-AND oracle drops it while the loader keeps it → census RED (even though the real corpus has 0 optional-component sites).
+Expect: exact set-equality across all 10 dicts — the message-level set (runtime Step-2 probe surface + IR **data-structure** projection) **and** the per-group required-member set (Contract 1a), plus the shipped max per-group required-member count. To confirm it is not a tautology, prove **two** RED witnesses ([contracts Contract 1](./contracts/census-and-agreement.md)): (a) revert the `in_group` gate in `expand_field_list` → census RED; (b) inject a synthetic optional-component-`required='Y'` field → the stronger full-component-AND oracle drops it while the loader keeps it → census RED. **⚠️ SUPERSEDED (2026-07-19, T020 fix):** "even though the real corpus has 0 optional-component sites" is now false — the real corpus had 4 genuine sites (T015 census finding), fixed in `xml_loader.cpp`'s `component_required` threading; witness (b)'s synthetic proof still independently demonstrates the mechanism, it is just no longer the sole non-trivial RED source for this leg.
 
 ## 4. QuickFIX parity (US4) — the tiebreaker (9 dicts)
 
@@ -54,7 +54,7 @@ The two-tier verdict-agreement test is ordinary isolation-safe verdict-compariso
 ```
 ctest --test-dir build/debug -L <two-tier bucket label — finalized at /tasks> -V
 ```
-Expect: runtime and generated typed `validate_<Msg>` return identical verdicts for the affected frames — confirming no codegen change was needed. **Scope: v44 / v50sp2 / vlatest only** — FIX42 has no typed validator (L-077-1/#196; `main.cpp:132`), so it is covered runtime-only (steps 1/2) plus census-vs-IR-structure (step 3).
+Expect: runtime and generated typed `validate_<Msg>` agree — confirming no codegen change was needed. **Scope: v44 / v50sp2 / vlatest**. **v44** carries the end-to-end full-frame verdict comparison; **v50sp2 / vlatest** are compared at the **derivation tier** (both tiers' message-level required set excludes the group tag) because standalone full-frame `validate()` is blocked by the empty FIXT header (L-041-2 / #203, per Contract 3). FIX42 has no typed validator (L-077-1/#196; `main.cpp:132`), covered runtime-only (steps 1/2) plus census-vs-IR-structure (step 3).
 
 ## 6. Regression floor (no read-golden / ABI drift)
 

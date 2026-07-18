@@ -153,6 +153,32 @@ target_compile_definitions(dictionary_dict_enum_census_test PRIVATE
 add_test(NAME dictionary_dict_enum_census_test COMMAND dictionary_dict_enum_census_test)
 set_tests_properties(dictionary_dict_enum_census_test PROPERTIES LABELS "075;dictionary;census")
 
+# ── 079-required-presence-scope T015-T017: required-set census (Contract 1 +
+# 1a) — STANDALONE (const §VII.8) exact-set completeness gate, selected via
+# `-R required_scope_census` (Article VII §8 carve-out). Links the codegen
+# tool's ir.cpp directly (mirrors codegen_067_emit_builders_unit_test —
+# tests/codegen/CMakeLists.txt) for the IR safety-net leg; host-tool-only, no
+# generated-header dependency (fixpp_codegen_generate NOT required).
+add_executable(dictionary_required_scope_census_test
+  required_scope_census_test.cpp
+  "${CMAKE_SOURCE_DIR}/tools/codegen/fixpp-codegen/ir.cpp"
+)
+target_include_directories(dictionary_required_scope_census_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+  "${CMAKE_SOURCE_DIR}/tools/codegen/fixpp-codegen"
+)
+target_link_libraries(dictionary_required_scope_census_test PRIVATE
+  fixpp_dictionary
+  pugixml::pugixml
+  GTest::gtest
+  GTest::gtest_main
+)
+target_compile_definitions(dictionary_required_scope_census_test PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${FIXPP_DICT_DATA_DIR}\""
+  "FIXPP_ORCHESTRA_DATA_DIR=\"${FIXPP_ORCHESTRA_DATA_DIR}\"")
+add_test(NAME required_scope_census COMMAND dictionary_required_scope_census_test)
+set_tests_properties(required_scope_census PROPERTIES LABELS "dictionary;079;census")
+
 # mallocnesia gate for the group-context lookup no-alloc test — re-runs the
 # standalone binary under LD_PRELOAD so global malloc/calloc/realloc is
 # intercepted (dual gate alongside the in-TU global operator-new counter; absent
