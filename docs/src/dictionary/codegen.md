@@ -23,7 +23,7 @@ through a custom CMake script.
 | Target | Description |
 |--------|-------------|
 | `fixpp-codegen` | The host-only code generator executable. |
-| `fixpp_codegen_generate` | Custom target that runs `fixpp-codegen` on all four XML dictionaries and writes headers into `${CMAKE_BINARY_DIR}/_codegen/include/fixpp/`. |
+| `fixpp_codegen_generate` | No-op marker target that library/test TUs depend on. The generated headers are produced at **configure time** (`execute_process` runs `fixpp-codegen` on the XML dictionaries into `${CMAKE_BINARY_DIR}/_codegen/include/fixpp/`), not by building this target. |
 | `fixpp_dictionary` | The user-facing library. **Depends on** `fixpp_codegen_generate` so generated headers are ready before any library TU compiles. |
 | `fixpp_builders_<ver>` / `fixpp::builders::<ver>` | Precompiled **STATIC** library holding every `build_<Msg>` body for version `<ver>` ∈ {v44, v50sp2, vlatest} (078). Always built. |
 | `fixpp_validators_<ver>` / `fixpp::validators::<ver>` | Precompiled **STATIC** library holding every `validate_<Msg>` body for version `<ver>` — a disjoint object set from the builder lib (078). Always built. |
