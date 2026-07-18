@@ -256,7 +256,7 @@ Task: "T029 all.hpp full-set equivalence (US4)"
 3. US2 (P1) → send-only zero validator code.
 4. US3 (P2) → ODR-safe mixing + per-message link granularity.
 5. US4 (P2) → aggregator full set, slim by default, old path removed.
-6. US5 (P2) → heavy tests cheap; #197 stopgap retired (CI-gated).
+6. US5 (P2) → heavy tests cheap; #197 stopgap retired (CI-gated) or its removal deferred to a named follow-up.
 7. Polish → constitution AMEND (at merge) + docs + decision record + close-out.
 
 ---
