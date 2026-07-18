@@ -32,6 +32,7 @@ add_executable(dictionary_pure_tests
   field_traits_test.cpp
   version_registry_test.cpp
   table_view_test.cpp
+  required_scope_test.cpp          # fixpp#201: message-level required scope (group leak)
   defect_a_group_context_test.cpp
   reused_tag_census_test.cpp
   collision_membership_guards_test.cpp

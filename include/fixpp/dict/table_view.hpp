@@ -156,6 +156,9 @@ struct group_ctx_equal {
 struct group_ctx_entry {
     std::uint16_t group_first = 0;
     std::vector<std::uint16_t> members;
+    // fixpp#201: the group's DIRECT `required='Y'` members (excludes nested-
+    // group members). The runtime validator checks these PER group instance.
+    std::vector<std::uint16_t> required_members;
 };
 
 // T017/T019 (data-model.md Entity B): enum-domain table entry. OWNS copies of
@@ -300,6 +303,19 @@ public:
         return {it->second.data(), it->second.size()};
     }
 
+    // fixpp#201: the DIRECT `required='Y'` members of group `no_tag` — the tags
+    // the runtime validator must find in EVERY instance of this group. Empty
+    // span if the group has none (or is not a group). Bare no_tag store; the
+    // context-scoped overload below is preferred by the validator.
+    [[nodiscard]] std::span<std::uint16_t const> group_required_members(
+        std::uint16_t no_tag) const noexcept {
+        auto it = group_required_members_.find(no_tag);
+        if (it == group_required_members_.end()) {
+            return {};
+        }
+        return {it->second.data(), it->second.size()};
+    }
+
     // ── 063 Defect-A: context-scoped group accessors ─────────────────────
     // `(msg_type, parent_path, no_tag)` overloads — the acceptance-gate
     // surface `group_member_fn_t` (parser.hpp) and `Validator::validate()`
@@ -359,6 +375,22 @@ public:
             return {it->second.members.data(), it->second.members.size()};
         }
         return group_member_tags(no_tag);  // legacy bare fallback — see doc above
+    }
+
+    // fixpp#201 context-scoped twin of group_required_members(no_tag), mirroring
+    // group_member_tags(msg_type, parent_path, no_tag): context store first,
+    // bare fallback on a context miss.
+    [[nodiscard]] std::span<std::uint16_t const> group_required_members(
+        std::string_view msg_type, std::span<std::uint16_t const> parent_path,
+        std::uint16_t no_tag) const noexcept {
+        if (!group_bit(no_tag)) {  // same exact pre-filter as the accessors above
+            return {};
+        }
+        auto const it = group_ctx_.find(group_ctx_query{msg_type, parent_path, no_tag});
+        if (it != group_ctx_.end()) {
+            return {it->second.required_members.data(), it->second.required_members.size()};
+        }
+        return group_required_members(no_tag);  // legacy bare fallback
     }
 
     // 7-value structural type category for `tag`. Defaults to String for
@@ -477,6 +509,19 @@ public:
         return *this;
     }
 
+    // fixpp#201: register `member_tag` as a DIRECT required member of group
+    // `no_tag` (bare store). Does NOT add it to the member set — callers pair
+    // this with add_group_member/set_group_first as needed.
+    table_view& add_group_required_member(std::uint16_t no_tag, std::uint16_t member_tag) {
+        set_group_bit(no_tag);
+        auto& req = group_required_members_[no_tag];
+        for (auto const t : req) {
+            if (t == member_tag) return *this;  // dedup
+        }
+        req.push_back(member_tag);
+        return *this;
+    }
+
     // Chain-style helpers — all return *this for fluent use.
 
     table_view& add_valid(std::string_view msg_type, std::uint16_t tag) {
@@ -553,6 +598,18 @@ public:
         entry.members.push_back(member_tag);
     }
 
+    // fixpp#201 context-scoped twin of add_group_required_member.
+    void add_group_required_member_ctx(std::string_view msg_type,
+                                       std::span<std::uint16_t const> parent_path,
+                                       std::uint16_t no_tag, std::uint16_t member_tag) {
+        set_group_bit(no_tag);
+        auto& entry = group_ctx_[make_group_ctx_key(msg_type, parent_path, no_tag)];
+        for (auto const t : entry.required_members) {
+            if (t == member_tag) return;  // dedup
+        }
+        entry.required_members.push_back(member_tag);
+    }
+
     // Mirrors set_group_first's "sets the delimiter AND adds it as a member"
     // behaviour, context-scoped.
     void set_group_first_ctx(std::string_view msg_type, std::span<std::uint16_t const> parent_path,
@@ -616,6 +673,11 @@ private:
 
     // Group member-tag lists (no_tag → member tags; spans stable).
     std::unordered_map<std::uint16_t, std::vector<std::uint16_t>> group_members_;
+
+    // fixpp#201: DIRECT required-member lists (no_tag → required member tags;
+    // spans stable). Bare store paralleling group_members_; the primary store
+    // is group_ctx_entry.required_members (context-scoped).
+    std::unordered_map<std::uint16_t, std::vector<std::uint16_t>> group_required_members_;
 
     // perf pre-filter over BOTH group stores (bare + context): bit `no_tag`
     // is set by EVERY population path that can make a group accessor answer

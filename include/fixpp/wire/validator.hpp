@@ -298,13 +298,39 @@ public:
         bool const can_descend = child.depth > ctx.depth;
         std::span<std::uint16_t const> const child_path{child.parent_path.data(), child.depth};
 
+        // fixpp#201: every DIRECT `required='Y'` member of this group must
+        // appear in EVERY instance (QuickFIX checkHasRequired, per-instance).
+        // `required_out` no longer leaks these to the message-level scan (Step
+        // 2); they are enforced here instead. A bitmask over `req_members`
+        // (deduped, tiny — real groups carry 0-3) records per-instance
+        // presence; the delimiter always opens an instance so it is pre-marked.
+        // Guarded to <= 64 required members (unreached by any real dictionary);
+        // beyond that the check is skipped rather than risk a false-reject.
+        auto const req_members = dict_.group_required_members(ctx.msg_type, parent_path, no_tag);
+        bool const check_required = !req_members.empty() && req_members.size() <= 64;
+        std::uint64_t const full_mask =
+            req_members.size() >= 64 ? ~std::uint64_t{0}
+                                     : ((std::uint64_t{1} << req_members.size()) - 1);
+        auto const req_bit = [&](std::uint16_t tag) noexcept -> std::uint64_t {
+            for (std::size_t k = 0; k < req_members.size(); ++k) {
+                if (req_members[k] == tag) {
+                    return std::uint64_t{1} << k;
+                }
+            }
+            return 0;
+        };
+
         std::uint32_t actual_count = 0;
         while (i < end && ents[i].tag == delim_tag) {
+            std::uint64_t seen_mask = check_required ? req_bit(delim_tag) : 0;
             ++i;  // consume this instance's delimiter
             while (i < end && ents[i].tag != delim_tag) {
                 std::uint16_t const t = ents[i].tag;
                 if (!is_member(t)) {
                     break;  // end of this group's extent
+                }
+                if (check_required) {
+                    seen_mask |= req_bit(t);  // mark before any nested descent
                 }
                 // Query-before-push: is `t` itself a nested group under the
                 // pushed child path? (depth-bounded by K=16.)
@@ -320,6 +346,17 @@ public:
                 } else {
                     ++i;  // ordinary scalar member (or depth cap reached)
                 }
+            }
+            // fixpp#201: reject an instance missing a required member.
+            if (check_required && seen_mask != full_mask) {
+                for (std::size_t k = 0; k < req_members.size(); ++k) {
+                    if ((seen_mask & (std::uint64_t{1} << k)) == 0) {
+                        set_ref_tag(ref_tag_out, req_members[k]);
+                        break;
+                    }
+                }
+                return core::expected_t<std::size_t>{std::unexpect,
+                                                     core::error::wire_required_field_missing};
             }
             ++actual_count;
         }

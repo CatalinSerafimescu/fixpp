@@ -631,4 +631,66 @@ TEST(ValidatorTypeCheck, TrapThrowFenceMechanismCatchesExceptionAndReturnsError)
         << "generic exception must map to decimal_invalid_input";
 }
 
+// ── fixpp#201: per-instance required-member enforcement in repeating groups ────
+// A group NoX(100) with delimiter 200 and a REQUIRED non-delimiter member 300
+// (plus optional member 400). QuickFIX checks required members PER instance;
+// before this fix the runtime validator's consume_group verified only
+// count/delimiter/membership, so an instance omitting 300 was wrongly ACCEPTED.
+namespace {
+table_view make_group_grammar_201() {
+    table_view t;
+    t.add_valid("D", 8).add_valid("D", 9).add_valid("D", 10).add_valid("D", 35);
+    t.add_valid("D", 100).add_valid("D", 200).add_valid("D", 300).add_valid("D", 400);
+    t.set_group_first(100, 200);      // NoX=100, delimiter=200 (also adds 200 as member)
+    t.add_group_member(100, 300);
+    t.add_group_member(100, 400);
+    t.add_group_required_member(100, 300);  // 300 required in EVERY instance
+    return t;
+}
+}  // namespace
+
+// RED before fix (accepted); GREEN after: instance 2 omits required member 300.
+TEST(ValidatorTypeCheck, Fixpp201GroupInstanceMissingRequiredMemberRejected) {
+    dictionary_driven_validator v{make_group_grammar_201()};
+    auto buf = make_frame(
+        "35=D\x01"
+        "100=2\x01"
+        "200=a\x01" "300=x\x01" "400=y\x01"   // instance 1: complete
+        "200=b\x01" "400=z\x01");               // instance 2: MISSING required 300
+    std::array<std::byte, 4096> stack{};
+    std::pmr::monotonic_buffer_resource arena;
+    auto mv = parse_index(buf, stack, arena);
+
+    std::array<std::byte, kScratch> scratch_buf{};
+    std::pmr::monotonic_buffer_resource scratch_mr{scratch_buf.data(), scratch_buf.size(),
+                                                   std::pmr::null_memory_resource()};
+    std::uint16_t ref_tag = 0;
+    auto result = v.validate(mv, &scratch_mr, &ref_tag);
+    ASSERT_FALSE(result.has_value())
+        << "group instance omitting a required member must be rejected";
+    EXPECT_EQ(result.error(), error::wire_required_field_missing);
+    EXPECT_EQ(ref_tag, 300) << "ref tag must name the missing required member";
+}
+
+// Positive: every instance carries required member 300 → accept (no over-reject).
+TEST(ValidatorTypeCheck, Fixpp201GroupAllInstancesCompleteAccepted) {
+    dictionary_driven_validator v{make_group_grammar_201()};
+    auto buf = make_frame(
+        "35=D\x01"
+        "100=2\x01"
+        "200=a\x01" "300=x\x01" "400=y\x01"
+        "200=b\x01" "300=w\x01");
+    std::array<std::byte, 4096> stack{};
+    std::pmr::monotonic_buffer_resource arena;
+    auto mv = parse_index(buf, stack, arena);
+
+    std::array<std::byte, kScratch> scratch_buf{};
+    std::pmr::monotonic_buffer_resource scratch_mr{scratch_buf.data(), scratch_buf.size(),
+                                                   std::pmr::null_memory_resource()};
+    auto result = v.validate(mv, &scratch_mr, nullptr);
+    EXPECT_TRUE(result.has_value())
+        << "conforming group (all instances complete) must be accepted; err="
+        << (result.has_value() ? 0 : static_cast<int>(result.error()));
+}
+
 }  // namespace

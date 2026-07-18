@@ -226,10 +226,13 @@ private:
     // group's own members with the group-context set (T016).
     // NOLINTBEGIN(misc-no-recursion,bugprone-easily-swappable-parameters) — recursive XML walk by
     // design; the two uint16_t params name different domains and are not interchangeable.
+    // `in_group` (fixpp#201): once inside any repeating group, member
+    // `presence='required'` fields stay per-group (queryable via each
+    // FieldRef's `rule`) and do NOT leak into the MESSAGE-level `required_out`.
     void expand_field_list(pugi::xml_node const& parent, std::vector<FieldRef>& out,
                            std::vector<std::uint16_t>& required_out,
                            std::uint16_t enclosing_group_no_tag,
-                           std::uint16_t enclosing_component_index);
+                           std::uint16_t enclosing_component_index, bool in_group = false);
     // NOLINTEND(misc-no-recursion,bugprone-easily-swappable-parameters)
 
     // Best-effort one-level delimiter scan for a group/component body: mirrors
@@ -474,7 +477,8 @@ void OrchestraLoaderState::expand_field_list(pugi::xml_node const& parent,
                                              std::vector<FieldRef>& out,
                                              std::vector<std::uint16_t>& required_out,
                                              std::uint16_t enclosing_group_no_tag,
-                                             std::uint16_t enclosing_component_index) {
+                                             std::uint16_t enclosing_component_index,
+                                             bool in_group) {
     for (auto const& child : parent.children()) {
         std::string_view const tag_name{child.name()};
         if (tag_name == "fixr:fieldRef") {
@@ -496,7 +500,7 @@ void OrchestraLoaderState::expand_field_list(pugi::xml_node const& parent,
             fr.component_index = enclosing_component_index;
             fr.length_pair_data_tag = 0;  // out of scope for 074 (not requested by tasks.md)
             out.push_back(fr);
-            if (req) {
+            if (req && !in_group) {  // fixpp#201: group-member requireds stay per-group
                 required_out.push_back(tag);
             }
         } else if (tag_name == "fixr:componentRef") {
@@ -509,7 +513,7 @@ void OrchestraLoaderState::expand_field_list(pugi::xml_node const& parent,
             }
             auto const& def = components_[cit->second];
             expand_field_list(def.node, out, required_out, enclosing_group_no_tag,
-                              static_cast<std::uint16_t>(cit->second + 1));
+                              static_cast<std::uint16_t>(cit->second + 1), in_group);
         } else if (tag_name == "fixr:groupRef") {
             auto const xml_id = parse_orchestra_id(child.attribute("id"), "<fixr:groupRef>");
             auto const git = group_by_xml_id_.find(xml_id);
@@ -544,8 +548,8 @@ void OrchestraLoaderState::expand_field_list(pugi::xml_node const& parent,
             no_fr.group_no_tag = enclosing_group_no_tag;
             no_fr.component_index = enclosing_component_index;
             out.push_back(no_fr);
-            if (greq) {
-                required_out.push_back(no_tag);
+            if (greq && !in_group) {  // fixpp#201: nested-group count field is per-instance,
+                required_out.push_back(no_tag);  // not message-level required
             }
 
             // Record the GroupRef (deduplicated by no_tag — first-seen wins).
@@ -563,7 +567,8 @@ void OrchestraLoaderState::expand_field_list(pugi::xml_node const& parent,
             // Recurse into the group's own children (its <fixr:numInGroup> child
             // is skipped automatically — it matches none of the three branches
             // above) with the group-context set.
-            expand_field_list(group_node, out, required_out, no_tag, enclosing_component_index);
+            expand_field_list(group_node, out, required_out, no_tag, enclosing_component_index,
+                              /*in_group=*/true);  // fixpp#201
         }
         // Ignore fixr:annotation / other unknown child elements (forwards-compat).
     }

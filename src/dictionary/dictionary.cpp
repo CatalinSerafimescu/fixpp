@@ -366,6 +366,10 @@ table_view Dictionary::as_table_view() const {
             tv.set_group_first(legacy_no_tag, legacy_first);
             for (auto const& gfr : group_fields(legacy_no_tag)) {
                 tv.add_group_member(legacy_no_tag, gfr.tag);
+                // fixpp#201: a DIRECT (not nested) required member of this group.
+                if (gfr.rule == field_presence::Required && gfr.group_no_tag == legacy_no_tag) {
+                    tv.add_group_required_member(legacy_no_tag, gfr.tag);
+                }
             }
         }
 
@@ -405,9 +409,13 @@ table_view Dictionary::as_table_view() const {
             //    tag-SORTED (xml_loader.cpp), so `members` is a SET, not
             //    declaration order; the DELIMITER is taken separately in (4).
             std::vector<std::uint16_t> members;
+            std::vector<std::uint16_t> required_members;  // fixpp#201: direct required members
             for (auto const& m : all_fields) {
                 if (m.group_no_tag == no_tag) {
                     members.push_back(m.tag);
+                    if (m.rule == field_presence::Required) {
+                        required_members.push_back(m.tag);
+                    }
                 }
             }
             if (members.empty()) {
@@ -452,6 +460,9 @@ table_view Dictionary::as_table_view() const {
             tv.set_group_first_ctx(mt, path, no_tag, delim);
             for (auto const member_tag : members) {
                 tv.add_group_member_ctx(mt, path, no_tag, member_tag);
+            }
+            for (auto const req_tag : required_members) {  // fixpp#201
+                tv.add_group_required_member_ctx(mt, path, no_tag, req_tag);
             }
         }
     }

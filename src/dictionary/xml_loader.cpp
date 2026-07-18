@@ -274,10 +274,16 @@ private:
     // FieldRef vector. Components are resolved recursively. Groups emit a
     // GroupRef AND their inner fields (the group's first field is the first
     // field declared inside it, per FIX semantics).
+    // `in_group` (fixpp#201): true once expansion has descended into ANY
+    // repeating <group>. Group-member `required='Y'` fields are queryable
+    // per-group (via each FieldRef's own `rule`), but must NOT leak into the
+    // MESSAGE-level `required_out` — QuickFIX composes message-level required-
+    // ness top-level-scoped and checks group members per instance. `out` and
+    // each FieldRef's `rule` are unaffected; only `required_out` membership is.
     void expand_field_list(pugi::xml_node const& parent, std::vector<FieldRef>& out,
                            std::vector<std::uint16_t>& required_out,
                            std::uint16_t enclosing_group_no_tag,
-                           std::uint16_t enclosing_component_index);
+                           std::uint16_t enclosing_component_index, bool in_group = false);
 
     void detect_length_pairs(pugi::xml_node const& root);
 
@@ -486,7 +492,7 @@ void LoaderState::collect_messages(pugi::xml_node const& root) {
 void LoaderState::expand_field_list(pugi::xml_node const& parent, std::vector<FieldRef>& out,
                                     std::vector<std::uint16_t>& required_out,
                                     std::uint16_t enclosing_group_no_tag,
-                                    std::uint16_t enclosing_component_index) {
+                                    std::uint16_t enclosing_component_index, bool in_group) {
     for (auto const& child : parent.children()) {
         std::string_view const tag_name{child.name()};
         if (tag_name == "field") {
@@ -509,7 +515,7 @@ void LoaderState::expand_field_list(pugi::xml_node const& parent, std::vector<Fi
             fr.component_index = enclosing_component_index;
             fr.length_pair_data_tag = info.length_pair_data_tag;
             out.push_back(fr);
-            if (req) {
+            if (req && !in_group) {  // fixpp#201: group-member requireds stay per-group
                 required_out.push_back(info.tag);
             }
         } else if (tag_name == "component") {
@@ -521,7 +527,7 @@ void LoaderState::expand_field_list(pugi::xml_node const& parent, std::vector<Fi
             }
             auto const& def = components_[cit->second];
             expand_field_list(def.node, out, required_out, enclosing_group_no_tag,
-                              static_cast<std::uint16_t>(cit->second + 1));
+                              static_cast<std::uint16_t>(cit->second + 1), in_group);
         } else if (tag_name == "group") {
             auto const gname = std::string{child.attribute("name").as_string("")};
             auto const nit = by_name_.find(gname);
@@ -540,8 +546,8 @@ void LoaderState::expand_field_list(pugi::xml_node const& parent, std::vector<Fi
             no_fr.component_index = enclosing_component_index;
             no_fr.length_pair_data_tag = nit->second.length_pair_data_tag;
             out.push_back(no_fr);
-            if (greq) {
-                required_out.push_back(no_tag);
+            if (greq && !in_group) {  // fixpp#201: a nested group's count field is not
+                required_out.push_back(no_tag);  // message-level required (per-instance instead)
             }
             // Record the GroupRef (deduplicated by no_tag — first-seen wins).
             if (!group_index_by_no_tag_.contains(no_tag)) {
@@ -586,8 +592,10 @@ void LoaderState::expand_field_list(pugi::xml_node const& parent, std::vector<Fi
                 group_index_by_no_tag_.emplace(no_tag, idx);
                 groups_.push_back(gd);
             }
-            // Recurse into group children with the group-context set.
-            expand_field_list(child, out, required_out, no_tag, enclosing_component_index);
+            // Recurse into group children with the group-context set. fixpp#201:
+            // in_group=true so descendant requireds do NOT leak to message level.
+            expand_field_list(child, out, required_out, no_tag, enclosing_component_index,
+                              /*in_group=*/true);
         }
         // Ignore unknown child elements (forwards-compat).
     }
