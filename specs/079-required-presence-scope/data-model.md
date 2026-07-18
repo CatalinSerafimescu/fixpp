@@ -6,7 +6,7 @@ This feature adds no new persisted or wire data. The "entities" are the in-memor
 
 - **What**: the set of top-level tags the validator requires to be present in a message (validator Step 2 flat-probes it against top-level fields).
 - **Source**: `required_out` accumulated in `expand_field_list` (both loaders), surfaced via `Dictionary::required_fields(msg_type)` / `table_view::required_fields()`.
-- **Rule (after fix)**: a tag is in the set iff `required='Y'` AND it is not enclosed by any group. Component-usage handling unchanged (Phase 0: no optional-component-with-required-field configuration exists). Header/trailer required fields retained.
+- **Rule (after fix)**: a tag is in the set iff `required='Y'` AND it is not enclosed by any group. Component-usage handling unchanged — the loader threads no component-AND (Phase 0: no optional-component-with-required-field configuration exists). Header/trailer required fields retained. (This is the **loader/shipped** rule. The census oracle re-derives it independently with a *stronger* full-ancestor-chain component-AND + StandardHeader/StandardTrailer carve-out — see "Census entities" below — so an optional-component over-require would surface as census RED even though the loader itself threads no component-AND.)
 - **Invariant**: for every message in every dict, this set equals the independent raw-XML oracle's expected set (census, exact equality). Legacy behavior for non-group messages is unchanged.
 
 ## Per-group required-member set
@@ -19,8 +19,8 @@ This feature adds no new persisted or wire data. The "entities" are the in-memor
 
 ## Group-instance membership check state
 
-- **What**: transient per-instance state in `consume_group` — a bitmask of which required members have been seen in the current group instance.
-- **Bounds**: guarded ≤64 members (bitmask width); the delimiter tag is pre-marked. Fail-closed → `wire_required_field_missing(offending_tag)` on the first missing required member.
+- **What**: transient per-instance state in `consume_group` — a record of which required members have been seen in the current group instance.
+- **Bounds**: enforcement is **universal / dynamic-width** — it works for **every** per-group required-member count, fail-closed (Article XV). The candidate's fixed ≤64-bit mask silently **skips** the check for groups with >64 required members ("rather than risk a false-reject") — that is fail-**open** and is REMOVED: the mask MUST be widened to a dynamic width at /implement (the validator already runs a linear `req_bit` scan; only the mask width is 64-bounded). A census additionally asserts the shipped **maximum** per-group required-member count across all 10 dicts so the small-count assumption cannot rot. The delimiter tag is pre-marked. Fail-closed → `wire_required_field_missing(offending_tag)` on the first missing required member.
 - **Lifetime**: stack-local per group instance; no allocation, no persistence.
 
 ## Field-ref context (unchanged, referenced)
@@ -29,6 +29,7 @@ This feature adds no new persisted or wire data. The "entities" are the in-memor
 
 ## Census entities (test-only)
 
-- **Expected required set**: `(msg_type) → set<tag>` from an independent raw-XML walker (group members excluded).
-- **Shipped required set**: `(msg_type) → set<tag>` from `Dictionary::required_fields()` and the codegen IR top-level list.
-- **QuickFIX required set**: `(msg_type) → set<tag>` from quickfix-cpp 1.16.0 `DataDictionary`, captured to a checked-in golden (9 QuickFIX dicts).
+- **Expected required set** (the oracle): `(msg_type) → set<tag>` from an independent raw-XML walker computing **full-ancestor-chain component-AND composition** — a field is message-level-required iff its own `required='Y'` AND every enclosing componentRef usage on the path to the message root is `required='Y'`, AND it is not enclosed by any group — **EXCEPT StandardHeader/StandardTrailer fields (tags 8/9/34/35/49/52/56/10), which are treated as structurally-always-required and are NEVER dropped even when a message references the header/trailer componentRef with default (optional) presence** (parity-tolerance note: QuickFIX `DataDictionary.cpp:510/:522` ANDs only the *immediate* enclosing component, not the full ancestor chain; the vendored dicts contain 0 nested-optional-component sites, so this divergence never bites). Deliberately **stronger** than the loader rule above, so it detects an optional-component over-require.
+- **Shipped required set**: `(msg_type) → set<tag>` = `table_view::required_fields(msg_type)`, the exact set the runtime validator's **Step-2 required-field scan iterates** (Step-2's literal input; `dict_` is a `table_view` held by value in the validator, so this accessor IS the probe surface, not a sibling projection). Step-2 skips exactly tags {8,9,10} (framer-guaranteed), so both sides compare the pre-skip `required_fields()` span (which also verifies 8/9/10 are present). Plus the codegen **IR data-structure** top-level required list (the `MessageIR` projection — present for every version including FIX42; the emitted validator tier is not the census surface).
+- **Per-group required-member set** (FR-009a): two legs (the bare and context stores carry different contracts). **(1) Context store** `(msg_type, parent_path, no_tag) → set<tag>` == the independent walker's per-context required set, both directions, every `(msg_type, parent_path, no_tag)`, all 10 dicts (PRIMARY pin, drives FR-004). **(2) Bare store** `no_tag → set<tag>` == its global first-seen fallback value (reached only on a context miss; NOT required to equal every context — reused tags like FIX44 295 diverge `{}` vs `{299}`). Both cross-checked against QuickFIX per-group required members (`DataDictionary.cpp:560/:570`) where available.
+- **QuickFIX required set**: `(msg_type) → set<tag>` from quickfix-cpp 1.16.0 `DataDictionary::isRequiredField`, captured to a checked-in golden with a manifest/hash + stale-golden regen rule (9 QuickFIX dicts; no vlatest/Orchestra row).
