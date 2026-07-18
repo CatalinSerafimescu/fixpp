@@ -231,6 +231,13 @@ endif()
 # subdirectory's own CMakeLists.txt). Never enabled in CI; see T002.
 add_subdirectory(tools/quickfix_enum_golden)
 
+# ── 079-required-presence-scope T018 golden generator (local-only) ──────────
+# Shares the SAME FIXPP_BUILD_QUICKFIX_GOLDEN guard + FIXPP_QUICKFIX_ROOT
+# cache var as the 075 generator above (declared inside this subdirectory's
+# own CMakeLists.txt; option()/cache-var re-declaration is idempotent). Never
+# enabled in CI.
+add_subdirectory(tools/quickfix_required_golden)
+
 # ── Bindings ─────────────────────────────────────────────────────────────────
 if(FIXPP_BUILD_PYTHON)
   add_subdirectory(bindings/python)

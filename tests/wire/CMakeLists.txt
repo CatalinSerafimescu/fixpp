@@ -180,6 +180,33 @@ target_compile_definitions(enum_golden_parity_test PRIVATE
 add_test(NAME enum_golden_parity_test COMMAND enum_golden_parity_test)
 set_tests_properties(enum_golden_parity_test PROPERTIES LABELS "075;golden;parity")
 
+# ── Standalone: 079-required-presence-scope T019 QuickFIX required-set
+# PARITY gate (Contract 2) ───────────────────────────────────────────────
+# Isolation-sensitive per [const §VII.8] (a data-driven exact-set gate
+# consuming the checked-in golden). Links NO QuickFIX: it re-derives the
+# independent oracle (tests/dictionary/required_scope_oracle.hpp, shared with
+# the T015-T017 census — single-oracle guarantee) directly from the vendored
+# dictionaries/*.xml and compares it against the checked-in
+# tools/quickfix_required_golden/golden.csv (produced by T018 against a REAL,
+# locally built QuickFIX v1.16.0), so it builds and runs identically whether
+# or not reference-engines/ is present (same posture as
+# enum_golden_parity_test above).
+find_package(pugixml CONFIG REQUIRED)
+add_executable(required_scope_parity_test required_scope_parity_test.cpp)
+target_link_libraries(required_scope_parity_test PRIVATE
+  pugixml::pugixml
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(required_scope_parity_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests/dictionary")
+target_compile_definitions(required_scope_parity_test PRIVATE
+  "FIXPP_REQUIRED_GOLDEN_CSV=\"${CMAKE_SOURCE_DIR}/tools/quickfix_required_golden/golden.csv\""
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
+)
+add_test(NAME required_scope_parity COMMAND required_scope_parity_test)
+set_tests_properties(required_scope_parity PROPERTIES LABELS "079;golden;parity;census")
+
 # ── Standalone: 076-fix-latest-typed-codegen T009(b) — vlatest reify
 # round-trip (universal reify/read-back leg only; see the .cpp file header
 # for the T009(a) Builders.hpp compile-cost escalation). Needs the
@@ -227,3 +254,35 @@ target_compile_definitions(validator_legacy_char_type_test PRIVATE
   "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\"")
 add_test(NAME validator_legacy_char_type_test COMMAND validator_legacy_char_type_test)
 set_tests_properties(validator_legacy_char_type_test PROPERTIES LABELS "075;wire;dictionary")
+
+# ── Standalone: 079-required-presence-scope T013 [US3] — two-tier
+# verdict-agreement (Contract 3). Header-only-includes the generated
+# v44/v50sp2/vlatest message headers (FIXPP_VALIDATORS_HEADER_ONLY_<Msg>) to
+# read fixpp::wire::writer_traits<...>::required_checks directly, so it
+# links NO fixpp::validators::* lib — mirroring validator_legacy_char_type_
+# test's isolation-simple posture. Needs the build-tree generated
+# fixpp/{v44,v50sp2,vlatest}/messages/*.hpp (fixpp_codegen_generate, defined
+# in tests/codegen, add_subdirectory'd before tests/wire — same guard as
+# wire_codegen_tests above), gated on FIXPP_CODEGEN_FIX_LATEST for the
+# vlatest leg (mirrors wire_vlatest_reify_roundtrip_test's guard — with the
+# tier OFF, cmake/Codegen.cmake removes _codegen/include/fixpp/vlatest/
+# entirely).
+if(TARGET fixpp_codegen_generate AND FIXPP_CODEGEN_FIX_LATEST)
+  add_executable(required_scope_two_tier_test required_scope_two_tier_test.cpp)
+  add_dependencies(required_scope_two_tier_test fixpp_codegen_generate)
+  target_link_libraries(required_scope_two_tier_test PRIVATE
+    fixpp_wire
+    fixpp_dictionary
+    GTest::gtest
+    GTest::gtest_main
+  )
+  target_include_directories(required_scope_two_tier_test PRIVATE
+    "${CMAKE_SOURCE_DIR}/tests"
+    "${CMAKE_BINARY_DIR}/_codegen/include"
+  )
+  target_compile_definitions(required_scope_two_tier_test PRIVATE
+    "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
+    "FIXPP_ORCHESTRA_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries/orchestra\"")
+  add_test(NAME required_scope_two_tier_test COMMAND required_scope_two_tier_test)
+  set_tests_properties(required_scope_two_tier_test PROPERTIES LABELS "079;wire;two-tier")
+endif()

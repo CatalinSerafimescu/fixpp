@@ -25,3 +25,12 @@ dictionaries/FIX41.xml -text
 dictionaries/FIX42.xml -text
 tools/quickfix_enum_golden/main.cpp -text
 tools/quickfix_enum_golden/golden.csv -text
+
+# 079-required-presence-scope T018: same CRLF-hash trap as above — the
+# generator's manifest block SHA1s tools/quickfix_required_golden/main.cpp
+# itself (generator_source_hash) and golden.csv is regenerated/diffed
+# byte-for-byte by regen_and_diff.py. Pin to LF (main.cpp opens the output
+# stream std::ios::binary, so a Windows checkout would otherwise CRLF-convert
+# only the checked-in copy, not a freshly regenerated one).
+tools/quickfix_required_golden/main.cpp -text
+tools/quickfix_required_golden/golden.csv -text
