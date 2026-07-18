@@ -265,6 +265,14 @@ jobs:
       CMAKE_CXX_COMPILER_LAUNCHER: ccache
       CMAKE_C_COMPILER_LAUNCHER: ccache
       CCACHE_COMPILERCHECK: content
+      # CCACHE_COMPRESSLEVEL: raise zstd compression from the default (~1) to 5.
+      # The repo shares ONE Actions-cache quota (10 GB default) across every
+      # preset's ccache — so smaller stored blobs both fit more logical objects
+      # under each preset's max-size (the 2G store logged 99.93%-full / 56
+      # cleanups) AND cut cross-preset LRU eviction. CPU cost is negligible next
+      # to the C++ compile. (078 follow-up — measure hit-rate before touching
+      # max-size.)
+      CCACHE_COMPRESSLEVEL: "5"
       # Keep ccache outside the checkout so source-cleanliness tests do not see
       # the action's default .ccache directory as an untracked repo file.
       CCACHE_DIR: /tmp/fixpp-ccache-${{ matrix.preset }}
@@ -1074,6 +1082,7 @@ jobs:
       CMAKE_CXX_COMPILER_LAUNCHER: ccache
       CMAKE_C_COMPILER_LAUNCHER: ccache
       CCACHE_COMPILERCHECK: content
+      CCACHE_COMPRESSLEVEL: "5"   # see matrix `linux` job — shared 10 GB cache quota
       CCACHE_DIR: /tmp/fixpp-ccache-bench
 
     steps:
