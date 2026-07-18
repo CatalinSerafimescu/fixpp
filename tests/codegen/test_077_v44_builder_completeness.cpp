@@ -8,7 +8,7 @@
 // non-circularity rationale (shared across the v44/v50sp2/vlatest siblings).
 //
 // This TU is the ONLY leg that needs a compile-time ODR-use: it #includes
-// the generated fixpp::v44::Builders.hpp AND the committed
+// the generated fixpp::v44::all.hpp AND the committed
 // generated/v44_builder_completeness_entries.def (83 (msgtype, identifier)
 // pairs, produced once by a standalone raw-XML script -- see the .def
 // file's own header) via the FIXPP_BC_ENTRY X-macro, taking the address of

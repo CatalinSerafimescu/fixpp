@@ -13,7 +13,7 @@
 // test_077_vlatest_builder_roundtrip.cpp): with the tier OFF,
 // cmake/Codegen.cmake removes _codegen/include/fixpp/vlatest/ entirely, so
 // an ungated target here would fail to compile. #includes the ~78MB
-// deduped fixpp::vlatest::Builders.hpp -- build THIS target with -j1
+// deduped fixpp::vlatest::all.hpp -- build THIS target with -j1
 // (feedback_build_resource_cap_oom; ~3.7-4.6 GiB peak RSS per the T015
 // compile-resource bench).
 //

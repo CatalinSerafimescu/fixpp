@@ -28,7 +28,7 @@
 //
 // SCOPE NOTE (advisor-confirmed, see implementation report): the address-of
 // compile-time leg (C2, test_077_v44_builder_completeness.cpp's kEntries
-// array) is NOT re-probed here -- dropping a message from Builders.hpp
+// array) is NOT re-probed here -- dropping a message from all.hpp
 // would make an address-of TU built against it FAIL TO COMPILE, not fail an
 // assertion, so there is no "rerun and observe an assertion go red" for
 // that leg; its "red" is the language-guaranteed compile error, a

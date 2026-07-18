@@ -30,7 +30,7 @@
 //     (C1). Authoritative; re-derived fresh every test run from the live
 //     source dictionaries.
 //  2. actual(V) via address-of (C2, `expected ⊆ actual`) -- the PER-VERSION
-//     .cpp #includes the generated Builders.hpp and a committed
+//     .cpp #includes the generated all.hpp and a committed
 //     tests/codegen/generated/<ns>_builder_completeness_entries.def
 //     (X-macro list of (msgtype, C++ identifier) pairs), building a
 //     `std::vector<Entry>` whose `build_addr`/`validate_addr` are the

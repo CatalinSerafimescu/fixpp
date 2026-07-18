@@ -188,7 +188,9 @@ endif()
 
 # 077-builder-args-dedup: the v50sp2/vlatest builder completeness+roundtrip test
 # TUs each #include a ~75-78MB deduped Builders.hpp and peak at ~3.7-4.6 GiB RSS
-# to compile (~2x under gcc). Building them across the full sanitizer/coverage/
+# to compile (~2x under gcc) (pre-078 rationale; TUs now #include all.hpp and
+# link the precompiled builder/validator libs — the compile-cost driver is
+# unchanged). Building them across the full sanitizer/coverage/
 # compiler matrix OOMs or times out the 16GB/4-core/90-min hosted runners
 # (feedback_build_resource_cap_oom): parallel giant compiles exhaust RAM
 # (gcc/ubsan/coverage) and serializing them past the 90-min cap (tsan,
@@ -363,7 +365,10 @@ endif()
 
 # ── 077-builder-args-dedup: heavy-builder-TU compile job pool ───────────────
 # Each test TU that #includes a deduped Builders.hpp instantiates every
-# build_/validate_ for its version. The v50sp2 (~75MB) and vlatest (~78MB)
+# build_/validate_ for its version (pre-078 rationale; TUs now #include
+# all.hpp and link the precompiled builder/validator libs — see T034
+# follow-up for re-measuring this job pool against the split layout). The
+# v50sp2 (~75MB) and vlatest (~78MB)
 # headers peak at ~3.7-4.6 GiB RSS per TU (T015 compile-resource bench;
 # feedback_build_resource_cap_oom). At CI's default -j(nproc)=4 on a 16 GB
 # hosted runner, two-plus of these compiling concurrently exhausts RAM and the

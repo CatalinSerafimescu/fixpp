@@ -690,8 +690,9 @@ TEST_F(DeterminismTest, VlatestByteIdenticalAcrossRuns) {
 //       when the run genuinely never touches the orchestra XML); ON-run
 //       vlatest/Messages.hpp == the checked-in 076 golden.
 //   (b) Relative/additive discriminator — EVERY legacy file (Fields/
-//       Messages/Validator/Reify/NormativeReferences.md/Manifest.txt/
-//       Builders.hpp under v42/v44/v50sp2/vt11, plus the shared
+//       Messages/Validator/Reify/NormativeReferences.md/Manifest.txt/ the
+//       builder-tier output (`all.hpp` + split files, post-078) under
+//       v42/v44/v50sp2/vt11, plus the shared
 //       _dispatch/*.hpp) is byte-identical between the OFF-run and the
 //       ON-run. Neither specs/003 nor specs/069's golden dir carries a
 //       golden for _dispatch/ or for Fields/Validator/Reify/
@@ -766,11 +767,13 @@ TEST_F(DeterminismTest, AdditiveOffOnByteDiff) {
                                " differs between OFF-run and ON-run.");
         ++compared;
     }
-    // Sanity bound: v42/v50sp2/vt11 emit 5 artifacts each, v44 emits 6
-    // (+Builders.hpp), plus 2 shared _dispatch files == 23. A loose lower
-    // bound (not the exact count) so this doesn't need updating on every
-    // unrelated emitter-shape change, while still catching a degenerate
-    // walk that silently compares nothing.
+    // Sanity bound: v42/v50sp2/vt11 emit 5 artifacts each, v44 emits 5
+    // read-tier artifacts plus its builder-tier output (`all.hpp` + split
+    // files, post-078 -- a single +Builders.hpp pre-078), plus 2 shared
+    // _dispatch files -- comfortably over 20. A loose lower bound (not the
+    // exact count) so this doesn't need updating on every unrelated
+    // emitter-shape change, while still catching a degenerate walk that
+    // silently compares nothing.
     EXPECT_GE(compared, 20U) << "V-7 walk compared suspiciously few files (" << compared
                               << ") — codegen output shape may have changed.";
 }
@@ -836,9 +839,10 @@ TEST_F(DeterminismTest, VlatestFailClosedUnknownDatatype) {
 // Mirrors AdditiveOffOnByteDiff's OFF-path job (run_codegen() -- the legacy
 // XMLs only, exactly what a FIXPP_CODEGEN_FIX_LATEST=OFF configure passes to
 // the tool; Codegen.cmake never adds the orchestra --xml job when OFF) but
-// asserts the BUILDER-specific claim: no stale vlatest/Builders.hpp survives
-// an OFF-path run, while the other builder-bearing versions (v44/v50sp2,
-// wired by 077 T008-T017) are unaffected by the option being OFF.
+// asserts the BUILDER-specific claim: no stale vlatest/all.hpp (the
+// builder-tier output, post-078) survives an OFF-path run, while the other
+// builder-bearing versions (v44/v50sp2, wired by 077 T008-T017) are
+// unaffected by the option being OFF.
 //
 // Deliberately does NOT reconfigure the shared build tree (RUN_SERIAL vs the
 // codegen-build-graph-check git-cleanliness gate would be required for no
@@ -875,16 +879,17 @@ TEST_F(DeterminismTest, BuildersOffPathNoStaleVlatestOthersUnaffected) {
     EXPECT_FALSE(fs::exists(off_run.path / "v42" / "all.hpp"));
 }
 
-#ifdef FIXPP_CODEGEN_MAIN_VLATEST_BUILDERS_HPP
+#ifdef FIXPP_CODEGEN_MAIN_VLATEST_ALL_HPP
 // This whole suite drives the codegen TOOL directly into isolated TempDirs
 // (never reconfigures/touches the shared main build tree's _codegen/include
-// output). Confirm that holds: the main tree's vlatest/Builders.hpp
-// (present iff THIS build was configured with FIXPP_CODEGEN_FIX_LATEST=ON --
-// the macro itself is only defined by CMake in that case) still exists
-// after BuildersOffPathNoStaleVlatestOthersUnaffected above ran.
+// output). Confirm that holds: the main tree's vlatest/all.hpp (the
+// builder-tier output, post-078 -- present iff THIS build was configured
+// with FIXPP_CODEGEN_FIX_LATEST=ON -- the macro itself is only defined by
+// CMake in that case) still exists after
+// BuildersOffPathNoStaleVlatestOthersUnaffected above ran.
 TEST_F(DeterminismTest, MainTreeVlatestBuildersUnaffectedByOffPathWitness) {
-    EXPECT_TRUE(fs::exists(FIXPP_CODEGEN_MAIN_VLATEST_BUILDERS_HPP))
-        << "Main build tree's vlatest/Builders.hpp missing after the "
+    EXPECT_TRUE(fs::exists(FIXPP_CODEGEN_MAIN_VLATEST_ALL_HPP))
+        << "Main build tree's vlatest/all.hpp missing after the "
            "OFF-path tool-invocation witness -- that witness must run "
            "against an isolated TempDir only, never the shared tree.";
 }

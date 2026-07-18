@@ -214,7 +214,7 @@ set_tests_properties(codegen_vlatest_manifest_class_test PROPERTIES
 # 077-builder-args-dedup T023 [US4]: vlatest builder-completeness census.
 # Own executable, gated on FIXPP_CODEGEN_FIX_LATEST (mirrors
 # test_077_vlatest_builder_roundtrip above the tier gate at T012) —
-# #includes the ~78MB deduped fixpp::vlatest::Builders.hpp; build THIS
+# #includes the ~78MB deduped fixpp::vlatest::all.hpp; build THIS
 # target with -j1 (feedback_build_resource_cap_oom). Gated on
 # FIXPP_BUILD_HEAVY_BUILDER_TESTS (heavy-TU config gating — top-level CMakeLists).
 if(FIXPP_BUILD_HEAVY_BUILDER_TESTS)
@@ -241,7 +241,7 @@ target_compile_definitions(codegen_077_vlatest_builder_completeness_test PRIVATE
   "FIXPP_CODEGEN_VLATEST_BUILDERS_HPP=\"${FIXPP_CODEGEN_OUT}/fixpp/vlatest/all.hpp\""
 )
 # MSVC C1128: this TU takes the address of every vlatest build_/validate_ over
-# the ~78MB deduped Builders.hpp (173 plans); under debug/asan the section count
+# the ~78MB deduped all.hpp (173 plans); under debug/asan the section count
 # exceeds the default COFF object-format limit. /bigobj lifts the 2^16 cap.
 target_compile_options(codegen_077_vlatest_builder_completeness_test PRIVATE
   $<$<CXX_COMPILER_ID:MSVC>:/bigobj>
@@ -254,7 +254,7 @@ endif()  # FIXPP_CODEGEN_FIX_LATEST
 
 # 077-builder-args-dedup T023 [US4]: v44 builder-completeness census
 # (contracts/builder-completeness.md C1-C4) — address-of compile-time gate
-# over the generated fixpp::v44::Builders.hpp + the committed
+# over the generated fixpp::v44::all.hpp + the committed
 # generated/v44_builder_completeness_entries.def table, cross-checked at
 # runtime against an independent raw-XML walk (builder_completeness_common.hpp).
 add_executable(codegen_077_v44_builder_completeness_test
@@ -285,7 +285,7 @@ set_tests_properties(codegen_077_v44_builder_completeness_test PROPERTIES
 
 # 077-builder-args-dedup T023 [US4]: v50sp2 builder-completeness census. Own
 # executable (not joined to the v44 target above) — #includes the ~75MB
-# deduped fixpp::v50sp2::Builders.hpp (RSS discipline, mirrors
+# deduped fixpp::v50sp2::all.hpp (RSS discipline, mirrors
 # tests/session/CMakeLists.txt's per-version builder-roundtrip split). Gated on
 # FIXPP_BUILD_HEAVY_BUILDER_TESTS (heavy-TU config gating — top-level CMakeLists).
 if(FIXPP_BUILD_HEAVY_BUILDER_TESTS)
@@ -312,7 +312,7 @@ target_compile_definitions(codegen_077_v50sp2_builder_completeness_test PRIVATE
   "FIXPP_CODEGEN_V50SP2_BUILDERS_HPP=\"${FIXPP_CODEGEN_OUT}/fixpp/v50sp2/all.hpp\""
 )
 # MSVC C1128: this TU takes the address of every v50sp2 build_/validate_ over
-# the ~75MB deduped Builders.hpp (156 plans); under debug/asan the section count
+# the ~75MB deduped all.hpp (156 plans); under debug/asan the section count
 # exceeds the default COFF object-format limit. /bigobj lifts the 2^16 cap.
 target_compile_options(codegen_077_v50sp2_builder_completeness_test PRIVATE
   $<$<CXX_COMPILER_ID:MSVC>:/bigobj>
@@ -376,9 +376,12 @@ set_tests_properties(codegen_builder_completeness_mutation_witness_test PROPERTI
 #   (1) Run fixpp-codegen twice into separate temp dirs; assert byte-identical.
 #   (2) Assert no source-tree write (mtime/file-count snapshot of dictionaries/).
 #   (3) Assert generated Messages.hpp == checked-in golden for all 4 versions.
-#   (4) Gate B PR#187 r1 F3 (SC-003): `--families official` v44/Builders.hpp
-#       == checked-in golden (promotes the 069 T009 local byte-identity
-#       procedure into a CI-automated gate).
+#   (4) [historical -- retired 078] Gate B PR#187 r1 F3 (SC-003) originally
+#       pinned `--families official` v44/Builders.hpp == checked-in golden
+#       (promoting the 069 T009 local byte-identity procedure into a
+#       CI-automated gate); 078's OfficialModeBuildersStructuralShape
+#       replaces it with a structural witness over v44/all.hpp (see
+#       determinism_test.cpp's retirement-rationale comment).
 #   (5) 076 T017 [US3] (V-4): generated vlatest/Messages.hpp == checked-in
 #       076 golden.
 #   (6) 076 T018/T019 [US3] (V-7/FR-004/SC-003): an OFF-path job (legacy
@@ -414,9 +417,10 @@ set_tests_properties(codegen_determinism_test PROPERTIES LABELS codegen)
 # (where _codegen/include/fixpp/vlatest/ doesn't exist at all) never sees a
 # spurious existence-check failure.
 if(FIXPP_CODEGEN_FIX_LATEST)
-  # 078-precompiled-builder-libs census re-point: Builders.hpp -> all.hpp.
+  # gate-b/r6 (078-precompiled-builder-libs): macro renamed from the stale
+  # ..._BUILDERS_HPP (pre-078 census re-point: Builders.hpp -> all.hpp).
   target_compile_definitions(codegen_determinism_test PRIVATE
-    "FIXPP_CODEGEN_MAIN_VLATEST_BUILDERS_HPP=\"${FIXPP_CODEGEN_OUT}/fixpp/vlatest/all.hpp\"")
+    "FIXPP_CODEGEN_MAIN_VLATEST_ALL_HPP=\"${FIXPP_CODEGEN_OUT}/fixpp/vlatest/all.hpp\"")
 endif()
 
 # T039: cmake -P build-graph test — fixpp::dict::codegen-build-graph-check

@@ -9,7 +9,7 @@
 // full application set) -- 156 in-scope messages.
 //
 // This is its OWN executable (not joined to the v44 test above): it
-// #includes the ~75MB deduped fixpp::v50sp2::Builders.hpp; keeping it
+// #includes the ~75MB deduped fixpp::v50sp2::all.hpp; keeping it
 // separate mirrors tests/session/CMakeLists.txt's
 // test_077_allversions_builder_roundtrip split rationale (RSS discipline).
 //

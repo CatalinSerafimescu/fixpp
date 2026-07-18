@@ -76,7 +76,7 @@ a generated-but-unincluded version costs nothing at the consumer's compile
 |---|---|---|
 | `FIXPP_BUILD_CODEGEN_TOOL` | `ON` | Build the `fixpp-codegen` host tool. |
 | `FIXPP_CODEGEN_FIX_LATEST` | `ON` | Generate the `fixpp::vlatest` (FIX Latest / EP303) read/reify/validator tier from `dictionaries/orchestra/OrchestraFIXLatest.xml`. `OFF` removes the `vlatest/` output dir entirely; the four legacy tiers are **byte-identical** either way. |
-| `FIXPP_CODEGEN_V44_FAMILIES` | `all` | Breadth of the v44 **builder** tier (`Builders.hpp`): `all` = 83 `msgcat='app'` messages; `official` = the frozen 33 OFFICIAL MsgTypes. Read tier is unaffected (always universal). |
+| `FIXPP_CODEGEN_V44_FAMILIES` | `all` | Breadth of the v44 **builder** tier (`all.hpp` + the split layout): `all` = 83 `msgcat='app'` messages; `official` = the frozen 33 OFFICIAL MsgTypes. Read tier is unaffected (always universal). |
 
 ```bash
 # Default: v42/v44/v50sp2/vt11 + vlatest; v44 builders = all 83 app messages.
