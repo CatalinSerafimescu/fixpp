@@ -91,4 +91,43 @@ TEST(RequiredScope, Fix44AsTableViewContextRequiredMembers) {
     EXPECT_FALSE(contains(req, 311)) << "delimiter is optional — must not be a required member";
 }
 
+// 079 T008 boundary pin (discovered during /implement Phase 3/4 real-frame
+// test construction — see tests/wire/validator_type_check_test.cpp's
+// T010/T011 FIX42 escalation comment for the full analysis): FIX42.xml
+// declares group-count fields (e.g. NoAllocs/78 on Allocation(J)) with
+// `type='INT'`, not `type='NUMINGROUP'`. The context-scoped per-group store
+// (dictionary.cpp's group-population loop) keys on
+// `field_data_type::NumInGroup`, so it NEVER populates a context entry for
+// ANY FIX42 group — `group_first_field(msg_type, path, no_tag)` returns 0
+// even for a real, directly-declared, non-nested FIX42 group, though the
+// BARE global `Dictionary::group_first_field(no_tag)` (a type-independent
+// `<group>`-element scan) resolves correctly. This is the documented,
+// already-tracked L-066-1 limitation ("FIX 4.0/4.1/4.2 sessions become
+// strict-but-GROUP-BLIND under dict validation"), deferred to issue #196 —
+// pinned here so a future fix to #196 flips this assertion (intentionally,
+// not silently).
+TEST(RequiredScope, Fix42GroupCountFieldIsIntTypedContextStoreBlindL0661) {
+    std::pmr::monotonic_buffer_resource mr;
+    auto d42 = load_dict("FIX42.xml", &mr);
+    auto const tv = d42.as_table_view();
+
+    // NoAllocs(78) on Allocation(J): FieldRef.type is Int (not NumInGroup).
+    auto const j_fields = d42.message_fields("J");
+    auto const it = std::find_if(j_fields.begin(), j_fields.end(),
+                                 [](auto const& fr) { return fr.tag == 78; });
+    ASSERT_NE(it, j_fields.end()) << "NoAllocs(78) must appear in J's field expansion";
+    EXPECT_EQ(it->type, fixpp::dict::field_data_type::Int)
+        << "FIX42 NoAllocs(78) is INT-typed, not NUMINGROUP — the L-066-1 root cause";
+
+    // Bare global accessor (type-independent <group>-element scan) DOES resolve.
+    EXPECT_EQ(d42.group_first_field(78), 79)
+        << "bare global group_first_field resolves via <group> element, not field type";
+
+    // Context-scoped store (keyed on NumInGroup type detection) does NOT.
+    EXPECT_EQ(tv.group_first_field("J", std::span<std::uint16_t const>{}, 78), 0U)
+        << "L-066-1: context store is group-blind for FIX42 (INT-typed count field) — "
+           "if this ever resolves to 79, issue #196 has landed and this pin should be "
+           "updated/removed";
+}
+
 }  // namespace

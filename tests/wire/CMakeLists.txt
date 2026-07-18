@@ -68,6 +68,11 @@ add_wire_test(wire_pure_tests
 # is now gated behind FIXPP_TEST_HOOKS, matching the session-layer test-only
 # convention rather than shipping ungated in the installed public header).
 target_compile_definitions(wire_pure_tests PRIVATE FIXPP_TEST_HOOKS)
+# 079 T006/T007/T010/T011: validator_type_check_test.cpp needs the real
+# vendored dictionaries (FIX44/FIX50SP2/FIX42) for the required-presence-
+# scope real-frame accept/reject regressions (fixpp#201).
+target_compile_definitions(wire_pure_tests PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\"")
 
 # ── Standalone: 061-slim body-builder alloc gate (FR-002) ────────────────────
 # in-TU global ::operator new / ::operator new[] allocation counter (D3).

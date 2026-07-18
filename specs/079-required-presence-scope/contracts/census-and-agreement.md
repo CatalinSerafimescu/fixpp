@@ -28,7 +28,7 @@ A **distinct** set-equality leg (the message-level census above does not cover i
 
 The census splits into **two legs** — the bare and context stores have *different* contracts, so requiring both to equal every per-context oracle is unsatisfiable on real dicts (FIX44 tag 295 NoQuoteEntries is reused with divergent direct-required members: `QuotCxlEntriesGrp` → `{}` vs `QuotEntryGrp` → `{299}`; the bare store is a single value keyed on `no_tag` alone and cannot equal both):
 
-- **Context store (PRIMARY pin — drives FR-004 per-instance rejection)**: for **every** `(msg_type, parent_path, no_tag)` in all 10 dicts, shipped context `group_required_members(msg_type, parent_path, no_tag)` == the independent walker's **per-context** required set — **exact set equality, both directions**.
+- **Context store (PRIMARY pin — drives FR-004 per-instance rejection)**: for **every** `(msg_type, parent_path, no_tag)` in all 10 dicts **except FIX42**, shipped context `group_required_members(msg_type, parent_path, no_tag)` == the independent walker's **per-context** required set — **exact set equality, both directions**. **FIX42 carve-out** (L-066-1 / issue #196): FIX 4.2 group-count fields are XML type `INT`, so the context store (`dictionary.cpp:358` gates on `field_data_type::NumInGroup`) is empty for FIX42 while the raw-XML oracle sees FIX42's structural `<group>` members — the leg would spuriously RED. FIX42 is asserted **context-store-empty** instead (a pin that flips intentionally when #196 lands); FIX42's message-level census leg (Contract 1) is unaffected (the loader's message-level `<group>` exclusion is structural, `xml_loader.cpp:531`).
 - **Bare store (fallback contract)**: shipped bare `group_required_members(no_tag)` == the **global first-seen** variant for `no_tag` (the value populated from the first-seen `group_fields(no_tag)`, reached by the validator ONLY on a context miss). The bare store is a fallback — it is NOT required to equal every per-context oracle, so assert bare == the first-seen variant only.
 - both legs cross-checked against QuickFIX per-group required members (`DataDictionary.cpp:560/:570`) where available (9 QuickFIX dicts).
 
@@ -58,7 +58,7 @@ Also census the shipped **maximum** per-group required-member count across all 1
 **Given** a frame `f` (conforming or malformed) for an affected message in a version that **has a typed tier**:
 - `runtime_validate(f)` verdict (accept/reject) == `generated_typed_validate_<Msg>(f)` verdict.
 
-**For**: the named messages + one-per-version corpus (both conforming and malformed frames), **v44 / v50sp2 / vlatest only**.
+**For**: the named messages + one-per-version corpus, **v44 / v50sp2 / vlatest**. **v44** carries the end-to-end full-frame verdict comparison (conforming + malformed). **v50sp2 / vlatest full-frame `validate()` is blocked by the empty FIXT `<header/>`** (L-041-2 / issue #203 — FIXT application dicts, standard header owned by FIXT.1.1; runtime Step 1 rejects on tag 8 before required-scan), so for those versions the two-tier agreement is asserted at the **derivation tier** — both the runtime `table_view::required_fields(msg)` and the typed tier's message-level required set exclude the group tag — rather than a full-frame accept/reject verdict.
 
 **Scope — FIX42 excluded**: FIX42 has no generated typed `validate_<Msg>` (codegen driver skips builder/validator emission at `tools/codegen/fixpp-codegen/main.cpp:132` `if (ir.ns != "v42")` — L-077-1/#196: FIX 4.2 `NumInGroup=INT` ⇒ 0 typed groups). FIX42 is covered runtime-only (Contract 4) plus the census-vs-IR-**structure** leg (Contract 1 — the `MessageIR` top-level list exists for v42 even though no validator is emitted).
 
@@ -68,6 +68,6 @@ Also census the shipped **maximum** per-group required-member count across all 1
 
 **Surface**: gtests in `tests/wire` / `tests/dictionary`.
 
-- **Accept**: a conforming FIX44 PositionReport without NoUnderlyings → accepted (was: `wire_required_field_missing(732)`). FIX50SP2 TradeCaptureReport without NoSides → accepted. One representative conforming frame per affected version.
-- **Reject (per-instance)**: a group whose second instance omits an intra-group required member → rejected, offending tag surfaced. One representative per affected version.
+- **Accept**: a conforming **FIX44** PositionReport without NoUnderlyings → accepted end-to-end (was: `wire_required_field_missing(732)`); a **FIX42** conforming frame (Allocation, populated header) → accepted. For **FIX50SP2** TradeCaptureReport without NoSides, acceptance is verified at the derivation tier (required set excludes 54) — full-frame `validate()` blocked by L-041-2 / #203 (empty FIXT header).
+- **Reject (per-instance)**: a **FIX44** group whose second instance omits an intra-group required member → rejected, offending tag surfaced (the end-to-end reject corroboration). FIX50SP2 full-frame reject is blocked (L-041-2 / #203); FIX42 per-instance enforcement is inert (INT-typed group counts → `consume_group` never fires, L-066-1 / #196) — both carved out, with the synthetic >64-member RED (T003) proving the dynamic-width logic independently.
 - **No over-correction**: a message genuinely missing a top-level required field → still rejected. Control: FIX44 NewOrderSingle message-level required set excludes Symbol(55).
