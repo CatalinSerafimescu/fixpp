@@ -19,9 +19,13 @@ Runnable validation scenarios proving the feature end-to-end. Detail lives in
 
 1. Compile a TU that `#include <fixpp/vlatest/messages/NewOrderSingle.hpp>` and
    calls one `build_NewOrderSingle`, linking `fixpp::builders::vlatest`.
-2. **Expect:** compiles + links; peak compiler RSS an order of magnitude below the
-   077 monolith baseline (~3.6 GiB just to `#include`). Record RSS/wall in the
-   **compile-bench decision record** (003/T046 convention) — not a ctest gate.
+2. **Expect:** compiles + links; peak compiler RSS materially below the 077
+   monolith baseline (~3.6 GiB just to `#include`), proportional to
+   `NewOrderSingle`'s group-plan closure — for vlatest/v50sp2 (common message,
+   233-plan closure) that's ~0.88 GiB (~4.2×), not order-of-magnitude; v44's
+   much smaller group set does meet order-of-magnitude (~0.21 GiB, ~17×). See
+   SC-001 / L-078-1. Record RSS/wall in the **compile-bench decision record**
+   (003/T046 convention) — not a ctest gate.
 3. **Expect:** the object contains machine code only for the called builder (not
    all 173) — `nm` on the object / linked binary (Scenario 3).
 

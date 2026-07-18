@@ -88,14 +88,14 @@ is re-pointed. User stories US1–US5 can now proceed (in parallel if staffed).
 
 **Goal**: A consumer includes a slim declaration header and links `fixpp_builders_<ver>`, paying compile time/size only for what it links.
 
-**Independent Test**: A small consumer TU includes only the slim per-version builder header, calls one `build_<Msg>`, links the prebuilt builder lib — compiles at an order-of-magnitude lower peak RSS than the monolith, links, and produces byte-identical wire output.
+**Independent Test**: A small consumer TU includes only the slim per-version builder header, calls one `build_<Msg>`, links the prebuilt builder lib — compiles at peak RSS materially below the monolith, proportional to the message's group-plan closure (order-of-magnitude for v44; ~2.6–7.9× for v50sp2/vlatest — see SC-001/L-078-1), links, and produces byte-identical wire output.
 
 > Write these tests FIRST and confirm they FAIL before relying on the Foundational split.
 
 - [X] T020 [P] [US1] Slim-header compile + link witness: a TU that `#include <fixpp/vlatest/messages/NewOrderSingle.hpp>`, calls one `build_NewOrderSingle`, links `fixpp::builders::vlatest` — asserts it compiles + links and the object contains machine code only for the called builder (US1 AC1/AC2). File: `tests/codegen/test_078_slim_compile_us1.cpp` (+ `tests/codegen/CMakeLists.txt`).
 - [X] T021 [P] [US1] Byte-identical wire round-trip via the **linked** lib for representative messages across v44/v50sp2/vlatest — asserts wire bytes equal the 077 baseline/golden (SC-004 builder, link mode; FR-009). File: `tests/session/test_078_builder_roundtrip_linked_us1.cpp` (+ CMake).
 - [X] T022 [P] [US1] Two-version no-symbol-collision: a consumer linking BOTH `fixpp::builders::v44` and `fixpp::builders::vlatest`, calling one `build_<Msg>` from each — resolves each from its own lib with no collision (US1 AC3). File: `tests/codegen/test_078_two_version_link_us1.cpp` (+ CMake).
-- [X] T023 [US1] Repoint `bench/codegen/vlatest_builders_compile_bench/compile_bench.sh` (currently `#include`s the monolith, `:66`) to the slim header, making it the SC-001 slim-vs-monolith compile-RSS harness (R9); run it and record peak RSS/wall in `.specify/decisions/078-precompiled-builder-libs-verify.md` compile-bench decision record (003/T046 convention — NOT Article VIII). Confirms SC-001 (peak RSS ≥ an order of magnitude below the ~3.6 GiB monolith baseline).
+- [X] T023 [US1] Repoint `bench/codegen/vlatest_builders_compile_bench/compile_bench.sh` (currently `#include`s the monolith, `:66`) to the slim header, making it the SC-001 slim-vs-monolith compile-RSS harness (R9); run it and record peak RSS/wall in `.specify/decisions/078-precompiled-builder-libs-verify.md` compile-bench decision record (003/T046 convention — NOT Article VIII). Confirms SC-001 (peak RSS proportional-to-closure, materially below the ~3.6 GiB monolith — order-of-magnitude on v44; see L-078-1 / verify compile-bench table).
 
 **Checkpoint**: US1 (the MVP) is independently testable — cheap slim compile + link + byte-identical wire.
 

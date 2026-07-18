@@ -51,7 +51,7 @@ A consumer (the library's own tests + an in-tree example, or a client built in-t
 
 **Why this priority**: This is the core value of the feature — it removes the unavoidable per-consumer compile-cost cliff that motivated the issue. Without it, nothing else matters.
 
-**Independent Test**: Build a small consumer TU that includes only the slim per-version builder header and calls one `build_<Msg>`, linking the prebuilt builder library. Verify it compiles with an order-of-magnitude lower peak RSS and wall-time than including today's monolith, links successfully, and produces a byte-identical wire message to the current typed builder output.
+**Independent Test**: Build a small consumer TU that includes only the slim per-version builder header and calls one `build_<Msg>`, linking the prebuilt builder library. Verify it compiles with peak RSS and wall-time materially below including today's monolith, proportional to the message's group-plan closure (order-of-magnitude for v44; ~2.6–7.9× for v50sp2/vlatest depending on group density — see SC-001/L-078-1), links successfully, and produces a byte-identical wire message to the current typed builder output.
 
 **Acceptance Scenarios**:
 
