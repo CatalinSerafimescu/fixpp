@@ -28,7 +28,8 @@
 - **From single file → set.** Replace the 077 single-file goldens
   (`specs/077-.../contracts/golden/{v44_Builders_all,v50sp2_Builders,vlatest_Builders}.golden.hpp`
   + `specs/069-.../v44_Builders_official.golden.hpp`) with a **golden set** per
-  version under `specs/078-.../contracts/golden/`: `groups.hpp` +
+  version under `specs/078-.../contracts/golden/`: per-plan `groups/<Plan>.hpp`
+  (one per deduped plan) + umbrella `groups.hpp` +
   `validators/traits.hpp` +
   `messages/<Msg>.{hpp,builder.inl,validator.inl,builder.cpp,validator.cpp}` +
   `all.hpp`.
@@ -47,8 +48,10 @@ Three assertions over the emitted **set**:
 1. **Byte-stable content** — run the tool twice; every file in the set is
    byte-identical run-to-run.
 2. **Stable file NAME set + COUNT** — the set of emitted relative paths and their
-   count is invariant; a dropped/renamed message is a distinct failure (a
-   content-only diff would miss it — the split multiplies files).
+   count is invariant, including the per-plan `groups/<Plan>.hpp` set alongside
+   the per-message and shared headers; a dropped/renamed message or plan is a
+   distinct failure (a content-only diff would miss it — the split multiplies
+   files).
 3. **Set == golden** — the generated set matches the checked-in golden set.
 
 Backstops (unchanged): `codegen-build-graph-check` (`git status --porcelain`

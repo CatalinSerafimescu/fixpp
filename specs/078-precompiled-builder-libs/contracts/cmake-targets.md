@@ -127,5 +127,6 @@ logic, and the `tests/codegen/CMakeLists.txt` `-D..._BUILDERS_HPP` path defs. Th
 **complete** set with per-file dispositions lives in the **plan.md migration census
 (Gate A round 2)** — the earlier `#include`-only framing under-counted them
 ([[feedback_reachability_built_table_misses_bypassing_surface]]). Note two re-point
-targets: `builder_registry` → `all.hpp`, but the `G_<no_tag>Args` structs → `groups.hpp`
-(so the group-struct text-parse gates re-point to `groups.hpp`, not `all.hpp`).
+targets: `builder_registry` → `all.hpp`, but the `G_<no_tag>Args` structs → the
+per-plan `groups/<Plan>.hpp` headers (so the group-struct text-parse gates re-point
+to the `groups/` dir, not the umbrella `groups.hpp` and not `all.hpp`).

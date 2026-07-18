@@ -15,27 +15,32 @@ cmake-targets.md, Gate A round 1 build-tree-only decision):
 
 ```
 fixpp/<ns>/
-├── groups.hpp                 # DATA-ONLY: shared G_<no_tag>[_<ord>]Args data structs
-│                              #   (NO validator traits — R2)
+├── groups/
+│   └── <Plan>.hpp              # DATA-ONLY: one per deduped plan, holds the
+│                               #   G_<no_tag>[_<ord>]Args struct + #includes its
+│                               #   child-plan headers (NO validator traits — R2)
+├── groups.hpp                  # UMBRELLA: #include "groups/<Plan>.hpp" for every
+│                               #   plan — pure #includes, 0 struct bodies
+│                               #   (SC-001 "Option 1" per-plan-header split)
 ├── validators/
-│   └── traits.hpp             # shared group-plan inline writer_traits<T> + helpers (R2);
-│                              #   #include "../groups.hpp" (traits specialize over the group
-│                              #   Args structs — emit_builders.cpp:959-960 — so they need the
-│                              #   complete data structs); included ONLY by the validator
-│                              #   surface, never by builders
+│   └── traits.hpp              # shared group-plan inline writer_traits<T> + helpers (R2);
+│                               #   #include "../groups.hpp" (the umbrella — traits need
+│                               #   every plan complete — emit_builders.cpp:959-960);
+│                               #   included ONLY by the validator surface, never by builders
 ├── messages/
-│   ├── <Msg>.hpp              # slim: #include "../groups.hpp"; <Msg>Args;
-│   │                          #   extern build_<Msg> / validate_<Msg> decls
-│   │                          #   (builder-inline macro → #include "<Msg>.builder.inl";
-│   │                          #    validator-inline macro → #include "<Msg>.validator.inl")
-│   ├── <Msg>.builder.inl      # inline build_<Msg> body (groups data only, no traits)
-│   ├── <Msg>.validator.inl    # inline validate_<Msg> body + per-message top-level traits;
-│   │                          #   #include "../validators/traits.hpp"
-│   ├── <Msg>.builder.cpp      # external-linkage build_<Msg> def → fixpp_builders_<ver> (not a header)
-│   └── <Msg>.validator.cpp    # external-linkage validate_<Msg> def + per-message traits
-│                              #   → fixpp_validators_<ver> (not a header)
-└── all.hpp                    # #include every messages/<Msg>.hpp + the builder_registry
-                               #   aggregate (New-1)  (replaces Builders.hpp)
+│   ├── <Msg>.hpp               # slim: #include "../groups/<Plan>.hpp" for each plan in
+│   │                           #   the message's closure (NOT the umbrella); <Msg>Args;
+│   │                           #   extern build_<Msg> / validate_<Msg> decls
+│   │                           #   (builder-inline macro → #include "<Msg>.builder.inl";
+│   │                           #    validator-inline macro → #include "<Msg>.validator.inl")
+│   ├── <Msg>.builder.inl       # inline build_<Msg> body (groups data only, no traits)
+│   ├── <Msg>.validator.inl     # inline validate_<Msg> body + per-message top-level traits;
+│   │                           #   #include "../validators/traits.hpp"
+│   ├── <Msg>.builder.cpp       # external-linkage build_<Msg> def → fixpp_builders_<ver> (not a header)
+│   └── <Msg>.validator.cpp     # external-linkage validate_<Msg> def + per-message traits
+│                               #   → fixpp_validators_<ver> (not a header)
+└── all.hpp                     # #include every messages/<Msg>.hpp + the builder_registry
+                                #   aggregate (New-1)  (replaces Builders.hpp)
 ```
 
 `vt11` emits none (0 application messages); `v42` emits none (deferred to #196).
@@ -49,8 +54,11 @@ fixpp/<ns>/
 | Force-inline chosen builders (zero-overhead) | define `FIXPP_BUILDERS_HEADER_ONLY` (whole-TU) **or** the per-message override; include as above | link the non-inlined remainder |
 | Force-inline chosen validators (zero-overhead) | define `FIXPP_VALIDATORS_HEADER_ONLY` **or** the per-message validator override | link the non-inlined validator remainder |
 
-- **Declarations are free.** Including `<Msg>.hpp` (or `all.hpp`) in default mode
-  costs declarations + `groups.hpp` only — never the function bodies (SC-001).
+- **Declarations are free.** Including `<Msg>.hpp` in default mode costs
+  declarations + the message's **per-plan closure subset** of `groups/<Plan>.hpp`
+  only (not the full umbrella `groups.hpp`) — never the function bodies (SC-001
+  lever). `all.hpp` reaches every message and so effectively pulls the whole
+  per-plan set.
 - **`all.hpp` stays slim by default (R5).** In link mode it is N declaration
   headers (plus the `builder_registry` aggregate); only under
   `FIXPP_BUILDERS_HEADER_ONLY` / `FIXPP_VALIDATORS_HEADER_ONLY` does it pull every
@@ -85,7 +93,8 @@ fixpp/<ns>/
 
 1. Including one `<Msg>.hpp` does not transitively include any other message's
    `.inl`, any validator trait, or the monolith (compile-cost witness →
-   compile-bench record).
+   compile-bench record) — it includes only its closure's `groups/<Plan>.hpp`
+   subset, not the umbrella `groups.hpp`.
 2. A builder-only include graph (`<Msg>.hpp` / `<Msg>.builder.inl` /
    `<Msg>.builder.cpp`) never reaches `validators/traits.hpp` or any `validate_`
    symbol (SC-003) — enforced by the emitter invariant + `nm` witness + R2a.

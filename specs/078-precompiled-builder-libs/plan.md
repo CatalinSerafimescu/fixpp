@@ -15,7 +15,9 @@ always emitted and always compiled once, per version; all opt-in is purely
 link-time.*
 
 Per builder-bearing version `<ns>` ∈ {v44, v50sp2, vlatest} the emitter emits a
-file set — **data-only** `groups.hpp` (shared `G_<no_tag>Args`), validator-scoped
+file set — **data-only** per-plan `groups/<Plan>.hpp` + umbrella `groups.hpp`
+(shared `G_<no_tag>Args`; split at `/implement` into per-plan headers +
+`#include`-only umbrella — SC-001 resolution), validator-scoped
 `validators/traits.hpp` (shared group-plan traits), slim `messages/<Msg>.hpp`
 (Args + `extern` decls), per-side inline bodies `messages/<Msg>.builder.inl` /
 `<Msg>.validator.inl`, per-side external-linkage TUs `messages/<Msg>.builder.cpp` /
@@ -68,8 +70,9 @@ the R2a probe); `all.hpp` stays slim by default (R5); #197 removal CI-gated (R8)
 
 **Scale/Scope**: 3 versions; 83+156+173 = 412 messages × {slim `.hpp`,
 `.builder.inl`, `.validator.inl`, `.builder.cpp`, `.validator.cpp`} + per-version
-`groups.hpp` (data-only) + `validators/traits.hpp` + `all.hpp`; 6 new STATIC lib
-targets (3×{builders,validators}); ~4,500 vlatest validator specializations.
+per-plan `groups/<Plan>.hpp` (data-only) + umbrella `groups.hpp` + `validators/traits.hpp` +
+`all.hpp`; 6 new STATIC lib targets (3×{builders,validators}); ~4,500 vlatest
+validator specializations.
 
 ## Constitution Check
 
@@ -121,8 +124,9 @@ specs/078-precompiled-builder-libs/
 ```text
 tools/codegen/fixpp-codegen/
 ├── emit_builders.cpp   # PRIMARY CHANGE — split the 4-pass string into a file set:
-│                       #   data-only groups.hpp, validators/traits.hpp (shared group-plan
-│                       #   traits :961, R2), messages/<Msg>.{hpp slim decl, builder.inl,
+│                       #   data-only per-plan groups/<Plan>.hpp + umbrella groups.hpp,
+│                       #   validators/traits.hpp (shared group-plan traits :961, R2),
+│                       #   messages/<Msg>.{hpp slim decl, builder.inl,
 │                       #   validator.inl (+ per-msg top-level traits :963-966), builder.cpp,
 │                       #   validator.cpp}, all.hpp (+ builder_registry :929); keep the
 │                       #   interned-plan/message ordering for determinism (:824-912)
@@ -183,7 +187,7 @@ change.
 |---|---|---|
 | Per-message, **per-side** `.cpp` (`<Msg>.builder.cpp` / `<Msg>.validator.cpp`) instead of one `Builders.cpp` | SC-002 needs static-archive **object granularity** so the linker pulls only used messages; **disjoint** builder/validator objects are what keep a builder-only link validator-free (SC-003) and let both libs link with no duplicate symbol (R1); also bounds per-TU compile RSS (SC-006) | one `Builders.o` pulls the whole ~18–20 MiB `.text` → SC-002 fails; a single `<Msg>.cpp` defining both `build_`+`validate_` → validator code leaks into a builder-only link AND both-libs link hard-fails on duplicate symbol |
 | Five-file per message (`.hpp` decl / `.builder.inl` / `.validator.inl` / `.builder.cpp` / `.validator.cpp`) | FR-004+FR-006 require **both** link mode (default) and header-only inline **from one generation**, and the builder/validator surfaces must be **physically separate on the inline path too** (force-inlining `build_` must not pull validator traits) | header-only-only (issue proposal 2) can't remove the test compile cost (SC-006); lib-only drops FR-006; a unified `.inl` re-creates root-cause-#1 on the inline path |
-| Two-tier validator traits — shared **group-plan** traits in `validators/traits.hpp` (inline) + per-message **top-level** traits in the per-message validator surface (R2) | group-plan traits are shared and must be one ODR-safe definition across linked-lib + force-inlined validators (FR-007); per-message top-level traits are **not** shared (one set per message); both must be **invisible to the builder graph** (SC-003/SC-001) | traits in the builder-included `groups.hpp` → parses into every builder TU (SC-001) + tri-doc contradiction; a whole-hog move of *all* traits into one shared header re-creates the parse-cost leak for the per-message half |
+| Two-tier validator traits — shared **group-plan** traits in `validators/traits.hpp` (inline) + per-message **top-level** traits in the per-message validator surface (R2) | group-plan traits are shared and must be one ODR-safe definition across linked-lib + force-inlined validators (FR-007); per-message top-level traits are **not** shared (one set per message); both must be **invisible to the builder graph** (SC-003/SC-001) | traits in the builder-included group headers (`groups/<Plan>.hpp`) → parses into every builder TU (SC-001) + tri-doc contradiction; a whole-hog move of *all* traits into one shared header re-creates the parse-cost leak for the per-message half |
 | Golden as a file **set** + name/count determinism (R6) | the split multiplies files → a dropped/renamed message is a new failure mode a content-only diff misses | content-only diff on a single golden → silent omission across the split ([[feedback_codegen_golden_exists_narrow_verify_misses_it]]) |
 | #197 removal is **CI-gated**, not a blind delete (R8) | Article XVII §8 resource gate — "every leg fits without the pool" is CI-verified, not locally provable; gcc ~2× RSS + MSVC | delete-then-hope re-introduces the exit-143 OOM that motivated #197 |
 
@@ -229,7 +233,7 @@ mandatory controls.
 4. **`validators/traits.hpp` → `groups.hpp` include edge (Opus New-A) → RESOLVED.** Traits specialize over the group `Args` structs (`emit_builders.cpp:959-960`; type must be complete, `:954-955`), so `validators/traits.hpp` MUST `#include "../groups.hpp"`. Stated in data-model.md Entity 1b + include-layout.md.
 5. **Single-body-source variant vs golden NAME/COUNT (Opus New-B, drift-watch) → NOTED.** If the deferred single-body variant is chosen at `/implement`, the file name-set changes → Entity 7 golden enumeration + the R6 name-set/count assertion regenerate together; R6 stays authoritative. Noted in research.md R1 + completeness-and-golden.md R6.
 
-**Complete `Builders.hpp` migration census (non-`#include` gates — New-C).** This is the **COMPLETE** set of `#include`-independent artifacts that hardcode the monolith path/marker or text-parse a whole-version aggregate symbol; each false-reds or inverts once FR-008 deletes `Builders.hpp`. Built from a tree-wide `grep -rn 'Builders\.hpp' tests/ cmake/ bench/` + a `grep -rn 'builder_registry'` symbol-leg sweep (which confirmed every `builder_registry` symbol consumer also `#include`s its defining header — those are the separately-enumerated `#include`-ers: 067×5, 069×4, 077×6, relinked to `all.hpp`). The round-1 `#include`-only framing under-counted this class ([[feedback_reachability_built_table_misses_bypassing_surface]]). **`/tasks` MUST carry a disposition task per row.** Two re-point targets: `builder_registry` → `all.hpp` (Entity 5); the `G_<no_tag>Args` group structs → `groups.hpp` (Entity 1, data-only) — the group-struct text-parse gates re-point to `groups.hpp`, **not** `all.hpp`.
+**Complete `Builders.hpp` migration census (non-`#include` gates — New-C).** This is the **COMPLETE** set of `#include`-independent artifacts that hardcode the monolith path/marker or text-parse a whole-version aggregate symbol; each false-reds or inverts once FR-008 deletes `Builders.hpp`. Built from a tree-wide `grep -rn 'Builders\.hpp' tests/ cmake/ bench/` + a `grep -rn 'builder_registry'` symbol-leg sweep (which confirmed every `builder_registry` symbol consumer also `#include`s its defining header — those are the separately-enumerated `#include`-ers: 067×5, 069×4, 077×6, relinked to `all.hpp`). The round-1 `#include`-only framing under-counted this class ([[feedback_reachability_built_table_misses_bypassing_surface]]). **`/tasks` MUST carry a disposition task per row.** Two re-point targets: `builder_registry` → `all.hpp` (Entity 5); the `G_<no_tag>Args` group structs → the per-plan `groups/<Plan>.hpp` headers (Entity 1, data-only) — the group-struct text-parse gates re-point to the per-plan `groups/` directory, **not** the umbrella `groups.hpp` and **not** `all.hpp`.
 
 | File:line | What it does (verified at source) | Disposition |
 |---|---|---|
@@ -242,9 +246,9 @@ mandatory controls.
 | `tests/codegen/determinism_test.cpp:363-368,559-568` (existence + byte-identity), `763-774,784` (FR-012 OFF-path presence/absence; `:784` = `MainTreeVlatestBuildersUnaffectedByOffPathWitness` monolith-existence assertion), `807-879` (FR-013 per-version golden-diff) | asserts `<ver>/Builders.hpp` exists + byte-identical run-to-run; OFF-path vlatest-absent / v44+v50sp2-present / v42-absent; per-version golden-diff of the monolith | rewrite to the file-**SET** (name-set + count + content) per R6: existence → the `all.hpp`/messages set; OFF-path → `<ver>/all.hpp` (or `<ver>/` dir) presence/absence; golden-diff → the golden **SET** |
 | `tests/codegen/test_077_builder_no_emit.cpp:51-72` | `EXPECT_FALSE(exists(vt11/v42 Builders.hpp))` + `EXPECT_TRUE(exists(v44/v50sp2/vlatest Builders.hpp))` via `-D..._BUILDERS_HPP` | present versions → `<ver>/all.hpp` exists; absent versions (vt11/v42) → assert no `<ver>/all.hpp`/messages dir emitted (no-emit semantics preserved) |
 | `tests/codegen/vlatest_compile_smoke_test.cpp:82-91` | `ASSERT_TRUE(exists(vlatest/Builders.hpp))` + `EXPECT_LT(size, 100MB)` monolith size gate | existence → `vlatest/all.hpp` + the per-message set; the ~monolith size band is **obsolete** (no monolith to bound) — retire or retarget to the split artifact set |
-| `tests/codegen/test_077_builder_dedup_count.cpp:61,89-110` | text-parse of `vlatest/Builders.hpp`: counts `struct G_…Args` (==576) + `namespace fixpp::vlatest::groups` + size band | re-point to **`vlatest/groups.hpp`** (the `G_…Args` structs' new data-only home — **NOT** `all.hpp`); size band retargets to `groups.hpp` |
-| `tests/codegen/test_077_v42_vt11_completeness_and_c4.cpp:72,94,102` | `EXPECT_FALSE(exists(v42/vt11 Builders.hpp))` (still holds) + C4 reads `v50sp2/Builders.hpp` text for `struct G_…Args` bodies | v42/vt11 existence → `<ver>/all.hpp` absence; C4 structural-key text → **`v50sp2/groups.hpp`** (group structs' new home) |
-| `tests/codegen/CMakeLists.txt:158,161-164,234,269,297,324-326,400,437` | `-DFIXPP_CODEGEN_*_BUILDERS_HPP="…/Builders.hpp"` + `FIXPP_BUILDERS_HEADER` (`:437`) — feed the monolith path into the heavy/text-parse/golden TUs | change each `-D` header-path def to the new header (`all.hpp` for registry/build-fn/existence; `groups.hpp` for `G_`-struct text-parse) or drop it as the TU relinks the libs |
+| `tests/codegen/test_077_builder_dedup_count.cpp:61,89-110` | text-parse of `vlatest/Builders.hpp`: counts `struct G_…Args` (==576) + `namespace fixpp::vlatest::groups` + size band | re-point to the per-plan **`vlatest/groups/`** directory (`groups/<Plan>.hpp`, the `G_…Args` structs' new data-only home — the umbrella `groups.hpp` holds only `#include`s; **NOT** `all.hpp`); count `struct G_` across the per-plan set; size band retargets to the per-plan set |
+| `tests/codegen/test_077_v42_vt11_completeness_and_c4.cpp:72,94,102` | `EXPECT_FALSE(exists(v42/vt11 Builders.hpp))` (still holds) + C4 reads `v50sp2/Builders.hpp` text for `struct G_…Args` bodies | v42/vt11 existence → `<ver>/all.hpp` absence; C4 structural-key text → the per-plan **`v50sp2/groups/`** directory (group structs' new home) |
+| `tests/codegen/CMakeLists.txt:158,161-164,234,269,297,324-326,400,437` | `-DFIXPP_CODEGEN_*_BUILDERS_HPP="…/Builders.hpp"` + `FIXPP_BUILDERS_HEADER` (`:437`) — feed the monolith path into the heavy/text-parse/golden TUs | change each `-D` header-path def to the new header (`all.hpp` for registry/build-fn/existence; the per-plan `groups/` dir for `G_`-struct text-parse) or drop it as the TU relinks the libs |
 
 *Separate (already-enumerated) `#include`-er leg:* the completeness TUs `test_077_{v44,v50sp2,vlatest}_builder_completeness.cpp` are in **both** categories — `#include <fixpp/<ns>/Builders.hpp>` (relink → `all.hpp`) **and** `-D`-fed registry/build-fn text-parse (re-point per the table). Disposition both legs at `/tasks`.
 
