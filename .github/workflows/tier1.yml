@@ -1067,6 +1067,14 @@ jobs:
     concurrency:
       group: tier1-${{ github.event.pull_request.number || github.ref }}-bench
       cancel-in-progress: true
+    # ccache the release build (mirrors the matrix `linux` job): without this the
+    # bench job did a full COLD release build every run (~800 per-message TUs at
+    # -O2), the slowest Tier-1 job. Content-hashed cross-run cache → warm rebuilds.
+    env:
+      CMAKE_CXX_COMPILER_LAUNCHER: ccache
+      CMAKE_C_COMPILER_LAUNCHER: ccache
+      CCACHE_COMPILERCHECK: content
+      CCACHE_DIR: /tmp/fixpp-ccache-bench
 
     steps:
       - uses: actions/checkout@v6
@@ -1144,6 +1152,15 @@ jobs:
           key: conan-linux-clang-release-${{ hashFiles('conanfile.py', 'conan/profiles/linux-clang-release') }}
           restore-keys: |
             conan-linux-clang-release-
+
+      # ccache MUST install BEFORE "Conan install" so the CMAKE_*_COMPILER_LAUNCHER
+      # is on PATH for any conan from-source dependency build (mirrors the `linux`
+      # job's ordering + exit-127 note).
+      - name: ccache (install + restore + save compiler cache)
+        uses: hendrikmuhs/ccache-action@v1.2.23
+        with:
+          key: tier1-bench
+          max-size: 2G
 
       - name: Conan install
         run: |
