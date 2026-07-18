@@ -9,15 +9,16 @@
 // isolation-safe (mirrors vlatest_compile_smoke_test.cpp's existence-check
 // style, not test_077_builder_dedup_count.cpp's text-parse).
 //
-// Asserts:
-//   - vt11/Builders.hpp is ABSENT (admin-only, 0 application messages;
-//     write_file empty-skip -- G4a).
-//   - v42/Builders.hpp is ABSENT (DESCOPED, issue #196 / L-063-1: FIX 4.2
-//     NumInGroup=INT => 0 typed groups; the driver excludes v42 from
-//     builder emission at T017, main.cpp's job loop, not a namespace gate
-//     inside emit_builders.cpp).
-//   - v44/Builders.hpp, v50sp2/Builders.hpp, vlatest/Builders.hpp ARE
-//     present (positive control -- the three builder-bearing versions).
+// Asserts (078-precompiled-builder-libs: Builders.hpp -> all.hpp, the new
+// per-version emission sentinel; census table T014):
+//   - vt11/all.hpp AND vt11/messages/ are ABSENT (admin-only, 0 application
+//     messages; write_file empty-skip -- G4a).
+//   - v42/all.hpp AND v42/messages/ are ABSENT (DESCOPED, issue #196 /
+//     L-063-1: FIX 4.2 NumInGroup=INT => 0 typed groups; the driver excludes
+//     v42 from builder emission at T017, main.cpp's job loop, not a
+//     namespace gate inside emit_builders.cpp).
+//   - v44/all.hpp, v50sp2/all.hpp, vlatest/all.hpp ARE present (positive
+//     control -- the three builder-bearing versions).
 // Neither vt11 nor v42's absence is an error (FR-006, edge case, G4a).
 //
 // Anchors: specs/077-builder-args-dedup/tasks.md T018;
@@ -50,24 +51,30 @@
 TEST(BuilderNoEmit077, Vt11EmitsNoBuilders) {
     EXPECT_FALSE(std::filesystem::exists(FIXPP_CODEGEN_VT11_BUILDERS_HPP))
         << "vt11 is FIXT admin-only (0 application messages); expected NO "
-           "Builders.hpp (empty-skip, G4a). Found one at "
+           "all.hpp (empty-skip, G4a). Found one at "
         << FIXPP_CODEGEN_VT11_BUILDERS_HPP;
+    EXPECT_FALSE(std::filesystem::exists(
+        std::filesystem::path(FIXPP_CODEGEN_VT11_BUILDERS_HPP).parent_path() / "messages"))
+        << "vt11 is FIXT admin-only (0 application messages); expected NO messages/ dir (G4a).";
 }
 
 TEST(BuilderNoEmit077, V42EmitsNoBuilders) {
     EXPECT_FALSE(std::filesystem::exists(FIXPP_CODEGEN_V42_BUILDERS_HPP))
         << "v42 is DESCOPED (issue #196 / L-063-1: FIX 4.2 NumInGroup=INT => "
-           "0 typed groups); expected NO Builders.hpp (driver-level "
+           "0 typed groups); expected NO all.hpp (driver-level "
            "exclusion, T017). Found one at "
         << FIXPP_CODEGEN_V42_BUILDERS_HPP << " -- would mean the T017 exclusion regressed.";
+    EXPECT_FALSE(std::filesystem::exists(
+        std::filesystem::path(FIXPP_CODEGEN_V42_BUILDERS_HPP).parent_path() / "messages"))
+        << "v42 is DESCOPED; expected NO messages/ dir (driver-level exclusion, T017).";
 }
 
 // Positive control: the three builder-bearing versions DO emit.
 TEST(BuilderNoEmit077, BuilderBearingVersionsPresent) {
     EXPECT_TRUE(std::filesystem::exists(FIXPP_CODEGEN_V44_BUILDERS_HPP))
-        << "v44/Builders.hpp missing: " << FIXPP_CODEGEN_V44_BUILDERS_HPP;
+        << "v44/all.hpp missing: " << FIXPP_CODEGEN_V44_BUILDERS_HPP;
     EXPECT_TRUE(std::filesystem::exists(FIXPP_CODEGEN_V50SP2_BUILDERS_HPP))
-        << "v50sp2/Builders.hpp missing: " << FIXPP_CODEGEN_V50SP2_BUILDERS_HPP;
+        << "v50sp2/all.hpp missing: " << FIXPP_CODEGEN_V50SP2_BUILDERS_HPP;
     EXPECT_TRUE(std::filesystem::exists(FIXPP_CODEGEN_VLATEST_BUILDERS_HPP))
-        << "vlatest/Builders.hpp missing: " << FIXPP_CODEGEN_VLATEST_BUILDERS_HPP;
+        << "vlatest/all.hpp missing: " << FIXPP_CODEGEN_VLATEST_BUILDERS_HPP;
 }

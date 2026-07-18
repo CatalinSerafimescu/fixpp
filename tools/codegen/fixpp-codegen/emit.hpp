@@ -9,6 +9,7 @@
 // emit_reify; T036 emit_dispatch) — at the Foundational checkpoint they are
 // scaffolding stubs so the tool builds and links.
 #pragma once
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -36,13 +37,25 @@ namespace fixpp::codegen {
 // Entity "N-002/N-003 exclusion set").
 enum class CoverageMode { All, Official };
 
-// 067-codegen-writer-emitter: the write emitter — build_<Msg>/<Msg>Args/
-// validate_<Msg> over wire::body_builder, for every message selected by
-// `mode` (069-v44-all-families). Returns "" for non-v44 versions
-// (writer-emitter is v44-scoped for v1.0); `write_file`'s empty-skip then
-// writes no Builders.hpp for those versions.
-[[nodiscard]] std::string emit_builders(VersionIR const& ir,
-                                        CoverageMode mode);  // <vXX>/Builders.hpp
+// 078-precompiled-builder-libs (data-model.md Entities 1-5): one file of the
+// per-version builder/validator split. `rel` is relative to the version's
+// output directory (`<out>/<ns>/`) — e.g. "groups.hpp",
+// "messages/NewOrderSingle.builder.cpp".
+struct EmittedFile {
+    std::filesystem::path rel;
+    std::string content;
+};
+
+// 067-codegen-writer-emitter / 078-precompiled-builder-libs: the write
+// emitter — build_<Msg>/<Msg>Args/validate_<Msg> over wire::body_builder,
+// for every message selected by `mode` (069-v44-all-families). Returns the
+// SPLIT file set (data-model.md Entities 1-5: groups.hpp,
+// validators/traits.hpp, per-message messages/<Msg>.{hpp,builder.inl,
+// validator.inl,builder.cpp,validator.cpp}, all.hpp) that replaces the
+// pre-078 single-file Builders.hpp. Returns an empty vector for a version
+// with zero in-scope messages (vt11) — the driver's empty-skip then writes
+// nothing for it.
+[[nodiscard]] std::vector<EmittedFile> emit_builders(VersionIR const& ir, CoverageMode mode);
 
 // Shared dispatch headers ([2c §4.8]/[2c §6.3]) — emitted once over ALL
 // codegen versions, not per-version. _dispatch/reify_dispatch_{fixt,application}.hpp

@@ -39,6 +39,24 @@ struct Job {
     std::filesystem::path out;
 };
 
+// 078-precompiled-builder-libs (data-model.md Entity 7 / quickstart V3) --
+// OFF-clean discipline for the split builder/validator file SET: `write_file`
+// only writes, it never deletes, so every generation run must sweep the
+// whole builder/validator output region -- Builders.hpp/groups.hpp/all.hpp
+// plus the groups/, validators/, messages/ dirs -- before (re)writing it.
+// Covers a version that emits no builders this run (vt11's empty registry;
+// v42 excluded below), a legacy pre-078 monolith, and a prior run's stale
+// per-plan groups/*.hpp.
+void remove_builder_output(std::filesystem::path const& base) {
+    std::error_code ec;
+    std::filesystem::remove(base / "Builders.hpp", ec);
+    std::filesystem::remove(base / "groups.hpp", ec);
+    std::filesystem::remove(base / "all.hpp", ec);
+    std::filesystem::remove_all(base / "groups", ec);
+    std::filesystem::remove_all(base / "validators", ec);
+    std::filesystem::remove_all(base / "messages", ec);
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -95,37 +113,28 @@ int main(int argc, char** argv) {
             // materializes ZERO typed groups for it -- a v42 build_<Msg>
             // would silently omit a required='Y' group, emitting invalid
             // FIX 4.2. v42 still has in-scope application messages (just no
-            // typed groups), so emit_builders(v42) does NOT self-skip via
-            // empty content -- it must be excluded at the DRIVER, not inside
-            // emit_builders (which stays version-agnostic per FR-005/T009).
-            // vt11 is the only version that self-skips via a truly empty
-            // registry (0 application messages, emit_builders.cpp).
+            // typed groups), so emit_builders(v42) does NOT self-skip via an
+            // empty file set -- it must be excluded at the DRIVER, not
+            // inside emit_builders (which stays version-agnostic per
+            // FR-005/T009). vt11 is the only version that self-skips via a
+            // truly empty registry (0 application messages,
+            // emit_builders.cpp).
+            //
+            // 078-precompiled-builder-libs T004: emit_builders now returns
+            // the split file SET (data-model.md Entities 1-5) instead of a
+            // single Builders.hpp string. v42 stays descoped (issue #196 /
+            // L-063-1) -- keep the existing ir.ns != "v42" predicate, it
+            // just yields an empty write set here instead of a separate
+            // branch. remove_builder_output sweeps the whole builder/
+            // validator output region unconditionally before writing, so
+            // every branch (empty set / v42 / non-empty) is OFF-clean.
+            std::vector<fixpp::codegen::EmittedFile> files;
             if (ir.ns != "v42") {
-                // gate-b/r1 F2: empty-emit -> remove (rather than write_file's
-                // write-only no-op) keeps the no-emit contract build-tree-
-                // history-independent for every non-v42 version, including
-                // vt11 -- write_file only writes, it never deletes, so a
-                // stale Builders.hpp from a prior generation run would
-                // otherwise persist forever once the emitter stops producing
-                // content for it (quickstart V3 / FR-012 OFF-clean
-                // discipline).
-                std::string const builders_content =
-                    fixpp::codegen::emit_builders(ir, families_mode);
-                if (builders_content.empty()) {
-                    std::error_code ec;
-                    std::filesystem::remove(base / "Builders.hpp", ec);
-                } else {
-                    write_file(base / "Builders.hpp", builders_content);
-                }
-            } else {
-                // Remove a stale Builders.hpp left on disk by a pre-077 (or
-                // pre-this-fix) generation run -- write_file only writes, it
-                // never deletes, so a prior real v42 Builders.hpp would
-                // otherwise persist forever once this driver stops emitting
-                // it (quickstart V3 / FR-012 OFF-clean discipline, applied
-                // here to the v42 descope rather than a CMake toggle).
-                std::error_code ec;
-                std::filesystem::remove(base / "Builders.hpp", ec);
+                files = fixpp::codegen::emit_builders(ir, families_mode);
+            }
+            remove_builder_output(base);
+            for (auto const& f : files) {
+                write_file(base / f.rel, f.content);
             }
             all.push_back(std::move(ir));
         }

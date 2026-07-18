@@ -55,7 +55,7 @@
 #include <cstddef>
 #include <fixpp/core/decimal_alias.hpp>
 #include <fixpp/core/error.hpp>
-#include <fixpp/v44/Builders.hpp>  // GENERATED (Phase 5) — validate_<Msg>/writer_traits<T>
+#include <fixpp/v44/all.hpp>  // GENERATED (Phase 5) — validate_<Msg>/writer_traits<T>
 #include <memory_resource>
 #include <optional>
 #include <span>

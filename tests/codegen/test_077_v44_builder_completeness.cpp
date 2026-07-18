@@ -8,7 +8,7 @@
 // non-circularity rationale (shared across the v44/v50sp2/vlatest siblings).
 //
 // This TU is the ONLY leg that needs a compile-time ODR-use: it #includes
-// the generated fixpp::v44::Builders.hpp AND the committed
+// the generated fixpp::v44::all.hpp AND the committed
 // generated/v44_builder_completeness_entries.def (83 (msgtype, identifier)
 // pairs, produced once by a standalone raw-XML script -- see the .def
 // file's own header) via the FIXPP_BC_ENTRY X-macro, taking the address of
@@ -24,7 +24,7 @@
 // Anchors: specs/077-builder-args-dedup/tasks.md T023;
 //          contracts/builder-completeness.md C1-C4.
 
-#include <fixpp/v44/Builders.hpp>  // GENERATED -- build_<Msg>/validate_<Msg>/builder_registry
+#include <fixpp/v44/all.hpp>  // GENERATED -- build_<Msg>/validate_<Msg>/builder_registry
 
 #include "builder_completeness_common.hpp"
 
@@ -130,7 +130,8 @@ TEST(BuilderCompleteness077V44, BuildFnSignaturesMatchRawXmlWalk) {
     using namespace fixpp_test::builder_completeness;
     std::set<std::string> const expected =
         legacy_expected_msgtypes(std::string(FIXPP_DICT_DATA_DIR) + "/FIX44.xml", {"BE", "BF", "BW", "BX", "BY"});
-    std::set<std::string> const build_idents = parse_build_fn_identifiers(FIXPP_CODEGEN_V44_BUILDERS_HPP);
+    std::set<std::string> const build_idents =
+        parse_build_fn_identifiers(std::filesystem::path(FIXPP_CODEGEN_V44_BUILDERS_HPP).parent_path().string());
 
     std::set<std::string> translated_msgtypes;
     for (auto const& ident : build_idents) {

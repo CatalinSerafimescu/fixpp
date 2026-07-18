@@ -105,4 +105,26 @@ inline fixpp::wire::MessageView<fixpp::wire::access_mode::Index> parse_dict(
     return std::move(*mv);
 }
 
+// Assert tag `tag` is present in `mv` and its string value equals `expected`.
+// SCOPED_TRACE(label) so a failure names which field the assertion covers.
+inline void expect_text(fixpp::wire::MessageView<fixpp::wire::access_mode::Index> const& mv,
+                        std::uint16_t tag, std::string_view expected, char const* label) {
+    SCOPED_TRACE(label);
+    auto fv = mv.get(tag);
+    ASSERT_TRUE(fv.has_value()) << "tag " << tag << " not found in parsed frame";
+    EXPECT_EQ(fv->as_string(), expected);
+}
+
+// Assert tag `tag` is present in `mv` and its decimal value equals the ASCII
+// literal `expected_ascii` (parsed via make_decimal). SCOPED_TRACE(label) so a
+// failure names which field the assertion covers.
+inline void expect_decimal(fixpp::wire::MessageView<fixpp::wire::access_mode::Index> const& mv,
+                           std::uint16_t tag, std::string_view expected_ascii,
+                           std::pmr::memory_resource* mr, char const* label) {
+    SCOPED_TRACE(label);
+    auto got = mv.get_decimal(tag, mr);
+    ASSERT_TRUE(got.has_value()) << "tag " << tag << " not found/decodable in parsed frame";
+    EXPECT_EQ(*got, make_decimal(expected_ascii, mr));
+}
+
 }  // namespace fixpp_test_support

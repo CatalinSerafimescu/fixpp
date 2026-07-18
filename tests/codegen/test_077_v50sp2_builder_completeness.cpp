@@ -9,14 +9,14 @@
 // full application set) -- 156 in-scope messages.
 //
 // This is its OWN executable (not joined to the v44 test above): it
-// #includes the ~75MB deduped fixpp::v50sp2::Builders.hpp; keeping it
+// #includes the ~75MB deduped fixpp::v50sp2::all.hpp; keeping it
 // separate mirrors tests/session/CMakeLists.txt's
 // test_077_allversions_builder_roundtrip split rationale (RSS discipline).
 //
 // Anchors: specs/077-builder-args-dedup/tasks.md T023;
 //          contracts/builder-completeness.md C1-C4.
 
-#include <fixpp/v50sp2/Builders.hpp>  // GENERATED -- build_<Msg>/validate_<Msg>/builder_registry
+#include <fixpp/v50sp2/all.hpp>  // GENERATED -- build_<Msg>/validate_<Msg>/builder_registry
 
 #include "builder_completeness_common.hpp"
 
@@ -95,7 +95,8 @@ TEST(BuilderCompleteness077V50sp2, BuildFnSignaturesMatchRawXmlWalk) {
     using namespace fixpp_test::builder_completeness;
     std::set<std::string> const expected =
         legacy_expected_msgtypes(std::string(FIXPP_DICT_DATA_DIR) + "/FIX50SP2.xml");
-    std::set<std::string> const build_idents = parse_build_fn_identifiers(FIXPP_CODEGEN_V50SP2_BUILDERS_HPP);
+    std::set<std::string> const build_idents =
+        parse_build_fn_identifiers(std::filesystem::path(FIXPP_CODEGEN_V50SP2_BUILDERS_HPP).parent_path().string());
 
     std::set<std::string> translated_msgtypes;
     for (auto const& ident : build_idents) {

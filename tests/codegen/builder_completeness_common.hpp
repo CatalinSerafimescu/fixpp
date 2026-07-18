@@ -30,7 +30,7 @@
 //     (C1). Authoritative; re-derived fresh every test run from the live
 //     source dictionaries.
 //  2. actual(V) via address-of (C2, `expected ⊆ actual`) -- the PER-VERSION
-//     .cpp #includes the generated Builders.hpp and a committed
+//     .cpp #includes the generated all.hpp and a committed
 //     tests/codegen/generated/<ns>_builder_completeness_entries.def
 //     (X-macro list of (msgtype, C++ identifier) pairs), building a
 //     `std::vector<Entry>` whose `build_addr`/`validate_addr` are the
@@ -44,18 +44,21 @@
 //     table's msg_type set against the live leg-1 walk on every run, so
 //     staleness is self-detecting (RED), never silent.
 //  3. `parse_registry_msgtypes` -- text-parses the emitted
-//     `builder_registry` array out of the generated Builders.hpp (C2
+//     `builder_registry` array out of the generated per-version `all.hpp`
+//     (078-precompiled-builder-libs: the registry's new home, Entity 5; C2
 //     secondary / C3a's `actual ⊆ expected` leg).
 //  4. `parse_build_fn_identifiers` -- an INDEPENDENT text scan for
-//     `build_<Msg>(` function signatures in the same header, NOT sourced
-//     from the registry-array parse above. Closes the Gate-A round-3
-//     residual (tasks.md T023 note): the registry array, the `build_<Msg>`
-//     definition, and the `validate_<Msg>` definition are all emitted from
-//     ONE loop in emit_builders.cpp (an unproven co-emission invariant) --
-//     this second, differently-shaped parse means a future split of that
-//     loop that dropped the registry entry but kept `build_<Msg>` (or vice
-//     versa) would surface as a leg-3-vs-leg-4 mismatch, not be silently
-//     covered by a single check.
+//     `build_<Msg>(` function signatures over the per-version
+//     `messages/*.builder.inl` + `messages/*.builder.cpp` set
+//     (078-precompiled-builder-libs: `all.hpp` holds only `#include`s + the
+//     registry array, no literal `build_<Msg>(` bodies -- Entity 3/4), NOT
+//     sourced from the registry-array parse above. Closes the Gate-A
+//     round-3 residual (077 tasks.md T023 note): the registry array and the
+//     `build_<Msg>` definition are emitted from the same per-message pass in
+//     emit_builders.cpp (an unproven co-emission invariant) -- this second,
+//     differently-shaped parse means a future drift that dropped the
+//     registry entry but kept `build_<Msg>` (or vice versa) would surface as
+//     a leg-3-vs-leg-4 mismatch, not be silently covered by a single check.
 //
 // Anchors: specs/077-builder-args-dedup/tasks.md T023;
 //          contracts/builder-completeness.md C1-C4; data-model.md Entity 6.
@@ -64,6 +67,7 @@
 
 #include <pugixml.hpp>
 
+#include <filesystem>
 #include <fstream>
 #include <regex>
 #include <set>
@@ -165,16 +169,18 @@ inline std::string read_file(std::string const& path) {
 }
 
 // Leg 3 (C2 secondary / C3a actual-subset-expected): the emitted
-// `builder_registry` array's msg_type set.
-inline std::set<std::string> parse_registry_msgtypes(std::string const& builders_hpp_path) {
-    std::string const text = read_file(builders_hpp_path);
+// `builder_registry` array's msg_type set. `all_hpp_path` is the
+// per-version `all.hpp` aggregator (078-precompiled-builder-libs Entity 5 --
+// the registry's new home, formerly the monolithic Builders.hpp).
+inline std::set<std::string> parse_registry_msgtypes(std::string const& all_hpp_path) {
+    std::string const text = read_file(all_hpp_path);
     auto const begin = text.find("builder_registry = {{");
     if (begin == std::string::npos) {
-        throw std::runtime_error("no builder_registry array in " + builders_hpp_path);
+        throw std::runtime_error("no builder_registry array in " + all_hpp_path);
     }
     auto const end = text.find("}};", begin);
     if (end == std::string::npos) {
-        throw std::runtime_error("unterminated builder_registry array in " + builders_hpp_path);
+        throw std::runtime_error("unterminated builder_registry array in " + all_hpp_path);
     }
     std::string const body = text.substr(begin, end - begin);
     static std::regex const re(R"re(\{"([^"]*)"\},)re");
@@ -191,16 +197,22 @@ inline std::set<std::string> parse_registry_msgtypes(std::string const& builders
 // the same .def table's (msg_type, identifier) map to compare against
 // expected(V)'s msg_type set.
 //
+// 078-precompiled-builder-libs re-point: `all.hpp` holds only `#include`s +
+// the registry array (Entity 5) -- the literal `build_<Msg>(` bodies now
+// live per-message in `messages/<Msg>.builder.inl` (inline mode) and
+// `messages/<Msg>.builder.cpp` (external-linkage/lib mode, Entity 3/4). This
+// scans every `*.builder.inl` + `*.builder.cpp` file under
+// `<version_dir>/messages/` and unions the identifiers found.
+//
 // Manual scan, NOT std::regex: a global `\bbuild_(\w+)\(` search over the
-// v50sp2/vlatest headers (~75-78MB) took ~33s under std::regex's
-// backtracking engine -- a plain substring search + hand-rolled identifier
-// scan is the same logic, sub-second.
+// (formerly monolithic) v50sp2/vlatest headers (~75-78MB) took ~33s under
+// std::regex's backtracking engine -- a plain substring search +
+// hand-rolled identifier scan is the same logic, sub-second.
 inline bool is_ident_char(char c) {
     return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_';
 }
 
-inline std::set<std::string> parse_build_fn_identifiers(std::string const& builders_hpp_path) {
-    std::string const text = read_file(builders_hpp_path);
+inline std::set<std::string> scan_build_fn_identifiers_in_text(std::string const& text) {
     static std::string const needle = "build_";
     std::set<std::string> out;
     std::size_t pos = 0;
@@ -219,6 +231,30 @@ inline std::set<std::string> parse_build_fn_identifiers(std::string const& build
             out.insert(text.substr(ident_begin, ident_end - ident_begin));
         }
         pos = ident_begin;
+    }
+    return out;
+}
+
+inline std::set<std::string> parse_build_fn_identifiers(std::string const& version_dir) {
+    namespace fs = std::filesystem;
+    fs::path const messages_dir = fs::path(version_dir) / "messages";
+    if (!fs::exists(messages_dir)) {
+        throw std::runtime_error("no messages/ dir in " + version_dir);
+    }
+    std::set<std::string> out;
+    for (auto const& entry : fs::directory_iterator(messages_dir)) {
+        if (!entry.is_regular_file()) {
+            continue;
+        }
+        std::string const fname = entry.path().filename().string();
+        bool const is_builder_file =
+            (fname.size() > 12 && fname.compare(fname.size() - 12, 12, ".builder.inl") == 0) ||
+            (fname.size() > 12 && fname.compare(fname.size() - 12, 12, ".builder.cpp") == 0);
+        if (!is_builder_file) {
+            continue;
+        }
+        std::set<std::string> const file_idents = scan_build_fn_identifiers_in_text(read_file(entry.path().string()));
+        out.insert(file_idents.begin(), file_idents.end());
     }
     return out;
 }

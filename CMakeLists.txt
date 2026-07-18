@@ -188,7 +188,9 @@ endif()
 
 # 077-builder-args-dedup: the v50sp2/vlatest builder completeness+roundtrip test
 # TUs each #include a ~75-78MB deduped Builders.hpp and peak at ~3.7-4.6 GiB RSS
-# to compile (~2x under gcc). Building them across the full sanitizer/coverage/
+# to compile (~2x under gcc) (pre-078 rationale; TUs now #include all.hpp and
+# link the precompiled builder/validator libs — the compile-cost driver is
+# unchanged). Building them across the full sanitizer/coverage/
 # compiler matrix OOMs or times out the 16GB/4-core/90-min hosted runners
 # (feedback_build_resource_cap_oom): parallel giant compiles exhaust RAM
 # (gcc/ubsan/coverage) and serializing them past the 90-min cap (tsan,
@@ -335,18 +337,38 @@ install(
 # only (cmake/Codegen.cmake) — an external consumer outside the build tree
 # could not #include them. _dispatch/ (build-tree-private reify bridge) and
 # vt11/ (FIXT.1.1, not part of the public v42/v44/v50sp2 set) are excluded.
+#
+# 078-precompiled-builder-libs: the split emits a `messages/`+`groups/`+
+# `validators/` layout plus `all.hpp`/`groups.hpp` aggregators whose
+# `build_<Msg>`/`validate_<Msg>` declarations resolve only against the
+# unexported `fixpp_builders_<ver>`/`fixpp_validators_<ver>` libs
+# (`cmake/Codegen.cmake`). Per `contracts/cmake-targets.md` "Install / export
+# scope" Coherence rule (Gate A round 1, R3): while those libs are unexported,
+# the slim typed layout must NOT be installed — an installed consumer would
+# get unresolvable `build_`/`validate_` link symbols, and the generated
+# `.builder.cpp`/`.validator.cpp` would leak as public "headers". This is a
+# denylist against the 061 install rule below; extend it if a new emitted
+# file/directory type is added under `_codegen/include/<ns>/`.
 if(FIXPP_BUILD_CODEGEN_TOOL)
   install(
     DIRECTORY "${CMAKE_BINARY_DIR}/_codegen/include/"
     DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
     PATTERN "_dispatch" EXCLUDE
     PATTERN "vt11" EXCLUDE
+    PATTERN "messages"   EXCLUDE   # 078 per-message .hpp/.builder.{inl,cpp}/.validator.{inl,cpp}
+    PATTERN "groups"     EXCLUDE   # 078 per-plan group headers
+    PATTERN "validators" EXCLUDE   # 078 validators/traits.hpp
+    PATTERN "all.hpp"    EXCLUDE   # 078 aggregator
+    PATTERN "groups.hpp" EXCLUDE   # 078 groups umbrella
   )
 endif()
 
 # ── 077-builder-args-dedup: heavy-builder-TU compile job pool ───────────────
 # Each test TU that #includes a deduped Builders.hpp instantiates every
-# build_/validate_ for its version. The v50sp2 (~75MB) and vlatest (~78MB)
+# build_/validate_ for its version (pre-078 rationale; TUs now #include
+# all.hpp and link the precompiled builder/validator libs — see T034
+# follow-up for re-measuring this job pool against the split layout). The
+# v50sp2 (~75MB) and vlatest (~78MB)
 # headers peak at ~3.7-4.6 GiB RSS per TU (T015 compile-resource bench;
 # feedback_build_resource_cap_oom). At CI's default -j(nproc)=4 on a 16 GB
 # hosted runner, two-plus of these compiling concurrently exhausts RAM and the

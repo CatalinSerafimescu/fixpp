@@ -35,7 +35,7 @@
 #include <algorithm>
 #include <array>
 #include <filesystem>
-#include <fixpp/v44/Builders.hpp>  // GENERATED (Phase 3b) — fixpp::v44::builder_registry
+#include <fixpp/v44/all.hpp>  // GENERATED (Phase 3b) — fixpp::v44::builder_registry
 #include <pugixml.hpp>
 #include <set>
 #include <string>

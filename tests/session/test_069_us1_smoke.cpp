@@ -25,7 +25,7 @@
 #include <cstddef>
 #include <fixpp/core/decimal_alias.hpp>
 #include <fixpp/core/error.hpp>
-#include <fixpp/v44/Builders.hpp>  // GENERATED — build_TradeCaptureReport is 069-new
+#include <fixpp/v44/all.hpp>  // GENERATED — build_TradeCaptureReport is 069-new
 #include <memory_resource>
 #include <span>
 #include <string>

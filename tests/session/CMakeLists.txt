@@ -2514,6 +2514,8 @@ if(TARGET fixpp_codegen_generate)
   target_link_libraries(test_067_builder_roundtrip PRIVATE
     fixpp_wire
     fixpp_dictionary
+    fixpp::builders::v44
+    fixpp::validators::v44
     GTest::gtest
     GTest::gtest_main
   )
@@ -2539,6 +2541,8 @@ if(TARGET fixpp_codegen_generate)
   add_dependencies(test_067_builder_failclosed fixpp_codegen_generate)
   target_link_libraries(test_067_builder_failclosed PRIVATE
     fixpp_wire
+    fixpp::builders::v44
+    fixpp::validators::v44
     GTest::gtest
     GTest::gtest_main
   )
@@ -2552,14 +2556,18 @@ if(TARGET fixpp_codegen_generate)
     LABELS "067;us1;failclosed;069;all_families;us1_smoke")
 
   # ── 067-codegen-writer-emitter T022 [US3] [TESTS-FIRST] — validate_<Msg>
-  # required-presence witnesses. Links fixpp_wire only (matches
-  # test_067_builder_failclosed — no dict parsing needed).
+  # required-presence witnesses. Constructs each message via build_<Msg> then
+  # exercises validate_<Msg>, so it links BOTH prebuilt v44 libs
+  # (078-precompiled-builder-libs: builders for build_, validators for
+  # validate_ — the T019 relink; matches test_067_builder_roundtrip).
   add_executable(test_067_builder_validate
     test_067_builder_validate.cpp
   )
   add_dependencies(test_067_builder_validate fixpp_codegen_generate)
   target_link_libraries(test_067_builder_validate PRIVATE
     fixpp_wire
+    fixpp::builders::v44
+    fixpp::validators::v44
     GTest::gtest
     GTest::gtest_main
   )
@@ -2590,6 +2598,7 @@ if(TARGET fixpp_codegen_generate)
   target_link_libraries(test_067_builder_shape_oracle PRIVATE
     fixpp_session
     fixpp_wire
+    fixpp::builders::v44
     GTest::gtest
     GTest::gtest_main
   )
@@ -2609,7 +2618,7 @@ if(TARGET fixpp_codegen_generate)
   # ── 077-builder-args-dedup T012 [US1] [TESTS-FIRST] ──────────────────────
   # Deep-group vlatest round-trip smoke. Deliberately its OWN executable, NOT
   # joined to test_067_builder_roundtrip above: this TU #includes the ~74MB
-  # deduped fixpp::vlatest::Builders.hpp (576 shared plans -- T017 fixed a
+  # deduped fixpp::vlatest::all.hpp (576 shared plans -- T017 fixed a
   # version-unscoped N-002/N-003 exclusion bug that had put this at 573),
   # which the other
   # builder-test binaries in this file must NOT pay the compile cost of.
@@ -2619,7 +2628,7 @@ if(TARGET fixpp_codegen_generate)
   # build).
   # Gated on FIXPP_BUILD_HEAVY_BUILDER_TESTS too (heavy-TU config gating —
   # top-level CMakeLists): this TU #includes the ~78MB deduped vlatest
-  # Builders.hpp (~3.7-4.6 GiB RSS to compile).
+  # all.hpp (~3.7-4.6 GiB RSS to compile).
   if(FIXPP_CODEGEN_FIX_LATEST AND FIXPP_BUILD_HEAVY_BUILDER_TESTS)
     add_executable(test_077_vlatest_builder_roundtrip
       test_077_vlatest_builder_roundtrip.cpp
@@ -2628,6 +2637,7 @@ if(TARGET fixpp_codegen_generate)
     target_link_libraries(test_077_vlatest_builder_roundtrip PRIVATE
       fixpp_wire
       fixpp_dictionary
+      fixpp::builders::vlatest
       GTest::gtest
       GTest::gtest_main
     )
@@ -2653,7 +2663,7 @@ if(TARGET fixpp_codegen_generate)
   # Exhaustive differential round-trip over v50sp2's FULL in-scope
   # application set (156, no v44 exclusion inherited -- FR-006/T017). Its own
   # executable, not joined to test_067_builder_roundtrip above: this TU
-  # #includes the ~75MB deduped fixpp::v50sp2::Builders.hpp (558 shared
+  # #includes the ~75MB deduped fixpp::v50sp2::all.hpp (558 shared
   # plans). v50sp2 is not gated by FIXPP_CODEGEN_FIX_LATEST (always emitted), but
   # IS gated on FIXPP_BUILD_HEAVY_BUILDER_TESTS (heavy-TU config gating —
   # top-level CMakeLists).
@@ -2665,6 +2675,7 @@ if(TARGET fixpp_codegen_generate)
   target_link_libraries(test_077_allversions_builder_roundtrip PRIVATE
     fixpp_wire
     fixpp_dictionary
+    fixpp::builders::v50sp2
     GTest::gtest
     GTest::gtest_main
   )
@@ -2684,7 +2695,7 @@ if(TARGET fixpp_codegen_generate)
 
   # vlatest half of T016 -- kept in a SEPARATE TU/executable from the v50sp2
   # one above (not one combined "allversions" TU): compiling both the ~75MB
-  # v50sp2 AND ~78MB vlatest deduped Builders.hpp in a single TU would stack
+  # v50sp2 AND ~78MB vlatest deduped all.hpp in a single TU would stack
   # their peak RSS past what a -j1 WSL2 build can survive (each alone is
   # already ~3.7-4.6 GiB per the T015 compile-resource bench;
   # feedback_build_resource_cap_oom). Gated on FIXPP_CODEGEN_FIX_LATEST like
@@ -2698,6 +2709,7 @@ if(TARGET fixpp_codegen_generate)
     target_link_libraries(test_077_allversions_builder_roundtrip_vlatest PRIVATE
       fixpp_wire
       fixpp_dictionary
+      fixpp::builders::vlatest
       GTest::gtest
       GTest::gtest_main
     )
@@ -2719,6 +2731,63 @@ if(TARGET fixpp_codegen_generate)
     set_tests_properties(test_077_allversions_builder_roundtrip_vlatest PROPERTIES
       LABELS "077;us2;builder-roundtrip;vlatest")
   endif()
+
+  # ── 078-precompiled-builder-libs T021 [US1]: byte-identical wire round-trip
+  # via the LINKED lib for representative v44 + v50sp2 messages (SC-004
+  # builder, link mode; FR-009). Each TEST includes ONLY its message's slim
+  # per-message header (not all.hpp) -- cheap, ungated by
+  # FIXPP_BUILD_HEAVY_BUILDER_TESTS. vlatest cell CI-deferred (lib not built
+  # locally).
+  add_executable(test_078_builder_roundtrip_linked_us1
+    test_078_builder_roundtrip_linked_us1.cpp
+  )
+  add_dependencies(test_078_builder_roundtrip_linked_us1 fixpp_codegen_generate
+    fixpp_builders_v44 fixpp_builders_v50sp2)
+  target_link_libraries(test_078_builder_roundtrip_linked_us1 PRIVATE
+    fixpp_wire
+    fixpp_dictionary
+    fixpp::builders::v44
+    fixpp::builders::v50sp2
+    GTest::gtest
+    GTest::gtest_main
+  )
+  target_include_directories(test_078_builder_roundtrip_linked_us1 PRIVATE
+    "${_067_CODEGEN_INC}"
+    "${CMAKE_SOURCE_DIR}/tests"
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+  )
+  target_compile_definitions(test_078_builder_roundtrip_linked_us1 PRIVATE
+    "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
+  )
+  add_test(NAME test_078_builder_roundtrip_linked_us1
+    COMMAND test_078_builder_roundtrip_linked_us1)
+  set_tests_properties(test_078_builder_roundtrip_linked_us1 PROPERTIES
+    LABELS "078;us1;builder-roundtrip;v44;v50sp2")
+
+  # ── 078-precompiled-builder-libs T025 [US2]: validator-linked behavior
+  # (FR-003/FR-004 AC2). Links fixpp::validators::v44 -- the US2 counterpart
+  # to T024's builder-only nm witness: this consumer DOES want the outbound
+  # required-field check and gets it by linking the validator lib.
+  add_executable(test_078_validator_linked_us2
+    test_078_validator_linked_us2.cpp
+  )
+  add_dependencies(test_078_validator_linked_us2 fixpp_codegen_generate
+    fixpp_validators_v44)
+  target_link_libraries(test_078_validator_linked_us2 PRIVATE
+    fixpp_wire
+    fixpp::validators::v44
+    GTest::gtest
+    GTest::gtest_main
+  )
+  target_include_directories(test_078_validator_linked_us2 PRIVATE
+    "${_067_CODEGEN_INC}"
+    "${CMAKE_SOURCE_DIR}/tests"
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+  )
+  add_test(NAME test_078_validator_linked_us2
+    COMMAND test_078_validator_linked_us2)
+  set_tests_properties(test_078_validator_linked_us2 PROPERTIES
+    LABELS "078;us2;validator-linked;v44")
 else()
   message(STATUS
     "tests/session: fixpp_codegen_generate not available; skipping 067 US1 suites")

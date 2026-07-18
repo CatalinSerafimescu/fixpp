@@ -114,14 +114,14 @@ else()
   _assert(FALSE "_dispatch/reify_dispatch_fixt.hpp must exist post-configure: ${FIXPP_CODEGEN_DISPATCH_MARKER}")
 endif()
 
-# v44/Builders.hpp marker (067-codegen-writer-emitter — v44 ONLY, not a
-# per-version loop; other codegen versions get no Builders.hpp).
+# v44/all.hpp marker (078-precompiled-builder-libs — v44 ONLY, not a
+# per-version loop; other codegen versions get no all.hpp).
 if(EXISTS "${FIXPP_CODEGEN_BUILDERS_MARKER_v44}")
   message(STATUS "[T039]   OK  ${FIXPP_CODEGEN_BUILDERS_MARKER_v44}")
-  _assert(TRUE "v44/Builders.hpp exists")
+  _assert(TRUE "v44/all.hpp exists")
 else()
   message(STATUS "[T039]   MISSING  ${FIXPP_CODEGEN_BUILDERS_MARKER_v44}")
-  _assert(FALSE "v44/Builders.hpp must exist post-configure: ${FIXPP_CODEGEN_BUILDERS_MARKER_v44}")
+  _assert(FALSE "v44/all.hpp must exist post-configure: ${FIXPP_CODEGEN_BUILDERS_MARKER_v44}")
 endif()
 
 # ── (b) Configure-time flag ───────────────────────────────────────────────────

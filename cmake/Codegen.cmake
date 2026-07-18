@@ -261,16 +261,19 @@ set(_v42_marker    "${CMAKE_BINARY_DIR}/_codegen/include/fixpp/v42/Messages.hpp"
 set(_v44_marker    "${CMAKE_BINARY_DIR}/_codegen/include/fixpp/v44/Messages.hpp")
 set(_v50sp2_marker "${CMAKE_BINARY_DIR}/_codegen/include/fixpp/v50sp2/Messages.hpp")
 set(_vt11_marker   "${CMAKE_BINARY_DIR}/_codegen/include/fixpp/vt11/Messages.hpp")
-# 067-codegen-writer-emitter: Builders.hpp is emitted for v44 (other legacy
-# versions get no Builders.hpp — see emit_builders.cpp scope note); 077 adds
-# vlatest (below) through the same version-agnostic deduped path.
-set(_v44_builders_marker "${CMAKE_BINARY_DIR}/_codegen/include/fixpp/v44/Builders.hpp")
+# 067-codegen-writer-emitter: the builder tier is emitted for v44 (other
+# legacy versions get no builder-tier output — see emit_builders.cpp scope
+# note); 077 adds vlatest (below) through the same version-agnostic deduped
+# path. gate-b/r6 (078-precompiled-builder-libs): the emitted artifact this
+# marker tracks is `all.hpp` (the pre-078 single-file `Builders.hpp` monolith
+# is gone, FR-008).
+set(_v44_builders_marker "${CMAKE_BINARY_DIR}/_codegen/include/fixpp/v44/all.hpp")
 # gate-b/r1 F1 (077-builder-args-dedup): v50sp2 also gets a deduped
-# Builders.hpp via the same version-agnostic emit_builders path (main.cpp
-# emits Builders.hpp for every ns != v42, so v50sp2 too); this marker must
-# participate in the same missing-output / regen-guard discipline as the
-# v44 builders marker above.
-set(_v50sp2_builders_marker "${CMAKE_BINARY_DIR}/_codegen/include/fixpp/v50sp2/Builders.hpp")
+# builder tier via the same version-agnostic emit_builders path (main.cpp
+# emits the builder-tier file set for every ns != v42, so v50sp2 too); this
+# marker must participate in the same missing-output / regen-guard
+# discipline as the v44 builders marker above.
+set(_v50sp2_builders_marker "${CMAKE_BINARY_DIR}/_codegen/include/fixpp/v50sp2/all.hpp")
 # 076-fix-latest-typed-codegen T006: FIX Latest tier, gated by
 # FIXPP_CODEGEN_FIX_LATEST (default ON). Input lives under dictionaries/
 # orchestra/ (074), not dictionaries/ directly.
@@ -278,19 +281,21 @@ set(_orchestra_xml "${_xml_dir}/orchestra/OrchestraFIXLatest.xml")
 set(_vlatest_marker "${CMAKE_BINARY_DIR}/_codegen/include/fixpp/vlatest/Messages.hpp")
 # 077-builder-args-dedup T014 [US1]: vlatest builder tier marker (FR-004/
 # FR-012, G4a) — separate from _vlatest_marker (Messages.hpp) because the
-# deduped emitter now emits Builders.hpp for vlatest too (T009 lifted the
-# v44-only gate) and this file must participate in the same missing-output /
-# regen-guard discipline as the other builder marker above, not just the
-# read-tier marker.
-set(_vlatest_builders_marker "${CMAKE_BINARY_DIR}/_codegen/include/fixpp/vlatest/Builders.hpp")
+# deduped emitter now emits a builder tier for vlatest too (T009 lifted the
+# v44-only gate; gate-b/r6: the emitted artifact is `all.hpp`, not the
+# pre-078 `Builders.hpp` monolith) and this file must participate in the
+# same missing-output / regen-guard discipline as the other builder marker
+# above, not just the read-tier marker.
+set(_vlatest_builders_marker "${CMAKE_BINARY_DIR}/_codegen/include/fixpp/vlatest/all.hpp")
 
 set(_need_generate FALSE)
 
 # 069 T015 (US3) regen-guard invalidation: the marker/xml-mtime checks below
 # know nothing about the coverage mode, so switching FIXPP_CODEGEN_V44_FAMILIES
 # between configures (all <-> official) would otherwise leave a stale
-# Builders.hpp on disk. Track the last-used value in an INTERNAL cache
-# variable and force a re-run whenever it differs from the current value.
+# v44 builder-tier output (all.hpp) on disk. Track the last-used value in an
+# INTERNAL cache variable and force a re-run whenever it differs from the
+# current value.
 if(DEFINED FIXPP_CODEGEN_V44_FAMILIES_LAST_USED
    AND NOT "${FIXPP_CODEGEN_V44_FAMILIES_LAST_USED}" STREQUAL "${FIXPP_CODEGEN_V44_FAMILIES}")
   set(_need_generate TRUE)
@@ -346,10 +351,11 @@ set(FIXPP_CODEGEN_FIX_LATEST_LAST_USED "${FIXPP_CODEGEN_FIX_LATEST}" CACHE INTER
 # `file(REMOVE .../vlatest/Builders.hpp)` above this comment (previously the
 # `else()` arm here) is GONE — 077 re-enables the vlatest typed builder tier
 # (component-identity Args-dedup makes it compilable), so an ON configure
-# must now KEEP vlatest/Builders.hpp, not delete it. Only the OFF-path clean
-# remains; it already removes the whole vlatest/ subdir (Builders.hpp
-# included) unconditionally, satisfying "no stale file when OFF" without a
-# separate arm.
+# must now KEEP the vlatest builder-tier output, not delete it. Only the
+# OFF-path clean remains; it already removes the whole vlatest/ subdir
+# (the builder-tier output — `all.hpp` + the split groups/validators/
+# messages subtree post-078 — included) unconditionally, satisfying "no
+# stale file when OFF" without a separate arm.
 if(NOT FIXPP_CODEGEN_FIX_LATEST)
   file(REMOVE_RECURSE "${FIXPP_CODEGEN_OUT_DIR}/vlatest")
 endif()
@@ -374,9 +380,10 @@ endif()
 
 # 077-builder-args-dedup T014 [US1] (FR-012): vlatest builder-tier marker,
 # same shape as the read-tier check above — a state where Messages.hpp
-# exists but Builders.hpp doesn't (e.g. right after this file's own
-# unconditional-delete removal is deployed on an existing build tree, or an
-# OFF->ON flip) must force a regen, or T012/T013 stay spuriously RED.
+# exists but the builder-tier output (`all.hpp`) doesn't (e.g. right after
+# this file's own unconditional-delete removal is deployed on an existing
+# build tree, or an OFF->ON flip) must force a regen, or T012/T013 stay
+# spuriously RED.
 if(FIXPP_CODEGEN_FIX_LATEST AND NOT EXISTS "${_vlatest_builders_marker}")
   set(_need_generate TRUE)
 endif()
@@ -403,7 +410,7 @@ endif()
 # all<->official mode switch, but NOT about the generator's OWN source. A
 # same-mode edit to tools/codegen/fixpp-codegen/*.{cpp,hpp} that gets rebuilt
 # into ${_codegen_tool} (fast path above picks up the newer main-build binary
-# on the NEXT reconfigure) would otherwise leave a stale v44/Builders.hpp on
+# on the NEXT reconfigure) would otherwise leave a stale v44/all.hpp on
 # disk — the emitter changed but nothing here noticed. Compare the resolved
 # tool binary's mtime against the builders marker (the file this class of
 # edit changes the emission of) and force a re-run when the tool is newer.
@@ -501,8 +508,8 @@ endif()
 # gate-b/r1 F1 (077-builder-args-dedup): v44 and v50sp2 builder-tier outputs,
 # mirroring the vlatest builders assertion above — unconditional (not gated
 # on FIXPP_CODEGEN_FIX_LATEST) because v44/v50sp2 builders are part of the
-# always-generated legacy set (main.cpp emits Builders.hpp for every
-# ns != v42).
+# always-generated legacy set (main.cpp emits the builder-tier file set
+# for every ns != v42).
 if(NOT EXISTS "${_v44_builders_marker}")
   message(FATAL_ERROR
     "[Codegen] Expected output missing after configure-time generation: "
@@ -537,6 +544,42 @@ foreach(_ver IN ITEMS v42 v44 v50sp2 vt11)
     "$<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/_codegen/include>"
   )
   add_dependencies(${_tgt} fixpp_codegen_generate)
+endforeach()
+
+# ── Per-version builder/validator STATIC libraries ────────────────────────────
+# 078-precompiled-builder-libs T006 (contracts/cmake-targets.md; data-model.md
+# Entity 8): fixpp_builders_<ver> / fixpp_validators_<ver>, sources = the
+# disjoint per-message *.builder.cpp / *.validator.cpp sets emitted by T003-
+# T005 (SC-002 object granularity, SC-003 builder⟂validator, R1/R2a ODR
+# safety). Always built (FR-004) — consumer opt-in is link-time only.
+# Build-tree + in-tree consumers only; NO install() (R3, Gate A round 1) —
+# same "no install() rules" convention as fixpp_dict_<ver> above.
+foreach(_ver IN ITEMS v44 v50sp2 vlatest)
+  if(_ver STREQUAL "vlatest" AND NOT FIXPP_CODEGEN_FIX_LATEST)
+    continue()
+  endif()
+
+  file(GLOB _builder_sources CONFIGURE_DEPENDS
+    "${FIXPP_CODEGEN_OUT_DIR}/${_ver}/messages/*.builder.cpp")
+  add_library(fixpp_builders_${_ver} STATIC ${_builder_sources})
+  add_library(fixpp::builders::${_ver} ALIAS fixpp_builders_${_ver})
+  target_include_directories(fixpp_builders_${_ver} PUBLIC
+    "$<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/_codegen/include>"
+  )
+  target_link_libraries(fixpp_builders_${_ver} PUBLIC fixpp::wire)
+  add_dependencies(fixpp_builders_${_ver} fixpp_codegen_generate)
+
+  # Disjoint from _builder_sources (SC-003) — no .cpp is shared between the
+  # two libs (R1).
+  file(GLOB _validator_sources CONFIGURE_DEPENDS
+    "${FIXPP_CODEGEN_OUT_DIR}/${_ver}/messages/*.validator.cpp")
+  add_library(fixpp_validators_${_ver} STATIC ${_validator_sources})
+  add_library(fixpp::validators::${_ver} ALIAS fixpp_validators_${_ver})
+  target_include_directories(fixpp_validators_${_ver} PUBLIC
+    "$<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/_codegen/include>"
+  )
+  target_link_libraries(fixpp_validators_${_ver} PUBLIC fixpp::wire)
+  add_dependencies(fixpp_validators_${_ver} fixpp_codegen_generate)
 endforeach()
 
 # fixpp::dict::dispatch — shared _dispatch/ headers (Entity 8 / I-11).
@@ -620,7 +663,7 @@ set(FIXPP_CODEGEN_MARKER_v44    \"${CMAKE_BINARY_DIR}/_codegen/include/fixpp/v44
 set(FIXPP_CODEGEN_MARKER_v50sp2 \"${CMAKE_BINARY_DIR}/_codegen/include/fixpp/v50sp2/Messages.hpp\")
 set(FIXPP_CODEGEN_MARKER_vt11   \"${CMAKE_BINARY_DIR}/_codegen/include/fixpp/vt11/Messages.hpp\")
 set(FIXPP_CODEGEN_DISPATCH_MARKER \"${CMAKE_BINARY_DIR}/_codegen/include/fixpp/_dispatch/reify_dispatch_fixt.hpp\")
-set(FIXPP_CODEGEN_BUILDERS_MARKER_v44 \"${CMAKE_BINARY_DIR}/_codegen/include/fixpp/v44/Builders.hpp\")
+set(FIXPP_CODEGEN_BUILDERS_MARKER_v44 \"${CMAKE_BINARY_DIR}/_codegen/include/fixpp/v44/all.hpp\")
 
 # (b) Configure-time flag: generation ran at CMake configure time (not build time).
 # This file itself is evidence — it is written by cmake/Codegen.cmake during the

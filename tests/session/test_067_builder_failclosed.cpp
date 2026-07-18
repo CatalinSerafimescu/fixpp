@@ -34,7 +34,7 @@
 #include <cstddef>
 #include <fixpp/core/decimal_alias.hpp>
 #include <fixpp/core/error.hpp>
-#include <fixpp/v44/Builders.hpp>  // GENERATED (Phase 3b)
+#include <fixpp/v44/all.hpp>  // GENERATED (Phase 3b)
 #include <memory_resource>
 #include <span>
 #include <string>

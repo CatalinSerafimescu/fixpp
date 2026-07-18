@@ -32,7 +32,7 @@
 #include <fixpp/core/decimal_alias.hpp>
 #include <fixpp/dict/dictionary.hpp>
 #include <fixpp/dict/orchestra_loader.hpp>
-#include <fixpp/vlatest/Builders.hpp>  // GENERATED (077) -- build_<Msg>/<Msg>Args
+#include <fixpp/vlatest/all.hpp>  // GENERATED (077) -- build_<Msg>/<Msg>Args
 #include <fixpp/vlatest/Messages.hpp>
 #include <memory_resource>
 #include <optional>

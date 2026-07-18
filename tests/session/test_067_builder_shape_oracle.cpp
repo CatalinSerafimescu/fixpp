@@ -38,7 +38,7 @@
 #include <cstdint>
 #include <fixpp/core/decimal_alias.hpp>
 #include <fixpp/session/business_messages.hpp>  // frozen 061 hand exemplars
-#include <fixpp/v44/Builders.hpp>  // GENERATED (Phase 3b) — build_<Msg>/<Msg>Args
+#include <fixpp/v44/all.hpp>  // GENERATED (Phase 3b) — build_<Msg>/<Msg>Args
 #include <fstream>
 #include <memory_resource>
 #include <optional>

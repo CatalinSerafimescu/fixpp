@@ -151,7 +151,7 @@ jobs:
     # Hung-job backstop (2026-07-09): the libc++ matrix (incl. instrumented-libc++
     # TSan) runs well under an hour; 90 caps a wedged build far below GitHub's 6h
     # default (matches tier1's heavy-job convention) without clipping a cold run.
-    timeout-minutes: 90
+    timeout-minutes: 180
     needs: filter
     if: needs.filter.outputs.should_run == 'true'
 

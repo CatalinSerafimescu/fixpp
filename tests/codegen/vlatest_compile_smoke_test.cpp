@@ -76,17 +76,25 @@ TEST(VlatestCompileSmoke076, FourReadTierHeadersCarryRealSymbols) {
 // component-identity Args-dedup emitter (cmake/Codegen.cmake no longer
 // deletes vlatest/Builders.hpp on an ON configure -- FR-004/FR-012, G4a).
 // This test's invariant is exactly reversed from 076: pin that the header
-// NOW EXISTS and has the deduped shape (bounded size -- NOT the pre-dedup
-// ~137MB; struct count is pinned precisely by
+// NOW EXISTS and has the deduped shape (struct count is pinned precisely by
 // BuilderDedupCount077.VlatestStructCountIs576 in this same binary, T013).
+//
+// 078-precompiled-builder-libs re-point (census T015): the monolithic
+// Builders.hpp is GONE (FR-008) -- existence now targets the per-version
+// all.hpp aggregator (Entity 5) plus the per-message messages/ set (Entity
+// 2/3/4). The pre-dedup-era ~137MB / ~100MB monolith size band is retired
+// outright, not retargeted: there is no monolith left to bound -- all.hpp
+// holds only #includes + the builder_registry array, and no single split
+// artifact approaches that scale.
 TEST(VlatestCompileSmoke076, BuildersHeaderEmittedDeduped) {
     ASSERT_TRUE(std::filesystem::exists(FIXPP_CODEGEN_VLATEST_BUILDERS_HPP))
-        << "fixpp::vlatest::Builders.hpp must be emitted -- 077 re-enables "
+        << "fixpp::vlatest::all.hpp must be emitted -- 077 re-enables "
            "the typed builder tier via structural-plan dedup "
            "(specs/077-builder-args-dedup/tasks.md T014).";
-    auto const size = std::filesystem::file_size(FIXPP_CODEGEN_VLATEST_BUILDERS_HPP);
-    EXPECT_LT(size, 100ull * 1024 * 1024)
-        << "vlatest/Builders.hpp is " << size
-        << " bytes -- dedup may have regressed toward the pre-077 ~137MB "
-           "message-rooted shape.";
+    auto const messages_dir = std::filesystem::path(FIXPP_CODEGEN_VLATEST_BUILDERS_HPP).parent_path() / "messages";
+    ASSERT_TRUE(std::filesystem::exists(messages_dir)) << "fixpp::vlatest::messages/ set must be emitted alongside "
+                                                            "all.hpp (078-precompiled-builder-libs Entity 2/3/4).";
+    EXPECT_GT(std::distance(std::filesystem::directory_iterator(messages_dir), std::filesystem::directory_iterator{}),
+              0)
+        << "fixpp::vlatest::messages/ must be non-empty.";
 }
