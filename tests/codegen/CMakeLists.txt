@@ -693,6 +693,32 @@ else()
   message(STATUS "tests/codegen: nm not found; skipping test078_builder_mixing_us3_object_nm_check")
 endif()
 
+# ── 078-precompiled-builder-libs Gate B RC#3 [US3]: builder-side SAFE-path
+# counter-test for the inline-XOR-link contract (spec.md Edge Case ~line 128;
+# quickstart.md Scenario 4d). A 2-TU program that force-inlines
+# build_NewOrderSingle in BOTH TUs -- never link-resolved in this binary, so
+# it deliberately does NOT link fixpp::builders::v44.
+add_executable(test078_builder_inline_all_tus_us3
+  test_078_builder_inline_all_tus_us3.cpp
+  test_078_builder_inline_all_tus_us3_tu2.cpp
+)
+add_dependencies(test078_builder_inline_all_tus_us3 fixpp_codegen_generate)
+target_link_libraries(test078_builder_inline_all_tus_us3 PRIVATE
+  fixpp_dictionary
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(test078_builder_inline_all_tus_us3 PRIVATE
+  "${FIXPP_CODEGEN_OUT}"
+  "${CMAKE_SOURCE_DIR}/tests"
+)
+target_compile_definitions(test078_builder_inline_all_tus_us3 PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
+)
+add_test(NAME test078_builder_inline_all_tus_us3 COMMAND test078_builder_inline_all_tus_us3)
+set_tests_properties(test078_builder_inline_all_tus_us3 PROPERTIES
+  LABELS "codegen;078;us3;builder-inline-all-tus")
+
 # ── 078-precompiled-builder-libs T027 [US3]: validator-side mixing witness
 # (R2a leg i, at real-lib scale). Force-inlines validate_Email (shares the
 # G_33Args group plan) while linking fixpp::validators::v44 for validate_News.
@@ -710,6 +736,28 @@ target_include_directories(test078_validator_mixing_us3 PRIVATE
 add_test(NAME test078_validator_mixing_us3 COMMAND test078_validator_mixing_us3)
 set_tests_properties(test078_validator_mixing_us3 PROPERTIES
   LABELS "codegen;078;us3;validator-mixing")
+
+# ── 078-precompiled-builder-libs Gate B RC#3 [US3]: validator-side SAFE-path
+# counter-test for the inline-XOR-link contract (spec.md Edge Case ~line 128;
+# quickstart.md Scenario 4d). A 2-TU program that force-inlines
+# validate_Email in BOTH TUs -- never link-resolved in this binary, so it
+# deliberately does NOT link fixpp::validators::v44.
+add_executable(test078_validator_inline_all_tus_us3
+  test_078_validator_inline_all_tus_us3.cpp
+  test_078_validator_inline_all_tus_us3_tu2.cpp
+)
+add_dependencies(test078_validator_inline_all_tus_us3 fixpp_codegen_generate)
+target_link_libraries(test078_validator_inline_all_tus_us3 PRIVATE
+  fixpp_wire
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(test078_validator_inline_all_tus_us3 PRIVATE
+  "${FIXPP_CODEGEN_OUT}"
+)
+add_test(NAME test078_validator_inline_all_tus_us3 COMMAND test078_validator_inline_all_tus_us3)
+set_tests_properties(test078_validator_inline_all_tus_us3 PROPERTIES
+  LABELS "codegen;078;us3;validator-inline-all-tus")
 
 # ── 078-precompiled-builder-libs T028 [US3]: SC-002 `nm` link-only witness.
 # Calls a SUBSET (3) of v44's builders, linking fixpp::builders::v44 --

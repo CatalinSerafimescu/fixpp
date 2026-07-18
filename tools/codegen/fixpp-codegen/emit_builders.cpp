@@ -1016,6 +1016,17 @@ void emit_msg_hpp(TemplateWriter& w, std::string const& ns, std::string const& m
     w.line(ns);
     w.line();
 
+    // 078-precompiled-builder-libs contract (spec.md Edge Case ~line 128,
+    // FR-006/FR-007): FIXPP_BUILDERS_HEADER_ONLY[_<Msg>] is a PROGRAM-WIDE
+    // per-message switch, not a per-TU one. Defining it force-inlines an
+    // `inline` (weak/COMDAT) build_<Msg> here; the archive's `.builder.cpp`
+    // member defines the SAME mangled symbol non-inline (strong external,
+    // see emit_build_fn_def as_inline=false). A message may be inlined
+    // EVERYWHERE in a program or LINKED everywhere -- never mixed
+    // (inlined-in-one-TU + link-resolved-in-another-TU for the SAME message
+    // in the SAME program is an ODR/[dcl.inline]/4 IFNDR: no diagnostic is
+    // required, so it can silently "work" on today's toolchains while being
+    // undefined behavior). The doc/quickstart callout mirrors this comment.
     w.raw("#if defined(FIXPP_BUILDERS_HEADER_ONLY) || defined(FIXPP_BUILDERS_HEADER_ONLY_");
     w.raw(msg_id);
     w.line(")");
@@ -1032,6 +1043,8 @@ void emit_msg_hpp(TemplateWriter& w, std::string const& ns, std::string const& m
     w.line("#endif");
     w.line();
 
+    // Same program-wide inline-XOR-link contract as build_<Msg> above,
+    // mirrored for validate_<Msg> (FIXPP_VALIDATORS_HEADER_ONLY[_<Msg>]).
     w.raw("#if defined(FIXPP_VALIDATORS_HEADER_ONLY) || defined(FIXPP_VALIDATORS_HEADER_ONLY_");
     w.raw(msg_id);
     w.line(")");

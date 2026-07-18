@@ -69,6 +69,27 @@ Runnable validation scenarios proving the feature end-to-end. Detail lives in
 compiles + links with **no duplicate-symbol** for `build_`/`validate_` (disjoint
 objects, R1).
 
+**4d — contract: `FIXPP_BUILDERS_HEADER_ONLY[_<Msg>]` / `FIXPP_VALIDATORS_HEADER_ONLY[_<Msg>]`
+is a program-wide per-message switch, not a per-TU one (Edge Case, spec.md ~line 128).**
+A given message must be **either** force-inlined in *every* TU of the program that
+references it, **or** left in link mode (resolved from the archive) in *every* TU —
+never both within one program. Scenarios 4a/4b above force-inline exactly one
+message per consumer and never reference that same message in link mode elsewhere
+in the same binary, so they stay on the safe side of this contract. Mixing modes
+for the *same* message across TUs in one program (force-inline in TU-A, link-mode
+in TU-B, both linked into the same binary) produces an `inline` (weak/COMDAT)
+definition in TU-A's object alongside the archive's non-`inline` (strong external)
+definition of the identically-mangled symbol — an ODR violation under
+[dcl.inline]/4 (IFNDR: no diagnostic required). In practice mainstream linkers
+resolve all references to whichever definition is pulled in first and both
+definitions are token-identical (same emitter body, differing only in the
+`inline` keyword), so this typically does not manifest as observably divergent
+output — but it is undefined behavior and MUST NOT be relied upon. Regression
+coverage: `tests/codegen/test_078_builder_inline_all_tus_us3.cpp` (+ validator
+twin) demonstrate the SAFE all-inline-across-TUs path; the mixed-same-message
+case is intentionally not exercised as a "passing" test (see that file's header
+comment) — see also `feedback_named_safety_invariant_needs_direct_pin`.
+
 ## Scenario 5 — Aggregator = full set, byte-identical, stays slim (US4 / SC-005 / R5)
 
 1. Build a consumer that `#include <fixpp/<ns>/all.hpp>` (default/link mode) and
