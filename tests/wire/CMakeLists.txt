@@ -73,6 +73,11 @@ target_compile_definitions(wire_pure_tests PRIVATE FIXPP_TEST_HOOKS)
 # scope real-frame accept/reject regressions (fixpp#201).
 target_compile_definitions(wire_pure_tests PRIVATE
   "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\"")
+# 079 T024: label the bucket `wire` so `ctest -L wire` selects the US1/US2
+# real-frame regressions living in validator_type_check_test.cpp (matches the
+# wire_dict_tests "075;wire" + required_scope_two_tier_test "079;wire" pattern;
+# quickstart.md §2/§6 select this bucket by label, Article VII §8).
+set_tests_properties(wire_pure_tests PROPERTIES LABELS "079;wire")
 
 # ── Standalone: 061-slim body-builder alloc gate (FR-002) ────────────────────
 # in-TU global ::operator new / ::operator new[] allocation counter (D3).

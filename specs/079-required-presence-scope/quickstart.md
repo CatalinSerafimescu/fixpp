@@ -10,7 +10,7 @@ How to prove the feature end-to-end. Assumes the library submodule cwd and the s
 
 ## 1. Group-scope fix (US1) — conforming message accepted
 
-US1's acceptance criterion is that a **conforming frame is accepted by the runtime `validate()`** — so this step runs the **real-frame accept regression** (Contract 4), not a set-membership check: parse a FIX44 PositionReport (AP) without NoUnderlyings (and a FIX42 conforming frame) and pass each through `dictionary_driven_validator::validate()`; expect **ACCEPT** (was: `wire_required_field_missing(732)`). **The FIX50SP2 TradeCaptureReport (AE) leg is verified at the derivation tier (§1a), NOT full-frame `validate()`** — FIX50SPx ship an empty `<header/>` (FIXT app dict), so `validate()` rejects on tag 8 before the required scan (L-041-2 / #203); FIX44 carries the end-to-end frame accept. This is a grouped-bucket pin — its concrete target + `ctest -L <label>` are finalized at /tasks (Article VII §8: select by label, not exe-name). See [contracts Contract 4](./contracts/census-and-agreement.md).
+US1's acceptance criterion is that a **conforming frame is accepted by the runtime `validate()`** — so this step runs the **real-frame accept regression** (Contract 4), not a set-membership check: parse a FIX44 PositionReport (AP) without NoUnderlyings (and a FIX42 conforming frame) and pass each through `dictionary_driven_validator::validate()`; expect **ACCEPT** (was: `wire_required_field_missing(732)`). **The FIX50SP2 TradeCaptureReport (AE) leg is verified at the derivation tier (§1a), NOT full-frame `validate()`** — FIX50SPx ship an empty `<header/>` (FIXT app dict), so `validate()` rejects on tag 8 before the required scan (L-041-2 / #203); FIX44 carries the end-to-end frame accept. This is a grouped-bucket pin in `wire_pure_tests` (LABELS `"079;wire"`, T024) — select via `ctest -L wire` (Article VII §8: by label, not exe-name). See [contracts Contract 4](./contracts/census-and-agreement.md).
 
 ## 1a. Required-set derivation unit check (supplementary)
 
@@ -22,9 +22,9 @@ Expect (**dictionary-derivation only — does NOT exercise `validate()`**, so it
 
 ## 2. Per-instance group required check (US2)
 
-`validator_type_check_test.cpp` compiles into the grouped `wire_pure_tests` binary (registered only as `add_test(NAME wire_pure_tests)`), so `-R validator_type_check_test` would match no test name and run nothing. The `wire_pure_tests` bucket currently carries **no** LABELS, so the concrete label (added to the bucket) or a standalone target is **finalized at /tasks**; select it by `ctest -L <label>` (Article VII §8), not by exe-name regex:
+`validator_type_check_test.cpp` compiles into the grouped `wire_pure_tests` binary, which T024 labelled `"079;wire"` (`tests/wire/CMakeLists.txt`), so select it by label (Article VII §8), not by exe-name regex:
 ```
-ctest --test-dir build/debug -L <wire bucket label — finalized at /tasks> -V
+ctest --test-dir build/debug -L wire -V
 ```
 Expect: a group instance missing a required member → rejected with the offending tag; complete instances accepted.
 
@@ -50,9 +50,9 @@ Expect: QuickFIX `DataDictionary` required set == census oracle, per message, 9 
 
 ## 5. Two-tier agreement (US3)
 
-The two-tier verdict-agreement test is ordinary isolation-safe verdict-comparison coverage — NOT an Article VII §8 exact-set standalone gate — so its default selection is a grouped bucket by `ctest -L <label>`, not `-R <exe-name>`. The concrete label/target is **finalized at /tasks** (a standalone target only if /tasks explicitly justifies the isolation exception):
+The two-tier verdict-agreement test (`required_scope_two_tier_test`, LABELS `"079;wire;two-tier"`) is ordinary isolation-safe verdict-comparison coverage, selected by label (Article VII §8):
 ```
-ctest --test-dir build/debug -L <two-tier bucket label — finalized at /tasks> -V
+ctest --test-dir build/debug -L two-tier -V
 ```
 Expect: runtime and generated typed `validate_<Msg>` agree — confirming no codegen change was needed. **Scope: v44 / v50sp2 / vlatest**. **v44** carries the end-to-end full-frame verdict comparison; **v50sp2 / vlatest** are compared at the **derivation tier** (both tiers' message-level required set excludes the group tag) because standalone full-frame `validate()` is blocked by the empty FIXT header (L-041-2 / #203, per Contract 3). FIX42 has no typed validator (L-077-1/#196; `main.cpp:132`), covered runtime-only (steps 1/2) plus census-vs-IR-structure (step 3).
 
@@ -62,6 +62,6 @@ These are whole-binary grouped buckets, so select them by **label** (Article VII
 ```
 ctest --test-dir build/debug -L 'codegen|dictionary|wire' -j2
 ```
-Expect: all green **and a non-zero test count selected** (a mis-typed `-L` regex matches nothing and ctest still exits 0 — a silent false-green; assert `>0` tests ran); v44/v42/vt11/v50sp2/vlatest read goldens byte-identical; no C-ABI change. (Bucket labels follow the 068 grouping precedent — set in each module's CMakeLists; the `wire_pure_tests` label is finalized at /tasks.)
+Expect: all green **and a non-zero test count selected** (a mis-typed `-L` regex matches nothing and ctest still exits 0 — a silent false-green; assert `>0` tests ran); v44/v42/vt11/v50sp2/vlatest read goldens byte-identical; no C-ABI change. (Bucket labels follow the 068 grouping precedent — set in each module's CMakeLists; `wire_pure_tests` is labelled `"079;wire"` by T024.)
 
 ## Success = all steps green, with step 3's census proven RED on BOTH witnesses (the `in_group` revert AND the synthetic optional-component injection), and the same-PR perf bench reported.
