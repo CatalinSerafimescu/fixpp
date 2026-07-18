@@ -342,13 +342,16 @@ public:
             }
         }
 
+        // The delimiter's bit index is invariant across every instance of this
+        // group — resolve it once (079 T021 simplify: was re-scanned per
+        // instance). `req_members.size()` is the "not a required member" sentinel.
+        std::size_t const delim_k = check_required ? req_bit_index(delim_tag) : req_members.size();
+
         std::uint32_t actual_count = 0;
         while (i < end && ents[i].tag == delim_tag) {
             req_mask_t seen_mask{};
-            if (check_required) {
-                if (auto const k = req_bit_index(delim_tag); k < req_members.size()) {
-                    mark_bit(seen_mask, k);
-                }
+            if (check_required && delim_k < req_members.size()) {
+                mark_bit(seen_mask, delim_k);
             }
             ++i;  // consume this instance's delimiter
             while (i < end && ents[i].tag != delim_tag) {
