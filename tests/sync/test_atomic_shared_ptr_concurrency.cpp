@@ -93,7 +93,15 @@ TEST(AtomicSharedPtrPublishAcquireOrdering, WriterReaderNeverSeesTornPayload) {
   std::atomic<bool> go{false};
 
   const int kReaderCount = 4;
-  const int kIterations = 20000;
+  // Torn-read stress floor (correctness depends on this quantity — see file header).
+  const int kMinIterations = 20000;
+  // Hard ceiling for the overlap-witness extension below. The writer publishes at
+  // least kMinIterations, then keeps publishing ONLY while no reader has yet
+  // observed a writer payload (valid_reads == 0), capped here so a genuinely broken
+  // atomic (a store that never becomes visible) still terminates and fails the final
+  // EXPECT_GT rather than looping forever. 20× the floor is ample headroom for a
+  // single reader to be scheduled on an oversubscribed runner.
+  const int kMaxIterations = kMinIterations * 20;
 
   // Seed a valid (a == 0) payload so readers never load null before the writer's
   // first store. The seed is deliberately NOT counted toward valid_reads (only
@@ -135,7 +143,14 @@ TEST(AtomicSharedPtrPublishAcquireOrdering, WriterReaderNeverSeesTornPayload) {
   go.store(true, std::memory_order_release);
 
   std::thread writer([&]() {
-    for (int i = 1; i <= kIterations && !stop.load(std::memory_order_relaxed); ++i) {
+    // Publish the fixed torn-read floor (kMinIterations). If no reader has yet
+    // witnessed a writer payload by then, KEEP publishing (structural overlap
+    // guarantee: don't signal stop while valid_reads == 0) up to the hard ceiling.
+    for (int i = 1;
+         i <= kMaxIterations && !stop.load(std::memory_order_relaxed) &&
+             (i <= kMinIterations ||
+              valid_reads.load(std::memory_order_relaxed) == 0);
+         ++i) {
       auto payload = std::make_shared<Payload>();
       payload->a = i;
       payload->b = i * 3;
