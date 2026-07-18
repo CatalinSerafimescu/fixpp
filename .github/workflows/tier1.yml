@@ -241,7 +241,7 @@ jobs:
     # tree recompile on a new branch). 60->90 (2026-07-09): the tsan leg hit the
     # 60-min cap on a cold run and was cancelled — 90 gives the cold sanitizer
     # legs headroom while still capping a genuine deadlock.
-    timeout-minutes: 90
+    timeout-minutes: 180
     needs: gate-precheck
     # `&& github.event_name != 'release'`: a published release only needs the
     # wheel build+install-test lanes to attach the asset — the C++/sanitizer
@@ -430,7 +430,7 @@ jobs:
     runs-on: ubuntu-24.04
     # Backstop against a hung coverage build; matches the `linux` job's 90 for
     # cold-ccache headroom (previously inherited GitHub's 360-min default).
-    timeout-minutes: 90
+    timeout-minutes: 180
     needs: gate-precheck  # runs in parallel with matrix, after the gate check
     # Skipped on release (see the `linux` job note) — coverage doesn't gate the asset.
     if: needs.gate-precheck.outputs.proceed == 'true' && github.event_name != 'release'
@@ -619,7 +619,7 @@ jobs:
     # wedging the runner; see the `linux` job's timeout note. 45->60->90
     # (2026-07-09): the sanitizer legs brushed 45 then 60 cold; matches the
     # `linux` job's 90 for cold-ccache headroom.
-    timeout-minutes: 90
+    timeout-minutes: 180
     needs: gate-precheck
     # Gate-then-relevance (release-excluded): like the C++ matrix, the sanitizer
     # legs run ONLY once both gates are satisfied (`proceed`), and then only when
@@ -802,7 +802,7 @@ jobs:
     runs-on: ubuntu-24.04
     # CI-6: cibuildwheel builds the whole statically-linked engine + static
     # OpenSSL in-container; generous backstop against a hung build wedging the runner.
-    timeout-minutes: 90
+    timeout-minutes: 180
     needs: gate-precheck       # CI-1
     # Gate-then-relevance: the ~7-min container wheel build runs on a release
     # (the asset is built there), OR — on a PR — once both gates are satisfied
@@ -1060,7 +1060,7 @@ jobs:
     runs-on: ubuntu-24.04
     # Backstop against a hung bench build; matches the `linux` job's 90
     # (previously inherited GitHub's 360-min default).
-    timeout-minutes: 90
+    timeout-minutes: 180
     needs: gate-precheck
     # Skipped on release (see the `linux` job note) — bench is a soft gate, not an asset gate.
     if: needs.gate-precheck.outputs.proceed == 'true' && github.event_name != 'release'

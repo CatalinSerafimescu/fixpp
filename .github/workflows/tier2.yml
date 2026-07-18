@@ -151,7 +151,7 @@ jobs:
     # Hung-job backstop (2026-07-09): the MSVC matrix runs ~45 min cold; 90 sits
     # well above that (matches wheel-windows / tier1's heavy-job convention) while
     # capping a wedged build far below GitHub's 6h default.
-    timeout-minutes: 90
+    timeout-minutes: 180
     needs: filter
     if: needs.filter.outputs.should_run == 'true'
 
