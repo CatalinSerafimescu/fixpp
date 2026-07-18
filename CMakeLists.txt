@@ -335,12 +335,29 @@ install(
 # only (cmake/Codegen.cmake) — an external consumer outside the build tree
 # could not #include them. _dispatch/ (build-tree-private reify bridge) and
 # vt11/ (FIXT.1.1, not part of the public v42/v44/v50sp2 set) are excluded.
+#
+# 078-precompiled-builder-libs: the split emits a `messages/`+`groups/`+
+# `validators/` layout plus `all.hpp`/`groups.hpp` aggregators whose
+# `build_<Msg>`/`validate_<Msg>` declarations resolve only against the
+# unexported `fixpp_builders_<ver>`/`fixpp_validators_<ver>` libs
+# (`cmake/Codegen.cmake`). Per `contracts/cmake-targets.md` "Install / export
+# scope" Coherence rule (Gate A round 1, R3): while those libs are unexported,
+# the slim typed layout must NOT be installed — an installed consumer would
+# get unresolvable `build_`/`validate_` link symbols, and the generated
+# `.builder.cpp`/`.validator.cpp` would leak as public "headers". This is a
+# denylist against the 061 install rule below; extend it if a new emitted
+# file/directory type is added under `_codegen/include/<ns>/`.
 if(FIXPP_BUILD_CODEGEN_TOOL)
   install(
     DIRECTORY "${CMAKE_BINARY_DIR}/_codegen/include/"
     DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
     PATTERN "_dispatch" EXCLUDE
     PATTERN "vt11" EXCLUDE
+    PATTERN "messages"   EXCLUDE   # 078 per-message .hpp/.builder.{inl,cpp}/.validator.{inl,cpp}
+    PATTERN "groups"     EXCLUDE   # 078 per-plan group headers
+    PATTERN "validators" EXCLUDE   # 078 validators/traits.hpp
+    PATTERN "all.hpp"    EXCLUDE   # 078 aggregator
+    PATTERN "groups.hpp" EXCLUDE   # 078 groups umbrella
   )
 endif()
 
