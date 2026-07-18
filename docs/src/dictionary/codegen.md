@@ -141,20 +141,32 @@ A builder-only link carries zero `validate_<Msg>` machine code, and vice versa
 
 ### Per-message header-only inline mode
 
-Each side is independently selectable, whole-TU or per-message:
+Each side is independently selectable — all messages
+(`FIXPP_..._HEADER_ONLY`) or a single message (`..._HEADER_ONLY_<Msg>`). The
+selection is a **program-wide per-message** switch, not per-TU: a message
+selected for inlining must be inlined in *every* TU of the program that
+references it, and a message left in link mode must stay in link mode in
+*every* TU of that program.
 
 | Macro | Effect |
 |---|---|
-| `FIXPP_BUILDERS_HEADER_ONLY` | Every message's `build_<Msg>` in this TU is pulled inline from `.builder.inl` instead of resolved from the linked library. |
+| `FIXPP_BUILDERS_HEADER_ONLY` | Every message's `build_<Msg>` referenced by a TU including this header is pulled inline from `.builder.inl` instead of resolved from the linked library. |
 | `FIXPP_BUILDERS_HEADER_ONLY_<Msg>` | Only `<Msg>`'s `build_<Msg>` is inlined; other messages still link. |
-| `FIXPP_VALIDATORS_HEADER_ONLY` | Every message's `validate_<Msg>` in this TU is inlined. |
+| `FIXPP_VALIDATORS_HEADER_ONLY` | Every message's `validate_<Msg>` referenced by a TU including this header is inlined. |
 | `FIXPP_VALIDATORS_HEADER_ONLY_<Msg>` | Only `<Msg>`'s `validate_<Msg>` is inlined. |
 
 The builder and validator sides are independently gated — force-inlining
-`build_<Msg>` never pulls validator machine code. Mixing is safe: a TU may
-force-inline a chosen subset of messages while linking the library for the
-rest, with no duplicate-symbol error (each side's `.inl` and `.cpp` are the
-same generated body at different linkage).
+`build_<Msg>` never pulls validator machine code. Mixing **different**
+messages is safe: a program may force-inline a chosen subset of messages
+while linking the library for the rest, with no duplicate-symbol error (each
+side's `.inl` and `.cpp` are the same generated body at different linkage).
+Mixing modes for the **same** message across TUs of one program — force-inline
+in one TU, link mode in another — is **unsupported**: it produces an `inline`
+(weak) definition alongside the archive's non-`inline` (strong external)
+definition of the identically-mangled symbol, an ODR violation under
+[dcl.inline]/4 (IFNDR, no diagnostic required), and MUST NOT be relied upon.
+See `specs/078-precompiled-builder-libs/quickstart.md` Scenario 4d for the
+full contract.
 
 ### SC-001 — consumer compile cost is closure-bounded, not universally order-of-magnitude
 
