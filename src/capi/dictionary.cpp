@@ -19,7 +19,7 @@
 #include "fix/c_api/dict.h"
 #include "fix/c_api/error.h"
 
-#include "fixpp/dict/xml_loader.hpp"
+#include "fixpp/dict/load_any.hpp"
 
 // ── Dead-shell registry (retained-shell tombstone, gate-b/r1 comment F4):
 //    Each successful fixpp_dict_destroy links the shell pointer here so a
@@ -55,9 +55,8 @@ fixpp_error_t fixpp_dict_load_from_xml(const char* path, fixpp_dict_t** out_dict
     // Construction-time thunk ([2i §5.2]): catch all exceptions; never let one
     // cross extern "C" (undefined behaviour in C callers; std::terminate for C++).
     try {
-        fixpp::dict::XmlLoader loader;
-        auto d = loader.load(std::filesystem::path{path},
-                             std::pmr::get_default_resource());
+        auto d = fixpp::dict::load_any(std::filesystem::path{path},
+                                       std::pmr::get_default_resource());
         auto* h = new fixpp_dict{
             std::make_shared<const fixpp::dict::Dictionary>(std::move(d))};
         *out_dict = reinterpret_cast<fixpp_dict_t*>(h);

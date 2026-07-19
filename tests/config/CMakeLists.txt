@@ -59,6 +59,7 @@ add_executable(config_044_tests
 )
 target_compile_definitions(config_044_tests PRIVATE
     FIXPP_CONFIG_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures"
+    FIXPP_ORCHESTRA_XML="${CMAKE_SOURCE_DIR}/dictionaries/orchestra/OrchestraFIXLatest.xml"
 )
 target_link_libraries(config_044_tests PRIVATE
     fixpp::config_toml
@@ -77,7 +78,7 @@ set_target_properties(config_044_tests PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
 )
 add_test(NAME config_044_tests COMMAND config_044_tests)
-set_tests_properties(config_044_tests PROPERTIES LABELS "config;044")
+set_tests_properties(config_044_tests PROPERTIES LABELS "config;044;080")
 
 # ── 068-test-binary-grouping US2: config_045_tests grouped bucket (4 .cpp) ──
 # T008/T009 logger equivalence + T014/T014a/T015 logger negative battery +
