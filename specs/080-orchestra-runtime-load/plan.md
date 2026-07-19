@@ -6,9 +6,9 @@
 
 ## Summary
 
-Make the already-runtime-loadable FIX Latest / Orchestra dictionary (delivered by 074's `dict::OrchestraLoader`) reachable from the two non-C++ acquisition surfaces that are currently hard-wired to `dict::XmlLoader`: the C-API `fixpp_dict_load_from_xml` and the TOML `dictionary.path` resolver. A single new dictionary-layer helper `dict::load_any(path, mr)` sniffs the document's root element (`<fix>` → `XmlLoader`, `<fixr:repository>` → `OrchestraLoader`, any other root → fail-closed `dict::` error) and is called by both surfaces so the dispatch rule is defined once. Independently, the config-file path gains a pre-check that detects a FIX50SP2 + FIX-Latest dictionary pair (which today `std::abort`s at `version_registry` construction) and emits a **new distinct config-layer `reason_class` value** before the registry is built, turning process death into a diagnosable config error.
+Make the already-runtime-loadable FIX Latest / Orchestra dictionary (delivered by 074's `dict::OrchestraLoader`) reachable from the two non-C++ acquisition surfaces that are currently hard-wired to `dict::XmlLoader`: the C-API `fixpp_dict_load_from_xml` and the TOML `dictionary.path` resolver. A single new dictionary-layer helper `dict::load_any(path, mr)` sniffs the document's root element (`<fix>` → `XmlLoader`, `<fixr:repository>` → `OrchestraLoader`, any other root → fail-closed `dict::` error) and is called by both surfaces so the dispatch rule is defined once.
 
-**No C-ABI change.** The C-API entry point's *behavior* widens (an Orchestra file that returned `FIXPP_ERR_CAPI_CONFIG_INVALID` now returns `FIXPP_ERR_OK`), but no symbol, signature, or `fixpp_error_t` value changes and no byte-frozen header is edited — the dual-dictionary collision is unreachable via the C-API (census below), so its distinct error lives in the C++ config layer, not `error.h`.
+**No C-ABI change.** The C-API entry point's *behavior* widens (an Orchestra file that returned `FIXPP_ERR_CAPI_CONFIG_INVALID` now returns `FIXPP_ERR_OK`), but no symbol, signature, or `fixpp_error_t` value changes and no byte-frozen header is edited.
 
 ## Technical Context
 
@@ -28,7 +28,7 @@ Make the already-runtime-loadable FIX Latest / Orchestra dictionary (delivered b
 
 **Constraints**: C-ABI frozen at `1.5.0` — `tests/abi/golden/fixpp_capi_symbols.txt` (`nm` symbol set) and `tools/capi_freeze.sha256` (header byte-freeze incl. `error.h`/`version.h`) MUST pass without regeneration (SC-005). No codegen/golden/emitter change; existing read goldens byte-identical. 074 T022h loader-unit invariant (`XmlLoader` rejects `<fixr:repository>`) preserved.
 
-**Scale/Scope**: Small, surgical. One new helper (`dict::load_any`, header + cpp), two call-site redirects (C-API thunk, TOML resolver), one appended `reason_class` value + a config-layer collision pre-check, and the test suite. No change to `src/session/`, `bindings/`, codegen, or the wire path.
+**Scale/Scope**: Small, surgical. One new helper (`dict::load_any`, header + cpp), two call-site redirects (C-API thunk, TOML resolver), and the test suite. No change to `src/session/`, `bindings/`, codegen, or the wire path.
 
 ## Constitution Check
 
@@ -42,9 +42,9 @@ Make the already-runtime-loadable FIX Latest / Orchestra dictionary (delivered b
 | **VIII §3** (perf bench) | Hot-path perf change? | **N/A** — startup-only load path; documented above. No bench required. |
 | **IX §5** (abidiff / ABI hygiene) | ABI golden diff. | **PASS by no-op** — no exported C symbol added/changed; `nm` symbol golden + header byte-freeze unchanged (SC-005). `/speckit-verify` asserts both stay green. |
 | **X** (ABI policy) | C-ABI contract review. | **PASS** — no `fixpp_error_t` addition, no signature/symbol change, no frozen-header edit. The C-API behavioral widening is documented (contract note + B&L row). §4 (error reporting) untouched. |
-| **XVI §3 / Appendix A** (mandatory controls) | `/clarify`, `/analyze`, Gate A, `/plan` sign-off. | **TRIGGERED** via "Codegen layout — dictionary loader, multi-version coexistence" and a new public C++ `dict::` symbol. `/clarify` ✓ done. `/analyze` + Codex Gate A + user `/plan` sign-off REQUIRED before `/tasks`. |
+| **XVI §3 / Appendix A** (mandatory controls) | `/clarify`, `/analyze`, Gate A, `/plan` sign-off. | **TRIGGERED** by the new public C++ `dict::load_any` symbol (Article XVII §1). `/clarify` ✓ done. `/analyze` + Codex Gate A + user `/plan` sign-off REQUIRED before `/tasks`. |
 | **XVII §1** (Gate A) | Touches public C++ API / dictionary loader. | **Gate A MANDATORY.** |
-| **XV** (banned patterns) | Fail-closed disposition. | **PASS** — `load_any` propagates the loaders' existing fail-closed `dict::*_error` types; unrecognized/malformed root → `dict::` parse error (C-API `catch(...)`→`CONFIG_INVALID`; TOML `trap_throw_to_expected`→diagnostic). The collision pre-check is fail-closed (emits the new `reason_class`, does not proceed to registry build). `version_registry`'s existing `std::abort` retained as the direct-C++ fail-loud backstop. |
+| **XV** (banned patterns) | Fail-closed disposition. | **PASS** — `load_any` propagates the loaders' existing fail-closed `dict::*_error` types; unrecognized/malformed root → `dict::` parse error (C-API `catch(...)`→`CONFIG_INVALID`; TOML `trap_throw_to_expected`→diagnostic). `version_registry`'s existing `std::abort` retained as the direct-C++ fail-loud backstop. |
 
 **No Complexity Tracking entries** — no constitution violation to justify.
 
@@ -57,11 +57,11 @@ specs/080-orchestra-runtime-load/
 ├── plan.md              # This file
 ├── spec.md              # Feature spec (/speckit-specify + /speckit-clarify)
 ├── research.md          # Phase 0 — design decisions + the C-ABI-surface pivot
-├── data-model.md        # Phase 1 — entities: load_any, reason_class value, collision predicate
+├── data-model.md        # Phase 1 — entities: load_any + the two call-site redirects
 ├── quickstart.md        # Phase 1 — runnable validation scenarios (RED-first)
 ├── contracts/
 │   ├── load_any.md      # dict::load_any signature + dispatch contract
-│   └── surfaces.md      # widened C-API/TOML behavior + new reason_class value contract
+│   └── surfaces.md      # widened C-API/TOML behavior contract
 ├── checklists/
 │   └── requirements.md  # spec quality checklist (from /speckit-specify)
 └── tasks.md             # /speckit-tasks output — NOT created here
@@ -81,25 +81,25 @@ src/dictionary/
 ├── xml_loader.cpp               # unchanged (T022h root reject intact)
 └── orchestra_loader.cpp         # unchanged
 
-include/fixpp/config/
-└── load_diagnostic.hpp          # EDIT — append reason_class::conflicting_dictionaries
-
 src/config/
-└── selector_resolver.cpp        # EDIT — (a) call dict::load_any not XmlLoader (~L359);
-                                 #        (b) collision pre-check over engine.dictionaries
-                                 #            → emit conflicting_dictionaries diagnostic
+└── selector_resolver.cpp        # EDIT — call dict::load_any not XmlLoader (~L359)
 
 src/capi/
 └── dictionary.cpp               # EDIT — fixpp_dict_load_from_xml calls dict::load_any (~L48)
 
 tests/dictionary/  tests/config/  tests/capi/
 └── *                            # NEW — sniff dispatch, C-API/TOML Orchestra load,
-                                 #        collision reason_class, single-dict ok,
-                                 #        classic-fix regression, T022h invariant pin
+                                 #        single-dict ok, classic-fix regression,
+                                 #        T022h invariant pin
 ```
 
-**Structure Decision**: Single-project library layout (Option 1). The feature is a thin dispatch/entry-point addition inside the existing `dict::` and `config::` layers plus one C-API thunk redirect; it introduces one new translation unit (`load_any.cpp`) and edits three existing files. No new module, directory, or build target beyond the test binaries.
+**Structure Decision**: Single-project library layout (Option 1). The feature is a thin dispatch/entry-point addition inside the existing `dict::` and `config::` layers plus one C-API thunk redirect; it introduces one new translation unit (`load_any.cpp`) and edits two existing files. No new module, directory, or build target beyond the test binaries.
 
 ## Complexity Tracking
 
 > No Constitution Check violations — section intentionally empty.
+
+## Gate A
+
+- Round 1 applied 2026-07-19: Codex P1=2 P2=1 P3=0; Opus post-judging P1=2 P2=2 P3=1; rewrite descopes the dual-dictionary collision leg (Root cause #1: false reachability premise — config cannot name two dictionaries) + adds a pinned frozen-header docs-note obligation (RC#3) + pins the sniff to document_element() (N-2). Reviews: research/reviews/codex_080-orchestra-runtime-load_gate_a_review.md, research/reviews/opus_080-orchestra-runtime-load_gate_a_adversarial_review.md.
+- Round 2 applied 2026-07-19: Codex P1=0 P2=2 P3=2; Opus post-judging P1=0 P2=2 P3=3; mechanical doc-drift sweep (stale Input-line goal marked descoped; T022h test made message-agnostic + citation fixed to xml_loader.cpp:742-745; surfaces.md S1 pointer; checklist scope-boundary reworded; FR-004 single-dispatch source-inspection scenario added). No substance change. Reviews: research/reviews/codex_080-orchestra-runtime-load_gate_a_2_review.md, research/reviews/opus_080-orchestra-runtime-load_gate_a_2_adversarial_review.md.

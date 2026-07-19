@@ -20,6 +20,8 @@ namespace fixpp::dict {
 | `fixr:repository` | `OrchestraLoader::load(path, mr)` | FIX-Latest `Dictionary` (equivalent to `OrchestraLoader::load` directly — FR-001/SC-001) |
 | any other / empty / unreadable / malformed | — | throw a `dict::` parse error (fail-closed — FR-003) |
 
+The root element MUST be read with pugixml `document_element()` (the first *element* child), **not** `first_child()`. `document_element()` skips any leading non-element node (comment / processing-instruction / XML declaration), so the discriminant stays aligned with `XmlLoader`'s own `doc.child("fix")` probe and the FR-006 byte-identical classic load cannot diverge if pugixml parse flags ever change (N-2 hardening, Gate A round 1).
+
 ## Guarantees
 
 - **G1 (single definition)**: this is the only runtime root-sniff/dispatch; both the C-API thunk and the TOML resolver call it (FR-004). The codegen `ir.cpp` sniff is a separate build-time concern and is out of scope.

@@ -32,4 +32,4 @@
 ## Notes
 
 - The feature is API/config surface work, so the spec necessarily names the two existing entry points (C-API `fixpp_dict_load_from_xml`, TOML `dictionary.path`) and the two loaders as *anchors of the capability gap*, not as prescribed implementation. The DECIDED design (Option B root-sniff) is recorded under Assumptions per the user's standing decision so `/plan` inherits it; the "how" (the shared helper's internals) is deferred to `/plan`.
-- No [NEEDS CLARIFICATION] markers: the design is user-decided and the scope boundary (abort→error only, no registry re-keying) is explicit.
+- No [NEEDS CLARIFICATION] markers: the design is user-decided and the scope boundary is explicit — the delivered scope is the root-sniff acquisition path only (the C-API `fixpp_dict_load_from_xml` and the TOML `dictionary.path` resolver both load an Orchestra dictionary via one shared helper). The dual-dictionary collision leg was descoped by Gate A round 1 (unreachable via any config surface); the `version_registry` abort is retained unchanged and no registry re-keying is done.

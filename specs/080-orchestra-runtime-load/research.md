@@ -14,9 +14,9 @@ All items below were resolved against the current code (surface map, 2026-07-19)
 
 ## D-2 — Sniff strategy: parse-to-sniff, then dispatch to `loader.load(path)`
 
-**Decision**: `load_any` performs one lightweight pugixml parse to read the root element name, then calls the chosen loader's existing `load(path, mr)`. The loader re-opens/parses the file (two reads on a startup path).
+**Decision**: `load_any` performs one lightweight pugixml parse to read the root element name via `document_element()`, then calls the chosen loader's existing `load(path, mr)`. The loader re-opens/parses the file (two reads on a startup path). The root discriminant is read with `document_element()` (the first *element* child), **not** `first_child()`, so a leading non-element node (BOM-adjacent comment / PI / XML declaration) can never be mistaken for the root even if pugixml parse flags change — this keeps the FR-006 byte-identical classic load aligned with `XmlLoader`'s own `doc.child("fix")` discriminant (N-2 hardening, Gate A round 1).
 
-**Rationale**: Keeps the loaders' path-based error messages (filenames in `dict::xml_parse_error` / `orchestra_parse_error`) intact and matches the 076 `ir.cpp` precedent exactly. Dictionary acquisition is a one-time startup event, so a second file read is immaterial (Article VIII §3 does not apply — not a hot path).
+**Rationale**: Keeps the loaders' path-based error messages (filenames in `dict::xml_parse_error` / `orchestra_parse_error`) intact. The sniff shape follows the 076 `ir.cpp` precedent, but pins the accessor to `document_element()` rather than `ir.cpp`'s `first_child()` for the robustness reason above. Dictionary acquisition is a one-time startup event, so a second file read is immaterial (Article VIII §3 does not apply — not a hot path).
 
 **Alternatives rejected**:
 - *Read file once → sniff → `loader.load_from_string`* — saves one read but drops the filename from loader error messages and diverges from the path-based call the TOML resolver uses today. Premature optimization on a non-hot path (Karpathy simplicity). If a future profile ever shows startup load cost matters, revisit then.
@@ -25,6 +25,8 @@ All items below were resolved against the current code (surface map, 2026-07-19)
 **Malformed input**: if the sniff parse fails or the root is neither `fix` nor `fixr:repository`, `load_any` throws a `dict::` parse error → C-API `catch(...)` → `FIXPP_ERR_CAPI_CONFIG_INVALID` (unchanged disposition); TOML `trap_throw_to_expected` → a `LoadDiagnostic`. Fail-closed either way.
 
 ## D-3 — ★ Distinct collision error surface: config-layer `reason_class`, NOT the C-ABI (pivot)
+
+> **SUPERSEDED by Gate A round 1 (2026-07-19) — retained for audit (Article XX §1).** Gate A found the FIX50SP2 + FIX-Latest collision to be **unreachable via any config surface** (TOML resolves a single `[dictionary]` table → at most one dictionary; the C-API never populates the engine's multi-dictionary registry), so the entire collision leg — the new `reason_class` value and the config-layer pre-check — was **removed entirely**, not merely relocated off the C-ABI. The direct-C++ `version_registry` `std::abort` (074 L-074-1) remains the fail-loud backstop for the only surface that can express the pair. This decision is retained because its census is still the authoritative record of **why 080 makes no C-ABI change**; only its conclusion (add a `reason_class` value) is reversed.
 
 **Decision**: The new distinct "both FIX50SP2 and FIX-Latest named" error (clarify Q1 = B) is a **new `reason_class` value** (`conflicting_dictionaries`) appended to `include/fixpp/config/load_diagnostic.hpp` (a `std::uint8_t` C++ enum surfaced to the config consumer via `LoadResult`/`LoadDiagnostic`). It is **not** a `fixpp_error_t` value and touches no C-ABI header.
 
@@ -44,6 +46,8 @@ All items below were resolved against the current code (surface map, 2026-07-19)
 
 ## D-4 — Collision pre-check placement: config layer, before registry construction (FR-007a)
 
+> **SUPERSEDED by Gate A round 1 (2026-07-19) — retained for audit (Article XX §1).** With the collision leg descoped (see D-3), no config-layer pre-check is added at all; FR-007a is removed from the spec. This placement analysis is retained only as the record of the option that was considered and dropped.
+
 **Decision**: The collision pre-check runs in `selector_resolver.cpp` over `bundle.engine.dictionaries` after they are resolved and **before** the Engine (hence the `version_registry`) is constructed. It detects two dictionaries whose `which_session_version()` differ but both map to `application_version::v50sp2` via `session_to_application` (i.e. the `{v50sp2, vlatest}` pair — the exact condition of the `version_registry.cpp:89-98` abort), and emits the `conflicting_dictionaries` diagnostic instead of proceeding.
 
 **Rationale**: FR-007a / clarify Q2 = A. Detecting in the config layer leaves the core `noexcept` `version_registry` ctor — and its `std::abort` as a direct-C++ fail-loud backstop — untouched, matching "registry re-keying is out of scope." The collision condition is fully determinable from the resolved dictionary vector using the public `Dictionary::which_session_version()` accessor (`dictionary.hpp:90`).
@@ -54,7 +58,7 @@ All items below were resolved against the current code (surface map, 2026-07-19)
 
 ## D-5 — Loaders and the T022h invariant are reused unchanged
 
-**Decision**: `XmlLoader` and `OrchestraLoader` are not modified. `XmlLoader` continues to reject a `<fixr:repository>` root at `xml_loader.cpp:347-350` (074 T022h). `load_any` never routes an Orchestra document to `XmlLoader`, so the invariant holds and is pinned by a regression test (FR-009).
+**Decision**: `XmlLoader` and `OrchestraLoader` are not modified. `XmlLoader` continues to reject a `<fixr:repository>` root (074 T022h): for a non-`<fix>` root the reject fires FIRST at `xml_loader.cpp:742-745` — `parse_document`'s `doc.child("fix")`-missing guard (message "root `<fix>` element missing"). The `parse_version` guard at `:347-350` never sees a non-`<fix>` root (it only ever receives `doc.child("fix")`), so it is for-this-path dead. `load_any` never routes an Orchestra document to `XmlLoader`, so the invariant holds and is pinned by a regression test (FR-009).
 
 **Rationale**: The widening is at the *dispatch/entry-point* layer only; the loaders keep their single-grammar contracts. This keeps the change surgical and the existing loader unit tests valid.
 
