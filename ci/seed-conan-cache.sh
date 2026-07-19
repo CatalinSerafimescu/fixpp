@@ -42,10 +42,12 @@ conan list --graph="$WORK/graph.json" --graph-binaries="*" --format=json > "$WOR
 conan cache save --list="$WORK/pkglist.json" --file="$WORK/conan-$PROFILE.tgz"
 
 # 3. Push to GHCR as a public OCI artifact, linked to the fixpp repo.
-oras push "$IMAGE:$TAG" \
-  --artifact-type application/vnd.fixpp.conan-cache.v1 \
-  --annotation "org.opencontainers.image.source=https://github.com/CatalinSerafimescu/fixpp" \
-  --annotation "fixpp.profile=$PROFILE" \
-  "$WORK/conan-$PROFILE.tgz:application/gzip"
+#    Push from inside $WORK with a RELATIVE filename so oras' absolute-path guard
+#    passes and the artifact title is the clean basename (not a random /tmp path).
+( cd "$WORK" && oras push "$IMAGE:$TAG" \
+    --artifact-type application/vnd.fixpp.conan-cache.v1 \
+    --annotation "org.opencontainers.image.source=https://github.com/CatalinSerafimescu/fixpp" \
+    --annotation "fixpp.profile=$PROFILE" \
+    "conan-$PROFILE.tgz:application/gzip" )
 
 echo "seeded $IMAGE:$TAG   ($(du -h "$WORK/conan-$PROFILE.tgz" | cut -f1))"
