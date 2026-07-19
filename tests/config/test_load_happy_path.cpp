@@ -76,6 +76,44 @@ bool has_diag_hp(const std::vector<fixpp::config::LoadDiagnostic>& diags,
     });
 }
 
+// 080: write a minimal well-formed engine TOML whose single [dictionary] names
+// `dict_path` (as a single-quoted TOML *literal* string so Windows absolute
+// paths with backslashes are not escape-parsed). Returns the temp file path;
+// caller removes it. Mirrors the Cov_AbsoluteDictPath fixture shape.
+std::filesystem::path write_dict_path_toml(const std::filesystem::path& fixture_dir,
+                                           std::string_view tmp_name,
+                                           const std::filesystem::path& dict_path) {
+    const std::filesystem::path tmp = fixture_dir / tmp_name;
+    std::ofstream out{tmp};
+    out << "[clock]\nkind = \"system\"\n\n"
+        << "[store]\nkind = \"memory\"\n\n"
+        << "[cert_source]\nkind = \"file\"\n"
+        << "cert_file = \"leaf_ecdsa_p256.pem\"\n"
+        << "key_file  = \"leaf_ecdsa_p256.key\"\n"
+        << "ca_file   = \"ca.pem\"\n\n"
+        << "[dictionary]\nkind = \"path\"\n"
+        << "path = '" << dict_path.string() << "'\n\n"
+        << "[[session]]\n"
+        << "sender_comp_id = \"CLIENT1\"\n"
+        << "target_comp_id = \"SERVER1\"\n"
+        << "begin_string   = \"FIX.4.4\"\n"
+        << "role           = \"initiator\"\n\n"
+        << "[session.transport]\nkind = \"tls\"\n"
+        << "host = \"fix.example.com\"\nport = 4321\n\n"
+        << "[session.security_profile]\nkind = \"mtls_ca\"\n";
+    return tmp;
+}
+
+// Render a LoadResult's diagnostics as "key_path: message\n" lines (empty when
+// the load succeeded) — the on-failure detail for an ASSERT_TRUE message.
+std::string dump_diags(const fixpp::config::LoadResult& result) {
+    std::string s;
+    if (!result.has_value()) {
+        for (const auto& d : result.error()) s += d.key_path + ": " + d.message + "\n";
+    }
+    return s;
+}
+
 }  // namespace
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -456,31 +494,8 @@ TEST(LoadHappyPath, Cov_AbsoluteDictPath) {
 
 TEST(LoadHappyPath, Cov_OrchestraDictPath) {
     const std::filesystem::path fixture_dir{std::string{FIXPP_CONFIG_FIXTURE_DIR}};
-    const std::filesystem::path orchestra_xml{FIXPP_ORCHESTRA_XML};
-
-    const std::filesystem::path tmp = fixture_dir / "_tmp_orchestra_path_test.toml";
-    {
-        std::ofstream out{tmp};
-        out << "[clock]\nkind = \"system\"\n\n"
-            << "[store]\nkind = \"memory\"\n\n"
-            << "[cert_source]\nkind = \"file\"\n"
-            << "cert_file = \"leaf_ecdsa_p256.pem\"\n"
-            << "key_file  = \"leaf_ecdsa_p256.key\"\n"
-            << "ca_file   = \"ca.pem\"\n\n"
-            << "[dictionary]\nkind = \"path\"\n"
-            // TOML *literal* string (single quotes): a Windows absolute path
-            // contains backslashes that a basic (double-quoted) string would
-            // parse as escape sequences.
-            << "path = '" << orchestra_xml.string() << "'\n\n"
-            << "[[session]]\n"
-            << "sender_comp_id = \"CLIENT1\"\n"
-            << "target_comp_id = \"SERVER1\"\n"
-            << "begin_string   = \"FIX.4.4\"\n"
-            << "role           = \"initiator\"\n\n"
-            << "[session.transport]\nkind = \"tls\"\n"
-            << "host = \"fix.example.com\"\nport = 4321\n\n"
-            << "[session.security_profile]\nkind = \"mtls_ca\"\n";
-    }
+    const auto tmp = write_dict_path_toml(fixture_dir, "_tmp_orchestra_path_test.toml",
+                                          std::filesystem::path{FIXPP_ORCHESTRA_XML});
 
     auto result = load_path(tmp);
 
@@ -488,12 +503,7 @@ TEST(LoadHappyPath, Cov_OrchestraDictPath) {
     std::filesystem::remove(tmp, ec);
 
     ASSERT_TRUE(result.has_value())
-        << "orchestra dict path must load successfully; diagnostics: " << [&] {
-               std::string s;
-               if (!result.has_value())
-                   for (const auto& d : result.error()) s += d.key_path + ": " + d.message + "\n";
-               return s;
-           }();
+        << "orchestra dict path must load successfully; diagnostics: " << dump_diags(result);
 
     ASSERT_EQ(result->engine.dictionaries.size(), std::size_t{1})
         << "expected 1 dictionary entry for the Orchestra dict path";
@@ -508,27 +518,7 @@ TEST(LoadHappyPath, Cov_OrchestraDictPath) {
 TEST(LoadHappyPath, Cov_ClassicDictPathUnchangedPost080) {
     const std::filesystem::path fixture_dir{std::string{FIXPP_CONFIG_FIXTURE_DIR}};
     const std::filesystem::path abs_dict = (fixture_dir / "FIX44.xml").lexically_normal();
-
-    const std::filesystem::path tmp = fixture_dir / "_tmp_classic_path_test.toml";
-    {
-        std::ofstream out{tmp};
-        out << "[clock]\nkind = \"system\"\n\n"
-            << "[store]\nkind = \"memory\"\n\n"
-            << "[cert_source]\nkind = \"file\"\n"
-            << "cert_file = \"leaf_ecdsa_p256.pem\"\n"
-            << "key_file  = \"leaf_ecdsa_p256.key\"\n"
-            << "ca_file   = \"ca.pem\"\n\n"
-            << "[dictionary]\nkind = \"path\"\n"
-            << "path = '" << abs_dict.string() << "'\n\n"
-            << "[[session]]\n"
-            << "sender_comp_id = \"CLIENT1\"\n"
-            << "target_comp_id = \"SERVER1\"\n"
-            << "begin_string   = \"FIX.4.4\"\n"
-            << "role           = \"initiator\"\n\n"
-            << "[session.transport]\nkind = \"tls\"\n"
-            << "host = \"fix.example.com\"\nport = 4321\n\n"
-            << "[session.security_profile]\nkind = \"mtls_ca\"\n";
-    }
+    const auto tmp = write_dict_path_toml(fixture_dir, "_tmp_classic_path_test.toml", abs_dict);
 
     auto result = load_path(tmp);
 
@@ -536,12 +526,7 @@ TEST(LoadHappyPath, Cov_ClassicDictPathUnchangedPost080) {
     std::filesystem::remove(tmp, ec);
 
     ASSERT_TRUE(result.has_value())
-        << "classic dict path must load successfully; diagnostics: " << [&] {
-               std::string s;
-               if (!result.has_value())
-                   for (const auto& d : result.error()) s += d.key_path + ": " + d.message + "\n";
-               return s;
-           }();
+        << "classic dict path must load successfully; diagnostics: " << dump_diags(result);
 
     ASSERT_EQ(result->engine.dictionaries.size(), std::size_t{1})
         << "expected 1 dictionary entry for the classic dict path";

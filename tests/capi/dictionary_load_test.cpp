@@ -63,6 +63,24 @@ TEST(DictLoadFromXml, LoadFixt11) {
     fixpp_dict_destroy(d);
 }
 
+// 080: assert `path` loads through the C-API (OK + non-null handle) and the
+// resulting handle is accepted by fixpp_session_config_set_dictionary, then
+// release both. The shared load→settable→destroy witness for US1. void-returning
+// so gtest ASSERT_* short-circuits cleanly.
+static void expect_dict_loads_and_is_settable(const char* path) {
+    fixpp_dict_t* d = nullptr;
+    ASSERT_EQ(fixpp_dict_load_from_xml(path, &d), FIXPP_ERR_OK);
+    ASSERT_NE(d, nullptr);
+
+    fixpp_session_config_t* cfg = nullptr;
+    ASSERT_EQ(fixpp_session_config_create(&cfg), FIXPP_ERR_OK);
+    ASSERT_NE(cfg, nullptr);
+
+    EXPECT_EQ(fixpp_session_config_set_dictionary(cfg, d), FIXPP_ERR_OK);
+    fixpp_dict_destroy(d);
+    fixpp_session_config_destroy(cfg);
+}
+
 // ── 080 US1: fixpp_dict_load_from_xml accepts an Orchestra <fixr:repository>
 //    document via dict::load_any (SC-001, US1 AC1/AC2, quickstart Scenario 1).
 //
@@ -73,37 +91,13 @@ TEST(DictLoadFromXml, LoadFixt11) {
 // entry-point contract (OK + non-null) + set_dictionary usability (SC-001,
 // US1 AC1/AC2).
 TEST(DictLoadFromXml, LoadOrchestraFixLatest) {
-    fixpp_dict_t* d = nullptr;
-    auto err = fixpp_dict_load_from_xml(FIXPP_DICT_DIR "/orchestra/OrchestraFIXLatest.xml", &d);
-    ASSERT_EQ(err, FIXPP_ERR_OK);
-    ASSERT_NE(d, nullptr);
-
-    fixpp_session_config_t* cfg = nullptr;
-    ASSERT_EQ(fixpp_session_config_create(&cfg), FIXPP_ERR_OK);
-    ASSERT_NE(cfg, nullptr);
-
-    EXPECT_EQ(fixpp_session_config_set_dictionary(cfg, d), FIXPP_ERR_OK);
-    fixpp_dict_destroy(d);
-
-    fixpp_session_config_destroy(cfg);
+    expect_dict_loads_and_is_settable(FIXPP_DICT_DIR "/orchestra/OrchestraFIXLatest.xml");
 }
 
 // ── 080 US1 regression pin: classic <fix> load is unchanged post-080
 //    (SC-003, US1 AC3, quickstart Scenario 2).
 TEST(DictLoadFromXml, ClassicFix44LoadUnchangedPost080) {
-    fixpp_dict_t* d = nullptr;
-    auto err = fixpp_dict_load_from_xml(FIXPP_DICT_DIR "/FIX44.xml", &d);
-    ASSERT_EQ(err, FIXPP_ERR_OK);
-    ASSERT_NE(d, nullptr);
-
-    fixpp_session_config_t* cfg = nullptr;
-    ASSERT_EQ(fixpp_session_config_create(&cfg), FIXPP_ERR_OK);
-    ASSERT_NE(cfg, nullptr);
-
-    EXPECT_EQ(fixpp_session_config_set_dictionary(cfg, d), FIXPP_ERR_OK);
-    fixpp_dict_destroy(d);
-
-    fixpp_session_config_destroy(cfg);
+    expect_dict_loads_and_is_settable(FIXPP_DICT_DIR "/FIX44.xml");
 }
 
 // ── Positive: loaded dict is usable via fixpp_session_config_set_dictionary ───

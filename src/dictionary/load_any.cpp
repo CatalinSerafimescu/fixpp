@@ -32,8 +32,12 @@ Dictionary load_any(std::filesystem::path const& path, std::pmr::memory_resource
     }
 
     // document_element() = the first ELEMENT child (skips any leading
-    // comment/processing-instruction/XML declaration) — N-2 hardening, keeps
-    // this discriminant aligned with XmlLoader's own doc.child("fix") probe.
+    // comment/processing-instruction/XML declaration) — N-2 hardening. This
+    // aligns with XmlLoader's own comment-skipping doc.child("fix") probe;
+    // OrchestraLoader instead re-checks with a raw first_child() (no skip), so
+    // an Orchestra file with a leading comment/PI would sniff-accept here yet be
+    // rejected on delegation — still fail-closed (a clean dict:: error, never a
+    // mis-load), and moot for the shipped comment-free OrchestraFIXLatest.xml.
     auto const root = doc.document_element();
     std::string_view const name{root.name()};
 

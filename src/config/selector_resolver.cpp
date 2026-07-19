@@ -274,7 +274,7 @@ static void resolve_engine_cert_source(const toml::table& root_tbl,
 // resolve_engine_dictionary — build engine.dictionaries from [dictionary] table (D-5).
 //
 // step-1 accepted kind: "path"
-// XmlLoader::load throws — use trap_throw_to_expected.
+// dict::load_any throws — use trap_throw_to_expected.
 // ─────────────────────────────────────────────────────────────────────────────
 static void resolve_engine_dictionary(const toml::table& root_tbl,
                                       const std::filesystem::path& base_dir,
