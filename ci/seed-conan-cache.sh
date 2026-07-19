@@ -30,7 +30,10 @@ IMAGE="ghcr.io/catalinserafimescu/fixpp-conan-cache"
 # KEY: recomputed identically by restore-conan-cache.sh — plain sha256sum, NOT
 # GitHub hashFiles(), so both sides match without depending on Actions functions.
 KEY="$(cat conanfile.py "conan/profiles/$PROFILE" | tr -d '\r' | sha256sum | cut -c1-16)"
-TAG="${PROFILE}-${KEY}"
+# OCI tags forbid '+', so libc++ profiles must be sanitized (libc++ -> libcxx).
+# No-op for '+' -free profiles → existing tags unchanged. The .tgz FILENAME keeps
+# the raw profile ('+' is legal in filenames); only the tag is sanitized.
+TAG="${PROFILE//+/x}-${KEY}"
 
 WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
 

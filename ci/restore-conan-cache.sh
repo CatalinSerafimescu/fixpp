@@ -17,7 +17,8 @@ IMAGE="ghcr.io/catalinserafimescu/fixpp-conan-cache"
 # tr -d '\r': make the key line-ending-independent so a CRLF Windows checkout
 # hashes identically to the LF Linux seed (no-op on Linux → existing tags stay valid).
 KEY="$(cat conanfile.py "conan/profiles/$PROFILE" | tr -d '\r' | sha256sum | cut -c1-16)"
-TAG="${PROFILE}-${KEY}"
+# OCI tags forbid '+' → sanitize (libc++ -> libcxx); no-op for '+'-free profiles.
+TAG="${PROFILE//+/x}-${KEY}"
 
 WORK="$(mktemp -d)"
 if oras pull "$IMAGE:$TAG" -o "$WORK" >/dev/null 2>&1; then
