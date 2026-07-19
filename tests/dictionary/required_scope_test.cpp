@@ -130,4 +130,65 @@ TEST(RequiredScope, Fix42GroupCountFieldIsIntTypedContextStoreBlindL0661) {
            "updated/removed";
 }
 
+// ============================================================================
+// Gate B r1 F1 (fixpp#201 escalation) — GROUP-RELATIVE component-AND per-group
+// required-member store. Both witnesses source-verified against the vendored
+// XML (see Gate B r1 triage): the per-group required-member set must be
+// gated by a component-AND accumulator RESET at the group's OWN boundary —
+// NOT the message-root accumulator (over-excludes NoSides) and NOT a blind
+// `own_req` filter (over-includes NoMDStatistics's optional-component
+// members).
+// ============================================================================
+
+// (a) over-include guard: FIX50SP2 NoMDStatistics(2474) -> MDStatisticReqGrp
+// (component, required='Y' on message DO) -> <group name='NoMDStatistics'
+// required='N'> -> <component name='MDStatisticParameters' required='N'>
+// declaring MDStatisticType(2456)/MDStatisticScope(2457) required='Y'. Those
+// two tags are required only inside the OPTIONAL MDStatisticParameters
+// component NESTED WITHIN the group — they must NOT be direct group-required
+// members (a valid NoMDStatistics instance may legitimately omit
+// MDStatisticParameters entirely).
+TEST(RequiredScope, Fix50sp2NoMDStatisticsExcludesOptionalComponentRequireds) {
+    std::pmr::monotonic_buffer_resource mr;
+    auto d502 = load_dict("FIX50SP2.xml", &mr);
+    auto const tv = d502.as_table_view();
+
+    auto const ctx_req = tv.group_required_members("DO", std::span<std::uint16_t const>{}, 2474);
+    EXPECT_FALSE(contains(ctx_req, 2456))
+        << "MDStatisticType(2456) lives inside optional MDStatisticParameters "
+           "nested within NoMDStatistics — must not be group-required (over-include)";
+    EXPECT_FALSE(contains(ctx_req, 2457))
+        << "MDStatisticScope(2457) lives inside optional MDStatisticParameters "
+           "nested within NoMDStatistics — must not be group-required (over-include)";
+
+    // Bare/global store must agree (same group-relative rule, first-seen node).
+    auto const bare_req = tv.group_required_members(2474);
+    EXPECT_FALSE(contains(bare_req, 2456));
+    EXPECT_FALSE(contains(bare_req, 2457));
+}
+
+// (b) over-exclude REGRESSION GUARD: FIX50SP1 TradeCaptureReportAck(AR) ->
+// <component name='TrdCapRptAckSideGrp' required='N'> (OPTIONAL) ->
+// <group name='NoSides' required='Y'> -> <field name='Side' required='Y'/>
+// (a DIRECT member of NoSides, not behind any further optional component).
+// Once a NoSides instance is present, Side(54) MUST stay a direct
+// group-required member REGARDLESS of the outer component's optionality —
+// this is what distinguishes the correct group-RELATIVE (reset-at-group-
+// boundary) rule from the naive "mirror the message-root component_required
+// accumulator" fix, which would incorrectly zero this out (the message-root
+// accumulator is already false at the TrdCapRptAckSideGrp boundary).
+TEST(RequiredScope, Fix50sp1NoSidesRetainsDirectRequiredDespiteOptionalEnclosingComponent) {
+    std::pmr::monotonic_buffer_resource mr;
+    auto d501 = load_dict("FIX50SP1.xml", &mr);
+    auto const tv = d501.as_table_view();
+
+    auto const ctx_req = tv.group_required_members("AR", std::span<std::uint16_t const>{}, 552);
+    EXPECT_TRUE(contains(ctx_req, 54))
+        << "Side(54) is a DIRECT required member of NoSides(552) — must be retained "
+           "despite the enclosing TrdCapRptAckSideGrp component being optional";
+
+    auto const bare_req = tv.group_required_members(552);
+    EXPECT_TRUE(contains(bare_req, 54));
+}
+
 }  // namespace

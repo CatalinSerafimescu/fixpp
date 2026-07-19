@@ -85,12 +85,26 @@ struct DictOracle {
 
 // ─────────────────────────── independent oracle (QuickFIX-XML) ────────────
 
+// Gate B r1 F1 (fixpp#201 escalation): `group_scope_and` is a SEPARATE
+// component-AND accumulator from `component_and` — the latter is the
+// message-root accumulator (never reset at a group boundary, feeds
+// `msg_required`); `group_scope_and` RESETS to `true` on entry to each
+// `<group>` and gates `oracle.group_required` inserts, mirroring
+// `LoaderState::expand_field_list`'s `group_scope_component_required`
+// (xml_loader.cpp / orchestra_loader.cpp). Without this, a member
+// `required='Y'` only inside an optional component NESTED WITHIN a group
+// (e.g. FIX50SP2 NoMDStatistics(2474) -> optional MDStatisticParameters)
+// wrongly counts as group-required, while a member directly required inside
+// a group that itself sits behind an unrelated optional component (e.g.
+// FIX50SP1 NoSides(552) inside optional TrdCapRptAckSideGrp) must still stay
+// required — the reset-at-group-boundary is what distinguishes the two.
+//
 // NOLINTNEXTLINE(misc-no-recursion) — recursive XML walk by design, mirrors
 // (but shares no code with) LoaderState::expand_field_list.
 inline void qfix_walk(pugi::xml_node parent, std::unordered_map<std::string, std::uint16_t> const& tag_by_name,
                        std::unordered_map<std::string, pugi::xml_node> const& components_by_name,
                        std::string const& msg_type, std::vector<std::uint16_t>& group_path, bool component_and,
-                       std::set<std::uint16_t>& msg_required, DictOracle& oracle) {
+                       bool group_scope_and, std::set<std::uint16_t>& msg_required, DictOracle& oracle) {
     for (auto const& child : parent.children()) {
         std::string_view const name{child.name()};
         if (name == "field") {
@@ -110,7 +124,7 @@ inline void qfix_walk(pugi::xml_node parent, std::unordered_map<std::string, std
                 GroupContextKey key{msg_type, {group_path.begin(), group_path.end() - 1},
                                     group_path.back()};
                 oracle.group_members[key].insert(tag);
-                if (own_req) {
+                if (own_req && group_scope_and) {
                     oracle.group_required[key].insert(tag);
                 }
             }
@@ -131,13 +145,13 @@ inline void qfix_walk(pugi::xml_node parent, std::unordered_map<std::string, std
                 GroupContextKey key{msg_type, {group_path.begin(), group_path.end() - 1},
                                     group_path.back()};
                 oracle.group_members[key].insert(no_tag);
-                if (own_req) {
+                if (own_req && group_scope_and) {
                     oracle.group_required[key].insert(no_tag);
                 }
             }
             group_path.push_back(no_tag);
             qfix_walk(child, tag_by_name, components_by_name, msg_type, group_path, component_and,
-                      msg_required, oracle);
+                      /*group_scope_and=*/true, msg_required, oracle);  // reset at group boundary
             group_path.pop_back();
         } else if (name == "component") {
             auto const cname = std::string{child.attribute("name").as_string("")};
@@ -148,7 +162,7 @@ inline void qfix_walk(pugi::xml_node parent, std::unordered_map<std::string, std
             }
             bool const comp_req = std::string_view{child.attribute("required").as_string("N")} == "Y";
             qfix_walk(cit->second, tag_by_name, components_by_name, msg_type, group_path,
-                      component_and && comp_req, msg_required, oracle);
+                      component_and && comp_req, group_scope_and && comp_req, msg_required, oracle);
         }
         // Ignore unknown child elements (forwards-compat; mirrors the loader).
     }
@@ -194,13 +208,13 @@ inline DictOracle build_quickfix_oracle(std::filesystem::path const& xml_path,
         auto& msg_required = oracle.message_required[msg_type];
         std::vector<std::uint16_t> group_path;
         if (include_header_trailer && header) {
-            qfix_walk(header, tag_by_name, components_by_name, msg_type, group_path, true,
+            qfix_walk(header, tag_by_name, components_by_name, msg_type, group_path, true, true,
                       msg_required, oracle);
         }
-        qfix_walk(m, tag_by_name, components_by_name, msg_type, group_path, true, msg_required,
-                  oracle);
+        qfix_walk(m, tag_by_name, components_by_name, msg_type, group_path, true, true,
+                  msg_required, oracle);
         if (include_header_trailer && trailer) {
-            qfix_walk(trailer, tag_by_name, components_by_name, msg_type, group_path, true,
+            qfix_walk(trailer, tag_by_name, components_by_name, msg_type, group_path, true, true,
                       msg_required, oracle);
         }
     }
@@ -209,11 +223,14 @@ inline DictOracle build_quickfix_oracle(std::filesystem::path const& xml_path,
 
 // ─────────────────────────── independent oracle (Orchestra) ───────────────
 
+// Gate B r1 F1 (fixpp#201 escalation): `group_scope_and` mirrors qfix_walk's
+// separate reset-at-group-boundary accumulator above (Orchestra twin).
+//
 // NOLINTNEXTLINE(misc-no-recursion)
 inline void orch_walk(pugi::xml_node parent, std::unordered_map<std::uint32_t, pugi::xml_node> const& components_by_id,
                        std::unordered_map<std::uint32_t, pugi::xml_node> const& groups_by_id,
                        std::string const& msg_type, std::vector<std::uint16_t>& group_path, bool component_and,
-                       std::set<std::uint16_t>& msg_required, DictOracle& oracle) {
+                       bool group_scope_and, std::set<std::uint16_t>& msg_required, DictOracle& oracle) {
     for (auto const& child : parent.children()) {
         std::string_view const name{child.name()};
         if (name == "fixr:fieldRef") {
@@ -228,7 +245,7 @@ inline void orch_walk(pugi::xml_node parent, std::unordered_map<std::uint32_t, p
                 GroupContextKey key{msg_type, {group_path.begin(), group_path.end() - 1},
                                     group_path.back()};
                 oracle.group_members[key].insert(tag);
-                if (own_req) {
+                if (own_req && group_scope_and) {
                     oracle.group_required[key].insert(tag);
                 }
             }
@@ -255,13 +272,13 @@ inline void orch_walk(pugi::xml_node parent, std::unordered_map<std::uint32_t, p
                 GroupContextKey key{msg_type, {group_path.begin(), group_path.end() - 1},
                                     group_path.back()};
                 oracle.group_members[key].insert(no_tag);
-                if (own_req) {
+                if (own_req && group_scope_and) {
                     oracle.group_required[key].insert(no_tag);
                 }
             }
             group_path.push_back(no_tag);
             orch_walk(git->second, components_by_id, groups_by_id, msg_type, group_path,
-                      component_and, msg_required, oracle);
+                      component_and, /*group_scope_and=*/true, msg_required, oracle);
             group_path.pop_back();
         } else if (name == "fixr:componentRef") {
             auto const cid = child.attribute("id").as_uint();
@@ -273,7 +290,7 @@ inline void orch_walk(pugi::xml_node parent, std::unordered_map<std::uint32_t, p
             bool const comp_req =
                 std::string_view{child.attribute("presence").as_string("")} == "required";
             orch_walk(cit->second, components_by_id, groups_by_id, msg_type, group_path,
-                      component_and && comp_req, msg_required, oracle);
+                      component_and && comp_req, group_scope_and && comp_req, msg_required, oracle);
         }
         // Ignore fixr:annotation / other unknown child elements.
     }
@@ -305,8 +322,8 @@ inline DictOracle build_orchestra_oracle(std::filesystem::path const& xml_path) 
         auto& msg_required = oracle.message_required[msg_type];
         std::vector<std::uint16_t> group_path;
         auto const structure = m.child("fixr:structure");
-        orch_walk(structure, components_by_id, groups_by_id, msg_type, group_path, true, msg_required,
-                  oracle);
+        orch_walk(structure, components_by_id, groups_by_id, msg_type, group_path, true, true,
+                  msg_required, oracle);
     }
     return oracle;
 }
