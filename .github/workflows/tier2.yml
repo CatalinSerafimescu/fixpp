@@ -148,6 +148,9 @@ jobs:
   windows:
     name: "${{ matrix.preset }}"
     runs-on: windows-2022
+    permissions:
+      contents: read
+      packages: write  # auto-push-on-miss (push:main only) — save rebuilt Conan cache to GHCR
     # Hung-job backstop (2026-07-09): the MSVC matrix runs ~45 min cold; 90 sits
     # well above that (matches wheel-windows / tier1's heavy-job convention) while
     # capping a wedged build far below GitHub's 6h default.
@@ -202,6 +205,7 @@ jobs:
       - name: Set up oras
         uses: oras-project/setup-oras@v1
       - name: Restore Conan cache from GHCR
+        id: conan_restore
         shell: bash
         run: ci/restore-conan-cache.sh ${{ matrix.preset }}
 
@@ -228,6 +232,16 @@ jobs:
             -s:b compiler.cppstd=20 ^
             --build=missing ^
             -of build/${{ matrix.preset }}
+
+      # Self-populate on push:main after a MISS — packs ONLY the current graph
+      # (same options) → never stale packages. Best-effort; shell:bash (Git Bash).
+      - name: Save Conan cache to GHCR (push:main + miss only)
+        if: github.event_name == 'push' && steps.conan_restore.outputs.hit == 'false'
+        continue-on-error: true
+        shell: bash
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u "${{ github.actor }}" --password-stdin
+          ci/seed-conan-cache.sh ${{ matrix.preset }} -o 'fixpp/*:with_otel=False' -s:b compiler.cppstd=20
 
       - name: Configure (OTel-OFF)
         shell: cmd

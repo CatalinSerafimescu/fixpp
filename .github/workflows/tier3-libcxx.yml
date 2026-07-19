@@ -166,7 +166,7 @@ jobs:
 
     permissions:
       contents: read
-      packages: read
+      packages: write  # was read; write enables auto-push-on-miss (push:main only)
 
     strategy:
       fail-fast: false
@@ -263,6 +263,7 @@ jobs:
       - name: Set up oras
         uses: oras-project/setup-oras@v1
       - name: Restore Conan cache from GHCR
+        id: conan_restore
         run: ci/restore-conan-cache.sh ${{ matrix.preset }}
 
       # ccache MUST be installed BEFORE "Conan install" on this lane. libc++ has
@@ -289,6 +290,15 @@ jobs:
             -o 'fixpp/*:with_otel=False' \
             --build=missing \
             -of build/${{ matrix.preset }}
+
+      # Self-populate on push:main after a MISS — packs ONLY the current graph
+      # (with the SAME with_otel=False option) → never stale packages. Best-effort.
+      - name: Save Conan cache to GHCR (push:main + miss only)
+        if: github.event_name == 'push' && steps.conan_restore.outputs.hit == 'false'
+        continue-on-error: true
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u "${{ github.actor }}" --password-stdin
+          ci/seed-conan-cache.sh ${{ matrix.preset }} -o 'fixpp/*:with_otel=False'
 
       - name: Configure
         run: cmake --preset ${{ matrix.preset }}

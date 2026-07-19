@@ -20,13 +20,18 @@ KEY="$(cat conanfile.py "conan/profiles/$PROFILE" | tr -d '\r' | sha256sum | cut
 # OCI tags forbid '+' → sanitize (libc++ -> libcxx); no-op for '+'-free profiles.
 TAG="${PROFILE//+/x}-${KEY}"
 
+emit() { [ -n "${GITHUB_OUTPUT:-}" ] && echo "hit=$1" >> "$GITHUB_OUTPUT"; }
+
 WORK="$(mktemp -d)"
 if oras pull "$IMAGE:$TAG" -o "$WORK" >/dev/null 2>&1; then
   conan cache restore "$WORK/conan-$PROFILE.tgz"
   echo "conan-cache HIT  $TAG"
+  emit true
 else
   # MISS: conanfile/profile changed (no seeded artifact) or GHCR unreachable.
-  # Not fatal — the subsequent `conan install --build=missing` rebuilds, and the
-  # artifact should be re-seeded locally (seed-conan-cache.sh) afterwards.
+  # Not fatal — the subsequent `conan install --build=missing` rebuilds. On
+  # push:main the "Save Conan cache to GHCR" step then auto-pushes the rebuilt
+  # cache (gated on hit=false) so the next run hits.
   echo "conan-cache MISS $TAG  → falling back to --build=missing"
+  emit false
 fi

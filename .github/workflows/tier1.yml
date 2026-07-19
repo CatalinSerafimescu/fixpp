@@ -236,6 +236,9 @@ jobs:
   linux:
     name: "${{ matrix.preset }}"
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write  # auto-push-on-miss (push:main only) — save rebuilt Conan cache to GHCR
     # Backstop against a hung test wedging the runner. A clean sanitizer leg is
     # ~24 min (build ~15 + test ~6 + setup); the debug leg hit ~45 min cold (whole
     # tree recompile on a new branch). 60->90 (2026-07-09): the tsan leg hit the
@@ -378,6 +381,7 @@ jobs:
       - name: Set up oras
         uses: oras-project/setup-oras@v1
       - name: Restore Conan cache from GHCR
+        id: conan_restore
         run: ci/restore-conan-cache.sh ${{ matrix.preset }}
 
       # ccache MUST be installed BEFORE "Conan install" on this lane. When a
@@ -410,6 +414,17 @@ jobs:
             -pr conan/profiles/${{ matrix.preset }} \
             --build=missing \
             -of build/${{ matrix.preset }}
+
+      # Self-populate: on push:main, if the restore MISSED (conanfile bumped),
+      # push the just-rebuilt cache to GHCR so the next run hits. seed packs ONLY
+      # the current graph's package_ids (conan cache save --list) → never stale
+      # packages. Best-effort (continue-on-error); never on PRs (untrusted write).
+      - name: Save Conan cache to GHCR (push:main + miss only)
+        if: github.event_name == 'push' && steps.conan_restore.outputs.hit == 'false'
+        continue-on-error: true
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u "${{ github.actor }}" --password-stdin
+          ci/seed-conan-cache.sh ${{ matrix.preset }}
 
       - name: Configure
         run: cmake --preset ${{ matrix.preset }}
