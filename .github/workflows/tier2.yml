@@ -239,6 +239,8 @@ jobs:
         if: github.event_name == 'push' && steps.conan_restore.outputs.hit == 'false'
         continue-on-error: true
         shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # for prune's `gh api` (delete stale tags)
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u "${{ github.actor }}" --password-stdin
           ci/seed-conan-cache.sh ${{ matrix.preset }} -o 'fixpp/*:with_otel=False' -s:b compiler.cppstd=20

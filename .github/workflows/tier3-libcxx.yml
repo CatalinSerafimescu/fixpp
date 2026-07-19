@@ -296,6 +296,8 @@ jobs:
       - name: Save Conan cache to GHCR (push:main + miss only)
         if: github.event_name == 'push' && steps.conan_restore.outputs.hit == 'false'
         continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # for prune's `gh api` (delete stale tags)
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u "${{ github.actor }}" --password-stdin
           ci/seed-conan-cache.sh ${{ matrix.preset }} -o 'fixpp/*:with_otel=False'

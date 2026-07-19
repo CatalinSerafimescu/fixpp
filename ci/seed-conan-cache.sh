@@ -59,3 +59,6 @@ conan cache save --list="$WORK/pkglist.json" --file="$WORK/conan-$PROFILE.tgz"
     "conan-$PROFILE.tgz:application/gzip" )
 
 echo "seeded $IMAGE:$TAG   ($(du -h "$WORK/conan-$PROFILE.tgz" | cut -f1))"
+
+# 4. Prune this profile's stale tags (keep only the one just pushed). Best-effort.
+"$(dirname "$0")/prune-conan-cache.sh" "$PROFILE" "$TAG" || true
