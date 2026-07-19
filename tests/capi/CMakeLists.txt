@@ -298,7 +298,7 @@ target_link_libraries(capi_dictionary_load_test PRIVATE
 target_compile_definitions(capi_dictionary_load_test PRIVATE
   FIXPP_DICT_DIR="${CMAKE_SOURCE_DIR}/dictionaries")
 add_test(NAME capi_dictionary_load COMMAND capi_dictionary_load_test)
-set_tests_properties(capi_dictionary_load PROPERTIES LABELS "capi;052")
+set_tests_properties(capi_dictionary_load PROPERTIES LABELS "capi;052;080")
 
 if(EXISTS "${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so")
     add_test(
