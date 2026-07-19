@@ -365,13 +365,18 @@ jobs:
               version: ["19", "20", "21", "22", "23"]
           EOF
 
-      - name: Cache Conan packages
-        uses: actions/cache@v5
-        with:
-          path: ~/.conan2/p
-          key: conan-${{ matrix.preset }}-${{ hashFiles('conanfile.py', format('conan/profiles/{0}', matrix.preset)) }}
-          restore-keys: |
-            conan-${{ matrix.preset }}-
+      # Conan deps come from a pre-seeded GHCR OCI artifact (per matrix.preset)
+      # instead of the repo-wide 10 GB actions/cache pool. Keeping the heavy
+      # from-source chain (opentelemetry-cpp + protobuf/abseil/prometheus) OFF
+      # that pool stops it LRU-evicting ccache — the real cause of the ~1-3%
+      # ccache hit rate and cold ~100-min builds. See
+      # research/G19-fix-fpml-iso20022/remaining-work/ci-conan-ghcr-pilot/.
+      # MISS (unseeded / conanfile bumped) → restore is a no-op and the
+      # `conan install --build=missing` below rebuilds; re-seed locally after.
+      - name: Set up oras
+        uses: oras-project/setup-oras@v1
+      - name: Restore Conan cache from GHCR
+        run: ci/restore-conan-cache.sh ${{ matrix.preset }}
 
       # ccache MUST be installed BEFORE "Conan install" on this lane. When a
       # dependency has no prebuilt Conan Center binary for the resolved config,
