@@ -458,6 +458,9 @@ jobs:
   coverage:
     name: linux-clang-coverage
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write  # auto-push-on-miss (push:main only) — coverage owns its tag
     # Backstop against a hung coverage build; matches the `linux` job's 90 for
     # cold-ccache headroom (previously inherited GitHub's 360-min default).
     timeout-minutes: 180
@@ -537,13 +540,12 @@ jobs:
               version: ["19", "20", "21", "22", "23"]
           EOF
 
-      - name: Cache Conan packages
-        uses: actions/cache@v5
-        with:
-          path: ~/.conan2/p
-          key: conan-linux-clang-coverage-${{ hashFiles('conanfile.py', 'conan/profiles/linux-clang-coverage') }}
-          restore-keys: |
-            conan-linux-clang-coverage-
+      # Conan from pre-seeded GHCR (off the 10 GB pool) — see the matrix-job note.
+      - name: Set up oras
+        uses: oras-project/setup-oras@v1
+      - name: Restore Conan cache from GHCR
+        id: conan_restore
+        run: ci/restore-conan-cache.sh linux-clang-coverage
 
       - name: Conan install
         run: |
@@ -551,6 +553,15 @@ jobs:
             -pr conan/profiles/linux-clang-coverage \
             --build=missing \
             -of build/linux-clang-coverage
+
+      - name: Save Conan cache to GHCR (push:main + miss only)
+        if: github.event_name == 'push' && steps.conan_restore.outputs.hit == 'false'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u "${{ github.actor }}" --password-stdin
+          ci/seed-conan-cache.sh linux-clang-coverage
 
       - name: Configure
         run: cmake --preset linux-clang-coverage
@@ -752,13 +763,13 @@ jobs:
               version: ["19", "20", "21", "22", "23"]
           EOF
 
-      - name: Cache Conan packages
-        uses: actions/cache@v5
-        with:
-          path: ~/.conan2/p
-          key: conan-linux-clang-debug-py-${{ hashFiles('conanfile.py', 'conan/profiles/linux-clang-debug') }}
-          restore-keys: |
-            conan-linux-clang-debug-
+      # Reuses the matrix leg's linux-clang-debug seed (same profile+ids; sanitizer
+      # is a CMake flag, not Conan). Restore-only — the matrix debug leg owns the
+      # push/prune. Kills the old duplicate conan-linux-clang-debug-py cache.
+      - name: Set up oras
+        uses: oras-project/setup-oras@v1
+      - name: Restore Conan cache from GHCR
+        run: ci/restore-conan-cache.sh linux-clang-debug
 
       - name: Conan install
         run: |
@@ -1176,13 +1187,12 @@ jobs:
               version: ["19", "20", "21", "22", "23"]
           EOF
 
-      - name: Cache Conan packages
-        uses: actions/cache@v5
-        with:
-          path: ~/.conan2/p
-          key: conan-linux-clang-release-${{ hashFiles('conanfile.py', 'conan/profiles/linux-clang-release') }}
-          restore-keys: |
-            conan-linux-clang-release-
+      # Reuses the matrix leg's linux-clang-release seed. Restore-only — the
+      # matrix release leg owns the push/prune.
+      - name: Set up oras
+        uses: oras-project/setup-oras@v1
+      - name: Restore Conan cache from GHCR
+        run: ci/restore-conan-cache.sh linux-clang-release
 
       # ccache MUST install BEFORE "Conan install" so the CMAKE_*_COMPILER_LAUNCHER
       # is on PATH for any conan from-source dependency build (mirrors the `linux`
