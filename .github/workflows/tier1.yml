@@ -377,7 +377,7 @@ jobs:
       # MISS (unseeded / conanfile bumped) → restore is a no-op and the
       # `conan install --build=missing` below rebuilds; re-seed locally after.
       - name: Set up oras
-        uses: oras-project/setup-oras@v1
+        uses: oras-project/setup-oras@v2
       - name: Restore Conan cache from GHCR
         id: conan_restore
         run: ci/restore-conan-cache.sh ${{ matrix.preset }}
@@ -542,7 +542,7 @@ jobs:
 
       # Conan from pre-seeded GHCR (off the 10 GB pool) — see the matrix-job note.
       - name: Set up oras
-        uses: oras-project/setup-oras@v1
+        uses: oras-project/setup-oras@v2
       - name: Restore Conan cache from GHCR
         id: conan_restore
         run: ci/restore-conan-cache.sh linux-clang-coverage
@@ -767,7 +767,7 @@ jobs:
       # is a CMake flag, not Conan). Restore-only — the matrix debug leg owns the
       # push/prune. Kills the old duplicate conan-linux-clang-debug-py cache.
       - name: Set up oras
-        uses: oras-project/setup-oras@v1
+        uses: oras-project/setup-oras@v2
       - name: Restore Conan cache from GHCR
         run: ci/restore-conan-cache.sh linux-clang-debug
 
@@ -1190,7 +1190,7 @@ jobs:
       # Reuses the matrix leg's linux-clang-release seed. Restore-only — the
       # matrix release leg owns the push/prune.
       - name: Set up oras
-        uses: oras-project/setup-oras@v1
+        uses: oras-project/setup-oras@v2
       - name: Restore Conan cache from GHCR
         run: ci/restore-conan-cache.sh linux-clang-release
 

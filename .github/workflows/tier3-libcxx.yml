@@ -261,7 +261,7 @@ jobs:
       # the SAME `-o 'fixpp/*:with_otel=False'` these lanes use, so package_ids
       # match. See research/.../ci-conan-ghcr-pilot/.
       - name: Set up oras
-        uses: oras-project/setup-oras@v1
+        uses: oras-project/setup-oras@v2
       - name: Restore Conan cache from GHCR
         id: conan_restore
         run: ci/restore-conan-cache.sh ${{ matrix.preset }}
