@@ -173,6 +173,45 @@ std::span<FieldRef const> dict_metadata_handle::group_fields_impl(
     return std::span<FieldRef const>{group_fields_.data() + gr.first_field_index, gr.field_count};
 }
 
+// Gate B r1 F1 (fixpp#201): `group_required_offsets_[i]` is parallel to
+// `groups_[i]` (same finalize() loop populates both in lockstep) — locate the
+// index via the SAME `no_tag` lower_bound as `group_fields_impl` above, then
+// index the parallel run table.
+std::span<std::uint16_t const> dict_metadata_handle::group_required_members_impl(
+    std::uint16_t no_tag) const noexcept {
+    auto const it = std::ranges::lower_bound(groups_, no_tag, {},
+                                             [](GroupRef const& g) noexcept { return g.no_tag; });
+    if (it == groups_.end() || it->no_tag != no_tag) {
+        return {};
+    }
+    auto const idx = static_cast<std::size_t>(it - groups_.begin());
+    if (idx >= group_required_offsets_.size()) {
+        return {};
+    }
+    auto const run = group_required_offsets_[idx];
+    if (run.count == 0 || run.start + run.count > group_required_pool_.size()) {
+        return {};
+    }
+    return std::span<std::uint16_t const>{group_required_pool_.data() + run.start, run.count};
+}
+
+// Gate B r1 F1 (fixpp#201): reuses `find_msg_index`'s message-row lookup (SAME
+// index as `per_msg_field_offsets_`) but indexes the parallel
+// `per_msg_group_required_offsets_`/`msg_group_required_pool_` pair store.
+std::span<std::pair<std::uint16_t, std::uint16_t> const>
+dict_metadata_handle::msg_group_required_pairs_impl(std::string_view msg_type) const noexcept {
+    auto const idx = find_msg_index(messages_, msg_type);
+    if (idx == SIZE_MAX || idx >= per_msg_group_required_offsets_.size()) {
+        return {};
+    }
+    auto const run = per_msg_group_required_offsets_[idx];
+    if (run.count == 0 || run.start + run.count > msg_group_required_pool_.size()) {
+        return {};
+    }
+    return std::span<std::pair<std::uint16_t, std::uint16_t> const>{
+        msg_group_required_pool_.data() + run.start, run.count};
+}
+
 // 074-orchestra-native-reader (FR-002): enum {value, description} pairs for a
 // codeset-backed field, keyed by tag. Binary-search the per-tag runs (sorted by
 // tag) → a span into the flat enum_values_ store. Empty for tags with no
@@ -367,6 +406,16 @@ table_view Dictionary::as_table_view() const {
             for (auto const& gfr : group_fields(legacy_no_tag)) {
                 tv.add_group_member(legacy_no_tag, gfr.tag);
             }
+            // Gate B r1 F1 (fixpp#201): the DIRECT required-member set is now
+            // sourced from the GROUP-RELATIVE store (own_req gated by a
+            // component-AND accumulator reset at this group's own boundary —
+            // NOT the blind `gfr.rule==Required && gfr.group_no_tag==
+            // legacy_no_tag` filter, which over-included a member required
+            // only inside an OPTIONAL component nested within the group; see
+            // `dict_metadata_handle::group_required_members_impl`).
+            for (auto const req_tag : handle_->group_required_members_impl(legacy_no_tag)) {
+                tv.add_group_required_member(legacy_no_tag, req_tag);
+            }
         }
 
         // ── group structure (063 Defect-A: context-scoped, per-message) ───
@@ -414,6 +463,22 @@ table_view Dictionary::as_table_view() const {
                 continue;  // not a real group in this message (plain scalar reuse of the tag)
             }
 
+            // Gate B r1 F1 (fixpp#201): DIRECT required members, sourced from
+            // the context-exact GROUP-RELATIVE pairs store (own_req gated by
+            // a component-AND accumulator reset at this group's own boundary
+            // — NOT the blind `m.rule==Required` filter, which over-included
+            // a member required only inside an OPTIONAL component nested
+            // within the group; see `dict_metadata_handle::
+            // msg_group_required_pairs_impl`). Filtered to THIS no_tag from
+            // the whole-message pairs list (small counts — RC5 pin: max
+            // observed direct required-member count is 6).
+            std::vector<std::uint16_t> required_members;
+            for (auto const& [pair_no_tag, pair_tag] : handle_->msg_group_required_pairs_impl(mt)) {
+                if (pair_no_tag == no_tag) {
+                    required_members.push_back(pair_tag);
+                }
+            }
+
             // 3) Full parent-no_tag path (outermost first, EXCLUDING no_tag
             //    itself): walk the immediate_parent chain up from no_tag's
             //    OWN enclosing group to the root (0). For FIX44 295 in
@@ -452,6 +517,9 @@ table_view Dictionary::as_table_view() const {
             tv.set_group_first_ctx(mt, path, no_tag, delim);
             for (auto const member_tag : members) {
                 tv.add_group_member_ctx(mt, path, no_tag, member_tag);
+            }
+            for (auto const req_tag : required_members) {  // fixpp#201
+                tv.add_group_required_member_ctx(mt, path, no_tag, req_tag);
             }
         }
     }

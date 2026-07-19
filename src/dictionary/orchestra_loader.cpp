@@ -66,6 +66,31 @@ namespace {
 // closed via `resolve_datatype` below.
 // ----------------------------------------------------------------------------
 
+// 079-required-presence-scope T020 (component-AND symmetry with xml_loader):
+// StandardHeader/StandardTrailer framing tags are structurally always-required
+// and MUST stay in the message-level required set even when a message
+// references the header/trailer componentRef with default (optional) presence
+// (Orchestra's default componentRef presence is optional — e.g.
+// PayManagementReportAck references StandardHeader with no presence attr). This
+// mirrors the census oracle's `is_header_trailer_tag` carve-out
+// (tests/dictionary/required_scope_oracle.hpp) so the component-AND gate below
+// never drops framing tags.
+[[nodiscard]] constexpr bool is_header_trailer_tag(std::uint16_t tag) noexcept {
+    switch (tag) {
+        case 8:
+        case 9:
+        case 34:
+        case 35:
+        case 49:
+        case 52:
+        case 56:
+        case 10:
+            return true;
+        default:
+            return false;
+    }
+}
+
 struct OrchestraTypeEntry {
     std::string_view name;
     field_data_type value;
@@ -226,10 +251,21 @@ private:
     // group's own members with the group-context set (T016).
     // NOLINTBEGIN(misc-no-recursion,bugprone-easily-swappable-parameters) — recursive XML walk by
     // design; the two uint16_t params name different domains and are not interchangeable.
-    void expand_field_list(pugi::xml_node const& parent, std::vector<FieldRef>& out,
-                           std::vector<std::uint16_t>& required_out,
-                           std::uint16_t enclosing_group_no_tag,
-                           std::uint16_t enclosing_component_index);
+    // `in_group` (fixpp#201): once inside any repeating group, member
+    // `presence='required'` fields stay per-group (queryable via each
+    // FieldRef's `rule`) and do NOT leak into the MESSAGE-level `required_out`.
+    // `group_scope_component_required` (Gate B r1 F1 — fixpp#201 escalation,
+    // symmetric with xml_loader.cpp): a SEPARATE component-AND accumulator,
+    // RESET to `true` on entry to each `<fixr:groupRef>`, gating
+    // `group_required_pairs_out` — see xml_loader.cpp's expand_field_list
+    // doc-comment for the full mechanism note.
+    void expand_field_list(
+        pugi::xml_node const& parent, std::vector<FieldRef>& out,
+        std::vector<std::uint16_t>& required_out,
+        std::vector<std::pair<std::uint16_t, std::uint16_t>>& group_required_pairs_out,
+        std::uint16_t enclosing_group_no_tag, std::uint16_t enclosing_component_index,
+        bool in_group = false, bool component_required = true,
+        bool group_scope_component_required = true);
     // NOLINTEND(misc-no-recursion,bugprone-easily-swappable-parameters)
 
     // Best-effort one-level delimiter scan for a group/component body: mirrors
@@ -470,11 +506,12 @@ std::uint16_t OrchestraLoaderState::first_member_tag(pugi::xml_node const& conta
     return first_field_tag;
 }
 
-void OrchestraLoaderState::expand_field_list(pugi::xml_node const& parent,
-                                             std::vector<FieldRef>& out,
-                                             std::vector<std::uint16_t>& required_out,
-                                             std::uint16_t enclosing_group_no_tag,
-                                             std::uint16_t enclosing_component_index) {
+void OrchestraLoaderState::expand_field_list(
+    pugi::xml_node const& parent, std::vector<FieldRef>& out,
+    std::vector<std::uint16_t>& required_out,
+    std::vector<std::pair<std::uint16_t, std::uint16_t>>& group_required_pairs_out,
+    std::uint16_t enclosing_group_no_tag, std::uint16_t enclosing_component_index, bool in_group,
+    bool component_required, bool group_scope_component_required) {
     for (auto const& child : parent.children()) {
         std::string_view const tag_name{child.name()};
         if (tag_name == "fixr:fieldRef") {
@@ -496,8 +533,17 @@ void OrchestraLoaderState::expand_field_list(pugi::xml_node const& parent,
             fr.component_index = enclosing_component_index;
             fr.length_pair_data_tag = 0;  // out of scope for 074 (not requested by tasks.md)
             out.push_back(fr);
-            if (req) {
+            // 079 T020 (component-AND, symmetric with xml_loader): a field
+            // `presence='required'` only inside an OPTIONAL componentRef must
+            // not enter the message-level required set — EXCEPT the structural
+            // header/trailer framing tags, which are never dropped.
+            if (req && !in_group && (component_required || is_header_trailer_tag(tag))) {
                 required_out.push_back(tag);
+            }
+            // Gate B r1 F1 (fixpp#201, symmetric with xml_loader.cpp): a DIRECT
+            // group-required member of the CURRENT immediately-enclosing group.
+            if (req && group_scope_component_required && enclosing_group_no_tag != 0) {
+                group_required_pairs_out.emplace_back(enclosing_group_no_tag, tag);
             }
         } else if (tag_name == "fixr:componentRef") {
             auto const xml_id = parse_orchestra_id(child.attribute("id"), "<fixr:componentRef>");
@@ -508,8 +554,15 @@ void OrchestraLoaderState::expand_field_list(pugi::xml_node const& parent,
                     std::to_string(xml_id) + "\"> not defined in <fixr:components>");
             }
             auto const& def = components_[cit->second];
-            expand_field_list(def.node, out, required_out, enclosing_group_no_tag,
-                              static_cast<std::uint16_t>(cit->second + 1));
+            // 079 T020: Orchestra's default componentRef presence is OPTIONAL
+            // (absent attr != "required"), so AND the ref's own presence into
+            // the running component_required (mirrors xml_loader + the oracle).
+            bool const comp_req =
+                std::string_view{child.attribute("presence").as_string("")} == "required";
+            expand_field_list(def.node, out, required_out, group_required_pairs_out,
+                              enclosing_group_no_tag, static_cast<std::uint16_t>(cit->second + 1),
+                              in_group, component_required && comp_req,
+                              group_scope_component_required && comp_req);
         } else if (tag_name == "fixr:groupRef") {
             auto const xml_id = parse_orchestra_id(child.attribute("id"), "<fixr:groupRef>");
             auto const git = group_by_xml_id_.find(xml_id);
@@ -544,8 +597,18 @@ void OrchestraLoaderState::expand_field_list(pugi::xml_node const& parent,
             no_fr.group_no_tag = enclosing_group_no_tag;
             no_fr.component_index = enclosing_component_index;
             out.push_back(no_fr);
-            if (greq) {
+            // fixpp#201: nested-group count field is per-instance, not
+            // message-level required; 079 T020: nor is a group inside an
+            // optional component (a NumInGroup count is never a header/trailer
+            // framing tag, so no carve-out needed here).
+            if (greq && !in_group && component_required) {
                 required_out.push_back(no_tag);
+            }
+            // Gate B r1 F1: the nested group's own count-tag is a DIRECT member
+            // of the OUTER group, gated by the OUTER group's own group-relative
+            // AND (symmetric with xml_loader.cpp).
+            if (greq && group_scope_component_required && enclosing_group_no_tag != 0) {
+                group_required_pairs_out.emplace_back(enclosing_group_no_tag, no_tag);
             }
 
             // Record the GroupRef (deduplicated by no_tag — first-seen wins).
@@ -562,8 +625,13 @@ void OrchestraLoaderState::expand_field_list(pugi::xml_node const& parent,
 
             // Recurse into the group's own children (its <fixr:numInGroup> child
             // is skipped automatically — it matches none of the three branches
-            // above) with the group-context set.
-            expand_field_list(group_node, out, required_out, no_tag, enclosing_component_index);
+            // above) with the group-context set. Gate B r1 F1:
+            // group_scope_component_required RESETS to true at this new
+            // group's own boundary (symmetric with xml_loader.cpp).
+            expand_field_list(group_node, out, required_out, group_required_pairs_out, no_tag,
+                              enclosing_component_index,
+                              /*in_group=*/true, component_required,
+                              /*group_scope_component_required=*/true);  // fixpp#201 / 079 T020
         }
         // Ignore fixr:annotation / other unknown child elements (forwards-compat).
     }
@@ -727,15 +795,28 @@ detail::dict_metadata_handle_ptr OrchestraLoaderState::finalize() {
 
         std::vector<FieldRef> msg_fields;
         std::vector<std::uint16_t> msg_required;
+        // Gate B r1 F1 (fixpp#201): context-exact group-relative required
+        // (no_tag,tag) pairs (mirrors xml_loader.cpp).
+        std::vector<std::pair<std::uint16_t, std::uint16_t>> msg_group_required;
         // No separate header/trailer nodes in Orchestra — StandardHeader
         // (component 1024) / StandardTrailer (1025) are ordinary componentRefs
         // inside each message's own <fixr:structure> (brief).
         if (md.node) {
-            expand_field_list(md.node, msg_fields, msg_required, 0, 0);
+            expand_field_list(md.node, msg_fields, msg_required, msg_group_required, 0, 0);
         }
         auto const [field_run, req_run] = append_run(msg_fields, msg_required);
         h.per_msg_field_offsets_.push_back(field_run);
         h.per_msg_required_offsets_.push_back(req_run);
+
+        std::ranges::sort(msg_group_required);
+        auto const grlast = std::ranges::unique(msg_group_required).begin();
+        msg_group_required.erase(grlast, msg_group_required.end());
+        detail::MsgFieldsRun group_req_run{
+            .start = static_cast<std::uint32_t>(h.msg_group_required_pool_.size()),
+            .count = static_cast<std::uint32_t>(msg_group_required.size())};
+        h.msg_group_required_pool_.insert(h.msg_group_required_pool_.end(),
+                                          msg_group_required.begin(), msg_group_required.end());
+        h.per_msg_group_required_offsets_.push_back(group_req_run);
     }
 
     // Emit components (PMR ComponentRef array) — mirrors xml_loader.cpp:751-795.
@@ -749,7 +830,10 @@ detail::dict_metadata_handle_ptr OrchestraLoaderState::finalize() {
 
         std::vector<FieldRef> comp_fields;
         std::vector<std::uint16_t> comp_required;  // discard — component required-sets unused
-        expand_field_list(def.node, comp_fields, comp_required,
+        std::vector<std::pair<std::uint16_t, std::uint16_t>> comp_group_required;  // discard —
+        // any group reached here is ALSO reached (and correctly captured) via
+        // its own standalone OrchestraGroupDef walk below.
+        expand_field_list(def.node, comp_fields, comp_required, comp_group_required,
                           /*enclosing_group_no_tag=*/0,
                           /*enclosing_component_index=*/static_cast<std::uint16_t>(i + 1));
 
@@ -799,13 +883,18 @@ detail::dict_metadata_handle_ptr OrchestraLoaderState::finalize() {
         return a.no_tag < b.no_tag;
     });
     h.groups_.reserve(groups_.size());
+    h.group_required_offsets_.reserve(groups_.size());
     for (auto const& g : groups_) {
         std::uint16_t first_idx = 0;
         std::uint16_t cnt = 0;
+        // Gate B r1 F1 (fixpp#201, mirrors xml_loader.cpp): `grp_required` is
+        // the GROUP-RELATIVE direct required-member set for THIS group — this
+        // standalone call starts fresh at the group's own boundary.
+        std::vector<FieldRef> grp_fields;
+        std::vector<std::uint16_t> grp_required;
         if (g.node) {
-            std::vector<FieldRef> grp_fields;
-            std::vector<std::uint16_t> grp_required;
-            expand_field_list(g.node, grp_fields, grp_required,
+            std::vector<std::pair<std::uint16_t, std::uint16_t>> grp_group_required;  // discard
+            expand_field_list(g.node, grp_fields, grp_required, grp_group_required,
                               /*enclosing_group_no_tag=*/g.no_tag,
                               /*enclosing_component_index=*/0);
             first_idx = static_cast<std::uint16_t>(h.group_fields_.size());
@@ -821,6 +910,17 @@ detail::dict_metadata_handle_ptr OrchestraLoaderState::finalize() {
         gr.parent_group_no_tag = g.parent_group_no_tag;
         gr._reserved = 0;
         h.groups_.push_back(gr);
+
+        // Parallel to h.groups_ (SAME index — pushed in lockstep above).
+        std::ranges::sort(grp_required);
+        auto const grplast = std::ranges::unique(grp_required).begin();
+        grp_required.erase(grplast, grp_required.end());
+        detail::MsgFieldsRun greq_run{
+            .start = static_cast<std::uint32_t>(h.group_required_pool_.size()),
+            .count = static_cast<std::uint32_t>(grp_required.size())};
+        h.group_required_pool_.insert(h.group_required_pool_.end(), grp_required.begin(),
+                                      grp_required.end());
+        h.group_required_offsets_.push_back(greq_run);
     }
 
     // Pool is now finalized — lock the data pointer.

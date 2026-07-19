@@ -23,6 +23,7 @@
 #include <array>
 #include <cstddef>
 #include <cstring>
+#include <filesystem>
 #include <memory_resource>
 #include <span>
 #include <stdexcept>
@@ -82,8 +83,9 @@ std::vector<std::byte> make_frame(std::string_view body_fields) {
     return out;
 }
 
+template <std::size_t N>
 MessageView<access_mode::Index> parse_index(std::vector<std::byte> const& buf,
-                                            std::array<std::byte, 4096>& stack_buf,
+                                            std::array<std::byte, N>& stack_buf,
                                             std::pmr::monotonic_buffer_resource& arena_out) {
     new (&arena_out) std::pmr::monotonic_buffer_resource{stack_buf.data(), stack_buf.size(),
                                                          std::pmr::null_memory_resource()};
@@ -630,5 +632,343 @@ TEST(ValidatorTypeCheck, TrapThrowFenceMechanismCatchesExceptionAndReturnsError)
     EXPECT_EQ(r.error(), error::decimal_invalid_input)
         << "generic exception must map to decimal_invalid_input";
 }
+
+// ── fixpp#201: per-instance required-member enforcement in repeating groups ────
+// A group NoX(100) with delimiter 200 and a REQUIRED non-delimiter member 300
+// (plus optional member 400). QuickFIX checks required members PER instance;
+// before this fix the runtime validator's consume_group verified only
+// count/delimiter/membership, so an instance omitting 300 was wrongly ACCEPTED.
+namespace {
+table_view make_group_grammar_201() {
+    table_view t;
+    t.add_valid("D", 8).add_valid("D", 9).add_valid("D", 10).add_valid("D", 35);
+    t.add_valid("D", 100).add_valid("D", 200).add_valid("D", 300).add_valid("D", 400);
+    t.set_group_first(100, 200);      // NoX=100, delimiter=200 (also adds 200 as member)
+    t.add_group_member(100, 300);
+    t.add_group_member(100, 400);
+    t.add_group_required_member(100, 300);  // 300 required in EVERY instance
+    return t;
+}
+}  // namespace
+
+// RED before fix (accepted); GREEN after: instance 2 omits required member 300.
+TEST(ValidatorTypeCheck, Fixpp201GroupInstanceMissingRequiredMemberRejected) {
+    dictionary_driven_validator v{make_group_grammar_201()};
+    auto buf = make_frame(
+        "35=D\x01"
+        "100=2\x01"
+        "200=a\x01" "300=x\x01" "400=y\x01"   // instance 1: complete
+        "200=b\x01" "400=z\x01");               // instance 2: MISSING required 300
+    std::array<std::byte, 4096> stack{};
+    std::pmr::monotonic_buffer_resource arena;
+    auto mv = parse_index(buf, stack, arena);
+
+    std::array<std::byte, kScratch> scratch_buf{};
+    std::pmr::monotonic_buffer_resource scratch_mr{scratch_buf.data(), scratch_buf.size(),
+                                                   std::pmr::null_memory_resource()};
+    std::uint16_t ref_tag = 0;
+    auto result = v.validate(mv, &scratch_mr, &ref_tag);
+    ASSERT_FALSE(result.has_value())
+        << "group instance omitting a required member must be rejected";
+    EXPECT_EQ(result.error(), error::wire_required_field_missing);
+    EXPECT_EQ(ref_tag, 300) << "ref tag must name the missing required member";
+}
+
+// Positive: every instance carries required member 300 → accept (no over-reject).
+TEST(ValidatorTypeCheck, Fixpp201GroupAllInstancesCompleteAccepted) {
+    dictionary_driven_validator v{make_group_grammar_201()};
+    auto buf = make_frame(
+        "35=D\x01"
+        "100=2\x01"
+        "200=a\x01" "300=x\x01" "400=y\x01"
+        "200=b\x01" "300=w\x01");
+    std::array<std::byte, 4096> stack{};
+    std::pmr::monotonic_buffer_resource arena;
+    auto mv = parse_index(buf, stack, arena);
+
+    std::array<std::byte, kScratch> scratch_buf{};
+    std::pmr::monotonic_buffer_resource scratch_mr{scratch_buf.data(), scratch_buf.size(),
+                                                   std::pmr::null_memory_resource()};
+    auto result = v.validate(mv, &scratch_mr, nullptr);
+    EXPECT_TRUE(result.has_value())
+        << "conforming group (all instances complete) must be accepted; err="
+        << (result.has_value() ? 0 : static_cast<int>(result.error()));
+}
+
+// ── T003: dynamic-width per-instance required-member check (079) ────────────
+// A synthetic group NoW(900) with delimiter 901 and 70 DIRECT required
+// members (tags 1000..1069) -- deliberately >64 to exercise the width past
+// the candidate's fixed uint64_t bitmask. Against the candidate's
+// `req_members.size() <= 64` guard, `check_required` is false for this group
+// so the whole per-instance required check is SKIPPED (fail-open) and an
+// instance omitting a required member is wrongly ACCEPTED. FR-004/data-model.md
+// "Group-instance membership check state" mandates universal, fail-closed
+// enforcement for every per-group required-member count.
+namespace {
+constexpr std::uint16_t kWideGroupNoTag = 900;
+constexpr std::uint16_t kWideGroupDelim = 901;
+constexpr std::uint16_t kWideGroupFirstMember = 1000;
+constexpr std::size_t kWideGroupMemberCount = 70;  // > 64
+
+table_view make_wide_group_grammar_201() {
+    table_view t;
+    t.add_valid("D", 8).add_valid("D", 9).add_valid("D", 10).add_valid("D", 35);
+    t.add_valid("D", kWideGroupNoTag).add_valid("D", kWideGroupDelim);
+    t.set_group_first(kWideGroupNoTag, kWideGroupDelim);  // also adds the delim as a member
+    for (std::size_t k = 0; k < kWideGroupMemberCount; ++k) {
+        std::uint16_t const tag = static_cast<std::uint16_t>(kWideGroupFirstMember + k);
+        t.add_valid("D", tag);
+        t.add_group_member(kWideGroupNoTag, tag);
+        t.add_group_required_member(kWideGroupNoTag, tag);  // ALL 70 direct-required
+    }
+    return t;
+}
+
+// One group instance body, optionally omitting `omit_tag` (0 = omit nothing).
+std::string wide_group_instance(std::uint16_t omit_tag) {
+    std::string out = std::to_string(kWideGroupDelim) + "=x\x01";
+    for (std::size_t k = 0; k < kWideGroupMemberCount; ++k) {
+        std::uint16_t const tag = static_cast<std::uint16_t>(kWideGroupFirstMember + k);
+        if (tag == omit_tag) {
+            continue;
+        }
+        out += std::to_string(tag) + "=v\x01";
+    }
+    return out;
+}
+}  // namespace
+
+TEST(ValidatorTypeCheck, Fixpp201GroupWideRequiredMaskInstanceMissingRequiredMemberRejected) {
+    dictionary_driven_validator v{make_wide_group_grammar_201()};
+    // Instance 1: complete (all 70 required members present).
+    // Instance 2: omits tag 1069 -- bit-index 69 within the required set,
+    // i.e. word 1 / bit 5 of the dynamic-width mask -- strictly PAST the old
+    // fixed uint64_t mask's 64-bit capacity (word 0 / bits 0-63). This is
+    // load-bearing: an implementation that merely stops skipping the check
+    // but still tracks presence in a single 64-bit word would satisfy word 0
+    // in full (indices 0-63 all present) and never notice the missing
+    // index-69 bit, so this test would wrongly PASS against such a
+    // regression unless the omitted index is >= 64.
+    constexpr std::uint16_t kOmitTag = 1069;
+    std::string const body = std::string("35=D\x01") + "900=2\x01" + wide_group_instance(0) +
+                             wide_group_instance(kOmitTag);
+    auto buf = make_frame(body);
+    // 146 offset-table entries for this synthetic wide group -- larger than
+    // the shared 4096-byte stack the other cases use.
+    std::array<std::byte, 16384> stack{};
+    std::pmr::monotonic_buffer_resource arena;
+    auto mv = parse_index(buf, stack, arena);
+
+    std::array<std::byte, kScratch> scratch_buf{};
+    std::pmr::monotonic_buffer_resource scratch_mr{scratch_buf.data(), scratch_buf.size(),
+                                                   std::pmr::null_memory_resource()};
+    std::uint16_t ref_tag = 0;
+    auto result = v.validate(mv, &scratch_mr, &ref_tag);
+    ASSERT_FALSE(result.has_value())
+        << ">64-required-member group instance omitting a required member must be "
+           "rejected (dynamic-width, fail-closed, FR-004)";
+    EXPECT_EQ(result.error(), error::wire_required_field_missing);
+    EXPECT_EQ(ref_tag, kOmitTag) << "ref tag must name the missing required member";
+}
+
+// ── 079 T006/T007/T010/T011: real-frame accept/reject over the REAL vendored
+// dictionaries (contracts/census-and-agreement.md Contract 4) ──────────────
+// Loads FIX44.xml / FIX50SP2.xml / FIX42.xml via the production XmlLoader ->
+// Dictionary::as_table_view() -> dictionary_driven_validator, exactly the
+// runtime path a live session uses. Per-test Dictionary (local, kept alive
+// through validate()).
+namespace {
+
+Dictionary load_real_dict(char const* file, std::pmr::memory_resource* mr) {
+    auto const path = std::filesystem::path{FIXPP_DICT_DATA_DIR} / file;
+    return fixpp::dict::XmlLoader{}.load(path, mr);
+}
+
+}  // namespace
+
+// ── T006: FIX44 PositionReport(AP) with NO NoUnderlyings group -> ACCEPT ───
+// Pre-candidate the loader leaked UnderlyingSettlPrice(732)/
+// UnderlyingSettlPriceType(733) (required='Y' only INSIDE the optional
+// NoUnderlyings group) into AP's message-level required set, so a
+// conforming AP omitting the group was wrongly rejected with
+// wire_required_field_missing on tag 732.
+TEST(ValidatorTypeCheck, Fixpp201Fix44PositionReportOmitsOptionalGroupAccepted) {
+    std::pmr::monotonic_buffer_resource mr;
+    auto d44 = load_real_dict("FIX44.xml", &mr);
+    dictionary_driven_validator v{d44.as_table_view()};
+
+    // Every FIX44 AP message-level required field (581 AccountType, 715
+    // ClearingBusinessDate, 721 PosMaintRptID, 728 PosReqResult, 730
+    // SettlPrice, 731 SettlPriceType, 734 PriorSettlPrice) + header (34/49/
+    // 52/56) — NO 711 (NoUnderlyings) group present.
+    auto buf = make_frame(
+        "35=AP\x01"
+        "34=1\x01" "49=SENDER\x01" "52=20240101-00:00:00\x01" "56=TARGET\x01"
+        "1=ACCT1\x01" "581=1\x01" "715=20240101\x01" "721=RPT1\x01" "728=0\x01"
+        "730=1.5\x01" "731=1\x01" "734=1.4\x01");
+    std::array<std::byte, 4096> stack{};
+    std::pmr::monotonic_buffer_resource arena;
+    auto mv = parse_index(buf, stack, arena);
+
+    std::array<std::byte, kScratch> scratch_buf{};
+    std::pmr::monotonic_buffer_resource scratch_mr{scratch_buf.data(), scratch_buf.size(),
+                                                   std::pmr::null_memory_resource()};
+    std::uint16_t ref_tag = 0;
+    auto result = v.validate(mv, &scratch_mr, &ref_tag);
+    EXPECT_TRUE(result.has_value())
+        << "conforming FIX44 AP omitting the optional NoUnderlyings group must be "
+           "accepted; err=" << (result.has_value() ? 0 : static_cast<int>(result.error()))
+        << " ref_tag=" << ref_tag;
+}
+
+// ── T006: FIX50SP2 TradeCaptureReport(AE) — real-frame validate() BLOCKED ──
+// ESCALATED FINDING (079 /implement Phase 3, out of T009's scope — not a
+// group-required leak): every FIX50SP2.x vendored dictionary (FIX50.xml,
+// FIX50SP1.xml, FIX50SP2.xml) ships a self-closing empty `<header/>`
+// element (the QuickFIX FIXT.1.1 session/application split — standard
+// header fields BeginString(8)/BodyLength(9)/MsgSeqNum(34)/SenderCompID(49)/
+// SendingTime(52)/TargetCompID(56)/CheckSum(10) live ONLY in FIXT11.xml).
+// `XmlLoader::expand_field_list` walks `header_node_` unconditionally
+// (xml_loader.cpp:850) — with zero children, ZERO header tags are ever
+// registered `valid_` for ANY FIX50SPx message type. `dictionary_driven_-
+// validator::validate()` Step 1(a) then rejects the very first framing
+// field (tag 8, itself guaranteed present by the Framer) with
+// wire_unexpected_tag, for EVERY message of EVERY FIX50SPx msg_type —
+// unconditionally, before Step 2/3 (required-fields / group checks) ever
+// run. fixpp has no FIXT11+FIX50SPx dictionary-merge mechanism (confirmed:
+// `dict::version_registry` treats vt11 as session-admin-only, never merged
+// into an application `table_view`; `XmlLoader::load()` takes exactly one
+// XML path; `dictionary.kind="path"` in the TOML config loader loads a
+// single file). This means `dictionary_driven_validator::validate()`
+// cannot accept ANY real FIX50SP2 application frame today when the
+// dictionary is loaded from the vendored FIX50SP2.xml alone — a
+// pre-existing, orthogonal defect discovered while constructing this
+// test, NOT introduced by the 079 candidate and NOT a group-required
+// leak, so out of T009's fix scope. Escalated to the orchestrator; no
+// real-frame FIX50SP2 validate() test is shipped here. The T008
+// dictionary-level derivation pin (RequiredScope.-
+// Fix50sp2TradeCaptureReportExcludesOptionalGroupRequired, which never
+// calls validate()) still stands as US1's FIX50SP2 corroboration.
+
+// ── T007: FIX42 Allocation(J) with NO NoAllocs group -> ACCEPT ─────────────
+// FIX42 is the QuickFIX-XML `xml_loader` path (no typed tier, SC-004).
+// AllocShares(80) is `required='Y'` only INSIDE the optional NoAllocs(78)
+// group on J; the message-level required set must exclude it.
+TEST(ValidatorTypeCheck, Fixpp201Fix42AllocationOmitsOptionalGroupAccepted) {
+    std::pmr::monotonic_buffer_resource mr;
+    auto d42 = load_real_dict("FIX42.xml", &mr);
+    dictionary_driven_validator v{d42.as_table_view()};
+
+    // FIX42 J message-level required: AllocID(70), AllocTransType(71),
+    // Side(54), Symbol(55), Shares(53), AvgPx(6), TradeDate(75) + header.
+    auto buf = make_frame(
+        "35=J\x01"
+        "34=1\x01" "49=SENDER\x01" "52=20240101-00:00:00\x01" "56=TARGET\x01"
+        "70=ALLOC1\x01" "71=0\x01" "54=1\x01" "55=SYM\x01" "53=100\x01" "6=10.5\x01"
+        "75=20240101\x01");
+    std::array<std::byte, 4096> stack{};
+    std::pmr::monotonic_buffer_resource arena;
+    auto mv = parse_index(buf, stack, arena);
+
+    std::array<std::byte, kScratch> scratch_buf{};
+    std::pmr::monotonic_buffer_resource scratch_mr{scratch_buf.data(), scratch_buf.size(),
+                                                   std::pmr::null_memory_resource()};
+    std::uint16_t ref_tag = 0;
+    auto result = v.validate(mv, &scratch_mr, &ref_tag);
+    EXPECT_TRUE(result.has_value())
+        << "conforming FIX42 Allocation omitting the optional NoAllocs group must be "
+           "accepted; err=" << (result.has_value() ? 0 : static_cast<int>(result.error()))
+        << " ref_tag=" << ref_tag;
+}
+
+// ── T010/T011: FIX44 AP / NoUnderlyings(711) — malformed instance reject,
+// complete instances accept ────────────────────────────────────────────────
+// Delimiter = UnderlyingSymbol(311, required='N'); direct required members
+// = {UnderlyingSettlPrice(732), UnderlyingSettlPriceType(733)} (pinned by
+// RequiredScope.Fix44AsTableViewContextRequiredMembers).
+namespace {
+std::string fix44_ap_required_prefix() {
+    return "35=AP\x01"
+           "34=1\x01" "49=SENDER\x01" "52=20240101-00:00:00\x01" "56=TARGET\x01"
+           "1=ACCT1\x01" "581=1\x01" "715=20240101\x01" "721=RPT1\x01" "728=0\x01"
+           "730=1.5\x01" "731=1\x01" "734=1.4\x01";
+}
+}  // namespace
+
+TEST(ValidatorTypeCheck, Fixpp201Fix44PositionReportGroupInstanceMissingRequiredMemberRejected) {
+    std::pmr::monotonic_buffer_resource mr;
+    auto d44 = load_real_dict("FIX44.xml", &mr);
+    dictionary_driven_validator v{d44.as_table_view()};
+
+    // Instance 1 complete (311/732/733); instance 2 omits 733.
+    auto buf = make_frame(
+        fix44_ap_required_prefix() +
+        "711=2\x01"
+        "311=SYMA\x01" "732=1.1\x01" "733=1\x01"
+        "311=SYMB\x01" "732=2.2\x01");
+    std::array<std::byte, 4096> stack{};
+    std::pmr::monotonic_buffer_resource arena;
+    auto mv = parse_index(buf, stack, arena);
+
+    std::array<std::byte, kScratch> scratch_buf{};
+    std::pmr::monotonic_buffer_resource scratch_mr{scratch_buf.data(), scratch_buf.size(),
+                                                   std::pmr::null_memory_resource()};
+    std::uint16_t ref_tag = 0;
+    auto result = v.validate(mv, &scratch_mr, &ref_tag);
+    ASSERT_FALSE(result.has_value())
+        << "FIX44 AP NoUnderlyings instance omitting required 733 must be rejected";
+    EXPECT_EQ(result.error(), error::wire_required_field_missing);
+    EXPECT_EQ(ref_tag, 733) << "ref tag must name the missing required member";
+}
+
+TEST(ValidatorTypeCheck, Fixpp201Fix44PositionReportAllGroupInstancesCompleteAccepted) {
+    std::pmr::monotonic_buffer_resource mr;
+    auto d44 = load_real_dict("FIX44.xml", &mr);
+    dictionary_driven_validator v{d44.as_table_view()};
+
+    auto buf = make_frame(
+        fix44_ap_required_prefix() +
+        "711=2\x01"
+        "311=SYMA\x01" "732=1.1\x01" "733=1\x01"
+        "311=SYMB\x01" "732=2.2\x01" "733=2\x01");
+    std::array<std::byte, 4096> stack{};
+    std::pmr::monotonic_buffer_resource arena;
+    auto mv = parse_index(buf, stack, arena);
+
+    std::array<std::byte, kScratch> scratch_buf{};
+    std::pmr::monotonic_buffer_resource scratch_mr{scratch_buf.data(), scratch_buf.size(),
+                                                   std::pmr::null_memory_resource()};
+    auto result = v.validate(mv, &scratch_mr, nullptr);
+    EXPECT_TRUE(result.has_value())
+        << "FIX44 AP with every NoUnderlyings instance complete must be accepted; err="
+        << (result.has_value() ? 0 : static_cast<int>(result.error()));
+}
+
+// ── T010/T011: FIX50SP2 — BLOCKED, same root cause as the T006 escalation
+// above (every FIX50SPx message rejects on the framing tag itself, before
+// Step 2/3 ever run) — no real-frame FIX50SP2 reject/accept test shipped.
+//
+// ── T010/T011: FIX42 — BLOCKED for a DIFFERENT, also pre-existing, also
+// out-of-scope reason: FIX42.xml declares group-count fields (e.g. NoAllocs,
+// tag 78) with `type='INT'` rather than `type='NUMINGROUP'` (confirmed via
+// message_fields("J"): FieldRef{tag=78, type=Int, ...}). The 079 Phase-2
+// context-scoped per-group store (dictionary.cpp's group-population loop)
+// keys strictly on `fr.type == field_data_type::NumInGroup` to detect a
+// group's count field, so it NEVER populates a context entry for ANY FIX42
+// group — `table_view::group_first_field("J", {}, 78)` returns 0 (though
+// the BARE global `Dictionary::group_first_field(78)` resolves correctly
+// via a type-independent `<group>`-element scan). Consequently
+// `Validator::validate_group_level` never recognises 78 as a group count
+// field for FIX42, `consume_group` is never invoked, and the per-instance
+// required-member check can never fire — a synthetic "reject" test would
+// vacuously pass for the WRONG reason (group invisibility, not correct
+// enforcement), and an "accept" test would be equally uninformative. This
+// is the documented, already-tracked limitation L-066-1 ("FIX 4.0/4.1/4.2
+// sessions become strict-but-GROUP-BLIND under dict validation"),
+// explicitly deferred to issue #196 ("relax INT-typed NumInGroup group
+// detection to structural") — NOT something T012 authorizes fixing here.
+// T007's FIX42 accept-path test above remains valid: it exercises ONLY the
+// message-level `in_group` required-set exclusion (candidate's
+// `expand_field_list`), which does NOT depend on NumInGroup-type detection.
 
 }  // namespace

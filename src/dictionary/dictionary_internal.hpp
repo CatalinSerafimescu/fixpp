@@ -24,6 +24,7 @@
 #include <optional>
 #include <span>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace fixpp::dict::detail {
@@ -99,6 +100,10 @@ public:
           component_fields_(mr),
           groups_(mr),
           group_fields_(mr),
+          group_required_pool_(mr),
+          group_required_offsets_(mr),
+          msg_group_required_pool_(mr),
+          per_msg_group_required_offsets_(mr),
           enum_values_(mr),
           enum_runs_(mr),
           messages_(mr),
@@ -150,6 +155,24 @@ public:
     // Returns the flat FieldRef run for a group (by no_tag).
     // Returns empty span if the group has no fields recorded.
     [[nodiscard]] std::span<FieldRef const> group_fields_impl(std::uint16_t no_tag) const noexcept;
+
+    // Gate B r1 F1 (fixpp#201): the GROUP-RELATIVE (bare/global, first-seen)
+    // direct required-member set for a group — `own_req` gated by a
+    // component-AND accumulator RESET at this group's own boundary (NOT the
+    // message-root accumulator that feeds `required_fields_impl`). Consumed
+    // by `Dictionary::as_table_view()`'s legacy bare-store loop in place of
+    // the old blind `gfr.rule==Required && gfr.group_no_tag==no_tag` filter.
+    [[nodiscard]] std::span<std::uint16_t const> group_required_members_impl(
+        std::uint16_t no_tag) const noexcept;
+
+    // Gate B r1 F1 (fixpp#201): the CONTEXT-exact (per-message) twin — every
+    // (enclosing group no_tag, tag) pair this message's own expansion reached
+    // with `own_req && group-scope-component-AND-since-nearest-enclosing-
+    // group-boundary` true. Consumed by `Dictionary::as_table_view()`'s
+    // context-store loop (filtered to the no_tag being populated) in place of
+    // the old blind `m.rule==Required` filter.
+    [[nodiscard]] std::span<std::pair<std::uint16_t, std::uint16_t> const>
+    msg_group_required_pairs_impl(std::string_view msg_type) const noexcept;
 
     // 074 (FR-002): enum {value, description} pairs for `tag`; empty span if the
     // tag has no codeset entry. Binary-searches `enum_runs_` (sorted by tag).
@@ -203,6 +226,19 @@ public:
     // Flat FieldRef table for per-group field runs.
     // GroupRef::first_field_index / field_count index into this vector.
     std::pmr::vector<FieldRef> group_fields_;
+
+    // Gate B r1 F1 (fixpp#201): bare/global group-relative required-member
+    // store. `group_required_offsets_[i]` is the run for `groups_[i]` (SAME
+    // index — populated in lockstep in the same finalize() loop that builds
+    // `groups_`/`group_fields_`, so no separate sort/lookup key is needed).
+    std::pmr::vector<std::uint16_t> group_required_pool_;
+    std::pmr::vector<MsgFieldsRun> group_required_offsets_;
+
+    // Gate B r1 F1 (fixpp#201): per-message context-exact group-required
+    // (no_tag,tag) pairs. `per_msg_group_required_offsets_[i]` is the run for
+    // the i-th message in `messages_` (SAME index as `per_msg_field_offsets_`).
+    std::pmr::vector<std::pair<std::uint16_t, std::uint16_t>> msg_group_required_pool_;
+    std::pmr::vector<MsgFieldsRun> per_msg_group_required_offsets_;
 
     // 074 (FR-002): flat enum-value store (value+description string_views into
     // the FROZEN name_pool_ — bound in finalize() after the pool is stable) and

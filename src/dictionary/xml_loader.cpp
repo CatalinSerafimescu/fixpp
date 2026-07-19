@@ -274,10 +274,46 @@ private:
     // FieldRef vector. Components are resolved recursively. Groups emit a
     // GroupRef AND their inner fields (the group's first field is the first
     // field declared inside it, per FIX semantics).
-    void expand_field_list(pugi::xml_node const& parent, std::vector<FieldRef>& out,
-                           std::vector<std::uint16_t>& required_out,
-                           std::uint16_t enclosing_group_no_tag,
-                           std::uint16_t enclosing_component_index);
+    // `in_group` (fixpp#201): true once expansion has descended into ANY
+    // repeating <group>. Group-member `required='Y'` fields are queryable
+    // per-group (via each FieldRef's own `rule`), but must NOT leak into the
+    // MESSAGE-level `required_out` — QuickFIX composes message-level required-
+    // ness top-level-scoped and checks group members per instance. `out` and
+    // each FieldRef's `rule` are unaffected; only `required_out` membership is.
+    // `component_required` (079-required-presence-scope T020 fix; census
+    // T015 found this is NOT vacuous — 4 real sites): the running AND of
+    // every enclosing <component required=.../> usage's own `required`
+    // attribute (default "N"/optional, mirroring QuickFIX
+    // `DataDictionary.cpp:401-403,510` `componentRequired`) on the path from
+    // the message root to `parent`. A field/group's own `required='Y'` only
+    // reaches message-level `required_out` when `component_required` is ALSO
+    // true — an optional componentRef's contents must not leak into the
+    // message-level required set even when the nested field/group itself says
+    // `required='Y'`. Does NOT affect `FieldRef.rule` (per-field presence,
+    // FR-008) — only `required_out` membership.
+    // `group_scope_component_required` (Gate B r1 F1 — fixpp#201 escalation):
+    // a SEPARATE component-AND accumulator, distinct from `component_required`
+    // above — RESET to `true` on entry to each `<group>` (unlike
+    // `component_required`, which threads through group boundaries unchanged
+    // because it feeds the MESSAGE-root `required_out`). ANDed with a
+    // componentRef's own `required` at every componentRef reached inside the
+    // CURRENT group's own subtree. Gates `group_required_pairs_out`: a field/
+    // group's own `required='Y'` becomes a DIRECT group-required member of its
+    // immediately-enclosing group only when this group-relative AND is ALSO
+    // true — an optional componentRef nested INSIDE a group must not leak its
+    // contents into that group's required-member set, even though the OUTER
+    // group itself may sit behind an unrelated optional component (which
+    // `component_required` already correctly zeroed out — irrelevant here,
+    // since this accumulator resets fresh at the group boundary). See Gate B
+    // r1 triage F1 (NoMDStatistics(2474) over-include vs NoSides(552)
+    // over-exclude counterexamples).
+    void expand_field_list(
+        pugi::xml_node const& parent, std::vector<FieldRef>& out,
+        std::vector<std::uint16_t>& required_out,
+        std::vector<std::pair<std::uint16_t, std::uint16_t>>& group_required_pairs_out,
+        std::uint16_t enclosing_group_no_tag, std::uint16_t enclosing_component_index,
+        bool in_group = false, bool component_required = true,
+        bool group_scope_component_required = true);
 
     void detect_length_pairs(pugi::xml_node const& root);
 
@@ -483,10 +519,12 @@ void LoaderState::collect_messages(pugi::xml_node const& root) {
 // NOLINTBEGIN(misc-no-recursion,bugprone-easily-swappable-parameters) — recursive XML walk by
 // design (component refs expand inline); the two uint16_t params name different domains (group's
 // no_tag vs component index) and aren't interchangeable.
-void LoaderState::expand_field_list(pugi::xml_node const& parent, std::vector<FieldRef>& out,
-                                    std::vector<std::uint16_t>& required_out,
-                                    std::uint16_t enclosing_group_no_tag,
-                                    std::uint16_t enclosing_component_index) {
+void LoaderState::expand_field_list(
+    pugi::xml_node const& parent, std::vector<FieldRef>& out,
+    std::vector<std::uint16_t>& required_out,
+    std::vector<std::pair<std::uint16_t, std::uint16_t>>& group_required_pairs_out,
+    std::uint16_t enclosing_group_no_tag, std::uint16_t enclosing_component_index, bool in_group,
+    bool component_required, bool group_scope_component_required) {
     for (auto const& child : parent.children()) {
         std::string_view const tag_name{child.name()};
         if (tag_name == "field") {
@@ -509,8 +547,15 @@ void LoaderState::expand_field_list(pugi::xml_node const& parent, std::vector<Fi
             fr.component_index = enclosing_component_index;
             fr.length_pair_data_tag = info.length_pair_data_tag;
             out.push_back(fr);
-            if (req) {
-                required_out.push_back(info.tag);
+            if (req && !in_group && component_required) {  // fixpp#201: group-member requireds
+                required_out.push_back(info.tag);  // stay per-group; 079: optional-component AND
+            }
+            // Gate B r1 F1 (fixpp#201): a DIRECT group-required member of the
+            // CURRENT immediately-enclosing group — group-relative component-AND
+            // (reset at THIS group's own boundary), independent of the
+            // message-root `component_required` above.
+            if (req && group_scope_component_required && enclosing_group_no_tag != 0) {
+                group_required_pairs_out.emplace_back(enclosing_group_no_tag, info.tag);
             }
         } else if (tag_name == "component") {
             auto const cname = std::string{child.attribute("name").as_string("")};
@@ -520,8 +565,15 @@ void LoaderState::expand_field_list(pugi::xml_node const& parent, std::vector<Fi
                                       "\"> not defined in <components> block");
             }
             auto const& def = components_[cit->second];
-            expand_field_list(def.node, out, required_out, enclosing_group_no_tag,
-                              static_cast<std::uint16_t>(cit->second + 1));
+            // 079-required-presence-scope T020: componentRef's own `required`
+            // (default "N", QuickFIX `DataDictionary.cpp:401-403` parity) ANDs
+            // into the running component_required for the recursion.
+            bool const comp_req =
+                std::string_view{child.attribute("required").as_string("N")} == "Y";
+            expand_field_list(def.node, out, required_out, group_required_pairs_out,
+                              enclosing_group_no_tag, static_cast<std::uint16_t>(cit->second + 1),
+                              in_group, component_required && comp_req,
+                              group_scope_component_required && comp_req);
         } else if (tag_name == "group") {
             auto const gname = std::string{child.attribute("name").as_string("")};
             auto const nit = by_name_.find(gname);
@@ -540,8 +592,15 @@ void LoaderState::expand_field_list(pugi::xml_node const& parent, std::vector<Fi
             no_fr.component_index = enclosing_component_index;
             no_fr.length_pair_data_tag = nit->second.length_pair_data_tag;
             out.push_back(no_fr);
-            if (greq) {
-                required_out.push_back(no_tag);
+            if (greq && !in_group && component_required) {  // fixpp#201: a nested group's count
+                required_out.push_back(no_tag);  // field is not message-level required (per-
+            }  // instance instead); 079: optional-component AND
+            // Gate B r1 F1: the nested group's own NoXxx count-tag is a DIRECT
+            // member of the OUTER group (enclosing_group_no_tag), gated by the
+            // OUTER group's own group-relative AND (this group's own `greq` is
+            // handled separately, once we recurse into ITS scope below).
+            if (greq && group_scope_component_required && enclosing_group_no_tag != 0) {
+                group_required_pairs_out.emplace_back(enclosing_group_no_tag, no_tag);
             }
             // Record the GroupRef (deduplicated by no_tag — first-seen wins).
             if (!group_index_by_no_tag_.contains(no_tag)) {
@@ -586,8 +645,18 @@ void LoaderState::expand_field_list(pugi::xml_node const& parent, std::vector<Fi
                 group_index_by_no_tag_.emplace(no_tag, idx);
                 groups_.push_back(gd);
             }
-            // Recurse into group children with the group-context set.
-            expand_field_list(child, out, required_out, no_tag, enclosing_component_index);
+            // Recurse into group children with the group-context set. fixpp#201:
+            // in_group=true so descendant requireds do NOT leak to message level.
+            // 079: component_required carries through unchanged (a group ref
+            // itself has no `required`-usage semantics on this axis). Gate B r1
+            // F1: group_scope_component_required RESETS to true here — the new
+            // group's own scope starts fresh at ITS boundary, independent of
+            // whatever optional component wrapped THIS <group> usage (matches
+            // QuickFIX's per-group sub-DataDictionary semantics).
+            expand_field_list(child, out, required_out, group_required_pairs_out, no_tag,
+                              enclosing_component_index,
+                              /*in_group=*/true, component_required,
+                              /*group_scope_component_required=*/true);
         }
         // Ignore unknown child elements (forwards-compat).
     }
@@ -838,17 +907,31 @@ detail::dict_metadata_handle_ptr LoaderState::finalize() {
 
         std::vector<FieldRef> msg_fields;
         std::vector<std::uint16_t> msg_required;
+        // Gate B r1 F1 (fixpp#201): context-exact group-relative required
+        // (no_tag,tag) pairs, accumulated across header+body+trailer exactly
+        // like msg_fields/msg_required above.
+        std::vector<std::pair<std::uint16_t, std::uint16_t>> msg_group_required;
         // Header fields first, then message-specific, then trailer.
         if (header_node_ != nullptr) {
-            expand_field_list(header_node_, msg_fields, msg_required, 0, 0);
+            expand_field_list(header_node_, msg_fields, msg_required, msg_group_required, 0, 0);
         }
-        expand_field_list(md.node, msg_fields, msg_required, 0, 0);
+        expand_field_list(md.node, msg_fields, msg_required, msg_group_required, 0, 0);
         if (trailer_node_ != nullptr) {
-            expand_field_list(trailer_node_, msg_fields, msg_required, 0, 0);
+            expand_field_list(trailer_node_, msg_fields, msg_required, msg_group_required, 0, 0);
         }
         auto const [field_run, req_run] = append_run(msg_fields, msg_required);
         h.per_msg_field_offsets_.push_back(field_run);
         h.per_msg_required_offsets_.push_back(req_run);
+
+        std::ranges::sort(msg_group_required);
+        auto const grlast = std::ranges::unique(msg_group_required).begin();
+        msg_group_required.erase(grlast, msg_group_required.end());
+        detail::MsgFieldsRun group_req_run{
+            .start = static_cast<std::uint32_t>(h.msg_group_required_pool_.size()),
+            .count = static_cast<std::uint32_t>(msg_group_required.size())};
+        h.msg_group_required_pool_.insert(h.msg_group_required_pool_.end(),
+                                          msg_group_required.begin(), msg_group_required.end());
+        h.per_msg_group_required_offsets_.push_back(group_req_run);
     }
 
     // Emit components (PMR ComponentRef array).
@@ -868,7 +951,10 @@ detail::dict_metadata_handle_ptr LoaderState::finalize() {
         // append to the flat component_fields_ table.
         std::vector<FieldRef> comp_fields;
         std::vector<std::uint16_t> comp_required;  // discard — component required-sets unused
-        expand_field_list(def.node, comp_fields, comp_required,
+        std::vector<std::pair<std::uint16_t, std::uint16_t>> comp_group_required;  // discard —
+        // any group reached here is ALSO reached (and correctly captured) via
+        // its own standalone GroupDef walk below.
+        expand_field_list(def.node, comp_fields, comp_required, comp_group_required,
                           /*enclosing_group_no_tag=*/0,
                           /*enclosing_component_index=*/static_cast<std::uint16_t>(i + 1));
 
@@ -928,14 +1014,25 @@ detail::dict_metadata_handle_ptr LoaderState::finalize() {
     std::ranges::sort(
         groups_, [](GroupDef const& a, GroupDef const& b) noexcept { return a.no_tag < b.no_tag; });
     h.groups_.reserve(groups_.size());
+    h.group_required_offsets_.reserve(groups_.size());
     for (auto const& g : groups_) {
         std::uint16_t first_idx = 0;
         std::uint16_t cnt = 0;
+        // Gate B r1 F1 (fixpp#201): `grp_required` is the GROUP-RELATIVE direct
+        // required-member set for THIS group — this standalone call already
+        // starts fresh at the group's own boundary (`component_required`
+        // defaults `true`), so `!in_group && component_required`-gated pushes
+        // to `required_out` are exactly "own_req AND component-AND since this
+        // group's boundary" for direct members (nested-group descendants are
+        // excluded by the `!in_group` gate once a deeper <group> is entered).
+        // No separate `group_scope_component_required` accumulator is needed
+        // for THIS call — see Gate B r1 triage F1 mechanism note.
+        std::vector<FieldRef> grp_fields;
+        std::vector<std::uint16_t> grp_required;
         if (g.node) {
             // Expand the group's inner fields into the flat group_fields_ table.
-            std::vector<FieldRef> grp_fields;
-            std::vector<std::uint16_t> grp_required;
-            expand_field_list(g.node, grp_fields, grp_required,
+            std::vector<std::pair<std::uint16_t, std::uint16_t>> grp_group_required;  // discard
+            expand_field_list(g.node, grp_fields, grp_required, grp_group_required,
                               /*enclosing_group_no_tag=*/g.no_tag,
                               /*enclosing_component_index=*/0);
             first_idx = static_cast<std::uint16_t>(h.group_fields_.size());
@@ -951,6 +1048,17 @@ detail::dict_metadata_handle_ptr LoaderState::finalize() {
         gr.parent_group_no_tag = g.parent_group_no_tag;
         gr._reserved = 0;
         h.groups_.push_back(gr);
+
+        // Parallel to h.groups_ (SAME index — pushed in lockstep above).
+        std::ranges::sort(grp_required);
+        auto const grplast = std::ranges::unique(grp_required).begin();
+        grp_required.erase(grplast, grp_required.end());
+        detail::MsgFieldsRun greq_run{
+            .start = static_cast<std::uint32_t>(h.group_required_pool_.size()),
+            .count = static_cast<std::uint32_t>(grp_required.size())};
+        h.group_required_pool_.insert(h.group_required_pool_.end(), grp_required.begin(),
+                                      grp_required.end());
+        h.group_required_offsets_.push_back(greq_run);
     }
 
     // Pool is now finalized — but we may have grown it past pool_estimate.

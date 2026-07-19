@@ -23,6 +23,7 @@
 // §XV.9 guard: table_view.hpp and field_type.hpp have deliberately minimal
 // include graphs (no mutex, no heavy asio) — see their file headers.
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <fixpp/core/decimal_alias.hpp>    // fixpp::decimal_t
@@ -298,13 +299,71 @@ public:
         bool const can_descend = child.depth > ctx.depth;
         std::span<std::uint16_t const> const child_path{child.parent_path.data(), child.depth};
 
+        // fixpp#201 (T004, dynamic-width): every DIRECT `required='Y'` member
+        // of this group must appear in EVERY instance (QuickFIX
+        // checkHasRequired, per-instance). `required_out` no longer leaks
+        // these to the message-level scan (Step 2); they are enforced here
+        // instead. Presence is tracked in a fixed-capacity multi-word bitset
+        // (`kReqMaskWords` * 64 bits) — generous headroom over the
+        // census-measured real max of 0-3 direct required members per group
+        // (data-model.md "Group-instance membership check state", FR-004) —
+        // stack-only, no allocation. Fail-CLOSED (Article XV) above capacity:
+        // a group this wide is REJECTED outright rather than silently
+        // skipping the check, replacing the prior <= 64 fail-open skip.
+        auto const req_members = dict_.group_required_members(ctx.msg_type, parent_path, no_tag);
+        static constexpr std::size_t kReqMaskWords = 4;  // 256-bit headroom
+        static constexpr std::size_t kReqMaskCapacity = kReqMaskWords * 64;
+        if (req_members.size() > kReqMaskCapacity) {
+            set_ref_tag(ref_tag_out, delim_tag);
+            return core::expected_t<std::size_t>{std::unexpect,
+                                                 core::error::wire_required_field_missing};
+        }
+        bool const check_required = !req_members.empty();
+        using req_mask_t = std::array<std::uint64_t, kReqMaskWords>;
+        auto const req_bit_index = [&](std::uint16_t tag) noexcept -> std::size_t {
+            for (std::size_t k = 0; k < req_members.size(); ++k) {
+                if (req_members[k] == tag) {
+                    return k;
+                }
+            }
+            return req_members.size();  // sentinel: not a required member
+        };
+        auto const mark_bit = [](req_mask_t& mask, std::size_t k) noexcept {
+            mask[k / 64] |= (std::uint64_t{1} << (k % 64));
+        };
+        req_mask_t full_mask{};
+        {
+            std::size_t const n = req_members.size();
+            for (std::size_t w = 0; w < n / 64; ++w) {
+                full_mask[w] = ~std::uint64_t{0};
+            }
+            if (std::size_t const rem = n % 64; rem != 0) {
+                full_mask[n / 64] = (std::uint64_t{1} << rem) - 1;
+            }
+        }
+
+        // The delimiter's bit index is invariant across every instance of this
+        // group — resolve it once (079 T021 simplify: was re-scanned per
+        // instance). `req_members.size()` is the "not a required member" sentinel.
+        std::size_t const delim_k = check_required ? req_bit_index(delim_tag) : req_members.size();
+
         std::uint32_t actual_count = 0;
         while (i < end && ents[i].tag == delim_tag) {
+            req_mask_t seen_mask{};
+            if (check_required && delim_k < req_members.size()) {
+                mark_bit(seen_mask, delim_k);
+            }
             ++i;  // consume this instance's delimiter
             while (i < end && ents[i].tag != delim_tag) {
                 std::uint16_t const t = ents[i].tag;
                 if (!is_member(t)) {
                     break;  // end of this group's extent
+                }
+                if (check_required) {
+                    // mark before any nested descent
+                    if (auto const k = req_bit_index(t); k < req_members.size()) {
+                        mark_bit(seen_mask, k);
+                    }
                 }
                 // Query-before-push: is `t` itself a nested group under the
                 // pushed child path? (depth-bounded by K=16.)
@@ -320,6 +379,17 @@ public:
                 } else {
                     ++i;  // ordinary scalar member (or depth cap reached)
                 }
+            }
+            // fixpp#201: reject an instance missing a required member.
+            if (check_required && seen_mask != full_mask) {
+                for (std::size_t k = 0; k < req_members.size(); ++k) {
+                    if ((seen_mask[k / 64] & (std::uint64_t{1} << (k % 64))) == 0) {
+                        set_ref_tag(ref_tag_out, req_members[k]);
+                        break;
+                    }
+                }
+                return core::expected_t<std::size_t>{std::unexpect,
+                                                     core::error::wire_required_field_missing};
             }
             ++actual_count;
         }
