@@ -284,14 +284,12 @@ jobs:
       fail-fast: false
       matrix:
         preset:
-          # VALIDATION TRIM (revert before merge): single leg to keep the
-          # GHCR-Conan-offload smoke run to one ~2h build, not six.
+          - linux-clang-debug
           - linux-clang-release
-          # - linux-clang-debug
-          # - linux-clang-asan
-          # - linux-clang-ubsan
-          # - linux-clang-tsan
-          # - linux-gcc-release
+          - linux-clang-asan
+          - linux-clang-ubsan
+          - linux-clang-tsan
+          - linux-gcc-release
 
     steps:
       - uses: actions/checkout@v6
@@ -465,7 +463,7 @@ jobs:
     timeout-minutes: 180
     needs: gate-precheck  # runs in parallel with matrix, after the gate check
     # Skipped on release (see the `linux` job note) — coverage doesn't gate the asset.
-    if: false  # VALIDATION TRIM (revert before merge) — single-leg smoke run
+    if: needs.gate-precheck.outputs.proceed == 'true' && github.event_name != 'release'
     concurrency:
       group: tier1-${{ github.event.pull_request.number || github.ref }}-coverage
       cancel-in-progress: true
@@ -657,7 +655,10 @@ jobs:
     # legs run ONLY once both gates are satisfied (`proceed`), and then only when
     # the binding/C-ABI surface actually changed (`python_touched` narrows within
     # Tier 1). No gate labels ⇒ skipped. Never on release.
-    if: false  # VALIDATION TRIM (revert before merge) — single-leg smoke run
+    if: >-
+      github.event_name != 'release' &&
+      needs.gate-precheck.outputs.proceed == 'true' &&
+      needs.gate-precheck.outputs.python_touched == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -838,7 +839,10 @@ jobs:
     # (`proceed`) AND the binding/C-ABI/packaging surface actually changed
     # (`python_touched`). A pure-C++ PR or a PR without gate labels skips it;
     # a merge to main (push) builds it unconditionally.
-    if: false  # VALIDATION TRIM (revert before merge) — single-leg smoke run
+    if: >-
+      github.event_name == 'release' ||
+      (needs.gate-precheck.outputs.proceed == 'true' &&
+       needs.gate-precheck.outputs.python_touched == 'true')
     concurrency:               # CI-7
       group: tier1-${{ github.event.pull_request.number || github.ref }}-python-wheel-build
       cancel-in-progress: true
@@ -1055,7 +1059,7 @@ jobs:
     runs-on: ubuntu-24.04
     needs: gate-precheck
     # Skipped on release (see the `linux` job note) — layer checks gated the merge commit.
-    if: false  # VALIDATION TRIM (revert before merge) — single-leg smoke run
+    if: needs.gate-precheck.outputs.proceed == 'true' && github.event_name != 'release'
     concurrency:
       group: tier1-${{ github.event.pull_request.number || github.ref }}-check-layers
       cancel-in-progress: true
@@ -1089,7 +1093,7 @@ jobs:
     timeout-minutes: 180
     needs: gate-precheck
     # Skipped on release (see the `linux` job note) — bench is a soft gate, not an asset gate.
-    if: false  # VALIDATION TRIM (revert before merge) — single-leg smoke run
+    if: needs.gate-precheck.outputs.proceed == 'true' && github.event_name != 'release'
     concurrency:
       group: tier1-${{ github.event.pull_request.number || github.ref }}-bench
       cancel-in-progress: true
