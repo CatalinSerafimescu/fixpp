@@ -42,7 +42,7 @@ Also a standalone exact-set gate, selected live by `-R` (Article VII §8 carve-o
 ```
 ctest --test-dir build/debug -R required_scope_parity -V
 ```
-The golden is captured from QuickFIX via `DataDictionary::isRequiredField(msgType, tag)` (encodes the component AND-rule + per-group required members `:560/:570`), with a manifest/hash + stale-golden regen rule (075 precedent). To regenerate after a dictionary change (local only):
+The golden is captured from QuickFIX via `DataDictionary::isRequiredField(msgType, tag)` (encodes the component AND-rule; body message-level only — no per-group surface), with a manifest/hash + stale-golden regen rule (075 precedent). To regenerate after a dictionary change (local only):
 ```
 cmake -S . -B build/qfgolden -DFIXPP_BUILD_QUICKFIX_GOLDEN=ON <...> && cmake --build build/qfgolden --target quickfix_required_golden -j2
 ```
