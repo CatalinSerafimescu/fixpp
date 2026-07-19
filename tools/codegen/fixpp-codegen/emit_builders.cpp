@@ -171,7 +171,13 @@ struct LevelItem {
     std::uint16_t data_tag = 0;
     // 067 US3/T025 (R3/G5): this scalar's own FieldRef.rule==Required (the
     // Length tag's rule, OR'd with the Data tag's rule when coupled — either
-    // half being Required makes the ONE coupled Args member required).
+    // half being Required makes the ONE coupled Args member required),
+    // GATED by the enclosing level's own required-ness (081-strict-
+    // validation-residuals D-4 — `resolve_level`'s `level_required` param;
+    // this scalar's raw own-required is never separately retained: a scalar
+    // Args field is always `optional<T>` regardless of required-ness —
+    // emit_args_struct — so the gated value alone is safe here, unlike
+    // `group_required`/`group_check_required` above).
     // group_no_tag/header-exclusion are already baked in by construction:
     // top-level items are the framing-excluded run (top_level_synthetic_
     // members), group items never carry a framing tag at all.
@@ -186,7 +192,30 @@ struct LevelItem {
     std::string group_type_name;
     std::uint16_t no_tag = 0;
     std::uint16_t delimiter_tag = 0;
+    // This group's OWN raw `required=` attribute at its point of declaration
+    // — UNGATED by the enclosing level's own required-ness. Drives the
+    // STRUCT/builder surface only (emit_args_struct's span<> vs
+    // optional<span<>> field type, emit_level_body's optional_group wrap,
+    // and the `_count_`/`_validate_entry_` access-pattern dispatch in
+    // emit_writer_traits_for_level) — those must stay tied to the Args
+    // struct's actual field type, which never forks (081-strict-validation-
+    // residuals D-4/E-4: "No builder_validate.hpp change", groups.hpp byte-
+    // identical for a non-mixed-usage group).
     bool group_required = false;
+    // 081-strict-validation-residuals D-4/E-4 (Concern B codegen fork):
+    // GATED enforcement value — `group_required && enclosing_group_required`
+    // (the IMMEDIATE enclosing level's own required-ness, threaded via
+    // resolve_level's `level_required` param, reset — not ancestor-AND'd —
+    // at each group boundary; mirrors the landed runtime-tier rule in
+    // xml_loader.cpp/orchestra_loader.cpp `group_scope_component_required`
+    // and the oracle's `group_scope_and`). Feeds ONLY the validator surface:
+    // `group_check<T>::required` in emit_writer_traits_for_level's
+    // group_checks array, and one component of compute_signature's plan-
+    // interning identity so a mixed-usage structural group (used required in
+    // one context, optional in another) forks into two distinct plans
+    // instead of sharing one `writer_traits<T>` (ODR — a shared type cannot
+    // carry two conflicting explicit specializations).
+    bool group_check_required = false;
     // Index into PlanIntern::plans identifying this occurrence's interned
     // structural plan (data-model Entity 1) — replaces the pre-077
     // message-rooted `child_plan` pointer.
@@ -259,6 +288,14 @@ std::string compute_signature(std::uint16_t delimiter_tag, LevelPlan const& plan
             sig += std::to_string(item.no_tag);
             sig += ":";
             sig += item.group_required ? "1" : "0";
+            // 081-strict-validation-residuals D-4/E-4: the GATED enforcement
+            // value is a SEPARATE signature component from the RAW
+            // `group_required` above — both must contribute independently,
+            // since they drive disjoint emitters (RAW -> struct/builder
+            // shape; GATED -> validator group_checks[i].required) and either
+            // one differing must fork the plan.
+            sig += ":";
+            sig += item.group_check_required ? "1" : "0";
             sig += ":{";
             sig += intern.plans[item.plan_id].signature;
             sig += "};";
@@ -590,11 +627,26 @@ GroupOrderEntry const* find_group_entry(MessageIR const& m, std::vector<std::uin
 // into `intern` (bottom-up — a child is always interned before its
 // parent's own signature, which embeds the child's, is computed). `path` is
 // this level's own GroupOrderEntry key (empty for top-level).
+//
+// 081-strict-validation-residuals D-4/E-4 (Concern B codegen fork):
+// `level_required` is THIS level's own effective enclosing-group-required-
+// ness — true unconditionally at the top-level (message-root) call (no
+// enclosing group; mirrors the loader's `!in_group` message-level path,
+// which has no groupRequired concept), and RESET (not ancestor-AND'd) at
+// each group boundary to that group's OWN raw `required=` attribute when
+// recursing into its children — mirroring `LoaderState::expand_field_list`'s
+// `group_scope_component_required` reset and
+// `required_scope_oracle.hpp`'s `group_scope_and` reset (immediate-
+// enclosing gating, not ancestor-AND, research.md D-3). Gates a DIRECT
+// member's effective required-ness for THIS level's required_checks/
+// group_checks (own_required && level_required) — never the STRUCT shape
+// (LevelItem::group_required stays RAW; see its comment above).
 // NOLINTNEXTLINE(misc-no-recursion)
 LevelPlan resolve_level(MessageIR const& m,
                         std::unordered_map<std::uint16_t, FieldIR const*> const& field_by_tag,
                         std::vector<std::uint16_t> const& path,
-                        std::vector<GroupOrderMember> const& members, PlanIntern& intern) {
+                        std::vector<GroupOrderMember> const& members, PlanIntern& intern,
+                        bool level_required = true) {
     std::unordered_set<std::uint16_t> level_tags;
     for (auto const& gm : members) {
         level_tags.insert(gm.tag);
@@ -639,10 +691,15 @@ LevelPlan resolve_level(MessageIR const& m,
             FieldIR const* gf = fit->second;
             std::string const stripped{strip_no_prefix(gf->name)};
 
+            bool const own_required = gf->ref.rule == fixpp::dict::field_presence::Required;
+
             std::vector<std::uint16_t> child_path = path;
             child_path.push_back(gm.tag);
-            LevelPlan child_members =
-                resolve_level(m, field_by_tag, child_path, nested->members, intern);
+            // RESET to this group's OWN raw required-ness for its children's
+            // scope — not compounded with `level_required` (immediate-
+            // enclosing gating, D-3/D-4).
+            LevelPlan child_members = resolve_level(m, field_by_tag, child_path, nested->members,
+                                                     intern, /*level_required=*/own_required);
             std::string const signature =
                 compute_signature(nested->delimiter_tag, child_members, intern);
             std::size_t const plan_id =
@@ -653,7 +710,8 @@ LevelPlan resolve_level(MessageIR const& m,
             item.accessor = uniquify_accessor(used_accessors, to_accessor(stripped), gm.tag);
             item.no_tag = gm.tag;
             item.delimiter_tag = nested->delimiter_tag;
-            item.group_required = gf->ref.rule == fixpp::dict::field_presence::Required;
+            item.group_required = own_required;
+            item.group_check_required = own_required && level_required;
             item.plan_id = plan_id;
             plan.push_back(std::move(item));
             continue;
@@ -680,8 +738,9 @@ LevelPlan resolve_level(MessageIR const& m,
             item.kind = TypeKind::String;
             item.accessor =
                 uniquify_accessor(used_accessors, to_accessor(dit->second->name), data_tag);
-            item.required = f->ref.rule == fixpp::dict::field_presence::Required ||
-                            dit->second->ref.rule == fixpp::dict::field_presence::Required;
+            item.required = (f->ref.rule == fixpp::dict::field_presence::Required ||
+                             dit->second->ref.rule == fixpp::dict::field_presence::Required) &&
+                            level_required;
             plan.push_back(std::move(item));
             continue;
         }
@@ -695,7 +754,7 @@ LevelPlan resolve_level(MessageIR const& m,
         item.tag = gm.tag;
         item.kind = k;
         item.accessor = uniquify_accessor(used_accessors, to_accessor(f->name), gm.tag);
-        item.required = f->ref.rule == fixpp::dict::field_presence::Required;
+        item.required = (f->ref.rule == fixpp::dict::field_presence::Required) && level_required;
         plan.push_back(std::move(item));
     }
     return plan;
@@ -832,7 +891,13 @@ void emit_writer_traits_for_level(TemplateWriter& w, std::string const& qtype,
                 continue;
             }
             w.raw("        {");
-            w.raw(item.group_required ? "true" : "false");
+            // 081-strict-validation-residuals D-4/E-4: the GATED enforcement
+            // value (own required && enclosing level's own required-ness) —
+            // NOT the RAW `group_required` used two blocks above for the
+            // `_count_`/`_validate_entry_` access-pattern dispatch, which
+            // must stay tied to the Args struct's actual (never-forked)
+            // field type.
+            w.raw(item.group_check_required ? "true" : "false");
             w.raw(", &");
             w.raw(type_name);
             w.raw("_count_");

@@ -393,6 +393,32 @@ public:
         return group_required_members(no_tag);  // legacy bare fallback
     }
 
+    // ── 081 Concern A: validator-private FIXT.1.1 framing surface ──────────
+    // (research.md D-1/D-2, data-model.md E-2). Populated by
+    // Dictionary::as_table_view() ONLY for v50/v50sp1/v50sp2 (empty
+    // `<header/>`), from the baked FIXT11.xml-census-pinned constant
+    // (src/dictionary/fixt_framing_table.hpp). Read ONLY by the validator's
+    // Step-1 gate + type-check arm (validator.hpp) — deliberately NOT the
+    // shared `valid_`/`types_` stores, so `field_valid_for`/`valid_tags_for`/
+    // `field_type_of` (and therefore the inbound parser's `unknown_fields()`
+    // classification) stay byte-identical whether strict validation is on or
+    // off (RC#1 / FR-009 / FR-010 load-bearing invariant).
+    [[nodiscard]] bool is_fixt_framing_tag(std::uint16_t tag) const noexcept {
+        return fixt_framing_tags_.contains(tag);
+    }
+
+    // Resolves a FIXT framing tag's structural type from the baked framing
+    // table FIRST, falling back to field_type_of() for every other tag.
+    // Framing tags are never message-attached in a v50/v50sp1/v50sp2
+    // dictionary (empty `<header/>`), so they are never `set_field_type`'d —
+    // without this, field_type_of() would default them to field_type::String
+    // (no structural constraint), silently false-accepting a malformed
+    // Int-typed header field (34=abc, 1156=abc — FR-011 / D-2 F2 pin).
+    [[nodiscard]] field_type field_type_of_with_framing(std::uint16_t tag) const noexcept {
+        auto const it = fixt_framing_types_.find(tag);
+        return it != fixt_framing_types_.end() ? it->second : field_type_of(tag);
+    }
+
     // 7-value structural type category for `tag`. Defaults to String for
     // unknown tags (safe: the String arm imposes no structural constraint).
     [[nodiscard]] field_type field_type_of(std::uint16_t tag) const noexcept {
@@ -619,6 +645,15 @@ public:
         add_group_member_ctx(msg_type, parent_path, no_tag, first);
     }
 
+    // 081 Concern A (T009): registers `tag` as a FIXT framing tag with
+    // structural type `ft`. Used EXCLUSIVELY by Dictionary::as_table_view()
+    // for v50/v50sp1/v50sp2, from the baked FIXT11.xml-census-pinned
+    // constant. Does NOT touch valid_/required_/types_ (D-1 invariant).
+    void add_fixt_framing_tag(std::uint16_t tag, field_type ft) {
+        fixt_framing_tags_.insert(tag);
+        fixt_framing_types_[tag] = ft;
+    }
+
 private:
     // O(log C) byte-exact, whole-token lookup over a sorted code list — no
     // case folding, no prefix matching. `token` is a slice of the caller's
@@ -752,6 +787,17 @@ private:
     // set_multi_value (Dictionary::as_table_view()) or directly by tests.
     // Immutable after construction; enum_valid()'s sole backing store.
     std::unordered_map<std::uint16_t, enum_domain> enums_;
+
+    // 081 Concern A (data-model.md E-2): validator-private FIXT.1.1 framing
+    // surface — deliberately SEPARATE from valid_/types_ above (D-1 load-
+    // bearing invariant: field_valid_for/valid_tags_for/field_type_of stay
+    // byte-identical). Populated ONLY by Dictionary::as_table_view() for
+    // v50/v50sp1/v50sp2, from the baked census-pinned constant
+    // (src/dictionary/fixt_framing_table.hpp). Read ONLY by the validator's
+    // Step-1 gate (is_fixt_framing_tag) and type-check arm
+    // (field_type_of_with_framing).
+    std::unordered_set<std::uint16_t> fixt_framing_tags_;
+    std::unordered_map<std::uint16_t, field_type> fixt_framing_types_;
 };
 
 }  // namespace fixpp::dict

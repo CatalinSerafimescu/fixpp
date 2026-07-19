@@ -77,15 +77,22 @@ TEST(RequiredScope, Fix50sp2TradeCaptureReportExcludesOptionalGroupRequired) {
 // The per-instance validator check reads the CONTEXT-scoped required-member
 // store built by as_table_view(). Pin it directly on a real dictionary (the
 // synthetic validator pins exercise only the bare fallback): NoUnderlyings(711)
-// on FIX44 AP must carry 732/733 as DIRECT required members.
-TEST(RequiredScope, Fix44AsTableViewContextRequiredMembers) {
+// on FIX44 AP is itself OPTIONAL (`required='N'`) — 081-strict-validation-
+// residuals D-3 (immediate-enclosing group-gating, QuickFIX `addXMLGroup`'s
+// `required=="Y" && groupRequired`) means its direct `required='Y'` members
+// 732/733 must NOT be recorded per-instance (was: recorded under 079's
+// "required-once-present" rule — this is the T014 flip, one of the 24
+// divergent contexts research.md D-3/D-5 collapses to 0).
+TEST(RequiredScope, Fix44AsTableViewContextExcludesOptionalGroupOwnRequireds) {
     std::pmr::monotonic_buffer_resource mr;
     auto d44 = load_dict("FIX44.xml", &mr);
     auto const tv = d44.as_table_view();
 
     auto const req = tv.group_required_members("AP", std::span<std::uint16_t const>{}, 711);
-    EXPECT_TRUE(contains(req, 732)) << "ctx store: 732 required per NoUnderlyings instance";
-    EXPECT_TRUE(contains(req, 733)) << "ctx store: 733 required per NoUnderlyings instance";
+    EXPECT_FALSE(contains(req, 732))
+        << "NoUnderlyings(711) is itself optional — 732 must not be group-required";
+    EXPECT_FALSE(contains(req, 733))
+        << "NoUnderlyings(711) is itself optional — 733 must not be group-required";
     // Sanity: the group's DELIMITER (UnderlyingSymbol 311, required='N') is NOT
     // a required member, so a per-instance check does not over-require it.
     EXPECT_FALSE(contains(req, 311)) << "delimiter is optional — must not be a required member";

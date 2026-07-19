@@ -81,7 +81,7 @@ include/fixpp/
 src/dictionary/
 ├── dictionary.cpp                # as_table_view() (:358) — CONCERN A: populate fixt_framing_tags_/fixt_framing_types_ (~:376-382), leave valid_ store byte-identical;
 │                                 #   per-group required store population (:416-418 bare, :475-522 ctx) — CONCERN B store
-├── xml_loader.cpp                # expand_field_list (:522); group member record (:571-573); group greq at <group> branch;
+├── xml_loader.cpp                # expand_field_list (:522); group member record (:557-559); group greq at <group> branch;
 │                                 #   version detection kVersionTable (:157-188) — CONCERN A gate + CONCERN B threading
 └── orchestra_loader.cpp          # expand_field_list (:509); group member record (:545-547); greq (:592) — CONCERN B threading
 

@@ -441,17 +441,12 @@ template <> struct writer_traits<::fixpp::v44::groups::G_702Args> {
     }};
 };
 
-inline bool G_711_2Args_required_732(::fixpp::v44::groups::G_711_2Args const& a) noexcept { return a.underlying_settl_price.has_value(); }
-inline bool G_711_2Args_required_733(::fixpp::v44::groups::G_711_2Args const& a) noexcept { return a.underlying_settl_price_type.has_value(); }
 inline ::std::optional<::std::size_t> G_711_2Args_count_underlying_security_alt_id(::fixpp::v44::groups::G_711_2Args const& a) noexcept { if (!a.underlying_security_alt_id) { return ::std::nullopt; } return a.underlying_security_alt_id->size(); }
 inline ::fixpp::core::expected_t<void> G_711_2Args_validate_entry_underlying_security_alt_id(::fixpp::v44::groups::G_711_2Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.underlying_security_alt_id)[i]); }
 inline ::std::optional<::std::size_t> G_711_2Args_count_underlying_stips(::fixpp::v44::groups::G_711_2Args const& a) noexcept { if (!a.underlying_stips) { return ::std::nullopt; } return a.underlying_stips->size(); }
 inline ::fixpp::core::expected_t<void> G_711_2Args_validate_entry_underlying_stips(::fixpp::v44::groups::G_711_2Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.underlying_stips)[i]); }
 template <> struct writer_traits<::fixpp::v44::groups::G_711_2Args> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::groups::G_711_2Args>, 2> required_checks = {{
-        {732, &G_711_2Args_required_732},
-        {733, &G_711_2Args_required_733},
-    }};
+    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::groups::G_711_2Args>, 0> required_checks = {};
     static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::groups::G_711_2Args>, 2> group_checks = {{
         {false, &G_711_2Args_count_underlying_security_alt_id, &G_711_2Args_validate_entry_underlying_security_alt_id},
         {false, &G_711_2Args_count_underlying_stips, &G_711_2Args_validate_entry_underlying_stips},
@@ -816,15 +811,12 @@ template <> struct writer_traits<::fixpp::v44::groups::G_428Args> {
     }};
 };
 
-inline bool G_711_4Args_required_44(::fixpp::v44::groups::G_711_4Args const& a) noexcept { return a.price.has_value(); }
 inline ::std::optional<::std::size_t> G_711_4Args_count_underlying_security_alt_id(::fixpp::v44::groups::G_711_4Args const& a) noexcept { if (!a.underlying_security_alt_id) { return ::std::nullopt; } return a.underlying_security_alt_id->size(); }
 inline ::fixpp::core::expected_t<void> G_711_4Args_validate_entry_underlying_security_alt_id(::fixpp::v44::groups::G_711_4Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.underlying_security_alt_id)[i]); }
 inline ::std::optional<::std::size_t> G_711_4Args_count_underlying_stips(::fixpp::v44::groups::G_711_4Args const& a) noexcept { if (!a.underlying_stips) { return ::std::nullopt; } return a.underlying_stips->size(); }
 inline ::fixpp::core::expected_t<void> G_711_4Args_validate_entry_underlying_stips(::fixpp::v44::groups::G_711_4Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.underlying_stips)[i]); }
 template <> struct writer_traits<::fixpp::v44::groups::G_711_4Args> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::groups::G_711_4Args>, 1> required_checks = {{
-        {44, &G_711_4Args_required_44},
-    }};
+    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v44::groups::G_711_4Args>, 0> required_checks = {};
     static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v44::groups::G_711_4Args>, 2> group_checks = {{
         {false, &G_711_4Args_count_underlying_security_alt_id, &G_711_4Args_validate_entry_underlying_security_alt_id},
         {false, &G_711_4Args_count_underlying_stips, &G_711_4Args_validate_entry_underlying_stips},

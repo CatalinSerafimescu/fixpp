@@ -207,7 +207,16 @@ struct OrchestraGroupDef {
     std::uint16_t no_tag{0};
     std::uint16_t first_field_tag{0};
     std::uint16_t parent_group_no_tag{0};
-    pugi::xml_node node;  // the <fixr:group> XML node, stored at first-seen time
+    pugi::xml_node node;  // the <fixr:group> DEFINITION XML node, stored at first-seen time
+    // 081-strict-validation-residuals D-3: unlike xml_loader.cpp's inline
+    // <group required=.../> (definition == usage, so the required attribute
+    // lives on `node` itself), Orchestra's group DEFINITION (<fixr:group>,
+    // referenced by id) carries no presence — presence lives on the
+    // first-seen <fixr:groupRef presence=.../> USAGE. Recorded separately so
+    // the bare-store fallback (finalize()) can seed `component_required`
+    // from the first-seen usage's own required-ness, symmetric with
+    // xml_loader.cpp's `g.node.attribute("required")`.
+    bool first_seen_required{false};
 };
 
 struct OrchestraMessageDef {
@@ -255,10 +264,12 @@ private:
     // `presence='required'` fields stay per-group (queryable via each
     // FieldRef's `rule`) and do NOT leak into the MESSAGE-level `required_out`.
     // `group_scope_component_required` (Gate B r1 F1 — fixpp#201 escalation,
-    // symmetric with xml_loader.cpp): a SEPARATE component-AND accumulator,
-    // RESET to `true` on entry to each `<fixr:groupRef>`, gating
-    // `group_required_pairs_out` — see xml_loader.cpp's expand_field_list
-    // doc-comment for the full mechanism note.
+    // symmetric with xml_loader.cpp; 081-strict-validation-residuals D-3
+    // amends the reset value): a SEPARATE component-AND accumulator, RESET on
+    // entry to each `<fixr:groupRef>` to THAT groupRef's own
+    // `presence='required'` (081 D-3; was unconditionally `true` under 079),
+    // gating `group_required_pairs_out` — see xml_loader.cpp's
+    // expand_field_list doc-comment for the full mechanism note.
     void expand_field_list(
         pugi::xml_node const& parent, std::vector<FieldRef>& out,
         std::vector<std::uint16_t>& required_out,
@@ -618,6 +629,7 @@ void OrchestraLoaderState::expand_field_list(
                 gd.first_field_tag = first_member_tag(group_node);
                 gd.parent_group_no_tag = enclosing_group_no_tag;
                 gd.node = group_node;
+                gd.first_seen_required = greq;  // 081 D-3: first-seen usage's own presence
                 auto const idx = static_cast<std::uint16_t>(groups_.size());
                 group_index_by_no_tag_.emplace(no_tag, idx);
                 groups_.push_back(gd);
@@ -625,13 +637,20 @@ void OrchestraLoaderState::expand_field_list(
 
             // Recurse into the group's own children (its <fixr:numInGroup> child
             // is skipped automatically — it matches none of the three branches
-            // above) with the group-context set. Gate B r1 F1:
-            // group_scope_component_required RESETS to true at this new
-            // group's own boundary (symmetric with xml_loader.cpp).
+            // above) with the group-context set. 081 D-3 (Concern B —
+            // supersedes the Gate B r1 F1 "RESETS to true" rule):
+            // group_scope_component_required RESETS to `greq` — THIS
+            // groupRef's own `presence='required'` — at this new group's own
+            // boundary (symmetric with xml_loader.cpp). A direct member of an
+            // OPTIONAL group must not enter `group_required_pairs_out` even
+            // when its own `presence='required'` (QuickFIX `addXMLGroup`'s
+            // `required=="Y" && groupRequired`); NOT an AND across ancestor
+            // groups — each group's own boundary reset discards whatever the
+            // enclosing accumulator carried.
             expand_field_list(group_node, out, required_out, group_required_pairs_out, no_tag,
                               enclosing_component_index,
                               /*in_group=*/true, component_required,
-                              /*group_scope_component_required=*/true);  // fixpp#201 / 079 T020
+                              /*group_scope_component_required=*/greq);  // 081 D-3
         }
         // Ignore fixr:annotation / other unknown child elements (forwards-compat).
     }
@@ -889,14 +908,21 @@ detail::dict_metadata_handle_ptr OrchestraLoaderState::finalize() {
         std::uint16_t cnt = 0;
         // Gate B r1 F1 (fixpp#201, mirrors xml_loader.cpp): `grp_required` is
         // the GROUP-RELATIVE direct required-member set for THIS group — this
-        // standalone call starts fresh at the group's own boundary.
+        // standalone call starts fresh at the group's own boundary. 081-
+        // strict-validation-residuals D-3 (symmetric with xml_loader.cpp):
+        // `component_required` seeds from `g.first_seen_required` (the
+        // first-seen groupRef's own presence) instead of the unconditional
+        // `true` default, so an optional group's bare fallback reports no
+        // direct group-required members (Contract 1a leg 2).
         std::vector<FieldRef> grp_fields;
         std::vector<std::uint16_t> grp_required;
         if (g.node) {
             std::vector<std::pair<std::uint16_t, std::uint16_t>> grp_group_required;  // discard
             expand_field_list(g.node, grp_fields, grp_required, grp_group_required,
                               /*enclosing_group_no_tag=*/g.no_tag,
-                              /*enclosing_component_index=*/0);
+                              /*enclosing_component_index=*/0,
+                              /*in_group=*/false,
+                              /*component_required=*/g.first_seen_required);
             first_idx = static_cast<std::uint16_t>(h.group_fields_.size());
             cnt = static_cast<std::uint16_t>(std::min<std::size_t>(grp_fields.size(), 65535U));
             h.group_fields_.insert(h.group_fields_.end(), grp_fields.begin(), grp_fields.end());

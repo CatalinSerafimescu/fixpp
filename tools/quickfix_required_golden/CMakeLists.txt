@@ -61,7 +61,10 @@ if(FIXPP_BUILD_QUICKFIX_GOLDEN)
   target_compile_definitions(quickfix_required_golden PRIVATE
     "FIXPP_REQUIRED_GOLDEN_DICT_DIR=\"${FIXPP_REQUIRED_GOLDEN_DICT_DIR}\""
     "FIXPP_GOLDEN_GENERATOR_SOURCE=\"${CMAKE_CURRENT_SOURCE_DIR}/main.cpp\""
-    "FIXPP_REQUIRED_GOLDEN_OUTPUT_CSV=\"${CMAKE_CURRENT_SOURCE_DIR}/golden.csv\"")
+    "FIXPP_REQUIRED_GOLDEN_OUTPUT_CSV=\"${CMAKE_CURRENT_SOURCE_DIR}/golden.csv\""
+    # 081-strict-validation-residuals T020: per-group parity golden (SEPARATE
+    # file from golden.csv -- see main.cpp's T020 header-comment banner).
+    "FIXPP_REQUIRED_GOLDEN_GROUPS_OUTPUT_CSV=\"${CMAKE_CURRENT_SOURCE_DIR}/golden_groups.csv\"")
 
   # Host tool only: never installed, never linked into the user-facing
   # library, never part of a default preset.

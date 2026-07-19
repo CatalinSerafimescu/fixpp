@@ -203,6 +203,26 @@ target_compile_definitions(dictionary_required_scope_census_test PRIVATE
 add_test(NAME required_scope_census COMMAND dictionary_required_scope_census_test)
 set_tests_properties(required_scope_census PROPERTIES LABELS "dictionary;079;census")
 
+# ── 081-strict-validation-residuals T005/T006: FIXT.1.1 framing-table
+# non-circular census (Concern A) — STANDALONE (const §VII.8) exact-set
+# completeness gate, mirroring required_scope_census_test above. Includes the
+# private production header src/dictionary/fixt_framing_table.hpp via an
+# explicit target_include_directories seam (same pattern as ir.hpp above).
+add_executable(dictionary_fixt_header_merge_test fixt_header_merge_test.cpp)
+target_include_directories(dictionary_fixt_header_merge_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+  "${CMAKE_SOURCE_DIR}/src/dictionary")
+target_link_libraries(dictionary_fixt_header_merge_test PRIVATE
+  fixpp_dictionary
+  pugixml::pugixml
+  GTest::gtest
+  GTest::gtest_main
+)
+target_compile_definitions(dictionary_fixt_header_merge_test PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${FIXPP_DICT_DATA_DIR}\"")
+add_test(NAME fixt_header_merge COMMAND dictionary_fixt_header_merge_test)
+set_tests_properties(fixt_header_merge PROPERTIES LABELS "dictionary;081;census")
+
 # mallocnesia gate for the group-context lookup no-alloc test — re-runs the
 # standalone binary under LD_PRELOAD so global malloc/calloc/realloc is
 # intercepted (dual gate alongside the in-TU global operator-new counter; absent

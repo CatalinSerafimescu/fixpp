@@ -291,22 +291,25 @@ private:
     // message-level required set even when the nested field/group itself says
     // `required='Y'`. Does NOT affect `FieldRef.rule` (per-field presence,
     // FR-008) — only `required_out` membership.
-    // `group_scope_component_required` (Gate B r1 F1 — fixpp#201 escalation):
-    // a SEPARATE component-AND accumulator, distinct from `component_required`
-    // above — RESET to `true` on entry to each `<group>` (unlike
+    // `group_scope_component_required` (Gate B r1 F1 — fixpp#201 escalation;
+    // 081-strict-validation-residuals D-3 amends the reset value below): a
+    // SEPARATE component-AND accumulator, distinct from `component_required`
+    // above — RESET on entry to each `<group>` to THIS group's own
+    // `required=` (081 D-3; was unconditionally `true` under 079) — unlike
     // `component_required`, which threads through group boundaries unchanged
-    // because it feeds the MESSAGE-root `required_out`). ANDed with a
+    // because it feeds the MESSAGE-root `required_out`. ANDed with a
     // componentRef's own `required` at every componentRef reached inside the
     // CURRENT group's own subtree. Gates `group_required_pairs_out`: a field/
     // group's own `required='Y'` becomes a DIRECT group-required member of its
     // immediately-enclosing group only when this group-relative AND is ALSO
-    // true — an optional componentRef nested INSIDE a group must not leak its
-    // contents into that group's required-member set, even though the OUTER
-    // group itself may sit behind an unrelated optional component (which
-    // `component_required` already correctly zeroed out — irrelevant here,
-    // since this accumulator resets fresh at the group boundary). See Gate B
+    // true — i.e. `required=="Y" && groupRequired` (QuickFIX `addXMLGroup`):
+    // an optional componentRef nested INSIDE a group must not leak its
+    // contents into that group's required-member set, AND the immediately-
+    // enclosing group itself must be `required='Y'` (081 D-3 — NOT an AND
+    // across ancestor groups; each group's own boundary reset discards the
+    // outer accumulator, seeding fresh from ITS OWN `required=`). See Gate B
     // r1 triage F1 (NoMDStatistics(2474) over-include vs NoSides(552)
-    // over-exclude counterexamples).
+    // over-exclude counterexamples) + 081 research.md D-3.
     void expand_field_list(
         pugi::xml_node const& parent, std::vector<FieldRef>& out,
         std::vector<std::uint16_t>& required_out,
@@ -648,15 +651,23 @@ void LoaderState::expand_field_list(
             // Recurse into group children with the group-context set. fixpp#201:
             // in_group=true so descendant requireds do NOT leak to message level.
             // 079: component_required carries through unchanged (a group ref
-            // itself has no `required`-usage semantics on this axis). Gate B r1
-            // F1: group_scope_component_required RESETS to true here — the new
-            // group's own scope starts fresh at ITS boundary, independent of
-            // whatever optional component wrapped THIS <group> usage (matches
-            // QuickFIX's per-group sub-DataDictionary semantics).
+            // itself has no `required`-usage semantics on this axis). 081-
+            // strict-validation-residuals D-3 (Concern B — supersedes the Gate
+            // B r1 F1 "RESETS to true" rule below): group_scope_component_
+            // required RESETS to `greq` — THIS group's own `required=` — not
+            // unconditionally `true`. A direct member of an OPTIONAL group must
+            // NOT enter `group_required_pairs_out` even when its own
+            // `required='Y'` (QuickFIX `addXMLGroup`'s
+            // `required=="Y" && groupRequired`; research.md D-3). This is NOT
+            // an AND across ancestor groups — each group's own boundary reset
+            // discards whatever the enclosing accumulator carried, seeding
+            // fresh from ITS OWN `required=` (matches QuickFIX's per-group
+            // sub-DataDictionary semantics, and the reworked independent
+            // oracle in required_scope_oracle.hpp).
             expand_field_list(child, out, required_out, group_required_pairs_out, no_tag,
                               enclosing_component_index,
                               /*in_group=*/true, component_required,
-                              /*group_scope_component_required=*/true);
+                              /*group_scope_component_required=*/greq);
         }
         // Ignore unknown child elements (forwards-compat).
     }
@@ -1019,14 +1030,24 @@ detail::dict_metadata_handle_ptr LoaderState::finalize() {
         std::uint16_t first_idx = 0;
         std::uint16_t cnt = 0;
         // Gate B r1 F1 (fixpp#201): `grp_required` is the GROUP-RELATIVE direct
-        // required-member set for THIS group — this standalone call already
-        // starts fresh at the group's own boundary (`component_required`
-        // defaults `true`), so `!in_group && component_required`-gated pushes
-        // to `required_out` are exactly "own_req AND component-AND since this
-        // group's boundary" for direct members (nested-group descendants are
-        // excluded by the `!in_group` gate once a deeper <group> is entered).
-        // No separate `group_scope_component_required` accumulator is needed
-        // for THIS call — see Gate B r1 triage F1 mechanism note.
+        // required-member set for THIS group — this standalone call starts
+        // fresh at the group's own boundary, so `!in_group && component_
+        // required`-gated pushes to `required_out` are exactly "own_req AND
+        // component-AND since this group's boundary" for direct members
+        // (nested-group descendants are excluded by the `!in_group` gate once
+        // a deeper <group> is entered). No separate `group_scope_component_
+        // required` accumulator is needed for THIS call — see Gate B r1
+        // triage F1 mechanism note. 081-strict-validation-residuals D-3
+        // (Concern B, E-3's "bare" backing — symmetric with the context-store
+        // fix above): `component_required` now SEEDS from THIS group's own
+        // first-seen `required=` (`g_own_required`) instead of the unconditional
+        // `true` default — a bare-store fallback for an optional group's node
+        // must report empty (no direct member is group-required), matching
+        // the immediate-enclosing-group-gating rule the context store now
+        // enforces (Contract 1a leg 2 — the bare value must remain a valid
+        // observed per-context variant).
+        bool const g_own_required =
+            std::string_view{g.node.attribute("required").as_string("N")} == "Y";
         std::vector<FieldRef> grp_fields;
         std::vector<std::uint16_t> grp_required;
         if (g.node) {
@@ -1034,7 +1055,9 @@ detail::dict_metadata_handle_ptr LoaderState::finalize() {
             std::vector<std::pair<std::uint16_t, std::uint16_t>> grp_group_required;  // discard
             expand_field_list(g.node, grp_fields, grp_required, grp_group_required,
                               /*enclosing_group_no_tag=*/g.no_tag,
-                              /*enclosing_component_index=*/0);
+                              /*enclosing_component_index=*/0,
+                              /*in_group=*/false,
+                              /*component_required=*/g_own_required);
             first_idx = static_cast<std::uint16_t>(h.group_fields_.size());
             cnt = static_cast<std::uint16_t>(std::min<std::size_t>(grp_fields.size(), 65535U));
             h.group_fields_.insert(h.group_fields_.end(), grp_fields.begin(), grp_fields.end());

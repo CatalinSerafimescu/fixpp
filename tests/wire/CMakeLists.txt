@@ -117,7 +117,8 @@ add_executable(wire_dict_tests
   validator_nested_membership_test.cpp
   message_view_membership_copy_test.cpp
   validator_enum_domain_test.cpp                                      # T022/T022a/T023 (075)
-  validator_enum_multivalue_test.cpp)                                 # T027 (075)
+  validator_enum_multivalue_test.cpp                                  # T027 (075)
+  fixt_header_validate_test.cpp)                                      # T003/T004 (081)
 target_link_libraries(wire_dict_tests PRIVATE
   fixpp_wire
   fixpp_dictionary
@@ -207,6 +208,10 @@ target_include_directories(required_scope_parity_test PRIVATE
   "${CMAKE_SOURCE_DIR}/tests/dictionary")
 target_compile_definitions(required_scope_parity_test PRIVATE
   "FIXPP_REQUIRED_GOLDEN_CSV=\"${CMAKE_SOURCE_DIR}/tools/quickfix_required_golden/golden.csv\""
+  # 081-strict-validation-residuals T020: per-group parity golden (SEPARATE
+  # file from golden.csv -- see tools/quickfix_required_golden/main.cpp's
+  # T020 header-comment banner).
+  "FIXPP_REQUIRED_GOLDEN_GROUPS_CSV=\"${CMAKE_SOURCE_DIR}/tools/quickfix_required_golden/golden_groups.csv\""
   "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
 )
 add_test(NAME required_scope_parity COMMAND required_scope_parity_test)

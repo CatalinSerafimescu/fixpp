@@ -34,3 +34,8 @@ tools/quickfix_enum_golden/golden.csv -text
 # only the checked-in copy, not a freshly regenerated one).
 tools/quickfix_required_golden/main.cpp -text
 tools/quickfix_required_golden/golden.csv -text
+# 081-strict-validation-residuals T020: the new per-group golden shares the
+# same CRLF trap — pin to LF so a Windows checkout does not diverge the
+# checked-in copy from a freshly regenerated one (generator opens the stream
+# std::ios::binary) and no git-cleanliness gate reds on a CRLF-converted copy.
+tools/quickfix_required_golden/golden_groups.csv -text

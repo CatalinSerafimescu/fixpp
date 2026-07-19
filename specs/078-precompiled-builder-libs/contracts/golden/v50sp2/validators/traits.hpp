@@ -3551,7 +3551,6 @@ template <> struct writer_traits<::fixpp::v50sp2::groups::G_2691Args> {
     }};
 };
 
-inline bool G_552_1Args_required_54(::fixpp::v50sp2::groups::G_552_1Args const& a) noexcept { return a.side.has_value(); }
 inline ::std::optional<::std::size_t> G_552_1Args_count_party_i_ds(::fixpp::v50sp2::groups::G_552_1Args const& a) noexcept { if (!a.party_i_ds) { return ::std::nullopt; } return a.party_i_ds->size(); }
 inline ::fixpp::core::expected_t<void> G_552_1Args_validate_entry_party_i_ds(::fixpp::v50sp2::groups::G_552_1Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.party_i_ds)[i]); }
 inline ::std::optional<::std::size_t> G_552_1Args_count_party_details(::fixpp::v50sp2::groups::G_552_1Args const& a) noexcept { if (!a.party_details) { return ::std::nullopt; } return a.party_details->size(); }
@@ -3591,9 +3590,7 @@ inline ::fixpp::core::expected_t<void> G_552_1Args_validate_entry_related_positi
 inline ::std::optional<::std::size_t> G_552_1Args_count_side_collateral_amounts(::fixpp::v50sp2::groups::G_552_1Args const& a) noexcept { if (!a.side_collateral_amounts) { return ::std::nullopt; } return a.side_collateral_amounts->size(); }
 inline ::fixpp::core::expected_t<void> G_552_1Args_validate_entry_side_collateral_amounts(::fixpp::v50sp2::groups::G_552_1Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.side_collateral_amounts)[i]); }
 template <> struct writer_traits<::fixpp::v50sp2::groups::G_552_1Args> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v50sp2::groups::G_552_1Args>, 1> required_checks = {{
-        {54, &G_552_1Args_required_54},
-    }};
+    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v50sp2::groups::G_552_1Args>, 0> required_checks = {};
     static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v50sp2::groups::G_552_1Args>, 19> group_checks = {{
         {false, &G_552_1Args_count_party_i_ds, &G_552_1Args_validate_entry_party_i_ds},
         {false, &G_552_1Args_count_party_details, &G_552_1Args_validate_entry_party_details},
@@ -4265,11 +4262,8 @@ template <> struct writer_traits<::fixpp::v50sp2::groups::G_124_1Args> {
     }};
 };
 
-inline bool G_862Args_required_528(::fixpp::v50sp2::groups::G_862Args const& a) noexcept { return a.order_capacity.has_value(); }
 template <> struct writer_traits<::fixpp::v50sp2::groups::G_862Args> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v50sp2::groups::G_862Args>, 1> required_checks = {{
-        {528, &G_862Args_required_528},
-    }};
+    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v50sp2::groups::G_862Args>, 0> required_checks = {};
     static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v50sp2::groups::G_862Args>, 0> group_checks = {};
 };
 
@@ -4384,7 +4378,6 @@ template <> struct writer_traits<::fixpp::v50sp2::groups::G_711_2Args> {
     }};
 };
 
-inline bool G_552_2Args_required_54(::fixpp::v50sp2::groups::G_552_2Args const& a) noexcept { return a.side.has_value(); }
 inline ::std::optional<::std::size_t> G_552_2Args_count_party_i_ds(::fixpp::v50sp2::groups::G_552_2Args const& a) noexcept { if (!a.party_i_ds) { return ::std::nullopt; } return a.party_i_ds->size(); }
 inline ::fixpp::core::expected_t<void> G_552_2Args_validate_entry_party_i_ds(::fixpp::v50sp2::groups::G_552_2Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.party_i_ds)[i]); }
 inline ::std::optional<::std::size_t> G_552_2Args_count_limit_amts(::fixpp::v50sp2::groups::G_552_2Args const& a) noexcept { if (!a.limit_amts) { return ::std::nullopt; } return a.limit_amts->size(); }
@@ -4416,9 +4409,7 @@ inline ::fixpp::core::expected_t<void> G_552_2Args_validate_entry_related_trades
 inline ::std::optional<::std::size_t> G_552_2Args_count_related_positions(::fixpp::v50sp2::groups::G_552_2Args const& a) noexcept { if (!a.related_positions) { return ::std::nullopt; } return a.related_positions->size(); }
 inline ::fixpp::core::expected_t<void> G_552_2Args_validate_entry_related_positions(::fixpp::v50sp2::groups::G_552_2Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.related_positions)[i]); }
 template <> struct writer_traits<::fixpp::v50sp2::groups::G_552_2Args> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v50sp2::groups::G_552_2Args>, 1> required_checks = {{
-        {54, &G_552_2Args_required_54},
-    }};
+    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v50sp2::groups::G_552_2Args>, 0> required_checks = {};
     static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v50sp2::groups::G_552_2Args>, 15> group_checks = {{
         {false, &G_552_2Args_count_party_i_ds, &G_552_2Args_validate_entry_party_i_ds},
         {false, &G_552_2Args_count_limit_amts, &G_552_2Args_validate_entry_limit_amts},
@@ -4571,11 +4562,8 @@ template <> struct writer_traits<::fixpp::v50sp2::groups::G_897Args> {
     static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v50sp2::groups::G_897Args>, 0> group_checks = {};
 };
 
-inline bool G_33Args_required_58(::fixpp::v50sp2::groups::G_33Args const& a) noexcept { return a.text.has_value(); }
 template <> struct writer_traits<::fixpp::v50sp2::groups::G_33Args> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v50sp2::groups::G_33Args>, 1> required_checks = {{
-        {58, &G_33Args_required_58},
-    }};
+    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v50sp2::groups::G_33Args>, 0> required_checks = {};
     static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v50sp2::groups::G_33Args>, 0> group_checks = {};
 };
 
@@ -4695,13 +4683,8 @@ template <> struct writer_traits<::fixpp::v50sp2::groups::G_936_1Args> {
     static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v50sp2::groups::G_936_1Args>, 0> group_checks = {};
 };
 
-inline bool G_936_2Args_required_930(::fixpp::v50sp2::groups::G_936_2Args const& a) noexcept { return a.ref_comp_id.has_value(); }
-inline bool G_936_2Args_required_928(::fixpp::v50sp2::groups::G_936_2Args const& a) noexcept { return a.status_value.has_value(); }
 template <> struct writer_traits<::fixpp::v50sp2::groups::G_936_2Args> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v50sp2::groups::G_936_2Args>, 2> required_checks = {{
-        {930, &G_936_2Args_required_930},
-        {928, &G_936_2Args_required_928},
-    }};
+    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v50sp2::groups::G_936_2Args>, 0> required_checks = {};
     static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v50sp2::groups::G_936_2Args>, 0> group_checks = {};
 };
 
@@ -4719,8 +4702,6 @@ template <> struct writer_traits<::fixpp::v50sp2::groups::G_1610Args> {
     }};
 };
 
-inline bool G_386_2Args_required_336(::fixpp::v50sp2::groups::G_386_2Args const& a) noexcept { return a.trading_session_id.has_value(); }
-inline bool G_386_2Args_required_340(::fixpp::v50sp2::groups::G_386_2Args const& a) noexcept { return a.trad_ses_status.has_value(); }
 inline ::std::optional<::std::size_t> G_386_2Args_count_ord_type_rules(::fixpp::v50sp2::groups::G_386_2Args const& a) noexcept { if (!a.ord_type_rules) { return ::std::nullopt; } return a.ord_type_rules->size(); }
 inline ::fixpp::core::expected_t<void> G_386_2Args_validate_entry_ord_type_rules(::fixpp::v50sp2::groups::G_386_2Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.ord_type_rules)[i]); }
 inline ::std::optional<::std::size_t> G_386_2Args_count_time_in_force_rules(::fixpp::v50sp2::groups::G_386_2Args const& a) noexcept { if (!a.time_in_force_rules) { return ::std::nullopt; } return a.time_in_force_rules->size(); }
@@ -4734,10 +4715,7 @@ inline ::fixpp::core::expected_t<void> G_386_2Args_validate_entry_match_rules(::
 inline ::std::optional<::std::size_t> G_386_2Args_count_md_feed_types(::fixpp::v50sp2::groups::G_386_2Args const& a) noexcept { if (!a.md_feed_types) { return ::std::nullopt; } return a.md_feed_types->size(); }
 inline ::fixpp::core::expected_t<void> G_386_2Args_validate_entry_md_feed_types(::fixpp::v50sp2::groups::G_386_2Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.md_feed_types)[i]); }
 template <> struct writer_traits<::fixpp::v50sp2::groups::G_386_2Args> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v50sp2::groups::G_386_2Args>, 2> required_checks = {{
-        {336, &G_386_2Args_required_336},
-        {340, &G_386_2Args_required_340},
-    }};
+    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v50sp2::groups::G_386_2Args>, 0> required_checks = {};
     static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v50sp2::groups::G_386_2Args>, 6> group_checks = {{
         {false, &G_386_2Args_count_ord_type_rules, &G_386_2Args_validate_entry_ord_type_rules},
         {false, &G_386_2Args_count_time_in_force_rules, &G_386_2Args_validate_entry_time_in_force_rules},
@@ -5944,33 +5922,19 @@ template <> struct writer_traits<::fixpp::v50sp2::groups::G_2428_2Args> {
     }};
 };
 
-inline bool G_2474_1Args_required_2456(::fixpp::v50sp2::groups::G_2474_1Args const& a) noexcept { return a.md_statistic_type.has_value(); }
-inline bool G_2474_1Args_required_2457(::fixpp::v50sp2::groups::G_2474_1Args const& a) noexcept { return a.md_statistic_scope.has_value(); }
-inline bool G_2474_1Args_required_2464(::fixpp::v50sp2::groups::G_2474_1Args const& a) noexcept { return a.md_statistic_interval_type.has_value(); }
 inline ::std::optional<::std::size_t> G_2474_1Args_count_nested_party_i_ds(::fixpp::v50sp2::groups::G_2474_1Args const& a) noexcept { if (!a.nested_party_i_ds) { return ::std::nullopt; } return a.nested_party_i_ds->size(); }
 inline ::fixpp::core::expected_t<void> G_2474_1Args_validate_entry_nested_party_i_ds(::fixpp::v50sp2::groups::G_2474_1Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.nested_party_i_ds)[i]); }
 template <> struct writer_traits<::fixpp::v50sp2::groups::G_2474_1Args> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v50sp2::groups::G_2474_1Args>, 3> required_checks = {{
-        {2456, &G_2474_1Args_required_2456},
-        {2457, &G_2474_1Args_required_2457},
-        {2464, &G_2474_1Args_required_2464},
-    }};
+    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v50sp2::groups::G_2474_1Args>, 0> required_checks = {};
     static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v50sp2::groups::G_2474_1Args>, 1> group_checks = {{
         {false, &G_2474_1Args_count_nested_party_i_ds, &G_2474_1Args_validate_entry_nested_party_i_ds},
     }};
 };
 
-inline bool G_2474_2Args_required_2456(::fixpp::v50sp2::groups::G_2474_2Args const& a) noexcept { return a.md_statistic_type.has_value(); }
-inline bool G_2474_2Args_required_2457(::fixpp::v50sp2::groups::G_2474_2Args const& a) noexcept { return a.md_statistic_scope.has_value(); }
-inline bool G_2474_2Args_required_2464(::fixpp::v50sp2::groups::G_2474_2Args const& a) noexcept { return a.md_statistic_interval_type.has_value(); }
 inline ::std::optional<::std::size_t> G_2474_2Args_count_nested_party_i_ds(::fixpp::v50sp2::groups::G_2474_2Args const& a) noexcept { if (!a.nested_party_i_ds) { return ::std::nullopt; } return a.nested_party_i_ds->size(); }
 inline ::fixpp::core::expected_t<void> G_2474_2Args_validate_entry_nested_party_i_ds(::fixpp::v50sp2::groups::G_2474_2Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.nested_party_i_ds)[i]); }
 template <> struct writer_traits<::fixpp::v50sp2::groups::G_2474_2Args> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v50sp2::groups::G_2474_2Args>, 3> required_checks = {{
-        {2456, &G_2474_2Args_required_2456},
-        {2457, &G_2474_2Args_required_2457},
-        {2464, &G_2474_2Args_required_2464},
-    }};
+    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v50sp2::groups::G_2474_2Args>, 0> required_checks = {};
     static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v50sp2::groups::G_2474_2Args>, 1> group_checks = {{
         {false, &G_2474_2Args_count_nested_party_i_ds, &G_2474_2Args_validate_entry_nested_party_i_ds},
     }};
@@ -5986,9 +5950,6 @@ template <> struct writer_traits<::fixpp::v50sp2::groups::G_124_3Args> {
     static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v50sp2::groups::G_124_3Args>, 0> group_checks = {};
 };
 
-inline bool G_73_4Args_required_11(::fixpp::v50sp2::groups::G_73_4Args const& a) noexcept { return a.cl_ord_id.has_value(); }
-inline bool G_73_4Args_required_67(::fixpp::v50sp2::groups::G_73_4Args const& a) noexcept { return a.list_seq_no.has_value(); }
-inline bool G_73_4Args_required_54(::fixpp::v50sp2::groups::G_73_4Args const& a) noexcept { return a.side.has_value(); }
 inline ::std::optional<::std::size_t> G_73_4Args_count_party_i_ds(::fixpp::v50sp2::groups::G_73_4Args const& a) noexcept { if (!a.party_i_ds) { return ::std::nullopt; } return a.party_i_ds->size(); }
 inline ::fixpp::core::expected_t<void> G_73_4Args_validate_entry_party_i_ds(::fixpp::v50sp2::groups::G_73_4Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.party_i_ds)[i]); }
 inline ::std::optional<::std::size_t> G_73_4Args_count_allocs(::fixpp::v50sp2::groups::G_73_4Args const& a) noexcept { if (!a.allocs) { return ::std::nullopt; } return a.allocs->size(); }
@@ -6052,11 +6013,7 @@ inline ::fixpp::core::expected_t<void> G_73_4Args_validate_entry_order_attribute
 inline ::std::optional<::std::size_t> G_73_4Args_count_strategy_parameters(::fixpp::v50sp2::groups::G_73_4Args const& a) noexcept { if (!a.strategy_parameters) { return ::std::nullopt; } return a.strategy_parameters->size(); }
 inline ::fixpp::core::expected_t<void> G_73_4Args_validate_entry_strategy_parameters(::fixpp::v50sp2::groups::G_73_4Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.strategy_parameters)[i]); }
 template <> struct writer_traits<::fixpp::v50sp2::groups::G_73_4Args> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v50sp2::groups::G_73_4Args>, 3> required_checks = {{
-        {11, &G_73_4Args_required_11},
-        {67, &G_73_4Args_required_67},
-        {54, &G_73_4Args_required_54},
-    }};
+    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v50sp2::groups::G_73_4Args>, 0> required_checks = {};
     static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v50sp2::groups::G_73_4Args>, 31> group_checks = {{
         {false, &G_73_4Args_count_party_i_ds, &G_73_4Args_validate_entry_party_i_ds},
         {false, &G_73_4Args_count_allocs, &G_73_4Args_validate_entry_allocs},
@@ -6092,19 +6049,8 @@ template <> struct writer_traits<::fixpp::v50sp2::groups::G_73_4Args> {
     }};
 };
 
-inline bool G_73_5Args_required_14(::fixpp::v50sp2::groups::G_73_5Args const& a) noexcept { return a.cum_qty.has_value(); }
-inline bool G_73_5Args_required_39(::fixpp::v50sp2::groups::G_73_5Args const& a) noexcept { return a.ord_status.has_value(); }
-inline bool G_73_5Args_required_151(::fixpp::v50sp2::groups::G_73_5Args const& a) noexcept { return a.leaves_qty.has_value(); }
-inline bool G_73_5Args_required_84(::fixpp::v50sp2::groups::G_73_5Args const& a) noexcept { return a.cxl_qty.has_value(); }
-inline bool G_73_5Args_required_6(::fixpp::v50sp2::groups::G_73_5Args const& a) noexcept { return a.avg_px.has_value(); }
 template <> struct writer_traits<::fixpp::v50sp2::groups::G_73_5Args> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v50sp2::groups::G_73_5Args>, 5> required_checks = {{
-        {14, &G_73_5Args_required_14},
-        {39, &G_73_5Args_required_39},
-        {151, &G_73_5Args_required_151},
-        {84, &G_73_5Args_required_84},
-        {6, &G_73_5Args_required_6},
-    }};
+    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v50sp2::groups::G_73_5Args>, 0> required_checks = {};
     static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v50sp2::groups::G_73_5Args>, 0> group_checks = {};
 };
 
@@ -6330,11 +6276,8 @@ template <> struct writer_traits<::fixpp::v50sp2::groups::G_146_11Args> {
     }};
 };
 
-inline bool G_267Args_required_269(::fixpp::v50sp2::groups::G_267Args const& a) noexcept { return a.md_entry_type.has_value(); }
 template <> struct writer_traits<::fixpp::v50sp2::groups::G_267Args> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v50sp2::groups::G_267Args>, 1> required_checks = {{
-        {269, &G_267Args_required_269},
-    }};
+    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v50sp2::groups::G_267Args>, 0> required_checks = {};
     static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v50sp2::groups::G_267Args>, 0> group_checks = {};
 };
 
@@ -6343,7 +6286,6 @@ template <> struct writer_traits<::fixpp::v50sp2::groups::G_1177Args> {
     static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v50sp2::groups::G_1177Args>, 0> group_checks = {};
 };
 
-inline bool G_268_1Args_required_269(::fixpp::v50sp2::groups::G_268_1Args const& a) noexcept { return a.md_entry_type.has_value(); }
 inline ::std::optional<::std::size_t> G_268_1Args_count_price_qualifiers(::fixpp::v50sp2::groups::G_268_1Args const& a) noexcept { if (!a.price_qualifiers) { return ::std::nullopt; } return a.price_qualifiers->size(); }
 inline ::fixpp::core::expected_t<void> G_268_1Args_validate_entry_price_qualifiers(::fixpp::v50sp2::groups::G_268_1Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.price_qualifiers)[i]); }
 inline ::std::optional<::std::size_t> G_268_1Args_count_rate_sources(::fixpp::v50sp2::groups::G_268_1Args const& a) noexcept { if (!a.rate_sources) { return ::std::nullopt; } return a.rate_sources->size(); }
@@ -6359,9 +6301,7 @@ inline ::fixpp::core::expected_t<void> G_268_1Args_validate_entry_related_trades
 inline ::std::optional<::std::size_t> G_268_1Args_count_party_i_ds(::fixpp::v50sp2::groups::G_268_1Args const& a) noexcept { if (!a.party_i_ds) { return ::std::nullopt; } return a.party_i_ds->size(); }
 inline ::fixpp::core::expected_t<void> G_268_1Args_validate_entry_party_i_ds(::fixpp::v50sp2::groups::G_268_1Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.party_i_ds)[i]); }
 template <> struct writer_traits<::fixpp::v50sp2::groups::G_268_1Args> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v50sp2::groups::G_268_1Args>, 1> required_checks = {{
-        {269, &G_268_1Args_required_269},
-    }};
+    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v50sp2::groups::G_268_1Args>, 0> required_checks = {};
     static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v50sp2::groups::G_268_1Args>, 7> group_checks = {{
         {false, &G_268_1Args_count_price_qualifiers, &G_268_1Args_validate_entry_price_qualifiers},
         {false, &G_268_1Args_count_rate_sources, &G_268_1Args_validate_entry_rate_sources},
@@ -6378,7 +6318,6 @@ template <> struct writer_traits<::fixpp::v50sp2::groups::G_1175Args> {
     static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v50sp2::groups::G_1175Args>, 0> group_checks = {};
 };
 
-inline bool G_268_2Args_required_279(::fixpp::v50sp2::groups::G_268_2Args const& a) noexcept { return a.md_update_action.has_value(); }
 inline ::std::optional<::std::size_t> G_268_2Args_count_security_alt_id(::fixpp::v50sp2::groups::G_268_2Args const& a) noexcept { if (!a.security_alt_id) { return ::std::nullopt; } return a.security_alt_id->size(); }
 inline ::fixpp::core::expected_t<void> G_268_2Args_validate_entry_security_alt_id(::fixpp::v50sp2::groups::G_268_2Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.security_alt_id)[i]); }
 inline ::std::optional<::std::size_t> G_268_2Args_count_secondary_asset_classes(::fixpp::v50sp2::groups::G_268_2Args const& a) noexcept { if (!a.secondary_asset_classes) { return ::std::nullopt; } return a.secondary_asset_classes->size(); }
@@ -6460,9 +6399,7 @@ inline ::fixpp::core::expected_t<void> G_268_2Args_validate_entry_stats_indicato
 inline ::std::optional<::std::size_t> G_268_2Args_count_party_i_ds(::fixpp::v50sp2::groups::G_268_2Args const& a) noexcept { if (!a.party_i_ds) { return ::std::nullopt; } return a.party_i_ds->size(); }
 inline ::fixpp::core::expected_t<void> G_268_2Args_validate_entry_party_i_ds(::fixpp::v50sp2::groups::G_268_2Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.party_i_ds)[i]); }
 template <> struct writer_traits<::fixpp::v50sp2::groups::G_268_2Args> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v50sp2::groups::G_268_2Args>, 1> required_checks = {{
-        {279, &G_268_2Args_required_279},
-    }};
+    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v50sp2::groups::G_268_2Args>, 0> required_checks = {};
     static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v50sp2::groups::G_268_2Args>, 40> group_checks = {{
         {false, &G_268_2Args_count_security_alt_id, &G_268_2Args_validate_entry_security_alt_id},
         {false, &G_268_2Args_count_secondary_asset_classes, &G_268_2Args_validate_entry_secondary_asset_classes},
@@ -6772,7 +6709,6 @@ template <> struct writer_traits<::fixpp::v50sp2::groups::G_2580Args> {
     static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v50sp2::groups::G_2580Args>, 0> group_checks = {};
 };
 
-inline bool G_295_3Args_required_299(::fixpp::v50sp2::groups::G_295_3Args const& a) noexcept { return a.quote_entry_id.has_value(); }
 inline ::std::optional<::std::size_t> G_295_3Args_count_security_alt_id(::fixpp::v50sp2::groups::G_295_3Args const& a) noexcept { if (!a.security_alt_id) { return ::std::nullopt; } return a.security_alt_id->size(); }
 inline ::fixpp::core::expected_t<void> G_295_3Args_validate_entry_security_alt_id(::fixpp::v50sp2::groups::G_295_3Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.security_alt_id)[i]); }
 inline ::std::optional<::std::size_t> G_295_3Args_count_secondary_asset_classes(::fixpp::v50sp2::groups::G_295_3Args const& a) noexcept { if (!a.secondary_asset_classes) { return ::std::nullopt; } return a.secondary_asset_classes->size(); }
@@ -6822,9 +6758,7 @@ inline ::fixpp::core::expected_t<void> G_295_3Args_validate_entry_extraordinary_
 inline ::std::optional<::std::size_t> G_295_3Args_count_legs(::fixpp::v50sp2::groups::G_295_3Args const& a) noexcept { if (!a.legs) { return ::std::nullopt; } return a.legs->size(); }
 inline ::fixpp::core::expected_t<void> G_295_3Args_validate_entry_legs(::fixpp::v50sp2::groups::G_295_3Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.legs)[i]); }
 template <> struct writer_traits<::fixpp::v50sp2::groups::G_295_3Args> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v50sp2::groups::G_295_3Args>, 1> required_checks = {{
-        {299, &G_295_3Args_required_299},
-    }};
+    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v50sp2::groups::G_295_3Args>, 0> required_checks = {};
     static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v50sp2::groups::G_295_3Args>, 24> group_checks = {{
         {false, &G_295_3Args_count_security_alt_id, &G_295_3Args_validate_entry_security_alt_id},
         {false, &G_295_3Args_count_secondary_asset_classes, &G_295_3Args_validate_entry_secondary_asset_classes},
@@ -6853,8 +6787,6 @@ template <> struct writer_traits<::fixpp::v50sp2::groups::G_295_3Args> {
     }};
 };
 
-inline bool G_296_2Args_required_302(::fixpp::v50sp2::groups::G_296_2Args const& a) noexcept { return a.quote_set_id.has_value(); }
-inline bool G_296_2Args_required_304(::fixpp::v50sp2::groups::G_296_2Args const& a) noexcept { return a.tot_no_quote_entries.has_value(); }
 inline ::std::optional<::std::size_t> G_296_2Args_count_underlying_security_alt_id(::fixpp::v50sp2::groups::G_296_2Args const& a) noexcept { if (!a.underlying_security_alt_id) { return ::std::nullopt; } return a.underlying_security_alt_id->size(); }
 inline ::fixpp::core::expected_t<void> G_296_2Args_validate_entry_underlying_security_alt_id(::fixpp::v50sp2::groups::G_296_2Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.underlying_security_alt_id)[i]); }
 inline ::std::optional<::std::size_t> G_296_2Args_count_underlying_stips(::fixpp::v50sp2::groups::G_296_2Args const& a) noexcept { if (!a.underlying_stips) { return ::std::nullopt; } return a.underlying_stips->size(); }
@@ -6910,10 +6842,7 @@ inline ::fixpp::core::expected_t<void> G_296_2Args_validate_entry_underlying_ext
 inline ::std::optional<::std::size_t> G_296_2Args_count_quote_entries(::fixpp::v50sp2::groups::G_296_2Args const& a) noexcept { if (!a.quote_entries) { return ::std::nullopt; } return a.quote_entries->size(); }
 inline ::fixpp::core::expected_t<void> G_296_2Args_validate_entry_quote_entries(::fixpp::v50sp2::groups::G_296_2Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.quote_entries)[i]); }
 template <> struct writer_traits<::fixpp::v50sp2::groups::G_296_2Args> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v50sp2::groups::G_296_2Args>, 2> required_checks = {{
-        {302, &G_296_2Args_required_302},
-        {304, &G_296_2Args_required_304},
-    }};
+    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v50sp2::groups::G_296_2Args>, 0> required_checks = {};
     static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v50sp2::groups::G_296_2Args>, 27> group_checks = {{
         {false, &G_296_2Args_count_underlying_security_alt_id, &G_296_2Args_validate_entry_underlying_security_alt_id},
         {false, &G_296_2Args_count_underlying_stips, &G_296_2Args_validate_entry_underlying_stips},
@@ -7067,8 +6996,6 @@ template <> struct writer_traits<::fixpp::v50sp2::groups::G_1829Args> {
     }};
 };
 
-inline bool G_552_3Args_required_54(::fixpp::v50sp2::groups::G_552_3Args const& a) noexcept { return a.side.has_value(); }
-inline bool G_552_3Args_required_11(::fixpp::v50sp2::groups::G_552_3Args const& a) noexcept { return a.cl_ord_id.has_value(); }
 inline ::std::optional<::std::size_t> G_552_3Args_count_party_i_ds(::fixpp::v50sp2::groups::G_552_3Args const& a) noexcept { if (!a.party_i_ds) { return ::std::nullopt; } return a.party_i_ds->size(); }
 inline ::fixpp::core::expected_t<void> G_552_3Args_validate_entry_party_i_ds(::fixpp::v50sp2::groups::G_552_3Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.party_i_ds)[i]); }
 inline ::std::optional<::std::size_t> G_552_3Args_count_cross_legs(::fixpp::v50sp2::groups::G_552_3Args const& a) noexcept { if (!a.cross_legs) { return ::std::nullopt; } return a.cross_legs->size(); }
@@ -7078,10 +7005,7 @@ inline ::fixpp::core::expected_t<void> G_552_3Args_validate_entry_allocs(::fixpp
 inline ::std::optional<::std::size_t> G_552_3Args_count_commissions(::fixpp::v50sp2::groups::G_552_3Args const& a) noexcept { if (!a.commissions) { return ::std::nullopt; } return a.commissions->size(); }
 inline ::fixpp::core::expected_t<void> G_552_3Args_validate_entry_commissions(::fixpp::v50sp2::groups::G_552_3Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.commissions)[i]); }
 template <> struct writer_traits<::fixpp::v50sp2::groups::G_552_3Args> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v50sp2::groups::G_552_3Args>, 2> required_checks = {{
-        {54, &G_552_3Args_required_54},
-        {11, &G_552_3Args_required_11},
-    }};
+    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v50sp2::groups::G_552_3Args>, 0> required_checks = {};
     static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v50sp2::groups::G_552_3Args>, 4> group_checks = {{
         {false, &G_552_3Args_count_party_i_ds, &G_552_3Args_validate_entry_party_i_ds},
         {false, &G_552_3Args_count_cross_legs, &G_552_3Args_validate_entry_cross_legs},
@@ -7090,15 +7014,10 @@ template <> struct writer_traits<::fixpp::v50sp2::groups::G_552_3Args> {
     }};
 };
 
-inline bool G_552_4Args_required_54(::fixpp::v50sp2::groups::G_552_4Args const& a) noexcept { return a.side.has_value(); }
-inline bool G_552_4Args_required_11(::fixpp::v50sp2::groups::G_552_4Args const& a) noexcept { return a.cl_ord_id.has_value(); }
 inline ::std::optional<::std::size_t> G_552_4Args_count_party_i_ds(::fixpp::v50sp2::groups::G_552_4Args const& a) noexcept { if (!a.party_i_ds) { return ::std::nullopt; } return a.party_i_ds->size(); }
 inline ::fixpp::core::expected_t<void> G_552_4Args_validate_entry_party_i_ds(::fixpp::v50sp2::groups::G_552_4Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.party_i_ds)[i]); }
 template <> struct writer_traits<::fixpp::v50sp2::groups::G_552_4Args> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v50sp2::groups::G_552_4Args>, 2> required_checks = {{
-        {54, &G_552_4Args_required_54},
-        {11, &G_552_4Args_required_11},
-    }};
+    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::v50sp2::groups::G_552_4Args>, 0> required_checks = {};
     static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::v50sp2::groups::G_552_4Args>, 1> group_checks = {{
         {false, &G_552_4Args_count_party_i_ds, &G_552_4Args_validate_entry_party_i_ds},
     }};
