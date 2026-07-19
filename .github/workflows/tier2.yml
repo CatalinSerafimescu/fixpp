@@ -193,13 +193,17 @@ jobs:
       - name: Install Ninja
         run: choco install ninja --no-progress -y
 
-      - name: Cache Conan packages
-        uses: actions/cache@v5
-        with:
-          path: C:\Users\runneradmin\.conan2\p
-          key: conan-win-${{ matrix.preset }}-${{ hashFiles('conanfile.py', format('conan/profiles/{0}', matrix.preset)) }}
-          restore-keys: |
-            conan-win-${{ matrix.preset }}-
+      # Conan deps come from a pre-seeded GHCR OCI artifact instead of the 10 GB
+      # actions/cache pool (keeps Conan off it so ccache stops being LRU-evicted).
+      # shell: bash → Git Bash (has sha256sum); the key strips CR so it matches
+      # the LF Linux seed. MISS → no-op and `conan install --build=missing` below
+      # rebuilds. Seeded with the SAME `-o with_otel=False -s:b compiler.cppstd=20`
+      # so package_ids match. NOTE: Windows restore path not yet dispatch-verified.
+      - name: Set up oras
+        uses: oras-project/setup-oras@v1
+      - name: Restore Conan cache from GHCR
+        shell: bash
+        run: ci/restore-conan-cache.sh ${{ matrix.preset }}
 
       # setup-msbuild only adds msbuild to PATH; it does NOT run vcvars, so cl.exe
       # is absent and the Ninja-generator presets fail "CMAKE_CXX_COMPILER (cl.exe)

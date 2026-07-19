@@ -15,7 +15,12 @@
 #   cd <library>; CONAN_HOME=/mnt/c/Users/Catalin/.conan2 ci/seed-conan-cache.sh windows-msvc-release
 set -euo pipefail
 
-PROFILE="${1:?usage: seed-conan-cache.sh <profile>   e.g. linux-clang-release}"
+PROFILE="${1:?usage: seed-conan-cache.sh <profile> [extra conan args] — e.g. linux-clang-libc++ -o 'fixpp/*:with_otel=False'}"
+shift
+EXTRA=("$@")   # lane-specific conan args — MUST match the CI lane's `conan install`
+               # so the packed package_id equals what CI resolves. Examples:
+               #   libc++ lanes : -o 'fixpp/*:with_otel=False'
+               #   MSVC lanes   : -o 'fixpp/*:with_otel=False' -s:b compiler.cppstd=20
 IMAGE="ghcr.io/catalinserafimescu/fixpp-conan-cache"
 
 # CWD-based (same as restore-conan-cache.sh) — no path magic.
@@ -24,17 +29,17 @@ IMAGE="ghcr.io/catalinserafimescu/fixpp-conan-cache"
 
 # KEY: recomputed identically by restore-conan-cache.sh — plain sha256sum, NOT
 # GitHub hashFiles(), so both sides match without depending on Actions functions.
-KEY="$(cat conanfile.py "conan/profiles/$PROFILE" | sha256sum | cut -c1-16)"
+KEY="$(cat conanfile.py "conan/profiles/$PROFILE" | tr -d '\r' | sha256sum | cut -c1-16)"
 TAG="${PROFILE}-${KEY}"
 
 WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
 
-# 1. Resolve the EXACT profile-locked package set from the local cache (no build).
-#    If this errors "missing binary", the local cache is incomplete for this
-#    profile — build it locally first (conan install ... --build=missing), then
-#    re-run. We deliberately do NOT pass --build=missing here: the point is to
-#    pack what already exists, never to rebuild.
-conan install . -pr:a "conan/profiles/$PROFILE" --format=json -of "$WORK/gen" > "$WORK/graph.json"
+# 1. Resolve the EXACT profile+options-locked package set. `conan graph info`
+#    (NOT `conan install`) resolves the graph WITHOUT running generators, so it
+#    (a) needs no toolchain — a Windows/MSVC profile resolves fine from Linux via
+#    CONAN_HOME=/mnt/c, and (b) never builds. If a binary is "Missing", the local
+#    cache lacks that package_id — build that lane locally first, then re-run.
+conan graph info . -pr:a "conan/profiles/$PROFILE" "${EXTRA[@]}" --format=json > "$WORK/graph.json"
 
 # 2. Turn the graph into a package list, then pack ONLY those package_ids
 #    (a bare `conan cache save '<ref>:*'` would also grab stale clang-18 ids).

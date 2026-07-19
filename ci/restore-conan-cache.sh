@@ -14,7 +14,9 @@ PROFILE="${1:?usage: restore-conan-cache.sh <profile>}"
 IMAGE="ghcr.io/catalinserafimescu/fixpp-conan-cache"
 
 # Same KEY basis as seed-conan-cache.sh (plain sha256sum of conanfile + profile).
-KEY="$(cat conanfile.py "conan/profiles/$PROFILE" | sha256sum | cut -c1-16)"
+# tr -d '\r': make the key line-ending-independent so a CRLF Windows checkout
+# hashes identically to the LF Linux seed (no-op on Linux → existing tags stay valid).
+KEY="$(cat conanfile.py "conan/profiles/$PROFILE" | tr -d '\r' | sha256sum | cut -c1-16)"
 TAG="${PROFILE}-${KEY}"
 
 WORK="$(mktemp -d)"
