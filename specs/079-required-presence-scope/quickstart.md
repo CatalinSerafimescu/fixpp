@@ -46,7 +46,7 @@ The golden is captured from QuickFIX via `DataDictionary::isRequiredField(msgTyp
 ```
 cmake -S . -B build/qfgolden -DFIXPP_BUILD_QUICKFIX_GOLDEN=ON <...> && cmake --build build/qfgolden --target quickfix_required_golden -j2
 ```
-Expect: QuickFIX `DataDictionary` required set == census oracle, per message, 9 QuickFIX dicts (no vlatest row — the genuine optional-component blind spot is vlatest-only, guarded by step 3's stronger walker + synthetic RED witness).
+Expect: QuickFIX `DataDictionary` required set == census oracle, per message, 9 QuickFIX dicts (no vlatest row — the genuine optional-component blind spot is vlatest-only, guarded by step 3's independent walker + synthetic RED witness; post-T020 both loaders thread the same component-AND, so the walker's guard is *independence*, not asymmetric strength).
 
 ## 5. Two-tier agreement (US3)
 

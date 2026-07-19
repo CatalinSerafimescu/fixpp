@@ -53,7 +53,7 @@
 ## Scenario & Coverage Gaps
 
 - [x] CHK027 Does the census requirement cover the header/trailer carve-out REGRESSION detection (a carve-out drop is caught because 8/9/10 must be present in the pre-skip span)? [Coverage, Spec §FR-009, contracts Contract 1] — PASS: FR-009/Contract 1 both state "which also verifies 8/9/10 are present" as a regression-detection consequence of the pre-skip comparison.
-- [x] CHK028 Is the vlatest-only blind spot (genuine optional-component, guarded by the stronger walker + synthetic RED witness) explicitly bounded vs the 9 QuickFIX dicts (independently guarded by Contract 2)? [Coverage, contracts Contract 2 Scope note] — PASS: Contract 2 Scope note states this bound explicitly.
+- [x] CHK028 Is the vlatest-only blind spot (genuine optional-component, guarded by the independent walker + synthetic RED witness; post-T020/F1 the guard is independence, not strength) explicitly bounded vs the 9 QuickFIX dicts (independently guarded by Contract 2)? [Coverage, contracts Contract 2 Scope note] — PASS: Contract 2 Scope note states this bound explicitly.
 - [x] CHK029 Is the two-tier failure interpretation specified (an unexpected mismatch LOCALIZES a missed codegen leg → adds a codegen change), so the "no codegen change" conclusion is falsifiable, not assumed? [Coverage, Spec §SC-008, contracts Contract 3 Purpose] — PASS: SC-008/Contract 3 Purpose/tasks.md T014 all state the localize-and-fix interpretation, making the conclusion falsifiable.
 
 ## Notes
