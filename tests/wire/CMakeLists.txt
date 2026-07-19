@@ -266,13 +266,21 @@ set_tests_properties(validator_legacy_char_type_test PROPERTIES LABELS "075;wire
 # read fixpp::wire::writer_traits<...>::required_checks directly, so it
 # links NO fixpp::validators::* lib — mirroring validator_legacy_char_type_
 # test's isolation-simple posture. Needs the build-tree generated
-# fixpp/{v44,v50sp2,vlatest}/messages/*.hpp (fixpp_codegen_generate, defined
-# in tests/codegen, add_subdirectory'd before tests/wire — same guard as
-# wire_codegen_tests above), gated on FIXPP_CODEGEN_FIX_LATEST for the
-# vlatest leg (mirrors wire_vlatest_reify_roundtrip_test's guard — with the
-# tier OFF, cmake/Codegen.cmake removes _codegen/include/fixpp/vlatest/
-# entirely).
-if(TARGET fixpp_codegen_generate AND FIXPP_CODEGEN_FIX_LATEST)
+# fixpp/{v44,v50sp2}/messages/*.hpp (fixpp_codegen_generate, defined in
+# tests/codegen, add_subdirectory'd before tests/wire — same guard as
+# wire_codegen_tests above) UNCONDITIONALLY, and ADDITIONALLY
+# fixpp/vlatest/messages/PositionReport.hpp when FIXPP_CODEGEN_FIX_LATEST is
+# ON. Gate B r1 F4: the v44/v50sp2 legs are NOT vlatest-gated (v44/v50sp2
+# generated headers exist whenever fixpp_codegen_generate does), so the
+# earlier `AND FIXPP_CODEGEN_FIX_LATEST` on the WHOLE target silently
+# dropped the v44 end-to-end two-tier check and the v50sp2 derivation check
+# too when the option was OFF — register the target whenever
+# fixpp_codegen_generate exists; the TU itself #ifdef-guards ONLY the
+# vlatest include + TEST on the FIXPP_TEST_HAS_VLATEST macro defined below
+# (mirrors wire_vlatest_reify_roundtrip_test's guard for the vlatest-only
+# case above — with the tier OFF, cmake/Codegen.cmake removes
+# _codegen/include/fixpp/vlatest/ entirely, so the TU must not #include it).
+if(TARGET fixpp_codegen_generate)
   add_executable(required_scope_two_tier_test required_scope_two_tier_test.cpp)
   add_dependencies(required_scope_two_tier_test fixpp_codegen_generate)
   target_link_libraries(required_scope_two_tier_test PRIVATE
@@ -288,6 +296,9 @@ if(TARGET fixpp_codegen_generate AND FIXPP_CODEGEN_FIX_LATEST)
   target_compile_definitions(required_scope_two_tier_test PRIVATE
     "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
     "FIXPP_ORCHESTRA_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries/orchestra\"")
+  if(FIXPP_CODEGEN_FIX_LATEST)
+    target_compile_definitions(required_scope_two_tier_test PRIVATE FIXPP_TEST_HAS_VLATEST)
+  endif()
   add_test(NAME required_scope_two_tier_test COMMAND required_scope_two_tier_test)
   set_tests_properties(required_scope_two_tier_test PROPERTIES LABELS "079;wire;two-tier")
 endif()

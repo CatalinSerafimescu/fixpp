@@ -61,9 +61,17 @@
 // 715`) land in the shared `fixpp::wire` namespace, overloaded on the
 // (distinct) Args parameter type. Included un-namespaced, same as the v44 /
 // v50sp2 blocks above.
+//
+// Gate B r1 F4: guarded on FIXPP_TEST_HAS_VLATEST (CMakeLists.txt, set only
+// when FIXPP_CODEGEN_FIX_LATEST is ON) — with the tier OFF,
+// cmake/Codegen.cmake removes _codegen/include/fixpp/vlatest/ entirely, so
+// this #include must not compile unconditionally, but the v44/v50sp2 legs
+// below (independent of this tier) must still build+run either way.
+#ifdef FIXPP_TEST_HAS_VLATEST
 #define FIXPP_VALIDATORS_HEADER_ONLY_PositionReport
 #include <fixpp/vlatest/messages/PositionReport.hpp>
 #undef FIXPP_VALIDATORS_HEADER_ONLY_PositionReport
+#endif  // FIXPP_TEST_HAS_VLATEST
 
 #include <gtest/gtest.h>
 
@@ -374,8 +382,12 @@ TEST(RequiredScopeTwoTier, V50sp2TradeCaptureReport_DerivationTierAgrees) {
 // PositionReport shape diverges from v44's (own required_checks {715,721};
 // NoUnderlyings(711) carries zero required members in this schema) — no
 // full-frame corroboration attempted here, per Contract 3 / SC-004.
+//
+// Gate B r1 F4: guarded on FIXPP_TEST_HAS_VLATEST — see the vlatest #include
+// guard above.
 // ══════════════════════════════════════════════════════════════════════════
 
+#ifdef FIXPP_TEST_HAS_VLATEST
 TEST(RequiredScopeTwoTier, VlatestPositionReport_DerivationTierAgrees) {
     std::pmr::monotonic_buffer_resource mr;
     auto dvlatest = load_orchestra_dict(&mr);
@@ -444,3 +456,4 @@ TEST(RequiredScopeTwoTier, VlatestPositionReport_DerivationTierAgrees) {
            "the 453 exclusion above is a representational split, not an under-enforcement";
     EXPECT_EQ(typed_missing_parties_result.error(), error::wire_required_field_missing);
 }
+#endif  // FIXPP_TEST_HAS_VLATEST
