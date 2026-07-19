@@ -31,6 +31,7 @@
 #include <fixpp/config/load_diagnostic.hpp>
 #include <fixpp/config/toml_config_loader.hpp>
 #include <fixpp/core/system_clock_source.hpp>
+#include <fixpp/dict/dictionary.hpp>
 #include <fixpp/dict/version_profile.hpp>
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/transport/reconnect_policy.hpp>
@@ -446,6 +447,106 @@ TEST(LoadHappyPath, Cov_AbsoluteDictPath) {
 
     EXPECT_EQ(result->engine.dictionaries.size(), std::size_t{1})
         << "expected 1 dictionary entry when path is absolute";
+}
+
+// ── 080-orchestra-runtime-load T012: dictionary.path resolves an Orchestra
+//    (<fixr:repository>) file via dict::load_any. RED before T014 (the
+//    resolver's XmlLoader throws on the Orchestra root -> invalid_or_
+//    contradictory_selector diagnostic on dictionary.path -> !has_value()).
+
+TEST(LoadHappyPath, Cov_OrchestraDictPath) {
+    const std::filesystem::path fixture_dir{std::string{FIXPP_CONFIG_FIXTURE_DIR}};
+    const std::filesystem::path orchestra_xml{FIXPP_ORCHESTRA_XML};
+
+    const std::filesystem::path tmp = fixture_dir / "_tmp_orchestra_path_test.toml";
+    {
+        std::ofstream out{tmp};
+        out << "[clock]\nkind = \"system\"\n\n"
+            << "[store]\nkind = \"memory\"\n\n"
+            << "[cert_source]\nkind = \"file\"\n"
+            << "cert_file = \"leaf_ecdsa_p256.pem\"\n"
+            << "key_file  = \"leaf_ecdsa_p256.key\"\n"
+            << "ca_file   = \"ca.pem\"\n\n"
+            << "[dictionary]\nkind = \"path\"\n"
+            // TOML *literal* string (single quotes): a Windows absolute path
+            // contains backslashes that a basic (double-quoted) string would
+            // parse as escape sequences.
+            << "path = '" << orchestra_xml.string() << "'\n\n"
+            << "[[session]]\n"
+            << "sender_comp_id = \"CLIENT1\"\n"
+            << "target_comp_id = \"SERVER1\"\n"
+            << "begin_string   = \"FIX.4.4\"\n"
+            << "role           = \"initiator\"\n\n"
+            << "[session.transport]\nkind = \"tls\"\n"
+            << "host = \"fix.example.com\"\nport = 4321\n\n"
+            << "[session.security_profile]\nkind = \"mtls_ca\"\n";
+    }
+
+    auto result = load_path(tmp);
+
+    std::error_code ec;
+    std::filesystem::remove(tmp, ec);
+
+    ASSERT_TRUE(result.has_value())
+        << "orchestra dict path must load successfully; diagnostics: " << [&] {
+               std::string s;
+               if (!result.has_value())
+                   for (const auto& d : result.error()) s += d.key_path + ": " + d.message + "\n";
+               return s;
+           }();
+
+    ASSERT_EQ(result->engine.dictionaries.size(), std::size_t{1})
+        << "expected 1 dictionary entry for the Orchestra dict path";
+    EXPECT_EQ(result->engine.dictionaries[0]->which_session_version(),
+              fixpp::dict::session_version::vlatest);
+    EXPECT_EQ(result->engine.dictionaries[0]->messages().size(), std::size_t{181});
+}
+
+// ── 080-orchestra-runtime-load T013: dictionary.path resolution for a
+//    classic <fix> dictionary is unchanged post-080 (SC-003/US2-AC2 pin).
+
+TEST(LoadHappyPath, Cov_ClassicDictPathUnchangedPost080) {
+    const std::filesystem::path fixture_dir{std::string{FIXPP_CONFIG_FIXTURE_DIR}};
+    const std::filesystem::path abs_dict = (fixture_dir / "FIX44.xml").lexically_normal();
+
+    const std::filesystem::path tmp = fixture_dir / "_tmp_classic_path_test.toml";
+    {
+        std::ofstream out{tmp};
+        out << "[clock]\nkind = \"system\"\n\n"
+            << "[store]\nkind = \"memory\"\n\n"
+            << "[cert_source]\nkind = \"file\"\n"
+            << "cert_file = \"leaf_ecdsa_p256.pem\"\n"
+            << "key_file  = \"leaf_ecdsa_p256.key\"\n"
+            << "ca_file   = \"ca.pem\"\n\n"
+            << "[dictionary]\nkind = \"path\"\n"
+            << "path = '" << abs_dict.string() << "'\n\n"
+            << "[[session]]\n"
+            << "sender_comp_id = \"CLIENT1\"\n"
+            << "target_comp_id = \"SERVER1\"\n"
+            << "begin_string   = \"FIX.4.4\"\n"
+            << "role           = \"initiator\"\n\n"
+            << "[session.transport]\nkind = \"tls\"\n"
+            << "host = \"fix.example.com\"\nport = 4321\n\n"
+            << "[session.security_profile]\nkind = \"mtls_ca\"\n";
+    }
+
+    auto result = load_path(tmp);
+
+    std::error_code ec;
+    std::filesystem::remove(tmp, ec);
+
+    ASSERT_TRUE(result.has_value())
+        << "classic dict path must load successfully; diagnostics: " << [&] {
+               std::string s;
+               if (!result.has_value())
+                   for (const auto& d : result.error()) s += d.key_path + ": " + d.message + "\n";
+               return s;
+           }();
+
+    ASSERT_EQ(result->engine.dictionaries.size(), std::size_t{1})
+        << "expected 1 dictionary entry for the classic dict path";
+    EXPECT_EQ(result->engine.dictionaries[0]->which_session_version(),
+              fixpp::dict::session_version::v44);
 }
 
 // ── pos_scalars_more_enums.toml: millis + block + insecure_plain_tcp profile ───

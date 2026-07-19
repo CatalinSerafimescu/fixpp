@@ -63,6 +63,49 @@ TEST(DictLoadFromXml, LoadFixt11) {
     fixpp_dict_destroy(d);
 }
 
+// ── 080 US1: fixpp_dict_load_from_xml accepts an Orchestra <fixr:repository>
+//    document via dict::load_any (SC-001, US1 AC1/AC2, quickstart Scenario 1).
+//
+// RED before T011 (returned FIXPP_ERR_CAPI_CONFIG_INVALID). Deep
+// load_any≡OrchestraLoader parity is established by Phase-2
+// dictionary_load_any_tests (T003); the opaque fixpp_dict_t* is not
+// field-introspectable through the public C-ABI, so this layer asserts the
+// entry-point contract (OK + non-null) + set_dictionary usability (SC-001,
+// US1 AC1/AC2).
+TEST(DictLoadFromXml, LoadOrchestraFixLatest) {
+    fixpp_dict_t* d = nullptr;
+    auto err = fixpp_dict_load_from_xml(FIXPP_DICT_DIR "/orchestra/OrchestraFIXLatest.xml", &d);
+    ASSERT_EQ(err, FIXPP_ERR_OK);
+    ASSERT_NE(d, nullptr);
+
+    fixpp_session_config_t* cfg = nullptr;
+    ASSERT_EQ(fixpp_session_config_create(&cfg), FIXPP_ERR_OK);
+    ASSERT_NE(cfg, nullptr);
+
+    EXPECT_EQ(fixpp_session_config_set_dictionary(cfg, d), FIXPP_ERR_OK);
+    fixpp_dict_destroy(d);
+
+    fixpp_session_config_destroy(cfg);
+}
+
+// ── 080 US1 regression pin: classic <fix> load is unchanged post-080
+//    (SC-003, US1 AC3, quickstart Scenario 2).
+TEST(DictLoadFromXml, ClassicFix44LoadUnchangedPost080) {
+    fixpp_dict_t* d = nullptr;
+    auto err = fixpp_dict_load_from_xml(FIXPP_DICT_DIR "/FIX44.xml", &d);
+    ASSERT_EQ(err, FIXPP_ERR_OK);
+    ASSERT_NE(d, nullptr);
+
+    fixpp_session_config_t* cfg = nullptr;
+    ASSERT_EQ(fixpp_session_config_create(&cfg), FIXPP_ERR_OK);
+    ASSERT_NE(cfg, nullptr);
+
+    EXPECT_EQ(fixpp_session_config_set_dictionary(cfg, d), FIXPP_ERR_OK);
+    fixpp_dict_destroy(d);
+
+    fixpp_session_config_destroy(cfg);
+}
+
 // ── Positive: loaded dict is usable via fixpp_session_config_set_dictionary ───
 //
 // Witnesses FR-001: the shared_ptr is copied through the setter; the dict handle

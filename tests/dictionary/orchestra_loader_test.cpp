@@ -438,14 +438,16 @@ TEST(OrchestraFailClosed, DanglingComponentRefThrows) {
 
 // (h) [reverse asymmetry regression pin] the vendored Orchestra file fed to
 // XmlLoader (QuickFIX-XML reader) — its root is <fixr:repository>, not <fix>,
-// so XmlLoader::parse_version's non-"fix"-root check (xml_loader.cpp:284-285)
-// rejects it. Assert THROWS (any documented XmlLoader exception type).
+// so XmlLoader::parse_document's missing-<fix>-child check
+// (xml_loader.cpp:742-745) rejects it. Assert THROWS (any documented
+// XmlLoader exception type).
 TEST(OrchestraFailClosed, VendoredOrchestraFileFedToXmlLoaderThrows) {
     std::pmr::monotonic_buffer_resource mr;
     fixpp::dict::XmlLoader loader;
-    // xml_loader.cpp:284-285's `root.name() != "fix"` check fires (the
-    // Orchestra root is <fixr:repository>) — the base xml_parse_error, NOT
-    // orchestra_parse_error (that type is OrchestraLoader-only).
+    // xml_loader.cpp:742-745's `doc.child("fix")`-missing check fires (the
+    // Orchestra root is <fixr:repository>, so `doc.child("fix")` finds
+    // nothing) — the base xml_parse_error, NOT orchestra_parse_error (that
+    // type is OrchestraLoader-only).
     EXPECT_THROW((void)loader.load(orchestra_file(), &mr), fixpp::dict::xml_parse_error);
 }
 

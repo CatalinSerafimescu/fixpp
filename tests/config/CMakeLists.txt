@@ -59,6 +59,7 @@ add_executable(config_044_tests
 )
 target_compile_definitions(config_044_tests PRIVATE
     FIXPP_CONFIG_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures"
+    FIXPP_ORCHESTRA_XML="${CMAKE_SOURCE_DIR}/dictionaries/orchestra/OrchestraFIXLatest.xml"
 )
 target_link_libraries(config_044_tests PRIVATE
     fixpp::config_toml

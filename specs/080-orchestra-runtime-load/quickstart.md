@@ -5,7 +5,7 @@ Runnable validation scenarios that prove the feature end-to-end. Author each as 
 ## Prerequisites
 
 - `dictionaries/orchestra/OrchestraFIXLatest.xml` (074 supply-chain artifact) — the Orchestra fixture.
-- An existing classic dictionary (e.g. `dictionaries/quickfix/FIX44.xml`) — the regression baseline.
+- An existing classic dictionary (e.g. `dictionaries/FIX44.xml`) — the regression baseline.
 - FIX-Latest message fixtures reused from 074/076 (no new goldens — spec Assumptions).
 
 ## Scenario 1 — C-API loads an Orchestra dictionary (US1 / SC-001)

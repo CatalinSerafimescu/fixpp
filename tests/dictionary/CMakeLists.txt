@@ -132,6 +132,30 @@ target_compile_definitions(dictionary_orchestra_tests PRIVATE
 add_test(NAME dictionary_orchestra_tests COMMAND dictionary_orchestra_tests)
 set_tests_properties(dictionary_orchestra_tests PROPERTIES LABELS "dictionary;orchestra")
 
+# ── 080-orchestra-runtime-load: dict::load_any shared dispatch helper ───────
+# Grouped whole-binary executable (const §VII.8), LABELS "dictionary;orchestra;080";
+# selected by `ctest -L 080`. Mirrors the dictionary_orchestra_tests block
+# above; reuses the same FIXPP_ORCHESTRA_DATA_DIR / FIXPP_DICT_DATA_DIR vars.
+add_executable(dictionary_load_any_tests
+  load_any_test.cpp
+)
+target_link_libraries(dictionary_load_any_tests PRIVATE
+  fixpp_dictionary
+  pugixml::pugixml
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(dictionary_load_any_tests PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests")
+target_compile_definitions(dictionary_load_any_tests PRIVATE
+  "FIXPP_ORCHESTRA_DATA_DIR=\"${FIXPP_ORCHESTRA_DATA_DIR}\""
+  "FIXPP_DICT_DATA_DIR=\"${FIXPP_DICT_DATA_DIR}\""
+  # 080 T015 (FR-004 single-dispatch source-inspection gate): repo src root so
+  # the gate can read the two call-site TUs + the sole sniff TU verbatim.
+  "FIXPP_SRC_DIR=\"${CMAKE_SOURCE_DIR}/src\"")
+add_test(NAME dictionary_load_any_tests COMMAND dictionary_load_any_tests)
+set_tests_properties(dictionary_load_any_tests PROPERTIES LABELS "dictionary;orchestra;080")
+
 # ── 075-live-wire-enum-validation T021: dictionary census gates ──────────────
 # STANDALONE (const §VII.8) — an exact-set completeness gate is
 # isolation-sensitive. Scans the shipped dictionaries/*.xml directly via

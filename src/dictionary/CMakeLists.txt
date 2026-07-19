@@ -13,6 +13,9 @@ add_library(fixpp_dictionary STATIC
   # 074-orchestra-native-reader: native FIX Orchestra (fixr:repository) reader,
   # sibling to xml_loader.cpp. Consumes pugixml PRIVATELY (same as xml_loader).
   orchestra_loader.cpp
+  # 080-orchestra-runtime-load: shared root-sniff dispatch helper
+  # (dict::load_any) — routes to xml_loader.cpp / orchestra_loader.cpp above.
+  load_any.cpp
   dictionary.cpp
   # 003-dictionary-codegen (RC#1): the 003-owned upstream surface bodies.
   # field_traits.cpp is a bridge file (arch §2.4 v0.3 — #includes the

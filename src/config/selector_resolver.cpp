@@ -11,7 +11,7 @@
 //
 // Calling convention for factory construction (D-3 / validation rule 9):
 //   - Noexcept expected_t factories: check-the-expected pattern (no try/catch).
-//   - Throwing ctors (system_clock_source, XmlLoader::load): wrap in
+//   - Throwing ctors (system_clock_source, dict::load_any): wrap in
 //     trap_throw_to_expected from loader_internal.hpp.
 // See loader_internal.hpp comment block for the closed list of trap_throw sites.
 
@@ -19,7 +19,7 @@
 #include <fixpp/config/config_bundle.hpp>
 #include <fixpp/config/toml_config_loader.hpp>
 #include <fixpp/core/system_clock_source.hpp>
-#include <fixpp/dict/xml_loader.hpp>
+#include <fixpp/dict/load_any.hpp>
 #include <fixpp/session/file_store_factory.hpp>
 #include <fixpp/session/memory_store_factory.hpp>
 #include <fixpp/session/security_profile.hpp>
@@ -356,11 +356,10 @@ static void resolve_engine_dictionary(const toml::table& root_tbl,
 
     std::filesystem::path xml_path = resolve_path(base_dir, std::filesystem::path{rel_path_str});
 
-    // XmlLoader::load THROWS — use trap_throw_to_expected.
+    // dict::load_any THROWS — use trap_throw_to_expected.
     auto load_result = trap_throw_to_expected(
         "dictionary.path", reason_class::invalid_or_contradictory_selector, [&] {
-            dict::XmlLoader loader;
-            dict::Dictionary d = loader.load(xml_path, opts.resource);
+            dict::Dictionary d = dict::load_any(xml_path, opts.resource);
             return std::make_shared<const dict::Dictionary>(std::move(d));
         });
 
