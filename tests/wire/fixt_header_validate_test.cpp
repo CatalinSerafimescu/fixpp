@@ -149,6 +149,26 @@ std::vector<std::byte> well_formed_new_order_single(NosFields const& f = {}) {
     return make_frame(body);
 }
 
+// Gate B r1 (opus_pr207_1_triage.md FIX-2): a well-formed NewOrderSingle with
+// one extra FIXT framing LENGTH field (90 SecureDataLen / 93 SignatureLength
+// / 212 XmlDataLen) injected immediately AFTER 35=D so Step-0's header-order
+// check does not preempt the Step-1 type check being pinned here.
+std::vector<std::byte> new_order_single_with_length_field(std::uint16_t tag,
+                                                           std::string_view value) {
+    NosFields f;
+    std::string body = "35=D\x01";
+    body += std::to_string(tag) + "=" + std::string{value} + "\x01";
+    body += "34=" + f.seq_num + "\x01";
+    body += "49=SENDER\x01";
+    body += "52=" + f.sending_time + "\x01";
+    body += "56=TARGET\x01";
+    body += "11=CLORD1\x01";
+    body += "54=1\x01";
+    body += "60=20240101-00:00:00\x01";
+    body += "40=2\x01";
+    return make_frame(body);
+}
+
 struct FixtHeaderValidateTest : ::testing::TestWithParam<char const*> {};
 
 // ── T003: standalone accept (SC-001) ────────────────────────────────────────
@@ -302,6 +322,99 @@ TEST_P(FixtHeaderValidateTest, MalformedSendingTimeStaysAccepted) {
         << GetParam()
         << ": malformed SendingTime(52) is structurally undetectable (UtcTimestamp->String) "
            "and must stay accepted (documented limitation, not a reject pin)";
+}
+
+// ── Gate B r1 (opus_pr207_1_triage.md FIX-2, FR-003a/FR-011): a malformed
+// FIXT framing LENGTH field (90/93/212, field_type::Length via
+// kFixtFramingTable) MUST be rejected at the Length structural-check arm
+// with the EXACT offending tag reported. RED before FIX-1 (Length routed
+// through the no-op arm — false-accept, [const §XVI] no-false-accept
+// invariant FR-011); GREEN after. ────────────────────────────────────────────
+TEST_P(FixtHeaderValidateTest, MalformedSecureDataLenRejected) {
+    std::pmr::monotonic_buffer_resource mr;
+    auto dict = load_real_dict(GetParam(), &mr);
+    dictionary_driven_validator v{dict.as_table_view()};
+
+    auto buf = new_order_single_with_length_field(90, "abc");
+    std::array<std::byte, 4096> stack{};
+    std::pmr::monotonic_buffer_resource arena;
+    auto mv = parse_index(buf, stack, arena);
+
+    std::array<std::byte, kScratch> scratch_buf{};
+    std::pmr::monotonic_buffer_resource scratch_mr{scratch_buf.data(), scratch_buf.size(),
+                                                   std::pmr::null_memory_resource()};
+    std::uint16_t ref_tag = 0;
+    auto result = v.validate(mv, &scratch_mr, &ref_tag);
+    ASSERT_FALSE(result.has_value()) << GetParam() << ": SecureDataLen(90)=abc must be rejected";
+    EXPECT_EQ(result.error(), error::wire_field_value_out_of_range);
+    EXPECT_EQ(ref_tag, std::uint16_t{90});
+}
+
+TEST_P(FixtHeaderValidateTest, MalformedSignatureLengthRejected) {
+    std::pmr::monotonic_buffer_resource mr;
+    auto dict = load_real_dict(GetParam(), &mr);
+    dictionary_driven_validator v{dict.as_table_view()};
+
+    auto buf = new_order_single_with_length_field(93, "abc");
+    std::array<std::byte, 4096> stack{};
+    std::pmr::monotonic_buffer_resource arena;
+    auto mv = parse_index(buf, stack, arena);
+
+    std::array<std::byte, kScratch> scratch_buf{};
+    std::pmr::monotonic_buffer_resource scratch_mr{scratch_buf.data(), scratch_buf.size(),
+                                                   std::pmr::null_memory_resource()};
+    std::uint16_t ref_tag = 0;
+    auto result = v.validate(mv, &scratch_mr, &ref_tag);
+    ASSERT_FALSE(result.has_value())
+        << GetParam() << ": SignatureLength(93)=abc must be rejected";
+    EXPECT_EQ(result.error(), error::wire_field_value_out_of_range);
+    EXPECT_EQ(ref_tag, std::uint16_t{93});
+}
+
+TEST_P(FixtHeaderValidateTest, MalformedXmlDataLenRejected) {
+    std::pmr::monotonic_buffer_resource mr;
+    auto dict = load_real_dict(GetParam(), &mr);
+    dictionary_driven_validator v{dict.as_table_view()};
+
+    auto buf = new_order_single_with_length_field(212, "abc");
+    std::array<std::byte, 4096> stack{};
+    std::pmr::monotonic_buffer_resource arena;
+    auto mv = parse_index(buf, stack, arena);
+
+    std::array<std::byte, kScratch> scratch_buf{};
+    std::pmr::monotonic_buffer_resource scratch_mr{scratch_buf.data(), scratch_buf.size(),
+                                                   std::pmr::null_memory_resource()};
+    std::uint16_t ref_tag = 0;
+    auto result = v.validate(mv, &scratch_mr, &ref_tag);
+    ASSERT_FALSE(result.has_value()) << GetParam() << ": XmlDataLen(212)=abc must be rejected";
+    EXPECT_EQ(result.error(), error::wire_field_value_out_of_range);
+    EXPECT_EQ(ref_tag, std::uint16_t{212});
+}
+
+// Over-rejection guard: a WELL-FORMED (numeric) LENGTH value for each of the
+// three tags above must still be accepted.
+TEST_P(FixtHeaderValidateTest, WellFormedLengthFieldsStillAccepted) {
+    std::pmr::monotonic_buffer_resource mr;
+    auto dict = load_real_dict(GetParam(), &mr);
+    dictionary_driven_validator v{dict.as_table_view()};
+
+    for (std::uint16_t const tag : {std::uint16_t{90}, std::uint16_t{93}, std::uint16_t{212}}) {
+        auto buf = new_order_single_with_length_field(tag, "5");
+        std::array<std::byte, 4096> stack{};
+        std::pmr::monotonic_buffer_resource arena;
+        auto mv = parse_index(buf, stack, arena);
+
+        std::array<std::byte, kScratch> scratch_buf{};
+        std::pmr::monotonic_buffer_resource scratch_mr{scratch_buf.data(), scratch_buf.size(),
+                                                       std::pmr::null_memory_resource()};
+        std::uint16_t ref_tag = 0;
+        auto result = v.validate(mv, &scratch_mr, &ref_tag);
+        EXPECT_TRUE(result.has_value())
+            << GetParam() << ": tag " << tag
+            << "=5 (well-formed LENGTH) must be accepted; err="
+            << (result.has_value() ? 0 : static_cast<int>(result.error()))
+            << " ref_tag=" << ref_tag;
+    }
 }
 
 INSTANTIATE_TEST_SUITE_P(Fix50Family, FixtHeaderValidateTest,

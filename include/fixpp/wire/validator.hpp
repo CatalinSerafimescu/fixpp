@@ -538,10 +538,26 @@ private:
                 }
                 return {};
             }
+            case ft::Length: {
+                // A LENGTH field is a non-negative integer (a byte count):
+                // non-empty, ASCII digits only, no leading '-' (stricter
+                // than Int — negative lengths are never valid).
+                if (value.empty()) {
+                    return core::expected_t<void>{std::unexpect,
+                                                  core::error::wire_field_value_out_of_range};
+                }
+                for (auto const ch_raw : value) {
+                    auto const ch = static_cast<unsigned char>(ch_raw);
+                    if (ch < '0' || ch > '9') {
+                        return core::expected_t<void>{std::unexpect,
+                                                      core::error::wire_field_value_out_of_range};
+                    }
+                }
+                return {};
+            }
             case ft::String:
             case ft::Boolean:
             case ft::Data:
-            case ft::Length:
             default:
                 // No structural constraint beyond non-degenerate framing.
                 return {};
