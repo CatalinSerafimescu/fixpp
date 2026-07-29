@@ -21,12 +21,14 @@
 // compilation, SIGKILL'd to protect the 24GB build host.
 //
 // 077-builder-args-dedup re-enables the tier via component-identity Args
-// dedup (576 shared plans instead of ~26k message-rooted structs, ~78MB;
+// dedup (577 shared plans instead of ~26k message-rooted structs, ~78MB;
 // T017 fixed a version-unscoped N-002/N-003 exclusion bug that had put the
-// build-tree count at 573 -- see BuilderDedupCount077.VlatestStructCountIs576) --
+// build-tree count at 573; 081 D-4/E-4 then re-pinned 576 -> 577 for the
+// tag-33 gated-required plan fork
+// -- see BuilderDedupCount077.VlatestStructCountIs577) --
 // see BuildersHeaderEmittedDeduped below (flipped to assert PRESENCE) and
 // tests/session/test_077_vlatest_builder_roundtrip.cpp / this binary's
-// BuilderDedupCount077.VlatestStructCountIs576 (T012/T013) for the
+// BuilderDedupCount077.VlatestStructCountIs577 (T012/T013) for the
 // #include/compile leg this TU still deliberately avoids -- this TU only
 // needs the read-tier headers named in the task -- {Fields,Messages,
 // Validator,Reify} -- which are v50sp2-comparable in size/cost.
@@ -77,7 +79,7 @@ TEST(VlatestCompileSmoke076, FourReadTierHeadersCarryRealSymbols) {
 // deletes vlatest/Builders.hpp on an ON configure -- FR-004/FR-012, G4a).
 // This test's invariant is exactly reversed from 076: pin that the header
 // NOW EXISTS and has the deduped shape (struct count is pinned precisely by
-// BuilderDedupCount077.VlatestStructCountIs576 in this same binary, T013).
+// BuilderDedupCount077.VlatestStructCountIs577 in this same binary, T013).
 //
 // 078-precompiled-builder-libs re-point (census T015): the monolithic
 // Builders.hpp is GONE (FR-008) -- existence now targets the per-version
