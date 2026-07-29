@@ -895,12 +895,23 @@ std::string fix44_ap_required_prefix() {
 }
 }  // namespace
 
-TEST(ValidatorTypeCheck, Fixpp201Fix44PositionReportGroupInstanceMissingRequiredMemberRejected) {
+// 081-strict-validation-residuals Concern B (#205) — SUPERSEDES waiver W-204-1
+// (and flips this 079-era pin). `NoUnderlyings(711)` is an OPTIONAL group in the
+// FIX44 PositionReport(AP), so under QuickFIX immediate-enclosing group-gating a
+// present-but-incomplete instance omitting the group's own `required='Y'` member
+// (733) is now ACCEPTED (was rejected under 079's stricter "required-once-present"
+// rule). Sibling pins: tests/dictionary/required_scope_test.cpp (AP 732/733
+// contains→not-contains, T014) and tests/wire/required_scope_two_tier_test.cpp
+// (V44PositionReport_OptionalGroupInstanceMissingRequired_BothTiersAccept). A
+// REQUIRED group's incomplete instance still rejects (see the required-group pins
+// in required_scope_two_tier_test.cpp). See B&L B-081-2 / L-081-1.
+TEST(ValidatorTypeCheck, Fixpp201Fix44PositionReportOptionalGroupInstanceMissingMemberAccepted) {
     std::pmr::monotonic_buffer_resource mr;
     auto d44 = load_real_dict("FIX44.xml", &mr);
     dictionary_driven_validator v{d44.as_table_view()};
 
-    // Instance 1 complete (311/732/733); instance 2 omits 733.
+    // Instance 1 complete (311/732/733); instance 2 omits 733. NoUnderlyings is
+    // optional → accepted under 081 Concern B group-gating.
     auto buf = make_frame(
         fix44_ap_required_prefix() +
         "711=2\x01"
@@ -915,10 +926,9 @@ TEST(ValidatorTypeCheck, Fixpp201Fix44PositionReportGroupInstanceMissingRequired
                                                    std::pmr::null_memory_resource()};
     std::uint16_t ref_tag = 0;
     auto result = v.validate(mv, &scratch_mr, &ref_tag);
-    ASSERT_FALSE(result.has_value())
-        << "FIX44 AP NoUnderlyings instance omitting required 733 must be rejected";
-    EXPECT_EQ(result.error(), error::wire_required_field_missing);
-    EXPECT_EQ(ref_tag, 733) << "ref tag must name the missing required member";
+    EXPECT_TRUE(result.has_value())
+        << "FIX44 AP NoUnderlyings is an OPTIONAL group; a present instance omitting "
+           "its required member 733 must be ACCEPTED (081 Concern B / #205, supersedes W-204-1)";
 }
 
 TEST(ValidatorTypeCheck, Fixpp201Fix44PositionReportAllGroupInstancesCompleteAccepted) {

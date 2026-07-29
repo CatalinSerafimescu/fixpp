@@ -16,7 +16,22 @@
 //
 // Asserts:
 //   (1) the emitted `struct G_<no_tag>[_<ordinal>]Args {` count is exactly
-//       576 -- the T005 census pin for vlatest (NOT ~26k message-rooted).
+//       577 -- the T005 census pin for vlatest (NOT ~26k message-rooted).
+//       081-strict-validation-residuals re-pin 576 -> 577 (D-4/E-4, Concern
+//       B): `compute_signature` gained the GATED enforcement values as
+//       signature components (a group item's `group_check_required`, and a
+//       scalar item's `required` now `own_required && level_required`), so a
+//       structural group used REQUIRED in one context and OPTIONAL in
+//       another can no longer share one interned plan -- its directly-
+//       required members' effective required-ness differs. In vlatest
+//       exactly one group met that: tag 33 (`NoLinesOfText`, whose `Text`
+//       member is required='Y'), which forked `G_33Args` ->
+//       `G_33_1Args` + `G_33_2Args`. Net +1; every other one of the 576
+//       per-plan headers is byte-identical (one fork, zero merges -- see the
+//       regenerated golden under specs/078-precompiled-builder-libs/
+//       contracts/golden/vlatest/groups/). The fork set is complete BY
+//       CONSTRUCTION: interning is keyed on the signature, so no two
+//       conflicting gated values can collapse into a shared plan.
 //       T017 (US2) found the build-tree's pre-fix 573 traced to a real bug:
 //       emit_builders.cpp's `all`-mode N-002/N-003 exclusion set
 //       {BE,BF,BW,BX,BY} was applied version-UNSCOPED, so vlatest (like
@@ -49,7 +64,9 @@
 //          specs/077-builder-args-dedup/contracts/generated-builder-dedup.md
 //          G1/G1a/G5;
 //          .specify/decisions/077-builder-args-dedup-verify.md (576 pin,
-//          T017 N-002/N-003 version-scoping fix).
+//          T017 N-002/N-003 version-scoping fix);
+//          specs/081-strict-validation-residuals/plan.md D-4/E-4 (the
+//          576 -> 577 re-pin: gated-required plan fork, tag 33).
 
 #include <gtest/gtest.h>
 
@@ -68,7 +85,7 @@ namespace {
 // data-only home, 078-precompiled-builder-libs) is a sibling in the same
 // per-version directory.
 // 078-precompiled-builder-libs SC-001 fix: groups.hpp became an UMBRELLA of
-// #includes (no struct bodies); the 576 `struct G_...Args` definitions now
+// #includes (no struct bodies); the 577 `struct G_...Args` definitions now
 // live one-per-file under the sibling `groups/` directory (per-plan headers).
 // This gate walks that directory instead of the (now bodyless) umbrella.
 std::string const kGroupsDir =
@@ -107,7 +124,7 @@ long count_group_structs(std::string const& dir, bool& saw_groups_namespace,
 
 }  // namespace
 
-TEST(BuilderDedupCount077, VlatestStructCountIs576) {
+TEST(BuilderDedupCount077, VlatestStructCountIs577) {
     bool saw_groups_namespace = false;
     long file_size = 0;
     long const count = count_group_structs(kGroupsDir, saw_groups_namespace, file_size);
@@ -117,9 +134,10 @@ TEST(BuilderDedupCount077, VlatestStructCountIs576) {
            "emitted it and cmake/Codegen.cmake to have kept it (T014); 078 SC-001 "
            "fix moved the G_...Args structs from the umbrella groups.hpp into "
            "one-per-file per-plan headers under groups/.";
-    EXPECT_EQ(count, 576)
+    EXPECT_EQ(count, 577)
         << "vlatest dedup plan count changed -- investigate before re-pinning "
-           "(.specify/decisions/077-builder-args-dedup-verify.md).";
+           "(.specify/decisions/077-builder-args-dedup-verify.md; 081 D-4/E-4 "
+           "re-pinned 576 -> 577 for the tag-33 gated-required plan fork).";
     EXPECT_TRUE(saw_groups_namespace)
         << "namespace fixpp::vlatest::groups not found in any per-plan header under " << kGroupsDir;
 

@@ -58,6 +58,40 @@
 // universe was bounded.
 //
 // ─────────────────────────────────────────────────────────────────────────
+// 081-strict-validation-residuals T020 — per-group golden (Concern B,
+// contracts/census-and-parity.md "Parity golden contract"): ALSO records, for
+// every real group context QuickFIX itself discovers, the group's own DIRECT
+// required-member set, measured via `FIX::DataDictionary::isGroup`/`getGroup`
+// (DataDictionary.h:286/298) recursively descending into the returned
+// sub-`DataDictionary`, then `isRequiredField(msgType, tag)` on THAT sub-DD.
+// Non-circular: both context EXISTENCE (`isGroup`/`getGroup`) and
+// required-ness (`isRequiredField` on the sub-DD) are real, measured
+// QuickFIX API calls — no independent structural re-scan is needed for
+// group discovery (unlike the message-type/max-tag candidate universe
+// above, which bounds a `1..max_tag` probe range only). Because
+// `addXMLGroup`/`addGroup` (DataDictionary.cpp:536-587) thread the ORIGINAL
+// enclosing message's `msgtype` string unchanged through every nesting
+// level, and register HEADER/TRAILER groups under the literal keys
+// `"_header_"`/`"_trailer_"` (not the real msgType), calling
+// `dd.isGroup(msg_type, tag)` with the real message type naturally scopes
+// this walk to message-BODY groups only — the same body-only surface the
+// message-level golden above corroborates (isRequiredField has no
+// header/trailer surface at all).
+//
+// Written to a SEPARATE file, `golden_groups.csv` (NOT appended to
+// golden.csv): the message-level golden's 3-column row shape
+// ("dictionary,msg_type,required_tags") is consumed by an
+// already-landed 3-field CSV parser (`required_scope_parity_test.cpp`);
+// mixing in a 5-column group row would break that parser and the
+// message-level parity test's byte-stability. Format:
+//   "dictionary,msg_type,group_path,no_tag,required_tags"
+// `group_path` = space-separated ancestor no_tags, OUTER-TO-INNER order
+// (excludes this group's own no_tag; empty string for a depth-1 group),
+// quoted like `required_tags`. Mirrors
+// `tests/dictionary/required_scope_oracle.hpp`'s `GroupContextKey`
+// convention (path excludes no_tag itself) so the parity test can build the
+// exact same key type for both-directions context-set comparison.
+// ─────────────────────────────────────────────────────────────────────────
 // Manifest hash formats (mirrors 075's tools/quickfix_enum_golden/main.cpp):
 //
 //   All hashes are standard SHA-1, 40 lowercase hex characters, computed via
@@ -177,6 +211,57 @@ struct DictScan {
     std::uint32_t max_tag = 0;
 };
 
+// 081 T020 — one per-group golden row: (dict, msg_type, ancestor path
+// outer-to-inner excluding this group's own no_tag, this group's own
+// no_tag) -> its DIRECT required-member tags, all measured via real
+// QuickFIX `isGroup`/`getGroup`/`isRequiredField` calls (see the T020
+// header-comment banner above).
+struct GroupRow {
+    std::string dict;
+    std::string msg_type;
+    std::vector<std::uint16_t> path;
+    std::uint16_t no_tag = 0;
+    std::vector<std::uint16_t> required;  // ascending
+};
+
+// NOLINTNEXTLINE(misc-no-recursion) — recursive descent through real
+// QuickFIX sub-DataDictionary objects (getGroup), depth bounded by the
+// dictionary's own real nesting depth. Appends one GroupRow per real group
+// context found, pre-order (tag-ascending at each level, depth-first) --
+// this fixes `golden_groups_output_hash`'s row emission order.
+void walk_groups(FIX::DataDictionary const &cur_dd, std::string const &dict_label, std::string const &msg_type,
+                  std::uint32_t max_tag, std::vector<std::uint16_t> &path, std::vector<GroupRow> &rows_out) {
+    for (std::uint32_t tag = 1; tag <= max_tag; ++tag) {
+        if (!cur_dd.isGroup(msg_type, static_cast<int>(tag))) {
+            continue;
+        }
+        int delim = 0;
+        FIX::DataDictionary const *sub = nullptr;
+        if (!cur_dd.getGroup(msg_type, static_cast<int>(tag), delim, sub) || sub == nullptr) {
+            continue;  // isGroup already said true; defensive only, should not happen
+        }
+
+        std::vector<std::uint16_t> req;
+        for (std::uint32_t t2 = 1; t2 <= max_tag; ++t2) {
+            if (sub->isRequiredField(msg_type, static_cast<int>(t2))) {
+                req.push_back(static_cast<std::uint16_t>(t2));
+            }
+        }
+
+        GroupRow row;
+        row.dict = dict_label;
+        row.msg_type = msg_type;
+        row.path = path;
+        row.no_tag = static_cast<std::uint16_t>(tag);
+        row.required = std::move(req);
+        rows_out.push_back(std::move(row));
+
+        path.push_back(static_cast<std::uint16_t>(tag));
+        walk_groups(*sub, dict_label, msg_type, max_tag, path, rows_out);
+        path.pop_back();
+    }
+}
+
 DictScan scan_dict(std::filesystem::path const &xml_path) {
     pugi::xml_document doc;
     auto const result = doc.load_file(xml_path.c_str());
@@ -213,6 +298,9 @@ int main() {
 #ifndef FIXPP_REQUIRED_GOLDEN_OUTPUT_CSV
 #error "FIXPP_REQUIRED_GOLDEN_OUTPUT_CSV must be defined by CMake"
 #endif
+#ifndef FIXPP_REQUIRED_GOLDEN_GROUPS_OUTPUT_CSV
+#error "FIXPP_REQUIRED_GOLDEN_GROUPS_OUTPUT_CSV must be defined by CMake"
+#endif
 
     std::filesystem::path const dict_dir = FIXPP_REQUIRED_GOLDEN_DICT_DIR;
     std::string const generator_source_hash = sha1_hex(read_file_bytes(FIXPP_GOLDEN_GENERATOR_SOURCE));
@@ -224,6 +312,9 @@ int main() {
     };
     std::vector<DictOut> out;
     out.reserve(kDicts.size());
+
+    // 081 T020: per-group golden rows, accumulated across all dicts/messages.
+    std::vector<GroupRow> group_rows;
 
     std::ostringstream candidate_buf;
     std::ostringstream output_buf;
@@ -267,6 +358,11 @@ int main() {
                 output_buf << req[i];
             }
             output_buf << "\n";
+
+            // 081 T020: per-group golden rows for this message, measured via
+            // real QuickFIX isGroup/getGroup/isRequiredField (see walk_groups).
+            std::vector<std::uint16_t> path;
+            walk_groups(dd, dc.label, msg_type, scan.max_tag, path, group_rows);
         }
 
         std::cout << "[" << dc.label << "] " << scan.msg_types.size() << " message type(s), max_tag="
@@ -276,6 +372,29 @@ int main() {
 
     std::string const candidate_universe_hash = sha1_hex(candidate_buf.str());
     std::string const golden_output_hash = sha1_hex(output_buf.str());
+
+    // 081 T020: serialize group_rows (emitted in dict-then-message-then-
+    // pre-order-depth-first order, per walk_groups' own iteration order) and
+    // hash them the same way as golden_output_hash above.
+    std::ostringstream group_output_buf;
+    for (auto const &row : group_rows) {
+        group_output_buf << row.dict << "|" << row.msg_type << "|";
+        for (std::size_t i = 0; i < row.path.size(); ++i) {
+            if (i != 0) {
+                group_output_buf << " ";
+            }
+            group_output_buf << row.path[i];
+        }
+        group_output_buf << "|" << row.no_tag << "|";
+        for (std::size_t i = 0; i < row.required.size(); ++i) {
+            if (i != 0) {
+                group_output_buf << " ";
+            }
+            group_output_buf << row.required[i];
+        }
+        group_output_buf << "\n";
+    }
+    std::string const golden_groups_output_hash = sha1_hex(group_output_buf.str());
 
     std::ofstream out_file(FIXPP_REQUIRED_GOLDEN_OUTPUT_CSV, std::ios::binary | std::ios::trunc);
     if (!out_file) {
@@ -304,6 +423,8 @@ int main() {
     out_file << "# generator_source_hash=" << generator_source_hash << "\n";
     out_file << "# candidate_universe_hash=" << candidate_universe_hash << "\n";
     out_file << "# golden_output_hash=" << golden_output_hash << "\n";
+    out_file << "# golden_groups_output_hash=" << golden_groups_output_hash << " (081 T020 -- see the\n";
+    out_file << "#   sibling golden_groups.csv, this dict/message/group-run's per-group golden)\n";
     out_file << "#\n";
     out_file << "# Hash algorithm: SHA-1 (OpenSSL EVP_sha1), 40 lowercase hex chars.\n";
     out_file << "# dictionary_sha1: over the raw bytes of dictionaries/<D>.xml.\n";
@@ -347,10 +468,81 @@ int main() {
 
     out_file.close();
 
+    // 081 T020: per-group golden -- SEPARATE file (see the header-comment
+    // banner above for why it is not appended to golden.csv).
+    std::ofstream group_file(FIXPP_REQUIRED_GOLDEN_GROUPS_OUTPUT_CSV, std::ios::binary | std::ios::trunc);
+    if (!group_file) {
+        std::cerr << "FATAL: cannot open '" << FIXPP_REQUIRED_GOLDEN_GROUPS_OUTPUT_CSV << "' for writing\n";
+        return 1;
+    }
+
+    group_file << "# 081-strict-validation-residuals -- QuickFIX PER-GROUP required-member parity "
+                  "golden (Concern B, T020, contracts/census-and-parity.md)\n";
+    group_file << "# Generated by tools/quickfix_required_golden/main.cpp against a REAL, locally built\n";
+    group_file << "# QuickFIX v1.16.0. Every row's (existence AND required_tags) is the literal measured\n";
+    group_file << "# output of FIX::DataDictionary::isGroup/getGroup (DataDictionary.h:286/298) recursively\n";
+    group_file << "# descended, then isRequiredField(msgType, tag) called on the returned sub-DataDictionary\n";
+    group_file << "# -- never hand-authored, never derived from the independent oracle.\n";
+    group_file << "#\n";
+    group_file << "# SCOPE: body-only, same rationale as golden.csv (addXMLGroup/addGroup register\n";
+    group_file << "# header/trailer groups under the literal keys \"_header_\"/\"_trailer_\", not the real\n";
+    group_file << "# msgType, so probing isGroup(msg_type, tag) with the real message type naturally\n";
+    group_file << "# excludes them). NO vlatest/Orchestra row (QuickFIX 1.16.0 cannot parse Orchestra).\n";
+    group_file << "#\n";
+    group_file << "# MANIFEST:\n";
+    group_file << "# quickfix_version=1.16.0\n";
+    group_file << "# quickfix_soname=libquickfix.so.17.0.0\n";
+    for (auto const &d : out) {
+        group_file << "# dictionary_sha1[" << d.label << "]=" << d.dict_sha1 << "\n";
+    }
+    group_file << "# generator_source_hash=" << generator_source_hash << "\n";
+    group_file << "# candidate_universe_hash=" << candidate_universe_hash << "\n";
+    group_file << "# golden_groups_output_hash=" << golden_groups_output_hash << "\n";
+    group_file << "#\n";
+    group_file << "# Hash algorithm: SHA-1 (OpenSSL EVP_sha1), 40 lowercase hex chars (see golden.csv's\n";
+    group_file << "# own manifest comment for dictionary_sha1/generator_source_hash/candidate_universe_hash\n";
+    group_file << "# definitions -- identical here).\n";
+    group_file << "# golden_groups_output_hash: over the concatenation, in walk_groups' own emission\n";
+    group_file << "# order (dict-then-message per kDicts/ascending-msgtype order, pre-order depth-first\n";
+    group_file << "# within a message), of the exact bytes\n";
+    group_file << "#   \"{dict}|{msg_type}|{path tag1 tag2 ...}|{no_tag}|{req tag1 tag2 ...}\\n\"\n";
+    group_file << "# (path = ancestor no_tags outer-to-inner, space-separated, empty for a depth-1 group;\n";
+    group_file << "# required tags ascending, space-separated). Computed over the OUTPUT ROWS ONLY.\n";
+    group_file << "#\n";
+    group_file << "dictionary,msg_type,group_path,no_tag,required_tags\n";
+
+    auto csv_quote_path = [](std::vector<std::uint16_t> const &path) {
+        std::ostringstream oss;
+        for (std::size_t i = 0; i < path.size(); ++i) {
+            if (i != 0) {
+                oss << " ";
+            }
+            oss << path[i];
+        }
+        return "\"" + oss.str() + "\"";
+    };
+
+    for (auto const &row : group_rows) {
+        std::ostringstream tags;
+        for (std::size_t i = 0; i < row.required.size(); ++i) {
+            if (i != 0) {
+                tags << " ";
+            }
+            tags << row.required[i];
+        }
+        group_file << row.dict << "," << row.msg_type << "," << csv_quote_path(row.path) << "," << row.no_tag
+                    << "," << csv_quote(tags.str()) << "\n";
+    }
+
+    group_file.close();
+
     std::cout << "\nWrote " << FIXPP_REQUIRED_GOLDEN_OUTPUT_CSV << "\n";
     std::cout << "generator_source_hash=" << generator_source_hash << "\n";
     std::cout << "candidate_universe_hash=" << candidate_universe_hash << "\n";
     std::cout << "golden_output_hash=" << golden_output_hash << "\n";
+    std::cout << "\nWrote " << FIXPP_REQUIRED_GOLDEN_GROUPS_OUTPUT_CSV << " (" << group_rows.size()
+              << " group context row(s))\n";
+    std::cout << "golden_groups_output_hash=" << golden_groups_output_hash << "\n";
 
     return 0;
 }

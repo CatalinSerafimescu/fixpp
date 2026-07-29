@@ -21,9 +21,11 @@
 # dictionary_sha1[FIX50SP1]=03c64c1c6837bd562855afcbc4d30c2ca890c95c
 # dictionary_sha1[FIX50SP2]=04a16954f51ccc2c7899d9a388f9da91b7af122c
 # dictionary_sha1[FIXT11]=966193332cdccce03e27eee69c1c7609f66175df
-# generator_source_hash=a1e054230ca773d477822319fb9916570bd7f992
+# generator_source_hash=fd904f80a139d6309c3f286627b87eccc10039a3
 # candidate_universe_hash=1aad26311c97c53a676da9e257abb24620c18de5
 # golden_output_hash=45422beea72793e6e75de405be68e94f1c18d770
+# golden_groups_output_hash=714923610ea55789f6085ba98a4acf29232be246 (081 T020 -- see the
+#   sibling golden_groups.csv, this dict/message/group-run's per-group golden)
 #
 # Hash algorithm: SHA-1 (OpenSSL EVP_sha1), 40 lowercase hex chars.
 # dictionary_sha1: over the raw bytes of dictionaries/<D>.xml.

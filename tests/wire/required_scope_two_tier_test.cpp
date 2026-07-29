@@ -51,6 +51,12 @@
 #include <fixpp/v44/messages/PositionReport.hpp>
 #undef FIXPP_VALIDATORS_HEADER_ONLY_PositionReport
 
+// 081-strict-validation-residuals T013 (Concern B required-group-still-
+// rejects counter-case): FIX44 NewOrderList/NoOrders(73), a REQUIRED group.
+#define FIXPP_VALIDATORS_HEADER_ONLY_NewOrderList
+#include <fixpp/v44/messages/NewOrderList.hpp>
+#undef FIXPP_VALIDATORS_HEADER_ONLY_NewOrderList
+
 #define FIXPP_VALIDATORS_HEADER_ONLY_TradeCaptureReport
 #include <fixpp/v50sp2/messages/TradeCaptureReport.hpp>
 #undef FIXPP_VALIDATORS_HEADER_ONLY_TradeCaptureReport
@@ -250,10 +256,20 @@ TEST(RequiredScopeTwoTier, V44PositionReport_OmitsOptionalGroup_BothTiersAccept)
         << "two-tier verdict disagreement on conforming AP (Contract 3)";
 }
 
-// Malformed (US2/T010): a present NoUnderlyings group whose second instance
-// omits the intra-group required UnderlyingSettlPriceType(733). Both tiers
-// must REJECT with wire_required_field_missing.
-TEST(RequiredScopeTwoTier, V44PositionReport_GroupInstanceMissingRequired_BothTiersReject) {
+// 081-strict-validation-residuals T013 (Concern B, census-and-parity.md
+// clause 1 / D-4 / E-4 — SUPERSEDES the 079-era
+// V44PositionReport_GroupInstanceMissingRequired_BothTiersReject REJECT
+// expectation below): NoUnderlyings(711) is itself an OPTIONAL group on
+// PositionReport/AP (dictionaries/FIX44.xml — `<group name="NoUnderlyings"
+// required="N">`); UnderlyingSettlPriceType(733) is a direct member declared
+// `required="Y"` WITHIN that group. Per the immediate-enclosing-gating rule
+// (own_required && enclosing_group_required), a direct member's required-
+// ness is gated OFF when its enclosing group is optional — so a present
+// NoUnderlyings instance omitting 733 must now be ACCEPTED on both tiers
+// (was wrongly rejected pre-081; T016/T017 fixed the runtime tier, T018
+// forks the typed group-plan identity by enclosing-group-required-ness so
+// `writer_traits<G_711_2Args>::required_checks` no longer carries 733).
+TEST(RequiredScopeTwoTier, V44PositionReport_OptionalGroupInstanceMissingRequired_BothTiersAccept) {
     // Runtime tier: real wire frame, instance 2 omits 733.
     std::pmr::monotonic_buffer_resource dict_mr;
     auto d44 = load_real_dict("FIX44.xml", &dict_mr);
@@ -271,8 +287,7 @@ TEST(RequiredScopeTwoTier, V44PositionReport_GroupInstanceMissingRequired_BothTi
     std::array<std::byte, kScratch> scratch_buf{};
     std::pmr::monotonic_buffer_resource scratch_mr{scratch_buf.data(), scratch_buf.size(),
                                                    std::pmr::null_memory_resource()};
-    std::uint16_t ref_tag = 0;
-    auto runtime_result = v.validate(mv, &scratch_mr, &ref_tag);
+    auto runtime_result = v.validate(mv, &scratch_mr, nullptr);
 
     // Typed tier: underlyings span of 2 entries, second missing
     // underlying_settl_price_type (733).
@@ -283,20 +298,74 @@ TEST(RequiredScopeTwoTier, V44PositionReport_GroupInstanceMissingRequired_BothTi
     entry1.underlying_settl_price_type = 1;
     fixpp::v44::groups::G_711_2Args entry2{};
     entry2.underlying_settl_price = make_decimal("2.2", &args_mr);
-    // entry2.underlying_settl_price_type left unset — the malformed member.
+    // entry2.underlying_settl_price_type left unset — no longer enforced:
+    // NoUnderlyings is optional, so its direct members are not group-required.
     std::array<fixpp::v44::groups::G_711_2Args, 2> entries{entry1, entry2};
     args.underlyings = std::span<const fixpp::v44::groups::G_711_2Args>{entries};
     auto typed_result = fixpp::v44::validate_PositionReport(args);
 
+    EXPECT_TRUE(runtime_result.has_value())
+        << "runtime tier: NoUnderlyings (optional) instance omitting 733 must accept";
+    EXPECT_TRUE(typed_result.has_value())
+        << "typed tier: underlyings[1] omitting underlying_settl_price_type (optional "
+           "enclosing group) must accept";
+    EXPECT_EQ(runtime_result.has_value(), typed_result.has_value())
+        << "two-tier verdict disagreement on optional-group-incomplete AP (Contract 3)";
+}
+
+// 081-strict-validation-residuals T013 (census-and-parity.md clause 2):
+// mirror of the ACCEPT case above, but with the group ITSELF required —
+// FIX44 NewOrderList(E) -> ListOrdGrp(required='Y') -> NoOrders(73,
+// required='Y') -> direct members ClOrdID(11)/ListSeqNo(67)/Side(54), all
+// required='Y' (dictionaries/FIX44.xml). A present NoOrders instance
+// omitting Side(54) must still REJECT with wire_required_field_missing on
+// both tiers — proving the fork did not over-relax the required-group arm.
+TEST(RequiredScopeTwoTier, V44NewOrderList_RequiredGroupInstanceMissingRequired_BothTiersReject) {
+    // Runtime tier: real wire frame, the sole NoOrders entry omits Side(54).
+    std::pmr::monotonic_buffer_resource dict_mr;
+    auto d44 = load_real_dict("FIX44.xml", &dict_mr);
+    dictionary_driven_validator v{d44.as_table_view()};
+
+    auto buf = make_frame(
+        "35=E\x01"
+        "34=1\x01" "49=SENDER\x01" "52=20240101-00:00:00\x01" "56=TARGET\x01"
+        "66=LIST1\x01" "68=1\x01" "394=1\x01"
+        "73=1\x01"
+        "11=ORD1\x01" "67=1\x01");
+    std::array<std::byte, 4096> stack{};
+    std::pmr::monotonic_buffer_resource arena;
+    auto mv = parse_index(buf, stack, arena);
+
+    std::array<std::byte, kScratch> scratch_buf{};
+    std::pmr::monotonic_buffer_resource scratch_mr{scratch_buf.data(), scratch_buf.size(),
+                                                   std::pmr::null_memory_resource()};
+    std::uint16_t ref_tag = 0;
+    auto runtime_result = v.validate(mv, &scratch_mr, &ref_tag);
+
+    // Typed tier: NewOrderListArgs with a single NoOrders entry, Side unset.
+    std::pmr::monotonic_buffer_resource args_mr{4096};
+    fixpp::v44::NewOrderListArgs args{};
+    args.list_id = "LIST1";
+    args.tot_no_orders = 1;
+    args.bid_type = 1;
+    fixpp::v44::groups::G_73_2Args entry{};
+    entry.cl_ord_id = "ORD1";
+    entry.list_seq_no = 1;
+    // entry.side left unset — the malformed member; NoOrders is required, so
+    // this must still be enforced.
+    std::array<fixpp::v44::groups::G_73_2Args, 1> entries{entry};
+    args.orders = std::span<const fixpp::v44::groups::G_73_2Args>{entries};
+    auto typed_result = fixpp::v44::validate_NewOrderList(args);
+
     ASSERT_FALSE(runtime_result.has_value())
-        << "runtime tier: NoUnderlyings instance omitting required 733 must reject";
+        << "runtime tier: required NoOrders instance omitting required Side(54) must reject";
     EXPECT_EQ(runtime_result.error(), error::wire_required_field_missing);
-    EXPECT_EQ(ref_tag, 733);
+    EXPECT_EQ(ref_tag, 54);
     ASSERT_FALSE(typed_result.has_value())
-        << "typed tier: underlyings[1] omitting underlying_settl_price_type must reject";
+        << "typed tier: orders[0] omitting side must reject (NoOrders is a required group)";
     EXPECT_EQ(typed_result.error(), error::wire_required_field_missing);
     EXPECT_EQ(runtime_result.has_value(), typed_result.has_value())
-        << "two-tier verdict disagreement on malformed AP (Contract 3)";
+        << "two-tier verdict disagreement on malformed required-group NewOrderList (Contract 3)";
 }
 
 // No-false-reject corroboration (US2/T011 mirror): every group instance

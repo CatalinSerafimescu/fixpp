@@ -166,8 +166,14 @@ public:
         for (auto it = msg.begin(); !(it == msg.end()); ++it) {
             auto const& fld = *it;
 
-            // (a) Unexpected tag check
-            if (!valid_tags.contains(fld.tag)) {
+            // (a) Unexpected tag check. 081 Concern A (research.md D-1):
+            // `contains(tag)` is checked FIRST — cheap, and true for the
+            // overwhelming majority of fields — so the `is_fixt_framing_tag`
+            // term only runs on an already-failing lookup, adding no cost to
+            // the pre-081 accept path (T023 perf note). A FIXT framing tag
+            // (populated only for v50/v50sp1/v50sp2 — table_view.hpp) passes
+            // here instead of rejecting wire_unexpected_tag.
+            if (!valid_tags.contains(fld.tag) && !dict_.is_fixt_framing_tag(fld.tag)) {
                 set_ref_tag(ref_tag_out, fld.tag);
                 return core::expected_t<void>{std::unexpect, core::error::wire_unexpected_tag};
             }
@@ -464,7 +470,13 @@ private:
         std::uint16_t tag, std::span<const std::byte> value,
         std::pmr::memory_resource* mr) const noexcept {
         using ft = fixpp::dict::field_type;
-        switch (dict_.field_type_of(tag)) {
+        // 081 Concern A (research.md D-2 F2): a FIXT framing tag's type
+        // resolves from the baked fixt_framing_types_ map FIRST — field_
+        // type_of() would otherwise default it to String (never message-
+        // attached in a v50/v50sp1/v50sp2 dict, so never set_field_type'd),
+        // silently under-constraining a malformed Int-typed header field
+        // (34=abc, 1156=abc). No-op for every other tag/version.
+        switch (dict_.field_type_of_with_framing(tag)) {
             case ft::Float: {
                 // (C1) trap_throw fences the potentially-throwing 2a decode
                 // boundary (FR-013, [arch §5.3]). Result is
@@ -526,10 +538,26 @@ private:
                 }
                 return {};
             }
+            case ft::Length: {
+                // A LENGTH field is a non-negative integer (a byte count):
+                // non-empty, ASCII digits only, no leading '-' (stricter
+                // than Int — negative lengths are never valid).
+                if (value.empty()) {
+                    return core::expected_t<void>{std::unexpect,
+                                                  core::error::wire_field_value_out_of_range};
+                }
+                for (auto const ch_raw : value) {
+                    auto const ch = static_cast<unsigned char>(ch_raw);
+                    if (ch < '0' || ch > '9') {
+                        return core::expected_t<void>{std::unexpect,
+                                                      core::error::wire_field_value_out_of_range};
+                    }
+                }
+                return {};
+            }
             case ft::String:
             case ft::Boolean:
             case ft::Data:
-            case ft::Length:
             default:
                 // No structural constraint beyond non-degenerate framing.
                 return {};

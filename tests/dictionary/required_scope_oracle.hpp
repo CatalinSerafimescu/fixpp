@@ -85,19 +85,30 @@ struct DictOracle {
 
 // ─────────────────────────── independent oracle (QuickFIX-XML) ────────────
 
-// Gate B r1 F1 (fixpp#201 escalation): `group_scope_and` is a SEPARATE
-// component-AND accumulator from `component_and` — the latter is the
-// message-root accumulator (never reset at a group boundary, feeds
-// `msg_required`); `group_scope_and` RESETS to `true` on entry to each
-// `<group>` and gates `oracle.group_required` inserts, mirroring
-// `LoaderState::expand_field_list`'s `group_scope_component_required`
-// (xml_loader.cpp / orchestra_loader.cpp). Without this, a member
-// `required='Y'` only inside an optional component NESTED WITHIN a group
-// (e.g. FIX50SP2 NoMDStatistics(2474) -> optional MDStatisticParameters)
-// wrongly counts as group-required, while a member directly required inside
-// a group that itself sits behind an unrelated optional component (e.g.
-// FIX50SP1 NoSides(552) inside optional TrdCapRptAckSideGrp) must still stay
-// required — the reset-at-group-boundary is what distinguishes the two.
+// 081-strict-validation-residuals D-3 (Concern B, immediate-enclosing
+// group-gating — supersedes the 079 "required-once-present" rule below):
+// `group_scope_and` is a SEPARATE component-AND accumulator from
+// `component_and` — the latter is the message-root accumulator (never reset
+// at a group boundary, feeds `msg_required`, untouched by 081). On entry to
+// each `<group>`, `group_scope_and` now RESETS to that group's OWN
+// `required=` (`own_req`) — NOT unconditionally `true` (079's rule) — so a
+// direct `required='Y'` member is recorded in `oracle.group_required` only
+// when `own_req && group_scope_and`, i.e. iff the member's own required=Y
+// AND the immediate enclosing group's own required=Y (QuickFIX
+// `addXMLGroup`'s `required=="Y" && groupRequired`), mirroring
+// `LoaderState::expand_field_list`'s `group_scope_component_required` fix
+// (xml_loader.cpp / orchestra_loader.cpp). This is NOT an AND across
+// ancestor groups — each group entry independently resets from its OWN
+// `required=`, discarding whatever value the enclosing accumulator carried
+// (research.md D-3). The reset-at-group-boundary multiplicative AND with
+// intra-group nested optional components (079 Gate B r1 fix) is preserved:
+// e.g. FIX50SP2 NoMDStatistics(2474) (required='N') -> optional
+// MDStatisticParameters's required='Y' members must not be group-required
+// (excluded either way — the group itself is optional); FIX50SP1
+// NoSides(552) (required='Y') direct member Side(54) must stay
+// group-required despite NoSides sitting behind an unrelated optional
+// TrdCapRptAckSideGrp component (the group's own boundary reset seeds
+// `true` regardless of the outer component's optionality).
 //
 // NOLINTNEXTLINE(misc-no-recursion) — recursive XML walk by design, mirrors
 // (but shares no code with) LoaderState::expand_field_list.
@@ -150,8 +161,10 @@ inline void qfix_walk(pugi::xml_node parent, std::unordered_map<std::string, std
                 }
             }
             group_path.push_back(no_tag);
+            // 081 D-3: reset to THIS group's own `required=` (own_req), not
+            // unconditionally true — immediate-enclosing group-gating.
             qfix_walk(child, tag_by_name, components_by_name, msg_type, group_path, component_and,
-                      /*group_scope_and=*/true, msg_required, oracle);  // reset at group boundary
+                      /*group_scope_and=*/own_req, msg_required, oracle);
             group_path.pop_back();
         } else if (name == "component") {
             auto const cname = std::string{child.attribute("name").as_string("")};
@@ -277,8 +290,10 @@ inline void orch_walk(pugi::xml_node parent, std::unordered_map<std::uint32_t, p
                 }
             }
             group_path.push_back(no_tag);
+            // 081 D-3: reset to THIS group's own `presence='required'`
+            // (own_req), not unconditionally true — symmetric with qfix_walk.
             orch_walk(git->second, components_by_id, groups_by_id, msg_type, group_path,
-                      component_and, /*group_scope_and=*/true, msg_required, oracle);
+                      component_and, /*group_scope_and=*/own_req, msg_required, oracle);
             group_path.pop_back();
         } else if (name == "fixr:componentRef") {
             auto const cid = child.attribute("id").as_uint();

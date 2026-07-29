@@ -4415,7 +4415,6 @@ template <> struct writer_traits<::fixpp::vlatest::groups::G_711_2Args> {
     }};
 };
 
-inline bool G_552_2Args_required_54(::fixpp::vlatest::groups::G_552_2Args const& a) noexcept { return a.side.has_value(); }
 inline ::std::optional<::std::size_t> G_552_2Args_count_party_i_ds(::fixpp::vlatest::groups::G_552_2Args const& a) noexcept { if (!a.party_i_ds) { return ::std::nullopt; } return a.party_i_ds->size(); }
 inline ::fixpp::core::expected_t<void> G_552_2Args_validate_entry_party_i_ds(::fixpp::vlatest::groups::G_552_2Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.party_i_ds)[i]); }
 inline ::std::optional<::std::size_t> G_552_2Args_count_limit_amts(::fixpp::vlatest::groups::G_552_2Args const& a) noexcept { if (!a.limit_amts) { return ::std::nullopt; } return a.limit_amts->size(); }
@@ -4447,9 +4446,7 @@ inline ::fixpp::core::expected_t<void> G_552_2Args_validate_entry_related_trades
 inline ::std::optional<::std::size_t> G_552_2Args_count_related_positions(::fixpp::vlatest::groups::G_552_2Args const& a) noexcept { if (!a.related_positions) { return ::std::nullopt; } return a.related_positions->size(); }
 inline ::fixpp::core::expected_t<void> G_552_2Args_validate_entry_related_positions(::fixpp::vlatest::groups::G_552_2Args const& a, ::std::size_t i) noexcept { return ::fixpp::wire::validate_required((*a.related_positions)[i]); }
 template <> struct writer_traits<::fixpp::vlatest::groups::G_552_2Args> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::vlatest::groups::G_552_2Args>, 1> required_checks = {{
-        {54, &G_552_2Args_required_54},
-    }};
+    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::vlatest::groups::G_552_2Args>, 0> required_checks = {};
     static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::vlatest::groups::G_552_2Args>, 15> group_checks = {{
         {false, &G_552_2Args_count_party_i_ds, &G_552_2Args_validate_entry_party_i_ds},
         {false, &G_552_2Args_count_limit_amts, &G_552_2Args_validate_entry_limit_amts},
@@ -4618,12 +4615,12 @@ template <> struct writer_traits<::fixpp::vlatest::groups::G_897Args> {
     static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::vlatest::groups::G_897Args>, 0> group_checks = {};
 };
 
-inline bool G_33Args_required_58(::fixpp::vlatest::groups::G_33Args const& a) noexcept { return a.text.has_value(); }
-template <> struct writer_traits<::fixpp::vlatest::groups::G_33Args> {
-    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::vlatest::groups::G_33Args>, 1> required_checks = {{
-        {58, &G_33Args_required_58},
+inline bool G_33_1Args_required_58(::fixpp::vlatest::groups::G_33_1Args const& a) noexcept { return a.text.has_value(); }
+template <> struct writer_traits<::fixpp::vlatest::groups::G_33_1Args> {
+    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::vlatest::groups::G_33_1Args>, 1> required_checks = {{
+        {58, &G_33_1Args_required_58},
     }};
-    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::vlatest::groups::G_33Args>, 0> group_checks = {};
+    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::vlatest::groups::G_33_1Args>, 0> group_checks = {};
 };
 
 inline ::std::optional<::std::size_t> G_146_4Args_count_security_alt_id(::fixpp::vlatest::groups::G_146_4Args const& a) noexcept { if (!a.security_alt_id) { return ::std::nullopt; } return a.security_alt_id->size(); }
@@ -6305,6 +6302,11 @@ template <> struct writer_traits<::fixpp::vlatest::groups::G_3126Args> {
 template <> struct writer_traits<::fixpp::vlatest::groups::G_3092Args> {
     static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::vlatest::groups::G_3092Args>, 0> required_checks = {};
     static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::vlatest::groups::G_3092Args>, 0> group_checks = {};
+};
+
+template <> struct writer_traits<::fixpp::vlatest::groups::G_33_2Args> {
+    static constexpr ::std::array<::fixpp::wire::required_check<::fixpp::vlatest::groups::G_33_2Args>, 0> required_checks = {};
+    static constexpr ::std::array<::fixpp::wire::group_check<::fixpp::vlatest::groups::G_33_2Args>, 0> group_checks = {};
 };
 
 inline ::std::optional<::std::size_t> G_268_1Args_count_security_alt_id(::fixpp::vlatest::groups::G_268_1Args const& a) noexcept { if (!a.security_alt_id) { return ::std::nullopt; } return a.security_alt_id->size(); }

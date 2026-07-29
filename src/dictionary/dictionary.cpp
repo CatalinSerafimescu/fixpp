@@ -24,6 +24,7 @@
 #include "fixpp/dict/field_ref.hpp"
 #include "fixpp/dict/group_ref.hpp"
 #include "fixpp/dict/version_profile.hpp"
+#include "fixt_framing_table.hpp"  // 081 Concern A: kFixtFramingTable (D-2)
 
 namespace fixpp::dict {
 
@@ -567,6 +568,24 @@ table_view Dictionary::as_table_view() const {
         for (auto const& ev : enum_values(run.tag)) {
             tv.add_enum(run.tag, ev.value);
         }
+    }
+
+    // ── 081 Concern A (D-1/D-2, T009): validator-private FIXT.1.1 framing
+    // surface — v50/v50sp1/v50sp2 ONLY (empty `<header/>`). Baked constant,
+    // census-pinned to dictionaries/FIXT11.xml (fixt_framing_table.hpp).
+    // Does NOT touch valid_/required_/types_ above (D-1 load-bearing
+    // invariant: field_valid_for/valid_tags_for/field_type_of stay
+    // byte-identical whether strict validation is on or off).
+    switch (which_session_version()) {
+        case session_version::v50:
+        case session_version::v50sp1:
+        case session_version::v50sp2:
+            for (auto const& entry : detail::kFixtFramingTable) {
+                tv.add_fixt_framing_tag(entry.tag, entry.type);
+            }
+            break;
+        default:
+            break;  // all other versions: framing surface stays empty
     }
 
     return tv;

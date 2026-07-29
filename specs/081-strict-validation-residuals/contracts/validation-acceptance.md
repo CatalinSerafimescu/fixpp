@@ -1,0 +1,25 @@
+# Contract — Concern A: FIXT header/trailer acceptance (accept-only)
+
+**Surface**: the runtime dictionary-driven validator's full-frame `validate()` on the opt-in strict path (`validate_inbound_messages=true`). No public C-ABI or config surface changes.
+
+## Behavioral contract
+
+Given a `Dictionary` loaded from a FIX50 / FIX50SP1 / FIX50SP2 dictionary (empty `<header/>`), on the strict-validation path:
+
+1. **Accept standard header/trailer tags.** A well-formed application frame carrying the FIXT.1.1-owned standard header (34, 49, 52, 56, and the rest of the FIXT.1.1 header set) and trailer (10) MUST pass Step-1 (`wire_unexpected_tag`) and proceed to the required-field / enum / group-structure steps. Acceptance is via a **validator-private framing surface** (`fixt_framing_tags_`, consulted at Step-1 in addition to the per-message valid-tag set) — the shared `valid_` store, `field_valid_for`, and `valid_tags_for` are unchanged. Tags 8/9/10 (BeginString/BodyLength/CheckSum) are **present to the validator and reach Step-1** — the framer does not strip them from the validated `bytes()`, and Step-1 walks from byte 0, so the pre-fix reject fires on **tag 8**, the first field examined. They are therefore part of the framing acceptance set (this is why the FIXT11 census set — clause below, and the `<header>`+`<trailer>` census — includes 8/9/10).
+2. **No new required-presence enforcement (accept-only).** A frame that OMITS a session-owned header field (e.g. no 52/SendingTime at the dictionary-validator layer) MUST NOT be rejected by `validate()` for a *missing header field* — required-presence of session-owned header fields remains governed by the session-layer FSM, not the dictionary validator.
+3. **Existing checks preserved.** A frame that omits a genuinely-required **application** field, carries an out-of-domain enum, or has a malformed group MUST still be rejected exactly as before (header acceptance only lets the framing tags pass the Step-1 gate).
+4. **Type/enum apply where defined — including framing tags.** The enum check is global-by-tag and applies for free to an accepted framing tag where the app dict defines its codeset. The type check MUST resolve each framing tag's datatype from the baked `fixt_framing_types_` map (not the `field_type_of` String default), so a **malformed numeric header field is REJECTED**: `34=abc` (SeqNum→Int) and `1156=abc` (ApplExtID→Int) MUST be rejected at the Int arm with `wire_field_value_out_of_range` **and** the reported `ref_tag` equal to the malformed tag (`ref_tag == 34` / `ref_tag == 1156`), not merely "rejected". `52=notatime` is NOT rejected (UtcTimestamp reduces to String → structurally undetectable to the Phase-1 validator; accept-only). No false-accept of a malformed Int-typed header field (FR-011).
+5. **Parser classification unchanged (RC#1).** Because framing acceptance is validator-private, `MessageView::unknown_fields()` classification of a FIX50SPx frame (via `field_valid_for`, `parser.hpp:582–584`) MUST be byte-identical whether `validate_inbound_messages` is on or off.
+
+## Scope / non-goals (contract boundaries)
+
+- Applies to **v50 / v50sp1 / v50sp2 only**. FIX40/41/42/43/44 (own populated header) and FIXT.1.1 full-frame validation behavior MUST be byte-for-byte unchanged.
+- **`vlatest` excluded** — Orchestra models StandardHeader/Trailer (components 1024/1025) inline per message; the loader already expands them, so vlatest never reproduced the reject. Untouched here.
+- **Default off** (`validate_inbound_messages=false`) → no validation runs → byte-identical no-op.
+
+## Invariants (pinned by tests)
+
+- The baked FIXT framing table == `dictionaries/FIXT11.xml` `<header>`+`<trailer>` field tags **and their datatypes** (exact-set census, both directions). The census walk **recurses one level** into the `<header>`/`<trailer>` nested groups, so the nested `NoHops` group (`FIXT11.xml:32–35`) contributes its tags **flat**: `627 NoHops`→Int, `628 HopCompID`→String, `629 HopSendingTime`→String, `630 HopRefID`→Int (accept-only — passed at Step-1 and type-checked; the hop group is not structurally validated). Excluding them would leave a residual SC-003 false-reject of routed FIXT traffic.
+- **Parser-containment pin (RC#1), asserted directly — not by a blind on-vs-off compare.** For FIX50/FIX50SP1/FIX50SP2, on the `as_table_view()` output, `table_view::field_valid_for(msg_type, T)` AND `valid_tags_for(msg_type).contains(T)` MUST stay **false** for every framing tag `T ∈ {8, 9, 10, 34, 49, 52, 56, 1128, 1156, …}` that is not genuinely message-declared, WHILE `dictionary_driven_validator::validate()` **accepts** those same tags (via `is_fixt_framing_tag`). This asserts the validator-private containment boundary directly: any re-widening of the shared `valid_` store inside `as_table_view()` flips `field_valid_for` to `true` → RED. (A byte-identical `unknown_fields()` on-vs-off comparison is near-vacuous here — `inbound_tv_` is built flag-independently at `session.cpp:992`, so a both-sides `valid_` widening classifies identically on and off and escapes it.)
+- No read/reify golden changes; abidiff 0-diff; symbol golden unchanged.
