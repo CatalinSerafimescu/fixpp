@@ -1,0 +1,95 @@
+name: Publish TSan-instrumented libc++ (GHCR)
+
+# Reproducible builder for the `fixpp-libcxx-tsan` artifact-carrier image consumed
+# by tier3-libcxx.yml (the linux-clang-libc++-tsan lane). Replaces the previously
+# HAND-BUILT + HAND-PUSHED image with a committed Dockerfile so the instrumented
+# libc++ is reproducible AND the GHCR package auto-links to this repo (it runs
+# from the fixpp repo's Actions, and the Dockerfile carries
+# org.opencontainers.image.source).
+#
+# The consumer PINS BY DIGEST and requires a MANUAL digest bump after any re-push
+# (supply-chain: the .so is loaded into the test process, so a silently re-pushed
+# tag could fabricate/suppress TSan results). This workflow therefore only builds
+# + pushes a new tag/digest; it does NOT edit the pinned digest in
+# tier3-libcxx.yml. Copy the digest from this run's job summary into that file's
+# "Fetch instrumented libc++" step by hand, after verifying the run is clean.
+
+on:
+  # Manual only. The first successful push is what LINKS this GHCR package to the
+  # repo; until then the pre-existing (repo: null) package must be granted Actions
+  # write access to CatalinSerafimescu/fixpp once, by hand (Package → Settings →
+  # Manage Actions access → Add repository). A push:main trigger would fire on
+  # merge and go red until that grant exists — so publishing stays a deliberate
+  # dispatch. Add a push-on-paths trigger here once the package is linked, if you
+  # want auto-rebuild when the Dockerfile changes.
+  workflow_dispatch:
+    inputs:
+      llvm_version:
+        description: "LLVM release to build (llvmorg-<X>)"
+        default: "22.1.2"
+        required: true
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/fixpp-libcxx-tsan
+
+concurrency:
+  group: publish-libcxx-tsan
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: build + push instrumented libc++
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Buildx
+        # docker-container driver is required for the gha cache backend.
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve tags
+        id: meta
+        run: |
+          ref="$(echo '${{ env.IMAGE }}' | tr '[:upper:]' '[:lower:]')"
+          ver="${{ github.event.inputs.llvm_version || '22.1.2' }}"
+          echo "ref=$ref"     >> "$GITHUB_OUTPUT"
+          echo "version=$ver" >> "$GITHUB_OUTPUT"
+
+      - name: Build + push (version + latest)
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ci/libcxx-tsan.Dockerfile
+          push: true
+          build-args: |
+            LLVM_VERSION=${{ steps.meta.outputs.version }}
+          tags: |
+            ${{ steps.meta.outputs.ref }}:${{ steps.meta.outputs.version }}
+            ${{ steps.meta.outputs.ref }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Emit pin digest (paste into tier3-libcxx.yml)
+        run: |
+          {
+            echo "## fixpp-libcxx-tsan pushed"
+            echo ""
+            echo "**Tag:** \`${{ steps.meta.outputs.ref }}:${{ steps.meta.outputs.version }}\`"
+            echo ""
+            echo "**Digest — pin this in tier3-libcxx.yml (verify the run is clean first):**"
+            echo ""
+            echo '```'
+            echo "${{ steps.meta.outputs.ref }}@${{ steps.build.outputs.digest }}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
