@@ -448,6 +448,66 @@ Full suite `dictionary_pure_tests` **276/286**, exactly these 10 red, nothing el
 `RequiredScopeCensus.*` 4/4 and `RequiredScopeParity.*` 2/2 still green. The file was deliberately
 **left untouched** — it is T023's to resolve, and silencing it now would destroy the RED evidence.
 
+#### T006's landed constant pin
+
+The oracle's ten-dictionary output is now pinned against **literal constants** in
+`reused_tag_census_test.cpp` (nine in the `kRuntimeDicts` loop + a separate Orchestra-FIX-Latest
+test, since `kRuntimeDicts` is QuickFIX-only), together with the zero-member count `== 0` per
+dictionary, and exact **set** equality both directions for FIX40 / FIX41 / FIX42.
+
+This is deliberately **not** an oracle-vs-loader comparison. An oracle-vs-actual pin passes whenever
+both sides drift together — e.g. if the oracle were later "corrected" to match a defective loader.
+Pinning the oracle to constants is what makes that failure mode visible. A comment at the pin says
+so, to stop a future reader "simplifying" it into an actual-side check.
+
+**Orchestra note:** `dictionary_pure_tests` had no `FIXPP_ORCHESTRA_DATA_DIR` macro, so one
+`target_compile_definitions` line was added to `tests/dictionary/CMakeLists.txt`.
+
+**Independently verified by the orchestrator** (not taken from the agent's report):
+`dictionary_pure_tests` → **287 tests, 277 pass, 10 fail**, the 10 being exactly the expected
+collision-guard set. The FIX50SP2 oracle constant is **505** here — correct, because this pin is the
+raw-XML structural truth; the *loader-side* pin (T018) uses **502**. Both are pinned on purpose.
+
+### Phase 3/5 — pre-T023 RED batch (T015–T018, T040, T042), OBSERVED RED
+
+`dictionary_required_scope_census_test` → **10 tests, 5 pass, 5 fail**. Orchestrator-verified by
+running the binary, not taken from the agent's report. Transcripts:
+
+| pin | state | observed |
+|---|---|---|
+| **T015** FIX42 18 tags | **RED** | oracle `{33,73,…,428}` (18) vs actual `{}` |
+| **T016** FIX40 / FIX41 | **RED** | `{73,78,124,136}` and `{33,73,78,124,136,146,199}` vs `{}` |
+| **T017** tag-146 | **RED** | all 6 contexts + the bare leg, expected sets vs `{}` |
+| **T040** FIX43 576 | **RED** | `group_first_field(576)` = 0; members `{}` vs `{577}` |
+| **T042** FIX43 delta | **RED** | actual 33 tags vs `baseline+1` = 34, `missing{576}` |
+| **T018** six unchanged | **green** | non-regression witness — green by design, see below |
+
+**T018 is green now and stays green — that is correct, not a false green.** All six are C2 **EQUAL**
+rows (type set == struct set), so replacing the datatype gate with the structural one cannot move
+them. It is FR-014/SC-002's *non-regression* leg: its job is to go RED if T023 accidentally moves one
+of the six. Its FIX50SP2 row is pinned at **502**, derived as `oracle.group_tags` minus
+`{1499,1669,1919}` (not hand-transcribed) with a `#208` citation and a note that it flips to a plain
+`oracle.group_tags` comparison once #208 lands.
+
+#### T017 needed a second leg — added by the orchestrator
+
+As first written, T017 pinned only the **context** store. The task text requires both, and the gap
+was load-bearing: a T023 implementation that populates the context store correctly while leaving the
+**bare** store wrong (or vice versa) would have passed. That is precisely the half-restructure FR-004
+exists to prevent, and T015 does not close it — T015 pins the bare store's registered *tag set*, not
+tag 146's *member set*.
+
+The added leg pins `tv.group_member_tags(146)` (bare overload) to the loader's **first-seen** variant.
+The expected value is **derived, not transcribed**: `News(B)` is the first `<message>` in FIX42.xml
+document order that reaches a `<group name="NoRelatedSym">`, so its member set is what `finalize()`'s
+`group_fields_` expansion records for the bare `no_tag`. Verified independently to be the 19-member
+`{News, Email}` variant `{22,46,48,65,106,107,167,200,201,202,205,206,207,223,231,348,349,350,351}`.
+
+Observed RED: `FIX42 tag 146 (BARE store, first-seen wins): missing-from-actual{22,46,…,351}`.
+
+Both legs now fail for the right reason (`group_bit(146)` is clear pre-T023), and they assert
+genuinely different things — per-context sets vs the single first-seen set.
+
 ---
 
 ## Evidence index

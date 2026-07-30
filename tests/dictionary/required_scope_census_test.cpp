@@ -135,6 +135,25 @@ std::string describe_diff(std::set<std::uint16_t> const& expected, std::set<std:
 
 constexpr std::size_t kArenaBytes = 32UZ * 1024UZ * 1024UZ;
 
+// 082-structural-group-detection T015/T016/T018/T040/T042: the bare store's
+// registered group-tag set, measured the SAME way T004's Phase-1 baseline
+// was captured (implementation-notes.md § T004: "sweeping
+// table_view::group_first_field(t) != 0 over all tags for each dictionary").
+// A sweep over the whole uint16_t space rather than a union of declared
+// field tags — table_view exposes no direct "list every registered no_tag"
+// accessor, and this mirrors the existing measurement methodology exactly
+// rather than inventing a second one.
+std::set<std::uint16_t> bare_registered_group_tags(table_view const& tv) {
+    std::set<std::uint16_t> tags;
+    for (std::uint32_t t = 1; t <= 0xFFFFU; ++t) {
+        auto const tag = static_cast<std::uint16_t>(t);
+        if (tv.group_first_field(tag) != 0) {
+            tags.insert(tag);
+        }
+    }
+    return tags;
+}
+
 }  // namespace
 
 // ============================================================================
@@ -439,4 +458,296 @@ TEST(RequiredScopeCensus, BareStoreIsAValidPerContextVariantExceptL0661GroupBlin
     }
     std::cout << "  total no_tags censused: " << total_no_tags << "\n";
     EXPECT_GT(total_no_tags, 0u);
+}
+
+// ============================================================================
+// 082-structural-group-detection Phase 3/5 RED pins (tasks.md T015/T016/T017/
+// T018/T040/T042 — written BEFORE T023 per the RED-first ordering rule).
+// contracts/group-detection.md C1/C2/K1/K3/K4. See the ⚠ DESCOPE BANNER at
+// the top of tasks.md for the FIX50SP2 502-vs-505 delta (issue #208), which
+// T018 below pins explicitly.
+//
+// EXPECTED RED until T023 lands: `Dictionary::as_table_view()`'s bare and
+// context population loops (dictionary.cpp:397-420, :439-470) gate on
+// `fr.type == field_data_type::NumInGroup` BEFORE ever consulting the
+// structural `Dictionary::group_first_field()` predicate. FIX40/41/42 type
+// EVERY group-count tag `INT` (never `NUMINGROUP`), and FIX43's tag 576 is
+// the same INT-vs-NUMINGROUP typo, so none of their group-declaring tags
+// ever reach the loop body — the bare/context stores register zero (resp.
+// 33, missing 576) for them today. T023 replaces the gate with
+// `group_first_field(fr.tag) != 0` directly, at which point these pins go
+// GREEN by construction.
+// ============================================================================
+
+// T015 [US1]: FIX42's 18 bare-store registered group tags, exact-set both
+// directions vs the oracle (FR-005 / K1).
+TEST(RequiredScopeCensus, Fix42BareStoreRegistersAllEighteenGroupTags) {
+    std::cout << "\n=== 082 T015: FIX42 bare-store registered group-tag exact-set ===\n";
+
+    auto storage = std::make_unique<std::byte[]>(kArenaBytes);
+    std::pmr::monotonic_buffer_resource mr{storage.get(), kArenaBytes};
+
+    auto const path = std::filesystem::path{FIXPP_DICT_DATA_DIR} / "FIX42.xml";
+    auto const oracle = build_quickfix_oracle(path);
+    auto const dict = fixpp::dict::XmlLoader{}.load(path, &mr);
+    auto const tv = dict.as_table_view();
+
+    ASSERT_EQ(oracle.group_tags.size(), 18u)
+        << "FIX42 oracle group-tag count drifted from the pinned 18 -- re-derive, don't silently "
+           "update this pin";
+
+    auto const actual = bare_registered_group_tags(tv);
+    EXPECT_EQ(oracle.group_tags, actual)
+        << "FIX42 bare-store registered set vs oracle: " << describe_diff(oracle.group_tags, actual);
+}
+
+// T016 [US1]: FIX40 (4 tags) and FIX41 (7 tags) bare-store registered group
+// tags, exact-set both directions vs the oracle — these two dictionaries
+// have no codegen golden to regenerate, so this direct pin is their ONLY
+// witness (FR-005 / K1).
+TEST(RequiredScopeCensus, Fix40AndFix41BareStoreRegisterAllGroupTags) {
+    std::cout << "\n=== 082 T016: FIX40/FIX41 bare-store registered group-tag exact-set ===\n";
+
+    struct Case {
+        char const* filename;
+        std::size_t expected_count;
+    };
+    std::vector<Case> const kCases{{"FIX40.xml", 4}, {"FIX41.xml", 7}};
+
+    for (auto const& c : kCases) {
+        auto storage = std::make_unique<std::byte[]>(kArenaBytes);
+        std::pmr::monotonic_buffer_resource mr{storage.get(), kArenaBytes};
+
+        auto const path = std::filesystem::path{FIXPP_DICT_DATA_DIR} / c.filename;
+        auto const oracle = build_quickfix_oracle(path);
+        auto const dict = fixpp::dict::XmlLoader{}.load(path, &mr);
+        auto const tv = dict.as_table_view();
+
+        ASSERT_EQ(oracle.group_tags.size(), c.expected_count)
+            << c.filename << ": oracle group-tag count drifted from the pinned value -- re-derive";
+
+        auto const actual = bare_registered_group_tags(tv);
+        EXPECT_EQ(oracle.group_tags, actual)
+            << c.filename << " bare-store exact-set: " << describe_diff(oracle.group_tags, actual);
+    }
+}
+
+// T017 [US1]: per-context member-set equality for FIX42's divergent-
+// signature tag NoRelatedSym(146) across its 6 occurrences — 4 distinct
+// direct-member lists (K4 / FR-004 / I-4a). Deliberately NOT tag 33
+// (LinesOfText) — its two occurrences carry identical members, so a
+// collapse-to-projection bug would be unobservable there (K4's own text).
+// This checks the FULL per-context member SET via the context-scoped
+// accessor `table_view::group_member_tags(msg_type, parent_path, no_tag)` —
+// not a tag-set projection across contexts.
+TEST(RequiredScopeCensus, Fix42Tag146PerContextMemberSetsMatchOracle) {
+    std::cout << "\n=== 082 T017: FIX42 tag 146 (NoRelatedSym) per-context member sets ===\n";
+
+    auto storage = std::make_unique<std::byte[]>(kArenaBytes);
+    std::pmr::monotonic_buffer_resource mr{storage.get(), kArenaBytes};
+
+    auto const path = std::filesystem::path{FIXPP_DICT_DATA_DIR} / "FIX42.xml";
+    auto const oracle = build_quickfix_oracle(path);
+    auto const dict = fixpp::dict::XmlLoader{}.load(path, &mr);
+    auto const tv = dict.as_table_view();
+
+    std::size_t contexts_checked = 0;
+    std::set<std::set<std::uint16_t>> distinct_variants;
+    for (auto const& [key, members] : oracle.group_members) {
+        if (key.no_tag != 146) {
+            continue;
+        }
+        auto const actual =
+            to_set(tv.group_member_tags(key.msg_type, std::span{key.path}, key.no_tag));
+        EXPECT_EQ(members, actual) << "FIX42 msg=" << key.msg_type
+                                    << " no_tag=146 (context store): " << describe_diff(members, actual);
+        distinct_variants.insert(members);
+        ++contexts_checked;
+    }
+
+    ASSERT_EQ(contexts_checked, 6u)
+        << "oracle found a different number of FIX42 tag-146 occurrences than the pinned 6 -- "
+           "re-derive, don't silently update this pin";
+    ASSERT_EQ(distinct_variants.size(), 4u)
+        << "oracle found a different number of distinct tag-146 member-set variants than the "
+           "pinned 4 -- re-derive, don't silently update this pin";
+
+    std::vector<std::size_t> sizes;
+    for (auto const& v : distinct_variants) {
+        sizes.push_back(v.size());
+    }
+    std::ranges::sort(sizes);
+    EXPECT_EQ(sizes, (std::vector<std::size_t>{19u, 20u, 22u, 31u}))
+        << "distinct tag-146 variant sizes drifted from the pinned {19,20,22,31} "
+           "({News,Email}=19, MarketDataRequest=20, "
+           "{SecurityDefinitionRequest,SecurityDefinition}=22, QuoteRequest=31)";
+
+    // ---- LEG 2 (082 T017): the BARE store holds the loader's FIRST-SEEN set ----
+    //
+    // BOTH legs are required and they assert DIFFERENT things. The two stores are
+    // keyed differently — the context store by (msg_type, parent path, no_tag),
+    // the bare store by no_tag alone — so "the stores agree" could only ever mean
+    // a tag-set PROJECTION, which passes while every per-context member set is
+    // wrong. Leg 1 above pins the context store per context; this leg pins the
+    // bare store to the ONE variant the loader records (first-seen wins,
+    // `xml_loader.cpp:609`). Without leg 2 a half-restructure that populates the
+    // context store correctly and leaves the bare store wrong (or vice versa)
+    // passes T017 — exactly what FR-004 exists to prevent. T015 does not close
+    // this gap: it pins the bare store's registered *tag set*, not 146's *member
+    // set*.
+    //
+    // The expected value is DERIVED, not transcribed: `News(B)` is the first
+    // `<message>` in FIX42.xml document order that reaches a
+    // `<group name="NoRelatedSym">`, so its member set is what
+    // `finalize()`'s `group_fields_` expansion records for the bare no_tag.
+    // Cross-check: it is the 19-member `{News, Email}` variant.
+    std::set<std::uint16_t> first_seen_variant;
+    std::size_t first_seen_hits = 0;
+    for (auto const& [key, members] : oracle.group_members) {
+        if (key.no_tag == 146 && key.msg_type == "B") {
+            first_seen_variant = members;
+            ++first_seen_hits;
+        }
+    }
+    ASSERT_EQ(first_seen_hits, 1u)
+        << "expected exactly one oracle entry for FIX42 News(B) tag 146 — the first-seen "
+           "occurrence in document order; re-derive rather than adjusting this pin";
+    ASSERT_EQ(first_seen_variant.size(), 19u)
+        << "FIX42 News(B) tag-146 member count drifted from the derived 19";
+
+    auto const bare_actual = to_set(tv.group_member_tags(146));
+    EXPECT_EQ(first_seen_variant, bare_actual)
+        << "FIX42 tag 146 (BARE store, first-seen wins): "
+        << describe_diff(first_seen_variant, bare_actual);
+}
+
+// T018 [US1]: the six unchanged dictionaries' bare-store registered group
+// set, exact-set both directions vs the registered-after column (C2 / K1 /
+// FR-014 / SC-002) — 082's C3 non-regression leg. Unlike T015/T016 this pin
+// is NOT expected to flip RED->GREEN across T023 for five of the six rows
+// (their group-count tags are already NUMINGROUP-typed, so the datatype gate
+// was never the obstacle); it stands as a witness that the predicate swap
+// moves none of them.
+//
+// FIX50SP2 is special-cased per the tasks.md DESCOPE BANNER (issue #208):
+// the shipped loader's one-level-deep <component> member scan
+// (xml_loader.cpp:610-641) never resolves 1499/1669/1919's only-nested-group
+// members, so those three tags never register — a PRE-EXISTING defect
+// unrelated to and unmoved by T023 (`group_first_field` returns 0 for all
+// three both before and after the predicate swap;
+// implementation-notes.md § BLOCKER B-1). Pinned at 502 = oracle.group_tags
+// minus those 3 tags; this row flips to a plain oracle.group_tags comparison
+// (505) once #208 lands.
+TEST(RequiredScopeCensus, SixUnchangedDictionariesBareStoreExactSet) {
+    std::cout << "\n=== 082 T018: six unchanged dictionaries' bare-store exact-set ===\n";
+
+    struct Case {
+        char const* label;
+        char const* filename;
+        bool is_orchestra;
+        std::size_t expected_count;
+    };
+    std::vector<Case> const kCases{
+        {"FIX44.xml", "FIX44.xml", false, 59},
+        {"FIX50.xml", "FIX50.xml", false, 67},
+        {"FIX50SP1.xml", "FIX50SP1.xml", false, 97},
+        {"FIX50SP2.xml", "FIX50SP2.xml", false, 502},  // #208 -- see banner above; NOT 505
+        {"FIXT11.xml", "FIXT11.xml", false, 1},
+        {"OrchestraFIXLatest.xml", "OrchestraFIXLatest.xml", true, 524},
+    };
+
+    for (auto const& c : kCases) {
+        auto storage = std::make_unique<std::byte[]>(kArenaBytes);
+        std::pmr::monotonic_buffer_resource mr{storage.get(), kArenaBytes};
+
+        auto const path = c.is_orchestra
+                             ? std::filesystem::path{FIXPP_ORCHESTRA_DATA_DIR} / c.filename
+                             : std::filesystem::path{FIXPP_DICT_DATA_DIR} / c.filename;
+        auto const oracle = c.is_orchestra ? build_orchestra_oracle(path) : build_quickfix_oracle(path);
+        auto const dict = c.is_orchestra ? fixpp::dict::OrchestraLoader{}.load(path, &mr)
+                                          : fixpp::dict::XmlLoader{}.load(path, &mr);
+        auto const tv = dict.as_table_view();
+
+        auto expected = oracle.group_tags;
+        if (std::string_view{c.filename} == "FIX50SP2.xml") {
+            // #208: never registers -- one-level <component> scan defect, not this feature's predicate.
+            expected.erase(1499);
+            expected.erase(1669);
+            expected.erase(1919);
+        }
+        ASSERT_EQ(expected.size(), c.expected_count)
+            << c.label << ": derived expected-set size drifted from the pinned count -- re-derive";
+
+        auto const actual = bare_registered_group_tags(tv);
+        EXPECT_EQ(expected, actual)
+            << c.label << " bare-store exact-set: " << describe_diff(expected, actual);
+    }
+}
+
+// T040 [US3]: FIX43 tag 576 (NoClearingInstructions) registers as a
+// repeating group with member ClearingInstruction(577) in the bare store.
+// 576 is INT-typed (a pre-existing dialect typo -- FIX44 types it correctly
+// as NUMINGROUP), so registering it is only possible once T023 replaces the
+// `fr.type == NumInGroup` filter with the structural `group_first_field()`
+// predicate -- FR-001's behavioral witness, not a token grep (FR-011 / K3).
+TEST(RequiredScopeCensus, Fix43Tag576RegistersAsGroupWithClearingInstructionMember) {
+    std::cout << "\n=== 082 T040: FIX43 tag 576 (NoClearingInstructions) registration ===\n";
+
+    auto storage = std::make_unique<std::byte[]>(kArenaBytes);
+    std::pmr::monotonic_buffer_resource mr{storage.get(), kArenaBytes};
+
+    auto const path = std::filesystem::path{FIXPP_DICT_DATA_DIR} / "FIX43.xml";
+    auto const dict = fixpp::dict::XmlLoader{}.load(path, &mr);
+    auto const tv = dict.as_table_view();
+
+    EXPECT_NE(tv.group_first_field(576), 0)
+        << "FIX43 tag 576 (NoClearingInstructions) not registered as a group in the bare store -- "
+           "INT-typed group-count fields are filtered out before T023's predicate swap";
+    auto const members = to_set(tv.group_member_tags(576));
+    EXPECT_EQ(members, (std::set<std::uint16_t>{577}))
+        << "FIX43 tag 576 member set: " << describe_diff(std::set<std::uint16_t>{577}, members);
+}
+
+// T042 [US3]: FIX43's bare-store registered set differs from the T004
+// pre-change baseline (33 tags; implementation-notes.md § T004) by EXACTLY
+// +1 tag (576) -- not merely "more than before" -- and no OTHER tag moves
+// (FR-013 / SC-003 / K3).
+TEST(RequiredScopeCensus, Fix43RegisteredSetDeltaIsExactlyPlusOneTag576) {
+    std::cout << "\n=== 082 T042: FIX43 registered-set delta vs T004 baseline ===\n";
+
+    auto storage = std::make_unique<std::byte[]>(kArenaBytes);
+    std::pmr::monotonic_buffer_resource mr{storage.get(), kArenaBytes};
+
+    auto const path = std::filesystem::path{FIXPP_DICT_DATA_DIR} / "FIX43.xml";
+    auto const oracle = build_quickfix_oracle(path);
+    auto const dict = fixpp::dict::XmlLoader{}.load(path, &mr);
+    auto const tv = dict.as_table_view();
+
+    ASSERT_EQ(oracle.group_tags.size(), 34u)
+        << "FIX43 oracle struct-set drifted from the pinned 34 -- re-derive, don't silently update";
+
+    // T004's pre-change baseline (33 tags), derived here as oracle.group_tags
+    // minus 576 -- not re-transcribed, so it stays tied to the oracle's own
+    // 34-tag output rather than a second hand-copied literal.
+    auto baseline_before = oracle.group_tags;
+    baseline_before.erase(576);
+    ASSERT_EQ(baseline_before.size(), 33u)
+        << "derived T004 baseline drifted from the pinned 33 -- re-derive";
+
+    auto const actual = bare_registered_group_tags(tv);
+
+    // No OTHER tag moves: every one of the 33 baseline tags must still be
+    // registered.
+    for (auto const tag : baseline_before) {
+        EXPECT_TRUE(actual.contains(tag))
+            << "FIX43 baseline tag " << tag << " unexpectedly un-registered by the predicate swap";
+    }
+    // The delta is EXACTLY {576} -- both that it registers (RED until T023)
+    // and that nothing beyond it changes.
+    EXPECT_EQ(oracle.group_tags, actual)
+        << "FIX43 bare-store set vs full 34-tag registered-after set: "
+        << describe_diff(oracle.group_tags, actual);
+    EXPECT_EQ(actual.size(), baseline_before.size() + 1)
+        << "FIX43 registered-set delta is not exactly +1 tag -- actual size " << actual.size()
+        << " vs baseline " << baseline_before.size();
 }
