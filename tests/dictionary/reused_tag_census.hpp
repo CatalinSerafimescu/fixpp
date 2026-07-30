@@ -10,6 +10,24 @@
 // Mirrors Dictionary::as_table_view()'s Defect-A membership derivation
 // (src/dictionary/dictionary.cpp:369-422) field-for-field — see
 // reused_tag_census_test.cpp's file header for the full rationale.
+//
+// 082-structural-group-detection T008 (FR-018): `census_for`'s own group-tag
+// gate is re-pointed from the datatype test (`fr.type ==
+// field_data_type::NumInGroup`) onto `required_scope_oracle.hpp`'s T005
+// group-tag census (`DictOracle::group_tags`) — the from-scratch,
+// reachability-restricted structural set (contracts/group-detection.md C1/
+// C2), passed in by the caller. NOT `Dictionary::group_first_field()`: that
+// accessor's backing `groups_` table is populated once per DECLARED
+// `<component>` regardless of message-reachability (xml_loader.cpp:954-970),
+// so in isolation it is the unrestricted *struct* set (confirmed
+// empirically: it disagrees with the oracle on FIX50/FIX50SP1 by exactly
+// {384, 627}, the two declared-but-unreachable groups C2 documents), and it
+// also still carries the not-yet-fixed component-recursion gap on FIX50SP2
+// (differs by {1499, 1669, 1919} until T012b lands) — using it here would
+// launder that pre-existing defect into this census's witness rather than
+// exposing it. The independent oracle keeps this census non-circular per the
+// FR-018/D-6 single-oracle guarantee: it is unaffected by both the T023
+// predicate change AND the T012b loader fix.
 
 #pragma once
 
@@ -29,7 +47,6 @@
 namespace fixpp_test_support {
 
 using fixpp::dict::Dictionary;
-using fixpp::dict::field_data_type;
 
 // One (msg_type, outer-to-inner parent-no_tag path) coordinate.
 struct GroupContext {
@@ -57,8 +74,12 @@ struct DictCensus {
 };
 
 // Mirrors Dictionary::as_table_view()'s Defect-A membership derivation
-// (src/dictionary/dictionary.cpp:369-422) field-for-field.
-inline DictCensus census_for(Dictionary const& dict, std::string name) {
+// (src/dictionary/dictionary.cpp:369-422) field-for-field, except the
+// group-tag gate itself: `group_tags` (082 T005/T008) replaces the datatype
+// test with the independent oracle's reachability-restricted structural set
+// — see the file header for why.
+inline DictCensus census_for(Dictionary const& dict, std::string name,
+                              std::set<std::uint16_t> const& group_tags) {
     DictCensus dc;
     dc.name = std::move(name);
 
@@ -71,13 +92,13 @@ inline DictCensus census_for(Dictionary const& dict, std::string name) {
 
         std::unordered_map<std::uint16_t, std::uint16_t> immediate_parent;
         for (auto const& fr : all_fields) {
-            if (fr.type == field_data_type::NumInGroup) {
+            if (group_tags.contains(fr.tag)) {
                 immediate_parent[fr.tag] = fr.group_no_tag;
             }
         }
 
         for (auto const& fr : all_fields) {
-            if (fr.type != field_data_type::NumInGroup) {
+            if (!group_tags.contains(fr.tag)) {
                 continue;
             }
             std::uint16_t const no_tag = fr.tag;

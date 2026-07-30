@@ -42,6 +42,7 @@
 #include <string_view>
 #include <vector>
 
+#include "required_scope_oracle.hpp"  // 082 T008: independent group-tag census
 #include "reused_tag_census.hpp"
 
 namespace {
@@ -101,7 +102,8 @@ std::vector<CollisionCase> derive_cases_for_dict(std::string_view fname) {
 
     auto const path = std::filesystem::path{FIXPP_DICT_DATA_DIR} / std::string{fname};
     auto dict = load(path, &mr);
-    auto const dc = census_for(dict, std::string{fname});
+    auto const oracle = fixpp_test::required_scope_oracle::build_quickfix_oracle(path);
+    auto const dc = census_for(dict, std::string{fname}, oracle.group_tags);
 
     for (auto const& [no_tag, variants] : dc.per_tag) {
         if (variants.size() < 2) {
