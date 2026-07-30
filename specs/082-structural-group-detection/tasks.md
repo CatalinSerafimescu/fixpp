@@ -9,6 +9,47 @@
 OD-1 resolved → the fail-closed loader rejection (**FR-023**). OD-2 ratified → the annotation-only
 Article XVIII §7 amendment (**FR-020**, task T052). Appendix-A user `/plan` sign-off given.
 
+> ## ⚠ DESCOPE BANNER — issue [#208](https://github.com/CatalinSerafimescu/fixpp/issues/208), user decision 2026-07-30
+>
+> Implementation-time measurement (T004) found a **pre-existing loader defect** that this task list
+> was written without knowledge of. It is **split out of 082** by user decision and tracked as #208.
+> Rather than re-editing every affected row, the deltas are stated **once, here**, and override the
+> task text below wherever they conflict.
+>
+> **The defect.** Both loaders resolve a `<group>`'s `<component>` member **one level deep only**
+> (`xml_loader.cpp:610-641`, `orchestra_loader.cpp:495-513`). FIX50SP2's **1499** `NoAsgnReqs`,
+> **1669** `NoRiskLimits`, **1919** `NoPriceMovements` therefore never register: the shipped loader
+> registers **502**, not C2's 505. Fixing it is blocked on a `consume_group` change in the wire
+> validator (#208 § B-2 — reproduced at runtime: a multi-instance group whose delimiter is a nested
+> group's count tag false-rejects with `wire_required_field_missing`), which is far outside 082's
+> reviewed surface. Full evidence: `implementation-notes.md` §§ B-1, B-1a, B-1b, B-2.
+>
+> **Deltas that override the rows below:**
+>
+> 1. **T018** pins FIX50SP2's actual registered set at **502**, not 505, with a `#208` reference and
+>    the note that it flips to 505 when #208 lands. FIX44 / FIX50 / FIX50SP1 / FIXT11 /
+>    Orchestra-Latest are unchanged at 59 / 67 / 97 / 1 / 524.
+> 2. **T005–T008 (already landed) are unaffected** — the oracle is a raw-XML derivation and
+>    correctly yields **505**. The 505-vs-502 gap between oracle and loader **is** the defect, and
+>    C2 now pins both numbers separately so it stays visible rather than being absorbed.
+> 3. **T009 / T010 / T012 / T013** — FR-023's rejection fires **only on a `<group>` with no child
+>    elements at all** (the literal definition K7/S0 measures as 0 across all ten dictionaries), NOT
+>    on "no *resolvable* member". The broader reading would **reject FIX50SP2 outright**. The
+>    non-first-seen-occurrence fixture constraint and the outside-the-dedup-guard placement
+>    constraint both still stand unchanged.
+> 4. **T011's** ten-dictionary load-clean leg is unchanged and now doubly load-bearing — it is what
+>    proves the narrowed rejection does not take FIX50SP2 down.
+> 5. **T014 / T050 / T051** must state the residual honestly: `group_first_field(T) == 0` **remains
+>    reachable** on FIX50SP2 after 082 (3 tags), so contract C1.1's "no caveat" claim is **not**
+>    achieved by this feature and P1-NON is correspondingly narrowed. The B&L row and release note
+>    must say the rejection affects zero shipped dictionaries **because it is scoped to the literal
+>    definition**, and must cross-reference #208 for the residual.
+> 6. **T055's** completeness audit records FR-023 as **partially delivered** against its original
+>    wording, with #208 as the named carry-forward — not as fully met.
+>
+> **Gate visibility:** C2, C1.1 and P1-NON were edited *after* Gate A sign-off. This banner is the
+> Gate B disclosure of that drift; the edits narrow claims to what is measured and add no new scope.
+
 ## Format: `[ID] [P?] [Story] Description`
 
 - **[P]** — parallelizable (different files, no dependency on an incomplete task)

@@ -35,7 +35,20 @@ declares **is** one.
   082 does not change the accessor. What 082 changes is the **input**: FR-023 makes a member-less
   `<group>` a **load error** in both loaders, so no `Dictionary` the loaders admit can carry the
   ambiguous state. Over the set of dictionaries admitted, `group_first_field(T) != 0` is therefore
-  **exactly** the predicate of C1 — no caveat. See P1-NON and K11.
+  the predicate of C1 — **subject to the one residual exception below**. See P1-NON and K11.
+
+  **RESIDUAL EXCEPTION (measured, not theoretical — [#208](https://github.com/CatalinSerafimescu/fixpp/issues/208)).**
+  FR-023's rejection is defined on a **literally member-less** `<group>` (no child elements at all),
+  which is the state K7/S0 measures as **0** across all ten dictionaries. It does **not** cover a
+  `<group>` whose children exist but none of which the loader can *resolve* — the distinct,
+  pre-existing one-level-`<component>`-scan defect. **FIX50SP2 has 3 such groups** (1499, 1669,
+  1919), so `group_first_field(T) == 0` **remains reachable** on a shipped dictionary after 082.
+
+  Therefore: over the set of dictionaries admitted, `group_first_field(T) != 0` is exactly C1's
+  predicate **except for those three tags**, and it becomes exact with no caveat only once #208
+  lands. 082 deliberately does not close that gap — the fix requires a `consume_group` change in
+  the wire validator (#208 § B-2) as a hard prerequisite, well outside this feature's surface.
+  Stating "no caveat" here without #208 would be false.
 
 ### C1.2 — Codegen realization
 
@@ -47,7 +60,7 @@ messages of the version.
 | ID | Property |
 |---|---|
 | **P1** | **Not derived from a message's own field-run membership.** Derivations from a group's members — `{FieldRef::group_no_tag : != 0}` over `all_fields`, or a `members.empty()` test — are **non-conforming**, because they conflate "**D** declares a group with count tag T" with "T has members **in this message**": a group's own count field carries its *parent's* tag, never its own, and a tag reused as a plain scalar answers wrongly. This is what the predicate owes. **Scope: P1 binds the *detection predicate*.** `dictionary.cpp:463`'s post-detection `if (members.empty()) continue;` registration guard runs *downstream* of the detection filter at `:446`, is unchanged by 082, and is **outside P1's scope** — see P1-NON. (Same scoping as FR-001's absolute, which likewise binds detection sites only.) |
-| **P1-NON** | **Zero-member `<group>` visibility is RETIRED AT THE LOADER, not documented around (OD-1 resolved 2026-07-30 — FR-023).** Earlier drafts stated P1 as "member-independent — a `<group>` with zero members still satisfies the predicate". That is unachievable at the runtime tier and stays withdrawn, and the reason is **representational**: `table_view` cannot represent a delimiter-less group (`set_group_first(t, 0)` at `table_view.hpp:570-575` would set the group bit **and** insert member tag **0**, a malformed registration the parser and validator would consume), and the 063 context store's `if (members.empty()) continue;` (`dictionary.cpp:463`) defeats visibility under *any* predicate. **That reason is now the ground on which rejection is right, rather than the ground on which a limitation is tolerable:** a declaration with no usable downstream representation is a malformed dictionary, so FR-023 makes it a **load error** in both loaders — mirroring `xml_loader.cpp:584`'s sibling rejection and closing `:1017`'s `first_field_tag != 0` carve-out. **Consequence:** the zero-member state is **unreachable by construction**, so C1.1's realization is exactly C1's predicate with **no caveat**. **Do not overstate it:** the sentinel is still ambiguous *when read in isolation* (`dictionary.cpp:92-99` is unchanged); what changed is that the ambiguous **input** can no longer reach it. The codegen realization (C1.2) would still *see* a zero-member group (`walk_level` appends unconditionally) — moot post-FR-023, since no such dictionary loads, and still not to be restated as a feature-level guarantee. No vendored dictionary declares a member-less `<group>` (K7/S0), so **zero** shipped dictionaries are affected by the rejection. Conformance: **K11**. |
+| **P1-NON** | **Zero-member `<group>` visibility is RETIRED AT THE LOADER, not documented around (OD-1 resolved 2026-07-30 — FR-023).** Earlier drafts stated P1 as "member-independent — a `<group>` with zero members still satisfies the predicate". That is unachievable at the runtime tier and stays withdrawn, and the reason is **representational**: `table_view` cannot represent a delimiter-less group (`set_group_first(t, 0)` at `table_view.hpp:570-575` would set the group bit **and** insert member tag **0**, a malformed registration the parser and validator would consume), and the 063 context store's `if (members.empty()) continue;` (`dictionary.cpp:463`) defeats visibility under *any* predicate. **That reason is now the ground on which rejection is right, rather than the ground on which a limitation is tolerable:** a declaration with no usable downstream representation is a malformed dictionary, so FR-023 makes it a **load error** in both loaders — mirroring `xml_loader.cpp:584`'s sibling rejection and closing `:1017`'s `first_field_tag != 0` carve-out. **Consequence:** the **literally** zero-member state is unreachable by construction. **But `first_field_tag == 0` is NOT**, and C1.1's realization is therefore exactly C1's predicate **except for three FIX50SP2 tags** — see C1.1's RESIDUAL EXCEPTION and [#208](https://github.com/CatalinSerafimescu/fixpp/issues/208). FR-023's rejection fires on a `<group>` with **no child elements at all** (the definition K7/S0 measures as 0 on all ten). A `<group>` whose children exist but none of which the loader can *resolve* — FIX50SP2's 1499/1669/1919, behind the one-level `<component>` scan — is a **separate pre-existing defect**, is explicitly NOT rejected by FR-023, and keeps the ambiguous sentinel reachable until #208 lands. Scoping the rejection to the literal definition is what keeps FIX50SP2 loading; the broader definition would reject a shipped dictionary. **Do not overstate it:** the sentinel is still ambiguous *when read in isolation* (`dictionary.cpp:92-99` is unchanged); what changed is that the ambiguous **input** can no longer reach it. The codegen realization (C1.2) would still *see* a zero-member group (`walk_level` appends unconditionally) — moot post-FR-023, since no such dictionary loads, and still not to be restated as a feature-level guarantee. No vendored dictionary declares a member-less `<group>` (K7/S0), so **zero** shipped dictionaries are affected by the rejection. Conformance: **K11**. |
 | **P2** | **Per-dictionary** — evaluated against one loaded dictionary. No global tag-keyed group set. |
 | **P3** | **Deterministic** — same input document ⇒ same set, same order. Emission order must remain stable or the goldens' determinism test fails. |
 | **P4** | **Single-sourced, and the source is NAMED.** Exactly one predicate per tier: the **runtime** tier's is `Dictionary::group_first_field(t) != 0`, shared by `as_table_view()`'s two registration loops **and** the four C-ABI write sites listed in C1.1; the **codegen** tier's is membership in `VersionIR::group_tags`. Neither a union with the datatype test, nor a per-version/per-dictionary special case, nor a *second structural realization inside one tier* (e.g. `Dictionary::group(t).has_value()` in `as_table_view()` while `message_write.cpp` keeps `group_first_field`) is conforming — the last is the half-restructure FR-004 exists to prevent. |
@@ -76,9 +89,30 @@ oracle, not inferred from set cardinality:
 | FIX44 | 59 | 59 | 59 | **59** | — |
 | FIX50 | 69 | 69 | 67 | **67** | — |
 | FIX50SP1 | 99 | 99 | 97 | **97** | — |
-| FIX50SP2 | 507 | 507 | 505 | **505** | — |
+| FIX50SP2 | 507 | 507 | 505 † | **505** † | — |
 | FIXT11 | 1 | 1 | 1 | **1** | — |
 | Orchestra FIX Latest | 524 | 524 | 524 | **524** | — |
+
+† **FIX50SP2: structural truth is 505; the shipped loader actually registers 502** — measured, not
+inferred, at the 082 branch point (`implementation-notes.md` § BLOCKER B-1). Tags **1499**
+`NoAsgnReqs`, **1669** `NoRiskLimits` and **1919** `NoPriceMovements` have only `<component>`
+children whose own first child is a nested `<group>`, and both loaders resolve a `<component>`
+member **one level deep only** (`xml_loader.cpp:610-641`, `orchestra_loader.cpp:495-513`), so their
+`first_field_tag` stays 0 and they never register. This is a **pre-existing defect, tracked as
+[#208](https://github.com/CatalinSerafimescu/fixpp/issues/208) and deliberately OUT OF SCOPE for
+082** — the fix requires a `consume_group` change in the wire validator as a hard prerequisite
+(#208 § B-2), which is far outside this feature's reviewed surface.
+
+The two numbers are therefore both correct and must be pinned **separately**:
+
+- **oracle / structural** (`struct ∩ reachable`, raw XML) = **505** — what K7's oracle asserts;
+- **actual loader registration** = **502** — what K1/K2 assert against `as_table_view()` until #208
+  lands, at which point this row becomes 505 on both sides and the pin flips.
+
+The delta between them **is** the defect, and pinning both directions is what keeps it visible
+rather than silently absorbed. FIX50SP2 remains an **EQUAL** row either way: `group_first_field`
+returns 0 for those three both before and after the T023 predicate swap, so this does not affect
+C3 or the predicate change.
 
 **Why FIX50/SP1/SP2 register 2 fewer than they declare** (a cross-check on this model, not an
 anomaly): those dictionaries ship an **empty `<header/>`** — the FIXT.1.1 session layer owns the
