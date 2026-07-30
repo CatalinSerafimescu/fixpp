@@ -28,7 +28,7 @@ Comparing, per dictionary, the **type set** `{tag : the field definition's type 
 | FIX40 | 0 | 4 | structural-only (+4) |
 | FIX41 | 0 | 7 | structural-only (+7) |
 | FIX42 | 0 | **18** | structural-only (+18) — the #196 target |
-| **FIX43** | 34 | 34 | **sets DIVERGE on two tags** (US3) |
+| **FIX43** | 34 | 34 | **sets DIVERGE on two tags**; effective delta **+576 only** (US3) |
 | FIX44 | 59 | 59 | equal — no-op |
 | FIX50 | 69 | 69 | equal — no-op |
 | FIX50SP1 | 99 | 99 | equal — no-op |
@@ -44,10 +44,12 @@ This table is reproducible: `contracts/predicate_census.py` is the checked-in, n
 
 ### The FIX43 divergence — both cases are upstream dictionary typos
 
-- **tag 82 `NoRpts`** is typed `NUMINGROUP` (`FIX43.xml:2596`) but is **never** a `<group>` anywhere; it is used as a plain field inside `<message name='ListStatus'>` (`FIX43.xml:728`). FIX44 types the same tag `INT` (`FIX44.xml:4095`) and likewise uses it as a plain field. Today FIX43 registers tag 82 as a **spurious zero-member group**.
-- **tag 576 `NoClearingInstructions`** is typed `INT` (`FIX43.xml:4069`) but **is** a `<group required='N'>` with member `ClearingInstruction` (`FIX43.xml:1918`). FIX44 types it `NUMINGROUP` (`FIX44.xml:5637`) and declares the same group. Today FIX43 is **group-blind on a real repeating group**.
+- **tag 576 `NoClearingInstructions`** is typed `INT` (`FIX43.xml:4069`) but **is** a `<group required='N'>` with member `ClearingInstruction` (`FIX43.xml:1918`). FIX44 types it `NUMINGROUP` (`FIX44.xml:5637`) and declares the same group. Today FIX43 is **group-blind on a real repeating group** — this is a live defect and the one effective FIX43 delta.
+- **tag 82 `NoRpts`** is typed `NUMINGROUP` (`FIX43.xml:2596`) but is **never** a `<group>` anywhere; it is used as a plain field inside `<message name='ListStatus'>` (`FIX43.xml:728`). FIX44 types the same tag `INT` (`FIX44.xml:4095`) and likewise uses it as a plain field. The datatype gate *nominates* tag 82 as a group — but **both registration stores already reject it downstream**: the legacy bare store via `group_first_field(82) == 0` (`dictionary.cpp:402`; `group_first_field_impl` binary-searches the structural `groups_` table and returns 0 for a non-`<group>` tag, `dictionary.cpp:92`), and the context-scoped store via its `members.empty()` guard (`dictionary.cpp:463`). **Tag 82 is therefore already unregistered today, and this feature does not change that.** What changes is *why*: the rejection becomes principled (the dictionary does not declare a `<group>`) instead of incidental (a downstream guard happens to catch it).
 
-Structural detection is correct on **both**. A union predicate (`type OR structural`) would preserve the spurious tag-82 registration and is therefore rejected.
+**Effective FIX43 delta: exactly one tag — `+576`.** Tag 82 is a **no-regression pin**, not a behavior change.
+
+**Why pure structural rather than a union (`type OR structural`).** The honest case is *not* that a union misbehaves today — the same downstream guards that already reject tag 82 would reject it under a union too, so union and structural produce identical results on all ten dictionaries as they stand. The case is design integrity: a union keeps two sources of truth for one property and leaves a latent trap (a future dictionary declaring a `NUMINGROUP`-typed non-group tag that *does* acquire members would register spuriously, with no guard left to catch it), keeps `FieldRef::type` semantically overloaded as both datatype and group marker, and costs more code for zero present benefit. One predicate, one source.
 
 ### Structural truth is already available on both sides — this is a re-point, not new plumbing
 
@@ -108,19 +110,19 @@ A developer constructing outbound FIX 4.2 messages wants the same typed `build_<
 
 ### User Story 3 - FIX43's two mis-typed group-count tags are corrected (Priority: P2)
 
-An operator running a FIX 4.3 session under dictionary-backed validation is affected by two latent dictionary-typo defects that the predicate change necessarily resolves: a **real** repeating group (`NoClearingInstructions(576)`) is currently unregistered and therefore group-blind, and a **plain field** (`NoRpts(82)`) is currently registered as a spurious zero-member group.
+An operator running a FIX 4.3 session under dictionary-backed parsing is affected by a latent dictionary-typo defect that the predicate change resolves: a **real** repeating group, `NoClearingInstructions(576)`, is typed `INT` and is therefore currently unregistered and group-blind. The companion typo — plain field `NoRpts(82)` typed `NUMINGROUP` — is already rejected by both stores' downstream guards, so it carries a **no-regression pin** rather than a behavior change.
 
-**Why this priority**: It is unavoidable once the predicate changes — it cannot be deferred to a later feature — but it is a discovered latent-defect fix, independent of what #196 asks for. It is separated so its behavior deltas and pins are visible in their own right and are not buried under the `v42` story.
+**Why this priority**: It is unavoidable once the predicate changes — it cannot be deferred to a later feature — but it is a discovered latent-defect fix, independent of what #196 asks for. It is separated so its delta and pins are visible in their own right and are not buried under the `v42` story.
 
-**Independent Test**: Load `FIX43.xml`, build `as_table_view()`, and assert tag 82 is **not** registered as a group while `ListStatus` still reads tag 82 as a plain required field; and assert tag 576 **is** registered as a group with member `ClearingInstruction`.
+**Independent Test**: Load `FIX43.xml`, build `as_table_view()`, and assert tag 576 **is** registered as a group with member `ClearingInstruction` (it is not today); separately assert tag 82 remains **un**registered as a group and `ListStatus` still reads it as a plain required field.
 
 **Acceptance Scenarios**:
 
-1. **Given** the vendored `FIX43.xml`, **When** `as_table_view()` is built, **Then** tag **82** is **not** registered as a repeating group (it is registered today).
-2. **Given** the same view, **When** a `ListStatus` message carrying tag 82 is validated, **Then** tag 82 is still accepted and enforced as a **plain required field** — removing the spurious group registration must not make the field unknown or optional.
-3. **Given** the same view, **When** tag **576** is queried, **Then** it **is** registered as a repeating group with member `ClearingInstruction` (it is not registered today).
-4. **Given** a FIX 4.3 inbound message carrying a populated `NoClearingInstructions(576)` group, **When** a typed or C-ABI group read is issued, **Then** it returns a membership-bounded read rather than `TYPE_MISMATCH`/absent.
-5. **Given** FIX43's remaining 33 group tags, **When** `as_table_view()` is built, **Then** their registration is unchanged (only the two named tags move).
+1. **Given** the vendored `FIX43.xml`, **When** `as_table_view()` is built, **Then** tag **576** **is** registered as a repeating group with member `ClearingInstruction` (it is not registered today).
+2. **Given** a FIX 4.3 inbound message carrying a populated `NoClearingInstructions(576)` group, **When** a typed or C-ABI group read is issued, **Then** it returns a membership-bounded read rather than `TYPE_MISMATCH`/absent.
+3. **Given** the same view, **When** tag **82** is queried, **Then** it is **not** registered as a repeating group — unchanged from today, now because the dictionary declares no `<group>` for it rather than because a downstream guard rejects it.
+4. **Given** the same view, **When** a `ListStatus` message carrying tag 82 is validated, **Then** tag 82 is still accepted and enforced as a **plain required field** — the predicate change must not make the field unknown or optional.
+5. **Given** FIX43's other 33 group tags, **When** `as_table_view()` is built, **Then** their registration is unchanged. Exactly one tag moves.
 
 ---
 
@@ -177,9 +179,9 @@ The exemplar suite (feature 061) has no FIX 4.2 grouped or nested **write** exem
 
 **FIX43 corrections**
 
-- **FR-011**: `as_table_view()` for FIX43 MUST NOT register tag **82 `NoRpts`** as a repeating group, while `ListStatus` MUST continue to accept and enforce tag 82 as a plain **required** field.
-- **FR-012**: `as_table_view()` for FIX43 MUST register tag **576 `NoClearingInstructions`** as a repeating group with member `ClearingInstruction`, making its inbound reads membership-bounded.
-- **FR-013**: FIX43's other 33 group registrations MUST be unchanged. Exactly two tags move.
+- **FR-011**: `as_table_view()` for FIX43 MUST register tag **576 `NoClearingInstructions`** as a repeating group with member `ClearingInstruction`, making its inbound reads membership-bounded. This is the one effective FIX43 behavior change.
+- **FR-012**: `as_table_view()` for FIX43 MUST continue to leave tag **82 `NoRpts`** unregistered as a group, and `ListStatus` MUST continue to accept and enforce tag 82 as a plain **required** field. This is a **no-regression pin**: tag 82 is already unregistered today (rejected by `group_first_field(82) == 0` in the legacy store and by `members.empty()` in the context-scoped store), so the requirement is that the predicate change preserves that outcome while making it principled rather than incidental.
+- **FR-013**: FIX43's other 33 group registrations MUST be unchanged. **Exactly one tag moves** (`+576`).
 
 **Non-regression**
 
@@ -209,7 +211,7 @@ The exemplar suite (feature 061) has no FIX 4.2 grouped or nested **write** exem
 
 - **SC-001**: `as_table_view()` registers exactly **4 / 7 / 18** repeating groups for FIX40 / FIX41 / FIX42 (today **0 / 0 / 0**), each with its declared member set, verified against a non-circular raw-XML oracle by exact-set equality in both directions.
 - **SC-002**: For FIX44, FIX50, FIX50SP1, FIX50SP2, FIXT11, and Orchestra FIX Latest, the registered group set is exact-set-equal to the pre-feature set in both directions — **0 additions, 0 removals**.
-- **SC-003**: The FIX43 registered group set differs from the pre-feature set by **exactly two** tags: 82 removed, 576 added. `ListStatus` still enforces tag 82 as a plain required field, and a populated `NoClearingInstructions(576)` group reads membership-bounded.
+- **SC-003**: The FIX43 registered group set differs from the pre-feature set by **exactly one** tag: **576 added**. A populated `NoClearingInstructions(576)` group reads membership-bounded where it previously did not. Tag 82 stays unregistered and `ListStatus` still enforces it as a plain required field (no-regression pin, not a delta).
 - **SC-004**: The regenerated `v42` read tier contains typed group accessors for all **18** FIX42 group tags (today **0**), including the `296 → 295` nesting, and every emitted-count delta in its `Messages.hpp` / `Manifest.txt` / `Reify.hpp` is reconciled by construction to FIX42's declared structure.
 - **SC-005**: Regeneration produces **byte-identical** `v44`, `v50sp2`, `vt11`, and `vlatest` read goldens and **byte-identical** existing `v44` / `v50sp2` / `vlatest` builder goldens — demonstrated by an actual diff over regenerated output.
 - **SC-006**: `fixpp::v42` ships a typed builder tier covering its **39** application messages, with repeating groups represented in `Args` for the **21** that declare them; `validate_<Msg>` rejects omission of a `required='Y'` group at all **14** message/group pairs that declare one.
