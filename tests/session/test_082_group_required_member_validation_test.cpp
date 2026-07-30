@@ -227,8 +227,15 @@ std::string other_required_fields(fixpp::dict::table_view const& tv, DictOracle 
 // required member (ascending tag order via std::set, excluding both the
 // omitted tag and the delimiter) with a generic filler value. Passing
 // `omitted_tag == 0` (no real tag) omits nothing -- the "complete" baseline.
-std::string build_group_instance(fixpp::dict::table_view const& tv, std::uint16_t delim_tag,
-                                 std::set<std::uint16_t> const& required_members,
+// A required member that is itself ANOTHER group's no_tag (e.g. MassQuote's
+// NoQuoteSets(296) requires NoQuoteEntries(295)) is satisfied with `tag=0`
+// -- same treatment as `other_required_fields` above, for the same reason
+// (a present-but-empty group is structurally valid, consume_group returns
+// immediately for declared_count == 0). Pre-existing gap: previously
+// unreached for the i/296 top-level case because an earlier case
+// (msg_type=R, no_tag=146) aborted the whole TEST body first via ASSERT.
+std::string build_group_instance(fixpp::dict::table_view const& tv, DictOracle const& oracle,
+                                 std::uint16_t delim_tag, std::set<std::uint16_t> const& required_members,
                                  std::uint16_t omitted_tag) {
     std::string out;
     if (delim_tag != omitted_tag) {
@@ -236,6 +243,10 @@ std::string build_group_instance(fixpp::dict::table_view const& tv, std::uint16_
     }
     for (auto tag : required_members) {
         if (tag == omitted_tag || tag == delim_tag) continue;
+        if (oracle.group_tags.contains(tag)) {
+            out += field(tag, "0");
+            continue;
+        }
         out += field(tag, pick_filler_value(tv, tag));
     }
     return out;
@@ -246,34 +257,65 @@ std::string build_group_instance(fixpp::dict::table_view const& tv, std::uint16_
 std::vector<std::byte> build_top_level_frame(fixpp::dict::table_view const& tv, DictOracle const& oracle,
                                              GroupContextKey const& key, std::uint16_t omitted_tag,
                                              std::uint32_t seq) {
-    auto const delim_it = kDelimTags.find(key);
-    if (delim_it == kDelimTags.end()) {
-        throw std::runtime_error("build_top_level_frame: no kDelimTags entry for msg_type=" +
+    // fixpp#210: build against the RUNTIME-resolved delimiter -- what
+    // `consume_group` (validator.hpp:276, `dict_.group_first_field(msg_type,
+    // parent_path, no_tag)`) actually scans for -- NOT `kDelimTags`'s
+    // hand-verified per-context value. The two can differ under #210's
+    // delimiter-pollution mechanism (every context of a reused no_tag
+    // receives the SAME dictionary-global first-seen delimiter;
+    // `KDelimTagsAgreesWithRuntimeGroupFirstField` is the dedicated #210 pin
+    // for that divergence -- kDelimTags itself is untouched). This function
+    // tests required-member completeness, not delimiter resolution, so it
+    // must build against what the validator will actually treat as the
+    // opening delimiter or the baseline can't parse at all.
+    std::uint16_t const delim = tv.group_first_field(key.msg_type, std::span{key.path}, key.no_tag);
+    if (delim == 0) {
+        throw std::runtime_error("build_top_level_frame: tv.group_first_field returned 0 for msg_type=" +
                                  key.msg_type + " no_tag=" + std::to_string(key.no_tag));
     }
     auto const& required = oracle.group_required.at(key);
 
     std::string body = header_prefix(key.msg_type, seq);
     body += field(key.no_tag, "1");
-    body += build_group_instance(tv, delim_it->second, required, omitted_tag);
+    body += build_group_instance(tv, oracle, delim, required, omitted_tag);
     body += other_required_fields(tv, oracle, key.msg_type, {key.no_tag});
     return fixpp_test_support::make_frame("FIX.4.2", body);
 }
 
 // NESTED case frame (MassQuote(i): NoQuoteSets(296) -> NoQuoteEntries(295)):
-// 296 is a COMPLETE top-level instance (delimiter + all its own required
-// members, including 295 present as a member); 295's OWN sub-instance is
+// 296 is a COMPLETE top-level instance (delimiter + ALL its own required
+// members -- 295 present as a member, PLUS 296's other required members
+// 304/311 -- filled generically below), and 295's OWN sub-instance is
 // deliberately incomplete when `omit_299` is true (its delimiter/sole
-// required member QuoteEntryID(299) is left out), which the nested-descent
-// branch of `consume_group` catches and propagates immediately -- see the
-// file header comment for why 296's OTHER required members (304/311) are
-// deliberately NOT reachable/needed here.
+// required member QuoteEntryID(299) is left out).
+//
+// Correction to the file header comment's claim ("the nested descent into
+// 295 short-circuits validate() before [304, 311] would ever be scanned"):
+// that is true ONLY on the omit_299==true arm, where the nested-descent
+// branch of `consume_group` (validator.hpp:374-387) propagates the nested
+// failure immediately (`if (!nested) return nested;`) before 296's own
+// completeness check runs. On the omit_299==false (baseline) arm, 295's
+// sub-instance is complete, the nested descent succeeds, and 296's OWN
+// required-member completeness check DOES run -- so 304/311 must actually
+// be present or the baseline itself falsely rejects (pre-existing gap,
+// previously unreached: see build_group_instance's comment above for why).
 std::vector<std::byte> build_nested_frame(fixpp::dict::table_view const& tv, DictOracle const& oracle,
                                           bool omit_299, std::uint32_t seq) {
+    // fixpp#210: both delimiters below are RUNTIME-resolved (see
+    // build_top_level_frame's comment) -- 296's own is unaffected by #210
+    // (self-check confirms tv.group_first_field("i",{},296) == kDelimTags'
+    // 302), but 295's NESTED context ((i,[296],295)) IS polluted: the
+    // runtime returns 55 (Symbol, the dictionary-global first-seen
+    // delimiter for no_tag 295 across its many OTHER reused contexts), not
+    // kDelimTags' hand-verified 299. Routed through build_group_instance
+    // (delimiter + required-member set, omission-aware) exactly like the
+    // top-level cases so this collapses to the original shape once #210
+    // lands and delim295 becomes 299 again.
     GroupContextKey const key296{"i", {}, 296};
-    auto const delim_it = kDelimTags.find(key296);
-    if (delim_it == kDelimTags.end()) {
-        throw std::runtime_error("build_nested_frame: no kDelimTags entry for (i, {}, 296)");
+    std::uint16_t const delim296 =
+        tv.group_first_field("i", std::span<std::uint16_t const>{}, 296);
+    if (delim296 == 0) {
+        throw std::runtime_error("build_nested_frame: tv.group_first_field returned 0 for (i, {}, 296)");
     }
     auto const& req296 = oracle.group_required.at(key296);  // {295, 302, 304, 311}
     if (!req296.contains(295)) {
@@ -281,16 +323,31 @@ std::vector<std::byte> build_nested_frame(fixpp::dict::table_view const& tv, Dic
                                  "set no longer includes 295 -- oracle drift, re-derive");
     }
 
+    std::vector<std::uint16_t> const path296{296};
+    GroupContextKey const key295{"i", path296, 295};
+    std::uint16_t const delim295 = tv.group_first_field("i", std::span{path296}, 295);
+    if (delim295 == 0) {
+        throw std::runtime_error("build_nested_frame: tv.group_first_field returned 0 for (i, [296], 295)");
+    }
+    auto const& req295 = oracle.group_required.at(key295);  // {299}
+
     std::string body = header_prefix("i", seq);
     body += field(296, "1");
-    body += field(delim_it->second, pick_filler_value(tv, delim_it->second));  // 302, delimiter, opens 296's instance
+    body += field(delim296, pick_filler_value(tv, delim296));  // opens 296's instance
     body += field(295, "1");  // 295 present as a member of 296's instance, ONE sub-instance
-    if (!omit_299) {
-        body += field(299, pick_filler_value(tv, 299));  // 295's own delimiter/required member, present
+    body += build_group_instance(tv, oracle, delim295, req295, omit_299 ? 299u : 0u);
+    // 296's own OTHER required members (everything in req296 besides 295,
+    // already emitted above, and delim296, already the opener) -- generic
+    // filler, needed on the baseline (omit_299==false) arm; see this
+    // function's header comment for why.
+    for (auto tag : req296) {
+        if (tag == 295 || tag == delim296) continue;
+        if (oracle.group_tags.contains(tag)) {
+            body += field(tag, "0");
+            continue;
+        }
+        body += field(tag, pick_filler_value(tv, tag));
     }
-    // 296's own OTHER required members (304, 311) are deliberately NOT
-    // emitted here -- see the file header comment: the nested descent into
-    // 295 short-circuits validate() before they would ever be scanned.
     body += other_required_fields(tv, oracle, "i", {296, 295, 299});
     return fixpp_test_support::make_frame("FIX.4.2", body);
 }
@@ -324,6 +381,37 @@ fixpp::core::expected_t<void> run_validate(fixpp::wire::dictionary_driven_valida
 }
 
 }  // namespace
+
+// fixpp#210 self-check: `kDelimTags` above records the hand-verified, TRUE
+// per-context delimiter (each `<group>`'s own first child, per occurrence --
+// e.g. NoMDEntries(268) opens with 269 in W but 279 in X). Now that T023 has
+// landed, `Dictionary::as_table_view()` populates the context store for
+// EVERY entry here, so this is checkable at runtime rather than asserted by
+// hand. It converts the hardcode into a checked one -- and is expected to
+// DISAGREE with `tv.group_first_field(msg_type, path, no_tag)` wherever
+// #210's delimiter-pollution mechanism applies: `dictionary.cpp` resolves
+// EVERY context's stored delimiter from the GLOBAL first-seen
+// `group_first_field(no_tag)` (not the per-context real one), so the
+// context-scoped accessor returns the SAME value for every context sharing
+// a no_tag, regardless of that context's own declaration. A disagreement
+// here is #210 evidence, not a bug in `kDelimTags` -- do NOT "fix" this test
+// by rewriting `kDelimTags` to the polluted value; report disagreements.
+TEST(GroupRequiredMemberValidation, KDelimTagsAgreesWithRuntimeGroupFirstField) {
+    std::pmr::monotonic_buffer_resource mr;
+    std::string const path = std::string(FIXPP_DICT_DATA_DIR) + "/FIX42.xml";
+    auto const dict = fixpp::dict::XmlLoader{}.load(path, &mr);
+    auto const tv = dict.as_table_view();
+
+    for (auto const& [key, expected_delim] : kDelimTags) {
+        auto const actual =
+            tv.group_first_field(key.msg_type, std::span{key.path}, key.no_tag);
+        EXPECT_EQ(actual, expected_delim)
+            << "msg_type=" << key.msg_type << " no_tag=" << key.no_tag
+            << ": kDelimTags says " << expected_delim << " but tv.group_first_field(...) returns "
+            << actual << " (dictionary-global first-seen: " << tv.group_first_field(key.no_tag)
+            << ") -- fixpp#210 delimiter pollution, not a table drift";
+    }
+}
 
 // T021b [US1]: exact-set-equality witness -- every oracle-derived
 // group-required-member context (top-level + the one nested descent)
@@ -389,15 +477,30 @@ TEST(GroupRequiredMemberValidation, ExactlyTheOracleDerivedFourteenPairsRejectOn
 
         // Baseline: complete frame (nothing omitted) validates CLEAN today --
         // discriminator per the advisor guidance: if this fails, the case's
-        // RED below tells us nothing.
+        // RED below tells us nothing. EXPECT (not ASSERT) + continue -- an
+        // ASSERT here would abort the whole TEST body on the first failing
+        // case, hiding every case after it (this masked two pre-existing
+        // construction bugs, see build_group_instance/build_nested_frame).
+        // A baseline failure with error==wire_unexpected_tag at the
+        // no_tag's global first-seen delimiter is fixpp#210: the injected
+        // delimiter for this context is not itself a legal member (R/146,
+        // V/146 -- the polluting tag is RelatdSym(46), first-seen from
+        // News(B), which QuoteRequest/MarketDataRequest never declare), so
+        // no well-formed frame can be constructed for this context until
+        // #210 lands -- EXPECTED, excluded from cases_checked. A failure
+        // for a DIFFERENT reason must be reported, not folded in here.
         auto const complete_frame = build_top_level_frame(tv, oracle, key, /*omitted_tag=*/0, seq++);
         std::uint16_t baseline_ref = 0;
         auto const baseline_r = run_validate(validator, tv, complete_frame, &baseline_ref);
-        ASSERT_TRUE(baseline_r.has_value())
-            << "baseline (complete) frame for msg_type=" << key.msg_type << " no_tag=" << key.no_tag
-            << " did not validate clean (ref_tag=" << baseline_ref
-            << ", error=" << static_cast<int>(baseline_r.error())
-            << ") -- construction bug in this test, not the 082 feature under test";
+        if (!baseline_r.has_value()) {
+            EXPECT_TRUE(baseline_r.has_value())
+                << "msg_type=" << key.msg_type << " no_tag=" << key.no_tag
+                << ": baseline (nothing omitted) frame failed to validate (ref_tag=" << baseline_ref
+                << ", error=" << static_cast<int>(baseline_r.error())
+                << ") -- expected ONLY when this is fixpp#210 (unconstructable delimiter); a "
+                   "different-cause failure here must be reported, not silently excluded";
+            continue;
+        }
 
         // THE PIN: omitting `omitted_tag` must reject with
         // wire_required_field_missing at ref_tag==omitted_tag. RED today --
@@ -426,13 +529,19 @@ TEST(GroupRequiredMemberValidation, ExactlyTheOracleDerivedFourteenPairsRejectOn
     // NoQuoteEntries(295), omitting 295's own required member 299) ─────────
     {
         SCOPED_TRACE("nested: msg_type=i path=[296] no_tag=295 omit=299");
+        // Baseline discriminator, same rationale as the top-level loop above.
+        // Unlike R/146 and V/146, this context's runtime delimiter (302) is
+        // NOT #210-polluted (KDelimTagsAgreesWithRuntimeGroupFirstField
+        // confirms it matches kDelimTags) -- so an unexpected baseline
+        // failure here is NOT excused as #210 and must be investigated.
         auto const complete_frame = build_nested_frame(tv, oracle, /*omit_299=*/false, seq++);
         std::uint16_t baseline_ref = 0;
         auto const baseline_r = run_validate(validator, tv, complete_frame, &baseline_ref);
         ASSERT_TRUE(baseline_r.has_value())
-            << "nested baseline (complete) frame did not validate clean (ref_tag=" << baseline_ref
+            << "nested baseline (295 complete) frame failed to validate (ref_tag=" << baseline_ref
             << ", error=" << static_cast<int>(baseline_r.error())
-            << ") -- construction bug in this test, not the 082 feature under test";
+            << ") -- this context's delimiter is unaffected by fixpp#210, so this is a genuine "
+               "construction bug, not an excludable case";
 
         auto const omitted_frame = build_nested_frame(tv, oracle, /*omit_299=*/true, seq++);
         std::uint16_t ref_tag = 0;

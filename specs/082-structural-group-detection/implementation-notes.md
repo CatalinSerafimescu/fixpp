@@ -588,6 +588,91 @@ required to load cleanly.
 
 ---
 
+---
+
+## ⏸ PARKED 2026-07-30 — resume after issue #210 lands
+
+**User decision:** park 082 here, fix [#210](https://github.com/CatalinSerafimescu/fixpp/issues/210)
+on its own branch, then resume. #210's fix makes three of 082's pins *stronger*, so finishing them
+first would mean writing concessions we would immediately delete.
+
+**Branch #210 off `main`, NOT off 082.** #210 reproduces entirely on shipped dictionaries (42
+polluted contexts on FIX44/50/50SP1/50SP2, all C2 **EQUAL** rows, so T023 provably changes nothing
+for them — T018 passing before *and* after is the witness). A branch off 082 would carry 082's
+unfinished commits into #210's ancestry; rebasing before merge would then mean the artifact tested is
+not the artifact merged, and #210's pins developed over T023 would cover FIX42 contexts that do not
+exist on `main`.
+
+### State at park
+
+| item | state |
+|---|---|
+| Phases 1, 2 (T001–T014) | **complete**, committed |
+| Phase 3 RED batch (T015–T022, T021b, T040, T042) | **complete**, RED observed and recorded |
+| T023–T025 (predicate + codegen re-point) | **complete**, committed |
+| T030 (carve-out refresh) | **complete** — 5 files, see below |
+| `dictionary_pure_tests` | **287 / 287 GREEN** |
+| `dictionary_required_scope_census_test` | **13 / 13 GREEN** |
+| T026–T029 (regenerate, golden diffs, consistency gate) | **NOT STARTED** |
+| T021b | **blocked on #210** — deliberately left unrestricted |
+| Phases 4–7 (T031–T055) | **NOT STARTED** |
+
+### T030 as delivered (5 files, not the 4 tasks.md names)
+
+Two carve-outs were **inverted, not deleted** — each carried an explicit instruction to flip when
+#196 landed, and 082 *is* #196:
+
+- `required_scope_test.cpp` — `Fix42GroupCountFieldIsIntTypedContextStoreBlindL0661` →
+  `Fix42IntTypedGroupCountFieldNowResolvesInContextStore`. Keeps the `FieldRef::type == Int`
+  assertion deliberately: that is what makes it a behavioural FR-001 witness rather than a tautology,
+  and it is the test that would catch a reintroduced datatype gate.
+- `required_scope_census_test.cpp` — `PerGroupContextStoreIsEmptyForL0661GroupBlindDicts` →
+  `PerGroupContextStoreIsPopulatedForFormerlyGroupBlindDicts`. Asserts `group_required_members`,
+  which is **not** affected by #210 (the pollution goes through `add_group_member_ctx`, not the
+  required-member store), so plain equality is correct there. Output: FIX40 **6** contexts, FIX41
+  **10**, FIX42 **38** — previously zero.
+- `collision_membership_guards_test.cpp` — added to T030's scope (tasks.md named only 4 files).
+  Banner rewritten, `expected_total` 69 → **78** with per-dict tallies FIX40 1 / FIX41 1 / FIX42 7,
+  and a latent weakness fixed: the zero-check used `std::map::count`, which returns only 0 or 1, so
+  it could report presence but never magnitude — it would have passed whether a dictionary
+  contributed 1 case or 70. Now asserts the tally via `operator[]`.
+- `reused_tag_census_test.cpp` + the census helper — done earlier under T008.
+
+### Concessions to #210 that must be REVERTED when it lands
+
+All three are commented in-place as such:
+
+1. **`required_scope_census_test.cpp` T017** — the per-context member-set leg allows exactly one
+   extra tag, the global first-seen delimiter, and nothing else. Collapses to plain
+   `EXPECT_EQ(members, actual)`.
+2. **`collision_membership_guards_test.cpp`** — `first_tag_only_in` takes an `exclude` parameter so
+   the injected delimiter is never chosen as a discriminator. Becomes a no-op; the parameter can go.
+3. **`test_082_group_required_member_validation_test.cpp` T021b** — left **unrestricted and RED** on
+   purpose. 5 of its 14 contexts fail because the runtime delimiter is global, not per-context. Do
+   not write a restriction; #210 fixes it outright.
+
+### The #210 severity escalation found here
+
+The `kDelimTags` self-check (added because T023 made delimiters derivable) proved the per-context
+delimiter is **global**, so strict validation rejects schema-valid messages with
+`wire_unexpected_tag` (error 42):
+
+```
+msg_type=R no_tag=146: table says 55 (Symbol), runtime returns 46 (global first-seen)
+baseline FAIL msg_type=R no_tag=146 ref_tag=46 error=42
+```
+
+5 of FIX42's 14 required-group contexts affected (`R/146`, `V/146`, `X/268`, `i/295`, `l/420`).
+Posted to #210; it invalidates that issue's cheaper fix option (b), since removing the member
+injection alone leaves the delimiter global and the false rejection intact.
+
+**Coupling to #208:** per-context delimiter resolution picks each context's true first member in
+document order. Where that member is a nested group's count tag, #208's B-2 (`consume_group` cannot
+open an instance on such a delimiter) bites immediately. FIX42's five are safe (`55 Symbol` etc. are
+plain fields); FIX50SP2's may not be. #210's RED pin must check this explicitly.
+
+---
+
 ## Evidence index
 
 | Artefact | Path |

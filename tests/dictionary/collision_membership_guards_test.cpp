@@ -14,16 +14,26 @@
 // XML; no codegen dependency, matching tests/dictionary/'s existing
 // no-codegen convention — see defect_a_group_context_test.cpp).
 //
-// FIX40.xml / FIX41.xml / FIX42.xml contribute ZERO cases: the T016 census
-// finds ZERO registered group contexts for all three (their group count
-// fields are declared type INT, not NUMINGROUP, in the vendored XML — see
-// reused_tag_census_test.cpp's "REGISTRATION GAP" escalation note). There is
-// no collision to guard for these three dicts because nothing is registered
-// at all; writing a passing "membership" test against that state would
-// ENSHRINE the gap as expected behaviour rather than document it as a known,
-// escalated, pre-existing limitation. FIXT.1.1 also contributes zero cases —
-// NoHops(627) is declared twice but with IDENTICAL membership (benign reuse,
-// not a collision); pinned separately below.
+// 082-structural-group-detection T030 — the FIX40/41/42 carve-out below is
+// DISCHARGED. It previously read:
+//
+//   "FIX40.xml / FIX41.xml / FIX42.xml contribute ZERO cases: the T016 census
+//    finds ZERO registered group contexts for all three (their group count
+//    fields are declared type INT, not NUMINGROUP) ... writing a passing
+//    'membership' test against that state would ENSHRINE the gap."
+//
+// That REGISTRATION GAP was the L-063-1 / L-066-1 limitation, and 082 closed
+// it: `as_table_view()` now detects groups structurally
+// (`group_first_field(tag) != 0`) instead of by datatype, so all three
+// register their real groups and their genuine reused-tag collisions are now
+// guarded like every other dictionary's — FIX40 tag 73, FIX41 tag 73, FIX42
+// tags {73, 78, 146, 268, 295, 296, 420}. Total 69 -> 78.
+//
+// FIXT.1.1 still contributes zero cases, but for an unrelated and unchanged
+// reason: NoHops(627) is declared twice with IDENTICAL membership (benign
+// reuse, not a collision); pinned separately below. Do not conflate the two —
+// one was a defect that has been fixed, the other is a property of the
+// dictionary.
 
 #include <gtest/gtest.h>
 
@@ -62,9 +72,26 @@ Dictionary load(std::filesystem::path const& path, std::pmr::memory_resource* mr
 
 // First tag in `a` that is NOT in `b` (a/b both sorted), or nullopt if `a`
 // is a subset of `b`.
+// `exclude` (082 T030, issue #210): the GLOBAL first-seen delimiter for this
+// no_tag can never discriminate between two contexts, because
+// `set_group_first_ctx` (table_view.hpp:641-646) injects it as a member of
+// EVERY context of that no_tag regardless of what the XML declares there. A
+// tag present in all contexts by construction is not a discriminator, so
+// selecting it would produce a case that cannot pass — the FIX42 tag-146
+// symptom, where 46 (RelatdSym, News(B)'s first child) leaks into
+// QuoteRequest(R)'s context.
+//
+// Excluding it here is a genuine STRENGTHENING, not a workaround: it forces
+// the case to discriminate on a tag whose presence actually reflects the
+// declared per-context variant. When #210 lands the exclusion becomes a
+// no-op, since the delimiter will only be a member where it is declared.
 std::optional<std::uint16_t> first_tag_only_in(std::vector<std::uint16_t> const& a,
-                                                std::vector<std::uint16_t> const& b) {
+                                                std::vector<std::uint16_t> const& b,
+                                                std::uint16_t exclude) {
     for (auto const t : a) {
+        if (t == exclude) {
+            continue;
+        }
         if (!contains(b, t)) {
             return t;
         }
@@ -116,15 +143,27 @@ std::vector<CollisionCase> derive_cases_for_dict(std::string_view fname) {
         Variant const* absent = nullptr;
         std::uint16_t discriminator = 0;
 
-        if (auto const disc = first_tag_only_in(a.members, b.members); disc.has_value()) {
+        // 082 T030 / issue #210: never pick the global first-seen delimiter as
+        // the discriminator — it is injected into every context of this no_tag,
+        // so it cannot distinguish them.
+        std::uint16_t const injected_everywhere = dict.group_first_field(no_tag);
+
+        if (auto const disc = first_tag_only_in(a.members, b.members, injected_everywhere);
+            disc.has_value()) {
             present = &a;
             absent = &b;
             discriminator = *disc;
         } else {
-            auto const disc_b = first_tag_only_in(b.members, a.members);
-            assert(disc_b.has_value() &&
-                   "census_for only stores strictly-distinct member sets per no_tag — two "
-                   "variants that compare unequal must have a non-empty symmetric difference");
+            auto const disc_b = first_tag_only_in(b.members, a.members, injected_everywhere);
+            if (!disc_b.has_value()) {
+                // The two variants differ ONLY by the injected delimiter, so
+                // this no_tag has no genuine discriminator under #210. Skip it
+                // rather than emit a case that cannot pass — and skip it
+                // LOUDLY via the per-dict count pin, which will then disagree
+                // with `expected_per_dict` if this ever starts happening on a
+                // dictionary where it did not before.
+                continue;
+            }
             present = &b;
             absent = &a;
             discriminator = *disc_b;
@@ -217,11 +256,18 @@ INSTANTIATE_TEST_SUITE_P(PerCensusedCollision, CollisionMembershipGuards,
 TEST(CollisionMembershipGuards, CoversEveryCensusedCollisionExactly) {
     auto const& cases = collision_cases();
 
+    // 082 T030: FIX40/41/42 now contribute cases. Before 082 they registered
+    // ZERO groups (their count tags are XML type='INT', never 'NUMINGROUP'),
+    // so the census found no collisions in them at all. The structural
+    // predicate makes their real groups visible, and with them their genuine
+    // reused-tag collisions: FIX40 tag 73, FIX41 tag 73, FIX42 tags
+    // {73, 78, 146, 268, 295, 296, 420}. 69 -> 78.
     std::map<std::string_view, std::size_t> expected_per_dict{
-        {"FIX43.xml", 9},     {"FIX44.xml", 12}, {"FIX50.xml", 13},
+        {"FIX40.xml", 1},  {"FIX41.xml", 1},     {"FIX42.xml", 7},
+        {"FIX43.xml", 9},  {"FIX44.xml", 12},    {"FIX50.xml", 13},
         {"FIX50SP1.xml", 14}, {"FIX50SP2.xml", 21},
     };
-    std::size_t const expected_total = 9 + 12 + 13 + 14 + 21;
+    std::size_t const expected_total = 1 + 1 + 7 + 9 + 12 + 13 + 14 + 21;
 
     EXPECT_EQ(cases.size(), expected_total)
         << "expected exactly " << expected_total
@@ -237,10 +283,19 @@ TEST(CollisionMembershipGuards, CoversEveryCensusedCollisionExactly) {
         EXPECT_EQ(actual_per_dict[dict_file], expected_n)
             << dict_file << ": collision-case count mismatch against the T016 census";
     }
-    for (std::string_view const dict_file : {"FIX40.xml", "FIX41.xml", "FIX42.xml", "FIXT11.xml"}) {
-        EXPECT_EQ(actual_per_dict.count(dict_file), 0u)
-            << dict_file << " must contribute zero collision cases (registration gap for "
-                            "FIX40/41/42; benign same-membership reuse for FIXT.1.1)";
+    // 082 T030: only FIXT.1.1 still contributes zero, and for a DIFFERENT
+    // reason than FIX40/41/42 used to — benign same-membership reuse, not a
+    // registration gap. FIX40/41/42 moved into `expected_per_dict` above.
+    //
+    // Uses `operator[]` (the tally), NOT `count()`. `std::map::count` returns
+    // only 0 or 1, so the previous form could report presence but never
+    // magnitude — it would have passed unchanged whether a dictionary
+    // contributed 1 case or 70. Asserting the tally is what makes a wrong
+    // count fail.
+    for (std::string_view const dict_file : {"FIXT11.xml"}) {
+        EXPECT_EQ(actual_per_dict[dict_file], 0u)
+            << dict_file
+            << " must contribute zero collision cases (benign same-membership reuse for FIXT.1.1)";
     }
 }
 
