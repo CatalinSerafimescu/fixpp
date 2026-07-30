@@ -51,6 +51,7 @@
 #include <span>
 #include <sstream>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "ir.hpp"  // fixpp::codegen::build_ir / MessageIR / collect_top_fields — ACTUAL side only
@@ -152,6 +153,45 @@ std::set<std::uint16_t> bare_registered_group_tags(table_view const& tv) {
         }
     }
     return tags;
+}
+
+// 082 T017 bare-store leg: bounded, read-only, document-order pugixml scan --
+// NOT "a third walker" in the 079 banner's sense (it shares no
+// required/component-AND semantics with qfix_walk; only document POSITION
+// matters here). Mirrors reused_tag_census_test.cpp's own DelimiterScan
+// precedent (a separate bounded scan alongside the shared oracle walker).
+//
+// Determines which `<group name="...">` declaration site the loader's OWN
+// global first-seen dedup guard (xml_loader.cpp:609,
+// "if (!group_index_by_no_tag_.contains(no_tag))") resolves to: a pre-order,
+// document-order depth-first search through `<field>`/`<group>`/`<component>`
+// children, recursing into named `<component>` refs -- mirroring
+// `expand_field_list`'s own traversal order (xml_loader.cpp:525+) -- and
+// returning the FIRST `<group name=group_name>` node encountered.
+std::optional<pugi::xml_node> dfs_find_group(
+    pugi::xml_node const& node, std::string_view group_name,
+    std::unordered_map<std::string, pugi::xml_node> const& components_by_name) {
+    for (auto const& child : node.children()) {
+        std::string_view const name{child.name()};
+        if (name == "group") {
+            if (std::string_view{child.attribute("name").as_string("")} == group_name) {
+                return child;
+            }
+            if (auto found = dfs_find_group(child, group_name, components_by_name)) {
+                return found;
+            }
+        } else if (name == "component") {
+            auto const cname = std::string{child.attribute("name").as_string("")};
+            auto const cit = components_by_name.find(cname);
+            if (cit != components_by_name.end()) {
+                if (auto found = dfs_find_group(cit->second, group_name, components_by_name)) {
+                    return found;
+                }
+            }
+        }
+        // "field" and anything else: no group can be nested under it.
+    }
+    return std::nullopt;
 }
 
 }  // namespace
@@ -596,29 +636,66 @@ TEST(RequiredScopeCensus, Fix42Tag146PerContextMemberSetsMatchOracle) {
     // this gap: it pins the bare store's registered *tag set*, not 146's *member
     // set*.
     //
-    // The expected value is DERIVED, not transcribed: `News(B)` is the first
-    // `<message>` in FIX42.xml document order that reaches a
-    // `<group name="NoRelatedSym">`, so its member set is what
-    // `finalize()`'s `group_fields_` expansion records for the bare no_tag.
-    // Cross-check: it is the 19-member `{News, Email}` variant.
-    std::set<std::uint16_t> first_seen_variant;
-    std::size_t first_seen_hits = 0;
-    for (auto const& [key, members] : oracle.group_members) {
-        if (key.no_tag == 146 && key.msg_type == "B") {
-            first_seen_variant = members;
-            ++first_seen_hits;
+    // The expected value is DERIVED via `dfs_find_group`, NOT transcribed:
+    // walk `<messages>/<message>` in document order (xml_loader.cpp:747) and,
+    // within each message, depth-first through field/group/component children
+    // — the same traversal `expand_field_list` follows (xml_loader.cpp:525+) —
+    // to find the FIRST `<group name="NoRelatedSym">` declaration site
+    // anywhere in the document. A doc reorder therefore cannot silently
+    // invalidate this pin; the scan re-derives the answer instead of
+    // comparing against a stale literal.
+    pugi::xml_document raw_doc;
+    ASSERT_TRUE(raw_doc.load_file(path.c_str())) << "raw-XML scan: failed to load " << path;
+    auto const raw_root = raw_doc.child("fix");
+    std::unordered_map<std::string, pugi::xml_node> components_by_name;
+    for (auto const& c : raw_root.child("components").children("component")) {
+        components_by_name.emplace(std::string{c.attribute("name").as_string("")}, c);
+    }
+
+    std::string first_seen_msg_type;
+    pugi::xml_node first_seen_node;
+    // Header/trailer are expanded before EVERY message body by the real
+    // loader (xml_loader.cpp:927-931), so a header/trailer-declared group
+    // would win first-seen ahead of any message body — NoRelatedSym is not
+    // header/trailer-declared in FIX42 (kHeaderTrailerTags has no group
+    // entries), so scanning <messages> directly is faithful for this tag; a
+    // header/trailer-declared no_tag would need this scan widened.
+    for (auto const& m : raw_root.child("messages").children("message")) {
+        if (auto found = dfs_find_group(m, "NoRelatedSym", components_by_name)) {
+            first_seen_msg_type = std::string{m.attribute("msgtype").as_string("")};
+            first_seen_node = *found;
+            break;
         }
     }
-    ASSERT_EQ(first_seen_hits, 1u)
-        << "expected exactly one oracle entry for FIX42 News(B) tag 146 — the first-seen "
-           "occurrence in document order; re-derive rather than adjusting this pin";
+    ASSERT_FALSE(first_seen_msg_type.empty())
+        << "raw-XML document-order scan found no NoRelatedSym(146) declaration -- fixture/scan "
+           "regression";
+    ASSERT_EQ(std::string_view{first_seen_node.parent().name()}, std::string_view{"message"})
+        << "first-seen NoRelatedSym(146) site is NOT a direct message-top-level child (path != "
+           "[]) -- the GroupContextKey{msg_type, {}, 146} lookup below no longer holds; widen "
+           "this scan to walk the found node's ancestor chain and resolve a non-empty path";
+
+    GroupContextKey const first_seen_key{first_seen_msg_type, {}, 146};
+    auto const oit = oracle.group_members.find(first_seen_key);
+    ASSERT_NE(oit, oracle.group_members.end())
+        << "oracle has no group_members entry for the scan-derived first-seen key (msg_type="
+        << first_seen_msg_type << ") -- scan/oracle disagreement, investigate before trusting "
+           "this pin";
+    auto const& first_seen_variant = oit->second;
+
+    // Sanity pin over the derivation (not a substitute for it): News (msgtype
+    // 'B', line 269) is declared before Email (msgtype 'C', line 309) in
+    // FIX42.xml, so News's 19-member NoRelatedSym is first-seen.
+    EXPECT_EQ(first_seen_msg_type, "B")
+        << "scan-derived first-seen msg_type for tag 146 drifted from the pinned 'B' (News) -- "
+           "re-verify the dictionary's message order didn't change";
     ASSERT_EQ(first_seen_variant.size(), 19u)
         << "FIX42 News(B) tag-146 member count drifted from the derived 19";
 
     auto const bare_actual = to_set(tv.group_member_tags(146));
     EXPECT_EQ(first_seen_variant, bare_actual)
-        << "FIX42 tag 146 (BARE store, first-seen wins): "
-        << describe_diff(first_seen_variant, bare_actual);
+        << "FIX42 tag 146 (BARE store, first-seen wins, msg_type=" << first_seen_msg_type
+        << "): " << describe_diff(first_seen_variant, bare_actual);
 }
 
 // T018 [US1]: the six unchanged dictionaries' bare-store registered group
