@@ -508,6 +508,41 @@ Observed RED: `FIX42 tag 146 (BARE store, first-seen wins): missing-from-actual{
 Both legs now fail for the right reason (`group_bit(146)` is clear pre-T023), and they assert
 genuinely different things — per-context sets vs the single first-seen set.
 
+### Phase 3 — cross-cutting RED batch (T019–T022, T021b), OBSERVED RED
+
+Each binary re-run independently by the orchestrator, not taken from the agent's report.
+
+| pin | binary | state | observed |
+|---|---|---|---|
+| **T019** | `codegen_082_v42_group_classes_test` | **RED** | `class G_` count **0**, expected **18** (the 46 message classes already match and correctly do *not* fail) |
+| **T020** | same | **RED** | `group_ids.contains(296)` false — no `G_296` (`NoQuoteSets`) flyweight |
+| **T021** | `test_082_ungated_group_parse` | **RED** | `NoOrders(73)=2` yields **0** group instances, expected 2 — identically for FIX40/41/42 |
+| **T021b** | `test_082_group_required_member_validation` | **RED** | all 14 oracle-derived pairs: omitting a required group member is **accepted**, must be rejected |
+| **T022** | `capi_082_group_detection_cross_path_test` | **RED** | write-path set (18 tags) vs bare registered set `{}` |
+
+**T022's RED is the informative one.** It fails not because the write path is broken but because the
+write path is **already structural** — `fixpp_msg_group_begin` succeeds for all 18 FIX42 tags today
+(`src/capi/message_write.cpp:812` uses `Dictionary::group_first_field`) — while the read-side bare
+store is still datatype-gated and empty. That is exactly the **cross-path divergence K6b exists to
+catch**, and it confirms C4.4 empirically rather than by assertion. After T023 both sides should be
+the same 18 tags.
+
+**T021's SC-008a first leg already holds today** (`from_app_calls == 1`, session stays `Active` with
+the strict flag off) and is correctly *not* among the failures — it is a non-discriminating leg whose
+job is to survive T023 unchanged.
+
+#### Follow-up to fold into T023's phase — `kDelimTags`
+
+`test_082_group_required_member_validation_test.cpp` carries a hardcoded `kDelimTags` table mapping
+each `(msg_type, path, no_tag)` to its delimiter, used **only** to construct valid wire bytes; no
+delimiter value is ever asserted, and a missing entry throws loudly at construction. That is
+acceptable at RED time — the delimiter cannot be derived from the code under test without
+circularity, and nothing else in the repo pins delimiters (which is itself part of #208).
+
+**Once T023 lands the delimiters become derivable, so add a self-check**: assert each `kDelimTags`
+entry equals `tv.group_first_field(msg_type, path, no_tag)`. That converts a bare hardcode into a
+*checked* hardcode at no cost. Tracked here so it is not lost.
+
 ---
 
 ## Evidence index
