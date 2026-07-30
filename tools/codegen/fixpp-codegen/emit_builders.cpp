@@ -596,14 +596,15 @@ void emit_validate_fn_def(TemplateWriter& w, std::string const& msg_id, bool as_
 // the top-level regime IS tag-ascending, served by the tag-sorted m.fields
 // run). Exclusion is by PROVENANCE (`header_trailer_tags`), with
 // `kFramingTags` retained as a defensive floor.
-std::vector<GroupOrderMember> top_level_synthetic_members(
-    MessageIR const& m, std::vector<std::uint16_t> const& header_trailer_tags) {
+std::vector<GroupOrderMember> top_level_synthetic_members(VersionIR const& ir, MessageIR const& m,
+                                                           std::vector<std::uint16_t> const&
+                                                               header_trailer_tags) {
     std::vector<GroupOrderMember> out;
     for (FieldIR const* f : collect_top_fields(m)) {
         if (is_framing_tag(f->ref.tag) || is_header_trailer(f->ref.tag, header_trailer_tags)) {
             continue;
         }
-        bool const is_grp = f->ref.type == fixpp::dict::field_data_type::NumInGroup;
+        bool const is_grp = is_group_tag(ir, f->ref.tag);
         out.push_back(GroupOrderMember{.tag = f->ref.tag, .is_group = is_grp});
     }
     return out;
@@ -1323,7 +1324,7 @@ std::vector<EmittedFile> emit_builders(VersionIR const& ir, CoverageMode mode) {
 
         std::string const msg_id = to_identifier(m.name);
         std::vector<GroupOrderMember> const top_members =
-            top_level_synthetic_members(m, ir.header_trailer_tags);
+            top_level_synthetic_members(ir, m, ir.header_trailer_tags);
         LevelPlan plan = resolve_level(m, field_by_tag, /*path=*/{}, top_members, intern);
 
         registry_msg_types.push_back(m.msg_type);

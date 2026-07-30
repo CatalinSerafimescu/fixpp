@@ -135,6 +135,40 @@ void collect_tags(pugi::xml_node const& node, ComponentIndex const& comps,
     }
 }
 
+// 082-structural-group-detection: group-only sibling of `collect_tags` —
+// recursively collects ONLY <group> count tags reachable from `node` (skips
+// plain <field> members) into `out`. `populate_group_order`'s
+// `group_order`/`VersionIR::group_tags` walk is deliberately body-only
+// (<message>, NOT <header>/<trailer> — INV-2, the write-emitter exclusion),
+// but the READ-tier emitters (emit_messages.cpp/emit_reify.cpp) test
+// `is_group_tag()` against `m.fields`, which IS header/trailer-inclusive
+// (`dict.message_fields()`, xml_loader.cpp:926-933 header/trailer merge).
+// Without this, a header/trailer-declared group (e.g. NoHops(627) in
+// FIX44's/FIXT11's own <header>) is silently demoted to a scalar accessor
+// on the read tier — confirmed empirically against the v44 read golden.
+// NOLINTNEXTLINE(misc-no-recursion)
+void collect_group_tags(pugi::xml_node const& node, ComponentIndex const& comps,
+                        fixpp::dict::Dictionary const& dict, std::unordered_set<std::uint16_t>& out) {
+    for (auto const& child : node.children()) {
+        std::string_view const tag_name{child.name()};
+        if (tag_name == "component") {
+            auto const cname = std::string{child.attribute("name").as_string("")};
+            auto const it = comps.by_name.find(cname);
+            if (it != comps.by_name.end()) {
+                collect_group_tags(it->second, comps, dict, out);
+            }
+        } else if (tag_name == "group") {
+            auto const gname = std::string{child.attribute("name").as_string("")};
+            auto const no_tag_opt = dict.field_by_name(gname);
+            if (no_tag_opt) {
+                out.insert(*no_tag_opt);
+            }
+            collect_group_tags(child, comps, dict, out);
+        }
+        // "field" and unknown child elements carry no group tag of their own.
+    }
+}
+
 // Populates `group_order` on every MessageIR in `ir`, rooted at each
 // message's own <message> XML node (NOT header/trailer — the write emitter
 // is body-only, INV-2), and `ir.header_trailer_tags` from the top-level
@@ -165,6 +199,17 @@ void populate_group_order(std::filesystem::path const& xml_path, fixpp::dict::Di
     collect_tags(root.child("trailer"), comps, dict, header_trailer);
     ir.header_trailer_tags.assign(header_trailer.begin(), header_trailer.end());
     std::sort(ir.header_trailer_tags.begin(), ir.header_trailer_tags.end());
+
+    // 082 D-3 fix-up: header/trailer-declared groups (e.g. NoHops(627) in
+    // FIX44's/FIXT11's own <header>) are outside group_order's body-only
+    // walk but ARE reachable via `m.fields` (header/trailer-merged) at the
+    // read-tier emitter sites — union them into group_tags directly here
+    // (build_ir() sorts+dedupes the whole set after both populate_* calls).
+    std::unordered_set<std::uint16_t> header_trailer_groups;
+    collect_group_tags(root.child("header"), comps, dict, header_trailer_groups);
+    collect_group_tags(root.child("trailer"), comps, dict, header_trailer_groups);
+    ir.group_tags.insert(ir.group_tags.end(), header_trailer_groups.begin(),
+                         header_trailer_groups.end());
 
     std::unordered_map<std::string, pugi::xml_node> msg_node_by_type;
     for (auto const& m : root.child("messages").children("message")) {
@@ -313,6 +358,46 @@ void collect_orchestra_tags(pugi::xml_node const& node, OrchestraComponentIndex 
     }
 }
 
+// 082-structural-group-detection: group-only sibling of `collect_orchestra_tags`
+// — see `collect_group_tags`'s banner (the <fix>-schema twin) for why this
+// is needed: StandardHeader/StandardTrailer-declared groups are outside
+// `walk_orchestra_level`'s per-message group_order but reachable via
+// `m.fields` at the read-tier emitter sites.
+// NOLINTNEXTLINE(misc-no-recursion)
+void collect_orchestra_group_tags(pugi::xml_node const& node, OrchestraComponentIndex const& comps,
+                                  OrchestraGroupIndex const& groups,
+                                  std::unordered_set<std::uint16_t>& out) {
+    for (auto const& child : node.children()) {
+        std::string_view const tag_name{child.name()};
+        if (tag_name == "fixr:componentRef") {
+            std::uint16_t id = 0;
+            if (try_parse_orchestra_uint16(std::string_view{child.attribute("id").as_string("")},
+                                           id)) {
+                if (auto const it = comps.by_id.find(id); it != comps.by_id.end()) {
+                    collect_orchestra_group_tags(it->second, comps, groups, out);
+                }
+            }
+        } else if (tag_name == "fixr:groupRef") {
+            std::uint16_t id = 0;
+            if (try_parse_orchestra_uint16(std::string_view{child.attribute("id").as_string("")},
+                                           id)) {
+                if (auto const git = groups.by_id.find(id); git != groups.by_id.end()) {
+                    if (auto const ning = git->second.child("fixr:numInGroup"); ning) {
+                        std::uint16_t no_tag = 0;
+                        if (try_parse_orchestra_uint16(
+                                std::string_view{ning.attribute("id").as_string("")}, no_tag)) {
+                            out.insert(no_tag);
+                        }
+                    }
+                    collect_orchestra_group_tags(git->second, comps, groups, out);
+                }
+            }
+        }
+        // "fixr:fieldRef" / "fixr:numInGroup" / "fixr:annotation" carry no
+        // group tag of their own.
+    }
+}
+
 // Walks `node`'s children in DECLARATION order (mirrors `walk_level` above,
 // over the fixr: schema): appends each direct fieldRef to `out_members`
 // (research R2b output 1 — group_order), transparently expands componentRef
@@ -457,6 +542,19 @@ void populate_orchestra_projection(std::filesystem::path const& xml_path,
     }
     ir.header_trailer_tags.assign(header_trailer.begin(), header_trailer.end());
     std::sort(ir.header_trailer_tags.begin(), ir.header_trailer_tags.end());
+
+    // 082 D-3 fix-up (Orchestra sibling of populate_group_order's fix-up
+    // above): union StandardHeader/StandardTrailer-declared group no_tags
+    // into group_tags directly.
+    std::unordered_set<std::uint16_t> header_trailer_groups;
+    if (auto const it = comps.by_name.find("StandardHeader"); it != comps.by_name.end()) {
+        collect_orchestra_group_tags(it->second, comps, groups, header_trailer_groups);
+    }
+    if (auto const it = comps.by_name.find("StandardTrailer"); it != comps.by_name.end()) {
+        collect_orchestra_group_tags(it->second, comps, groups, header_trailer_groups);
+    }
+    ir.group_tags.insert(ir.group_tags.end(), header_trailer_groups.begin(),
+                         header_trailer_groups.end());
 
     std::unordered_map<std::string, pugi::xml_node> msg_node_by_type;
     for (auto const& m : root.child("fixr:messages").children("fixr:message")) {
@@ -629,6 +727,21 @@ VersionIR build_ir(std::filesystem::path const& xml_path, std::pmr::memory_resou
     } else {
         populate_group_order(xml_path, dict, ir);
     }
+
+    // 082-structural-group-detection D-3/C1.2: group_tags = sorted, unique
+    // union of {e.no_tag : e ∈ m.group_order} over every message — the
+    // structural set every emitter discovery/branch site consults instead
+    // of `FieldRef::type == NumInGroup` (D-7). Populated on BOTH schema
+    // paths, since group_order itself is (populate_group_order for <fix>,
+    // populate_orchestra_projection for Orchestra, above).
+    for (auto const& m : ir.messages) {
+        for (auto const& entry : m.group_order) {
+            ir.group_tags.push_back(entry.no_tag);
+        }
+    }
+    std::sort(ir.group_tags.begin(), ir.group_tags.end());
+    ir.group_tags.erase(std::unique(ir.group_tags.begin(), ir.group_tags.end()),
+                        ir.group_tags.end());
 
     // Length+Data pairs — ascending tag scan (deterministic order). AC-V4 is
     // verified exhaustively against source XML in seam #19; here we project

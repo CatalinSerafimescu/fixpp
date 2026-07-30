@@ -485,9 +485,6 @@ table_view Dictionary::as_table_view() const {
         // not worse — L-063-3), never overriding the CONTEXT store that the
         // parser lambda / validator query first.
         for (auto const& fr : all_fields) {
-            if (fr.type != field_data_type::NumInGroup) {
-                continue;
-            }
             std::uint16_t const legacy_no_tag = fr.tag;
             std::uint16_t const legacy_first = group_first_field(legacy_no_tag);
             if (legacy_first == 0) {
@@ -525,15 +522,15 @@ table_view Dictionary::as_table_view() const {
         //
         // 1) immediate_parent[G] = the enclosing group of G's OWN count-tag
         //    entry (0 = top level) — this is exactly `fr.group_no_tag` on the
-        //    FieldRef whose `.tag == G` and `.type == NumInGroup`.
+        //    FieldRef whose `.tag == G` and `group_first_field(G) != 0`.
         std::unordered_map<std::uint16_t, std::uint16_t> immediate_parent;
         for (auto const& fr : all_fields) {
-            if (fr.type == field_data_type::NumInGroup) {
+            if (group_first_field(fr.tag) != 0) {
                 immediate_parent[fr.tag] = fr.group_no_tag;
             }
         }
         for (auto const& fr : all_fields) {
-            if (fr.type != field_data_type::NumInGroup) {
+            if (group_first_field(fr.tag) == 0) {
                 continue;
             }
             std::uint16_t const no_tag = fr.tag;
