@@ -2944,6 +2944,63 @@ set_tests_properties(test_066_arena_fit PROPERTIES
   ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
   LABELS "066;us3")
 
+# ── 082-structural-group-detection T021 [US1] RED pin ───────────────────────
+# (written BEFORE T023 per the RED-first ordering rule): ungated (validate_
+# inbound_messages OFF) group-scoped parse across FIX40/FIX41/FIX42, real
+# Session dispatch. contracts/group-detection.md C4.1; spec.md FR-006a,
+# SC-008/SC-008a (first leg).
+add_executable(test_082_ungated_group_parse
+  test_082_ungated_group_parse_test.cpp
+)
+target_link_libraries(test_082_ungated_group_parse PRIVATE
+  fixpp_session
+  fixpp_mock_clock
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(test_082_ungated_group_parse PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+  "${CMAKE_CURRENT_SOURCE_DIR}"
+)
+target_compile_definitions(test_082_ungated_group_parse PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
+)
+add_test(NAME test_082_ungated_group_parse COMMAND test_082_ungated_group_parse)
+set_tests_properties(test_082_ungated_group_parse PROPERTIES
+  ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  LABELS "082;us1")
+
+# ── 082-structural-group-detection T021b [US1] RED pin ──────────────────────
+# (written BEFORE T023 per the RED-first ordering rule): SC-008a second leg —
+# validate_inbound_messages ON, exact-set-equality of the oracle-derived
+# 14 required-group-member pairs (13 top-level + 1 nested) that newly reject
+# on omission. Reuses tests/dictionary/required_scope_oracle.hpp (T005's
+# shared oracle) directly against the real dictionary_driven_validator, via
+# Framer+Parser<Index> (no Session/FSM). contracts/group-detection.md C4.2,
+# K9; spec.md FR-006/FR-006b, SC-008a.
+add_executable(test_082_group_required_member_validation
+  test_082_group_required_member_validation_test.cpp
+)
+find_package(pugixml CONFIG REQUIRED)
+target_link_libraries(test_082_group_required_member_validation PRIVATE
+  fixpp_wire
+  fixpp_dictionary
+  fixpp_core
+  pugixml::pugixml
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(test_082_group_required_member_validation PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+  "${CMAKE_CURRENT_SOURCE_DIR}"
+)
+target_compile_definitions(test_082_group_required_member_validation PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
+)
+add_test(NAME test_082_group_required_member_validation COMMAND test_082_group_required_member_validation)
+set_tests_properties(test_082_group_required_member_validation PROPERTIES
+  LABELS "082;us1")
+
 # ── Conformance subdirectory (005 Q2 in-scope [FIX-TC] subset) ───────────────
 # Phase 3 adds tc_establishment_test.cpp (T020); later phases add more.
 add_subdirectory(conformance)

@@ -211,6 +211,24 @@ add_test(NAME codegen_vlatest_manifest_class_test COMMAND codegen_vlatest_manife
 set_tests_properties(codegen_vlatest_manifest_class_test PROPERTIES
   LABELS "codegen;076;vlatest_manifest_class")
 
+# 082-structural-group-detection T019/T020 [US1] RED pins: pure text-parse of
+# the shipped v42/Messages.hpp (same non-circular class-side-extraction shape
+# as codegen_vlatest_manifest_class_test above; no fixpp header, no runtime
+# Dictionary/table_view). MUST be written and observed RED BEFORE T023
+# (RED-first ordering rule, tasks.md).
+add_executable(codegen_082_v42_group_classes_test test_082_v42_group_classes_test.cpp)
+add_dependencies(codegen_082_v42_group_classes_test fixpp_codegen_generate)
+target_link_libraries(codegen_082_v42_group_classes_test PRIVATE
+  GTest::gtest
+  GTest::gtest_main
+)
+target_compile_definitions(codegen_082_v42_group_classes_test PRIVATE
+  "FIXPP_CODEGEN_V42_MESSAGES_HPP=\"${FIXPP_CODEGEN_OUT}/fixpp/v42/Messages.hpp\""
+)
+add_test(NAME codegen_082_v42_group_classes_test COMMAND codegen_082_v42_group_classes_test)
+set_tests_properties(codegen_082_v42_group_classes_test PROPERTIES
+  LABELS "codegen;082;us1")
+
 # 077-builder-args-dedup T023 [US4]: vlatest builder-completeness census.
 # Own executable, gated on FIXPP_CODEGEN_FIX_LATEST (mirrors
 # test_077_vlatest_builder_roundtrip above the tier gate at T012) —
