@@ -47,6 +47,19 @@ No `<group>` element in any vendored dictionary has zero members, so a member-de
 
 Structural detection is correct on **both**. A union predicate (`type OR structural`) would preserve the spurious tag-82 registration and is therefore rejected.
 
+### Structural truth is already available on both sides — this is a re-point, not new plumbing
+
+Both group-declaration walks already key on the **element name**, never on the datatype:
+
+- runtime — `src/dictionary/xml_loader.cpp:580` (`else if (tag_name == "group")`) builds the `Dictionary` group table, and `Dictionary::group(no_tag)` / `group_fields(no_tag)` expose it. The raw structural accessors are correct for FIX40/41/42 **today** (L-063-1 notes `group_fields(382)` on FIX42 returns its 4 members); only `as_table_view()`'s registration loops re-derive group-ness from the datatype and therefore register nothing.
+- codegen — `tools/codegen/fixpp-codegen/ir.cpp:80` (`walk_level`, `else if (tag_name == "group")`) builds each message's declaration-order `group_order` (the 067/R9 `GroupOrderEntry` structure). So `MessageIR::group_order` is **already correctly populated for FIX42 today**. The emitters nonetheless re-derive group-ness from `FieldRef::type` over the tag-deduped `MessageIR::fields` run — `emit_builders.cpp:606` (`top_level_synthetic_members`) and `emit_messages.cpp:425` (`group_tags` collection) are the two discovery sites.
+
+The work is therefore to re-point each consumer at a structural source that already exists, not to add dictionary parsing. `FieldRef::type` is **not** changed by this feature — it keeps carrying the declared datatype (`INT` for FIX42's count fields), which is what makes the byte-identity claims in FR-015/FR-016 checkable.
+
+### Two existing tests encode the descope and must invert
+
+`tests/codegen/test_077_builder_no_emit.cpp` (`V42EmitsNoBuilders` — asserts `v42/all.hpp` and `v42/messages/` are **absent**) and `tests/codegen/test_077_v42_vt11_completeness_and_c4.cpp` (defines the v42 builder-completeness expected set as **∅ by policy**, while recording that FIX42 really has 39 application messages) are the 077 descope pins. They are the natural RED→GREEN witnesses for US2.
+
 ## Clarifications
 
 *(To be populated by `/speckit-clarify`. Exactly one question is deliberately left open — it is marked inline in **FR-006**. It is a live-traffic compatibility decision on three shipping dictionaries and is not the spec author's to make.)*
@@ -163,7 +176,9 @@ The exemplar suite (feature 061) has no FIX 4.2 grouped or nested **write** exem
 
 - **FR-014**: For the six dictionaries whose type and structural sets are equal (FIX44, FIX50, FIX50SP1, FIX50SP2, FIXT11, Orchestra FIX Latest), the registered group set from `as_table_view()` MUST be **exactly** unchanged in both directions (set equality, not containment).
 - **FR-015**: The `v44`, `v50sp2`, and `vt11` **read** goldens and the `vlatest` read golden MUST stay **byte-identical**, and the existing `vlatest` / `v50sp2` / `v44` **builder** goldens MUST stay byte-identical. This MUST be demonstrated by an actual regeneration + golden diff, not asserted from a source-level census.
-- **FR-016**: The `v42` read tier regenerates: its `Messages.hpp` golden goes from 0 to 18 group classes, and its `Manifest.txt` and `Reify.hpp` outputs move correspondingly. Every count that moves MUST carry a **by-construction** explanation reconciling the emitted delta to the dictionary's declared structure — "golden regenerated" alone is not sufficient evidence.
+- **FR-016**: The `v42` read tier regenerates. **All six** emitted `v42` artifacts — `Fields.hpp`, `Messages.hpp`, `Validator.hpp`, `Reify.hpp`, `NormativeReferences.md`, `Manifest.txt` — MUST be classified explicitly as either byte-identical or changed-with-explanation; none may be left unexamined. `Messages.hpp` goes from 0 to 18 group classes. Every count that moves MUST carry a **by-construction** explanation reconciling the emitted delta to FIX42's declared structure — "golden regenerated" alone is not sufficient evidence.
+- **FR-016a**: Because `FieldRef::type` is unchanged (FR-001 re-points detection, it does not re-type any field), the `v42` artifacts whose content is a function of field datatype rather than group structure are expected to be byte-identical — specifically `Fields.hpp` (the constexpr `FieldRef` arrays) and `Validator.hpp` (per-message rule tables plus the Length+Data pair table; the validator emitter has no group axis at all). This expectation MUST be **verified by regeneration diff**, and any artifact that moves against it is a finding to be explained, not absorbed.
+- **FR-016b**: The two existing `v42` builder-descope pins — `tests/codegen/test_077_builder_no_emit.cpp` (`V42EmitsNoBuilders`) and `tests/codegen/test_077_v42_vt11_completeness_and_c4.cpp` (v42 expected set defined as ∅ by policy) — MUST be inverted to assert the delivered `v42` builder tier, not deleted. `vt11`'s companion assertions in the same files MUST be unchanged.
 - **FR-017**: No C-ABI change. The frozen `1.5.0` surface, its symbol golden, and the abidiff baseline are untouched.
 - **FR-018**: The 063 reused-tag census helper MUST be re-pointed to a source **independent** of the detection predicate under change (e.g. the raw dictionary XML), so that it can witness the FIX40/41/42 and FIX43 deltas rather than moving in lockstep with the code it checks.
 
@@ -196,7 +211,8 @@ The exemplar suite (feature 061) has no FIX 4.2 grouped or nested **write** exem
 
 ## Assumptions
 
-- The structural group declaration is already tracked by **both** loaders (the QuickFIX-schema XML loader and the Orchestra loader) independent of the count field's datatype, so no new dictionary parsing is introduced — detection is re-pointed at data that already exists. Whether the emitters consume it via an additive read accessor or via an existing IR-local derivation is a design decision for `/speckit-plan`.
+- The structural group declaration is already tracked on both sides independent of the count field's datatype — the loaders' `<group>`-element walk (`xml_loader.cpp:580`) feeding the `Dictionary` group table, and the codegen IR's `walk_level` (`ir.cpp:80`) feeding `MessageIR::group_order`. **No new dictionary parsing is introduced**; detection is re-pointed at data that already exists (see § Context). Which existing source each consumer reads — the `Dictionary` group table via an additive enumeration accessor, or `group_order` directly — is a design decision for `/speckit-plan`.
+- `FieldRef::type` is **not** modified. FIX42's count fields keep their declared `INT` datatype; only what the detection sites *consult* changes. This is what makes FR-016a's byte-identity expectation for the datatype-derived artifacts a meaningful, falsifiable check rather than a tautology.
 - Only **FIX42, FIX44, FIX50SP2, and FIXT11** are code-generated (`cmake/Codegen.cmake`). FIX40, FIX41, FIX43, FIX50, and FIX50SP1 are runtime dictionaries only, so this feature's codegen/golden impact is confined to **`v42`**; FIX40/41/43 impact is runtime-`as_table_view()`/validator only, with no golden to regenerate and therefore a need for **direct** regression pins.
 - Byte-identity of unaffected tiers is treated as a **requirement pinned by regeneration diff**, never as an assumption — the `NoSidesCodeSet` finding above is the standing evidence that a raw-XML census does not equal loader truth.
 - Verification uses the established tooling of the preceding dictionary features: non-circular raw-XML oracles compared by exact-set equality in both directions, RED→GREEN behavior pins, QuickFIX-derived wire goldens, and the codegen golden-matching + determinism tests. `tools/codegen/**` is touched, so the codegen test label is in scope for local verification.
