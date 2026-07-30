@@ -543,6 +543,49 @@ circularity, and nothing else in the repo pins delimiters (which is itself part 
 entry equals `tv.group_first_field(msg_type, path, no_tag)`. That converts a bare hardcode into a
 *checked* hardcode at no cost. Tracked here so it is not lost.
 
+### Phase 2 loader — FR-023 rejection (T009–T014), RED → GREEN
+
+RED captured **before** the loader edits: both `MemberLessGroupAtNonFirstSeenOccurrenceThrows*` pins
+failed with `threw == false` — i.e. no throw occurred, not a setup error. T011 (ten dictionaries load
+clean) was **green-by-construction from the start**, which is itself the evidence that the narrowed
+rejection never touches a real dictionary.
+
+Implementation placed **outside** the first-seen dedup guard in both loaders
+(`xml_loader.cpp` before `:609`'s `group_index_by_no_tag_.contains`, `orchestra_loader.cpp` before
+`:626`), so the rule is occurrence-independent rather than order-dependent. Diagnostic names both
+`name` and `no_tag`. No new exception subclass and no `fixpp::core::error` variant, so FR-017/SC-009
+and `test_020_error_completeness.cpp`'s slot pin are untouched.
+
+After: `dictionary_required_scope_census_test` **13 tests, 8 pass, 5 fail** (the 3 new pins GREEN; the
+5 pre-T023 pins unmoved). `dictionary_pure_tests` back to **287 / 277 / 10**. Both
+orchestrator-verified. All ten dictionaries load clean, message counts
+27 / 28 / 46 / 68 / 93 / 93 / 105 / 156 / 8 / 181.
+
+#### Collateral finding — FR-023 is NOT theoretical for third-party dialects
+
+`tests/dictionary/lookup_test.cpp`'s `load_small_dictionary()` fixture declared two **literally
+self-closing** `<group name='NoPartyIDs'/>` / `<group name='NoLegs'/>` tags, deliberately, to
+exercise the empty-group accessor paths (`group(453)->field_count == 0`, `group_fields(453).empty()`).
+FR-023 rejected it, surfacing 2 failures beyond the expected 10.
+
+Fixed by giving each group one zero-field `<component name='Empty'/>` child: the resolved shape is
+unchanged (`field_count` still 0, `group_fields()` still empty), so the accessor paths under test are
+preserved, while the fixture moves out of FR-023's literal scope. A repo-wide grep for other
+self-closing `<group>` / `<fixr:group>` fixtures found none besides fuzz-corpus seeds, which are not
+required to load cleanly.
+
+**Two things to carry forward from this:**
+
+1. **T051's release note should say this shape occurs in practice.** "Zero vendored dictionaries are
+   affected" is true, but a checked-in fixture *in this repo* used the rejected shape — so the
+   rejection is a real behavior change for third-party dialects, not a theoretical one. That is a
+   stronger and more honest operator-facing rationale than the bare zero-impact claim.
+2. **#208 interaction.** The replacement fixture is deliberately the *residual* shape (children
+   present, resolving to nothing) — the same category as FIX50SP2's 1499/1669/1919. If #208 is later
+   scoped to *also* extend FR-023's rejection to "no resolvable member", this fixture will start
+   throwing and must be revisited. #208's suggested scope (recursive scan, no new rejection) does not
+   break it, but the coupling is worth naming.
+
 ---
 
 ## Evidence index

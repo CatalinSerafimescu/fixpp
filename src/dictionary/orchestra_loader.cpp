@@ -591,6 +591,28 @@ void OrchestraLoaderState::expand_field_list(
                 group_required_pairs_out.emplace_back(enclosing_group_no_tag, no_tag);
             }
 
+            // FR-023 (082-structural-group-detection): reject a member-less
+            // <fixr:group> (no child other than the mandatory
+            // <fixr:numInGroup>/<fixr:annotation>) as a load error — the
+            // Orchestra sibling of xml_loader.cpp's rejection above. Runs on
+            // EVERY groupRef occurrence, not just the first-seen one
+            // recorded below, so the rule is not order-dependent (the dedup
+            // guard just below only records first-seen).
+            bool has_member_child = false;
+            for (auto const& gc : group_node.children()) {
+                std::string_view const gcn{gc.name()};
+                if (gcn != "fixr:numInGroup" && gcn != "fixr:annotation") {
+                    has_member_child = true;
+                    break;
+                }
+            }
+            if (!has_member_child) {
+                throw orchestra_parse_error(
+                    "dict::orchestra_parse_error: <fixr:group id=\"" + std::to_string(xml_id) +
+                    "\" name=\"" + std::string{group_node.attribute("name").as_string("")} +
+                    "\"> (numInGroup id " + std::to_string(no_tag) +
+                    ") has no member child other than <fixr:numInGroup>/<fixr:annotation>");
+            }
             // Record the GroupRef (deduplicated by no_tag — first-seen wins).
             if (!group_index_by_no_tag_.contains(no_tag)) {
                 OrchestraGroupDef gd{};

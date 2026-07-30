@@ -35,9 +35,12 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <fixpp/dict/dictionary.hpp>
+#include <fixpp/dict/error.hpp>
 #include <fixpp/dict/field_ref.hpp>
 #include <fixpp/dict/orchestra_loader.hpp>
 #include <fixpp/dict/table_view.hpp>
@@ -51,6 +54,7 @@
 #include <span>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -827,4 +831,144 @@ TEST(RequiredScopeCensus, Fix43RegisteredSetDeltaIsExactlyPlusOneTag576) {
     EXPECT_EQ(actual.size(), baseline_before.size() + 1)
         << "FIX43 registered-set delta is not exactly +1 tag -- actual size " << actual.size()
         << " vs baseline " << baseline_before.size();
+}
+
+// ============================================================================
+// 082 T009/T010/T011 (FR-023 / K11 / OD-1) — fail-closed member-less-`<group>`
+// load rejection. Per the ⚠ DESCOPE BANNER (tasks.md, issue #208): the
+// rejection fires ONLY on a `<group>` with literally NO child elements at
+// all, never on "no *resolvable* member" (FIX50SP2's 1499/1669/1919 have
+// `<component>` children the loader cannot resolve one level deep -- those
+// are NOT rejected; see #208). Both fixtures below place the member-less
+// `<group>` at a NON-first-seen occurrence of its no_tag/numInGroup id,
+// because both loaders record `GroupDef`/`OrchestraGroupDef` inside a
+// first-seen-wins dedup guard (`xml_loader.cpp:609`,
+// `orchestra_loader.cpp:626`) -- a check wrongly placed inside that guard
+// would silently pass a fixture where the member-less occurrence isn't
+// first-seen.
+// ============================================================================
+
+// T009 [P] RED->GREEN: the `<fix>` (QuickFIX-XML) loader. `NoOuter`(100) is
+// first-seen in message 'Good' WITH a member (150); its second occurrence in
+// message 'Bad' has ZERO field/group/component children -- literally
+// member-less. Must throw `xml_parse_error` naming the group's name and its
+// no_tag.
+TEST(RequiredScopeCensus, MemberLessGroupAtNonFirstSeenOccurrenceThrowsXmlParseError) {
+    constexpr std::string_view kXml =
+        R"(<fix type='FIX' major='4' minor='4' servicepack='0'>)"
+        R"(<fields>)"
+        R"(<field number='35' name='MsgType' type='STRING'/>)"
+        R"(<field number='100' name='NoOuter' type='NUMINGROUP'/>)"
+        R"(<field number='150' name='OuterMember' type='STRING'/>)"
+        R"(</fields>)"
+        R"(<messages>)"
+        R"(<message name='Good' msgtype='U' msgcat='app'>)"
+        R"(<field name='MsgType' required='N'/>)"
+        R"(<group name='NoOuter' required='N'>)"
+        R"(<field name='OuterMember' required='N'/>)"  // first-seen: HAS a member
+        R"(</group></message>)"
+        R"(<message name='Bad' msgtype='V' msgcat='app'>)"
+        R"(<field name='MsgType' required='N'/>)"
+        R"(<group name='NoOuter' required='N'>)"  // non-first-seen: NO children at all
+        R"(</group></message>)"
+        R"(</messages></fix>)";
+
+    std::array<std::byte, (1UZ << 20)> buf{};
+    std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
+
+    bool threw = false;
+    try {
+        (void)fixpp::dict::XmlLoader{}.load_from_string(kXml, &mr);
+    } catch (fixpp::dict::xml_parse_error const& e) {
+        threw = true;
+        std::string_view const what{e.what()};
+        EXPECT_NE(what.find("NoOuter"), std::string_view::npos)
+            << "diagnostic must name the group's name (NoOuter): " << what;
+        EXPECT_NE(what.find("100"), std::string_view::npos)
+            << "diagnostic must name the group's no_tag (100): " << what;
+    }
+    EXPECT_TRUE(threw) << "a <group> with no field/group/component child at all must fail to "
+                          "load with fixpp::dict::xml_parse_error, even at a non-first-seen "
+                          "occurrence of its no_tag";
+}
+
+// T010 [P] RED->GREEN: the Orchestra sibling. `<fixr:group id=10>` (numInGroup
+// 100) is first-seen via message 'Good''s groupRef and HAS a fieldRef member;
+// `<fixr:group id=20>` shares the SAME numInGroup id (100) but has NO child
+// other than the mandatory `<fixr:numInGroup>` -- referenced by message
+// 'Bad''s groupRef, i.e. the non-first-seen occurrence of no_tag 100 (the
+// dedup guard is keyed by no_tag, not by the group element's own xml id).
+// Must throw the DERIVED `orchestra_parse_error` specifically (catching the
+// base `xml_parse_error` would not discriminate this from every other load
+// error).
+TEST(RequiredScopeCensus, MemberLessOrchestraGroupAtNonFirstSeenOccurrenceThrowsOrchestraParseError) {
+    constexpr std::string_view kXml = R"xml(
+<fixr:repository version="FIX.Latest_EP303">
+  <fixr:fields>
+    <fixr:field id="100" name="NoOuter" type="NumInGroup"/>
+    <fixr:field id="200" name="Member" type="String"/>
+  </fixr:fields>
+  <fixr:groups>
+    <fixr:group id="10" name="GroupFirstSeen">
+      <fixr:numInGroup id="100"/>
+      <fixr:fieldRef id="200"/>
+    </fixr:group>
+    <fixr:group id="20" name="GroupMemberLess">
+      <fixr:numInGroup id="100"/>
+    </fixr:group>
+  </fixr:groups>
+  <fixr:messages>
+    <fixr:message id="1" name="Good" msgType="U">
+      <fixr:structure><fixr:groupRef id="10"/></fixr:structure>
+    </fixr:message>
+    <fixr:message id="2" name="Bad" msgType="V">
+      <fixr:structure><fixr:groupRef id="20"/></fixr:structure>
+    </fixr:message>
+  </fixr:messages>
+</fixr:repository>
+)xml";
+
+    std::pmr::monotonic_buffer_resource mr;
+
+    bool threw_derived = false;
+    try {
+        (void)fixpp::dict::OrchestraLoader{}.load_from_string(kXml, &mr);
+    } catch (fixpp::dict::orchestra_parse_error const& e) {
+        threw_derived = true;
+        std::string_view const what{e.what()};
+        EXPECT_NE(what.find("GroupMemberLess"), std::string_view::npos)
+            << "diagnostic must name the group's name (GroupMemberLess): " << what;
+        EXPECT_NE(what.find("100"), std::string_view::npos)
+            << "diagnostic must name the group's no_tag/numInGroup id (100): " << what;
+    } catch (fixpp::dict::xml_parse_error const&) {
+        // Base type caught but NOT the derived orchestra_parse_error -- fails
+        // below via threw_derived staying false, discriminating this from a
+        // wrong-typed throw.
+    }
+    EXPECT_TRUE(threw_derived)
+        << "a member-less <fixr:group> (no child other than <fixr:numInGroup>/<fixr:annotation>) "
+           "must fail to load with the DERIVED fixpp::dict::orchestra_parse_error, even at a "
+           "non-first-seen occurrence of its numInGroup id";
+}
+
+// T011 [P] RED-by-construction->GREEN: all ten vendored dictionaries still
+// load clean -- the FR-023 no-regression leg, cross-checked against T007's
+// oracle zero-member-`<group>` report (0 across all ten). Doubly load-bearing
+// per the DESCOPE BANNER: this is what proves the narrowed (literal-only)
+// rejection does not take FIX50SP2 down (its 1499/1669/1919 have unresolved
+// `<component>` children, not zero children -- #208, not FR-023).
+TEST(RequiredScopeCensus, AllTenVendoredDictionariesStillLoadCleanAfterMemberLessGroupRejection) {
+    std::cout << "\n=== 082 T011: all ten vendored dictionaries load clean "
+                 "(FR-023 no-regression leg) ===\n";
+
+    for (auto const& dc : kAllDicts) {
+        auto storage = std::make_unique<std::byte[]>(kArenaBytes);
+        std::pmr::monotonic_buffer_resource mr{storage.get(), kArenaBytes};
+
+        Dictionary dict = load_actual(dc, &mr);
+        EXPECT_FALSE(dict.messages().empty())
+            << dc.label << ": failed to load or has no messages after the FR-023 rejection landed";
+        std::cout << "  " << dc.label << ": loaded clean, " << dict.messages().size()
+                  << " message(s)\n";
+    }
 }

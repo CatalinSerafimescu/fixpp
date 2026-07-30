@@ -80,8 +80,15 @@ fixpp::dict::Dictionary load_small_dictionary() {
         R"(<message name='NewOrderSingle' msgtype='D' msgcat='app'>)"
         R"(<field name='ClOrdID' required='Y'/>)"
         R"(<component name='Instrument' required='N'/>)"
-        R"(<group name='NoPartyIDs' required='N'/>)"
-        R"(<group name='NoLegs' required='N'/>)"
+        // 082-structural-group-detection FR-023: a literally member-less
+        // <group> (no child element at all) is now a load error. These two
+        // groups are still exercised as EMPTY (field_count == 0) below --
+        // referencing the zero-field 'Empty' component keeps that resolved
+        // shape while giving each <group> one real child element, so the
+        // fixture stays outside FR-023's literal scope (mirrors the
+        // RESIDUAL EXCEPTION shape: children present, resolving to nothing).
+        R"(<group name='NoPartyIDs' required='N'><component name='Empty' required='N'/></group>)"
+        R"(<group name='NoLegs' required='N'><component name='Empty' required='N'/></group>)"
         R"(</message>)"
         R"(</messages>)"
         R"(</fix>)";
