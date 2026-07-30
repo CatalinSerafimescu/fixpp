@@ -43,20 +43,35 @@ messages of the version.
 ## C2 — Ground truth per dictionary
 
 Authoritative output of `contracts/predicate_census.py` (raw XML; loads neither `Dictionary` nor
-the codegen IR). Any conforming implementation must reproduce the **struct** column exactly.
+the codegen IR).
 
-| dictionary | type set | **struct set (normative)** | registered today | after |
-|---|---:|---:|---:|---:|
-| FIX40 | 0 | **4** | 0 | 4 |
-| FIX41 | 0 | **7** | 0 | 7 |
-| FIX42 | 0 | **18** | 0 | 18 |
-| FIX43 | 34 | **34** | 33 | 34 |
-| FIX44 | 59 | **59** | 59 | 59 |
-| FIX50 | 69 | **69** | 69 | 69 |
-| FIX50SP1 | 99 | **99** | 99 | 99 |
-| FIX50SP2 | 507 | **507** | 507 | 507 |
-| FIXT11 | 1 | **1** | 1 | 1 |
-| Orchestra FIX Latest | 524 | **524** | 524 | 524 |
+**Registration is reachability-restricted.** Both `as_table_view()` loops filter over a *message's
+own field run*, so a group registers only if it is transitively reachable from a `<message>` —
+including via `<header>`/`<trailer>`, which `xml_loader.cpp:926-931` expands into **every**
+message's run. Registered-count columns below are therefore `set ∩ reachable`, **measured** by the
+oracle, not inferred from set cardinality:
+
+- **registered today** = `type ∩ struct ∩ reachable` (nominated by datatype, a real `<group>`, and reachable)
+- **registered after** = `struct ∩ reachable`
+
+| dictionary | type set | **struct set (normative)** | registered today | **registered after** | delta |
+|---|---:|---:|---:|---:|---|
+| FIX40 | 0 | 4 | 0 | **4** | +4 |
+| FIX41 | 0 | 7 | 0 | **7** | +7 |
+| FIX42 | 0 | 18 | 0 | **18** | +18 |
+| FIX43 | 34 | 34 | 33 | **34** | **+576** |
+| FIX44 | 59 | 59 | 59 | **59** | — |
+| FIX50 | 69 | 69 | 67 | **67** | — |
+| FIX50SP1 | 99 | 99 | 97 | **97** | — |
+| FIX50SP2 | 507 | 507 | 505 | **505** | — |
+| FIXT11 | 1 | 1 | 1 | **1** | — |
+| Orchestra FIX Latest | 524 | 524 | 524 | **524** | — |
+
+**Why FIX50/SP1/SP2 register 2 fewer than they declare** (a cross-check on this model, not an
+anomaly): those dictionaries ship an **empty `<header/>`** — the FIXT.1.1 session layer owns the
+standard header (feature 081 / L-041-2) — so `NoHops(627)` is unreachable there, and
+`NoMsgTypes(384)` belongs to `Logon`, which lives in FIXT11 rather than the application
+dictionary. Both are unreachable **before and after**, so C3 is unaffected.
 
 FIX42's 18: `33, 73, 78, 124, 136, 146, 199, 215, 267, 268, 295, 296, 382, 384, 386, 398, 420, 428`.
 
@@ -66,6 +81,10 @@ FIX42's 18: `33, 73, 78, 124, 136, 146, 199, 215, 267, 268, 295, 296, 382, 384, 
 |---|---|---|---|---|---|---|
 | 82 | `NoRpts` | `NUMINGROUP` | **no** | unregistered | unregistered | already rejected downstream — **no-regression pin**, not a delta |
 | 576 | `NoClearingInstructions` | `INT` | **yes** | unregistered | **registered** | the one effective delta |
+
+This is why FIX43 is the discriminating dictionary: its two sets have **equal cardinality**, so a
+count-only check passes while the membership is wrong in both directions. Only exact-set equality
+catches it — the same reason C3 demands both directions rather than containment.
 
 Cross-version corroboration that both are upstream typos: FIX44 types 82 `INT` and 576
 `NUMINGROUP`, the opposite of FIX43 in each case, while declaring the same `<group>` for 576 and
@@ -103,5 +122,5 @@ not sufficient: a subset check passes while silently dropping a group.
 | **K3** | FIX43 differs from baseline by exactly `{+576}`; 576 carries member `ClearingInstruction`; 82 is unregistered **and** still enforced as a plain required field in `ListStatus`. |
 | **K4** | The two `table_view` stores agree on every newly-visible FIX42 group (no half-restructure). |
 | **K5** | Regeneration diff: `v44`/`v50sp2`/`vt11`/`vlatest` read goldens and `v44`/`v50sp2`/`vlatest` builder goldens byte-identical; `v42` `Fields.hpp` + `Validator.hpp` byte-identical; `v42` `Messages.hpp` gains exactly 18 `class G_`. |
-| **K6** | P4 — no residual datatype-based detection gate at any of the nine production sites, and no version-name predicate in the codegen driver. |
+| **K6** | P4 — asserted **behaviorally**, not by token census: FIX43 tag 576 (`INT`-typed) registering is only possible if no datatype gate survives on the runtime path, and `v42` emitting 18 `class G_` is only possible if none survives on the codegen path. Plus: no version-name predicate remains in the codegen driver. |
 | **K7** | The oracle backing K1–K3 derives from raw XML; mutating the production predicate cannot silence it. |

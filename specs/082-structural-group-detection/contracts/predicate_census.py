@@ -26,8 +26,45 @@ import xml.etree.ElementTree as ET
 R = '{http://fixprotocol.io/2020/orchestra/repository}'
 
 
+def _reachable_groups_quickfix(root, name2num):
+    """Group tags transitively reachable from a <message> (component refs expanded).
+
+    A <group> declared only inside an unreferenced <component> is in the struct set but
+    is never registered, because both as_table_view() loops filter over a MESSAGE's own
+    field run. Registration figures must therefore be reachability-restricted, not raw
+    struct-set cardinality.
+    """
+    comps = {c.get('name'): c for c in root.iter('component')
+             if c.get('name') and len(list(c))}
+    out, seen_comp = set(), set()
+
+    def walk(node):
+        for ch in node:
+            if ch.tag == 'group':
+                nm = ch.get('name')
+                if nm in name2num:
+                    out.add(name2num[nm])
+                walk(ch)
+            elif ch.tag == 'component':
+                nm = ch.get('name')
+                if nm in comps and nm not in seen_comp:
+                    seen_comp.add(nm)          # cycle guard; components are a DAG in practice
+                    walk(comps[nm])
+                    seen_comp.discard(nm)
+
+    for m in root.find('messages').findall('message'):
+        walk(m)
+    # xml_loader.cpp:926-931 expands <header> and <trailer> into EVERY message's field
+    # run, so a group declared there (e.g. NoHops(627)) is reachable from every message.
+    for section in ('header', 'trailer'):
+        node = root.find(section)
+        if node is not None:
+            walk(node)
+    return out
+
+
 def census_quickfix(path):
-    """<fix> (QuickFIX) schema. Returns (type_set, struct_set, empty_groups, num2name)."""
+    """<fix> (QuickFIX) schema. Returns (type_set, struct_set, empty, undeclared, num2name, reach)."""
     root = ET.parse(path).getroot()
     name2num, num2name, type_set = {}, {}, set()
     for f in root.find('fields').findall('field'):
@@ -46,7 +83,8 @@ def census_quickfix(path):
         struct_set.add(t)
         if len(list(g)) == 0:
             empty_groups.add(t)
-    return type_set, struct_set, empty_groups, undeclared, num2name
+    return (type_set, struct_set, empty_groups, undeclared, num2name,
+            _reachable_groups_quickfix(root, name2num))
 
 
 def census_orchestra(path):
@@ -75,12 +113,29 @@ def census_orchestra(path):
         members = [c for c in g if c.tag not in (R + 'numInGroup', R + 'annotation')]
         if not members:
             empty_groups.add(t)
-    return type_set, struct_set, empty_groups, set(), num2name
+    # Orchestra groups are reached via <fixr:groupRef>; every declared group in the
+    # vendored FIX Latest repository is message-reachable, so struct == reachable there.
+    return type_set, struct_set, empty_groups, set(), num2name, set(struct_set)
 
 
-def report(label, ts, ss, empty, undeclared, n2n):
+def report(label, ts, ss, empty, undeclared, n2n, reach):
     same = ts == ss
-    print(f"{label:22s} type={len(ts):4d} struct={len(ss):4d}  {'EQUAL' if same else 'DIFFER'}")
+    # Effective registration = reachability-restricted, since both as_table_view() loops
+    # filter over a message's own field run.
+    before = ts & ss & reach   # today: nominated by datatype AND a real <group> AND reachable
+    after = ss & reach         # after:              a real <group> AND reachable
+    delta_add, delta_del = sorted(after - before), sorted(before - after)
+    print(f"{label:22s} type={len(ts):4d} struct={len(ss):4d}  {'EQUAL' if same else 'DIFFER'}"
+          f"   | registered: {len(before):4d} -> {len(after):4d}"
+          f"  (+{len(delta_add)}/-{len(delta_del)})")
+    if delta_add:
+        print(f"   REGISTER: {[(t, n2n.get(t)) for t in delta_add][:40]}")
+    if delta_del:
+        print(f"   UNREGISTER: {[(t, n2n.get(t)) for t in delta_del]}")
+    unreachable = ss - reach
+    if unreachable:
+        print(f"   note: declared <group> not message-reachable ({len(unreachable)}): "
+              f"{[(t, n2n.get(t)) for t in sorted(unreachable)][:20]}")
     if not same:
         only_t, only_s = sorted(ts - ss), sorted(ss - ts)
         if only_t:

@@ -27,7 +27,13 @@ That is precisely the structural property required, and it is:
 - **reachability-preserving** — it is applied as a *filter over `all_fields`* (this message's
   own field run), exactly where the datatype test sits today, so the set of messages a group
   registers under is unchanged. Enumerating `groups_` globally instead would register groups
-  declared in unused components and would break FR-014's exact-set equality.
+  declared in unused components and would break FR-014's exact-set equality. This is not
+  hypothetical: **FIX50/SP1/SP2 each declare 2 groups that are unreachable** — `NoHops(627)`
+  (their `<header/>` is empty; FIXT owns the header, per 081/L-041-2) and `NoMsgTypes(384)`
+  (belongs to `Logon`, which lives in FIXT11) — so global enumeration would add 2 spurious
+  registrations to each and fail C3. Note `<header>`/`<trailer>` **are** expanded into every
+  message's run (`xml_loader.cpp:926-931`), which is why `NoHops` *is* reachable in
+  FIX43/44/FIXT11 but not in FIX50SPx.
 
 **Alternatives rejected.**
 

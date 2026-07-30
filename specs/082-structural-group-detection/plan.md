@@ -161,3 +161,23 @@ Ordered so that each step's evidence exists before the step that depends on it.
 
 Because `tools/codegen/**` is touched, `ctest -L codegen` is mandatory locally — a label-filtered
 run that omits it has previously missed a subsystem's COUNT pin.
+
+## Gate A framing
+
+`/gate-a` runs **after this plan and before `/speckit-tasks`** (pipeline step 4), not after tasks.
+Reviewer attention is best spent on:
+
+- **D-1** — the claim that **no new accessor is needed**: `group_first_field` is already public and
+  already answers the structural question.
+- **D-2** — the *corrected, weaker* case against a union predicate. A union is **not** wrong today;
+  the argument is single-sourcing plus closing a latent trap. Review the argument as stated, not
+  the stronger one the issue originally implied.
+- **D-3** — `group_order` over a member-derived set (member-independence, I-6/P1).
+- **D-5 — read the citation, not the comment.** The ungated-parse claim underpinning FR-006a, and
+  the compat posture the user signed off on, rests on the comment at `session.cpp:992` being
+  **stale**. The load-bearing evidence is the *consume* site:
+  `Parser<access_mode::Index> pd_parser{*inbound_tv_}` at `session.cpp:328`, inside
+  `parse_and_dispatch_`, with no `validate_inbound_messages` condition anywhere on that path. A
+  reviewer who reads only the `:992` comment will wrongly challenge FR-006a.
+- **C2 / D-10** — the reachability-restricted registration counts (**measured** by the oracle, not
+  derived from set cardinality) and the per-artifact delta budget.

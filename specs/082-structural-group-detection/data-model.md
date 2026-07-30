@@ -59,13 +59,21 @@ Two stores, both populated by `Dictionary::as_table_view()`, both of which must 
 
 **State change (the whole feature, at the runtime tier):**
 
+Counts are **reachability-restricted and measured** by `contracts/predicate_census.py` — a group
+registers only if transitively reachable from a `<message>`, including via `<header>`/`<trailer>`
+(expanded into every message's run at `xml_loader.cpp:926-931`). See contract C2.
+
 | Dictionary | groups registered before | after |
 |---|---:|---:|
 | FIX40 | 0 | **4** |
 | FIX41 | 0 | **7** |
 | FIX42 | 0 | **18** |
 | FIX43 | 33 | **34** (`+576`) |
-| FIX44 / FIX50 / FIX50SP1 / FIX50SP2 / FIXT11 / FIX Latest | 59 / 69 / 99 / 507 / 1 / 524 | **unchanged** |
+| FIX44 / FIX50 / FIX50SP1 / FIX50SP2 / FIXT11 / FIX Latest | 59 / 67 / 97 / 505 / 1 / 524 | **unchanged** |
+
+FIX50/SP1/SP2 register 2 fewer than they *declare* (`NoHops(627)`, `NoMsgTypes(384)` — unreachable
+because those dictionaries ship an empty `<header/>` and `Logon` lives in FIXT11). Unreachable both
+before and after, so I-4 is unaffected.
 
 **I-4 (exact-set, both directions)** — for the six unchanged dictionaries the registered set must
 be *equal*, not merely a superset (FR-014). A subset check would pass while silently dropping a
@@ -130,7 +138,7 @@ Every requirement has a named witness. No FR relies on inspection alone.
 
 | FR | Pin |
 |---|---|
-| FR-001 | Site census test: zero `field_data_type::NumInGroup` detection gates remain in the nine production sites (D-7 table) |
+| FR-001 | **Behavioral, not a token grep.** Runtime path: FIX43 tag 576 registering proves no datatype gate survives in `as_table_view()` (576 is `INT`-typed — it *cannot* register while a datatype gate exists). Codegen path: `v42` emitting 18 `class G_` proves the same for the emitters. A token census over `NumInGroup` would false-fail on the four legitimate remaining occurrences (`emit_manifest:73`, `gen_util:162`, the two loader type-name tables) or need an allowlist that drifts. |
 | FR-002 | FIX43: 576 registered **and** 82 not registered, from one predicate |
 | FR-003 | Cross-dictionary: tag 576 is a group in FIX43+FIX44; tag 82 in neither — asserted per dictionary |
 | FR-004 | Both stores queried for the same newly-visible FIX42 group; must agree |
