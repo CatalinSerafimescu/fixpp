@@ -67,6 +67,7 @@
 namespace {
 
 using fixpp::dict::Dictionary;
+using fixpp::dict::field_data_type;
 using fixpp::dict::table_view;
 using fixpp_test::required_scope_oracle::build_orchestra_oracle;
 using fixpp_test::required_scope_oracle::build_quickfix_oracle;
@@ -114,18 +115,65 @@ std::set<std::uint16_t> to_set(std::span<std::uint16_t const> s) {
     return std::set<std::uint16_t>{s.begin(), s.end()};
 }
 
+// C-3.4a's checked set (contracts/group_ctx_delims.md), mirrored EXACTLY
+// against the loader's own gate (dictionary.cpp:445-463): a context is
+// checked iff, on `mt`'s deduped field run, the count tag's FieldRef type is
+// NumInGroup AND at least one FieldRef has group_no_tag == no_tag. Three
+// outcomes, not two — an INT-typed count tag (L-066-1/#196) and a
+// NumInGroup-typed tag with no members in THIS message (dictionary.cpp:463's
+// separate "plain scalar reuse" skip) are different exclusion reasons and
+// must not be folded together, or the exact-55 tripwire below would silently
+// absorb a second population.
+enum class CheckedSetStatus : std::uint8_t { kChecked, kNotNumInGroup, kEmptyMembers };
+
+CheckedSetStatus checked_set_status(Dictionary const& dict, GroupContextKey const& key) {
+    auto const all_fields = dict.message_fields(key.msg_type);
+    bool found_numingroup = false;
+    for (auto const& fr : all_fields) {
+        if (fr.tag == key.no_tag) {
+            found_numingroup = fr.type == field_data_type::NumInGroup;
+            break;
+        }
+    }
+    if (!found_numingroup) {
+        return CheckedSetStatus::kNotNumInGroup;
+    }
+    for (auto const& fr : all_fields) {
+        if (fr.group_no_tag == key.no_tag) {
+            return CheckedSetStatus::kChecked;
+        }
+    }
+    return CheckedSetStatus::kEmptyMembers;
+}
+
 // Dictionaries here are large (FIX50SP2 / Orchestra FIX Latest have tens of
 // thousands of contexts) — mirrors required_scope_census_test.cpp's arena.
 constexpr std::size_t kArenaBytes = 32UZ * 1024UZ * 1024UZ;
 
-// Per-dictionary tally, matching spec.md's Baseline table columns exactly.
+// Per-dictionary tally. T012 re-point: `unregistered` is split into
+// `unregistered_in_checked_set` (a real FR-023/C-3.4 completeness violation
+// — asserted 0) and `int_typed_out_of_checked_set` (L-066-1/#196, out of
+// 083's scope — asserted exactly 55/6/10/38/1, a tripwire, see below).
+// `empty_members_out_of_checked_set` is a THIRD, distinct exclusion reason
+// (dictionary.cpp:463's "plain scalar reuse" skip) — reported, not folded
+// into either bucket above, so it can't silently distort the exact-count
+// tripwire.
 struct DictCensus {
     std::string label;
     std::size_t contexts = 0;
     std::size_t wrong_delimiter = 0;
     std::size_t wrong_delimiter_nested = 0;  // of those, the delimiter is itself a nested group
+    // SC-016's UNCONDITIONED population: every oracle context (any
+    // registration/correctness status) whose oracle-expected delimiter is
+    // itself a child group's count tag. Not conditioned on `wrong_delimiter`
+    // (unlike `wrong_delimiter_nested` above).
+    std::size_t nested_delim_total = 0;
+    std::size_t nested_delim_total_registered = 0;
+    std::size_t nested_delim_total_unregistered = 0;
     std::size_t polluted = 0;
-    std::size_t unregistered = 0;
+    std::size_t unregistered_in_checked_set = 0;
+    std::size_t int_typed_out_of_checked_set = 0;
+    std::size_t empty_members_out_of_checked_set = 0;
 };
 
 // Cap the per-context failure DETAIL lines printed per dictionary — an
@@ -154,20 +202,13 @@ DictCensus census_one(DictCase const& dc) {
     for (auto const& [key, expected_members] : oracle.group_members) {
         ++census.contexts;
 
-        auto const ctx_members = tv.group_member_tags(key.msg_type, std::span{key.path}, key.no_tag);
-        auto const bare_members = tv.group_member_tags(key.no_tag);
-        bool const registered = ctx_members.data() != bare_members.data();
-
-        if (!registered) {
-            ++census.unregistered;
-            if (detail_printed < kMaxDetailLinesPerDict) {
-                std::cout << "    [unregistered] " << dc.label << " msg=" << key.msg_type
-                          << " no_tag=" << key.no_tag << "\n";
-                ++detail_printed;
-            }
-            continue;
-        }
-
+        // Hoisted above the registration check (was previously only reached
+        // for registered contexts) — `nested_delim_total` below needs the
+        // oracle's expected delimiter for EVERY context, registered or not.
+        // Every group_members[key] insertion in required_scope_oracle.hpp is
+        // paired with a group_delims.try_emplace(key, ...) on the same key in
+        // the same walker call, so this should never miss; kept as a guarded
+        // EXPECT_NE rather than assumed.
         auto const dit = oracle.group_delims.find(key);
         EXPECT_NE(dit, oracle.group_delims.end())
             << dc.label << ": oracle.group_delims missing an entry group_members has (walker bug) — "
@@ -176,22 +217,67 @@ DictCensus census_one(DictCase const& dc) {
             continue;  // ASSERT_ is unusable in a non-void function; guard manually.
         }
         std::uint16_t const expected_delim = dit->second;
+
+        // SC-016 UNCONDITIONED nested-delimiter check: is the oracle's
+        // expected delimiter itself a group count tag, structurally
+        // reachable as a direct child of THIS context? Exact per-context
+        // check: does the oracle record a context keyed (msg_type, path +
+        // this no_tag, expected_delim)? Computed for every context
+        // regardless of wrong/correct/registered status (unlike the
+        // `wrong_delimiter_nested` sub-check below, which conditions on
+        // `wrong_delim`).
+        std::vector<std::uint16_t> child_path = key.path;
+        child_path.push_back(key.no_tag);
+        GroupContextKey const child_key{key.msg_type, child_path, expected_delim};
+        bool const nested_delim = oracle.group_members.contains(child_key);
+
+        auto const ctx_members = tv.group_member_tags(key.msg_type, std::span{key.path}, key.no_tag);
+        auto const bare_members = tv.group_member_tags(key.no_tag);
+        bool const registered = ctx_members.data() != bare_members.data();
+
+        if (nested_delim) {
+            ++census.nested_delim_total;
+            if (registered) {
+                ++census.nested_delim_total_registered;
+            } else {
+                ++census.nested_delim_total_unregistered;
+            }
+        }
+
+        if (!registered) {
+            switch (checked_set_status(dict, key)) {
+                case CheckedSetStatus::kChecked:
+                    // In C-3.4a's checked set but not registered — a real
+                    // FR-023/C-3.4 completeness violation (not #196).
+                    ++census.unregistered_in_checked_set;
+                    if (detail_printed < kMaxDetailLinesPerDict) {
+                        std::cout << "    [unregistered_in_checked_set] " << dc.label
+                                  << " msg=" << key.msg_type << " no_tag=" << key.no_tag << "\n";
+                        ++detail_printed;
+                    }
+                    break;
+                case CheckedSetStatus::kNotNumInGroup:
+                    // L-066-1/#196: the count tag is INT-typed, not
+                    // NumInGroup-typed, so dictionary.cpp:446 never visits it
+                    // — out of 083's scope.
+                    ++census.int_typed_out_of_checked_set;
+                    break;
+                case CheckedSetStatus::kEmptyMembers:
+                    // dictionary.cpp:463's separate "plain scalar reuse"
+                    // skip — a distinct exclusion reason, reported only.
+                    ++census.empty_members_out_of_checked_set;
+                    break;
+            }
+            continue;
+        }
+
         std::uint16_t const actual_delim =
             tv.group_first_field(key.msg_type, std::span{key.path}, key.no_tag);
 
         bool const wrong_delim = actual_delim != expected_delim;
-        bool nested = false;
         if (wrong_delim) {
             ++census.wrong_delimiter;
-            // FR-004: is the (oracle's) expected delimiter itself a nested
-            // group's count tag, structurally reachable as a direct child of
-            // THIS context? Exact per-context check: does the oracle record
-            // a context keyed (msg_type, path + this no_tag, expected_delim)?
-            std::vector<std::uint16_t> child_path = key.path;
-            child_path.push_back(key.no_tag);
-            GroupContextKey const child_key{key.msg_type, child_path, expected_delim};
-            nested = oracle.group_members.contains(child_key);
-            if (nested) {
+            if (nested_delim) {
                 ++census.wrong_delimiter_nested;
             }
         }
@@ -207,7 +293,7 @@ DictCensus census_one(DictCase const& dc) {
                       << " no_tag=" << key.no_tag
                       << (wrong_delim ? (" WRONG_DELIM(expected=" + std::to_string(expected_delim) +
                                          " actual=" + std::to_string(actual_delim) + ")" +
-                                         (nested ? "[nested]" : ""))
+                                         (nested_delim ? "[nested]" : ""))
                                       : "")
                       << (polluted ? " POLLUTED" : "") << "\n";
             ++detail_printed;
@@ -218,22 +304,36 @@ DictCensus census_one(DictCase const& dc) {
 }
 
 void print_census_table(std::vector<DictCensus> const& all) {
-    std::cout << "\n=== 083 T006 delimiter census — all ten dictionaries ===\n";
-    std::cout << "  dictionary            contexts  wrong  wrong(nested)  polluted  unregistered\n";
+    std::cout << "\n=== 083 T006/T012 delimiter census — all ten dictionaries ===\n";
+    std::cout << "  dictionary            contexts  wrong  wrong(nested)  nested_total  polluted  "
+                 "unreg_checked  int_typed_oos  empty_members_oos\n";
     DictCensus total{.label = "TOTAL"};
     for (auto const& c : all) {
         std::cout << "  " << c.label << std::string(std::max<std::size_t>(1, 22 - c.label.size()), ' ')
                   << c.contexts << "  " << c.wrong_delimiter << "  " << c.wrong_delimiter_nested << "  "
-                  << c.polluted << "  " << c.unregistered << "\n";
+                  << c.nested_delim_total << "  " << c.polluted << "  " << c.unregistered_in_checked_set
+                  << "  " << c.int_typed_out_of_checked_set << "  " << c.empty_members_out_of_checked_set
+                  << "\n";
         total.contexts += c.contexts;
         total.wrong_delimiter += c.wrong_delimiter;
         total.wrong_delimiter_nested += c.wrong_delimiter_nested;
+        total.nested_delim_total += c.nested_delim_total;
+        total.nested_delim_total_registered += c.nested_delim_total_registered;
+        total.nested_delim_total_unregistered += c.nested_delim_total_unregistered;
         total.polluted += c.polluted;
-        total.unregistered += c.unregistered;
+        total.unregistered_in_checked_set += c.unregistered_in_checked_set;
+        total.int_typed_out_of_checked_set += c.int_typed_out_of_checked_set;
+        total.empty_members_out_of_checked_set += c.empty_members_out_of_checked_set;
     }
     std::cout << "  " << total.label << std::string(std::max<std::size_t>(1, 22 - total.label.size()), ' ')
               << total.contexts << "  " << total.wrong_delimiter << "  " << total.wrong_delimiter_nested
-              << "  " << total.polluted << "  " << total.unregistered << "\n";
+              << "  " << total.nested_delim_total << "  " << total.polluted << "  "
+              << total.unregistered_in_checked_set << "  " << total.int_typed_out_of_checked_set << "  "
+              << total.empty_members_out_of_checked_set << "\n";
+    std::cout << "  nested_delim_total registered/unregistered split: "
+              << total.nested_delim_total_registered << " / " << total.nested_delim_total_unregistered
+              << " (SC-016 asserts 262 over this UNCONDITIONED population — not asserted here, T012 "
+                 "measurement only)\n";
     std::cout << "  spec.md Baseline for comparison: total contexts wrong=335 (232 nested) "
                  "polluted=52 unregistered=30\n";
 }
@@ -315,10 +415,16 @@ TEST(DelimiterCensus, NoChangeDictionariesUnchanged) {
     for (auto const& dc : no_change_dicts) {
         auto const c = census_one(dc);
         std::cout << "  " << c.label << ": contexts=" << c.contexts << " wrong=" << c.wrong_delimiter
-                  << " polluted=" << c.polluted << " unregistered=" << c.unregistered << "\n";
+                  << " polluted=" << c.polluted
+                  << " unregistered_in_checked_set=" << c.unregistered_in_checked_set << "\n";
         EXPECT_EQ(c.wrong_delimiter, 0u) << c.label << ": SC-008 violated — wrong-delimiter count changed";
         EXPECT_EQ(c.polluted, 0u) << c.label << ": SC-008 violated — polluted-member-set count changed";
-        EXPECT_EQ(c.unregistered, 0u) << c.label << ": SC-008 violated — unregistered-context count changed";
+        // T012 re-point: the `unregistered` leg now checks
+        // unregistered_in_checked_set only — L-066-1/#196's INT-typed
+        // out-of-scope exclusions land in int_typed_out_of_checked_set
+        // instead and must not fail this SC-008 pin.
+        EXPECT_EQ(c.unregistered_in_checked_set, 0u)
+            << c.label << ": SC-008 violated — unregistered-in-checked-set count changed";
     }
 }
 
@@ -349,7 +455,59 @@ TEST(DelimiterCensus, RedCountsReconcileWithSpecBaseline) {
         EXPECT_EQ(c.polluted, 0u) << c.label << ": " << c.polluted
                                    << " context(s) with a polluted member set (post-fix target: 0, "
                                       "FR-010/FR-015)";
-        EXPECT_EQ(c.unregistered, 0u) << c.label << ": " << c.unregistered
-                                       << " unregistered context(s) (post-fix target: 0, FR-006/FR-023)";
+        // T012 re-point: this leg checks unregistered_in_checked_set only.
+        // int_typed_out_of_checked_set (L-066-1/#196) is a permanently-out-
+        // of-scope population that this pin must never require to be zero —
+        // see the dedicated exact-count tripwire test below instead.
+        EXPECT_EQ(c.unregistered_in_checked_set, 0u)
+            << c.label << ": " << c.unregistered_in_checked_set
+            << " unregistered-in-checked-set context(s) (post-fix target: 0, FR-006/FR-023)";
     }
+}
+
+// ============================================================================
+// T012: the `int_typed_out_of_checked_set` bucket (L-066-1/#196 — count
+// tags declared INT rather than NUMINGROUP, which dictionary.cpp:446 skips
+// entirely) is intentionally out of 083's scope and MUST NOT gate SC-015
+// above. But an un-asserted "just report it" bucket is a gate that observes
+// and never fails — the natural hiding place for a future silent drop, since
+// anything falling out of the checked set lands here unnoticed. Assert the
+// EXACT count instead: a tripwire that fails loudly (rather than silently
+// widening) the day #196 lands and these contexts start registering, so
+// someone updates this pin deliberately instead of it drifting unnoticed.
+//
+// If a re-measurement of this pin ever disagrees with the constants below,
+// update the constants only after confirming why via a real cause (e.g.
+// #196 landing) — never adjust them merely to match whatever the code
+// currently produces (that would pin nothing, per
+// [[feedback_coverage_push_enshrines_bugs]]-style "assert whatever we
+// observed").
+// ============================================================================
+TEST(DelimiterCensus, IntTypedOutOfCheckedSetIsExactlyFiftyFive) {
+    std::vector<DictCensus> all;
+    all.reserve(kAllDicts.size());
+    for (auto const& dc : kAllDicts) {
+        all.push_back(census_one(dc));
+    }
+
+    std::size_t total = 0;
+    for (auto const& c : all) {
+        total += c.int_typed_out_of_checked_set;
+        std::size_t expected = 0;
+        if (c.label == "FIX40") {
+            expected = 6;
+        } else if (c.label == "FIX41") {
+            expected = 10;
+        } else if (c.label == "FIX42") {
+            expected = 38;
+        } else if (c.label == "FIX43") {
+            expected = 1;
+        }
+        EXPECT_EQ(c.int_typed_out_of_checked_set, expected)
+            << c.label << ": int_typed_out_of_checked_set (L-066-1/#196) drifted from its pinned "
+                           "per-dictionary count — update this pin deliberately only if the cause is "
+                           "confirmed (e.g. #196 landing), never to match an unexplained observation";
+    }
+    EXPECT_EQ(total, 55u) << "int_typed_out_of_checked_set total drifted from its pinned 55 "
+                             "(L-066-1/#196) — see per-dictionary breakdown above";
 }
