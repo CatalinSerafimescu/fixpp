@@ -43,6 +43,12 @@ set(FIXPP_CAPI_FEATURE_B_INCLUDES
   "${CMAKE_CURRENT_SOURCE_DIR}"          # capi_loopback_support.hpp
   "${CMAKE_SOURCE_DIR}/src/capi"         # capi_internal.hpp + the public src tree
   "${CMAKE_SOURCE_DIR}/tests"            # support/minimal_dictionary.hpp
+  # 083 T049: the W-11a seam (as_table_view_call_count) lives in the INTERNAL
+  # dictionary header, mirroring the fixpp_capi::detail live-state-counter
+  # precedent. This is the first tests/capi -> src/dictionary include.
+  # tools/check_layers.py has no opinion here: it scans src/** and bindings/**
+  # only (:172-176), never tests/.
+  "${CMAKE_SOURCE_DIR}/src/dictionary"   # dictionary_internal.hpp (083 T049)
 )
 
 # ── 068-test-binary-grouping US2: capi_pure_tests grouped bucket (6 .cpp) ────
@@ -65,6 +71,7 @@ set(FIXPP_CAPI_FEATURE_B_INCLUDES
 #     boundary completeness check — no global mutable state, no LABEL-scoped
 #     `-L` selector to break.
 add_executable(capi_pure_tests
+  capi_group_delimiter_ctx_test.cpp   # 083 T049/T053: W-11/11a/11b/12/13
   capi_smoke_test.cpp
   version_test.cpp
   error_surface_test.cpp
@@ -79,6 +86,8 @@ target_link_libraries(capi_pure_tests PRIVATE
 )
 target_include_directories(capi_pure_tests PRIVATE ${FIXPP_CAPI_FEATURE_B_INCLUDES})
 target_compile_definitions(capi_pure_tests PRIVATE
+  FIXPP_DICT_DATA_DIR="${CMAKE_SOURCE_DIR}/dictionaries"
+  FIXPP_ORCHESTRA_DATA_DIR="${CMAKE_SOURCE_DIR}/dictionaries/orchestra"
   FIXPP_CAPI_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
   FIXPP_TEST_HOOKS
   "FIXPP_CAPI_LIB=\"$<TARGET_FILE:fixpp_capi>\""
