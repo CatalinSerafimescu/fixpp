@@ -189,6 +189,78 @@ inline void capture_first_emission(DelimCapture* cap, std::uint16_t tag) noexcep
     }
 }
 
+// 083 T041 — the FR-023 / C-3.4 completeness invariant, shared by both loaders
+// (C-1.5: a one-loader fix is a half-restructure).
+//
+// Every group context `as_table_view()` will enumerate and register MUST have
+// an Entity-2 record. Returns the offending `no_tag` on the first violation, or
+// 0 if the message is complete.
+//
+// The registration predicate is mirrored EXACTLY from
+// `Dictionary::as_table_view()` (`src/dictionary/dictionary.cpp:445-463`):
+// a context exists iff, on this message's deduped field run, the count tag's
+// `FieldRef.type` is `NumInGroup` AND at least one `FieldRef` has
+// `group_no_tag == no_tag` — C-3.4a's `!members.empty()` leg, which is what
+// keeps a message that merely REUSES a NumInGroup-typed tag as a plain scalar
+// from reading as a violation.
+//
+// Enforced at `finalize()` and deliberately NOT at `as_table_view()`, which is
+// contractually non-throwing (established by 072, L-063-4) and must stay so —
+// which is what makes a consumer-side lookup miss unreachable by construction
+// rather than merely unobserved.
+[[nodiscard]] inline std::uint16_t find_context_without_delim_record(
+    std::span<FieldRef const> fields, std::span<GroupCtxDelim const> delims) noexcept {
+    // Immediate-parent chain over count tags only, as dictionary.cpp builds it.
+    std::vector<std::pair<std::uint16_t, std::uint16_t>> immediate_parent;
+    for (auto const& fr : fields) {
+        if (fr.type == field_data_type::NumInGroup) {
+            immediate_parent.emplace_back(fr.tag, fr.group_no_tag);
+        }
+    }
+    auto parent_of = [&](std::uint16_t tag) noexcept -> std::uint16_t {
+        for (auto const& [t, p] : immediate_parent) {
+            if (t == tag) {
+                return p;
+            }
+        }
+        return 0;
+    };
+    for (auto const& fr : fields) {
+        if (fr.type != field_data_type::NumInGroup) {
+            continue;
+        }
+        bool has_members = false;
+        for (auto const& m : fields) {
+            if (m.group_no_tag == fr.tag) {
+                has_members = true;
+                break;
+            }
+        }
+        if (!has_members) {
+            continue;  // C-3.4a: scalar reuse contributes no context
+        }
+        std::vector<std::uint16_t> path;
+        std::uint16_t cur = fr.group_no_tag;
+        while (cur != 0 && path.size() < kMaxGroupContextDepth) {
+            path.push_back(cur);
+            cur = parent_of(cur);
+        }
+        std::reverse(path.begin(), path.end());
+        GroupCtxDelim const probe = make_group_ctx_delim(path, fr.tag, /*delimiter=*/0);
+        bool found = false;
+        for (auto const& rec : delims) {
+            if (!group_ctx_delim_less(probe, rec) && !group_ctx_delim_less(rec, probe)) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            return fr.tag;
+        }
+    }
+    return 0;
+}
+
 class dict_metadata_handle {
 public:
     explicit dict_metadata_handle(std::pmr::memory_resource* mr) noexcept

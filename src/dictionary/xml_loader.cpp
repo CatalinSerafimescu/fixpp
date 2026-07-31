@@ -254,7 +254,10 @@ struct MessageDef {
 
 class LoaderState {
 public:
-    explicit LoaderState(std::pmr::memory_resource* mr) noexcept : mr_(mr) {}
+    explicit LoaderState(std::pmr::memory_resource* mr,
+                         unresolved_group_policy policy =
+                             unresolved_group_policy::fail_closed) noexcept
+        : mr_(mr), unresolved_policy_(policy) {}
 
     void parse_document(pugi::xml_document const& doc);
 
@@ -323,6 +326,9 @@ private:
     void detect_length_pairs(pugi::xml_node const& root);
 
     std::pmr::memory_resource* mr_;
+
+    // 083 T036/T037 (FR-006 / FR-006a): load-time only (C-6.5).
+    unresolved_group_policy unresolved_policy_ = unresolved_group_policy::fail_closed;
 
     pugi::xml_node header_node_;
     pugi::xml_node trailer_node_;
@@ -678,12 +684,31 @@ void LoaderState::expand_field_list(
                     delim_cap->out.push_back(
                         detail::make_group_ctx_delim(delim_cap->path, no_tag, captured));
                 }
-                // captured == 0 means this <group> declares no members at all.
-                // Recording 0 is NOT a storable state (C-1.4) — the record is
-                // omitted here and the fail-closed REJECTION is FR-006's, which
-                // T036 lands together with its witness. Omitting is what makes
-                // that later completeness check able to see the gap; writing 0
-                // would hide it behind a value that reads as an answer.
+                // 083 T036 (FR-006 / C-6.1): `captured == 0` means this
+                // <group> emitted no first member at all, so its delimiter is
+                // unresolvable and no message can ever be parsed against it.
+                // Recording 0 is not a storable state (C-1.4), and a silent
+                // drop is the outlier that concealed three FIX50SP2 groups —
+                // so this fails closed by default, mirroring the disposition
+                // this loader already takes for every sibling violation.
+                //
+                // C-6.1a / FR-006d — why "zero contexts must not trip this" is
+                // satisfied STRUCTURALLY rather than by a second predicate:
+                // this branch runs only when `delim_cap != nullptr`, i.e. only
+                // inside the MESSAGE-scoped expansion. A group declared but
+                // reachable from no message expansion (C-6.1a's class 2, e.g.
+                // tags 384/627 in FIX50/SP1/SP2) is walked with a NULL sink at
+                // the component/group caches and never reaches here at all.
+                else if (unresolved_policy_ == unresolved_group_policy::fail_closed) {
+                    throw xml_parse_error(
+                        "dict::xml_parse_error: <group name=\"" + gname +
+                        "\"> (NumInGroup tag " + std::to_string(no_tag) +
+                        ") declares no first member, so its delimiter cannot be resolved; "
+                        "pass unresolved_group_policy::tolerant to skip it instead");
+                }
+                // FR-006a tolerant mode: skip. The group is left UNREGISTERED
+                // rather than half-registered, so it never enters the
+                // consumer's enumeration (FR-023a).
             }
         }
         // Ignore unknown child elements (forwards-compat).
@@ -1022,6 +1047,41 @@ detail::dict_metadata_handle_ptr LoaderState::finalize() {
         }
     }
 
+
+    // ── 083 T041 (FR-023 / C-3.4): Entity-2 completeness invariant ──────────
+    // Every context `as_table_view()` will register must have a record. Runs
+    // AFTER the projection above (so `first_field_tag` is final) and at
+    // finalize() rather than at as_table_view(), which is contractually
+    // non-throwing and stays so -- that is what makes a consumer-side miss
+    // unreachable by construction instead of merely unobserved.
+    //
+    // NO silent fallback is available here by design: falling back to
+    // `group_first_field(no_tag)` would reinstate this feature's own defect,
+    // and to `members.front()` a worse one already fixed and pinned
+    // (ValidatorProductionTableView.GroupDelimiterFromWireNotTagSortedMember).
+    //
+    // FR-023a: a tolerantly-skipped group never reaches here as a violation --
+    // `captured == 0` means no FieldRef was emitted at that group's level, so
+    // no FieldRef carries its `group_no_tag`, so the `!members.empty()` leg
+    // excludes it from the registered set in the first place.
+    for (std::size_t i = 0; i < h.per_msg_field_offsets_.size(); ++i) {
+        auto const frun = h.per_msg_field_offsets_[i];
+        auto const drun = (i < h.per_msg_group_ctx_delim_offsets_.size())
+                              ? h.per_msg_group_ctx_delim_offsets_[i]
+                              : detail::MsgFieldsRun{};
+        auto const offender = detail::find_context_without_delim_record(
+            std::span<FieldRef const>{h.fields_.data() + frun.start, frun.count},
+            std::span<detail::GroupCtxDelim const>{h.group_ctx_delim_pool_.data() + drun.start,
+                                                   drun.count});
+        if (offender != 0) {
+            throw xml_parse_error(
+                "dict::xml_parse_error: group context for NumInGroup tag " +
+                std::to_string(offender) + " in message \'" + std::string{messages_[i].msg_type} +
+                "\' is registered by as_table_view() but has no per-context delimiter record "
+                "(FR-023 completeness invariant)");
+        }
+    }
+
     // Emit components (PMR ComponentRef array).
     // For each component, walk its fields via expand_field_list to populate
     // the per-component flat field table (component_fields_), recording
@@ -1247,8 +1307,9 @@ detail::dict_metadata_handle_ptr LoaderState::finalize() {
 // ----------------------------------------------------------------------------
 
 [[nodiscard]] detail::dict_metadata_handle_ptr build_handle_from_doc(
-    pugi::xml_document const& doc, std::pmr::memory_resource* mr) {
-    LoaderState st{mr};
+    pugi::xml_document const& doc, std::pmr::memory_resource* mr,
+    unresolved_group_policy policy) {
+    LoaderState st{mr, policy};
     st.parse_document(doc);
     return st.finalize();
 }
@@ -1256,7 +1317,8 @@ detail::dict_metadata_handle_ptr LoaderState::finalize() {
 }  // namespace
 
 // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
-Dictionary XmlLoader::load(std::filesystem::path const& xml_path, std::pmr::memory_resource* mr) {
+Dictionary XmlLoader::load(std::filesystem::path const& xml_path, std::pmr::memory_resource* mr,
+                           unresolved_group_policy policy) {
     assert(mr != nullptr && "XmlLoader::load: mr must not be null");
     return fixpp::core::detail::trap_throw_or_throw<xml_oom_error>([&] {
         std::ifstream in(xml_path, std::ios::binary);
@@ -1268,12 +1330,14 @@ Dictionary XmlLoader::load(std::filesystem::path const& xml_path, std::pmr::memo
         if (!result) {
             throw xml_parse_error(std::string{"dict::xml_parse_error: "} + result.description());
         }
-        return Dictionary{build_handle_from_doc(doc, mr)};
+        return Dictionary{build_handle_from_doc(doc, mr, policy)};
     });
 }
 
 // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
-Dictionary XmlLoader::load_from_string(std::string_view xml_text, std::pmr::memory_resource* mr) {
+Dictionary XmlLoader::load_from_string(std::string_view xml_text,
+                                       std::pmr::memory_resource* mr,
+                                       unresolved_group_policy policy) {
     assert(mr != nullptr && "XmlLoader::load_from_string: mr must not be null");
     return fixpp::core::detail::trap_throw_or_throw<xml_oom_error>([&] {
         pugi::xml_document doc;
@@ -1281,7 +1345,7 @@ Dictionary XmlLoader::load_from_string(std::string_view xml_text, std::pmr::memo
         if (!result) {
             throw xml_parse_error(std::string{"dict::xml_parse_error: "} + result.description());
         }
-        return Dictionary{build_handle_from_doc(doc, mr)};
+        return Dictionary{build_handle_from_doc(doc, mr, policy)};
     });
 }
 

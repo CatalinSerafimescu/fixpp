@@ -20,6 +20,7 @@ set(FIXPP_DICT_DATA_DIR "${CMAKE_SOURCE_DIR}/dictionaries")
 # reused_tag_census (raw-XML ground-truth scans); harmless for the others.
 add_executable(dictionary_pure_tests
   ref_shape_test.cpp
+  loader_disposition_test.cpp     # 083 T035/T042: FR-006 / FR-006a / FR-023 dispositions
   xml_loader_test.cpp
   xml_loader_enum_test.cpp        # 075 T012/T013: enum-value parse + loader strictness
   xml_enum_codeset_test.cpp       # 075 T028: enum_values() census + exposure witness
@@ -48,7 +49,12 @@ target_link_libraries(dictionary_pure_tests PRIVATE
 target_include_directories(dictionary_pure_tests PRIVATE
   "${CMAKE_SOURCE_DIR}/tests")
 target_compile_definitions(dictionary_pure_tests PRIVATE
-  "FIXPP_DICT_DATA_DIR=\"${FIXPP_DICT_DATA_DIR}\"")
+  "FIXPP_DICT_DATA_DIR=\"${FIXPP_DICT_DATA_DIR}\""
+  # 083 T035 (W-6): loader_disposition_test.cpp loads all TEN shipped
+  # dictionaries under the fail-closed default, Orchestra included. Spelled out
+  # rather than reusing FIXPP_ORCHESTRA_DATA_DIR, which this file sets further
+  # down (line ~98) and so would expand empty here.
+  "FIXPP_ORCHESTRA_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries/orchestra\"")
 add_test(NAME dictionary_pure_tests COMMAND dictionary_pure_tests)
 set_tests_properties(dictionary_pure_tests PROPERTIES LABELS "dictionary;075")
 
