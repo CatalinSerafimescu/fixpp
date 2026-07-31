@@ -152,4 +152,4 @@ ctest -L codegen        # required — the loader change is codegen-adjacent
 
 *(365 is the affected set, not the context population — the population is 56,246 rising to ~56,276. The projection marker was added at Gate A round 1; the row previously read "0 of 365" with no marker, in a bundle that is otherwise explicit about which figures are projections.)*
 
-Plus: both load dispositions witnessed; the typed-read splitter characterised by evidence rather than left as an unverified note; behaviour changes recorded as operator-facing rows and release notes; the interop divergence observed and documented.
+Plus: both load dispositions witnessed; the typed-read splitter characterised by evidence rather than left as an unverified note; behaviour changes recorded as operator-facing `spec/behaviors-and-limitations.md` rows (this repo's release-note artifact); the interop divergence observed and documented.
