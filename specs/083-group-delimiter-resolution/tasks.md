@@ -263,7 +263,7 @@ Landing the loader recursion first converts a wrong-delimiter defect into a **fa
 
 ### SC-007 is discharged by distribution — named here so it has a home
 
-SC-007 ("no schema-valid message accepted before this change is rejected after it, except the disclosed C-ABI construction-order change") has **no single owning task by design**: it is a whole-feature non-regression property, not a discrete activity. It is discharged by the union of **T009** (named-subset accepts), **T024** (per-instance cap-breach assessment — a breach would be a *new* rejection), **T033** (previously-accepted shapes still accepted), **T048** (FIX40/41/FIXT11 unchanged), and **T069** (enumeration of the five disclosed groups, which is what lets the audit distinguish an intended new rejection from a regression).
+SC-007 ("no schema-valid message accepted before this change is rejected after it, except the disclosed C-ABI construction-order change") has **no single owning task by design**: it is a whole-feature non-regression property, not a discrete activity. It is discharged by the union of **T009** (named-subset accepts), **T024** (per-instance cap-breach assessment — a breach would be a *new* rejection), **T033** (previously-accepted shapes still accepted), **T048** (FIX40/41/FIXT11 unchanged), and **T069** (enumeration of **FR-019a classes (a)+(b)** — the two SC-007-exception classes: the five groups whose global value moves, *and* the cause-1 tags whose lookup becomes context-sensitive in divergent contexts — which is what lets the audit distinguish an intended new rejection from a regression; class (c) is a widening and is not an SC-007 exception). *(Scope corrected 2026-07-31 at the `/speckit-analyze` re-run, F3: this paragraph exists so SC-007 has a readable home, and it still said "the five disclosed groups" after the checklist audit widened the exception — the one place an SC-007 auditor looks first.)*
 
 **T077** (Phase-4 exit gate) and **T079** (completeness audit) MUST each confirm this set is green as a body before signing off; an auditor grepping for "the SC-007 task" will otherwise find none and read it as skipped. This mirrors the round-1 Gate A fix that pulled SC-004's wire leg into a named phase-exit leg.
 
@@ -362,7 +362,7 @@ That is the smallest tree state in which the feature's own coupling is resolved:
 ### Incremental delivery after that
 
 1. **US4** — prove the pin red on reintroduction; the guard against recurrence costs one task and gates nothing else.
-2. **US1 leg 2 (C-ABI)** — closes the last path applying a different rule to the same message; carries the one disclosed regression (five groups), so it ships with its enumeration (T069).
+2. **US1 leg 2 (C-ABI)** — closes the last path applying a different rule to the same message; carries the **two** disclosed-regression classes (FR-019a (a)+(b)) plus the class-(c) widening, so it ships with its enumeration (T069). *(Corrected 2026-07-31, `/speckit-analyze` re-run F4 — was "the one disclosed regression (five groups)".)*
 3. **US5 leg 2 (splitter)** — the P3 story; the last delimiter rule in the engine.
 4. **Polish** — three benches in the same PR (`[const §VIII.3]`), the B&L/release-note disclosure set, the 082 handoff, then the two mandatory close-out tasks.
 

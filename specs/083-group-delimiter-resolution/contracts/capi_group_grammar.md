@@ -1,12 +1,12 @@
 # Contract — C-ABI construction-side group grammar, context-keyed
 
-**Feature**: `083-group-delimiter-resolution` | Satisfies FR-018, FR-018a, FR-018b, FR-019, **FR-022 (path 3)**, SC-009, SC-012
-*(Header corrected at Gate A round 2, 2026-07-31: FR-018b is new and C-9.2a below is its landing clause; FR-022 / SC-009 were already discharged by this file's body and unlisted — C-9.1/C-9.2/C-9.2a put a context-keyed lookup plus path maintenance on the per-commit path, FR-022's third hot path, with its own bench `bench/capi_commit_group_bench.cpp` and its own `[const §XV.1]` witness W-11a.)*
+**Feature**: `083-group-delimiter-resolution` | Satisfies FR-018, FR-018a, FR-018b, FR-019, **FR-019a**, **FR-019b**, **FR-022 (path 3)**, SC-009, SC-012
+*(Header corrected at Gate A round 2, 2026-07-31: FR-018b is new and C-9.2a below is its landing clause; FR-022 / SC-009 were already discharged by this file's body and unlisted — C-9.1/C-9.2/C-9.2a put a context-keyed lookup plus path maintenance on the per-commit path, FR-022's third hot path, with its own bench `bench/capi/capi_commit_group_bench.cpp` and its own `[const §XV.1]` witness W-11a.)*
 **Created**: 2026-07-30 (Gate A round 1) — the 2026-07-30 clarification widened scope onto the C-ABI construction path, and that surface had a research paragraph, no contract and no test artifact while carrying a **disclosed behaviour change through a GA-frozen ABI**.
 
 ## Why this needs a contract, not a paragraph
 
-`[const §X.1]` (`.specify/constitution.md:220`) makes the C ABI a versioned contract, frozen at 1.5.0; `[const §X.6]` (`:225`) makes an ABI-affecting feature trigger all four mandatory controls. FR-019 (`spec.md`) already admits a **disclosed regression**: five groups whose delimiter moves, so a C-ABI client that today builds one of them opening with the old delimiter gets `FIXPP_ERR_TYPE_MISMATCH` afterwards. `[const §VII.4]` ("no code without a test") applied to a disclosed ABI-visible regression means SC-012 needs a witness, and it had none.
+`[const §X.1]` (`.specify/constitution.md:220`) makes the C ABI a versioned contract, frozen at 1.5.0; `[const §X.6]` (`:225`) makes an ABI-affecting feature trigger all four mandatory controls. FR-019/FR-019a (`spec.md`) already admit a **disclosed C-ABI construction-side behaviour change** in three classes — two of them regressions (a client that today builds an affected group opening with the old delimiter gets `FIXPP_ERR_TYPE_MISMATCH` afterwards) and one a widening. *(Generalised 2026-07-31, `/speckit-analyze` re-run F2 — this background paragraph still said "five groups whose delimiter moves" after C-9.6/C-9.7 below were widened to three classes.)* `[const §VII.4]` ("no code without a test") applied to a disclosed ABI-visible regression means SC-012 needs a witness, and it had none.
 
 ## Current behaviour
 

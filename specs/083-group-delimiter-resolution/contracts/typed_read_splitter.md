@@ -2,7 +2,7 @@
 
 **Feature**: `083-group-delimiter-resolution` | Satisfies FR-021, FR-021a, FR-021b, FR-021c, FR-021d, **FR-021e**, **FR-022 (path 2)**, SC-009, SC-010, **SC-016**
 *(FR-021e / SC-016 added to this header at Gate A round 3, 2026-07-31 — the user scope amendment on N23 withdrew C-8.0b's first bullet and put the extent walk's delimiter-position descent in scope as **C-8.0c**.)*
-*(FR-022 / SC-009 added to this header at Gate A round 2, 2026-07-31 — C-8.1 and C-8.5 put a context-keyed lookup and a nested-extent recursion on the typed-read group-access path, which is FR-022's second hot path and carries its own bench, `bench/typed_read_group_bench.cpp`. Round 1 created that cost here and left the header stating only the FR-021 family.)*
+*(FR-022 / SC-009 added to this header at Gate A round 2, 2026-07-31 — C-8.1 and C-8.5 put a context-keyed lookup and a nested-extent recursion on the typed-read group-access path, which is FR-022's second hot path and carries its own bench, `bench/wire/typed_read_group_bench.cpp`. Round 1 created that cost here and left the header stating only the FR-021 family.)*
 **Created**: 2026-07-30 (Gate A round 1) — promotes research.md **D-6** from a task-level investigation to a specified surface.
 
 ## Why this file exists
