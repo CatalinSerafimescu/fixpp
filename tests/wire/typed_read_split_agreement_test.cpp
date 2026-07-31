@@ -38,9 +38,11 @@
 #include <fixpp/dict/dictionary.hpp>
 #include <fixpp/dict/table_view.hpp>
 #include <fixpp/dict/xml_loader.hpp>
+#include <fixpp/wire/offset_table.hpp>
 #include <fixpp/wire/parser.hpp>
 #include <fixpp/wire/validator.hpp>
 #include <memory_resource>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -479,4 +481,209 @@ TEST(TypedReadSplitAgreement, ExtentWalkDescendsAtNestedGroupDelimiter_Populated
            "RED at 1. observed=" << res.slices.size();
     EXPECT_EQ(slice_text(res.slices[0]), kInstance1);
     EXPECT_EQ(slice_text(res.slices[1]), kInstance2);
+}
+
+// ============================================================================
+// W-10a leg 4 — the depth cap RETURNS, rather than burning `declared` no-op
+// iterations (contracts/typed_read_splitter.md C-8.0c.3, W-10a leg 4; T021).
+//
+// ── Why this leg cannot be observed RED, and what stands in for that ────────
+// Pre-C-8.0c there is no delimiter-position descent at all, so the branch this
+// leg discriminates — the `if (overflow) { return k; }` MIRROR of :489-491 —
+// does not yet exist. Its control is therefore the ASSERTION ITSELF (an
+// invariance that fails deterministically against an un-mirrored
+// implementation), demonstrated to be discriminating by T023, which deletes
+// the mirror and confirms this case goes red.
+//
+// ── Why the error code is NOT the discriminator ─────────────────────────────
+// `overflow` is a `bool&` threaded from `group()`'s `bool overflow = false`
+// (offset_table.cpp:549), so the depth-cap branch's `overflow = true` (:443)
+// reaches `group()`'s check at :551-553 and `err_group_too_large` is returned
+// WHETHER OR NOT the mirror is present. The mirror controls *when* the walk
+// returns, never *what* it reports. The error code is asserted below because
+// the contract requires it, but it decides nothing.
+//
+// ── The discriminator: a `group_member_fn_` invocation count ────────────────
+// Supplied through the EXISTING construction-time `group_member_fn_t` seam
+// (offset_table.hpp:79-80, :119-121) — a plain function pointer, so no
+// production change and no new seam.
+//
+// The arithmetic, derived in the frame whose descent hits the cap (the frame
+// at depth 15, which processes chain tag base+15): the depth-16 recursion
+// returns at :442-444 BEFORE any probe call and leaves `k` unadvanced, and the
+// inner member loop at :476 contributes nothing because `entries_[k].tag ==
+// delim` still holds on entry. So each wasted outer iteration costs EXACTLY
+// ONE further `group_member_fn_` evaluation — the delimiter-position descent
+// probe. A mirrored implementation performs it once and returns; an
+// un-mirrored one performs it `declared` times.
+//
+// The assertion is therefore INVARIANCE, not an absolute total: the same
+// fixture at `declared = 2` and `declared = 8` OF THAT FRAME'S count field
+// must record EQUAL invocation totals. An absolute constant would have to
+// account for all 16 enclosing frames' probes and would be un-re-derivable by
+// a later reader — exactly the magic number leg 1 forbids.
+//
+// ── Why the CAP-HITTING frame's count, and not the outermost ───────────────
+// Only the cap-adjacent frame fails to advance `k`. Every enclosing frame DOES
+// advance, so the un-mirrored total is invariant under their `declared` too —
+// varying the outermost count would false-green. Because `k` never advances in
+// the cap-hitting frame, `entries_[k].tag == delim` holds on every iteration of
+// THAT frame's loop regardless of how many instances are physically present,
+// which is what makes this invariance structural rather than argued.
+// ============================================================================
+
+namespace {
+
+// Chain fixture: group tag base+i is delimited by base+(i+1)'s own count tag,
+// `total_groups` levels deep, terminated by the scalar leaf base+total_groups.
+// Every level therefore descends via the C-8.0c delimiter-position probe.
+constexpr std::uint16_t kChainBase = 2000;
+// 17 groups (base+0 .. base+16) + a leaf at base+17. The frame at depth 15
+// (tag base+15) descends with depth = 16 = kMaxGroupDepth and trips the guard
+// at offset_table.cpp:442-445, so THAT is the cap-hitting frame.
+constexpr std::size_t kChainGroups = 17;
+constexpr std::size_t kCapHittingIndex = 15;
+
+table_view make_chain_dict() {
+    table_view tv;
+    for (std::uint16_t const t : {std::uint16_t{8}, std::uint16_t{9}, std::uint16_t{10},
+                                  std::uint16_t{35}}) {
+        tv.add_valid("Z", t);
+    }
+    for (std::size_t i = 0; i <= kChainGroups; ++i) {
+        tv.add_valid("Z", static_cast<std::uint16_t>(kChainBase + i));
+    }
+    for (std::size_t i = 0; i < kChainGroups; ++i) {
+        tv.set_group_first(static_cast<std::uint16_t>(kChainBase + i),
+                           static_cast<std::uint16_t>(kChainBase + i + 1));
+    }
+    return tv;
+}
+
+// One physical instance at every level. `deep_count` is written into the
+// cap-hitting frame's count field ONLY; every other level declares 1. The two
+// runs below differ in exactly that one digit.
+std::vector<std::byte> make_chain_frame(unsigned deep_count) {
+    std::string body = "35=Z\x01";
+    for (std::size_t i = 0; i < kChainGroups; ++i) {
+        unsigned const c = (i == kCapHittingIndex) ? deep_count : 1U;
+        body += std::to_string(static_cast<unsigned>(kChainBase + i)) + "=" + std::to_string(c) +
+                "\x01";
+    }
+    body += std::to_string(static_cast<unsigned>(kChainBase + kChainGroups)) + "=L\x01";
+    return make_frame(body);
+}
+
+// The counting wrapper. `group_member_fn_t` is a plain function pointer, so
+// the tally is file-scope state rather than a capture; gtest runs this binary
+// single-threaded, and it is reset at the start of each run.
+std::size_t g_probe_calls = 0;
+
+bool counting_group_member(void const* d, fixpp::wire::group_context const& ctx,
+                           std::uint16_t no_tag, std::uint16_t tag) noexcept {
+    ++g_probe_calls;
+    // Same body as the production lambda at parser.hpp:601-612 (which is not
+    // reachable from here) — context-keyed lookup with the table_view's own
+    // bare fallback.
+    auto const* tv = static_cast<table_view const*>(d);
+    auto const members = tv->group_member_tags(
+        ctx.msg_type, std::span<std::uint16_t const>{ctx.parent_path.data(), ctx.depth}, no_tag);
+    for (auto const member_tag : members) {
+        if (member_tag == tag) {
+            return true;
+        }
+    }
+    return false;
+}
+
+struct ChainRun {
+    std::size_t probe_calls = 0;
+    bool group_too_large = false;
+    std::vector<fixpp::wire::OffsetTable::entry> layout;
+    std::size_t cap_frame_tag_occurrences = 0;
+};
+
+ChainRun run_chain(table_view const& tv, std::vector<std::byte> const& buf,
+                   std::pmr::memory_resource* mr) {
+    ChainRun out;
+    auto fv = fixpp::wire::test::make_frame_view(buf);
+    if (!fv.has_value()) {
+        ADD_FAILURE() << "make_frame_view failed";
+        return out;
+    }
+    g_probe_calls = 0;
+    fixpp::wire::OffsetTable table{*fv, mr, &tv, &counting_group_member};
+    auto const gi = table.group(kChainBase);
+    out.probe_calls = g_probe_calls;
+    out.group_too_large =
+        !gi.has_value() && gi.error() == fixpp::core::error::wire_group_too_large;
+    for (auto const& e : table.entries()) {
+        out.layout.push_back(e);
+        if (e.tag == static_cast<std::uint16_t>(kChainBase + kCapHittingIndex)) {
+            ++out.cap_frame_tag_occurrences;
+        }
+    }
+    return out;
+}
+
+}  // namespace
+
+TEST(TypedReadSplitAgreement, ExtentWalkDescendsAtNestedGroupDelimiter_Leg4DepthCapReturns) {
+    auto const tv = make_chain_dict();
+    auto const buf2 = make_chain_frame(2);
+    auto const buf8 = make_chain_frame(8);
+
+    std::pmr::monotonic_buffer_resource arena2;
+    std::pmr::monotonic_buffer_resource arena8;
+    auto const run2 = run_chain(tv, buf2, &arena2);
+    auto const run8 = run_chain(tv, buf8, &arena8);
+
+    // ── "Same fixture", made STRUCTURAL rather than argued ──────────────────
+    // Entry LAYOUT byte-identical: same entry count, and every entry's tag,
+    // value offset and value length equal. (The frame bytes themselves differ
+    // in the one count digit and, consequently, in the CheckSum value — whose
+    // offset and length are unchanged, which is what "layout" means here.)
+    ASSERT_EQ(run2.layout.size(), run8.layout.size()) << "fixture layout differs in entry count";
+    for (std::size_t i = 0; i < run2.layout.size(); ++i) {
+        ASSERT_EQ(run2.layout[i].tag, run8.layout[i].tag) << "layout differs at entry " << i;
+        ASSERT_EQ(run2.layout[i].offset, run8.layout[i].offset) << "layout differs at entry " << i;
+        ASSERT_EQ(run2.layout[i].length, run8.layout[i].length) << "layout differs at entry " << i;
+    }
+    // PHYSICAL instance count unchanged: the cap-hitting frame's group is
+    // present exactly once in both frames. Only its DECLARED count varies.
+    ASSERT_EQ(run2.cap_frame_tag_occurrences, 1U);
+    ASSERT_EQ(run8.cap_frame_tag_occurrences, 1U);
+    // And the two frames really do differ in exactly one count digit: the
+    // declared values written were 2 and 8.
+    ASSERT_EQ(buf2.size(), buf8.size()) << "the two frames must be the same length";
+
+    // ── Non-vacuity: the fixture must actually REACH the depth cap ──────────
+    // Required by the contract as leg 4's item (d), and asserted
+    // unconditionally rather than as a post-fix courtesy: without it the
+    // invocation-count equality below would pass on a fixture that never
+    // descends at all — which is precisely its state TODAY (pre-C-8.0c the
+    // chain stops at the first delimiter, 3 probe calls, no cap reached), so
+    // this assertion is RED until T022 and is what pins the shape.
+    // It is NOT the discriminator: `overflow` is a `bool&` that reaches
+    // group()'s check at offset_table.cpp:551-553 with or without the mirror.
+    EXPECT_TRUE(run2.group_too_large)
+        << "leg 4 fixture: a chain nested to kMaxGroupDepth must trip the depth guard and report "
+           "err_group_too_large. TODAY this is expected RED — the delimiter-position descent does "
+           "not exist yet, so the walk never gets past depth 0 and no cap is reached.";
+    EXPECT_TRUE(run8.group_too_large)
+        << "leg 4 fixture: the declared=8 run must reach the cap identically.";
+
+    // ── The discriminator ───────────────────────────────────────────────────
+    ASSERT_GT(run2.probe_calls, 0U)
+        << "the counting wrapper recorded no invocations at all — the equality below would be "
+           "vacuous. The fixture is not reaching consume_group_extent.";
+    EXPECT_EQ(run2.probe_calls, run8.probe_calls)
+        << "W-10a leg 4 (C-8.0c.3): once the depth cap trips, consume_group_extent must RETURN "
+           "— mirroring the `if (overflow) { return k; }` at offset_table.cpp:489-491 — not burn "
+           "`declared` no-op outer iterations. Each wasted iteration costs exactly one further "
+           "group_member_fn_ evaluation (the delimiter-position descent probe), so an un-mirrored "
+           "implementation's total GROWS with the cap-hitting frame's declared count while a "
+           "mirrored one's is invariant. declared=2 -> " << run2.probe_calls
+        << " calls; declared=8 -> " << run8.probe_calls << " calls.";
+
 }

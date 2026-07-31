@@ -138,6 +138,15 @@ add_test(NAME wire_dict_tests COMMAND wire_dict_tests)
 # along (name-selectable via `-R wire_dict_tests` as before, now ALSO
 # `ctest -L 075` / `-L wire` selectable).
 set_tests_properties(wire_dict_tests PROPERTIES LABELS "075;wire")
+# 083 T021 (W-10a leg 4, contracts/typed_read_splitter.md): a BACKSTOP, never
+# the discriminator. Leg 4's depth-capped chain fixture drives
+# consume_group_extent's outer loop with an attacker-shaped declared count; an
+# un-mirrored `if (overflow) return k;` burns iterations rather than returning.
+# The leg is decided by a group_member_fn_ invocation-count equality — this
+# bound only limits the blast radius of an unanticipated non-termination, per
+# the standing lesson that a hung test with no per-test bound burns the job.
+# The whole bucket runs in well under a second, so 120s is pure headroom.
+set_tests_properties(wire_dict_tests PROPERTIES TIMEOUT 120)
 
 # ── Standalone: 075 T007 QuickFIX enum-golden manifest gate ─────────────────
 # Isolation-sensitive per [const §VII.8] (a data-driven exact-hash gate) —
