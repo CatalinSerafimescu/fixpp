@@ -223,6 +223,30 @@ target_compile_definitions(dictionary_fixt_header_merge_test PRIVATE
 add_test(NAME fixt_header_merge COMMAND dictionary_fixt_header_merge_test)
 set_tests_properties(fixt_header_merge PROPERTIES LABELS "dictionary;081;census")
 
+# ── 083-group-delimiter-resolution T006: all-ten delimiter census (FR-002/
+# FR-010/FR-012/FR-013/FR-015) — STANDALONE (const §VII.8) exact-set
+# completeness gate, mirroring required_scope_census_test above. Foundational
+# RED pin: the assertions express the POST-FIX target (every defect bucket
+# zero), so this is expected to FAIL until Phase 3/5's loader fix lands (see
+# spec.md's Baseline table: 335 wrong-delimiter / 52 polluted / 30
+# unregistered measured on today's tree). Own TIMEOUT — this sweeps a
+# comparable corpus to required_scope_census (~35s) plus a second discovery
+# discrimination pass per context, so generous headroom.
+add_executable(dictionary_delimiter_census_test delimiter_census_test.cpp)
+target_include_directories(dictionary_delimiter_census_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests")
+target_link_libraries(dictionary_delimiter_census_test PRIVATE
+  fixpp_dictionary
+  pugixml::pugixml
+  GTest::gtest
+  GTest::gtest_main
+)
+target_compile_definitions(dictionary_delimiter_census_test PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${FIXPP_DICT_DATA_DIR}\""
+  "FIXPP_ORCHESTRA_DATA_DIR=\"${FIXPP_ORCHESTRA_DATA_DIR}\"")
+add_test(NAME delimiter_census COMMAND dictionary_delimiter_census_test)
+set_tests_properties(delimiter_census PROPERTIES LABELS "dictionary;083;census" TIMEOUT 180)
+
 # mallocnesia gate for the group-context lookup no-alloc test — re-runs the
 # standalone binary under LD_PRELOAD so global malloc/calloc/realloc is
 # intercepted (dual gate alongside the in-TU global operator-new counter; absent
