@@ -338,3 +338,80 @@ Baseline figures in spec.md come from `delim_probe3.cpp`, run against `main` @ `
 **Authority of record**: from the moment `tests/dictionary/delimiter_census_test.cpp` first runs RED, **that pin is the authority for every figure in spec.md's Baseline table**, and `delim_probe3.cpp` is history. Without this line a later reader chasing SC-001 is chasing a deleted scratch file.
 
 The two probe-fidelity properties above are requirements **on the pin**, not just on the probe: the pin must discriminate context-miss from wrong-answer by span `.data()` identity, and must score the 30 unregistered contexts rather than `continue` past them.
+
+### T007 — third-authority corroboration of a documented sample (FR-013)
+
+**Authority used, and why it is independent.** `tools/codegen/fixpp-codegen/ir.cpp`'s `build_ir()` — the **real** codegen walker, not a re-implementation. It root-sniffs the XML (`ir.cpp:564-577`: `<fix>` → `XmlLoader` dispatch, `fixr:repository` → `OrchestraLoader` dispatch) and then re-parses the same file a **second time** with a codegen-tool-local pugixml walk: `walk_level` (`:61-102`) for the `<fix>` schema, `walk_orchestra_level` (`:335-416`) for the `fixr:` schema — both populate `MessageIR::group_order`, a `std::vector<GroupOrderEntry>` per message carrying `parent_path`/`no_tag`/`delimiter_tag` at every nesting depth. It is independent of **both** the D-8 oracle (a separate pugixml walk sharing no code — `tests/dictionary/required_scope_oracle.hpp`'s `qfix_walk`/`orch_walk`) and the loader under fix: it consults `fixpp::dict::Dictionary` only for `field_by_name`/`field_ref` (name→tag and tag→type resolution), never for group structure or delimiters — `entry.delimiter_tag = entry.members.front().tag` (`ir.cpp:96`, `:410`) comes entirely from its own declaration-order walk of the XML tree.
+
+**Mechanism.** A scratch program (not checked in; build+run commands below for reproduction) that, per dictionary: (1) calls `build_quickfix_oracle`/`build_orchestra_oracle` (T005's oracle, unmodified, called not forked) to get `oracle.group_delims`; (2) calls the real `fixpp::codegen::build_ir()` on the same XML file and flattens every message's `group_order` into a map keyed identically, `(msg_type, parent_path, no_tag) → delimiter_tag`; (3) separately loads the dictionary via `XmlLoader`/`OrchestraLoader` (mirroring `delimiter_census_test.cpp`) purely to read today's **bare global** `table_view::group_first_field(no_tag)`, used only for sample selection (see below), never as part of the oracle-vs-codegen comparison itself.
+
+Reproduction: compile `ir.cpp` and the scratch `.cpp` with clang++ (`-std=c++23 -stdlib=libstdc++ -I<repo>/include -I<repo>/tools/codegen/fixpp-codegen -isystem <pugixml include>`), link both objects against `build/linux-clang-debug/lib/{libfixpp_dictionary,libfixpp_wire,libfixpp_dict_dispatch_bridge,libfixpp_core}.a` and pugixml's static lib inside a `--start-group`/`--end-group` pair (same libraries `dictionary_required_scope_census_test` already links, see `tests/dictionary/CMakeLists.txt:186-199`).
+
+**Sample selection rule** (stated so a reader can reconstruct it): for each of five dictionaries — FIX42, FIX44, FIX50SP2, FIXT11 (all `<fix>`-schema, QuickFIX-XML) and Orchestra FIX Latest (`fixr:`-schema) — walk `oracle.group_delims` in its natural sorted key order `(msg_type, parent_path, no_tag)` and take, in priority order (no double-counting): every context named in requirement 4 (FIX50SP2 count tags 1499/1669/1919); then up to 4 **divergent** contexts (oracle delimiter ≠ that dictionary's bare/global `group_first_field(no_tag)`); then up to 2 **nested** contexts (non-empty `parent_path`) regardless of divergence; then 1 non-divergent **control** context. This yielded 36 rows (5 dictionaries; both loader families; several dictionaries each) — full table below.
+
+**Two flavours of "divergent" turned out to matter, and are labelled separately, not averaged together.** *Divergent-by-conflict* — bare global holds a **different real** delimiter (e.g. `FIX44 AX {} 124`: bare=32, oracle=17; `FIX50SP2 6 {} 40204`: bare=40205, oracle=40209) — is the shape FR-001 is about, and 12 of the 36 rows are this shape (FIX44 ×4 msg types sharing one no_tag/value pair, FIX50SP2 ×4, Orchestra ×4). *Divergent-by-absence* — bare global is 0 dictionary-wide (FIX42's rows, an instance of L-063-1's `INT`-typed group-blindness — not delimiter divergence in FR-001's sense) or per-context (the three FIX50SP2 named groups, the "30 newly-registering" set) — is a different fact and is marked separately in the table's `bare_global` column rather than folded into one undifferentiated "divergent" bucket.
+
+**The nested requirement is not vacuously satisfied.** 10 of the 36 rows are simultaneously nested (`parent_path` non-empty) **and** divergent — 2 divergent-by-conflict (`FIX50SP2 6 {555} 41599`, `FIX50SP2 6 {711} 42060`) and 8 divergent-by-absence (`FIX42 E {73} 78`/`386`; the six named FIX50SP2 rows under `{1677}`/`{146}`) — so a path-handling off-by-one on either side (oracle or codegen) would have to surface as a `DIFFER`, not agree by coincidence on a root-level shape.
+
+**Both loader families are covered by the same authority, not by "one covers the other."** `build_ir()`'s root-sniff dispatches every one of the five sampled files to the matching walker automatically — `walk_level` served the four `<fix>` dictionaries, `walk_orchestra_level` served Orchestra FIX Latest. No fallback, no manual per-family branching in the scratch program.
+
+**Sample table** (`dictionary | msg_type | parent_path | no_tag | oracle_delim | bare_global | divergent | codegen_delim | agree | selection_reason`):
+
+```
+FIX42|6|{}|199|104|0|YES|104|AGREE|divergent
+FIX42|6|{}|215|216|0|YES|216|AGREE|divergent
+FIX42|8|{}|382|375|0|YES|375|AGREE|divergent
+FIX42|A|{}|384|372|0|YES|372|AGREE|divergent
+FIX42|E|{73}|78|79|0|YES|79|AGREE|nested
+FIX42|E|{73}|386|336|0|YES|336|AGREE|nested
+FIX44|0|{}|627|628|628|no|MISSING|NO_CODEGEN_ENTRY|control
+FIX44|6|{555}|604|605|605|no|605|AGREE|nested
+FIX44|6|{555}|683|688|688|no|688|AGREE|nested
+FIX44|AX|{}|124|17|32|YES|17|AGREE|divergent
+FIX44|AY|{}|124|17|32|YES|17|AGREE|divergent
+FIX44|AZ|{}|124|17|32|YES|17|AGREE|divergent
+FIX44|BA|{}|124|17|32|YES|17|AGREE|divergent
+FIX50SP2|6|{}|199|104|104|no|104|AGREE|control
+FIX50SP2|6|{}|40204|40209|40205|YES|40209|AGREE|divergent
+FIX50SP2|6|{453}|802|523|523|no|523|AGREE|nested
+FIX50SP2|6|{555}|604|605|605|no|605|AGREE|nested
+FIX50SP2|6|{555}|41599|41604|41601|YES|41604|AGREE|divergent
+FIX50SP2|6|{711}|42060|42065|42061|YES|42065|AGREE|divergent
+FIX50SP2|7|{}|40204|40209|40205|YES|40209|AGREE|divergent
+FIX50SP2|CC|{}|1499|453|0|YES|453|AGREE|named-FIX50SP2
+FIX50SP2|CD|{}|1499|453|0|YES|453|AGREE|named-FIX50SP2
+FIX50SP2|CM|{1677}|1669|1529|0|YES|1529|AGREE|named-FIX50SP2
+FIX50SP2|CR|{1677}|1669|1529|0|YES|1529|AGREE|named-FIX50SP2
+FIX50SP2|CS|{1677}|1669|1529|0|YES|1529|AGREE|named-FIX50SP2
+FIX50SP2|CT|{1677}|1669|1529|0|YES|1529|AGREE|named-FIX50SP2
+FIX50SP2|DE|{1677}|1669|1529|0|YES|1529|AGREE|named-FIX50SP2
+FIX50SP2|y|{146}|1919|1920|0|YES|1920|AGREE|named-FIX50SP2
+FIXT11|0|{}|627|628|628|no|MISSING|NO_CODEGEN_ENTRY|control
+Orchestra FIX Latest|0|{}|627|628|628|no|628|AGREE|control
+Orchestra FIX Latest|6|{453}|802|523|523|no|523|AGREE|nested
+Orchestra FIX Latest|6|{555}|604|605|605|no|605|AGREE|nested
+Orchestra FIX Latest|AK|{}|73|11|2887|YES|11|AGREE|divergent
+Orchestra FIX Latest|AS|{}|73|11|2887|YES|11|AGREE|divergent
+Orchestra FIX Latest|AX|{}|124|17|32|YES|17|AGREE|divergent
+Orchestra FIX Latest|AY|{}|124|17|32|YES|17|AGREE|divergent
+```
+
+**Outcome: 34 AGREE, 0 DIFFER, 2 no-data (not disagreements — see below).** Every row where the third authority has an entry agrees with the oracle's declaration-order-first-member delimiter, including all three previously-zero FIX50SP2 groups (1499/1669/1919) and every divergent-by-conflict row. **No disagreement was found; had one been found, it would be reported here per the task brief, not adjusted away.**
+
+**The two `NO_CODEGEN_ENTRY` rows, recorded prominently, not rounded into the agree count.** `(FIX44, "0", {}, 627)` and `(FIXT11, "0", {}, 627)` — `NoHops`, declared inside `StandardHeader`. Cause, verified at source: `populate_group_order` (`ir.cpp:147-199`) roots its walk at `it->second` — the `<message>` node only (`:180`, `walk_level(it->second, …)`) — and never walks `root.child("header")`/`root.child("trailer")`; this is INV-2's documented body-only design for the write emitter (`ir.cpp:138-139`: "rooted at each message's own `<message>` XML node (NOT header/trailer...)"). The oracle, by contrast, explicitly walks `header` and `trailer` for every message (`required_scope_oracle.hpp:230-239`, `include_header_trailer` defaulting `true`) — that is Contract 1's header/trailer carve-out, a 079 decision unrelated to codegen scope. **This is a scope gap, not a disagreement**: the codegen third authority has zero data for header/trailer-scoped group contexts, by design, in the `<fix>`-schema dictionaries. Corroborating evidence that the expected value (628, `HopCompID`) is nonetheless right: Orchestra has **no separate header/trailer elements** — `StandardHeader`/`StandardTrailer` are ordinary `componentRef`s inside each message's own `<fixr:structure>` (`ir.cpp:274`, `orchestra_loader.cpp:730-732`) — so `walk_orchestra_level` walks straight through them, and `Orchestra FIX Latest|0|{}|627|628|628|no|628|AGREE` **does** corroborate the same `(msg_type="0", {}, 627)` context, cross-family. FIXT11 additionally shows `codegen contexts=0` for the whole dictionary (below) — FIXT11.xml's `<message>` bodies (session-layer admin messages) declare zero groups at body level; every one of its 8 oracle-recorded group contexts is header/trailer-scoped.
+
+**Reverse-direction check (does the codegen enumerate a context the oracle never recorded?).** Per dictionary, every codegen `group_order` key was checked for presence in `oracle.group_delims`:
+
+```
+FIX42: codegen contexts=38 oracle contexts=38 codegen-only=0
+FIX44: codegen contexts=730 oracle contexts=823 codegen-only=0
+FIX50SP2: codegen contexts=25927 oracle contexts=25927 codegen-only=0
+FIXT11: codegen contexts=0 oracle contexts=8 codegen-only=0
+Orchestra FIX Latest: codegen contexts=26806 oracle contexts=26806 codegen-only=0
+```
+
+Zero codegen-only contexts in every dictionary: the codegen never enumerates a context the oracle lacks. The asymmetry runs entirely one direction — oracle-enumerates-more (FIX44: 823 vs 730 = 93 more; FIXT11: 8 vs 0) — and is fully accounted for by the header/trailer scope gap above, not by a hole in either walker's coverage of the message body.
+
+**C-1.4a inertness on this sample — shown, not inferred from absence of disagreement.** The brief's concern: `walk_level` `continue`s past an unresolvable field/component/group reference (`ir.cpp:71`, `:77`, `:84` — "defensive only") where the loader must throw (C-1.4a); if either side silently skipped a reference, the *second* child would be captured as the delimiter instead of the first, and that would show up as a `DIFFER`. The oracle's `qfix_walk`/`orch_walk` throws on exactly the same three unresolvable-reference shapes — unresolvable `<field name=>` (`required_scope_oracle.hpp:130`), unresolvable `<group name=>` (`:152`), unresolvable `<component name=>` (`:180`) — and both oracle runs (all five dictionaries) completed without throwing. Since the oracle's throw and `walk_level`'s `continue` guard the identical set of malformed shapes, a completed oracle run is proof (not inference) that no reference in these five files was unresolvable, so none of `walk_level`'s three `continue` arms fired on this corpus. The check is therefore **shown inert on the sampled corpus**, not merely "no disagreement observed, so presumably inert."
+
+**Files touched for T007**: this section only. Scratch program not checked in (per task brief); rebuild commands above are sufficient for reproduction against `build/linux-clang-debug` as configured at this commit.
