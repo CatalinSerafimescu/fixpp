@@ -389,13 +389,31 @@ TEST(DelimiterCensus, RegisteredGroupCountMatchesCodegenFix50Sp2) {
     for (auto t : unresolved_no_tags) {
         std::cout << t << " ";
     }
-    std::cout << "\n  spec.md target: 502 measured -> 505 (codegen cross-check deferred to T043)\n";
+    std::cout << "\n  spec.md target: 502 -> 505\n";
 
     EXPECT_EQ(registered, 505u)
         << "FIX50SP2 registered-group count did not reach the post-fix target of 505 "
-           "(spec.md SC-005/FR-017/W-7) — today's measured value is 502; the three groups "
+           "(spec.md SC-005/FR-017/W-7) — the pre-fix measured value is 502; the three groups "
            "named in spec.md (count tags 1499, 1669, 1919) resolve no delimiter and never "
-           "register. Full codegen cross-check is T043's job.";
+           "register.";
+
+    // 083 T043: ACCOUNT for the 502 -> 505 delta by naming its three members,
+    // rather than resting on the total. A bare count is a weak pin: three
+    // groups appearing while three others silently disappeared would leave it
+    // green. Asserting the named three resolve makes the delta attributable.
+    for (auto const named : {std::uint16_t{1499}, std::uint16_t{1669}, std::uint16_t{1919}}) {
+        EXPECT_NE(tv.group_first_field(named), 0)
+            << "FR-017 / SC-005: count tag " << named
+            << " is one of the three FIX50SP2 groups the pre-fix loader dropped (they resolved no "
+               "delimiter and never registered). It must now resolve — this is what accounts for "
+               "the 502 -> 505 delta, so the total alone is not the pin.";
+    }
+    // The complementary direction: nothing was lost to make room. `registered`
+    // equals the oracle's distinct declared count, so the set is exact rather
+    // than merely the right size.
+    EXPECT_EQ(registered, distinct_no_tags.size())
+        << "every group the independent oracle declares must be registered — an equal COUNT with "
+           "a different SET would pass the assertion above.";
 }
 
 // ============================================================================
