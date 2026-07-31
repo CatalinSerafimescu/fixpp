@@ -119,7 +119,8 @@ add_executable(wire_dict_tests
   validator_enum_domain_test.cpp                                      # T022/T022a/T023 (075)
   validator_enum_multivalue_test.cpp                                  # T027 (075)
   fixt_header_validate_test.cpp                                       # T003/T004 (081)
-  delimiter_divergence_wire_test.cpp)                                 # T009 (083)
+  delimiter_divergence_wire_test.cpp                                  # T009 (083)
+  consume_group_nested_delim_test.cpp)                                # T010 (083)
 target_link_libraries(wire_dict_tests PRIVATE
   fixpp_wire
   fixpp_dictionary
