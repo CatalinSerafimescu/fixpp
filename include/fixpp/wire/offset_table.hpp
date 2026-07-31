@@ -79,6 +79,15 @@ public:
     using group_member_fn_t = bool (*)(void const*, group_context const&, std::uint16_t,
                                        std::uint16_t) noexcept;
 
+    // 083 T057 (C-8.1): SIBLING of `group_member_fn_t`, resolving through the
+    // SAME `opaque_dict` to `table_view::group_first_field(msg_type,
+    // parent_path, no_tag)`. The callback set was membership-only; this widens
+    // it by exactly one entry. Internal seam — no public signature changes
+    // (C-8.3): `group_slices()` / `group_slices_status()` keep their
+    // signatures. Returns 0 when `no_tag` is not a group in that context.
+    using group_delim_fn_t = std::uint16_t (*)(void const*, group_context const&,
+                                               std::uint16_t) noexcept;
+
     // Caller-tunable DoS caps (FR-015 / [2b §1.2] "configurable").
     // Defaults match the module-level inline constexpr above.
     struct Config {
@@ -118,14 +127,16 @@ public:
 
     OffsetTable(frame_view const& frame [[clang::lifetimebound]],
                 std::pmr::memory_resource* mr [[clang::lifetimebound]], void const* opaque_dict,
-                group_member_fn_t group_member_fn) noexcept;
+                group_member_fn_t group_member_fn,
+                group_delim_fn_t group_delim_fn = nullptr) noexcept;
 
     OffsetTable(frame_view const& frame [[clang::lifetimebound]],
                 std::pmr::memory_resource* mr [[clang::lifetimebound]], Config cfg) noexcept;
 
     OffsetTable(frame_view const& frame [[clang::lifetimebound]],
                 std::pmr::memory_resource* mr [[clang::lifetimebound]], Config cfg,
-                void const* opaque_dict, group_member_fn_t group_member_fn) noexcept;
+                void const* opaque_dict, group_member_fn_t group_member_fn,
+                group_delim_fn_t group_delim_fn = nullptr) noexcept;
 
     // Non-RED build status (ok, or the wire_* cap/format error hit).
     [[nodiscard]] core::expected_t<void> build_status() const noexcept { return status_; }
@@ -319,7 +330,8 @@ private:
                                                            void const* opaque_dict,
                                                            group_member_fn_t group_member_fn,
                                                            detail::generation_token gen,
-                                                           group_context const& ctx) noexcept;
+                                                           group_context const& ctx,
+                                          group_delim_fn_t group_delim_fn = nullptr) noexcept;
 
     // 063 T006: builds an actual `group_context` value from the raw fields
     // below (needs the complete type — defined in offset_table.cpp, which
@@ -358,6 +370,8 @@ private:
     Config cfg_{};                           // caller-tunable caps (FR-015 / [2b §1.2])
     void const* opaque_dict_ = nullptr;
     group_member_fn_t group_member_fn_ = nullptr;
+    // 083 T057 (C-8.1): supplied at EVERY site that supplies opaque_dict_.
+    group_delim_fn_t group_delim_fn_ = nullptr;
     // 063 T006: raw storage for the stored group_context (msg_type + bounded
     // parent-no_tag path). Stored as constituent fields, NOT a `group_context`
     // member by value — `group_context` is only forward-declared in this

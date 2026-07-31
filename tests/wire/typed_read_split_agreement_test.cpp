@@ -687,3 +687,63 @@ TEST(TypedReadSplitAgreement, ExtentWalkDescendsAtNestedGroupDelimiter_Leg4Depth
         << " calls; declared=8 -> " << run8.probe_calls << " calls.";
 
 }
+
+// ============================================================================
+// W-8 / W-9 fixture (b) (T054 / T055) — RECORDED NEGATIVE RESULT, with the
+// shapes tried. This is FR-021a's own escape clause exercised, not a gap.
+//
+// ── What C-8.5 targets ──────────────────────────────────────────────────────
+// A splitter MIS-SPLIT needs the outer group's delimiter tag `D` to reappear
+// INSIDE one of that group's own nested groups, so a deep `D` reads as a new
+// outer instance to the flat `entries_[k].tag == delim` boundary test at
+// `src/wire/offset_table.cpp:678-680`.
+//
+// ── Measured: that precondition occurs ZERO times ───────────────────────────
+// Swept all ten shipped dictionaries under the POST-FIX (per-context)
+// delimiters: for every context `(msg_type, path, no_tag)` with delimiter `D`,
+// does any group nested directly inside it carry `D` as a member?
+//
+//   FIX40 0 · FIX41 0 · FIX42 0 · FIX43 0 · FIX44 0 · FIX50 0 · FIX50SP1 0 ·
+//   FIX50SP2 0 · FIXT11 0 · Orchestra FIX Latest 0        TOTAL = 0
+//
+// ── And the shape is not merely absent, it is UNPARSEABLE ───────────────────
+// Two synthetic dialects were built to witness the mis-split, and both are
+// genuinely ambiguous on the wire rather than merely awkward:
+//
+//   (1) nested delimiter == outer delimiter (both 101). The nested group's own
+//       instance scan cannot tell its second instance from the outer group's
+//       next one. `dictionary_driven_validator` rejects the frame outright
+//       (declared-vs-actual mismatch, error 38) — so the read path is never
+//       reached. This is exactly the layout 072's load-time nested==parent
+//       delimiter guard exists to reject.
+//   (2) nested delimiter distinct (103) but `D`(101) a LATER member of the
+//       nested group. The nested extent then ends only at a non-member, and
+//       `D` is a member — so the nested walk swallows the next outer instance.
+//       Ambiguous for the same reason, one position over.
+//
+// A wire layout in which a tag both opens outer instances and appears inside
+// them has no unique parse. That is why no shipped dictionary contains one,
+// and it is the mechanism behind the measured zero — not a coincidence of the
+// current schemas.
+//
+// ── Consequence for C-8.5, stated rather than quietly dropped ───────────────
+// C-8.5 ("boundary detection skips nested extents") is therefore NOT
+// implemented, and this is a deliberate scope decision:
+//
+//   * its target population is empty on every shipped dictionary;
+//   * the shapes that would exercise it have no well-defined parse, so a
+//     "fix" would be choosing one reading of an ambiguous frame;
+//   * and implemented literally it would BREAK the shape that IS reachable:
+//     in FR-021 mode (c) the outer delimiter IS a nested group's count tag, so
+//     skipping past the nested extent before testing the boundary would skip
+//     the very tag that opens each instance — collapsing W-10a leg 2's two
+//     slices back to one. C-8.0c and C-8.5 are a pair only where their
+//     populations are disjoint; on mode (c) they are in direct conflict.
+//
+// L-063-4 / issue #180 accordingly keeps BOTH of its legs open. T071 already
+// records that #180 is not closed by this feature; this note is the evidence
+// for why leg 1 is not closed either.
+//
+// FR-021b's agreement claim is carried instead by W-10a legs 2/3, which run on
+// mode (c) — the population that IS reachable, at 485 contexts.
+// ============================================================================

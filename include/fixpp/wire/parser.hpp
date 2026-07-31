@@ -121,17 +121,20 @@ public:
     // ptrs. ([PR68-02]/[PR68-10] fix.)
     using classify_fn_t = bool (*)(void const*, std::string_view, std::uint16_t) noexcept;
     using group_member_fn_t = OffsetTable::group_member_fn_t;
+    using group_delim_fn_t = OffsetTable::group_delim_fn_t;
 
     MessageView(frame_view const& frame, std::pmr::memory_resource* mr, void const* opaque_dict,
-                classify_fn_t classify_fn, group_member_fn_t group_member_fn) noexcept
+                classify_fn_t classify_fn, group_member_fn_t group_member_fn,
+                group_delim_fn_t group_delim_fn = nullptr) noexcept
         requires(Mode == access_mode::Index)
         : View{frame.bytes().data(), frame.bytes().size(),
                frame.token()},  // [2b §6.4] thread real pool token
-          table_{frame, mr, opaque_dict, group_member_fn},
+          table_{frame, mr, opaque_dict, group_member_fn, group_delim_fn},
           mr_{mr},
           opaque_dict_{opaque_dict},
           classify_fn_{classify_fn},
           group_member_fn_{group_member_fn},
+          group_delim_fn_{group_delim_fn},
           unk_items_{mr} {
         // Gate B PR#176 r1 root cause #1: seed the ROOT group_context ({msg_type,
         // path=[]}) HERE, unconditionally, rather than lazily only in group<>()
@@ -424,6 +427,7 @@ private : [[nodiscard]] std::span<const std::byte> field_bytes(std::uint16_t tag
     // build a dict-aware sub-OffsetTable). Default nullptr on the dict-free
     // ctors, matching table_'s own dict-free construction.
     group_member_fn_t group_member_fn_ = nullptr;
+    group_delim_fn_t group_delim_fn_ = nullptr;  // 083 T057 (C-8.1)
     // unk_items_: lazily built unknown-fields kv list in the per-message arena.
     // An Index-mode ctor overrides this default with the real arena
     // (`unk_items_{mr}`), but a default-constructed view and EVERY Iter-mode view
@@ -610,7 +614,16 @@ public:
                       }
                   }
                   return false;
-              }} {}
+              }},
+          // 083 T057 (C-8.1): the delimiter sibling of the membership lambda,
+          // resolving through the SAME opaque_dict and the SAME context key.
+          group_delim_fn_{[](void const* d, group_context const& ctx,
+                             std::uint16_t no_tag) noexcept -> std::uint16_t {
+              using dict_t = std::remove_reference_t<TV>;
+              return static_cast<dict_t const*>(d)->group_first_field(
+                  ctx.msg_type,
+                  std::span<std::uint16_t const>{ctx.parent_path.data(), ctx.depth}, no_tag);
+          }} {}
 
     template <class TV>
     explicit Parser(TV&&) noexcept
@@ -627,7 +640,8 @@ public:
                                                             std::pmr::memory_resource* mr) noexcept
         [[clang::lifetimebound]] {
         // Thread the opaque dict pointer + helper fns into the MessageView.
-        MessageView<Mode> mv{frame, mr, opaque_dict_, classify_fn_, group_member_fn_};
+        MessageView<Mode> mv{frame, mr, opaque_dict_, classify_fn_, group_member_fn_,
+                             group_delim_fn_};
         if constexpr (Mode == access_mode::Index) {
             if (auto s = mv.offsets().build_status(); !s) {
                 return core::expected_t<MessageView<Mode>>{std::unexpect, s.error()};
@@ -660,6 +674,7 @@ public:
 private : void const* opaque_dict_ = nullptr;
     bool (*classify_fn_)(void const*, std::string_view, std::uint16_t) noexcept = nullptr;
     OffsetTable::group_member_fn_t group_member_fn_ = nullptr;
+    OffsetTable::group_delim_fn_t group_delim_fn_ = nullptr;
 };
 
 }  // namespace fixpp::wire
