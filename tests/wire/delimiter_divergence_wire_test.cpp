@@ -337,15 +337,25 @@ TEST(DelimiterDivergenceWire, PollutedContextInjectedTagIsNotIndependentlyValid)
     constexpr std::uint16_t kTrueMember = 17;     // ExecID — AX's true (only) declared member
     std::array<std::uint16_t, 0> const root{};
 
-    // The context's registered delimiter today is the wrong, dictionary-
-    // global first-seen value (32) — measured directly (research.md T007:
-    // FIX44|AX|{}|124|17|32|YES divergent).
-    EXPECT_EQ(tv.group_first_field("AX", root, kNoExecs), kInjectedTag)
-        << "AX/NoExecs(124)'s registered delimiter should still be today's wrong bare-global "
-           "value (32/LastQty) before this feature lands.";
+    // 083 T033 — FLIPPED from the pre-fix scaffolding these two assertions
+    // carried while the feature was RED. Recorded delta, the headline of US1:
+    //
+    //   before: group_first_field("AX", {}, 124) == 32 (LastQty) — the
+    //           dictionary-GLOBAL first-seen value, wrong for this context
+    //           (research.md T007: FIX44|AX|{}|124|17|32|YES divergent);
+    //   after:  == 17 (ExecID) — AX's OWN declaration-order first member.
+    EXPECT_EQ(tv.group_first_field("AX", root, kNoExecs), kTrueMember)
+        << "FR-001/FR-002: AX/NoExecs(124) must resolve to ITS OWN declaration-order first "
+           "member (17/ExecID), not the dictionary-global first-seen value (32/LastQty) that "
+           "belongs to a different context of the same count tag.";
 
-    // The member set is polluted: it contains 32 in addition to the true
-    // declared member 17 (D-5's injection mechanism).
+    // The member set is no longer polluted. NOTE this needed no separate fix:
+    // `set_group_first_ctx`'s unconditional `add_group_member_ctx(..., first)`
+    // (table_view.hpp:645) is RETAINED and still runs — but `first` is now
+    // this context's real delimiter, which is already a declared member, so
+    // the injection is a NO-OP (D-5 / C-3.3). The pollution disappears by
+    // construction. That is why SC-002's 48 -> 0 has no implementation task of
+    // its own.
     auto const members = tv.group_member_tags("AX", root, kNoExecs);
     bool has_injected = false;
     bool has_true_member = false;
@@ -353,8 +363,11 @@ TEST(DelimiterDivergenceWire, PollutedContextInjectedTagIsNotIndependentlyValid)
         has_injected = has_injected || (m == kInjectedTag);
         has_true_member = has_true_member || (m == kTrueMember);
     }
-    EXPECT_TRUE(has_injected) << "AX/NoExecs(124)'s member set should be polluted with the "
-                                 "injected delimiter (32/LastQty) before this feature lands.";
+    EXPECT_FALSE(has_injected)
+        << "FR-010/FR-015 (#210 Consequence 1): AX/NoExecs(124)'s member set must no longer "
+           "carry the injected global delimiter (32/LastQty). It is not declared anywhere in "
+           "CollateralRequest's tree; it could only have arrived via set_group_first_ctx's "
+           "member injection of a WRONG delimiter.";
     EXPECT_TRUE(has_true_member) << "AX/NoExecs(124)'s true declared member (17/ExecID) must "
                                     "remain present regardless.";
 

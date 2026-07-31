@@ -272,6 +272,18 @@ namespace {
 constexpr std::string_view kReusedTagDivergentDelimXml =
     R"(<fix type='FIX' major='4' minor='4' servicepack='0'>)"
     R"(<fields>)"
+    // 083 T033a: the three framing tags were MISSING from this fixture. Every
+    // frame `make_frame` builds carries BeginString(8)/BodyLength(9)/
+    // CheckSum(10), and validate()'s Step 1 checks EVERY field against
+    // `valid_tags_for(mt)` before the group walk ever runs — so an undeclared
+    // framing tag rejects with wire_unexpected_tag(42) regardless of the
+    // delimiter. The omission was invisible while this case was GTEST_SKIPped:
+    // the fixture was authored but never executed. (Sibling synthetic dialects
+    // that DO run — e.g. consume_group_nested_delim_test.cpp's — declare all
+    // three.)
+    R"(<field number='8' name='BeginString' type='STRING'/>)"
+    R"(<field number='9' name='BodyLength' type='INT'/>)"
+    R"(<field number='10' name='CheckSum' type='STRING'/>)"
     R"(<field number='35' name='MsgType' type='STRING'/>)"
     R"(<field number='600' name='NoX' type='NUMINGROUP'/>)"
     R"(<field number='610' name='FieldA' type='STRING'/>)"
@@ -279,12 +291,18 @@ constexpr std::string_view kReusedTagDivergentDelimXml =
     R"(</fields>)"
     R"(<messages>)"
     R"(<message name='U1Msg' msgtype='U1' msgcat='app'>)"
+    R"(<field name='BeginString' required='N'/>)"
+    R"(<field name='BodyLength' required='N'/>)"
     R"(<field name='MsgType' required='N'/>)"
+    R"(<field name='CheckSum' required='N'/>)"
     R"(<group name='NoX' required='N'>)"
     R"(<field name='FieldA' required='N'/>)"  // U1's delimiter = 610 (first-seen globally)
     R"(</group></message>)"
     R"(<message name='U2Msg' msgtype='U2' msgcat='app'>)"
+    R"(<field name='BeginString' required='N'/>)"
+    R"(<field name='BodyLength' required='N'/>)"
     R"(<field name='MsgType' required='N'/>)"
+    R"(<field name='CheckSum' required='N'/>)"
     R"(<group name='NoX' required='N'>)"
     R"(<field name='FieldB' required='N'/>)"  // U2's REAL delimiter = 620, corrupted to 610
     R"(</group></message>)"
@@ -301,14 +319,14 @@ constexpr std::string_view kReusedTagDivergentDelimXml =
 // (not a hand-built table_view, per Codex's original observation that a
 // hand-built table_view proves only that the recursion CAN consume good
 // data, not that the real loader SUPPLIES it).
-TEST(ValidatorNestedMembership, PerContextDelimiterResidual_L063_3b_SkipPending) {
-    GTEST_SKIP() << "L-063-3(b) per-context group delimiter residual — as_table_view() stores "
-                    "the global first-seen delimiter (dictionary.cpp :421), not a per-context "
-                    "one. A GREEN assert here would ENSHRINE the bug (see "
-                    "feedback_coverage_push_enshrines_bugs). Un-skip when the per-context-"
-                    "delimiter follow-up lands (tracked via L-063-3 in "
-                    "spec/behaviors-and-limitations.md).";
-
+// 083 T033a: UN-SKIPPED. The `GTEST_SKIP()` that stood here named this feature
+// as its own unblocking condition verbatim — "Un-skip when the per-context-
+// delimiter follow-up lands (tracked via L-063-3)" — and T070 retires L-063-3.
+// Leaving it parked would have retired the B&L row while its own pin stayed
+// skipped, which `ctest` reports as success. T031 makes `as_table_view()`
+// source the delimiter from Entity 2 per context, so the assert below now
+// passes on merit rather than enshrining the bug.
+TEST(ValidatorNestedMembership, PerContextDelimiterResidual_L063_3b) {
     std::vector<std::byte> buf(2u * 1024u * 1024u);
     std::pmr::monotonic_buffer_resource dict_mr{buf.data(), buf.size()};
     auto dict = fixpp::dict::XmlLoader{}.load_from_string(kReusedTagDivergentDelimXml, &dict_mr);

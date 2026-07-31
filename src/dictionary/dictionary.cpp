@@ -530,20 +530,41 @@ table_view Dictionary::as_table_view() const {
             }
             std::reverse(path.begin(), path.end());
 
-            // 4) Delimiter = the group's DECLARATION first field, from the
-            //    dictionary's GroupRef (group_first_field), NOT members.front():
-            //    `all_fields` is tag-sorted, so members.front() is the lowest-tag
-            //    member, not the delimiter (e.g. FIX44 NoPartyIDs(453): lowest
-            //    member PartyIDSource(447), real delimiter PartyID(448)). Using
-            //    members.front() made the validator reject valid real-dict groups.
-            //    group_first_field() is GroupRef.first_field_tag — the first
-            //    child in declaration order (xml_loader.cpp). It is global (one
-            //    GroupRef per no_tag, first-seen for reused tags), so a reused
-            //    tag with divergent per-context delimiters is an L-063-3 residual;
-            //    the per-context MEMBER SET above stays exact regardless. Fall
-            //    back to members.front() only if the dict has no GroupRef.
-            std::uint16_t const gr_delim = group_first_field(no_tag);
-            std::uint16_t const delim = gr_delim != 0 ? gr_delim : members.front();
+            // 4) Delimiter = the group's DECLARATION first field, NOT
+            //    members.front(): `all_fields` is tag-sorted, so members.front()
+            //    is the lowest-tag member, not the delimiter (e.g. FIX44
+            //    NoPartyIDs(453): lowest member PartyIDSource(447), real
+            //    delimiter PartyID(448)). Using members.front() made the
+            //    validator reject valid real-dict groups. [This paragraph is
+            //    unchanged and still TRUE.]
+            //
+            //    083 T031 (C-3.1): the SOURCE is now Entity 2 — this context's
+            //    OWN declaration — not the global `group_first_field(no_tag)`.
+            //
+            //    083 T032 (FR-011 / C-3.2) — CORRECTION of the sentence that
+            //    used to close this comment. It read: "a reused tag with
+            //    divergent per-context delimiters is an L-063-3 residual; the
+            //    per-context MEMBER SET above stays exact regardless." The
+            //    second clause is FALSE, and believing it is why the defect
+            //    survived inspection. The member set does NOT stay exact: it is
+            //    `set_group_first_ctx`'s own unconditional
+            //    `add_group_member_ctx(msg_type, parent_path, no_tag, first)`
+            //    (include/fixpp/dict/table_view.hpp:645) that INJECTS the wrong
+            //    global delimiter into this context's member set — measured on
+            //    48 contexts. A wrong delimiter therefore corrupts the member
+            //    set too, which is fixpp#210 Consequence 1/2. With the source
+            //    corrected the injected tag is already a declared member, so
+            //    that injection becomes a no-op (D-5 / C-3.3) and the pollution
+            //    disappears by construction rather than by a second fix.
+            //
+            //    There is deliberately NO fallback here: falling back to the
+            //    global would reinstate the defect, and to members.front() a
+            //    worse one already fixed above. A 0 means the context has no
+            //    Entity-2 record, which is FR-006's fail-closed condition and is
+            //    rejected at LOAD time in the loaders' finalize() (FR-023 /
+            //    C-3.4), never silently absorbed here — `as_table_view()` is
+            //    contractually non-throwing (072, L-063-4) and stays so.
+            std::uint16_t const delim = handle_->group_ctx_delimiter_impl(mt, path, no_tag);
 
             // Register into the CONTEXT-KEYED store (in ADDITION to the
             // legacy bare store populated above — see the escalation note
