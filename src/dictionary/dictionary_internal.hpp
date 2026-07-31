@@ -463,4 +463,18 @@ public:
     session_version version_{session_version::Unknown};
 };
 
+// 083 T049 (W-11a) — TEST SEAM. Counts entries into
+// `Dictionary::as_table_view()`, so the C-ABI witness can assert the view is
+// built ONCE per opened session and ZERO times per message (C-9.2a / D-13;
+// `dict->as_table_view()` inside the commit path is barred by [const §XV.1]).
+//
+// Declared in this INTERNAL header, deliberately — not in the public
+// `include/fixpp/dict/dictionary.hpp` — mirroring the `fixpp_capi::detail`
+// live-state-counter precedent (`src/capi/capi_internal.hpp:496-503`). No
+// installed public surface is touched. `tests/capi/` already includes internal
+// headers directly.
+void bump_as_table_view_call_count() noexcept;
+[[nodiscard]] std::uint64_t as_table_view_call_count() noexcept;
+void reset_as_table_view_call_count() noexcept;
+
 }  // namespace fixpp::dict::detail

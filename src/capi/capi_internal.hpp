@@ -265,6 +265,14 @@ struct fixpp_msg {
     // nullptr for inbound dispatch-window handles (they do not need validation).
     std::shared_ptr<const fixpp::dict::Dictionary> dict_;
 
+    // 083 T051: NON-OWNING view of the SESSION's cached table_view, copied here
+    // at create_outbound exactly as dict_ is. Absent on precisely the handles
+    // whose dict_ is null (inbound dispatch-window handles), so "no dictionary"
+    // and "no view" remain ONE state and C-9.4's dict-free disposition is
+    // unchanged. This is NOT owned_tv_ below — that is the clone-inbound
+    // membership copy, a different artifact.
+    std::shared_ptr<const fixpp::dict::table_view> session_tv_;
+
     // 066-dict-backed-inbound-parse T007 (mechanism (b), FR-007/C4): clone-owned
     // membership copy, populated ONLY when the source view is dict-backed
     // (MessageView::is_dict_backed()) via MessageView::membership_copy()
@@ -491,6 +499,18 @@ struct fixpp_session {
     // to populate fixpp_msg::dict_ so the set_* thunks can perform DICT_CONFIG /
     // TYPE_MISMATCH validation without re-leasing the session.
     std::shared_ptr<const fixpp::dict::Dictionary> dict_;
+
+    // 083 T050 (C-9.2a / D-13): the session's ONE table_view, built at
+    // fixpp_session_open beside dict_ above. Exactly one as_table_view() per
+    // opened session, ZERO per message — calling dict->as_table_view() inside
+    // the commit path is BARRED by [const §XV.1]; it is a constitution
+    // violation, not merely a slow path.
+    //
+    // Owned by the SESSION, not the message handle, and deliberately NOT in the
+    // session arena — same reason dict_ is not (the destructor must not depend
+    // on arena lifetime). Empty/default when the session has no dictionary, so
+    // "no dictionary" and "no view" stay ONE state.
+    std::shared_ptr<const fixpp::dict::table_view> tv_;
 };
 
 namespace fixpp_capi::detail {

@@ -391,7 +391,20 @@ std::span<EnumValueRef const> Dictionary::enum_values(std::uint16_t tag) const n
 //
 // [const §XV.1]: called once at session/validator setup; must not be called
 // on the per-message hot path.
+namespace detail {
+// 083 T049 (W-11a) test seam — see dictionary_internal.hpp. A plain
+// non-atomic counter: the witness opens one session on one thread, and this
+// must not add synchronisation to a hot construction path.
+namespace {
+std::uint64_t g_as_table_view_calls = 0;
+}  // namespace
+void bump_as_table_view_call_count() noexcept { ++g_as_table_view_calls; }
+std::uint64_t as_table_view_call_count() noexcept { return g_as_table_view_calls; }
+void reset_as_table_view_call_count() noexcept { g_as_table_view_calls = 0; }
+}  // namespace detail
+
 table_view Dictionary::as_table_view() const {
+    detail::bump_as_table_view_call_count();  // 083 T049 test seam (W-11a)
     table_view tv;
 
     if (!handle_) {
