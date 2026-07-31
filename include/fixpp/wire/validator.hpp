@@ -359,7 +359,29 @@ public:
             if (check_required && delim_k < req_members.size()) {
                 mark_bit(seen_mask, delim_k);
             }
-            ++i;  // consume this instance's delimiter
+            // Query-before-consume (C-4.1/C-4.2): is the instance-opening
+            // delimiter itself a nested group's count tag in child context?
+            // Same shape as the post-delimiter descent in the member loop
+            // below, applied at the delimiter position instead of a later
+            // member position — a symmetry repair, no new mechanism.
+            // `can_descend` is the existing K=16 depth guard (C-4.3):
+            // unchanged, no new recursion limit; at the cap this falls to
+            // the `else ++i` branch (non-recursive), so termination of
+            // THIS while loop does not depend on the recursive call ever
+            // returning `i` unchanged. `seen_mask`/`delim_k` above marks
+            // the delimiter's own required-bit against THIS group's
+            // `req_members` before any descent (C-5.2); the nested call
+            // builds an independent mask from the nested group's own
+            // `req_members`, so the two never interact.
+            if (can_descend && dict_.group_first_field(ctx.msg_type, child_path, delim_tag) != 0) {
+                auto const nested = consume_group(ents, child, frame_base, i, end, ref_tag_out);
+                if (!nested) {
+                    return nested;  // propagate the nested failure slot
+                }
+                i = *nested;  // advance past the consumed nested group
+            } else {
+                ++i;  // ordinary delimiter, no nested descent
+            }
             while (i < end && ents[i].tag != delim_tag) {
                 std::uint16_t const t = ents[i].tag;
                 if (!is_member(t)) {
