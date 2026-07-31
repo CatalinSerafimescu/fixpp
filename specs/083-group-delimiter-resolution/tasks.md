@@ -45,8 +45,8 @@ Landing the loader recursion first converts a wrong-delimiter defect into a **fa
 
 - **6 NEW test files**: `tests/dictionary/delimiter_census_test.cpp`, `tests/dictionary/loader_disposition_test.cpp`, `tests/wire/consume_group_nested_delim_test.cpp`, `tests/wire/delimiter_divergence_wire_test.cpp`, `tests/wire/typed_read_split_agreement_test.cpp`, `tests/capi/capi_group_delimiter_ctx_test.cpp`.
 - **6 EDITED test/fuzz files**: `tests/dictionary/required_scope_oracle.hpp`, `tests/dictionary/reused_tag_census_test.cpp`, `tests/wire/nested_group_extent_test.cpp`, `tests/fuzz/fuzz_wire_validator.cpp`, `tests/fuzz/fuzz_dict_xml_loader.cpp`, `tests/fuzz/fuzz_orchestra_loader.cpp`.
-- **3 benchmarks**: inbound validate, typed read, C-ABI commit. *(Path note: `plan.md`'s tree writes these as `bench/<name>.cpp`; the repo's actual layout is per-subsystem — `bench/wire/`, and a NEW `bench/capi/`. Tasks use the per-subsystem home.)*
-- **1 source file `plan.md`'s tree omits**: `src/capi/session.cpp` — C-9.2a mandates building the session view at `fixpp_session_open` (`:109-111`), the site where `dict_` is cached, but the file is absent from the Source Code tree. T050 covers it.
+- **3 benchmarks**: inbound validate, typed read, C-ABI commit, at `bench/wire/validate_group_bench.cpp`, `bench/wire/typed_read_group_bench.cpp`, `bench/capi/capi_commit_group_bench.cpp` — the repo's per-subsystem layout (`bench/wire/` exists; `bench/capi/` is NEW and needs its own `CMakeLists.txt`). *(Drift CLOSED 2026-07-31 at `/speckit-checklist`: `plan.md`'s tree wrote all three flat as `bench/<name>.cpp` and has been corrected to match these paths. This bullet previously recorded the disagreement; it now records the reconciliation.)*
+- **`src/capi/session.cpp`** — C-9.2a mandates building the session `table_view` at `fixpp_session_open` (`:109-111`), the site where `dict_` is cached. T050 covers it. *(Drift CLOSED 2026-07-31 at `/speckit-checklist`: the file was absent from `plan.md`'s Source Code tree and has been added there. `plan.md` and `tasks.md` now name the same file set.)*
 
 ## Witness → task map (every W- has a home)
 

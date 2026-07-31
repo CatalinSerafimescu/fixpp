@@ -143,6 +143,11 @@ src/capi/
 │                              #   the point where src/capi/session.cpp:109-111 caches dict_; non-owning pointer copied into fixpp_msg at
 │                              #   create_outbound exactly as src/capi/message_write.cpp:289-291 copies dict_ into the member declared at
 │                              #   :261-266. Internal struct — no exported surface (C-9.2a / C-9.3). (Copy-site citations added Gate A r3, Codex #1)
+├── session.cpp                # BUILD SITE for the above — fixpp_session_open caches dict_ at :109-111; the session table_view is built there,
+│                              #   once per session, and its lifetime is the session's (C-9.2a). A dictionary-less handle keeps C-9.4's
+│                              #   existing no-delimiter-check behaviour unchanged. (Added to this tree at /speckit-checklist, 2026-07-31: C-9.2a
+│                              #   mandates this edit and tasks.md T050 already schedules it, but the file was absent here — a plan-vs-tasks
+│                              #   Consistency drift that `/speckit-checklist-audit` cannot waive.)
 └── message_write.cpp          # validate_group_grammar (:710-730): thread msg_type + path through the existing :725 recursion and resolve
                                #   through the session-cached table_view — NEVER dict->as_table_view(), which is [const §XV.1]-barred on the
                                #   per-message commit path (FR-018, C-9.2 / C-9.2a). Predicate sites :157 / :812 / :923 NOT converted (C-9.5)
@@ -196,12 +201,17 @@ tests/fuzz/
 ├── fuzz_dict_xml_loader.cpp        # EDITED — documented exception set comment covers FR-006's throw (:50-72)
 └── fuzz_orchestra_loader.cpp       # EDITED — same, derived-type catch already covers it given FR-006c (:52-80)
 
-bench/
-├── validate_group_bench.cpp      # inbound validate path (FR-022, path 1)
-├── typed_read_group_bench.cpp    # NEW (Gate A r2) — typed-read group-slice split: ctx-keyed delimiter callback + nested-extent
+bench/                            # PER-SUBSYSTEM layout — the repo's actual shape (bench/wire/, bench/core/, …), NOT a flat bench/<name>.cpp.
+                                  #   (Corrected at /speckit-checklist, 2026-07-31: this tree previously wrote all three flat, disagreeing with
+                                  #   tasks.md T063/T064/T065, which already use the per-subsystem homes. bench/wire/ exists; bench/capi/ is NEW.)
+├── wire/
+│   ├── validate_group_bench.cpp  # inbound validate path (FR-022, path 1) — alongside the existing bench/wire/validator_bench.cpp
+│   └── typed_read_group_bench.cpp # NEW (Gate A r2) — typed-read group-slice split: ctx-keyed delimiter callback + nested-extent
 │                                 #   recursion in group_slices_status (FR-022 path 2, C-8.1/C-8.5)
-└── capi_commit_group_bench.cpp   # NEW (Gate A r2) — fixpp_msg_commit group grammar: ctx-keyed lookup + path maintenance through
-                                  #   the :725 recursion, plus the one config-time as_table_view() per session (FR-022 path 3, C-9.2/C-9.2a)
+├── capi/                         # NEW directory — needs its own CMakeLists.txt, added by the same task
+│   └── capi_commit_group_bench.cpp # NEW (Gate A r2) — fixpp_msg_commit group grammar: ctx-keyed lookup + path maintenance through
+│                                 #   the :725 recursion, plus the one config-time as_table_view() per session (FR-022 path 3, C-9.2/C-9.2a)
+└── baselines/wire/, baselines/capi/  # recorded baselines for the three benches (Article VIII §3)
 ```
 
 **Structure Decision**: existing module layout is unchanged; this feature edits in place across `dict`, `wire`, and `capi` and adds **six** new test files and **three** benchmarks, and **edits six** existing test/fuzz files rather than duplicating their subsystems. No new module, no new library target, no new public header — so `check_layers.py` has no new boundary to evaluate. The only *new* runtime data structure is the per-context delimiter side table (data-model.md Entity 2), which lives on the existing metadata handle rather than in a new component; C-9.2a additionally caches one `table_view` on the **internal** `fixpp_session` struct, which is not a public or C-ABI surface. *(Gate A round 1 added: the two new contracts, the C-ABI and typed-read test files, the three fuzz harnesses, the `reused_tag_census_test.cpp` re-census, and named cases for the five success criteria that previously had no artifact — SC-004's wire leg, SC-005, SC-008, SC-010, SC-012. Gate A round 2 added: two benches for the typed-read and C-ABI hot paths, `src/capi/capi_internal.hpp` to the source tree, and three named cases — the FR-023a tolerant twin, the C-3.4a scalar-reuse exclusion, and W-11a/W-11b. **Gate A round 3 (user scope amendment) added no files and no benches** — a second edit to `src/wire/offset_table.cpp` (C-8.0c) and two named cases in test files this tree already lists: W-10a in `typed_read_split_agreement_test.cpp` and W-3 in `consume_group_nested_delim_test.cpp`. The counts below are therefore **unchanged and re-confirmed against this tree at round 3**.)*
