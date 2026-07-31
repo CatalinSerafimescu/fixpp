@@ -267,6 +267,36 @@ The new map is populated by a document-order walk **twinned with** `qfix_walk` /
 
 **Rationale**: two independent guards against the two ways this pin could be worthless. If the oracle mirrored the fixed loader's logic it would pass by construction and prove nothing — hence the third authority. If it were never observed red it would prove nothing either — hence Phase 1 running fully RED first, with counts recorded.
 
+### T046 — the SECOND red, and what its numbers reveal
+
+FR-014 asks for **two different guards**, and they answer different questions. Red *before* the fix (T012) proves the pin measures **something**. Red *on reintroduction* proves it measures **this** something.
+
+Reintroduced `as_table_view()`'s pre-083 source (`group_first_field(no_tag)` with a `members.front()` fallback) in place of T031's Entity-2 lookup, and re-ran the census:
+
+| dictionary | wrong | polluted |
+|---|---:|---:|
+| FIX43 | 4 | 0 |
+| FIX44 | 10 | 6 |
+| FIX50 | 10 | 6 |
+| FIX50SP1 | 12 | 6 |
+| FIX50SP2 | 29 | 14 |
+| Orchestra | 30 | 16 |
+| **total** | **95** | **48** |
+
+Restored → 4/4 green again.
+
+**Two things the numbers say that a bare red/green would not.**
+
+**(1) Pollution reproduces EXACTLY — 48, matching T012's measured baseline cell for cell.** That is strong confirmation of D-5/C-3.3's mechanism: member-set pollution is driven *entirely* by `set_group_first_ctx`'s injection of a wrong delimiter. Reinstate the wrong delimiter and precisely the same 48 contexts are polluted again — no more, no fewer.
+
+**(2) Wrong delimiters come back as 95, not 330 — and the gap is informative, not a shortfall.** The mutation reverts only the *consumer* leg (T031). The loader's Entity-2 capture (T027/T030) still feeds the **projection**, so the "global" this mutant reads is a *document-order* first-seen value rather than the pre-083 one-level component scan's output. So **330 − 95 = 235** of the original defect was attributable to the broken scan (T028/T030) and **95** to global-first-seen keying (T031). Both legs were load-bearing; neither alone would have closed it. A single-leg mutation reaching 330 would in fact have been the surprising result.
+
+### T047 — what does NOT count as delimiter coverage, and why the exclusion is asserted
+
+`tests/dictionary/collision_membership_guards_test.cpp` is **not** delimiter coverage at any cardinality. Its 69 parameterized cases resemble a broad per-context census and are not one: the discriminator they assert on (`first_tag_only_in`) is derived **independently of the delimiter**, and a sibling feature had to add an `exclude` parameter specifically so the injected delimiter would not be picked as that discriminator. **A suite that must actively avoid the delimiter in order to work cannot also be evidence that the delimiter is right.** Recorded in the census's own header so a later reader counting tests does not mistake 69 cases for coverage.
+
+FR-012/FR-016's "no carve-out" is now **asserted inside the pin**, not merely intended: the census asserts it ran over exactly **ten** dictionaries and that **each contributed > 0 contexts**. The second leg matters as much as the first — a dictionary left in the list but contributing nothing is an exemption by accident, and it would read as coverage.
+
 **Explicitly not treated as coverage** (FR-016): the 78 passing collision-membership cases. *(Provenance note, Gate A round 1: fixpp#210 quotes 69 for the same suite. The cases are derived at **runtime**, per dictionary, by `derive_cases_for_dict` in `tests/dictionary/collision_membership_guards_test.cpp:91`, so the count is a property of the dictionaries and of the sibling features that have since widened the set — 082 plausibly among them — not a fixed literal. Nothing in this feature depends on which number is right, because FR-016 forbids citing the suite as delimiter coverage at **any** cardinality. The discrepancy is recorded rather than reconciled, so a later reader does not mistake it for a measurement error.)* Their discriminator comes from `first_tag_only_in`, derived independently of the delimiter, so their green says nothing about delimiter correctness. A sibling feature had to add an `exclude` parameter to that helper specifically so the injected delimiter would not be chosen as a discriminator — direct evidence that these cases route *around* this defect rather than over it.
 
 ---

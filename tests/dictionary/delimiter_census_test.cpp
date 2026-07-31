@@ -24,6 +24,22 @@
 //   quickstart: specs/083-group-delimiter-resolution/quickstart.md §3
 //
 // ============================================================================
+// 083 T047 (FR-012 / FR-016) — WHAT DOES NOT COUNT AS DELIMITER COVERAGE
+//
+// `tests/dictionary/collision_membership_guards_test.cpp` is NOT delimiter
+// coverage, at any cardinality. Its 69 parameterized cases look like a broad
+// per-context census and are not one: their discriminator (`first_tag_only_in`)
+// is derived INDEPENDENTLY of the delimiter, and a sibling feature had to add
+// an `exclude` parameter specifically so the injected delimiter would not be
+// chosen as that discriminator. A suite that must actively avoid the delimiter
+// to work cannot also be evidence the delimiter is right.
+//
+// This case is therefore the ONLY delimiter authority, and it carries no
+// carve-out, exclusion list or per-dictionary exemption — asserted below, not
+// merely intended. See research.md D-9.
+// ============================================================================
+//
+// ============================================================================
 // MISS-DISCRIMINATION (contracts/group_ctx_delims.md "Lookup-miss
 // behaviour"): both `table_view::group_first_field(msg_type, path, no_tag)`
 // and `group_member_tags(msg_type, path, no_tag)` fall back to the BARE
@@ -462,6 +478,22 @@ TEST(DelimiterCensus, RedCountsReconcileWithSpecBaseline) {
     all.reserve(kAllDicts.size());
     for (auto const& dc : kAllDicts) {
         all.push_back(census_one(dc));
+    }
+
+    // 083 T047 (FR-012 / FR-016) — NO CARVE-OUT, asserted rather than intended.
+    // The pin's whole value is that it covers every shipped dictionary with no
+    // exclusion list and no per-dictionary exemption; a later "just skip this
+    // one" would otherwise be a one-line edit that no test notices.
+    ASSERT_EQ(all.size(), 10u)
+        << "FR-012 / FR-016: the delimiter census must run over ALL TEN shipped dictionaries "
+           "with no carve-out, exclusion list or per-dictionary exemption. Observed "
+        << all.size() << ".";
+    for (auto const& c : all) {
+        EXPECT_GT(c.contexts, 0u)
+            << c.label
+            << ": censused zero contexts — a dictionary present in the list but contributing "
+               "nothing is an exemption by accident, which FR-016 forbids as firmly as an "
+               "explicit one.";
     }
 
     print_census_table(all);
