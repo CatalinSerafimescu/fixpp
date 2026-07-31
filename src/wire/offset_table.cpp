@@ -472,7 +472,28 @@ std::size_t OffsetTable::consume_group_extent(std::size_t count_idx,
     // actual mismatch flagging is the validator's job (plan.md).
     while (k < entries_.size() && inst < declared && entries_[k].tag == delim) {
         std::size_t const inst_start = k;
-        ++k;  // consume the delimiter
+        // 083 C-8.0c: query-before-consume AT the instance-opening delimiter.
+        // Is `delim` itself a nested group's count tag in the child context? If
+        // so, consuming it with a bare `++k` skips past its count field and
+        // leaves the walk inside the nested group's own instances, so the next
+        // OUTER instance's opening tag is never reached and the extent
+        // truncates to one instance. Same probe shape, same child context and
+        // same recursion as the post-delimiter descent below — one rule applied
+        // at both positions, not a new mechanism. The `k + 1U <
+        // entries_.size()` bound makes a delimiter that is the last entry fall
+        // through to the bare `++k`, and a nested group declaring 0 instances
+        // returns `k + 1` from :461-462, so both degenerate cases behave
+        // exactly as they do today.
+        if (k + 1U < entries_.size() &&
+            group_member_fn_(opaque_dict_, child, delim, entries_[k + 1U].tag)) {
+            k = consume_group_extent(k, child, static_cast<std::uint8_t>(depth + 1U), overflow);
+            if (overflow) {
+                return k;  // mirrors :489-491 — at the cap, RETURN rather than
+                           // burn `declared` no-op iterations (C-8.0c.3)
+            }
+        } else {
+            ++k;  // ordinary delimiter, no nested descent
+        }
         while (k < entries_.size() && entries_[k].tag != delim) {
             std::uint16_t const t = entries_[k].tag;
             if (!group_member_fn_(opaque_dict_, ctx, group_no_tag, t)) {
