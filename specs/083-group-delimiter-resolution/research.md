@@ -205,6 +205,50 @@ Throwing the per-loader type therefore lands inside both existing sets with **no
 
 **Alternatives considered**: warn-only (rejected by the user's clarification; also inconsistent with every sibling violation), and fail-closed with no escape (rejected by the user, who wanted third-party/partial dictionaries loadable).
 
+### C-7.1 precondition — RUN and RECORDED (T034), before the throw is enabled
+
+Measured after T025–T033a landed, over all ten shipped dictionaries. For each, load, then enumerate every group with a `GroupRef` whose `first_field_tag` is still 0, and classify it by the count of contexts `as_table_view()` would register for that tag — the discriminator mirrors `dictionary.cpp:445-463` exactly (`FieldRef.type == NumInGroup` **and** at least one `FieldRef` has `group_no_tag == no_tag`).
+
+| dictionary | loads | unresolvable groups | class 1 (C-6.1 **fires**) | class 2 (informational) |
+|---|---|---:|---:|---:|
+| FIX40 / FIX41 / FIX42 / FIX43 / FIX44 | ✅ | 0 | 0 | 0 |
+| FIX50 | ✅ | 2 — tags **384**, **627** | 0 | 2 |
+| FIX50SP1 | ✅ | 2 — tags **384**, **627** | 0 | 2 |
+| FIX50SP2 | ✅ | 2 — tags **384**, **627** | 0 | 2 |
+| FIXT11 | ✅ | 0 | 0 | 0 |
+| Orchestra FIX Latest | ✅ | 0 | 0 | 0 |
+
+**Verdict: 10/10 load; class-1 count is ZERO.** Enabling C-6.1 rejects nothing on the shipped set, which is exactly the state FR-006b required be *known* rather than discovered in CI. All six survivors register **0 contexts** — C-6.1a's second class, so `C-6.1` must not fire on them, and FR-006d / C-3.6 is the governing disposition.
+
+**These six are PRE-EXISTING, not created by this feature.** Verified by reverting `src/dictionary/` to the last pre-T025 commit, rebuilding and re-running the same sweep: **identical 6**, same three dictionaries, same two tags. The deleted one-level component scan could not resolve them either — which is the weakness D-1 cites as the reason to delete it, not a regression from deleting it.
+
+**Why the earlier message-reachable sweep saw none.** That sweep enumerated group tags via each dictionary's message list and found **0** zero-delimiter groups. Both results are correct and together they *locate* the six: `384`/`627` have a `GroupRef` (so they are declared) but appear in no message expansion of FIX50/SP1/SP2 (so Entity 2 has nothing to project for them). The two sweeps disagreeing was the signal; neither alone identifies the class.
+
+### C-7.3 precondition — RUN and RECORDED (T040), before the FR-023 check is enabled
+
+Both-directions set diff, all ten dictionaries. **R** = the contexts `as_table_view()` registers, built from C-3.4a's predicate exactly (`FieldRef.type == NumInGroup` **and** `!members.empty()`, `dictionary.cpp:445-463`). **E** = the Entity-2 record set — taken from the **independent** document-order oracle (`required_scope_oracle.hpp::group_delims`), not from the loader's own table, because diffing the loader against itself would be circular and FR-013 exists to prevent exactly that.
+
+| dictionary | \|R\| | \|E\| | **R \\ E** (C-3.4 violation) | E \\ R (C-3.7 dead data) | registered ctx resolving 0 |
+|---|---:|---:|---:|---:|---:|
+| FIX40 | 0 | 6 | **0** | 6 | 0 |
+| FIX41 | 0 | 10 | **0** | 10 | 0 |
+| FIX42 | 0 | 38 | **0** | 38 | 0 |
+| FIX43 | 234 | 235 | **0** | 1 | 0 |
+| FIX44 | 823 | 823 | **0** | 0 | 0 |
+| FIX50 | 1114 | 1114 | **0** | 0 | 0 |
+| FIX50SP1 | 1309 | 1309 | **0** | 0 | 0 |
+| FIX50SP2 | 25927 | 25927 | **0** | 0 | 0 |
+| FIXT11 | 8 | 8 | **0** | 0 | 0 |
+| Orchestra | 26806 | 26806 | **0** | 0 | 0 |
+
+**Direction 1 — R \\ E = 0 on all ten. No C-3.4 violation; Phase 3 is not blocked.** Independently corroborated by the second observable: **0** registered contexts resolve a delimiter of 0. That check matters because a registered-with-no-record context is not merely unresolved — `set_group_first_ctx(…, 0)` stores the 0 *and* injects tag 0 into the member set, and `table_view`'s context accessor returns a stored 0 rather than falling back (only a **miss** falls back, `table_view.hpp:361-363`). So the failure would be silent, not loud.
+
+**Direction 2 — E \\ R = 55, and the number identifies itself.** FIX40 6 + FIX41 10 + FIX42 38 + FIX43 1 = **55**, which is *exactly* the checked-in census pin's `int_typed_out_of_checked_set` column, cell for cell. These are the **INT-typed `NumInGroup`** contexts (L-066-1 / #196): the oracle's document walk reads them as real groups, but `message_fields` types their count tag as `Int`, so `as_table_view()` never registers them. Two independent measurements converging on 55 is what makes this dead-data figure trustworthy rather than merely restated.
+
+This is **C-3.7 as specified — dead data, recorded and not failed**, and it is the *expected* shape: Entity 2 is deliberately finer than what consumes it (C-3.5), so records the consumer cannot reach are anticipated. The reverse direction is the one that would have been a blocker, and it is empty.
+
+**FIX43's single dead-data row** (`AE`, `no_tag=576`, depth 1) is the same class — FIX43's lone INT-typed count tag — not a separate phenomenon.
+
 ---
 
 ## D-8 — Oracle extension must be additive
