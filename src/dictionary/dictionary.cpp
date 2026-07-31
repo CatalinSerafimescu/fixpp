@@ -213,6 +213,41 @@ dict_metadata_handle::msg_group_required_pairs_impl(std::string_view msg_type) c
         msg_group_required_pool_.data() + run.start, run.count};
 }
 
+// 083 T025 (Entity 2). Same run-lookup shape as msg_group_required_pairs_impl
+// above — the message scoping IS the run.
+std::span<GroupCtxDelim const> dict_metadata_handle::msg_group_ctx_delims_impl(
+    std::string_view msg_type) const noexcept {
+    auto const idx = find_msg_index(messages_, msg_type);
+    if (idx == SIZE_MAX || idx >= per_msg_group_ctx_delim_offsets_.size()) {
+        return {};
+    }
+    auto const run = per_msg_group_ctx_delim_offsets_[idx];
+    if (run.count == 0 || run.start + run.count > group_ctx_delim_pool_.size()) {
+        return {};
+    }
+    return std::span<GroupCtxDelim const>{group_ctx_delim_pool_.data() + run.start, run.count};
+}
+
+std::uint16_t dict_metadata_handle::group_ctx_delimiter_impl(
+    std::string_view msg_type, std::span<std::uint16_t const> parent_path,
+    std::uint16_t no_tag) const noexcept {
+    auto const run = msg_group_ctx_delims_impl(msg_type);
+    // Build the probe through the SAME helper the store side uses, so the
+    // depth clamp is one rule rather than two that can drift (C-2.2).
+    GroupCtxDelim const probe = make_group_ctx_delim(parent_path, no_tag, /*delimiter=*/0);
+    auto const* const begin = run.data();
+    auto const* const end = begin + run.size();
+    auto const* it = std::lower_bound(begin, end, probe, group_ctx_delim_less);
+    // `group_ctx_delim_less` orders by (no_tag, depth, path) and the probe
+    // carries all three, so an exact hit lands here or nowhere. Confirm the
+    // key rather than trusting the position: lower_bound returns the insertion
+    // point on a miss.
+    if (it == end || group_ctx_delim_less(probe, *it)) {
+        return 0;  // no record — FR-006 fail-closed is the caller's decision
+    }
+    return it->delimiter;
+}
+
 // 074-orchestra-native-reader (FR-002): enum {value, description} pairs for a
 // codeset-backed field, keyed by tag. Binary-search the per-tag runs (sorted by
 // tag) → a span into the flat enum_values_ store. Empty for tags with no

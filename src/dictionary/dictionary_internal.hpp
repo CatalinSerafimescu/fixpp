@@ -14,6 +14,7 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <fixpp/dict/component_ref.hpp>
 #include <fixpp/dict/dictionary.hpp>
@@ -86,6 +87,108 @@ struct FieldNameEntry {
     std::uint16_t tag{0};
 };
 
+// 083 T025 — Entity 2, the feature's ONE new persistent structure
+// (data-model.md Entity 2; contracts/group_ctx_delims.md C-2.1/C-2.2/C-2.3).
+// One record = one group context and the delimiter its own declaration gives
+// it, replacing the global first-seen `GroupDef.first_field_tag` as the
+// SOURCE OF TRUTH for delimiter resolution.
+//
+// `msg_type` is deliberately NOT a member: records live in a per-message run
+// (`per_msg_group_ctx_delim_offsets_`, parallel to `messages_`), exactly as
+// `msg_group_required_pool_` does, so the message scoping IS the run and there
+// is no second copy of the msg_type to keep in sync.
+struct GroupCtxDelim {
+    // Ancestor count tags, OUTERMOST FIRST, EXCLUDING this group's own
+    // `no_tag` (C-1.3 / Entity 1's invariant). Same convention as
+    // `table_view::group_ctx_` and the test oracle's `GroupContextKey`, so the
+    // three cannot disagree about what a context is.
+    std::array<std::uint16_t, kMaxGroupContextDepth> parent_path{};
+    std::uint16_t no_tag{0};
+    // Never 0 for a STORED record: recording 0 is the FR-006 fail-closed
+    // condition, not a storable state (data-model.md Entity 2, validation
+    // rules). 0 is therefore usable as the accessor's "no record" answer
+    // without colliding with a legitimate value.
+    std::uint16_t delimiter{0};
+    std::uint8_t depth{0};
+};
+
+// C-2.2 ("keyed IDENTICALLY to `make_group_ctx_key`") made structural rather
+// than asserted: ONE function builds the key, and both the store side
+// (xml_loader) and the lookup side (`group_ctx_delimiter_impl`) go through it,
+// so the depth clamp cannot drift between them. The clamp mirrors
+// `make_group_ctx_key`'s `std::min(parent_path.size(), kMaxGroupContextDepth)`
+// (include/fixpp/dict/table_view.hpp:229-233) — a path deeper than K=16 clamps
+// rather than growing unbounded.
+[[nodiscard]] inline GroupCtxDelim make_group_ctx_delim(
+    std::span<std::uint16_t const> parent_path, std::uint16_t no_tag,
+    std::uint16_t delimiter) noexcept {
+    GroupCtxDelim rec;
+    rec.no_tag = no_tag;
+    rec.delimiter = delimiter;
+    rec.depth = static_cast<std::uint8_t>(
+        std::min<std::size_t>(parent_path.size(), kMaxGroupContextDepth));
+    for (std::uint8_t i = 0; i < rec.depth; ++i) {
+        rec.parent_path[i] = parent_path[i];
+    }
+    return rec;
+}
+
+// Ordering within a message's run: by `no_tag`, then by the path, so the
+// lookup can binary-search on `no_tag` and walk the (normally one-element)
+// equal range. Also the dedup key at the emission site.
+[[nodiscard]] inline bool group_ctx_delim_less(GroupCtxDelim const& a,
+                                               GroupCtxDelim const& b) noexcept {
+    if (a.no_tag != b.no_tag) {
+        return a.no_tag < b.no_tag;
+    }
+    if (a.depth != b.depth) {
+        return a.depth < b.depth;
+    }
+    for (std::uint8_t i = 0; i < a.depth; ++i) {
+        if (a.parent_path[i] != b.parent_path[i]) {
+            return a.parent_path[i] < b.parent_path[i];
+        }
+    }
+    return false;
+}
+
+// 083 T026/T027 — the loaders' shared per-message capture state for Entity 2
+// (research.md D-1 "first-emission capture"; contracts/group_ctx_delims.md
+// C-1.1/C-1.2/C-1.3). Defined here rather than in either loader so the XML and
+// Orchestra walks cannot drift apart: FR-005 / C-1.5 records that a one-loader
+// fix is a half-restructure.
+//
+// `path` and `pending` are pushed and popped TOGETHER around each nested-group
+// recursion and are parallel: `path.back()` is the innermost open group's own
+// count tag, `pending.back()` is that group's delimiter slot — 0 until the
+// FIRST FieldRef emitted at its level sets it. Because component members
+// expand inline at the enclosing level and a nested group's count tag is
+// pushed at the OUTER level before descent, "first emitted at this level" is
+// already document order: FR-003 and FR-004 fall out and NO second traversal
+// is written. Adding one would recreate the drift that caused the defect.
+//
+// A NULL `DelimCapture*` is the C-1.1 gate: the component-cache and
+// group-cache expansions are not message-scoped, so they must contribute
+// NOTHING. A null pointer says that structurally — a discard vector would
+// still manufacture records keyed to no message.
+struct DelimCapture {
+    std::vector<std::uint16_t> path;     // ancestors, outermost first
+    std::vector<std::uint16_t> pending;  // parallel to `path`; 0 = not yet captured
+    std::vector<GroupCtxDelim> out;      // this message's records
+};
+
+// The FIRST emission at the currently-open group's level wins. Called at every
+// site that pushes a FieldRef, so `no-op unless a group is open and its slot is
+// still empty` is the whole rule. Deliberately NOT an unconditional assignment:
+// an `=` here would record the LAST member instead of the first, invert the
+// delimiter, and still compile and pass every test that does not pin order —
+// the same hazard the census oracle's `try_emplace` guards against.
+inline void capture_first_emission(DelimCapture* cap, std::uint16_t tag) noexcept {
+    if (cap != nullptr && !cap->pending.empty() && cap->pending.back() == 0) {
+        cap->pending.back() = tag;
+    }
+}
+
 class dict_metadata_handle {
 public:
     explicit dict_metadata_handle(std::pmr::memory_resource* mr) noexcept
@@ -104,6 +207,8 @@ public:
           group_required_offsets_(mr),
           msg_group_required_pool_(mr),
           per_msg_group_required_offsets_(mr),
+          group_ctx_delim_pool_(mr),
+          per_msg_group_ctx_delim_offsets_(mr),
           enum_values_(mr),
           enum_runs_(mr),
           messages_(mr),
@@ -174,6 +279,25 @@ public:
     [[nodiscard]] std::span<std::pair<std::uint16_t, std::uint16_t> const>
     msg_group_required_pairs_impl(std::string_view msg_type) const noexcept;
 
+    // 083 T025 (Entity 2): every per-context delimiter record this message's
+    // own expansion produced, sorted by `group_ctx_delim_less`. Consumed by
+    // `Dictionary::as_table_view()`'s context-store loop in place of the
+    // global `group_first_field(no_tag)`, and by the loaders' finalize()
+    // completeness invariant (FR-023 / C-3.4).
+    [[nodiscard]] std::span<GroupCtxDelim const> msg_group_ctx_delims_impl(
+        std::string_view msg_type) const noexcept;
+
+    // 083 T025 (Entity 2): the delimiter for ONE context. Returns 0 when no
+    // record exists — which is distinguishable from a real answer because a
+    // stored record's delimiter is never 0 (FR-006). There is deliberately NO
+    // fallback to `group_first_field(no_tag)`: that would reinstate the exact
+    // defect this feature removes (data-model.md Entity 2, "no silent
+    // fallback exists"). Callers that need a fail-closed disposition act on
+    // the 0.
+    [[nodiscard]] std::uint16_t group_ctx_delimiter_impl(
+        std::string_view msg_type, std::span<std::uint16_t const> parent_path,
+        std::uint16_t no_tag) const noexcept;
+
     // 074 (FR-002): enum {value, description} pairs for `tag`; empty span if the
     // tag has no codeset entry. Binary-searches `enum_runs_` (sorted by tag).
     [[nodiscard]] std::span<EnumValueRef const> enum_values_impl(std::uint16_t tag) const noexcept;
@@ -239,6 +363,18 @@ public:
     // the i-th message in `messages_` (SAME index as `per_msg_field_offsets_`).
     std::pmr::vector<std::pair<std::uint16_t, std::uint16_t>> msg_group_required_pool_;
     std::pmr::vector<MsgFieldsRun> per_msg_group_required_offsets_;
+
+    // 083 T025 (Entity 2 — C-2.1/C-2.3): per-message per-context delimiter
+    // records. `per_msg_group_ctx_delim_offsets_[i]` is the run for the i-th
+    // message in `messages_` (SAME index as `per_msg_field_offsets_`).
+    // PMR-allocated on the caller's `memory_resource` alongside the handle's
+    // other tables; written ONCE during load and never mutated afterwards.
+    // C-2.1's "no mutation path exposed" holds at the surface that matters:
+    // this handle is private to `src/dictionary/` (see the file header), and
+    // the public `Dictionary` exposes only const accessors over it — there is
+    // no setter anywhere in `include/fixpp/dict/`.
+    std::pmr::vector<GroupCtxDelim> group_ctx_delim_pool_;
+    std::pmr::vector<MsgFieldsRun> per_msg_group_ctx_delim_offsets_;
 
     // 074 (FR-002): flat enum-value store (value+description string_views into
     // the FROZEN name_pool_ — bound in finalize() after the pool is stable) and
