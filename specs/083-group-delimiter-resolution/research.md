@@ -108,6 +108,27 @@ The reasons path keying is nonetheless correct, in order of weight:
 
 **Landed in**: spec **FR-021e** / **SC-016** / US5 scenario 3; `contracts/typed_read_splitter.md` **C-8.0c** (+ C-8.0b's first bullet withdrawn, C-8.6a, W-9 fixture (c), **W-10 re-stated**, **W-10a** new); `contracts/consume_group.md` **C-4.4** (pointer); `plan.md` Phase-4 gate + Article IX §1 branch (11); `data-model.md` Entity 6; `quickstart.md` §4.
 
+### D-4a per-instance cap assessment — MEASURED (T024), and the bundle's stated reason is falsified
+
+C-8.0c.4 recorded this as *"inferred, to be confirmed"*: **no shipped shape breaches `default_max_group_entries_per_instance = 4096`** (`include/fixpp/wire/offset_table.hpp:28`), *"because … no group instance in the ten dictionaries approaches 4096 entries."* Measured at T024 by a scratch probe over all ten dictionaries — for every group in every message, the **static per-instance entry count** (direct members, plus one instance's worth of each nested group, recursively), computed **twice**: post-C-8.0c, and pre-C-8.0c (where a group whose delimiter is a nested count tag truncates to exactly **1** entry, since the bare `++k` lands inside the nested group and `:478` breaks the instance).
+
+| dictionary | groups | C-8.0c popn | max **pre** | max **post** | max Δ | groups > 4096 |
+|---|---:|---:|---:|---:|---:|---:|
+| FIX40 / FIX41 / FIX42 | 0 | 0 | 0 | 0 | 0 | **0** |
+| FIX43 | 234 | 0 | 133 | 133 | 0 | **0** |
+| FIX44 | 823 | 0 | 229 | 229 | 0 | **0** |
+| FIX50 | 1114 | 0 | 301 | 301 | 0 | **0** |
+| FIX50SP1 | 1309 | 0 | 326 | 326 | 0 | **0** |
+| FIX50SP2 | 25927 | 0 | 4046 | 4046 | 0 | **0** |
+| FIXT11 | 8 | 0 | 3 | 3 | 0 | **0** |
+| Orchestra FIX Latest | 26806 | **252** | 4064 | **4082** | **1265** | **0** |
+
+**The conclusion holds: zero groups cross the cap, so C-8.0c creates no new SC-007 rejection on any shipped schema shape.** The *reason* given does not. The global maximum is **4082 against a cap of 4096 — 14 entries of headroom, 99.66 % of the cap** (Orchestra `X/268`; runner-up Orchestra `DC/1889` at 4062, then FIX50SP2 `DC/1889` at 4046, 50 entries clear). "No shipped shape approaches 4096" is false; six shapes sit above 3900. The assessment survives by a **thin margin that has to be stated**, not by the wide one the clause assumed.
+
+**Where C-8.0c's growth actually lands — small at the top, large at the bottom.** Only Orchestra has a non-empty C-8.0c population (252 of 26 806 groups; the nine QuickFIX dictionaries have **none**, so their pre/post columns are identical and this assessment is Orchestra-only). The two largest deltas are the C-8.0c groups **themselves** — Orchestra `CD/1499` and `CC/1499`, **1 → 1266** and **1 → 1262** — which is the truncation the repair removes, quantified. The shapes near the cap grew by only **18–23** (`X/268` 4064 → 4082, `y/146` 3966 → 3989), because they merely *contain* a C-8.0c group rather than being one. So the repair spends ~18 of Orchestra's ~32 remaining entries of headroom.
+
+**What this measure is NOT, stated so it is not over-read.** It is a **static schema** bound — one instance of every nested group, every declared optional field present. It is **not** an upper bound on wire entries: a message carrying ≥ 2 instances of a nested group inside one outer instance exceeds it, and can cross 4096 **with or without** C-8.0c. What C-8.0c changes, on the 252 Orchestra contexts, is that the crossing becomes reachable at a **lower nested-instance count**. That is the **fail-closed** direction relative to today, where the identical message is **silently truncated** instead — rejection replaces silent instance loss, which is D-4a's whole point. FR-015's caller-tunable `Config::max_group_entries_per_instance` is the mitigation and already exists.
+
 ---
 
 ## D-5 — Member-set injection becomes redundant, not removed
