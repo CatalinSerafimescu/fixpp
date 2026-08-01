@@ -142,14 +142,31 @@ ctest -L codegen        # required — the loader change is codegen-adjacent
 
 ## 6. What "done" looks like
 
-| | before | after | provenance |
+**Table re-stated 2026-08-01 (T076) against the DELIVERED tree.** The previous version carried spec.md's planning-era Baseline figures (335 / 52 / 30 / 232), which T012 superseded by measurement on 2026-07-31 — spec.md's own Baseline table was amended then, but this table was not, so it had been reading as a live target while quoting withdrawn numbers. Every "before" below is now T012's **measured** figure and every "after" is a value asserted by a landed test, with the command that prints it.
+
+| | before (measured, T012) | after (asserted) | provenance |
 |---|---|---|---|
-| wrong delimiter | 335 of 335 **measured** | **0 wrong**, over the 365 contexts in the *affected set* | 335 measured; the 30 that make it 365 are **projected** until the Phase-1 pin measures them |
-| polluted member sets | 52 measured | 0 | measured |
-| unregistered contexts | 30 measured | 0 | measured |
-| FIX50SP2 groups | 502 measured | 505 | measured |
+| wrong delimiter | **330** | **0** | `DelimiterCensus.RedCountsReconcileWithSpecBaseline` — all ten dictionaries, no carve-out |
+| of those, nested | **235** | **0** | same pin, `wrong(nested)` column |
+| polluted member sets | **48** | **0** | same pin — falls out of the delimiter fix by construction (D-5/C-3.3), not a second assertion |
+| unregistered contexts (in C-3.4a's checked set) | **0** | **0** | same pin, `unreg_checked` column. *(The planning-era "30" was a different population — see research.md T008: the 30 are unregistered on the BARE-store surface only, and 27 of them were already correct on the context surface.)* |
+| FIX50SP2 registered groups | **502** | **505** | `DelimiterCensus.RegisteredGroupCountMatchesCodegenFix50Sp2` — oracle 505, registered 505, no unresolved no_tags |
 | delimiter pinned anywhere | **nothing** | all ten dictionaries, no carve-out | — |
+| mode-(c) contexts (delimiter IS a nested count tag) | **485**, extent truncated to ONE instance | **485**, extent spans all `declared` | `nested_delim_total` = 240 (FIX50SP2) + 245 (Orchestra), registered/unregistered split **485 / 0**; behaviour pinned by W-10a legs 1–4 |
+| `INT`-typed contexts outside the checked set (#196) | 55 | **55** — unchanged, tripwire-asserted | `IntTypedOutOfCheckedSetIsExactlyFiftyFive`; this feature does not narrow or widen #196's scope |
 
-*(365 is the affected set, not the context population — the population is 56,246 rising to ~56,276. The projection marker was added at Gate A round 1; the row previously read "0 of 365" with no marker, in a bundle that is otherwise explicit about which figures are projections.)*
+Context population: **56,276**.
 
-Plus: both load dispositions witnessed; the typed-read splitter characterised by evidence rather than left as an unverified note; behaviour changes recorded as operator-facing `spec/behaviors-and-limitations.md` rows (this repo's release-note artifact); the interop divergence observed and documented.
+Plus, all delivered: both load dispositions witnessed (fail-closed default + tolerant opt-in); the typed-read splitter characterised **by evidence** — including a recorded NEGATIVE result for C-8.5 with the shapes tried, rather than an unverified note; behaviour changes recorded as operator-facing `spec/behaviors-and-limitations.md` rows (this repo's release-note artifact), with FR-019a class (b) enumerated by measurement (95 contexts, 6 dictionaries); the interop position recorded as observational-only, including the fact that `reference-engines/` is absent from this working copy.
+
+### T076 run record (2026-08-01)
+
+| step | result |
+|---|---|
+| §0 baseline / §1 + §1a / §2 + §2a / §3 "prove the pin can fail" | RED observations were made at Phase 1 and are recorded in `.specify/decisions/083-group-delimiter-resolution-verify.md` (incl. T046's mutation, which reproduced pollution **exactly** at 48). They are **not** re-run here: re-observing them would require reverting the fix. |
+| §4 per-phase table | every row's witness is landed and green — see the Phase-3/4/5 exit-gate sections of the verify record |
+| §5 `ctest -L dictionary` | **17/17 PASS** |
+| §5 `ctest -L wire` | **4/4 PASS** |
+| §5 `ctest -L capi` | **22/22 PASS** *(was 21 — `capi_pure_tests` was unlabelled, so this command had never run 083's five C-ABI witnesses or the ABI golden; fixed at T062)* |
+| §5 `ctest -L codegen` **(mandatory)** | **32/32 PASS**, after the full 2944-target closure build (`NINJA_EXIT=0`) |
+| §6 done-table | re-stated above against the delivered tree; every figure re-derived from a live test run, none carried over |
