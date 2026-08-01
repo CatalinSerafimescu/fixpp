@@ -5,7 +5,7 @@
 
 ## Surface
 
-Three seams, all internal to the library. **No public C++ header signature and no C ABI symbol changes.**
+Three seams, all internal to the library. *(Corrected 2026-08-02, Gate B r1 F2/IND-5 — the sentence below was a blanket claim that is false at source; C-8.1 of `contracts/typed_read_splitter.md` explicitly authorizes and names the actual widening.)* **No C ABI symbol changes.** `include/fixpp/wire/offset_table.hpp`'s `OffsetTable` ctors and `include/fixpp/wire/parser.hpp`'s `MessageView<Index>` ctors each gain one **defaulted** `group_delim_fn_t` parameter (C-8.1) — a public C++ header signature widening, source-compatible for every existing caller. C-8.3's narrower promise — `group_slices(no_tag)` / `group_slices_status(no_tag)` keep their signatures — holds exactly, and the C ABI freeze holds byte-for-byte (verify Step 5: `nm` golden 72 = 72 identical, `include/fix/c_api*` diff empty).
 
 | Seam | Direction | Contract |
 |---|---|---|
@@ -114,10 +114,12 @@ The context-keyed accessor falls back to the bare global store on a miss. This i
 
 Heading corrected 2026-07-30 (Gate A round 1): the previous heading read `Post-conditions (measured)` while the first row's "After" value rests on **365**, which is a projection. A contract is the document an implementer treats as the acceptance target, so a projected figure under a measurement heading is the wrong kind of error to leave in it.
 
+*(Figures superseded 2026-08-02, Gate B r1 F2/IND-4 — the 335/52/30 row below is the pre-`/implement` scratch-probe projection this file was never repointed to correct; `spec.md:107` and `spec.md:370` record the re-measured, authoritative figures — **330 wrong / 48 polluted / 30 unregistered** — after `spec.md:362-366`'s T012/T013/T014 finding that FIX42 registers **no** group contexts at all, which moves the wrong/polluted cells by exactly FIX42's contribution. See `spec.md:370` for the full reconciliation.)*
+
 | Property | Before | After | provenance |
 |---|---|---|---|
-| contexts with wrong delimiter | **335 measured** — scored over the contexts that resolve a delimiter today, so excluding the 30 that resolve none | **0 wrong**, over the **365** contexts in the *affected set* | 335 measured; 30 **projected** until the Phase-1 pin measures them (SC-001, SC-015) |
-| contexts with polluted member set | **52 measured** | 0 | measured |
+| contexts with wrong delimiter | **330 measured** *(was 335 — see note above)* — scored over the contexts that resolve a delimiter today, so excluding the 30 that resolve none | **0 wrong**, over the **365** contexts in the *affected set* | 330 measured; 30 **projected** until the Phase-1 pin measures them (SC-001, SC-015) |
+| contexts with polluted member set | **48 measured** *(was 52 — see note above)* | 0 | measured |
 | contexts unregistered | **30 measured** | 0 | measured |
 | FIX50SP2 registered groups | **502 measured** | 505, matching codegen | measured; delta accounted for by three named groups (FR-017) |
 

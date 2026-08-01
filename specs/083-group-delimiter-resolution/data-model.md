@@ -110,7 +110,7 @@ Only `src/wire/offset_table.cpp:656` changes its delimiter **source**. `:454`, `
 |---|---|---|---|
 | inbound validation (`validator.hpp`) | dictionary | yes at both positions **after C-4.1** | Phase 2 |
 | offset-table **extent walk** (`:454`) | wire (unchanged) | post-delimiter only → **both positions after C-8.0c** | Phase 4 — **repaired**, was scoped out at round 2 |
-| typed-read **splitter** (`:656`) | **wire → dictionary** (C-8.1/C-8.2) | yes (C-8.5) | Phase 4 |
+| typed-read **splitter** (`:656`) | **wire → dictionary** (C-8.1/C-8.2) | **no — C-8.5 DESCOPED** (2026-08-01, `tasks.md` T059; `contracts/typed_read_splitter.md`'s dated banner) | Phase 4 |
 | `group()` cap loop (`:561`) | wire | no — flat | out of scope (C-8.0b); feeds a DoS cap only |
 
 **A correct split of a truncated extent is still wrong**, which is why FR-021b's agreement invariant below could not have held on the 262 contexts whose post-fix delimiter is a nested group's count tag until C-8.0c landed.
