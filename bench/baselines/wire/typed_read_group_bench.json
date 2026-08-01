@@ -17,33 +17,33 @@
       "name": "BM_TypedReadGroup_Flat2",
       "fixture": "ordinary group, 2 instances — the C-8.0c descent probe runs per instance and answers FALSE both times (pure added-probe cost, no recursion)",
       "pre083_median_ns": 382,
-      "measured_median_ns": 386,
       "stddev_ns": 8.92,
-      "delta_pct": 1.0,
-      "budget_pct": 5,
-      "verdict": "WITHIN — C-8.0c's extra per-instance group_member_fn_ evaluation is ~2 ns/instance on the not-taken arm"
+      "verdict": "WITHIN — C-8.0c's extra per-instance group_member_fn_ evaluation is ~2 ns/instance on the not-taken arm",
+      "budget_pct_note": "no [2b 6.6] ceiling for the typed-read splitter; +/-5% here is the A/B tolerance vs the pre-083 run, not a recorded-baseline regression budget",
+      "seed_median_ns": 386,
+      "delta_vs_pre083_pct": 1.0
     },
     {
       "name": "BM_TypedReadGroup_ModeC2",
       "fixture": "FR-021 mode (c), 2 instances — the outer delimiter IS nested group 200's count tag, so the descent probe answers TRUE and recurses",
       "pre083_median_ns": null,
       "pre083_status": "WRONG RESULT — split into 1 slice, expected 2 (extent truncated); the bench refused to time it",
-      "measured_median_ns": 661,
       "stddev_ns": 13.0,
-      "delta_pct": null,
-      "budget_pct": null,
-      "verdict": "NEW CORRECTNESS — more work because it is now right, not because it regressed"
+      "verdict": "NEW CORRECTNESS — more work because it is now right, not because it regressed",
+      "budget_pct_note": null,
+      "seed_median_ns": 661,
+      "delta_vs_pre083_pct": null
     },
     {
       "name": "BM_TypedReadGroup_ModeC8",
       "fixture": "the same mode-(c) shape at 8 instances — separates the per-instance term from the fixed per-materialization term",
       "pre083_median_ns": null,
       "pre083_status": "WRONG RESULT — split into 1 slice, expected 8",
-      "measured_median_ns": 1643,
       "stddev_ns": 31.2,
-      "delta_pct": null,
-      "budget_pct": null,
-      "verdict": "NEW CORRECTNESS. Derived per-instance cost from the two measured mode-(c) points: (1643-661)/6 = ~164 ns per additional outer instance, which is the descent + nested-extent recursion, not an assertion"
+      "verdict": "NEW CORRECTNESS. Derived per-instance cost from the two measured mode-(c) points: (1643-661)/6 = ~164 ns per additional outer instance, which is the descent + nested-extent recursion, not an assertion",
+      "budget_pct_note": null,
+      "seed_median_ns": 1643,
+      "delta_vs_pre083_pct": null
     }
   ]
 }

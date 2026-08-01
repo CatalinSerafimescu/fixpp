@@ -1,5 +1,5 @@
 {
-  "_note": "083-group-delimiter-resolution T063/T066 SEED baseline — linux-clang-RELEASE (2026-08-01). FR-022 path 1 (inbound validate). These are NEW rows, so there is no prior baseline to compare against; instead the SAME bench file was built and run against the PRE-083 library (a detached worktree at merge-base 0539b56d) so the Article VIII §2 +/-5% budget is measured, not asserted. Medians over 9 --benchmark_repetitions at --benchmark_min_time=0.5s, same host, runs sequential (not concurrent). VERDICT: path 1 is WITHIN budget on every comparable row. BM_ValidateGroup_DivergentContext has NO pre-083 counterpart — the pre-083 library REJECTED that frame during warm-up ('IncrementalX fixture is not conformant'), which is the defect this feature fixes; it is recorded as a new row, never as a regression.",
+  "_note": "083-group-delimiter-resolution T063/T066 SEED baseline — linux-clang-RELEASE (2026-08-01). FR-022 path 1 (inbound validate). These are NEW rows, so there is no prior baseline to compare against; instead the SAME bench file was built and run against the PRE-083 library (a detached worktree at merge-base 0539b56d) so the +/-5% tolerance is MEASURED against a real pre-083 run rather than asserted. These are SEED rows: no prior baseline existed, so Article VIII §2's regression budget does not apply to them and none is claimed. Medians over 9 --benchmark_repetitions at --benchmark_min_time=0.5s, same host, runs sequential (not concurrent). VERDICT: path 1 is WITHIN budget on every comparable row. BM_ValidateGroup_DivergentContext has NO pre-083 counterpart — the pre-083 library REJECTED that frame during warm-up ('IncrementalX fixture is not conformant'), which is the defect this feature fixes; it is recorded as a new row, never as a regression.",
   "context": {
     "date": "2026-08-01",
     "host_name": "WSLUBUNTU24.04",
@@ -17,32 +17,32 @@
       "name": "BM_ValidateGroup_NoGroup",
       "fixture": "Heartbeat(35=0) — no group; every entry short-circuits on the group_bits_ pre-filter",
       "pre083_median_ns": 289,
-      "measured_median_ns": 290,
       "stddev_ns": 10.7,
-      "delta_pct": 0.3,
-      "budget_pct": 5,
-      "verdict": "WITHIN — the common path did not acquire a string hash, which was the main regression risk"
+      "verdict": "WITHIN — the common path did not acquire a string hash, which was the main regression risk",
+      "budget_pct_note": "[2b 6.6] ceiling applies to this inbound path; the +/-5% figure is the tolerance used against it",
+      "seed_median_ns": 290,
+      "delta_vs_pre083_pct": 0.3
     },
     {
       "name": "BM_ValidateGroup_FirstSeenContext",
       "fixture": "35=W MarketDataSnapshotFullRefresh — NoMDEntries(268) in MDFullGrp, first-seen context (pre- and post-083 resolve the SAME delimiter 269), so this row isolates lookup COST from behaviour change",
       "pre083_median_ns": 542,
-      "measured_median_ns": 562,
       "stddev_ns": 9.29,
-      "delta_pct": 3.7,
-      "budget_pct": 5,
-      "verdict": "WITHIN — the context probe (string_view + path span hash) costs ~20 ns per group-bearing message vs the old uint16 hash"
+      "verdict": "WITHIN — the context probe (string_view + path span hash) costs ~20 ns per group-bearing message vs the old uint16 hash",
+      "budget_pct_note": "[2b 6.6] ceiling applies to this inbound path; the +/-5% figure is the tolerance used against it",
+      "seed_median_ns": 562,
+      "delta_vs_pre083_pct": 3.7
     },
     {
       "name": "BM_ValidateGroup_DivergentContext",
       "fixture": "35=X MarketDataIncrementalRefresh — the SAME NoMDEntries(268) in MDIncGrp, delimiter MDUpdateAction(279)",
       "pre083_median_ns": null,
       "pre083_status": "REJECTED — validate() refused this conforming frame on the pre-083 library (the L-063-3 residual-(b) false-reject)",
-      "measured_median_ns": 695,
       "stddev_ns": 18.5,
-      "delta_pct": null,
-      "budget_pct": null,
-      "verdict": "NEW CAPABILITY — no pre-083 counterpart exists, so no delta is claimed"
+      "verdict": "NEW CAPABILITY — no pre-083 counterpart exists, so no delta is claimed",
+      "budget_pct_note": null,
+      "seed_median_ns": 695,
+      "delta_vs_pre083_pct": null
     }
   ]
 }
