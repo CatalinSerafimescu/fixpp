@@ -69,13 +69,17 @@ rm -rf /mnt/wsl/fixppbuild/build/linux-gcc-release  # artifacts/ is untouched
 ctest --test-dir build/linux-gcc-release -R "consumer::install-witness" --output-on-failure
 ```
 
-**Expected**: PASS — the standalone consumer configures via `find_package(fixpp)`, links `fixpp::fixpp`, and builds with no hand-added include or library path.
+**Expected**: PASS — the standalone consumer configures via `find_package(fixpp)`, links `fixpp::fixpp`, and builds with no hand-added include or library path. **A second, separate target in the same witness links `fixpp::capi` by name** (FR-003, T034): it is the only place an installed *imported name* of a by-name member is exercised at all — everything else here links the umbrella. Keep it separate; linking `fixpp::capi` and `fixpp::fixpp` from one target is the combination Article IV §2 / `architecture.md:509` rejects.
 
-**This tier now links the whole closure.** It goes from four hand-listed archives (`tests/consumer/CMakeLists.txt:56`) to `fixpp::fixpp`, which pulls the full export set plus OpenSSL, asio and Crc32c. So it is the **first** place a missing `find_dependency` (FR-010c) or the `FILE_SET` blocker (FR-002b) will surface — expect early failures here to be real, not harness noise.
+**This tier now links the whole closure.** It goes from four hand-listed archives (`tests/consumer/CMakeLists.txt:56`) to `fixpp::fixpp`, which pulls the **measured eleven-member closure** plus OpenSSL, asio and Crc32c. So it is the **first** place a missing `find_dependency` (FR-010c) or the `FILE_SET` blocker (FR-002b) will surface — expect early failures here to be real, not harness noise.
+
+> **The umbrella is not the export set — and `fixpp::fixpp` pulls neither group of the five.** `fixpp_session` links none of `fixpp_capi`, `fixpp_config_toml`, `fixpp_tap`, `fixpp_service` or `fixpp_log_otlp`. **Four** of those (`fixpp::capi`, `fixpp::config_toml`, `fixpp::tap`, `fixpp::service`) are exported so a consumer can link them **by name**; the **fifth**, `fixpp_log_otlp`, is **closure-only** — no public header names `fixpp::log_otlp` and no consumer is told to link it (`contracts/export-set.md` §1). A green run here says nothing about any of the five.
+
+> **⚠️ Six export-set members are DERIVED BY READING, not measured — the set is not settled.** `fixpp_capi`, `fixpp_capi_objects`, `fixpp_config_toml`, `fixpp_log_otlp`, `fixpp_tap` and `fixpp_service` were read out of `target_link_libraries`, which is the exact method the Gate A round-1 measurement caught being wrong in **three** places across a **three-level** cascade. Only the **eleven** in `contracts/export-set.md` §2 come from an executed `install(TARGETS … EXPORT …)` + generate run. **Re-running that experiment once the six are wired is a standing implementation obligation** (`contracts/export-set.md` §2a, `tasks.md` T024) — do not read this document as describing a closed export set.
 
 **Must include BOTH header kinds** (SC-002): a hand-written `include/` header *and* a generated per-version header (e.g. `Fields.hpp`). They arrive via two different install rules (`CMakeLists.txt:321` and `:346`), so this proves the generated headers were **installed and are reachable**.
 
-> **What this does NOT prove.** Both install rules write to the same `${CMAKE_INSTALL_INCLUDEDIR}` (`:323` == `:348`), so a generated header resolves through the umbrella's install include root whether or not any `fixpp::dict::<ver>` target has an install interface at all. If those targets stay in the export set, do **not** cite this check as evidence their install interface is correct — it structurally cannot fail on that. (The design proposes dropping them; see `contracts/export-set.md` §2.)
+> **What this does NOT prove.** Both install rules write to the same `${CMAKE_INSTALL_INCLUDEDIR}` (`:323` == `:348`), so a generated header resolves through the umbrella's install include root whether or not any `fixpp::dict::<ver>` target has an install interface at all. **Because** those targets are **decided, excluded** (research R2; `contracts/export-set.md` §2 — a closed Gate A round-1 decision, not a live proposal), the question does not arise today. If a *future* change re-adds them, do **not** cite this check as evidence their install interface is correct — it structurally cannot fail on that.
 
 > **What this tier still cannot see.** It is handed the producing build's Conan toolchain (`tests/consumer/CMakeLists.txt:39-44`), so a green run says nothing about whether the package works on a host without that environment. That is §5b's job.
 
@@ -132,6 +136,12 @@ ctest --test-dir build/linux-gcc-release -R "packaging::provenance" --output-on-
 **Expected**: a witness fed a package from a *different* configuration, source revision, **or worktree state** fails.
 
 > **Why this is live, not theoretical.** The build strategy deletes trees between configurations while `artifacts/` deliberately survives (FR-021). That directory therefore accumulates packages from earlier configurations and earlier source states — precisely what would let a witness go green against a package predating the change under test.
+
+> **A SECOND, separate provenance gate — telemetry** (FR-011, T062a):
+> ```bash
+> ctest --test-dir build/linux-gcc-release -R "packaging::telemetry-provenance" --output-on-failure
+> ```
+> Every produced artifact must record `FIXPP_BUILD_OTEL=ON` in its provenance, across **all six** configurations, and the packaging step must **fail** on any that does not. FR-011 permits the `-o "&:with_otel=False"` accelerator (§1) while the CMake is being written and forbids one reaching a shipped artifact — nothing enforced the second half. It reads the same provenance record as the check above but has a **different red fixture** (a deliberately OTel-OFF configuration, versus a mismatched configuration/revision/worktree), so it is its own ctest and must not be merged into `packaging::provenance`. **Prove it red** by packaging one OTel-OFF configuration and confirming rejection.
 
 > **Configuration + revision is not enough** (FR-021a). Two packages built from the same commit either side of an uncommitted edit are indistinguishable under that pair — and an uncommitted edit is the *normal* state of a working branch, so it is the likely case, not the exotic one. Provenance must also record worktree cleanliness (reusing `git status --porcelain`, as `tests/codegen/codegen_build_graph_test.cmake:202-224` already does) or a build-input content hash.
 
@@ -196,7 +206,7 @@ Neither the archiver nor the linker strips anything — the compiler never emits
 
 ## 7b. Two traps when adding the new tests
 
-**Every packaging test must be `RUN_SERIAL` with an explicit `TIMEOUT`** — now **four** (contents, provenance, real-client, clean-environment), plus SC-007a's nested scratch configure if that option is taken. They configure and build sub-projects, so concurrent runs collide with each other and with the git-cleanliness gate. Mirror the existing consumer witness (`TIMEOUT 300` at `CMakeLists.txt:308-310`, driven via `cmake -P`). Any scratch configure must write **outside** the source tree, or it reds the same cleanliness gate.
+**Every packaging test must be `RUN_SERIAL` with an explicit `TIMEOUT`** — now **five** (contents, provenance, telemetry-provenance, real-client, clean-environment), plus SC-007a's nested scratch configure if that option is taken. They configure and build sub-projects, so concurrent runs collide with each other and with the git-cleanliness gate. Mirror the existing consumer witness (`TIMEOUT 300` at `CMakeLists.txt:308-310`, driven via `cmake -P`). Any scratch configure must write **outside** the source tree, or it reds the same cleanliness gate.
 
 **Commit `NOTICE` together with its install rule.** `tests/codegen/codegen_build_graph_test.cmake:202-224` runs `git status --porcelain` and fails on any output. The build symlinks are invisible to it (git never descends into an ignored directory), but a new **tracked** file at the repo root is not — `NOTICE` will red that gate for as long as it stays uncommitted.
 
@@ -232,3 +242,5 @@ Build in a **separate sandbox** under `/mnt/c/temp/`. **Do not reuse `/mnt/c/tem
 | 16 | `find_package(fixpp)` **resolves** against dependencies the producing build's package manager did not provide — plus the **proven red leg** (one named dependency removed ⇒ that dependency's `find_dependency` diagnostic and no other) and the installed-config build-host-path grep | SC-016, FR-018e |
 
 **A gate never observed failing proves nothing.** SC-007b requires the exclusion assertion be demonstrated red on a deliberately broken input before it counts. SC-007a's closure leg cannot take that form — CMake enforces closure at *generate*, so a broken tree has no build system for ctest to run in — which is why it requires a recorded red **generate** run or a nested scratch configure instead. Claiming a ctest-shaped assertion for a failure mode that prevents ctest from existing is the defect this split exists to prevent.
+
+> **A fourth proven-red gate sits OUTSIDE this table because it is not SC-keyed.** T062a's telemetry-provenance gate (§5, FR-011) must also be demonstrated red — by packaging one deliberately OTel-OFF configuration and confirming rejection. The table above has sixteen SC rows; the proven-red set is **four**: SC-007a, SC-007b, SC-016's red leg, and this one. Do not infer the proven-red count from the row count.

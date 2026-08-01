@@ -150,9 +150,9 @@ That leaves four obligations, all of them real:
 
 ## 5. Naming and provenance
 
-Names encode product, version, platform, toolchain, configuration, and are unique across the matrix (FR-017).
+Names encode product, version, platform, toolchain, configuration, **and format**, and are unique across the matrix (FR-017). **Format is part of the naming dimension, not only of uniqueness**: the three Linux formats of one configuration are distinct artifacts, and each must be **independently identifiable by name** — including the file extension where the format supplies one — never merely disambiguated by directory placement.
 
-Each artifact carries **provenance**: the configuration it was built from, the source revision, **and** either worktree cleanliness or a content hash over the build inputs (FR-021a).
+Each artifact carries **provenance**: the configuration it was built from, the source revision, **and** either worktree cleanliness or a content hash over the build inputs (FR-021a) — **plus the telemetry state it was built with** (FR-011 / `tasks.md` T062a: every shipped artifact must record `FIXPP_BUILD_OTEL=ON`, and the packaging step fails on any that does not, so the §1 development accelerator cannot reach a shipped package).
 
 > **Why provenance is load-bearing here.** The build strategy deletes each build tree after packaging (Assumption 5) while finished artifacts are deliberately preserved *past* that deletion (FR-021). Those two rules together maintain a directory of packages from earlier configurations and earlier source states — exactly the input that would let a witness report green against a package predating the change under test. Any witness must consume a current-build package and **fail on provenance mismatch**.
 
