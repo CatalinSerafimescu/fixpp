@@ -150,15 +150,17 @@ public:
     // FR-015 / [2b §1.2]: same as above but with caller-tunable caps.
     MessageView(frame_view const& frame, std::pmr::memory_resource* mr, OffsetTable::Config cfg,
                 void const* opaque_dict, classify_fn_t classify_fn,
-                group_member_fn_t group_member_fn) noexcept
+                group_member_fn_t group_member_fn,
+                group_delim_fn_t group_delim_fn = nullptr) noexcept
         requires(Mode == access_mode::Index)
         : View{frame.bytes().data(), frame.bytes().size(),
                frame.token()},  // [2b §6.4] thread real pool token
-          table_{frame, mr, cfg, opaque_dict, group_member_fn},
+          table_{frame, mr, cfg, opaque_dict, group_member_fn, group_delim_fn},
           mr_{mr},
           opaque_dict_{opaque_dict},
           classify_fn_{classify_fn},
           group_member_fn_{group_member_fn},
+          group_delim_fn_{group_delim_fn},
           unk_items_{mr} {
         // See the sibling ctor above — same root group_context seed, same
         // rationale (Gate B PR#176 r1 root cause #1).
@@ -658,7 +660,13 @@ public:
                                                         std::pmr::memory_resource* mr,
                                                         OffsetTable::Config cfg) noexcept
     [[clang::lifetimebound]] requires(Mode == access_mode::Index) {
-        MessageView<Mode> mv{frame, mr, cfg, opaque_dict_, classify_fn_, group_member_fn_};
+        // 083 T057 (C-8.1): the cap-tunable overload threads the delimiter
+        // callback too. It supplies `opaque_dict_`, so omitting it here would
+        // silently take C-8.4's dict-FREE fallback (wire-derived
+        // `entries_[first].tag`) on a dictionary-backed parse — the missed
+        // construction site T057 warns about, one API surface over.
+        MessageView<Mode> mv{frame,      mr,          cfg,           opaque_dict_,
+                             classify_fn_, group_member_fn_, group_delim_fn_};
         if (auto s = mv.offsets().build_status(); !s) {
             return core::expected_t<MessageView<Mode>>{std::unexpect, s.error()};
         }

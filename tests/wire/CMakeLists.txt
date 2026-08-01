@@ -130,7 +130,13 @@ target_link_libraries(wire_dict_tests PRIVATE
 target_include_directories(wire_dict_tests PRIVATE
   "${CMAKE_SOURCE_DIR}/tests")
 target_compile_definitions(wire_dict_tests PRIVATE
-  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\"")
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
+  # 083 T056 (W-10): reads the private group_slices_reserve_bound() through
+  # tests/support/wire_test_hooks.hpp's gated friend seam. The FIXPP_TEST_HOOKS
+  # blocks in offset_table.hpp are friend DECLARATIONS only — no gated data
+  # members — so the class layout is identical with and without the define and
+  # this bucket stays ODR-compatible with the fixpp_wire objects it links.
+  FIXPP_TEST_HOOKS)
 add_test(NAME wire_dict_tests COMMAND wire_dict_tests)
 # 075 (tasks.md Test-binary discipline note): sets LABELS on the buckets it
 # joins/adds. wire_dict_tests is a grouped add_test binary — one label set

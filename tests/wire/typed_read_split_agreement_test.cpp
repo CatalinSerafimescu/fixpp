@@ -31,6 +31,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -48,6 +49,7 @@
 #include <vector>
 
 #include "support/frame_view_factory.hpp"
+#include "support/wire_test_hooks.hpp"  // 083 T056 (W-10): reserve-bound seam
 
 namespace {
 
@@ -686,6 +688,299 @@ TEST(TypedReadSplitAgreement, ExtentWalkDescendsAtNestedGroupDelimiter_Leg4Depth
            "mirrored one's is invariant. declared=2 -> " << run2.probe_calls
         << " calls; declared=8 -> " << run8.probe_calls << " calls.";
 
+}
+
+// ============================================================================
+// W-10 (T056) — OUT-OF-SCOPE WIRE PROBES UNCHANGED.
+//
+// On a DIVERGENT context (the resolved per-context delimiter differs from the
+// bare global one), exactly ONE of the four wire-side probes may move:
+//
+//   MOVES     `group_slices_status(no_tag)`'s split          (C-8.2 / T058)
+//   UNCHANGED `consume_group_extent`'s extent bound          (C-8.0, `:454`)
+//   UNCHANGED `group(no_tag)`'s group_index (no_tag, first_entry, entry_count)
+//   UNCHANGED `group_slices_reserve_bound()`                 (C-8.0, `:597`)
+//
+// ── The pre-083 oracle is RUN, not hardcoded ────────────────────────────────
+// A second `OffsetTable` is built over the SAME frame and the SAME dictionary
+// with `group_delim_fn == nullptr`. That is not an approximation of pre-083:
+// C-8.4 defines the null-callback path as "today's wire-derived
+// `entries_[first].tag`, behaviour-preserving", so the oracle table executes
+// the pre-083 splitter rule verbatim. The three unchanged probes never consult
+// `group_delim_fn_` at all, so they run one shared code path in both tables —
+// which is why their equality below is a real invariance check and not a
+// tautology dressed up as one.
+//
+// ── Why the two exclusions are ASSERTED, not assumed ────────────────────────
+// The oracle is faithful only if the delimiter callback is the ONLY 083 delta
+// that can reach this fixture. Two other deltas could, and both are excluded
+// inside the case rather than argued in prose — because without them this
+// pin's passing condition would be "a defect is still present":
+//
+//   Exclusion 1 — the delimiter is NOT itself a registered group's count tag.
+//     That is C-8.0c's entire population (FR-021 mode (c)). Inside it the
+//     extent bound legitimately MOVES (T009/W-10a leg 2 pin that movement as a
+//     change), so an unexcluded fixture would assert "unchanged" against a
+//     value 083 deliberately changed.
+//
+//   Exclusion 2 — the member sets are identical pre/post-083: this context's
+//     own AND every nested context the extent walk descends through. The
+//     `table_view.hpp:645` injection of the global first field is what
+//     pollutes a member set; on the 52 polluted contexts removing it MOVES the
+//     extent, and that movement is #210 Consequence 2, pinned as a change by
+//     T009. Here the injected tag is already a declared member, so the
+//     injection is provably a no-op — asserted below — and the walk descends
+//     through no nested context at all, so "every nested context" is the empty
+//     set by construction rather than by inspection.
+//
+// ── Why this case is not RED-first, and what stands in for that ─────────────
+// W-10's subject is an INVARIANCE (three probes must not move), which has no
+// pre-fix red state to observe — pre-083 both tables are the same table. The
+// RED observation is supplied IN-BAND instead, on every run rather than once
+// at authoring time: the oracle below IS the pre-083 splitter, and it is
+// asserted to produce 2 slices where the shipped one produces 3. That is
+// exactly the assertion that would have failed before T058, executed as part
+// of this case. `ASSERT_NE` on the two sizes then makes the whole case
+// non-vacuous — a silent revert of C-8.2 collapses the oracle onto the
+// shipped path and trips it.
+//
+// ── The fixture ─────────────────────────────────────────────────────────────
+// `NoDivergent(100)` is declared by TWO messages with its two members in
+// opposite order: D -> [201, 202] (so the global first-seen delimiter is 201),
+// E -> [202, 201] (so E's per-context delimiter is 202). The frame carries
+// msg_type E with the group written in D's order — precisely FR-019a class
+// (b), the accepted-today / rejected-after construction order this feature
+// discloses. Neither 201 nor 202 is a NumInGroup, so no descent exists.
+// ============================================================================
+
+namespace {
+
+constexpr std::string_view kDivergentDelimXml =
+    R"(<fix type='FIX' major='4' minor='4' servicepack='0'>)"
+    R"(<fields>)"
+    R"(<field number='8' name='BeginString' type='STRING'/>)"
+    R"(<field number='9' name='BodyLength' type='INT'/>)"
+    R"(<field number='10' name='CheckSum' type='STRING'/>)"
+    R"(<field number='35' name='MsgType' type='STRING'/>)"
+    R"(<field number='100' name='NoDivergent' type='NUMINGROUP'/>)"
+    R"(<field number='201' name='FieldA' type='STRING'/>)"
+    R"(<field number='202' name='FieldB' type='STRING'/>)"
+    R"(</fields>)"
+    R"(<messages>)"
+    // Declared FIRST, so 201 is the global first-seen delimiter for 100.
+    R"(<message name='DMsg' msgtype='D' msgcat='app'>)"
+    R"(<field name='BeginString' required='N'/>)"
+    R"(<field name='BodyLength' required='N'/>)"
+    R"(<field name='MsgType' required='N'/>)"
+    R"(<field name='CheckSum' required='N'/>)"
+    R"(<group name='NoDivergent' required='N'>)"
+    R"(<field name='FieldA' required='N'/>)"
+    R"(<field name='FieldB' required='N'/>)"
+    R"(</group></message>)"
+    // SAME group tag, SAME member set, OPPOSITE order -> E's delimiter is 202.
+    R"(<message name='EMsg' msgtype='E' msgcat='app'>)"
+    R"(<field name='BeginString' required='N'/>)"
+    R"(<field name='BodyLength' required='N'/>)"
+    R"(<field name='MsgType' required='N'/>)"
+    R"(<field name='CheckSum' required='N'/>)"
+    R"(<group name='NoDivergent' required='N'>)"
+    R"(<field name='FieldB' required='N'/>)"
+    R"(<field name='FieldA' required='N'/>)"
+    R"(</group></message>)"
+    R"(</messages></fix>)";
+
+// The Parser's own membership lambda (parser.hpp:605-618), lifted to a named
+// function so the PRE-083 oracle table can be constructed by hand with the
+// IDENTICAL membership oracle and a null delimiter callback. Copied rather
+// than shared because the Parser's is an unnamed closure with no other
+// accessor; any divergence between the two would show up as the three
+// unchanged probes disagreeing, which is the very thing this case asserts.
+bool divergent_member_fn(void const* d, fixpp::wire::group_context const& ctx,
+                         std::uint16_t no_tag, std::uint16_t tag) noexcept {
+    auto const members = static_cast<table_view const*>(d)->group_member_tags(
+        ctx.msg_type, std::span<std::uint16_t const>{ctx.parent_path.data(), ctx.depth}, no_tag);
+    for (auto const member_tag : members) {
+        if (member_tag == tag) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// msg_type E, group written in D's (global) member order, two instances.
+std::vector<std::byte> make_divergent_frame() {
+    return make_frame("35=E\x01"
+                      "100=2\x01"
+                      "201=A\x01" "202=x\x01"
+                      "201=B\x01" "202=y\x01");
+}
+
+}  // namespace
+
+TEST(TypedReadSplitAgreement, OutOfScopeWireProbesUnchanged) {
+    std::vector<std::byte> dict_buf(2u * 1024u * 1024u);
+    std::pmr::monotonic_buffer_resource dict_mr{dict_buf.data(), dict_buf.size()};
+    auto dict = fixpp::dict::XmlLoader{}.load_from_string(kDivergentDelimXml, &dict_mr);
+    auto tv = dict.as_table_view();
+
+    std::span<std::uint16_t const> const root_path{};
+
+    // ── Precondition: the context really is DIVERGENT ───────────────────────
+    ASSERT_EQ(tv.group_first_field(std::uint16_t{100}), 201U)
+        << "fixture precondition: DMsg is declared first, so the bare global first-seen delimiter "
+           "for NoDivergent(100) must be FieldA(201).";
+    ASSERT_EQ(tv.group_first_field("E", root_path, std::uint16_t{100}), 202U)
+        << "fixture precondition: EMsg declares FieldB(202) first, so E's per-context delimiter "
+           "must be 202. Equal to 201 here would mean the context store MISSED and fell through "
+           "to the bare global — a non-divergent fixture, on which this whole case is vacuous.";
+
+    // ── Exclusion 1: the delimiter is NOT a registered group's count tag ────
+    // C-8.0c's population is exactly the complement of this. Both candidate
+    // delimiters are checked, globally and in-context, so the fixture cannot
+    // drift into mode (c) by a later dictionary edit.
+    for (std::uint16_t const t : {std::uint16_t{201}, std::uint16_t{202}}) {
+        ASSERT_EQ(tv.group_first_field(t), 0U)
+            << "exclusion 1: tag " << t << " must not be a group globally.";
+        ASSERT_EQ(tv.group_first_field("E", root_path, t), 0U)
+            << "exclusion 1: tag " << t << " must not be a group in context E either — if it "
+               "were, C-8.0c's delimiter-position descent would fire and the extent bound this "
+               "case asserts UNCHANGED is one 083 deliberately moves (T009 / W-10a leg 2).";
+    }
+
+    // ── Exclusion 2: member sets identical pre/post-083 ─────────────────────
+    auto const ctx_members = tv.group_member_tags("E", root_path, std::uint16_t{100});
+    auto const bare_members = tv.group_member_tags(std::uint16_t{100});
+    // (a) The context store is genuinely populated for this key — otherwise
+    //     the comparison below is a span against itself.
+    ASSERT_NE(ctx_members.data(), bare_members.data())
+        << "exclusion 2: group_member_tags(\"E\", [], 100) must HIT the context store.";
+    // (b) Same member SET (order is the delimiter's business, not membership's).
+    //     Equal sets are what makes the pre-083 walk and the post-083 walk take
+    //     identical decisions at every entry.
+    std::vector<std::uint16_t> ctx_sorted(ctx_members.begin(), ctx_members.end());
+    std::vector<std::uint16_t> bare_sorted(bare_members.begin(), bare_members.end());
+    std::sort(ctx_sorted.begin(), ctx_sorted.end());
+    std::sort(bare_sorted.begin(), bare_sorted.end());
+    ASSERT_EQ(ctx_sorted, bare_sorted)
+        << "exclusion 2: this context must not be POLLUTED or newly registering — a member-set "
+           "delta would move the extent independently of the delimiter, and that movement is "
+           "#210 Consequence 2 (pinned as a CHANGE by T009), not something to assert unchanged.";
+    ASSERT_EQ(ctx_sorted, (std::vector<std::uint16_t>{201, 202}))
+        << "exclusion 2: the declared member set, hand-derived from the fixture XML.";
+    // (c) The pre-083 `table_view.hpp:645` injection would have added the
+    //     GLOBAL first field (201) to E's member set. It is already a declared
+    //     member, so the injection was provably a no-op on this fixture — the
+    //     precise statement of "divergent but not polluted".
+    ASSERT_NE(std::find(ctx_sorted.begin(), ctx_sorted.end(), std::uint16_t{201}),
+              ctx_sorted.end())
+        << "exclusion 2: the global first field must already be a declared member of E's group, "
+           "so the removed injection cannot have changed this member set.";
+    // (d) "every nested context the extent walk descends through" is EMPTY:
+    //     no member of the group heads a group under the child path [100], so
+    //     neither descent site in consume_group_extent can fire.
+    std::array<std::uint16_t, 1> const child_path{100};
+    for (auto const member_tag : ctx_members) {
+        ASSERT_EQ(tv.group_first_field("E", child_path, member_tag), 0U)
+            << "exclusion 2: member " << member_tag << " must not head a nested group — the "
+               "extent walk must descend through NO nested context, so the set of nested member "
+               "sets to compare is empty by construction rather than by inspection.";
+    }
+
+    auto buf = make_divergent_frame();
+    auto fv = fixpp::wire::test::make_frame_view(buf);
+    ASSERT_TRUE(fv.has_value()) << "make_frame_view failed";
+
+    // ── POST-083: the shipped wiring ────────────────────────────────────────
+    Parser<access_mode::Index> parser{tv};
+    std::pmr::monotonic_buffer_resource arena;
+    auto mv = parser.parse(*fv, &arena);
+    ASSERT_TRUE(mv.has_value()) << "parser.parse failed";
+    auto const& post = mv->offsets();
+
+    // ── PRE-083 oracle: same frame, same dict, same membership oracle, NO
+    //    delimiter callback (C-8.4's dict-free fallback == the pre-083 rule) ──
+    std::pmr::monotonic_buffer_resource oracle_arena;
+    fixpp::wire::OffsetTable pre{*fv, &oracle_arena, &tv, &divergent_member_fn, nullptr};
+    ASSERT_TRUE(pre.build_status().has_value()) << "oracle table failed to build";
+    // The ROOT context MessageView seeds unconditionally (parser.hpp:139-147);
+    // reproduce it so the two tables differ in the delimiter callback ALONE.
+    pre.set_group_context(fixpp::wire::group_context{.msg_type = "E"});
+
+    // ── UNCHANGED probe 1: the extent bound ─────────────────────────────────
+    // Read through the same entry point production uses, on the group's own
+    // count-field index, under the root context.
+    auto const count_idx = [&] {
+        auto const entries = post.entries();
+        for (std::size_t i = 0; i < entries.size(); ++i) {
+            if (entries[i].tag == 100U) {
+                return i;
+            }
+        }
+        return entries.size();
+    }();
+    ASSERT_LT(count_idx, post.entries().size()) << "fixture: NoDivergent(100) not found in frame";
+
+    bool post_overflow = false;
+    bool pre_overflow = false;
+    fixpp::wire::group_context const root_ctx{.msg_type = "E"};
+    auto const post_extent = post.consume_group_extent(count_idx, root_ctx, 0, post_overflow);
+    auto const pre_extent = pre.consume_group_extent(count_idx, root_ctx, 0, pre_overflow);
+    EXPECT_FALSE(post_overflow);
+    EXPECT_FALSE(pre_overflow);
+    EXPECT_EQ(post_extent, pre_extent)
+        << "C-8.0: consume_group_extent's bound is membership-driven and its local `delim` stays "
+           "WIRE-derived (offset_table.cpp:454). With both exclusions asserted above, 083 must "
+           "not move it. pre=" << pre_extent << " post=" << post_extent;
+
+    // ── UNCHANGED probe 2: group(no_tag)'s group_index ──────────────────────
+    auto const post_gi = post.group(100);
+    auto const pre_gi = pre.group(100);
+    ASSERT_TRUE(post_gi.has_value()) << "group(100) failed post-083";
+    ASSERT_TRUE(pre_gi.has_value()) << "group(100) failed on the oracle";
+    EXPECT_EQ(post_gi->no_tag(), pre_gi->no_tag());
+    EXPECT_EQ(post_gi->first_entry(), pre_gi->first_entry());
+    EXPECT_EQ(post_gi->entry_count(), pre_gi->entry_count())
+        << "group()'s reported extent must be unchanged: pre=" << pre_gi->entry_count()
+        << " post=" << post_gi->entry_count();
+
+    // ── UNCHANGED probe 3: the reserve bound ────────────────────────────────
+    // `:597` keeps its wire-derived membership-probe role (C-8.0) — it never
+    // consults a delimiter, and this feature must not perturb the reservation
+    // made in the fixed 16 KiB inbound arena (research.md D-6 / C-8.0a).
+    using fixpp::wire::reserve_bound_access_for_testing;
+    EXPECT_EQ(reserve_bound_access_for_testing::get(post),
+              reserve_bound_access_for_testing::get(pre))
+        << "C-8.0a: the reserve estimator's inputs are member sets alone, so with exclusion 2 "
+           "asserted it must be byte-for-byte the same reservation.";
+
+    // ── CHANGED probe: the split ────────────────────────────────────────────
+    auto const post_res = post.group_slices_status(100);
+    auto const pre_res = pre.group_slices_status(100);
+    ASSERT_FALSE(post_res.alloc_failed) << "post-083 splitter degraded on allocation";
+    ASSERT_FALSE(pre_res.alloc_failed) << "oracle splitter degraded on allocation";
+
+    // Hand-derived from the fixture's bytes, NEVER captured. Pre-083 splits on
+    // the wire's first tag (201): two instances. Post-083 splits on E's
+    // dictionary delimiter (202): the leading "201=A" is its own instance, and
+    // each subsequent 202 opens the next.
+    ASSERT_EQ(pre_res.slices.size(), 2U)
+        << "oracle: the pre-083 wire-derived rule splits this frame at 201.";
+    EXPECT_EQ(slice_text(pre_res.slices[0]), "201=A\x01" "202=x");
+    EXPECT_EQ(slice_text(pre_res.slices[1]), "201=B\x01" "202=y");
+
+    ASSERT_EQ(post_res.slices.size(), 3U)
+        << "W-10: the split — and ONLY the split — must move on a divergent context. Post-083 the "
+           "boundary is E's dictionary delimiter FieldB(202), not the wire's first tag. "
+           "observed=" << post_res.slices.size();
+    EXPECT_EQ(slice_text(post_res.slices[0]), "201=A");
+    EXPECT_EQ(slice_text(post_res.slices[1]), "202=x\x01" "201=B");
+    EXPECT_EQ(slice_text(post_res.slices[2]), "202=y");
+
+    // Non-vacuity: the two splits must actually DIFFER, so a future change that
+    // silently reverted C-8.2 could not leave this case green.
+    ASSERT_NE(post_res.slices.size(), pre_res.slices.size())
+        << "W-10 is vacuous unless the delimiter callback demonstrably changes the split on this "
+           "fixture — that is the single permitted movement the three probes above bound.";
 }
 
 // ============================================================================

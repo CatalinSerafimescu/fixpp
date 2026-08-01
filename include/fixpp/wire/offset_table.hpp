@@ -440,8 +440,17 @@ private:
     // §D2 mode (a)/(b)/(c) by introspecting the real sub-table rather than a
     // `sizeof(OffsetTable)`-tuned cap band (not portable across toolchains,
     // research.md "Platform-robust mode pinning").
+    // 083 T056 (W-10): TEST-ONLY read of `group_slices_reserve_bound()`, same
+    // seam and same gating as the sibling above — the DEFINITION lives in the
+    // non-installed tests/support/wire_test_hooks.hpp, so this installed
+    // header gains a friend DECLARATION and no accessor code. W-10 must assert
+    // the reserve bound is UNCHANGED across a pre-083 / post-083 pair of
+    // tables; there is no behavioural proxy for it (it is a reservation, not
+    // an output), and a re-derivation in the test would assert the test's own
+    // arithmetic rather than `:597`'s.
 #ifdef FIXPP_TEST_HOOKS
     friend struct nested_cache_access_for_testing;
+    friend struct reserve_bound_access_for_testing;
 #endif  // FIXPP_TEST_HOOKS
 };
 

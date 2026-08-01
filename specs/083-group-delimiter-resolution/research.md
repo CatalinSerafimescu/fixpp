@@ -180,6 +180,63 @@ The **membership-probe role** at all three out-of-scope sites stays wire-derived
 
 **#180's second leg is unchanged by this amendment — but L-063-4 gains a correction that is not one of its legs.** Re-checked at round 3: leg 2 is still, exactly, `group()`'s `:559-570` flat cap loop, and it is still outstanding. What the amendment adds is a **third** close-out disposition: L-063-4's assertion that *"`consume_group_extent()` correctly computes the nesting-aware `group_end` for the outer group"* is **wrong for mode (c)**. Its audit (*"0 nested/parent delimiter collisions"*) is about a nested delimiter **equal to** its parent's, taken against the **pre-fix** delimiters; mode (c) is a different shape, is present in 262 contexts, and becomes reachable **because** this feature corrects the delimiters. FR-021d sends the characterisation to start from L-063-4, so without this paragraph the bundle inherits the wrong leg — which is precisely what happened at rounds 1 and 2.
 
+### FR-021c four-site census — OUTCOME, confirmed against the shipped tree (T061)
+
+The census above was taken during planning, against pre-implementation line numbers. Re-read on the delivered tree (`src/wire/offset_table.cpp`, after T022 and T058), the four sites and their dispositions are:
+
+| planning line | **shipped line** | site | what this feature did to it |
+|---|---|---|---|
+| `:454` | **`:458`** | `consume_group_extent` — wire local | **TRAVERSAL repaired, source unchanged.** The local stays `entries_[first].tag` and the membership probe at **`:461`** stays wire-derived (C-8.0). What changed is that the instance-opening delimiter now gets the same descent test as post-delimiter members: the new probe + recursion at **`:492-499`** mirrors the pre-existing one at `:510-518` (C-8.0c / FR-021e, T022). |
+| `:526` | **`:551`** | `group(no_tag)` — wire local | **UNTOUCHED.** Probe at **`:566`**, flat cap loop at **`:584-594`**. |
+| `:597` | **`:622`** | reserve estimator | **UNTOUCHED.** A membership probe alone (`:623`); its *inputs* change, assessed as C-8.0a immediately below. |
+| `:656` | **`:704`** | `group_slices_status` — **the splitter** | **SOURCE changed** — the one site whose delimiter provenance moves, from the wire to `group_delim_fn_(opaque_dict_, stored_group_context(), no_tag)` at **`:705-711`** (C-8.2 / T058). Boundary test at `:715`. |
+
+**Outcome: exactly one site's delimiter SOURCE changed** — `:704` — as scoped. `:458`'s change is a traversal repair inside a wire-derived rule, `:622` and `:551` were not edited at all.
+
+**The named residual moved line, not substance.** The one flat, wire-derived instance-boundary rule left in this file is `group()`'s cap-loop test, planning `:561` → **shipped `:586`** (its cap check at `:591`). That is L-063-4 leg 2's subject and the residual whoever takes **#180** inherits; T071 re-states the row against these shipped numbers, not the planning ones.
+
+**Boundary-rule tally on the delivered tree**, re-derived rather than carried over from the round-3 paragraph below: dictionary-sourced and nesting-aware at `:704`/`:715`; wire-derived but nesting-aware at **both** positions in `:458`'s walk (`:477` open/close, `:492` and `:510` descents); wire-derived and **flat** at `:586`. Three rules, one of them still flat — unchanged in count from the plan, because C-8.5 was descoped (see `tests/wire/typed_read_split_agreement_test.cpp`, the W-8/W-9 negative-result block) and C-8.5 was never the leg that would have removed `:586`.
+
+---
+
+### C-8.0a assessment — RUN and RECORDED (T060), not left as the inference below
+
+The paragraph that follows was written as an **inference** and explicitly flagged as one (*"inferred, to be confirmed by the FR-021c task, not asserted as measured"*). It is confirmed here, with the measurement and with a structural leg the inference did not have. **Verdict: LOW, and the under-reserve failure mode is impossible by construction, not merely unlikely.**
+
+**Leg 1 — the estimator's predicate is byte-identical to the push gate it sizes for.** `group_slices_reserve_bound()` (`src/wire/offset_table.cpp:599-633`) counts a top-level entry `e` iff `group_member_fn_(opaque_dict_, stored_group_context(), entries_[e].tag, entries_[e + 1U].tag)`. `group()` (`:530-566`) admits `no_tag` iff `group_member_fn_(opaque_dict_, stored_group_context(), no_tag, entries_[first].tag)` — **same callback, same context, same `no_tag`, same delimiter argument**. So a member-set change cannot move the bound and the pushes independently: whatever `e` the estimator stops counting, `group()` stops admitting, and `group_slices_status` pushes nothing for it. `total` remains an upper bound on pushes for every possible member set. **Under-reserve — the L-073-1 / L-065-2 silent-truncation mode — is therefore unreachable through a member-set change, before considering which sets actually changed.**
+
+**Leg 2 — direction.** FR-001 only ever **removes** the injected global-first-seen tag from a context member set (D-5: the injection becomes redundant; nothing is added). Membership can therefore only go true→false, so the bound can only **decrease**. The arena pressure L-073-1 documents comes from *over*-reserving in the fixed 16 KiB inbound arena (PR #181 Tier-2 `arena_fit`); a smaller reservation is strictly the safe direction.
+
+**Leg 3 — the measurement (all ten dictionaries, post-fix basis).** Reproduces T012's baseline `polluted` cell exactly, and adds the column that decides exposure — how many of those contexts are **top-level**, since the estimator only ever probes under the ROOT context:
+
+| dictionary | contexts | top-level | pre-fix polluted | **of those, top-level** |
+|---|---|---|---|---|
+| FIX40 | 6 | 6 | 0 | 0 |
+| FIX41 | 10 | 9 | 0 | 0 |
+| FIX42 | 38 | 33 | 0 | 0 |
+| FIX43 | 235 | 182 | 0 | 0 |
+| FIX44 | 823 | 449 | 6 | 6 |
+| FIX50 | 1114 | 472 | 6 | 6 |
+| FIX50SP1 | 1309 | 532 | 6 | 6 |
+| FIX50SP2 | 25927 | 2570 | 14 | 14 |
+| FIXT11 | 8 | 8 | 0 | 0 |
+| Orchestra FIX Latest | 26806 | 2862 | 16 | 16 |
+| **total** | **56276** | **7123** | **48** | **48** |
+
+**48 vs 52 — reconciled, not glossed.** `52` is **spec.md's Baseline table**, a planning-time projection; `48` is the **measured** figure T012's live pin recorded (research.md, T012 section: *"wrong=330, wrong-nested=235, polluted=48, unregistered=55"*). The probe here reproduces T012's per-dictionary pollution cells exactly (FIX44 6 · FIX50 6 · FIX50SP1 6 · FIX50SP2 14 · Orchestra 16), which is what makes it a re-measurement rather than a fresh number. `tests/dictionary/delimiter_census_test.cpp` cites `polluted=52` in three comments — each explicitly attributed to *"spec.md's Baseline table"*, so those citations are correct as written and are not stale; **measured** figures anywhere in this bundle are 330/235/**48**/55. *(Pre-fix pollution is only reconstructible — post-fix the live pin measures 0, which is the assertion that matters.)*
+
+**Basis note.** The probe counts pollution over **registered** contexts only (the ones whose member set the injection could reach); an unregistered context falls through to the bare store, where "injection into a per-context set" has no meaning. That is the same restriction `census_one` applies before its own `polluted` tally, which is why the cells match.
+
+**The negative result did NOT come back.** All 48 are top-level, so the estimator can reach every one of them — the "it can't see them" escape is not available and is not claimed. Exposure is bounded by legs 1 and 2 instead, which is the stronger ground: the bound may move on these 48, and moving is harmless because it moves *with* the pushes.
+
+**Leg 4 — when the probe's answer actually differs, and on what frame.** The tag removed from a polluted set is the **global first-seen** delimiter, i.e. another message's delimiter for the same count tag. For the estimator's answer to change, a frame must place that tag immediately after the count field *in this context* — which is exactly FR-019a class (b), a construction order that is not schema-valid here and that this feature deliberately starts rejecting. On such a frame the post-fix answer ("not a group in this context") is the correct one, and it propagates consistently to `group()`, which is what leg 1 states. The pre-fix inference below — *"which is by definition not what a message in that context puts on the wire, so the probe's outcome should be unchanged"* — was right about the schema-valid population and silent about the invalid one; leg 1 is what covers the invalid one.
+
+**`:597` keeps its wire-derived membership-probe role unchanged (C-8.0).** No code change was made there by this feature.
+
+*W-10 (`TypedReadSplitAgreement.OutOfScopeWireProbesUnchanged`, T056) pins the invariance directly on a divergent-but-unpolluted context, comparing the shipped table against a pre-083 table built with a null `group_delim_fn`.*
+
+The original inference, kept for provenance:
+
 `:597` needs its own sentence, because it is the one whose *inputs* this feature changes. It sizes a reservation in the fixed 16 KiB inbound parse arena, whose under-reserve failure mode is a **documented silent truncation** (`spec/behaviors-and-limitations.md` L-073-1 top-level; L-065-2 for the nested twin). D-3's impact statement is scoped to lookup *cost* and says nothing about what changed *values* do to a consumer that sizes memory from them. **Assessment (inferred, to be confirmed by the FR-021c task, not asserted as measured):** the risk is low — the tag removed from a polluted member set is the global first-seen delimiter, which is by definition not what a message in that context puts on the wire, so the probe's outcome should be unchanged. "Low, and here is why" belongs in the bundle; the task confirms it against the post-fix member sets.
 
 ---
