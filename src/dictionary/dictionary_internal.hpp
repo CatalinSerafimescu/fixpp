@@ -25,6 +25,8 @@
 #include <optional>
 #include <span>
 #include <string_view>
+#include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -210,33 +212,36 @@ inline void capture_first_emission(DelimCapture* cap, std::uint16_t tag) noexcep
 // rather than merely unobserved.
 [[nodiscard]] inline std::uint16_t find_context_without_delim_record(
     std::span<FieldRef const> fields, std::span<GroupCtxDelim const> delims) noexcept {
+    // /simplify: the three scans below were each linear, making this
+    // O(G²)/O(depth·G²) in groups-per-message on the largest dictionaries
+    // (FIX50SP2, Orchestra). Each is replaced with the lookup structure the
+    // sibling code already uses for the same job — `as_table_view()` builds
+    // its immediate-parent chain with an unordered_map (dictionary.cpp), and
+    // `group_ctx_delimiter_impl` resolves the very same `delims` data with
+    // `lower_bound` rather than a scan. Load-time only, but the correct
+    // pattern was a few lines away in both cases.
+    //
     // Immediate-parent chain over count tags only, as dictionary.cpp builds it.
-    std::vector<std::pair<std::uint16_t, std::uint16_t>> immediate_parent;
+    std::unordered_map<std::uint16_t, std::uint16_t> immediate_parent;
+    // Every tag that is some group's container — the C-3.4a "has members" test.
+    std::unordered_set<std::uint16_t> has_members;
     for (auto const& fr : fields) {
         if (fr.type == field_data_type::NumInGroup) {
-            immediate_parent.emplace_back(fr.tag, fr.group_no_tag);
+            immediate_parent.emplace(fr.tag, fr.group_no_tag);
+        }
+        if (fr.group_no_tag != 0) {
+            has_members.insert(fr.group_no_tag);
         }
     }
     auto parent_of = [&](std::uint16_t tag) noexcept -> std::uint16_t {
-        for (auto const& [t, p] : immediate_parent) {
-            if (t == tag) {
-                return p;
-            }
-        }
-        return 0;
+        auto const it = immediate_parent.find(tag);
+        return it == immediate_parent.end() ? std::uint16_t{0} : it->second;
     };
     for (auto const& fr : fields) {
         if (fr.type != field_data_type::NumInGroup) {
             continue;
         }
-        bool has_members = false;
-        for (auto const& m : fields) {
-            if (m.group_no_tag == fr.tag) {
-                has_members = true;
-                break;
-            }
-        }
-        if (!has_members) {
+        if (!has_members.contains(fr.tag)) {
             continue;  // C-3.4a: scalar reuse contributes no context
         }
         std::vector<std::uint16_t> path;
@@ -247,15 +252,18 @@ inline void capture_first_emission(DelimCapture* cap, std::uint16_t tag) noexcep
         }
         std::reverse(path.begin(), path.end());
         GroupCtxDelim const probe = make_group_ctx_delim(path, fr.tag, /*delimiter=*/0);
-        bool found = false;
-        for (auto const& rec : delims) {
-            if (!group_ctx_delim_less(probe, rec) && !group_ctx_delim_less(rec, probe)) {
-                found = true;
-                break;
-            }
-        }
-        if (!found) {
-            return fr.tag;
+        // PRECONDITION: `delims` is sorted by `group_ctx_delim_less`. Both call
+        // sites (each loader's `finalize()`) sort the per-message records with
+        // exactly that comparator immediately before flushing them into the
+        // pool this span is a contiguous run of, and `group_ctx_delimiter_impl`
+        // already relies on the same ordering to `lower_bound` this data at
+        // runtime. Stated rather than assumed, because a scan tolerated an
+        // unsorted span and this does not — an unsorted span would yield a
+        // spurious "no record" and a false load-time rejection.
+        auto const it = std::lower_bound(delims.begin(), delims.end(), probe,
+                                         group_ctx_delim_less);
+        if (it == delims.end() || group_ctx_delim_less(probe, *it)) {
+            return fr.tag;  // no record for a context as_table_view() will register
         }
     }
     return 0;
@@ -476,5 +484,62 @@ public:
 void bump_as_table_view_call_count() noexcept;
 [[nodiscard]] std::uint64_t as_table_view_call_count() noexcept;
 void reset_as_table_view_call_count() noexcept;
+
+// ── 083 /simplify (C-1.5): the last two loader-symmetric blocks, shared ──────
+//
+// C-1.5's rule is that a one-loader fix is a half-restructure, which is why
+// `make_group_ctx_delim`, `group_ctx_delim_less`, `capture_first_emission` and
+// `find_context_without_delim_record` already live here. Two more blocks were
+// left inline in BOTH `xml_loader.cpp` and `orchestra_loader.cpp` — one of them
+// byte-identical, the other differing only in which exception type is thrown —
+// with the Orchestra copy's own comment reading "same sort, same key-dedup and
+// same run shape as xml_loader.cpp". Documenting a duplication is not the same
+// as not having one; both are lifted here so the two walks cannot drift.
+
+// Flush ONE message's captured delimiter records into the handle's pool:
+// sort → dedup by key → append → record the per-message run. Deduping by key
+// is deliberate — a group declared in both the header and the body yields two
+// captures that agree by construction, and the first is kept.
+inline void flush_group_ctx_delims(dict_metadata_handle& h, DelimCapture& cap) {
+    std::ranges::sort(cap.out, group_ctx_delim_less);
+    auto const last = std::ranges::unique(cap.out,
+                                          [](GroupCtxDelim const& a,
+                                             GroupCtxDelim const& b) noexcept {
+                                              return !group_ctx_delim_less(a, b) &&
+                                                     !group_ctx_delim_less(b, a);
+                                          })
+                          .begin();
+    cap.out.erase(last, cap.out.end());
+    MsgFieldsRun const run{.start = static_cast<std::uint32_t>(h.group_ctx_delim_pool_.size()),
+                           .count = static_cast<std::uint32_t>(cap.out.size())};
+    h.group_ctx_delim_pool_.insert(h.group_ctx_delim_pool_.end(), cap.out.begin(), cap.out.end());
+    h.per_msg_group_ctx_delim_offsets_.push_back(run);
+}
+
+// FR-023 / C-3.4 completeness sweep over every message. Returns the FIRST
+// violation as `(message index, offending NumInGroup tag)`, or `nullopt` when
+// every context `as_table_view()` will register has a delimiter record.
+//
+// Returns rather than throws so each loader keeps its OWN exception type
+// (FR-006c: `xml_parse_error` vs `orchestra_parse_error`, discriminated by
+// catch type) — that difference is the one thing that legitimately varies
+// between the two, and it stays at the call site.
+[[nodiscard]] inline std::optional<std::pair<std::size_t, std::uint16_t>>
+find_incomplete_group_context(dict_metadata_handle const& h) {
+    for (std::size_t i = 0; i < h.per_msg_field_offsets_.size(); ++i) {
+        auto const frun = h.per_msg_field_offsets_[i];
+        auto const drun = (i < h.per_msg_group_ctx_delim_offsets_.size())
+                              ? h.per_msg_group_ctx_delim_offsets_[i]
+                              : MsgFieldsRun{};
+        auto const offender = find_context_without_delim_record(
+            std::span<FieldRef const>{h.fields_.data() + frun.start, frun.count},
+            std::span<GroupCtxDelim const>{h.group_ctx_delim_pool_.data() + drun.start,
+                                           drun.count});
+        if (offender != 0) {
+            return std::pair{i, offender};
+        }
+    }
+    return std::nullopt;
+}
 
 }  // namespace fixpp::dict::detail

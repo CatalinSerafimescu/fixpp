@@ -9,6 +9,7 @@
 // memory back to the originating `mr` (`[2c §4.3]` / C-R2-P1-1).
 
 #include <algorithm>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <fixpp/dict/dictionary.hpp>
@@ -392,15 +393,36 @@ std::span<EnumValueRef const> Dictionary::enum_values(std::uint16_t tag) const n
 // [const §XV.1]: called once at session/validator setup; must not be called
 // on the per-message hot path.
 namespace detail {
-// 083 T049 (W-11a) test seam — see dictionary_internal.hpp. A plain
-// non-atomic counter: the witness opens one session on one thread, and this
-// must not add synchronisation to a hot construction path.
+// 083 T049 (W-11a) test seam — see dictionary_internal.hpp.
+//
+// ATOMIC, corrected at /simplify: this was a plain `std::uint64_t`, justified
+// by "the witness opens one session on one thread". That reasoning covers the
+// TEST but not the PRODUCTION reachability — the increment is unconditional
+// and `as_table_view()` is called from `fixpp_session_open`
+// (src/capi/session.cpp) and from `Session::open()`, so two threads opening
+// sessions concurrently on one engine race on it. Nothing gated the increment
+// to test builds, unlike this same feature's sibling seam
+// (`reserve_bound_access_for_testing`, offset_table.hpp) which IS behind
+// FIXPP_TEST_HOOKS. Gating was not available here: the counter lives in the
+// library, so a gated definition would not link against a test TU that
+// defines the macro.
+//
+// `relaxed` is sufficient and is not a hot-path cost: the seam counts
+// SESSION-OPEN calls, not per-message work — `[const §XV.1]` is what keeps
+// `as_table_view()` off the per-message path in the first place, and W-11a is
+// the witness that it stays there.
 namespace {
-std::uint64_t g_as_table_view_calls = 0;
+std::atomic<std::uint64_t> g_as_table_view_calls{0};
 }  // namespace
-void bump_as_table_view_call_count() noexcept { ++g_as_table_view_calls; }
-std::uint64_t as_table_view_call_count() noexcept { return g_as_table_view_calls; }
-void reset_as_table_view_call_count() noexcept { g_as_table_view_calls = 0; }
+void bump_as_table_view_call_count() noexcept {
+    g_as_table_view_calls.fetch_add(1, std::memory_order_relaxed);
+}
+std::uint64_t as_table_view_call_count() noexcept {
+    return g_as_table_view_calls.load(std::memory_order_relaxed);
+}
+void reset_as_table_view_call_count() noexcept {
+    g_as_table_view_calls.store(0, std::memory_order_relaxed);
+}
 }  // namespace detail
 
 table_view Dictionary::as_table_view() const {

@@ -353,6 +353,18 @@ public:
         // instance). `req_members.size()` is the "not a required member" sentinel.
         std::size_t const delim_k = check_required ? req_bit_index(delim_tag) : req_members.size();
 
+        // 083 /simplify: HOISTED out of the per-instance loop below. The probe's
+        // key — `ctx.msg_type`, `child_path`, `delim_tag` — is fixed for this
+        // whole `consume_group` call, so re-running it per instance repeated a
+        // string_view + path-span hash for an answer that cannot change. Same
+        // class of redundancy as the one fixed in `validate_group_grammar`
+        // (src/capi/message_write.cpp), and the same one the `delim_k` hoist
+        // immediately above already avoids for the required-member index — this
+        // new probe simply had not been given the same treatment, which is the
+        // half-restructure shape: one symmetric site fixed, its twin missed.
+        bool const delim_opens_nested_group =
+            can_descend && dict_.group_first_field(ctx.msg_type, child_path, delim_tag) != 0;
+
         std::uint32_t actual_count = 0;
         while (i < end && ents[i].tag == delim_tag) {
             req_mask_t seen_mask{};
@@ -373,7 +385,7 @@ public:
             // `req_members` before any descent (C-5.2); the nested call
             // builds an independent mask from the nested group's own
             // `req_members`, so the two never interact.
-            if (can_descend && dict_.group_first_field(ctx.msg_type, child_path, delim_tag) != 0) {
+            if (delim_opens_nested_group) {
                 auto const nested = consume_group(ents, child, frame_base, i, end, ref_tag_out);
                 if (!nested) {
                     return nested;  // propagate the nested failure slot

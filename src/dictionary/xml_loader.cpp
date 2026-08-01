@@ -999,22 +999,7 @@ detail::dict_metadata_handle_ptr LoaderState::finalize() {
         // be reached twice in a message — e.g. via a component used in both
         // header and body — and both walks read the same declaration, so the
         // duplicates agree by construction and the first is kept.
-        std::ranges::sort(delim_cap.out, detail::group_ctx_delim_less);
-        auto const dlast =
-            std::ranges::unique(delim_cap.out,
-                                [](detail::GroupCtxDelim const& a,
-                                   detail::GroupCtxDelim const& b) noexcept {
-                                    return !detail::group_ctx_delim_less(a, b) &&
-                                           !detail::group_ctx_delim_less(b, a);
-                                })
-                .begin();
-        delim_cap.out.erase(dlast, delim_cap.out.end());
-        detail::MsgFieldsRun const delim_run{
-            .start = static_cast<std::uint32_t>(h.group_ctx_delim_pool_.size()),
-            .count = static_cast<std::uint32_t>(delim_cap.out.size())};
-        h.group_ctx_delim_pool_.insert(h.group_ctx_delim_pool_.end(), delim_cap.out.begin(),
-                                       delim_cap.out.end());
-        h.per_msg_group_ctx_delim_offsets_.push_back(delim_run);
+        detail::flush_group_ctx_delims(h, delim_cap);
     }
 
     // ── 083 T028/T029 (research D-10 / C-1.4b / C-7.2's write-order leg) ────
@@ -1064,22 +1049,13 @@ detail::dict_metadata_handle_ptr LoaderState::finalize() {
     // `captured == 0` means no FieldRef was emitted at that group's level, so
     // no FieldRef carries its `group_no_tag`, so the `!members.empty()` leg
     // excludes it from the registered set in the first place.
-    for (std::size_t i = 0; i < h.per_msg_field_offsets_.size(); ++i) {
-        auto const frun = h.per_msg_field_offsets_[i];
-        auto const drun = (i < h.per_msg_group_ctx_delim_offsets_.size())
-                              ? h.per_msg_group_ctx_delim_offsets_[i]
-                              : detail::MsgFieldsRun{};
-        auto const offender = detail::find_context_without_delim_record(
-            std::span<FieldRef const>{h.fields_.data() + frun.start, frun.count},
-            std::span<detail::GroupCtxDelim const>{h.group_ctx_delim_pool_.data() + drun.start,
-                                                   drun.count});
-        if (offender != 0) {
-            throw xml_parse_error(
-                "dict::xml_parse_error: group context for NumInGroup tag " +
-                std::to_string(offender) + " in message \'" + std::string{messages_[i].msg_type} +
-                "\' is registered by as_table_view() but has no per-context delimiter record "
-                "(FR-023 completeness invariant)");
-        }
+    if (auto const bad = detail::find_incomplete_group_context(h); bad) {
+        throw xml_parse_error(
+            "dict::xml_parse_error: group context for NumInGroup tag " +
+            std::to_string(bad->second) + " in message '" +
+            std::string{messages_[bad->first].msg_type} +
+            "' is registered by as_table_view() but has no per-context delimiter "
+            "record (FR-023 completeness invariant)");
     }
 
     // Emit components (PMR ComponentRef array).

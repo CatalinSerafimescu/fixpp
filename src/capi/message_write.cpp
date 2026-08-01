@@ -753,7 +753,10 @@ static fixpp_error_t validate_group_grammar(const std::pmr::vector<AccumulatorEn
             // INV-4 leg (c): each instance must have at least one field.
             if (inst.fields.empty()) return FIXPP_ERR_TYPE_MISMATCH;
             // INV-4 leg (d): first field must be the group delimiter (dict-gated).
-            if (dict && delim != 0 && inst.fields[0].tag != delim) {
+            // `delim != 0` already implies `dict != nullptr` — it is only ever
+            // assigned inside the `if (dict && ...)` above — so the redundant
+            // `dict &&` left over from the per-instance form is dropped.
+            if (delim != 0 && inst.fields[0].tag != delim) {
                 return FIXPP_ERR_TYPE_MISMATCH;
             }
             // Recurse into nested groups within this instance, with THIS group's
