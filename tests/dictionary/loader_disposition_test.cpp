@@ -30,11 +30,31 @@
 #include <string_view>
 #include <vector>
 
+// Gate B r1 F1 (fixpp#216 P1-1): the direct `find_incomplete_group_context()`
+// unit test and the FR-023 rejection-witness test seam, same pattern as
+// tests/capi/capi_group_delimiter_ctx_test.cpp's W-11a include.
+#include "dictionary_internal.hpp"
+
 namespace {
 
+using fixpp::dict::group_delimiter_collision_error;
 using fixpp::dict::orchestra_parse_error;
 using fixpp::dict::unresolved_group_policy;
 using fixpp::dict::xml_parse_error;
+
+// Gate B r1 F1: RAII guard for the FR-023 test seam
+// (`detail::set_force_incomplete_group_context_for_testing`). Declared BEFORE
+// any `try` in each user so a thrown exception still resets it — the flag is
+// a process-global shared by every case in this 20-file bucket binary
+// (dictionary_pure_tests).
+struct ForceIncompleteGroupContextGuard {
+    ForceIncompleteGroupContextGuard() {
+        fixpp::dict::detail::set_force_incomplete_group_context_for_testing(true);
+    }
+    ~ForceIncompleteGroupContextGuard() {
+        fixpp::dict::detail::set_force_incomplete_group_context_for_testing(false);
+    }
+};
 
 // ── W-4/W-5 fixture: an OTHERWISE VALID dictionary carrying exactly one group
 // whose delimiter cannot be resolved. `NoBad(700)` is declared as a group in
@@ -146,6 +166,40 @@ constexpr std::string_view kOrchestraUnresolvableXml =
     R"(<fixr:structure>)"
     R"(<fixr:fieldRef id='35'/>)"
     R"(<fixr:groupRef id='7000'/>)"
+    R"(</fixr:structure>)"
+    R"(</fixr:message>)"
+    R"(</fixr:messages>)"
+    R"(</fixr:repository>)";
+
+// ── Gate B r1 F1 (fixpp#216): a WELL-FORMED Orchestra twin of
+// kScalarReuseXml's `V1` message — group `NoGood(600)` has a real member
+// `FieldA(610)`, so it loads and registers a context under the default policy
+// with no seam involved. Used with `ForceIncompleteGroupContextGuard` to
+// exercise the FR-023 throw itself (as `orchestra_parse_error`) on a
+// dictionary that would otherwise load cleanly.
+constexpr std::string_view kOrchestraValidGroupXml =
+    R"(<fixr:repository xmlns:fixr='http://fixprotocol.io/2020/orchestra/repository' )"
+    R"(name='FIX' version='FIX.Latest_EP303'>)"
+    R"(<fixr:datatypes>)"
+    R"(<fixr:datatype name='String'/><fixr:datatype name='int'/>)"
+    R"(<fixr:datatype name='NumInGroup'/>)"
+    R"(</fixr:datatypes>)"
+    R"(<fixr:fields>)"
+    R"(<fixr:field id='35' name='MsgType' type='String'/>)"
+    R"(<fixr:field id='600' name='NoGood' type='NumInGroup'/>)"
+    R"(<fixr:field id='610' name='FieldA' type='String'/>)"
+    R"(</fixr:fields>)"
+    R"(<fixr:groups>)"
+    R"(<fixr:group id='6000' name='GoodGrp'>)"
+    R"(<fixr:numInGroup id='600'/>)"
+    R"(<fixr:fieldRef id='610'/>)"
+    R"(</fixr:group>)"
+    R"(</fixr:groups>)"
+    R"(<fixr:messages>)"
+    R"(<fixr:message id='1' name='V1Msg' msgType='V1'>)"
+    R"(<fixr:structure>)"
+    R"(<fixr:fieldRef id='35'/>)"
+    R"(<fixr:groupRef id='6000'/>)"
     R"(</fixr:structure>)"
     R"(</fixr:message>)"
     R"(</fixr:messages>)"
@@ -347,24 +401,155 @@ TEST(LoaderDisposition, ScalarReuseOfGroupTagIsNotACompletenessViolation) {
 }
 
 // ============================================================================
-// T042 / FR-023 / C-3.4 — the Entity-2 completeness invariant is enforced at
-// finalize(), NOT at as_table_view().
+// Gate B r1 F1 (fixpp#216 P1-1) — a DIRECT unit test of
+// `detail::find_incomplete_group_context()` on a hand-built handle with one
+// `group_ctx_delim_pool_` record simply never populated. Needs no loader, no
+// XML, and no test seam: it covers the detector's found-branch
+// (dictionary_internal.hpp:265/:534) in complete isolation from whether the
+// loaders' throw is reachable.
+// ============================================================================
+TEST(LoaderDisposition, FindIncompleteGroupContextDetectsMissingRecord) {
+    std::array<std::byte, 4096> buf{};
+    std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
+    fixpp::dict::detail::dict_metadata_handle h{&mr};
+
+    // One message: NoGood(600) is a registered NumInGroup context with one
+    // member, FieldA(610) — exactly C-3.4a's "!members.empty()" registration
+    // predicate — but NO delimiter record is added to the pool.
+    fixpp::dict::FieldRef group_fr{};
+    group_fr.tag = 600;
+    group_fr.type = fixpp::dict::field_data_type::NumInGroup;
+    group_fr.group_no_tag = 0;
+
+    fixpp::dict::FieldRef member_fr{};
+    member_fr.tag = 610;
+    member_fr.type = fixpp::dict::field_data_type::String;
+    member_fr.group_no_tag = 600;
+
+    h.fields_.push_back(group_fr);
+    h.fields_.push_back(member_fr);
+    h.per_msg_field_offsets_.push_back({.start = 0, .count = 2});
+    // The violation under test: zero delimiter records for this message.
+    h.per_msg_group_ctx_delim_offsets_.push_back({.start = 0, .count = 0});
+
+    auto const bad = fixpp::dict::detail::find_incomplete_group_context(h);
+    ASSERT_TRUE(bad.has_value())
+        << "a registered context (NoGood/600, with member FieldA/610) that has no delimiter "
+           "record must be detected as the FR-023 / C-3.4 violation it is.";
+    EXPECT_EQ(bad->first, 0u);
+    EXPECT_EQ(bad->second, 600);
+}
+
+// ============================================================================
+// Gate B r1 F1 (fixpp#216 P1-1) — the FR-023 / C-3.4 REJECTION witness itself:
+// constructs a dictionary reaching the invariant and asserts the load is
+// rejected (contracts/group_ctx_delims.md C-3.4's Witnesses clause, verbatim).
+//
+// C-7.3's zero-population measurement (research.md D-7) means no ORDINARY
+// dialect reaches this throw, so `ForceIncompleteGroupContextGuard` is used to
+// truncate a real, otherwise-valid dictionary's delimiter run to zero records
+// immediately before the check both loaders run — `find_incomplete_group_context`
+// then genuinely misses and the throw fires for the real reason it exists to
+// catch (proven by the mutation test below: deleting the detector call turns
+// this RED).
+//
+// The assertion discriminates the FR-023 throw from 072's
+// `group_delimiter_collision_error` (also an `xml_parse_error`, `error.hpp:67`)
+// by BOTH catch type (caught separately, ADD_FAILURE if it fires instead) AND
+// the FR-023 message text — never the base class alone
+// (`feedback_witness_asserts_named_postcondition_not_proxy`).
+// ============================================================================
+TEST(LoaderDisposition, ContextWithoutDelimiterRecordRejectedAtFinalize) {
+    ForceIncompleteGroupContextGuard const guard;
+
+    std::vector<std::byte> buf(2u * 1024u * 1024u);
+    std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
+
+    bool threw = false;
+    std::string what;
+    try {
+        // kScalarReuseXml's V1 message is otherwise valid: NoGood(600) has a
+        // real member, FieldA(610). Messages sort bytewise ("V1" < "V2"), so
+        // message index 0 — the one the seam truncates — is V1.
+        auto d = fixpp::dict::XmlLoader{}.load_from_string(kScalarReuseXml, &mr);
+        (void)d;
+    } catch (group_delimiter_collision_error const& e) {
+        ADD_FAILURE() << "the wrong guard fired (072's nested/parent delimiter collision check, "
+                         "not the FR-023 completeness invariant this test targets): "
+                      << e.what();
+        return;
+    } catch (xml_parse_error const& e) {
+        threw = true;
+        what = e.what();
+    }
+    ASSERT_TRUE(threw) << "FR-023 / C-3.4: a registered context with no delimiter record must "
+                          "reject the load.";
+    EXPECT_NE(what.find("no per-context delimiter record (FR-023 completeness invariant)"),
+              std::string::npos)
+        << "the diagnostic must name the FR-023 completeness invariant specifically; got: "
+        << what;
+    EXPECT_NE(what.find("600"), std::string::npos)
+        << "the diagnostic must name the offending group's NumInGroup tag; got: " << what;
+    EXPECT_NE(what.find("V1"), std::string::npos)
+        << "the diagnostic must name the offending message; got: " << what;
+}
+
+// Gate B r1 F1 — the Orchestra twin (FR-006c: the Orchestra loader's own
+// exception type, discriminated by catch type). Reuses the Orchestra fixture
+// idiom already established at `OrchestraRejectionIsOrchestraParseError`
+// above.
+TEST(LoaderDisposition, ContextWithoutDelimiterRecordRejectedAtFinalizeOrchestra) {
+    ForceIncompleteGroupContextGuard const guard;
+
+    std::vector<std::byte> buf(2u * 1024u * 1024u);
+    std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
+
+    bool caught_derived = false;
+    std::string what;
+    try {
+        auto d = fixpp::dict::OrchestraLoader{}.load_from_string(kOrchestraValidGroupXml, &mr);
+        (void)d;
+    } catch (orchestra_parse_error const& e) {
+        caught_derived = true;
+        what = e.what();
+    } catch (xml_parse_error const& e) {
+        ADD_FAILURE() << "FR-006c / C-6.1b: OrchestraLoader threw the BASE xml_parse_error, not "
+                         "the derived orchestra_parse_error; got: "
+                      << e.what();
+        return;
+    }
+    ASSERT_TRUE(caught_derived) << "FR-023 / C-3.4 must reject in the Orchestra loader too, as "
+                                   "its own orchestra_parse_error (FR-006c).";
+    EXPECT_NE(what.find("no per-context delimiter record (FR-023 completeness invariant)"),
+              std::string::npos)
+        << "the diagnostic must name the FR-023 completeness invariant specifically; got: "
+        << what;
+    EXPECT_NE(what.find("600"), std::string::npos)
+        << "the diagnostic must name the offending group's NumInGroup tag; got: " << what;
+}
+
+// ============================================================================
+// T042 / FR-023 / C-3.4 — a property pin (NOT the rejection witness — see
+// `ContextWithoutDelimiterRecordRejectedAtFinalize` above for that): every
+// shipped dictionary's registered contexts resolve a non-zero delimiter,
+// which is what lets finalize()'s check pass on all ten without a carve-out.
 //
 // Why the assertion is shaped as "all ten load, and every registered context
 // resolves a non-zero delimiter" rather than as a hand-built violating
-// dictionary: the invariant holds BY CONSTRUCTION, and that is worth stating
-// rather than engineering around. `captured == 0` means no FieldRef was
-// emitted at the group's level, so no FieldRef carries its `group_no_tag`, so
-// C-3.4a's `!members.empty()` leg excludes it from the registered set — there
-// is no reachable input that registers a context and omits its record. The
-// check is defence in depth against a future change breaking that
-// correspondence, and this case pins the property it defends.
+// dictionary: the invariant holds BY CONSTRUCTION on ordinary input, and that
+// is worth stating rather than engineering around. `captured == 0` means no
+// FieldRef was emitted at the group's level, so no FieldRef carries its
+// `group_no_tag`, so C-3.4a's `!members.empty()` leg excludes it from the
+// registered set — there is no reachable ORDINARY input that registers a
+// context and omits its record. The check is defence in depth against a
+// future change breaking that correspondence, and this case pins the
+// property it defends.
 //
 // The measured precondition is recorded in research.md D-7 (C-7.3): R\E = 0 on
 // all ten, with E taken from the INDEPENDENT document-order oracle rather than
 // from the loader's own table.
 // ============================================================================
-TEST(LoaderDisposition, ContextWithoutDelimiterRecordRejectedAtFinalize) {
+TEST(LoaderDisposition, AllShippedContextsHaveADelimiterRecord) {
     // The invariant is live: every shipped dictionary passes finalize()'s
     // check, and no registered context resolves the 0 that a missing record
     // would produce. A 0 here would be SILENT, not loud: set_group_first_ctx
@@ -372,7 +557,17 @@ TEST(LoaderDisposition, ContextWithoutDelimiterRecordRejectedAtFinalize) {
     // the group as not-a-group and skips it.
     for (auto const& d : kAllTen) {
         if (d.is_orchestra) {
-            continue;  // covered by the same loop in W-6; keeps this case fast
+            // Not re-derived by this walk (which would cost a second 64 MB
+            // re-parse of the same file). Covered TRANSITIVELY instead: W-6
+            // (`AllTenShippedDictionariesLoadUnderFailClosedDefault`, above)
+            // asserts the Orchestra dictionary loads successfully under the
+            // fail-closed default, and the FR-023 finalize() check enforced in
+            // BOTH loaders (`ContextWithoutDelimiterRecordRejectedAtFinalizeOrchestra`
+            // proves it fires when it should) is exactly what would reject
+            // that load if any registered context had no delimiter record —
+            // so "loads" already implies "every context here resolves a
+            // non-zero delimiter".
+            continue;
         }
         std::vector<std::byte> buf(64u * 1024u * 1024u);
         std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};

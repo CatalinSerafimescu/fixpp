@@ -888,6 +888,7 @@ detail::dict_metadata_handle_ptr OrchestraLoaderState::finalize() {
     // `captured == 0` means no FieldRef was emitted at that group's level, so
     // no FieldRef carries its `group_no_tag`, so the `!members.empty()` leg
     // excludes it from the registered set in the first place.
+    detail::maybe_drop_first_group_ctx_delim_run_for_testing(h);  // Gate B r1 F1 test seam
     if (auto const bad = detail::find_incomplete_group_context(h); bad) {
         throw orchestra_parse_error(
             "dict::orchestra_parse_error: group context for NumInGroup tag " +

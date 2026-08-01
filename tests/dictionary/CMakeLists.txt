@@ -47,7 +47,12 @@ target_link_libraries(dictionary_pure_tests PRIVATE
   GTest::gtest_main
 )
 target_include_directories(dictionary_pure_tests PRIVATE
-  "${CMAKE_SOURCE_DIR}/tests")
+  "${CMAKE_SOURCE_DIR}/tests"
+  # Gate B r1 F1: loader_disposition_test.cpp includes the private
+  # dictionary_internal.hpp directly (detail::find_incomplete_group_context()
+  # unit test + the FR-023 test seam), same pattern as
+  # dictionary_fixt_header_merge_test below.
+  "${CMAKE_SOURCE_DIR}/src/dictionary")
 target_compile_definitions(dictionary_pure_tests PRIVATE
   "FIXPP_DICT_DATA_DIR=\"${FIXPP_DICT_DATA_DIR}\""
   # 083 T035 (W-6): loader_disposition_test.cpp loads all TEN shipped

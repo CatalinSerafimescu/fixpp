@@ -484,6 +484,25 @@ void bump_as_table_view_call_count() noexcept;
 [[nodiscard]] std::uint64_t as_table_view_call_count() noexcept;
 void reset_as_table_view_call_count() noexcept;
 
+// Gate B r1 F1 (fixpp#216 P1-1) — TEST SEAM. The FR-023 / C-3.4 completeness
+// throws in both loaders' finalize() (xml_loader.cpp, orchestra_loader.cpp)
+// hold on every shipped dictionary (C-7.3's zero-population measurement), so
+// no witness reaches them by loading an ordinary dialect. When enabled,
+// `maybe_drop_first_group_ctx_delim_run_for_testing` truncates the FIRST
+// message's per-context delimiter run to zero records, called immediately
+// before the completeness check both loaders run (after Entity 2's own
+// projection loop, which reads the pool, not the offsets, so nothing else
+// observes the truncation). `find_incomplete_group_context` then GENUINELY
+// misses at the `lower_bound` above (not a synthetic stand-in) and returns a
+// REAL offending `(message, tag)` pair, so the throw fires for the actual
+// reason it exists to catch. RAII-reset by the test.
+//
+// Runtime-settable rather than `FIXPP_TEST_HOOKS`-gated for the same reason
+// recorded on the W-11a seam above: the flag lives in the library, so a
+// gated definition would not link against a test TU that defines the macro.
+void set_force_incomplete_group_context_for_testing(bool enable) noexcept;
+void maybe_drop_first_group_ctx_delim_run_for_testing(dict_metadata_handle& h) noexcept;
+
 // ── 083 /simplify (C-1.5): the last two loader-symmetric blocks, shared ──────
 //
 // C-1.5's rule is that a one-loader fix is a half-restructure, which is why

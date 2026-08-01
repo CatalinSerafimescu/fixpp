@@ -426,6 +426,23 @@ std::uint64_t as_table_view_call_count() noexcept {
 void reset_as_table_view_call_count() noexcept {
     g_as_table_view_calls.store(0, std::memory_order_relaxed);
 }
+
+// Gate B r1 F1 (fixpp#216 P1-1) test seam — see dictionary_internal.hpp.
+namespace {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+std::atomic<bool> g_force_incomplete_group_context{false};
+}  // namespace
+void set_force_incomplete_group_context_for_testing(bool enable) noexcept {
+    g_force_incomplete_group_context.store(enable, std::memory_order_relaxed);
+}
+void maybe_drop_first_group_ctx_delim_run_for_testing(dict_metadata_handle& h) noexcept {
+    if (!g_force_incomplete_group_context.load(std::memory_order_relaxed)) {
+        return;
+    }
+    if (!h.per_msg_group_ctx_delim_offsets_.empty()) {
+        h.per_msg_group_ctx_delim_offsets_[0].count = 0;
+    }
+}
 }  // namespace detail
 
 table_view Dictionary::as_table_view() const {
