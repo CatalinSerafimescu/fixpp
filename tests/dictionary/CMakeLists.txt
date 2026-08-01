@@ -56,7 +56,10 @@ target_compile_definitions(dictionary_pure_tests PRIVATE
   # down (line ~98) and so would expand empty here.
   "FIXPP_ORCHESTRA_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries/orchestra\"")
 add_test(NAME dictionary_pure_tests COMMAND dictionary_pure_tests)
-set_tests_properties(dictionary_pure_tests PROPERTIES LABELS "dictionary;075")
+# 083 joins this bucket with loader_disposition_test (T035/T042, the FR-006 /
+# FR-006a / FR-023 dispositions) — labelled `083` so the feature selector
+# reaches it, same rationale as wire_dict_tests above.
+set_tests_properties(dictionary_pure_tests PROPERTIES LABELS "dictionary;075;083")
 
 # ── Standalone: isolation-sensitive dictionary tests (FR-002) ─────────────────
 # Each keeps its own executable + add_test(NAME <target>) so its name, labels,
@@ -238,6 +241,14 @@ set_tests_properties(fixt_header_merge PROPERTIES LABELS "dictionary;081;census"
 # unregistered measured on today's tree). Own TIMEOUT — this sweeps a
 # comparable corpus to required_scope_census (~35s) plus a second discovery
 # discrimination pass per context, so generous headroom.
+#
+# The bound is sized for the SLOWEST preset that runs it, not for a plain build.
+# The original 180 was derived from the ~35s plain-build figure; but the tier1
+# matrix runs this bucket unfiltered under the sanitizers, and it measures
+# **111.7 s under linux-clang-tsan** — 62% of the way to the cap, i.e. red on
+# any CI runner ~1.6x slower than this host. Raised to 600 for the same ~4x
+# headroom as wire_dict_tests (tests/wire/CMakeLists.txt), which hit the same
+# defect for real on the tsan leg. Still bounds a non-termination to minutes.
 add_executable(dictionary_delimiter_census_test delimiter_census_test.cpp)
 target_include_directories(dictionary_delimiter_census_test PRIVATE
   "${CMAKE_SOURCE_DIR}/tests")
@@ -251,7 +262,7 @@ target_compile_definitions(dictionary_delimiter_census_test PRIVATE
   "FIXPP_DICT_DATA_DIR=\"${FIXPP_DICT_DATA_DIR}\""
   "FIXPP_ORCHESTRA_DATA_DIR=\"${FIXPP_ORCHESTRA_DATA_DIR}\"")
 add_test(NAME delimiter_census COMMAND dictionary_delimiter_census_test)
-set_tests_properties(delimiter_census PROPERTIES LABELS "dictionary;083;census" TIMEOUT 180)
+set_tests_properties(delimiter_census PROPERTIES LABELS "dictionary;083;census" TIMEOUT 600)
 
 # mallocnesia gate for the group-context lookup no-alloc test — re-runs the
 # standalone binary under LD_PRELOAD so global malloc/calloc/realloc is

@@ -143,7 +143,13 @@ add_test(NAME wire_dict_tests COMMAND wire_dict_tests)
 # covers the whole executable, not per-.cpp; the 3 pre-existing members ride
 # along (name-selectable via `-R wire_dict_tests` as before, now ALSO
 # `ctest -L 075` / `-L wire` selectable).
-set_tests_properties(wire_dict_tests PROPERTIES LABELS "075;wire")
+# 083 joins this bucket with T009/T010/T011 (delimiter_divergence_wire,
+# consume_group_nested_delim, typed_read_split_agreement) — its three
+# load-bearing wire witnesses. Adding `083` so `ctest -L 083` actually reaches
+# them: 081 shipped with this exact hole (its #203 accept witnesses sat in this
+# same bucket, unreachable by the feature selector, and only the unfiltered
+# debug leg ran them).
+set_tests_properties(wire_dict_tests PROPERTIES LABELS "075;083;wire")
 # 083 T021 (W-10a leg 4, contracts/typed_read_splitter.md): a BACKSTOP, never
 # the discriminator. Leg 4's depth-capped chain fixture drives
 # consume_group_extent's outer loop with an attacker-shaped declared count; an
@@ -151,8 +157,20 @@ set_tests_properties(wire_dict_tests PROPERTIES LABELS "075;wire")
 # The leg is decided by a group_member_fn_ invocation-count equality — this
 # bound only limits the blast radius of an unanticipated non-termination, per
 # the standing lesson that a hung test with no per-test bound burns the job.
-# The whole bucket runs in well under a second, so 120s is pure headroom.
-set_tests_properties(wire_dict_tests PROPERTIES TIMEOUT 120)
+#
+# The bound must be sized for the SLOWEST preset that runs this bucket, not for
+# a plain build. This was first set to 120 on the reasoning "the whole bucket
+# runs in well under a second" — true on linux-clang-debug, but the tier1 matrix
+# also runs it unfiltered under the sanitizers, where it is ~150x slower.
+# Measured under linux-clang-tsan: **147.2 s wall, all 77 tests passing** — so
+# 120 turned a green bucket RED on the tsan leg (caught by /speckit-verify Step
+# 3; it would otherwise have been a CI red on the PR). The cost is not 083's:
+# 081's Fix50Family/FixtHeaderValidateTest is 120.0 s of that 147.2 s, and 083's
+# three added files account for well under 30 s.
+# 600 keeps ~4x headroom over the measured tsan figure — enough for a CI runner
+# slower than this host — while still bounding a non-termination to minutes
+# rather than the job timeout, which is the whole point of having the property.
+set_tests_properties(wire_dict_tests PROPERTIES TIMEOUT 600)
 
 # ── Standalone: 075 T007 QuickFIX enum-golden manifest gate ─────────────────
 # Isolation-sensitive per [const §VII.8] (a data-driven exact-hash gate) —
