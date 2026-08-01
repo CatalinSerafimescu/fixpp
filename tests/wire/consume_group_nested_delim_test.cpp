@@ -283,6 +283,57 @@ TEST(ConsumeGroupNestedDelim, NestedDelimiterTwoInstanceRejectedTodayOneInstance
 }
 
 // ============================================================================
+// FAIL-CLOSED propagation at the DELIMITER position (validator.hpp:390-391).
+//
+// Added at /speckit-verify Step 4, which found this leg uncovered. C-4.1's
+// descent is a symmetry repair: the post-delimiter MEMBER loop already had a
+// nested descent with a `if (!nested) return nested;` failure propagation
+// (validator.hpp:415-416), and T017 added the twin at the instance-opening
+// DELIMITER position. Coverage showed the member-position propagation firing
+// (`[True: 1, False: 14]`) while the new delimiter-position one read
+// `[True: 0, False: 74]` — the fix was made at both sites, but only one site
+// had a test driving its failure arm. That is the same half-restructure shape
+// this feature's own comments call out, surfacing one level up in the TEST
+// dimension: symmetric code needs symmetric coverage, or the untested half is
+// a fail-closed path no one has ever watched fail.
+//
+// The shape: outer NoOuter(100) declares ONE instance and opens with delimiter
+// 200, which IS NoInner's own count tag (FR-021 class (c) — the whole point of
+// 083). NoInner declares one instance, but the frame ends before its delimiter
+// 201 ever appears, so the NESTED consume_group hits its "first instance must
+// open with the delimiter" guard (validator.hpp:287-290) and returns
+// unexpected. The outer call must PROPAGATE that failure rather than swallow
+// it and continue scanning — a swallow here would silently accept a malformed
+// nested group sitting at the delimiter position.
+TEST(ConsumeGroupNestedDelim, NestedFailureAtDelimiterPositionPropagatesFailClosed) {
+    auto tv = make_bare_nested_delim_dict();
+    dictionary_driven_validator v{std::move(tv)};
+    auto buf = make_frame("35=X\x01"
+                          "100=1\x01"
+                          "200=1\x01");
+    std::pmr::monotonic_buffer_resource arena;
+    auto mv = parse_index(buf, arena);
+    std::array<std::byte, 2048> scratch_buf{};
+    std::pmr::monotonic_buffer_resource scratch_mr{scratch_buf.data(), scratch_buf.size(),
+                                                   std::pmr::null_memory_resource()};
+    std::uint16_t ref_tag = 0;
+    auto result = v.validate(mv, &scratch_mr, &ref_tag);
+    ASSERT_FALSE(result.has_value())
+        << "FAIL-CLOSED (validator.hpp:390-391): NoInner(200) declares one instance but the "
+           "frame ends before its delimiter 201, so the nested consume_group invoked from the "
+           "DELIMITER position fails. The outer consume_group must propagate that failure. "
+           "Accepting here would mean a malformed nested group at the instance-opening "
+           "delimiter is silently swallowed — the exact silent-accept this arm exists to "
+           "prevent.";
+    EXPECT_EQ(result.error(), error::wire_required_field_missing)
+        << "the propagated slot must be the nested call's own error, unmodified";
+    EXPECT_EQ(ref_tag, 201)
+        << "ref_tag must name the NESTED group's missing delimiter (201), proving the error "
+           "came from the nested consume_group and was propagated — not re-manufactured by the "
+           "outer frame, which would have reported the outer delimiter 200 instead.";
+}
+
+// ============================================================================
 // W-1a — the IDENTICAL shape on a POPULATED context store (Gate A round 1's
 // rewritten gate; contracts/consume_group.md "the real Phase-2 exit
 // witness"). NoOuter(100) registers under parent path [900] (NoWrap), so
