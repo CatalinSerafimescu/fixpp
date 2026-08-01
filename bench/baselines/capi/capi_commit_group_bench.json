@@ -1,0 +1,68 @@
+{
+  "_note": "083-group-delimiter-resolution T065/T066 SEED baseline — linux-clang-RELEASE (2026-08-01). FR-022 path 3 (C-ABI commit). Same A/B method: the SAME bench file built against the PRE-083 library at merge-base 0539b56d. *** THIS IS THE ONE PATH THAT DOES NOT MEET THE +/-5% BUDGET ON EVERY ROW, and it is recorded as an exception with rationale rather than reported as a pass. *** First measurement showed Group1 +7.4%, Group8 +7.1%, Nested +10.4%. Root cause found and PARTLY fixed in this PR (T066): validate_group_grammar resolved the delimiter once per group INSTANCE, but its key (msg_type, parent_path, e.tag) does not vary across instances — hoisting it to once per GROUP took Group8 from +7.1% to -3.3% (now FASTER than pre-083). The residual on Group1/Nested is the irreducible per-GROUP cost of a context-keyed probe (string_view hash + path-span hash) versus the pre-083 single uint16 hash; a one-instance commit has exactly one lookup, so no hoist can recover it. Reducing it further needs a pre-hashed context handle on table_view (the shape 075 used for the validator's msg_type hash), which is an API change and is NOT attempted at Gate-B time. Scope of the exception: group-bearing C-ABI CONSTRUCTION only. No [2b 6.6] ceiling exists for this path; the inbound paths (1 and 2) are within budget.",
+  "context": {
+    "date": "2026-08-01",
+    "host_name": "WSLUBUNTU24.04",
+    "executable": "build/linux-clang-release/bench/capi/capi_commit_group_bench",
+    "build_type": "release",
+    "preset": "linux-clang-release",
+    "num_cpus": 10,
+    "mhz_per_cpu": 3593,
+    "repetitions": 9,
+    "min_time_s": 0.5,
+    "pre083_ref": "git worktree @ 0539b56dd482bdacbe30c1445c66777cbc298254 (merge-base), same bench sources",
+    "dictionary": "small inline FIX.4.2 dialect (2 messages) — so the numbers are not perturbed by a 25k-context dictionary; the session-open row is therefore a FLOOR for a real dictionary, not a claim about one"
+  },
+  "benchmarks": [
+    {
+      "name": "BM_CapiCommit_NoGroup",
+      "fixture": "no group — validate_group_grammar descends nothing and the delimiter store is never consulted",
+      "pre083_median_ns": 411,
+      "measured_median_ns": 399,
+      "stddev_ns": 15.9,
+      "delta_pct": -2.9,
+      "budget_pct": 5,
+      "verdict": "WITHIN — the context lookup did not leak into the common commit path"
+    },
+    {
+      "name": "BM_CapiCommit_Group1",
+      "fixture": "one outer group instance — exactly ONE delimiter lookup, so the T066 hoist cannot help this row by construction",
+      "pre083_median_ns": 489,
+      "measured_median_ns": 524,
+      "stddev_ns": 17.1,
+      "delta_pct": 7.2,
+      "budget_pct": 5,
+      "verdict": "EXCEEDS — recorded exception. ~35 ns is one context-keyed probe replacing one uint16 probe. Irreducible without a pre-hashed context handle."
+    },
+    {
+      "name": "BM_CapiCommit_Group8",
+      "fixture": "eight instances of the same group — isolates the PER-INSTANCE term",
+      "pre083_median_ns": 1090,
+      "measured_median_ns": 1054,
+      "stddev_ns": 23.7,
+      "delta_pct": -3.3,
+      "budget_pct": 5,
+      "verdict": "WITHIN, and FASTER than pre-083 after the T066 hoist (was +7.1% before it). This row is what proved the per-instance lookup was redundant."
+    },
+    {
+      "name": "BM_CapiCommit_Nested",
+      "fixture": "two outer instances each carrying a nested group — exercises parent-path MAINTENANCE (ctx.pushed(no_tag)), three group lookups per commit",
+      "pre083_median_ns": 873,
+      "measured_median_ns": 985,
+      "stddev_ns": 20.7,
+      "delta_pct": 12.8,
+      "budget_pct": 5,
+      "verdict": "EXCEEDS — recorded exception. Three per-group context probes plus the path push/pop the pre-083 code did not need, since it keyed on no_tag alone."
+    },
+    {
+      "name": "BM_CapiSessionOpen_TableViewBuild",
+      "fixture": "the ONE config-time as_table_view() per session (D-13) — reported as SESSION-OPEN cost, deliberately NOT amortized into any per-message row",
+      "pre083_median_ns": 21353,
+      "measured_median_ns": 30655,
+      "stddev_ns": 1634,
+      "delta_pct": 43.6,
+      "budget_pct": null,
+      "verdict": "EXPECTED AND BY DESIGN — as_table_view() now builds the per-context delimiter store in addition to the bare one. This is once per session, not per message; folding it into a per-message figure would hide it and reporting it per-message would misstate it, so it gets its own row and no budget."
+    }
+  ]
+}

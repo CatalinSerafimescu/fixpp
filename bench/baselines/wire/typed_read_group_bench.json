@@ -1,0 +1,49 @@
+{
+  "_note": "083-group-delimiter-resolution T064/T066 SEED baseline — linux-clang-RELEASE (2026-08-01). FR-022 path 2 (typed read). Same A/B method as validate_group_bench.json: the SAME bench file built against the PRE-083 library at merge-base 0539b56d. VERDICT: path 2 is WITHIN budget on the one comparable row. The two mode-(c) rows have NO pre-083 counterpart — on the pre-083 library the fixture SPLIT INTO 1 SLICE where the dictionary declares 2 and 8 (the C-8.0c extent truncation, 485 shipped contexts), and the bench's own warm-up shape check refused to time it. That refusal is itself the live demonstration that the mode-(c) requirement is load-bearing: without it this bench would have silently reported the truncated one-slice path's number.",
+  "context": {
+    "date": "2026-08-01",
+    "host_name": "WSLUBUNTU24.04",
+    "executable": "build/linux-clang-release/bench/wire/typed_read_group_bench",
+    "build_type": "release",
+    "preset": "linux-clang-release",
+    "num_cpus": 10,
+    "mhz_per_cpu": 3593,
+    "repetitions": 9,
+    "min_time_s": 0.5,
+    "pre083_ref": "git worktree @ 0539b56dd482bdacbe30c1445c66777cbc298254 (merge-base), same bench sources"
+  },
+  "benchmarks": [
+    {
+      "name": "BM_TypedReadGroup_Flat2",
+      "fixture": "ordinary group, 2 instances — the C-8.0c descent probe runs per instance and answers FALSE both times (pure added-probe cost, no recursion)",
+      "pre083_median_ns": 382,
+      "measured_median_ns": 386,
+      "stddev_ns": 8.92,
+      "delta_pct": 1.0,
+      "budget_pct": 5,
+      "verdict": "WITHIN — C-8.0c's extra per-instance group_member_fn_ evaluation is ~2 ns/instance on the not-taken arm"
+    },
+    {
+      "name": "BM_TypedReadGroup_ModeC2",
+      "fixture": "FR-021 mode (c), 2 instances — the outer delimiter IS nested group 200's count tag, so the descent probe answers TRUE and recurses",
+      "pre083_median_ns": null,
+      "pre083_status": "WRONG RESULT — split into 1 slice, expected 2 (extent truncated); the bench refused to time it",
+      "measured_median_ns": 661,
+      "stddev_ns": 13.0,
+      "delta_pct": null,
+      "budget_pct": null,
+      "verdict": "NEW CORRECTNESS — more work because it is now right, not because it regressed"
+    },
+    {
+      "name": "BM_TypedReadGroup_ModeC8",
+      "fixture": "the same mode-(c) shape at 8 instances — separates the per-instance term from the fixed per-materialization term",
+      "pre083_median_ns": null,
+      "pre083_status": "WRONG RESULT — split into 1 slice, expected 8",
+      "measured_median_ns": 1643,
+      "stddev_ns": 31.2,
+      "delta_pct": null,
+      "budget_pct": null,
+      "verdict": "NEW CORRECTNESS. Derived per-instance cost from the two measured mode-(c) points: (1643-661)/6 = ~164 ns per additional outer instance, which is the descent + nested-extent recursion, not an assertion"
+    }
+  ]
+}

@@ -1,0 +1,48 @@
+{
+  "_note": "083-group-delimiter-resolution T063/T066 SEED baseline — linux-clang-RELEASE (2026-08-01). FR-022 path 1 (inbound validate). These are NEW rows, so there is no prior baseline to compare against; instead the SAME bench file was built and run against the PRE-083 library (a detached worktree at merge-base 0539b56d) so the Article VIII §2 +/-5% budget is measured, not asserted. Medians over 9 --benchmark_repetitions at --benchmark_min_time=0.5s, same host, runs sequential (not concurrent). VERDICT: path 1 is WITHIN budget on every comparable row. BM_ValidateGroup_DivergentContext has NO pre-083 counterpart — the pre-083 library REJECTED that frame during warm-up ('IncrementalX fixture is not conformant'), which is the defect this feature fixes; it is recorded as a new row, never as a regression.",
+  "context": {
+    "date": "2026-08-01",
+    "host_name": "WSLUBUNTU24.04",
+    "executable": "build/linux-clang-release/bench/wire/validate_group_bench",
+    "build_type": "release",
+    "preset": "linux-clang-release",
+    "num_cpus": 10,
+    "mhz_per_cpu": 3593,
+    "repetitions": 9,
+    "min_time_s": 0.5,
+    "pre083_ref": "git worktree @ 0539b56dd482bdacbe30c1445c66777cbc298254 (merge-base), same bench sources"
+  },
+  "benchmarks": [
+    {
+      "name": "BM_ValidateGroup_NoGroup",
+      "fixture": "Heartbeat(35=0) — no group; every entry short-circuits on the group_bits_ pre-filter",
+      "pre083_median_ns": 289,
+      "measured_median_ns": 290,
+      "stddev_ns": 10.7,
+      "delta_pct": 0.3,
+      "budget_pct": 5,
+      "verdict": "WITHIN — the common path did not acquire a string hash, which was the main regression risk"
+    },
+    {
+      "name": "BM_ValidateGroup_FirstSeenContext",
+      "fixture": "35=W MarketDataSnapshotFullRefresh — NoMDEntries(268) in MDFullGrp, first-seen context (pre- and post-083 resolve the SAME delimiter 269), so this row isolates lookup COST from behaviour change",
+      "pre083_median_ns": 542,
+      "measured_median_ns": 562,
+      "stddev_ns": 9.29,
+      "delta_pct": 3.7,
+      "budget_pct": 5,
+      "verdict": "WITHIN — the context probe (string_view + path span hash) costs ~20 ns per group-bearing message vs the old uint16 hash"
+    },
+    {
+      "name": "BM_ValidateGroup_DivergentContext",
+      "fixture": "35=X MarketDataIncrementalRefresh — the SAME NoMDEntries(268) in MDIncGrp, delimiter MDUpdateAction(279)",
+      "pre083_median_ns": null,
+      "pre083_status": "REJECTED — validate() refused this conforming frame on the pre-083 library (the L-063-3 residual-(b) false-reject)",
+      "measured_median_ns": 695,
+      "stddev_ns": 18.5,
+      "delta_pct": null,
+      "budget_pct": null,
+      "verdict": "NEW CAPABILITY — no pre-083 counterpart exists, so no delta is claimed"
+    }
+  ]
+}

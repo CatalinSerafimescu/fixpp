@@ -720,25 +720,41 @@ static fixpp_error_t validate_group_grammar(const std::pmr::vector<AccumulatorEn
                                              std::vector<uint16_t>& parent_path) noexcept {
     for (const auto& e : entries) {
         if (!e.is_group) continue;
+        // 083 T066: resolve the delimiter ONCE PER GROUP, not once per instance.
+        // The key is `(msg_type, parent_path, e.tag)` — none of which varies
+        // across `e.instances` (`parent_path` is pushed and popped strictly
+        // INSIDE the instance loop, so it holds the same value at every
+        // iteration's top). The pre-083 lookup was a single uint16 hash and was
+        // cheap enough per instance; the context-keyed one hashes a string_view
+        // plus a path span, and leaving it in the inner loop cost ~7% on an
+        // 8-instance commit against the pre-083 library (measured, T066).
+        //
+        // 083 T052: a dictionary-present handle that cannot reach the session
+        // view FAILS THE COMMIT CLOSED. It must NEVER fall back to the bare
+        // global `dict->group_first_field(e.tag)` — that is exactly the
+        // context-free resolution FR-001 removes, and a fallback here would let
+        // the builder accept an order inbound validation rejects, which is the
+        // disagreement this task exists to close.
+        //
+        // `!e.instances.empty()` keeps the hoist BEHAVIOUR-preserving: with zero
+        // instances the old code never entered the inner loop and so never
+        // reached the `tv == nullptr` fail-closed check, and hoisting it
+        // unguarded would have started rejecting an empty group on a
+        // dict-present/view-missing handle. Both orderings return the same
+        // TYPE_MISMATCH for every case that does reach the check.
+        uint16_t delim = 0;
+        if (dict && !e.instances.empty()) {
+            if (tv == nullptr) return FIXPP_ERR_TYPE_MISMATCH;
+            delim = tv->group_first_field(
+                msg_type, std::span<const uint16_t>{parent_path.data(), parent_path.size()},
+                e.tag);
+        }
         for (const auto& inst : e.instances) {
             // INV-4 leg (c): each instance must have at least one field.
             if (inst.fields.empty()) return FIXPP_ERR_TYPE_MISMATCH;
             // INV-4 leg (d): first field must be the group delimiter (dict-gated).
-            if (dict) {
-                // 083 T052: a dictionary-present handle that cannot reach the
-                // session view FAILS THE COMMIT CLOSED. It must NEVER fall back
-                // to the bare global `dict->group_first_field(e.tag)` — that is
-                // exactly the context-free resolution FR-001 removes, and a
-                // fallback here would let the builder accept an order inbound
-                // validation rejects, which is the disagreement this task
-                // exists to close.
-                if (tv == nullptr) return FIXPP_ERR_TYPE_MISMATCH;
-                uint16_t delim = tv->group_first_field(
-                    msg_type, std::span<const uint16_t>{parent_path.data(), parent_path.size()},
-                    e.tag);
-                if (delim != 0 && inst.fields[0].tag != delim) {
-                    return FIXPP_ERR_TYPE_MISMATCH;
-                }
+            if (dict && delim != 0 && inst.fields[0].tag != delim) {
+                return FIXPP_ERR_TYPE_MISMATCH;
             }
             // Recurse into nested groups within this instance, with THIS group's
             // count tag pushed — so a nested group is keyed on its real ancestor

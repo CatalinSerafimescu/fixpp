@@ -94,6 +94,14 @@ target_compile_definitions(capi_pure_tests PRIVATE
   "FIXPP_CAPI_GOLDEN=\"${CMAKE_SOURCE_DIR}/tests/abi/golden/fixpp_capi_symbols.txt\""
 )
 add_test(NAME capi_pure_tests COMMAND capi_pure_tests)
+# 083 T062: this bucket carried NO labels, so `ctest -L capi` — the C-ABI gate
+# command every feature's exit gate runs — silently skipped it. It holds
+# 083's five C-ABI construction witnesses (W-11/11a/11b/12/13) AND the `nm`
+# exported-symbol ABI golden (W-14, the current ABI gate since libabigail was
+# retired), so an unlabelled bucket meant the ABI gate was not in the ABI
+# label. Labelled `capi` (the bucket-wide selector) + `083` (feature-scoped),
+# matching the convention the sibling capi buckets already use.
+set_tests_properties(capi_pure_tests PROPERTIES LABELS "capi;083;abi")
 
 # T004 (US1, SC-004) — 051 error-block foundational oracle (translate re-point +
 # strerror + per-code-minor downgrade).  T022 (US5) appends live end-to-end arms
