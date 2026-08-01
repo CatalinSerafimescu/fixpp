@@ -412,6 +412,9 @@ namespace detail {
 // `as_table_view()` off the per-message path in the first place, and W-11a is
 // the witness that it stays there.
 namespace {
+// A mutable process-wide counter is the POINT of this seam; it is file-local
+// (anonymous namespace), atomic, and read only by the W-11a witness.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::atomic<std::uint64_t> g_as_table_view_calls{0};
 }  // namespace
 void bump_as_table_view_call_count() noexcept {
@@ -563,7 +566,7 @@ table_view Dictionary::as_table_view() const {
                 auto const pit = immediate_parent.find(cur);
                 cur = (pit != immediate_parent.end()) ? pit->second : std::uint16_t{0};
             }
-            std::reverse(path.begin(), path.end());
+            std::ranges::reverse(path);
 
             // 4) Delimiter = the group's DECLARATION first field, NOT
             //    members.front(): `all_fields` is tag-sorted, so members.front()

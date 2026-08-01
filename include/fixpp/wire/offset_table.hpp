@@ -325,13 +325,10 @@ private:
     // 063 T008: `ctx` seeds the new sub-table's stored context (via
     // set_group_context) immediately after construction — see
     // nested_group_slices()'s doc comment above for what `ctx` means.
-    [[nodiscard]] static OffsetTable* build_nested_subview(std::byte const* data, std::size_t len,
-                                                           std::pmr::memory_resource* mr,
-                                                           void const* opaque_dict,
-                                                           group_member_fn_t group_member_fn,
-                                                           detail::generation_token gen,
-                                                           group_context const& ctx,
-                                          group_delim_fn_t group_delim_fn = nullptr) noexcept;
+    [[nodiscard]] static OffsetTable* build_nested_subview(
+        std::byte const* data, std::size_t len, std::pmr::memory_resource* mr,
+        void const* opaque_dict, group_member_fn_t group_member_fn, detail::generation_token gen,
+        group_context const& ctx, group_delim_fn_t group_delim_fn = nullptr) noexcept;
 
     // 063 T006: builds an actual `group_context` value from the raw fields
     // below (needs the complete type — defined in offset_table.cpp, which

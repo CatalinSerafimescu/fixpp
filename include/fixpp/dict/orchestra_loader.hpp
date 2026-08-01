@@ -47,13 +47,13 @@ public:
     // 083 FR-006a / C-6.4 / C-6.6: `policy` is the SAME option with the SAME
     // semantics as XmlLoader's, defaulted to fail-closed, so existing callers
     // compile unchanged.
-    [[nodiscard]] Dictionary load(std::filesystem::path const& path, std::pmr::memory_resource* mr,
-                                  unresolved_group_policy policy =
-                                      unresolved_group_policy::fail_closed);
+    [[nodiscard]] Dictionary load(
+        std::filesystem::path const& path, std::pmr::memory_resource* mr,
+        unresolved_group_policy policy = unresolved_group_policy::fail_closed);
 
-    [[nodiscard]] Dictionary load_from_string(std::string_view xml, std::pmr::memory_resource* mr,
-                                              unresolved_group_policy policy =
-                                                  unresolved_group_policy::fail_closed);
+    [[nodiscard]] Dictionary load_from_string(
+        std::string_view xml, std::pmr::memory_resource* mr,
+        unresolved_group_policy policy = unresolved_group_policy::fail_closed);
 };
 
 }  // namespace fixpp::dict

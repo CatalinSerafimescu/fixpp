@@ -623,8 +623,8 @@ public:
                              std::uint16_t no_tag) noexcept -> std::uint16_t {
               using dict_t = std::remove_reference_t<TV>;
               return static_cast<dict_t const*>(d)->group_first_field(
-                  ctx.msg_type,
-                  std::span<std::uint16_t const>{ctx.parent_path.data(), ctx.depth}, no_tag);
+                  ctx.msg_type, std::span<std::uint16_t const>{ctx.parent_path.data(), ctx.depth},
+                  no_tag);
           }} {}
 
     template <class TV>
@@ -642,7 +642,7 @@ public:
                                                             std::pmr::memory_resource* mr) noexcept
         [[clang::lifetimebound]] {
         // Thread the opaque dict pointer + helper fns into the MessageView.
-        MessageView<Mode> mv{frame, mr, opaque_dict_, classify_fn_, group_member_fn_,
+        MessageView<Mode> mv{frame,          mr, opaque_dict_, classify_fn_, group_member_fn_,
                              group_delim_fn_};
         if constexpr (Mode == access_mode::Index) {
             if (auto s = mv.offsets().build_status(); !s) {
@@ -665,8 +665,8 @@ public:
         // silently take C-8.4's dict-FREE fallback (wire-derived
         // `entries_[first].tag`) on a dictionary-backed parse — the missed
         // construction site T057 warns about, one API surface over.
-        MessageView<Mode> mv{frame,      mr,          cfg,           opaque_dict_,
-                             classify_fn_, group_member_fn_, group_delim_fn_};
+        MessageView<Mode> mv{frame,          mr, cfg, opaque_dict_, classify_fn_, group_member_fn_,
+                             group_delim_fn_};
         if (auto s = mv.offsets().build_status(); !s) {
             return core::expected_t<MessageView<Mode>>{std::unexpect, s.error()};
         }

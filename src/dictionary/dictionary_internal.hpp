@@ -121,14 +121,14 @@ struct GroupCtxDelim {
 // `make_group_ctx_key`'s `std::min(parent_path.size(), kMaxGroupContextDepth)`
 // (include/fixpp/dict/table_view.hpp:229-233) — a path deeper than K=16 clamps
 // rather than growing unbounded.
-[[nodiscard]] inline GroupCtxDelim make_group_ctx_delim(
-    std::span<std::uint16_t const> parent_path, std::uint16_t no_tag,
-    std::uint16_t delimiter) noexcept {
+[[nodiscard]] inline GroupCtxDelim make_group_ctx_delim(std::span<std::uint16_t const> parent_path,
+                                                        std::uint16_t no_tag,
+                                                        std::uint16_t delimiter) noexcept {
     GroupCtxDelim rec;
     rec.no_tag = no_tag;
     rec.delimiter = delimiter;
-    rec.depth = static_cast<std::uint8_t>(
-        std::min<std::size_t>(parent_path.size(), kMaxGroupContextDepth));
+    rec.depth =
+        static_cast<std::uint8_t>(std::min<std::size_t>(parent_path.size(), kMaxGroupContextDepth));
     for (std::uint8_t i = 0; i < rec.depth; ++i) {
         rec.parent_path[i] = parent_path[i];
     }
@@ -250,7 +250,7 @@ inline void capture_first_emission(DelimCapture* cap, std::uint16_t tag) noexcep
             path.push_back(cur);
             cur = parent_of(cur);
         }
-        std::reverse(path.begin(), path.end());
+        std::ranges::reverse(path);
         GroupCtxDelim const probe = make_group_ctx_delim(path, fr.tag, /*delimiter=*/0);
         // PRECONDITION: `delims` is sorted by `group_ctx_delim_less`. Both call
         // sites (each loader's `finalize()`) sort the per-message records with
@@ -260,8 +260,7 @@ inline void capture_first_emission(DelimCapture* cap, std::uint16_t tag) noexcep
         // runtime. Stated rather than assumed, because a scan tolerated an
         // unsorted span and this does not — an unsorted span would yield a
         // spurious "no record" and a false load-time rejection.
-        auto const it = std::lower_bound(delims.begin(), delims.end(), probe,
-                                         group_ctx_delim_less);
+        auto const it = std::ranges::lower_bound(delims, probe, group_ctx_delim_less);
         if (it == delims.end() || group_ctx_delim_less(probe, *it)) {
             return fr.tag;  // no record for a context as_table_view() will register
         }
@@ -374,9 +373,9 @@ public:
     // defect this feature removes (data-model.md Entity 2, "no silent
     // fallback exists"). Callers that need a fail-closed disposition act on
     // the 0.
-    [[nodiscard]] std::uint16_t group_ctx_delimiter_impl(
-        std::string_view msg_type, std::span<std::uint16_t const> parent_path,
-        std::uint16_t no_tag) const noexcept;
+    [[nodiscard]] std::uint16_t group_ctx_delimiter_impl(std::string_view msg_type,
+                                                         std::span<std::uint16_t const> parent_path,
+                                                         std::uint16_t no_tag) const noexcept;
 
     // 074 (FR-002): enum {value, description} pairs for `tag`; empty span if the
     // tag has no codeset entry. Binary-searches `enum_runs_` (sorted by tag).
@@ -502,13 +501,10 @@ void reset_as_table_view_call_count() noexcept;
 // captures that agree by construction, and the first is kept.
 inline void flush_group_ctx_delims(dict_metadata_handle& h, DelimCapture& cap) {
     std::ranges::sort(cap.out, group_ctx_delim_less);
-    auto const last = std::ranges::unique(cap.out,
-                                          [](GroupCtxDelim const& a,
-                                             GroupCtxDelim const& b) noexcept {
-                                              return !group_ctx_delim_less(a, b) &&
-                                                     !group_ctx_delim_less(b, a);
-                                          })
-                          .begin();
+    auto const last =
+        std::ranges::unique(cap.out, [](GroupCtxDelim const& a, GroupCtxDelim const& b) noexcept {
+            return !group_ctx_delim_less(a, b) && !group_ctx_delim_less(b, a);
+        }).begin();
     cap.out.erase(last, cap.out.end());
     MsgFieldsRun const run{.start = static_cast<std::uint32_t>(h.group_ctx_delim_pool_.size()),
                            .count = static_cast<std::uint32_t>(cap.out.size())};

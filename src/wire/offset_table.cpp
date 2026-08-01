@@ -748,13 +748,10 @@ group_slices_result OffsetTable::group_slices_status(std::uint16_t no_tag) const
 // the ownership/lifetime/RC1 contract). Placement-constructs into `mr`,
 // mirroring the established `mr->allocate(size, align)` + placement-new
 // arena pattern (include/fixpp/core/sync/async_mutex.hpp:1160-1164).
-OffsetTable* OffsetTable::build_nested_subview(std::byte const* data, std::size_t len,
-                                               std::pmr::memory_resource* mr,
-                                               void const* opaque_dict,
-                                               group_member_fn_t group_member_fn,
-                                               detail::generation_token gen,
-                                               group_context const& ctx,
-                                               group_delim_fn_t group_delim_fn) noexcept {
+OffsetTable* OffsetTable::build_nested_subview(
+    std::byte const* data, std::size_t len, std::pmr::memory_resource* mr, void const* opaque_dict,
+    group_member_fn_t group_member_fn, detail::generation_token gen, group_context const& ctx,
+    group_delim_fn_t group_delim_fn) noexcept {
     try {
         // RC1: slice-scoped `len+1` — the terminal SOH is provably already
         // present in the parent frame buffer at `data+len` (the slice is
@@ -774,8 +771,7 @@ OffsetTable* OffsetTable::build_nested_subview(std::byte const* data, std::size_
         // missed site would silently take C-8.4's dict-free fallback on nested
         // splits only -- the "context seeded lazily on ONE path leaves sibling
         // paths default" shape, invisible to any root-level test.
-        auto* table =
-            ::new (mem) OffsetTable(fv, mr, opaque_dict, group_member_fn, group_delim_fn);
+        auto* table = ::new (mem) OffsetTable(fv, mr, opaque_dict, group_member_fn, group_delim_fn);
         // 063 T008: seed the new sub-table's stored context VERBATIM (no
         // further push — see nested_group_slices()'s doc comment).
         table->set_group_context(ctx);

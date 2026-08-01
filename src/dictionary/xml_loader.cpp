@@ -254,9 +254,9 @@ struct MessageDef {
 
 class LoaderState {
 public:
-    explicit LoaderState(std::pmr::memory_resource* mr,
-                         unresolved_group_policy policy =
-                             unresolved_group_policy::fail_closed) noexcept
+    explicit LoaderState(
+        std::pmr::memory_resource* mr,
+        unresolved_group_policy policy = unresolved_group_policy::fail_closed) noexcept
         : mr_(mr), unresolved_policy_(policy) {}
 
     void parse_document(pugi::xml_document const& doc);
@@ -701,8 +701,8 @@ void LoaderState::expand_field_list(
                 // the component/group caches and never reaches here at all.
                 else if (unresolved_policy_ == unresolved_group_policy::fail_closed) {
                     throw xml_parse_error(
-                        "dict::xml_parse_error: <group name=\"" + gname +
-                        "\"> (NumInGroup tag " + std::to_string(no_tag) +
+                        "dict::xml_parse_error: <group name=\"" + gname + "\"> (NumInGroup tag " +
+                        std::to_string(no_tag) +
                         ") declares no first member, so its delimiter cannot be resolved; "
                         "pass unresolved_group_policy::tolerant to skip it instead");
                 }
@@ -1032,7 +1032,6 @@ detail::dict_metadata_handle_ptr LoaderState::finalize() {
         }
     }
 
-
     // ── 083 T041 (FR-023 / C-3.4): Entity-2 completeness invariant ──────────
     // Every context `as_table_view()` will register must have a record. Runs
     // AFTER the projection above (so `first_field_tag` is final) and at
@@ -1050,12 +1049,11 @@ detail::dict_metadata_handle_ptr LoaderState::finalize() {
     // no FieldRef carries its `group_no_tag`, so the `!members.empty()` leg
     // excludes it from the registered set in the first place.
     if (auto const bad = detail::find_incomplete_group_context(h); bad) {
-        throw xml_parse_error(
-            "dict::xml_parse_error: group context for NumInGroup tag " +
-            std::to_string(bad->second) + " in message '" +
-            std::string{messages_[bad->first].msg_type} +
-            "' is registered by as_table_view() but has no per-context delimiter "
-            "record (FR-023 completeness invariant)");
+        throw xml_parse_error("dict::xml_parse_error: group context for NumInGroup tag " +
+                              std::to_string(bad->second) + " in message '" +
+                              std::string{messages_[bad->first].msg_type} +
+                              "' is registered by as_table_view() but has no per-context delimiter "
+                              "record (FR-023 completeness invariant)");
     }
 
     // Emit components (PMR ComponentRef array).
@@ -1283,8 +1281,7 @@ detail::dict_metadata_handle_ptr LoaderState::finalize() {
 // ----------------------------------------------------------------------------
 
 [[nodiscard]] detail::dict_metadata_handle_ptr build_handle_from_doc(
-    pugi::xml_document const& doc, std::pmr::memory_resource* mr,
-    unresolved_group_policy policy) {
+    pugi::xml_document const& doc, std::pmr::memory_resource* mr, unresolved_group_policy policy) {
     LoaderState st{mr, policy};
     st.parse_document(doc);
     return st.finalize();
@@ -1311,8 +1308,7 @@ Dictionary XmlLoader::load(std::filesystem::path const& xml_path, std::pmr::memo
 }
 
 // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
-Dictionary XmlLoader::load_from_string(std::string_view xml_text,
-                                       std::pmr::memory_resource* mr,
+Dictionary XmlLoader::load_from_string(std::string_view xml_text, std::pmr::memory_resource* mr,
                                        unresolved_group_policy policy) {
     assert(mr != nullptr && "XmlLoader::load_from_string: mr must not be null");
     return fixpp::core::detail::trap_throw_or_throw<xml_oom_error>([&] {

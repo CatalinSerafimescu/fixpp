@@ -147,10 +147,11 @@ constexpr OrchestraTypeEntry kOrchestraTypeTable[] = {
 }
 
 // ----------------------------------------------------------------------------
-// Non-throwing uint16 id parse — used by the best-effort `first_member_tag`
-// delimiter scan (mirrors xml_loader.cpp's tolerant "skip on lookup miss"
-// style for that specific helper; skip-on-malformed there is not a
-// correctness path, unlike fieldRef/componentRef/groupRef resolution below).
+// Non-throwing uint16 id parse — tolerant "skip on lookup miss" style, used
+// by the id-attribute reads below. (It previously also served the
+// `first_member_tag` delimiter scan, which 083 T030 removed.)
+// Skip-on-malformed here is not a correctness path, unlike
+// fieldRef/componentRef/groupRef resolution below.
 // ----------------------------------------------------------------------------
 
 [[nodiscard]] bool try_parse_uint16(std::string_view s, std::uint16_t& out) noexcept {
@@ -235,9 +236,9 @@ struct OrchestraMessageDef {
 
 class OrchestraLoaderState {
 public:
-    explicit OrchestraLoaderState(std::pmr::memory_resource* mr,
-                                  unresolved_group_policy policy =
-                                      unresolved_group_policy::fail_closed) noexcept
+    explicit OrchestraLoaderState(
+        std::pmr::memory_resource* mr,
+        unresolved_group_policy policy = unresolved_group_policy::fail_closed) noexcept
         : mr_(mr), unresolved_policy_(policy) {}
 
     void parse_document(pugi::xml_document const& doc);
@@ -284,11 +285,14 @@ private:
         bool component_required = true, bool group_scope_component_required = true);
     // NOLINTEND(misc-no-recursion,bugprone-easily-swappable-parameters)
 
-    // Best-effort one-level delimiter scan for a group/component body: mirrors
-    // xml_loader.cpp's first_field_tag computation (fieldRef/groupRef ->
-    // direct tag; a leading componentRef -> drill into ITS direct fieldRef
-    // children only, no further recursion). Returns 0 if none found.
-    [[nodiscard]] std::uint16_t first_member_tag(pugi::xml_node const& container) const;
+    // 083 T030: `first_member_tag()` — the best-effort one-level delimiter scan
+    // — was REMOVED here, not merely bypassed. Its only caller set
+    // `gd.first_field_tag`, and the delimiter is now captured from declaration
+    // order during `expand_field_list` (Entity 2), with the global repopulated
+    // afterwards as a first-seen projection. Leaving the function defined but
+    // uncalled is the orphan a `/simplify` pass is supposed to clean up, and
+    // cppcheck flagged it as `unusedPrivateFunction`. `try_parse_uint16` is
+    // NOT removed — it has other callers.
 
     std::pmr::memory_resource* mr_;
 
@@ -471,59 +475,6 @@ void OrchestraLoaderState::parse_document(pugi::xml_document const& doc) {
     collect_components(root);
     collect_groups(root);
     collect_messages(root);
-}
-
-std::uint16_t OrchestraLoaderState::first_member_tag(pugi::xml_node const& container) const {
-    std::uint16_t first_field_tag = 0;
-    for (auto const& gc : container.children()) {
-        std::string_view const tn{gc.name()};
-        if (tn == "fixr:fieldRef") {
-            std::uint16_t tag = 0;
-            if (try_parse_uint16(std::string_view{gc.attribute("id").as_string("")}, tag) &&
-                fields_by_tag_.contains(tag)) {
-                first_field_tag = tag;
-                break;
-            }
-        } else if (tn == "fixr:groupRef") {
-            // A leading nested group's OWN count-field tag is the delimiter
-            // surrogate (mirrors xml_loader.cpp treating a leading <group
-            // name=X> exactly like a <field name=X> reference).
-            std::uint16_t xml_id = 0;
-            if (try_parse_uint16(std::string_view{gc.attribute("id").as_string("")}, xml_id)) {
-                if (auto const git = group_by_xml_id_.find(xml_id); git != group_by_xml_id_.end()) {
-                    if (auto const ning = git->second.child("fixr:numInGroup"); ning) {
-                        std::uint16_t no_tag = 0;
-                        if (try_parse_uint16(std::string_view{ning.attribute("id").as_string("")},
-                                             no_tag)) {
-                            first_field_tag = no_tag;
-                            break;
-                        }
-                    }
-                }
-            }
-        } else if (tn == "fixr:componentRef") {
-            std::uint16_t xml_id = 0;
-            if (try_parse_uint16(std::string_view{gc.attribute("id").as_string("")}, xml_id)) {
-                if (auto const cit = component_index_by_xml_id_.find(xml_id);
-                    cit != component_index_by_xml_id_.end()) {
-                    for (auto const& cf : components_[cit->second].node.children("fixr:fieldRef")) {
-                        std::uint16_t cf_tag = 0;
-                        if (try_parse_uint16(std::string_view{cf.attribute("id").as_string("")},
-                                             cf_tag) &&
-                            fields_by_tag_.contains(cf_tag)) {
-                            first_field_tag = cf_tag;
-                            break;
-                        }
-                    }
-                    if (first_field_tag != 0) {
-                        break;
-                    }
-                }
-            }
-        }
-        // Ignore fixr:numInGroup / fixr:annotation / other unknown children.
-    }
-    return first_field_tag;
 }
 
 void OrchestraLoaderState::expand_field_list(
@@ -921,7 +872,6 @@ detail::dict_metadata_handle_ptr OrchestraLoaderState::finalize() {
         }
     }
 
-
     // ── 083 T041 (FR-023 / C-3.4): Entity-2 completeness invariant ──────────
     // Every context `as_table_view()` will register must have a record. Runs
     // AFTER the projection above (so `first_field_tag` is final) and at
@@ -1139,8 +1089,7 @@ detail::dict_metadata_handle_ptr OrchestraLoaderState::finalize() {
 // ----------------------------------------------------------------------------
 
 [[nodiscard]] detail::dict_metadata_handle_ptr build_handle_from_doc(
-    pugi::xml_document const& doc, std::pmr::memory_resource* mr,
-    unresolved_group_policy policy) {
+    pugi::xml_document const& doc, std::pmr::memory_resource* mr, unresolved_group_policy policy) {
     OrchestraLoaderState st{mr, policy};
     st.parse_document(doc);
     return st.finalize();
@@ -1148,8 +1097,7 @@ detail::dict_metadata_handle_ptr OrchestraLoaderState::finalize() {
 
 }  // namespace
 
-Dictionary OrchestraLoader::load(std::filesystem::path const& path,
-                                 std::pmr::memory_resource* mr,
+Dictionary OrchestraLoader::load(std::filesystem::path const& path, std::pmr::memory_resource* mr,
                                  unresolved_group_policy policy) {
     assert(mr != nullptr && "OrchestraLoader::load: mr must not be null");
     return fixpp::core::detail::trap_throw_or_throw<xml_oom_error>([&] {
@@ -1168,9 +1116,8 @@ Dictionary OrchestraLoader::load(std::filesystem::path const& path,
     });
 }
 
-Dictionary OrchestraLoader::load_from_string(std::string_view xml,
-                                            std::pmr::memory_resource* mr,
-                                            unresolved_group_policy policy) {
+Dictionary OrchestraLoader::load_from_string(std::string_view xml, std::pmr::memory_resource* mr,
+                                             unresolved_group_policy policy) {
     assert(mr != nullptr && "OrchestraLoader::load_from_string: mr must not be null");
     return fixpp::core::detail::trap_throw_or_throw<xml_oom_error>([&] {
         pugi::xml_document doc;

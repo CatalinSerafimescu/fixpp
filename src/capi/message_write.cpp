@@ -714,10 +714,10 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_remove_tag(fixpp_msg_t* msg, uint16_t t
 // so construction resolves the delimiter by the same rule inbound validation
 // does. `tv` is the session's ONE cached view (T050/T051) — never rebuilt here.
 static fixpp_error_t validate_group_grammar(const std::pmr::vector<AccumulatorEntry>& entries,
-                                             const fixpp::dict::Dictionary* dict,
-                                             const fixpp::dict::table_view* tv,
-                                             std::string_view msg_type,
-                                             std::vector<uint16_t>& parent_path) noexcept {
+                                            const fixpp::dict::Dictionary* dict,
+                                            const fixpp::dict::table_view* tv,
+                                            std::string_view msg_type,
+                                            std::vector<uint16_t>& parent_path) noexcept {
     for (const auto& e : entries) {
         if (!e.is_group) continue;
         // 083 T066: resolve the delimiter ONCE PER GROUP, not once per instance.
@@ -746,8 +746,7 @@ static fixpp_error_t validate_group_grammar(const std::pmr::vector<AccumulatorEn
         if (dict && !e.instances.empty()) {
             if (tv == nullptr) return FIXPP_ERR_TYPE_MISMATCH;
             delim = tv->group_first_field(
-                msg_type, std::span<const uint16_t>{parent_path.data(), parent_path.size()},
-                e.tag);
+                msg_type, std::span<const uint16_t>{parent_path.data(), parent_path.size()}, e.tag);
         }
         for (const auto& inst : e.instances) {
             // INV-4 leg (c): each instance must have at least one field.
@@ -800,9 +799,8 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_commit(fixpp_msg_t* msg, const uint8_t*
     // makes FR-018's agreement structural rather than coincidental.
     {
         std::vector<uint16_t> parent_path;
-        if (fixpp_error_t c = validate_group_grammar(acc.entries, h->dict_.get(),
-                                                     h->session_tv_.get(), acc.msg_type,
-                                                     parent_path);
+        if (fixpp_error_t c = validate_group_grammar(
+                acc.entries, h->dict_.get(), h->session_tv_.get(), acc.msg_type, parent_path);
             c != FIXPP_ERR_OK) {
             return c;
         }
