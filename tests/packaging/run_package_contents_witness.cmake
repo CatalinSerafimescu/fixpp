@@ -10,6 +10,7 @@
 #   DEB  ./usr/lib/...
 #   RPM  /usr/lib/...
 #   TGZ  fixpp-<version>-<platform>-<toolchain>-<config>/usr/lib/...
+#   ZIP  fixpp-<version>-windows-msvc-<config>/lib/...   (NO usr/ — Windows)
 #
 # Expected artifacts are derived BY MEMBER KIND, not from a flat "the exported
 # static libraries": of the 18 export members, 13 are STATIC (one archive each),
@@ -77,7 +78,7 @@ if(NOT _rc EQUAL 0)
   message(FATAL_ERROR "T058: failed to extract ${_tgz}")
 endif()
 
-file(GLOB_RECURSE _shipped_targets "${_x}/*/usr/lib/cmake/fixpp/fixppTargets.cmake")
+file(GLOB_RECURSE _shipped_targets "${_x}/*/fixppTargets.cmake")
 if(_shipped_targets STREQUAL "")
   message(FATAL_ERROR "T058: the package ships no fixppTargets.cmake — nothing to derive from")
 endif()
@@ -139,6 +140,12 @@ function(_fixpp_list_package _path _out_files)
     string(REGEX REPLACE "^\\./" "" _f "${_f}")
     string(REGEX REPLACE "^/" "" _f "${_f}")
     string(REGEX REPLACE "^fixpp-[^/]+/" "" _f "${_f}")
+    # `usr/` is a LINUX-only component: DEB and RPM install into the system tree
+    # and need it, the Windows ZIP does not (MEASURED — it used to carry `usr/`
+    # unconditionally, which is why this strip is written to tolerate BOTH). It
+    # is removed here so every expectation below is expressed once, prefix-free,
+    # instead of being duplicated per platform.
+    string(REGEX REPLACE "^usr/" "" _f "${_f}")
     string(REGEX REPLACE "/$" "" _f "${_f}")
     if(NOT _f STREQUAL "")
       list(APPEND _norm "${_f}")
@@ -159,13 +166,15 @@ foreach(_artifact IN LISTS _artifacts)
   set(_missing "")
 
   # MUST BE PRESENT — enumerated explicitly, never as a class.
+  # Paths are PREFIX-FREE: the Linux-only `usr/` component was stripped during
+  # normalisation, so one list covers DEB, RPM, TGZ and the Windows ZIP.
   foreach(_required
-      "usr/lib/cmake/fixpp/fixppConfig.cmake"
-      "usr/lib/cmake/fixpp/fixppConfigVersion.cmake"
-      "usr/lib/cmake/fixpp/fixppTargets.cmake"
-      "usr/share/doc/fixpp/NOTICE"
-      "usr/share/doc/fixpp/QUICKFIX_LICENSE.txt"
-      "usr/share/fixpp/dictionaries/FIX44.xml")
+      "lib/cmake/fixpp/fixppConfig.cmake"
+      "lib/cmake/fixpp/fixppConfigVersion.cmake"
+      "lib/cmake/fixpp/fixppTargets.cmake"
+      "share/doc/fixpp/NOTICE"
+      "share/doc/fixpp/QUICKFIX_LICENSE.txt"
+      "share/fixpp/dictionaries/FIX44.xml")
     if(NOT _required IN_LIST _files)
       list(APPEND _missing "${_required}")
     endif()
@@ -178,31 +187,39 @@ foreach(_artifact IN LISTS _artifacts)
   set(_n_archives 0)
   set(_have_objects 0)
   foreach(_f IN LISTS _files)
-    if(_f MATCHES "^usr/include/fixpp/wire/parser\\.hpp$")
+    if(_f MATCHES "^include/fixpp/wire/parser\\.hpp$")
       set(_have_public 1)
     endif()
-    if(_f MATCHES "^usr/include/fixpp/v44/Messages\\.hpp$")
+    if(_f MATCHES "^include/fixpp/v44/Messages\\.hpp$")
       set(_have_generated 1)
     endif()
-    if(_f MATCHES "^usr/lib/libfixpp_[A-Za-z0-9_]+\\.a$")
+    # Archive naming is TOOLCHAIN-dependent and both forms must be recognised:
+    # GNU/Clang emit `libfixpp_core.a`, MSVC emits `fixpp_core.lib` (MEASURED in
+    # the windows-msvc-release ZIP). A pattern written for only the GNU form
+    # counts ZERO archives on Windows, and since the expected count is derived
+    # from the shipped fixppTargets.cmake this fails as a count mismatch — which
+    # would read as a missing-archive defect rather than as a test that cannot
+    # see the archives it is looking at.
+    if(_f MATCHES "^lib/libfixpp_[A-Za-z0-9_]+\\.a$" OR _f MATCHES "^lib/fixpp_[A-Za-z0-9_]+\\.lib$")
       math(EXPR _n_archives "${_n_archives} + 1")
     endif()
-    if(_f MATCHES "^usr/lib/objects-[A-Za-z]+/fixpp_capi_objects/.*\\.o$")
+    # Likewise `.o` (GNU/Clang) vs `.obj` (MSVC).
+    if(_f MATCHES "^lib/objects-[A-Za-z]+/fixpp_capi_objects/.*\\.(o|obj)$")
       set(_have_objects 1)
     endif()
   endforeach()
   if(NOT _have_public)
-    list(APPEND _missing "usr/include/fixpp/wire/parser.hpp (hand-written public header)")
+    list(APPEND _missing "include/fixpp/wire/parser.hpp (hand-written public header)")
   endif()
   if(NOT _have_generated)
-    list(APPEND _missing "usr/include/fixpp/v44/Messages.hpp (generated typed header, FR-011a)")
+    list(APPEND _missing "include/fixpp/v44/Messages.hpp (generated typed header, FR-011a)")
   endif()
   # objects-Release/ is INTENDED content, not a leak: fixpp_capi_objects is an
   # OBJECT library in the export set and needs OBJECTS DESTINATION. Its contents
   # duplicate members already inside libfixpp_capi.a (~1.2 MB) — a knowingly
   # accepted cost, recorded so a future reader does not "clean it up".
   if(NOT _have_objects)
-    list(APPEND _missing "usr/lib/objects-*/fixpp_capi_objects/*.o (OBJECT-library member)")
+    list(APPEND _missing "lib/objects-*/fixpp_capi_objects/*.{o,obj} (OBJECT-library member)")
   endif()
 
   if(NOT _missing STREQUAL "")
@@ -226,10 +243,10 @@ foreach(_artifact IN LISTS _artifacts)
   # (vt11/) while looking perfectly coherent.
   set(_leaked "")
   foreach(_f IN LISTS _files)
-    if(_f MATCHES "^usr/include/fixpp/(_dispatch|vt11)(/|$)"
-       OR _f MATCHES "^usr/include/fixpp/[^/]+/(messages|groups|validators)(/|$)"
-       OR _f MATCHES "^usr/include/fixpp/[^/]+/(all|groups)\\.hpp$"
-       OR _f MATCHES "^usr/include/fixpp/(core|transport)/test(/|$)")
+    if(_f MATCHES "^include/fixpp/(_dispatch|vt11)(/|$)"
+       OR _f MATCHES "^include/fixpp/[^/]+/(messages|groups|validators)(/|$)"
+       OR _f MATCHES "^include/fixpp/[^/]+/(all|groups)\\.hpp$"
+       OR _f MATCHES "^include/fixpp/(core|transport)/test(/|$)")
       list(APPEND _leaked "${_f}")
     endif()
   endforeach()
@@ -250,7 +267,7 @@ foreach(_artifact IN LISTS _artifacts)
   set(_expected_generated "Fields.hpp;Messages.hpp;NormativeReferences.md;Reify.hpp;Validator.hpp")
   set(_versions_seen "")
   foreach(_f IN LISTS _files)
-    if(_f MATCHES "^usr/include/fixpp/(v[A-Za-z0-9]+)/([^/]+)$")
+    if(_f MATCHES "^include/fixpp/(v[A-Za-z0-9]+)/([^/]+)$")
       list(APPEND _versions_seen "${CMAKE_MATCH_1}")
     endif()
   endforeach()
@@ -263,7 +280,7 @@ foreach(_artifact IN LISTS _artifacts)
   foreach(_ver IN LISTS _versions_seen)
     set(_actual "")
     foreach(_f IN LISTS _files)
-      if(_f MATCHES "^usr/include/fixpp/${_ver}/([^/]+)$")
+      if(_f MATCHES "^include/fixpp/${_ver}/([^/]+)$")
         list(APPEND _actual "${CMAKE_MATCH_1}")
       endif()
     endforeach()
@@ -293,7 +310,11 @@ endforeach()
 # it spans TWO lines, sits INDENTED inside clause 3, and is itself ENCLOSED IN
 # QUOTATION MARKS, so a literal written from memory silently never matches and the
 # one obligation classified as legal becomes unfalsifiable.
-file(GLOB_RECURSE _notice_files "${_x}/*/usr/share/doc/fixpp/NOTICE")
+# Matched by BASENAME at any depth, deliberately: the Linux layouts carry an
+# extra `usr/` component that the Windows ZIP does not, and a GLOB_RECURSE
+# pattern containing intermediate literal directories must match them at an
+# exact depth — so `*/share/doc/fixpp/NOTICE` silently finds nothing on Linux.
+file(GLOB_RECURSE _notice_files "${_x}/*/NOTICE")
 if(_notice_files STREQUAL "")
   message(FATAL_ERROR "T058/FR-018b: no NOTICE in the extracted package")
 endif()

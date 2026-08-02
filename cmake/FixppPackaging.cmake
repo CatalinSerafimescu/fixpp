@@ -184,9 +184,23 @@ add_custom_target(fixpp-package
   WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
   COMMENT "084 FR-020/FR-021: package, then copy artifacts to ${FIXPP_ARTIFACT_DIR}"
   VERBATIM)
-set(CPACK_PACKAGING_INSTALL_PREFIX "/usr")
-set(CPACK_INSTALL_DEFAULT_DIRECTORY_PERMISSIONS
-    OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
+# ── Internal prefix — Linux ONLY ─────────────────────────────────────────────
+# MEASURED 2026-08-02, not assumed: with this set unconditionally, the Windows
+# ZIP shipped `fixpp-0.0.1-windows-msvc-release/usr/lib/fixpp_core.lib` — an FHS
+# path that means nothing on Windows, with a POSIX permission set applied beneath
+# it. A Windows developer package is expected to extract to <root>/{include,lib,
+# bin}; `usr/` reads as a packaging bug to any consumer of the ZIP.
+#
+# DEB and RPM genuinely need /usr — they install into the system tree. The
+# archive generators do not: they extract wherever the consumer puts them, and
+# the consumer points CMAKE_PREFIX_PATH at that directory.
+if(NOT WIN32)
+  set(CPACK_PACKAGING_INSTALL_PREFIX "/usr")
+  # POSIX permission bits are meaningless to the ZIP generator; scoped with the
+  # prefix they belong to rather than left applying to a Windows package.
+  set(CPACK_INSTALL_DEFAULT_DIRECTORY_PERMISSIONS
+      OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
+endif()
 
 # ── T053 + T062a (FR-021a, I24): provenance stamping ─────────────────────────
 # Configuration + source revision ALONE IS INSUFFICIENT: two packages built from

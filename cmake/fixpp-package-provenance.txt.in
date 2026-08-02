@@ -19,9 +19,17 @@ Field notes
 -----------
 
 source-worktree
-    `clean` means `git status --porcelain` was empty when this package was
-    configured; `dirty` means it was not, and the source-revision above
-    therefore does NOT fully identify the inputs.
+    `clean` means the worktree carried no uncommitted change when this package
+    was configured; `dirty` means it did, and the source-revision above
+    therefore does NOT fully identify the inputs. `unknown` means neither could
+    be established — the source tree was not a git repository (a source-tarball
+    build, for instance) and no explicit value was supplied.
+
+    The value is normally measured with `git status --porcelain`. It can also be
+    supplied at configure time via FIXPP_PACKAGE_WORKTREE, alongside
+    FIXPP_PACKAGE_REVISION, for builds from a non-git source tree; in that case
+    it is an assertion by the builder rather than a measurement, and is only as
+    trustworthy as that build's inputs.
 
     Configuration + revision alone is insufficient to detect staleness: two
     packages built from the same commit either side of an uncommitted edit are

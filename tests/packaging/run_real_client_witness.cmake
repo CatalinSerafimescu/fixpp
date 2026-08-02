@@ -162,12 +162,33 @@ endif()
 file(REAL_PATH "${FIXPP_WORK_DIR}"       _work_real)
 file(REAL_PATH "${FIXPP_SOURCE_DIR}"     _src_real)
 file(REAL_PATH "${FIXPP_MAIN_BUILD_DIR}" _bld_real)
-string(REPLACE "${_work_real}"     "<WORK>" _lines "${_lines}")
-string(REPLACE "${FIXPP_WORK_DIR}" "<WORK>" _lines "${_lines}")
+
+# ⚠️ SEPARATOR NORMALISATION — without it this gate FALSE-GREENS on Windows.
+# CMake hands us paths with forward slashes, but MSVC/Ninja writes BACKSLASHES
+# into compile_commands.json and the link variables. `string(FIND)` is a literal
+# search, so a genuine `C:\temp\...\src` leak would simply not match the
+# forward-slash needle and the gate would report clean. Fold both haystack and
+# needles to forward slashes so the comparison is separator-independent
+# (`feedback_crossplatform_test_same_name_ifdef` — the same class of Windows-only
+# blind spot). JSON escaping doubles the backslashes, so collapse those first.
+string(REPLACE "\\\\" "/" _lines "${_lines}")
+string(REPLACE "\\"   "/" _lines "${_lines}")
+# Ninja escapes ':' as '$:' inside build.ninja, so a Windows drive letter reads
+# as `C$:/temp/...` and would not match the `C:/temp/...` needle either.
+string(REPLACE "$:" ":" _lines "${_lines}")
+foreach(_v _work_real _src_real _bld_real)
+  string(REPLACE "\\" "/" ${_v} "${${_v}}")
+endforeach()
+string(REPLACE "\\" "/" _fixpp_src_fwd  "${FIXPP_SOURCE_DIR}")
+string(REPLACE "\\" "/" _fixpp_bld_fwd  "${FIXPP_MAIN_BUILD_DIR}")
+string(REPLACE "\\" "/" _fixpp_work_fwd "${FIXPP_WORK_DIR}")
+
+string(REPLACE "${_work_real}"      "<WORK>" _lines "${_lines}")
+string(REPLACE "${_fixpp_work_fwd}" "<WORK>" _lines "${_lines}")
 
 # string(FIND), not MATCHES: these are literal paths and may contain regex
 # metacharacters (`+` and `.` both occur in real prefixes).
-foreach(_forbidden "${FIXPP_SOURCE_DIR}" "${_src_real}" "${FIXPP_MAIN_BUILD_DIR}" "${_bld_real}")
+foreach(_forbidden "${_fixpp_src_fwd}" "${_src_real}" "${_fixpp_bld_fwd}" "${_bld_real}")
   string(FIND "${_lines}" "${_forbidden}" _at)
   if(NOT _at EQUAL -1)
     string(SUBSTRING "${_lines}" ${_at} 200 _ctx)
