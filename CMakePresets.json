@@ -108,6 +108,20 @@
     },
 
     {
+      "name": "linux-gcc-debug",
+      "displayName": "Linux / GCC / Debug (sanity)",
+      "inherits": "_base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_C_COMPILER": "gcc",
+        "CMAKE_CXX_COMPILER": "g++",
+        "FIXPP_WERROR": "OFF",
+        "FIXPP_BUILD_OTEL": "ON",
+        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/build/linux-gcc-debug/conan_toolchain.cmake"
+      }
+    },
+
+    {
       "name": "linux-clang-libc++",
       "displayName": "Linux / Clang / libc++ (Tier-2 NFR-017)",
       "inherits": "_base",
@@ -218,6 +232,7 @@
     { "name": "linux-clang-tsan",     "configurePreset": "linux-clang-tsan" },
     { "name": "linux-clang-coverage", "configurePreset": "linux-clang-coverage" },
     { "name": "linux-gcc-release",    "configurePreset": "linux-gcc-release" },
+    { "name": "linux-gcc-debug",      "configurePreset": "linux-gcc-debug" },
     { "name": "linux-clang-libc++",        "configurePreset": "linux-clang-libc++" },
     { "name": "linux-clang-libc++-asan",   "configurePreset": "linux-clang-libc++-asan" },
     { "name": "linux-clang-libc++-ubsan",  "configurePreset": "linux-clang-libc++-ubsan" },
@@ -261,6 +276,11 @@
     {
       "name": "linux-gcc-release",
       "configurePreset": "linux-gcc-release",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "linux-gcc-debug",
+      "configurePreset": "linux-gcc-debug",
       "output": { "outputOnFailure": true }
     },
     {

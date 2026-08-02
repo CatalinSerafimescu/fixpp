@@ -32,13 +32,13 @@ tools.info.package_id:confs=["tools.build:cxxflags", "tools.build:cflags", "tool
 
 # Disable Conan's CMakeUserPresets.json (084, 2026-08-02).
 # Conan names its generated preset from build_type ALONE -- every Release profile
-# emits "conan-release" and every Debug profile "conan-debug" (10 of the 14
+# emits "conan-release" and every Debug profile "conan-debug" (12 of the 15
 # profiles here are Debug). CMakeUserPresets.json accumulates one `include:` per
 # `conan install -of <dir>`, so the SECOND output folder of the same build_type
 # makes the names collide and CMake then refuses to read ANY presets:
 #     CMake Error: Could not read presets from ...: Duplicate preset: "conan-release"
 # which breaks `cmake --preset <anything>`, not just the colliding pair.
 # We never use conan-release/conan-debug: the tracked CMakePresets.json carries
-# all 15 presets and points CMAKE_TOOLCHAIN_FILE at each build/<preset>/
+# all 16 presets and points CMAKE_TOOLCHAIN_FILE at each build/<preset>/
 # conan_toolchain.cmake itself. Empty value = do not generate the file.
 tools.cmake.cmaketoolchain:user_presets=
