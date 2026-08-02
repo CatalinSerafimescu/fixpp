@@ -34,6 +34,33 @@ Windows is **ZIP only** for v1.0 (user decision). An installer-format seam is do
 | Attribution set | doc dir | **New (FR-018b)** |
 | Debug symbol files | alongside libraries | **Windows only (FR-019)** |
 
+> ### Internal prefix — a PLATFORM ASYMMETRY, measured 2026-08-02
+>
+> The locations above are deliberately abstract ("standard include dir"). Concretely they sit under a
+> **`/usr` prefix on Linux only**:
+>
+> | Generator | Internal layout |
+> |---|---|
+> | DEB | `./usr/lib/…` |
+> | RPM | `/usr/lib/…` |
+> | TGZ | `<package-name>/usr/lib/…` |
+> | **ZIP (Windows)** | `<package-name>/lib/…` — **no `usr/`** |
+>
+> DEB and RPM install into the system tree and need the prefix. The archive generators do not: the
+> consumer extracts them wherever they like and points `CMAKE_PREFIX_PATH` at that directory.
+>
+> **This was a defect until it was measured.** `CPACK_PACKAGING_INSTALL_PREFIX "/usr"` was set
+> unconditionally, so the Windows ZIP shipped `fixpp-0.0.1-windows-msvc-release/usr/lib/fixpp_core.lib`
+> — an FHS path that means nothing on Windows — with a POSIX permission set applied beneath it. Now
+> guarded to `NOT WIN32`.
+>
+> **Consequence for any content check**: normalise the `usr/` component away before comparing, and
+> never anchor a `GLOB_RECURSE` on it. A pattern with intermediate literal directories must match at
+> an *exact depth*, so a `usr/`-anchored glob finds nothing on Windows and reports "the package
+> carries no X" — a defect claim about the product, manufactured by the test. Archive naming is
+> likewise toolchain-dependent: `libfixpp_core.a` / `.o` under GNU and Clang, `fixpp_core.lib` /
+> `.obj` under MSVC.
+
 **Excluded from every package** (FR-013): test executables, build-system scratch, every denylisted generated artifact — and, per the §2a sign-off, the two **test-support header** subtrees (`include/fixpp/core/test/`, `include/fixpp/transport/test/`), which FR-013's "test **executables**" wording did not previously reach. **The exclusion reference is the full 7-pattern set** at `CMakeLists.txt:349-355` — `_dispatch`, `vt11`, `messages`, `groups`, `validators`, `all.hpp`, `groups.hpp` — asserted as **set equality**, not as a subset (FR-009). *(The last five are the 078 tail; `_dispatch/` is the build-tree-private reify bridge and `vt11/` is FIXT.1.1, outside the public v42/v44/v50sp2 set. A "must be absent" check written from the 078 five would pass a package leaking either of the first two while looking coherent.)*
 
 ---
