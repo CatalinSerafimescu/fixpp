@@ -76,6 +76,18 @@ if(TARGET opentelemetry-cpp::api)
   add_executable(test_session_spans test_session_spans.cpp)
   target_link_libraries(test_session_spans PRIVATE
     fixpp_otel
+    # fixpp_session supplies session_trace_context_of (src/session/
+    # session_executor.cpp:81). It is referenced from include/fixpp/core/
+    # trace_context.hpp:162 — a CORE header — and fixpp_otel links only
+    # core/log/asio, so it is NOT reachable transitively. Both this TU and
+    # libfixpp_otel.a(session_spans.cpp.o) carry the undefined reference.
+    #
+    # Latent until 2026-08-02: the reference sits inside a coroutine, and only
+    # gcc at -O0 emits it from the outlined `.actor` frame — clang Debug,
+    # clang Release and gcc Release all elide it. The new linux-gcc-debug
+    # configuration (084 T002/T003) is simply the first build to link it.
+    # otel_e2_spans_tests already links fixpp_session for the same reason.
+    fixpp_session
     opentelemetry-cpp::exporter_in_memory  # may be header-only in Conan config
     opentelemetry-cpp::trace               # SimpleSpanProcessorFactory etc.
     GTest::gtest
