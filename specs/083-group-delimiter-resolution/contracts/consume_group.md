@@ -33,7 +33,7 @@ The instance scanner opens each instance at the delimiter and consumes it with a
 
 ## Ordering constraint — this contract lands FIRST
 
-Non-negotiable, and the reason the phases are not interchangeable: **232 measured FIX50SP2 contexts**, plus **30 more** once the three silently-dropped groups register, have a post-fix delimiter that is a nested group's count tag. Landing recursive delimiter resolution before this contract converts a wrong-delimiter defect into a false rejection across all of them — strictly worse than the current state.
+Non-negotiable, and the reason the phases are not interchangeable: **485 contexts** *(corrected 2026-08-02, Gate B r2 — superseding the earlier "232 measured FIX50SP2 contexts, plus 30 more"; the unconditioned re-measurement is FIX50SP2 240 + Orchestra FIX Latest 245; see `spec.md:342-346` / SC-016)* have a post-fix delimiter that is a nested group's count tag. Landing recursive delimiter resolution before this contract converts a wrong-delimiter defect into a false rejection across all of them — strictly worse than the current state.
 
 ### Gate between the two — REWRITTEN 2026-07-30 (Gate A round 1)
 
@@ -41,7 +41,7 @@ The previous gate read: *"the nested-delimiter reproduction is green **and the d
 
 Worse, the first leg's only witness could not reach the code path the *next* phase depends on. W-1 is #208's *"minimal hand-built `table_view`"*, and hand-built fixtures **never populate `group_ctx_`** — documented at `include/fixpp/dict/table_view.hpp:346-349` and restated by `group_ctx_delims.md`'s lookup-miss section. But C-4.1's descent fires on a **context-keyed** query: the existing post-delimiter descent is `dict_.group_first_field(ctx.msg_type, child_path, t) != 0` (`include/fixpp/wire/validator.hpp:376`) and C-4.2 requires the new one to reuse that exact shape. So W-1 alone exercises only the **bare fallback** (`table_view.hpp:364`). Meanwhile no shipped dictionary has a nested-group delimiter in any context today — that is what Phase 3 creates — so nothing on the real dictionaries can exercise the context-keyed descent in Phase 2 even in principle.
 
-Net, under the old gate: an implementation that descends correctly on the bare path and is broken on the context-keyed one — a mismatch between the loader's recorded `parent_path` and the validator's `child_path`, say — passes **every** stated Phase-2 gate, and the failure surfaces only after Phase 3, as the exact 232+30-context false rejection the ordering constraint exists to prevent, at the most expensive point to unwind. (Anti-pattern: *context seeded lazily on ONE path leaves sibling paths default* — here the sibling is the production path.)
+Net, under the old gate: an implementation that descends correctly on the bare path and is broken on the context-keyed one — a mismatch between the loader's recorded `parent_path` and the validator's `child_path`, say — passes **every** stated Phase-2 gate, and the failure surfaces only after Phase 3, as the exact **485-context** *(corrected 2026-08-02, Gate B r2 — superseding the earlier "232+30"; see `spec.md:342-346` / SC-016)* false rejection the ordering constraint exists to prevent, at the most expensive point to unwind. (Anti-pattern: *context seeded lazily on ONE path leaves sibling paths default* — here the sibling is the production path.)
 
 **The gate is now two assertions this phase can actually move:**
 

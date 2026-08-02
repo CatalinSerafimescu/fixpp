@@ -31,7 +31,7 @@
 Landing the loader recursion first converts a wrong-delimiter defect into a **false rejection across 232 measured FIX50SP2 contexts plus the 30 that newly register** — strictly worse than today. Therefore:
 
 - **US2 (P1, receiver)** is Phase 3 — before US1's loader leg, even though US1 is the headline story.
-- **US5 leg 1 (C-8.0c / FR-021e, the offset table's extent walk)** is Phase 4 — pulled ahead of the loader phase because `plan.md`'s **Phase-3 gate leg (iv)** requires **W-10a green at the Phase-3 exit**, and because leaving it later leaves reachable **silent instance loss** on the 262 mode-(c) contexts once Phase 2's FR-007 makes validation accept them (C-8.0c.5). C-8.0c is not *blocked by* Phase 3 (its delimiter is wire-derived and it needs no per-context record), so it can land any time from Phase 2 onward.
+- **US5 leg 1 (C-8.0c / FR-021e, the offset table's extent walk)** is Phase 4 — pulled ahead of the loader phase because `plan.md`'s **Phase-3 gate leg (iv)** requires **W-10a green at the Phase-3 exit**, and because leaving it later leaves reachable **silent instance loss** on the **485** mode-(c) contexts *(corrected 2026-08-02, Gate B r2 — superseding the earlier "262"; see `spec.md:342-346` / SC-016)* once Phase 2's FR-007 makes validation accept them (C-8.0c.5). C-8.0c is not *blocked by* Phase 3 (its delimiter is wire-derived and it needs no per-context record), so it can land any time from Phase 2 onward.
 - **US1 and US5 each split into two legs** across the loader/consumer boundary; each leg is marked. US5's split is *forced* by the two clauses above. US1's split (loaders → C-ABI) follows `plan.md`'s own Phase-3/Phase-4 content division.
 
 **Intermediate phase exits are not releasable states for this feature** (`plan.md`, C-8.0c.5). The merge unit is the single PR; Gate B and all three tier matrices run on the PR head, not on phase boundaries. A phase gate here is a construction-order discipline, not a release gate.
@@ -121,7 +121,7 @@ Landing the loader recursion first converts a wrong-delimiter defect into a **fa
 
 *(FR-021e / SC-016 / C-8.0c — `contracts/typed_read_splitter.md`. `plan.md` lists C-8.0c under Phase-4 **content**, and requires its witness **W-10a green at the Phase-3 exit** (gate leg (iv)). It is not blocked by Phase 3 — its delimiter is wire-derived and it needs no per-context delimiter record — so it lands here, closing the window in which validation accepts (Phase 2) while the read path truncates.)*
 
-**Goal**: `OffsetTable::consume_group_extent` descends at the instance-opening delimiter, so the extent spans all `declared` instances on the 262 contexts (232 measured + 30 newly registering) whose post-fix delimiter is a nested group's count tag.
+**Goal**: `OffsetTable::consume_group_extent` descends at the instance-opening delimiter, so the extent spans all `declared` instances on the **485 contexts** *(corrected 2026-08-02, Gate B r2 — superseding the earlier "262 (232 measured + 30 newly registering)" figure; see `spec.md:342-346` / SC-016)* whose post-fix delimiter is a nested group's count tag.
 
 **Independent Test**: quickstart §2a — take the T010 bytes through the **read** path: `group(100)->entry_count()` spans one instance today and all `declared` after; `group_slices()` reports 1 today and 2 after; the one-instance form still reports 1.
 
