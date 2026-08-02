@@ -65,3 +65,18 @@ set_tests_properties(fixpp::packaging::contents PROPERTIES
   TIMEOUT 900
   LABELS "packaging"
 )
+
+# ── T060 (FR-021a, I24): package PROVENANCE ─────────────────────────────────
+add_test(
+  NAME fixpp::packaging::provenance
+  COMMAND "${CMAKE_COMMAND}"
+    "-DFIXPP_MAIN_BUILD_DIR=${CMAKE_BINARY_DIR}"
+    "-DFIXPP_WORK_DIR=${_fixpp_pkg_work}/provenance"
+    "-DFIXPP_BUILD_TYPE=${CMAKE_BUILD_TYPE}"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/run_provenance_witness.cmake"
+)
+set_tests_properties(fixpp::packaging::provenance PROPERTIES
+  RUN_SERIAL TRUE
+  TIMEOUT 600
+  LABELS "packaging"
+)
