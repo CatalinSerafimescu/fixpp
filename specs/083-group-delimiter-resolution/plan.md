@@ -221,7 +221,7 @@ bench/                            # PER-SUBSYSTEM layout — the repo's actual s
 
 ## Implementation Phasing
 
-Ordering is dictated by one hard constraint: **FR-007 (descend-at-delimiter) must land before FR-003 (recursive resolution)**, or the recursive fix converts a wrong-delimiter defect into a false rejection across **485 contexts** *(corrected 2026-08-02, Gate B r3 — superseding the earlier "232 measured contexts plus the 30 that newly register"; see `spec.md:342-346` / SC-016)*. Phases 2 and 3 are therefore not interchangeable.
+Ordering is dictated by one hard constraint: **FR-007 (descend-at-delimiter) must land before FR-003 (recursive resolution)**, or the recursive fix converts a wrong-delimiter defect into a false rejection across **the 232 + 30 contexts this correction newly routes into that shape** *(corrected 2026-08-02, Gate B r3 — superseding the earlier "232 measured contexts plus the 30 that newly register"; see `spec.md:342-346` / SC-016; verb scope corrected 2026-08-02, Gate B r4, fixpp#216 IND-1 — **485** sizes the full shape, not this conversion; see `spec.md:167`)*. Phases 2 and 3 are therefore not interchangeable.
 
 **Gates rewritten 2026-07-30 (Gate A round 1).** Every gate below was previously stated over an artifact the phase in question does not move: Phase 1 *recorded* counts without reconciling them, Phase 2's gate was a dictionary-level failure count a validator-only phase cannot change (and its only witness resolved through the bare fallback rather than the context store Phase 3 populates), Phase 3 had no wire leg so SC-004's witnesses landed nowhere, and Phase 5 scheduled edits to a branch D-8 says cannot be observed. Each gate is now an assertion over something its own phase changes.
 

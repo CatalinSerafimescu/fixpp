@@ -88,7 +88,7 @@ The reasons path keying is nonetheless correct, in order of weight:
 
 **Rationale**: this mirrors the descent the scanner *already* performs for post-delimiter members at `:376`, using the same `can_descend` depth guard and the same `child_path`. It is a symmetry repair, not a new mechanism — which keeps FR-009 (bounded depth) satisfied by the existing K=16 cap rather than by new logic.
 
-**Why it must precede D-1's recursion**: measured — 232 FIX50SP2 contexts have a post-fix delimiter that is a nested group's count tag, plus 30 more once the three silently-dropped groups register. Landing recursive resolution first turns those into false rejections.
+**Why it must precede D-1's recursion**: measured — **232 + 30** FIX50SP2 contexts (232 already delimiter-bearing, plus 30 more once the three silently-dropped groups register) are the subset this correction newly routes into the mode-(c) shape *(corrected 2026-08-02, Gate B r4, fixpp#216 IND-2 — this entry's "232 ... plus 30 more" was never re-pointed when SC-016 measured the unconditioned shape at **485** — FIX50SP2 240 + Orchestra FIX Latest 245; see `spec.md:342-346`)*. Landing recursive resolution first turns those 232 + 30 into false rejections *(verb scope per IND-1 — the 485 total sizes the shape, not this conversion; see `spec.md:167`)*.
 
 **Invariants that must not move** (FR-008): instance-count enforcement at `:402`, required-member masking, and extent termination at `:365`. The delimiter's required-bit is marked *before* descent (`delim_k`, `:354`), and must remain so.
 
