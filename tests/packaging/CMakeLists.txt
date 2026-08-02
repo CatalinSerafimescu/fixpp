@@ -43,3 +43,25 @@ set_tests_properties(fixpp::packaging::clean-env PROPERTIES
   TIMEOUT 600
   LABELS "packaging"
 )
+
+# ── T058 (FR-009/FR-012/FR-013/FR-018d, SC-004, SC-013): package CONTENTS ────
+# The expected archive count is NOT computed here. FIXPP_EXPORT_TARGETS is set in
+# the root CMakeLists AFTER this subdirectory is added, so reading it here yields
+# an empty list and an expected count of 0 -- an exact-match gate silently
+# asserting the wrong value. The test derives the count from the SHIPPED
+# fixppTargets.cmake instead, which also makes it a real cross-check.
+
+add_test(
+  NAME fixpp::packaging::contents
+  COMMAND "${CMAKE_COMMAND}"
+    "-DFIXPP_MAIN_BUILD_DIR=${CMAKE_BINARY_DIR}"
+    "-DFIXPP_WORK_DIR=${_fixpp_pkg_work}/contents"
+    "-DFIXPP_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+    "-DFIXPP_PROJECT_VERSION=${PROJECT_VERSION}"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/run_package_contents_witness.cmake"
+)
+set_tests_properties(fixpp::packaging::contents PROPERTIES
+  RUN_SERIAL TRUE
+  TIMEOUT 900
+  LABELS "packaging"
+)

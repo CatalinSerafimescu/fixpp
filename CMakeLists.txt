@@ -459,6 +459,20 @@ if(FIXPP_BUILD_CODEGEN_TOOL)
     PATTERN "validators" EXCLUDE   # 078 validators/traits.hpp
     PATTERN "all.hpp"    EXCLUDE   # 078 aggregator
     PATTERN "groups.hpp" EXCLUDE   # 078 groups umbrella
+    # ── 8th pattern, added by 084 T058/T059 (FR-013) ────────────────────────
+    # Manifest.txt is the 076 T012 codegen CENSUS manifest — a ~12 MB generated
+    # "DO NOT EDIT" audit artifact emitted under fixpp/vlatest/. It is read ONLY
+    # by tests/codegen, and only from the BUILD tree (FIXPP_CODEGEN_VLATEST_MANIFEST
+    # points into ${FIXPP_CODEGEN_OUT}); nothing reads it from an install prefix
+    # and no consumer has any use for it. It is build-system output in FR-013's
+    # sense, and it was ~12 MB of every package.
+    #
+    # ⚠️ Note for anyone updating docs: the denylist is now EIGHT patterns, not
+    # seven. Every "the 7-pattern denylist" phrase in this feature's bundle
+    # predates this exclusion. It was found by the T058 exact-set gate on its
+    # first real run against a package — a denylist-only check could not have
+    # found it, which is the whole point of T059.
+    PATTERN "Manifest.txt" EXCLUDE
   )
 endif()
 
