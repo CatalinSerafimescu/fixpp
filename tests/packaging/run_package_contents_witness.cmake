@@ -101,6 +101,77 @@ if(FIXPP_EXPECTED_ARCHIVES EQUAL 0)
 endif()
 message(STATUS "T058: package declares ${FIXPP_EXPECTED_ARCHIVES} STATIC imported targets")
 
+# ── T061 / SC-005: debug-vs-release fidelity, LINUX leg ──────────────────────
+# Each platform is checked by its own mechanism (package-layout.md §7):
+#   Linux    debug info lives INSIDE the archive members (DWARF) -> count
+#            .debug_info sections in libfixpp_core.a
+#   Windows  debug info lives in SEPARATE .pdb files -> asserted per-artifact
+#            further down, two-sided
+# TWO-SIDED here as well: Debug MUST carry debug_info, Release MUST NOT. A
+# one-sided check would pass a Release package built with -g, shipping debug
+# information (and the size that comes with it) to every consumer.
+#
+# Measured 2026-08-02 on the shipped artifacts: debug 228 KB / 4 sections,
+# release 16 KB / 0 sections. Neither the archiver nor the linker strips
+# anything — the compiler simply never emits debug info in Release.
+if(_tgz MATCHES "linux-")
+  file(GLOB_RECURSE _core_archives "${_x}/*/libfixpp_core.a")
+  if(_core_archives STREQUAL "")
+    message(FATAL_ERROR
+      "T061: no libfixpp_core.a in the extracted package, so debug/release "
+      "fidelity cannot be established.")
+  endif()
+  list(GET _core_archives 0 _core_archive)
+
+  find_program(_fixpp_readelf NAMES readelf eu-readelf)
+  if(NOT _fixpp_readelf)
+    # Deliberately fatal, not skipped: a fidelity gate that quietly does not run
+    # is the false-green this bundle refuses everywhere else. readelf ships with
+    # binutils, which is already required to build.
+    message(FATAL_ERROR
+      "T061: readelf not found, so SC-005's Linux leg cannot run. Refusing to "
+      "report a pass on a gate that did not execute.")
+  endif()
+
+  execute_process(COMMAND "${_fixpp_readelf}" -S "${_core_archive}"
+                  OUTPUT_VARIABLE _readelf_out RESULT_VARIABLE _readelf_rc ERROR_QUIET)
+  if(NOT _readelf_rc EQUAL 0)
+    message(FATAL_ERROR "T061: readelf failed on ${_core_archive} (exit ${_readelf_rc})")
+  endif()
+  string(REGEX MATCHALL "debug_info" _dbg_hits "${_readelf_out}")
+  list(LENGTH _dbg_hits _n_debug)
+
+  # Configuration comes from the ARTIFACT'S OWN NAME, not a passed-in build-type
+  # variable: the name is what a consumer sees, it already encodes all six FR-017
+  # dimensions, and it cannot drift from the thing under test.
+  get_filename_component(_tgz_name "${_tgz}" NAME)
+  if(_tgz_name MATCHES "-debug")
+    set(_cfg_lower "debug")
+  elseif(_tgz_name MATCHES "-release")
+    set(_cfg_lower "release")
+  else()
+    message(FATAL_ERROR
+      "T061: cannot tell the configuration from '${_tgz_name}', so debug/release "
+      "fidelity cannot be asserted. FR-017 requires the configuration in the name.")
+  endif()
+
+  if(_cfg_lower STREQUAL "debug" AND _n_debug EQUAL 0)
+    message(FATAL_ERROR
+      "SC-005/T061: a DEBUG package's libfixpp_core.a carries NO debug_info "
+      "sections. On Linux the debug information lives inside the archive "
+      "members, so this package is undebuggable.")
+  endif()
+  if(_cfg_lower STREQUAL "release" AND NOT _n_debug EQUAL 0)
+    message(FATAL_ERROR
+      "SC-005/T061: a RELEASE package's libfixpp_core.a carries ${_n_debug} "
+      "debug_info sections. Release emits no debug information, so this "
+      "configuration is not what the artifact name claims.")
+  endif()
+  message(STATUS
+    "T061: ${_cfg_lower} libfixpp_core.a carries ${_n_debug} debug_info section(s) — "
+    "correct for this configuration")
+endif()
+
 # ── List one artifact's contents, normalised ─────────────────────────────────
 # RAW listing — exactly what the archive contains, no normalisation. Split out
 # because the internal-prefix assertion must see the prefix that normalisation
