@@ -26,3 +26,20 @@ set_tests_properties(fixpp::packaging::version-mismatch PROPERTIES
   TIMEOUT 300
   LABELS "packaging"
 )
+
+# ── T041/T042/T043 (SC-016, FR-018e): the clean-environment tier ─────────────
+add_test(
+  NAME fixpp::packaging::clean-env
+  COMMAND "${CMAKE_COMMAND}"
+    "-DFIXPP_MAIN_BUILD_DIR=${CMAKE_BINARY_DIR}"
+    "-DFIXPP_CONSUMER_SRC_DIR=${CMAKE_CURRENT_SOURCE_DIR}/clean_env"
+    "-DFIXPP_WORK_DIR=${_fixpp_pkg_work}/clean-env"
+    "-DFIXPP_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
+    "-DFIXPP_BUILD_TYPE=${CMAKE_BUILD_TYPE}"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/run_clean_env_witness.cmake"
+)
+set_tests_properties(fixpp::packaging::clean-env PROPERTIES
+  RUN_SERIAL TRUE
+  TIMEOUT 600
+  LABELS "packaging"
+)
