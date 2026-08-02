@@ -305,7 +305,18 @@ jobs:
 
       - name: Configure (OTel-ON)
         shell: cmd
-        run: cmake --preset ${{ matrix.preset }} -DFIXPP_BUILD_OTEL=ON
+        # 084 T066: FIXPP_ARTIFACT_DIR is a CACHE variable baked into the
+        # fixpp-package target at CONFIGURE time — it is not read from the
+        # environment. Its in-repo default is a local WSL mount, unreachable
+        # here, so it must be set now rather than on the packaging step.
+        #
+        # %GITHUB_WORKSPACE:\=/% rewrites the backslashes to forward slashes.
+        # Passing the raw Windows path would hand CMake a value containing
+        # sequences like `\a`, which it may interpret rather than take
+        # literally; CMake accepts forward slashes on Windows everywhere.
+        run: >
+          cmake --preset ${{ matrix.preset }} -DFIXPP_BUILD_OTEL=ON
+          -DFIXPP_ARTIFACT_DIR=%GITHUB_WORKSPACE:\=/%/_artifacts
 
       - name: Build
         shell: cmd
@@ -329,7 +340,51 @@ jobs:
       # in the CMake staging: the lane would stay green while the fix that
       # local developers depend on had quietly stopped firing. Keeping ctest
       # bare makes the staging load-bearing, and so continuously verified.
-      - name: Test
+      # 084 T066 — the packaging tier is GATED ON windows-msvc-release.
+      #
+      # Turning OTel ON here also turned PACKAGING on (084 FR-011:
+      # FIXPP_PACKAGING_ENABLED tracks FIXPP_BUILD_OTEL), so these six witnesses
+      # now register on all three lanes where they never have before. Each one
+      # stage-installs a prefix and then configures and compiles a sub-project —
+      # including a 1700-line TU in the real-client tier — which is not something
+      # to run three times, least of all under ASan on a Windows runner.
+      #
+      # ⚠️ The exclusion is BY LABEL and is `packaging` ONLY, which preserves the
+      # property the comment above depends on: every real test binary still runs
+      # bare, so the CMakeLists DLL staging stays load-bearing and continuously
+      # verified. Narrowing ctest to a subset would have broken that; excluding
+      # one label does not.
+      #
+      # windows-msvc-asan is excluded outright — it is not one of the six shipped
+      # configurations (contracts/package-layout.md §1), so it has no artifact.
+      - name: Test (minimal tier — packaging gated on windows-msvc-release)
+        if: matrix.preset != 'windows-msvc-release'
+        shell: cmd
+        run: ctest --preset ${{ matrix.preset }} --output-on-failure -LE packaging
+
+      # ⚠️ ASSERT THE COUNT BEFORE RUNNING. `ctest -L` exits 0 when the filter
+      # matches NOTHING, so an exit-code-only check would report this lane green
+      # having run zero witnesses — and on Windows that is a live risk, not a
+      # theoretical one: if FIXPP_PACKAGING_ENABLED ever goes OFF here (an
+      # OTel-OFF regression in the conan step, say) the tier silently vanishes
+      # and the lane still passes.
+      - name: Assert the packaging tier is registered
+        if: matrix.preset == 'windows-msvc-release'
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected=6
+          n=$(ctest --preset ${{ matrix.preset }} -L packaging -N \
+                | sed -n 's/^Total Tests: //p')
+          echo "registered packaging witnesses: ${n:-0} (expected ${expected})"
+          if [ "${n:-0}" != "${expected}" ]; then
+            echo "::error::packaging tier registered ${n:-0} tests, expected ${expected}."
+            echo "::error::Refusing to report this lane green on an unrun gate."
+            exit 1
+          fi
+
+      - name: Test (full tier incl. packaging)
+        if: matrix.preset == 'windows-msvc-release'
         shell: cmd
         run: ctest --preset ${{ matrix.preset }} --output-on-failure
 
@@ -387,6 +442,34 @@ jobs:
 
           echo "===== PATH entries Conan added for running ====="
           grep -oiE '[A-Za-z]:[^;\"]*\\bin' "build/${{ matrix.preset }}/conanrun.bat" 2>/dev/null | sort -u | head -20
+
+      # ── 084 T066 / FR-026: attach the Windows package artifacts ─────────────
+      # BOTH shipped Windows configurations upload, not just the gating lane:
+      # windows-msvc-{debug,release} are two of the six configurations
+      # contracts/package-layout.md §1 enumerates, and T062 counts fourteen
+      # artifacts across them. Gating the packaging TESTS to one lane (above) and
+      # producing ARTIFACTS from both is deliberate — the tests are expensive and
+      # configuration-independent, the artifacts are neither.
+      #
+      # windows-msvc-asan produces nothing: it is not a shipped configuration.
+      #
+      # Runs only after a green test step, so a red lane uploads nothing.
+      - name: Build packages
+        if: matrix.preset != 'windows-msvc-asan'
+        shell: cmd
+        run: cmake --build --preset ${{ matrix.preset }} --target fixpp-package
+
+      # T068 / SC-010: names must identify the matrix cell or a second lane
+      # silently overwrites the first. matrix.preset is unique by construction,
+      # and the ZIP inside already carries all six FR-017 dimensions.
+      - name: Upload packages
+        if: matrix.preset != 'windows-msvc-asan'
+        uses: actions/upload-artifact@v4
+        with:
+          name: packages-${{ matrix.preset }}
+          path: ${{ github.workspace }}/_artifacts/*
+          if-no-files-found: error
+          retention-days: 14
 
   # NOTE: the "ABI golden — fixpp_decimal_t" abidiff job moved to tier1.yml
   # (2026-06-22) — it is a Linux C-ABI layout gate with nothing Windows-specific,
