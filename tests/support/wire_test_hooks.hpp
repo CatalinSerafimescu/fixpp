@@ -52,6 +52,17 @@ struct nested_cache_access_for_testing {
         return nullptr;
     }
 };
+// 083 T056 (W-10): TEST-ONLY read of the private `group_slices_reserve_bound()`
+// (offset_table.hpp `:597` / the `:350` declaration), gated and declared as a
+// friend exactly like the sibling above. W-10 asserts that on a divergent
+// delimiter context the reservation made in the fixed inbound arena is
+// UNCHANGED between a pre-083 table (null `group_delim_fn`) and the shipped
+// one. Never called from production code.
+struct reserve_bound_access_for_testing {
+    [[nodiscard]] static std::uint32_t get(OffsetTable const& t) noexcept {
+        return t.group_slices_reserve_bound();
+    }
+};
 #endif  // FIXPP_TEST_HOOKS
 
 }  // namespace fixpp::wire

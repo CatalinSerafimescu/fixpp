@@ -81,6 +81,11 @@ struct DictOracle {
     std::map<GroupContextKey, std::set<std::uint16_t>> group_members;
     // Contract 1a: the same contexts' DIRECT required='Y' member tags.
     std::map<GroupContextKey, std::set<std::uint16_t>> group_required;
+    // FR-002: the declaration-order FIRST member emitted at each group's own
+    // level — i.e. the group's delimiter tag — captured from the first
+    // emission of the existing document-order walk below, keyed identically
+    // to `group_members`.
+    std::map<GroupContextKey, std::uint16_t> group_delims;
 };
 
 // ─────────────────────────── independent oracle (QuickFIX-XML) ────────────
@@ -135,6 +140,7 @@ inline void qfix_walk(pugi::xml_node parent, std::unordered_map<std::string, std
                 GroupContextKey key{msg_type, {group_path.begin(), group_path.end() - 1},
                                     group_path.back()};
                 oracle.group_members[key].insert(tag);
+                oracle.group_delims.try_emplace(key, tag);
                 if (own_req && group_scope_and) {
                     oracle.group_required[key].insert(tag);
                 }
@@ -156,6 +162,7 @@ inline void qfix_walk(pugi::xml_node parent, std::unordered_map<std::string, std
                 GroupContextKey key{msg_type, {group_path.begin(), group_path.end() - 1},
                                     group_path.back()};
                 oracle.group_members[key].insert(no_tag);
+                oracle.group_delims.try_emplace(key, no_tag);
                 if (own_req && group_scope_and) {
                     oracle.group_required[key].insert(no_tag);
                 }
@@ -258,6 +265,7 @@ inline void orch_walk(pugi::xml_node parent, std::unordered_map<std::uint32_t, p
                 GroupContextKey key{msg_type, {group_path.begin(), group_path.end() - 1},
                                     group_path.back()};
                 oracle.group_members[key].insert(tag);
+                oracle.group_delims.try_emplace(key, tag);
                 if (own_req && group_scope_and) {
                     oracle.group_required[key].insert(tag);
                 }
@@ -285,6 +293,7 @@ inline void orch_walk(pugi::xml_node parent, std::unordered_map<std::uint32_t, p
                 GroupContextKey key{msg_type, {group_path.begin(), group_path.end() - 1},
                                     group_path.back()};
                 oracle.group_members[key].insert(no_tag);
+                oracle.group_delims.try_emplace(key, no_tag);
                 if (own_req && group_scope_and) {
                     oracle.group_required[key].insert(no_tag);
                 }

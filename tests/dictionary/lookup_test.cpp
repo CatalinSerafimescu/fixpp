@@ -85,7 +85,16 @@ fixpp::dict::Dictionary load_small_dictionary() {
         R"(</message>)"
         R"(</messages>)"
         R"(</fix>)";
-    return fixpp::dict::XmlLoader{}.load_from_string(kXml, mr);
+    // 083 T036/T037 (FR-006 / FR-006a): this fixture declares `NoPartyIDs` and
+    // `NoLegs` as groups with NO members ON PURPOSE — the empty `group_fields()`
+    // run is precisely what the cases below cover. Under FR-006's fail-closed
+    // default that is now a load rejection, and correctly so: a group with no
+    // first member has no delimiter, so no message can ever be parsed against
+    // it. Loading TOLERANTLY is the designed escape valve and is what this
+    // fixture actually wants — it keeps the empty-run coverage intact rather
+    // than adding members that would delete the very paths under test.
+    return fixpp::dict::XmlLoader{}.load_from_string(
+        kXml, mr, fixpp::dict::unresolved_group_policy::tolerant);
 }
 
 }  // namespace

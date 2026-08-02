@@ -155,7 +155,8 @@ OffsetTable::OffsetTable(frame_view const& frame, std::pmr::memory_resource* mr)
 }
 
 OffsetTable::OffsetTable(frame_view const& frame, std::pmr::memory_resource* mr,
-                         void const* opaque_dict, group_member_fn_t group_member_fn) noexcept
+                         void const* opaque_dict, group_member_fn_t group_member_fn,
+                         group_delim_fn_t group_delim_fn) noexcept
     :
 #ifndef NDEBUG
       gen_{frame.token()},
@@ -163,6 +164,7 @@ OffsetTable::OffsetTable(frame_view const& frame, std::pmr::memory_resource* mr,
       cfg_{},
       opaque_dict_{opaque_dict},
       group_member_fn_{group_member_fn},
+      group_delim_fn_{group_delim_fn},
       entries_(mr),
       overlay_(mr),
       group_slices_(mr),
@@ -188,7 +190,8 @@ OffsetTable::OffsetTable(frame_view const& frame, std::pmr::memory_resource* mr,
 }
 
 OffsetTable::OffsetTable(frame_view const& frame, std::pmr::memory_resource* mr, Config cfg,
-                         void const* opaque_dict, group_member_fn_t group_member_fn) noexcept
+                         void const* opaque_dict, group_member_fn_t group_member_fn,
+                         group_delim_fn_t group_delim_fn) noexcept
     :
 #ifndef NDEBUG
       gen_{frame.token()},
@@ -196,6 +199,7 @@ OffsetTable::OffsetTable(frame_view const& frame, std::pmr::memory_resource* mr,
       cfg_{cfg},
       opaque_dict_{opaque_dict},
       group_member_fn_{group_member_fn},
+      group_delim_fn_{group_delim_fn},
       entries_(mr),
       overlay_(mr),
       group_slices_(mr),
@@ -472,7 +476,28 @@ std::size_t OffsetTable::consume_group_extent(std::size_t count_idx,
     // actual mismatch flagging is the validator's job (plan.md).
     while (k < entries_.size() && inst < declared && entries_[k].tag == delim) {
         std::size_t const inst_start = k;
-        ++k;  // consume the delimiter
+        // 083 C-8.0c: query-before-consume AT the instance-opening delimiter.
+        // Is `delim` itself a nested group's count tag in the child context? If
+        // so, consuming it with a bare `++k` skips past its count field and
+        // leaves the walk inside the nested group's own instances, so the next
+        // OUTER instance's opening tag is never reached and the extent
+        // truncates to one instance. Same probe shape, same child context and
+        // same recursion as the post-delimiter descent below — one rule applied
+        // at both positions, not a new mechanism. The `k + 1U <
+        // entries_.size()` bound makes a delimiter that is the last entry fall
+        // through to the bare `++k`, and a nested group declaring 0 instances
+        // returns `k + 1` from :461-462, so both degenerate cases behave
+        // exactly as they do today.
+        if (k + 1U < entries_.size() &&
+            group_member_fn_(opaque_dict_, child, delim, entries_[k + 1U].tag)) {
+            k = consume_group_extent(k, child, static_cast<std::uint8_t>(depth + 1U), overflow);
+            if (overflow) {
+                return k;  // mirrors :489-491 — at the cap, RETURN rather than
+                           // burn `declared` no-op iterations (C-8.0c.3)
+            }
+        } else {
+            ++k;  // ordinary delimiter, no nested descent
+        }
         while (k < entries_.size() && entries_[k].tag != delim) {
             std::uint16_t const t = entries_[k].tag;
             if (!group_member_fn_(opaque_dict_, ctx, group_no_tag, t)) {
@@ -653,7 +678,37 @@ group_slices_result OffsetTable::group_slices_status(std::uint16_t no_tag) const
                 // The loop is bounded by group_end, NOT entries_.size(), so
                 // trailing top-level fields are never included in the last
                 // instance slice. ([PR68-09] boundary fix.)
-                std::uint16_t const delim = entries_[first].tag;
+                // 083 T058 (C-8.2 / C-8.4): the boundary delimiter is now
+                // resolved from the DICTIONARY, keyed on this table's STORED
+                // context — `(msg_type, stored_group_context().parent_path,
+                // no_tag)`, the SAME key the validator's descent uses, which is
+                // what makes FR-021b's agreement structural rather than
+                // coincidental.
+                //
+                // NOT `group_context_for(no_tag)`: that returns
+                // `stored_group_context().pushed(no_tag)` (:424-426) and would
+                // query one path element too long, violating Entity 1's
+                // "parent_path EXCLUDES no_tag" invariant.
+                //
+                // C-8.4's fallback has exactly TWO cases and no third: no
+                // dictionary / no callback -> today's wire-derived
+                // `entries_[first].tag`, which is behaviour-preserving and is
+                // the CORRECT answer for a table with no dictionary; dictionary
+                // present -> the store's answer, with no wire fallback (a zero
+                // means "not a group", which callers already handle as absent).
+                // There is deliberately no "or the context did not resolve"
+                // branch: the splitter cannot observe that state, since
+                // `group_first_field` has already fallen through to the bare
+                // global before it sees a value and returns a plain scalar with
+                // no discriminator.
+                std::uint16_t delim = entries_[first].tag;
+                if (opaque_dict_ != nullptr && group_delim_fn_ != nullptr) {
+                    group_context const ctx = stored_group_context();
+                    if (std::uint16_t const d = group_delim_fn_(opaque_dict_, ctx, no_tag);
+                        d != 0) {
+                        delim = d;
+                    }
+                }
                 std::size_t inst_start = first;
                 for (std::size_t k = first; k <= group_end; ++k) {
                     bool const boundary =
@@ -693,12 +748,10 @@ group_slices_result OffsetTable::group_slices_status(std::uint16_t no_tag) const
 // the ownership/lifetime/RC1 contract). Placement-constructs into `mr`,
 // mirroring the established `mr->allocate(size, align)` + placement-new
 // arena pattern (include/fixpp/core/sync/async_mutex.hpp:1160-1164).
-OffsetTable* OffsetTable::build_nested_subview(std::byte const* data, std::size_t len,
-                                               std::pmr::memory_resource* mr,
-                                               void const* opaque_dict,
-                                               group_member_fn_t group_member_fn,
-                                               detail::generation_token gen,
-                                               group_context const& ctx) noexcept {
+OffsetTable* OffsetTable::build_nested_subview(
+    std::byte const* data, std::size_t len, std::pmr::memory_resource* mr, void const* opaque_dict,
+    group_member_fn_t group_member_fn, detail::generation_token gen, group_context const& ctx,
+    group_delim_fn_t group_delim_fn) noexcept {
     try {
         // RC1: slice-scoped `len+1` — the terminal SOH is provably already
         // present in the parent frame buffer at `data+len` (the slice is
@@ -714,7 +767,11 @@ OffsetTable* OffsetTable::build_nested_subview(std::byte const* data, std::size_
         // the sub-OffsetTable is owned by the per-message arena and freed with
         // it, not heap-owned (gsl::owner not adopted in this codebase).
         // NOLINTNEXTLINE(cppcoreguidelines-owning-memory)
-        auto* table = ::new (mem) OffsetTable(fv, mr, opaque_dict, group_member_fn);
+        // 083 T057 (C-8.1): the delimiter callback MUST be supplied here too. A
+        // missed site would silently take C-8.4's dict-free fallback on nested
+        // splits only -- the "context seeded lazily on ONE path leaves sibling
+        // paths default" shape, invisible to any root-level test.
+        auto* table = ::new (mem) OffsetTable(fv, mr, opaque_dict, group_member_fn, group_delim_fn);
         // 063 T008: seed the new sub-table's stored context VERBATIM (no
         // further push — see nested_group_slices()'s doc comment).
         table->set_group_context(ctx);
@@ -798,8 +855,13 @@ nested_slices_result OffsetTable::nested_group_slices(
         }
     }
     if (table == nullptr) {
+        // 083 T057 (C-8.1): pass the delimiter callback through, so a NESTED
+        // split resolves its boundary from the dictionary exactly as the root
+        // does. Omitting it here would leave nested splits on the wire-derived
+        // fallback while root splits used the store — the sibling-path drift
+        // the contract calls out by name.
         table = build_nested_subview(slice_data, slice_len, resource(), opaque_dict,
-                                     group_member_fn, gen, ctx);
+                                     group_member_fn, gen, ctx, group_delim_fn_);
     }
     try {
         nested_cache_.push_back(nested_cache_row{

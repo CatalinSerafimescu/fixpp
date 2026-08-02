@@ -1,1 +1,3 @@
-{"feature_directory":"specs/081-strict-validation-residuals"}
+{
+  "feature_directory": "specs/083-group-delimiter-resolution"
+}

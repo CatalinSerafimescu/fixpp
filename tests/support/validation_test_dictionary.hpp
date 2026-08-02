@@ -75,6 +75,23 @@ constexpr std::string_view kValidationTestFix42Xml = R"xml(
       <field number="38"  name="OrderQty"     required="N"/>
       <field number="44"  name="Price"        required="N"/>
     </message>
+    <!-- 083-group-delimiter-resolution T018: NEW msgtype "N" — additive only,
+         does not touch A/0/D above. Carries the #208 B-2 nested-delimiter
+         shape (contracts/consume_group.md; tests/wire/
+         consume_group_nested_delim_test.cpp W-1): outer group NoOuter(100)
+         is delimited by NoInner(200) — itself a nested group's own count
+         tag, with InnerField(201) as NoInner's delimiter. Exists so
+         tests/fuzz/fuzz_wire_validator.cpp's corpus can exercise the new
+         consume_group descent (validator.hpp:376) — the shipped dict above
+         has zero groups, so consume_group was otherwise unreachable from
+         that harness. -->
+    <message name="NestedGroupTest" msgtype="N" msgcat="app">
+      <group name="NoOuter" required="N">
+        <group name="NoInner" required="N">
+          <field name="InnerField" required="N"/>
+        </group>
+      </group>
+    </message>
   </messages>
   <fields>
     <field number="8"   name="BeginString"  type="STRING"/>
@@ -93,6 +110,10 @@ constexpr std::string_view kValidationTestFix42Xml = R"xml(
     <field number="98"  name="EncryptMethod" type="INT"/>
     <field number="108" name="HeartBtInt"   type="INT"/>
     <field number="112" name="TestReqID"    type="STRING"/>
+    <!-- T018: NestedGroupTest(N) group fields — see the message block above. -->
+    <field number="100" name="NoOuter"      type="NUMINGROUP"/>
+    <field number="200" name="NoInner"      type="NUMINGROUP"/>
+    <field number="201" name="InnerField"   type="STRING"/>
   </fields>
 </fix>
 )xml";

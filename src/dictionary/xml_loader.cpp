@@ -254,7 +254,10 @@ struct MessageDef {
 
 class LoaderState {
 public:
-    explicit LoaderState(std::pmr::memory_resource* mr) noexcept : mr_(mr) {}
+    explicit LoaderState(
+        std::pmr::memory_resource* mr,
+        unresolved_group_policy policy = unresolved_group_policy::fail_closed) noexcept
+        : mr_(mr), unresolved_policy_(policy) {}
 
     void parse_document(pugi::xml_document const& doc);
 
@@ -315,12 +318,17 @@ private:
         std::vector<std::uint16_t>& required_out,
         std::vector<std::pair<std::uint16_t, std::uint16_t>>& group_required_pairs_out,
         std::uint16_t enclosing_group_no_tag, std::uint16_t enclosing_component_index,
-        bool in_group = false, bool component_required = true,
-        bool group_scope_component_required = true);
+        // 083 T026/T027: Entity-2 capture. NULL at the component-cache and
+        // group-cache call sites, which are not message-scoped (C-1.1).
+        detail::DelimCapture* delim_cap = nullptr, bool in_group = false,
+        bool component_required = true, bool group_scope_component_required = true);
 
     void detect_length_pairs(pugi::xml_node const& root);
 
     std::pmr::memory_resource* mr_;
+
+    // 083 T036/T037 (FR-006 / FR-006a): load-time only (C-6.5).
+    unresolved_group_policy unresolved_policy_ = unresolved_group_policy::fail_closed;
 
     pugi::xml_node header_node_;
     pugi::xml_node trailer_node_;
@@ -526,8 +534,9 @@ void LoaderState::expand_field_list(
     pugi::xml_node const& parent, std::vector<FieldRef>& out,
     std::vector<std::uint16_t>& required_out,
     std::vector<std::pair<std::uint16_t, std::uint16_t>>& group_required_pairs_out,
-    std::uint16_t enclosing_group_no_tag, std::uint16_t enclosing_component_index, bool in_group,
-    bool component_required, bool group_scope_component_required) {
+    std::uint16_t enclosing_group_no_tag, std::uint16_t enclosing_component_index,
+    detail::DelimCapture* delim_cap, bool in_group, bool component_required,
+    bool group_scope_component_required) {
     for (auto const& child : parent.children()) {
         std::string_view const tag_name{child.name()};
         if (tag_name == "field") {
@@ -550,6 +559,8 @@ void LoaderState::expand_field_list(
             fr.component_index = enclosing_component_index;
             fr.length_pair_data_tag = info.length_pair_data_tag;
             out.push_back(fr);
+            // 083 D-1: first emission at the open group's level = its delimiter.
+            detail::capture_first_emission(delim_cap, info.tag);
             if (req && !in_group && component_required) {  // fixpp#201: group-member requireds
                 required_out.push_back(info.tag);  // stay per-group; 079: optional-component AND
             }
@@ -573,9 +584,13 @@ void LoaderState::expand_field_list(
             // into the running component_required for the recursion.
             bool const comp_req =
                 std::string_view{child.attribute("required").as_string("N")} == "Y";
+            // 083 C-1.2: a componentRef expands INLINE at the enclosing
+            // level, so the same capture frame carries through unchanged —
+            // that is what makes a component's first field eligible to be the
+            // enclosing group's delimiter (FR-004) with no extra machinery.
             expand_field_list(def.node, out, required_out, group_required_pairs_out,
                               enclosing_group_no_tag, static_cast<std::uint16_t>(cit->second + 1),
-                              in_group, component_required && comp_req,
+                              delim_cap, in_group, component_required && comp_req,
                               group_scope_component_required && comp_req);
         } else if (tag_name == "group") {
             auto const gname = std::string{child.attribute("name").as_string("")};
@@ -595,6 +610,11 @@ void LoaderState::expand_field_list(
             no_fr.component_index = enclosing_component_index;
             no_fr.length_pair_data_tag = nit->second.length_pair_data_tag;
             out.push_back(no_fr);
+            // 083 D-1 / FR-003: a nested group's own count tag is pushed at
+            // the OUTER level, BEFORE the descent below — so it is eligible to
+            // be the outer group's delimiter exactly as a scalar field is.
+            // This is the #208 shape, and it needs no special case.
+            detail::capture_first_emission(delim_cap, no_tag);
             if (greq && !in_group && component_required) {  // fixpp#201: a nested group's count
                 required_out.push_back(no_tag);  // field is not message-level required (per-
             }  // instance instead); 079: optional-component AND
@@ -607,41 +627,21 @@ void LoaderState::expand_field_list(
             }
             // Record the GroupRef (deduplicated by no_tag — first-seen wins).
             if (!group_index_by_no_tag_.contains(no_tag)) {
-                std::uint16_t first_field_tag = 0;
-                for (auto const& gc : child.children()) {
-                    std::string_view const tn{gc.name()};
-                    if (tn == "field" || tn == "group") {
-                        auto const cn = std::string{gc.attribute("name").as_string("")};
-                        auto const fi = by_name_.find(cn);
-                        if (fi != by_name_.end()) {
-                            first_field_tag = fi->second.tag;
-                            break;
-                        }
-                    } else if (tn == "component") {
-                        auto const cn = std::string{gc.attribute("name").as_string("")};
-                        auto const ci = component_index_by_name_.find(cn);
-                        if (ci != component_index_by_name_.end()) {
-                            // Use first <field> of the resolved component.
-                            for (auto const& cf : components_[ci->second].node.children()) {
-                                std::string_view const cfn{cf.name()};
-                                if (cfn == "field") {
-                                    auto const fn = std::string{cf.attribute("name").as_string("")};
-                                    auto const fi2 = by_name_.find(fn);
-                                    if (fi2 != by_name_.end()) {
-                                        first_field_tag = fi2->second.tag;
-                                        break;
-                                    }
-                                }
-                            }
-                            if (first_field_tag != 0) {
-                                break;
-                            }
-                        }
-                    }
-                }
                 GroupDef gd{};
                 gd.no_tag = no_tag;
-                gd.first_field_tag = first_field_tag;
+                // 083 T028 (research D-10 / C-1.4b): the one-level component
+                // scan that used to compute `first_field_tag` HERE is deleted.
+                // It could only see a componentRef's own first <field> — never
+                // through a nested component, and never in declaration order
+                // for the message actually being expanded — which is the
+                // structural cause of the divergence this feature removes.
+                // `first_field_tag` is left 0 and REPOPULATED after the message
+                // loop as a first-seen projection of Entity 2 (see
+                // `project_group_first_fields`). It must never STAY 0: the bare
+                // `group_first_field(no_tag)` doubles as an is-this-tag-a-group
+                // predicate at six sites, and leaving it unpopulated would make
+                // the C ABI's `group_begin` reject every group through a
+                // GA-frozen ABI.
                 gd.parent_group_no_tag = enclosing_group_no_tag;
                 gd.node = child;  // store for group_fields_ expansion in finalize()
                 auto const idx = static_cast<std::uint16_t>(groups_.size());
@@ -664,10 +664,52 @@ void LoaderState::expand_field_list(
             // fresh from ITS OWN `required=` (matches QuickFIX's per-group
             // sub-DataDictionary semantics, and the reworked independent
             // oracle in required_scope_oracle.hpp).
+            // 083 T026/T027: open this group's capture frame. `path` carries
+            // its own no_tag only for the DESCENDANTS' keys — it is popped
+            // again before this group's own record is emitted, so that
+            // record's `parent_path` EXCLUDES no_tag (C-1.3 / Entity 1).
+            if (delim_cap != nullptr) {
+                delim_cap->path.push_back(no_tag);
+                delim_cap->pending.push_back(0);
+            }
             expand_field_list(child, out, required_out, group_required_pairs_out, no_tag,
-                              enclosing_component_index,
+                              enclosing_component_index, delim_cap,
                               /*in_group=*/true, component_required,
                               /*group_scope_component_required=*/greq);
+            if (delim_cap != nullptr) {
+                std::uint16_t const captured = delim_cap->pending.back();
+                delim_cap->pending.pop_back();
+                delim_cap->path.pop_back();
+                if (captured != 0) {
+                    delim_cap->out.push_back(
+                        detail::make_group_ctx_delim(delim_cap->path, no_tag, captured));
+                }
+                // 083 T036 (FR-006 / C-6.1): `captured == 0` means this
+                // <group> emitted no first member at all, so its delimiter is
+                // unresolvable and no message can ever be parsed against it.
+                // Recording 0 is not a storable state (C-1.4), and a silent
+                // drop is the outlier that concealed three FIX50SP2 groups —
+                // so this fails closed by default, mirroring the disposition
+                // this loader already takes for every sibling violation.
+                //
+                // C-6.1a / FR-006d — why "zero contexts must not trip this" is
+                // satisfied STRUCTURALLY rather than by a second predicate:
+                // this branch runs only when `delim_cap != nullptr`, i.e. only
+                // inside the MESSAGE-scoped expansion. A group declared but
+                // reachable from no message expansion (C-6.1a's class 2, e.g.
+                // tags 384/627 in FIX50/SP1/SP2) is walked with a NULL sink at
+                // the component/group caches and never reaches here at all.
+                else if (unresolved_policy_ == unresolved_group_policy::fail_closed) {
+                    throw xml_parse_error(
+                        "dict::xml_parse_error: <group name=\"" + gname + "\"> (NumInGroup tag " +
+                        std::to_string(no_tag) +
+                        ") declares no first member, so its delimiter cannot be resolved; "
+                        "pass unresolved_group_policy::tolerant to skip it instead");
+                }
+                // FR-006a tolerant mode: skip. The group is left UNREGISTERED
+                // rather than half-registered, so it never enters the
+                // consumer's enumeration (FR-023a).
+            }
         }
         // Ignore unknown child elements (forwards-compat).
     }
@@ -922,13 +964,20 @@ detail::dict_metadata_handle_ptr LoaderState::finalize() {
         // (no_tag,tag) pairs, accumulated across header+body+trailer exactly
         // like msg_fields/msg_required above.
         std::vector<std::pair<std::uint16_t, std::uint16_t>> msg_group_required;
+        // 083 T026 (C-1.1): the ONLY message-scoped expansion, and therefore
+        // the only one that may emit Entity-2 records. One capture state spans
+        // header + body + trailer, since all three contribute to the same
+        // message's contexts.
+        detail::DelimCapture delim_cap;
         // Header fields first, then message-specific, then trailer.
         if (header_node_ != nullptr) {
-            expand_field_list(header_node_, msg_fields, msg_required, msg_group_required, 0, 0);
+            expand_field_list(header_node_, msg_fields, msg_required, msg_group_required, 0, 0,
+                              &delim_cap);
         }
-        expand_field_list(md.node, msg_fields, msg_required, msg_group_required, 0, 0);
+        expand_field_list(md.node, msg_fields, msg_required, msg_group_required, 0, 0, &delim_cap);
         if (trailer_node_ != nullptr) {
-            expand_field_list(trailer_node_, msg_fields, msg_required, msg_group_required, 0, 0);
+            expand_field_list(trailer_node_, msg_fields, msg_required, msg_group_required, 0, 0,
+                              &delim_cap);
         }
         auto const [field_run, req_run] = append_run(msg_fields, msg_required);
         h.per_msg_field_offsets_.push_back(field_run);
@@ -943,6 +992,69 @@ detail::dict_metadata_handle_ptr LoaderState::finalize() {
         h.msg_group_required_pool_.insert(h.msg_group_required_pool_.end(),
                                           msg_group_required.begin(), msg_group_required.end());
         h.per_msg_group_required_offsets_.push_back(group_req_run);
+
+        // 083 T025/T027 (Entity 2): flush this message's per-context delimiter
+        // records. Sorted by `group_ctx_delim_less` so the accessor can binary
+        // -search; deduped by KEY (not by whole record) because one group can
+        // be reached twice in a message — e.g. via a component used in both
+        // header and body — and both walks read the same declaration, so the
+        // duplicates agree by construction and the first is kept.
+        detail::flush_group_ctx_delims(h, delim_cap);
+    }
+
+    // ── 083 T028/T029 (research D-10 / C-1.4b / C-7.2's write-order leg) ────
+    // Repopulate the global `GroupDef.first_field_tag` as a FIRST-SEEN
+    // PROJECTION of Entity 2, now that every message has been expanded and the
+    // pool is complete.
+    //
+    // WRITE ORDER IS LOAD-BEARING, not incidental: the 072 nested/parent
+    // delimiter collision guard below reads `first_field_tag` and THROWS on a
+    // match. It must see post-projection values — against a half-populated
+    // global it would compare 0 against 0 for every unprojected pair and either
+    // fire spuriously or (as the `!= 0` guard actually has it) silently pass
+    // over the very dialects it exists to reject. Hence this loop sits here,
+    // immediately after the message loop and well before the guard, rather than
+    // anywhere later in finalize().
+    //
+    // "First-seen" is the pool's own order, which is `messages_` order — sorted
+    // bytewise by msg_type at :819 — so the projection is deterministic across
+    // runs and platforms. Which message wins no longer matters for CORRECTNESS
+    // (per-context resolution reads Entity 2 directly); the global survives
+    // only as an is-this-tag-a-group predicate and as this guard's input.
+    for (auto const& rec : h.group_ctx_delim_pool_) {
+        auto const git = group_index_by_no_tag_.find(rec.no_tag);
+        if (git == group_index_by_no_tag_.end()) {
+            continue;  // a context whose GroupDef this dialect never recorded
+        }
+        auto& gd = groups_[git->second];
+        if (gd.first_field_tag == 0) {
+            gd.first_field_tag = rec.delimiter;  // first-seen wins
+        }
+    }
+
+    // ── 083 T041 (FR-023 / C-3.4): Entity-2 completeness invariant ──────────
+    // Every context `as_table_view()` will register must have a record. Runs
+    // AFTER the projection above (so `first_field_tag` is final) and at
+    // finalize() rather than at as_table_view(), which is contractually
+    // non-throwing and stays so -- that is what makes a consumer-side miss
+    // unreachable by construction instead of merely unobserved.
+    //
+    // NO silent fallback is available here by design: falling back to
+    // `group_first_field(no_tag)` would reinstate this feature's own defect,
+    // and to `members.front()` a worse one already fixed and pinned
+    // (ValidatorProductionTableView.GroupDelimiterFromWireNotTagSortedMember).
+    //
+    // FR-023a: a tolerantly-skipped group never reaches here as a violation --
+    // `captured == 0` means no FieldRef was emitted at that group's level, so
+    // no FieldRef carries its `group_no_tag`, so the `!members.empty()` leg
+    // excludes it from the registered set in the first place.
+    detail::maybe_drop_first_group_ctx_delim_run_for_testing(h);  // Gate B r1 F1 test seam
+    if (auto const bad = detail::find_incomplete_group_context(h); bad) {
+        throw xml_parse_error("dict::xml_parse_error: group context for NumInGroup tag " +
+                              std::to_string(bad->second) + " in message '" +
+                              std::string{messages_[bad->first].msg_type} +
+                              "' is registered by as_table_view() but has no per-context delimiter "
+                              "record (FR-023 completeness invariant)");
     }
 
     // Emit components (PMR ComponentRef array).
@@ -967,7 +1079,12 @@ detail::dict_metadata_handle_ptr LoaderState::finalize() {
         // its own standalone GroupDef walk below.
         expand_field_list(def.node, comp_fields, comp_required, comp_group_required,
                           /*enclosing_group_no_tag=*/0,
-                          /*enclosing_component_index=*/static_cast<std::uint16_t>(i + 1));
+                          /*enclosing_component_index=*/static_cast<std::uint16_t>(i + 1),
+                          // 083 C-1.1: NOT message-scoped — a record emitted
+                          // here would carry no message type and corrupt the
+                          // store. Explicit rather than defaulted, so the
+                          // decision is visible at the call site.
+                          /*delim_cap=*/nullptr);
 
         auto const first_idx = static_cast<std::uint16_t>(h.component_fields_.size());
         auto const cnt =
@@ -1056,6 +1173,9 @@ detail::dict_metadata_handle_ptr LoaderState::finalize() {
             expand_field_list(g.node, grp_fields, grp_required, grp_group_required,
                               /*enclosing_group_no_tag=*/g.no_tag,
                               /*enclosing_component_index=*/0,
+                              // 083 C-1.1: the group cache is not
+                              // message-scoped either — same reason as above.
+                              /*delim_cap=*/nullptr,
                               /*in_group=*/false,
                               /*component_required=*/g_own_required);
             first_idx = static_cast<std::uint16_t>(h.group_fields_.size());
@@ -1162,8 +1282,8 @@ detail::dict_metadata_handle_ptr LoaderState::finalize() {
 // ----------------------------------------------------------------------------
 
 [[nodiscard]] detail::dict_metadata_handle_ptr build_handle_from_doc(
-    pugi::xml_document const& doc, std::pmr::memory_resource* mr) {
-    LoaderState st{mr};
+    pugi::xml_document const& doc, std::pmr::memory_resource* mr, unresolved_group_policy policy) {
+    LoaderState st{mr, policy};
     st.parse_document(doc);
     return st.finalize();
 }
@@ -1171,7 +1291,8 @@ detail::dict_metadata_handle_ptr LoaderState::finalize() {
 }  // namespace
 
 // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
-Dictionary XmlLoader::load(std::filesystem::path const& xml_path, std::pmr::memory_resource* mr) {
+Dictionary XmlLoader::load(std::filesystem::path const& xml_path, std::pmr::memory_resource* mr,
+                           unresolved_group_policy policy) {
     assert(mr != nullptr && "XmlLoader::load: mr must not be null");
     return fixpp::core::detail::trap_throw_or_throw<xml_oom_error>([&] {
         std::ifstream in(xml_path, std::ios::binary);
@@ -1183,12 +1304,13 @@ Dictionary XmlLoader::load(std::filesystem::path const& xml_path, std::pmr::memo
         if (!result) {
             throw xml_parse_error(std::string{"dict::xml_parse_error: "} + result.description());
         }
-        return Dictionary{build_handle_from_doc(doc, mr)};
+        return Dictionary{build_handle_from_doc(doc, mr, policy)};
     });
 }
 
 // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
-Dictionary XmlLoader::load_from_string(std::string_view xml_text, std::pmr::memory_resource* mr) {
+Dictionary XmlLoader::load_from_string(std::string_view xml_text, std::pmr::memory_resource* mr,
+                                       unresolved_group_policy policy) {
     assert(mr != nullptr && "XmlLoader::load_from_string: mr must not be null");
     return fixpp::core::detail::trap_throw_or_throw<xml_oom_error>([&] {
         pugi::xml_document doc;
@@ -1196,7 +1318,7 @@ Dictionary XmlLoader::load_from_string(std::string_view xml_text, std::pmr::memo
         if (!result) {
             throw xml_parse_error(std::string{"dict::xml_parse_error: "} + result.description());
         }
-        return Dictionary{build_handle_from_doc(doc, mr)};
+        return Dictionary{build_handle_from_doc(doc, mr, policy)};
     });
 }
 

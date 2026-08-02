@@ -15,6 +15,7 @@ set_target_properties(placeholder_bench PROPERTIES
 )
 
 add_subdirectory(core)
+add_subdirectory(capi)   # 083-group-delimiter-resolution bench (T065 — FR-022 path 3, C-ABI commit)
 add_subdirectory(codegen)
 add_subdirectory(dictionary)
 add_subdirectory(wire)

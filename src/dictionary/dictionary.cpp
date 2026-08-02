@@ -9,6 +9,7 @@
 // memory back to the originating `mr` (`[2c §4.3]` / C-R2-P1-1).
 
 #include <algorithm>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <fixpp/dict/dictionary.hpp>
@@ -213,6 +214,41 @@ dict_metadata_handle::msg_group_required_pairs_impl(std::string_view msg_type) c
         msg_group_required_pool_.data() + run.start, run.count};
 }
 
+// 083 T025 (Entity 2). Same run-lookup shape as msg_group_required_pairs_impl
+// above — the message scoping IS the run.
+std::span<GroupCtxDelim const> dict_metadata_handle::msg_group_ctx_delims_impl(
+    std::string_view msg_type) const noexcept {
+    auto const idx = find_msg_index(messages_, msg_type);
+    if (idx == SIZE_MAX || idx >= per_msg_group_ctx_delim_offsets_.size()) {
+        return {};
+    }
+    auto const run = per_msg_group_ctx_delim_offsets_[idx];
+    if (run.count == 0 || run.start + run.count > group_ctx_delim_pool_.size()) {
+        return {};
+    }
+    return std::span<GroupCtxDelim const>{group_ctx_delim_pool_.data() + run.start, run.count};
+}
+
+std::uint16_t dict_metadata_handle::group_ctx_delimiter_impl(
+    std::string_view msg_type, std::span<std::uint16_t const> parent_path,
+    std::uint16_t no_tag) const noexcept {
+    auto const run = msg_group_ctx_delims_impl(msg_type);
+    // Build the probe through the SAME helper the store side uses, so the
+    // depth clamp is one rule rather than two that can drift (C-2.2).
+    GroupCtxDelim const probe = make_group_ctx_delim(parent_path, no_tag, /*delimiter=*/0);
+    auto const* const begin = run.data();
+    auto const* const end = begin + run.size();
+    auto const* it = std::lower_bound(begin, end, probe, group_ctx_delim_less);
+    // `group_ctx_delim_less` orders by (no_tag, depth, path) and the probe
+    // carries all three, so an exact hit lands here or nowhere. Confirm the
+    // key rather than trusting the position: lower_bound returns the insertion
+    // point on a miss.
+    if (it == end || group_ctx_delim_less(probe, *it)) {
+        return 0;  // no record — FR-006 fail-closed is the caller's decision
+    }
+    return it->delimiter;
+}
+
 // 074-orchestra-native-reader (FR-002): enum {value, description} pairs for a
 // codeset-backed field, keyed by tag. Binary-search the per-tag runs (sorted by
 // tag) → a span into the flat enum_values_ store. Empty for tags with no
@@ -356,7 +392,61 @@ std::span<EnumValueRef const> Dictionary::enum_values(std::uint16_t tag) const n
 //
 // [const §XV.1]: called once at session/validator setup; must not be called
 // on the per-message hot path.
+namespace detail {
+// 083 T049 (W-11a) test seam — see dictionary_internal.hpp.
+//
+// ATOMIC, corrected at /simplify: this was a plain `std::uint64_t`, justified
+// by "the witness opens one session on one thread". That reasoning covers the
+// TEST but not the PRODUCTION reachability — the increment is unconditional
+// and `as_table_view()` is called from `fixpp_session_open`
+// (src/capi/session.cpp) and from `Session::open()`, so two threads opening
+// sessions concurrently on one engine race on it. Nothing gated the increment
+// to test builds, unlike this same feature's sibling seam
+// (`reserve_bound_access_for_testing`, offset_table.hpp) which IS behind
+// FIXPP_TEST_HOOKS. Gating was not available here: the counter lives in the
+// library, so a gated definition would not link against a test TU that
+// defines the macro.
+//
+// `relaxed` is sufficient and is not a hot-path cost: the seam counts
+// SESSION-OPEN calls, not per-message work — `[const §XV.1]` is what keeps
+// `as_table_view()` off the per-message path in the first place, and W-11a is
+// the witness that it stays there.
+namespace {
+// A mutable process-wide counter is the POINT of this seam; it is file-local
+// (anonymous namespace), atomic, and read only by the W-11a witness.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+std::atomic<std::uint64_t> g_as_table_view_calls{0};
+}  // namespace
+void bump_as_table_view_call_count() noexcept {
+    g_as_table_view_calls.fetch_add(1, std::memory_order_relaxed);
+}
+std::uint64_t as_table_view_call_count() noexcept {
+    return g_as_table_view_calls.load(std::memory_order_relaxed);
+}
+void reset_as_table_view_call_count() noexcept {
+    g_as_table_view_calls.store(0, std::memory_order_relaxed);
+}
+
+// Gate B r1 F1 (fixpp#216 P1-1) test seam — see dictionary_internal.hpp.
+namespace {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+std::atomic<bool> g_force_incomplete_group_context{false};
+}  // namespace
+void set_force_incomplete_group_context_for_testing(bool enable) noexcept {
+    g_force_incomplete_group_context.store(enable, std::memory_order_relaxed);
+}
+void maybe_drop_first_group_ctx_delim_run_for_testing(dict_metadata_handle& h) noexcept {
+    if (!g_force_incomplete_group_context.load(std::memory_order_relaxed)) {
+        return;
+    }
+    if (!h.per_msg_group_ctx_delim_offsets_.empty()) {
+        h.per_msg_group_ctx_delim_offsets_[0].count = 0;
+    }
+}
+}  // namespace detail
+
 table_view Dictionary::as_table_view() const {
+    detail::bump_as_table_view_call_count();  // 083 T049 test seam (W-11a)
     table_view tv;
 
     if (!handle_) {
@@ -493,22 +583,43 @@ table_view Dictionary::as_table_view() const {
                 auto const pit = immediate_parent.find(cur);
                 cur = (pit != immediate_parent.end()) ? pit->second : std::uint16_t{0};
             }
-            std::reverse(path.begin(), path.end());
+            std::ranges::reverse(path);
 
-            // 4) Delimiter = the group's DECLARATION first field, from the
-            //    dictionary's GroupRef (group_first_field), NOT members.front():
-            //    `all_fields` is tag-sorted, so members.front() is the lowest-tag
-            //    member, not the delimiter (e.g. FIX44 NoPartyIDs(453): lowest
-            //    member PartyIDSource(447), real delimiter PartyID(448)). Using
-            //    members.front() made the validator reject valid real-dict groups.
-            //    group_first_field() is GroupRef.first_field_tag — the first
-            //    child in declaration order (xml_loader.cpp). It is global (one
-            //    GroupRef per no_tag, first-seen for reused tags), so a reused
-            //    tag with divergent per-context delimiters is an L-063-3 residual;
-            //    the per-context MEMBER SET above stays exact regardless. Fall
-            //    back to members.front() only if the dict has no GroupRef.
-            std::uint16_t const gr_delim = group_first_field(no_tag);
-            std::uint16_t const delim = gr_delim != 0 ? gr_delim : members.front();
+            // 4) Delimiter = the group's DECLARATION first field, NOT
+            //    members.front(): `all_fields` is tag-sorted, so members.front()
+            //    is the lowest-tag member, not the delimiter (e.g. FIX44
+            //    NoPartyIDs(453): lowest member PartyIDSource(447), real
+            //    delimiter PartyID(448)). Using members.front() made the
+            //    validator reject valid real-dict groups. [This paragraph is
+            //    unchanged and still TRUE.]
+            //
+            //    083 T031 (C-3.1): the SOURCE is now Entity 2 — this context's
+            //    OWN declaration — not the global `group_first_field(no_tag)`.
+            //
+            //    083 T032 (FR-011 / C-3.2) — CORRECTION of the sentence that
+            //    used to close this comment. It read: "a reused tag with
+            //    divergent per-context delimiters is an L-063-3 residual; the
+            //    per-context MEMBER SET above stays exact regardless." The
+            //    second clause is FALSE, and believing it is why the defect
+            //    survived inspection. The member set does NOT stay exact: it is
+            //    `set_group_first_ctx`'s own unconditional
+            //    `add_group_member_ctx(msg_type, parent_path, no_tag, first)`
+            //    (include/fixpp/dict/table_view.hpp:645) that INJECTS the wrong
+            //    global delimiter into this context's member set — measured on
+            //    48 contexts. A wrong delimiter therefore corrupts the member
+            //    set too, which is fixpp#210 Consequence 1/2. With the source
+            //    corrected the injected tag is already a declared member, so
+            //    that injection becomes a no-op (D-5 / C-3.3) and the pollution
+            //    disappears by construction rather than by a second fix.
+            //
+            //    There is deliberately NO fallback here: falling back to the
+            //    global would reinstate the defect, and to members.front() a
+            //    worse one already fixed above. A 0 means the context has no
+            //    Entity-2 record, which is FR-006's fail-closed condition and is
+            //    rejected at LOAD time in the loaders' finalize() (FR-023 /
+            //    C-3.4), never silently absorbed here — `as_table_view()` is
+            //    contractually non-throwing (072, L-063-4) and stays so.
+            std::uint16_t const delim = handle_->group_ctx_delimiter_impl(mt, path, no_tag);
 
             // Register into the CONTEXT-KEYED store (in ADDITION to the
             // legacy bare store populated above — see the escalation note

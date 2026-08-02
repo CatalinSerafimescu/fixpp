@@ -147,10 +147,11 @@ constexpr OrchestraTypeEntry kOrchestraTypeTable[] = {
 }
 
 // ----------------------------------------------------------------------------
-// Non-throwing uint16 id parse — used by the best-effort `first_member_tag`
-// delimiter scan (mirrors xml_loader.cpp's tolerant "skip on lookup miss"
-// style for that specific helper; skip-on-malformed there is not a
-// correctness path, unlike fieldRef/componentRef/groupRef resolution below).
+// Non-throwing uint16 id parse — tolerant "skip on lookup miss" style, used
+// by the id-attribute reads below. (It previously also served the
+// `first_member_tag` delimiter scan, which 083 T030 removed.)
+// Skip-on-malformed here is not a correctness path, unlike
+// fieldRef/componentRef/groupRef resolution below.
 // ----------------------------------------------------------------------------
 
 [[nodiscard]] bool try_parse_uint16(std::string_view s, std::uint16_t& out) noexcept {
@@ -235,7 +236,10 @@ struct OrchestraMessageDef {
 
 class OrchestraLoaderState {
 public:
-    explicit OrchestraLoaderState(std::pmr::memory_resource* mr) noexcept : mr_(mr) {}
+    explicit OrchestraLoaderState(
+        std::pmr::memory_resource* mr,
+        unresolved_group_policy policy = unresolved_group_policy::fail_closed) noexcept
+        : mr_(mr), unresolved_policy_(policy) {}
 
     void parse_document(pugi::xml_document const& doc);
 
@@ -275,17 +279,26 @@ private:
         std::vector<std::uint16_t>& required_out,
         std::vector<std::pair<std::uint16_t, std::uint16_t>>& group_required_pairs_out,
         std::uint16_t enclosing_group_no_tag, std::uint16_t enclosing_component_index,
-        bool in_group = false, bool component_required = true,
-        bool group_scope_component_required = true);
+        // 083 T030: Entity-2 capture, symmetric with xml_loader.cpp. NULL at
+        // the component-cache and group-cache call sites (C-1.1).
+        detail::DelimCapture* delim_cap = nullptr, bool in_group = false,
+        bool component_required = true, bool group_scope_component_required = true);
     // NOLINTEND(misc-no-recursion,bugprone-easily-swappable-parameters)
 
-    // Best-effort one-level delimiter scan for a group/component body: mirrors
-    // xml_loader.cpp's first_field_tag computation (fieldRef/groupRef ->
-    // direct tag; a leading componentRef -> drill into ITS direct fieldRef
-    // children only, no further recursion). Returns 0 if none found.
-    [[nodiscard]] std::uint16_t first_member_tag(pugi::xml_node const& container) const;
+    // 083 T030: `first_member_tag()` — the best-effort one-level delimiter scan
+    // — was REMOVED here, not merely bypassed. Its only caller set
+    // `gd.first_field_tag`, and the delimiter is now captured from declaration
+    // order during `expand_field_list` (Entity 2), with the global repopulated
+    // afterwards as a first-seen projection. Leaving the function defined but
+    // uncalled is the orphan a `/simplify` pass is supposed to clean up, and
+    // cppcheck flagged it as `unusedPrivateFunction`. `try_parse_uint16` is
+    // NOT removed — it has other callers.
 
     std::pmr::memory_resource* mr_;
+
+    // 083 T036/T037 (FR-006 / FR-006a): load-time only (C-6.5). SAME option
+    // and SAME semantics as XmlLoader's (C-6.4) -- shared enum, not a twin.
+    unresolved_group_policy unresolved_policy_ = unresolved_group_policy::fail_closed;
 
     std::unordered_map<std::string, OrchestraCodeSet> codesets_by_name_;
     std::unordered_map<std::uint16_t, OrchestraFieldInfo> fields_by_tag_;
@@ -464,65 +477,13 @@ void OrchestraLoaderState::parse_document(pugi::xml_document const& doc) {
     collect_messages(root);
 }
 
-std::uint16_t OrchestraLoaderState::first_member_tag(pugi::xml_node const& container) const {
-    std::uint16_t first_field_tag = 0;
-    for (auto const& gc : container.children()) {
-        std::string_view const tn{gc.name()};
-        if (tn == "fixr:fieldRef") {
-            std::uint16_t tag = 0;
-            if (try_parse_uint16(std::string_view{gc.attribute("id").as_string("")}, tag) &&
-                fields_by_tag_.contains(tag)) {
-                first_field_tag = tag;
-                break;
-            }
-        } else if (tn == "fixr:groupRef") {
-            // A leading nested group's OWN count-field tag is the delimiter
-            // surrogate (mirrors xml_loader.cpp treating a leading <group
-            // name=X> exactly like a <field name=X> reference).
-            std::uint16_t xml_id = 0;
-            if (try_parse_uint16(std::string_view{gc.attribute("id").as_string("")}, xml_id)) {
-                if (auto const git = group_by_xml_id_.find(xml_id); git != group_by_xml_id_.end()) {
-                    if (auto const ning = git->second.child("fixr:numInGroup"); ning) {
-                        std::uint16_t no_tag = 0;
-                        if (try_parse_uint16(std::string_view{ning.attribute("id").as_string("")},
-                                             no_tag)) {
-                            first_field_tag = no_tag;
-                            break;
-                        }
-                    }
-                }
-            }
-        } else if (tn == "fixr:componentRef") {
-            std::uint16_t xml_id = 0;
-            if (try_parse_uint16(std::string_view{gc.attribute("id").as_string("")}, xml_id)) {
-                if (auto const cit = component_index_by_xml_id_.find(xml_id);
-                    cit != component_index_by_xml_id_.end()) {
-                    for (auto const& cf : components_[cit->second].node.children("fixr:fieldRef")) {
-                        std::uint16_t cf_tag = 0;
-                        if (try_parse_uint16(std::string_view{cf.attribute("id").as_string("")},
-                                             cf_tag) &&
-                            fields_by_tag_.contains(cf_tag)) {
-                            first_field_tag = cf_tag;
-                            break;
-                        }
-                    }
-                    if (first_field_tag != 0) {
-                        break;
-                    }
-                }
-            }
-        }
-        // Ignore fixr:numInGroup / fixr:annotation / other unknown children.
-    }
-    return first_field_tag;
-}
-
 void OrchestraLoaderState::expand_field_list(
     pugi::xml_node const& parent, std::vector<FieldRef>& out,
     std::vector<std::uint16_t>& required_out,
     std::vector<std::pair<std::uint16_t, std::uint16_t>>& group_required_pairs_out,
-    std::uint16_t enclosing_group_no_tag, std::uint16_t enclosing_component_index, bool in_group,
-    bool component_required, bool group_scope_component_required) {
+    std::uint16_t enclosing_group_no_tag, std::uint16_t enclosing_component_index,
+    detail::DelimCapture* delim_cap, bool in_group, bool component_required,
+    bool group_scope_component_required) {
     for (auto const& child : parent.children()) {
         std::string_view const tag_name{child.name()};
         if (tag_name == "fixr:fieldRef") {
@@ -544,6 +505,8 @@ void OrchestraLoaderState::expand_field_list(
             fr.component_index = enclosing_component_index;
             fr.length_pair_data_tag = 0;  // out of scope for 074 (not requested by tasks.md)
             out.push_back(fr);
+            // 083 D-1: first emission at the open group's level = its delimiter.
+            detail::capture_first_emission(delim_cap, tag);
             // 079 T020 (component-AND, symmetric with xml_loader): a field
             // `presence='required'` only inside an OPTIONAL componentRef must
             // not enter the message-level required set — EXCEPT the structural
@@ -570,9 +533,11 @@ void OrchestraLoaderState::expand_field_list(
             // the running component_required (mirrors xml_loader + the oracle).
             bool const comp_req =
                 std::string_view{child.attribute("presence").as_string("")} == "required";
+            // 083 C-1.2: a componentRef expands INLINE at the enclosing level,
+            // so the same capture frame carries through (FR-004).
             expand_field_list(def.node, out, required_out, group_required_pairs_out,
                               enclosing_group_no_tag, static_cast<std::uint16_t>(cit->second + 1),
-                              in_group, component_required && comp_req,
+                              delim_cap, in_group, component_required && comp_req,
                               group_scope_component_required && comp_req);
         } else if (tag_name == "fixr:groupRef") {
             auto const xml_id = parse_orchestra_id(child.attribute("id"), "<fixr:groupRef>");
@@ -608,6 +573,10 @@ void OrchestraLoaderState::expand_field_list(
             no_fr.group_no_tag = enclosing_group_no_tag;
             no_fr.component_index = enclosing_component_index;
             out.push_back(no_fr);
+            // 083 D-1 / FR-003: the nested group's own count tag is pushed at
+            // the OUTER level, BEFORE the descent below — so it is eligible to
+            // be the outer group's delimiter exactly as a scalar field is.
+            detail::capture_first_emission(delim_cap, no_tag);
             // fixpp#201: nested-group count field is per-instance, not
             // message-level required; 079 T020: nor is a group inside an
             // optional component (a NumInGroup count is never a header/trailer
@@ -626,7 +595,12 @@ void OrchestraLoaderState::expand_field_list(
             if (!group_index_by_no_tag_.contains(no_tag)) {
                 OrchestraGroupDef gd{};
                 gd.no_tag = no_tag;
-                gd.first_field_tag = first_member_tag(group_node);
+                // 083 T030 (research D-10 / C-1.4b, symmetric with
+                // xml_loader.cpp): the best-effort one-level `first_member_tag`
+                // scan no longer decides the delimiter. Left 0 here and
+                // REPOPULATED after the message loop as a first-seen projection
+                // of Entity 2 — never left 0, since the global doubles as an
+                // is-this-tag-a-group predicate behind the GA-frozen C ABI.
                 gd.parent_group_no_tag = enclosing_group_no_tag;
                 gd.node = group_node;
                 gd.first_seen_required = greq;  // 081 D-3: first-seen usage's own presence
@@ -647,10 +621,45 @@ void OrchestraLoaderState::expand_field_list(
             // `required=="Y" && groupRequired`); NOT an AND across ancestor
             // groups — each group's own boundary reset discards whatever the
             // enclosing accumulator carried.
+            // 083 T030: open this group's capture frame. `path` carries its own
+            // no_tag only for the DESCENDANTS' keys — popped again before this
+            // group's own record is emitted, so that record's `parent_path`
+            // EXCLUDES no_tag (C-1.3 / Entity 1).
+            if (delim_cap != nullptr) {
+                delim_cap->path.push_back(no_tag);
+                delim_cap->pending.push_back(0);
+            }
             expand_field_list(group_node, out, required_out, group_required_pairs_out, no_tag,
-                              enclosing_component_index,
+                              enclosing_component_index, delim_cap,
                               /*in_group=*/true, component_required,
                               /*group_scope_component_required=*/greq);  // 081 D-3
+            if (delim_cap != nullptr) {
+                std::uint16_t const captured = delim_cap->pending.back();
+                delim_cap->pending.pop_back();
+                delim_cap->path.pop_back();
+                if (captured != 0) {
+                    delim_cap->out.push_back(
+                        detail::make_group_ctx_delim(delim_cap->path, no_tag, captured));
+                }
+                // 083 T036 (FR-006 / C-6.1), symmetric with xml_loader.cpp:
+                // `captured == 0` means this group emitted no first member, so
+                // its delimiter is unresolvable. Fail-closed by default.
+                // C-6.1b / FR-006c: the type is the DERIVED
+                // `orchestra_parse_error`, not the base -- the Orchestra fuzz
+                // harness catches the derived type, so a base xml_parse_error
+                // would escape to its terminal rethrow and crash the fuzzer.
+                // C-6.1a / FR-006d holds STRUCTURALLY: this branch runs only
+                // under a non-null sink, i.e. only in the message-scoped walk.
+                else if (unresolved_policy_ == unresolved_group_policy::fail_closed) {
+                    throw orchestra_parse_error(
+                        "dict::orchestra_parse_error: <fixr:group> with <fixr:numInGroup id=\"" +
+                        std::to_string(no_tag) +
+                        "\"> declares no first member, so its delimiter cannot be resolved; "
+                        "pass unresolved_group_policy::tolerant to skip it instead");
+                }
+                // FR-006a tolerant mode: skip, leaving the group UNREGISTERED
+                // rather than half-registered (FR-023a).
+            }
         }
         // Ignore fixr:annotation / other unknown child elements (forwards-compat).
     }
@@ -820,8 +829,12 @@ detail::dict_metadata_handle_ptr OrchestraLoaderState::finalize() {
         // No separate header/trailer nodes in Orchestra — StandardHeader
         // (component 1024) / StandardTrailer (1025) are ordinary componentRefs
         // inside each message's own <fixr:structure> (brief).
+        // 083 T030 (C-1.1): the ONLY message-scoped expansion, and therefore
+        // the only one that may emit Entity-2 records.
+        detail::DelimCapture delim_cap;
         if (md.node) {
-            expand_field_list(md.node, msg_fields, msg_required, msg_group_required, 0, 0);
+            expand_field_list(md.node, msg_fields, msg_required, msg_group_required, 0, 0,
+                              &delim_cap);
         }
         auto const [field_run, req_run] = append_run(msg_fields, msg_required);
         h.per_msg_field_offsets_.push_back(field_run);
@@ -836,6 +849,53 @@ detail::dict_metadata_handle_ptr OrchestraLoaderState::finalize() {
         h.msg_group_required_pool_.insert(h.msg_group_required_pool_.end(),
                                           msg_group_required.begin(), msg_group_required.end());
         h.per_msg_group_required_offsets_.push_back(group_req_run);
+
+        // 083 T030 (Entity 2): flush this message's records — same sort, same
+        // key-dedup and same run shape as xml_loader.cpp.
+        detail::flush_group_ctx_delims(h, delim_cap);
+    }
+
+    // ── 083 T030 (research D-10 / C-1.4b / C-7.2's write-order leg) ─────────
+    // Repopulate the global `first_field_tag` as a FIRST-SEEN PROJECTION of
+    // Entity 2, symmetric with xml_loader.cpp. WRITE ORDER IS LOAD-BEARING:
+    // the 072 nested/parent delimiter collision guard below reads
+    // `first_field_tag` and THROWS on a match, so it must see post-projection
+    // values rather than a half-populated global.
+    for (auto const& rec : h.group_ctx_delim_pool_) {
+        auto const git = group_index_by_no_tag_.find(rec.no_tag);
+        if (git == group_index_by_no_tag_.end()) {
+            continue;
+        }
+        auto& gd = groups_[git->second];
+        if (gd.first_field_tag == 0) {
+            gd.first_field_tag = rec.delimiter;  // first-seen wins
+        }
+    }
+
+    // ── 083 T041 (FR-023 / C-3.4): Entity-2 completeness invariant ──────────
+    // Every context `as_table_view()` will register must have a record. Runs
+    // AFTER the projection above (so `first_field_tag` is final) and at
+    // finalize() rather than at as_table_view(), which is contractually
+    // non-throwing and stays so -- that is what makes a consumer-side miss
+    // unreachable by construction instead of merely unobserved.
+    //
+    // NO silent fallback is available here by design: falling back to
+    // `group_first_field(no_tag)` would reinstate this feature's own defect,
+    // and to `members.front()` a worse one already fixed and pinned
+    // (ValidatorProductionTableView.GroupDelimiterFromWireNotTagSortedMember).
+    //
+    // FR-023a: a tolerantly-skipped group never reaches here as a violation --
+    // `captured == 0` means no FieldRef was emitted at that group's level, so
+    // no FieldRef carries its `group_no_tag`, so the `!members.empty()` leg
+    // excludes it from the registered set in the first place.
+    detail::maybe_drop_first_group_ctx_delim_run_for_testing(h);  // Gate B r1 F1 test seam
+    if (auto const bad = detail::find_incomplete_group_context(h); bad) {
+        throw orchestra_parse_error(
+            "dict::orchestra_parse_error: group context for NumInGroup tag " +
+            std::to_string(bad->second) + " in message '" +
+            std::string{messages_[bad->first].msg_type} +
+            "' is registered by as_table_view() but has no per-context delimiter "
+            "record (FR-023 completeness invariant)");
     }
 
     // Emit components (PMR ComponentRef array) — mirrors xml_loader.cpp:751-795.
@@ -854,7 +914,9 @@ detail::dict_metadata_handle_ptr OrchestraLoaderState::finalize() {
         // its own standalone OrchestraGroupDef walk below.
         expand_field_list(def.node, comp_fields, comp_required, comp_group_required,
                           /*enclosing_group_no_tag=*/0,
-                          /*enclosing_component_index=*/static_cast<std::uint16_t>(i + 1));
+                          /*enclosing_component_index=*/static_cast<std::uint16_t>(i + 1),
+                          // 083 C-1.1: not message-scoped — emits nothing.
+                          /*delim_cap=*/nullptr);
 
         auto const first_idx = static_cast<std::uint16_t>(h.component_fields_.size());
         auto const cnt =
@@ -921,6 +983,8 @@ detail::dict_metadata_handle_ptr OrchestraLoaderState::finalize() {
             expand_field_list(g.node, grp_fields, grp_required, grp_group_required,
                               /*enclosing_group_no_tag=*/g.no_tag,
                               /*enclosing_component_index=*/0,
+                              // 083 C-1.1: not message-scoped — emits nothing.
+                              /*delim_cap=*/nullptr,
                               /*in_group=*/false,
                               /*component_required=*/g.first_seen_required);
             first_idx = static_cast<std::uint16_t>(h.group_fields_.size());
@@ -1026,15 +1090,16 @@ detail::dict_metadata_handle_ptr OrchestraLoaderState::finalize() {
 // ----------------------------------------------------------------------------
 
 [[nodiscard]] detail::dict_metadata_handle_ptr build_handle_from_doc(
-    pugi::xml_document const& doc, std::pmr::memory_resource* mr) {
-    OrchestraLoaderState st{mr};
+    pugi::xml_document const& doc, std::pmr::memory_resource* mr, unresolved_group_policy policy) {
+    OrchestraLoaderState st{mr, policy};
     st.parse_document(doc);
     return st.finalize();
 }
 
 }  // namespace
 
-Dictionary OrchestraLoader::load(std::filesystem::path const& path, std::pmr::memory_resource* mr) {
+Dictionary OrchestraLoader::load(std::filesystem::path const& path, std::pmr::memory_resource* mr,
+                                 unresolved_group_policy policy) {
     assert(mr != nullptr && "OrchestraLoader::load: mr must not be null");
     return fixpp::core::detail::trap_throw_or_throw<xml_oom_error>([&] {
         std::ifstream in(path, std::ios::binary);
@@ -1048,11 +1113,12 @@ Dictionary OrchestraLoader::load(std::filesystem::path const& path, std::pmr::me
             throw orchestra_parse_error(std::string{"dict::orchestra_parse_error: "} +
                                         result.description());
         }
-        return Dictionary{build_handle_from_doc(doc, mr)};
+        return Dictionary{build_handle_from_doc(doc, mr, policy)};
     });
 }
 
-Dictionary OrchestraLoader::load_from_string(std::string_view xml, std::pmr::memory_resource* mr) {
+Dictionary OrchestraLoader::load_from_string(std::string_view xml, std::pmr::memory_resource* mr,
+                                             unresolved_group_policy policy) {
     assert(mr != nullptr && "OrchestraLoader::load_from_string: mr must not be null");
     return fixpp::core::detail::trap_throw_or_throw<xml_oom_error>([&] {
         pugi::xml_document doc;
@@ -1061,7 +1127,7 @@ Dictionary OrchestraLoader::load_from_string(std::string_view xml, std::pmr::mem
             throw orchestra_parse_error(std::string{"dict::orchestra_parse_error: "} +
                                         result.description());
         }
-        return Dictionary{build_handle_from_doc(doc, mr)};
+        return Dictionary{build_handle_from_doc(doc, mr, policy)};
     });
 }
 

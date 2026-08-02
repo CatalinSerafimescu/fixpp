@@ -289,6 +289,9 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_create_outbound(fixpp_session_t* sessio
         // Copy the dictionary reference into the msg shell (D-5) so setters can
         // validate without re-leasing the session.
         h->dict_ = reinterpret_cast<const fixpp_session*>(session)->dict_;
+        // 083 T051: and the session's ONE table_view, non-owning by intent —
+        // built once at session open, never rebuilt per message.
+        h->session_tv_ = reinterpret_cast<const fixpp_session*>(session)->tv_;
 
         // Seed the per-message arena (construction-time). 16 KiB comfortably holds
         // a frame-cap (~3800 B) message's accumulator (field bytes + container
@@ -707,23 +710,62 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_remove_tag(fixpp_msg_t* msg, uint16_t t
 // Returns TYPE_MISMATCH on violation (consistent with group_begin's non-group-tag
 // reject; no new symbol or error code needed).
 // Guarded on dict_ presence for the delimiter check (no-dict → empty check only).
+// 083 T052 (C-9.1 / C-9.2): `msg_type` and `parent_path` thread the CONTEXT in,
+// so construction resolves the delimiter by the same rule inbound validation
+// does. `tv` is the session's ONE cached view (T050/T051) — never rebuilt here.
 static fixpp_error_t validate_group_grammar(const std::pmr::vector<AccumulatorEntry>& entries,
-                                             const fixpp::dict::Dictionary* dict) noexcept {
+                                            const fixpp::dict::Dictionary* dict,
+                                            const fixpp::dict::table_view* tv,
+                                            std::string_view msg_type,
+                                            std::vector<uint16_t>& parent_path) noexcept {
     for (const auto& e : entries) {
         if (!e.is_group) continue;
+        // 083 T066: resolve the delimiter ONCE PER GROUP, not once per instance.
+        // The key is `(msg_type, parent_path, e.tag)` — none of which varies
+        // across `e.instances` (`parent_path` is pushed and popped strictly
+        // INSIDE the instance loop, so it holds the same value at every
+        // iteration's top). The pre-083 lookup was a single uint16 hash and was
+        // cheap enough per instance; the context-keyed one hashes a string_view
+        // plus a path span, and leaving it in the inner loop cost ~7% on an
+        // 8-instance commit against the pre-083 library (measured, T066).
+        //
+        // 083 T052: a dictionary-present handle that cannot reach the session
+        // view FAILS THE COMMIT CLOSED. It must NEVER fall back to the bare
+        // global `dict->group_first_field(e.tag)` — that is exactly the
+        // context-free resolution FR-001 removes, and a fallback here would let
+        // the builder accept an order inbound validation rejects, which is the
+        // disagreement this task exists to close.
+        //
+        // `!e.instances.empty()` keeps the hoist BEHAVIOUR-preserving: with zero
+        // instances the old code never entered the inner loop and so never
+        // reached the `tv == nullptr` fail-closed check, and hoisting it
+        // unguarded would have started rejecting an empty group on a
+        // dict-present/view-missing handle. Both orderings return the same
+        // TYPE_MISMATCH for every case that does reach the check.
+        uint16_t delim = 0;
+        if (dict && !e.instances.empty()) {
+            if (tv == nullptr) return FIXPP_ERR_TYPE_MISMATCH;
+            delim = tv->group_first_field(
+                msg_type, std::span<const uint16_t>{parent_path.data(), parent_path.size()}, e.tag);
+        }
         for (const auto& inst : e.instances) {
             // INV-4 leg (c): each instance must have at least one field.
             if (inst.fields.empty()) return FIXPP_ERR_TYPE_MISMATCH;
             // INV-4 leg (d): first field must be the group delimiter (dict-gated).
-            if (dict) {
-                uint16_t delim = dict->group_first_field(e.tag);
-                if (delim != 0 && inst.fields[0].tag != delim) {
-                    return FIXPP_ERR_TYPE_MISMATCH;
-                }
+            // `delim != 0` already implies `dict != nullptr` — it is only ever
+            // assigned inside the `if (dict && ...)` above — so the redundant
+            // `dict &&` left over from the per-instance form is dropped.
+            if (delim != 0 && inst.fields[0].tag != delim) {
+                return FIXPP_ERR_TYPE_MISMATCH;
             }
-            // Recurse into nested groups within this instance.
-            if (fixpp_error_t c = validate_group_grammar(inst.fields, dict);
-                c != FIXPP_ERR_OK) return c;
+            // Recurse into nested groups within this instance, with THIS group's
+            // count tag pushed — so a nested group is keyed on its real ancestor
+            // path rather than on the root (C-9.2).
+            parent_path.push_back(e.tag);
+            fixpp_error_t const c =
+                validate_group_grammar(inst.fields, dict, tv, msg_type, parent_path);
+            parent_path.pop_back();
+            if (c != FIXPP_ERR_OK) return c;
         }
     }
     return FIXPP_ERR_OK;
@@ -752,8 +794,17 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_commit(fixpp_msg_t* msg, const uint8_t*
     if (!acc.open_builders.empty()) return FIXPP_ERR_INVALID_HANDLE;
 
     // INV-4 group grammar: non-empty + delimiter-first per instance.
-    if (fixpp_error_t c = validate_group_grammar(acc.entries, h->dict_.get());
-        c != FIXPP_ERR_OK) return c;
+    // 083 T052: keyed on THIS message's type and, for nested groups, on their
+    // real ancestor path — the same key inbound validation uses, which is what
+    // makes FR-018's agreement structural rather than coincidental.
+    {
+        std::vector<uint16_t> parent_path;
+        if (fixpp_error_t c = validate_group_grammar(
+                acc.entries, h->dict_.get(), h->session_tv_.get(), acc.msg_type, parent_path);
+            c != FIXPP_ERR_OK) {
+            return c;
+        }
+    }
 
     // First pass: compute total payload size = "35=<mt>\x01" + entries (recursive,
     // scalars + groups, US4).

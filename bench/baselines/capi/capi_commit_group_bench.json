@@ -1,0 +1,63 @@
+{
+  "_note": "083-group-delimiter-resolution T065/T066 SEED baseline — linux-clang-RELEASE (2026-08-01). FR-022 path 3 (C-ABI commit). *** THESE ARE SEED ROWS: no prior baseline existed for this path, so Article VIII 2's +/-5% REGRESSION budget does not apply to them and none is claimed. *** What is recorded instead is a measured A/B: the SAME bench file built and run against the PRE-083 library in a detached worktree at merge-base 0539b56d, 9 repetitions, sequential, same host. That A/B is stronger than a budget check would have been, and it is what the delta_vs_pre083_pct column means. The inbound paths (1 and 2) DO carry [2b 6.6] ceilings and are reported against them in their own baseline files; this path has no such ceiling. FINDING, recorded rather than smoothed: group-bearing C-ABI construction costs more after 083 — attributed to the context-keyed probe (string_view hash + path-span hash) replacing the pre-083 single uint16 hash, one per group. Accepted as the correctness price of FR-018. PARTIAL FIX LANDED IN THIS PR (T066): validate_group_grammar resolved the delimiter once per group INSTANCE although its key does not vary across instances; hoisting it to once per GROUP moved the 8-instance commit from +7.1% to -3.3% (now faster than pre-083). Reducing the residual further needs a pre-hashed context handle on table_view (the shape 075 used for the validator's msg_type hash) — an API change, deliberately NOT attempted at Gate-B time. MEASUREMENT HYGIENE: every number below comes from a run with no build or other load on the host. A later attempt to re-measure Group1/Nested while the codegen build was running returned 606/1117 ns and was DISCARDED as contaminated, not recorded.",
+  "context": {
+    "date": "2026-08-01",
+    "host_name": "WSLUBUNTU24.04",
+    "executable": "build/linux-clang-release/bench/capi/capi_commit_group_bench",
+    "build_type": "release",
+    "preset": "linux-clang-release",
+    "num_cpus": 10,
+    "mhz_per_cpu": 3593,
+    "repetitions": 9,
+    "min_time_s": 0.5,
+    "pre083_ref": "git worktree @ 0539b56dd482bdacbe30c1445c66777cbc298254 (merge-base), same bench sources",
+    "dictionary": "small inline FIX.4.2 dialect (2 messages) — so the numbers are not perturbed by a 25k-context dictionary; the session-open row is therefore a FLOOR for a real dictionary, not a claim about one"
+  },
+  "benchmarks": [
+    {
+      "name": "BM_CapiCommit_NoGroup",
+      "fixture": "no group — validate_group_grammar descends nothing and the delimiter store is never consulted",
+      "pre083_median_ns": 411,
+      "seed_median_ns": 399,
+      "stddev_ns": 15.9,
+      "delta_vs_pre083_pct": -2.9,
+      "verdict": "FLAT (within one stddev) — the context lookup did not leak into the common commit path, which was the regression risk that mattered"
+    },
+    {
+      "name": "BM_CapiCommit_Group1",
+      "fixture": "one outer group instance — exactly ONE delimiter lookup, so the T066 hoist cannot help this row by construction",
+      "pre083_median_ns": 489,
+      "seed_median_ns": 524,
+      "stddev_ns": 17.1,
+      "delta_vs_pre083_pct": 7.2,
+      "verdict": "SLOWER by ~35 ns, which is one context-keyed probe replacing one uint16 probe. Irreducible without a pre-hashed context handle. Accepted as the correctness price; no budget existed for this row."
+    },
+    {
+      "name": "BM_CapiCommit_Group8",
+      "fixture": "eight instances of the same group — isolates the PER-INSTANCE term",
+      "pre083_median_ns": 1090,
+      "seed_median_ns": 1054,
+      "stddev_ns": 23.7,
+      "delta_vs_pre083_pct": -3.3,
+      "verdict": "FASTER than pre-083 after the T066 hoist (it was +7.1% before it). This row is what exposed the redundant per-instance lookup — the bench earned its place by finding a defect, not by confirming a number."
+    },
+    {
+      "name": "BM_CapiCommit_Nested",
+      "fixture": "two outer instances each carrying a nested group — exercises parent-path MAINTENANCE (ctx.pushed(no_tag)); three group lookups per commit after the hoist, four before it",
+      "pre083_median_ns": 873,
+      "seed_median_ns": 985,
+      "stddev_ns": 20.7,
+      "delta_vs_pre083_pct": 12.8,
+      "verdict": "SLOWER — three per-group context probes plus the path push/pop the pre-083 code did not need (it keyed on no_tag alone). NOTE on the hoist: this row measured 964 ns before the hoist and 985 ns after, i.e. the post-hoist figure is 21 ns HIGHER at stddev ~21 ns — within one stddev, and the hoist strictly REMOVES a lookup on this fixture (4 -> 3), so that difference is noise and must not be read as the fix making it worse."
+    },
+    {
+      "name": "BM_CapiSessionOpen_TableViewBuild",
+      "fixture": "the ONE config-time as_table_view() per session (D-13) — reported as SESSION-OPEN cost, deliberately NOT amortized into any per-message row",
+      "pre083_median_ns": 21353,
+      "seed_median_ns": 30655,
+      "stddev_ns": 1634,
+      "delta_vs_pre083_pct": 43.6,
+      "verdict": "EXPECTED AND BY DESIGN — as_table_view() now builds the per-context delimiter store in addition to the bare one. Once per session, not per message. Folding it into a per-message figure would hide it; reporting it per-message would misstate it. It gets its own row and no budget."
+    }
+  ]
+}

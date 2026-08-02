@@ -118,7 +118,10 @@ add_executable(wire_dict_tests
   message_view_membership_copy_test.cpp
   validator_enum_domain_test.cpp                                      # T022/T022a/T023 (075)
   validator_enum_multivalue_test.cpp                                  # T027 (075)
-  fixt_header_validate_test.cpp)                                      # T003/T004 (081)
+  fixt_header_validate_test.cpp                                       # T003/T004 (081)
+  delimiter_divergence_wire_test.cpp                                  # T009 (083)
+  consume_group_nested_delim_test.cpp                                 # T010 (083)
+  typed_read_split_agreement_test.cpp)                                # T011 (083)
 target_link_libraries(wire_dict_tests PRIVATE
   fixpp_wire
   fixpp_dictionary
@@ -127,14 +130,47 @@ target_link_libraries(wire_dict_tests PRIVATE
 target_include_directories(wire_dict_tests PRIVATE
   "${CMAKE_SOURCE_DIR}/tests")
 target_compile_definitions(wire_dict_tests PRIVATE
-  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\"")
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
+  # 083 T056 (W-10): reads the private group_slices_reserve_bound() through
+  # tests/support/wire_test_hooks.hpp's gated friend seam. The FIXPP_TEST_HOOKS
+  # blocks in offset_table.hpp are friend DECLARATIONS only — no gated data
+  # members — so the class layout is identical with and without the define and
+  # this bucket stays ODR-compatible with the fixpp_wire objects it links.
+  FIXPP_TEST_HOOKS)
 add_test(NAME wire_dict_tests COMMAND wire_dict_tests)
 # 075 (tasks.md Test-binary discipline note): sets LABELS on the buckets it
 # joins/adds. wire_dict_tests is a grouped add_test binary — one label set
 # covers the whole executable, not per-.cpp; the 3 pre-existing members ride
 # along (name-selectable via `-R wire_dict_tests` as before, now ALSO
 # `ctest -L 075` / `-L wire` selectable).
-set_tests_properties(wire_dict_tests PROPERTIES LABELS "075;wire")
+# 083 joins this bucket with T009/T010/T011 (delimiter_divergence_wire,
+# consume_group_nested_delim, typed_read_split_agreement) — its three
+# load-bearing wire witnesses. Adding `083` so `ctest -L 083` actually reaches
+# them: 081 shipped with this exact hole (its #203 accept witnesses sat in this
+# same bucket, unreachable by the feature selector, and only the unfiltered
+# debug leg ran them).
+set_tests_properties(wire_dict_tests PROPERTIES LABELS "075;083;wire")
+# 083 T021 (W-10a leg 4, contracts/typed_read_splitter.md): a BACKSTOP, never
+# the discriminator. Leg 4's depth-capped chain fixture drives
+# consume_group_extent's outer loop with an attacker-shaped declared count; an
+# un-mirrored `if (overflow) return k;` burns iterations rather than returning.
+# The leg is decided by a group_member_fn_ invocation-count equality — this
+# bound only limits the blast radius of an unanticipated non-termination, per
+# the standing lesson that a hung test with no per-test bound burns the job.
+#
+# The bound must be sized for the SLOWEST preset that runs this bucket, not for
+# a plain build. This was first set to 120 on the reasoning "the whole bucket
+# runs in well under a second" — true on linux-clang-debug, but the tier1 matrix
+# also runs it unfiltered under the sanitizers, where it is ~150x slower.
+# Measured under linux-clang-tsan: **147.2 s wall, all 77 tests passing** — so
+# 120 turned a green bucket RED on the tsan leg (caught by /speckit-verify Step
+# 3; it would otherwise have been a CI red on the PR). The cost is not 083's:
+# 081's Fix50Family/FixtHeaderValidateTest is 120.0 s of that 147.2 s, and 083's
+# three added files account for well under 30 s.
+# 600 keeps ~4x headroom over the measured tsan figure — enough for a CI runner
+# slower than this host — while still bounding a non-termination to minutes
+# rather than the job timeout, which is the whole point of having the property.
+set_tests_properties(wire_dict_tests PROPERTIES TIMEOUT 600)
 
 # ── Standalone: 075 T007 QuickFIX enum-golden manifest gate ─────────────────
 # Isolation-sensitive per [const §VII.8] (a data-driven exact-hash gate) —

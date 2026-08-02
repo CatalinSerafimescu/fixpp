@@ -20,6 +20,7 @@ set(FIXPP_DICT_DATA_DIR "${CMAKE_SOURCE_DIR}/dictionaries")
 # reused_tag_census (raw-XML ground-truth scans); harmless for the others.
 add_executable(dictionary_pure_tests
   ref_shape_test.cpp
+  loader_disposition_test.cpp     # 083 T035/T042: FR-006 / FR-006a / FR-023 dispositions
   xml_loader_test.cpp
   xml_loader_enum_test.cpp        # 075 T012/T013: enum-value parse + loader strictness
   xml_enum_codeset_test.cpp       # 075 T028: enum_values() census + exposure witness
@@ -46,11 +47,38 @@ target_link_libraries(dictionary_pure_tests PRIVATE
   GTest::gtest_main
 )
 target_include_directories(dictionary_pure_tests PRIVATE
-  "${CMAKE_SOURCE_DIR}/tests")
+  "${CMAKE_SOURCE_DIR}/tests"
+  # Gate B r1 F1: loader_disposition_test.cpp includes the private
+  # dictionary_internal.hpp directly (detail::find_incomplete_group_context()
+  # unit test + the FR-023 test seam), same pattern as
+  # dictionary_fixt_header_merge_test below.
+  "${CMAKE_SOURCE_DIR}/src/dictionary")
 target_compile_definitions(dictionary_pure_tests PRIVATE
-  "FIXPP_DICT_DATA_DIR=\"${FIXPP_DICT_DATA_DIR}\"")
+  "FIXPP_DICT_DATA_DIR=\"${FIXPP_DICT_DATA_DIR}\""
+  # 083 T035 (W-6): loader_disposition_test.cpp loads all TEN shipped
+  # dictionaries under the fail-closed default, Orchestra included. Spelled out
+  # rather than reusing FIXPP_ORCHESTRA_DATA_DIR, which this file sets further
+  # down (line ~98) and so would expand empty here.
+  "FIXPP_ORCHESTRA_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries/orchestra\""
+  # Gate B r2 (fixpp#216 P1-A downgraded): loader_disposition_test.cpp calls the
+  # FR-023 test seam `detail::set_force_incomplete_group_context_for_testing`,
+  # whose declaration in dictionary_internal.hpp is now FIXPP_TEST_HOOKS-gated —
+  # the same house pattern as tests/capi/CMakeLists.txt's use of this macro
+  # (capi_send_recv_test, capi_error_live_test) for src/capi/capi_internal.hpp's
+  # gated declarations. ODR-safe for the whole bucket: the only other
+  # FIXPP_TEST_HOOKS block transitively reachable from these 20 TUs is
+  # wire/offset_table.hpp's `friend struct ..._for_testing` pair (via
+  # group_view.hpp, included by defect_a_group_context_test.cpp and
+  # support/context_group_member_fn.hpp) — friend declarations only, no gated
+  # data members, so OffsetTable's layout matches the non-hooks
+  # fixpp_dictionary/fixpp_wire archives (same reasoning as
+  # tests/capi/CMakeLists.txt:153-155).
+  FIXPP_TEST_HOOKS)
 add_test(NAME dictionary_pure_tests COMMAND dictionary_pure_tests)
-set_tests_properties(dictionary_pure_tests PROPERTIES LABELS "dictionary;075")
+# 083 joins this bucket with loader_disposition_test (T035/T042, the FR-006 /
+# FR-006a / FR-023 dispositions) — labelled `083` so the feature selector
+# reaches it, same rationale as wire_dict_tests above.
+set_tests_properties(dictionary_pure_tests PROPERTIES LABELS "dictionary;075;083")
 
 # ── Standalone: isolation-sensitive dictionary tests (FR-002) ─────────────────
 # Each keeps its own executable + add_test(NAME <target>) so its name, labels,
@@ -222,6 +250,38 @@ target_compile_definitions(dictionary_fixt_header_merge_test PRIVATE
   "FIXPP_DICT_DATA_DIR=\"${FIXPP_DICT_DATA_DIR}\"")
 add_test(NAME fixt_header_merge COMMAND dictionary_fixt_header_merge_test)
 set_tests_properties(fixt_header_merge PROPERTIES LABELS "dictionary;081;census")
+
+# ── 083-group-delimiter-resolution T006: all-ten delimiter census (FR-002/
+# FR-010/FR-012/FR-013/FR-015) — STANDALONE (const §VII.8) exact-set
+# completeness gate, mirroring required_scope_census_test above. Foundational
+# RED pin: the assertions express the POST-FIX target (every defect bucket
+# zero), so this is expected to FAIL until Phase 3/5's loader fix lands (see
+# spec.md's Baseline table: 335 wrong-delimiter / 52 polluted / 30
+# unregistered measured on today's tree). Own TIMEOUT — this sweeps a
+# comparable corpus to required_scope_census (~35s) plus a second discovery
+# discrimination pass per context, so generous headroom.
+#
+# The bound is sized for the SLOWEST preset that runs it, not for a plain build.
+# The original 180 was derived from the ~35s plain-build figure; but the tier1
+# matrix runs this bucket unfiltered under the sanitizers, and it measures
+# **111.7 s under linux-clang-tsan** — 62% of the way to the cap, i.e. red on
+# any CI runner ~1.6x slower than this host. Raised to 600 for the same ~4x
+# headroom as wire_dict_tests (tests/wire/CMakeLists.txt), which hit the same
+# defect for real on the tsan leg. Still bounds a non-termination to minutes.
+add_executable(dictionary_delimiter_census_test delimiter_census_test.cpp)
+target_include_directories(dictionary_delimiter_census_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests")
+target_link_libraries(dictionary_delimiter_census_test PRIVATE
+  fixpp_dictionary
+  pugixml::pugixml
+  GTest::gtest
+  GTest::gtest_main
+)
+target_compile_definitions(dictionary_delimiter_census_test PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${FIXPP_DICT_DATA_DIR}\""
+  "FIXPP_ORCHESTRA_DATA_DIR=\"${FIXPP_ORCHESTRA_DATA_DIR}\"")
+add_test(NAME delimiter_census COMMAND dictionary_delimiter_census_test)
+set_tests_properties(delimiter_census PROPERTIES LABELS "dictionary;083;census" TIMEOUT 600)
 
 # mallocnesia gate for the group-context lookup no-alloc test — re-runs the
 # standalone binary under LD_PRELOAD so global malloc/calloc/realloc is

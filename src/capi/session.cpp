@@ -109,6 +109,11 @@ fixpp_error_t fixpp_session_open(fixpp_engine_t* engine, fixpp_session_config_t*
         // D-5 (051): cache the dictionary BEFORE delete cfg so fixpp_msg_create_outbound
         // can copy it into each outbound fixpp_msg shell for set_* validation.
         h->dict_ = cfg->cfg.dictionary;
+        // 083 T050: build the session's table_view ONCE, here, where dict_ is
+        // already cached. Not per message (C-9.2a / [const §XV.1]).
+        if (h->dict_) {
+            h->tv_ = std::make_shared<const fixpp::dict::table_view>(h->dict_->as_table_view());
+        }
         fixpp_session* raw = h.get();
         engine->sessions_.push_back(std::move(h));
         delete cfg;  // builder CONSUMED on success (invalidated)

@@ -113,3 +113,38 @@ target_compile_definitions(validator_bench PRIVATE
 set_target_properties(validator_bench PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bench/wire"
 )
+
+# ── 083 T063: validate_group_bench (FR-022 path 1, Article VIII §3) ──────────
+# Per-entry delimiter resolution on the inbound validate path. Uses a REAL
+# FIX44.xml table_view — a hand-built one never populates `group_ctx_`, so
+# every lookup would fall through to the bare store and the bench would
+# measure exactly the path 083 replaced.
+add_executable(validate_group_bench validate_group_bench.cpp)
+target_link_libraries(validate_group_bench PRIVATE
+  fixpp_wire
+  fixpp_dictionary
+  benchmark::benchmark
+  benchmark::benchmark_main
+)
+target_compile_definitions(validate_group_bench PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${FIXPP_DICT_DATA_DIR}\""
+)
+set_target_properties(validate_group_bench PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bench/wire"
+)
+
+# ── 083 T064: typed_read_group_bench (FR-022 path 2, Article VIII §3) ────────
+# group_slices_status: the C-8.1/C-8.2 context-keyed delimiter callback plus
+# C-8.0c's per-instance descent probe. Carries a mode-(c) shape (the outer
+# delimiter IS a nested group's count tag) — without it the bench measures the
+# branch that never descends.
+add_executable(typed_read_group_bench typed_read_group_bench.cpp)
+target_link_libraries(typed_read_group_bench PRIVATE
+  fixpp_wire
+  fixpp_dictionary
+  benchmark::benchmark
+  benchmark::benchmark_main
+)
+set_target_properties(typed_read_group_bench PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bench/wire"
+)

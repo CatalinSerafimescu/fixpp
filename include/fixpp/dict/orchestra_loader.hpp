@@ -16,7 +16,8 @@
 #include <filesystem>
 #include <fixpp/dict/dictionary.hpp>
 // NOLINTNEXTLINE(misc-include-cleaner)
-#include <fixpp/dict/error.hpp>  // re-exported: load*() throws dict::orchestra_parse_error etc.
+#include <fixpp/dict/error.hpp>
+#include <fixpp/dict/loader_policy.hpp>  // re-exported: load*() throws dict::orchestra_parse_error etc.
 #include <memory_resource>
 #include <string_view>
 
@@ -34,10 +35,25 @@ public:
     //         dangling-ref), unknown_version_error (root version= not FIX
     //         Latest), group_delimiter_collision_error (nested delimiter ==
     //         parent), xml_oom_error (PMR bad_alloc, via
-    //         trap_throw_or_throw).
-    [[nodiscard]] Dictionary load(std::filesystem::path const& path, std::pmr::memory_resource* mr);
+    //         trap_throw_or_throw), and -- 083 T038/FR-006c -- a further
+    //         orchestra_parse_error when a group's delimiter cannot be
+    //         resolved from its own declaration under the fail-closed
+    //         default (FR-006). The type is the DERIVED one, deliberately:
+    //         tests/fuzz/fuzz_orchestra_loader.cpp catches
+    //         orchestra_parse_error, so a base xml_parse_error thrown here
+    //         would escape to its terminal rethrow and crash the fuzzer on
+    //         every input carrying an unresolvable group.
+    //
+    // 083 FR-006a / C-6.4 / C-6.6: `policy` is the SAME option with the SAME
+    // semantics as XmlLoader's, defaulted to fail-closed, so existing callers
+    // compile unchanged.
+    [[nodiscard]] Dictionary load(
+        std::filesystem::path const& path, std::pmr::memory_resource* mr,
+        unresolved_group_policy policy = unresolved_group_policy::fail_closed);
 
-    [[nodiscard]] Dictionary load_from_string(std::string_view xml, std::pmr::memory_resource* mr);
+    [[nodiscard]] Dictionary load_from_string(
+        std::string_view xml, std::pmr::memory_resource* mr,
+        unresolved_group_policy policy = unresolved_group_policy::fail_closed);
 };
 
 }  // namespace fixpp::dict

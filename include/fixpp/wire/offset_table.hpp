@@ -79,6 +79,15 @@ public:
     using group_member_fn_t = bool (*)(void const*, group_context const&, std::uint16_t,
                                        std::uint16_t) noexcept;
 
+    // 083 T057 (C-8.1): SIBLING of `group_member_fn_t`, resolving through the
+    // SAME `opaque_dict` to `table_view::group_first_field(msg_type,
+    // parent_path, no_tag)`. The callback set was membership-only; this widens
+    // it by exactly one entry. Internal seam — no public signature changes
+    // (C-8.3): `group_slices()` / `group_slices_status()` keep their
+    // signatures. Returns 0 when `no_tag` is not a group in that context.
+    using group_delim_fn_t = std::uint16_t (*)(void const*, group_context const&,
+                                               std::uint16_t) noexcept;
+
     // Caller-tunable DoS caps (FR-015 / [2b §1.2] "configurable").
     // Defaults match the module-level inline constexpr above.
     struct Config {
@@ -118,14 +127,16 @@ public:
 
     OffsetTable(frame_view const& frame [[clang::lifetimebound]],
                 std::pmr::memory_resource* mr [[clang::lifetimebound]], void const* opaque_dict,
-                group_member_fn_t group_member_fn) noexcept;
+                group_member_fn_t group_member_fn,
+                group_delim_fn_t group_delim_fn = nullptr) noexcept;
 
     OffsetTable(frame_view const& frame [[clang::lifetimebound]],
                 std::pmr::memory_resource* mr [[clang::lifetimebound]], Config cfg) noexcept;
 
     OffsetTable(frame_view const& frame [[clang::lifetimebound]],
                 std::pmr::memory_resource* mr [[clang::lifetimebound]], Config cfg,
-                void const* opaque_dict, group_member_fn_t group_member_fn) noexcept;
+                void const* opaque_dict, group_member_fn_t group_member_fn,
+                group_delim_fn_t group_delim_fn = nullptr) noexcept;
 
     // Non-RED build status (ok, or the wire_* cap/format error hit).
     [[nodiscard]] core::expected_t<void> build_status() const noexcept { return status_; }
@@ -314,12 +325,10 @@ private:
     // 063 T008: `ctx` seeds the new sub-table's stored context (via
     // set_group_context) immediately after construction — see
     // nested_group_slices()'s doc comment above for what `ctx` means.
-    [[nodiscard]] static OffsetTable* build_nested_subview(std::byte const* data, std::size_t len,
-                                                           std::pmr::memory_resource* mr,
-                                                           void const* opaque_dict,
-                                                           group_member_fn_t group_member_fn,
-                                                           detail::generation_token gen,
-                                                           group_context const& ctx) noexcept;
+    [[nodiscard]] static OffsetTable* build_nested_subview(
+        std::byte const* data, std::size_t len, std::pmr::memory_resource* mr,
+        void const* opaque_dict, group_member_fn_t group_member_fn, detail::generation_token gen,
+        group_context const& ctx, group_delim_fn_t group_delim_fn = nullptr) noexcept;
 
     // 063 T006: builds an actual `group_context` value from the raw fields
     // below (needs the complete type — defined in offset_table.cpp, which
@@ -358,6 +367,8 @@ private:
     Config cfg_{};                           // caller-tunable caps (FR-015 / [2b §1.2])
     void const* opaque_dict_ = nullptr;
     group_member_fn_t group_member_fn_ = nullptr;
+    // 083 T057 (C-8.1): supplied at EVERY site that supplies opaque_dict_.
+    group_delim_fn_t group_delim_fn_ = nullptr;
     // 063 T006: raw storage for the stored group_context (msg_type + bounded
     // parent-no_tag path). Stored as constituent fields, NOT a `group_context`
     // member by value — `group_context` is only forward-declared in this
@@ -426,8 +437,17 @@ private:
     // §D2 mode (a)/(b)/(c) by introspecting the real sub-table rather than a
     // `sizeof(OffsetTable)`-tuned cap band (not portable across toolchains,
     // research.md "Platform-robust mode pinning").
+    // 083 T056 (W-10): TEST-ONLY read of `group_slices_reserve_bound()`, same
+    // seam and same gating as the sibling above — the DEFINITION lives in the
+    // non-installed tests/support/wire_test_hooks.hpp, so this installed
+    // header gains a friend DECLARATION and no accessor code. W-10 must assert
+    // the reserve bound is UNCHANGED across a pre-083 / post-083 pair of
+    // tables; there is no behavioural proxy for it (it is a reservation, not
+    // an output), and a re-derivation in the test would assert the test's own
+    // arithmetic rather than `:597`'s.
 #ifdef FIXPP_TEST_HOOKS
     friend struct nested_cache_access_for_testing;
+    friend struct reserve_bound_access_for_testing;
 #endif  // FIXPP_TEST_HOOKS
 };
 

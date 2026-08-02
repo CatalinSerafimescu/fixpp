@@ -57,7 +57,11 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
         // noexcept so they cannot themselves perturb fuzzer state.
         (void)dict.which_session_version();
     } catch (const fixpp::dict::xml_parse_error&) {
-        // Expected on AC-L2..L8 negative paths.
+        // Expected on AC-L2..L8 negative paths, and -- 083 T039 / FR-006 --
+        // on a group whose delimiter cannot be resolved from its own
+        // declaration under the fail-closed default. NO harness widening is
+        // required: XmlLoader throws the BASE type and this catch already
+        // covers it (verified against T004's recorded pre-change set).
     } catch (const fixpp::dict::unknown_version_error&) {
         // Expected on AC-L4 negative paths.
     } catch (const fixpp::dict::xml_oom_error&) {

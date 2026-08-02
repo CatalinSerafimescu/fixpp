@@ -62,6 +62,12 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     } catch (const fixpp::dict::orchestra_parse_error&) {
         // Expected on malformed/unknown-datatype/wrong-root/dangling-ref
         // negative paths.
+        // 083 T039 / FR-006c: ALSO thrown when a group's delimiter cannot be
+        // resolved under the fail-closed default. NO harness widening is
+        // required -- and the DERIVED type is load-bearing here: this catch
+        // does not cover a base `xml_parse_error`, so had OrchestraLoader
+        // thrown the base, every input carrying an unresolvable group would
+        // fall through to the terminal rethrow below and crash the fuzzer.
     } catch (const fixpp::dict::group_delimiter_collision_error&) {
         // Expected: a nested group's delimiter equals its parent's.
     } catch (const fixpp::dict::unknown_version_error&) {
