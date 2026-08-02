@@ -244,7 +244,7 @@ Landing the loader recursion first converts a wrong-delimiter defect into a **fa
 > - **W-9 fixture (b)** is deliberately not implemented; its slot is discharged by that recorded negative result (FR-021a's own escape clause). **W-9 fixture (c)** is delivered and green.
 > - **T062** records "W-9 (fixture (c) only)", never "both fixtures green".
 > - **T067** branch (5) is re-pointed — see its own amendment note.
-> - **T071** leg (a) is **NOT** done; **#180 keeps BOTH legs open.**
+> - **T071** leg (a) is **NOT** done (descoped, with evidence); **both L-063-4 legs remain undelivered — but `#180` itself was already closed by 072 on 2026-07-13; see T071's CORRECTION.** *(Re-dispositioned 2026-08-02, Gate B r2, fixpp#216 IND-B — this line previously read "#180 keeps BOTH legs open", contradicting T071's own body at `:264` in this same file, dated the same day.)*
 
 **Checkpoint**: every delimiter path in the engine — validation, extent walk, splitter, C-ABI construction — applies the same rule.
 
@@ -394,4 +394,4 @@ Genuine parallelism is limited by the ordering constraint, not by staffing. The 
 - `[P]` = different file, no incomplete dependency. `[Story]` maps a task to its user story for traceability.
 - Verify tests fail — **with counts** — before implementing. Reconciliation, not mere recording, is the Phase-1 exit criterion (SC-015).
 - Commit after each task or logical group. Stop at any **gate** task to validate before proceeding; the gates, not the checkpoints, are the enforcement points.
-- Things a reader will otherwise get wrong, collected: FR-011's false sentence is `dictionary.cpp:507-508` **not** `:503-505`; `table_view.hpp:645`'s member injection is **retained** and pinned as a no-op; the C-ABI predicate sites `:157`/`:812`/`:923` are **not** converted; `:526`/`:559-570` stays untouched and **#180 stays open** with the `:561` residual; records are emitted only from `xml_loader.cpp:927-931`, never from `:968` or `:1056`; `FieldRef` stays 16 bytes; SC-008's unchanged set is FIX40/FIX41/FIXT11 and **not** FIX42.
+- Things a reader will otherwise get wrong, collected: FR-011's false sentence is `dictionary.cpp:507-508` **not** `:503-505`; `table_view.hpp:645`'s member injection is **retained** and pinned as a no-op; the C-ABI predicate sites `:157`/`:812`/`:923` are **not** converted; `:526`/`:559-570` stays untouched as the `:561` residual, which is why L-063-4's second leg (fold the cap loop in) is still outstanding — tracked by fixpp#214; `#180` itself was already closed by 072 and is **not** reopened by this feature *(corrected 2026-08-02, Gate B r2, fixpp#216 P1-B — previously read "#180 stays open")*; records are emitted only from `xml_loader.cpp:927-931`, never from `:968` or `:1056`; `FieldRef` stays 16 bytes; SC-008's unchanged set is FIX40/FIX41/FIXT11 and **not** FIX42.
