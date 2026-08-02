@@ -88,17 +88,44 @@ endforeach()
 # exists solely for this proof). Nothing is fabricated: rewriting the stamp would
 # test the parser, not the gate.
 #
-# When it is not supplied the gate is UNPROVEN, and this test says so loudly
-# rather than reporting a green it has not earned — an assertion never observed
-# failing proves nothing.
+# ── Why the red leg is OPTIONAL here, unlike T042's ──────────────────────────
+# This feature runs its red legs in two shapes, and the choice is not stylistic:
+#
+#   T042 (clean-env)  — red leg is PERMANENT and runs every time, because it is
+#                       cheap and self-contained: copy a dependency prefix,
+#                       delete one file, re-configure.
+#   T059 (contents)   — red leg was a ONE-TIME RECORDED PROOF, because producing
+#                       it requires mutating the build tree.
+#
+# Producing this red fixture requires an ENTIRE SECOND BUILD from a genuinely
+# OTel-OFF tree. That is T059-shaped, not T042-shaped, so the red is a one-time
+# recorded proof (`.specify/decisions/084-packaging-cpack-export-verify.md`,
+# audited by T075 clause (v)) and the STANDING assertion is the PASS leg above.
+#
+# The pass leg is not a formality: it fails on any artifact whose provenance is
+# missing, unparseable, or stamped OFF, which is the defect FR-011 names. What is
+# NOT re-proven on every run is that the check can distinguish OFF from ON — and
+# that was proven once, against a real artifact, and recorded.
+#
+# ⚠️ EARLIER DISPOSITION, DELIBERATELY REVERSED 2026-08-02: this script used to
+# FATAL_ERROR when no fixture was supplied. That is wrong for a STANDING ctest —
+# CI runs `ctest --preset <p>` with no label filter, so it would have gone red on
+# every lane, for the absence of a fixture no lane builds. A gate that cannot
+# pass in the environment it runs in is not a strict gate; it is a broken one.
 if(NOT DEFINED FIXPP_OTEL_OFF_PACKAGE OR FIXPP_OTEL_OFF_PACKAGE STREQUAL "")
-  message(FATAL_ERROR
-    "T062a: no OTel-OFF fixture supplied (-DFIXPP_OTEL_OFF_PACKAGE=...), so the red "
-    "leg cannot run and this gate is UNPROVEN. Refusing to report a pass: a gate "
-    "never observed failing proves nothing.")
+  message(STATUS
+    "T062a: no OTel-OFF fixture supplied; the PASS leg above is the standing "
+    "assertion and the red leg is the one-time recorded proof in "
+    ".specify/decisions/084-packaging-cpack-export-verify.md. Supply "
+    "-DFIXPP_OTEL_OFF_PACKAGE=<artifact> to re-run the red leg here.")
+  message(STATUS "fixpp::packaging::telemetry-provenance: OK (pass leg only)")
+  return()
 endif()
 if(NOT EXISTS "${FIXPP_OTEL_OFF_PACKAGE}")
-  message(FATAL_ERROR "T062a: OTel-OFF fixture not found at ${FIXPP_OTEL_OFF_PACKAGE}")
+  message(FATAL_ERROR
+    "T062a: an OTel-OFF fixture was SPECIFIED but does not exist at "
+    "${FIXPP_OTEL_OFF_PACKAGE}. A silently-skipped red leg is exactly what this "
+    "test refuses; fix the path or unset the variable deliberately.")
 endif()
 
 _fixpp_telemetry_of("${FIXPP_OTEL_OFF_PACKAGE}" "${FIXPP_WORK_DIR}/red" _red_state)

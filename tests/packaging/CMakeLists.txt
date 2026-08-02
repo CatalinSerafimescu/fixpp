@@ -83,8 +83,11 @@ set_tests_properties(fixpp::packaging::provenance PROPERTIES
 
 # ── T062a (FR-011): TELEMETRY provenance — a FIFTH test, not an extension ────
 # FIXPP_OTEL_OFF_PACKAGE is the red fixture: a real artifact from a real OTel-OFF
-# tree. Without it the test FAILS rather than passing, because a gate never
-# observed failing proves nothing. Produce one with:
+# tree. It is OPTIONAL — producing it needs an entire second build, so the red is
+# a ONE-TIME RECORDED PROOF (T059-shaped, not T042-shaped; see the long note in
+# run_telemetry_provenance_witness.cmake) and the standing assertion here is the
+# PASS leg. Supplying a path that does not exist is still fatal: a silently
+# skipped red leg is the thing this test refuses. Produce one with:
 #   conan install . -pr conan/profiles/<p> -o "&:with_otel=False" -of build/<p>-otel-off
 #   cmake -S . -B build/<p>-otel-off -DFIXPP_BUILD_OTEL=OFF \
 #         -DFIXPP_ALLOW_OTEL_OFF_PACKAGE=ON ...
