@@ -244,7 +244,14 @@ jobs:
     # tree recompile on a new branch). 60->90 (2026-07-09): the tsan leg hit the
     # 60-min cap on a cold run and was cancelled — 90 gives the cold sanitizer
     # legs headroom while still capping a genuine deadlock.
-    timeout-minutes: 180
+    # 180->240 (2026-08-02, 083): 083 changes widely-included wire/dictionary
+    # headers, so its first CI run recompiles ~1500 objects against a pre-083
+    # ccache. The local tsan mirror measured 168 min against the 180 cap — under
+    # it, but with no headroom for a slower runner. A job that hits the cap is
+    # killed BEFORE its ccache-save step, so the retry restores the same pre-083
+    # cache and recompiles the same ~1500 objects: a timeout costs two full
+    # cycles, not one, and a re-run cannot fix it. 240 buys the one-time churn.
+    timeout-minutes: 240
     needs: gate-precheck
     # `&& github.event_name != 'release'`: a published release only needs the
     # wheel build+install-test lanes to attach the asset — the C++/sanitizer
