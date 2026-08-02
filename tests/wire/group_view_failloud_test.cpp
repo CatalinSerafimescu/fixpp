@@ -28,20 +28,50 @@
 // robustly lands inside "outer succeeds, nested fails" on every CI tier —
 // not just clang-debug ([[feedback_local_verify_clang_only_misses_gcc_release_ci_job]]).
 //
-// Empirical sweep (both `linux-clang-debug` and `linux-gcc-release`, byte
-// step 40, identical transition points on both toolchains):
+// Empirical sweep — ORIGINAL (073, pre-083), `linux-clang-debug` +
+// `linux-gcc-release` only, byte step 40, identical transition points on both:
 //   cap <  1800: top-level Parser::parse() itself fails (unrelated —
 //                out of the fixture's usable window, same caveat as T006's
 //                header comment re: the unrelated cursor-shell allocation).
 //   cap in [1800, 2440]: top-level parses but the OUTER group(296) read
 //                itself comes back empty (not the nested-only failure we
 //                need — excluded).
-//   cap in [2480, 5160]: OUTER_OK (quote_sets().size()==1), nested
-//                quote_entries().alloc_failed()==true, size()==0.  <- our
-//                band, 2680 bytes wide.
+//   cap in [2480, 5160]: OUTER_OK, nested alloc_failed()==true.  <- old band
 //   cap >= 5200: everything fits; quote_entries().size()==40 (full success).
-// kTinyCap = 3800 sits in the middle of the [2480,5160] band (1320 bytes of
-// margin on either side), not at either edge.
+// The original kTinyCap = 3800 sat mid-band THERE.
+//
+// ── 083 RE-TUNE (fixpp#216): 3800 became a Tier-2 CRASH ───────────────────
+//
+// 083 added `group_delim_fn_` to `OffsetTable` (T057/C-8.1), growing
+// `sizeof(OffsetTable)` and shifting every band above. Re-measured:
+//   linux-clang-debug: band moved [2480,5160] -> [1700,6000].
+//   windows-msvc-debug: band is [3400,6250] — and it contains a ~100-byte
+//                TERMINATE NOTCH at [3750,3800]. 3700 passes, 3850 passes,
+//                3800 std::terminate()s (exit 3, no assertion output).
+// So the shipped 3800 landed exactly in that notch and killed
+// `windows-msvc-{debug,asan}` while release stayed green.
+//
+// The notch is NOT a product defect and NOT new: it is the pre-existing
+// MSVC-debug-STL characteristic already documented in
+// nested_group_slices_failloud_test.cpp:43-52 (PR #191 round 3) — a cap where
+// the nested sub-table's SHELL allocation fits but its `noexcept` ctor's
+// MSVC-debug pmr-member proxies do not, so `bad_alloc` escapes the `noexcept`
+// ctor and terminates before any assertion runs
+// ([[feedback_noexcept_ctor_pmr_member_proxy_alloc_escapes_msvc_debug]]).
+// Production is MSVC-release with a 16 KiB arena: no proxies, no terminate.
+// T001/T006 dodge it with kTinyCap=6000, MSVC-probed; THIS witness's 3800 was
+// never MSVC-probed (its sweep above lists clang/gcc only) and was clear of
+// the notch only by luck until 083 moved it.
+//
+// kTinyCap = 4900 is the midpoint of the MSVC-debug-verified safe region
+// [3850,6250] intersected with linux-clang-debug's [1700,6000] => [3850,6000].
+// The [3850,6250] region was swept at 25-BYTE resolution on windows-msvc-debug
+// with zero anomalies, so no second notch hides inside it. Margins: 1100 above
+// the notch top, 1100 below the nearest upper edge.
+//
+// If a future change moves `sizeof(OffsetTable)` again, RE-RUN THE MSVC PROBE
+// — a clang-only sweep cannot see the notch, which is exactly how this
+// regression reached CI.
 //
 // Faithful exhaustion harness (research.md D6 / quickstart.md "Faithful
 // exhaustion harness"): a tiny-capacity `std::pmr::monotonic_buffer_resource`
@@ -82,7 +112,7 @@ constexpr std::uint16_t kOuterDelim = 302;  // QuoteSetID
 constexpr std::uint16_t kInnerNoTag = 295;  // NoQuoteEntries
 constexpr std::uint16_t kInnerDelim = 299;  // QuoteEntryID
 constexpr int kInnerInstances = 40;         // wide-margin fixture (2x T001's 20)
-constexpr std::size_t kTinyCap = 3800;      // mid-band, see sweep above
+constexpr std::size_t kTinyCap = 4900;      // 083 re-tune, see sweep above
 constexpr std::size_t kAmpleCap = 16384;
 
 fixpp::dict::table_view make_dict() {
