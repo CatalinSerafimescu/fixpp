@@ -350,6 +350,7 @@ if(FIXPP_BUILD_TESTS)
   add_subdirectory(tests/sync)   # 006-async-mutex — 29 sync_* seams (T002)
   add_subdirectory(tests/conformance)  # 008-message-store — seam 17 store-side corpus replay (T019)
   add_subdirectory(tests/perf)         # 008-message-store — seam 14 mallocnesia alloc-guard (T050)
+  add_subdirectory(tests/packaging)    # 084-packaging-cpack-export — package/export witnesses
 
   # 061-typed-app-messages (061-slim) T024 — FR-008/SC-004 external-consumer
   # install witness. tests/consumer/ is a STANDALONE CMake project (its own
