@@ -234,6 +234,22 @@ Neither the archiver nor the linker strips anything — the compiler never emits
 
 ## 8. Windows legs
 
+> ### ⛔ ON HOLD as of 2026-08-02 — user decision
+>
+> **Do not start an MSVC build, and do not touch `/mnt/c/temp/`, without confirming with the
+> user first.** Another workstream has a bug to fix before the Windows legs may run.
+>
+> **Blocked while the hold stands**: T055 (FR-019 `.pdb` rule — currently written from
+> documented toolchain behaviour and **NOT measured**), the two MSVC rows of T054, T061's
+> Windows leg, and the full counts in T062 (**14** artifacts needs the 2 Windows ZIPs; only
+> the **12** Linux ones are reachable) and T062a.
+>
+> **Still proceeds**: all four Linux configurations, and *editing* `.github/workflows/tier2.yml`
+> (T066/T068) — authoring the workflow does not require running a Windows build.
+>
+> The pre-existing constraint survives the hold: when MSVC resumes it uses a **separate**
+> Windows sandbox, never `/mnt/c/temp/fixpp`, which holds unrelated in-flight state.
+
 Build in a **separate sandbox** under `/mnt/c/temp/`. **Do not reuse `/mnt/c/temp/fixpp`** — it holds unrelated in-flight state from another feature. Windows trees live on C: and do not consume the 64 GB budget.
 
 ---
