@@ -189,6 +189,15 @@ The witness that inherits **nothing** from the producing build: no `conan_toolch
 
 ## 6. Telemetry-disabled config resolution
 
+> **⚠️ Amended at implement (2026-08-02).** `cmake/FixppPackaging.cmake` now **fatal-errors on an
+> OTel-OFF configure** (T062a / FR-011: a shipped artifact must be OTel-ON). The procedure below is
+> therefore no longer runnable as originally written — it dies at configure before SC-015 is reached.
+>
+> Add `-DFIXPP_ALLOW_OTEL_OFF_PACKAGE=ON` to the `cmake --preset` line for this run **only**. That
+> advanced flag exists solely to let SC-015 and the `packaging::telemetry-provenance` red proof
+> configure an OTel-OFF tree; it must never be set in CI or for any shipped artifact, and any package
+> produced under it is stamped `telemetry : OFF` in its provenance file and is expected to be rejected.
+
 **Use a FRESH build folder.** Do **not** reconfigure the tree from §1 — it was configured OTel-ON, `find_package(opentelemetry-cpp CONFIG QUIET)` (`CMakeLists.txt:52`) cached `opentelemetry-cpp_DIR` there, and `src/otel/CMakeLists.txt:36` keys its SDK link on `if(TARGET opentelemetry-cpp::api)`, **not** on `FIXPP_BUILD_OTEL`. Reusing the tree can leave SC-015 exercising a contaminated configure state — a check that passes because the thing it is testing never actually happened.
 
 ```bash

@@ -170,6 +170,18 @@ if(NOT _red_text MATCHES "${_removed_dep}")
     "never names ${_removed_dep}, so this does not demonstrate that the missing "
     "dependency is what was detected.\n${_red_text}")
 endif()
+# Naming the dependency is NOT sufficient on its own. CMake's package-not-found
+# message interpolates the package name into generic text, so the check above
+# would also pass if fixppConfig.cmake carried no find_dependency(Crc32c) line at
+# all and something else in the chain merely mentioned Crc32c. Require the
+# failure to have come THROUGH our own config file, which is what actually
+# demonstrates that fixpp declares this dependency.
+if(NOT _red_text MATCHES "fixppConfig\\.cmake")
+  message(FATAL_ERROR
+    "T042 RED leg failed OUTSIDE our config: the diagnostic names ${_removed_dep} but "
+    "its call stack does not pass through fixppConfig.cmake, so it does not show "
+    "that FIXPP requires ${_removed_dep} -- only that something did.\n${_red_text}")
+endif()
 
 string(REGEX MATCH "[^\n]*${_removed_dep}[^\n]*" _red_line "${_red_text}")
 message(STATUS "T042 RED leg observed (exit ${_red_rc}): ${_red_line}")

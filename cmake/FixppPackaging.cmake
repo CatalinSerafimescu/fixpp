@@ -161,6 +161,29 @@ endif()
 # at a system location -- violating that silently pollutes the host and is what
 # makes the automatic cleanup hold.
 set(CPACK_PACKAGE_DIRECTORY "${CMAKE_BINARY_DIR}/_packages")
+
+# FR-021: finished artifacts must survive the build-tree deletion that the serial
+# build discipline performs between configurations -- CPACK_PACKAGE_DIRECTORY is
+# INSIDE the tree, so on its own nothing outlives the cycle. FIXPP_ARTIFACT_DIR is
+# the durable location; `cmake --build . --target fixpp-package` builds, packages
+# and copies out in one step.
+#
+# Deliberately a TARGET rather than a post-CPack hook: CPack has no portable
+# "after all generators" hook, and a copy that silently did not happen would
+# leave T062 asserting over an empty directory.
+set(FIXPP_ARTIFACT_DIR "/mnt/wsl/fixppbuild/artifacts" CACHE PATH
+    "Durable directory for finished package artifacts (survives build-tree deletion)")
+
+add_custom_target(fixpp-package
+  COMMAND "${CMAKE_COMMAND}" -E make_directory "${FIXPP_ARTIFACT_DIR}"
+  COMMAND "${CMAKE_CPACK_COMMAND}" --config "${CMAKE_BINARY_DIR}/CPackConfig.cmake"
+  COMMAND "${CMAKE_COMMAND}"
+          "-DFIXPP_PACKAGE_DIR=${CPACK_PACKAGE_DIRECTORY}"
+          "-DFIXPP_ARTIFACT_DIR=${FIXPP_ARTIFACT_DIR}"
+          -P "${CMAKE_SOURCE_DIR}/cmake/FixppCopyArtifacts.cmake"
+  WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+  COMMENT "084 FR-020/FR-021: package, then copy artifacts to ${FIXPP_ARTIFACT_DIR}"
+  VERBATIM)
 set(CPACK_PACKAGING_INSTALL_PREFIX "/usr")
 set(CPACK_INSTALL_DEFAULT_DIRECTORY_PERMISSIONS
     OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
