@@ -23,6 +23,42 @@ This is the spec's escalation trigger, so it is resolved first.
 
 **Incidental finding**: `NormativeReferences.md` is installed into the public include tree — a Markdown file shipping as a header. Cosmetic, but it lands in every package. Cheap to exclude; recorded as a candidate, not a requirement.
 
+### ✅ T027 — RE-VERIFIED against the FINAL export set (2026-08-02, EXECUTED)
+
+FR-010/SC-009 requires this be re-derived against the T024-reconciled export set, **not** against the
+pre-export reading above. Verified against the **generated** `fixppTargets.cmake`
+(`build/linux-gcc-release/CMakeFiles/Export/…`) — the actual artifact a consumer receives, not an in-tree
+target property:
+
+| Check | Result |
+|---|---|
+| Any member's install interface reaching `messages/`, `groups/`, `validators/`, or `_codegen/` | **zero matches — CLEAN** |
+| `fixpp_builders_<ver>` / `fixpp_validators_<ver>` present anywhere in the export | **zero matches — CLEAN** (FR-007's exclusion holds; T026's by-name assertion is downstream of this) |
+| `fixpp::dict::dispatch` install interface | **absent entirely** — the target emits no `INTERFACE_INCLUDE_DIRECTORIES` property at all. I2/B2 hold **by construction** |
+
+**The export set does NOT reach either typed-builder tree. The FR-010 stop-work clause does NOT fire**; the
+deferred "Option 3" `Args` decision stays deferred and is not escalated.
+
+⚠️ **This required a real fix, found only because the check was run against the generated file.** The first
+`install(TARGETS …)` carried `INCLUDES DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"`, which appends that path to
+the install interface of **every** member — giving `fixpp_dict_dispatch` a **non-empty** install interface and
+breaking I2, while also duplicating the entry (`"<prefix>/include;<prefix>/include"`) on the 14 targets that
+declare it themselves after T006–T018. `INCLUDES DESTINATION` was dropped; it is redundant once the
+per-module rewrite is in place.
+
+**The in-tree T021 guard could not have caught this.** It inspects `INTERFACE_INCLUDE_DIRECTORIES` on the
+in-tree target at configure time, *before* `install(TARGETS)` contributes anything — so it was green while the
+generated export was wrong. It is kept as a regression pin on `cmake/Codegen.cmake` (it fires if someone adds
+an `$<INSTALL_INTERFACE:>` there), but **it is not the I2 assertion**; the discriminating check is over the
+generated file and belongs with T026.
+
+**Reconciliation, per-member** (executed audit of the generated export): exactly **14** of 17 members carry an
+install include path — the same 14 targets T006–T018 rewrote. The **3** that carry none are exactly the three
+T019 records as correctly needing no edit, each for its own reason: `fixpp::dict_dispatch_bridge` (its only
+include dir is `PRIVATE`), `fixpp::dict::dispatch` (link-closure-only, I2), `fixpp::capi` (declares none;
+consumers receive them transitively through `fixpp::capi_objects`). Two independent counts agreeing is what
+makes this a reconciliation rather than a spot-check.
+
 ---
 
 ## R2 — The export set is a transitive closure, and it is configuration-dependent

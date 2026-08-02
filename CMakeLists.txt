@@ -543,8 +543,18 @@ install(
   LIBRARY  DESTINATION "${CMAKE_INSTALL_LIBDIR}"
   RUNTIME  DESTINATION "${CMAKE_INSTALL_BINDIR}"
   OBJECTS  DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-  INCLUDES DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
 )
+# NO `INCLUDES DESTINATION` -- deliberate, measured 2026-08-02 (T021/T027).
+# It appends its path to the install interface of EVERY member, which did two
+# unwanted things here:
+#   1. It duplicated the entry ("<prefix>/include;<prefix>/include") on the 14
+#      targets that already declare $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+#      themselves after the T006-T018 rewrite.
+#   2. It gave fixpp_dict_dispatch a NON-EMPTY install interface, silently breaking
+#      invariant I2 / rule B2. That member is link-closure-only and must export no
+#      install include path at all.
+# With the per-target rewrite in place this option is redundant; dropping it makes
+# I2 hold BY CONSTRUCTION, which is what T021 asks for.
 
 # Writing the export set is what makes CMake ENFORCE the link closure ("... includes
 # target X which requires target Y that is not in any export set"). install(TARGETS
