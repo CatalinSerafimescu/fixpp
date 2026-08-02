@@ -463,6 +463,33 @@ set(FIXPP_EXPORT_TARGETS
   fixpp_service
 )
 
+# ── T029: the fixpp::fixpp umbrella (FR-001, FR-002) ─────────────────────────
+# find_package(fixpp REQUIRED) + target_link_libraries(app PRIVATE fixpp::fixpp)
+# is the whole contract. Linking fixpp_session pulls the measured closure
+# transitively (core, sync, wire, dictionary, tls, transport, log, otel, and the
+# dict dispatch pair) -- the umbrella does not restate it.
+#
+# ⚠️ The umbrella is deliberately NOT the whole export set. It does not reach
+# fixpp_capi, fixpp_config_toml, fixpp_tap, fixpp_service or fixpp_log_otlp,
+# because fixpp_session links none of them. That is correct, not a gap -- but the
+# five are NOT one class:
+#   * FOUR are exported so a consumer can link them BY NAME: fixpp::capi for a
+#     C-ABI consumer who deliberately does not want the C++ umbrella (Article IV
+#     §2 / architecture.md:509 -- linking both is REJECTED by tools/check_layers.py),
+#     and fixpp::config_toml exactly as include/fixpp/config/toml_config_loader.hpp
+#     instructs.
+#   * The FIFTH, fixpp_log_otlp, is CLOSURE-ONLY: it is in the export set solely
+#     as fixpp_config_toml's $<LINK_ONLY:> requirement. No public header names
+#     fixpp::log_otlp and nothing instructs anyone to link it directly.
+add_library(fixpp INTERFACE)
+add_library(fixpp::fixpp ALIAS fixpp)
+target_link_libraries(fixpp INTERFACE fixpp_session)
+target_include_directories(fixpp INTERFACE
+  "$<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>"
+  "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
+)
+list(APPEND FIXPP_EXPORT_TARGETS fixpp)
+
 # fixpp_log_otlp is the one genuinely configuration-dependent member: it exists
 # only under if(TARGET opentelemetry-cpp::api) (src/log/CMakeLists.txt). It is a
 # CLOSURE-ONLY member -- fixpp_config_toml names it via a PRIVATE link edge, which
@@ -566,6 +593,86 @@ install(
   FILE fixppTargets.cmake
   NAMESPACE fixpp::
   DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/fixpp"
+)
+
+# ── 084 T030: the find_dependency set, DERIVED from the configured target graph ─
+#
+# The RULE is the deliverable, not the list. For every export-set member, every
+# imported target in its link interface contributes its find_package package name
+# -- $<LINK_ONLY:> entries INCLUDED, because a static library does not link its
+# own PRIVATE dependencies and the consumer's final link must resolve them.
+#
+# A hand-written enumeration was tried at Gate A and was wrong in BOTH directions:
+# it named compression and networking packages no target links, and it omitted
+# Crc32c, which every consumer needs. A derivation cannot drift that way.
+#
+# Applied to the current graph this yields SIX: OpenSSL, asio, pugixml, Crc32c,
+# opentelemetry-cpp, tomlplusplus. ZLIB is deliberately absent -- no fixpp target
+# links it (research R3 / invariant I7); a spurious requirement is as much a
+# packaging defect as a missing one. If a ZLIB link error ever appears in the
+# real-client witness, check whether OpenSSL's imported target regressed BEFORE
+# adding find_dependency(ZLIB) -- adding it would mask the real fault.
+set(_fixpp_dep_pkgs "")
+foreach(_fixpp_export_tgt IN LISTS FIXPP_EXPORT_TARGETS)
+  get_target_property(_fixpp_link_iface ${_fixpp_export_tgt} INTERFACE_LINK_LIBRARIES)
+  if(NOT _fixpp_link_iface)
+    continue()
+  endif()
+  foreach(_fixpp_link_entry IN LISTS _fixpp_link_iface)
+    # Unwrap $<LINK_ONLY:X> -> X. This is where a PRIVATE dependency of a STATIC
+    # library lands, and it is a genuine consumer-configure obligation.
+    string(REGEX REPLACE "^\\$<LINK_ONLY:(.*)>$" "\\1" _fixpp_link_entry "${_fixpp_link_entry}")
+    # An imported third-party target is Namespace::target; the namespace IS the
+    # find_package package name for every dependency in this graph.
+    if(_fixpp_link_entry MATCHES "^([A-Za-z0-9_+.-]+)::")
+      if(NOT CMAKE_MATCH_1 STREQUAL "fixpp")
+        list(APPEND _fixpp_dep_pkgs "${CMAKE_MATCH_1}")
+      endif()
+    endif()
+  endforeach()
+endforeach()
+list(REMOVE_DUPLICATES _fixpp_dep_pkgs)
+list(SORT _fixpp_dep_pkgs)
+
+set(FIXPP_FIND_DEPENDENCY_BLOCK "")
+foreach(_fixpp_dep IN LISTS _fixpp_dep_pkgs)
+  string(APPEND FIXPP_FIND_DEPENDENCY_BLOCK "find_dependency(${_fixpp_dep})\n")
+endforeach()
+message(STATUS "fixpp package: find_dependency set (derived) = ${_fixpp_dep_pkgs}")
+
+# ── T031: version file, derived from project(VERSION) ────────────────────────
+# NEVER a packaging-local literal: a later GA bump (REMAINING-WORK item 13) must
+# propagate with no packaging change. SameMajorVersion makes an incompatible
+# request fail inside find_package() at CONFIGURE time (FR-006 / SC-006).
+include(CMakePackageConfigHelpers)
+write_basic_package_version_file(
+  "${CMAKE_CURRENT_BINARY_DIR}/fixppConfigVersion.cmake"
+  VERSION "${PROJECT_VERSION}"
+  COMPATIBILITY SameMajorVersion
+)
+
+# ── T032: the package config itself ──────────────────────────────────────────
+configure_package_config_file(
+  "${CMAKE_CURRENT_SOURCE_DIR}/cmake/fixppConfig.cmake.in"
+  "${CMAKE_CURRENT_BINARY_DIR}/fixppConfig.cmake"
+  INSTALL_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/fixpp"
+)
+
+install(
+  FILES
+    "${CMAKE_CURRENT_BINARY_DIR}/fixppConfig.cmake"
+    "${CMAKE_CURRENT_BINARY_DIR}/fixppConfigVersion.cmake"
+  DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/fixpp"
+)
+
+# ── T033: the FIX dictionaries (FR-018a) ─────────────────────────────────────
+# dictionaries/ had NO install rule of any kind before this feature, so the
+# package shipped fixpp::dict::load_any(path, ...) with none of its data -- a
+# public runtime-loading API with nothing to load. The XML is the redistributed
+# upstream material, which is also why its licence ships alongside it (FR-018b).
+install(
+  DIRECTORY "${CMAKE_SOURCE_DIR}/dictionaries/"
+  DESTINATION "${CMAKE_INSTALL_DATADIR}/fixpp/dictionaries"
 )
 
 # 077/078: the heavy_builder_compile Ninja job pool (#197 CI stopgap that capped

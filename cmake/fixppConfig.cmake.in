@@ -1,0 +1,40 @@
+@PACKAGE_INIT@
+
+# fixpp CMake package configuration.
+#
+# Usage:
+#   find_package(fixpp REQUIRED)
+#   target_link_libraries(app PRIVATE fixpp::fixpp)
+#
+# That is the whole contract. Include paths, compile features, link ordering and
+# transitive third-party dependencies all arrive through the imported target; a
+# consumer never hand-adds an include directory and never restates a link line.
+#
+# PROVIDER-AGNOSTIC (084 FR-018e). fixpp is BUILT with Conan, but nothing about
+# that survives into this file: every fixpp target links only imported target
+# names -- there is not a single find_library(... NO_DEFAULT_PATH) or absolute
+# package-cache path anywhere in the exported graph -- so each find_dependency()
+# below is a plain find_package() resolved against YOUR CMAKE_PREFIX_PATH, by
+# whatever provider you use (distro packages, vcpkg, Conan, a manual prefix).
+#
+# find_dependency LOCATES, it does not PROVIDE. You must already have these
+# available. Two of them are rarely offered by a platform package manager and you
+# will most likely have to supply them yourself:
+#   * Crc32c            -- rarely distro-packaged
+#   * opentelemetry-cpp -- rarely distro-packaged, and required by EVERY artifact
+#                          this project ships (all shipped configurations are
+#                          built with the OpenTelemetry integration enabled)
+#
+# The list below is DERIVED AT CONFIGURE TIME from the built target graph, not
+# hand-maintained: every export-set member's link interface is walked, including
+# $<LINK_ONLY:> entries (a static library does not link its own private
+# dependencies, so the consumer's final link must still resolve them). A missing
+# entry therefore surfaces as a hard error inside find_package(fixpp) at CONFIGURE
+# time, not as an undefined symbol at link time.
+
+include(CMakeFindDependencyMacro)
+
+@FIXPP_FIND_DEPENDENCY_BLOCK@
+include("${CMAKE_CURRENT_LIST_DIR}/fixppTargets.cmake")
+
+check_required_components(fixpp)
