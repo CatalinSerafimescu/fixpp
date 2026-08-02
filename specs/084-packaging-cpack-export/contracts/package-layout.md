@@ -34,6 +34,34 @@ Windows is **ZIP only** for v1.0 (user decision). An installer-format seam is do
 | Attribution set | doc dir | **New (FR-018b)** |
 | Debug symbol files | alongside libraries | **Windows only (FR-019)** |
 
+> ### The shipped OBJECT-library files — KEEP, decided 2026-08-02 (user)
+>
+> Every package carries `lib/objects-<CONFIG>/fixpp_capi_objects/*.{o,obj}` — 11 files duplicating
+> content already inside the capi archive. **Measured cost: ~21 MB in the MSVC Debug ZIP (about half
+> of it), ~1.2 MB on Linux Release.** The Debug figure is far larger than the Linux one the cost was
+> originally accepted on.
+>
+> **They are dead weight on the consumption path — no consumer links them.** Measured on both
+> platforms: the `consumer_capi_witness` link line carries `libfixpp_capi.a` / `fixpp_capi.lib` and
+> **zero** loose objects, with no reference to `objects-*` anywhere in either consumer build. The
+> reason is a CMake asymmetry worth stating, because it is easy to get backwards: a **non-imported**
+> OBJECT library propagates its objects through `target_link_libraries` (since 3.12); an **IMPORTED**
+> one does not. Its objects arrive only via an explicit `$<TARGET_OBJECTS:…>`, which no consumer
+> writes. So `fixpp::capi` propagates include directories and transitive links from
+> `fixpp::capi_objects` while the archive supplies every symbol.
+>
+> **⚠️ They nonetheless CANNOT be deleted.** The generated `fixppTargets.cmake` ends with an existence
+> check over `_cmake_import_check_files_for_fixpp::capi_objects`; removing the files makes
+> `find_package(fixpp)` **`FATAL_ERROR` at configure time for every consumer**. Stripping them trades
+> dead weight for a broken package.
+>
+> Both facts follow from `fixpp_capi_objects` being an export-set member, which is forced:
+> `fixpp_capi` has no sources and reaches it `PUBLIC` (`src/capi/CMakeLists.txt:45`), and
+> `install(TARGETS)` on an OBJECT library **mandates** `OBJECTS DESTINATION`. The only way to drop
+> them is to keep the OBJECT library out of the export closure — `fixpp_capi` owning the capi sources
+> directly — at the cost of `fixpp_capi_shared` compiling its own copy. **Decided: not worth it for
+> v1.0; keep and document.** Revisit if Debug package size becomes a distribution constraint.
+>
 > ### Internal prefix — a PLATFORM ASYMMETRY, measured 2026-08-02
 >
 > The locations above are deliberately abstract ("standard include dir"). Concretely they sit under a

@@ -102,7 +102,10 @@ endif()
 message(STATUS "T058: package declares ${FIXPP_EXPECTED_ARCHIVES} STATIC imported targets")
 
 # ── List one artifact's contents, normalised ─────────────────────────────────
-function(_fixpp_list_package _path _out_files)
+# RAW listing — exactly what the archive contains, no normalisation. Split out
+# because the internal-prefix assertion must see the prefix that normalisation
+# deliberately removes.
+function(_fixpp_list_package_raw _path _out_raw)
   get_filename_component(_ext "${_path}" EXT)
   set(_raw "")
   if(_path MATCHES "\\.deb$")
@@ -134,6 +137,12 @@ function(_fixpp_list_package _path _out_files)
     string(REPLACE "\n" ";" _raw "${_o}")
   endif()
 
+  set(${_out_raw} "${_raw}" PARENT_SCOPE)
+endfunction()
+
+# Normalised listing — every generator on equal terms.
+function(_fixpp_list_package _path _out_files)
+  _fixpp_list_package_raw("${_path}" _raw)
   # Normalise: drop a leading "./", a leading "/", and the archive's top-level
   # <package-name>/ component, so all three generators compare on equal terms.
   set(_norm "")
@@ -169,6 +178,36 @@ foreach(_artifact IN LISTS _artifacts)
   endif()
 
   set(_missing "")
+
+  # ── The INTERNAL PREFIX must match the platform (measured, not normalised away)
+  # Normalisation below strips `usr/` so one set of expectations covers every
+  # generator — which also makes every check downstream BLIND to whether the
+  # prefix was right. It has to be asserted here, on the RAW listing, or a
+  # Windows ZIP shipping FHS `usr/lib/*.lib` passes the entire suite. That is not
+  # hypothetical: it is exactly what happened, and the collected Release artifact
+  # was wrong while contents reported green.
+  #   DEB/RPM/TGZ → MUST have usr/   (they install into the system tree)
+  #   ZIP          → MUST NOT        (extracted anywhere; `usr/` is meaningless)
+  _fixpp_list_package_raw("${_artifact}" _raw_files)
+  set(_has_usr 0)
+  foreach(_f IN LISTS _raw_files)
+    if(_f MATCHES "(^|/)usr/(lib|include|share)(/|$)")
+      set(_has_usr 1)
+    endif()
+  endforeach()
+  if(_aname MATCHES "\\.zip$" AND _has_usr)
+    message(FATAL_ERROR
+      "T058: ${_aname} is a ZIP but carries an FHS `usr/` prefix. A Windows package "
+      "extracts wherever the consumer puts it and points CMAKE_PREFIX_PATH there; "
+      "`usr/` means nothing on Windows. CPACK_PACKAGING_INSTALL_PREFIX must stay "
+      "guarded to NOT WIN32.")
+  endif()
+  if(NOT _aname MATCHES "\\.zip$" AND NOT _has_usr)
+    message(FATAL_ERROR
+      "T058: ${_aname} carries NO `usr/` prefix. DEB/RPM install into the system "
+      "tree and the TGZ mirrors them, so losing it would install into the wrong "
+      "place.")
+  endif()
 
   # MUST BE PRESENT — enumerated explicitly, never as a class.
   # Paths are PREFIX-FREE: the Linux-only `usr/` component was stripped during
@@ -255,10 +294,31 @@ foreach(_artifact IN LISTS _artifacts)
   if(NOT _have_generated)
     list(APPEND _missing "include/fixpp/v44/Messages.hpp (generated typed header, FR-011a)")
   endif()
-  # objects-Release/ is INTENDED content, not a leak: fixpp_capi_objects is an
-  # OBJECT library in the export set and needs OBJECTS DESTINATION. Its contents
-  # duplicate members already inside libfixpp_capi.a (~1.2 MB) — a knowingly
-  # accepted cost, recorded so a future reader does not "clean it up".
+  # objects-<CONFIG>/ is INTENDED content, not a leak: fixpp_capi_objects is an
+  # OBJECT library in the export set and install(TARGETS) on one MANDATES an
+  # OBJECTS DESTINATION.
+  #
+  # ⚠️ DO NOT "CLEAN THIS UP" — measured 2026-08-02, decision: keep (user).
+  # The objects duplicate members already inside the capi archive, and NO
+  # CONSUMER LINKS THEM: the Linux and Windows consumer_capi_witness link lines
+  # carry libfixpp_capi.a / fixpp_capi.lib and ZERO loose objects, with no
+  # reference to objects-* anywhere in either consumer build. (An IMPORTED
+  # OBJECT library does not propagate its objects through
+  # target_link_libraries — only a non-imported one does, since CMake 3.12 —
+  # so they arrive only via an explicit $<TARGET_OBJECTS:>, which no consumer
+  # writes.)
+  #
+  # They still CANNOT be deleted from the package. The generated
+  # fixppTargets.cmake ends in an existence check over
+  # _cmake_import_check_files_for_fixpp::capi_objects, so removing them makes
+  # find_package(fixpp) FATAL_ERROR at configure time for every consumer —
+  # trading dead weight for a broken package. Dropping them requires keeping the
+  # OBJECT library out of the export closure entirely (fixpp_capi owning its
+  # sources), which costs fixpp_capi_shared a second compilation.
+  #
+  # Measured cost: ~21 MB in the MSVC Debug ZIP (~half of it), ~1.2 MB on Linux
+  # Release. The Debug figure is far larger than the Linux one this was
+  # originally accepted on.
   if(NOT _have_objects)
     list(APPEND _missing "lib/objects-*/fixpp_capi_objects/*.{o,obj} (OBJECT-library member)")
   endif()
