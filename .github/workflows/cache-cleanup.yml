@@ -1,4 +1,4 @@
-name: Reclaim a closed PR's Actions caches
+name: Reclaim unreachable PR Actions caches
 
 # WHY THIS EXISTS
 #
@@ -7,22 +7,36 @@ name: Reclaim a closed PR's Actions caches
 # `refs/pull/<n>/merge` are readable by: a later run on `main` — no; the next PR
 # — no (different PR ref; it inherits `main`, never a sibling PR); that PR itself
 # — yes, until it closes. The moment the PR closes they are PERMANENTLY
-# UNREACHABLE, while still consuming the repo-wide 10 GB budget until LRU gets
-# to them — and LRU has no notion of "unreachable", so it evicts `main`'s
-# entries, the only ones every future PR inherits, just as readily.
+# UNREACHABLE, while still consuming the repo-wide 10 GB budget — and LRU has no
+# notion of "unreachable", so it evicts `main`'s entries, the only ones every
+# future PR inherits, just as readily.
 #
 # Measured on this repo right after 083 (#216) merged: `refs/heads/main` = 1
 # cache / 234 MB (zero ccache); `refs/pull/216/merge` = 15 caches / 9,749 MB.
 # 97.6% of the budget belonged to a merged, closed PR, and `main` held none of
 # the ccache its own prior push run had demonstrably saved.
 #
-# THIS IS THE SECOND HALF OF THE FIX, NOT THE WHOLE FIX. Deleting on close
-# reclaims only AFTER the merge; the eviction happens while the PR is still
-# open. The first half is `save: ${{ github.event_name == 'push' }}` on every
-# ccache-action site (tier1.yml ×2, tier3-libcxx.yml ×1), which stops PRs
+# THIS IS THE SECOND HALF OF THE FIX, NOT THE WHOLE FIX. Reclaiming after a PR
+# ends cannot prevent an eviction that happens while the PR is still OPEN — main
+# (~7.7 GB) plus one open PR (~7 GB) does not fit in 10 GB by any ordering of
+# deletions. The first half is `save: ${{ github.event_name == 'push' }}` on
+# every ccache-action site (tier1.yml x2, tier3-libcxx.yml x1), which stops PRs
 # writing ccache at all. What remains for this workflow is everything else a PR
-# still legitimately writes — `conan-abi-golden`, tier2's `conan-win-*` — about
-# 1 GB per PR, which would otherwise accumulate forever.
+# still legitimately writes — `conan-abi-golden`, tier1's manylinux wheel cache
+# — roughly 1 GB per PR, which would otherwise accumulate.
+#
+# WHY STATE-BASED RATHER THAN EVENT-BASED
+#
+# The obvious design is "on pull_request closed, delete that PR's caches". It
+# works, and it is strictly weaker: it cleans only PRs that close from the moment
+# it lands, only if the event actually fires, and never the backlog. This asks
+# instead "which cache scopes belong to a PR that is no longer open?" — a
+# question about STATE, which is true regardless of what events were caught. A
+# missed event self-heals on the next run instead of leaking a scope forever.
+#
+# Note it is deliberately NOT restricted to MERGED PRs: a PR closed without
+# merging leaves caches that are exactly as unreachable, and an abandoned PR is
+# the one nobody comes back to clean up.
 #
 # Deleting caches is self-healing: the next run that misses simply rebuilds and
 # re-saves. Nothing downstream depends on a cache existing.
@@ -31,96 +45,132 @@ name: Reclaim a closed PR's Actions caches
 # memory feedback_pr_scoped_actions_caches_unreachable_but_evict_main.
 
 on:
+  # The load-bearing trigger. A merge to main is exactly when the budget is
+  # needed: the post-merge tier1/2/3 matrices are about to save, and the PR that
+  # just merged is holding the room they need. No paths-ignore — a docs-only
+  # merge costs one API listing and keeps the sweep unconditional.
+  push:
+    branches: ["main"]
+
+  # Fast path, so a PR that closes WITHOUT merging (no push to main follows) does
+  # not squat until the next merge. The sweep it runs is the same one.
   pull_request_target:
     types: [closed]
+
+  workflow_dispatch:
 
 # `pull_request_target` rather than `pull_request`: for a PR from a fork the
 # GITHUB_TOKEN in a `pull_request` run is read-only no matter what this block
 # says, so the delete would silently fail. `pull_request_target` runs in the base
 # repository's context with a writable token. That is normally a supply-chain
 # hazard because the token is exposed to the PR's code — this job checks out
-# NOTHING and executes no repository content, only `gh api` calls against a PR
-# number, so there is no untrusted code to expose it to.
+# NOTHING and executes no repository content, only `gh api` calls, so there is no
+# untrusted code to expose it to.
 permissions:
-  actions: write      # required to DELETE /actions/caches/{id}
+  actions: write        # required to DELETE /actions/caches/{id}
+  pull-requests: read   # to ask whether a PR is still open
   contents: read
+
+# Never let two sweeps race: both could list the same entry and the loser would
+# log a spurious delete failure.
+concurrency:
+  group: cache-cleanup
+  cancel-in-progress: false
 
 jobs:
   reclaim:
-    name: Delete caches scoped to the closed PR
+    name: Delete caches belonging to PRs that are no longer open
     runs-on: ubuntu-latest
     steps:
-      - name: Delete this PR's cache entries
+      - name: Sweep unreachable PR cache scopes
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
-          PR: ${{ github.event.number }}
         run: |
           set -euo pipefail
 
-          # Only this PR's own scopes. `refs/pull/<n>/merge` is what a
-          # `pull_request` run saves under; `/head` is included because a
-          # workflow triggered on the head ref would land there. Anchored so
-          # PR 21 can never match PR 216.
-          MERGE="refs/pull/${PR}/merge"
-          HEAD_REF="refs/pull/${PR}/head"
-
-          echo "Reclaiming caches for PR #${PR} (${MERGE}, ${HEAD_REF})"
-
           # Page through: a single PR has held 15+ entries, and the default page
-          # size would silently truncate a larger set into a partial sweep.
-          ids=$(
-            for ref in "$MERGE" "$HEAD_REF"; do
-              gh api --paginate \
-                "repos/${REPO}/actions/caches?per_page=100&ref=${ref}" \
-                --jq '.actions_caches[] | "\(.id)\t\(.key)\t\(.size_in_bytes)"'
-            done
-          )
+          # size would silently truncate a large set into a partial sweep.
+          all=$(gh api --paginate "repos/${REPO}/actions/caches?per_page=100" \
+                  --jq '.actions_caches[] | "\(.id)\t\(.ref)\t\(.key)\t\(.size_in_bytes)"')
 
-          if [ -z "$ids" ]; then
-            echo "No caches scoped to PR #${PR} — nothing to reclaim."
+          if [ -z "$all" ]; then
+            echo "No caches in this repository."
             exit 0
           fi
 
-          # `while read`, NOT `for id in $ids`: word-splitting a newline-separated
+          # Which PRs are represented at all. `sort -u` so each PR is queried
+          # once no matter how many entries it holds.
+          prs=$(echo "$all" | cut -f2 | sed -n 's#^refs/pull/\([0-9]\+\)/.*#\1#p' | sort -u -n)
+
+          if [ -z "$prs" ]; then
+            echo "No PR-scoped caches — nothing to reclaim."
+            exit 0
+          fi
+
+          # Decide per PR BEFORE deleting anything, so the delete loop is a pure
+          # execution of an already-made decision.
+          #
+          # FAIL CLOSED: if the state query fails (network, rate limit, a PR that
+          # cannot be read), SKIP. The only harmful outcome available here is
+          # deleting an OPEN PR's caches; not deleting merely defers a reclaim to
+          # the next sweep, and there is always a next sweep.
+          doomed=""
+          for pr in $prs; do
+            state=$(gh api "repos/${REPO}/pulls/${pr}" --jq '.state' 2>/dev/null || echo "unknown")
+            case "$state" in
+              closed)  echo "PR #${pr}: closed  → reclaim";  doomed="${doomed}${pr} " ;;
+              open)    echo "PR #${pr}: OPEN    → keep (its own runs can still read these)" ;;
+              *)       echo "::warning::PR #${pr}: state '${state}' could not be determined → keeping its caches" ;;
+            esac
+          done
+
+          if [ -z "$doomed" ]; then
+            echo "Every PR-scoped cache belongs to a still-open PR — nothing to reclaim."
+            exit 0
+          fi
+
+          total=0; count=0; failed=0
+          # `while read`, NOT `for x in $list`: word-splitting a newline-separated
           # list is shell-dependent, and `gh api -X DELETE` exits 0 on an id that
           # does not exist — so a broken loop reports success having deleted
-          # nothing. A previous manual sweep failed exactly this way and was
-          # caught only because the usage figure did not move.
-          total=0
-          count=0
-          failed=0
-          while IFS=$'\t' read -r id key size; do
-            [ -n "$id" ] || continue
+          # nothing. A manual sweep failed exactly this way and was caught only
+          # because the usage figure did not move.
+          while IFS=$'\t' read -r id ref key size; do
+            [ -n "${id:-}" ] || continue
+            pr=$(echo "$ref" | sed -n 's#^refs/pull/\([0-9]\+\)/.*#\1#p')
+            [ -n "$pr" ] || continue
+            # Space-delimited on both sides so PR 21 cannot match PR 216.
+            case " $doomed " in *" $pr "*) ;; *) continue ;; esac
+
             # `</dev/null`: a command inside a `while read` loop inherits the
             # loop's stdin and can swallow the remaining lines, silently
-            # truncating the sweep. Same failure SHAPE as the word-splitting
-            # trap above — reports success, deletes a fraction.
+            # truncating the sweep — the same failure SHAPE as the trap above.
             if gh api -X DELETE "repos/${REPO}/actions/caches/${id}" </dev/null >/dev/null 2>&1; then
-              echo "  deleted  ${key}  ($((size / 1048576)) MB)"
-              total=$((total + size))
-              count=$((count + 1))
+              echo "  deleted  #${pr}  ${key}  ($((size / 1048576)) MB)"
+              total=$((total + size)); count=$((count + 1))
             else
               echo "::warning::failed to delete cache ${id} (${key})"
               failed=$((failed + 1))
             fi
-          done <<< "$ids"
+          done <<< "$all"
 
-          echo "Reclaimed ${count} cache entries, $((total / 1048576)) MB, from PR #${PR}."
+          echo "Reclaimed ${count} entries, $((total / 1048576)) MB."
           [ "$failed" -eq 0 ] || echo "::warning::${failed} entries could not be deleted."
 
           # Verify by RE-LISTING, not by reading `actions/cache/usage` — that
           # endpoint is eventually consistent and lagged several minutes behind
           # confirmed deletes during the 2026-08-02 sweep.
-          remaining=$(
-            gh api "repos/${REPO}/actions/caches?per_page=100&ref=${MERGE}" \
-              --jq '.actions_caches | length'
-          )
-          echo "Remaining under ${MERGE}: ${remaining}"
-
           {
-            echo "### Cache reclaim — PR #${PR}"
+            echo "### Cache reclaim"
             echo ""
-            echo "Deleted **${count}** entries, **$((total / 1048576)) MB**."
-            echo "Remaining under \`${MERGE}\`: ${remaining}."
+            echo "Reclaimed **${count}** entries, **$((total / 1048576)) MB** from PRs: ${doomed:-none}"
+            echo ""
+            echo "| scope | entries | MB |"
+            echo "|---|---|---|"
+            gh api --paginate "repos/${REPO}/actions/caches?per_page=100" \
+              --jq '[.actions_caches[]|{ref,mb:(.size_in_bytes/1048576)}]
+                    | group_by(.ref)
+                    | .[]
+                    | "| \(.[0].ref) | \(length) | \((map(.mb)|add)|round) |"'
           } >> "$GITHUB_STEP_SUMMARY"
