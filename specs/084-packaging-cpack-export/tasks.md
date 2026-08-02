@@ -231,6 +231,39 @@
 
 **Independent Test**: inspect a CI run for an in-scope lane and confirm package artifacts are attached with the expected names.
 
+> ### ⚠️ US3 PRE-WORK FINDINGS — measured 2026-08-02, BEFORE any workflow edit. Read before starting T065–T068.
+>
+> Three facts about how CI actually runs tests change what this phase has to do. All three were found
+> by checking T067's premise against the workflows rather than by trusting the task text.
+>
+> **1. `ctest --preset <p>` runs with NO label filter** (`tier1.yml:453`; the `testPresets` entries
+> carry only `output`, no `filter` key). So the six new packaging witnesses do **not** wait to be
+> opted into — as of this branch they run on **every tier1 lane**, including the sanitizer and
+> coverage lanes, each doing a full stage-install plus a sub-project configure and compile. T067's
+> "the other five lanes run the minimal tier only" is therefore **not the current behaviour** and has
+> to be *made* true; it is not already true.
+>
+> **2. T067's lever is stale.** `FIXPP_BUILD_INTEROP_PERF` was the correct knob when T067 was written,
+> because the real-client witness was to live in `perf/`. The T038–T040 amendment above made it a
+> standalone project registered unconditionally under `tests/packaging/`, so that option no longer
+> gates anything relevant. **T067's disposition is unchanged and still correct** — gate the heavy tier
+> on `linux-gcc-release` only, exit non-zero on failure — only the lever changes. Note
+> `consumer::install-witness` is registered in the ROOT `CMakeLists.txt`, not under
+> `tests/packaging/`, so gating the subdirectory leaves it running on every lane; that is the
+> intended "minimal tier".
+>
+> **3. The gating lane MUST `apt-get install -y rpm`.** `packaging::contents` invokes cpack with the
+> **default** generator list, which is `DEB;RPM;TGZ` on Linux (`cmake/FixppPackaging.cmake:155`), so
+> it needs `rpmbuild` — absent from `ubuntu-24.04` runners. (`provenance` and `telemetry-provenance`
+> force `-G TGZ` and are unaffected.) T065's own artifact upload needs it too: FR-015 requires all
+> three Linux formats. This is the same dependency that had to be installed locally on 2026-08-02.
+>
+> **Anti-false-green requirement for T067/T068**: assert the **count** of packaging tests that ran on
+> the gating lane (`ctest -L packaging -N`, parse `Total Tests:`, fail if it is not the expected N),
+> not merely the exit code. **`ctest -R <pattern>` exits 0 when the pattern matches nothing** —
+> verified directly — so an exit-code-only check reports a lane green having run zero witnesses. The
+> local matrix script carries exactly this pin for the same reason.
+
 - [ ] T065 [P] [US3] **Attach package artifacts on the in-scope Linux lanes** in `.github/workflows/tier1.yml` (FR-026) — run the package step after a green build and upload the DEB/RPM/TGZ artifacts, named per FR-017/T051.
 - [ ] T066 [P] [US3] **Attach package artifacts on the MSVC lanes** in `.github/workflows/tier2.yml` (FR-026) — same, for ZIP.
 - [ ] T067 [US3] **FR-026a / D3 — enable `FIXPP_BUILD_INTEROP_PERF` and gate the real-client witness on `linux-gcc-release` ONLY** in `.github/workflows/tier1.yml`. That single lane runs SC-011 and SC-012 as a **gate**; the other five in-scope lanes run the **minimal tier only**. `FIXPP_BUILD_INTEROP_PERF` is declared `OFF` at `cmake/ProjectOptions.cmake:10` and is enabled in **no** preset and **no** workflow today — so without this task SC-011/SC-012 are local-only and a witness that silently never runs **reads as green** (`feedback_ci_gate_observes_not_asserts_witness_skips_into_green`). `linux-gcc-release` is the chosen lane because it builds **zero** third-party dependencies from source (M1, Assumption 9), so gating the heaviest tier is bounded rather than all-or-nothing. **This must exit non-zero on failure — an observing step is not a gate.**
