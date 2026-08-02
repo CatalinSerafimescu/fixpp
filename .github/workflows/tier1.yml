@@ -470,7 +470,14 @@ jobs:
       packages: write  # auto-push-on-miss (push:main only) — coverage owns its tag
     # Backstop against a hung coverage build; matches the `linux` job's 90 for
     # cold-ccache headroom (previously inherited GitHub's 360-min default).
-    timeout-minutes: 180
+    # 180->240 (2026-08-02, 083): tracks the `linux` job for the same reason —
+    # this job rebuilds the same tree, so 083's header churn busts its ccache by
+    # construction, not by coincidence. Measured 130 min on the last green main
+    # (run 30483617307) vs tsan's 168, so it is not the tightest leg — but a
+    # ~1500-object cold recompile eats most of its 50-min margin, and a job
+    # killed at the cap loses its ccache-save step, making a re-run cost a
+    # second full cycle rather than fixing anything.
+    timeout-minutes: 240
     needs: gate-precheck  # runs in parallel with matrix, after the gate check
     # Skipped on release (see the `linux` job note) — coverage doesn't gate the asset.
     if: needs.gate-precheck.outputs.proceed == 'true' && github.event_name != 'release'
