@@ -293,10 +293,46 @@ install(
 # libraries. THERE IS NO LINUX COUNTERPART TO THIS RULE: on Linux the compiler
 # writes DWARF into the .o members of the .a, and the archiver copies it.
 #
-# ⚠️ The exact artifact naming and location MUST be verified against real MSVC
-# output during the Windows legs; this rule is written from the documented
-# behaviour and is NOT yet measured.
+# ── ✅ NOW MEASURED (2026-08-02, windows-msvc-debug) — and the rule was WRONG ──
+# The instruction above said this must be verified against real MSVC output. It
+# was, and the verification failed: `${CMAKE_BINARY_DIR}/lib/` contained ZERO
+# .pdb files, so the Debug ZIP shipped NO symbol files at all — precisely the
+# undebuggable-package outcome FR-019 exists to prevent.
+#
+# WHY. `$<TARGET_PDB_FILE>` and "the .pdb sits next to the library" describe the
+# LINKER pdb, which MSVC emits only for a DLL or EXE. A STATIC or OBJECT library
+# is never linked, so it gets a COMPILER pdb instead, written into the target's
+# object directory:
+#     build/<preset>/src/core/CMakeFiles/fixpp_core.dir/fixpp_core.pdb
+#     build/<preset>/src/capi/CMakeFiles/fixpp_capi_objects.dir/vc140.pdb
+# (18 found in the tree, 0 next to the archives; note the OBJECT library also
+# defaults to the toolset-wide name `vc140.pdb`, which would collide if several
+# were ever collected into one directory.)
+#
+# ⚠️ THIS FAILED SILENTLY. `install(DIRECTORY … FILES_MATCHING)` over a directory
+# with no match installs nothing and SUCCEEDS — the exact "a rule whose PATTERN
+# matches nothing yields a package missing content while looking entirely correct
+# in CMake" shape that run_package_contents_witness.cmake's own header warns
+# about. Nothing failed; the symbols were simply absent.
+#
+# FIX: point the compiler pdb at the archive output directory and give it the
+# target's own name, so the install rule below has something to match and each
+# artifact is identifiable.
 if(MSVC)
+  foreach(_fixpp_pdb_tgt IN LISTS FIXPP_EXPORT_TARGETS)
+    if(NOT TARGET ${_fixpp_pdb_tgt})
+      continue()
+    endif()
+    get_target_property(_fixpp_pdb_type ${_fixpp_pdb_tgt} TYPE)
+    # INTERFACE targets compile nothing and have no pdb; asking them for one is
+    # a hard error, not a no-op.
+    if(_fixpp_pdb_type STREQUAL "STATIC_LIBRARY" OR _fixpp_pdb_type STREQUAL "OBJECT_LIBRARY")
+      set_target_properties(${_fixpp_pdb_tgt} PROPERTIES
+        COMPILE_PDB_NAME "${_fixpp_pdb_tgt}"
+        COMPILE_PDB_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
+    endif()
+  endforeach()
+
   install(
     DIRECTORY "${CMAKE_BINARY_DIR}/lib/"
     DESTINATION "${CMAKE_INSTALL_LIBDIR}"

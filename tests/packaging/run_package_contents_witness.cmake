@@ -213,6 +213,42 @@ foreach(_artifact IN LISTS _artifacts)
       set(_have_objects 1)
     endif()
   endforeach()
+  # ── FR-019: a Windows DEBUG package MUST carry separate symbol files ────────
+  # Keyed off the artifact's OWN name, so no build-time variable has to be
+  # threaded in and the check cannot drift from the thing it describes.
+  #
+  # This exists because the rule that ships them failed SILENTLY: it globbed
+  # ${CMAKE_BINARY_DIR}/lib/ for *.pdb, MSVC writes a STATIC library's COMPILER
+  # pdb into the target's object directory instead, and install(DIRECTORY …
+  # FILES_MATCHING) over a directory with no match installs nothing and
+  # SUCCEEDS. The Debug ZIP shipped undebuggable libraries and every gate was
+  # green. Release correctly ships none (no /Zi, nothing to separate), so this
+  # must NOT be asserted there.
+  # TWO-SIDED, because that is what makes it a FIDELITY check (SC-005/T061)
+  # rather than a presence check: Debug MUST carry symbol files, Release MUST
+  # NOT. A one-sided assertion would pass a Release package that shipped debug
+  # symbols it has no business carrying.
+  if(_aname MATCHES "windows-msvc-")
+    set(_have_pdb 0)
+    foreach(_f IN LISTS _files)
+      if(_f MATCHES "^lib/.*\\.pdb$")
+        set(_have_pdb 1)
+      endif()
+    endforeach()
+    if(_aname MATCHES "windows-msvc-debug" AND NOT _have_pdb)
+      list(APPEND _missing
+        "lib/*.pdb (FR-019: a Windows Debug package without separate symbol files "
+        "ships UNDEBUGGABLE libraries — MSVC keeps a static library's debug info in "
+        "a compiler pdb under its object dir, NOT next to the archive)")
+    endif()
+    if(_aname MATCHES "windows-msvc-release" AND _have_pdb)
+      message(FATAL_ERROR
+        "SC-005/T061: ${_aname} is a RELEASE package but carries lib/*.pdb. Release "
+        "emits no debug information at all (no /Zi), so a symbol file here means the "
+        "configuration is not what the artifact name claims.")
+    endif()
+  endif()
+
   if(NOT _have_public)
     list(APPEND _missing "include/fixpp/wire/parser.hpp (hand-written public header)")
   endif()
