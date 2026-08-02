@@ -282,6 +282,11 @@ jobs:
         with:
           key: tier3-${{ matrix.preset }}
           max-size: 500M
+          # Restore-only on pull requests — see tier1.yml's matrix `linux` ccache
+          # step for the measurement and the budget arithmetic. These four legs
+          # measured ~460 MB each; on a PR they wrote ~1.8 GB that no later run
+          # could ever read. All three ccache-action sites carry this.
+          save: ${{ github.event_name == 'push' }}
 
       - name: Conan install
         run: |

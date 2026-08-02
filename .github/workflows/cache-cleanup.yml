@@ -1,0 +1,122 @@
+name: Reclaim a closed PR's Actions caches
+
+# WHY THIS EXISTS
+#
+# GitHub scopes cache READS to the run's own ref plus the default branch (plus
+# the base branch, for a PR). So the entries a PR saves under
+# `refs/pull/<n>/merge` are readable by: a later run on `main` — no; the next PR
+# — no (different PR ref; it inherits `main`, never a sibling PR); that PR itself
+# — yes, until it closes. The moment the PR closes they are PERMANENTLY
+# UNREACHABLE, while still consuming the repo-wide 10 GB budget until LRU gets
+# to them — and LRU has no notion of "unreachable", so it evicts `main`'s
+# entries, the only ones every future PR inherits, just as readily.
+#
+# Measured on this repo right after 083 (#216) merged: `refs/heads/main` = 1
+# cache / 234 MB (zero ccache); `refs/pull/216/merge` = 15 caches / 9,749 MB.
+# 97.6% of the budget belonged to a merged, closed PR, and `main` held none of
+# the ccache its own prior push run had demonstrably saved.
+#
+# THIS IS THE SECOND HALF OF THE FIX, NOT THE WHOLE FIX. Deleting on close
+# reclaims only AFTER the merge; the eviction happens while the PR is still
+# open. The first half is `save: ${{ github.event_name == 'push' }}` on every
+# ccache-action site (tier1.yml ×2, tier3-libcxx.yml ×1), which stops PRs
+# writing ccache at all. What remains for this workflow is everything else a PR
+# still legitimately writes — `conan-abi-golden`, tier2's `conan-win-*` — about
+# 1 GB per PR, which would otherwise accumulate forever.
+#
+# Deleting caches is self-healing: the next run that misses simply rebuilds and
+# re-saves. Nothing downstream depends on a cache existing.
+#
+# Refs: remaining-work/ci-ghcr-package-offload-plan.md § "MEASURED 2026-08-02";
+# memory feedback_pr_scoped_actions_caches_unreachable_but_evict_main.
+
+on:
+  pull_request_target:
+    types: [closed]
+
+# `pull_request_target` rather than `pull_request`: for a PR from a fork the
+# GITHUB_TOKEN in a `pull_request` run is read-only no matter what this block
+# says, so the delete would silently fail. `pull_request_target` runs in the base
+# repository's context with a writable token. That is normally a supply-chain
+# hazard because the token is exposed to the PR's code — this job checks out
+# NOTHING and executes no repository content, only `gh api` calls against a PR
+# number, so there is no untrusted code to expose it to.
+permissions:
+  actions: write      # required to DELETE /actions/caches/{id}
+  contents: read
+
+jobs:
+  reclaim:
+    name: Delete caches scoped to the closed PR
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete this PR's cache entries
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.number }}
+        run: |
+          set -euo pipefail
+
+          # Only this PR's own scopes. `refs/pull/<n>/merge` is what a
+          # `pull_request` run saves under; `/head` is included because a
+          # workflow triggered on the head ref would land there. Anchored so
+          # PR 21 can never match PR 216.
+          MERGE="refs/pull/${PR}/merge"
+          HEAD_REF="refs/pull/${PR}/head"
+
+          echo "Reclaiming caches for PR #${PR} (${MERGE}, ${HEAD_REF})"
+
+          # Page through: a single PR has held 15+ entries, and the default page
+          # size would silently truncate a larger set into a partial sweep.
+          ids=$(
+            for ref in "$MERGE" "$HEAD_REF"; do
+              gh api --paginate \
+                "repos/${REPO}/actions/caches?per_page=100&ref=${ref}" \
+                --jq '.actions_caches[] | "\(.id)\t\(.key)\t\(.size_in_bytes)"'
+            done
+          )
+
+          if [ -z "$ids" ]; then
+            echo "No caches scoped to PR #${PR} — nothing to reclaim."
+            exit 0
+          fi
+
+          # `while read`, NOT `for id in $ids`: word-splitting a newline-separated
+          # list is shell-dependent, and `gh api -X DELETE` exits 0 on an id that
+          # does not exist — so a broken loop reports success having deleted
+          # nothing. A previous manual sweep failed exactly this way and was
+          # caught only because the usage figure did not move.
+          total=0
+          count=0
+          failed=0
+          while IFS=$'\t' read -r id key size; do
+            [ -n "$id" ] || continue
+            if gh api -X DELETE "repos/${REPO}/actions/caches/${id}" >/dev/null 2>&1; then
+              echo "  deleted  ${key}  ($((size / 1048576)) MB)"
+              total=$((total + size))
+              count=$((count + 1))
+            else
+              echo "::warning::failed to delete cache ${id} (${key})"
+              failed=$((failed + 1))
+            fi
+          done <<< "$ids"
+
+          echo "Reclaimed ${count} cache entries, $((total / 1048576)) MB, from PR #${PR}."
+          [ "$failed" -eq 0 ] || echo "::warning::${failed} entries could not be deleted."
+
+          # Verify by RE-LISTING, not by reading `actions/cache/usage` — that
+          # endpoint is eventually consistent and lagged several minutes behind
+          # confirmed deletes during the 2026-08-02 sweep.
+          remaining=$(
+            gh api "repos/${REPO}/actions/caches?per_page=100&ref=${MERGE}" \
+              --jq '.actions_caches | length'
+          )
+          echo "Remaining under ${MERGE}: ${remaining}"
+
+          {
+            echo "### Cache reclaim — PR #${PR}"
+            echo ""
+            echo "Deleted **${count}** entries, **$((total / 1048576)) MB**."
+            echo "Remaining under \`${MERGE}\`: ${remaining}."
+          } >> "$GITHUB_STEP_SUMMARY"

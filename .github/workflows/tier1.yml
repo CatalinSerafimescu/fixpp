@@ -412,6 +412,34 @@ jobs:
           # debug build to the full 45-min timeout. 2G holds a leg's full object
           # set so warm runs actually hit.
           max-size: 2G
+          # RESTORE-ONLY ON PULL REQUESTS (2026-08-02) — a PR must never WRITE to
+          # the repo-wide 10 GB Actions-cache pool.
+          #
+          # GitHub scopes cache READS to the run's own ref plus the default
+          # branch, so a PR's own saved entries become PERMANENTLY UNREACHABLE
+          # the moment it merges — no later `main` run and no sibling PR can read
+          # them — while still counting against the cap until evicted. Measured
+          # right after 083/#216 merged: `refs/heads/main` held 1 cache / 234 MB
+          # (zero ccache) against `refs/pull/216/merge` at 15 caches / 9,749 MB —
+          # 97.6% of the budget owned by a closed PR, which had LRU-evicted
+          # main's ccache even though the prior push:main run's save step had
+          # succeeded. That is what made 083 pay a cold ~1500-object rebuild.
+          #
+          # The arithmetic, not just the tidiness: one clean `main` set is ~7.7 GB
+          # (4 sanitizer legs at 1.4-1.9 GB + 4 tier3 legs at ~460 MB + Conan/ABI
+          # entries) of a 10 GB cap. An open PR running the same matrix would add
+          # ~7 GB — so deleting a PR's caches when it CLOSES cannot prevent the
+          # eviction, which happens while the PR is still open. Only not writing
+          # does. Bounding PR saves instead was rejected: ~2 GB spread over 11
+          # legs is ~180 MB each, i.e. the thrash config the 2G above escaped.
+          #
+          # PR runs still RESTORE — the base-branch fallback gives them main's
+          # warm cache — so a PR pays only the delta against `main`, never a cold
+          # build. What it loses is incrementality BETWEEN pushes on the same PR
+          # (each Gate-B fixer round re-restores from main rather than from the
+          # previous push). See remaining-work/ci-ghcr-package-offload-plan.md
+          # "MEASURED 2026-08-02" and feedback_pr_scoped_actions_caches_unreachable_but_evict_main.
+          save: ${{ github.event_name == 'push' }}
 
       - name: Conan install
         run: |
@@ -1216,6 +1244,11 @@ jobs:
         with:
           key: tier1-bench
           max-size: 2G
+          # Restore-only on pull requests — see the matrix `linux` job's ccache
+          # step for the measurement and the budget arithmetic. All three
+          # ccache-action sites (matrix, bench, tier3 libc++) carry this; fixing
+          # a subset would leave the remaining ones squatting the same pool.
+          save: ${{ github.event_name == 'push' }}
 
       - name: Conan install
         run: |
