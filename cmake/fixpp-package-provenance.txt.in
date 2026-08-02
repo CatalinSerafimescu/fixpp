@@ -1,0 +1,36 @@
+fixpp package provenance
+========================
+
+This file identifies the exact build that produced the artifact it ships in.
+It exists because the artifact directory deliberately outlives the build-tree
+deletion cycle, so packages from different configurations and different source
+states accumulate side by side (084 FR-021/FR-021a).
+
+product              : fixpp
+version              : @PROJECT_VERSION@
+platform             : @CMAKE_SYSTEM_NAME@
+toolchain            : @CMAKE_CXX_COMPILER_ID@ @CMAKE_CXX_COMPILER_VERSION@
+configuration        : @CMAKE_BUILD_TYPE@
+telemetry            : @FIXPP_PACKAGE_TELEMETRY@
+source-revision      : @FIXPP_PACKAGE_REVISION@
+source-worktree      : @FIXPP_PACKAGE_WORKTREE@
+
+Field notes
+-----------
+
+source-worktree
+    `clean` means `git status --porcelain` was empty when this package was
+    configured; `dirty` means it was not, and the source-revision above
+    therefore does NOT fully identify the inputs.
+
+    Configuration + revision alone is insufficient to detect staleness: two
+    packages built from the same commit either side of an uncommitted edit are
+    indistinguishable under that pair, and an uncommitted edit is the normal
+    state of a working branch. A `dirty` package is not reproducible from its
+    revision and must not be published.
+
+telemetry
+    Every artifact this project ships is built with the OpenTelemetry
+    integration ON. An `OFF` value here means the package came from a
+    development-accelerator build that must never have been packaged, and the
+    packaging::telemetry-provenance gate is expected to reject it.

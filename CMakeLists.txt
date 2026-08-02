@@ -391,9 +391,41 @@ endif()
 
 # ── CMake package export (fixpp:: namespace per [arch §7.4]) ────────────────
 # include(GNUInstallDirs) moved above the module block — see the note there (084 T005).
+# 084 T047 (FR-012a sign-off, FR-013): the FIRST exclusions this rule has ever
+# carried -- it installed the entire include/ tree unconditionally until
+# 2026-08-02. Recorded as a DELIBERATE CHANGE IN DELIVERED CONTENT, on two
+# separate grounds:
+#   * include/fixpp/core/test/  -- mock_clock.hpp's backing target fixpp_mock_clock
+#     is FIXPP_BUILD_TESTS-only and absent from any packaging build, so shipping
+#     the header meant shipping a header with no library behind it.
+#   * include/fixpp/transport/test/ -- header-only test infrastructure that
+#     User Story 1 acceptance scenario 7 already treats as outside the
+#     consumable surface.
+# Do NOT over-exclude: include/fixpp/otel/, the detail/ subtrees,
+# session/quickfix_compat/ and the .gitkeep files all SHIP.
+# contracts/package-layout.md §2a is authoritative per row.
 install(
   DIRECTORY "${CMAKE_SOURCE_DIR}/include/"
   DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+  PATTERN "fixpp/core/test"      EXCLUDE
+  PATTERN "fixpp/transport/test" EXCLUDE
+)
+
+# 084 T046 (FR-018b): attribution ships in the package doc directory.
+# TWO separate upstream obligations, discharged by TWO files -- they are not
+# interchangeable:
+#   * QUICKFIX_LICENSE.txt -- clauses 1 and 2 (reproduce the copyright notice,
+#     conditions and disclaimer). The packages ship the dictionary XML, which IS
+#     the redistributed material.
+#   * NOTICE -- clause 3 (the acknowledgment sentence in end-user documentation).
+# NOTICE is a TRACKED file at the repo root and reds the git-cleanliness gate in
+# tests/codegen/codegen_build_graph_test.cmake if left uncommitted, so it is
+# committed in the SAME commit as this rule.
+install(
+  FILES
+    "${CMAKE_SOURCE_DIR}/dictionaries/QUICKFIX_LICENSE.txt"
+    "${CMAKE_SOURCE_DIR}/NOTICE"
+  DESTINATION "${CMAKE_INSTALL_DOCDIR}"
 )
 
 # 061-typed-app-messages (061-slim) T023 / FR-008 (research.md Decision 7):
@@ -674,6 +706,9 @@ install(
   DIRECTORY "${CMAKE_SOURCE_DIR}/dictionaries/"
   DESTINATION "${CMAKE_INSTALL_DATADIR}/fixpp/dictionaries"
 )
+
+# ── 084 T048-T057: CPack. Must come AFTER every install() rule above ─────────
+include(cmake/FixppPackaging.cmake)
 
 # 077/078: the heavy_builder_compile Ninja job pool (#197 CI stopgap that capped
 # concurrent compilation of the deduped-header TUs to 2) is removed (078 T034) —
