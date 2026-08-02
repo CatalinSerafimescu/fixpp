@@ -96,16 +96,30 @@ private:
     std::vector<sdk_metrics::ResourceMetrics> received_;
 };
 
-// Helper: sum all SumPointData int64 values for a named metric across batches.
-// Returns -1 if the metric is not found in any batch.
-int64_t sum_counter_in_export(
+// Helper: read a named metric's SumPointData int64 value from the MOST RECENT
+// batch that carried it. Returns -1 if no batch did.
+//
+// Summing ACROSS batches (what this did until 2026-08-02) is wrong arithmetic
+// for a CUMULATIVE counter: every export re-reports the running total, so N
+// exports of a counter at 7 sum to 7N, not 7. It was only ever correct because
+// exactly one export happened to occur — which does not hold on Windows, where
+// the MSVC release lane observed two batches and read 14 against an expected 7.
+// Within a single batch the points ARE summed, which is correct: those are the
+// same counter under different attribute sets.
+//
+// This is the twin of latest_counter_in_export() in test_dual_metric_export.cpp.
+// Both had the identical defect; fixing only the one that failed first would
+// have left this to surface as a separate mystery.
+int64_t latest_counter_in_export(
     const std::vector<sdk_metrics::ResourceMetrics>& batches,
     std::string_view metric_name)
 {
-    int64_t total = 0;
-    bool found = false;
+    int64_t latest = -1;
 
     for (const auto& rm : batches) {
+        int64_t batch_total = 0;
+        bool    in_batch    = false;
+
         for (const auto& scope_m : rm.scope_metric_data_) {
             for (const auto& md : scope_m.metric_data_) {
                 if (std::string_view{md.instrument_descriptor.name_} != metric_name)
@@ -116,15 +130,16 @@ int64_t sum_counter_in_export(
                                 &pda.point_data)) {
                         if (const auto* iv =
                                 opentelemetry::nostd::get_if<int64_t>(&sp->value_)) {
-                            total += *iv;
-                            found = true;
+                            batch_total += *iv;
+                            in_batch = true;
                         }
                     }
                 }
             }
         }
+        if (in_batch) latest = batch_total;
     }
-    return found ? total : -1;
+    return latest;
 }
 
 }  // namespace
@@ -237,7 +252,7 @@ TEST(OtelDualExportBuilderTest, WithPrometheusAndMockOtlpReaderWiresBothReaders)
         << "MockPushExporter received no batches after ForceFlush; "
            "the OTLP reader was not registered";
 
-    int64_t otlp_val = sum_counter_in_export(batches, "fixpp.exporters.test.counter");
+    int64_t otlp_val = latest_counter_in_export(batches, "fixpp.exporters.test.counter");
     EXPECT_EQ(otlp_val, kValue)
         << "Mock OTLP exporter must capture counter==" << kValue
         << " in " << batches.size() << " batch(es); "
