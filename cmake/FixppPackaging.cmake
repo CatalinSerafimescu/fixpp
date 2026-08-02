@@ -199,26 +199,68 @@ set(CPACK_INSTALL_DEFAULT_DIRECTORY_PERMISSIONS
 # This is live, not theoretical: the artifact directory deliberately outlives the
 # build-tree deletion cycle (FR-021), so packages from earlier configurations and
 # earlier source states accumulate alongside current ones.
+# ⚠️ TWO FAIL-OPEN BUGS FIXED HERE 2026-08-02 — found while preparing the MSVC
+# sandbox, which has no `.git` (the rsync procedure excludes it). This is NOT a
+# sandbox-only path: a build from a released SOURCE TARBALL hits it identically.
+#
+#   1. The `set(... "unknown")` fallbacks were DEAD CODE whenever git EXISTS but
+#      the directory is not a repository. `execute_process` assigns OUTPUT_VARIABLE
+#      the command's (empty) stdout on failure rather than leaving the prior
+#      value, so the revision became "" -- verified directly, not assumed. An
+#      artifact then shipped with a BLANK revision, which reads as a formatting
+#      glitch rather than as "provenance unavailable".
+#   2. Worse: a FAILED `git status --porcelain` also yields empty output, which
+#      compared equal to "" and stamped the package **"clean"** -- an affirmative
+#      claim of worktree cleanliness that was never verified. Fail-open on the
+#      exact field FR-021a added to catch staleness.
+#
+# Both are fixed by trusting output only when RESULT_VARIABLE says the command
+# succeeded, and by never inferring "clean" from a command that did not run.
 find_package(Git QUIET)
-set(FIXPP_PACKAGE_REVISION "unknown")
-set(FIXPP_PACKAGE_WORKTREE "unknown")
-if(GIT_FOUND)
-  execute_process(
-    COMMAND "${GIT_EXECUTABLE}" rev-parse HEAD
-    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-    OUTPUT_VARIABLE FIXPP_PACKAGE_REVISION
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-    ERROR_QUIET)
-  execute_process(
-    COMMAND "${GIT_EXECUTABLE}" status --porcelain
-    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-    OUTPUT_VARIABLE _fixpp_git_porcelain
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-    ERROR_QUIET)
-  if(_fixpp_git_porcelain STREQUAL "")
-    set(FIXPP_PACKAGE_WORKTREE "clean")
-  else()
-    set(FIXPP_PACKAGE_WORKTREE "dirty")
+
+# Explicit override, for building from a source tree that is legitimately not a
+# git repository (source tarball; the rsync-populated MSVC sandbox). Providing a
+# revision that CAN be traced is strictly better than stamping "unknown"; leaving
+# it unset is still honest, because "unknown" fails T060 by design.
+set(FIXPP_PACKAGE_REVISION "" CACHE STRING
+    "Override the stamped source revision when the source tree is not a git repo")
+set(FIXPP_PACKAGE_WORKTREE "" CACHE STRING
+    "Override the stamped worktree state (clean|dirty) alongside FIXPP_PACKAGE_REVISION")
+
+if(FIXPP_PACKAGE_REVISION STREQUAL "")
+  set(FIXPP_PACKAGE_REVISION "unknown")
+  if(GIT_FOUND)
+    execute_process(
+      COMMAND "${GIT_EXECUTABLE}" rev-parse HEAD
+      WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+      RESULT_VARIABLE _fixpp_git_rev_rc
+      OUTPUT_VARIABLE _fixpp_git_rev
+      OUTPUT_STRIP_TRAILING_WHITESPACE
+      ERROR_QUIET)
+    if(_fixpp_git_rev_rc EQUAL 0 AND NOT _fixpp_git_rev STREQUAL "")
+      set(FIXPP_PACKAGE_REVISION "${_fixpp_git_rev}")
+    endif()
+  endif()
+endif()
+
+if(FIXPP_PACKAGE_WORKTREE STREQUAL "")
+  set(FIXPP_PACKAGE_WORKTREE "unknown")
+  if(GIT_FOUND)
+    execute_process(
+      COMMAND "${GIT_EXECUTABLE}" status --porcelain
+      WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+      RESULT_VARIABLE _fixpp_git_status_rc
+      OUTPUT_VARIABLE _fixpp_git_porcelain
+      OUTPUT_STRIP_TRAILING_WHITESPACE
+      ERROR_QUIET)
+    # "clean" is asserted ONLY when the command actually RAN and reported nothing.
+    if(_fixpp_git_status_rc EQUAL 0)
+      if(_fixpp_git_porcelain STREQUAL "")
+        set(FIXPP_PACKAGE_WORKTREE "clean")
+      else()
+        set(FIXPP_PACKAGE_WORKTREE "dirty")
+      endif()
+    endif()
   endif()
 endif()
 
