@@ -497,10 +497,17 @@ void reset_as_table_view_call_count() noexcept;
 // REAL offending `(message, tag)` pair, so the throw fires for the actual
 // reason it exists to catch. RAII-reset by the test.
 //
-// Runtime-settable rather than `FIXPP_TEST_HOOKS`-gated for the same reason
-// recorded on the W-11a seam above: the flag lives in the library, so a
-// gated definition would not link against a test TU that defines the macro.
+#ifdef FIXPP_TEST_HOOKS
+// Gate B r2: declaration gated to the repo's house pattern (src/capi/capi_internal.hpp:45-59,
+// src/session/file_store.cpp:123-125). The DEFINITION stays unconditional in dictionary.cpp —
+// that is what lets a test TU defining this macro link against the library, which is compiled
+// WITHOUT it. Gating the declaration is what makes a production caller unable to NAME it.
 void set_force_incomplete_group_context_for_testing(bool enable) noexcept;
+#endif  // FIXPP_TEST_HOOKS
+
+// Consulted unconditionally by BOTH loaders' finalize() and therefore NOT gated — it is inert
+// (one relaxed atomic load) unless the gated setter above has been called. Same shape as
+// src/session/engine.cpp:919's unconditional consult of a hook production can never set.
 void maybe_drop_first_group_ctx_delim_run_for_testing(dict_metadata_handle& h) noexcept;
 
 // ── 083 /simplify (C-1.5): the last two loader-symmetric blocks, shared ──────
