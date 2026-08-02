@@ -311,9 +311,32 @@ jobs:
         shell: cmd
         run: cmake --build --preset ${{ matrix.preset }}
 
+      # opentelemetry-cpp ships `opentelemetry_proto` as a DLL on Windows even
+      # though NOTHING in the Conan graph is shared=True — verified by
+      # dumpbin /dependents against a control binary: every import of
+      # config_044_tests.exe resolves except opentelemetry_proto.dll. Turning
+      # OTel ON therefore made four previously-green tests die at 0xc0000135
+      # (STATUS_DLL_NOT_FOUND) in the loader, before main(), with no output for
+      # ctest to report. config_044_tests does not link an OTel target at all —
+      # it inherits the import transitively through fixpp::session.
+      #
+      # conanrun.bat is Conan's own answer to this: it puts the packages' bin
+      # dirs on PATH for RUNNING (as opposed to building) what was just
+      # installed. Conan 2 writes it into the `conan install -of` folder.
+      #
+      # NOTE this fixes CI only. A developer running these tests from a plain
+      # Windows shell hits the identical wall; the durable fix is copying the
+      # runtime DLLs next to the test executables at build time (CMake's
+      # $<TARGET_RUNTIME_DLLS>), which is a wider change than this lane needs.
       - name: Test
         shell: cmd
-        run: ctest --preset ${{ matrix.preset }} --output-on-failure
+        run: |
+          if not exist "build\${{ matrix.preset }}\conanrun.bat" (
+            echo ::error::conanrun.bat not found in build\${{ matrix.preset }} — opentelemetry_proto.dll will not be on PATH and OTel tests will die at 0xc0000135. Refusing to run the suite in a state whose failures would be misattributed.
+            exit /b 1
+          )
+          call "build\${{ matrix.preset }}\conanrun.bat"
+          ctest --preset ${{ matrix.preset }} --output-on-failure
 
       # Exit code 0xc0000135 is STATUS_DLL_NOT_FOUND: the process dies in the
       # loader before main(), so ctest captures NO output and the test reports
@@ -331,32 +354,44 @@ jobs:
         run: |
           set +e
           BIN="build/${{ matrix.preset }}/bin"
+          [ -d "$BIN" ] || { echo "no $BIN — the failure was before linking"; exit 0; }
 
-          # The executables observed dying at load, plus a CONTROL that started
-          # fine. The control is the point: a list of imports means nothing
-          # without knowing which imports a WORKING binary in this same tree
-          # also has. The difference between the two lists is the answer.
-          echo "===== imports of executables that failed to start ====="
-          for e in config_044_tests config_045_tests ts10_otlp_log_sink otel_exporters; do
-            [ -f "$BIN/$e.exe" ] || { echo "--- $e: NOT BUILT ---"; continue; }
-            echo "--- $e ---"
-            dumpbin //dependents "$BIN/$e.exe" | grep -i '\.dll' | sort
-          done
+          # Scan EVERY executable rather than a hand-written list. The first
+          # version of this named four ctest TEST names, two of which are not
+          # target names, so they reported "NOT BUILT" and contributed nothing.
+          # Deriving the list from what was actually built has no such coupling.
+          TMP=$(mktemp -d)
+          for exe in "$BIN"/*.exe; do
+            [ -f "$exe" ] || continue
+            dumpbin //dependents "$exe" \
+              | grep -oiE '[A-Za-z0-9_.-]+\.dll' \
+              | sort -u \
+              | sed "s#^#$(basename "$exe" .exe)\t#"
+          done > "$TMP/imports.tsv"
 
-          echo "===== CONTROL — an executable that DID start ====="
-          [ -f "$BIN/log_smoke.exe" ] && dumpbin //dependents "$BIN/log_smoke.exe" | grep -i '\.dll' | sort
+          echo "===== imported DLLs the loader CANNOT resolve ====="
+          # This is the whole diagnosis: an import nothing can resolve is why a
+          # process dies at 0xc0000135 before main(), with no output to show.
+          #
+          # The missing set is accumulated in a FILE, not a shell variable: a
+          # `while` on the right of a pipe runs in a subshell, so a flag set
+          # inside it does not survive, and this would cheerfully report "every
+          # import resolves" while listing the ones that do not.
+          cut -f2 "$TMP/imports.tsv" | sort -u | while read -r d; do
+            command -v "$d" >/dev/null 2>&1 || echo "$d"
+          done > "$TMP/missing.txt"
 
-          # Then ask the loader directly about every DLL named above, rather
-          # than about a guessed shortlist.
-          echo "===== can the loader resolve each imported DLL? ====="
-          for e in config_044_tests log_smoke; do
-            [ -f "$BIN/$e.exe" ] || continue
-            dumpbin //dependents "$BIN/$e.exe" | grep -oiE '[A-Za-z0-9_.-]+\.dll' | sort -u
-          done | sort -u | while read -r d; do
-            p=$(command -v "$d" 2>/dev/null)
-            if [ -n "$p" ]; then echo "  OK       $d"
-            else                 echo "  MISSING  $d"; fi
-          done
+          if [ -s "$TMP/missing.txt" ]; then
+            while read -r d; do
+              echo "  MISSING  $d"
+              echo "    imported by: $(awk -F'\t' -v d="$d" '$2==d {print $1}' "$TMP/imports.tsv" | tr '\n' ' ')"
+            done < "$TMP/missing.txt"
+          else
+            echo "  (none — every import resolves; the failure is NOT a missing DLL)"
+          fi
+
+          echo "===== PATH entries Conan added for running ====="
+          grep -oiE '[A-Za-z]:[^;\"]*\\bin' "build/${{ matrix.preset }}/conanrun.bat" 2>/dev/null | sort -u | head -20
 
   # NOTE: the "ABI golden — fixpp_decimal_t" abidiff job moved to tier1.yml
   # (2026-06-22) — it is a Linux C-ABI layout gate with nothing Windows-specific,
