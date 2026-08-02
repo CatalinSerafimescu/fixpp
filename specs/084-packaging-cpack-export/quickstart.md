@@ -55,16 +55,23 @@ Required free space, tree size + an 8 GB margin: **≥ 12 GB** before a Release 
 
 **Start with `linux-gcc-release`.** It is the only configuration cheap on *both* axes.
 
-| Configuration | Tree size | Third-party deps to build |
-|---|---|---|
-| **`linux-gcc-release`** | **3.4 GB** | **0** |
-| `linux-clang-release` | 2.4 GB | 5 |
-| `linux-clang-debug` | 22 GB | 0 |
-| `linux-gcc-debug` | ~25 GB | 9 |
+| Configuration | Tree size (planned) | **Tree size (MEASURED, full matrix 2026-08-02)** | Third-party deps to build |
+|---|---|---|---|
+| **`linux-gcc-release`** | 3.4 GB | **6.4 GB** | **0** |
+| `linux-clang-release` | 2.4 GB | **5.6 GB** | 5 |
+| `linux-clang-debug` | 22 GB | **26 GB** | 0 |
+| `linux-gcc-debug` | ~25 GB | **31 GB** | 9 |
 
 `linux-clang-release` has the smallest tree but five dependencies to build from source — smallest ≠ fastest to a first package.
 
-**One configuration at a time. Delete before the next.** Four trees do not fit in 64 GB.
+**Every configuration measured LARGER than planned** — by 1.9x on the Release legs and ~20% on the
+Debug ones. The planning figures came from a partial build; these are the completed matrix, including
+the packaging witnesses' own scratch trees (each stage-installs a prefix and configures a sub-build).
+
+**One configuration at a time. Delete before the next.** Four trees do not fit in 64 GB — and the
+measured total makes that starker than the estimate did: **~69 GB against a 64 GB volume that also
+carries a 20 GB ccache**. Two concurrent *Debug* configurations alone (57 GB) would exhaust it.
+Whole-volume high-water for the actual serial run was **41 GB of 64 GB** (T064/SC-008).
 
 ```bash
 cd /home/catalin/Work/Programming/fixpp-parallel

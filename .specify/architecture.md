@@ -517,7 +517,13 @@ include/
 > | `:506`/`:507` `fixppd`, `fixpp-python` | **UNAFFECTED** | Neither is packaged by 084; the Python module keeps its own install rule (`bindings/python/CMakeLists.txt:196`) |
 > | `:509` `check_layers.py` backstop | **STILL ENFORCED, narrower than it reads** | The lint operates on the **in-tree** graph and is unchanged. It does not — and cannot — police the `:503` gap above, which exists only in the installed package's include interface |
 >
-> **The `:503` finding is the one that matters and is deliberately not "fixed" here.** Giving
+> **The `:503` finding is tracked as [issue #218](https://github.com/CatalinSerafimescu/fixpp/issues/218)**
+> — including the option worth taking whichever way it is decided: a consumer witness asserting that
+> `#include <fixpp/session/engine.hpp>` **fails to compile** when only `fixpp::capi` is linked. The
+> claim has stood in this document unverified, and a compile-fails assertion is the only thing that
+> can hold it.
+>
+> **It is deliberately not "fixed" here.** Giving
 > `fixpp::capi` a restricted `$<INSTALL_INTERFACE:include/fix>` would contradict D1 Option A, under
 > which `fixpp_capi` has no include directories of its own and reaches everything through
 > `fixpp_capi_objects` (`contracts/package-layout.md` §2a). Narrowing it is a **C-ABI surface
