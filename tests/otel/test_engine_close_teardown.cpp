@@ -13,6 +13,23 @@
 // Anchors: FR-014 / T044 / [2k §6.6] / contracts/otel-surface.md shutdown.
 // NO session-FSM edit: the Engine has zero registered sessions here.
 
+// MSVC: this MUST precede everything below. asio — reached further down via
+// <fixpp/session/engine.hpp> — refuses a TU in which winsock v1 was included
+// first: asio/detail/socket_types.hpp errors with "WinSock.h has already been
+// included" when _WINSOCKAPI_ is defined but _WINSOCK2API_ is not. The OTel
+// headers immediately below pull in <windows.h>, which includes <winsock.h>
+// unless <winsock2.h> got there first. Including it here defines _WINSOCK2API_
+// up front, so asio's check passes.
+//
+// Note this is the OPPOSITE of what the next comment's rationale implies on
+// Windows: putting the OTel headers first is exactly what breaks asio there.
+// The ordering is kept (it is load-bearing for the asio macro issue it names on
+// other platforms) and made safe by claiming winsock2 before either.
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#endif
+
 // OTel headers first to avoid include ordering issues with asio macros.
 #include <opentelemetry/version.h>
 #include <opentelemetry/trace/noop.h>

@@ -22,6 +22,27 @@
 // Anchor: .specify/2k-log-otel.md §4.10; contracts/otel-surface.md §Metric exporters.
 // [const §XIII.3]: no opentelemetry::trace::Scope.
 
+// Sockets for the raw HTTP GET (definition below). On Windows this MUST be the
+// FIRST include in the TU: <winsock2.h> has to claim _WINSOCK2API_ before any
+// header pulls in <windows.h> (which would include winsock v1), and the OTel
+// headers below do exactly that. Placing it where the POSIX includes used to sit
+// — after them — reproduces the same conflict from the other side.
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+// Self-contained linkage, mirroring tests/interop/support/counterparty_probe.hpp:
+// auto-link winsock rather than making this target name ws2_32 in CMake.
+#pragma comment(lib, "ws2_32.lib")
+#else
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <poll.h>
+#endif
+
 #include <gtest/gtest.h>
 
 #include <fixpp/otel/exporters.hpp>
@@ -49,14 +70,8 @@
 // SDK MeterProvider concrete type (needed for ForceFlush).
 #include <opentelemetry/sdk/metrics/meter_provider.h>
 
-// POSIX sockets for the raw HTTP GET.
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <unistd.h>
-#include <fcntl.h>
-#include <poll.h>
+// (Socket headers moved to the TOP of this file — on Windows <winsock2.h> must
+// precede anything that pulls in <windows.h>, which the OTel headers above do.)
 
 #include <atomic>
 #include <chrono>
@@ -110,48 +125,101 @@ private:
 // full response body (after the blank-line header separator), or an empty string
 // on error.  The connect has a 2-second timeout to fail loudly when the port
 // is not listening, rather than hanging.
+// Winsock and POSIX sockets differ in exactly five places for this helper: the
+// handle type, the invalid-handle sentinel, the non-blocking toggle, the poll
+// entry point, and getsockopt's buffer/length types. Isolating those five keeps
+// http_get() below as ONE body — a duplicated per-platform copy is where two
+// halves drift apart and only one of them keeps getting fixed.
+#ifdef _WIN32
+using socket_t = SOCKET;
+static constexpr socket_t kInvalidSocket = INVALID_SOCKET;
+
+// WSAStartup must run once per process before any winsock call. Function-local
+// static init is thread-safe. Mirrors counterparty_probe.hpp's equivalent.
+static void ensure_sockets_started() {
+    static const bool started = [] {
+        WSADATA wsa_data{};
+        return ::WSAStartup(MAKEWORD(2, 2), &wsa_data) == 0;
+    }();
+    (void)started;
+}
+static void set_nonblocking(socket_t s, bool on) {
+    u_long v = on ? 1u : 0u;
+    ::ioctlsocket(s, FIONBIO, &v);
+}
+static int wait_writable(socket_t s, int timeout_ms) {
+    WSAPOLLFD pfd{s, POLLWRNORM, 0};
+    return ::WSAPoll(&pfd, 1, timeout_ms);
+}
+static int socket_error(socket_t s) {
+    int err = 0;
+    int len = static_cast<int>(sizeof(err));
+    ::getsockopt(s, SOL_SOCKET, SO_ERROR, reinterpret_cast<char*>(&err), &len);
+    return err;
+}
+static void close_socket(socket_t s) { ::closesocket(s); }
+#else
+using socket_t = int;
+static constexpr socket_t kInvalidSocket = -1;
+
+static void ensure_sockets_started() {}
+static void set_nonblocking(socket_t s, bool on) {
+    const int flags = ::fcntl(s, F_GETFL, 0);
+    ::fcntl(s, F_SETFL, on ? (flags | O_NONBLOCK) : (flags & ~O_NONBLOCK));
+}
+static int wait_writable(socket_t s, int timeout_ms) {
+    pollfd pfd{s, POLLOUT, 0};
+    return ::poll(&pfd, 1, timeout_ms);
+}
+static int socket_error(socket_t s) {
+    int err = 0;
+    socklen_t len = sizeof(err);
+    ::getsockopt(s, SOL_SOCKET, SO_ERROR, &err, &len);
+    return err;
+}
+static void close_socket(socket_t s) { ::close(s); }
+#endif
+
 static std::string http_get(uint16_t port, const char* path) {
-    int fd = ::socket(AF_INET, SOCK_STREAM, 0);
-    if (fd < 0) return {};
+    ensure_sockets_started();
+
+    socket_t fd = ::socket(AF_INET, SOCK_STREAM, 0);
+    if (fd == kInvalidSocket) return {};
 
     // Set non-blocking for the connect so we can apply a timeout.
-    int flags = ::fcntl(fd, F_GETFL, 0);
-    ::fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+    set_nonblocking(fd, true);
 
     sockaddr_in addr{};
     addr.sin_family      = AF_INET;
     addr.sin_port        = htons(port);
     addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
 
-    ::connect(fd, reinterpret_cast<const sockaddr*>(&addr), sizeof(addr));
+    ::connect(fd, reinterpret_cast<const sockaddr*>(&addr),
+              static_cast<int>(sizeof(addr)));
 
     // Wait up to 2 s for the connection to succeed.
-    pollfd pfd{fd, POLLOUT, 0};
-    int r = ::poll(&pfd, 1, 2000);  // 2000 ms
-    if (r <= 0) { ::close(fd); return {}; }
+    if (wait_writable(fd, 2000) <= 0) { close_socket(fd); return {}; }
 
     // Check SO_ERROR for a connection failure (ECONNREFUSED etc.).
-    int sockerr = 0;
-    socklen_t slen = sizeof(sockerr);
-    ::getsockopt(fd, SOL_SOCKET, SO_ERROR, &sockerr, &slen);
-    if (sockerr != 0) { ::close(fd); return {}; }
+    if (socket_error(fd) != 0) { close_socket(fd); return {}; }
 
     // Restore blocking mode for send/recv.
-    ::fcntl(fd, F_SETFL, flags);
+    set_nonblocking(fd, false);
 
     // Send a minimal HTTP/1.0 request (no persistent connection).
     std::string req = std::string{"GET "} + path + " HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n";
-    ::send(fd, req.data(), req.size(), 0);
+    ::send(fd, req.data(), static_cast<int>(req.size()), 0);
 
-    // Read the full response.
+    // Read the full response. recv() returns ssize_t on POSIX and int on
+    // Windows, so let the type follow the platform rather than naming it.
     std::string resp;
     char buf[4096];
     for (;;) {
-        ssize_t n = ::recv(fd, buf, sizeof(buf), 0);
+        const auto n = ::recv(fd, buf, static_cast<int>(sizeof(buf)), 0);
         if (n <= 0) break;
         resp.append(buf, static_cast<size_t>(n));
     }
-    ::close(fd);
+    close_socket(fd);
 
     // Strip headers (everything up to and including the first blank line).
     const auto sep = resp.find("\r\n\r\n");
