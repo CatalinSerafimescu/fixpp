@@ -315,6 +315,49 @@ jobs:
         shell: cmd
         run: ctest --preset ${{ matrix.preset }} --output-on-failure
 
+      # Exit code 0xc0000135 is STATUS_DLL_NOT_FOUND: the process dies in the
+      # loader before main(), so ctest captures NO output and the test reports
+      # only that number. There is nothing to diagnose from the log, and
+      # guessing which DLL is missing from the dependency graph is exactly the
+      # kind of inference this project treats as unproven. dumpbin /dependents
+      # names the imports directly, and `where` says which of them the loader
+      # can actually resolve on this runner.
+      #
+      # Runs only on failure, so a green lane pays nothing.
+      - name: Diagnose a loader failure (0xc0000135 and friends)
+        if: failure()
+        shell: bash
+        continue-on-error: true
+        run: |
+          set +e
+          BIN="build/${{ matrix.preset }}/bin"
+
+          # The executables observed dying at load, plus a CONTROL that started
+          # fine. The control is the point: a list of imports means nothing
+          # without knowing which imports a WORKING binary in this same tree
+          # also has. The difference between the two lists is the answer.
+          echo "===== imports of executables that failed to start ====="
+          for e in config_044_tests config_045_tests ts10_otlp_log_sink otel_exporters; do
+            [ -f "$BIN/$e.exe" ] || { echo "--- $e: NOT BUILT ---"; continue; }
+            echo "--- $e ---"
+            dumpbin //dependents "$BIN/$e.exe" | grep -i '\.dll' | sort
+          done
+
+          echo "===== CONTROL — an executable that DID start ====="
+          [ -f "$BIN/log_smoke.exe" ] && dumpbin //dependents "$BIN/log_smoke.exe" | grep -i '\.dll' | sort
+
+          # Then ask the loader directly about every DLL named above, rather
+          # than about a guessed shortlist.
+          echo "===== can the loader resolve each imported DLL? ====="
+          for e in config_044_tests log_smoke; do
+            [ -f "$BIN/$e.exe" ] || continue
+            dumpbin //dependents "$BIN/$e.exe" | grep -oiE '[A-Za-z0-9_.-]+\.dll' | sort -u
+          done | sort -u | while read -r d; do
+            p=$(command -v "$d" 2>/dev/null)
+            if [ -n "$p" ]; then echo "  OK       $d"
+            else                 echo "  MISSING  $d"; fi
+          done
+
   # NOTE: the "ABI golden — fixpp_decimal_t" abidiff job moved to tier1.yml
   # (2026-06-22) — it is a Linux C-ABI layout gate with nothing Windows-specific,
   # and belongs in the per-PR tier so C-ABI drift fails fast on every PR.

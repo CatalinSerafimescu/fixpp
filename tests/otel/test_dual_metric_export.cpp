@@ -257,19 +257,30 @@ static int64_t scrape_counter_value(const std::string& body,
     return val;
 }
 
-// ── Helper: sum all counter values in exported ResourceMetrics ────────────────
+// ── Helper: read the counter from the MOST RECENT exported ResourceMetrics ────
 //
-// Iterates over all ScopeMetrics → MetricData → PointDataAttributes looking
-// for a metric named `metric_name` with a SumPointData int64 value.
-// Returns the total sum, or -1 if the metric was not found.
-static int64_t sum_counter_in_export(
+// Iterates over ScopeMetrics → MetricData → PointDataAttributes looking for a
+// metric named `metric_name` with a SumPointData int64 value. Returns the value
+// from the LAST batch that carried it, or -1 if no batch did.
+//
+// Summing ACROSS batches (what this did until 2026-08-02) is wrong arithmetic
+// for a CUMULATIVE counter: every export re-reports the running total, so N
+// exports of a counter at 3 sum to 3N, not 3. It was only ever correct because
+// exactly one export happened to occur — an assumption the 300 s
+// export_interval_millis makes likely but does not enforce, and which does not
+// hold on Windows, where the MSVC lane observed two batches and read 6.
+// Within a single batch the points are summed, which IS correct: those are the
+// same counter under different attribute sets.
+static int64_t latest_counter_in_export(
     const std::vector<sdk_metrics::ResourceMetrics>& batches,
     std::string_view                                  metric_name)
 {
-    int64_t total = 0;
-    bool found = false;
+    int64_t latest = -1;
 
     for (const auto& rm : batches) {
+        int64_t batch_total = 0;
+        bool    in_batch    = false;
+
         for (const auto& scope_m : rm.scope_metric_data_) {
             for (const auto& md : scope_m.metric_data_) {
                 if (std::string_view{md.instrument_descriptor.name_} != metric_name)
@@ -280,15 +291,16 @@ static int64_t sum_counter_in_export(
                                 &pda.point_data)) {
                         if (const auto* iv =
                                 opentelemetry::nostd::get_if<int64_t>(&sp->value_)) {
-                            total += *iv;
-                            found = true;
+                            batch_total += *iv;
+                            in_batch = true;
                         }
                     }
                 }
             }
         }
+        if (in_batch) latest = batch_total;
     }
-    return found ? total : -1;
+    return latest;
 }
 
 // ── TS-11 test ────────────────────────────────────────────────────────────────
@@ -379,7 +391,7 @@ TEST(DualMetricExport, CounterVisibleOnBothExportersInOneCycle) {
         << "MockPushExporter received no batches after ForceFlush; "
         << "PeriodicExportingMetricReader did not call Export()";
 
-    int64_t otlp_val = sum_counter_in_export(batches, "fixpp.test.counter");
+    int64_t otlp_val = latest_counter_in_export(batches, "fixpp.test.counter");
     EXPECT_EQ(otlp_val, 3)
         << "Mock OTLP exporter did not capture counter==3 in " << batches.size()
         << " batch(es)";
