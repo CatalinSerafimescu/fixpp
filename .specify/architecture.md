@@ -497,6 +497,34 @@ include/
 
 ### 7.4 CMake target layout
 
+> ### ⚠️ RECONCILED against the delivered export — 084, 2026-08-02 (FR-024a / T070)
+>
+> §7.4 predates any `install(EXPORT)`. Feature 084 built one and **measured** the result, so the
+> clauses below are now checkable rather than aspirational. Read this table first; the prose that
+> follows is retained as the design intent it was written as, not as a description of what ships.
+>
+> **Delivered export set: 18 members — 13 STATIC, 4 INTERFACE, 1 OBJECT** (counted in the shipped
+> `fixppTargets.cmake`).
+>
+> | Clause | Disposition | Measured reality |
+> |---|---|---|
+> | `:500` module targets are **`OBJECT` libraries combined into a final `fixpp` shared/static** | **SUPERSEDED** | All are **STATIC**; there is no combined shared/static `fixpp` library. The list is also incomplete and partly misnamed — the export carries `fixpp::sync`, `fixpp::config_toml`, `fixpp::dict_dispatch_bridge`, `fixpp::dict::dispatch` and `fixpp::log_otlp` besides, and the dictionary target exports as `fixpp::dictionary`, not `fixpp::dict` |
+> | `:501` `fixpp::capi-objects` is an **`OBJECT`** library | **SATISFIED (kind), SUPERSEDED (name + fate)** | It is genuinely the one OBJECT library in the set, but exports as `fixpp::capi_objects` (underscore), and its objects are absorbed into the **static** `fixpp_capi` archive — there is no shared library to combine into |
+> | `:502` `fixpp` — the **C++ public umbrella** | **SATISFIED IN PART** | 084 T029 creates it, as an **INTERFACE** target (`fixpp::fixpp`), and it is what `tests/consumer/` links. But it links `fixpp_session`, not "every object library", and **`find_package(fixpp)` has no `COMPONENTS` support** — `COMPONENTS Cxx` does not exist |
+> | `:503` `fixpp::capi` exposes **`include/fix/` only**, so C-ABI consumers *"cannot accidentally `#include <fixpp/...>`"* | ⛔ **NOT DELIVERED** | Measured in the shipped targets file: `fixpp::capi` carries **no `INTERFACE_INCLUDE_DIRECTORIES` at all** — only `INTERFACE_LINK_LIBRARIES "fixpp::capi_objects"`, and *that* target exposes `${_IMPORT_PREFIX}/include`, the **whole** tree. A C-ABI consumer therefore reaches `<fixpp/...>` transitively. The isolation §8 calls structural is **not** structural in the packaged form |
+> | `:504` `fixpp::service-iface` — INTERFACE target | **SATISFIED (kind), SUPERSEDED (name)** | Exports as **`fixpp::service`**; it is INTERFACE as described |
+> | `:505` `fixpp-codegen` host tool, **not exported** | **SATISFIED** | Absent from the export set, verified by the T024 membership assertion |
+> | `:506`/`:507` `fixppd`, `fixpp-python` | **UNAFFECTED** | Neither is packaged by 084; the Python module keeps its own install rule (`bindings/python/CMakeLists.txt:196`) |
+> | `:509` `check_layers.py` backstop | **STILL ENFORCED, narrower than it reads** | The lint operates on the **in-tree** graph and is unchanged. It does not — and cannot — police the `:503` gap above, which exists only in the installed package's include interface |
+>
+> **The `:503` finding is the one that matters and is deliberately not "fixed" here.** Giving
+> `fixpp::capi` a restricted `$<INSTALL_INTERFACE:include/fix>` would contradict D1 Option A, under
+> which `fixpp_capi` has no include directories of its own and reaches everything through
+> `fixpp_capi_objects` (`contracts/package-layout.md` §2a). Narrowing it is a **C-ABI surface
+> decision**, not a packaging one, and it belongs to whoever owns Article IV §2 — recorded here so it
+> is inherited deliberately rather than discovered by a consumer.
+
+
 - `fixpp::core`, `fixpp::dict`, `fixpp::wire`, `fixpp::transport`, `fixpp::tls`, `fixpp::session`, `fixpp::log`, `fixpp::otel`, `fixpp::tap` — `OBJECT` libraries combined into the final `fixpp` shared/static.
 - `fixpp::capi-objects` — `OBJECT` library producing the `extern "C"` translation units; combined into the same shared library.
 - `fixpp` — the **C++ public umbrella**. Links every object library above. `INTERFACE_INCLUDE_DIRECTORIES = include/`, exposing `<fix/c_api.h>` and the entire `<fixpp/...>` C++ surface. This is what `find_package(fixpp) COMPONENTS Cxx` brings in for in-process C++ users.
