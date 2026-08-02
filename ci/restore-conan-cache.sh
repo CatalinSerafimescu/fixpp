@@ -13,18 +13,28 @@ set -uo pipefail
 PROFILE="${1:?usage: restore-conan-cache.sh <profile>}"
 IMAGE="ghcr.io/catalinserafimescu/fixpp-conan-cache"
 
-# Same KEY basis as seed-conan-cache.sh (plain sha256sum of conanfile + profile).
-# tr -d '\r': make the key line-ending-independent so a CRLF Windows checkout
-# hashes identically to the LF Linux seed (no-op on Linux → existing tags stay valid).
-KEY="$(cat conanfile.py "conan/profiles/$PROFILE" | tr -d '\r' | sha256sum | cut -c1-16)"
-# OCI tags forbid '+' → sanitize (libc++ -> libcxx); no-op for '+'-free profiles.
-TAG="${PROFILE//+/x}-${KEY}"
+# KEY/TAG come from ci/conan-cache-key.sh — the one place seed and restore share,
+# so the two can never drift into a permanent MISS. MSVC profiles additionally
+# fold the VS toolset into the key (see that file for why).
+# shellcheck source=ci/conan-cache-key.sh
+. "$(dirname "$0")/conan-cache-key.sh"
 
 emit() { [ -n "${GITHUB_OUTPUT:-}" ] && echo "hit=$1" >> "$GITHUB_OUTPUT"; }
 
+# An unidentifiable MSVC toolset is dispositioned as a MISS, not as an error:
+# falling through to `conan install --build=missing` is always CORRECT, just
+# slower. Mirrors the MISS path below rather than inventing a new fatal one.
+if ! conan_cache_key "$PROFILE"; then
+  echo "conan-cache MISS ($PROFILE, toolset unidentified) → falling back to --build=missing"
+  emit false
+  exit 0
+fi
+TAG="$CONAN_CACHE_TAG"
+[ -n "$CONAN_CACHE_TOOLSET" ] && echo "conan-cache: MSVC toolset $CONAN_CACHE_TOOLSET folded into the key"
+
 WORK="$(mktemp -d)"
 if oras pull "$IMAGE:$TAG" -o "$WORK" >/dev/null 2>&1; then
-  conan cache restore "$WORK/conan-$PROFILE.tgz"
+  conan cache restore "$(winpath "$WORK/conan-$PROFILE.tgz")"
   echo "conan-cache HIT  $TAG"
   emit true
 else

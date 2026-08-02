@@ -148,6 +148,9 @@ jobs:
   windows:
     name: "${{ matrix.preset }}"
     runs-on: windows-2022
+    permissions:
+      contents: read
+      packages: write  # auto-push-on-miss — save the rebuilt Conan cache to GHCR
     # Hung-job backstop (2026-07-09): the MSVC matrix runs ~45 min cold; 90 sits
     # well above that (matches wheel-windows / tier1's heavy-job convention) while
     # capping a wedged build far below GitHub's 6h default.
@@ -193,13 +196,15 @@ jobs:
       - name: Install Ninja
         run: choco install ninja --no-progress -y
 
-      - name: Cache Conan packages
-        uses: actions/cache@v5
-        with:
-          path: C:\Users\runneradmin\.conan2\p
-          key: conan-win-${{ matrix.preset }}-${{ hashFiles('conanfile.py', format('conan/profiles/{0}', matrix.preset)) }}
-          restore-keys: |
-            conan-win-${{ matrix.preset }}-
+      # NOTE the ORDER of the next four steps is load-bearing: vcvars must run
+      # BEFORE the GHCR restore, because the restore's cache key is derived from
+      # the MSVC toolset version that vcvars exports. See ci/conan-cache-key.sh.
+      #
+      # The `actions/cache` Conan step that used to sit HERE is gone. It was
+      # keyed on hashFiles(conanfile, profile) with no toolset component, which
+      # is the unsafe key this lane now avoids; it also wrote ~790 MB per PR into
+      # the repo-wide 10 GB Actions-cache pool under a `refs/pull/<n>/merge`
+      # scope that nothing can read once the PR closes.
 
       # setup-msbuild only adds msbuild to PATH; it does NOT run vcvars, so cl.exe
       # is absent and the Ninja-generator presets fail "CMAKE_CXX_COMPILER (cl.exe)
@@ -211,23 +216,96 @@ jobs:
       - name: Set up MSVC environment (vcvars)
         uses: egor-tensin/vs-shell@v2
 
-      # OTel-OFF for the first lane-bring-up: skip the protobuf/abseil/grpc build so
-      # the toolchain/configure/codegen path converges in fast (~10 min) cycles.
-      # Flip with_otel=True (the V1.0 CI requirement) once the lane is proven green;
-      # the build-ctx cppstd=20 fix is already in place for that flip.
-      - name: Conan install (OTel-OFF — first lane bring-up)
+      # Record WHICH toolset this run used. This is not decoration: the whole
+      # MSVC cache design turns on VCToolsVersion (the MSVC toolset, which ships
+      # the STL and drives the ABI) rather than VSCMD_VER (the VS *instance*
+      # version, one level coarser). Printing both on every run means a future
+      # LNK2038 can be traced to a toolset change from the log alone, and a
+      # GitHub image bump is visible before it is mysterious.
+      - name: Record the MSVC toolset
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "VCToolsVersion = ${VCToolsVersion:-<unset>}"
+          echo "VSCMD_VER      = ${VSCMD_VER:-<unset>}"
+          cl 2>&1 | head -2 || true
+          {
+            echo "### MSVC toolset — ${{ matrix.preset }}"
+            echo ""
+            echo "| variable | value |"
+            echo "|---|---|"
+            echo "| \`VCToolsVersion\` | \`${VCToolsVersion:-<unset>}\` |"
+            echo "| \`VSCMD_VER\` | \`${VSCMD_VER:-<unset>}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Conan deps come from GHCR (the same fixpp-conan-cache package the Linux
+      # lanes use), NOT from the Actions cache. This lane was offloaded once
+      # before and REVERTED (main 327d7665) because a locally-seeded package HIT
+      # and then LNK2038-mismatched the runner. Two things changed:
+      #
+      #   1. The key now folds in the MSVC toolset, so a VS image bump MISSES and
+      #      auto-reseeds instead of silently restoring a foreign STL.
+      #   2. Seeding is RUNNER-ONLY. ci/seed-conan-cache.sh refuses a
+      #      windows-msvc-* seed when no toolset is in scope, which is exactly
+      #      the case off a runner — the local-seed mistake is now unrepresentable
+      #      rather than merely documented.
+      #
+      # MISS is never fatal: `conan install --build=missing` below rebuilds, and
+      # the save step then publishes it.
+      - name: Set up oras
+        uses: oras-project/setup-oras@v2
+
+      - name: Restore Conan cache from GHCR
+        id: conan_restore
+        shell: bash
+        run: ci/restore-conan-cache.sh ${{ matrix.preset }}
+
+      # OTel is ON here — the V1.0 "OTel everywhere" requirement, and a hard
+      # prerequisite for 084-packaging, whose FR-011/T062a fails the packaging
+      # step on any shipped artifact not recording FIXPP_BUILD_OTEL=ON across all
+      # six configurations, two of which are these MSVC legs.
+      #
+      # This is also what makes the MSVC offload worth doing at all: OTel-OFF,
+      # the only from-source cost here was static openssl; OTel-ON drags in the
+      # opentelemetry-cpp + protobuf + abseil chain, which is the expensive
+      # payload the GHCR package exists to carry.
+      #
+      # -s:b compiler.cppstd=20 applies to the BUILD context (protoc and friends)
+      # and was already in place for precisely this flip.
+      - name: Conan install (OTel-ON)
         shell: cmd
         run: |
           conan install . ^
             -pr conan/profiles/${{ matrix.preset }} ^
-            -o "fixpp/*:with_otel=False" ^
+            -o "fixpp/*:with_otel=True" ^
             -s:b compiler.cppstd=20 ^
             --build=missing ^
             -of build/${{ matrix.preset }}
 
-      - name: Configure (OTel-OFF)
+      # Auto-push-on-miss. Gated to push:main and workflow_dispatch — both are
+      # maintainer-triggered, never a PR — so a PR can neither publish nor
+      # poison the package. workflow_dispatch is included deliberately: it makes
+      # a manual run the RESEED lever after a toolchain change, which is why no
+      # separate "the compiler changed" workflow is needed. A trigger that has to
+      # DETECT a change is strictly more fragile than a key that IS the change:
+      # the key already misses on a bump, so a dispatch only makes the reseed
+      # early instead of lazy.
+      #
+      # continue-on-error: publishing is an optimisation. A GHCR hiccup must not
+      # redden a lane whose build and tests passed.
+      - name: Save Conan cache to GHCR (push:main / dispatch + miss only)
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && steps.conan_restore.outputs.hit == 'false'
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # for prune's `gh api`
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u "${{ github.actor }}" --password-stdin
+          ci/seed-conan-cache.sh ${{ matrix.preset }} -o 'fixpp/*:with_otel=True' -s:b compiler.cppstd=20
+
+      - name: Configure (OTel-ON)
         shell: cmd
-        run: cmake --preset ${{ matrix.preset }} -DFIXPP_BUILD_OTEL=OFF
+        run: cmake --preset ${{ matrix.preset }} -DFIXPP_BUILD_OTEL=ON
 
       - name: Build
         shell: cmd

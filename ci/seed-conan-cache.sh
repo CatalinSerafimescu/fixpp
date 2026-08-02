@@ -27,13 +27,22 @@ IMAGE="ghcr.io/catalinserafimescu/fixpp-conan-cache"
 [ -f conanfile.py ] && [ -f "conan/profiles/$PROFILE" ] || {
   echo "run from the library submodule root (need conanfile.py + conan/profiles/$PROFILE)" >&2; exit 2; }
 
-# KEY: recomputed identically by restore-conan-cache.sh — plain sha256sum, NOT
-# GitHub hashFiles(), so both sides match without depending on Actions functions.
-KEY="$(cat conanfile.py "conan/profiles/$PROFILE" | tr -d '\r' | sha256sum | cut -c1-16)"
-# OCI tags forbid '+', so libc++ profiles must be sanitized (libc++ -> libcxx).
-# No-op for '+' -free profiles → existing tags unchanged. The .tgz FILENAME keeps
-# the raw profile ('+' is legal in filenames); only the tag is sanitized.
-TAG="${PROFILE//+/x}-${KEY}"
+# KEY/TAG come from ci/conan-cache-key.sh — the SAME expression restore uses, so
+# the two sides cannot drift. Plain sha256sum, NOT GitHub hashFiles(), so both
+# match without depending on Actions functions. The .tgz FILENAME keeps the raw
+# profile ('+' is legal in filenames); only the tag is sanitized.
+# shellcheck source=ci/conan-cache-key.sh
+. "$(dirname "$0")/conan-cache-key.sh"
+
+# Publishing is the irreversible direction — GHCR never evicts, and GITHUB_TOKEN
+# cannot delete a user-scoped package version (verified) — so seed ABORTS where
+# restore degrades to a MISS. A windows-msvc-* seed with no toolset in scope is
+# a LOCAL seed, which is the exact thing that forced the 2026-07-19 revert.
+if ! conan_cache_key "$PROFILE"; then
+  echo "seed: refusing to publish an MSVC package that is not keyed to a toolset." >&2
+  exit 2
+fi
+TAG="$CONAN_CACHE_TAG"
 
 WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
 
@@ -46,8 +55,11 @@ conan graph info . -pr:a "conan/profiles/$PROFILE" "${EXTRA[@]}" --format=json >
 
 # 2. Turn the graph into a package list, then pack ONLY those package_ids
 #    (a bare `conan cache save '<ref>:*'` would also grab stale clang-18 ids).
-conan list --graph="$WORK/graph.json" --graph-binaries="*" --format=json > "$WORK/pkglist.json"
-conan cache save --list="$WORK/pkglist.json" --file="$WORK/conan-$PROFILE.tgz"
+# winpath: conan is a native Windows binary under Git Bash on the MSVC lane and
+# cannot open the POSIX paths mktemp hands out. No-op on Linux. (The `>` and `<`
+# redirections need no conversion — the SHELL opens those, not conan.)
+conan list --graph="$(winpath "$WORK/graph.json")" --graph-binaries="*" --format=json > "$WORK/pkglist.json"
+conan cache save --list="$(winpath "$WORK/pkglist.json")" --file="$(winpath "$WORK/conan-$PROFILE.tgz")"
 
 # 3. Push to GHCR as a public OCI artifact, linked to the fixpp repo.
 #    Push from inside $WORK with a RELATIVE filename so oras' absolute-path guard
@@ -56,9 +68,10 @@ conan cache save --list="$WORK/pkglist.json" --file="$WORK/conan-$PROFILE.tgz"
     --artifact-type application/vnd.fixpp.conan-cache.v1 \
     --annotation "org.opencontainers.image.source=https://github.com/CatalinSerafimescu/fixpp" \
     --annotation "fixpp.profile=$PROFILE" \
+    --annotation "fixpp.msvc.toolset=${CONAN_CACHE_TOOLSET:-n/a}" \
     "conan-$PROFILE.tgz:application/gzip" )
 
-echo "seeded $IMAGE:$TAG   ($(du -h "$WORK/conan-$PROFILE.tgz" | cut -f1))"
+echo "seeded $IMAGE:$TAG   ($(du -h "$WORK/conan-$PROFILE.tgz" | cut -f1))${CONAN_CACHE_TOOLSET:+   toolset $CONAN_CACHE_TOOLSET}"
 
 # 4. Prune this profile's stale tags (keep only the one just pushed). Best-effort.
 "$(dirname "$0")/prune-conan-cache.sh" "$PROFILE" "$TAG" || true
