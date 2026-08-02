@@ -23,7 +23,8 @@ add_library(fixpp_sync STATIC
 add_library(fixpp::sync ALIAS fixpp_sync)
 
 target_include_directories(fixpp_sync PUBLIC
-  "${CMAKE_SOURCE_DIR}/include"
+  "$<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>"
+  "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
 )
 
 # Allowed dependencies: core only [arch §2.3] (RC#2 — core::async_mutex never

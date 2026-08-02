@@ -10,7 +10,8 @@ add_library(fixpp_core STATIC
 add_library(fixpp::core ALIAS fixpp_core)
 
 target_include_directories(fixpp_core PUBLIC
-  "${CMAKE_SOURCE_DIR}/include"
+  "$<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>"
+  "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
 )
 
 # core has no internal project dependencies — it is the leaf [arch §2.2].

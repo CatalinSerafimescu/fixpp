@@ -21,7 +21,8 @@ add_library(fixpp::transport ALIAS fixpp_transport)
 
 target_include_directories(fixpp_transport
   PUBLIC
-    "${CMAKE_SOURCE_DIR}/include"
+    "$<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>"
+    "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
   PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}"  # for the internal asio_tls_transport.hpp
 )
@@ -50,7 +51,19 @@ target_link_libraries(fixpp_transport
 )
 
 # Phase 2 public headers (installed via top-level install(DIRECTORY include/))
-target_sources(fixpp_transport PUBLIC
+#
+# 084 T020 / FR-002b: PRIVATE, not PUBLIC. This is the repository's only interface
+# FILE_SET, and an exported target with an uninstalled interface file set is a
+# generate-time hard error ("not all of its interface file sets are installed").
+# Demoting is free here because the file set was never the install mechanism —
+# the annotation above says so: these eight headers ship via the directory rule
+# at the root CMakeLists.txt. The BASE_DIRS a PUBLIC file set would contribute to
+# INTERFACE_INCLUDE_DIRECTORIES is the same path target_include_directories
+# already declares above, so nothing is lost from the usage requirements either.
+# Installing the file set instead would write these eight headers to the prefix a
+# second time, uniquely among all modules; dropping it would lose the source
+# listing for no gain. See research.md R12.
+target_sources(fixpp_transport PRIVATE
   FILE_SET HEADERS
   BASE_DIRS "${CMAKE_SOURCE_DIR}/include"
   FILES

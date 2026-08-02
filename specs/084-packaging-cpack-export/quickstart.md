@@ -29,6 +29,26 @@ If `/mnt/wsl/fixppbuild` is missing, the vhdx detached (any `wsl --shutdown` doe
 ```
 A missing mount looks like a broken build tree. Check the mount first.
 
+### Artifact retention — DECIDED at implement (2026-08-02, T004)
+
+*(spec Assumption 5, SC-008, `contracts/package-layout.md` §5; `plan.md:429` open choice 3.)*
+
+**`artifacts/` stays on `/mnt/wsl/fixppbuild`. Artifacts accumulate for the whole matrix run and are purged only at the START of a run — never between configurations.**
+
+**Why not a between-configuration purge**, which is the obvious way to bound the growth: T062 asserts SC-003 by enumerating `/mnt/wsl/fixppbuild/artifacts/` and matching **both the count (14) and the name set** against the declared matrix. That assertion requires all fourteen to coexist. Purging as you go leaves the directory holding one configuration's output at every moment, so the count check passes trivially against whatever is present and the *silent omission* SC-003 exists to catch becomes undetectable — `feedback_completeness_gate_exact_set_not_subset`. The retention rule is therefore fixed by the gate, not free to choose.
+
+**Why not different storage**: the root vhdx is the wrong target — it is Dynamic with a 256 GiB virtual size on a 223.6 GB volume, has filled twice, and `/mnt/wsl/fixppbuild` exists specifically to relieve it (`project_wsl_build_vhdx_on_f_drive`). Moving artifacts there re-creates the pressure the build vhdx was provisioned to remove.
+
+**Budget enforcement — a preflight `df` check before EACH configuration**, since the three consumers share one 64 GB volume (build tree + 20 GB ccache + the accumulating artifact set):
+
+```bash
+df -h /mnt/wsl/fixppbuild        # run BEFORE configuring each configuration
+```
+
+Required free space, tree size + an 8 GB margin: **≥ 12 GB** before a Release configuration (tree measured 3.4 GB), **≥ 33 GB** before a Debug configuration (tree measured 22–25 GB). Below the threshold, **stop** — do not start the configuration and re-derive the budget.
+
+**Projected artifact total ≈ 7 GB** — 2 Linux Debug configurations dominate (~4.6 GB installable payload each, compressed across DEB/RPM/TGZ), Release contributes well under 1 GB, and the two MSVC ZIPs land in the separate Windows sandbox, not on this volume. ⚠️ **This figure is PROJECTED, not measured** — it is extrapolated from the measured clang-Debug payload and an assumed DWARF compression ratio. **T064 measures the real whole-volume high-water mark across the T062 run and this line is corrected from that measurement**; it must not be cited as a measured budget before then.
+
 ---
 
 ## 1. Build order — and why it is not the obvious one

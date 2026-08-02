@@ -259,7 +259,18 @@ CMake makes this a hard error: *"install TARGETS target … is exported but not 
 | Demote it to `PRIVATE` | Touches `src/transport/CMakeLists.txt`; the file set is currently annotated *"Phase 2 public headers (installed via top-level install(DIRECTORY include/))"*, i.e. it already relies on the directory rule for installation, so demotion may be near-free — **verify before relying on it** |
 | Drop it | Same file, larger blast radius; loses whatever IDE/header-dependency benefit the file set provides |
 
-**Not decided here** (FR-002b). The choice must be recorded with its `DESTINATION` if the first option is taken.
+### ✅ DECIDED at implement (2026-08-02, T020): **demote to `PRIVATE`**
+
+**No `DESTINATION` is owed** — that obligation attaches only to the first option.
+
+Grounds, all source-verified before choosing:
+
+1. **The file set is not the install mechanism and never was.** Its own annotation at `src/transport/CMakeLists.txt:52` reads *"Phase 2 public headers (installed via top-level install(DIRECTORY include/))"*. All eight `FILES` entries are `include/fixpp/transport/*.hpp`, inside the tree `CMakeLists.txt:321-324` installs unconditionally. Demotion therefore changes **nothing about what ships** — it is not a change in delivered content and must not be recorded as one.
+2. **The include interface it contributes is already declared independently.** A `PUBLIC` `FILE_SET HEADERS` adds its `BASE_DIRS` to `INTERFACE_INCLUDE_DIRECTORIES`; here that is `${CMAKE_SOURCE_DIR}/include`, the *same* path `target_include_directories(fixpp_transport PUBLIC …)` already declares at `:22-26` — which T011 rewrites into `$<BUILD_INTERFACE:>`/`$<INSTALL_INTERFACE:>` form. Demotion drops a duplicate, not a usage requirement.
+3. **Installing it instead would make transport's eight headers uniquely special.** Every other module's public headers reach the package through the directory rule. Option (i) adds a second install rule writing the same files to the same prefix for one module alone — redundancy that reads as intent and invites a future maintainer to "fix" the other modules to match.
+4. **Dropping it (option iii) is strictly worse than demoting.** Same file edited, but the eight headers stop being listed as sources of `fixpp_transport` at all, losing the IDE/header-dependency association for no gain.
+
+**Verification obligation — this decision is not self-certifying.** R12's own table says *"demotion may be near-free — verify before relying on it"*. Two checks are owed at T024's re-measurement, and demotion is not accepted until both pass: (a) `cmake --preset linux-gcc-release` generates with `fixpp_transport` in the export set and the *"not all of its interface file sets are installed"* diagnostic gone; (b) a property dump confirms `fixpp_transport`'s `INTERFACE_INCLUDE_DIRECTORIES` still carries the install-interface path after the demotion — i.e. that grounds 2 held in fact and not merely on reading.
 
 ---
 
@@ -320,7 +331,7 @@ CMake makes this a hard error: *"install TARGETS target … is exported but not 
 | Item | Disposition |
 |---|---|
 | **Export-set membership** (R2) | ✅ **Measured floor CLOSED at Gate A round 2** — the executed run produced the eleven-member minimum (M3–M5). **⚠️ RE-OPENED as an implementation obligation by the 2026-08-01 sign-off**: the six members D1/FR-012a add are **derived by reading, not measured**, and the reading method has been wrong here before. **Re-run the generate experiment once they are wired** and reconcile against `contracts/export-set.md` §2a |
-| **Include-interface rewrite form** — per-module vs centralised from the root (R11) | **Still open — and NOT waiting on a run.** The generate run happened and did not settle it (*"Not measured: whether the export succeeds once all three blockers are fixed … implementation, not a Gate-A experiment"*). This is an implementation choice under FR-002a, to be recorded when made. The file list is now **13 of 14** regardless of form (R11), carrying **14 targets** — which is what Article IX and D2 were waiting on |
+| **Include-interface rewrite form** — per-module vs centralised from the root (R11) | ✅ **DECIDED at implement (2026-08-02, T005): PER-MODULE.** See the decision note below. T006–T018 stand as written; **no** task collapses and no waiver row is owed. The file list is **13 of 14** regardless of form (R11), carrying **14 targets** |
 | **`fixpp_capi_objects` install shape** (new, sign-off) | It is an **OBJECT** library, so `install(TARGETS …)` needs an `OBJECTS DESTINATION` — a shape no other member has. Whether the export takes that destination or a wiring change is the first thing the re-measurement must answer |
 | **`fixpp_transport` `FILE_SET` disposition** (R12, FR-002b) | Install / demote to PRIVATE / drop. Record the choice and its `DESTINATION` |
 | **Dependency provisioning** (R13, FR-018e) | ✅ **CLOSED at the 2026-08-01 sign-off — and the question was mis-framed.** The package is **provider-agnostic by construction**; the three-option table is withdrawn. FR-018e now carries four obligations (no build-host paths in the installed config; tested-against version + ABI character per dependency; honest availability statement; SC-016 proves it) |
@@ -328,5 +339,46 @@ CMake makes this a hard error: *"install TARGETS target … is exported but not 
 | **Per-version `fixpp::dict::<ver>` targets** (R2) | ✅ **DECIDED — excluded.** Not routed to Gate A round 3 sign-off (unlike D1/FR-018e/D3); settled by the three verified grounds above. Standing re-open trigger only: if a future change adds them, enumerate by name, disposition `vt11` explicitly, and provide a check other than SC-002 for their install interface |
 | **`include/fixpp/otel/` in an OTel-OFF package** (`package-layout.md` §2a) | ✅ **CLOSED at the 2026-08-01 sign-off — it ships in every configuration.** `include/fixpp/session/engine.hpp:32` includes `<fixpp/otel/trace_context.hpp>` unguarded, so excluding it would break a public session header even in an OTel-OFF build |
 | **Test-support headers** — `include/fixpp/core/test/`, `include/fixpp/transport/test/` | ✅ **CLOSED at the 2026-08-01 sign-off — EXCLUDE**, recorded as a deliberate change in delivered content. This is the first `PATTERN` filter `CMakeLists.txt:321-324` will carry, and it keeps `src/core/test/CMakeLists.txt` out of the FR-002a edit list |
-| **Artifact-directory retention** (spec Assumption 5, SC-008) | State a measured budget with a retention rule, or move `artifacts/` off the 64 GB volume |
+| **Artifact-directory retention** (spec Assumption 5, SC-008) | ✅ **DECIDED at implement (2026-08-02, T004)** — recorded in `quickstart.md` §0. Artifacts stay on the 64 GB volume and **accumulate across the whole matrix run** (T062's count+name-set assertion requires all fourteen to coexist; a between-configuration purge would make SC-003 unfalsifiable). Purge at the **start** of a run only. Budget enforced by a preflight `df` check per configuration — ≥ 12 GB free before a Release, ≥ 33 GB before a Debug. Projected total ≈ 7 GB, **projected not measured** — T064 measures it and corrects the figure |
 | **`architecture.md` §7.4 reconciliation** (FR-024a) | Committable on this branch — do **not** bundle with FR-024/FR-025's parent-repo staging |
+
+### T005 decision note — the include-interface rewrite is PER-MODULE
+
+*(Recorded 2026-08-02 at implement. FR-002a; `plan.md:429` open choice 1.)*
+
+**Form**: in each of the 13 files, rewrite in place to
+
+```cmake
+target_include_directories(<tgt> PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+)
+```
+
+preserving each target's existing `PRIVATE` entries verbatim (`fixpp_transport` and `fixpp_dictionary` both carry them).
+
+**Why not centralised.** The centralised form is fewer edits and worse on three counts, two of them specific to *this* feature:
+
+1. **It creates a second target list that must stay in sync with the export set.** A root-level sweep needs an enumeration of the 14 targets. This feature already has one hard target-list-maintenance problem — T023's `install(TARGETS … EXPORT)` membership, whose re-open checklist (T019/T022/T023/T026/T030) exists precisely because a list derived by reading was wrong three times. Adding a *second* list, updated by a different task, reproduces the exact "half-applied sweep" failure T022 is written to prevent. A member added later would silently miss the include rewrite while appearing in the export.
+2. **`set_property(TARGET … PROPERTY INTERFACE_INCLUDE_DIRECTORIES …)` overwrites rather than appends.** Several targets carry interface include directories from elsewhere — the codegen-generated ones via `cmake/Codegen.cmake:541-544`, and `fixpp_transport`'s file-set `BASE_DIRS` until T020 demotes it. A root-level `set_property` would clobber them silently; getting it right means read-modify-write per target, which is the per-module edit with extra indirection and no locality.
+3. **It separates the usage requirement from the target definition**, against the surrounding style — every module in `src/` declares its own include directories next to its own `add_library`. A reader of `src/session/CMakeLists.txt` would no longer see how `fixpp_session` gets its include interface.
+
+**Cost accepted**: 13 near-identical edits. That is a mechanical sweep, and T019 already exists as its exact-count census gate (13 files / 14 targets, `src/core/test/CMakeLists.txt` verifiably unedited) — so the repetition is *checked*, which is what makes it the cheaper risk.
+
+**Consequence for the task list**: T005's conditional ("if the centralised form is chosen, T006–T018 collapse into one root-level task and each per-file row is marked with a waiver") **does not fire**. No waiver rows are owed.
+
+### T022 decision note — the `EXPORT_NAME` convention already exists in-tree, and T026's check has a hole
+
+*(Recorded 2026-08-02 at implement, from the executed alias census. FR-003; `contracts/export-set.md` §1.)*
+
+**Convention chosen: `EXPORT_NAME` = the target name with its `fixpp_` prefix stripped** — i.e. exactly the short name each target's existing `add_library(fixpp::<short> ALIAS …)` already publishes. This is not a new convention; it is the repository's de-facto one, held consistently across **15** aliases (`grep -rn "add_library(fixpp::[A-Za-z_:]* ALIAS" src/ cmake/ CMakeLists.txt`). Choosing anything else would make the installed package disagree with every in-tree consumer and with `architecture.md:503`.
+
+Two findings the census produced that the task list did not anticipate:
+
+**1. Two export-set members have NO alias at all** — `fixpp_dict_dispatch_bridge` (`src/dictionary/CMakeLists.txt:79`) and `fixpp_capi_objects` (`src/capi/CMakeLists.txt:11`). Every other member has one. This **breaks T026's check as written**: T026 asserts the alias census and the installed imported-name set are *"equal both directions, never a subset"*, which cannot hold when two members contribute an installed name and no alias to match it. T026's stated red — *"a member whose installed imported name does not match its existing in-tree alias"* — does not cover *"a member with no in-tree alias"*.
+
+  **Disposition**: give both an `EXPORT_NAME` under the same convention (`dict_dispatch_bridge`, `capi_objects`) and **add the matching in-tree alias**, rather than carving them out of the equality check. Grounds: both are genuine export members (the bridge by the measured `$<LINK_ONLY:>` closure, `capi_objects` by `fixpp_capi`'s PUBLIC edge), so a consumer *can* see them; an exception list is the "half-applied sweep" T022 exists to prevent, and it would have to be maintained in the test. Adding two aliases keeps the gate a plain set equality with **zero** exemptions.
+
+**2. `fixpp_dict_dispatch`'s alias is NESTED — `fixpp::dict::dispatch`** (`cmake/Codegen.cmake:588`), not `fixpp::dict_dispatch`. Under `install(EXPORT … NAMESPACE fixpp::)` that requires `EXPORT_NAME dict::dispatch`, i.e. a **`::` inside an `EXPORT_NAME`**. ⚠️ **Whether CMake accepts that is NOT assumed — it is verified at T024's generate run before the convention is applied to this target.** If it is rejected, the fallback is `EXPORT_NAME dict_dispatch` publishing `fixpp::dict_dispatch`, and the divergence from the in-tree `fixpp::dict::dispatch` alias is then a **recorded, named exemption in T026** with this note as its rationale — not a silent mismatch. `fixpp::dict::runtime` (`:597`) has the same shape but is **not** an export member, so it is unaffected.
+
+**3. The `fixpp::fixpp` umbrella (T029) is a new target and needs both** an alias and an `EXPORT_NAME` (`fixpp`) so that it, too, appears on both sides of T026's equality.

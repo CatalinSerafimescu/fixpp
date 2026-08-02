@@ -200,6 +200,18 @@ endif()
 # ── Global include path ───────────────────────────────────────────────────────
 include_directories("${CMAKE_SOURCE_DIR}/include")
 
+# ── Install-layout variables ─────────────────────────────────────────────────
+# 084 T005/FR-002a: hoisted from the packaging section below, where it sat until
+# 2026-08-02. It MUST precede the add_subdirectory(src/*) block: every module
+# target declares $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}> as part of its
+# include interface, and an undefined CMAKE_INSTALL_INCLUDEDIR expands to the
+# EMPTY STRING rather than erroring — yielding a bare $<INSTALL_INTERFACE:> that
+# generates cleanly and exports targets carrying no include directory at all.
+# The package would then install correctly, find_package() would succeed, and
+# every consumer would fail to find a single header, with nothing in any CMake
+# file looking wrong. Keep this include above line 146.
+include(GNUInstallDirs)
+
 # ── Testing ──────────────────────────────────────────────────────────────────
 enable_testing()
 
@@ -378,7 +390,7 @@ if(FIXPP_BUILD_FUZZ)
 endif()
 
 # ── CMake package export (fixpp:: namespace per [arch §7.4]) ────────────────
-include(GNUInstallDirs)
+# include(GNUInstallDirs) moved above the module block — see the note there (084 T005).
 install(
   DIRECTORY "${CMAKE_SOURCE_DIR}/include/"
   DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
@@ -416,6 +428,135 @@ if(FIXPP_BUILD_CODEGEN_TOOL)
     PATTERN "groups.hpp" EXCLUDE   # 078 groups umbrella
   )
 endif()
+
+# ── 084 T022/T023: the fixppTargets export set ───────────────────────────────
+#
+# Membership basis: the ELEVEN measured members (the executed generate run
+# recorded in the 084 Gate A round-1 measurement, M3-M5) plus the SIX derived at
+# the 2026-08-01 D1/FR-012a sign-off. "Derived" means read off
+# target_link_libraries rather than observed failing a generate — the method that
+# was wrong three times across a three-level cascade, which is why T024 re-runs
+# the experiment against this list rather than trusting it.
+#
+# ONE list, deliberately: install(TARGETS) and the EXPORT_NAME sweep both consume
+# it, so a member added here cannot get an export entry without also getting its
+# imported name. A second, separately-maintained list is exactly the half-applied
+# sweep that would publish fixpp::fixpp_capi (T022).
+set(FIXPP_EXPORT_TARGETS
+  # -- the eleven measured (M3-M5) --
+  fixpp_core
+  fixpp_sync
+  fixpp_log
+  fixpp_wire
+  fixpp_dictionary
+  fixpp_tls
+  fixpp_transport
+  fixpp_session
+  fixpp_dict_dispatch_bridge
+  fixpp_dict_dispatch
+  fixpp_otel
+  # -- the six derived at the D1/FR-012a sign-off --
+  fixpp_capi
+  fixpp_capi_objects
+  fixpp_config_toml
+  fixpp_tap
+  fixpp_service
+)
+
+# fixpp_log_otlp is the one genuinely configuration-dependent member: it exists
+# only under if(TARGET opentelemetry-cpp::api) (src/log/CMakeLists.txt). It is a
+# CLOSURE-ONLY member -- fixpp_config_toml names it via a PRIVATE link edge, which
+# lands in INTERFACE_LINK_LIBRARIES as $<LINK_ONLY:> and is an export-set
+# requirement all the same (FR-008a). No public header names fixpp::log_otlp.
+if(TARGET fixpp_log_otlp)
+  list(APPEND FIXPP_EXPORT_TARGETS fixpp_log_otlp)
+endif()
+
+# Fail CLOSED. Every other name above is expected to exist in EVERY in-scope
+# configuration; if one does not, that is a membership defect to be diagnosed,
+# never a member to be silently skipped. Filtering the list through
+# if(TARGET ...) would turn a missing export member into a package that installs
+# cleanly and is missing a library -- the silent-omission shape SC-003 exists for.
+foreach(_fixpp_export_tgt IN LISTS FIXPP_EXPORT_TARGETS)
+  if(NOT TARGET ${_fixpp_export_tgt})
+    message(FATAL_ERROR
+      "084 FR-007: export set names '${_fixpp_export_tgt}', which is not a target in "
+      "this configuration. Diagnose the membership -- do not delete the entry.")
+  endif()
+endforeach()
+
+# T022 -- EXPORT_NAME on EVERY member, one convention, applied over the SAME list.
+# install(EXPORT ... NAMESPACE fixpp::) derives imported names from TARGET names;
+# add_library(fixpp::X ALIAS ...) does NOT carry into an export. Left alone the
+# package would publish fixpp::fixpp_capi while architecture.md:503 promises
+# fixpp::capi. Convention = target name minus the fixpp_ prefix, which is the
+# repository's existing de-facto one across 15 in-tree aliases.
+foreach(_fixpp_export_tgt IN LISTS FIXPP_EXPORT_TARGETS)
+  string(REGEX REPLACE "^fixpp_" "" _fixpp_export_short "${_fixpp_export_tgt}")
+  set_target_properties(${_fixpp_export_tgt} PROPERTIES EXPORT_NAME "${_fixpp_export_short}")
+endforeach()
+unset(_fixpp_export_tgt)
+unset(_fixpp_export_short)
+
+# One target diverges from the prefix-strip rule, and it is the in-tree alias that
+# decides: fixpp_dict_dispatch is aliased fixpp::dict::dispatch (a NESTED namespace,
+# cmake/Codegen.cmake), not fixpp::dict_dispatch. Measured 2026-08-02: CMake accepts
+# a "::" inside EXPORT_NAME and emits fixpp::dict::dispatch verbatim, so the export
+# matches the alias and T026's set-equality needs no exemption.
+set_target_properties(fixpp_dict_dispatch PROPERTIES EXPORT_NAME "dict::dispatch")
+
+# T022/T026: two export members had no in-tree fixpp:: alias at all
+# (fixpp_dict_dispatch_bridge, fixpp_capi_objects) while every other member had one.
+# T026 asserts the alias census and the installed imported-name set are equal BOTH
+# directions; without these, two installed names would have no alias to match and the
+# gate would need a hand-maintained exemption list — the half-applied sweep T022
+# exists to prevent. Adding the aliases keeps it a plain set equality with zero
+# exemptions. Both are real members: the bridge by the measured $<LINK_ONLY:> closure,
+# capi_objects by fixpp_capi's PUBLIC edge.
+if(NOT TARGET fixpp::dict_dispatch_bridge)
+  add_library(fixpp::dict_dispatch_bridge ALIAS fixpp_dict_dispatch_bridge)
+endif()
+if(NOT TARGET fixpp::capi_objects)
+  add_library(fixpp::capi_objects ALIAS fixpp_capi_objects)
+endif()
+
+# T021 -- fixpp_dict_dispatch's install interface must stay EMPTY. Its sole
+# include directory (cmake/Codegen.cmake) is $<BUILD_INTERFACE:> over
+# _codegen/include, whose _dispatch/ content is install-EXCLUDED by the denylist
+# above. It is in the export set ONLY to satisfy CMake's closure rule for the
+# bridge's $<LINK_ONLY:> edge. Asserting emptiness here makes invariant I2 hold by
+# construction rather than by luck, and trips FR-010's standing obligation if a
+# future change gives it a non-empty one.
+get_target_property(_fixpp_dd_inc fixpp_dict_dispatch INTERFACE_INCLUDE_DIRECTORIES)
+if(_fixpp_dd_inc MATCHES "INSTALL_INTERFACE")
+  message(FATAL_ERROR
+    "084 T021/I2: fixpp_dict_dispatch acquired a non-empty install interface "
+    "(${_fixpp_dd_inc}). Its _dispatch/ headers are install-excluded, so exporting "
+    "an install include path would publish a directory the package does not ship.")
+endif()
+unset(_fixpp_dd_inc)
+
+install(
+  TARGETS ${FIXPP_EXPORT_TARGETS}
+  EXPORT fixppTargets
+  ARCHIVE  DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+  LIBRARY  DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+  RUNTIME  DESTINATION "${CMAKE_INSTALL_BINDIR}"
+  OBJECTS  DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+  INCLUDES DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+)
+
+# Writing the export set is what makes CMake ENFORCE the link closure ("... includes
+# target X which requires target Y that is not in any export set"). install(TARGETS
+# ... EXPORT) alone only populates the set: with no install(EXPORT) the set is never
+# generated, the closure is never checked, and generate succeeds over an incomplete
+# export set. Keep these two together.
+install(
+  EXPORT fixppTargets
+  FILE fixppTargets.cmake
+  NAMESPACE fixpp::
+  DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/fixpp"
+)
 
 # 077/078: the heavy_builder_compile Ninja job pool (#197 CI stopgap that capped
 # concurrent compilation of the deduped-header TUs to 2) is removed (078 T034) —

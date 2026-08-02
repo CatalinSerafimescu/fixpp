@@ -8,7 +8,8 @@ add_library(fixpp_service INTERFACE)
 add_library(fixpp::service ALIAS fixpp_service)
 
 target_include_directories(fixpp_service INTERFACE
-  "${CMAKE_SOURCE_DIR}/include"
+  "$<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>"
+  "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
 )
 
 # service depends on capi only — never on C++ engine internals [arch §2.3]
