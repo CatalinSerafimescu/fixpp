@@ -28,7 +28,7 @@
 
 > **FR-007 (descend-at-delimiter) MUST land before FR-003 (recursive resolution).**
 
-Landing the loader recursion first converts a wrong-delimiter defect into a **false rejection across 232 measured FIX50SP2 contexts plus the 30 that newly register** — strictly worse than today. Therefore:
+Landing the loader recursion first converts a wrong-delimiter defect into a **false rejection across 485 contexts** *(corrected 2026-08-02, Gate B r2 — superseding the earlier "232 measured FIX50SP2 contexts plus the 30 that newly register"; see `spec.md:342-346` / SC-016)* — strictly worse than today. Therefore:
 
 - **US2 (P1, receiver)** is Phase 3 — before US1's loader leg, even though US1 is the headline story.
 - **US5 leg 1 (C-8.0c / FR-021e, the offset table's extent walk)** is Phase 4 — pulled ahead of the loader phase because `plan.md`'s **Phase-3 gate leg (iv)** requires **W-10a green at the Phase-3 exit**, and because leaving it later leaves reachable **silent instance loss** on the **485** mode-(c) contexts *(corrected 2026-08-02, Gate B r2 — superseding the earlier "262"; see `spec.md:342-346` / SC-016)* once Phase 2's FR-007 makes validation accept them (C-8.0c.5). C-8.0c is not *blocked by* Phase 3 (its delimiter is wire-derived and it needs no per-context record), so it can land any time from Phase 2 onward.
