@@ -92,7 +92,11 @@ jobs:
           failed=0
           while IFS=$'\t' read -r id key size; do
             [ -n "$id" ] || continue
-            if gh api -X DELETE "repos/${REPO}/actions/caches/${id}" >/dev/null 2>&1; then
+            # `</dev/null`: a command inside a `while read` loop inherits the
+            # loop's stdin and can swallow the remaining lines, silently
+            # truncating the sweep. Same failure SHAPE as the word-splitting
+            # trap above — reports success, deletes a fraction.
+            if gh api -X DELETE "repos/${REPO}/actions/caches/${id}" </dev/null >/dev/null 2>&1; then
               echo "  deleted  ${key}  ($((size / 1048576)) MB)"
               total=$((total + size))
               count=$((count + 1))

@@ -43,5 +43,15 @@ else
   # push:main the "Save Conan cache to GHCR" step then auto-pushes the rebuilt
   # cache (gated on hit=false) so the next run hits.
   echo "conan-cache MISS $TAG  → falling back to --build=missing"
+
+  # An MSVC miss is LOUD, because it is self-inflicted and it does not
+  # self-clear on a PR. Seeding is gated to push:main and workflow_dispatch, so
+  # after a GitHub image bump changes the toolset, EVERY tier2 PR leg rebuilds
+  # the whole OTel/protobuf/abseil chain from source, over and over, until a
+  # maintainer dispatches a reseed. Without this the only symptom is one quiet
+  # log line and a lane that got slow for no visible reason.
+  if [ -n "${CONAN_CACHE_TOOLSET:-}" ]; then
+    echo "::warning::No GHCR Conan cache for MSVC toolset ${CONAN_CACHE_TOOLSET} (tag ${TAG}). Every PR leg will rebuild the OTel chain from source until this is reseeded — dispatch tier2.yml on main to republish."
+  fi
   emit false
 fi
