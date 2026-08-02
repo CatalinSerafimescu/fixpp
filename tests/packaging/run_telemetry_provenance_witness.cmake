@@ -48,7 +48,8 @@ function(_fixpp_telemetry_of _package _work _out_state)
   if(NOT _r EQUAL 0)
     message(FATAL_ERROR "T062a: failed to extract ${_package}")
   endif()
-  file(GLOB_RECURSE _p "${_x}/*/usr/share/doc/fixpp/fixpp-package-provenance.txt")
+  # By BASENAME at any depth — `usr/` is Linux-only (see run_provenance_witness).
+  file(GLOB_RECURSE _p "${_x}/*/fixpp-package-provenance.txt")
   if(_p STREQUAL "")
     message(FATAL_ERROR
       "T062a/FR-021a: ${_package} carries no provenance file, so its telemetry state "

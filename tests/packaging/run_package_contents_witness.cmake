@@ -60,14 +60,19 @@ message(STATUS "T058: enumerating ${_n_artifacts} produced artifact(s)")
 #   * it becomes a genuine cross-check — the package's declared STATIC members
 #     against the package's actual archives — rather than a restatement of
 #     something the build already believes.
+# The extractable artifact is the TGZ on Linux and the ZIP on Windows — the
+# platform ships one archive generator, not both, so requiring .tar.gz
+# specifically made this test unrunnable on Windows (measured: it aborted with
+# "no .tar.gz artifact" against a perfectly good ZIP).
 set(_tgz "")
 foreach(_a IN LISTS _artifacts)
-  if(_a MATCHES "\\.tar\\.gz$")
+  if(_a MATCHES "\\.tar\\.gz$" OR _a MATCHES "\\.zip$")
     set(_tgz "${_a}")
   endif()
 endforeach()
 if(_tgz STREQUAL "")
-  message(FATAL_ERROR "T058: no .tar.gz artifact to extract for content checks")
+  message(FATAL_ERROR
+    "T058: no .tar.gz or .zip artifact to extract for content checks (produced: ${_artifacts})")
 endif()
 
 set(_x "${FIXPP_WORK_DIR}/extract")

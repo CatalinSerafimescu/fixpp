@@ -58,7 +58,12 @@ if(NOT _rc EQUAL 0)
   message(FATAL_ERROR "T060: failed to extract ${_pkg}")
 endif()
 
-file(GLOB_RECURSE _prov_files "${_x}/*/usr/share/doc/fixpp/fixpp-package-provenance.txt")
+# Matched by BASENAME at any depth: the Linux layouts carry a `usr/` component
+# that the Windows ZIP does not, and a GLOB_RECURSE pattern with intermediate
+# literal directories must match at an exact depth — so a `usr/`-anchored pattern
+# finds nothing on Windows and this reads as "the package carries NO provenance
+# file" when the file is in fact present.
+file(GLOB_RECURSE _prov_files "${_x}/*/fixpp-package-provenance.txt")
 if(_prov_files STREQUAL "")
   message(FATAL_ERROR
     "T060/FR-021a: the package carries NO provenance file. Every artifact must be "
