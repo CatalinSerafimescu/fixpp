@@ -36,19 +36,22 @@ endif()
 # FIXPP_ALLOW_OTEL_OFF_PACKAGE exists ONLY to prove this gate red (it is what the
 # packaging::telemetry-provenance test flips). It must never be set in CI or in
 # any shipped configuration.
-option(FIXPP_ALLOW_OTEL_OFF_PACKAGE
-       "TEST-ONLY escape hatch for proving the OTel-ON packaging gate red" OFF)
-mark_as_advanced(FIXPP_ALLOW_OTEL_OFF_PACKAGE)
+# FIXPP_ALLOW_OTEL_OFF_PACKAGE and FIXPP_PACKAGING_ENABLED are declared in the
+# root CMakeLists (near the FIXPP_BUILD_OTEL option), because tests/ needs the
+# same answer long before this module is included. THIS FILE IS ONLY INCLUDED
+# WHEN PACKAGING IS ENABLED, so reaching it with OTel OFF means the TEST-ONLY
+# escape hatch is set — the red-proof path, which must be loud.
+#
+# There is deliberately NO FATAL_ERROR here any more. The first cut refused to
+# CONFIGURE an OTel-OFF build, which would have red-lined every Windows CI lane:
+# tier2.yml configures MSVC with -DFIXPP_BUILD_OTEL=OFF, a configuration FR-011
+# explicitly PERMITS. An OTel-OFF build now simply defines no packaging targets
+# at all, which enforces the same invariant more strongly — there is nothing to
+# invoke rather than something that refuses when invoked.
 if(FIXPP_BUILD_OTEL)
   set(FIXPP_PACKAGE_TELEMETRY "ON")
 else()
   set(FIXPP_PACKAGE_TELEMETRY "OFF")
-  if(NOT FIXPP_ALLOW_OTEL_OFF_PACKAGE)
-    message(FATAL_ERROR
-      "084 FR-011: refusing to configure packaging for an OTel-OFF build. Every "
-      "shipped artifact must be built FIXPP_BUILD_OTEL=ON. An OTel-OFF build is "
-      "permitted as a development accelerator, but it must not produce a package.")
-  endif()
   message(WARNING
     "084 FR-011: packaging an OTel-OFF build because FIXPP_ALLOW_OTEL_OFF_PACKAGE "
     "is set. This is the RED-PROOF path for packaging::telemetry-provenance and "

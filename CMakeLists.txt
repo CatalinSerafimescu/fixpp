@@ -101,6 +101,38 @@ endif()
 # paths unchanged when the option is not explicitly passed.
 add_compile_definitions(FIXPP_BUILD_OTEL=$<BOOL:${FIXPP_BUILD_OTEL}>)
 
+# ── 084 FR-011: is PACKAGING available in this configuration? ────────────────
+# Computed HERE, before tests/ and before the CPack module, because both must
+# agree — and the answer is needed long before cmake/FixppPackaging.cmake is
+# included at the bottom of this file.
+#
+# FR-011 permits an OTel-OFF build as a development accelerator and forbids one
+# reaching a shipped artifact. The first cut enforced that with a FATAL_ERROR in
+# the packaging module, which was WRONG and would have RED-LINED THE ENTIRE
+# WINDOWS CI TIER: .github/workflows/tier2.yml configures every MSVC lane with
+# `-DFIXPP_BUILD_OTEL=OFF`, so an unconditional refusal fails a configuration
+# the requirement explicitly PERMITS. It punished the permitted use case instead
+# of the forbidden one. (Missed locally because the MSVC legs were run OTel-ON.)
+#
+# The invariant is unchanged and still airtight: an OTel-OFF build simply
+# defines NO packaging targets and NO CPack configuration, so it CANNOT produce
+# an artifact. That is a stronger guarantee than refusing to configure — there
+# is nothing to invoke, rather than something that refuses when invoked.
+option(FIXPP_ALLOW_OTEL_OFF_PACKAGE
+       "TEST-ONLY escape hatch for proving the OTel-ON packaging gate red" OFF)
+mark_as_advanced(FIXPP_ALLOW_OTEL_OFF_PACKAGE)
+
+if(FIXPP_BUILD_OTEL OR FIXPP_ALLOW_OTEL_OFF_PACKAGE)
+  set(FIXPP_PACKAGING_ENABLED ON)
+else()
+  set(FIXPP_PACKAGING_ENABLED OFF)
+  message(STATUS
+    "084 FR-011: packaging DISABLED for this OTel-OFF build — no CPack "
+    "configuration and no packaging tests are defined, so no artifact can be "
+    "produced. The build itself is unaffected (an OTel-OFF build is a permitted "
+    "development accelerator).")
+endif()
+
 # Windows: <windows.h> (pulled transitively via openssl, and directly by the
 # file_store Win32 path) defines min/max as macros, which break std::min/std::max
 # (e.g. include/fixpp/transport/listener_events.hpp). NOMINMAX suppresses them;
@@ -350,7 +382,12 @@ if(FIXPP_BUILD_TESTS)
   add_subdirectory(tests/sync)   # 006-async-mutex — 29 sync_* seams (T002)
   add_subdirectory(tests/conformance)  # 008-message-store — seam 17 store-side corpus replay (T019)
   add_subdirectory(tests/perf)         # 008-message-store — seam 14 mallocnesia alloc-guard (T050)
-  add_subdirectory(tests/packaging)    # 084-packaging-cpack-export — package/export witnesses
+  # 084 — package/export witnesses. Gated with the CPack module below: every one
+  # of them invokes cpack, so registering them where packaging is not configured
+  # would fail on a missing CPackConfig.cmake rather than on anything real.
+  if(FIXPP_PACKAGING_ENABLED)
+    add_subdirectory(tests/packaging)
+  endif()
 
   # 061-typed-app-messages (061-slim) T024 — FR-008/SC-004 external-consumer
   # install witness. tests/consumer/ is a STANDALONE CMake project (its own
@@ -740,7 +777,12 @@ install(
 )
 
 # ── 084 T048-T057: CPack. Must come AFTER every install() rule above ─────────
-include(cmake/FixppPackaging.cmake)
+# Guarded on the INCLUDE rather than by a return() inside the module: `include()`
+# does not open a new scope, so a return() in the included file would return from
+# THIS directory scope and silently skip everything below.
+if(FIXPP_PACKAGING_ENABLED)
+  include(cmake/FixppPackaging.cmake)
+endif()
 
 endif()  # NOT FIXPP_CODEGEN_BOOTSTRAP_RUNNING — see the banner above the export set
 
