@@ -136,6 +136,67 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 
+# ── Windows: stage opentelemetry-cpp's runtime DLLs beside the executables ────
+#
+# opentelemetry-cpp ships `opentelemetry_proto` as a DLL on Windows even though
+# NOTHING in the Conan graph is shared=True. Without this, every executable that
+# reaches the OTel chain — including ones that link no OTel target of their own
+# and inherit the import transitively through fixpp::session — dies at
+# STATUS_DLL_NOT_FOUND (0xc0000135) in the loader, before main(), producing no
+# output whatsoever to diagnose from.
+#
+# Two things that look like the obvious fix and do NOT work here:
+#
+#   * `$<TARGET_RUNTIME_DLLS:tgt>` — the generator expression built for exactly
+#     this. It expands to the DLLs of imported SHARED targets, and Conan's
+#     generated config never declares `opentelemetry_proto` as an imported
+#     target at all. It would expand to EMPTY and this block would silently do
+#     nothing, which is worse than not having it.
+#   * `${opentelemetry-cpp_BIN_DIRS_<CFG>}` — generated, but set to the empty
+#     string, because the recipe does not declare `bindirs`.
+#
+# What IS reliable is the package folder, so glob its bin/ directly. Verified
+# against the generated `opentelemetry-cpp-release-x86_64-data.cmake`:
+# PACKAGE_FOLDER_RELEASE is set, BIN_DIRS_RELEASE is empty, and the DLL is at
+# <package folder>/bin/opentelemetry_proto.dll.
+#
+# Everything lands in one directory (CMAKE_RUNTIME_OUTPUT_DIRECTORY above), and
+# the Windows loader searches an executable's own directory first, so a single
+# copy covers every test and tool without touching PATH. This is the fix that
+# also works for a developer running the tests from a plain shell; CI has a
+# `conanrun.bat` belt as well.
+if(WIN32)
+    set(_fixpp_runtime_dlls "")
+    foreach(_cfg RELEASE DEBUG RELWITHDEBINFO MINSIZEREL)
+        if(DEFINED opentelemetry-cpp_PACKAGE_FOLDER_${_cfg})
+            file(GLOB _fixpp_found
+                 "${opentelemetry-cpp_PACKAGE_FOLDER_${_cfg}}/bin/*.dll")
+            list(APPEND _fixpp_runtime_dlls ${_fixpp_found})
+        endif()
+    endforeach()
+
+    if(_fixpp_runtime_dlls)
+        list(REMOVE_DUPLICATES _fixpp_runtime_dlls)
+        add_custom_target(fixpp_runtime_dlls ALL
+            COMMAND ${CMAKE_COMMAND} -E make_directory
+                    "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    ${_fixpp_runtime_dlls} "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}"
+            COMMENT "Staging runtime DLLs next to the executables (Windows loader)"
+            VERBATIM)
+        message(STATUS "fixpp: staging runtime DLLs: ${_fixpp_runtime_dlls}")
+    elseif(TARGET opentelemetry-cpp::api)
+        # OTel is present but produced no DLLs to stage. Either the recipe
+        # changed (good — say so) or the glob is looking in the wrong place
+        # (bad). Either way this must be visible rather than a silent no-op:
+        # the symptom otherwise is 0xc0000135 with nothing to go on.
+        message(WARNING
+            "fixpp: opentelemetry-cpp found but no DLLs under its package bin/. "
+            "If Windows tests die with exit code 0xc0000135 "
+            "(STATUS_DLL_NOT_FOUND), this glob is why — see CMakeLists.txt.")
+    endif()
+endif()
+
 # ── Global include path ───────────────────────────────────────────────────────
 include_directories("${CMAKE_SOURCE_DIR}/include")
 

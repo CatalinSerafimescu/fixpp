@@ -320,23 +320,18 @@ jobs:
       # ctest to report. config_044_tests does not link an OTel target at all —
       # it inherits the import transitively through fixpp::session.
       #
-      # conanrun.bat is Conan's own answer to this: it puts the packages' bin
-      # dirs on PATH for RUNNING (as opposed to building) what was just
-      # installed. Conan 2 writes it into the `conan install -of` folder.
+      # The fix lives in CMakeLists.txt, which stages those DLLs next to the
+      # executables at build time — so it works for a developer running the
+      # tests from a plain Windows shell too, not only here.
       #
-      # NOTE this fixes CI only. A developer running these tests from a plain
-      # Windows shell hits the identical wall; the durable fix is copying the
-      # runtime DLLs next to the test executables at build time (CMake's
-      # $<TARGET_RUNTIME_DLLS>), which is a wider change than this lane needs.
+      # This step deliberately does NOT `call conanrun.bat`. Conan's run-env
+      # would also put the DLL on PATH and would therefore MASK any regression
+      # in the CMake staging: the lane would stay green while the fix that
+      # local developers depend on had quietly stopped firing. Keeping ctest
+      # bare makes the staging load-bearing, and so continuously verified.
       - name: Test
         shell: cmd
-        run: |
-          if not exist "build\${{ matrix.preset }}\conanrun.bat" (
-            echo ::error::conanrun.bat not found in build\${{ matrix.preset }} — opentelemetry_proto.dll will not be on PATH and OTel tests will die at 0xc0000135. Refusing to run the suite in a state whose failures would be misattributed.
-            exit /b 1
-          )
-          call "build\${{ matrix.preset }}\conanrun.bat"
-          ctest --preset ${{ matrix.preset }} --output-on-failure
+        run: ctest --preset ${{ matrix.preset }} --output-on-failure
 
       # Exit code 0xc0000135 is STATUS_DLL_NOT_FOUND: the process dies in the
       # loader before main(), so ctest captures NO output and the test reports
