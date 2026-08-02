@@ -80,3 +80,27 @@ set_tests_properties(fixpp::packaging::provenance PROPERTIES
   TIMEOUT 600
   LABELS "packaging"
 )
+
+# ── T062a (FR-011): TELEMETRY provenance — a FIFTH test, not an extension ────
+# FIXPP_OTEL_OFF_PACKAGE is the red fixture: a real artifact from a real OTel-OFF
+# tree. Without it the test FAILS rather than passing, because a gate never
+# observed failing proves nothing. Produce one with:
+#   conan install . -pr conan/profiles/<p> -o "&:with_otel=False" -of build/<p>-otel-off
+#   cmake -S . -B build/<p>-otel-off -DFIXPP_BUILD_OTEL=OFF \
+#         -DFIXPP_ALLOW_OTEL_OFF_PACKAGE=ON ...
+#   cmake --build build/<p>-otel-off --target <export members> && cpack -G TGZ ...
+set(FIXPP_OTEL_OFF_PACKAGE "" CACHE FILEPATH
+    "Red fixture for T062a: a package built from a genuinely OTel-OFF tree")
+add_test(
+  NAME fixpp::packaging::telemetry-provenance
+  COMMAND "${CMAKE_COMMAND}"
+    "-DFIXPP_MAIN_BUILD_DIR=${CMAKE_BINARY_DIR}"
+    "-DFIXPP_WORK_DIR=${_fixpp_pkg_work}/telemetry"
+    "-DFIXPP_OTEL_OFF_PACKAGE=${FIXPP_OTEL_OFF_PACKAGE}"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/run_telemetry_provenance_witness.cmake"
+)
+set_tests_properties(fixpp::packaging::telemetry-provenance PROPERTIES
+  RUN_SERIAL TRUE
+  TIMEOUT 600
+  LABELS "packaging"
+)
