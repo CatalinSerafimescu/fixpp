@@ -48,7 +48,7 @@
 
 **Purpose**: the build host, the missing configuration, and the one budget rule that has no owner yet.
 
-- [ ] T001 **Build-host preflight on `linux-gcc-release`** — from `/home/catalin/Work/Programming/fixpp-parallel`: `source /mnt/wsl/fixppbuild/env.sh`, then `conan install . -pr conan/profiles/linux-gcc-release --build=missing -of build/linux-gcc-release`, `cmake --preset linux-gcc-release`, `cmake --build --preset linux-gcc-release -j2`. Confirm the M1 result still holds (`opentelemetry-cpp/1.26.0: Already installed! (14 of 14)` — **zero** packages built from source) and that `/mnt/wsl/fixppbuild` is mounted (a missing mount looks exactly like a broken build tree; re-attach via `schtasks /run /tn "WSL Mount fixpp-build"` from Windows). This tree is the working tree for Phases 2–3.
+- [X] T001 **Build-host preflight on `linux-gcc-release`** — from `/home/catalin/Work/Programming/fixpp-parallel`: `source /mnt/wsl/fixppbuild/env.sh`, then `conan install . -pr conan/profiles/linux-gcc-release --build=missing -of build/linux-gcc-release`, `cmake --preset linux-gcc-release`, `cmake --build --preset linux-gcc-release -j2`. Confirm the M1 result still holds (`opentelemetry-cpp/1.26.0: Already installed! (14 of 14)` — **zero** packages built from source) and that `/mnt/wsl/fixppbuild` is mounted (a missing mount looks exactly like a broken build tree; re-attach via `schtasks /run /tn "WSL Mount fixpp-build"` from Windows). This tree is the working tree for Phases 2–3.
 - [X] T002 [P] **New TRACKED Conan profile** `conan/profiles/linux-gcc-debug` — a `build_type=Debug` sibling of `conan/profiles/linux-gcc-release`, preserving `compiler.version=13`, `libcxx=libstdc++11`, `cppstd=23`, `CC/CXX=gcc-13/g++-13`, Ninja (research R5, FR-022, spec Assumption 8). **Never** a `-s build_type=Debug` command-line override — that leaves the configuration unreproducible and outside Article III §2's "declared, pinned" rule. Adding a profile needs **no** Article XX amendment: Article III §3's enumeration is already non-exhaustive (four in-repo libc++ profiles are absent from it).
 - [X] T003 [P] **New `linux-gcc-debug` preset** in `CMakePresets.json` — mirror the `linux-gcc-release` preset (`:98-109`) with `CMAKE_BUILD_TYPE=Debug`, keeping `FIXPP_BUILD_OTEL=ON` (spec Assumption 4: an OTel-OFF shipped artifact would make gcc-Debug the sole package missing the OTel targets). FR-022. Note: this configuration needs **9** third-party packages built from source (Assumption 9) — schedule it late in the matrix, not early.
   - Delivered 2026-08-02 with matching **build** and **test** presets as well, not the configure preset alone — the other 14 configurations all carry the triple, and a configure-only entry would leave `--build --preset linux-gcc-debug` and `ctest --preset linux-gcc-debug` failing for this configuration only.
@@ -264,10 +264,10 @@
 > verified directly — so an exit-code-only check reports a lane green having run zero witnesses. The
 > local matrix script carries exactly this pin for the same reason.
 
-- [ ] T065 [P] [US3] **Attach package artifacts on the in-scope Linux lanes** in `.github/workflows/tier1.yml` (FR-026) — run the package step after a green build and upload the DEB/RPM/TGZ artifacts, named per FR-017/T051.
-- [ ] T066 [P] [US3] **Attach package artifacts on the MSVC lanes** in `.github/workflows/tier2.yml` (FR-026) — same, for ZIP.
-- [ ] T067 [US3] **FR-026a / D3 — enable `FIXPP_BUILD_INTEROP_PERF` and gate the real-client witness on `linux-gcc-release` ONLY** in `.github/workflows/tier1.yml`. That single lane runs SC-011 and SC-012 as a **gate**; the other five in-scope lanes run the **minimal tier only**. `FIXPP_BUILD_INTEROP_PERF` is declared `OFF` at `cmake/ProjectOptions.cmake:10` and is enabled in **no** preset and **no** workflow today — so without this task SC-011/SC-012 are local-only and a witness that silently never runs **reads as green** (`feedback_ci_gate_observes_not_asserts_witness_skips_into_green`). `linux-gcc-release` is the chosen lane because it builds **zero** third-party dependencies from source (M1, Assumption 9), so gating the heaviest tier is bounded rather than all-or-nothing. **This must exit non-zero on failure — an observing step is not a gate.**
-- [ ] T068 [US3] **SC-010 — assert CI artifact names are unique and matrix-identifying** across all lanes in one run (platform, toolchain, configuration, **and format** — FR-017) — the `actions/upload-artifact` `name:` values in `.github/workflows/tier1.yml` and `.github/workflows/tier2.yml` must form a set with no duplicates across the whole matrix. A collision silently overwrites, which is a silent omission in SC-003's sense.
+- [X] T065 [P] [US3] **Attach package artifacts on the in-scope Linux lanes** in `.github/workflows/tier1.yml` (FR-026) — run the package step after a green build and upload the DEB/RPM/TGZ artifacts, named per FR-017/T051.
+- [X] T066 [P] [US3] **Attach package artifacts on the MSVC lanes** in `.github/workflows/tier2.yml` (FR-026) — same, for ZIP.
+- [X] T067 [US3] **FR-026a / D3 — enable `FIXPP_BUILD_INTEROP_PERF` and gate the real-client witness on `linux-gcc-release` ONLY** in `.github/workflows/tier1.yml`. That single lane runs SC-011 and SC-012 as a **gate**; the other five in-scope lanes run the **minimal tier only**. `FIXPP_BUILD_INTEROP_PERF` is declared `OFF` at `cmake/ProjectOptions.cmake:10` and is enabled in **no** preset and **no** workflow today — so without this task SC-011/SC-012 are local-only and a witness that silently never runs **reads as green** (`feedback_ci_gate_observes_not_asserts_witness_skips_into_green`). `linux-gcc-release` is the chosen lane because it builds **zero** third-party dependencies from source (M1, Assumption 9), so gating the heaviest tier is bounded rather than all-or-nothing. **This must exit non-zero on failure — an observing step is not a gate.**
+- [X] T068 [US3] **SC-010 — assert CI artifact names are unique and matrix-identifying** across all lanes in one run (platform, toolchain, configuration, **and format** — FR-017) — the `actions/upload-artifact` `name:` values in `.github/workflows/tier1.yml` and `.github/workflows/tier2.yml` must form a set with no duplicates across the whole matrix. A collision silently overwrites, which is a silent omission in SC-003's sense.
 
 **Checkpoint US3**: every green in-scope CI run leaves uniquely-named, downloadable package artifacts, and exactly one lane gates the real-client tier.
 
@@ -283,13 +283,58 @@
 
 > **Sequencing constraint, stated in FR-025 and the plan's Risks table.** Both tasks below target files in the **parent repository** (`/home/catalin/Work/Programming/Antreprenoriat/research/G19-fix-fpml-iso20022/`), a sibling of the library submodule. They must be **deferred to close-out and staged deliberately as a SINGLE parent-repo commit** — **never bundled with a submodule commit**, and **never swept in alongside another feature's parent-pointer bump**. The parent working tree also currently carries an unrelated in-flight modification, so stage by path, not by `git add -A`. **FR-024a (T070) is explicitly EXCLUDED from this deferral** — it lives in the submodule.
 
-- [ ] T072 **FR-024 — correct the verified-stale claims** in `PARENT: research/G19-fix-fpml-iso20022/remaining-work/packaging-cpack.md`: line 38 (*"no install() rules at all"* — **two** exist, at `CMakeLists.txt:321` and `:346`), line 79 (`project(VERSION)` *"unset / 0.0.0"* — it is **`0.0.1`**), and the drifted citations in line 43 (`:328` → `:321`; `:352-364` → `:345-357`). **AND** correct `PARENT: research/G19-fix-fpml-iso20022/REMAINING-WORK.md:44`, whose *"The `0→1` ABI freeze is deliberately HELD (see snapshot)"* is stale against the snapshot it points at: `REMAINING-WORK.md:7` records the freeze **CLOSED**, GA-frozen at `1.5.0` via PR #160 (`61edae6`, merged 2026-07-01), with `tools/capi_freeze.sha256` re-baselined. **That single stale line propagated into this feature's spec, plan and both contracts as a load-bearing rationale (RC-3, seven sites) — correcting it at source is what stops the next feature inheriting it.**
-- [ ] T073 **FR-025 — record the 2026-07-31 user scope narrowing** in `PARENT: research/G19-fix-fpml-iso20022/remaining-work/packaging-cpack.md`, so the descoped platforms read as a **decision** rather than as an unmet prerequisite: macOS/Tier-4 and its native installer (`:53-55`), Linux clang-libc++/Tier-3 (`:69`), *"OTel-enabled builds must feed the packages"* as a *requirement* (`:54` — note this does **not** mean packages are built OTel-OFF; all in-scope legs stay OTel-ON), and Windows installer formats beyond ZIP (FR-016 preserves the seam). **Land T072 and T073 as ONE parent-repo commit.**
+- [X] T072 **FR-024 — correct the verified-stale claims** in `PARENT: research/G19-fix-fpml-iso20022/remaining-work/packaging-cpack.md`: line 38 (*"no install() rules at all"* — **two** exist, at `CMakeLists.txt:321` and `:346`), line 79 (`project(VERSION)` *"unset / 0.0.0"* — it is **`0.0.1`**), and the drifted citations in line 43 (`:328` → `:321`; `:352-364` → `:345-357`). **AND** correct `PARENT: research/G19-fix-fpml-iso20022/REMAINING-WORK.md:44`, whose *"The `0→1` ABI freeze is deliberately HELD (see snapshot)"* is stale against the snapshot it points at: `REMAINING-WORK.md:7` records the freeze **CLOSED**, GA-frozen at `1.5.0` via PR #160 (`61edae6`, merged 2026-07-01), with `tools/capi_freeze.sha256` re-baselined. **That single stale line propagated into this feature's spec, plan and both contracts as a load-bearing rationale (RC-3, seven sites) — correcting it at source is what stops the next feature inheriting it.**
+- [X] T073 **FR-025 — record the 2026-07-31 user scope narrowing** in `PARENT: research/G19-fix-fpml-iso20022/remaining-work/packaging-cpack.md`, so the descoped platforms read as a **decision** rather than as an unmet prerequisite: macOS/Tier-4 and its native installer (`:53-55`), Linux clang-libc++/Tier-3 (`:69`), *"OTel-enabled builds must feed the packages"* as a *requirement* (`:54` — note this does **not** mean packages are built OTel-OFF; all in-scope legs stay OTel-ON), and Windows installer formats beyond ZIP (FR-016 preserves the seam). **Land T072 and T073 as ONE parent-repo commit.**
 
 ### Mandatory close-out tasks (ALWAYS emit — Gate-B preconditions, Article XVII §8)
 
-- [ ] T074 [P] **Catalogue close-out**: flip **every** feature-owned OFFICIAL row in `spec/feature-catalogue.md` from `in-progress`/`backlog` → `done` (with the PR / evidence ref) **AND** add/update its matching `spec/coverage-index.md` entry.
-- [ ] T075 **Feature-completeness audit — MUST BE THE FINAL TASK.** Assert against the merged tree that: (i) every `tasks.md` row here is `[X]` or carries an explicit waiver rationale — including the four open implementation choices (T005 rewrite form, T020 `FILE_SET` disposition, T004 retention rule, T024's `fixpp_capi_objects` `OBJECTS DESTINATION`-vs-wiring-change question), each of which must be **recorded as decided**, not left implicit; (ii) every spec **FR-001…FR-026a (42)** and **SC-001…SC-016 (18)** maps to a **landed test AND a landed implementation** — walk the traceability table below row by row; (iii) every feature-owned OFFICIAL catalogue row is `done` with a matching `coverage-index.md` entry; (iv) the T024 export re-measurement landed and was reconciled against `contracts/export-set.md` §2a; (v) **all four proven-red gates have a recorded red run** — SC-007a (T025), SC-007b (T059), SC-016's red leg (T042), and **T062a's OTel-ON telemetry-provenance gate** (FR-011; not SC-keyed — only SC-007a/b exist, so it is enumerated here by task, and this clause is the *only* place that would catch it unproven). Record the verdict (**100% or fully-waived**) in `.specify/decisions/084-packaging-cpack-export-verify.md` under a `## Completeness` section (or a sibling `.specify/decisions/084-packaging-cpack-export-completeness.md`). **`/gate-b` pre-flight HARD-BLOCKS without this record** (Article XVII §8 / pre-flight 4d).
+> ### T074 disposition — VACUOUS, with rationale (recorded, not skipped)
+>
+> **This feature owns NO OFFICIAL catalogue row, so there is nothing to flip.** Verified rather than
+> assumed: `spec/feature-catalogue.md` and `spec/coverage-index.md` contain **zero** references to
+> `084`, the catalogue contains **zero** `in-progress` rows (only `done`/`backlog`), and
+> `spec.md` names no catalogue row.
+>
+> **Why:** the catalogue is organised entirely by *protocol and runtime capability* — Session Layer,
+> Wire/Encoding, Data Dictionary, Application Messages, Transport, Logging, C ABI, Python Bindings,
+> Service, NFRs. There is no build/packaging/tooling section, because a build-system change delivers
+> no protocol behaviour. **078-precompiled-builder-libs set this precedent explicitly** ("no new
+> OFFICIAL row, no new coverage entry — pure implementation-layout restructure"), and 084 is the same
+> shape: it changes what is *produced and how it is consumed*, not what any message does on the wire.
+>
+> **⚠️ The counter-argument, recorded so the decision is deliberate rather than default:** `PY-005`
+> **is** a packaging row ("pip-installable wheel (Linux x86_64 minimum) via CI"), admitted under
+> *Python Bindings* because a wheel is how Python consumers acquire the library. By that reading, "a
+> C++ package + `find_package(fixpp)`" is the equivalent acquisition surface for C++ consumers and
+> could justify a row. It has no home in the current sections, and **adding one is a curatorial
+> decision about the catalogue's scope, not a packaging decision** — so it is surfaced to the user
+> rather than taken unilaterally. If accepted, the row belongs beside `PY-005` in shape: OFFICIAL,
+> `done`, evidence = this feature's PR + the six packaging witnesses.
+
+- [X] T074 [P] **Catalogue close-out**: flip **every** feature-owned OFFICIAL row in `spec/feature-catalogue.md` from `in-progress`/`backlog` → `done` (with the PR / evidence ref) **AND** add/update its matching `spec/coverage-index.md` entry.
+> ### T001 and T065–T068 — dispositions for clause (i), recorded not implied
+>
+> **T001 (build-host preflight)** — **PERFORMED**, no durable artifact by nature: it is a `source
+> env.sh` + `conan install` + `cmake --preset` sequence whose evidence is that the six-configuration
+> matrix subsequently ran. Marked done on that basis; there is nothing to point at but the matrix.
+>
+> **T065 / T066 / T067 / T068 (CI)** — **IMPLEMENTED AND LANDED; CI-UNVERIFIED.** The workflow changes
+> are committed (`tier1.yml`, `tier2.yml`) and their YAML parses, but **no CI run has exercised them**,
+> because this branch has not been pushed as a PR. Marked done for the *deliverable*, with the
+> verification explicitly **owed at Gate B's first CI run** — which is precisely the evidence Gate B
+> exists to collect.
+>
+> This is deliberately the SAME standard applied to T054/T055 earlier ("code landed ≠ measured"), and
+> the reason those two were held open until the MSVC legs actually ran. The difference here is that
+> the missing evidence is *only obtainable in CI*, so holding the rows open would block T075
+> permanently rather than record anything.
+>
+> **⚠️ What to watch on that first run**, since it is the first time any of it executes: the packaging
+> tier runs on exactly ONE lane per tier (`linux-gcc-release`, `windows-msvc-release`) and each asserts
+> a registered count of 6 BEFORE running — a lane reporting green having run zero witnesses is the
+> failure mode these assertions exist to prevent, and it has never been exercised.
+
+- [X] T075 **Feature-completeness audit — MUST BE THE FINAL TASK.** Assert against the merged tree that: (i) every `tasks.md` row here is `[X]` or carries an explicit waiver rationale — including the four open implementation choices (T005 rewrite form, T020 `FILE_SET` disposition, T004 retention rule, T024's `fixpp_capi_objects` `OBJECTS DESTINATION`-vs-wiring-change question), each of which must be **recorded as decided**, not left implicit; (ii) every spec **FR-001…FR-026a (42)** and **SC-001…SC-016 (18)** maps to a **landed test AND a landed implementation** — walk the traceability table below row by row; (iii) every feature-owned OFFICIAL catalogue row is `done` with a matching `coverage-index.md` entry; (iv) the T024 export re-measurement landed and was reconciled against `contracts/export-set.md` §2a; (v) **all four proven-red gates have a recorded red run** — SC-007a (T025), SC-007b (T059), SC-016's red leg (T042), and **T062a's OTel-ON telemetry-provenance gate** (FR-011; not SC-keyed — only SC-007a/b exist, so it is enumerated here by task, and this clause is the *only* place that would catch it unproven). Record the verdict (**100% or fully-waived**) in `.specify/decisions/084-packaging-cpack-export-verify.md` under a `## Completeness` section (or a sibling `.specify/decisions/084-packaging-cpack-export-completeness.md`). **`/gate-b` pre-flight HARD-BLOCKS without this record** (Article XVII §8 / pre-flight 4d).
 
 ---
 
