@@ -476,6 +476,23 @@ if(FIXPP_BUILD_CODEGEN_TOOL)
   )
 endif()
 
+# ── 084: export + packaging surface ──────────────────────────────────────────
+#
+# SKIPPED ENTIRELY during the codegen bootstrap. cmake/Codegen.cmake re-configures
+# THIS SAME root CMakeLists into _codegen_bootstrap/ with
+# FIXPP_CODEGEN_BOOTSTRAP_RUNNING=ON to build just the host codegen tool. That
+# sub-configure deliberately does not create the dictionary/codegen targets
+# (src/dictionary/CMakeLists.txt:73 guards fixpp_dict_dispatch_bridge on exactly
+# this flag), so the fail-closed membership check below would fire and abort the
+# bootstrap. A build-tool-only configure must not define an install or export
+# surface at all.
+#
+# ⚠️ This only ever manifests on a FRESH tree: the bootstrap runs when
+# _codegen_bootstrap/ does not yet exist, so an already-configured tree skips it
+# and hides the fault. Found 2026-08-02 by the first configure of a new build
+# directory, after many green reconfigures of an existing one.
+if(NOT FIXPP_CODEGEN_BOOTSTRAP_RUNNING)
+
 # ── 084 T022/T023: the fixppTargets export set ───────────────────────────────
 #
 # Membership basis: the ELEVEN measured members (the executed generate run
@@ -724,6 +741,8 @@ install(
 
 # ── 084 T048-T057: CPack. Must come AFTER every install() rule above ─────────
 include(cmake/FixppPackaging.cmake)
+
+endif()  # NOT FIXPP_CODEGEN_BOOTSTRAP_RUNNING — see the banner above the export set
 
 # 077/078: the heavy_builder_compile Ninja job pool (#197 CI stopgap that capped
 # concurrent compilation of the deduped-header TUs to 2) is removed (078 T034) —
