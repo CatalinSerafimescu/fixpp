@@ -104,3 +104,30 @@ set_tests_properties(fixpp::packaging::telemetry-provenance PROPERTIES
   TIMEOUT 600
   LABELS "packaging"
 )
+
+# ── T038/T039/T040 (FR-005, SC-001): the REAL-CLIENT tier ───────────────────
+# The only witness whose client was NOT written for this feature: fixpp's own
+# ~1700-line perf/interop driver, built unmodified against the installed package
+# and RUN over a real loopback FIX session. It is also the first witness to
+# compile an asio header, which is what a package exporting asio-typed public
+# APIs actually has to support.
+#
+# The longest TIMEOUT here: this leg stage-installs, configures, compiles a
+# 1700-line TU against the full session/transport/tls stack, and then runs a
+# 220-message FIX session.
+add_test(
+  NAME fixpp::packaging::real-client
+  COMMAND "${CMAKE_COMMAND}"
+    "-DFIXPP_MAIN_BUILD_DIR=${CMAKE_BINARY_DIR}"
+    "-DFIXPP_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+    "-DFIXPP_PROJECT_SRC_DIR=${CMAKE_CURRENT_SOURCE_DIR}/real_client"
+    "-DFIXPP_WORK_DIR=${_fixpp_pkg_work}/real-client"
+    "-DFIXPP_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
+    "-DFIXPP_BUILD_TYPE=${CMAKE_BUILD_TYPE}"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/run_real_client_witness.cmake"
+)
+set_tests_properties(fixpp::packaging::real-client PROPERTIES
+  RUN_SERIAL TRUE
+  TIMEOUT 1200
+  LABELS "packaging"
+)

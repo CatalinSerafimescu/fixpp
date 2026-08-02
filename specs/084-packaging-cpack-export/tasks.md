@@ -128,9 +128,43 @@
 
 ### The real-client witness (existing program, adapted)
 
-- [ ] T038 [P] [US1] **Add the packaged-variant path to `perf/CMakeLists.txt`** (research R9) with **three subtractions**, none of which changes the program's status as a real client: (1) drop `src/` and `tests/` from the include path (`:51-54`) — SC-012 forbids any source-tree path; (2) drop the `HdrHistogram_c` `FetchContent` (`:43-47`) — a **network fetch**, and latency instrumentation is irrelevant to a link-and-run witness; (3) replace the one non-public include, the test-support dictionary helper `support/minimal_dictionary.hpp`, with a **runtime load of a shipped dictionary** via `fixpp::dict::load_any` (which is what FR-018a makes possible). Also do **not** carry forward the stale comment at `:15-17` claiming `fixpp_transport`/`fixpp_tls` expose asio/OpenSSL *"PRIVATEly"* — `src/transport/CMakeLists.txt:43-49` links OpenSSL **PUBLIC** (research R7).
-- [ ] T039 [US1] **New `tests/packaging/run_real_client_witness.cmake` + its ctest registration** (SC-011, FR-010a, FR-010b) — build `perf/fixpp_perf_driver.cpp` **out-of-tree** against the installed package, link it, and **run it against a live counterparty**. Register `RUN_SERIAL` with an explicit `TIMEOUT`. It is gated behind `FIXPP_BUILD_INTEROP_PERF` (declared `OFF` at `cmake/ProjectOptions.cmake:10`), so the witness must **enable it explicitly** rather than assume it is present. This is the tier that catches an export which **resolves but cannot link a real program**, and the only one that proves FR-010b — the exported targets must carry the static-link ordering (`libfixpp_tls.a` references cryptography symbols and needs the fixpp archives to precede them; `perf/CMakeLists.txt:56-57` hand-rolls it today) so a consumer never restates it. ⚠️ **This inverts a standing caution**: the driver is documented as needing an in-tree build so it links freshly generated libraries rather than a stale prebuilt one. Building it against an installed package is safe **only** because the package comes from the build under test — which is what FR-021a (T053/T060) enforces. **Treat any relaxation of FR-021a as reintroducing the staleness trap that guidance was written to prevent.**
-- [ ] T040 [US1] **SC-012 — the NAMED equivalent check, not the impossible one.** The *"source tree unavailable"* form is **impossible by construction and MUST NOT be claimed**: the real client *is* `perf/fixpp_perf_driver.cpp` and its build *is* `perf/CMakeLists.txt`, both inside the source tree. The operative check is: **configure the adapted client from a directory OUTSIDE the source tree with `CMAKE_PREFIX_PATH` set only to the staged prefix, then assert the generated `compile_commands.json` and the link line contain ZERO paths under the fixpp source root.** Assert it mechanically; an "or an equivalent check" branch that nobody writes is the `feedback_ci_gate_observes_not_asserts_witness_skips_into_green` shape.
+> ### ⚠️ AMENDED AT IMPLEMENTATION — 2026-08-02. Delivered as a standalone project, not a `perf/` variant.
+>
+> **The claim T038–T040 were written to establish is unchanged and is fully delivered**: a real,
+> pre-existing client builds and runs against the installed package with no source-tree path on its
+> compile or link line. What changed is *where* the packaged-variant lives, and the change makes the
+> claim **stronger**, because the driver is now used **byte-for-byte unmodified** (asserted by sha256
+> in the runner) instead of adapted.
+>
+> Delivered as `tests/packaging/real_client/` (a standalone `project()`), configured from a **copy**
+> under the witness work dir, registered as `fixpp::packaging::real-client`.
+>
+> Three consequences for the task text below, all recorded rather than silently diverged:
+>
+> 1. **T038's "add the path to `perf/CMakeLists.txt`" does not apply.** `perf/` is shared with the
+>    interop workstream, and a target defined there inherits the top-level directory scope — so
+>    satisfying T040 inside `perf/` would mean proving a negative about inherited state. A separate
+>    `project()` boundary makes T040 **structural**: there is no producer source path in scope to leak.
+> 2. **T038 subtraction (2) — "drop the `HdrHistogram_c` FetchContent" — is met with a witness-local
+>    shim** (`real_client/shim/hdr/hdr_histogram.h`), not by deletion. Deleting it would require
+>    editing the driver's `hdr_*` call sites, which destroys the "real, unmodified client" property
+>    that is this tier's entire value. The network fetch is gone either way.
+> 3. **T038 subtraction (3) — "replace the dictionary helper with a runtime `load_any` of a shipped
+>    dictionary" — is met by COPYING `tests/support/minimal_dictionary.hpp` next to the copied `.cpp`.**
+>    Same reason: `load_any` would mean editing the driver, and it would also swap the minimal FIX 4.2
+>    dictionary for FIX 4.4, changing the client's runtime behaviour inside a packaging witness. The
+>    shipped-dictionary load path is already witnessed directly by **T037** in
+>    `run_consumer_witness.cmake`, so nothing is lost. Copying (not duplicating into the repo) keeps the
+>    helper from drifting out of sync with the tracked one.
+>
+> T039's `FIXPP_BUILD_INTEROP_PERF` note likewise does not apply — the standalone project does not
+> consult that option. **FR-010b is still proven**, and more visibly: the witness restates no static
+> link ordering, no `--start-group`, and no OpenSSL/ZLIB `find_library` probes, all of which
+> `perf/CMakeLists.txt` hand-rolls when building in-tree.
+
+- [X] T038 [P] [US1] **Add the packaged-variant path to `perf/CMakeLists.txt`** (research R9) with **three subtractions**, none of which changes the program's status as a real client: (1) drop `src/` and `tests/` from the include path (`:51-54`) — SC-012 forbids any source-tree path; (2) drop the `HdrHistogram_c` `FetchContent` (`:43-47`) — a **network fetch**, and latency instrumentation is irrelevant to a link-and-run witness; (3) replace the one non-public include, the test-support dictionary helper `support/minimal_dictionary.hpp`, with a **runtime load of a shipped dictionary** via `fixpp::dict::load_any` (which is what FR-018a makes possible). Also do **not** carry forward the stale comment at `:15-17` claiming `fixpp_transport`/`fixpp_tls` expose asio/OpenSSL *"PRIVATEly"* — `src/transport/CMakeLists.txt:43-49` links OpenSSL **PUBLIC** (research R7).
+- [X] T039 [US1] **New `tests/packaging/run_real_client_witness.cmake` + its ctest registration** (SC-011, FR-010a, FR-010b) — build `perf/fixpp_perf_driver.cpp` **out-of-tree** against the installed package, link it, and **run it against a live counterparty**. Register `RUN_SERIAL` with an explicit `TIMEOUT`. It is gated behind `FIXPP_BUILD_INTEROP_PERF` (declared `OFF` at `cmake/ProjectOptions.cmake:10`), so the witness must **enable it explicitly** rather than assume it is present. This is the tier that catches an export which **resolves but cannot link a real program**, and the only one that proves FR-010b — the exported targets must carry the static-link ordering (`libfixpp_tls.a` references cryptography symbols and needs the fixpp archives to precede them; `perf/CMakeLists.txt:56-57` hand-rolls it today) so a consumer never restates it. ⚠️ **This inverts a standing caution**: the driver is documented as needing an in-tree build so it links freshly generated libraries rather than a stale prebuilt one. Building it against an installed package is safe **only** because the package comes from the build under test — which is what FR-021a (T053/T060) enforces. **Treat any relaxation of FR-021a as reintroducing the staleness trap that guidance was written to prevent.**
+- [X] T040 [US1] **SC-012 — the NAMED equivalent check, not the impossible one.** The *"source tree unavailable"* form is **impossible by construction and MUST NOT be claimed**: the real client *is* `perf/fixpp_perf_driver.cpp` and its build *is* `perf/CMakeLists.txt`, both inside the source tree. The operative check is: **configure the adapted client from a directory OUTSIDE the source tree with `CMAKE_PREFIX_PATH` set only to the staged prefix, then assert the generated `compile_commands.json` and the link line contain ZERO paths under the fixpp source root.** Assert it mechanically; an "or an equivalent check" branch that nobody writes is the `feedback_ci_gate_observes_not_asserts_witness_skips_into_green` shape.
 
 ### The clean-environment witness (SC-016 — the only tier that inherits nothing)
 
