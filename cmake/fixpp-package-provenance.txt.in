@@ -20,10 +20,16 @@ Field notes
 
 source-worktree
     `clean` means the worktree carried no uncommitted change when this package
-    was configured; `dirty` means it did, and the source-revision above
+    was STAGED FOR INSTALL; `dirty` means it did, and the source-revision above
     therefore does NOT fully identify the inputs. `unknown` means neither could
     be established — the source tree was not a git repository (a source-tarball
     build, for instance) and no explicit value was supplied.
+
+    Measured at INSTALL time, not configure time (084 Gate B round 2, R2-F1).
+    Configure-time measurement was frozen by `configure_file` and could not see
+    a source edit made after configuration, so an artifact built from modified
+    sources shipped stamped `clean` — a false affirmative. Every `cpack` /
+    `cmake --install` now restamps.
 
     The value is normally measured with `git status --porcelain`. It can also be
     supplied at configure time via FIXPP_PACKAGE_WORKTREE, alongside
