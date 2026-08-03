@@ -1,4 +1,4 @@
-name: Reclaim unreachable PR Actions caches
+name: Reclaim unreachable and superseded Actions caches
 
 # WHY THIS EXISTS
 #
@@ -57,6 +57,23 @@ on:
   pull_request_target:
     types: [closed]
 
+  # REQUIRED for the superseded-main sweep to reach a steady state of ONE entry
+  # per leg. `push: main` is the wrong moment for it: this workflow finishes in
+  # ~20 seconds while the matrices it shares that event with save their ccache an
+  # hour or more later. Measured for 8dc7ec9a on 2026-08-03 — sweep ran
+  # 15:57:33→15:57:53; the saves landed 16:57 through 17:19. So a push-triggered
+  # sweep can only ever collapse the PREVIOUS generation, and the moment the
+  # current run saves, every leg is back to two. At ~7 GB for one live set that
+  # is ~14 GB against a 10 GB cap — still evicting, just half as fast.
+  #
+  # Firing on the tiers' COMPLETION instead puts the sweep after the saves, which
+  # is the only ordering that leaves one entry per leg. Names must match the
+  # `name:` of each tier workflow exactly.
+  workflow_run:
+    workflows: ["Tier 1 — Linux CI", "Tier 2 — Windows CI", "Tier 3 — Linux libc++ CI"]
+    types: [completed]
+    branches: ["main"]
+
   workflow_dispatch:
 
 # `pull_request_target` rather than `pull_request`: for a PR from a fork the
@@ -79,7 +96,7 @@ concurrency:
 
 jobs:
   reclaim:
-    name: Delete caches belonging to PRs that are no longer open
+    name: Delete caches from closed PRs and superseded main entries
     runs-on: ubuntu-latest
     steps:
       - name: Sweep unreachable PR cache scopes
@@ -173,4 +190,99 @@ jobs:
                     | group_by(.ref)
                     | .[]
                     | "| \(.[0].ref) | \(length) | \((map(.mb)|add)|round) |"'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # SECOND SWEEP — the default branch now evicts ITSELF.
+      #
+      # The PR sweep above fixed the PR-scoped squatter (measured 2026-08-03:
+      # zero bytes on any refs/pull/* ref). What it cannot see is that
+      # `hendrikmuhs/ccache-action` writes a NEW key every run —
+      # `ccache-<name>-<ISO8601>` — and never deletes the one it supersedes,
+      # while restoring via the `ccache-<name>-` prefix, so only the newest is
+      # ever read. Measured on this repo 2026-08-03, with PR scopes already at
+      # zero: 22 entries / 11.2 GB, 100% on refs/heads/main, over the 10 GB cap;
+      # `ccache-tier1-linux-clang-asan` was present THREE times. LRU was already
+      # biting — that day's tier1 ubsan and tsan saves had been evicted, leaving
+      # only the previous day's.
+      #
+      # KEEP-NEWEST-PER-KEY, and note what that deliberately does NOT do: the
+      # grouping key is the cache key with a trailing ISO8601 stamp stripped, and
+      # groups are matched by EXACT EQUALITY, never by prefix containment.
+      # `ccache-tier3-linux-clang-libc++` and `ccache-tier3-linux-clang-libc++-asan`
+      # are therefore different groups, not one group where the shorter swallows
+      # the longer. A key with no such stamp — `conan-abi-golden-<sha>`,
+      # `conan-wheel-manylinux228-<sha>` — matches nothing to strip, so it forms a
+      # group of one and is ALWAYS kept. Content-hashed keys are self-invalidating
+      # and are not this sweep's business.
+      #
+      # Deleting a superseded entry cannot affect an in-flight run: a restore has
+      # already happened by the time a build is running, and a save writes a new
+      # key. As above, a miss is self-healing.
+      - name: Sweep superseded default-branch ccache entries
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          # `|| 'main'` because the payload differs per trigger: a workflow_run
+          # event carries `repository`, but an empty value here would make the
+          # ref filter match nothing and the sweep silently no-op — the exact
+          # reports-success-having-done-nothing shape the step below guards.
+          DEFAULT_REF: refs/heads/${{ github.event.repository.default_branch || 'main' }}
+        run: |
+          set -euo pipefail
+
+          all=$(gh api --paginate "repos/${REPO}/actions/caches?per_page=100" \
+                  --jq '.actions_caches[] | "\(.id)\t\(.ref)\t\(.key)\t\(.size_in_bytes)\t\(.created_at)"' \
+                | awk -F'\t' -v ref="$DEFAULT_REF" '$2 == ref')
+
+          if [ -z "$all" ]; then
+            echo "No caches on ${DEFAULT_REF} — nothing to sweep."
+            exit 0
+          fi
+
+          # Decide first, delete second — same shape as the PR sweep. Emit
+          # "<group>\t<created_at>\t<id>\t<key>\t<size>", sort by group then
+          # created_at DESCENDING (ISO8601 is fixed-width, so lexicographic order
+          # IS chronological order), and mark every row after the first in each
+          # group. Exact-equality grouping is what `$1 == prev` gives us.
+          # NO `{n}` interval quantifiers in this regex: ubuntu-latest's default
+          # awk is mawk, which does not support them. Verified, not assumed — the
+          # `{4}` form was run under mawk here and aborts with
+          # `REcompile() - panic: values still on machine stack`. Spelled out with
+          # [0-9] instead; the grouping was then checked to produce byte-identical
+          # output under mawk, gawk and default awk on a fixture covering
+          # three-copy groups, libc++ vs libc++-asan, hash-suffixed keys and a
+          # fraction-less timestamp.
+          doomed=$(awk -F'\t' '
+              { grp = $3
+                sub(/-[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9](\.[0-9]+)?Z$/, "", grp)
+                printf "%s\t%s\t%s\t%s\t%s\n", grp, $5, $1, $3, $4 }' <<< "$all" \
+            | sort -t$'\t' -k1,1 -k2,2r \
+            | awk -F'\t' '$1 == prev { print $3 "\t" $4 "\t" $5 } { prev = $1 }')
+
+          if [ -z "$doomed" ]; then
+            echo "Every ${DEFAULT_REF} cache key is the newest of its group — nothing to sweep."
+            exit 0
+          fi
+
+          total=0; count=0; failed=0
+          while IFS=$'\t' read -r id key size; do
+            [ -n "${id:-}" ] || continue
+            if gh api -X DELETE "repos/${REPO}/actions/caches/${id}" </dev/null >/dev/null 2>&1; then
+              echo "  deleted  superseded  ${key}  ($((size / 1048576)) MB)"
+              total=$((total + size)); count=$((count + 1))
+            else
+              echo "::warning::failed to delete cache ${id} (${key})"
+              failed=$((failed + 1))
+            fi
+          done <<< "$doomed"
+
+          echo "Swept ${count} superseded entries, $((total / 1048576)) MB."
+          [ "$failed" -eq 0 ] || echo "::warning::${failed} entries could not be deleted."
+
+          {
+            echo ""
+            echo "### Superseded ${DEFAULT_REF} ccache sweep"
+            echo ""
+            echo "Swept **${count}** superseded entries, **$((total / 1048576)) MB**."
           } >> "$GITHUB_STEP_SUMMARY"

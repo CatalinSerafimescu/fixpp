@@ -11,9 +11,12 @@
 
 #include <cstddef>
 #include <cstring>
+#include <filesystem>
 #include <fixpp/core/error.hpp>
 #include <fixpp/wire/offset_table.hpp>
 #include <fixpp/wire/parser.hpp>
+#include <fstream>
+#include <iterator>
 #include <memory_resource>
 #include <string>
 #include <string_view>
@@ -234,6 +237,115 @@ TEST(WireOffsetTable, DoSCapPerInstanceRejectsOversizedSingleInstance) {
     EXPECT_EQ(g.error(), error::wire_group_too_large);
 }
 
+// 085 T013 (US2, FR-004/SC-004). Pins the DoS cap on the DICT-FREE fallback
+// branch of OffsetTable::group() (src/wire/offset_table.cpp's `else` arm,
+// post-085-relocation) — the one branch the dictionary-path tests above
+// cannot exercise, since a dict-free table has no `opaque_dict_`/
+// `group_member_fn_` and so always takes that `else`.
+//
+// Both a DICT-FREE construction (the 3-arg (frame_view, memory_resource*,
+// Config) constructor — never Parser<access_mode::Index>, which threads a
+// dictionary and lands on the dictionary branch instead) AND a TIGHTENED
+// Config are required to reach this: under the default Config the branch is
+// arithmetically unreachable (research.md R-2 — default_max_offset_entries ==
+// default_max_group_entries_per_instance == 4096, and build() clamps the
+// table at the former (offset_table.cpp:326), so the dict-free segment
+// entries_.size() - first is always <= 4095 < 4096 and inst_count > cap can
+// never hold). That is exactly why no such test existed before 085.
+//
+// Frame layout (envelope + body, whole-frame entries_ in document order):
+//   idx 0: 8=FIX.4.4   idx 1: 9=<len>   idx 2: 35=D   idx 3: 34=1
+//   idx 4: 453=1  <- count field (no_tag)
+//   idx 5: 448=PA <- first = count_idx+1 = 5; delim = entries_[5].tag = 448
+//   idx 6: 447=D  idx 7: 452=1  idx 8: 802=1
+//   idx 9: 10=000 <- checksum; dict-free group_end = entries_.size() = 10
+//
+// Dict-free extent rule (no dictionary => no per-instance re-walk on 448):
+// group_end is rest-of-message (10), so the loop's ONLY boundary before the
+// final one would be a LATER entry whose tag == delim (448) — there is none
+// here, so the sole boundary hit is k == group_end == 10. That makes ONE
+// instance spanning idx 5..9, inst_count = 10 - 5 = 5, which breaches
+// max_group_entries_per_instance = 3 (5 > 3) and must return
+// error::wire_group_too_large. Verified by running, not by reasoning alone
+// (per this task's instruction) — see T015's mutation transcript.
+//
+// The RED evidence for the companion mutation-transcript task (T015) lives in
+// .specify/decisions/085-fold-flat-cap-loop-verify.md.
+//
+// ⚠ THESE TWO TESTS ENCODE A KNOWN, FILED DEFECT — read the numbers with that
+// in mind. The 5-entry instance above is 448/447/452/802 **plus the trailing
+// checksum field 10=000**: on the dict-free path `group_end` is
+// rest-of-message, so top-level fields after the group count toward the last
+// instance. That is limitation **L-085-1 / fixpp#220**, preserved (not
+// repaired) by this feature because 085 is a semantics-preserving relocation.
+// Contrast `GroupExtentExcludesTrailingTopLevelFields` in this same file: on
+// the DICTIONARY path the trailing top-level field is correctly excluded.
+// When #220 is fixed, the real instance here becomes 4 entries, so
+// `AllowsWhenCapRaised`'s `entry_count()` expectation below changes 5 -> 4.
+// The rejecting pin is unaffected either way (4 still breaches a cap of 3);
+// only the entry_count assertion pins the buggy value.
+// Stated explicitly so these tests cannot be read as blessing the trailer
+// inclusion as intended behaviour.
+//
+// The two tests below MUST drive the identical frame — that is what makes them
+// a bracket around the cap threshold rather than two unrelated observations.
+// The bytes therefore live in this one helper instead of being duplicated in
+// each TEST body, so the invariant is enforced by construction rather than by
+// a comment asking the next editor to keep them in sync.
+std::vector<std::byte> dict_free_over_cap_frame() {
+    return make_raw_frame(
+        "35=D\x01"
+        "34=1\x01"
+        "453=1\x01"
+        "448=PA\x01"
+        "447=D\x01"
+        "452=1\x01"
+        "802=1\x01");
+}
+
+TEST(WireOffsetTable, DictFreeDoSCapPerInstanceRejectsOversizedInstance) {
+    auto buf = dict_free_over_cap_frame();
+    auto fv = fixpp::wire::test::make_frame_view(buf);
+    ASSERT_TRUE(fv.has_value());
+
+    std::pmr::monotonic_buffer_resource arena;
+    OffsetTable::Config tight_cfg{.max_offset_entries = 4096, .max_group_entries_per_instance = 3};
+    OffsetTable t{*fv, &arena, tight_cfg};
+    ASSERT_TRUE(t.build_status().has_value());
+
+    auto g = t.group(453);
+    ASSERT_FALSE(g.has_value());
+    EXPECT_EQ(g.error(), error::wire_group_too_large);
+}
+
+// 085 T014 (US2, FR-005a(ii)/SC-004a). Bracketing companion to the case
+// above: the IDENTICAL frame bytes, with max_group_entries_per_instance
+// raised to exactly the breaching instance's size (5) so the strict `>`
+// comparison no longer fires (5 > 5 is false) and group() succeeds. Same
+// frame is required — changing it would prove nothing about the threshold
+// this brackets.
+TEST(WireOffsetTable, DictFreeDoSCapPerInstanceAllowsWhenCapRaised) {
+    auto buf = dict_free_over_cap_frame();  // SAME frame as the rejecting pin — that is the bracket
+    auto fv = fixpp::wire::test::make_frame_view(buf);
+    ASSERT_TRUE(fv.has_value());
+
+    std::pmr::monotonic_buffer_resource arena;
+    OffsetTable::Config raised_cfg{.max_offset_entries = 4096, .max_group_entries_per_instance = 5};
+    OffsetTable t{*fv, &arena, raised_cfg};
+    ASSERT_TRUE(t.build_status().has_value());
+
+    auto g = t.group(453);
+    ASSERT_TRUE(g.has_value());
+    EXPECT_EQ(g->no_tag(), 453U);
+    // 5 = the four real members (448/447/452/802) + the trailing checksum
+    // 10=000, which the dict-free rest-of-message extent wrongly absorbs.
+    // This value pins L-085-1 / fixpp#220, NOT intended behaviour — it becomes
+    // 4 when that limitation is repaired.
+    EXPECT_EQ(g->entry_count(), 5U)
+        << "expected 5 only because L-085-1/#220 counts the trailing checksum "
+           "into the last dict-free instance; becomes 4 when #220 is fixed";
+}
+
 // RC#2: group slice must begin at the delimiter field's "tag=" prefix, NOT
 // at its value.  A real 2c GroupT parses "tag=value<SOH>..." as a sub-frame;
 // the leading "NNN=" must be present.
@@ -439,6 +551,128 @@ TEST(WireOffsetTable, GroupExtentSupportsMoreThanThirtyTwoDistinctMembers) {
     std::string_view second_instance{reinterpret_cast<char const*>(slices[1].data), slices[1].len};
     EXPECT_NE(first_instance.find("9033="), std::string_view::npos);
     EXPECT_EQ(second_instance.find("9999="), std::string_view::npos);
+}
+
+// Read a TU for source inspection, NORMALISING CRLF -> LF.
+//
+// The read is binary (no CRT text-mode translation), and the windows-msvc
+// runners check out with core.autocrlf=true, so on Windows this file arrives
+// with "\r\n" line endings. The FR-001b needles below anchor on "\n" at BOTH
+// ends in order to key on leading indentation, so without this normalisation
+// none of them matches on Windows — and the failure is asymmetric: the two
+// "expect 0" assertions pass VACUOUSLY while only the two "expect 1" ones fail.
+// A pin that cannot distinguish "the block moved" from "the file is unreadable
+// to my matcher" is no pin at all. Normalising here (rather than pinning
+// src/wire/offset_table.cpp to -text in .gitattributes) keeps line endings a
+// non-contract for a live source file: what FR-001b pins is indentation and
+// occurrence counts, and "\r" is incidental to both. No effect on Linux, so the
+// Article VII §3 RED->GREEN transcript recorded there still stands unchanged.
+std::string slurp(std::filesystem::path const& p) {
+    std::ifstream in(p, std::ios::binary);
+    std::string s{std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}};
+    std::erase(s, '\r');
+    return s;
+}
+
+// T006 — FR-001b red-first structural pin (085-fold-flat-cap-loop).
+// A SOURCE-inspection assertion, not a behaviour test: it asserts WHERE the
+// flat per-instance cap loop (currently OffsetTable::group()'s function
+// body, after the dict/dict-free if/else) lives in the source, and that it
+// moved into the dict-free `else` branch *unchanged*. Behaviour cannot
+// distinguish "flat loop in the function body" from "flat loop relocated
+// into the else branch" because the dictionary path's cap is already
+// enforced, redundantly, by consume_group_extent's nesting-aware comparison
+// (research.md R-1) — the flat re-walk is unreachable-as-an-error on the
+// dictionary path either way, so every behavioural test (dictionary-path
+// and dict-free) stays green whether or not the relocation has happened.
+// Only reading the source can tell the two states apart.
+//
+// Two independent keys are asserted, because one alone is insufficient:
+//
+// (a) THE BLOCK MOVED: `inst_start`'s declaration sits at 4-space
+//     (function-body) indentation before the move, and at 8-space
+//     (else-body) indentation after. This alone would also pass for an
+//     *inverted* relocation — `if (boundary) { ... }` replacing
+//     `if (!boundary) continue;` while re-indenting — which is semantically
+//     identical (so no behavioural test catches it) but violates C-3 #4 and
+//     FR-001a's "moved unchanged" requirement. So:
+//
+// (b) THE BLOCK MOVED UNCHANGED: the early-continue guard
+//     `if (!boundary) {` (immediately followed by `continue;`) sits at
+//     8-space before the move and at 12-space after. An else-inverted
+//     relocation would fail this key even though it passes key (a) — this
+//     is the only guard in the whole feature that would catch it (per
+//     tasks.md T006/T007).
+//
+// Mirrors tests/dictionary/load_any_test.cpp's
+// LoadAny.FR004_SingleSharedDispatchSourceInspection construction: plain
+// std::string::find/count, no AST.
+TEST(WireOffsetTable, FR001_SingleTraversalSourceInspection) {
+    std::filesystem::path const src{FIXPP_SRC_DIR};
+    std::string const tu = slurp(src / "wire" / "offset_table.cpp");
+    ASSERT_FALSE(tu.empty());
+
+    auto count_occurrences = [](std::string const& haystack, std::string const& needle) {
+        std::size_t n = 0;
+        for (std::size_t pos = haystack.find(needle); pos != std::string::npos;
+             pos = haystack.find(needle, pos + 1)) {
+            ++n;
+        }
+        return n;
+    };
+
+    // Key (a): the block moved.
+    std::size_t const inst_start_4space =
+        count_occurrences(tu, "\n    std::size_t inst_start = first;\n");
+    std::size_t const inst_start_8space =
+        count_occurrences(tu, "\n        std::size_t inst_start = first;\n");
+
+    // Key (b): the block moved unchanged.
+    std::size_t const boundary_guard_8space = count_occurrences(tu, "\n        if (!boundary) {\n");
+    std::size_t const boundary_guard_12space =
+        count_occurrences(tu, "\n            if (!boundary) {\n");
+
+    // ANTI-VACUITY GUARD — assert the block is in EXACTLY ONE of the two
+    // tracked indentations before asserting WHICH one.
+    //
+    // Every count above is an indentation-keyed needle anchored on "\n" at both
+    // ends, so anything that stops the matcher seeing the TU the way it expects
+    // — CRLF line endings, a reformat, a rename, a truncated read — drives all
+    // four counts to 0. That is not neutral: it SATISFIES both "expect 0"
+    // assertions, so the pin half-passes for a reason having nothing to do with
+    // the relocation it exists to prove. (Observed: this pin went red on
+    // windows-msvc with 4space=0/8space=0, where the "expect 0" leg passed
+    // vacuously. The CRLF cause is fixed in slurp() above; this guard makes the
+    // whole vacuity class impossible rather than just that one instance.)
+    //
+    // The sum is the right invariant because the block must exist somewhere:
+    // pre-move it is 4-space, post-move 8-space, never both and never neither.
+    // Deliberately NOT a whole-file count — `std::size_t inst_start = first;`
+    // legitimately appears twice, ours and group_slices_status's sibling walk at
+    // 16-space (which uses the POSITIVE `if (boundary) {` at 20-space, so it
+    // matches none of these four needles).
+    ASSERT_EQ(inst_start_4space + inst_start_8space, 1U)
+        << "the flat cap block's `inst_start` is in NEITHER tracked indentation (4-space="
+        << inst_start_4space << ", 8-space=" << inst_start_8space
+        << ") — the matcher cannot see the TU it is pinning, so the counts below are vacuous";
+    ASSERT_EQ(boundary_guard_8space + boundary_guard_12space, 1U)
+        << "the early-continue guard is in NEITHER tracked indentation (8-space="
+        << boundary_guard_8space << ", 12-space=" << boundary_guard_12space
+        << ") — the counts below are vacuous";
+
+    EXPECT_EQ(inst_start_4space, 0U)
+        << "4-space (function-body) inst_start occurrences: " << inst_start_4space
+        << " — expected 0 once the flat cap block has moved into the dict-free else branch";
+    EXPECT_EQ(inst_start_8space, 1U)
+        << "8-space (else-body) inst_start occurrences: " << inst_start_8space
+        << " — expected exactly 1 once the flat cap block has moved into the dict-free else branch";
+    EXPECT_EQ(boundary_guard_8space, 0U)
+        << "8-space (function-body) 'if (!boundary) {' occurrences: " << boundary_guard_8space
+        << " — expected 0 once the early-continue guard has moved unchanged into the else branch";
+    EXPECT_EQ(boundary_guard_12space, 1U)
+        << "12-space (else-body) 'if (!boundary) {' occurrences: " << boundary_guard_12space
+        << " — expected exactly 1 once the early-continue guard has moved unchanged into the else "
+           "branch";
 }
 
 }  // namespace
