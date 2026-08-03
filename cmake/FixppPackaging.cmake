@@ -183,8 +183,16 @@ set(CPACK_PACKAGE_DIRECTORY "${CMAKE_BINARY_DIR}/_packages")
 # Deliberately a TARGET rather than a post-CPack hook: CPack has no portable
 # "after all generators" hook, and a copy that silently did not happen would
 # leave T062 asserting over an empty directory.
-set(FIXPP_ARTIFACT_DIR "/mnt/wsl/fixppbuild/artifacts" CACHE PATH
+#
+# Default is a sibling of the build tree, NOT inside it -- FR-021 requires the
+# location to survive build-tree deletion, so nesting it under CMAKE_BINARY_DIR
+# would silently defeat the whole point of the variable. This is a developer
+# convenience default only; CI overrides it explicitly at configure time
+# (tier1.yml, tier2.yml) and does not rely on this value.
+cmake_path(SET _fixpp_default_artifact_dir NORMALIZE "${CMAKE_BINARY_DIR}/../artifacts")
+set(FIXPP_ARTIFACT_DIR "${_fixpp_default_artifact_dir}" CACHE PATH
     "Durable directory for finished package artifacts (survives build-tree deletion)")
+unset(_fixpp_default_artifact_dir)
 
 add_custom_target(fixpp-package
   COMMAND "${CMAKE_COMMAND}" -E make_directory "${FIXPP_ARTIFACT_DIR}"

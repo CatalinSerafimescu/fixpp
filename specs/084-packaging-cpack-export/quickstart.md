@@ -16,6 +16,8 @@ Runnable validation. Written to be followed after a context reset — every path
 | Package output | `/mnt/wsl/fixppbuild/artifacts/` — **survives build-tree deletion** |
 | ccache | 20 GB at `/mnt/wsl/fixppbuild/ccache` |
 
+`/mnt/wsl/fixppbuild/artifacts/` is **this host's chosen `-DFIXPP_ARTIFACT_DIR` override**, not the CMake built-in default. `FIXPP_ARTIFACT_DIR` is a `CACHE PATH` (`cmake/FixppPackaging.cmake`) that defaults to a sibling of the build tree (`${CMAKE_BINARY_DIR}/../artifacts`) — still outside it, per FR-021 — and is overridable per configure; CI does the same (`tier1.yml`, `tier2.yml`).
+
 **Two environment rules that cause silent damage if skipped:**
 
 ```bash
