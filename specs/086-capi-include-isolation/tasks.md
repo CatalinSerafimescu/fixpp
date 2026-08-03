@@ -30,7 +30,7 @@
 >    `set_target_properties()`; the round-1 `awk '/…/,/^$/'` captured two identical lines and `diff` exited 0
 >    *unconditionally*. Anchor on `/^set_target_properties\(<target> PROPERTIES$/,/^\)$/`.
 
-**Total: 58 tasks.** Tests are not optional in this feature — the witnesses *are* the deliverable.
+**Total: 60 tasks** (T001–T058 plus T014a and T019a, added at `/speckit-analyze` remediation — see the Gate A + analyze note below). Tests are not optional in this feature — the witnesses *are* the deliverable.
 
 ---
 
@@ -64,6 +64,7 @@
 - [ ] T012 [P] [US1] Add the **C** positive probe TU (same 12 headers, compiled as C) in `tests/consumer/probe_capi_positive_c.c`
 - [ ] T013 [P] [US1] Add the ❌ engine-header probe source `tests/consumer/probe_capi_negative.cpp` (`#include <fixpp/wire/parser.hpp>`) — probe a header whose own disappearance would itself be a defect (FR-008)
 - [ ] T014 [P] [US1] Add the ❌ **service-header** probe source `tests/consumer/probe_capi_negative_service.cpp` (`#include <fixpp/service/control_plane_factory.hpp>`) — a **distinct** matrix cell: a mis-wired `fixpp::capi` that picked up `include/service-iface` would leak this while the engine probe still passed
+- [ ] T014a [US1] **Extend `tests/consumer/consumer_capi_witness.cpp` per FR-009** — add a **non-elidable** reference (namespace-scope non-`static` non-`const` pointer, or a call; see T049 — an address assigned to an unused local can be optimised away with its relocation) to `fixpp_dict_load_from_xml` **and** `fixpp_engine_create`, so the witness pulls the **session/dictionary closure** out of the archive at *link* time. Today it references only `fixpp_library_version` + `fixpp_strerror`, whose objects need not reference session/dictionary/transport/TLS or either static-archive cycle — so it would stay green even if `$<LINK_ONLY:>` silently dropped a real transitive edge. The TU is **never executed** (`run_consumer_witness.cmake:110` runs `consumer_witness` only), so the added reference must not depend on runtime behaviour and must not be a call that could fail at runtime
 - [ ] T015 [US1] Wire T011–T014 into `tests/consumer/CMakeLists.txt` against `fixpp::capi`; run the witness and **record both ❌ probes returning TRUE** (i.e. the headers ARE reachable) against the unfixed package — this is the FR-007 red observation for the C-ABI leg, written to `$FIXPP_086_EVIDENCE/`
 
 ### Then the edit that makes them green
@@ -72,6 +73,7 @@
 - [ ] T017 [US1] `src/capi/CMakeLists.txt` — add `target_include_directories(fixpp_capi PUBLIC "$<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>" "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/capi>")`; BUILD stays permissive so in-tree is untouched (R8/I9)
 - [ ] T018 [US1] `CMakeLists.txt` (near `:446-451`) — add `install(DIRECTORY "${CMAKE_SOURCE_DIR}/include/fix/" DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/capi/fix")`. **Do not** add any `PATTERN … EXCLUDE` to the existing rule (FR-005a; note `:449-450` already carries two unrelated exclusions)
 - [ ] T019 [US1] Rebuild + re-install; confirm all four probes now behave per contracts §1 and record the paired evidence (positive TRUE **and** negative FALSE from the same configured consumer — FR-008a: the positive alone is equally consistent with the defect being present)
+- [ ] T019a [US1] Run `quickstart.md` §3 and **record its evidence** — the direct-property-delta assertion (C-3 leg 2 / FR-009a(i)): extract each target's property block with a range anchored on `/^set_target_properties\(<target> PROPERTIES$/,/^\)$/` (**never** a blank-line terminator) and compare the observed delta against the closed enumeration — OFF `{INTERFACE_LINK_LIBRARIES}`, ON `{INTERFACE_INCLUDE_DIRECTORIES, INTERFACE_LINK_LIBRARIES}` — so an unexpected **third** changed property fails. C-3 states its three legs are non-substitutable, and this one is otherwise reachable only by someone reading the quickstart rather than the task list (mirrors how T038 mirrors §7)
 
 **Checkpoint**: US1 is independently deliverable — the C-ABI isolation ships even if nothing below lands.
 
@@ -103,7 +105,7 @@
 
 **Goal**: each must-fail assertion is *demonstrated* red. Depends on US1 and US6 being green first.
 
-- [ ] T029 [US2] Write the demonstrated-red helper: install an `EXIT` trap **before** any edit, save `isolation.patch` plus copies of both CMake files, run each `ctest` under a controlled `set +e`, capture stdout/stderr and the **real** exit status to separate files, assert the status is non-zero, assert the isolation-specific diagnostic, restore, remove the trap
+- [ ] T029 [US2] Write the demonstrated-red helper: install an `EXIT` trap **before** any edit, save `isolation.patch` plus copies of both CMake files, run each `ctest` under a controlled `set +e`, capture stdout/stderr and the **real** exit status to separate files, assert the status is non-zero, **capture and record the first diagnostic line** as an evidence artifact, restore, remove the trap. *(Wording matches `quickstart.md` §5, which requires capture — not a content assertion. If a content match is wanted, add it to §5 first so the two do not drift.)*
 - [ ] T030 [US2] **Demonstration A** — revert `src/capi/CMakeLists.txt:46` alone; rebuild, re-install, confirm the C-ABI ❌ probes go TRUE and the witness reds; record commands + exit code + first diagnostic line to `$FIXPP_086_EVIDENCE/`
 - [ ] T031 [US2] **Demonstration B** — revert `src/service/CMakeLists.txt:12` **alone**. FR-011e: the independence is *directional* — `fixpp_service` links `fixpp_capi` (`src/service/CMakeLists.txt:16`), so reverting the C-ABI leg reds **both** probes and cannot stand in for this one. Record `fixpp::capi`'s properties from *this* run to show it stayed isolated
 - [ ] T032 [US2] After the final restore, **rebuild and re-install** before any later step reads the export file — `cmake --install` copies a generate-time artifact and cannot regenerate it, so §§6/8/9 would otherwise run against demonstration B's reverted export *(Gate A r3 carry-forward #2, N2)*
