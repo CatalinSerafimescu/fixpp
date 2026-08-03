@@ -271,7 +271,24 @@
 > verified directly — so an exit-code-only check reports a lane green having run zero witnesses. The
 > local matrix script carries exactly this pin for the same reason.
 
-- [ ] T065 [P] [US3] **Attach package artifacts on the in-scope Linux lanes** in `.github/workflows/tier1.yml` (FR-026) — run the package step after a green build and upload the DEB/RPM/TGZ artifacts, named per FR-017/T051.
+> **T065–T068 CLOSED 2026-08-03 against the merged-PR CI run** (the user's stated condition: close
+> only on a confirmed-GREEN run). Evidence, verified in the run log rather than from a green tick —
+> a lane that reports green having run zero witnesses closes nothing, which is exactly what the
+> registration assertion exists to catch:
+>
+> | Gating lane | Registration assert | Full tier incl. packaging | Upload |
+> |---|---|---|---|
+> | `linux-gcc-release` (tier1, run 30815408968) | ✅ success | ✅ success | ✅ success |
+> | `windows-msvc-release` (tier2, run 30815408980) | ✅ success | ✅ success | ✅ success |
+>
+> All 8 registered packaging witnesses executed (`version-mismatch`, `clean-env`, `contents`,
+> `export-names`, `package-target`, `provenance`, `telemetry-provenance`, `real-client`), matching the
+> `expected=8` pins at `tier1.yml:532` / `tier2.yml:376` — the pins' first-ever execution, having moved
+> 6→7→8 across the Gate B loop without any local run able to exercise them.
+>
+> Tier 1, Tier 2 and Tier 3 all green; PR #219 squash-merged as `8582c1c3`.
+
+- [X] T065 [P] [US3] **Attach package artifacts on the in-scope Linux lanes** in `.github/workflows/tier1.yml` (FR-026) — run the package step after a green build and upload the DEB/RPM/TGZ artifacts, named per FR-017/T051.
 > **FR-026 upload coverage — RELEASE-ONLY IN CI (USER DECISION 2026-08-03).** Package artifacts are
 > attached on the **Release lanes only**: `linux-gcc-release` and `linux-clang-release` (`tier1.yml`),
 > `windows-msvc-release` (`tier2.yml`) — **3 of 6** in-scope configurations. **No `-Debug`
@@ -292,9 +309,9 @@
 >
 > **T066 is narrowed with it:** "attach package artifacts on the MSVC lanes" (plural) is delivered as
 > `windows-msvc-release` only.
-- [ ] T066 [P] [US3] **Attach package artifacts on the MSVC lanes** in `.github/workflows/tier2.yml` (FR-026) — same, for ZIP.
-- [ ] T067 [US3] **FR-026a / D3 — enable `FIXPP_BUILD_INTEROP_PERF` and gate the real-client witness on `linux-gcc-release` ONLY** in `.github/workflows/tier1.yml`. That single lane runs SC-011 and SC-012 as a **gate**; the other five in-scope lanes run the **minimal tier only**. `FIXPP_BUILD_INTEROP_PERF` is declared `OFF` at `cmake/ProjectOptions.cmake:10` and is enabled in **no** preset and **no** workflow today — so without this task SC-011/SC-012 are local-only and a witness that silently never runs **reads as green** (`feedback_ci_gate_observes_not_asserts_witness_skips_into_green`). `linux-gcc-release` is the chosen lane because it builds **zero** third-party dependencies from source (M1, Assumption 9), so gating the heaviest tier is bounded rather than all-or-nothing. **This must exit non-zero on failure — an observing step is not a gate.**
-- [ ] T068 [US3] **SC-010 — assert CI artifact names are unique and matrix-identifying** across all lanes in one run (platform, toolchain, configuration, **and format** — FR-017) — the `actions/upload-artifact` `name:` values in `.github/workflows/tier1.yml` and `.github/workflows/tier2.yml` must form a set with no duplicates across the whole matrix. A collision silently overwrites, which is a silent omission in SC-003's sense.
+- [X] T066 [P] [US3] **Attach package artifacts on the MSVC lanes** in `.github/workflows/tier2.yml` (FR-026) — same, for ZIP.
+- [X] T067 [US3] **FR-026a / D3 — enable `FIXPP_BUILD_INTEROP_PERF` and gate the real-client witness on `linux-gcc-release` ONLY** in `.github/workflows/tier1.yml`. That single lane runs SC-011 and SC-012 as a **gate**; the other five in-scope lanes run the **minimal tier only**. `FIXPP_BUILD_INTEROP_PERF` is declared `OFF` at `cmake/ProjectOptions.cmake:10` and is enabled in **no** preset and **no** workflow today — so without this task SC-011/SC-012 are local-only and a witness that silently never runs **reads as green** (`feedback_ci_gate_observes_not_asserts_witness_skips_into_green`). `linux-gcc-release` is the chosen lane because it builds **zero** third-party dependencies from source (M1, Assumption 9), so gating the heaviest tier is bounded rather than all-or-nothing. **This must exit non-zero on failure — an observing step is not a gate.**
+- [X] T068 [US3] **SC-010 — assert CI artifact names are unique and matrix-identifying** across all lanes in one run (platform, toolchain, configuration, **and format** — FR-017) — the `actions/upload-artifact` `name:` values in `.github/workflows/tier1.yml` and `.github/workflows/tier2.yml` must form a set with no duplicates across the whole matrix. A collision silently overwrites, which is a silent omission in SC-003's sense.
 
 **Checkpoint US3**: every green in-scope CI run leaves uniquely-named, downloadable package artifacts, and exactly one lane gates the real-client tier.
 
