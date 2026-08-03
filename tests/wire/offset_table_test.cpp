@@ -271,8 +271,14 @@ TEST(WireOffsetTable, DoSCapPerInstanceRejectsOversizedSingleInstance) {
 //
 // The RED evidence for the companion mutation-transcript task (T015) lives in
 // .specify/decisions/085-fold-flat-cap-loop-verify.md.
-TEST(WireOffsetTable, DictFreeDoSCapPerInstanceRejectsOversizedInstance) {
-    auto buf = make_raw_frame(
+//
+// The two tests below MUST drive the identical frame — that is what makes them
+// a bracket around the cap threshold rather than two unrelated observations.
+// The bytes therefore live in this one helper instead of being duplicated in
+// each TEST body, so the invariant is enforced by construction rather than by
+// a comment asking the next editor to keep them in sync.
+std::vector<std::byte> dict_free_over_cap_frame() {
+    return make_raw_frame(
         "35=D\x01"
         "34=1\x01"
         "453=1\x01"
@@ -280,6 +286,10 @@ TEST(WireOffsetTable, DictFreeDoSCapPerInstanceRejectsOversizedInstance) {
         "447=D\x01"
         "452=1\x01"
         "802=1\x01");
+}
+
+TEST(WireOffsetTable, DictFreeDoSCapPerInstanceRejectsOversizedInstance) {
+    auto buf = dict_free_over_cap_frame();
     auto fv = fixpp::wire::test::make_frame_view(buf);
     ASSERT_TRUE(fv.has_value());
 
@@ -300,14 +310,7 @@ TEST(WireOffsetTable, DictFreeDoSCapPerInstanceRejectsOversizedInstance) {
 // frame is required — changing it would prove nothing about the threshold
 // this brackets.
 TEST(WireOffsetTable, DictFreeDoSCapPerInstanceAllowsWhenCapRaised) {
-    auto buf = make_raw_frame(
-        "35=D\x01"
-        "34=1\x01"
-        "453=1\x01"
-        "448=PA\x01"
-        "447=D\x01"
-        "452=1\x01"
-        "802=1\x01");
+    auto buf = dict_free_over_cap_frame();  // SAME frame as the rejecting pin — that is the bracket
     auto fv = fixpp::wire::test::make_frame_view(buf);
     ASSERT_TRUE(fv.has_value());
 

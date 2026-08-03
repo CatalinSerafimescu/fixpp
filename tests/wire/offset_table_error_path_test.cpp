@@ -37,10 +37,10 @@
 // Retaining the stale claim would have been a waiver asserting unreachability
 // for a branch a delivered test exercises.
 //
-// The line numbers above were ALSO stale independently: the previous set
-// (125-127, 157-158, 183-184, 231-232) dated from a pre-063 revision of a file
-// that is now 900+ lines. Re-pointing alone would have preserved the false
-// claim, which is why the claim is repaired rather than renumbered.
+// The line numbers were also stale independently of the false claim: the
+// previous set (125-127, 157-158, 183-184, 231-232) dated from a pre-063
+// revision of a file that is now 900+ lines. Both defects were present, which
+// is why this block was repaired rather than merely renumbered.
 
 #include <gtest/gtest.h>
 #include "../support/msvc_debug_arena_skip.hpp"
