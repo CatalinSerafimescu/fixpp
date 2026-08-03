@@ -11,9 +11,12 @@
 
 #include <cstddef>
 #include <cstring>
+#include <filesystem>
 #include <fixpp/core/error.hpp>
 #include <fixpp/wire/offset_table.hpp>
 #include <fixpp/wire/parser.hpp>
+#include <fstream>
+#include <iterator>
 #include <memory_resource>
 #include <string>
 #include <string_view>
@@ -234,6 +237,91 @@ TEST(WireOffsetTable, DoSCapPerInstanceRejectsOversizedSingleInstance) {
     EXPECT_EQ(g.error(), error::wire_group_too_large);
 }
 
+// 085 T013 (US2, FR-004/SC-004). Pins the DoS cap on the DICT-FREE fallback
+// branch of OffsetTable::group() (src/wire/offset_table.cpp's `else` arm,
+// post-085-relocation) — the one branch the dictionary-path tests above
+// cannot exercise, since a dict-free table has no `opaque_dict_`/
+// `group_member_fn_` and so always takes that `else`.
+//
+// Both a DICT-FREE construction (the 3-arg (frame_view, memory_resource*,
+// Config) constructor — never Parser<access_mode::Index>, which threads a
+// dictionary and lands on the dictionary branch instead) AND a TIGHTENED
+// Config are required to reach this: under the default Config the branch is
+// arithmetically unreachable (research.md R-2 — default_max_offset_entries ==
+// default_max_group_entries_per_instance == 4096, and build() clamps the
+// table at the former (offset_table.cpp:326), so the dict-free segment
+// entries_.size() - first is always <= 4095 < 4096 and inst_count > cap can
+// never hold). That is exactly why no such test existed before 085.
+//
+// Frame layout (envelope + body, whole-frame entries_ in document order):
+//   idx 0: 8=FIX.4.4   idx 1: 9=<len>   idx 2: 35=D   idx 3: 34=1
+//   idx 4: 453=1  <- count field (no_tag)
+//   idx 5: 448=PA <- first = count_idx+1 = 5; delim = entries_[5].tag = 448
+//   idx 6: 447=D  idx 7: 452=1  idx 8: 802=1
+//   idx 9: 10=000 <- checksum; dict-free group_end = entries_.size() = 10
+//
+// Dict-free extent rule (no dictionary => no per-instance re-walk on 448):
+// group_end is rest-of-message (10), so the loop's ONLY boundary before the
+// final one would be a LATER entry whose tag == delim (448) — there is none
+// here, so the sole boundary hit is k == group_end == 10. That makes ONE
+// instance spanning idx 5..9, inst_count = 10 - 5 = 5, which breaches
+// max_group_entries_per_instance = 3 (5 > 3) and must return
+// error::wire_group_too_large. Verified by running, not by reasoning alone
+// (per this task's instruction) — see T015's mutation transcript.
+//
+// The RED evidence for the companion mutation-transcript task (T015) lives in
+// .specify/decisions/085-fold-flat-cap-loop-verify.md.
+TEST(WireOffsetTable, DictFreeDoSCapPerInstanceRejectsOversizedInstance) {
+    auto buf = make_raw_frame(
+        "35=D\x01"
+        "34=1\x01"
+        "453=1\x01"
+        "448=PA\x01"
+        "447=D\x01"
+        "452=1\x01"
+        "802=1\x01");
+    auto fv = fixpp::wire::test::make_frame_view(buf);
+    ASSERT_TRUE(fv.has_value());
+
+    std::pmr::monotonic_buffer_resource arena;
+    OffsetTable::Config tight_cfg{.max_offset_entries = 4096, .max_group_entries_per_instance = 3};
+    OffsetTable t{*fv, &arena, tight_cfg};
+    ASSERT_TRUE(t.build_status().has_value());
+
+    auto g = t.group(453);
+    ASSERT_FALSE(g.has_value());
+    EXPECT_EQ(g.error(), error::wire_group_too_large);
+}
+
+// 085 T014 (US2, FR-005a(ii)/SC-004a). Bracketing companion to the case
+// above: the IDENTICAL frame bytes, with max_group_entries_per_instance
+// raised to exactly the breaching instance's size (5) so the strict `>`
+// comparison no longer fires (5 > 5 is false) and group() succeeds. Same
+// frame is required — changing it would prove nothing about the threshold
+// this brackets.
+TEST(WireOffsetTable, DictFreeDoSCapPerInstanceAllowsWhenCapRaised) {
+    auto buf = make_raw_frame(
+        "35=D\x01"
+        "34=1\x01"
+        "453=1\x01"
+        "448=PA\x01"
+        "447=D\x01"
+        "452=1\x01"
+        "802=1\x01");
+    auto fv = fixpp::wire::test::make_frame_view(buf);
+    ASSERT_TRUE(fv.has_value());
+
+    std::pmr::monotonic_buffer_resource arena;
+    OffsetTable::Config raised_cfg{.max_offset_entries = 4096, .max_group_entries_per_instance = 5};
+    OffsetTable t{*fv, &arena, raised_cfg};
+    ASSERT_TRUE(t.build_status().has_value());
+
+    auto g = t.group(453);
+    ASSERT_TRUE(g.has_value());
+    EXPECT_EQ(g->no_tag(), 453U);
+    EXPECT_EQ(g->entry_count(), 5U);
+}
+
 // RC#2: group slice must begin at the delimiter field's "tag=" prefix, NOT
 // at its value.  A real 2c GroupT parses "tag=value<SOH>..." as a sub-frame;
 // the leading "NNN=" must be present.
@@ -439,6 +527,84 @@ TEST(WireOffsetTable, GroupExtentSupportsMoreThanThirtyTwoDistinctMembers) {
     std::string_view second_instance{reinterpret_cast<char const*>(slices[1].data), slices[1].len};
     EXPECT_NE(first_instance.find("9033="), std::string_view::npos);
     EXPECT_EQ(second_instance.find("9999="), std::string_view::npos);
+}
+
+std::string slurp(std::filesystem::path const& p) {
+    std::ifstream in(p, std::ios::binary);
+    return std::string{std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}};
+}
+
+// T006 — FR-001b red-first structural pin (085-fold-flat-cap-loop).
+// A SOURCE-inspection assertion, not a behaviour test: it asserts WHERE the
+// flat per-instance cap loop (currently OffsetTable::group()'s function
+// body, after the dict/dict-free if/else) lives in the source, and that it
+// moved into the dict-free `else` branch *unchanged*. Behaviour cannot
+// distinguish "flat loop in the function body" from "flat loop relocated
+// into the else branch" because the dictionary path's cap is already
+// enforced, redundantly, by consume_group_extent's nesting-aware comparison
+// (research.md R-1) — the flat re-walk is unreachable-as-an-error on the
+// dictionary path either way, so every behavioural test (dictionary-path
+// and dict-free) stays green whether or not the relocation has happened.
+// Only reading the source can tell the two states apart.
+//
+// Two independent keys are asserted, because one alone is insufficient:
+//
+// (a) THE BLOCK MOVED: `inst_start`'s declaration sits at 4-space
+//     (function-body) indentation before the move, and at 8-space
+//     (else-body) indentation after. This alone would also pass for an
+//     *inverted* relocation — `if (boundary) { ... }` replacing
+//     `if (!boundary) continue;` while re-indenting — which is semantically
+//     identical (so no behavioural test catches it) but violates C-3 #4 and
+//     FR-001a's "moved unchanged" requirement. So:
+//
+// (b) THE BLOCK MOVED UNCHANGED: the early-continue guard
+//     `if (!boundary) {` (immediately followed by `continue;`) sits at
+//     8-space before the move and at 12-space after. An else-inverted
+//     relocation would fail this key even though it passes key (a) — this
+//     is the only guard in the whole feature that would catch it (per
+//     tasks.md T006/T007).
+//
+// Mirrors tests/dictionary/load_any_test.cpp's
+// LoadAny.FR004_SingleSharedDispatchSourceInspection construction: plain
+// std::string::find/count, no AST.
+TEST(WireOffsetTable, FR001_SingleTraversalSourceInspection) {
+    std::filesystem::path const src{FIXPP_SRC_DIR};
+    std::string const tu = slurp(src / "wire" / "offset_table.cpp");
+    ASSERT_FALSE(tu.empty());
+
+    auto count_occurrences = [](std::string const& haystack, std::string const& needle) {
+        std::size_t n = 0;
+        for (std::size_t pos = haystack.find(needle); pos != std::string::npos;
+             pos = haystack.find(needle, pos + 1)) {
+            ++n;
+        }
+        return n;
+    };
+
+    // Key (a): the block moved.
+    std::size_t const inst_start_4space =
+        count_occurrences(tu, "\n    std::size_t inst_start = first;\n");
+    std::size_t const inst_start_8space =
+        count_occurrences(tu, "\n        std::size_t inst_start = first;\n");
+
+    // Key (b): the block moved unchanged.
+    std::size_t const boundary_guard_8space = count_occurrences(tu, "\n        if (!boundary) {\n");
+    std::size_t const boundary_guard_12space =
+        count_occurrences(tu, "\n            if (!boundary) {\n");
+
+    EXPECT_EQ(inst_start_4space, 0U)
+        << "4-space (function-body) inst_start occurrences: " << inst_start_4space
+        << " — expected 0 once the flat cap block has moved into the dict-free else branch";
+    EXPECT_EQ(inst_start_8space, 1U)
+        << "8-space (else-body) inst_start occurrences: " << inst_start_8space
+        << " — expected exactly 1 once the flat cap block has moved into the dict-free else branch";
+    EXPECT_EQ(boundary_guard_8space, 0U)
+        << "8-space (function-body) 'if (!boundary) {' occurrences: " << boundary_guard_8space
+        << " — expected 0 once the early-continue guard has moved unchanged into the else branch";
+    EXPECT_EQ(boundary_guard_12space, 1U)
+        << "12-space (else-body) 'if (!boundary) {' occurrences: " << boundary_guard_12space
+        << " — expected exactly 1 once the early-continue guard has moved unchanged into the else "
+           "branch";
 }
 
 }  // namespace

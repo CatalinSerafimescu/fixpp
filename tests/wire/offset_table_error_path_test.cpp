@@ -1,17 +1,46 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // tests/wire/offset_table_error_path_test.cpp — T055 coverage hardening.
 // Targeted error-path tests for fixpp::wire::OffsetTable covering uncovered
-// branches in src/wire/offset_table.cpp:
-//   - lines 134-137: ctor bad_alloc degrade (catch block)
-//   - lines 142-143: find() on RED table returns status error
-//   - lines 165-166: group() on RED table returns status error
-//   - lines 231-232: group_slices() bad_alloc degrade (catch block, empty span)
+// branches in src/wire/offset_table.cpp. Sites are named by function and role
+// first; line numbers are appended as-of 085-fold-flat-cap-loop's delivered
+// tree and are the perishable part of the reference.
+//   - build()'s bad_alloc degrade — the catch block (:370-374)
+//   - find() on a RED table returns the status error (:379-381)
+//   - group() on a RED table returns the status error (:532-534)
+//   - group_slices_status()'s bad_alloc degrade — catch block, empty span +
+//     alloc_failed (:755-759)
 //
 // Lines NOT covered here (documented as unreachable/waived):
-//   - 125-127 (kMaxBuildProbe DoS bound — adversarial-only, waived)
-//   - 157-158 (find() probe-cap break — unreachable under load-factor < 1, waived)
-//   - 183-184 (group() err_group_too_large — provably unreachable: max table
-//              entries = 4096, so avail ≤ 4095 < default_max_group_entries_per_instance)
+//   - build()'s kMaxBuildProbe DoS bound (:361-363) — adversarial-only, waived
+//   - find()'s probe-cap break (:394-396) — unreachable under load-factor < 1,
+//     waived
+//
+// REPAIRED by 085-fold-flat-cap-loop (2026-08-03), research.md R-3. This block
+// previously carried a THIRD waiver reading "group() err_group_too_large —
+// provably unreachable: max table entries = 4096, so avail <= 4095 <
+// default_max_group_entries_per_instance". That claim was FALSE and is
+// withdrawn, not re-pointed. group() has TWO err_group_too_large returns and
+// BOTH are now covered:
+//   - the consume_group_extent overflow return (:577) has been covered since
+//     063 shipped that walk's per-instance cap, by
+//     WireOffsetTable.DoSCapPerInstanceRejectsOversizedSingleInstance;
+//   - the flat per-instance cap return, now inside group()'s dict-free `else`
+//     branch (:607), is covered for the first time by
+//     WireOffsetTable.DictFreeDoSCapPerInstanceRejectsOversizedInstance, which
+//     supplies the combination no prior test did — dict-free construction AND
+//     a tightened Config simultaneously.
+// The old waiver's arithmetic was sound only for the DEFAULT Config (both
+// bounds 4096, table clamped at :326, so a segment is <= 4095); it wrongly
+// generalised that to "unreachable", which a caller-tightened
+// max_group_entries_per_instance defeats. The residual looseness on that path
+// is recorded as limitation L-085-1 / fixpp#220, not waived here.
+// Retaining the stale claim would have been a waiver asserting unreachability
+// for a branch a delivered test exercises.
+//
+// The line numbers above were ALSO stale independently: the previous set
+// (125-127, 157-158, 183-184, 231-232) dated from a pre-063 revision of a file
+// that is now 900+ lines. Re-pointing alone would have preserved the false
+// claim, which is why the claim is repaired rather than renumbered.
 
 #include <gtest/gtest.h>
 #include "../support/msvc_debug_arena_skip.hpp"

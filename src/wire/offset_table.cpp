@@ -576,22 +576,38 @@ core::expected_t<OffsetTable::group_index> OffsetTable::group(std::uint16_t no_t
         if (overflow) {
             return err_group_too_large<group_index>();
         }
+        // 085: the flat per-instance cap loop that used to run here
+        // unconditionally after this if/else was removed from the dictionary
+        // path. Why it could go: consume_group_extent's per-instance cap
+        // check (`:521-524` as-of `c1564dd2`) already caps the same
+        // nesting-aware instances whose extent its normal exit (`:527` as-of
+        // `c1564dd2`) returns; the flat partition that used to run here
+        // merely refined that one, and consume_group_extent returns as soon
+        // as its own check breaches — so the flat loop's cap comparison
+        // could never be the first to fire on this path. What stands in its
+        // place (C-1, standing): this branch's entire per-instance DoS
+        // defence is now consume_group_extent's cap over the instances
+        // whose extent it returns. Any future change to that walk (the
+        // instance-opening rule at `:477-478` as-of `c1564dd2`, the cap
+        // check itself, or the delimiter consume_group_extent resolves at
+        // `:458` as-of `c1564dd2`) MUST re-verify the cap still measures the
+        // partition the function's return describes, or re-introduce an
+        // independent per-instance cap on this branch.
     } else {
         // Dict-free fallback kept for non-dictionary callers.
         group_end = entries_.size();
-    }
-
-    std::size_t inst_start = first;
-    for (std::size_t k = first; k <= group_end; ++k) {
-        bool const boundary = (k == group_end) || (k > first && entries_[k].tag == delim);
-        if (!boundary) {
-            continue;
+        std::size_t inst_start = first;
+        for (std::size_t k = first; k <= group_end; ++k) {
+            bool const boundary = (k == group_end) || (k > first && entries_[k].tag == delim);
+            if (!boundary) {
+                continue;
+            }
+            std::size_t const inst_count = k - inst_start;
+            if (inst_count > cfg_.max_group_entries_per_instance) {
+                return err_group_too_large<group_index>();
+            }
+            inst_start = k;
         }
-        std::size_t const inst_count = k - inst_start;
-        if (inst_count > cfg_.max_group_entries_per_instance) {
-            return err_group_too_large<group_index>();
-        }
-        inst_start = k;
     }
     return group_index{no_tag, first, group_end - first};
 }
