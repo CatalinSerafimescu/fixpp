@@ -284,11 +284,20 @@ interface header and the C-ABI headers compile; a C++ engine header does not.
   the C-ABI entry header, with no new consumer-side hints.
 - **FR-005**: The in-tree build MUST be unaffected: every existing target configures, builds and tests as before,
   with no source edited to satisfy the new include layout.
-- **FR-005a**: The installed layout change MUST be **purely additive**. No header may be removed from, or moved
-  within, the location it occupies in the package today; the existing install rule for the public header tree
-  MUST NOT acquire an exclusion for the isolated subtrees. A consumer compiling today against
+- **FR-005a**: The installed **file layout** change MUST be **purely additive**. No header may be removed from,
+  or moved within, the location it occupies in the package today; the existing install rule for the public
+  header tree MUST NOT acquire an exclusion for the isolated subtrees. A consumer compiling today against
   `<prefix>/include` with a bare include-path flag MUST continue to resolve every header it resolves now,
   `<fix/c_api.h>` included. *(Clarified 2026-08-03.)*
+- **FR-005b**: **Additivity in FR-005a constrains the installed file layout ONLY. It does NOT constrain the
+  target graph, and satisfying it is not sufficient.** Adding a root does not subtract one: today
+  `fixpp::capi`'s whole-tree include path arrives through `INTERFACE_LINK_LIBRARIES "fixpp::capi_objects"`, and
+  `fixpp::service` declares its own at `src/service/CMakeLists.txt:12`. Both **MUST** be cut, and each by-name
+  target given its own restricted installed include interface. A change that adds the new roots and install
+  rules while leaving those two edges intact ships a package that **satisfies FR-005a, FR-010 and SC-003a and
+  still fails FR-003** — every content-shaped gate green over the live defect. *(Added after clarify: the
+  additive answer resolves the layout question and leaves the target-graph obligation untouched; they are
+  independent and the spec must not let one be read as discharging the other.)*
 
 **The witnesses**
 
@@ -299,6 +308,14 @@ interface header and the C-ABI headers compile; a C++ engine header does not.
 - **FR-008**: The compile-must-fail witness MUST probe a header whose own disappearance would be a defect, and
   MUST distinguish "failed because isolation holds" from "failed for any other reason". A generic
   build-failure check is not sufficient.
+- **FR-008a**: **The positive assertion alone cannot detect the defect, and MUST NOT be cited as if it could.**
+  Because the layout is additive, `<fix/c_api.h>` resolves from **either** root — so a witness observing that
+  it compiles cannot distinguish "isolation delivered, resolved from the isolated root" from "isolation absent,
+  resolved from the whole-tree root". Only the **paired** observation discriminates: the C-ABI include succeeds
+  **and** the C++ engine include fails. Any evidence offered for FR-003 / SC-001 MUST be the pair; a passing
+  positive witness on its own is compatible with the defect being fully present. *(This is the
+  additive-layout counterpart of the trap in #218 itself, where a target property read clean while the
+  transitive path was wide open.)*
 - **FR-009**: The existing positive C-ABI consumer witness (links the C-ABI target by its exported name,
   includes the entry header, resolves a real symbol) MUST continue to pass unchanged in intent.
 - **FR-010**: The package-contents witness MUST assert the C-ABI headers are present at **both** their existing
@@ -315,6 +332,11 @@ interface header and the C-ABI headers compile; a C++ engine header does not.
   — the service reaches the engine through the C ABI, so it needs that surface and only that surface.
 - **FR-011b**: The service consumer target's installed interface MUST NOT make the C++ engine headers
   (`<fixpp/wire/...>`, `<fixpp/session/...>`, `<fixpp/dict/...>`, …) reachable, directly or transitively.
+- **FR-011d**: The whole-tree installed include declaration on the service target —
+  `"$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"` at **`src/service/CMakeLists.txt:12`** — MUST be
+  replaced by the isolated root. It is named explicitly because it is the single line that makes FR-011b false,
+  it is *not* inherited from the C-ABI target (so narrowing that target does not touch it), and every other
+  requirement in this feature can be satisfied while it survives.
 - **FR-011c**: The service plugin interface header MUST remain reachable from the C++ umbrella at its existing
   spelling — `EngineConfig` holds a `unique_ptr<ControlPlaneFactory>` and needs the base type complete, so
   isolating the service surface must not remove it from the C++ surface.
@@ -366,9 +388,12 @@ interface header and the C-ABI headers compile; a C++ engine header does not.
 ### Measurable Outcomes
 
 - **SC-001**: With only the C-ABI consumer target linked from an installed package, **0** of the C++ engine
-  headers are reachable, and **13 of 13** C-ABI headers are.
+  headers are reachable, and **13 of 13** C-ABI headers are. Evidence for this criterion is the **paired**
+  observation required by FR-008a — the reachability counts and the C++-unreachable result from the *same*
+  configured consumer. The positive count alone does not satisfy SC-001, because under the additive layout it
+  is equally consistent with the defect being present.
 - **SC-001a**: With only the service consumer target linked, **0** C++ engine headers are reachable, while the
-  service plugin interface header **and** the 13 C-ABI headers are.
+  service plugin interface header **and** the 13 C-ABI headers are. Same paired-evidence rule as SC-001.
 - **SC-002**: **Each** compile-must-fail assertion (C-ABI target, service target) is observed **failing** at
   least once with its isolation removed and **passing** with it present; both observations are recorded with
   the commands that produced them.
