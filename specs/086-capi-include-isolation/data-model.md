@@ -28,10 +28,21 @@ A directory under the install prefix that appears on some target's `INTERFACE_IN
 - **I3 (spelling preserved)**: the header's include spelling is identical from every root — `<fix/c_api.h>`
   resolves the same way whether it came from `include/` or `include/capi/`. A consumer therefore never sees
   both; exactly one root on its search path wins, and both hold identical bytes.
+- **I11 (roots contain only their subtree)**: every installed path under `include/capi/` matches
+  `^include/capi/fix/`, and every path under `include/service-iface/` matches
+  `^include/service-iface/fixpp/service/`. This is a property of the **root**, which is what FR-001 states and
+  what no target-property check can observe; the existing packaging gates are anchored on `^include/fixpp/…`
+  and structurally cannot see these roots. *(FR-001 / FR-010a; asserted as contract invariant C-5.)*
 
 ## E2 — Exported target, classified by consumption role
 
-`CMakeLists.txt:575-584` already establishes this taxonomy; this feature adopts it rather than inventing one.
+The by-name / closure-only distinction is the project's own, but it is grounded here in a **measured
+predicate**, not in a comment: a member is *closure-only* when no public header names it
+(`grep -rn <target> include/`) and no public header instructs linking it. `CMakeLists.txt:575-585` states the
+distinction in prose, but it ranges over the **five targets the umbrella does not reach** and classifies only
+`fixpp_log_otlp` as closure-only — `capi_objects` is not classified there at all, so that comment cannot be
+the authority for the row below. Export-set **membership** is separately by explicit enumeration
+(`CMakeLists.txt:562` → `install(TARGETS ${FIXPP_EXPORT_TARGETS} EXPORT fixppTargets)` at `:733`).
 
 | Target | Role | Isolated? | Reachable roots after |
 |---|---|---|---|
@@ -76,10 +87,14 @@ assert.
   `<fix/c_api.h>` resolves from *either* root, so observing that it compiles is equally consistent with
   isolation being fully absent. Only the **pair** — the ✅ and the ❌ from the same configured consumer —
   discriminates. *(FR-008a; this is the additive-layout form of the original #218 trap.)*
-- **I8 (compile-only)**: ❌ cells are asserted by **compilation**, never by a build that links. A link stage
-  fails and succeeds for reasons unrelated to include reachability — measured: the research probe's umbrella
-  row reported a false ❌ caused by an unresolved symbol while every `#include` resolved. *(FR-008; research
-  R5.)*
+- **I8 (compile-only, and inverted outside the build)**: ❌ cells are asserted by **compilation**, never by a
+  build that links. A link stage fails and succeeds for reasons unrelated to include reachability — measured:
+  the research probe's umbrella row reported a false ❌ caused by an unresolved symbol while every `#include`
+  resolved. A ❌ cell also cannot be a **build target** in the consumer sub-project at all: its driver
+  `FATAL_ERROR`s on any non-zero build exit (`tests/consumer/run_consumer_witness.cmake:96-104`), so a
+  must-fail target would red the whole witness. The result must be inverted where the build cannot see it —
+  at consumer-**configure** time. *(FR-008 / FR-006a; research R5; mechanism in
+  `contracts/include-interface.md` §4a.)*
 
 ## E4 — Build-tree vs install-tree interface
 
@@ -93,9 +108,16 @@ Every isolated target carries **two** generator expressions, and only one of the
 **Invariants**
 
 - **I9 (in-tree untouched)**: the isolation is an *installed-interface* property. In-tree, the directory-scoped
-  `include_directories("${CMAKE_SOURCE_DIR}/include")` at `CMakeLists.txt:234` covers the whole build, so the
-  6 of 28 `tests/capi/*.cpp` that include `<fixpp/…>` keep two independent reasons to compile. *(FR-005.)*
-- **I10 (lint unchanged)**: in-tree layering enforcement remains `tools/check_layers.py` (`architecture.md`:509).
-  Its `"capi"` and `"service"` rule rows are untouched by this feature — it operates on the in-tree graph and
-  structurally cannot see the installed interface, which is why #218 went uncaught (issue text, "Why it was not
-  caught in-tree").
+  `include_directories("${CMAKE_SOURCE_DIR}/include")` at `CMakeLists.txt:234` covers the whole build — over
+  **all 28** `tests/capi/*.cpp` regardless of include spelling, so the **11** whose compilation depends on the
+  `-I` search for a `fixpp/` header (**6** spelling it `<fixpp/…>`, **5** only `"fixpp/…"`) keep two
+  independent reasons to compile. *(FR-005. The figure was "6 of 28" — the angle-bracket count — until Gate A
+  r2; it named a subset of the dependent set, and the directory-scoped argument never depended on it.)*
+- **I10 (lint unchanged, and narrower than the documents claim)**: in-tree layering enforcement remains
+  `tools/check_layers.py` (`architecture.md`:509). Its `"capi"` and `"service"` rule rows are untouched by this
+  feature. **What it actually is**: a *source include-edge lint* — it walks `#include` lines in
+  `src/**/*.{cpp,hpp,h}` and `bindings/**/*.{cpp,hpp,h}` against an allowed-edge whitelist and exits 1 on any
+  violation (`tools/check_layers.py:2-7`, `:173-176`). It reads **no** CMake target links, so it cannot reject
+  "a target that links both `fixpp` and `fixpp::capi`" as `architecture.md:543`, `CMakeLists.txt:580` and
+  `tests/consumer/CMakeLists.txt:68-69` all claim; and it never sees an installed consumer, which is why #218
+  went uncaught in-tree (issue text, "Why it was not caught in-tree"). Correcting those three sites is FR-014.
