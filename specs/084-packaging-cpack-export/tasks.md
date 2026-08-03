@@ -264,10 +264,10 @@
 > verified directly — so an exit-code-only check reports a lane green having run zero witnesses. The
 > local matrix script carries exactly this pin for the same reason.
 
-- [X] T065 [P] [US3] **Attach package artifacts on the in-scope Linux lanes** in `.github/workflows/tier1.yml` (FR-026) — run the package step after a green build and upload the DEB/RPM/TGZ artifacts, named per FR-017/T051.
-- [X] T066 [P] [US3] **Attach package artifacts on the MSVC lanes** in `.github/workflows/tier2.yml` (FR-026) — same, for ZIP.
-- [X] T067 [US3] **FR-026a / D3 — enable `FIXPP_BUILD_INTEROP_PERF` and gate the real-client witness on `linux-gcc-release` ONLY** in `.github/workflows/tier1.yml`. That single lane runs SC-011 and SC-012 as a **gate**; the other five in-scope lanes run the **minimal tier only**. `FIXPP_BUILD_INTEROP_PERF` is declared `OFF` at `cmake/ProjectOptions.cmake:10` and is enabled in **no** preset and **no** workflow today — so without this task SC-011/SC-012 are local-only and a witness that silently never runs **reads as green** (`feedback_ci_gate_observes_not_asserts_witness_skips_into_green`). `linux-gcc-release` is the chosen lane because it builds **zero** third-party dependencies from source (M1, Assumption 9), so gating the heaviest tier is bounded rather than all-or-nothing. **This must exit non-zero on failure — an observing step is not a gate.**
-- [X] T068 [US3] **SC-010 — assert CI artifact names are unique and matrix-identifying** across all lanes in one run (platform, toolchain, configuration, **and format** — FR-017) — the `actions/upload-artifact` `name:` values in `.github/workflows/tier1.yml` and `.github/workflows/tier2.yml` must form a set with no duplicates across the whole matrix. A collision silently overwrites, which is a silent omission in SC-003's sense.
+- [ ] T065 [P] [US3] **Attach package artifacts on the in-scope Linux lanes** in `.github/workflows/tier1.yml` (FR-026) — run the package step after a green build and upload the DEB/RPM/TGZ artifacts, named per FR-017/T051.
+- [ ] T066 [P] [US3] **Attach package artifacts on the MSVC lanes** in `.github/workflows/tier2.yml` (FR-026) — same, for ZIP.
+- [ ] T067 [US3] **FR-026a / D3 — enable `FIXPP_BUILD_INTEROP_PERF` and gate the real-client witness on `linux-gcc-release` ONLY** in `.github/workflows/tier1.yml`. That single lane runs SC-011 and SC-012 as a **gate**; the other five in-scope lanes run the **minimal tier only**. `FIXPP_BUILD_INTEROP_PERF` is declared `OFF` at `cmake/ProjectOptions.cmake:10` and is enabled in **no** preset and **no** workflow today — so without this task SC-011/SC-012 are local-only and a witness that silently never runs **reads as green** (`feedback_ci_gate_observes_not_asserts_witness_skips_into_green`). `linux-gcc-release` is the chosen lane because it builds **zero** third-party dependencies from source (M1, Assumption 9), so gating the heaviest tier is bounded rather than all-or-nothing. **This must exit non-zero on failure — an observing step is not a gate.**
+- [ ] T068 [US3] **SC-010 — assert CI artifact names are unique and matrix-identifying** across all lanes in one run (platform, toolchain, configuration, **and format** — FR-017) — the `actions/upload-artifact` `name:` values in `.github/workflows/tier1.yml` and `.github/workflows/tier2.yml` must form a set with no duplicates across the whole matrix. A collision silently overwrites, which is a silent omission in SC-003's sense.
 
 **Checkpoint US3**: every green in-scope CI run leaves uniquely-named, downloadable package artifacts, and exactly one lane gates the real-client tier.
 
@@ -318,16 +318,17 @@
 > env.sh` + `conan install` + `cmake --preset` sequence whose evidence is that the six-configuration
 > matrix subsequently ran. Marked done on that basis; there is nothing to point at but the matrix.
 >
-> **T065 / T066 / T067 / T068 (CI)** — **IMPLEMENTED AND LANDED; CI-UNVERIFIED.** The workflow changes
-> are committed (`tier1.yml`, `tier2.yml`) and their YAML parses, but **no CI run has exercised them**,
-> because this branch has not been pushed as a PR. Marked done for the *deliverable*, with the
-> verification explicitly **owed at Gate B's first CI run** — which is precisely the evidence Gate B
-> exists to collect.
+> **T065 / T066 / T067 / T068 (CI)** — **IMPLEMENTED AND LANDED; DELIBERATELY LEFT OPEN.** The workflow
+> changes are committed (`tier1.yml`, `tier2.yml`) and their YAML parses, but **no CI run has exercised
+> them**, because this branch has not been pushed as a PR.
 >
-> This is deliberately the SAME standard applied to T054/T055 earlier ("code landed ≠ measured"), and
-> the reason those two were held open until the MSVC legs actually ran. The difference here is that
-> the missing evidence is *only obtainable in CI*, so holding the rows open would block T075
-> permanently rather than record anything.
+> **USER DECISION 2026-08-03: close these only once a PR run is confirmed GREEN.** They stay `[ ]`
+> until then. This applies the SAME standard as T054/T055 ("code landed ≠ measured") without the
+> softening — a workflow that has never executed is not verified by the fact that its YAML parses, and
+> these four are precisely the rows whose whole content is *"does this behave correctly in CI"*.
+>
+> T075 clause (i) is satisfied by this recorded rationale, which is the alternative it explicitly
+> admits ("`[X]` **or** carries an explicit waiver rationale").
 >
 > **⚠️ What to watch on that first run**, since it is the first time any of it executes: the packaging
 > tier runs on exactly ONE lane per tier (`linux-gcc-release`, `windows-msvc-release`) and each asserts
