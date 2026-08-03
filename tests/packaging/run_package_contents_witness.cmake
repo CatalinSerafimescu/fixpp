@@ -46,6 +46,71 @@ file(GLOB _artifacts "${_pkgdir}/*.deb" "${_pkgdir}/*.rpm" "${_pkgdir}/*.tar.gz"
 if(_artifacts STREQUAL "")
   message(FATAL_ERROR "T058: cpack exited 0 but produced no artifacts in ${_pkgdir}")
 endif()
+set(_expected_exts "")
+set(_platform_token "")
+set(_actual_exts "")
+foreach(_artifact IN LISTS _artifacts)
+  get_filename_component(_artifact_name "${_artifact}" NAME)
+  if(_artifact_name MATCHES "linux-")
+    set(_this_platform "linux")
+  elseif(_artifact_name MATCHES "windows-")
+    set(_this_platform "windows")
+  else()
+    message(FATAL_ERROR
+      "T058: cannot derive the platform token from artifact '${_artifact_name}'. "
+      "FR-017 requires the platform in the artifact's own name.")
+  endif()
+
+  if(_platform_token STREQUAL "")
+    set(_platform_token "${_this_platform}")
+  elseif(NOT _platform_token STREQUAL _this_platform)
+    message(FATAL_ERROR
+      "T058: produced artifacts disagree on platform token (${_platform_token} vs ${_this_platform}): "
+      "${_artifacts}")
+  endif()
+
+  if(_artifact_name MATCHES "\\.tar\\.gz$")
+    list(APPEND _actual_exts ".tar.gz")
+  elseif(_artifact_name MATCHES "\\.deb$")
+    list(APPEND _actual_exts ".deb")
+  elseif(_artifact_name MATCHES "\\.rpm$")
+    list(APPEND _actual_exts ".rpm")
+  elseif(_artifact_name MATCHES "\\.zip$")
+    list(APPEND _actual_exts ".zip")
+  else()
+    message(FATAL_ERROR
+      "T058: produced artifact '${_artifact_name}' has an unrecognised package extension")
+  endif()
+endforeach()
+list(REMOVE_DUPLICATES _actual_exts)
+list(SORT _actual_exts)
+if(_platform_token STREQUAL "linux")
+  set(_expected_exts ".deb" ".rpm" ".tar.gz")
+elseif(_platform_token STREQUAL "windows")
+  set(_expected_exts ".zip")
+else()
+  message(FATAL_ERROR "T058: could not derive an expected format set from produced artifacts")
+endif()
+set(_missing_exts "")
+foreach(_expected_ext IN LISTS _expected_exts)
+  if(NOT _expected_ext IN_LIST _actual_exts)
+    list(APPEND _missing_exts "${_expected_ext}")
+  endif()
+endforeach()
+set(_extra_exts "")
+foreach(_actual_ext IN LISTS _actual_exts)
+  if(NOT _actual_ext IN_LIST _expected_exts)
+    list(APPEND _extra_exts "${_actual_ext}")
+  endif()
+endforeach()
+if(NOT _missing_exts STREQUAL "" OR NOT _extra_exts STREQUAL "")
+  message(FATAL_ERROR
+    "T058/FR-015: ${_platform_token} artifacts have the wrong format set.\n"
+    "  missing: ${_missing_exts}\n"
+    "  extra: ${_extra_exts}\n"
+    "  expected: ${_expected_exts}\n"
+    "  actual: ${_actual_exts}")
+endif()
 list(LENGTH _artifacts _n_artifacts)
 message(STATUS "T058: enumerating ${_n_artifacts} produced artifact(s)")
 

@@ -22,9 +22,10 @@
 # from FIXPP_SOURCE_DIR via `git`, the same approach
 # tests/codegen/codegen_build_graph_test.cmake already uses for its own
 # git-cleanliness gate. Because this witness invokes `cpack` against the
-# CURRENT build tree, the artifact under test is from this build by
-# construction -- so this independent measurement is not merely non-circular,
-# it is the DETECTOR for a configure-time-frozen (stale) stamp.
+# CURRENT build tree, the artifact under test is packed from the current build
+# tree — which makes this measurement the detector for a configure-time-frozen
+# stamp. It does not establish that the tree's binaries are current with
+# respect to that source state; see the residual note below.
 #
 # ── The red leg ──────────────────────────────────────────────────────────────
 # The witness's contract is (package, expected-state) -> verdict. Feeding it an
@@ -42,6 +43,12 @@
 # cannot, by itself, prove R2-F1 (the configure-time freeze) is fixed. Only a
 # configure→edit→package→extract counter-test, run once and recorded outside
 # this ctest, discriminates the two.
+#
+# Payload residual: this witness samples the source state independently, but it
+# still packages whatever binaries already exist in the build tree. A green run
+# therefore does not prove those binaries were rebuilt for that state; it proves
+# only that the stamp matches the tree CPack packaged from. Binding the stamp to
+# the payload bytes or build inputs is a separate follow-up issue.
 
 cmake_minimum_required(VERSION 3.28)
 

@@ -83,6 +83,7 @@ foreach(_cmake_file IN LISTS _alias_files)
     continue()
   endif()
   file(READ "${_cmake_file}" _cmake_text)
+  string(REGEX REPLACE "#[^\n]*" "" _cmake_text "${_cmake_text}")
   string(REGEX MATCHALL
          "add_library\\(fixpp::[A-Za-z0-9_:]+ ALIAS [A-Za-z0-9_:$<>.-]+\\)"
          _alias_decls "${_cmake_text}")

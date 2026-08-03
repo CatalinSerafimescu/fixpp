@@ -191,8 +191,10 @@ set(CPACK_PACKAGE_DIRECTORY "${CMAKE_BINARY_DIR}/_packages")
 # FR-021: finished artifacts must survive the build-tree deletion that the serial
 # build discipline performs between configurations -- CPACK_PACKAGE_DIRECTORY is
 # INSIDE the tree, so on its own nothing outlives the cycle. FIXPP_ARTIFACT_DIR is
-# the durable location; `cmake --build . --target fixpp-package` builds, packages
-# and copies out in one step.
+# the durable location; `cmake --build . --target fixpp-package` depends on the
+# packaged build outputs so they are current, then packages them and copies the
+# artifacts out. This still does not bind the provenance stamp to the payload
+# bytes themselves; that digest leg remains a follow-up.
 #
 # Deliberately a TARGET rather than a post-CPack hook: CPack has no portable
 # "after all generators" hook, and a copy that silently did not happen would
@@ -220,12 +222,27 @@ if(FIXPP_PACKAGE_TELEMETRY STREQUAL "ON")
       "084 FR-020/FR-021: package, then copy artifacts to ${FIXPP_ARTIFACT_DIR}")
 endif()
 add_custom_target(fixpp-package
+  COMMAND "${CMAKE_COMMAND}" -E rm -rf "${CPACK_PACKAGE_DIRECTORY}"
   COMMAND "${CMAKE_COMMAND}" -E make_directory "${FIXPP_ARTIFACT_DIR}"
   COMMAND "${CMAKE_CPACK_COMMAND}" --config "${CMAKE_BINARY_DIR}/CPackConfig.cmake"
   ${_fixpp_package_copy_commands}
   WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
   COMMENT "${_fixpp_package_comment}"
   VERBATIM)
+set(_fixpp_package_dependencies "")
+foreach(_fixpp_package_tgt IN LISTS FIXPP_EXPORT_TARGETS)
+  if(NOT TARGET ${_fixpp_package_tgt})
+    continue()
+  endif()
+  get_target_property(_fixpp_package_type ${_fixpp_package_tgt} TYPE)
+  if(NOT _fixpp_package_type STREQUAL "INTERFACE_LIBRARY")
+    list(APPEND _fixpp_package_dependencies "${_fixpp_package_tgt}")
+  endif()
+endforeach()
+if(_fixpp_package_dependencies)
+  add_dependencies(fixpp-package ${_fixpp_package_dependencies})
+endif()
+unset(_fixpp_package_dependencies)
 unset(_fixpp_package_comment)
 unset(_fixpp_package_copy_commands)
 # ── Internal prefix — Linux ONLY ─────────────────────────────────────────────
