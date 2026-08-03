@@ -50,11 +50,11 @@ set(_installed_imports "")
 foreach(_targets_file IN LISTS _installed_targets)
   file(READ "${_targets_file}" _targets_text)
   string(REGEX MATCHALL
-         "add_library\\(fixpp::[A-Za-z0-9_:]+ (STATIC|INTERFACE) IMPORTED\\)"
+         "add_library\\(fixpp::[A-Za-z0-9_:]+ [A-Z]+ IMPORTED\\)"
          _decls "${_targets_text}")
   foreach(_decl IN LISTS _decls)
     string(REGEX REPLACE
-           "^add_library\\((fixpp::[A-Za-z0-9_:]+) (STATIC|INTERFACE) IMPORTED\\)$"
+           "^add_library\\((fixpp::[A-Za-z0-9_:]+) [A-Z]+ IMPORTED\\)$"
            "\\1" _name "${_decl}")
     list(APPEND _installed_imports "${_name}")
   endforeach()
