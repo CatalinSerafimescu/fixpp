@@ -245,9 +245,27 @@ A maintainer opens a completed CI run for a supported lane and downloads the pac
 - **FR-026**: CI lanes covering in-scope configurations MUST attach their package artifacts to the run, named per FR-017.
 - **FR-026a**: **Exactly one CI lane — `linux-gcc-release` — MUST enable `FIXPP_BUILD_INTEROP_PERF` and run the real-client witness (SC-011, SC-012) as a gate.** The other five in-scope lanes run the minimal tier only. *(Decision D3, closed at Gate A sign-off 2026-08-01, option (iii). `FIXPP_BUILD_INTEROP_PERF` is declared `OFF` at `cmake/ProjectOptions.cmake:10` and is enabled in **no** preset and **no** workflow today, so without this requirement SC-011/SC-012 are local-only and a witness that silently never runs reads as green — `feedback_ci_gate_observes_not_asserts_witness_skips_into_green`. `linux-gcc-release` is the lane chosen because it builds **zero** third-party dependencies from source (Assumption 9), so gating there is bounded rather than all-or-nothing. This is stated as a requirement rather than left in plan prose precisely so a derived task list carries it.)*
 
-  > **FR-026 upload coverage — CORRECTED at Gate B round 5 (user decision 2026-08-03).** FR-026 is a separate obligation from FR-026a/D3: D3 governs which lane runs the packaging **ctest** witnesses (unchanged, `linux-gcc-release` only); FR-026 governs which lanes **attach package artifacts**. As landed, artifact upload covers `linux-gcc-release`, `linux-clang-release` **and** `linux-clang-debug` (`.github/workflows/tier1.yml:519,556,564`) — **5 of 6** in-scope configurations. `linux-gcc-debug` has **no CI lane at all**: FR-026 binds only lanes that exist, and FR-022 requires the *configuration*, not a lane, so none is owed. **FR-026 is met for every lane that exists; no narrowing waiver applies.**
-  
-  > ⚠️ **This banner previously narrowed uploads to Release-only, and that narrowing rested on a wrong figure.** It cited *"≈3 GB of artifacts per Linux Debug configuration (`quickstart.md:50`)"* against a ~14 GB runner free-disk ceiling. **Measured 2026-08-03: 99 MB (gcc-debug), 72 MB (clang-debug), 295 MB for all 14 artifacts** — about **30× smaller**, so the disk argument did not hold. The ≈3 GB value came from a `quickstart.md` line that labelled itself PROJECTED-not-measured and named T064 as the task that would correct it; T064 ran and the line was never corrected, after which the projection was cited as a measured budget. `quickstart.md` is now corrected from the measurement. The lesson kept in the bundle: a self-labelled projection was still propagated verbatim into a decision rationale.
+  > **FR-026 upload coverage — RELEASE-ONLY IN CI (USER DECISION 2026-08-03, supersedes the round-1 and
+  > round-5 versions of this banner).** Package artifacts are attached on the **Release lanes only**:
+  > `linux-gcc-release`, `linux-clang-release` (`tier1.yml`) and `windows-msvc-release` (`tier2.yml`) —
+  > **3 of 6** in-scope configurations. **No `-Debug` configuration uploads packages in CI.** This is a
+  > deliberate narrowing of FR-026, recorded here rather than left implicit.
+  >
+  > **What it does NOT change: which tests run.** The packaging ctest tier was already Release-only on
+  > both tiers under decision D3 (`tier1.yml` registration-assert + full-tier steps, mirrored in
+  > `tier2.yml`), so no witness stops executing. The Debug legs of FR-019 (`.pdb`) and T058 were never
+  > CI-exercised on a Debug lane in any version of this feature. Debug packaging still works locally and
+  > was proven there across the six-configuration matrix (14 artifacts, 14 unique names).
+  >
+  > ⚠️ **Two earlier versions of this banner were wrong; the history is kept because the failure shape
+  > recurs.** The round-1 version narrowed uploads to Release-only on the ground of *"≈3 GB of artifacts
+  > per Linux Debug configuration"* against a ~14 GB runner ceiling. **Measured 2026-08-03: 99 MB
+  > (gcc-debug), 72 MB (clang-debug), 295 MB for all 14 artifacts — about 30× smaller.** That figure came
+  > from a `quickstart.md` line labelled PROJECTED-not-measured which named T064 as its corrector; T064
+  > ran, the line was never corrected, and the projection was then cited as a measured budget in a
+  > decision rationale. The round-5 version widened uploads to 5 of 6 on the corrected measurement. **The
+  > current disposition is Release-only again — but on the user's decision, NOT on the disk-cost ground,
+  > which does not hold at the measured size.**
 
 ### Key Entities
 

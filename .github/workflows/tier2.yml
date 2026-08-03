@@ -373,7 +373,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          expected=7
+          expected=8
           n=$(ctest --preset ${{ matrix.preset }} -L packaging -N \
                 | sed -n 's/^Total Tests: //p')
           echo "registered packaging witnesses: ${n:-0} (expected ${expected})"
@@ -455,7 +455,7 @@ jobs:
       #
       # Runs only after a green test step, so a red lane uploads nothing.
       - name: Build packages
-        if: matrix.preset != 'windows-msvc-asan'
+        if: matrix.preset == 'windows-msvc-release'
         shell: cmd
         run: cmake --build --preset ${{ matrix.preset }} --target fixpp-package
 
@@ -463,7 +463,7 @@ jobs:
       # silently overwrites the first. matrix.preset is unique by construction,
       # and the ZIP inside already carries all six FR-017 dimensions.
       - name: Upload packages
-        if: matrix.preset != 'windows-msvc-asan'
+        if: matrix.preset == 'windows-msvc-release'
         uses: actions/upload-artifact@v4
         with:
           name: packages-${{ matrix.preset }}

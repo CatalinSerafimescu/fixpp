@@ -81,6 +81,20 @@ set_tests_properties(fixpp::packaging::export-names PROPERTIES
   LABELS "packaging"
 )
 
+# ── fixpp-package target shape: generated Ninja graph, not witness-local lore ─
+add_test(
+  NAME fixpp::packaging::package-target
+  COMMAND "${CMAKE_COMMAND}"
+    "-DFIXPP_MAIN_BUILD_DIR=${CMAKE_BINARY_DIR}"
+    "-DFIXPP_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/run_package_target_witness.cmake"
+)
+set_tests_properties(fixpp::packaging::package-target PROPERTIES
+  RUN_SERIAL TRUE
+  TIMEOUT 600
+  LABELS "packaging"
+)
+
 # ── T060 (FR-021a, I24): package PROVENANCE ─────────────────────────────────
 add_test(
   NAME fixpp::packaging::provenance

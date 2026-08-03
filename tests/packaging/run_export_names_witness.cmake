@@ -1,13 +1,13 @@
 # tests/packaging/run_export_names_witness.cmake — 084 T026
 #
-# Asserts the realizable direction only: every INSTALLED imported fixpp name
-# must match an in-tree fixpp:: alias. The reverse direction is deliberately not
-# asserted here because several aliases are intentionally build-only or
-# non-exported.
+# Asserts exact set equality between the INSTALLED imported fixpp names and the
+# configure-time export manifest derived from the real target graph. Direction B
+# is realizable NOW because the comparison base changed: it is no longer "all
+# in-tree aliases", which deliberately includes build-only names.
 
 cmake_minimum_required(VERSION 3.28)
 
-foreach(_var FIXPP_MAIN_BUILD_DIR FIXPP_WORK_DIR FIXPP_SOURCE_DIR)
+foreach(_var FIXPP_MAIN_BUILD_DIR FIXPP_WORK_DIR)
   if(NOT DEFINED ${_var})
     message(FATAL_ERROR "run_export_names_witness.cmake: -D${_var}=... is required")
   endif()
@@ -65,55 +65,42 @@ if(_installed_imports STREQUAL "")
   message(FATAL_ERROR "T026: no installed imported fixpp names matched the witness regex")
 endif()
 
-set(_alias_files "${FIXPP_SOURCE_DIR}/CMakeLists.txt")
-file(GLOB_RECURSE _tree_files
-  LIST_DIRECTORIES FALSE
-  "${FIXPP_SOURCE_DIR}/src/*"
-  "${FIXPP_SOURCE_DIR}/cmake/*")
-foreach(_tree_file IN LISTS _tree_files)
-  get_filename_component(_tree_name "${_tree_file}" NAME)
-  if(_tree_name STREQUAL "CMakeLists.txt" OR _tree_file MATCHES "\\.cmake$")
-    list(APPEND _alias_files "${_tree_file}")
-  endif()
-endforeach()
-
-set(_alias_census "")
-foreach(_cmake_file IN LISTS _alias_files)
-  if(NOT EXISTS "${_cmake_file}")
-    continue()
-  endif()
-  file(READ "${_cmake_file}" _cmake_text)
-  string(REGEX REPLACE "#[^\n]*" "" _cmake_text "${_cmake_text}")
-  string(REGEX MATCHALL
-         "add_library\\(fixpp::[A-Za-z0-9_:]+ ALIAS [A-Za-z0-9_:$<>.-]+\\)"
-         _alias_decls "${_cmake_text}")
-  foreach(_decl IN LISTS _alias_decls)
-    string(REGEX REPLACE
-           "^add_library\\((fixpp::[A-Za-z0-9_:]+) ALIAS [A-Za-z0-9_:$<>.-]+\\)$"
-           "\\1" _alias "${_decl}")
-    list(APPEND _alias_census "${_alias}")
-  endforeach()
-endforeach()
-list(REMOVE_DUPLICATES _alias_census)
-list(SORT _alias_census)
-if(_alias_census STREQUAL "")
-  message(FATAL_ERROR "T026: no in-tree fixpp:: aliases matched the witness regex")
+set(_manifest "${FIXPP_MAIN_BUILD_DIR}/fixpp-export-names.txt")
+if(NOT EXISTS "${_manifest}")
+  message(FATAL_ERROR
+    "T026: expected configure-time export-name manifest '${_manifest}' does not exist")
+endif()
+file(STRINGS "${_manifest}" _expected_imports)
+list(FILTER _expected_imports EXCLUDE REGEX "^$")
+list(REMOVE_DUPLICATES _expected_imports)
+list(SORT _expected_imports)
+if(_expected_imports STREQUAL "")
+  message(FATAL_ERROR "T026: export-name manifest '${_manifest}' is empty")
 endif()
 
-set(_missing_aliases "")
-foreach(_installed_name IN LISTS _installed_imports)
-  if(NOT _installed_name IN_LIST _alias_census)
-    list(APPEND _missing_aliases "${_installed_name}")
+set(_missing_from_install "")
+foreach(_expected_name IN LISTS _expected_imports)
+  if(NOT _expected_name IN_LIST _installed_imports)
+    list(APPEND _missing_from_install "${_expected_name}")
   endif()
 endforeach()
 
-if(_missing_aliases)
+set(_unexpected_installed "")
+foreach(_installed_name IN LISTS _installed_imports)
+  if(NOT _installed_name IN_LIST _expected_imports)
+    list(APPEND _unexpected_installed "${_installed_name}")
+  endif()
+endforeach()
+
+if(_missing_from_install OR _unexpected_installed)
   message(FATAL_ERROR
-    "T026/FR-003: installed imported names missing in-tree aliases: ${_missing_aliases}\n"
-    "Installed names: ${_installed_imports}\n"
-    "Alias census: ${_alias_census}")
+    "T026/FR-003: installed imported names differ from the configure-time export manifest.\n"
+    "Missing from package: ${_missing_from_install}\n"
+    "Unexpected in package: ${_unexpected_installed}\n"
+    "Expected: ${_expected_imports}\n"
+    "Installed: ${_installed_imports}")
 endif()
 
 message(STATUS
-  "T026: every installed imported name has a matching in-tree alias "
+  "T026: installed imported names exactly match the configure-time export manifest "
   "(${_installed_imports})")

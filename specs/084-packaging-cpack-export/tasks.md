@@ -272,23 +272,26 @@
 > local matrix script carries exactly this pin for the same reason.
 
 - [ ] T065 [P] [US3] **Attach package artifacts on the in-scope Linux lanes** in `.github/workflows/tier1.yml` (FR-026) — run the package step after a green build and upload the DEB/RPM/TGZ artifacts, named per FR-017/T051.
-> **FR-026 upload coverage — CORRECTED at Gate B round 5 (USER DECISION 2026-08-03).** Landed lanes
-> are `linux-gcc-release`, `linux-clang-release` **and** `linux-clang-debug` — **5 of 6** in-scope
-> configurations, `tier1.yml:519,556,564`. `linux-gcc-debug` has **no CI lane at all**; FR-026 binds
-> only lanes that exist and FR-022 requires the *configuration*, not a lane, so none is owed. **FR-026
-> is therefore met for every lane that exists, and there is no narrowing waiver.**
+> **FR-026 upload coverage — RELEASE-ONLY IN CI (USER DECISION 2026-08-03).** Package artifacts are
+> attached on the **Release lanes only**: `linux-gcc-release` and `linux-clang-release` (`tier1.yml`),
+> `windows-msvc-release` (`tier2.yml`) — **3 of 6** in-scope configurations. **No `-Debug`
+> configuration uploads packages in CI.** `linux-gcc-debug` additionally has no CI lane at all
+> (`tasks.md` records it builds 9 third-party dependencies from source against 0 for
+> `linux-gcc-release`).
 >
-> ⚠️ **The round-1 version of this banner was wrong, and a decision was taken on it.** It narrowed
-> uploads to Release-only on the ground of *"≈3 GB of artifacts per Linux Debug configuration
-> (`quickstart.md:50`)"* against the runner's ~14 GB free-disk ceiling. **Measured 2026-08-03: 99 MB
-> (gcc-debug) and 72 MB (clang-debug) across DEB+RPM+TGZ; 295 MB for all 14 artifacts** — roughly
-> **30× smaller**, so the disk-ceiling argument did not hold. The ≈3 GB figure came from a
-> `quickstart.md` line that labelled *itself* PROJECTED-not-measured and named the task (T064) that
-> would correct it; T064 ran, the line was never corrected, and the projection was then cited as a
-> measured budget. `quickstart.md` is now corrected from the measurement.
+> **This does not change which tests run.** The packaging ctest tier was already Release-only on both
+> tiers under decision D3, so no witness stops executing; the Debug legs of FR-019 and T058 were never
+> CI-exercised on a Debug lane. Debug packaging works locally and was proven there across the
+> six-configuration matrix.
 >
-> Root cause worth keeping: **a self-labelled projection still got propagated verbatim into a
-> decision rationale.** The label did not prevent the citation.
+> ⚠️ Superseded rationale, kept because the shape recurs: the round-1 narrowing cited *"≈3 GB of
+> artifacts per Linux Debug configuration"*. **Measured: 99 MB / 72 MB; 295 MB for all 14 artifacts —
+> ~30× smaller.** It came from a `quickstart.md` line that labelled itself PROJECTED-not-measured and
+> named T064 as its corrector; T064 ran, the line was never corrected, and the projection was cited as
+> measured fact. Release-only is the user's decision, **not** a disk-cost conclusion.
+>
+> **T066 is narrowed with it:** "attach package artifacts on the MSVC lanes" (plural) is delivered as
+> `windows-msvc-release` only.
 - [ ] T066 [P] [US3] **Attach package artifacts on the MSVC lanes** in `.github/workflows/tier2.yml` (FR-026) — same, for ZIP.
 - [ ] T067 [US3] **FR-026a / D3 — enable `FIXPP_BUILD_INTEROP_PERF` and gate the real-client witness on `linux-gcc-release` ONLY** in `.github/workflows/tier1.yml`. That single lane runs SC-011 and SC-012 as a **gate**; the other five in-scope lanes run the **minimal tier only**. `FIXPP_BUILD_INTEROP_PERF` is declared `OFF` at `cmake/ProjectOptions.cmake:10` and is enabled in **no** preset and **no** workflow today — so without this task SC-011/SC-012 are local-only and a witness that silently never runs **reads as green** (`feedback_ci_gate_observes_not_asserts_witness_skips_into_green`). `linux-gcc-release` is the chosen lane because it builds **zero** third-party dependencies from source (M1, Assumption 9), so gating the heaviest tier is bounded rather than all-or-nothing. **This must exit non-zero on failure — an observing step is not a gate.**
 - [ ] T068 [US3] **SC-010 — assert CI artifact names are unique and matrix-identifying** across all lanes in one run (platform, toolchain, configuration, **and format** — FR-017) — the `actions/upload-artifact` `name:` values in `.github/workflows/tier1.yml` and `.github/workflows/tier2.yml` must form a set with no duplicates across the whole matrix. A collision silently overwrites, which is a silent omission in SC-003's sense.

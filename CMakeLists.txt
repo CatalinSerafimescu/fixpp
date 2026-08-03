@@ -636,20 +636,82 @@ set_target_properties(fixpp_dict_dispatch PROPERTIES EXPORT_NAME "dict::dispatch
 
 # T022/T026: two export members had no in-tree fixpp:: alias at all
 # (fixpp_dict_dispatch_bridge, fixpp_capi_objects) while every other member had one.
-# T026 now checks the realizable half only: every INSTALLED imported name must
-# have a matching in-tree alias. The reverse direction is not shippable as a
-# zero-exemption rule because four in-tree aliases are deliberately never
-# exported (fixpp::mock_clock, fixpp::builders::<ver>, fixpp::validators::<ver>,
-# fixpp::dict::runtime). These two aliases are still required so the installed
-# name set matches real aliases rather than needing special cases. Both are real
-# members: the bridge by the measured $<LINK_ONLY:> closure, capi_objects by
-# fixpp_capi's PUBLIC edge.
+# These aliases are still required so the exported-name manifest below can be
+# derived from the REAL configured graph rather than from source text.
 if(NOT TARGET fixpp::dict_dispatch_bridge)
   add_library(fixpp::dict_dispatch_bridge ALIAS fixpp_dict_dispatch_bridge)
 endif()
 if(NOT TARGET fixpp::capi_objects)
   add_library(fixpp::capi_objects ALIAS fixpp_capi_objects)
 endif()
+
+# T026: configure-time exported-name manifest, derived from the ACTUAL export set.
+# Source-text scraping could be fooled by comments, dead branches, or variables;
+# this loop cannot, because the target graph and every EXPORT_NAME are already
+# resolved. The manifest stays in the BUILD tree only -- installing it would
+# mutate the exact package payload asserted by T058.
+set(FIXPP_EXPORT_NAMES_MANIFEST "${CMAKE_BINARY_DIR}/fixpp-export-names.txt")
+set(FIXPP_PACKAGE_TARGET_INPUTS_MANIFEST "${CMAKE_BINARY_DIR}/fixpp-package-target-inputs.txt")
+set(_fixpp_export_manifest_names "")
+set(_fixpp_package_target_inputs "")
+file(RELATIVE_PATH _fixpp_archive_rel_dir "${CMAKE_BINARY_DIR}" "${CMAKE_ARCHIVE_OUTPUT_DIRECTORY}")
+foreach(_fixpp_export_tgt IN LISTS FIXPP_EXPORT_TARGETS)
+  get_target_property(_fixpp_export_name ${_fixpp_export_tgt} EXPORT_NAME)
+  if(NOT _fixpp_export_name OR _fixpp_export_name STREQUAL "_fixpp_export_name-NOTFOUND")
+    set(_fixpp_export_name "${_fixpp_export_tgt}")
+  endif()
+
+  set(_fixpp_export_alias "fixpp::${_fixpp_export_name}")
+  if(NOT TARGET ${_fixpp_export_alias})
+    message(FATAL_ERROR
+      "084 T026: export member '${_fixpp_export_tgt}' resolves to imported name "
+      "'${_fixpp_export_alias}', but no in-tree alias target of that name exists.")
+  endif()
+
+  get_target_property(_fixpp_aliased_target ${_fixpp_export_alias} ALIASED_TARGET)
+  if(NOT _fixpp_aliased_target STREQUAL _fixpp_export_tgt)
+    message(FATAL_ERROR
+      "084 T026: alias '${_fixpp_export_alias}' points at '${_fixpp_aliased_target}', "
+      "not at export member '${_fixpp_export_tgt}'.")
+  endif()
+  list(APPEND _fixpp_export_manifest_names "${_fixpp_export_alias}")
+
+  get_target_property(_fixpp_export_type ${_fixpp_export_tgt} TYPE)
+  if(_fixpp_export_type STREQUAL "STATIC_LIBRARY")
+    list(APPEND _fixpp_package_target_inputs
+      "${_fixpp_archive_rel_dir}/$<TARGET_FILE_NAME:${_fixpp_export_tgt}>")
+  elseif(_fixpp_export_type STREQUAL "OBJECT_LIBRARY")
+    get_target_property(_fixpp_export_binary_dir ${_fixpp_export_tgt} BINARY_DIR)
+    file(RELATIVE_PATH _fixpp_export_binary_rel "${CMAKE_BINARY_DIR}" "${_fixpp_export_binary_dir}")
+    list(APPEND _fixpp_package_target_inputs
+      "${_fixpp_export_binary_rel}/${_fixpp_export_tgt}")
+  elseif(NOT _fixpp_export_type STREQUAL "INTERFACE_LIBRARY")
+    message(FATAL_ERROR
+      "084 packaging::package-target: unexpected export member type "
+      "'${_fixpp_export_type}' for target '${_fixpp_export_tgt}'.")
+  endif()
+endforeach()
+list(REMOVE_DUPLICATES _fixpp_export_manifest_names)
+list(SORT _fixpp_export_manifest_names)
+list(REMOVE_DUPLICATES _fixpp_package_target_inputs)
+list(SORT _fixpp_package_target_inputs)
+string(JOIN "\n" _fixpp_export_manifest_text ${_fixpp_export_manifest_names})
+string(JOIN "\n" _fixpp_package_target_inputs_text ${_fixpp_package_target_inputs})
+file(GENERATE OUTPUT "${FIXPP_EXPORT_NAMES_MANIFEST}" CONTENT "${_fixpp_export_manifest_text}\n")
+file(GENERATE OUTPUT "${FIXPP_PACKAGE_TARGET_INPUTS_MANIFEST}"
+     CONTENT "${_fixpp_package_target_inputs_text}\n")
+unset(_fixpp_export_alias)
+unset(_fixpp_export_binary_dir)
+unset(_fixpp_export_binary_rel)
+unset(_fixpp_export_manifest_names)
+unset(_fixpp_export_manifest_text)
+unset(_fixpp_export_name)
+unset(_fixpp_export_tgt)
+unset(_fixpp_export_type)
+unset(_fixpp_aliased_target)
+unset(_fixpp_archive_rel_dir)
+unset(_fixpp_package_target_inputs)
+unset(_fixpp_package_target_inputs_text)
 
 # T021 -- fixpp_dict_dispatch's install interface must stay EMPTY. Its sole
 # include directory (cmake/Codegen.cmake) is $<BUILD_INTERFACE:> over
