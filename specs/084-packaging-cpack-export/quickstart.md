@@ -49,7 +49,15 @@ df -h /mnt/wsl/fixppbuild        # run BEFORE configuring each configuration
 
 Required free space, tree size + an 8 GB margin: **≥ 12 GB** before a Release configuration (tree measured 3.4 GB), **≥ 33 GB** before a Debug configuration (tree measured 22–25 GB). Below the threshold, **stop** — do not start the configuration and re-derive the budget.
 
-**Projected artifact total ≈ 7 GB** — 2 Linux Debug configurations dominate (~4.6 GB installable payload each, compressed across DEB/RPM/TGZ), Release contributes well under 1 GB, and the two MSVC ZIPs land in the separate Windows sandbox, not on this volume. ⚠️ **This figure is PROJECTED, not measured** — it is extrapolated from the measured clang-Debug payload and an assumed DWARF compression ratio. **T064 measures the real whole-volume high-water mark across the T062 run and this line is corrected from that measurement**; it must not be cited as a measured budget before then.
+**Artifact total: 295 MB MEASURED** (2026-08-03, all 14 artifacts on the build volume). Per Linux Debug configuration, across DEB+RPM+TGZ: **gcc-debug 99 MB, clang-debug 72 MB**. Uncompressed staged Debug payload: **348 MB / 197 files**.
+
+> ⚠️ **CORRECTED at Gate B round 5 (2026-08-03) — the superseded projection was cited as fact and a decision was taken on it.**
+>
+> This line previously read *"Projected artifact total ≈ 7 GB — 2 Linux Debug configurations dominate (~4.6 GB installable payload each)"*, and carried its own instruction: *"This figure is PROJECTED, not measured … T064 measures the real whole-volume high-water mark across the T062 run and **this line is corrected from that measurement**; it must not be cited as a measured budget before then."*
+>
+> **T064 ran; this line was never corrected from it.** The projection then survived long enough to be cited — as ≈3 GB per Linux Debug configuration — in the FR-026 upload-coverage narrowing (Gate B round 1, F3), which is the rationale a user decision rested on. **The measured figure is ~99 MB, roughly 30× smaller**, so the disk-ceiling argument that narrowing rested on does not hold at the measured size. See the FR-026 banner in `spec.md` and T065 in `tasks.md`.
+>
+> Root cause worth keeping: a figure that labelled itself unmeasured, and named the task that would correct it, was still propagated verbatim into a decision rationale. The label did not prevent the citation.
 
 ---
 

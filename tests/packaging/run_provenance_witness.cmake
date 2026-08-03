@@ -220,8 +220,13 @@ function(_fixpp_check_provenance _expect_config _expect_worktree _expect_revisio
   if(NOT _got_rev STREQUAL "${_expect_revision}")
     list(APPEND _why "source-revision is '${_got_rev}', expected '${_expect_revision}'")
   endif()
-  if(NOT _got_payload_sha256 MATCHES "^[0-9a-f]{64}$")
-    list(APPEND _why "payload-sha256 is '${_got_payload_sha256}', not a 64-hex SHA-256")
+  # CMake's regex engine has NO {n} repetition quantifier -- "^[0-9a-f]{64}$"
+  # matches the literal characters { 6 4 } and so can NEVER match a real digest.
+  # Proven: cmake -P on this exact hash returns no match for the brace form and a
+  # match for the "+" form. Length is therefore checked separately.
+  string(LENGTH "${_got_payload_sha256}" _got_payload_len)
+  if(NOT _got_payload_sha256 MATCHES "^[0-9a-f]+$" OR NOT _got_payload_len EQUAL 64)
+    list(APPEND _why "payload-sha256 is '${_got_payload_sha256}' (length ${_got_payload_len}), not a 64-hex SHA-256")
   endif()
   if(NOT _got_payload_sha256 STREQUAL "${_expect_payload_sha256}")
     list(APPEND _why "payload-sha256 is '${_got_payload_sha256}', expected '${_expect_payload_sha256}'")
