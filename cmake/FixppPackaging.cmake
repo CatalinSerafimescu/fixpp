@@ -140,6 +140,15 @@ YOU MUST SUPPLY, and they must be discoverable by find_package:
 The ABI-fragile dependencies offer no cross-version ABI guarantee: build them
 with the same toolchain and standard library as this package.
 
+RESOLUTION MODE: configure your consumer project with
+-DCMAKE_FIND_PACKAGE_PREFER_CONFIG=ON. Without it, find_dependency(OpenSSL) can
+resolve through CMake's bundled FindOpenSSL MODULE instead of OpenSSL's own
+config package: measured, this binds whatever OpenSSL the host happens to have
+(host 3.0.13 vs the 3.6.2 this package was built against) with NO diagnostic,
+and it declares OpenSSL::SSL but not the lowercase openssl::openssl target the
+OpenTelemetry dependency chain expects, so configure can die deep inside a
+third-party config file instead of failing cleanly.
+
 fixpp is an independent implementation, neither affiliated with nor endorsed by
 the QuickFIX project. Redistributed FIX dictionary data retains its upstream
 licence; see the NOTICE and QUICKFIX_LICENSE.txt files in the package doc
