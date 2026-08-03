@@ -57,6 +57,23 @@ on:
   pull_request_target:
     types: [closed]
 
+  # REQUIRED for the superseded-main sweep to reach a steady state of ONE entry
+  # per leg. `push: main` is the wrong moment for it: this workflow finishes in
+  # ~20 seconds while the matrices it shares that event with save their ccache an
+  # hour or more later. Measured for 8dc7ec9a on 2026-08-03 — sweep ran
+  # 15:57:33→15:57:53; the saves landed 16:57 through 17:19. So a push-triggered
+  # sweep can only ever collapse the PREVIOUS generation, and the moment the
+  # current run saves, every leg is back to two. At ~7 GB for one live set that
+  # is ~14 GB against a 10 GB cap — still evicting, just half as fast.
+  #
+  # Firing on the tiers' COMPLETION instead puts the sweep after the saves, which
+  # is the only ordering that leaves one entry per leg. Names must match the
+  # `name:` of each tier workflow exactly.
+  workflow_run:
+    workflows: ["Tier 1 — Linux CI", "Tier 2 — Windows CI", "Tier 3 — Linux libc++ CI"]
+    types: [completed]
+    branches: ["main"]
+
   workflow_dispatch:
 
 # `pull_request_target` rather than `pull_request`: for a PR from a fork the
@@ -206,7 +223,11 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
-          DEFAULT_REF: refs/heads/${{ github.event.repository.default_branch }}
+          # `|| 'main'` because the payload differs per trigger: a workflow_run
+          # event carries `repository`, but an empty value here would make the
+          # ref filter match nothing and the sweep silently no-op — the exact
+          # reports-success-having-done-nothing shape the step below guards.
+          DEFAULT_REF: refs/heads/${{ github.event.repository.default_branch || 'main' }}
         run: |
           set -euo pipefail
 
