@@ -265,7 +265,7 @@ After this feature the dictionary path has **no other cap**. A pin never observe
 
 **Expected**: the pin **fails** — the over-cap frame is accepted instead of returning `wire_group_too_large`. Record the mutation applied, the selected count (**1**), and the failure output in `.specify/decisions/085-fold-flat-cap-loop-verify.md`.
 
-**What this transcript proves, and what it does not.** It proves the dictionary path's **cap check is load-bearing** — enforcement exists there and deleting it is observable. It does **not** prove contract **C-1**'s partition coupling: this fixture (`tests/wire/offset_table_test.cpp:198-235`) is `453=1` with a single *unnested* instance, so its flat and nesting-aware partitions are identical and no whole-check deletion can tell them apart. Do not write the wider claim into the verify record. *(Narrowed at Gate A round 2.)*
+**What this transcript proves, and what it does not.** It proves the dictionary path's **cap check is load-bearing** — enforcement exists there and deleting it is observable. It does **not** prove contract **C-1**'s partition coupling: this fixture (`tests/wire/offset_table_test.cpp:199-235`) is `453=1` with a single *unnested* instance, so its flat and nesting-aware partitions are identical and no whole-check deletion can tell them apart. Do not write the wider claim into the verify record. *(Narrowed at Gate A round 2.)*
 
 **If the pin stays GREEN with the comparison deleted, diagnose in this order:**
 

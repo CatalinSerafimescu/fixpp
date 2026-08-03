@@ -95,7 +95,7 @@ Today `group()` has **two** `err_group_too_large` returns:
 
 | Return | Origin | Covered today? |
 |---|---|---|
-| `:577` | `consume_group_extent` overflow (`:521-524` cap, `:446-449` depth) | **Yes** — `WireOffsetTable.DoSCapPerInstanceRejectsOversizedSingleInstance` (`offset_table_test.cpp:198-235`) drives it with `tight_cfg` |
+| `:577` | `consume_group_extent` overflow (`:521-524` cap, `:446-449` depth) | **Yes** — `WireOffsetTable.DoSCapPerInstanceRejectsOversizedSingleInstance` (`offset_table_test.cpp:199-235`) drives it with `tight_cfg` |
 | `:592` | the flat cap loop | **No** — dead in the entire suite |
 
 `:592` is dead because it needs dict-free construction **and** a tightened `Config` **simultaneously**, and no test does both: every `tight_cfg` test goes through `Parser` + `table_view` (dictionary path, where step 4 pre-empts it), and every dict-free test uses default `Config`.
@@ -171,8 +171,8 @@ Ordering note (FR-009): `group_end` is assigned before the loop in the `else` br
 Re-verified by enumeration at `c1564dd2`.
 
 **Dictionary-path cap pins (must stay green, unchanged):**
-- `WireOffsetTable.DoSCapPerInstanceRejectsOversizedSingleInstance` — `offset_table_test.cpp:198-235`
-- `WireOffsetTable.DoSCapPerInstanceAllowsAggregateOverCap` — `offset_table_test.cpp:164-196`
+- `WireOffsetTable.DoSCapPerInstanceRejectsOversizedSingleInstance` — `offset_table_test.cpp:199-235`
+- `WireOffsetTable.DoSCapPerInstanceAllowsAggregateOverCap` — `offset_table_test.cpp:164-197`
 
 **Dict-free path coverage (must stay green — this is what makes FR-003's relocation *checkable*):** roughly sixteen direct `OffsetTable{frame, mr}` constructions across `offset_table_test.cpp` (`:58,104,117,129,150,254`), `offset_table_overflow_test.cpp` (`:74,113,155`), `offset_table_error_path_test.cpp` (`:68,100,125,190`) and `hostile_input_hardening_test.cpp` (`:78,107,132,161,284,319`). Notably `offset_table_test.cpp:150-157` already calls `group(453)` **dict-free** and asserts its extent — i.e. the relocated branch is on a live, asserted path today.
 
