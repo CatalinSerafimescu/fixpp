@@ -108,11 +108,12 @@ add_compile_definitions(FIXPP_BUILD_OTEL=$<BOOL:${FIXPP_BUILD_OTEL}>)
 #
 # FR-011 permits an OTel-OFF build as a development accelerator and forbids one
 # reaching a shipped artifact. The first cut enforced that with a FATAL_ERROR in
-# the packaging module, which was WRONG and would have RED-LINED THE ENTIRE
-# WINDOWS CI TIER: .github/workflows/tier2.yml configures every MSVC lane with
-# `-DFIXPP_BUILD_OTEL=OFF`, so an unconditional refusal fails a configuration
-# the requirement explicitly PERMITS. It punished the permitted use case instead
-# of the forbidden one. (Missed locally because the MSVC legs were run OTel-ON.)
+# the packaging module, which was WRONG: it rejected a configuration the
+# requirement explicitly permits. The current tier2 MSVC packaging lane runs
+# OTel ON (`.github/workflows/tier2.yml` passes `-DFIXPP_BUILD_OTEL=ON` on
+# 2026-08-03), but the FR-011 reason for removing the refusal is broader than
+# that lane detail: OTel-OFF development builds are allowed, shipped artifacts
+# from them are not.
 #
 # The invariant is unchanged and still airtight: an OTel-OFF build simply
 # defines NO packaging targets and NO CPack configuration, so it CANNOT produce
@@ -635,12 +636,14 @@ set_target_properties(fixpp_dict_dispatch PROPERTIES EXPORT_NAME "dict::dispatch
 
 # T022/T026: two export members had no in-tree fixpp:: alias at all
 # (fixpp_dict_dispatch_bridge, fixpp_capi_objects) while every other member had one.
-# T026 asserts the alias census and the installed imported-name set are equal BOTH
-# directions; without these, two installed names would have no alias to match and the
-# gate would need a hand-maintained exemption list — the half-applied sweep T022
-# exists to prevent. Adding the aliases keeps it a plain set equality with zero
-# exemptions. Both are real members: the bridge by the measured $<LINK_ONLY:> closure,
-# capi_objects by fixpp_capi's PUBLIC edge.
+# T026 now checks the realizable half only: every INSTALLED imported name must
+# have a matching in-tree alias. The reverse direction is not shippable as a
+# zero-exemption rule because four in-tree aliases are deliberately never
+# exported (fixpp::mock_clock, fixpp::builders::<ver>, fixpp::validators::<ver>,
+# fixpp::dict::runtime). These two aliases are still required so the installed
+# name set matches real aliases rather than needing special cases. Both are real
+# members: the bridge by the measured $<LINK_ONLY:> closure, capi_objects by
+# fixpp_capi's PUBLIC edge.
 if(NOT TARGET fixpp::dict_dispatch_bridge)
   add_library(fixpp::dict_dispatch_bridge ALIAS fixpp_dict_dispatch_bridge)
 endif()
@@ -782,6 +785,14 @@ install(
 # THIS directory scope and silently skip everything below.
 if(FIXPP_PACKAGING_ENABLED)
   include(cmake/FixppPackaging.cmake)
+  foreach(_fixpp_dep IN LISTS _fixpp_dep_pkgs)
+    if(NOT _fixpp_dep IN_LIST FIXPP_DOCUMENTED_DEP_PKGS)
+      message(FATAL_ERROR
+        "084 T050: derived dependency '${_fixpp_dep}' is missing from the documented "
+        "dependency list in cmake/FixppPackaging.cmake. Document every derived "
+        "find_dependency package before shipping the package description.")
+    endif()
+  endforeach()
 endif()
 
 endif()  # NOT FIXPP_CODEGEN_BOOTSTRAP_RUNNING — see the banner above the export set

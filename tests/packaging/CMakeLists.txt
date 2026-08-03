@@ -66,6 +66,21 @@ set_tests_properties(fixpp::packaging::contents PROPERTIES
   LABELS "packaging"
 )
 
+# ── T026 (FR-003/FR-007/FR-008): installed imported names map to real aliases ─
+add_test(
+  NAME fixpp::packaging::export-names
+  COMMAND "${CMAKE_COMMAND}"
+    "-DFIXPP_MAIN_BUILD_DIR=${CMAKE_BINARY_DIR}"
+    "-DFIXPP_WORK_DIR=${_fixpp_pkg_work}/export-names"
+    "-DFIXPP_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/run_export_names_witness.cmake"
+)
+set_tests_properties(fixpp::packaging::export-names PROPERTIES
+  RUN_SERIAL TRUE
+  TIMEOUT 600
+  LABELS "packaging"
+)
+
 # ── T060 (FR-021a, I24): package PROVENANCE ─────────────────────────────────
 add_test(
   NAME fixpp::packaging::provenance

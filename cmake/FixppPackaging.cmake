@@ -43,11 +43,14 @@ endif()
 # escape hatch is set — the red-proof path, which must be loud.
 #
 # There is deliberately NO FATAL_ERROR here any more. The first cut refused to
-# CONFIGURE an OTel-OFF build, which would have red-lined every Windows CI lane:
-# tier2.yml configures MSVC with -DFIXPP_BUILD_OTEL=OFF, a configuration FR-011
-# explicitly PERMITS. An OTel-OFF build now simply defines no packaging targets
-# at all, which enforces the same invariant more strongly — there is nothing to
-# invoke rather than something that refuses when invoked.
+# CONFIGURE an OTel-OFF build, which was wrong because FR-011 explicitly
+# permits such development builds. The current tier2 MSVC packaging lane runs
+# OTel ON (`.github/workflows/tier2.yml` passes `-DFIXPP_BUILD_OTEL=ON` on
+# 2026-08-03), but the reason for removing the refusal does not depend on that
+# workflow detail. An OTel-OFF build now simply defines no packaging targets at
+# all unless the TEST-ONLY escape hatch is set, which enforces the same
+# invariant more strongly — there is nothing to invoke rather than something
+# that refuses when invoked.
 if(FIXPP_BUILD_OTEL)
   set(FIXPP_PACKAGE_TELEMETRY "ON")
 else()
@@ -82,6 +85,9 @@ set(CPACK_PACKAGE_NAME "fixpp")
 set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
 set(CPACK_PACKAGE_FILE_NAME
     "fixpp-${PROJECT_VERSION}-${_fixpp_pkg_platform}-${_fixpp_pkg_toolchain}-${_fixpp_pkg_config}")
+if(NOT FIXPP_PACKAGE_TELEMETRY STREQUAL "ON")
+  string(APPEND CPACK_PACKAGE_FILE_NAME "-otel-off-fixture")
+endif()
 
 # ── T049 (FR-018, FR-018c): metadata ─────────────────────────────────────────
 # ⚠️ FR-018c constrains the DESCRIPTION wording. Third-party engine compatibility
@@ -116,6 +122,14 @@ set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_SOURCE_DIR}/LICENSE")
 #                                               surface (7 imported targets on
 #                                               fixpp_otel + 3 on fixpp_log_otlp)
 #                                               and fastest-moving
+set(FIXPP_DOCUMENTED_DEP_PKGS
+  OpenSSL
+  asio
+  tomlplusplus
+  pugixml
+  Crc32c
+  opentelemetry-cpp
+)
 set(CPACK_PACKAGE_DESCRIPTION
 "fixpp is a modern C++23 implementation of the FIX protocol, shipped as static
 libraries with a CMake package configuration.
@@ -194,16 +208,26 @@ set(FIXPP_ARTIFACT_DIR "${_fixpp_default_artifact_dir}" CACHE PATH
     "Durable directory for finished package artifacts (survives build-tree deletion)")
 unset(_fixpp_default_artifact_dir)
 
+set(_fixpp_package_copy_commands "")
+set(_fixpp_package_comment "084 FR-020/FR-021: package only")
+if(FIXPP_PACKAGE_TELEMETRY STREQUAL "ON")
+  list(APPEND _fixpp_package_copy_commands
+    COMMAND "${CMAKE_COMMAND}"
+            "-DFIXPP_PACKAGE_DIR=${CPACK_PACKAGE_DIRECTORY}"
+            "-DFIXPP_ARTIFACT_DIR=${FIXPP_ARTIFACT_DIR}"
+            -P "${CMAKE_SOURCE_DIR}/cmake/FixppCopyArtifacts.cmake")
+  set(_fixpp_package_comment
+      "084 FR-020/FR-021: package, then copy artifacts to ${FIXPP_ARTIFACT_DIR}")
+endif()
 add_custom_target(fixpp-package
   COMMAND "${CMAKE_COMMAND}" -E make_directory "${FIXPP_ARTIFACT_DIR}"
   COMMAND "${CMAKE_CPACK_COMMAND}" --config "${CMAKE_BINARY_DIR}/CPackConfig.cmake"
-  COMMAND "${CMAKE_COMMAND}"
-          "-DFIXPP_PACKAGE_DIR=${CPACK_PACKAGE_DIRECTORY}"
-          "-DFIXPP_ARTIFACT_DIR=${FIXPP_ARTIFACT_DIR}"
-          -P "${CMAKE_SOURCE_DIR}/cmake/FixppCopyArtifacts.cmake"
+  ${_fixpp_package_copy_commands}
   WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
-  COMMENT "084 FR-020/FR-021: package, then copy artifacts to ${FIXPP_ARTIFACT_DIR}"
+  COMMENT "${_fixpp_package_comment}"
   VERBATIM)
+unset(_fixpp_package_comment)
+unset(_fixpp_package_copy_commands)
 # ── Internal prefix — Linux ONLY ─────────────────────────────────────────────
 # MEASURED 2026-08-02, not assumed: with this set unconditionally, the Windows
 # ZIP shipped `fixpp-0.0.1-windows-msvc-release/usr/lib/fixpp_core.lib` — an FHS

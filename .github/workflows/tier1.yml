@@ -529,7 +529,7 @@ jobs:
         if: matrix.preset == 'linux-gcc-release'
         run: |
           set -euo pipefail
-          expected=6
+          expected=7
           n=$(ctest --preset ${{ matrix.preset }} -L packaging -N \
                 | sed -n 's/^Total Tests: //p')
           echo "registered packaging witnesses: ${n:-0} (expected ${expected})"
