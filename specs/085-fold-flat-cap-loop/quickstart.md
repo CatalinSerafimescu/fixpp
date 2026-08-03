@@ -23,7 +23,9 @@ Four rules, each with the reason and the reproduction. Transplanted from `specs/
 
 - **`-j2` maximum.** Wide parallel C++ builds in this tree have OOM-killed the session.
 
-- **Never use `cmake --preset` / `ctest --preset`.** Reproduced from the library root, 2026-08-03:
+- ~~**Never use `cmake --preset` / `ctest --preset`.**~~ **LIFTED by the 084 rebase (2026-08-03) — `cmake --preset` now WORKS; this rule no longer applies.** 084 removed the *cause*, not just the symptom: `conan/profiles/*` now set `tools.cmake.cmaketoolchain:user_presets=` (empty), so Conan **no longer generates `CMakeUserPresets.json` at all** — and with no accumulating `include:` list there is no `Duplicate preset` collision to break `--preset`. Verified after rebasing onto `8dc7ec9a`: delete the stale gitignored `CMakeUserPresets.json` + each `build/<preset>/CMakePresets.json`, re-run `conan install -pr conan/profiles/<preset> -of build/<preset>`, and the file is **not** regenerated; `cmake --preset linux-clang-debug` then succeeds. **Every step in this file may now use `cmake --preset <P>` / `cmake --build --preset <P>` / `ctest --preset <P>`, which is what `tier1.yml` actually runs** — preferred, since `-S`/`-B` re-derived the flags by hand and is where this feature's own verify pass mis-set four sanitizer caches. The `-S`/`-B` forms below still work and are left in place rather than rewritten wholesale. The original constraint and its two recorded mechanisms are preserved verbatim below as history — **do not read them as current state.**
+
+  *(Historical, pre-084 — the rule as it stood when this file was written.)* **Never use `cmake --preset` / `ctest --preset`.** Reproduced from the library root, 2026-08-03:
 
   ```
   $ cmake --list-presets

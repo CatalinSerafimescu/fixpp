@@ -26,7 +26,7 @@ Article VII §3 is mandatory and is discharged **by compliance**, not substituti
 
 ## Build constraints (read before running anything)
 
-- **`cmake --preset` is broken in this tree** (missing Conan include) — use `-S`/`-B` and `--test-dir`, per `quickstart.md` §0. Never `cmake --preset`.
+- ~~**`cmake --preset` is broken in this tree** (missing Conan include) — use `-S`/`-B` and `--test-dir`, per `quickstart.md` §0. Never `cmake --preset`.~~ **LIFTED by the 084 rebase (2026-08-03).** 084 set `tools.cmake.cmaketoolchain:user_presets=` in every `conan/profiles/*`, so Conan no longer generates `CMakeUserPresets.json` and the `Duplicate preset` collision that broke `--preset` cannot occur. Verified on `8dc7ec9a`: `cmake --preset linux-clang-debug` succeeds. **Prefer `--preset` — it is what `tier1.yml` runs.** See `quickstart.md`'s build-constraints banner for the mechanism and the one-time cleanup (remove the stale gitignored `CMakeUserPresets.json`, re-run `conan install`).
 - **Build with `-j2`.** Wider parallelism has OOM-killed the session in this tree.
 - **Never `ctest -R <gtest-case-name>`** — CTest registers *bucket* names (`wire_pure_tests`, `wire_dict_tests`, `delimiter_census`); a case-name selector matches nothing and **exits 0**. Select by `-L`, then `--gtest_filter` on the bucket binary, and assert the count. This section false-greened four times during Gate A; `quickstart.md` §3a records the sequence.
 
