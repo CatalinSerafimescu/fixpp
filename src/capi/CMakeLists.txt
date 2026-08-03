@@ -23,7 +23,8 @@ add_library(fixpp_capi_objects OBJECT
 )
 set_property(TARGET fixpp_capi_objects PROPERTY POSITION_INDEPENDENT_CODE ON)
 target_include_directories(fixpp_capi_objects PUBLIC
-  "${CMAKE_SOURCE_DIR}/include"
+  "$<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>"
+  "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
 )
 target_link_libraries(fixpp_capi_objects PUBLIC
   fixpp_core

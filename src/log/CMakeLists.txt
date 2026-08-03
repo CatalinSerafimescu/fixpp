@@ -14,7 +14,8 @@ add_library(fixpp_log STATIC
 add_library(fixpp::log ALIAS fixpp_log)
 
 target_include_directories(fixpp_log PUBLIC
-  "${CMAKE_SOURCE_DIR}/include"
+  "$<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>"
+  "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
 )
 
 # Allowed dependencies: core only [arch §2.3]
@@ -40,7 +41,8 @@ if(TARGET opentelemetry-cpp::api)
   add_library(fixpp::log_otlp ALIAS fixpp_log_otlp)
 
   target_include_directories(fixpp_log_otlp PUBLIC
-    "${CMAKE_SOURCE_DIR}/include"
+    "$<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>"
+    "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
   )
 
   # Links fixpp_log (sink interface + record) + OTel SDK log components.

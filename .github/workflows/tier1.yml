@@ -462,7 +462,14 @@ jobs:
           ci/seed-conan-cache.sh ${{ matrix.preset }}
 
       - name: Configure
-        run: cmake --preset ${{ matrix.preset }}
+        # FIXPP_ARTIFACT_DIR is a CACHE variable baked into the fixpp-package
+        # target at CONFIGURE time — it is NOT read from the environment, so it
+        # must be set here rather than on the build step. Its in-repo default is
+        # a local WSL mount; on a runner it has to be inside the workspace for
+        # upload-artifact to reach it. Harmless on the non-packaging lanes.
+        run: >
+          cmake --preset ${{ matrix.preset }}
+          -DFIXPP_ARTIFACT_DIR=${{ github.workspace }}/_artifacts
 
       # 069-v44-all-families T017 (FR-008): this Tier-1 matrix is the CI
       # invariant that keeps >=1 preset continuously verifying the FULL v44
@@ -484,8 +491,98 @@ jobs:
       - name: Build
         run: cmake --build --preset ${{ matrix.preset }}
 
-      - name: Test
+      # 084 T067 / FR-026a — the packaging tier is GATED ON ONE LANE.
+      #
+      # `ctest --preset` carries no label filter, so the six packaging witnesses
+      # would otherwise run on EVERY lane, each stage-installing and then
+      # configuring and compiling a sub-project — including a 1700-line TU in
+      # the real-client tier — on the sanitizer legs that already sit at the
+      # runner's disk ceiling.
+      #
+      # linux-gcc-release is the gating lane because it builds ZERO third-party
+      # dependencies from source (M1 / Assumption 9), so gating the heaviest
+      # tier is bounded rather than all-or-nothing.
+      #
+      # NOTE the exclusion is by LABEL, not by test name, and it is `packaging`
+      # only: consumer::install-witness carries the `consumer` label and keeps
+      # running on all six lanes. That is the "minimal tier" FR-026a intends —
+      # every lane still proves an external consumer compiles and links against
+      # the installed package.
+      - name: Test (minimal tier — packaging gated on linux-gcc-release)
+        if: matrix.preset != 'linux-gcc-release'
+        run: ctest --preset ${{ matrix.preset }} --output-on-failure -LE packaging
+
+      # rpmbuild is NOT on ubuntu-24.04 and packaging::contents drives the
+      # default generator list (DEB;RPM;TGZ), so without this the lane fails on
+      # a missing tool rather than on anything about the package.
+      - name: Install rpmbuild (packaging lane only)
+        if: matrix.preset == 'linux-gcc-release' || matrix.preset == 'linux-clang-release'
+        run: sudo apt-get update && sudo apt-get install -y rpm
+
+      # ⚠️ ASSERT THE COUNT, NOT JUST THE EXIT CODE. `ctest -R`/`-L` exits 0 when
+      # the filter matches NOTHING (verified), so an exit-code-only check reports
+      # this lane green having run zero witnesses — the
+      # feedback_ci_gate_observes_not_asserts_witness_skips_into_green shape.
+      # Registration is asserted BEFORE the run, so a lane that silently stops
+      # registering them fails here instead of passing quietly.
+      - name: Assert the packaging tier is registered (SC-011/SC-012 gate)
+        if: matrix.preset == 'linux-gcc-release'
+        run: |
+          set -euo pipefail
+          expected=8
+          n=$(ctest --preset ${{ matrix.preset }} -L packaging -N \
+                | sed -n 's/^Total Tests: //p')
+          echo "registered packaging witnesses: ${n:-0} (expected ${expected})"
+          if [ "${n:-0}" != "${expected}" ]; then
+            echo "::error::packaging tier registered ${n:-0} tests, expected ${expected}."
+            echo "::error::Refusing to report this lane green on an unrun gate."
+            exit 1
+          fi
+
+      - name: Test (full tier incl. packaging — the SC-011/SC-012 gate)
+        if: matrix.preset == 'linux-gcc-release'
         run: ctest --preset ${{ matrix.preset }} --output-on-failure
+
+      # ── 084 T065 / FR-026: attach the package artifacts ────────────────────
+      # Runs only after a green test step, so a red lane uploads nothing.
+      #
+      # RELEASE-ONLY IN CI (user decision 2026-08-03). Artifacts are attached on
+      # the Release lanes only: linux-gcc-release and linux-clang-release here,
+      # windows-msvc-release in tier2. No -Debug configuration uploads packages.
+      #
+      # FR-026 covers every in-scope lane, not just the one that runs the
+      # packaging ctest witnesses — that is decision D3, a separate obligation,
+      # left untouched above. So this IS a narrowing of FR-026, recorded as such
+      # in spec.md's FR-026 banner and tasks.md T065/T066 rather than left
+      # implicit.
+      #
+      # What this does NOT change: which tests run. The packaging ctest tier was
+      # already Release-only on both tiers under D3, so no witness stops
+      # executing — the Debug legs of FR-019 (.pdb) and T058 were never
+      # CI-exercised on a Debug lane. Debug packaging still works locally and was
+      # proven there across the six-configuration matrix.
+      #
+      # An earlier version of this comment justified excluding Debug on disk
+      # cost, citing ~3 GB of artifacts per Linux Debug configuration. That
+      # figure was wrong by ~30x (measured: 99 MB gcc-debug, 72 MB clang-debug)
+      # and is NOT the reason. The reason is the user's decision to keep CI
+      # artifacts Release-only.
+      - name: Build packages
+        if: matrix.preset == 'linux-gcc-release' || matrix.preset == 'linux-clang-release'
+        run: cmake --build --preset ${{ matrix.preset }} --target fixpp-package
+
+      # T068 / SC-010: the artifact NAME must identify the matrix cell, or a
+      # second lane silently overwrites the first. `matrix.preset` is unique by
+      # construction, and the files inside already carry all six FR-017
+      # dimensions.
+      - name: Upload packages
+        if: matrix.preset == 'linux-gcc-release' || matrix.preset == 'linux-clang-release'
+        uses: actions/upload-artifact@v4
+        with:
+          name: packages-${{ matrix.preset }}
+          path: ${{ github.workspace }}/_artifacts/*
+          if-no-files-found: error
+          retention-days: 14
 
   # ── Coverage job (SOFT — does not fail on threshold; Phase 3) ────────────
   # SOFT GATE: coverage threshold enforcement is disabled until Phase 4 module 1

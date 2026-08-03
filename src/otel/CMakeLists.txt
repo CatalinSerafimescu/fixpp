@@ -13,7 +13,8 @@ add_library(fixpp_otel STATIC
 add_library(fixpp::otel ALIAS fixpp_otel)
 
 target_include_directories(fixpp_otel PUBLIC
-  "${CMAKE_SOURCE_DIR}/include"
+  "$<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>"
+  "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
 )
 
 # Allowed dependencies: core, log (sink interface) [arch §2.3]

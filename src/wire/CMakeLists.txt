@@ -18,7 +18,8 @@ add_library(fixpp_wire STATIC
 add_library(fixpp::wire ALIAS fixpp_wire)
 
 target_include_directories(fixpp_wire PUBLIC
-  "${CMAKE_SOURCE_DIR}/include"
+  "$<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>"
+  "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
 )
 
 # Allowed dependencies: core, dictionary [arch §2.3]. (dict::table_view is a

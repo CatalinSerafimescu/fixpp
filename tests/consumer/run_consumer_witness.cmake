@@ -84,7 +84,6 @@ execute_process(
     "-DCMAKE_CXX_COMPILER=${FIXPP_CXX_COMPILER}"
     "-DCMAKE_C_COMPILER=${FIXPP_C_COMPILER}"
     "-DFIXPP_STAGE_PREFIX=${_stage}"
-    "-DFIXPP_BUILD_LIB_DIR=${FIXPP_MAIN_BUILD_DIR}/lib"
   RESULT_VARIABLE _cfg_rc
   OUTPUT_VARIABLE _cfg_out
   ERROR_VARIABLE  _cfg_err
@@ -116,8 +115,22 @@ if(NOT EXISTS "${_exe}")
   message(FATAL_ERROR "consumer_witness executable not found at ${_exe}")
 endif()
 
+# 084 T037 / SC-014 — the API/data pairing must be USABLE, not merely co-located.
+# The dictionary is loaded from the INSTALLED PREFIX, never from the source tree:
+# FR-018a added the dictionaries/ install rule precisely so a consumer of the
+# package can reach this data, and passing ${FIXPP_SOURCE_DIR}/dictionaries/ (as
+# this driver did before 084) would prove only that the file exists in the repo —
+# which says nothing about the package. Fail loudly rather than falling back.
+set(_installed_dict "${_stage}/share/fixpp/dictionaries/FIX44.xml")
+if(NOT EXISTS "${_installed_dict}")
+  message(FATAL_ERROR
+    "SC-014: no FIX44.xml in the installed prefix at ${_installed_dict} — the "
+    "FR-018a dictionary install rule regressed. The package would ship "
+    "fixpp::dict::load_any with none of its data.")
+endif()
+
 execute_process(
-  COMMAND "${_exe}" "${FIXPP_SOURCE_DIR}/dictionaries/FIX44.xml"
+  COMMAND "${_exe}" "${_installed_dict}"
   RESULT_VARIABLE _run_rc
   OUTPUT_VARIABLE _run_out
   ERROR_VARIABLE  _run_err

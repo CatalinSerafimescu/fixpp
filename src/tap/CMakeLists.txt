@@ -5,7 +5,8 @@ add_library(fixpp_tap INTERFACE)
 add_library(fixpp::tap ALIAS fixpp_tap)
 
 target_include_directories(fixpp_tap INTERFACE
-  "${CMAKE_SOURCE_DIR}/include"
+  "$<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>"
+  "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
 )
 
 # Allowed dependencies: core, wire (read-only views), log (interface) [arch §2.3]

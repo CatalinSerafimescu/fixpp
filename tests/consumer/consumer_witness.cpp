@@ -18,6 +18,19 @@
 // harness this feature also ships), then asserts real field values decode
 // correctly, proving the linked archives are functional, not just present.
 
+// 084 T035 / SC-002 — BOTH header kinds, reached through fixpp::fixpp ALONE:
+//   * hand-written public headers   (installed by the install(DIRECTORY include/) rule)
+//   * a generated per-version typed header, <fixpp/v44/Messages.hpp>
+//     (installed by the separate generated-header rule, filtered by its
+//      seven-pattern exclusion set)
+//
+// ⚠️ STATED LIMIT — do not cite this criterion for more than it can carry.
+// Both install rules write to the SAME ${CMAKE_INSTALL_INCLUDEDIR}, so a
+// generated header resolves through the umbrella's single install include root
+// REGARDLESS of whether any per-version fixpp::dict::<ver> target has an install
+// interface at all. SC-002 therefore proves the generated headers were INSTALLED
+// and are REACHABLE; it is structurally incapable of failing on a broken
+// per-version install interface, and must not be cited for the latter.
 #include <fixpp/dict/dictionary.hpp>
 #include <fixpp/dict/xml_loader.hpp>
 #include <fixpp/wire/parser.hpp>

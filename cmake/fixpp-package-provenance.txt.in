@@ -1,0 +1,66 @@
+fixpp package provenance
+========================
+
+This file identifies the exact build that produced the artifact it ships in.
+It exists because the artifact directory deliberately outlives the build-tree
+deletion cycle, so packages from different configurations and different source
+states accumulate side by side (084 FR-021/FR-021a).
+
+product              : fixpp
+version              : @FIXPP_STAMP_VERSION@
+platform             : @FIXPP_STAMP_PLATFORM@
+toolchain            : @FIXPP_STAMP_COMPILER_ID@ @FIXPP_STAMP_COMPILER_VERSION@
+configuration        : @FIXPP_STAMP_CONFIG@
+telemetry            : @FIXPP_PACKAGE_TELEMETRY@
+source-revision      : @FIXPP_PACKAGE_REVISION@
+source-worktree      : @FIXPP_PACKAGE_WORKTREE@
+payload-sha256       : @FIXPP_STAMP_PAYLOAD_SHA256@
+
+Field notes
+-----------
+
+source-worktree
+    `clean` means the worktree carried no uncommitted change when this package
+    was STAGED FOR INSTALL; `dirty` means it did, and the source-revision above
+    therefore does NOT fully identify the inputs. `unknown` means neither could
+    be established — the source tree was not a git repository (a source-tarball
+    build, for instance) and no explicit value was supplied.
+
+    Measured at INSTALL time, not configure time (084 Gate B round 2, R2-F1).
+    Configure-time measurement was frozen by `configure_file` and could not see
+    a source edit made after configuration, so an artifact built from modified
+    sources shipped stamped `clean` — a false affirmative. Every `cpack` /
+    `cmake --install` now restamps.
+
+    The value is normally measured with `git status --porcelain`. It can also be
+    supplied at configure time via FIXPP_PACKAGE_WORKTREE, alongside
+    FIXPP_PACKAGE_REVISION, for builds from a non-git source tree; in that case
+    it is an assertion by the builder rather than a measurement, and is only as
+    trustworthy as that build's inputs.
+
+    Configuration + revision alone is insufficient to detect staleness: two
+    packages built from the same commit either side of an uncommitted edit are
+    indistinguishable under that pair, and an uncommitted edit is the normal
+    state of a working branch. A `dirty` package is not reproducible from its
+    revision and must not be published.
+
+telemetry
+    Every artifact this project ships is built with the OpenTelemetry
+    integration ON. An `OFF` value here means the package came from a
+    development-accelerator build that must never have been packaged, and the
+    packaging::telemetry-provenance gate is expected to reject it.
+
+payload-sha256
+    SHA-256 of the staged install payload this provenance ships in, excluding
+    this provenance file itself. The digest is computed at INSTALL time over
+    the installed-prefix root (the directory containing `lib/`, `include/` and
+    `share/`), not over the source tree.
+
+    Recompute it by walking every regular file under that installed-prefix root,
+    excluding `share/doc/fixpp/fixpp-package-provenance.txt`, sorting the
+    relative paths lexicographically, hashing each file's contents with
+    SHA-256, then concatenating:
+        <relative-path-with-forward-slashes>\n<file-sha256>\n
+    for every file in that sorted order, and finally SHA-256 hashing the whole
+    concatenated manifest string. Because the path is part of the manifest, a
+    rename with identical bytes still changes the digest.
