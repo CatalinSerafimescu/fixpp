@@ -553,9 +553,25 @@ TEST(WireOffsetTable, GroupExtentSupportsMoreThanThirtyTwoDistinctMembers) {
     EXPECT_EQ(second_instance.find("9999="), std::string_view::npos);
 }
 
+// Read a TU for source inspection, NORMALISING CRLF -> LF.
+//
+// The read is binary (no CRT text-mode translation), and the windows-msvc
+// runners check out with core.autocrlf=true, so on Windows this file arrives
+// with "\r\n" line endings. The FR-001b needles below anchor on "\n" at BOTH
+// ends in order to key on leading indentation, so without this normalisation
+// none of them matches on Windows — and the failure is asymmetric: the two
+// "expect 0" assertions pass VACUOUSLY while only the two "expect 1" ones fail.
+// A pin that cannot distinguish "the block moved" from "the file is unreadable
+// to my matcher" is no pin at all. Normalising here (rather than pinning
+// src/wire/offset_table.cpp to -text in .gitattributes) keeps line endings a
+// non-contract for a live source file: what FR-001b pins is indentation and
+// occurrence counts, and "\r" is incidental to both. No effect on Linux, so the
+// Article VII §3 RED->GREEN transcript recorded there still stands unchanged.
 std::string slurp(std::filesystem::path const& p) {
     std::ifstream in(p, std::ios::binary);
-    return std::string{std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}};
+    std::string s{std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}};
+    std::erase(s, '\r');
+    return s;
 }
 
 // T006 — FR-001b red-first structural pin (085-fold-flat-cap-loop).
@@ -615,6 +631,34 @@ TEST(WireOffsetTable, FR001_SingleTraversalSourceInspection) {
     std::size_t const boundary_guard_8space = count_occurrences(tu, "\n        if (!boundary) {\n");
     std::size_t const boundary_guard_12space =
         count_occurrences(tu, "\n            if (!boundary) {\n");
+
+    // ANTI-VACUITY GUARD — assert the block is in EXACTLY ONE of the two
+    // tracked indentations before asserting WHICH one.
+    //
+    // Every count above is an indentation-keyed needle anchored on "\n" at both
+    // ends, so anything that stops the matcher seeing the TU the way it expects
+    // — CRLF line endings, a reformat, a rename, a truncated read — drives all
+    // four counts to 0. That is not neutral: it SATISFIES both "expect 0"
+    // assertions, so the pin half-passes for a reason having nothing to do with
+    // the relocation it exists to prove. (Observed: this pin went red on
+    // windows-msvc with 4space=0/8space=0, where the "expect 0" leg passed
+    // vacuously. The CRLF cause is fixed in slurp() above; this guard makes the
+    // whole vacuity class impossible rather than just that one instance.)
+    //
+    // The sum is the right invariant because the block must exist somewhere:
+    // pre-move it is 4-space, post-move 8-space, never both and never neither.
+    // Deliberately NOT a whole-file count — `std::size_t inst_start = first;`
+    // legitimately appears twice, ours and group_slices_status's sibling walk at
+    // 16-space (which uses the POSITIVE `if (boundary) {` at 20-space, so it
+    // matches none of these four needles).
+    ASSERT_EQ(inst_start_4space + inst_start_8space, 1U)
+        << "the flat cap block's `inst_start` is in NEITHER tracked indentation (4-space="
+        << inst_start_4space << ", 8-space=" << inst_start_8space
+        << ") — the matcher cannot see the TU it is pinning, so the counts below are vacuous";
+    ASSERT_EQ(boundary_guard_8space + boundary_guard_12space, 1U)
+        << "the early-continue guard is in NEITHER tracked indentation (8-space="
+        << boundary_guard_8space << ", 12-space=" << boundary_guard_12space
+        << ") — the counts below are vacuous";
 
     EXPECT_EQ(inst_start_4space, 0U)
         << "4-space (function-body) inst_start occurrences: " << inst_start_4space
