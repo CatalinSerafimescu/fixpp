@@ -516,7 +516,7 @@ jobs:
       # default generator list (DEB;RPM;TGZ), so without this the lane fails on
       # a missing tool rather than on anything about the package.
       - name: Install rpmbuild (packaging lane only)
-        if: matrix.preset == 'linux-gcc-release' || matrix.preset == 'linux-clang-release'
+        if: matrix.preset == 'linux-gcc-release' || matrix.preset == 'linux-clang-release' || matrix.preset == 'linux-clang-debug'
         run: sudo apt-get update && sudo apt-get install -y rpm
 
       # ⚠️ ASSERT THE COUNT, NOT JUST THE EXIT CODE. `ctest -R`/`-L` exits 0 when
@@ -553,7 +553,7 @@ jobs:
       # has no CI lane at all (none is owed), and linux-clang-debug's narrowing
       # is a recorded cost decision — see spec.md FR-026 and tasks.md T065.
       - name: Build packages
-        if: matrix.preset == 'linux-gcc-release' || matrix.preset == 'linux-clang-release'
+        if: matrix.preset == 'linux-gcc-release' || matrix.preset == 'linux-clang-release' || matrix.preset == 'linux-clang-debug'
         run: cmake --build --preset ${{ matrix.preset }} --target fixpp-package
 
       # T068 / SC-010: the artifact NAME must identify the matrix cell, or a
@@ -561,7 +561,7 @@ jobs:
       # construction, and the files inside already carry all six FR-017
       # dimensions.
       - name: Upload packages
-        if: matrix.preset == 'linux-gcc-release' || matrix.preset == 'linux-clang-release'
+        if: matrix.preset == 'linux-gcc-release' || matrix.preset == 'linux-clang-release' || matrix.preset == 'linux-clang-debug'
         uses: actions/upload-artifact@v4
         with:
           name: packages-${{ matrix.preset }}
