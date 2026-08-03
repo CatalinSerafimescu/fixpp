@@ -288,28 +288,25 @@
 
 ### Mandatory close-out tasks (ALWAYS emit — Gate-B preconditions, Article XVII §8)
 
-> ### T074 disposition — VACUOUS, with rationale (recorded, not skipped)
+> ### T074 disposition — CLOSED, nothing to flip (USER DECISION 2026-08-03)
 >
-> **This feature owns NO OFFICIAL catalogue row, so there is nothing to flip.** Verified rather than
-> assumed: `spec/feature-catalogue.md` and `spec/coverage-index.md` contain **zero** references to
-> `084`, the catalogue contains **zero** `in-progress` rows (only `done`/`backlog`), and
-> `spec.md` names no catalogue row.
+> **`spec/feature-catalogue.md` catalogues OFFICIAL FIX features and fixpp features. Packaging is
+> IMPLIED, not catalogued** — user, 2026-08-03. T074 is therefore satisfied by having no row to flip,
+> not by adding one.
 >
-> **Why:** the catalogue is organised entirely by *protocol and runtime capability* — Session Layer,
-> Wire/Encoding, Data Dictionary, Application Messages, Transport, Logging, C ABI, Python Bindings,
-> Service, NFRs. There is no build/packaging/tooling section, because a build-system change delivers
-> no protocol behaviour. **078-precompiled-builder-libs set this precedent explicitly** ("no new
-> OFFICIAL row, no new coverage entry — pure implementation-layout restructure"), and 084 is the same
-> shape: it changes what is *produced and how it is consumed*, not what any message does on the wire.
+> That matches what T074 actually asks: it says *flip* every feature-owned OFFICIAL row from
+> `in-progress`/`backlog` → `done`, and its "add/update" clause attaches to the `coverage-index.md`
+> entry **matching a flipped row**. It never asks for a row to be minted.
 >
-> **⚠️ The counter-argument, recorded so the decision is deliberate rather than default:** `PY-005`
-> **is** a packaging row ("pip-installable wheel (Linux x86_64 minimum) via CI"), admitted under
-> *Python Bindings* because a wheel is how Python consumers acquire the library. By that reading, "a
-> C++ package + `find_package(fixpp)`" is the equivalent acquisition surface for C++ consumers and
-> could justify a row. It has no home in the current sections, and **adding one is a curatorial
-> decision about the catalogue's scope, not a packaging decision** — so it is surfaced to the user
-> rather than taken unilaterally. If accepted, the row belongs beside `PY-005` in shape: OFFICIAL,
-> `done`, evidence = this feature's PR + the six packaging witnesses.
+> Verified rather than assumed: **zero** `084` references in `feature-catalogue.md` or
+> `coverage-index.md`, **zero** `in-progress` rows anywhere in the catalogue (only `done`/`backlog`),
+> and no catalogue row named by `spec.md`. Consistent with **078-precompiled-builder-libs**, which
+> recorded the same disposition explicitly ("no new OFFICIAL row, no new coverage entry — pure
+> implementation-layout restructure").
+>
+> *(`PY-005` — "pip-installable wheel via CI" — is not a counter-example under this scope statement:
+> it sits under **Python Bindings**, cataloguing the binding's delivery surface, which is a fixpp
+> feature. C++ packaging is delivery infrastructure for the library itself.)*
 
 - [X] T074 [P] **Catalogue close-out**: flip **every** feature-owned OFFICIAL row in `spec/feature-catalogue.md` from `in-progress`/`backlog` → `done` (with the PR / evidence ref) **AND** add/update its matching `spec/coverage-index.md` entry.
 > ### T001 and T065–T068 — dispositions for clause (i), recorded not implied
