@@ -289,6 +289,7 @@ foreach(_artifact IN LISTS _artifacts)
       "lib/cmake/fixpp/fixppTargets.cmake"
       "share/doc/fixpp/NOTICE"
       "share/doc/fixpp/QUICKFIX_LICENSE.txt"
+      "share/doc/fixpp/fixpp-package-provenance.txt"
       "share/fixpp/dictionaries/FIX44.xml")
     if(NOT _required IN_LIST _files)
       list(APPEND _missing "${_required}")
