@@ -14,6 +14,7 @@ configuration        : @FIXPP_STAMP_CONFIG@
 telemetry            : @FIXPP_PACKAGE_TELEMETRY@
 source-revision      : @FIXPP_PACKAGE_REVISION@
 source-worktree      : @FIXPP_PACKAGE_WORKTREE@
+payload-sha256       : @FIXPP_STAMP_PAYLOAD_SHA256@
 
 Field notes
 -----------
@@ -48,3 +49,18 @@ telemetry
     integration ON. An `OFF` value here means the package came from a
     development-accelerator build that must never have been packaged, and the
     packaging::telemetry-provenance gate is expected to reject it.
+
+payload-sha256
+    SHA-256 of the staged install payload this provenance ships in, excluding
+    this provenance file itself. The digest is computed at INSTALL time over
+    the installed-prefix root (the directory containing `lib/`, `include/` and
+    `share/`), not over the source tree.
+
+    Recompute it by walking every regular file under that installed-prefix root,
+    excluding `share/doc/fixpp/fixpp-package-provenance.txt`, sorting the
+    relative paths lexicographically, hashing each file's contents with
+    SHA-256, then concatenating:
+        <relative-path-with-forward-slashes>\n<file-sha256>\n
+    for every file in that sorted order, and finally SHA-256 hashing the whole
+    concatenated manifest string. Because the path is part of the manifest, a
+    rename with identical bytes still changes the digest.

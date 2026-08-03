@@ -83,8 +83,41 @@ file(READ "${_fixpp_stamp_source_dir}/cmake/fixpp-package-provenance.txt.in" _fi
 # applied, so a manual file write (unlike install(FILES), which handles this
 # internally) must prepend it explicitly or the stamp lands outside the
 # staging tree CPack actually archives.
-set(_fixpp_stamp_dest
-    "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/${_fixpp_stamp_docdir}/fixpp-package-provenance.txt")
+string(CONCAT _fixpp_stamp_dest
+       "$ENV{DESTDIR}" "${CMAKE_INSTALL_PREFIX}" "/" "${_fixpp_stamp_docdir}"
+       "/fixpp-package-provenance.txt")
+
+# Paths are hashed RELATIVE TO THE INSTALLED PREFIX ROOT: the directory that
+# contains lib/, include/ and share/ inside the staged install tree. The digest
+# accumulates one record per file, in sorted order, as:
+#   <forward-slash-relative-path>\n<file-sha256>\n
+# and then SHA-256s that manifest string. This binds both file bytes and path
+# names, so a pure rename changes the digest, and sorting keeps the result
+# stable across platforms whose recursive glob traversal orders differ.
+string(REGEX REPLACE "/${_fixpp_stamp_docdir}/fixpp-package-provenance\\.txt$" ""
+       _fixpp_stamp_root "${_fixpp_stamp_dest}")
+file(GLOB_RECURSE _fixpp_stamp_entries
+  RELATIVE "${_fixpp_stamp_root}"
+  LIST_DIRECTORIES false
+  "${_fixpp_stamp_root}/*")
+list(SORT _fixpp_stamp_entries)
+string(CONCAT _fixpp_stamp_manifest "")
+foreach(_fixpp_stamp_rel IN LISTS _fixpp_stamp_entries)
+  string(REPLACE "\\" "/" _fixpp_stamp_rel "${_fixpp_stamp_rel}")
+  if(_fixpp_stamp_rel STREQUAL "${_fixpp_stamp_docdir}/fixpp-package-provenance.txt")
+    continue()
+  endif()
+  if(IS_SYMLINK "${_fixpp_stamp_root}/${_fixpp_stamp_rel}" OR
+     IS_DIRECTORY "${_fixpp_stamp_root}/${_fixpp_stamp_rel}")
+    continue()
+  endif()
+  file(SHA256 "${_fixpp_stamp_root}/${_fixpp_stamp_rel}" _fixpp_stamp_file_sha256)
+  string(APPEND _fixpp_stamp_manifest
+         "${_fixpp_stamp_rel}\n${_fixpp_stamp_file_sha256}\n")
+endforeach()
+set(FIXPP_STAMP_PAYLOAD_SHA256 "")
+string(SHA256 FIXPP_STAMP_PAYLOAD_SHA256 "${_fixpp_stamp_manifest}")
+
 file(CONFIGURE
   OUTPUT "${_fixpp_stamp_dest}"
   CONTENT "${_fixpp_stamp_template}"

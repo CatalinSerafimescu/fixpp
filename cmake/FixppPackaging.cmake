@@ -323,29 +323,6 @@ set(FIXPP_PACKAGE_REVISION "" CACHE STRING
 set(FIXPP_PACKAGE_WORKTREE "" CACHE STRING
     "Override the stamped worktree state (clean|dirty) alongside FIXPP_PACKAGE_REVISION")
 
-# Everything baked into this install(CODE) string below is a stable
-# per-configuration constant (source dir, version, platform, toolchain,
-# build type, telemetry flag, docdir, and the two overrides above) -- safe to
-# freeze at configure time. The `[==[ ... ]==]` bracket-quoting defers
-# interpretation of the VALUE to when cmake_install.cmake actually executes
-# this line (install time), so an empty override or one containing unusual
-# characters round-trips exactly. Only cmake/FixppStampProvenance.cmake's own
-# `execute_process(git ...)` calls, plus CMAKE_INSTALL_PREFIX / $ENV{DESTDIR},
-# are read live at install time.
-install(CODE "
-  set(_fixpp_stamp_override_revision [==[${FIXPP_PACKAGE_REVISION}]==])
-  set(_fixpp_stamp_override_worktree [==[${FIXPP_PACKAGE_WORKTREE}]==])
-  set(_fixpp_stamp_source_dir [==[${CMAKE_SOURCE_DIR}]==])
-  set(_fixpp_stamp_project_version [==[${PROJECT_VERSION}]==])
-  set(_fixpp_stamp_platform [==[${CMAKE_SYSTEM_NAME}]==])
-  set(_fixpp_stamp_compiler_id [==[${CMAKE_CXX_COMPILER_ID}]==])
-  set(_fixpp_stamp_compiler_version [==[${CMAKE_CXX_COMPILER_VERSION}]==])
-  set(_fixpp_stamp_build_type [==[${CMAKE_BUILD_TYPE}]==])
-  set(_fixpp_stamp_telemetry [==[${FIXPP_PACKAGE_TELEMETRY}]==])
-  set(_fixpp_stamp_docdir [==[${CMAKE_INSTALL_DOCDIR}]==])
-  include(\"${CMAKE_SOURCE_DIR}/cmake/FixppStampProvenance.cmake\")
-")
-
 # ── T055 (FR-019): Windows debug symbol files ────────────────────────────────
 # The Microsoft toolchain emits debug information to SEPARATE symbol files
 # alongside its static libraries, not inside the archive members -- so a Windows
@@ -398,6 +375,33 @@ if(MSVC)
     DESTINATION "${CMAKE_INSTALL_LIBDIR}"
     FILES_MATCHING PATTERN "*.pdb")
 endif()
+
+# Everything baked into this install(CODE) string below is a stable
+# per-configuration constant (source dir, version, platform, toolchain,
+# build type, telemetry flag, docdir, and the two overrides above) -- safe to
+# freeze at configure time. The `[==[ ... ]==]` bracket-quoting defers
+# interpretation of the VALUE to when cmake_install.cmake actually executes
+# this line (install time), so an empty override or one containing unusual
+# characters round-trips exactly. Only cmake/FixppStampProvenance.cmake's own
+# `execute_process(git ...)` calls, plus CMAKE_INSTALL_PREFIX / $ENV{DESTDIR},
+# are read live at install time.
+#
+# This install(CODE) block MUST stay the LAST install() rule in this file:
+# payload provenance is hashed from the fully staged install tree, so any later
+# install() would silently ship bytes the stamp never covered.
+install(CODE "
+  set(_fixpp_stamp_override_revision [==[${FIXPP_PACKAGE_REVISION}]==])
+  set(_fixpp_stamp_override_worktree [==[${FIXPP_PACKAGE_WORKTREE}]==])
+  set(_fixpp_stamp_source_dir [==[${CMAKE_SOURCE_DIR}]==])
+  set(_fixpp_stamp_project_version [==[${PROJECT_VERSION}]==])
+  set(_fixpp_stamp_platform [==[${CMAKE_SYSTEM_NAME}]==])
+  set(_fixpp_stamp_compiler_id [==[${CMAKE_CXX_COMPILER_ID}]==])
+  set(_fixpp_stamp_compiler_version [==[${CMAKE_CXX_COMPILER_VERSION}]==])
+  set(_fixpp_stamp_build_type [==[${CMAKE_BUILD_TYPE}]==])
+  set(_fixpp_stamp_telemetry [==[${FIXPP_PACKAGE_TELEMETRY}]==])
+  set(_fixpp_stamp_docdir [==[${CMAKE_INSTALL_DOCDIR}]==])
+  include(\"${CMAKE_SOURCE_DIR}/cmake/FixppStampProvenance.cmake\")
+")
 
 # ── Generator-specific ───────────────────────────────────────────────────────
 set(CPACK_DEBIAN_PACKAGE_SECTION "libdevel")

@@ -48,7 +48,7 @@
 # still packages whatever binaries already exist in the build tree. A green run
 # therefore does not prove those binaries were rebuilt for that state; it proves
 # only that the stamp matches the tree CPack packaged from. Binding the stamp to
-# the payload bytes or build inputs is a separate follow-up issue.
+# the payload bytes or build inputs used to be a separate follow-up issue.
 
 cmake_minimum_required(VERSION 3.28)
 
@@ -132,10 +132,48 @@ endif()
 list(GET _prov_files 0 _prov)
 file(READ "${_prov}" _prov_text)
 
+function(_fixpp_payload_digest _prov_file _out_digest)
+  # Hash paths RELATIVE TO THE INSTALLED PREFIX ROOT: the directory that holds
+  # lib/, include/ and share/ in the installed tree. In extracted archives the
+  # artifact may add a top-level <package>/ wrapper (TGZ) and Linux may add
+  # usr/, so derive the installed-prefix root by stripping the known
+  # share/doc/fixpp provenance suffix from the located file path.
+  set(_suffix "/share/doc/fixpp/fixpp-package-provenance.txt")
+  string(REPLACE "\\" "/" _prov_norm "${_prov_file}")
+  if(NOT _prov_norm MATCHES "${_suffix}$")
+    message(FATAL_ERROR
+      "T060: cannot derive the installed-prefix root from provenance path '${_prov_file}'")
+  endif()
+  string(REGEX REPLACE "${_suffix}$" "" _payload_root "${_prov_norm}")
+
+  file(GLOB_RECURSE _entries
+    RELATIVE "${_payload_root}"
+    LIST_DIRECTORIES false
+    "${_payload_root}/*")
+  list(SORT _entries)
+  set(_manifest "")
+  foreach(_rel IN LISTS _entries)
+    string(REPLACE "\\" "/" _rel "${_rel}")
+    if(_rel STREQUAL "share/doc/fixpp/fixpp-package-provenance.txt")
+      continue()
+    endif()
+    set(_abs "${_payload_root}/${_rel}")
+    if(IS_SYMLINK "${_abs}" OR IS_DIRECTORY "${_abs}")
+      continue()
+    endif()
+    file(SHA256 "${_abs}" _file_sha256)
+    string(APPEND _manifest "${_rel}\n${_file_sha256}\n")
+  endforeach()
+  string(SHA256 _digest "${_manifest}")
+  set(${_out_digest} "${_digest}" PARENT_SCOPE)
+endfunction()
+
+_fixpp_payload_digest("${_prov}" _fixpp_payload_sha256)
+
 # ── The check, as a function so both legs run IDENTICAL logic ────────────────
 # If the red leg ran different code from the pass leg it would prove nothing
 # about the gate that actually runs in anger.
-function(_fixpp_check_provenance _expect_config _expect_worktree _expect_revision _out_ok _out_why)
+function(_fixpp_check_provenance _expect_config _expect_worktree _expect_revision _expect_payload_sha256 _out_ok _out_why)
   set(_why "")
   # version/platform/toolchain carry no downstream comparison (unlike the four
   # fields below), so a blank render is otherwise invisible: this is the
@@ -143,7 +181,7 @@ function(_fixpp_check_provenance _expect_config _expect_worktree _expect_revisio
   # the real CMake variable names to avoid shadowing them at install time --
   # a rename typo would render an EMPTY string via `file(CONFIGURE @ONLY)`,
   # not an error, and nothing else would catch it).
-  foreach(_field version platform toolchain configuration source-revision source-worktree telemetry)
+  foreach(_field version platform toolchain configuration source-revision source-worktree telemetry payload-sha256)
     if(NOT _prov_text MATCHES "${_field}[ ]*:[ ]*([^ \n][^\n]*)")
       list(APPEND _why "provenance has no '${_field}' field")
     endif()
@@ -160,6 +198,8 @@ function(_fixpp_check_provenance _expect_config _expect_worktree _expect_revisio
   string(STRIP "${CMAKE_MATCH_1}" _got_rev)
   string(REGEX MATCH "source-worktree[ ]*:[ ]*([^\n]+)" _m "${_prov_text}")
   string(STRIP "${CMAKE_MATCH_1}" _got_worktree)
+  string(REGEX MATCH "payload-sha256[ ]*:[ ]*([^\n]+)" _m "${_prov_text}")
+  string(STRIP "${CMAKE_MATCH_1}" _got_payload_sha256)
 
   if(NOT _got_config STREQUAL "${_expect_config}")
     list(APPEND _why "configuration is '${_got_config}', expected '${_expect_config}'")
@@ -180,6 +220,12 @@ function(_fixpp_check_provenance _expect_config _expect_worktree _expect_revisio
   if(NOT _got_rev STREQUAL "${_expect_revision}")
     list(APPEND _why "source-revision is '${_got_rev}', expected '${_expect_revision}'")
   endif()
+  if(NOT _got_payload_sha256 MATCHES "^[0-9a-f]{64}$")
+    list(APPEND _why "payload-sha256 is '${_got_payload_sha256}', not a 64-hex SHA-256")
+  endif()
+  if(NOT _got_payload_sha256 STREQUAL "${_expect_payload_sha256}")
+    list(APPEND _why "payload-sha256 is '${_got_payload_sha256}', expected '${_expect_payload_sha256}'")
+  endif()
 
   if(_why STREQUAL "")
     set(${_out_ok} TRUE PARENT_SCOPE)
@@ -195,14 +241,14 @@ endfunction()
 # construction — it could not fail on a stale stamp. Both expectations below
 # (`_fixpp_exp_worktree`, `_fixpp_exp_rev`) are the INDEPENDENT measurement
 # taken at the very top of this script, before the artifact was even built.
-_fixpp_check_provenance("${FIXPP_BUILD_TYPE}" "${_fixpp_exp_worktree}" "${_fixpp_exp_rev}" _ok _why)
+_fixpp_check_provenance("${FIXPP_BUILD_TYPE}" "${_fixpp_exp_worktree}" "${_fixpp_exp_rev}" "${_fixpp_payload_sha256}" _ok _why)
 if(NOT _ok)
   string(REPLACE ";" "\n  " _why_pretty "${_why}")
   message(FATAL_ERROR "T060 PASS leg FAILED:\n  ${_why_pretty}")
 endif()
 message(STATUS "T060 PASS leg: provenance matches the producing build "
                "(configuration=${FIXPP_BUILD_TYPE}, worktree=${_fixpp_exp_worktree}, "
-               "revision=${_fixpp_exp_rev})")
+               "revision=${_fixpp_exp_rev}, payload-sha256=${_fixpp_payload_sha256})")
 
 # ── User decision 2026-08-03: WARN-AND-ACCEPT on a dirty worktree ────────────
 # "Require a clean tree for any artifact a witness accepts" is unrunnable as a
@@ -229,7 +275,7 @@ else()
   set(_wrong_config "Debug")
 endif()
 
-_fixpp_check_provenance("${_wrong_config}" "${_fixpp_exp_worktree}" "${_fixpp_exp_rev}" _red_ok _red_why)
+_fixpp_check_provenance("${_wrong_config}" "${_fixpp_exp_worktree}" "${_fixpp_exp_rev}" "${_fixpp_payload_sha256}" _red_ok _red_why)
 if(_red_ok)
   message(FATAL_ERROR
     "T060 RED leg FAILED TO FAIL: a package stamped '${FIXPP_BUILD_TYPE}' was accepted "
@@ -250,7 +296,7 @@ if(_fixpp_exp_worktree STREQUAL "clean")
 else()
   set(_wrong_worktree "clean")
 endif()
-_fixpp_check_provenance("${FIXPP_BUILD_TYPE}" "${_wrong_worktree}" "${_fixpp_exp_rev}" _red2_ok _red2_why)
+_fixpp_check_provenance("${FIXPP_BUILD_TYPE}" "${_wrong_worktree}" "${_fixpp_exp_rev}" "${_fixpp_payload_sha256}" _red2_ok _red2_why)
 if(_red2_ok)
   message(FATAL_ERROR
     "T060 RED leg 2 FAILED TO FAIL: a package stamped worktree='${_fixpp_exp_worktree}' "
@@ -275,7 +321,7 @@ if(_wrong_revision STREQUAL "${_fixpp_exp_rev}")
   # hash), but fail loudly rather than silently pass a non-discriminating leg.
   message(FATAL_ERROR "T060: sentinel wrong-revision collides with the real HEAD; pick another sentinel")
 endif()
-_fixpp_check_provenance("${FIXPP_BUILD_TYPE}" "${_fixpp_exp_worktree}" "${_wrong_revision}" _red3_ok _red3_why)
+_fixpp_check_provenance("${FIXPP_BUILD_TYPE}" "${_fixpp_exp_worktree}" "${_wrong_revision}" "${_fixpp_payload_sha256}" _red3_ok _red3_why)
 if(_red3_ok)
   message(FATAL_ERROR
     "T060 RED leg 3 FAILED TO FAIL: a package stamped revision='${_fixpp_exp_rev}' "
@@ -285,5 +331,25 @@ if(_red3_ok)
 endif()
 string(REPLACE ";" "; " _red3_why_pretty "${_red3_why}")
 message(STATUS "T060 RED leg 3 observed: ${_red3_why_pretty}")
+
+# ── RED leg 4 — a different PAYLOAD DIGEST is rejected ───────────────────────
+# Same discipline as the other red legs: the artifact and `_prov_text` stay
+# untouched; only the EXPECTED value is wrong. That proves the comparator
+# rejects the real package when the expected payload identity differs.
+set(_wrong_payload_sha256 "0000000000000000000000000000000000000000000000000000000000000000")
+if(_wrong_payload_sha256 STREQUAL "${_fixpp_payload_sha256}")
+  message(FATAL_ERROR
+    "T060: sentinel wrong payload digest collides with the real payload digest; pick another sentinel")
+endif()
+_fixpp_check_provenance("${FIXPP_BUILD_TYPE}" "${_fixpp_exp_worktree}" "${_fixpp_exp_rev}" "${_wrong_payload_sha256}" _red4_ok _red4_why)
+if(_red4_ok)
+  message(FATAL_ERROR
+    "T060 RED leg 4 FAILED TO FAIL: a package stamped payload-sha256='${_fixpp_payload_sha256}' "
+    "was accepted as '${_wrong_payload_sha256}'. Payload identity is not discriminating, so "
+    "a consumer cannot tell whether the bytes extracted from the artifact are the "
+    "same bytes the provenance claimed to stamp.")
+endif()
+string(REPLACE ";" "; " _red4_why_pretty "${_red4_why}")
+message(STATUS "T060 RED leg 4 observed: ${_red4_why_pretty}")
 
 message(STATUS "fixpp::packaging::provenance: OK")
