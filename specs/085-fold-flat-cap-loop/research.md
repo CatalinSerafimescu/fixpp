@@ -19,7 +19,7 @@ This document discharges **A-001**, which obliges `/speckit-plan` to *re-verify*
 
 `group()` passes its own `count_idx` to `consume_group_extent` at `:575`, so both compute `first` from the same value and read the same entry. **Identical by construction, not by coincidence.** ✅
 
-*Note for Gate A:* this is the one step that could silently break later. 083 moved the **splitter's** delimiter to the dictionary store (`:704-711`) but deliberately left `group()`'s and `consume_group_extent`'s wire-derived (L-063-4's "the splitter is still flat"). If a future feature re-points *one* of `:551` / `:458` at the store without the other, step 1 fails and FR-002's no-op claim is void. C-1 below turns this into a contract obligation rather than a comment.
+*Note for Gate A — corrected at Gate A round 1.* This step is a **premise of the one-time removal**, not a standing invariant, and the earlier version of this note said otherwise. 083 moved the **splitter's** delimiter to the dictionary store (`:704-711`) but deliberately left `group()`'s and `consume_group_extent`'s wire-derived (L-063-4's "the splitter is still flat"). While the flat loop is still present, re-pointing *one* of `:551` / `:458` without the other would break the superset relation and void FR-002's no-op claim — which is exactly why the equality has to hold **at the commit the removal is judged on**. Once the loop is gone, it stops mattering: there is no second partition left for two keys to disagree about, and `group():551`'s only remaining dictionary-path use is the recognition gate at `:566`. So the equality is recorded as **C-1a**, a delivery-time proof premise discharged by inspection, and **C-1** is restated as the property that survives — `consume_group_extent` must cap the same nesting-aware instances whose extent it returns. See `contracts/group_cap_accounting.md` and R-7 below.
 
 ### Step 2 — the flat boundary set is a superset of the nesting-aware one
 
@@ -45,6 +45,8 @@ inst_count at :590   ≤   (k - inst_start) at :521      for the enclosing insta
 
 `:521-524` sets `overflow = true` and returns the moment any instance exceeds the cap; `group()` converts that to `err_group_too_large` at `:576-578`, **before** `:584`. Combined with step 3: if a flat segment could exceed the cap, the enclosing nesting-aware instance already did, and `group()` already returned. ✅
 
+**Empirical corroboration (added at Gate A round 1).** Deleting `:521-524` on `main` = `c1564dd2` and re-running the dictionary cap pin `WireOffsetTable.DoSCapPerInstanceRejectsOversizedSingleInstance` leaves it **GREEN** — the flat loop at `:584-595` catches the identical breach and returns the identical `wire_group_too_large` from `:592`. That is the redundancy of steps 2–4 observed rather than argued: on that fixture the two walks reach the same verdict independently. It also establishes an **ordering constraint** that the bundle's own mutation procedure has to honour — FR-005b's RED is only obtainable *after* the relocation, because until then the flat loop pre-empts. See FR-005b and `quickstart.md` §2a-mut.
+
 ### Degenerate exits — all five checked
 
 | `consume_group_extent` exit | Line | Reachable from `group()`? | Effect on the flat loop |
@@ -54,6 +56,8 @@ inst_count at :590   ≤   (k - inst_start) at :521      for the enclosing insta
 | dict-free | `:454-456` | **No** — `group()` guards at `:553` | — |
 | `delim` not a member | `:461-462` | **No** — `group()` guards at `:566` | — |
 | `declared == 0` | `:465-467` | Yes | returns `first`, so `group_end == first`; the loop's single iteration measures `0` |
+
+*Bound, stated precisely (corrected at Gate A round 1):* the outer `while` at `:477` is `k < entries_.size() && inst < declared && entries_[k].tag == delim` and the inner member scan breaks on a non-member at `:503-504`, so `consume_group_extent` consumes **up to** `declared` delimiter-opened instances — bounded by the entry table and by membership termination — not *exactly* `declared`. Nothing in steps 1–4 depends on the difference: fewer instances means a smaller `[first, group_end]`, and the superset relation is over whatever interval is actually returned. `spec.md`'s Walk-1 description and its lying-count edge case carry the same correction.
 
 **Alternatives considered**: taking the spec's argument as given (rejected — A-001 exists precisely because an inherited proof is not a proof); proving it empirically by differential-testing before/after over the corpora (rejected as the *primary* basis — it is evidence, not proof, and is anyway delivered as SC-002; but it is retained as the cross-check).
 
@@ -111,27 +115,54 @@ Leaving it would be a waiver asserting unreachability for a branch a delivered t
 
 ## R-4 — Delivered code shape
 
-**Decision**: Per FR-001a (clarified 2026-08-03), the loop moves **verbatim** into the dict-free `else` branch. `consume_group_extent` is not touched.
+**Decision**: Per FR-001a (clarified 2026-08-03; wording corrected at Gate A round 1), the loop moves into the dict-free `else` branch **without semantic change**, re-indented one level and otherwise untouched. `consume_group_extent` is not touched.
+
+**The block being moved, quoted verbatim from `src/wire/offset_table.cpp:584-595` at `main` = `c1564dd2`:**
+
+```cpp
+    std::size_t inst_start = first;
+    for (std::size_t k = first; k <= group_end; ++k) {
+        bool const boundary = (k == group_end) || (k > first && entries_[k].tag == delim);
+        if (!boundary) {
+            continue;
+        }
+        std::size_t const inst_count = k - inst_start;
+        if (inst_count > cfg_.max_group_entries_per_instance) {
+            return err_group_too_large<group_index>();
+        }
+        inst_start = k;
+    }
+```
+
+> **Corrected at Gate A round 1.** This section previously showed the block as `for (std::size_t k = first, inst_start = first; k <= group_end; ++k) { ... }` — a **rewrite**, not the source: it merges two declarations into the for-init and changes `inst_start`'s scope. The one artifact showing the delivered shape showed a shape that violated the bundle's own FR-001a/C-3. The text above is the real block, pasted from the tree.
+
+**Delivered shape** (`:553-596` at `c1564dd2` — dictionary branch, `else` branch, shared return):
 
 ```
   if (opaque_dict_ != nullptr && group_member_fn_ != nullptr) {
       ...  membership check at :566 (unchanged — still needs `delim`)
       group_end = consume_group_extent(count_idx, ctx, ctx.depth, overflow);
       if (overflow) { return err_group_too_large<group_index>(); }
-      // FR-002 comment lands HERE: why no second walk is needed.
+      // FR-002 comment lands HERE. Two parts (SC-005a): (1) why the second
+      // walk went — R-1's redundancy argument; (2) what stands in its place —
+      // C-1: this branch's cap is now SOLELY consume_group_extent's, applied
+      // over the same nesting-aware instances whose extent it returns.
   } else {
       group_end = entries_.size();
-      // relocated verbatim — SOLE cap enforcement on this path
-      for (std::size_t k = first, inst_start = first; k <= group_end; ++k) { ... }
+      // relocated, SOLE cap enforcement on this path — the eleven lines
+      // quoted above, indented one level, nothing else changed (C-3's
+      // nine-item checklist).
   }
   return group_index{no_tag, first, group_end - first};
 ```
+
+**On "byte-identical".** FR-003 originally claimed the dict-free preservation was byte-identical. It cannot be: the block sits at 4-space function-body indentation and the `else` body is 8-space, so relocation necessarily re-indents, and `clang-format` (`[const §IX.4]`) will force it. FR-001a and C-3 now state the rule as an explicit **semantic-preservation checklist** — nine named elements, mechanical re-indentation permitted, nothing else. That keeps FR-003 discharged by a bounded diff inspection rather than silently reverting it to the equivalence argument the bundle set out to avoid.
 
 Ordering note (FR-009): `group_end` is assigned before the loop in the `else` branch, exactly as today, so no work is added on either path and the `return` at `:596` is unchanged.
 
 **Alternatives considered**:
 - *Remove `consume_group_extent`'s dict-free bail so one traversal serves both paths* — the most literal reading of "fold". Rejected at `/clarify` Q1: with no dictionary that walk can be neither membership-driven nor nesting-aware, so it would embed a flat mode inside a function whose entire contract is that it is not flat, and would put FR-008 in play for no behavioural gain.
-- *Extract a shared cap helper* — rejected: an abstraction over a two-line comparison, and it would make FR-003's byte-identical claim un-inspectable.
+- *Extract a shared cap helper* — rejected: an abstraction over a two-line comparison, and it would make C-3's preservation checklist un-walkable over the diff.
 
 ---
 
@@ -143,11 +174,31 @@ Re-verified by enumeration at `c1564dd2`.
 - `WireOffsetTable.DoSCapPerInstanceRejectsOversizedSingleInstance` — `offset_table_test.cpp:198-235`
 - `WireOffsetTable.DoSCapPerInstanceAllowsAggregateOverCap` — `offset_table_test.cpp:164-196`
 
-**Dict-free path coverage (must stay green — this is what makes FR-003's byte-identical relocation *checkable*):** roughly sixteen direct `OffsetTable{frame, mr}` constructions across `offset_table_test.cpp` (`:58,104,117,129,150,254`), `offset_table_overflow_test.cpp` (`:74,113,155`), `offset_table_error_path_test.cpp` (`:68,100,125,190`) and `hostile_input_hardening_test.cpp` (`:78,107,132,161,284,319`). Notably `offset_table_test.cpp:150-157` already calls `group(453)` **dict-free** and asserts its extent — i.e. the relocated branch is on a live, asserted path today.
+**Dict-free path coverage (must stay green — this is what makes FR-003's relocation *checkable*):** roughly sixteen direct `OffsetTable{frame, mr}` constructions across `offset_table_test.cpp` (`:58,104,117,129,150,254`), `offset_table_overflow_test.cpp` (`:74,113,155`), `offset_table_error_path_test.cpp` (`:68,100,125,190`) and `hostile_input_hardening_test.cpp` (`:78,107,132,161,284,319`). Notably `offset_table_test.cpp:150-157` already calls `group(453)` **dict-free** and asserts its extent — i.e. the relocated branch is on a live, asserted path today.
 
 **Census / split pins (SC-001):** `DelimiterCensus.RedCountsReconcileWithSpecBaseline` (`tests/dictionary/delimiter_census_test.cpp:476`) and all seven `TypedReadSplitAgreement.*` (`tests/wire/typed_read_split_agreement_test.cpp:194,296,337,383,452,633,820`).
 
-**New (FR-004/FR-005a):** a dict-free + tight-`Config` cap pin, its bracketing companion (same frame, cap raised above it → succeeds), and a recorded RED-under-mutation transcript. Per Article VII §8 these are isolation-safe and belong in the existing `offset_table_test.cpp` bucket — **no new executable**.
+**New (FR-004/FR-005a):** two cases, named by SC-004 so the selector and its expected count are deterministic —
+
+- `WireOffsetTable.DictFreeDoSCapPerInstanceRejectsOversizedInstance` — dict-free + tight-`Config` cap pin;
+- `WireOffsetTable.DictFreeDoSCapPerInstanceAllowsWhenCapRaised` — its bracketing companion (same frame, cap raised above it → succeeds).
+
+Both join `tests/wire/offset_table_test.cpp`, which is compiled into the **`wire_pure_tests`** bucket (`tests/wire/CMakeLists.txt:43`, LABELS `"079;wire"` at `:80`) — isolation-safe per `[const §VII.8]`, **no new executable**. `--gtest_filter='WireOffsetTable.DictFreeDoSCapPerInstance*'` must select exactly **2** once they land.
+
+**New (FR-001b):** the red-first **structural** pin `WireOffsetTable.FR001_SingleTraversalSourceInspection`, also joining `tests/wire/offset_table_test.cpp` / `wire_pure_tests`, plus one `FIXPP_SRC_DIR` line on that bucket in `tests/wire/CMakeLists.txt` (the bucket does not define it today — verified). Authored and observed **RED on the unmodified tree before the relocation**; GREEN after. Article VII §3's failing-test-first artifact (SC-005b). Construction copied from `tests/dictionary/load_any_test.cpp:143-171`. `--gtest_filter='WireOffsetTable.FR001_SingleTraversalSourceInspection'` must select exactly **1** once it lands.
+
+**New (FR-005b):** no new test — a recorded RED-under-mutation transcript for the **pre-existing** dictionary pin `WireOffsetTable.DoSCapPerInstanceRejectsOversizedSingleInstance`, obtained by deleting `consume_group_extent`'s per-instance comparison (`:521-524`). **Valid only post-relocation** — on baseline the flat loop at `:584-595` pre-empts and the pin stays GREEN (measured; see R-1 step 4 and FR-005b). It is the discharge SC-003 had been demanding with no artifact behind it, and it guards contract **C-1**'s *existence* half only: the fixture is one **unnested** instance, so it cannot distinguish flat from nesting-aware partitions and does **not** guard C-1's partition coupling *(narrowed at Gate A round 2)*.
+
+**Registered CTest names and counts (verified 2026-08-03 at `c1564dd2`, `build/linux-clang-debug`).** Recorded here because the round-1 quickstart selected all of these by GoogleTest *case* name via `ctest -R`, which matches nothing and exits 0:
+
+| Selection | Count |
+|---|---|
+| `ctest -L wire` (`wire_pure_tests`, `wire_dict_tests`, `validator_legacy_char_type_test`, `required_scope_two_tier_test`) | **4** — observed green, 45.99 s |
+| `ctest -L capi` | **22** |
+| `ctest -L dictionary` | **17** |
+| `ctest -R '^delimiter_census$'` | **1** |
+| `wire_dict_tests --gtest_filter='TypedReadSplitAgreement.*'` | **7** cases |
+| `wire_pure_tests --gtest_filter='WireOffsetTable.DoSCapPerInstance*'` | **2** cases |
 
 ---
 
@@ -155,12 +206,12 @@ Re-verified by enumeration at `c1564dd2`.
 
 | Article | Obligation | Discharge |
 |---|---|---|
-| VII §3 | TDD, red-green-refactor | The new dict-free cap pin is written and observed RED **before** the relocation; recorded per FR-005a(i) |
+| VII §3 | TDD, red-green-refactor | **PASS (planned) — by compliance.** *(Corrected twice. Round 1 replaced an unachievable "the new dict-free cap pin is observed RED **before** the relocation" with "NOT CLEANLY APPLICABLE". **Round 2 withdraws that disposition too.**)* The round-1 *cap-pin* finding stands: on baseline the flat cap loop sits **after** the `if/else` (`:584-595` follows `:553-582`) and runs on **both** paths, so a dict-free + tight-`Config` **cap** pin is green on baseline. What round 1 got wrong is the inference from there to *no red-first artifact exists*. A **structural** one does. **Artifact: FR-001b's `WireOffsetTable.FR001_SingleTraversalSourceInspection`** — a permanent, behaviour-blind source-inspection pin asserting the flat block sits inside the dict-free `else` and not in `group()`'s body after the `if/else`. RED on the unmodified tree, GREEN after the relocation; verified by **SC-005b**; RED output in `.specify/decisions/085-fold-flat-cap-loop-verify.md`. Discriminant measured at `c1564dd2` rather than assumed — 4-space `inst_start` declarations **1**, 8-space **0** ⇒ RED. Precedent: `tests/dictionary/load_any_test.cpp:143-171`, same construction, plain `std::string::find`, **no AST** — so round 1's "no precedent / novel structural-AST gate" rationale was false on **both** clauses and is deleted. Route forced by `.specify/constitution.md:86` and `[const §XX.1]` (`:402`): a conflict with a mandatory article is resolved by compliance, amendment or a rationale-bearing waiver — never by a locally invented verdict. The FR-005a(i)/FR-005b **mutation transcripts** remain as supplementary evidence |
 | VII §7 | Parser-touching ⇒ fuzz harness | No new parser code; existing `tests/fuzz/` harnesses cover `OffsetTable`. No new harness required |
 | VII §8 | Grouped buckets, select by label | New tests join the existing `offset_table_test.cpp` bucket; `ctest -L wire` |
-| VIII §2/§3 | Bench in the same PR, ±5% | The three existing `BM_TypedReadGroup_{Flat2,ModeC2,ModeC8}` run before/after, numbers in the PR body (SC-006). No baseline file is updated — this is not an intentional perf change |
+| VIII §2/§3 | Bench in the same PR, ±5% | **§3** — the three existing `BM_TypedReadGroup_{Flat2,ModeC2,ModeC8}` ship in this PR (A-004). **§2** — ±5% is measured against **`bench/baselines/wire/typed_read_group_bench.json`**, per SC-006 leg 1: each case's `_median` `cpu_time` from `--benchmark_format=json` versus that case's **`seed_median_ns`** (`386`/`661`/`1643`), at the baseline's own recorded `repetitions: 9`, `min_time_s: 0.5`, release, same host. The same-session `main`-vs-branch A/B is leg 2, supplemental noise control. *(Basis corrected at Gate A round 2 — round 1 named only the A/B, which is not the comparison the article specifies.)* **`tools/bench_compare.py` cannot perform this comparison for this file**: `load_benchmarks` keys on `cpu_time`, which this baseline does not carry, so all three rows print `N/A` (verified). No baseline file is updated and the comparator is not modified — this is not an intentional perf change and both are out of scope |
 | VIII §5 | Zero hot-path alloc | Removal only; FR-009 |
-| IX §1 | ≥95% line / ≥85% branch on touched modules; no silent uncovered error path | Improves — see R-3. The one previously-dead branch becomes covered; the stale waiver is repaired |
+| IX §1 | ≥95% line / ≥85% branch on touched modules; no silent uncovered error path | **PLANNED — expected to improve.** See R-3: the one previously-dead branch becomes covered and the stale waiver is repaired, so the line arithmetic nets positive. The **percentages themselves are unmeasured pre-implementation** — they are measured at `/speckit-verify` with fresh per-binary profraw and recorded in `.specify/decisions/085-fold-flat-cap-loop-verify.md`, which is the artifact §1's binding rule names. *(Qualifier added at Gate A round 1 for consistency with the "(planned)" verdicts on VIII §2/§3 and IX §2/§4.)* |
 | IX §2/§4 | ASan/UBSan/TSan + static analysis | SC-008; no new constructs |
 | X | C-ABI contract | Untouched — FR-008/SC-007 |
 
@@ -170,6 +221,6 @@ Re-verified by enumeration at `c1564dd2`.
 
 ## R-7 — Residual risk
 
-1. **Step 1 is a standing invariant, not a one-time fact.** If a later feature re-points `group():551` or `consume_group_extent():458` at the dictionary store without the other, the redundancy argument silently breaks and the dict path could under-enforce the cap. Mitigated by C-1 (contract) — *not* by a test, because no test can observe a cap that correctly never fires.
+1. **After the removal, the dictionary path's cap has no backstop.** *(Restated at Gate A round 1. The previous version of this item said "Step 1 is a standing invariant, not a one-time fact" and warned that re-pointing `:551` or `:458` would let the dict path under-enforce the cap. That is wrong on both halves — see the corrected note under R-1 step 1 and `contracts/group_cap_accounting.md` C-1/C-1a.)* Step 1's delimiter-source equality is a **one-time fact** about `c1564dd2` that licenses the removal and then stops binding: with the second walk gone there is no rival partition, and `group():551`'s only remaining dictionary-path use is the recognition gate at `:566`. What *is* a standing risk is narrower and real: `consume_group_extent`'s per-instance check (`:521-524`) becomes the dictionary path's **sole** DoS defence, so a future change to that walk — the instance-opening rule, the delimiter it walks on (`:458`), or the extent it returns (`:527`) — could under-enforce with nothing left to mask it. Mitigated by **C-1** as a contract, by the FR-002 source comment (content pinned by SC-005a), **and partly by a test**: FR-005b/SC-003 prove the dictionary pin RED when `:521-524` is mutated away — **post-relocation only**, since on baseline the flat loop still pre-empts and the pin stays green (measured; R-1 step 4). The old "no test can observe a cap that correctly never fires" rationale does not survive the restatement — the restated property's *existence* half is directly mutation-testable. **What that mutation does not reach** *(narrowed at Gate A round 2)*: the pin's frame is a single **unnested** instance, so deleting the whole comparison cannot distinguish the flat partition from the nesting-aware one. A change re-anchoring `inst_start` after a nested descent (`:493` / `:512`) would under-count only for nested instances and leave the pin green — which is precisely the "instance-opening rule" half of this risk. That half stays mitigated by the contract and the comment, not by a test; a nesting-sensitive fixture to close it was considered and rejected as out of scope for a removal (`plan.md` `### Round 2 — disagreements`).
 2. **fixpp#220 stays open at merge.** By design (FR-003a). The risk is that the limitation row and the issue drift apart; SC-010 pins the citation in both directions.
 3. **The bench delta may be within noise.** Expected — the removed walk is `O(extent)` on a path already dominated by the nesting-aware walk. SC-006 asserts *no regression*, not an improvement, precisely so a null result is a pass and not a temptation to re-tune the fixture (A-004).
