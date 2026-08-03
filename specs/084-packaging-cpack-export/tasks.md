@@ -272,6 +272,14 @@
 > local matrix script carries exactly this pin for the same reason.
 
 - [ ] T065 [P] [US3] **Attach package artifacts on the in-scope Linux lanes** in `.github/workflows/tier1.yml` (FR-026) — run the package step after a green build and upload the DEB/RPM/TGZ artifacts, named per FR-017/T051.
+> **Gate B round 1 (F3) narrowing, USER DECISION 2026-08-03**: landed lanes are `linux-gcc-release`
+> **and** `linux-clang-release` — 4 of 6 in-scope configurations, `tier1.yml:519,556,564`. The two
+> Linux Debug configurations are NOT widened: `linux-gcc-debug` has no CI lane at all (FR-026 binds
+> only lanes that exist; none is owed); `linux-clang-debug` has a lane but is narrowed on a measured
+> cost ground — ≈3 GB of artifacts per Linux Debug configuration (`quickstart.md:50`) against the
+> runner's ~14 GB free-disk ceiling on which UBSan has already failed `No space left on device`
+> (`tier1.yml:304-318`), for packages that are CI-download-only and published nowhere (Assumption 2).
+> `linux-clang-release`'s artifact set is ≈36 MB by contrast. See `spec.md` FR-026 banner.
 - [ ] T066 [P] [US3] **Attach package artifacts on the MSVC lanes** in `.github/workflows/tier2.yml` (FR-026) — same, for ZIP.
 - [ ] T067 [US3] **FR-026a / D3 — enable `FIXPP_BUILD_INTEROP_PERF` and gate the real-client witness on `linux-gcc-release` ONLY** in `.github/workflows/tier1.yml`. That single lane runs SC-011 and SC-012 as a **gate**; the other five in-scope lanes run the **minimal tier only**. `FIXPP_BUILD_INTEROP_PERF` is declared `OFF` at `cmake/ProjectOptions.cmake:10` and is enabled in **no** preset and **no** workflow today — so without this task SC-011/SC-012 are local-only and a witness that silently never runs **reads as green** (`feedback_ci_gate_observes_not_asserts_witness_skips_into_green`). `linux-gcc-release` is the chosen lane because it builds **zero** third-party dependencies from source (M1, Assumption 9), so gating the heaviest tier is bounded rather than all-or-nothing. **This must exit non-zero on failure — an observing step is not a gate.**
 - [ ] T068 [US3] **SC-010 — assert CI artifact names are unique and matrix-identifying** across all lanes in one run (platform, toolchain, configuration, **and format** — FR-017) — the `actions/upload-artifact` `name:` values in `.github/workflows/tier1.yml` and `.github/workflows/tier2.yml` must form a set with no duplicates across the whole matrix. A collision silently overwrites, which is a silent omission in SC-003's sense.
