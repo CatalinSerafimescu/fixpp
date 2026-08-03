@@ -56,8 +56,8 @@ The predicate deciding where one group instance ends and the next begins. Two im
 
 | | Nesting-aware | Flat |
 |---|---|---|
-| Site | `consume_group_extent:477-526` | `group():584-595` (relocating) and `group_slices():712-733` (untouched) |
-| Delimiter source | wire — `entries_[first].tag` (`:458`) | `group()`: wire (`:551`) · `group_slices()`: **dictionary store** (`:704-711`) |
+| Site | `consume_group_extent:477-526` | `group():584-595` (relocating) and `group_slices_status():712-733` (untouched) |
+| Delimiter source | wire — `entries_[first].tag` (`:458`) | `group()`: wire (`:551`) · `group_slices_status()`: **dictionary store** (`:704-711`) |
 | Descends into nested groups | Yes (`:491-499`, `:510-518`) | No |
 | Requires a dictionary | Yes | No |
 | Applies the cap | Yes (`:521-524`) | Yes (`:591-593`) |
@@ -69,7 +69,7 @@ The predicate deciding where one group instance ends and the next begins. Two im
 | Dictionary | nesting-aware **then** flat (flat unreachable-as-error, R-1) | nesting-aware only |
 | Dict-free | flat only | flat only *(semantics preserved — FR-003 + C-3's nine-item checklist)* |
 
-**The asymmetry FR-007a obliges us to record**: the two *surviving* flat sites do not share a delimiter source. `group()`'s dict-free check reads the wire; `group_slices()`'s splitter reads the per-context dictionary store (083's change, which moved 330 contexts' delimiters). Calling both "flat" is true but incomplete — they can split on different keys.
+**The asymmetry FR-007a obliges us to record**: the two *surviving* flat sites do not share a delimiter source. `group()`'s dict-free check reads the wire; `group_slices_status()`'s splitter reads the per-context dictionary store (083's change, which moved 330 contexts' delimiters). Calling both "flat" is true but incomplete — they can split on different keys.
 
 **And this asymmetry is already live over the *same* extent, benignly.** `group_slices_status`'s splitter walks `[first, group_end]` with the same boundary predicate as the flat cap loop (`:712-715` vs `:585-586`) on a delimiter resolved through `group_delim_fn_` (`:704-711`) while `group():551` reads the wire — two walks, one extent, independent sources, on shipped `main` since 083. It does not under-enforce the cap, because dictionary-path enforcement lives in the nesting-aware walk (`:521-524`), not in either flat walk. Contract **C-1** cites this as the shipped proof that divergent delimiter *sources* are not by themselves a cap defect — which is why C-1 freezes the nesting-aware walk's cap/extent coupling rather than a delimiter-source equality. *(Cross-reference added at Gate A round 1: the round-1 contract asserted the opposite of what this row already recorded.)*
 

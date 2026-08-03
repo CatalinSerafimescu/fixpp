@@ -136,7 +136,7 @@ Named explicitly so a reviewer can see the boundary rather than infer it.
 | Site | Why out of scope |
 |---|---|
 | `consume_group_extent` (`:442-528`) — signature, body, contract, dict-free bail at `:454-456`: **not modified by this feature** | FR-001a/FR-008. The "literal fold" alternative was rejected at `/clarify` Q1. **Two carve-outs, stated so this row does not contradict C-1** *(reconciled at Gate A round 2)*: (i) **C-1 governs this function as a standing obligation** — govern is not modify, and no line of it changes in the delivered diff; (ii) SC-003's mutation deletes `:521-524` **transiently**, in a working tree, and restores it — no delivered change; that is evidence-gathering, not scope. |
-| `group_slices()` instance splitter (`:712-733`) | L-063-4 **leg 1**, descoped with evidence by 083 (empty target population across all ten dictionaries; a literal implementation would break the 485-context shape that *is* reachable). Still flat, and still resolving `delim` from the **dictionary store** (`:704-711`) rather than the wire — see FR-007a |
+| `group_slices_status()` instance splitter (`:712-733`) — `group_slices()` (`:639-641`) merely delegates | L-063-4 **leg 1**, descoped with evidence by 083 (empty target population across all ten dictionaries; a literal implementation would break the 485-context shape that *is* reachable). Still flat, and still resolving `delim` from the **dictionary store** (`:704-711`) rather than the wire — see FR-007a |
 | `group_slices_reserve_bound()` (`:599-634`) | Not reached by this change |
 | Per-context delimiter store, membership callbacks, `group_context` | 083's contracts own these |
 

@@ -97,7 +97,7 @@ src/wire/
                                        #   COMMENT  — group()'s dictionary branch, after the overflow
                                        #              conversion :576-578 — the FR-002/C-1 justification
                                        #   UNCHANGED— the shared return :596; consume_group_extent
-                                       #              :442-528 (FR-001a); group_slices() splitter
+                                       #              :442-528 (FR-001a); group_slices_status() splitter
                                        #              :712-733 (leg 1, descoped)
 
 include/fixpp/wire/
@@ -154,7 +154,7 @@ bench/wire/
 | **C-1a** | At `c1564dd2`, `group():551` and `consume_group_extent():458` read the same entry | **Delivery-time proof premise, NOT standing.** It licenses the one-time removal (R-1 step 1) and then stops binding: with no second walk there is no rival partition. Discharged by inspection; nothing carries forward, no test |
 | **C-2** | Dictionary path performs exactly one traversal | Post-conditions all unchanged in value |
 | **C-3** | Dict-free cap preserved with **no semantic change** | Nine-item preservation checklist; mechanical re-indentation permitted (`clang-format` is a Tier-1 gate); reduces FR-003 to a bounded diff inspection |
-| **C-4** | Explicit non-scope: `consume_group_extent`, the `group_slices()` splitter (leg 1), the reserve bound, delimiter resolution | Named so the boundary is visible, not inferred |
+| **C-4** | Explicit non-scope: `consume_group_extent`, the `group_slices_status()` splitter (leg 1), the reserve bound, delimiter resolution | Named so the boundary is visible, not inferred |
 
 **Validation**: [quickstart.md](./quickstart.md) — §0 (the FR-001b red-first pin, run **before** the relocation) then three claims in order (nothing changed → cap still fires → no regression), with **two** mutation steps called out as mandatory and non-skippable (§2a-mut dictionary, §2c dict-free), and a count assertion on every selection — test **and** benchmark. *(Rewritten at Gate A round 1 against the real build and test invocations; at round 2 every block was made a fail-fast subshell and re-executed in all four shell forms — see `## Gate A`.)*
 
