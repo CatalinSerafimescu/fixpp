@@ -99,6 +99,18 @@ Measured diff, `stage-OFF` → `stage-ON`:
 resolves every symbol, but does not inherit its include directories. The `-` line is the defect #218 reports,
 verbatim.
 
+**The two property maps, stated as sets** — this is FR-009a(i)'s closed enumeration, and it is what
+`quickstart.md` §3 compares against rather than printing *(Gate A r3 carry-forward #3)*:
+
+| stage | property NAMES in `fixpp::capi`'s block | basis |
+|---|---|---|
+| **OFF** | `{INTERFACE_LINK_LIBRARIES}` | measured, on the real pre-feature installed artifact |
+| **ON** | `{INTERFACE_INCLUDE_DIRECTORIES, INTERFACE_LINK_LIBRARIES}` | `contracts/include-interface.md` §2 |
+
+The delta is *gain one, rewrite one* — not "lose one". A check written as "loses only
+`INTERFACE_INCLUDE_DIRECTORIES`" is unsatisfiable against the delivered design, which is why the enumeration is
+stated by name at both stages instead of as a difference.
+
 > ### The generated text, pasted verbatim — every extraction command is derived from THIS, not from a description of it *(Gate A r2)*
 >
 > Re-run on this host, CMake 3.30.0, `cmake --install` of the fixture at both stages. `fixpp::capi`'s region of
@@ -216,7 +228,9 @@ isolation probes are **different kinds of test** and must stay separate.
 > (`:142-143`). `consumer_capi_witness` is covered by the single `cmake --build` at `:96-104` and by nothing
 > else, exactly as `tests/consumer/CMakeLists.txt:71` states: *"Building and linking IS the assertion — it need
 > not run."* FR-009's strengthening therefore rests on the **link** stage: the added reference must pull the
-> entry point's object out of the archive when `consumer_capi_witness` is linked (taking its address does),
+> entry point's object out of the archive when `consumer_capi_witness` is linked — a namespace-scope,
+> non-`static`, non-`const` pointer initialised with its address, or a call; an address assigned to an unused
+> local can be optimised away together with its relocation and would restore the gap silently —
 > and **no runtime behaviour is asserted**. The "no call whose runtime failure would red it" proviso was
 > derived from the false premise; it is over-restrictive rather than wrong, and is dropped.
 
@@ -285,7 +299,8 @@ argument is unaffected — `include_directories()` is directory-scoped over all 
 >   **never through `fixpp::capi`'s own block** — which reads identically whether the definition propagates or
 >   not, so (i) is structurally blind to it. Instrument and its measured discrimination: **R10**.
 >
-> The enumerated, presently-unreachable set — today exactly `FIXPP_LOG_MIN_LEVEL` — is **permitted** to
+> The enumerated, presently-unreachable set — today **at least** `FIXPP_LOG_MIN_LEVEL` and `ASIO_STANDALONE`;
+> the complete set is enumerated per (a) and membership is decided by the predicate, not by this list — is **permitted** to
 > disappear as a recorded consequence. In-tree behaviour is preserved by construction; the *installed*
 > usage-requirement delta is measured, not assumed.
 

@@ -27,6 +27,32 @@
 
 #include <cstdio>
 
+// ── 086 T014a (FR-009) — pull the SESSION/DICTIONARY closure at LINK time ─────
+//
+// Without these two references this witness proves less than it appears to.
+// main() below touches only fixpp_library_version and fixpp_strerror, and
+// neither of those objects references anything outside fixpp_capi_objects — so
+// the witness would stay green even if $<LINK_ONLY:> silently dropped a real
+// transitive archive edge, which is exactly the regression 086 could introduce.
+// fixpp_dict_load_from_xml and fixpp_engine_create reach the dictionary and
+// session/transport/TLS closures, including both deliberate static-archive
+// cycles (wire <-> dictionary, dictionary -> bridge -> dictionary).
+//
+// FORM MATTERS. These are namespace-scope, non-`static`, non-`const` pointers:
+// external linkage means the initializer is a relocation the linker must
+// satisfy, and neither constant-folding nor --gc-sections may discard it. An
+// address assigned to an unused local CAN be optimised away together with its
+// relocation, which would silently restore the gap (Gate A r3 carry-forward #6).
+//
+// No runtime obligation is taken on. This TU is built and linked but NEVER
+// executed — the driver runs only ${_sub_build}/consumer_witness
+// (run_consumer_witness.cmake:110) — so nothing here may depend on, or assert,
+// runtime behaviour. Building and linking IS the assertion.
+fixpp_error_t (*fixpp_capi_witness_dict_entry)(const char*, fixpp_dict_t**) =
+    &fixpp_dict_load_from_xml;
+fixpp_error_t (*fixpp_capi_witness_engine_entry)(fixpp_engine_config_t*, uint16_t, uint16_t,
+                                                 fixpp_engine_t**) = &fixpp_engine_create;
+
 int main() {
     const fixpp_version_t v = fixpp_library_version();
 

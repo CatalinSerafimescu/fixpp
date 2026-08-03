@@ -83,6 +83,10 @@ execute_process(
     "-DCMAKE_BUILD_TYPE=${FIXPP_BUILD_TYPE}"
     "-DCMAKE_CXX_COMPILER=${FIXPP_CXX_COMPILER}"
     "-DCMAKE_C_COMPILER=${FIXPP_C_COMPILER}"
+    # 086 T053: the sub-build does not go through CMakePresets.json, so it never
+    # picks up the _base preset's CMAKE_EXPORT_COMPILE_COMMANDS (:12). Without a
+    # compile DB here, clang-tidy cannot be pointed at the new probe TUs at all.
+    "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"
     "-DFIXPP_STAGE_PREFIX=${_stage}"
   RESULT_VARIABLE _cfg_rc
   OUTPUT_VARIABLE _cfg_out
@@ -102,6 +106,59 @@ execute_process(
 if(NOT _build_rc EQUAL 0)
   message(FATAL_ERROR "consumer build failed (exit ${_build_rc}):\n${_build_out}\n${_build_err}")
 endif()
+
+# ── 3a. 086 FR-009a(ii) / C-3 leg 3 — read back the usage-requirement probe ───
+#
+# tests/consumer/CMakeLists.txt writes this file with file(GENERATE), which runs
+# at GENERATE time and asserts nothing by itself. The compare has to live
+# downstream of the sub-build, which is here. Without this block the generated
+# file is written and never read, and leg 3 does not exist.
+#
+# What is being checked: `fixpp::capi` carries `$<LINK_ONLY:fixpp::capi_objects>`,
+# and $<LINK_ONLY:> withholds COMPILE_DEFINITIONS, COMPILE_OPTIONS,
+# COMPILE_FEATURES and SYSTEM_INCLUDE_DIRECTORIES along with the include path. So
+# a target that links only fixpp::capi must end up with an EMPTY effective set for
+# all three. Asserting empty — rather than "does not contain FIXPP_LOG_MIN_LEVEL"
+# — is deliberate: it is a closed assertion, so a definition nobody predicted
+# fails it too. (The withheld set today is at least FIXPP_LOG_MIN_LEVEL, from
+# src/log/CMakeLists.txt:27, and ASIO_STANDALONE, carried by asio::asio linked
+# unwrapped inside the closure. Membership is decided by this predicate, not by
+# that list.) Instrument measured in research.md R10.
+set(_usage_file "${_sub_build}/usage-requirements.txt")
+if(NOT EXISTS "${_usage_file}")
+  message(FATAL_ERROR
+    "086 FR-009a(ii): ${_usage_file} was not generated — the usage-requirement probe "
+    "is missing from tests/consumer/CMakeLists.txt, so C-3 leg 3 asserts nothing.")
+endif()
+file(READ "${_usage_file}" _usage_txt)
+message(STATUS "086 usage requirements at the C-ABI consumer:\n${_usage_txt}")
+foreach(_prop COMPILE_DEFINITIONS COMPILE_OPTIONS COMPILE_FEATURES)
+  # Both sides are READ, never invented here: tests/consumer/CMakeLists.txt is the
+  # named producer of the EXPECTED_ values (FR-009a(ii)), and the OBSERVED_ values
+  # come from $<TARGET_PROPERTY:> on a real target inside the configured consumer.
+  # Anchored per line — an unanchored match would let the COMPILE_OPTIONS line
+  # satisfy the COMPILE_DEFINITIONS lookup through the substring.
+  if(NOT _usage_txt MATCHES "(^|\n)EXPECTED_${_prop}=([^\n]*)")
+    message(FATAL_ERROR "086 FR-009a(ii): no EXPECTED_${_prop}= line in ${_usage_file}")
+  endif()
+  set(_expected "${CMAKE_MATCH_2}")
+  if(NOT _usage_txt MATCHES "(^|\n)OBSERVED_${_prop}=([^\n]*)")
+    message(FATAL_ERROR "086 FR-009a(ii): no OBSERVED_${_prop}= line in ${_usage_file}")
+  endif()
+  set(_observed "${CMAKE_MATCH_2}")
+  if(NOT _observed STREQUAL _expected)
+    message(FATAL_ERROR
+      "086 FR-009a(ii) FAIL: a consumer linking ONLY fixpp::capi sees "
+      "${_prop}=[${_observed}], expected [${_expected}].\n"
+      "If something appeared, the include interface was narrowed while this usage "
+      "requirement still propagates — \$<LINK_ONLY:> is not in effect on fixpp::capi, "
+      "or something outside the C-ABI closure is adding to it. If something "
+      "disappeared that the expectation names, the closure lost a requirement it "
+      "relies on. Either way the delivered interface is not what "
+      "contracts/include-interface.md §2 describes.")
+  endif()
+endforeach()
+message(STATUS "086 FR-009a(ii): OK — no usage requirement propagates through fixpp::capi")
 
 # ── 4. Run it and check the output ────────────────────────────────────────────
 # Ninja single-config drops the exe at the sub-build root; the basename carries a

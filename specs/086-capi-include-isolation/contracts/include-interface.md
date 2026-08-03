@@ -79,7 +79,7 @@ root of its own.
 | `CMakeLists.txt:446-451` | **unchanged** — acquires **no new** `PATTERN … EXCLUDE` for the isolated subtrees *(it already carries two, for `fixpp/core/test` and `fixpp/transport/test`, `:449-450` — this feature adds none)* | FR-005a additivity |
 | `tests/consumer/CMakeLists.txt` | `project(fixpp_consumer_witness CXX)` (`:40`) → `C CXX`; + the compile-only positive probe targets; + the configure-time must-fail probes (§4, **three** of them: `<fixpp/wire/parser.hpp>` and `<fixpp/service/control_plane_factory.hpp>` through `fixpp::capi`, `<fixpp/wire/parser.hpp>` through `fixpp::service`); + the usage-requirement probe target and its `file(GENERATE)` | the C-side installed-interface gap (FR-002); the negative cells, which cannot be targets in this sub-project (§4); and C-3 leg 3 |
 | `tests/consumer/run_consumer_witness.cmake` | + a read-back and compare of the generated usage-requirement file, **after** the `cmake --build` at `:96-104` | FR-009a(ii) / C-3 leg 3 — `file(GENERATE)` writes at generate time, so the assertion has to live downstream of the sub-build or it does not exist |
-| `tests/consumer/consumer_capi_witness.cpp` | + a reference to an entry point that pulls the session/dictionary closure **at link time** (its address suffices) | FR-009 — as it stands the witness passes even if the transitive archive edge is lost. This TU is built and linked, **never run** (`tests/consumer/CMakeLists.txt:71`), so the reference carries no runtime obligation |
+| `tests/consumer/consumer_capi_witness.cpp` | + a reference to an entry point that pulls the session/dictionary closure **at link time** — a namespace-scope, non-`static`, non-`const` pointer initialised with its address, or a call; **not** an address assigned to an unused local, which can be optimised away together with its relocation | FR-009 — as it stands the witness passes even if the transitive archive edge is lost. This TU is built and linked, **never run** (`tests/consumer/CMakeLists.txt:71`), so the reference carries no runtime obligation |
 | `tests/packaging/run_package_contents_witness.cmake` | + presence assertions (FR-010) **and** the isolated-root containment assertions (FR-010a / C-5) | the existing gates' regexes are anchored on `^include/fixpp/…` and cannot see the new roots |
 
 ## 3. Invariants a change must preserve
@@ -94,9 +94,11 @@ root of its own.
   *include* interface must not narrow the *link* interface **or any other usage requirement the closure relies
   on**, except for a set enumerated and recorded in advance. `$<LINK_ONLY:>` withholds
   `INTERFACE_COMPILE_DEFINITIONS`, `INTERFACE_COMPILE_OPTIONS`, `INTERFACE_COMPILE_FEATURES` and
-  `INTERFACE_SYSTEM_INCLUDE_DIRECTORIES` too — and the closure carries a live PUBLIC definition,
-  `FIXPP_LOG_MIN_LEVEL` (`src/log/CMakeLists.txt:27`), consumed unguarded at
-  `include/fixpp/log/logger.hpp:275,301,333`. An installed C-ABI consumer **does** lose it (measured,
+  `INTERFACE_SYSTEM_INCLUDE_DIRECTORIES` too — and the closure carries **at least two** live PUBLIC
+  definitions: `FIXPP_LOG_MIN_LEVEL` (`src/log/CMakeLists.txt:27`), consumed unguarded at
+  `include/fixpp/log/logger.hpp:275,301,333`, and `ASIO_STANDALONE`, carried by `asio::asio`, which is linked
+  **unwrapped** inside the C-ABI closure. The complete set is enumerated per FR-009a(ii)(a) and membership is
+  decided by the predicate, not by this list. An installed C-ABI consumer **does** lose them (measured,
   `research.md` R10); nothing reaches `logger.hpp` from such a consumer today, so there is no live break, and
   that loss is the enumerated exception this invariant's title names. The invariant exists so any *other*
   withheld requirement, or a future header that did reach one, would not pass silently.
@@ -184,7 +186,7 @@ sub-project: a build failure reds the witness, which is the correct polarity.
 
 | Assertion | Kind | Target |
 |---|---|---|
-| `fixpp::capi` links and resolves a real symbol **from the transitive archive set** | **link only** | `consumer_capi_witness` — **exists**, extended per FR-009. **Building and linking IS the assertion** (`tests/consumer/CMakeLists.txt:71`); the driver runs only `${_sub_build}/consumer_witness` (`run_consumer_witness.cmake:110`, `^PASS:` at `:142-143`), so this binary is **never executed** and no runtime behaviour is asserted. The added reference must pull the entry point's object out of the archive at *link* time — taking its address does |
+| `fixpp::capi` links and resolves a real symbol **from the transitive archive set** | **link only** | `consumer_capi_witness` — **exists**, extended per FR-009. **Building and linking IS the assertion** (`tests/consumer/CMakeLists.txt:71`); the driver runs only `${_sub_build}/consumer_witness` (`run_consumer_witness.cmake:110`, `^PASS:` at `:142-143`), so this binary is **never executed** and no runtime behaviour is asserted. The added reference must pull the entry point's object out of the archive at *link* time — a namespace-scope, non-`static`, non-`const` pointer initialised with its address (or a call), never an address assigned to an unused local, which can be elided with its relocation |
 | `fixpp::capi` reaches all 12 C-ABI headers, from **C++** | compile-only target | new |
 | `fixpp::capi` reaches all 12 C-ABI headers, from **C** | compile-only target, C language | new — `project(... C CXX)`; closes US1's "C or C++ integrator" promise for the *installed* interface (in-tree C-cleanliness is already pinned at `tests/capi/CMakeLists.txt:13`, `:23`) |
 | `fixpp::capi` does **not** reach a C++ engine header (`<fixpp/wire/parser.hpp>`) | configure-time `try_compile`, **asserted FALSE** (§4a) | new — C++ only; a C compiler rejecting a C++ header proves nothing about isolation |

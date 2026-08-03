@@ -366,7 +366,10 @@ interface header and the C-ABI headers compile; a C++ engine header does not.
   `run_consumer_witness.cmake:110` runs `${_sub_build}/consumer_witness` — the umbrella witness — and asserts
   `^PASS:` on that binary alone (`:142-143`); `tests/consumer/CMakeLists.txt:71` states it in as many words,
   "Building and linking IS the assertion — it need not run". The reference must therefore pull the entry
-  point's object out of the archive at **link** time — taking its address is the simplest form that does — and
+  point's object out of the archive at **link** time. **The form is load-bearing**: a namespace-scope,
+  non-`static`, non-`const` pointer initialised with the entry point's address (or a call), never an address
+  assigned to an unused local — a local can be optimised away *together with its relocation*, silently
+  restoring the gap this requirement exists to close *(Gate A r3 carry-forward #6)*. And
   **no runtime behaviour is asserted**. Verifiers MUST NOT record a run of `consumer_capi_witness` as FR-009 or
   SC-008 evidence; there is none. Adding a runtime assertion on the C-ABI leg would be a separate, larger
   change to `run_consumer_witness.cmake` and is not in scope here.)*
@@ -389,14 +392,30 @@ interface header and the C-ABI headers compile; a C++ engine header does not.
     `fixppTargets.cmake` is generated becomes an unsatisfiable MUST the moment the real block carries one more
     property than the fixture did. What is fixed by this requirement is the **shape** of the check (closed
     enumeration, positively named, no wildcard "nothing else may differ"), not its contents.
+
+    **The enumeration, now filled in** *(Gate A r3 carry-forward #3 — measured, so it is no longer a blank)*:
+
+    | stage | property NAMES in `fixpp::capi`'s generated block | source |
+    |---|---|---|
+    | **OFF** (pre-feature) | `{INTERFACE_LINK_LIBRARIES}` | measured on the real installed artifact, `research.md` R3 |
+    | **ON** (isolated) | `{INTERFACE_INCLUDE_DIRECTORIES, INTERFACE_LINK_LIBRARIES}` | `contracts/include-interface.md` §2 |
+
+    Note what the delta actually **is**: the include property is **gained** and `INTERFACE_LINK_LIBRARIES` is
+    **rewritten** (bare → `$<LINK_ONLY:…>`). "Loses only `INTERFACE_INCLUDE_DIRECTORIES`" is false of the
+    delivered design and was never satisfiable. `quickstart.md` §3 compares both name sets against these two
+    maps rather than printing them, so an unexpected **third** changed property fails the step.
   - **FR-009a(ii) — effective usage-requirement delta, MEASURED AT THE CONSUMER.** FR-009a(i) is structurally
     incapable of observing compile definitions: they reach a C-ABI consumer through
     `fixpp_capi_objects` → `fixpp_log` (`src/capi/CMakeLists.txt:29-38`), never through `fixpp::capi`'s own
     block, which reads identically either way. `/speckit-implement` MUST therefore (a) enumerate the closure's
     PUBLIC/INTERFACE compile definitions, options and features **once**, and (b) measure, at a probe target
     inside the configured consumer sub-project, which of them a `fixpp::capi` consumer actually receives —
-    `file(GENERATE … CONTENT "$<TARGET_PROPERTY:<probe>,COMPILE_DEFINITIONS>")`, **not** by diffing the targets
-    file. **The comparison step MUST be named and MUST run**: `file(GENERATE)` writes at *generate* time, so no
+    `file(GENERATE … CONTENT "$<TARGET_PROPERTY:<probe>,COMPILE_DEFINITIONS>")` **and the same for
+    `COMPILE_OPTIONS` and `COMPILE_FEATURES`**, all three in the one `file(GENERATE)` and all three in the one
+    driver compare (three lines, no new machinery), **not** by diffing the targets file. `$<LINK_ONLY:>`
+    withholds all three, and measured on the real export the live surface is `COMPILE_DEFINITIONS` only — but
+    this requirement must not be narrower than its own claim, which is about *usage requirements*, not about
+    definitions *(Gate A r3 carry-forward #5)*. **The comparison step MUST be named and MUST run**: `file(GENERATE)` writes at *generate* time, so no
     configure-time `if()` can read it back — the read-and-compare belongs in the driver after the sub-build
     (`tests/consumer/run_consumer_witness.cmake`, after the build at `:96-104`), or in a `cmake -P` compare
     attached as a build step. A `file(GENERATE)` whose output nothing reads asserts nothing. The measured set
@@ -406,8 +425,9 @@ interface header and the C-ABI headers compile; a C++ engine header does not.
   `run_consumer_witness.cmake:86`), so the comparison has a right-hand side with an origin. A comparison whose
   expected value is derived from the run it checks is satisfied by whatever the run produced — the same
   no-op-gate shape as a `file(GENERATE)` nothing reads. One **recorded, pre-approved exception** applies: the
-    definitions enumerated in (a) as presently unreachable from any C-ABI consumer — today exactly
-    `FIXPP_LOG_MIN_LEVEL` — are **permitted** to be absent, as an accepted and recorded consequence of the
+    definitions enumerated in (a) as presently unreachable from any C-ABI consumer — today **at least**
+    `FIXPP_LOG_MIN_LEVEL` and `ASIO_STANDALONE`; the complete set is enumerated per (a) and membership is
+    decided by the predicate, not by this list — are **permitted** to be absent, as an accepted and recorded consequence of the
     narrowing. Anything else that goes missing MUST be republished on `fixpp_capi` directly. *(Measured
     instrument: `research.md` R10 — the probe reads `FIXPP_LOG_MIN_LEVEL` at ISO=OFF and loses it at ISO=ON, so
     the check discriminates rather than merely reporting.)*

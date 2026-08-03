@@ -475,6 +475,88 @@ foreach(_artifact IN LISTS _artifacts)
       "drifts either way is a membership defect, not a naming detail.")
   endif()
 
+  # ══ 086 T034/T035 — the isolated include roots ════════════════════════════
+  #
+  # Nothing here asserted the C-ABI headers AT ALL before this feature, at either
+  # root: the denylist below is anchored on `^include/fixpp/…` and the
+  # generated-tree allowlist on `^include/fixpp/(v[A-Za-z0-9]+)/…`, so both are
+  # structurally incapable of matching a path under `include/capi/` or
+  # `include/service-iface/`. A package that shipped neither new root — or shipped
+  # one half-populated — passed every gate in this file.
+  #
+  # BY SET EQUALITY, NOT BY A HARDCODED CENSUS. The two roots are installed from
+  # ONE source directory each (data-model I2), so the duplicate tree must match
+  # the original exactly. A transcribed list of twelve filenames would go stale
+  # the first time a C-ABI sub-header is added, and would go stale SILENTLY in the
+  # direction that matters — a new header missing from the isolated root is
+  # exactly the defect this is for.
+  #
+  # PREFIX-FREE: `_files` has already had the Linux-only `usr/` component
+  # stripped (see normalisation above), so one expectation covers DEB, RPM, TGZ
+  # and the Windows ZIP. A `usr/`-anchored glob would find nothing in the ZIP and
+  # report "the package carries no C-ABI headers" — a defect claim about the
+  # product manufactured by the test.
+  foreach(_dup_pair
+      "include/fix/|include/capi/fix/"
+      "include/fixpp/service/|include/service-iface/fixpp/service/")
+    string(REPLACE "|" ";" _dup_pair "${_dup_pair}")
+    list(GET _dup_pair 0 _orig_root)
+    list(GET _dup_pair 1 _iso_root)
+
+    set(_orig_tails "")
+    set(_iso_tails "")
+    foreach(_f IN LISTS _files)
+      if(_f MATCHES "^${_orig_root}(.+)$")
+        list(APPEND _orig_tails "${CMAKE_MATCH_1}")
+      endif()
+      if(_f MATCHES "^${_iso_root}(.+)$")
+        list(APPEND _iso_tails "${CMAKE_MATCH_1}")
+      endif()
+    endforeach()
+    list(SORT _orig_tails)
+    list(SORT _iso_tails)
+
+    # FR-010, and the floor that stops equality from holding vacuously: two empty
+    # sets are equal. Without this an artifact shipping NO headers under either
+    # root passes the comparison below with a perfectly straight face.
+    if(_orig_tails STREQUAL "")
+      list(APPEND _missing
+        "${_orig_root}** (FR-010: ${_aname} ships nothing under this root at all)")
+    elseif(NOT _orig_tails STREQUAL _iso_tails)
+      string(REPLACE ";" "\n    " _o_pretty "${_orig_tails}")
+      string(REPLACE ";" "\n    " _i_pretty "${_iso_tails}")
+      message(FATAL_ERROR
+        "086 FR-010: ${_aname} — the isolated root ${_iso_root} does not carry the same "
+        "set as ${_orig_root}. Both are installed from one source directory, so any "
+        "difference means an install rule is missing, mis-scoped, or was not updated "
+        "when a header was added.\n"
+        "  ${_orig_root}:\n    ${_o_pretty}\n"
+        "  ${_iso_root}:\n    ${_i_pretty}")
+    endif()
+  endforeach()
+
+  # FR-010a / C-5 — CONTAINMENT. The only assertion in the entire suite that
+  # traces FR-001, which is a property of a ROOT, not of a target: an isolated
+  # root that also carried, say, `include/capi/fixpp/wire/parser.hpp` would defeat
+  # the isolation for every consumer, and no negative probe would catch it unless
+  # it happened to name that exact header.
+  set(_uncontained "")
+  foreach(_f IN LISTS _files)
+    if(_f MATCHES "^include/capi/" AND NOT _f MATCHES "^include/capi/fix/")
+      list(APPEND _uncontained "${_f}")
+    endif()
+    if(_f MATCHES "^include/service-iface/"
+       AND NOT _f MATCHES "^include/service-iface/fixpp/service/")
+      list(APPEND _uncontained "${_f}")
+    endif()
+  endforeach()
+  if(NOT _uncontained STREQUAL "")
+    string(REPLACE ";" "\n  " _uncontained_pretty "${_uncontained}")
+    message(FATAL_ERROR
+      "086 FR-010a/C-5: ${_aname} — an isolated include root carries paths outside its "
+      "declared subtree, so it is not isolated:\n  ${_uncontained_pretty}")
+  endif()
+
   # MUST BE ABSENT — SET EQUALITY over the exact 7-pattern denylist, never a
   # subset. A check written from the 078 five-pattern tail would pass a package
   # leaking the build-tree-private reify bridge (_dispatch/) or the FIXT.1.1 tree

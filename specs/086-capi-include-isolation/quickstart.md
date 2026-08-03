@@ -201,10 +201,22 @@ grep -Fq 'INTERFACE_INCLUDE_DIRECTORIES "${_IMPORT_PREFIX}/include/capi"' "$A" \
 grep -Fq 'INTERFACE_LINK_LIBRARIES "\$<LINK_ONLY:fixpp::capi_objects>"' "$A" \
   || { echo "FR-009a(i) FAIL: LINK_ONLY wrapper absent"; exit 1; }
 
-# CLOSED ENUMERATION — the set of property NAMES present at each stage. Record both in the verify
-# record and reconcile against research.md R3's re-measured diff. Any name outside the enumeration,
-# added or removed, is an FR-009a(i) failure.
-for F in "$B" "$A"; do sed -nE 's/^  ([A-Za-z_]+) .*/\1/p' "$F" | sort; echo "--- ^ $F"; done
+# CLOSED ENUMERATION — COMPARED, not printed. Printing the two name sets and reading them by eye
+# is not a gate: an unexpected THIRD changed property scrolls past and the step still "passes".
+# The two maps below are the closed enumeration FR-009a(i) requires:
+#   OFF = {INTERFACE_LINK_LIBRARIES}                                   measured on the real
+#         pre-feature artifact (research.md R3)
+#   ON  = {INTERFACE_INCLUDE_DIRECTORIES, INTERFACE_LINK_LIBRARIES}    contracts/include-interface.md §2
+# Note what the delta IS: the include property is GAINED and INTERFACE_LINK_LIBRARIES is REWRITTEN.
+# "Loses only INTERFACE_INCLUDE_DIRECTORIES" is false of the delivered design and never was satisfiable.
+props() { sed -nE 's/^  ([A-Za-z_]+) .*/\1/p' "$1" | sort; }
+diff <(props "$B") <(printf '%s\n' INTERFACE_LINK_LIBRARIES) \
+  || { echo "FR-009a(i) FAIL: OFF-side property set is not exactly {INTERFACE_LINK_LIBRARIES}"; exit 1; }
+diff <(props "$A") <(printf '%s\n' INTERFACE_INCLUDE_DIRECTORIES INTERFACE_LINK_LIBRARIES) \
+  || { echo "FR-009a(i) FAIL: ON-side property set is not exactly {INTERFACE_INCLUDE_DIRECTORIES, INTERFACE_LINK_LIBRARIES}"; exit 1; }
+# Record both name sets in the verify record as well — the assertion above is the gate, the record
+# is the evidence.
+for F in "$B" "$A"; do props "$F"; echo "--- ^ $F"; done
 
 # The two blocks MUST differ. Identical blocks mean the isolation is absent or the extraction is wrong —
 # which is exactly the false green this step used to report. (`if` is used so `set -e` does not abort on
@@ -338,7 +350,9 @@ reference an entry point reaching the session/dictionary closure (`fixpp_dict_lo
 > run."* An earlier revision of this section asserted the opposite two lines after citing `:71-74` correctly.
 >
 > Consequences for the verifier: the FR-009 reference must pull the entry point's object out of the archive at
-> **link** time (taking its address does); **no runtime behaviour is asserted**; and a verify record that says
+> **link** time — a namespace-scope, non-`static`, non-`const` pointer initialised with its address, or a call;
+> **not** an address assigned to an unused local, which the optimiser may drop together with its relocation;
+> **no runtime behaviour is asserted**; and a verify record that says
 > "the C-ABI witness ran and its output was asserted" is recording a run that never happened.
 
 ## 7. Re-measure the export set — FR-016 / SC-006 / C-2
@@ -431,8 +445,13 @@ diff <(grep -oE 'Test +#[0-9]+: [^ ]+' "$FIXPP_086_EVIDENCE/ctest-before.txt" | 
      <(grep -oE 'Test +#[0-9]+: [^ ]+' "$FIXPP_086_EVIDENCE/ctest-after.txt"  | sed 's/.*: //' | sort) \
   || { echo "SC-007 FAIL: the test-name set moved"; exit 1; }
 
-git diff --stat "$(cat "$FIXPP_086_EVIDENCE/baseline-commit.txt")" -- \
-  '*.cpp' '*.hpp' '*.h' ':!tests/consumer/*'       # MUST be empty: no PRODUCTION source edited
+# --quiet, NOT --stat: `git diff --stat` exits 0 whether or not it prints, so a "MUST be empty"
+# comment beside it asserts precisely nothing. --quiet exits 1 when there is a difference.
+git diff --quiet "$(cat "$FIXPP_086_EVIDENCE/baseline-commit.txt")" -- \
+  '*.cpp' '*.hpp' '*.h' ':!tests/consumer/*' \
+  || { echo "SC-007 FAIL: production source edited"; \
+       git diff --stat "$(cat "$FIXPP_086_EVIDENCE/baseline-commit.txt")" -- \
+         '*.cpp' '*.hpp' '*.h' ':!tests/consumer/*'; exit 1; }
 ```
 
 Record both `.rc` files, both logs and the summary lines in the verify record — they are SC-007's evidence.
