@@ -21,8 +21,9 @@
 #
 # Required -D inputs:
 #   FIXPP_MAIN_BUILD_DIR  — configured main build dir (build/<preset>)
-#   FIXPP_SOURCE_DIR      — repo root (the driver + dictionary helper are COPIED
-#                           from here; no path from here reaches a compile line)
+#   FIXPP_SOURCE_DIR      — repo root (the driver is COPIED from here; no path
+#                           from here reaches a compile line; the dictionary
+#                           helper is instead a witness-local shim, see step 2)
 #   FIXPP_PROJECT_SRC_DIR — tests/packaging/real_client/
 #   FIXPP_WORK_DIR        — scratch dir (fresh; NOT the source tree)
 #   FIXPP_CXX_COMPILER / FIXPP_C_COMPILER / FIXPP_BUILD_TYPE
@@ -67,17 +68,16 @@ if(NOT EXISTS "${_driver_src}")
 endif()
 file(COPY "${_driver_src}" DESTINATION "${_proj}/src")
 
-# The driver's only non-public fixpp include. COPIED rather than duplicated into
-# the repo on purpose: a checked-in copy would drift silently the moment
-# tests/support/minimal_dictionary.hpp changed, and the witness would go on
-# compiling a stale helper while claiming to build the real client.
-# "support/minimal_dictionary.hpp" is a QUOTED include, so landing it next to the
-# copied .cpp resolves it with no include path at all.
-set(_dict_helper "${FIXPP_SOURCE_DIR}/tests/support/minimal_dictionary.hpp")
-if(NOT EXISTS "${_dict_helper}")
-  message(FATAL_ERROR "T038: dictionary helper not found at ${_dict_helper}")
-endif()
-file(COPY "${_dict_helper}" DESTINATION "${_proj}/src/support")
+# The driver's only non-public fixpp include, "support/minimal_dictionary.hpp",
+# is a QUOTED include and is satisfied by a WITNESS-LOCAL SHIM
+# (real_client/shim/support/minimal_dictionary.hpp), copied into ${_proj} as
+# part of the `file(COPY "${FIXPP_PROJECT_SRC_DIR}/" ...)` above — same
+# technique already used for the HdrHistogram stand-in (shim/hdr/…). The real
+# tests/support/minimal_dictionary.hpp is a private test-support header and is
+# deliberately NOT copied here: doing so would reach into the fixpp source
+# tree's test-support headers, which spec.md:78 (US1 acceptance scenario 7)
+# forbids. See shim/support/minimal_dictionary.hpp for what the shim loads
+# instead (the SHIPPED FIX42.xml, through the public loader API).
 
 # The copy must be IDENTICAL to the tracked driver. If this ever diverges, the
 # tier is quietly building a modified client and its "unmodified" claim is false.
@@ -89,6 +89,22 @@ if(NOT _driver_hash_src STREQUAL _driver_hash_copy)
     "client UNMODIFIED; that claim is now false.")
 endif()
 message(STATUS "T038: driver copied unmodified (sha256 ${_driver_hash_src})")
+
+# ── F1 counter-assertion (part 1, Gate B r1) ──────────────────────────────────
+# The private test-support header must land at this exact path if the smuggling
+# this fix removes is ever reintroduced (it is the only place file(COPY) used to
+# put it). Assert it stayed replaced by the shim rather than trusting the
+# absence by construction — the same discipline the sha256 check above applies
+# to the driver.
+if(EXISTS "${_proj}/src/support/minimal_dictionary.hpp")
+  message(FATAL_ERROR
+    "F1 RED: ${_proj}/src/support/minimal_dictionary.hpp exists. The real-client witness "
+    "must satisfy the driver's \"support/minimal_dictionary.hpp\" include with the "
+    "witness-local shim (real_client/shim/support/minimal_dictionary.hpp), not by "
+    "copying tests/support/minimal_dictionary.hpp -- a private test-support header -- "
+    "into the scratch project (spec.md:78, US1 acceptance scenario 7).")
+endif()
+message(STATUS "F1: no tests/support/minimal_dictionary.hpp copied into the scratch project")
 
 # ── 3. Configure against the staged prefix ───────────────────────────────────
 # Producer toolchain, exactly as tests/consumer/ does. This tier is NOT the
@@ -201,6 +217,24 @@ foreach(_forbidden "${_fixpp_src_fwd}" "${_src_real}" "${_fixpp_bld_fwd}" "${_bl
   endif()
 endforeach()
 message(STATUS "T040: compile and link lines carry no producer source-tree or build-tree path")
+
+# ── F1 counter-assertion (part 2, Gate B r1) ──────────────────────────────────
+# Reuses the same normalised ${_lines} the T040 loop above built (backslash and
+# `$:` folding already applied, so this inherits the Windows-portability fix
+# from T040 for free): the compile line must carry no include path back to the
+# private tests/support/ tree -- that is exactly the leak this fix closes.
+# string(FIND), not MATCHES, for the same literal-metacharacter reason as T040.
+string(FIND "${_lines}" "tests/support" _at_support)
+if(NOT _at_support EQUAL -1)
+  string(SUBSTRING "${_lines}" ${_at_support} 200 _ctx_support)
+  message(FATAL_ERROR
+    "F1 RED: the compile line carries a tests/support include path:\n"
+    "  ...${_ctx_support}...\n"
+    "The real-client witness must satisfy \"support/minimal_dictionary.hpp\" with the "
+    "witness-local shim (real_client/shim/support/minimal_dictionary.hpp), not a path "
+    "back into the fixpp source tree's private test-support headers.")
+endif()
+message(STATUS "F1: compile_commands.json carries no tests/support include path")
 
 # ── 6. T039: RUN it ──────────────────────────────────────────────────────────
 # --role loopback runs initiator AND acceptor in ONE process over a real loopback

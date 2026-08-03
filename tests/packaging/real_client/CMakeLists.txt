@@ -76,10 +76,22 @@ find_package(Threads REQUIRED)
 # to the producer tree is exactly what T040 forbids.
 add_executable(real_client_witness src/fixpp_perf_driver.cpp)
 
-# One include directory, for the HdrHistogram stand-in (see shim/hdr/…). The
-# driver's other non-public include, "support/minimal_dictionary.hpp", is QUOTED
-# and resolves next to the copied .cpp with no include path at all.
+# One include directory for BOTH witness-local shims: the HdrHistogram
+# stand-in (shim/hdr/…, angle-bracket <hdr/hdr_histogram.h>) and the dictionary
+# helper stand-in (shim/support/…, quoted "support/minimal_dictionary.hpp" —
+# quoted includes fall back to the compiler's normal include search path when
+# no sibling file of that name exists next to the copied .cpp, which is the
+# case here since run_real_client_witness.cmake no longer copies
+# tests/support/minimal_dictionary.hpp into the scratch project; see
+# shim/support/minimal_dictionary.hpp for why).
 target_include_directories(real_client_witness PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/shim")
+
+# The dictionary shim loads the SHIPPED FIX42.xml from the staged install
+# prefix through the public XmlLoader API (see shim/support/minimal_dictionary
+# .hpp). FIXPP_STAGE_PREFIX is already known here (passed by
+# run_real_client_witness.cmake at configure time, above).
+target_compile_definitions(real_client_witness PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${FIXPP_STAGE_PREFIX}/share/fixpp/dictionaries\"")
 
 # fixpp::fixpp is the umbrella. Note what is NOT here, all of which
 # perf/CMakeLists.txt needs when building in-tree against raw archives:

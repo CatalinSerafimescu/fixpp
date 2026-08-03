@@ -153,12 +153,19 @@
 >    editing the driver's `hdr_*` call sites, which destroys the "real, unmodified client" property
 >    that is this tier's entire value. The network fetch is gone either way.
 > 3. **T038 subtraction (3) — "replace the dictionary helper with a runtime `load_any` of a shipped
->    dictionary" — is met by COPYING `tests/support/minimal_dictionary.hpp` next to the copied `.cpp`.**
->    Same reason: `load_any` would mean editing the driver, and it would also swap the minimal FIX 4.2
->    dictionary for FIX 4.4, changing the client's runtime behaviour inside a packaging witness. The
->    shipped-dictionary load path is already witnessed directly by **T037** in
->    `run_consumer_witness.cmake`, so nothing is lost. Copying (not duplicating into the repo) keeps the
->    helper from drifting out of sync with the tracked one.
+>    dictionary" — is met by a witness-local shim** (`real_client/shim/support/minimal_dictionary.hpp`,
+>    landed at Gate B round 1, finding F1 — see spec.md:78/:90). The initial delivery instead COPIED
+>    `tests/support/minimal_dictionary.hpp` — a private test-support header — next to the copied `.cpp`,
+>    which violated US1 acceptance scenario 7 (spec.md:78) and was recorded only here, not in spec.md.
+>    The shim applies the same technique as subtraction (2) above: `load_any` (or any call-site change)
+>    would mean editing the driver, so the shim instead loads the **shipped** `dictionaries/FIX42.xml`
+>    through the public `XmlLoader::load(path, mr)` API — keeping FIX 4.2, not swapping in FIX 4.4 —
+>    from the staged install prefix, with the driver's quoted `"support/minimal_dictionary.hpp"`
+>    include resolving to the shim via the compiler's normal include-path fallback rather than a copy of
+>    the private header. `run_real_client_witness.cmake` now asserts directly that no
+>    `tests/support`-sourced copy exists and that no `tests/support` path reaches
+>    `compile_commands.json`, rather than relying on the absence of a copy step. The shipped-dictionary
+>    load path is still also witnessed directly by **T037** in `run_consumer_witness.cmake`.
 >
 > T039's `FIXPP_BUILD_INTEROP_PERF` note likewise does not apply — the standalone project does not
 > consult that option. **FR-010b is still proven**, and more visibly: the witness restates no static
