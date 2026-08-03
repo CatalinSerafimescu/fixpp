@@ -18,22 +18,22 @@
 
 ## Requirement Completeness
 
-- [ ] **No [NEEDS CLARIFICATION] markers remain** — **2 remain, deliberately.** FR-011 (`fixpp::service`
-      scope) and FR-012 (non-CMake consumers). Both are genuine scope decisions with no defensible default,
-      and pipeline step 2 (`/speckit-clarify`) is mandatory for ABI-surface features per const §XVI.3. They
-      are routed there rather than guessed. **This box closes at `/speckit-clarify`, not before `/speckit-plan`.**
+- [x] **No [NEEDS CLARIFICATION] markers remain** — **closed at `/speckit-clarify`, 2026-08-03.** Three
+      questions asked and answered: installed layout (additive, both roots), `fixpp::service` scope (in scope),
+      isolation strictness (by-name targets only). FR-011/FR-012 were rewritten from open questions into
+      requirements; FR-003a and FR-005a were added to carry the strictness and additivity answers.
 - [x] Requirements are testable and unambiguous — *FR-003 is stated as transitive reachability precisely
       because the #218 defect was a direct property reading clean while the transitive one was open.*
 - [x] Success criteria are measurable — *SC-001 counts headers; SC-002 requires a red observation; SC-006
       requires a re-measurement.*
 - [x] Success criteria are technology-agnostic (no implementation details) — *stated as reachability counts and
       observed pass/fail, not as target properties.*
-- [x] All acceptance scenarios are defined — *5 user stories, 11 scenarios.*
-- [x] Edge cases are identified — *6, including the `usr/`-prefix asymmetry and the `find_package`-time
-      existence check that makes a naive export-set change break every consumer.*
-- [x] Scope is clearly bounded — *bounded by the two open clarifications, which are explicit rather than
-      implicit.*
-- [x] Dependencies and assumptions identified — *7 assumptions, 3 dependencies.*
+- [x] All acceptance scenarios are defined — *6 user stories, 15 scenarios.*
+- [x] Edge cases are identified — *7, including the `usr/`-prefix asymmetry, the `find_package`-time existence
+      check that makes a naive export-set change break every consumer, and the same-header-at-two-paths
+      consequence for any exact-set content assertion.*
+- [x] Scope is clearly bounded — *closed at clarify: three roots, by-name targets only, strictly additive.*
+- [x] Dependencies and assumptions identified — *10 assumptions, 3 dependencies.*
 
 ## Feature Readiness
 
@@ -51,5 +51,9 @@
 - **FR-007 (demonstrated-red) is load-bearing** and is written to the project's standing rule that a gate never
   observed failing proves nothing. FR-008 guards the adjacent trap — a compile-fails assertion that would pass
   for the wrong reason is a proxy, not a witness.
-- **Two clarifications block `/speckit-plan`.** Proceed: `/speckit-clarify` → re-validate this checklist →
-  `/speckit-plan`.
+- **Clarify session 2026-08-03 resolved all blockers; 16/16 items pass.** One answer went against the
+  direction preview the user had originally selected (the preview showed `PATTERN fix EXCLUDE`; the clarified
+  layout is strictly additive) — recorded in Clarifications so the plan builds against the answer, not the
+  preview.
+- **`fixpp::service` was pulled into scope on new evidence** gathered after the direction was chosen. Ready for
+  `/speckit-plan`, then `/gate-a` before `/speckit-tasks`.

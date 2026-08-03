@@ -30,8 +30,9 @@ service-mode boundary. The installed package does not deliver it. Measured in th
 > `<prefix>/include/fix/fix/c_api.h` and **breaks every C-ABI consumer**. The clause is self-inconsistent with
 > the project's own include convention and cannot be satisfied literally.
 >
-> **This feature delivers the isolation by a second installed include root instead** (user decision,
-> 2026-08-03), which preserves `<fix/c_api.h>` verbatim for every consumer while making the restriction real.
+> **This feature delivers the isolation by *additional* installed include roots instead** (user decisions,
+> 2026-08-03 — see Clarifications), which preserves every existing include spelling and every existing
+> installed path verbatim while making the restriction real for the targets consumers are told to link.
 
 ### What was measured before writing this spec (2026-08-03, `main` @ `24595e11`)
 
@@ -40,9 +41,42 @@ service-mode boundary. The installed package does not deliver it. Measured in th
 | The C-ABI headers are **self-contained** | `include/fix/**` includes only `<fix/c_api/...>` and C stdlib headers (`stdint.h`, `stddef.h`, `stdbool.h`). **Zero** `<fixpp/...>` includes | Isolation is achievable — no header has to be rewritten to make the boundary hold |
 | **In-tree blast radius is zero** | `CMakeLists.txt:234` — `include_directories("${CMAKE_SOURCE_DIR}/include")`, directory-scoped over the whole build. The 6 of 28 `tests/capi/*.cpp` that use `<fixpp/...>` receive it from there, **not** through the `fixpp_capi` target | The gap is installed-package-only, exactly as #218 states. Narrowing the target's interface cannot break an in-tree build |
 | `fixpp_capi_objects` is **load-bearing in the export closure** | `contracts/package-layout.md` §2a — it is an export member *because* `fixpp_capi` is source-less and links it `PUBLIC` (`src/capi/CMakeLists.txt:46`); the shipped `lib/objects-<CONFIG>/` files are checked by `_cmake_import_check_files_for_fixpp::capi_objects` and removing them makes `find_package(fixpp)` **`FATAL_ERROR`** for every consumer | Any change to that link keyword is a **measured** obligation, not a read-off-the-source one. Export-set membership and the shipped object files must be re-verified on a real configure + install |
-| `fixpp_service` leaks the same claim **independently** | `src/service/CMakeLists.txt:10-13` declares its own `$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>` — the whole tree — and is an export member. It does not inherit from `fixpp_capi` | §8's boundary claim is unenforced there too. Routed to clarification (FR-011) — see the note below |
+| `fixpp_service` leaks the same claim **independently** | `src/service/CMakeLists.txt:10-13` declares its own `$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>` — the whole tree — and is an export member. It does not inherit from `fixpp_capi` | §8's boundary claim is unenforced there too. **In scope** (clarified 2026-08-03) — US6 / FR-011 |
+| The service public surface is **one self-contained header** | `include/fixpp/service/control_plane_factory.hpp` — a pure abstract base, **zero** `#include` directives. `include/fixpp/service/` holds nothing else but a `.gitkeep`. No `fixppd` target exists in any `CMakeLists.txt` yet (Phase-3 stub) | Isolating it is cheap, but the header must **also** stay reachable from the C++ umbrella: `EngineConfig` holds a `unique_ptr<ControlPlaneFactory>`, so the value type needs the base complete |
 | The package-contents witness has **no** C-ABI header assertion | `tests/packaging/run_package_contents_witness.cmake` asserts `include/fixpp/wire/parser.hpp` (:371) and `include/fixpp/v44/Messages.hpp` (:374); nothing asserts any `include/fix/**` path | Relocating the C-ABI headers would today be invisible to the packaging gate — the headers could vanish entirely and it would stay green |
 | `fixpp_capi_shared` is a **second** propagation path | `src/capi/CMakeLists.txt:50` links the same OBJECT library `PUBLIC` | Test-only (`FIXPP_BUILD_TESTS`), but not zero — it must be considered when the link keyword changes |
+
+---
+
+## Clarifications
+
+### Session 2026-08-03
+
+- Q: Non-CMake consumers — relocating the C-ABI headers breaks a bare `-I<prefix>/include` +
+  `#include <fix/c_api.h>`. How should the installed layout handle it? → A: **Install at BOTH roots.**
+  `include/fix/` stays exactly where it is *and* a copy is installed under `include/capi/fix/`. The change is
+  purely additive: no existing consumer breaks, and the umbrella's install rule needs no exclusion. Isolation is
+  a **target-interface** property, so what lives at another root does not weaken it — `fixpp::capi` sees only
+  the isolated root. Both copies come from one source directory, so they cannot drift.
+- Q: `fixpp::service` leaks the same §8 boundary claim independently — in scope for 086? → A: **In scope.**
+  A third installed root, `include/service-iface/`, carries the service plugin interface; the one header
+  involved ships at two paths for the same reason the C-ABI headers do (the C++ umbrella must keep reaching it,
+  because `EngineConfig` holds a `unique_ptr<ControlPlaneFactory>`). §8's boundary claim is delivered whole
+  rather than leaving a second known hole open.
+- Q: How strict is the isolation boundary the witness must hold? → A: **By-name targets only.** Isolation is
+  asserted for the targets a consumer is *instructed* to link (`fixpp::capi`, `fixpp::service`).
+  `fixpp::capi_objects` keeps its whole-tree interface: it is a **closure-only** export member by the project's
+  own existing taxonomy (`CMakeLists.txt:575-584` — no public header names it and nothing instructs anyone to
+  link it), the same class as `fixpp::log_otlp`. Narrowing it would cascade into the in-tree graph and into the
+  export-closure coupling that makes `find_package` `FATAL_ERROR`.
+
+**Resulting installed layout** (three roots, additive — nothing moves):
+
+| Root | Contents | Reached by |
+|---|---|---|
+| `<prefix>/include` | `fix/` + `fixpp/` — unchanged, the whole tree | `fixpp::fixpp` (C++ umbrella) |
+| `<prefix>/include/capi` | `fix/` only | `fixpp::capi` (C-ABI consumer target) |
+| `<prefix>/include/service-iface` | `fixpp/service/` only | `fixpp::service` (+ the C-ABI root) |
 
 ---
 
@@ -168,12 +202,45 @@ checks out. No clause prescribes an include path that would break `<fix/c_api.h>
 
 ---
 
+---
+
+### User Story 6 - The service plugin boundary holds too (Priority: P2)
+
+`architecture.md` §8 says the service reaches the engine **exclusively** through `extern "C"` symbols, and
+§7.4:504 names the service target's interface as the public plugin surface. Today that target declares the
+whole `include/` tree as its own installed interface, independently of the C-ABI target — so the same claim is
+false in a second place, and would stay false even after US1 is delivered. A plugin author linking the service
+target should reach the plugin interface and the C ABI, and nothing else.
+
+**Why this priority**: Same claim, same document, same failure mode — but its only intended consumer
+(`fixppd`) does not exist in any `CMakeLists.txt` yet, so no integrator is affected today. It is delivered here
+because leaving a known second hole open is how §7.4:503 became false in the first place.
+
+**Independent Test**: A standalone consumer links only the service target from a staged install. The plugin
+interface header and the C-ABI headers compile; a C++ engine header does not.
+
+**Acceptance Scenarios**:
+
+1. **Given** a staged install, **When** a consumer links only the service target and includes
+   `<fixpp/service/control_plane_factory.hpp>`, **Then** it compiles.
+2. **Given** the same consumer, **When** it includes `<fix/c_api.h>`, **Then** it compiles — the service reaches
+   the engine through the C ABI, so that surface is deliberately available.
+3. **Given** the same consumer, **When** it includes `<fixpp/wire/parser.hpp>`, **Then** compilation **fails**.
+4. **Given** a C++ consumer of the umbrella, **When** it includes `<fixpp/service/control_plane_factory.hpp>`,
+   **Then** it still compiles — the isolation adds a root, it does not remove the header from the C++ surface.
+
+---
+
 ### Edge Cases
 
 - **A consumer that never uses CMake.** A C program on a Debian/RPM install that compiles with a bare
-  `-I/usr/include` and `#include <fix/c_api.h>` resolves today. If the C-ABI headers move, that spelling stops
-  resolving unless the consumer adds the new root. This is a **delivered-content change for non-CMake
-  consumers** and must be dispositioned deliberately, not discovered. → **FR-012**.
+  `-I/usr/include` and `#include <fix/c_api.h>` resolves today, and **must keep resolving** — the layout change
+  is additive, so nothing moves out from under it (FR-005a). This is what makes the isolation safe to ship
+  without a migration note.
+- **The same header at two installed paths.** The C-ABI headers and the service plugin header each ship at two
+  locations. They are installed from **one** source directory, so the copies cannot drift — but a content
+  assertion that counts headers, or asserts an exact set of installed paths, will see both and must be written
+  knowing that. A consumer never sees both: the include spelling is identical, so exactly one root resolves it.
 - **Both roots reachable at once.** A consumer that links *both* the umbrella and the C-ABI target is the
   combination Article IV §2 / `architecture.md`:509 rejects and `tools/check_layers.py` enforces in-tree; the
   installed package has no such lint. What the package does in that case must be stated, not left implicit.
@@ -207,10 +274,21 @@ checks out. No clause prescribes an include path that would break `<fix/c_api.h>
   neither directly nor transitively through any target it links. *(Stated as reachability, not as a property of
   one target's `INTERFACE_INCLUDE_DIRECTORIES`, because the defect in #218 is precisely that the direct property
   was empty while the transitive one was wide open.)*
+- **FR-003a**: The isolation obligation in FR-003 applies to **by-name** export members — the targets a consumer
+  is instructed to link (`fixpp::capi`, `fixpp::service`). It does **not** apply to **closure-only** members,
+  which keep their present interfaces. `fixpp::capi_objects` is closure-only by the project's existing taxonomy
+  (`CMakeLists.txt:575-584`): no public header names it and nothing instructs anyone to link it — the same class
+  as `fixpp::log_otlp`. *(Clarified 2026-08-03. This bounds the witness: it asserts what the documented
+  consumption path does, not what an undocumented one could reach.)*
 - **FR-004**: The installed C++ umbrella target MUST continue to resolve both the full `<fixpp/...>` surface and
   the C-ABI entry header, with no new consumer-side hints.
 - **FR-005**: The in-tree build MUST be unaffected: every existing target configures, builds and tests as before,
   with no source edited to satisfy the new include layout.
+- **FR-005a**: The installed layout change MUST be **purely additive**. No header may be removed from, or moved
+  within, the location it occupies in the package today; the existing install rule for the public header tree
+  MUST NOT acquire an exclusion for the isolated subtrees. A consumer compiling today against
+  `<prefix>/include` with a bare include-path flag MUST continue to resolve every header it resolves now,
+  `<fix/c_api.h>` included. *(Clarified 2026-08-03.)*
 
 **The witnesses**
 
@@ -223,34 +301,38 @@ checks out. No clause prescribes an include path that would break `<fix/c_api.h>
   build-failure check is not sufficient.
 - **FR-009**: The existing positive C-ABI consumer witness (links the C-ABI target by its exported name,
   includes the entry header, resolves a real symbol) MUST continue to pass unchanged in intent.
-- **FR-010**: The package-contents witness MUST assert the C-ABI headers are present at their delivered path,
-  prefix-normalised so it holds on every generator, and MUST fail if they are absent.
+- **FR-010**: The package-contents witness MUST assert the C-ABI headers are present at **both** their existing
+  and their isolated path, and the service plugin header likewise, prefix-normalised so the assertions hold on
+  every generator, and MUST fail if any is absent.
 
-**Scope questions routed to `/speckit-clarify`**
+**The service plugin boundary** *(in scope per clarification, 2026-08-03)*
 
-- **FR-011**: [NEEDS CLARIFICATION: `fixpp::service` leaks the same §8 boundary claim independently
-  (`src/service/CMakeLists.txt:10-13` — its own whole-tree install interface). Evidence gathered after the
-  direction was chosen: its entire public surface is **one** self-contained header
-  (`include/fixpp/service/control_plane_factory.hpp`, zero includes), but that header must **also** stay
-  reachable from the C++ umbrella because `EngineConfig` holds a `unique_ptr<ControlPlaneFactory>` — so
-  isolating it needs a third include root **with that header present in two roots**, i.e. duplication, for a
-  target whose only intended consumer (`fixppd`) does not exist yet (service is a Phase-3 stub, no target in
-  any `CMakeLists.txt`). Is `fixpp::service` in scope for 086, deferred to its own issue, or explicitly
-  documented as non-isolated?]
-- **FR-012**: [NEEDS CLARIFICATION: non-CMake consumers. On a system install, `#include <fix/c_api.h>` with a
-  bare `-I/usr/include` resolves today. Relocating the C-ABI headers breaks that spelling unless the header
-  tree is also left at its current location. Options: (a) relocate only — non-CMake consumers must add the new
-  root, documented as a delivered-content change; (b) install at both locations — the old path keeps working
-  but the whole tree stays adjacent to it, which weakens nothing about the target-level isolation but does mean
-  the C++ headers remain reachable to anyone who points at the old root; (c) declare non-CMake consumption
-  unsupported. Which?]
+- **FR-011**: The installed package MUST provide an include root from which the service plugin interface is
+  reachable and from which no `<fixpp/...>` header **other than the service plugin interface itself** is
+  reachable.
+- **FR-011a**: The service consumer target's installed interface MUST resolve both the service plugin interface
+  header at its existing spelling (`<fixpp/service/control_plane_factory.hpp>`) and the C-ABI headers at theirs
+  — the service reaches the engine through the C ABI, so it needs that surface and only that surface.
+- **FR-011b**: The service consumer target's installed interface MUST NOT make the C++ engine headers
+  (`<fixpp/wire/...>`, `<fixpp/session/...>`, `<fixpp/dict/...>`, …) reachable, directly or transitively.
+- **FR-011c**: The service plugin interface header MUST remain reachable from the C++ umbrella at its existing
+  spelling — `EngineConfig` holds a `unique_ptr<ControlPlaneFactory>` and needs the base type complete, so
+  isolating the service surface must not remove it from the C++ surface.
+- **FR-012**: The compile-must-fail witness obligations (FR-006 … FR-008) apply to the service consumer target
+  as well as the C-ABI one: a witness MUST assert that a C++ engine header fails to compile when only the
+  service target is linked, and that assertion MUST likewise be demonstrated red.
 
 **The record**
 
 - **FR-013**: `architecture.md` §7.4:503 MUST be rewritten to describe the delivered mechanism. The literal
   `INTERFACE_INCLUDE_DIRECTORIES = include/fix/` prescription MUST NOT survive in any form, since it cannot be
   satisfied without breaking `<fix/c_api.h>`.
-- **FR-014**: `architecture.md` §8 MUST attribute each enforcement it claims to the mechanism that performs it.
+- **FR-013a**: `architecture.md` §7.4:504 MUST be updated to state the service target's delivered include
+  interface. Its current reconciliation row dispositions only the target's *kind* and *name* and says nothing
+  about its include path — which is how the second instance of the same gap went unrecorded while §7.4:503's
+  was being reconciled.
+- **FR-014**: `architecture.md` §8 MUST attribute each enforcement it claims to the mechanism that performs it,
+  for **both** boundaries it asserts — the C-ABI consumer boundary and the service boundary.
 - **FR-015**: `contracts/package-layout.md` §2a MUST be reconciled wherever it reasons about the C-ABI target's
   include path or the export-closure consequences of D1 Option A. *(Note: §2a cites `src/capi/CMakeLists.txt:45`
   for the `PUBLIC` link; the file has it at `:46`. Correct the citation while there.)*
@@ -269,7 +351,12 @@ checks out. No clause prescribes an include path that would break `<fix/c_api.h>
   everything through the OBJECT library. Its *reachable include set* is the subject of this feature.
 - **C-ABI object library** (`fixpp::capi_objects`): supplies the objects and, today, the whole-tree include
   path. A forced export-set member whose shipped object files are checked at `find_package` time.
-- **C++ umbrella target** (`fixpp::fixpp`): the primary public surface. Must reach both header sets.
+- **Service plugin interface** (`include/fixpp/service/`): one self-contained abstract base header. Public
+  plugin surface per §7.4:504, *and* a type the C++ engine's `EngineConfig` holds by pointer — so it belongs to
+  two surfaces at once, which is why isolating it means adding a root rather than moving the header.
+- **Service consumer target** (`fixpp::service`): what a control-plane plugin author links. Reaches the engine
+  through the C ABI only (§8). Its reachable include set is the subject of US6.
+- **C++ umbrella target** (`fixpp::fixpp`): the primary public surface. Must reach every header set.
 - **Consumer witness project**: a standalone CMake project configured against a staged install, deliberately
   not inheriting the main build's directory-scoped include path — which is what makes it able to observe the
   installed include interface at all.
@@ -280,10 +367,16 @@ checks out. No clause prescribes an include path that would break `<fix/c_api.h>
 
 - **SC-001**: With only the C-ABI consumer target linked from an installed package, **0** of the C++ engine
   headers are reachable, and **13 of 13** C-ABI headers are.
-- **SC-002**: The compile-must-fail assertion is observed **failing** at least once with the isolation removed
-  and **passing** with it present; both observations are recorded with the commands that produced them.
+- **SC-001a**: With only the service consumer target linked, **0** C++ engine headers are reachable, while the
+  service plugin interface header **and** the 13 C-ABI headers are.
+- **SC-002**: **Each** compile-must-fail assertion (C-ABI target, service target) is observed **failing** at
+  least once with its isolation removed and **passing** with it present; both observations are recorded with
+  the commands that produced them.
 - **SC-003**: The umbrella consumer witness passes with **zero** edits to its include paths, library paths, or
   `find_package` invocation.
+- **SC-003a**: Every header path present in a package built before this change is still present after it —
+  the installed layout is a strict superset. Verified by comparing produced package manifests, not by reading
+  the install rules.
 - **SC-004**: Every clause of `architecture.md` §7.4:503 is checkable against the shipped targets file, and
   **all** of them check out. No clause remains that would break `<fix/c_api.h>` if implemented literally.
 - **SC-005**: The package-contents witness asserts the C-ABI headers positively, and that assertion is observed
@@ -297,9 +390,16 @@ checks out. No clause prescribes an include path that would break `<fix/c_api.h>
 
 ## Assumptions
 
-- **The direction is settled.** Isolation is delivered by giving the C-ABI headers their own installed include
-  root, not by narrowing the existing root (user decision, 2026-08-03). The literal §7.4:503 prescription is
-  rejected as unimplementable, with the evidence recorded above.
+- **The direction is settled.** Isolation is delivered by giving the isolated surfaces their own installed
+  include roots, **in addition to** the existing root, which is left untouched (user decisions, 2026-08-03 —
+  see Clarifications). The literal §7.4:503 prescription is rejected as unimplementable, with the evidence
+  recorded above.
+- **Additive, therefore no migration.** Because nothing moves, this feature ships no consumer migration note
+  and no deprecation. If the plan finds a reason the change cannot stay additive, that invalidates FR-005a and
+  must be raised, not absorbed.
+- **`fixpp::service` is delivered without a consumer.** No `fixppd` target exists yet, so US6 cannot be
+  exercised by a real service build. Its witness is a standalone consumer project, the same shape as the C-ABI
+  one — which is the only way to observe an installed include interface at all.
 - **`<fix/c_api.h>` is frozen.** No consumer-visible include spelling changes. The C ABI's include convention
   is treated as part of the frozen surface even though the freeze (`REMAINING-WORK.md:7`) formally governs
   symbols.
