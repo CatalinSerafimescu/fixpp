@@ -233,6 +233,23 @@ endif()
 # This is live, not theoretical: the artifact directory deliberately outlives the
 # build-tree deletion cycle (FR-021), so packages from earlier configurations and
 # earlier source states accumulate alongside current ones.
+#
+# ⚠️ GATE B ROUND 2 (R2-F1): the stamp MUST be sampled at INSTALL TIME, not
+# configure time. `configure_file()` freezes its output once, at configure --
+# nothing re-triggers configuration when a `.cpp` is edited afterwards, so a
+# configure-then-edit-then-package cycle used to ship an artifact stamped
+# `source-worktree: clean` for a build that was, at pack time, actually dirty.
+# That is a FALSE AFFIRMATIVE -- worse than a missing stamp -- and it is the
+# THIRD fail-open found on this exact field (the first two are the
+# 2026-08-02 history below, still relevant because cmake/FixppStampProvenance.cmake
+# reproduces the same RESULT_VARIABLE guards at install time). Fixed by moving
+# the git measurement into an install(CODE) block below, so EVERY `cpack` /
+# `cmake --install` invocation recomputes it fresh against the tree being
+# staged right now -- including the other witnesses that call
+# `cmake --install` directly (run_version_mismatch_witness.cmake,
+# run_real_client_witness.cmake, run_clean_env_witness.cmake,
+# tests/consumer/run_consumer_witness.cmake).
+#
 # ⚠️ TWO FAIL-OPEN BUGS FIXED HERE 2026-08-02 — found while preparing the MSVC
 # sandbox, which has no `.git` (the rsync procedure excludes it). This is NOT a
 # sandbox-only path: a build from a released SOURCE TARBALL hits it identically.
@@ -249,62 +266,44 @@ endif()
 #      exact field FR-021a added to catch staleness.
 #
 # Both are fixed by trusting output only when RESULT_VARIABLE says the command
-# succeeded, and by never inferring "clean" from a command that did not run.
-find_package(Git QUIET)
+# succeeded, and by never inferring "clean" from a command that did not run --
+# now inside cmake/FixppStampProvenance.cmake, since that is where the git
+# commands run.
 
 # Explicit override, for building from a source tree that is legitimately not a
 # git repository (source tarball; the rsync-populated MSVC sandbox). Providing a
 # revision that CAN be traced is strictly better than stamping "unknown"; leaving
-# it unset is still honest, because "unknown" fails T060 by design.
+# it unset is still honest, because "unknown" fails T060 by design. Read fresh
+# inside cmake/FixppStampProvenance.cmake at install time (baked into the
+# install(CODE) block below), so this escape hatch keeps working under the
+# install-time stamp exactly as it did under the configure-time one.
 set(FIXPP_PACKAGE_REVISION "" CACHE STRING
     "Override the stamped source revision when the source tree is not a git repo")
 set(FIXPP_PACKAGE_WORKTREE "" CACHE STRING
     "Override the stamped worktree state (clean|dirty) alongside FIXPP_PACKAGE_REVISION")
 
-if(FIXPP_PACKAGE_REVISION STREQUAL "")
-  set(FIXPP_PACKAGE_REVISION "unknown")
-  if(GIT_FOUND)
-    execute_process(
-      COMMAND "${GIT_EXECUTABLE}" rev-parse HEAD
-      WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-      RESULT_VARIABLE _fixpp_git_rev_rc
-      OUTPUT_VARIABLE _fixpp_git_rev
-      OUTPUT_STRIP_TRAILING_WHITESPACE
-      ERROR_QUIET)
-    if(_fixpp_git_rev_rc EQUAL 0 AND NOT _fixpp_git_rev STREQUAL "")
-      set(FIXPP_PACKAGE_REVISION "${_fixpp_git_rev}")
-    endif()
-  endif()
-endif()
-
-if(FIXPP_PACKAGE_WORKTREE STREQUAL "")
-  set(FIXPP_PACKAGE_WORKTREE "unknown")
-  if(GIT_FOUND)
-    execute_process(
-      COMMAND "${GIT_EXECUTABLE}" status --porcelain
-      WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-      RESULT_VARIABLE _fixpp_git_status_rc
-      OUTPUT_VARIABLE _fixpp_git_porcelain
-      OUTPUT_STRIP_TRAILING_WHITESPACE
-      ERROR_QUIET)
-    # "clean" is asserted ONLY when the command actually RAN and reported nothing.
-    if(_fixpp_git_status_rc EQUAL 0)
-      if(_fixpp_git_porcelain STREQUAL "")
-        set(FIXPP_PACKAGE_WORKTREE "clean")
-      else()
-        set(FIXPP_PACKAGE_WORKTREE "dirty")
-      endif()
-    endif()
-  endif()
-endif()
-
-configure_file(
-  "${CMAKE_SOURCE_DIR}/cmake/fixpp-package-provenance.txt.in"
-  "${CMAKE_BINARY_DIR}/fixpp-package-provenance.txt"
-  @ONLY)
-install(
-  FILES "${CMAKE_BINARY_DIR}/fixpp-package-provenance.txt"
-  DESTINATION "${CMAKE_INSTALL_DOCDIR}")
+# Everything baked into this install(CODE) string below is a stable
+# per-configuration constant (source dir, version, platform, toolchain,
+# build type, telemetry flag, docdir, and the two overrides above) -- safe to
+# freeze at configure time. The `[==[ ... ]==]` bracket-quoting defers
+# interpretation of the VALUE to when cmake_install.cmake actually executes
+# this line (install time), so an empty override or one containing unusual
+# characters round-trips exactly. Only cmake/FixppStampProvenance.cmake's own
+# `execute_process(git ...)` calls, plus CMAKE_INSTALL_PREFIX / $ENV{DESTDIR},
+# are read live at install time.
+install(CODE "
+  set(_fixpp_stamp_override_revision [==[${FIXPP_PACKAGE_REVISION}]==])
+  set(_fixpp_stamp_override_worktree [==[${FIXPP_PACKAGE_WORKTREE}]==])
+  set(_fixpp_stamp_source_dir [==[${CMAKE_SOURCE_DIR}]==])
+  set(_fixpp_stamp_project_version [==[${PROJECT_VERSION}]==])
+  set(_fixpp_stamp_platform [==[${CMAKE_SYSTEM_NAME}]==])
+  set(_fixpp_stamp_compiler_id [==[${CMAKE_CXX_COMPILER_ID}]==])
+  set(_fixpp_stamp_compiler_version [==[${CMAKE_CXX_COMPILER_VERSION}]==])
+  set(_fixpp_stamp_build_type [==[${CMAKE_BUILD_TYPE}]==])
+  set(_fixpp_stamp_telemetry [==[${FIXPP_PACKAGE_TELEMETRY}]==])
+  set(_fixpp_stamp_docdir [==[${CMAKE_INSTALL_DOCDIR}]==])
+  include(\"${CMAKE_SOURCE_DIR}/cmake/FixppStampProvenance.cmake\")
+")
 
 # ── T055 (FR-019): Windows debug symbol files ────────────────────────────────
 # The Microsoft toolchain emits debug information to SEPARATE symbol files

@@ -7,10 +7,10 @@ deletion cycle, so packages from different configurations and different source
 states accumulate side by side (084 FR-021/FR-021a).
 
 product              : fixpp
-version              : @PROJECT_VERSION@
-platform             : @CMAKE_SYSTEM_NAME@
-toolchain            : @CMAKE_CXX_COMPILER_ID@ @CMAKE_CXX_COMPILER_VERSION@
-configuration        : @CMAKE_BUILD_TYPE@
+version              : @FIXPP_STAMP_VERSION@
+platform             : @FIXPP_STAMP_PLATFORM@
+toolchain            : @FIXPP_STAMP_COMPILER_ID@ @FIXPP_STAMP_COMPILER_VERSION@
+configuration        : @FIXPP_STAMP_CONFIG@
 telemetry            : @FIXPP_PACKAGE_TELEMETRY@
 source-revision      : @FIXPP_PACKAGE_REVISION@
 source-worktree      : @FIXPP_PACKAGE_WORKTREE@
