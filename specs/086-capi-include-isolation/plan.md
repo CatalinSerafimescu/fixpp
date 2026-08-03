@@ -63,7 +63,7 @@ export-set membership must not move (18 members); `fixpp_capi_objects`' shipped 
 |---|---|---|
 | **IV §2** — the C ABI is the legal isolation boundary for AGPL/commercial dual licensing | This feature *delivers* the boundary the article assumes. Directly aligned. | ✅ |
 | **X §1** — every change to the C ABI is reviewed against the contract; Gate A mandatory | Gate A is scheduled (pipeline step 4) and blocks `/speckit-tasks`. | ✅ planned |
-| **X §6** — ABI-affecting features trigger **all four** mandatory controls | `/clarify` ✅ done · `/analyze` ⏳ step 6 · Gate A ⏳ step 4 · **user `/plan` sign-off ⏳ REQUIRED — see below** | ⚠️ **one outstanding** |
+| **X §6** — ABI-affecting features trigger **all four** mandatory controls | `/clarify` ✅ done · `/analyze` ⏳ step 6 · Gate A ⏳ step 4 · **user `/plan` sign-off ✅ GIVEN 2026-08-03** | ✅ |
 | **X §2** — no C++ symbol leakage through the C ABI | Unaffected: no symbol, header content or version script changes. The existing `nm`/`dumpbin` gate keeps applying. | ✅ |
 | **VII §3** — TDD mandatory, failing test first | **Binds task ordering.** Each isolation witness is written and observed **red** before the CMake change that makes it green. This is also FR-007's demonstrated-red obligation, so the two coincide. | ✅ ordering fixed |
 | **VII §4** — no code without a test | Every requirement maps to an assertion in `contracts/include-interface.md` §4. | ✅ |
@@ -84,6 +84,10 @@ export-set membership must not move (18 members); `fixpp_capi_objects`' shipped 
 > the *consumption* interface does. It is treated as in-scope deliberately, because the article exists to stop
 > exactly this class of change from reaching consumers unreviewed, and because the surface being changed is the
 > one Article IV §2 designates the legal boundary.
+>
+> **✅ SIGNED OFF — user, 2026-08-03**, on this plan as written: three additive installed include roots, the
+> `PRIVATE`/`$<LINK_ONLY:>` mechanism measured in `research.md` R1–R3, `fixpp::service` in scope, isolation
+> bound to by-name targets only. The remaining three §6 controls run as pipeline steps.
 
 ### Post-Phase-1 re-check
 
