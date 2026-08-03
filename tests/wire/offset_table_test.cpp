@@ -272,6 +272,21 @@ TEST(WireOffsetTable, DoSCapPerInstanceRejectsOversizedSingleInstance) {
 // The RED evidence for the companion mutation-transcript task (T015) lives in
 // .specify/decisions/085-fold-flat-cap-loop-verify.md.
 //
+// ⚠ THESE TWO TESTS ENCODE A KNOWN, FILED DEFECT — read the numbers with that
+// in mind. The 5-entry instance above is 448/447/452/802 **plus the trailing
+// checksum field 10=000**: on the dict-free path `group_end` is
+// rest-of-message, so top-level fields after the group count toward the last
+// instance. That is limitation **L-085-1 / fixpp#220**, preserved (not
+// repaired) by this feature because 085 is a semantics-preserving relocation.
+// Contrast `GroupExtentExcludesTrailingTopLevelFields` in this same file: on
+// the DICTIONARY path the trailing top-level field is correctly excluded.
+// When #220 is fixed, the real instance here becomes 4 entries, so
+// `AllowsWhenCapRaised`'s `entry_count()` expectation below changes 5 -> 4.
+// The rejecting pin is unaffected either way (4 still breaches a cap of 3);
+// only the entry_count assertion pins the buggy value.
+// Stated explicitly so these tests cannot be read as blessing the trailer
+// inclusion as intended behaviour.
+//
 // The two tests below MUST drive the identical frame — that is what makes them
 // a bracket around the cap threshold rather than two unrelated observations.
 // The bytes therefore live in this one helper instead of being duplicated in
@@ -322,7 +337,13 @@ TEST(WireOffsetTable, DictFreeDoSCapPerInstanceAllowsWhenCapRaised) {
     auto g = t.group(453);
     ASSERT_TRUE(g.has_value());
     EXPECT_EQ(g->no_tag(), 453U);
-    EXPECT_EQ(g->entry_count(), 5U);
+    // 5 = the four real members (448/447/452/802) + the trailing checksum
+    // 10=000, which the dict-free rest-of-message extent wrongly absorbs.
+    // This value pins L-085-1 / fixpp#220, NOT intended behaviour — it becomes
+    // 4 when that limitation is repaired.
+    EXPECT_EQ(g->entry_count(), 5U)
+        << "expected 5 only because L-085-1/#220 counts the trailing checksum "
+           "into the last dict-free instance; becomes 4 when #220 is fixed";
 }
 
 // RC#2: group slice must begin at the delimiter field's "tag=" prefix, NOT
