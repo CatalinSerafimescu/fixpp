@@ -392,23 +392,52 @@ That is a ~9-point spread on `Flat2` against a ±5% budget, on code **identical*
 Compare the two runs by name:
 
 ```bash
-for n in BM_TypedReadGroup_Flat2 BM_TypedReadGroup_ModeC2 BM_TypedReadGroup_ModeC8; do
-  python3 - /tmp/085-bench-main.json /tmp/085-bench-branch.json "$n" <<'PY'
+(
+  set -u
+  for f in /tmp/085-bench-main.json /tmp/085-bench-branch.json; do
+    [ -s "$f" ] || { echo "A/B FAIL: $f missing or empty"; exit 1; }
+  done
+  python3 - /tmp/085-bench-main.json /tmp/085-bench-branch.json <<'PY' || exit 1
 import json, sys
-def med(p, n):
-    for b in json.load(open(p))["benchmarks"]:
-        if b.get("aggregate_name") == "median" and b["name"].removesuffix("_median") == n:
-            return b["cpu_time"]
-    raise SystemExit(f"A/B FAIL: {n} absent from {p}")
-a, b, n = med(sys.argv[1], sys.argv[3]), med(sys.argv[2], sys.argv[3]), sys.argv[3]
-d = (b - a) / a * 100.0
-print(f"{n:<28} main {a:>8.1f} ns   branch {b:>8.1f} ns   {d:+6.1f}%"
-      f"   {'BLOCKS (>+/-5% A/B)' if abs(d) > 5.0 else 'within +/-5%'}")
+
+NAMES = ("BM_TypedReadGroup_Flat2", "BM_TypedReadGroup_ModeC2", "BM_TypedReadGroup_ModeC8")
+
+def medians(p):
+    return {b["name"].removesuffix("_median"): b["cpu_time"]
+            for b in json.load(open(p))["benchmarks"]
+            if b.get("aggregate_name") == "median"}
+
+a_all, b_all = medians(sys.argv[1]), medians(sys.argv[2])
+
+# Decide ONCE, over all three, before printing anything. A per-name loop in the
+# SHELL cannot do this: each python process's exit status is overwritten by the
+# next iteration, so a missing FIRST case prints its error and still ends at
+# status 0 (order-dependent — a missing LAST case would happen to fail).
+missing = [f"{n} absent from {p}"
+           for n in NAMES
+           for p, d in ((sys.argv[1], a_all), (sys.argv[2], b_all)) if n not in d]
+if missing:
+    sys.exit("A/B FAIL:\n  " + "\n  ".join(missing))
+
+rows, blocked = [], False
+for n in NAMES:
+    a, b = a_all[n], b_all[n]
+    d = (b - a) / a * 100.0
+    over = abs(d) > 5.0
+    blocked |= over
+    rows.append(f"{n:<28} main {a:>8.1f} ns   branch {b:>8.1f} ns   {d:+6.1f}%"
+                f"   {'BLOCKS (>+/-5% A/B)' if over else 'within +/-5%'}")
+print("\n".join(rows))
+if blocked:
+    sys.exit("A/B BLOCKS: at least one case outside +/-5%")
 PY
-done
+)
+echo "ab_status=$?"
 ```
 
-**Expected**: three rows, all `within +/-5%`. `med()` raises rather than returning a default if a case is missing from either file, so a truncated run cannot read as a 0% delta.
+**Expected**: three rows, all `within +/-5%`, and `ab_status=0`.
+
+> ⚠️ **Why this is one invocation and not a `for` loop.** The first version of this comparator ran one `python3` per name inside a three-iteration shell loop. `med()` raised correctly on a missing case — and the loop then **overwrote its status with the next iteration's**, printing the remaining rows and exiting 0. Worse, it was order-dependent: a missing *last* case would have failed, a missing *first* case would not. Deciding all three inside a single process, before any row is printed, is what makes a truncated run unable to read as a pass. *(Reproduced under both bash and zsh in the fresh Gate A round — the fix for the round-3 finding had itself reintroduced the same false-green class it was written to close. Fourth occurrence in this section; see `plan.md` `## Gate A`.)*
 
 ### 3b. Sanitizers and static analysis (SC-008) — **not runnable from here; handed off**
 
