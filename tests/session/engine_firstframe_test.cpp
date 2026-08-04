@@ -109,16 +109,26 @@ static asio::awaitable<void> probe_closed_within_window(asio::io_context& ioc, u
                                                         std::string payload,
                                                         std::atomic<bool>& closed,
                                                         std::atomic<bool>& done) {
-    asio::ip::tcp::socket s(ioc);
+    // [gate-b/r1 FQ-1] s and timed_out are shared-owned and captured BY VALUE
+    // in the timer handler below (not by reference to a frame local). Once
+    // self_deadline.async_wait() has queued a handler for the io_context's
+    // ready queue, cancel() cannot un-queue it — if the read completion is
+    // dequeued first, this coroutine resumes and returns, and the still-queued
+    // timer handler would then write through references into a destroyed
+    // frame. Shared ownership means the handler always has a live target;
+    // asio_tls_transport::cancel()-equivalent close() on an already-closed
+    // socket is a documented no-op, so a late-firing handler is harmless.
+    auto s = std::make_shared<asio::ip::tcp::socket>(ioc);
     asio::steady_timer self_deadline(ioc);
     bool connected = false;
-    bool timed_out = false;
+    auto timed_out = std::make_shared<bool>(false);
     try {
-        co_await s.async_connect(asio::ip::tcp::endpoint{asio::ip::make_address("127.0.0.1"), port},
-                                 asio::use_awaitable);
+        co_await s->async_connect(
+            asio::ip::tcp::endpoint{asio::ip::make_address("127.0.0.1"), port},
+            asio::use_awaitable);
         connected = true;
         if (!payload.empty())
-            co_await asio::async_write(s, asio::buffer(payload), asio::use_awaitable);
+            co_await asio::async_write(*s, asio::buffer(payload), asio::use_awaitable);
 
         // Probe-owned bound (< the test's run_for): on the stub the read pends
         // forever, so WE must terminate it — otherwise the final ioc.run() in
@@ -126,22 +136,22 @@ static asio::awaitable<void> probe_closed_within_window(asio::io_context& ioc, u
         // socket and mark timed_out so the resulting abort is NOT miscounted as
         // a server-side close.
         self_deadline.expires_after(2s);
-        self_deadline.async_wait([&](const std::error_code& ec) {
+        self_deadline.async_wait([s, timed_out](const std::error_code& ec) {
             if (!ec) {
-                timed_out = true;
-                s.close();
+                *timed_out = true;
+                s->close();
             }
         });
 
         std::array<char, 64> buf{};
-        co_await s.async_read_some(asio::buffer(buf), asio::use_awaitable);
+        co_await s->async_read_some(asio::buffer(buf), asio::use_awaitable);
         // Reaching here means the server SENT data — not a pre-session close.
         self_deadline.cancel();
     } catch (const std::system_error&) {
         self_deadline.cancel();
         // eof / connection_reset AFTER connect, and NOT our own deadline-close,
         // == the acceptor closed the pre-session connection (the window fired).
-        if (connected && !timed_out) closed.store(true, std::memory_order_release);
+        if (connected && !*timed_out) closed.store(true, std::memory_order_release);
     } catch (...) {
         self_deadline.cancel();
     }
@@ -174,7 +184,12 @@ static asio::awaitable<void> probe_post_handshake(
     // here so a detached coroutine cannot terminate the process, and still
     // release `done` so the test reports a clean RED instead of hanging.
     try {
-        auto client = fixture.make_client(ioc.get_executor());
+        // [gate-b/r1 FQ-1] client and self_timed_out are shared-owned and
+        // captured BY VALUE in the timer handler below — see the identical
+        // rationale on probe_closed_within_window() above. `make_client()`
+        // returns a unique_ptr<Transport>, which converts implicitly.
+        std::shared_ptr<fixpp::transport::Transport> client =
+            fixture.make_client(ioc.get_executor());
         auto* tls = dynamic_cast<fixpp::transport::TlsTransport*>(client.get());
         if (tls != nullptr) {
             const fixpp::transport::Endpoint ep{"127.0.0.1", port};
@@ -192,12 +207,12 @@ static asio::awaitable<void> probe_post_handshake(
                 // Probe-owned backstop: if the acceptor never closes us (the
                 // mutation case for the deadline leg), WE must terminate the
                 // read so the test reports a clean RED instead of hanging.
-                bool self_timed_out = false;
+                auto self_timed_out = std::make_shared<bool>(false);
                 asio::steady_timer self_deadline(ioc);
                 self_deadline.expires_after(self_deadline_after);
-                self_deadline.async_wait([&](const std::error_code& ec) {
+                self_deadline.async_wait([client, self_timed_out](const std::error_code& ec) {
                     if (!ec) {
-                        self_timed_out = true;
+                        *self_timed_out = true;
                         (void)client->cancel();
                     }
                 });
@@ -209,7 +224,7 @@ static asio::awaitable<void> probe_post_handshake(
                 // A read ERROR that is not our own cancellation == the acceptor
                 // closed the pre-session connection. A successful read would
                 // mean the server sent us data, i.e. no pre-session close.
-                if (!read_r.has_value() && !self_timed_out) {
+                if (!read_r.has_value() && !*self_timed_out) {
                     out.elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
                         std::chrono::steady_clock::now() - t0);
                     out.closed.store(true, std::memory_order_release);
