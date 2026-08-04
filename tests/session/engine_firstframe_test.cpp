@@ -229,6 +229,12 @@ static asio::awaitable<void> probe_post_handshake(
 // body_length > bytes.size() → make_partial()). This matters for
 // mutation-proofness — a payload the Framer rejected would route the close
 // through the framing-error arm and pin the wrong branch.
+//
+// SIZE IS LOAD-BEARING: the caller sends only just OVER kFirstFrameMaxBytes,
+// not a large multiple. A payload of 2x the budget would still trip a budget
+// widened to 2x and so would only witness gross removals. At budget+ε, ANY
+// widening leaves the frame incomplete, the read blocks, and the close falls
+// through to kFirstFrameDeadline at ~5s — which the elapsed band catches.
 static std::string make_carried_over_budget_payload(std::size_t total_bytes) {
     // Split literal: "\x01" is a maximal-munch hex escape, so "…\x019=…" would
     // be read as the single byte 0x19 followed by '='.
@@ -446,6 +452,9 @@ TEST(EngineFirstFrameTest, PostHandshakeStallClosedByFirstFrameDeadline) {
 // keeps carrying the (deliberately incomplete) frame and the connection is
 // still closed — 5s later, by kFirstFrameDeadline. Only the elapsed band
 // separates "rejected on budget" from "rejected on deadline".
+//
+// The payload is budget+104 bytes, so the witness is sensitive to ANY widening
+// of the budget, not just a large one — see make_carried_over_budget_payload().
 TEST(EngineFirstFrameTest, PostHandshakeOverBudgetClosedByByteBudget) {
     asio::io_context ioc;
     fixpp::core::EngineConfig eng_cfg;
@@ -466,7 +475,8 @@ TEST(EngineFirstFrameTest, PostHandshakeOverBudgetClosedByByteBudget) {
     PostHandshakeProbe probe;
     asio::co_spawn(ioc,
                    probe_post_handshake(ioc, harness->transport_fixture(), port,
-                                        make_carried_over_budget_payload(8192),
+                                        // 4200 = kFirstFrameMaxBytes (4096) + epsilon.
+                                        make_carried_over_budget_payload(4200),
                                         /*self_deadline_after=*/9s, probe),
                    asio::detached);
 
