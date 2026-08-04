@@ -30,9 +30,13 @@
 // rationales used to claim the Step-3 bounds; #228 showed that was a proxy.
 // The two post-handshake probes (real mTLS clients) are the Step-3 witnesses,
 // and they assert an ELAPSED BAND, not merely "closed": a bare close is
-// non-discriminating because every leg ends in a close. The band is what
-// separates the 1500ms handshake timeout from the 5s first-frame deadline,
-// and the immediate byte-budget rejection from the deadline backstop.
+// non-discriminating because every leg ends in a close. [gate-b/r1 nit] Step 2
+// is already excluded by CONSTRUCTION, not by the elapsed band: each probe's
+// `t0` is taken only after its own mTLS handshake has returned, by which
+// point the server-side 1500ms handshake timer has already been cancelled
+// (asio_tls_transport.cpp). The elapsed band's job is narrower — it separates
+// the two Step-3 outcomes from EACH OTHER: the immediate byte-budget
+// rejection from the ~5s first-frame-deadline backstop.
 //
 // Bounding: every test drives the io_context in slices until its probe reports
 //   or a per-test cap elapses — no hang, and no burning the full cap once the
@@ -247,9 +251,13 @@ static asio::awaitable<void> probe_post_handshake(
 //
 // SIZE IS LOAD-BEARING: the caller sends only just OVER kFirstFrameMaxBytes,
 // not a large multiple. A payload of 2x the budget would still trip a budget
-// widened to 2x and so would only witness gross removals. At budget+ε, ANY
-// widening leaves the frame incomplete, the read blocks, and the close falls
-// through to kFirstFrameDeadline at ~5s — which the elapsed band catches.
+// widened to 2x and so would only witness gross removals. [gate-b/r1 FQ-2]
+// budget + 1. Any widening to >= 4098 leaves the frame incomplete, the read
+// blocks, and the close falls through to kFirstFrameDeadline at ~5s — which
+// the elapsed band catches. The single 4096->4097 mutant survives; that is
+// the deliberate price of a payload that is agnostic to whether production
+// rejects at >= or at > (see issue #233 / production budget-vs-FR-014
+// "exceeds" mismatch), so this test needs no change when that is corrected.
 static std::string make_carried_over_budget_payload(std::size_t total_bytes) {
     // Split literal: "\x01" is a maximal-munch hex escape, so "…\x019=…" would
     // be read as the single byte 0x19 followed by '='.
@@ -468,8 +476,13 @@ TEST(EngineFirstFrameTest, PostHandshakeStallClosedByFirstFrameDeadline) {
 // still closed — 5s later, by kFirstFrameDeadline. Only the elapsed band
 // separates "rejected on budget" from "rejected on deadline".
 //
-// The payload is budget+104 bytes, so the witness is sensitive to ANY widening
-// of the budget, not just a large one — see make_carried_over_budget_payload().
+// [gate-b/r1 FQ-2] The payload is budget+1 (4097) bytes. Any widening to
+// >= 4098 leaves the frame incomplete, the read blocks, and the close falls
+// through to kFirstFrameDeadline at ~5s, which the elapsed band below
+// catches. The single 4096->4097 mutant survives GREEN — that is the
+// deliberate price of a payload that is agnostic to whether production
+// rejects at >= or at > (issue #233), so this test needs no change if that
+// boundary is later corrected. See make_carried_over_budget_payload().
 TEST(EngineFirstFrameTest, PostHandshakeOverBudgetClosedByByteBudget) {
     asio::io_context ioc;
     fixpp::core::EngineConfig eng_cfg;
@@ -490,8 +503,8 @@ TEST(EngineFirstFrameTest, PostHandshakeOverBudgetClosedByByteBudget) {
     PostHandshakeProbe probe;
     asio::co_spawn(ioc,
                    probe_post_handshake(ioc, harness->transport_fixture(), port,
-                                        // 4200 = kFirstFrameMaxBytes (4096) + epsilon.
-                                        make_carried_over_budget_payload(4200),
+                                        // 4097 = kFirstFrameMaxBytes (4096) + 1.
+                                        make_carried_over_budget_payload(4097),
                                         /*self_deadline_after=*/9s, probe),
                    asio::detached);
 
@@ -509,12 +522,18 @@ TEST(EngineFirstFrameTest, PostHandshakeOverBudgetClosedByByteBudget) {
 
     ASSERT_TRUE(measured_closed)
         << "SC-011 (FR-014): a peer that completed the mTLS handshake and then "
-        << "sent 8KiB without completing a frame must be closed and its accept "
-        << "slot reclaimed. Measured from real I/O — no close within 9s.";
+        << "sent 4097 bytes without completing a frame must be closed and its "
+        << "accept slot reclaimed. Measured from real I/O — no close within 9s.";
+    // [gate-b/r1 FQ-2 / F-7] "on the first read" is not exact: async_read_some
+    // may return short, in which case each valid prefix is fed to the Framer
+    // and classified PARTIAL (framer.cpp) before the NEXT read pushes the
+    // cumulative buffer to the budget. Either way the close is on the budget
+    // arm, not the deadline.
     EXPECT_LT(measured_ms, 2000)
         << "SC-011 (FR-014) [#228]: the close arrived after " << measured_ms
-        << "ms. The 4096-byte kFirstFrameMaxBytes budget is exceeded on the first "
-        << "read, so a live budget rejects this peer immediately; a close near "
-        << "5000ms means the budget did NOT fire and the connection was reclaimed "
-        << "by kFirstFrameDeadline instead.";
+        << "ms. The 4096-byte kFirstFrameMaxBytes budget is exceeded once the "
+        << "cumulative read reaches the budget (possibly over more than one "
+        << "read, before the next Framer feed), so a live budget rejects this "
+        << "peer immediately; a close near 5000ms means the budget did NOT fire "
+        << "and the connection was reclaimed by kFirstFrameDeadline instead.";
 }
