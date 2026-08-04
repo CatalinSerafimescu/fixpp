@@ -145,7 +145,7 @@ src/capi/CMakeLists.txt              # :46 PUBLIC -> PRIVATE; + target_include_d
 src/service/CMakeLists.txt           # :12 whole-tree INSTALL_INTERFACE -> service-iface root
 tests/consumer/
 ├── CMakeLists.txt                   # :40 project(... CXX) -> (... C CXX); + compile-only ✅ probe targets;
-│                                    #   + the ❌ try_compile assertions, asserted TRUE (configure-time, asserted FALSE)
+│                                    #   + the ❌ try_compile assertions, asserted TRUE (configure-time)
 ├── consumer_capi_witness.cpp        # EXISTS — links fixpp::capi; EXTENDED per FR-009 to reach the
 │                                    #   session/dictionary closure AT LINK TIME (CALL, from a non-foldable branch (a taken address is discardable under --gc-sections/LTO — Gate B r2)).
 │                                    #   BUILT AND LINKED, NEVER RUN: the driver runs only

@@ -252,7 +252,7 @@ Asserts the full `contracts/include-interface.md` §1 matrix. Three rules govern
   `research.md` R5);
 - they are **not build targets**. The driver `FATAL_ERROR`s on any non-zero build exit
   (`tests/consumer/run_consumer_witness.cmake:100-108`), so a must-fail target would red the whole witness.
-  They are `try_compile` calls asserted **TRUE** (`__has_include` + a unique-token `#error`; polarity inverted at Gate B r2) at consumer-**configure** time; a TRUE result raises
+  They are `try_compile` calls asserted **TRUE** (`__has_include` + a unique-token `#error`; polarity inverted at Gate B r2) at consumer-**configure** time; a FALSE result raises
   `FATAL_ERROR` and the driver reports it as *"consumer configure failed"* (`:91-92`);
 - a passing positive assertion **never** establishes a negative one, because `<fix/c_api.h>` resolves from
   either root under the additive layout. Evidence is the **pair**, from the same configured consumer.

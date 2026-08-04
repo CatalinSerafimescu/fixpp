@@ -508,7 +508,7 @@ include/
 >
 > | Clause | Disposition | Measured reality |
 > |---|---|---|
-> | `:500` module targets are **`OBJECT` libraries combined into a final `fixpp` shared/static** | **SUPERSEDED** | All are **STATIC**; there is no combined shared/static `fixpp` library. The list is also incomplete and partly misnamed — the export carries `fixpp::sync`, `fixpp::config_toml`, `fixpp::dict_dispatch_bridge`, `fixpp::dict::dispatch` and `fixpp::log_otlp` besides, and the dictionary target exports as `fixpp::dictionary`, not `fixpp::dict` |
+> | `:500` module targets are **`OBJECT` libraries combined into a final `fixpp` shared/static** | **SUPERSEDED** | **13 STATIC / 4 INTERFACE / 1 OBJECT**, measured in the shipped `fixppTargets.cmake`: STATIC = `core`, `sync`, `wire`, `dictionary`, `dict_dispatch_bridge`, `session`, `transport`, `tls`, `log`, `otel`, `config_toml`, `log_otlp`, `capi`; INTERFACE = `fixpp`, `service`, `tap`, `dict::dispatch`; OBJECT = `capi_objects`. **Not all module targets are STATIC** — `tap` and `dict::dispatch` are INTERFACE (corrected Gate B r4). There is no combined shared/static `fixpp` library. The list is also incomplete and partly misnamed — the export carries `fixpp::sync`, `fixpp::config_toml`, `fixpp::dict_dispatch_bridge`, `fixpp::dict::dispatch` and `fixpp::log_otlp` besides, and the dictionary target exports as `fixpp::dictionary`, not `fixpp::dict` |
 > | `:501` `fixpp::capi-objects` is an **`OBJECT`** library | **SATISFIED (kind), SUPERSEDED (name + fate)** | It is genuinely the one OBJECT library in the set, but exports as `fixpp::capi_objects` (underscore), and its objects are absorbed into the **static** `fixpp_capi` archive — there is no shared library to combine into |
 > | `:502` `fixpp` — the **C++ public umbrella** | **SATISFIED IN PART** | 084 T029 creates it, as an **INTERFACE** target (`fixpp::fixpp`), and it is what `tests/consumer/` links. But it links `fixpp_session`, not "every object library", and **`find_package(fixpp)` has no `COMPONENTS` support** — `COMPONENTS Cxx` does not exist |
 > | `:503` `fixpp::capi` exposes **`include/fix/` only**, so C-ABI consumers *"cannot accidentally `#include <fixpp/...>`"* | ✅ **DELIVERED by 086 — INTENT, not the literal prescription** | The *intent* holds: an installed consumer linking only `fixpp::capi` reaches all 12 C-ABI headers and **no** `<fixpp/...>` header, asserted by a witness demonstrated able to fail. The *literal* clause is retired as **unsatisfiable** — see the row below. Measured: `INTERFACE_INCLUDE_DIRECTORIES "${_IMPORT_PREFIX}/include/capi"`, `INTERFACE_LINK_LIBRARIES "$<LINK_ONLY:fixpp::capi_objects>"` |
@@ -551,10 +551,13 @@ include/
 The delivered export set is **18 members — 13 STATIC, 4 INTERFACE, 1 OBJECT**, measured in the shipped
 `fixppTargets.cmake`:
 
-- `fixpp::core`, `fixpp::dictionary`, `fixpp::wire`, `fixpp::transport`, `fixpp::tls`, `fixpp::session`,
-  `fixpp::log`, `fixpp::otel`, `fixpp::tap`, `fixpp::sync`, `fixpp::config_toml`, `fixpp::dict_dispatch_bridge`,
-  `fixpp::dict::dispatch` — **`STATIC`** libraries, one per module. There is **no** combined shared/static
-  `fixpp` library to be "combined into".
+- **STATIC (13)** — `fixpp::core`, `fixpp::sync`, `fixpp::wire`, `fixpp::dictionary`,
+  `fixpp::dict_dispatch_bridge`, `fixpp::session`, `fixpp::transport`, `fixpp::tls`, `fixpp::log`,
+  `fixpp::otel`, `fixpp::config_toml`, `fixpp::log_otlp`, and `fixpp::capi`. There is **no** combined
+  shared/static `fixpp` library for these to be "combined into".
+- **INTERFACE (4)** — `fixpp::fixpp` (the umbrella), `fixpp::service`, `fixpp::tap`, `fixpp::dict::dispatch`.
+  *(`tap` and `dict::dispatch` are header-only; an earlier revision of this list called them STATIC — corrected
+  at Gate B r4 against the shipped `fixppTargets.cmake`, which is the only authority for target kind.)*
 - `fixpp::capi_objects` — the **one** `OBJECT` library in the set, producing the `extern "C"` translation
   units. Its objects are absorbed into the STATIC `fixpp_capi` archive. Note the **underscore**: it exports as
   `fixpp::capi_objects`, not `fixpp::capi-objects`.

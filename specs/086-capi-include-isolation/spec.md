@@ -372,7 +372,20 @@ interface header and the C-ABI headers compile; a C++ engine header does not.
   change to `run_consumer_witness.cmake` and is not in scope here.)*
 - **FR-009a**: **Narrowing the include interface MUST NOT withhold any other usage requirement the closure
   relies on.** `$<LINK_ONLY:>` withholds `INTERFACE_COMPILE_DEFINITIONS`, `INTERFACE_COMPILE_OPTIONS`,
-  `INTERFACE_COMPILE_FEATURES` and `INTERFACE_SYSTEM_INCLUDE_DIRECTORIES` as well **NARROWED at Gate B r3**: this requirement does **NOT** bind `INTERFACE_SYSTEM_INCLUDE_DIRECTORIES`. There is no documented *collected* `SYSTEM_INCLUDE_DIRECTORIES` consumer property, so asserting it would compare empty against empty — an assertion that cannot fail. The §1 reachability matrix covers system include directories only at its two NAMED header boundaries, not in general (a different propagated system dir, a change in system classification, or SYSTEM's warning-suppression and search-ordering effects all leave every cell green). Closing it properly needs the CMake File API compile groups — recorded as a follow-up, not done here. See `contracts/include-interface.md` C-3. as include directories, and
+  `INTERFACE_COMPILE_FEATURES` and `INTERFACE_SYSTEM_INCLUDE_DIRECTORIES` as well as include directories.
+
+  > **SCOPE, narrowed at Gate B r3.** Of those four, this requirement binds **three**:
+  > `COMPILE_DEFINITIONS`, `COMPILE_OPTIONS`, `COMPILE_FEATURES`. It does **NOT** bind
+  > `INTERFACE_SYSTEM_INCLUDE_DIRECTORIES`. There is no documented *collected* `SYSTEM_INCLUDE_DIRECTORIES`
+  > consumer property to assert against, so a compare would read empty against empty — an assertion that cannot
+  > fail, which is the defect class this feature exists to remove. The §1 reachability matrix covers system
+  > include paths only at its **two named header boundaries**, not in general: a different propagated system
+  > directory, a change in the system classification of an existing one, or `SYSTEM`'s warning-suppression and
+  > search-ordering effects all leave every cell green. Closing it properly needs the CMake File API compile
+  > groups asserted against an allowed system-root set — **recorded as an open follow-up, not delivered here**,
+  > because it is new machinery outside this feature's reviewed scope. See `contracts/include-interface.md` C-3.
+
+  And
   the closure carries at least one live PUBLIC compile definition — `FIXPP_LOG_MIN_LEVEL`
   (`src/log/CMakeLists.txt:27`, documented at `:24-26` as propagated to every consumer, consumed unguarded at
   `include/fixpp/log/logger.hpp:275,301,333`). No C-ABI consumer reaches `logger.hpp` today, so nothing breaks
@@ -556,7 +569,7 @@ interface header and the C-ABI headers compile; a C++ engine header does not.
   `find include/fix -type f`, not transcribed), and **no** C++ engine header is — **evidenced by the named
   negative probes plus C-5 root containment**, which is what "0" means here. Concretely: the
   `<fixpp/wire/parser.hpp>` and `<fixpp/service/control_plane_factory.hpp>` probes of
-  `contracts/include-interface.md` §4 both assert FALSE, **and** `fixpp::capi`'s only installed include root is
+  `contracts/include-interface.md` §4 both assert the probe COMPILES (`try_compile` TRUE = header unreachable; FALSE + `FIXPP_086_FORBIDDEN_HEADER_REACHABLE` = leak; FALSE without the token = BROKEN probe, equally fatal), **and** `fixpp::capi`'s only installed include root is
   `include/capi`, whose contents C-5 / I11 pin to `^include/capi/fix/`. *(Scoped this way deliberately: a "0
   over all nine header families" claim asserted by two probes would be a universal claim on representative
   evidence. The two named probes plus the pinned root are what is actually measured, and together they exclude
