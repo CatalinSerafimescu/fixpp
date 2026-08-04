@@ -611,15 +611,19 @@ foreach(_artifact IN LISTS _artifacts)
       "declared subtree, so it is not isolated:\n  ${_uncontained_pretty}")
   endif()
 
-  # ── The COMPLETION TOKEN (Gate B r1 P1 #4) ──────────────────────────────────
-  # `tests/packaging/CMakeLists.txt` requires this exact line via
-  # PASS_REGULAR_EXPRESSION, so deleting the 086 block above turns this test RED
-  # instead of silently reducing its coverage. Before this existed, the whole
-  # block could be removed and `fixpp::packaging::contents` stayed green on the
-  # inherited 084 assertions alone.
+  # ── PER-ARTIFACT COMPLETION COUNT (Gate B r1 P1 #4, revised r2 P1 #1) ───────
+  # This increments; it does NOT emit a token. The single token is emitted AFTER
+  # the artifact loop and is read back by run_package_contents_gate.cmake, which
+  # checks this script's EXIT CODE first.
+  #
+  # It used to print a token here, required via `PASS_REGULAR_EXPRESSION` in
+  # tests/packaging/CMakeLists.txt. That was WORSE than no gate at all: CTest
+  # IGNORES the exit code when a pass-regex matches, so a token printed while
+  # checking the DEB masked a FATAL_ERROR raised while checking the RPM or TGZ.
+  # The property is gone; the outer driver replaces it.
   #
   # The COUNTS are asserted, not just printed: a block that ran partially — one
-  # root pair compared, one containment root walked — cannot emit the token,
+  # root pair compared, one containment root walked — cannot reach this line,
   # because the numbers are checked first and the token names them.
   if(NOT _086_pairs_checked EQUAL 2 OR NOT _086_roots_checked EQUAL 2)
     message(FATAL_ERROR

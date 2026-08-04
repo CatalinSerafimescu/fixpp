@@ -540,13 +540,43 @@ include/
 > under `$<BUILD_INTERFACE:>` and narrows only the install interface.
 
 
-- `fixpp::core`, `fixpp::dict`, `fixpp::wire`, `fixpp::transport`, `fixpp::tls`, `fixpp::session`, `fixpp::log`, `fixpp::otel`, `fixpp::tap` — `OBJECT` libraries combined into the final `fixpp` shared/static.
-- `fixpp::capi-objects` — `OBJECT` library producing the `extern "C"` translation units; combined into the same shared library.
-- `fixpp` — the **C++ public umbrella**. Links every object library above. `INTERFACE_INCLUDE_DIRECTORIES = include/`, exposing `<fix/c_api.h>` and the entire `<fixpp/...>` C++ surface. This is what `find_package(fixpp) COMPONENTS Cxx` brings in for in-process C++ users.
-- `fixpp::capi` — the **C-ABI consumer target**. Same underlying object code as `fixpp` (no duplication), and its **installed** interface exposes the isolated root `${_IMPORT_PREFIX}/include/capi` only, under which the C-ABI headers sit at `capi/fix/**`. C-ABI consumers link this; they cannot accidentally `#include <fixpp/...>`, because the C++ headers are not under that root and the link edge to `fixpp::capi_objects` is wrapped in `$<LINK_ONLY:>` so its whole-tree include path is not inherited. **Delivered and witnessed by 086** — see the `:503` rows above for why the root is `include/capi/` and not the `include/fix/` this line used to specify (that spelling is unsatisfiable). In-tree behaviour is unchanged: the build interface keeps the full edge.
-- `fixpp::service-iface` — `INTERFACE` (header-only) target exposing `include/fixpp/service/` (just the public plugin interface — `ControlPlaneFactory`; 086/FR-014 corrected this from `ControlPlane` / `ControlPlaneConfig`, neither of which exists: `grep -rn "class ControlPlane" include/ src/` returns only `ControlPlaneFactory` at `include/fixpp/service/control_plane_factory.hpp:15`). Exports as **`fixpp::service`**; its **installed** interface exposes `${_IMPORT_PREFIX}/include/service-iface`, carrying `fixpp/service/**` and nothing else (086). It reaches `<fix/c_api.h>` through its link to `fixpp::capi` and declares no C-ABI root of its own.
-- `fixpp-codegen` — host tool; not exported.
-- `fixppd` — depends on `fixpp::capi` and `fixpp::service-iface` (plus gRPC and iceoryx2 externs). It does **not** depend on `fixpp` or any of the C++ engine OBJECT libraries; it reaches the engine exclusively through `extern "C"` symbols.
+> ### ⚠️ REPLACED by 086/FR-013 (Gate B r2) — the bullets that stood here prescribed targets that do not exist
+>
+> The previous list described the engine modules as `OBJECT` libraries combined into a final shared/static
+> `fixpp`, selected via `find_package(fixpp) COMPONENTS Cxx`, with `fixpp::capi` sharing that library's object
+> code and `fixpp::service-iface` as the plugin target. **None of that is what ships**, and leaving it as
+> "design intent" left a second, superseded implementation recipe inside the normative architecture — one that
+> contradicted both the 084 reconciliation table above and `api-contract.md` §8. It is replaced, not annotated.
+
+The delivered export set is **18 members — 13 STATIC, 4 INTERFACE, 1 OBJECT**, measured in the shipped
+`fixppTargets.cmake`:
+
+- `fixpp::core`, `fixpp::dictionary`, `fixpp::wire`, `fixpp::transport`, `fixpp::tls`, `fixpp::session`,
+  `fixpp::log`, `fixpp::otel`, `fixpp::tap`, `fixpp::sync`, `fixpp::config_toml`, `fixpp::dict_dispatch_bridge`,
+  `fixpp::dict::dispatch` — **`STATIC`** libraries, one per module. There is **no** combined shared/static
+  `fixpp` library to be "combined into".
+- `fixpp::capi_objects` — the **one** `OBJECT` library in the set, producing the `extern "C"` translation
+  units. Its objects are absorbed into the STATIC `fixpp_capi` archive. Note the **underscore**: it exports as
+  `fixpp::capi_objects`, not `fixpp::capi-objects`.
+- `fixpp::fixpp` — the **C++ public umbrella**, an **`INTERFACE`** target linking `fixpp::session`.
+  `INTERFACE_INCLUDE_DIRECTORIES = ${_IMPORT_PREFIX}/include`, exposing `<fix/c_api.h>` and the entire
+  `<fixpp/...>` C++ surface. Consumed as `find_package(fixpp REQUIRED)` + `target_link_libraries(app PRIVATE
+  fixpp::fixpp)`. **`COMPONENTS Cxx` does not exist.**
+- `fixpp::capi` — the **C-ABI consumer target**, a **`STATIC`** archive distinct from the umbrella (it does not
+  share object code with `fixpp::fixpp`, which is INTERFACE and has none). Its **installed** interface exposes
+  the isolated root `${_IMPORT_PREFIX}/include/capi`, under which the C-ABI headers sit at `capi/fix/**`, and
+  its link entry is `$<LINK_ONLY:fixpp::capi_objects>` so the objects target's whole-tree include path is not
+  inherited. Delivered and witnessed by 086; see the `:503` rows above for why the root is `include/capi/` and
+  not the unsatisfiable `include/fix/`.
+- `fixpp::service` — `INTERFACE` (header-only), exposing `include/fixpp/service/` (the public plugin interface,
+  `ControlPlaneFactory`). **Exports as `fixpp::service`; `fixpp::service-iface` is not a target.** Its installed
+  interface exposes `${_IMPORT_PREFIX}/include/service-iface`; it reaches `<fix/c_api.h>` through its link to
+  `fixpp::capi`.
+- `fixpp::log_otlp` — closure-only export member, present when the OTel SDK is.
+- `fixpp-codegen` — host tool; **not exported**.
+- `fixppd` — **not yet built** (`FIXPP_BUILD_SERVICE` is not functional). It will depend on `fixpp::capi` and
+  `fixpp::service` plus gRPC/iceoryx2 externs, and **not** on `fixpp::fixpp` or on any of the engine **STATIC**
+  libraries; it reaches the engine exclusively through `extern "C"` symbols.
 - `fixpp-python` — SWIG target; depends only on `fixpp::capi` and the SWIG-generated wrapper.
 
 **Constraint, and what actually enforces it** *(corrected by 086 — this paragraph previously attributed it to a tool that cannot perform it)*: a target that links both `fixpp::capi` and `fixpp` (the C++ umbrella) is the combination Article IV §2 rejects. **`tools/check_layers.py` does not detect it.** That script is a **source `#include`-edge lint** over `src/**` and `bindings/**` (`tools/check_layers.py:2-7`, `:173-176`); it parses no CMake file, reads no link interface, and cannot see an installed consumer at all. What is actually in force is (a) the **convention**, which is why `tests/consumer/` keeps `consumer_witness` and `consumer_capi_witness` as separate executables, and (b) 086's installed include isolation, which makes the *header* half structural for anyone consuming the package. **Nothing mechanically rejects the link combination**, in-tree or installed — an installed CMake package cannot observe which targets a consumer links together. Stated plainly so the gap is inherited deliberately rather than assumed closed.

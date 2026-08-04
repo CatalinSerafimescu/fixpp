@@ -62,6 +62,9 @@ add_library(fixpp::capi ALIAS fixpp_capi)
 #
 # ⚠️ $<LINK_ONLY:> withholds COMPILE_DEFINITIONS, COMPILE_OPTIONS,
 # COMPILE_FEATURES and SYSTEM_INCLUDE_DIRECTORIES too, not just the include path.
+# (Of those four, C-3's closed enumeration binds the first three. System include
+# directories are NOT asserted — no collected consumer property exists to assert
+# them against; narrowed at Gate B r3, follow-up recorded in the contract.)
 # That is intended and enumerated (contracts/include-interface.md C-3): a C-ABI
 # consumer stops receiving at least FIXPP_LOG_MIN_LEVEL and ASIO_STANDALONE,
 # neither of which any C-ABI header consumes. tests/consumer/ measures the

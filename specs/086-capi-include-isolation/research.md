@@ -176,7 +176,7 @@ that the shipped witness does.
 
 ## R5 — ⚠️ The negative witness MUST be compile-only **and cannot be a build target**
 
-**Decision: the compile-must-fail assertion is a configure-time `try_compile` asserted **TRUE** (`__has_include` + a unique-token `#error`; polarity inverted at Gate B r2), never an
+**Decision (POLARITY SUPERSEDED at Gate B r2 — see `contracts/include-interface.md` §4a; retained as the round-0 record): the compile-must-fail assertion is a configure-time `try_compile` asserted **TRUE** (`__has_include` + a unique-token `#error`; polarity inverted at Gate B r2), never an
 executable and never a build target.**
 
 > **Amended at Gate A round 1.** The original decision read "an `OBJECT` library (or `try_compile`)". The
@@ -228,7 +228,7 @@ isolation probes are **different kinds of test** and must stay separate.
 > (`:142-143`). `consumer_capi_witness` is covered by the single `cmake --build` at `:96-104` and by nothing
 > else, exactly as `tests/consumer/CMakeLists.txt:83` states: *"Building and linking IS the assertion — it need
 > not run."* FR-009's strengthening therefore rests on the **link** stage: the added reference must pull the
-> entry point's object out of the archive when `consumer_capi_witness` is linked — a namespace-scope,
+> entry point's object out of the archive when `consumer_capi_witness` is linked — a
 > **CALL** from a branch the compiler cannot fold (Gate B r2 P2 #7 — a namespace-scope pointer is discardable
 > under `--gc-sections`/LTO, and an unused local weaker still) —
 > and **no runtime behaviour is asserted**. The "no call whose runtime failure would red it" proviso was
@@ -277,7 +277,7 @@ argument is unaffected — `include_directories()` is directory-scoped over all 
 > **⚠️ Scope of "by construction" (Gate A r1).** The argument above is stated over **include directories** and
 > is therefore narrower than the change. `include_directories()` carries only include paths, but
 > `$<LINK_ONLY:>` withholds `INTERFACE_COMPILE_DEFINITIONS`, `INTERFACE_COMPILE_OPTIONS`,
-> `INTERFACE_COMPILE_FEATURES` and `INTERFACE_SYSTEM_INCLUDE_DIRECTORIES` as well. The closure carries at least
+> `INTERFACE_COMPILE_FEATURES` and (NOT asserted — see C-3, narrowed at Gate B r3) `INTERFACE_SYSTEM_INCLUDE_DIRECTORIES` as well. The closure carries at least
 > one live PUBLIC compile definition: `FIXPP_LOG_MIN_LEVEL` (`src/log/CMakeLists.txt:27`, documented at
 > `:24-26` as "propagated to every consumer so the `if constexpr` cutoff in the LOG macros is build-wide"),
 > consumed unguarded at `include/fixpp/log/logger.hpp:275,301,333` with no `#ifndef` fallback.

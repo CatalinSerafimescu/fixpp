@@ -342,7 +342,7 @@ interface header and the C-ABI headers compile; a C++ engine header does not.
   the instance is **measured** in `research.md` **R9**.)*
 - **FR-007**: That assertion MUST be **demonstrated red** — the record MUST show it failing when the isolation
   is removed and passing when it is present. An assertion never observed failing is not evidence.
-- **FR-008**: The compile-must-fail witness MUST probe a header whose own disappearance would be a defect, and
+- **FR-008**: The compile-must-fail witness MUST probe a header whose own disappearance would be a defect, and *(polarity INVERTED at Gate B r2 — the probe is asserted **TRUE**; FALSE + `FIXPP_086_FORBIDDEN_HEADER_REACHABLE` is a leak, FALSE without the token is a BROKEN probe and equally fatal. See `contracts/include-interface.md` §4a.)*
   MUST distinguish "failed because isolation holds" from "failed for any other reason". A generic
   build-failure check is not sufficient.
 - **FR-008a**: **The positive assertion alone cannot detect the defect, and MUST NOT be cited as if it could.**
@@ -372,7 +372,7 @@ interface header and the C-ABI headers compile; a C++ engine header does not.
   change to `run_consumer_witness.cmake` and is not in scope here.)*
 - **FR-009a**: **Narrowing the include interface MUST NOT withhold any other usage requirement the closure
   relies on.** `$<LINK_ONLY:>` withholds `INTERFACE_COMPILE_DEFINITIONS`, `INTERFACE_COMPILE_OPTIONS`,
-  `INTERFACE_COMPILE_FEATURES` and `INTERFACE_SYSTEM_INCLUDE_DIRECTORIES` as well as include directories, and
+  `INTERFACE_COMPILE_FEATURES` and `INTERFACE_SYSTEM_INCLUDE_DIRECTORIES` as well **NARROWED at Gate B r3**: this requirement does **NOT** bind `INTERFACE_SYSTEM_INCLUDE_DIRECTORIES`. There is no documented *collected* `SYSTEM_INCLUDE_DIRECTORIES` consumer property, so asserting it would compare empty against empty — an assertion that cannot fail. The §1 reachability matrix covers system include directories only at its two NAMED header boundaries, not in general (a different propagated system dir, a change in system classification, or SYSTEM's warning-suppression and search-ordering effects all leave every cell green). Closing it properly needs the CMake File API compile groups — recorded as a follow-up, not done here. See `contracts/include-interface.md` C-3. as include directories, and
   the closure carries at least one live PUBLIC compile definition — `FIXPP_LOG_MIN_LEVEL`
   (`src/log/CMakeLists.txt:27`, documented at `:24-26` as propagated to every consumer, consumed unguarded at
   `include/fixpp/log/logger.hpp:275,301,333`). No C-ABI consumer reaches `logger.hpp` today, so nothing breaks

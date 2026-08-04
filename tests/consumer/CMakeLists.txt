@@ -139,7 +139,7 @@ target_link_libraries(probe_service_positive PRIVATE fixpp::service)
 add_library(probe_umbrella OBJECT probe_umbrella.cpp)
 target_link_libraries(probe_umbrella PRIVATE fixpp::fixpp)
 
-# ── ❌ cells — configure-time try_compile(), asserted FALSE ──────────────────
+# ── ❌ cells — configure-time try_compile(), asserted TRUE (inverted, Gate B r2) ─
 #
 # fixpp086_probe_unreachable(<label> <source> <link-target>)
 #   Records the result in FIXPP_086_LEAKS (parent scope) instead of raising

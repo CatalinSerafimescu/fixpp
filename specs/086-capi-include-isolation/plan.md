@@ -145,9 +145,9 @@ src/capi/CMakeLists.txt              # :46 PUBLIC -> PRIVATE; + target_include_d
 src/service/CMakeLists.txt           # :12 whole-tree INSTALL_INTERFACE -> service-iface root
 tests/consumer/
 ├── CMakeLists.txt                   # :40 project(... CXX) -> (... C CXX); + compile-only ✅ probe targets;
-│                                    #   + the ❌ try_compile assertions (configure-time, asserted FALSE)
+│                                    #   + the ❌ try_compile assertions, asserted TRUE (configure-time, asserted FALSE)
 ├── consumer_capi_witness.cpp        # EXISTS — links fixpp::capi; EXTENDED per FR-009 to reach the
-│                                    #   session/dictionary closure AT LINK TIME (take the address).
+│                                    #   session/dictionary closure AT LINK TIME (CALL, from a non-foldable branch (a taken address is discardable under --gc-sections/LTO — Gate B r2)).
 │                                    #   BUILT AND LINKED, NEVER RUN: the driver runs only
 │                                    #   consumer_witness (run_consumer_witness.cmake:197, ^PASS: at
 │                                    #   :142-143); tests/consumer/CMakeLists.txt:83 — "Building and
@@ -185,7 +185,7 @@ literally false against this same structure block.
 > **Delivered shape — MEASURED (`research.md` R9), not a decision rule**: ✅ cells are `OBJECT` targets (build
 > failure reds the witness — correct polarity); ❌ cells are `try_compile(... LINK_LIBRARIES fixpp::capi)` at
 > consumer-**configure** time with `CMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY` (compile-only, no `main()`,
-> restored after), asserted **FALSE** — a FALSE result carrying `FIXPP_086_FORBIDDEN_HEADER_REACHABLE` raises `FATAL_ERROR`, and a FALSE result WITHOUT it is fatal as a BROKEN probe and the driver reports it at
+> restored after), asserted **TRUE** (`__has_include` + unique-token `#error`; inverted at Gate B r2) — a FALSE result carrying `FIXPP_086_FORBIDDEN_HEADER_REACHABLE` raises `FATAL_ERROR`, and a FALSE result WITHOUT it is fatal as a BROKEN probe and the driver reports it at
 > `:91-92`. Both polarities stay inside **one configured consumer**, which is what FR-008a's paired-evidence
 > rule requires. R9 ran this shape against the Phase-0 fixture at both stages: the imported target's
 > `INTERFACE_INCLUDE_DIRECTORIES` **do** propagate through `LINK_LIBRARIES`, there is no link stage, and the

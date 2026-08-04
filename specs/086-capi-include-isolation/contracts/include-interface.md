@@ -258,8 +258,12 @@ the result so that *compiling* is the failure.
 **Instance to implement — MEASURED, `research.md` R9, POLARITY AMENDED ABOVE**: `try_compile(<var> ... LINK_LIBRARIES fixpp::capi)`
 evaluated at **consumer-configure time**, with `CMAKE_TRY_COMPILE_TARGET_TYPE` set to `STATIC_LIBRARY` for the
 duration (compile-only — no link stage, no `main()` required, which is exactly R5's rule) and **restored
-afterwards** so it does not leak into any `check_*` module in the same scope. `<var>` must be **FALSE**; a TRUE
-result raises `FATAL_ERROR`, which fails the *configure* step and is caught by the driver at `:91-92`. This
+afterwards** so it does not leak into any `check_*` module in the same scope. **`<var>` must be `TRUE`** — the
+probe compiles precisely when the forbidden header is UNREACHABLE. A `FALSE` result carrying
+`FIXPP_086_FORBIDDEN_HEADER_REACHABLE` is a leak; a `FALSE` result **without** the token is a BROKEN probe.
+Both raise `FATAL_ERROR`, failing the *configure* step, which the driver reports at `:95-97`. *(This paragraph
+read "must be FALSE" until Gate B r2 — see the amendment box above for why that was a false-green generator.)*
+This
 keeps both the ✅ and the ❌ cells inside **one configured consumer**, which is what FR-008a's paired-evidence
 rule requires.
 
