@@ -222,8 +222,9 @@ explaining membership, and that no code path recomputes it from the observation.
 - **FR-014**: CI MUST assert the **registration count** of the `consumer` label before running it, and fail
   the lane if it is not the expected number. `ctest` exits 0 when a label filter matches nothing, and the
   witness registers only under `FIXPP_BUILD_CODEGEN_TOOL`; without this assertion a lane on which that option
-  goes OFF reports green having run the 087 gate zero times — the last vacuity path, and the one no
-  demonstration in the gate itself can reach. This obligation is **unqualified by tier**: it applies to
+  goes OFF reports green having run the 087 gate zero times — the last vacuity path **a mechanised check can
+  close**, and the one no demonstration in the gate itself can reach. (Contract §6 enumerates the residual
+  paths that remain review-enforced by construction.) This obligation is **unqualified by tier**: it applies to
   **every** workflow that runs the witness — `tier1.yml`, `tier2.yml` and `tier3-libcxx.yml` — because
   `FIXPP_BUILD_CODEGEN_TOOL` defaults ON and is overridden nowhere, so the hazard is latent on every lane
   equally. Modelled on the assertion `tier1.yml` and `tier2.yml` already carry for the `packaging` label.

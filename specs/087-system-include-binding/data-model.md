@@ -53,7 +53,7 @@ leg.
 
 | field | type | value |
 |---|---|---|
-| `leg` | enum | `capi` \| `service` — a **closed** set of exactly two; the carrier rejects a missing, duplicate or unknown leg (contract C-6.4) |
+| `leg` | enum | `capi` \| `service` — a **closed** set of exactly two; the carrier rejects a missing, duplicate or unknown leg, and `compare` rejects an **empty `expectation` argument** — all four are `LEG_ERROR` (contract C-6.4) |
 | `probe target` | string | the target whose reply supplies this leg's E2: `probe_usage_requirements` for `capi`, `probe_service_positive` for `service` (contract C-6.4) |
 | `entries` | set of (prefix-relative path, isSystem) | see below — **unordered**; see I2 |
 | `origin` | prose | why each member is there — a literal with a comment, never computed from the run it checks |
@@ -93,6 +93,10 @@ not re-open replies.
 minimum schema is just `leg`; under the capi-first fail-fast carrier the final status, tokens and diagnostics
 travel on `compare`'s own exit status and output rather than through this file.
 
+**Location**: E4 files live **under the sub-build's binary directory** (contract C-6.1), which
+`tests/consumer/run_consumer_witness.cmake:46` wipes at the start of every witness run — so the E4s `leg-set`
+reads are always this run's, never a previous one's. *(Pinned at Gate A instance 2 round 2.)*
+
 ---
 
 ## Invariants
@@ -127,6 +131,14 @@ travel on `compare`'s own exit status and output rather than through this file.
   and parses but yields zero include entries**: `present` ranges over reply existence and parse only, so a
   populated-but-empty observation passes it and is rejected here, as a `DROP`. The two guards are easy to
   conflate.
+
+  **I3 is a RUNTIME invariant, and what makes it one is `compare`'s rejection of an empty `expectation`
+  argument** (contract C-6.4, demonstrated by §5 row 6a sub-case *(iv)*). Non-emptiness of the literal
+  declared in `tests/consumer/CMakeLists.txt` is not sufficient: the arithmetic is a property of the
+  expectation that actually reaches `compare`, and a mis-spelled `${FIXPP_087_EXPECTED_*}` or a quoting error
+  in the carrier's command hands it ∅. ∅ against a zero-entry observation is green having asserted nothing.
+  Unlike I4 below, I3 is therefore **not** review-time only. *(Stated at Gate A instance 2 round 1, where the
+  guard was named in contract C-2 but defined and demonstrated nowhere.)*
 - **I4 — the expectation has an origin in the tree.** It is a literal with a rationale comment. Nothing may
   derive it from the observation it is compared against; such a comparison is satisfied by whatever the run
   produced. **I4 is a review-time invariant only** — no demonstration and no mechanised check would catch a
@@ -137,7 +149,9 @@ travel on `compare`'s own exit status and output rather than through this file.
   configuring the sub-build. `tests/consumer/CMakeLists.txt` cannot do this for its own reply — it runs during
   that configure.
 - **I7 — `leg-set` reasons over per-leg results, not replies.** Exactly two E4 instances, naming the distinct
-  known legs `capi` and `service`, are required for success. The carrier may fail-fast on the first red
+  known legs `capi` and `service`, are required for success. **They are this run's**: E4's Location clause puts
+  them under the sub-build tree that `run_consumer_witness.cmake:46` wipes at the start of every run, so the
+  count can never be met by files a previous run left behind. The carrier may fail-fast on the first red
   compare, but row #8 remains satisfiable because it invokes `capi` first and therefore reaches `leg-set`
   only on the green control path.
 

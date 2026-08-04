@@ -75,8 +75,8 @@
   (`specs/085-fold-flat-cap-loop/spec.md:223-225`).
 
 - **Two requirements were added at Gate A round 1**, so this checklist's scope grew: **FR-014** (assert the
-  `consumer` label's registration count in CI — the last vacuity path, which no demonstration inside the gate
-  can reach) and **SC-008** (its outcome). Both are testable and measurable as the boxes above require;
+  `consumer` label's registration count in CI — the last **gate-closable** vacuity path, which no
+  demonstration inside the gate can reach) and **SC-008** (its outcome). Both are testable and measurable as the boxes above require;
   neither adds a registered test, so FR-013 is unaffected.
 
 - **No requirement was added at Gate A round 2, but two had their scope made explicit** — recorded here

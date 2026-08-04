@@ -45,7 +45,7 @@ unevidenced from the bundle alone.
 |---|---|---|
 | **II** — Language/compilers/platforms | **PASS** | No source change. Instrument verified on both Tier-1 (clang) and Tier-2 (MSVC) toolchains. |
 | **III** — Build & dependency toolchain | **PASS** | No new dependency. File API is built into CMake; JSON is read with the tree's existing means. |
-| **VI §2/§5** — Spec coverage discipline | **PASS** | **§5 (presence):** `spec.md` carries `## Normative References`, discharged the way 086 did (`specs/086-capi-include-isolation/spec.md:655-662`) — the FIX-normative set is empty (`grep -c "086\|087" spec/feature-catalogue.md` → 0, so `[const §VI.4]` is not engaged) and the governing constitutional/architectural authorities are named instead. *(Added at Gate A round 1; its absence was a direct `[const §VI.5]` violation.)* **§2 (citation format):** the inherited-artifact citations are repository-relative with clause identifiers, defined **once** in `contracts/system-include-interface.md` §4a and cited from `spec.md` FR-011 rather than restated. |
+| **VI §2/§5** — Spec coverage discipline | **PASS** (§5) · **N/A** (§2) | **§5 (presence):** `spec.md` carries `## Normative References`, discharged the way 086 did (`specs/086-capi-include-isolation/spec.md:655-662`) — the FIX-normative set is empty (`grep -c "086\|087" spec/feature-catalogue.md` → 0, so `[const §VI.4]` is not engaged) and the governing constitutional/architectural authorities are named instead. *(Added at Gate A round 1; its absence was a direct `[const §VI.5]` violation.)* **§2 (canonical `Spec ref` format): NOT ENGAGED.** §2 governs *"Every OFFICIAL row's `Spec ref`"* (`.specify/constitution.md:161`) — a field of the **catalogue**, not cross-artifact citation hygiene inside a spec bundle — and this feature adds no OFFICIAL row, on the same grep that disengages `[const §VI.4]` above. §2 is therefore not engaged for the same reason §4 is not. *(A note, not the discharge: the bundle's inherited-artifact citations are repository-relative with clause identifiers, defined **once** in `contracts/system-include-interface.md` §4a and cited from `spec.md` FR-011 rather than restated — sound practice, but not the practice §2 governs.)* *(Basis corrected at Gate A instance 2 round 2: the previous §2 basis asserted a discharge of an obligation §2 does not govern. Nothing violates §2, engaged or not; the §5 discharge and the row's verdict are unaffected.)* |
 | **VII §3** — TDD mandatory | **PASS** | The plan **mandates** writing the gate and observing the initial red before the first green — FR-007, SC-003 (four causes required). **Nine** red demonstrations are specified in contract §5 and required as delivery evidence. **Sequencing step 2** is the initial red and precedes the first green (step 3). *(Restated in the mandating voice at Gate A round 2 — the verdict and the count were right, the completed-state tense was not; nothing is implemented and `spec.md` is `Status: Draft`.)* |
 | **VII §4** — No code without a test | **PASS** | The deliverable *is* a test. |
 | **VII §8** — Label-selectable tests | **PASS** | Rides the existing `consumer` label; no new executable and no new registration. **FR-014 requires** the label's registration count to be asserted in CI before the run (contract §6), so label-selectability cannot silently degrade to selecting nothing. **The feature's edits outside `tests/` and `specs/` are four files**, recorded here because no article governs them directly and so that no file in the diff is uncovered by this table: `.github/workflows/tier1.yml`, `.github/workflows/tier2.yml` and `.github/workflows/tier3-libcxx.yml` (FR-014, contract §6a — every workflow that runs the witness, modelled on the `packaging` assertions at `tier1.yml:528-540` and `tier2.yml:371-384`), plus **`src/capi/CMakeLists.txt:63-67`** (FR-011, contract §4a row 4 — operational source documentation that would otherwise contradict the delivered mechanism). *(Re-derived at Gate A round 2: this row previously claimed the CI assertion **was already** made — it is not; `tier1.yml` mentions `consumer` only in comments at `:507`/`:509` and its sole count assertion is for `packaging` — and claimed `tier1.yml` was the **only** out-of-tree edit, which the §4a row-4 source edit added at round 1 already falsified.)* |
@@ -94,11 +94,14 @@ tests/consumer/
 ├── compare_system_includes.cmake   # NEW — the comparator, a standalone `cmake -P` script with TWO modes
 │                                   #   (contract C-6.1) — NOT an inline block in the driver:
 │                                   #   * compare  (reply-dir, leg, install-prefix, expectation, result-file)
-│                                   #     — parses the reply, normalises against the install prefix, compares
+│                                   #     — VALIDATES ITS ARGUMENTS FIRST (unknown leg or EMPTY expectation
+│                                   #     => LEG_ERROR, before the reply is located — the guard that makes
+│                                   #     data-model I3 a runtime property), then parses the reply,
+│                                   #     normalises against the install prefix, compares
 │                                   #     as an unordered set matched BY PATH in two stages, writes a result
 │                                   #     file naming that leg BEFORE terminating, and emits the COMPLETE
 │                                   #     token set: LEAK / DROP / RECLASSIFIED, or one of MISSING_REPLY /
-│                                   #     INPUT_ERROR as a pre-comparison termination
+│                                   #     INPUT_ERROR / LEG_ERROR as a pre-comparison termination
 │                                   #   * leg-set  (result-file list) — the C-6.4 "exactly two distinct
 │                                   #     known legs" assertion; LEG_ERROR. Separately invocable so
 │                                   #     demonstration #6a's missing-leg and duplicated-leg sub-cases are
@@ -171,7 +174,10 @@ had no step, and this project has a recorded incident of `/speckit-tasks` silent
 
 1. **Build the instrument as a standalone comparator, and the carrier that runs it.**
    `tests/consumer/compare_system_includes.cmake` with its **two `cmake -P` modes** — **compare**
-   (reply-dir / leg / install-prefix / expectation / result-file), implementing C-1's **two-stage,
+   (reply-dir / leg / install-prefix / expectation / result-file), which **validates its arguments first**
+   (an unknown `leg` or an **empty `expectation`** ⇒ `LEG_ERROR`, before the reply is located — the guard
+   that makes `data-model.md` I3 a runtime property rather than a property of the declared literal, C-6.4),
+   then implements C-1's **two-stage,
    match-by-`path`** algorithm, normalising against the staged prefix, writing a per-leg result that names the
    leg **before** terminating, and emitting the **complete** token set; and **leg-set** (result-file list),
    the C-6.4 assertion, made separately invocable so demonstration #6a's sub-cases need no tree edit. Plus
@@ -203,10 +209,13 @@ had no step, and this project has a recorded incident of `/speckit-tasks` silent
 6. **Red — missing reply, input error, and leg error.** Against a copy: delete the per-target reply (and,
    separately, the whole reply directory) → `MISSING_REPLY` naming the artifact, never read as "no includes".
    Truncate the per-target JSON so it is present-but-unparseable → `INPUT_ERROR`. Drive the shipped script
-   wrongly → `LEG_ERROR`, in **three** mandatory sub-cases, all pure `cmake -P` invocation with no tree or
-   reply edit: compare mode with an unknown `leg`; leg-set mode over **one** result file (missing leg); and
-   leg-set mode over the **same file twice** (duplicated leg). The missing-leg sub-case is the one C-6.4's
-   rationale is about and is **not** discharged by the unknown-leg one.
+   wrongly → `LEG_ERROR`, in **four** mandatory sub-cases, all pure `cmake -P` invocation with no tree or
+   reply edit: compare mode with an unknown `leg`; leg-set mode over **one** result file (missing leg);
+   leg-set mode over the **same file twice** (duplicated leg); and compare mode with an **empty
+   `expectation` argument**, every other argument correct. The missing-leg sub-case is the one C-6.4's
+   rationale is about and is **not** discharged by the unknown-leg one; the empty-expectation sub-case reds
+   at argument validation, before the reply is located, and is what demonstrates that `data-model.md` I3 is
+   a runtime property rather than a property of the declared literal.
    **Three distinct tokens for three distinct causes** —
    a corrupt reply and a mis-driven carrier are different defects, and one token for both would not
    discriminate them. → **FR-005, FR-008, FR-001a, SC-003, SC-004** · demonstrations #5, #6, #6a · contract
@@ -246,12 +255,17 @@ had no step, and this project has a recorded incident of `/speckit-tasks` silent
 **FR-009, FR-010, FR-010a** are discharged by measurement in `research.md` R6, transcribed there verbatim at
 Gate A round 1 (both platforms measured on the real consumer project before any artifact prescribed the
 mechanism; no scope-out is needed, and contract §1 records the toolchain scope of that measurement).
+**SC-006** — *"the observing mechanism produces a non-empty observation on both Linux and MSVC-under-Conan,
+recorded per platform, before any artifact prescribes it"* — is FR-009's success criterion and is discharged
+by that same R6 record; it is named here because every other SC is annotated on a step above (SC-002/003/004/
+005/007/008) or in `quickstart.md` (SC-001), and this block asserts its own completeness. *(SC-006 added at
+Gate A instance 2 round 1; the block accounted for FRs only.)*
 
 ## Complexity Tracking
 
 | Risk | Why plausible | Mitigation |
 |---|---|---|
-| The gate passes having measured nothing | The dominant failure mode; 086's Gate B found five P1s of this shape | Step 2 asserts a wrong expectation FIRST; the expected set is non-empty (R4) so empty ≠ pass — including a reply that exists and parses but yields zero entries, which `present` does **not** catch (`data-model.md` I3); a missing reply is FATAL (FR-005); the comparator is a named target, so deleting it fails the build (FR-006); and **FR-014 requires** the `consumer` label's registration count to be asserted in CI on all three workflows, so a lane that stops registering the witness fails instead of passing on zero selected tests *(mandated, not yet made — restated in the mandating voice at Gate A round 2)* |
+| The gate passes having measured nothing | The dominant failure mode; 086's Gate B found five P1s of this shape | Step 2 asserts a wrong expectation FIRST; the expected set is non-empty (R4) so empty ≠ pass — including a reply that exists and parses but yields zero entries, which `present` does **not** catch (`data-model.md` I3), and **`compare` rejects an empty `expectation` argument with `LEG_ERROR`** so I3's arithmetic cannot be voided by a mis-spelled expectation variable reaching it as ∅ (contract C-6.4, demonstration #6a sub-case *(iv)*); a missing reply is FATAL (FR-005); the comparator is a named target, so deleting it fails the build (FR-006); and **FR-014 requires** the `consumer` label's registration count to be asserted in CI on all three workflows, so a lane that stops registering the witness fails instead of passing on zero selected tests *(mandated, not yet made — restated in the mandating voice at Gate A round 2)* |
 | The instrument works on one platform only | **Exactly what happened to 086's R9** — measured on a Linux fixture, prescribed, then failed under Conan/MSVC after sign-off | **Already closed**: R6 measured MSVC-under-Conan on the real consumer project; results identical. FR-010a's scope-out is not needed |
 | Absolute paths make the comparison machine-specific | Observed paths embed the stage prefix, which differs per run and per platform (`/tmp/…` vs `C:/temp/…`) | Compare prefix-relative (R5); the File API emits forward slashes on both platforms (R6), so only the expected side needs normalising |
 | Hard-coded reply filename breaks at the next configure | Reply names carry a content hash | Glob `target-<name>-*.json` or read the index; never hard-code a reply name |
@@ -279,6 +293,19 @@ mechanism; no scope-out is needed, and contract §1 records the toolchain scope 
   mode's tuple, plus three P3s. Reviews:
   `research/reviews/codex_087-system-include-binding_gate_a_3_review.md`,
   `research/reviews/opus_087-system-include-binding_gate_a_3_adversarial_review.md`.
+- Instance 2 round 1 applied 2026-08-04: Codex P1=0 P2=1 P3=0; Opus post-judging P1=0 P2=1 P3=3. Root cause:
+  C-2's `LEG_ERROR` cause list, C-6.4's definition and §5 row 6a's mandatory sub-cases disagreed on how many
+  invocation faults exist and which are demonstrated — the empty-expectation cause was named once and carried
+  nowhere, degrading R7 guard #1 from mechanised to declared. Reviews:
+  `research/reviews/codex_087-system-include-binding_gate_a_i2_review.md`,
+  `research/reviews/opus_087-system-include-binding_gate_a_i2_adversarial_review.md`.
+- Instance 2 round 2 CONVERGED 2026-08-04: Codex P1=0 P2=0 P3=0; Opus post-judging P1=0 P2=0 P3=2 —
+  user-signed-off. Both residual P3s applied as sign-off edits: the Article VI §2 basis (misattributed — §2
+  governs the catalogue's `Spec ref` field and is not engaged, since 087 adds no OFFICIAL row; the PASS verdict
+  and the VI §5 discharge are unaffected), and the per-leg result file's location pinned to the sub-build tree
+  that `run_consumer_witness.cmake:46` wipes each run. Reviews:
+  `research/reviews/codex_087-system-include-binding_gate_a_i2_2_review.md`,
+  `research/reviews/opus_087-system-include-binding_gate_a_i2_2_adversarial_review.md`.
 
 ### Round 1 — disagreements
 

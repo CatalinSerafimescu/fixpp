@@ -294,11 +294,20 @@ Four findings that matter for implementation:
 
 **Decision: six independent guards, because "the gate observed nothing" is this feature's dominant risk.**
 *(Three at first draft; the fourth and fifth were added at Gate A round 1 and this enumeration was not swept
-until round 2. Guard 6 is the CI registration-count assertion from contract §6, titled "The last vacuity
-path". The remaining asymmetry is disclosed below rather than mis-stated as mechanised.)*
+until round 2. Guard 6 is the CI registration-count assertion from contract §6, titled "The last
+GATE-CLOSABLE vacuity path" — last **closable by a mechanised check**, not last in existence; §6 now
+enumerates the review-enforced residuals rather than claiming to be the only one. The remaining asymmetry is
+disclosed below rather than mis-stated as mechanised.)*
 
-1. **A non-empty expectation.** Unlike the three existing legs, the expected set here is non-empty (R4), so an
-   empty observation cannot equal it. Emptiness fails by arithmetic, not by a special case.
+1. **A non-empty expectation — and `compare` rejects an empty one.** Unlike the three existing legs, the
+   expected set here is non-empty (R4), so an empty observation cannot equal it. Emptiness fails by
+   arithmetic, not by a special case. **The arithmetic is a property of the expectation that reaches
+   `compare`, not of the literal declared in the tree**, so `compare` MUST reject an empty `expectation`
+   argument with `LEG_ERROR` at argument-validation time (contract C-6.4, demonstrated by §5 row 6a
+   sub-case *(iv)*): an expectation variable that expands to nothing, composed with an observation of zero
+   entries, would otherwise compare ∅ against ∅ and report green. That rejection is what makes this guard —
+   and `data-model.md` I3 — mechanised rather than declared. *(The cause was named in contract C-2 from the
+   first draft, but defined and demonstrated nowhere until Gate A instance 2 round 1.)*
 2. **Reply-existence check.** The reply directory and the per-target reply must exist and parse; absence is a
    `FATAL_ERROR` naming the missing file (FR-005). A File API query that was never created yields *no reply
    at all*, which is the realistic failure and must not read as "no includes".
@@ -312,7 +321,9 @@ path". The remaining asymmetry is disclosed below rather than mis-stated as mech
 5. **Exact-leg-set validation.** Success requires exactly two per-leg result files naming the distinct known
    legs `capi` and `service`; one file, the same file twice, or an unknown leg all red as `LEG_ERROR`
    (contract C-6.4, demonstrated by §5 row #6a). This is the anti-vacuity guard that prevents a `capi`-only
-   comparator from reporting green while FR-001a disappears.
+   comparator from reporting green while FR-001a disappears. These are the **leg** faults; C-6.4's fourth
+   `LEG_ERROR` cause — an empty `expectation` argument — is `compare`'s, not `leg-set`'s (`leg-set` never
+   sees an expectation), and it belongs to guard #1 above, whose mechanism it is.
 6. **The `consumer` label's registration count is asserted in CI, before the test step, on every workflow
    that runs the witness** — `tier1.yml`, `tier2.yml`, `tier3-libcxx.yml` (FR-014, contract §6/§6a). This is
    the only guard that sits **outside** the gate: `ctest -L` exits 0 when it selects nothing, so a lane where

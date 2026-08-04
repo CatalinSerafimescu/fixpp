@@ -171,6 +171,11 @@ permission below is confined to C-1's three.
   > is all C-2 checks; a populated-but-empty observation passes it. What rejects the empty observation is the
   > non-empty expectation (`data-model.md` I3): ∅ ≠ a non-empty declared set, so it fails by arithmetic as a
   > **DROP**. The two guards are easy to conflate and are stated separately here on purpose.
+  >
+  > **That arithmetic holds only while the expectation *reaching* `compare` is non-empty**, which is why the
+  > empty-expectation cause above is a `LEG_ERROR` and not a documentation note: ∅ compared against ∅ is green
+  > having asserted nothing. C-6.4 defines the guard that makes I3 a **runtime** property rather than a
+  > property of the literal declared in the tree.
 - **C-3 Prefix-relative.** Both sides are compared with the install prefix stripped. The File API emits
   forward slashes on **both** platforms, so only the expected side needs constructing with `/`. An observed
   entry outside that prefix remains in its canonical absolute form and therefore cannot match the closed
@@ -197,12 +202,22 @@ permission below is confined to C-1's three.
 
      | mode | arguments | what it does |
      |---|---|---|
-     | **compare** | `(reply-dir, leg, install-prefix, expectation, result-file)` | locates and parses that leg's reply, normalises observed paths relative to `install-prefix` per C-3, compares per C-1, writes one per-leg result file naming that `leg`, and emits the **complete** token set C-1/C-2 produce for that leg |
+     | **compare** | `(reply-dir, leg, install-prefix, expectation, result-file)` | **validates its arguments first** — an unknown `leg` or an **empty `expectation`** ⇒ `LEG_ERROR`, before any reply is located (C-6.4) — then locates and parses that leg's reply, normalises observed paths relative to `install-prefix` per C-3, compares per C-1, writes one per-leg result file naming that `leg`, and emits the **complete** token set C-1/C-2 produce for that leg |
      | **leg-set** | `(result-file list)` | the C-6.4 assertion over already-collected per-leg results; emits `LEG_ERROR` or nothing |
 
      `compare` MUST write its per-leg result file **before** it terminates, including on a red comparison.
      Otherwise a `message(FATAL_ERROR)`-first implementation can emit a token and leave no per-leg result
      behind — the exact anti-vacuity hole C-6.2 exists to prevent.
+
+     **Where the result files live.** The `result-file` path is the carrier's to choose, but the path **the
+     carrier passes** MUST lie
+     **under the sub-build's binary directory** — `CMAKE_BINARY_DIR` as `tests/consumer/CMakeLists.txt` sees
+     it, which is the `-B` directory the driver configures (`run_consumer_witness.cmake:80`, `_sub_build` at
+     `:34`) and therefore part of the tree `file(REMOVE_RECURSE "${_stage}" "${_sub_build}")` wipes at the
+     **start** of every run (`:46`). This is what makes C-6.4's *"exactly two"* an assertion about **this**
+     run: written anywhere the wipe does not reach, two files left behind by a previous run would satisfy the
+     count. *(Location pinned at Gate A instance 2 round 2 — it was previously unstated, so the property that
+     closed the stale-result read was incidental rather than required.)*
 
      **Both modes live in the one script on purpose.** It keeps C-6.3's guarantee intact without a second
      file — deleting `compare_system_includes.cmake` still fails the carrier's own command, and the leg-set
@@ -255,24 +270,58 @@ permission below is confined to C-1's three.
 
      Before reporting success the carrier MUST assert it collected **exactly two** per-leg results with
      **distinct, known** leg names, and fail (**`LEG_ERROR`**) on a missing, duplicate or unknown leg.
+     The two are necessarily **this run's**: C-6.1 pins the carrier's result-file paths under the sub-build
+     tree that `run_consumer_witness.cmake:46` wipes at the start of every run, so the count can never be met
+     by files a previous run left behind.
+     **Those are three of C-2's four `LEG_ERROR` causes — the leg faults. The fourth, an empty expectation,
+     is `compare`'s and is defined immediately below; this paragraph is not the whole cause list.**
      `leg-set` therefore reads the `leg` recorded in each per-leg result file; without that field it cannot
      distinguish "one file twice" from "two distinct legs". Without this assertion a comparator implemented
      for `capi` alone runs through an already-required target and reports green, silently deleting FR-001a and
      half of SC-001.
 
-     **That assertion MUST live in the script's `leg-set` mode (C-6.1), not inline in the carrier's command
-     declaration**, and the mode MUST be invocable directly as `cmake -P` over an arbitrary list of per-leg
-     result files. The reason is demonstrability, and it is the one this feature exists to serve: §5 row 6a
-     requires three mandatory sub-cases — an unknown leg, **one leg missing**, and **a leg duplicated** — and
-     §5 defines the `invocation` class as driving the shipped comparator/carrier wrongly *with no tree or
-     reply mutation at all*. With leg enumeration and aggregation buried in the carrier's declaration in
+     **The fourth `LEG_ERROR` cause, and it belongs to `compare` rather than to `leg-set`: an EMPTY
+     EXPECTATION ARGUMENT.** `compare` MUST reject an empty `expectation` argument with **`LEG_ERROR`**,
+     at **argument-validation time** — before the reply is located and before C-1 runs, so it remains an
+     exclusive pre-comparison termination in the sense of §3 (`LEG_ERROR` never co-occurs with a C-1 token).
+     C-2's cause list names four invocation faults; the three above are leg faults, this is the fourth, and
+     it is stated here because C-2 delegates the whole list to this clause.
+
+     **Why it is a mechanism and not a note.** `data-model.md` I3 — the expectation is non-empty, so an
+     observation of ∅ "fails by arithmetic" as a `DROP` — is the feature's headline anti-vacuity property
+     (`research.md` R7 guard #1). The arithmetic is a property of the expectation **that actually reaches
+     `compare`**, not of the literal declared in `tests/consumer/CMakeLists.txt`: a mis-spelled
+     `${FIXPP_087_EXPECTED_*}` reference expands to nothing, and a quoting error in the carrier's command can
+     drop the argument entirely. Composed with an observation that parses to zero entries, an unguarded
+     `compare` then compares **∅ against ∅ and reports green having asserted nothing** — the exact outcome
+     I3 is written to make impossible. `leg-set` cannot cover this: it never sees an expectation. With this
+     rejection in place I3 is a **runtime** invariant enforced by the shipped script; without it I3 would be
+     a review-time invariant like C-4 / I4 and would have to be labelled one. *(Added at Gate A instance 2
+     round 1, where C-2 named this cause and nothing defined or demonstrated it.)*
+
+     **The exactly-two-legs assertion MUST live in the script's `leg-set` mode (C-6.1), not inline in the
+     carrier's command declaration**, and the mode MUST be invocable directly as `cmake -P` over an arbitrary
+     list of per-leg result files. The reason is demonstrability, and it is the one this feature exists to
+     serve: §5 row 6a requires **four** mandatory sub-cases — an unknown leg, **one leg missing**, **a leg
+     duplicated**, and an **empty expectation** — and §5 defines the `invocation` class as driving the
+     shipped comparator/carrier wrongly *with no tree or reply mutation at all*. With leg enumeration and
+     aggregation buried in the carrier's declaration in
      `tests/consumer/CMakeLists.txt`, the missing-leg and duplicated-leg sub-cases could be induced **only by
      editing the tree** — which that class forbids. An implementer facing that would demonstrate the
      unknown-leg case, tick the row, and leave undemonstrated exactly the assertion this clause's own
      rationale is about (the `capi`-only comparator above). That is this feature's dominant failure mode
-     reproduced inside its own gate. With `leg-set` mode invocable, all three sub-cases are pure invocation:
-     pass one result file (missing), pass the same file twice (duplicate), pass a result naming an unknown
-     leg. *(Added at Gate A round 2.)*
+     reproduced inside its own gate.
+
+     **Which mode induces which sub-case — §5 row 6a is the authority on the induction, and this enumeration
+     matches it.** `leg-set`'s separate invocability is what makes the *missing-leg* and *duplicated-leg*
+     sub-cases pure invocation: pass one result file, pass the same file twice. The *unknown-leg* and
+     *empty-expectation* sub-cases are **`compare`** invocations — both are argument faults `compare` rejects
+     before a reply is located, and an unknown leg is therefore rejected before any per-leg result file
+     naming one could exist for `leg-set` to read. `leg-set` MUST still validate that the legs it reads are
+     known, but that branch is belt-and-braces over a state the shipped path cannot produce, which is why §5
+     row 6a demonstrates the `compare` form instead. *(Mode split added at Gate A round 2; this enumeration
+     reconciled with row 6a — it previously attributed all sub-cases to `leg-set`, contradicting row 6a on
+     this same page — and the empty-expectation sub-case added, at Gate A instance 2 round 1.)*
   5. **The demonstrations invoke the shipped script.** Every §5 row that induces a fault does so against
      `compare_system_includes.cmake` itself, not against a re-implementation — a red produced by a bespoke
      harness proves nothing about the shipped path.
@@ -398,7 +447,7 @@ one, and every class is defined here:
 | 4 | **reclassified** | reply-side | copy a real reply directory; in the copy, flip one entry's `isSystem` from `true` to `false`, **leaving both paths identical**; invoke the shipped script against the copy, passing the same install prefix the original configure used | **`RECLASSIFIED`**, and **that token alone** | red naming the path and both classifications, with **no** accompanying `LEAK` or `DROP` — the path matches on both sides, so C-1 stage 1 claims the pair and removes it, leaving stage 2 nothing. **This row is why C-1's staging is normative:** under an unstaged reading of `data-model.md` I2's `(path, isSystem)` canonicalisation the same mutation fires all three tokens at once. This is also the **only** demonstration that exercises FR-003a's classification leg — `isSystem` is uniformly `true` in the passing state (`research.md` R4), so no happy-path run varies it, and a comparator that parsed `path` and discarded `isSystem` would satisfy every other row |
 | 5 | **missing reply** | reply-side | copy a real reply directory; delete the per-target `target-<name>-*.json` from the copy — and, as a second sub-case, delete the whole reply directory; invoke the shipped script against each, passing the same install prefix the original configure used | **`MISSING_REPLY`** | red naming the missing artifact — **not** read as "no includes", and distinct from #6's token |
 | 6 | **input error / counter-test** | reply-side | copy a real reply directory; truncate the per-target JSON mid-object in the copy so it is **present but unparseable**; invoke the shipped script against the copy, passing the same install prefix the original configure used | **`INPUT_ERROR`** | red naming the file and the parse failure, **distinguishable from `MISSING_REPLY` and from every C-1 token**. This row is FR-008 / SC-004 — an unrelated failure reported distinguishably from a genuine violation |
-| 6a | **leg error / counter-test** | invocation | **three mandatory sub-cases, all pure `cmake -P` invocation** (C-6.4): *(i)* **compare** mode with an unknown `leg`; *(ii)* **leg-set** mode over **one** result file — the missing-leg case; *(iii)* **leg-set** mode over the **same result file twice** — the duplicated-leg case. No tree edit and no reply mutation in any of the three | **`LEG_ERROR`** | red naming the offending leg, **distinguishable from `INPUT_ERROR`** — a corrupt reply and a mis-driven carrier are different defects. Sub-case *(ii)* is the one that matters most and it is **not** discharged by *(i)*: C-6.4's own rationale is the missing-leg case — *"a comparator implemented for `capi` alone runs through an already-required target and reports green, silently deleting FR-001a and half of SC-001."* All three sub-cases were only reachable by editing the carrier's declaration until the leg-set assertion was made separately invocable at Gate A round 2 |
+| 6a | **leg error / counter-test** | invocation | **four mandatory sub-cases, all pure `cmake -P` invocation** (C-6.4): *(i)* **compare** mode with an unknown `leg`; *(ii)* **leg-set** mode over **one** result file — the missing-leg case; *(iii)* **leg-set** mode over the **same result file twice** — the duplicated-leg case; *(iv)* **compare** mode with an **empty `expectation` argument**, every other argument correct. No tree edit and no reply mutation in any of the four | **`LEG_ERROR`** | red naming the offending leg (*(i)*–*(iii)*) or the empty expectation (*(iv)*), **distinguishable from `INPUT_ERROR`** — a corrupt reply and a mis-driven carrier are different defects. Sub-case *(ii)* is not discharged by *(i)*: C-6.4's own rationale is the missing-leg case — *"a comparator implemented for `capi` alone runs through an already-required target and reports green, silently deleting FR-001a and half of SC-001."* Sub-case *(iv)* is what makes `data-model.md` I3 a **runtime** property: it must red **before** the reply is located, so it reds even against a correct reply, and it is the only demonstration of the guard standing between an empty expectation and a green ∅-vs-∅ comparison. Sub-cases *(ii)* and *(iii)* were only reachable by editing the carrier's declaration until the leg-set assertion was made separately invocable at Gate A round 2; *(iv)* was added at Gate A instance 2 round 1 |
 | 7 | **carrier deleted** | package-side | delete the **new 087 target** `probe_system_include_contract` from `tests/consumer/CMakeLists.txt`; as a second sub-case delete `tests/consumer/compare_system_includes.cmake` and leave the target | **build failure by name** | with the target gone: `ninja: error: unknown target 'probe_system_include_contract'` (Ninja's phrasing — *not* Make's "No rule to make target"). With only the script gone: the target's own command fails. **Deleting an 086 target would re-prove an 086 obligation, not this one** |
 | 8 | **service leg** | package-side | restore the **pre-086** service `$<INSTALL_INTERFACE:>` value in `src/service/CMakeLists.txt` **alone** — the exact diff is in the box below, with its `git show` provenance | **`LEAK` *and* `DROP`** (service leg) — both, per C-1's multi-token rule | red naming **`include` as observed-but-unexpected** (LEAK) **and `include/service-iface` as expected-but-absent** (DROP), in one comparison. `include/capi` matches on both sides and is removed by C-1 stage 1. **Plus the capi leg's own result from the same invocation**, still exactly `include/capi` — emitted because the carrier runs `capi` first and `compare` writes that result before the later service red terminates the build (§2b, C-6.2). Reverting capi reds both legs and proves nothing about service (086 FR-011e) |
 | — | **controls** | — | all restored | — | green, both legs, exactly two leg results (C-6.4) |
@@ -511,10 +560,11 @@ one, and every class is defined here:
 
 ---
 
-## 6. The last vacuity path — the `consumer` label's registration count
+## 6. The last GATE-CLOSABLE vacuity path — the `consumer` label's registration count
 
 §5's rows all assert things *inside* a gate that runs. One path remains by which the gate reports nothing
-having asserted nothing, and it sits **outside** every §5 row: the witness is registered only inside
+having asserted nothing that **the gate itself could close** — and it is the only one closable in CI. It sits
+**outside** every §5 row: the witness is registered only inside
 `if(FIXPP_BUILD_CODEGEN_TOOL)` nested in `if(FIXPP_BUILD_TESTS)` (`CMakeLists.txt:401`), and
 `ctest -L`/`-R` **exits 0 when the filter matches nothing**. Every CI step that runs the witness does so with
 **no count assertion for the `consumer` label** — `tier1.yml:513`/`:544`, `tier2.yml:363`/`:389`,
@@ -522,6 +572,16 @@ having asserted nothing, and it sits **outside** every §5 row: the witness is r
 existing and the lane reports green.
 
 `quickstart.md` §0 names this hazard, but a quickstart banner binds a **human**; it does not bind CI.
+
+> **"Last" means last *closable by the gate*, not last in existence — the residual set is REVIEW-enforced and
+> is enumerated, not implied.** Two other paths sit outside every §5 row and neither is closable from inside
+> the gate: the carrier's own `leg-set` invocation is not self-policing — deleting that one line from
+> `tests/consumer/CMakeLists.txt` leaves the build green in every state the gate can reach (`research.md` R7's
+> *"one last turtle"* box) — and the computed-expectation prohibition is a human inspection (C-4 above,
+> `data-model.md` I4). Both are disclosed as review-time invariants where they are stated, and neither is
+> misdescribed as mechanised. *(This paragraph read "**One** path remains… **the last** vacuity path" until
+> Gate A instance 2 round 1. §6's substance and prescription are unchanged; only the singularity framing was
+> false, and this project has twice found real defects behind exhaustiveness claims.)*
 
 ### 6a. Scope — all three workflows, because the hazard is per lane and uniform
 
@@ -580,5 +640,6 @@ having run zero witnesses"*:
 
 **Why prescribe rather than scope out.** This feature's identity is closing vacuity paths; the assertion is
 small, the count is known, and it is the last enumerated path by which this gate can report green having
-observed nothing. Scoping it out as inherited from 086/084 CHK063 would be defensible for a feature about
+observed nothing **that a mechanised check can close at all** — the two residuals above are review-enforced
+by construction. Scoping it out as inherited from 086/084 CHK063 would be defensible for a feature about
 something else. It is not defensible for this one.
