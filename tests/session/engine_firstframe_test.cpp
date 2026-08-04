@@ -566,10 +566,12 @@ TEST(EngineFirstFrameTest, PostHandshakeOverBudgetClosedByByteBudget) {
     // arm, not the deadline.
     EXPECT_LT(measured_ms, 2000)
         << "SC-011 (FR-014) [#228]: the close arrived after " << measured_ms
-        << "ms. The 4096-byte kFirstFrameMaxBytes budget is exceeded once the "
-        << "cumulative read reaches the budget (possibly over more than one "
-        << "read, before the next Framer feed), so a live budget rejects this "
-        << "peer immediately; a close near 5000ms means the budget did NOT fire "
+        << "ms. This peer sends 4097 bytes against a 4096-byte "
+        << "kFirstFrameMaxBytes, so it reaches the rejection boundary under "
+        << "BOTH the current >= implementation and the intended > semantics "
+        << "(issue #233) — possibly over more than one read, before the next "
+        << "Framer feed. A live budget therefore rejects this peer "
+        << "immediately; a close near 5000ms means the budget did NOT fire "
         << "and the connection was reclaimed by kFirstFrameDeadline instead.";
 }
 
