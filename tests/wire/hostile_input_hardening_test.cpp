@@ -124,10 +124,11 @@ TEST(HostileInputHardening, CountedDataExactFrameEndSwallowsChecksumRejectedInde
 //
 // NOTE — this is a COVERAGE test, not a mutation-proof pin. Both this guard and
 // the `end >= n` guard below it return wire_invalid_field_format, and `end >= n`
-// subsumes every case this one catches on a 64-bit size_t, so deleting the
-// subtraction guard leaves this assertion green. What it pins is the boundary
-// (8 accepted-into-the-next-guard vs 9 rejected here) and the fact that the path
-// executes at all; the wrap it defends against is unobservable on this host.
+// subsumes every case this one catches on a 64-bit size_t. Verified by deleting
+// the subtraction guard outright: this test and its saturated sibling both stay
+// GREEN. What they pin is the boundary (8 falls through to the next guard, 9 is
+// rejected here) and the fact that the path executes at all; the size_t wrap it
+// defends against is unobservable on a 64-bit host.
 TEST(HostileInputHardening, CountedDataDeclaredLengthPastFrameEndRejectedIndex) {
     auto buf = make_raw_frame(
         "95=9\x01"
@@ -420,7 +421,10 @@ TEST(HostileInputHardening, InflatedGroupCountClampedToEntryCountInReserveBound)
     auto const& t = mv->offsets();
 
     // Setup precondition: the declared count must exceed the entry count, or the
-    // clamp is not the thing being exercised.
+    // clamp is not the thing being exercised. t.size() is 8 here — build() scans
+    // the WHOLE frame, so the three envelope fields (8=, 9=, 10=) are entries
+    // alongside the five body fields. Deriving the expectation from t.size()
+    // rather than hardcoding 8 keeps that off the assertion.
     ASSERT_LT(t.size(), 999U) << "test setup: declared count must exceed the entry count";
 
     EXPECT_EQ(fixpp::wire::reserve_bound_access_for_testing::get(t),
