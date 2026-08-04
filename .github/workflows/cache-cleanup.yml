@@ -67,12 +67,35 @@ on:
   # is ~14 GB against a 10 GB cap — still evicting, just half as fast.
   #
   # Firing on the tiers' COMPLETION instead puts the sweep after the saves, which
-  # is the only ordering that leaves one entry per leg. Names must match the
-  # `name:` of each tier workflow exactly.
+  # is the only ordering that leaves one entry per leg.
+  #
+  # ⚠️ These entries are NOT literal strings — GitHub runs them through its
+  # FILTER-PATTERN parser, where `+` means "one or more of the preceding". The
+  # unescaped `libc++` below was therefore a malformed pattern (`+` quantifying
+  # an already-quantified `c+`), and GitHub rejected the whole trigger with:
+  #
+  #   Encountered an issue parsing workflow trigger(s) "tier 3 — linux libc++ ci"
+  #   in a workflow ".github/workflows/cache-cleanup.yml".
+  #
+  # The failure is at BUILD time, before trigger filters are evaluated, so it
+  # produced one "(Unknown event)" startup_failure run per completed workflow —
+  # 15-20 per push to main — while `push`/`pull_request_target` kept working
+  # because they parse no patterns. Net effect: this workflow_run leg, the whole
+  # point of the change, never fired once between a5ae671f and this commit.
+  #
+  # SINGLE quotes are load-bearing: YAML single-quoted scalars keep backslashes
+  # literal, so the parser receives `libc\+\+`. The double-quoted form
+  # "libc\+\+" is INVALID YAML (`\+` is not a legal double-quoted escape); its
+  # valid equivalent would need "libc\\+\\+".
+  #
+  # Names must otherwise match the `name:` of each tier workflow exactly.
   workflow_run:
-    workflows: ["Tier 1 — Linux CI", "Tier 2 — Windows CI", "Tier 3 — Linux libc++ CI"]
+    workflows:
+      - 'Tier 1 — Linux CI'
+      - 'Tier 2 — Windows CI'
+      - 'Tier 3 — Linux libc\+\+ CI'
     types: [completed]
-    branches: ["main"]
+    branches: ['main']
 
   workflow_dispatch:
 
