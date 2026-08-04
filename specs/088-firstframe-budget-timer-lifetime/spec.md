@@ -282,23 +282,34 @@ first post-connect (resp. post-handshake) operation is not cancelled.
 - **FR-006**: A deadline-timer completion handler MUST NOT cancel a transport that has already been
   handed to a live `Session`. A successfully established session MUST NOT be torn down by the expiry
   of the pre-session deadline that it beat.
-- **FR-014**: The same joined-lifetime property MUST hold at the three transport timer sites: a
-  connect-timeout or handshake-timeout expiry MUST NOT cancel a socket after its connect or handshake
-  has already completed successfully. *(Q3 class-fix; these sites capture `this` so they have no
-  dangle leg — the requirement is the late-cancel leg only.)* **Each of the three MUST carry its own
-  same-drain witness** (C4); an equivalence-by-inspection argument does not discharge this.
+- **FR-014**: At the three transport timer sites, a connect-timeout or handshake-timeout expiry MUST
+  NOT cancel a socket after its connect or handshake has already completed successfully. **The
+  mechanism is `/plan`'s choice, per site** — these sites capture `this`, so they have **no dangle
+  leg**, and the joined form chosen for FR-005 is not automatically the right remedy here: a
+  per-attempt epoch or generation check inside the handler closes the late-cancel leg without
+  disturbing the existing cancellation-state plumbing, which at
+  `src/transport/asio_plain_transport.cpp:138-144` already installs an OUT filter that any `||`
+  composition would have to compose with. `/plan` MUST state the mechanism chosen for each site and
+  why. **Each of the three MUST carry its own same-drain witness** (C4); an
+  equivalence-by-inspection argument does not discharge this.
 - **FR-015**: `Engine::stop()` issued while a first-frame read is in flight MUST still abort that
   read promptly, reclaim the accept slot, and tear down cleanly under the sanitizer matrix — and this
   MUST be pinned by a **dedicated** regression test, not inferred from existing engine-stop coverage
   (C2). The joined form introduced by FR-005 MUST NOT create an operation that outlives a stop.
 - **FR-016**: `read_first_frame_bounded` MUST be reachable from tests directly, via an **internal
-  `detail` header** (C3), so the same-drain scenarios of FR-005/FR-006 can be constructed
-  deterministically rather than awaited probabilistically. That header MUST NOT be installed and MUST
-  NOT become part of the public surface (FR-012 still holds). No `FIXPP_TEST_HOOKS`-gated branch is
-  added to the accept path for this purpose.
+  header under `src/session/`** (C3), so the same-drain scenarios of FR-005/FR-006 can be constructed
+  deterministically rather than awaited probabilistically. The precedent is exact:
+  `scan_first_frame_ids.hpp` lives at `src/session/scan_first_frame_ids.hpp` — inside `src/`, not
+  `include/` — so it is outside the install set by construction and FR-012's empty public-surface
+  claim holds without any install-list work. No `FIXPP_TEST_HOOKS`-gated branch is added to the
+  accept path for this purpose.
 - **FR-007**: The unreachable duplicate budget check at `src/session/engine.cpp:408-411` MUST be
   eliminated rather than maintained in parallel with its live twin — the delivered code MUST have a
-  single place where the budget decision is taken.
+  single place where the budget decision is taken, and that place MUST be **after** the framing step
+  of the same iteration (i.e. at the foot of the loop body, past the frame-found return). This
+  placement is not cosmetic: it is what guarantees `buf.size() <= max_bytes` on entry to every
+  subsequent clamp evaluation, and therefore what makes FR-013's `max_bytes + 1 - buf.size()`
+  underflow-free and always `>= 1`. Moving the decision elsewhere invalidates FR-013's proof.
 - **FR-008**: The production comments that state the delivered contract MUST be corrected in the
   same change — specifically the `:853` claim that 4096 bytes "covers any valid FIX Logon message"
   and the `:373-375` invariant list, both of which describe the pre-fix behaviour.
@@ -357,9 +368,22 @@ first post-connect (resp. post-handshake) operation is not cancelled.
 - **SC-008**: All four enumerated timer-handler sites are fixed, and the delivered census in the
   artifacts matches the four in this spec (or records the difference). No enumerated site is silently
   left out.
-- **SC-012**: A peer whose first read delivers a complete, valid Logon at a cumulative size **past**
-  the byte budget establishes a session. *(This is the criterion the comparison-only fix would fail —
-  it is what distinguishes the delivered invariant. RED against pre-fix source.)*
+- **SC-012**: A session establishes when the chunk that pushes the cumulative size to
+  `max_bytes + 1` is **also** the chunk that completes the first frame. The witness MUST use
+  **fragmented delivery** — e.g. 1000 bytes, then 3097 bytes, with the Logon ending at byte 3500 —
+  because with the C1 clamp a *single* delivery can never exceed `max_bytes`, so a single-write
+  witness cannot reach this case at all. *(RED against pre-fix source. See the discrimination note
+  below — this is the only criterion that separates the delivered invariant from the rejected
+  comparison-only fix, and it is easy to write a version that separates nothing.)*
+
+> **Discrimination note — SC-001 and SC-012 test different things, and one of them is easy to get
+> wrong.** SC-001 (single delivery, cumulative exactly `max_bytes`, frame present) is RED against the
+> **pre-fix** `>=` source, so it discharges FR-010 — but it passes under the *rejected*
+> comparison-only fix too, so it does **not** demonstrate that the delivered invariant was chosen.
+> Only SC-012's fragmented shape does: at cumulative `max_bytes + 1`, budget-before-frame rejects and
+> frame-before-budget returns the Logon. A test suite that covers only the `== max_bytes` case is
+> green, RED-proven, and still blind to which of the two fixes shipped
+> ([[feedback_subset_check_cannot_see_symmetric_omission]]).
 - **SC-013**: The worst-case buffered size for a pre-session connection is **`kFirstFrameMaxBytes + 1`**
   (4097) — demonstrably not exceeded by any sequence of peer writes, and strictly tighter than the
   `+ <one read-buffer>` that the reordering alone would have allowed. *(FR-013 / C1.)*
@@ -373,8 +397,8 @@ first post-connect (resp. post-handshake) operation is not cancelled.
 - **SC-016**: The same-drain witnesses for SC-005/SC-006 are deterministic — the ordering under test
   is constructed by the test, not awaited. No witness in this feature depends on winning a timing
   race. *(FR-016 / C3.)*
-- **SC-017**: The `detail` header added by FR-016 is not installed; the installed package's headers
-  are byte-identical to `main`'s. *(FR-012 / FR-016 / C3.)*
+- **SC-017**: The internal header added by FR-016 sits under `src/session/` and is therefore not
+  installed; the installed package's headers are byte-identical to `main`'s. *(FR-012 / FR-016 / C3.)*
 - **SC-009**: The full sanitizer ctest matrix (ASan / UBSan / TSan) is green with 0 findings, and
   the `linux-clang-debug` local build gate is green.
 - **SC-010**: The public surface delta is **empty** — no header change, no new or removed error
@@ -535,9 +559,11 @@ completion cannot be reliably steered into the same drain as a 5000 ms expiry. T
 probabilistic, and a race a test merely fails to observe is not evidence
 ([[feedback_overlap_witness_needs_stimulus_held_until_witnessed]]).
 
-**Carried obligation.** The exposure is an internal `detail` header, not public API — FR-012's
-empty-public-surface claim must remain true, and the plan must say where the header lives and that
-it is not installed.
+**Where it lives — settled, not left to `/plan`.** `scan_first_frame_ids.hpp` sits at
+`src/session/scan_first_frame_ids.hpp`, inside `src/`, not under `include/`. Following that precedent
+puts the new header outside the install set *by construction*, so FR-012's empty-public-surface claim
+and SC-017 hold with no install-list change. Putting it under `include/fixpp/session/detail/` would
+work too but would make SC-017 real work instead of a tautology — take the precedent.
 
 ### C4 — How much witness coverage do the transport sites owe? → **One pin per site, all three**
 
@@ -580,9 +606,35 @@ with **two** mechanisms instead of one, and the suppression flag inherits its ow
 ordering question (when is `retired` observed relative to the queued handler?) — i.e. it replaces the
 bug with a smaller instance of the same reasoning burden.
 
+**Feasibility verified against the pinned asio (1.38.0), not assumed.** The mechanism was checked in
+the shipped headers before this decision was locked:
+
+- `operator||` is `make_parallel_group(co_spawn(…), co_spawn(…)).async_wait(wait_for_one_success(), deferred)`
+  (`asio/experimental/awaitable_operators.hpp:258-264`). `parallel_group::async_wait` completes only
+  when **every** operation has finished — so the joined-lifetime property FR-005 needs is
+  *structural*, not incidental.
+- `wait_for_one_success()` defaults to `cancellation_type::all`
+  (`asio/experimental/cancellation_condition.hpp:67-68`), which includes `terminal`.
+- The losing arm honours it: `ssl::stream::async_read_some` documents cancellation support for
+  `terminal` and `partial` (`asio/ssl/stream.hpp:843-849`), and `basic_stream_socket::async_read_some`
+  supports `terminal`/`partial`/`total`. Both `asio_plain_transport::async_read_some`
+  (`src/transport/asio_plain_transport.cpp:191-197`) and `asio_tls_transport::async_read_some`
+  (`src/transport/asio_tls_transport.cpp:1129-1134`) open with
+  `reset_cancellation_state(enable_total_cancellation())`, so the forwarded signal is accepted and
+  reaches the underlying operation, which returns `operation_aborted` →
+  `transport_read_cancelled`.
+
+**Caveat `/plan` must handle, found in the same read.** `wait_for_one_success`'s disposition overload
+returns `cancellation_type::none` when the winning arm completed with an **error**
+(`cancellation_condition.hpp:87-91`). The transports return `expected_t` rather than throwing, so the
+normal read-failure path still cancels the timer — but if the read arm's coroutine *throws*, the
+timer arm is not cancelled and the group waits out the full deadline before retiring. Bounded (5 s),
+not unbounded, but it is a latency path that does not exist today and the plan must state whether it
+is reachable.
+
 **Constraint carried forward.** The joined form must remain correct under `Engine::stop()`'s
-`cancellation_type::total` (see Edge Cases) — the `||` composition must not create an operation that
-outlives a stop. `/plan` must show this, not assert it.
+`cancellation_type::total` (see Edge Cases and FR-015) — the composition must not create an operation
+that outlives a stop. `/plan` must show this, not assert it.
 
 ### Q3 — Does the census scope include the three transport sites? → **Fix all four (class-fix)**
 
