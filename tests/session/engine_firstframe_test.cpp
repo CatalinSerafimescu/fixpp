@@ -416,18 +416,16 @@ TEST(EngineFirstFrameTest, AcceptLoopRunsContinuously) {
 // the raw-TCP probes above already pin — asserting only that is precisely the
 // proxy #228 reports. Requiring elapsed >= 4700ms is what makes this witness
 // reachable ONLY through something close to the 5s deadline, not the 1500ms
-// handshake bound. [gate-b/r1 FQ-3a] Honest claim: this test pins the Step-3
-// close into a measured band — a deadline moved to <= 4500ms goes RED (see
-// FQ-3c below for the lower bound). It CANNOT distinguish 5000ms from
-// 6000ms: with only a lower bound, `kFirstFrameDeadline: 5000 -> 8000`
-// still satisfies elapsed >= 4700ms and survives GREEN. Closing that gap
-// would need a production clock/timer seam on read_first_frame_bounded,
-// which is a behaviour change triggering a real Gate A (Article XVII §1 —
-// concurrency/cancellation) and is rejected here as out of scope for a
-// tests-only remediation; see issue #233. An upper band to at least catch
-// gross widening is deferred pending a linux-clang-tsan measurement (the one
-// lane that now runs ctest with execution.jobs: 2) rather than written from
-// a debug-lane extrapolation.
+// handshake bound. [gate-b/r1 FQ-3a/FQ-3b] Honest claim: this test pins the
+// Step-3 close into a measured band [4700, 7000)ms — a deadline moved to
+// <= 4500ms goes RED (FQ-3c, the EXPECT_GE below), and a deadline widened to
+// >= 8000ms (measured ~8000ms) also goes RED (FQ-3b, the EXPECT_LT below;
+// see that assertion's comment for the measurement provenance). It still
+// CANNOT distinguish 5000ms from, say, 6000ms — a wall-clock witness has
+// that limit. Closing THAT gap would need a production clock/timer seam on
+// read_first_frame_bounded, which is a behaviour change triggering a real
+// Gate A (Article XVII §1 — concurrency/cancellation) and is rejected here
+// as out of scope for a tests-only remediation; see issue #233.
 //
 // Upper bound is deliberately loose (timers fire late under load, never early);
 // the probe's own self-deadline caps the run.
@@ -485,6 +483,22 @@ TEST(EngineFirstFrameTest, PostHandshakeStallClosedByFirstFrameDeadline) {
         << "Something earlier closed this connection, so this test would not "
         << "detect the removal of the first-frame deadline — exactly the "
         << "proxy-assertion defect this witness exists to rule out.";
+    // [gate-b/r1 FQ-3b] Upper band, measurement-gated per the triage: measured
+    // 5077ms on linux-clang-tsan (ctest -R, i.e. this test running ALONE),
+    // 5070ms on linux-clang-debug, 5124ms on MSVC debug — ~1.9s of headroom
+    // under 7000. Limitation: the TSan figure is from a filtered single-test
+    // run; linux-clang-tsan is the one lane that runs ctest with
+    // execution.jobs: 2 (CMakePresets.json, PR #227), so a real concurrent CI
+    // run could measure later than 5077ms. 7000ms is sized to absorb that
+    // un-measured lateness — it is not a claim that 5077ms is the worst case.
+    // 7000 is also the largest value that still kills the `kFirstFrameDeadline:
+    // 5000 -> 8000` mutant, which is the entire point of this leg; it must not
+    // drift upward past this without re-deriving from a fresh measurement.
+    EXPECT_LT(measured_ms, 7000)
+        << "SC-011 (FR-014) [#228]: the close arrived after " << measured_ms
+        << "ms. kFirstFrameDeadline is configured at 5s; a close this late "
+        << "means the deadline is no longer ~5s — i.e. it has been widened — "
+        << "which the lower bound above cannot see on its own.";
 }
 
 // FR-014 / engine.cpp kFirstFrameMaxBytes (4096). A peer that completes the
