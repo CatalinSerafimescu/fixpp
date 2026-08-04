@@ -1,42 +1,64 @@
 # `ctest` parallelism — single-lane probe (TSan)
 
-**Status:** PROBE, **two measurements in — both green**. `linux-clang-tsan` only. Do **not** copy
-`execution.jobs` to any other test preset yet: acceptance criterion **4** (peak memory) is still
-unmet.
+**Status:** MERGED (PR #227, squash `80ccb782`), **three measurements in — all green**.
+`linux-clang-tsan` only. Do **not** copy `execution.jobs` to any other test preset yet: acceptance
+criterion **4** (peak memory) is still unmet.
 
 ## MEASURED — 2026-08-04
 
-Two independent runs, both on `e3d3cecb`/`3c4a030a`: `30881578522` and `30885760893`.
+Three independent runs: `30881578522` and `30885760893` (on `e3d3cecb`/`3c4a030a`), and
+`30895037213` (on the rebased `b8a3481d`, i.e. the content that actually merged).
 
 ```
-100% tests passed, 0 tests failed out of 346          (both runs)
-Total Test time (real) = 1935.04 sec                  (run 1)
-346/346 Test #270: log_file_fsync ... Passed 1.42 sec  (both runs — last, alone, identical)
+100% tests passed, 0 tests failed out of 346          (all three runs)
+Total Test time (real) = 1935.04 / — / 1858.99 sec
+346/346 Test #270: log_file_fsync ... Passed 1.42 sec  (all three — last, alone, identical)
 ```
 
 | | value |
 |---|---:|
 | baseline (serial), 3 runs on `main` | 3356 / 3300 / 3302 — mean **3319**, range/mean **1.69%** |
-| **measured, `jobs=2`** | 1935 / 1806 — mean **1871**, range/mean **6.90%** |
-| saving | **1449 s ≈ 24.1 min, −43.6%** |
-| modelled ideal lower bound | 1845 — the two-run mean is **+1.4%** above it |
+| **measured, `jobs=2`** | 1935 / 1806 / 1859 — mean **1867**, range/mean **6.91%** |
+| saving | **1453 s ≈ 24.2 min, −43.8%** |
+| modelled ideal lower bound | 1845 — the three-run mean is **+1.2%** above it |
+
+The third run matters more than as a tie-breaker: it is the only one taken on the exact content
+that merged, and it moved the mean *toward* the ideal bound (+1.4% → +1.2%) rather than away, so the
+model is not drifting as samples accumulate.
 
 ### Acceptance status
 
 | # | criterion | status |
 |---|---|---|
-| 1 | materially lower over more than one run | **MET** — 1935 and 1806, both far below the 3300–3356 band |
-| 2 | no failures, no `exit 143` / OOM | **MET** — 346/346 both runs |
-| 3 | no previously-stable test turns intermittent | **MET so far** — identical 346 count, zero failures, on two runs |
+| 1 | materially lower over more than one run | **MET** — 1935 / 1806 / 1859, all far below the 3300–3356 band |
+| 2 | no failures, no `exit 143` / OOM | **MET** — 346/346 on all three runs |
+| 3 | no previously-stable test turns intermittent | **MET** — identical 346 count and zero failures across three runs |
 | 4 | peak RSS / cgroup `memory.peak` captured | **UNMET** — still not measured |
+
+**Criterion 4 is what blocks widening, and it is not a formality.** Three green runs say the lane
+*did not* run out of memory; they say nothing about how close it came. Two concurrent TSan
+processes on a 4 vCPU / 16 GB runner is precisely the configuration this repo has previously had an
+`exit 143` OOM kill mistaken for a flake. Rolling `execution.jobs` out to `asan`/`ubsan`/`coverage`
+without a headroom figure would repeat the modelled-for-measured substitution this probe exists to
+prevent.
+
+### `log_file_fsync` — the Gate B P1, closed by observation
+
+Scheduled **last and alone at `346/346` for exactly 1.42 s in all three runs** — byte-identical to
+each other and to its serial baseline. `RUN_SERIAL` is behaving deterministically, not
+coincidentally, so the 40 ms / 100 ms / 200 ms-slack wall-clock assertions were never exposed to a
+co-runner.
 
 ### A side effect worth recording
 
-Run-to-run variance on this lane rose from **1.69% → 6.90%** (range/mean). That is expected —
+Run-to-run variance on this lane rose from **1.69% → 6.91%** (range/mean, three runs). That is expected —
 makespan now depends on how tests happen to pack rather than on a fixed serial sum — but it has a
 consequence: **this lane is a noticeably noisier baseline for any future A/B measurement.** The
 1.7% stability that made TSan the right lane to probe *with* is partly spent by the probe itself.
 Anything later that needs a tight TSan baseline should account for that, or use more runs.
+
+Also note the two-run figures previously recorded here (mean 1871, −43.6%, +1.4% vs ideal) were
+correct for two samples; they are superseded by the three-run figures above rather than corrected.
 
 Three things this establishes beyond the headline:
 
