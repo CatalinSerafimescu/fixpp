@@ -1131,7 +1131,12 @@ target_compile_definitions(engine_firstframe_test PRIVATE
   FIXPP_TLS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/tls/fixtures"
 )
 add_test(NAME engine_firstframe COMMAND engine_firstframe_test)
+# TIMEOUT is explicit (#228): the two Step-3 witnesses assert an ELAPSED BAND,
+# so their failure mode is "waits" — the deadline witness must be allowed to
+# reach ~5s, and a regression that never closes must be cut off rather than
+# left to burn a job slot. 300s covers all 14 lanes including the sanitizers.
 set_tests_properties(engine_firstframe PROPERTIES
+  TIMEOUT 300
   ENVIRONMENT
     "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
   LABELS "015;us1;live_tls;firstframe;window")
