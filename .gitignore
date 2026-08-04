@@ -93,6 +93,17 @@ decisions/
 book/
 *-decisions.md
 
+# `.specify/decisions` is a LOCAL SYMLINK to the Antreprenoriat research repo
+# (research/G19-fix-fpml-iso20022/decisions/speckit), where the gate/verify
+# records are tracked and backed up. It needs its own entry: the `decisions/`
+# rule above ends in a slash, so it matches DIRECTORIES only, and git treats a
+# symlink as a file no matter what it points at. Without this line the symlink
+# shows up as `?? .specify/decisions`, which fails
+# `fixpp::dict::codegen-build-graph-check` (it asserts `git status --porcelain`
+# is empty) and would otherwise be committed into fixpp as a dangling absolute
+# path in every CI checkout.
+.specify/decisions
+
 .claude
 # Vendored spec-kit skills under .claude/ stay ignored EXCEPT the
 # locally-patched files: speckit-implement/SKILL.md carries the project's
