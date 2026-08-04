@@ -519,9 +519,24 @@ foreach(_artifact IN LISTS _artifacts)
     # FR-010, and the floor that stops equality from holding vacuously: two empty
     # sets are equal. Without this an artifact shipping NO headers under either
     # root passes the comparison below with a perfectly straight face.
-    if(_orig_tails STREQUAL "")
-      list(APPEND _missing
-        "${_orig_root}** (FR-010: ${_aname} ships nothing under this root at all)")
+    # ⚠️ FATAL_ERROR, not `list(APPEND _missing …)`. `_missing` is initialised at
+    # :316 and consumed ONCE at :463 — sixty lines ABOVE here — then reset at the
+    # top of the next artifact's iteration. An append at this point is never read
+    # by anything, so routing this branch through it made the floor DEAD CODE:
+    # the check that exists to stop a vacuous pass would itself have passed
+    # vacuously. Caught at /simplify; it is the same defect class this whole
+    # feature is about, which is why it is worth this comment.
+    # The floor requires a HEADER, not merely a non-empty tail list. Directory
+    # entries survive normalisation (`include/fix/c_api/` -> `include/fix/c_api`)
+    # and DO match `^include/fix/(.+)$`, so a bare `STREQUAL ""` floor would still
+    # pass a package that shipped the directory skeleton at both roots and not one
+    # header — set-equality between two identical skeletons holds.
+    if(NOT _orig_tails MATCHES "\\.(h|hpp)(;|$)")
+      message(FATAL_ERROR
+        "086 FR-010: ${_aname} ships no HEADER under ${_orig_root} at all, so the "
+        "set comparison below would hold vacuously. Either the install(DIRECTORY) "
+        "rule for this root regressed, or a new PATTERN … EXCLUDE on CMakeLists.txt's "
+        "include/ rule removed the subtree.\n  observed tails: ${_orig_tails}")
     elseif(NOT _orig_tails STREQUAL _iso_tails)
       string(REPLACE ";" "\n    " _o_pretty "${_orig_tails}")
       string(REPLACE ";" "\n    " _i_pretty "${_iso_tails}")

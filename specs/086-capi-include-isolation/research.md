@@ -24,7 +24,7 @@ target_include_directories(fixpp_capi PUBLIC
   "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/capi>")            # installed: isolated
 target_include_directories(fixpp_service INTERFACE
   "$<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>"
-  "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/service-iface>")   # replaces src/service/CMakeLists.txt:12
+  "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/service-iface>")   # replaces src/service/CMakeLists.txt:26
 install(DIRECTORY include/fix/           DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/capi/fix")
 install(DIRECTORY include/fixpp/service/ DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/service-iface/fixpp/service")
 # install(DIRECTORY include/ DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}") — UNCHANGED, no exclusions added
@@ -62,8 +62,8 @@ The generated `fixppTargets.cmake` declares `fixpp::capi_objects` identically in
 **Correction to the stated mechanism (Gate A r1).** The fixture's reasoning was that `PRIVATE` on a *static*
 library still records the dependency in `INTERFACE_LINK_LIBRARIES` as `$<LINK_ONLY:>`, keeping it an export-set
 *requirement* — true, but **not** what holds membership in the real tree. In fixpp, `fixpp_capi_objects` is
-listed **by name** in `FIXPP_EXPORT_TARGETS` (`CMakeLists.txt:562`), which drives
-`install(TARGETS ${FIXPP_EXPORT_TARGETS} EXPORT fixppTargets)` (`:733`). Membership is therefore by
+listed **by name** in `FIXPP_EXPORT_TARGETS` (`CMakeLists.txt:596`), which drives
+`install(TARGETS ${FIXPP_EXPORT_TARGETS} EXPORT fixppTargets)` (`:770`). Membership is therefore by
 **enumeration**, and is stable independently of any closure inference — the same conclusion 084 already
 recorded (`package-layout.md` §2a `:132`: *"demoting the edge to `PRIVATE` does not escape it, because
 `$<LINK_ONLY:>` entries are export requirements too"*), reached by a mechanism that does not depend on the
@@ -183,7 +183,7 @@ executable and never a build target.**
 > `OBJECT`-library leg is **not implementable in the tier this feature extends**, and stating it would have
 > produced an unbuildable `/speckit-tasks` task. `tests/consumer/` is a standalone sub-project whose driver runs
 > one `cmake --build` and raises `message(FATAL_ERROR "consumer build failed")` on **any** non-zero build exit
-> (`tests/consumer/run_consumer_witness.cmake:96-104`) — so a probe target that is *required* to fail reds the
+> (`tests/consumer/run_consumer_witness.cmake:100-108`) — so a probe target that is *required* to fail reds the
 > entire witness. The assertion cannot be expressed as a target there at all.
 >
 > **What the mechanism must do** (spec FR-006a): evaluate the ❌ cell where the target's usage requirements
@@ -199,7 +199,7 @@ executable and never a build target.**
 > **Fallback**: if the FR-007 demonstrated-red observation does **not** go red under a reverted isolation, the
 > `try_compile` context is not faithfully carrying the usage requirements — fall back to a dedicated probe
 > sub-project with its own `cmake -P` driver asserting a **non-zero** build result, mirroring the existing
-> `execute_process` + `RESULT_VARIABLE` shape at `run_consumer_witness.cmake:96-104`. FR-007 is what decides
+> `execute_process` + `RESULT_VARIABLE` shape at `run_consumer_witness.cmake:100-108`. FR-007 is what decides
 > between the two; it is not assumed.
 >
 > ✅ cells are unaffected: ordinary compile-only `OBJECT` library targets in the same sub-project, where a
@@ -224,9 +224,9 @@ isolation probes are **different kinds of test** and must stay separate.
 > **Corrected at Gate A r2 — this witness is NEVER RUN.** An earlier revision of this paragraph asserted that
 > `consumer_capi_witness` "is executed and its output asserted (`run_consumer_witness.cmake` step 4)". Read from
 > the file, that is false: step 4 sets `set(_exe "${_sub_build}/consumer_witness")`
-> (`run_consumer_witness.cmake:110`) — the **umbrella** witness — and asserts `^PASS:` on that one binary
+> (`run_consumer_witness.cmake:197`) — the **umbrella** witness — and asserts `^PASS:` on that one binary
 > (`:142-143`). `consumer_capi_witness` is covered by the single `cmake --build` at `:96-104` and by nothing
-> else, exactly as `tests/consumer/CMakeLists.txt:71` states: *"Building and linking IS the assertion — it need
+> else, exactly as `tests/consumer/CMakeLists.txt:83` states: *"Building and linking IS the assertion — it need
 > not run."* FR-009's strengthening therefore rests on the **link** stage: the added reference must pull the
 > entry point's object out of the archive when `consumer_capi_witness` is linked — a namespace-scope,
 > non-`static`, non-`const` pointer initialised with its address, or a call; an address assigned to an unused
@@ -257,7 +257,7 @@ construction, and the check that proves it compares **produced manifests**, not 
 
 **Decision: leave it exactly as it is.**
 
-It links `fixpp_capi_objects` `PUBLIC` (`src/capi/CMakeLists.txt:50`) — a second propagation path the spec
+It links `fixpp_capi_objects` `PUBLIC` (`src/capi/CMakeLists.txt:116`) — a second propagation path the spec
 flags. But it is gated on `FIXPP_BUILD_TESTS`, exists solely for the Python ctypes oracle, and is **not an
 export member** (verified: zero occurrences of `fixpp_capi_shared` in the root `CMakeLists.txt`, so it is
 absent from `FIXPP_EXPORT_TARGETS`). Nothing it propagates reaches an installed consumer.
@@ -427,7 +427,7 @@ file(GENERATE OUTPUT "${CMAKE_BINARY_DIR}/probe_incs.txt"
 4a. **The probe consumer reached the imported targets by `include(fixppTargets.cmake)`, not by
    `find_package`.** Stated because the method must not read stronger than what ran: the fixture ships no
    `fixppConfig.cmake`, so `find_package(fixpp REQUIRED)` — which the real sub-project uses
-   (`tests/consumer/CMakeLists.txt:55`) — could not resolve there. The generated targets file is what
+   (`tests/consumer/CMakeLists.txt:59`) — could not resolve there. The generated targets file is what
    `find_package` ultimately includes, so the propagation measured above is expected to be identical; but
    "identical" is an inference here, not a measurement, and the real-tree run at `/speckit-implement` is what
    settles it.
@@ -445,10 +445,10 @@ file(GENERATE OUTPUT "${CMAKE_BINARY_DIR}/probe_incs.txt"
 | # | Decision | Basis |
 |---|---|---|
 | D-1 | `fixpp_capi` links `fixpp_capi_objects` **`PRIVATE`**, gaining its own restricted `INSTALL_INTERFACE` | R1, R3 |
-| D-2 | `src/service/CMakeLists.txt:12`'s whole-tree `INSTALL_INTERFACE` is **replaced** by the service-iface root | R3, spec FR-011d |
+| D-2 | `src/service/CMakeLists.txt:26`'s whole-tree `INSTALL_INTERFACE` is **replaced** by the service-iface root | R3, spec FR-011d |
 | D-3 | Three installed roots, **strictly additive**; no install rule gains an exclusion | R6 |
 | D-4 | Isolation probes are **compile-only** and separate from the linking `consumer_capi_witness`: ✅ cells are `OBJECT` targets; ❌ cells are configure-time `try_compile` asserted FALSE, because a must-fail *target* would red the whole witness | R5, **R9** (mechanism measured) |
-| D-5 | `fixpp_capi_objects`, `fixpp_capi_shared` and the export-set membership are **unchanged** — membership held by explicit enumeration at `CMakeLists.txt:562`, not by closure inference | R2, R7 |
+| D-5 | `fixpp_capi_objects`, `fixpp_capi_shared` and the export-set membership are **unchanged** — membership held by explicit enumeration at `CMakeLists.txt:596`, not by closure inference | R2, R7 |
 | D-6 | `BUILD_INTERFACE` permissive, `INSTALL_INTERFACE` restricted — in-tree unaffected | R8 |
 
 ## What is NOT yet proven, and must be at `/speckit-implement`

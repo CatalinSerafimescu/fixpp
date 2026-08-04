@@ -17,8 +17,14 @@
 //
 // ⚠️ This target deliberately does NOT link fixpp::fixpp. Linking the C++
 // umbrella and fixpp::capi into one binary is the combination Article IV §2 /
-// architecture.md:509 rejects and tools/check_layers.py enforces — which is why
-// this is a separate executable and not another TU of consumer_witness.
+// architecture.md §7.4 rejects.
+//
+// NOTHING MECHANICALLY ENFORCES THAT (corrected by 086/FR-014 — this comment used
+// to say tools/check_layers.py did). That script is a source #include-edge lint
+// over src/** and bindings/** (:2-7, :173-176); it parses no CMake and reads no
+// link interface, and an installed package cannot observe which targets a
+// consumer links together anyway. Keeping this a separate executable IS the
+// convention being upheld.
 //
 // Compiled as C++ rather than C so the standalone witness project needs only the
 // CXX language enabled; the header is C-ABI either way.
@@ -46,7 +52,7 @@
 //
 // No runtime obligation is taken on. This TU is built and linked but NEVER
 // executed — the driver runs only ${_sub_build}/consumer_witness
-// (run_consumer_witness.cmake:110) — so nothing here may depend on, or assert,
+// (run_consumer_witness.cmake:167,190) — so nothing here may depend on, or assert,
 // runtime behaviour. Building and linking IS the assertion.
 // NOLINTBEGIN(cppcoreguidelines-avoid-non-const-global-variables): making these
 // `const` would DEFEAT them. A namespace-scope `const` object has INTERNAL

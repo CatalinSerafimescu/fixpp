@@ -47,12 +47,12 @@ outside the documented consumption path and gets no isolation guarantee. *(FR-00
 deliberately at clarify; narrowing `fixpp::capi_objects` would cascade into the in-tree graph and into the
 export-closure coupling that makes `find_package` `FATAL_ERROR`.)*
 
-> **On `CMakeLists.txt:575-585`.** Earlier drafts cited that comment as the taxonomy. It classifies the **five
+> **On `CMakeLists.txt:608-622`.** Earlier drafts cited that comment as the taxonomy. It classifies the **five
 > targets the umbrella does not reach** — `fixpp_capi`, `fixpp_config_toml`, `fixpp_tap`, `fixpp_service`,
 > `fixpp_log_otlp` — declaring four by-name and **`fixpp_log_otlp` alone** closure-only. `capi_objects` is not
 > classified there at all. The classification above is unchanged and correct; its basis is the measured
 > predicate, not that comment. `capi_objects`' export-set membership is likewise by **explicit enumeration**
-> (`CMakeLists.txt:562`, consumed by `install(TARGETS ${FIXPP_EXPORT_TARGETS} EXPORT fixppTargets)` at `:733`),
+> (`CMakeLists.txt:596`, consumed by `install(TARGETS ${FIXPP_EXPORT_TARGETS} EXPORT fixppTargets)` at `:770`),
 > not by closure inference.
 
 ## 2. Delivered mechanism
@@ -73,13 +73,13 @@ root of its own.
 
 | File | Change | Why it is named |
 |---|---|---|
-| `src/capi/CMakeLists.txt:46` | `PRIVATE fixpp_capi_objects` **plus `PUBLIC "$<BUILD_INTERFACE:fixpp_capi_objects>"`**, plus a new `target_include_directories(fixpp_capi PUBLIC …)` | the transitive path #218 identifies. **The `$<BUILD_INTERFACE:>` half was added at `/speckit-implement` after a MEASURED in-tree build failure** — see the note below; `PUBLIC` → `PRIVATE` alone, as this row read through Gate A, breaks the in-tree build and violates C-4 |
-| `src/service/CMakeLists.txt:12` | `$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>` → the service-iface root | **not** inherited from `fixpp_capi`, so narrowing that target does not touch it; every other requirement can be satisfied while this line survives (FR-011d) |
+| `src/capi/CMakeLists.txt:94-96` | `PRIVATE fixpp_capi_objects` **plus `PUBLIC "$<BUILD_INTERFACE:fixpp_capi_objects>"`**, plus a new `target_include_directories(fixpp_capi PUBLIC …)` | the transitive path #218 identifies. **The `$<BUILD_INTERFACE:>` half was added at `/speckit-implement` after a MEASURED in-tree build failure** — see the note below; `PUBLIC` → `PRIVATE` alone, as this row read through Gate A, breaks the in-tree build and violates C-4 |
+| `src/service/CMakeLists.txt:26` | `$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>` → the service-iface root | **not** inherited from `fixpp_capi`, so narrowing that target does not touch it; every other requirement can be satisfied while this line survives (FR-011d) |
 | `CMakeLists.txt` (near `:446-451`) | **two added** `install(DIRECTORY …)` rules | the new roots |
 | `CMakeLists.txt:446-451` | **unchanged** — acquires **no new** `PATTERN … EXCLUDE` for the isolated subtrees *(it already carries two, for `fixpp/core/test` and `fixpp/transport/test`, `:449-450` — this feature adds none)* | FR-005a additivity |
 | `tests/consumer/CMakeLists.txt` | `project(fixpp_consumer_witness CXX)` (`:40`) → `C CXX`; + the compile-only positive probe targets; + the configure-time must-fail probes (§4, **three** of them: `<fixpp/wire/parser.hpp>` and `<fixpp/service/control_plane_factory.hpp>` through `fixpp::capi`, `<fixpp/wire/parser.hpp>` through `fixpp::service`); + the usage-requirement probe target and its `file(GENERATE)` | the C-side installed-interface gap (FR-002); the negative cells, which cannot be targets in this sub-project (§4); and C-3 leg 3 |
 | `tests/consumer/run_consumer_witness.cmake` | + a read-back and compare of the generated usage-requirement file, **after** the `cmake --build` at `:96-104` | FR-009a(ii) / C-3 leg 3 — `file(GENERATE)` writes at generate time, so the assertion has to live downstream of the sub-build or it does not exist |
-| `tests/consumer/consumer_capi_witness.cpp` | + a reference to an entry point that pulls the session/dictionary closure **at link time** — a namespace-scope, non-`static`, non-`const` pointer initialised with its address, or a call; **not** an address assigned to an unused local, which can be optimised away together with its relocation | FR-009 — as it stands the witness passes even if the transitive archive edge is lost. This TU is built and linked, **never run** (`tests/consumer/CMakeLists.txt:71`), so the reference carries no runtime obligation |
+| `tests/consumer/consumer_capi_witness.cpp` | + a reference to an entry point that pulls the session/dictionary closure **at link time** — a namespace-scope, non-`static`, non-`const` pointer initialised with its address, or a call; **not** an address assigned to an unused local, which can be optimised away together with its relocation | FR-009 — as it stands the witness passes even if the transitive archive edge is lost. This TU is built and linked, **never run** (`tests/consumer/CMakeLists.txt:83`), so the reference carries no runtime obligation |
 | `tests/packaging/run_package_contents_witness.cmake` | + presence assertions (FR-010) **and** the isolated-root containment assertions (FR-010a / C-5) | the existing gates' regexes are anchored on `^include/fixpp/…` and cannot see the new roots |
 
 > ### ⚠️ `PUBLIC` → `PRIVATE` alone breaks the in-tree build — measured 2026-08-04, at `/speckit-implement`
@@ -170,7 +170,7 @@ root of its own.
   `^include/capi/fix/`; every path under `include/service-iface/` matches
   `^include/service-iface/fixpp/service/`. This is the **only** assertion that traces **FR-001**, which is a
   property of a *root*, not of a target. The existing content gates cannot cover it: the denylist anchors on
-  `^include/fixpp/…` (`tests/packaging/run_package_contents_witness.cmake:484-487`) and the exact-set
+  `^include/fixpp/…` (`tests/packaging/run_package_contents_witness.cmake:609-612`) and the exact-set
   generated-tree check on `^include/fixpp/(v[A-Za-z0-9]+)/…` (`:508`), so neither regex can ever match a path
   under the new roots. Without C-5, a partial or over-broad duplication under an isolated root passes every
   gate unless a negative probe happens to name the duplicated header. *(FR-010a.)*
@@ -219,7 +219,7 @@ toolchain, the real `tests/consumer/` sub-project, and MSVC.
 
 **Fallback, if FR-007's demonstrated-red observation does not go red under a reverted isolation in the real
 tree** — a dedicated probe sub-project with its own `cmake -P` driver asserting a **non-zero** build result,
-mirroring the existing `execute_process` + `RESULT_VARIABLE` shape at `run_consumer_witness.cmake:96-104`.
+mirroring the existing `execute_process` + `RESULT_VARIABLE` shape at `run_consumer_witness.cmake:100-108`.
 R9 removes the *reason to expect* this fallback; it does not remove the obligation to check. **FR-007 is still
 the decider**, and R9's fixture-level red is not a substitute for observing the *shipped* witness red.
 
@@ -228,7 +228,7 @@ sub-project: a build failure reds the witness, which is the correct polarity.
 
 | Assertion | Kind | Target |
 |---|---|---|
-| `fixpp::capi` links and resolves a real symbol **from the transitive archive set** | **link only** | `consumer_capi_witness` — **exists**, extended per FR-009. **Building and linking IS the assertion** (`tests/consumer/CMakeLists.txt:71`); the driver runs only `${_sub_build}/consumer_witness` (`run_consumer_witness.cmake:110`, `^PASS:` at `:142-143`), so this binary is **never executed** and no runtime behaviour is asserted. The added reference must pull the entry point's object out of the archive at *link* time — a namespace-scope, non-`static`, non-`const` pointer initialised with its address (or a call), never an address assigned to an unused local, which can be elided with its relocation |
+| `fixpp::capi` links and resolves a real symbol **from the transitive archive set** | **link only** | `consumer_capi_witness` — **exists**, extended per FR-009. **Building and linking IS the assertion** (`tests/consumer/CMakeLists.txt:83`); the driver runs only `${_sub_build}/consumer_witness` (`run_consumer_witness.cmake:197`, `^PASS:` at `:142-143`), so this binary is **never executed** and no runtime behaviour is asserted. The added reference must pull the entry point's object out of the archive at *link* time — a namespace-scope, non-`static`, non-`const` pointer initialised with its address (or a call), never an address assigned to an unused local, which can be elided with its relocation |
 | `fixpp::capi` reaches all 12 C-ABI headers, from **C++** | compile-only target | new |
 | `fixpp::capi` reaches all 12 C-ABI headers, from **C** | compile-only target, C language | new — `project(... C CXX)`; closes US1's "C or C++ integrator" promise for the *installed* interface (in-tree C-cleanliness is already pinned at `tests/capi/CMakeLists.txt:13`, `:23`) |
 | `fixpp::capi` does **not** reach a C++ engine header (`<fixpp/wire/parser.hpp>`) | configure-time `try_compile`, **asserted FALSE** (§4a) | new — C++ only; a C compiler rejecting a C++ header proves nothing about isolation |
@@ -242,7 +242,7 @@ sub-project: a build failure reds the witness, which is the correct polarity.
 | The isolated roots contain **only** their declared subtree | package content | extends the packaging witness (FR-010a / C-5) — the only assertion tracing FR-001 |
 
 Each **must fail** assertion carries a demonstrated-red obligation: observed failing with **its own** isolation
-removed (per FR-011e the service demonstration reverts `src/service/CMakeLists.txt:12` alone), passing with it
+removed (per FR-011e the service demonstration reverts `src/service/CMakeLists.txt:26` alone), passing with it
 present, both recorded with the command, the exit code and the first diagnostic line, in
 `.specify/decisions/086-capi-include-isolation-verify.md` (FR-007). The probe header must be one whose own
 disappearance would itself be a defect, so the assertion cannot pass for the wrong reason (FR-008).

@@ -12,7 +12,7 @@
 C++ headers, and §8 calls that a *structural* enforcement of the AGPL/commercial boundary. The installed
 package does not deliver it: `fixpp::capi` carries no include directories of its own and inherits the whole
 tree through `fixpp::capi_objects`. `fixpp::service` leaks the same claim independently, via its own
-declaration at `src/service/CMakeLists.txt:12`.
+declaration at `src/service/CMakeLists.txt:26`.
 
 **Approach — three additive installed include roots plus two target-graph edits.** `fixpp_capi` links its
 objects `PRIVATE` (so CMake records `$<LINK_ONLY:>` and withholds the include directories while still linking
@@ -149,8 +149,8 @@ tests/consumer/
 ├── consumer_capi_witness.cpp        # EXISTS — links fixpp::capi; EXTENDED per FR-009 to reach the
 │                                    #   session/dictionary closure AT LINK TIME (take the address).
 │                                    #   BUILT AND LINKED, NEVER RUN: the driver runs only
-│                                    #   consumer_witness (run_consumer_witness.cmake:110, ^PASS: at
-│                                    #   :142-143); tests/consumer/CMakeLists.txt:71 — "Building and
+│                                    #   consumer_witness (run_consumer_witness.cmake:197, ^PASS: at
+│                                    #   :142-143); tests/consumer/CMakeLists.txt:83 — "Building and
 │                                    #   linking IS the assertion". No runtime obligation. (Gate A r2)
 ├── consumer_witness.cpp             # EXISTS — links the umbrella, UNCHANGED (SC-003 requires it)
 ├── run_consumer_witness.cmake       # + -DCMAKE_EXPORT_COMPILE_COMMANDS=ON on the configure step (Art IX §4)
@@ -205,15 +205,15 @@ Order is constrained by Article VII §3 and by FR-007's demonstrated-red obligat
    separately, for `fixpp::service`.
 2. **The `fixpp_capi` edit** — `PRIVATE` + its own `$<INSTALL_INTERFACE:…/capi>` + the install rule. Probes for
    `fixpp::capi` go green.
-3. **The `fixpp_service` edit** — `src/service/CMakeLists.txt:12` + its install rule. Probes for
+3. **The `fixpp_service` edit** — `src/service/CMakeLists.txt:26` + its install rule. Probes for
    `fixpp::service` go green. Kept a separate step because this line is **not** reachable from step 2: it is
    independently declared, and every other requirement can be satisfied while it survives (FR-011d).
 
    > **The independence is directional — the red demonstrations must respect it (FR-011e).** *Forward*, step 3
    > is genuinely not implied by step 2. *Backward* it is: `fixpp_service` links `fixpp_capi`
-   > (`src/service/CMakeLists.txt:16`), so reverting `src/capi/CMakeLists.txt:46` to `PUBLIC` reds **both**
+   > (`src/service/CMakeLists.txt:30`), so reverting `src/capi/CMakeLists.txt:94-96` to `PUBLIC` reds **both**
    > probes via the restored transitive include path. The service red demonstration must therefore revert
-   > `src/service/CMakeLists.txt:12` **alone**, C-ABI isolation intact, and record `fixpp::capi`'s properties
+   > `src/service/CMakeLists.txt:26` **alone**, C-ABI isolation intact, and record `fixpp::capi`'s properties
    > from that run as proof. "One revert cannot stand in for the other" is true of the *fixes*, not of the
    > *reverts*.
 
@@ -365,18 +365,18 @@ downgraded or narrowed it. Recorded so round 2 does not re-open them.
   (`tests/packaging/run_package_contents_witness.cmake:439-441`), so it would pass even if the archive edge
   were lost (FR-009). Codex's "inspect the evaluated link closure on the real Conan build" is already FR-016.
 - **Codex #10 (export stability) — CONCLUSION KEPT, BASIS REPLACED.** Codex was right that `research.md` R2
-  cited the wrong mechanism and that `CMakeLists.txt:575-584` does not classify `capi_objects`. But the
+  cited the wrong mechanism and that `CMakeLists.txt:608-584` does not classify `capi_objects`. But the
   *classification itself* is factually correct — `grep -rn "capi_objects" include/` returns **zero** hits and
   the only "link `fixpp::X`" instruction in any public header is
   `include/fixpp/config/toml_config_loader.hpp:7-8`. **Applied instead**: the classification is re-grounded in
   that measured predicate and membership in the explicit `FIXPP_EXPORT_TARGETS` enumeration
-  (`CMakeLists.txt:562` → `install(TARGETS … EXPORT fixppTargets)` at `:733`); the `:575-584` citation is
+  (`CMakeLists.txt:596` → `install(TARGETS … EXPORT fixppTargets)` at `:770`); the `:608-621` citation is
   dropped, not the conclusion.
 - **Codex #11 / #12 — SCOPE WIDENED rather than applied as written.** Both were correct but line-scoped.
   Applying them literally would have fixed the named lines and left the duplicates (RC-3). **Applied
   instead**: FR-013…FR-015 rewritten as **claim predicates**, with the known sites — `architecture.md:514`,
-  `:515`, `:518`, `:537`, `:538`, `:543`, `:557`, `:560`, `:561`; `CMakeLists.txt:580`;
-  `tests/consumer/CMakeLists.txt:68-69` — attached as non-exhaustive evidence.
+  `:515`, `:518`, `:537`, `:538`, `:543`, `:557`, `:560`, `:561`; `CMakeLists.txt:615`;
+  `tests/consumer/CMakeLists.txt:75-79` — attached as non-exhaustive evidence.
 
 ## Next
 

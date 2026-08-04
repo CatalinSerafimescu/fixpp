@@ -98,10 +98,10 @@ target_link_libraries(consumer_capi_witness PRIVATE fixpp::capi)
 #     links. research.md R5 measured a false negative on the umbrella row caused
 #     by an unresolved symbol while every #include resolved correctly.
 #  2. A "MUST NOT resolve" cell CANNOT be a build target here. The driver
-#     run_consumer_witness.cmake:96-104 raises FATAL_ERROR on ANY non-zero build
+#     run_consumer_witness.cmake:107 raises FATAL_ERROR on ANY non-zero build
 #     exit, so a must-fail target reds the whole witness. The ❌ cells are
 #     configure-time try_compile() asserted FALSE (contract §4a, measured in R9);
-#     a TRUE result fails this configure, which the driver reports at :91-92.
+#     a TRUE result fails this configure, which the driver reports at :96.
 #  3. A passing ✅ cell NEVER establishes a ❌ cell. Under the additive layout
 #     <fix/c_api.h> resolves from EITHER root, so a green positive probe is
 #     exactly as consistent with the defect being present as with it being fixed.
@@ -123,7 +123,7 @@ set_target_properties(probe_capi_positive_c PROPERTIES
 # US6 / FR-011a — fixpp::service reaches the plugin header AND the C ABI. The
 # C-ABI half is the load-bearing one: fixpp::service declares no C-ABI root of
 # its own and reaches <fix/c_api.h> only through its existing link to
-# fixpp::capi (src/service/CMakeLists.txt:16). Narrowing fixpp::capi is exactly
+# fixpp::capi (src/service/CMakeLists.txt:30). Narrowing fixpp::capi is exactly
 # the change that could sever that path.
 add_library(probe_service_positive OBJECT probe_service_positive.cpp)
 target_link_libraries(probe_service_positive PRIVATE fixpp::service)
@@ -161,14 +161,27 @@ function(fixpp086_probe_unreachable _label _source _link)
     NO_CACHE
     OUTPUT_VARIABLE _probe_out)
   if(_probe_ok)
-    set(_leaks "${FIXPP_086_LEAKS}")
-    list(APPEND _leaks "${_label}")   # list(APPEND) so an empty start does not
-    set(FIXPP_086_LEAKS "${_leaks}" PARENT_SCOPE)   # yield a leading empty element
-    message(STATUS "086 probe LEAK: ${_label} — ${_source} COMPILED against ${_link}")
+    # list(APPEND) on the caller-inherited copy, so an empty start does not yield
+    # a leading empty element the way "${FIXPP_086_LEAKS};${_label}" would.
+    list(APPEND FIXPP_086_LEAKS "${_label}")
+    set(FIXPP_086_LEAKS "${FIXPP_086_LEAKS}" PARENT_SCOPE)
+    # The compiler output is the only thing that says WHY it compiled; without it
+    # diagnosing a leak means re-running the probe by hand.
+    message(STATUS "086 probe LEAK: ${_label} — ${_source} COMPILED against ${_link}\n${_probe_out}")
   else()
     message(STATUS "086 probe ok:   ${_label} — ${_source} correctly unreachable from ${_link}")
   endif()
   set(FIXPP_086_PROBE_LOG "${FIXPP_086_PROBE_LOG}${_label}: compiled=${_probe_ok}\n" PARENT_SCOPE)
+
+  # The compiler output goes to its OWN file, not into probe-results.txt: that
+  # table is machine-read by the driver and must stay one clean line per cell.
+  # Keeping the output at all matters because it is the only evidence that a
+  # FALSE was caused by an unresolved #include rather than by a missing
+  # third-party path or a language-standard mismatch — i.e. that the probe is
+  # measuring isolation and not something else.
+  string(REPLACE ">" "-" _slug "${_label}")
+  string(REPLACE "-" "_" _slug "${_slug}")
+  file(WRITE "${CMAKE_BINARY_DIR}/probe-${_slug}.log" "${_probe_out}")
 endfunction()
 
 # CMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY is what makes the probes
@@ -202,8 +215,9 @@ fixpp086_probe_unreachable("capi->service-header"
 # consumes the engine through the C ABI only.
 #
 # This one has its OWN demonstrated-red obligation and its own revert
-# (src/service/CMakeLists.txt:12 alone, FR-011e). The asymmetry is DIRECTIONAL:
-# fixpp_service links fixpp_capi (src/service/CMakeLists.txt:16), so reverting
+# (the $<INSTALL_INTERFACE:...> line in src/service/CMakeLists.txt alone --
+# cited by construct because it is an instruction, FR-011e). The asymmetry is DIRECTIONAL:
+# fixpp_service links fixpp_capi (src/service/CMakeLists.txt:30), so reverting
 # the C-ABI leg reds this probe too and cannot stand in for the service one.
 fixpp086_probe_unreachable("service->engine-header"
   probe_service_negative.cpp fixpp::service)
@@ -256,6 +270,16 @@ target_link_libraries(probe_usage_requirements PRIVATE fixpp::capi)
 set(FIXPP_086_EXPECTED_COMPILE_DEFINITIONS "")
 set(FIXPP_086_EXPECTED_COMPILE_OPTIONS "")
 set(FIXPP_086_EXPECTED_COMPILE_FEATURES "")
+
+# SEPARATOR NORMALISATION — both sides must be joined the same way or the compare
+# fails for a reason that has nothing to do with the interface. The OBSERVED side
+# is `$<JOIN:…,|>`; a bare `${VAR}` expansion of a CMake list uses `;`. Both are
+# empty today so `STREQUAL` holds either way, but the moment anyone sets a
+# non-empty expectation — the one edit this instrument invites — `A;B` vs `A|B`
+# would fail permanently and look like a real finding.
+foreach(_p COMPILE_DEFINITIONS COMPILE_OPTIONS COMPILE_FEATURES)
+  string(REPLACE ";" "|" FIXPP_086_EXPECTED_${_p} "${FIXPP_086_EXPECTED_${_p}}")
+endforeach()
 
 # Both sides go into the file so the driver compares two values it was GIVEN,
 # neither of which it invents.

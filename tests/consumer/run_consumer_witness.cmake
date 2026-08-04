@@ -107,7 +107,37 @@ if(NOT _build_rc EQUAL 0)
   message(FATAL_ERROR "consumer build failed (exit ${_build_rc}):\n${_build_out}\n${_build_err}")
 endif()
 
-# ── 3a. 086 FR-009a(ii) / C-3 leg 3 — read back the usage-requirement probe ───
+# ── 3a. 086 FR-006/FR-007 — read back the NEGATIVE-PROBE table ───────────────
+#
+# Without this block the try_compile probes assert only against THEMSELVES: they
+# raise FATAL_ERROR during the consumer configure, so DELETING THE WHOLE PROBE
+# BLOCK from tests/consumer/CMakeLists.txt would make the configure succeed and
+# this driver report green. A gate that vanishes silently when removed is the
+# same defect class as a gate that cannot fail.
+#
+# The expected labels are named here on purpose. Adding a fourth ❌ cell must
+# force an edit to this list — a count-only check would let a new cell be added
+# and silently never asserted.
+set(_probe_file "${_sub_build}/probe-results.txt")
+if(NOT EXISTS "${_probe_file}")
+  message(FATAL_ERROR
+    "086 FR-006: ${_probe_file} was not written — the negative-probe block is "
+    "missing from tests/consumer/CMakeLists.txt, so no ❌ cell of the §1 "
+    "reachability matrix is being asserted at all.")
+endif()
+file(READ "${_probe_file}" _probe_txt)
+message(STATUS "086 negative-probe table:\n${_probe_txt}")
+foreach(_cell "capi->engine-header" "capi->service-header" "service->engine-header")
+  if(NOT _probe_txt MATCHES "(^|\n)${_cell}: compiled=FALSE(\n|$)")
+    message(FATAL_ERROR
+      "086 FR-006: the ❌ cell '${_cell}' is not recorded as compiled=FALSE in "
+      "${_probe_file}. Either the probe was removed, renamed, or it resolved a "
+      "header it must not reach.\nTable was:\n${_probe_txt}")
+  endif()
+endforeach()
+message(STATUS "086 FR-006: OK — all three ❌ cells asserted FALSE")
+
+# ── 3b. 086 FR-009a(ii) / C-3 leg 3 — read back the usage-requirement probe ───
 #
 # tests/consumer/CMakeLists.txt writes this file with file(GENERATE), which runs
 # at GENERATE time and asserts nothing by itself. The compare has to live

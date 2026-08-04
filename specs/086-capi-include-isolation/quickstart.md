@@ -251,7 +251,7 @@ Asserts the full `contracts/include-interface.md` §1 matrix. Three rules govern
 - the "MUST NOT resolve" cells are **compile-only** (a link stage fails for unrelated reasons — measured in
   `research.md` R5);
 - they are **not build targets**. The driver `FATAL_ERROR`s on any non-zero build exit
-  (`tests/consumer/run_consumer_witness.cmake:96-104`), so a must-fail target would red the whole witness.
+  (`tests/consumer/run_consumer_witness.cmake:100-108`), so a must-fail target would red the whole witness.
   They are `try_compile` calls asserted **FALSE** at consumer-**configure** time; a TRUE result raises
   `FATAL_ERROR` and the driver reports it as *"consumer configure failed"* (`:91-92`);
 - a passing positive assertion **never** establishes a negative one, because `<fix/c_api.h>` resolves from
@@ -265,12 +265,12 @@ the **first diagnostic line**, in `.specify/decisions/086-capi-include-isolation
 
 > ### ⚠️ The two reverts are NOT interchangeable, and the asymmetry is directional
 >
-> `fixpp_service` links `fixpp_capi` (`src/service/CMakeLists.txt:16`). Reverting
-> `src/capi/CMakeLists.txt:46` to `PUBLIC` restores the un-wrapped
+> `fixpp_service` links `fixpp_capi` (`src/service/CMakeLists.txt:30`). Reverting
+> `src/capi/CMakeLists.txt:94-96` to `PUBLIC` restores the un-wrapped
 > `INTERFACE_LINK_LIBRARIES "fixpp::capi_objects"`, and `fixpp::service` then inherits
 > `${_IMPORT_PREFIX}/include` **transitively through it** — so the C-ABI revert reds **both** probes. A
 > verifier who reverts capi and sees both go red has recorded service-leg evidence that proves nothing about
-> `src/service/CMakeLists.txt:12`. **The service demonstration MUST revert `src/service/CMakeLists.txt:12`
+> `src/service/CMakeLists.txt:26`. **The service demonstration MUST revert `src/service/CMakeLists.txt:26`
 > alone, with the C-ABI isolation intact**, and MUST capture `fixpp::capi`'s properties from that same run
 > (§3) as proof the C-ABI leg was not the cause (FR-011e).
 >
@@ -324,7 +324,7 @@ Narrowing an *include* interface must not narrow the *link* interface — nor wi
 requirement (FR-009a; the property diff in §3 is the other half of this).
 
 There is **no separate ctest** for this: `consumer_capi_witness` is a *target inside* the standalone consumer
-sub-project, built and linked by the same `fixpp::consumer::install-witness` run as §4 (`tests/consumer/CMakeLists.txt:75-76`;
+sub-project, built and linked by the same `fixpp::consumer::install-witness` run as §4 (`tests/consumer/CMakeLists.txt:87-88`;
 building and linking **is** the assertion, `:71-74`). §4's green already carries it. The earlier
 `ctest -R consumer_witness` here selected **nothing** — the registered name is `fixpp::consumer::install-witness`
 (`CMakeLists.txt:403`) — and exited 0, which is both a false green and an Article VII §8 violation
@@ -336,7 +336,7 @@ ctest --test-dir build/linux-clang-release -L consumer --no-tests=error --output
 ```
 
 `consumer_capi_witness` links `fixpp::capi` and references `fixpp_library_version()` + `fixpp_strerror()`
-(`consumer_capi_witness.cpp:31,36`) — **both in objects that reference nothing outside `fixpp_capi_objects`**,
+(`consumer_capi_witness.cpp:72,77`) — **both in objects that reference nothing outside `fixpp_capi_objects`**,
 so as it stands this would pass even if the transitive archive edge were lost. FR-009 requires it to also
 reference an entry point reaching the session/dictionary closure (`fixpp_dict_load_from_xml` /
 `fixpp_engine_create`).
@@ -344,9 +344,9 @@ reference an entry point reaching the session/dictionary closure (`fixpp_dict_lo
 > ### ⚠️ `consumer_capi_witness` is NEVER RUN — do not record a run of it as evidence
 >
 > Step 4 of the driver executes `${_sub_build}/consumer_witness` — the **umbrella** witness
-> (`run_consumer_witness.cmake:110`) — and asserts `^PASS:` on that one binary (`:142-143`).
+> (`run_consumer_witness.cmake:197`) — and asserts `^PASS:` on that one binary (`:142-143`).
 > `consumer_capi_witness` is covered by the single `cmake --build` at `:96-104` and by nothing else, which is
-> what `tests/consumer/CMakeLists.txt:71` means by *"Building and linking IS the assertion — it need not
+> what `tests/consumer/CMakeLists.txt:83` means by *"Building and linking IS the assertion — it need not
 > run."* An earlier revision of this section asserted the opposite two lines after citing `:71-74` correctly.
 >
 > Consequences for the verifier: the FR-009 reference must pull the entry point's object out of the archive at
@@ -366,7 +366,7 @@ ls /tmp/fixpp-stage-086/lib/objects-*/fixpp_capi_objects/ | wc -l               
 ```
 
 Both expectations are **derived, not remembered**: 18 = the `FIXPP_EXPORT_TARGETS` list
-(`CMakeLists.txt:547-566`, 16 entries) plus `fixpp` appended at `:593` plus `fixpp_log_otlp` appended at
+(`CMakeLists.txt:581-600`, 16 entries) plus `fixpp` appended at `:593` plus `fixpp_log_otlp` appended at
 `:601`; 11 = the translation units listed in `add_library(fixpp_capi_objects OBJECT …)`
 (`src/capi/CMakeLists.txt:11-23`), one object each. Re-derive both if either file changes — the 11 here is a
 *TU* count and is unrelated to the 11 C-ABI sub-headers, which it happens to equal.
@@ -387,7 +387,7 @@ reports green having asserted nothing.
 Beyond presence (FR-010), the witness must assert **containment** (FR-010a / C-5): every installed path under
 `include/capi/` matches `^include/capi/fix/`, every path under `include/service-iface/` matches
 `^include/service-iface/fixpp/service/`. The existing gates cannot cover this — the denylist is anchored on
-`^include/fixpp/…` (`run_package_contents_witness.cmake:484-487`) and the exact-set generated-tree check on
+`^include/fixpp/…` (`run_package_contents_witness.cmake:609-612`) and the exact-set generated-tree check on
 `^include/fixpp/(v[A-Za-z0-9]+)/…` (`:508`); neither regex can ever match a path under the new roots.
 
 Assertions must be **prefix-normalised**: Linux DEB/RPM/TGZ carry a `usr/` component, the Windows ZIP does not.

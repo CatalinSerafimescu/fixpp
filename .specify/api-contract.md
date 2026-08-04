@@ -220,7 +220,12 @@ Per `[arch §7.4]`:
 | `fixppd` | Executable | Daemon. Depends on `fixpp::capi` + `fixpp::service-iface` (and external gRPC, iceoryx2). **Does not depend on `fixpp` (the C++ umbrella) or any of the C++ engine `OBJECT` libraries** — reaches the engine exclusively through `extern "C"` symbols. | Stable from v1.0 |
 | `fixpp-python` | SWIG | Python wheel. Depends only on `fixpp::capi` and the SWIG-generated wrapper. | Stable from v1.0 |
 
-**Boundary backstop** per `[arch §7.4]` / `[arch §8]`: any target downstream of `fixpp::capi` that also lists `fixpp` in its link interface fails the `tools/check_layers.py` lint. The lint also scans `service/` and `bindings/python/` source for any `#include <fixpp/X/...>` where `X` is an engine-internal module — only `<fixpp/service/...>` is allowed in `service/`.
+**Boundary backstop** per `[arch §7.4]` / `[arch §8]` — *corrected by 086/FR-014, which requires that no statement about what `tools/check_layers.py` enforces remain untrue. This paragraph previously made two claims the script cannot support, and leaving it would have put this document in direct contradiction with `architecture.md` §8:*
+
+- **A target linking both `fixpp::capi` and `fixpp` is rejected by convention and review, NOT by a lint.** `tools/check_layers.py` reads no CMake and no link interface — it is a source `#include`-edge lint over **`src/**` and `bindings/**`** (`tools/check_layers.py:2-7`, `:173-176`). Nothing mechanically detects the link combination, in-tree or installed; an installed CMake package cannot observe which targets a consumer links together.
+- **The lint does not scan `service/`.** Its glob list is `src/**` and `bindings/**` only. The engine-internal `#include` rule for `service/` sources rests on convention plus review.
+
+**What IS mechanical**, for consumers of the installed package: 086's include isolation. `fixpp::capi` exposes `${_IMPORT_PREFIX}/include/capi` and `fixpp::service` exposes `${_IMPORT_PREFIX}/include/service-iface`, so `#include <fixpp/wire/...>` does not resolve from either — asserted by three configure-time `try_compile` calls in `tests/consumer/`, each demonstrated able to fail.
 
 ---
 

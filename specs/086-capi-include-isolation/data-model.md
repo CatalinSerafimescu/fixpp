@@ -38,11 +38,11 @@ A directory under the install prefix that appears on some target's `INTERFACE_IN
 
 The by-name / closure-only distinction is the project's own, but it is grounded here in a **measured
 predicate**, not in a comment: a member is *closure-only* when no public header names it
-(`grep -rn <target> include/`) and no public header instructs linking it. `CMakeLists.txt:575-585` states the
+(`grep -rn <target> include/`) and no public header instructs linking it. `CMakeLists.txt:608-622` states the
 distinction in prose, but it ranges over the **five targets the umbrella does not reach** and classifies only
 `fixpp_log_otlp` as closure-only — `capi_objects` is not classified there at all, so that comment cannot be
 the authority for the row below. Export-set **membership** is separately by explicit enumeration
-(`CMakeLists.txt:562` → `install(TARGETS ${FIXPP_EXPORT_TARGETS} EXPORT fixppTargets)` at `:733`).
+(`CMakeLists.txt:596` → `install(TARGETS ${FIXPP_EXPORT_TARGETS} EXPORT fixppTargets)` at `:770`).
 
 | Target | Role | Isolated? | Reachable roots after |
 |---|---|---|---|
@@ -91,7 +91,7 @@ assert.
   build that links. A link stage fails and succeeds for reasons unrelated to include reachability — measured:
   the research probe's umbrella row reported a false ❌ caused by an unresolved symbol while every `#include`
   resolved. A ❌ cell also cannot be a **build target** in the consumer sub-project at all: its driver
-  `FATAL_ERROR`s on any non-zero build exit (`tests/consumer/run_consumer_witness.cmake:96-104`), so a
+  `FATAL_ERROR`s on any non-zero build exit (`tests/consumer/run_consumer_witness.cmake:100-108`), so a
   must-fail target would red the whole witness. The result must be inverted where the build cannot see it —
   at consumer-**configure** time. *(FR-008 / FR-006a; research R5; mechanism in
   `contracts/include-interface.md` §4a.)*
@@ -118,6 +118,6 @@ Every isolated target carries **two** generator expressions, and only one of the
   feature. **What it actually is**: a *source include-edge lint* — it walks `#include` lines in
   `src/**/*.{cpp,hpp,h}` and `bindings/**/*.{cpp,hpp,h}` against an allowed-edge whitelist and exits 1 on any
   violation (`tools/check_layers.py:2-7`, `:173-176`). It reads **no** CMake target links, so it cannot reject
-  "a target that links both `fixpp` and `fixpp::capi`" as `architecture.md:543`, `CMakeLists.txt:580` and
-  `tests/consumer/CMakeLists.txt:68-69` all claim; and it never sees an installed consumer, which is why #218
-  went uncaught in-tree (issue text, "Why it was not caught in-tree"). Correcting those three sites is FR-014.
+  "a target that links both `fixpp` and `fixpp::capi`" as `architecture.md:543`, `CMakeLists.txt:615` and
+  `tests/consumer/CMakeLists.txt:75-79` all claim; and it never sees an installed consumer, which is why #218
+  went uncaught in-tree (issue text, "Why it was not caught in-tree"). Correcting those three sites is FR-014. *(Amended at `/simplify`: FR-014 is written as an UNBOUNDED prohibition — "no statement … may remain untrue" — and a three-site list is not a discharge of it. Re-run BY PREDICATE over `.specify/*.md`, `tools/`, `src/`, `tests/`, `bindings/` and the root `CMakeLists.txt`, the live census is SIX: the three above plus `.specify/api-contract.md:223`, `.specify/architecture.md:131` and the `:509` row at `:519`, and `tests/consumer/consumer_capi_witness.cpp`. `api-contract.md:223` mattered most — left uncorrected it would have asserted the exact opposite of the `architecture.md` §8 text this feature rewrote, i.e. a contradiction between two `.specify`-tier normative docs that 086 itself would have created. Occurrences inside `specs/0NN-*/` historical bundles and the frozen Phase-2 design docs `.specify/2j-*.md` / `.specify/2m-*.md` are inherited-from records, not live claims, and are deliberately left.)*

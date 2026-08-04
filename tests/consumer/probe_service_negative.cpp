@@ -7,11 +7,14 @@
 // the C ABI only.
 //
 // ⚠️ NOT A BUILD TARGET — the SOURCE of a configure-time try_compile() asserted
-// FALSE (contracts §4a; run_consumer_witness.cmake:96-104 FATAL_ERRORs on any
+// FALSE (contracts §4a; run_consumer_witness.cmake:107 FATAL_ERRORs on any
 // non-zero build exit).
 //
 // This cell has its OWN demonstrated-red obligation and its own revert
-// (src/service/CMakeLists.txt:12 alone, FR-011e). The C-ABI revert reds this
+// (the $<INSTALL_INTERFACE:...> line in src/service/CMakeLists.txt alone --
+// cited by CONSTRUCT, not by line: this is an INSTRUCTION a future verifier acts
+// on, and a stale number would have them revert a comment and observe nothing.
+// FR-011e.) The C-ABI revert reds this
 // probe too — fixpp_service links fixpp_capi — so it cannot stand in for the
 // service demonstration.
 

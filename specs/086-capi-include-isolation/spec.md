@@ -45,11 +45,11 @@ service-mode boundary. The installed package does not deliver it. Measured in th
 | The C-ABI public header set is **12 files** | `find include/fix -type f` → 12: `c_api.h` plus **11** sub-headers (`decimal`, `dict`, `engine`, `error`, `export`, `handles`, `log`, `message`, `otel`, `session`, `version`). `specs/084-packaging-cpack-export/contracts/package-layout.md` §2a records the same figure ("`include/fix/` + `include/fix/c_api/` (12 files)") | This is the census FR-002, SC-001 and SC-001a range over. **`store.h` is not missing**: `.specify/2i-capi.md:133` lists it among the *designed* domain-split headers, but the C-ABI surface is DONE (CA-001..010) and GA-frozen at `1.5.0`, additive-only (**[parent-repo]**`/REMAINING-WORK.md:7` — root given under Normative References), and `2i-capi.md:93` assigns the store *function* surface to design doc **2e**. The delivered 12-file set **is** the intended v1.0 surface; a `store.h` would be a post-GA MINOR addition. **Not a question 086 answers** |
 | The C-ABI headers are **self-contained** | `include/fix/**` includes only `<fix/c_api/...>` / `"fix/c_api/..."` and C stdlib headers (`stdint.h`, `stddef.h`, `stdbool.h`). **Zero** `<fixpp/...>` includes | Isolation is achievable — no header has to be rewritten to make the boundary hold |
 | **In-tree blast radius is zero** | `CMakeLists.txt:234` — `include_directories("${CMAKE_SOURCE_DIR}/include")`, directory-scoped over the whole build. The **11 of 28** `tests/capi/*.cpp` whose compilation depends on the `-I` search for a `fixpp/` header receive it from there, **not** through the `fixpp_capi` target — **6** spell it `<fixpp/...>` and **5** only `"fixpp/..."` (`error_surface_test`, `error_block_test`, `capi_group_delimiter_ctx_test`, `error_live_test`, `send_recv_test`), and since `tests/capi/` contains no `fixpp/` subdirectory the quoted form falls back to the same search. Counted by `ls tests/capi/*.cpp \| wc -l`, `grep -l 'fixpp/' tests/capi/*.cpp \| wc -l`. *(The angle-bracket-only figure is the count this table carried until Gate A r2; `include_directories()` is directory-scoped over all 28 regardless of spelling, so the argument is untouched — but the figure named the wrong set, which is exactly the quoted-vs-angle-bracket conflation corrected elsewhere in this Context table.)* | The gap is installed-package-only, exactly as #218 states. Narrowing the target's interface cannot break an in-tree build |
-| `fixpp_capi_objects` is **load-bearing in the export closure** | It is an export member by **explicit enumeration** — listed by name in `FIXPP_EXPORT_TARGETS` (`CMakeLists.txt:562`), consumed by `install(TARGETS ${FIXPP_EXPORT_TARGETS} EXPORT fixppTargets)` (`:733`) — **not** because `fixpp_capi` is source-less and links it `PUBLIC` (`src/capi/CMakeLists.txt:46`), which was this row's basis until Gate A r2 and is superseded by FR-003a and `research.md` R2. The distinction matters here: membership by enumeration is stable under *any* change to that link keyword. The shipped `lib/objects-<CONFIG>/` files are checked by `_cmake_import_check_files_for_fixpp::capi_objects` and removing them makes `find_package(fixpp)` **`FATAL_ERROR`** for every consumer | Any change to that link keyword is a **measured** obligation, not a read-off-the-source one. Export-set membership and the shipped object files must be re-verified on a real configure + install |
-| `fixpp_service` leaks the same claim **independently** | `src/service/CMakeLists.txt:10-13` declares its own `$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>` — the whole tree — and is an export member. It does not inherit from `fixpp_capi` | §8's boundary claim is unenforced there too. **In scope** (clarified 2026-08-03) — US6 / FR-011 |
+| `fixpp_capi_objects` is **load-bearing in the export closure** | It is an export member by **explicit enumeration** — listed by name in `FIXPP_EXPORT_TARGETS` (`CMakeLists.txt:596`), consumed by `install(TARGETS ${FIXPP_EXPORT_TARGETS} EXPORT fixppTargets)` (`:770`) — **not** because `fixpp_capi` is source-less and links it `PUBLIC` (`src/capi/CMakeLists.txt:94-96`), which was this row's basis until Gate A r2 and is superseded by FR-003a and `research.md` R2. The distinction matters here: membership by enumeration is stable under *any* change to that link keyword. The shipped `lib/objects-<CONFIG>/` files are checked by `_cmake_import_check_files_for_fixpp::capi_objects` and removing them makes `find_package(fixpp)` **`FATAL_ERROR`** for every consumer | Any change to that link keyword is a **measured** obligation, not a read-off-the-source one. Export-set membership and the shipped object files must be re-verified on a real configure + install |
+| `fixpp_service` leaks the same claim **independently** | `src/service/CMakeLists.txt:24-27` declares its own `$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>` — the whole tree — and is an export member. It does not inherit from `fixpp_capi` | §8's boundary claim is unenforced there too. **In scope** (clarified 2026-08-03) — US6 / FR-011 |
 | The service public surface is **one self-contained header** | `include/fixpp/service/control_plane_factory.hpp` — a pure abstract base, **zero** `#include` directives. `include/fixpp/service/` holds nothing else but a `.gitkeep`. No `fixppd` target exists in any `CMakeLists.txt` yet (Phase-3 stub) | Isolating it is cheap, but the header must **also** stay reachable from the C++ umbrella: `EngineConfig` holds a `unique_ptr<ControlPlaneFactory>`, so the value type needs the base complete |
 | The package-contents witness has **no** C-ABI header assertion | `tests/packaging/run_package_contents_witness.cmake` asserts `include/fixpp/wire/parser.hpp` (:371) and `include/fixpp/v44/Messages.hpp` (:374); nothing asserts any `include/fix/**` path | Relocating the C-ABI headers would today be invisible to the packaging gate — the headers could vanish entirely and it would stay green |
-| `fixpp_capi_shared` is a **second** propagation path | `src/capi/CMakeLists.txt:50` links the same OBJECT library `PUBLIC` | Test-only (`FIXPP_BUILD_TESTS`), but not zero — it must be considered when the link keyword changes |
+| `fixpp_capi_shared` is a **second** propagation path | `src/capi/CMakeLists.txt:116` links the same OBJECT library `PUBLIC` | Test-only (`FIXPP_BUILD_TESTS`), but not zero — it must be considered when the link keyword changes |
 
 ---
 
@@ -297,8 +297,8 @@ interface header and the C-ABI headers compile; a C++ engine header does not.
   public header names it (`grep -rn capi_objects include/` → 0 hits) and no public header instructs linking it
   (the only such instruction is `include/fixpp/config/toml_config_loader.hpp:7-8`, naming `fixpp::config_toml`).
   Its export-set membership is by **explicit enumeration** — it is listed by name in `FIXPP_EXPORT_TARGETS`
-  (`CMakeLists.txt:562`), consumed by `install(TARGETS ${FIXPP_EXPORT_TARGETS} EXPORT fixppTargets)` — not by
-  closure inference. *(The `CMakeLists.txt:575-585` commentary that earlier versions of this spec cited
+  (`CMakeLists.txt:596`), consumed by `install(TARGETS ${FIXPP_EXPORT_TARGETS} EXPORT fixppTargets)` — not by
+  closure inference. *(The `CMakeLists.txt:608-622` commentary that earlier versions of this spec cited
   classifies the **five targets the umbrella does not reach**, and names only `fixpp_log_otlp` closure-only;
   `capi_objects` is not classified there at all. The conclusion is unchanged, the basis is now the predicate
   rather than that comment. Clarified 2026-08-03. This bounds the witness: it asserts what the documented
@@ -321,7 +321,7 @@ interface header and the C-ABI headers compile; a C++ engine header does not.
 - **FR-005b**: **Additivity in FR-005a constrains the installed file layout ONLY. It does NOT constrain the
   target graph, and satisfying it is not sufficient.** Adding a root does not subtract one: today
   `fixpp::capi`'s whole-tree include path arrives through `INTERFACE_LINK_LIBRARIES "fixpp::capi_objects"`, and
-  `fixpp::service` declares its own at `src/service/CMakeLists.txt:12`. Both **MUST** be cut, and each by-name
+  `fixpp::service` declares its own at `src/service/CMakeLists.txt:26`. Both **MUST** be cut, and each by-name
   target given its own restricted installed include interface. A change that adds the new roots and install
   rules while leaving those two edges intact ships a package that **satisfies FR-005a, FR-010 and SC-003a and
   still fails FR-003** — every content-shaped gate green over the live defect. *(Added after clarify: the
@@ -334,7 +334,7 @@ interface header and the C-ABI headers compile; a C++ engine header does not.
   linked, including a C++ engine header **fails to compile**.
 - **FR-006a**: **The must-fail assertion MUST be expressed in a form the existing consumer-witness harness can
   carry.** `tests/consumer/` is a standalone sub-project whose driver runs one `cmake --build` and raises
-  `FATAL_ERROR` on **any** non-zero build exit (`tests/consumer/run_consumer_witness.cmake:96-104`). A probe
+  `FATAL_ERROR` on **any** non-zero build exit (`tests/consumer/run_consumer_witness.cmake:100-108`). A probe
   *target* that is required to fail therefore reds the entire witness and the assertion cannot be expressed as
   a target at all. The mechanism MUST evaluate the negative cell where `fixpp::capi`'s usage requirements
   propagate exactly as they do to a real consumer target, and MUST invert the result so that *compiling* is
@@ -356,15 +356,15 @@ interface header and the C-ABI headers compile; a C++ engine header does not.
 - **FR-009**: The existing positive C-ABI consumer witness (links the C-ABI target by its exported name,
   includes the entry header, resolves a real symbol) MUST continue to pass unchanged in intent, and MUST be
   **strengthened to exercise the transitive archive set**. As it stands it references only
-  `fixpp_library_version()` and `fixpp_strerror()` (`tests/consumer/consumer_capi_witness.cpp:31,36`), whose
+  `fixpp_library_version()` and `fixpp_strerror()` (`tests/consumer/consumer_capi_witness.cpp:72,77`), whose
   objects (`version.cpp`, `error.cpp`) reference nothing outside `fixpp_capi_objects` — and the consumer link
   line carries the archive with **zero loose objects** (measured, `tests/packaging/run_package_contents_witness.cmake:439-441`),
   so the engine archives arrive purely through `capi_objects`' `INTERFACE_LINK_LIBRARIES`. If that edge were
   lost, this witness would still pass. It MUST additionally reference an entry point whose object pulls the
   session/dictionary closure out of the archive (`fixpp_dict_load_from_xml` / `fixpp_engine_create` —
   `src/capi/dictionary.cpp`, `src/capi/engine.cpp`). *(This witness is **built and linked, never run**:
-  `run_consumer_witness.cmake:110` runs `${_sub_build}/consumer_witness` — the umbrella witness — and asserts
-  `^PASS:` on that binary alone (`:142-143`); `tests/consumer/CMakeLists.txt:71` states it in as many words,
+  `run_consumer_witness.cmake:197` runs `${_sub_build}/consumer_witness` — the umbrella witness — and asserts
+  `^PASS:` on that binary alone (`:142-143`); `tests/consumer/CMakeLists.txt:83` states it in as many words,
   "Building and linking IS the assertion — it need not run". The reference must therefore pull the entry
   point's object out of the archive at **link** time. **The form is load-bearing**: a namespace-scope,
   non-`static`, non-`const` pointer initialised with the entry point's address (or a call), never an address
@@ -440,7 +440,7 @@ interface header and the C-ABI headers compile; a C++ engine header does not.
   `include/service-iface/` matches `^include/service-iface/fixpp/service/`. This is the only assertion that
   traces FR-001, which is a property of a **root** rather than of a target, and the existing content gates are
   structurally blind to it: the denylist anchors on `^include/fixpp/…`
-  (`tests/packaging/run_package_contents_witness.cmake:484-487`) and the exact-set generated-tree check on
+  (`tests/packaging/run_package_contents_witness.cmake:609-612`) and the exact-set generated-tree check on
   `^include/fixpp/(v[A-Za-z0-9]+)/…` (`:508`) — neither regex can ever match a path under the new roots.
   Without it, a partial or over-broad duplication under an isolated root passes every gate unless a negative
   probe happens to name the duplicated header.
@@ -460,19 +460,19 @@ interface header and the C-ABI headers compile; a C++ engine header does not.
   isolating the service surface must not remove it from the C++ surface. **Witnessed by the new umbrella probe
   of FR-004**, since no existing witness includes that header.
 - **FR-011d**: The whole-tree installed include declaration on the service target —
-  `"$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"` at **`src/service/CMakeLists.txt:12`** — MUST be
+  `"$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"` at **`src/service/CMakeLists.txt:26`** — MUST be
   replaced by the isolated root. It is named explicitly because it is the single line that makes FR-011b false,
   it is *not* inherited from the C-ABI target (so narrowing that target does not touch it), and every other
   requirement in this feature can be satisfied while it survives.
 - **FR-011e**: **The independence in FR-011d is directional, and the red demonstrations MUST be written to
   it.** *Forward* (the fix direction) it holds: narrowing `fixpp::capi` does not narrow `fixpp::service`, so
   both edits are needed. *Backward* (the revert direction) it does **not**: `fixpp_service` links `fixpp_capi`
-  (`src/service/CMakeLists.txt:16`), so reverting `src/capi/CMakeLists.txt:46` to `PUBLIC` restores the
+  (`src/service/CMakeLists.txt:30`), so reverting `src/capi/CMakeLists.txt:94-96` to `PUBLIC` restores the
   un-wrapped `INTERFACE_LINK_LIBRARIES "fixpp::capi_objects"` and `fixpp::service` inherits
   `${_IMPORT_PREFIX}/include` transitively — reddening **both** probes. A verifier who reverts the C-ABI line
   and observes both go red records SC-002 evidence for the service leg that proves nothing about
-  `src/service/CMakeLists.txt:12`. The service red demonstration MUST therefore be produced by reverting
-  **`src/service/CMakeLists.txt:12` only**, with the C-ABI isolation intact, and MUST record `fixpp::capi`'s
+  `src/service/CMakeLists.txt:26`. The service red demonstration MUST therefore be produced by reverting
+  **`src/service/CMakeLists.txt:26` only**, with the C-ABI isolation intact, and MUST record `fixpp::capi`'s
   observed properties from that same run as proof the C-ABI leg was not the cause.
 - **FR-012**: The compile-must-fail witness obligations (FR-006, FR-006a, FR-007, FR-008) apply to the service
   consumer target as well as the C-ABI one: a witness MUST assert that a C++ engine header fails to compile
@@ -508,7 +508,7 @@ interface header and the C-ABI headers compile; a C++ engine header does not.
   "STILL ENFORCED, narrower than it reads" — understates it), `:561` (claims the lint "scans `service/` source"
   — there is no `service/` directory at the repo root), `:557` (names `include/fixpp/service/control_plane.h`,
   which does not exist), `:560` (names `fixppd` and `fixpp::service-iface`, neither of which exists as a
-  target); and the verbatim replications at `CMakeLists.txt:580` and `tests/consumer/CMakeLists.txt:68-69`,
+  target); and the verbatim replications at `CMakeLists.txt:615` and `tests/consumer/CMakeLists.txt:75-79`,
   **which are where this bundle inherited the claim from** — leaving them re-seeds the next reader exactly as
   `:503` seeded 084.
 - **FR-015**: `specs/084-packaging-cpack-export/contracts/package-layout.md` §2a MUST be reconciled wherever it
@@ -573,7 +573,7 @@ interface header and the C-ABI headers compile; a C++ engine header does not.
   `include/service-iface`), and the same paired-evidence rule.
 - **SC-002**: **Each** compile-must-fail assertion (C-ABI target, service target) is observed **failing** at
   least once with **its own** isolation removed — per FR-011e, the service demonstration reverts
-  `src/service/CMakeLists.txt:12` alone — and **passing** with it present; both observations are recorded with
+  `src/service/CMakeLists.txt:26` alone — and **passing** with it present; both observations are recorded with
   the commands that produced them, the exit code, and the first diagnostic line, in
   `.specify/decisions/086-capi-include-isolation-verify.md`.
 - **SC-003**: The umbrella consumer witness passes with **zero** edits to its include paths, library paths, or

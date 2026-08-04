@@ -6,7 +6,7 @@
 //
 // ⚠️ THIS FILE IS NOT A BUILD TARGET. It is the SOURCE argument of a
 // configure-time try_compile() in tests/consumer/CMakeLists.txt, asserted FALSE.
-// It cannot be a target: run_consumer_witness.cmake:96-104 raises FATAL_ERROR on
+// It cannot be a target: run_consumer_witness.cmake:107 raises FATAL_ERROR on
 // ANY non-zero build exit, so a must-fail target would red the whole witness
 // (contracts §4a — the reason the earlier "OBJECT library that must fail to
 // build" wording was unimplementable).
