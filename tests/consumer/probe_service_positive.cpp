@@ -20,7 +20,5 @@
 #include <fixpp/service/control_plane_factory.hpp>
 
 namespace {
-using fixpp_probe_service_version_fn = fixpp_version_t (*)(void);
-[[maybe_unused]] constexpr fixpp_probe_service_version_fn kProbeServiceVersion =
-    &fixpp_library_version;
+[[maybe_unused]] fixpp_version_t probe_service_use() { return fixpp_library_version(); }
 }  // namespace

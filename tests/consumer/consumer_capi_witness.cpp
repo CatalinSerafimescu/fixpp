@@ -48,10 +48,19 @@
 // executed — the driver runs only ${_sub_build}/consumer_witness
 // (run_consumer_witness.cmake:110) — so nothing here may depend on, or assert,
 // runtime behaviour. Building and linking IS the assertion.
+// NOLINTBEGIN(cppcoreguidelines-avoid-non-const-global-variables): making these
+// `const` would DEFEAT them. A namespace-scope `const` object has INTERNAL
+// linkage in C++, and an internal-linkage pointer nothing reads is exactly what
+// the optimiser may discard together with its relocation — the failure mode this
+// declaration exists to avoid. External linkage is the property doing the work,
+// and `const` is mutually exclusive with it here without an `extern` that the
+// check would flag anyway. Nothing mutates these; the check cannot see that the
+// non-constness is a linkage consequence rather than a design choice.
 fixpp_error_t (*fixpp_capi_witness_dict_entry)(const char*, fixpp_dict_t**) =
     &fixpp_dict_load_from_xml;
 fixpp_error_t (*fixpp_capi_witness_engine_entry)(fixpp_engine_config_t*, uint16_t, uint16_t,
                                                  fixpp_engine_t**) = &fixpp_engine_create;
+// NOLINTEND(cppcoreguidelines-avoid-non-const-global-variables)
 
 int main() {
     const fixpp_version_t v = fixpp_library_version();

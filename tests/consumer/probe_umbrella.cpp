@@ -23,7 +23,5 @@
 #include <fixpp/wire/parser.hpp>
 
 namespace {
-using fixpp_probe_umbrella_version_fn = fixpp_version_t (*)(void);
-[[maybe_unused]] constexpr fixpp_probe_umbrella_version_fn kProbeUmbrellaVersion =
-    &fixpp_library_version;
+[[maybe_unused]] fixpp_version_t probe_umbrella_use() { return fixpp_library_version(); }
 }  // namespace

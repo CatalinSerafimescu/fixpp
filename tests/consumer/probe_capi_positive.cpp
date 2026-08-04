@@ -35,10 +35,9 @@
 #include <fix/c_api/session.h>
 #include <fix/c_api/version.h>
 
-// Odr-use one declaration from the umbrella so the TU is not merely a
-// preprocessor exercise: a header that resolved but declared nothing usable
-// would still compile if this file were empty of code.
+// Use one declaration from the umbrella so the TU is not merely a preprocessor
+// exercise: a header that resolved but declared nothing usable would still
+// compile if this file were empty of code.
 namespace {
-using fixpp_probe_version_fn = fixpp_version_t (*)(void);
-[[maybe_unused]] constexpr fixpp_probe_version_fn kProbeVersion = &fixpp_library_version;
+[[maybe_unused]] fixpp_version_t probe_use() { return fixpp_library_version(); }
 }  // namespace
