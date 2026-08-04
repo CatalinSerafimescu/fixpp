@@ -11,12 +11,14 @@
 // picked up that root would leak this cell while the <fixpp/wire/parser.hpp>
 // probe still passed. Measured FALSE at ISO=ON in research.md R4 row 4.
 //
-// ⚠️ NOT A BUILD TARGET, and THE POLARITY IS INVERTED ON PURPOSE (Gate B r1 P1 #2).
-// This is the SOURCE of a configure-time try_compile() asserted to COMPILE.
+// ⚠️ AN ORDINARY OBJECT-LIBRARY TARGET THAT MUST COMPILE — the polarity is
+// inverted on purpose (Gate B r1 P1 #2), and BUILDING it is the assertion.
+// It was a configure-time try_compile() source until Gate B r3, when CI proved
+// that form cannot resolve Conan's imported-target closure (contracts §4a r3).
 // `__has_include` tests LOOKUP without parsing the forbidden header:
-//   * not reachable (correct) -> #error skipped, compiles      -> TRUE
-//   * reachable (the defect)  -> #error fires with a UNIQUE token -> FALSE
-//   * anything else broken    -> FALSE, but WITHOUT the token
+//   * not reachable (correct) -> #error skipped, compiles         -> PASS
+//   * reachable (the defect)  -> #error fires with a UNIQUE token -> FAIL
+//   * anything else broken    -> FAIL, but WITHOUT the token
 // The old form asserted "did not compile", which made a syntax error or a
 // missing third-party path indistinguishable from the isolation working.
 // See probe_capi_negative.cpp for the full rationale.

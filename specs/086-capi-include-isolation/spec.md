@@ -569,7 +569,7 @@ interface header and the C-ABI headers compile; a C++ engine header does not.
   `find include/fix -type f`, not transcribed), and **no** C++ engine header is — **evidenced by the named
   negative probes plus C-5 root containment**, which is what "0" means here. Concretely: the
   `<fixpp/wire/parser.hpp>` and `<fixpp/service/control_plane_factory.hpp>` probes of
-  `contracts/include-interface.md` §4 both assert the probe COMPILES (`try_compile` TRUE = header unreachable; FALSE + `FIXPP_086_FORBIDDEN_HEADER_REACHABLE` = leak; FALSE without the token = BROKEN probe, equally fatal), **and** `fixpp::capi`'s only installed include root is
+  `contracts/include-interface.md` §4 both assert the probe COMPILES (it builds = header unreachable; build fails carrying `FIXPP_086_FORBIDDEN_HEADER_REACHABLE` = leak; build fails without the token = BROKEN probe, equally fatal), **and** `fixpp::capi`'s only installed include root is
   `include/capi`, whose contents C-5 / I11 pin to `^include/capi/fix/`. *(Scoped this way deliberately: a "0
   over all nine header families" claim asserted by two probes would be a universal claim on representative
   evidence. The two named probes plus the pinned root are what is actually measured, and together they exclude
@@ -606,8 +606,7 @@ interface header and the C-ABI headers compile; a C++ engine header does not.
   is a **durable artifact captured from a named pre-feature commit** (quickstart §0/§2), not an ambient file;
   the comparison is automated to a non-zero exit, not eyeballed. **"No test newly fails" is asserted by
   RESULT, not by test names.** A name-set diff is structurally incapable of observing a failure, and this
-  feature registers no new ctest test (the probes are targets and configure-time `try_compile` inside an
-  existing sub-project), so the name sets are expected identical whatever happens. The assertions are therefore
+  feature registers no new ctest test (the probes are all ordinary targets inside an existing sub-project), so the name sets are expected identical whatever happens. The assertions are therefore
   (a) both `ctest` runs' **exit codes** are captured and the after-run's MUST be 0; (b) the baseline run's exit
   code MUST be 0 too — or, if the host's baseline is not green, its failing tests MUST be enumerated by name in
   `.specify/decisions/086-capi-include-isolation-verify.md` and the after-run's failure set MUST equal exactly

@@ -23,9 +23,12 @@
 > not evidence (`feedback_sanitizer_canary_must_be_proven_red`).
 
 > ### Two traps this feature already paid for — do not re-enter them
-> 1. **A ❌ assertion may never be a build target.** `run_consumer_witness.cmake:96-104` raises `FATAL_ERROR`
->    on *any* non-zero build exit, so a must-fail target reds the whole witness. ❌ cells are configure-time
->    `try_compile` asserted **TRUE** (`__has_include` + unique-token `#error`; inverted at Gate B r2) (contracts §4a, measured in R9).
+> 1. **A ❌ assertion may never be a build target that must FAIL.** `run_consumer_witness.cmake:96-104` raises
+>    `FATAL_ERROR` on *any* non-zero build exit, so a must-fail target reds the whole witness. Since Gate B r2
+>    the ❌ cells assert the opposite — `__has_include` + a unique-token `#error`, which must **compile** — so
+>    since r3 they ARE ordinary `OBJECT` targets, named in the driver's `_required_targets`, and building them
+>    is the assertion (contracts §4a **r3 box**). They were configure-time `try_compile` calls in between;
+>    that form cannot resolve Conan's imported-target closure and failed every MSVC Debug CI run.
 > 2. **Never terminate an extraction range on a blank line.** CMake emits one between `add_library()` and
 >    `set_target_properties()`; the round-1 `awk '/…/,/^$/'` captured two identical lines and `diff` exited 0
 >    *unconditionally*. Anchor on `/^set_target_properties\(<target> PROPERTIES$/,/^\)$/`.
@@ -47,7 +50,7 @@
 - [X] T006 Capture the **pre-feature baseline**: pin `BASE=$(git merge-base HEAD origin/main)`, record it to `$FIXPP_086_EVIDENCE/baseline-commit.txt`, `git worktree add /tmp/fixpp-086-base "$BASE"` (a **third** worktree — the main checkout must not be switched), `conan install` + configure + build + install it to `/tmp/fixpp-stage-086-base`
 - [X] T007 Capture `$FIXPP_086_EVIDENCE/before.txt` (installed manifest) and `ctest-before.txt` **with exit code**, asserting the baseline suite is green or enumerating its pre-existing failures — SC-003a/SC-007 evidence. Start from an emptied stage prefix (`cmake --install` does not remove stale files, so a dirty prefix makes `comm -23` pass falsely)
 - [X] T008 Convert `tests/consumer/` to `project(fixpp_consumer_witness C CXX)` so the C-language probe can exist (contracts §4; closes US1's "C or C++ integrator" promise for the *installed* interface)
-- [X] T009 Add the `try_compile` scaffolding to `tests/consumer/CMakeLists.txt`: `CMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY` (compile-only, no `main()`), restored after use, with each ❌ probe asserted **TRUE** (`__has_include` + a unique-token `#error`; inverted at Gate B r2) and a FALSE result raising `FATAL_ERROR` — carrying the token it is a leak, without it a BROKEN probe — surfaced by the driver as "consumer configure failed" (`run_consumer_witness.cmake:91-92`). Mechanism measured in `research.md` R9
+- [X] T009 Add the three ❌ probe targets to `tests/consumer/CMakeLists.txt` as compile-only `OBJECT` libraries linked against the imported target (`probe_capi_negative`, `probe_capi_negative_service` → `fixpp::capi`; `probe_service_negative` → `fixpp::service`), each body `__has_include` + a unique-token `#error` so it compiles iff the forbidden header is unreachable, and add all three to `run_consumer_witness.cmake`'s `_required_targets` so a deleted probe fails the build by name (`ninja: error: unknown target '<name>'` — measured; the Makefile generators' "No rule to make target" phrasing never appears here). Building them IS the assertion — the driver's existing non-zero-exit `FATAL_ERROR` (`:96-104`) is the gate; output containing `FIXPP_086_FORBIDDEN_HEADER_REACHABLE` is a leak, any other failure a broken probe, both fatal and both readable from the verbatim compiler output. **Amended at Gate B r3**: this task read "add the `try_compile` scaffolding … `CMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY`, restored after use" until CI proved `try_compile` cannot resolve Conan's `CONAN_LIB::…_DEBUG` closure on MSVC Debug (contracts §4a r3 box). R9's measurement of the retired form stands but is Linux/clang-scoped
 - [X] T010 Add the `file(GENERATE)` usage-requirement probe **and its driver read-back** after the sub-build — a `file(GENERATE)` nothing compares asserts nothing (contracts §4, FR-009a(ii), instrument measured in R10)
 
 ---

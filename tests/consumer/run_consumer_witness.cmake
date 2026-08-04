@@ -105,8 +105,11 @@ endif()
 # equivalent, and "the gate can be removed without anything noticing" is the same
 # defect class as "the gate cannot fail".
 #
-# Naming them makes their absence a hard error: CMake fails with
-# "No rule to make target" if any is renamed or removed.
+# Naming them makes their absence a hard error if any is renamed or removed. The
+# wording is GENERATOR-SPECIFIC: Ninja (what this project uses) says
+# "ninja: error: unknown target '<name>'"; the Makefile generators say
+# "No rule to make target". MEASURED, not assumed — deleting probe_service_negative
+# produced the Ninja form. Match on both if you ever grep for it.
 set(_required_targets
   consumer_witness           # the umbrella witness, run at step 4
   consumer_capi_witness      # FR-009 transitive-link closure (built + linked, never run)
@@ -132,8 +135,9 @@ execute_process(
 if(NOT _build_rc EQUAL 0)
   message(FATAL_ERROR
     "consumer build failed (exit ${_build_rc}). NOTE: this driver builds the 086 "
-    "witness targets BY NAME (${_required_targets}), so a 'No rule to make target' "
-    "here means a gate was deleted or renamed, not that the code is broken.\n"
+    "witness targets BY NAME (${_required_targets}), so an \"unknown target\" error "
+    "(Ninja) or \"No rule to make target\" (Makefiles) here means a gate was deleted "
+    "or renamed, not that the code is broken.\n"
     "${_build_out}\n${_build_err}")
 endif()
 
@@ -150,8 +154,8 @@ endif()
 # They are now ordinary OBJECT-library targets that must COMPILE, listed BY NAME
 # in `_required_targets` above. That gives both properties the read-back gave:
 #   * a probe that stops compiling (the header became reachable) fails the build;
-#   * a probe that is DELETED or renamed fails the build with "No rule to make
-#     target", because the driver names it.
+#   * a probe that is DELETED or renamed fails the build — "ninja: error: unknown
+#     target '<name>'" under Ninja — because the driver names it.
 # The build failure above prints the compiler output verbatim, so an isolation
 # breach is identifiable by its `FIXPP_086_FORBIDDEN_HEADER_REACHABLE` token
 # while any other failure reads as a broken probe.

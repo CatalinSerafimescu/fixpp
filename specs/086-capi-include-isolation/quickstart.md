@@ -250,10 +250,15 @@ Asserts the full `contracts/include-interface.md` §1 matrix. Three rules govern
 
 - the "MUST NOT resolve" cells are **compile-only** (a link stage fails for unrelated reasons — measured in
   `research.md` R5);
-- they are **not build targets**. The driver `FATAL_ERROR`s on any non-zero build exit
-  (`tests/consumer/run_consumer_witness.cmake:100-108`), so a must-fail target would red the whole witness.
-  They are `try_compile` calls asserted **TRUE** (`__has_include` + a unique-token `#error`; polarity inverted at Gate B r2) at consumer-**configure** time; a FALSE result raises
-  `FATAL_ERROR` and the driver reports it as *"consumer configure failed"* (`:91-92`);
+- they **are** build targets — ordinary compile-only `OBJECT` libraries, exactly like the positive cells, and
+  **building them is the assertion**. Each carries `__has_include` + a unique-token `#error`, so it compiles
+  iff the forbidden header is unreachable. The driver `FATAL_ERROR`s on any non-zero build exit
+  (`tests/consumer/run_consumer_witness.cmake:100-108`) and echoes the compiler output verbatim: output
+  containing `FIXPP_086_FORBIDDEN_HEADER_REACHABLE` is an isolation breach, any other failure is a broken
+  probe, both fatal. All three are named in `_required_targets`, so deleting one fails the build
+  (`ninja: error: unknown target '<name>'` under this project's generator — measured). *(Until Gate B r3 these were configure-time `try_compile` calls reported as "consumer
+  configure failed"; that form cannot resolve Conan's imported-target closure — see
+  `contracts/include-interface.md` §4a r3 box.)*
 - a passing positive assertion **never** establishes a negative one, because `<fix/c_api.h>` resolves from
   either root under the additive layout. Evidence is the **pair**, from the same configured consumer.
 
@@ -400,8 +405,7 @@ claim about the product manufactured by the test (`package-layout.md` §2).
 >
 > The name-set comparison this section carried until Gate A r2 is structurally incapable of observing what
 > SC-007 claims ("no test newly fails"), and it is close to vacuous by construction: this feature registers
-> **no new ctest test** (the probes are targets and configure-time `try_compile` inside the existing consumer
-> sub-project), so the name sets are expected identical whatever happens. Neither `ctest` exit status was
+> **no new ctest test** (the probes are all ordinary targets inside the existing consumer sub-project), so the name sets are expected identical whatever happens. Neither `ctest` exit status was
 > captured either — `> file` discards it silently. All four legs below are required; the name diff is kept
 > only for leg (d), "no test disappears".
 

@@ -18,8 +18,10 @@
 // additive layout <fix/c_api.h> resolves from either root, so a green here is
 // exactly as consistent with the defect being fully present as with it being
 // fixed. Only the PAIR — this TU compiling AND the probe_capi_negative*
-// try_compile calls returning FALSE, from the same configured consumer —
-// discriminates (FR-008a).
+// targets compiling, from the same configured consumer — discriminates
+// (FR-008a). Both halves are now the same kind of target, so they resolve in
+// the same context; they did not before Gate B r3, and that asymmetry is what
+// hid an MSVC Debug defect on CI (contracts §4a r3).
 
 #include <fix/c_api.h>
 #include <fix/c_api/decimal.h>

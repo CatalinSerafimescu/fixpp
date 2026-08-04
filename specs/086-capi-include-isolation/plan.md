@@ -62,8 +62,8 @@ export-set membership must not move (18 members); `fixpp_capi_objects`' shipped 
 **Scale/Scope**: **6** CMake/CMake-script files edited (`CMakeLists.txt`, `src/capi/CMakeLists.txt`,
 `src/service/CMakeLists.txt`, `tests/consumer/CMakeLists.txt`, `tests/consumer/run_consumer_witness.cmake`,
 `tests/packaging/run_package_contents_witness.cmake`), 2 install rules added, **~7** new witness translation
-units (C++ positive ×2, C positive ×1, umbrella probe ×1, the two `try_compile` negative probe sources — one
-engine header, one service header, consumed by **three** `try_compile` calls — plus the usage-requirement probe
+units (C++ positive ×2, C positive ×1, umbrella probe ×1, the two negative probe sources — one
+engine header, one service header, consumed by **three** negative probe targets — plus the usage-requirement probe
 TU), 1 existing witness TU extended (`consumer_capi_witness.cpp`, FR-009), 3 documents reconciled. *(Counted
 2026-08-03 against the Project Structure below; the earlier "3 CMake files / ~4 targets" figures did not
 match it. Raised from 5 files / ~6 TUs at Gate A r2, when the driver edit (FR-009a(ii), Article IX §4) and the
@@ -145,7 +145,7 @@ src/capi/CMakeLists.txt              # :46 PUBLIC -> PRIVATE; + target_include_d
 src/service/CMakeLists.txt           # :12 whole-tree INSTALL_INTERFACE -> service-iface root
 tests/consumer/
 ├── CMakeLists.txt                   # :40 project(... CXX) -> (... C CXX); + compile-only ✅ probe targets;
-│                                    #   + the ❌ try_compile assertions, asserted TRUE (configure-time)
+│                                    #   + the ❌ probe targets, also compile-only, asserted to COMPILE (r3)
 ├── consumer_capi_witness.cpp        # EXISTS — links fixpp::capi; EXTENDED per FR-009 to reach the
 │                                    #   session/dictionary closure AT LINK TIME (CALL, from a non-foldable branch (a taken address is discardable under --gc-sections/LTO — Gate B r2)).
 │                                    #   BUILT AND LINKED, NEVER RUN: the driver runs only
@@ -159,7 +159,7 @@ tests/consumer/
 └── <new probe TUs>                  # ✅ compile-only: 12 C-ABI headers from C++ and from C; umbrella probe
                                      #   carrying <fix/c_api.h> + <fixpp/service/control_plane_factory.hpp>
                                      #   (FR-004 / FR-011c — witnessed by NOTHING today)
-                                     # ❌ negative sources, consumed by try_compile, never built as targets
+                                     # ❌ negative sources, built as OBJECT targets asserted to COMPILE (r3)
 tests/packaging/
 └── run_package_contents_witness.cmake   # + presence assertions (FR-010) + isolated-root containment (FR-010a/C-5)
 .specify/architecture.md             # §7.4:503, §7.4:504, §8 reconciled (FR-013, FR-013a, FR-014)
@@ -174,34 +174,42 @@ measured), so isolation needs no source change. Two `CMakeLists.txt` files *unde
 (`src/capi`, `src/service`) — that is the feature — and the earlier claim that "`src/` is untouched" was
 literally false against this same structure block.
 
-> ### ⚠️ The ❌ cells cannot be build targets — this constrains the structure, not just the wording
+> ### ⚠️ The ❌ cells ARE build targets — reversed at Gate B r3; read this box, not its history
 >
-> `tests/consumer/` is a standalone sub-project driven by `tests/consumer/run_consumer_witness.cmake`, which
-> runs **one** `cmake --build` and `message(FATAL_ERROR "consumer build failed")` on **any** non-zero exit
-> (`:96-104`). A compile-must-fail *target* there reds the entire witness, so the earlier plan of
-> "compile-only isolation probe targets" covering both polarities was **unbuildable** and would have produced
-> `/speckit-tasks` tasks that cannot be implemented.
+> **Delivered shape**: ✅ **and** ❌ cells are both ordinary compile-only `OBJECT` targets in the consumer
+> sub-project, linked against the real imported target and named in `run_consumer_witness.cmake`'s
+> `_required_targets`. **Building them is the assertion** — the driver runs **one** `cmake --build` and
+> `message(FATAL_ERROR "consumer build failed")` on **any** non-zero exit (`:96-104`), which is exactly the
+> gate both polarities need. A ❌ probe carries `__has_include` + a unique-token `#error`, so it compiles iff
+> the forbidden header is unreachable; a build failure whose output contains
+> `FIXPP_086_FORBIDDEN_HEADER_REACHABLE` is an isolation breach and any other failure is a broken
+> probe/toolchain, both fatal, both readable from the verbatim compiler output. Authority:
+> `contracts/include-interface.md` §4a **r3 box**.
 >
-> **Delivered shape — MEASURED (`research.md` R9), not a decision rule**: ✅ cells are `OBJECT` targets (build
-> failure reds the witness — correct polarity); ❌ cells are `try_compile(... LINK_LIBRARIES fixpp::capi)` at
-> consumer-**configure** time with `CMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY` (compile-only, no `main()`,
-> restored after), asserted **TRUE** (`__has_include` + unique-token `#error`; inverted at Gate B r2) — a FALSE result carrying `FIXPP_086_FORBIDDEN_HEADER_REACHABLE` raises `FATAL_ERROR`, and a FALSE result WITHOUT it is fatal as a BROKEN probe and the driver reports it at
-> `:91-92`. Both polarities stay inside **one configured consumer**, which is what FR-008a's paired-evidence
-> rule requires. R9 ran this shape against the Phase-0 fixture at both stages: the imported target's
-> `INTERFACE_INCLUDE_DIRECTORIES` **do** propagate through `LINK_LIBRARIES`, there is no link stage, and the
-> negative probe reads TRUE at ISO=OFF / FALSE at ISO=ON — so the pair discriminates. Still open, and owned by
-> FR-007: the same shape on the **18-member tree under Conan**, in the real `tests/consumer/` sub-project, and
-> under MSVC. Fallback if FR-007's red demonstration does not fire there: a dedicated probe sub-project with
-> its own `cmake -P` driver asserting a non-zero build result — no longer expected, still checked. Full
-> statement: `contracts/include-interface.md` §4a, `research.md` R5 + R9.
+> **This box asserted the opposite until 2026-08-04**, and the history matters because it is why the structure
+> looks the way it does. While a ❌ cell had to *fail* to compile it genuinely could not be a target — a
+> must-fail target reds the whole witness — so the mechanism was a configure-time
+> `try_compile(... LINK_LIBRARIES fixpp::capi)` with `CMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY`, measured
+> end-to-end in `research.md` R9. Two things retired it: Gate B **r2** inverted the polarity (the FALSE
+> assertion was a false-green generator), which removed the *reason* for `try_compile`; and Gate B **r3** —
+> CI, `windows-msvc-debug` — proved it *unusable* here, because `try_compile` exports the imported-target
+> closure into CMake's scratch project, which never defines Conan's `CONAN_LIB::…_DEBUG` targets. R9 is not
+> falsified, only scope-limited to non-Conan imported targets on Linux/clang; the residual it declared
+> ("**18-member tree under Conan** … and under MSVC") is precisely what came due.
+>
+> Both polarities still stay inside **one configured consumer**, which is what FR-008a's paired-evidence rule
+> requires — and now through the *same kind of target*, so the two halves no longer resolve in two different
+> contexts. The R5 `cmake -P` fallback is moot: it existed to hold a must-fail build result, and nothing must
+> fail to build any more. Full statement: `contracts/include-interface.md` §4a, `research.md` R5 + R9.
 
 ## Implementation sequencing (input to `/speckit-tasks`)
 
 Order is constrained by Article VII §3 and by FR-007's demonstrated-red obligation, which coincide here.
 
-1. **Witnesses first, observed RED.** Add the probes against the *current* package. The negative probes must
-   fail to fail — i.e. they compile, so the `try_compile` result is TRUE and the assertion raises
-   `FATAL_ERROR`, proving today's package leaks. That observation is FR-007 evidence for `fixpp::capi` and,
+1. **Witnesses first, observed RED.** Add the probes against the *current* package. Against today's leaking
+   package the forbidden header IS reachable, so `__has_include` fires the unique-token `#error` and the
+   negative probe **fails to build** — the driver's non-zero-exit check raises `FATAL_ERROR` carrying
+   `FIXPP_086_FORBIDDEN_HEADER_REACHABLE`. That observation is FR-007 evidence for `fixpp::capi` and,
    separately, for `fixpp::service`.
 2. **The `fixpp_capi` edit** — `PRIVATE` + its own `$<INSTALL_INTERFACE:…/capi>` + the install rule. Probes for
    `fixpp::capi` go green.
@@ -264,8 +272,8 @@ Order is constrained by Article VII §3 and by FR-007's demonstrated-red obligat
 | Risk | Why it is plausible | Mitigation |
 |---|---|---|
 | The real 18-member tree behaves unlike the 5-target repro | fixpp has two deliberate static-archive cycles and a Conan toolchain the fixture lacks | Step 5 re-measures on a real generate run before any doc is written (FR-016) |
-| A witness passes for the wrong reason | Measured, not hypothetical: the research probe produced a false negative on its first attempt (R5) | Compile-only negatives; probe headers whose disappearance would itself be a defect (FR-008); paired evidence (FR-008a). **R9 measures the prescribed `try_compile` shape end-to-end**: no link stage at all, and the negative probe reads TRUE at ISO=OFF / FALSE at ISO=ON, so it discriminates rather than merely failing |
-| The ❌ mechanism cannot express the assertion in the real harness | The first mechanism named was unbuildable (a must-fail target reds the whole witness); the replacement was initially unverified | **Retired at Gate A r1 for the fixture**: R9 proves `try_compile` + `LINK_LIBRARIES` propagates the imported include interface and is genuinely compile-only. Residual is real-tree/Conan/MSVC only — owned by FR-007, with R5's `cmake -P` fallback still named |
+| A witness passes for the wrong reason | Measured, not hypothetical: the research probe produced a false negative on its first attempt (R5) | Compile-only negatives; probe headers whose disappearance would itself be a defect (FR-008); paired evidence (FR-008a). **R9 measured the then-prescribed `try_compile` shape end-to-end**: no link stage at all, and the negative probe discriminated ISO=OFF from ISO=ON rather than merely failing. The carrier changed at Gate B r3 (§4a r3 box) and the discrimination was **re-measured** under it — normal green, breach red *with* the token, deletion red, an unrelated `#error` red *without* the token — so BROKEN and BREACH stay separable |
+| The ❌ mechanism cannot express the assertion in the real harness | The first mechanism named was unbuildable (a must-fail target reds the whole witness); the replacement was initially unverified | **This risk FIRED, twice, and is now closed.** R9 retired it for the fixture (`try_compile` + `LINK_LIBRARIES` does propagate and is compile-only), leaving a declared real-tree/Conan/MSVC residual — which then **came due at Gate B r3**: `try_compile` cannot resolve Conan's `CONAN_LIB::…_DEBUG` closure in CMake's scratch project, so every `windows-msvc-debug` run failed for a non-isolation reason. Closed by dropping `try_compile` entirely (§4a r3 box): the r2 polarity inversion made a ❌ cell something that must *succeed*, so an ordinary `OBJECT` target expresses it, resolving against the real closure. R5's `cmake -P` fallback is moot — nothing must fail to build any more |
 | The content gate goes green on Windows while finding nothing | A `usr/`-anchored glob matches nothing in the ZIP and reads as "no C-ABI headers shipped" | Prefix-normalise before comparing; never anchor a glob on `usr/` (`package-layout.md` §2) |
 | Docs reconciled against the prediction rather than the measurement | The 084 §2a note records this exact failure — derived-not-measured export members, wrong in three places | Step 6 is ordered strictly after step 5 |
 | Verify runs against the wrong tree | `/speckit-verify` and `/gate-b` hardcode the main checkout, which holds `085` | Substitute the worktree path; symlink decision records (**[parent-repo]**`/phases/phase-4/parallel-worktrees.md` §4) |
@@ -307,9 +315,10 @@ Order is constrained by Article VII §3 and by FR-007's demonstrated-red obligat
 Findings where the applied fix differs from the proposal as written. Recorded so round 3 does not re-open them.
 
 - **R2-5, alternative (a) vs (b) — (b) chosen.** The review's *required* leg (a second configure-time
-  `try_compile` asserted **TRUE** (`__has_include` + unique-token `#error`; inverted at Gate B r2) for `<fixpp/service/control_plane_factory.hpp>` through `fixpp::capi`) is
-  applied in full: it is now a row in `contracts/include-interface.md` §4 and a third `try_compile` in the
-  sequencing. For the follow-on the review offered (a) an exact-set assertion over a probe target's evaluated
+  probe asserted to COMPILE (`__has_include` + unique-token `#error`; polarity inverted at Gate B r2, carrier
+  changed from `try_compile` to an `OBJECT` target at r3) for `<fixpp/service/control_plane_factory.hpp>`
+  through `fixpp::capi`) is applied in full: it is now a row in `contracts/include-interface.md` §4 and a
+  third negative probe target in the sequencing. For the follow-on the review offered (a) an exact-set assertion over a probe target's evaluated
   `INCLUDE_DIRECTORIES` **or** (b) scoping SC-001/SC-001a's "0" to the named probes plus C-5 root containment —
   "(a) or (b), not both". **(b) is applied.** The reason is *not* that (a) needs machinery — FR-009a(ii) lands
   the `file(GENERATE)` + driver-comparison machinery regardless, and R10 measures that `INCLUDE_DIRECTORIES`
