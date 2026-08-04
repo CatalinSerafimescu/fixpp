@@ -540,15 +540,43 @@ foreach(_artifact IN LISTS _artifacts)
   # root that also carried, say, `include/capi/fixpp/wire/parser.hpp` would defeat
   # the isolation for every consumer, and no negative probe would catch it unless
   # it happened to name that exact header.
+  # ⚠️ DIRECTORY ENTRIES ARE PART OF THE LISTING. DEB/RPM/TGZ enumerate the
+  # directories they create, and the normalisation above strips the trailing "/",
+  # so `include/capi/fix/` arrives here as `include/capi/fix` — indistinguishable
+  # by name from a file, and NOT a match for "^include/capi/fix/". A containment
+  # check written only against the file paths reports the subtree's own directory
+  # as escaping it, which is what this one did on its first real run.
+  #
+  # The intermediate ancestors are DERIVED from the declared subtree rather than
+  # listed, so adding a level to either root cannot leave a transcribed
+  # allowance behind. Everything else under a root is still a violation — this
+  # does not weaken the check: `include/service-iface/fixpp/wire/parser.hpp`
+  # matches neither the subtree nor an ancestor.
   set(_uncontained "")
-  foreach(_f IN LISTS _files)
-    if(_f MATCHES "^include/capi/" AND NOT _f MATCHES "^include/capi/fix/")
-      list(APPEND _uncontained "${_f}")
-    endif()
-    if(_f MATCHES "^include/service-iface/"
-       AND NOT _f MATCHES "^include/service-iface/fixpp/service/")
-      list(APPEND _uncontained "${_f}")
-    endif()
+  foreach(_pair
+      "include/capi/|include/capi/fix"
+      "include/service-iface/|include/service-iface/fixpp/service")
+    string(REPLACE "|" ";" _pair "${_pair}")
+    list(GET _pair 0 _root)
+    list(GET _pair 1 _subtree)
+
+    set(_ancestors "")
+    set(_cur "${_subtree}")
+    while(TRUE)
+      get_filename_component(_cur "${_cur}" DIRECTORY)
+      if(_cur STREQUAL "" OR NOT _cur MATCHES "^${_root}")
+        break()
+      endif()
+      list(APPEND _ancestors "${_cur}")
+    endwhile()
+
+    foreach(_f IN LISTS _files)
+      if(_f MATCHES "^${_root}"
+         AND NOT _f MATCHES "^${_subtree}(/|$)"
+         AND NOT _f IN_LIST _ancestors)
+        list(APPEND _uncontained "${_f}")
+      endif()
+    endforeach()
   endforeach()
   if(NOT _uncontained STREQUAL "")
     string(REPLACE ";" "\n  " _uncontained_pretty "${_uncontained}")
