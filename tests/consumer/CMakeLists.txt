@@ -37,7 +37,11 @@
 # one's — do not cite this witness as evidence the package is consumable off the
 # producing host.
 cmake_minimum_required(VERSION 3.28)
-project(fixpp_consumer_witness CXX)
+# 086 T008: C is enabled so the INSTALLED C-ABI interface can be witnessed from a
+# C compiler (probe_capi_positive_c.c). US1 promises "a C or C++ integrator";
+# in-tree C-cleanliness was already pinned (tests/capi/CMakeLists.txt:13, :23) but
+# that says nothing about what the package delivers.
+project(fixpp_consumer_witness C CXX)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -66,7 +70,15 @@ target_link_libraries(consumer_witness PRIVATE fixpp::fixpp)
 #
 # ⚠️ It MUST be a separate target, never merged with consumer_witness above:
 # linking fixpp::capi and fixpp::fixpp into one target is the combination
-# Article IV §2 / architecture.md:509 rejects, and tools/check_layers.py enforces.
+# Article IV §2 / architecture.md §7.4 rejects.
+#
+# NOTHING MECHANICALLY ENFORCES THAT (corrected by 086/FR-014 — this comment used
+# to say tools/check_layers.py did). That script is a source #include-edge lint
+# over src/** and bindings/** (:2-7, :173-176); it parses no CMake and reads no
+# link interface, and an installed package cannot observe which targets a
+# consumer links together anyway. Keeping these two witnesses separate IS the
+# convention being upheld, which is why the separation is load-bearing here
+# rather than stylistic.
 #
 # Building and linking IS the assertion — it need not run. The existing harness
 # registers ONE add_test that configures and builds this whole sub-project, so
@@ -74,3 +86,159 @@ target_link_libraries(consumer_witness PRIVATE fixpp::fixpp)
 # run_consumer_witness.cmake.
 add_executable(consumer_capi_witness consumer_capi_witness.cpp)
 target_link_libraries(consumer_capi_witness PRIVATE fixpp::capi)
+
+# ═════════════════════════════════════════════════════════════════════════════
+# 086-capi-include-isolation — the §1 reachability matrix
+# (specs/086-capi-include-isolation/contracts/include-interface.md)
+#
+# Three rules decide whether any of this is worth anything. All three are
+# structural, and all three were arrived at by measurement, not by taste:
+#
+#  1. A "MUST NOT resolve" cell is asserted by COMPILATION, never by a build that
+#     links. research.md R5 measured a false negative on the umbrella row caused
+#     by an unresolved symbol while every #include resolved correctly.
+#  2. A "MUST NOT resolve" cell is asserted by BUILDING, because the assertion is
+#     inverted. It used to be that such a cell could not be a build target at all:
+#     the driver raises FATAL_ERROR on ANY non-zero build exit, so a probe that
+#     had to FAIL to build would red the whole witness. Since Gate B r2 the ❌
+#     cells use `__has_include` + a unique-token `#error` and must COMPILE, so an
+#     ordinary OBJECT-library target expresses them exactly, and the driver's
+#     existing build check IS the assertion. (They were configure-time
+#     `try_compile` calls until Gate B r3, when MSVC Debug proved that form
+#     cannot see the Conan closure — see the ❌ block below.)
+#  3. A passing ✅ cell NEVER establishes a ❌ cell. Under the additive layout
+#     <fix/c_api.h> resolves from EITHER root, so a green positive probe is
+#     exactly as consistent with the defect being present as with it being fixed.
+#     Evidence is the PAIR, from this one configured consumer (FR-008a) — which
+#     is why both halves live in this file and not in two projects.
+# ═════════════════════════════════════════════════════════════════════════════
+
+# ── ✅ cells — ordinary compile-only OBJECT libraries ────────────────────────
+# OBJECT, not add_executable: no link stage, so rule 1 holds for these too and a
+# green cannot be manufactured by a symbol that happens to resolve.
+add_library(probe_capi_positive OBJECT probe_capi_positive.cpp)
+target_link_libraries(probe_capi_positive PRIVATE fixpp::capi)
+
+add_library(probe_capi_positive_c OBJECT probe_capi_positive_c.c)
+target_link_libraries(probe_capi_positive_c PRIVATE fixpp::capi)
+set_target_properties(probe_capi_positive_c PROPERTIES
+  C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
+
+# US6 / FR-011a — fixpp::service reaches the plugin header AND the C ABI. The
+# C-ABI half is the load-bearing one: fixpp::service declares no C-ABI root of
+# its own and reaches <fix/c_api.h> only through its existing link to
+# fixpp::capi (src/service/CMakeLists.txt:30). Narrowing fixpp::capi is exactly
+# the change that could sever that path.
+add_library(probe_service_positive OBJECT probe_service_positive.cpp)
+target_link_libraries(probe_service_positive PRIVATE fixpp::service)
+
+# US3 / FR-004 / FR-011c — the umbrella still reaches EVERYTHING, including both
+# headers this feature republishes at isolated roots. The regression guard for
+# the whole feature: the isolation is delivered by ADDING roots, never by
+# removing anything from the umbrella's, and this is what goes red if that stops
+# being true.
+#
+# A SEPARATE TU, deliberately: consumer_witness.cpp:34-37 includes neither of
+# those two headers, and SC-003 trades on that file staying byte-unchanged.
+add_library(probe_umbrella OBJECT probe_umbrella.cpp)
+target_link_libraries(probe_umbrella PRIVATE fixpp::fixpp)
+
+# ── ❌ cells — ORDINARY BUILD TARGETS, asserted to COMPILE ───────────────────
+#
+# These were configure-time `try_compile` calls until Gate B r3 (CI). Two changes
+# made that both unnecessary and actively wrong:
+#
+# 1. **The inversion removed the reason for try_compile.** A ❌ cell could not be
+#    a build target while it had to FAIL to build — the driver FATAL_ERRORs on any
+#    non-zero build exit, so a must-fail target reds the whole witness. Since
+#    Gate B r2 the probes assert the opposite: `__has_include` + a unique-token
+#    `#error`, which must COMPILE. A target that must build is exactly what this
+#    harness expresses natively, and the driver's existing build check IS the
+#    assertion.
+#
+# 2. **try_compile could not see the Conan closure — MEASURED on CI.** MSVC Debug
+#    failed with:
+#
+#        The link interface of target "opentelemetry-cpp::exporter_prometheus"
+#        contains: CONAN_LIB::…_exporter_prometheus_…_DEBUG
+#        but the target was not found.
+#
+#    `try_compile(... LINK_LIBRARIES fixpp::capi)` exports the imported-target
+#    closure into CMake's scratch project, which never runs the Conan machinery
+#    that defines those `CONAN_LIB::…_DEBUG` targets. So the probe failed for a
+#    reason with NOTHING to do with include reachability — the BROKEN category —
+#    on every MSVC Debug run. As ordinary targets in THIS project they build
+#    against the fully-resolved closure and the problem disappears.
+#
+#    Worth recording: under the pre-r2 polarity this would have been a SILENT
+#    FALSE GREEN. The probe would have "correctly failed to compile" and reported
+#    the isolation working. The inversion is what turned it into a visible,
+#    correctly-classified failure.
+#
+# The three outcomes are still distinguishable, now through the build:
+#   builds                          -> header unreachable. The pass.
+#   fails w/ FIXPP_086_FORBIDDEN_…  -> ISOLATION BREACH (the #error names itself).
+#   fails otherwise                 -> a broken probe/toolchain, equally red.
+# In all failing cases the driver surfaces the compiler output verbatim, so the
+# category is readable from the log rather than inferred.
+add_library(probe_capi_negative OBJECT probe_capi_negative.cpp)
+target_link_libraries(probe_capi_negative PRIVATE fixpp::capi)
+
+add_library(probe_capi_negative_service OBJECT probe_capi_negative_service.cpp)
+target_link_libraries(probe_capi_negative_service PRIVATE fixpp::capi)
+
+add_library(probe_service_negative OBJECT probe_service_negative.cpp)
+target_link_libraries(probe_service_negative PRIVATE fixpp::service)
+# ── C-3 leg 3 — effective usage requirements at a real consumer target ───────
+# FR-009a(ii). Not a duplicate of quickstart §3's property diff: compile
+# definitions reach a C-ABI consumer through fixpp_capi_objects -> fixpp_log
+# (src/capi/CMakeLists.txt:29-38) and never appear in fixpp::capi's own exported
+# block, which reads IDENTICALLY whether they propagate or not. Leg 2 is
+# structurally incapable of seeing them; this target is where they show up.
+#
+# file(GENERATE) alone asserts NOTHING — it only writes. The compare lives in
+# run_consumer_witness.cmake, after the sub-build.
+add_library(probe_usage_requirements OBJECT probe_usage_requirements.cpp)
+target_link_libraries(probe_usage_requirements PRIVATE fixpp::capi)
+
+# The RIGHT-HAND SIDE of the comparison, as a literal WITH AN ORIGIN. FR-009a(ii)
+# requires the expected set to have a named producer in the tree rather than
+# being derived from the run it checks — a comparison whose expected value comes
+# out of the run is satisfied by whatever the run produced, which is the same
+# no-op-gate shape as a file(GENERATE) nothing reads.
+#
+# Empty, all three, and that is a CLOSED expectation, not a shrug: `fixpp::capi`
+# carries $<LINK_ONLY:fixpp::capi_objects> (contract §2) and $<LINK_ONLY:>
+# withholds COMPILE_DEFINITIONS, COMPILE_OPTIONS, COMPILE_FEATURES and
+# SYSTEM_INCLUDE_DIRECTORIES along with the include path. Naming an expected
+# non-empty list instead would have to enumerate what survives, and nothing does.
+# What is thereby lost is enumerated and pre-approved: today AT LEAST
+# FIXPP_LOG_MIN_LEVEL (src/log/CMakeLists.txt:27) and ASIO_STANDALONE (carried by
+# asio::asio, linked unwrapped inside the closure). Membership in that set is
+# decided by this predicate, not by that list.
+set(FIXPP_086_EXPECTED_COMPILE_DEFINITIONS "")
+set(FIXPP_086_EXPECTED_COMPILE_OPTIONS "")
+set(FIXPP_086_EXPECTED_COMPILE_FEATURES "")
+
+# SEPARATOR NORMALISATION — both sides must be joined the same way or the compare
+# fails for a reason that has nothing to do with the interface. The OBSERVED side
+# is `$<JOIN:…,|>`; a bare `${VAR}` expansion of a CMake list uses `;`. Both are
+# empty today so `STREQUAL` holds either way, but the moment anyone sets a
+# non-empty expectation — the one edit this instrument invites — `A;B` vs `A|B`
+# would fail permanently and look like a real finding.
+foreach(_p COMPILE_DEFINITIONS COMPILE_OPTIONS COMPILE_FEATURES)
+  string(REPLACE ";" "|" FIXPP_086_EXPECTED_${_p} "${FIXPP_086_EXPECTED_${_p}}")
+endforeach()
+
+# Both sides go into the file so the driver compares two values it was GIVEN,
+# neither of which it invents.
+file(GENERATE
+  OUTPUT "${CMAKE_BINARY_DIR}/usage-requirements.txt"
+  CONTENT
+"EXPECTED_COMPILE_DEFINITIONS=${FIXPP_086_EXPECTED_COMPILE_DEFINITIONS}
+OBSERVED_COMPILE_DEFINITIONS=$<JOIN:$<TARGET_PROPERTY:probe_usage_requirements,COMPILE_DEFINITIONS>,|>
+EXPECTED_COMPILE_OPTIONS=${FIXPP_086_EXPECTED_COMPILE_OPTIONS}
+OBSERVED_COMPILE_OPTIONS=$<JOIN:$<TARGET_PROPERTY:probe_usage_requirements,COMPILE_OPTIONS>,|>
+EXPECTED_COMPILE_FEATURES=${FIXPP_086_EXPECTED_COMPILE_FEATURES}
+OBSERVED_COMPILE_FEATURES=$<JOIN:$<TARGET_PROPERTY:probe_usage_requirements,COMPILE_FEATURES>,|>
+")

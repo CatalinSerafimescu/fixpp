@@ -450,6 +450,40 @@ install(
   PATTERN "fixpp/transport/test" EXCLUDE
 )
 
+# ── 086 (issue #218): the isolated include roots ─────────────────────────────
+#
+# ADDITIVE, and that word is doing real work. The rule above is UNCHANGED and
+# acquires NO new PATTERN ... EXCLUDE for these subtrees — the two exclusions it
+# already carries (:449-450) are unrelated and predate this. Both trees below
+# ship at their existing path as well as at the isolated one, from ONE source
+# directory each.
+#
+# Why duplication rather than relocation, which would have been tidier:
+#   * <fix/c_api.h> and <fixpp/service/control_plane_factory.hpp> keep resolving
+#     for every existing consumer, CMake or not. A bare -I<prefix>/include still
+#     works, so this feature ships no migration note and breaks no build.
+#   * fixpp::fixpp must keep reaching everything (FR-004): the umbrella's root is
+#     include/, so removing either tree from it would break the umbrella to fix
+#     the C ABI.
+# The cost is that the same header ships at two paths, which any content
+# assertion that COUNTS headers or asserts an exact path set has to know about
+# (tests/packaging/run_package_contents_witness.cmake is written knowing it).
+#
+# The isolated root is include/capi and the headers land under include/capi/fix/,
+# NOT at include/capi/ directly: the spelling <fix/c_api.h> must not change, and
+# the entry header includes its own sub-headers as "fix/c_api/export.h" etc.
+# (include/fix/c_api.h:40-48). architecture.md §7.4:503's literal
+# `INTERFACE_INCLUDE_DIRECTORIES = include/fix/` is unsatisfiable for exactly
+# this reason — it would resolve <fix/c_api.h> to include/fix/fix/c_api.h.
+install(
+  DIRECTORY "${CMAKE_SOURCE_DIR}/include/fix/"
+  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/capi/fix"
+)
+install(
+  DIRECTORY "${CMAKE_SOURCE_DIR}/include/fixpp/service/"
+  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/service-iface/fixpp/service"
+)
+
 # 084 T046 (FR-018b): attribution ships in the package doc directory.
 # TWO separate upstream obligations, discharged by TWO files -- they are not
 # interchangeable:
@@ -577,7 +611,10 @@ set(FIXPP_EXPORT_TARGETS
 # five are NOT one class:
 #   * FOUR are exported so a consumer can link them BY NAME: fixpp::capi for a
 #     C-ABI consumer who deliberately does not want the C++ umbrella (Article IV
-#     §2 / architecture.md:509 -- linking both is REJECTED by tools/check_layers.py),
+#     §2 / architecture.md §7.4 -- linking both is rejected by CONVENTION and by
+#     review, NOT by tools/check_layers.py: that script is a source #include-edge
+#     lint over src/** and bindings/** (:2-7, :173-176) which reads no CMake link
+#     interface at all. Corrected by 086/FR-014),
 #     and fixpp::config_toml exactly as include/fixpp/config/toml_config_loader.hpp
 #     instructs.
 #   * The FIFTH, fixpp_log_otlp, is CLOSURE-ONLY: it is in the export set solely

@@ -305,6 +305,11 @@ function(_fixpp_list_package _path _out_files)
 endfunction()
 
 # ── Per-artifact assertions ──────────────────────────────────────────────────
+# 086 / Gate B r2 P1 #1: counts artifacts whose FR-010/FR-010a block ran to
+# completion. Asserted against _n_artifacts AFTER the loop — a per-artifact token
+# proves only that ONE artifact's block completed, and Linux processes DEB, RPM
+# and TGZ sequentially.
+set(_086_artifacts_done 0)
 foreach(_artifact IN LISTS _artifacts)
   get_filename_component(_aname "${_artifact}" NAME)
   _fixpp_list_package("${_artifact}" _files)
@@ -475,6 +480,160 @@ foreach(_artifact IN LISTS _artifacts)
       "drifts either way is a membership defect, not a naming detail.")
   endif()
 
+  # ══ 086 T034/T035 — the isolated include roots ════════════════════════════
+  #
+  # Nothing here asserted the C-ABI headers AT ALL before this feature, at either
+  # root: the denylist below is anchored on `^include/fixpp/…` and the
+  # generated-tree allowlist on `^include/fixpp/(v[A-Za-z0-9]+)/…`, so both are
+  # structurally incapable of matching a path under `include/capi/` or
+  # `include/service-iface/`. A package that shipped neither new root — or shipped
+  # one half-populated — passed every gate in this file.
+  #
+  # BY SET EQUALITY, NOT BY A HARDCODED CENSUS. The two roots are installed from
+  # ONE source directory each (data-model I2), so the duplicate tree must match
+  # the original exactly. A transcribed list of twelve filenames would go stale
+  # the first time a C-ABI sub-header is added, and would go stale SILENTLY in the
+  # direction that matters — a new header missing from the isolated root is
+  # exactly the defect this is for.
+  #
+  # PREFIX-FREE: `_files` has already had the Linux-only `usr/` component
+  # stripped (see normalisation above), so one expectation covers DEB, RPM, TGZ
+  # and the Windows ZIP. A `usr/`-anchored glob would find nothing in the ZIP and
+  # report "the package carries no C-ABI headers" — a defect claim about the
+  # product manufactured by the test.
+  set(_086_pairs_checked 0)
+  set(_086_roots_checked 0)
+  foreach(_dup_pair
+      "include/fix/|include/capi/fix/"
+      "include/fixpp/service/|include/service-iface/fixpp/service/")
+    string(REPLACE "|" ";" _dup_pair "${_dup_pair}")
+    list(GET _dup_pair 0 _orig_root)
+    list(GET _dup_pair 1 _iso_root)
+
+    set(_orig_tails "")
+    set(_iso_tails "")
+    foreach(_f IN LISTS _files)
+      if(_f MATCHES "^${_orig_root}(.+)$")
+        list(APPEND _orig_tails "${CMAKE_MATCH_1}")
+      endif()
+      if(_f MATCHES "^${_iso_root}(.+)$")
+        list(APPEND _iso_tails "${CMAKE_MATCH_1}")
+      endif()
+    endforeach()
+    list(SORT _orig_tails)
+    list(SORT _iso_tails)
+
+    # FR-010, and the floor that stops equality from holding vacuously: two empty
+    # sets are equal. Without this an artifact shipping NO headers under either
+    # root passes the comparison below with a perfectly straight face.
+    # ⚠️ FATAL_ERROR, not `list(APPEND _missing …)`. `_missing` is initialised at
+    # :316 and consumed ONCE at :463 — sixty lines ABOVE here — then reset at the
+    # top of the next artifact's iteration. An append at this point is never read
+    # by anything, so routing this branch through it made the floor DEAD CODE:
+    # the check that exists to stop a vacuous pass would itself have passed
+    # vacuously. Caught at /simplify; it is the same defect class this whole
+    # feature is about, which is why it is worth this comment.
+    # The floor requires a HEADER, not merely a non-empty tail list. Directory
+    # entries survive normalisation (`include/fix/c_api/` -> `include/fix/c_api`)
+    # and DO match `^include/fix/(.+)$`, so a bare `STREQUAL ""` floor would still
+    # pass a package that shipped the directory skeleton at both roots and not one
+    # header — set-equality between two identical skeletons holds.
+    if(NOT _orig_tails MATCHES "\\.(h|hpp)(;|$)")
+      message(FATAL_ERROR
+        "086 FR-010: ${_aname} ships no HEADER under ${_orig_root} at all, so the "
+        "set comparison below would hold vacuously. Either the install(DIRECTORY) "
+        "rule for this root regressed, or a new PATTERN … EXCLUDE on CMakeLists.txt's "
+        "include/ rule removed the subtree.\n  observed tails: ${_orig_tails}")
+    else()
+      math(EXPR _086_pairs_checked "${_086_pairs_checked} + 1")
+    endif()
+    if(NOT _orig_tails STREQUAL "" AND NOT _orig_tails STREQUAL _iso_tails)
+      string(REPLACE ";" "\n    " _o_pretty "${_orig_tails}")
+      string(REPLACE ";" "\n    " _i_pretty "${_iso_tails}")
+      message(FATAL_ERROR
+        "086 FR-010: ${_aname} — the isolated root ${_iso_root} does not carry the same "
+        "set as ${_orig_root}. Both are installed from one source directory, so any "
+        "difference means an install rule is missing, mis-scoped, or was not updated "
+        "when a header was added.\n"
+        "  ${_orig_root}:\n    ${_o_pretty}\n"
+        "  ${_iso_root}:\n    ${_i_pretty}")
+    endif()
+  endforeach()
+
+  # FR-010a / C-5 — CONTAINMENT. The only assertion in the entire suite that
+  # traces FR-001, which is a property of a ROOT, not of a target: an isolated
+  # root that also carried, say, `include/capi/fixpp/wire/parser.hpp` would defeat
+  # the isolation for every consumer, and no negative probe would catch it unless
+  # it happened to name that exact header.
+  # ⚠️ DIRECTORY ENTRIES ARE PART OF THE LISTING. DEB/RPM/TGZ enumerate the
+  # directories they create, and the normalisation above strips the trailing "/",
+  # so `include/capi/fix/` arrives here as `include/capi/fix` — indistinguishable
+  # by name from a file, and NOT a match for "^include/capi/fix/". A containment
+  # check written only against the file paths reports the subtree's own directory
+  # as escaping it, which is what this one did on its first real run.
+  #
+  # The intermediate ancestors are DERIVED from the declared subtree rather than
+  # listed, so adding a level to either root cannot leave a transcribed
+  # allowance behind. Everything else under a root is still a violation — this
+  # does not weaken the check: `include/service-iface/fixpp/wire/parser.hpp`
+  # matches neither the subtree nor an ancestor.
+  set(_uncontained "")
+  foreach(_pair
+      "include/capi/|include/capi/fix"
+      "include/service-iface/|include/service-iface/fixpp/service")
+    string(REPLACE "|" ";" _pair "${_pair}")
+    list(GET _pair 0 _root)
+    list(GET _pair 1 _subtree)
+
+    set(_ancestors "")
+    set(_cur "${_subtree}")
+    while(TRUE)
+      get_filename_component(_cur "${_cur}" DIRECTORY)
+      if(_cur STREQUAL "" OR NOT _cur MATCHES "^${_root}")
+        break()
+      endif()
+      list(APPEND _ancestors "${_cur}")
+    endwhile()
+
+    foreach(_f IN LISTS _files)
+      if(_f MATCHES "^${_root}"
+         AND NOT _f MATCHES "^${_subtree}(/|$)"
+         AND NOT _f IN_LIST _ancestors)
+        list(APPEND _uncontained "${_f}")
+      endif()
+    endforeach()
+    math(EXPR _086_roots_checked "${_086_roots_checked} + 1")
+  endforeach()
+  if(NOT _uncontained STREQUAL "")
+    string(REPLACE ";" "\n  " _uncontained_pretty "${_uncontained}")
+    message(FATAL_ERROR
+      "086 FR-010a/C-5: ${_aname} — an isolated include root carries paths outside its "
+      "declared subtree, so it is not isolated:\n  ${_uncontained_pretty}")
+  endif()
+
+  # ── PER-ARTIFACT COMPLETION COUNT (Gate B r1 P1 #4, revised r2 P1 #1) ───────
+  # This increments; it does NOT emit a token. The single token is emitted AFTER
+  # the artifact loop and is read back by run_package_contents_gate.cmake, which
+  # checks this script's EXIT CODE first.
+  #
+  # It used to print a token here, required via `PASS_REGULAR_EXPRESSION` in
+  # tests/packaging/CMakeLists.txt. That was WORSE than no gate at all: CTest
+  # IGNORES the exit code when a pass-regex matches, so a token printed while
+  # checking the DEB masked a FATAL_ERROR raised while checking the RPM or TGZ.
+  # The property is gone; the outer driver replaces it.
+  #
+  # The COUNTS are asserted, not just printed: a block that ran partially — one
+  # root pair compared, one containment root walked — cannot reach this line,
+  # because the numbers are checked first and the token names them.
+  if(NOT _086_pairs_checked EQUAL 2 OR NOT _086_roots_checked EQUAL 2)
+    message(FATAL_ERROR
+      "086: the FR-010/FR-010a block did not run to completion for ${_aname} — "
+      "compared ${_086_pairs_checked} root pair(s) and walked ${_086_roots_checked} "
+      "isolated root(s), expected 2 and 2. Either a root was dropped from the loop "
+      "lists or an early return skipped part of the block.")
+  endif()
+  math(EXPR _086_artifacts_done "${_086_artifacts_done} + 1")
+
   # MUST BE ABSENT — SET EQUALITY over the exact 7-pattern denylist, never a
   # subset. A check written from the 078 five-pattern tail would pass a package
   # leaking the build-tree-private reify bridge (_dispatch/) or the FIXT.1.1 tree
@@ -591,4 +750,23 @@ if(_ack_pos EQUAL -1)
 endif()
 
 message(STATUS "T058: NOTICE carries the clause-3 acknowledgment, matched against the pinned anchor")
+# ── 086 completion token — emitted ONCE, after EVERY artifact ────────────────
+# Read back by run_package_contents_gate.cmake, which ALSO requires this script's
+# exit code to be 0. Both legs are needed and neither is sufficient:
+#   * exit code alone  -> deleting the whole 086 block leaves the script exiting 0;
+#   * token alone      -> CTest's PASS_REGULAR_EXPRESSION IGNORES the exit code,
+#                         so a token printed for DEB would mask a FATAL_ERROR on
+#                         RPM or TGZ. That was this gate's own round-1 fix, and it
+#                         made the gate WEAKER; the outer driver replaces it.
+list(LENGTH _artifacts _n_artifacts_final)
+if(NOT _086_artifacts_done EQUAL _n_artifacts_final)
+  message(FATAL_ERROR
+    "086: the FR-010/FR-010a block completed for ${_086_artifacts_done} of "
+    "${_n_artifacts_final} artifact(s). Every produced artifact must be asserted, "
+    "not just the first.")
+endif()
+message(STATUS
+  "086: FR-010/FR-010a asserted over ${_086_artifacts_done} artifact(s), "
+  "2 root pairs and 2 isolated roots each")
+
 message(STATUS "fixpp::packaging::contents: OK")
