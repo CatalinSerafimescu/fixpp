@@ -414,9 +414,20 @@ TEST(EngineFirstFrameTest, AcceptLoopRunsContinuously) {
 // The LOWER bound is the load-bearing assertion. `closed == true` alone is
 // satisfied by every rejection leg, including the 1500ms handshake bound that
 // the raw-TCP probes above already pin — asserting only that is precisely the
-// proxy #228 reports. Requiring elapsed >= 4000ms is what makes this witness
-// reachable ONLY through the 5s deadline. Widen or delete kFirstFrameDeadline
-// and this test goes RED; the byte-budget witness below stays GREEN.
+// proxy #228 reports. Requiring elapsed >= 4700ms is what makes this witness
+// reachable ONLY through something close to the 5s deadline, not the 1500ms
+// handshake bound. [gate-b/r1 FQ-3a] Honest claim: this test pins the Step-3
+// close into a measured band — a deadline moved to <= 4500ms goes RED (see
+// FQ-3c below for the lower bound). It CANNOT distinguish 5000ms from
+// 6000ms: with only a lower bound, `kFirstFrameDeadline: 5000 -> 8000`
+// still satisfies elapsed >= 4700ms and survives GREEN. Closing that gap
+// would need a production clock/timer seam on read_first_frame_bounded,
+// which is a behaviour change triggering a real Gate A (Article XVII §1 —
+// concurrency/cancellation) and is rejected here as out of scope for a
+// tests-only remediation; see issue #233. An upper band to at least catch
+// gross widening is deferred pending a linux-clang-tsan measurement (the one
+// lane that now runs ctest with execution.jobs: 2) rather than written from
+// a debug-lane extrapolation.
 //
 // Upper bound is deliberately loose (timers fire late under load, never early);
 // the probe's own self-deadline caps the run.
@@ -458,12 +469,22 @@ TEST(EngineFirstFrameTest, PostHandshakeStallClosedByFirstFrameDeadline) {
         << "SC-011 (FR-014): a peer that completed the mTLS handshake and then "
         << "stalled must be closed by kFirstFrameDeadline. Measured from real I/O "
         << "— the peer's post-handshake read never saw eof within 12s.";
-    EXPECT_GE(measured_ms, 4000)
+    // [gate-b/r1 FQ-3c] 4700, not 4000: kills the `kFirstFrameDeadline: 5000 ->
+    // 4500` mutant (measured ~4560ms would pass a 4000ms floor). Safe on
+    // physics, not a projection: the only route to elapsed < 4700ms is the
+    // server arming kFirstFrameDeadline more than 300ms BEFORE our own t0
+    // (taken after the client handshake returns, above), which loopback
+    // handshake ordering forbids — timers fire late, never early. Figures
+    // already in evidence put real elapsed at 5068ms (linux-clang-debug) and
+    // 5124ms (MSVC), so 4700 leaves >= 368ms of headroom under either; a
+    // sanitizer lane can only push elapsed further UP, never down, so this
+    // floor cannot false-fail under TSan/ASan overhead.
+    EXPECT_GE(measured_ms, 4700)
         << "SC-011 (FR-014) [#228]: the close arrived after " << measured_ms
-        << "ms, i.e. BEFORE the 5s kFirstFrameDeadline could fire. Something "
-        << "earlier closed this connection, so this test would not detect the "
-        << "removal of the first-frame deadline — exactly the proxy-assertion "
-        << "defect this witness exists to rule out.";
+        << "ms, i.e. BEFORE the 5s kFirstFrameDeadline could plausibly fire. "
+        << "Something earlier closed this connection, so this test would not "
+        << "detect the removal of the first-frame deadline — exactly the "
+        << "proxy-assertion defect this witness exists to rule out.";
 }
 
 // FR-014 / engine.cpp kFirstFrameMaxBytes (4096). A peer that completes the
