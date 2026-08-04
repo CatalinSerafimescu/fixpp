@@ -22,7 +22,6 @@
 // discriminates (FR-008a).
 
 #include <fix/c_api.h>
-
 #include <fix/c_api/decimal.h>
 #include <fix/c_api/dict.h>
 #include <fix/c_api/engine.h>

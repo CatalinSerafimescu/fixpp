@@ -17,6 +17,7 @@
 // (FR-008a).
 
 #include <fix/c_api.h>
+
 #include <fixpp/service/control_plane_factory.hpp>
 
 namespace {

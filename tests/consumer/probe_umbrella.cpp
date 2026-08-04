@@ -19,6 +19,7 @@
 // COMPILE-ONLY (OBJECT library, no main) — contracts §4 / research.md R5.
 
 #include <fix/c_api.h>
+
 #include <fixpp/service/control_plane_factory.hpp>
 #include <fixpp/wire/parser.hpp>
 

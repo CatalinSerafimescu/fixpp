@@ -62,8 +62,8 @@
 // and `const` is mutually exclusive with it here without an `extern` that the
 // check would flag anyway. Nothing mutates these; the check cannot see that the
 // non-constness is a linkage consequence rather than a design choice.
-fixpp_error_t (*fixpp_capi_witness_dict_entry)(const char*, fixpp_dict_t**) =
-    &fixpp_dict_load_from_xml;
+fixpp_error_t (*fixpp_capi_witness_dict_entry)(const char*,
+                                               fixpp_dict_t**) = &fixpp_dict_load_from_xml;
 fixpp_error_t (*fixpp_capi_witness_engine_entry)(fixpp_engine_config_t*, uint16_t, uint16_t,
                                                  fixpp_engine_t**) = &fixpp_engine_create;
 // NOLINTEND(cppcoreguidelines-avoid-non-const-global-variables)
