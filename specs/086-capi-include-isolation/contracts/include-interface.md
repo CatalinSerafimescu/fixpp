@@ -73,7 +73,7 @@ root of its own.
 
 | File | Change | Why it is named |
 |---|---|---|
-| `src/capi/CMakeLists.txt:46` | `PUBLIC` → `PRIVATE`, plus a new `target_include_directories(fixpp_capi PUBLIC …)` | the transitive path #218 identifies |
+| `src/capi/CMakeLists.txt:46` | `PRIVATE fixpp_capi_objects` **plus `PUBLIC "$<BUILD_INTERFACE:fixpp_capi_objects>"`**, plus a new `target_include_directories(fixpp_capi PUBLIC …)` | the transitive path #218 identifies. **The `$<BUILD_INTERFACE:>` half was added at `/speckit-implement` after a MEASURED in-tree build failure** — see the note below; `PUBLIC` → `PRIVATE` alone, as this row read through Gate A, breaks the in-tree build and violates C-4 |
 | `src/service/CMakeLists.txt:12` | `$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>` → the service-iface root | **not** inherited from `fixpp_capi`, so narrowing that target does not touch it; every other requirement can be satisfied while this line survives (FR-011d) |
 | `CMakeLists.txt` (near `:446-451`) | **two added** `install(DIRECTORY …)` rules | the new roots |
 | `CMakeLists.txt:446-451` | **unchanged** — acquires **no new** `PATTERN … EXCLUDE` for the isolated subtrees *(it already carries two, for `fixpp/core/test` and `fixpp/transport/test`, `:449-450` — this feature adds none)* | FR-005a additivity |
@@ -81,6 +81,35 @@ root of its own.
 | `tests/consumer/run_consumer_witness.cmake` | + a read-back and compare of the generated usage-requirement file, **after** the `cmake --build` at `:96-104` | FR-009a(ii) / C-3 leg 3 — `file(GENERATE)` writes at generate time, so the assertion has to live downstream of the sub-build or it does not exist |
 | `tests/consumer/consumer_capi_witness.cpp` | + a reference to an entry point that pulls the session/dictionary closure **at link time** — a namespace-scope, non-`static`, non-`const` pointer initialised with its address, or a call; **not** an address assigned to an unused local, which can be optimised away together with its relocation | FR-009 — as it stands the witness passes even if the transitive archive edge is lost. This TU is built and linked, **never run** (`tests/consumer/CMakeLists.txt:71`), so the reference carries no runtime obligation |
 | `tests/packaging/run_package_contents_witness.cmake` | + presence assertions (FR-010) **and** the isolated-root containment assertions (FR-010a / C-5) | the existing gates' regexes are anchored on `^include/fixpp/…` and cannot see the new roots |
+
+> ### ⚠️ `PUBLIC` → `PRIVATE` alone breaks the in-tree build — measured 2026-08-04, at `/speckit-implement`
+>
+> The bundle carried "flip the keyword" as a one-line change through Gate A. It is not one, and the reason is
+> worth stating because it is the same shape as the defect this feature exists to fix — a usage requirement
+> travelling through a link edge nobody was looking at.
+>
+> Applying `PRIVATE` and rebuilding produced:
+>
+> ```
+> src/capi/capi_internal.hpp:23:10: fatal error: 'asio/executor_work_guard.hpp' file not found
+>   (building tests/capi/capi_group_delimiter_ctx_test.cpp)
+> ```
+>
+> In-tree targets that link `fixpp_capi` were inheriting `fixpp_capi_objects`' **entire** usage-requirement
+> set through the `PUBLIC` edge, including the **Conan dependencies'** include directories. `$<LINK_ONLY:>`
+> withholds those in-tree exactly as it does when installed — which is the point when installed, and a
+> regression in-tree (**C-4**).
+>
+> `target_include_directories(fixpp_capi PUBLIC "$<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>")` does **not**
+> cover it: that restores fixpp's *own* headers, and the missing header belongs to a third party reachable only
+> through the target graph. R1 measured that `PRIVATE` still absorbs the objects into the archive — true, and
+> silent about include reachability, which is what broke.
+>
+> **Delivered:** `PRIVATE fixpp_capi_objects` **and** `PUBLIC "$<BUILD_INTERFACE:fixpp_capi_objects>"`. The
+> build interface keeps the full edge; `install(EXPORT)` evaluates `$<BUILD_INTERFACE:>` to empty, so the
+> exported `fixpp::capi` carries exactly `$<LINK_ONLY:fixpp::capi_objects>` and §2's table is unchanged. The
+> two entries do not double-link: that is the arrangement already in force before this feature, and a static
+> archive contributes only members not already defined.
 
 ## 3. Invariants a change must preserve
 
