@@ -558,3 +558,89 @@ TEST(EngineFirstFrameTest, PostHandshakeOverBudgetClosedByByteBudget) {
         << "peer immediately; a close near 5000ms means the budget did NOT fire "
         << "and the connection was reclaimed by kFirstFrameDeadline instead.";
 }
+
+// [gate-b/r1 FQ-4] Neither Step-3 witness above proves the accept loop
+// RE-SPINS after a Step-3 rejection: each opens exactly one connection and
+// returns. Mutating engine.cpp's Step-3 failure arm from
+// `transport->close(); continue;` to `transport->close(); co_return;` leaves
+// both witnesses above green — and `AcceptLoopRunsContinuously` too, since
+// its raw-TCP probes never speak TLS and so never reach Step 3 at all — while
+// the engine permanently stops accepting: an SC-011 "accept slot reclaimed …
+// other peers unaffected" violation. This test drives TWO SEQUENTIAL
+// post-handshake over-budget peers; the second must ALSO be rejected by the
+// byte budget (not merely "eventually closed" or "never accepted"), which is
+// only possible if the accept loop re-issued async_accept after the first
+// peer's Step-3 rejection.
+TEST(EngineFirstFrameTest, PostHandshakeRejectionDoesNotStopTheAcceptLoop) {
+    asio::io_context ioc;
+    fixpp::core::EngineConfig eng_cfg;
+    eng_cfg.executor = ioc.get_executor();
+    auto harness = EngineLoopbackHarness::build(ioc.get_executor(), std::move(eng_cfg));
+    if (!harness) {
+        GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
+    }
+
+    ASSERT_TRUE(harness->engine().start().has_value()) << "engine.start() failed";
+    ioc.run_for(std::chrono::milliseconds{50});
+    ioc.restart();
+    uint16_t port = harness->server_endpoint().port;
+    if (port == 0) {
+        GTEST_SKIP() << "acceptor listener did not bind";
+    }
+
+    // First peer: over-budget mTLS client, same 4097 payload as
+    // PostHandshakeOverBudgetClosedByByteBudget. A short 3s self-deadline is
+    // ample against the ~105ms budget-rejection close.
+    PostHandshakeProbe first;
+    asio::co_spawn(ioc,
+                   probe_post_handshake(ioc, harness->transport_fixture(), port,
+                                        make_carried_over_budget_payload(4097),
+                                        /*self_deadline_after=*/3s, first),
+                   asio::detached);
+    run_until(ioc, first.done, 5s);
+
+    const bool first_closed = first.closed.load(std::memory_order_acquire);
+    const auto first_ms = first.elapsed.count();
+
+    // Second peer, started only after the first has fully reported. If the
+    // accept loop did not re-spin (the mutation case), this connect's TCP
+    // handshake still succeeds (the listener socket itself is untouched —
+    // only async_accept was never reissued), but no async_accept is pending
+    // to complete the mTLS handshake server-side, so this probe's own read
+    // never sees a server-side close and `second.done` never flips within the
+    // bound below: `run_until` exhausts its cap with `second.closed == false`.
+    PostHandshakeProbe second;
+    asio::co_spawn(ioc,
+                   probe_post_handshake(ioc, harness->transport_fixture(), port,
+                                        make_carried_over_budget_payload(4097),
+                                        /*self_deadline_after=*/3s, second),
+                   asio::detached);
+    run_until(ioc, second.done, 5s);
+
+    const bool second_closed = second.closed.load(std::memory_order_acquire);
+    const auto second_ms = second.elapsed.count();
+
+    auto stop_fut = asio::co_spawn(ioc, harness->engine().stop(), asio::use_future);
+    ioc.run();
+    stop_fut.get();
+
+    ASSERT_TRUE(first_closed) << "SC-011 (FR-014): the first over-budget peer must be "
+                              << "closed and its accept slot reclaimed.";
+    EXPECT_LT(first_ms, 2000) << "first peer: the close arrived after " << first_ms
+                              << "ms — expected an immediate byte-budget rejection, "
+                              << "not a deadline-backstop close.";
+    ASSERT_TRUE(second_closed)
+        << "SC-011 (FR-014) / [#228 FQ-4]: the SECOND over-budget peer, connected "
+        << "after the first was rejected, must ALSO be closed. If it is not, the "
+        << "accept loop failed to re-issue async_accept after reclaiming the first "
+        << "peer's slot — Step 3's failure arm stopped the loop instead of "
+        << "continuing it, exactly what `transport->close(); continue;` -> "
+        << "`transport->close(); co_return;` at engine.cpp's Step-3 rejection "
+        << "would do, and exactly what AcceptLoopRunsContinuously (raw-TCP, "
+        << "Step-2-only) cannot see.";
+    EXPECT_LT(second_ms, 2000)
+        << "second peer: the close arrived after " << second_ms
+        << "ms — expected an immediate byte-budget rejection (proving the accept "
+        << "loop re-spun AND Step 3 is live again), not a deadline-backstop close "
+        << "or a stall.";
+}
