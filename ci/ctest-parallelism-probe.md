@@ -1,7 +1,39 @@
 # `ctest` parallelism — single-lane probe (TSan)
 
-**Status:** PROBE. `linux-clang-tsan` only. Do **not** copy `execution.jobs` to any other test
-preset until this lane has been re-measured green over several runs.
+**Status:** PROBE, **first measurement in — green**. `linux-clang-tsan` only. Do **not** copy
+`execution.jobs` to any other test preset yet: acceptance criteria 1 and 4 below are still unmet
+(one run, and no memory figure captured).
+
+## MEASURED — run `30881578522`, `3c4a030a`, 2026-08-04
+
+```
+100% tests passed, 0 tests failed out of 346
+Total Test time (real) = 1935.04 sec
+346/346 Test #270: log_file_fsync ......... Passed    1.42 sec
+```
+
+| | seconds |
+|---|---:|
+| baseline (serial), 3 runs on `main` | 3356 / 3300 / 3302 — mean **3319** |
+| **measured, `jobs=2`** | **1935** (`Test` step 1937) |
+| saving | **1384 s ≈ 23 min, −41.7%** |
+| modelled ideal lower bound | 1845 — measured is 4.9% above it |
+
+Three things this establishes beyond the headline:
+
+- **Test count unchanged: 346, same as serial.** Parallelism did not skip or drop a test — the
+  failure mode that would otherwise read as a saving.
+- **Zero failures.** No flake, no `exit 143`, no OOM.
+- **The `RUN_SERIAL` mitigation is visibly correct.** `log_file_fsync` was scheduled **last and
+  alone** (`346/346`) and cost **1.42 s** — identical to its serial baseline, i.e. it was never
+  descheduled behind a co-runner. That is the Gate B round-1 P1 discharged by observation, not by
+  argument.
+- **The model was honest.** Measured sits 4.9% *above* the ideal lower bound, which is the only
+  direction it can legitimately sit; imperfect packing and contention account for the gap.
+
+**Still outstanding before widening:** criterion 1 (more than one run) and criterion 4 (peak memory
+captured). One green run is not a trend, and the memory question this probe was cautious about has
+not actually been answered — it was simply not exercised hard enough to fail.
 
 Every `testPreset` in `CMakePresets.json` ran serial (no `execution.jobs`) up to this change, and
 no CI workflow passes `-j` to `ctest`. This probe sets `jobs: 2` on exactly one lane so the effect
