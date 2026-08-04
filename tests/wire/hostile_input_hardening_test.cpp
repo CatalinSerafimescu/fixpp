@@ -113,6 +113,61 @@ TEST(HostileInputHardening, CountedDataExactFrameEndSwallowsChecksumRejectedInde
     EXPECT_EQ(s.error(), error::wire_invalid_field_format);
 }
 
+// ── #221 (1): counted Data whose declared length runs PAST the frame end ──────
+// One byte beyond the sibling case above: the same frame with `95=9` instead of
+// `95=8` leaves the frame byte-identical in length (n = 30, val_start = 22, so
+// `n - val_start` = 8) but declares 9, so the SUBTRACTION bound
+// `carry_len > n - val_start` rejects BEFORE `val_start + carry_len` is ever
+// formed. That ordering is the W-P2-1a defence: on a 32-bit size_t the sum would
+// be the wrapping expression, and the later `end >= n` guard would then be
+// evaluated on a wrapped value.
+//
+// NOTE — this is a COVERAGE test, not a mutation-proof pin. Both this guard and
+// the `end >= n` guard below it return wire_invalid_field_format, and `end >= n`
+// subsumes every case this one catches on a 64-bit size_t, so deleting the
+// subtraction guard leaves this assertion green. What it pins is the boundary
+// (8 accepted-into-the-next-guard vs 9 rejected here) and the fact that the path
+// executes at all; the wrap it defends against is unobservable on this host.
+TEST(HostileInputHardening, CountedDataDeclaredLengthPastFrameEndRejectedIndex) {
+    auto buf = make_raw_frame(
+        "95=9\x01"
+        "96=\x01");
+    auto fv = fixpp::wire::test::make_frame_view(buf);
+    ASSERT_TRUE(fv.has_value());
+
+    std::pmr::monotonic_buffer_resource arena;
+    OffsetTable t{*fv, &arena};
+
+    auto s = t.build_status();
+    ASSERT_FALSE(s.has_value())
+        << "a counted Data value whose declared length runs past the frame end "
+           "must be rejected";
+    EXPECT_EQ(s.error(), error::wire_invalid_field_format);
+}
+
+// ── #221 (1b): a SATURATED declared length ────────────────────────────────────
+// 4294967295 exceeds the uint32 accumulator's cap, which accumulate_bounded
+// saturates to the frame size `n` rather than wrapping (W-P2-1c / W-P3-1). n is
+// always > n - val_start (val_start >= 1 for any field), so a saturated length
+// lands on the subtraction guard deterministically — this is the composition of
+// the two defences, not just the guard in isolation.
+TEST(HostileInputHardening, CountedDataSaturatedDeclaredLengthRejectedIndex) {
+    auto buf = make_raw_frame(
+        "95=4294967295\x01"
+        "96=\x01");
+    auto fv = fixpp::wire::test::make_frame_view(buf);
+    ASSERT_TRUE(fv.has_value());
+
+    std::pmr::monotonic_buffer_resource arena;
+    OffsetTable t{*fv, &arena};
+
+    auto s = t.build_status();
+    ASSERT_FALSE(s.has_value())
+        << "a declared length that saturates the uint32 accumulator must be "
+           "rejected, never wrap into an in-bounds offset";
+    EXPECT_EQ(s.error(), error::wire_invalid_field_format);
+}
+
 // ── regression: a TRUTHFUL RawDataLength (value carries an embedded SOH) ───────
 // 96 declared as 5 bytes = "a\x01b\x01c"; the trailing byte after those 5 IS a
 // SOH, so the field is well-formed. Must still parse: 96 findable with the full
@@ -326,6 +381,52 @@ TEST(HostileInputHardening, CraftedCollisionSetDefeatedByDifferentSeed) {
     if (found.has_value()) {
         EXPECT_EQ(found->tag, kTarget);
     }
+}
+
+// ── #221 (2): an inflated group count must not inflate the reserve bound ──────
+// group_slices_reserve_bound() sums the DECLARED instance count of every
+// top-level group count-field to size the one-shot group_slices_ reservation.
+// A hostile frame can declare an arbitrarily large count (453=999 here) while
+// carrying a single instance; without the clamp that number is what gets
+// reserved out of the fixed inbound parse arena — the arena_fit exhaustion mode
+// (PR #181), reachable from the wire. The clamp holds it at entries_.size(),
+// which is a valid upper bound because every instance needs at least one entry.
+//
+// Mutation-proof: with the clamp removed the bound is 999, not the entry count.
+TEST(HostileInputHardening, InflatedGroupCountClampedToEntryCountInReserveBound) {
+    fixpp::dict::table_view dict;
+    dict.add_valid("D", 35)
+        .add_valid("D", 34)
+        .add_valid("D", 453)
+        .add_valid("D", 448)
+        .add_valid("D", 447)
+        .set_group_first(453, 448)
+        .add_group_member(453, 447);
+
+    // NoPartyIDs(453) declares 999 instances; exactly one is present.
+    auto buf = make_raw_frame(
+        "35=D\x01"
+        "34=1\x01"
+        "453=999\x01"
+        "448=PA\x01"
+        "447=D\x01");
+    auto fv = fixpp::wire::test::make_frame_view(buf);
+    ASSERT_TRUE(fv.has_value());
+
+    std::pmr::monotonic_buffer_resource arena;
+    fixpp::wire::Parser<access_mode::Index> parser{dict};
+    auto mv = parser.parse(*fv, &arena);
+    ASSERT_TRUE(mv.has_value());
+    auto const& t = mv->offsets();
+
+    // Setup precondition: the declared count must exceed the entry count, or the
+    // clamp is not the thing being exercised.
+    ASSERT_LT(t.size(), 999U) << "test setup: declared count must exceed the entry count";
+
+    EXPECT_EQ(fixpp::wire::reserve_bound_access_for_testing::get(t),
+              static_cast<std::uint32_t>(t.size()))
+        << "a malicious declared instance count must be clamped to the entry "
+           "count, not reserved verbatim out of the fixed parse arena";
 }
 
 }  // namespace
