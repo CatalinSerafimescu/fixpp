@@ -114,7 +114,15 @@ set(_required_targets
   probe_capi_positive_c      # ✅ all 12 C-ABI headers, C
   probe_service_positive     # ✅ fixpp::service reaches the plugin header AND the C ABI
   probe_umbrella             # ✅ the umbrella still reaches everything
-  probe_usage_requirements)  # C-3 leg 3 carrier
+  probe_usage_requirements   # C-3 leg 3 carrier
+  # ❌ cells. Since Gate B r3 these are ordinary targets asserted to COMPILE
+  # (`__has_include` + a unique-token `#error`), so BUILDING them IS the
+  # assertion — and naming them here is the only thing that stops one being
+  # deleted silently, now that there is no configure-time probe table to read
+  # back.
+  probe_capi_negative        # ❌ fixpp::capi must not reach <fixpp/wire/parser.hpp>
+  probe_capi_negative_service # ❌ fixpp::capi must not reach the service header
+  probe_service_negative)    # ❌ fixpp::service must not reach an engine header
 execute_process(
   COMMAND "${CMAKE_COMMAND}" --build "${_sub_build}" --target ${_required_targets}
   RESULT_VARIABLE _build_rc
@@ -129,36 +137,25 @@ if(NOT _build_rc EQUAL 0)
     "${_build_out}\n${_build_err}")
 endif()
 
-# ── 3a. 086 FR-006/FR-007 — read back the NEGATIVE-PROBE table ───────────────
+# ── 3a. 086 FR-006/FR-007 — the ❌ cells are asserted BY THE BUILD ABOVE ──────
 #
-# Without this block the try_compile probes assert only against THEMSELVES: they
-# raise FATAL_ERROR during the consumer configure, so DELETING THE WHOLE PROBE
-# BLOCK from tests/consumer/CMakeLists.txt would make the configure succeed and
-# this driver report green. A gate that vanishes silently when removed is the
-# same defect class as a gate that cannot fail.
+# There is no probe table to read back any more. Until Gate B r3 the ❌ cells were
+# configure-time `try_compile` calls that wrote `probe-results.txt`, and this
+# block re-read it so deleting the probe block could not pass unnoticed. MSVC
+# Debug then proved `try_compile` unusable here: it exports the imported-target
+# closure into CMake's scratch project, which never defines Conan's
+# `CONAN_LIB::…_DEBUG` targets, so the probes failed for a reason unrelated to
+# include reachability on every Debug run.
 #
-# The expected labels are named here on purpose. Adding a fourth ❌ cell must
-# force an edit to this list — a count-only check would let a new cell be added
-# and silently never asserted.
-set(_probe_file "${_sub_build}/probe-results.txt")
-if(NOT EXISTS "${_probe_file}")
-  message(FATAL_ERROR
-    "086 FR-006: ${_probe_file} was not written — the negative-probe block is "
-    "missing from tests/consumer/CMakeLists.txt, so no ❌ cell of the §1 "
-    "reachability matrix is being asserted at all.")
-endif()
-file(READ "${_probe_file}" _probe_txt)
-message(STATUS "086 negative-probe table:\n${_probe_txt}")
-foreach(_cell "capi->engine-header" "capi->service-header" "service->engine-header")
-  if(NOT _probe_txt MATCHES "(^|\n)${_cell}: reachable=FALSE(\n|$)")
-    message(FATAL_ERROR
-      "086 FR-006: the ❌ cell '${_cell}' is not recorded as reachable=FALSE in "
-      "${_probe_file}. Either the probe was removed, renamed, it resolved a header "
-      "it must not reach (reachable=TRUE), or it could not answer at all "
-      "(reachable=BROKEN).\nTable was:\n${_probe_txt}")
-  endif()
-endforeach()
-message(STATUS "086 FR-006: OK — all three ❌ cells asserted unreachable")
+# They are now ordinary OBJECT-library targets that must COMPILE, listed BY NAME
+# in `_required_targets` above. That gives both properties the read-back gave:
+#   * a probe that stops compiling (the header became reachable) fails the build;
+#   * a probe that is DELETED or renamed fails the build with "No rule to make
+#     target", because the driver names it.
+# The build failure above prints the compiler output verbatim, so an isolation
+# breach is identifiable by its `FIXPP_086_FORBIDDEN_HEADER_REACHABLE` token
+# while any other failure reads as a broken probe.
+
 
 # ── 3b. 086 FR-009a(ii) / C-3 leg 3 — read back the usage-requirement probe ───
 #

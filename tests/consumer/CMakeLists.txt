@@ -97,11 +97,15 @@ target_link_libraries(consumer_capi_witness PRIVATE fixpp::capi)
 #  1. A "MUST NOT resolve" cell is asserted by COMPILATION, never by a build that
 #     links. research.md R5 measured a false negative on the umbrella row caused
 #     by an unresolved symbol while every #include resolved correctly.
-#  2. A "MUST NOT resolve" cell CANNOT be a build target here. The driver
-#     run_consumer_witness.cmake:107 raises FATAL_ERROR on ANY non-zero build
-#     exit, so a must-fail target reds the whole witness. The ❌ cells are
-#     configure-time try_compile() asserted TRUE (__has_include + unique-token #error; inverted at Gate B r2) (contract §4a, measured in R9);
-#     a FALSE result carrying FIXPP_086_FORBIDDEN_HEADER_REACHABLE fails this configure, which the driver reports at :96.
+#  2. A "MUST NOT resolve" cell is asserted by BUILDING, because the assertion is
+#     inverted. It used to be that such a cell could not be a build target at all:
+#     the driver raises FATAL_ERROR on ANY non-zero build exit, so a probe that
+#     had to FAIL to build would red the whole witness. Since Gate B r2 the ❌
+#     cells use `__has_include` + a unique-token `#error` and must COMPILE, so an
+#     ordinary OBJECT-library target expresses them exactly, and the driver's
+#     existing build check IS the assertion. (They were configure-time
+#     `try_compile` calls until Gate B r3, when MSVC Debug proved that form
+#     cannot see the Conan closure — see the ❌ block below.)
 #  3. A passing ✅ cell NEVER establishes a ❌ cell. Under the additive layout
 #     <fix/c_api.h> resolves from EITHER root, so a green positive probe is
 #     exactly as consistent with the defect being present as with it being fixed.
@@ -139,145 +143,52 @@ target_link_libraries(probe_service_positive PRIVATE fixpp::service)
 add_library(probe_umbrella OBJECT probe_umbrella.cpp)
 target_link_libraries(probe_umbrella PRIVATE fixpp::fixpp)
 
-# ── ❌ cells — configure-time try_compile(), asserted TRUE (inverted, Gate B r2) ─
+# ── ❌ cells — ORDINARY BUILD TARGETS, asserted to COMPILE ───────────────────
 #
-# fixpp086_probe_unreachable(<label> <source> <link-target>)
-#   Records the result in FIXPP_086_LEAKS (parent scope) instead of raising
-#   immediately, so ONE configure reports EVERY leaked cell rather than only the
-#   first. A run that stops at the first leak understates the defect and makes
-#   the FR-007 red observation incomplete.
+# These were configure-time `try_compile` calls until Gate B r3 (CI). Two changes
+# made that both unnecessary and actively wrong:
 #
-# NO_CACHE is load-bearing: try_compile normally writes its result to the CMake
-# cache and never re-runs. The driver wipes the sub-build every run
-# (run_consumer_witness.cmake:46) so it would not bite there, but a hand-driven
-# re-configure after applying the isolation would silently replay a stale TRUE.
+# 1. **The inversion removed the reason for try_compile.** A ❌ cell could not be
+#    a build target while it had to FAIL to build — the driver FATAL_ERRORs on any
+#    non-zero build exit, so a must-fail target reds the whole witness. Since
+#    Gate B r2 the probes assert the opposite: `__has_include` + a unique-token
+#    `#error`, which must COMPILE. A target that must build is exactly what this
+#    harness expresses natively, and the driver's existing build check IS the
+#    assertion.
 #
-# ── THE PROBE IS ASSERTED TO COMPILE. THAT INVERSION IS THE POINT. ───────────
-# (Gate B r1 P1 #2.) The earlier form asserted try_compile FALSE, which made
-# "did not compile" the entire assertion — so a syntax error, a missing
-# third-party include path, a language-standard mismatch or a future missing
-# transitive dependency all produced FALSE and were INDISTINGUISHABLE from the
-# isolation working. Appending `#error unrelated_failure` to a probe left the
-# witness green.
+# 2. **try_compile could not see the Conan closure — MEASURED on CI.** MSVC Debug
+#    failed with:
 #
-# Each probe now uses `__has_include` (lookup without parsing) and fires an
-# `#error` carrying a UNIQUE TOKEN when the forbidden header IS reachable. So:
-#   TRUE                      -> header unreachable. Correct.
-#   FALSE + token in output   -> ISOLATION BREACH. The defect.
-#   FALSE + no token          -> the PROBE ITSELF is broken (toolchain, path,
-#                                standard). Also red, but a different fault.
-# All three outcomes are now distinguishable, and only the first is green.
-set(FIXPP_086_LEAKS "")
-set(FIXPP_086_BROKEN "")
-function(fixpp086_probe_unreachable _label _source _link)
-  try_compile(_probe_ok
-    SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/${_source}"
-    LINK_LIBRARIES ${_link}
-    CXX_STANDARD 23
-    CXX_STANDARD_REQUIRED ON
-    NO_CACHE
-    OUTPUT_VARIABLE _probe_out)
-  if(_probe_ok)
-    set(_reachable FALSE)
-    message(STATUS "086 probe ok:   ${_label} — ${_source} correctly unreachable from ${_link}")
-  elseif(_probe_out MATCHES "FIXPP_086_FORBIDDEN_HEADER_REACHABLE")
-    set(_reachable TRUE)
-    # list(APPEND) on the caller-inherited copy, so an empty start does not yield
-    # a leading empty element the way "${FIXPP_086_LEAKS};${_label}" would.
-    list(APPEND FIXPP_086_LEAKS "${_label}")
-    set(FIXPP_086_LEAKS "${FIXPP_086_LEAKS}" PARENT_SCOPE)
-    message(STATUS "086 probe LEAK: ${_label} — ${_source} REACHED the forbidden header via ${_link}")
-  else()
-    # NOT a leak, and NOT a pass. Failing closed here is the whole reason the
-    # polarity was inverted: under the old form this landed in the same bucket
-    # as success.
-    set(_reachable BROKEN)
-    list(APPEND FIXPP_086_BROKEN "${_label}")
-    set(FIXPP_086_BROKEN "${FIXPP_086_BROKEN}" PARENT_SCOPE)
-    message(STATUS "086 probe BROKEN: ${_label} — ${_source} failed to compile for a reason "
-                   "UNRELATED to include reachability (no token in output):\n${_probe_out}")
-  endif()
-  set(FIXPP_086_PROBE_LOG "${FIXPP_086_PROBE_LOG}${_label}: reachable=${_reachable}\n" PARENT_SCOPE)
-
-  # The compiler output goes to its OWN file, not into probe-results.txt: that
-  # table is machine-read by the driver and must stay one clean line per cell.
-  # Keeping the output at all matters because it is the only evidence that a
-  # FALSE was caused by an unresolved #include rather than by a missing
-  # third-party path or a language-standard mismatch — i.e. that the probe is
-  # measuring isolation and not something else.
-  string(REPLACE ">" "-" _slug "${_label}")
-  string(REPLACE "-" "_" _slug "${_slug}")
-  file(WRITE "${CMAKE_BINARY_DIR}/probe-${_slug}.log" "${_probe_out}")
-endfunction()
-
-# CMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY is what makes the probes
-# genuinely compile-only: no link stage, and no main() required (contract §4a,
-# measured in research.md R9). Saved and restored around the block so it cannot
-# leak into a later check_* module in this scope.
-if(DEFINED CMAKE_TRY_COMPILE_TARGET_TYPE)
-  set(_fixpp086_saved_ttype "${CMAKE_TRY_COMPILE_TARGET_TYPE}")
-  set(_fixpp086_had_ttype TRUE)
-else()
-  set(_fixpp086_had_ttype FALSE)
-endif()
-set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
-
-set(FIXPP_086_PROBE_LOG "")
-
-# <fixpp/wire/parser.hpp> — a SHIPPED public engine header. The probe header must
-# be one whose own disappearance would itself be a defect (FR-008), or the
-# assertion could pass for a reason unrelated to isolation.
-fixpp086_probe_unreachable("capi->engine-header"
-  probe_capi_negative.cpp fixpp::capi)
-
-# A DISTINCT matrix cell, not a variant of the one above: the service plugin
-# header is the one C++ header this feature republishes at a SECOND installed
-# root, so a mis-wired fixpp::capi that picked up include/service-iface would
-# leak this cell while the engine-header probe still passed.
-fixpp086_probe_unreachable("capi->service-header"
-  probe_capi_negative_service.cpp fixpp::capi)
-
-# US6 / FR-011b — the SAME cell for the service target. [arch §8]: the service
-# consumes the engine through the C ABI only.
+#        The link interface of target "opentelemetry-cpp::exporter_prometheus"
+#        contains: CONAN_LIB::…_exporter_prometheus_…_DEBUG
+#        but the target was not found.
 #
-# This one has its OWN demonstrated-red obligation and its own revert
-# (the $<INSTALL_INTERFACE:...> line in src/service/CMakeLists.txt alone --
-# cited by construct because it is an instruction, FR-011e). The asymmetry is DIRECTIONAL:
-# fixpp_service links fixpp_capi (src/service/CMakeLists.txt:30), so reverting
-# the C-ABI leg reds this probe too and cannot stand in for the service one.
-fixpp086_probe_unreachable("service->engine-header"
-  probe_service_negative.cpp fixpp::service)
+#    `try_compile(... LINK_LIBRARIES fixpp::capi)` exports the imported-target
+#    closure into CMake's scratch project, which never runs the Conan machinery
+#    that defines those `CONAN_LIB::…_DEBUG` targets. So the probe failed for a
+#    reason with NOTHING to do with include reachability — the BROKEN category —
+#    on every MSVC Debug run. As ordinary targets in THIS project they build
+#    against the fully-resolved closure and the problem disappears.
+#
+#    Worth recording: under the pre-r2 polarity this would have been a SILENT
+#    FALSE GREEN. The probe would have "correctly failed to compile" and reported
+#    the isolation working. The inversion is what turned it into a visible,
+#    correctly-classified failure.
+#
+# The three outcomes are still distinguishable, now through the build:
+#   builds                          -> header unreachable. The pass.
+#   fails w/ FIXPP_086_FORBIDDEN_…  -> ISOLATION BREACH (the #error names itself).
+#   fails otherwise                 -> a broken probe/toolchain, equally red.
+# In all failing cases the driver surfaces the compiler output verbatim, so the
+# category is readable from the log rather than inferred.
+add_library(probe_capi_negative OBJECT probe_capi_negative.cpp)
+target_link_libraries(probe_capi_negative PRIVATE fixpp::capi)
 
-if(_fixpp086_had_ttype)
-  set(CMAKE_TRY_COMPILE_TARGET_TYPE "${_fixpp086_saved_ttype}")
-else()
-  unset(CMAKE_TRY_COMPILE_TARGET_TYPE)
-endif()
+add_library(probe_capi_negative_service OBJECT probe_capi_negative_service.cpp)
+target_link_libraries(probe_capi_negative_service PRIVATE fixpp::capi)
 
-# Durable even when the configure aborts below — this file IS the FR-007 red
-# observation when the isolation is absent or reverted.
-file(WRITE "${CMAKE_BINARY_DIR}/probe-results.txt" "${FIXPP_086_PROBE_LOG}")
-
-if(FIXPP_086_LEAKS)
-  string(REPLACE ";" "\n  " _leaks_pretty "${FIXPP_086_LEAKS}")
-  message(FATAL_ERROR
-    "086 include isolation NOT delivered — these matrix cells are reachable and must not be:\n"
-    "  ${_leaks_pretty}\n"
-    "See specs/086-capi-include-isolation/contracts/include-interface.md §1.")
-endif()
-
-# FAIL CLOSED on a probe that could not answer. Under the pre-Gate-B polarity this
-# case was silently GREEN — it produced the same FALSE as a working isolation.
-if(FIXPP_086_BROKEN)
-  string(REPLACE ";" "\n  " _broken_pretty "${FIXPP_086_BROKEN}")
-  message(FATAL_ERROR
-    "086: these probes failed to compile for a reason UNRELATED to include "
-    "reachability, so they assert NOTHING about isolation:\n"
-    "  ${_broken_pretty}\n"
-    "Read probe-<cell>.log in the sub-build for the compiler output. This is not "
-    "an isolation failure; it is a broken gate, and it is fatal for that reason.")
-endif()
-
+add_library(probe_service_negative OBJECT probe_service_negative.cpp)
+target_link_libraries(probe_service_negative PRIVATE fixpp::service)
 # ── C-3 leg 3 — effective usage requirements at a real consumer target ───────
 # FR-009a(ii). Not a duplicate of quickstart §3's property diff: compile
 # definitions reach a C-ABI consumer through fixpp_capi_objects -> fixpp_log
