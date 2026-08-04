@@ -398,11 +398,32 @@ file(GENERATE OUTPUT "${CMAKE_BINARY_DIR}/probe_incs.txt"
    receiving `FIXPP_LOG_MIN_LEVEL`. FR-009a(ii) records that as the pre-approved exception rather than
    pretending nothing is withheld.
 
+> ### The real 18-member measurement — `/speckit-implement`, 2026-08-04
+>
+> Limit 4 below required the expected set to be enumerated from the real closure rather than transcribed from
+> the fixture. Done, via demonstration C (the probe target linked to `fixpp::capi_objects` instead of
+> `fixpp::capi`, which makes the un-narrowed set observable while both `try_compile` cells stay FALSE):
+>
+> ```
+> OBSERVED_COMPILE_DEFINITIONS=ASIO_STANDALONE|FIXPP_LOG_MIN_LEVEL=2|OPENTELEMETRY_ABI_VERSION_NO=2|CURL_STATICLIB=1
+> OBSERVED_COMPILE_OPTIONS=
+> OBSERVED_COMPILE_FEATURES=
+> ```
+>
+> **Four definitions, where the fixture showed one and Gate A's carry-forward #1 predicted two.** The fixture
+> was not wrong, it was small: `OPENTELEMETRY_ABI_VERSION_NO` and `CURL_STATICLIB` arrive from Conan packages
+> the 5-target fixture does not have. At ISO=ON all three lines are empty.
+>
+> This is the case for the check's *shape*. FR-009a(ii) is asserted as "the effective set is EMPTY", not as
+> "the effective set is `{…}`" — and only the former could have caught two definitions nobody enumerated.
+> `grep -rl <def> include/fix/` returns 0 for all four, so none is a live break.
+
 **Limits — stated so this is not over-read:**
 
 4. **Fixture-scoped, same as R9.** 5 targets, no Conan toolchain, Linux/clang. It establishes that the
    instrument *works*; the **expected set** it is compared against must still be enumerated from the real
-   18-member closure at `/speckit-implement`, never transcribed from this table.
+   18-member closure at `/speckit-implement`, never transcribed from this table. *(Discharged — see the
+   measurement above, which found twice as many definitions as this fixture could show.)*
 4a. **The probe consumer reached the imported targets by `include(fixppTargets.cmake)`, not by
    `find_package`.** Stated because the method must not read stronger than what ran: the fixture ships no
    `fixppConfig.cmake`, so `find_package(fixpp REQUIRED)` — which the real sub-project uses

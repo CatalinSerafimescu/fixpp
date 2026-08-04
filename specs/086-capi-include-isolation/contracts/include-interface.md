@@ -123,14 +123,27 @@ root of its own.
   *include* interface must not narrow the *link* interface **or any other usage requirement the closure relies
   on**, except for a set enumerated and recorded in advance. `$<LINK_ONLY:>` withholds
   `INTERFACE_COMPILE_DEFINITIONS`, `INTERFACE_COMPILE_OPTIONS`, `INTERFACE_COMPILE_FEATURES` and
-  `INTERFACE_SYSTEM_INCLUDE_DIRECTORIES` too — and the closure carries **at least two** live PUBLIC
-  definitions: `FIXPP_LOG_MIN_LEVEL` (`src/log/CMakeLists.txt:27`), consumed unguarded at
-  `include/fixpp/log/logger.hpp:275,301,333`, and `ASIO_STANDALONE`, carried by `asio::asio`, which is linked
-  **unwrapped** inside the C-ABI closure. The complete set is enumerated per FR-009a(ii)(a) and membership is
-  decided by the predicate, not by this list. An installed C-ABI consumer **does** lose them (measured,
-  `research.md` R10); nothing reaches `logger.hpp` from such a consumer today, so there is no live break, and
-  that loss is the enumerated exception this invariant's title names. The invariant exists so any *other*
-  withheld requirement, or a future header that did reach one, would not pass silently.
+  `INTERFACE_SYSTEM_INCLUDE_DIRECTORIES` too.
+  **MEASURED at `/speckit-implement`, 2026-08-04 — the withheld set is FOUR definitions, not the two the
+  bundle predicted:**
+
+  ```
+  ASIO_STANDALONE | FIXPP_LOG_MIN_LEVEL=2 | OPENTELEMETRY_ABI_VERSION_NO=2 | CURL_STATICLIB=1
+  ```
+
+  Read off demonstration C, where the probe target was linked to `fixpp::capi_objects` instead of
+  `fixpp::capi` so the un-narrowed set became observable. Through Gate A this invariant named
+  `FIXPP_LOG_MIN_LEVEL` alone; carry-forward #1 corrected it to "at least `FIXPP_LOG_MIN_LEVEL` and
+  `ASIO_STANDALONE`". Both were still short, and the OTel and curl definitions were reached
+  by nobody's prediction — **which is the whole argument for asserting the effective set is EMPTY rather than
+  asserting a named list.** A list-shaped check written from either version of this paragraph would have let
+  two definitions propagate unremarked; the closed predicate caught all four without being told about them.
+
+  None is a live break: `grep -rl <def> include/fix/` returns **0 for every one of the four**, so no C-ABI
+  header consumes any of them, and nothing reaches `include/fixpp/log/logger.hpp:275,301,333` — where
+  `FIXPP_LOG_MIN_LEVEL` (`src/log/CMakeLists.txt:27`) is consumed unguarded — from such a consumer. That loss
+  is the enumerated exception this invariant's title names. The invariant exists so any *other* withheld
+  requirement, or a future header that did reach one, would not pass silently.
 
   > **Asserted THREE ways, on three different instruments — none is a substitute for another** *(restated at
   > Gate A r2; the previous two-way formulation was unsatisfiable and its second leg was blind to the property

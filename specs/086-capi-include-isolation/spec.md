@@ -425,9 +425,10 @@ interface header and the C-ABI headers compile; a C++ engine header does not.
   `run_consumer_witness.cmake:86`), so the comparison has a right-hand side with an origin. A comparison whose
   expected value is derived from the run it checks is satisfied by whatever the run produced — the same
   no-op-gate shape as a `file(GENERATE)` nothing reads. One **recorded, pre-approved exception** applies: the
-    definitions enumerated in (a) as presently unreachable from any C-ABI consumer — today **at least**
-    `FIXPP_LOG_MIN_LEVEL` and `ASIO_STANDALONE`; the complete set is enumerated per (a) and membership is
-    decided by the predicate, not by this list — are **permitted** to be absent, as an accepted and recorded consequence of the
+    definitions enumerated in (a) as presently unreachable from any C-ABI consumer — **MEASURED 2026-08-04 at
+    `/speckit-implement`: exactly four**, `ASIO_STANDALONE`, `FIXPP_LOG_MIN_LEVEL=2`,
+    `OPENTELEMETRY_ABI_VERSION_NO=2` and `CURL_STATICLIB=1`, none of which occurs in **any** of the twelve
+    C-ABI headers (`grep -rl <def> include/fix/` → 0 for each) — are **permitted** to be absent, as an accepted and recorded consequence of the
     narrowing. Anything else that goes missing MUST be republished on `fixpp_capi` directly. *(Measured
     instrument: `research.md` R10 — the probe reads `FIXPP_LOG_MIN_LEVEL` at ISO=OFF and loses it at ISO=ON, so
     the check discriminates rather than merely reporting.)*

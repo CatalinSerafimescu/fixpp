@@ -112,6 +112,25 @@ target_link_libraries(probe_capi_positive_c PRIVATE fixpp::capi)
 set_target_properties(probe_capi_positive_c PROPERTIES
   C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
 
+# US6 / FR-011a — fixpp::service reaches the plugin header AND the C ABI. The
+# C-ABI half is the load-bearing one: fixpp::service declares no C-ABI root of
+# its own and reaches <fix/c_api.h> only through its existing link to
+# fixpp::capi (src/service/CMakeLists.txt:16). Narrowing fixpp::capi is exactly
+# the change that could sever that path.
+add_library(probe_service_positive OBJECT probe_service_positive.cpp)
+target_link_libraries(probe_service_positive PRIVATE fixpp::service)
+
+# US3 / FR-004 / FR-011c — the umbrella still reaches EVERYTHING, including both
+# headers this feature republishes at isolated roots. The regression guard for
+# the whole feature: the isolation is delivered by ADDING roots, never by
+# removing anything from the umbrella's, and this is what goes red if that stops
+# being true.
+#
+# A SEPARATE TU, deliberately: consumer_witness.cpp:34-37 includes neither of
+# those two headers, and SC-003 trades on that file staying byte-unchanged.
+add_library(probe_umbrella OBJECT probe_umbrella.cpp)
+target_link_libraries(probe_umbrella PRIVATE fixpp::fixpp)
+
 # ── ❌ cells — configure-time try_compile(), asserted FALSE ──────────────────
 #
 # fixpp086_probe_unreachable(<label> <source> <link-target>)
@@ -170,6 +189,16 @@ fixpp086_probe_unreachable("capi->engine-header"
 # leak this cell while the engine-header probe still passed.
 fixpp086_probe_unreachable("capi->service-header"
   probe_capi_negative_service.cpp fixpp::capi)
+
+# US6 / FR-011b — the SAME cell for the service target. [arch §8]: the service
+# consumes the engine through the C ABI only.
+#
+# This one has its OWN demonstrated-red obligation and its own revert
+# (src/service/CMakeLists.txt:12 alone, FR-011e). The asymmetry is DIRECTIONAL:
+# fixpp_service links fixpp_capi (src/service/CMakeLists.txt:16), so reverting
+# the C-ABI leg reds this probe too and cannot stand in for the service one.
+fixpp086_probe_unreachable("service->engine-header"
+  probe_service_negative.cpp fixpp::service)
 
 if(_fixpp086_had_ttype)
   set(CMAKE_TRY_COMPILE_TARGET_TYPE "${_fixpp086_saved_ttype}")
