@@ -25,7 +25,7 @@
 > ### Two traps this feature already paid for — do not re-enter them
 > 1. **A ❌ assertion may never be a build target.** `run_consumer_witness.cmake:96-104` raises `FATAL_ERROR`
 >    on *any* non-zero build exit, so a must-fail target reds the whole witness. ❌ cells are configure-time
->    `try_compile` asserted FALSE (contracts §4a, measured in R9).
+>    `try_compile` asserted **TRUE** (`__has_include` + unique-token `#error`; inverted at Gate B r2) (contracts §4a, measured in R9).
 > 2. **Never terminate an extraction range on a blank line.** CMake emits one between `add_library()` and
 >    `set_target_properties()`; the round-1 `awk '/…/,/^$/'` captured two identical lines and `diff` exited 0
 >    *unconditionally*. Anchor on `/^set_target_properties\(<target> PROPERTIES$/,/^\)$/`.
@@ -65,7 +65,7 @@
 - [X] T013 [P] [US1] Add the ❌ engine-header probe source `tests/consumer/probe_capi_negative.cpp` (`#include <fixpp/wire/parser.hpp>`) — probe a header whose own disappearance would itself be a defect (FR-008)
 - [X] T014 [P] [US1] Add the ❌ **service-header** probe source `tests/consumer/probe_capi_negative_service.cpp` (`#include <fixpp/service/control_plane_factory.hpp>`) — a **distinct** matrix cell: a mis-wired `fixpp::capi` that picked up `include/service-iface` would leak this while the engine probe still passed
 - [X] T014a [US1] **Extend `tests/consumer/consumer_capi_witness.cpp` per FR-009** — add a **non-elidable** reference (namespace-scope non-`static` non-`const` pointer, or a call; see T049 — an address assigned to an unused local can be optimised away with its relocation) to `fixpp_dict_load_from_xml` **and** `fixpp_engine_create`, so the witness pulls the **session/dictionary closure** out of the archive at *link* time. Today it references only `fixpp_library_version` + `fixpp_strerror`, whose objects need not reference session/dictionary/transport/TLS or either static-archive cycle — so it would stay green even if `$<LINK_ONLY:>` silently dropped a real transitive edge. The TU is **never executed** (`run_consumer_witness.cmake:110` runs `consumer_witness` only), so the added reference must not depend on runtime behaviour and must not be a call that could fail at runtime
-- [X] T015 [US1] Wire T011–T014 into `tests/consumer/CMakeLists.txt` against `fixpp::capi`; run the witness and **record both ❌ probes returning TRUE** (i.e. the headers ARE reachable) against the unfixed package — this is the FR-007 red observation for the C-ABI leg, written to `$FIXPP_086_EVIDENCE/`
+- [X] T015 [US1] Wire T011–T014 into `tests/consumer/CMakeLists.txt` against `fixpp::capi`; run the witness and **record both ❌ probes reporting reachable=TRUE** (i.e. the headers ARE reachable) against the unfixed package — this is the FR-007 red observation for the C-ABI leg, written to `$FIXPP_086_EVIDENCE/`
 
 ### Then the edit that makes them green
 
@@ -86,7 +86,7 @@
 
 - [X] T020 [P] [US6] Add the service positive probe TU `tests/consumer/probe_service_positive.cpp` (`<fixpp/service/control_plane_factory.hpp>` **and** `<fix/c_api.h>` — FR-011a)
 - [X] T021 [P] [US6] Add the ❌ engine-header probe source `tests/consumer/probe_service_negative.cpp` for the service target (FR-011b)
-- [X] T022 [US6] Wire T020–T021 against `fixpp::service`; record the ❌ probe returning TRUE against the unfixed package — the FR-007 red observation for the **service** leg
+- [X] T022 [US6] Wire T020–T021 against `fixpp::service`; record the ❌ probe reporting reachable=TRUE against the unfixed package — the FR-007 red observation for the **service** leg
 - [X] T023 [US6] `src/service/CMakeLists.txt`, **the `$<INSTALL_INTERFACE:…>` entry of `target_include_directories(fixpp_service …)`** (cited by CONSTRUCT — this is an instruction someone acts on, and 086's own comment block moved it from `:12` to `:26`) — replace `"$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"` with the `service-iface` root. **This line is not inherited from `fixpp_capi`** — narrowing that target does not touch it, and every other requirement can be satisfied while it survives (FR-011d)
 - [X] T024 [US6] `CMakeLists.txt` — add `install(DIRECTORY "${CMAKE_SOURCE_DIR}/include/fixpp/service/" DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/service-iface/fixpp/service")`
 - [X] T025 [US6] Rebuild + re-install; confirm the service matrix row and that `fixpp::service` still reaches the C ABI **through its existing link to `fixpp::capi`** (no C-ABI root declared on it — R3)

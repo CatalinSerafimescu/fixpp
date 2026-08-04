@@ -366,10 +366,7 @@ interface header and the C-ABI headers compile; a C++ engine header does not.
   `run_consumer_witness.cmake:197` runs `${_sub_build}/consumer_witness` — the umbrella witness — and asserts
   `^PASS:` on that binary alone (`:142-143`); `tests/consumer/CMakeLists.txt:83` states it in as many words,
   "Building and linking IS the assertion — it need not run". The reference must therefore pull the entry
-  point's object out of the archive at **link** time. **The form is load-bearing**: a namespace-scope,
-  non-`static`, non-`const` pointer initialised with the entry point's address (or a call), never an address
-  assigned to an unused local — a local can be optimised away *together with its relocation*, silently
-  restoring the gap this requirement exists to close *(Gate A r3 carry-forward #6)*. And
+  point's object out of the archive at **link** time. **The form is load-bearing, and only a CALL is sufficient** (amended Gate B r2 P2 #7): the reference must be a call reached from a branch the compiler cannot fold. A namespace-scope pointer — the Gate A r3 wording — is NOT enough, because `-ffunction-sections -fdata-sections -Wl,--gc-sections`, or LTO, can discard the data section holding it and the closure is then never pulled. An address in an unused local is weaker still. And
   **no runtime behaviour is asserted**. Verifiers MUST NOT record a run of `consumer_capi_witness` as FR-009 or
   SC-008 evidence; there is none. Adding a runtime assertion on the C-ABI leg would be a separate, larger
   change to `run_consumer_witness.cmake` and is not in scope here.)*

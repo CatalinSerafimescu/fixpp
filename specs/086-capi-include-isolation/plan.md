@@ -185,7 +185,7 @@ literally false against this same structure block.
 > **Delivered shape — MEASURED (`research.md` R9), not a decision rule**: ✅ cells are `OBJECT` targets (build
 > failure reds the witness — correct polarity); ❌ cells are `try_compile(... LINK_LIBRARIES fixpp::capi)` at
 > consumer-**configure** time with `CMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY` (compile-only, no `main()`,
-> restored after), asserted **FALSE** — a TRUE result raises `FATAL_ERROR` and the driver reports it at
+> restored after), asserted **FALSE** — a FALSE result carrying `FIXPP_086_FORBIDDEN_HEADER_REACHABLE` raises `FATAL_ERROR`, and a FALSE result WITHOUT it is fatal as a BROKEN probe and the driver reports it at
 > `:91-92`. Both polarities stay inside **one configured consumer**, which is what FR-008a's paired-evidence
 > rule requires. R9 ran this shape against the Phase-0 fixture at both stages: the imported target's
 > `INTERFACE_INCLUDE_DIRECTORIES` **do** propagate through `LINK_LIBRARIES`, there is no link stage, and the
@@ -307,7 +307,7 @@ Order is constrained by Article VII §3 and by FR-007's demonstrated-red obligat
 Findings where the applied fix differs from the proposal as written. Recorded so round 3 does not re-open them.
 
 - **R2-5, alternative (a) vs (b) — (b) chosen.** The review's *required* leg (a second configure-time
-  `try_compile` asserted FALSE for `<fixpp/service/control_plane_factory.hpp>` through `fixpp::capi`) is
+  `try_compile` asserted **TRUE** (`__has_include` + unique-token `#error`; inverted at Gate B r2) for `<fixpp/service/control_plane_factory.hpp>` through `fixpp::capi`) is
   applied in full: it is now a row in `contracts/include-interface.md` §4 and a third `try_compile` in the
   sequencing. For the follow-on the review offered (a) an exact-set assertion over a probe target's evaluated
   `INCLUDE_DIRECTORIES` **or** (b) scoping SC-001/SC-001a's "0" to the named probes plus C-5 root containment —

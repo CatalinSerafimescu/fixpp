@@ -305,6 +305,11 @@ function(_fixpp_list_package _path _out_files)
 endfunction()
 
 # ── Per-artifact assertions ──────────────────────────────────────────────────
+# 086 / Gate B r2 P1 #1: counts artifacts whose FR-010/FR-010a block ran to
+# completion. Asserted against _n_artifacts AFTER the loop — a per-artifact token
+# proves only that ONE artifact's block completed, and Linux processes DEB, RPM
+# and TGZ sequentially.
+set(_086_artifacts_done 0)
 foreach(_artifact IN LISTS _artifacts)
   get_filename_component(_aname "${_artifact}" NAME)
   _fixpp_list_package("${_artifact}" _files)
@@ -623,8 +628,7 @@ foreach(_artifact IN LISTS _artifacts)
       "isolated root(s), expected 2 and 2. Either a root was dropped from the loop "
       "lists or an early return skipped part of the block.")
   endif()
-  message(STATUS
-    "086: FR-010/FR-010a asserted over 2 root pairs and 2 isolated roots (${_aname})")
+  math(EXPR _086_artifacts_done "${_086_artifacts_done} + 1")
 
   # MUST BE ABSENT — SET EQUALITY over the exact 7-pattern denylist, never a
   # subset. A check written from the 078 five-pattern tail would pass a package
@@ -742,4 +746,23 @@ if(_ack_pos EQUAL -1)
 endif()
 
 message(STATUS "T058: NOTICE carries the clause-3 acknowledgment, matched against the pinned anchor")
+# ── 086 completion token — emitted ONCE, after EVERY artifact ────────────────
+# Read back by run_package_contents_gate.cmake, which ALSO requires this script's
+# exit code to be 0. Both legs are needed and neither is sufficient:
+#   * exit code alone  -> deleting the whole 086 block leaves the script exiting 0;
+#   * token alone      -> CTest's PASS_REGULAR_EXPRESSION IGNORES the exit code,
+#                         so a token printed for DEB would mask a FATAL_ERROR on
+#                         RPM or TGZ. That was this gate's own round-1 fix, and it
+#                         made the gate WEAKER; the outer driver replaces it.
+list(LENGTH _artifacts _n_artifacts_final)
+if(NOT _086_artifacts_done EQUAL _n_artifacts_final)
+  message(FATAL_ERROR
+    "086: the FR-010/FR-010a block completed for ${_086_artifacts_done} of "
+    "${_n_artifacts_final} artifact(s). Every produced artifact must be asserted, "
+    "not just the first.")
+endif()
+message(STATUS
+  "086: FR-010/FR-010a asserted over ${_086_artifacts_done} artifact(s), "
+  "2 root pairs and 2 isolated roots each")
+
 message(STATUS "fixpp::packaging::contents: OK")

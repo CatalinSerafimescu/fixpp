@@ -100,8 +100,8 @@ target_link_libraries(consumer_capi_witness PRIVATE fixpp::capi)
 #  2. A "MUST NOT resolve" cell CANNOT be a build target here. The driver
 #     run_consumer_witness.cmake:107 raises FATAL_ERROR on ANY non-zero build
 #     exit, so a must-fail target reds the whole witness. The ❌ cells are
-#     configure-time try_compile() asserted FALSE (contract §4a, measured in R9);
-#     a TRUE result fails this configure, which the driver reports at :96.
+#     configure-time try_compile() asserted TRUE (__has_include + unique-token #error; inverted at Gate B r2) (contract §4a, measured in R9);
+#     a FALSE result carrying FIXPP_086_FORBIDDEN_HEADER_REACHABLE fails this configure, which the driver reports at :96.
 #  3. A passing ✅ cell NEVER establishes a ❌ cell. Under the additive layout
 #     <fix/c_api.h> resolves from EITHER root, so a green positive probe is
 #     exactly as consistent with the defect being present as with it being fixed.

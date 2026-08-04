@@ -252,7 +252,7 @@ Asserts the full `contracts/include-interface.md` §1 matrix. Three rules govern
   `research.md` R5);
 - they are **not build targets**. The driver `FATAL_ERROR`s on any non-zero build exit
   (`tests/consumer/run_consumer_witness.cmake:100-108`), so a must-fail target would red the whole witness.
-  They are `try_compile` calls asserted **FALSE** at consumer-**configure** time; a TRUE result raises
+  They are `try_compile` calls asserted **TRUE** (`__has_include` + a unique-token `#error`; polarity inverted at Gate B r2) at consumer-**configure** time; a TRUE result raises
   `FATAL_ERROR` and the driver reports it as *"consumer configure failed"* (`:91-92`);
 - a passing positive assertion **never** establishes a negative one, because `<fix/c_api.h>` resolves from
   either root under the additive layout. Evidence is the **pair**, from the same configured consumer.
@@ -350,8 +350,8 @@ reference an entry point reaching the session/dictionary closure (`fixpp_dict_lo
 > run."* An earlier revision of this section asserted the opposite two lines after citing `:71-74` correctly.
 >
 > Consequences for the verifier: the FR-009 reference must pull the entry point's object out of the archive at
-> **link** time — a namespace-scope, non-`static`, non-`const` pointer initialised with its address, or a call;
-> **not** an address assigned to an unused local, which the optimiser may drop together with its relocation;
+> **link** time, and it must be a **CALL** from a non-foldable branch (Gate B r2 P2 #7) — a namespace-scope
+> pointer is discardable under `--gc-sections`/LTO, and an address in an unused local weaker still;
 > **no runtime behaviour is asserted**; and a verify record that says
 > "the C-ABI witness ran and its output was asserted" is recording a run that never happened.
 

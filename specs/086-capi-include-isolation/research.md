@@ -176,7 +176,7 @@ that the shipped witness does.
 
 ## R5 — ⚠️ The negative witness MUST be compile-only **and cannot be a build target**
 
-**Decision: the compile-must-fail assertion is a configure-time `try_compile` asserted FALSE, never an
+**Decision: the compile-must-fail assertion is a configure-time `try_compile` asserted **TRUE** (`__has_include` + a unique-token `#error`; polarity inverted at Gate B r2), never an
 executable and never a build target.**
 
 > **Amended at Gate A round 1.** The original decision read "an `OBJECT` library (or `try_compile`)". The
@@ -229,8 +229,8 @@ isolation probes are **different kinds of test** and must stay separate.
 > else, exactly as `tests/consumer/CMakeLists.txt:83` states: *"Building and linking IS the assertion — it need
 > not run."* FR-009's strengthening therefore rests on the **link** stage: the added reference must pull the
 > entry point's object out of the archive when `consumer_capi_witness` is linked — a namespace-scope,
-> non-`static`, non-`const` pointer initialised with its address, or a call; an address assigned to an unused
-> local can be optimised away together with its relocation and would restore the gap silently —
+> **CALL** from a branch the compiler cannot fold (Gate B r2 P2 #7 — a namespace-scope pointer is discardable
+> under `--gc-sections`/LTO, and an unused local weaker still) —
 > and **no runtime behaviour is asserted**. The "no call whose runtime failure would red it" proviso was
 > derived from the false premise; it is over-restrictive rather than wrong, and is dropped.
 
@@ -343,7 +343,7 @@ real tree.)*
 2. **It is genuinely compile-only.** `CMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY` means neither probe source
    has a `main()` and both compiled with no link stage — so R5's confound (a link failure read as an include
    failure) **cannot recur** in this shape.
-3. **The pair discriminates.** The OFF row shows the negative probe returning TRUE against the *unfixed*
+3. **The pair discriminates.** The OFF row shows the negative probe reporting the header REACHABLE against the *unfixed*
    package, so the assertion goes red for the right reason rather than for any reason. This is design-time
    demonstrated-red evidence for the **mechanism**, parallel to R4 row 1.
 
@@ -447,7 +447,7 @@ file(GENERATE OUTPUT "${CMAKE_BINARY_DIR}/probe_incs.txt"
 | D-1 | `fixpp_capi` links `fixpp_capi_objects` **`PRIVATE`**, gaining its own restricted `INSTALL_INTERFACE` | R1, R3 |
 | D-2 | `src/service/CMakeLists.txt:26`'s whole-tree `INSTALL_INTERFACE` is **replaced** by the service-iface root | R3, spec FR-011d |
 | D-3 | Three installed roots, **strictly additive**; no install rule gains an exclusion | R6 |
-| D-4 | Isolation probes are **compile-only** and separate from the linking `consumer_capi_witness`: ✅ cells are `OBJECT` targets; ❌ cells are configure-time `try_compile` asserted FALSE, because a must-fail *target* would red the whole witness | R5, **R9** (mechanism measured) |
+| D-4 | Isolation probes are **compile-only** and separate from the linking `consumer_capi_witness`: ✅ cells are `OBJECT` targets; ❌ cells are configure-time `try_compile` asserted **TRUE** (`__has_include` + a unique-token `#error`; polarity inverted at Gate B r2), because a must-fail *target* would red the whole witness | R5, **R9** (mechanism measured) |
 | D-5 | `fixpp_capi_objects`, `fixpp_capi_shared` and the export-set membership are **unchanged** — membership held by explicit enumeration at `CMakeLists.txt:596`, not by closure inference | R2, R7 |
 | D-6 | `BUILD_INTERFACE` permissive, `INSTALL_INTERFACE` restricted — in-tree unaffected | R8 |
 

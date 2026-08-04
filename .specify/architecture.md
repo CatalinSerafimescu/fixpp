@@ -524,7 +524,7 @@ include/
 > Article IV §2.
 >
 > The compile-fails witness 084 asked for exists and is the load-bearing part. It is **three**
-> configure-time `try_compile` calls asserted FALSE — not build targets, because
+> configure-time `try_compile` calls asserted **TRUE** (`__has_include` + unique-token `#error`; inverted at Gate B r2) — not build targets, because
 > `tests/consumer/run_consumer_witness.cmake:107` raises `FATAL_ERROR` on any non-zero build exit, so a
 > must-fail target would red the whole witness. Each was **observed red with its own isolation reverted**
 > and green with it restored.

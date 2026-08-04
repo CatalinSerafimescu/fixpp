@@ -61,12 +61,16 @@
 //
 // Direct calls are safe here for the reason stated below: this TU is built and
 // linked but NEVER executed — the driver runs only ${_sub_build}/consumer_witness
-// — so no runtime behaviour is depended on or asserted. The guard is also false
-// for every invocation the harness could make (it needs 4+ argv entries), so even
-// an accidental execution would not enter it.
+// — so no runtime behaviour is depended on or asserted. The guard needs 4+ argv
+// entries, so ORDINARY zero-argument execution skips it. It is NOT true that
+// every accidental execution skips it: an invocation with three or more arguments
+// does enter the branch. Stated precisely because the earlier wording overclaimed
+// (Gate B r2 P3 #6); it does not weaken the link gate either way, since the
+// harness never executes this binary.
 
 int main(int argc, char** argv) {
-    // NEVER TRUE in practice; the compiler cannot know that, which is the point.
+    // False for any invocation the harness makes; the compiler cannot know that,
+    // which is exactly what makes the calls below non-elidable.
     if (argc > 3) {
         fixpp_dict_t* d = nullptr;
         (void)fixpp_dict_load_from_xml(argv[1], &d);

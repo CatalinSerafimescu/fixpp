@@ -51,32 +51,31 @@ set_tests_properties(fixpp::packaging::clean-env PROPERTIES
 # asserting the wrong value. The test derives the count from the SHIPPED
 # fixppTargets.cmake instead, which also makes it a real cross-check.
 
+# 086 / Gate B r2 P1 #1 — registered through an OUTER DRIVER, and NOT with
+# PASS_REGULAR_EXPRESSION.
+#
+# Two things must both hold: the witness must exit 0, AND it must have executed
+# the 086 block (which is otherwise deletable without anything noticing).
+# `PASS_REGULAR_EXPRESSION` cannot express that conjunction — CTest IGNORES the
+# exit code when the regex matches. Using it here, as round 1 did, made this gate
+# strictly WEAKER: the witness checks DEB, RPM and TGZ in sequence, so a token
+# printed for DEB masked a FATAL_ERROR raised for RPM or TGZ.
+#
+# run_package_contents_gate.cmake asserts the exit code FIRST, then the token.
 add_test(
   NAME fixpp::packaging::contents
   COMMAND "${CMAKE_COMMAND}"
+    "-DFIXPP_WITNESS_SCRIPT=${CMAKE_CURRENT_SOURCE_DIR}/run_package_contents_witness.cmake"
     "-DFIXPP_MAIN_BUILD_DIR=${CMAKE_BINARY_DIR}"
     "-DFIXPP_WORK_DIR=${_fixpp_pkg_work}/contents"
     "-DFIXPP_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
     "-DFIXPP_PROJECT_VERSION=${PROJECT_VERSION}"
-    -P "${CMAKE_CURRENT_SOURCE_DIR}/run_package_contents_witness.cmake"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/run_package_contents_gate.cmake"
 )
 set_tests_properties(fixpp::packaging::contents PROPERTIES
   RUN_SERIAL TRUE
   TIMEOUT 900
   LABELS "packaging"
-  # 086 / Gate B r1 P1 #4 — REQUIRE the feature's own gates to have EXECUTED.
-  #
-  # Every 086 assertion lives inside run_package_contents_witness.cmake, and
-  # deleting that entire block left this test green: the inherited 084 assertions
-  # still passed and the script still exited 0. Nothing OUTSIDE the block required
-  # it to have run, which is the same defect class as a gate that cannot fail.
-  #
-  # The witness emits this token only after both duplicated-root pairs and both
-  # containment roots have been checked, with the counts asserted as exactly 2 —
-  # so the token cannot be printed by a block that ran partially. ctest fails the
-  # test when the token is absent, making deletion a RED rather than a silent
-  # reduction in coverage.
-  PASS_REGULAR_EXPRESSION "086: FR-010/FR-010a asserted over 2 root pairs and 2 isolated roots"
 )
 
 # ── T026 (FR-003/FR-007/FR-008): installed imported names map to real aliases ─
