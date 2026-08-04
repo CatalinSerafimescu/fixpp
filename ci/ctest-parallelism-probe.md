@@ -1,23 +1,42 @@
 # `ctest` parallelism — single-lane probe (TSan)
 
-**Status:** PROBE, **first measurement in — green**. `linux-clang-tsan` only. Do **not** copy
-`execution.jobs` to any other test preset yet: acceptance criteria 1 and 4 below are still unmet
-(one run, and no memory figure captured).
+**Status:** PROBE, **two measurements in — both green**. `linux-clang-tsan` only. Do **not** copy
+`execution.jobs` to any other test preset yet: acceptance criterion **4** (peak memory) is still
+unmet.
 
-## MEASURED — run `30881578522`, `3c4a030a`, 2026-08-04
+## MEASURED — 2026-08-04
+
+Two independent runs, both on `e3d3cecb`/`3c4a030a`: `30881578522` and `30885760893`.
 
 ```
-100% tests passed, 0 tests failed out of 346
-Total Test time (real) = 1935.04 sec
-346/346 Test #270: log_file_fsync ......... Passed    1.42 sec
+100% tests passed, 0 tests failed out of 346          (both runs)
+Total Test time (real) = 1935.04 sec                  (run 1)
+346/346 Test #270: log_file_fsync ... Passed 1.42 sec  (both runs — last, alone, identical)
 ```
 
-| | seconds |
+| | value |
 |---|---:|
-| baseline (serial), 3 runs on `main` | 3356 / 3300 / 3302 — mean **3319** |
-| **measured, `jobs=2`** | **1935** (`Test` step 1937) |
-| saving | **1384 s ≈ 23 min, −41.7%** |
-| modelled ideal lower bound | 1845 — measured is 4.9% above it |
+| baseline (serial), 3 runs on `main` | 3356 / 3300 / 3302 — mean **3319**, range/mean **1.69%** |
+| **measured, `jobs=2`** | 1935 / 1806 — mean **1871**, range/mean **6.90%** |
+| saving | **1449 s ≈ 24.1 min, −43.6%** |
+| modelled ideal lower bound | 1845 — the two-run mean is **+1.4%** above it |
+
+### Acceptance status
+
+| # | criterion | status |
+|---|---|---|
+| 1 | materially lower over more than one run | **MET** — 1935 and 1806, both far below the 3300–3356 band |
+| 2 | no failures, no `exit 143` / OOM | **MET** — 346/346 both runs |
+| 3 | no previously-stable test turns intermittent | **MET so far** — identical 346 count, zero failures, on two runs |
+| 4 | peak RSS / cgroup `memory.peak` captured | **UNMET** — still not measured |
+
+### A side effect worth recording
+
+Run-to-run variance on this lane rose from **1.69% → 6.90%** (range/mean). That is expected —
+makespan now depends on how tests happen to pack rather than on a fixed serial sum — but it has a
+consequence: **this lane is a noticeably noisier baseline for any future A/B measurement.** The
+1.7% stability that made TSan the right lane to probe *with* is partly spent by the probe itself.
+Anything later that needs a tight TSan baseline should account for that, or use more runs.
 
 Three things this establishes beyond the headline:
 
