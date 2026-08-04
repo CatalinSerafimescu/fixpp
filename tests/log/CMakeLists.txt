@@ -94,13 +94,21 @@ target_link_libraries(log_file_fsync_test PRIVATE
   GTest::gtest_main
 )
 add_test(NAME log_file_fsync COMMAND log_file_fsync_test)
-# Gate B PR #227 F-1: this test decides pass/fail from 40 ms (enqueue-does-not-
-# block, :211) and 100 ms (flush-returns-before-a-500 ms-fsync, :255) wall-clock
-# ceilings — its own comment concedes the 100 ms is "3x the flush_deadline for OS
-# scheduling jitter". Under `ctest --parallel` a correct implementation can be
-# descheduled past either ceiling behind a CPU-heavy co-runner, reporting an
-# I/O-blocking regression that never happened. RUN_SERIAL costs 1.42 s (its whole
-# runtime, measured on the TSan lane) and is a no-op on every serial lane.
+# Gate B PR #227 F-1: this test decides pass/fail from four small wall-clock
+# ceilings, and carries the tightest absolute slack anywhere in the suite:
+#   :211  enqueue of 10 records          < 40 ms
+#   :255  flush(10 ms) under a 500 ms fsync < 100 ms
+#   :274  close() after a 500 ms fsync   < 700 ms  -> 200 ms slack
+#   :364  close() after an 800 ms stall  < 1000 ms -> 200 ms slack
+# Under `ctest --parallel` a correct implementation can be descheduled past any
+# of these behind a CPU-heavy co-runner, reporting an I/O-blocking regression
+# that never happened. RUN_SERIAL costs 1.42 s (its whole runtime, measured on
+# the TSan lane) and is a no-op on every serial lane — CMake defines it as "do
+# not run this test in parallel with any other test", which is isolation from
+# CTest's own scheduler, not from unrelated machine load.
+# Unrelated pre-existing nit spotted while doing this, deliberately NOT touched:
+# the comment at :234 says the 100 ms bound is "3x the flush_deadline", but the
+# constants at :233/:235 are 10 ms and 100 ms, i.e. 10x.
 # The deeper fix is to make the assertions scheduler-independent — assert enqueue
 # completes while the mocked fsync is still blocked, rather than comparing a small
 # wall-clock number — but that is a test-semantics change, not a CI probe's job.

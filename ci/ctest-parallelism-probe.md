@@ -63,16 +63,36 @@ for this suite, and shadow *address space* is not resident memory. The probe mus
 it rather than assume it — see acceptance criterion 4. What makes the caution non-theoretical is
 that this repo has previously read an OOM kill (`exit 143`) as a flake.
 
-The CPU side is better evidenced. Several session/transport/interop tests assert wall-clock
-deadlines, and oversubscription is exactly the condition under which a real lost-wake was once
-dismissed as an "oversubscription flake". A Gate B sweep of the whole suite (PR #227 round 1) found
-the ceilings to be: `log_file_fsync` 40 ms / 100 ms, plain-transport close 500 ms, C-API close 1 s,
-interop stop watchdogs ~3 s. Only `log_file_fsync`'s are tight enough that a descheduled-but-correct
-implementation can breach them, so it is pinned `RUN_SERIAL` in `tests/log/CMakeLists.txt` (1.42 s
-— its entire runtime). The rest carry 5–50× headroom. The same sweep found **no** cross-test fixed
-path, fixed listening port, Unix socket, or process-global env/cwd writer; every listener binds
-`127.0.0.1:0`, and the only test that mutates the source tree is already `RUN_SERIAL`, so it cannot
-overlap `codegen-build-graph-check`'s repo-global `git status --porcelain` assertion.
+The CPU side is better evidenced. Many tests assert wall-clock bounds, and oversubscription is
+exactly the condition under which a real lost-wake was once dismissed as an "oversubscription
+flake". Two Gate B sweeps (PR #227 rounds 1–2) inventoried them. **This list is not exhaustive** —
+the suite has dozens of 2–12 s completion watchdogs whose normal path is sub-second or structurally
+driven, and enumerating every one is not the useful thing. What matters is the ratio between the
+asserted bound and the *intended* path:
+
+| Test | ceiling | intended path | slack |
+|---|---|---|---|
+| `log_file_fsync` enqueue (`test_file_sink_async_fsync.cpp:211`) | 40 ms | ~0 | tight, no lower bound |
+| `log_file_fsync` flush (`:255`) | 100 ms | 10 ms deadline | 10× |
+| `log_file_fsync` close (`:274`) | 700 ms | 500 ms injected fsync | **200 ms** |
+| `log_file_fsync` close (`:364`) | 1000 ms | 800 ms injected stall | **200 ms** |
+| `otel_exporters` teardown (`tests/otel/test_engine_close_teardown.cpp:311`) | 400 ms | ~50 ms | 8× |
+| plain-transport close (`tests/transport/test_asio_plain_transport_config.cpp:242`) | 500 ms | immediate (wrong path is 2 s) | wide |
+| C-API close (`tests/capi/lifecycle_test.cpp:~310`) | 1 s | immediate | wide |
+| session / interop stop watchdogs | 1.5–5 s | prompt | wide |
+
+The four smallest margins in the whole suite are all inside `log_file_fsync`, and two of them are
+an absolute 200 ms rather than a multiple — which is why that one test is pinned `RUN_SERIAL` in
+`tests/log/CMakeLists.txt` (1.42 s, its entire runtime). Everything else has enough headroom that
+2× CPU contention should not reach it; that expectation is what acceptance criterion 3 exists to
+falsify.
+
+The same sweeps found **no** cross-test fixed path, fixed listening port, Unix socket, or
+process-global env/cwd writer; every listener binds `127.0.0.1:0`; `codegen_determinism_test` uses
+PID-keyed `TempDir`s; and the only test that mutates the source tree is already `RUN_SERIAL`, so it
+cannot overlap `codegen-build-graph-check`'s repo-global `git status --porcelain` assertion. No
+registered CTest `TIMEOUT` is tight enough for a 2× slowdown to trip it — the closest are
+`wire_dict_tests` (600 s registered vs 220 s measured) and `delimiter_census` (600 s vs 112 s).
 
 ## Acceptance for rolling this out further
 
