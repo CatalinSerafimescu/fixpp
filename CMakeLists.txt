@@ -611,7 +611,10 @@ set(FIXPP_EXPORT_TARGETS
 # five are NOT one class:
 #   * FOUR are exported so a consumer can link them BY NAME: fixpp::capi for a
 #     C-ABI consumer who deliberately does not want the C++ umbrella (Article IV
-#     §2 / architecture.md:509 -- linking both is REJECTED by tools/check_layers.py),
+#     §2 / architecture.md §7.4 -- linking both is rejected by CONVENTION and by
+#     review, NOT by tools/check_layers.py: that script is a source #include-edge
+#     lint over src/** and bindings/** (:2-7, :173-176) which reads no CMake link
+#     interface at all. Corrected by 086/FR-014),
 #     and fixpp::config_toml exactly as include/fixpp/config/toml_config_loader.hpp
 #     instructs.
 #   * The FIFTH, fixpp_log_otlp, is CLOSURE-ONLY: it is in the export set solely

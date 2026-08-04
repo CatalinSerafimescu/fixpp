@@ -70,7 +70,15 @@ target_link_libraries(consumer_witness PRIVATE fixpp::fixpp)
 #
 # ⚠️ It MUST be a separate target, never merged with consumer_witness above:
 # linking fixpp::capi and fixpp::fixpp into one target is the combination
-# Article IV §2 / architecture.md:509 rejects, and tools/check_layers.py enforces.
+# Article IV §2 / architecture.md §7.4 rejects.
+#
+# NOTHING MECHANICALLY ENFORCES THAT (corrected by 086/FR-014 — this comment used
+# to say tools/check_layers.py did). That script is a source #include-edge lint
+# over src/** and bindings/** (:2-7, :173-176); it parses no CMake and reads no
+# link interface, and an installed package cannot observe which targets a
+# consumer links together anyway. Keeping these two witnesses separate IS the
+# convention being upheld, which is why the separation is load-bearing here
+# rather than stylistic.
 #
 # Building and linking IS the assertion — it need not run. The existing harness
 # registers ONE add_test that configures and builds this whole sub-project, so
