@@ -9,7 +9,8 @@
 - [x] No implementation details (languages, frameworks, APIs)
 - [x] Focused on user value and business needs
 - [x] Written for non-technical stakeholders
-- [x] All mandatory sections completed
+- [x] All mandatory sections completed *(see Notes — this tick was **false** at Gate A round 1, `## Normative
+      References` was missing; closed there)*
 
 ## Requirement Completeness
 
@@ -61,3 +62,32 @@
 
 - **Anti-vacuity is a first-class requirement here**, not a review concern: US2 and FR-005 exist because the
   naive form of this gate — a fourth empty-vs-empty comparison — is precisely why 086 declined to write it.
+
+- **"All mandatory sections completed" was FALSE at Gate A round 1, and is now true.** `spec.md` had no
+  `## Normative References` section, which `[const §VI.5]` (`.specify/constitution.md:164`) makes a
+  **presence** obligation on every `/specify` artifact — so the tick above was unearned. The section was added
+  at Gate A round 1, discharged the way 086 discharged it
+  (`specs/086-capi-include-isolation/spec.md:655-662`): the FIX-normative set is empty — verified,
+  `grep -c "086\|087" spec/feature-catalogue.md` → **0**, so `[const §VI.4]`'s coverage-index obligation is
+  not engaged — and the constitutional and architectural authorities that do govern are named instead. The
+  tick is retained because the obligation is now met; it is recorded here rather than silently corrected,
+  exactly as 085 did when it acquired the same section at this same gate
+  (`specs/085-fold-flat-cap-loop/spec.md:223-225`).
+
+- **Two requirements were added at Gate A round 1**, so this checklist's scope grew: **FR-014** (assert the
+  `consumer` label's registration count in CI — the last vacuity path, which no demonstration inside the gate
+  can reach) and **SC-008** (its outcome). Both are testable and measurable as the boxes above require;
+  neither adds a registered test, so FR-013 is unaffected.
+
+- **No requirement was added at Gate A round 2, but two had their scope made explicit** — recorded here
+  because "Scope is clearly bounded" and "Requirements are testable and unambiguous" are ticked above, and in
+  both cases the round-1 wording was read narrower than it said:
+  - **FR-014 / SC-008** were unqualified by tier, yet `plan.md` prescribed an edit to `tier1.yml` only. The
+    witness runs on every lane of all three tiers and `FIXPP_BUILD_CODEGEN_TOOL` is overridden nowhere, so
+    the requirement now names `tier1.yml`, `tier2.yml` and `tier3-libcxx.yml` outright (contract §6a).
+  - **FR-011**'s amendment set grew from five artifacts to **seven**. The two additions are hits of §4a's own
+    exhaustiveness grep that the table had omitted — both in files 087 already edits. The requirement itself
+    is unchanged: it delegates the list to §4a, which is why extending §4a was sufficient.
+
+  The ticks are retained: neither correction changed what the requirements assert, only where the bundle said
+  they reach.

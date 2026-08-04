@@ -207,12 +207,28 @@ explaining membership, and that no code path recomputes it from the observation.
   If FR-009's measurement shows the mechanism works everywhere, this requirement is discharged by recording
   that result. *(Decided up front because 086 did not: a mechanism measured only on Linux/clang was written
   into a contract, cleared six Gate B rounds, and then failed on `windows-msvc-debug`.)*
-- **FR-011**: 086's contract clause **C-3** and the artifacts that record its scope limit
-  (`spec.md` FR-009a, `checklists/abi.md` CHK006) MUST be updated to reflect the property becoming bound.
+- **FR-011**: 086's contract clause **C-3** and every other artifact that records its scope limit MUST be
+  updated to reflect the property becoming bound. **The amendment set is defined once, as repository-relative
+  paths with clause identifiers, in `contracts/system-include-interface.md` §4a** — **seven** artifacts,
+  including the operational source comment at `src/capi/CMakeLists.txt:63-67`, the two consumer-harness scope
+  records at `tests/consumer/CMakeLists.txt:205-218` and `tests/consumer/run_consumer_witness.cmake:171-180`
+  *(added at Gate A round 2 — they are hits of §4a's own exhaustiveness grep that the table omitted)*, and a
+  **provenance-preserving** append to 086's historical measurement record. This requirement does not restate
+  the list; §4a is the authority, and a site discovered during the sweep is added there first.
 - **FR-012**: The existing three-property comparison MUST continue to pass unchanged; this feature adds a leg
   and MUST NOT weaken, replace, or re-scope the existing one.
 - **FR-013**: The consumer witness MUST NOT gain a new registered test; the assertion rides the existing
   `fixpp::consumer::install-witness` registration, consistent with 086. *(Assumption — see Assumptions.)*
+- **FR-014**: CI MUST assert the **registration count** of the `consumer` label before running it, and fail
+  the lane if it is not the expected number. `ctest` exits 0 when a label filter matches nothing, and the
+  witness registers only under `FIXPP_BUILD_CODEGEN_TOOL`; without this assertion a lane on which that option
+  goes OFF reports green having run the 087 gate zero times — the last vacuity path, and the one no
+  demonstration in the gate itself can reach. This obligation is **unqualified by tier**: it applies to
+  **every** workflow that runs the witness — `tier1.yml`, `tier2.yml` and `tier3-libcxx.yml` — because
+  `FIXPP_BUILD_CODEGEN_TOOL` defaults ON and is overridden nowhere, so the hazard is latent on every lane
+  equally. Modelled on the assertion `tier1.yml` and `tier2.yml` already carry for the `packaging` label.
+  Contract §6, scoped in §6a. *(Added at Gate A round 1; scope made explicit at round 2, where the plan was
+  found to prescribe tier 1 alone.)*
 
 ### Key Entities
 
@@ -247,14 +263,23 @@ explaining membership, and that no code path recomputes it from the observation.
 - **SC-006**: The observing mechanism is confirmed to produce a **non-empty** observation on **both** Linux
   and MSVC-under-Conan, recorded per platform, before any artifact prescribes it.
 - **SC-007**: Every artifact that previously recorded C-3 as unbound is updated; no document still describes
-  the property as an open scope limit.
+  the property as an open scope limit. Discharged against the enumerated amendment set in
+  `contracts/system-include-interface.md` §4a, which includes the historical research record (amended by
+  **appending provenance**, never by rewriting) and the operational source comment — so the universal wording
+  is not silently narrowed to "current normative artifacts".
+- **SC-008**: A lane on which `fixpp::consumer::install-witness` fails to register **fails**, rather than
+  reporting green on zero selected tests: the `consumer` label's registration count is asserted before the
+  test step runs, on **every** workflow that runs the witness — tier 1, tier 2 and tier 3 (FR-014,
+  contract §6/§6a).
 
 ---
 
 ## Assumptions
 
 - **No new ctest registration.** The assertion extends the existing `fixpp::consumer::install-witness`, as
-  086's probes do. This keeps the zero-selection hazard (CHK063, inherited from 084) from widening.
+  086's probes do. This keeps the zero-selection hazard (CHK063, inherited from 084) from widening — and
+  FR-014 **narrows** it for the `consumer` label, by asserting the registration count in CI before the run.
+  Asserting a count is not a registration, so FR-013 is unaffected.
 - **Scope is both installed consumer targets** — `fixpp::capi` **and** `fixpp::service` (clarified
   2026-08-04). No longer an assumption: 086 measured that the service leg is *not* implied by the capi leg,
   since its `$<INSTALL_INTERFACE:>` is independently declared. Each leg gets its own probe, expectation and
@@ -326,3 +351,37 @@ explaining membership, and that no code path recomputes it from the observation.
   include behaviour is unchanged and out of scope, as it was for 086.
 - Re-opening the three properties already covered by FR-009a(ii).
 - Any change to the C-ABI header surface, symbol set, or version script.
+
+---
+
+## Normative References
+
+*(Added at Gate A round 1. Its absence was a direct `[const §VI.5]` violation — the same one 085 recorded at
+this gate — and made `checklists/requirements.md`'s "All mandatory sections completed" tick false; see that
+file's Note.)*
+
+Per `[const §VI.5]` (`.specify/constitution.md:164`), the exact entries that inform this spec. **This feature
+has no FIX-normative content and introduces no OFFICIAL catalogue rows** — it asserts a build-system property
+of the installed package and changes nothing about message semantics, encoding or validation, so no
+`[DocAbbrev §X.Y.Z]` FIX section is engaged and `[const §VI.4]`'s coverage-index obligation is not triggered.
+*(Verified: `grep -c "086\|087" spec/feature-catalogue.md` → **0**.)* The governing authorities are
+constitutional, architectural and inherited, and they are listed here because §5 is a **presence** obligation:
+the honest discharge is to record that the FIX set is empty and name what does govern — the form 086 used
+(`specs/086-capi-include-isolation/spec.md:655-662`).
+
+- **`[const §IV.2]`** (`.specify/constitution.md:141`) — the C ABI is the AGPL/commercial legal-isolation
+  boundary. This is the article that makes an unenforced C-ABI include boundary a defect rather than a
+  tidiness concern, and it is why the fourth withheld usage requirement is worth binding at all.
+- **`[const §VI.5]`** (`.specify/constitution.md:164`) — the presence obligation this section discharges.
+- **`[const §X.6]`** (`.specify/constitution.md:225`) — ABI-affecting features trigger all four mandatory
+  controls (`/clarify`, `/analyze`, Codex Gate A, user `/plan` sign-off). Tracked in `plan.md`'s Constitution
+  Check; the property asserted here *is* the C-ABI consumption boundary, so 086's ABI-adjacent disposition is
+  matched.
+- **`[const §XVI.3]`** — `/clarify` is mandatory and was run (3 questions, all resolved; see Clarifications).
+- **`.specify/architecture.md` §7.4** (`:498`, "CMake target layout") — the exported-target layout whose
+  installed interface this feature measures.
+- **`specs/086-capi-include-isolation/contracts/include-interface.md` C-3** (`:122-149`) — the inherited
+  scope limit this feature closes; the amendment set it belongs to is enumerated at
+  `contracts/system-include-interface.md` §4a.
+
+No FIX-normative section is cited because none applies.
