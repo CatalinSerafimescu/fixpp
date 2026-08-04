@@ -496,6 +496,8 @@ foreach(_artifact IN LISTS _artifacts)
   # and the Windows ZIP. A `usr/`-anchored glob would find nothing in the ZIP and
   # report "the package carries no C-ABI headers" — a defect claim about the
   # product manufactured by the test.
+  set(_086_pairs_checked 0)
+  set(_086_roots_checked 0)
   foreach(_dup_pair
       "include/fix/|include/capi/fix/"
       "include/fixpp/service/|include/service-iface/fixpp/service/")
@@ -537,7 +539,10 @@ foreach(_artifact IN LISTS _artifacts)
         "set comparison below would hold vacuously. Either the install(DIRECTORY) "
         "rule for this root regressed, or a new PATTERN … EXCLUDE on CMakeLists.txt's "
         "include/ rule removed the subtree.\n  observed tails: ${_orig_tails}")
-    elseif(NOT _orig_tails STREQUAL _iso_tails)
+    else()
+      math(EXPR _086_pairs_checked "${_086_pairs_checked} + 1")
+    endif()
+    if(NOT _orig_tails STREQUAL "" AND NOT _orig_tails STREQUAL _iso_tails)
       string(REPLACE ";" "\n    " _o_pretty "${_orig_tails}")
       string(REPLACE ";" "\n    " _i_pretty "${_iso_tails}")
       message(FATAL_ERROR
@@ -592,6 +597,7 @@ foreach(_artifact IN LISTS _artifacts)
         list(APPEND _uncontained "${_f}")
       endif()
     endforeach()
+    math(EXPR _086_roots_checked "${_086_roots_checked} + 1")
   endforeach()
   if(NOT _uncontained STREQUAL "")
     string(REPLACE ";" "\n  " _uncontained_pretty "${_uncontained}")
@@ -599,6 +605,26 @@ foreach(_artifact IN LISTS _artifacts)
       "086 FR-010a/C-5: ${_aname} — an isolated include root carries paths outside its "
       "declared subtree, so it is not isolated:\n  ${_uncontained_pretty}")
   endif()
+
+  # ── The COMPLETION TOKEN (Gate B r1 P1 #4) ──────────────────────────────────
+  # `tests/packaging/CMakeLists.txt` requires this exact line via
+  # PASS_REGULAR_EXPRESSION, so deleting the 086 block above turns this test RED
+  # instead of silently reducing its coverage. Before this existed, the whole
+  # block could be removed and `fixpp::packaging::contents` stayed green on the
+  # inherited 084 assertions alone.
+  #
+  # The COUNTS are asserted, not just printed: a block that ran partially — one
+  # root pair compared, one containment root walked — cannot emit the token,
+  # because the numbers are checked first and the token names them.
+  if(NOT _086_pairs_checked EQUAL 2 OR NOT _086_roots_checked EQUAL 2)
+    message(FATAL_ERROR
+      "086: the FR-010/FR-010a block did not run to completion for ${_aname} — "
+      "compared ${_086_pairs_checked} root pair(s) and walked ${_086_roots_checked} "
+      "isolated root(s), expected 2 and 2. Either a root was dropped from the loop "
+      "lists or an early return skipped part of the block.")
+  endif()
+  message(STATUS
+    "086: FR-010/FR-010a asserted over 2 root pairs and 2 isolated roots (${_aname})")
 
   # MUST BE ABSENT — SET EQUALITY over the exact 7-pattern denylist, never a
   # subset. A check written from the 078 five-pattern tail would pass a package

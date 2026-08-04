@@ -6,16 +6,26 @@
 // `fixpp::service` column). [arch §8] — the service consumes the engine through
 // the C ABI only.
 //
-// ⚠️ NOT A BUILD TARGET — the SOURCE of a configure-time try_compile() asserted
-// FALSE (contracts §4a; run_consumer_witness.cmake:107 FATAL_ERRORs on any
-// non-zero build exit).
+// This cell has its OWN demonstrated-red obligation and its own revert: the
+// $<INSTALL_INTERFACE:...> line in src/service/CMakeLists.txt ALONE -- cited by
+// CONSTRUCT, not by line, because this is an INSTRUCTION a future verifier acts
+// on and a stale number would have them revert a comment and observe nothing
+// (FR-011e). The C-ABI revert reds this probe too -- fixpp_service links
+// fixpp_capi -- so it cannot stand in for the service demonstration.
 //
-// This cell has its OWN demonstrated-red obligation and its own revert
-// (the $<INSTALL_INTERFACE:...> line in src/service/CMakeLists.txt alone --
-// cited by CONSTRUCT, not by line: this is an INSTRUCTION a future verifier acts
-// on, and a stale number would have them revert a comment and observe nothing.
-// FR-011e.) The C-ABI revert reds this
-// probe too — fixpp_service links fixpp_capi — so it cannot stand in for the
-// service demonstration.
+// ⚠️ NOT A BUILD TARGET, and THE POLARITY IS INVERTED ON PURPOSE (Gate B r1 P1 #2).
+// This is the SOURCE of a configure-time try_compile() asserted to COMPILE.
+// `__has_include` tests LOOKUP without parsing the forbidden header:
+//   * not reachable (correct) -> #error skipped, compiles      -> TRUE
+//   * reachable (the defect)  -> #error fires with a UNIQUE token -> FALSE
+//   * anything else broken    -> FALSE, but WITHOUT the token
+// The old form asserted "did not compile", which made a syntax error or a
+// missing third-party path indistinguishable from the isolation working.
+// See probe_capi_negative.cpp for the full rationale.
 
-#include <fixpp/wire/parser.hpp>
+#if __has_include(<fixpp/wire/parser.hpp>)
+#error FIXPP_086_FORBIDDEN_HEADER_REACHABLE
+#endif
+
+int fixpp_086_service_engine_probe();
+int fixpp_086_service_engine_probe() { return 0; }

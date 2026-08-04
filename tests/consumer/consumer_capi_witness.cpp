@@ -44,31 +44,36 @@
 // session/transport/TLS closures, including both deliberate static-archive
 // cycles (wire <-> dictionary, dictionary -> bridge -> dictionary).
 //
-// FORM MATTERS. These are namespace-scope, non-`static`, non-`const` pointers:
-// external linkage means the initializer is a relocation the linker must
-// satisfy, and neither constant-folding nor --gc-sections may discard it. An
-// address assigned to an unused local CAN be optimised away together with its
-// relocation, which would silently restore the gap (Gate A r3 carry-forward #6).
+// FORM MATTERS — and the earlier form was NOT strong enough (Gate B r1, P2 #7).
 //
-// No runtime obligation is taken on. This TU is built and linked but NEVER
-// executed — the driver runs only ${_sub_build}/consumer_witness
-// (run_consumer_witness.cmake:167,190) — so nothing here may depend on, or assert,
-// runtime behaviour. Building and linking IS the assertion.
-// NOLINTBEGIN(cppcoreguidelines-avoid-non-const-global-variables): making these
-// `const` would DEFEAT them. A namespace-scope `const` object has INTERNAL
-// linkage in C++, and an internal-linkage pointer nothing reads is exactly what
-// the optimiser may discard together with its relocation — the failure mode this
-// declaration exists to avoid. External linkage is the property doing the work,
-// and `const` is mutually exclusive with it here without an `extern` that the
-// check would flag anyway. Nothing mutates these; the check cannot see that the
-// non-constness is a linkage consequence rather than a design choice.
-fixpp_error_t (*fixpp_capi_witness_dict_entry)(const char*,
-                                               fixpp_dict_t**) = &fixpp_dict_load_from_xml;
-fixpp_error_t (*fixpp_capi_witness_engine_entry)(fixpp_engine_config_t*, uint16_t, uint16_t,
-                                                 fixpp_engine_t**) = &fixpp_engine_create;
-// NOLINTEND(cppcoreguidelines-avoid-non-const-global-variables)
+// This previously took the two addresses into namespace-scope, non-`static`,
+// non-`const` pointers, on the stated grounds that "neither constant-folding nor
+// --gc-sections may discard it". THAT CLAIM WAS FALSE. External linkage stops
+// ordinary TU-local dead-code elimination, but under `-ffunction-sections
+// -fdata-sections -Wl,--gc-sections`, or whole-program LTO, an unreferenced data
+// section holding those pointers can be discarded — and the executable then links
+// WITHOUT pulling the dictionary/session closure. The gate would have gone hollow
+// under a link-flag change nobody would have associated with it.
+//
+// The references are now CALLS, reached from a branch whose condition the
+// compiler cannot fold (`argc`), so the relocations are unavoidable at link time
+// regardless of section GC or LTO.
+//
+// Direct calls are safe here for the reason stated below: this TU is built and
+// linked but NEVER executed — the driver runs only ${_sub_build}/consumer_witness
+// — so no runtime behaviour is depended on or asserted. The guard is also false
+// for every invocation the harness could make (it needs 4+ argv entries), so even
+// an accidental execution would not enter it.
 
-int main() {
+int main(int argc, char** argv) {
+    // NEVER TRUE in practice; the compiler cannot know that, which is the point.
+    if (argc > 3) {
+        fixpp_dict_t* d = nullptr;
+        (void)fixpp_dict_load_from_xml(argv[1], &d);
+        fixpp_engine_t* e = nullptr;
+        (void)fixpp_engine_create(nullptr, 1, 0, &e);
+    }
+
     const fixpp_version_t v = fixpp_library_version();
 
     // fixpp_strerror is in a different C-ABI translation unit from

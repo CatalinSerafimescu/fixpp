@@ -64,6 +64,19 @@ set_tests_properties(fixpp::packaging::contents PROPERTIES
   RUN_SERIAL TRUE
   TIMEOUT 900
   LABELS "packaging"
+  # 086 / Gate B r1 P1 #4 — REQUIRE the feature's own gates to have EXECUTED.
+  #
+  # Every 086 assertion lives inside run_package_contents_witness.cmake, and
+  # deleting that entire block left this test green: the inherited 084 assertions
+  # still passed and the script still exited 0. Nothing OUTSIDE the block required
+  # it to have run, which is the same defect class as a gate that cannot fail.
+  #
+  # The witness emits this token only after both duplicated-root pairs and both
+  # containment roots have been checked, with the counts asserted as exactly 2 —
+  # so the token cannot be printed by a block that ran partially. ctest fails the
+  # test when the token is absent, making deletion a RED rather than a silent
+  # reduction in coverage.
+  PASS_REGULAR_EXPRESSION "086: FR-010/FR-010a asserted over 2 root pairs and 2 isolated roots"
 )
 
 # ── T026 (FR-003/FR-007/FR-008): installed imported names map to real aliases ─

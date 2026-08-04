@@ -124,6 +124,20 @@ root of its own.
   on**, except for a set enumerated and recorded in advance. `$<LINK_ONLY:>` withholds
   `INTERFACE_COMPILE_DEFINITIONS`, `INTERFACE_COMPILE_OPTIONS`, `INTERFACE_COMPILE_FEATURES` and
   `INTERFACE_SYSTEM_INCLUDE_DIRECTORIES` too.
+
+  > **Which instrument covers which of those four** *(narrowed at Gate B r1, P2 #6 — the previous wording
+  > implied the property compare covered all four, and it covers three)*. FR-009a(ii)'s `file(GENERATE)` +
+  > driver compare asserts `COMPILE_DEFINITIONS`, `COMPILE_OPTIONS` and `COMPILE_FEATURES`. It does **not**
+  > assert system include directories, and adding them would be worse than leaving them out: there is no
+  > documented *collected* `SYSTEM_INCLUDE_DIRECTORIES` target property for a consumer, so the compare would
+  > read empty against empty — an assertion that cannot fail, which is the exact defect class this feature
+  > exists to remove.
+  >
+  > **System include directories are covered by a stronger instrument instead: the §1 reachability matrix.**
+  > The only observable consequence of an `INTERFACE_SYSTEM_INCLUDE_DIRECTORIES` entry propagating to a C-ABI
+  > consumer is that headers under it become **reachable** — and reachability is precisely what the three
+  > `try_compile` ❌ cells assert, against real `#include` lookup rather than against a property string. A
+  > system include path that leaked the engine tree would red `capi->engine-header`.
   **MEASURED at `/speckit-implement`, 2026-08-04 — the withheld set is FOUR definitions, not the two the
   bundle predicted:**
 

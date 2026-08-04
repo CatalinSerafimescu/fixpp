@@ -151,7 +151,24 @@ target_link_libraries(probe_umbrella PRIVATE fixpp::fixpp)
 # cache and never re-runs. The driver wipes the sub-build every run
 # (run_consumer_witness.cmake:46) so it would not bite there, but a hand-driven
 # re-configure after applying the isolation would silently replay a stale TRUE.
+#
+# ── THE PROBE IS ASSERTED TO COMPILE. THAT INVERSION IS THE POINT. ───────────
+# (Gate B r1 P1 #2.) The earlier form asserted try_compile FALSE, which made
+# "did not compile" the entire assertion — so a syntax error, a missing
+# third-party include path, a language-standard mismatch or a future missing
+# transitive dependency all produced FALSE and were INDISTINGUISHABLE from the
+# isolation working. Appending `#error unrelated_failure` to a probe left the
+# witness green.
+#
+# Each probe now uses `__has_include` (lookup without parsing) and fires an
+# `#error` carrying a UNIQUE TOKEN when the forbidden header IS reachable. So:
+#   TRUE                      -> header unreachable. Correct.
+#   FALSE + token in output   -> ISOLATION BREACH. The defect.
+#   FALSE + no token          -> the PROBE ITSELF is broken (toolchain, path,
+#                                standard). Also red, but a different fault.
+# All three outcomes are now distinguishable, and only the first is green.
 set(FIXPP_086_LEAKS "")
+set(FIXPP_086_BROKEN "")
 function(fixpp086_probe_unreachable _label _source _link)
   try_compile(_probe_ok
     SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/${_source}"
@@ -161,17 +178,26 @@ function(fixpp086_probe_unreachable _label _source _link)
     NO_CACHE
     OUTPUT_VARIABLE _probe_out)
   if(_probe_ok)
+    set(_reachable FALSE)
+    message(STATUS "086 probe ok:   ${_label} — ${_source} correctly unreachable from ${_link}")
+  elseif(_probe_out MATCHES "FIXPP_086_FORBIDDEN_HEADER_REACHABLE")
+    set(_reachable TRUE)
     # list(APPEND) on the caller-inherited copy, so an empty start does not yield
     # a leading empty element the way "${FIXPP_086_LEAKS};${_label}" would.
     list(APPEND FIXPP_086_LEAKS "${_label}")
     set(FIXPP_086_LEAKS "${FIXPP_086_LEAKS}" PARENT_SCOPE)
-    # The compiler output is the only thing that says WHY it compiled; without it
-    # diagnosing a leak means re-running the probe by hand.
-    message(STATUS "086 probe LEAK: ${_label} — ${_source} COMPILED against ${_link}\n${_probe_out}")
+    message(STATUS "086 probe LEAK: ${_label} — ${_source} REACHED the forbidden header via ${_link}")
   else()
-    message(STATUS "086 probe ok:   ${_label} — ${_source} correctly unreachable from ${_link}")
+    # NOT a leak, and NOT a pass. Failing closed here is the whole reason the
+    # polarity was inverted: under the old form this landed in the same bucket
+    # as success.
+    set(_reachable BROKEN)
+    list(APPEND FIXPP_086_BROKEN "${_label}")
+    set(FIXPP_086_BROKEN "${FIXPP_086_BROKEN}" PARENT_SCOPE)
+    message(STATUS "086 probe BROKEN: ${_label} — ${_source} failed to compile for a reason "
+                   "UNRELATED to include reachability (no token in output):\n${_probe_out}")
   endif()
-  set(FIXPP_086_PROBE_LOG "${FIXPP_086_PROBE_LOG}${_label}: compiled=${_probe_ok}\n" PARENT_SCOPE)
+  set(FIXPP_086_PROBE_LOG "${FIXPP_086_PROBE_LOG}${_label}: reachable=${_reachable}\n" PARENT_SCOPE)
 
   # The compiler output goes to its OWN file, not into probe-results.txt: that
   # table is machine-read by the driver and must stay one clean line per cell.
@@ -238,6 +264,18 @@ if(FIXPP_086_LEAKS)
     "086 include isolation NOT delivered — these matrix cells are reachable and must not be:\n"
     "  ${_leaks_pretty}\n"
     "See specs/086-capi-include-isolation/contracts/include-interface.md §1.")
+endif()
+
+# FAIL CLOSED on a probe that could not answer. Under the pre-Gate-B polarity this
+# case was silently GREEN — it produced the same FALSE as a working isolation.
+if(FIXPP_086_BROKEN)
+  string(REPLACE ";" "\n  " _broken_pretty "${FIXPP_086_BROKEN}")
+  message(FATAL_ERROR
+    "086: these probes failed to compile for a reason UNRELATED to include "
+    "reachability, so they assert NOTHING about isolation:\n"
+    "  ${_broken_pretty}\n"
+    "Read probe-<cell>.log in the sub-build for the compiler output. This is not "
+    "an isolation failure; it is a broken gate, and it is fatal for that reason.")
 endif()
 
 # ── C-3 leg 3 — effective usage requirements at a real consumer target ───────

@@ -366,8 +366,8 @@ ls /tmp/fixpp-stage-086/lib/objects-*/fixpp_capi_objects/ | wc -l               
 ```
 
 Both expectations are **derived, not remembered**: 18 = the `FIXPP_EXPORT_TARGETS` list
-(`CMakeLists.txt:581-600`, 16 entries) plus `fixpp` appended at `:593` plus `fixpp_log_otlp` appended at
-`:601`; 11 = the translation units listed in `add_library(fixpp_capi_objects OBJECT …)`
+(`CMakeLists.txt:581-600`, 16 entries) plus `fixpp` appended at `:630` plus `fixpp_log_otlp` appended at
+`:638`; 11 = the translation units listed in `add_library(fixpp_capi_objects OBJECT …)`
 (`src/capi/CMakeLists.txt:11-23`), one object each. Re-derive both if either file changes — the 11 here is a
 *TU* count and is unrelated to the 11 C-ABI sub-headers, which it happens to equal.
 

@@ -96,15 +96,37 @@ if(NOT _cfg_rc EQUAL 0)
   message(FATAL_ERROR "consumer configure failed (exit ${_cfg_rc}):\n${_cfg_out}\n${_cfg_err}")
 endif()
 
-# ── 3. Build it ────────────────────────────────────────────────────────────
+# ── 3. Build it — BY NAME, so a deleted gate fails closed ────────────────────
+#
+# 086 / Gate B r1 P1 #3. A bare `cmake --build` builds whatever targets happen to
+# exist, so DELETING the positive probes or `consumer_capi_witness` left this
+# driver perfectly green — there were simply fewer things to build. The ❌ cells
+# had gained a read-back; the ✅ cells and the link-closure witness had no
+# equivalent, and "the gate can be removed without anything noticing" is the same
+# defect class as "the gate cannot fail".
+#
+# Naming them makes their absence a hard error: CMake fails with
+# "No rule to make target" if any is renamed or removed.
+set(_required_targets
+  consumer_witness           # the umbrella witness, run at step 4
+  consumer_capi_witness      # FR-009 transitive-link closure (built + linked, never run)
+  probe_capi_positive        # ✅ all 12 C-ABI headers, C++
+  probe_capi_positive_c      # ✅ all 12 C-ABI headers, C
+  probe_service_positive     # ✅ fixpp::service reaches the plugin header AND the C ABI
+  probe_umbrella             # ✅ the umbrella still reaches everything
+  probe_usage_requirements)  # C-3 leg 3 carrier
 execute_process(
-  COMMAND "${CMAKE_COMMAND}" --build "${_sub_build}"
+  COMMAND "${CMAKE_COMMAND}" --build "${_sub_build}" --target ${_required_targets}
   RESULT_VARIABLE _build_rc
   OUTPUT_VARIABLE _build_out
   ERROR_VARIABLE  _build_err
 )
 if(NOT _build_rc EQUAL 0)
-  message(FATAL_ERROR "consumer build failed (exit ${_build_rc}):\n${_build_out}\n${_build_err}")
+  message(FATAL_ERROR
+    "consumer build failed (exit ${_build_rc}). NOTE: this driver builds the 086 "
+    "witness targets BY NAME (${_required_targets}), so a 'No rule to make target' "
+    "here means a gate was deleted or renamed, not that the code is broken.\n"
+    "${_build_out}\n${_build_err}")
 endif()
 
 # ── 3a. 086 FR-006/FR-007 — read back the NEGATIVE-PROBE table ───────────────
@@ -128,14 +150,15 @@ endif()
 file(READ "${_probe_file}" _probe_txt)
 message(STATUS "086 negative-probe table:\n${_probe_txt}")
 foreach(_cell "capi->engine-header" "capi->service-header" "service->engine-header")
-  if(NOT _probe_txt MATCHES "(^|\n)${_cell}: compiled=FALSE(\n|$)")
+  if(NOT _probe_txt MATCHES "(^|\n)${_cell}: reachable=FALSE(\n|$)")
     message(FATAL_ERROR
-      "086 FR-006: the ❌ cell '${_cell}' is not recorded as compiled=FALSE in "
-      "${_probe_file}. Either the probe was removed, renamed, or it resolved a "
-      "header it must not reach.\nTable was:\n${_probe_txt}")
+      "086 FR-006: the ❌ cell '${_cell}' is not recorded as reachable=FALSE in "
+      "${_probe_file}. Either the probe was removed, renamed, it resolved a header "
+      "it must not reach (reachable=TRUE), or it could not answer at all "
+      "(reachable=BROKEN).\nTable was:\n${_probe_txt}")
   endif()
 endforeach()
-message(STATUS "086 FR-006: OK — all three ❌ cells asserted FALSE")
+message(STATUS "086 FR-006: OK — all three ❌ cells asserted unreachable")
 
 # ── 3b. 086 FR-009a(ii) / C-3 leg 3 — read back the usage-requirement probe ───
 #
