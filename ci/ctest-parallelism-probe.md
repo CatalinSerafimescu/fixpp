@@ -72,10 +72,10 @@ asserted bound and the *intended* path:
 
 | Test | ceiling | intended path | slack |
 |---|---|---|---|
-| `log_file_fsync` enqueue (`test_file_sink_async_fsync.cpp:211`) | 40 ms | ~0 | tight, no lower bound |
-| `log_file_fsync` flush (`:255`) | 100 ms | 10 ms deadline | 10× |
+| `log_file_fsync` enqueue (`test_file_sink_async_fsync.cpp:212`) | 40 ms | ~0 | tight, no lower bound |
+| `log_file_fsync` flush (`:259`) | 100 ms | 10 ms deadline | 10× |
 | `log_file_fsync` close (`:274`) | 700 ms | 500 ms injected fsync | **200 ms** |
-| `log_file_fsync` close (`:364`) | 1000 ms | 800 ms injected stall | **200 ms** |
+| `log_file_fsync` close (`:365`) | 1000 ms | 800 ms injected stall | **200 ms** |
 | `otel_exporters` teardown (`tests/otel/test_engine_close_teardown.cpp:311`) | 400 ms | ~50 ms | 8× |
 | plain-transport close (`tests/transport/test_asio_plain_transport_config.cpp:242`) | 500 ms | immediate (wrong path is 2 s) | wide |
 | C-API close (`tests/capi/lifecycle_test.cpp:~310`) | 1 s | immediate | wide |

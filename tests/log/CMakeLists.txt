@@ -96,10 +96,11 @@ target_link_libraries(log_file_fsync_test PRIVATE
 add_test(NAME log_file_fsync COMMAND log_file_fsync_test)
 # Gate B PR #227 F-1: this test decides pass/fail from four small wall-clock
 # ceilings, and carries the tightest absolute slack anywhere in the suite:
-#   :211  enqueue of 10 records          < 40 ms
-#   :255  flush(10 ms) under a 500 ms fsync < 100 ms
-#   :274  close() after a 500 ms fsync   < 700 ms  -> 200 ms slack
-#   :364  close() after an 800 ms stall  < 1000 ms -> 200 ms slack
+#   :212  enqueue of 10 records             < 40 ms
+#   :259  flush(10 ms) under a 500 ms fsync < 100 ms
+#   :274  close() after a 500 ms fsync      < 700 ms  -> 200 ms slack
+#   :365  close() after an 800 ms stall     < 1000 ms -> 200 ms slack
+# (line numbers are the EXPECT_LT itself, not the comment above it)
 # Under `ctest --parallel` a correct implementation can be descheduled past any
 # of these behind a CPU-heavy co-runner, reporting an I/O-blocking regression
 # that never happened. RUN_SERIAL costs 1.42 s (its whole runtime, measured on
