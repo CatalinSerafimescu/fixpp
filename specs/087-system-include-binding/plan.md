@@ -52,13 +52,19 @@ That ordering is the deliberate correction of 086's failure mode, not a formalit
 | **IX §4** — Static analysis | **PASS** | Any new probe TU goes through clang-tidy/clang-format as 086's did; the sub-build already sets `CMAKE_EXPORT_COMPILE_COMMANDS=ON`. |
 | **IX §5** — ABI check | **N/A** | `include/fix/**` byte-unchanged; no symbol, header or version-script change. |
 | **X §1/§2** — ABI policy | **PASS** | Asserts an existing ABI-boundary property; does not move the surface. |
-| **X §6** — ABI-affecting ⇒ four controls | **IN PROGRESS** | `/clarify` **done** (3 questions, all resolved) · `/analyze` pending (step 6) · Gate A pending (step 4) · **user `/plan` sign-off REQUESTED**. Treated as ABI-adjacent to match 086's disposition, since the property asserted *is* the C-ABI consumption boundary. |
+| **X §6** — ABI-affecting ⇒ four controls | **2 of 4 DONE** | `/clarify` **DONE** (3 questions, all resolved) · **user `/plan` sign-off DONE — granted 2026-08-04** · `/analyze` pending (pipeline step 6) · Gate A pending (step 4). Treated as ABI-adjacent to match 086's disposition, since the property asserted *is* the C-ABI consumption boundary. |
 | **XV** — Banned patterns | **PASS** | No banned construct introduced. |
 | **XVI §3** — `/clarify` mandatory | **PASS** | Run, not skipped on "spec complete". |
 | **XVII §3** — Author/reviewer independence | **PASS** | Implementation by Opus; Gate A/B reviewers are fresh Codex sessions. |
 | **XVII §8** — Verify + gate evidence | **PLANNED** | `/speckit-verify` + paired gate records before any `gate-*-done` label. |
 
-**No unjustified violation.** The one open item is the Article X §6 user sign-off, requested at the end of this plan.
+**No unjustified violation.**
+
+> ### ✅ Article X §6 — user `/plan` sign-off GRANTED 2026-08-04
+>
+> Signed off on this plan and `contracts/system-include-interface.md`. Two of the four mandatory controls are
+> now discharged (`/clarify`, user sign-off); `/gate-a` and `/speckit-analyze` remain and are ordered by
+> `.specify/pipeline.md` — **Gate A runs after `/plan` and BEFORE `/speckit-tasks`**, `/analyze` at step 6.
 
 ## Project Structure
 
