@@ -60,21 +60,12 @@ Anything later that needs a tight TSan baseline should account for that, or use 
 Also note the two-run figures previously recorded here (mean 1871, −43.6%, +1.4% vs ideal) were
 correct for two samples; they are superseded by the three-run figures above rather than corrected.
 
-Three things this establishes beyond the headline:
+What the measurement establishes beyond the headline number:
 
-- **Test count unchanged: 346, same as serial.** Parallelism did not skip or drop a test — the
-  failure mode that would otherwise read as a saving.
-- **Zero failures.** No flake, no `exit 143`, no OOM.
-- **The `RUN_SERIAL` mitigation is visibly correct.** `log_file_fsync` was scheduled **last and
-  alone** (`346/346`) and cost **1.42 s** — identical to its serial baseline, i.e. it was never
-  descheduled behind a co-runner. That is the Gate B round-1 P1 discharged by observation, not by
-  argument.
-- **The model was honest.** Measured sits 4.9% *above* the ideal lower bound, which is the only
-  direction it can legitimately sit; imperfect packing and contention account for the gap.
-
-**Still outstanding before widening:** criterion 1 (more than one run) and criterion 4 (peak memory
-captured). One green run is not a trend, and the memory question this probe was cautious about has
-not actually been answered — it was simply not exercised hard enough to fail.
+- **Test count unchanged: 346, same as serial** — parallelism skipped or dropped nothing, which is
+  the failure mode that would otherwise read as a saving.
+- **The model was honest.** The mean sits *above* the ideal lower bound, the only direction it can
+  legitimately sit; imperfect packing and contention account for the gap.
 
 Every `testPreset` in `CMakePresets.json` ran serial (no `execution.jobs`) up to this change, and
 no CI workflow passes `-j` to `ctest`. This probe sets `jobs: 2` on exactly one lane so the effect
