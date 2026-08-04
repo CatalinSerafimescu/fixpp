@@ -41,6 +41,13 @@ stay isolable).
 
 ## 2. Run the feature's witnesses
 
+> ⚠️ **These target names, labels and `-R` patterns do not exist at this commit.** They are the
+> *contract* for what `/speckit-tasks` and `/speckit-implement` must create — the `088` ctest label,
+> the `session_read_first_frame_bounded` target, and the regex-matchable test names. Run against the
+> plan-phase tree they match **zero** tests, and a zero-test ctest run **exits green**
+> (`[[feedback_ci_gate_observes_not_asserts_witness_skips_into_green]]`). Treat a green run here as
+> evidence of nothing until the targets exist.
+
 ```bash
 # the whole feature's cells
 ctest --preset linux-clang-debug -L 088 --output-on-failure

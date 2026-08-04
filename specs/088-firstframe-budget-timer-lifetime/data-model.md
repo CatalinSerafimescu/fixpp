@@ -129,8 +129,16 @@ attempt N:                                  handler armed by attempt N:
 ```
 
 `timer_epoch_` is a plain `std::uint64_t` member, mutated only on the transport's strand — the same
-confinement `read_in_flight_` already relies on. One member per transport: the TLS transport's
-connect and handshake timers are **sequential, never concurrent**, so they share it safely.
+confinement `read_in_flight_` already relies on.
+
+**One member per timer**, not per transport: `asio_plain_transport` gets `connect_timer_epoch_`;
+`asio_tls_transport` gets `connect_timer_epoch_` **and** `handshake_timer_epoch_`. The two TLS timers
+are in fact strictly ordered today — `async_connect` (`:869`) and `async_handshake` (`:984`) are
+awaited sequentially by both drivers (`reconnect_fsm.cpp:250` then `:284`; the accept path uses only
+the handshake, `engine.cpp:842`), and `reconnect_fsm` builds a fresh transport per attempt
+(`:242-247`) — so a shared member would be correct. It is split anyway because that correctness rests
+on a sequencing property of the *callers* which the transport does not enforce; sharing would make a
+future interleaving silently reintroduce this exact defect class (see research §D-4).
 
 Overflow is not a concern at 2⁶⁴ attempts; no wrap-handling is added, and none is needed
 (`[[feedback_truncated_timestamp_wrap_false_linearizability_failure]]` is about a 31-bit truncation,

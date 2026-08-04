@@ -214,8 +214,20 @@ answer.
 | `src/transport/asio_tls_transport.cpp:910` | `async_connect` (connect timeout) | the existing `timer.cancel()` after `async_connect` returns |
 | `src/transport/asio_tls_transport.cpp:1032` | `async_handshake` (handshake timeout) | the existing `timer.cancel()` at `:1045` |
 
-Each transport gets **one** `timer_epoch_` member; the TLS transport's connect and handshake timers
-are sequential, never concurrent, so they can share it.
+**One epoch member per timer, not one per transport.** The TLS transport's connect and handshake
+timers *are* in fact strictly ordered — verified, not assumed: `async_connect` (`:869`) and
+`async_handshake` (`:984`) are separate public methods, and both drivers await them sequentially
+(`src/session/reconnect_fsm.cpp:250` then `:284`; the accept path calls only `async_handshake`,
+`src/session/engine.cpp:842`), while `reconnect_fsm` builds a **fresh transport per attempt**
+(`factory_->make(...)` at `:242-247`), so cross-attempt aliasing on one object cannot arise either.
+A single shared member would therefore be correct today.
+
+It is still **two members** (`connect_timer_epoch_`, `handshake_timer_epoch_`), because that
+correctness rests on a sequencing property of two *callers* that nothing in the transport enforces.
+A future caller that interleaves them — or a reconnect path that reused a transport — would silently
+convert a shared epoch into a stale-connect-handler cancelling a live handshake, which is the very
+defect class this feature exists to close. Eight bytes buys the removal of an argument rather than
+the addition of one. (The plain transport has only a connect timer, so it gets one member.)
 
 **Alternatives rejected.** `||` at all three (item 1 above); `||` at the two connect sites only
 (inconsistent mechanism for one defect class, and the handshake site is the one whose composed
@@ -269,11 +281,17 @@ fix and the rejected one.
 
 **RED-proof method — one mechanism for all cells, stated once.** The pre-fix source is `main`'s
 `read_first_frame_bounded`. Because D-5 makes it an inline header, the RED run is:
-`git show main:src/session/engine.cpp` → extract the pre-fix body into a scratch copy of the new
-header → build the witness target against it → record the failure output. This is a *source* A/B on
-one function, not a branch checkout, so it cannot be contaminated by stale objects
-(`[[feedback_stale_build_objects_false_green_masks_pins]]`). Each cell records its own RED output in
-the verify record.
+`git show main:src/session/engine.cpp` → extract the pre-fix body (`main` lines 378-455) into a
+scratch copy of the new header → build the witness target against it → record the failure output.
+This is a *source* A/B on one function, not a branch checkout, so it cannot be contaminated by stale
+objects (`[[feedback_stale_build_objects_false_green_masks_pins]]`). Each cell records its own RED
+output in the verify record.
+
+**The pre-fix body must be adapted to the new position, and only to it**: wrap it in
+`namespace fixpp::session::detail`, mark it `inline`, and add the includes `engine.cpp` was supplying
+(`<asio/steady_timer.hpp>`, the framer/carry-buffer headers, `scan_first_frame_ids.hpp`'s
+dependencies). **Change nothing else** — every `>=`, the check ordering, the `bool timed_out` and the
+`timer.async_wait` lambda stay exactly as `main` has them, or the A/B measures the wrong thing.
 
 | Cell | Shape | Kills | RED pre-fix because |
 |---|---|---|---|

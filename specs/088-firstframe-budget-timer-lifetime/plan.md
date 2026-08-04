@@ -140,9 +140,12 @@ wired into a test at `tests/session/CMakeLists.txt:722-728`; the new witness tar
 verbatim, including the `${CMAKE_SOURCE_DIR}/src` include path and the absence of any
 `FIXPP_TEST_HOOKS` requirement.
 
-The two transport headers each gain a single `std::uint64_t timer_epoch_`. Both transports are
-strand-confined and already carry plain-`bool` members guarded the same way (`read_in_flight_`), so
-no atomic and no new synchronisation primitive is introduced.
+The transport headers gain one `std::uint64_t` epoch **per timer** — `connect_timer_epoch_` on the
+plain transport, `connect_timer_epoch_` + `handshake_timer_epoch_` on the TLS one. Both transports
+are strand-confined and already carry plain-`bool` members guarded the same way (`read_in_flight_`),
+so no atomic and no new synchronisation primitive is introduced. (A single shared member per
+transport would be correct against today's callers — verified in research §D-4 — but is split so that
+correctness does not depend on a caller sequencing property the transport cannot enforce.)
 
 ## Design decisions (full detail in [research.md](./research.md))
 
