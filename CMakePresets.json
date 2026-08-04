@@ -266,7 +266,9 @@
     {
       "name": "linux-clang-tsan",
       "configurePreset": "linux-clang-tsan",
-      "output": { "outputOnFailure": true }
+      "description": "TSan. PROBE: jobs=2 is a single-lane ctest-parallelism trial — do NOT copy to the other lanes until this one is re-measured green (see ci/ctest-parallelism-probe.md).",
+      "output": { "outputOnFailure": true },
+      "execution": { "jobs": 2 }
     },
     {
       "name": "linux-clang-coverage",
