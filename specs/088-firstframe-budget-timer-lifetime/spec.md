@@ -232,8 +232,11 @@ first post-connect (resp. post-handshake) operation is not cancelled.
   distinguishes the delivered invariant from the cheap comparison-only fix, so it MUST carry its own
   pin — a test suite that covers only the `== max_bytes` case cannot tell the two apart.
 - **The chunk that pushes the cumulative size past the budget contains NO complete frame** — closed
-  on the budget at the very next evaluation. This is the FR-013 bound: it is reached at most once,
-  so buffered size cannot exceed `max_bytes + <one read-buffer>`.
+  on the budget at that evaluation. Because each read is clamped to `max_bytes + 1 - buf.size()`
+  (C1), the cumulative size at that point is exactly `max_bytes + 1` and can never be more.
+- **`buf.size()` is exactly `max_bytes` on entry to the clamp** — the read requests exactly 1 byte.
+  The clamp must not compute 0 (which would spin on a zero-length read) nor underflow. This is the
+  off-by-one FR-013 obligates proving.
 - **A frame fragmented across several reads that completes exactly at the budget** — the stateful
   framer carries unconsumed bytes across `feed` calls (`:432-437`); the boundary must be evaluated
   against the same accumulation the existing fragmentation fix (F-015-001) established, not against
@@ -262,12 +265,11 @@ first post-connect (resp. post-handshake) operation is not cancelled.
 - **FR-003**: The over-budget close MUST be preserved for a peer that exceeds the budget without a
   complete frame becoming available: `wire_frame_too_large`, transport closed, accept slot
   reclaimed, other peers unaffected. This feature MUST NOT weaken FR-014's protective behaviour.
-- **FR-013**: The pre-session read MUST remain hard-bounded in bytes. Because FR-002 defers the
-  budget decision until after the chunk has been framed, the worst-case cumulative bytes a peer can
-  cause to be buffered rises from `max_bytes` to `max_bytes + <one read-buffer>`. That bound MUST be
-  stated in the delivered artifacts, MUST remain a constant (never a function of peer behaviour), and
-  MUST NOT be reachable more than once — the very next budget evaluation after the over-budget chunk
-  MUST close the connection. An unbounded or peer-steerable growth path does not satisfy this feature.
+- **FR-013**: The pre-session read MUST remain hard-bounded in bytes, at **`max_bytes + 1`**. Because
+  FR-002 defers the budget decision until after the chunk has been framed, each read MUST be clamped
+  to at most `max_bytes + 1 - buf.size()` bytes so that deferral cannot widen the bound (C1). The
+  bound MUST be a constant, never a function of peer behaviour, and MUST NOT be exceeded by any
+  sequence of peer writes. The clamp expression MUST be shown not to underflow.
 - **FR-004**: The deadline behaviour MUST be preserved: a peer that stalls the pre-session window
   MUST still have its in-flight read aborted and its connection closed and reclaimed within the
   deadline. The remedy for FR-005 MUST NOT reintroduce the between-reads-flag-polling behaviour
@@ -283,7 +285,17 @@ first post-connect (resp. post-handshake) operation is not cancelled.
 - **FR-014**: The same joined-lifetime property MUST hold at the three transport timer sites: a
   connect-timeout or handshake-timeout expiry MUST NOT cancel a socket after its connect or handshake
   has already completed successfully. *(Q3 class-fix; these sites capture `this` so they have no
-  dangle leg — the requirement is the late-cancel leg only.)*
+  dangle leg — the requirement is the late-cancel leg only.)* **Each of the three MUST carry its own
+  same-drain witness** (C4); an equivalence-by-inspection argument does not discharge this.
+- **FR-015**: `Engine::stop()` issued while a first-frame read is in flight MUST still abort that
+  read promptly, reclaim the accept slot, and tear down cleanly under the sanitizer matrix — and this
+  MUST be pinned by a **dedicated** regression test, not inferred from existing engine-stop coverage
+  (C2). The joined form introduced by FR-005 MUST NOT create an operation that outlives a stop.
+- **FR-016**: `read_first_frame_bounded` MUST be reachable from tests directly, via an **internal
+  `detail` header** (C3), so the same-drain scenarios of FR-005/FR-006 can be constructed
+  deterministically rather than awaited probabilistically. That header MUST NOT be installed and MUST
+  NOT become part of the public surface (FR-012 still holds). No `FIXPP_TEST_HOOKS`-gated branch is
+  added to the accept path for this purpose.
 - **FR-007**: The unreachable duplicate budget check at `src/session/engine.cpp:408-411` MUST be
   eliminated rather than maintained in parallel with its live twin — the delivered code MUST have a
   single place where the budget decision is taken.
@@ -348,12 +360,21 @@ first post-connect (resp. post-handshake) operation is not cancelled.
 - **SC-012**: A peer whose first read delivers a complete, valid Logon at a cumulative size **past**
   the byte budget establishes a session. *(This is the criterion the comparison-only fix would fail —
   it is what distinguishes the delivered invariant. RED against pre-fix source.)*
-- **SC-013**: The worst-case buffered size for a pre-session connection is a stated constant no
-  greater than `kFirstFrameMaxBytes + <one read-buffer>`, and is demonstrated to be reached at most
-  once — a peer cannot drive buffered bytes above it by any sequence of writes. *(FR-013.)*
-- **SC-014**: For each of the three transport timer sites, a connect or handshake that succeeds in
-  the same event-loop drain as its timeout expiry is not followed by a cancellation of the socket;
-  the first subsequent operation completes. *(FR-014. RED against pre-fix source.)*
+- **SC-013**: The worst-case buffered size for a pre-session connection is **`kFirstFrameMaxBytes + 1`**
+  (4097) — demonstrably not exceeded by any sequence of peer writes, and strictly tighter than the
+  `+ <one read-buffer>` that the reordering alone would have allowed. *(FR-013 / C1.)*
+- **SC-014**: For **each** of the three transport timer sites — plain connect, TLS connect, TLS
+  handshake — a connect or handshake that succeeds in the same event-loop drain as its timeout expiry
+  is not followed by a cancellation of the socket; the first subsequent operation completes. Three
+  witnesses, one per site. *(FR-014 / C4. RED against pre-fix source.)*
+- **SC-015**: `Engine::stop()` during an in-flight first-frame read aborts promptly, reclaims the
+  accept slot, and leaves the sanitizer matrix clean — asserted by a dedicated test that is shown to
+  actually catch a read in flight rather than passing vacuously. *(FR-015 / C2.)*
+- **SC-016**: The same-drain witnesses for SC-005/SC-006 are deterministic — the ordering under test
+  is constructed by the test, not awaited. No witness in this feature depends on winning a timing
+  race. *(FR-016 / C3.)*
+- **SC-017**: The `detail` header added by FR-016 is not installed; the installed package's headers
+  are byte-identical to `main`'s. *(FR-012 / FR-016 / C3.)*
 - **SC-009**: The full sanitizer ctest matrix (ASan / UBSan / TSan) is green with 0 findings, and
   the `linux-clang-debug` local build gate is green.
 - **SC-010**: The public surface delta is **empty** — no header change, no new or removed error
@@ -380,7 +401,12 @@ first post-connect (resp. post-handshake) operation is not cancelled.
   late cancel on a socket that is *open and in use*.
 - **The same-drain race will not reproduce by chance.** Both US2 and US4 need a deterministic
   scheduling seam, not a timing-tuned sleep. Constructing that seam is part of the work, and a test
-  that merely fails to observe the race is not evidence.
+  that merely fails to observe the race is not evidence. The seam is the FR-016 `detail`-header
+  exposure plus a hand-driven `io_context` (C3), not a production hook.
+- **The clamped read reduces the surplus carried into the read pump near the boundary.** With C1, a
+  coalesced next frame is only partially buffered when the first frame ends close to `max_bytes`; the
+  read pump reads the remainder from the socket. This is correct but must be pinned — the existing
+  F-015-002 surplus-carry behaviour must survive the clamp, not merely survive below the boundary.
 - **Local toolchain is Clang 22** per Article XVII §7; the Tier-1 mirror runs `linux-clang-debug`
   plus the sanitizer presets. gcc-release and MSVC are CI-only.
 - **Provenance** — the analysis this spec rests on:
@@ -390,10 +416,32 @@ first post-connect (resp. post-handshake) operation is not cancelled.
 
 ## Clarifications
 
-> Three decisions fork what is delivered. All three were settled by explicit user decision on
-> **2026-08-04**, at `/speckit-specify` time, before any planning. They are recorded with the
-> rejected alternatives intact, because Gate A will want to see that the cheaper options were
-> considered and why they were not taken.
+> Seven decisions fork what is delivered — three at `/speckit-specify` (Q1–Q3, the blocking forks)
+> and four at `/speckit-clarify` (C1–C4, the residuals those three left behind). All were settled by
+> explicit user decision on **2026-08-04**, before any planning. Each is recorded with the rejected
+> alternatives intact, because Gate A will want to see that the cheaper options were considered and
+> why they were not taken.
+
+### Session 2026-08-04
+
+- Q: Which invariant does the budget fix deliver — comparison-only, frame-before-budget, or both?
+  → **A: Both.** Frame each chunk first (a complete frame wins unconditionally), then apply the
+  budget with a strict `>`.
+- Q: Which remedy shape closes the timer-lifetime defect — shared-owned state, or a joined race?
+  → **A: Joined race** via `asio::experimental::awaitable_operators`' `||`. One mechanism, both legs.
+- Q: Does the census scope include the three transport sites?
+  → **A: Fix all four.** Class-fix, including `asio_plain_transport.cpp:130`, which issue #233 does
+  not name.
+- Q: Is the `max_bytes + one read-buffer` DoS bound acceptable, or should it be tightened?
+  → **A: Tighten by clamping the read** to `max_bytes + 1 - buf.size()`. Worst case becomes
+  `max_bytes + 1`, not `max_bytes + 4096`.
+- Q: Does the joined form owe a direct regression pin for `Engine::stop()` during an in-flight
+  first-frame read? → **A: Yes, a direct pin.** Not inherited from existing engine-stop coverage.
+- Q: What may the deterministic same-drain witness touch — a production seam, or an internal
+  exposure? → **A: Expose `read_first_frame_bounded` via a detail header** for direct unit testing.
+  No production branch, no test hook.
+- Q: How much witness coverage do the three transport timer sites owe?
+  → **A: One pin per site — all three**, including the harder TLS-handshake staging.
 
 ### Q1 — Which invariant does the budget fix deliver? → **BOTH legs: frame-before-budget AND `>`**
 
@@ -414,12 +462,103 @@ It is the smallest diff and it leaves the defect class intact.
 a peer sitting at exactly `max_bytes` with nothing complete yet — which is the precise wording
 (`"exceeds"` / `"more than"`) this feature exists to satisfy. Half a correction.
 
-**Consequence the decision carries, and Gate A will ask about it.** Deferring the budget decision
-until after framing raises the worst-case buffered size from `max_bytes` to
-`max_bytes + <one read-buffer>` — with today's constants, 4096 → 8192. This is still a hard
-constant bound, reachable at most once (the next budget evaluation closes the connection), and not
-steerable by the peer. **FR-013 exists to hold that property**; if the design cannot keep the bound
-constant and single-shot, this decision must be revisited rather than quietly relaxed.
+**Consequence the decision carries.** Deferring the budget decision until after framing would, on
+its own, raise the worst-case buffered size from `max_bytes` to `max_bytes + <one read-buffer>` —
+4096 → 8192 with today's constants. **C1 removes that consequence** by clamping the read: see below.
+**FR-013 holds the resulting bound**; if the design cannot keep it constant and single-shot, this
+decision must be revisited rather than quietly relaxed.
+
+---
+
+### C1 — Is the widened DoS bound acceptable? → **No: clamp the read to `max_bytes + 1`**
+
+**Context**: FR-013 / SC-013 / Edge case "the chunk that pushes cumulative past the budget".
+
+**Decision.** Each read requests at most `max_bytes + 1 - buf.size()` bytes rather than a fixed
+`read_buf.size()`. Worst-case buffered size becomes **`max_bytes + 1` (4097)** — *tighter* than the
+`max_bytes + <read-buffer>` that Q1's reordering would otherwise imply, and tighter than the 8192 a
+naive frame-before-budget would allow. The frame-wins rule is unaffected: any first frame of size
+`≤ max_bytes` is wholly contained within the clamped bytes, so it is still detectable; a first frame
+*larger* than `max_bytes` is precisely what the budget exists to reject.
+
+**Rejected — accept `max_bytes + <one read-buffer>` (8192).** Simplest diff, and still a hard
+single-shot constant. But it doubles the buffer a hostile peer can cause on a window that
+deliberately precedes any `Session`-level limit, when a strictly tighter option was available at the
+cost of one `min()`.
+
+**Rejected — clamp *and* resize `read_buf` to `max_bytes + 1`.** Tightest and most self-consistent,
+but it couples the read-buffer size to the budget constant — a coupling nothing needs, on a line
+neither defect implicates.
+
+**Carried obligation.** The clamp is an off-by-one surface. `max_bytes + 1 - buf.size()` must be
+proven never to underflow (it is evaluated only when `buf.size() <= max_bytes`, which the strict-`>`
+reject guarantees, but the guarantee must be *shown* rather than assumed) and the boundary pins must
+cover `buf.size() == max_bytes` on entry to the clamp.
+
+### C2 — Does the joined form owe a direct `Engine::stop()` pin? → **Yes**
+
+**Context**: FR-004 / FR-015 / Edge case "Engine `stop()` during the first-frame read".
+
+**Decision.** A dedicated regression pin: `Engine::stop()` is called while a first-frame read is in
+flight, and the test asserts prompt abort, accept-slot reclaim, and clean teardown under the
+sanitizer matrix.
+
+**Rejected — rely on existing engine-stop coverage.** The engine already has stop/teardown tests, but
+they were written against the pre-`||` shape. If none of them happens to have a first-frame read in
+flight at `stop()` time, the coverage is nominal and a regression in exactly the construct this
+feature introduces would land silently. The joined form is *the* construct that could create an arm
+outliving a stop; Article XVII §1 makes cancellation the Gate-A trigger surface; and a named safety
+invariant needs a direct pin, not an incidental one
+([[feedback_named_safety_invariant_needs_direct_pin]]).
+
+**Carried obligation.** The pin must be shown to be meaningful rather than vacuously green — a
+`stop()` test that never actually catches a read in flight asserts nothing
+([[feedback_ci_gate_observes_not_asserts_witness_skips_into_green]]).
+
+### C3 — What may the same-drain witness touch? → **Expose `read_first_frame_bounded` to tests**
+
+**Context**: FR-016 / SC-005 / SC-006 / Assumption "the same-drain race will not reproduce by chance".
+
+**Decision.** Move `read_first_frame_bounded`'s declaration into a `detail` header so tests can drive
+it directly against a mock transport with a small deadline and a hand-driven `io_context` — both
+completions ready before the drain, so the ordering under test is *constructed*, not awaited. Direct
+precedent in this same file: `scan_first_frame_ids` was moved out of the anonymous namespace into
+`scan_first_frame_ids.hpp` for exactly this reason (040 US2 Phase 4, noted at `engine.cpp:360-362`).
+
+**Rejected — a `FIXPP_TEST_HOOKS`-gated seam in the accept path.** Precedent exists
+(`test_hook_pre_publish_`, `engine.cpp:926-932`), and it would keep the witness end-to-end. But it
+adds a production-compiled branch, and the hook would have to sit at exactly the drain boundary under
+test — more delicate than the exposure, for a weaker guarantee.
+
+**Rejected — end-to-end only against the live 5000 ms deadline.** No new surface, but a read
+completion cannot be reliably steered into the same drain as a 5000 ms expiry. The witness would be
+probabilistic, and a race a test merely fails to observe is not evidence
+([[feedback_overlap_witness_needs_stimulus_held_until_witnessed]]).
+
+**Carried obligation.** The exposure is an internal `detail` header, not public API — FR-012's
+empty-public-surface claim must remain true, and the plan must say where the header lives and that
+it is not installed.
+
+### C4 — How much witness coverage do the transport sites owe? → **One pin per site, all three**
+
+**Context**: FR-014 / SC-014 / User Story 4.
+
+**Decision.** Each of `asio_plain_transport.cpp:130` (connect), `asio_tls_transport.cpp:910`
+(connect), and `asio_tls_transport.cpp:1032` (TLS handshake) gets its own same-drain witness. This is
+the only reading under which SC-014 is literally true as written.
+
+**Rejected — pin both connect sites, source-verify the handshake site.** Cheaper, and the
+shape-equivalence argument is genuinely strong. But it turns SC-014 into a waiver-shaped item at
+Gate B, and this project's record is that the "not reachable / equivalent by inspection" leg has to
+be source-verified to a standard that costs about as much as the test
+([[feedback_waiver_not_reachable_leg_must_be_source_verified]]).
+
+**Rejected — one representative pin plus equivalence for the other two.** Fixing four sites and
+witnessing one is the class-fix-scoped-to-one-occurrence pattern that the Q3 decision widened scope
+specifically to avoid.
+
+**Cost accepted.** The TLS-handshake same-drain case needs a peer that stalls the handshake to a
+controlled point; it is the most expensive single test in this feature.
 
 ### Q2 — Which remedy shape closes Defect 2? → **(b) joined race via `||`**
 
