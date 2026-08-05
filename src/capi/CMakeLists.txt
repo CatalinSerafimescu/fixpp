@@ -62,9 +62,22 @@ add_library(fixpp::capi ALIAS fixpp_capi)
 #
 # ⚠️ $<LINK_ONLY:> withholds COMPILE_DEFINITIONS, COMPILE_OPTIONS,
 # COMPILE_FEATURES and SYSTEM_INCLUDE_DIRECTORIES too, not just the include path.
-# (Of those four, C-3's closed enumeration binds the first three. System include
-# directories are NOT asserted — no collected consumer property exists to assert
-# them against; narrowed at Gate B r3, follow-up recorded in the contract.)
+# (Of those four, 086's C-3 closed enumeration binds the first three, by the
+# target-property comparisons in tests/consumer/.
+#
+#  System include directories ARE asserted — since 087 (#234), 2026-08-05. Not by
+#  a target property: there is no documented *collected* consumer property to
+#  assert them against, and comparing an absent property would read empty against
+#  empty — an assertion that cannot fail, which is exactly why 086 declined to
+#  write this leg. THAT is why the instrument is the CMake File API rather than a
+#  target property: `codemodel-v2` reports CMake's own model of the include
+#  interface actually supplied to a consumer's compilation, each entry with its
+#  system/non-system classification, at the INSTALLED package.
+#
+#  The assertion lives in tests/consumer/compare_system_includes.cmake, carried by
+#  the target probe_system_include_contract, and binds fixpp::capi and
+#  fixpp::service as exact CLOSED sets against a non-empty declared expectation.
+#  See specs/087-system-include-binding/contracts/system-include-interface.md.)
 # That is intended and enumerated (contracts/include-interface.md C-3): a C-ABI
 # consumer stops receiving at least FIXPP_LOG_MIN_LEVEL and ASIO_STANDALONE,
 # neither of which any C-ABI header consumes. tests/consumer/ measures the

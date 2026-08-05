@@ -204,7 +204,24 @@ endif()
 # and $<LINK_ONLY:> withholds COMPILE_DEFINITIONS, COMPILE_OPTIONS,
 # COMPILE_FEATURES and SYSTEM_INCLUDE_DIRECTORIES along with the include path. So
 # a target that links only fixpp::capi must end up with an EMPTY effective set for
-# all three. Asserting empty — rather than "does not contain FIXPP_LOG_MIN_LEVEL"
+# all three.
+#
+# ⚠️ FOUR withheld, "all three" asserted — the seam is NOT a typo, and since 087
+# (#234, 2026-08-05) it is no longer unexplained. This instrument (file(GENERATE)
+# + the compare below) binds THREE of the four BY CONSTRUCTION: each has a
+# documented collected consumer property to read via $<TARGET_PROPERTY:>.
+# SYSTEM_INCLUDE_DIRECTORIES has none — comparing an absent property would read
+# empty against empty, an assertion that cannot fail — so it is deliberately not
+# among the three here.
+#
+# The FOURTH is bound by 087, through a different instrument: the CMake File API
+# `codemodel-v2` compile groups, read at the installed consumer by
+# tests/consumer/compare_system_includes.cmake and carried by the target
+# `probe_system_include_contract` — which is listed in THIS FILE's own
+# _required_targets above, so it cannot be deleted silently.
+#
+# Leg 3's own scope is UNCHANGED: it still asserts exactly the three properties
+# named below, for exactly the reason given. Asserting empty — rather than "does not contain FIXPP_LOG_MIN_LEVEL"
 # — is deliberate: it is a closed assertion, so a definition nobody predicted
 # fails it too. (The withheld set today is at least FIXPP_LOG_MIN_LEVEL, from
 # src/log/CMakeLists.txt:27, and ASIO_STANDALONE, carried by asio::asio linked

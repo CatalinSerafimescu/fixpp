@@ -212,6 +212,17 @@ target_link_libraries(probe_usage_requirements PRIVATE fixpp::capi)
 # withholds COMPILE_DEFINITIONS, COMPILE_OPTIONS, COMPILE_FEATURES and
 # SYSTEM_INCLUDE_DIRECTORIES along with the include path. Naming an expected
 # non-empty list instead would have to enumerate what survives, and nothing does.
+#
+# ⚠️ THAT CLOSING SENTENCE IS ABOUT 086's INSTRUMENT — the three target-property
+# comparisons declared immediately below — and it stays TRUE for them. It is not
+# a claim about this file as a whole. Since 087 (#234), 2026-08-05, this same
+# file ALSO declares two NON-EMPTY expectations (FIXPP_087_EXPECTED_CAPI and
+# FIXPP_087_EXPECTED_SERVICE, further down), and there is no contradiction: they
+# are a DIFFERENT OBSERVATION. 086 compares collected target properties on a
+# consumer target; 087 compares the system-classified EFFECTIVE include set at
+# the installed consumer, read through the CMake File API. Something does survive
+# there — include/capi, and include/service-iface — which is precisely why 087's
+# expectations can be non-empty while 086's remain correctly empty.
 # What is thereby lost is enumerated and pre-approved: today AT LEAST
 # FIXPP_LOG_MIN_LEVEL (src/log/CMakeLists.txt:27) and ASIO_STANDALONE (carried by
 # asio::asio, linked unwrapped inside the closure). Membership in that set is

@@ -371,10 +371,29 @@ specs/086-capi-include-isolation/contracts/include-interface.md:132  → row 1 (
 specs/086-capi-include-isolation/contracts/include-interface.md:145  → row 1 (C-3, :122-149)
 src/capi/CMakeLists.txt:64                                           → row 4
 tests/consumer/CMakeLists.txt:213                                    → row 6
-tests/consumer/run_consumer_witness.cmake:173                        → row 7
+tests/consumer/run_consumer_witness.cmake:205                        → row 7
+tests/consumer/run_consumer_witness.cmake:213                        → row 7 (the amendment itself)
 ```
 
-**Ten in-scope hits, seven rows, no residue.** Two notes on the pipeline, because both filters are load-bearing
+**ELEVEN in-scope hits, seven rows, no residue** — the pre-sweep figure was **ten**, and it was correct then.
+*(Re-run and re-counted at T036, 2026-08-05, after the sweep landed. Corrected here first, per this file's own
+authority-first rule.)*
+
+**The eleventh hit is row 7's own amendment, and this is expected rather than residue.** Row 7's obligation is
+to *name the three/four seam* — it cannot discharge that without spelling `SYSTEM_INCLUDE_DIRECTORIES` a second
+time in the same file, once in 086's original clause (`:205`) and once in the sentence explaining that the
+fourth property is bound by 087 (`:213`). An amendment that avoided the token to protect a count would be a
+worse amendment. Every other file's count is unchanged; the delta is exactly +1 and it is attributable to a
+single named edit.
+
+> **This is the same self-referential-figure hazard already recorded below for 087's own bundle**, now realised
+> on the *amended* side: a document that describes a search term matches that search term. The figure is
+> therefore pinned with its provenance (pre-sweep 10 → post-sweep 11) rather than silently replaced, so a
+> reader can tell a legitimate sweep-induced increment from an unswept new site. **SC-007's criterion is not
+> the count** — it is that *no document still describes the property as an open scope limit*, which is
+> discharged row by row above and re-verified at T036.
+
+Two notes on the pipeline, because both filters are load-bearing
 and neither hides a site:
 
 - `grep -v "^specs/087-system-include-binding/"` drops **087's own bundle**, which this section's scope rule

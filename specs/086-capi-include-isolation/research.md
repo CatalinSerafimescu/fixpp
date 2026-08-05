@@ -277,7 +277,7 @@ argument is unaffected — `include_directories()` is directory-scoped over all 
 > **⚠️ Scope of "by construction" (Gate A r1).** The argument above is stated over **include directories** and
 > is therefore narrower than the change. `include_directories()` carries only include paths, but
 > `$<LINK_ONLY:>` withholds `INTERFACE_COMPILE_DEFINITIONS`, `INTERFACE_COMPILE_OPTIONS`,
-> `INTERFACE_COMPILE_FEATURES` and (NOT asserted — see C-3, narrowed at Gate B r3) `INTERFACE_SYSTEM_INCLUDE_DIRECTORIES` as well. The closure carries at least
+> `INTERFACE_COMPILE_FEATURES` and (NOT asserted — see C-3, narrowed at Gate B r3) `INTERFACE_SYSTEM_INCLUDE_DIRECTORIES` *(not asserted by 086; subsequently bound by 087 (#234), 2026-08-05 — appended, not rewritten: the clause records what 086 measured and is left standing as such)* as well. The closure carries at least
 > one live PUBLIC compile definition: `FIXPP_LOG_MIN_LEVEL` (`src/log/CMakeLists.txt:27`, documented at
 > `:24-26` as "propagated to every consumer so the `if constexpr` cutoff in the LOG macros is build-wide"),
 > consumed unguarded at `include/fixpp/log/logger.hpp:275,301,333` with no `#ifndef` fallback.
