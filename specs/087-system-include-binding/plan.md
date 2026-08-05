@@ -55,7 +55,7 @@ unevidenced from the bundle alone.
 | **IX §4** — Static analysis | **PASS** | Any new probe TU goes through clang-tidy/clang-format as 086's did; the sub-build already sets `CMAKE_EXPORT_COMPILE_COMMANDS=ON`. |
 | **IX §5** — ABI check | **N/A** | `include/fix/**` byte-unchanged; no symbol, header or version-script change. |
 | **X §1/§2** — ABI policy | **PASS** | Asserts an existing ABI-boundary property; does not move the surface. |
-| **X §6** — ABI-affecting ⇒ four controls | **2 of 4 DONE** | `/clarify` **DONE** (3 questions, all resolved) · **user `/plan` sign-off DONE — granted 2026-08-04** · `/analyze` pending (pipeline step 6) · Gate A pending (step 4). Treated as ABI-adjacent to match 086's disposition, since the property asserted *is* the C-ABI consumption boundary. |
+| **X §6** — ABI-affecting ⇒ four controls | **3 of 4 DONE** | `/clarify` **DONE** (3 questions, all resolved) · **user `/plan` sign-off DONE — granted 2026-08-04** · **Codex Gate A DONE — CONVERGED instance 2 round 2, user-signed-off 2026-08-04** (2 loop instances, 5 rounds, 3 Opus rewrites + 1 Codex fixer; record `research/G19-fix-fpml-iso20022/decisions/speckit/087-system-include-binding-gatea.md`) · `/analyze` pending (pipeline step 6). *(Row updated 2026-08-05 at `/speckit-tasks` — it still read "2 of 4 … Gate A pending".)* Treated as ABI-adjacent to match 086's disposition, since the property asserted *is* the C-ABI consumption boundary. |
 | **XV** — Banned patterns | **PASS** | No banned construct introduced. |
 | **XVI §3** — `/clarify` mandatory | **PASS** | Run, not skipped on "spec complete". |
 | **XVII §3** — Author/reviewer independence | **PASS** | Implementation by Opus; Gate A/B reviewers are fresh Codex sessions. |
@@ -77,6 +77,8 @@ unevidenced from the bundle alone.
 specs/087-system-include-binding/
 ├── spec.md              # 18 FR / 8 SC / 3 user stories; all clarifications resolved
 ├── plan.md              # this file
+├── tasks.md             # 44 tasks, T001–T044 (pipeline step 5, 2026-08-05); five countable sets
+│                        #   pinned in its header + a requirement→task map over 18/18 FR, 8/8 SC
 ├── research.md          # R1–R7; BOTH platforms measured on the real consumer project
 ├── data-model.md        # observed set / declared expectation / probe target
 ├── contracts/
@@ -187,10 +189,15 @@ had no step, and this project has a recorded incident of `/speckit-tasks` silent
    `FATAL_ERROR` text for **both** of that message's defects in the same edit (C-6.3).
    → **FR-001, FR-001a, FR-002, FR-004, FR-005, FR-006** · contract §2, §2a, C-1, C-6
 2. **Assert an expectation that is deliberately WRONG**, in the `LEAK` direction on the service leg
-   (declare `include/service-iface` only). Observe the gate **red** naming `include/capi`. This comes before
-   any green: a gate first seen green has not been shown to measure anything, and vacuity is this feature's
-   dominant risk. → **FR-007** · demonstration #1 · Article VII §3
-3. **Correct the expectations to the measured sets** (R4 — capi 1 entry, service 2), declared as literals with
+   (declare `include/service-iface` only) — **with the `capi` expectation already declared at its measured
+   value**, which contract §5's demonstration-#1 box makes a requirement of the row rather than an incidental
+   choice: the carrier runs `capi` first and short-circuits, so an absent or wrong `capi` expectation reds
+   *that* leg (`LEG_ERROR` or a comparison red) and the service comparison is never reached. Observe the gate
+   **red** naming `include/capi`. This comes before any green: a gate first seen green has not been shown to
+   measure anything, and vacuity is this feature's dominant risk.
+   → **FR-007** · demonstration #1 · Article VII §3
+3. **Correct the *service* expectation to its measured set** (R4 — service 2 entries; capi's 1-entry
+   expectation is already correct from step 2), declared as literals with
    a per-member rationale, never computed from the observation. Gate goes green.
    → **FR-003, FR-003a** · contract C-4 (review-time invariant — say so, do not claim it is enforced)
 4. **Red — leak (package-side).** Apply contract §5's demonstration-#2 diff to `src/capi/CMakeLists.txt:97-99`
@@ -306,6 +313,20 @@ Gate A instance 2 round 1; the block accounted for FRs only.)*
   that `run_consumer_witness.cmake:46` wipes each run. Reviews:
   `research/reviews/codex_087-system-include-binding_gate_a_i2_2_review.md`,
   `research/reviews/opus_087-system-include-binding_gate_a_i2_2_adversarial_review.md`.
+
+### Post-convergence amendment applied at `/speckit-tasks` (2026-08-05)
+
+- **Demonstration #1 could not emit its asserted token as written.** §5 row 1 said only *"before **the** correct
+  expectation is ever written … declare the `service` expectation as `include/service-iface` only"*, leaving the
+  **`capi`** expectation's state unstated, and step 3 above said *"correct the **expectations**"* (plural). Read
+  together, an implementer declares **neither** expectation at demonstration time. Composed with the two clauses
+  added *after* row 1 was drafted — C-6.2's `capi`-before-`service` ordering (round 3) and C-6.4's rejection of an
+  empty `expectation` argument (instance 2 round 1) — that reading reds the **capi** leg with **`LEG_ERROR`** at
+  argument validation, short-circuits the carrier's `COMMAND` list, and never reaches the service comparison: the
+  row records the wrong token, and the feature's only vacuity proof is not taken. Closed by pinning the `capi`
+  expectation at its measured value as a **requirement** of the row, in a new demonstration-#1 box in contract §5,
+  swept in the same commit to `plan.md` steps 2–3, `quickstart.md` §4 row 1, and `tasks.md` T013/T014. Authority-first
+  per this bundle's own rule; recorded here so Gate B's spec-vs-delivered audit sees a post-sign-off contract edit.
 
 ### Round 1 — disagreements
 

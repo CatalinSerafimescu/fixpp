@@ -441,7 +441,7 @@ one, and every class is defined here:
 
 | # | cause | class | how induced | asserted diagnostic | expected |
 |---|---|---|---|---|---|
-| 1 | **vacuity proof** | expectation-side | *Before the correct expectation is ever written*: on the **`service`** leg declare the expectation as `include/service-iface` **only**, omitting `include/capi` — a **strict, non-empty subset** of the measured set, run against the real reply | **`LEAK`** | red naming `include/capi` as observed-but-unexpected. Proves the gate reads real data. The direction is `LEAK` **by construction** so it cannot be confused with #3's `DROP`; the service leg is used because the capi leg's single entry admits no non-empty strict subset |
+| 1 | **vacuity proof** | expectation-side | *Before the `service` leg's correct expectation is ever written*: declare the **`service`** expectation as `include/service-iface` **only**, omitting `include/capi` — a **strict, non-empty subset** of the measured set — **with the `capi` expectation already declared at its measured value** (see the box below; this is required, not incidental), run against the real reply | **`LEAK`** | red naming `include/capi` as observed-but-unexpected. Proves the gate reads real data. The direction is `LEAK` **by construction** so it cannot be confused with #3's `DROP`; the service leg is used because the capi leg's single entry admits no non-empty strict subset |
 | 2 | **leak — package-side** | package-side | the exact diff below against `src/capi/CMakeLists.txt`, then re-stage and re-run | **`LEAK`** | red naming each entry the reverted interface adds. **The expectation is qualitative:** the observed set gains the umbrella include root and the third-party roots; **the exact count is recorded at demonstration time.** See the box below — no figure is stated here because none has been measured on a reverted `fixpp::capi` |
 | 3 | **drop** | reply-side | copy a real reply directory; in the copy's `target-probe_service_positive-*.json`, delete one entry from `compileGroups[].includes[]`; invoke the shipped script against the copy, passing the same install prefix the original configure used | **`DROP`** | red naming the deleted entry as expected-but-absent — reachable **only** because C-1 asserts equality, not containment |
 | 4 | **reclassified** | reply-side | copy a real reply directory; in the copy, flip one entry's `isSystem` from `true` to `false`, **leaving both paths identical**; invoke the shipped script against the copy, passing the same install prefix the original configure used | **`RECLASSIFIED`**, and **that token alone** | red naming the path and both classifications, with **no** accompanying `LEAK` or `DROP` — the path matches on both sides, so C-1 stage 1 claims the pair and removes it, leaving stage 2 nothing. **This row is why C-1's staging is normative:** under an unstaged reading of `data-model.md` I2's `(path, isSystem)` canonicalisation the same mutation fires all three tokens at once. This is also the **only** demonstration that exercises FR-003a's classification leg — `isSystem` is uniformly `true` in the passing state (`research.md` R4), so no happy-path run varies it, and a comparator that parsed `path` and discarded `isSystem` would satisfy every other row |
@@ -451,6 +451,30 @@ one, and every class is defined here:
 | 7 | **carrier deleted** | package-side | delete the **new 087 target** `probe_system_include_contract` from `tests/consumer/CMakeLists.txt`; as a second sub-case delete `tests/consumer/compare_system_includes.cmake` and leave the target | **build failure by name** | with the target gone: `ninja: error: unknown target 'probe_system_include_contract'` (Ninja's phrasing — *not* Make's "No rule to make target"). With only the script gone: the target's own command fails. **Deleting an 086 target would re-prove an 086 obligation, not this one** |
 | 8 | **service leg** | package-side | restore the **pre-086** service `$<INSTALL_INTERFACE:>` value in `src/service/CMakeLists.txt` **alone** — the exact diff is in the box below, with its `git show` provenance | **`LEAK` *and* `DROP`** (service leg) — both, per C-1's multi-token rule | red naming **`include` as observed-but-unexpected** (LEAK) **and `include/service-iface` as expected-but-absent** (DROP), in one comparison. `include/capi` matches on both sides and is removed by C-1 stage 1. **Plus the capi leg's own result from the same invocation**, still exactly `include/capi` — emitted because the carrier runs `capi` first and `compare` writes that result before the later service red terminates the build (§2b, C-6.2). Reverting capi reds both legs and proves nothing about service (086 FR-011e) |
 | — | **controls** | — | all restored | — | green, both legs, exactly two leg results (C-6.4) |
+
+> ### Demonstration #1 — the `capi` expectation MUST already be correct, or the row cannot emit its token
+>
+> *(Added 2026-08-05 at `/speckit-tasks`. Row 1 predates both the round-3 leg-ordering fix and the instance-2
+> empty-expectation guard, and its opening phrase — "before **the** correct expectation is ever written" —
+> reads naturally as "before **either** expectation is written". Composed with the two clauses added after it,
+> that reading makes the row unable to produce `LEAK`. `plan.md` step 3's plural "correct the **expectations**"
+> invited the same reading.)*
+>
+> C-6.2 makes the carrier invoke `capi` **before** `service`, and the carrier's `COMMAND` list short-circuits
+> on the first non-zero exit (the i1r3 finding). So whatever the `capi` leg does happens first and decides
+> whether the `service` comparison is reached at all:
+>
+> | `capi` expectation at demonstration #1 | what actually happens |
+> |---|---|
+> | **absent / empty** | `compare` rejects it at argument-validation time ⇒ **`LEG_ERROR`** (C-6.4), before any reply is located. The build stops. The service leg never runs, and the row records the **wrong token** |
+> | **present but wrong** | the `capi` leg reds first. The build stops. Same outcome |
+> | **declared at its measured value** (`include/capi`, `isSystem=true`) | the `capi` leg passes and writes its result; the `service` leg then reds with **`LEAK`** naming `include/capi` — the token this row asserts |
+>
+> **Only the third configuration realises the row.** The `capi` expectation is therefore declared correctly
+> from the start; "before the correct expectation is ever written" scopes to the **`service`** leg alone. This
+> costs the row nothing: the vacuity proof is a property of the *service* comparison reading real data, and a
+> correct `capi` leg is not a green the gate has been credited with — it is the control that lets the service
+> red be reached.
 
 > ### Demonstration #2 — the exact mutation, and why no count is stated
 >
