@@ -20,8 +20,19 @@ rewrites + 1 Codex fixer. Record:
 > `research/G19-fix-fpml-iso20022/decisions/speckit/`** — records written from this worktree are real tracked
 > files visible from either tree. No pre-`/gate-b` symlinking, and nothing to convert back at retirement.
 >
-> **No CodeGraph index in this worktree.** Use Read/Grep/Glob. Never pass the main checkout's `projectPath`
-> — an explicit `projectPath` silences the borrowed-index warning and answers from another branch.
+> **CodeGraph IS indexed in this worktree as of 2026-08-05** (`state: complete`, 3539 files) — the note that
+> said otherwise was written before the index existed. Pass **this worktree's** path,
+> `projectPath: /home/catalin/Work/Programming/fixpp-parallel`, and never the main checkout's: an explicit
+> `projectPath` silences the borrowed-index warning and would answer from another branch, which is now a
+> *silent* wrong answer because that tree is indexed too.
+>
+> **But the index does not cover CMake.** Its languages are `c, cpp, python, xml, yaml` — **zero** `.cmake` or
+> `CMakeLists.txt` files are in it. This feature's mechanism (`compare_system_includes.cmake`,
+> `run_consumer_witness.cmake`, `tests/consumer/CMakeLists.txt`, `src/*/CMakeLists.txt`) is therefore invisible
+> to CodeGraph: read it with **Read/Grep**, and treat "codegraph found nothing" about a CMake symbol as
+> *no evidence*, never as absence. CodeGraph **is** authoritative for the C++ probe TUs the reply is read
+> from — `probe_usage_requirements.cpp`, `probe_service_positive.cpp`, `probe_umbrella.cpp` — and for the
+> three workflow YAMLs (indexed, 0 symbols: use it for file location, not structure).
 >
 > **Build discipline**: `-j2` maximum (wider OOM-kills the host); one owner per build directory;
 > `export CCACHE_DIR=/mnt/wsl/fixppbuild/ccache`.
