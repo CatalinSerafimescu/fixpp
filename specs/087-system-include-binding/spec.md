@@ -233,10 +233,21 @@ explaining membership, and that no code path recomputes it from the observation.
 
 ### Key Entities
 
-- **Observed include set** — the include directories used to compile the consumer probe, each carrying a path
-  and a system/non-system classification. Measured per configuration.
-- **Allowed expectation** — the declared set the observed side is compared against, defined in the tree with
-  a rationale, including how toolchain-owned roots are treated.
+*(Names below are the ones `data-model.md` uses, so the two do not drift. Corrected at the step-9 checklist
+audit, 2026-08-05 — this list said "**Allowed** expectation" where the data model says "**Declared**
+expectation", and it omitted the per-leg result file entirely, which was added to the data model as **E4** at
+Gate A instance 2. That is this feature's recorded recurring root cause: a round-N addition swept into the
+artifacts that **do** the work but not into those that **summarise** it.)*
+
+- **Include entry** (`data-model.md` E1) — one directory on a target's effective include path, carrying a path
+  and a system/non-system classification.
+- **Observed include set** (E2) — the include entries used to compile one consumer probe, from one
+  configuration. **Measured**, never defaulted; a missing observation is fatal, not empty.
+- **Declared expectation** (E3) — the set the observed side is compared against, defined in the tree with a
+  rationale per member, including how toolchain-owned roots are treated. One per leg.
+- **Per-leg result file** (E4) — the artifact the comparator writes for one leg **before it terminates**,
+  including on a red comparison. It records which leg it is; the leg-set assertion reasons over exactly two of
+  these and never re-opens a reply.
 - **Consumer probe target** — the real target whose compilation is measured. **Two of them**, one linking only
   `fixpp::capi` and one linking only `fixpp::service`, each from the installed package so the measurement
   reflects the shipped interface. They are separate targets with separate expectations because the two
