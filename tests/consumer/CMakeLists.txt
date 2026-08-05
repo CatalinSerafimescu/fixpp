@@ -257,39 +257,39 @@ OBSERVED_COMPILE_FEATURES=$<JOIN:$<TARGET_PROPERTY:probe_usage_requirements,COMP
 # short-circuits on the first non-zero exit, so if `service` ran first a red
 # there would leave no capi-leg result behind at all.
 #
-# ⚠️ T013 — DEMONSTRATION #1, THE VACUITY PROOF. THIS IS A DELIBERATE RED.
+# ── The RIGHT-HAND SIDE of the 087 comparison: literals WITH AN ORIGIN ────────
 #
-# The `service` expectation below is WRONG ON PURPOSE: it names
-# include/service-iface only, omitting include/capi — a strict, NON-EMPTY subset
-# of the measured set (contract §1 row 2). Run against the real reply it must red
-# with LEAK, naming include/capi as observed-but-unexpected. T014 corrects it.
+# Contract C-4 / data-model I4. Each member carries its own reason for being
+# there (E3's `origin` column). NOTHING may derive either set from the
+# observation it checks: a comparison whose expected value comes out of the run
+# is satisfied by whatever the run produced — the same no-op shape as a
+# file(GENERATE) nothing reads, and the very defect 086 declined to ship.
 #
-# Why this red must be observed BEFORE any green (Article VII §3, FR-007, and
-# tasks.md's "single most important ordering in the file"): a gate first seen
-# green has not been shown to measure anything. This is the ONLY induction class
-# that reds the gate without touching the package, the reply, or the invocation,
-# so it is the only one that proves the observed side is genuinely measured
-# rather than defaulted, derived, or compared against itself.
+# ⚠️ C-4 and I4 are REVIEW-TIME invariants only. No §5 demonstration and no
+# mechanised check would catch a future edit that recomputed these from the
+# reply; US3's Independent Test is a human inspection (T028). Do not describe
+# them as gate-enforced.
 #
-# The `capi` expectation is declared AT ITS MEASURED VALUE, and that is a
-# REQUIREMENT of this row, not a convenience (contract §5's demonstration-#1
-# box). The carrier runs capi first and its COMMAND list short-circuits, so:
-#   capi absent/empty  -> LEG_ERROR at argument validation; build stops; the
-#                         service leg never runs and the row records the WRONG token
-#   capi present-but-wrong -> the capi leg reds first; build stops; same outcome
-#   capi correct           -> capi passes, writes its result, and the service leg
-#                         then reds with LEAK — the token this row asserts
-# So "before the correct expectation is written" scopes to the SERVICE leg alone.
-# A correct capi leg is not a green the gate has been credited with; it is the
-# control that lets the service red be reached.
-#
-# The service leg is used because the capi leg's single entry admits no non-empty
-# strict subset, and LEAK is by construction here so it cannot be confused with
-# demonstration #3's DROP.
-#
-# Wire format is compare_system_includes.cmake's own: "<prefix-relative path>|<isSystem 0|1>".
+# Wire format is compare_system_includes.cmake's own:
+#   "<prefix-relative path>|<isSystem 0|1>", entries separated by ';'.
+# Values MEASURED through the shipped driver at T007 (evidence:
+# ~/fixpp-087-evidence/driver-observed.txt), matching research.md R4 and
+# contract §1 exactly on Linux/clang, and R6 on MSVC-under-Conan.
+
+# capi — one entry. The C-ABI root 086 installs, and `fixpp::capi`'s ONLY
+# $<INSTALL_INTERFACE:> (src/capi/CMakeLists.txt:112-115).
 set(FIXPP_087_EXPECTED_CAPI "include/capi|1")
-set(FIXPP_087_EXPECTED_SERVICE "include/service-iface|1")
+
+# service — two entries, and each arrives by a DIFFERENT route, which is why
+# this leg is the one that can go LEAK and DROP at once (§5 row #8):
+#   include/service-iface — src/service/CMakeLists.txt's own independently
+#                           declared install interface (:24-27);
+#   include/capi          — INHERITED transitively, through fixpp::service's
+#                           link to fixpp::capi (src/service/CMakeLists.txt:30).
+#                           Nothing in src/service/ names it.
+# T013 (demonstration #1, the vacuity proof) deliberately omitted the inherited
+# member and observed the resulting LEAK before this line was ever correct.
+set(FIXPP_087_EXPECTED_SERVICE "include/service-iface|1;include/capi|1")
 
 # The codemodel-v2 reply directory for THIS sub-build. Contract §2a: the query
 # file is written by run_consumer_witness.cmake before this project is
