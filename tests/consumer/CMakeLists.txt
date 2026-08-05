@@ -257,14 +257,39 @@ OBSERVED_COMPILE_FEATURES=$<JOIN:$<TARGET_PROPERTY:probe_usage_requirements,COMP
 # short-circuits on the first non-zero exit, so if `service` ran first a red
 # there would leave no capi-leg result behind at all.
 #
-# ⚠️ No expectation is declared yet (T013 comes next). FIXPP_087_EXPECTED_CAPI
-# and FIXPP_087_EXPECTED_SERVICE are empty on purpose: contract §3 C-2 / C-6.4
-# requires `compare` to reject an empty expectation as LEG_ERROR at
-# argument-validation time, before any reply is even located — so until T013
-# fills these in, the `capi` leg (which runs first) reds LEG_ERROR and the
-# build stops there. That is Phase 2's required end state.
-set(FIXPP_087_EXPECTED_CAPI "")
-set(FIXPP_087_EXPECTED_SERVICE "")
+# ⚠️ T013 — DEMONSTRATION #1, THE VACUITY PROOF. THIS IS A DELIBERATE RED.
+#
+# The `service` expectation below is WRONG ON PURPOSE: it names
+# include/service-iface only, omitting include/capi — a strict, NON-EMPTY subset
+# of the measured set (contract §1 row 2). Run against the real reply it must red
+# with LEAK, naming include/capi as observed-but-unexpected. T014 corrects it.
+#
+# Why this red must be observed BEFORE any green (Article VII §3, FR-007, and
+# tasks.md's "single most important ordering in the file"): a gate first seen
+# green has not been shown to measure anything. This is the ONLY induction class
+# that reds the gate without touching the package, the reply, or the invocation,
+# so it is the only one that proves the observed side is genuinely measured
+# rather than defaulted, derived, or compared against itself.
+#
+# The `capi` expectation is declared AT ITS MEASURED VALUE, and that is a
+# REQUIREMENT of this row, not a convenience (contract §5's demonstration-#1
+# box). The carrier runs capi first and its COMMAND list short-circuits, so:
+#   capi absent/empty  -> LEG_ERROR at argument validation; build stops; the
+#                         service leg never runs and the row records the WRONG token
+#   capi present-but-wrong -> the capi leg reds first; build stops; same outcome
+#   capi correct           -> capi passes, writes its result, and the service leg
+#                         then reds with LEAK — the token this row asserts
+# So "before the correct expectation is written" scopes to the SERVICE leg alone.
+# A correct capi leg is not a green the gate has been credited with; it is the
+# control that lets the service red be reached.
+#
+# The service leg is used because the capi leg's single entry admits no non-empty
+# strict subset, and LEAK is by construction here so it cannot be confused with
+# demonstration #3's DROP.
+#
+# Wire format is compare_system_includes.cmake's own: "<prefix-relative path>|<isSystem 0|1>".
+set(FIXPP_087_EXPECTED_CAPI "include/capi|1")
+set(FIXPP_087_EXPECTED_SERVICE "include/service-iface|1")
 
 # The codemodel-v2 reply directory for THIS sub-build. Contract §2a: the query
 # file is written by run_consumer_witness.cmake before this project is
