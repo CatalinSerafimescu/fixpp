@@ -135,19 +135,41 @@ set(_required_targets
   # back.
   probe_capi_negative        # ❌ fixpp::capi must not reach <fixpp/wire/parser.hpp>
   probe_capi_negative_service # ❌ fixpp::capi must not reach the service header
-  probe_service_negative)    # ❌ fixpp::service must not reach an engine header
+  probe_service_negative     # ❌ fixpp::service must not reach an engine header
+  probe_system_include_contract) # 087 T010 — installed system-include interface (C-6.3)
 execute_process(
   COMMAND "${CMAKE_COMMAND}" --build "${_sub_build}" --target ${_required_targets}
   RESULT_VARIABLE _build_rc
   OUTPUT_VARIABLE _build_out
   ERROR_VARIABLE  _build_err
 )
+# ⚠️ The token names in the message below are spelled WITHOUT brackets, and that
+# is load-bearing rather than stylistic. The comparator emits its real token
+# BRACKETED, as `[<TOKEN>] compare_system_includes.cmake compare (<leg>): ...`,
+# and contract §5's demonstrations record that token as their evidence. If this
+# help text enumerated them bracketed, a bare grep for the bracketed form would
+# match THIS TEXT on every red, so a demonstration could be ticked having matched
+# the enumeration rather than the emission — §5 row #8 asserts LEAK *and* DROP and
+# would confirm both vacuously. Measured: the first draft of this message did
+# exactly that, and all six token names appeared in a run whose only real token
+# was the capi leg's LEG_ERROR.
+#
+# Evidence greps MUST anchor on the emission, e.g.
+#   grep -oE '\[[A-Z_]+\] compare_system_includes'
+# rather than on a bare bracketed token name.
 if(NOT _build_rc EQUAL 0)
   message(FATAL_ERROR
-    "consumer build failed (exit ${_build_rc}). NOTE: this driver builds the 086 "
-    "witness targets BY NAME (${_required_targets}), so an \"unknown target\" error "
-    "(Ninja) or \"No rule to make target\" (Makefiles) here means a gate was deleted "
-    "or renamed, not that the code is broken.\n"
+    "consumer build failed (exit ${_build_rc}). This driver builds the 086/087 "
+    "witness targets BY NAME (${_required_targets}). Two dispositions are possible, "
+    "and they are NOT the same finding (contract C-6.3):\n"
+    "  * an \"unknown target\" error (Ninja) or \"No rule to make target\" "
+    "(Makefiles) means a gate was deleted or renamed;\n"
+    "  * a non-zero exit FROM probe_system_include_contract itself means the "
+    "system-include comparison FAILED — a genuine interface violation. Its token "
+    "(one or more of LEAK, DROP, RECLASSIFIED, MISSING_REPLY, INPUT_ERROR, "
+    "LEG_ERROR — spelled unbracketed here on purpose; see the comment above this "
+    "message in run_consumer_witness.cmake) and its first diagnostic line are in "
+    "the build output printed directly below.\n"
     "${_build_out}\n${_build_err}")
 endif()
 

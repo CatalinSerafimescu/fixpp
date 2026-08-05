@@ -242,3 +242,64 @@ OBSERVED_COMPILE_OPTIONS=$<JOIN:$<TARGET_PROPERTY:probe_usage_requirements,COMPI
 EXPECTED_COMPILE_FEATURES=${FIXPP_086_EXPECTED_COMPILE_FEATURES}
 OBSERVED_COMPILE_FEATURES=$<JOIN:$<TARGET_PROPERTY:probe_usage_requirements,COMPILE_FEATURES>,|>
 ")
+
+# ═════════════════════════════════════════════════════════════════════════════
+# 087-system-include-binding — the installed system-include interface
+# (specs/087-system-include-binding/contracts/system-include-interface.md)
+#
+# T010: the carrier target. A NEW, uniquely named target — never one of 086's
+# (contract C-6.2) — whose build command invokes the standalone comparator
+# (compare_system_includes.cmake, T008/T009) once per leg, `capi` THEN
+# `service`, then `leg-set` over the two collected result files. The
+# capi-before-service ordering is load-bearing, not incidental (C-6.2): it is
+# what makes §5 row #8's same-run capi evidence a property of THIS gate's
+# output rather than of a demonstrator's follow-up read — a `COMMAND` list
+# short-circuits on the first non-zero exit, so if `service` ran first a red
+# there would leave no capi-leg result behind at all.
+#
+# ⚠️ No expectation is declared yet (T013 comes next). FIXPP_087_EXPECTED_CAPI
+# and FIXPP_087_EXPECTED_SERVICE are empty on purpose: contract §3 C-2 / C-6.4
+# requires `compare` to reject an empty expectation as LEG_ERROR at
+# argument-validation time, before any reply is even located — so until T013
+# fills these in, the `capi` leg (which runs first) reds LEG_ERROR and the
+# build stops there. That is Phase 2's required end state.
+set(FIXPP_087_EXPECTED_CAPI "")
+set(FIXPP_087_EXPECTED_SERVICE "")
+
+# The codemodel-v2 reply directory for THIS sub-build. Contract §2a: the query
+# file is written by run_consumer_witness.cmake before this project is
+# configured, so by build time (when this target's COMMANDs run) the reply
+# already exists, produced by the same configure that defined every target
+# below.
+set(_fixpp_087_reply_dir "${CMAKE_BINARY_DIR}/.cmake/api/v1/reply")
+
+# Contract C-6.1: these MUST lie under CMAKE_BINARY_DIR as THIS file sees it —
+# i.e. inside the `-B` tree run_consumer_witness.cmake wipes at the START of
+# every run — so leg-set's "exactly two" is an assertion about THIS run.
+set(_fixpp_087_result_capi    "${CMAKE_BINARY_DIR}/fixpp-087-result-capi.txt")
+set(_fixpp_087_result_service "${CMAKE_BINARY_DIR}/fixpp-087-result-service.txt")
+
+add_custom_target(probe_system_include_contract
+  COMMAND "${CMAKE_COMMAND}"
+    -DFIXPP_087_MODE=compare
+    "-DFIXPP_087_REPLY_DIR=${_fixpp_087_reply_dir}"
+    -DFIXPP_087_LEG=capi
+    "-DFIXPP_087_INSTALL_PREFIX=${FIXPP_STAGE_PREFIX}"
+    "-DFIXPP_087_EXPECTATION=${FIXPP_087_EXPECTED_CAPI}"
+    "-DFIXPP_087_RESULT_FILE=${_fixpp_087_result_capi}"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/compare_system_includes.cmake"
+  COMMAND "${CMAKE_COMMAND}"
+    -DFIXPP_087_MODE=compare
+    "-DFIXPP_087_REPLY_DIR=${_fixpp_087_reply_dir}"
+    -DFIXPP_087_LEG=service
+    "-DFIXPP_087_INSTALL_PREFIX=${FIXPP_STAGE_PREFIX}"
+    "-DFIXPP_087_EXPECTATION=${FIXPP_087_EXPECTED_SERVICE}"
+    "-DFIXPP_087_RESULT_FILE=${_fixpp_087_result_service}"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/compare_system_includes.cmake"
+  COMMAND "${CMAKE_COMMAND}"
+    -DFIXPP_087_MODE=leg-set
+    "-DFIXPP_087_RESULT_FILES=${_fixpp_087_result_capi};${_fixpp_087_result_service}"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/compare_system_includes.cmake"
+  VERBATIM
+  COMMENT "087: comparing the installed system-include interface (capi, then service)"
+)
