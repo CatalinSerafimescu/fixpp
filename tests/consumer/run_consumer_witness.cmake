@@ -69,6 +69,16 @@ if(EXISTS "${_stage}/include/fixpp/vt11")
   message(FATAL_ERROR "Staged install leaked fixpp/vt11/ (must be excluded per FR-008)")
 endif()
 
+# ── 1a. 087 T006 — request the codemodel-v2 File API reply ───────────────────
+# contract §2a: a reply exists only if .cmake/api/v1/query/codemodel-v2 was
+# present when CMake configured the sub-build below. tests/consumer/CMakeLists.txt
+# cannot write this file itself — it executes *during* the configure it would be
+# requesting a reply for, so the driver (here) writes it first. _sub_build does not
+# exist yet at this point (the configure below creates it), so the query directory
+# is created explicitly.
+file(MAKE_DIRECTORY "${_sub_build}/.cmake/api/v1/query")
+file(TOUCH "${_sub_build}/.cmake/api/v1/query/codemodel-v2")
+
 # ── 2. Configure the standalone consumer project ─────────────────────────────
 # Reuses the main build's Conan toolchain (resolves pugixml identically to the
 # main build — no separate dependency-resolution mechanism) but points the
