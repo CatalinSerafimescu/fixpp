@@ -80,7 +80,10 @@ specs/087-system-include-binding/
 ├── tasks.md             # 44 tasks, T001–T044 (pipeline step 5, 2026-08-05); five countable sets
 │                        #   pinned in its header + a requirement→task map over 18/18 FR, 8/8 SC
 ├── research.md          # R1–R7; BOTH platforms measured on the real consumer project
-├── data-model.md        # observed set / declared expectation / probe target
+├── data-model.md        # E1 include entry / E2 observed set / E3 declared expectation /
+│                        #   E4 per-leg result file; invariants I1–I7
+│                        #   (this line listed three entities and omitted E1 and E4 until the
+│                        #    step-9 audit — the same summarise-vs-do drift CHK018 found in spec.md)
 ├── contracts/
 │   └── system-include-interface.md   # normative expected sets + comparison rules
 ├── quickstart.md        # reproduce every measurement and every red

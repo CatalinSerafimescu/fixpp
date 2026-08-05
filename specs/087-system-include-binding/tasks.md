@@ -53,6 +53,7 @@ T014a/T019a precedent). Tests are not optional in this feature — the gate *is*
 |---|---|---|
 | §5 demonstrated-red rows + green control | **9 + 1** | T013, T015–T023 |
 | C-6.4 `LEG_ERROR` causes / §5 row 6a sub-cases | **4** | T022 (i)–(iv) |
+| §5 rows carrying **mandatory** sub-cases | row 5 → **2** · row 6a → **4** · row 7 → **2** | T020, T022, T023 |
 | FR-011 / contract §4a amendment rows | **7** | T029–T035 |
 | FR-014 workflows carrying the count assertion | **3** | T024, T025, T026 |
 | R7 anti-vacuity guards | **6** | T008 (#1), T008 (#2), T011 (#3), T010+T008 (#4), T009 (#5), T024–T026 (#6) |
