@@ -1,8 +1,53 @@
 # Tier 2 (MSVC) compiler cache — sccache probe
 
-**Status:** WIRED, **not yet measured on CI**. Issue [#231]. Sibling of
-[`ctest-parallelism-probe.md`](ctest-parallelism-probe.md), and deliberately the same shape: a change
-that is kept only if a measurement says to keep it.
+**Status:** WIRED. **Cold run measured** ([31114098100], 2026-08-06); the warm half of the A/B is
+still outstanding. Issue [#231].
+
+## MEASURED — cold run, 2026-08-06
+
+Dispatched on `ci/231-tier2-sccache`. ⚠️ **All three legs were cancelled externally** during a
+window that also took the longest-running job out of Tier 1, Tier 2 and Tier 3 on `main` — cause
+under separate investigation, unrelated to this change and not something this file should guess at.
+The cancellations landed in the **`ctest`** phase on two of three legs, i.e. **after** Build, stats
+and seed, so the compiler-cache evidence survived intact.
+
+| leg | AC3 gate | restore | compile requests | hits | **non-cacheable** | **failures** | seeded |
+|---|---|---|---:|---:|---:|---:|---|
+| `windows-msvc-debug` | ✅ | MISS | 1456 | 0 (0.00 %) | **0** | **0** | ✅ 1.1 G |
+| `windows-msvc-release` | ✅ | MISS | *(cold, completed)* | 0 | — | — | ✅ |
+| `windows-msvc-asan` | ✅ | MISS | 894 *(partial — Build cancelled at 65m)* | 0 | **0** | **0** | ❌ |
+
+**The `0 non-cacheable / 0 failures` column is the headline, not the 0 % hit rate.** A cold run is
+*supposed* to be 0 %. What was genuinely unknown is whether the `/Z7` prerequisite holds across the
+whole build rather than on the one TU the AC3 gate samples — and 1456 + 894 compiles produced
+**zero** non-cacheable compilations and **zero** compilation failures. That retires the failure mode
+#231 was most worried about, and it does so on every leg including asan.
+
+AC3's gate printed, on all three legs:
+
+```
+OK: launcher present
+OK: /Z7 (embedded debug info)
+OK: no /Zi
+```
+
+Other cold-run facts worth keeping:
+
+- **`Build` step ≈ 75m26s** on `windows-msvc-debug` (15:08:14 → 16:23:40), against the 80m13s
+  baseline — i.e. the launcher itself costs nothing measurable.
+- **Publishing is cheap.** 1.1 GB archive, `oras push` 16:24:11 → 16:24:28 = **17 s**. The
+  upload-cost worry does not survive contact with the measurement. `SCCACHE_CACHE_SIZE=8G` is
+  comfortable against a measured 1.1 G and needs no tuning yet.
+- **The package was created by CI**, with `GITHUB_TOKEN` and no bootstrap — and came out
+  `visibility: public`, `repository: CatalinSerafimescu/fixpp`, matching the other three packages.
+  Both of this file's earlier worries on that point (that the first push might be refused, and that
+  the package would land private and 401 fork PRs) were **wrong**; the `oras login` in the restore
+  step is therefore belt-and-braces rather than load-bearing.
+
+---
+
+Sibling of [`ctest-parallelism-probe.md`](ctest-parallelism-probe.md), and deliberately the same
+shape: a change that is kept only if a measurement says to keep it.
 
 Tier 1 / Tier 3 keep `hendrikmuhs/ccache-action`. This is not a proposal to unify them — sccache is
 here because ccache's MSVC support is still experimental while sccache has treated `cl.exe` as a
@@ -243,18 +288,14 @@ scope creep for its own sake: `fixpp-conan-cache` is the package where the defec
 the same one-line expression, and leaving it out would mean the PAT fixes the new package while the
 old one keeps accumulating.
 
-### Open item — the package does not exist yet
+### CLOSED — the package created itself, public, from CI
 
-`ghcr.io/catalinserafimescu/fixpp-sccache` is created by the **first seed**. Verified against the
-three packages that already exist (`fixpp-conan-cache`, `fixpp-libcxx-tsan`,
-`fixpp-interop-counterparties`): all are `visibility=public`, and `fixpp-conan-cache` carries
-`repository: CatalinSerafimescu/fixpp` — the linkage the `org.opencontainers.image.source`
-annotation establishes, which `seed-sccache.sh` sets identically.
-
-A newly created package is **private**. The restore step therefore `oras login`s first (`|| true`,
-so a fork PR's downgraded token still falls back to an anonymous pull). **If it is left private,
-fork-PR legs read as a permanent MISS** — visible as a 0% hit rate in the stats, not as a failure.
-Making it public matches the other three and removes the asymmetry.
+`ghcr.io/catalinserafimescu/fixpp-sccache` was created at 16:24:28Z by the cold run's own seed step,
+with plain `GITHUB_TOKEN` and no bootstrap, as `visibility: public` /
+`repository: CatalinSerafimescu/fixpp` — matching `fixpp-conan-cache`, `fixpp-libcxx-tsan` and
+`fixpp-interop-counterparties`. Both concerns previously recorded here (a refused first push; a
+private package 401-ing fork PRs into a permanent MISS) were unfounded. The `oras login` in the
+restore step stays as belt-and-braces, not as a fix for something real.
 
 ## Running the A/B — the warm dispatch is GATED, not automatic
 
@@ -295,10 +336,10 @@ Numbering follows #231.
 
 | # | criterion | status |
 |---|---|---|
-| 1 | `sccache --show-stats` in the job summary on every leg — requests, hits, **and** the non-cacheable/failure breakdown | **WIRED** — `if: always()`, so a red build still reports them. The restore step ends with `--zero-stats`, so the reported rate is over a known-zero baseline rather than over whatever a prior step happened to leave. Not yet measured on CI. |
-| 2 | warm-vs-cold `Build` wall time, back-to-back **on the same PR in the same session** | **PENDING** — two `workflow_dispatch` runs on this branch, cold then warm. Not a cross-day A/B: on GitHub runners that measures host drift as much as code (`feedback_bench_ab_needs_same_session_control_host_drifts`). |
-| 3 | one-TU `ninja -v` / `-t commands` excerpt confirming `/Z7` and the launcher | **WIRED as a GATE, not an excerpt** — see §4 below. Locally proven RED on an unfixed tree. |
-| 4 | all three legs green, incl. the `Assert the packaging tier is registered` count check on `windows-msvc-release` | **PENDING** |
+| 1 | `sccache --show-stats` in the job summary on every leg — requests, hits, **and** the non-cacheable/failure breakdown | **MET (cold half)** — debug 1456 req / 0 hit / **0 non-cacheable** / **0 failures**; asan 894 req / **0** / **0**. The restore step ends with `--zero-stats`, so the rate is over a known-zero baseline. |
+| 2 | warm-vs-cold `Build` wall time, back-to-back **on the same PR in the same session** | **HALF DONE** — cold captured (debug `Build` 75m26s vs an 80m13s baseline). Warm dispatch outstanding; debug + release are seeded, **asan is not** (its Build was cancelled before the seed) so asan re-runs cold. Not a cross-day A/B: on GitHub runners that measures host drift as much as code (`feedback_bench_ab_needs_same_session_control_host_drifts`). |
+| 3 | one-TU `ninja -v` / `-t commands` excerpt confirming `/Z7` and the launcher | **MET** — shipped as a GATE, not an excerpt (see §4). Passed on all three legs: `OK: launcher present` / `OK: /Z7` / `OK: no /Zi`. Proven RED on an unfixed tree. |
+| 4 | all three legs green, incl. the `Assert the packaging tier is registered` count check on `windows-msvc-release` | **PENDING** — the cold run cannot answer it: all three legs were cancelled externally mid-`ctest`. `Assert the packaging tier is registered` did pass on `windows-msvc-release` before the cancellation. |
 | 5 | explicit statement of what was **not** improved | **MET** — the `ctest` half, 81 min on the asan leg; see the top of this file. Cross-ref [#229]. |
 
 ### AC3 is a gate
@@ -331,3 +372,4 @@ into the job summary so that trade is visible rather than assumed.
 [#229]: https://github.com/CatalinSerafimescu/fixpp/issues/229
 [#177]: https://github.com/CatalinSerafimescu/fixpp/issues/177
 [30880318695]: https://github.com/CatalinSerafimescu/fixpp/actions/runs/30880318695
+[31114098100]: https://github.com/CatalinSerafimescu/fixpp/actions/runs/31114098100
