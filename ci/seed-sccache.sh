@@ -51,6 +51,12 @@ WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
 # Uncompressed — see restore-sccache.sh. Must match the extract side.
 tar -cf "$WORK/sccache-$PRESET.tar" -C "$DIR_POSIX" .
 
+# Report the SIZES BEFORE attempting the push, not after. SCCACHE_CACHE_SIZE was
+# set from an estimate and is meant to be tuned from these two numbers — and the
+# run most likely to fail its push (the first one, before the GHCR package
+# exists) is exactly the run whose sizing datum would otherwise be lost.
+note "sccache-cache archive \`$TAG\` — $(du -h "$WORK/sccache-$PRESET.tar" | cut -f1) archive, $(du -sh "$DIR_POSIX" | cut -f1) on disk (cap \`${SCCACHE_CACHE_SIZE:-default}\`)"
+
 # Push from inside $WORK with a RELATIVE filename so oras' absolute-path guard
 # passes and the artifact title is the clean basename (same reason as
 # seed-conan-cache.sh).
@@ -59,9 +65,18 @@ tar -cf "$WORK/sccache-$PRESET.tar" -C "$DIR_POSIX" .
     --annotation "org.opencontainers.image.source=https://github.com/CatalinSerafimescu/fixpp" \
     --annotation "fixpp.preset=$PRESET" \
     --annotation "fixpp.msvc.toolset=$SCCACHE_CACHE_TOOLSET" \
-    "sccache-$PRESET.tar:application/x-tar" ) || { echo "seed: oras push failed" >&2; exit 1; }
+    "sccache-$PRESET.tar:application/x-tar" ) || {
+  # The caller sets continue-on-error, so this exit is INVISIBLE in the step's
+  # status. Shout into the summary instead — a silently unseeded cache makes the
+  # next run a second COLD build that reads as a warm one, which would corrupt
+  # the A/B this probe exists to produce.
+  note "::error::sccache-cache SEED FAILED for \`$TAG\` — the cache was NOT published. A following 'warm' run would measure another cold build."
+  exit 1
+}
 
-note "sccache-cache SEEDED \`$TAG\`  ($(du -h "$WORK/sccache-$PRESET.tar" | cut -f1) archive, $(du -sh "$DIR_POSIX" | cut -f1) on disk)"
+# The literal token a warm-run dispatch is gated on. Do not reword without
+# updating ci/tier2-sccache-probe.md, which tells the operator to grep for it.
+note "sccache-cache SEEDED \`$TAG\`"
 
 # ── Prune, best-effort ───────────────────────────────────────────────────────
 # Two kinds of dead weight accumulate here and BOTH matter, because a version is

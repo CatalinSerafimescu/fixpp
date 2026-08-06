@@ -59,3 +59,19 @@ else
   note "sccache-cache MISS \`$TAG\` → compiling with an empty cache"
   emit false
 fi
+
+# Start the server on a KNOWN-ZERO counter. Nothing before this point starts one
+# (`sccache --version` does not), so today the counters would be zero anyway —
+# but "would be anyway" is not a property worth resting the headline measurement
+# on, and any future step that touches sccache earlier would silently carry its
+# requests into the reported hit rate. --zero-stats also proves here, before an
+# 80-minute Build, that the server can start against the directory just restored.
+#
+# This IS allowed to redden the lane, unlike every other failure in this script.
+# A server that will not start is not "the cache is down" — every `sccache
+# cl.exe` invocation in the Build step would fail, so the choice is between
+# failing here with a step name that says why and failing 3235 times later.
+sccache --zero-stats >/dev/null || {
+  echo "::error::sccache server would not start against ${SCCACHE_DIR}. Every compile in the Build step invokes it, so this is fatal rather than a lost speedup."
+  exit 1
+}

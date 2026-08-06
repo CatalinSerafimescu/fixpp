@@ -97,7 +97,14 @@ Configure step passes. Full run: `sccache v0.17.0`.
 | launcher on the line | `sccache "…\cl.exe" /nologo /TP …` |
 | **cold** build | `Compile requests 3 · Cache hits 0 · Cache misses 3 · 0.00 %` |
 | **warm** build (objects wiped, cache kept) | `Compile requests 3 · Cache hits 3 · Cache misses 0 · **100.00 %**` |
+| **tar round-trip**: cache archived, directory **deleted**, restored from the archive, rebuilt | `Cache hits 3 · Cache misses 0 · **100.00 %**` |
 | **control**: same, `/Zi` (no override) | **build FAILS**, `C1041` ×2 — see §Prerequisites 1 |
+
+The round-trip row is there because the row above it does **not** imply it. A warm build against a
+cache directory that was never moved proves sccache caches; it does not prove a cache survives
+`tar -cf … -C $SCCACHE_DIR .` → delete → `tar -xf`, which is the only form CI ever sees. A local
+disk cache with an LRU index, absolute paths or a stale lock file could have failed exactly there,
+after the 104-minute leg rather than before it.
 
 Two things this settles that a CI run would have settled more expensively:
 
@@ -172,14 +179,49 @@ Same bargain the Conan package already makes (*"MISS is never fatal"*).
 Publishing happens **after Build and before `ctest`**: the cache is a compilation artifact, and
 withholding it because an unrelated test went red would make the next run pay a full cold build.
 
-### Open item — package visibility
+### Open item — the package does not exist yet
 
-`ghcr.io/catalinserafimescu/fixpp-sccache` is created by the first seed and is **private** by
-default, unlike `fixpp-conan-cache` which was made public by hand. The restore step therefore
-`oras login`s first (`|| true`, so a fork PR's downgraded token falls back to an anonymous pull).
-**If the package is left private, fork-PR legs will read as a permanent MISS** — visible as a 0% hit
-rate in the stats, not as a failure. Making it public matches the Conan package and removes the
-asymmetry.
+`ghcr.io/catalinserafimescu/fixpp-sccache` is created by the **first seed**. Verified against the
+three packages that already exist (`fixpp-conan-cache`, `fixpp-libcxx-tsan`,
+`fixpp-interop-counterparties`): all are `visibility=public`, and `fixpp-conan-cache` carries
+`repository: CatalinSerafimescu/fixpp` — the linkage the `org.opencontainers.image.source`
+annotation establishes, which `seed-sccache.sh` sets identically.
+
+A newly created package is **private**. The restore step therefore `oras login`s first (`|| true`,
+so a fork PR's downgraded token still falls back to an anonymous pull). **If it is left private,
+fork-PR legs read as a permanent MISS** — visible as a 0% hit rate in the stats, not as a failure.
+Making it public matches the other three and removes the asymmetry.
+
+## Running the A/B — the warm dispatch is GATED, not automatic
+
+`workflow_dispatch` bypasses the `filter` job's gate check, so neither run needs a gate label:
+
+```bash
+gh workflow run tier2.yml --ref ci/231-tier2-sccache      # 1. COLD
+# … then, only after the check below passes …
+gh workflow run tier2.yml --ref ci/231-tier2-sccache      # 2. WARM
+```
+
+⚠️ **Do not fire the warm run on the cold run's green checkmark.** The seed step carries
+`continue-on-error: true` — correct in steady state, wrong here: a failed publish leaves a green
+cold run followed by a "warm" run that is silently a **second cold build**, i.e. six hours spent
+measuring nothing. The first run is the one most likely to fail its push, because that is the run
+that has to create the package.
+
+Gate on the marker instead. Each leg's job summary must contain, literally:
+
+```
+sccache-cache SEEDED `sccache-<preset>-<toolset>`
+```
+
+and no `SEED FAILED` line. Both are emitted by `ci/seed-sccache.sh` into `$GITHUB_STEP_SUMMARY`;
+the failure line is an `::error::` so it is not merely quiet text. The archive/on-disk sizes are
+printed **before** the push, so a failed first run still yields the datum
+`SCCACHE_CACHE_SIZE` needs to be tuned from.
+
+Read off the cold run while it is there, since it is the only cold run that will be cheap to get:
+the `Build` step wall time per leg, and — for the follow-up on the uncached dependency scan — how
+much of it the `Scanning … for CXX dependencies` lines account for.
 
 ---
 
@@ -189,7 +231,7 @@ Numbering follows #231.
 
 | # | criterion | status |
 |---|---|---|
-| 1 | `sccache --show-stats` in the job summary on every leg — requests, hits, **and** the non-cacheable/failure breakdown | **WIRED** — `if: always()`, so a red build still reports them. Not yet measured on CI. |
+| 1 | `sccache --show-stats` in the job summary on every leg — requests, hits, **and** the non-cacheable/failure breakdown | **WIRED** — `if: always()`, so a red build still reports them. The restore step ends with `--zero-stats`, so the reported rate is over a known-zero baseline rather than over whatever a prior step happened to leave. Not yet measured on CI. |
 | 2 | warm-vs-cold `Build` wall time, back-to-back **on the same PR in the same session** | **PENDING** — two `workflow_dispatch` runs on this branch, cold then warm. Not a cross-day A/B: on GitHub runners that measures host drift as much as code (`feedback_bench_ab_needs_same_session_control_host_drifts`). |
 | 3 | one-TU `ninja -v` / `-t commands` excerpt confirming `/Z7` and the launcher | **WIRED as a GATE, not an excerpt** — see §4 below. Locally proven RED on an unfixed tree. |
 | 4 | all three legs green, incl. the `Assert the packaging tier is registered` count check on `windows-msvc-release` | **PENDING** |
