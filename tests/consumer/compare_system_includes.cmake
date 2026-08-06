@@ -108,22 +108,6 @@ if(FIXPP_087_MODE STREQUAL "compare")
       message(FATAL_ERROR "compare_system_includes.cmake compare: -D${_var}=... is required")
     endif()
   endforeach()
-  # DEFINED is not enough for the prefix: an empty (or "/") value normalises to
-  # a zero-length prefix, which matches the leading "/" of EVERY absolute entry,
-  # strips it, and so passes the wrong-prefix guard while leaving nothing able to
-  # match the expectation — the same degenerate all-LEAK + all-DROP the guard
-  # exists to prevent, reached through the one input the guard cannot see.
-  # Deliberately a plain usage error, NOT a token: C-6.4's cause list stays four.
-  string(REGEX REPLACE "/+$" "" _prefix_probe "${FIXPP_087_INSTALL_PREFIX}")
-  if(_prefix_probe STREQUAL "")
-    message(FATAL_ERROR
-      "compare_system_includes.cmake compare: "
-      "-DFIXPP_087_INSTALL_PREFIX is empty or the filesystem root. A zero-length "
-      "prefix strips the leading '/' from every observed entry, so the comparison "
-      "would degenerate to all-LEAK + all-DROP and void this row's assertion.\n"
-      "Pass the prefix the configure actually used — for the shipped witness that "
-      "is <build>/_consumer_witness/stage.")
-  endif()
   if(NOT DEFINED FIXPP_087_LEG)
     set(FIXPP_087_LEG "")
   endif()
@@ -182,6 +166,34 @@ if(FIXPP_087_MODE STREQUAL "compare")
       "-DFIXPP_087_EXPECTATION='${FIXPP_087_EXPECTATION}' is non-empty as a "
       "string but parses to ZERO entries — refusing an unguarded null-vs-null "
       "comparison (data-model.md I3)")
+  endif()
+
+  # DEFINED is not enough for the prefix: an empty (or "/") value normalises to
+  # a zero-length prefix, which matches the leading "/" of EVERY absolute entry,
+  # strips it, and so passes the wrong-prefix guard while leaving nothing able to
+  # match the expectation — the same degenerate all-LEAK + all-DROP the guard
+  # exists to prevent, reached through the one input the guard cannot see.
+  # Deliberately a plain usage error, NOT a token: C-6.4's cause list stays four.
+  #
+  # ⚠️ POSITION IS LOAD-BEARING: this sits BELOW every [LEG_ERROR] check above and
+  # ABOVE the reply location below. It must stay pre-location — that is its whole
+  # purpose — but it must NOT precede a token guard. §5 row 6a(i) is "compare mode
+  # with an unknown leg" and, unlike (iv), does NOT stipulate "every other argument
+  # correct", so a demonstrator inducing it may pass a throwaway prefix; run above
+  # the unknown-leg check, this guard shadows the [LEG_ERROR] that row exists to
+  # record and the row banks NO token at all. Measured: it did exactly that when
+  # first written, and the direct-invocation test missed it because that test
+  # passed a correct prefix — the one configuration where this guard is silent.
+  # The original wrong-prefix guard below follows the same rule, further down still.
+  string(REGEX REPLACE "/+$" "" _prefix_probe "${FIXPP_087_INSTALL_PREFIX}")
+  if(_prefix_probe STREQUAL "")
+    message(FATAL_ERROR
+      "compare_system_includes.cmake compare: "
+      "-DFIXPP_087_INSTALL_PREFIX is empty or the filesystem root. A zero-length "
+      "prefix strips the leading '/' from every observed entry, so the comparison "
+      "would degenerate to all-LEAK + all-DROP and void this row's assertion.\n"
+      "Pass the prefix the configure actually used — for the shipped witness that "
+      "is <build>/_consumer_witness/stage.")
   endif()
 
   # ── C-5: locate the reply BY GLOB — never a hard-coded hash ────────────────

@@ -505,7 +505,7 @@ one, and every class is defined here:
 > ⚠️ **These anchors were RE-POINTED at `/simplify` (2026-08-06), `:97-99`→`:110-112` and
 > `:112-115`→`:125-128`.** They are not a correction of what was measured — the *content* at both sites is
 > byte-identical to `main`, verified line-for-line. 087's own row-4 amendment to `src/capi/CMakeLists.txt`
-> inserted 16 comment lines for 3, shifting everything from `:66` down by **+13**, and this box's anchors were
+> inserted 16 comment lines for 3, shifting everything from `:67` down by **+13**, and this box's anchors were
 > not re-pointed at the time. On HEAD, `:97-99` had become **comment text**: an operator following the
 > demonstration would have edited a comment and produced no `LEAK`. The drift was self-inflicted by the
 > amendment in the same feature — the recorded "re-point before a later layout change" shape — and it is
