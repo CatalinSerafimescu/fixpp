@@ -38,6 +38,13 @@
 // defect T012-T015 already fixed. T1's fix (arm-once absolute-expiry timer +
 // the `||` join) is T026/T027, not yet landed — do not expect this cell green
 // under ASan until then.
+//
+// Phase 5 (User Story 3) — T031/T032: cells B4 (SC-003) and B6 (SC-004/D-1b).
+// Both land after T016-T018/T026-T029 (the fix), so both are regression
+// guards over the delivered design, not RED-against-`main` cells — B4 is
+// GREEN on pre-fix source by construction (research.md D-6.7); B6's RED is a
+// mutant of the delivered design (`expires_after` moved into the loop), not
+// `main`. See each cell's own comment for its RED basis.
 
 #include <gtest/gtest.h>
 
@@ -505,6 +512,159 @@ TEST(ReadFirstFrameBounded, T1) {
 // elapsed wall-clock against a constant. The context is always drained to
 // `result.has_value()` regardless of which fires first, matching D-6.2's
 // "drain to completion" discipline (T1, above) rather than aborting mid-flight.
+// ── B4 (SC-003) — regression guard, NOT a RED cell against `main` ────────────
+// Over-budget, no complete frame ever (a declared BodyLength of 200000 that
+// never completes, X-padded to exactly max_bytes + 1 bytes — same shape as
+// `engine_firstframe_test.cpp`'s `make_carried_over_budget_payload`). Per
+// research.md D-6.7's per-cell RED-basis table: "none — GREEN on pre-fix
+// source. A `budget + 1` no-frame payload is rejected identically by `>=`
+// and `>`." Pre-fix rejects after ONE unclamped 4096-byte read (site B,
+// `4096 >= 4096`, before feed); the delivered design rejects after TWO
+// clamped reads (4096 then the room-clamped 1, `4097 > 4096` at the foot,
+// AFTER feed found nothing) — same outcome, different mechanism, so no A/B
+// against `main` can discriminate this cell. It proves the fix does not
+// relax FR-003/FR-014's protective intent, not that the fix changed anything
+// observable here.
+//
+// The two supporting pins (`async_reads_observed() == 2`, `buf.size() ==
+// kMaxBytes + 1`) exist so this cell asserts the MECHANISM D-6.9 credits it
+// with (the step-5 budget decision, "must fire") rather than merely a token
+// match on the error value: `framer.feed` can independently return
+// `wire_frame_too_large` on a badly-formed frame (D-6.8's FR-011 note), so a
+// bare `error == wire_frame_too_large` check would pass "for the wrong
+// reason" if some future change moved the rejection back into the framer.
+//
+// `read_latency = 3ms` (matching B5) is NOT needed for the assertion above —
+// B4 is `read_latency`-silent for its own outcome, same as B5 was before
+// D-6.11's correction. It is here because B4 shares B5's exposure to the
+// `room == 0` mutant (`room = max_bytes - buf.size()`): once buf.size()
+// reaches max_bytes, `want` clamps to 0, the mock returns a successful
+// zero-byte completion (mechanism 6), and the loop re-enters forever unless
+// a non-zero latency eventually lets the deadline arm be recorded first
+// (research.md D-6.11's B5 derivation, D-6.8's round-4 correction). Without
+// it this cell HANGS on that mutant instead of failing — it did, across two
+// Gate A rounds (tasks.md T031). Giving it the same treatment B5 got does
+// NOT earn B4 a matrix credit for that column — research.md D-6.11 states
+// plainly "[w]hether B4 *also kills* this column is not claimed here", and
+// none is claimed here either; the termination proof lives in the verify
+// record, not as an added mutant-kill column.
+TEST(ReadFirstFrameBounded, B4) {
+    constexpr std::size_t kMaxBytes = 4096;
+    constexpr auto kDeadline = std::chrono::milliseconds{50};
+
+    std::string never_completes = std::string("8=FIX.4.2\x01") + "9=200000\x01";
+    ASSERT_LT(never_completes.size(), kMaxBytes + 1);
+    never_completes.append(kMaxBytes + 1 - never_completes.size(), 'X');
+    ASSERT_EQ(never_completes.size(), kMaxBytes + 1);
+
+    Script s;
+    s.inbound_bytes = to_bytes(never_completes);
+    s.read_latency = std::chrono::milliseconds{3};
+
+    asio::io_context ioc;
+    mock_transport mt{ioc.get_executor(), std::move(s)};
+    std::vector<std::byte> buf;
+
+    auto fut = asio::co_spawn(
+        ioc, read_first_frame_bounded(mt, buf, kDeadline, kMaxBytes),
+        asio::use_future);
+    ioc.run();
+    expected_t<std::size_t> const result = fut.get();
+
+    EXPECT_FALSE(result.has_value())
+        << "B4 (SC-003): expected the over-budget, never-completing payload to be rejected, got "
+        << describe(result);
+    if (!result.has_value()) {
+        EXPECT_EQ(result.error(), error::wire_frame_too_large)
+            << "B4 (SC-003): expected wire_frame_too_large (FR-003/FR-014's protective intent), got "
+            << describe(result);
+    }
+    EXPECT_EQ(mt.async_reads_observed(), 2u)
+        << "B4 (SC-003) [mechanism pin]: expected exactly two reads (4096 then the room-clamped 1) — "
+        << "the step-5 budget decision, not an earlier framer-level reject.";
+    EXPECT_EQ(buf.size(), kMaxBytes + 1)
+        << "B4 (SC-003) [mechanism pin]: expected buf to hold exactly max_bytes + 1 bytes when the "
+        << "budget decision fires.";
+}
+
+// ── B6 (SC-004 / D-1b) ────────────────────────────────────────────────────────
+// The arm-once deadline. `max_bytes = 200`, `deadline = 50 ms`, `read_latency
+// = 7 ms`, `inbound_chunks` = 201 chunks of 1 byte (mechanism 5). Reads
+// complete at 7, 14, 21, 28, 35, 42, 49 ms; the 8th read's latency wait is
+// still in flight when the deadline expires at 50 ms, with `buf.size() == 7`
+// — far below the 200-byte budget — so the deadline arm must win.
+//
+// `7 ms` is load-bearing (research.md D-6.11): the two timer series MUST NOT
+// share a common multiple inside the deadline window, or the cell depends on
+// an ordering §D-6.4/SC-014 explicitly refuse to depend on (5 ms would
+// co-expire the 10th read with the 50 ms deadline in the same drain).
+//
+// `buf.size()` is asserted as a BAND (`[1, kMaxBytes)`), not the exact
+// derived value 7: pinning the wall-clock-derived exact count is a <2%
+// margin against real timer/scheduler slop (49ms vs a 50ms deadline) and
+// would false-RED under ASan/TSan or a loaded CI lane
+// ([[feedback_timing_band_witness_range_admits_the_mutant_it_claims_to_kill]]).
+// The band is tight on the side that matters: `< kMaxBytes` still excludes
+// the mutant's terminal value of 201 (all chunks drained), and `>= 1` keeps
+// the cell non-vacuous (the loop genuinely ran at least once). The 7-ms/
+// 14-ms.../49-ms derivation is recorded here and in the failure message, not
+// pinned as an assertion.
+//
+// Mutant killed: `expires_after` moved into the loop (or into
+// `await_deadline`) — a per-iteration re-arm. Under it the deadline is reset
+// every 7 ms and never fires; the loop drains all 201 chunks and reaches
+// `201 > 200` at the foot ⇒ `wire_frame_too_large`, with `buf.size() == 201`.
+// `await_deadline` is documented (read_first_frame_bounded.hpp) as forbidden
+// from calling `expires_after` for exactly this reason.
+TEST(ReadFirstFrameBounded, B6) {
+    constexpr std::size_t kMaxBytes = 200;
+    constexpr auto kDeadline = std::chrono::milliseconds{50};
+
+    // A well-formed header whose declared BodyLength (200000) far exceeds what
+    // is sent, so parse_frame classifies it partial forever — same
+    // never-completing shape as B4/B5 — split into 201 one-byte chunks
+    // (mechanism 5) so the framer is fed byte-by-byte across 201 reads.
+    std::string never_completes = std::string("8=FIX.4.2\x01") + "9=200000\x01";
+    ASSERT_LT(never_completes.size(), kMaxBytes + 1);
+    never_completes.append(kMaxBytes + 1 - never_completes.size(), 'X');
+    ASSERT_EQ(never_completes.size(), kMaxBytes + 1);
+    std::vector<std::byte> const payload = to_bytes(never_completes);
+
+    Script s;
+    s.inbound_chunks.reserve(payload.size());
+    for (std::byte b : payload) s.inbound_chunks.push_back({b});
+    ASSERT_EQ(s.inbound_chunks.size(), 201u);
+    s.read_latency = std::chrono::milliseconds{7};
+
+    asio::io_context ioc;
+    mock_transport mt{ioc.get_executor(), std::move(s)};
+    std::vector<std::byte> buf;
+
+    auto fut = asio::co_spawn(
+        ioc, read_first_frame_bounded(mt, buf, kDeadline, kMaxBytes),
+        asio::use_future);
+    ioc.run();
+    expected_t<std::size_t> const result = fut.get();
+
+    EXPECT_FALSE(result.has_value())
+        << "B6 (SC-004/D-1b): expected the deadline to win before the budget could be reached, got "
+        << describe(result);
+    if (!result.has_value()) {
+        EXPECT_EQ(result.error(), error::transport_handshake_timeout)
+            << "B6 (SC-004/D-1b): expected transport_handshake_timeout (the arm-once deadline firing "
+            << "at 50ms, derived buf.size() == 7 from reads completing at 7/14/.../49ms), got "
+            << describe(result) << " — a per-iteration re-arm would let the deadline keep being pushed "
+            << "forward and the loop would drain all 201 chunks instead.";
+    }
+    EXPECT_GE(buf.size(), 1u)
+        << "B6 (SC-004/D-1b) [non-vacuity]: expected at least one completed read before the deadline "
+        << "fired (derived: 7, from reads at 7/14/.../49ms) — buf.size() == 0 would mean the loop "
+        << "never genuinely ran.";
+    EXPECT_LT(buf.size(), kMaxBytes)
+        << "B6 (SC-004/D-1b): expected buf.size() far below the " << kMaxBytes << "-byte budget "
+        << "(derived: 7) — the re-arm mutant drains all 201 chunks, reaching buf.size() == 201.";
+}
+
 TEST(ReadFirstFrameBounded, T2a) {
     constexpr std::size_t kMaxBytes = 4096;
     constexpr auto kDeadline = std::chrono::milliseconds{500};
