@@ -371,13 +371,13 @@ specs/086-capi-include-isolation/contracts/include-interface.md:132  → row 1 (
 specs/086-capi-include-isolation/contracts/include-interface.md:145  → row 1 (C-3, :122-149)
 src/capi/CMakeLists.txt:64                                           → row 4
 tests/consumer/CMakeLists.txt:213                                    → row 6
-tests/consumer/run_consumer_witness.cmake:205                        → row 7
-tests/consumer/run_consumer_witness.cmake:213                        → row 7 (the amendment itself)
+tests/consumer/run_consumer_witness.cmake:232                        → row 7
+tests/consumer/run_consumer_witness.cmake:240                        → row 7 (the amendment itself)
 ```
 
 **ELEVEN in-scope hits, seven rows, no residue** — the pre-sweep figure was **ten**, and it was correct then.
 *(Re-run and re-counted at T036, 2026-08-05, after the sweep landed. Corrected here first, per this file's own
-authority-first rule.)*
+authority-first rule. Line anchors as of `ace806b8`.)*
 
 **The eleventh hit is row 7's own amendment, and this is expected rather than residue.** Row 7's obligation is
 to *name the three/four seam* — it cannot discharge that without spelling `SYSTEM_INCLUDE_DIRECTORIES` a second
@@ -400,7 +400,7 @@ and neither hides a site:
   above already excludes: those occurrences *describe the binding*, none records the property as an open scope
   limit, so none is an FR-011 amendment target. Their count is deliberately **not** pinned here — this very
   block matches the search term, so quoting a number for them would be a self-referential figure that goes
-  stale on the next edit to any 087 artifact. Drop the `grep -v` to see them; the in-scope ten are unaffected.
+  stale on the next edit to any 087 artifact. Drop the `grep -v` to see them; the in-scope eleven are unaffected.
 - `cut -d: -f1,2` shows `file:line` only. Three of the raw matches run to several hundred characters
   (`checklists/abi.md:16` is a single wrapped CHK item). No line is filtered by it.
 
