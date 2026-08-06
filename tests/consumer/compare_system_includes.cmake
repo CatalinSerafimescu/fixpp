@@ -299,7 +299,7 @@ if(FIXPP_087_MODE STREQUAL "compare")
           # E1 declares path: string and isSystem: boolean (data-model.md:15-16), so a
           # wrong leaf type is "parses without the expected compileGroups structure"
           # (C-2) — the same TYPE walk applied at the root (:249), compileGroups (:261)
-          # and includes (:281) above, one level deeper. No new C-2 cause.
+          # and includes (:280) above, one level deeper. No new C-2 cause.
           if(NOT _path_type STREQUAL "STRING")
             message(FATAL_ERROR
               "[INPUT_ERROR] compare_system_includes.cmake compare (${FIXPP_087_LEG}): "
