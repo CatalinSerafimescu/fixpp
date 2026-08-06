@@ -1130,8 +1130,26 @@ asio_tls_transport::async_handshake(fixpp::tls::SslCtxConfig const& cfg) {
     std::span<std::byte> buf) {
     using E = core::error;
 
-    // Enable total cancellation (D-17).
-    co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
+    // 088 T029 (FR-018) — the SSL composed op (ssl::detail::io_op) delegates to
+    // base_from_cancellation_state's no-filter overload, which is documented and
+    // implemented as TERMINAL-ONLY (asio/cancellation_state.hpp:88-100). A
+    // one-argument reset installs a MASK (asio::cancellation_filter is `type &
+    // Mask`, not a map), so Engine::stop()'s cancellation_type::total would be
+    // forwarded as `total` and then silently dropped by that inner terminal-only
+    // state — the in-flight read never aborts and stop() hangs UNBOUNDED on the
+    // default TLS accept path (research.md D-2a). The two-argument OUT filter
+    // below maps any accepted (non-none) cancellation to `terminal` for the
+    // forwarded child op, so the io_op's inner state records and forwards it.
+    // Mirrors async_connect's precedent at :918-933, including its commenting
+    // discipline. NOT expressible at the call site (read_first_frame_bounded):
+    // reset_cancellation_state REPLACES the single bottom-frame state — last
+    // reset wins — so an engine-side wrapper reset is clobbered by this one.
+    // [[feedback_asio_cospawn_total_cancellation_default]];
+    // [[feedback_engine_stop_must_close_transports_total_cancel_insufficient]].
+    co_await asio::this_coro::reset_cancellation_state(
+        asio::enable_total_cancellation(), [](asio::cancellation_type ct) {
+            return ct == asio::cancellation_type::none ? ct : asio::cancellation_type::terminal;
+        });
 
     // state_ != handshaken covers both `closed` and pre-handshake states;
     // post-close every async_* returns transport_already_closed per FR-006.

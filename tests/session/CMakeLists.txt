@@ -2986,6 +2986,31 @@ set_tests_properties(session_read_first_frame_bounded PROPERTIES
   LABELS "088;us1;us2;first_frame;budget;lifetime;session_read_first_frame_bounded"
   TIMEOUT 120)
 
+# ── 088 Phase 4 (US2) — T023/T024/T025: T6 (SC-018/FR-018) ───────────────────
+# Real-TLS witness for FR-018: Engine::stop()'s cancellation_type::total must
+# abort an in-flight first-frame read on a REAL ssl::stream — the ONLY cell
+# pinning FR-018 (a mock cell is green exactly where a real ssl::stream hangs,
+# research.md D-6.10). MUST NOT be skippable in CI, so FIXPP_TLS_FIXTURE_DIR
+# is wired unconditionally at configure time (never a runtime env var — the
+# GTEST_SKIP() fallback in this file is for local/manual runs only). Uses
+# research.md D-6.13b's build contract verbatim. TIMEOUT is second-line
+# defence only — the in-test watchdog (1000ms) is the primary bound; a run
+# that ends in the ctest TIMEOUT instead of a watchdog assertion means the
+# watchdog is mis-wired (a broken cell, not a RED proof).
+# Anchors: research.md D-6.10/D-6.10a/D-6.13; tasks.md T023-T025.
+add_executable(session_first_frame_total_cancel_tls first_frame_total_cancel_tls_test.cpp)
+target_link_libraries(session_first_frame_total_cancel_tls PRIVATE
+  fixpp fixpp_transport fixpp_tls GTest::gtest_main)
+target_include_directories(session_first_frame_total_cancel_tls PRIVATE
+  "${CMAKE_SOURCE_DIR}/src"
+  "${CMAKE_SOURCE_DIR}/tests")
+target_compile_definitions(session_first_frame_total_cancel_tls PRIVATE
+  FIXPP_TLS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/tls/fixtures")
+add_test(NAME session_first_frame_total_cancel_tls COMMAND session_first_frame_total_cancel_tls)
+set_tests_properties(session_first_frame_total_cancel_tls PROPERTIES
+  LABELS "088;us2;live_tls;first_frame;cancellation"
+  TIMEOUT 60)
+
 # ── Conformance subdirectory (005 Q2 in-scope [FIX-TC] subset) ───────────────
 # Phase 3 adds tc_establishment_test.cpp (T020); later phases add more.
 add_subdirectory(conformance)
