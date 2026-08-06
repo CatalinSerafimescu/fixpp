@@ -193,9 +193,23 @@ Measured on the sibling package rather than assumed:
 2026-08-03  windows-msvc-release-e2fcc26591580ae9   <- the 08-02 tag was never deleted
 ```
 
-All three `fixpp-conan-cache` **MSVC** profiles hold **two** tags; all eleven **Linux** profiles hold
-exactly **one**. MSVC is seeded from the runner, Linux locally with an admin-scoped `gh` — the prune
-silently no-ops in the first case and works in the second.
+All three `fixpp-conan-cache` **MSVC** profiles hold **two** tags. The prune runs unconditionally at
+the end of every seed, so it ran and did not delete.
+
+⚠️ The Linux profiles hold exactly **one** tag each, and that is **not** evidence that pruning works
+locally — it only means each was seeded once. The maintainer's own `gh` token carries
+`write:packages` but **not** `delete:packages`; probed non-destructively against a nonexistent
+version id:
+
+```
+DELETE /user/packages/container/fixpp-conan-cache/versions/999999999
+403  "You need at least delete:packages and read:packages scopes to delete a package version."
+```
+
+So the prune has never deleted anything, from anywhere. `prune-conan-cache.sh`'s header — *"`gh`
+authenticated locally, or GH_TOKEN in CI (needs delete perms on the package — fixpp has Admin)"* —
+conflates repository Admin with token scope; package deletion is gated on the **token's** scope, and
+neither token in play has it.
 
 Conan barely pays for this: its tag is content-hashed, so each push mints a *new* tag and orphans no
 manifest (zero untagged versions in that package today). A **rolling** tag has no such luck, which is
@@ -203,14 +217,20 @@ the one real cost of choosing stability over content-hashing.
 
 Handling, since it cannot be fixed from inside the workflow:
 
-- `ci/prune-sccache.sh <preset> <current-tag>` is **standalone and runnable locally**, where the
-  admin token does have delete rights. `DRY_RUN=1` lists without deleting.
-- `seed-sccache.sh` calls it, counts the refusals, and writes
-  **"N dead version(s) could not be reclaimed"** into the job summary. The previous shape logged
-  `delete FAILED (non-fatal)` per version, which is exactly the sort of line that let the sibling
-  package double its MSVC tag count unnoticed.
-- A `delete:packages` PAT as a repo secret would close this properly. That is a maintainer decision,
-  not something to wire unasked.
+- Both seed steps now read `GH_TOKEN` from **`secrets.GHCR_PAT || secrets.GITHUB_TOKEN`**, so
+  supplying a `delete:packages` PAT as a repo secret turns pruning on with no further change. Absent
+  the secret the expression falls back to `GITHUB_TOKEN` and behaviour is exactly as before — the
+  wiring is inert until the secret exists.
+- `ci/prune-sccache.sh <preset> <current-tag>` is **standalone**, so a backlog can also be reclaimed
+  by hand with `GH_TOKEN=<pat>`. `DRY_RUN=1` lists without deleting.
+- `seed-sccache.sh` counts the refusals and writes **"N dead version(s) could not be reclaimed"**
+  into the job summary. The previous shape logged `delete FAILED (non-fatal)` per version, which is
+  exactly the sort of line that let the sibling package double its MSVC tag count unnoticed.
+
+The same `GH_TOKEN` change is applied to the **Conan** seed step in `tier2.yml`. That is not
+scope creep for its own sake: `fixpp-conan-cache` is the package where the defect is *proven*, it is
+the same one-line expression, and leaving it out would mean the PAT fixes the new package while the
+old one keeps accumulating.
 
 ### Open item — the package does not exist yet
 

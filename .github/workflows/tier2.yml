@@ -362,7 +362,11 @@ jobs:
         continue-on-error: true
         shell: bash
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # for prune's `gh api`
+          # Prune needs `delete:packages`, which GITHUB_TOKEN does NOT carry — verified
+          # 403 against the live API. Supplying a GHCR_PAT repo secret with that scope
+          # turns pruning on with no other change; without the secret this falls back to
+          # GITHUB_TOKEN and behaves exactly as before, so the wiring is inert until then.
+          GH_TOKEN: ${{ secrets.GHCR_PAT || secrets.GITHUB_TOKEN }}  # for prune's `gh api`
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u "${{ github.actor }}" --password-stdin
           ci/seed-conan-cache.sh ${{ matrix.preset }} -o 'fixpp/*:with_otel=True' -s:b compiler.cppstd=20
@@ -556,7 +560,11 @@ jobs:
         continue-on-error: true
         shell: bash
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # for prune's `gh api`
+          # Prune needs `delete:packages`, which GITHUB_TOKEN does NOT carry — verified
+          # 403 against the live API. Supplying a GHCR_PAT repo secret with that scope
+          # turns pruning on with no other change; without the secret this falls back to
+          # GITHUB_TOKEN and behaves exactly as before, so the wiring is inert until then.
+          GH_TOKEN: ${{ secrets.GHCR_PAT || secrets.GITHUB_TOKEN }}  # for prune's `gh api`
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u "${{ github.actor }}" --password-stdin
           ci/seed-sccache.sh ${{ matrix.preset }}
