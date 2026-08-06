@@ -269,8 +269,9 @@ if(FIXPP_087_MODE STREQUAL "compare")
   # ── Collect E1 entries across ALL compileGroups[], normalised + deduped ───
   # (data-model.md E2: the reply's order is measurement metadata, not asserted
   # — I2 canonicalises to a set. A path seen more than once, e.g. from two
-  # compile groups on a multi-language target, keeps only its first isSystem;
-  # not observed to disagree in this project's measured replies.)
+  # compile groups on a multi-language target, keeps its first isSystem; a
+  # later occurrence that disagrees is rejected as [INPUT_ERROR] rather than
+  # silently dropped.)
   set(_observed_paths "")
   set(_observed_sys "")
   set(_any_under_prefix FALSE)
@@ -290,16 +291,29 @@ if(FIXPP_087_MODE STREQUAL "compare")
       if(_inc_len GREATER 0)
         math(EXPR _inc_last "${_inc_len} - 1")
         foreach(_ii RANGE 0 ${_inc_last})
-          string(JSON _path ERROR_VARIABLE _path_err GET "${_json}" "compileGroups" ${_gi} "includes" ${_ii} "path")
-          if(_path_err)
+          string(JSON _path_type ERROR_VARIABLE _path_type_err TYPE "${_json}" "compileGroups" ${_gi} "includes" ${_ii} "path")
+          if(_path_type_err)
             message(FATAL_ERROR
               "[INPUT_ERROR] compare_system_includes.cmake compare (${FIXPP_087_LEG}): "
               "${_reply_file} compileGroups[${_gi}].includes[${_ii}] has no 'path'")
           endif()
-          # E1: isSystem absent in JSON means false.
-          string(JSON _sys ERROR_VARIABLE _sys_err GET "${_json}" "compileGroups" ${_gi} "includes" ${_ii} "isSystem")
-          if(_sys_err)
+          if(NOT _path_type STREQUAL "STRING")
+            message(FATAL_ERROR
+              "[INPUT_ERROR] compare_system_includes.cmake compare (${FIXPP_087_LEG}): "
+              "${_reply_file} compileGroups[${_gi}].includes[${_ii}].path is not a JSON string (got ${_path_type})")
+          endif()
+          string(JSON _path GET "${_json}" "compileGroups" ${_gi} "includes" ${_ii} "path")
+
+          # E1: isSystem absent in JSON means false; if present it must be a JSON boolean.
+          string(JSON _sys_type ERROR_VARIABLE _sys_type_err TYPE "${_json}" "compileGroups" ${_gi} "includes" ${_ii} "isSystem")
+          if(_sys_type_err)
             set(_sys OFF)
+          elseif(NOT _sys_type STREQUAL "BOOLEAN")
+            message(FATAL_ERROR
+              "[INPUT_ERROR] compare_system_includes.cmake compare (${FIXPP_087_LEG}): "
+              "${_reply_file} compileGroups[${_gi}].includes[${_ii}].isSystem is not a JSON boolean (got ${_sys_type})")
+          else()
+            string(JSON _sys GET "${_json}" "compileGroups" ${_gi} "includes" ${_ii} "isSystem")
           endif()
 
           _fixpp_087_normalize_path("${_path}" "${FIXPP_087_INSTALL_PREFIX}" _relpath)
@@ -312,6 +326,31 @@ if(FIXPP_087_MODE STREQUAL "compare")
           if(_existing_idx EQUAL -1)
             list(APPEND _observed_paths "${_relpath}")
             list(APPEND _observed_sys "${_sys}")
+          else()
+            # Repeated normalised path (e.g. two compile groups on a
+            # multi-language target): the first isSystem wins, but a
+            # disagreeing later occurrence is a malformed reply, not a
+            # silent drop — same normalisation as the stage-1 comparison
+            # below, since both sides may be JSON GET's "ON"/"OFF" or the
+            # "OFF" default.
+            list(GET _observed_sys ${_existing_idx} _existing_sys)
+            if(_sys)
+              set(_sys_b TRUE)
+            else()
+              set(_sys_b FALSE)
+            endif()
+            if(_existing_sys)
+              set(_existing_sys_b TRUE)
+            else()
+              set(_existing_sys_b FALSE)
+            endif()
+            if(NOT _sys_b STREQUAL _existing_sys_b)
+              message(FATAL_ERROR
+                "[INPUT_ERROR] compare_system_includes.cmake compare (${FIXPP_087_LEG}): "
+                "${_reply_file} reports conflicting isSystem classifications for "
+                "${_relpath}: first seen isSystem=${_existing_sys_b}, "
+                "compileGroups[${_gi}].includes[${_ii}] isSystem=${_sys_b}")
+            endif()
           endif()
         endforeach()
       endif()
