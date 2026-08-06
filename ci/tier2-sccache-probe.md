@@ -179,6 +179,39 @@ Same bargain the Conan package already makes (*"MISS is never fatal"*).
 Publishing happens **after Build and before `ctest`**: the cache is a compilation artifact, and
 withholding it because an unrelated test went red would make the next run pay a full cold build.
 
+### ⚠️ Storage: CI cannot reclaim what a rolling tag orphans
+
+The tag rolls, so **every republish orphans an untagged version of several GB** — and the prune that
+would delete it **cannot run from CI**. `GITHUB_TOKEN`'s `packages: write` is read+write; deleting a
+package version needs `delete:packages`, and this repo has no PAT secret (`gh secret list` →
+`CODECOV_TOKEN` only).
+
+Measured on the sibling package rather than assumed:
+
+```
+2026-08-02  windows-msvc-release-f73256440a9ef613
+2026-08-03  windows-msvc-release-e2fcc26591580ae9   <- the 08-02 tag was never deleted
+```
+
+All three `fixpp-conan-cache` **MSVC** profiles hold **two** tags; all eleven **Linux** profiles hold
+exactly **one**. MSVC is seeded from the runner, Linux locally with an admin-scoped `gh` — the prune
+silently no-ops in the first case and works in the second.
+
+Conan barely pays for this: its tag is content-hashed, so each push mints a *new* tag and orphans no
+manifest (zero untagged versions in that package today). A **rolling** tag has no such luck, which is
+the one real cost of choosing stability over content-hashing.
+
+Handling, since it cannot be fixed from inside the workflow:
+
+- `ci/prune-sccache.sh <preset> <current-tag>` is **standalone and runnable locally**, where the
+  admin token does have delete rights. `DRY_RUN=1` lists without deleting.
+- `seed-sccache.sh` calls it, counts the refusals, and writes
+  **"N dead version(s) could not be reclaimed"** into the job summary. The previous shape logged
+  `delete FAILED (non-fatal)` per version, which is exactly the sort of line that let the sibling
+  package double its MSVC tag count unnoticed.
+- A `delete:packages` PAT as a repo secret would close this properly. That is a maintainer decision,
+  not something to wire unasked.
+
 ### Open item — the package does not exist yet
 
 `ghcr.io/catalinserafimescu/fixpp-sccache` is created by the **first seed**. Verified against the

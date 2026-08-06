@@ -78,40 +78,14 @@ note "sccache-cache archive \`$TAG\` — $(du -h "$WORK/sccache-$PRESET.tar" | c
 # updating ci/tier2-sccache-probe.md, which tells the operator to grep for it.
 note "sccache-cache SEEDED \`$TAG\`"
 
-# ── Prune, best-effort ───────────────────────────────────────────────────────
-# Two kinds of dead weight accumulate here and BOTH matter, because a version is
-# multiple GB rather than the Conan package's ~790 MB:
-#
-#   1. UNTAGGED versions — this tag is rolling, so every republish orphans the
-#      previous manifest. Untagged is unreachable by construction (nothing can
-#      pull it), so it is always safe to delete.
-#   2. STALE toolset tags — after a VS image bump the old
-#      `sccache-<preset>-<oldtoolset>` can never hit again.
-#
-# Safety mirrors prune-conan-cache.sh: a TAGGED version is deleted only when
-# EVERY one of its tags is a this-preset sccache tag and none of them is the tag
-# just pushed. Never exits non-zero.
-command -v jq >/dev/null 2>&1 && command -v gh >/dev/null 2>&1 || {
-  echo "prune: jq/gh not found — skipping"; exit 0; }
-
-mapfile -t STALE < <(
-  gh api --paginate "/user/packages/container/$PKG/versions" 2>/dev/null \
-  | jq -r --arg p "$PRESET" --arg cur "$TAG" '
-      .[]
-      | . as $v
-      | (($v.metadata.container.tags) // []) as $tags
-      | (($tags | length) == 0)                                  as $untagged
-      | ([ $tags[] | startswith("sccache-\($p)-") ] | all)       as $mine
-      | (($tags | index($cur)) != null)                          as $is_current
-      | select($untagged or ($mine and ($is_current | not)))
-      | "\($v.id)\t\(if $untagged then "<untagged>" else ($tags | join(",")) end)"' 2>/dev/null
-)
-
-for row in "${STALE[@]:-}"; do
-  [ -z "$row" ] && continue
-  vid="${row%%$'\t'*}"; tags="${row#*$'\t'}"
-  echo "prune: deleting version $vid  tags=[${tags:-<untagged>}]"
-  gh api --method DELETE "/user/packages/container/$PKG/versions/$vid" >/dev/null 2>&1 \
-    && echo "  deleted" || echo "  delete FAILED (non-fatal — needs delete perms)"
-done
+# ── Prune, best-effort — delegated so it is also runnable STANDALONE ─────────
+# It has to be runnable standalone because it will NOT delete anything from here:
+# GITHUB_TOKEN carries packages:write (read+write), not delete:packages. The
+# rolling tag means every republish orphans a multi-GB untagged version, so the
+# backlog is surfaced into the job summary rather than left to accumulate
+# silently. Full evidence in ci/prune-sccache.sh's header.
+pending=$("$(dirname "$0")/prune-sccache.sh" "$PRESET" "$TAG" | tee /dev/stderr | sed -n 's/^prune: PENDING \([0-9]*\).*/\1/p')
+if [ -n "${pending:-}" ] && [ "$pending" -gt 0 ]; then
+  note "sccache-cache: **$pending dead version(s) could not be reclaimed** from CI (token lacks \`delete:packages\`). Run \`ci/prune-sccache.sh $PRESET $TAG\` locally."
+fi
 exit 0
