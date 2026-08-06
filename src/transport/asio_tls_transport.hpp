@@ -113,6 +113,30 @@ public:
     // expose it ([const §XIV.2]: no extra pure-virtual added).
     enum class role_t : std::uint8_t { client, server };
 
+    // ── Timer-epoch guard (research.md D-4.1, FR-014) ───────────────────────
+    //
+    // Nested (not namespace-scope): asio_plain_transport.hpp declares its own
+    // same-named-but-differently-shaped type, and both headers are included
+    // together in transport_factory.cpp/engine.cpp/asio_listener.cpp — a
+    // namespace-scope definition here would collide there.
+    //
+    // TWO counters, not one. async_connect (:869) and async_handshake (:984)
+    // are strictly ordered by every current caller (reconnect_fsm.cpp:250
+    // then :284; the accept path calls async_handshake only) and
+    // reconnect_fsm mints a fresh transport per attempt, so a single shared
+    // counter would in fact be correct against today's call graph. It is
+    // still split because that correctness rests on a sequencing property of
+    // the *callers*, which nothing in this class enforces — a future
+    // interleaving (or a reconnect path that reused a transport) would
+    // silently reintroduce the exact stale-handler-cancels-a-live-op defect
+    // this feature exists to close. Eight bytes buys removing an argument
+    // rather than adding one (D-4.1 "One counter per timer, not one per
+    // transport").
+    struct timer_epoch_state {  // strand-confined; plain integers, no atomics
+        std::uint64_t connect{0};
+        std::uint64_t handshake{0};
+    };
+
     // ── Constructor (throwing — [arch §5.3] engine-bootstrap carve-out) ───
     //
     // Builds the asio::ssl::context from `ssl_cfg` fields (protocol version
@@ -173,7 +197,12 @@ public:
     asio_tls_transport(asio_tls_transport&&) = delete;
     asio_tls_transport& operator=(asio_tls_transport&&) = delete;
 
-    ~asio_tls_transport() override = default;
+    // Not `= default`: the destructor BODY retires every armed timer epoch
+    // (D-4.1 item 3) before members are destroyed, so a stranded timer
+    // handler that observes the retirement is guaranteed `this` is still
+    // alive. Nothing else changes — members are still destroyed in reverse
+    // declaration order after the body runs. Body in the .cpp.
+    ~asio_tls_transport() override;
 
     // ── Transport overrides (bodies in asio_tls_transport.cpp — T027) ─────
 
@@ -213,6 +242,17 @@ public:
     // not const on asio::ip::tcp::socket.
     [[nodiscard]] asio::any_io_executor socket_executor() noexcept {
         return socket_.get_executor();
+    }
+
+    // ── Timer-epoch accessor (D-4.1 mechanism 2; D-9 mechanism 2) ───────────
+    //
+    // Used by the T3-T5 witness cells to observe the retire-point-omitted
+    // mutant (D-6.4). This is exactly what it buys — not broader guard
+    // coverage; the sibling "guard omitted" mutant has no killer and is
+    // discharged structurally (D-9). Const, internal-header-only: no
+    // production branch, no FIXPP_TEST_HOOKS.
+    [[nodiscard]] std::shared_ptr<const timer_epoch_state> timer_epochs() const noexcept {
+        return timer_epochs_;
     }
 
     // ── Test-access friend ──────────────────────────────────────────────────
@@ -277,6 +317,17 @@ private:
 
     // ── Role (initiator vs acceptor — set by ctor; used by async_handshake) ─
     role_t role_{role_t::client};
+
+    // ── Timer-epoch guard (D-4.1) ────────────────────────────────────────────
+    // Held by shared_ptr, not by value: a timer handler captures a copy of
+    // this pointer (never `this`), so `*timer_epochs_` outlives the
+    // transport unconditionally even when the owner destroys `this` with no
+    // drain (D-4.0 — reconnect_fsm.cpp:250-252/284-286 and
+    // engine.cpp:841-844 all destroy synchronously on the failure arm).
+    // Safe as a default member initializer: every asio_tls_transport ctor is
+    // already throwing ([arch §5.3] carve-out) and one already does a
+    // make_shared (ssl_ctx_ above) inside the same trap_throw boundary.
+    std::shared_ptr<timer_epoch_state> timer_epochs_{std::make_shared<timer_epoch_state>()};
 
     // ── In-flight exclusivity flags (strand-confined — NOT atomics) ─────────
     //

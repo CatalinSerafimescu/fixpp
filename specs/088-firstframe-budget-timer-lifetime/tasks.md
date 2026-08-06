@@ -159,10 +159,10 @@ the connect (resp. handshake) returns, so any expiry still in flight is stale.
 
 ### Implementation for User Story 4
 
-- [ ] T037 [P] [US4] Add `timer_epoch_state` + a `std::shared_ptr` member + a user-provided destructor whose **body** retires every counter + a `timer_epochs()` const accessor to `src/transport/asio_plain_transport.hpp` (D-4.1). The epoch lives in **shared state the handler owns by value** — a plain member would be read through a dangling `this`
-- [ ] T038 [P] [US4] Add the same three additions to `src/transport/asio_tls_transport.hpp`, with **two** counters (`connect` and `handshake`) — split per timer even though one would be correct against today's callers, so correctness does not rest on a caller sequencing property the transport cannot enforce
-- [ ] T039 [US4] Add the shared-epoch guard at the connect timer in `src/transport/asio_plain_transport.cpp:130`, retiring immediately before the existing `timer.cancel()` at `:150` (FR-014 / FR-009)
-- [ ] T040 [US4] Add the shared-epoch guards at `src/transport/asio_tls_transport.cpp:910` (connect, retire before `:941`) and `:1032` (handshake, retire before `:1045`) — FR-014 / FR-009
+- [X] T037 [P] [US4] Add `timer_epoch_state` + a `std::shared_ptr` member + a user-provided destructor whose **body** retires every counter + a `timer_epochs()` const accessor to `src/transport/asio_plain_transport.hpp` (D-4.1). The epoch lives in **shared state the handler owns by value** — a plain member would be read through a dangling `this`
+- [X] T038 [P] [US4] Add the same three additions to `src/transport/asio_tls_transport.hpp`, with **two** counters (`connect` and `handshake`) — split per timer even though one would be correct against today's callers, so correctness does not rest on a caller sequencing property the transport cannot enforce
+- [X] T039 [US4] Add the shared-epoch guard at the connect timer in `src/transport/asio_plain_transport.cpp:130`, retiring immediately before the existing `timer.cancel()` at `:150` (FR-014 / FR-009)
+- [X] T040 [US4] Add the shared-epoch guards at `src/transport/asio_tls_transport.cpp:910` (connect, retire before `:941`) and `:1032` (handshake, retire before `:1045`) — FR-014 / FR-009
 - [ ] T041 [US4] Run T3/T4/T5 green and confirm the delivered census in `spec.md` matches the four enumerated sites fixed (SC-008)
 
 ---
@@ -179,7 +179,7 @@ the connect (resp. handshake) returns, so any expiry still in flight is stale.
 
 ### Mandatory close-out tasks (ALWAYS emit — Gate-B preconditions, Article XVII §8)
 
-- [ ] T049 Catalogue close-out — flip every feature-owned OFFICIAL row in `spec/feature-catalogue.md` to `done` and add the corresponding `spec/coverage-index.md` entry
+- [ ] T049 Catalogue close-out — flip every feature-owned OFFICIAL row in `spec/feature-catalogue.md` to `done` and add the corresponding `spec/coverage-index.md` entry. **Plus one cross-feature row added at /implement:** record in `spec/behaviors-and-limitations.md` that 088 widens **`asio_plain_transport`'s two constructors from `noexcept` to potentially-throwing**. Cause: D-4.1's `timer_epoch_state` mechanism requires a `std::make_shared` default member initializer, and `make_shared` can throw `bad_alloc` — which inside a `noexcept` constructor would **terminate**, making the declaration false. The type is **internal** (`src/transport/` is not an installed include root; it is named in no installed header and no C-ABI surface), so **no installed surface, no ABI boundary and no C-ABI symbol moves** — SC-010/SC-017 are unaffected. The `trap_throw` try/catch already wired at `transport_factory.cpp:513-522` and `:539-549` becomes non-vacuous; it needed no change. `specs/043-plaintext-tcp-transport/contracts/asio_plain_transport.hpp:44,49` is **deliberately left unmodified** — it is the historical record of what 043 shipped and is superseded on this one point, not falsified
 - [ ] T050 **Feature-completeness audit (FINAL task)** — verify tasks ↔ FR/SC ↔ catalogue all map to a landed test **and** a landed implementation; record the verdict (100%-or-waived) in `.specify/decisions/088-firstframe-budget-timer-lifetime-verify.md` under `## Completeness`. `/gate-b` 4d **HARD-BLOCKS** without this record
 
 ---
