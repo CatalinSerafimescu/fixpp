@@ -384,6 +384,19 @@ interface header and the C-ABI headers compile; a C++ engine header does not.
   > search-ordering effects all leave every cell green. Closing it properly needs the CMake File API compile
   > groups asserted against an allowed system-root set — **recorded as an open follow-up, not delivered here**,
   > because it is new machinery outside this feature's reviewed scope. See `contracts/include-interface.md` C-3.
+  >
+  > **DELIVERED BY 087 (#234), 2026-08-05 — the follow-up is closed.** The File API assertion described above
+  > now exists: `tests/consumer/compare_system_includes.cmake`, carried by `probe_system_include_contract`,
+  > reads `codemodel-v2` compile groups at the installed consumer and compares them to a declared expectation
+  > for `fixpp::capi` and `fixpp::service` as exact closed sets, per entry including its system
+  > classification. The empty-against-empty objection above does not apply to it: the expectation is a
+  > **non-empty** literal declared in the tree, and an empty one is rejected as `LEG_ERROR` at argument
+  > validation.
+  >
+  > **FR-009a's OWN instrument and scope are UNCHANGED.** This requirement still binds three properties by
+  > the direct-property and effective-usage-requirement deltas it defines. The fourth is bound by a different
+  > feature, with a different instrument, at a different observation point — and the §1 reachability matrix's
+  > two-named-header-boundaries scope note stands exactly as written above.
 
   And
   the closure carries at least one live PUBLIC compile definition — `FIXPP_LOG_MIN_LEVEL`

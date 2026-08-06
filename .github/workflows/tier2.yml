@@ -322,6 +322,41 @@ jobs:
         shell: cmd
         run: cmake --build --preset ${{ matrix.preset }}
 
+      # 087 T025 / FR-014 / SC-008 — the last gate-closable vacuity path.
+      #
+      # ⚠️ ASSERT THE COUNT, NOT JUST THE EXIT CODE. `ctest -L` exits 0 when the
+      # filter matches NOTHING, so an exit-code-only check reports this lane green
+      # having run zero witnesses. fixpp::consumer::install-witness — carrying the
+      # 087 system-include gate and 086's reachability matrix — is registered only
+      # inside `if(FIXPP_BUILD_CODEGEN_TOOL)` nested in `if(FIXPP_BUILD_TESTS)`
+      # (CMakeLists.txt:401), so if that option ever goes OFF here the gate stops
+      # existing and this lane still passes.
+      #
+      # ⚠️ `shell: bash` — this file's ctest steps are `shell: cmd`, and this is a
+      # POSIX-shell script. Modelled on THIS workflow's own packaging assertion
+      # below, which already switches to bash for exactly this reason — NOT on
+      # tier 1's step. Contract §6b.
+      #
+      # UNCONDITIONAL — no `if:` guard. The two test steps below are mutually
+      # exclusive by `if:` (`:363` on all but windows-msvc-release, `:389` only on
+      # it) and jointly cover every lane, so one unguarded step covers both.
+      # Placed after Build and before the first test step: `ctest -N` reads
+      # CTestTestfile.cmake and needs a configured tree.
+      - name: Assert the consumer witness is registered (087 FR-014 gate)
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected=1
+          n=$(ctest --preset ${{ matrix.preset }} -L consumer -N \
+                | sed -n 's/^Total Tests: //p')
+          echo "registered consumer witnesses: ${n:-0} (expected ${expected})"
+          if [ "${n:-0}" != "${expected}" ]; then
+            echo "::error::consumer label registered ${n:-0} tests, expected ${expected}."
+            echo "::error::The 086/087 installed-interface gate is not registered on this lane."
+            echo "::error::Refusing to report this lane green on an unrun gate."
+            exit 1
+          fi
+
       # opentelemetry-cpp ships `opentelemetry_proto` as a DLL on Windows even
       # though NOTHING in the Conan graph is shared=True — verified by
       # dumpbin /dependents against a control binary: every import of

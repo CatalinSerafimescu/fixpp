@@ -212,6 +212,17 @@ target_link_libraries(probe_usage_requirements PRIVATE fixpp::capi)
 # withholds COMPILE_DEFINITIONS, COMPILE_OPTIONS, COMPILE_FEATURES and
 # SYSTEM_INCLUDE_DIRECTORIES along with the include path. Naming an expected
 # non-empty list instead would have to enumerate what survives, and nothing does.
+#
+# ⚠️ THAT CLOSING SENTENCE IS ABOUT 086's INSTRUMENT — the three target-property
+# comparisons declared immediately below — and it stays TRUE for them. It is not
+# a claim about this file as a whole. Since 087 (#234), 2026-08-05, this same
+# file ALSO declares two NON-EMPTY expectations (FIXPP_087_EXPECTED_CAPI and
+# FIXPP_087_EXPECTED_SERVICE, further down), and there is no contradiction: they
+# are a DIFFERENT OBSERVATION. 086 compares collected target properties on a
+# consumer target; 087 compares the system-classified EFFECTIVE include set at
+# the installed consumer, read through the CMake File API. Something does survive
+# there — include/capi, and include/service-iface — which is precisely why 087's
+# expectations can be non-empty while 086's remain correctly empty.
 # What is thereby lost is enumerated and pre-approved: today AT LEAST
 # FIXPP_LOG_MIN_LEVEL (src/log/CMakeLists.txt:27) and ASIO_STANDALONE (carried by
 # asio::asio, linked unwrapped inside the closure). Membership in that set is
@@ -242,3 +253,89 @@ OBSERVED_COMPILE_OPTIONS=$<JOIN:$<TARGET_PROPERTY:probe_usage_requirements,COMPI
 EXPECTED_COMPILE_FEATURES=${FIXPP_086_EXPECTED_COMPILE_FEATURES}
 OBSERVED_COMPILE_FEATURES=$<JOIN:$<TARGET_PROPERTY:probe_usage_requirements,COMPILE_FEATURES>,|>
 ")
+
+# ═════════════════════════════════════════════════════════════════════════════
+# 087-system-include-binding — the installed system-include interface
+# (specs/087-system-include-binding/contracts/system-include-interface.md)
+#
+# T010: the carrier target. A NEW, uniquely named target — never one of 086's
+# (contract C-6.2) — whose build command invokes the standalone comparator
+# (compare_system_includes.cmake, T008/T009) once per leg, `capi` THEN
+# `service`, then `leg-set` over the two collected result files. The
+# capi-before-service ordering is load-bearing, not incidental (C-6.2): it is
+# what makes §5 row #8's same-run capi evidence a property of THIS gate's
+# output rather than of a demonstrator's follow-up read — a `COMMAND` list
+# short-circuits on the first non-zero exit, so if `service` ran first a red
+# there would leave no capi-leg result behind at all.
+#
+# ── The RIGHT-HAND SIDE of the 087 comparison: literals WITH AN ORIGIN ────────
+#
+# Contract C-4 / data-model I4. Each member carries its own reason for being
+# there (E3's `origin` column). NOTHING may derive either set from the
+# observation it checks: a comparison whose expected value comes out of the run
+# is satisfied by whatever the run produced — the same no-op shape as a
+# file(GENERATE) nothing reads, and the very defect 086 declined to ship.
+#
+# ⚠️ C-4 and I4 are REVIEW-TIME invariants only. No §5 demonstration and no
+# mechanised check would catch a future edit that recomputed these from the
+# reply; US3's Independent Test is a human inspection (T028). Do not describe
+# them as gate-enforced.
+#
+# Wire format is compare_system_includes.cmake's own:
+#   "<prefix-relative path>|<isSystem 0|1>", entries separated by ';'.
+# Values MEASURED through the shipped driver at T007 (evidence:
+# ~/fixpp-087-evidence/driver-observed.txt), matching research.md R4 and
+# contract §1 exactly on Linux/clang, and R6 on MSVC-under-Conan.
+
+# capi — one entry. The C-ABI root 086 installs, and `fixpp::capi`'s ONLY
+# $<INSTALL_INTERFACE:> (src/capi/CMakeLists.txt:125-128).
+set(FIXPP_087_EXPECTED_CAPI "include/capi|1")
+
+# service — two entries, and each arrives by a DIFFERENT route, which is why
+# this leg is the one that can go LEAK and DROP at once (§5 row #8):
+#   include/service-iface — src/service/CMakeLists.txt's own independently
+#                           declared install interface (:24-27);
+#   include/capi          — INHERITED transitively, through fixpp::service's
+#                           link to fixpp::capi (src/service/CMakeLists.txt:30).
+#                           Nothing in src/service/ names it.
+# T013 (demonstration #1, the vacuity proof) deliberately omitted the inherited
+# member and observed the resulting LEAK before this line was ever correct.
+set(FIXPP_087_EXPECTED_SERVICE "include/service-iface|1;include/capi|1")
+
+# The codemodel-v2 reply directory for THIS sub-build. Contract §2a: the query
+# file is written by run_consumer_witness.cmake before this project is
+# configured, so by build time (when this target's COMMANDs run) the reply
+# already exists, produced by the same configure that defined every target
+# below.
+set(_fixpp_087_reply_dir "${CMAKE_BINARY_DIR}/.cmake/api/v1/reply")
+
+# Contract C-6.1: these MUST lie under CMAKE_BINARY_DIR as THIS file sees it —
+# i.e. inside the `-B` tree run_consumer_witness.cmake wipes at the START of
+# every run — so leg-set's "exactly two" is an assertion about THIS run.
+set(_fixpp_087_result_capi    "${CMAKE_BINARY_DIR}/fixpp-087-result-capi.txt")
+set(_fixpp_087_result_service "${CMAKE_BINARY_DIR}/fixpp-087-result-service.txt")
+
+add_custom_target(probe_system_include_contract
+  COMMAND "${CMAKE_COMMAND}"
+    -DFIXPP_087_MODE=compare
+    "-DFIXPP_087_REPLY_DIR=${_fixpp_087_reply_dir}"
+    -DFIXPP_087_LEG=capi
+    "-DFIXPP_087_INSTALL_PREFIX=${FIXPP_STAGE_PREFIX}"
+    "-DFIXPP_087_EXPECTATION=${FIXPP_087_EXPECTED_CAPI}"
+    "-DFIXPP_087_RESULT_FILE=${_fixpp_087_result_capi}"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/compare_system_includes.cmake"
+  COMMAND "${CMAKE_COMMAND}"
+    -DFIXPP_087_MODE=compare
+    "-DFIXPP_087_REPLY_DIR=${_fixpp_087_reply_dir}"
+    -DFIXPP_087_LEG=service
+    "-DFIXPP_087_INSTALL_PREFIX=${FIXPP_STAGE_PREFIX}"
+    "-DFIXPP_087_EXPECTATION=${FIXPP_087_EXPECTED_SERVICE}"
+    "-DFIXPP_087_RESULT_FILE=${_fixpp_087_result_service}"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/compare_system_includes.cmake"
+  COMMAND "${CMAKE_COMMAND}"
+    -DFIXPP_087_MODE=leg-set
+    "-DFIXPP_087_RESULT_FILES=${_fixpp_087_result_capi};${_fixpp_087_result_service}"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/compare_system_includes.cmake"
+  VERBATIM
+  COMMENT "087: comparing the installed system-include interface (capi, then service)"
+)

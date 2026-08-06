@@ -147,6 +147,21 @@ root of its own.
   > with their system classification without parsing compiler-specific command lines) asserted against an
   > allowed system-root set for `probe_usage_requirements` — **recorded as a follow-up, not done here**,
   > because it is new machinery well outside this feature's reviewed scope.
+  >
+  > **CLOSED BY 087 (#234), 2026-08-05 — this scope limit is no longer open.** The follow-up above was
+  > delivered exactly as described: the CMake File API `codemodel-v2` compile groups are read at the
+  > installed consumer and compared against a declared expectation, by
+  > `tests/consumer/compare_system_includes.cmake` carried by the target `probe_system_include_contract`.
+  > See `specs/087-system-include-binding/contracts/system-include-interface.md` §2 (the instrument) and §1
+  > (what is bound).
+  >
+  > **What 087 binds, precisely — it must not be read as more.** 087 binds the *include set of the two
+  > exported consumer targets named in its §1*, `fixpp::capi` and `fixpp::service`, each as an **exact,
+  > closed set** with per-entry system/non-system classification. It does **not** turn 086's §1 reachability
+  > matrix into a general system-path assertion: that matrix still covers system include directories only at
+  > its two named header boundaries, and its scope note stands unchanged. C-3's own closed enumeration above
+  > is likewise untouched — it still binds three properties by *this* instrument; the fourth is bound by a
+  > *different* instrument, in a different feature, at a different observation point.
   **MEASURED at `/speckit-implement`, 2026-08-04 — the withheld set is FOUR definitions, not the two the
   bundle predicted:**
 

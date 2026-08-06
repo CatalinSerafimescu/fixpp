@@ -491,6 +491,39 @@ jobs:
       - name: Build
         run: cmake --build --preset ${{ matrix.preset }}
 
+      # 087 T024 / FR-014 / SC-008 — the LAST GATE-CLOSABLE VACUITY PATH.
+      #
+      # ⚠️ ASSERT THE COUNT, NOT JUST THE EXIT CODE. Same shape as the packaging
+      # assertion below, for the same reason: `ctest -L` exits 0 when the filter
+      # matches NOTHING. fixpp::consumer::install-witness — which carries the
+      # whole 087 system-include gate AND 086's reachability matrix — is
+      # registered only inside `if(FIXPP_BUILD_CODEGEN_TOOL)` nested in
+      # `if(FIXPP_BUILD_TESTS)` (CMakeLists.txt:401). If that option ever goes
+      # OFF on a lane, the gate stops existing and the lane reports GREEN.
+      #
+      # UNCONDITIONAL — no `if:` guard, deliberately. The two test steps below
+      # are mutually exclusive by `if:` (`:513` runs on all but linux-gcc-release,
+      # `:544` only on it) and jointly cover every lane, so ONE unguarded step
+      # covers both without six conditional copies. Contract §6b.
+      #
+      # Placed after Build and before the first test step: `ctest -N` reads
+      # CTestTestfile.cmake and therefore needs a configured tree. This is
+      # EARLIER than the packaging assertion it is modelled on, which sits
+      # between the two test steps because only one lane needs it.
+      - name: Assert the consumer witness is registered (087 FR-014 gate)
+        run: |
+          set -euo pipefail
+          expected=1
+          n=$(ctest --preset ${{ matrix.preset }} -L consumer -N \
+                | sed -n 's/^Total Tests: //p')
+          echo "registered consumer witnesses: ${n:-0} (expected ${expected})"
+          if [ "${n:-0}" != "${expected}" ]; then
+            echo "::error::consumer label registered ${n:-0} tests, expected ${expected}."
+            echo "::error::The 086/087 installed-interface gate is not registered on this lane."
+            echo "::error::Refusing to report this lane green on an unrun gate."
+            exit 1
+          fi
+
       # 084 T067 / FR-026a — the packaging tier is GATED ON ONE LANE.
       #
       # `ctest --preset` carries no label filter, so the six packaging witnesses

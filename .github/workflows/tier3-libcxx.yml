@@ -313,6 +313,40 @@ jobs:
       - name: Build
         run: cmake --build --preset ${{ matrix.preset }} -j2
 
+      # 087 T026 / FR-014 / SC-008 — and THIS WORKFLOW IS THE LOAD-BEARING ONE.
+      #
+      # ⚠️ ASSERT THE COUNT, NOT JUST THE EXIT CODE. `ctest -L` exits 0 when the
+      # filter matches NOTHING, so an exit-code-only check reports the lane green
+      # having run zero witnesses. fixpp::consumer::install-witness is registered
+      # only inside `if(FIXPP_BUILD_CODEGEN_TOOL)` nested in `if(FIXPP_BUILD_TESTS)`
+      # (CMakeLists.txt:401); if that option ever goes OFF here the whole 086/087
+      # installed-interface gate silently stops existing.
+      #
+      # WHY THIS FILE MATTERS MOST: contract §1 discharges the UNMEASURED
+      # toolchains — gcc and libc++ — by arguing that CI executes the same gate.
+      # libc++ lives HERE and nowhere else (tier 1's matrix has no libc++ lane),
+      # and until this step landed this workflow carried NO count assertion of any
+      # kind. So for libc++ that argument rested on neither a cite nor a count.
+      # Contract §6a.
+      #
+      # UNCONDITIONAL — no `if:` guard. The two test steps below are mutually
+      # exclusive by `if:` (`:341` on all but -tsan, `:349` only on it) and jointly
+      # cover every lane, so one unguarded step covers both. Placed after Build and
+      # before the first test step: `ctest -N` needs a configured tree.
+      - name: Assert the consumer witness is registered (087 FR-014 gate)
+        run: |
+          set -euo pipefail
+          expected=1
+          n=$(ctest --preset ${{ matrix.preset }} -L consumer -N \
+                | sed -n 's/^Total Tests: //p')
+          echo "registered consumer witnesses: ${n:-0} (expected ${expected})"
+          if [ "${n:-0}" != "${expected}" ]; then
+            echo "::error::consumer label registered ${n:-0} tests, expected ${expected}."
+            echo "::error::The 086/087 installed-interface gate is not registered on this libc++ lane."
+            echo "::error::Refusing to report this lane green on an unrun gate."
+            exit 1
+          fi
+
       # TSan only: the apt-installed libc++ is NOT TSan-instrumented, so TSan
       # cannot see libc++'s internal synchronisation and reports FALSE data
       # races in std::future / asio::use_future shared-state teardown (proven

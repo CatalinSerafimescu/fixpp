@@ -69,6 +69,16 @@ if(EXISTS "${_stage}/include/fixpp/vt11")
   message(FATAL_ERROR "Staged install leaked fixpp/vt11/ (must be excluded per FR-008)")
 endif()
 
+# ── 1a. 087 T006 — request the codemodel-v2 File API reply ───────────────────
+# contract §2a: a reply exists only if .cmake/api/v1/query/codemodel-v2 was
+# present when CMake configured the sub-build below. tests/consumer/CMakeLists.txt
+# cannot write this file itself — it executes *during* the configure it would be
+# requesting a reply for, so the driver (here) writes it first. _sub_build does not
+# exist yet at this point (the configure below creates it), so the query directory
+# is created explicitly.
+file(MAKE_DIRECTORY "${_sub_build}/.cmake/api/v1/query")
+file(TOUCH "${_sub_build}/.cmake/api/v1/query/codemodel-v2")
+
 # ── 2. Configure the standalone consumer project ─────────────────────────────
 # Reuses the main build's Conan toolchain (resolves pugixml identically to the
 # main build — no separate dependency-resolution mechanism) but points the
@@ -125,19 +135,68 @@ set(_required_targets
   # back.
   probe_capi_negative        # ❌ fixpp::capi must not reach <fixpp/wire/parser.hpp>
   probe_capi_negative_service # ❌ fixpp::capi must not reach the service header
-  probe_service_negative)    # ❌ fixpp::service must not reach an engine header
+  probe_service_negative     # ❌ fixpp::service must not reach an engine header
+  probe_system_include_contract) # 087 T010 — installed system-include interface (C-6.3)
 execute_process(
   COMMAND "${CMAKE_COMMAND}" --build "${_sub_build}" --target ${_required_targets}
   RESULT_VARIABLE _build_rc
   OUTPUT_VARIABLE _build_out
   ERROR_VARIABLE  _build_err
 )
+# ⚠️ The token names in the message below are spelled WITHOUT brackets, and that
+# is load-bearing rather than stylistic. The comparator emits its real token
+# BRACKETED, as `[<TOKEN>] compare_system_includes.cmake compare (<leg>): ...`,
+# and contract §5's demonstrations record that token as their evidence. If this
+# help text enumerated them bracketed, a bare grep for the bracketed form would
+# match THIS TEXT on every red, so a demonstration could be ticked having matched
+# the enumeration rather than the emission — §5 row #8 asserts LEAK *and* DROP and
+# would confirm both vacuously. Measured: the first draft of this message did
+# exactly that, and all six token names appeared in a run whose only real token
+# was the capi leg's LEG_ERROR.
+#
+# Evidence greps MUST anchor on the emission, e.g.
+#   grep -oE '\[[A-Z_;]+\] compare_system_includes'
+# rather than on a bare bracketed token name.
+#
+# ⚠️ THE ';' IN THAT CHARACTER CLASS IS REQUIRED, and its absence was a real
+# false-negative until 2026-08-06. A leg that emits MORE THAN ONE token spells
+# them semicolon-joined inside the brackets, in the `[<TOKEN;TOKEN>] ...` shape —
+# so the narrower '\[[A-Z_]+\]' matches NOTHING on contract §5 row #8, the one row
+# whose entire assertion is LEAK *and* DROP from a single mutation (FR-004, the
+# direction of the mismatch). Measured: 0 hits with the old pattern against a
+# genuine row-#8 red, 1 with this one.
+#
+# (The two-token example is written with the same `<...>` placeholder convention
+# as the single-token one above, and for the same reason: spelling a REAL pair
+# here would make this very comment match the widened grep. It did, in the first
+# draft of this note — caught by re-running the property check against this file.)
+#
+# That failure mode is worse than it looks. A demonstrator who trusts the
+# documented grep reads "no token emitted" on the row that emitted two, and the
+# obvious repair — relaxing to a bare '\[DROP\]' — is exactly the vacuity the
+# unbracketed rule above exists to prevent, because it matches this help text.
+# Widening the class is the repair that keeps both properties: verified 0 matches
+# against this file, and correct single-token matches on rows #1/#2.
 if(NOT _build_rc EQUAL 0)
   message(FATAL_ERROR
-    "consumer build failed (exit ${_build_rc}). NOTE: this driver builds the 086 "
-    "witness targets BY NAME (${_required_targets}), so an \"unknown target\" error "
-    "(Ninja) or \"No rule to make target\" (Makefiles) here means a gate was deleted "
-    "or renamed, not that the code is broken.\n"
+    "consumer build failed (exit ${_build_rc}). This driver builds the 086/087 "
+    "witness targets BY NAME (${_required_targets}). Three dispositions are "
+    "possible, and they are NOT the same finding (contract C-6.3, and §3's "
+    "pre-comparison split):\n"
+    "  * an \"unknown target\" error (Ninja) or \"No rule to make target\" "
+    "(Makefiles) means a gate was deleted or renamed;\n"
+    "  * a non-zero exit FROM probe_system_include_contract carrying LEAK, DROP "
+    "or RECLASSIFIED means the comparison RAN and FAILED — a genuine interface "
+    "violation;\n"
+    "  * a non-zero exit carrying MISSING_REPLY, INPUT_ERROR or LEG_ERROR means "
+    "the leg terminated BEFORE comparing anything — the reply was absent, the "
+    "reply was unparseable, or the comparator was driven wrong. These are NOT "
+    "interface findings, and C-2 keeps them apart on purpose: \"the reply was "
+    "corrupt\" and \"the carrier was driven wrong\" are different defects with "
+    "different owners.\n"
+    "(Token names are spelled unbracketed here on purpose; see the comment above "
+    "this message in run_consumer_witness.cmake.) The token and its first "
+    "diagnostic line are in the build output printed directly below.\n"
     "${_build_out}\n${_build_err}")
 endif()
 
@@ -172,7 +231,24 @@ endif()
 # and $<LINK_ONLY:> withholds COMPILE_DEFINITIONS, COMPILE_OPTIONS,
 # COMPILE_FEATURES and SYSTEM_INCLUDE_DIRECTORIES along with the include path. So
 # a target that links only fixpp::capi must end up with an EMPTY effective set for
-# all three. Asserting empty — rather than "does not contain FIXPP_LOG_MIN_LEVEL"
+# all three.
+#
+# ⚠️ FOUR withheld, "all three" asserted — the seam is NOT a typo, and since 087
+# (#234, 2026-08-05) it is no longer unexplained. This instrument (file(GENERATE)
+# + the compare below) binds THREE of the four BY CONSTRUCTION: each has a
+# documented collected consumer property to read via $<TARGET_PROPERTY:>.
+# SYSTEM_INCLUDE_DIRECTORIES has none — comparing an absent property would read
+# empty against empty, an assertion that cannot fail — so it is deliberately not
+# among the three here.
+#
+# The FOURTH is bound by 087, through a different instrument: the CMake File API
+# `codemodel-v2` compile groups, read at the installed consumer by
+# tests/consumer/compare_system_includes.cmake and carried by the target
+# `probe_system_include_contract` — which is listed in THIS FILE's own
+# _required_targets above, so it cannot be deleted silently.
+#
+# Leg 3's own scope is UNCHANGED: it still asserts exactly the three properties
+# named below, for exactly the reason given. Asserting empty — rather than "does not contain FIXPP_LOG_MIN_LEVEL"
 # — is deliberate: it is a closed assertion, so a definition nobody predicted
 # fails it too. (The withheld set today is at least FIXPP_LOG_MIN_LEVEL, from
 # src/log/CMakeLists.txt:27, and ASIO_STANDALONE, carried by asio::asio linked
