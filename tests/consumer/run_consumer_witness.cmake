@@ -155,8 +155,28 @@ execute_process(
 # was the capi leg's LEG_ERROR.
 #
 # Evidence greps MUST anchor on the emission, e.g.
-#   grep -oE '\[[A-Z_]+\] compare_system_includes'
+#   grep -oE '\[[A-Z_;]+\] compare_system_includes'
 # rather than on a bare bracketed token name.
+#
+# ⚠️ THE ';' IN THAT CHARACTER CLASS IS REQUIRED, and its absence was a real
+# false-negative until 2026-08-06. A leg that emits MORE THAN ONE token spells
+# them semicolon-joined inside the brackets, in the `[<TOKEN;TOKEN>] ...` shape —
+# so the narrower '\[[A-Z_]+\]' matches NOTHING on contract §5 row #8, the one row
+# whose entire assertion is LEAK *and* DROP from a single mutation (FR-004, the
+# direction of the mismatch). Measured: 0 hits with the old pattern against a
+# genuine row-#8 red, 1 with this one.
+#
+# (The two-token example is written with the same `<...>` placeholder convention
+# as the single-token one above, and for the same reason: spelling a REAL pair
+# here would make this very comment match the widened grep. It did, in the first
+# draft of this note — caught by re-running the property check against this file.)
+#
+# That failure mode is worse than it looks. A demonstrator who trusts the
+# documented grep reads "no token emitted" on the row that emitted two, and the
+# obvious repair — relaxing to a bare '\[DROP\]' — is exactly the vacuity the
+# unbracketed rule above exists to prevent, because it matches this help text.
+# Widening the class is the repair that keeps both properties: verified 0 matches
+# against this file, and correct single-token matches on rows #1/#2.
 if(NOT _build_rc EQUAL 0)
   message(FATAL_ERROR
     "consumer build failed (exit ${_build_rc}). This driver builds the 086/087 "
