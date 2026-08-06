@@ -3,6 +3,17 @@
 **Status:** WIRED. **Cold run measured** ([31114098100], 2026-08-06); the warm half of the A/B is
 still outstanding. Issue [#231].
 
+> ⏸️ **BLOCKED ON GITHUB CAPACITY, not on this change.** The warm dispatch
+> ([31121588649], 16:57Z) never reached the Windows matrix: its `filter` job — a trivial job on
+> **`ubuntu-24.04`** — sat queued ~13 min and was then **cancelled**, leaving `matrix.preset`
+> skipped. Same window as the cold run's cancellations and the ones that took the longest-running
+> job out of Tier 1, Tier 2 and Tier 3 on `main`. The Ubuntu symptom is the informative one: this is
+> not a Windows-runner shortage but jobs failing to be scheduled at all.
+>
+> **Nothing is lost by waiting.** The debug and release caches are already published to GHCR and are
+> keyed on `<preset>-<toolset>`, not on a commit — so the warm run is a re-dispatch whenever
+> capacity returns, not a re-run of the cold half. Only `windows-msvc-asan` still owes a cold pass.
+
 ## MEASURED — cold run, 2026-08-06
 
 Dispatched on `ci/231-tier2-sccache`. ⚠️ **All three legs were cancelled externally** during a
@@ -373,3 +384,4 @@ into the job summary so that trade is visible rather than assumed.
 [#177]: https://github.com/CatalinSerafimescu/fixpp/issues/177
 [30880318695]: https://github.com/CatalinSerafimescu/fixpp/actions/runs/30880318695
 [31114098100]: https://github.com/CatalinSerafimescu/fixpp/actions/runs/31114098100
+[31121588649]: https://github.com/CatalinSerafimescu/fixpp/actions/runs/31121588649
