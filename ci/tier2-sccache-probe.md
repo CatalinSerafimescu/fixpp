@@ -215,6 +215,17 @@ Conan barely pays for this: its tag is content-hashed, so each push mints a *new
 manifest (zero untagged versions in that package today). A **rolling** tag has no such luck, which is
 the one real cost of choosing stability over content-hashing.
 
+**RESOLVED 2026-08-06.** A classic PAT with `delete:packages` + `read:packages` is now stored as the
+repo secret **`GHCR_PAT`**, and the backlog was reclaimed: the three stale 2026-08-02
+`fixpp-conan-cache` MSVC versions were deleted, leaving each profile on its single live tag and the
+package with zero untagged versions. The keep-tag for each was not assumed — it was **computed** with
+`ci/conan-cache-key.sh` at `VCToolsVersion=14.44.35207`, and that toolset was in turn confirmed from
+the runner rather than from the local sandbox: on the cold run, `Save Conan cache to GHCR` reports
+**`skipped`**, and its condition is `steps.conan_restore.outputs.hit == 'false'` — a skip therefore
+means the restore HIT, so the runner computed a tag that exists. All eleven Linux profiles dry-ran
+clean (each one's single tag *is* its current tag), which also confirms they were never evidence that
+pruning worked.
+
 Handling, since it cannot be fixed from inside the workflow:
 
 - Both seed steps now read `GH_TOKEN` from **`secrets.GHCR_PAT || secrets.GITHUB_TOKEN`**, so
