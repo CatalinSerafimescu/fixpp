@@ -4,12 +4,16 @@
 // for read_first_frame_bounded (088-firstframe-budget-timer-lifetime).
 //
 // Phase 3 (User Story 1) — T012-T015: cells B1/B2/B3/B5 (research.md D-6.1 /
-// D-6.11). Each cell drives the CURRENT tree's (pre-fix) read_first_frame_bounded
-// directly via a mock_transport Script and asserts the outcome the DELIVERED
-// design (T016/T017, not yet landed) is required to produce. Every cell here is
-// RED against `main` — see research.md D-6.7's per-cell RED-basis table.
+// D-6.11). Each cell drives read_first_frame_bounded directly via a
+// mock_transport Script and asserts the DELIVERED contract: a complete frame
+// always wins over the budget (checked first, every iteration); the budget
+// only fires when no frame is extractable, with a strict `>` (exceeds, not
+// reaches — FR-014). Every cell was RED against `main` when written — see
+// research.md D-6.7's per-cell RED-basis table.
 //
-// Pre-fix source shape (src/session/read_first_frame_bounded.hpp, current tree):
+// Pre-fix source shape (src/session/read_first_frame_bounded.hpp AS IT STOOD
+// WHEN THESE CELLS WERE WRITTEN — T016-T018 has since replaced it; nothing
+// below describes the current tree):
 //   :56  timer.expires_after(deadline) — armed once, before the loop.
 //   :72  pmr_carry_buffer carry{max_bytes, ...} — capacity max_bytes, NOT max_bytes+1.
 //   :78  site A — `if (buf.size() >= max_bytes)` at the loop top (unreachable pre-frame
@@ -17,27 +21,26 @@
 //   :83-84 the read is UNCLAMPED — always requests the full 4096-byte read_buf,
 //        regardless of remaining budget ("room").
 //   :96  site B — `if (buf.size() >= max_bytes)`, evaluated AFTER the insert but
-//        BEFORE framer.feed. This is the budget-before-frame defect every cell
-//        below actually hits (site A is unreachable from any of these four
-//        constructions — buf is always empty at every site-A check).
+//        BEFORE framer.feed. This was the budget-before-frame defect every cell
+//        below actually hit (site A was unreachable from any of these four
+//        constructions — buf starts empty at every site-A check).
 //
 // research.md D-6.11's B2/B5 iteration tables (room/want columns, "terminates at
-// ~50ms") describe the DELIVERED (clamped) loop, not this pre-fix source — the
-// pre-fix read is unclamped and (for B1/B3/B5) returns after exactly ONE read,
-// well before any deadline could fire. Recorded so a reader does not mistake
-// those tables for a pre-fix trace.
+// ~50ms") describe the DELIVERED (clamped) loop, which is what these cells now
+// run against. Recorded so a reader does not mistake those tables for the
+// (now-superseded) pre-fix trace above.
 //
 // Anchors: research.md D-5/D-6/D-6.7/D-6.11; tasks.md T012-T015;
 //          contracts/read_first_frame_bounded.md.
 //
 // Phase 4 (User Story 2) — T020: cell T1 (SC-005/SC-006, research.md D-6.2/
-// D-6.3/D-6.7). Unlike B1/B2/B3/B5 above, T1's RED basis is the TIMER defect
-// (still present in the current tree — src/session/read_first_frame_bounded.hpp
+// D-6.3/D-6.7). Unlike B1/B2/B3/B5 above, T1's RED basis was the TIMER defect
+// (at the time this cell was written — src/session/read_first_frame_bounded.hpp
 // :59 `bool timed_out`, :65 the by-reference `timer.async_wait` lambda, :68
 // `transport.cancel()`, :83 `while (!timed_out)`), not the budget-before-frame
 // defect T012-T015 already fixed. T1's fix (arm-once absolute-expiry timer +
-// the `||` join) is T026/T027, not yet landed — do not expect this cell green
-// under ASan until then.
+// the `||` join) landed at T026/T027 — this cell is GREEN under ASan against
+// the delivered tree.
 //
 // Phase 5 (User Story 3) — T031/T032: cells B4 (SC-003) and B6 (SC-004/D-1b).
 // Both land after T016-T018/T026-T029 (the fix), so both are regression

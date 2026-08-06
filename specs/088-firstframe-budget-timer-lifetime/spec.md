@@ -702,9 +702,21 @@ for why the *same-drain ordering itself* is not constructible at this layer.
 - **SC-016**: The witnesses for SC-005/SC-006/SC-015 are deterministic — the ordering under test
   is constructed by the test, not awaited. No **session-layer** witness in this feature depends on
   winning a timing race. *(FR-016 / C3.)* **Scoped at Gate A round 1 (clarification G-1):** this
-  criterion binds the session-layer cells, where FR-016's seam exists and research §D-6.2 gives the
-  construction. It does **not** bind SC-014's transport cells, which — after that criterion's
-  narrowing — no longer test an ordering at all.
+  criterion binds the session-layer cells, where FR-016's seam exists. It does **not** bind SC-014's
+  transport cells, which — after that criterion's narrowing — no longer test an ordering at all.
+  **T1 discharges this via research §D-6.2's elapse-then-poll construction** (a hand-driven
+  `io_context` elapses wall time with no live handler racing it) — **D-6.2 is T1's construction
+  specifically, not a blanket description of every session-layer cell.**
+  **Reconciled with SC-015 at T045 (carried Gate A obligation 1):** SC-015's normative figures — T2a's
+  100 ms against a 500 ms deadline, T2b's 500 ms against `kFirstFrameDeadline` — read, on their own, as
+  wall-clock thresholds, which would be exactly the timing race this criterion forbids. **T2a/T2b do
+  not implement that reading.** Each arms a TEST-OWNED intermediate timer at the SC-015 figure and
+  asserts an ORDERING between two test-controlled events — the intermediate timer's own handler
+  observes whether the result is still unset at the instant it fires (`tests/session/
+  read_first_frame_bounded_test.cpp`'s T2a cell; `tests/session/first_frame_stop_test.cpp`'s T2b
+  cell) — never a comparison of elapsed wall-clock against a constant. SC-015's bound survives as the
+  intermediate timer's value; SC-016 holds because winning that ordering requires no live race
+  against real time, only against a timer the test itself controls.
 - **SC-017**: The internal header added by FR-016 sits under `src/session/` and is therefore not
   installed; the installed package's headers are byte-identical to `main`'s. *(FR-012 / FR-016 / C3.)*
 - **SC-018**: On a **real TLS transport**, a `cancellation_type::total` delivered while a first-frame

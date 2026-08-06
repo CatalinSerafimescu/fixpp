@@ -66,9 +66,12 @@ inline asio::awaitable<void> await_deadline(asio::steady_timer& timer) {
 //
 // Used AFTER async_handshake succeeds — we read TLS application-data bytes.
 //
-// Invariant: returns when >= 1 complete FIX frame is present in buf, OR when
-// the deadline fires, OR when the byte budget is exceeded, OR on read error.
-// "Complete frame" == Framer::feed returns at least one frame_view.
+// Invariant: a complete frame ALWAYS wins over the budget — this returns as
+// soon as >= 1 complete FIX frame is present in buf, checked BEFORE the budget
+// decision on every iteration (FR-002/FR-007). The byte budget only fires when
+// no frame is extractable from what has been read so far. Also returns on
+// deadline fire or read error. "Complete frame" == Framer::feed returns at
+// least one frame_view.
 //
 // [FR-014; E-2; data-model "Bounded first-frame read"]
 inline asio::awaitable<fixpp::core::expected_t<std::size_t>> read_first_frame_bounded(

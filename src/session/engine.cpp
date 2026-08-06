@@ -767,7 +767,16 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
         // Plaintext path falls through here with hr{} (no peer_id; D-10/E-7).
 
         // Step 3: bounded first-frame read (FR-014).
-        // 5s deadline, 4096 bytes max (covers any valid FIX Logon message).
+        // 5s deadline; kFirstFrameMaxBytes=4096 bounds the FIRST FRAME's own
+        // budget check (any valid FIX Logon fits well within it) — it is NOT a
+        // cap on frame_buf's total size. A peer that coalesces the Logon with
+        // the start of a following frame in the same segment can still land up
+        // to max_bytes + 1 bytes in frame_buf (the C1 clamp; research.md D-1a)
+        // before the budget would reject, because the frame-found return
+        // always wins over the budget check (research.md D-1). The coalesced
+        // surplus beyond the first frame (frame_buf[first_frame_len..), see
+        // below) is not itself budget-checked here — it is handed to the
+        // read-pump (F-015-002).
         constexpr std::size_t kFirstFrameMaxBytes = 4096;
         constexpr auto kFirstFrameDeadline = std::chrono::milliseconds{5000};
 
