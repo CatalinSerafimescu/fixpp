@@ -25,14 +25,22 @@ and seed, so the compiler-cache evidence survived intact.
 | leg | AC3 gate | restore | compile requests | hits | **non-cacheable** | **failures** | seeded |
 |---|---|---|---:|---:|---:|---:|---|
 | `windows-msvc-debug` | ✅ | MISS | 1456 | 0 (0.00 %) | **0** | **0** | ✅ 1.1 G |
-| `windows-msvc-release` | ✅ | MISS | *(cold, completed)* | 0 | — | — | ✅ |
+| `windows-msvc-release` | ✅ | MISS | 1456 | 0 (0.00 %) | **0** | **0** | ✅ 205 M |
 | `windows-msvc-asan` | ✅ | MISS | 894 *(partial — Build cancelled at 65m)* | 0 | **0** | **0** | ❌ |
 
 **The `0 non-cacheable / 0 failures` column is the headline, not the 0 % hit rate.** A cold run is
 *supposed* to be 0 %. What was genuinely unknown is whether the `/Z7` prerequisite holds across the
-whole build rather than on the one TU the AC3 gate samples — and 1456 + 894 compiles produced
+whole build rather than on the one TU the AC3 gate samples — and 3806 compiles produced
 **zero** non-cacheable compilations and **zero** compilation failures. That retires the failure mode
 #231 was most worried about, and it does so on every leg including asan.
+
+`windows-msvc-release` **completed green**, so it also answers the half of AC4 that names it:
+`registered packaging witnesses: 8 (expected 8)`.
+
+The cache-size split is the `/Z7` signature and worth keeping as a sanity anchor: **1 GiB** on
+debug against **203 MiB** on release, from an identical 1456-TU compile set — embedded debug info
+makes Debug objects several times larger, and Release carries none. A future run where those two
+converge means the genex stopped discriminating by config.
 
 AC3's gate printed, on all three legs:
 
