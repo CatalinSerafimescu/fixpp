@@ -3011,6 +3011,40 @@ set_tests_properties(session_first_frame_total_cancel_tls PROPERTIES
   LABELS "088;us2;live_tls;first_frame;cancellation"
   TIMEOUT 60)
 
+# ── 088 Phase 4 (US2) — T022: T2b (SC-015 accept-slot leg) ───────────────────
+# Engine::stop()'s promptness + accept-slot reclaim at engine scope, driven
+# through #232's real mTLS loopback harness (EngineLoopbackHarness). Same
+# bare-deadline-arm mutant as T2a (research.md D-6.12b), applied via stop()'s
+# Step-3 join on outstanding_counter_ rather than a direct helper call. MUST
+# NOT be skippable in CI, so FIXPP_TLS_FIXTURE_DIR is wired unconditionally at
+# configure time. TIMEOUT is explicit (research.md D-6.13b's build contract):
+# this target's regression mode is a bounded 5s stall under the mutant, not a
+# hang, but per D-5's rule a target whose failure shape includes a multi-
+# second wait may not inherit add_threading_test's default silently.
+# Anchors: research.md D-6.1/D-6.12/D-6.13a/D-6.13b; tasks.md T022.
+add_executable(session_first_frame_stop first_frame_stop_test.cpp)
+target_link_libraries(session_first_frame_stop PRIVATE
+  fixpp_session
+  fixpp_transport
+  fixpp_tls
+  "${FIXPP_TRANSPORT_OPENSSL_SSL_LIB}"
+  "${FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB}"
+  "${FIXPP_TRANSPORT_ZLIB_LIB}"
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(session_first_frame_stop PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+  "${CMAKE_SOURCE_DIR}/src"
+)
+target_compile_definitions(session_first_frame_stop PRIVATE
+  FIXPP_TLS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/tls/fixtures"
+)
+add_test(NAME session_first_frame_stop COMMAND session_first_frame_stop)
+set_tests_properties(session_first_frame_stop PROPERTIES
+  LABELS "088;us2;first_frame;stop;live_tls"
+  TIMEOUT 120)
+
 # ── Conformance subdirectory (005 Q2 in-scope [FIX-TC] subset) ───────────────
 # Phase 3 adds tc_establishment_test.cpp (T020); later phases add more.
 add_subdirectory(conformance)

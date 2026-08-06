@@ -41,13 +41,20 @@
 
 #include <gtest/gtest.h>
 
+#include <asio/awaitable.hpp>
+#include <asio/bind_cancellation_slot.hpp>
+#include <asio/cancellation_signal.hpp>
+#include <asio/cancellation_type.hpp>
 #include <asio/co_spawn.hpp>
 #include <asio/detached.hpp>
 #include <asio/io_context.hpp>
+#include <asio/steady_timer.hpp>
+#include <asio/this_coro.hpp>
 #include <asio/use_future.hpp>
 #include <chrono>
 #include <cstddef>
 #include <cstdio>
+#include <exception>
 #include <fixpp/core/error.hpp>
 #include <fixpp/transport/test/mock_transport.hpp>
 #include <future>
@@ -138,6 +145,16 @@ std::string describe_sizes(std::vector<std::size_t> const& v) {
         out += std::to_string(v[i]);
     }
     return out + "}";
+}
+
+// A cancellation-attributable outcome per D-6.1's T2a row / D-6.10a's leg-A
+// binding: one of the two errors a genuinely-cancelled read/deadline arm can
+// surface — order[0] (unspecified asio scheduler internals) decides which,
+// and this bundle elsewhere refuses to depend on that ordering (D-6.4/D-6.10a).
+bool is_cancellation_attributable(expected_t<std::size_t> const& r) {
+    if (r.has_value()) return false;
+    return r.error() == error::transport_read_cancelled ||
+           r.error() == error::transport_handshake_timeout;
 }
 
 }  // namespace
@@ -448,4 +465,121 @@ TEST(ReadFirstFrameBounded, T1) {
         << "defect this cell targets. Under linux-clang-asan this must instead manifest as a "
         << "heap-use-after-free abort (the write to `timed_out` lands first); a clean ASan run "
         << "here means the proof did not fire, not that there is no defect (D-6.3).";
+}
+
+// ── T2a (SC-015 / FR-015) ──────────────────────────────────────────────────────
+// `total`-cancellation delivery (D-2/D-6.12): the wrapper coroutine below is
+// NOT a test convenience — co_spawn's initial cancellation state is
+// terminal-only (C2), so without an outer co_spawn whose FIRST statement
+// resets to enable_total_cancellation(), the test's own `signal.emit(total)`
+// dies before ever reaching read_first_frame_bounded's internal join, and the
+// cell would fail with the delivered code CORRECT.
+//
+// Asserts a cancellation-ATTRIBUTABLE error SET
+// (transport_read_cancelled OR transport_handshake_timeout), not the exact
+// value: under the delivered design BOTH arms of the internal `||` join are
+// cancelled together, and which one is recorded as order[0] (unspecified asio
+// scheduler internals — D-6.4/D-6.10a) decides which surfaces. Binding the
+// exact value would risk a RED on correct code (research.md D-6.1's T2a row,
+// widened at Gate A round 4).
+//
+// Mutant killed: the BARE deadline arm — await_deadline (read_first_frame_
+// bounded.hpp) replaced by a raw timer.async_wait(use_awaitable), dropping
+// both the total-cancel reset and redirect_error. Per D-6.12b this mutant
+// does NOT change the RETURNED VALUE (order[0]==0 either way, so the join
+// still surfaces the read arm's transport_read_cancelled) — the
+// discriminator is PROMPTNESS. Under the mutant the bare arm's own cancel is
+// silently dropped (its terminal-only IN filter never sees `total`), it is
+// never re-cancelled (the group's one-shot guard was already consumed
+// cancelling the read arm), and it runs to the FULL `kDeadline` before the
+// join retires — even though the read arm itself aborted almost immediately.
+//
+// Deterministic construction (T045/SC-016 — NOT a wall-clock threshold): an
+// intermediate timer the TEST owns is armed at `kIntermediate` (100ms)
+// against a helper `kDeadline` of 500ms — D-6.12's own figures, a one-sided
+// 5x margin (the delivered code retires in microseconds; the mutant cannot
+// retire before 500ms). `timer_fired_before_result` is set inside the
+// timer's own handler ONLY if `result` is still unset at that instant, so
+// the assertion is an ORDERING between two test-controlled events (did the
+// timer's handler run before the join retired?), not a comparison of
+// elapsed wall-clock against a constant. The context is always drained to
+// `result.has_value()` regardless of which fires first, matching D-6.2's
+// "drain to completion" discipline (T1, above) rather than aborting mid-flight.
+TEST(ReadFirstFrameBounded, T2a) {
+    constexpr std::size_t kMaxBytes = 4096;
+    constexpr auto kDeadline = std::chrono::milliseconds{500};
+    constexpr auto kIntermediate = std::chrono::milliseconds{100};
+
+    Script s;
+    // 10s >> kDeadline (500ms): the read must be resolved ONLY by
+    // cancellation, never by the mock's own latency timer racing it.
+    s.read_latency = std::chrono::seconds{10};
+
+    asio::io_context ioc;
+    mock_transport mt{ioc.get_executor(), std::move(s)};
+    std::vector<std::byte> buf;
+
+    asio::cancellation_signal signal;
+    bool entered_helper = false;
+    std::optional<expected_t<std::size_t>> result;
+    std::exception_ptr thrown;
+
+    asio::co_spawn(
+        ioc,
+        [&]() -> asio::awaitable<void> {
+            co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
+            entered_helper = true;
+            result = co_await read_first_frame_bounded(mt, buf, kDeadline, kMaxBytes);
+        },
+        asio::bind_cancellation_slot(signal.slot(),
+                                      [&](std::exception_ptr ep) { thrown = ep; }));
+
+    // Positive initiation barrier (D-6.13a): poll() until entered_helper is
+    // set, then confirm a FOLLOWING poll() leaves `result` unset — genuinely
+    // suspended inside the join, not merely queued. An unset completion flag
+    // alone would be satisfied by a coroutine that never ran at all — exactly
+    // what C2's bug produces (D-6.13a(a); withdrawn round-2 form).
+    for (int i = 0; i < 10'000 && !entered_helper; ++i) ioc.poll();
+    ASSERT_TRUE(entered_helper)
+        << "T2a: the wrapper coroutine never reached the co_await of the subject "
+        << "helper — vacuous cell (D-6.13a).";
+    ioc.poll();
+    ASSERT_FALSE(result.has_value())
+        << "T2a: the helper completed before cancellation was ever emitted — the "
+        << "barrier cannot certify suspension inside the join.";
+    EXPECT_GE(mt.async_reads_observed(), 1u)
+        << "T2a (mechanism 4): no read was initiated before cancellation — the read "
+        << "arm never became genuinely in-flight, so this cell would not exercise "
+        << "D-2's join at all.";
+
+    bool timer_fired_before_result = false;
+    asio::steady_timer intermediate{ioc.get_executor()};
+    intermediate.expires_after(kIntermediate);
+    intermediate.async_wait([&](std::error_code ec) {
+        if (!ec && !result.has_value()) timer_fired_before_result = true;
+    });
+
+    signal.emit(asio::cancellation_type::total);
+
+    while (!result.has_value()) {
+        ASSERT_GT(ioc.run_one(), 0u)
+            << "T2a: io_context ran out of work before the join completed — a broken "
+            << "cell (mis-wired timers), not a RED proof.";
+    }
+    intermediate.cancel();
+    ioc.poll();
+
+    ASSERT_FALSE(thrown) << "T2a: the wrapper coroutine threw.";
+
+    // THE promptness assertion — kills the bare-deadline-arm mutant (D-6.12b).
+    EXPECT_FALSE(timer_fired_before_result)
+        << "T2a (SC-015/FR-015): the intermediate " << kIntermediate.count() << "ms timer "
+        << "fired BEFORE the join completed, against a " << kDeadline.count() << "ms helper "
+        << "deadline. Under the bare-deadline-arm mutant the deadline arm's own cancel is "
+        << "silently dropped, so the join cannot retire before the FULL deadline elapses "
+        << "(D-6.12b) — cancellation must be PROMPT, not merely eventual.";
+
+    EXPECT_TRUE(is_cancellation_attributable(*result))
+        << "T2a (SC-015): expected a cancellation-attributable outcome (transport_read_"
+        << "cancelled or transport_handshake_timeout), got " << describe(*result);
 }
