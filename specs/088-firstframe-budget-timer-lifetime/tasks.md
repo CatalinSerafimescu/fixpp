@@ -121,7 +121,7 @@ assert no write-to-freed and no `cancel()` from any handler the call armed.
 - [X] T027 [US2] Replace the raw `timer.async_wait(...)` + `transport.cancel()` with the `||` join in `src/session/read_first_frame_bounded.hpp`, the deadline arm wrapped in a coroutine that resets to `enable_total_cancellation()` first (FR-005 / FR-006 / D-2)
 - [X] T028 [US2] Give the deadline arm `asio::redirect_error(asio::use_awaitable, ec)` in `src/session/read_first_frame_bounded.hpp` (D-3) — a bare `use_awaitable` arm throws on **every established connection**, and no-throw is what makes `outcome.index()` a sound discriminator
 - [X] T029 [US2] Change the one-argument reset at `src/transport/asio_tls_transport.cpp:1134` in `async_read_some` to the **two-argument** OUT-mapping form, mapping any non-`none` cancellation to `terminal`, mirroring the `async_connect` precedent at `:918-933` **including its commenting discipline** (in-source reason + both `[[feedback_*]]` mnemonics) — FR-018. Without it `Engine::stop()`'s `total` dies in the SSL composed op's terminal-only inner state and `stop()` hangs unboundedly on the default accept path. **The fix is not expressible at the call site** — `reset_cancellation_state` replaces the bottom-frame state, last reset wins. Do **not** touch the plain transport: its socket op already honours `terminal|partial|total`
-- [ ] T030 [US2] Run T1/T2a/T2b/T6 green under ASan and TSan and re-run every mutant
+- [X] T030 [US2] Run T1/T2a/T2b/T6 green under ASan and TSan and re-run every mutant
 
 ---
 
