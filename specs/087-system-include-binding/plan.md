@@ -77,7 +77,7 @@ unevidenced from the bundle alone.
 specs/087-system-include-binding/
 ├── spec.md              # 18 FR / 8 SC / 3 user stories; all clarifications resolved
 ├── plan.md              # this file
-├── tasks.md             # 44 tasks, T001–T044 (pipeline step 5, 2026-08-05); five countable sets
+├── tasks.md             # 45 tasks, T001–T044 plus T005a (pipeline step 5, 2026-08-05); five countable sets
 │                        #   pinned in its header + a requirement→task map over 18/18 FR, 8/8 SC
 ├── research.md          # R1–R7; BOTH platforms measured on the real consumer project
 ├── data-model.md        # E1 include entry / E2 observed set / E3 declared expectation /
