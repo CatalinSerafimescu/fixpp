@@ -227,6 +227,14 @@ public:
                 co_return std::unexpected{E::transport_read_eof};
             }
 
+            // cppcheck-suppress containerOutOfBounds  // co_return not modelled as terminating
+            // FALSE POSITIVE, disproven experimentally rather than assumed: cppcheck does not
+            // treat `co_return` as a control-flow terminator, so it believes execution falls
+            // through the guard above. Swapping that `co_return` for a plain `return` in a scratch
+            // copy drops the finding from 1 to 0 with the code otherwise identical — the coroutine
+            // return is the whole cause. The access is reached only when the guard did NOT fire,
+            // i.e. `chunk_index_ < script_.inbound_chunks.size()`, so it is in bounds by
+            // construction. (088 T048 / [const] treat-every-analyzer-finding-as-real discipline.)
             auto const& chunk = script_.inbound_chunks[chunk_index_];
             const std::size_t chunk_remaining = chunk.size() - chunk_offset_;
             const std::size_t n = std::min(buf.size(), chunk_remaining);
@@ -398,9 +406,9 @@ private:
     // rule 7), so bytes_read_so_far() below is meaningful in both modes.
     std::size_t read_cursor_{0};
     std::size_t chunk_index_{0};   // inbound_chunks: index of the current
-                                    // (not-yet-fully-drained) chunk.
+                                   // (not-yet-fully-drained) chunk.
     std::size_t chunk_offset_{0};  // inbound_chunks: bytes already drained
-                                    // from the current chunk.
+                                   // from the current chunk.
     std::vector<std::byte> outbound_seen_;
     std::size_t writes_observed_{0};
     std::size_t reads_observed_{0};

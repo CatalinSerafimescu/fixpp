@@ -119,9 +119,9 @@ inline asio::awaitable<fixpp::core::expected_t<std::size_t>> read_first_frame_bo
         // deadline's own wait) is always retired before this co_await returns —
         // no explicit timer.cancel()/transport.cancel() bookkeeping is needed on
         // any return path below (FR-005/FR-006).
-        auto outcome = co_await (
-            transport.async_read_some(std::span<std::byte>{read_buf.data(), want}) ||
-            await_deadline(timer));
+        auto outcome =
+            co_await (transport.async_read_some(std::span<std::byte>{read_buf.data(), want}) ||
+                      await_deadline(timer));
         if (outcome.index() == 1) {
             // Deadline arm won (D-3: outcome.index() is a sound discriminator
             // because neither arm throws — await_deadline uses redirect_error).
