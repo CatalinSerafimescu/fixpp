@@ -160,16 +160,23 @@ execute_process(
 if(NOT _build_rc EQUAL 0)
   message(FATAL_ERROR
     "consumer build failed (exit ${_build_rc}). This driver builds the 086/087 "
-    "witness targets BY NAME (${_required_targets}). Two dispositions are possible, "
-    "and they are NOT the same finding (contract C-6.3):\n"
+    "witness targets BY NAME (${_required_targets}). Three dispositions are "
+    "possible, and they are NOT the same finding (contract C-6.3, and §3's "
+    "pre-comparison split):\n"
     "  * an \"unknown target\" error (Ninja) or \"No rule to make target\" "
     "(Makefiles) means a gate was deleted or renamed;\n"
-    "  * a non-zero exit FROM probe_system_include_contract itself means the "
-    "system-include comparison FAILED — a genuine interface violation. Its token "
-    "(one or more of LEAK, DROP, RECLASSIFIED, MISSING_REPLY, INPUT_ERROR, "
-    "LEG_ERROR — spelled unbracketed here on purpose; see the comment above this "
-    "message in run_consumer_witness.cmake) and its first diagnostic line are in "
-    "the build output printed directly below.\n"
+    "  * a non-zero exit FROM probe_system_include_contract carrying LEAK, DROP "
+    "or RECLASSIFIED means the comparison RAN and FAILED — a genuine interface "
+    "violation;\n"
+    "  * a non-zero exit carrying MISSING_REPLY, INPUT_ERROR or LEG_ERROR means "
+    "the leg terminated BEFORE comparing anything — the reply was absent, the "
+    "reply was unparseable, or the comparator was driven wrong. These are NOT "
+    "interface findings, and C-2 keeps them apart on purpose: \"the reply was "
+    "corrupt\" and \"the carrier was driven wrong\" are different defects with "
+    "different owners.\n"
+    "(Token names are spelled unbracketed here on purpose; see the comment above "
+    "this message in run_consumer_witness.cmake.) The token and its first "
+    "diagnostic line are in the build output printed directly below.\n"
     "${_build_out}\n${_build_err}")
 endif()
 

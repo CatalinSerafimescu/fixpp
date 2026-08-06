@@ -117,9 +117,9 @@ and **a set that includes six third-party roots**, not a one-entry margin.
 > The 7 above is measured on `probe_umbrella`, which links `fixpp::fixpp`. It is **not** a measurement of a
 > reverted `fixpp::capi`, and it cannot be substituted for one:
 >
-> - the revert demonstration mutates `src/capi/CMakeLists.txt:97-99` (the link line). The
+> - the revert demonstration mutates `src/capi/CMakeLists.txt:110-112` (the link line). The
 >   `$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/capi>` root is declared in a **separate command** at
->   `:112-115` and therefore **survives** the mutation — so the reverted set still contains `include/capi`;
+>   `:125-128` and therefore **survives** the mutation — so the reverted set still contains `include/capi`;
 > - the 7-entry umbrella set above contains `<prefix>/include` and **not** `<prefix>/include/capi`. The two
 >   sets are therefore provably different;
 > - what the reverted set actually is, is `{include/capi} ∪ closure(fixpp_capi_objects)` — and nothing

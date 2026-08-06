@@ -46,7 +46,14 @@
 # note on the same policy.
 cmake_minimum_required(VERSION 3.28)
 
+# The two legs, and the probe target whose reply each one reads. ONE table, so
+# the known-leg list and the leg->target mapping cannot drift apart: adding a leg
+# here without its _FIXPP_087_TARGET_<leg> entry resolves the lookup below to the
+# empty string and reds as MISSING_REPLY, rather than silently reading some other
+# leg's reply through an else() catch-all.
 set(_FIXPP_087_KNOWN_LEGS capi service)
+set(_FIXPP_087_TARGET_capi    probe_usage_requirements)
+set(_FIXPP_087_TARGET_service probe_service_positive)
 
 # ── Helper: prefix-relative normalisation (C-3, I1) ──────────────────────────
 # The File API emits forward slashes on both platforms (data-model.md E1), so
@@ -54,6 +61,18 @@ set(_FIXPP_087_KNOWN_LEGS capi service)
 # An entry outside the prefix is left in canonical absolute form; C-3 says that
 # form can never match the closed prefix-relative expectation, so it becomes a
 # LEAK by construction rather than by a special case here.
+#
+# ⚠️ LIMIT OF THE WRONG-PREFIX GUARD BELOW, stated because the guard's error text
+# would otherwise read as full coverage. The guard fires when the prefix stripped
+# NOTHING. It cannot detect a prefix that strips SOMETHING but the wrong amount —
+# specifically a proper ANCESTOR of the real prefix (pass
+# <build>/_consumer_witness where the real one is <build>/_consumer_witness/stage
+# and every entry normalises to stage/include/... instead of include/...). That
+# still degenerates to all-LEAK + all-DROP, and demonstration #3 asserts DROP,
+# a subset of it. Not mechanically closable here: "require at least one stage-1
+# path match" would false-fire on a genuine total regression, reporting a real
+# LEAK+DROP as a usage error. The empty/root prefix — the other member of this
+# class — IS closed, at argument validation below.
 function(_fixpp_087_normalize_path _abspath _prefix _out_var)
   string(REGEX REPLACE "/+$" "" _p "${_prefix}")
   string(LENGTH "${_p}" _plen)
@@ -89,6 +108,22 @@ if(FIXPP_087_MODE STREQUAL "compare")
       message(FATAL_ERROR "compare_system_includes.cmake compare: -D${_var}=... is required")
     endif()
   endforeach()
+  # DEFINED is not enough for the prefix: an empty (or "/") value normalises to
+  # a zero-length prefix, which matches the leading "/" of EVERY absolute entry,
+  # strips it, and so passes the wrong-prefix guard while leaving nothing able to
+  # match the expectation — the same degenerate all-LEAK + all-DROP the guard
+  # exists to prevent, reached through the one input the guard cannot see.
+  # Deliberately a plain usage error, NOT a token: C-6.4's cause list stays four.
+  string(REGEX REPLACE "/+$" "" _prefix_probe "${FIXPP_087_INSTALL_PREFIX}")
+  if(_prefix_probe STREQUAL "")
+    message(FATAL_ERROR
+      "compare_system_includes.cmake compare: "
+      "-DFIXPP_087_INSTALL_PREFIX is empty or the filesystem root. A zero-length "
+      "prefix strips the leading '/' from every observed entry, so the comparison "
+      "would degenerate to all-LEAK + all-DROP and void this row's assertion.\n"
+      "Pass the prefix the configure actually used — for the shipped witness that "
+      "is <build>/_consumer_witness/stage.")
+  endif()
   if(NOT DEFINED FIXPP_087_LEG)
     set(FIXPP_087_LEG "")
   endif()
@@ -129,12 +164,33 @@ if(FIXPP_087_MODE STREQUAL "compare")
     list(APPEND _expected_sys "${CMAKE_MATCH_2}")
   endforeach()
 
-  # ── C-5: locate the reply BY GLOB — never a hard-coded hash ────────────────
-  if(FIXPP_087_LEG STREQUAL "capi")
-    set(_target_name "probe_usage_requirements")
-  else()
-    set(_target_name "probe_service_positive")
+  # I3 is a property of the expectation that REACHES C-1, and the STREQUAL ""
+  # test above only sees the raw string. A value that is non-empty as a string
+  # but parses to ZERO entries — ";" is the whole family, and C-6.4's own
+  # rationale for this cause is "a quoting error in the carrier's command can
+  # drop the argument" — passes that test, iterates zero times here, and then
+  # compares an empty expected set against the observation. If the observation
+  # is also empty the run reports green having asserted nothing, which is the
+  # exact outcome this cause exists to make impossible.
+  #
+  # Same LEG_ERROR cause as above (an empty expectation), not a fifth one:
+  # C-6.4's cause list stays four. This completes its detection rather than
+  # extending it.
+  if(NOT _expected_paths)
+    message(FATAL_ERROR
+      "[LEG_ERROR] compare_system_includes.cmake compare (${FIXPP_087_LEG}): "
+      "-DFIXPP_087_EXPECTATION='${FIXPP_087_EXPECTATION}' is non-empty as a "
+      "string but parses to ZERO entries — refusing an unguarded null-vs-null "
+      "comparison (data-model.md I3)")
   endif()
+
+  # ── C-5: locate the reply BY GLOB — never a hard-coded hash ────────────────
+  # Table lookup, not an if/else: the else() branch used to map EVERY non-capi
+  # leg to probe_service_positive, so a third leg added to _FIXPP_087_KNOWN_LEGS
+  # would have compared the SERVICE target's reply against the new leg's
+  # expectation with nothing to say so. The IN_LIST guard above already
+  # guarantees this resolves, so no fallback branch is needed.
+  set(_target_name "${_FIXPP_087_TARGET_${FIXPP_087_LEG}}")
 
   if(NOT EXISTS "${FIXPP_087_REPLY_DIR}")
     message(FATAL_ERROR
@@ -151,7 +207,29 @@ if(FIXPP_087_MODE STREQUAL "compare")
       "no target-${_target_name}-*.json under ${FIXPP_087_REPLY_DIR} — the "
       "codemodel-v2 query may not have preceded configure (contract §2a)")
   endif()
-  list(SORT _reply_matches)
+  # More than one match is NOT a case C-2 disposes of: its two tokens cover a
+  # MISSING artifact (MISSING_REPLY) and a present-but-unparseable one
+  # (INPUT_ERROR), and neither covers ambiguity. C-5 says the reply is LOCATED by
+  # glob; it does not license silently picking one of several. Unreachable via
+  # the carrier — the driver wipes the sub-build and configures it exactly once,
+  # so one configure writes one reply per target — but §5's reply-side rows all
+  # work by cp -r'ing a real reply directory and mutating the copy by hand, and a
+  # copy carrying a second target-<name>-*.json would be compared against the
+  # lexicographically-first file with no diagnostic. Demonstration #5(i), which
+  # DELETES the per-target reply, would then not emit MISSING_REPLY at all: it
+  # would fall through to the surviving sibling and compare that instead.
+  #
+  # Deliberately a plain usage error, NOT a token: adding a cause to INPUT_ERROR
+  # would amend C-2's enumeration and the audited countable sets, and this is a
+  # malformed INPUT DIRECTORY rather than malformed input DATA. Same disposition
+  # the wrong-prefix guard was given, for the same reason.
+  if(_n_matches GREATER 1)
+    message(FATAL_ERROR
+      "compare_system_includes.cmake compare (${FIXPP_087_LEG}): "
+      "${_n_matches} replies match target-${_target_name}-*.json under "
+      "${FIXPP_087_REPLY_DIR} — ambiguous, refusing to pick one.\n"
+      "Matches: ${_reply_matches}")
+  endif()
   list(GET _reply_matches 0 _reply_file)
 
   # ── C-2: present-but-unparseable / wrong structure ⇒ INPUT_ERROR ──────────

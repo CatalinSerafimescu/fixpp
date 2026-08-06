@@ -203,8 +203,8 @@ had no step, and this project has a recorded incident of `/speckit-tasks` silent
    expectation is already correct from step 2), declared as literals with
    a per-member rationale, never computed from the observation. Gate goes green.
    → **FR-003, FR-003a** · contract C-4 (review-time invariant — say so, do not claim it is enforced)
-4. **Red — leak (package-side).** Apply contract §5's demonstration-#2 diff to `src/capi/CMakeLists.txt:97-99`
-   (**not** a `PRIVATE`→`PUBLIC` keyword flip; `:112-115` is not touched) and re-stage. The observed set gains
+4. **Red — leak (package-side).** Apply contract §5's demonstration-#2 diff to `src/capi/CMakeLists.txt:110-112`
+   (**not** a `PRIVATE`→`PUBLIC` keyword flip; `:125-128` is not touched) and re-stage. The observed set gains
    the umbrella include root and the third-party roots; **the count is recorded at demonstration time — no
    expected figure is stated, because none has been measured on a reverted `fixpp::capi`.**
    → **FR-007, SC-002** · demonstration #2

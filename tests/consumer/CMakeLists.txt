@@ -288,7 +288,7 @@ OBSERVED_COMPILE_FEATURES=$<JOIN:$<TARGET_PROPERTY:probe_usage_requirements,COMP
 # contract §1 exactly on Linux/clang, and R6 on MSVC-under-Conan.
 
 # capi — one entry. The C-ABI root 086 installs, and `fixpp::capi`'s ONLY
-# $<INSTALL_INTERFACE:> (src/capi/CMakeLists.txt:112-115).
+# $<INSTALL_INTERFACE:> (src/capi/CMakeLists.txt:125-128).
 set(FIXPP_087_EXPECTED_CAPI "include/capi|1")
 
 # service — two entries, and each arrives by a DIFFERENT route, which is why

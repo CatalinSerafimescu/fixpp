@@ -502,7 +502,16 @@ one, and every class is defined here:
 > — *"The bundle carried 'flip the keyword' as a one-line change through Gate A. It is not one."*). The
 > mutation is written out here so the demonstration is executable and so the bundle cannot repeat it.
 >
-> The shipped state is **two separate commands**. `src/capi/CMakeLists.txt:97-99`:
+> ⚠️ **These anchors were RE-POINTED at `/simplify` (2026-08-06), `:97-99`→`:110-112` and
+> `:112-115`→`:125-128`.** They are not a correction of what was measured — the *content* at both sites is
+> byte-identical to `main`, verified line-for-line. 087's own row-4 amendment to `src/capi/CMakeLists.txt`
+> inserted 16 comment lines for 3, shifting everything from `:66` down by **+13**, and this box's anchors were
+> not re-pointed at the time. On HEAD, `:97-99` had become **comment text**: an operator following the
+> demonstration would have edited a comment and produced no `LEAK`. The drift was self-inflicted by the
+> amendment in the same feature — the recorded "re-point before a later layout change" shape — and it is
+> recorded here rather than silently fixed. Sixteen references across the bundle carried it; all sixteen moved.
+>
+> The shipped state is **two separate commands**. `src/capi/CMakeLists.txt:110-112`:
 >
 > ```cmake
 > target_link_libraries(fixpp_capi
@@ -510,7 +519,7 @@ one, and every class is defined here:
 >   PUBLIC  "$<BUILD_INTERFACE:fixpp_capi_objects>")
 > ```
 >
-> and `src/capi/CMakeLists.txt:112-115`:
+> and `src/capi/CMakeLists.txt:125-128`:
 >
 > ```cmake
 > target_include_directories(fixpp_capi PUBLIC
@@ -519,7 +528,7 @@ one, and every class is defined here:
 > )
 > ```
 >
-> **What reverts** (`:97-99` only) — the whole two-keyword arrangement collapses back to the pre-086 single
+> **What reverts** (`:110-112` only) — the whole two-keyword arrangement collapses back to the pre-086 single
 > public edge:
 >
 > ```diff
@@ -532,13 +541,13 @@ one, and every class is defined here:
 > Merely flipping the `PRIVATE` keyword is **not** this: it would leave a redundant second
 > `PUBLIC "$<BUILD_INTERFACE:fixpp_capi_objects>"` entry alongside the now-public first one.
 >
-> **What stays** — `:112-115` is **not** touched. It is a different command, so the demonstration leaves
+> **What stays** — `:125-128` is **not** touched. It is a different command, so the demonstration leaves
 > `$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/capi>` in place.
 >
 > **What installed interface this represents.** Not the pre-086 state. It is *086's isolated root plus the
 > full transitive usage-requirement set of `fixpp_capi_objects`* — the regression #218 describes (a narrowing
 > that silently stops narrowing), which is exactly what this gate must catch, and the reason the demonstration
-> is written this way rather than as a full revert. Reverting `:112-115` as well would produce the true
+> is written this way rather than as a full revert. Reverting `:125-128` as well would produce the true
 > pre-086 state; that is **not** what this row induces, and if a task wants it, it is a separate row.
 >
 > **Why no count.** It follows from the above that the reverted set **retains `include/capi`** — and
