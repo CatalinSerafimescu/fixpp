@@ -71,6 +71,19 @@ struct Script {
     // subsequent reads complete with transport_read_eof.
     std::vector<std::byte> inbound_bytes;
 
+    // Per-chunk-bounded inbound delivery (mechanism 5, research.md D-9).
+    // Supersedes inbound_bytes when non-empty; empty (the default) leaves
+    // the inbound_bytes/read_cursor_ path above byte-for-byte unchanged.
+    // No async_read_some completion ever crosses a chunk boundary: each
+    // call completes with min(chunk_remaining, buf.size()) bytes from the
+    // current chunk only. A chunk larger than one request leaves its
+    // remainder at the head of that same chunk for the next read; the
+    // chunk retires only once fully drained. Empty chunks are forbidden —
+    // async_read_some skips them without producing a completion, never a
+    // zero-byte success. Once every chunk is drained, reads complete with
+    // transport_read_eof, exactly as the inbound_bytes path does.
+    std::vector<std::vector<std::byte>> inbound_chunks;
+
     // Optional: expected outbound writes verified against outbound_seen_.
     // Empty vector = no verification. Mismatches surface as a
     // transport_write_short error (the test asserts via diagnostic accessors;
@@ -174,6 +187,19 @@ public:
             co_return std::unexpected{E::transport_read_cancelled};
         }
 
+        // reads_observed_ / read_sizes_ are recorded here, before latency
+        // injection, unlike writes_observed_ (which counts at actual data
+        // movement, after latency). This is deliberate, not a mirroring
+        // slip: mechanism 4 (research.md D-9) exists so a test can prove a
+        // read was actually initiated before a cancellation fires during the
+        // latency wait below, and mechanism 6 records the requested length
+        // (buf.size(), before any clamping) for every read attempt that gets
+        // this far — including one that later completes with
+        // transport_read_eof — so a test can observe requested sizes the
+        // clamp alone can't distinguish (see D-9 cell B5).
+        ++reads_observed_;
+        read_sizes_.push_back(buf.size());
+
         // Latency injection — async_wait honours cancellation_type::total.
         if (script_.read_latency > std::chrono::milliseconds{0}) {
             asio::steady_timer timer{exec_};
@@ -183,6 +209,40 @@ public:
             if (wait_ec == asio::error::operation_aborted) {
                 co_return std::unexpected{E::transport_read_cancelled};
             }
+        }
+
+        // Drain inbound_chunks (mechanism 5, research.md D-9) when non-empty;
+        // supersedes the inbound_bytes cursor path below, which is left
+        // byte-for-byte unchanged when inbound_chunks is empty.
+        if (!script_.inbound_chunks.empty()) {
+            // Skip exhausted/empty chunks without producing a completion —
+            // empty chunks are forbidden from ever yielding a zero-byte
+            // success (D-9 mechanism 5, rule 5).
+            while (chunk_index_ < script_.inbound_chunks.size() &&
+                   script_.inbound_chunks[chunk_index_].empty()) {
+                ++chunk_index_;
+            }
+
+            if (chunk_index_ >= script_.inbound_chunks.size()) {
+                co_return std::unexpected{E::transport_read_eof};
+            }
+
+            auto const& chunk = script_.inbound_chunks[chunk_index_];
+            const std::size_t chunk_remaining = chunk.size() - chunk_offset_;
+            const std::size_t n = std::min(buf.size(), chunk_remaining);
+
+            for (std::size_t i = 0; i < n; ++i) {
+                buf[i] = chunk[chunk_offset_ + i];
+            }
+            chunk_offset_ += n;
+            read_cursor_ += n;  // cumulative delivered bytes (rule 7).
+
+            if (chunk_offset_ >= chunk.size()) {
+                ++chunk_index_;
+                chunk_offset_ = 0;
+            }
+
+            co_return n;
         }
 
         // Drain inbound_bytes against read_cursor_.
@@ -248,6 +308,7 @@ public:
         // awaiter's cancellation_signal at the test layer (the tests use
         // bind_cancellation_slot on co_spawn and emit on the signal). Per the
         // Transport contract cancel() is documented synchronous + thread-safe.
+        ++cancels_observed_;
         return {};
     }
 
@@ -310,15 +371,41 @@ public:
 
     [[nodiscard]] std::size_t async_writes_observed() const noexcept { return writes_observed_; }
 
+    // reads_observed_ / cancels_observed_ — strand-confinement note per
+    // research.md D-9: cancel() is the class's only documented off-strand
+    // path (see the class doc above and the async_writes_observed() pair
+    // this mirrors), so cancels_observed_ may be written from a potentially
+    // off-strand context. It is a plain std::size_t, read only after the
+    // io_context has been driven to completion and never concurrently with a
+    // cancel() call; a future consumer calling cancel() from a second thread
+    // must make it atomic.
+    [[nodiscard]] std::size_t async_reads_observed() const noexcept { return reads_observed_; }
+    [[nodiscard]] std::size_t cancels_observed() const noexcept { return cancels_observed_; }
+
+    // read_sizes_ — the sequence of requested lengths (buf.size()) passed to
+    // async_read_some, recorded before any clamping the mock applies. See
+    // the in-source note at the call site (mechanism 6, D-9).
+    [[nodiscard]] std::vector<std::size_t> read_sizes() const { return read_sizes_; }
+
     [[nodiscard]] bool is_closed() const noexcept { return closed_; }
     [[nodiscard]] bool is_handshaken() const noexcept { return handshaken_; }
 
 private:
     asio::any_io_executor exec_;
     Script script_;
+    // read_cursor_ is the inbound_bytes cursor; it also doubles as the
+    // inbound_chunks cumulative-delivered-bytes counter (D-9 mechanism 5,
+    // rule 7), so bytes_read_so_far() below is meaningful in both modes.
     std::size_t read_cursor_{0};
+    std::size_t chunk_index_{0};   // inbound_chunks: index of the current
+                                    // (not-yet-fully-drained) chunk.
+    std::size_t chunk_offset_{0};  // inbound_chunks: bytes already drained
+                                    // from the current chunk.
     std::vector<std::byte> outbound_seen_;
     std::size_t writes_observed_{0};
+    std::size_t reads_observed_{0};
+    std::size_t cancels_observed_{0};
+    std::vector<std::size_t> read_sizes_;
     bool closed_{false};
     bool handshaken_{false};
 };

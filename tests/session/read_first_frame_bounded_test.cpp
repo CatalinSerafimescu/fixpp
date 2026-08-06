@@ -1,0 +1,451 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//
+// tests/session/read_first_frame_bounded_test.cpp — direct-helper witness
+// for read_first_frame_bounded (088-firstframe-budget-timer-lifetime).
+//
+// Phase 3 (User Story 1) — T012-T015: cells B1/B2/B3/B5 (research.md D-6.1 /
+// D-6.11). Each cell drives the CURRENT tree's (pre-fix) read_first_frame_bounded
+// directly via a mock_transport Script and asserts the outcome the DELIVERED
+// design (T016/T017, not yet landed) is required to produce. Every cell here is
+// RED against `main` — see research.md D-6.7's per-cell RED-basis table.
+//
+// Pre-fix source shape (src/session/read_first_frame_bounded.hpp, current tree):
+//   :56  timer.expires_after(deadline) — armed once, before the loop.
+//   :72  pmr_carry_buffer carry{max_bytes, ...} — capacity max_bytes, NOT max_bytes+1.
+//   :78  site A — `if (buf.size() >= max_bytes)` at the loop top (unreachable pre-frame
+//        on every cell below, since buf starts empty).
+//   :83-84 the read is UNCLAMPED — always requests the full 4096-byte read_buf,
+//        regardless of remaining budget ("room").
+//   :96  site B — `if (buf.size() >= max_bytes)`, evaluated AFTER the insert but
+//        BEFORE framer.feed. This is the budget-before-frame defect every cell
+//        below actually hits (site A is unreachable from any of these four
+//        constructions — buf is always empty at every site-A check).
+//
+// research.md D-6.11's B2/B5 iteration tables (room/want columns, "terminates at
+// ~50ms") describe the DELIVERED (clamped) loop, not this pre-fix source — the
+// pre-fix read is unclamped and (for B1/B3/B5) returns after exactly ONE read,
+// well before any deadline could fire. Recorded so a reader does not mistake
+// those tables for a pre-fix trace.
+//
+// Anchors: research.md D-5/D-6/D-6.7/D-6.11; tasks.md T012-T015;
+//          contracts/read_first_frame_bounded.md.
+//
+// Phase 4 (User Story 2) — T020: cell T1 (SC-005/SC-006, research.md D-6.2/
+// D-6.3/D-6.7). Unlike B1/B2/B3/B5 above, T1's RED basis is the TIMER defect
+// (still present in the current tree — src/session/read_first_frame_bounded.hpp
+// :59 `bool timed_out`, :65 the by-reference `timer.async_wait` lambda, :68
+// `transport.cancel()`, :83 `while (!timed_out)`), not the budget-before-frame
+// defect T012-T015 already fixed. T1's fix (arm-once absolute-expiry timer +
+// the `||` join) is T026/T027, not yet landed — do not expect this cell green
+// under ASan until then.
+
+#include <gtest/gtest.h>
+
+#include <asio/co_spawn.hpp>
+#include <asio/detached.hpp>
+#include <asio/io_context.hpp>
+#include <asio/use_future.hpp>
+#include <chrono>
+#include <cstddef>
+#include <cstdio>
+#include <fixpp/core/error.hpp>
+#include <fixpp/transport/test/mock_transport.hpp>
+#include <future>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <thread>
+#include <vector>
+
+#include "session/read_first_frame_bounded.hpp"
+
+namespace {
+
+using fixpp::core::error;
+using fixpp::core::expected_t;
+using fixpp::session::detail::read_first_frame_bounded;
+using fixpp::transport::test::mock_transport;
+using fixpp::transport::test::Script;
+
+std::vector<std::byte> to_bytes(std::string_view s) {
+    std::vector<std::byte> v;
+    v.reserve(s.size());
+    for (char c : s) v.push_back(static_cast<std::byte>(c));
+    return v;
+}
+
+// Build a well-formed, checksum-valid FIX frame: "8=FIX.4.2\x01 9=<len>\x01 <body>
+// 10=<chk>\x01". `body` must already start with "35=X\x01" and be SOH-delimited.
+// Same pattern as tests/session/test_business_messages_read.cpp::make_frame.
+std::vector<std::byte> make_frame(std::string_view body) {
+    std::string pre = std::string("8=FIX.4.2\x01") + "9=" + std::to_string(body.size()) + "\x01" +
+                      std::string(body);
+    unsigned sum = 0;
+    for (unsigned char c : pre) sum += c;
+    char checksum[16]{};
+    std::snprintf(checksum, sizeof(checksum), "10=%03u\x01", sum % 256U);
+    return to_bytes(pre + checksum);
+}
+
+// Builds a Logon(35=A) frame of EXACTLY `frame_len` bytes, padding the body with
+// a filler tag (58=Text) to hit the requested size. B1/B2/B3's constructions
+// (research.md D-6.1/D-6.11) are stated relative to exact byte counts.
+std::vector<std::byte> make_logon_of_length(std::size_t frame_len) {
+    static constexpr std::string_view kFixedFields =
+        "35=A\x01"
+        "34=1\x01"
+        "49=SNDR\x01"
+        "52=20260101-00:00:00.000\x01"
+        "56=TGT\x01"
+        "98=0\x01"
+        "108=30\x01";
+    // frame_len == 10 ("8=FIX.4.2\x01") + 2 ("9=") + digits(body.size()) + 1 (SOH)
+    //            + body.size() + 7 ("10=NNN\x01"), and body.size() ==
+    //            kFixedFields.size() + 4 ("58=" + SOH) + pad_len.
+    // Solved assuming a 4-digit BodyLength (true for every frame_len this feature
+    // uses) and self-verified below rather than merely assumed.
+    constexpr std::size_t kOverhead = 10 + 2 + 4 /*digits*/ + 1 + 7 + 4 /*"58="+SOH*/;
+    if (frame_len <= kOverhead + kFixedFields.size()) {
+        ADD_FAILURE() << "make_logon_of_length(" << frame_len << "): too small";
+        return {};
+    }
+    std::size_t const pad_len = frame_len - kOverhead - kFixedFields.size();
+    std::string body = std::string(kFixedFields) + "58=" + std::string(pad_len, 'Z') + "\x01";
+    if (std::to_string(body.size()).size() != 4) {
+        ADD_FAILURE() << "make_logon_of_length(" << frame_len
+                       << "): BodyLength digit-count assumption (4) violated for body.size()=="
+                       << body.size();
+        return {};
+    }
+    std::vector<std::byte> frame = make_frame(body);
+    if (frame.size() != frame_len) {
+        ADD_FAILURE() << "make_logon_of_length(" << frame_len << "): internal size mismatch, got "
+                       << frame.size();
+        return {};
+    }
+    return frame;
+}
+
+std::string describe(expected_t<std::size_t> const& r) {
+    if (r.has_value()) return "value=" + std::to_string(*r);
+    return std::string("error=") + std::string(fixpp::core::to_string(r.error()));
+}
+
+std::string describe_sizes(std::vector<std::size_t> const& v) {
+    std::string out = "{";
+    for (std::size_t i = 0; i < v.size(); ++i) {
+        if (i) out += ", ";
+        out += std::to_string(v[i]);
+    }
+    return out + "}";
+}
+
+}  // namespace
+
+// ── B1 (SC-001) ───────────────────────────────────────────────────────────────
+// Single delivery, cumulative EXACTLY max_bytes, complete Logon at its head (the
+// Logon's own frame length IS max_bytes — no surplus). S4/FR-002/INV-B2 requires
+// this be ADMITTED. Pre-fix rejects at site B (:96, `4096 >= 4096`) BEFORE
+// framer.feed ever runs, so the complete frame already sitting in `buf` is never
+// discovered. RED here is attributable to the COMPARISON: a strict `>` at
+// cumulative exactly max_bytes would not fire, feed would run, the frame would be
+// found. Kills the `>=` retained mutant (research.md D-6.1).
+TEST(ReadFirstFrameBounded, B1) {
+    constexpr std::size_t kMaxBytes = 4096;
+
+    Script s;
+    s.inbound_bytes = make_logon_of_length(kMaxBytes);
+    ASSERT_EQ(s.inbound_bytes.size(), kMaxBytes);
+
+    asio::io_context ioc;
+    mock_transport mt{ioc.get_executor(), std::move(s)};
+    std::vector<std::byte> buf;
+
+    auto fut = asio::co_spawn(
+        ioc, read_first_frame_bounded(mt, buf, std::chrono::milliseconds{1000}, kMaxBytes),
+        asio::use_future);
+    ioc.run();
+    expected_t<std::size_t> const result = fut.get();
+
+    EXPECT_TRUE(result.has_value())
+        << "B1 (SC-001): expected the first frame's length (" << kMaxBytes << "), got "
+        << describe(result) << " — pre-fix rejects at cumulative == max_bytes BEFORE framing "
+        << "runs (site B, read_first_frame_bounded.hpp:96, `buf.size() >= max_bytes`).";
+    if (result.has_value()) {
+        EXPECT_EQ(*result, kMaxBytes) << "B1 (SC-001): the admitted frame's exact length.";
+    }
+}
+
+// ── B3 (SC-002) ───────────────────────────────────────────────────────────────
+// B1's delivery (single read, cumulative exactly max_bytes) plus surplus: the
+// Logon completes at byte 3500, with 596 bytes of non-frame surplus after it,
+// still inside the single max_bytes-sized read. Pre-fix rejects at the SAME site
+// B line as B1 (4096 >= 4096) before feed ever runs, so this cell shares B1's RED
+// mechanism; B3's OWN contribution is the VALUE assertion below, which kills the
+// `return buf.size()` mutant (it would return 4096, the whole buffer, instead of
+// 3500, the frame's exact length — S3 / research.md D-6.1).
+TEST(ReadFirstFrameBounded, B3) {
+    constexpr std::size_t kMaxBytes = 4096;
+    constexpr std::size_t kLogonLen = 3500;
+
+    std::vector<std::byte> stream = make_logon_of_length(kLogonLen);
+    ASSERT_EQ(stream.size(), kLogonLen);
+    std::vector<std::byte> const surplus = to_bytes(std::string(kMaxBytes - kLogonLen, 'Y'));
+    stream.insert(stream.end(), surplus.begin(), surplus.end());
+    ASSERT_EQ(stream.size(), kMaxBytes);
+
+    Script s;
+    s.inbound_bytes = std::move(stream);
+
+    asio::io_context ioc;
+    mock_transport mt{ioc.get_executor(), std::move(s)};
+    std::vector<std::byte> buf;
+
+    auto fut = asio::co_spawn(
+        ioc, read_first_frame_bounded(mt, buf, std::chrono::milliseconds{1000}, kMaxBytes),
+        asio::use_future);
+    ioc.run();
+    expected_t<std::size_t> const result = fut.get();
+
+    EXPECT_TRUE(result.has_value())
+        << "B3 (SC-002): expected success (frame length " << kLogonLen << "), got "
+        << describe(result) << " — see B1's RED mechanism: site B (:96, `buf.size() >= "
+        << "max_bytes`) fires before framing runs.";
+    if (result.has_value()) {
+        EXPECT_EQ(*result, kLogonLen)
+            << "B3 (SC-002): S3 — must return the frame's EXACT length (" << kLogonLen
+            << "), not the whole buffer (" << kMaxBytes << "). Kills the `return buf.size()` "
+            << "mutant.";
+    }
+}
+
+// ── B2 (SC-012) ───────────────────────────────────────────────────────────────
+// Fragmented delivery via Script::inbound_chunks (mechanism 5): {1000, 3097},
+// cumulative 4097 (max_bytes + 1), Logon completing at byte 3500. This is the
+// only cell of the four that isolates the budget-before-frame ORDERING defect:
+// B1/B3's single-read constructions never let a second read observe an
+// already-complete frame, so they cannot discriminate ordering from comparison.
+//
+// tasks.md T013 asks this cell to RED against all three of budget-before-frame,
+// carry@max_bytes (D-1a) and `>=` retained — NOT achievable from one run against
+// `main`. Pre-fix carries all three simultaneously, and iter2's site B
+// (`4097 >= 4096`) fires BEFORE framer.feed is ever called on chunk 1, so the
+// carry-capacity path (F2b) is never reached — this is D-1a's own "F2b is
+// pre-empted by F1's pre-feed position" point, one level up. Only the ORDERING
+// defect is exercised here; `carry@max_bytes` and `comparison-only` are
+// discharged at T019 against mutants of the DELIVERED design, per research.md
+// D-6.11's own three-column derivation table. Recorded as an escalation in the
+// verify record, not silently narrowed.
+TEST(ReadFirstFrameBounded, B2) {
+    constexpr std::size_t kMaxBytes = 4096;
+    constexpr std::size_t kLogonLen = 3500;
+    constexpr std::size_t kCumulative = kMaxBytes + 1;  // 4097
+
+    std::vector<std::byte> stream = make_logon_of_length(kLogonLen);
+    ASSERT_EQ(stream.size(), kLogonLen);
+    std::vector<std::byte> const surplus = to_bytes(std::string(kCumulative - kLogonLen, 'Y'));
+    stream.insert(stream.end(), surplus.begin(), surplus.end());
+    ASSERT_EQ(stream.size(), kCumulative);
+
+    Script s;
+    s.inbound_chunks = {
+        std::vector<std::byte>(stream.begin(), stream.begin() + 1000),
+        std::vector<std::byte>(stream.begin() + 1000, stream.end()),
+    };
+    ASSERT_EQ(s.inbound_chunks[0].size(), 1000u);
+    ASSERT_EQ(s.inbound_chunks[1].size(), 3097u);
+
+    asio::io_context ioc;
+    mock_transport mt{ioc.get_executor(), std::move(s)};
+    std::vector<std::byte> buf;
+
+    auto fut = asio::co_spawn(
+        ioc, read_first_frame_bounded(mt, buf, std::chrono::milliseconds{1000}, kMaxBytes),
+        asio::use_future);
+    ioc.run();
+    expected_t<std::size_t> const result = fut.get();
+
+    EXPECT_TRUE(result.has_value())
+        << "B2 (SC-012): expected success (frame length " << kLogonLen << "), got "
+        << describe(result) << " — pre-fix rejects on the SECOND read at site B "
+        << "(:96, `4097 >= 4096`) before framer.feed ever runs on the newly-read bytes, "
+        << "discarding a frame that was already complete in the accumulated buffer.";
+    if (result.has_value()) {
+        EXPECT_EQ(*result, kLogonLen) << "B2 (SC-012): the admitted frame's exact length.";
+    }
+}
+
+// ── B5 (edge / FR-013) ────────────────────────────────────────────────────────
+// The clamp's `room == 1` case. Script::inbound_chunks (mechanism 5) =
+// {4096 B (never a complete frame), 1 B}; deadline 50ms; read_latency 3ms
+// (non-zero and load-bearing per D-6.11 — required for TERMINATION of the mutant
+// this cell will later be run against at T019, not for pre-fix termination,
+// which reaches its outcome after one read regardless). Driven with ioc.run().
+//
+// The delivered design requests exactly `room` bytes per read: {4096, 1}. Pre-fix
+// NEVER clamps the request (:83-84 — always the full 4096-byte read_buf) AND
+// rejects at site B immediately after the FIRST read (4096 >= 4096, before feed),
+// so it never issues a second read at all. RED here is attributable to the
+// MISSING CLAMP: read_sizes() stays length-1 ({4096}) instead of reaching a
+// second, room-clamped request of 1.
+//
+// The outcome leg (wire_frame_too_large) is a SUPPORTING PIN, not a RED leg: both
+// pre-fix (via site B on the first read) and the delivered design (via F1 after
+// the clamped second read) reject this input with the same error — recorded so
+// this does not overclaim a second RED.
+TEST(ReadFirstFrameBounded, B5) {
+    constexpr std::size_t kMaxBytes = 4096;
+
+    // A well-formed header whose declared BodyLength (200000) far exceeds what is
+    // sent, so parse_frame classifies it partial — "no complete frame ever"
+    // (same construction as engine_firstframe_test.cpp's
+    // make_carried_over_budget_payload).
+    std::string never_completes = std::string("8=FIX.4.2\x01") + "9=200000\x01";
+    ASSERT_LT(never_completes.size(), kMaxBytes);
+    never_completes.append(kMaxBytes - never_completes.size(), 'X');
+    ASSERT_EQ(never_completes.size(), kMaxBytes);
+
+    Script s;
+    s.inbound_chunks = {to_bytes(never_completes), to_bytes(std::string(1, 'X'))};
+    s.read_latency = std::chrono::milliseconds{3};
+
+    asio::io_context ioc;
+    mock_transport mt{ioc.get_executor(), std::move(s)};
+    std::vector<std::byte> buf;
+
+    auto fut = asio::co_spawn(
+        ioc, read_first_frame_bounded(mt, buf, std::chrono::milliseconds{50}, kMaxBytes),
+        asio::use_future);
+    ioc.run();
+    expected_t<std::size_t> const result = fut.get();
+
+    std::vector<std::size_t> const sizes = mt.read_sizes();
+    std::vector<std::size_t> const expected_sizes{kMaxBytes, 1};
+    EXPECT_EQ(sizes, expected_sizes)
+        << "B5 (FR-013): expected read_sizes() == " << describe_sizes(expected_sizes)
+        << " (the second request clamped to room=1). Got " << describe_sizes(sizes)
+        << " — pre-fix issues only ONE unclamped 4096-byte request, then rejects at site B "
+        << "before ever requesting again.";
+
+    EXPECT_FALSE(result.has_value())
+        << "B5 (FR-013) [supporting pin]: expected wire_frame_too_large (not admitted), got "
+        << describe(result);
+    if (!result.has_value()) {
+        EXPECT_EQ(result.error(), error::wire_frame_too_large)
+            << "B5 (FR-013) [supporting pin]: got " << describe(result);
+    }
+}
+
+// ── T1 (SC-005 / SC-006) ──────────────────────────────────────────────────────
+// The timer defect: the deadline's `timer.async_wait` handler captures
+// coroutine-frame locals (`timed_out`, `transport`) BY REFERENCE (pre-fix
+// :59-70). When the read completion and the deadline both expire with no
+// handler having run (elapse-then-poll below), asio's timer queue releases
+// them in expiry order — the shorter-latency read first — so the coroutine
+// finds its frame, calls `timer.cancel()` (too late: the deadline handler is
+// already queued and CANNOT be un-queued — research.md D-6.2/[[feedback_
+// steady_timer_cancel_cannot_unqueue_a_completed_handler]]) and returns,
+// freeing its frame. The deadline handler then runs and writes into that
+// freed frame before calling `transport.cancel()` — a heap-use-after-free
+// under ASan.
+//
+// Construction is D-6.2's elapse-then-poll, verbatim, NOT the "0ms deadline,
+// inline read" first draft rejected there (no suspension point exists between
+// the pre-fix `timer.async_wait` and the read, so a 0ms/inline construction
+// reaches `timer.cancel()` before the scheduler ever runs and the RED never
+// fires — a clean ASan run would then be misrecorded as "no finding").
+//
+// asio::detached, NOT use_future (unlike every cell above): per research.md
+// D-6.3, the binding rule is to never `co_await` the helper from an enclosing
+// TEST *coroutine* — that is what lets HALO elide the inner frame into an
+// outer one that is still alive when the stranded handler fires, silently
+// destroying the proof. That rule is about the *caller shape*, not the
+// completion token: `read_first_frame_bounded(...)` is called here from the
+// TEST body, which is not itself a coroutine, so no HALO-enabling co_await
+// context exists regardless of the token used to observe the spawn's result.
+// We therefore use `asio::detached` for the spawn itself (matching the
+// brief/D-6.2 literally) but capture the coroutine's actual return value via
+// a plain (non-coroutine) completion-handler lambda passed alongside it —
+// this is still HALO-neutral for the reason above, and unlike `buf.size()`
+// (which goes non-zero the instant a read lands data, whether or not a frame
+// was ever found — an over-claiming proxy, not this cell's own defect but
+// worth naming) it is the DIRECT observable of "the helper returned the
+// frame's length" that D-6.2 names as the post-fix criterion.
+TEST(ReadFirstFrameBounded, T1) {
+    constexpr std::size_t kMaxBytes = 4096;
+    constexpr std::size_t kLogonLen = 1024;  // well under max_bytes; also the smallest
+                                              // value make_logon_of_length's 4-digit
+                                              // BodyLength assumption admits.
+    constexpr auto kDeadline = std::chrono::milliseconds{10};
+
+    std::vector<std::byte> const frame = make_logon_of_length(kLogonLen);
+    ASSERT_EQ(frame.size(), kLogonLen);
+
+    Script s;
+    s.inbound_bytes = frame;
+    s.read_latency = std::chrono::milliseconds{1};
+
+    asio::io_context ioc;
+    mock_transport mt{ioc.get_executor(), std::move(s)};
+    std::vector<std::byte> buf;
+
+    std::optional<expected_t<std::size_t>> result;
+    asio::co_spawn(ioc, read_first_frame_bounded(mt, buf, kDeadline, kMaxBytes),
+                    [&result](std::exception_ptr ep, expected_t<std::size_t> r) {
+                        EXPECT_FALSE(ep) << "T1: the spawned coroutine threw.";
+                        result = std::move(r);
+                    });
+
+    // Step 1: run the spawn to its first real suspension. co_spawn's initial
+    // resume is posted, not inline, so this poll() call executes the
+    // coroutine synchronously through timer.expires_after(10ms) and the
+    // callback-form timer.async_wait(...) registration (neither suspends —
+    // async_wait with a callback starts the wait without co_await'ing it)
+    // until it reaches the genuine suspension inside async_read_some: the
+    // mock's own 1ms read_latency co_await. Both timers are now armed;
+    // nothing is expired yet, so poll() returns with work outstanding.
+    ioc.poll();
+
+    // Step 2: elapse BOTH absolute deadlines with no handler running at all
+    // (the context is not being driven). This is a one-sided, 5x-slack
+    // margin on elapsing two wall-clock expiries, not a race.
+    std::this_thread::sleep_for(std::chrono::milliseconds{50});
+
+    // Step 3: both timers are now expired. asio's timer queue is a heap
+    // ordered by expiry, so the ready queue is drained in expiry order: the
+    // 1ms read completion first (resumes the coroutine -> feeds -> finds the
+    // frame -> timer.cancel() [cannot un-queue the already-ready deadline
+    // handler] -> co_return, freeing the frame), then the 10ms deadline
+    // handler (writes into the freed frame, then transport.cancel()).
+    ioc.poll();
+
+    // Drain to completion (D-6.2: "after the context is drained to
+    // completion") in case anything remains posted (e.g. the completion
+    // handler's own dispatch).
+    ioc.run();
+
+    ASSERT_TRUE(result.has_value())
+        << "T1: the spawned coroutine never completed — the drain above is insufficient, not the "
+        << "elapse-then-poll construction. Without a completed result, cancels_observed()==0 would "
+        << "be a vacuous pass.";
+    EXPECT_TRUE(result->has_value())
+        << "T1 (SC-005/SC-006): expected the first frame's length (" << kLogonLen << "), got "
+        << describe(*result) << " — the read that raced the deadline must still win the frame.";
+    if (result->has_value()) {
+        EXPECT_EQ(**result, kLogonLen) << "T1 (SC-005/SC-006): the admitted frame's exact length.";
+    }
+    EXPECT_EQ(mt.async_reads_observed(), 1u)
+        << "T1: expected exactly one read (the whole frame arrives in it) — a second read would "
+        << "mean framer.feed found nothing on the first and this cell is not exercising the "
+        << "frame-found race D-6.2 describes.";
+
+    EXPECT_EQ(mt.cancels_observed(), 0u)
+        << "T1 (SC-005/SC-006) [S5 proxy — research.md D-6.2/N3, not the full postcondition: "
+        << "this observes that no cancel() RAN, which is narrower than 'no handler armed by this "
+        << "call is outstanding on return']: expected zero cancel() calls after the context "
+        << "drains. A nonzero count means the stranded deadline handler survived the coroutine's "
+        << "return and called transport.cancel() through its dangling reference — the pre-fix "
+        << "defect this cell targets. Under linux-clang-asan this must instead manifest as a "
+        << "heap-use-after-free abort (the write to `timed_out` lands first); a clean ASan run "
+        << "here means the proof did not fire, not that there is no defect (D-6.3).";
+}

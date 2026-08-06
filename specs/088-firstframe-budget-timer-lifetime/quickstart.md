@@ -49,9 +49,13 @@ stay isolable).
 > evidence of nothing until the targets exist.
 
 **Select by label, never by executable name** — `[const §VII.8]` (`.specify/constitution.md:178`):
-*"Tests are selected by `ctest -L <label>`, never `-R <exe-name>`."* The `-R` forms below are shown
-only for the two cases §8 explicitly allows (a live single-target selection during the RED A/B). The
-labels are specified in research §D-5.
+*"Tests are selected by `ctest -L <label>`, never `-R <exe-name>`."* Every invocation below,
+including the live single-target selection during the RED A/B (§4), uses `-L`; there is no `-R`
+form in this document. The labels are specified in research §D-5. `session_read_first_frame_bounded`
+is a dedicated RED-proof label on the `session_read_first_frame_bounded` target — its `LABELS`
+string carries the target's own name so `ctest -L session_read_first_frame_bounded` always selects
+exactly that one target, even after later phases add sibling `088` targets (T2b, T3-T6) that share
+the other labels.
 
 ```bash
 # the whole feature's cells
@@ -127,7 +131,7 @@ git show main:src/session/engine.cpp > /tmp/pre-fix-engine.cpp
 cmake --build --preset linux-clang-debug --target session_read_first_frame_bounded -j2
 
 # 3. run and CAPTURE the failure output — this text goes into the verify record
-ctest --preset linux-clang-debug -R 'read_first_frame_bounded' --output-on-failure 2>&1 \
+ctest --preset linux-clang-debug -L session_read_first_frame_bounded --output-on-failure 2>&1 \
   | tee /tmp/088-red-boundary.txt
 
 # 4. restore the fixed header, rebuild, confirm green

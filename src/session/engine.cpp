@@ -65,6 +65,9 @@
 // direct unit testing — T011/T012). Bounded tag helper (accumulate_tag_digit)
 // guards against wrap-and-continue overflow aliasing CompID tags.
 #include "scan_first_frame_ids.hpp"
+// 088 T008: read_first_frame_bounded (moved from anon ns to enable direct
+// unit testing).
+#include "read_first_frame_bounded.hpp"
 
 namespace fixpp::session {
 
@@ -363,96 +366,10 @@ namespace {
 using fixpp::session::detail::FirstFrameIds;
 using fixpp::session::detail::scan_first_frame_ids;
 
-// ── Bounded first-frame read (FR-014 / E-2 / C1 steps 2-3) ──────────────────
-// Reads raw bytes from an accepted (not-yet-TLS-handshaken, post-handshake) TCP
-// transport into `buf` with a deadline. Returns the number of bytes read on
-// success, or an error on timeout / over-budget / read-fail.
-//
-// Used AFTER async_handshake succeeds — we read TLS application-data bytes.
-//
-// Invariant: returns when >= 1 complete FIX frame is present in buf, OR when
-// the deadline fires, OR when the byte budget is exceeded, OR on read error.
-// "Complete frame" == Framer::feed returns at least one frame_view.
-//
-// [FR-014; E-2; data-model "Bounded first-frame read"]
-asio::awaitable<fixpp::core::expected_t<std::size_t>> read_first_frame_bounded(
-    fixpp::transport::Transport& transport, std::vector<std::byte>& buf,
-    std::chrono::milliseconds deadline, std::size_t max_bytes) {
-    using namespace std::chrono_literals;
-    using fixpp::core::error;
-
-    auto exec = co_await asio::this_coro::executor;
-    asio::steady_timer timer{exec};
-    timer.expires_after(deadline);
-
-    bool timed_out = false;
-    // 015 /simplify (Q-2) — the deadline must CANCEL the in-flight async_read_some,
-    // not merely set a flag the loop checks between reads: a peer that completes the
-    // TLS handshake then stalls would otherwise block the read forever (FR-014 /
-    // SC-011). transport.cancel() aborts the pending read → the read-error arm below
-    // returns transport_handshake_timeout.
-    timer.async_wait([&timed_out, &transport](const std::error_code& ec) {
-        if (!ec) {
-            timed_out = true;
-            transport.cancel();
-        }
-    });
-
-    // Build a framer to detect frame boundaries.
-    fixpp::wire::pmr_carry_buffer carry{max_bytes, std::pmr::new_delete_resource()};
-    std::array<fixpp::wire::frame_view, 1> out_frames{};
-    fixpp::wire::Framer framer;
-
-    std::array<std::byte, 4096> read_buf{};
-    while (!timed_out) {
-        if (buf.size() >= max_bytes) {
-            timer.cancel();
-            co_return std::unexpected(error::wire_frame_too_large);
-        }
-
-        auto read_r = co_await transport.async_read_some(
-            std::span<std::byte>{read_buf.data(), read_buf.size()});
-        if (!read_r.has_value()) {
-            // Deadline (Q-2): the timer callback cancelled this read → the error
-            // arm closes + reclaims (FR-014). The specific code is unobservable
-            // here (no Session, no log surface) so it is not special-cased; the
-            // between-reads deadline still returns transport_handshake_timeout below.
-            timer.cancel();
-            co_return std::unexpected(read_r.error());
-        }
-        std::size_t n = *read_r;
-        buf.insert(buf.end(), read_buf.data(), read_buf.data() + n);
-
-        if (buf.size() >= max_bytes) {
-            timer.cancel();
-            co_return std::unexpected(error::wire_frame_too_large);
-        }
-
-        // Feed ONLY the newly-read bytes into the stateful Framer — it accumulates
-        // unconsumed bytes in `carry` across calls, so re-feeding the whole `buf`
-        // would duplicate the already-carried prefix and corrupt a fragmented first
-        // frame (a valid Logon split across TLS reads → rejected). Mirrors the
-        // incremental feed in run_read_pump. [F-015-001]
-        auto feed_r = framer.feed(std::span<const std::byte>{read_buf.data(), n}, carry,
-                                  std::span<fixpp::wire::frame_view>{out_frames});
-        if (!feed_r.has_value()) {
-            timer.cancel();
-            if (feed_r.error() == error::wire_frame_too_large)
-                co_return std::unexpected(error::wire_frame_too_large);
-            co_return std::unexpected(feed_r.error());
-        }
-        if (!feed_r->empty()) {
-            // First complete frame available. Return its EXACT length so the caller
-            // delivers ONLY the first frame (buf[0..len)) to on_inbound_frame and
-            // carries any surplus (buf[len..], a coalesced next frame) into the
-            // read-pump (F-015-002). buf accumulates raw bytes in arrival order, so
-            // buf[0..len) is byte-for-byte the first frame the framer emitted.
-            timer.cancel();
-            co_return (*feed_r)[0].bytes().size();
-        }
-    }
-    co_return std::unexpected(error::transport_handshake_timeout);
-}
+// read_first_frame_bounded is now defined in read_first_frame_bounded.hpp
+// (088 T008: moved from anonymous namespace to enable direct unit testing).
+// Bring it into scope for all callers in this TU via a using declaration.
+using fixpp::session::detail::read_first_frame_bounded;
 
 // ── Read-pump (US2 T015) ─────────────────────────────────────────────────────
 // Co-awaited inline from run_accept_loop after the first Logon is delivered.
