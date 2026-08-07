@@ -695,6 +695,16 @@ jobs:
             exit 1
           fi
 
+      # Regression pin (#245 Gate B RC#5): ci/restore-conan-cache.sh's three
+      # restore dispositions (unrestorable archive / plain MISS / HIT). One
+      # preset only — the behaviour under test is platform-independent shell.
+      # This step yields zero pre-merge signal (the matrix skips until both
+      # gate labels land); the binding evidence is the local RED-then-GREEN
+      # transcript recorded in the PR body.
+      - name: Regression pin — conan-cache restore dispositions (#245)
+        if: matrix.preset == 'linux-gcc-release'
+        run: bash ci/test-restore-conan-cache.sh
+
       - name: Test (full tier incl. packaging — the SC-011/SC-012 gate)
         if: matrix.preset == 'linux-gcc-release'
         run: ctest --preset ${{ matrix.preset }} --output-on-failure
