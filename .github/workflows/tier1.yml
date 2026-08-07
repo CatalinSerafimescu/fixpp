@@ -607,10 +607,12 @@ jobs:
           done
           total_kb="$(awk '/^MemTotal:/{print $2}' /proc/meminfo 2>/dev/null || true)"
 
-          # #229 criteria 2 & 3 are discharged AT 350/350 (ci/ctest-parallelism-probe.md, criterion 4
-          # bullet — re-derived for PR #245 Gate B round 2 at 9e444ef5, since the 346-test basis of
-          # criteria 2/3 predates #239's test additions).
-          # An acceptance figure taken over a different workload is not comparable to them, so the
+          # #229 criteria 2 & 3 are discharged AT 346/346 (ci/ctest-parallelism-probe.md's criteria
+          # table) — that basis predates #239's test additions. expected_eligible tracks the CURRENT
+          # suite size instead (350, re-derived for PR #245 Gate B round 2 at 9e444ef5; see the
+          # criterion 4 bullet in that doc), because the acceptance figure below must be comparable to
+          # the workload it is actually taken over, not to the smaller one criteria 2/3 were closed at.
+          # An acceptance figure taken over a mismatched workload is not comparable evidence, so the
           # count gates the LABEL. It never fails the lane: a legitimate test addition renders
           # DIAGNOSTIC ONLY and prompts whoever closes criterion 4 to re-record the basis (see that
           # doc — a mismatch here is the DESIGNED prompt to do so, not a broken step).
