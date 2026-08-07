@@ -794,3 +794,44 @@ TEST(ReadFirstFrameBounded, CovFramerErrorPropagates) {
         << "coverage cell: the budget arm must NOT be what fired — buf stayed well under "
         << kMaxBytes << ", so this is the framer arm.";
 }
+
+// ── COVERAGE CELL — read-arm error propagation (Article IX §1) ───────────────
+// Gate B (PR #239) B3: `:135`'s `co_return std::unexpected(read_r.error())` is
+// covered by T2a but T2a's assertion (is_cancellation_attributable) is a
+// two-element SET, not the named postcondition. Contract
+// `contracts/read_first_frame_bounded.md:96-99` states transport-originated
+// read errors are "Propagated verbatim ... No mapping changes" — that must be
+// pinned with an EXACT value, on an error T2a's set does not admit.
+//
+// Construction: an empty Script (no inbound_bytes, no inbound_chunks) makes
+// every async_read_some hit the mock's exhaustion path immediately
+// (mock_transport.hpp:257-259, read_cursor_ >= inbound_bytes.size() == 0 ==>
+// transport_read_eof) with no latency, so the deadline arm (500ms) cannot
+// win the join.
+TEST(ReadFirstFrameBounded, CovReadErrorPropagates) {
+    constexpr std::size_t kMaxBytes = 4096;
+    constexpr auto kDeadline = std::chrono::milliseconds{500};
+
+    Script s;  // inbound_bytes left empty — immediate transport_read_eof.
+
+    asio::io_context ioc;
+    mock_transport mt{ioc.get_executor(), std::move(s)};
+    std::vector<std::byte> buf;
+
+    auto fut = asio::co_spawn(ioc, read_first_frame_bounded(mt, buf, kDeadline, kMaxBytes),
+                              asio::use_future);
+    ioc.run();
+    expected_t<std::size_t> const result = fut.get();
+
+    ASSERT_FALSE(result.has_value())
+        << "coverage cell: an exhausted transport must surface a read error, got "
+        << describe(result);
+    EXPECT_EQ(result.error(), error::transport_read_eof)
+        << "coverage cell: expected the read arm's error to PROPAGATE VERBATIM "
+           "(read_first_frame_bounded.hpp:135, contracts/read_first_frame_bounded.md:96-99), got "
+        << describe(result);
+    EXPECT_NE(result.error(), error::transport_read_cancelled)
+        << "coverage cell: :135 mapping every read error to a cancellation-attributable "
+           "value would leave T2a green while breaking verbatim propagation — this cell "
+           "must fail if that mapping is reintroduced.";
+}
