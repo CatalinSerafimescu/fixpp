@@ -175,7 +175,26 @@ note "sccache-cache SEEDED \`$TAG\`"
 # Match the marker WITHOUT requiring a count: prune emits `PENDING ?` when it
 # could not even list the package, and that is the loudest case, not one to drop
 # on a failed [0-9]+ parse.
-pending=$("$(dirname "$0")/prune-sccache.sh" "$PRESET" "$TAG" | tee /dev/stderr | sed -n 's/^prune: PENDING \(.*\)$/\1/p' | head -1)
+#
+# ⚠️ NOT `| tee /dev/stderr |`. Git Bash on the windows runner has no
+# `/dev/stderr`, so that form died with `tee: /dev/stderr: No such file or
+# directory` (verbatim in jobs 92919721349 / 92919721354) and threw away EVERY
+# per-version prune line — the only place the actual API refusal is reported.
+# What survived was the count in the job-summary note, which is exactly the
+# signal that cannot distinguish "nothing to delete" from "nothing could be
+# deleted". Tee to a temp file and cat it: portable, and the file is also what
+# the count is parsed from, so the log and the note can never disagree.
+prune_log="$(mktemp)"
+"$(dirname "$0")/prune-sccache.sh" "$PRESET" "$TAG" > "$prune_log" 2>&1 || true
+cat "$prune_log"
+# FIRST TOKEN ONLY. `\(.*\)$` swallowed the whole remainder of the line, so the
+# job-summary note rendered the count plus prune's entire parenthetical remedy
+# sentence. Pre-existing, and harmless-looking, but the note is the surface a
+# maintainer actually reads. `[^ ]*` still matches BOTH shapes the marker takes —
+# a count (`PENDING 2`) and the could-not-even-list case (`PENDING ?`), which is
+# the loudest one and must never be dropped on a failed [0-9]+ parse.
+pending=$(sed -n 's/^prune: PENDING \([^ ]*\).*$/\1/p' "$prune_log" | head -1)
+rm -f "$prune_log"
 if [ -n "${pending:-}" ]; then
   note "sccache-cache: **dead version(s) could not be reclaimed** from CI — \`$pending\`. Run \`ci/prune-sccache.sh $PRESET $TAG\` locally with a \`delete:packages\` token."
 fi

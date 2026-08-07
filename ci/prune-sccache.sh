@@ -142,11 +142,22 @@ for row in "${DEAD[@]:-}"; do
     echo "prune (dry-run): would delete version $vid  tags=[$tags]"
     continue
   fi
-  if gh api --method DELETE "/user/packages/container/$PKG/versions/$vid" >/dev/null 2>&1; then
+  # PRINT WHAT THE API ACTUALLY SAID. The previous shape discarded the response
+  # (`>/dev/null 2>&1`) and every failure printed the fixed string "token lacks
+  # delete:packages" — a GUESS presented as a diagnosis. It happened to be right
+  # once, which is worse than being wrong: when the token was re-issued on
+  # 2026-08-06 and the DELETEs still failed, the log said the same sentence, so
+  # the second cause was unrecoverable from CI and the fix was declared resolved
+  # while the package kept accumulating orphans. A diagnostic that cannot be
+  # contradicted by the thing it describes is not a diagnostic.
+  if out=$(gh api --method DELETE "/user/packages/container/$PKG/versions/$vid" 2>&1); then
     echo "prune: deleted version $vid  tags=[$tags]"
     deleted=$((deleted + 1))
   else
-    echo "prune: REFUSED version $vid  tags=[$tags]"
+    # Same collapse-and-truncate as the LIST failure above: gh prints a one-line
+    # diagnosis followed by a pretty-printed JSON body, so the first line is
+    # often just `{`.
+    echo "prune: REFUSED version $vid  tags=[$tags] — $(printf '%s' "$out" | tr -s '\n\r\t ' ' ' | cut -c1-200)"
     pending=$((pending + 1))
   fi
 done
@@ -156,6 +167,10 @@ if [ "$pending" -gt 0 ]; then
   # Greppable, and deliberately not silent. The previous shape logged
   # "delete FAILED (non-fatal)" per version, which reads as noise and let the
   # sibling package quietly double its MSVC tag count unnoticed for a week.
-  echo "prune: PENDING $pending  (token lacks delete:packages — run ci/prune-sccache.sh locally to reclaim)"
+  #
+  # NO CAUSAL CLAIM HERE. The cause is whatever the per-version REFUSED lines
+  # above report; asserting one in the summary is what made the last two
+  # failures look identical.
+  echo "prune: PENDING $pending  (see the REFUSED line(s) above for what the API said; run ci/prune-sccache.sh locally with a delete:packages token to reclaim)"
 fi
 exit 0
