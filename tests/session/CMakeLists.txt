@@ -2949,6 +2949,102 @@ set_tests_properties(test_066_arena_fit PROPERTIES
   ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
   LABELS "066;us3")
 
+# ── 088-firstframe-budget-timer-lifetime T009/T011 (US1/US2) ────────────────
+# Direct-helper witness for the bounded first-frame read (B1-B6, T1, T2a).
+# read_first_frame_bounded is included directly from the internal header
+# src/session/read_first_frame_bounded.hpp (extracted from engine.cpp's
+# anonymous namespace to enable direct unit testing — 088 T008). The
+# ${CMAKE_SOURCE_DIR}/src include path is added so
+# "session/read_first_frame_bounded.hpp" resolves correctly (include-path
+# shape copied from the :712-728 scan_first_frame_ids block, not its wiring —
+# this function needs wire::Framer, pmr_carry_buffer, the Transport vtable and
+# asio::steady_timer, so it still links fixpp_session in full via
+# add_threading_test; research.md D-5 withdraws the "keeps witness binaries
+# small" claim the scan_first_frame_ids precedent implied).
+# FIXPP_ALLOW_MOCK_TRANSPORT is required: include/fixpp/transport/test/
+# mock_transport.hpp is a hard #error without it.
+# TIMEOUT is set explicitly rather than inherited from add_threading_test's
+# default 120 (:92): this target hosts B4 and B5, whose MUTANTS hang rather
+# than fail (research.md D-6.11's room==0 "loops without bound" case) — same
+# reasoning D-5's table gives for the sibling session_first_frame_stop (T2b)
+# target: a target whose regression mode is a hang may not inherit a default
+# silently.
+# LABELS carries a dedicated RED-proof label,
+# session_read_first_frame_bounded (matching the target's own name, so it can
+# never collide with a label shared by a later 088 target), so quickstart.md
+# §4's RED A/B can select exactly this target via `ctest -L`, never
+# `-R <exe-name>` ([const §VII.8]).
+# real cells land in Phase 3 (T012-T015); until then the source file below
+# holds one deliberately-failing placeholder so the target configures without
+# masquerading as covered (an empty TU or GTEST_SKIP() exits green and reads
+# as a pass — [[feedback_ci_gate_observes_not_asserts_witness_skips_into_green]]).
+# Anchors: spec.md FR-001..FR-018; research.md D-5/D-6; tasks.md T008/T009/T011.
+add_threading_test(session_read_first_frame_bounded read_first_frame_bounded_test.cpp)
+target_include_directories(session_read_first_frame_bounded PRIVATE "${CMAKE_SOURCE_DIR}/src")
+target_compile_definitions(session_read_first_frame_bounded PRIVATE FIXPP_ALLOW_MOCK_TRANSPORT)
+set_tests_properties(session_read_first_frame_bounded PROPERTIES
+  LABELS "088;us1;us2;first_frame;budget;lifetime;session_read_first_frame_bounded"
+  TIMEOUT 120)
+
+# ── 088 Phase 4 (US2) — T023/T024/T025: T6 (SC-018/FR-018) ───────────────────
+# Real-TLS witness for FR-018: Engine::stop()'s cancellation_type::total must
+# abort an in-flight first-frame read on a REAL ssl::stream — the ONLY cell
+# pinning FR-018 (a mock cell is green exactly where a real ssl::stream hangs,
+# research.md D-6.10). MUST NOT be skippable in CI, so FIXPP_TLS_FIXTURE_DIR
+# is wired unconditionally at configure time (never a runtime env var — the
+# GTEST_SKIP() fallback in this file is for local/manual runs only). Uses
+# research.md D-6.13b's build contract verbatim. TIMEOUT is second-line
+# defence only — the in-test watchdog (1000ms) is the primary bound; a run
+# that ends in the ctest TIMEOUT instead of a watchdog assertion means the
+# watchdog is mis-wired (a broken cell, not a RED proof).
+# Anchors: research.md D-6.10/D-6.10a/D-6.13; tasks.md T023-T025.
+add_executable(session_first_frame_total_cancel_tls first_frame_total_cancel_tls_test.cpp)
+target_link_libraries(session_first_frame_total_cancel_tls PRIVATE
+  fixpp fixpp_transport fixpp_tls GTest::gtest_main)
+target_include_directories(session_first_frame_total_cancel_tls PRIVATE
+  "${CMAKE_SOURCE_DIR}/src"
+  "${CMAKE_SOURCE_DIR}/tests")
+target_compile_definitions(session_first_frame_total_cancel_tls PRIVATE
+  FIXPP_TLS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/tls/fixtures")
+add_test(NAME session_first_frame_total_cancel_tls COMMAND session_first_frame_total_cancel_tls)
+set_tests_properties(session_first_frame_total_cancel_tls PROPERTIES
+  LABELS "088;us2;live_tls;first_frame;cancellation"
+  TIMEOUT 60)
+
+# ── 088 Phase 4 (US2) — T022: T2b (SC-015 accept-slot leg) ───────────────────
+# Engine::stop()'s promptness + accept-slot reclaim at engine scope, driven
+# through #232's real mTLS loopback harness (EngineLoopbackHarness). Same
+# bare-deadline-arm mutant as T2a (research.md D-6.12b), applied via stop()'s
+# Step-3 join on outstanding_counter_ rather than a direct helper call. MUST
+# NOT be skippable in CI, so FIXPP_TLS_FIXTURE_DIR is wired unconditionally at
+# configure time. TIMEOUT is explicit (research.md D-6.13b's build contract):
+# this target's regression mode is a bounded 5s stall under the mutant, not a
+# hang, but per D-5's rule a target whose failure shape includes a multi-
+# second wait may not inherit add_threading_test's default silently.
+# Anchors: research.md D-6.1/D-6.12/D-6.13a/D-6.13b; tasks.md T022.
+add_executable(session_first_frame_stop first_frame_stop_test.cpp)
+target_link_libraries(session_first_frame_stop PRIVATE
+  fixpp_session
+  fixpp_transport
+  fixpp_tls
+  "${FIXPP_TRANSPORT_OPENSSL_SSL_LIB}"
+  "${FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB}"
+  "${FIXPP_TRANSPORT_ZLIB_LIB}"
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(session_first_frame_stop PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+  "${CMAKE_SOURCE_DIR}/src"
+)
+target_compile_definitions(session_first_frame_stop PRIVATE
+  FIXPP_TLS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/tls/fixtures"
+)
+add_test(NAME session_first_frame_stop COMMAND session_first_frame_stop)
+set_tests_properties(session_first_frame_stop PROPERTIES
+  LABELS "088;us2;first_frame;stop;live_tls"
+  TIMEOUT 120)
+
 # ── Conformance subdirectory (005 Q2 in-scope [FIX-TC] subset) ───────────────
 # Phase 3 adds tc_establishment_test.cpp (T020); later phases add more.
 add_subdirectory(conformance)

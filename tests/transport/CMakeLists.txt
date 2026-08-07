@@ -356,6 +356,38 @@ target_compile_definitions(transport_asio_tls_transport_error_paths PRIVATE
 add_test(NAME transport_asio_tls_transport_error_paths
          COMMAND transport_asio_tls_transport_error_paths)
 
+# ── 088-firstframe-budget-timer-lifetime T036 (US4) — timer-epoch retirement ──
+# Cells T4 (TLS connect) and T5 (TLS handshake) — SC-014. Resolves
+# plan.md:240's "(TLS transport test target)" placeholder: no existing file
+# fits (test_asio_tls_transport_error_paths.cpp above is scoped to error
+# paths; the other TLS files are unrelated). D-5's delivered label row
+# (research.md:972), applied at creation per T010.
+# Anchors: research.md D-4.1/D-5/D-6.1/D-6.4; tasks.md T036.
+
+add_executable(transport_timer_epoch_retire
+  test_asio_tls_transport_timer_epochs.cpp)
+target_include_directories(transport_timer_epoch_retire PRIVATE
+  "${CMAKE_SOURCE_DIR}/src"
+  "${CMAKE_SOURCE_DIR}/tests"
+)
+target_link_libraries(transport_timer_epoch_retire PRIVATE
+  fixpp_transport
+  fixpp_tls
+  "${FIXPP_TRANSPORT_OPENSSL_SSL_LIB}"
+  "${FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB}"
+  "${FIXPP_TRANSPORT_ZLIB_LIB}"
+  GTest::gtest
+  GTest::gtest_main
+)
+target_compile_definitions(transport_timer_epoch_retire PRIVATE
+  FIXPP_TLS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/tls/fixtures"
+)
+add_test(NAME transport_timer_epoch_retire
+         COMMAND transport_timer_epoch_retire)
+set_tests_properties(transport_timer_epoch_retire PROPERTIES
+  LABELS "088;us4;transport;timer_epoch"
+  TIMEOUT 60)
+
 # ── 043 T005 — asio_plain_transport loopback live-I/O witness (SC-001) ─────────
 #
 # Tests: connect/read/write cycle, no-TLS-ClientHello (first byte 0x38),

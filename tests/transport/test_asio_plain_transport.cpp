@@ -468,4 +468,81 @@ TEST(AsioPlainTransport, MakeAcceptedReturnsConnectedTransport) {
     EXPECT_EQ(*read_result, 2u);
 }
 
+// ── Test 7: T3 (SC-014, 088) — connect epoch retired after a real connect ─────
+//
+// Per research.md D-6.1/D-6.4 (088-firstframe-budget-timer-lifetime): drive a
+// real successful async_connect against a loopback stub peer; assert
+// timer_epochs()->connect has advanced PAST the value armed for that
+// attempt by the time async_connect returns, so any expiry still in flight
+// afterwards is stale. A fresh transport starts at connect == 0; the arm
+// site increments it to 1 when the attempt begins, and the retire site
+// increments it again to 2 immediately before timer.cancel() — so a
+// successful connect leaves connect == 2, past the armed value of 1.
+// Deleting the retire-site `++` (the retire-point-omitted mutant) leaves it
+// at 1, equal to the armed value — RED. The sibling "guard omitted" mutant
+// has no killer and is discharged structurally (D-9); this cell does not
+// claim to kill it.
+TEST(AsioPlainTransport, TimerEpochRetiredAfterConnect) {
+    asio::io_context ioc;
+    asio::ip::tcp::acceptor acc{ioc};
+    auto ep = make_loopback_acceptor(ioc, acc);
+
+    bool timed_out{false};
+    bool done{false};
+    bool connect_ok{false};
+    std::uint64_t epoch_after_connect{0};
+
+    asio::steady_timer watchdog{ioc};
+    watchdog.expires_after(std::chrono::seconds{10});
+    watchdog.async_wait([&](asio::error_code ec) {
+        if (!ec && !done) {
+            timed_out = true;
+            asio::error_code ignored;
+            acc.close(ignored);
+        }
+    });
+
+    // Server: accept the TCP connection and hold it open (no I/O needed — T3
+    // only needs a successful connect).
+    asio::co_spawn(
+        ioc.get_executor(),
+        [&]() -> asio::awaitable<void> {
+            asio::error_code ec;
+            asio::ip::tcp::socket accepted_sock{co_await asio::this_coro::executor};
+            co_await acc.async_accept(accepted_sock, asio::redirect_error(asio::use_awaitable, ec));
+        },
+        asio::detached);
+
+    // Client: real successful connect, then read the epoch before the
+    // transport (a coroutine-frame local) leaves scope.
+    asio::co_spawn(
+        ioc.get_executor(),
+        [&]() -> asio::awaitable<void> {
+            Transport::Config cfg{};
+            asio_plain_transport client{co_await asio::this_coro::executor, cfg};
+
+            fixpp::transport::Endpoint endpoint;
+            endpoint.host = "127.0.0.1";
+            endpoint.port = ep.port();
+
+            auto conn = co_await client.async_connect(endpoint);
+            connect_ok = conn.has_value();
+            epoch_after_connect = client.timer_epochs()->connect;
+
+            done = true;
+            watchdog.cancel();
+        },
+        asio::detached);
+
+    ioc.run_for(std::chrono::seconds{12});
+
+    ASSERT_FALSE(timed_out) << "test timed out";
+    ASSERT_TRUE(connect_ok) << "async_connect must succeed for T3's construction";
+    EXPECT_EQ(epoch_after_connect, 2u)
+        << "T3 (SC-014): connect epoch must be retired (advanced past the armed "
+           "value 1) by the time async_connect returns — arm (0->1) then retire "
+           "(1->2); got "
+        << epoch_after_connect;
+}
+
 }  // namespace
