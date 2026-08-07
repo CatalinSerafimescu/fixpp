@@ -179,7 +179,29 @@ the connect (resp. handshake) returns, so any expiry still in flight is stale.
 
 ### Mandatory close-out tasks (ALWAYS emit — Gate-B preconditions, Article XVII §8)
 
-- [ ] T049 Catalogue close-out — flip every feature-owned OFFICIAL row in `spec/feature-catalogue.md` to `done` and add the corresponding `spec/coverage-index.md` entry. **Plus one cross-feature row added at /implement:** record in `spec/behaviors-and-limitations.md` that 088 widens **`asio_plain_transport`'s two constructors from `noexcept` to potentially-throwing**. Cause: D-4.1's `timer_epoch_state` mechanism requires a `std::make_shared` default member initializer, and `make_shared` can throw `bad_alloc` — which inside a `noexcept` constructor would **terminate**, making the declaration false. The type is **internal** (`src/transport/` is not an installed include root; it is named in no installed header and no C-ABI surface), so **no installed surface, no ABI boundary and no C-ABI symbol moves** — SC-010/SC-017 are unaffected. The `trap_throw` try/catch already wired at `transport_factory.cpp:513-522` and `:539-549` becomes non-vacuous; it needed no change. `specs/043-plaintext-tcp-transport/contracts/asio_plain_transport.hpp:44,49` is **deliberately left unmodified** — it is the historical record of what 043 shipped and is superseded on this one point, not falsified
+- [X] T049 Catalogue close-out — flip every feature-owned OFFICIAL row in `spec/feature-catalogue.md` to `done` and add the corresponding `spec/coverage-index.md` entry. **Plus one cross-feature row added at /implement:** record in `spec/behaviors-and-limitations.md` that 088 widens **`asio_plain_transport`'s two constructors from `noexcept` to potentially-throwing**. Cause: D-4.1's `timer_epoch_state` mechanism requires a `std::make_shared` default member initializer, and `make_shared` can throw `bad_alloc` — which inside a `noexcept` constructor would **terminate**, making the declaration false. The type is **internal** (`src/transport/` is not an installed include root; it is named in no installed header and no C-ABI surface), so **no installed surface, no ABI boundary and no C-ABI symbol moves** — SC-010/SC-017 are unaffected. The `trap_throw` try/catch already wired at `transport_factory.cpp:513-522` and `:539-549` becomes non-vacuous; it needed no change. `specs/043-plaintext-tcp-transport/contracts/asio_plain_transport.hpp:44,49` is **deliberately left unmodified** — it is the historical record of what 043 shipped and is superseded on this one point, not falsified
+
+  > **DONE 2026-08-07. Three items, one of them N/A — recorded rather than silently dropped.**
+  > **(1) Catalogue flip — N/A, no rows to flip.** `spec.md:1299` states it directly: *"This feature
+  > introduces no OFFICIAL catalogue rows"* — 088 corrects the implementation of an already-shipped
+  > requirement. Verified rather than assumed: the four rows its governing FIX section routes through
+  > (**S-001, S-015, S-021, S-022**) are **already `done`**, so there is no feature-owned row in any
+  > state but `done`.
+  > **(2) Coverage index — added** to the `[FIX-SL §4.3] Establishing a FIX connection` row
+  > (`spec/coverage-index.md:43`), explicitly as traceability with **no coverage change and no new
+  > row**.
+  > **(3) Behaviours & limitations — added**, as a full `## 088-…` section: **B-088-1** (budget at
+  > equality + budget-before-framer, the two atomic edits), **B-088-2** (deadline re-armed per read),
+  > **B-088-3** (`total` cancellation swallowed by the deadline arm), **L-088-1** (the `noexcept`
+  > widening — the queued cross-feature row), **L-088-2** (the epoch guard's suppression half has no
+  > witness by design; D-6.8's deliberately-empty `guard omitted` column).
+  > **One correction carried into L-088-1**: this task's own text above says the type is *"named in no
+  > installed header"*. That is **wrong** — `asio_plain_transport` IS named at
+  > `include/fixpp/transport/transport_factory.hpp:43` (forward declaration) and `:249` (a
+  > `unique_ptr` return). The conclusion survives on narrower ground and the shipped row says so: both
+  > uses are of an **incomplete type**, so a constructor's `noexcept`-ness cannot reach the compiled
+  > interface. SC-010/SC-017 unaffected either way. The `trap_throw` anchors `:513-522` / `:539-549`
+  > were re-verified against the current file and still hold.
 - [ ] T050 **Feature-completeness audit (FINAL task)** — verify tasks ↔ FR/SC ↔ catalogue all map to a landed test **and** a landed implementation; record the verdict (100%-or-waived) in `.specify/decisions/088-firstframe-budget-timer-lifetime-verify.md` under `## Completeness`. `/gate-b` 4d **HARD-BLOCKS** without this record
 
 ---
