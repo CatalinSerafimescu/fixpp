@@ -561,13 +561,14 @@ jobs:
       # ── #229: the LAST unmet criterion before `ctest --parallel` can widen ───
       #
       # `execution: {jobs: 2}` is set on the linux-clang-tsan TEST PRESET ONLY
-      # (CMakePresets.json). It has measured 1937 / 1946 / 1851 s across three
-      # runs — two of them post-merge push:main — against a 3319 s serial mean,
-      # all green at 346/346. That discharges every acceptance criterion in
-      # ci/ctest-parallelism-probe.md except one: peak memory was to be CAPTURED,
-      # not assumed. Two concurrent TSan processes on a 4 vCPU / 16 GB runner is
-      # a SUSPECTED constraint, and it is the only thing still blocking the
-      # largest single CI lever available (~236 min aggregate modelled at -j4).
+      # (CMakePresets.json). See ci/ctest-parallelism-probe.md for the measured
+      # run times (not restated here — a comment copy of a volatile measurement
+      # goes stale silently; the probe doc is the single source). That doc
+      # discharges every acceptance criterion except one: peak memory was to be
+      # CAPTURED, not assumed. Two concurrent TSan processes on a 4 vCPU / 16 GB
+      # runner is a SUSPECTED constraint, and it is the only thing still
+      # blocking the largest single CI lever available (~236 min aggregate
+      # modelled at -j4).
       #
       # WHAT THIS NUMBER IS: cgroup v2 `memory.peak` is the JOB-WIDE high-water
       # mark, so it also covers Build, which is itself memory-hungry. Resetting

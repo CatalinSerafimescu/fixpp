@@ -26,6 +26,25 @@ The third run matters more than as a tie-breaker: it is the only one taken on th
 that merged, and it moved the mean *toward* the ideal bound (+1.4% → +1.2%) rather than away, so the
 model is not drifting as samples accumulate.
 
+### Two further post-merge `push:main` runs — different basis, both correct
+
+Runs `30908214440` (1946 s) and `30938621205` (1851 s), alongside the shared run `30881578522`
+(1937 s), are recorded in `tier1.yml`'s own #229 comment history. **These are NOT the same
+measurement as the table above and are not merged into it.** The table above is ctest's own
+`Total Test time (real)` (the `:14` block); these three are the Actions **Test-step wall-clock**
+duration, which additionally includes step setup/teardown overhead around the `ctest` invocation.
+Only `30881578522` is common to both sets, and there the two bases agree as expected — 1935.04 s of
+ctest inside a 1937 s step. Both sets are individually correct; they are not reconciled against each
+other because they measure different things.
+
+| | runs | basis | figures | mean |
+|---|---|---|---|---:|
+| measured, `jobs=2` (above) | `30881578522`, `30885760893`, `30895037213` | ctest `Total Test time (real)` | 1935 / 1806 / 1859 | 1867 |
+| Actions Test-step duration | `30881578522`, `30908214440`, `30938621205` | GitHub Actions step wall-clock | 1937 / 1946 / 1851 | 1911 |
+
+All three step-duration runs (and both `Total Test time` samples that overlap them) are green at
+346/346, consistent with criteria 1–3 above.
+
 ### Acceptance status
 
 | # | criterion | status |
@@ -33,7 +52,7 @@ model is not drifting as samples accumulate.
 | 1 | materially lower over more than one run | **MET** — 1935 / 1806 / 1859, all far below the 3300–3356 band |
 | 2 | no failures, no `exit 143` / OOM | **MET** — 346/346 on all three runs |
 | 3 | no previously-stable test turns intermittent | **MET** — identical 346 count and zero failures across three runs |
-| 4 | peak RSS / cgroup `memory.peak` captured | **UNMET** — still not measured |
+| 4 | peak RSS / cgroup `memory.peak` captured | **UNMET** — still not measured. Closes on the first successful post-merge `linux-clang-tsan` run of the `Capture peak memory (ctest --parallel evidence, #229)` step added in PR #245 (`tier1.yml`); record that run here (URL, source path, peak bytes/GiB, runner MemTotal, Test outcome) when it lands. |
 
 **Criterion 4 is what blocks widening, and it is not a formality.** Three green runs say the lane
 *did not* run out of memory; they say nothing about how close it came. Two concurrent TSan
@@ -166,7 +185,11 @@ registered CTest `TIMEOUT` is tight enough for a 2× slowdown to trip it — the
 4. **Peak memory captured, not assumed** — record peak RSS / cgroup `memory.peak` during the run,
    ideally while `codegen_determinism_test` (1132 s) overlaps `dictionary_pure_tests` (531 s), the
    worst-case pairing. Until that number exists, "two concurrent TSan processes fit in 16 GB" is
-   untested, and widening to `jobs=3` would be compounding an unmeasured assumption.
+   untested, and widening to `jobs=3` would be compounding an unmeasured assumption. **Still UNMET**:
+   PR #245 installs the `Capture peak memory` step (`tier1.yml`) that takes this measurement;
+   criterion 4 closes on the first successful post-merge `linux-clang-tsan` run after that PR merges,
+   recorded in this document (run URL, source path, peak bytes/GiB, runner MemTotal, Test outcome) —
+   not on the PR's own merge.
 
 Only then extend `execution.jobs` to `linux-clang-asan` / `linux-clang-ubsan` /
 `linux-clang-coverage`, one at a time, re-measuring each.
