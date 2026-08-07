@@ -125,9 +125,11 @@ struct Script {
 // ─────────────────────────────────────────────────────────────────────────────
 // mock_transport — deterministic TlsTransport impl for FSM tests.
 //
-// All async methods compose an `asio::post(exec_)` checkpoint (deferred
-// resume) and, if the matching latency is non-zero, an
-// `asio::steady_timer::async_wait`. Both honour the awaiter's
+// `async_connect` composes an `asio::post(exec_)` checkpoint (deferred
+// resume); it has no latency injection. `async_read_some`, `async_write`
+// and `async_handshake` compose an `asio::steady_timer::async_wait` when the
+// matching latency is non-zero, and nothing otherwise. Both forms honour the
+// awaiter's
 // `cancellation_state` per [const §XI.2] — emit cancellation_type::total
 // during the wait and the method surfaces the matching `*_cancelled` variant.
 //
