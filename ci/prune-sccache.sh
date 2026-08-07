@@ -41,8 +41,13 @@ PRESET="${1:?usage: prune-sccache.sh <preset> <current-tag>}"
 CURRENT_TAG="${2-}"
 PKG=fixpp-sccache
 
-command -v jq >/dev/null 2>&1 || { echo "prune: jq not found — skipping"; exit 0; }
-command -v gh >/dev/null 2>&1 || { echo "prune: gh not found — skipping"; exit 0; }
+# Route missing tools through the SAME `prune: PENDING` marker as every other
+# non-deletion outcome. A bare "skipping" line is invisible to the caller, which
+# greps for that marker to write the backlog note into the job summary — so a
+# runner image that stopped shipping jq would silently disable reclamation while
+# every seed still reported success.
+command -v jq >/dev/null 2>&1 || { echo "prune: PENDING ? — jq not found; nothing was examined, let alone deleted"; exit 0; }
+command -v gh >/dev/null 2>&1 || { echo "prune: PENDING ? — gh not found; nothing was examined, let alone deleted"; exit 0; }
 
 # SAFE UNDER A STATED CONTRACT, mirroring prune-conan-cache.sh:
 #  - an UNTAGGED version is unreachable *through this repo's cache contract*,

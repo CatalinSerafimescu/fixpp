@@ -22,10 +22,18 @@
 All three legs **`success`**, including the full `ctest` phase — that is AC4 in full, which the
 cold run could not answer. `Build packages` ran green on `windows-msvc-release`.
 
-Restore + seed overhead is ~1 min on the worst leg against an observed `Build` delta of 65–87 min.
-That gap is two orders of magnitude, so the upload/download trade named in *Keep-or-revert* is
-settled in favour of keeping **even if a large share of the delta were host drift** — which is why
-this one conclusion survives the AC2 downgrade below while the ratios themselves do not.
+Transfer overhead, arithmetic only, from the table above:
+
+| leg | restore + seed | observed `Build` delta |
+|---|---:|---:|
+| `windows-msvc-debug` | 40 s + 65 s = **105 s** | 65m19s |
+| `windows-msvc-release` | 10 s + 17 s = **27 s** | 87m05s |
+
+Those are **observations, not an apportionment.** The cross-host comparison cannot say how much of
+each delta the cache caused, so no net time/storage saving is claimed here — see *Why AC2 cannot be
+fully met here*. What the 100 % hit rate does establish is that the mechanism works and the transfer
+cost is small in absolute terms; the trade is therefore judged worth keeping **provisionally**, and
+the quantitative case stays open until a directly-measured saving exists.
 
 ### Why AC2 cannot be fully met here, and what is claimed instead
 
@@ -444,9 +452,8 @@ grep never shown to be non-zero is a broken instrument, not a clean sweep
 Keep only on a demonstrated hit rate on a warm re-run (AC2 + AC1 together). **Resolved: KEEP**, and
 the keep rests on **AC1's hit rate**, which is controlled, not on the wall-clock ratios, which are
 not. Both outcomes this section flagged as live were measured and neither materialised:
-`windows-msvc-release` was the *best* leg rather than the poor one, and restore+seed overhead is
-~1 min — two orders of magnitude below the observed `Build` delta, so the storage trade holds under
-any plausible share of host drift.
+`windows-msvc-release` was the *best* leg rather than the poor one, and transfer overhead is small
+in absolute terms (105 s on debug, 27 s on release).
 
 ⚠️ **What this section deliberately does NOT claim.** The two cross-host runs differed by
 **≈2.5 h of `Build` across the two seeded legs**. That is an *observed delta between two runs*, not a

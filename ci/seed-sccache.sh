@@ -58,9 +58,36 @@ stop_out="$(sccache --stop-server 2>&1)"; stop_rc=$?
 case "$stop_rc:$stop_out" in
   0:*|*:*"couldn't connect to server"*) : ;;   # stopped, or already quiescent
   *)
-    note "::error::sccache-cache SEED FAILED for \`$TAG\` — could not confirm the sccache server is stopped (rc=$stop_rc), so $DIR_POSIX may still be written to. Refusing to archive a live cache directory."
+    note "::error::sccache-cache SEED FAILED for \`$TAG\` — \`sccache --stop-server\` failed in an unrecognised way (rc=$stop_rc): ${stop_out}. Refusing to archive a possibly-live cache directory."
     exit 1 ;;
 esac
+
+# …and then VERIFY the process is gone, because neither branch above proves it.
+# `rc=0` only means the daemon acknowledged the shutdown request — it may still
+# drain in-flight requests for several seconds afterwards — and "couldn't
+# connect" is a generic connection failure that a live-but-wedged daemon can
+# also produce. Both were accepted as quiescence, which left exactly the
+# false-green this check exists to close: a `SEEDED` marker over an archive
+# taken while the cache was still being written.
+#
+# MEASURED on Windows: `tasklist` exits 0 whether or not anything matches, so
+# the discriminator is the OUTPUT, never the status — a version of this loop
+# keyed on the exit code would pass unconditionally.
+if command -v tasklist >/dev/null 2>&1; then
+  waited=0
+  while tasklist //NH 2>/dev/null | grep -qi '^sccache\.exe'; do
+    if [ "$waited" -ge 30 ]; then
+      note "::error::sccache-cache SEED FAILED for \`$TAG\` — an sccache process was still alive ${waited}s after the shutdown request, so $DIR_POSIX cannot be assumed quiescent. Nothing was published."
+      exit 1
+    fi
+    sleep 2; waited=$((waited + 2))
+  done
+  echo "seed: no sccache process remains (waited ${waited}s) — $DIR_POSIX is quiescent"
+else
+  # Degrade loudly rather than pretending. Not fatal: on any host without
+  # tasklist we are no worse off than before this check existed.
+  echo "seed: tasklist unavailable — quiescence NOT independently verified (stop-server rc=$stop_rc)"
+fi
 
 [ -d "$DIR_POSIX" ] || { echo "seed: $DIR_POSIX does not exist — nothing to publish."; exit 0; }
 
