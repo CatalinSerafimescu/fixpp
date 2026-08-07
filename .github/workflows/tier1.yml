@@ -554,6 +554,7 @@ jobs:
       # every lane still proves an external consumer compiles and links against
       # the installed package.
       - name: Test (minimal tier — packaging gated on linux-gcc-release)
+        id: tsan_test
         if: matrix.preset != 'linux-gcc-release'
         run: ctest --preset ${{ matrix.preset }} --output-on-failure -LE packaging
 
@@ -584,6 +585,8 @@ jobs:
       - name: Capture peak memory (ctest --parallel evidence, #229)
         if: always() && matrix.preset == 'linux-clang-tsan'
         continue-on-error: true
+        env:
+          TEST_OUTCOME: ${{ steps.tsan_test.outcome }}
         run: |
           set -uo pipefail
           peak=""
@@ -604,6 +607,10 @@ jobs:
               echo "### Peak memory (#229) — NOT MEASURED"
               echo
               echo "No readable cgroup peak file. The \`--parallel\` widening criterion is still open."
+              echo
+              echo "| metric | value |"
+              echo "|---|---|"
+              echo "| Test outcome | ${TEST_OUTCOME} |"
             } >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
@@ -615,21 +622,50 @@ jobs:
             pct="$(awk -v b="$peak" -v k="$total_kb" 'BEGIN{printf "%.1f%%", (b/1024)/k*100}')"
           fi
 
-          echo "peak=${peak} bytes (${peak_gib} GiB) of ${total_gib} GiB — ${pct} [source: ${src}]"
-          {
-            echo "### Peak memory — \`ctest --parallel\` evidence (#229)"
-            echo
-            echo "| metric | value |"
-            echo "|---|---|"
-            echo "| ctest jobs | 2 (\`linux-clang-tsan\` test preset only) |"
-            echo "| peak (job-wide) | **${peak_gib} GiB** |"
-            echo "| runner MemTotal | ${total_gib} GiB |"
-            echo "| utilisation | ${pct} |"
-            echo "| source | \`${src}\` |"
-            echo
-            echo "Job-wide high-water mark, so it includes \`Build\`; the runner user cannot"
-            echo "reset \`memory.peak\`, so treat this as a **ceiling** for the test phase."
-          } >> "$GITHUB_STEP_SUMMARY"
+          echo "peak=${peak} bytes (${peak_gib} GiB) of ${total_gib} GiB — ${pct} [source: ${src}] [test outcome: ${TEST_OUTCOME}]"
+
+          # The Test step above (id: tsan_test) has no `always()`, so on a Build
+          # failure it is SKIPPED, not failed — and this step still runs
+          # (always()) against a perfectly readable cgroup file. A number here
+          # would be read as acceptance evidence for a run that measured a
+          # workload strictly smaller than "the suite ran". Label accordingly
+          # rather than suppressing the number.
+          if [ "${TEST_OUTCOME}" = "success" ]; then
+            {
+              echo "### Peak memory — \`ctest --parallel\` evidence (#229)"
+              echo
+              echo "| metric | value |"
+              echo "|---|---|"
+              echo "| ctest jobs | 2 (\`linux-clang-tsan\` test preset only) |"
+              echo "| peak (job-wide) | **${peak_gib} GiB** |"
+              echo "| runner MemTotal | ${total_gib} GiB |"
+              echo "| utilisation | ${pct} |"
+              echo "| source | \`${src}\` |"
+              echo "| Test outcome | ${TEST_OUTCOME} |"
+              echo
+              echo "Job-wide high-water mark, so it includes \`Build\`; the runner user cannot"
+              echo "reset \`memory.peak\`, so treat this as a **ceiling** for the test phase."
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::warning::#229 peak-memory figure below is DIAGNOSTIC ONLY — the Test step's outcome was '${TEST_OUTCOME}', not success, so the suite did not complete and this number does NOT discharge the ctest --parallel memory criterion."
+            {
+              echo "### Peak memory (#229) — DIAGNOSTIC ONLY, Test outcome: ${TEST_OUTCOME}"
+              echo
+              echo "The Test step did not succeed (outcome: \`${TEST_OUTCOME}\`), so the suite did"
+              echo "not run to completion. This figure does **not** discharge the ctest --parallel"
+              echo "memory criterion — it reflects a workload strictly smaller than the one the"
+              echo "criterion is about."
+              echo
+              echo "| metric | value |"
+              echo "|---|---|"
+              echo "| ctest jobs | 2 (\`linux-clang-tsan\` test preset only) |"
+              echo "| peak (job-wide) | ${peak_gib} GiB |"
+              echo "| runner MemTotal | ${total_gib} GiB |"
+              echo "| utilisation | ${pct} |"
+              echo "| source | \`${src}\` |"
+              echo "| Test outcome | ${TEST_OUTCOME} |"
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       # rpmbuild is NOT on ubuntu-24.04 and packaging::contents drives the
       # default generator list (DEB;RPM;TGZ), so without this the lane fails on
