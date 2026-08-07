@@ -805,7 +805,7 @@ TEST(ReadFirstFrameBounded, CovFramerErrorPropagates) {
 //
 // Construction: an empty Script (no inbound_bytes, no inbound_chunks) makes
 // every async_read_some hit the mock's exhaustion path immediately
-// (mock_transport.hpp:257-259, read_cursor_ >= inbound_bytes.size() == 0 ==>
+// (mock_transport.hpp:260-261, read_cursor_ >= inbound_bytes.size() == 0 ==>
 // transport_read_eof) with no latency, so the deadline arm (500ms) cannot
 // win the join.
 TEST(ReadFirstFrameBounded, CovReadErrorPropagates) {
