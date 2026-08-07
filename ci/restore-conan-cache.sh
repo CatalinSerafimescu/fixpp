@@ -37,7 +37,7 @@ TAG="$CONAN_CACHE_TAG"
 # impossible if only the failing side prints its inputs.
 echo "conan-cache: key inputs — $CONAN_CACHE_INPUTS"
 
-WORK="$(mktemp -d)"
+WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
 if oras pull "$IMAGE:$TAG" -o "$WORK" >/dev/null 2>"$WORK/oras.err"; then
   if conan cache restore "$(winpath "$WORK/conan-$PROFILE.tgz")"; then
     echo "conan-cache HIT  $TAG"
