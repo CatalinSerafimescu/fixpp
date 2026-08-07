@@ -3,8 +3,22 @@
 # Called at the end of seed-conan-cache.sh (local seed AND the CI push:main save
 # step), so a conanfile.py bump doesn't leave old <profile>-<oldkey> tags behind.
 #
-# Auth: `gh` authenticated locally, or GH_TOKEN in CI (needs delete perms on the
-# package — fixpp has Admin). BEST-EFFORT: never exits non-zero, never fails seed.
+# Auth: needs a token carrying `delete:packages` + `read:packages`.
+#
+# ⚠️ Repository Admin does NOT supply that — package deletion is gated on the
+# TOKEN's scope, and the previous wording here ("needs delete perms on the
+# package — fixpp has Admin") conflated the two. Measured 2026-08-06: this
+# script had never deleted anything, from anywhere. Both MSVC-seeding runs left
+# their predecessor's tag in place, and the maintainer's own `gh` token returned
+# 403 "You need at least delete:packages and read:packages scopes" against a
+# nonexistent version id. The single tag per Linux profile was never evidence to
+# the contrary — each had simply been seeded once.
+#
+# In CI, tier2.yml passes GH_TOKEN as `secrets.GHCR_PAT || secrets.GITHUB_TOKEN`;
+# GITHUB_TOKEN cannot delete, so pruning is live only while GHCR_PAT exists.
+# Locally, `gh auth refresh -h github.com -s delete:packages,read:packages`.
+#
+# BEST-EFFORT: never exits non-zero, never fails seed.
 # DRY_RUN=1 → print what would be deleted, delete nothing.
 #
 # SAFE BY CONSTRUCTION:

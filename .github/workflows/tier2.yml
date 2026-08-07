@@ -150,10 +150,16 @@ jobs:
     runs-on: windows-2022
     permissions:
       contents: read
-      packages: write  # auto-push-on-miss — save the rebuilt Conan cache to GHCR
-    # Hung-job backstop (2026-07-09): the MSVC matrix runs ~45 min cold; 90 sits
-    # well above that (matches wheel-windows / tier1's heavy-job convention) while
-    # capping a wedged build far below GitHub's 6h default.
+      packages: write  # save the rebuilt Conan cache + the sccache cache to GHCR
+    # Hung-job backstop. MEASURED (#231, run 30880318695, all three legs green):
+    # job totals are 104 / 104 / 171 min for debug / release / asan — so the asan
+    # leg finishes 9 minutes inside this backstop, not "well above" it.
+    #
+    # The "~45 min cold; 90 sits well above that" note this replaces (2026-07-09)
+    # was stale by 2-4x and read as headroom that does not exist. Left at 180
+    # deliberately: raising it would hide the proximity that #229 has to fix, and
+    # a compiler cache cannot buy it back — 85 of the asan leg's 171 min is
+    # Build, the other 81 is ctest, which sccache does not touch.
     timeout-minutes: 180
     needs: filter
     if: needs.filter.outputs.should_run == 'true'
@@ -169,6 +175,27 @@ jobs:
 
     env:
       CONAN_HOME: C:\Users\runneradmin\.conan2
+
+      # ── sccache (#231) ────────────────────────────────────────────────────
+      # ⚠️ CMAKE_{C,CXX}_COMPILER_LAUNCHER is deliberately ABSENT from this
+      # block. A JOB-level launcher is the tier1 exit-127 shape
+      # (tier1.yml:392-404): `conan install --build=missing` runs a dependency's
+      # compiler probe through the launcher, and a launcher not yet on PATH
+      # fails the probe with 127 and reddens the lane. Passing it with -D on the
+      # Configure step instead scopes it to the fixpp build, so Conan's
+      # dependency builds never see it and that shape is unrepresentable rather
+      # than merely ordered-around. Deps arrive prebuilt from GHCR on this lane
+      # by design, so caching them would buy little anyway.
+      SCCACHE_DIR: C:\sccache
+      # Never idle-shut-down. The default (600 s) lets the server exit during a
+      # long link with no compiles; the next invocation silently starts a FRESH
+      # server, and `--show-stats` then reports that server's zeros. The
+      # acceptance criterion here IS the stats, so a truncated counter would not
+      # be a cosmetic loss — it would fabricate the measurement.
+      SCCACHE_IDLE_TIMEOUT: "0"
+      # Bounds what the seed step has to upload. First estimate, to be tuned
+      # from the size the seed step prints into the job summary.
+      SCCACHE_CACHE_SIZE: 8G
 
     strategy:
       fail-fast: false
@@ -195,6 +222,48 @@ jobs:
 
       - name: Install Ninja
         run: choco install ninja --no-progress -y
+
+      # sccache is wireable on this lane AT ALL because the Windows presets use
+      # the NINJA generator (CMakePresets.json:9): CMAKE_<LANG>_COMPILER_LAUNCHER
+      # is honored by Ninja/Makefiles and IGNORED by the Visual Studio generator.
+      # Moving this lane to the VS generator would silently disable the cache —
+      # the AC3 assertion after Configure is what would catch that.
+      #
+      # Installed from the pinned upstream release rather than `choco install
+      # sccache` (the idiom two lines up) because the version is then exactly
+      # what this file says: sccache's own entry hash covers the compiler and the
+      # preprocessed source, so a version drift cannot corrupt a build, but it
+      # CAN change the stats format and the non-cacheable classification that
+      # AC1 reads. Pinning keeps the measurement comparable run to run.
+      - name: Install sccache
+        shell: bash
+        run: |
+          set -euo pipefail
+          ver=v0.17.0
+          asset="sccache-${ver}-x86_64-pc-windows-msvc"
+          base="https://github.com/mozilla/sccache/releases/download/${ver}"
+          # $RUNNER_TEMP, not the workspace: the workspace IS the git checkout on
+          # this runner, and a stray download there is an untracked file in a
+          # tree several steps later assume is clean.
+          tmp="$(cygpath -u "$RUNNER_TEMP")/sccache-dl"
+          rm -rf "$tmp"; mkdir -p "$tmp"; cd "$tmp"
+          # PINNED IN-REPO, deliberately not fetched. Downloading the .sha256
+          # sidecar from the same mutable release that serves the archive checks
+          # transport integrity but pins nothing: whoever can replace the asset
+          # can replace its sidecar. This literal was verified out-of-band —
+          # asset downloaded and hashed locally, and the value agreed with the
+          # published sidecar at the time of pinning (2026-08-07).
+          # Bumping `ver` REQUIRES re-deriving this by hand.
+          sha256=e94cfc5b58cbe439302f586c1d1bd7980c2cd371d47bdf385ade657411e6f3ac
+          curl -sSfL -o sccache.zip "${base}/${asset}.zip"
+          echo "${sha256}  sccache.zip" | sha256sum -c -
+          unzip -q sccache.zip
+          mkdir -p "$HOME/bin"
+          mv "${asset}/sccache.exe" "$HOME/bin/"
+          # GITHUB_PATH must carry a WINDOWS path: the Configure/Build steps are
+          # `shell: cmd`, which cannot resolve the `/c/...` form Git Bash uses.
+          cygpath -w "$HOME/bin" >> "$GITHUB_PATH"
+          "$HOME/bin/sccache.exe" --version
 
       # NOTE the ORDER of the next four steps is load-bearing: vcvars must run
       # BEFORE the GHCR restore, because the restore's cache key is derived from
@@ -298,10 +367,33 @@ jobs:
         continue-on-error: true
         shell: bash
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # for prune's `gh api`
+          # Prune needs `delete:packages`, which GITHUB_TOKEN does NOT carry — verified
+          # 403 against the live API. Supplying a GHCR_PAT repo secret with that scope
+          # turns pruning on with no other change; without the secret this falls back to
+          # GITHUB_TOKEN and behaves exactly as before, so the wiring is inert until then.
+          GH_TOKEN: ${{ secrets.GHCR_PAT || secrets.GITHUB_TOKEN }}  # for prune's `gh api`
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u "${{ github.actor }}" --password-stdin
           ci/seed-conan-cache.sh ${{ matrix.preset }} -o 'fixpp/*:with_otel=True' -s:b compiler.cppstd=20
+
+      # ── sccache restore (#231) ──────────────────────────────────────────────
+      # MUST run before Configure: the first `sccache cl.exe` invocation starts
+      # the background server, and swapping SCCACHE_DIR under a live server is
+      # how a half-written entry gets restored as a compile failure instead of a
+      # miss.
+      #
+      # `oras login` here — unlike the Conan restore's anonymous pull. The Conan
+      # package was made public by hand; a package first created by
+      # GITHUB_TOKEN is PRIVATE, so an anonymous pull of fixpp-sccache 401s and
+      # every leg reads as a permanent MISS with no other symptom. `|| true`
+      # because a fork PR's downgraded token cannot log in, and there the
+      # anonymous attempt (public package) is still the correct fallback.
+      - name: Restore sccache from GHCR
+        id: sccache_restore
+        shell: bash
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u "${{ github.actor }}" --password-stdin || true
+          ci/restore-sccache.sh ${{ matrix.preset }}
 
       - name: Configure (OTel-ON)
         shell: cmd
@@ -314,13 +406,173 @@ jobs:
         # Passing the raw Windows path would hand CMake a value containing
         # sequences like `\a`, which it may interpret rather than take
         # literally; CMake accepts forward slashes on Windows everywhere.
+        #
+        # ── sccache (#231): both -D pairs are CI-ONLY, never CMakePresets.json ──
+        #
+        # COMPILER_LAUNCHER on the command line rather than in the job env — see
+        # the `env:` block above for the exit-127 reason.
+        #
+        # MSVC_DEBUG_INFORMATION_FORMAT: sccache CANNOT cache a compilation that
+        # writes to a shared PDB (`/Zi`), because the PDB is an out-of-band side
+        # effect it cannot reproduce from a cache entry; it needs `/Z7` (debug
+        # info embedded in the .obj). MEASURED on a local Debug tree before this
+        # was wired: 3235 of 3235 compile FLAGS lines carried `-Zi`, zero `/Z7`
+        # — CMP0141 is NEW (cmake_minimum_required 3.28) and nothing in the tree
+        # overrides the default, so `Embedded` here is additive, not a fight
+        # with a preset value.
+        #
+        # The value is CMake's own default genex with ProgramDatabase swapped
+        # for Embedded, NOT a bare `Embedded`. A bare value would put /Z7 on
+        # windows-msvc-release too — that config emits no debug info today, and
+        # silently starting to would change what ships, not just how fast it
+        # builds. Quoted so `cmd` reads `<` and `>` as text and not as
+        # redirection.
+        #
+        # Kept OFF CMakePresets.json deliberately: a local developer's Debug
+        # build keeps /Zi and its PDBs.
+        #
+        # ⚠️ Scoped risk, recorded: cmake/FixppPackaging.cmake:358 redirects each
+        # static/object target's COMPILER PDB into lib/ so an
+        # install(... FILES_MATCHING "*.pdb") has something to match — a rule
+        # that already shipped a zero-symbol Debug ZIP once (fixed 2026-08-02,
+        # comment at FixppPackaging.cmake:333-353), silently, because a glob
+        # that matches nothing installs nothing and SUCCEEDS. Under /Z7 there is
+        # no compiler PDB at all. It does not bite today: `Build packages` is
+        # gated to windows-msvc-release, which the genex leaves on
+        # ProgramDatabase-less Release. It WOULD bite the day packaging is
+        # enabled on a Debug leg.
         run: >
           cmake --preset ${{ matrix.preset }} -DFIXPP_BUILD_OTEL=ON
           -DFIXPP_ARTIFACT_DIR=%GITHUB_WORKSPACE:\=/%/_artifacts
+          -DCMAKE_C_COMPILER_LAUNCHER=sccache
+          -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
+          "-DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=$<$<CONFIG:Debug,RelWithDebInfo>:Embedded>"
+
+      # AC3 (#231) — assert the premise on the REAL command line, do not infer it.
+      #
+      # This is a gate, not an excerpt. Every claim sccache rests on is invisible
+      # from the outside: a VS-generator move drops the launcher, a preset change
+      # restores /Zi, and either one turns the cache into a 0%-hit no-op that
+      # still reports the lane green. `ninja -t commands` prints what will
+      # actually run, so the assertions here fail loudly instead.
+      #
+      # ⚠️ `-t commands` prints the FULL TRANSITIVE command list, not one line —
+      # MEASURED at 85 lines for a real fixpp .obj (codegen, then a
+      # `-scanDependencies` pass, then `cmake -E cmake_ninja_dyndep`, then the
+      # compile). `head -1` picks a codegen step and this gate would report
+      # "sccache is not on the command line" on a perfectly wired lane.
+      #
+      # ` -c ` is the discriminator: MEASURED to match exactly 1 of those 85
+      # lines, the compile itself. The `-scanDependencies` line ends in `-Fo…`
+      # and carries no `-c`, so it is excluded — which also records the caveat
+      # that CMake does NOT route the module-dependency scan through the
+      # launcher, so that per-TU cl invocation is never cached. See
+      # ci/tier2-sccache-probe.md.
+      - name: Assert the sccache prerequisites are on the cl command line
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "build/${{ matrix.preset }}"
+          obj=$(ninja -t targets all | grep -m1 -E '\.obj: ' | cut -d: -f1)
+          [ -n "$obj" ] || { echo "::error::no .obj target found in the ninja graph"; exit 1; }
+          cmdline=$(ninja -t commands "$obj" | grep -E ' [-/]c ' | tail -1)
+          case "$cmdline" in
+            *cl.exe*) ;;
+            *) echo "::error::could not isolate the compile line out of \`ninja -t commands $obj\` (got: ${cmdline:-<empty>}). The gate below would be vacuous, so this fails instead."; exit 1 ;;
+          esac
+          echo "$cmdline"
+          {
+            echo "### sccache prerequisites — ${{ matrix.preset }}"
+            echo ''
+            echo "One-TU \`ninja -t commands\` excerpt (\`$obj\`):"
+            echo ''
+            echo '```'
+            echo "$cmdline"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          fail=0
+          case "$cmdline" in
+            *sccache*) echo "OK: launcher present" ;;
+            *) echo "::error::sccache is NOT on the compile command line — CMAKE_CXX_COMPILER_LAUNCHER did not take effect (a Visual Studio generator would ignore it; these presets must stay on Ninja)."; fail=1 ;;
+          esac
+
+          # Release emits no debug info at all, so /Z7 must be ABSENT there —
+          # asserting its presence on every leg would fail the genex that keeps
+          # Release unchanged, which is the property that genex exists to hold.
+          if [ "${{ matrix.preset }}" = "windows-msvc-release" ]; then
+            case "$cmdline" in
+              *-Z7*|*/Z7*|*-Zi*|*/Zi*) echo "::error::windows-msvc-release must emit NO debug info; found a /Z7 or /Zi on the command line."; fail=1 ;;
+              *) echo "OK: no debug-info flag on Release" ;;
+            esac
+          else
+            case "$cmdline" in
+              *-Z7*|*/Z7*) echo "OK: /Z7 (embedded debug info)" ;;
+              *) echo "::error::/Z7 is NOT on the command line. MEASURED: this does not degrade to a poor hit rate, it FAILS the build - cl reports C1041 (cannot open program database) even with /FS present, at Non-cacheable compilations 0. Do not go looking for a non-cacheable bucket; there will not be one."; fail=1 ;;
+            esac
+            case "$cmdline" in
+              *-Zi*|*/Zi*) echo "::error::/Zi is STILL on the command line alongside /Z7 - the shared-PDB write is what breaks parallel cached compiles (C1041), so this must not survive."; fail=1 ;;
+              *) echo "OK: no /Zi" ;;
+            esac
+          fi
+          [ "$fail" = 0 ] || exit 1
 
       - name: Build
         shell: cmd
         run: cmake --build --preset ${{ matrix.preset }}
+
+      # AC1 (#231) — requests, hits, AND the non-cacheable / failure breakdown.
+      #
+      # `if: always()` so a RED build still reports them: a build that failed
+      # because of the cache is exactly the case where the stats are the
+      # diagnosis, and skipping them there would leave the one useful artifact
+      # unwritten.
+      - name: sccache statistics
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          stats=$(sccache --show-stats)
+          echo "$stats"
+          {
+            echo "### sccache stats — ${{ matrix.preset }}"
+            echo ''
+            echo "restore: \`${{ steps.sccache_restore.outputs.hit || 'n/a' }}\` (hit)"
+            echo ''
+            echo '```'
+            echo "$stats"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # Stop the server HERE, not only in the seed script. SCCACHE_IDLE_TIMEOUT=0
+          # means it never exits on its own, and the seed step that would stop it
+          # is skipped on every PR event — leaving a live background process for
+          # the runner to clean up at job teardown. Stopping it also quiesces
+          # SCCACHE_DIR before the seed step archives it; seed-sccache.sh repeats
+          # the call because it must hold that property on its own.
+          sccache --stop-server >/dev/null 2>&1 || true
+      # Publish BEFORE the ctest steps, not after. The cache is a compilation
+      # artifact: a red test says nothing about whether these objects are worth
+      # keeping, and withholding the cache on a test failure would make the next
+      # run pay a full cold build to fix an unrelated test. The Build step above
+      # succeeding is the only precondition that matters, and step ordering
+      # already enforces it.
+      #
+      # Gating and continue-on-error mirror the Conan save step above; the
+      # rationale differs and is recorded in ci/seed-sccache.sh.
+      - name: Save sccache to GHCR (push:main / dispatch)
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        continue-on-error: true
+        shell: bash
+        env:
+          # Prune needs `delete:packages`, which GITHUB_TOKEN does NOT carry — verified
+          # 403 against the live API. Supplying a GHCR_PAT repo secret with that scope
+          # turns pruning on with no other change; without the secret this falls back to
+          # GITHUB_TOKEN and behaves exactly as before, so the wiring is inert until then.
+          GH_TOKEN: ${{ secrets.GHCR_PAT || secrets.GITHUB_TOKEN }}  # for prune's `gh api`
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u "${{ github.actor }}" --password-stdin
+          ci/seed-sccache.sh ${{ matrix.preset }}
 
       # 087 T025 / FR-014 / SC-008 — the last gate-closable vacuity path.
       #
