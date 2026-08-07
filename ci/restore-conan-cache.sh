@@ -46,22 +46,25 @@ if oras pull "$IMAGE:$TAG" -o "$WORK" >/dev/null 2>"$WORK/oras.err"; then
     # Pulled, but the payload is not usable. Same disposition as a plain miss: a
     # cache we could not verify is a cache we do not have — mirrors
     # ci/restore-sccache.sh:91-96. `emit false` here is load-bearing: it
-    # re-arms the `hit == 'false'` save step so this run republishes a working
-    # tag instead of leaving the bad artifact published indefinitely. A failed
-    # restore may leave the local Conan cache partially populated; the
-    # subsequent `conan install --build=missing` + seed-conan-cache.sh repack
-    # it regardless, so this is a strict improvement over never replacing the
-    # tag at all.
-    echo "::warning::conan-cache ${TAG} DOWNLOADED BUT NOT RESTORABLE — the published archive is unusable (truncated, corrupt, or incompatible). Treating as a MISS so this run rebuilds from source AND republishes the tag; a HIT here would leave the bad artifact published indefinitely."
+    # re-arms the `hit == 'false'` save step so an eligible push:main /
+    # dispatch-on-main publisher can attempt reseeding instead of leaving the
+    # bad artifact published indefinitely. A failed restore may leave the local
+    # Conan cache partially populated; the subsequent
+    # `conan install --build=missing` + seed-conan-cache.sh path can repack it
+    # regardless, so this is a strict improvement over never replacing the tag
+    # at all.
+    echo "::warning::conan-cache ${TAG} DOWNLOADED BUT NOT RESTORABLE — the published archive is unusable (truncated, corrupt, or incompatible). Treating as a MISS so emitting hit=false allows an eligible push:main / dispatch-on-main publisher to attempt reseeding; a HIT here would leave the bad artifact published indefinitely."
     echo "conan-cache MISS $TAG (unrestorable archive) → falling back to --build=missing"
     emit false
   fi
 else
   # MISS: conanfile/profile changed (no seeded artifact), GHCR/ORAS retrieval
   # failed, or the registry is unreachable. Not fatal — the subsequent
-  # `conan install --build=missing` rebuilds. On push:main / dispatch-on-main
-  # the "Save Conan cache to GHCR" step then auto-pushes the rebuilt cache
-  # (gated on hit=false) so the next run hits.
+  # `conan install --build=missing` falls back to normal Conan resolution:
+  # downloading prebuilt binaries where available and building the rest from
+  # source. On push:main / dispatch-on-main an eligible "Save Conan cache to
+  # GHCR" step may then attempt reseeding (gated on hit=false) so the next run
+  # can hit.
   echo "conan-cache MISS $TAG  → falling back to --build=missing"
   [ -s "$WORK/oras.err" ] && sed 's/^/conan-cache: oras: /' "$WORK/oras.err"
 
@@ -93,7 +96,7 @@ else
   fi
 
   # %0A, not literal newlines: GitHub truncates an annotation at the first line.
-  echo "::warning::conan-cache MISS ${TAG} — this leg rebuilds its Conan deps from source.%0A\
+  echo "::warning::conan-cache MISS ${TAG} — this leg falls back to normal Conan resolution (\`--build=missing\`) — downloading prebuilt binaries where available and building the rest from source.%0A\
 Tag = sha256(conanfile.py + conan/profiles/${PROFILE}[ + MSVC toolset])[0:16], so a MISS means either the tag is absent (one of those inputs differs from what is published on GHCR) or the GHCR fetch failed.%0A\
 This run's inputs: ${CONAN_CACHE_INPUTS}%0A\
  • This branch touched conanfile.py or conan/profiles/** → EXPECTED, no action. Packages are seeded only on push:main / workflow_dispatch on main, so a feature-branch key cannot exist yet; it publishes automatically on the first push:main after merge.%0A\

@@ -8,6 +8,11 @@
 #   2. oras pull FAILS                           -> hit=false, MISS annotation.
 #   3. oras pull OK, `conan cache restore` OK    -> hit=true, HIT line.
 #
+# The pin also enforces the restore script's registry/argv contract: exact OCI
+# reference (`$IMAGE:$TAG`) into `oras pull`, and exactly `conan cache restore
+# <archive>` with no extra arguments. Broken reference / bogus-extra-arg
+# mutants must die as SHIM-VIOLATION, not preserve the same 3/3 dispositions.
+#
 # Case 1 is the regression case this file exists for: run this harness
 # against `git show origin/main:ci/restore-conan-cache.sh` (written to a temp
 # dir, alongside a copy of origin/main's ci/conan-cache-key.sh, since the
@@ -23,11 +28,22 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCRIPT="${1:-$repo_root/ci/restore-conan-cache.sh}"
 PROFILE="linux-clang-release"
+IMAGE="ghcr.io/catalinserafimescu/fixpp-conan-cache"
 
 fail() { echo "FAIL: $1" >&2; exit 1; }
 
 shim_dir="$(mktemp -d)"
 trap 'rm -rf "$shim_dir"' EXIT
+
+EXPECTED_TAG="$(
+  cd "$repo_root" || exit 1
+  # shellcheck source=ci/conan-cache-key.sh
+  . "$repo_root/ci/conan-cache-key.sh"
+  conan_cache_key "$PROFILE"
+  printf '%s' "$CONAN_CACHE_TAG"
+)"
+[ -n "$EXPECTED_TAG" ] || fail "expected conan cache tag must not be empty"
+EXPECTED_REF="$IMAGE:$EXPECTED_TAG"
 
 # Fake oras: validates argv (`pull ... -o <dir>`) and, on a simulated
 # success, actually WRITES the archive under whichever <dir> it was told
@@ -43,13 +59,17 @@ if [ "${1:-}" != "pull" ]; then
   echo "SHIM-VIOLATION: oras $*" >&2
   exit 2
 fi
-shift
-dir="" prev=""
-for a in "$@"; do
-  [ "$prev" = "-o" ] && dir="$a"
-  prev="$a"
-done
-if [ -z "$dir" ]; then
+if [ -z "${FAKE_EXPECTED_REF+x}" ] || [ -z "${FAKE_EXPECTED_REF:-}" ]; then
+  echo "SHIM-VIOLATION: oras $*" >&2
+  exit 2
+fi
+if [ "$#" -ne 4 ]; then
+  echo "SHIM-VIOLATION: oras $*" >&2
+  exit 2
+fi
+ref="${2:-}"
+dir="${4:-}"
+if [ "$ref" != "$FAKE_EXPECTED_REF" ] || [ "${3:-}" != "-o" ] || [ -z "$dir" ]; then
   echo "SHIM-VIOLATION: oras $*" >&2
   exit 2
 fi
@@ -74,6 +94,10 @@ chmod +x "$shim_dir/oras"
 cat > "$shim_dir/conan" <<'SHIM'
 #!/usr/bin/env bash
 if [ "${1:-}" = "cache" ] && [ "${2:-}" = "restore" ]; then
+  if [ "$#" -ne 3 ]; then
+    echo "SHIM-VIOLATION: conan $*" >&2
+    exit 2
+  fi
   path="${3:-}"
   if [ -z "$path" ]; then
     echo "SHIM-VIOLATION: conan cache restore <missing archive argument>" >&2
@@ -111,6 +135,7 @@ run_case() {
     PATH="$shim_dir:$PATH" \
     FAKE_ORAS_EXIT="$oras_exit" \
     FAKE_CONAN_EXIT="$conan_exit" \
+    FAKE_EXPECTED_REF="$EXPECTED_REF" \
     FAKE_PROFILE="$PROFILE" \
     GITHUB_OUTPUT="$gh_output" \
     bash "$SCRIPT" "$PROFILE" ) > "$out_file" 2>&1 || status=$?
@@ -143,6 +168,11 @@ if echo "$OUT" | grep -q "^conan-cache HIT"; then
 fi
 echo "$OUT" | grep -qi "DOWNLOADED BUT NOT RESTORABLE" \
   || fail "case 1: expected the corrupt-artifact warning"
+echo "$OUT" | grep -q "allows an eligible push:main / dispatch-on-main publisher to attempt reseeding" \
+  || fail "case 1: expected the eligible-publisher wording"
+if echo "$OUT" | grep -q "republishes the tag"; then
+  fail "case 1: must NOT claim the current run republishes the tag"
+fi
 
 # ── Case 2: the pull itself fails (plain MISS) ──────────────────────────────
 run_case "pull fails" 7 0
@@ -152,6 +182,11 @@ echo "$OUT" | grep -q "^::warning::conan-cache MISS" \
   || fail "case 2: expected the ::warning:: MISS annotation (anchored — restore-conan-cache.sh:65's plain log line also contains the unanchored substring)"
 echo "$OUT" | grep -q "^conan-cache: oras: " \
   || fail "case 2: expected the retained ORAS stderr to be echoed (prefixed 'conan-cache: oras: ')"
+echo "$OUT" | grep -q "falls back to normal Conan resolution" \
+  || fail "case 2: expected the context-free resolution wording"
+if echo "$OUT" | grep -q "rebuilds its Conan deps from source"; then
+  fail "case 2: must NOT claim every MISS rebuilds Conan deps from source"
+fi
 
 # ── Case 3: full HIT ─────────────────────────────────────────────────────────
 run_case "full hit" 0 0
