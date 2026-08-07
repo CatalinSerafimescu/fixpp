@@ -74,7 +74,7 @@ inline asio::awaitable<void> await_deadline(asio::steady_timer& timer) {
 // least one frame_view.
 //
 // [FR-014; E-2; data-model "Bounded first-frame read"]
-inline asio::awaitable<fixpp::core::expected_t<std::size_t>> read_first_frame_bounded(
+[[nodiscard]] inline asio::awaitable<fixpp::core::expected_t<std::size_t>> read_first_frame_bounded(
     fixpp::transport::Transport& transport, std::vector<std::byte>& buf,
     std::chrono::milliseconds deadline, std::size_t max_bytes) {
     using fixpp::core::error;
