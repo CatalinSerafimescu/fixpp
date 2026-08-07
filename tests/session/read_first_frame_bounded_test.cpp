@@ -748,3 +748,49 @@ TEST(ReadFirstFrameBounded, T2a) {
         << "T2a (SC-015): expected a cancellation-attributable outcome (transport_read_"
         << "cancelled or transport_handshake_timeout), got " << describe(*result);
 }
+
+// ── COVERAGE CELL — framer-error propagation (Article IX §1) ─────────────────
+// NOT one of the 13 mutation-proven witness cells and deliberately not named
+// like one. Added at /speckit-verify to close a genuine uncovered error path:
+// the `co_return std::unexpected(feed_r.error())` arm was the only 088-owned
+// uncovered line in read_first_frame_bounded.hpp, and Article IX §1 makes an
+// error return "genuine by default" — it must be TESTED, not waived.
+//
+// Construction: a payload that does not begin "8=" makes Framer::parse_frame
+// reject with wire_framing_resync (src/wire/framer.cpp:79/:85) rather than
+// merely carrying the bytes forward. It is kept far below the budget so the
+// step-5 budget check cannot fire first — this cell must exercise the FRAMER
+// arm specifically, not the budget arm that B1-B4 already cover.
+TEST(ReadFirstFrameBounded, CovFramerErrorPropagates) {
+    constexpr std::size_t kMaxBytes = 4096;
+    constexpr auto kDeadline = std::chrono::milliseconds{50};
+
+    std::string const junk =
+        "NOT-A-FIX-FRAME\x01"
+        "more-junk\x01";
+    ASSERT_LT(junk.size(), kMaxBytes) << "must stay under budget so the framer arm is what fires";
+
+    Script s;
+    s.inbound_bytes = to_bytes(junk);
+    s.read_latency = std::chrono::milliseconds{1};
+
+    asio::io_context ioc;
+    mock_transport mt{ioc.get_executor(), std::move(s)};
+    std::vector<std::byte> buf;
+
+    auto fut = asio::co_spawn(ioc, read_first_frame_bounded(mt, buf, kDeadline, kMaxBytes),
+                              asio::use_future);
+    ioc.run();
+    expected_t<std::size_t> const result = fut.get();
+
+    ASSERT_FALSE(result.has_value())
+        << "coverage cell: a non-FIX payload must surface the framer's error, got "
+        << describe(result);
+    EXPECT_EQ(result.error(), error::wire_framing_resync)
+        << "coverage cell: expected the framer's own error to PROPAGATE VERBATIM "
+           "(read_first_frame_bounded.hpp's feed-error arm), got "
+        << describe(result);
+    EXPECT_LT(buf.size(), kMaxBytes)
+        << "coverage cell: the budget arm must NOT be what fired — buf stayed well under "
+        << kMaxBytes << ", so this is the framer arm.";
+}
