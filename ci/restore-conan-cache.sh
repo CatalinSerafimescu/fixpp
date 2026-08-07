@@ -53,7 +53,7 @@ if oras pull "$IMAGE:$TAG" -o "$WORK" >/dev/null 2>"$WORK/oras.err"; then
     # `conan install --build=missing` + seed-conan-cache.sh path can repack it
     # regardless, so this is a strict improvement over never replacing the tag
     # at all.
-    echo "::warning::conan-cache ${TAG} DOWNLOADED BUT NOT RESTORABLE — the published archive is unusable (truncated, corrupt, or incompatible). Treating as a MISS so emitting hit=false allows an eligible push:main / dispatch-on-main publisher to attempt reseeding; a HIT here would leave the bad artifact published indefinitely."
+    echo "::warning::conan-cache ${TAG} DOWNLOADED BUT NOT RESTORABLE — the archive downloaded but could not be restored; inspect the Conan error above. Possible causes include an invalid archive or a local cache/filesystem failure. Treating as a MISS so emitting hit=false allows an eligible push:main / dispatch-on-main publisher to attempt reseeding; a HIT here would leave the bad artifact published indefinitely."
     echo "conan-cache MISS $TAG (unrestorable archive) → falling back to --build=missing"
     emit false
   fi
