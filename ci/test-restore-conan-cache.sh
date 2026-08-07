@@ -29,28 +29,69 @@ fail() { echo "FAIL: $1" >&2; exit 1; }
 shim_dir="$(mktemp -d)"
 trap 'rm -rf "$shim_dir"' EXIT
 
-# Fake oras: only `oras pull ...` is exercised by restore-conan-cache.sh.
+# Fake oras: validates argv (`pull ... -o <dir>`) and, on a simulated
+# success, actually WRITES the archive under whichever <dir> it was told
+# (not necessarily $WORK) — that is what lets mutant C (a wrong `-o` target
+# in the real script) surface: conan then finds nothing at the expected
+# path. Any argv this shim does not recognise, or a write it cannot
+# perform, prints SHIM-VIOLATION and exits 2 rather than silently
+# succeeding for the wrong reason.
 # Exit code controlled by FAKE_ORAS_EXIT (default 0 = pull succeeds).
 cat > "$shim_dir/oras" <<'SHIM'
 #!/usr/bin/env bash
-if [ "${1:-}" = "pull" ]; then
-  if [ "${FAKE_ORAS_EXIT:-0}" != "0" ]; then
-    echo "Error: unexpected status: 404 Not Found" >&2
-  fi
+if [ "${1:-}" != "pull" ]; then
+  echo "SHIM-VIOLATION: oras $*" >&2
+  exit 2
+fi
+shift
+dir="" prev=""
+for a in "$@"; do
+  [ "$prev" = "-o" ] && dir="$a"
+  prev="$a"
+done
+if [ -z "$dir" ]; then
+  echo "SHIM-VIOLATION: oras $*" >&2
+  exit 2
+fi
+if [ "${FAKE_ORAS_EXIT:-0}" != "0" ]; then
+  echo "Error: unexpected status: 404 Not Found" >&2
   exit "${FAKE_ORAS_EXIT:-0}"
+fi
+if ! mkdir -p "$dir" || ! printf 'fake conan cache archive\n' > "$dir/conan-${FAKE_PROFILE}.tgz" 2>/dev/null; then
+  echo "SHIM-VIOLATION: oras could not write $dir/conan-${FAKE_PROFILE}.tgz" >&2
+  exit 2
 fi
 exit 0
 SHIM
 chmod +x "$shim_dir/oras"
 
-# Fake conan: only `conan cache restore <path>` is exercised.
+# Fake conan: validates argv (`cache restore <path>`) AND requires the given
+# path to exist with basename conan-$FAKE_PROFILE.tgz — this is what lets
+# mutant B (a wrong archive name in the real script) and mutant C (oras
+# wrote the archive somewhere else) surface as a contract violation instead
+# of silently coinciding with an expected exit code.
 # Exit code controlled by FAKE_CONAN_EXIT (default 0 = restore succeeds).
 cat > "$shim_dir/conan" <<'SHIM'
 #!/usr/bin/env bash
 if [ "${1:-}" = "cache" ] && [ "${2:-}" = "restore" ]; then
+  path="${3:-}"
+  if [ -z "$path" ]; then
+    echo "SHIM-VIOLATION: conan cache restore <missing archive argument>" >&2
+    exit 2
+  fi
+  if [ ! -f "$path" ]; then
+    echo "SHIM-VIOLATION: conan cache restore $path (archive does not exist)" >&2
+    exit 2
+  fi
+  base="$(basename "$path")"
+  if [ "$base" != "conan-${FAKE_PROFILE}.tgz" ]; then
+    echo "SHIM-VIOLATION: conan cache restore $path (unexpected basename: $base, expected conan-${FAKE_PROFILE}.tgz)" >&2
+    exit 2
+  fi
   exit "${FAKE_CONAN_EXIT:-0}"
 fi
-exit 0
+echo "SHIM-VIOLATION: conan $*" >&2
+exit 2
 SHIM
 chmod +x "$shim_dir/conan"
 
@@ -70,6 +111,7 @@ run_case() {
     PATH="$shim_dir:$PATH" \
     FAKE_ORAS_EXIT="$oras_exit" \
     FAKE_CONAN_EXIT="$conan_exit" \
+    FAKE_PROFILE="$PROFILE" \
     GITHUB_OUTPUT="$gh_output" \
     bash "$SCRIPT" "$PROFILE" ) > "$out_file" 2>&1 || status=$?
 
@@ -81,6 +123,15 @@ run_case() {
   echo "── case: $label ──"
   echo "$OUT" | sed 's/^/  /'
   echo "  [exit=$STATUS hit=${HIT:-<unset>}]"
+
+  # The shims validate argv AND the archive handoff between oras and conan;
+  # a violation must always fail the case it occurred in, never coincide
+  # silently with an expected exit code (e.g. mutant B's wrong archive name
+  # makes the fake conan exit nonzero for the WRONG reason on case 1, which
+  # already expects a nonzero conan exit).
+  if echo "$OUT" | grep -q "SHIM-VIOLATION"; then
+    fail "$label: the script under test violated a shim's argv/file contract — see output above"
+  fi
 }
 
 # ── Case 1: pulled, but the archive is not restorable ──────────────────────
@@ -97,7 +148,8 @@ echo "$OUT" | grep -qi "DOWNLOADED BUT NOT RESTORABLE" \
 run_case "pull fails" 7 0
 [ "$STATUS" -eq 0 ] || fail "case 2: expected exit 0, got $STATUS"
 [ "$HIT" = "false" ] || fail "case 2: expected hit=false, got '${HIT:-<unset>}'"
-echo "$OUT" | grep -q "conan-cache MISS" || fail "case 2: expected a MISS annotation"
+echo "$OUT" | grep -q "^::warning::conan-cache MISS" \
+  || fail "case 2: expected the ::warning:: MISS annotation (anchored — restore-conan-cache.sh:65's plain log line also contains the unanchored substring)"
 echo "$OUT" | grep -q "^conan-cache: oras: " \
   || fail "case 2: expected the retained ORAS stderr to be echoed (prefixed 'conan-cache: oras: ')"
 
