@@ -452,8 +452,18 @@ jobs:
       # push the just-rebuilt cache to GHCR so the next run hits. seed packs ONLY
       # the current graph's package_ids (conan cache save --list) → never stale
       # packages. Best-effort (continue-on-error); never on PRs (untrusted write).
-      - name: Save Conan cache to GHCR (push:main + miss only)
-        if: github.event_name == 'push' && steps.conan_restore.outputs.hit == 'false'
+      #
+      # `|| workflow_dispatch` (#222): tier2.yml has always accepted a manual
+      # dispatch as the reseed lever and documents it as a deliberate design
+      # choice; tier1 and tier3 gated on `push` alone, with no stated reason for
+      # the asymmetry. A dispatch here therefore restored, missed, rebuilt — and
+      # published NOTHING, so the only reseed lever on these tiers was a push to
+      # main. restore-conan-cache.sh's MISS annotation is shared by all seven
+      # call sites and now tells the reader to "dispatch this workflow on main to
+      # reseed"; making the gate uniform is what makes that sentence true here,
+      # rather than teaching one diagnostic to describe a per-tier special case.
+      - name: Save Conan cache to GHCR (push:main or dispatch + miss only)
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && steps.conan_restore.outputs.hit == 'false'
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # for prune's `gh api` (delete stale tags)
@@ -544,6 +554,80 @@ jobs:
       - name: Test (minimal tier — packaging gated on linux-gcc-release)
         if: matrix.preset != 'linux-gcc-release'
         run: ctest --preset ${{ matrix.preset }} --output-on-failure -LE packaging
+
+      # ── #229: the LAST unmet criterion before `ctest --parallel` can widen ───
+      #
+      # `execution: {jobs: 2}` is set on the linux-clang-tsan TEST PRESET ONLY
+      # (CMakePresets.json). It has measured 1937 / 1946 / 1851 s across three
+      # runs — two of them post-merge push:main — against a 3319 s serial mean,
+      # all green at 346/346. That discharges every acceptance criterion in
+      # ci/ctest-parallelism-probe.md except one: peak memory was to be CAPTURED,
+      # not assumed. Two concurrent TSan processes on a 4 vCPU / 16 GB runner is
+      # a SUSPECTED constraint, and it is the only thing still blocking the
+      # largest single CI lever available (~236 min aggregate modelled at -j4).
+      #
+      # WHAT THIS NUMBER IS: cgroup v2 `memory.peak` is the JOB-WIDE high-water
+      # mark, so it also covers Build, which is itself memory-hungry. Resetting
+      # it before the test step would isolate the test phase, but the runner user
+      # cannot write the cgroup file. So this is deliberately reported as a
+      # job-wide CEILING: comfortably under the runner's total ⇒ the constraint
+      # is discharged whatever caused the peak, and only a figure NEAR the limit
+      # would force separating Build from Test.
+      #
+      # NEVER FAILS THE LANE — it is a measurement, not a gate. But a measurement
+      # that cannot be taken must SAY SO: an unreadable cgroup file emits a
+      # warning rather than an empty summary, so "no number" can never be read as
+      # "captured, and it was fine"
+      # (feedback_silent_empty_recurred_three_times_including_inside_its_own_fix).
+      - name: Capture peak memory (ctest --parallel evidence, #229)
+        if: always() && matrix.preset == 'linux-clang-tsan'
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          peak=""
+          src=""
+          for f in /sys/fs/cgroup/memory.peak \
+                   /sys/fs/cgroup/memory/memory.max_usage_in_bytes; do
+            if [ -r "$f" ]; then
+              peak="$(cat "$f" 2>/dev/null || true)"
+              src="$f"
+              [ -n "$peak" ] && break
+            fi
+          done
+          total_kb="$(awk '/^MemTotal:/{print $2}' /proc/meminfo 2>/dev/null || true)"
+
+          if [ -z "$peak" ] || ! [ "$peak" -eq "$peak" ] 2>/dev/null; then
+            echo "::warning::#229 peak-memory probe FAILED — no readable cgroup peak (tried /sys/fs/cgroup/memory.peak and the v1 fallback). The ctest --parallel memory criterion remains UNMEASURED; do not read this run as evidence."
+            {
+              echo "### Peak memory (#229) — NOT MEASURED"
+              echo
+              echo "No readable cgroup peak file. The \`--parallel\` widening criterion is still open."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          peak_gib="$(awk -v b="$peak" 'BEGIN{printf "%.2f", b/1073741824}')"
+          total_gib="$(awk -v k="${total_kb:-0}" 'BEGIN{printf "%.2f", k/1048576}')"
+          pct="n/a"
+          if [ -n "${total_kb:-}" ] && [ "${total_kb:-0}" -gt 0 ]; then
+            pct="$(awk -v b="$peak" -v k="$total_kb" 'BEGIN{printf "%.1f%%", (b/1024)/k*100}')"
+          fi
+
+          echo "peak=${peak} bytes (${peak_gib} GiB) of ${total_gib} GiB — ${pct} [source: ${src}]"
+          {
+            echo "### Peak memory — \`ctest --parallel\` evidence (#229)"
+            echo
+            echo "| metric | value |"
+            echo "|---|---|"
+            echo "| ctest jobs | 2 (\`linux-clang-tsan\` test preset only) |"
+            echo "| peak (job-wide) | **${peak_gib} GiB** |"
+            echo "| runner MemTotal | ${total_gib} GiB |"
+            echo "| utilisation | ${pct} |"
+            echo "| source | \`${src}\` |"
+            echo
+            echo "Job-wide high-water mark, so it includes \`Build\`; the runner user cannot"
+            echo "reset \`memory.peak\`, so treat this as a **ceiling** for the test phase."
+          } >> "$GITHUB_STEP_SUMMARY"
 
       # rpmbuild is NOT on ubuntu-24.04 and packaging::contents drives the
       # default generator list (DEB;RPM;TGZ), so without this the lane fails on
@@ -726,8 +810,9 @@ jobs:
             --build=missing \
             -of build/linux-clang-coverage
 
-      - name: Save Conan cache to GHCR (push:main + miss only)
-        if: github.event_name == 'push' && steps.conan_restore.outputs.hit == 'false'
+      # `|| workflow_dispatch` — see the matrix job's save step for why (#222).
+      - name: Save Conan cache to GHCR (push:main or dispatch + miss only)
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && steps.conan_restore.outputs.hit == 'false'
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

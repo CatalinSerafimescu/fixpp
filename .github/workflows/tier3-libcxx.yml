@@ -298,8 +298,13 @@ jobs:
 
       # Self-populate on push:main after a MISS — packs ONLY the current graph
       # (with the SAME with_otel=False option) → never stale packages. Best-effort.
-      - name: Save Conan cache to GHCR (push:main + miss only)
-        if: github.event_name == 'push' && steps.conan_restore.outputs.hit == 'false'
+      #
+      # `|| workflow_dispatch` — see tier1.yml's matrix save step for why (#222).
+      # Without it a manual dispatch on this tier restored, missed, rebuilt and
+      # published nothing, so the shared MISS annotation's "dispatch to reseed"
+      # advice was true on tier2 only.
+      - name: Save Conan cache to GHCR (push:main or dispatch + miss only)
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && steps.conan_restore.outputs.hit == 'false'
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # for prune's `gh api` (delete stale tags)

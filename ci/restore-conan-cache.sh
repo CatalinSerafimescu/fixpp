@@ -32,6 +32,11 @@ fi
 TAG="$CONAN_CACHE_TAG"
 [ -n "$CONAN_CACHE_TOOLSET" ] && echo "conan-cache: MSVC toolset $CONAN_CACHE_TOOLSET folded into the key"
 
+# Printed on BOTH the hit and the miss path, deliberately. The whole point is to
+# diff a MISSing run against a HITting one to see which input moved, and that is
+# impossible if only the failing side prints its inputs.
+echo "conan-cache: key inputs — $CONAN_CACHE_INPUTS"
+
 WORK="$(mktemp -d)"
 if oras pull "$IMAGE:$TAG" -o "$WORK" >/dev/null 2>&1; then
   conan cache restore "$(winpath "$WORK/conan-$PROFILE.tgz")"
@@ -44,14 +49,35 @@ else
   # cache (gated on hit=false) so the next run hits.
   echo "conan-cache MISS $TAG  → falling back to --build=missing"
 
-  # An MSVC miss is LOUD, because it is self-inflicted and it does not
-  # self-clear on a PR. Seeding is gated to push:main and workflow_dispatch, so
-  # after a GitHub image bump changes the toolset, EVERY tier2 PR leg rebuilds
-  # the whole OTel/protobuf/abseil chain from source, over and over, until a
-  # maintainer dispatches a reseed. Without this the only symptom is one quiet
-  # log line and a lane that got slow for no visible reason.
+  # ── WHY THIS ANNOTATION FIRES ON EVERY LANE, NOT JUST MSVC (#222) ─────────
+  #
+  # It used to be wrapped in `if [ -n "$CONAN_CACHE_TOOLSET" ]`, i.e. MSVC only.
+  # But conan_cache_key hashes the PROFILE FILE on every platform, so a
+  # `conan/profiles/**` touch misses everywhere at once — Tier 1 and Tier 3 just
+  # said so at `echo` level. The real cost of such a touch is "every lane in all
+  # three tiers rebuilds its Conan deps from source", and the log made that
+  # visible on two legs out of fourteen.
+  #
+  # MSVC still gets a louder sentence — but in the TEXT, not in whether the
+  # annotation exists at all.
+  #
+  # The old message named exactly one cause (the VS image bumped) and prescribed
+  # a remediation that is a NO-OP for the common one: on a feature branch that
+  # touched the profiles, "dispatch on main to republish" republishes MAIN's key,
+  # which this branch can never match. Seeding is gated to push / dispatch, so a
+  # feature-branch key is UNSEEDABLE BY DESIGN until merge — and harmless: it
+  # self-heals on the first push:main afterwards. Prescribing an action for a
+  # situation needing none is what taught readers to ignore this warning.
+  msvc_note=""
   if [ -n "${CONAN_CACHE_TOOLSET:-}" ]; then
-    echo "::warning::No GHCR Conan cache for MSVC toolset ${CONAN_CACHE_TOOLSET} (tag ${TAG}). Every PR leg will rebuild the OTel chain from source until this is reseeded — dispatch tier2.yml on main to republish."
+    msvc_note="%0A ⚠ MSVC payload is the OTel/protobuf/abseil chain, so this leg is the expensive one to miss."
   fi
+
+  # %0A, not literal newlines: GitHub truncates an annotation at the first line.
+  echo "::warning::conan-cache MISS ${TAG} — this leg rebuilds its Conan deps from source.%0A\
+Tag = sha256(conanfile.py + conan/profiles/${PROFILE}[ + MSVC toolset])[0:16], so a MISS means one of those inputs differs from what is published on GHCR.%0A\
+This run's inputs: ${CONAN_CACHE_INPUTS}%0A\
+ • This branch touched conanfile.py or conan/profiles/** → EXPECTED, no action. Packages are seeded only on push:main / workflow_dispatch, so a feature-branch key cannot exist yet; it publishes automatically on the first push:main after merge.%0A\
+ • Neither input changed on this branch → the runner's toolchain moved (toolset ${CONAN_CACHE_TOOLSET:-n/a}) and main's published package is stale → dispatch this workflow on main to reseed.${msvc_note}"
   emit false
 fi

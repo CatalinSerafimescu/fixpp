@@ -26,7 +26,8 @@ winpath() {
 
 # conan_cache_key <profile>
 #
-# Sets: CONAN_CACHE_KEY, CONAN_CACHE_TAG, CONAN_CACHE_TOOLSET ("" off MSVC).
+# Sets: CONAN_CACHE_KEY, CONAN_CACHE_TAG, CONAN_CACHE_TOOLSET ("" off MSVC),
+#       CONAN_CACHE_INPUTS (human-readable per-input digests; see below).
 # Returns 1 if an MSVC profile's toolset cannot be identified — see below.
 conan_cache_key() {
   local profile="$1"
@@ -98,4 +99,30 @@ conan_cache_key() {
   # prune-conan-cache.sh's `^<profile>-[0-9a-f]{16}$` pattern still matches MSVC
   # tags; it is recorded as an OCI annotation and logged for inspection.
   CONAN_CACHE_TAG="${profile//+/x}-${CONAN_CACHE_KEY}"
+
+  # ── PER-INPUT DIGESTS — what makes a MISS self-diagnosing (#222) ───────────
+  #
+  # The tag says a key MOVED; it cannot say WHICH of the three inputs moved.
+  # That gap is what #222 is about: the old warning named one cause (the VS
+  # image bumped) but fired on every MSVC miss, so in the common case its advice
+  # was wrong — which trains readers to ignore the annotation entirely.
+  #
+  # The common case is a `conan/profiles/**` touch: PR #219 added 13 lines to
+  # all 15 profiles, which moved the key on EVERY lane in all three tiers at
+  # once, with conanfile.py untouched. Publishing a digest per input turns
+  # diagnosing that into a one-line diff between two runs' logs.
+  #
+  # Computed here rather than in the caller so seed and restore can never print
+  # digests derived differently from the key they describe — the same reason the
+  # key expression itself lives in this file.
+  #
+  # ⚠️ `tr -d '\r'` PER FILE, matching the key expression above. Without it a
+  # CRLF Windows checkout reports different per-input digests from an LF Linux
+  # one for byte-identical content — i.e. the diagnostic would accuse a file
+  # that never moved, while the tags legitimately agree. A confidently wrong
+  # instrument is worse than no instrument.
+  local digest_conanfile digest_profile
+  digest_conanfile="$(tr -d '\r' < conanfile.py | sha256sum | cut -c1-8)"
+  digest_profile="$(tr -d '\r' < "conan/profiles/$profile" | sha256sum | cut -c1-8)"
+  CONAN_CACHE_INPUTS="conanfile.py ${digest_conanfile}  conan/profiles/${profile} ${digest_profile}  toolset ${toolset:-—}"
 }
