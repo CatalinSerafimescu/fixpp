@@ -23,6 +23,7 @@
 #include <cassert>
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/session/engine.hpp>
@@ -778,6 +779,10 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
         // below) is not itself budget-checked here — it is handed to the
         // read-pump (F-015-002).
         constexpr std::size_t kFirstFrameMaxBytes = 4096;
+        // Contract P3 (contracts/read_first_frame_bounded.md): 1 <= max_bytes <
+        // SIZE_MAX — the upper bound keeps max_bytes + 1 representable
+        // (read_first_frame_bounded.hpp:105,113 both wrap at SIZE_MAX otherwise).
+        static_assert(kFirstFrameMaxBytes >= 1 && kFirstFrameMaxBytes < SIZE_MAX);
         constexpr auto kFirstFrameDeadline = std::chrono::milliseconds{5000};
 
         std::vector<std::byte> frame_buf;
