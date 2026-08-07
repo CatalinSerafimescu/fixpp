@@ -43,8 +43,24 @@ command -v gh >/dev/null 2>&1 || { echo "prune: gh not found — skipping"; exit
 #  - a TAGGED version is deleted only when EVERY one of its tags is a
 #    this-preset sccache tag AND none of them is $CURRENT_TAG. A version sharing
 #    a tag with anything else is left alone.
+# List and parse as SEPARATE steps. Piping the api straight into jq with
+# `2>/dev/null` makes a failed call indistinguishable from a clean package: both
+# yield an empty DEAD, the loop below prints nothing, and the caller records
+# `pending=0`. MEASURED on run 31121588649 — this step printed not one line on
+# either seeded leg while the package was in fact carrying two orphaned
+# multi-GB versions, which a local run of this same script then deleted. A
+# reclaim path that reports "nothing to do" when it could not even ask is worse
+# than one that reports a backlog.
+if ! VERSIONS=$(gh api --paginate "/user/packages/container/$PKG/versions" 2>&1); then
+  echo "prune: PENDING ? — could not LIST $PKG versions; nothing was examined, let alone deleted"
+  # gh prints a one-line diagnosis AND a pretty-printed JSON body; the first
+  # line is often just `{`, so collapse and truncate rather than head -1.
+  echo "prune: (api said) $(printf '%s' "$VERSIONS" | tr -s '\n\r\t ' ' ' | cut -c1-200)"
+  exit 0
+fi
+
 mapfile -t DEAD < <(
-  gh api --paginate "/user/packages/container/$PKG/versions" 2>/dev/null \
+  printf '%s' "$VERSIONS" \
   | jq -r --arg p "$PRESET" --arg cur "$CURRENT_TAG" '
       .[]
       | . as $v
@@ -53,7 +69,7 @@ mapfile -t DEAD < <(
       | ([ $tags[] | startswith("sccache-\($p)-") ] | all) as $mine
       | (($tags | index($cur)) != null)                    as $is_current
       | select($untagged or ($mine and ($is_current | not)))
-      | "\($v.id)\t\(if $untagged then "<untagged>" else ($tags | join(",")) end)"' 2>/dev/null
+      | "\($v.id)\t\(if $untagged then "<untagged>" else ($tags | join(",")) end)"'
 )
 
 deleted=0 pending=0

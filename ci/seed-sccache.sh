@@ -84,8 +84,11 @@ note "sccache-cache SEEDED \`$TAG\`"
 # rolling tag means every republish orphans a multi-GB untagged version, so the
 # backlog is surfaced into the job summary rather than left to accumulate
 # silently. Full evidence in ci/prune-sccache.sh's header.
-pending=$("$(dirname "$0")/prune-sccache.sh" "$PRESET" "$TAG" | tee /dev/stderr | sed -n 's/^prune: PENDING \([0-9]*\).*/\1/p')
-if [ -n "${pending:-}" ] && [ "$pending" -gt 0 ]; then
-  note "sccache-cache: **$pending dead version(s) could not be reclaimed** from CI (token lacks \`delete:packages\`). Run \`ci/prune-sccache.sh $PRESET $TAG\` locally."
+# Match the marker WITHOUT requiring a count: prune emits `PENDING ?` when it
+# could not even list the package, and that is the loudest case, not one to drop
+# on a failed [0-9]+ parse.
+pending=$("$(dirname "$0")/prune-sccache.sh" "$PRESET" "$TAG" | tee /dev/stderr | sed -n 's/^prune: PENDING \(.*\)$/\1/p' | head -1)
+if [ -n "${pending:-}" ]; then
+  note "sccache-cache: **dead version(s) could not be reclaimed** from CI — \`$pending\`. Run \`ci/prune-sccache.sh $PRESET $TAG\` locally with a \`delete:packages\` token."
 fi
 exit 0

@@ -33,11 +33,12 @@ build time by tens of percent; it does not move a hit rate from 0 % to 100 %.
 
 ## MEASURED — cold run, 2026-08-06
 
-Dispatched on `ci/231-tier2-sccache`. ⚠️ **All three legs were cancelled externally** during a
-window that also took the longest-running job out of Tier 1, Tier 2 and Tier 3 on `main` — cause
-under separate investigation, unrelated to this change and not something this file should guess at.
-The cancellations landed in the **`ctest`** phase on two of three legs, i.e. **after** Build, stats
-and seed, so the compiler-cache evidence survived intact.
+Dispatched on `ci/231-tier2-sccache`. ⚠️ **Two of the three legs were cancelled externally**
+(`windows-msvc-debug` in `ctest`, `windows-msvc-asan` mid-`Build`; `windows-msvc-release` finished
+green) during a window that also took the longest-running job out of Tier 1, Tier 2 and Tier 3 on
+`main` — cause under separate investigation, unrelated to this change and not something this file
+should guess at. The debug cancellation landed **after** Build, stats and seed, so the
+compiler-cache evidence survived intact on two legs.
 
 | leg | AC3 gate | restore | compile requests | hits | **non-cacheable** | **failures** | seeded |
 |---|---|---|---:|---:|---:|---:|---|
@@ -315,9 +316,31 @@ Handling, since it cannot be fixed from inside the workflow:
   wiring is inert until the secret exists.
 - `ci/prune-sccache.sh <preset> <current-tag>` is **standalone**, so a backlog can also be reclaimed
   by hand with `GH_TOKEN=<pat>`. `DRY_RUN=1` lists without deleting.
-- `seed-sccache.sh` counts the refusals and writes **"N dead version(s) could not be reclaimed"**
+- `seed-sccache.sh` counts the refusals and writes **"dead version(s) could not be reclaimed"**
   into the job summary. The previous shape logged `delete FAILED (non-fatal)` per version, which is
   exactly the sort of line that let the sibling package double its MSVC tag count unnoticed.
+
+#### ⚠️ The 2026-08-07 finding: reporting *nothing* is the worse failure
+
+The warm run was the **first republish over an existing tag**, so it was the first exercise of the
+prune path — and on both seeded legs the step printed **not one line**. Not `deleted`, not
+`PENDING`, not `jq not found`. The job summary therefore carried no backlog note, which reads as a
+clean package. It was not: `fixpp-sccache` was holding **two orphaned untagged versions** (~1.3 GB),
+and running the *same script* locally deleted both immediately.
+
+The cause was structural, not a token problem. The listing was piped straight into `jq` with
+`2>/dev/null`, so a failed `gh api` and a genuinely clean package produce the **same** empty result —
+and the caller then recorded `pending=0`. A reclaim path that says "nothing to do" when it could not
+even ask is worse than one that reports a backlog, because the second is visible.
+
+Fixed by listing and parsing as separate steps: a failed list now emits
+`prune: PENDING ? — could not LIST … nothing was examined, let alone deleted` plus the API's own
+message, and `seed-sccache.sh` matches the `PENDING` marker **without requiring a numeric count** (a
+`[0-9]*` parse silently dropped exactly the loudest case). Proven non-vacuous — with a deliberately
+bad `GH_TOKEN` the path fires with `Bad credentials (HTTP 401)`; with a real token on a clean package
+it stays silent.
+
+Package state after the manual reclaim: **3 tags, 0 untagged.**
 
 The same `GH_TOKEN` change is applied to the **Conan** seed step in `tier2.yml`. That is not
 scope creep for its own sake: `fixpp-conan-cache` is the package where the defect is *proven*, it is
