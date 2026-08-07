@@ -587,7 +587,12 @@ jobs:
         if: always() && matrix.preset == 'linux-clang-tsan'
         continue-on-error: true
         env:
-          TEST_OUTCOME: ${{ steps.tsan_test.outcome }}
+          # `|| 'unavailable'`: GitHub's steps context is documented to report
+          # `skipped` for a step that never ran, but default rather than trust
+          # an empty interpolation — a blank cell would defeat the "Test
+          # outcome is on the page regardless of which branch rendered it"
+          # requirement this step exists to satisfy.
+          TEST_OUTCOME: ${{ steps.tsan_test.outcome || 'unavailable' }}
         run: |
           set -uo pipefail
           peak=""
@@ -859,7 +864,8 @@ jobs:
             --build=missing \
             -of build/linux-clang-coverage
 
-      # `|| workflow_dispatch` — see the matrix job's save step for why (#222).
+      # `|| (workflow_dispatch on main)` — see the matrix job's save step for
+      # why (#222).
       - name: Save Conan cache to GHCR (push:main / dispatch on main + miss only)
         if: (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')) && steps.conan_restore.outputs.hit == 'false'
         continue-on-error: true

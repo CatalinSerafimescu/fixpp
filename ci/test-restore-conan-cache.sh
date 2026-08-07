@@ -34,6 +34,9 @@ trap 'rm -rf "$shim_dir"' EXIT
 cat > "$shim_dir/oras" <<'SHIM'
 #!/usr/bin/env bash
 if [ "${1:-}" = "pull" ]; then
+  if [ "${FAKE_ORAS_EXIT:-0}" != "0" ]; then
+    echo "Error: unexpected status: 404 Not Found" >&2
+  fi
   exit "${FAKE_ORAS_EXIT:-0}"
 fi
 exit 0
@@ -95,6 +98,8 @@ run_case "pull fails" 7 0
 [ "$STATUS" -eq 0 ] || fail "case 2: expected exit 0, got $STATUS"
 [ "$HIT" = "false" ] || fail "case 2: expected hit=false, got '${HIT:-<unset>}'"
 echo "$OUT" | grep -q "conan-cache MISS" || fail "case 2: expected a MISS annotation"
+echo "$OUT" | grep -q "^conan-cache: oras: " \
+  || fail "case 2: expected the retained ORAS stderr to be echoed (prefixed 'conan-cache: oras: ')"
 
 # ── Case 3: full HIT ─────────────────────────────────────────────────────────
 run_case "full hit" 0 0

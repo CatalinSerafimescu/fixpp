@@ -29,8 +29,10 @@ model is not drifting as samples accumulate.
 ### Two further post-merge `push:main` runs — different basis, both correct
 
 Runs `30908214440` (1946 s) and `30938621205` (1851 s), alongside the shared run `30881578522`
-(1937 s), are recorded in `tier1.yml`'s own #229 comment history. **These are NOT the same
-measurement as the table above and are not merged into it.** The table above is ctest's own
+(1937 s), were previously carried in `tier1.yml`'s #229 comment as a second, uncited record of this
+measurement; that comment now points here instead (PR #245 Gate B RC#4), and this section is where
+the figures live going forward. **These are NOT the same measurement as the table above and are not
+merged into it.** The table above is ctest's own
 `Total Test time (real)` (the `:14` block); these three are the Actions **Test-step wall-clock**
 duration, which additionally includes step setup/teardown overhead around the `ctest` invocation.
 Only `30881578522` is common to both sets, and there the two bases agree as expected — 1935.04 s of
