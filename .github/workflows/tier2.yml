@@ -508,10 +508,10 @@ jobs:
           else
             case "$cmdline" in
               *-Z7*|*/Z7*) echo "OK: /Z7 (embedded debug info)" ;;
-              *) echo "::error::/Z7 is NOT on the command line. sccache cannot cache a compile that writes a shared PDB, so this leg would report a near-zero hit rate with a large non-cacheable bucket."; fail=1 ;;
+              *) echo "::error::/Z7 is NOT on the command line. MEASURED: this does not degrade to a poor hit rate, it FAILS the build - cl reports C1041 (cannot open program database) even with /FS present, at Non-cacheable compilations 0. Do not go looking for a non-cacheable bucket; there will not be one."; fail=1 ;;
             esac
             case "$cmdline" in
-              *-Zi*|*/Zi*) echo "::error::/Zi is STILL on the command line alongside /Z7 — the shared-PDB write is what blocks caching, so this must not survive."; fail=1 ;;
+              *-Zi*|*/Zi*) echo "::error::/Zi is STILL on the command line alongside /Z7 - the shared-PDB write is what breaks parallel cached compiles (C1041), so this must not survive."; fail=1 ;;
               *) echo "OK: no /Zi" ;;
             esac
           fi

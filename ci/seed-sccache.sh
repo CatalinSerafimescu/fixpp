@@ -38,11 +38,29 @@ if ! sccache_cache_key "$PRESET"; then
 fi
 TAG="$SCCACHE_CACHE_TAG"
 
-# Stop the server BEFORE archiving. sccache writes entries through a background
-# daemon; tarring a live cache directory can capture a half-written entry or a
-# lock file, and a corrupt entry restored on a later run is a compile failure
-# rather than a miss. This is the one step that must not be skipped for speed.
-sccache --stop-server >/dev/null 2>&1 || true
+# The cache directory must be QUIESCENT before archiving. sccache writes entries
+# through a background daemon; tarring a live cache directory can capture a
+# half-written entry, and a corrupt entry restored on a later run is a compile
+# failure rather than a miss. This is the one prerequisite that must not be
+# skipped for speed — and it was previously asserted (`|| true`) rather than
+# verified, so a daemon that stayed alive still produced a `SEEDED` marker.
+#
+# ⚠️ Do NOT "fix" this by requiring exit 0. MEASURED with sccache 0.17.0:
+#
+#     no server running  → rc=2, "sccache: error: couldn't connect to server"
+#     server running     → rc=0
+#
+# and the caller's `sccache statistics` step (tier2.yml) has ALREADY stopped the
+# server by the time this runs. Treating non-zero as failure would redden every
+# seed on the normal path. Both "I stopped it" and "there was nothing to stop"
+# are the state we want; anything else is not.
+stop_out="$(sccache --stop-server 2>&1)"; stop_rc=$?
+case "$stop_rc:$stop_out" in
+  0:*|*:*"couldn't connect to server"*) : ;;   # stopped, or already quiescent
+  *)
+    note "::error::sccache-cache SEED FAILED for \`$TAG\` — could not confirm the sccache server is stopped (rc=$stop_rc), so $DIR_POSIX may still be written to. Refusing to archive a live cache directory."
+    exit 1 ;;
+esac
 
 [ -d "$DIR_POSIX" ] || { echo "seed: $DIR_POSIX does not exist — nothing to publish."; exit 0; }
 

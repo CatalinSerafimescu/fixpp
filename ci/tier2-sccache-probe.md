@@ -22,8 +22,10 @@
 All three legs **`success`**, including the full `ctest` phase — that is AC4 in full, which the
 cold run could not answer. `Build packages` ran green on `windows-msvc-release`.
 
-Restore + seed overhead is ~1 min on the worst leg against ~65–87 min saved, so the upload/download
-trade named in *Keep-or-revert* is settled decisively in favour of keeping.
+Restore + seed overhead is ~1 min on the worst leg against an observed `Build` delta of 65–87 min.
+That gap is two orders of magnitude, so the upload/download trade named in *Keep-or-revert* is
+settled in favour of keeping **even if a large share of the delta were host drift** — which is why
+this one conclusion survives the AC2 downgrade below while the ratios themselves do not.
 
 ### Why AC2 cannot be fully met here, and what is claimed instead
 
@@ -439,11 +441,21 @@ grep never shown to be non-zero is a broken instrument, not a clean sweep
 
 ## Keep-or-revert
 
-Keep only on a demonstrated hit rate on a warm re-run (AC2 + AC1 together). **Resolved: KEEP.** Both
-outcomes this section flagged as live were measured and neither materialised — `windows-msvc-release`
-was the *best* leg rather than the poor one (~13.8× observed), and restore+seed overhead is ~1 min against
-65–87 min saved per leg. Steady-state saving is **~2.5 h of Build per Tier 2 run** on the two seeded
-legs, rising to roughly 4 h once asan's cache is warm.
+Keep only on a demonstrated hit rate on a warm re-run (AC2 + AC1 together). **Resolved: KEEP**, and
+the keep rests on **AC1's hit rate**, which is controlled, not on the wall-clock ratios, which are
+not. Both outcomes this section flagged as live were measured and neither materialised:
+`windows-msvc-release` was the *best* leg rather than the poor one, and restore+seed overhead is
+~1 min — two orders of magnitude below the observed `Build` delta, so the storage trade holds under
+any plausible share of host drift.
+
+⚠️ **What this section deliberately does NOT claim.** The two cross-host runs differed by
+**≈2.5 h of `Build` across the two seeded legs**. That is an *observed delta between two runs*, not a
+measured steady-state saving — attributing all of it to the cache would re-import through the back
+door exactly the causal claim the AC2 downgrade above refuses. And there is **no ≈4 h figure**: asan
+has never been measured warm, so any all-three-legs number would be a projection, which this project
+has already been burned by once (`feedback_self_labelled_projection_still_cited_as_measured`, ~30×
+wrong). The honest statement is: *the cache serves 100 % of compiles, and the two observed runs
+differed by about 2.5 h.* Revisit after asan's first warm `push:main`.
 
 [#231]: https://github.com/CatalinSerafimescu/fixpp/issues/231
 [#229]: https://github.com/CatalinSerafimescu/fixpp/issues/229

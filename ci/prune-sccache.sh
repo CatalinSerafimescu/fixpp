@@ -70,15 +70,25 @@ command -v gh >/dev/null 2>&1 || { echo "prune: gh not found — skipping"; exit
 # multi-GB versions, which a local run of this same script then deleted. A
 # reclaim path that reports "nothing to do" when it could not even ask is worse
 # than one that reports a backlog.
-if ! VERSIONS=$(gh api --paginate "/user/packages/container/$PKG/versions" 2>&1); then
+if ! RAW=$(gh api --paginate "/user/packages/container/$PKG/versions?per_page=100" 2>&1); then
   echo "prune: PENDING ? — could not LIST $PKG versions; nothing was examined, let alone deleted"
   # gh prints a one-line diagnosis AND a pretty-printed JSON body; the first
   # line is often just `{`, so collapse and truncate rather than head -1.
-  echo "prune: (api said) $(printf '%s' "$VERSIONS" | tr -s '\n\r\t ' ' ' | cut -c1-200)"
+  echo "prune: (api said) $(printf '%s' "$RAW" | tr -s '\n\r\t ' ' ' | cut -c1-200)"
   exit 0
 fi
 
 bail() { echo "prune: PENDING ? — $1; nothing was deleted"; exit 0; }
+
+# FLATTEN THE PAGES. `gh api --paginate` emits each page as its own top-level
+# JSON array, not one merged array, and this endpoint pages at 30 by default.
+# The streaming `.[]` filter below tolerates that, but the two scalar guards do
+# NOT: they would emit one count per page ("0\n0"), every `[ "$x" = "0" ]`
+# comparison would fail, and the script would fail closed FOREVER the moment the
+# package exceeded one page — locking out the very cleanup that shrinks it.
+# `jq -s add` rather than `gh --slurp` so this does not depend on the gh version.
+VERSIONS=$(printf '%s' "$RAW" | jq -s 'add // []' 2>/dev/null)
+[ -n "$VERSIONS" ] || bail "could not parse the version list as JSON"
 
 # Guard 1: every version must carry a real tags array. No `// []` fallback.
 MALFORMED=$(printf '%s' "$VERSIONS" \

@@ -35,6 +35,24 @@ fi
 TAG="$SCCACHE_CACHE_TAG"
 echo "sccache-cache: toolset $SCCACHE_CACHE_TOOLSET folded into the tag"
 
+# The HIT path below does `rm -rf "$DIR_POSIX"`. Everything protecting that call
+# lives OUTSIDE this script — the workflow happens to set `C:\sccache`. Make the
+# guard local instead: a drive root converts to `/c` (or `/c/`), which
+# `rm --preserve-root` does NOT protect the way it protects `/`, so a one-line
+# workflow edit would recursively delete the runner's system drive. Require at
+# least two path components below the root before anything destructive runs.
+# `C:\sccache` → `/c/sccache`: two components, fine. `C:\` → `/c`: one, refused.
+DIR_TRIMMED="${DIR_POSIX%/}"
+case "$DIR_TRIMMED" in
+  */*/?*) : ;;   # at least two components AND a non-empty leaf
+  *)
+    echo "::error::SCCACHE_DIR=${SCCACHE_DIR} resolves to '${DIR_POSIX}', which is at or directly below a filesystem root. Refusing to run: this script removes that directory on a cache hit, and 'rm -rf /c' is not something --preserve-root stops."
+    exit 1 ;;
+esac
+case "$DIR_TRIMMED" in
+  *..*) echo "::error::SCCACHE_DIR=${SCCACHE_DIR} contains '..'; refusing to use an unnormalised path as a removable directory."; exit 1 ;;
+esac
+
 # STAGE sits beside SCCACHE_DIR, not under $WORK, so the swap-in below is a
 # rename on the same volume rather than a 1 GB copy across one.
 STAGE="${DIR_POSIX%/}.restore.$$"
