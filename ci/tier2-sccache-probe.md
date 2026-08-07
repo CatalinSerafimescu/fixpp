@@ -3,7 +3,9 @@
 **Status:** WIRED and **MEASURED, both halves.** Cold run [31114098100] (2026-08-06), warm run
 [31121588649] (2026-08-07, **all three legs green**). Issue [#231].
 
-> ✅ **KEEP.** Warm `Build` on the two seeded legs came back at a **100.00 % hit rate, 1456/1456,
+> ✅ **KEEP** — on the hit rate, which is controlled evidence, not on the wall-clock ratios, which
+> are not (*Keep-or-revert* states this as provisional; the two must not drift apart).
+> Warm `Build` on the two seeded legs came back at a **100.00 % hit rate, 1456/1456,
 > 0 cache errors**, with observed `Build` times of `windows-msvc-release` **93m52s → 6m47s** and
 > `windows-msvc-debug` **75m26s → 10m07s**. The hit rate is controlled evidence; the wall-clock
 > ratios are **observational** — see *Why AC2 cannot be fully met here*. `windows-msvc-asan` had never seeded (its cold Build was cancelled),

@@ -113,7 +113,12 @@ if [ -n "$CURRENT_TAG" ]; then
   [ "$KEEP" = "1" ] || bail "keep-tag '$CURRENT_TAG' matched ${KEEP:-?} versions, expected exactly 1"
 fi
 
-mapfile -t DEAD < <(
+# Status-checked like every other read here. An unchecked `mapfile < <(jq …)`
+# turns a jq failure into an empty DEAD, a loop that prints nothing and a
+# `pending=0` the caller reports as clean — the same silent-empty that let this
+# package accumulate 1.3 GB of orphans unnoticed. Guards 1 and 2 make a failure
+# here unlikely, not impossible.
+if ! DEADTXT=$(
   printf '%s' "$VERSIONS" \
   | jq -r --arg p "$PRESET" --arg cur "$CURRENT_TAG" '
       .[]
@@ -124,7 +129,10 @@ mapfile -t DEAD < <(
       | (($tags | index($cur)) != null)                    as $is_current
       | select(($is_current | not) and ($untagged or $mine))
       | "\($v.id)\t\(if $untagged then "<untagged>" else ($tags | join(",")) end)"'
-)
+); then
+  bail "could not classify the version list (jq failed)"
+fi
+mapfile -t DEAD <<< "$DEADTXT"
 
 deleted=0 pending=0
 for row in "${DEAD[@]:-}"; do

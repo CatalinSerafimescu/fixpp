@@ -73,21 +73,45 @@ esac
 # MEASURED on Windows: `tasklist` exits 0 whether or not anything matches, so
 # the discriminator is the OUTPUT, never the status — a version of this loop
 # keyed on the exit code would pass unconditionally.
+# MEASURED under the runner's git-bash, all three cases, before this was written:
+#
+#   server up          → rc=0, one `sccache.exe` line
+#   server down        → rc=0, no matching line
+#   broken invocation  → rc=1, no matching line   ← the trap
+#
+# So the STATUS says whether the instrument worked and the OUTPUT says what it
+# found — and they must be read separately. A loop written as
+# `while tasklist //NH 2>/dev/null | grep -q …` collapses the two: a tasklist
+# that failed produces no output, the loop exits on its first pass, and the
+# script prints an affirmative "quiescent" line. That is instrument failure
+# reading as a clean result — the same defect as the prune's `2>/dev/null | jq`
+# and as the `--stop-server` check above. Not repeating it a third time.
+quiescent=unknown
 if command -v tasklist >/dev/null 2>&1; then
   waited=0
-  while tasklist //NH 2>/dev/null | grep -qi '^sccache\.exe'; do
+  while : ; do
+    procs="$(tasklist //NH 2>&1)"; tl_rc=$?
+    if [ "$tl_rc" != 0 ]; then
+      quiescent=unverified
+      echo "seed: tasklist failed (rc=$tl_rc) — quiescence NOT independently verified: $(printf '%s' "$procs" | tr -s '\n\r\t ' ' ' | cut -c1-120)"
+      break
+    fi
+    printf '%s' "$procs" | grep -qi '^sccache\.exe' || { quiescent=yes; break; }
     if [ "$waited" -ge 30 ]; then
       note "::error::sccache-cache SEED FAILED for \`$TAG\` — an sccache process was still alive ${waited}s after the shutdown request, so $DIR_POSIX cannot be assumed quiescent. Nothing was published."
       exit 1
     fi
     sleep 2; waited=$((waited + 2))
   done
-  echo "seed: no sccache process remains (waited ${waited}s) — $DIR_POSIX is quiescent"
+  [ "$quiescent" = yes ] && echo "seed: no sccache process remains (waited ${waited}s) — $DIR_POSIX is quiescent"
 else
-  # Degrade loudly rather than pretending. Not fatal: on any host without
-  # tasklist we are no worse off than before this check existed.
+  quiescent=unverified
   echo "seed: tasklist unavailable — quiescence NOT independently verified (stop-server rc=$stop_rc)"
 fi
+# `unverified` is deliberately NOT fatal: on a host where the probe cannot run we
+# are no worse off than before this check existed, and reddening a green lane
+# over a missing diagnostic tool would be the wrong trade. It is, however, said
+# out loud every time rather than silently assumed.
 
 [ -d "$DIR_POSIX" ] || { echo "seed: $DIR_POSIX does not exist — nothing to publish."; exit 0; }
 
