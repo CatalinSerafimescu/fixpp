@@ -86,8 +86,10 @@ else
   # an action for a situation needing none is what taught readers to ignore
   # this warning.
   msvc_note=""
+  toolset_clause=""
   if [ -n "${CONAN_CACHE_TOOLSET:-}" ]; then
     msvc_note="%0A ⚠ MSVC payload is the OTel/protobuf/abseil chain, so this leg is the expensive one to miss."
+    toolset_clause=" On MSVC the VS toolset is ALSO folded into the key, so a runner image bump (toolset ${CONAN_CACHE_TOOLSET}) moves the tag with both files unchanged — the most likely cause here."
   fi
 
   # %0A, not literal newlines: GitHub truncates an annotation at the first line.
@@ -95,7 +97,7 @@ else
 Tag = sha256(conanfile.py + conan/profiles/${PROFILE}[ + MSVC toolset])[0:16], so a MISS means either the tag is absent (one of those inputs differs from what is published on GHCR) or the GHCR fetch failed.%0A\
 This run's inputs: ${CONAN_CACHE_INPUTS}%0A\
  • This branch touched conanfile.py or conan/profiles/** → EXPECTED, no action. Packages are seeded only on push:main / workflow_dispatch on main, so a feature-branch key cannot exist yet; it publishes automatically on the first push:main after merge.%0A\
- • Neither input changed on this branch → the runner's toolchain moved (toolset ${CONAN_CACHE_TOOLSET:-n/a}) and main's published package is stale → dispatch this workflow on main to reseed.%0A\
- • ORAS reported a transport/registry error (see the \`conan-cache: oras:\` lines above) → this is an infrastructure failure, NOT an input change; no reseed is needed.${msvc_note}"
+ • Neither keyed file changed on this branch → the tag was never seeded on main, or the published package was deleted.${toolset_clause} → dispatch this workflow on main to (re)seed.%0A\
+ • CHECK THE \`conan-cache: oras:\` LINES ABOVE BEFORE RESEEDING: \`manifest unknown\` / \`not found\` / \`404\` means the tag really is absent, so one of the two cases above applies. DNS/TLS/auth/timeout/5xx means GHCR was unreachable — infrastructure, NOT an input change, and NO reseed is needed.${msvc_note}"
   emit false
 fi
