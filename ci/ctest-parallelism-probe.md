@@ -54,7 +54,7 @@ All three step-duration runs (and both `Total Test time` samples that overlap th
 | 1 | materially lower over more than one run | **MET** — 1935 / 1806 / 1859, all far below the 3300–3356 band |
 | 2 | no failures, no `exit 143` / OOM | **MET** — 346/346 on all three runs |
 | 3 | no previously-stable test turns intermittent | **MET** — identical 346 count and zero failures across three runs |
-| 4 | peak RSS / cgroup `memory.peak` captured | **UNMET** — still not measured. Closes on the first successful post-merge `linux-clang-tsan` run of the `Capture peak memory (ctest --parallel evidence, #229)` step added in PR #245 (`tier1.yml`); record that run here (URL, source path, peak bytes/GiB, runner MemTotal, Test outcome) when it lands. |
+| 4 | peak RSS / cgroup `memory.peak` captured | **UNMET** — still not measured. Closes on the first successful post-merge `linux-clang-tsan` run of the `Capture peak memory (ctest --parallel evidence, #229)` step added in PR #245 (`tier1.yml`); record that run here (URL, source path, peak bytes/GiB, runner MemTotal, Test outcome, eligible test count (`-LE packaging`), which must equal `tier1.yml`'s `expected_eligible`) when it lands. |
 
 **Criterion 4 is what blocks widening, and it is not a formality.** Three green runs say the lane
 *did not* run out of memory; they say nothing about how close it came. Two concurrent TSan
@@ -190,8 +190,26 @@ registered CTest `TIMEOUT` is tight enough for a 2× slowdown to trip it — the
    untested, and widening to `jobs=3` would be compounding an unmeasured assumption. **Still UNMET**:
    PR #245 installs the `Capture peak memory` step (`tier1.yml`) that takes this measurement;
    criterion 4 closes on the first successful post-merge `linux-clang-tsan` run after that PR merges,
-   recorded in this document (run URL, source path, peak bytes/GiB, runner MemTotal, Test outcome) —
-   not on the PR's own merge.
+   recorded in this document (run URL, source path, peak bytes/GiB, runner MemTotal, Test outcome,
+   eligible test count) — not on the PR's own merge.
+
+   **The eligible-count coupling (Gate B round 2, RC#6):** the peak-memory step's acceptance
+   heading ("`ctest --parallel` evidence") only renders when `eligible` (`ctest -N -LE packaging` on
+   `linux-clang-tsan`) equals a pinned `expected_eligible` in `tier1.yml` — this is the OTHER end of
+   that coupling; the two must be kept in sync by hand. **This is a designed prompt, not a bug**: if
+   the first post-merge run renders `DIAGNOSTIC ONLY` with `eligible ≠ expected_eligible`, re-record
+   the basis here and update `expected_eligible` in the same commit; criterion 4 closes on the run
+   **after** that reconciliation, not on the mismatched one. The direction is safe by construction —
+   a stale expectation degrades toward "not evidence", never toward a false acceptance.
+
+   `expected_eligible` was re-derived for PR #245 Gate B round 2 at `9e444ef5` (configure-only
+   `cmake --preset linux-clang-tsan` + `ctest --preset linux-clang-tsan -N -LE packaging`) and came
+   back **350**, not the 346 this document's criteria 2 and 3 above were discharged at — #239
+   (088-firstframe-budget-timer-lifetime) landed on `main` after the three runs cited above and added
+   test files under `tests/session/` and `tests/transport/`. The 346/346 figures in criteria 2 and 3
+   are correctly measured for the runs they cite and are left as-is (add, do not correct); this line
+   records that the suite has since grown to 350, which is the value written into `tier1.yml`'s
+   `expected_eligible`.
 
 Only then extend `execution.jobs` to `linux-clang-asan` / `linux-clang-ubsan` /
 `linux-clang-coverage`, one at a time, re-measuring each.
