@@ -90,13 +90,14 @@ namespace {
 using fixpp::core::error;
 using fixpp::core::expected_t;
 using fixpp::session::detail::read_first_frame_bounded;
-using fixpp::transport::Transport;
 using fixpp::transport::TlsTransport;
+using fixpp::transport::Transport;
 using fixpp::transport::test::LoopbackTlsFixture;
 using namespace std::chrono_literals;
 
 std::string describe(expected_t<std::size_t> const& r) {
-    if (!r.has_value()) return std::string("error=") + std::string(fixpp::core::to_string(r.error()));
+    if (!r.has_value())
+        return std::string("error=") + std::string(fixpp::core::to_string(r.error()));
     return "value=" + std::to_string(*r);
 }
 
@@ -166,7 +167,7 @@ void establish_pair(asio::io_context& ioc, LoopbackTlsFixture& fixture, Establis
 // AND a following poll() leaves `result` still unset — suspended inside the
 // read, not merely not-yet-run.
 void confirm_suspended_in_read(asio::io_context& ioc, bool const& entered_read,
-                                std::optional<expected_t<std::size_t>> const& result) {
+                               std::optional<expected_t<std::size_t>> const& result) {
     for (int i = 0; i < 10'000 && !entered_read; ++i) ioc.poll();
     ASSERT_TRUE(entered_read) << "positive barrier: wrapper coroutine never reached the "
                               << "co_await of the subject read — vacuous cell (D-6.13a).";
@@ -211,8 +212,7 @@ TEST(FirstFrameTotalCancelTls, LegA_JoinedHelper_CancellationAttributable) {
             entered_read = true;
             result = co_await read_first_frame_bounded(*pair.server, buf, kDeadline, kMaxBytes);
         },
-        asio::bind_cancellation_slot(signal.slot(),
-                                      [&](std::exception_ptr ep) { thrown = ep; }));
+        asio::bind_cancellation_slot(signal.slot(), [&](std::exception_ptr ep) { thrown = ep; }));
 
     // Watchdog — converts the un-mapped build's hang into a bounded, captured
     // assertion failure (A2) instead of a ctest TIMEOUT kill.
@@ -266,11 +266,11 @@ TEST(FirstFrameTotalCancelTls, LegA_JoinedHelper_CancellationAttributable) {
         << "cancelled or transport_handshake_timeout), got " << describe(*result);
 
     // A4 — promptness, normative (D-6.10's 10x watchdog / 50x deadline margins).
-    EXPECT_LT(elapsed, 100ms) << "T6 leg A (SC-018/FR-015 on TLS): expected completion within "
-                              << "100ms of the total emit (got "
-                              << std::chrono::duration_cast<std::chrono::milliseconds>(elapsed)
-                                     .count()
-                              << "ms) — cancellation must be PROMPT, not merely eventual.";
+    EXPECT_LT(elapsed, 100ms)
+        << "T6 leg A (SC-018/FR-015 on TLS): expected completion within "
+        << "100ms of the total emit (got "
+        << std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count()
+        << "ms) — cancellation must be PROMPT, not merely eventual.";
 }
 
 // ── Leg B (raw async_read_some, no join) ──────────────────────────────────────
@@ -298,8 +298,7 @@ TEST(FirstFrameTotalCancelTls, LegB_DirectRead_ExactCancelled) {
             entered_read = true;
             result = co_await pair.server->async_read_some(std::span<std::byte>{read_buf});
         },
-        asio::bind_cancellation_slot(signal.slot(),
-                                      [&](std::exception_ptr ep) { thrown = ep; }));
+        asio::bind_cancellation_slot(signal.slot(), [&](std::exception_ptr ep) { thrown = ep; }));
 
     bool watchdog_fired = false;
     asio::steady_timer watchdog{ioc.get_executor()};
@@ -343,9 +342,8 @@ TEST(FirstFrameTotalCancelTls, LegB_DirectRead_ExactCancelled) {
         << "T6 leg B (SC-018): expected EXACTLY transport_read_cancelled (no join, no ordering "
         << "premise), got " << describe(*result);
 
-    EXPECT_LT(elapsed, 100ms) << "T6 leg B (SC-018/FR-015 on TLS): expected completion within "
-                              << "100ms of the total emit (got "
-                              << std::chrono::duration_cast<std::chrono::milliseconds>(elapsed)
-                                     .count()
-                              << "ms).";
+    EXPECT_LT(elapsed, 100ms)
+        << "T6 leg B (SC-018/FR-015 on TLS): expected completion within "
+        << "100ms of the total emit (got "
+        << std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count() << "ms).";
 }

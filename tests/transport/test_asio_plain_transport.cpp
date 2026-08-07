@@ -541,7 +541,8 @@ TEST(AsioPlainTransport, TimerEpochRetiredAfterConnect) {
     EXPECT_EQ(epoch_after_connect, 2u)
         << "T3 (SC-014): connect epoch must be retired (advanced past the armed "
            "value 1) by the time async_connect returns — arm (0->1) then retire "
-           "(1->2); got " << epoch_after_connect;
+           "(1->2); got "
+        << epoch_after_connect;
 }
 
 }  // namespace

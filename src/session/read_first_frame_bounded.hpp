@@ -77,7 +77,6 @@ inline asio::awaitable<void> await_deadline(asio::steady_timer& timer) {
 inline asio::awaitable<fixpp::core::expected_t<std::size_t>> read_first_frame_bounded(
     fixpp::transport::Transport& transport, std::vector<std::byte>& buf,
     std::chrono::milliseconds deadline, std::size_t max_bytes) {
-    using namespace std::chrono_literals;
     using fixpp::core::error;
 
     using namespace asio::experimental::awaitable_operators;
@@ -149,8 +148,12 @@ inline asio::awaitable<fixpp::core::expected_t<std::size_t>> read_first_frame_bo
         auto feed_r = framer.feed(std::span<const std::byte>{read_buf.data(), n}, carry,
                                   std::span<fixpp::wire::frame_view>{out_frames});
         if (!feed_r.has_value()) {
-            if (feed_r.error() == error::wire_frame_too_large)
-                co_return std::unexpected(error::wire_frame_too_large);
+            // Propagated verbatim, including a framer-sourced wire_frame_too_large.
+            // (088 /simplify: the previous form special-cased that enum and then
+            // returned the identical value on both arms — a branch that made no
+            // distinction, while B4's own comment discusses exactly the
+            // framer-vs-budget provenance of this error. A reader checking the code
+            // for that distinction found a branch that did not make one.)
             co_return std::unexpected(feed_r.error());
         }
         if (!feed_r->empty()) {

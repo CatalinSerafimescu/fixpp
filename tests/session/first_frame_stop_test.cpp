@@ -84,7 +84,7 @@ namespace {
 // first_frame_total_cancel_tls_test.cpp duplicates EstablishedPair rather
 // than including engine_firstframe_test.cpp's anonymous-namespace helpers).
 void run_until(asio::io_context& ioc, std::atomic<bool> const& done,
-                std::chrono::steady_clock::duration cap) {
+               std::chrono::steady_clock::duration cap) {
     auto const limit = std::chrono::steady_clock::now() + cap;
     while (!done.load(std::memory_order_acquire) && std::chrono::steady_clock::now() < limit) {
         ioc.run_for(50ms);
@@ -101,13 +101,12 @@ struct PostHandshakeProbe {
 // payload, no close. `self_deadline_after` is a probe-owned backstop (NOT the
 // mechanism under test): if the server never closes us, WE must terminate the
 // read so the test reports a clean failure instead of hanging.
-asio::awaitable<void> probe_post_handshake_silent(asio::io_context& ioc,
-                                                    fixpp::transport::test::LoopbackTlsFixture& fixture,
-                                                    std::uint16_t port,
-                                                    std::chrono::milliseconds self_deadline_after,
-                                                    PostHandshakeProbe& out) {
+asio::awaitable<void> probe_post_handshake_silent(
+    asio::io_context& ioc, fixpp::transport::test::LoopbackTlsFixture& fixture, std::uint16_t port,
+    std::chrono::milliseconds self_deadline_after, PostHandshakeProbe& out) {
     try {
-        std::shared_ptr<fixpp::transport::Transport> client = fixture.make_client(ioc.get_executor());
+        std::shared_ptr<fixpp::transport::Transport> client =
+            fixture.make_client(ioc.get_executor());
         auto* tls = dynamic_cast<fixpp::transport::TlsTransport*>(client.get());
         if (tls != nullptr) {
             fixpp::transport::Endpoint const ep{"127.0.0.1", port};
@@ -163,9 +162,9 @@ TEST(FirstFrameStop, StopReturnsPromptlyAndReclaimsAcceptSlot) {
 
     PostHandshakeProbe probe;
     asio::co_spawn(ioc,
-                    probe_post_handshake_silent(ioc, harness->transport_fixture(), port,
-                                                 /*self_deadline_after=*/10s, probe),
-                    asio::detached);
+                   probe_post_handshake_silent(ioc, harness->transport_fixture(), port,
+                                               /*self_deadline_after=*/10s, probe),
+                   asio::detached);
 
     // Let the client complete its handshake and the server-side accept loop
     // (as far as this test can tell — see the non-vacuity note above the

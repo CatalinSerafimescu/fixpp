@@ -49,6 +49,8 @@
 // mutant of the delivered design (`expires_after` moved into the loop), not
 // `main`. See each cell's own comment for its RED basis.
 
+#include "session/read_first_frame_bounded.hpp"
+
 #include <gtest/gtest.h>
 
 #include <asio/awaitable.hpp>
@@ -73,8 +75,6 @@
 #include <string_view>
 #include <thread>
 #include <vector>
-
-#include "session/read_first_frame_bounded.hpp"
 
 namespace {
 
@@ -130,14 +130,14 @@ std::vector<std::byte> make_logon_of_length(std::size_t frame_len) {
     std::string body = std::string(kFixedFields) + "58=" + std::string(pad_len, 'Z') + "\x01";
     if (std::to_string(body.size()).size() != 4) {
         ADD_FAILURE() << "make_logon_of_length(" << frame_len
-                       << "): BodyLength digit-count assumption (4) violated for body.size()=="
-                       << body.size();
+                      << "): BodyLength digit-count assumption (4) violated for body.size()=="
+                      << body.size();
         return {};
     }
     std::vector<std::byte> frame = make_frame(body);
     if (frame.size() != frame_len) {
         ADD_FAILURE() << "make_logon_of_length(" << frame_len << "): internal size mismatch, got "
-                       << frame.size();
+                      << frame.size();
         return {};
     }
     return frame;
@@ -401,8 +401,8 @@ TEST(ReadFirstFrameBounded, B5) {
 TEST(ReadFirstFrameBounded, T1) {
     constexpr std::size_t kMaxBytes = 4096;
     constexpr std::size_t kLogonLen = 1024;  // well under max_bytes; also the smallest
-                                              // value make_logon_of_length's 4-digit
-                                              // BodyLength assumption admits.
+                                             // value make_logon_of_length's 4-digit
+                                             // BodyLength assumption admits.
     constexpr auto kDeadline = std::chrono::milliseconds{10};
 
     std::vector<std::byte> const frame = make_logon_of_length(kLogonLen);
@@ -418,10 +418,10 @@ TEST(ReadFirstFrameBounded, T1) {
 
     std::optional<expected_t<std::size_t>> result;
     asio::co_spawn(ioc, read_first_frame_bounded(mt, buf, kDeadline, kMaxBytes),
-                    [&result](std::exception_ptr ep, expected_t<std::size_t> r) {
-                        EXPECT_FALSE(ep) << "T1: the spawned coroutine threw.";
-                        result = std::move(r);
-                    });
+                   [&result](std::exception_ptr ep, expected_t<std::size_t> r) {
+                       EXPECT_FALSE(ep) << "T1: the spawned coroutine threw.";
+                       result = std::move(r);
+                   });
 
     // Step 1: run the spawn to its first real suspension. co_spawn's initial
     // resume is posted, not inline, so this poll() call executes the
@@ -477,44 +477,6 @@ TEST(ReadFirstFrameBounded, T1) {
         << "here means the proof did not fire, not that there is no defect (D-6.3).";
 }
 
-// ── T2a (SC-015 / FR-015) ──────────────────────────────────────────────────────
-// `total`-cancellation delivery (D-2/D-6.12): the wrapper coroutine below is
-// NOT a test convenience — co_spawn's initial cancellation state is
-// terminal-only (C2), so without an outer co_spawn whose FIRST statement
-// resets to enable_total_cancellation(), the test's own `signal.emit(total)`
-// dies before ever reaching read_first_frame_bounded's internal join, and the
-// cell would fail with the delivered code CORRECT.
-//
-// Asserts a cancellation-ATTRIBUTABLE error SET
-// (transport_read_cancelled OR transport_handshake_timeout), not the exact
-// value: under the delivered design BOTH arms of the internal `||` join are
-// cancelled together, and which one is recorded as order[0] (unspecified asio
-// scheduler internals — D-6.4/D-6.10a) decides which surfaces. Binding the
-// exact value would risk a RED on correct code (research.md D-6.1's T2a row,
-// widened at Gate A round 4).
-//
-// Mutant killed: the BARE deadline arm — await_deadline (read_first_frame_
-// bounded.hpp) replaced by a raw timer.async_wait(use_awaitable), dropping
-// both the total-cancel reset and redirect_error. Per D-6.12b this mutant
-// does NOT change the RETURNED VALUE (order[0]==0 either way, so the join
-// still surfaces the read arm's transport_read_cancelled) — the
-// discriminator is PROMPTNESS. Under the mutant the bare arm's own cancel is
-// silently dropped (its terminal-only IN filter never sees `total`), it is
-// never re-cancelled (the group's one-shot guard was already consumed
-// cancelling the read arm), and it runs to the FULL `kDeadline` before the
-// join retires — even though the read arm itself aborted almost immediately.
-//
-// Deterministic construction (T045/SC-016 — NOT a wall-clock threshold): an
-// intermediate timer the TEST owns is armed at `kIntermediate` (100ms)
-// against a helper `kDeadline` of 500ms — D-6.12's own figures, a one-sided
-// 5x margin (the delivered code retires in microseconds; the mutant cannot
-// retire before 500ms). `timer_fired_before_result` is set inside the
-// timer's own handler ONLY if `result` is still unset at that instant, so
-// the assertion is an ORDERING between two test-controlled events (did the
-// timer's handler run before the join retired?), not a comparison of
-// elapsed wall-clock against a constant. The context is always drained to
-// `result.has_value()` regardless of which fires first, matching D-6.2's
-// "drain to completion" discipline (T1, above) rather than aborting mid-flight.
 // ── B4 (SC-003) — regression guard, NOT a RED cell against `main` ────────────
 // Over-budget, no complete frame ever (a declared BodyLength of 200000 that
 // never completes, X-padded to exactly max_bytes + 1 bytes — same shape as
@@ -568,9 +530,8 @@ TEST(ReadFirstFrameBounded, B4) {
     mock_transport mt{ioc.get_executor(), std::move(s)};
     std::vector<std::byte> buf;
 
-    auto fut = asio::co_spawn(
-        ioc, read_first_frame_bounded(mt, buf, kDeadline, kMaxBytes),
-        asio::use_future);
+    auto fut = asio::co_spawn(ioc, read_first_frame_bounded(mt, buf, kDeadline, kMaxBytes),
+                              asio::use_future);
     ioc.run();
     expected_t<std::size_t> const result = fut.get();
 
@@ -579,11 +540,13 @@ TEST(ReadFirstFrameBounded, B4) {
         << describe(result);
     if (!result.has_value()) {
         EXPECT_EQ(result.error(), error::wire_frame_too_large)
-            << "B4 (SC-003): expected wire_frame_too_large (FR-003/FR-014's protective intent), got "
+            << "B4 (SC-003): expected wire_frame_too_large (FR-003/FR-014's protective intent), "
+               "got "
             << describe(result);
     }
     EXPECT_EQ(mt.async_reads_observed(), 2u)
-        << "B4 (SC-003) [mechanism pin]: expected exactly two reads (4096 then the room-clamped 1) — "
+        << "B4 (SC-003) [mechanism pin]: expected exactly two reads (4096 then the room-clamped 1) "
+           "— "
         << "the step-5 budget decision, not an earlier framer-level reject.";
     EXPECT_EQ(buf.size(), kMaxBytes + 1)
         << "B4 (SC-003) [mechanism pin]: expected buf to hold exactly max_bytes + 1 bytes when the "
@@ -643,9 +606,8 @@ TEST(ReadFirstFrameBounded, B6) {
     mock_transport mt{ioc.get_executor(), std::move(s)};
     std::vector<std::byte> buf;
 
-    auto fut = asio::co_spawn(
-        ioc, read_first_frame_bounded(mt, buf, kDeadline, kMaxBytes),
-        asio::use_future);
+    auto fut = asio::co_spawn(ioc, read_first_frame_bounded(mt, buf, kDeadline, kMaxBytes),
+                              asio::use_future);
     ioc.run();
     expected_t<std::size_t> const result = fut.get();
 
@@ -654,13 +616,16 @@ TEST(ReadFirstFrameBounded, B6) {
         << describe(result);
     if (!result.has_value()) {
         EXPECT_EQ(result.error(), error::transport_handshake_timeout)
-            << "B6 (SC-004/D-1b): expected transport_handshake_timeout (the arm-once deadline firing "
+            << "B6 (SC-004/D-1b): expected transport_handshake_timeout (the arm-once deadline "
+               "firing "
             << "at 50ms, derived buf.size() == 7 from reads completing at 7/14/.../49ms), got "
-            << describe(result) << " — a per-iteration re-arm would let the deadline keep being pushed "
+            << describe(result)
+            << " — a per-iteration re-arm would let the deadline keep being pushed "
             << "forward and the loop would drain all 201 chunks instead.";
     }
     EXPECT_GE(buf.size(), 1u)
-        << "B6 (SC-004/D-1b) [non-vacuity]: expected at least one completed read before the deadline "
+        << "B6 (SC-004/D-1b) [non-vacuity]: expected at least one completed read before the "
+           "deadline "
         << "fired (derived: 7, from reads at 7/14/.../49ms) — buf.size() == 0 would mean the loop "
         << "never genuinely ran.";
     EXPECT_LT(buf.size(), kMaxBytes)
@@ -668,6 +633,44 @@ TEST(ReadFirstFrameBounded, B6) {
         << "(derived: 7) — the re-arm mutant drains all 201 chunks, reaching buf.size() == 201.";
 }
 
+// ── T2a (SC-015 / FR-015) ──────────────────────────────────────────────────────
+// `total`-cancellation delivery (D-2/D-6.12): the wrapper coroutine below is
+// NOT a test convenience — co_spawn's initial cancellation state is
+// terminal-only (C2), so without an outer co_spawn whose FIRST statement
+// resets to enable_total_cancellation(), the test's own `signal.emit(total)`
+// dies before ever reaching read_first_frame_bounded's internal join, and the
+// cell would fail with the delivered code CORRECT.
+//
+// Asserts a cancellation-ATTRIBUTABLE error SET
+// (transport_read_cancelled OR transport_handshake_timeout), not the exact
+// value: under the delivered design BOTH arms of the internal `||` join are
+// cancelled together, and which one is recorded as order[0] (unspecified asio
+// scheduler internals — D-6.4/D-6.10a) decides which surfaces. Binding the
+// exact value would risk a RED on correct code (research.md D-6.1's T2a row,
+// widened at Gate A round 4).
+//
+// Mutant killed: the BARE deadline arm — await_deadline (read_first_frame_
+// bounded.hpp) replaced by a raw timer.async_wait(use_awaitable), dropping
+// both the total-cancel reset and redirect_error. Per D-6.12b this mutant
+// does NOT change the RETURNED VALUE (order[0]==0 either way, so the join
+// still surfaces the read arm's transport_read_cancelled) — the
+// discriminator is PROMPTNESS. Under the mutant the bare arm's own cancel is
+// silently dropped (its terminal-only IN filter never sees `total`), it is
+// never re-cancelled (the group's one-shot guard was already consumed
+// cancelling the read arm), and it runs to the FULL `kDeadline` before the
+// join retires — even though the read arm itself aborted almost immediately.
+//
+// Deterministic construction (T045/SC-016 — NOT a wall-clock threshold): an
+// intermediate timer the TEST owns is armed at `kIntermediate` (100ms)
+// against a helper `kDeadline` of 500ms — D-6.12's own figures, a one-sided
+// 5x margin (the delivered code retires in microseconds; the mutant cannot
+// retire before 500ms). `timer_fired_before_result` is set inside the
+// timer's own handler ONLY if `result` is still unset at that instant, so
+// the assertion is an ORDERING between two test-controlled events (did the
+// timer's handler run before the join retired?), not a comparison of
+// elapsed wall-clock against a constant. The context is always drained to
+// `result.has_value()` regardless of which fires first, matching D-6.2's
+// "drain to completion" discipline (T1, above) rather than aborting mid-flight.
 TEST(ReadFirstFrameBounded, T2a) {
     constexpr std::size_t kMaxBytes = 4096;
     constexpr auto kDeadline = std::chrono::milliseconds{500};
@@ -694,8 +697,7 @@ TEST(ReadFirstFrameBounded, T2a) {
             entered_helper = true;
             result = co_await read_first_frame_bounded(mt, buf, kDeadline, kMaxBytes);
         },
-        asio::bind_cancellation_slot(signal.slot(),
-                                      [&](std::exception_ptr ep) { thrown = ep; }));
+        asio::bind_cancellation_slot(signal.slot(), [&](std::exception_ptr ep) { thrown = ep; }));
 
     // Positive initiation barrier (D-6.13a): poll() until entered_helper is
     // set, then confirm a FOLLOWING poll() leaves `result` unset — genuinely
