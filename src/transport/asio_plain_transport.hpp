@@ -28,6 +28,9 @@
 #include <memory_resource>
 #include <span>
 
+// The shared timer-epoch counter block (D-4.1) — internal, src/ only.
+#include "timer_epoch_state.hpp"
+
 namespace fixpp::transport {
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -54,15 +57,10 @@ public:
 
     // ── Timer-epoch guard (research.md D-4.1, FR-014) ───────────────────────
     //
-    // Nested (not namespace-scope): asio_tls_transport.hpp declares its own
-    // same-named-but-differently-shaped type (adds `handshake`), and both
-    // headers are included together in transport_factory.cpp/engine.cpp/
-    // asio_listener.cpp — a namespace-scope definition here would collide
-    // there. Qualified spelling for callers outside the class:
-    // `asio_plain_transport::timer_epoch_state`.
-    struct timer_epoch_state {  // strand-confined; plain integers, no atomics
-        std::uint64_t connect{0};
-    };
+    // The counter block is the SHARED `fixpp::transport::timer_epoch_state`
+    // from "transport/timer_epoch_state.hpp" — one type for both transports,
+    // as data-model.md §4 and D-4.1 specify. This transport uses `connect`
+    // only; the `handshake` field is TLS-only and unused here.
 
     // Initiator constructor — fresh socket; async_connect drives fresh→connected.
     // NOT noexcept (088/FR-014 widening): the default member initializer for

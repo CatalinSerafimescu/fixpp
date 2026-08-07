@@ -68,6 +68,9 @@
 #include <memory_resource>
 #include <optional>
 
+// The shared timer-epoch counter block (D-4.1) — internal, src/ only.
+#include "timer_epoch_state.hpp"
+
 namespace fixpp::transport {
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -115,27 +118,11 @@ public:
 
     // ── Timer-epoch guard (research.md D-4.1, FR-014) ───────────────────────
     //
-    // Nested (not namespace-scope): asio_plain_transport.hpp declares its own
-    // same-named-but-differently-shaped type, and both headers are included
-    // together in transport_factory.cpp/engine.cpp/asio_listener.cpp — a
-    // namespace-scope definition here would collide there.
-    //
-    // TWO counters, not one. async_connect (:869) and async_handshake (:984)
-    // are strictly ordered by every current caller (reconnect_fsm.cpp:250
-    // then :284; the accept path calls async_handshake only) and
-    // reconnect_fsm mints a fresh transport per attempt, so a single shared
-    // counter would in fact be correct against today's call graph. It is
-    // still split because that correctness rests on a sequencing property of
-    // the *callers*, which nothing in this class enforces — a future
-    // interleaving (or a reconnect path that reused a transport) would
-    // silently reintroduce the exact stale-handler-cancels-a-live-op defect
-    // this feature exists to close. Eight bytes buys removing an argument
-    // rather than adding one (D-4.1 "One counter per timer, not one per
-    // transport").
-    struct timer_epoch_state {  // strand-confined; plain integers, no atomics
-        std::uint64_t connect{0};
-        std::uint64_t handshake{0};
-    };
+    // The counter block is the SHARED `fixpp::transport::timer_epoch_state`
+    // from "transport/timer_epoch_state.hpp" — one type for both transports,
+    // as data-model.md §4 and D-4.1 specify. This transport uses BOTH fields;
+    // the why-two-counters argument (a sequencing property of the callers that
+    // nothing in this class enforces) lives with the type.
 
     // ── Constructor (throwing — [arch §5.3] engine-bootstrap carve-out) ───
     //
