@@ -42,6 +42,7 @@ Define FIXPP_ALLOW_MOCK_TRANSPORT in the consuming test target."
 #include <asio/steady_timer.hpp>
 #include <asio/this_coro.hpp>
 #include <asio/use_awaitable.hpp>
+#include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <fixpp/core/error.hpp>               // core::expected_t<T>
@@ -318,7 +319,7 @@ public:
         // awaiter's cancellation_signal at the test layer (the tests use
         // bind_cancellation_slot on co_spawn and emit on the signal). Per the
         // Transport contract cancel() is documented synchronous + thread-safe.
-        ++cancels_observed_;
+        cancels_observed_.fetch_add(1, std::memory_order_relaxed);
         return {};
     }
 
@@ -381,16 +382,19 @@ public:
 
     [[nodiscard]] std::size_t async_writes_observed() const noexcept { return writes_observed_; }
 
-    // reads_observed_ / cancels_observed_ — strand-confinement note per
-    // research.md D-9: cancel() is the class's only documented off-strand
-    // path (see the class doc above and the async_writes_observed() pair
-    // this mirrors), so cancels_observed_ may be written from a potentially
-    // off-strand context. It is a plain std::size_t, read only after the
-    // io_context has been driven to completion and never concurrently with a
-    // cancel() call; a future consumer calling cancel() from a second thread
-    // must make it atomic.
+    // reads_observed_ — strand-confined; written only from inside coroutines
+    // running on exec_, read only after the io_context has been driven to
+    // completion.
+    //
+    // cancels_observed_ — strand-confinement note per research.md D-9:
+    // cancel() is the class's only documented off-strand path (see the class
+    // doc above and the async_writes_observed() pair this mirrors), so it may
+    // be written from a potentially off-strand context. Stored as
+    // std::atomic_size_t for exactly that reason.
     [[nodiscard]] std::size_t async_reads_observed() const noexcept { return reads_observed_; }
-    [[nodiscard]] std::size_t cancels_observed() const noexcept { return cancels_observed_; }
+    [[nodiscard]] std::size_t cancels_observed() const noexcept {
+        return cancels_observed_.load(std::memory_order_relaxed);
+    }
 
     // read_sizes_ — the sequence of requested lengths (buf.size()) passed to
     // async_read_some, recorded before any clamping the mock applies. See
@@ -414,7 +418,7 @@ private:
     std::vector<std::byte> outbound_seen_;
     std::size_t writes_observed_{0};
     std::size_t reads_observed_{0};
-    std::size_t cancels_observed_{0};
+    std::atomic_size_t cancels_observed_{0};
     std::vector<std::size_t> read_sizes_;
     bool closed_{false};
     bool handshaken_{false};
