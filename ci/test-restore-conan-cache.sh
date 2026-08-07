@@ -101,6 +101,10 @@ if ! mkdir -p "$dir" || ! printf 'fake conan cache archive\n' > "$dir/conan-${FA
   echo "SHIM-VIOLATION: oras could not write $dir/conan-${FAKE_PROFILE}.tgz" >&2
   exit 2
 fi
+# Record the workspace so the harness can assert the script cleaned it up. See
+# the cleanup assertion in run_case: without this, deleting restore's EXIT trap
+# preserved every asserted observation and the mutant survived.
+[ -n "${FAKE_WORKDIR_RECORD:-}" ] && printf '%s\n' "$dir" >> "$FAKE_WORKDIR_RECORD"
 exit 0
 SHIM
 chmod +x "$shim_dir/oras"
@@ -151,6 +155,7 @@ run_case() {
 
   out_file="$(mktemp)"
   gh_output="$(mktemp)"
+  workdir_record="$(mktemp)"
   expected_ref="$(compute_expected_ref "$profile" "$toolset_mode")" \
     || fail "$label: expected conan cache tag must not be empty"
 
@@ -176,6 +181,7 @@ run_case() {
     FAKE_CONAN_STDERR="$conan_stderr" \
     FAKE_EXPECTED_REF="$expected_ref" \
     FAKE_PROFILE="$profile" \
+    FAKE_WORKDIR_RECORD="$workdir_record" \
     GITHUB_OUTPUT="$gh_output" \
     bash "$SCRIPT" "$profile"
   ) > "$out_file" 2>&1 || status=$?
@@ -183,7 +189,8 @@ run_case() {
   OUT="$(cat "$out_file")"
   HIT="$(sed -n 's/^hit=//p' "$gh_output")"
   STATUS="$status"
-  rm -f "$out_file" "$gh_output"
+  WORKDIRS="$(cat "$workdir_record")"
+  rm -f "$out_file" "$gh_output" "$workdir_record"
 
   echo "── case: $label ──"
   echo "$OUT" | sed 's/^/  /'
@@ -197,6 +204,26 @@ run_case() {
   if echo "$OUT" | grep -q "SHIM-VIOLATION"; then
     fail "$label: the script under test violated a shim's argv/file contract — see output above"
   fi
+
+  # CLEANUP IS AN ASSERTED POST-CONDITION, not a comment. Deleting
+  # restore-conan-cache.sh's `trap 'rm -rf "$WORK"' EXIT` preserved every OTHER
+  # observation this harness makes — disposition, hit value, argv, annotations —
+  # so the mutant survived all of them. In production that leaks the downloaded
+  # archive under /tmp for the rest of the job, on lanes the workflow documents
+  # as already sitting near their disk ceiling. Checked on EVERY disposition,
+  # including the failure paths, because those are where a cleanup path is most
+  # often forgotten.
+  # `if`, NOT `[ -e "$wd" ] && fail …`. Under this script's `set -e` the `&&`
+  # form returns non-zero on the PASSING branch (dir absent), and as the loop
+  # body's last command that aborts the whole harness silently — a green result
+  # killing the run it was supposed to certify. Caught by running it; reading it
+  # looked fine.
+  while IFS= read -r wd; do
+    [ -n "$wd" ] || continue
+    if [ -e "$wd" ]; then
+      fail "$label: restore workspace '$wd' still exists after exit — the EXIT cleanup did not run"
+    fi
+  done <<< "$WORKDIRS"
 }
 
 assert_restore_failure_case() {

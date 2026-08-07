@@ -59,6 +59,14 @@ fi
 # FLATTEN THE PAGES: `gh api --paginate` emits one top-level array PER PAGE, not
 # one merged array. `jq -s add` rather than `gh --slurp` so this does not depend
 # on the gh version. Same rationale as prune-sccache.sh.
+# VALIDATE THE SHAPE BEFORE FLATTENING — see prune-sccache.sh for the full note.
+# `jq -s 'add // []'` maps empty output, `null` and `{}` all onto `[]`, so a
+# SUCCESSFUL-but-malformed response still rendered "no stale tags": the exact
+# false-clean this script's fail-closed rework exists to remove, surviving inside
+# it. A zero exit from `gh` is not evidence the body was the expected shape.
+printf '%s' "$RAW" | jq -se 'length > 0 and all(.[]; type == "array")' >/dev/null 2>&1 \
+  || bail "the LIST response was not one-or-more JSON arrays (empty, null, or an unexpected shape)"
+
 VERSIONS=$(printf '%s' "$RAW" | jq -s 'add // []' 2>/dev/null)
 [ -n "$VERSIONS" ] || bail "could not parse the version list as JSON"
 

@@ -184,8 +184,23 @@ note "sccache-cache SEEDED \`$TAG\`"
 # signal that cannot distinguish "nothing to delete" from "nothing could be
 # deleted". Tee to a temp file and cat it: portable, and the file is also what
 # the count is parsed from, so the log and the note can never disagree.
-prune_log="$(mktemp)"
-"$(dirname "$0")/prune-sccache.sh" "$PRESET" "$TAG" > "$prune_log" 2>&1 || true
+# Inside the already-trapped $WORK (line 118) rather than a fresh `mktemp`: it is
+# cleaned up on interruption too, and it cannot leave an unset path behind if
+# mktemp fails — this script is `set -uo pipefail`, not `set -e`, so a failed
+# `mktemp` would have continued with an empty filename, lost the prune output,
+# and emitted no note at all.
+prune_log="$WORK/prune.log"
+
+# CAPTURE THE STATUS, do not `|| true` it away. Best-effort must mean "never
+# fails the seed", NOT "ignore instrument failure": if the pruner dies before
+# emitting its own marker, `|| true` left NO prune disposition in either the log
+# or the job summary — a silent hole in the very thing being instrumented.
+# Synthesising the marker here keeps the one parse below authoritative.
+prune_rc=0
+"$(dirname "$0")/prune-sccache.sh" "$PRESET" "$TAG" > "$prune_log" 2>&1 || prune_rc=$?
+if [ "$prune_rc" -ne 0 ]; then
+  echo "prune: PENDING ? — the prune command exited $prune_rc before reporting a disposition" >> "$prune_log"
+fi
 cat "$prune_log"
 # FIRST TOKEN ONLY. `\(.*\)$` swallowed the whole remainder of the line, so the
 # job-summary note rendered the count plus prune's entire parenthetical remedy
@@ -194,7 +209,7 @@ cat "$prune_log"
 # a count (`PENDING 2`) and the could-not-even-list case (`PENDING ?`), which is
 # the loudest one and must never be dropped on a failed [0-9]+ parse.
 pending=$(sed -n 's/^prune: PENDING \([^ ]*\).*$/\1/p' "$prune_log" | head -1)
-rm -f "$prune_log"
+# No `rm` — $WORK's EXIT trap owns it.
 if [ -n "${pending:-}" ]; then
   note "sccache-cache: **dead version(s) could not be reclaimed** from CI — \`$pending\`. Run \`ci/prune-sccache.sh $PRESET $TAG\` locally with a \`delete:packages\` token."
 fi

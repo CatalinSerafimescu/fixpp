@@ -92,6 +92,15 @@ bail() { echo "prune: PENDING ? — $1; nothing was deleted"; exit 0; }
 # comparison would fail, and the script would fail closed FOREVER the moment the
 # package exceeded one page — locking out the very cleanup that shrinks it.
 # `jq -s add` rather than `gh --slurp` so this does not depend on the gh version.
+# VALIDATE THE SHAPE BEFORE FLATTENING. `jq -s 'add // []'` maps empty output,
+# `null` and `{}` all onto `[]` — so a SUCCESSFUL-but-malformed response (a
+# truncated body, an API shape change) sailed past the `-n "$VERSIONS"` check as
+# a legitimately empty package and rendered "nothing to prune". A zero exit from
+# `gh` is not evidence the body was what we think it is.
+# `-e` makes jq's exit status follow the expression's value, so false → bail.
+printf '%s' "$RAW" | jq -se 'length > 0 and all(.[]; type == "array")' >/dev/null 2>&1 \
+  || bail "the LIST response was not one-or-more JSON arrays (empty, null, or an unexpected shape)"
+
 VERSIONS=$(printf '%s' "$RAW" | jq -s 'add // []' 2>/dev/null)
 [ -n "$VERSIONS" ] || bail "could not parse the version list as JSON"
 
