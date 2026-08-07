@@ -49,7 +49,24 @@ sccache --stop-server >/dev/null 2>&1 || true
 WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
 
 # Uncompressed — see restore-sccache.sh. Must match the extract side.
-tar -cf "$WORK/sccache-$PRESET.tar" -C "$DIR_POSIX" .
+#
+# tar's status is CHECKED, and the result re-read with `tar -tf` before it is
+# allowed anywhere near GHCR. This script runs without `set -e` (most failures
+# here are deliberately non-fatal), which made an unchecked `tar -cf` the one
+# path that could publish a TRUNCATED archive and still print the `SEEDED`
+# marker the operator gates the warm run on. On Windows a single locked or
+# vanished cache entry — antivirus, or the daemon's own churn — is enough:
+# tar skips it, exits non-zero, and leaves a perfectly pushable tar behind.
+# The listing pass is not redundant with the exit status: it is what catches a
+# tar that was truncated after the fact.
+if ! tar -cf "$WORK/sccache-$PRESET.tar" -C "$DIR_POSIX" . ; then
+  note "::error::sccache-cache SEED FAILED for \`$TAG\` — could not archive $DIR_POSIX. Nothing was published; a following 'warm' run would measure another cold build."
+  exit 1
+fi
+if ! tar -tf "$WORK/sccache-$PRESET.tar" >/dev/null 2>&1; then
+  note "::error::sccache-cache SEED FAILED for \`$TAG\` — the archive did not read back cleanly. Nothing was published."
+  exit 1
+fi
 
 # Report the SIZES BEFORE attempting the push, not after. SCCACHE_CACHE_SIZE was
 # set from an estimate and is meant to be tuned from these two numbers — and the
@@ -79,11 +96,13 @@ note "sccache-cache archive \`$TAG\` — $(du -h "$WORK/sccache-$PRESET.tar" | c
 note "sccache-cache SEEDED \`$TAG\`"
 
 # ── Prune, best-effort — delegated so it is also runnable STANDALONE ─────────
-# It has to be runnable standalone because it will NOT delete anything from here:
-# GITHUB_TOKEN carries packages:write (read+write), not delete:packages. The
-# rolling tag means every republish orphans a multi-GB untagged version, so the
-# backlog is surfaced into the job summary rather than left to accumulate
-# silently. Full evidence in ci/prune-sccache.sh's header.
+# Whether it deletes from here depends on the token the caller supplies: with
+# `secrets.GHCR_PAT` (delete:packages) it does; falling back to GITHUB_TOKEN
+# (packages:write is read+write only) it cannot, and reports a backlog instead.
+# It must stay runnable standalone for exactly that reason. The rolling tag
+# means every republish orphans a multi-GB untagged version, so the backlog is
+# surfaced into the job summary rather than left to accumulate silently. Full
+# evidence in ci/prune-sccache.sh's header.
 # Match the marker WITHOUT requiring a count: prune emits `PENDING ?` when it
 # could not even list the package, and that is the loudest case, not one to drop
 # on a failed [0-9]+ parse.

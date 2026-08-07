@@ -247,11 +247,16 @@ jobs:
           # tree several steps later assume is clean.
           tmp="$(cygpath -u "$RUNNER_TEMP")/sccache-dl"
           rm -rf "$tmp"; mkdir -p "$tmp"; cd "$tmp"
-          curl -sSfL -o sccache.zip        "${base}/${asset}.zip"
-          curl -sSfL -o sccache.zip.sha256 "${base}/${asset}.zip.sha256"
-          # The published .sha256 is a BARE hash with no filename field, so the
-          # filename has to be supplied here for `sha256sum -c` to accept it.
-          echo "$(cat sccache.zip.sha256)  sccache.zip" | sha256sum -c -
+          # PINNED IN-REPO, deliberately not fetched. Downloading the .sha256
+          # sidecar from the same mutable release that serves the archive checks
+          # transport integrity but pins nothing: whoever can replace the asset
+          # can replace its sidecar. This literal was verified out-of-band —
+          # asset downloaded and hashed locally, and the value agreed with the
+          # published sidecar at the time of pinning (2026-08-07).
+          # Bumping `ver` REQUIRES re-deriving this by hand.
+          sha256=e94cfc5b58cbe439302f586c1d1bd7980c2cd371d47bdf385ade657411e6f3ac
+          curl -sSfL -o sccache.zip "${base}/${asset}.zip"
+          echo "${sha256}  sccache.zip" | sha256sum -c -
           unzip -q sccache.zip
           mkdir -p "$HOME/bin"
           mv "${asset}/sccache.exe" "$HOME/bin/"

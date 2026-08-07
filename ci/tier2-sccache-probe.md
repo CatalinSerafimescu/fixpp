@@ -4,18 +4,19 @@
 [31121588649] (2026-08-07, **all three legs green**). Issue [#231].
 
 > ✅ **KEEP.** Warm `Build` on the two seeded legs came back at a **100.00 % hit rate, 1456/1456,
-> 0 cache errors** — `windows-msvc-release` **93m52s → 6m47s (13.8×)** and `windows-msvc-debug`
-> **75m26s → 10m07s (7.5×)**. `windows-msvc-asan` had never seeded (its cold Build was cancelled),
+> 0 cache errors**, with observed `Build` times of `windows-msvc-release` **93m52s → 6m47s** and
+> `windows-msvc-debug` **75m26s → 10m07s**. The hit rate is controlled evidence; the wall-clock
+> ratios are **observational** — see *Why AC2 cannot be fully met here*. `windows-msvc-asan` had never seeded (its cold Build was cancelled),
 > so this run *was* its cold pass — 1456 misses, **0 non-cacheable, 0 failures**, and it seeded at
 > the end. Its warm number is the only measurement still outstanding, and it arrives free on the
 > first `push:main` after merge.
 
 ## MEASURED — warm run, 2026-08-07 ([31121588649])
 
-| leg | restore | `Build` cold → warm | speedup | requests | hits | non-cacheable | failures | seed |
+| leg | restore | `Build` cold → warm | observed ratio *(not controlled)* | requests | hits | non-cacheable | failures | seed |
 |---|---|---:|---:|---:|---:|---:|---:|---|
-| `windows-msvc-release` | HIT (10 s) | 93m52s → **6m47s** | **13.8×** | 1456 | **1456 (100.00 %)** | 0 | 0 | 17 s |
-| `windows-msvc-debug` | HIT (40 s) | 75m26s → **10m07s** | **7.5×** | 1456 | **1456 (100.00 %)** | 0 | 0 | 65 s |
+| `windows-msvc-release` | HIT (10 s) | 93m52s → **6m47s** | ~13.8× | 1456 | **1456 (100.00 %)** | 0 | 0 | 17 s |
+| `windows-msvc-debug` | HIT (40 s) | 75m26s → **10m07s** | ~7.5× | 1456 | **1456 (100.00 %)** | 0 | 0 | 65 s |
 | `windows-msvc-asan` | MISS (3 s) | — → 86m54s *(cold)* | — | 1456 | 0 (0.00 %) | **0** | **0** | 50 s |
 
 All three legs **`success`**, including the full `ctest` phase — that is AC4 in full, which the
@@ -24,12 +25,28 @@ cold run could not answer. `Build packages` ran green on `windows-msvc-release`.
 Restore + seed overhead is ~1 min on the worst leg against ~65–87 min saved, so the upload/download
 trade named in *Keep-or-revert* is settled decisively in favour of keeping.
 
-⚠️ **Honest caveat on the A/B:** cold and warm are **different days on different runner hosts**, not
-the same-session control that `feedback_bench_ab_needs_same_session_control_host_drifts` asks for —
-the GitHub capacity event made a same-session pair impossible. What makes the number safe to quote
-anyway is that the wall-clock delta is corroborated by a *direct* mechanism reading that host drift
-cannot produce: 1456 of 1456 compiles served from cache, 0 misses, 0 errors. Host drift moves a
-build time by tens of percent; it does not move a hit rate from 0 % to 100 %.
+### Why AC2 cannot be fully met here, and what is claimed instead
+
+AC2 asks for a warm/cold pair **"back-to-back on the same PR in the same session"**. That control was
+not obtained, and this file does **not** mark AC2 met. Two separate reasons, worth keeping apart:
+
+1. **Circumstantial** — the 2026-08-06 capacity event killed the same-day warm dispatch, so the pair
+   landed ~14 h apart.
+2. **Structural, and the more important one** — GitHub-hosted runners are **ephemeral**. Two runs are
+   never the same host, so on this infrastructure the criterion as written is *unobtainable in
+   principle*, not merely missed this once. Re-running it would not upgrade the evidence; it would
+   only spend another ~4.5 h of Windows minutes to get a second uncontrolled pair.
+
+So the ratios are **observational**. A slow cold host and a fast warm host would inflate 13.8×, and
+nothing here excludes that; the uncached `-scanDependencies` pass, linking, disk I/O and process
+startup are all inside the measured `Build` step and none of them is cache-served.
+
+**What IS controlled** is the mechanism, and it is controlled on the same commit and the same
+preset: the restore step ends with `--zero-stats`, so each rate is measured from a known-zero
+baseline, and the warm legs report **1456 of 1456 compiles served from cache, 0 misses, 0 errors**.
+Host drift moves a wall time by tens of percent; it cannot move a hit rate from 0 % to 100 %. The
+defensible claim is therefore: *the cache demonstrably serves every compile, and the observed build
+times fell by roughly an order of magnitude* — not *the speedup is 13.8×*.
 
 ## MEASURED — cold run, 2026-08-06
 
@@ -396,7 +413,7 @@ Numbering follows #231.
 | # | criterion | status |
 |---|---|---|
 | 1 | `sccache --show-stats` in the job summary on every leg — requests, hits, **and** the non-cacheable/failure breakdown | **MET** — both halves, all three legs. Warm: release + debug **1456/1456 hits (100.00 %)**, 0 errors; asan 1456 misses (its cold pass), **0 non-cacheable / 0 failures** everywhere. The restore step ends with `--zero-stats`, so every rate is over a known-zero baseline. |
-| 2 | warm-vs-cold `Build` wall time, back-to-back **on the same PR in the same session** | **MET on the two seeded legs** — release **93m52s → 6m47s (13.8×)**, debug **75m26s → 10m07s (7.5×)**. asan's warm number is outstanding; it now holds a seeded cache and gets measured free on the first `push:main` after merge. ⚠️ Cross-day, not same-session — the capacity event made that impossible; see the caveat at the top of this file for why the hit-rate corroboration makes it quotable anyway. |
+| 2 | warm-vs-cold `Build` wall time, back-to-back **on the same PR in the same session** | **PARTIALLY MET — deliberately not claimed as met.** The *mechanism* is established under control (`--zero-stats` baseline → 1456/1456 hits, 0 errors, on the same commit and preset). The **wall-clock ratios are observational, not a controlled A/B**: release 93m52s → 6m47s and debug 75m26s → 10m07s were measured ~14 h apart on different ephemeral runner hosts, so an unknown share of each ratio is host drift. Quote them as "observed", never as "the speedup is 13.8×". See *Why AC2 cannot be fully met here* below. asan's warm number is outstanding; it holds a seeded cache and gets measured free on the first `push:main` after merge. |
 | 3 | one-TU `ninja -v` / `-t commands` excerpt confirming `/Z7` and the launcher | **MET** — shipped as a GATE, not an excerpt (see §4). Passed on all three legs in both runs: `OK: launcher present` / `OK: /Z7` / `OK: no /Zi`. Proven RED on an unfixed tree. |
 | 4 | all three legs green, incl. the `Assert the packaging tier is registered` count check on `windows-msvc-release` | **MET** — warm run [31121588649]: all three legs `success` through the full `ctest` phase, `Build packages` green on `windows-msvc-release`. |
 | 5 | explicit statement of what was **not** improved | **MET** — the `ctest` half, 81 min on the asan leg; see the top of this file. Cross-ref [#229]. |
@@ -424,7 +441,7 @@ grep never shown to be non-zero is a broken instrument, not a clean sweep
 
 Keep only on a demonstrated hit rate on a warm re-run (AC2 + AC1 together). **Resolved: KEEP.** Both
 outcomes this section flagged as live were measured and neither materialised — `windows-msvc-release`
-was the *best* leg rather than the poor one (13.8×), and restore+seed overhead is ~1 min against
+was the *best* leg rather than the poor one (~13.8× observed), and restore+seed overhead is ~1 min against
 65–87 min saved per leg. Steady-state saving is **~2.5 h of Build per Tier 2 run** on the two seeded
 legs, rising to roughly 4 h once asan's cache is warm.
 

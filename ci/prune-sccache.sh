@@ -10,22 +10,29 @@
 # Passing an empty CURRENT_TAG keeps nothing — use only when reclaiming a preset
 # wholesale. Any non-empty value is protected.
 #
-# ── ⚠️ THIS WILL NOT DELETE ANYTHING WHEN RUN FROM CI ────────────────────────
+# ── ⚠️ WHETHER THIS DELETES FROM CI DEPENDS ENTIRELY ON THE TOKEN ────────────
 #
-# `GITHUB_TOKEN`'s `packages: write` is read+write; deleting a package VERSION
-# needs `delete:packages`, which it does not carry, and this repo has no PAT
-# secret. MEASURED on the sibling package: fixpp-conan-cache's three MSVC
-# profiles each hold TWO tags (2026-08-02 and 2026-08-03) — the older survived a
-# seed whose prune ran — while every Linux profile holds exactly ONE, because
-# those are seeded locally with an admin-scoped `gh`.
+# Deleting a package VERSION needs `delete:packages`. `GITHUB_TOKEN`'s
+# `packages: write` is read+write only and does NOT carry it, so under the
+# fallback token this script deletes nothing and reports `prune: PENDING <n>`.
+# Since 2026-08-06 the seed steps pass `secrets.GHCR_PAT || secrets.GITHUB_TOKEN`
+# and a classic PAT with `delete:packages` + `read:packages` is stored as
+# `GHCR_PAT`, so **CI does delete when that secret is present**. Do not read the
+# absence of a local prune as proof that nothing in CI can remove a version.
 #
-# That asymmetry costs Conan almost nothing: its tag is content-hashed, so each
-# push mints a NEW tag and orphans no manifest (zero untagged versions there).
-# This package's tag is ROLLING, so every republish orphans an untagged version
-# of several GB. Left alone, CI accumulates them indefinitely.
+# Why this mattered enough to build: MEASURED on the sibling package —
+# fixpp-conan-cache's three MSVC profiles each held TWO tags (2026-08-02 and
+# 2026-08-03), the older having survived a seed whose prune ran, while every
+# Linux profile held exactly ONE because those are seeded locally with a
+# delete-scoped `gh`. That asymmetry costs Conan almost nothing: its tag is
+# content-hashed, so each push mints a NEW tag and orphans no manifest (zero
+# untagged versions there). This package's tag is ROLLING, so every republish
+# orphans an untagged version of several GB. Left unreclaimed it accumulates
+# indefinitely.
 #
-# Hence: run this LOCALLY, periodically. seed-sccache.sh reports the pending
-# count into the job summary so the backlog is visible rather than assumed.
+# Runnable standalone precisely because the CI path is conditional on a secret:
+# seed-sccache.sh reports any pending backlog into the job summary so it is
+# visible rather than assumed, and a maintainer can drain it by hand.
 #
 # BEST-EFFORT: never exits non-zero. Prints a machine-greppable
 # `prune: PENDING <n>` line when deletes were refused.
@@ -37,12 +44,24 @@ PKG=fixpp-sccache
 command -v jq >/dev/null 2>&1 || { echo "prune: jq not found — skipping"; exit 0; }
 command -v gh >/dev/null 2>&1 || { echo "prune: gh not found — skipping"; exit 0; }
 
-# SAFE BY CONSTRUCTION, mirroring prune-conan-cache.sh:
-#  - an UNTAGGED version is unreachable by definition (nothing can pull it), so
-#    it is always safe to delete;
+# SAFE UNDER A STATED CONTRACT, mirroring prune-conan-cache.sh:
+#  - an UNTAGGED version is unreachable *through this repo's cache contract*,
+#    which is tag-only: restore-sccache.sh pulls `$IMAGE:$TAG` and nothing here
+#    ever pulls by digest. It is NOT unreachable in general — an OCI manifest
+#    can always be pulled by `@sha256:…`, so anyone who pins a digest by hand
+#    (e.g. parking a known-good cache for rollback) is outside the contract and
+#    this script will reclaim it. Do not pin a digest against this package.
 #  - a TAGGED version is deleted only when EVERY one of its tags is a
 #    this-preset sccache tag AND none of them is $CURRENT_TAG. A version sharing
 #    a tag with anything else is left alone.
+#
+# FAIL CLOSED on anything unexpected. `.metadata.container.tags // []` silently
+# turned a MISSING tags field into a proven-empty one, i.e. into "untagged, safe
+# to delete" — which is the one classification that bypasses the $CURRENT_TAG
+# guard. A degraded or reshaped API response could therefore delete the live
+# cache. Absence of evidence is not evidence of absence: if any version does not
+# carry a tags ARRAY, or if $CURRENT_TAG is not found exactly once, this script
+# deletes nothing and says so.
 # List and parse as SEPARATE steps. Piping the api straight into jq with
 # `2>/dev/null` makes a failed call indistinguishable from a clean package: both
 # yield an empty DEAD, the loop below prints nothing, and the caller records
@@ -59,16 +78,36 @@ if ! VERSIONS=$(gh api --paginate "/user/packages/container/$PKG/versions" 2>&1)
   exit 0
 fi
 
+bail() { echo "prune: PENDING ? — $1; nothing was deleted"; exit 0; }
+
+# Guard 1: every version must carry a real tags array. No `// []` fallback.
+MALFORMED=$(printf '%s' "$VERSIONS" \
+  | jq '[ .[] | select((.metadata.container.tags | type) != "array") ] | length' 2>/dev/null)
+[ -n "$MALFORMED" ] || bail "could not parse the version list as JSON"
+[ "$MALFORMED" = "0" ] || bail "$MALFORMED version(s) carry no tags ARRAY — the API response is not the shape this script classifies on"
+
+# Guard 2: the tag we are protecting must be present exactly once. Zero means we
+# are about to prune around a keep-tag that does not exist — the caller computed
+# a different key than the one that was published, and every "dead" version in
+# that listing is in fact the live cache. Two means the invariant is already
+# broken and a human should look. An EMPTY CURRENT_TAG is the documented
+# reclaim-a-preset-wholesale mode and skips this guard by design.
+if [ -n "$CURRENT_TAG" ]; then
+  KEEP=$(printf '%s' "$VERSIONS" \
+    | jq --arg cur "$CURRENT_TAG" '[ .[] | select(.metadata.container.tags | index($cur)) ] | length' 2>/dev/null)
+  [ "$KEEP" = "1" ] || bail "keep-tag '$CURRENT_TAG' matched ${KEEP:-?} versions, expected exactly 1"
+fi
+
 mapfile -t DEAD < <(
   printf '%s' "$VERSIONS" \
   | jq -r --arg p "$PRESET" --arg cur "$CURRENT_TAG" '
       .[]
       | . as $v
-      | (($v.metadata.container.tags) // []) as $tags
+      | ($v.metadata.container.tags) as $tags
       | (($tags | length) == 0)                            as $untagged
       | ([ $tags[] | startswith("sccache-\($p)-") ] | all) as $mine
       | (($tags | index($cur)) != null)                    as $is_current
-      | select($untagged or ($mine and ($is_current | not)))
+      | select(($is_current | not) and ($untagged or $mine))
       | "\($v.id)\t\(if $untagged then "<untagged>" else ($tags | join(",")) end)"'
 )
 

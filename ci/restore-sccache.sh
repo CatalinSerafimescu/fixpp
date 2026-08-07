@@ -35,17 +35,21 @@ fi
 TAG="$SCCACHE_CACHE_TAG"
 echo "sccache-cache: toolset $SCCACHE_CACHE_TOOLSET folded into the tag"
 
-WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
+# STAGE sits beside SCCACHE_DIR, not under $WORK, so the swap-in below is a
+# rename on the same volume rather than a 1 GB copy across one.
+STAGE="${DIR_POSIX%/}.restore.$$"
+WORK="$(mktemp -d)"; trap 'rm -rf "$WORK" "$STAGE"' EXIT
+rm -rf "$STAGE"
 
-if oras pull "$IMAGE:$TAG" -o "$WORK" >/dev/null 2>&1; then
-  # Uncompressed tar on purpose: sccache already stores every entry
-  # zstd-compressed, so gzipping the archive spends minutes of CPU to save
-  # almost nothing — on an 80-minute build step that is a real trade, not a
-  # micro-optimisation. Must match seed-sccache.sh.
-  tar -xf "$WORK/sccache-$PRESET.tar" -C "$DIR_POSIX"
-  note "sccache-cache HIT  \`$TAG\`  ($(du -sh "$DIR_POSIX" | cut -f1) restored)"
-  emit true
-else
+# Extract into STAGE and swap in only on success — never straight into the live
+# directory. Without `set -e` an unchecked `tar -xf` failure was invisible: a
+# truncated archive (whose OCI digest is perfectly valid for its truncated
+# bytes) extracts a prefix, returns non-zero, and the old code went on to emit
+# `HIT` and `hit=true` over a partial cache. That is worse than a MISS in both
+# directions — the summary records a restore that did not happen, and sccache
+# serves from a directory nobody verified. Every leg of the condition is
+# checked: the pull, the archive's presence, and the extraction itself.
+if ! oras pull "$IMAGE:$TAG" -o "$WORK" >/dev/null 2>&1; then
   # MISS: no cache published for this preset+toolset yet, the package is not
   # readable from this context, or GHCR is unreachable. All three are the same
   # disposition — compile from scratch.
@@ -58,6 +62,33 @@ else
   # so nothing is hidden by staying quiet.
   note "sccache-cache MISS \`$TAG\` → compiling with an empty cache"
   emit false
+
+# Uncompressed tar on purpose: sccache already stores every entry
+# zstd-compressed, so gzipping the archive spends minutes of CPU to save almost
+# nothing — on an 80-minute build step that is a real trade, not a
+# micro-optimisation. Must match seed-sccache.sh.
+elif ! { [ -f "$WORK/sccache-$PRESET.tar" ] \
+         && mkdir -p "$STAGE" \
+         && tar -xf "$WORK/sccache-$PRESET.tar" -C "$STAGE"; }; then
+  # Pulled, but the payload is not usable. Same disposition as a plain miss: a
+  # cache we could not verify is a cache we do not have. The partial tree is
+  # discarded rather than swapped in.
+  rm -rf "$STAGE"
+  note "sccache-cache MISS \`$TAG\` — pulled, but the archive was missing or did not extract cleanly. Treated as no cache; compiling from scratch."
+  emit false
+
+else
+  rm -rf "$DIR_POSIX"
+  if mv "$STAGE" "$DIR_POSIX"; then
+    note "sccache-cache HIT  \`$TAG\`  ($(du -sh "$DIR_POSIX" | cut -f1) restored)"
+    emit true
+  else
+    # DIR_POSIX has already been removed, so recreate it empty rather than let
+    # the server below start against a directory that may not exist.
+    mkdir -p "$DIR_POSIX"
+    note "sccache-cache MISS \`$TAG\` — restored tree could not be moved into ${SCCACHE_DIR}; compiling with an empty cache"
+    emit false
+  fi
 fi
 
 # Start the server on a KNOWN-ZERO counter. Nothing before this point starts one
