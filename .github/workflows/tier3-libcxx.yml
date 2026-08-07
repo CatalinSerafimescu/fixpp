@@ -166,7 +166,7 @@ jobs:
 
     permissions:
       contents: read
-      packages: write  # was read; write enables auto-push-on-miss (push:main only)
+      packages: write  # was read; write enables auto-push-on-miss (push:main / dispatch on main)
 
     strategy:
       fail-fast: false
@@ -303,8 +303,8 @@ jobs:
       # Without it a manual dispatch on this tier restored, missed, rebuilt and
       # published nothing, so the shared MISS annotation's "dispatch to reseed"
       # advice was true on tier2 only.
-      - name: Save Conan cache to GHCR (push:main or dispatch + miss only)
-        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && steps.conan_restore.outputs.hit == 'false'
+      - name: Save Conan cache to GHCR (push:main / dispatch on main + miss only)
+        if: (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')) && steps.conan_restore.outputs.hit == 'false'
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # for prune's `gh api` (delete stale tags)

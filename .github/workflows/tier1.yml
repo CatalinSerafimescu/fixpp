@@ -238,7 +238,7 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: read
-      packages: write  # auto-push-on-miss (push:main only) — save rebuilt Conan cache to GHCR
+      packages: write  # auto-push-on-miss (push:main / dispatch on main) — save rebuilt Conan cache to GHCR
     # Backstop against a hung test wedging the runner. A clean sanitizer leg is
     # ~24 min (build ~15 + test ~6 + setup); the debug leg hit ~45 min cold (whole
     # tree recompile on a new branch). 60->90 (2026-07-09): the tsan leg hit the
@@ -453,17 +453,19 @@ jobs:
       # the current graph's package_ids (conan cache save --list) → never stale
       # packages. Best-effort (continue-on-error); never on PRs (untrusted write).
       #
-      # `|| workflow_dispatch` (#222): tier2.yml has always accepted a manual
-      # dispatch as the reseed lever and documents it as a deliberate design
-      # choice; tier1 and tier3 gated on `push` alone, with no stated reason for
-      # the asymmetry. A dispatch here therefore restored, missed, rebuilt — and
-      # published NOTHING, so the only reseed lever on these tiers was a push to
-      # main. restore-conan-cache.sh's MISS annotation is shared by all seven
-      # call sites and now tells the reader to "dispatch this workflow on main to
-      # reseed"; making the gate uniform is what makes that sentence true here,
-      # rather than teaching one diagnostic to describe a per-tier special case.
-      - name: Save Conan cache to GHCR (push:main or dispatch + miss only)
-        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && steps.conan_restore.outputs.hit == 'false'
+      # `|| (workflow_dispatch on main)` (#222): tier2.yml has always accepted a
+      # manual dispatch as the reseed lever and documents it as a deliberate
+      # design choice; tier1 and tier3 gated on `push` alone, with no stated
+      # reason for the asymmetry. A dispatch here therefore restored, missed,
+      # rebuilt — and published NOTHING, so the only reseed lever on these tiers
+      # was a push to main. restore-conan-cache.sh's MISS annotation is shared
+      # by all seven call sites and now tells the reader to "dispatch this
+      # workflow on main to reseed"; making the gate uniform (and ref-restricted
+      # to main, so only main's content can ever publish into main's namespace)
+      # is what makes that sentence true here, rather than teaching one
+      # diagnostic to describe a per-tier special case.
+      - name: Save Conan cache to GHCR (push:main / dispatch on main + miss only)
+        if: (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')) && steps.conan_restore.outputs.hit == 'false'
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # for prune's `gh api` (delete stale tags)
@@ -709,7 +711,7 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: read
-      packages: write  # auto-push-on-miss (push:main only) — coverage owns its tag
+      packages: write  # auto-push-on-miss (push:main / dispatch on main) — coverage owns its tag
     # Backstop against a hung coverage build; matches the `linux` job's 90 for
     # cold-ccache headroom (previously inherited GitHub's 360-min default).
     # 180->240 (2026-08-02, 083): tracks the `linux` job for the same reason —
@@ -811,8 +813,8 @@ jobs:
             -of build/linux-clang-coverage
 
       # `|| workflow_dispatch` — see the matrix job's save step for why (#222).
-      - name: Save Conan cache to GHCR (push:main or dispatch + miss only)
-        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && steps.conan_restore.outputs.hit == 'false'
+      - name: Save Conan cache to GHCR (push:main / dispatch on main + miss only)
+        if: (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')) && steps.conan_restore.outputs.hit == 'false'
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

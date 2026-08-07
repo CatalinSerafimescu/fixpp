@@ -351,19 +351,20 @@ jobs:
             --build=missing ^
             -of build/${{ matrix.preset }}
 
-      # Auto-push-on-miss. Gated to push:main and workflow_dispatch — both are
-      # maintainer-triggered, never a PR — so a PR can neither publish nor
-      # poison the package. workflow_dispatch is included deliberately: it makes
-      # a manual run the RESEED lever after a toolchain change, which is why no
-      # separate "the compiler changed" workflow is needed. A trigger that has to
-      # DETECT a change is strictly more fragile than a key that IS the change:
-      # the key already misses on a bump, so a dispatch only makes the reseed
-      # early instead of lazy.
+      # Auto-push-on-miss. Gated to push:main and workflow_dispatch on main:
+      # publication is restricted to main's ref, whether reached by push or by
+      # dispatch, so no branch other than main can publish into the namespace
+      # main consumes. workflow_dispatch is included deliberately: it makes a
+      # manual run on main the RESEED lever after a toolchain change, which is
+      # why no separate "the compiler changed" workflow is needed. A trigger
+      # that has to DETECT a change is strictly more fragile than a key that IS
+      # the change: the key already misses on a bump, so a dispatch only makes
+      # the reseed early instead of lazy.
       #
       # continue-on-error: publishing is an optimisation. A GHCR hiccup must not
       # redden a lane whose build and tests passed.
-      - name: Save Conan cache to GHCR (push:main / dispatch + miss only)
-        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && steps.conan_restore.outputs.hit == 'false'
+      - name: Save Conan cache to GHCR (push:main / dispatch on main + miss only)
+        if: (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')) && steps.conan_restore.outputs.hit == 'false'
         continue-on-error: true
         shell: bash
         env:
