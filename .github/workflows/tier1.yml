@@ -1260,7 +1260,7 @@ jobs:
             note "ccache-restore HIT  tier1-linux-clang-debug — $((kib / 1024)) MiB in ${CCACHE_DIR:-<unset>} before the build"
           else
             note "ccache-restore MISS tier1-linux-clang-debug — 0 KiB in ${CCACHE_DIR:-<unset>}; this run builds cold"
-            echo "::warning::ccache restore found NOTHING under key prefix tier1-linux-clang-debug. Expected on the first run after this landed, or if main's entry was LRU-evicted. This run's hit rate therefore says nothing about whether the build dirs align."
+            echo "::warning::ccache restore found NOTHING under key prefix tier1-linux-clang-debug — no compatible entry was visible at restore time. That is one of three things: the key was never seeded, main's entry was LRU-evicted, or the entries present have an incompatible cache version. It is NOT expected merely because this change is new: a compatible entry on refs/heads/main is readable from a PR ref. This run's hit rate therefore says nothing about whether the build dirs align — but the MISS itself is a finding to explain."
           fi
 
       - name: Conan install
@@ -1296,10 +1296,13 @@ jobs:
       #
       # The ASSERTION here is deliberately LIVENESS, not performance: it fails
       # only when ccache was never invoked at all (zero cacheable calls), which
-      # is the silent-nothing failure. A run that is genuinely cold — first run
-      # after this lands, or a clang major that moved — legitimately reports 0
-      # hits and many misses, and must NOT be red for it. Tighten to a hit-rate
-      # floor only once a warm run has established the baseline.
+      # is the silent-nothing failure. A run that is genuinely cold — no
+      # compatible cache entry was visible at restore time, or a clang major
+      # moved so every lookup misses — legitimately reports 0 hits and many
+      # misses, and must NOT be red for it. Coldness does not follow from this
+      # change being new; the restore-check step above says whether the entry
+      # was there. Tighten to a hit-rate floor only once a warm run has
+      # established the baseline.
       - name: ccache stats (none leg — restore-only)
         if: matrix.sanitizer == 'none'
         run: |
