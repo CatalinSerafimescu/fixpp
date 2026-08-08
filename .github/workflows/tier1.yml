@@ -1235,8 +1235,17 @@ jobs:
             echo "$1"
             if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then echo "$1" >> "$GITHUB_STEP_SUMMARY"; fi
           }
-          kib=$(ccache --print-stats | awk '$1=="cache_size_kibibyte" {print $2}')
-          : "${kib:=0}"
+          kib=$(ccache --print-stats |
+                awk '$1=="cache_size_kibibyte" {n++; v=$2} END {if (n!=1) exit 2; print v}') || {
+            echo "::error::\`ccache --print-stats\` did not report exactly one cache_size_kibibyte line — the stats FORMAT is not what this step parses (ccache version moved?). This says NOTHING about whether the restore landed: the INSTRUMENT could not measure. Fix the parse."
+            exit 1
+          }
+          case "$kib" in
+            ''|*[!0-9]*)
+              echo "::error::cache_size_kibibyte is not a non-negative integer: '$kib' — the INSTRUMENT could not measure. Fix the parse."
+              exit 1
+              ;;
+          esac
           if [ "$kib" -gt 0 ]; then
             note "ccache-restore HIT  tier1-linux-clang-debug — $((kib / 1024)) MiB in ${CCACHE_DIR:-<unset>} before the build"
           else
