@@ -96,7 +96,19 @@ fi
 # entries ccache already compressed (CCACHE_COMPRESSLEVEL=5 job-wide), so the two
 # numbers should track each other closely. If they ever diverge sharply, the
 # compression config moved and the transfer cost changed with it.
-note "ccache-cache archive \`$TAG\` — $(du -h "$WORK/ccache-$PRESET.tar" | cut -f1) archive, $(du -sh "$CCACHE_DIR" | cut -f1) on disk (cap \`${CCACHE_MAXSIZE:-ccache default}\`)"
+#
+# ⚠️ BOTH `du` CALLS ARE CAPTURED AND VALIDATED, BUT NEVER FATAL. A `du`
+# failure here is a cosmetic measurement problem, not a reason to withhold the
+# cache — an earlier draft prescribed returning nonzero before the `oras push`
+# below, which would convert a lost sizing datum into an unpublished cache and
+# a cold rebuild next run. Warn and publish anyway; the placeholder `?` in the
+# summary line says the datum is missing rather than pretending it is zero.
+archive_size="$(du -h "$WORK/ccache-$PRESET.tar" 2>/dev/null | cut -f1)"
+disk_size="$(du -sh "$CCACHE_DIR" 2>/dev/null | cut -f1)"
+if [ -z "$archive_size" ] || [ -z "$disk_size" ]; then
+  note "::warning::ccache-cache could not measure the archive/disk size for \`$TAG\` — #240's demand datum is MISSING from this run. Publication proceeds; only the measurement is lost."
+fi
+note "ccache-cache archive \`$TAG\` — ${archive_size:-?} archive, ${disk_size:-?} on disk (cap \`${CCACHE_MAXSIZE:-ccache default}\`)"
 
 # Push from inside $WORK with a RELATIVE filename so oras' absolute-path guard
 # passes and the artifact title is the clean basename (same reason as

@@ -152,6 +152,17 @@ exec /bin/mv "$@"
 SHIM
 chmod +x "$shim_dir/mv"
 
+# ── du shim ──────────────────────────────────────────────────────────────────
+# Pass-through unless FAKE_DU_EXIT says otherwise. Exists for ONE case: the
+# sizing datum ci/seed-ccache.sh reports failing without aborting the publish
+# (3a/F4) — a `du` that prints nothing and exits non-zero.
+cat > "$shim_dir/du" <<'SHIM'
+#!/usr/bin/env bash
+if [ "${FAKE_DU_EXIT:-0}" != "0" ]; then exit "${FAKE_DU_EXIT}"; fi
+exec /usr/bin/du "$@"
+SHIM
+chmod +x "$shim_dir/du"
+
 # ── gh shim (prune) ──────────────────────────────────────────────────────────
 # One page, one untagged orphan + the live tag. DELETE always succeeds unless
 # FAKE_GH_DELETE_EXIT says otherwise.
@@ -401,6 +412,21 @@ want_out 'ccache-cache archive' "seed/ok"
 want_out 'cap `2G`' "seed/ok"
 grep -q "ccache-fake-libc++.tar" "$PUSH_RECORD" || fail "seed/ok: nothing was pushed"
 ok "SEEDED — archive published, size + cap reported"
+
+# ── 3a/F4 — THE SIZING DATUM FAILING MUST NOT ABORT THE PUBLISH ──────────────
+#
+# The reviewer's prescription (return nonzero on a `du` failure) was rejected:
+# that sits before the `oras push` and would turn a cosmetic sizing failure
+# into an unpublished cache, i.e. a cold rebuild next run. Warn, and let
+# publication proceed with a `?` placeholder for the missing datum.
+rm -rf "$CDIR"; mkdir -p "$CDIR/aa"; printf 'x\n' > "$CDIR/aa/entry"
+FAKE_DU_EXIT=1 seed_case fake-libc++ 0 0
+want_status 0 "seed/du-fails"
+want_out '::warning::' "seed/du-fails"
+want_out 'demand datum is MISSING' "seed/du-fails"
+want_out 'ccache-cache SEEDED' "seed/du-fails"
+want_no_out '— archive,' "seed/du-fails"
+ok "sizing datum unmeasurable — warns, publish still proceeds (3a/F4)"
 
 # The size line must precede the push, so the sizing datum survives a failed push.
 seed_case fake-libc++ 7 0
