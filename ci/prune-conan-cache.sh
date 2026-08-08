@@ -118,6 +118,10 @@ for row in "${STALE[@]}"; do
     if out=$(gh api --method DELETE "user/packages/container/$PKG/versions/$vid" 2>&1); then
       echo "prune: deleted stale version $vid  tags=[$tags]"
       deleted=$((deleted + 1))
+    elif printf '%s' "$out" | grep -qE '"status": *"404"|Package version not found'; then
+      # Already gone is success, not a refusal — see prune-sccache.sh for why
+      # (parallel legs racing to reclaim the same shared orphan).
+      echo "prune: already gone $vid  tags=[$tags] (deleted by a concurrent leg)"
     else
       echo "prune: REFUSED version $vid  tags=[$tags] — $(printf '%s' "$out" | tr -s '\n\r\t ' ' ' | cut -c1-200)"
       pending=$((pending + 1))

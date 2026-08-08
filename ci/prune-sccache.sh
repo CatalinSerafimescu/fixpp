@@ -177,6 +177,16 @@ for row in "${DEAD[@]:-}"; do
   if out=$(gh api --method DELETE "user/packages/container/$PKG/versions/$vid" 2>&1); then
     echo "prune: deleted version $vid  tags=[$tags]"
     deleted=$((deleted + 1))
+  elif printf '%s' "$out" | grep -qE '"status": *"404"|Package version not found'; then
+    # ALREADY GONE IS SUCCESS, NOT A REFUSAL. The three tier2 legs run in
+    # PARALLEL and each prunes the shared pool of untagged versions, so they
+    # routinely list the same orphan and race to delete it. The losers get 404.
+    # Counting that as PENDING would make every successful cleanup report
+    # "dead version(s) could not be reclaimed" on 2 of 3 legs — an instrument
+    # crying wolf, which is the failure mode this script exists to end.
+    # Safe to treat as reclaimed: we listed this id moments ago, so a 404 now
+    # means something else removed it, which is the outcome we wanted.
+    echo "prune: already gone $vid  tags=[$tags] (deleted by a concurrent leg)"
   else
     # Same collapse-and-truncate as the LIST failure above: gh prints a one-line
     # diagnosis followed by a pretty-printed JSON body, so the first line is
