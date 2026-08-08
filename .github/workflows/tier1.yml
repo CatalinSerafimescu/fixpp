@@ -1183,7 +1183,7 @@ jobs:
 
       # ── ccache — `none` leg only, RESTORE-ONLY (#244 part 1) ──────────────
       # Same key PREFIX as the matrix `linux` job's `tier1-${{ matrix.preset }}`
-      # for preset=linux-clang-debug, so this restores that job's entries.
+      # for linux-clang-debug — INTENDED to restore its entries, NOT verified here.
       #
       # `save: false` is load-bearing, twice over. (1) The matrix debug leg owns
       # the save, so this adds ZERO bytes to the repo-wide 10 GB Actions pool —
