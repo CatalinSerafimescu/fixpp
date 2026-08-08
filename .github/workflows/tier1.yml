@@ -1198,6 +1198,36 @@ jobs:
           max-size: 2G
           save: false
 
+      # Did the RESTORE land? Asked BEFORE the build, because the post-build hit
+      # rate cannot tell the two failure modes apart — "restored nothing" and
+      # "restored fine but the objects didn't match" both read as 0% hits over a
+      # nonzero call count.
+      #
+      #   size > 0  ⇒ the restore landed, so a later 0% hit rate is a BUILD
+      #               DIVERGENCE finding (the build-dir alignment didn't work).
+      #   size == 0 ⇒ the restore is the story and the hit rate says nothing
+      #               about build dirs. Legitimate states: nothing seeded yet, or
+      #               main's own entry was LRU-evicted (see
+      #               feedback_ccache_action_timestamped_keys_accumulate_on_default_branch
+      #               — main's timestamped keys accumulate and evict main).
+      #
+      # WARN, not fail: an evicted cache must be NAMED in the log, not red.
+      # Also the first observation in this repo of ccache-action sharing a key
+      # ACROSS jobs — every other call site uses its own job's key — so this line
+      # is what would surface a cross-job restore-prefix violation instead of it
+      # being misread as "the rename didn't work".
+      - name: ccache restore check (did the matrix debug leg's cache land?)
+        if: matrix.sanitizer == 'none'
+        run: |
+          set -euo pipefail
+          kib=$(ccache --print-stats | awk '$1=="cache_size_kibibyte" {print $2}')
+          : "${kib:=0}"
+          if [ "$kib" -gt 0 ]; then
+            echo "ccache restore: LANDED — $((kib / 1024)) MiB present in ${CCACHE_DIR:-<unset>} before the build."
+          else
+            echo "::warning::ccache restore found NOTHING under key prefix tier1-linux-clang-debug (0 KiB in ${CCACHE_DIR:-<unset>}). Expected on the first run after this landed, or if main's entry was LRU-evicted. This run will build cold, and its hit rate says nothing about whether the build dirs align."
+          fi
+
       - name: Conan install
         run: |
           # All legs share the linux-clang-debug Conan profile; the sanitizer is
@@ -1253,11 +1283,21 @@ jobs:
           val() { awk -v k="$1" '$1==k {print $2}' /tmp/ccache-stats.txt; }
           dhit=$(val direct_cache_hit);  phit=$(val preprocessed_cache_hit)
           miss=$(val cache_miss)
-          : "${dhit:=0}" "${phit:=0}" "${miss:=0}"
+          # DISCRIMINATE THE TWO REDS. Absent keys and zero calls both fail this
+          # step, but they are different findings, and a message that asserts a
+          # cause it did not measure sends the next reader down the wrong path
+          # (feedback_msys_rewrites_leading_slash_args_into_the_git_install_dir —
+          # that cost two rounds). Missing keys = the INSTRUMENT could not
+          # measure; zero calls = the instrument measured, and the answer is that
+          # ccache was never invoked.
+          if [ -z "$dhit" ] || [ -z "$phit" ] || [ -z "$miss" ]; then
+            echo "::error::\`ccache --print-stats\` did not report direct_cache_hit / preprocessed_cache_hit / cache_miss — the stats FORMAT is not what this step parses (ccache version moved?). This says NOTHING about the launcher or the cache: the instrument itself could not measure. Fix the parse."
+            exit 1
+          fi
           hits=$((dhit + phit)); calls=$((hits + miss))
           echo "ccache: hits=$hits (direct=$dhit preprocessed=$phit) misses=$miss cacheable_calls=$calls"
           if [ "$calls" -eq 0 ]; then
-            echo "::error::ccache recorded ZERO cacheable calls on the none leg — the compiler launcher was not wired in (check CMAKE_CXX_COMPILER_LAUNCHER in build/${{ matrix.bdir }}/CMakeCache.txt), so this leg is not using the matrix debug leg's cache at all."
+            echo "::error::ccache recorded ZERO cacheable calls on the none leg — it was never invoked, so the compiler launcher was not wired in. Check CMAKE_CXX_COMPILER_LAUNCHER in build/${{ matrix.bdir }}/CMakeCache.txt. (A 0% hit rate over a NONZERO call count would be a different finding — see the restore-check step above for which of the two.)"
             exit 1
           fi
           pct=$((hits * 100 / calls))
