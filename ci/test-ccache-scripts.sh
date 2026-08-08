@@ -184,6 +184,7 @@ run() {
   ) > "$OUT_FILE" 2>&1 || STATUS=$?
   OUT="$(cat "$OUT_FILE")"
   HIT="$(sed -n 's/^hit=//p' "$GH_OUTPUT")"
+  STEP_OUTPUTS="$(cat "$GH_OUTPUT")"
   SUMMARY_TEXT="$(cat "$SUMMARY")"
   rm -f "$OUT_FILE" "$GH_OUTPUT" "$SUMMARY"
   if printf '%s\n' "$OUT" | grep -q 'SHIM-VIOLATION'; then
@@ -196,6 +197,12 @@ want_status() { [ "$STATUS" -eq "$1" ] || { printf '%s\n' "$OUT" | sed 's/^/  | 
 want_out()    { printf '%s\n' "$OUT" | grep -q -- "$1" || { printf '%s\n' "$OUT" | sed 's/^/  | /'; fail "$2: expected output matching '$1'"; }; }
 want_no_out() { if printf '%s\n' "$OUT" | grep -q -- "$1"; then printf '%s\n' "$OUT" | sed 's/^/  | /'; fail "$2: output must NOT match '$1'"; fi; }
 want_hit()    { [ "${HIT:-<unset>}" = "$1" ] || fail "$2: expected hit=$1, got '${HIT:-<unset>}'"; }
+want_step_output() {
+  printf '%s\n' "$STEP_OUTPUTS" | grep -qx -- "$1" || {
+    printf '%s\n' "$STEP_OUTPUTS" | sed 's/^/  | /'
+    fail "$2: expected the step output line '$1' in \$GITHUB_OUTPUT"
+  }
+}
 
 TAG="$(expected_tag 'fake-libc++')" || fail "could not compute the expected tag"
 [ -n "$TAG" ] || fail "expected tag is empty"
@@ -430,13 +437,28 @@ write_stats 1400 0 61 1900000 2097152 0
 stats_case true success
 want_status 0 "stats/warm"
 want_out 'ccache-hitrate 95% over 1461 cacheable calls' "stats/warm"
+want_step_output 'misses=61' "stats/warm"
 ok "warm run — hit rate reported, exit 0"
+
+# The seed step's `&& misses != 0` guard reads this. An UNCHANGED cache must
+# report zero so the seed can skip re-tarring and re-uploading ~2 GB to publish
+# a byte-equivalent artifact.
+write_stats 1461 0 0 1900000 2097152 0
+stats_case true success
+want_status 0 "stats/unchanged"
+want_step_output 'misses=0' "stats/unchanged"
+want_out 'ccache-hitrate 100%' "stats/unchanged"
+ok "all hits, zero misses — misses=0 published so the seed can skip republishing"
 
 write_stats 0 0 0 0 512000 0
 stats_case false success
 want_status 1 "stats/zero-calls"
 want_out '::error::ccache recorded ZERO cacheable calls' "stats/zero-calls"
 want_out 'Causes still open' "stats/zero-calls"
+# Emitted even on the FATAL path — the counters are computed and published
+# before the liveness branch, because a value computed after a branch that can
+# exit is how a step output silently goes missing.
+want_step_output 'misses=0' "stats/zero-calls"
 ok "zero cacheable calls after a SUCCESSFUL build — fatal, with the causes left open"
 
 stats_case false failure

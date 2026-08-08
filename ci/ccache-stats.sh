@@ -97,6 +97,39 @@ clean="$(read_counter cleanups_performed)"    || exit 1
 hits=$((dhit + phit))
 calls=$((hits + miss))
 
+# ── Published so the seed step can skip republishing an UNCHANGED cache ───────
+#
+# `cache_miss == 0` after a successful build means ccache wrote no new entry, so
+# the tag already holds this content and re-archiving ~2 GB and re-uploading it
+# accomplishes nothing except orphaning another untagged version for the pruner
+# to reclaim. That is the ordinary shape of a CI-, docs- or workflow-only push
+# to main — this PR is itself one.
+#
+# ⚠️ EMITTED HERE, BEFORE THE LIVENESS CHECK BELOW, ON PURPOSE. The value is
+# wanted even on the paths that end in `exit 1`, and computing it after a branch
+# that can exit is how an output silently goes missing.
+#
+# ⚠️ THE CONSUMER'S GUARD IS FAIL-OPEN, AND THAT IS THE RIGHT DIRECTION. If this
+# step never ran or died before this line, `steps.<id>.outputs.misses` is empty,
+# `!= '0'` is true, and the seed publishes exactly as it does today. The guard
+# only ever SKIPS on positive evidence that nothing changed; it can never
+# withhold a cache because a measurement was missing.
+#
+# ⚠️ `misses` ALONE IS SUFFICIENT — do not add `&& restore == 'hit'`. A restore
+# MISS with zero misses would mean no compile ran at all, and that case cannot
+# reach the seed: the liveness check below exits 1 on it, which fails the job and
+# skips every later step. Adding the conjunct would look safer while guarding a
+# path that is already closed, and would then also skip the legitimate
+# cold-seed case if the reasoning behind it ever drifted.
+if [ -n "${GITHUB_OUTPUT:-}" ]; then
+  {
+    echo "misses=${miss}"
+    echo "hits=${hits}"
+    echo "calls=${calls}"
+    echo "cleanups=${clean}"
+  } >> "$GITHUB_OUTPUT"
+fi
+
 # ── The thrash indicator #240 exists to close ────────────────────────────────
 #
 # The 500M cap was defended by a comment measuring what the cap ALLOWED
