@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
-# Regression pin for the Tier 3 ccache scripts (#240, and #248's "extract the
-# probes into a TESTED ci/ script" deliverable).
+# Regression pin for the Tier 3 ccache scripts (#240).
+#
+# ⚠️ THIS DOES NOT CLOSE #248. #248 is specifically about extracting TIER 1's
+# in-workflow ccache probes (the ~170 lines of `run:` script around
+# python-bindings) into a tested ci/ script; those `run:` blocks are UNCHANGED
+# by this PR. What lands here is the same pattern applied to new code, and
+# ci/ccache-stats.sh is deliberately shaped to absorb tier1's probes when #248
+# is taken. Do not read a green run of this file as evidence about #248.
 #
 # Shims `oras`, `ccache`, `gh` and the compiler on a temp PATH, builds a
 # throwaway CMakePresets.json, and drives the REAL scripts —
@@ -438,6 +444,16 @@ want_status 0 "stats/zero-calls-red-build"
 want_out 'no liveness claim is made' "stats/zero-calls-red-build"
 want_no_out '::error::' "stats/zero-calls-red-build"
 ok "zero cacheable calls after a FAILED build — explained, no liveness claim"
+
+# `skipped`, not `failure`. The stats step is `if: always()`, so a Configure
+# failure reaches it with Build SKIPPED — a third outcome value, and the one a
+# `== "failure"` test would miss. The branch is `!= "success"` and already
+# correct; this pins it.
+stats_case false skipped
+want_status 0 "stats/zero-calls-skipped-build"
+want_out 'reported `skipped`' "stats/zero-calls-skipped-build"
+want_no_out '::error::' "stats/zero-calls-skipped-build"
+ok "zero cacheable calls after a SKIPPED build (Configure failed) — same branch"
 
 # A cold run is NOT red. This is the acceptance rule #240 inherits from #247:
 # assert liveness, never a hit-rate floor.
