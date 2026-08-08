@@ -138,3 +138,47 @@ ccache_cache_key() {
   # agreement if either ever changes.
   CCACHE_CACHE_TAG="ccache-${preset//+/x}-${CCACHE_CACHE_TOOLSET}"
 }
+
+# ccache_tag_regex <preset>
+#
+# Sets: CCACHE_TAG_RE — an anchored regex matching every tag ccache_cache_key
+# can mint for <preset>, and nothing else.
+# Returns 1 if the preset cannot be safely interpolated into a regex.
+#
+# ── WHY THE MATCHER LIVES BESIDE THE MINTER ──────────────────────────────────
+#
+# The pruner has to recognise the tags this file produces. When those two
+# expressions live in different files they are joined only by a prose "keep them
+# in agreement", and the failure mode of that drifting is SILENT: a tag the
+# regex does not match is classified as somebody else's and skipped, so nothing
+# is deleted, no `prune: PENDING` note fires, and multi-GB versions accumulate
+# forever while every log looks clean. Four legs republish per push:main here.
+#
+# Co-location makes the two expressions readable together. It does NOT make them
+# impossible to drift — only the test that derives its fixture from a REAL
+# minted tag does that (ci/test-ccache-scripts.sh). Both are needed; neither
+# substitutes for the other.
+#
+# ⚠️ PURE STRING WORK ON PURPOSE — no compiler invocation, no jq, no
+# CMakePresets.json. `ccache_cache_key` needs a working toolchain because it
+# probes `--version`; a pruner must stay runnable anywhere, including on a
+# maintainer's laptop reclaiming a backlog for a preset whose compiler is not
+# installed. Do not "simplify" this by deriving the regex from a minted tag.
+ccache_tag_regex() {
+  local preset="$1"
+  local safe="${preset//+/x}"
+
+  # Same '+' → 'x' sanitization the tag itself carries (OCI tags forbid '+'), in
+  # ONE place now rather than restated by each caller.
+  case "$safe" in
+    *[!a-zA-Z0-9_-]*)
+      echo "ccache-cache: preset '$preset' contains a character that is not safe to interpolate into a tag regex." >&2
+      return 1 ;;
+  esac
+
+  # ⚠️ ANCHORED AT BOTH ENDS, and the end anchor is the load-bearing one.
+  # `linux-clang-libcxx` IS a prefix of `linux-clang-libcxx-asan`, so a
+  # start-anchored regex run for the plain lane would classify all three
+  # sanitizer lanes' LIVE caches as reclaimable.
+  CCACHE_TAG_RE="^ccache-${safe}-clang[0-9a-z]+-[0-9a-f]+\$"
+}

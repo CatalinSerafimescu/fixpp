@@ -28,10 +28,29 @@
 # classify all three sanitizer lanes' live caches as "mine" and delete them.
 #
 # So the discrimination moved OUT of here, to the caller that knows the tag
-# grammar. All this script enforces is that the regex is anchored at the start
-# — a caller who forgets `^` gets a refusal, not a substring match. It cannot
-# check the END anchor, because the two tag grammars legitimately differ
-# (sccache tags end in a dotted toolset, ccache tags in clangNN-<sha8>).
+# grammar. What this script enforces is that the regex is anchored at BOTH ends
+# — a caller who forgets either gets a refusal, not a substring match.
+#
+# ⚠️ An earlier draft enforced `^` only, reasoning that "it cannot check the END
+# anchor, because the two tag grammars legitimately differ". That is a
+# non-sequitur, and it is recorded because it is an easy one to re-derive:
+# differing grammars prevent this script from requiring a particular SHAPE, not
+# from requiring a terminal `$`. Each caller states its own end — sccache's
+# toolset is dotted-numeric (`[0-9.]+$`), ccache's is `clangNN-<sha8>` — and
+# neither needs this file to know which.
+#
+# The trade is stated rather than hidden: end-anchoring converts possible
+# over-DELETION into possible silent under-deletion if a tag grammar later
+# changes without its regex following. That is why `ccache_tag_regex` lives
+# beside the minting expression in ci/ccache-cache-key.sh, and why
+# ci/test-ccache-scripts.sh derives its superseded fixture from a REAL minted
+# tag rather than a hardcoded one.
+#
+# Verified safe for Tier 2 at the time of the change by MEASUREMENT, not
+# reasoning: all three live fixpp-sccache tags
+# (`sccache-windows-msvc-{asan,debug,release}-14.44.35207`) match the
+# end-anchored form, so no existing version stopped being classified as
+# reclaimable.
 #
 # ── ⚠️ WHETHER THIS DELETES FROM CI DEPENDS ENTIRELY ON THE TOKEN ────────────
 #
@@ -76,6 +95,10 @@ command -v gh >/dev/null 2>&1 || { echo "prune: PENDING ? — gh not found; noth
 case "$TAG_RE" in
   '^'*) : ;;
   *) echo "prune: PENDING ? — tag regex '$TAG_RE' is not anchored at '^'; refusing to classify by substring (see this script's header for the libcxx prefix collision that makes this fatal)"; exit 0 ;;
+esac
+case "$TAG_RE" in
+  *'$') : ;;
+  *) echo "prune: PENDING ? — tag regex '$TAG_RE' is not anchored at '\$'; a start-only anchor still matches a LONGER preset's tags, which is how pruning one lane deletes a sibling lane's live cache. Nothing was examined."; exit 0 ;;
 esac
 
 # SAFE UNDER A STATED CONTRACT, mirroring prune-conan-cache.sh:

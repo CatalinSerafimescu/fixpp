@@ -215,14 +215,33 @@ case "$TAG" in
   'ccache-fake-libcxx-clang22-'*) ok "tag sanitizes '+' to 'x' and folds the compiler id" ;;
   *) fail "tag '$TAG' does not have the documented grammar" ;;
 esac
+
+# ── THE PRODUCER/MATCHER BRIDGE — the assertion this file exists for ─────────
+#
+# `ccache_tag_regex` must match a tag `ccache_cache_key` ACTUALLY MINTED. Both
+# come from the real key script; nothing about the grammar is restated here. A
+# change to the minting expression that the regex does not follow fails HERE,
+# rather than surfacing months later as multi-GB versions accumulating while
+# every log looks clean — a non-matching tag is classified as somebody else's
+# and skipped SILENTLY, so the `prune: PENDING` note never fires.
+TAG_RE="$(
+  cd "$sandbox" && PATH="$shim_dir:$PATH" \
+  . "$CI_DIR/ccache-cache-key.sh" && ccache_tag_regex 'fake-libc++' >/dev/null 2>&1 \
+    && printf '%s' "$CCACHE_TAG_RE"
+)"
+[ -n "$TAG_RE" ] || fail "ccache_tag_regex produced nothing for the plain preset"
+printf '%s' "$TAG" | grep -qE -- "$TAG_RE" \
+  || fail "the pruner's regex '$TAG_RE' does not match the tag the key script minted ('$TAG') — producer and matcher have drifted"
+ok "the pruner's regex matches a tag the key script actually minted"
+
 # ANCHORED-REGEX COLLISION, asserted rather than reasoned about: the plain
-# preset's prune regex must NOT match a sanitizer preset's tag. This is the
-# whole reason prune-ccache.sh anchors both ends.
+# preset's regex must NOT match a sanitizer preset's tag. Both sides derived,
+# neither restated — this is the whole reason both ends are anchored.
 ASAN_TAG="$(expected_tag 'fake-libc++-asan')" || fail "asan tag"
-if printf '%s' "$ASAN_TAG" | grep -qE "^ccache-fake-libcxx-clang[0-9a-z]+-[0-9a-f]+\$"; then
-  fail "the plain preset's anchored prune regex matches the asan preset's tag '$ASAN_TAG' — the four legs' namespaces are NOT disjoint"
+if printf '%s' "$ASAN_TAG" | grep -qE -- "$TAG_RE"; then
+  fail "the plain preset's regex '$TAG_RE' matches the asan preset's tag '$ASAN_TAG' — the four legs' namespaces are NOT disjoint"
 fi
-ok "the plain preset's prune regex does not match a sanitizer preset's tag"
+ok "the plain preset's regex does not match a sanitizer preset's tag"
 
 # ═════ ci/restore-ccache.sh ══════════════════════════════════════════════════
 echo "── restore-ccache.sh ──"
@@ -378,7 +397,17 @@ ok "unidentifiable compiler — publishes nothing, never fatal"
 # that restates the pattern it is checking proves only that it can copy.
 echo "── prune-ccache.sh ──"
 
-FAKE_VERSIONS_JSON="$(printf '[{"id":1,"metadata":{"container":{"tags":["%s"]}}},{"id":2,"metadata":{"container":{"tags":["%s"]}}},{"id":3,"metadata":{"container":{"tags":["ccache-fake-libcxx-clang22-00000000"]}}},{"id":4,"metadata":{"container":{"tags":[]}}}]' "$TAG" "$ASAN_TAG")"
+# ⚠️ THE SUPERSEDED FIXTURE IS DERIVED FROM THE REAL TAG, NOT HARDCODED.
+# id 1 is the keep-tag and is excluded from regex classification by `is_current`;
+# id 2 belongs to a sibling lane. So id 3 is the ONLY version whose fate the
+# regex decides — and a hardcoded old-shape string there would keep matching an
+# unchanged regex forever, leaving the whole prune section green while the
+# pruner matched nothing from the second republish onward. Mutating the digest
+# of a genuinely minted tag keeps it in whatever grammar the key script
+# currently produces.
+SUPERSEDED_TAG="$(printf '%s' "$TAG" | sed 's/[0-9a-f]\{8\}$/00000000/')"
+[ "$SUPERSEDED_TAG" != "$TAG" ] || fail "could not derive a superseded tag from '$TAG' — the fixture would be vacuous"
+FAKE_VERSIONS_JSON="$(printf '[{"id":1,"metadata":{"container":{"tags":["%s"]}}},{"id":2,"metadata":{"container":{"tags":["%s"]}}},{"id":3,"metadata":{"container":{"tags":["%s"]}}},{"id":4,"metadata":{"container":{"tags":[]}}}]' "$TAG" "$ASAN_TAG" "$SUPERSEDED_TAG")"
 
 FAKE_VERSIONS_JSON="$FAKE_VERSIONS_JSON" DRY_RUN=1 \
   run "$CI_DIR/prune-ccache.sh" 'fake-libc++' "$TAG"
@@ -406,10 +435,39 @@ ok "keep-tag absent from the listing — deletes nothing and says so"
 # substring-matched.
 FAKE_VERSIONS_JSON="$FAKE_VERSIONS_JSON" DRY_RUN=1 \
   run "$CI_DIR/prune-compiler-cache.sh" fixpp-ccache lbl 'ccache-fake-libcxx-' "$TAG"
-want_status 0 "prune/unanchored"
-want_out 'is not anchored' "prune/unanchored"
-want_no_out 'would delete' "prune/unanchored"
-ok "an unanchored tag regex is refused rather than substring-matched"
+want_status 0 "prune/unanchored-start"
+want_out "is not anchored at '\^'" "prune/unanchored-start"
+want_no_out 'would delete' "prune/unanchored-start"
+ok "a regex with no '^' is refused rather than substring-matched"
+
+# The END anchor is refused too. A start-only regex still matches a LONGER
+# preset's tags, which is exactly how pruning one lane deletes a sibling's live
+# cache — the failure the ccache grammar makes reachable and the sccache one
+# avoids only by accident of naming.
+FAKE_VERSIONS_JSON="$FAKE_VERSIONS_JSON" DRY_RUN=1 \
+  run "$CI_DIR/prune-compiler-cache.sh" fixpp-ccache lbl '^ccache-fake-libcxx-' "$TAG"
+want_status 0 "prune/unanchored-end"
+want_out "is not anchored at" "prune/unanchored-end"
+want_no_out 'would delete' "prune/unanchored-end"
+ok "a regex with no '\$' is refused — the sibling-lane deletion path is closed at the callee"
+
+# ── The SCCACHE wrapper, checked here because nothing else checks it ─────────
+#
+# This harness exists for the ccache scripts, but `prune-sccache.sh` is the
+# other caller of the same callee and has NO harness of its own. Without this,
+# a Tier 2 regex that lost its end anchor would be caught only at runtime, as a
+# `prune: PENDING ?` on a push:main — correct, but late and on the frozen path.
+# Asserting the negative here costs one case.
+#
+# Deliberately asserts only that the pattern is ACCEPTED, not what it deletes:
+# the fixture is the ccache package's, so no version can match, and inventing
+# sccache fixtures would restate the Tier 2 grammar this file has no business
+# owning.
+FAKE_VERSIONS_JSON='[{"id":9,"metadata":{"container":{"tags":["sccache-windows-msvc-debug-14.44.35207"]}}}]' DRY_RUN=1 \
+  run "$CI_DIR/prune-sccache.sh" windows-msvc-debug sccache-windows-msvc-debug-14.44.35207
+want_status 0 "prune/sccache-anchored"
+want_no_out 'is not anchored' "prune/sccache-anchored"
+ok "the sccache wrapper's regex satisfies the callee's both-ends anchor requirement"
 
 # ═════ ci/ccache-stats.sh ════════════════════════════════════════════════════
 echo "── ccache-stats.sh ──"

@@ -6,21 +6,15 @@
 #   ci/prune-ccache.sh linux-clang-libc++ ccache-linux-clang-libcxx-clang22-15dc124f
 #   DRY_RUN=1 ci/prune-ccache.sh linux-clang-libc++ ''     # list, delete nothing
 #
-# ⚠️ THE REGEX IS ANCHORED AT BOTH ENDS, and that is not stylistic.
-# `linux-clang-libcxx` is a PREFIX of `linux-clang-libcxx-asan`, so the
-# start-anchored form the sccache wrapper uses would make a prune of the plain
-# libc++ lane classify all three sanitizer lanes' live caches as "mine" and
-# delete them. The end anchor is what keeps the four Tier 3 legs' namespaces
-# disjoint.
+# ⚠️ THE TAG GRAMMAR IS NOT RESTATED HERE. It comes from `ccache_tag_regex` in
+# ci/ccache-cache-key.sh, beside the expression that MINTS the tags — because a
+# producer and a matcher in separate files drift silently: a tag the regex does
+# not match is classified as somebody else's and skipped, so nothing is deleted
+# and no `prune: PENDING` note ever fires. See that function's header.
 #
-# The grammar mirrored here is ci/ccache-cache-key.sh's:
-#
-#     ccache-<preset, '+' → 'x'>-clang<major>-<sha8 of `clang++ --version`>
-#
-# Keep the two in agreement. A tag the key script can mint but this regex does
-# not match is not merely unpruned — it is a version that accumulates forever
-# while the backlog note stays silent, because a non-matching tag is classified
-# as "someone else's" and skipped.
+# `ccache_tag_regex` is pure string work — no compiler probe, no jq — so this
+# wrapper stays runnable on a machine that cannot build the preset at all, which
+# is exactly the situation a maintainer draining a backlog is in.
 #
 # BEST-EFFORT: never exits non-zero. See ci/prune-compiler-cache.sh for the
 # `prune: PENDING <n>` contract and the delete:packages token requirement.
@@ -28,17 +22,13 @@ set -uo pipefail
 PRESET="${1:?usage: prune-ccache.sh <preset> <current-tag>}"
 CURRENT_TAG="${2-}"
 
-# Same sanitization the tag itself carries (conan-cache-key.sh:101,
-# ccache-cache-key.sh) — OCI tags forbid '+', so `libc++` → `libcxx`.
-SAFE_PRESET="${PRESET//+/x}"
+# shellcheck source=ci/ccache-cache-key.sh
+. "$(dirname "$0")/ccache-cache-key.sh"
 
-# The preset is interpolated into a REGEX below. After the '+' substitution the
-# libc++ presets are `[a-z0-9-]`, but refuse rather than assume.
-case "$SAFE_PRESET" in
-  *[!a-zA-Z0-9_-]*)
-    echo "prune: PENDING ? — preset '$PRESET' contains a character that is not safe to interpolate into a tag regex; nothing was examined"
-    exit 0 ;;
-esac
+if ! ccache_tag_regex "$PRESET"; then
+  echo "prune: PENDING ? — could not build a tag pattern for preset '$PRESET'; nothing was examined"
+  exit 0
+fi
 
 exec "$(dirname "$0")/prune-compiler-cache.sh" \
-  fixpp-ccache "$PRESET" "^ccache-${SAFE_PRESET}-clang[0-9a-z]+-[0-9a-f]+\$" "$CURRENT_TAG"
+  fixpp-ccache "$PRESET" "$CCACHE_TAG_RE" "$CURRENT_TAG"
