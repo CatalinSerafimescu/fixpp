@@ -1321,7 +1321,12 @@ jobs:
           hits=$((dhit + phit)); calls=$((hits + miss))
           echo "ccache: hits=$hits (direct=$dhit preprocessed=$phit) misses=$miss cacheable_calls=$calls"
           if [ "$calls" -eq 0 ]; then
-            echo "::error::ccache recorded ZERO cacheable calls on the none leg — it was never invoked, so the compiler launcher was not wired in. Check CMAKE_CXX_COMPILER_LAUNCHER in build/${{ matrix.bdir }}/CMakeCache.txt. (A 0% hit rate over a NONZERO call count would be a different finding — see the restore-check step above for which of the two.)"
+            cache_file="build/${{ matrix.bdir }}/CMakeCache.txt"
+            if grep -qE '^CMAKE_CXX_COMPILER_LAUNCHER:[^=]*=.*ccache' "$cache_file"; then
+              echo "::error::ccache recorded ZERO cacheable calls, but the launcher IS wired in — $cache_file carries CMAKE_CXX_COMPILER_LAUNCHER=…ccache. So ccache RAN and classified every invocation as uncacheable. Read the \`ccache --show-stats\` output above for called_for_link / called_for_preprocessing / unsupported_* / could_not_use_modules. (ccache 4.9.x has no aggregate uncacheable counter — those individual counters are the evidence.)"
+            else
+              echo "::error::ccache recorded ZERO cacheable calls AND $cache_file carries no CMAKE_CXX_COMPILER_LAUNCHER=…ccache — the compiler launcher was not wired in."
+            fi
             exit 1
           fi
           pct=$((hits * 100 / calls))
