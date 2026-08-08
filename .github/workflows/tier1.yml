@@ -1247,7 +1247,7 @@ jobs:
           }
           kib=$(ccache --print-stats |
                 awk '$1=="cache_size_kibibyte" {n++; v=$2} END {if (n!=1) exit 2; print v}') || {
-            echo "::error::\`ccache --print-stats | awk\` did not yield exactly one cache_size_kibibyte value. Either ccache itself failed or is not installed, or the stats FORMAT is not what this step parses (ccache version moved?) — run \`ccache --print-stats\` in the step above to tell which. Either way this says NOTHING about whether the restore landed: the INSTRUMENT could not measure."
+            echo "::error::\`ccache --print-stats | awk\` did not yield exactly one cache_size_kibibyte value. Three causes reach here: ccache itself failed or is not installed, \`awk\` itself failed, or the stats FORMAT is not what this step parses (ccache version moved?) — run \`ccache --print-stats\` in the step above to tell which. Either way this says NOTHING about whether the restore landed: the INSTRUMENT could not measure."
             exit 1
           }
           case "$kib" in
@@ -1300,14 +1300,19 @@ jobs:
       # inference; printed hit/miss counts are an observation.
       #
       # The ASSERTION here is deliberately LIVENESS, not performance: it fails
-      # only when ccache was never invoked at all (zero cacheable calls), which
-      # is the silent-nothing failure. A run that is genuinely cold — no
-      # compatible cache entry was visible at restore time, or a clang major
-      # moved so every lookup misses — legitimately reports 0 hits and many
-      # misses, and must NOT be red for it. Coldness does not follow from this
-      # change being new; the restore-check step above says whether the entry
-      # was there. Tighten to a hit-rate floor only once a warm run has
-      # established the baseline.
+      # when ccache recorded ZERO CACHEABLE CALLS, which is the silent-nothing
+      # shape. Note what that does and does not establish: zero cacheable calls
+      # does NOT by itself mean ccache was never invoked — ccache may have run
+      # and classified every invocation uncacheable, or no compile edge may have
+      # run at all. The step reads CMakeCache.txt to narrow CONFIGURATION and
+      # reports which causes remain open; it does not assert one.
+      #
+      # A run that is genuinely cold — no compatible cache entry was visible at
+      # restore time, or a clang major moved so every lookup misses —
+      # legitimately reports 0 hits and many misses, and must NOT be red for it.
+      # Coldness does not follow from this change being new; the restore-check
+      # step above says whether the entry was there. Tighten to a hit-rate floor
+      # only once a warm run has established the baseline.
       - name: ccache stats (none leg — restore-only)
         if: matrix.sanitizer == 'none'
         run: |
@@ -1318,22 +1323,54 @@ jobs:
           echo "compiler: $(clang++ --version | head -1)"
           echo "CCACHE_DIR=${CCACHE_DIR:-<unset>}"
           ccache --show-stats
-          # Machine-readable (ccache >= 4.4; ubuntu-24.04 ships 4.9.x). If a
-          # future runner's ccache lacks it this step fails LOUDLY rather than
-          # skipping the assertion — the fail-closed direction.
-          ccache --print-stats > /tmp/ccache-stats.txt
+          # Machine-readable (ccache >= 4.4; ubuntu-24.04 ships 4.9.x). Guarded
+          # rather than left bare: under `set -e` a bare failure exits non-zero
+          # with NO ::error:: annotation — red, but blaming nothing. Fail-closed
+          # AND attributed.
+          ccache --print-stats > /tmp/ccache-stats.txt || {
+            echo "::error::\`ccache --print-stats\` failed or is unavailable (ccache >= 4.4 required; ubuntu-24.04 ships 4.9.x) — the INSTRUMENT could not measure. This says NOTHING about the launcher or the cache."
+            exit 1
+          }
           # n==1 or nothing: a duplicated key must reach the instrument-error
           # branch below, not `$(( ))` as a two-line string.
           val() { awk -v k="$1" '$1==k {n++; v=$2} END {if (n==1) print v}' /tmp/ccache-stats.txt; }
-          dhit=$(val direct_cache_hit);  phit=$(val preprocessed_cache_hit)
-          miss=$(val cache_miss)
+          # `dhit=$(val …)` is a SIMPLE COMMAND under `set -e`: if awk itself
+          # exits non-zero the step dies HERE, before either instrument-error
+          # branch below, emitting rc but no ::error:: and no disposition. Guard
+          # each assignment. The handler must live in the OUTER shell — an
+          # `exit` inside the $( ) subshell would only leave the subshell and the
+          # message would be CAPTURED, not logged.
+          #
+          # Why val()'s awk does NOT `exit 2` on n!=1 the way the restore
+          # parser's does (:1249) — the contracts differ ON PURPOSE, this is not
+          # the asymmetry the guard above fixes. The restore parser reads ONE
+          # key, so `exit 2` collapses cleanly into its single handler. This one
+          # reads THREE, and n!=1 must reach the SHARED `-z` message below that
+          # names all three keys at once; making it exit non-zero would route
+          # missing/duplicated into the awk-failure handler and collapse the
+          # missing-vs-duplicated-vs-tool-failure discrimination that G2/G4 built.
+          dhit=$(val direct_cache_hit) || {
+            echo "::error::\`awk\` itself failed while parsing direct_cache_hit from /tmp/ccache-stats.txt — the INSTRUMENT could not measure. This says NOTHING about the launcher or the cache."
+            exit 1
+          }
+          phit=$(val preprocessed_cache_hit) || {
+            echo "::error::\`awk\` itself failed while parsing preprocessed_cache_hit from /tmp/ccache-stats.txt — the INSTRUMENT could not measure. This says NOTHING about the launcher or the cache."
+            exit 1
+          }
+          miss=$(val cache_miss) || {
+            echo "::error::\`awk\` itself failed while parsing cache_miss from /tmp/ccache-stats.txt — the INSTRUMENT could not measure. This says NOTHING about the launcher or the cache."
+            exit 1
+          }
           # DISCRIMINATE THE TWO REDS. Absent keys and zero calls both fail this
           # step, but they are different findings, and a message that asserts a
           # cause it did not measure sends the next reader down the wrong path
           # (feedback_msys_rewrites_leading_slash_args_into_the_git_install_dir —
           # that cost two rounds). Missing keys = the INSTRUMENT could not
-          # measure; zero calls = the instrument measured, and the answer is that
-          # ccache was never invoked.
+          # measure; zero cacheable calls = the instrument measured, and what it
+          # measured is that no CACHEABLE call was recorded — which is not the
+          # same as "ccache was never invoked". CMakeCache.txt narrows
+          # configuration state, not execution; the branch below names the causes
+          # that remain open rather than picking one.
           if [ -z "$dhit" ] || [ -z "$phit" ] || [ -z "$miss" ]; then
             echo "::error::\`ccache --print-stats\` did not report direct_cache_hit / preprocessed_cache_hit / cache_miss — the stats FORMAT is not what this step parses (ccache version moved?). This says NOTHING about the launcher or the cache: the instrument itself could not measure. Fix the parse."
             exit 1
