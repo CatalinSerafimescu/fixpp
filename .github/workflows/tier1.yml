@@ -128,7 +128,14 @@ jobs:
           # ~7-min container wheel build + the sanitizer legs. A merge to main
           # (push), workflow_dispatch, and release build them UNCONDITIONALLY
           # (full build on main; PRs stay path-gated).
-          PY_RE='^(bindings/python/|include/fix/c_api|.*\.i$)'
+          # `.github/workflows/tier1.yml` is in the set because the python jobs'
+          # BUILD RECIPE lives here — build dir, Conan profile, ccache wiring
+          # (#244). A PR editing only this file used to leave every python job
+          # SKIPPED, so a change to how they build shipped with zero CI signal
+          # and was first exercised post-merge on push:main. The added cost is
+          # bounded: these jobs also require `proceed` (both gate labels), which
+          # in this repo's flow lands once, immediately before merge.
+          PY_RE='^(bindings/python/|include/fix/c_api|\.github/workflows/tier1\.yml$|.*\.i$)'
           PYTHON_TOUCHED=false
           EV="${{ github.event_name }}"
           if [ "$EV" = "pull_request" ]; then
