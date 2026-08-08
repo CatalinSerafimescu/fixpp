@@ -128,7 +128,14 @@ jobs:
           # ~7-min container wheel build + the sanitizer legs. A merge to main
           # (push), workflow_dispatch, and release build them UNCONDITIONALLY
           # (full build on main; PRs stay path-gated).
-          PY_RE='^(bindings/python/|include/fix/c_api|.*\.i$)'
+          # `.github/workflows/tier1.yml` is in the set because the python jobs'
+          # BUILD RECIPE lives here — build dir, Conan profile, ccache wiring
+          # (#244). A PR editing only this file used to leave every python job
+          # SKIPPED, so a change to how they build shipped with zero CI signal
+          # and was first exercised post-merge on push:main. The added cost is
+          # bounded: these jobs also require `proceed` (both gate labels), which
+          # in this repo's flow lands once, immediately before merge.
+          PY_RE='^(bindings/python/|include/fix/c_api|\.github/workflows/tier1\.yml$|.*\.i$)'
           PYTHON_TOUCHED=false
           EV="${{ github.event_name }}"
           if [ "$EV" = "pull_request" ]; then
@@ -1010,14 +1017,77 @@ jobs:
       github.event_name != 'release' &&
       needs.gate-precheck.outputs.proceed == 'true' &&
       needs.gate-precheck.outputs.python_touched == 'true'
+    # ── ccache (#244 part 1) — `none` LEG ONLY ────────────────────────────────
+    # These two are set job-wide but are read only by the `none` leg, which is
+    # the only one that installs ccache and passes the launcher (see its
+    # matrix.cfg_extra). The other three legs never invoke ccache, so the vars
+    # are inert there.
+    #
+    # CCACHE_COMPILERCHECK=content is NOT optional and NOT a copy-paste: it is
+    # part of the cache-lookup hash. The matrix `linux` job sets it (see its env
+    # block, and the same fail-closed rationale — a re-installed clang can never
+    # serve a stale object). If this leg left it at the default (mtime), every
+    # lookup against that job's entries would miss and the whole change would
+    # measure as "no effect" for a reason unrelated to the build dir.
+    #
+    # Corollary worth stating: `content` hashes the compiler BINARY, so the two
+    # runners must resolve the SAME clang. apt.llvm.org's llvm.sh silently falls
+    # back to an earlier major when the requested one isn't published yet, so a
+    # divergence there shows up as a 0% hit rate, not as an error. Both jobs
+    # print `clang++ --version`; the stats step below prints it again next to
+    # the hit counts so the two are read together.
+    env:
+      CCACHE_COMPILERCHECK: content
+      # Same directory the matrix debug leg uses. It is not text in the `key:`
+      # string, but the Actions cache VERSION is derived partly from the cached
+      # paths — so producer and reader must keep this path aligned, or textually
+      # equal keys resolve to incompatible entries.
+      CCACHE_DIR: /tmp/fixpp-ccache-linux-clang-debug
+
     strategy:
       fail-fast: false
       matrix:
         include:
+          # `bdir` == the matrix leg's build dir, NOT `-py`-suffixed (#244).
+          # ~56% of this tree's compile commands carry an absolute
+          # `…/build/<dir>/_codegen/include` path, and ccache's `hash_dir`
+          # (default true under -g) folds the CWD in besides — so the suffix
+          # alone made every object hash differently from the matrix leg's.
+          # The two jobs run on separate runners, so it never prevented a
+          # collision; it only prevented the hit.
+          #
+          # Measured on two locally-configured trees (plan §2b): 1457/1457
+          # compile commands BYTE-IDENTICAL to matrix `linux-clang-debug` once
+          # the build dirs are named the same. `FIXPP_BUILD_PYTHON=ON` adds
+          # exactly one compile edge (the SWIG wrapper) and perturbs nothing
+          # else — it only gates `add_subdirectory(bindings/python)`.
+          #
+          # With bdir == the preset's own binaryDir, the `-B` and
+          # `-DCMAKE_TOOLCHAIN_FILE` overrides below become no-ops for this leg
+          # (they still matter for the three sanitizer legs), leaving it exactly
+          # `cmake --preset linux-clang-debug -DFIXPP_BUILD_PYTHON=ON` — which is
+          # the configuration that was measured.
+          #
+          # The launcher is a `-D` on Configure rather than a job-level
+          # CMAKE_*_COMPILER_LAUNCHER because a job-level env var reaches ALL
+          # FOUR legs and only `none` installs ccache (the action below is
+          # `if: matrix.sanitizer == 'none'`). On the three sanitizer legs a
+          # job-level launcher would front Conan's `--build=missing` compiler
+          # probe with ccache never on PATH at all — the tier1 exit-127 shape
+          # (see the matrix job's ccache note). On the `none` leg ccache IS
+          # already on PATH by Conan-install time, so the trade-off there is
+          # deliberate SCOPE, not ordering: a from-source Conan dep on this leg
+          # does not go through ccache; that matches today's behaviour and the
+          # GHCR Conan restore normally makes it moot.
           - sanitizer: none
-            bdir: linux-clang-debug-py
-            cfg_extra: ""
+            bdir: linux-clang-debug
+            cfg_extra: "-DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache"
             san_opts: ""
+          # The three sanitizer legs keep their `-py` dirs. Aligning them needs
+          # the Conan profile aligned too (#243 — they currently link
+          # UNINSTRUMENTED deps), which is a correctness change and lands
+          # separately. Until then their objects cannot match the matrix
+          # sanitizer legs' and a restore here would be pure download cost.
           - sanitizer: asan
             bdir: linux-clang-asan-py
             cfg_extra: "-DFIXPP_ENABLE_ASAN=ON -DBUILD_SHARED_LIBS=ON -DFIXPP_PYTHON_SANITIZER=asan"
@@ -1111,6 +1181,99 @@ jobs:
       - name: Restore Conan cache from GHCR
         run: ci/restore-conan-cache.sh linux-clang-debug
 
+      # ── ccache — `none` leg only, RESTORE-ONLY (#244 part 1) ──────────────
+      # Same key PREFIX as the matrix `linux` job's `tier1-${{ matrix.preset }}`
+      # for linux-clang-debug — INTENDED to restore its entries, NOT verified here.
+      #
+      # `save: false` is load-bearing, twice over. (1) The matrix debug leg owns
+      # the save, so this adds ZERO bytes to the repo-wide 10 GB Actions pool —
+      # the constraint that #240/#241 are blocked on. (2) It also means this leg
+      # can never write a python-flavoured object set into the namespace the
+      # matrix leg reads.
+      #
+      # ⚠️ ORDERING, not a defect: this job runs CONCURRENTLY with the matrix
+      # leg, so it cannot consume the save that leg is producing alongside it.
+      # It restores the newest compatible entry ALREADY VISIBLE at step start —
+      # normally a prior push:main run's (one was observed present on
+      # refs/heads/main on 2026-08-08). So run #1 is expected WARM, not cold. It
+      # is cold ONLY when no compatible entry exists: never seeded, LRU-evicted, or
+      # an incompatible cache version. A restore MISS or a 0% hit rate on run #1
+      # is therefore a finding to explain, NOT a first-run cold build to wave
+      # off — the restore-check step below says which of the two it is.
+      - name: ccache (install + restore-only — the matrix debug leg owns the save)
+        if: matrix.sanitizer == 'none'
+        uses: hendrikmuhs/ccache-action@v1.2.23
+        with:
+          key: tier1-linux-clang-debug
+          max-size: 2G
+          save: false
+
+      # Did the RESTORE land? Asked BEFORE the build, because the post-build hit
+      # rate cannot tell the two failure modes apart — "restored nothing" and
+      # "restored fine but the objects didn't match" both read as 0% hits over a
+      # nonzero call count.
+      #
+      #   size > 0  ⇒ the restore landed, so a later 0% hit rate is a LOOKUP
+      #               DIVERGENCE finding: entries were present and NONE matched.
+      #               That is all it establishes — it does not say WHICH hashed
+      #               input diverged. Compare, in this order: the build directory
+      #               (this change's thesis), the compiler binary
+      #               (CCACHE_COMPILERCHECK=content — llvm.sh silently falls back
+      #               a major, see the env note above), the command line, and the
+      #               generated _codegen include paths.
+      #   size == 0 ⇒ the restore is the story and the hit rate says nothing
+      #               about build dirs. Legitimate states: nothing seeded yet, or
+      #               main's own entry was LRU-evicted (see
+      #               feedback_ccache_action_timestamped_keys_accumulate_on_default_branch
+      #               — main's timestamped keys accumulate and evict main).
+      #
+      # WARN, not fail: an evicted cache must be NAMED in the log, not red.
+      # Also the first observation in this repo of ccache-action sharing a key
+      # ACROSS jobs — every other call site uses its own job's key — so this line
+      # is what would surface a cross-job restore-prefix violation instead of it
+      # being misread as "the rename didn't work".
+      # Reported in the repo's existing cache vocabulary — `<cache> HIT|MISS
+      # <tag>`, echoed to the log AND to $GITHUB_STEP_SUMMARY, as
+      # ci/restore-sccache.sh's note() and ci/restore-conan-cache.sh already do.
+      # The Job Summary tab is where this repo trains you to read cache health;
+      # a disposition that only reaches the raw log is one a reader will miss.
+      - name: ccache restore check (did the matrix debug leg's cache land?)
+        if: matrix.sanitizer == 'none'
+        run: |
+          set -euo pipefail
+          # ⚠️ `if`, not ci/restore-sccache.sh's `[ -n … ] && echo …` one-liner.
+          # Those scripts run under `set -uo pipefail` (no -e); this step is
+          # `set -euo pipefail`, where that shape RETURNS NON-ZERO whenever
+          # GITHUB_STEP_SUMMARY is unset — killing the step on its passing
+          # branch. Verified: the one-liner aborts after the first note() with
+          # the var unset. Same trap as the /gate-b harness fix.
+          note() {
+            echo "$1"
+            if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then echo "$1" >> "$GITHUB_STEP_SUMMARY"; fi
+          }
+          kib=$(ccache --print-stats |
+                awk '$1=="cache_size_kibibyte" {n++; v=$2} END {if (n!=1) exit 2; print v}') || {
+            echo "::error::\`ccache --print-stats | awk\` did not yield exactly one cache_size_kibibyte value. Three causes reach here: ccache itself failed or is not installed, \`awk\` itself failed, or the stats FORMAT is not what this step parses (ccache version moved?) — run \`ccache --print-stats\` in the step above to tell which. Either way this says NOTHING about whether the restore landed: the INSTRUMENT could not measure."
+            exit 1
+          }
+          case "$kib" in
+            ''|*[!0-9]*)
+              echo "::error::cache_size_kibibyte is not a non-negative integer: '$kib' — the INSTRUMENT could not measure. Fix the parse."
+              exit 1
+              ;;
+          esac
+          # Normalise to base 10 BEFORE any arithmetic: the case above admits
+          # leading zeros, and bash reads `08` as an invalid octal literal (a
+          # non-fatal expansion error in a script-file shell, so the step would
+          # exit 0 having printed no disposition at all) and `0070` as octal 56.
+          kib=$((10#$kib))
+          if [ "$kib" -gt 0 ]; then
+            note "ccache-restore HIT  tier1-linux-clang-debug — $((kib / 1024)) MiB in ${CCACHE_DIR:-<unset>} before the build"
+          else
+            note "ccache-restore MISS tier1-linux-clang-debug — 0 KiB in ${CCACHE_DIR:-<unset>}; this run builds cold"
+            echo "::warning::ccache restore found NOTHING under key prefix tier1-linux-clang-debug. What this probe MEASURED is only that: zero ccache data present locally before the build. It does NOT select a cause. Candidates, none of them excluded: the key was never seeded; main's entry was LRU-evicted; the entries present have an incompatible cache version; the cross-job key prefix does not resolve the way this step's first-in-repo shared-key use assumes (surfacing that is why this probe exists — see the comment above); or the restore itself FAILED — hendrikmuhs/ccache-action@v1.2.23 swallows Actions-cache service errors (dist/restore/index.js: non-5xx warns, 5xx core.errors, then it reports 'No cache found'), so a failed download is indistinguishable HERE from an empty one; read the action's own step log above. It is NOT expected merely because this change is new: a compatible entry on refs/heads/main is readable from a PR ref. This run's hit rate therefore says nothing about whether the build dirs align — but the MISS itself is a finding to explain."
+          fi
+
       - name: Conan install
         run: |
           # All legs share the linux-clang-debug Conan profile; the sanitizer is
@@ -1122,8 +1285,10 @@ jobs:
 
       - name: Configure with Python bindings
         run: |
-          # Override the preset's CMAKE_TOOLCHAIN_FILE because each leg uses its
-          # own -py-suffixed build folder where Conan placed the toolchain.
+          # Override the preset's CMAKE_TOOLCHAIN_FILE because the SANITIZER legs
+          # use a -py-suffixed build folder where Conan placed the toolchain.
+          # No-ops on the `none` leg — see the matrix `include` comment for why
+          # they are left uniform rather than made conditional.
           cmake --preset linux-clang-debug \
             -DFIXPP_BUILD_PYTHON=ON \
             ${{ matrix.cfg_extra }} \
@@ -1132,6 +1297,148 @@ jobs:
 
       - name: Build
         run: cmake --build build/${{ matrix.bdir }}
+
+      # ── ccache liveness + hit rate (#244 part 1 acceptance artifact) ──────
+      # WHY A STEP AND NOT "Build got faster": a restore-only ccache that finds
+      # no entry, or a launcher that never got wired in, produces exactly the
+      # shape this repo keeps getting burned by — a step that ran, exited 0, and
+      # measured nothing. "Build dropped from 90 min to 4 min" would then be an
+      # inference; printed hit/miss counts are an observation.
+      #
+      # The ASSERTION here is deliberately LIVENESS, not performance: it fails
+      # when ccache recorded ZERO CACHEABLE CALLS, which is the silent-nothing
+      # shape. Note what that does and does not establish: zero cacheable calls
+      # does NOT by itself mean ccache was never invoked — ccache may have run
+      # and classified every invocation uncacheable, or no compile edge may have
+      # run at all. The step reads CMakeCache.txt to narrow CONFIGURATION and
+      # reports which causes remain open; it does not assert one.
+      #
+      # A run that is genuinely cold — no compatible cache entry was visible at
+      # restore time, or a clang major moved so every lookup misses —
+      # legitimately reports 0 hits and many misses, and must NOT be red for it.
+      # Coldness does not follow from this change being new; the restore-check
+      # step above says whether the entry was there. Tighten to a hit-rate floor
+      # only once a warm run has established the baseline.
+      - name: ccache stats (none leg — restore-only)
+        if: matrix.sanitizer == 'none'
+        run: |
+          set -euo pipefail
+          # Printed together on purpose: CCACHE_COMPILERCHECK=content hashes the
+          # compiler binary, so a clang that differs from the matrix leg's is the
+          # first thing to check when hits are 0 (see the job's env note).
+          echo "compiler: $(clang++ --version | head -1)"
+          echo "CCACHE_DIR=${CCACHE_DIR:-<unset>}"
+          # Human-readable, and DIAGNOSTIC-ONLY — but "diagnostic-only" describes
+          # what its OUTPUT is for, not what its FAILURE does. Bare under `set -e`
+          # a non-zero rc kills the step HERE, so the guarded --print-stats below
+          # never runs and the ::error:: it would have emitted never appears.
+          # Measured on the unfixed tree: --show-stats returning 41 => rc 41, zero
+          # annotations, no disposition; ccache absent => rc 127, same. Warn and
+          # continue: the authoritative call is the next one, and it IS
+          # fatal-and-attributed.
+          if ! ccache --show-stats; then
+            echo "::warning::\`ccache --show-stats\` failed — the human-readable counters are NOT in this log, so the zero-cacheable-calls branch below cannot point you at called_for_link / called_for_preprocessing / unsupported_* / could_not_use_modules. The authoritative \`ccache --print-stats\` measurement follows and will fail with an attributed ::error:: if ccache is genuinely unavailable."
+          fi
+          # Machine-readable (ccache >= 4.4; ubuntu-24.04 ships 4.9.x). Guarded
+          # rather than left bare: under `set -e` a bare failure exits non-zero
+          # with NO ::error:: annotation — red, but blaming nothing. Fail-closed
+          # AND attributed.
+          ccache --print-stats > /tmp/ccache-stats.txt || {
+            echo "::error::\`ccache --print-stats\` failed or is unavailable (ccache >= 4.4 required; ubuntu-24.04 ships 4.9.x) — the INSTRUMENT could not measure. This says NOTHING about the launcher or the cache."
+            exit 1
+          }
+          # n==1 or nothing: a duplicated key must reach the instrument-error
+          # branch below, not `$(( ))` as a two-line string.
+          val() { awk -v k="$1" '$1==k {n++; v=$2} END {if (n==1) print v}' /tmp/ccache-stats.txt; }
+          # `dhit=$(val …)` is a SIMPLE COMMAND under `set -e`: if awk itself
+          # exits non-zero the step dies HERE, before either instrument-error
+          # branch below, emitting rc but no ::error:: and no disposition. Guard
+          # each assignment. The handler must live in the OUTER shell — an
+          # `exit` inside the $( ) subshell would only leave the subshell and the
+          # message would be CAPTURED, not logged.
+          #
+          # Why val()'s awk does NOT `exit 2` on n!=1 the way the restore
+          # parser's does (:1249) — the contracts differ ON PURPOSE, this is not
+          # the asymmetry the guard above fixes. The restore parser reads ONE
+          # key, so `exit 2` collapses cleanly into its single handler. This one
+          # reads THREE, and n!=1 must reach the SHARED `-z` message below that
+          # names all three keys at once; making it exit non-zero would route
+          # missing/duplicated into the awk-failure handler and collapse the
+          # FORMAT/CARDINALITY-vs-AWK-EXECUTION discrimination that G2/G4 built.
+          # Stated precisely, because the earlier wording of this comment was
+          # wrong: missing and duplicated are NOT separated from each other —
+          # both make val() print nothing and both deliberately reach the SHARED
+          # -z message below that names all three keys at once. What must stay
+          # separated is "the stats file is not the shape this step parses"
+          # (:1375) from "awk itself failed" (the three handlers just below).
+          dhit=$(val direct_cache_hit) || {
+            echo "::error::\`awk\` itself failed while parsing direct_cache_hit from /tmp/ccache-stats.txt — the INSTRUMENT could not measure. This says NOTHING about the launcher or the cache."
+            exit 1
+          }
+          phit=$(val preprocessed_cache_hit) || {
+            echo "::error::\`awk\` itself failed while parsing preprocessed_cache_hit from /tmp/ccache-stats.txt — the INSTRUMENT could not measure. This says NOTHING about the launcher or the cache."
+            exit 1
+          }
+          miss=$(val cache_miss) || {
+            echo "::error::\`awk\` itself failed while parsing cache_miss from /tmp/ccache-stats.txt — the INSTRUMENT could not measure. This says NOTHING about the launcher or the cache."
+            exit 1
+          }
+          # DISCRIMINATE THE TWO REDS. Absent keys and zero calls both fail this
+          # step, but they are different findings, and a message that asserts a
+          # cause it did not measure sends the next reader down the wrong path
+          # (feedback_msys_rewrites_leading_slash_args_into_the_git_install_dir —
+          # that cost two rounds). Missing keys = the INSTRUMENT could not
+          # measure; zero cacheable calls = the instrument measured, and what it
+          # measured is that no CACHEABLE call was recorded — which is not the
+          # same as "ccache was never invoked". CMakeCache.txt narrows
+          # configuration state, not execution; the branch below names the causes
+          # that remain open rather than picking one.
+          if [ -z "$dhit" ] || [ -z "$phit" ] || [ -z "$miss" ]; then
+            echo "::error::\`ccache --print-stats\` did not report direct_cache_hit / preprocessed_cache_hit / cache_miss — the stats FORMAT is not what this step parses (ccache version moved?). This says NOTHING about the launcher or the cache: the instrument itself could not measure. Fix the parse."
+            exit 1
+          fi
+          for v in "$dhit" "$phit" "$miss"; do
+            case "$v" in
+              *[!0-9]*)
+                echo "::error::\`ccache --print-stats\` reported a non-canonical counter value: '$v' — expected a plain non-negative decimal. The stats FORMAT is not what this step parses. This says NOTHING about the launcher or the cache: the instrument itself could not measure. Fix the parse."
+                exit 1
+                ;;
+            esac
+          done
+          hits=$((10#$dhit + 10#$phit)); calls=$((hits + 10#$miss))
+          echo "ccache: hits=$hits (direct=$dhit preprocessed=$phit) misses=$miss cacheable_calls=$calls"
+          if [ "$calls" -eq 0 ]; then
+            cache_file="build/${{ matrix.bdir }}/CMakeCache.txt"
+            if [ ! -f "$cache_file" ]; then
+              echo "::error::ccache recorded ZERO cacheable calls, and $cache_file does not exist — so this step could not read the launcher configuration at all. That is an INSTRUMENT failure on top of the zero-call finding, not evidence about wiring. Configure and Build both reported success, so the file's absence is itself the first thing to explain."
+              exit 1
+            fi
+            # `if grep …` is EXEMPT from `set -e`, so the else arm catches EVERY
+            # non-zero rc. grep's contract: 0 = matched, 1 = no match, >1 = the
+            # read or the regex failed. Folding rc 2 into the else reports "the
+            # launcher was not wired in" for a file that was never successfully
+            # read — a conclusion this step did not measure.
+            # ⚠️ `grep_rc=$?` MUST be the first COMMAND after `else`. A comment is
+            # safe; any echo placed before it clobbers $?.
+            if grep -qE '^CMAKE_CXX_COMPILER_LAUNCHER:[^=]*=.*ccache' "$cache_file"; then
+              echo "::error::ccache recorded ZERO cacheable calls, and the launcher IS configured — $cache_file carries CMAKE_CXX_COMPILER_LAUNCHER=…ccache. Configuration is all this step measured: it does NOT establish that ccache executed. Two causes fit: (a) ccache ran and classified every invocation as uncacheable — read the \`ccache --show-stats\` output above for called_for_link / called_for_preprocessing / unsupported_* / could_not_use_modules (ccache 4.9.x has no aggregate uncacheable counter, those individual counters are the evidence); or (b) no compile edge ran at all, so ccache was never invoked. A nonzero uncacheable counter above distinguishes them."
+            else
+              grep_rc=$?
+              if [ "$grep_rc" -gt 1 ]; then
+                echo "::error::ccache recorded ZERO cacheable calls, and \`grep\` exited $grep_rc while reading $cache_file — that is a read or regex failure, NOT a no-match. The launcher configuration was therefore NOT measured, and this says NOTHING about whether the launcher was wired in: the INSTRUMENT could not read the file."
+              else
+                echo "::error::ccache recorded ZERO cacheable calls AND $cache_file carries no CMAKE_CXX_COMPILER_LAUNCHER=…ccache — the compiler launcher was not wired in."
+              fi
+            fi
+            exit 1
+          fi
+          pct=$((hits * 100 / calls))
+          # Lands in the Job Summary next to the restore disposition above, so
+          # the two are read together — a 0% here under a restore HIT is a build
+          # divergence; under a restore MISS it is just a cold run.
+          line="ccache-hitrate ${pct}% over ${calls} cacheable calls (python-bindings none)"
+          echo "$line"
+          if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then echo "$line" >> "$GITHUB_STEP_SUMMARY"; fi
 
       # ── none leg: the meaningful Tier-1 gate (smoke + e2e round-trip) ───────
       - name: Run Python tests
