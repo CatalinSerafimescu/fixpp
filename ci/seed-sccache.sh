@@ -165,6 +165,15 @@ note "sccache-cache archive \`$TAG\` — $(du -h "$WORK/sccache-$PRESET.tar" | c
 note "sccache-cache SEEDED \`$TAG\`"
 
 # ── Prune, best-effort — delegated so it is also runnable STANDALONE ─────────
+#
+# ⚠️ A SECOND COPY OF THIS BLOCK LIVES IN ci/seed-ccache.sh — same eleven lines,
+# three literals changed. It points here for the rationale, so this is the
+# canonical side: a correction made here must be applied there too. The pointer
+# was one-directional until this line existed, which meant whoever edited the
+# canonical copy had no indication the other one existed — reproducing the exact
+# failure the pointer cites (ci/prune-conan-cache.sh:45, "the backport never
+# happened"). Note the asymmetry that makes it bite: the COPY is pinned by
+# ci/test-ccache-scripts.sh; this one is not pinned by anything.
 # Whether it deletes from here depends on the token the caller supplies: with
 # `secrets.GHCR_PAT` (delete:packages) it does; falling back to GITHUB_TOKEN
 # (packages:write is read+write only) it cannot, and reports a backlog instead.

@@ -193,7 +193,33 @@ run_case() {
   rm -f "$out_file" "$gh_output" "$workdir_record"
 
   echo "── case: $label ──"
-  echo "$OUT" | sed 's/^/  /'
+  # ── #249: THE `| ` GUTTER IS LOAD-BEARING, THE INDENT NEVER WAS ────────────
+  #
+  # This harness deliberately drives the restore script through its failure
+  # branches, so $OUT contains real `::warning::` / `::error::` workflow-command
+  # lines. Replaying them verbatim re-emits them as LIVE ANNOTATIONS: the runner
+  # STRIPS LEADING WHITESPACE before parsing `::`, so the two-space indent this
+  # previously used neutralised nothing. MEASURED on run 31256807981 —
+  # linux-gcc-release showed 5 `conan-cache … MISS / DOWNLOADED BUT NOT
+  # RESTORABLE` annotations while that lane's own cache was a clean HIT.
+  #
+  # Worth fixing rather than tolerating: the fakes are VERBATIM copies of the
+  # diagnostic #222 exists to make legible, so a real MISS is camouflaged on
+  # every run by five synthetic ones.
+  #
+  # `  | ` puts a non-whitespace character first AFTER the runner's
+  # leading-whitespace trim, so no amount of leading-space trimming makes the
+  # line start with `::`. Same shape as
+  # restore-conan-cache.sh:69, which prefixes retained oras stderr for exactly
+  # this reason. Indenting harder would not have worked.
+  replay="$(printf '%s\n' "$OUT" | sed 's/^/  | /')"
+  # ASSERTED, not assumed. A prefix that stops neutralising the token (someone
+  # "tidies" the gutter back to spaces) must fail this harness rather than
+  # quietly resume polluting every gcc-release run's annotation list.
+  if printf '%s\n' "$replay" | grep -q '^[[:space:]]*::'; then
+    fail "$label: a replayed line would still be parsed as a workflow command by the Actions runner (#249) — the gutter prefix is not neutralising \`::\`"
+  fi
+  printf '%s\n' "$replay"
   echo "  [exit=$STATUS hit=${HIT:-<unset>}]"
 
   # The shims validate argv AND the archive handoff between oras and conan;
