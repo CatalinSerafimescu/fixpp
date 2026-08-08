@@ -120,38 +120,39 @@ note "ccache-cache archive \`$TAG\` — $(du -h "$WORK/ccache-$PRESET.tar" | cut
 note "ccache-cache SEEDED \`$TAG\`"
 
 # ── Prune, best-effort — delegated so it is also runnable STANDALONE ─────────
-# Whether it deletes from here depends on the token the caller supplies: with
-# `secrets.GHCR_PAT` (delete:packages) it does; falling back to GITHUB_TOKEN
-# (packages:write is read+write only) it cannot, and reports a backlog instead.
-# The rolling tag means every republish orphans a multi-GB untagged version —
-# FOUR of them per push:main on this tier — so the backlog is surfaced into the
-# job summary rather than left to accumulate silently.
 #
-# Match the marker WITHOUT requiring a count: prune emits `PENDING ?` when it
-# could not even list the package, and that is the loudest case, not one to drop
-# on a failed [0-9]+ parse.
+# ⚠️ THE RATIONALE FOR THIS BLOCK IS NOT RESTATED HERE — IT IS CANONICAL IN
+# ci/seed-sccache.sh (the "Prune, best-effort" tail). This block is the same
+# eleven lines with three literals changed (the pruner's name, the `ccache-cache`
+# label, the remedy sentence), and every non-obvious choice in it — `$WORK`
+# rather than a fresh `mktemp`, capturing the status instead of `|| true`,
+# matching the marker WITHOUT requiring a numeric count, `[^ ]*` rather than
+# `\(.*\)$` — is argued there against the incident that produced it.
 #
-# Inside the already-trapped $WORK rather than a fresh `mktemp`: it is cleaned up
-# on interruption too, and it cannot leave an unset path behind if mktemp fails —
-# this script is `set -uo pipefail`, not `set -e`, so a failed `mktemp` would have
-# continued with an empty filename and lost the prune output entirely.
+# Deliberately a POINTER rather than a copy. Duplicating ~35 lines of evidence
+# comments is precisely how a correction lands on one side only, and this repo
+# has already paid that bill once in this very directory:
+# ci/prune-conan-cache.sh:45 — "prune-sccache.sh was fixed for this on
+# 2026-08-06; the backport never happened." Read the two blocks together before
+# changing either.
+#
+# The CODE is deliberately not shared, and that is a narrower decision than it
+# looks: extracting it would edit ci/seed-sccache.sh, which this PR does not
+# touch and which has no harness, so the Tier 2 copy would be unpinned at the
+# moment of the edit. Recorded as a follow-up with ci/prune-conan-cache.sh's
+# fold-in rather than taken here.
+#
+# What IS specific to this tier: the rolling tag means every republish orphans a
+# multi-GB untagged version, and there are FOUR legs doing it per push:main —
+# which is what makes the backlog note load-bearing here rather than tidy.
 prune_log="$WORK/prune.log"
 
-# CAPTURE THE STATUS, do not `|| true` it away. Best-effort must mean "never
-# fails the seed", NOT "ignore instrument failure": if the pruner dies before
-# emitting its own marker, `|| true` leaves NO prune disposition in either the
-# log or the job summary — a silent hole in the very thing being instrumented.
 prune_rc=0
 "$(dirname "$0")/prune-ccache.sh" "$PRESET" "$TAG" > "$prune_log" 2>&1 || prune_rc=$?
 if [ "$prune_rc" -ne 0 ]; then
   echo "prune: PENDING ? — the prune command exited $prune_rc before reporting a disposition" >> "$prune_log"
 fi
 cat "$prune_log"
-# FIRST TOKEN ONLY — `\(.*\)$` would swallow the remainder of the line and render
-# prune's whole parenthetical remedy sentence into the job-summary note. `[^ ]*`
-# still matches BOTH shapes the marker takes: a count (`PENDING 2`) and the
-# could-not-even-list case (`PENDING ?`), which is the loudest one and must never
-# be dropped on a failed [0-9]+ parse.
 pending=$(sed -n 's/^prune: PENDING \([^ ]*\).*$/\1/p' "$prune_log" | head -1)
 # No `rm` — $WORK's EXIT trap owns it.
 if [ -n "${pending:-}" ]; then

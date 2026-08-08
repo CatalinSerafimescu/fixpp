@@ -750,6 +750,28 @@ jobs:
         if: matrix.preset == 'linux-gcc-release'
         run: bash ci/test-restore-conan-cache.sh
 
+      # Regression pin (#240): ci/{restore,seed,ccache-stats,prune}-ccache.sh —
+      # 30 assertions, every case asserting exit status AND the printed
+      # disposition. Same lane and the same one-preset rationale as the conan pin
+      # above: the harness shims oras, ccache, gh and the compiler, so nothing
+      # under test is platform- or toolchain-specific and a libc++ lane buys
+      # nothing.
+      #
+      # ⚠️ HERE, NOT IN tier3-libcxx.yml, EVEN THOUGH THE SCRIPTS RUN THERE. A
+      # pin belongs where it is cheapest to run and hardest to skip, and Tier 3's
+      # matrix is on-demand — it does not run on every push:main the way this
+      # lane does. Keeping both `ci/` pins in one place is also how a maintainer
+      # finds them.
+      #
+      # Like the conan pin, this yields zero pre-merge signal (the matrix skips
+      # until both gate labels land); the binding evidence is the local
+      # RED-then-GREEN transcript in the PR body — 10 mutants, all killed. Its
+      # value is regression protection on LATER PRs, which is the same reason the
+      # conan pin was added despite the same limitation.
+      - name: Regression pin — ccache GHCR script dispositions (#240)
+        if: matrix.preset == 'linux-gcc-release'
+        run: bash ci/test-ccache-scripts.sh
+
       - name: Test (full tier incl. packaging — the SC-011/SC-012 gate)
         if: matrix.preset == 'linux-gcc-release'
         run: ctest --preset ${{ matrix.preset }} --output-on-failure --no-tests=error
