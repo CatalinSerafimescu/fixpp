@@ -153,11 +153,15 @@ SHIM
 chmod +x "$shim_dir/mv"
 
 # ── du shim ──────────────────────────────────────────────────────────────────
-# Pass-through unless FAKE_DU_EXIT says otherwise. Exists for ONE case: the
-# sizing datum ci/seed-ccache.sh reports failing without aborting the publish
-# (3a/F4) — a `du` that prints nothing and exits non-zero.
+# Pass-through unless FAKE_DU_EXIT says otherwise. Two failure shapes, both
+# exercised by ci/seed-ccache.sh's sizing datum (3a/F4, 5a):
+#   FAKE_DU_EXIT=1        — prints nothing and exits non-zero (empty read).
+#   FAKE_DU_EXIT=partial  — prints a plausible total AND exits non-zero (the
+#                           GNU `du` shape on an unreadable subtree — a
+#                           partial total must not be presented as valid).
 cat > "$shim_dir/du" <<'SHIM'
 #!/usr/bin/env bash
+if [ "${FAKE_DU_EXIT:-0}" = "partial" ]; then printf '8.0K\t%s\n' "${!#}"; exit 1; fi
 if [ "${FAKE_DU_EXIT:-0}" != "0" ]; then exit "${FAKE_DU_EXIT}"; fi
 exec /usr/bin/du "$@"
 SHIM
@@ -333,6 +337,20 @@ want_status 0 "restore/precondition-unreadable"; want_hit true "restore/precondi
 want_out 'precondition was NOT verified' "restore/precondition-unreadable"
 ok "unreadable counters — warns that the precondition is unverified, does not fail the lane"
 
+# 6a — a body that reads (exit 0) but carries none of the three named counters
+# must warn, not be misread as "zero calls, verified". awk's field guard
+# yields an empty precalls here, routing into the same warning branch above —
+# not a new fatal path.
+KEYLESS="$sandbox/keyless.txt"
+printf 'called_for_link\t412\n' > "$KEYLESS"
+rm -rf "$CDIR"
+FAKE_EXPECTED_REF="$IMAGE:$TAG" FAKE_ORAS_PULL_MODE=ok FAKE_PRESET=fake-libc++ \
+FAKE_STATS_FILE="$KEYLESS" CCACHE_DIR="$CDIR" \
+  run "$CI_DIR/restore-ccache.sh" fake-libc++
+want_status 0 "restore/precondition-keyless"; want_hit true "restore/precondition-keyless"
+want_out 'precondition was NOT verified' "restore/precondition-keyless"
+ok "keyless-but-readable stats body — warns unverified rather than reading as zero calls (6a)"
+
 restore_case fail
 want_status 0 "restore/pull-fails"; want_hit false "restore/pull-fails"
 want_out 'ccache-cache MISS' "restore/pull-fails"
@@ -425,8 +443,22 @@ want_status 0 "seed/du-fails"
 want_out '::warning::' "seed/du-fails"
 want_out 'demand datum is MISSING' "seed/du-fails"
 want_out 'ccache-cache SEEDED' "seed/du-fails"
-want_no_out '— archive,' "seed/du-fails"
+want_out '— ? archive, ? on disk' "seed/du-fails"
 ok "sizing datum unmeasurable — warns, publish still proceeds (3a/F4)"
+
+# ── 5a — A PARTIAL `du` TOTAL MUST NOT BE PRESENTED AS A VALID MEASUREMENT ───
+#
+# GNU `du` can print a plausible-but-wrong total AND exit non-zero (e.g. an
+# unreadable subtree). `2>/dev/null` swallows the diagnostic, so only a
+# status-aware capture catches this — the empty-output case above does not.
+rm -rf "$CDIR"; mkdir -p "$CDIR/aa"; printf 'x\n' > "$CDIR/aa/entry"
+FAKE_DU_EXIT=partial seed_case fake-libc++ 0 0
+want_status 0 "seed/du-partial"
+want_out '::warning::' "seed/du-partial"
+want_out 'demand datum is MISSING' "seed/du-partial"
+want_out 'ccache-cache SEEDED' "seed/du-partial"
+want_out '— ? archive, ? on disk' "seed/du-partial"
+ok "sizing datum partial — warns, does not present a partial total as valid (5a)"
 
 # The size line must precede the push, so the sizing datum survives a failed push.
 seed_case fake-libc++ 7 0

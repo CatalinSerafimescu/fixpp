@@ -103,8 +103,13 @@ fi
 # below, which would convert a lost sizing datum into an unpublished cache and
 # a cold rebuild next run. Warn and publish anyway; the placeholder `?` in the
 # summary line says the datum is missing rather than pretending it is zero.
-archive_size="$(du -h "$WORK/ccache-$PRESET.tar" 2>/dev/null | cut -f1)"
-disk_size="$(du -sh "$CCACHE_DIR" 2>/dev/null | cut -f1)"
+# The `|| var=""` also catches a PARTIAL total: `du` can print a plausible
+# (but wrong) size and still exit nonzero, e.g. on an unreadable subtree. With
+# `set -uo pipefail` (no `-e`) the assignment carries the pipeline's status, so
+# folding that into the same `-z` branch below treats a partial read the same
+# as no read at all, instead of presenting it as a valid measurement.
+archive_size="$(du -h "$WORK/ccache-$PRESET.tar" 2>/dev/null | cut -f1)" || archive_size=""
+disk_size="$(du -sh "$CCACHE_DIR" 2>/dev/null | cut -f1)" || disk_size=""
 if [ -z "$archive_size" ] || [ -z "$disk_size" ]; then
   note "::warning::ccache-cache could not measure the archive/disk size for \`$TAG\` — #240's demand datum is MISSING from this run. Publication proceeds; only the measurement is lost."
 fi

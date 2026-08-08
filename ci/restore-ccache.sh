@@ -65,9 +65,23 @@ mkdir -p "$CCACHE_DIR"
 #
 # An UNREADABLE counter is NOT fatal: refusing on a missing diagnostic would
 # redden a green lane over the instrument rather than the fault. It says so.
+#
+# The three counters must each appear EXACTLY ONCE (`d == 1 && p == 1 && m ==
+# 1`, not `> 0`): a duplicated key is drift too, and this is the same
+# exactly-once discipline ci/ccache-stats.sh's read_counter applies to its
+# six. This does not cry wolf on a cold runner — measured against real ccache
+# 4.9.1, `--print-stats` on a freshly-created empty CCACHE_DIR emits all three
+# keys with value 0, so the happy path still prints `0` and stays silent. The
+# `$2 ~ /^[0-9]+$/` field guard is load-bearing, not decoration: awk's
+# `n += "abc"` is `0`, and `0` passes the downstream `*[!0-9]*` digit check —
+# this guard is the only place that shape is caught, so a keyless-but-zero-
+# exit body prints nothing here and falls into the warning case below instead
+# of silently reading as "zero calls, verified".
 precalls="$(ccache --print-stats 2>/dev/null | awk '
-  $1 == "direct_cache_hit" || $1 == "preprocessed_cache_hit" || $1 == "cache_miss" { n += $2 }
-  END { print n + 0 }')" || precalls=""
+  $1 == "direct_cache_hit"       && $2 ~ /^[0-9]+$/ { n += $2; d++ }
+  $1 == "preprocessed_cache_hit" && $2 ~ /^[0-9]+$/ { n += $2; p++ }
+  $1 == "cache_miss"             && $2 ~ /^[0-9]+$/ { n += $2; m++ }
+  END { if (d == 1 && p == 1 && m == 1) print n + 0 }')" || precalls=""
 case "$precalls" in
   ''|*[!0-9]*)
     echo "::warning::Could not read ccache's counters before restoring, so the 'nothing has compiled yet' precondition was NOT verified on this run. The restore proceeds; if this step has been reordered below \`Conan install\`, the dependency-closure entries it just built will be discarded without further warning." ;;
