@@ -1256,6 +1256,11 @@ jobs:
               exit 1
               ;;
           esac
+          # Normalise to base 10 BEFORE any arithmetic: the case above admits
+          # leading zeros, and bash reads `08` as an invalid octal literal (a
+          # non-fatal expansion error in a script-file shell, so the step would
+          # exit 0 having printed no disposition at all) and `0070` as octal 56.
+          kib=$((10#$kib))
           if [ "$kib" -gt 0 ]; then
             note "ccache-restore HIT  tier1-linux-clang-debug — $((kib / 1024)) MiB in ${CCACHE_DIR:-<unset>} before the build"
           else
@@ -1317,7 +1322,9 @@ jobs:
           # future runner's ccache lacks it this step fails LOUDLY rather than
           # skipping the assertion — the fail-closed direction.
           ccache --print-stats > /tmp/ccache-stats.txt
-          val() { awk -v k="$1" '$1==k {print $2}' /tmp/ccache-stats.txt; }
+          # n==1 or nothing: a duplicated key must reach the instrument-error
+          # branch below, not `$(( ))` as a two-line string.
+          val() { awk -v k="$1" '$1==k {n++; v=$2} END {if (n==1) print v}' /tmp/ccache-stats.txt; }
           dhit=$(val direct_cache_hit);  phit=$(val preprocessed_cache_hit)
           miss=$(val cache_miss)
           # DISCRIMINATE THE TWO REDS. Absent keys and zero calls both fail this
@@ -1331,7 +1338,15 @@ jobs:
             echo "::error::\`ccache --print-stats\` did not report direct_cache_hit / preprocessed_cache_hit / cache_miss — the stats FORMAT is not what this step parses (ccache version moved?). This says NOTHING about the launcher or the cache: the instrument itself could not measure. Fix the parse."
             exit 1
           fi
-          hits=$((dhit + phit)); calls=$((hits + miss))
+          for v in "$dhit" "$phit" "$miss"; do
+            case "$v" in
+              *[!0-9]*)
+                echo "::error::\`ccache --print-stats\` reported a non-canonical counter value: '$v' — expected a plain non-negative decimal. The stats FORMAT is not what this step parses. This says NOTHING about the launcher or the cache: the instrument itself could not measure. Fix the parse."
+                exit 1
+                ;;
+            esac
+          done
+          hits=$((10#$dhit + 10#$phit)); calls=$((hits + 10#$miss))
           echo "ccache: hits=$hits (direct=$dhit preprocessed=$phit) misses=$miss cacheable_calls=$calls"
           if [ "$calls" -eq 0 ]; then
             cache_file="build/${{ matrix.bdir }}/CMakeCache.txt"
