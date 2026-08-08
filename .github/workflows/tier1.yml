@@ -1216,16 +1216,32 @@ jobs:
       # ACROSS jobs — every other call site uses its own job's key — so this line
       # is what would surface a cross-job restore-prefix violation instead of it
       # being misread as "the rename didn't work".
+      # Reported in the repo's existing cache vocabulary — `<cache> HIT|MISS
+      # <tag>`, echoed to the log AND to $GITHUB_STEP_SUMMARY, as
+      # ci/restore-sccache.sh's note() and ci/restore-conan-cache.sh already do.
+      # The Job Summary tab is where this repo trains you to read cache health;
+      # a disposition that only reaches the raw log is one a reader will miss.
       - name: ccache restore check (did the matrix debug leg's cache land?)
         if: matrix.sanitizer == 'none'
         run: |
           set -euo pipefail
+          # ⚠️ `if`, not ci/restore-sccache.sh's `[ -n … ] && echo …` one-liner.
+          # Those scripts run under `set -uo pipefail` (no -e); this step is
+          # `set -euo pipefail`, where that shape RETURNS NON-ZERO whenever
+          # GITHUB_STEP_SUMMARY is unset — killing the step on its passing
+          # branch. Verified: the one-liner aborts after the first note() with
+          # the var unset. Same trap as the /gate-b harness fix.
+          note() {
+            echo "$1"
+            if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then echo "$1" >> "$GITHUB_STEP_SUMMARY"; fi
+          }
           kib=$(ccache --print-stats | awk '$1=="cache_size_kibibyte" {print $2}')
           : "${kib:=0}"
           if [ "$kib" -gt 0 ]; then
-            echo "ccache restore: LANDED — $((kib / 1024)) MiB present in ${CCACHE_DIR:-<unset>} before the build."
+            note "ccache-restore HIT  tier1-linux-clang-debug — $((kib / 1024)) MiB in ${CCACHE_DIR:-<unset>} before the build"
           else
-            echo "::warning::ccache restore found NOTHING under key prefix tier1-linux-clang-debug (0 KiB in ${CCACHE_DIR:-<unset>}). Expected on the first run after this landed, or if main's entry was LRU-evicted. This run will build cold, and its hit rate says nothing about whether the build dirs align."
+            note "ccache-restore MISS tier1-linux-clang-debug — 0 KiB in ${CCACHE_DIR:-<unset>}; this run builds cold"
+            echo "::warning::ccache restore found NOTHING under key prefix tier1-linux-clang-debug. Expected on the first run after this landed, or if main's entry was LRU-evicted. This run's hit rate therefore says nothing about whether the build dirs align."
           fi
 
       - name: Conan install
@@ -1241,9 +1257,8 @@ jobs:
         run: |
           # Override the preset's CMAKE_TOOLCHAIN_FILE because the SANITIZER legs
           # use a -py-suffixed build folder where Conan placed the toolchain.
-          # (On the `none` leg bdir IS the preset's binaryDir, so this override
-          # and the -B below resolve to exactly what the preset already says —
-          # deliberately left uniform rather than made conditional. See #244.)
+          # No-ops on the `none` leg — see the matrix `include` comment for why
+          # they are left uniform rather than made conditional.
           cmake --preset linux-clang-debug \
             -DFIXPP_BUILD_PYTHON=ON \
             ${{ matrix.cfg_extra }} \
@@ -1301,7 +1316,12 @@ jobs:
             exit 1
           fi
           pct=$((hits * 100 / calls))
-          echo "ccache hit rate: ${pct}% over ${calls} cacheable calls" >> "$GITHUB_STEP_SUMMARY"
+          # Lands in the Job Summary next to the restore disposition above, so
+          # the two are read together — a 0% here under a restore HIT is a build
+          # divergence; under a restore MISS it is just a cold run.
+          line="ccache-hitrate ${pct}% over ${calls} cacheable calls (python-bindings none)"
+          echo "$line"
+          if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then echo "$line" >> "$GITHUB_STEP_SUMMARY"; fi
 
       # ── none leg: the meaningful Tier-1 gate (smoke + e2e round-trip) ───────
       - name: Run Python tests
