@@ -437,9 +437,18 @@ jobs:
           # Conan/ABI entries) of a 10 GB cap. MEASURED 2026-08-08 from
           # actions/cache/usage: 8.49 GiB live over 15 caches, 7.61 GiB after
           # this workflow's keep-newest sweep converges. #240 then moved the four
-          # tier3 legs (1.80 GiB) to GHCR, leaving **5.82 GiB** and ~4.2 GiB of
-          # headroom — which is the room #241's coverage cache is budgeted
-          # against. Do not re-quote the ~7.7 GB figure as current. An open PR running the same matrix would add
+          # tier3 legs (1.80 GiB) to GHCR, which brings this to **5.82 GiB** and
+          # ~4.2 GiB of headroom — the room #241's coverage cache is budgeted
+          # against. Do not re-quote the ~7.7 GB figure as current.
+          #
+          # ⚠️ 5.82 GiB IS CONDITIONAL ON A MANUAL STEP, so verify it before
+          # budgeting against it. cache-cleanup.yml's keep-newest sweep only
+          # deletes what something SUPERSEDED, so the four retired
+          # `ccache-tier3-*` entries are protected forever and the 1.80 GiB is
+          # NOT reclaimed by moving the lane — a one-time `gh cache delete` is.
+          # Until that has run, this number is a projection, not a reading:
+          # `gh api repos/<owner>/<repo>/actions/cache/usage`. The trap is
+          # recorded at the sweep itself in cache-cleanup.yml. An open PR running the same matrix would add
           # ~7 GB — so deleting a PR's caches when it CLOSES cannot prevent the
           # eviction, which happens while the PR is still open. Only not writing
           # does. Bounding PR saves instead was rejected: ~2 GB spread over 11
@@ -740,37 +749,8 @@ jobs:
             exit 1
           fi
 
-      # Regression pin (#245 Gate B RC#5): ci/restore-conan-cache.sh's three
-      # restore dispositions (unrestorable archive / plain MISS / HIT). One
-      # preset only — the behaviour under test is platform-independent shell.
-      # This step yields zero pre-merge signal (the matrix skips until both
-      # gate labels land); the binding evidence is the local RED-then-GREEN
-      # transcript recorded in the PR body.
-      - name: Regression pin — conan-cache restore dispositions (#245)
-        if: matrix.preset == 'linux-gcc-release'
-        run: bash ci/test-restore-conan-cache.sh
-
-      # Regression pin (#240): ci/{restore,seed,ccache-stats,prune}-ccache.sh —
-      # 30 assertions, every case asserting exit status AND the printed
-      # disposition. Same lane and the same one-preset rationale as the conan pin
-      # above: the harness shims oras, ccache, gh and the compiler, so nothing
-      # under test is platform- or toolchain-specific and a libc++ lane buys
-      # nothing.
-      #
-      # ⚠️ HERE, NOT IN tier3-libcxx.yml, EVEN THOUGH THE SCRIPTS RUN THERE. A
-      # pin belongs where it is cheapest to run and hardest to skip, and Tier 3's
-      # matrix is on-demand — it does not run on every push:main the way this
-      # lane does. Keeping both `ci/` pins in one place is also how a maintainer
-      # finds them.
-      #
-      # Like the conan pin, this yields zero pre-merge signal (the matrix skips
-      # until both gate labels land); the binding evidence is the local
-      # RED-then-GREEN transcript in the PR body — 10 mutants, all killed. Its
-      # value is regression protection on LATER PRs, which is the same reason the
-      # conan pin was added despite the same limitation.
-      - name: Regression pin — ccache GHCR script dispositions (#240)
-        if: matrix.preset == 'linux-gcc-release'
-        run: bash ci/test-ccache-scripts.sh
+      # The `ci/` regression pins used to live here, on the linux-gcc-release
+      # leg. They now have their own job — see `ci-script-pins` below for why.
 
       - name: Test (full tier incl. packaging — the SC-011/SC-012 gate)
         if: matrix.preset == 'linux-gcc-release'
@@ -1739,6 +1719,47 @@ jobs:
             --repo "${{ github.repository }}"
 
   # ── Architecture layer check ─────────────────────────────────────────────
+  # ── ci/ shell regression pins — THE ONLY TIER 1 JOB WITH PRE-MERGE SIGNAL ───
+  #
+  # `ci/test-restore-conan-cache.sh` (#245) and `ci/test-ccache-scripts.sh`
+  # (#240) drive the real restore/seed/prune/stats scripts through every
+  # disposition against shimmed `oras`, `conan`, `ccache`, `gh` and compiler
+  # binaries. Their true dependencies are bash, jq and coreutils: no build, no
+  # network, no toolchain. Measured at ~1.5 s and ~1 s.
+  #
+  # ⚠️ ITS OWN JOB, AND DELIBERATELY *NOT* GATED ON `gate-precheck`.
+  #
+  # Both pins previously ran as steps on the `linux-gcc-release` matrix leg,
+  # which was wrong twice over. First, a shell-only harness then executed only
+  # after a full Conan install + configure + C++ build + test of that leg
+  # SUCCEEDED — so any unrelated red above it (a compile error, a flaky test, an
+  # apt hiccup) meant the pin never ran, with no signal that it had not. Second,
+  # the matrix is gated on `proceed`, i.e. it skips until BOTH gate labels land,
+  # so both pins carried a comment conceding they "yield zero pre-merge signal"
+  # — an accepted limitation that was never actually necessary.
+  #
+  # Ungated and buildless, they run on every pull_request from the first push.
+  # That converts the conceded limitation into real pre-merge signal for the
+  # `ci/` scripts, which is the one part of this repo's CI that no other job
+  # exercises before merge.
+  #
+  # It IS in tier1-required's needs. A gate that runs but cannot block is the
+  # observe-don't-assert shape this repo has a recorded lesson about
+  # (feedback_ci_gate_observes_not_asserts_witness_skips_into_green, cited at
+  # that job). Safe to make blocking precisely because it is hermetic and
+  # sub-second: nothing here can flake.
+  ci-script-pins:
+    name: ci-script-pins
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Regression pin — conan-cache restore dispositions (#245)
+        run: bash ci/test-restore-conan-cache.sh
+
+      - name: Regression pin — ccache GHCR script dispositions (#240)
+        run: bash ci/test-ccache-scripts.sh
+
   check-layers:
     name: check-layers
     runs-on: ubuntu-24.04
@@ -1926,12 +1947,18 @@ jobs:
   tier1-required:
     name: tier1-required
     runs-on: ubuntu-latest
-    needs: [gate-precheck, linux, coverage, check-layers]
+    needs: [gate-precheck, linux, coverage, check-layers, ci-script-pins]
     if: always()
     steps:
       - name: Assert the core Tier 1 matrix ran to success (no skip-into-green)
         run: |
           # A published release intentionally skips the C++ matrix (wheel-only).
+          #
+          # ⚠️ ci-script-pins IS ASSERTED BELOW THIS EARLY EXIT TOO, i.e. it is
+          # not asserted on a release. That is deliberate and matches the rest:
+          # the pins guard the ci/ cache scripts, which a wheel-only release
+          # event does not run. Making one job blocking on an event where every
+          # other job is waived would be an asymmetry with no failure behind it.
           if [ "${{ github.event_name }}" = "release" ]; then
             echo "release event — C++ matrix intentionally skipped; gate not applicable."
             exit 0
@@ -1940,9 +1967,13 @@ jobs:
           lx='${{ needs.linux.result }}'
           cov='${{ needs.coverage.result }}'
           cl='${{ needs.check-layers.result }}'
-          echo "gate-precheck=$gp  linux=$lx  coverage=$cov  check-layers=$cl"
+          # ci-script-pins is UNGATED, so unlike the three above it is expected
+          # to be `success` even on a PR that has not yet earned its gate labels
+          # — it is the only member of this list that can be green before then.
+          csp='${{ needs.ci-script-pins.result }}'
+          echo "gate-precheck=$gp  linux=$lx  coverage=$cov  check-layers=$cl  ci-script-pins=$csp"
           fail=0
-          for kv in "gate-precheck=$gp" "linux=$lx" "coverage=$cov" "check-layers=$cl"; do
+          for kv in "gate-precheck=$gp" "linux=$lx" "coverage=$cov" "check-layers=$cl" "ci-script-pins=$csp"; do
             if [ "${kv#*=}" != "success" ]; then
               echo "::error::Tier 1 job '${kv%%=*}' did not run to success (got '${kv#*=}'). The core build/test matrix must actually run — satisfy Gate A + Gate B (gate-a-done / gate-b-done) so the matrix fires before merge."
               fail=1

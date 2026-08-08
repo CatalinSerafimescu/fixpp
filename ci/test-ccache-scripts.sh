@@ -125,7 +125,15 @@ case "${1:-}" in
   --show-stats)  printf '%s\n' "${FAKE_SHOW_STATS_OUT:-cacheable calls: 0}"; exit "${FAKE_SHOW_STATS_EXIT:-0}" ;;
   --print-stats)
     [ "${FAKE_PRINT_STATS_EXIT:-0}" = "0" ] || exit "${FAKE_PRINT_STATS_EXIT}"
-    cat "${FAKE_STATS_FILE:?}" ;;
+    # No fixture set => a pristine cache, all counters zero. That is what a
+    # fresh runner reads, and it is the happy path for restore-ccache.sh's
+    # "nothing has compiled yet" precondition — so the DEFAULT here must be the
+    # passing case, or that guard would never be exercised green.
+    if [ -z "${FAKE_STATS_FILE:-}" ]; then
+      printf 'direct_cache_hit\t0\npreprocessed_cache_hit\t0\ncache_miss\t0\n'
+      exit 0
+    fi
+    cat "$FAKE_STATS_FILE" ;;
   *) echo "SHIM-VIOLATION: ccache $*" >&2; exit 2 ;;
 esac
 SHIM
@@ -259,8 +267,36 @@ restore_case() {
 restore_case ok
 want_status 0 "restore/hit"; want_hit true "restore/hit"
 want_out '^ccache-cache HIT' "restore/hit"
+want_no_out 'precondition was NOT verified' "restore/hit"
 [ -f "$CDIR/aa/entry" ] || fail "restore/hit: the archive content was not swapped into CCACHE_DIR"
 ok "HIT — archive extracted, swapped in, hit=true"
+
+# ── The run-me-before-anything-compiles precondition ────────────────────────
+#
+# Nonzero cacheable calls before the restore means the step was reordered below
+# `Conan install`, and the HIT path's `rm -rf` would discard exactly the
+# dependency-closure entries Conan just built — leaving a plausible hit rate
+# over a cache that lost the lane's largest block of compile work.
+PRESTATS="$sandbox/prestats.txt"
+printf 'direct_cache_hit\t12\npreprocessed_cache_hit\t0\ncache_miss\t400\n' > "$PRESTATS"
+rm -rf "$CDIR"
+FAKE_EXPECTED_REF="$IMAGE:$TAG" FAKE_ORAS_PULL_MODE=ok FAKE_PRESET=fake-libc++ \
+FAKE_STATS_FILE="$PRESTATS" CCACHE_DIR="$CDIR" \
+  run "$CI_DIR/restore-ccache.sh" fake-libc++
+want_status 1 "restore/precondition"
+want_out '::error::412 cacheable ccache call' "restore/precondition"
+want_no_out 'ccache-cache HIT' "restore/precondition"
+ok "compiles already recorded before the restore — refuses, rather than discarding them"
+
+# An UNREADABLE counter must NOT redden the lane — that would fail on the
+# instrument rather than the fault. It warns and proceeds.
+rm -rf "$CDIR"
+FAKE_EXPECTED_REF="$IMAGE:$TAG" FAKE_ORAS_PULL_MODE=ok FAKE_PRESET=fake-libc++ \
+FAKE_PRINT_STATS_EXIT=1 CCACHE_DIR="$CDIR" \
+  run "$CI_DIR/restore-ccache.sh" fake-libc++
+want_status 0 "restore/precondition-unreadable"; want_hit true "restore/precondition-unreadable"
+want_out 'precondition was NOT verified' "restore/precondition-unreadable"
+ok "unreadable counters — warns that the precondition is unverified, does not fail the lane"
 
 restore_case fail
 want_status 0 "restore/pull-fails"; want_hit false "restore/pull-fails"
@@ -542,6 +578,21 @@ stats_case false success
 want_status 0 "stats/cold"
 want_out 'ccache-hitrate 0% over 900 cacheable calls' "stats/cold"
 ok "cold run — 0% is GREEN (liveness is the gate, not a hit-rate floor)"
+
+# "Read the PAIR" — a restore HIT with a near-zero rate is the change failing.
+write_stats 3 0 900 400000 2097152 0
+stats_case true success
+want_status 0 "stats/hit-but-cold"
+want_out '::warning::ccache RESTORED a cache' "stats/hit-but-cold"
+want_out 'do not read the green tick as evidence' "stats/hit-but-cold"
+ok "restore HIT + 0% rate — warned as the failing pair, still exit 0"
+
+# The same rate on a MISS is the expected cold reading and must stay silent,
+# or the warning becomes noise on every first run after a compiler bump.
+stats_case false success
+want_status 0 "stats/miss-and-cold"
+want_no_out '::warning::ccache RESTORED a cache' "stats/miss-and-cold"
+ok "restore MISS + 0% rate — silent, that is just a cold run"
 
 write_stats 100 0 800 511000 512000 42
 stats_case true success

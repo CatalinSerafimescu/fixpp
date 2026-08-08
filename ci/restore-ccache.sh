@@ -43,6 +43,40 @@ note() { echo "$1"; [ -n "${GITHUB_STEP_SUMMARY:-}" ] && echo "$1" >> "$GITHUB_S
 : "${CCACHE_DIR:?CCACHE_DIR must be set (the workflow sets it job-wide)}"
 mkdir -p "$CCACHE_DIR"
 
+# ── THIS SCRIPT PROVES ITS OWN PRECONDITION ─────────────────────────────────
+#
+# "Runs before anything compiles" was enforced only by step ORDER, restated in
+# three prose copies. Nothing could observe a violation — and the violation is
+# silent in the worst way. Move this below `Conan install` (plausible: the Conan
+# restore already sits between them) and the HIT path's `rm -rf "$CCACHE_DIR"`
+# deletes the dependency-closure entries Conan just built from source, then
+# swaps in the pulled tree. The run then reports nonzero cacheable calls and a
+# perfectly plausible hit rate: the liveness check never fires, and there is
+# deliberately no rate floor to catch it. The largest block of compile work on
+# the lane is silently thrown away while the summary reads healthy.
+#
+# A fresh runner reads zeros here, so the check costs nothing on the happy path.
+#
+# ⚠️ FATAL, unlike every other failure in this script — and the distinction is
+# the same one ci/ccache-stats.sh's zero-calls check draws. "The cache is down"
+# must never redden a lane whose build and tests pass. This is not that: it is
+# the wiring being wrong and the measurement being a lie, which is exactly the
+# class that is already fail-closed here (see the CCACHE_DIR root guard below).
+#
+# An UNREADABLE counter is NOT fatal: refusing on a missing diagnostic would
+# redden a green lane over the instrument rather than the fault. It says so.
+precalls="$(ccache --print-stats 2>/dev/null | awk '
+  $1 == "direct_cache_hit" || $1 == "preprocessed_cache_hit" || $1 == "cache_miss" { n += $2 }
+  END { print n + 0 }')" || precalls=""
+case "$precalls" in
+  ''|*[!0-9]*)
+    echo "::warning::Could not read ccache's counters before restoring, so the 'nothing has compiled yet' precondition was NOT verified on this run. The restore proceeds; if this step has been reordered below \`Conan install\`, the dependency-closure entries it just built will be discarded without further warning." ;;
+  0) : ;;
+  *)
+    echo "::error::${precalls} cacheable ccache call(s) were already recorded BEFORE the restore ran, so something compiled through ccache first. This step must run before \`Conan install\` — libc++ has no prebuilt Conan Center binaries, so \`--build=missing\` compiles the whole dependency closure through the launcher, and the restore's swap-in would discard exactly those entries. Refusing: continuing would produce a plausible hit rate over a cache that silently lost the lane's largest block of compile work."
+    exit 1 ;;
+esac
+
 if ! ccache_cache_key "$PRESET"; then
   note "ccache-cache MISS ($PRESET, compiler unidentified) → building with an empty cache"
   emit false

@@ -176,4 +176,26 @@ fi
 
 rate=$(( hits * 100 / calls ))
 note "ccache-hitrate ${rate}% over ${calls} cacheable calls (${PRESET}), restore=\`${RESTORE:-n/a}\`"
+
+# ── "READ THE PAIR" — made a CHECK instead of a sentence addressed to a human ─
+#
+# The rule that a restore HIT at ~0 % is the change FAILING, not passing, was
+# stated in this file's header and again in the workflow, as prose. But this
+# script holds BOTH inputs and was making no judgment on them — the exact shape
+# the #244/#247 correction is on record about: an instrument that reports two
+# numbers and leaves the only inference that matters to whoever reads the log.
+#
+# ⚠️ A WARNING, NOT AN ASSERT, AND THE THRESHOLD IS DELIBERATELY LOW. A hard
+# floor is wrong here for the same reason the liveness check is not a rate
+# check: a legitimate warm run can be well down after a large refactor or a
+# codegen change. 10 % is set to catch the PATHOLOGICAL signature — the tag was
+# pulled but almost nothing in it matched, i.e. compiler, flag or path drift —
+# without firing on ordinary churn. Tighten only once a warm baseline exists,
+# which is the same discipline the missing rate floor follows.
+#
+# Only fires on a HIT: on a MISS a 0 % rate is the expected cold-run reading and
+# says nothing.
+if [ "${RESTORE:-}" = "true" ] && [ "$rate" -lt 10 ]; then
+  note "::warning::ccache RESTORED a cache for ${PRESET} and then hit only ${rate}% of ${calls} cacheable calls. That pair — restore HIT with a near-zero rate — is the signature of a cache that was pulled but whose entries do not match this build: compiler drift (CCACHE_COMPILERCHECK=content hashes the binary, and llvm.sh can silently fall back to an earlier clang major), a flag change, or a build-directory path change. It is NOT a failure of this step, and it is deliberately not fatal — but it means the compiler cache is doing almost nothing on this lane, so do not read the green tick as evidence that it works."
+fi
 exit 0
