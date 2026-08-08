@@ -44,6 +44,12 @@ if ! conan_cache_key "$PROFILE"; then
 fi
 TAG="$CONAN_CACHE_TAG"
 
+# Same line restore prints, on the publishing side (#222). Restore's copy makes
+# two RESTORES diffable; this one makes a restore diffable against the run that
+# actually PUBLISHED the tag it is missing — which is the more useful comparison
+# when the question is "what changed since this package was seeded?".
+echo "conan-cache: key inputs — $CONAN_CACHE_INPUTS"
+
 WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
 
 # 1. Resolve the EXACT profile+options-locked package set. `conan graph info`

@@ -92,6 +92,15 @@ bail() { echo "prune: PENDING ? — $1; nothing was deleted"; exit 0; }
 # comparison would fail, and the script would fail closed FOREVER the moment the
 # package exceeded one page — locking out the very cleanup that shrinks it.
 # `jq -s add` rather than `gh --slurp` so this does not depend on the gh version.
+# VALIDATE THE SHAPE BEFORE FLATTENING. `jq -s 'add // []'` maps empty output,
+# `null` and `{}` all onto `[]` — so a SUCCESSFUL-but-malformed response (a
+# truncated body, an API shape change) sailed past the `-n "$VERSIONS"` check as
+# a legitimately empty package and rendered "nothing to prune". A zero exit from
+# `gh` is not evidence the body was what we think it is.
+# `-e` makes jq's exit status follow the expression's value, so false → bail.
+printf '%s' "$RAW" | jq -se 'length > 0 and all(.[]; type == "array")' >/dev/null 2>&1 \
+  || bail "the LIST response was not one-or-more JSON arrays (empty, null, or an unexpected shape)"
+
 VERSIONS=$(printf '%s' "$RAW" | jq -s 'add // []' 2>/dev/null)
 [ -n "$VERSIONS" ] || bail "could not parse the version list as JSON"
 
@@ -142,11 +151,22 @@ for row in "${DEAD[@]:-}"; do
     echo "prune (dry-run): would delete version $vid  tags=[$tags]"
     continue
   fi
-  if gh api --method DELETE "/user/packages/container/$PKG/versions/$vid" >/dev/null 2>&1; then
+  # PRINT WHAT THE API ACTUALLY SAID. The previous shape discarded the response
+  # (`>/dev/null 2>&1`) and every failure printed the fixed string "token lacks
+  # delete:packages" — a GUESS presented as a diagnosis. It happened to be right
+  # once, which is worse than being wrong: when the token was re-issued on
+  # 2026-08-06 and the DELETEs still failed, the log said the same sentence, so
+  # the second cause was unrecoverable from CI and the fix was declared resolved
+  # while the package kept accumulating orphans. A diagnostic that cannot be
+  # contradicted by the thing it describes is not a diagnostic.
+  if out=$(gh api --method DELETE "/user/packages/container/$PKG/versions/$vid" 2>&1); then
     echo "prune: deleted version $vid  tags=[$tags]"
     deleted=$((deleted + 1))
   else
-    echo "prune: REFUSED version $vid  tags=[$tags]"
+    # Same collapse-and-truncate as the LIST failure above: gh prints a one-line
+    # diagnosis followed by a pretty-printed JSON body, so the first line is
+    # often just `{`.
+    echo "prune: REFUSED version $vid  tags=[$tags] — $(printf '%s' "$out" | tr -s '\n\r\t ' ' ' | cut -c1-200)"
     pending=$((pending + 1))
   fi
 done
@@ -156,6 +176,10 @@ if [ "$pending" -gt 0 ]; then
   # Greppable, and deliberately not silent. The previous shape logged
   # "delete FAILED (non-fatal)" per version, which reads as noise and let the
   # sibling package quietly double its MSVC tag count unnoticed for a week.
-  echo "prune: PENDING $pending  (token lacks delete:packages — run ci/prune-sccache.sh locally to reclaim)"
+  #
+  # NO CAUSAL CLAIM HERE. The cause is whatever the per-version REFUSED lines
+  # above report; asserting one in the summary is what made the last two
+  # failures look identical.
+  echo "prune: PENDING $pending  (see the REFUSED line(s) above for what the API said; run ci/prune-sccache.sh locally with a delete:packages token to reclaim)"
 fi
 exit 0
