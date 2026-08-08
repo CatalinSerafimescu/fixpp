@@ -121,13 +121,14 @@ calls=$((hits + miss))
 # skips every later step. Adding the conjunct would look safer while guarding a
 # path that is already closed, and would then also skip the legitimate
 # cold-seed case if the reasoning behind it ever drifted.
+#
+# ⚠️ ONLY `misses`, because only `misses` has a consumer. An earlier draft also
+# emitted hits/calls/cleanups "in case someone wants them" — speculative surface
+# with no caller, which is the thing this repo's guidelines rule out outright.
+# All three are already in the log and the Job Summary; adding one back is one
+# line, on the day something actually reads it.
 if [ -n "${GITHUB_OUTPUT:-}" ]; then
-  {
-    echo "misses=${miss}"
-    echo "hits=${hits}"
-    echo "calls=${calls}"
-    echo "cleanups=${clean}"
-  } >> "$GITHUB_OUTPUT"
+  echo "misses=${miss}" >> "$GITHUB_OUTPUT"
 fi
 
 # ── The thrash indicator #240 exists to close ────────────────────────────────

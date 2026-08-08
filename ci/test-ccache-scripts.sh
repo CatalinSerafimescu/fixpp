@@ -193,7 +193,11 @@ run() {
   OUT="$(cat "$OUT_FILE")"
   HIT="$(sed -n 's/^hit=//p' "$GH_OUTPUT")"
   STEP_OUTPUTS="$(cat "$GH_OUTPUT")"
-  SUMMARY_TEXT="$(cat "$SUMMARY")"
+  # $SUMMARY is still CREATED and passed as GITHUB_STEP_SUMMARY — the scripts
+  # write to it and would behave differently if it were unset — but its contents
+  # are deliberately not captured: every summary line the scripts emit also goes
+  # to stdout via note(), so $OUT already covers them and a second variable was
+  # dead weight.
   rm -f "$OUT_FILE" "$GH_OUTPUT" "$SUMMARY"
   if printf '%s\n' "$OUT" | grep -q 'SHIM-VIOLATION'; then
     printf '%s\n' "$OUT" | sed 's/^/  | /'
