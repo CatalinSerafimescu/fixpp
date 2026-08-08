@@ -75,7 +75,20 @@ command -v gh >/dev/null 2>&1 || { echo "prune: PENDING ? — gh not found; noth
 # multi-GB versions, which a local run of this same script then deleted. A
 # reclaim path that reports "nothing to do" when it could not even ask is worse
 # than one that reports a backlog.
-if ! RAW=$(gh api --paginate "/user/packages/container/$PKG/versions?per_page=100" 2>&1); then
+# ⚠️ NO LEADING SLASH ON ANY `gh api` ENDPOINT HERE. Under Git Bash on the
+# windows runner, MSYS rewrites a leading-slash argument into a Windows path, so
+# `/user/packages/...` reached gh as
+# `C:/Program Files/Git/user/packages/container/fixpp-sccache/versions/<id>` and
+# every DELETE was refused with `invalid API endpoint`. gh's own error says to
+# omit the leading slash; the slash-free form is what its docs use anyway.
+#
+# The conversion is SHAPE-DEPENDENT, which is what made this so misleading: this
+# LIST carries `?per_page=100` and was NOT converted, so listing and classifying
+# worked perfectly while every delete failed. The result looked exactly like a
+# permissions problem — and was misdiagnosed as one twice. Same MSYS behaviour
+# `winpath()` in ci/conan-cache-key.sh already documents ("sometimes mangles such
+# arguments and sometimes does not; it depends on the argument's shape").
+if ! RAW=$(gh api --paginate "user/packages/container/$PKG/versions?per_page=100" 2>&1); then
   echo "prune: PENDING ? — could not LIST $PKG versions; nothing was examined, let alone deleted"
   # gh prints a one-line diagnosis AND a pretty-printed JSON body; the first
   # line is often just `{`, so collapse and truncate rather than head -1.
@@ -159,7 +172,9 @@ for row in "${DEAD[@]:-}"; do
   # the second cause was unrecoverable from CI and the fix was declared resolved
   # while the package kept accumulating orphans. A diagnostic that cannot be
   # contradicted by the thing it describes is not a diagnostic.
-  if out=$(gh api --method DELETE "/user/packages/container/$PKG/versions/$vid" 2>&1); then
+  # NO LEADING SLASH — see the note above `RAW=` for why. This is the call that
+  # was actually being mangled on the windows runner.
+  if out=$(gh api --method DELETE "user/packages/container/$PKG/versions/$vid" 2>&1); then
     echo "prune: deleted version $vid  tags=[$tags]"
     deleted=$((deleted + 1))
   else

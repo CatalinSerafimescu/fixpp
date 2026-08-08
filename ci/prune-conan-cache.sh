@@ -48,7 +48,12 @@ command -v gh  >/dev/null 2>&1 || { echo "prune: gh not found — skipping";  ex
 # says PENDING rather than "no stale tags".
 bail() { echo "prune: PENDING ? — $1; nothing was deleted"; exit 0; }
 
-if ! RAW=$(gh api --paginate "/user/packages/container/$PKG/versions?per_page=100" 2>&1); then
+# ⚠️ NO LEADING SLASH — MSYS on the windows runner rewrites a leading-slash
+# argument into a Windows path (`C:/Program Files/Git/user/packages/...`), which
+# gh rejects as an invalid API endpoint. This script runs on tier2 via
+# seed-conan-cache.sh, so it has the same exposure as prune-sccache.sh, where the
+# failure was actually observed. Full note in that file.
+if ! RAW=$(gh api --paginate "user/packages/container/$PKG/versions?per_page=100" 2>&1); then
   echo "prune: PENDING ? — could not LIST $PKG versions; nothing was examined, let alone deleted"
   # gh prints a one-line diagnosis AND a pretty-printed JSON body, so the first
   # line is often just `{` — collapse and truncate rather than head -1.
@@ -109,7 +114,8 @@ for row in "${STALE[@]}"; do
     # Print what the API actually said, for the same reason as prune-sccache.sh:
     # "needs delete perms" was a guess in the position of a diagnosis, and it
     # made two different failures produce identical logs.
-    if out=$(gh api --method DELETE "/user/packages/container/$PKG/versions/$vid" 2>&1); then
+    # NO LEADING SLASH — see the note above `RAW=`.
+    if out=$(gh api --method DELETE "user/packages/container/$PKG/versions/$vid" 2>&1); then
       echo "prune: deleted stale version $vid  tags=[$tags]"
       deleted=$((deleted + 1))
     else
