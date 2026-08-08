@@ -432,9 +432,14 @@ jobs:
           # main's ccache even though the prior push:main run's save step had
           # succeeded. That is what made 083 pay a cold ~1500-object rebuild.
           #
-          # The arithmetic, not just the tidiness: one clean `main` set is ~7.7 GB
-          # (4 sanitizer legs at 1.4-1.9 GB + 4 tier3 legs at ~460 MB + Conan/ABI
-          # entries) of a 10 GB cap. An open PR running the same matrix would add
+          # The arithmetic, not just the tidiness: one clean `main` set WAS
+          # ~7.6 GiB (4 sanitizer legs at 1.4-1.9 GB + 4 tier3 legs at ~460 MB +
+          # Conan/ABI entries) of a 10 GB cap. MEASURED 2026-08-08 from
+          # actions/cache/usage: 8.49 GiB live over 15 caches, 7.61 GiB after
+          # this workflow's keep-newest sweep converges. #240 then moved the four
+          # tier3 legs (1.80 GiB) to GHCR, leaving **5.82 GiB** and ~4.2 GiB of
+          # headroom — which is the room #241's coverage cache is budgeted
+          # against. Do not re-quote the ~7.7 GB figure as current. An open PR running the same matrix would add
           # ~7 GB — so deleting a PR's caches when it CLOSES cannot prevent the
           # eviction, which happens while the PR is still open. Only not writing
           # does. Bounding PR saves instead was rejected: ~2 GB spread over 11
@@ -1850,9 +1855,11 @@ jobs:
           key: tier1-bench
           max-size: 2G
           # Restore-only on pull requests — see the matrix `linux` job's ccache
-          # step for the measurement and the budget arithmetic. All three
-          # ccache-action sites (matrix, bench, tier3 libc++) carry this; fixing
-          # a subset would leave the remaining ones squatting the same pool.
+          # step for the measurement and the budget arithmetic. Both remaining
+          # WRITING ccache-action sites (this one and the matrix) carry it;
+          # fixing a subset would leave the other squatting the same pool.
+          # (#240 removed the third — tier3 libc++ — from the Actions pool
+          # entirely; its ccache is on GHCR and never touches this budget.)
           save: ${{ github.event_name == 'push' }}
 
       - name: Conan install

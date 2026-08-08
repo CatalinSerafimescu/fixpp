@@ -7,8 +7,12 @@
 # the dependency closure from source through the job-level
 # CMAKE_{C,CXX}_COMPILER_LAUNCHER=ccache. Restoring after that point leaves
 # every dependency TU a guaranteed miss — the single largest block of compile
-# work on this lane, and the one the previous ccache-action ordering
-# (tier3-libcxx.yml:269-279) was specifically written to cover.
+# work on this lane, and the one the previous ccache-action ordering was
+# specifically written to cover. The constraint is restated at the "Install
+# ccache" and "Restore ccache from GHCR" steps in .github/workflows/
+# tier3-libcxx.yml — cited by STEP NAME rather than line number on purpose,
+# because this PR moved those lines and a stale anchor pointing into a plausible
+# neighbouring block is worse than no anchor.
 #
 # On MISS it exits 0 and the build simply compiles everything, populating a
 # cache that the seed step then publishes. A compiler cache that is down must

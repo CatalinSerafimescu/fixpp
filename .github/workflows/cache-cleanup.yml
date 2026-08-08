@@ -20,8 +20,10 @@ name: Reclaim unreachable and superseded Actions caches
 # ends cannot prevent an eviction that happens while the PR is still OPEN — main
 # (~7.7 GB) plus one open PR (~7 GB) does not fit in 10 GB by any ordering of
 # deletions. The first half is `save: ${{ github.event_name == 'push' }}` on
-# every ccache-action site (tier1.yml x2, tier3-libcxx.yml x1), which stops PRs
-# writing ccache at all. What remains for this workflow is everything else a PR
+# every ccache-action site that WRITES — `tier1.yml` matrix + bench. (Corrected
+# by #240: tier3-libcxx.yml no longer uses the action at all, its ccache having
+# moved to GHCR. tier1's third site, python-bindings `none`, is `save: false`
+# and never writes.) This stops PRs writing ccache at all. What remains for this workflow is everything else a PR
 # still legitimately writes — `conan-abi-golden`, tier1's manylinux wheel cache
 # — roughly 1 GB per PR, which would otherwise accumulate.
 #
@@ -231,9 +233,25 @@ jobs:
       # KEEP-NEWEST-PER-KEY, and note what that deliberately does NOT do: the
       # grouping key is the cache key with a trailing ISO8601 stamp stripped, and
       # groups are matched by EXACT EQUALITY, never by prefix containment.
-      # `ccache-tier3-linux-clang-libc++` and `ccache-tier3-linux-clang-libc++-asan`
-      # are therefore different groups, not one group where the shorter swallows
-      # the longer. A key with no such stamp — `conan-abi-golden-<sha>`,
+      # `ccache-tier1-linux-clang-debug` and `ccache-tier1-linux-clang-debug-py`
+      # would therefore be different groups, not one group where the shorter
+      # swallows the longer.
+      #
+      # ⚠️ A RETIRED KEY'S NEWEST ENTRY IS IMMORTAL UNDER THIS RULE, and that is
+      # a real leak, not a corner case. Keep-newest only ever deletes an entry
+      # that something SUPERSEDED. When a lane stops writing a key altogether,
+      # its last entry becomes the newest of its group forever and this sweep
+      # protects it. #240 is exactly that case: moving Tier 3 to GHCR retired
+      # four `ccache-tier3-linux-clang-libc++*` keys holding 1.80 GiB (measured
+      # 2026-08-08), which this workflow would have preserved indefinitely —
+      # silently cancelling the pool reduction the move was for. Retiring a key
+      # therefore needs a ONE-TIME manual reclaim:
+      #
+      #     gh cache delete <key> --repo CatalinSerafimescu/fixpp
+      #
+      # Deliberately not automated: "no workflow writes this key any more" is not
+      # derivable from the cache list, and a sweep that guessed would delete a
+      # lane that is merely idle. A key with no such stamp — `conan-abi-golden-<sha>`,
       # `conan-wheel-manylinux228-<sha>` — matches nothing to strip, so it forms a
       # group of one and is ALWAYS kept. Content-hashed keys are self-invalidating
       # and are not this sweep's business.
