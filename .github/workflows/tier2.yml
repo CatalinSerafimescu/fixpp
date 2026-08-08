@@ -574,8 +574,11 @@ jobs:
       #   sccache tag:  sccache-<preset>-<toolset>                     ← no content hash
       #   Conan tag:    <profile>-sha256(conanfile.py+profile+toolset) ← content-derived
       #
-      # A feature branch that changes anything gets a DIFFERENT Conan tag and
-      # cannot collide. Every branch computes the IDENTICAL sccache tag, so a
+      # A branch that changes a Conan-key INPUT (conanfile.py, the profile, the
+      # toolset) gets a different Conan tag. A branch that changes only .cpp,
+      # headers, CMake, tests, or workflow YAML computes the SAME Conan tag as main —
+      # what protects that namespace is the ref check, not the key. Every branch
+      # computes the IDENTICAL sccache tag whatever it changed, so a
       # dispatch writes to exactly the artifact main reads next.
       #
       # Not a correctness risk — sccache hashes compilation inputs internally, so

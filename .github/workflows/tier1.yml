@@ -1038,8 +1038,10 @@ jobs:
     # the hit counts so the two are read together.
     env:
       CCACHE_COMPILERCHECK: content
-      # Same directory NAME the matrix debug leg uses. Only the restore target;
-      # it is not part of any key.
+      # Same directory the matrix debug leg uses. It is not text in the `key:`
+      # string, but the Actions cache VERSION is derived partly from the cached
+      # paths — so producer and reader must keep this path aligned, or textually
+      # equal keys resolve to incompatible entries.
       CCACHE_DIR: /tmp/fixpp-ccache-linux-clang-debug
 
     strategy:
@@ -1066,13 +1068,17 @@ jobs:
           # `cmake --preset linux-clang-debug -DFIXPP_BUILD_PYTHON=ON` — which is
           # the configuration that was measured.
           #
-          # The launcher is passed as `-D` on Configure rather than via job-level
-          # CMAKE_*_COMPILER_LAUNCHER on purpose: a job-level launcher is the
-          # tier1 exit-127 shape (see the matrix job's ccache note) — Conan's
-          # `--build=missing` compiler probe would run through a launcher that is
-          # not yet on PATH. The trade-off is that a from-source Conan dep on
-          # this leg does not go through ccache; that matches today's behaviour
-          # and the GHCR Conan restore normally makes it moot.
+          # The launcher is a `-D` on Configure rather than a job-level
+          # CMAKE_*_COMPILER_LAUNCHER because a job-level env var reaches ALL
+          # FOUR legs and only `none` installs ccache (the action below is
+          # `if: matrix.sanitizer == 'none'`). On the three sanitizer legs a
+          # job-level launcher would front Conan's `--build=missing` compiler
+          # probe with ccache never on PATH at all — the tier1 exit-127 shape
+          # (see the matrix job's ccache note). On the `none` leg ccache IS
+          # already on PATH by Conan-install time, so the trade-off there is
+          # deliberate SCOPE, not ordering: a from-source Conan dep on this leg
+          # does not go through ccache; that matches today's behaviour and the
+          # GHCR Conan restore normally makes it moot.
           - sanitizer: none
             bdir: linux-clang-debug
             cfg_extra: "-DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache"
@@ -1186,10 +1192,14 @@ jobs:
       # matrix leg reads.
       #
       # ⚠️ ORDERING, not a defect: this job runs CONCURRENTLY with the matrix
-      # leg, so on any given run it restores the PREVIOUS run's cache, not the
-      # one being built alongside it. Ordinary ccache steady state — but the
-      # first run after this change still pays a cold build, and a cold Build
-      # time on run #1 is not evidence the change failed.
+      # leg, so it cannot consume the save that leg is producing alongside it.
+      # It restores the newest compatible entry ALREADY VISIBLE at step start —
+      # normally a prior push:main run's (one was observed present on
+      # refs/heads/main on 2026-08-08). So run #1 is expected WARM, not cold. It
+      # is cold ONLY when no compatible entry exists: never seeded, LRU-evicted, or
+      # an incompatible cache version. A restore MISS or a 0% hit rate on run #1
+      # is therefore a finding to explain, NOT a first-run cold build to wave
+      # off — the restore-check step below says which of the two it is.
       - name: ccache (install + restore-only — the matrix debug leg owns the save)
         if: matrix.sanitizer == 'none'
         uses: hendrikmuhs/ccache-action@v1.2.23
