@@ -1213,8 +1213,14 @@ jobs:
       # "restored fine but the objects didn't match" both read as 0% hits over a
       # nonzero call count.
       #
-      #   size > 0  ⇒ the restore landed, so a later 0% hit rate is a BUILD
-      #               DIVERGENCE finding (the build-dir alignment didn't work).
+      #   size > 0  ⇒ the restore landed, so a later 0% hit rate is a LOOKUP
+      #               DIVERGENCE finding: entries were present and NONE matched.
+      #               That is all it establishes — it does not say WHICH hashed
+      #               input diverged. Compare, in this order: the build directory
+      #               (this change's thesis), the compiler binary
+      #               (CCACHE_COMPILERCHECK=content — llvm.sh silently falls back
+      #               a major, see the env note above), the command line, and the
+      #               generated _codegen include paths.
       #   size == 0 ⇒ the restore is the story and the hit rate says nothing
       #               about build dirs. Legitimate states: nothing seeded yet, or
       #               main's own entry was LRU-evicted (see
@@ -1265,7 +1271,7 @@ jobs:
             note "ccache-restore HIT  tier1-linux-clang-debug — $((kib / 1024)) MiB in ${CCACHE_DIR:-<unset>} before the build"
           else
             note "ccache-restore MISS tier1-linux-clang-debug — 0 KiB in ${CCACHE_DIR:-<unset>}; this run builds cold"
-            echo "::warning::ccache restore found NOTHING under key prefix tier1-linux-clang-debug — no compatible entry was visible at restore time. That is one of three things: the key was never seeded, main's entry was LRU-evicted, or the entries present have an incompatible cache version. It is NOT expected merely because this change is new: a compatible entry on refs/heads/main is readable from a PR ref. This run's hit rate therefore says nothing about whether the build dirs align — but the MISS itself is a finding to explain."
+            echo "::warning::ccache restore found NOTHING under key prefix tier1-linux-clang-debug. What this probe MEASURED is only that: zero ccache data present locally before the build. It does NOT select a cause. Candidates, none of them excluded: the key was never seeded; main's entry was LRU-evicted; the entries present have an incompatible cache version; the cross-job key prefix does not resolve the way this step's first-in-repo shared-key use assumes (surfacing that is why this probe exists — see the comment above); or the restore itself FAILED — hendrikmuhs/ccache-action@v1.2.23 swallows Actions-cache service errors (dist/restore/index.js: non-5xx warns, 5xx core.errors, then it reports 'No cache found'), so a failed download is indistinguishable HERE from an empty one; read the action's own step log above. It is NOT expected merely because this change is new: a compatible entry on refs/heads/main is readable from a PR ref. This run's hit rate therefore says nothing about whether the build dirs align — but the MISS itself is a finding to explain."
           fi
 
       - name: Conan install
@@ -1322,7 +1328,17 @@ jobs:
           # first thing to check when hits are 0 (see the job's env note).
           echo "compiler: $(clang++ --version | head -1)"
           echo "CCACHE_DIR=${CCACHE_DIR:-<unset>}"
-          ccache --show-stats
+          # Human-readable, and DIAGNOSTIC-ONLY — but "diagnostic-only" describes
+          # what its OUTPUT is for, not what its FAILURE does. Bare under `set -e`
+          # a non-zero rc kills the step HERE, so the guarded --print-stats below
+          # never runs and the ::error:: it would have emitted never appears.
+          # Measured on the unfixed tree: --show-stats returning 41 => rc 41, zero
+          # annotations, no disposition; ccache absent => rc 127, same. Warn and
+          # continue: the authoritative call is the next one, and it IS
+          # fatal-and-attributed.
+          if ! ccache --show-stats; then
+            echo "::warning::\`ccache --show-stats\` failed — the human-readable counters are NOT in this log, so the zero-cacheable-calls branch below cannot point you at called_for_link / called_for_preprocessing / unsupported_* / could_not_use_modules. The authoritative \`ccache --print-stats\` measurement follows and will fail with an attributed ::error:: if ccache is genuinely unavailable."
+          fi
           # Machine-readable (ccache >= 4.4; ubuntu-24.04 ships 4.9.x). Guarded
           # rather than left bare: under `set -e` a bare failure exits non-zero
           # with NO ::error:: annotation — red, but blaming nothing. Fail-closed
@@ -1348,7 +1364,13 @@ jobs:
           # reads THREE, and n!=1 must reach the SHARED `-z` message below that
           # names all three keys at once; making it exit non-zero would route
           # missing/duplicated into the awk-failure handler and collapse the
-          # missing-vs-duplicated-vs-tool-failure discrimination that G2/G4 built.
+          # FORMAT/CARDINALITY-vs-AWK-EXECUTION discrimination that G2/G4 built.
+          # Stated precisely, because the earlier wording of this comment was
+          # wrong: missing and duplicated are NOT separated from each other —
+          # both make val() print nothing and both deliberately reach the SHARED
+          # -z message below that names all three keys at once. What must stay
+          # separated is "the stats file is not the shape this step parses"
+          # (:1375) from "awk itself failed" (the three handlers just below).
           dhit=$(val direct_cache_hit) || {
             echo "::error::\`awk\` itself failed while parsing direct_cache_hit from /tmp/ccache-stats.txt — the INSTRUMENT could not measure. This says NOTHING about the launcher or the cache."
             exit 1
@@ -1391,10 +1413,22 @@ jobs:
               echo "::error::ccache recorded ZERO cacheable calls, and $cache_file does not exist — so this step could not read the launcher configuration at all. That is an INSTRUMENT failure on top of the zero-call finding, not evidence about wiring. Configure and Build both reported success, so the file's absence is itself the first thing to explain."
               exit 1
             fi
+            # `if grep …` is EXEMPT from `set -e`, so the else arm catches EVERY
+            # non-zero rc. grep's contract: 0 = matched, 1 = no match, >1 = the
+            # read or the regex failed. Folding rc 2 into the else reports "the
+            # launcher was not wired in" for a file that was never successfully
+            # read — a conclusion this step did not measure.
+            # ⚠️ `grep_rc=$?` MUST be the first COMMAND after `else`. A comment is
+            # safe; any echo placed before it clobbers $?.
             if grep -qE '^CMAKE_CXX_COMPILER_LAUNCHER:[^=]*=.*ccache' "$cache_file"; then
               echo "::error::ccache recorded ZERO cacheable calls, and the launcher IS configured — $cache_file carries CMAKE_CXX_COMPILER_LAUNCHER=…ccache. Configuration is all this step measured: it does NOT establish that ccache executed. Two causes fit: (a) ccache ran and classified every invocation as uncacheable — read the \`ccache --show-stats\` output above for called_for_link / called_for_preprocessing / unsupported_* / could_not_use_modules (ccache 4.9.x has no aggregate uncacheable counter, those individual counters are the evidence); or (b) no compile edge ran at all, so ccache was never invoked. A nonzero uncacheable counter above distinguishes them."
             else
-              echo "::error::ccache recorded ZERO cacheable calls AND $cache_file carries no CMAKE_CXX_COMPILER_LAUNCHER=…ccache — the compiler launcher was not wired in."
+              grep_rc=$?
+              if [ "$grep_rc" -gt 1 ]; then
+                echo "::error::ccache recorded ZERO cacheable calls, and \`grep\` exited $grep_rc while reading $cache_file — that is a read or regex failure, NOT a no-match. The launcher configuration was therefore NOT measured, and this says NOTHING about whether the launcher was wired in: the INSTRUMENT could not read the file."
+              else
+                echo "::error::ccache recorded ZERO cacheable calls AND $cache_file carries no CMAKE_CXX_COMPILER_LAUNCHER=…ccache — the compiler launcher was not wired in."
+              fi
             fi
             exit 1
           fi
