@@ -207,8 +207,9 @@ run_case() {
   # diagnostic #222 exists to make legible, so a real MISS is camouflaged on
   # every run by five synthetic ones.
   #
-  # `  | ` puts a non-whitespace character first, so no amount of leading-space
-  # trimming makes the line start with `::`. Same shape as
+  # `  | ` puts a non-whitespace character first AFTER the runner's
+  # leading-whitespace trim, so no amount of leading-space trimming makes the
+  # line start with `::`. Same shape as
   # restore-conan-cache.sh:69, which prefixes retained oras stderr for exactly
   # this reason. Indenting harder would not have worked.
   replay="$(printf '%s\n' "$OUT" | sed 's/^/  | /')"

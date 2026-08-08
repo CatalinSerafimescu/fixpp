@@ -1954,11 +1954,14 @@ jobs:
         run: |
           # A published release intentionally skips the C++ matrix (wheel-only).
           #
-          # ⚠️ ci-script-pins IS ASSERTED BELOW THIS EARLY EXIT TOO, i.e. it is
-          # not asserted on a release. That is deliberate and matches the rest:
-          # the pins guard the ci/ cache scripts, which a wheel-only release
-          # event does not run. Making one job blocking on an event where every
-          # other job is waived would be an asymmetry with no failure behind it.
+          # ⚠️ THE ci-script-pins ASSERTION SITS BELOW THIS EARLY EXIT, so a
+          # release event never reaches it. The JOB still runs on release (it
+          # has no event `if:`) — what is waived here is aggregating its
+          # result into this gate, not executing it. That is deliberate and
+          # matches the rest: the pins guard the ci/ cache scripts, which a
+          # wheel-only release event does not run. Making one job blocking on
+          # an event where every other job is waived would be an asymmetry
+          # with no failure behind it.
           if [ "${{ github.event_name }}" = "release" ]; then
             echo "release event — C++ matrix intentionally skipped; gate not applicable."
             exit 0
