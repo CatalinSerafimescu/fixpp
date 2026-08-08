@@ -1247,7 +1247,7 @@ jobs:
           }
           kib=$(ccache --print-stats |
                 awk '$1=="cache_size_kibibyte" {n++; v=$2} END {if (n!=1) exit 2; print v}') || {
-            echo "::error::\`ccache --print-stats\` did not report exactly one cache_size_kibibyte line — the stats FORMAT is not what this step parses (ccache version moved?). This says NOTHING about whether the restore landed: the INSTRUMENT could not measure. Fix the parse."
+            echo "::error::\`ccache --print-stats | awk\` did not yield exactly one cache_size_kibibyte value. Either ccache itself failed or is not installed, or the stats FORMAT is not what this step parses (ccache version moved?) — run \`ccache --print-stats\` in the step above to tell which. Either way this says NOTHING about whether the restore landed: the INSTRUMENT could not measure."
             exit 1
           }
           case "$kib" in
@@ -1335,8 +1335,12 @@ jobs:
           echo "ccache: hits=$hits (direct=$dhit preprocessed=$phit) misses=$miss cacheable_calls=$calls"
           if [ "$calls" -eq 0 ]; then
             cache_file="build/${{ matrix.bdir }}/CMakeCache.txt"
+            if [ ! -f "$cache_file" ]; then
+              echo "::error::ccache recorded ZERO cacheable calls, and $cache_file does not exist — so this step could not read the launcher configuration at all. That is an INSTRUMENT failure on top of the zero-call finding, not evidence about wiring. Configure and Build both reported success, so the file's absence is itself the first thing to explain."
+              exit 1
+            fi
             if grep -qE '^CMAKE_CXX_COMPILER_LAUNCHER:[^=]*=.*ccache' "$cache_file"; then
-              echo "::error::ccache recorded ZERO cacheable calls, but the launcher IS wired in — $cache_file carries CMAKE_CXX_COMPILER_LAUNCHER=…ccache. So ccache RAN and classified every invocation as uncacheable. Read the \`ccache --show-stats\` output above for called_for_link / called_for_preprocessing / unsupported_* / could_not_use_modules. (ccache 4.9.x has no aggregate uncacheable counter — those individual counters are the evidence.)"
+              echo "::error::ccache recorded ZERO cacheable calls, and the launcher IS configured — $cache_file carries CMAKE_CXX_COMPILER_LAUNCHER=…ccache. Configuration is all this step measured: it does NOT establish that ccache executed. Two causes fit: (a) ccache ran and classified every invocation as uncacheable — read the \`ccache --show-stats\` output above for called_for_link / called_for_preprocessing / unsupported_* / could_not_use_modules (ccache 4.9.x has no aggregate uncacheable counter, those individual counters are the evidence); or (b) no compile edge ran at all, so ccache was never invoked. A nonzero uncacheable counter above distinguishes them."
             else
               echo "::error::ccache recorded ZERO cacheable calls AND $cache_file carries no CMAKE_CXX_COMPILER_LAUNCHER=…ccache — the compiler launcher was not wired in."
             fi
