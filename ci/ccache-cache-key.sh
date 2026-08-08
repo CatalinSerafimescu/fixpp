@@ -180,5 +180,13 @@ ccache_tag_regex() {
   # `linux-clang-libcxx` IS a prefix of `linux-clang-libcxx-asan`, so a
   # start-anchored regex run for the plain lane would classify all three
   # sanitizer lanes' LIVE caches as reclaimable.
-  CCACHE_TAG_RE="^ccache-${safe}-clang[0-9a-z]+-[0-9a-f]+\$"
+  #
+  # ⚠️ TIGHTENED TO THE EXACT GRAMMAR THE MINTER ABOVE CAN PRODUCE, not the
+  # loosest shape that happens to match today's tags. `major` is digits or the
+  # literal `unknown`; `digest` is `sha256sum | cut -c1-8` — always exactly 8
+  # lowercase hex. `[0-9a-z]+-[0-9a-f]+` additionally accepted a non-numeric
+  # non-`unknown` major and a digest of any length — near-misses no producer
+  # here mints, but this regex is the sole classifier on an irreversible
+  # DELETE, and this repo's precedent is strictest exactly there.
+  CCACHE_TAG_RE="^ccache-${safe}-clang([0-9]+|unknown)-[0-9a-f]{8}\$"
 }

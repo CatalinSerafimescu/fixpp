@@ -255,6 +255,26 @@ if printf '%s' "$ASAN_TAG" | grep -qE -- "$TAG_RE"; then
 fi
 ok "the plain preset's regex does not match a sanitizer preset's tag"
 
+# ── 2a/F3 — REJECT EVERY NEAR-MISS NO PRODUCER HERE MINTS ────────────────────
+#
+# ccache_cache_key derives `major` as digits-or-`unknown` and `digest` as
+# exactly 8 lowercase hex (`sha256sum | cut -c1-8`). The old grammar
+# (`[0-9a-z]+-[0-9a-f]+`) also accepted a non-numeric non-`unknown` major and a
+# digest of any length — near-misses no producer here mints, but this regex is
+# the sole classifier on an irreversible DELETE.
+for bad in "ccache-fake-libcxx-clang22-a" "ccache-fake-libcxx-clangwat-deadbeef" "ccache-fake-libcxx-clang22-deadbeef00"; do
+  if printf '%s' "$bad" | grep -qE -- "$TAG_RE"; then
+    fail "prune/tag-regex-near-miss: '$bad' matches '$TAG_RE' — the pruner's classifier is wider than the grammar the minter can produce"
+  fi
+done
+ok "the pruner's regex rejects every near-miss tag no producer here mints"
+
+# The minter's 'unknown major' fallback must still classify as its own.
+UNKNOWN_MAJOR_TAG="ccache-fake-libcxx-clangunknown-15dc124f"
+printf '%s' "$UNKNOWN_MAJOR_TAG" | grep -qE -- "$TAG_RE" \
+  || fail "prune/tag-regex-unknown-major: '$UNKNOWN_MAJOR_TAG' does not match '$TAG_RE' — the tightened regex must still accept the minter's 'unknown major' fallback"
+ok "the pruner's regex still accepts the minter's 'unknown major' fallback tag"
+
 # ═════ ci/restore-ccache.sh ══════════════════════════════════════════════════
 echo "── restore-ccache.sh ──"
 CDIR="$sandbox/ccache-dir"
@@ -497,23 +517,39 @@ ok "a regex with no '\$' is refused — the sibling-lane deletion path is closed
 # other caller of the same callee and has NO harness of its own. Without this,
 # a Tier 2 regex that lost its end anchor would be caught only at runtime, as a
 # `prune: PENDING ?` on a push:main — correct, but late and on the frozen path.
-# Asserting the negative here costs one case.
 #
-# Deliberately asserts only that the pattern is ACCEPTED, not what it deletes:
-# the fixture is the ccache package's, so no version can match, and inventing
-# sccache fixtures would restate the Tier 2 grammar this file has no business
-# owning.
+# ⚠️ O1 — MUST END IN A POSITIVE SENTINEL, NOT JUST `want_no_out`. A keep-tag
+# that IS present in the fixture makes this wrapper's whole run print NOTHING
+# (Guard 2 passes, nothing classifies as dead, DRY_RUN=1 emits no lines) — so a
+# `want_no_out 'is not anchored'` over that empty output passes VACUOUSLY, and
+# any mutation that aborts `ci/prune-sccache.sh` *before* the anchor check
+# (e.g. an early `exit 0`) still scores this case green with the pruner never
+# having run. Passing a keep-tag ABSENT from the fixture instead forces the
+# run past both anchor checks into Guard 2, which bails with a printed reason
+# — that positive line is what proves the anchor check was actually reached.
+#
+# The fixture is the ccache package's tag shape reused for an sccache-style
+# keep-tag, so nothing in it matches the keep-tag by construction — Guard 2's
+# "matched 0" bail is therefore the expected disposition here, not a
+# classification result.
 FAKE_VERSIONS_JSON='[{"id":9,"metadata":{"container":{"tags":["sccache-windows-msvc-debug-14.44.35207"]}}}]' DRY_RUN=1 \
-  run "$CI_DIR/prune-sccache.sh" windows-msvc-debug sccache-windows-msvc-debug-14.44.35207
+  run "$CI_DIR/prune-sccache.sh" windows-msvc-debug sccache-windows-msvc-debug-99.99.99999
 want_status 0 "prune/sccache-anchored"
+want_out 'prune: PENDING ?' "prune/sccache-anchored"
+want_out 'matched 0' "prune/sccache-anchored"
 want_no_out 'is not anchored' "prune/sccache-anchored"
-ok "the sccache wrapper's regex satisfies the callee's both-ends anchor requirement"
+ok "the sccache wrapper's regex reaches Guard 2 — a positive sentinel proves the anchor check was not skipped (O1)"
 
 # ═════ ci/ccache-stats.sh ════════════════════════════════════════════════════
 echo "── ccache-stats.sh ──"
 STATS_FILE="$sandbox/stats.txt"
 
 write_stats() {
+  # $8 (local_storage_write) and $9 (recache) default to $3 (cache_miss) — a
+  # reasonable stand-in for the ordinary miss-driven case, and it keeps every
+  # pre-1a call site behaving as before without having to touch each one. Any
+  # case that needs `changed` to read something OTHER than `cache_miss` sets
+  # $8 explicitly.
   cat > "$STATS_FILE" <<EOF
 direct_cache_hit	${1:-0}
 preprocessed_cache_hit	${2:-0}
@@ -700,7 +736,10 @@ SS_EXIT=1 stats_case true success
 want_status 0 "stats/show-stats-fails"
 want_out '::warning::' "stats/show-stats-fails"
 want_out 'ccache-hitrate 50%' "stats/show-stats-fails"
-want_no_out 'is NOT in this log' "stats/show-stats-fails"
+# O2 — repointed from a `want_no_out` on a string ('is NOT in this log') that
+# does not exist anywhere in ci/ccache-stats.sh, which could never fire for
+# any regression. This is the wording actually shipped by the warning branch.
+want_out 'may be absent or incomplete' "stats/show-stats-fails"
 ok "--show-stats failure — warns without denying output the log may contain"
 
 echo
