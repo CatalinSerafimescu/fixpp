@@ -425,31 +425,35 @@ jobs:
       # hashes compilation inputs internally, so a foreign entry is a MISS, never
       # a wrong object) — a cost one: main's warm cache replaced by a branch's.
       #
-      # ── `&& misses != 0` — DO NOT REPUBLISH AN UNCHANGED CACHE ──────────────
+      # ── `&& changed != 0` — DO NOT REPUBLISH AN UNCHANGED CACHE ─────────────
       #
       # Mirrors the sibling Conan seed's `&& steps.conan_restore.outputs.hit ==
       # 'false'` conjunct 70 lines above: publish only when this run actually
       # produced something the published artifact does not already have.
       #
-      # `cache_miss == 0` means ccache wrote no new entry, so the tag already
-      # holds this content. Without the guard, a CI-, docs- or workflow-only
-      # push to main — where no C++ TU changed, and THIS PR is one — re-tars and
-      # re-uploads ~2 GB per leg to publish a byte-equivalent artifact:
-      # ~2-4 min of aggregate runner time, ~8 GB of GHCR churn, and four more
-      # orphaned untagged versions for the pruner to reclaim, every time.
+      # ⚠️ READS `changed` (ccache's `local_storage_write` counter), NOT
+      # `misses`. `cache_miss == 0` was read as "ccache wrote no new entry",
+      # but that is FALSE: a same-line-count comment/whitespace edit routinely
+      # produces `cache_miss=0` while ccache still writes a manifest entry
+      # (measured against real ccache 4.9.1 — see ci/ccache-stats.sh). Without
+      # the guard at all, a CI-, docs- or workflow-only push to main — where no
+      # C++ TU changed, and THIS PR is one — re-tars and re-uploads ~2 GB per
+      # leg to publish a byte-equivalent artifact: ~2-4 min of aggregate runner
+      # time, ~8 GB of GHCR churn, and four more orphaned untagged versions for
+      # the pruner to reclaim, every time.
       #
       # It is also the better branch when `cleanups_performed > 0` with zero
-      # misses: the cache only SHRANK, so republishing would replace the tagged
+      # writes: the cache only SHRANK, so republishing would replace the tagged
       # artifact with a strictly worse one.
       #
-      # ⚠️ FAIL-OPEN BY CONSTRUCTION. An empty `outputs.misses` — the stats step
-      # never ran, or died before emitting — makes `!= '0'` true and publishes
-      # exactly as before. The guard only ever skips on positive evidence that
-      # nothing changed, and can never withhold a cache because a measurement
-      # was missing. The rationale for `misses` alone, with no restore-hit
-      # conjunct, is at the emission site in ci/ccache-stats.sh.
+      # ⚠️ FAIL-OPEN BY CONSTRUCTION. An empty `outputs.changed` — the stats
+      # step never ran, or died before emitting — makes `!= '0'` true and
+      # publishes exactly as before. The guard only ever skips on positive
+      # evidence that nothing changed, and can never withhold a cache because a
+      # measurement was missing. The rationale for `changed` alone, with no
+      # restore-hit conjunct, is at the emission site in ci/ccache-stats.sh.
       - name: Save ccache to GHCR (push:main / dispatch on main, cache changed)
-        if: (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')) && steps.ccache_stats.outputs.misses != '0'
+        if: (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')) && steps.ccache_stats.outputs.changed != '0'
         continue-on-error: true
         env:
           # Prune needs `delete:packages`, which GITHUB_TOKEN does NOT carry —

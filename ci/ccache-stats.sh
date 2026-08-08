@@ -93,42 +93,50 @@ miss="$(read_counter cache_miss)"             || exit 1
 size="$(read_counter cache_size_kibibyte)"    || exit 1
 maxs="$(read_counter max_cache_size_kibibyte)" || exit 1
 clean="$(read_counter cleanups_performed)"    || exit 1
+writes="$(read_counter local_storage_write)"  || exit 1
 
 hits=$((dhit + phit))
 calls=$((hits + miss))
 
 # ── Published so the seed step can skip republishing an UNCHANGED cache ───────
 #
-# `cache_miss == 0` after a successful build means ccache wrote no new entry, so
-# the tag already holds this content and re-archiving ~2 GB and re-uploading it
-# accomplishes nothing except orphaning another untagged version for the pruner
-# to reclaim. That is the ordinary shape of a CI-, docs- or workflow-only push
-# to main — this PR is itself one.
+# ⚠️ GATED ON `local_storage_write`, NOT `cache_miss` — `cache_miss == 0` does
+# NOT prove ccache wrote no new entry. Measured against real ccache 4.9.1: a
+# same-line-count edit to a header or `.cpp` (comment/whitespace only) produces
+# `direct_cache_miss=1, preprocessed_cache_hit=1, cache_miss=0` while ccache
+# still updates its on-disk manifest — an ordinary shape in a comment-dense
+# repo, needing no special env var. The old gate withheld a genuinely-changed
+# cache on exactly that push. `local_storage_write` increments on any write to
+# CCACHE_DIR and is what actually answers "does the tag already hold this
+# content" — re-archiving ~2 GB and re-uploading it when it does accomplishes
+# nothing except orphaning another untagged version for the pruner to reclaim.
 #
 # ⚠️ EMITTED HERE, BEFORE THE LIVENESS CHECK BELOW, ON PURPOSE. The value is
 # wanted even on the paths that end in `exit 1`, and computing it after a branch
 # that can exit is how an output silently goes missing.
 #
 # ⚠️ THE CONSUMER'S GUARD IS FAIL-OPEN, AND THAT IS THE RIGHT DIRECTION. If this
-# step never ran or died before this line, `steps.<id>.outputs.misses` is empty,
-# `!= '0'` is true, and the seed publishes exactly as it does today. The guard
-# only ever SKIPS on positive evidence that nothing changed; it can never
+# step never ran or died before this line, `steps.<id>.outputs.changed` is
+# empty, `!= '0'` is true, and the seed publishes exactly as it does today. The
+# guard only ever SKIPS on positive evidence that nothing changed; it can never
 # withhold a cache because a measurement was missing.
 #
-# ⚠️ `misses` ALONE IS SUFFICIENT — do not add `&& restore == 'hit'`. A restore
-# MISS with zero misses would mean no compile ran at all, and that case cannot
+# ⚠️ `changed` ALONE IS SUFFICIENT — do not add `&& restore == 'hit'`. A restore
+# MISS with zero writes would mean no compile ran at all, and that case cannot
 # reach the seed: the liveness check below exits 1 on it, which fails the job and
 # skips every later step. Adding the conjunct would look safer while guarding a
 # path that is already closed, and would then also skip the legitimate
 # cold-seed case if the reasoning behind it ever drifted.
 #
-# ⚠️ ONLY `misses`, because only `misses` has a consumer. An earlier draft also
-# emitted hits/calls/cleanups "in case someone wants them" — speculative surface
-# with no caller, which is the thing this repo's guidelines rule out outright.
-# All three are already in the log and the Job Summary; adding one back is one
-# line, on the day something actually reads it.
+# `misses` is ALSO still emitted, alongside `changed` — not because it has a
+# consumer of its own (after this fix, nothing reads the step output; the Job
+# Summary table below reads the shell variable `$miss` directly, not
+# `outputs.misses`), but because three existing regression-pin assertions read
+# that exact output name and the line costs nothing to keep. Only `changed` is
+# what the publish guard reads now.
 if [ -n "${GITHUB_OUTPUT:-}" ]; then
   echo "misses=${miss}" >> "$GITHUB_OUTPUT"
+  echo "changed=${writes}" >> "$GITHUB_OUTPUT"
 fi
 
 # ── The thrash indicator #240 exists to close ────────────────────────────────

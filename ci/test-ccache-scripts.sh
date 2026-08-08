@@ -522,6 +522,8 @@ cache_size_kibibyte	${4:-0}
 max_cache_size_kibibyte	${5:-512000}
 cleanups_performed	${6:-0}
 called_for_link	${7:-0}
+local_storage_write	${8:-${3:-0}}
+recache	${9:-0}
 EOF
 }
 
@@ -531,22 +533,80 @@ stats_case() {
     run "$CI_DIR/ccache-stats.sh" fake-libc++ "${1:-true}" "${2:-success}"
 }
 
-write_stats 1400 0 61 1900000 2097152 0
+write_stats 1400 0 61 1900000 2097152 0 0 37
 stats_case true success
 want_status 0 "stats/warm"
 want_out 'ccache-hitrate 95% over 1461 cacheable calls' "stats/warm"
+# DISTINCT values for misses (61) and writes (37) — the highest-value
+# assertion in this fix: it proves `changed` reads local_storage_write, not
+# cache_miss. Every OTHER case's $8 defaults to $3, so an implementation that
+# emitted `changed=${miss}` would still pass them all; only a distinct pair
+# catches it.
 want_step_output 'misses=61' "stats/warm"
-ok "warm run — hit rate reported, exit 0"
+want_step_output 'changed=37' "stats/warm"
+ok "warm run — hit rate reported, misses and changed are DIFFERENT counters, exit 0"
 
-# The seed step's `&& misses != 0` guard reads this. An UNCHANGED cache must
+# The seed step's `&& changed != 0` guard reads this. An UNCHANGED cache must
 # report zero so the seed can skip re-tarring and re-uploading ~2 GB to publish
-# a byte-equivalent artifact.
-write_stats 1461 0 0 1900000 2097152 0
+# a byte-equivalent artifact. All hits AND zero writes — a real all-hit warm
+# rerun.
+write_stats 1461 0 0 1900000 2097152 0 0 0
 stats_case true success
 want_status 0 "stats/unchanged"
 want_step_output 'misses=0' "stats/unchanged"
+want_step_output 'changed=0' "stats/unchanged"
 want_out 'ccache-hitrate 100%' "stats/unchanged"
-ok "all hits, zero misses — misses=0 published so the seed can skip republishing"
+ok "all hits, zero writes — changed=0 published so the seed can skip republishing"
+
+# ── 1a/F2 — THE TWO REACHABLE "cache_miss==0 BUT WRITTEN" SHAPES ─────────────
+#
+# CCACHE_RECACHE: unreachable in this repo (grepped `*.yml`/`*.sh`/`*.json`/
+# `*.cmake`/CMakeLists.txt — set nowhere), kept as documentation of the
+# ccache-side mechanism rather than an independent kill: `ccache-stats.sh`
+# never reads `recache`, so this reduces to the exact same discriminator as
+# the case below (local_storage_write alone).
+write_stats 1 0 0 100 512000 0 0 1 1
+stats_case true success
+want_status 0 "stats/changed-recache-shape"
+want_step_output 'changed=1' "stats/changed-recache-shape"
+ok "cache_miss=0 with a write (CCACHE_RECACHE shape, documentation only) — changed=1"
+
+# direct-miss -> preprocessed-hit: REACHABLE and ORDINARY, reproduced against
+# real ccache 4.9.1 with a same-line-count header comment edit — no env var
+# needed. This is the shape that made the old `misses`-gated guard withhold a
+# genuinely-changed cache.
+write_stats 0 1 0 100 512000 0 0 1
+stats_case true success
+want_status 0 "stats/changed-direct-miss-preprocessed-hit"
+want_step_output 'changed=1' "stats/changed-direct-miss-preprocessed-hit"
+ok "cache_miss=0 with a preprocessed-hit write (reachable, ordinary) — changed=1"
+
+# ── 1b/F2 — PIN THE OUTPUT NAME AGAINST THE WORKFLOW EXPRESSION THAT READS IT ─
+#
+# The producer (ccache-stats.sh) and the consumer (tier3-libcxx.yml) are joined
+# only by a string, in different files. Derive the name FROM THE YAML — not
+# hardcoded here — and assert the script's LAST run actually emitted a step
+# output by that name, so a rename on EITHER side the other does not follow
+# fails here instead of publishing 2 GB x 4 legs on every push, silently and
+# green (the consumer's guard is fail-open). Same producer/matcher-drift
+# argument `ccache_tag_regex` is co-located with its minter for, above.
+WORKFLOW="$repo_root/.github/workflows/tier3-libcxx.yml"
+[ -f "$WORKFLOW" ] || fail "stats/output-name: $WORKFLOW not found"
+CHANGED_KEY="$(sed -n 's/.*steps\.ccache_stats\.outputs\.\([a-zA-Z0-9_]*\).*/\1/p' "$WORKFLOW" | head -1)"
+[ -n "$CHANGED_KEY" ] || fail "stats/output-name: could not find a steps.ccache_stats.outputs.<name> expression in $WORKFLOW"
+printf '%s\n' "$STEP_OUTPUTS" | grep -qx -- "${CHANGED_KEY}=1" \
+  || fail "stats/output-name: tier3-libcxx.yml's Save-ccache guard reads 'steps.ccache_stats.outputs.${CHANGED_KEY}', but the last ccache-stats.sh run did not emit an output named '${CHANGED_KEY}' — producer and consumer have drifted"
+ok "the publish guard reads the exact output name ccache-stats.sh emits"
+
+# A missing local_storage_write key must fail closed like the other five
+# counters — not silently read as zero (which would report changed=0 and
+# withhold a cache that actually did change).
+printf 'direct_cache_hit\t10\npreprocessed_cache_hit\t5\ncache_miss\t0\ncache_size_kibibyte\t100\nmax_cache_size_kibibyte\t512000\ncleanups_performed\t0\n' > "$STATS_FILE"
+stats_case true success
+want_status 1 "stats/changed-missing-key"
+want_out 'does not contain exactly one' "stats/changed-missing-key"
+want_out "'local_storage_write'" "stats/changed-missing-key"
+ok "local_storage_write absent — fail-closed, same branch as the other five counters"
 
 write_stats 0 0 0 0 512000 0
 stats_case false success
