@@ -1116,17 +1116,26 @@ jobs:
           # Plan §2c measured the same shape on `libopentelemetry_common.a` in
           # the CI archives: 57 refs under the matrix leg, ZERO under this job's.
           #
-          # It is the whole compiled closure, not those two: `conan graph info`
-          # gives a DIFFERENT package id per sanitizer profile for 13 of the 16
-          # host-context packages (openssl, protobuf, abseil, zlib, libcurl,
-          # civetweb, prometheus-cpp, crc32c, gtest, benchmark, pugixml, OTel,
-          # fixpp). The three that do not move — asio, nlohmann_json,
-          # tomlplusplus — are header-only and share the empty-payload id.
+          # The package id moves for the compiled EXTERNAL packages in the graph
+          # (`conan graph info`); asio, nlohmann_json and tomlplusplus do not
+          # move because they are header-only and share the empty-payload id.
           #
-          # The library itself was instrumented in both; the gap was exactly at
-          # the dependency boundary, which is the surface these legs exist to
-          # cover (the python trampoline / GIL / worker paths where they cross
-          # into a dependency).
+          # ⚠️ A MOVED ID IS NOT INSTRUMENTATION. The profiles carry
+          # `tools.build:cxxflags` and NO `tools.build:cflags`, so
+          # `conan_toolchain.cmake` appends `-fsanitize=<san>` to
+          # CONAN_CXX_FLAGS only — CONAN_C_FLAGS stays `-m64`. Instrumentation
+          # therefore reaches C++ translation units and NOT C ones. Measured
+          # with `nm` in one civetweb build folder: `libcivetweb-cpp.a` 15
+          # `__tsan_*` refs, `libcivetweb.a` (the C core, same build) ZERO.
+          # zlib, OpenSSL and libcurl are pure C and carry no refs at all under
+          # any of the three sanitizers.
+          #
+          # This C-language gap is NOT introduced here: `conan/profiles/` is
+          # shared with the Tier 1 MATRIX sanitizer legs (see `-pr
+          # conan/profiles/${{ matrix.preset }}` in the `linux` job), which have
+          # the identical gap. Tracked separately in #252. What this job
+          # gains is parity with those legs — the C++ closure, which was
+          # previously uninstrumented here and instrumented there.
           - sanitizer: none
             bdir: linux-clang-debug
             conan_profile: linux-clang-debug
