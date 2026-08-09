@@ -135,7 +135,13 @@ jobs:
           # and was first exercised post-merge on push:main. The added cost is
           # bounded: these jobs also require `proceed` (both gate labels), which
           # in this repo's flow lands once, immediately before merge.
-          PY_RE='^(bindings/python/|include/fix/c_api|\.github/workflows/tier1\.yml$|.*\.i$)'
+          # `conan/profiles/` and `conanfile.py` are here for the same reason
+          # `tier1.yml` is (#247): a job's BUILD RECIPE must sit inside its own
+          # relevance filter, or a change to how it builds gets no PR-side signal
+          # and is first exercised post-merge. #243 makes that concrete — each
+          # python leg now names a DIFFERENT profile, so
+          # `conan/profiles/linux-clang-tsan` decides what the tsan leg links.
+          PY_RE='^(bindings/python/|include/fix/c_api|\.github/workflows/tier1\.yml$|conan/profiles/|conanfile\.py$|.*\.i$)'
           PYTHON_TOUCHED=false
           EV="${{ github.event_name }}"
           if [ "$EV" = "pull_request" ]; then
@@ -1086,25 +1092,65 @@ jobs:
           # deliberate SCOPE, not ordering: a from-source Conan dep on this leg
           # does not go through ccache; that matches today's behaviour and the
           # GHCR Conan restore normally makes it moot.
+          #
+          # `conan_profile` == the Conan profile the DEPENDENCIES are built with
+          # (#243). It must track `sanitizer`, because the sanitizer is NOT only
+          # a CMake-level flag: `conan/profiles/linux-clang-<san>` carries
+          # `tools.build:cxxflags=["-fsanitize=<san>"]` plus the matching link
+          # flags, and lists them in `tools.info.package_id:confs`, so the
+          # instrumented closure is a DIFFERENT package id from the plain
+          # `linux-clang-debug` one. Pointing all four legs at `linux-clang-debug`
+          # therefore linked UNINSTRUMENTED dependencies into a sanitizer build.
+          #
+          # Measured in the built ARCHIVES, not inferred from config. `nm -C` on
+          # the two pugixml packages the two profiles select:
+          #
+          #   linux-clang-debug  c77741103fe2f…   0 `__tsan_*` refs (1508 symbols)
+          #   linux-clang-tsan   073f1b8991e19…  17 `__tsan_*` refs
+          #
+          # The 1508 is the non-circularity check: the archive is real and `nm`
+          # works, so the 0 is an absence rather than a broken instrument. The
+          # symbols present in one and missing from the other are the
+          # instrumentation entry points themselves — `__tsan_func_entry`,
+          # `__tsan_func_exit`, `__tsan_init`, `__tsan_memcpy`, `__tsan_memmove`.
+          # Plan §2c measured the same shape on `libopentelemetry_common.a` in
+          # the CI archives: 57 refs under the matrix leg, ZERO under this job's.
+          #
+          # It is the whole compiled closure, not those two: `conan graph info`
+          # gives a DIFFERENT package id per sanitizer profile for 13 of the 16
+          # host-context packages (openssl, protobuf, abseil, zlib, libcurl,
+          # civetweb, prometheus-cpp, crc32c, gtest, benchmark, pugixml, OTel,
+          # fixpp). The three that do not move — asio, nlohmann_json,
+          # tomlplusplus — are header-only and share the empty-payload id.
+          #
+          # The library itself was instrumented in both; the gap was exactly at
+          # the dependency boundary, which is the surface these legs exist to
+          # cover (the python trampoline / GIL / worker paths where they cross
+          # into a dependency).
           - sanitizer: none
             bdir: linux-clang-debug
+            conan_profile: linux-clang-debug
             cfg_extra: "-DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache"
             san_opts: ""
-          # The three sanitizer legs keep their `-py` dirs. Aligning them needs
-          # the Conan profile aligned too (#243 — they currently link
-          # UNINSTRUMENTED deps), which is a correctness change and lands
-          # separately. Until then their objects cannot match the matrix
-          # sanitizer legs' and a restore here would be pure download cost.
+          # The three sanitizer legs keep their `-py` dirs. The Conan profile is
+          # now aligned (#243, above), but ~56 % of compile commands carry an
+          # absolute `…/build/<dir>/_codegen/include` path, so their objects
+          # still cannot match the matrix sanitizer legs' until the suffix goes
+          # too — that is #244 part 2, and a ccache restore here before then
+          # would be pure download cost.
           - sanitizer: asan
             bdir: linux-clang-asan-py
+            conan_profile: linux-clang-asan
             cfg_extra: "-DFIXPP_ENABLE_ASAN=ON -DBUILD_SHARED_LIBS=ON -DFIXPP_PYTHON_SANITIZER=asan"
             san_opts: "ASAN_OPTIONS=detect_leaks=0:halt_on_error=1"
           - sanitizer: tsan
             bdir: linux-clang-tsan-py
+            conan_profile: linux-clang-tsan
             cfg_extra: "-DFIXPP_ENABLE_TSAN=ON -DBUILD_SHARED_LIBS=ON -DFIXPP_PYTHON_SANITIZER=tsan"
             san_opts: "TSAN_OPTIONS=suppressions=$GITHUB_WORKSPACE/bindings/python/tests/tsan_suppressions.txt:halt_on_error=1"
           - sanitizer: ubsan
             bdir: linux-clang-ubsan-py
+            conan_profile: linux-clang-ubsan
             cfg_extra: "-DFIXPP_ENABLE_UBSAN=ON -DBUILD_SHARED_LIBS=ON -DFIXPP_PYTHON_SANITIZER=ubsan"
             san_opts: "UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1"
     concurrency:
@@ -1180,13 +1226,21 @@ jobs:
               version: ["19", "20", "21", "22", "23"]
           EOF
 
-      # Reuses the matrix leg's linux-clang-debug seed (same profile+ids; sanitizer
-      # is a CMake flag, not Conan). Restore-only — the matrix debug leg owns the
-      # push/prune. Kills the old duplicate conan-linux-clang-debug-py cache.
+      # Reuses the MATCHING matrix leg's seed — `none` reads linux-clang-debug's,
+      # and each sanitizer leg reads its own (#243). Restore-only: the matrix legs
+      # own the push/prune, so this adds nothing to the GHCR package.
+      #
+      # This step's key MUST track `conan_profile` and not merely the leg name.
+      # `conan_cache_key` hashes the profile FILE, so a restore for
+      # linux-clang-debug fetches the uninstrumented closure — which is precisely
+      # the state #243 fixes. Wiring the profile above without moving the restore
+      # with it would leave the cache handing back the packages the profile no
+      # longer asks for, and `--build=missing` would then rebuild the whole
+      # closure from source on every run rather than fail visibly.
       - name: Set up oras
         uses: oras-project/setup-oras@v2
       - name: Restore Conan cache from GHCR
-        run: ci/restore-conan-cache.sh linux-clang-debug
+        run: ci/restore-conan-cache.sh ${{ matrix.conan_profile }}
 
       # ── ccache — `none` leg only, RESTORE-ONLY (#244 part 1) ──────────────
       # Same key PREFIX as the matrix `linux` job's `tier1-${{ matrix.preset }}`
@@ -1283,10 +1337,18 @@ jobs:
 
       - name: Conan install
         run: |
-          # All legs share the linux-clang-debug Conan profile; the sanitizer is
-          # a CMake-level flag (FIXPP_ENABLE_{ASAN,TSAN}), not a Conan setting.
+          # Each leg builds its dependencies with its OWN profile (#243). The
+          # previous comment here — "the sanitizer is a CMake-level flag, not a
+          # Conan setting" — is true of the LIBRARY and false of the
+          # DEPENDENCIES, which is why nobody looked: see the matrix `include`
+          # block above for the measurement.
+          #
+          # `--build=missing` is now load-bearing in a way it was not before: on
+          # a restore MISS this compiles the instrumented closure from source.
+          # The matrix asan/ubsan/tsan legs seed exactly these package ids, so
+          # the normal path is a HIT.
           conan install . \
-            -pr conan/profiles/linux-clang-debug \
+            -pr conan/profiles/${{ matrix.conan_profile }} \
             --build=missing \
             -of build/${{ matrix.bdir }}
 
