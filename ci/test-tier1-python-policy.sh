@@ -13,16 +13,19 @@
 #      (gate-b/r2 finding 1; feedback_completeness_gate_exact_set_not_subset).
 #   2. Suffix rule: `sanitizer == 'none'` -> `conan_profile == linux-clang-debug`;
 #      every other leg -> `conan_profile == "linux-clang-" + sanitizer`. This is
-#      the one that kills a `tsan -> linux-clang-debug` mutant — profile-file
-#      EXISTENCE (assertion 3) does not, because `linux-clang-debug` exists.
+#      the derived-mapping check that kills a `tsan -> linux-clang-debug` mutant
+#      and stays live across a hand-edited `EXPECTED_MATRIX`; the census
+#      (assertion 1) is the completeness check. Profile-file EXISTENCE
+#      (assertion 3) does not help here because `linux-clang-debug` exists.
 #   3. Profile-file existence: every `conan_profile` value names a real file
 #      under `conan/profiles/` — catches a typo'd/renamed profile at PR time
 #      instead of as a `--build=missing` from-source rebuild on the runner.
-#   4. Step parameterisation: the `python-bindings` job's `Conan install` and
-#      `Restore Conan cache from GHCR` steps run text is EXACTLY (not merely
-#      "contains") the expected parameterised call. gate-b/r2 finding 2: a
-#      substring/interpolation-present check passes on dead interpolation —
-#      an unused `${{ matrix.conan_profile }}` reference alongside a
+#   4. Step parameterisation: the `python-bindings` job's `Restore Conan cache
+#      from GHCR` step run text is an EXACT match for the single parameterised
+#      call, while the multi-line `Conan install` step is checked by counted
+#      occurrence of the single parameterised `-pr` literal. gate-b/r2 finding
+#      2: a substring/interpolation-present check passes on dead interpolation
+#      — an unused `${{ matrix.conan_profile }}` reference alongside a
 #      hard-coded fallback that is what actually runs — which is precisely
 #      the invariant #251's own comment argues is load-bearing (a restore
 #      pinned back to `linux-clang-debug` silently hands back the
@@ -109,18 +112,6 @@ assert_matrix_policy() {
   local json="$1" case_id="$2"
   local n
 
-  # Exact-set census (gate-b/r2 finding 1): the `length > 0` check this
-  # replaces only validates whatever entries remain, so 3 of the 4 sanitizer
-  # legs — including asan and ubsan outright — can be deleted from the matrix
-  # and the per-entry loop below still passes (feedback_completeness_gate_
-  # exact_set_not_subset). Adding a fifth sanitizer requires an intentional
-  # edit to EXPECTED_MATRIX here — that is the point, not friction.
-  local EXPECTED_MATRIX="asan->linux-clang-asan,none->linux-clang-debug,tsan->linux-clang-tsan,ubsan->linux-clang-ubsan"
-  local got
-  got="$(echo "$json" | jq -r '[.include[]|"\(.sanitizer)->\(.conan_profile)"]|sort|join(",")')"
-  [ "$got" = "$EXPECTED_MATRIX" ] \
-    || fail "$case_id: matrix set '$got' != expected '$EXPECTED_MATRIX'"
-
   n="$(echo "$json" | jq '.include | length')"
 
   local i sanitizer profile expected
@@ -140,6 +131,18 @@ assert_matrix_policy() {
     [ -f "$repo_root/conan/profiles/$profile" ] \
       || fail "$case_id: conan_profile '$profile' (sanitizer '$sanitizer') names no file under conan/profiles/"
   done
+
+  # Exact-set census (gate-b/r2 finding 1): the `length > 0` check this
+  # replaces only validates whatever entries remain, so 3 of the 4 sanitizer
+  # legs — including asan and ubsan outright — can be deleted from the matrix
+  # and the per-entry loop above still passes (feedback_completeness_gate_
+  # exact_set_not_subset). Adding a fifth sanitizer requires an intentional
+  # edit to EXPECTED_MATRIX here — that is the point, not friction.
+  local EXPECTED_MATRIX="asan->linux-clang-asan,none->linux-clang-debug,tsan->linux-clang-tsan,ubsan->linux-clang-ubsan"
+  local got
+  got="$(echo "$json" | jq -r '[.include[]|"\(.sanitizer)->\(.conan_profile)"]|sort|join(",")')"
+  [ "$got" = "$EXPECTED_MATRIX" ] \
+    || fail "$case_id: matrix set '$got' != expected '$EXPECTED_MATRIX'"
 }
 
 # ── 3: step parameterisation ────────────────────────────────────────────────
@@ -277,11 +280,8 @@ run_mutant_checks() {
 
   # Mutant A: tsan -> linux-clang-debug. Codex's named mutant from the F3
   # review. Profile-file existence alone (assertion 3) does NOT catch this —
-  # linux-clang-debug exists. Since gate-b/r2 added the matrix exact-set
-  # census (assertion 1) ahead of the per-entry loop, that census now catches
-  # this specific remapping before the suffix rule (assertion 2) gets to run
-  # — both would catch it; the census runs first. Kept as a witness for both:
-  # the failure message is checked below for either assertion's wording.
+  # linux-clang-debug exists. This is the suffix-rule witness; mutant D below
+  # is the census witness.
   local mut_a="$mut_dir/tier1-mutant-a.yml"
   local mut_a_out="$mut_dir/mutant_a_out"
   sed 's/conan_profile: linux-clang-tsan$/conan_profile: linux-clang-debug/' "$WORKFLOW" > "$mut_a"
@@ -303,7 +303,7 @@ run_mutant_checks() {
   if ( run_full_pin "$mut_a" "mutant-a" ) >"$mut_a_out" 2>&1; then
     fail "mutant A (tsan -> linux-clang-debug) did NOT fail the pin — neither the matrix census nor the suffix-rule assertion can distinguish it from the real policy"
   fi
-  grep -q "suffix rule violated\|matrix set" "$mut_a_out" \
+  grep -q "suffix rule violated" "$mut_a_out" \
     || fail "mutant A failed the pin for the WRONG reason: $(cat "$mut_a_out")"
   echo "RED (expected): mutant A (tsan -> linux-clang-debug) — $(cat "$mut_a_out")"
 
@@ -335,15 +335,13 @@ PYEOF
     || fail "mutant B failed the pin for the WRONG reason: $(cat "$mut_b_out")"
   echo "RED (expected): mutant B (un-anchored PY_RE) — $(cat "$mut_b_out")"
 
-  # Mutant C (kills the step-parameterisation exact-match, gate-b/r2 finding
-  # 2): dead interpolation on BOTH steps. `: "${{ matrix.conan_profile }}"`
-  # is a no-op reference to the matrix expression, and the actual profile
-  # used falls back to a hard-coded `debug` because `SANITIZER` is set
-  # nowhere in the workflow. A restore-only variant would leave B2 (the
-  # install-step assertion) unexercised, so this mutant patches both.
-  local mut_c="$mut_dir/tier1-mutant-c.yml"
-  local mut_c_out="$mut_dir/mutant_c_out"
-  python3 - "$WORKFLOW" "$mut_c" <<'PYEOF'
+  # Mutant C1 (kills B1): dead interpolation on the restore step only.
+  # `: "${{ matrix.conan_profile }}"` is a no-op reference to the matrix
+  # expression, and the actual profile used falls back to a hard-coded
+  # `debug` because `SANITIZER` is set nowhere in the workflow.
+  local mut_c1="$mut_dir/tier1-mutant-c1.yml"
+  local mut_c1_out="$mut_dir/mutant_c1_out"
+  python3 - "$WORKFLOW" "$mut_c1" <<'PYEOF'
 import sys
 src, dst = sys.argv[1], sys.argv[2]
 t = open(src).read()
@@ -354,27 +352,43 @@ new_restore = ('        run: |\n'
                '          ci/restore-conan-cache.sh "$PROFILE"\n')
 assert t.count(old_restore) == 1, t.count(old_restore)
 t = t.replace(old_restore, new_restore)
+open(dst, "w").write(t)
+PYEOF
+  if cmp -s "$WORKFLOW" "$mut_c1"; then
+    fail "mutant C1: python literal-replace produced no change — mutant not applied"
+  fi
+  if ( run_full_pin "$mut_c1" "mutant-c1" ) >"$mut_c1_out" 2>&1; then
+    fail "mutant C1 (dead interpolation, restore step) did NOT fail the pin — the step-parameterisation assertion cannot distinguish it from the real policy"
+  fi
+  grep -q "is not exactly the parameterised call" "$mut_c1_out" \
+    || fail "mutant C1 failed the pin for the WRONG reason: $(cat "$mut_c1_out")"
+  echo "RED (expected): mutant C1 (dead interpolation, restore step) — $(cat "$mut_c1_out")"
+
+  # Mutant C2 (kills B2): dead interpolation on the install step only.
+  local mut_c2="$mut_dir/tier1-mutant-c2.yml"
+  local mut_c2_out="$mut_dir/mutant_c2_out"
+  python3 - "$WORKFLOW" "$mut_c2" <<'PYEOF'
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
 old_inst = ("          conan install . \\\n"
             "            -pr conan/profiles/${{ matrix.conan_profile }} \\\n")
-new_inst = ('          PROFILE=linux-clang-"${SANITIZER:-debug}"\n'
+new_inst = ('          : "${{ matrix.conan_profile }}"\n'
+            '          PROFILE=linux-clang-"${SANITIZER:-debug}"\n'
             "          conan install . \\\n"
             '            -pr conan/profiles/"$PROFILE" \\\n')
 assert t.count(old_inst) == 1, t.count(old_inst)
-t = t.replace(old_inst, new_inst)
-open(dst, "w").write(t)
+open(dst, "w").write(t.replace(old_inst, new_inst))
 PYEOF
-  # Guard runs AFTER both replacements — a mutant applied to only one of the
-  # two steps would still trip the OTHER assertion, which would read as a
-  # pass while half the witness is missing.
-  if cmp -s "$WORKFLOW" "$mut_c"; then
-    fail "mutant C: python literal-replace produced no change — mutant not applied"
+  if cmp -s "$WORKFLOW" "$mut_c2"; then
+    fail "mutant C2: python literal-replace produced no change — mutant not applied"
   fi
-  if ( run_full_pin "$mut_c" "mutant-c" ) >"$mut_c_out" 2>&1; then
-    fail "mutant C (dead interpolation, both steps) did NOT fail the pin — the step-parameterisation assertion cannot distinguish it from the real policy"
+  if ( run_full_pin "$mut_c2" "mutant-c2" ) >"$mut_c2_out" 2>&1; then
+    fail "mutant C2 (dead interpolation, install step) did NOT fail the pin — the step-parameterisation assertion cannot distinguish it from the real policy"
   fi
-  grep -q "does not interpolate\|is not exactly the parameterised call\|occurrence(s), expected exactly" "$mut_c_out" \
-    || fail "mutant C failed the pin for the WRONG reason: $(cat "$mut_c_out")"
-  echo "RED (expected): mutant C (dead interpolation, both steps) — $(cat "$mut_c_out")"
+  grep -q "0 parameterised-literal" "$mut_c2_out" \
+    || fail "mutant C2 failed the pin for the WRONG reason: $(cat "$mut_c2_out")"
+  echo "RED (expected): mutant C2 (dead interpolation, install step) — $(cat "$mut_c2_out")"
 
   # Mutant D (kills the matrix exact-set census, gate-b/r2 finding 1): delete
   # the asan `include` entry entirely. The per-entry suffix rule and
@@ -434,6 +448,7 @@ PYEOF
   grep -q "occurrence(s), expected exactly" "$mut_e_out" \
     || fail "mutant E failed the pin for the WRONG reason: $(cat "$mut_e_out")"
   echo "RED (expected): mutant E (second hard-coded -pr appended) — $(cat "$mut_e_out")"
+
 }
 
 run_mutant_checks
