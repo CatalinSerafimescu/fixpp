@@ -1848,6 +1848,21 @@ jobs:
       - name: Regression pin — ccache GHCR script dispositions (#240)
         run: bash ci/test-ccache-scripts.sh
 
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      # Parses tier1.yml with PyYAML — hermetic (no build, no network, no
+      # workflow execution), so the #243/#251 sanitizer->profile policy and
+      # the anchored PY_RE relevance filter get pre-merge signal the same way
+      # the two pins above do (Article VII §§3-4; #247->#248's location
+      # waiver does not transfer here — this is tracked YAML data plus a
+      # regex, not shell embedded in a `run:` block with no harness to host it).
+      - name: Regression pin — tier1.yml python-bindings policy (#251)
+        run: |
+          python3 -c "import yaml" 2>/dev/null || pip install --quiet pyyaml
+          bash ci/test-tier1-python-policy.sh
+
   check-layers:
     name: check-layers
     runs-on: ubuntu-24.04
