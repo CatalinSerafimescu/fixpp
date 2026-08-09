@@ -3,6 +3,15 @@
 # FIXPP_BUILD_PYTHON target. Produces ONE stable-ABI (abi3) wheel
 # fixpp-<ver>-cp310-abi3-manylinux_2_28_x86_64.whl covering CPython 3.10–3.13+.
 # Built under cibuildwheel in manylinux_2_28 (see specs/056 quickstart.md / contracts).
+#
+# ⚠️ PROVENANCE — the wheel does NOT wrap the binaries from the CI clang/gcc
+# builds. It compiles the engine from source inside the manylinux container with
+# gcc-toolset-14 / Release / with_otel=False (cibw-before-all.sh), while the
+# Tier 1 legs that run the Python test suite use clang 22 / Debug+sanitizers /
+# with_otel=True. Those legs are a TEST VEHICLE and ship nothing; the
+# packages-linux-{clang,gcc}-release artifacts are the C++ deliverable and carry
+# no Python. A Python consumer needs ONLY this wheel — no fixpp C++ package, no
+# compiler, no Conan. See L-056-4 in spec/behaviors-and-limitations.md.
 
 [build-system]
 # PKG-1: scikit-build-core backend; swig>=4.2 (NO upper bound — builds with the

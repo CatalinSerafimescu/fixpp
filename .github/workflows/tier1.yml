@@ -1593,6 +1593,21 @@ jobs:
   # matrix-install-test the single artifact on 3.10–3.13 (python-wheel-test).
   # All cibuildwheel config is in bindings/python/pyproject.toml [tool.cibuildwheel]
   # — the single source shared with the local bindings/python/build-wheel.sh.
+  #
+  # ⚠️ THIS WHEEL DOES NOT WRAP THE BINARIES BUILT BY THE `linux` MATRIX. It
+  # compiles the engine from source inside the manylinux_2_28 container, and the
+  # `python-bindings` legs above are a TEST VEHICLE that ships nothing. The two
+  # differ in three dimensions at once:
+  #
+  #            shipped wheel                 | legs running the python tests
+  #   compiler gcc-toolset-14                | clang 22
+  #   build    Release                       | Debug (+ asan/ubsan/tsan)
+  #   OTel     with_otel=False               | with_otel default True
+  #
+  # So the artifact users run is exercised only by python-wheel-test's install +
+  # import + functional subset. Do not read a green sanitizer leg as coverage of
+  # the shipped wheel. `packages-linux-{clang,gcc}-release` is the C++ deliverable
+  # and carries no Python. See L-056-4 in spec/behaviors-and-limitations.md.
   python-wheel-build:
     name: python-wheel (build cp310-abi3)
     runs-on: ubuntu-24.04
