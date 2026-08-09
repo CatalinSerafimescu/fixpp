@@ -1266,7 +1266,20 @@ jobs:
       - name: Set up oras
         uses: oras-project/setup-oras@v2
       - name: Restore Conan cache from GHCR
+        id: conan_restore
         run: ci/restore-conan-cache.sh ${{ matrix.conan_profile }}
+
+      # O1 (gate-b/r1): the PR body's acceptance criterion — "Conan restore
+      # is a HIT on all three sanitizer legs" — had no instrument. The step
+      # above emits `hit=` to $GITHUB_OUTPUT but nothing read it, so a MISS
+      # produced only a `::warning::` and a silent from-source rebuild inside
+      # the 180-min cap. NOT a gate — a MISS is legitimate whenever
+      # conanfile.py or a profile changes on a branch (restore-conan-cache.sh
+      # deliberately warns and exits 0); this only makes the disposition
+      # observable in the Job Summary instead of requiring a log hunt.
+      - name: Conan restore disposition (observation, not a gate)
+        run: |
+          echo "conan restore ${{ matrix.conan_profile }}: hit=${{ steps.conan_restore.outputs.hit }}" >> "$GITHUB_STEP_SUMMARY"
 
       # ── ccache — `none` leg only, RESTORE-ONLY (#244 part 1) ──────────────
       # Same key PREFIX as the matrix `linux` job's `tier1-${{ matrix.preset }}`
