@@ -308,7 +308,14 @@ Immediately after Configure, on every leg:
 
 Three properties, each deliberate:
 
-1. **The instrument is proven non-zero on the unfixed tree.** `grep -c '^[[:space:]]*file(INSTALL' build/linux-clang-tsan-py/bindings/python/cmake_install.cmake` = **4**, measured 2026-08-09 (Appendix A, **E-32**). An absence-check never shown to return non-zero is a broken instrument, not evidence — `feedback_verification_grep_must_be_proven_nonzero_on_the_unfixed_tree`.
+1. **The instrument is proven non-zero on the unfixed tree — and the fixed side is now measured too, so E-32 is a PAIR, not a half.** An absence-check never shown to return non-zero is a broken instrument, not evidence (`feedback_verification_grep_must_be_proven_nonzero_on_the_unfixed_tree`); a zero never shown to be *reachable* is an untested claim. Both sides, 2026-08-09:
+
+| tree | control | `grep -c '^[[:space:]]*file(INSTALL' …/bindings/python/cmake_install.cmake` | file present |
+|---|---|---:|---|
+| `build/linux-clang-tsan-py` (configured **before** the option existed) | unfixed | **4** | yes |
+| `build/probe-none-B` (reconfigured, 19 s, **no rebuild**) | **OFF** | **0** | yes — 44 lines, and **zero** `_fixpp` / `fixpp*.py` / `_fixpp_data` references anywhere in it |
+
+   The OFF row closes the *"NOT YET MEASURED"* residual v0.2 carried. It cost one reconfigure of an existing tree: regenerating `cmake_install.cmake` does not require a build, which is why the earlier "needs a fresh tree, too expensive" disposition was wrong. The same reconfigure printed `fixpp: FIXPP_INSTALL_PYTHON=OFF; Python3_SITEARCH=''; FIXPP_PY_INSTALL_DIR='.'` — the `message(STATUS)` of §4.5.2 firing, and independent confirmation that **locally** the `"."` branch is the one in play. **CI's branch remains unestablished** (§4.5.2) — reported there, not assumed.
 2. **It is a positive existence check first.** If the generated file is missing entirely the step fails, so a `0` cannot be produced by the file having silently stopped being generated (which would also pass a naive count).
 3. **It is self-contained.** It needs no pre-change baseline artifact, so it runs identically on the first CI run and forever after — unlike "compare the manifest with the pre-change one", which has no baseline in CI.
 
@@ -319,6 +326,41 @@ The **local** two-prefix manifest diff (configure with and without `-DFIXPP_BUIL
 No new ON-side assertion is needed. `python-wheel-test` installs the **shipped wheel** and imports it across 3.10–3.13, exercising the install rules with the control at its default ON. Because `PY_RE` contains `\.github/workflows/tier1\.yml$` (`tier1.yml:161`) — and, after this edit, `^bindings/python/` as well — **`python_touched=true` on the #254 PR itself**, so that witness fires on this very PR. **This is what makes R6 dischargeable inside #254 rather than deferrable to #255.**
 
 ⚠️ **The two halves get signal at opposite ends of the PR's life**, and the implementer should expect that: the OFF-side signal arrives with `ci-script-pins`, which is **ungated** and fires before any gate label exists (§9 item 5); the ON-side wheel witness is gated on `proceed` and lands only once `gate-a-*` and `gate-b-*` are applied.
+
+#### 4.5.5 The two **semantic** install witnesses — R2-P2-1 and R2-P2-2, as implemented
+
+`bindings/python/run_python_install_witness.cmake`, registered from
+`bindings/python/CMakeLists.txt` as **exactly one** `ctest` test per build, decided by the option:
+
+| `FIXPP_INSTALL_PYTHON` | registered test | asserts |
+|---|---|---|
+| **ON** (default — every ordinary build) | `fixpp::python::install-present-witness` | module + `fixpp.py` + `fixpp_oo.py` + `fixpp_dict_data.py` + `_fixpp_data/__init__.py` + the 4 XMLs **are** staged — feature 056 LAY-1 / D-4 / T006 (**R2-P2-2**) |
+| **OFF** (tier 1's six `linux` legs) | `fixpp::python::install-absent-witness` | **no** `_fixpp*`, `fixpp.py`, `fixpp_oo.py`, `fixpp_dict_data.py`, `_fixpp_data` anywhere in the staged tree — L-056-4 (**R2-P2-1**) |
+
+⚠️ **`DESTDIR`, not `--prefix`, and that is a correctness requirement, not a style choice.** §4.5.2's
+own table row 2 says why: on the absolute-`Python3_SITEARCH` branch the DESTINATION is absolute, and
+`cmake --install --prefix X` **ignores the prefix** for an absolute destination — so a prefix-staged
+scan sees an empty delta and **PASSES** while the payload lands on the real interpreter. `DESTDIR`
+prepends to absolute destinations, so it captures both branches; the scan therefore walks the **whole**
+staging root, not `${stage}${prefix}`. ⚠️ **Do not copy `tests/consumer/run_consumer_witness.cmake:48–56`,
+which uses `--prefix`** — it answers a different question (a relocatable C++ package whose destinations
+are all prefix-relative). This blindness would **not** reproduce locally, where `Python3_SITEARCH` is
+empty and the `"."` branch fires; that is exactly what makes it worth spelling out.
+
+**Proven RED with no synthetic self-test.** Each mode's negative evidence is the *other* configuration
+of the same tree — the four cells are measured, not asserted (Appendix A, **E-35**). A planted-file
+self-test was considered and rejected: it would test the scanner, not the install.
+
+⚠️ **`absent` registers NOWHERE until §4.3.3 passes `-DFIXPP_INSTALL_PYTHON=OFF`.** It is inert by
+construction until then, which is correct — but it means a typo in that flag on the six legs would
+leave the witness silently not running and the §4.5.3 grep (the instrument R2-P2-1 judged
+*insufficient*) as the only survivor. **The workflow change must assert the test RAN** (a `ctest -N`
+count), not merely that ctest was green; `tier1.yml:569–581`'s `expected=1` on the consumer witness is
+the precedent. `feedback_ci_gate_observes_not_asserts_witness_skips_into_green`.
+
+Registration is `UNIX`-only (CMake does not support `DESTDIR` on Windows) and skipped under `SKBUILD`
+(the wheel build has no test tree, and R2-P2-2's question is specifically about the **non-**`SKBUILD`
+path `python-wheel-test` cannot see).
 
 ### 4.6 Edits 5 + 6 — the two required-check contracts
 
@@ -398,14 +440,19 @@ v0.1 enumerated **four** comment sites and §9 asserted a **two-file** blast rad
 | 18 | `bindings/python/cibw-before-all.sh:23–26` | L-056-4 verbatim, second axis | **RE-POINT** likewise |
 | 19 | `spec/behaviors-and-limitations.md:1649` (**L-056-4 itself**) | *"Those bindings are a **test vehicle only — not a byte of them ships**; likewise the `packages-linux-{clang,gcc}-release` artifacts are the **C++** consumer deliverable and contain no Python."* | **RE-POINT** — the vehicle is now the six matrix legs; add a `#254` note that the property is **preserved by `FIXPP_INSTALL_PYTHON=OFF`**, i.e. it stayed true by construction rather than by accident |
 
+| 20 | `bindings/python/tests/conftest.py:6` | describes the **current CI vehicle** for these tests (the `python-bindings` matrix) | **RE-POINT** — the vehicle is the six `linux` legs. Promoted out of table B by **Appendix D P3(3)** |
+| 21 | `bindings/python/tests/test_gil_release_canary.py:16` | same, **and** already stale on its own terms — it names the matrix as none/asan/tsan; the ubsan lane landed at #159 | **RE-POINT** — two fixes in one line; label them separately in the diff so the pre-existing staleness is not read as introduced by #254 |
+
+⚠️ **Rows 20/21 are NOT safe to land before the deletion.** Together with rows 15 (`ci/test-ccache-scripts.sh:3–9`) and 16 (`cache-cleanup.yml:25`), every one of these four re-points asserts a **post-deletion** state — *"there is no third ccache site"*, *"the vehicle is the six matrix legs"*. Landing them while the `python-bindings` job still exists makes the repo assert something **false**, which is strictly worse than stale (`feedback_stale_anchor_repoint_to_a_plausible_twin_is_worse_than_stale`). **They ship in the same commit as the deletion, not before it.**
+
 ⚠️ **Rows 8 / 17 / 18 / 19 are one invariant in four files** — the `feedback_subset_check_cannot_see_symmetric_omission` shape. v0.1 re-pointed **one** of the four. Fixing the copy you happen to be editing would leave three copies asserting the opposite.
 
 **B. Descriptive — disposition in one line each; do not rewrite**
 
 | site | disposition |
 |---|---|
-| `bindings/python/tests/conftest.py:6` | **LEAVE** — describes the pytest recursion, incidentally naming the matrix; harmless |
-| `bindings/python/tests/test_gil_release_canary.py:16` | **LEAVE** (already stale on its own terms — it says the matrix is none/asan/tsan; the ubsan lane landed at #159). Not #254's to fix; noted so it is not read as introduced here |
+| `bindings/python/tests/conftest.py:6` | ⚠️ **SUPERSEDED by Appendix D P3(3) → RE-POINT** (moved to table A as row 20). Round 2 was right: this does not merely *incidentally* name the matrix, it describes the **current CI vehicle**, and after the fold that description is false |
+| `bindings/python/tests/test_gil_release_canary.py:16` | ⚠️ **SUPERSEDED by Appendix D P3(3) → RE-POINT** (table A row 21). It is *also* already stale on its own terms — it says the matrix is none/asan/tsan and the ubsan lane landed at #159 — so the re-point fixes two things; say which is which in the diff so the pre-existing staleness is not read as introduced here |
 | `CMakeLists.txt:303` | **LEAVE** — an MSVC `/bigobj` comment mentioning the matrix as context |
 | `spec/coverage-index.md:656,658` · `spec/feature-catalogue.md:274–275` · `spec/behaviors-and-limitations-closed.md:138–142` · `spec/behaviors-and-limitations.md:1851` | **LEAVE — historical.** These record what the PY-001/002/003 features delivered *at the time*, keyed to closed L-rows. Rewriting them would falsify a record |
 | `CLAUDE.md:10,12` · `CLAUDE-history.md:40` | **LEAVE — historical.** Merged-PR narratives for #251/#247/#159 |
@@ -730,6 +777,9 @@ Line numbers verified in this worktree on **2026-08-09** against a 2205-line `ti
 | **E-31** | command-level merge evidence + the ccache prediction | **1457/1457 compile commands byte-identical**; `FIXPP_BUILD_PYTHON=ON` *"adds exactly one compile edge and perturbs nothing else"*; measured on run `31256807981`: **1461 hits / 1 miss over 1462 cacheable calls** | M | #244 part 1 / PR #247 (`CLAUDE.md:12`, issue #254 body). Gating mechanism verified at `CMakeLists.txt:333–335` (`if(FIXPP_BUILD_PYTHON) add_subdirectory(bindings/python) endif()`) — **I**. ⇒ this is the **mechanism** behind §9.7's cache claim, which v0.1 asserted without one |
 | **E-32** | R6 instrument, **proven non-zero on the unfixed tree** | `grep -c '^[[:space:]]*file(INSTALL' build/linux-clang-tsan-py/bindings/python/cmake_install.cmake` = **4**; destinations `${CMAKE_INSTALL_PREFIX}/.` and `${CMAKE_INSTALL_PREFIX}/./_fixpp_data` | M | local, 2026-08-09. ⇒ the **`"."` branch fires locally**, and §4.5.3's `== 0` assertion is a working instrument, not a broken one. ⚠️ Measured in a `-py`-suffixed build dir (the **deleted job's** naming) while §4.5.3 will read `build/<preset>/…`; the grep pattern matches CMake's generator output, which is **independent of the build-dir name**, so the instrument is proven on the same population. ⚠️ **Does not speak for CI**, where `actions/setup-python@v6` precedes Configure (OQ-1b) |
 | **E-33** | L-056-4 invariant site count | **4** — `spec/behaviors-and-limitations.md:1649`, `tier1.yml:1599–1610`, `bindings/python/pyproject.toml:11–14`, `bindings/python/cibw-before-all.sh:23–26` | M+I | two-axis census, 2026-08-09: `grep -rn 'python-bindings'` **and** `grep -rn 'no Python\|TEST VEHICLE\|not a byte of them ships'`, excluding `specs/`. ⚠️ **The second axis is not optional**: L-056-4's own home file does not contain the string `python-bindings` and is invisible to the first |
+
+| **E-34** | R6 instrument, **the OFF side, now measured** — E-32's missing half | `grep -c '^[[:space:]]*file(INSTALL' build/probe-none-B/bindings/python/cmake_install.cmake` = **0**, file present (44 lines), **zero** `_fixpp`/`fixpp*.py`/`_fixpp_data` references | M | local, 2026-08-09. Obtained by **reconfiguring an existing tree** with `-DFIXPP_INSTALL_PYTHON=OFF` — 19 s, **no rebuild**, because `cmake_install.cmake` is regenerated at generate time. ⇒ v0.2's *"could not test OFF locally without configuring a fresh tree (expensive)"* disposition was simply **wrong**, and E-32 is now a pair rather than a half. Same run printed `FIXPP_INSTALL_PYTHON=OFF; Python3_SITEARCH=''; FIXPP_PY_INSTALL_DIR='.'` — §4.5.2's `message(STATUS)` firing |
+| **E-35** | §4.5.5's two semantic witnesses, **all four cells measured** — each mode's RED is the other configuration, no synthetic self-test | tree `build/probe-none-B`, `-DFIXPP_BUILD_TESTS=OFF` (1843 edges; the install closure without the 330 test executables), `DESTDIR`-staged:<br>· **ON / present → GREEN**, 268 staged entries<br>· **ON / absent → RED**, 5 payload entries at the prefix root (`_fixpp.so`, `_fixpp_data`, `fixpp.py`, `fixpp_oo.py`, `fixpp_dict_data.py`)<br>· **OFF / absent → GREEN**, 0 payload in 258 staged<br>· **OFF / present → RED**, all 9 required entries missing | M | local, 2026-08-09. ⚠️ **268 − 258 = 10** — module + 3 `.py` + `_fixpp_data/` + `__init__.py` + 4 XMLs. The delta is *exactly* the payload, which is independent corroboration that the scan is neither over- nor under-matching. ⚠️ Verified `FIXPP_BUILD_TESTS=OFF` does not change install content: **no `install()` rule sits inside the `if(FIXPP_BUILD_TESTS)` block** (`CMakeLists.txt:349–424`; all 9 top-level rules are outside it) |
 
 **Figures deliberately NOT restated as current:** the `~7.7 GB` / `5.82 GiB` Actions-cache pool numbers (`tier1.yml:459–471`) — unaffected by this change in either direction (§9.7), and conditional on a manual `gh cache delete` that this doc does not verify.
 

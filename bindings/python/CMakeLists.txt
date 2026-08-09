@@ -261,3 +261,55 @@ install(
 )
 
 endif()  # FIXPP_INSTALL_PYTHON — see the option() block above (#254 / L-056-4)
+
+# ── #254 / Gate A round 2 — the two install witnesses (R2-P2-1, R2-P2-2) ─────
+#
+# Exactly ONE of these registers, decided by the option above, and together they
+# are jointly exhaustive over every non-SKBUILD build that has the bindings:
+#
+#   FIXPP_INSTALL_PYTHON=ON  (default, every ordinary build)  -> `present`
+#   FIXPP_INSTALL_PYTHON=OFF (tier 1's six `linux` legs)      -> `absent`
+#
+# That symmetry is the design. Each mode's proven-RED evidence is the OTHER
+# configuration of the same tree — no synthetic self-test, no planted files:
+#
+#   config                    present-witness   absent-witness
+#   FIXPP_INSTALL_PYTHON=ON     GREEN             RED (if run)
+#   FIXPP_INSTALL_PYTHON=OFF    RED  (if run)     GREEN
+#
+# ⚠️ `absent` registers NOWHERE until tier1.yml passes -DFIXPP_INSTALL_PYTHON=OFF
+# on the six legs. Until then it is inert by construction, not by accident. The
+# workflow change must assert that it RAN (`ctest -N` count), not merely that
+# ctest was green — the consumer witness's `expected=1` step is the precedent.
+#
+# UNIX-only: DESTDIR is not supported by CMake's install on Windows, and DESTDIR
+# rather than --prefix is the whole point (see the script's header — --prefix is
+# structurally blind to the absolute-Python3_SITEARCH destination branch).
+#
+# Not registered under SKBUILD: the wheel build has no test tree, and the ON-side
+# question R2-P2-2 asks is specifically about the NON-SKBUILD in-tree path that
+# `python-wheel-test` cannot see.
+if(FIXPP_BUILD_TESTS AND UNIX AND NOT DEFINED SKBUILD)
+  if(FIXPP_INSTALL_PYTHON)
+    set(_fixpp_py_witness_mode "present")
+  else()
+    set(_fixpp_py_witness_mode "absent")
+  endif()
+
+  add_test(
+    NAME "fixpp::python::install-${_fixpp_py_witness_mode}-witness"
+    COMMAND "${CMAKE_COMMAND}"
+      "-DFIXPP_MAIN_BUILD_DIR=${CMAKE_BINARY_DIR}"
+      "-DFIXPP_PY_WITNESS_MODE=${_fixpp_py_witness_mode}"
+      "-DFIXPP_PY_WITNESS_WORK_DIR=${CMAKE_BINARY_DIR}/_python_install_witness"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/run_python_install_witness.cmake"
+  )
+  set_tests_properties("fixpp::python::install-${_fixpp_py_witness_mode}-witness" PROPERTIES
+    LABELS "python;install"
+    # A full stage-install of the C++ closure plus the python payload. The
+    # consumer witness, which additionally CONFIGURES AND BUILDS a sub-project
+    # off its staged prefix, sits at 300; this one only installs.
+    TIMEOUT 300)
+
+  unset(_fixpp_py_witness_mode)
+endif()
