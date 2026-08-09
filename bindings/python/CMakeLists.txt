@@ -193,6 +193,43 @@ else()
   set(FIXPP_PY_INSTALL_DIR "${Python3_SITEARCH}")
 endif()
 
+# ── #254 — separate BUILDING the bindings from INSTALLING them ───────────────
+# Tier 1's six `linux` matrix legs build the bindings (to run pytest) but must
+# NOT install them: two of those legs (`linux-{clang,gcc}-release`) also build
+# `fixpp-package`, and the consumer witness stage-installs on all six. With the
+# rules below unconditional, folding the bindings into those legs silently puts
+# _fixpp.so + the three .py modules + _fixpp_data into
+# packages-linux-{clang,gcc}-release — falsifying L-056-4 ("the C++ packages
+# contain no Python") and shipping, by accident, exactly the payload that was
+# deliberately descoped from #254 (the decision is #257's to make).
+#
+# ⚠️ DEFAULT ON IS LOAD-BEARING. Feature 056 (LAY-1 / D-4 / T006) decided that a
+# plain in-tree `cmake --install` installs the bindings; that is a delivered
+# requirement, not an incidental behaviour. Only the six matrix legs pass OFF.
+#
+# ⚠️ Do NOT "simplify" this to `if(DEFINED SKBUILD)`. That gates the rules on the
+# WHEEL build and would silently regress the in-tree path 056 requires — while
+# still passing python-wheel-test, which only ever exercises the SKBUILD half.
+#
+# OFF costs the tests nothing: in-tree pytest imports from
+# PYTHONPATH=build/<preset>/lib, staged by the POST_BUILD copy above — not by
+# install(). See the comment at the top of this block.
+option(FIXPP_INSTALL_PYTHON
+       "Install the Python binding artifacts (module, pure-Python modules, _fixpp_data)" ON)
+
+# Report the resolved destination on every configure. FIXPP_PY_INSTALL_DIR has
+# three reachable outcomes and they fail in different directions: "." pollutes
+# the install-prefix root; an absolute writable SITEARCH makes `cmake --install
+# --prefix X` IGNORE the prefix (so a prefix-diff is structurally BLIND to it);
+# an absolute non-writable SITEARCH makes the install FATAL_ERROR. Locally the
+# "." branch fires, but actions/setup-python runs before Configure in CI, so
+# which branch fires there is NOT established — hence reported, not assumed.
+message(STATUS "fixpp: FIXPP_INSTALL_PYTHON=${FIXPP_INSTALL_PYTHON}; "
+               "Python3_SITEARCH='${Python3_SITEARCH}'; "
+               "FIXPP_PY_INSTALL_DIR='${FIXPP_PY_INSTALL_DIR}'")
+
+if(FIXPP_INSTALL_PYTHON)
+
 install(TARGETS fixpp_py DESTINATION "${FIXPP_PY_INSTALL_DIR}")
 install(
   FILES "${CMAKE_BINARY_DIR}/lib/fixpp.py"
@@ -222,3 +259,5 @@ install(
     "${CMAKE_SOURCE_DIR}/dictionaries/FIXT11.xml"
   DESTINATION "${FIXPP_PY_INSTALL_DIR}/_fixpp_data"
 )
+
+endif()  # FIXPP_INSTALL_PYTHON — see the option() block above (#254 / L-056-4)
