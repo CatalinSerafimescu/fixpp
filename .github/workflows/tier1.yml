@@ -1847,8 +1847,14 @@ jobs:
   # It IS in tier1-required's needs. A gate that runs but cannot block is the
   # observe-don't-assert shape this repo has a recorded lesson about
   # (feedback_ci_gate_observes_not_asserts_witness_skips_into_green, cited at
-  # that job). Safe to make blocking precisely because it is hermetic and
-  # sub-second: nothing here can flake.
+  # that job). Safe to make blocking BECAUSE it is fast and near-hermetic —
+  # but "near": the two original pins (#245, #240) are bash+jq and hermetic,
+  # nothing here can flake for THEM. The #251 pin below additionally requires
+  # `actions/setup-python` and may bootstrap PyYAML from PyPI — a live
+  # network dependency, gate-b/r2 finding 3. It fails closed (a failed
+  # install fails this step, hence `ci-script-pins`, hence
+  # `tier1-required`) — never a silent skip — but it is not "nothing here can
+  # flake" for the job as a whole any more.
   ci-script-pins:
     name: ci-script-pins
     runs-on: ubuntu-24.04
@@ -1865,12 +1871,16 @@ jobs:
         with:
           python-version: "3.12"
 
-      # Parses tier1.yml with PyYAML — hermetic (no build, no network, no
-      # workflow execution), so the #243/#251 sanitizer->profile policy and
-      # the anchored PY_RE relevance filter get pre-merge signal the same way
-      # the two pins above do (Article VII §§3-4; #247->#248's location
-      # waiver does not transfer here — this is tracked YAML data plus a
-      # regex, not shell embedded in a `run:` block with no harness to host it).
+      # Parses tier1.yml with PyYAML, so the #243/#251 sanitizer->profile
+      # policy and the anchored PY_RE relevance filter get pre-merge signal
+      # the same way the two pins above do (Article VII §§3-4; #247->#248's
+      # location waiver does not transfer here — this is tracked YAML data
+      # plus a regex, not shell embedded in a `run:` block with no harness to
+      # host it). The pin itself reads tracked files only and executes no
+      # build, no Conan and no workflow — but this step also bootstraps
+      # PyYAML from PyPI below when the interpreter on PATH lacks it, which
+      # is NOT hermetic and its frequency is unmeasured (gate-b/r2 finding 3;
+      # see the job-level comment above).
       - name: Regression pin — tier1.yml python-bindings policy (#251)
         run: |
           python3 -c "import yaml" 2>/dev/null || pip install --quiet pyyaml
