@@ -2018,7 +2018,8 @@ jobs:
   tier1-required:
     name: tier1-required
     runs-on: ubuntu-latest
-    needs: [gate-precheck, linux, coverage, check-layers, ci-script-pins]
+    needs: [gate-precheck, linux, coverage, check-layers, ci-script-pins,
+            python-bindings, python-wheel-build, python-wheel-test]
     if: always()
     steps:
       - name: Assert the core Tier 1 matrix ran to success (no skip-into-green)
@@ -2033,6 +2034,14 @@ jobs:
           # wheel-only release event does not run. Making one job blocking on
           # an event where every other job is waived would be an asymmetry
           # with no failure behind it.
+          #
+          # Same asymmetry now applies to `python-wheel-build`: its own `if:`
+          # includes `release`, so it DOES run on a release event (its `if:`
+          # is `release || (proceed && python_touched)`), and it is now in
+          # this job's `needs:` — so `tier1-required` waits on it (~70 min
+          # warm) before reaching this early exit, then discards its result
+          # unread. Cosmetic (nothing gates a release on this check), but a
+          # real behaviour change worth recording rather than rediscovering.
           if [ "${{ github.event_name }}" = "release" ]; then
             echo "release event — C++ matrix intentionally skipped; gate not applicable."
             exit 0
@@ -2053,5 +2062,74 @@ jobs:
               fail=1
             fi
           done
+
+          # ── Python legs (gate-b/r1, F2) ─────────────────────────────────
+          # `tier1-required` did not previously depend on the three python
+          # jobs at all, so they could go red while this check reported
+          # green — the exact skip-into-green hole this job exists to close,
+          # now reopened one layer down. #251 is the PR that makes it matter:
+          # its whole point is to surface NEW sanitizer findings on these
+          # legs, behind a required check that could not see them.
+          #
+          # A uniform "must be success" rule is wrong for two reasons:
+          #   - `python-bindings` / `python-wheel-build` gate independently
+          #     on `proceed && python_touched` — a path-gated C++-only PR
+          #     legitimately reports `skipped`, and that is NOT skip-into-
+          #     green: `python_touched` is the discriminant that decides
+          #     whether these jobs were relevant, not an unconditional skip.
+          #   - `python-wheel-test` has no `if:` of its own — only
+          #     `needs: python-wheel-build`. If that build fails,
+          #     wheel-test's own disposition is `skipped`, not `failure`,
+          #     so it must be checked against `python-wheel-build`'s result,
+          #     not against `python_touched` directly. Otherwise a build
+          #     failure would double-report AND a naive "skipped is always
+          #     fine for wheel-test" would silently re-open the hole here.
+          #
+          # Any `failure` or `cancelled` result fails both branches below
+          # (neither equals `success` nor `skipped`), so both are covered
+          # without a separate check.
+          #
+          # Latency: this makes `tier1-required` wait on the slowest python
+          # leg. Measured on run 31273945846: `python-bindings (asan)` took
+          # 113.1 min warm, while `linux-clang-coverage` was already the
+          # longer pole at 134.8 min — so on that run the gate was not
+          # delayed at all. On a run where coverage is faster, the required
+          # check can report up to ~113 min later than before.
+          pt='${{ needs.gate-precheck.outputs.python_touched }}'
+          pb='${{ needs.python-bindings.result }}'
+          pwb='${{ needs.python-wheel-build.result }}'
+          pwt='${{ needs.python-wheel-test.result }}'
+          echo "python_touched=$pt  python-bindings=$pb  python-wheel-build=$pwb  python-wheel-test=$pwt"
+          if [ "$pt" = "true" ]; then
+            if [ "$pb" != "success" ]; then
+              echo "::error::python-bindings did not run to success (got '$pb') while python_touched=true."
+              fail=1
+            fi
+            if [ "$pwb" != "success" ]; then
+              echo "::error::python-wheel-build did not run to success (got '$pwb') while python_touched=true."
+              fail=1
+            fi
+          else
+            if [ "$pb" != "skipped" ]; then
+              echo "::error::python-bindings expected exactly 'skipped' when python_touched=false, got '$pb'."
+              fail=1
+            fi
+            if [ "$pwb" != "skipped" ]; then
+              echo "::error::python-wheel-build expected exactly 'skipped' when python_touched=false, got '$pwb'."
+              fail=1
+            fi
+          fi
+          if [ "$pwb" = "success" ]; then
+            if [ "$pwt" != "success" ]; then
+              echo "::error::python-wheel-test did not run to success (got '$pwt') while python-wheel-build=success."
+              fail=1
+            fi
+          else
+            if [ "$pwt" != "skipped" ]; then
+              echo "::error::python-wheel-test expected exactly 'skipped' when python-wheel-build!=success (got '$pwb'), got '$pwt'."
+              fail=1
+            fi
+          fi
+
           [ "$fail" = 0 ] || exit 1
           echo "Tier 1 core matrix ran to success."
