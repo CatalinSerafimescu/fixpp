@@ -1,47 +1,63 @@
 #!/usr/bin/env bash
-# Regression pin for the sanitizer -> Conan-profile policy #243/#251 adds to
-# `tier1.yml`'s `python-bindings` job, plus the `PY_RE` python-relevance
-# filter in `gate-precheck` (gate-b/r1, PR #251 round 1, F3 items 1+3 / F4).
+# Regression pin for tier 1's Python policy.
+#
+# HISTORY, because the target moved. #243/#251 wrote this to pin the
+# sanitizer -> Conan-profile mapping of the `python-bindings` JOB, plus the
+# `PY_RE` python-relevance filter in `gate-precheck`. #254 folded that job into
+# the six `linux` matrix legs and deleted it, taking four of the six original
+# assertions and five of the six mutants with it. What replaces them is not a
+# narrowing: the same mapping now lives in ci/derive-python-sanitizer.sh and is
+# pinned by DRIVING THE REAL SCRIPT, which is stronger than parsing YAML for it.
 #
 # A naive version of this pin would re-read the YAML to confirm the YAML —
 # a tautology. These assertions are NOT that:
 #
-#   1. Matrix exact-set census: the `python-bindings` job's matrix `include[]`
-#      is exactly {asan, none, tsan, ubsan}, each mapped to its expected
-#      `conan_profile` — not merely "every entry present is correctly mapped",
-#      which a subset of the matrix (a deleted sanitizer leg) also satisfies
-#      (gate-b/r2 finding 1; feedback_completeness_gate_exact_set_not_subset).
-#   2. Suffix rule: `sanitizer == 'none'` -> `conan_profile == linux-clang-debug`;
-#      every other leg -> `conan_profile == "linux-clang-" + sanitizer`. This is
-#      the derived-mapping check that kills a `tsan -> linux-clang-debug` mutant
-#      and stays live across a hand-edited `EXPECTED_MATRIX`; the census
-#      (assertion 1) is the completeness check. Profile-file EXISTENCE
-#      (assertion 3) does not help here because `linux-clang-debug` exists.
-#   3. Profile-file existence: every `conan_profile` value names a real file
-#      under `conan/profiles/` — catches a typo'd/renamed profile at PR time
-#      instead of as a `--build=missing` from-source rebuild on the runner.
-#   4. Step parameterisation: the `python-bindings` job's `Restore Conan cache
-#      from GHCR` step run text is an EXACT match for the single parameterised
-#      call, while the multi-line `Conan install` step is checked by counted
-#      occurrence of the single parameterised `-pr` literal. gate-b/r2 finding
-#      2: a substring/interpolation-present check passes on dead interpolation
-#      — an unused `${{ matrix.conan_profile }}` reference alongside a
-#      hard-coded fallback that is what actually runs — which is precisely
-#      the invariant #251's own comment argues is load-bearing (a restore
-#      pinned back to `linux-clang-debug` silently hands back the
-#      uninstrumented closure — no `--build=missing` failure, no visible
-#      symptom).
-#   5. `PY_RE` case table: the literal is extracted from the `gate-precheck`
+#   1. Derive-script behaviour, over an EXACT SET read from the workflow: the
+#      six presets in the `linux` job's `strategy.matrix.preset` are read out of
+#      tier1.yml and ci/derive-python-sanitizer.sh is EXECUTED on each, with all
+#      three of its outputs (`sanitizer`, `rt_base`, `san_opts`) compared against
+#      the expected table below. Exact-set, not subset: a preset added to the
+#      matrix but not to the script fails, and a preset in the script but not in
+#      the matrix fails too (feedback_completeness_gate_exact_set_not_subset —
+#      the lesson the deleted EXPECTED_MATRIX census encoded).
+#      Plus one unknown preset, asserting exit 1 rather than a defaulted `none`.
+#   2. Call site: a tested script the workflow never invokes is the dead-call-site
+#      shape, so BOTH halves are pinned — the `linux` job has a step that invokes
+#      ci/derive-python-sanitizer.sh with `matrix.preset`, AND all three outputs
+#      are consumed somewhere in that job. gate-b/r2 finding 2 on the deleted job
+#      was exactly this failure mode under a different name: an interpolation
+#      present but dead. ⚠️ `san_opts` is the one that matters most — a UBSan leg
+#      that loses `halt_on_error=1` runs, finds, prints, and exits 0 (R2-P2-3).
+#   3. `FIXPP_INSTALL_PYTHON=OFF` is on the `linux` job's Configure line. Without
+#      it the Python payload enters packages-linux-{clang,gcc}-release and
+#      falsifies L-056-4, and the §4.5.3 assertion step could be deleted with
+#      nothing noticing.
+#   4. `PY_RE` case table: the literal is extracted from the `gate-precheck`
 #      step (not duplicated here, so this pin cannot pass against a stale
 #      copy) and evaluated with `grep -E` against a fixed positive/negative
 #      path list — genuinely behavioural, not a re-statement of the pattern.
-#   6. `tier1-required`'s `needs:` exact-set census (gate-b/r2 finding 4
-#      carve-out): the eight job names the F2 fix's durability rests on.
+#      ⚠️ UNCHANGED BY #254 and deliberately so: narrowing PY_RE now that it
+#      gates the wheel jobs alone is #253's, not this change's (NG-4).
+#   5. `tier1-required`'s `needs:` exact-set census: SEVEN job names since #254
+#      (was eight; `python-bindings` removed). This is the assertion that guards
+#      the trap — the `result` of a job not in `needs:` is the EMPTY STRING,
+#      which is neither `success` nor `skipped`, so a half-applied deletion reds
+#      the required check on every non-release run.
 #
-# Assertions 1, 2, 4 and 5 each have at least one mutant driven through this
-# same script via a MUTATED COPY of tier1.yml, so the pin proves it can
-# fail before it is trusted to pass (feedback_verification_grep_must_be_
-# proven_nonzero_on_the_unfixed_tree). See run_mutant_checks() below.
+# EVERY assertion has at least one mutant driven through this same script via a
+# MUTATED COPY of tier1.yml or of the derive script, so the pin proves it can
+# fail before it is trusted to pass (feedback_verification_grep_must_be_proven_
+# nonzero_on_the_unfixed_tree). See run_mutant_checks() below.
+#
+# ⚠️ M4 IS NEW AND ITS ABSENCE WAS A REAL HOLE. Assertion 5 (the `needs:`
+# census) shipped in #251 with NO mutant — it had never been proven RED. #254
+# re-bases it from eight names to seven, and re-basing a never-tested assertion
+# under a new number is how an untested check acquires false credibility.
+#
+# ⚠️ The declared mutant count is asserted against the number that actually ran
+# (see MUTANTS_DECLARED). PR #251's own review loop shipped a summary claiming
+# five mutants where six ran; the remedy for that is a machine check, not a
+# human eyeball.
 #
 # Hermetic: reads tracked files only. No build, no Conan, no network, no `nm`.
 # It DOES hard-require an importable PyYAML on the caller's `python3` (see
@@ -52,6 +68,9 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WORKFLOW="${1:-$repo_root/.github/workflows/tier1.yml}"
+# The derive script is a SECOND mutation target: M1/M2/M3 mutate it, not the
+# workflow, so it has to be overridable the same way $WORKFLOW is.
+DERIVE="${2:-$repo_root/ci/derive-python-sanitizer.sh}"
 
 fail() { echo "FAIL: $1" >&2; exit 1; }
 
@@ -74,18 +93,21 @@ with open(sys.argv[1]) as f:
     doc = yaml.safe_load(f)
 
 jobs = doc["jobs"]
-pb_job = jobs["python-bindings"]
-include = pb_job["strategy"]["matrix"]["include"]
 
-steps = pb_job["steps"]
-conan_install_run = None
-restore_run = None
-for step in steps:
-    name = step.get("name", "")
-    if name == "Conan install":
-        conan_install_run = step.get("run", "")
-    elif name == "Restore Conan cache from GHCR":
-        restore_run = step.get("run", "")
+# #254: `python-bindings` is gone. The set this pin is exact over is now the
+# `linux` job's own preset list — a list of STRINGS, not the list of dicts the
+# deleted job's matrix.include was. Reading it from the YAML rather than
+# hardcoding it here is what makes assertion 1 exact-SET rather than aspirational:
+# add a preset to the matrix and the derive script must grow an arm for it.
+linux_job = jobs["linux"]
+linux_presets = linux_job["strategy"]["matrix"]["preset"]
+
+# Every `run:` in the linux job, concatenated. The call-site and flag assertions
+# are single-line literal checks over this, which is all PyYAML should ever be
+# asked to do with shell (it never parses it).
+linux_runs = "\n".join(
+    str(step.get("run", "")) for step in linux_job["steps"]
+)
 
 gp_steps = jobs["gate-precheck"]["steps"]
 decide_run = None
@@ -97,9 +119,8 @@ for step in gp_steps:
 tier1_required_needs = jobs["tier1-required"]["needs"]
 
 out = {
-    "include": include,
-    "conan_install_run": conan_install_run,
-    "restore_run": restore_run,
+    "linux_presets": linux_presets,
+    "linux_runs": linux_runs,
     "decide_run": decide_run,
     "tier1_required_needs": tier1_required_needs,
 }
@@ -107,91 +128,101 @@ print(json.dumps(out))
 PYEOF
 }
 
-# ── 1 + 2: exact-set census + suffix rule + profile-file existence ──────────
-assert_matrix_policy() {
-  local json="$1" case_id="$2"
-  local n
+# ── 1: the derive script, driven over the linux matrix's EXACT preset set ───
+# preset|sanitizer|rt_base|san_opts  — mirrors design doc §4.3.2, and the values
+# are carried over byte-for-byte from the deleted job's strategy.matrix.include.
+#
+# ⚠️ `$GITHUB_WORKSPACE` in the tsan row is LITERAL and must stay unexpanded:
+# the consumer is `env <opts> pytest` inside a `run:` block, which expands it
+# there — exactly what the matrix scalar it replaces did. Single-quoted for that
+# reason; do not "fix" it.
+EXPECTED_DERIVE=(
+  "linux-clang-debug|none||"
+  "linux-clang-release|none||"
+  "linux-clang-asan|asan|asan|ASAN_OPTIONS=detect_leaks=0:halt_on_error=1"
+  'linux-clang-ubsan|ubsan|ubsan_standalone|UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1'
+  'linux-clang-tsan|tsan|tsan|TSAN_OPTIONS=suppressions=$GITHUB_WORKSPACE/bindings/python/tests/tsan_suppressions.txt:halt_on_error=1'
+  "linux-gcc-release|none||"
+)
 
-  n="$(echo "$json" | jq '.include | length')"
+assert_derive_script() {
+  local json="$1" case_id="$2" derive="$3"
+  local got_presets expected_presets entry preset out
+  local e_san e_rt e_opts g_san g_rt g_opts
 
-  local i sanitizer profile expected
-  for i in $(seq 0 $((n - 1))); do
-    sanitizer="$(echo "$json" | jq -r ".include[$i].sanitizer")"
-    profile="$(echo "$json" | jq -r ".include[$i].conan_profile")"
+  got_presets="$(echo "$json" | jq -r '.linux_presets[]' | sort | tr '\n' ',')"
+  expected_presets="$(printf '%s\n' "${EXPECTED_DERIVE[@]}" | cut -d'|' -f1 | sort | tr '\n' ',')"
+  # Exact SET equality in both directions — a preset added to the matrix without
+  # an arm in the script fails here, and so does the reverse.
+  [ "$got_presets" = "$expected_presets" ] \
+    || fail "$case_id: linux matrix preset set '$got_presets' != this pin's expected set '$expected_presets'"
 
-    if [ "$sanitizer" = "none" ]; then
-      expected="linux-clang-debug"
-    else
-      expected="linux-clang-$sanitizer"
+  for entry in "${EXPECTED_DERIVE[@]}"; do
+    preset="$(echo "$entry" | cut -d'|' -f1)"
+    e_san="$(echo "$entry"  | cut -d'|' -f2)"
+    e_rt="$(echo "$entry"   | cut -d'|' -f3)"
+    e_opts="$(echo "$entry" | cut -d'|' -f4-)"
+
+    # A preset in the matrix that the script REJECTS is an exhaustiveness
+    # failure, and it is reported as one — distinct from a value mismatch, so a
+    # mutant that deletes an arm cannot be confused with one that changes a value.
+    if ! out="$(bash "$derive" "$preset" 2>&1)"; then
+      fail "$case_id: ci/derive-python-sanitizer.sh REJECTED '$preset', which IS in tier1.yml's linux matrix — the case is not exhaustive over the matrix. Output: $out"
     fi
-    if [ "$profile" != "$expected" ]; then
-      fail "$case_id: sanitizer '$sanitizer' -> conan_profile '$profile', expected '$expected' (suffix rule violated)"
-    fi
 
-    [ -f "$repo_root/conan/profiles/$profile" ] \
-      || fail "$case_id: conan_profile '$profile' (sanitizer '$sanitizer') names no file under conan/profiles/"
+    g_san="$(echo  "$out" | sed -n 's/^sanitizer=//p')"
+    g_rt="$(echo   "$out" | sed -n 's/^rt_base=//p')"
+    g_opts="$(echo "$out" | sed -n 's/^san_opts=//p')"
+
+    [ "$g_san" = "$e_san" ] \
+      || fail "$case_id: derive mismatch for '$preset' field 'sanitizer': expected '$e_san', got '$g_san'"
+    [ "$g_rt" = "$e_rt" ] \
+      || fail "$case_id: derive mismatch for '$preset' field 'rt_base': expected '$e_rt', got '$g_rt'"
+    [ "$g_opts" = "$e_opts" ] \
+      || fail "$case_id: derive mismatch for '$preset' field 'san_opts': expected '$e_opts', got '$g_opts'"
   done
 
-  # Exact-set census (gate-b/r2 finding 1): the `length > 0` check this
-  # replaces only validates whatever entries remain, so 3 of the 4 sanitizer
-  # legs — including asan and ubsan outright — can be deleted from the matrix
-  # and the per-entry loop above still passes (feedback_completeness_gate_
-  # exact_set_not_subset). Adding a fifth sanitizer requires an intentional
-  # edit to EXPECTED_MATRIX here — that is the point, not friction.
-  local EXPECTED_MATRIX="asan->linux-clang-asan,none->linux-clang-debug,tsan->linux-clang-tsan,ubsan->linux-clang-ubsan"
-  local got
-  got="$(echo "$json" | jq -r '[.include[]|"\(.sanitizer)->\(.conan_profile)"]|sort|join(",")')"
-  [ "$got" = "$EXPECTED_MATRIX" ] \
-    || fail "$case_id: matrix set '$got' != expected '$EXPECTED_MATRIX'"
+  # Fail-closed on an unknown preset. A defaulted `none` on a future sanitizer
+  # leg builds an UNINSTRUMENTED _fixpp.so and reports green — the #251 class.
+  if bash "$derive" linux-clang-definitely-not-a-preset >/dev/null 2>&1; then
+    fail "$case_id: derive script did NOT exit non-zero on an unknown preset — it must be fail-closed, never a defaulted 'none'"
+  fi
 }
 
-# ── 3: step parameterisation ────────────────────────────────────────────────
-# gate-b/r2 finding 2: the previous version of this function greped for
-# `matrix\.conan_profile` ANYWHERE in the run text, and a hard-coded-literal
-# heuristic whose character class excluded `"` and `$`. Both survive dead
-# interpolation like `PROFILE=linux-clang-"${SANITIZER:-debug}"` — the
-# expression is present in the step (in a no-op `: "${{ matrix.conan_profile
-# }}"` line) while the value actually used is a hard-coded fallback. Exact
-# normalized command assertions replace both checks; see the fix queue
-# (opus_pr251_2_triage.md, finding 2) for the reproduction.
-#
-# Strips trailing `#` comments and collapses whitespace. Neither step's run
-# text contains a legitimate `#` today — if one is ever added, this
-# normalisation must change with it or it will silently eat part of the
-# command.
-norm() { sed -E 's/#.*$//; s/[[:space:]]+/ /g; s/^ //; s/ $//' | grep -v '^$'; }
-
-assert_step_parameterisation() {
+# ── 2 + 3: the call site, all three outputs consumed, and the OFF flag ───────
+# A tested script the workflow never invokes proves nothing, and an output
+# nothing reads is dead. Single-line literal checks over the linux job's
+# concatenated `run:` text — PyYAML is never asked to parse shell.
+assert_derive_call_site() {
   local json="$1" case_id="$2"
-  local conan_install_run restore_run
+  local runs
+  runs="$(echo "$json" | jq -r '.linux_runs')"
 
-  conan_install_run="$(echo "$json" | jq -r '.conan_install_run // ""')"
-  restore_run="$(echo "$json" | jq -r '.restore_run // ""')"
+  grep -qF 'ci/derive-python-sanitizer.sh "${{ matrix.preset }}"' <<<"$runs" \
+    || fail "$case_id: no step in the linux job invokes ci/derive-python-sanitizer.sh with matrix.preset — the script is tested but never called (dead call site)"
 
-  [ -n "$conan_install_run" ] || fail "$case_id: python-bindings job has no 'Conan install' step"
-  [ -n "$restore_run" ] || fail "$case_id: python-bindings job has no 'Restore Conan cache from GHCR' step"
+  # All three outputs. `san_opts` is the one that silently matters: lose it and
+  # a UBSan leg runs, finds, prints, and exits 0 (R2-P2-3).
+  local out
+  for out in sanitizer rt_base san_opts; do
+    grep -qF "steps.pysan.outputs.$out" <<<"$runs" \
+      || fail "$case_id: the linux job never consumes steps.pysan.outputs.$out — the derive script emits it and nothing reads it (dead output)"
+  done
 
-  # B1: the restore step's run text, normalized, must be EXACTLY the single
-  # parameterised call — string equality, not a match. Any extra line, any
-  # variable indirection, breaks it.
-  local nr
-  nr="$(echo "$restore_run" | norm)"
-  if [ "$nr" != 'ci/restore-conan-cache.sh ${{ matrix.conan_profile }}' ]; then
-    fail "$case_id: 'Restore Conan cache from GHCR' step's run text is not exactly the parameterised call: '$nr'"
-  fi
-
-  # B2: a substring check is not sufficient for the install step — a second,
-  # hard-coded `-pr` appended after the parameterised one would still contain
-  # the parameterised literal and pass a bare `grep -qF` (mutant E). Count
-  # BOTH the total number of `-pr ` occurrences and the number that are
-  # exactly the parameterised literal; both must be 1.
-  local ni total good
-  ni="$(echo "$conan_install_run" | norm)"
-  total="$(echo "$ni" | grep -oF -- '-pr ' | grep -c . || true)"
-  good="$(echo "$ni" | grep -oF -- '-pr conan/profiles/${{ matrix.conan_profile }}' | grep -c . || true)"
-  if [ "$total" != 1 ] || [ "$good" != 1 ]; then
-    fail "$case_id: 'Conan install' step's run text has $total '-pr ' occurrence(s) and $good parameterised-literal occurrence(s), expected exactly 1 and 1: '$ni'"
-  fi
+  # ⚠️ SCOPED TO THE CONFIGURE LINE, not to the job's whole run text — and M5 is
+  # what proved that necessary. A bare search for the flag also matches the
+  # DIAGNOSTIC MESSAGE of the "Assert the Python install witness" step, which
+  # quotes the flag by name; with that match available, deleting the real flag
+  # from Configure left this assertion GREEN. An assertion that can be satisfied
+  # by an error string describing its own violation is worse than no assertion.
+  #
+  # `-e` is also REQUIRED, not style: without it grep parses the leading `-D` of
+  # `-DFIXPP_INSTALL_PYTHON=OFF` as its own --devices option and dies with
+  # "unknown devices method" — which under `set -e` aborts the pin rather than
+  # failing an assertion.
+  grep -F 'cmake --preset ${{ matrix.preset }}' <<<"$runs" \
+    | grep -qF -e '-DFIXPP_INSTALL_PYTHON=OFF' \
+    || fail "$case_id: the linux job's Configure line does not pass -DFIXPP_INSTALL_PYTHON=OFF — the Python payload would enter packages-linux-{clang,gcc}-release and falsify L-056-4 (#254)"
 }
 
 # ── 4: PY_RE case table ─────────────────────────────────────────────────────
@@ -244,68 +275,136 @@ assert_py_re_case_table() {
 # table, the release early-exit, the id:/summary-output assertions) is waived
 # to #248, which is where that shell gets a home it can be tested from
 # without duplicating it. This pins the one thing the whole F2 fix's
-# durability rests on: these eight job names staying in tier1-required's
-# needs:.
+# durability rests on: these job names staying in tier1-required's needs:.
+#
+# ⚠️ SEVEN since #254, was eight — `python-bindings` removed with the job. This
+# is the census that guards the trap: the `result` of a job absent from `needs:`
+# evaluates to the EMPTY STRING, which is neither `success` nor `skipped`, so a
+# half-applied deletion reds this required check on EVERY non-release run, in
+# BOTH branches of the python_touched split. Mutant M4 proves this assertion can
+# fail; before #254 it never had a mutant at all.
 assert_tier1_required_needs() {
   local json="$1" case_id="$2"
-  local EXPECTED_NEEDS="check-layers,ci-script-pins,coverage,gate-precheck,linux,python-bindings,python-wheel-build,python-wheel-test"
+  local EXPECTED_NEEDS="check-layers,ci-script-pins,coverage,gate-precheck,linux,python-wheel-build,python-wheel-test"
   local got
   got="$(echo "$json" | jq -r '.tier1_required_needs | sort | join(",")')"
   [ "$got" = "$EXPECTED_NEEDS" ] \
     || fail "$case_id: tier1-required needs set '$got' != expected '$EXPECTED_NEEDS'"
 }
 
+# Two mutation targets, so two parameters: M1/M2/M3 mutate the DERIVE SCRIPT
+# and leave the workflow alone; M4-M8 do the reverse.
 run_full_pin() {
-  local workflow="$1" case_id="$2"
+  local workflow="$1" case_id="$2" derive="${3:-$DERIVE}"
   local json
   json="$(extract_json "$workflow")"
-  assert_matrix_policy "$json" "$case_id"
-  assert_step_parameterisation "$json" "$case_id"
+  assert_derive_script "$json" "$case_id" "$derive"
+  assert_derive_call_site "$json" "$case_id"
   assert_py_re_case_table "$json" "$case_id"
   assert_tier1_required_needs "$json" "$case_id"
 }
 
 # ── Real workflow: must pass all four assertions ────────────────────────────
 run_full_pin "$WORKFLOW" "tier1.yml"
-echo "PASS: matrix policy, step parameterisation, PY_RE case table — $WORKFLOW"
+echo "PASS: derive-script table + call site + FIXPP_INSTALL_PYTHON=OFF + PY_RE case table + tier1-required needs — $WORKFLOW"
 
 # ── Mutant witnesses: each must be shown RED before this pin is trusted ─────
 # (feedback_verification_grep_must_be_proven_nonzero_on_the_unfixed_tree —
 # an assertion never shown to fail is not evidence.) All mutants are applied
 # to a TEMP COPY; the tracked workflow is never touched.
+# ⚠️ DECLARED vs RUN, checked by machine. PR #251's own review loop shipped a
+# summary claiming five mutants where six ran, caught by orchestrator
+# verification after the fixer reported done. A human eyeball is not the remedy
+# for a miscount; a counter is. MUTANTS_RUN is incremented by each mutant AFTER
+# it has been proven RED for the right reason, so an early `return` or a mutant
+# silently commented out changes the total.
+MUTANTS_DECLARED=9   # M1 M2 M3 B M4 M5 M6 M7 M8
+MUTANTS_RUN=0
+
 run_mutant_checks() {
   local mut_dir
   mut_dir="$(mktemp -d)"
   trap 'rm -rf "$mut_dir"' RETURN
 
-  # Mutant A: tsan -> linux-clang-debug. Codex's named mutant from the F3
-  # review. Profile-file existence alone (assertion 3) does NOT catch this —
-  # linux-clang-debug exists. This is the suffix-rule witness; mutant D below
-  # is the census witness.
-  local mut_a="$mut_dir/tier1-mutant-a.yml"
-  local mut_a_out="$mut_dir/mutant_a_out"
-  sed 's/conan_profile: linux-clang-tsan$/conan_profile: linux-clang-debug/' "$WORKFLOW" > "$mut_a"
-  # O2 (gate-b/r2): the previous guard here (`grep -q 'sanitizer: tsan'`)
-  # checks a DIFFERENT line than the one `sed` targets — a `sed` that matched
-  # nothing (e.g. a future trailing comment on the profile line defeating the
-  # `$` anchor) would still pass it, and the mutant would then fail the pin
-  # for the wrong reason (or not at all) while this guard stayed green. `cmp`
-  # against the unmutated workflow is the direct no-op check. Written as
-  # `if cmp -s ...; then fail ...; fi`, NOT `cmp -s ... && fail ...` — the
-  # latter aborts the script on the PASSING branch under `set -e`
-  # (feedback_bracket_and_fail_under_set_e_aborts_on_the_passing_branch).
-  if cmp -s "$WORKFLOW" "$mut_a"; then
-    fail "mutant A: sed produced no change — mutant not applied"
+  # ── M1/M2/M3 mutate THE DERIVE SCRIPT, not the workflow ────────────────
+  # Heirs of the deleted mutants A and D: the mapping they guarded moved out of
+  # YAML into ci/derive-python-sanitizer.sh, so the mutants follow it.
+
+  # M1 (heir of mutant A): tsan -> none IN THE SCRIPT. Must fail the VALUE check
+  # and name the preset. This is the shape that silently builds an
+  # uninstrumented _fixpp.so on the tsan leg and reports green.
+  local m1="$mut_dir/derive-m1.sh"
+  local m1_out="$mut_dir/m1_out"
+  python3 - "$DERIVE" "$m1" <<'PYEOF2'
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "  linux-clang-tsan)\n    SANITIZER=tsan\n"
+new = "  linux-clang-tsan)\n    SANITIZER=none\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
+PYEOF2
+  if cmp -s "$DERIVE" "$m1"; then
+    fail "M1: python literal-replace produced no change — mutant not applied"
   fi
-  # `fail()` inside `run_full_pin` calls `exit 1`, which would kill this WHOLE
-  # script if invoked directly — run it in a subshell so its exit only fails
-  # the subshell and the `if` sees a plain non-zero status.
-  if ( run_full_pin "$mut_a" "mutant-a" ) >"$mut_a_out" 2>&1; then
-    fail "mutant A (tsan -> linux-clang-debug) did NOT fail the pin — neither the matrix census nor the suffix-rule assertion can distinguish it from the real policy"
+  if ( run_full_pin "$WORKFLOW" "M1" "$m1" ) >"$m1_out" 2>&1; then
+    fail "M1 (tsan -> none in the derive script) did NOT fail the pin — the derive value check cannot distinguish it from the real mapping"
   fi
-  grep -q "suffix rule violated" "$mut_a_out" \
-    || fail "mutant A failed the pin for the WRONG reason: $(cat "$mut_a_out")"
-  echo "RED (expected): mutant A (tsan -> linux-clang-debug) — $(cat "$mut_a_out")"
+  grep -q "derive mismatch for 'linux-clang-tsan' field 'sanitizer'" "$m1_out" \
+    || fail "M1 failed the pin for the WRONG reason: $(cat "$m1_out")"
+  echo "RED (expected): M1 (tsan -> none in the derive script) — $(cat "$m1_out")"
+  MUTANTS_RUN=$((MUTANTS_RUN + 1))
+
+  # M2 (heir of mutant D): delete linux-gcc-release from the script's case. Must
+  # fail the EXHAUSTIVENESS check, not merely a value check — the per-preset
+  # value assertions validate only whatever arms remain, which is exactly how a
+  # subset check misses a deletion.
+  local m2="$mut_dir/derive-m2.sh"
+  local m2_out="$mut_dir/m2_out"
+  python3 - "$DERIVE" "$m2" <<'PYEOF2'
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "  linux-clang-debug|linux-clang-release|linux-gcc-release)\n"
+new = "  linux-clang-debug|linux-clang-release)\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
+PYEOF2
+  if cmp -s "$DERIVE" "$m2"; then
+    fail "M2: python literal-replace produced no change — mutant not applied"
+  fi
+  if ( run_full_pin "$WORKFLOW" "M2" "$m2" ) >"$m2_out" 2>&1; then
+    fail "M2 (linux-gcc-release dropped from the derive case) did NOT fail the pin — the exhaustiveness check cannot see a deleted arm"
+  fi
+  grep -q "not exhaustive over the matrix" "$m2_out" \
+    || fail "M2 failed the pin for the WRONG reason (it must be the EXHAUSTIVENESS message, not a value mismatch): $(cat "$m2_out")"
+  echo "RED (expected): M2 (linux-gcc-release dropped from the derive case) — $(cat "$m2_out")"
+  MUTANTS_RUN=$((MUTANTS_RUN + 1))
+
+  # M3: ubsan_standalone -> ubsan. The ONE non-identity row in the table, and
+  # therefore the one a future edit "normalises" away. libclang_rt.ubsan.* does
+  # not exist; the leg would then LD_PRELOAD nothing.
+  local m3="$mut_dir/derive-m3.sh"
+  local m3_out="$mut_dir/m3_out"
+  python3 - "$DERIVE" "$m3" <<'PYEOF2'
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "    RT_BASE=ubsan_standalone\n"
+new = "    RT_BASE=ubsan\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
+PYEOF2
+  if cmp -s "$DERIVE" "$m3"; then
+    fail "M3: python literal-replace produced no change — mutant not applied"
+  fi
+  if ( run_full_pin "$WORKFLOW" "M3" "$m3" ) >"$m3_out" 2>&1; then
+    fail "M3 (ubsan_standalone -> ubsan) did NOT fail the pin"
+  fi
+  grep -q "derive mismatch for 'linux-clang-ubsan' field 'rt_base'" "$m3_out" \
+    || fail "M3 failed the pin for the WRONG reason: $(cat "$m3_out")"
+  echo "RED (expected): M3 (ubsan_standalone -> ubsan) — $(cat "$m3_out")"
+  MUTANTS_RUN=$((MUTANTS_RUN + 1))
 
   # Mutant B (kills assertion 4's target): un-anchor PY_RE back to the bare
   # `conan/profiles/` prefix this round's fix removed.
@@ -334,123 +433,146 @@ PYEOF
   grep -q "PY_RE against" "$mut_b_out" \
     || fail "mutant B failed the pin for the WRONG reason: $(cat "$mut_b_out")"
   echo "RED (expected): mutant B (un-anchored PY_RE) — $(cat "$mut_b_out")"
+  MUTANTS_RUN=$((MUTANTS_RUN + 1))
 
-  # Mutant C1 (kills B1): dead interpolation on the restore step only.
-  # `: "${{ matrix.conan_profile }}"` is a no-op reference to the matrix
-  # expression, and the actual profile used falls back to a hard-coded
-  # `debug` because `SANITIZER` is set nowhere in the workflow.
-  local mut_c1="$mut_dir/tier1-mutant-c1.yml"
-  local mut_c1_out="$mut_dir/mutant_c1_out"
-  python3 - "$WORKFLOW" "$mut_c1" <<'PYEOF'
+  # ── M4-M8 mutate THE WORKFLOW ──────────────────────────────────────────
+
+  # M4: drop one name from tier1-required's needs:. ⚠️ THIS MUTANT DID NOT EXIST
+  # BEFORE #254. Assertion 5 shipped in #251 with no witness, so it had never
+  # been proven RED — and #254 re-bases it from eight names to seven. Carrying a
+  # never-tested assertion forward under a new number is how an untested check
+  # acquires false credibility, so the witness lands with the re-base.
+  #
+  # `coverage` is the target rather than a python job precisely because the
+  # census is about the SET, not about python.
+  local m4="$mut_dir/tier1-m4.yml"
+  local m4_out="$mut_dir/m4_out"
+  python3 - "$WORKFLOW" "$m4" <<'PYEOF2'
 import sys
 src, dst = sys.argv[1], sys.argv[2]
 t = open(src).read()
-old_restore = "        run: ci/restore-conan-cache.sh ${{ matrix.conan_profile }}\n"
-new_restore = ('        run: |\n'
-               '          : "${{ matrix.conan_profile }}"\n'
-               '          PROFILE=linux-clang-"${SANITIZER:-debug}"\n'
-               '          ci/restore-conan-cache.sh "$PROFILE"\n')
-assert t.count(old_restore) == 1, t.count(old_restore)
-t = t.replace(old_restore, new_restore)
-open(dst, "w").write(t)
-PYEOF
-  if cmp -s "$WORKFLOW" "$mut_c1"; then
-    fail "mutant C1: python literal-replace produced no change — mutant not applied"
-  fi
-  if ( run_full_pin "$mut_c1" "mutant-c1" ) >"$mut_c1_out" 2>&1; then
-    fail "mutant C1 (dead interpolation, restore step) did NOT fail the pin — the step-parameterisation assertion cannot distinguish it from the real policy"
-  fi
-  grep -q "is not exactly the parameterised call" "$mut_c1_out" \
-    || fail "mutant C1 failed the pin for the WRONG reason: $(cat "$mut_c1_out")"
-  echo "RED (expected): mutant C1 (dead interpolation, restore step) — $(cat "$mut_c1_out")"
-
-  # Mutant C2 (kills B2): dead interpolation on the install step only.
-  local mut_c2="$mut_dir/tier1-mutant-c2.yml"
-  local mut_c2_out="$mut_dir/mutant_c2_out"
-  python3 - "$WORKFLOW" "$mut_c2" <<'PYEOF'
-import sys
-src, dst = sys.argv[1], sys.argv[2]
-t = open(src).read()
-old_inst = ("          conan install . \\\n"
-            "            -pr conan/profiles/${{ matrix.conan_profile }} \\\n")
-new_inst = ('          : "${{ matrix.conan_profile }}"\n'
-            '          PROFILE=linux-clang-"${SANITIZER:-debug}"\n'
-            "          conan install . \\\n"
-            '            -pr conan/profiles/"$PROFILE" \\\n')
-assert t.count(old_inst) == 1, t.count(old_inst)
-open(dst, "w").write(t.replace(old_inst, new_inst))
-PYEOF
-  if cmp -s "$WORKFLOW" "$mut_c2"; then
-    fail "mutant C2: python literal-replace produced no change — mutant not applied"
-  fi
-  if ( run_full_pin "$mut_c2" "mutant-c2" ) >"$mut_c2_out" 2>&1; then
-    fail "mutant C2 (dead interpolation, install step) did NOT fail the pin — the step-parameterisation assertion cannot distinguish it from the real policy"
-  fi
-  grep -q "0 parameterised-literal" "$mut_c2_out" \
-    || fail "mutant C2 failed the pin for the WRONG reason: $(cat "$mut_c2_out")"
-  echo "RED (expected): mutant C2 (dead interpolation, install step) — $(cat "$mut_c2_out")"
-
-  # Mutant D (kills the matrix exact-set census, gate-b/r2 finding 1): delete
-  # the asan `include` entry entirely. The per-entry suffix rule and
-  # profile-file existence checks (assertions 1+2) validate only whatever
-  # entries remain, so this survived until the exact-set census was added.
-  local mut_d="$mut_dir/tier1-mutant-d.yml"
-  local mut_d_out="$mut_dir/mutant_d_out"
-  python3 - "$WORKFLOW" "$mut_d" <<'PYEOF'
-import sys
-src, dst = sys.argv[1], sys.argv[2]
-t = open(src).read()
-old = ('          - sanitizer: asan\n'
-       '            bdir: linux-clang-asan-py\n'
-       '            conan_profile: linux-clang-asan\n'
-       '            cfg_extra: "-DFIXPP_ENABLE_ASAN=ON -DBUILD_SHARED_LIBS=ON -DFIXPP_PYTHON_SANITIZER=asan"\n'
-       '            san_opts: "ASAN_OPTIONS=detect_leaks=0:halt_on_error=1"\n')
-assert t.count(old) == 1, t.count(old)
-open(dst, "w").write(t.replace(old, ""))
-PYEOF
-  if cmp -s "$WORKFLOW" "$mut_d"; then
-    fail "mutant D: python literal-replace produced no change — mutant not applied"
-  fi
-  if ( run_full_pin "$mut_d" "mutant-d" ) >"$mut_d_out" 2>&1; then
-    fail "mutant D (deleted asan matrix entry) did NOT fail the pin — the matrix exact-set census cannot distinguish it from the real policy"
-  fi
-  grep -q "matrix set" "$mut_d_out" \
-    || fail "mutant D failed the pin for the WRONG reason: $(cat "$mut_d_out")"
-  echo "RED (expected): mutant D (deleted asan matrix entry) — $(cat "$mut_d_out")"
-
-  # Mutant E (gate-b/r2 finding 2, second surviving shape found while writing
-  # the fix): a second, hard-coded `-pr` appended after the parameterised
-  # one. The parameterised literal is still present, so a bare `grep -qF`
-  # for it (Codex's original prescription) would pass; Conan honours the
-  # LAST `-pr` on the command line, so this silently reverts to
-  # linux-clang-debug the same way mutant C2 does, just through a different
-  # surviving shape. The counted-occurrence form of B2 is what catches it.
-  local mut_e="$mut_dir/tier1-mutant-e.yml"
-  local mut_e_out="$mut_dir/mutant_e_out"
-  python3 - "$WORKFLOW" "$mut_e" <<'PYEOF'
-import sys
-src, dst = sys.argv[1], sys.argv[2]
-t = open(src).read()
-old = ("          conan install . \\\n"
-       "            -pr conan/profiles/${{ matrix.conan_profile }} \\\n")
-new = ("          conan install . \\\n"
-       "            -pr conan/profiles/${{ matrix.conan_profile }} \\\n"
-       "            -pr conan/profiles/linux-clang-debug \\\n")
+old = "    needs: [gate-precheck, linux, coverage, check-layers, ci-script-pins,\n"
+new = "    needs: [gate-precheck, linux, check-layers, ci-script-pins,\n"
 assert t.count(old) == 1, t.count(old)
 open(dst, "w").write(t.replace(old, new))
-PYEOF
-  if cmp -s "$WORKFLOW" "$mut_e"; then
-    fail "mutant E: python literal-replace produced no change — mutant not applied"
+PYEOF2
+  if cmp -s "$WORKFLOW" "$m4"; then
+    fail "M4: python literal-replace produced no change — mutant not applied"
   fi
-  if ( run_full_pin "$mut_e" "mutant-e" ) >"$mut_e_out" 2>&1; then
-    fail "mutant E (second hard-coded -pr appended) did NOT fail the pin — the step-parameterisation assertion cannot distinguish it from the real policy"
+  if ( run_full_pin "$m4" "M4" ) >"$m4_out" 2>&1; then
+    fail "M4 (coverage dropped from tier1-required's needs) did NOT fail the pin — the needs census has never been proven RED and cannot be trusted"
   fi
-  grep -q "occurrence(s), expected exactly" "$mut_e_out" \
-    || fail "mutant E failed the pin for the WRONG reason: $(cat "$mut_e_out")"
-  echo "RED (expected): mutant E (second hard-coded -pr appended) — $(cat "$mut_e_out")"
+  grep -q "tier1-required needs set" "$m4_out" \
+    || fail "M4 failed the pin for the WRONG reason: $(cat "$m4_out")"
+  echo "RED (expected): M4 (coverage dropped from tier1-required needs) — $(cat "$m4_out")"
+  MUTANTS_RUN=$((MUTANTS_RUN + 1))
+
+  # M5: remove -DFIXPP_INSTALL_PYTHON=OFF from the Configure line. The payload
+  # then enters packages-linux-{clang,gcc}-release and falsifies L-056-4 — and
+  # note that ctest would stay GREEN, because the ON-side witness registers
+  # instead of the OFF-side one.
+  local m5="$mut_dir/tier1-m5.yml"
+  local m5_out="$mut_dir/m5_out"
+  python3 - "$WORKFLOW" "$m5" <<'PYEOF2'
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "          -DFIXPP_INSTALL_PYTHON=OFF\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, ""))
+PYEOF2
+  if cmp -s "$WORKFLOW" "$m5"; then
+    fail "M5: python literal-replace produced no change — mutant not applied"
+  fi
+  if ( run_full_pin "$m5" "M5" ) >"$m5_out" 2>&1; then
+    fail "M5 (FIXPP_INSTALL_PYTHON=OFF removed) did NOT fail the pin"
+  fi
+  grep -q "FIXPP_INSTALL_PYTHON=OFF" "$m5_out" \
+    || fail "M5 failed the pin for the WRONG reason: $(cat "$m5_out")"
+  echo "RED (expected): M5 (FIXPP_INSTALL_PYTHON=OFF removed) — $(cat "$m5_out")"
+  MUTANTS_RUN=$((MUTANTS_RUN + 1))
+
+  # M6: the derive step stops invoking the script. The script is still tested
+  # and still correct — and never runs. Dead call site.
+  local m6="$mut_dir/tier1-m6.yml"
+  local m6_out="$mut_dir/m6_out"
+  python3 - "$WORKFLOW" "$m6" <<'PYEOF2'
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = '        run: ci/derive-python-sanitizer.sh "${{ matrix.preset }}" >> "$GITHUB_OUTPUT"\n'
+new = '        run: echo "sanitizer=none" >> "$GITHUB_OUTPUT"\n'
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
+PYEOF2
+  if cmp -s "$WORKFLOW" "$m6"; then
+    fail "M6: python literal-replace produced no change — mutant not applied"
+  fi
+  if ( run_full_pin "$m6" "M6" ) >"$m6_out" 2>&1; then
+    fail "M6 (derive step no longer invokes the script) did NOT fail the pin — a tested script nothing calls is the dead-call-site shape"
+  fi
+  grep -q "dead call site" "$m6_out" \
+    || fail "M6 failed the pin for the WRONG reason: $(cat "$m6_out")"
+  echo "RED (expected): M6 (derive step no longer invokes the script) — $(cat "$m6_out")"
+  MUTANTS_RUN=$((MUTANTS_RUN + 1))
+
+  # M7 (R2-P2-3): san_opts goes unconsumed. The sanitizer legs then run pytest
+  # WITHOUT halt_on_error=1 — UBSan reports, pytest exits 0, the leg is green.
+  # This is the output whose death is hardest to see, which is why it gets its
+  # own mutant rather than riding on M1's.
+  local m7="$mut_dir/tier1-m7.yml"
+  local m7_out="$mut_dir/m7_out"
+  python3 - "$WORKFLOW" "$m7" <<'PYEOF2'
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = '          env ${{ steps.pysan.outputs.san_opts }} LD_PRELOAD="$RT" \\\n'
+new = '          env LD_PRELOAD="$RT" \\\n'
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
+PYEOF2
+  if cmp -s "$WORKFLOW" "$m7"; then
+    fail "M7: python literal-replace produced no change — mutant not applied"
+  fi
+  if ( run_full_pin "$m7" "M7" ) >"$m7_out" 2>&1; then
+    fail "M7 (san_opts unconsumed) did NOT fail the pin — a sanitizer leg without halt_on_error=1 reports green after a real finding"
+  fi
+  grep -q "steps.pysan.outputs.san_opts" "$m7_out" \
+    || fail "M7 failed the pin for the WRONG reason: $(cat "$m7_out")"
+  echo "RED (expected): M7 (san_opts unconsumed) — $(cat "$m7_out")"
+  MUTANTS_RUN=$((MUTANTS_RUN + 1))
+
+  # M8 (R2-P2-3): rt_base goes unconsumed, re-derived inline instead. The
+  # shape the extraction exists to prevent — the mapping spelled a second time.
+  local m8="$mut_dir/tier1-m8.yml"
+  local m8_out="$mut_dir/m8_out"
+  python3 - "$WORKFLOW" "$m8" <<'PYEOF2'
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = '          RT_BASE="${{ steps.pysan.outputs.rt_base }}"\n'
+new = ('          RT_BASE="${{ steps.pysan.outputs.sanitizer }}"\n'
+       '          [ "$RT_BASE" = "ubsan" ] && RT_BASE="ubsan_standalone"\n')
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
+PYEOF2
+  if cmp -s "$WORKFLOW" "$m8"; then
+    fail "M8: python literal-replace produced no change — mutant not applied"
+  fi
+  if ( run_full_pin "$m8" "M8" ) >"$m8_out" 2>&1; then
+    fail "M8 (rt_base unconsumed, re-derived inline) did NOT fail the pin — the mapping is back to being spelled twice"
+  fi
+  grep -q "steps.pysan.outputs.rt_base" "$m8_out" \
+    || fail "M8 failed the pin for the WRONG reason: $(cat "$m8_out")"
+  echo "RED (expected): M8 (rt_base unconsumed, re-derived inline) — $(cat "$m8_out")"
+  MUTANTS_RUN=$((MUTANTS_RUN + 1))
 
 }
 
 run_mutant_checks
 
-echo "PASS: ci/test-tier1-python-policy.sh — all six mutants proven RED, real workflow proven GREEN"
+if [ "$MUTANTS_RUN" != "$MUTANTS_DECLARED" ]; then
+  fail "mutant count mismatch: $MUTANTS_RUN ran, $MUTANTS_DECLARED declared. A mutant was added, removed or short-circuited without updating MUTANTS_DECLARED — the summary below would otherwise claim coverage this run did not have."
+fi
+
+echo "PASS: ci/test-tier1-python-policy.sh — $MUTANTS_RUN/$MUTANTS_DECLARED mutants proven RED, real workflow proven GREEN"

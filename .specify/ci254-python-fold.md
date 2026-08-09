@@ -358,6 +358,14 @@ leave the witness silently not running and the §4.5.3 grep (the instrument R2-P
 count), not merely that ctest was green; `tier1.yml:569–581`'s `expected=1` on the consumer witness is
 the precedent. `feedback_ci_gate_observes_not_asserts_witness_skips_into_green`.
 
+**Named residual, so Gate B does not find it first.** The denylist matches on the **basename**, with
+`^_fixpp` covering both the module and the `_fixpp_data` directory. The four bundled XMLs are caught
+*via that directory*, not by name — deliberately, because `FIX42.xml`/`FIX44.xml`/`FIX50SP2.xml`/
+`FIXT11.xml` also exist in the C++ install and in `dictionaries/`, so a name match on them would
+false-positive. **Consequence:** a future refactor that flattened the XMLs to the install-prefix root
+*without* the `_fixpp_data` directory would slip past. Cell 2 of E-35 confirms the directory hit
+fires today. Not worth a content-hash gate now; recorded rather than left to be discovered.
+
 Registration is `UNIX`-only (CMake does not support `DESTDIR` on Windows) and skipped under `SKBUILD`
 (the wheel build has no test tree, and R2-P2-2's question is specifically about the **non-**`SKBUILD`
 path `python-wheel-test` cannot see).

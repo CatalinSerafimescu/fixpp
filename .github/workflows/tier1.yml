@@ -121,27 +121,38 @@ jobs:
           set -o pipefail
 
           # ── Python-relevance path-filter (computed for ALL events) ──
-          # The python jobs (python-bindings + python-wheel-{build,test}) gate on
-          # `proceed` (both gates satisfied) AND this relevance flag: on a PR they
-          # run only once the gates clear, and then only when the diff touches the
-          # binding/C-ABI surface — so a pure-C++ PR or a pre-gate PR skips the
-          # ~7-min container wheel build + the sanitizer legs. A merge to main
-          # (push), workflow_dispatch, and release build them UNCONDITIONALLY
-          # (full build on main; PRs stay path-gated).
-          # `.github/workflows/tier1.yml` is in the set because the python jobs'
-          # BUILD RECIPE lives here — build dir, Conan profile, ccache wiring
-          # (#244). A PR editing only this file used to leave every python job
-          # SKIPPED, so a change to how they build shipped with zero CI signal
-          # and was first exercised post-merge on push:main. The added cost is
-          # bounded: these jobs also require `proceed` (both gate labels), which
-          # in this repo's flow lands once, immediately before merge.
-          # `conan/profiles/linux-clang-{debug,asan,tsan,ubsan}` and `conanfile.py`
-          # are here for the same reason `tier1.yml` is (#247): a job's BUILD
-          # RECIPE must sit inside its own relevance filter, or a change to how
-          # it builds gets no PR-side signal and is first exercised post-merge.
-          # #243 makes that concrete — each python leg now names a DIFFERENT
-          # profile, so `conan/profiles/linux-clang-tsan` decides what the tsan
-          # leg links.
+          # ⚠️ AFTER #254 THIS FLAG GATES THE WHEEL JOBS ALONE. It used to gate
+          # `python-bindings` too; that job was folded into the six `linux`
+          # matrix legs and deleted, and `linux` has NO python_touched gate —
+          # only `proceed`. So the bindings are now built and pytest-ed on every
+          # non-release run, including pure-C++ PRs. That is a deliberate trade:
+          # the binding signal goes from CONDITIONALLY required to
+          # UNCONDITIONALLY required, and it is what pays for the merge.
+          # This collapse is the split #253 asks for, arrived at by deletion.
+          #
+          # python-wheel-{build,test} gate on `proceed` (both gates satisfied)
+          # AND this relevance flag: on a PR they run only once the gates clear,
+          # and then only when the diff touches the binding/C-ABI surface — so a
+          # pure-C++ PR or a pre-gate PR skips the ~7-min container wheel build.
+          # A merge to main (push), workflow_dispatch, and release build them
+          # UNCONDITIONALLY (full build on main; PRs stay path-gated).
+          # `.github/workflows/tier1.yml` is in the set because the wheel jobs'
+          # BUILD RECIPE lives here. A PR editing only this file used to leave
+          # every python job SKIPPED, so a change to how they build shipped with
+          # zero CI signal and was first exercised post-merge on push:main. The
+          # added cost is bounded: these jobs also require `proceed` (both gate
+          # labels), which in this repo's flow lands once, immediately before
+          # merge.
+          #
+          # ⚠️ `conan/profiles/linux-clang-{debug,asan,tsan,ubsan}` and
+          # `conanfile.py` are KEPT IN THE LITERAL, but their #243/#247
+          # justification no longer applies: they were here because each
+          # python-bindings leg named a DIFFERENT profile, so
+          # `conan/profiles/linux-clang-tsan` decided what the tsan leg linked.
+          # Those legs are gone, and the `linux` matrix that replaced them does
+          # not read this flag at all. Narrowing the literal is #253's, not
+          # #254's (NG-4) — recorded here so the stale warrant is visible rather
+          # than silently inherited.
           #
           # ANCHORED to exactly those four profiles, not the bare
           # `conan/profiles/` prefix: the four ARE the python legs' build
@@ -331,11 +342,25 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      # The Debug+sanitizer legs (asan/ubsan/tsan) build ~1748 instrumented
-      # executables and sit at the runner's ~14 GB free-disk ceiling. UBSan
-      # (slightly larger binaries from its type-check metadata) tipped over and
-      # failed `ld: final link failed: No space left on device`. Reclaim the
-      # preinstalled SDKs we don't use (~30 GB) to restore margin for every leg.
+      # The Debug+sanitizer legs (asan/ubsan/tsan) are the disk-heaviest: 3627
+      # ninja edges (1460 compiles + 1460 C++20 module scans + 330 links), and a
+      # 33 GiB tree of which bin/'s 330 instrumented executables are 18 G.
+      #
+      # ⚠️ Two numbers here were wrong and are corrected together (#254). The old
+      # text said "~1748 instrumented executables": 1748 was the ninja EDGE count
+      # of the day, not an executable count — run 28184395001 died at edge
+      # 1651/1748 with `ld: final link failed: No space left on device`, which is
+      # why UBSan (slightly larger binaries from its type-check metadata) tipped
+      # over first. A duplicate of the same comment said ~1987. Neither was ever
+      # a count of executables; there are 330.
+      #
+      # ⚠️ The "~14 GB free-disk ceiling" was ACCURATE WHEN WRITTEN and is kept as
+      # history, not deleted as an error. Measured 2026-08-08 on plain
+      # ubuntu-24.04: 145 G disk, 87 G free BEFORE this step, 114 G after. So the
+      # ceiling moved; the reclaim is what moves it. KEEP THIS STEP — the margin
+      # IS the reclaim, and #254 folds the Python bindings onto these same legs
+      # (+~126 MiB, of which lib/_fixpp.so is 120.83 MiB) on top of that tree.
+      # The job-end `Measure disk` step below is the standing instrument.
       - name: Free up disk space
         uses: jlumbroso/free-disk-space@main
         with:
@@ -370,9 +395,20 @@ jobs:
           sudo ln -sf /usr/bin/clang-$CLANG_VER   /usr/bin/clang
           sudo ln -sf /usr/bin/clang++-$CLANG_VER /usr/bin/clang++
           clang++ --version
+          # swig + python3-dev (#254): every leg now builds the Python bindings,
+          # so `find_package(SWIG 4.2 REQUIRED)` (bindings/python/CMakeLists.txt)
+          # must resolve here. Both are carried over VERBATIM from the deleted
+          # `python-bindings` job's apt line — that is the configuration CI has
+          # proven green, and python3-dev additionally decides which
+          # Python3_SITEARCH branch fires (bindings/python/CMakeLists.txt).
+          # Dropping python3-dev on the theory that actions/setup-python's headers
+          # suffice is an UNTESTED narrowing: no CI run and no local build can
+          # discriminate it, because all of them had the system headers present.
           sudo apt-get install -y --no-install-recommends \
             gcc-13 g++-13 \
             ninja-build \
+            swig \
+            python3-dev \
             python3-pip \
             pipx
 
@@ -386,7 +422,11 @@ jobs:
           conan --version
           # pytest is required by the decimal_compare_oracle CTest entry
           # (tests/oracle/decimal_compare_oracle_test.py) which is registered
-          # in every preset, not just the python-bindings build.
+          # in every preset. ⚠️ This used to read "not just the python-bindings
+          # build" — #254 folded that job into these six legs, so the contrast
+          # it drew no longer exists and the sentence inverted. pytest is now
+          # needed here for TWO independent reasons: that CTest entry, and the
+          # bindings' own test suite (bindings/python/tests/).
           # pyyaml is required by the interop_cell_results_schema_check CTest
           # entry (tests/interop/cell_results_schema_check_test.py — 016 T028).
           pip install pytest pyyaml
@@ -517,15 +557,85 @@ jobs:
           echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u "${{ github.actor }}" --password-stdin
           ci/seed-conan-cache.sh ${{ matrix.preset }}
 
+      # ── #254 — the Python sanitizer identity, derived ONCE from the preset ───
+      # The deleted `python-bindings` job spelled the sanitizer five times per
+      # leg (preset name, FIXPP_ENABLE_<SAN>, build-dir suffix,
+      # FIXPP_PYTHON_SANITIZER, san_opts). Two collapse for free — the preset
+      # already carries FIXPP_ENABLE_<SAN> and BUILD_SHARED_LIBS
+      # (CMakePresets.json), which is why neither is passed below. The other
+      # three come from here, and are consumed by expression only.
+      #
+      # ⚠️ Do NOT replace this with `contains(matrix.preset, 'san')` in the `if:`
+      # conditions below. That is the same mapping spelled a second time under
+      # another name, and it also matches `asan`/`ubsan` inside a future preset
+      # name. The script is fail-closed on an unknown preset (::error:: + exit 1)
+      # precisely so a new sanitizer leg cannot silently default to `none` and
+      # build an UNINSTRUMENTED _fixpp.so that reports green — the #251 class.
+      # Pinned by ci/test-tier1-python-policy.sh over this job's exact preset set.
+      - name: Derive the python sanitizer identity from the preset
+        id: pysan
+        run: ci/derive-python-sanitizer.sh "${{ matrix.preset }}" >> "$GITHUB_OUTPUT"
+
       - name: Configure
         # FIXPP_ARTIFACT_DIR is a CACHE variable baked into the fixpp-package
         # target at CONFIGURE time — it is NOT read from the environment, so it
         # must be set here rather than on the build step. Its in-repo default is
         # a local WSL mount; on a runner it has to be inside the workspace for
         # upload-artifact to reach it. Harmless on the non-packaging lanes.
+        #
+        # ⚠️ FIXPP_INSTALL_PYTHON=OFF is NOT optional and NOT symmetry with the
+        # line above it (#254). FIXPP_BUILD_PYTHON=ON fires four install() rules
+        # (bindings/python/CMakeLists.txt). Two of these legs
+        # (linux-{clang,gcc}-release) build `fixpp-package`, and the consumer
+        # install-witness stage-installs on ALL SIX — so without this flag the
+        # Python payload enters packages-linux-{clang,gcc}-release and falsifies
+        # L-056-4 ("the C++ consumer deliverable contains no Python"), shipping
+        # by accident exactly what was descoped from #254. Whether the packages
+        # SHOULD carry Python is #257's call. The option defaults ON so feature
+        # 056's LAY-1 in-tree `cmake --install` keeps working everywhere else;
+        # only these six legs turn it off.
+        #
+        # No -B and no CMAKE_TOOLCHAIN_FILE override: the preset's binaryDir is
+        # build/<preset> and its CMAKE_TOOLCHAIN_FILE already points at
+        # build/<preset>/conan_toolchain.cmake, which is where `conan install
+        # -of build/<preset>` above puts it. Both overrides existed only to
+        # service the deleted job's `-py` build dirs.
         run: >
           cmake --preset ${{ matrix.preset }}
           -DFIXPP_ARTIFACT_DIR=${{ github.workspace }}/_artifacts
+          -DFIXPP_BUILD_PYTHON=ON
+          -DFIXPP_INSTALL_PYTHON=OFF
+          -DFIXPP_PYTHON_SANITIZER=${{ steps.pysan.outputs.sanitizer }}
+
+      # ── #254 / L-056-4 — the OFF side, asserted at Configure time ────────────
+      # A cheap STRUCTURAL pin on the generated install script, run before
+      # anything is built. It is deliberately paired with, not a substitute for,
+      # the `fixpp::python::install-absent-witness` ctest below: this one reads
+      # the generated rules, that one performs a real DESTDIR install and
+      # inspects what landed. Gate A round 2 (R2-P2-1) was right that the grep
+      # alone certifies less than its contract — it would pass if the payload
+      # moved to install(CODE) or to another directory's install script.
+      #
+      # The instrument is proven on BOTH sides (design doc E-32/E-34): 4
+      # directives with the rules unguarded, 0 with FIXPP_INSTALL_PYTHON=OFF.
+      # The existence check comes FIRST so a 0 can never come from the file
+      # having silently stopped being generated.
+      - name: Assert the Python install rules are OFF (#254 / L-056-4)
+        run: |
+          set -euo pipefail
+          f="build/${{ matrix.preset }}/bindings/python/cmake_install.cmake"
+          if [ ! -f "$f" ]; then
+            echo "::error::$f absent — FIXPP_BUILD_PYTHON=ON should have generated it."
+            exit 1
+          fi
+          n=$(grep -c '^[[:space:]]*file(INSTALL' "$f" || true)
+          echo "python install directives in $f: $n (expected 0)"
+          if [ "$n" != "0" ]; then
+            echo "::error::FIXPP_INSTALL_PYTHON=OFF but $n install directive(s) remain."
+            echo "::error::These would enter fixpp-package and the packages-linux-* artifacts, falsifying L-056-4."
+            exit 1
+          fi
+          df -h "$GITHUB_WORKSPACE" | tail -1
 
       # 069-v44-all-families T017 (FR-008): this Tier-1 matrix is the CI
       # invariant that keeps >=1 preset continuously verifying the FULL v44
@@ -545,7 +655,12 @@ jobs:
           echo "OK: FIXPP_CODEGEN_V44_FAMILIES=all (full v44 coverage verified) on ${{ matrix.preset }}"
 
       - name: Build
-        run: cmake --build --preset ${{ matrix.preset }}
+        run: |
+          cmake --build --preset ${{ matrix.preset }}
+          # #254 disk trend point 3 of 4. One line, no new step; the operative
+          # high-water mark is the job-end pair, because the consumer witness,
+          # the packaging tier and `fixpp-package` all land AFTER this.
+          df -h "$GITHUB_WORKSPACE" | tail -1
 
       # 087 T024 / FR-014 / SC-008 — the LAST GATE-CLOSABLE VACUITY PATH.
       #
@@ -577,6 +692,38 @@ jobs:
             echo "::error::consumer label registered ${n:-0} tests, expected ${expected}."
             echo "::error::The 086/087 installed-interface gate is not registered on this lane."
             echo "::error::Refusing to report this lane green on an unrun gate."
+            exit 1
+          fi
+
+      # ── #254 / R2-P2-1 — the same vacuity gate, for the install witness ──────
+      #
+      # `fixpp::python::install-absent-witness` is the SEMANTIC half of the
+      # L-056-4 guard: it performs a real DESTDIR `cmake --install` and rejects
+      # the Python payload anywhere in the staged tree. It registers only when
+      # FIXPP_INSTALL_PYTHON is OFF (bindings/python/CMakeLists.txt) — which is
+      # to say, only because the Configure step above passes that flag.
+      #
+      # ⚠️ THAT IS EXACTLY WHY THIS STEP EXISTS. Drop the flag and the ON-side
+      # `install-present-witness` registers instead: ctest stays green, the
+      # payload silently enters packages-linux-*-release, and the only survivor
+      # is the Configure-time grep that R2-P2-1 judged INSUFFICIENT. Asserting
+      # the test RAN — not merely that ctest was green — is what closes that.
+      # Modelled on the consumer assertion above; same `ctest -L` vacuity trap.
+      #
+      # The name is asserted, not just the count: `-L python` matches exactly
+      # one test in either configuration, so a count alone cannot tell the OFF
+      # witness from the ON one.
+      - name: Assert the Python install witness is the OFF one (#254 / L-056-4)
+        run: |
+          set -euo pipefail
+          names=$(ctest --preset ${{ matrix.preset }} -L python -N \
+                    | sed -n 's/^ *Test *#[0-9]*: //p')
+          echo "registered python install witnesses: ${names:-<none>}"
+          if [ "$names" != "fixpp::python::install-absent-witness" ]; then
+            echo "::error::expected exactly 'fixpp::python::install-absent-witness', got '${names:-<none>}'."
+            echo "::error::Either -DFIXPP_INSTALL_PYTHON=OFF is missing from Configure (in which case the"
+            echo "::error::ON-side witness registered and the Python payload WILL enter fixpp-package), or the"
+            echo "::error::witness stopped being registered at all. Refusing to report this lane green either way."
             exit 1
           fi
 
@@ -779,6 +926,72 @@ jobs:
         if: matrix.preset == 'linux-gcc-release'
         run: ctest --preset ${{ matrix.preset }} --output-on-failure --no-tests=error
 
+      # ── #254 — the Python binding tests, folded in from `python-bindings` ────
+      #
+      # PLACEMENT is deliberate: after both ctest steps and before the packaging
+      # block. (a) the C++ signal is produced before any python step can stop the
+      # job, so a python failure never preempts it; (b) a red python leg then
+      # uploads no packages, which matches the existing intent below — "runs only
+      # after a green test step, so a red lane uploads nothing".
+      #
+      # TWO STEPS, NOT ONE, and `continue-on-error` off on both. Merging the jobs
+      # costs signal granularity (R2): a pytest flake now reds a required C++ leg
+      # on a PR that touched no Python. Separately-named steps do not fix the
+      # blast radius — they buy ATTRIBUTABILITY, so the failing step is
+      # identifiable from the checks UI without opening the job log. That trade
+      # was accepted knowingly.
+      #
+      # The two `if:` guards are mutually exclusive and jointly exhaustive over
+      # the six legs by construction of ci/derive-python-sanitizer.sh's table.
+      - name: Run Python tests
+        if: steps.pysan.outputs.sanitizer == 'none'
+        env:
+          PYTHONPATH: "${{ github.workspace }}/build/${{ matrix.preset }}/lib"
+        run: pytest bindings/python/tests/ -v
+
+      # asan / ubsan / tsan legs: the trampoline/worker path under the sanitizer
+      # (FR-013/FR-014 UAF, FR-007 GIL race). Runs the round-trip PLUS the
+      # PY-002/PY-003 tests that exercise the worker path — the GIL-release GREEN
+      # leg (test_gil_release_canary.py, FR-013/SC-003) and the raising-callback
+      # watchdog (test_callback_raise_watchdog.py, FR-011/SC-004) — so the
+      # trampoline stays sanitized every run. The canary RED leg
+      # (FIXPP_PY_GIL_RELEASE_CANARY) is NOT built here; the deliberate-hang build
+      # is local-only.
+      #
+      # CPython is not instrumented, so the runtime is LD_PRELOADed: subprocess
+      # children of the watchdog/canary tests inherit LD_PRELOAD and the *SAN
+      # options through the environment. Both clang naming schemes are tried, and
+      # ubsan's standalone runtime basename comes from the derive script — it is
+      # `ubsan_standalone`, not `ubsan`, the one non-identity row in the table.
+      #
+      # ⚠️ THE SANITIZER OPTIONS STAY PER-INVOCATION. Do NOT lift san_opts to the
+      # job's `env:` block during a future tidy-up: this job also runs the C++
+      # ctest suite, and a job-level *SAN_OPTIONS would silently change THAT run
+      # too. Nothing set for pytest reaches ctest today, and that is load-bearing.
+      #
+      # ⚠️ The resolved runtime is asserted to EXIST before pytest. A missing
+      # LD_PRELOAD path is silently ignored by the loader on some configurations,
+      # and the suite would then run UNINSTRUMENTED and report green — the #251
+      # class again (R2-P2-3).
+      - name: Run Python tests under sanitizer
+        if: steps.pysan.outputs.sanitizer != 'none'
+        env:
+          PYTHONPATH: "${{ github.workspace }}/build/${{ matrix.preset }}/lib"
+        run: |
+          set -euo pipefail
+          RT_BASE="${{ steps.pysan.outputs.rt_base }}"
+          RT=$(clang -print-file-name=libclang_rt.${RT_BASE}-x86_64.so)
+          [ -f "$RT" ] || RT="$(clang -print-runtime-dir)/libclang_rt.${RT_BASE}.so"
+          echo "${{ steps.pysan.outputs.sanitizer }} runtime: $RT"
+          if [ ! -f "$RT" ]; then
+            echo "::error::libclang_rt.${RT_BASE} not found under either naming scheme."
+            echo "::error::LD_PRELOAD of a missing path is silently ignored — the suite would run"
+            echo "::error::UNINSTRUMENTED and report green. Refusing to run it."
+            exit 1
+          fi
+          env ${{ steps.pysan.outputs.san_opts }} LD_PRELOAD="$RT" \
+            pytest bindings/python/tests/ -v
+
       # ── 084 T065 / FR-026: attach the package artifacts ────────────────────
       # Runs only after a green test step, so a red lane uploads nothing.
       #
@@ -819,6 +1032,46 @@ jobs:
           path: ${{ github.workspace }}/_artifacts/*
           if-no-files-found: error
           retention-days: 14
+
+      # ── #254 — disk at JOB END, points 1-4 complete ──────────────────────────
+      # Points 1-3 are the `Free up disk space` step's own before/after and the
+      # one-liners on Configure and Build. THIS is the operative high-water mark:
+      # the consumer install-witness, the packaging tier's sub-project builds and
+      # `fixpp-package`'s CPack staging all land after the Build step.
+      #
+      # ⚠️ THE SPLIT IS THE POINT. The MEASUREMENT asserts; the REPORTING does
+      # not. An earlier draft put continue-on-error on the whole thing and then
+      # wrote an acceptance criterion saying "a run that reports NOT MEASURED does
+      # not discharge this" — with nothing that fails. That criterion was
+      # self-waiving. A df/du that cannot run now reds the leg; only the cosmetic
+      # summary write is non-fatal.
+      #
+      # NO FLOOR IS ASSERTED, deliberately. Disk exhaustion is already
+      # self-asserting — `ld: final link failed: No space left on device` reds the
+      # Build step, which is how it was found in June. This is a TREND instrument,
+      # not the detector, and there is no measured floor to assert against: any
+      # threshold named here would be invented, and an invented threshold either
+      # never fires or fires spuriously. Re-open if job-end free space ever drops
+      # below ~2x the tree on any leg.
+      - name: Measure disk at job end (#254)
+        if: always()
+        run: |
+          set -euo pipefail
+          P="${{ matrix.preset }}"
+          if [ ! -d "build/$P" ]; then
+            echo "build/$P absent — the job did not reach a configured tree; nothing to measure."
+            exit 0
+          fi
+          df -h "$GITHUB_WORKSPACE" > /tmp/disk.txt || { echo "::error::df failed — instrument unavailable."; exit 1; }
+          du -sh "build/$P" >> /tmp/disk.txt || { echo "::error::du on build/$P failed — instrument unavailable."; exit 1; }
+          du -h "build/$P/lib/_fixpp.so" >> /tmp/disk.txt 2>/dev/null \
+            || echo "_fixpp.so absent (expected only if the build did not reach it)" >> /tmp/disk.txt
+          cat /tmp/disk.txt
+
+      - name: Report disk to the job summary (#254)
+        if: always()
+        continue-on-error: true
+        run: cat /tmp/disk.txt >> "$GITHUB_STEP_SUMMARY"
 
   # ── Coverage job (SOFT — does not fail on threshold; Phase 3) ────────────
   # SOFT GATE: coverage threshold enforcement is disabled until Phase 4 module 1
@@ -898,7 +1151,11 @@ jobs:
           conan --version
           # pytest is required by the decimal_compare_oracle CTest entry
           # (tests/oracle/decimal_compare_oracle_test.py) which is registered
-          # in every preset, not just the python-bindings build.
+          # in every preset. ⚠️ This used to read "not just the python-bindings
+          # build" — #254 folded that job into these six legs, so the contrast
+          # it drew no longer exists and the sentence inverted. pytest is now
+          # needed here for TWO independent reasons: that CTest entry, and the
+          # bindings' own test suite (bindings/python/tests/).
           # pyyaml is required by the interop_cell_results_schema_check CTest
           # entry (tests/interop/cell_results_schema_check_test.py — 016 T028).
           pip install pytest pyyaml
@@ -1016,579 +1273,9 @@ jobs:
           disable_search: true   # prevent auto-discovery of .ddi/.modmap CMake artefacts
           fail_ci_if_error: false  # SOFT: keep consistent with other coverage steps
 
-  # ── Python bindings job ──────────────────────────────────────────────────
-  # Four mutually-exclusive legs (053 / SC-004 / research D-9): the `none` leg
-  # is the meaningful Tier-1 gate (smoke + the e2e round-trip); `asan` catches
-  # the FR-013/FR-014 UAF on the callable-lifetime + borrowed-msg path; `tsan`
-  # covers the FR-007 GIL worker-thread race (with the CPython suppressions file,
-  # since the interpreter itself is not TSan-instrumented); `ubsan` covers signed
-  # overflow / bad casts / misalignment in the trampoline + wrapper + static deps
-  # (retires the W-1 / L-054-2 / 053 D-9 "no UBSan leg" waiver — the whole suite
-  # was proven UBSan-clean locally under clang-22, so no suppressions file is
-  # needed; a real finding on this lane is a real bug). The `ubsan` module links
-  # a SHARED ubsan runtime via rpath (bindings/python/CMakeLists.txt), so import
-  # does not depend on LD_PRELOAD, but the leg preloads it uniformly with the
-  # asan/tsan legs. Each leg is a separate runner, so the "one sanitizer at a
-  # time" build cap holds for free.
-  python-bindings:
-    name: python-bindings (${{ matrix.sanitizer }})
-    runs-on: ubuntu-24.04
-    # Backstop against a hung binding test (e.g. the FR-007 GIL/worker race)
-    # wedging the runner; see the `linux` job's timeout note. 45->60->90
-    # (2026-07-09): the sanitizer legs brushed 45 then 60 cold; matches the
-    # `linux` job's 90 for cold-ccache headroom.
-    timeout-minutes: 180
-    needs: gate-precheck
-    # Gate-then-relevance (release-excluded): like the C++ matrix, the sanitizer
-    # legs run ONLY once both gates are satisfied (`proceed`), and then only when
-    # the binding/C-ABI surface actually changed (`python_touched` narrows within
-    # Tier 1). No gate labels ⇒ skipped. Never on release.
-    if: >-
-      github.event_name != 'release' &&
-      needs.gate-precheck.outputs.proceed == 'true' &&
-      needs.gate-precheck.outputs.python_touched == 'true'
-    # ── ccache (#244 part 1) — `none` LEG ONLY ────────────────────────────────
-    # These two are set job-wide but are read only by the `none` leg, which is
-    # the only one that installs ccache and passes the launcher (see its
-    # matrix.cfg_extra). The other three legs never invoke ccache, so the vars
-    # are inert there.
-    #
-    # CCACHE_COMPILERCHECK=content is NOT optional and NOT a copy-paste: it is
-    # part of the cache-lookup hash. The matrix `linux` job sets it (see its env
-    # block, and the same fail-closed rationale — a re-installed clang can never
-    # serve a stale object). If this leg left it at the default (mtime), every
-    # lookup against that job's entries would miss and the whole change would
-    # measure as "no effect" for a reason unrelated to the build dir.
-    #
-    # Corollary worth stating: `content` hashes the compiler BINARY, so the two
-    # runners must resolve the SAME clang. apt.llvm.org's llvm.sh silently falls
-    # back to an earlier major when the requested one isn't published yet, so a
-    # divergence there shows up as a 0% hit rate, not as an error. Both jobs
-    # print `clang++ --version`; the stats step below prints it again next to
-    # the hit counts so the two are read together.
-    env:
-      CCACHE_COMPILERCHECK: content
-      # Same directory the matrix debug leg uses. It is not text in the `key:`
-      # string, but the Actions cache VERSION is derived partly from the cached
-      # paths — so producer and reader must keep this path aligned, or textually
-      # equal keys resolve to incompatible entries.
-      CCACHE_DIR: /tmp/fixpp-ccache-linux-clang-debug
-
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          # `bdir` == the matrix leg's build dir, NOT `-py`-suffixed (#244).
-          # ~56% of this tree's compile commands carry an absolute
-          # `…/build/<dir>/_codegen/include` path, and ccache's `hash_dir`
-          # (default true under -g) folds the CWD in besides — so the suffix
-          # alone made every object hash differently from the matrix leg's.
-          # The two jobs run on separate runners, so it never prevented a
-          # collision; it only prevented the hit.
-          #
-          # Measured on two locally-configured trees (plan §2b): 1457/1457
-          # compile commands BYTE-IDENTICAL to matrix `linux-clang-debug` once
-          # the build dirs are named the same. `FIXPP_BUILD_PYTHON=ON` adds
-          # exactly one compile edge (the SWIG wrapper) and perturbs nothing
-          # else — it only gates `add_subdirectory(bindings/python)`.
-          #
-          # With bdir == the preset's own binaryDir, the `-B` and
-          # `-DCMAKE_TOOLCHAIN_FILE` overrides below become no-ops for this leg
-          # (they still matter for the three sanitizer legs), leaving it exactly
-          # `cmake --preset linux-clang-debug -DFIXPP_BUILD_PYTHON=ON` — which is
-          # the configuration that was measured.
-          #
-          # The launcher is a `-D` on Configure rather than a job-level
-          # CMAKE_*_COMPILER_LAUNCHER because a job-level env var reaches ALL
-          # FOUR legs and only `none` installs ccache (the action below is
-          # `if: matrix.sanitizer == 'none'`). On the three sanitizer legs a
-          # job-level launcher would front Conan's `--build=missing` compiler
-          # probe with ccache never on PATH at all — the tier1 exit-127 shape
-          # (see the matrix job's ccache note). On the `none` leg ccache IS
-          # already on PATH by Conan-install time, so the trade-off there is
-          # deliberate SCOPE, not ordering: a from-source Conan dep on this leg
-          # does not go through ccache; that matches today's behaviour and the
-          # GHCR Conan restore normally makes it moot.
-          #
-          # `conan_profile` == the Conan profile the DEPENDENCIES are built with
-          # (#243). It must track `sanitizer`, because the sanitizer is NOT only
-          # a CMake-level flag: `conan/profiles/linux-clang-<san>` carries
-          # `tools.build:cxxflags=["-fsanitize=<san>"]` plus the matching link
-          # flags, and lists them in `tools.info.package_id:confs`, so the
-          # instrumented closure is a DIFFERENT package id from the plain
-          # `linux-clang-debug` one. Pointing all four legs at `linux-clang-debug`
-          # therefore linked UNINSTRUMENTED dependencies into a sanitizer build.
-          #
-          # Measured in the built ARCHIVES, not inferred from config. `nm -C` on
-          # the two pugixml packages the two profiles select:
-          #
-          #   linux-clang-debug  c77741103fe2f…   0 `__tsan_*` refs (1508 symbols)
-          #   linux-clang-tsan   073f1b8991e19…  17 `__tsan_*` refs
-          #
-          # The 1508 is the non-circularity check: the archive is real and `nm`
-          # works, so the 0 is an absence rather than a broken instrument. The
-          # symbols present in one and missing from the other are the
-          # instrumentation entry points themselves — `__tsan_func_entry`,
-          # `__tsan_func_exit`, `__tsan_init`, `__tsan_memcpy`, `__tsan_memmove`.
-          # Plan §2c measured the same shape on `libopentelemetry_common.a` in
-          # the CI archives: 57 refs under the matrix leg, ZERO under this job's.
-          #
-          # The package id moves for the compiled EXTERNAL packages in the graph
-          # (`conan graph info`); asio, nlohmann_json and tomlplusplus do not
-          # move because they are header-only and share the empty-payload id.
-          #
-          # ⚠️ A MOVED ID IS NOT INSTRUMENTATION. The profiles carry
-          # `tools.build:cxxflags` and NO `tools.build:cflags`, so
-          # `conan_toolchain.cmake` appends `-fsanitize=<san>` to
-          # CONAN_CXX_FLAGS only — CONAN_C_FLAGS stays `-m64`. Instrumentation
-          # therefore reaches C++ translation units and NOT C ones. Measured
-          # with `nm` in one civetweb build folder: `libcivetweb-cpp.a` 15
-          # `__tsan_*` refs, `libcivetweb.a` (the C core, same build) ZERO.
-          # zlib, OpenSSL and libcurl are pure C and carry no refs at all under
-          # any of the three sanitizers.
-          #
-          # This C-language gap is NOT introduced here: `conan/profiles/` is
-          # shared with the Tier 1 MATRIX sanitizer legs (see `-pr
-          # conan/profiles/${{ matrix.preset }}` in the `linux` job), which have
-          # the identical gap. Tracked separately in #252. What this job
-          # gains is parity with those legs — the C++ closure, which was
-          # previously uninstrumented here and instrumented there.
-          - sanitizer: none
-            bdir: linux-clang-debug
-            conan_profile: linux-clang-debug
-            cfg_extra: "-DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache"
-            san_opts: ""
-          # The three sanitizer legs keep their `-py` dirs. The Conan profile is
-          # now aligned (#243, above), but ~56 % of compile commands carry an
-          # absolute `…/build/<dir>/_codegen/include` path, so their objects
-          # still cannot match the matrix sanitizer legs' until the suffix goes
-          # too — that is #244 part 2, and a ccache restore here before then
-          # would be pure download cost.
-          - sanitizer: asan
-            bdir: linux-clang-asan-py
-            conan_profile: linux-clang-asan
-            cfg_extra: "-DFIXPP_ENABLE_ASAN=ON -DBUILD_SHARED_LIBS=ON -DFIXPP_PYTHON_SANITIZER=asan"
-            san_opts: "ASAN_OPTIONS=detect_leaks=0:halt_on_error=1"
-          - sanitizer: tsan
-            bdir: linux-clang-tsan-py
-            conan_profile: linux-clang-tsan
-            cfg_extra: "-DFIXPP_ENABLE_TSAN=ON -DBUILD_SHARED_LIBS=ON -DFIXPP_PYTHON_SANITIZER=tsan"
-            san_opts: "TSAN_OPTIONS=suppressions=$GITHUB_WORKSPACE/bindings/python/tests/tsan_suppressions.txt:halt_on_error=1"
-          - sanitizer: ubsan
-            bdir: linux-clang-ubsan-py
-            conan_profile: linux-clang-ubsan
-            cfg_extra: "-DFIXPP_ENABLE_UBSAN=ON -DBUILD_SHARED_LIBS=ON -DFIXPP_PYTHON_SANITIZER=ubsan"
-            san_opts: "UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1"
-    concurrency:
-      group: tier1-${{ github.event.pull_request.number || github.ref }}-python-bindings-${{ matrix.sanitizer }}
-      cancel-in-progress: true
-
-    steps:
-      - uses: actions/checkout@v6
-
-      # The Debug+sanitizer legs build the same ~1987 instrumented executables as
-      # the `linux` job and sit at the runner's ~14 GB free-disk ceiling. The
-      # ubsan leg (larger binaries from its type-check metadata) tipped over and
-      # failed `ld: final link failed: No space left on device`. Reclaim the
-      # preinstalled SDKs we don't use (~30 GB) to restore margin — mirrors the
-      # identical step in the `linux` job above.
-      - name: Free up disk space
-        uses: jlumbroso/free-disk-space@main
-        with:
-          tool-cache: true
-          android: true
-          dotnet: true
-          haskell: true
-          large-packages: false
-          docker-images: true
-          swap-storage: false
-
-      - name: Install Clang 22 (apt.llvm.org) + SWIG + Ninja
-        run: |
-          wget -O /tmp/llvm.sh https://apt.llvm.org/llvm.sh
-          chmod +x /tmp/llvm.sh
-          sudo /tmp/llvm.sh 22 all
-          # apt.llvm.org's llvm.sh installs versioned binaries (e.g. clang-22)
-          # but does NOT update the unversioned `clang`/`clang++` paths. CMake
-          # presets use unversioned `clang++`, which otherwise resolves to the
-          # runner image's pre-installed clang-18 (real binary at /usr/bin/clang++,
-          # missing C++23 std::expected in libstdc++ headers visible to it).
-          # `update-alternatives --install` does NOT overwrite that pre-existing
-          # regular file — force a symlink directly. Detect the actually installed
-          # major (llvm.sh silently falls back to an earlier major when the
-          # requested one isn't yet published for the runner's distro).
-          CLANG_BIN=$(ls /usr/bin/clang++-* 2>/dev/null | grep -oE '/usr/bin/clang\+\+-[0-9]+$' | sort -V | tail -1)
-          CLANG_VER=$(echo "$CLANG_BIN" | grep -oE '[0-9]+$')
-          test -n "$CLANG_VER" || { echo "::error::No clang-* installed by llvm.sh"; exit 1; }
-          echo "Force-symlinking clang-$CLANG_VER as default unversioned clang/clang++"
-          sudo ln -sf /usr/bin/clang-$CLANG_VER   /usr/bin/clang
-          sudo ln -sf /usr/bin/clang++-$CLANG_VER /usr/bin/clang++
-          clang++ --version
-          sudo apt-get install -y --no-install-recommends \
-            swig \
-            ninja-build \
-            python3-dev \
-            python3-pip \
-            pipx
-
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
-
-      - name: Install Conan + pytest via pipx
-        run: |
-          pipx install conan
-          pip install pytest pyyaml
-
-      - name: Initialize Conan default profile
-        run: conan profile detect --force
-
-      - name: Teach Conan about Clang 22
-        run: |
-          mkdir -p ~/.conan2
-          cat > ~/.conan2/settings_user.yml <<'EOF'
-          compiler:
-            clang:
-              version: ["19", "20", "21", "22", "23"]
-          EOF
-
-      # Reuses the MATCHING matrix leg's seed — `none` reads linux-clang-debug's,
-      # and each sanitizer leg reads its own (#243). Restore-only: the matrix legs
-      # own the push/prune, so this adds nothing to the GHCR package.
-      #
-      # This step's key MUST track `conan_profile` and not merely the leg name.
-      # `conan_cache_key` hashes the profile FILE, so a restore for
-      # linux-clang-debug fetches the uninstrumented closure — which is precisely
-      # the state #243 fixes. Wiring the profile above without moving the restore
-      # with it would leave the cache handing back the packages the profile no
-      # longer asks for, and `--build=missing` would then rebuild the whole
-      # closure from source on every run rather than fail visibly.
-      - name: Set up oras
-        uses: oras-project/setup-oras@v2
-      - name: Restore Conan cache from GHCR
-        id: conan_restore
-        run: ci/restore-conan-cache.sh ${{ matrix.conan_profile }}
-
-      # O1 (gate-b/r1): the PR body's acceptance criterion — "Conan restore
-      # is a HIT on all three sanitizer legs" — had no instrument. The step
-      # above emits `hit=` to $GITHUB_OUTPUT but nothing read it, so a MISS
-      # produced only a `::warning::` and a silent from-source rebuild inside
-      # the 180-min cap. NOT a gate — a MISS is legitimate whenever
-      # conanfile.py or a profile changes on a branch (restore-conan-cache.sh
-      # deliberately warns and exits 0); this only makes the disposition
-      # observable in the Job Summary instead of requiring a log hunt.
-      - name: Conan restore disposition (observation, not a gate)
-        run: |
-          echo "conan restore ${{ matrix.conan_profile }}: hit=${{ steps.conan_restore.outputs.hit }}" >> "$GITHUB_STEP_SUMMARY"
-
-      # ── ccache — `none` leg only, RESTORE-ONLY (#244 part 1) ──────────────
-      # Same key PREFIX as the matrix `linux` job's `tier1-${{ matrix.preset }}`
-      # for linux-clang-debug — INTENDED to restore its entries, NOT verified here.
-      #
-      # `save: false` is load-bearing, twice over. (1) The matrix debug leg owns
-      # the save, so this adds ZERO bytes to the repo-wide 10 GB Actions pool —
-      # the constraint that #240/#241 are blocked on. (2) It also means this leg
-      # can never write a python-flavoured object set into the namespace the
-      # matrix leg reads.
-      #
-      # ⚠️ ORDERING, not a defect: this job runs CONCURRENTLY with the matrix
-      # leg, so it cannot consume the save that leg is producing alongside it.
-      # It restores the newest compatible entry ALREADY VISIBLE at step start —
-      # normally a prior push:main run's (one was observed present on
-      # refs/heads/main on 2026-08-08). So run #1 is expected WARM, not cold. It
-      # is cold ONLY when no compatible entry exists: never seeded, LRU-evicted, or
-      # an incompatible cache version. A restore MISS or a 0% hit rate on run #1
-      # is therefore a finding to explain, NOT a first-run cold build to wave
-      # off — the restore-check step below says which of the two it is.
-      - name: ccache (install + restore-only — the matrix debug leg owns the save)
-        if: matrix.sanitizer == 'none'
-        uses: hendrikmuhs/ccache-action@v1.2.23
-        with:
-          key: tier1-linux-clang-debug
-          max-size: 2G
-          save: false
-
-      # Did the RESTORE land? Asked BEFORE the build, because the post-build hit
-      # rate cannot tell the two failure modes apart — "restored nothing" and
-      # "restored fine but the objects didn't match" both read as 0% hits over a
-      # nonzero call count.
-      #
-      #   size > 0  ⇒ the restore landed, so a later 0% hit rate is a LOOKUP
-      #               DIVERGENCE finding: entries were present and NONE matched.
-      #               That is all it establishes — it does not say WHICH hashed
-      #               input diverged. Compare, in this order: the build directory
-      #               (this change's thesis), the compiler binary
-      #               (CCACHE_COMPILERCHECK=content — llvm.sh silently falls back
-      #               a major, see the env note above), the command line, and the
-      #               generated _codegen include paths.
-      #   size == 0 ⇒ the restore is the story and the hit rate says nothing
-      #               about build dirs. Legitimate states: nothing seeded yet, or
-      #               main's own entry was LRU-evicted (see
-      #               feedback_ccache_action_timestamped_keys_accumulate_on_default_branch
-      #               — main's timestamped keys accumulate and evict main).
-      #
-      # WARN, not fail: an evicted cache must be NAMED in the log, not red.
-      # Also the first observation in this repo of ccache-action sharing a key
-      # ACROSS jobs — every other call site uses its own job's key — so this line
-      # is what would surface a cross-job restore-prefix violation instead of it
-      # being misread as "the rename didn't work".
-      # Reported in the repo's existing cache vocabulary — `<cache> HIT|MISS
-      # <tag>`, echoed to the log AND to $GITHUB_STEP_SUMMARY, as
-      # ci/restore-sccache.sh's note() and ci/restore-conan-cache.sh already do.
-      # The Job Summary tab is where this repo trains you to read cache health;
-      # a disposition that only reaches the raw log is one a reader will miss.
-      - name: ccache restore check (did the matrix debug leg's cache land?)
-        if: matrix.sanitizer == 'none'
-        run: |
-          set -euo pipefail
-          # ⚠️ `if`, not ci/restore-sccache.sh's `[ -n … ] && echo …` one-liner.
-          # Those scripts run under `set -uo pipefail` (no -e); this step is
-          # `set -euo pipefail`, where that shape RETURNS NON-ZERO whenever
-          # GITHUB_STEP_SUMMARY is unset — killing the step on its passing
-          # branch. Verified: the one-liner aborts after the first note() with
-          # the var unset. Same trap as the /gate-b harness fix.
-          note() {
-            echo "$1"
-            if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then echo "$1" >> "$GITHUB_STEP_SUMMARY"; fi
-          }
-          kib=$(ccache --print-stats |
-                awk '$1=="cache_size_kibibyte" {n++; v=$2} END {if (n!=1) exit 2; print v}') || {
-            echo "::error::\`ccache --print-stats | awk\` did not yield exactly one cache_size_kibibyte value. Three causes reach here: ccache itself failed or is not installed, \`awk\` itself failed, or the stats FORMAT is not what this step parses (ccache version moved?) — run \`ccache --print-stats\` in the step above to tell which. Either way this says NOTHING about whether the restore landed: the INSTRUMENT could not measure."
-            exit 1
-          }
-          case "$kib" in
-            ''|*[!0-9]*)
-              echo "::error::cache_size_kibibyte is not a non-negative integer: '$kib' — the INSTRUMENT could not measure. Fix the parse."
-              exit 1
-              ;;
-          esac
-          # Normalise to base 10 BEFORE any arithmetic: the case above admits
-          # leading zeros, and bash reads `08` as an invalid octal literal (a
-          # non-fatal expansion error in a script-file shell, so the step would
-          # exit 0 having printed no disposition at all) and `0070` as octal 56.
-          kib=$((10#$kib))
-          if [ "$kib" -gt 0 ]; then
-            note "ccache-restore HIT  tier1-linux-clang-debug — $((kib / 1024)) MiB in ${CCACHE_DIR:-<unset>} before the build"
-          else
-            note "ccache-restore MISS tier1-linux-clang-debug — 0 KiB in ${CCACHE_DIR:-<unset>}; this run builds cold"
-            echo "::warning::ccache restore found NOTHING under key prefix tier1-linux-clang-debug. What this probe MEASURED is only that: zero ccache data present locally before the build. It does NOT select a cause. Candidates, none of them excluded: the key was never seeded; main's entry was LRU-evicted; the entries present have an incompatible cache version; the cross-job key prefix does not resolve the way this step's first-in-repo shared-key use assumes (surfacing that is why this probe exists — see the comment above); or the restore itself FAILED — hendrikmuhs/ccache-action@v1.2.23 swallows Actions-cache service errors (dist/restore/index.js: non-5xx warns, 5xx core.errors, then it reports 'No cache found'), so a failed download is indistinguishable HERE from an empty one; read the action's own step log above. It is NOT expected merely because this change is new: a compatible entry on refs/heads/main is readable from a PR ref. This run's hit rate therefore says nothing about whether the build dirs align — but the MISS itself is a finding to explain."
-          fi
-
-      - name: Conan install
-        run: |
-          # Each leg builds its dependencies with its OWN profile (#243). The
-          # previous comment here — "the sanitizer is a CMake-level flag, not a
-          # Conan setting" — is true of the LIBRARY and false of the
-          # DEPENDENCIES, which is why nobody looked: see the matrix `include`
-          # block above for the measurement.
-          #
-          # `--build=missing` is now load-bearing in a way it was not before: on
-          # a restore MISS this compiles the instrumented closure from source.
-          # The matrix asan/ubsan/tsan legs seed exactly these package ids, so
-          # the normal path is a HIT.
-          conan install . \
-            -pr conan/profiles/${{ matrix.conan_profile }} \
-            --build=missing \
-            -of build/${{ matrix.bdir }}
-
-      - name: Configure with Python bindings
-        run: |
-          # Override the preset's CMAKE_TOOLCHAIN_FILE because the SANITIZER legs
-          # use a -py-suffixed build folder where Conan placed the toolchain.
-          # No-ops on the `none` leg — see the matrix `include` comment for why
-          # they are left uniform rather than made conditional.
-          cmake --preset linux-clang-debug \
-            -DFIXPP_BUILD_PYTHON=ON \
-            ${{ matrix.cfg_extra }} \
-            -DCMAKE_TOOLCHAIN_FILE="${{ github.workspace }}/build/${{ matrix.bdir }}/conan_toolchain.cmake" \
-            -B build/${{ matrix.bdir }}
-
-      - name: Build
-        run: cmake --build build/${{ matrix.bdir }}
-
-      # ── ccache liveness + hit rate (#244 part 1 acceptance artifact) ──────
-      # WHY A STEP AND NOT "Build got faster": a restore-only ccache that finds
-      # no entry, or a launcher that never got wired in, produces exactly the
-      # shape this repo keeps getting burned by — a step that ran, exited 0, and
-      # measured nothing. "Build dropped from 90 min to 4 min" would then be an
-      # inference; printed hit/miss counts are an observation.
-      #
-      # The ASSERTION here is deliberately LIVENESS, not performance: it fails
-      # when ccache recorded ZERO CACHEABLE CALLS, which is the silent-nothing
-      # shape. Note what that does and does not establish: zero cacheable calls
-      # does NOT by itself mean ccache was never invoked — ccache may have run
-      # and classified every invocation uncacheable, or no compile edge may have
-      # run at all. The step reads CMakeCache.txt to narrow CONFIGURATION and
-      # reports which causes remain open; it does not assert one.
-      #
-      # A run that is genuinely cold — no compatible cache entry was visible at
-      # restore time, or a clang major moved so every lookup misses —
-      # legitimately reports 0 hits and many misses, and must NOT be red for it.
-      # Coldness does not follow from this change being new; the restore-check
-      # step above says whether the entry was there. Tighten to a hit-rate floor
-      # only once a warm run has established the baseline.
-      - name: ccache stats (none leg — restore-only)
-        if: matrix.sanitizer == 'none'
-        run: |
-          set -euo pipefail
-          # Printed together on purpose: CCACHE_COMPILERCHECK=content hashes the
-          # compiler binary, so a clang that differs from the matrix leg's is the
-          # first thing to check when hits are 0 (see the job's env note).
-          echo "compiler: $(clang++ --version | head -1)"
-          echo "CCACHE_DIR=${CCACHE_DIR:-<unset>}"
-          # Human-readable, and DIAGNOSTIC-ONLY — but "diagnostic-only" describes
-          # what its OUTPUT is for, not what its FAILURE does. Bare under `set -e`
-          # a non-zero rc kills the step HERE, so the guarded --print-stats below
-          # never runs and the ::error:: it would have emitted never appears.
-          # Measured on the unfixed tree: --show-stats returning 41 => rc 41, zero
-          # annotations, no disposition; ccache absent => rc 127, same. Warn and
-          # continue: the authoritative call is the next one, and it IS
-          # fatal-and-attributed.
-          if ! ccache --show-stats; then
-            echo "::warning::\`ccache --show-stats\` failed — the human-readable counters are NOT in this log, so the zero-cacheable-calls branch below cannot point you at called_for_link / called_for_preprocessing / unsupported_* / could_not_use_modules. The authoritative \`ccache --print-stats\` measurement follows and will fail with an attributed ::error:: if ccache is genuinely unavailable."
-          fi
-          # Machine-readable (ccache >= 4.4; ubuntu-24.04 ships 4.9.x). Guarded
-          # rather than left bare: under `set -e` a bare failure exits non-zero
-          # with NO ::error:: annotation — red, but blaming nothing. Fail-closed
-          # AND attributed.
-          ccache --print-stats > /tmp/ccache-stats.txt || {
-            echo "::error::\`ccache --print-stats\` failed or is unavailable (ccache >= 4.4 required; ubuntu-24.04 ships 4.9.x) — the INSTRUMENT could not measure. This says NOTHING about the launcher or the cache."
-            exit 1
-          }
-          # n==1 or nothing: a duplicated key must reach the instrument-error
-          # branch below, not `$(( ))` as a two-line string.
-          val() { awk -v k="$1" '$1==k {n++; v=$2} END {if (n==1) print v}' /tmp/ccache-stats.txt; }
-          # `dhit=$(val …)` is a SIMPLE COMMAND under `set -e`: if awk itself
-          # exits non-zero the step dies HERE, before either instrument-error
-          # branch below, emitting rc but no ::error:: and no disposition. Guard
-          # each assignment. The handler must live in the OUTER shell — an
-          # `exit` inside the $( ) subshell would only leave the subshell and the
-          # message would be CAPTURED, not logged.
-          #
-          # Why val()'s awk does NOT `exit 2` on n!=1 the way the restore
-          # parser's does (:1249) — the contracts differ ON PURPOSE, this is not
-          # the asymmetry the guard above fixes. The restore parser reads ONE
-          # key, so `exit 2` collapses cleanly into its single handler. This one
-          # reads THREE, and n!=1 must reach the SHARED `-z` message below that
-          # names all three keys at once; making it exit non-zero would route
-          # missing/duplicated into the awk-failure handler and collapse the
-          # FORMAT/CARDINALITY-vs-AWK-EXECUTION discrimination that G2/G4 built.
-          # Stated precisely, because the earlier wording of this comment was
-          # wrong: missing and duplicated are NOT separated from each other —
-          # both make val() print nothing and both deliberately reach the SHARED
-          # -z message below that names all three keys at once. What must stay
-          # separated is "the stats file is not the shape this step parses"
-          # (:1375) from "awk itself failed" (the three handlers just below).
-          dhit=$(val direct_cache_hit) || {
-            echo "::error::\`awk\` itself failed while parsing direct_cache_hit from /tmp/ccache-stats.txt — the INSTRUMENT could not measure. This says NOTHING about the launcher or the cache."
-            exit 1
-          }
-          phit=$(val preprocessed_cache_hit) || {
-            echo "::error::\`awk\` itself failed while parsing preprocessed_cache_hit from /tmp/ccache-stats.txt — the INSTRUMENT could not measure. This says NOTHING about the launcher or the cache."
-            exit 1
-          }
-          miss=$(val cache_miss) || {
-            echo "::error::\`awk\` itself failed while parsing cache_miss from /tmp/ccache-stats.txt — the INSTRUMENT could not measure. This says NOTHING about the launcher or the cache."
-            exit 1
-          }
-          # DISCRIMINATE THE TWO REDS. Absent keys and zero calls both fail this
-          # step, but they are different findings, and a message that asserts a
-          # cause it did not measure sends the next reader down the wrong path
-          # (feedback_msys_rewrites_leading_slash_args_into_the_git_install_dir —
-          # that cost two rounds). Missing keys = the INSTRUMENT could not
-          # measure; zero cacheable calls = the instrument measured, and what it
-          # measured is that no CACHEABLE call was recorded — which is not the
-          # same as "ccache was never invoked". CMakeCache.txt narrows
-          # configuration state, not execution; the branch below names the causes
-          # that remain open rather than picking one.
-          if [ -z "$dhit" ] || [ -z "$phit" ] || [ -z "$miss" ]; then
-            echo "::error::\`ccache --print-stats\` did not report direct_cache_hit / preprocessed_cache_hit / cache_miss — the stats FORMAT is not what this step parses (ccache version moved?). This says NOTHING about the launcher or the cache: the instrument itself could not measure. Fix the parse."
-            exit 1
-          fi
-          for v in "$dhit" "$phit" "$miss"; do
-            case "$v" in
-              *[!0-9]*)
-                echo "::error::\`ccache --print-stats\` reported a non-canonical counter value: '$v' — expected a plain non-negative decimal. The stats FORMAT is not what this step parses. This says NOTHING about the launcher or the cache: the instrument itself could not measure. Fix the parse."
-                exit 1
-                ;;
-            esac
-          done
-          hits=$((10#$dhit + 10#$phit)); calls=$((hits + 10#$miss))
-          echo "ccache: hits=$hits (direct=$dhit preprocessed=$phit) misses=$miss cacheable_calls=$calls"
-          if [ "$calls" -eq 0 ]; then
-            cache_file="build/${{ matrix.bdir }}/CMakeCache.txt"
-            if [ ! -f "$cache_file" ]; then
-              echo "::error::ccache recorded ZERO cacheable calls, and $cache_file does not exist — so this step could not read the launcher configuration at all. That is an INSTRUMENT failure on top of the zero-call finding, not evidence about wiring. Configure and Build both reported success, so the file's absence is itself the first thing to explain."
-              exit 1
-            fi
-            # `if grep …` is EXEMPT from `set -e`, so the else arm catches EVERY
-            # non-zero rc. grep's contract: 0 = matched, 1 = no match, >1 = the
-            # read or the regex failed. Folding rc 2 into the else reports "the
-            # launcher was not wired in" for a file that was never successfully
-            # read — a conclusion this step did not measure.
-            # ⚠️ `grep_rc=$?` MUST be the first COMMAND after `else`. A comment is
-            # safe; any echo placed before it clobbers $?.
-            if grep -qE '^CMAKE_CXX_COMPILER_LAUNCHER:[^=]*=.*ccache' "$cache_file"; then
-              echo "::error::ccache recorded ZERO cacheable calls, and the launcher IS configured — $cache_file carries CMAKE_CXX_COMPILER_LAUNCHER=…ccache. Configuration is all this step measured: it does NOT establish that ccache executed. Two causes fit: (a) ccache ran and classified every invocation as uncacheable — read the \`ccache --show-stats\` output above for called_for_link / called_for_preprocessing / unsupported_* / could_not_use_modules (ccache 4.9.x has no aggregate uncacheable counter, those individual counters are the evidence); or (b) no compile edge ran at all, so ccache was never invoked. A nonzero uncacheable counter above distinguishes them."
-            else
-              grep_rc=$?
-              if [ "$grep_rc" -gt 1 ]; then
-                echo "::error::ccache recorded ZERO cacheable calls, and \`grep\` exited $grep_rc while reading $cache_file — that is a read or regex failure, NOT a no-match. The launcher configuration was therefore NOT measured, and this says NOTHING about whether the launcher was wired in: the INSTRUMENT could not read the file."
-              else
-                echo "::error::ccache recorded ZERO cacheable calls AND $cache_file carries no CMAKE_CXX_COMPILER_LAUNCHER=…ccache — the compiler launcher was not wired in."
-              fi
-            fi
-            exit 1
-          fi
-          pct=$((hits * 100 / calls))
-          # Lands in the Job Summary next to the restore disposition above, so
-          # the two are read together — a 0% here under a restore HIT is a build
-          # divergence; under a restore MISS it is just a cold run.
-          line="ccache-hitrate ${pct}% over ${calls} cacheable calls (python-bindings none)"
-          echo "$line"
-          if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then echo "$line" >> "$GITHUB_STEP_SUMMARY"; fi
-
-      # ── none leg: the meaningful Tier-1 gate (smoke + e2e round-trip) ───────
-      - name: Run Python tests
-        if: matrix.sanitizer == 'none'
-        env:
-          PYTHONPATH: "${{ github.workspace }}/build/${{ matrix.bdir }}/lib"
-        run: pytest bindings/python/tests/ -v
-
-      # ── asan / tsan legs: the trampoline/worker path under the sanitizer
-      #    (FR-013/FR-014 UAF, FR-007 GIL race). Runs the round-trip PLUS the
-      #    PY-002/PY-003 tests that exercise the worker path — the GIL-release
-      #    GREEN leg (test_gil_release_canary.py, in normal build, FR-013/SC-003)
-      #    and the raising-callback watchdog (test_callback_raise_watchdog.py,
-      #    FR-011/SC-004) — so the trampoline stays sanitized every PR. The
-      #    typed-exception + coverage tests run too (cheap, FR-006/SC-002). The
-      #    canary RED leg (FIXPP_PY_GIL_RELEASE_CANARY) is NOT built here — only
-      #    its GREEN leg is in-matrix; the deliberate-hang RED build is local-only.
-      #    One step, matrix-driven — only the runtime basename and *SAN_OPTIONS
-      #    differ. CPython is not instrumented, so the runtime is LD_PRELOADed
-      #    (subprocess children of the watchdog/canary tests inherit LD_PRELOAD +
-      #    *SAN_OPTIONS via the environment); the TSan suppressions file filters
-      #    interpreter-internal reports (see matrix.san_opts). ──────────────────
-      - name: Run Python tests under sanitizer
-        if: matrix.sanitizer != 'none'
-        env:
-          PYTHONPATH: "${{ github.workspace }}/build/${{ matrix.bdir }}/lib"
-        run: |
-          # Resolve the runtime for whichever clang naming scheme applies
-          # (older: libclang_rt.<san>-x86_64.so; newer: per-target libclang_rt.<san>.so).
-          # UBSan's standalone runtime is libclang_rt.ubsan_standalone[.-x86_64].so,
-          # not libclang_rt.ubsan.*, so map the basename for that leg.
-          RT_BASE="${{ matrix.sanitizer }}"
-          [ "$RT_BASE" = "ubsan" ] && RT_BASE="ubsan_standalone"
-          RT=$(clang -print-file-name=libclang_rt.${RT_BASE}-x86_64.so)
-          [ -f "$RT" ] || RT="$(clang -print-runtime-dir)/libclang_rt.${RT_BASE}.so"
-          echo "${{ matrix.sanitizer }} runtime: $RT"
-          env ${{ matrix.san_opts }} LD_PRELOAD="$RT" \
-            pytest bindings/python/tests/ -v
-
   # ── Python wheel gate (PY-005 / 056) ─────────────────────────────────────
-  # ADDITIVE (CI-8): this does NOT touch the python-bindings sanitizer matrix or
-  # the local-only GIL canary above — it builds + install-tests the SHIPPED
+  # ADDITIVE (CI-8): this does NOT touch the python tests on the `linux` matrix
+  # legs or the local-only GIL canary — it builds + install-tests the SHIPPED
   # cp310-abi3 wheel. Build ONCE in manylinux_2_28 (python-wheel-build), then
   # matrix-install-test the single artifact on 3.10–3.13 (python-wheel-test).
   # All cibuildwheel config is in bindings/python/pyproject.toml [tool.cibuildwheel]
@@ -1596,8 +1283,12 @@ jobs:
   #
   # ⚠️ THIS WHEEL DOES NOT WRAP THE BINARIES BUILT BY THE `linux` MATRIX. It
   # compiles the engine from source inside the manylinux_2_28 container, and the
-  # `python-bindings` legs above are a TEST VEHICLE that ships nothing. The two
-  # differ in three dimensions at once:
+  # bindings built by the six `linux` legs are a TEST VEHICLE that ships nothing.
+  # (#254: that vehicle used to be a separate `python-bindings` job; folding it
+  # into the matrix changed WHERE the bindings are built, not whether they ship.
+  # `FIXPP_INSTALL_PYTHON=OFF` on those legs is what keeps the second half of
+  # this note true — see the Configure step.) The two differ in three dimensions
+  # at once:
   #
   #            shipped wheel                 | legs running the python tests
   #   compiler gcc-toolset-14                | clang 22
@@ -1896,7 +1587,7 @@ jobs:
       # PyYAML from PyPI below when the interpreter on PATH lacks it, which
       # is NOT hermetic and its frequency is unmeasured (gate-b/r2 finding 3;
       # see the job-level comment above).
-      - name: Regression pin — tier1.yml python-bindings policy (#251)
+      - name: Regression pin — tier1.yml python policy (#251, re-based #254)
         run: |
           python3 -c "import yaml" 2>/dev/null || pip install --quiet pyyaml
           bash ci/test-tier1-python-policy.sh
@@ -2006,7 +1697,11 @@ jobs:
           conan --version
           # pytest is required by the decimal_compare_oracle CTest entry
           # (tests/oracle/decimal_compare_oracle_test.py) which is registered
-          # in every preset, not just the python-bindings build.
+          # in every preset. ⚠️ This used to read "not just the python-bindings
+          # build" — #254 folded that job into these six legs, so the contrast
+          # it drew no longer exists and the sentence inverted. pytest is now
+          # needed here for TWO independent reasons: that CTest entry, and the
+          # bindings' own test suite (bindings/python/tests/).
           # pyyaml is required by the interop_cell_results_schema_check CTest
           # entry (tests/interop/cell_results_schema_check_test.py — 016 T028).
           pip install pytest pyyaml
@@ -2088,8 +1783,14 @@ jobs:
   tier1-required:
     name: tier1-required
     runs-on: ubuntu-latest
+    # #254: `python-bindings` removed — the job no longer exists. ⚠️ This entry
+    # and the four assertion sites below MOVE AS ONE UNIT. The `result` of a job
+    # that is not in `needs:` (or does not exist) evaluates to the EMPTY STRING,
+    # and empty is neither `success` nor `skipped` — so leaving any assertion
+    # behind makes this required check RED on EVERY non-release run, both
+    # branches of the python_touched split, PR and push alike.
     needs: [gate-precheck, linux, coverage, check-layers, ci-script-pins,
-            python-bindings, python-wheel-build, python-wheel-test]
+            python-wheel-build, python-wheel-test]
     if: always()
     steps:
       - name: Assert the core Tier 1 matrix ran to success (no skip-into-green)
@@ -2141,12 +1842,21 @@ jobs:
           # its whole point is to surface NEW sanitizer findings on these
           # legs, behind a required check that could not see them.
           #
+          # ⚠️ #254 — the bindings' signal is NO LONGER ASSERTED HERE, and
+          # that is a STRENGTHENING, not a gap. `python-bindings` was folded
+          # into `linux`, which this job asserts `== success` UNCONDITIONALLY
+          # for every non-release event, with no python_touched gate of its
+          # own. The old contract accepted `python-bindings == skipped` as
+          # green on a C++-only PR; the new one has no such branch, because
+          # nothing is left that can legitimately skip. Read the `linux`
+          # assertion above as covering the bindings from here on.
+          #
           # A uniform "must be success" rule is wrong for two reasons:
-          #   - `python-bindings` / `python-wheel-build` gate independently
-          #     on `proceed && python_touched` — a path-gated C++-only PR
+          #   - `python-wheel-build` gates independently on
+          #     `proceed && python_touched` — a path-gated C++-only PR
           #     legitimately reports `skipped`, and that is NOT skip-into-
           #     green: `python_touched` is the discriminant that decides
-          #     whether these jobs were relevant, not an unconditional skip.
+          #     whether that job was relevant, not an unconditional skip.
           #   - `python-wheel-test` has no `if:` of its own — only
           #     `needs: python-wheel-build`. If that build fails,
           #     wheel-test's own disposition is `skipped`, not `failure`,
@@ -2160,30 +1870,23 @@ jobs:
           # without a separate check.
           #
           # Latency: this makes `tier1-required` wait on the slowest python
-          # leg. Measured on run 31273945846: `python-bindings (asan)` took
-          # 113.1 min warm, while `linux-clang-coverage` was already the
-          # longer pole at 134.8 min — so on that run the gate was not
-          # delayed at all. On a run where coverage is faster, the required
-          # check can report up to ~113 min later than before.
+          # job. ⚠️ The figures that used to sit here (113.1 min for
+          # `python-bindings (asan)` on run 31273945846, against
+          # `linux-clang-coverage`'s 134.8) went with the job in #254. The
+          # remaining pole is unchanged: coverage at ~134.8 min was already
+          # longer than any python leg, which is why #254 buys runner-MINUTES
+          # (~316/run, gross) and not wall-clock. Shortening tier 1's wall is
+          # #241's.
           pt='${{ needs.gate-precheck.outputs.python_touched }}'
-          pb='${{ needs.python-bindings.result }}'
           pwb='${{ needs.python-wheel-build.result }}'
           pwt='${{ needs.python-wheel-test.result }}'
-          echo "python_touched=$pt  python-bindings=$pb  python-wheel-build=$pwb  python-wheel-test=$pwt"
+          echo "python_touched=$pt  python-wheel-build=$pwb  python-wheel-test=$pwt"
           if [ "$pt" = "true" ]; then
-            if [ "$pb" != "success" ]; then
-              echo "::error::python-bindings did not run to success (got '$pb') while python_touched=true."
-              fail=1
-            fi
             if [ "$pwb" != "success" ]; then
               echo "::error::python-wheel-build did not run to success (got '$pwb') while python_touched=true."
               fail=1
             fi
           else
-            if [ "$pb" != "skipped" ]; then
-              echo "::error::python-bindings expected exactly 'skipped' when python_touched=false, got '$pb'."
-              fail=1
-            fi
             if [ "$pwb" != "skipped" ]; then
               echo "::error::python-wheel-build expected exactly 'skipped' when python_touched=false, got '$pwb'."
               fail=1

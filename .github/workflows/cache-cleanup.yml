@@ -22,8 +22,12 @@ name: Reclaim unreachable and superseded Actions caches
 # deletions. The first half is `save: ${{ github.event_name == 'push' }}` on
 # every ccache-action site that WRITES — `tier1.yml` matrix + bench. (Corrected
 # by #240: tier3-libcxx.yml no longer uses the action at all, its ccache having
-# moved to GHCR. tier1's third site, python-bindings `none`, is `save: false`
-# and never writes.) This stops PRs writing ccache at all. What remains for this workflow is everything else a PR
+# moved to GHCR. ⚠️ Corrected again by #254: there is no longer a THIRD tier-1
+# site. It was `python-bindings`' `none` leg, restore-only with `save: false`,
+# and that job was folded into the six `linux` matrix legs and deleted — which
+# also retires this repo's only cross-job ccache key share. Every ccache call
+# site now owns its own key, with a real save path gated on `push`.) This stops
+# PRs writing ccache at all. What remains for this workflow is everything else a PR
 # still legitimately writes — `conan-abi-golden`, tier1's manylinux wheel cache
 # — roughly 1 GB per PR, which would otherwise accumulate.
 #
