@@ -423,7 +423,7 @@ PYEOF
   # one. The parameterised literal is still present, so a bare `grep -qF`
   # for it (Codex's original prescription) would pass; Conan honours the
   # LAST `-pr` on the command line, so this silently reverts to
-  # linux-clang-debug the same way mutant C does, just through a different
+  # linux-clang-debug the same way mutant C2 does, just through a different
   # surviving shape. The counted-occurrence form of B2 is what catches it.
   local mut_e="$mut_dir/tier1-mutant-e.yml"
   local mut_e_out="$mut_dir/mutant_e_out"
@@ -453,4 +453,4 @@ PYEOF
 
 run_mutant_checks
 
-echo "PASS: ci/test-tier1-python-policy.sh — all five mutants proven RED, real workflow proven GREEN"
+echo "PASS: ci/test-tier1-python-policy.sh — all six mutants proven RED, real workflow proven GREEN"
