@@ -65,9 +65,14 @@
 # The exhaustiveness of the `case` below is NOT asserted here — it is asserted by
 # ci/test-tier1-python-policy.sh, which reads the `linux` job's
 # `strategy.matrix.preset` list out of tier1.yml and drives this script over
-# EXACTLY that set (exact-set, not subset). That is deliberate: a script cannot
-# know the matrix it serves, and a hardcoded list here would be a second census
-# to keep in sync.
+# EXACTLY that set. That is deliberate: a script cannot know the matrix it
+# serves, and a hardcoded list here would be a second census to keep in sync.
+#
+# ⚠️ What that does and does not cover (Gate B round 1, F3): every preset the
+# matrix names must have an arm here, and every arm the pin's table names must be
+# in the matrix. An EXTRA arm here that the matrix never names is not detected —
+# it is unreachable in CI, since the only call site passes `matrix.preset`, so it
+# is dead code rather than a false-green. Do not read "exact-set" as covering it.
 set -euo pipefail
 
 PRESET="${1:?usage: derive-python-sanitizer.sh <preset>}"

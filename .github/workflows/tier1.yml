@@ -359,8 +359,13 @@ jobs:
       # ubuntu-24.04: 145 G disk, 87 G free BEFORE this step, 114 G after. So the
       # ceiling moved; the reclaim is what moves it. KEEP THIS STEP — the margin
       # IS the reclaim, and #254 folds the Python bindings onto these same legs
-      # (+~126 MiB, of which lib/_fixpp.so is 120.83 MiB) on top of that tree.
-      # The job-end `Measure disk` step below is the standing instrument.
+      # on top of that tree. ⚠️ The only bindings figure quoted here is the
+      # directly measured `lib/_fixpp.so` = 120.83 MiB. An earlier draft added a
+      # "+~126 MiB" TOTAL; that came from a reconfigure which rebuilt 3053 edges,
+      # so it cannot be attributed to this change's 5 extra edges and is not a
+      # controlled delta (Appendix D P3(1); Gate B round 1 F2). The job-end
+      # `Measure disk` step below is the standing instrument — use it, not a
+      # remembered number.
       - name: Free up disk space
         uses: jlumbroso/free-disk-space@main
         with:

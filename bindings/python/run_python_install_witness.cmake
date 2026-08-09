@@ -81,8 +81,12 @@ if(NOT _install_rc EQUAL 0)
     "--- stdout ---\n${_install_out}\n--- stderr ---\n${_install_err}")
 endif()
 
-# The whole staging root. GLOB_RECURSE does not descend into the tree's
-# directories-as-entries, so `_fixpp_data` is matched via the files under it.
+# The whole staging root. `LIST_DIRECTORIES true` makes GLOB_RECURSE emit
+# DIRECTORY entries as well as files, so `_fixpp_data` is caught as a directory
+# entry in its own right. (An earlier version of this comment said it was caught
+# "via the files under it" — that is backwards, and it matters: the four bundled
+# XMLs do NOT match the payload prefix, so the directory entry is the only thing
+# that catches them. Gate B round 1, F6(c).)
 file(GLOB_RECURSE _staged LIST_DIRECTORIES true "${_stage}/*")
 list(LENGTH _staged _staged_n)
 if(_staged_n EQUAL 0)
@@ -110,10 +114,37 @@ set(_payload_names
 # or a sibling `_fixpp_something` is payload too.
 set(_payload_prefix "^_fixpp")
 
+# ── F6(a) — extensions, not just names ───────────────────────────────────────
+# Gate B round 1 measured the gap: the name list above is a CURRENT-basename
+# denylist, so a later `fixpp_helpers.py`, a `.pyi` stub, a stray `.pyc`, or an
+# SOABI-tagged module renamed off the `_fixpp` prefix all escape it. Rejecting by
+# EXTENSION follows provenance across renames and new files.
+#
+# ⚠️ Validated safe, not assumed: the real OFF-side install stages 258 entries
+# with ZERO `.py` / `.pyi` / `.pyc` among them. If a future C++ install rule
+# legitimately ships a Python file (a CMake helper script, say), THIS is the line
+# that will red — and the right response is to narrow it deliberately, not to
+# delete it.
+set(_payload_suffix_res
+  "\\.pyi?$"                        # .py and .pyi
+  "\\.pyc$"
+  "\\.cpython-[^/]*\\.(so|pyd)$")   # SOABI-tagged extension modules
+
 set(_hits "")
 foreach(_p IN LISTS _staged)
   get_filename_component(_name "${_p}" NAME)
+  set(_is_payload FALSE)
   if(_name IN_LIST _payload_names OR _name MATCHES "${_payload_prefix}")
+    set(_is_payload TRUE)
+  else()
+    foreach(_re IN LISTS _payload_suffix_res)
+      if(_name MATCHES "${_re}")
+        set(_is_payload TRUE)
+        break()
+      endif()
+    endforeach()
+  endif()
+  if(_is_payload)
     list(APPEND _hits "${_p}")
   endif()
 endforeach()
@@ -151,11 +182,46 @@ set(_required
   "_fixpp_data/FIX50SP2.xml"
   "_fixpp_data/FIXT11.xml")
 
+# ⚠️ EXACT PATH-COMPONENT COMPARISON, not a regex. Gate B round 1 F4: the
+# previous form was `if(_p MATCHES "/${_r}$")`, which interpolates the required
+# path into a REGEX without escaping — so the `.` in `fixpp.py` matched any
+# character and a staged `fixppXpy` satisfied the requirement. The witness could
+# certify a broken install, which is the exact negative path R2-P2-2 exists to
+# close.
+#
+# ⚠️ Regex-escaping alone would NOT be enough, so do not "fix" it that way: a
+# `$`-anchored suffix match still matches anywhere in the tree, and the four
+# bundled XMLs exist elsewhere in the C++ install (see the note above). Comparing
+# the trailing one or two path COMPONENTS with STREQUAL is what makes
+# `_fixpp_data/FIX42.xml` mean "FIX42.xml inside a directory named _fixpp_data"
+# rather than "some path ending in those characters".
+#
+# Relative-to-`_stage` is not usable here: DESTDIR staging prepends the whole
+# CMAKE_INSTALL_PREFIX, which varies per tree, so there is no fixed prefix to
+# strip. The component tail is the invariant.
 set(_missing "")
 foreach(_r IN LISTS _required)
+  # Split "dir/name" (or bare "name") into its expected components.
+  set(_want_dir "")
+  set(_want_name "${_r}")
+  if(_r MATCHES "^([^/]+)/([^/]+)$")
+    set(_want_dir  "${CMAKE_MATCH_1}")
+    set(_want_name "${CMAKE_MATCH_2}")
+  endif()
+
   set(_found FALSE)
   foreach(_p IN LISTS _staged)
-    if(_p MATCHES "/${_r}$")
+    get_filename_component(_p_name "${_p}" NAME)
+    if(NOT _p_name STREQUAL _want_name)
+      continue()
+    endif()
+    if(_want_dir STREQUAL "")
+      set(_found TRUE)
+      break()
+    endif()
+    get_filename_component(_p_dir "${_p}" DIRECTORY)
+    get_filename_component(_p_dir_name "${_p_dir}" NAME)
+    if(_p_dir_name STREQUAL _want_dir)
       set(_found TRUE)
       break()
     endif()

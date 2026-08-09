@@ -16,10 +16,17 @@
 #      six presets in the `linux` job's `strategy.matrix.preset` are read out of
 #      tier1.yml and ci/derive-python-sanitizer.sh is EXECUTED on each, with all
 #      three of its outputs (`sanitizer`, `rt_base`, `san_opts`) compared against
-#      the expected table below. Exact-set, not subset: a preset added to the
-#      matrix but not to the script fails, and a preset in the script but not in
-#      the matrix fails too (feedback_completeness_gate_exact_set_not_subset —
-#      the lesson the deleted EXPECTED_MATRIX census encoded).
+#      the expected table below.
+#      ⚠️ **Precisely what is exact, corrected at Gate B round 1 (F3).** The set
+#      equality holds between the MATRIX and this file's EXPECTED_DERIVE table:
+#      a preset added to the matrix without a row here fails, and vice versa.
+#      It does NOT enumerate the script's own accepted arms — adding a valid
+#      `linux-clang-msan)` arm to the script while leaving it out of the matrix
+#      still passes. That is untested-but-unreachable code, not a live
+#      false-green (the workflow only ever calls the script with `matrix.preset`,
+#      and that set IS pinned exactly), but the earlier wording claimed more than
+#      it delivered. A `--list-presets` mode was considered and rejected: it adds
+#      a surface to the production script to close a gap with no reachable defect.
 #      Plus one unknown preset, asserting exit 1 rather than a defaulted `none`.
 #   2. Call site: a tested script the workflow never invokes is the dead-call-site
 #      shape, so BOTH halves are pinned — the `linux` job has a step that invokes
@@ -102,12 +109,36 @@ jobs = doc["jobs"]
 linux_job = jobs["linux"]
 linux_presets = linux_job["strategy"]["matrix"]["preset"]
 
-# Every `run:` in the linux job, concatenated. The call-site and flag assertions
-# are single-line literal checks over this, which is all PyYAML should ever be
-# asked to do with shell (it never parses it).
-linux_runs = "\n".join(
-    str(step.get("run", "")) for step in linux_job["steps"]
-)
+# ⚠️ PER-STEP OBJECTS, not one concatenated blob — and the difference is the
+# whole of Gate B round 1's F5. The previous version emitted only
+# "\n".join(step["run"]), which means the step `if:` guards, the step `id`s and
+# the YAML `env:` mappings WERE NOT IN THE STRING AT ALL. Every assertion written
+# against it could therefore only ask "does this text appear ANYWHERE in the
+# job", never "is it in the position that makes it load-bearing" — and a mutant
+# that hard-coded the real consumers while re-introducing the tokens as dead
+# `echo`s passed the pin, for a workflow that ran the UBSan leg's pytest under
+# ASAN_OPTIONS with no halt_on_error=1. Measured, not hypothesised.
+#
+# This is the SAME class the install-flag assertion was already fixed for (see
+# `assert_derive_call_site`). It had been fixed at ONE of five sites.
+linux_steps = [
+    {
+        "name": str(step.get("name", "")),
+        "id":   str(step.get("id", "")),
+        "if":   str(step.get("if", "")),
+        "run":  str(step.get("run", "")),
+        # YAML `env:` on the step. Deliberately kept SEPARATE from the shell
+        # `env` command prefix inside `run:` — the sanitizer pytest step has
+        # both (a real YAML env: for PYTHONPATH, and `env <opts> pytest` in the
+        # shell), and conflating them is how a position assertion silently
+        # becomes a presence assertion again.
+        "env":  {str(k): str(v) for k, v in (step.get("env") or {}).items()},
+    }
+    for step in linux_job["steps"]
+]
+
+# Retained for the assertions that legitimately are job-wide.
+linux_runs = "\n".join(s["run"] for s in linux_steps)
 
 gp_steps = jobs["gate-precheck"]["steps"]
 decide_run = None
@@ -120,6 +151,7 @@ tier1_required_needs = jobs["tier1-required"]["needs"]
 
 out = {
     "linux_presets": linux_presets,
+    "linux_steps": linux_steps,
     "linux_runs": linux_runs,
     "decide_run": decide_run,
     "tier1_required_needs": tier1_required_needs,
@@ -189,40 +221,97 @@ assert_derive_script() {
   fi
 }
 
-# ── 2 + 3: the call site, all three outputs consumed, and the OFF flag ───────
-# A tested script the workflow never invokes proves nothing, and an output
-# nothing reads is dead. Single-line literal checks over the linux job's
-# concatenated `run:` text — PyYAML is never asked to parse shell.
+# ── 2 + 3: the call site, the three outputs IN POSITION, and the OFF flag ───
+#
+# ⚠️ POSITION, NOT PRESENCE. Gate B round 1 F5 (P1) measured the difference: the
+# previous version grepped the job's whole concatenated `run:` text for
+# `steps.pysan.outputs.<out>`. A mutant that hard-coded both real consumers and
+# re-introduced both tokens as dead `echo ... >/dev/null` lines PASSED this pin,
+# for a workflow that ran the UBSan leg's pytest under ASAN_OPTIONS with no
+# halt_on_error=1 and LD_PRELOADed the ASan runtime. M7/M8 delete the token
+# outright, so they only ever proved ABSENCE DETECTION — never that the token
+# sits where it does work. M9/M10 are the dead-echo mutants that close it.
+#
+# This is the same class as the install-flag false-green M5 caught. That one was
+# fixed at ONE of five sites; these are the other four.
 assert_derive_call_site() {
   local json="$1" case_id="$2"
-  local runs
-  runs="$(echo "$json" | jq -r '.linux_runs')"
 
-  grep -qF 'ci/derive-python-sanitizer.sh "${{ matrix.preset }}"' <<<"$runs" \
+  # ── helpers: select ONE step by a literal in a named field ────────────────
+  # Returns the step object, or empty. `--arg` keeps jq from interpreting the
+  # needle, so `${{ ... }}` and `-D...` are safe.
+  step_where() {  # <field> <literal>
+    echo "$json" | jq -c --arg f "$1" --arg needle "$2" \
+      'first(.linux_steps[] | select((.[$f] // "") | contains($needle)))'
+  }
+  step_field() { echo "$1" | jq -r --arg f "$2" '.[$f] // ""'; }
+
+  # ── the call site: SOME step must actually invoke the script ──────────────
+  local derive_step
+  derive_step="$(step_where run 'ci/derive-python-sanitizer.sh "${{ matrix.preset }}"')"
+  [ -n "$derive_step" ] && [ "$derive_step" != "null" ] \
     || fail "$case_id: no step in the linux job invokes ci/derive-python-sanitizer.sh with matrix.preset — the script is tested but never called (dead call site)"
 
-  # All three outputs. `san_opts` is the one that silently matters: lose it and
-  # a UBSan leg runs, finds, prints, and exits 0 (R2-P2-3).
-  local out
-  for out in sanitizer rt_base san_opts; do
-    grep -qF "steps.pysan.outputs.$out" <<<"$runs" \
-      || fail "$case_id: the linux job never consumes steps.pysan.outputs.$out — the derive script emits it and nothing reads it (dead output)"
-  done
+  # ⚠️ The step's `id:` is what every `steps.<id>.outputs.*` interpolation binds
+  # to. Rename it and all three consumers below silently become the EMPTY
+  # STRING while still reading as present. Nothing pinned this before F5.
+  local derive_id
+  derive_id="$(step_field "$derive_step" id)"
+  [ "$derive_id" = "pysan" ] \
+    || fail "$case_id: the derive step's id is '$derive_id', expected 'pysan' — every steps.pysan.outputs.* interpolation in this job would resolve to the empty string"
 
-  # ⚠️ SCOPED TO THE CONFIGURE LINE, not to the job's whole run text — and M5 is
-  # what proved that necessary. A bare search for the flag also matches the
-  # DIAGNOSTIC MESSAGE of the "Assert the Python install witness" step, which
-  # quotes the flag by name; with that match available, deleting the real flag
-  # from Configure left this assertion GREEN. An assertion that can be satisfied
-  # by an error string describing its own violation is worse than no assertion.
-  #
-  # `-e` is also REQUIRED, not style: without it grep parses the leading `-D` of
-  # `-DFIXPP_INSTALL_PYTHON=OFF` as its own --devices option and dies with
-  # "unknown devices method" — which under `set -e` aborts the pin rather than
-  # failing an assertion.
-  grep -F 'cmake --preset ${{ matrix.preset }}' <<<"$runs" \
-    | grep -qF -e '-DFIXPP_INSTALL_PYTHON=OFF' \
-    || fail "$case_id: the linux job's Configure line does not pass -DFIXPP_INSTALL_PYTHON=OFF — the Python payload would enter packages-linux-{clang,gcc}-release and falsify L-056-4 (#254)"
+  # ── `sanitizer`: the Configure argument AND both pytest `if:` guards ───────
+  local cfg
+  cfg="$(step_where run 'cmake --preset ${{ matrix.preset }}')"
+  [ -n "$cfg" ] && [ "$cfg" != "null" ] \
+    || fail "$case_id: no Configure step (no run: containing 'cmake --preset \${{ matrix.preset }}')"
+  local cfg_run; cfg_run="$(step_field "$cfg" run)"
+
+  grep -qF -e '-DFIXPP_PYTHON_SANITIZER=${{ steps.pysan.outputs.sanitizer }}' <<<"$cfg_run" \
+    || fail "$case_id: the Configure step does not pass -DFIXPP_PYTHON_SANITIZER=\${{ steps.pysan.outputs.sanitizer }} — the derived identity is not what configures the build"
+
+  # ⚠️ SCOPED TO THE CONFIGURE STEP, not the job. A bare job-wide search also
+  # matches the DIAGNOSTIC MESSAGE of the install-witness step, which quotes the
+  # flag by name — with that match available, deleting the real flag left this
+  # GREEN (M5). `-e` is required too: without it grep parses the leading `-D` as
+  # its own --devices option and dies, which under `set -e` aborts the pin.
+  grep -qF -e '-DFIXPP_INSTALL_PYTHON=OFF' <<<"$cfg_run" \
+    || fail "$case_id: the linux job's Configure step does not pass -DFIXPP_INSTALL_PYTHON=OFF — the Python payload would enter packages-linux-{clang,gcc}-release and falsify L-056-4 (#254)"
+
+  # Both pytest steps must BRANCH on the derived value. Substring sniffing
+  # (`contains(matrix.preset, 'san')`) is the mapping spelled twice; a literal
+  # `if:` is the mapping consumed once.
+  local none_step san_step
+  none_step="$(step_where if "steps.pysan.outputs.sanitizer == 'none'")"
+  san_step="$(step_where  if "steps.pysan.outputs.sanitizer != 'none'")"
+  [ -n "$none_step" ] && [ "$none_step" != "null" ] \
+    || fail "$case_id: no step is guarded by \`if: steps.pysan.outputs.sanitizer == 'none'\` — the non-sanitizer pytest leg does not branch on the derived identity"
+  [ -n "$san_step" ] && [ "$san_step" != "null" ] \
+    || fail "$case_id: no step is guarded by \`if: steps.pysan.outputs.sanitizer != 'none'\` — the sanitizer pytest leg does not branch on the derived identity"
+
+  # Both guards must be on steps that actually run pytest, or the branch is
+  # decorative.
+  local none_run san_run
+  none_run="$(step_field "$none_step" run)"
+  san_run="$(step_field "$san_step" run)"
+  grep -qF 'pytest bindings/python/tests/' <<<"$none_run" \
+    || fail "$case_id: the sanitizer=='none' guarded step does not run pytest bindings/python/tests/"
+  grep -qF 'pytest bindings/python/tests/' <<<"$san_run" \
+    || fail "$case_id: the sanitizer!='none' guarded step does not run pytest bindings/python/tests/"
+
+  # ── `rt_base`: the RT_BASE assignment INSIDE the sanitizer pytest step ─────
+  # Not "appears somewhere". If RT_BASE is hard-coded, the ubsan leg LD_PRELOADs
+  # the wrong runtime while the token still exists in a dead echo elsewhere.
+  grep -qE '^[[:space:]]*RT_BASE="\$\{\{ steps\.pysan\.outputs\.rt_base \}\}"[[:space:]]*$' <<<"$san_run" \
+    || fail "$case_id: the sanitizer pytest step does not assign RT_BASE=\"\${{ steps.pysan.outputs.rt_base }}\" — the LD_PRELOADed runtime is not the derived one (a dead reference elsewhere does not count)"
+
+  # ── `san_opts`: the shell `env` PREFIX on the pytest invocation ────────────
+  # ⚠️ The shell `env <opts> cmd` prefix, NOT a YAML `env:` key — this step has a
+  # real YAML env: block for PYTHONPATH, and conflating the two turns this back
+  # into a presence check. Lose this and a UBSan leg without halt_on_error=1
+  # runs, finds, prints, and exits 0.
+  grep -qE '^[[:space:]]*env \$\{\{ steps\.pysan\.outputs\.san_opts \}\} ' <<<"$san_run" \
+    || fail "$case_id: the sanitizer pytest step does not prefix its invocation with \`env \${{ steps.pysan.outputs.san_opts }}\` — the sanitizer options are not the derived ones, so a leg can lose halt_on_error=1 and still report green (R2-P2-3)"
 }
 
 # ── 4: PY_RE case table ─────────────────────────────────────────────────────
@@ -318,7 +407,7 @@ echo "PASS: derive-script table + call site + FIXPP_INSTALL_PYTHON=OFF + PY_RE c
 # for a miscount; a counter is. MUTANTS_RUN is incremented by each mutant AFTER
 # it has been proven RED for the right reason, so an early `return` or a mutant
 # silently commented out changes the total.
-MUTANTS_DECLARED=9   # M1 M2 M3 B M4 M5 M6 M7 M8
+MUTANTS_DECLARED=12  # M1 M2 M3 B M4 M5 M6 M7 M8 M9 M10 M11
 MUTANTS_RUN=0
 
 run_mutant_checks() {
@@ -565,6 +654,91 @@ PYEOF2
   grep -q "steps.pysan.outputs.rt_base" "$m8_out" \
     || fail "M8 failed the pin for the WRONG reason: $(cat "$m8_out")"
   echo "RED (expected): M8 (rt_base unconsumed, re-derived inline) — $(cat "$m8_out")"
+  MUTANTS_RUN=$((MUTANTS_RUN + 1))
+
+  # ── M9/M10/M11 — the DEAD-USE mutants (Gate B round 1, F5) ─────────────────
+  # M7/M8 delete the token outright, so they prove ABSENCE DETECTION only. These
+  # keep the token present — in a position where it does nothing — while killing
+  # the real consumer. That combination PASSED the pin before F5, for a workflow
+  # that ran the UBSan leg under ASAN_OPTIONS with no halt_on_error=1.
+
+  # M9: san_opts hard-coded at the pytest invocation, token survives as a dead echo.
+  local m9="$mut_dir/tier1-m9.yml"
+  local m9_out="$mut_dir/m9_out"
+  python3 - "$WORKFLOW" "$m9" <<'PYEOF2'
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = '          env ${{ steps.pysan.outputs.san_opts }} LD_PRELOAD="$RT" \\\n'
+new = ('          echo "dead: ${{ steps.pysan.outputs.san_opts }}" >/dev/null\n'
+       '          env ASAN_OPTIONS=detect_leaks=0 LD_PRELOAD="$RT" \\\n')
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
+PYEOF2
+  if cmp -s "$WORKFLOW" "$m9"; then
+    fail "M9: python literal-replace produced no change — mutant not applied"
+  fi
+  grep -qF 'steps.pysan.outputs.san_opts' "$m9" \
+    || fail "M9: the dead reference was not preserved — this mutant must keep the token PRESENT, or it degenerates into M7"
+  if ( run_full_pin "$m9" "M9" ) >"$m9_out" 2>&1; then
+    fail "M9 (san_opts hard-coded, token alive as a dead echo) did NOT fail the pin — the assertion is a presence check, not a position check, and a UBSan leg without halt_on_error=1 would report green"
+  fi
+  grep -q "does not prefix its invocation with" "$m9_out" \
+    || fail "M9 failed the pin for the WRONG reason: $(cat "$m9_out")"
+  echo "RED (expected): M9 (san_opts dead-echo) — $(cat "$m9_out")"
+  MUTANTS_RUN=$((MUTANTS_RUN + 1))
+
+  # M10: rt_base hard-coded, token survives as a dead echo.
+  local m10="$mut_dir/tier1-m10.yml"
+  local m10_out="$mut_dir/m10_out"
+  python3 - "$WORKFLOW" "$m10" <<'PYEOF2'
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = '          RT_BASE="${{ steps.pysan.outputs.rt_base }}"\n'
+new = ('          echo "dead: ${{ steps.pysan.outputs.rt_base }}" >/dev/null\n'
+       '          RT_BASE=asan\n')
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
+PYEOF2
+  if cmp -s "$WORKFLOW" "$m10"; then
+    fail "M10: python literal-replace produced no change — mutant not applied"
+  fi
+  grep -qF 'steps.pysan.outputs.rt_base' "$m10" \
+    || fail "M10: the dead reference was not preserved — this mutant must keep the token PRESENT, or it degenerates into M8"
+  if ( run_full_pin "$m10" "M10" ) >"$m10_out" 2>&1; then
+    fail "M10 (rt_base hard-coded to asan, token alive as a dead echo) did NOT fail the pin — the ubsan leg would LD_PRELOAD the ASan runtime"
+  fi
+  grep -q 'does not assign RT_BASE=' "$m10_out" \
+    || fail "M10 failed the pin for the WRONG reason: $(cat "$m10_out")"
+  echo "RED (expected): M10 (rt_base dead-echo) — $(cat "$m10_out")"
+  MUTANTS_RUN=$((MUTANTS_RUN + 1))
+
+  # M11: rename the derive step's id. Every `steps.pysan.outputs.*` then resolves
+  # to the EMPTY STRING while all three interpolations still read as present —
+  # an untested structural coupling until F5. (Fail-closed today, since an empty
+  # `sanitizer` sends all six legs down the `!= 'none'` branch where the RT
+  # existence check reds; that is luck, not a pin.)
+  local m11="$mut_dir/tier1-m11.yml"
+  local m11_out="$mut_dir/m11_out"
+  python3 - "$WORKFLOW" "$m11" <<'PYEOF2'
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "        id: pysan\n"
+new = "        id: py_san\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
+PYEOF2
+  if cmp -s "$WORKFLOW" "$m11"; then
+    fail "M11: python literal-replace produced no change — mutant not applied"
+  fi
+  if ( run_full_pin "$m11" "M11" ) >"$m11_out" 2>&1; then
+    fail "M11 (derive step id renamed) did NOT fail the pin — every steps.pysan.outputs.* would resolve to the empty string with nothing noticing"
+  fi
+  grep -q "expected 'pysan'" "$m11_out" \
+    || fail "M11 failed the pin for the WRONG reason: $(cat "$m11_out")"
+  echo "RED (expected): M11 (derive step id renamed) — $(cat "$m11_out")"
   MUTANTS_RUN=$((MUTANTS_RUN + 1))
 
 }
