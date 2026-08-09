@@ -135,7 +135,30 @@ jobs:
           # and was first exercised post-merge on push:main. The added cost is
           # bounded: these jobs also require `proceed` (both gate labels), which
           # in this repo's flow lands once, immediately before merge.
-          PY_RE='^(bindings/python/|include/fix/c_api|\.github/workflows/tier1\.yml$|.*\.i$)'
+          # `conan/profiles/linux-clang-{debug,asan,tsan,ubsan}` and `conanfile.py`
+          # are here for the same reason `tier1.yml` is (#247): a job's BUILD
+          # RECIPE must sit inside its own relevance filter, or a change to how
+          # it builds gets no PR-side signal and is first exercised post-merge.
+          # #243 makes that concrete — each python leg now names a DIFFERENT
+          # profile, so `conan/profiles/linux-clang-tsan` decides what the tsan
+          # leg links.
+          #
+          # ANCHORED to exactly those four profiles, not the bare
+          # `conan/profiles/` prefix: the four ARE the python legs' build
+          # recipe, and a bare-prefix match launches the whole ~387-runner-
+          # minute python fleet (4 binding legs + wheel build + 4 wheel
+          # install-tests) on an edit to any OTHER profile under that
+          # directory — `windows-msvc-release`, `linux-clang-libc++`,
+          # `linux-clang-coverage`, `README.md`, `linux-clang-tsan.backup` —
+          # none of which these legs consume. Two caveats: (a) if a python
+          # leg ever starts consuming a fifth profile, the alternation needs
+          # one more term — a visible, one-line fix-forward, the same
+          # maintenance the `linux` matrix's own profile list already
+          # carries; (b) none of the four profiles uses Conan `include()`
+          # today, so there is no shared base file this anchor would miss —
+          # if one is added under `conan/profiles/`, the filter must widen
+          # to cover it.
+          PY_RE='^(bindings/python/|include/fix/c_api|\.github/workflows/tier1\.yml$|conan/profiles/linux-clang-(debug|asan|tsan|ubsan)$|conanfile\.py$|.*\.i$)'
           PYTHON_TOUCHED=false
           EV="${{ github.event_name }}"
           if [ "$EV" = "pull_request" ]; then
@@ -1086,25 +1109,74 @@ jobs:
           # deliberate SCOPE, not ordering: a from-source Conan dep on this leg
           # does not go through ccache; that matches today's behaviour and the
           # GHCR Conan restore normally makes it moot.
+          #
+          # `conan_profile` == the Conan profile the DEPENDENCIES are built with
+          # (#243). It must track `sanitizer`, because the sanitizer is NOT only
+          # a CMake-level flag: `conan/profiles/linux-clang-<san>` carries
+          # `tools.build:cxxflags=["-fsanitize=<san>"]` plus the matching link
+          # flags, and lists them in `tools.info.package_id:confs`, so the
+          # instrumented closure is a DIFFERENT package id from the plain
+          # `linux-clang-debug` one. Pointing all four legs at `linux-clang-debug`
+          # therefore linked UNINSTRUMENTED dependencies into a sanitizer build.
+          #
+          # Measured in the built ARCHIVES, not inferred from config. `nm -C` on
+          # the two pugixml packages the two profiles select:
+          #
+          #   linux-clang-debug  c77741103fe2f…   0 `__tsan_*` refs (1508 symbols)
+          #   linux-clang-tsan   073f1b8991e19…  17 `__tsan_*` refs
+          #
+          # The 1508 is the non-circularity check: the archive is real and `nm`
+          # works, so the 0 is an absence rather than a broken instrument. The
+          # symbols present in one and missing from the other are the
+          # instrumentation entry points themselves — `__tsan_func_entry`,
+          # `__tsan_func_exit`, `__tsan_init`, `__tsan_memcpy`, `__tsan_memmove`.
+          # Plan §2c measured the same shape on `libopentelemetry_common.a` in
+          # the CI archives: 57 refs under the matrix leg, ZERO under this job's.
+          #
+          # The package id moves for the compiled EXTERNAL packages in the graph
+          # (`conan graph info`); asio, nlohmann_json and tomlplusplus do not
+          # move because they are header-only and share the empty-payload id.
+          #
+          # ⚠️ A MOVED ID IS NOT INSTRUMENTATION. The profiles carry
+          # `tools.build:cxxflags` and NO `tools.build:cflags`, so
+          # `conan_toolchain.cmake` appends `-fsanitize=<san>` to
+          # CONAN_CXX_FLAGS only — CONAN_C_FLAGS stays `-m64`. Instrumentation
+          # therefore reaches C++ translation units and NOT C ones. Measured
+          # with `nm` in one civetweb build folder: `libcivetweb-cpp.a` 15
+          # `__tsan_*` refs, `libcivetweb.a` (the C core, same build) ZERO.
+          # zlib, OpenSSL and libcurl are pure C and carry no refs at all under
+          # any of the three sanitizers.
+          #
+          # This C-language gap is NOT introduced here: `conan/profiles/` is
+          # shared with the Tier 1 MATRIX sanitizer legs (see `-pr
+          # conan/profiles/${{ matrix.preset }}` in the `linux` job), which have
+          # the identical gap. Tracked separately in #252. What this job
+          # gains is parity with those legs — the C++ closure, which was
+          # previously uninstrumented here and instrumented there.
           - sanitizer: none
             bdir: linux-clang-debug
+            conan_profile: linux-clang-debug
             cfg_extra: "-DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache"
             san_opts: ""
-          # The three sanitizer legs keep their `-py` dirs. Aligning them needs
-          # the Conan profile aligned too (#243 — they currently link
-          # UNINSTRUMENTED deps), which is a correctness change and lands
-          # separately. Until then their objects cannot match the matrix
-          # sanitizer legs' and a restore here would be pure download cost.
+          # The three sanitizer legs keep their `-py` dirs. The Conan profile is
+          # now aligned (#243, above), but ~56 % of compile commands carry an
+          # absolute `…/build/<dir>/_codegen/include` path, so their objects
+          # still cannot match the matrix sanitizer legs' until the suffix goes
+          # too — that is #244 part 2, and a ccache restore here before then
+          # would be pure download cost.
           - sanitizer: asan
             bdir: linux-clang-asan-py
+            conan_profile: linux-clang-asan
             cfg_extra: "-DFIXPP_ENABLE_ASAN=ON -DBUILD_SHARED_LIBS=ON -DFIXPP_PYTHON_SANITIZER=asan"
             san_opts: "ASAN_OPTIONS=detect_leaks=0:halt_on_error=1"
           - sanitizer: tsan
             bdir: linux-clang-tsan-py
+            conan_profile: linux-clang-tsan
             cfg_extra: "-DFIXPP_ENABLE_TSAN=ON -DBUILD_SHARED_LIBS=ON -DFIXPP_PYTHON_SANITIZER=tsan"
             san_opts: "TSAN_OPTIONS=suppressions=$GITHUB_WORKSPACE/bindings/python/tests/tsan_suppressions.txt:halt_on_error=1"
           - sanitizer: ubsan
             bdir: linux-clang-ubsan-py
+            conan_profile: linux-clang-ubsan
             cfg_extra: "-DFIXPP_ENABLE_UBSAN=ON -DBUILD_SHARED_LIBS=ON -DFIXPP_PYTHON_SANITIZER=ubsan"
             san_opts: "UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1"
     concurrency:
@@ -1180,13 +1252,34 @@ jobs:
               version: ["19", "20", "21", "22", "23"]
           EOF
 
-      # Reuses the matrix leg's linux-clang-debug seed (same profile+ids; sanitizer
-      # is a CMake flag, not Conan). Restore-only — the matrix debug leg owns the
-      # push/prune. Kills the old duplicate conan-linux-clang-debug-py cache.
+      # Reuses the MATCHING matrix leg's seed — `none` reads linux-clang-debug's,
+      # and each sanitizer leg reads its own (#243). Restore-only: the matrix legs
+      # own the push/prune, so this adds nothing to the GHCR package.
+      #
+      # This step's key MUST track `conan_profile` and not merely the leg name.
+      # `conan_cache_key` hashes the profile FILE, so a restore for
+      # linux-clang-debug fetches the uninstrumented closure — which is precisely
+      # the state #243 fixes. Wiring the profile above without moving the restore
+      # with it would leave the cache handing back the packages the profile no
+      # longer asks for, and `--build=missing` would then rebuild the whole
+      # closure from source on every run rather than fail visibly.
       - name: Set up oras
         uses: oras-project/setup-oras@v2
       - name: Restore Conan cache from GHCR
-        run: ci/restore-conan-cache.sh linux-clang-debug
+        id: conan_restore
+        run: ci/restore-conan-cache.sh ${{ matrix.conan_profile }}
+
+      # O1 (gate-b/r1): the PR body's acceptance criterion — "Conan restore
+      # is a HIT on all three sanitizer legs" — had no instrument. The step
+      # above emits `hit=` to $GITHUB_OUTPUT but nothing read it, so a MISS
+      # produced only a `::warning::` and a silent from-source rebuild inside
+      # the 180-min cap. NOT a gate — a MISS is legitimate whenever
+      # conanfile.py or a profile changes on a branch (restore-conan-cache.sh
+      # deliberately warns and exits 0); this only makes the disposition
+      # observable in the Job Summary instead of requiring a log hunt.
+      - name: Conan restore disposition (observation, not a gate)
+        run: |
+          echo "conan restore ${{ matrix.conan_profile }}: hit=${{ steps.conan_restore.outputs.hit }}" >> "$GITHUB_STEP_SUMMARY"
 
       # ── ccache — `none` leg only, RESTORE-ONLY (#244 part 1) ──────────────
       # Same key PREFIX as the matrix `linux` job's `tier1-${{ matrix.preset }}`
@@ -1283,10 +1376,18 @@ jobs:
 
       - name: Conan install
         run: |
-          # All legs share the linux-clang-debug Conan profile; the sanitizer is
-          # a CMake-level flag (FIXPP_ENABLE_{ASAN,TSAN}), not a Conan setting.
+          # Each leg builds its dependencies with its OWN profile (#243). The
+          # previous comment here — "the sanitizer is a CMake-level flag, not a
+          # Conan setting" — is true of the LIBRARY and false of the
+          # DEPENDENCIES, which is why nobody looked: see the matrix `include`
+          # block above for the measurement.
+          #
+          # `--build=missing` is now load-bearing in a way it was not before: on
+          # a restore MISS this compiles the instrumented closure from source.
+          # The matrix asan/ubsan/tsan legs seed exactly these package ids, so
+          # the normal path is a HIT.
           conan install . \
-            -pr conan/profiles/linux-clang-debug \
+            -pr conan/profiles/${{ matrix.conan_profile }} \
             --build=missing \
             -of build/${{ matrix.bdir }}
 
@@ -1746,8 +1847,14 @@ jobs:
   # It IS in tier1-required's needs. A gate that runs but cannot block is the
   # observe-don't-assert shape this repo has a recorded lesson about
   # (feedback_ci_gate_observes_not_asserts_witness_skips_into_green, cited at
-  # that job). Safe to make blocking precisely because it is hermetic and
-  # sub-second: nothing here can flake.
+  # that job). Safe to make blocking BECAUSE it is fast and near-hermetic —
+  # but "near": the two original pins (#245, #240) are bash+jq and hermetic,
+  # nothing here can flake for THEM. The #251 pin below additionally requires
+  # `actions/setup-python` and may bootstrap PyYAML from PyPI — a live
+  # network dependency, gate-b/r2 finding 3. It fails closed (a failed
+  # install fails this step, hence `ci-script-pins`, hence
+  # `tier1-required`) — never a silent skip — but it is not "nothing here can
+  # flake" for the job as a whole any more.
   ci-script-pins:
     name: ci-script-pins
     runs-on: ubuntu-24.04
@@ -1759,6 +1866,25 @@ jobs:
 
       - name: Regression pin — ccache GHCR script dispositions (#240)
         run: bash ci/test-ccache-scripts.sh
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      # Parses tier1.yml with PyYAML, so the #243/#251 sanitizer->profile
+      # policy and the anchored PY_RE relevance filter get pre-merge signal
+      # the same way the two pins above do (Article VII §§3-4; #247->#248's
+      # location waiver does not transfer here — this is tracked YAML data
+      # plus a regex, not shell embedded in a `run:` block with no harness to
+      # host it). The pin itself reads tracked files only and executes no
+      # build, no Conan and no workflow — but this step also bootstraps
+      # PyYAML from PyPI below when the interpreter on PATH lacks it, which
+      # is NOT hermetic and its frequency is unmeasured (gate-b/r2 finding 3;
+      # see the job-level comment above).
+      - name: Regression pin — tier1.yml python-bindings policy (#251)
+        run: |
+          python3 -c "import yaml" 2>/dev/null || pip install --quiet pyyaml
+          bash ci/test-tier1-python-policy.sh
 
   check-layers:
     name: check-layers
@@ -1947,7 +2073,8 @@ jobs:
   tier1-required:
     name: tier1-required
     runs-on: ubuntu-latest
-    needs: [gate-precheck, linux, coverage, check-layers, ci-script-pins]
+    needs: [gate-precheck, linux, coverage, check-layers, ci-script-pins,
+            python-bindings, python-wheel-build, python-wheel-test]
     if: always()
     steps:
       - name: Assert the core Tier 1 matrix ran to success (no skip-into-green)
@@ -1962,6 +2089,14 @@ jobs:
           # wheel-only release event does not run. Making one job blocking on
           # an event where every other job is waived would be an asymmetry
           # with no failure behind it.
+          #
+          # Same asymmetry now applies to `python-wheel-build`: its own `if:`
+          # includes `release`, so it DOES run on a release event (its `if:`
+          # is `release || (proceed && python_touched)`), and it is now in
+          # this job's `needs:` — so `tier1-required` waits on it (~70 min
+          # warm) before reaching this early exit, then discards its result
+          # unread. Cosmetic (nothing gates a release on this check), but a
+          # real behaviour change worth recording rather than rediscovering.
           if [ "${{ github.event_name }}" = "release" ]; then
             echo "release event — C++ matrix intentionally skipped; gate not applicable."
             exit 0
@@ -1982,5 +2117,74 @@ jobs:
               fail=1
             fi
           done
+
+          # ── Python legs (gate-b/r1, F2) ─────────────────────────────────
+          # `tier1-required` did not previously depend on the three python
+          # jobs at all, so they could go red while this check reported
+          # green — the exact skip-into-green hole this job exists to close,
+          # now reopened one layer down. #251 is the PR that makes it matter:
+          # its whole point is to surface NEW sanitizer findings on these
+          # legs, behind a required check that could not see them.
+          #
+          # A uniform "must be success" rule is wrong for two reasons:
+          #   - `python-bindings` / `python-wheel-build` gate independently
+          #     on `proceed && python_touched` — a path-gated C++-only PR
+          #     legitimately reports `skipped`, and that is NOT skip-into-
+          #     green: `python_touched` is the discriminant that decides
+          #     whether these jobs were relevant, not an unconditional skip.
+          #   - `python-wheel-test` has no `if:` of its own — only
+          #     `needs: python-wheel-build`. If that build fails,
+          #     wheel-test's own disposition is `skipped`, not `failure`,
+          #     so it must be checked against `python-wheel-build`'s result,
+          #     not against `python_touched` directly. Otherwise a build
+          #     failure would double-report AND a naive "skipped is always
+          #     fine for wheel-test" would silently re-open the hole here.
+          #
+          # Any `failure` or `cancelled` result fails both branches below
+          # (neither equals `success` nor `skipped`), so both are covered
+          # without a separate check.
+          #
+          # Latency: this makes `tier1-required` wait on the slowest python
+          # leg. Measured on run 31273945846: `python-bindings (asan)` took
+          # 113.1 min warm, while `linux-clang-coverage` was already the
+          # longer pole at 134.8 min — so on that run the gate was not
+          # delayed at all. On a run where coverage is faster, the required
+          # check can report up to ~113 min later than before.
+          pt='${{ needs.gate-precheck.outputs.python_touched }}'
+          pb='${{ needs.python-bindings.result }}'
+          pwb='${{ needs.python-wheel-build.result }}'
+          pwt='${{ needs.python-wheel-test.result }}'
+          echo "python_touched=$pt  python-bindings=$pb  python-wheel-build=$pwb  python-wheel-test=$pwt"
+          if [ "$pt" = "true" ]; then
+            if [ "$pb" != "success" ]; then
+              echo "::error::python-bindings did not run to success (got '$pb') while python_touched=true."
+              fail=1
+            fi
+            if [ "$pwb" != "success" ]; then
+              echo "::error::python-wheel-build did not run to success (got '$pwb') while python_touched=true."
+              fail=1
+            fi
+          else
+            if [ "$pb" != "skipped" ]; then
+              echo "::error::python-bindings expected exactly 'skipped' when python_touched=false, got '$pb'."
+              fail=1
+            fi
+            if [ "$pwb" != "skipped" ]; then
+              echo "::error::python-wheel-build expected exactly 'skipped' when python_touched=false, got '$pwb'."
+              fail=1
+            fi
+          fi
+          if [ "$pwb" = "success" ]; then
+            if [ "$pwt" != "success" ]; then
+              echo "::error::python-wheel-test did not run to success (got '$pwt') while python-wheel-build=success."
+              fail=1
+            fi
+          else
+            if [ "$pwt" != "skipped" ]; then
+              echo "::error::python-wheel-test expected exactly 'skipped' when python-wheel-build!=success (got '$pwb'), got '$pwt'."
+              fail=1
+            fi
+          fi
+
           [ "$fail" = 0 ] || exit 1
           echo "Tier 1 core matrix ran to success."
