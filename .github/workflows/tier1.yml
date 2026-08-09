@@ -135,13 +135,30 @@ jobs:
           # and was first exercised post-merge on push:main. The added cost is
           # bounded: these jobs also require `proceed` (both gate labels), which
           # in this repo's flow lands once, immediately before merge.
-          # `conan/profiles/` and `conanfile.py` are here for the same reason
-          # `tier1.yml` is (#247): a job's BUILD RECIPE must sit inside its own
-          # relevance filter, or a change to how it builds gets no PR-side signal
-          # and is first exercised post-merge. #243 makes that concrete — each
-          # python leg now names a DIFFERENT profile, so
-          # `conan/profiles/linux-clang-tsan` decides what the tsan leg links.
-          PY_RE='^(bindings/python/|include/fix/c_api|\.github/workflows/tier1\.yml$|conan/profiles/|conanfile\.py$|.*\.i$)'
+          # `conan/profiles/linux-clang-{debug,asan,tsan,ubsan}` and `conanfile.py`
+          # are here for the same reason `tier1.yml` is (#247): a job's BUILD
+          # RECIPE must sit inside its own relevance filter, or a change to how
+          # it builds gets no PR-side signal and is first exercised post-merge.
+          # #243 makes that concrete — each python leg now names a DIFFERENT
+          # profile, so `conan/profiles/linux-clang-tsan` decides what the tsan
+          # leg links.
+          #
+          # ANCHORED to exactly those four profiles, not the bare
+          # `conan/profiles/` prefix: the four ARE the python legs' build
+          # recipe, and a bare-prefix match launches the whole ~387-runner-
+          # minute python fleet (4 binding legs + wheel build + 4 wheel
+          # install-tests) on an edit to any OTHER profile under that
+          # directory — `windows-msvc-release`, `linux-clang-libc++`,
+          # `linux-clang-coverage`, `README.md`, `linux-clang-tsan.backup` —
+          # none of which these legs consume. Two caveats: (a) if a python
+          # leg ever starts consuming a fifth profile, the alternation needs
+          # one more term — a visible, one-line fix-forward, the same
+          # maintenance the `linux` matrix's own profile list already
+          # carries; (b) none of the four profiles uses Conan `include()`
+          # today, so there is no shared base file this anchor would miss —
+          # if one is added under `conan/profiles/`, the filter must widen
+          # to cover it.
+          PY_RE='^(bindings/python/|include/fix/c_api|\.github/workflows/tier1\.yml$|conan/profiles/linux-clang-(debug|asan|tsan|ubsan)$|conanfile\.py$|.*\.i$)'
           PYTHON_TOUCHED=false
           EV="${{ github.event_name }}"
           if [ "$EV" = "pull_request" ]; then
