@@ -13,8 +13,13 @@ Each op targets acc/eng_a (the engine whose single worker is parked mid-callback
 so each leg independently witnesses that its band is load-bearing.
 
   * Normal build (default): each op's child COMPLETES within the timeout -> GREEN.
-    This leg runs IN the Tier-1 python-bindings matrix (none/asan/tsan) — the
-    pass-without-canary witness is exercised every PR, not skipped (FR-013).
+    This leg runs IN the Tier-1 `linux` matrix — all six legs, i.e. none on
+    clang-debug/clang-release/gcc-release plus asan/ubsan/tsan — so the
+    pass-without-canary witness is exercised on every non-release run, not
+    skipped (FR-013). Two corrections in one line: #254 moved the vehicle from
+    the deleted `python-bindings` job onto the matrix legs, and the old list
+    "none/asan/tsan" was ALREADY stale before that — the ubsan lane landed at
+    #159 and was never added here.
 
   * FIXPP_PY_GIL_RELEASE_CANARY build: the GIL-release bands are elided, so the
     main thread holds the GIL in the blocking op and the worker can never run the

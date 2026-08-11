@@ -193,6 +193,43 @@ else()
   set(FIXPP_PY_INSTALL_DIR "${Python3_SITEARCH}")
 endif()
 
+# ── #254 — separate BUILDING the bindings from INSTALLING them ───────────────
+# Tier 1's six `linux` matrix legs build the bindings (to run pytest) but must
+# NOT install them: two of those legs (`linux-{clang,gcc}-release`) also build
+# `fixpp-package`, and the consumer witness stage-installs on all six. With the
+# rules below unconditional, folding the bindings into those legs silently puts
+# _fixpp.so + the three .py modules + _fixpp_data into
+# packages-linux-{clang,gcc}-release — falsifying L-056-4 ("the C++ packages
+# contain no Python") and shipping, by accident, exactly the payload that was
+# deliberately descoped from #254 (the decision is #257's to make).
+#
+# ⚠️ DEFAULT ON IS LOAD-BEARING. Feature 056 (LAY-1 / D-4 / T006) decided that a
+# plain in-tree `cmake --install` installs the bindings; that is a delivered
+# requirement, not an incidental behaviour. Only the six matrix legs pass OFF.
+#
+# ⚠️ Do NOT "simplify" this to `if(DEFINED SKBUILD)`. That gates the rules on the
+# WHEEL build and would silently regress the in-tree path 056 requires — while
+# still passing python-wheel-test, which only ever exercises the SKBUILD half.
+#
+# OFF costs the tests nothing: in-tree pytest imports from
+# PYTHONPATH=build/<preset>/lib, staged by the POST_BUILD copy above — not by
+# install(). See the comment at the top of this block.
+option(FIXPP_INSTALL_PYTHON
+       "Install the Python binding artifacts (module, pure-Python modules, _fixpp_data)" ON)
+
+# Report the resolved destination on every configure. FIXPP_PY_INSTALL_DIR has
+# three reachable outcomes and they fail in different directions: "." pollutes
+# the install-prefix root; an absolute writable SITEARCH makes `cmake --install
+# --prefix X` IGNORE the prefix (so a prefix-diff is structurally BLIND to it);
+# an absolute non-writable SITEARCH makes the install FATAL_ERROR. Locally the
+# "." branch fires, but actions/setup-python runs before Configure in CI, so
+# which branch fires there is NOT established — hence reported, not assumed.
+message(STATUS "fixpp: FIXPP_INSTALL_PYTHON=${FIXPP_INSTALL_PYTHON}; "
+               "Python3_SITEARCH='${Python3_SITEARCH}'; "
+               "FIXPP_PY_INSTALL_DIR='${FIXPP_PY_INSTALL_DIR}'")
+
+if(FIXPP_INSTALL_PYTHON)
+
 install(TARGETS fixpp_py DESTINATION "${FIXPP_PY_INSTALL_DIR}")
 install(
   FILES "${CMAKE_BINARY_DIR}/lib/fixpp.py"
@@ -222,3 +259,57 @@ install(
     "${CMAKE_SOURCE_DIR}/dictionaries/FIXT11.xml"
   DESTINATION "${FIXPP_PY_INSTALL_DIR}/_fixpp_data"
 )
+
+endif()  # FIXPP_INSTALL_PYTHON — see the option() block above (#254 / L-056-4)
+
+# ── #254 / Gate A round 2 — the two install witnesses (R2-P2-1, R2-P2-2) ─────
+#
+# Exactly ONE of these registers, decided by the option above, and together they
+# are jointly exhaustive over every non-SKBUILD build that has the bindings:
+#
+#   FIXPP_INSTALL_PYTHON=ON  (default, every ordinary build)  -> `present`
+#   FIXPP_INSTALL_PYTHON=OFF (tier 1's six `linux` legs)      -> `absent`
+#
+# That symmetry is the design. Each mode's proven-RED evidence is the OTHER
+# configuration of the same tree — no synthetic self-test, no planted files:
+#
+#   config                    present-witness   absent-witness
+#   FIXPP_INSTALL_PYTHON=ON     GREEN             RED (if run)
+#   FIXPP_INSTALL_PYTHON=OFF    RED  (if run)     GREEN
+#
+# ⚠️ `absent` registers NOWHERE until tier1.yml passes -DFIXPP_INSTALL_PYTHON=OFF
+# on the six legs. Until then it is inert by construction, not by accident. The
+# workflow change must assert that it RAN (`ctest -N` count), not merely that
+# ctest was green — the consumer witness's `expected=1` step is the precedent.
+#
+# UNIX-only: DESTDIR is not supported by CMake's install on Windows, and DESTDIR
+# rather than --prefix is the whole point (see the script's header — --prefix is
+# structurally blind to the absolute-Python3_SITEARCH destination branch).
+#
+# Not registered under SKBUILD: the wheel build has no test tree, and the ON-side
+# question R2-P2-2 asks is specifically about the NON-SKBUILD in-tree path that
+# `python-wheel-test` cannot see.
+if(FIXPP_BUILD_TESTS AND UNIX AND NOT DEFINED SKBUILD)
+  if(FIXPP_INSTALL_PYTHON)
+    set(_fixpp_py_witness_mode "present")
+  else()
+    set(_fixpp_py_witness_mode "absent")
+  endif()
+
+  add_test(
+    NAME "fixpp::python::install-${_fixpp_py_witness_mode}-witness"
+    COMMAND "${CMAKE_COMMAND}"
+      "-DFIXPP_MAIN_BUILD_DIR=${CMAKE_BINARY_DIR}"
+      "-DFIXPP_PY_WITNESS_MODE=${_fixpp_py_witness_mode}"
+      "-DFIXPP_PY_WITNESS_WORK_DIR=${CMAKE_BINARY_DIR}/_python_install_witness"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/run_python_install_witness.cmake"
+  )
+  set_tests_properties("fixpp::python::install-${_fixpp_py_witness_mode}-witness" PROPERTIES
+    LABELS "python;install"
+    # A full stage-install of the C++ closure plus the python payload. The
+    # consumer witness, which additionally CONFIGURES AND BUILDS a sub-project
+    # off its staged prefix, sits at 300; this one only installs.
+    TIMEOUT 300)
+
+  unset(_fixpp_py_witness_mode)
+endif()

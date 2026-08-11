@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
 # Regression pin for the Tier 3 ccache scripts (#240).
 #
-# ⚠️ THIS DOES NOT CLOSE #248. #248 is specifically about extracting TIER 1's
-# in-workflow ccache probes (the ~170 lines of `run:` script around
-# python-bindings) into a tested ci/ script; those `run:` blocks are UNCHANGED
-# by this PR. What lands here is the same pattern applied to new code, and
-# ci/ccache-stats.sh is deliberately shaped to absorb tier1's probes when #248
-# is taken. Do not read a green run of this file as evidence about #248.
+# ⚠️ THIS DOES NOT CLOSE #248, but #248 has SHRUNK TWICE since this was written.
+# #248 was specifically about extracting TIER 1's in-workflow ccache probes (the
+# ~170 lines of `run:` script around the `python-bindings` job) into a tested
+# ci/ script. #254 deleted that job, so those `run:` blocks no longer exist —
+# the extraction target is gone rather than done. #254 also paid a down payment
+# on #248's actual thesis by extracting the preset->sanitizer mapping into
+# ci/derive-python-sanitizer.sh, driven directly by
+# ci/test-tier1-python-policy.sh. What lands HERE is the same pattern applied to
+# new code, and ci/ccache-stats.sh is still shaped to absorb whatever tier-1
+# probes remain. Do not read a green run of this file as evidence about #248.
 #
 # Shims `oras`, `ccache`, `gh` and the compiler on a temp PATH, builds a
 # throwaway CMakePresets.json, and drives the REAL scripts —

@@ -20,8 +20,10 @@
 #   OTel     with_otel=False  (below)      | with_otel default True (conanfile.py)
 #
 # So the artifact users actually run is exercised only by python-wheel-test's
-# install + import + functional subset (3.10-3.13). The tier1 `python-bindings`
-# legs are a TEST VEHICLE — not a byte of them ships — and the
+# install + import + functional subset (3.10-3.13). The tier1 legs that run the
+# Python test suite — the six `linux` matrix legs since #254, previously a
+# separate `python-bindings` job — are a TEST VEHICLE, not a byte of them ships,
+# and the
 # packages-linux-{clang,gcc}-release artifacts are the C++ deliverable and carry
 # no Python at all. See L-056-4 in spec/behaviors-and-limitations.md.
 set -euo pipefail

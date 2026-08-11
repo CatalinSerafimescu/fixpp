@@ -8,7 +8,9 @@
 # builds. It compiles the engine from source inside the manylinux container with
 # gcc-toolset-14 / Release / with_otel=False (cibw-before-all.sh), while the
 # Tier 1 legs that run the Python test suite use clang 22 / Debug+sanitizers /
-# with_otel=True. Those legs are a TEST VEHICLE and ship nothing; the
+# with_otel=True. (#254: those legs are now the six `linux` matrix legs, not a
+# separate `python-bindings` job.) Those legs are a TEST VEHICLE and ship
+# nothing — held true by construction, via FIXPP_INSTALL_PYTHON=OFF; the
 # packages-linux-{clang,gcc}-release artifacts are the C++ deliverable and carry
 # no Python. A Python consumer needs ONLY this wheel — no fixpp C++ package, no
 # compiler, no Conan. See L-056-4 in spec/behaviors-and-limitations.md.
