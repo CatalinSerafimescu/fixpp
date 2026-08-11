@@ -285,6 +285,14 @@ assert_derive_call_site() {
   # Effective (non-comment, non-blank) command text of each step's `run`, joined.
   # Comments are stripped line-wise; a `#` inside a quoted string is not a comment
   # but stripping one only ever makes this check STRICTER, never laxer.
+  #
+  # `run_cmd` additionally joins `\`-continuations, so one LOGICAL COMMAND is one
+  # line. Without it a per-line assertion cannot see a whole invocation: the real
+  # sanitizer call is `env <opts> LD_PRELOAD=… \` on one physical line and
+  # `pytest bindings/python/tests/ -v` on the next, so "the line that runs pytest"
+  # and "the line that carries the prefix" are different lines and no per-line
+  # check can relate them. That gap is what X9 walked through. This is
+  # normalization that makes the check STRICTER — not the kind finding 6a waived.
   local _steps_eff
   _steps_eff="$(echo "$json" | jq -c '
     [ .linux_steps[]
@@ -292,7 +300,8 @@ assert_derive_call_site() {
                 | split("\n")
                 | map(sub("(^|[ \t])#.*$"; ""))
                 | map(select(test("[^ \t]")))
-                | join("\n") ) } ]')"
+                | join("\n") ) }
+      | . + { run_cmd: ( .run_eff | gsub("\\\\\n[ \t]*"; " ") ) } ]')"
 
   # Select the unique step whose <field> contains <literal>; fail on 0 or >1.
   step_where() {  # <field> <literal>
@@ -377,8 +386,8 @@ assert_derive_call_site() {
   # Both guards must be on steps that actually run pytest, or the branch is
   # decorative.
   local none_run san_run
-  none_run="$(step_field "$none_step" run_eff)"
-  san_run="$(step_field "$san_step" run_eff)"
+  none_run="$(step_field "$none_step" run_cmd)"
+  san_run="$(step_field "$san_step" run_cmd)"
   grep -qF 'pytest bindings/python/tests/' <<<"$none_run" \
     || fail "$case_id: the sanitizer=='none' guarded step does not run pytest bindings/python/tests/"
   grep -qF 'pytest bindings/python/tests/' <<<"$san_run" \
@@ -413,15 +422,30 @@ assert_derive_call_site() {
   # real YAML env: block for PYTHONPATH, and conflating the two turns this back
   # into a presence check. Lose this and a UBSan leg without halt_on_error=1
   # runs, finds, prints, and exits 0.
-  local _env_line
-  _env_line="$(grep -E '^[[:space:]]*env .*pytest|^[[:space:]]*env \$\{\{ steps\.pysan\.outputs\.san_opts \}\}' <<<"$san_run" | head -1)"
-  grep -qE '^[[:space:]]*env \$\{\{ steps\.pysan\.outputs\.san_opts \}\} ' <<<"$_env_line" \
-    || fail "$case_id: the sanitizer pytest step does not prefix its invocation with \`env \${{ steps.pysan.outputs.san_opts }}\` — the sanitizer options are not the derived ones, so a leg can lose halt_on_error=1 and still report green (R2-P2-3)"
-  # ⚠️ `env` takes the LAST assignment of a repeated variable, so a *SAN_OPTIONS
-  # re-specified AFTER the interpolation silently overrides everything the derive
-  # script emitted — the interpolation stays present and becomes inert (X7b).
-  grep -qE 'san_opts \}\}[^|&;]*[[:space:]](A|UB|T|L)SAN_OPTIONS=' <<<"$_env_line" \
-    && fail "$case_id: a *SAN_OPTIONS assignment follows \${{ steps.pysan.outputs.san_opts }} on the same env invocation — \`env\` takes the LAST assignment, so the derived options are overridden and the interpolation is inert. Line: \`$_env_line\`"
+  # ⚠️ UNIVERSALLY QUANTIFIED over the step's pytest invocations — EVERY one must
+  # carry the prefix, not "the first line that looks like one". The previous form
+  # took `head -1` of the matching lines, and X9 walked straight through it: a
+  # decoy `pytest … --collect-only` warm-up CARRYING the prefix, placed before a
+  # real invocation that had LOST it. The pin passed; the UBSan leg would have run
+  # its actual test suite with no sanitizer options at all. That is the third
+  # consecutive round in which R2-P2-3's named scenario survived, so the check is
+  # now over the whole set rather than over a representative of it.
+  local _py_lines _l
+  _py_lines="$(grep -E 'pytest bindings/python/tests/' <<<"$san_run" || true)"
+  [ -n "$_py_lines" ] \
+    || fail "$case_id: the sanitizer pytest step runs no \`pytest bindings/python/tests/\` command"
+  while IFS= read -r _l; do
+    [ -n "$_l" ] || continue
+    if ! grep -qE '^[[:space:]]*env \$\{\{ steps\.pysan\.outputs\.san_opts \}\} ' <<<"$_l"; then
+      fail "$case_id: a pytest invocation in the sanitizer step is not prefixed with \`env \${{ steps.pysan.outputs.san_opts }}\` — the sanitizer options are not the derived ones, so a leg can lose halt_on_error=1 and still report green (R2-P2-3). Line: \`$_l\`"
+    fi
+    # ⚠️ `env` takes the LAST assignment of a repeated variable, so a *SAN_OPTIONS
+    # re-specified AFTER the interpolation silently overrides everything the derive
+    # script emitted — the interpolation stays present and becomes inert (X7b).
+    if grep -qE 'san_opts \}\}[^|&;]*[[:space:]](A|UB|T|L)SAN_OPTIONS=' <<<"$_l"; then
+      fail "$case_id: a *SAN_OPTIONS assignment follows \${{ steps.pysan.outputs.san_opts }} on the same env invocation — \`env\` takes the LAST assignment, so the derived options are overridden and the interpolation is inert. Line: \`$_l\`"
+    fi
+  done <<<"$_py_lines"
   true
 }
 
@@ -518,7 +542,7 @@ echo "PASS: derive-script table + call site + FIXPP_INSTALL_PYTHON=OFF + PY_RE c
 # for a miscount; a counter is. MUTANTS_RUN is incremented by each mutant AFTER
 # it has been proven RED for the right reason, so an early `return` or a mutant
 # silently commented out changes the total.
-MUTANTS_DECLARED=19  # M1 M2 M3 B M4 M5 M6 M7 M8 M9 M10 M11 M12 M13 M14 M15 M16 M17 M18
+MUTANTS_DECLARED=20  # M1 M2 M3 B M4 M5 M6 M7 M8 M9 M10 M11 M12 M13 M14 M15 M16 M17 M18 M19
 MUTANTS_RUN=0
 
 run_mutant_checks() {
@@ -799,7 +823,12 @@ PYEOF2
   if ( run_full_pin "$m9" "M9" ) >"$m9_out" 2>&1; then
     fail "M9 (san_opts hard-coded, token alive as a dead echo) did NOT fail the pin — the assertion is a presence check, not a position check, and a UBSan leg without halt_on_error=1 would report green"
   fi
-  grep -q "does not prefix its invocation with" "$m9_out" \
+  # ⚠️ RE-POINTED when the san_opts check became universally quantified over the
+  # step's pytest invocations (X9). M9 still reds, and still for its own defect —
+  # but the wording moved from "does not prefix its invocation with" to the
+  # per-invocation message. A mutant that reds under a message the check no longer
+  # emits is testing nothing it claims to.
+  grep -q "is not prefixed with" "$m9_out" \
     || fail "M9 failed the pin for the WRONG reason: $(cat "$m9_out")"
   echo "RED (expected): M9 (san_opts dead-echo) — $(cat "$m9_out")"
   MUTANTS_RUN=$((MUTANTS_RUN + 1))
@@ -987,10 +1016,35 @@ old = """        run: >
 """
 new = """        run: |
           # -DFIXPP_INSTALL_PYTHON=OFF temporarily dropped while chasing a wheel issue
-          cmake --preset ${{ matrix.preset }} \\\\
-            -DFIXPP_ARTIFACT_DIR=${{ github.workspace }}/_artifacts \\\\
-            -DFIXPP_BUILD_PYTHON=ON \\\\
+          cmake --preset ${{ matrix.preset }} \\
+            -DFIXPP_ARTIFACT_DIR=${{ github.workspace }}/_artifacts \\
+            -DFIXPP_BUILD_PYTHON=ON \\
             -DFIXPP_PYTHON_SANITIZER=${{ steps.pysan.outputs.sanitizer }}
+"""
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
+'
+
+  # M19 (X9): a DECOY pytest invocation that CARRIES the prefix, placed before the
+  # real one, which LOSES it. The old assertion took `head -1` of the lines that
+  # looked like the invocation, so the decoy satisfied it while the actual test
+  # suite ran with no sanitizer options at all — no halt_on_error=1, no
+  # suppressions, on every sanitizer leg.
+  #
+  # ⚠️ The mutant deliberately keeps the interpolation PRESENT and correct. If it
+  # ever starts redding with "runs no `pytest ...` command" or with M9's message,
+  # it has degenerated and is no longer covering the quantifier.
+  mutate_workflow M19 "decoy prefixed pytest warm-up, real invocation unprefixed" "is not prefixed with" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = """          env ${{ steps.pysan.outputs.san_opts }} LD_PRELOAD="$RT" \\
+            pytest bindings/python/tests/ -v
+"""
+new = """          env ${{ steps.pysan.outputs.san_opts }} LD_PRELOAD="$RT" \\
+            pytest bindings/python/tests/ --collect-only -q >/dev/null
+          LD_PRELOAD="$RT" \\
+            pytest bindings/python/tests/ -v
 """
 assert t.count(old) == 1, t.count(old)
 open(dst, "w").write(t.replace(old, new))
