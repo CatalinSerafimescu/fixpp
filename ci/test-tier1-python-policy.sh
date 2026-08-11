@@ -87,6 +87,46 @@
 # columns is the same string and stays GREEN. M28 is the positive control for it,
 # and it is what distinguishes this golden from a file hash.
 #
+# ══ WHAT THIS PIN PROVES, AND WHAT IT DOES NOT ══════════════════════════════
+#
+# Written at Gate B round 9, after eight rounds in which each round found the
+# same class one layer further out. Stating the boundary is what ends that: an
+# unbounded promise generates unbounded findings, and every one of them looks
+# real because the promise really was too big.
+#
+# PROVES (all machine-checked, each with at least one mutant proven RED for its
+# own reason — see run_mutant_checks):
+#   * the derive script's behaviour, EXECUTED over the exact preset set read from
+#     the matrix, plus fail-closed on an unknown preset;
+#   * the four load-bearing `linux` steps — derive, Configure, and both pytest
+#     steps — compared VERBATIM against canonical blocks held here;
+#   * exact key sets at STEP, JOB, MATRIX and WORKFLOW level, so any added key
+#     (`continue-on-error`, `shell`, `container`, `defaults`, `exclude`, …) reds
+#     without anyone having to have thought of it;
+#   * the two pytest steps' `env:` blocks as whole objects;
+#   * the ordered list of `uses:` step OBJECTS — references AND their `with:`
+#     inputs, so `checkout` with `ref: main` cannot silently test the wrong tree;
+#   * a fail-closed census of steps MENTIONING an environment/path file;
+#   * `PY_RE`'s behaviour over a fixed case table, and `tier1-required`'s
+#     `needs:` as an exact set;
+#   * that every `ci/` harness is actually invoked by `ci-script-pins`.
+#
+# DOES NOT PROVE, deliberately and by recorded decision (Gate B rounds 5-8):
+#   * a file spelling ASSEMBLED at runtime — deliberate obfuscation, not an edit;
+#   * that a mutable action reference (`…@main`) returns the same remote content
+#     — this pins what the workflow ASKS FOR, not what the registry returns;
+#   * the runner substrate: labels, self-hosted images, preinstalled tooling;
+#   * `services:`, or arbitrary preceding filesystem state — a pre-pytest step
+#     that drops a `conftest.py`, writes a `pytest.ini` or pip-installs a plugin
+#     changes the outcome without naming anything this pin watches;
+#   * anything about what the six legs ACTUALLY DO at runtime. This is a policy
+#     pin over tracked workflow text. The runtime gates are the two ctest install
+#     witnesses and pytest's own exit status.
+#
+# ⚠️ If you are here because a review found something outside the second list,
+# fix it. If it is INSIDE the second list, the answer is not a new census — it is
+# that this pin does not promise that. Say so and close the finding.
+#
 # Hermetic: reads tracked files only. No build, no Conan, no network, no `nm`.
 # It DOES hard-require an importable PyYAML on the caller's `python3` (see
 # below) — providing that is the caller's responsibility, not this script's.
@@ -173,22 +213,43 @@ linux_matrix_keys = sorted(str(k) for k in linux_job["strategy"]["matrix"].keys(
 # obfuscation and out of the tracked-workflow, non-obfuscating threat model.
 # Excluding documented spellings would be a gap; excluding constructed ones is a
 # boundary. Round 5 drew that line and round 6 moved another spelling across it.
-# ⚠️ Round 7 finding 2: this matched the NAME anywhere in the step, so a harmless
-# `echo 'github.path is documented by Actions'` reported as a writer — a false
-# RED, and the kind that teaches people to loosen the check. A write needs a
-# redirection or a `tee`, so that is what is matched: the target spelling must
-# FOLLOW one, on the same line.
+# ⚠️ THIS CENSUS MATCHES *MENTIONS*, NOT WRITES, AND THAT IS DELIBERATE. Read
+# this before "tightening" it — the tightening has already been tried and it was
+# the defect.
+#
+# Round 7 flagged (P3) that matching the NAME anywhere produced a false RED on a
+# harmless `echo 'github.path is documented by Actions'`. The fix required a
+# redirection or `tee` before the spelling. Round 8 then measured what that
+# bought: `cp /etc/hostname "$GITHUB_ENV"` writes the file and matches no
+# redirection, so it passed the whole harness. `mv`, `install`, `dd of=`,
+# `sed -i` and `python3 -c` are the same shape.
+#
+# ⇒ The round-7 "fix" WAS round-8's P1, in its entirety. Enumerating the ways a
+# shell can write a file is the interpret-the-shell trap that this pin abandoned
+# at round 3b, re-entered through a cosmetic finding.
+#
+# An over-approximation that FAILS CLOSED is the correct shape here. A step that
+# merely names an environment file is something a human should look at; the false
+# RED costs one line — pin the legitimate mention here, by name, in the same
+# commit that introduces it. Measured at HEAD: ZERO steps mention any spelling,
+# so the census needs no allowlist today.
+#
+# The scan is over the SERIALIZED WHOLE STEP OBJECT, not `run:` alone, so `env:`,
+# `with:` and `if:` are in scope too — that closes the `${{ env.FOO }}`
+# indirection (a step `env:` holding `${{ github.env }}`, written through `$FOO`)
+# without a special case for it.
+#
+# Still out of scope, and stated rather than implied: a spelling ASSEMBLED at
+# runtime. That is deliberate obfuscation, not an ordinary edit.
 _ENV_FILE = (
     r"(?:GITHUB_ENV|GITHUB_PATH"
     r"|github\s*(?:\.\s*(?:env|path)\b|\[\s*['\"](?:env|path)['\"]\s*\]))"
 )
-_ENV_FILE_RE = re.compile(
-    r"(?:>>?|\btee\b[^\n]*?)\s*[\"']?\$?\{*\s*" + _ENV_FILE
-)
+_ENV_FILE_RE = re.compile(_ENV_FILE)
 linux_env_writers = [
     {"index": i, "name": str(s.get("name", ""))}
     for i, s in enumerate(linux_job["steps"])
-    if _ENV_FILE_RE.search(str(s.get("run", "")))
+    if _ENV_FILE_RE.search(json.dumps(s, sort_keys=True, default=str))
 ]
 # ⚠️ Round 7 finding 1. This used to be the list of REFERENCES only, and that is
 # a projection again — the inputs are what decide what the action does. Measured
@@ -631,7 +692,16 @@ assert_linux_job_context() {
 
   got="$(echo "$json" | jq -r '.linux_env_writers | length')"
   [ "$got" = "0" ] \
-    || fail "$case_id: $got step(s) in the linux job write to the environment/path files: $(echo "$json" | jq -c '.linux_env_writers'). Measured as ZERO on the unfixed tree, so this is a real change and not a pre-existing condition. Such a write reaches the pinned pytest steps without touching a byte of their run: text — PYTEST_ADDOPTS=--collect-only is the demonstrated case. If a legitimate one is ever needed, pin it here by name AND prove it cannot affect pytest."
+    || fail "$case_id: $got step(s) in the linux job MENTION an environment/path file: $(echo "$json" | jq -c '.linux_env_writers'). Measured as ZERO at HEAD, so this is a real change, not a pre-existing condition.
+
+This census matches MENTIONS, not writes, and it fails closed on purpose — see the comment above
+_ENV_FILE. A step that writes an environment file reaches the pinned pytest steps without touching a
+byte of their run: text (PYTEST_ADDOPTS=--collect-only is the demonstrated case), and enumerating the
+ways a shell can write a file is the interpret-the-shell trap this pin abandoned at round 3b.
+
+If the mention is LEGITIMATE, that is one line: add it to an allowlist here, by name, in the same
+commit that introduces it, having satisfied yourself it cannot reach pytest. Do NOT narrow the regex
+to require a redirection — that was tried, and \`cp <file> \"\$GITHUB_ENV\"\` walked straight through it."
 
   # ⚠️ The whole ordered list of `uses:` step OBJECTS, not their references. The
   # reference says which action; `with:` says what it does. `actions/checkout`
@@ -809,7 +879,8 @@ echo "PASS: derive-script table + call site + FIXPP_INSTALL_PYTHON=OFF + PY_RE c
 # for a miscount; a counter is. MUTANTS_RUN is incremented by each mutant AFTER
 # it has been proven RED for the right reason, so an early `return` or a mutant
 # silently commented out changes the total.
-MUTANTS_DECLARED=33  # M1 M2 M3 B M4 M5 M6 M7 M11 M14 M15 M21 M26 M27 M29-M45 + M28 M46 (2 GREEN controls) — DOWN from 27 at
+MUTANTS_DECLARED=33  # M1 M2 M3 B M4 M5 M6 M7 M11 M14 M15 M21 M26 M27 M29-M45 M47 + M28 (1 GREEN control;
+                     # M46 RETIRED at round 9 — its GREEN assertion became false by design) — DOWN from 27 at
                      # round 3b, because the golden subsumed 14 of them. See the
                      # RETIRED block in run_mutant_checks for the list and the reason.
 MUTANTS_RUN=0
@@ -1277,7 +1348,7 @@ open(dst, "w").write(t.replace(old, inject + old))
   # env-writer census can see this one, which is why M33 (which trips the count
   # first) does not stand in for it. Each census gets its own mutant or it is an
   # untested assertion.
-  mutate_workflow M34 "an existing step appends PYTEST_ADDOPTS to GITHUB_ENV" "write to the environment/path files" '
+  mutate_workflow M34 "an existing step appends PYTEST_ADDOPTS to GITHUB_ENV" "MENTION an environment/path file" '
 import sys
 src, dst = sys.argv[1], sys.argv[2]
 t = open(src).read()
@@ -1300,7 +1371,7 @@ open(dst, "w").write(t.replace(old, old + "          echo \x27PYTEST_ADDOPTS=--c
   # $GITHUB_ENV. The step count is unchanged, and the previous census stored step
   # NAMES and compared their join — so one unnamed writer produced [""], joined to
   # the empty string, and read as ZERO writers. Both censuses defeated at once.
-  mutate_workflow M35 "an existing step is un-named and writes GITHUB_ENV" "write to the environment/path files" '
+  mutate_workflow M35 "an existing step is un-named and writes GITHUB_ENV" "MENTION an environment/path file" '
 import sys
 src, dst = sys.argv[1], sys.argv[2]
 t = open(src).read()
@@ -1315,7 +1386,7 @@ open(dst, "w").write(t.replace(old, new))
   # M36 (round 5 finding 1b): `${{ github.env }}` — GitHub's OFFICIAL context
   # property for the same file. Not obfuscation, and a census that knows only the
   # `$GITHUB_ENV` spelling has a gap rather than a threat-model boundary.
-  mutate_workflow M36 "an existing step writes via the github.env context alias" "write to the environment/path files" '
+  mutate_workflow M36 "an existing step writes via the github.env context alias" "MENTION an environment/path file" '
 import sys
 src, dst = sys.argv[1], sys.argv[2]
 t = open(src).read()
@@ -1422,7 +1493,7 @@ open(dst, "w").write(t.replace(old, new))
   # M44 (round 6 finding 2): `${{ github[\x27env\x27] }}` — Actions expressions support
   # index syntax as well as property dereference, so this names the same file as
   # M36 does and the four-spelling list missed it. Placed BEFORE the pytest steps.
-  mutate_workflow M44 "an existing pre-pytest step writes via github[env] index syntax" "write to the environment/path files" '
+  mutate_workflow M44 "an existing pre-pytest step writes via github[env] index syntax" "MENTION an environment/path file" '
 import sys
 src, dst = sys.argv[1], sys.argv[2]
 t = open(src).read()
@@ -1452,32 +1523,29 @@ new = ("      - uses: actions/checkout@v6\n"
 open(dst, "w").write(t.replace(old, new))
 '
 
-  # ── M46 — the SECOND positive control, for the writer census ────────────────
+  # ── M46 RETIRED, and replaced by M47 ────────────────────────────────────────
   #
-  # A step that merely MENTIONS `github.path` in a diagnostic writes nothing, and
-  # must stay GREEN. Round 7 measured the previous regex reporting exactly this as
-  # a writer — a false RED, and the kind that teaches the next person to loosen
-  # the check rather than trust it. M34/M35/M36/M44 stay RED beside it, which is
-  # what makes this a control rather than a hole.
-  local m46="$mut_dir/tier1-m46.yml"
-  local m46_out="$mut_dir/m46_out"
-  python3 - "$WORKFLOW" "$m46" <<'PYEOF2'
+  # M46 was a GREEN control asserting that a step merely NAMING `github.path`
+  # stays green — round 7's P3 cosmetic finding, crystallized into a control.
+  # It is retired because its assertion is now FALSE BY DESIGN: the census
+  # deliberately matches mentions and fails closed (see the comment above
+  # _ENV_FILE). Keeping M46 would have FORBIDDEN the fix for round 8's P1, which
+  # is a good illustration of how a control written around a cosmetic complaint
+  # can pin the wrong property. The false RED it protected against has ⏱ ZERO
+  # instances at HEAD.
+  #
+  # M47 (round 8's P1, verbatim): `cp` writes the environment file and matches no
+  # redirection, so the write-shaped census passed it. `mv`, `install`, `dd of=`,
+  # `sed -i` and `python3 -c` are the same shape and are all covered now — not by
+  # enumerating them, but by not trying to recognise writing at all.
+  mutate_workflow M47 "cp onto \$GITHUB_ENV in a pre-pytest step" "MENTION an environment/path file" '
 import sys
 src, dst = sys.argv[1], sys.argv[2]
 t = open(src).read()
 old = "      - name: Assert the Python install rules are OFF (#254 / L-056-4)\n        run: |\n          set -euo pipefail\n"
 assert t.count(old) == 1, t.count(old)
-open(dst, "w").write(t.replace(old, old + "          echo 'github.path is documented by Actions'\n"))
-PYEOF2
-  if cmp -s "$WORKFLOW" "$m46"; then
-    fail "M46: python literal-replace produced no change — the positive control was not applied"
-  fi
-  if ! ( run_full_pin "$m46" "M46" ) >"$m46_out" 2>&1; then
-    fail "M46 (a diagnostic that merely NAMES github.path) went RED. The writer census is matching the NAME rather than a WRITE; a false RED here is how the census gets loosened later. Output: $(cat "$m46_out")"
-  fi
-  GREEN_CONTROLS=$((GREEN_CONTROLS + 1))
-  echo "GREEN (expected): M46 (prose naming github.path, no redirection) — the writer census matches WRITES, not mentions"
-  MUTANTS_RUN=$((MUTANTS_RUN + 1))
+open(dst, "w").write(t.replace(old, old + "          cp /etc/hostname \"$GITHUB_ENV\"\n"))
+'
 
   # ── M28 — a POSITIVE control, and the golden needs one ──────────────────────
   #

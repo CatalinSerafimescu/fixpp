@@ -526,7 +526,7 @@ Once `needs.python-bindings.result` no longer exists, the guard is **stronger, n
 
 **This is not in the brief's four-edit list, and a PR that ships the four edits alone is red before it is reviewed.**
 
-`ci/test-tier1-python-policy.sh` (456 lines, landed by PR #251) parses `tier1.yml` with PyYAML and pins the python policy. It is invoked by the **`ci-script-pins`** job (`tier1.yml:1899–1902`), which is **ungated** — it has no `if:` at all (`:1873–1876`) — and whose result `tier1-required` asserts `== success` (`:2126`, `:2129`). So this red fires on the #254 PR itself, on every event, **before** and independently of the §5 trap.
+`ci/test-tier1-python-policy.sh` (456 lines when #251 landed it; **1600 after Gate B rounds 3b-9**, measured 2026-08-11) parses `tier1.yml` with PyYAML and pins the python policy. ⚠️ **The FORM described in this section is superseded.** Gate B round 3b rewrote it: after the same false-green class was found nine times — each round one layer further out than the last — the pin stopped trying to interpret shell at all. The four load-bearing `linux` steps are now compared **verbatim** against canonical blocks held in the pin, with exact key sets at step/job/matrix/workflow level, whole-object comparison of the pytest steps' `env:` and of the `uses:` step objects, and a fail-closed census of steps mentioning an environment/path file. ~590 lines of parsing were deleted and 14 mutants retired as subsumed. **The authoritative statement of what the pin proves and what it deliberately does not is the header block of the script itself**, not this section; read that before extending it. It is invoked by the **`ci-script-pins`** job (`tier1.yml:1899–1902`), which is **ungated** — it has no `if:` at all (`:1873–1876`) — and whose result `tier1-required` asserts `== success` (`:2126`, `:2129`). So this red fires on the #254 PR itself, on every event, **before** and independently of the §5 trap.
 
 ### 5b.1 Every place the deletion breaks it
 
@@ -549,7 +549,7 @@ Why this supersedes v0.1's (b):
 
 - **It removes the contradiction v0.1 carried.** §6.2 claimed #254 *shrinks* #248 while §5b.2 chose the option that *deepens* it. Under this decision #254 **delivers a down payment on #248** and §6.2 becomes true.
 - **It is strictly cheaper than (b)** — v0.1's own cost note called (b) *"the largest single piece of work in #254 — larger than the workflow diff"*. Extracting the script and testing it directly is smaller *and* stronger.
-- **It keeps PyYAML doing what it is good at**: structure and **single-line literals** (which is exactly why assertion 5's behavioural `PY_RE` extraction works today). It never asks PyYAML to parse shell.
+- **It keeps PyYAML doing what it is good at**: structure and **single-line literals** (which is exactly why assertion 5's behavioural `PY_RE` extraction works today). It never asks PyYAML to parse shell. ⚠️ **Round 3b went further and stopped asking ANYTHING to parse shell** — the multi-line `run:` blocks that this bullet's "single-line literals" framing could not cover are now compared verbatim rather than inspected. The bullet is kept because its reasoning was right; the boundary it drew was simply not far enough.
 - **It does not delete the re-basing work.** Assertions 1/2/3/4, `EXPECTED_NEEDS`, and the mutant re-bases are all still required; only the *re-point target* changed.
 
 **Required content:**
