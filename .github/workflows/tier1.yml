@@ -1539,6 +1539,12 @@ jobs:
   # binaries. Their true dependencies are bash, jq and coreutils: no build, no
   # network, no toolchain. Measured at ~1.5 s and ~1 s.
   #
+  # `ci/test-python-install-witness.sh` (#254) is the third, and it is the one
+  # that widens the job's dependency set: it needs `cmake` on PATH (preinstalled
+  # on ubuntu-24.04) to configure eight throwaway `project(NONE)` fixtures and
+  # drive the real install witness over each. Still no compiler, no Conan, no
+  # network, no Python — ~1 s for all eight cells.
+  #
   # ⚠️ ITS OWN JOB, AND DELIBERATELY *NOT* GATED ON `gate-precheck`.
   #
   # Both pins previously ran as steps on the `linux-gcc-release` matrix leg,
@@ -1577,6 +1583,15 @@ jobs:
 
       - name: Regression pin — ccache GHCR script dispositions (#240)
         run: bash ci/test-ccache-scripts.sh
+
+      # The ctest cells in bindings/python/CMakeLists.txt only ever exercise the
+      # layout the local tree produces; they cannot show which BROKEN layouts the
+      # witness would certify. Gate B round 2 measured three it did, and this
+      # harness measured a fourth (`_fixpp_data` installed outside the module's
+      # directory). Buildless — see the job comment above for the `cmake`
+      # dependency this step adds.
+      - name: Regression pin — python install witness escapes (#254)
+        run: bash ci/test-python-install-witness.sh
 
       - uses: actions/setup-python@v6
         with:

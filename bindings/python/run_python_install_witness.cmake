@@ -182,67 +182,74 @@ set(_required
   "_fixpp_data/FIX50SP2.xml"
   "_fixpp_data/FIXT11.xml")
 
-# ⚠️ EXACT PATH-COMPONENT COMPARISON, not a regex. Gate B round 1 F4: the
-# previous form was `if(_p MATCHES "/${_r}$")`, which interpolates the required
-# path into a REGEX without escaping — so the `.` in `fixpp.py` matched any
-# character and a staged `fixppXpy` satisfied the requirement. The witness could
-# certify a broken install, which is the exact negative path R2-P2-2 exists to
-# close.
+# ── The module is the ANCHOR, and it is found FIRST ──────────────────────────
 #
-# ⚠️ Regex-escaping alone would NOT be enough, so do not "fix" it that way: a
-# `$`-anchored suffix match still matches anywhere in the tree, and the four
-# bundled XMLs exist elsewhere in the C++ install (see the note above). Comparing
-# the trailing one or two path COMPONENTS with STREQUAL is what makes
-# `_fixpp_data/FIX42.xml` mean "FIX42.xml inside a directory named _fixpp_data"
-# rather than "some path ending in those characters".
+# Gate B round 2, finding 3. The requirement loop used to search the whole staged
+# tree for each required BASENAME (with, at most, a check on its immediate parent
+# directory's name). Three broken layouts were MEASURED passing:
 #
-# Relative-to-`_stage` is not usable here: DESTDIR staging prepends the whole
-# CMAKE_INSTALL_PREFIX, which varies per tree, so there is no fixed prefix to
-# strip. The component tail is the invariant.
-set(_missing "")
-foreach(_r IN LISTS _required)
-  # Split "dir/name" (or bare "name") into its expected components.
-  set(_want_dir "")
-  set(_want_name "${_r}")
-  if(_r MATCHES "^([^/]+)/([^/]+)$")
-    set(_want_dir  "${CMAKE_MATCH_1}")
-    set(_want_name "${CMAKE_MATCH_2}")
-  endif()
-
-  set(_found FALSE)
-  foreach(_p IN LISTS _staged)
-    get_filename_component(_p_name "${_p}" NAME)
-    if(NOT _p_name STREQUAL _want_name)
-      continue()
-    endif()
-    if(_want_dir STREQUAL "")
-      set(_found TRUE)
-      break()
-    endif()
-    get_filename_component(_p_dir "${_p}" DIRECTORY)
-    get_filename_component(_p_dir_name "${_p_dir}" NAME)
-    if(_p_dir_name STREQUAL _want_dir)
-      set(_found TRUE)
-      break()
-    endif()
-  endforeach()
-  if(NOT _found)
-    list(APPEND _missing "${_r}")
-  endif()
-endforeach()
-
-# The extension module's basename carries an SOABI tag on some configurations,
-# so it is matched by pattern rather than by literal name.
-set(_module_found FALSE)
+#   W1  fixpp_oo.py + fixpp_dict_data.py installed to share/unrelated/ — accepted,
+#       because "somewhere in the tree" was the whole requirement. `fixpp.py`
+#       imports `fixpp_oo`, so that tree is not importable.
+#   W2  fixpp.py staged as a DIRECTORY — accepted, because nothing tested type.
+#   W3  the module renamed `_fixpp_broken.so` — accepted by `^_fixpp.*\.(so|pyd)$`.
+#
+# All three certify a non-importable install under a message that says the witness
+# "stages a WORKING binding". The fix is to stop asking "does this name exist
+# anywhere" and ask "is it BESIDE the module", which is what importability
+# actually requires — and it is exactly what the four install() rules in
+# bindings/python/CMakeLists.txt promise: all of them share one
+# `${FIXPP_PY_INSTALL_DIR}`, with `_fixpp_data` as its immediate child.
+#
+# ⚠️ Discover the module BEFORE the requirement loop and FAIL CLOSED if it is
+# absent. With no module there is no anchor, and an empty anchor would silently
+# revert every requirement to "anywhere in the tree" — i.e. re-open W1 on exactly
+# the trees where the install is most broken.
+#
+# ⚠️ Regex-escaping the required names would NOT have been enough, and neither is
+# a component tail (the round-1 F4 fix, now superseded): a `$`-anchored suffix
+# match still matches ANYWHERE in the tree, and the four bundled XMLs exist in the
+# C++ install too. Anchoring at a discovered absolute directory is what makes
+# "`FIX42.xml` inside THIS `_fixpp_data`" expressible at all. It also keeps the
+# DESTDIR-prefix independence the tail comparison was chosen for: the prefix is
+# whatever the discovered module's directory happens to be, never hard-coded.
+#
+# ⚠️ The module pattern is NARROWER here than `_payload_prefix` above, and the
+# asymmetry is deliberate — do not "reconcile" them. `absent` asks "did ANY
+# python-shaped thing leak", so it wants the broad `^_fixpp` (a sibling
+# `_fixpp_something` is payload too, and C2 depends on that breadth). `present`
+# asks "is THE importable module here", and `_fixpp_broken.so` is not it. The two
+# names that must pass are `_fixpp.so` and the SOABI-tagged
+# `_fixpp.cpython-<tag>.so`.
+#
+# ⚠️ The triage prescribed `^_fixpp([._].*)?\.(so|pyd)$` for this. It does not
+# work: `_` is inside the class, so `_fixpp_broken.so` decomposes as `^_fixpp` +
+# `_broken` + `\.so$` and still matches. Measured with `cmake -P` before adopting
+# the form below. W3 in ci/test-python-install-witness.sh is the standing proof.
+set(_module_re "^_fixpp(\\.cpython-[^/]*)?\\.(so|pyd)$")
+set(_module_path "")
 foreach(_p IN LISTS _staged)
   get_filename_component(_name "${_p}" NAME)
-  if(_name MATCHES "^_fixpp.*\\.(so|pyd)$")
-    set(_module_found TRUE)
+  if(_name MATCHES "${_module_re}" AND NOT IS_DIRECTORY "${_p}")
+    set(_module_path "${_p}")
     break()
   endif()
 endforeach()
-if(NOT _module_found)
-  list(APPEND _missing "_fixpp*.so (the extension module)")
+
+set(_missing "")
+if(_module_path STREQUAL "")
+  # Fail closed: no anchor, so no co-location claim can be made at all.
+  list(APPEND _missing "_fixpp.so / _fixpp.cpython-<tag>.so (the extension module)")
+else()
+  get_filename_component(_module_dir "${_module_path}" DIRECTORY)
+  foreach(_r IN LISTS _required)
+    set(_want "${_module_dir}/${_r}")
+    # IS_DIRECTORY rejection is not pedantry: W2 staged `fixpp.py` as a directory
+    # full of other files and the witness called the install working.
+    if(NOT EXISTS "${_want}" OR IS_DIRECTORY "${_want}")
+      list(APPEND _missing "${_r} (expected at ${_want})")
+    endif()
+  endforeach()
 endif()
 
 if(_missing)
@@ -250,8 +257,11 @@ if(_missing)
   string(REPLACE ";" "\n  " _all "${_staged}")
   message(FATAL_ERROR
     "python-install-witness [present]: this mode asserts that with FIXPP_INSTALL_PYTHON at its\n"
-    "default ON and SKBUILD undefined, a plain `cmake --install` stages a WORKING binding. It did\n"
-    "not stage:\n  ${_pretty}\n\n"
+    "default ON and SKBUILD undefined, a plain `cmake --install` stages a WORKING binding.\n"
+    "Each requirement must be a REGULAR FILE at the path shown — beside the extension module,\n"
+    "because that is what makes the payload importable and what the four install() rules in\n"
+    "bindings/python/CMakeLists.txt promise (one shared FIXPP_PY_INSTALL_DIR). Not satisfied:\n"
+    "  ${_pretty}\n\n"
     "This is feature 056's LAY-1 / D-4 / T006 in-tree install path. It is asserted separately from\n"
     "the wheel because `python-wheel-test` exercises ONLY the SKBUILD half — an\n"
     "`if(SKBUILD AND FIXPP_INSTALL_PYTHON)` guard would pass the wheel job AND every OFF-side\n"
@@ -259,5 +269,6 @@ if(_missing)
     "--- staged tree ---\n  ${_all}")
 endif()
 
-message(STATUS "python-install-witness [present]: PASS — module + 3 .py + _fixpp_data/__init__.py + 4 XMLs staged.")
+message(STATUS "python-install-witness [present]: PASS — module at ${_module_path}, with 3 .py + "
+               "_fixpp_data/{__init__.py,4 XMLs} co-located beside it.")
 file(REMOVE_RECURSE "${_stage}")

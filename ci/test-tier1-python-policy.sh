@@ -66,6 +66,29 @@
 # five mutants where six ran; the remedy for that is a machine check, not a
 # human eyeball.
 #
+# ⚠️ ACCEPTED BRITTLENESS — WAIVED AT GATE B ROUND 2 (finding 6a, P3). DO NOT
+# "FIX" THIS BY LOOSENING THE PATTERNS.
+#
+# The consumer-position assertions match a specific FORM, not just a meaning.
+# `RT_BASE="${{ … }}"` on its own line passes; `readonly RT_BASE="${{ … }}"`,
+# an unquoted assignment, or a `\`-continued `env` invocation are semantically
+# identical and RED. That was measured (round 2, X4) and it is deliberate:
+#
+#   * a false RED here is LOUD, self-announcing, and one line to fix at the
+#     point of trip — the person who reformatted the line is looking at the
+#     failure;
+#   * loosening the match is a move toward substring tolerance, which is the
+#     single mechanism behind every false-green this pin has had. Round 2 found
+#     FOUR of them (X1/X2/X3/X5/X6/X7b), all through `contains()` selection or a
+#     first-occurrence match. Trading a loud false RED for more of that is a bad
+#     trade at any exchange rate.
+#
+# ⚠️ This is NOT in tension with the EXACT `if:` guard equality below, and a
+# future reader must not "reconcile" the two. An added `if:` conjunct CHANGES
+# WHICH LEGS RUN and must force a deliberate pin update; `readonly` on an
+# assignment changes nothing. Behaviour-changing forms are pinned exactly;
+# formatting variants are simply not normalized.
+#
 # Hermetic: reads tracked files only. No build, no Conan, no network, no `nm`.
 # It DOES hard-require an importable PyYAML on the caller's `python3` (see
 # below) — providing that is the caller's responsibility, not this script's.
