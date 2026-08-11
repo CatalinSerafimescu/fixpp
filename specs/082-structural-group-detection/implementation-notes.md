@@ -650,6 +650,17 @@ All three are commented in-place as such:
 3. **`test_082_group_required_member_validation_test.cpp` T021b** — left **unrestricted and RED** on
    purpose. 5 of its 14 contexts fail because the runtime delimiter is global, not per-context. Do
    not write a restriction; #210 fixes it outright.
+   **→ DISCHARGED 2026-08-11 by measurement (#210 landed with 083).** The binary is now fully
+   GREEN: **0 baseline-construction failures and 0 omission-rejection failures**, both counts
+   measured, not projected — `build/linux-clang-debug/bin/test_082_group_required_member_validation`
+   at `87fcf5a8`, 2 tests / 32 ms, including `KDelimTagsAgreesWithRuntimeGroupFirstField` (the pin
+   that originally *proved* the delimiter global). The green is not vacuous: the #210 carve-out at
+   `:492-503` `continue`s **without** incrementing `cases_checked`, and `:526` asserts
+   `cases_checked == 13`, so a still-excluded case fails the test rather than vanishing from it.
+   ⚠️ **083's handoff projected that 2 of the 14 would still fail** (`spec/behaviors-and-limitations.md`
+   § *Handoff to 082*). That projection is **refuted by measurement — the number is 0.** Read the two
+   counts separately: the "5" above is *baseline-construction* failures; the pin body's "RED today"
+   is the distinct *all-14 omission-rejections* count. Both are zero.
 
 ### The #210 severity escalation found here
 
@@ -670,6 +681,93 @@ injection alone leaves the delimiter global and the false rejection intact.
 document order. Where that member is a nested group's count tag, #208's B-2 (`consume_group` cannot
 open an instance on such a delimiter) bites immediately. FIX42's five are safe (`55 Symbol` etc. are
 plain fields); FIX50SP2's may not be. #210's RED pin must check this explicitly.
+
+---
+
+## RESUMED 2026-08-11 — post-merge baseline (measured)
+
+Branch caught up to `main` by **merge** (not rebase — the branch is published and its Gate A record
+cites branch SHAs): merge commit `87fcf5a8`, **0 behind / 18 ahead**. Conflicts were 2 files, both
+additive-append (`.specify/feature.json`; `tests/session/CMakeLists.txt` — kept both 082's T021/T021b
+blocks and main's 088 blocks). All four stale preset build trees were deleted and rebuilt cold.
+
+**The parked record's central premise was wrong.** The resume brief held that 082 forked **pre-083**
+and must absorb 083's loader rewrite. Measured: `git merge-base --is-ancestor 1b9356bd 75965e3b` →
+**YES** — `1b9356bd` is 083's squash merge, so **the fork base already contains 083**. Corroborated
+by main's drift over `src/dictionary/` since the base being one file (`CMakeLists.txt`, +2/−1). There
+was never a merge collision to absorb, and 083's *"082 is parked on an unbuildable branch"* is retired:
+the merged tree **builds clean, 2771/2771 edges, zero errors**.
+
+### FR-023 × 083 — the collision is REAL, but it is not the predicted one
+
+The brief predicted *"083's FR-023 throws and every shipped dictionary fails to load — immediate and
+total."* **Refuted:** `LoaderDisposition.AllTenShippedDictionariesLoadUnderFailClosedDefault` **passes**.
+What is actually broken is 4 cases in `tests/dictionary/loader_disposition_test.cpp` — **main's own
+file, untouched by this branch** (`git diff --name-only 75965e3b..HEAD` on it is empty), so 082's
+loader edits are the cause. 083 chose a **member-less** group as its representative *unresolvable*
+fixture, so both features act on the same input class with opposite dispositions, in two legs:
+
+| Leg | Test | 083 requires | 082 FR-023 does |
+|---|---|---|---|
+| **1 — tolerant opt-in** | `UnresolvableGroupSkippedUnderTolerantOptIn`, `ContextWithoutDelimiterRecordTolerantModeSkipsGroup`, `OrchestraRejectionIsOrchestraParseError` (its tolerant half, `:370-374`) | FR-006a / FR-023a / C-6.4 — skip the group, load the rest, identically in **both** loaders | throws unconditionally |
+| **2 — DEFAULT policy** | `DeclaredGroupWithZeroContextsDoesNotFailClosed` | FR-006d / C-3.6 — a group reachable from **no** message expansion is *informational, never a load rejection* | throws |
+
+Leg 2 has no policy escape: the fixture is `<component name='UnreferencedComp'><group name='NoBad'
+required='N'></group></component>` — member-less **and** context-less — and both requirements speak at
+the default policy. `UnresolvableGroupRejectedUnderFailClosedDefault` **passes**, so the two features
+already agree on the default *for a referenced* group. **OD-1 (user, 2026-07-30) predates 083's
+`unresolved_group_policy` and did not contemplate the opt-in; the layering is an open decision.**
+
+### Outcome of the FR-023 amendment (measured 2026-08-11, after the removal)
+
+All **11** `LoaderDisposition` cases GREEN, including both required PASSes that would have refuted the
+removal — `AllTenShippedDictionariesLoadUnderFailClosedDefault` (1512 ms) and
+`AllShippedContextsHaveADelimiterRecord` (2863 ms). So 083's *"emitted no first member"* predicate and
+082's removed *"no literal child"* scan are equivalent on all ten shipped dictionaries.
+
+**One real gap surfaced, and it was in 083's diagnostic, not in the layering.** Re-pointing FR-023's
+own pins onto 083's disposition failed T010: the Orchestra message read `<fixr:group> with
+<fixr:numInGroup id="100">` — it names the `no_tag` but **not the group's `name`**, which FR-023
+requires and which the `<fix>` twin already prints. Fixed at `orchestra_loader.cpp`'s fail-closed
+throw by adding `name="…"`, degrading to the id-only form when the optional attribute is absent.
+The rejection itself fired correctly, with the derived `orchestra_parse_error`, **at a non-first-seen
+occurrence** — so 083's check being outside the dedup guard is confirmed by test, not just by reading.
+
+⚠️ **Baseline coverage hole, recorded so it is not repeated.** The `ctest -R 'dict|codegen'` sweep used
+for the baseline does **not** match FR-023's own pin: its ctest name is **`required_scope_census`**,
+not `dictionary_required_scope_census_test`. T009–T011 were therefore outside *both* the before and
+after runs, and T010's failure was found only by running the binary directly. Any FR-023 re-check must
+name that test explicitly.
+
+`fixpp::dict::codegen-build-graph-check` failing post-edit is **not** a regression: its assertion is
+`git status --porcelain` being empty, and it was listing the two modified loader files. It is a
+codegen-staleness gate that requires a committed tree; it also reconfigures the build tree while it
+runs, so keep `ctest` at `-j2` (see project memory `feedback_build_resource_cap_oom`).
+
+### Other post-merge RED, attributed
+
+- `test_067_emit_builders_unit.cpp:742,760` (`Group077DedupSoundness`, 3 cases) — synthetic tags
+  `9002`/`9003` are `NUMINGROUP`-typed but declare no group structure, so T024/T025's re-point onto
+  `VersionIR::group_tags` stops emitting their `G_*Args` structs. A 067 fixture resting on the old
+  datatype gate; **not** covered by T032/T033, which only invert 077's expectations.
+- `DeterminismTest.{GeneratedMatchesGolden,AdditiveOffOnByteDiff}` — **expected at this parking
+  point**: T026/T028 (regenerate + classify the emitted artifacts, regenerate the v42 golden) are
+  still unchecked.
+- `fixpp::dict::read-tier-byte-diff` — **2 artifacts diverged from the pre-077 baseline**, reported by
+  the gate itself as *"a real read-tier regression, not test noise"* (FR-009/SC-005). Present in the
+  baseline, i.e. **not** caused by the FR-023 amendment. This is exactly what **T027** exists to
+  settle — it requires the `v44`/`v50sp2`/`vt11`/`vlatest` read goldens to be **byte-identical**, the
+  discriminating check that the new predicate is set-equal wherever contract C2 says EQUAL. **Two are
+  not.** Treat it as the next substantive item, and identify the two artifacts before any golden is
+  regenerated: T028 regenerates the `v42` golden *by construction*, and reaching for that on a `v44`+
+  divergence would enshrine a real defect.
+
+### Also to reconcile
+
+`tasks.md` shows **T023–T025 unchecked**, but commit `027eef20` and the branch diff show the
+predicate swap and the emitter re-point already applied. Reconcile **by reading code**, not by
+trusting the boxes — a task closable only by inspection is the false-green shape 083's handoff
+named. Tally at resume: 26 done / 31 open.
 
 ---
 

@@ -625,31 +625,20 @@ void LoaderState::expand_field_list(
             if (greq && group_scope_component_required && enclosing_group_no_tag != 0) {
                 group_required_pairs_out.emplace_back(enclosing_group_no_tag, no_tag);
             }
-            // FR-023 (082-structural-group-detection): reject a member-less
-            // <group> (no field/group/component child at all) as a load
-            // error — a declaration with no usable downstream representation
-            // is a malformed dictionary (mirrors :567's sibling rejection).
-            // Deliberately scoped to the LITERAL definition, not "no
-            // *resolvable* member": FIX50SP2's 1499/1669/1919 have
-            // <component> children the one-level scan below can't resolve,
-            // and rejecting those too would take a shipped dictionary down
-            // (issue #208 — a separate, pre-existing defect). Runs on EVERY
-            // <group> occurrence, not just the first-seen one recorded
-            // below, so the rule is not order-dependent (the dedup guard
-            // just below only records first-seen).
-            bool has_member_child = false;
-            for (auto const& gc : child.children()) {
-                std::string_view const tn{gc.name()};
-                if (tn == "field" || tn == "group" || tn == "component") {
-                    has_member_child = true;
-                    break;
-                }
-            }
-            if (!has_member_child) {
-                throw xml_parse_error("dict::xml_parse_error: <group name=\"" + gname +
-                                      "\"> (no_tag " + std::to_string(no_tag) +
-                                      ") has no field/group/component child");
-            }
+            // FR-023 (082) is NOT implemented here. It is satisfied by 083's
+            // T036 `captured == 0` disposition below (:704-737), which rejects
+            // the same input class — a member-less <group> emits no first
+            // member — and does so with the policy layering FR-023 owes:
+            // fail-closed by default, skipped under the explicit
+            // `unresolved_group_policy::tolerant` opt-in (083 FR-006a/FR-023a),
+            // and structurally exempt when the group contributes zero contexts
+            // (083 FR-006d — that branch only runs under a non-null
+            // `delim_cap`, i.e. inside message-scoped expansion).
+            //
+            // A literal-definition scan HERE was tried and removed: it threw
+            // unconditionally, so it overrode BOTH of those dispositions and
+            // took four of 083's `LoaderDisposition` pins RED. See
+            // implementation-notes.md § RESUMED 2026-08-11 and spec.md FR-023.
             // Record the GroupRef (deduplicated by no_tag — first-seen wins).
             if (!group_index_by_no_tag_.contains(no_tag)) {
                 GroupDef gd{};

@@ -591,28 +591,12 @@ void OrchestraLoaderState::expand_field_list(
                 group_required_pairs_out.emplace_back(enclosing_group_no_tag, no_tag);
             }
 
-            // FR-023 (082-structural-group-detection): reject a member-less
-            // <fixr:group> (no child other than the mandatory
-            // <fixr:numInGroup>/<fixr:annotation>) as a load error — the
-            // Orchestra sibling of xml_loader.cpp's rejection above. Runs on
-            // EVERY groupRef occurrence, not just the first-seen one
-            // recorded below, so the rule is not order-dependent (the dedup
-            // guard just below only records first-seen).
-            bool has_member_child = false;
-            for (auto const& gc : group_node.children()) {
-                std::string_view const gcn{gc.name()};
-                if (gcn != "fixr:numInGroup" && gcn != "fixr:annotation") {
-                    has_member_child = true;
-                    break;
-                }
-            }
-            if (!has_member_child) {
-                throw orchestra_parse_error(
-                    "dict::orchestra_parse_error: <fixr:group id=\"" + std::to_string(xml_id) +
-                    "\" name=\"" + std::string{group_node.attribute("name").as_string("")} +
-                    "\"> (numInGroup id " + std::to_string(no_tag) +
-                    ") has no member child other than <fixr:numInGroup>/<fixr:annotation>");
-            }
+            // FR-023 (082) is NOT implemented here — the Orchestra sibling of
+            // the same removal in xml_loader.cpp. It is satisfied by 083's
+            // T036 `captured == 0` disposition below (:659-680), which rejects
+            // the same input class with the policy layering FR-023 owes
+            // (fail-closed default / tolerant skip / zero-context exempt).
+            // See implementation-notes.md § RESUMED 2026-08-11 and spec.md FR-023.
             // Record the GroupRef (deduplicated by no_tag — first-seen wins).
             if (!group_index_by_no_tag_.contains(no_tag)) {
                 OrchestraGroupDef gd{};
@@ -672,10 +656,21 @@ void OrchestraLoaderState::expand_field_list(
                 // would escape to its terminal rethrow and crash the fuzzer.
                 // C-6.1a / FR-006d holds STRUCTURALLY: this branch runs only
                 // under a non-null sink, i.e. only in the message-scoped walk.
+                // 082 FR-023: the diagnostic MUST name the group's `name`
+                // attribute as well as its `no_tag` — "the facts an operator
+                // needs to fix the offending dialect" (`error.hpp:73`). The
+                // `<fix>` twin already names it (`xml_loader.cpp`'s
+                // `<group name="...">`); this one did not, which is the ONE
+                // gap found when FR-023's own pins were re-pointed onto this
+                // disposition. `name` is optional on `<fixr:group>`, so an
+                // absent attribute degrades to the id-only form rather than
+                // printing an empty `name=""`.
                 else if (unresolved_policy_ == unresolved_group_policy::fail_closed) {
+                    std::string_view const gname{group_node.attribute("name").as_string("")};
                     throw orchestra_parse_error(
-                        "dict::orchestra_parse_error: <fixr:group> with <fixr:numInGroup id=\"" +
-                        std::to_string(no_tag) +
+                        "dict::orchestra_parse_error: <fixr:group" +
+                        (gname.empty() ? std::string{} : " name=\"" + std::string{gname} + "\"") +
+                        "> with <fixr:numInGroup id=\"" + std::to_string(no_tag) +
                         "\"> declares no first member, so its delimiter cannot be resolved; "
                         "pass unresolved_group_policy::tolerant to skip it instead");
                 }

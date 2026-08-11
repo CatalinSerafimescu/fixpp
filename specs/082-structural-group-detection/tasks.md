@@ -113,6 +113,15 @@ the zero-member `<group>` state unreachable for everything downstream.
 - [X] T011 [P] RED→GREEN-by-construction: assert all **ten** vendored dictionaries still load clean in `tests/dictionary/required_scope_census_test.cpp` — the FR-023 no-regression leg, cross-checked against T007's oracle report. T009–T011 together are SC-013's witness.
 - [X] T012 Implement the rejection in `src/dictionary/xml_loader.cpp` (member scan `:610-641`, recorded `:644`, pushed `:649`): throw `xml_parse_error` naming the group's `name` and `no_tag`, per `include/fixpp/dict/error.hpp:73`'s "the facts an operator needs to fix the offending dialect" convention. The check MUST sit **outside** the first-seen dedup guard at `:609` so the rule is not order-dependent. No new exception subclass and no `fixpp::core::error` variant (`error.hpp:18-27`), so FR-017 / SC-009 and `tests/core/test_020_error_completeness.cpp`'s slot pin hold.
 - [X] T013 Implement the Orchestra sibling in `src/dictionary/orchestra_loader.cpp` (`first_member_tag(group_node) == 0` at `:629`, helper `:467`, record block `:626-635`): throw `orchestra_parse_error`, same diagnostic shape, **outside** the dedup guard at `:626`.
+> **⚠️ T012 / T013 RE-DISPOSITIONED 2026-08-11 — implemented as a REMOVAL, not an addition.** Both
+> literal-scan rejections were written and are now **deleted**: they threw unconditionally, so they
+> overrode 083's `unresolved_group_policy` and its zero-context exemption, taking four
+> `LoaderDisposition` pins RED (one at the **default** policy). FR-023 is satisfied instead by 083's
+> `captured == 0` disposition already present in both loaders. The `[X]` boxes stay checked — the
+> tasks were executed and their outcome is the amended one — but **the code they describe is
+> deliberately absent**; do not "restore" it. Authority: user decision 2026-08-11; see `spec.md`
+> FR-023 § AMENDED and `implementation-notes.md` § RESUMED 2026-08-11.
+
 - [X] T014 Verify T009–T011 are GREEN and confirm the contract text in `contracts/group-detection.md` C1.1 / C1.3 P1-NON now describes an **unreachable** state rather than a tolerated limitation. Do not overstate: `group_first_field`'s sentinel is still ambiguous *in isolation*; what changed is that no `Dictionary` the loaders admit can carry a member-less group.
 
 **Checkpoint**: the oracle is independent of the predicate under change, and the zero-member state is
