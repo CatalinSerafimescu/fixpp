@@ -346,7 +346,15 @@ assert_derive_call_site() {
   cfg="$(step_where run_eff 'cmake --preset ${{ matrix.preset }}')" || exit 1
   [ -n "$cfg" ] && [ "$cfg" != "null" ] \
     || fail "$case_id: no Configure step (no run: containing 'cmake --preset \${{ matrix.preset }}')"
-  local cfg_run; cfg_run="$(step_field "$cfg" run)"
+  # ⚠️ `run_eff`, NOT `run`. Selecting the step on effective commands while
+  # ASSERTING against the raw text leaves the whole point of the strip behind —
+  # and that is exactly what shipped in the round-2 fix. Measured (X8): delete
+  # `-DFIXPP_INSTALL_PYTHON=OFF` from the Configure command and leave it in a `#`
+  # comment in the SAME step, and the pin PASSED — announcing
+  # "FIXPP_INSTALL_PYTHON=OFF" in its own success line while the six legs would
+  # configure without the flag and ship the Python payload in both Release
+  # packages. Same class as X1, one layer down, inside the fix for X1. M18.
+  local cfg_run; cfg_run="$(step_field "$cfg" run_eff)"
 
   grep -qF -e '-DFIXPP_PYTHON_SANITIZER=${{ steps.pysan.outputs.sanitizer }}' <<<"$cfg_run" \
     || fail "$case_id: the Configure step does not pass -DFIXPP_PYTHON_SANITIZER=\${{ steps.pysan.outputs.sanitizer }} — the derived identity is not what configures the build"
@@ -510,7 +518,7 @@ echo "PASS: derive-script table + call site + FIXPP_INSTALL_PYTHON=OFF + PY_RE c
 # for a miscount; a counter is. MUTANTS_RUN is incremented by each mutant AFTER
 # it has been proven RED for the right reason, so an early `return` or a mutant
 # silently commented out changes the total.
-MUTANTS_DECLARED=18  # M1 M2 M3 B M4 M5 M6 M7 M8 M9 M10 M11 M12 M13 M14 M15 M16 M17
+MUTANTS_DECLARED=19  # M1 M2 M3 B M4 M5 M6 M7 M8 M9 M10 M11 M12 M13 M14 M15 M16 M17 M18
 MUTANTS_RUN=0
 
 run_mutant_checks() {
@@ -953,6 +961,37 @@ src, dst = sys.argv[1], sys.argv[2]
 t = open(src).read()
 old = "          env ${{ steps.pysan.outputs.san_opts }} LD_PRELOAD=\"$RT\" \\\n"
 new = "          env ${{ steps.pysan.outputs.san_opts }} UBSAN_OPTIONS=print_stacktrace=1 LD_PRELOAD=\"$RT\" \\\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
+'
+
+  # M18 (X8): the Configure step keeps `cmake --preset ${{ matrix.preset }}` — so
+  # the selector still finds it, uniquely — but the real `-DFIXPP_INSTALL_PYTHON=OFF`
+  # is DELETED from the command and survives only as a `#` comment in the same
+  # step. Found by the orchestrator between rounds 2 and 3, and it was live: the
+  # step selector used `run_eff` while the flag assertions read the RAW `run`.
+  #
+  # ⚠️ This must red on the MISSING FLAG, not on ambiguity (M13's reason) and not
+  # on the sanitizer flag (which the mutant preserves). The reason-grep below is
+  # deliberately the OFF clause's own wording.
+  mutate_workflow M18 "the install flag survives only as a comment in the Configure step" "does not pass -DFIXPP_INSTALL_PYTHON=OFF" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = """        run: >
+          cmake --preset ${{ matrix.preset }}
+          -DFIXPP_ARTIFACT_DIR=${{ github.workspace }}/_artifacts
+          -DFIXPP_BUILD_PYTHON=ON
+          -DFIXPP_INSTALL_PYTHON=OFF
+          -DFIXPP_PYTHON_SANITIZER=${{ steps.pysan.outputs.sanitizer }}
+"""
+new = """        run: |
+          # -DFIXPP_INSTALL_PYTHON=OFF temporarily dropped while chasing a wheel issue
+          cmake --preset ${{ matrix.preset }} \\\\
+            -DFIXPP_ARTIFACT_DIR=${{ github.workspace }}/_artifacts \\\\
+            -DFIXPP_BUILD_PYTHON=ON \\\\
+            -DFIXPP_PYTHON_SANITIZER=${{ steps.pysan.outputs.sanitizer }}
+"""
 assert t.count(old) == 1, t.count(old)
 open(dst, "w").write(t.replace(old, new))
 '
