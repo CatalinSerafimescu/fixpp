@@ -169,9 +169,18 @@ cell_green() {
   echo "  ok  $name [$mode/$layout] — PASS as expected"
 }
 
-# A RED cell: nonzero exit AND the failure text must name THIS cell's defect.
+# A RED cell: nonzero exit, the failure text must name THIS cell's defect, and —
+# where a 5th argument is given — must NOT name something the layout staged
+# correctly.
+#
+# ⚠️ The negative needle is what makes "for its own reason" mean anything. Each
+# broken layout keeps everything except one thing; a witness that reported the
+# whole payload missing would satisfy the positive needle just as well, and the
+# cell would read green while the instrument was actually broken. That failure
+# shape — an instrument's breakage reading as a finding — has bitten this repo
+# before (feedback_silent_empty_recurred_three_times…).
 cell_red() {
-  local name="$1" mode="$2" layout="$3" needle="$4"
+  local name="$1" mode="$2" layout="$3" needle="$4" not_needle="${5:-}"
   local bld out rc=0
   bld="$(make_fixture "$name" "$layout")" || exit 1
   out="$TMP/$name/witness.log"
@@ -180,8 +189,12 @@ cell_red() {
     || { cat "$out" >&2; fail "cell $name [$mode/$layout]: expected RED, the witness PASSED — this layout is certified as a working install"; }
   grep -qF -- "$needle" "$out" \
     || { cat "$out" >&2; fail "cell $name [$mode/$layout]: RED, but not for its own reason — '$needle' is absent from the failure"; }
+  if [ -n "$not_needle" ] && grep -qF -- "$not_needle" "$out"; then
+    cat "$out" >&2
+    fail "cell $name [$mode/$layout]: RED, but OVER-BROAD — it also reports '$not_needle', which this layout stages CORRECTLY. The witness is failing for more than the seeded defect, so this cell is not evidence that it detects that defect."
+  fi
   cells_run=$((cells_run + 1))
-  echo "  ok  $name [$mode/$layout] — RED for its own reason"
+  echo "  ok  $name [$mode/$layout] — RED for its own reason, and only that reason"
 }
 
 echo "ci/test-python-install-witness.sh — driving $WITNESS"
@@ -194,10 +207,10 @@ cell_green good  present good  "python-install-witness [present]: PASS"
 cell_green soabi present soabi "_fixpp.cpython-312-x86_64-linux-gnu.so"
 
 # ── present: the three measured escapes, plus the data package ───────────────
-cell_red w1 present w1 "fixpp_oo.py (expected at"
-cell_red w2 present w2 "fixpp.py (expected at"
-cell_red w3 present w3 "the extension module"
-cell_red w5 present w5 "_fixpp_data/__init__.py (expected at"
+cell_red w1 present w1 "fixpp_oo.py (expected at"           "_fixpp_data/FIX42.xml (expected at"
+cell_red w2 present w2 "fixpp.py (expected at"              "fixpp_oo.py (expected at"
+cell_red w3 present w3 "the extension module"               "fixpp_oo.py (expected at"
+cell_red w5 present w5 "_fixpp_data/__init__.py (expected at" "fixpp_oo.py (expected at"
 
 # ── absent: the L-056-4 side ─────────────────────────────────────────────────
 # The clean cell also proves the four XMLs under share/fixpp/dictionaries are NOT
