@@ -148,14 +148,36 @@ linux_matrix_keys = sorted(str(k) for k in linux_job["strategy"]["matrix"].keys(
 #   * writes to $GITHUB_ENV / $GITHUB_PATH from any step in the job (measured: ZERO today)
 #   * `uses:` steps, which can do the same from inside a composite action
 #   * the job-level `env:` and `defaults:`
+# ⚠️ COUNT, not names, and the difference was a live false-green (round 5
+# finding 1). This stored step NAMES and the assertion compared `join(",")` — so
+# ONE UNNAMED writer produced `[""]`, which joins to the empty string and read as
+# ZERO writers. Turning an existing named step into an unnamed one therefore
+# defeated the writer census AND the step count at once. Names are kept for the
+# message only; the assertion is over the LENGTH.
+#
+# ⚠️ `${{ github.env }}` and `${{ github.path }}` are GitHub's OFFICIAL context
+# properties for the same two files — not obfuscation. A census that recognizes
+# only the `$GITHUB_ENV` spelling excludes a documented alias, which is a gap
+# rather than an accepted threat-model boundary (the concession for *computed*
+# paths stands; excluding official spellings does not).
+_ENV_FILE_SPELLINGS = ("GITHUB_ENV", "GITHUB_PATH", "github.env", "github.path")
 linux_env_writers = [
-    str(s.get("name", "")) for s in linux_job["steps"]
-    if "GITHUB_ENV" in str(s.get("run", "")) or "GITHUB_PATH" in str(s.get("run", ""))
+    {"index": i, "name": str(s.get("name", ""))}
+    for i, s in enumerate(linux_job["steps"])
+    if any(t in str(s.get("run", "")) for t in _ENV_FILE_SPELLINGS)
 ]
 linux_uses = [str(s["uses"]) for s in linux_job["steps"] if "uses" in s]
 linux_step_count = len(linux_job["steps"])
 linux_job_env = {str(k): str(v) for k, v in (linux_job.get("env") or {}).items()}
 linux_has_defaults = "defaults" in linux_job
+
+# ⚠️ Round 5 finding 2. WORKFLOW-level `env:` reaches every job, and workflow-level
+# `defaults.run` supplies the shell to every `run:` step in the file. Both sit
+# ABOVE the job context pinned above, and both were measured GREEN: a
+# workflow-level `PYTEST_ADDOPTS: --collect-only` beside the existing CONAN_HOME,
+# and a workflow-level `defaults.run.shell: /bin/true {0}`.
+workflow_env = {str(k): str(v) for k, v in (doc.get("env") or {}).items()}
+workflow_has_defaults = "defaults" in doc
 
 # ⚠️ PER-STEP OBJECTS, not one concatenated blob — and the difference is the
 # whole of Gate B round 1's F5. The previous version emitted only
@@ -225,6 +247,8 @@ out = {
     "linux_step_count": linux_step_count,
     "linux_job_env": linux_job_env,
     "linux_has_defaults": linux_has_defaults,
+    "workflow_env": workflow_env,
+    "workflow_has_defaults": workflow_has_defaults,
 }
 print(json.dumps(out))
 PYEOF
@@ -549,9 +573,9 @@ assert_linux_job_context() {
   [ "$got" = "preset" ] \
     || fail "$case_id: the linux job's strategy.matrix has keys '$got', expected exactly 'preset'. \`include\`/\`exclude\` change which legs are INSTANTIATED, so the preset list stops being the effective set and assertion 1's exactness claim becomes false — measured: excluding the three sanitizer presets left this pin GREEN with no sanitizer leg running at all."
 
-  got="$(echo "$json" | jq -r '.linux_env_writers | join(",")')"
-  [ -z "$got" ] \
-    || fail "$case_id: step(s) in the linux job write to \$GITHUB_ENV/\$GITHUB_PATH: '$got'. Measured as ZERO on the unfixed tree, so this is a real change and not a pre-existing condition. Such a write reaches the pinned pytest steps without touching a byte of their run: text — PYTEST_ADDOPTS=--collect-only is the demonstrated case. If a legitimate one is ever needed, pin it here by name AND prove it cannot affect pytest."
+  got="$(echo "$json" | jq -r '.linux_env_writers | length')"
+  [ "$got" = "0" ] \
+    || fail "$case_id: $got step(s) in the linux job write to the environment/path files: $(echo "$json" | jq -c '.linux_env_writers'). Measured as ZERO on the unfixed tree, so this is a real change and not a pre-existing condition. Such a write reaches the pinned pytest steps without touching a byte of their run: text — PYTEST_ADDOPTS=--collect-only is the demonstrated case. If a legitimate one is ever needed, pin it here by name AND prove it cannot affect pytest."
 
   got="$(echo "$json" | jq -r '.linux_uses | join(",")')"
   [ "$got" = "actions/checkout@v6,jlumbroso/free-disk-space@main,actions/setup-python@v6,oras-project/setup-oras@v2,hendrikmuhs/ccache-action@v1.2.23,actions/upload-artifact@v7" ] \
@@ -568,6 +592,18 @@ assert_linux_job_context() {
   got="$(echo "$json" | jq -r '.linux_has_defaults')"
   [ "$got" = "false" ] \
     || fail "$case_id: the linux job declares \`defaults:\` — \`defaults.run.shell\` changes the interpreter of every step in the job, including the pinned ones, with their run: text unchanged."
+
+  # ⚠️ ONE LAYER ABOVE THE JOB, and it was open until round 5. Workflow-level
+  # `env:` reaches every job and workflow-level `defaults.run` supplies the shell
+  # to every `run:` step in the file — so pinning the job context alone left both
+  # escapes intact, measured.
+  got="$(echo "$json" | jq -cS '.workflow_env')"
+  [ "$got" = '{"CONAN_HOME":"~/.conan2"}' ] \
+    || fail "$case_id: the workflow-level env: block is $got, expected exactly {\"CONAN_HOME\":\"~/.conan2\"}. Workflow env reaches EVERY job, so a variable added here lands on both pinned pytest steps without touching the linux job at all — PYTEST_ADDOPTS=--collect-only was measured doing exactly that."
+
+  got="$(echo "$json" | jq -r '.workflow_has_defaults')"
+  [ "$got" = "false" ] \
+    || fail "$case_id: the workflow declares top-level \`defaults:\` — \`defaults.run.shell\` supplies the interpreter for every run: step in the FILE, including the four pinned ones, with their text unchanged."
 }
 
 # ── 4: PY_RE case table ─────────────────────────────────────────────────────
@@ -693,7 +729,7 @@ echo "PASS: derive-script table + call site + FIXPP_INSTALL_PYTHON=OFF + PY_RE c
 # for a miscount; a counter is. MUTANTS_RUN is incremented by each mutant AFTER
 # it has been proven RED for the right reason, so an early `return` or a mutant
 # silently commented out changes the total.
-MUTANTS_DECLARED=21  # M1 M2 M3 B M4 M5 M6 M7 M11 M14 M15 M21 M26 M27 M29 M30 M31 M32 M33 M34 + M28 — DOWN from 27 at
+MUTANTS_DECLARED=28  # M1 M2 M3 B M4 M5 M6 M7 M11 M14 M15 M21 M26 M27 M29-M34 M35-M41 + M28 — DOWN from 27 at
                      # round 3b, because the golden subsumed 14 of them. See the
                      # RETIRED block in run_mutant_checks for the list and the reason.
 MUTANTS_RUN=0
@@ -1140,12 +1176,15 @@ open(dst, "w").write(t.replace(old, new))
   # into collection-only runs. Two censuses catch it (the env-writer census and
   # the step count) — the reason-grep names the env-writer one, which is the
   # specific mechanism.
+  # ⚠️ The inserted step deliberately writes NOTHING. An earlier version wrote
+  # $GITHUB_ENV, which tripped the writer census first and left the step count
+  # with no mutant of its own — the shadowing round 5 finding 3 is about.
   mutate_workflow M33 "an unnamed step is inserted before the pytest pair" "has 31 steps, expected 30" '
 import sys
 src, dst = sys.argv[1], sys.argv[2]
 t = open(src).read()
 old = "      - name: Run Python tests\n        if: steps.pysan.outputs.sanitizer == \x27none\x27\n"
-inject = "      - run: echo \x27PYTEST_ADDOPTS=--collect-only\x27 >> \"$GITHUB_ENV\"\n"
+inject = "      - run: echo harmless\n"
 assert t.count(old) == 1, t.count(old)
 open(dst, "w").write(t.replace(old, inject + old))
 '
@@ -1155,7 +1194,7 @@ open(dst, "w").write(t.replace(old, inject + old))
   # env-writer census can see this one, which is why M33 (which trips the count
   # first) does not stand in for it. Each census gets its own mutant or it is an
   # untested assertion.
-  mutate_workflow M34 "an existing step appends PYTEST_ADDOPTS to GITHUB_ENV" "write to .GITHUB_ENV" '
+  mutate_workflow M34 "an existing step appends PYTEST_ADDOPTS to GITHUB_ENV" "write to the environment/path files" '
 import sys
 src, dst = sys.argv[1], sys.argv[2]
 t = open(src).read()
@@ -1167,6 +1206,105 @@ new = ("        run: |\n"
        "          echo \x27PYTEST_ADDOPTS=--collect-only\x27 >> \"$GITHUB_ENV\"\n")
 assert t.count(old) == 1, t.count(old)
 open(dst, "w").write(t.replace(old, new))
+'
+
+  # ── Round 5: the two escapes above the job, and the unwitnessed censuses ────
+
+  # M35 (round 5 finding 1a): an EXISTING step becomes UNNAMED and writes
+  # $GITHUB_ENV. The step count is unchanged, and the previous census stored step
+  # NAMES and compared their join — so one unnamed writer produced [""], joined to
+  # the empty string, and read as ZERO writers. Both censuses defeated at once.
+  mutate_workflow M35 "an existing step is un-named and writes GITHUB_ENV" "write to the environment/path files" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "      - name: Report disk to the job summary (#254)\n"
+assert t.count(old) == 1, t.count(old)
+t = t.replace(old, "      -\n")
+old2 = "        run: cat /tmp/disk.txt >> \"$GITHUB_STEP_SUMMARY\"\n"
+new2 = ("        run: |\n"
+        "          cat /tmp/disk.txt >> \"$GITHUB_STEP_SUMMARY\"\n"
+        "          echo \x27PYTEST_ADDOPTS=--collect-only\x27 >> \"$GITHUB_ENV\"\n")
+assert t.count(old2) == 1, t.count(old2)
+open(dst, "w").write(t.replace(old2, new2))
+'
+
+  # M36 (round 5 finding 1b): `${{ github.env }}` — GitHub's OFFICIAL context
+  # property for the same file. Not obfuscation, and a census that knows only the
+  # `$GITHUB_ENV` spelling has a gap rather than a threat-model boundary.
+  mutate_workflow M36 "an existing step writes via the github.env context alias" "write to the environment/path files" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "        run: cat /tmp/disk.txt >> \"$GITHUB_STEP_SUMMARY\"\n"
+new = ("        run: |\n"
+       "          cat /tmp/disk.txt >> \"$GITHUB_STEP_SUMMARY\"\n"
+       "          echo \x27PYTEST_ADDOPTS=--collect-only\x27 >> \"${{ github.env }}\"\n")
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
+'
+
+  # M37 (round 5 finding 3): the `uses:` census had no mutant. A composite action
+  # can export environment to later steps from inside itself.
+  mutate_workflow M37 "an action reference is changed" "uses:. steps are" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+# Every plain `uses:` line here appears in several jobs, so the anchor carries the
+# linux job\x27s own preceding comment. Anchoring on the bare action reference
+# mutated four jobs at once and the assertion then fired for the wrong job.
+old = ("      # `Measure disk` step below is the standing instrument — use it, not a\n"
+       "      # remembered number.\n"
+       "      - name: Free up disk space\n"
+       "        uses: jlumbroso/free-disk-space@main\n")
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, old.replace("@main", "@v1.3.1")))
+'
+
+  # M38 / M39 (round 5 finding 3): the job-level env: and defaults: assertions had
+  # no mutants. Codex verified both work; an assertion nobody has driven RED is
+  # exactly what this file exists not to ship.
+  mutate_workflow M38 "a variable added to the job-level env" "job.s env: block is" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+# `CCACHE_DIR: /tmp/fixpp-ccache-${{ matrix.preset }}` is unique to the linux job
+# (the bench job uses a literal suffix). The three ccache lines above it are NOT
+# unique — they also appear in the coverage job.
+old = "      CCACHE_DIR: /tmp/fixpp-ccache-${{ matrix.preset }}\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, old + "      PYTEST_ADDOPTS: --collect-only\n"))
+'
+
+  mutate_workflow M39 "job-level defaults.run.shell" "declares .defaults:" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+# Anchored on the linux job\x27s unique CCACHE_DIR line and appended AFTER it:
+# that closes the `env:` mapping and opens `defaults:` as a sibling job key.
+# Mapping order is irrelevant to YAML, and the `env:` line itself is not unique.
+old = "      CCACHE_DIR: /tmp/fixpp-ccache-${{ matrix.preset }}\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, old + "    defaults:\n      run:\n        shell: /bin/true {0}\n"))
+'
+
+  # M40 / M41 (round 5 finding 2): one layer ABOVE the job.
+  mutate_workflow M40 "a variable added to the WORKFLOW-level env" "workflow-level env: block is" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "env:\n  CONAN_HOME: ~/.conan2\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, old + "  PYTEST_ADDOPTS: --collect-only\n"))
+'
+
+  mutate_workflow M41 "WORKFLOW-level defaults.run.shell" "top-level .defaults:" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "env:\n  CONAN_HOME: ~/.conan2\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, old + "defaults:\n  run:\n    shell: /bin/true {0}\n"))
 '
 
   # ── M28 — a POSITIVE control, and the golden needs one ──────────────────────
