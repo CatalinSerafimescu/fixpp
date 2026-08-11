@@ -230,7 +230,7 @@ set(_module_re "^_fixpp(\\.cpython-[^/]*)?\\.(so|pyd)$")
 set(_module_path "")
 foreach(_p IN LISTS _staged)
   get_filename_component(_name "${_p}" NAME)
-  if(_name MATCHES "${_module_re}" AND NOT IS_DIRECTORY "${_p}")
+  if(_name MATCHES "${_module_re}" AND NOT IS_DIRECTORY "${_p}" AND NOT IS_SYMLINK "${_p}")
     set(_module_path "${_p}")
     break()
   endif()
@@ -244,9 +244,17 @@ else()
   get_filename_component(_module_dir "${_module_path}" DIRECTORY)
   foreach(_r IN LISTS _required)
     set(_want "${_module_dir}/${_r}")
-    # IS_DIRECTORY rejection is not pedantry: W2 staged `fixpp.py` as a directory
-    # full of other files and the witness called the install working.
-    if(NOT EXISTS "${_want}" OR IS_DIRECTORY "${_want}")
+    # ⚠️ A REGULAR FILE — not a directory, not a symlink. Both exclusions are
+    # measured, not defensive:
+    #   W2  `fixpp.py` staged as a DIRECTORY full of other files -> was certified.
+    #   W6  `fixpp.py` staged as a SYMLINK to `fixpp_oo.py` (Gate B round 3, Codex
+    #       finding 5) -> was certified. `install(FILES)` preserves symlinks, so
+    #       that install has no SWIG wrapper at `fixpp.py` at all.
+    # Rejecting symlinks outright is stricter than resolving them, and deliberately
+    # so: the four install() rules promise installed artifacts, not a symlink
+    # layout, and validating a link target's identity is a bigger instrument than
+    # the contract needs.
+    if(NOT EXISTS "${_want}" OR IS_DIRECTORY "${_want}" OR IS_SYMLINK "${_want}")
       list(APPEND _missing "${_r} (expected at ${_want})")
     endif()
   endforeach()

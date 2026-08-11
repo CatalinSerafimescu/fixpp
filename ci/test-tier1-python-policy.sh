@@ -172,12 +172,20 @@ for step in gp_steps:
 
 tier1_required_needs = jobs["tier1-required"]["needs"]
 
+# #254 / Gate B round 3, Codex finding 6. `ci-script-pins` is where every ci/
+# shell harness actually EXECUTES. A harness that is green when run but is never
+# run is the dead-call-site shape this pin already guards for the derive script;
+# it was measured on the new install-witness harness (replace the invocation with
+# an echo and the job stays green, the negative layouts stop being exercised).
+ci_pin_runs = "\n".join(str(s.get("run", "")) for s in jobs["ci-script-pins"]["steps"])
+
 out = {
     "linux_presets": linux_presets,
     "linux_steps": linux_steps,
     "linux_runs": linux_runs,
     "decide_run": decide_run,
     "tier1_required_needs": tier1_required_needs,
+    "ci_pin_runs": ci_pin_runs,
 }
 print(json.dumps(out))
 PYEOF
@@ -286,6 +294,13 @@ assert_derive_call_site() {
   # Comments are stripped line-wise; a `#` inside a quoted string is not a comment
   # but stripping one only ever makes this check STRICTER, never laxer.
   #
+  # ⚠️ `;` counts as a comment introducer position, not just whitespace. Round 3
+  # (Codex finding 1) measured `echo dead >/dev/null ;# ci/derive-python-sanitizer.sh …`
+  # selecting the derive step through a shell COMMENT: `;#` has no whitespace
+  # before the `#`, so the first draft's `(^|[ \t])#` left the whole line intact.
+  # The named capture re-emits the separator so `cmd ;` survives as a command.
+  # `${VAR#pattern}` is deliberately NOT touched — no space or `;` precedes it.
+  #
   # `run_cmd` additionally joins `\`-continuations, so one LOGICAL COMMAND is one
   # line. Without it a per-line assertion cannot see a whole invocation: the real
   # sanitizer call is `env <opts> LD_PRELOAD=… \` on one physical line and
@@ -298,7 +313,7 @@ assert_derive_call_site() {
     [ .linux_steps[]
       | . + { run_eff: ( (.run // "")
                 | split("\n")
-                | map(sub("(^|[ \t])#.*$"; ""))
+                | map(sub("(?<p>[ \t;]|^)#.*$"; "\(.p)"))
                 | map(select(test("[^ \t]")))
                 | join("\n") ) }
       | . + { run_cmd: ( .run_eff | gsub("\\\\\n[ \t]*"; " ") ) } ]')"
@@ -349,6 +364,16 @@ assert_derive_call_site() {
   derive_id="$(step_field "$derive_step" id)"
   [ "$derive_id" = "pysan" ] \
     || fail "$case_id: the derive step's id is '$derive_id', expected 'pysan' — every steps.pysan.outputs.* interpolation in this job would resolve to the empty string"
+
+  # ⚠️ INVOKES the script, not MENTIONS it — the same distinction the pytest steps
+  # carry. Uniquely selecting a step that CONTAINS the text still admits a
+  # diagnostic `echo "running ci/derive-python-sanitizer.sh …"` in that same step
+  # with the real invocation deleted; the step would emit no outputs at all and
+  # every `steps.pysan.outputs.*` consumer would silently become the empty string.
+  # The command must START a logical line.
+  grep -qE '^[[:space:]]*ci/derive-python-sanitizer\.sh "\$\{\{ matrix\.preset \}\}"' \
+    <<<"$(step_field "$derive_step" run_cmd)" \
+    || fail "$case_id: no line of the derive step INVOKES \`ci/derive-python-sanitizer.sh \"\${{ matrix.preset }}\"\` — the text is present but sits inside another command, so the step emits no outputs and every steps.pysan.outputs.* consumer resolves to the empty string"
 
   # ── `sanitizer`: the Configure argument AND both pytest `if:` guards ───────
   local cfg
@@ -449,12 +474,31 @@ assert_derive_call_site() {
   # ── `rt_base`: the RT_BASE assignment INSIDE the sanitizer pytest step ─────
   # Not "appears somewhere". If RT_BASE is hard-coded, the ubsan leg LD_PRELOADs
   # the wrong runtime while the token still exists in a dead echo elsewhere.
-  # ⚠️ THE LAST ASSIGNMENT WINS, so assert the LAST one — not merely that a
-  # correct one appears. X6: a verbatim-correct assignment followed by
-  # `RT_BASE=asan` leaves the correct line present and inert, which the previous
-  # "does it appear" form accepted. `$san_run` is already comment-stripped.
-  local _rt_last
-  _rt_last="$(grep -oE '^[[:space:]]*(readonly[[:space:]]+)?RT_BASE=.*$' <<<"$san_run" | tail -1)"
+  # ⚠️ EXACTLY ONE ASSIGNMENT, and it is the interpolation. Two weaker rules were
+  # tried and both were measured GREEN on a workflow that LD_PRELOADs the wrong
+  # runtime on the UBSan leg:
+  #
+  #   "a correct one appears"  — X6: `RT_BASE="${{ … }}"` then `RT_BASE=asan`.
+  #   "the LAST one is correct" — Codex round 3, finding 3:
+  #        RT_BASE="${{ … }}"
+  #        RT_BASE=asan
+  #        if false; then RT_BASE="${{ … }}"; fi
+  #     The last TEXTUAL assignment is correct and unreachable; the effective value
+  #     is `asan`. The same escape is available through an uncalled function, a
+  #     subshell, or a non-selected `case` arm.
+  #
+  # A pin cannot do shell data-flow analysis, and it does not need to: every one of
+  # those forms requires a SECOND assignment. Counting them is exact where ordering
+  # is guesswork. A legitimate second assignment would be a deliberate change to a
+  # load-bearing line and should red — the same rule the `if:` guards follow.
+  # `$san_run` is already comment-stripped and continuation-joined.
+  local _rt_all _rt_n _rt_last
+  _rt_all="$(grep -oE '^[[:space:]]*(readonly[[:space:]]+)?RT_BASE=.*$' <<<"$san_run" || true)"
+  _rt_n="$(grep -c . <<<"$_rt_all" || true)"
+  [ -z "$_rt_all" ] && _rt_n=0
+  [ "$_rt_n" = "1" ] \
+    || fail "$case_id: the sanitizer pytest step makes $_rt_n assignments to RT_BASE, expected exactly 1. More than one means the effective value depends on reachability the pin cannot evaluate — a dead \`if false\` branch, an uncalled function or a subshell can leave a correct-looking assignment last while the leg LD_PRELOADs the wrong runtime. Assignments: $(printf '%s' "$_rt_all" | tr '\n' '|')"
+  _rt_last="$_rt_all"
   [ -n "$_rt_last" ] \
     || fail "$case_id: the sanitizer pytest step never assigns RT_BASE"
   grep -qE '^[[:space:]]*RT_BASE="\$\{\{ steps\.pysan\.outputs\.rt_base \}\}"[[:space:]]*$' <<<"$_rt_last" \
@@ -559,6 +603,34 @@ assert_tier1_required_needs() {
     || fail "$case_id: tier1-required needs set '$got' != expected '$EXPECTED_NEEDS'"
 }
 
+# ── 6: the ci/ harnesses are actually INVOKED by ci-script-pins ─────────────
+# Gate B round 3, Codex finding 6. `ci-script-pins` is the only ungated tier-1
+# job, and it is where every ci/ shell harness executes. A harness that passes
+# when run but is never run has no durable coverage at all — Article VII §4's
+# "no code without a test" is not satisfied by a test nothing calls. Measured:
+# replacing `bash ci/test-python-install-witness.sh` with an echo left this pin,
+# and the whole job, green while W1/W2/W3/W5 stopped being exercised.
+#
+# Same invokes-vs-mentions rule as everywhere else: the command must START a
+# line, so an echo naming it does not satisfy the census.
+CI_PIN_HARNESSES=(
+  "ci/test-restore-conan-cache.sh"
+  "ci/test-ccache-scripts.sh"
+  "ci/test-tier1-python-policy.sh"
+  "ci/test-python-install-witness.sh"
+)
+
+assert_ci_pin_call_sites() {
+  local json="$1" case_id="$2"
+  local runs h
+  runs="$(echo "$json" | jq -r '.ci_pin_runs // ""')"
+  [ -n "$runs" ] || fail "$case_id: the ci-script-pins job has no run: text at all"
+  for h in "${CI_PIN_HARNESSES[@]}"; do
+    grep -qE "^[[:space:]]*bash ${h//\//\\/}([[:space:]]|\$)" <<<"$runs" \
+      || fail "$case_id: ci-script-pins does not INVOKE \`bash $h\` — the harness would never run, so its assertions have no durable coverage (a mention inside an echo does not count)"
+  done
+}
+
 # Two mutation targets, so two parameters: M1/M2/M3 mutate the DERIVE SCRIPT
 # and leave the workflow alone; M4-M8 do the reverse.
 run_full_pin() {
@@ -569,6 +641,7 @@ run_full_pin() {
   assert_derive_call_site "$json" "$case_id"
   assert_py_re_case_table "$json" "$case_id"
   assert_tier1_required_needs "$json" "$case_id"
+  assert_ci_pin_call_sites "$json" "$case_id"
 }
 
 # ── Real workflow: must pass all four assertions ────────────────────────────
@@ -585,7 +658,7 @@ echo "PASS: derive-script table + call site + FIXPP_INSTALL_PYTHON=OFF + PY_RE c
 # for a miscount; a counter is. MUTANTS_RUN is incremented by each mutant AFTER
 # it has been proven RED for the right reason, so an early `return` or a mutant
 # silently commented out changes the total.
-MUTANTS_DECLARED=23  # M1 M2 M3 B M4 M5 M6 M7 M8 M9 M10 M11 M12 M13 M14 M15 M16 M17 M18 M19 M20 M21 M22
+MUTANTS_DECLARED=27  # M1 M2 M3 B M4 M5 M6 M7 M8 M9 M10 M11 M12 M13 M14 M15 M16 M17 M18 M19 M20 M21 M22 M23 M24 M25 M26
 MUTANTS_RUN=0
 
 run_mutant_checks() {
@@ -1014,7 +1087,12 @@ open(dst, "w").write(t.replace(old, new))
 
   # M16 (X6): the correct RT_BASE assignment stays, and is SHADOWED after it.
   # The previous form accepted this — the interpolation was present and inert.
-  mutate_workflow M16 "RT_BASE shadowed after a verbatim-correct assignment" "LAST RT_BASE assignment" '
+  # ⚠️ RE-POINTED at round 3: the rule moved from "the LAST assignment is correct"
+  # to "there is exactly ONE assignment" (Codex finding 3 defeated the former with
+  # an unreachable trailing assignment), so M16 now reds on the COUNT. Same defect,
+  # different message — a mutant redding under wording the check no longer emits
+  # is testing nothing it claims to.
+  mutate_workflow M16 "RT_BASE shadowed after a verbatim-correct assignment" "assignments to RT_BASE, expected exactly 1" '
 import sys
 src, dst = sys.argv[1], sys.argv[2]
 t = open(src).read()
@@ -1147,6 +1225,65 @@ old = """          env ${{ steps.pysan.outputs.san_opts }} LD_PRELOAD="$RT" \\
 new = """          env ${{ steps.pysan.outputs.san_opts }} LD_PRELOAD="$RT" \\
             echo "would run pytest bindings/python/tests/ -v"
 """
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
+'
+
+  # M23 (Codex round 3, finding 3): the last TEXTUAL RT_BASE assignment is correct
+  # and UNREACHABLE. "Last one wins" is true of execution, not of text.
+  mutate_workflow M23 "RT_BASE overridden, then re-assigned inside a dead if-false branch" "assignments to RT_BASE, expected exactly 1" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "          RT_BASE=\"${{ steps.pysan.outputs.rt_base }}\"\n"
+new = ("          RT_BASE=\"${{ steps.pysan.outputs.rt_base }}\"\n"
+       "          RT_BASE=asan\n"
+       "          if false; then\n"
+       "            RT_BASE=\"${{ steps.pysan.outputs.rt_base }}\"\n"
+       "          fi\n")
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
+'
+
+  # M24 (Codex round 3, finding 1): `;#` — a shell comment with NO whitespace
+  # before the `#`. The first comment-stripper required whitespace, so the whole
+  # line survived and selected the derive step through dead text.
+  mutate_workflow M24 "derive invocation behind a ;# comment" "expected EXACTLY ONE step whose .run_eff." '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "        run: ci/derive-python-sanitizer.sh \"${{ matrix.preset }}\" >> \"$GITHUB_OUTPUT\"\n"
+new = ("        run: |\n"
+       "          echo dead >/dev/null ;# ci/derive-python-sanitizer.sh \"${{ matrix.preset }}\" >> \"$GITHUB_OUTPUT\"\n")
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
+'
+
+  # M25: a SAME-STEP diagnostic echo quoting the invocation, with the real command
+  # deleted. Selection still finds exactly one step, so only the invokes-vs-mentions
+  # rule can catch it. The step would emit no outputs and every
+  # steps.pysan.outputs.* consumer would resolve to the empty string.
+  mutate_workflow M25 "derive invocation replaced by an echo of itself in the same step" "the text is present but sits inside another command" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "        run: ci/derive-python-sanitizer.sh \"${{ matrix.preset }}\" >> \"$GITHUB_OUTPUT\"\n"
+new = ("        run: |\n"
+       "          echo running ci/derive-python-sanitizer.sh \"${{ matrix.preset }}\" >> \"$GITHUB_OUTPUT\"\n")
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
+'
+
+  # M26 (Codex round 3, finding 6): the ci-script-pins call site for a harness is
+  # replaced by an echo. Without this census a harness can exist, be green when
+  # run, and never run — the dead-call-site shape the derive assertion already
+  # guards for the derive script.
+  mutate_workflow M26 "the install-witness harness call site replaced by an echo" "ci-script-pins does not INVOKE" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "        run: bash ci/test-python-install-witness.sh\n"
+new = "        run: echo \"bash ci/test-python-install-witness.sh\"\n"
 assert t.count(old) == 1, t.count(old)
 open(dst, "w").write(t.replace(old, new))
 '

@@ -52,7 +52,7 @@ command -v cmake >/dev/null || fail "cmake is required"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
-CELLS_DECLARED=8   # good soabi w1 w2 w3 w5 absent-clean absent-stray
+CELLS_DECLARED=9   # good soabi w1 w2 w3 w5 w6 absent-clean absent-stray
 cells_run=0
 
 # ── fixture ──────────────────────────────────────────────────────────────────
@@ -77,6 +77,16 @@ make_fixture() {
     echo "<fix/>" > "$src/dicts/$f.xml"
   done
   echo "stub" > "$src/dirpayload/marker.txt"
+  # The w6 fixture installs THIS path, so the staged `fixpp.py` is a symlink.
+  # ⚠️ The link must RESOLVE once staged, or the cell is vacuous: a dangling link
+  # fails the plain `EXISTS` test that was already there, and the cell would go
+  # RED against the very witness it is supposed to prove was blind. Hence a
+  # SAME-DIRECTORY target (`fixpp_oo.py`, which the fixture also installs into the
+  # same destination) rather than a path out of the staging tree — measured, the
+  # first draft used `../fixpp_oo.py` and proved nothing.
+  mkdir -p "$src/link"
+  cp "$src/fixpp_oo.py" "$src/link/fixpp_oo.py"
+  ln -sf fixpp_oo.py "$src/link/fixpp.py"
   echo "stub" > "$src/cpp/libfixpp.a"
   echo "// stub" > "$src/cpp/fixpp.hpp"
 
@@ -128,6 +138,15 @@ make_fixture() {
         echo "install(FILES \"\${S}/$module\" DESTINATION \${PYDIR})"
         echo 'install(FILES "${S}/fixpp.py" "${S}/fixpp_oo.py" "${S}/fixpp_dict_data.py" DESTINATION ${PYDIR})'
         echo 'install(DIRECTORY "${S}/_fixpp_data/" DESTINATION share/unrelated/_fixpp_data)'
+        ;;
+      w6)
+        # `fixpp.py` staged as a SYMLINK to `fixpp_oo.py`. install(FILES)
+        # preserves symlinks, so the install has no SWIG wrapper at all — and
+        # the pre-fix witness certified it (Gate B round 3, Codex finding 5).
+        echo "install(FILES \"\${S}/$module\" DESTINATION \${PYDIR})"
+        echo 'install(FILES "${S}/fixpp_oo.py" "${S}/fixpp_dict_data.py" DESTINATION ${PYDIR})'
+        echo 'install(FILES "${S}/link/fixpp.py" DESTINATION ${PYDIR})'
+        echo 'install(DIRECTORY "${S}/_fixpp_data/" DESTINATION ${PYDIR}/_fixpp_data)'
         ;;
       good|soabi|w3)
         echo "install(FILES \"\${S}/$module\" DESTINATION \${PYDIR})"
@@ -211,6 +230,7 @@ cell_red w1 present w1 "fixpp_oo.py (expected at"           "_fixpp_data/FIX42.x
 cell_red w2 present w2 "fixpp.py (expected at"              "fixpp_oo.py (expected at"
 cell_red w3 present w3 "the extension module"               "fixpp_oo.py (expected at"
 cell_red w5 present w5 "_fixpp_data/__init__.py (expected at" "fixpp_oo.py (expected at"
+cell_red w6 present w6 "fixpp.py (expected at"              "fixpp_oo.py (expected at"
 
 # ── absent: the L-056-4 side ─────────────────────────────────────────────────
 # The clean cell also proves the four XMLs under share/fixpp/dictionaries are NOT
@@ -222,4 +242,4 @@ cell_red   absent-stray absent absent-stray "fixpp_helpers.py"
 [ "$cells_run" = "$CELLS_DECLARED" ] \
   || fail "declared $CELLS_DECLARED cells, ran $cells_run"
 
-echo "PASS: ci/test-python-install-witness.sh — $cells_run/$CELLS_DECLARED cells, 4 present-mode escapes and 1 absent-mode leak proven RED for their own reason"
+echo "PASS: ci/test-python-install-witness.sh — $cells_run/$CELLS_DECLARED cells, 5 present-mode escapes and 1 absent-mode leak proven RED for their own reason"
