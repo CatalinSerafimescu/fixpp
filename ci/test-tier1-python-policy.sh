@@ -363,18 +363,32 @@ assert_derive_call_site() {
   # "FIXPP_INSTALL_PYTHON=OFF" in its own success line while the six legs would
   # configure without the flag and ship the Python payload in both Release
   # packages. Same class as X1, one layer down, inside the fix for X1. M18.
-  local cfg_run; cfg_run="$(step_field "$cfg" run_eff)"
+  # ⚠️ SCOPED TO THE `cmake --preset` COMMAND, not to the step, and not to the
+  # job. Three widenings of this same assertion have each been a live false-green:
+  #
+  #   M5  job-wide  — the install-witness step's `::error::` text quotes the flag,
+  #                   so deleting the real flag stayed GREEN.
+  #   X8  step-wide, raw `run` — the flag survives as a `#` comment. GREEN.
+  #   X10 step-wide, effective — `echo "configuring with -DFIXPP_INSTALL_PYTHON=OFF"`
+  #                   above a cmake line that lacks it. GREEN. And this is the MOST
+  #                   plausible of the three: a diagnostic echo is exactly what
+  #                   caused M5 in a neighbouring step.
+  #
+  # The command line itself is the only scope that means "this is what configures
+  # the build". `run_cmd` joins `\`-continuations, so the whole invocation is one
+  # line however it is wrapped.
+  local cfg_cmd
+  cfg_cmd="$(grep -F 'cmake --preset ${{ matrix.preset }}' <<<"$(step_field "$cfg" run_cmd)" | head -1)"
+  [ -n "$cfg_cmd" ] \
+    || fail "$case_id: the Configure step has no \`cmake --preset \${{ matrix.preset }}\` command line"
 
-  grep -qF -e '-DFIXPP_PYTHON_SANITIZER=${{ steps.pysan.outputs.sanitizer }}' <<<"$cfg_run" \
-    || fail "$case_id: the Configure step does not pass -DFIXPP_PYTHON_SANITIZER=\${{ steps.pysan.outputs.sanitizer }} — the derived identity is not what configures the build"
+  # `-e` is required: without it grep parses the leading `-D` as its own --devices
+  # option and dies, which under `set -e` aborts the pin instead of failing it.
+  grep -qF -e '-DFIXPP_PYTHON_SANITIZER=${{ steps.pysan.outputs.sanitizer }}' <<<"$cfg_cmd" \
+    || fail "$case_id: the Configure step's cmake command does not pass -DFIXPP_PYTHON_SANITIZER=\${{ steps.pysan.outputs.sanitizer }} — the derived identity is not what configures the build. Line: \`$cfg_cmd\`"
 
-  # ⚠️ SCOPED TO THE CONFIGURE STEP, not the job. A bare job-wide search also
-  # matches the DIAGNOSTIC MESSAGE of the install-witness step, which quotes the
-  # flag by name — with that match available, deleting the real flag left this
-  # GREEN (M5). `-e` is required too: without it grep parses the leading `-D` as
-  # its own --devices option and dies, which under `set -e` aborts the pin.
-  grep -qF -e '-DFIXPP_INSTALL_PYTHON=OFF' <<<"$cfg_run" \
-    || fail "$case_id: the linux job's Configure step does not pass -DFIXPP_INSTALL_PYTHON=OFF — the Python payload would enter packages-linux-{clang,gcc}-release and falsify L-056-4 (#254)"
+  grep -qF -e '-DFIXPP_INSTALL_PYTHON=OFF' <<<"$cfg_cmd" \
+    || fail "$case_id: the linux job's Configure step does not pass -DFIXPP_INSTALL_PYTHON=OFF on its cmake command line — the Python payload would enter packages-linux-{clang,gcc}-release and falsify L-056-4 (#254). Line: \`$cfg_cmd\`"
 
   # Both pytest steps must BRANCH on the derived value. Substring sniffing
   # (`contains(matrix.preset, 'san')`) is the mapping spelled twice; a literal
@@ -388,20 +402,49 @@ assert_derive_call_site() {
   local none_run san_run
   none_run="$(step_field "$none_step" run_cmd)"
   san_run="$(step_field "$san_step" run_cmd)"
-  grep -qF 'pytest bindings/python/tests/' <<<"$none_run" \
-    || fail "$case_id: the sanitizer=='none' guarded step does not run pytest bindings/python/tests/"
-  grep -qF 'pytest bindings/python/tests/' <<<"$san_run" \
-    || fail "$case_id: the sanitizer!='none' guarded step does not run pytest bindings/python/tests/"
+  # ⚠️ INVOKES pytest, not MENTIONS it. `contains("pytest bindings/python/tests/")`
+  # is satisfied by `echo "skipping: pytest bindings/python/tests/ -v"` with the
+  # real invocation deleted — measured (X11), PASS, and the leg then runs no
+  # Python tests at all while both guards, both `if:` exactness checks and the
+  # two-step census all still hold.
+  #
+  # A logical line INVOKES pytest when everything before the command is `env` plus
+  # `VAR=value` assignments and `${{ … }}` interpolations — nothing else. That
+  # admits the two real forms (bare `pytest …` on the none leg,
+  # `env ${{ … }} LD_PRELOAD="$RT" pytest …` on the sanitizer leg) and rejects any
+  # line where the text sits inside another command's arguments.
+  #
+  # ⚠️ The tokens after `env` are restricted DELIBERATELY. A first draft allowed
+  # any space-separated tokens there, and `env <opts> echo "… pytest bindings/…"`
+  # matched it — the same mention-vs-invocation confusion one token to the right.
+  local _pytest_invoke_re='^[[:space:]]*(env[[:space:]]+(([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*|\$\{\{[^}]*\}\})[[:space:]]+)*)?pytest[[:space:]]+bindings/python/tests/'
+  grep -qE "$_pytest_invoke_re" <<<"$none_run" \
+    || fail "$case_id: the sanitizer=='none' guarded step does not INVOKE \`pytest bindings/python/tests/\` — the text may appear inside another command (an echo, a comment in a quoted string), but no line of this step runs it"
+  grep -qE "$_pytest_invoke_re" <<<"$san_run" \
+    || fail "$case_id: the sanitizer!='none' guarded step does not INVOKE \`pytest bindings/python/tests/\` — the text may appear inside another command, but no line of this step runs it"
 
   # ⚠️ EXACTLY TWO pytest steps in the whole job, and they are these two. This is
   # what gives PG-2 ("every leg runs pytest, exactly once") an instrument instead
   # of an assertion: the two guards are exact and mutually exclusive, the derive
   # table is proven exhaustive over the six matrix presets, and there is no third
   # pytest step to take a leg down an unpinned path.
-  local _pytest_n
-  _pytest_n="$(echo "$_steps_eff" | jq '[ .[] | select((.run_eff // "") | contains("pytest bindings/python/tests/")) ] | length')"
+  #
+  # ⚠️ Counted over steps that INVOKE pytest, by the same rule as above — not over
+  # steps whose text merely contains the string. A census that counts mentions
+  # would be satisfied by two echoes, and it is the census that makes "every leg
+  # runs exactly one pytest step" a measurement rather than a claim. jq's `^` is
+  # STRING-anchored, not line-anchored, so the per-step test is done in bash;
+  # `@base64` carries the embedded newlines across intact.
+  local _pytest_n=0 _b64 _rc
+  while IFS= read -r _b64; do
+    [ -n "$_b64" ] || continue
+    _rc="$(printf '%s' "$_b64" | base64 -d)"
+    if grep -qE "$_pytest_invoke_re" <<<"$_rc"; then
+      _pytest_n=$((_pytest_n + 1))
+    fi
+  done < <(echo "$_steps_eff" | jq -r '.[].run_cmd | @base64')
   [ "$_pytest_n" = "2" ] \
-    || fail "$case_id: the linux job has $_pytest_n steps running \`pytest bindings/python/tests/\`, expected exactly 2 (the none/non-none pair). A third would run on an unpinned guard; fewer means a leg runs no python tests at all."
+    || fail "$case_id: the linux job has $_pytest_n steps INVOKING \`pytest bindings/python/tests/\`, expected exactly 2 (the none/non-none pair). A third would run on an unpinned guard; fewer means a leg runs no python tests at all."
 
   # ── `rt_base`: the RT_BASE assignment INSIDE the sanitizer pytest step ─────
   # Not "appears somewhere". If RT_BASE is hard-coded, the ubsan leg LD_PRELOADs
@@ -542,7 +585,7 @@ echo "PASS: derive-script table + call site + FIXPP_INSTALL_PYTHON=OFF + PY_RE c
 # for a miscount; a counter is. MUTANTS_RUN is incremented by each mutant AFTER
 # it has been proven RED for the right reason, so an early `return` or a mutant
 # silently commented out changes the total.
-MUTANTS_DECLARED=20  # M1 M2 M3 B M4 M5 M6 M7 M8 M9 M10 M11 M12 M13 M14 M15 M16 M17 M18 M19
+MUTANTS_DECLARED=23  # M1 M2 M3 B M4 M5 M6 M7 M8 M9 M10 M11 M12 M13 M14 M15 M16 M17 M18 M19 M20 M21 M22
 MUTANTS_RUN=0
 
 run_mutant_checks() {
@@ -1045,6 +1088,64 @@ new = """          env ${{ steps.pysan.outputs.san_opts }} LD_PRELOAD="$RT" \\
             pytest bindings/python/tests/ --collect-only -q >/dev/null
           LD_PRELOAD="$RT" \\
             pytest bindings/python/tests/ -v
+"""
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
+'
+
+  # M20 (X10): the flag survives as a diagnostic ECHO above a cmake line that
+  # lacks it. The most plausible of the three widenings this assertion has had —
+  # M5 was caused by exactly this shape in a neighbouring step.
+  mutate_workflow M20 "the install flag survives only in a diagnostic echo" "does not pass -DFIXPP_INSTALL_PYTHON=OFF on its cmake command line" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = """        run: >
+          cmake --preset ${{ matrix.preset }}
+          -DFIXPP_ARTIFACT_DIR=${{ github.workspace }}/_artifacts
+          -DFIXPP_BUILD_PYTHON=ON
+          -DFIXPP_INSTALL_PYTHON=OFF
+          -DFIXPP_PYTHON_SANITIZER=${{ steps.pysan.outputs.sanitizer }}
+"""
+new = """        run: |
+          echo "configuring with -DFIXPP_INSTALL_PYTHON=OFF"
+          cmake --preset ${{ matrix.preset }} \\
+            -DFIXPP_ARTIFACT_DIR=${{ github.workspace }}/_artifacts \\
+            -DFIXPP_BUILD_PYTHON=ON \\
+            -DFIXPP_PYTHON_SANITIZER=${{ steps.pysan.outputs.sanitizer }}
+"""
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
+'
+
+  # M21 (X11): the none-guarded step MENTIONS the invocation in an echo and no
+  # longer runs it. Every other assertion about that step still holds — the guard
+  # is exact, the step exists, the text is present — so this is the one that
+  # distinguishes "runs pytest" from "contains the words".
+  mutate_workflow M21 "the none-leg pytest invocation replaced by an echo of itself" "does not INVOKE" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "        run: pytest bindings/python/tests/ -v\n"
+new = "        run: echo \"would run pytest bindings/python/tests/ -v\"\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
+'
+
+  # M22: the sanitizer step keeps a correct, complete `env <derived opts>` prefix
+  # and runs `echo` under it instead of pytest. This is the mention-vs-invocation
+  # confusion ONE TOKEN TO THE RIGHT of M21, and the first draft of the
+  # invocation regex admitted it — the prefix tokens were unrestricted, so `echo`
+  # was accepted as just another one. It pins the restriction, not the anchor.
+  mutate_workflow M22 "pytest replaced by echo UNDER a correct env prefix" "does not INVOKE" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = """          env ${{ steps.pysan.outputs.san_opts }} LD_PRELOAD="$RT" \\
+            pytest bindings/python/tests/ -v
+"""
+new = """          env ${{ steps.pysan.outputs.san_opts }} LD_PRELOAD="$RT" \\
+            echo "would run pytest bindings/python/tests/ -v"
 """
 assert t.count(old) == 1, t.count(old)
 open(dst, "w").write(t.replace(old, new))
