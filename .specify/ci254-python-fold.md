@@ -942,9 +942,16 @@ sentence it contradicts. Both are now fixed. The independently checkable figure 
 **5** when it collects nothing (it is not `ctest -L`'s vacuous success), and "passed ≥ collected"
 fails on any legitimate skip/xfail; use `--collect-only` > 0, then trust pytest's own status.
 **(3)** ✅ *done* — both files were re-pointed as §4.8 table A rows 20–21, in the deletion commit. The
-touched-file count is **9** excluding this doc, not 8; and `bindings/python/tests/conftest.py:6` +
+touched-file count was **9** excluding this doc, not 8; and `bindings/python/tests/conftest.py:6` +
 `test_gil_release_canary.py:16` describe the **current** CI vehicle (the latter already stale — it
-omits UBSan), so they are re-point targets, not history. **(4)** ✅ *done* — E-30 records its counting
+omits UBSan), so they are re-point targets, not history.
+⚠️ **The `9` is now itself stale, and the way it went stale is the point.** Gate B rounds 2–4 added
+files the census could not have contained: `ci/test-python-install-witness.sh` is new, and several
+existing files were touched for the first time. **Re-derived 2026-08-11: 13 files excluding this doc**
+(`git diff --name-only $(git merge-base origin/main HEAD)..HEAD`, 14 including it). This is the
+*census taken before the fix misses what the fix adds* class, and a fixed number in prose cannot help
+being an instance of it — so the **command** above is the census, and the number is only its reading
+on a date. **(4)** ✅ *done* — E-30 records its counting
 command and its PR-number population. E-30 must record the PR-number
 population or the exact counting command, or be downgraded from **M**.
 
