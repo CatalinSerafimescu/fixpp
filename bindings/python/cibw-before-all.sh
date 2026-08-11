@@ -9,6 +9,23 @@
 # The exact recipe was proven by a configure-only probe in the pinned image
 # (research D-2/D-7): gcc-toolset-14 (gcc 14.2 — C++23/std::expected), SWIG 4.4
 # from the build-frontend, Python3 Development.SABIModule found → real abi3 link.
+#
+# ⚠️ THE WHEEL DOES NOT WRAP THE BINARIES FROM THE CI clang/gcc BUILDS. It
+# compiles the engine from source, here, and differs from every leg that runs the
+# Python test suite in THREE dimensions at once:
+#
+#            shipped wheel (this script)   | Tier 1 legs running the py tests
+#   compiler gcc-toolset-14                | clang 22
+#   build    Release                       | Debug (+ asan/ubsan/tsan)
+#   OTel     with_otel=False  (below)      | with_otel default True (conanfile.py)
+#
+# So the artifact users actually run is exercised only by python-wheel-test's
+# install + import + functional subset (3.10-3.13). The tier1 legs that run the
+# Python test suite — the six `linux` matrix legs since #254, previously a
+# separate `python-bindings` job — are a TEST VEHICLE, not a byte of them ships,
+# and the
+# packages-linux-{clang,gcc}-release artifacts are the C++ deliverable and carry
+# no Python at all. See L-056-4 in spec/behaviors-and-limitations.md.
 set -euo pipefail
 PROJECT="${1:?cibw-before-all: project root argument required}"
 

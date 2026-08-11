@@ -166,7 +166,7 @@ jobs:
 
     permissions:
       contents: read
-      packages: write  # was read; write enables auto-push-on-miss (push:main only)
+      packages: write  # was read; write enables auto-push-on-miss (push:main / dispatch on main)
 
     strategy:
       fail-fast: false
@@ -192,7 +192,34 @@ jobs:
       CMAKE_CXX_COMPILER_LAUNCHER: ccache
       CMAKE_C_COMPILER_LAUNCHER: ccache
       CCACHE_COMPILERCHECK: content
-      CCACHE_COMPRESSLEVEL: "5"   # see tier1.yml matrix job — shared 10 GB cache quota
+      # ── #240: BOTH VALUES BELOW ARE NOW DECISIONS, NOT DEFAULTS ─────────────
+      #
+      # hendrikmuhs/ccache-action supplied four things: the install, the
+      # restore/save lifecycle, `max-size`, and its config plumbing. Removing it
+      # in favour of the GHCR scripts removes all four. The install is handled by
+      # its own step below; these two are what `max-size: 500M` and the action's
+      # defaults were silently providing.
+      #
+      # CCACHE_MAXSIZE — 2G, matching every Tier 1 lane, so the cap is not a NEW
+      # variable in the before/after this PR is measured on. Chosen to be
+      # NON-BINDING rather than sized: the old 500M was defended by a comment
+      # measuring what the cap ALLOWED ("~460 MB each") and then citing that as
+      # evidence the cap was big enough — circular, and #240 exists because the
+      # lane thrashes at 99 % full for 7-27 % hits. A bound is still set, because
+      # without one ccache falls back to its 5 GB default and the seed step would
+      # push up to 5 GB × 4 legs per push:main.
+      #
+      # ⚠️ 2G IS A GUESS UNTIL THE FIRST SEED REPORTS. The demand measurement is
+      # the archive size seed-ccache.sh prints, and the test of whether 2G binds
+      # is `cleanups_performed` in the stats step — nonzero means the cache
+      # evicted while it was still being filled, which is the 500M failure
+      # repeating at a larger number. Do not read a good hit rate as proof the
+      # cap fits; read the cleanup count.
+      CCACHE_MAXSIZE: 2G
+      # Now governs the GHCR TARBALL size too, not just the (no-longer-used)
+      # Actions pool: the archive is an uncompressed tar over entries ccache has
+      # already compressed at this level.
+      CCACHE_COMPRESSLEVEL: "5"
       # Keep ccache outside the checkout so source-cleanliness tests do not see
       # the action's default .ccache directory as an untracked repo file.
       CCACHE_DIR: /tmp/fixpp-ccache-${{ matrix.preset }}
@@ -262,26 +289,53 @@ jobs:
       # match. See research/.../ci-conan-ghcr-pilot/.
       - name: Set up oras
         uses: oras-project/setup-oras@v2
+
+      # ⚠️ ccache MUST BE ON PATH BEFORE "Conan install" ON THIS LANE, AND THAT
+      # IS WHY THIS IS ITS OWN STEP RATHER THAN A LINE IN THE APT BLOCK ABOVE.
+      #
+      # libc++ has no prebuilt Conan Center binaries, so `conan install
+      # --build=missing` COMPILES the dependency closure (crc32c, ...) from
+      # source using the job-level CMAKE_{C,CXX}_COMPILER_LAUNCHER=ccache. If
+      # ccache is not yet on PATH the dependency's compiler probe fails with
+      # exit 127 ("ccache" not found) and the whole lane goes red — exactly what
+      # broke Tier 3 once while Tier 1 (libstdc++, prebuilt deps → no compile
+      # during Conan install) stayed green.
+      # Ref: project_tier3_libcxx_crc32c_ccache127_infra.
+      #
+      # hendrikmuhs/ccache-action used to supply this install as a side effect of
+      # restoring the cache. #240 replaces the action with the GHCR scripts, so
+      # the install has to be stated. `apt-get update` is not repeated: the
+      # llvm.sh step above already refreshed the lists.
+      - name: Install ccache
+        run: |
+          set -euo pipefail
+          sudo apt-get install -y --no-install-recommends ccache
+          # Not decoration — this is the assertion that the exit-127 trap above
+          # is closed, made here where the step name says what failed, rather
+          # than 200 lines later inside a Conan dependency build.
+          ccache --version
+
+      # ── ccache restore (#240) ───────────────────────────────────────────────
+      # BEFORE "Conan install", for the same reason the install is: the
+      # from-source dependency builds run through the launcher and are the
+      # largest single block of compile work on this lane. Restoring after them
+      # would leave every dependency TU a guaranteed miss.
+      #
+      # `oras login` here — unlike the Conan restore's anonymous pull. The Conan
+      # package was made public by hand; a package first created by GITHUB_TOKEN
+      # is PRIVATE, so an anonymous pull of fixpp-ccache 401s and every leg reads
+      # as a permanent MISS with no other symptom. `|| true` because a fork PR's
+      # downgraded token cannot log in, and there the anonymous attempt (public
+      # package) is still the correct fallback. Same shape as tier2.yml:392.
+      - name: Restore ccache from GHCR
+        id: ccache_restore
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u "${{ github.actor }}" --password-stdin || true
+          ci/restore-ccache.sh ${{ matrix.preset }}
+
       - name: Restore Conan cache from GHCR
         id: conan_restore
         run: ci/restore-conan-cache.sh ${{ matrix.preset }}
-
-      # ccache MUST be installed BEFORE "Conan install" on this lane. libc++ has
-      # no prebuilt Conan Center binaries, so `conan install --build=missing`
-      # compiles dependencies (crc32c, ...) from source using the job-level
-      # CMAKE_{C,CXX}_COMPILER_LAUNCHER=ccache. If ccache is not yet on PATH the
-      # dependency's compiler probe fails with exit 127 ("ccache" not found) and
-      # the whole lane goes red — this is exactly what broke Tier 3 while Tier 1
-      # (libstdc++, prebuilt deps → no compile during Conan install) stayed green.
-      # Runner images no longer ship ccache preinstalled, so we install it here
-      # (this action installs ccache + restores the cross-run cache) BEFORE the
-      # from-source dependency builds, which additionally lets those builds hit
-      # the cache. Ref: project_tier3_libcxx_crc32c_ccache127_infra.
-      - name: ccache (install + restore + save compiler cache)
-        uses: hendrikmuhs/ccache-action@v1.2.23
-        with:
-          key: tier3-${{ matrix.preset }}
-          max-size: 500M
 
       - name: Conan install
         run: |
@@ -293,8 +347,14 @@ jobs:
 
       # Self-populate on push:main after a MISS — packs ONLY the current graph
       # (with the SAME with_otel=False option) → never stale packages. Best-effort.
-      - name: Save Conan cache to GHCR (push:main + miss only)
-        if: github.event_name == 'push' && steps.conan_restore.outputs.hit == 'false'
+      #
+      # `|| (workflow_dispatch on main)` — see tier1.yml's matrix save step for
+      # why (#222). Without it a manual dispatch on this tier restored, missed,
+      # rebuilt and published nothing, so the shared MISS annotation's "dispatch
+      # to reseed" advice was true on tier2 only. Ref-restricted to main so no
+      # branch other than main can publish into the namespace main consumes.
+      - name: Save Conan cache to GHCR (push:main / dispatch on main + miss only)
+        if: (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')) && steps.conan_restore.outputs.hit == 'false'
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # for prune's `gh api` (delete stale tags)
@@ -305,8 +365,140 @@ jobs:
       - name: Configure
         run: cmake --preset ${{ matrix.preset }}
 
+      # ── `-j2` — RECORDED AS UNRESOLVED, DELIBERATELY NOT CHANGED (#240) ─────
+      #
+      # #240 lists dropping `-j2` as an option. It is NOT taken here, and the
+      # reason is that the rationale route needs a measurement this PR cannot
+      # have: `git log -S` places `-j2` in this file's ORIGINAL commit
+      # (b36ef16c, #142), so it is a day-one choice with no recorded cause — not
+      # a documented OOM mitigation, and not something to remove blind either.
+      #
+      # What resolves it: post-#240 `Build` wall time on a WARM run. If it lands
+      # near Tier 1's 4-6 min, `-j2` costs nothing measurable and the correct
+      # disposition is a recorded rationale, not removal. If it is still tens of
+      # minutes with a high hit rate, the parallelism is the remaining cost and
+      # the question becomes whether this runner can hold `-j4` (2 vCPU-class
+      # concurrency against a libc++ TSan link is the suspected constraint, and
+      # `/sys/fs/cgroup/memory.peak` is unreadable on ubuntu-24.04 — see #229).
+      #
+      # Writing a rationale now would mean asserting a cause nothing measured.
       - name: Build
+        id: build
         run: cmake --build --preset ${{ matrix.preset }} -j2
+
+      # ── ccache statistics (#240 acceptance instrument) ──────────────────────
+      #
+      # `if: always()` so a RED build still reports them: a build that failed
+      # because of the cache is exactly the case where the counters are the
+      # diagnosis. The script is passed the Build outcome and makes NO liveness
+      # claim when the build did not succeed — a build that never reached a
+      # compile is a sufficient explanation for zero cacheable calls.
+      #
+      # ⚠️ THE EVIDENCE IS THE PAIR — a restore HIT *and* a high hit rate. A HIT
+      # with 0 % is green under this instrument BY DESIGN (the only failure path
+      # is zero-cacheable-calls) and is this change FAILING, not passing. Both
+      # numbers go to the Job Summary for that reason. Do not close #240 on
+      # "CI was green".
+      - name: ccache statistics
+        id: ccache_stats
+        if: always()
+        run: |
+          ci/ccache-stats.sh ${{ matrix.preset }} \
+            "${{ steps.ccache_restore.outputs.hit }}" \
+            "${{ steps.build.outcome }}"
+
+      # Publish BEFORE the ctest steps, not after. The cache is a compilation
+      # artifact: a red test says nothing about whether these objects are worth
+      # keeping, and withholding the cache on a test failure would make the next
+      # run pay a full cold build to fix an unrelated test.
+      #
+      # ⚠️ THE REF GUARD IS LOAD-BEARING, AND ITS REASON IS NOT THE CONAN STEP'S.
+      # `push` is already safe — `on: push:` is restricted to `branches: [main]`.
+      # `workflow_dispatch` is not: the dispatch UI lets you select ANY branch.
+      #
+      # The Conan tag is content-derived, so a branch that changes conanfile.py
+      # or a profile gets a DIFFERENT tag and cannot collide. The ccache tag is
+      # deliberately coarse and ROLLING (ci/ccache-cache-key.sh) so a PR leg can
+      # pull what main published — which means EVERY branch computes the SAME tag
+      # whatever it changed, and a dispatch from a feature branch would write to
+      # exactly the artifact main reads next. Not a correctness risk (ccache
+      # hashes compilation inputs internally, so a foreign entry is a MISS, never
+      # a wrong object) — a cost one: main's warm cache replaced by a branch's.
+      #
+      # ── `&& changed != 0` — DO NOT REPUBLISH AN UNCHANGED CACHE ─────────────
+      #
+      # Mirrors the sibling Conan seed's `&& steps.conan_restore.outputs.hit ==
+      # 'false'` conjunct 70 lines above: publish only when this run actually
+      # produced something the published artifact does not already have.
+      #
+      # ⚠️ READS `changed` (ccache's `local_storage_write` counter), NOT
+      # `misses`. `cache_miss == 0` was read as "ccache wrote no new entry",
+      # but that is FALSE: a same-line-count comment/whitespace edit routinely
+      # produces `cache_miss=0` while ccache still writes a manifest entry
+      # (measured against real ccache 4.9.1 — see ci/ccache-stats.sh). Without
+      # the guard at all, a CI-, docs- or workflow-only push to main — where no
+      # C++ TU changed, and THIS PR is one — re-tars and re-uploads ~2 GB per
+      # leg to publish a byte-equivalent artifact: ~2-4 min of aggregate runner
+      # time, ~8 GB of GHCR churn, and four more orphaned untagged versions for
+      # the pruner to reclaim, every time.
+      #
+      # It is also the better branch when `cleanups_performed > 0` with zero
+      # writes: the cache only SHRANK, so republishing would replace the tagged
+      # artifact with a strictly worse one.
+      #
+      # ⚠️ FAIL-OPEN BY CONSTRUCTION. An empty `outputs.changed` — the stats
+      # step never ran, or died before emitting — makes `!= '0'` true and
+      # publishes exactly as before. The guard only ever skips on positive
+      # evidence that nothing changed, and can never withhold a cache because a
+      # measurement was missing. The rationale for `changed` alone, with no
+      # restore-hit conjunct, is at the emission site in ci/ccache-stats.sh.
+      - name: Save ccache to GHCR (push:main / dispatch on main, cache changed)
+        if: (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')) && steps.ccache_stats.outputs.changed != '0'
+        continue-on-error: true
+        env:
+          # Prune needs `delete:packages`, which GITHUB_TOKEN does NOT carry —
+          # verified 403 against the live API. With GHCR_PAT present this
+          # reclaims the untagged version each republish orphans (FOUR legs per
+          # push:main on this tier); without it the backlog is reported into the
+          # job summary instead of accumulating silently.
+          GH_TOKEN: ${{ secrets.GHCR_PAT || secrets.GITHUB_TOKEN }}
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u "${{ github.actor }}" --password-stdin
+          ci/seed-ccache.sh ${{ matrix.preset }}
+
+      # 087 T026 / FR-014 / SC-008 — and THIS WORKFLOW IS THE LOAD-BEARING ONE.
+      #
+      # ⚠️ ASSERT THE COUNT, NOT JUST THE EXIT CODE. `ctest -L` exits 0 when the
+      # filter matches NOTHING, so an exit-code-only check reports the lane green
+      # having run zero witnesses. fixpp::consumer::install-witness is registered
+      # only inside `if(FIXPP_BUILD_CODEGEN_TOOL)` nested in `if(FIXPP_BUILD_TESTS)`
+      # (CMakeLists.txt:401); if that option ever goes OFF here the whole 086/087
+      # installed-interface gate silently stops existing.
+      #
+      # WHY THIS FILE MATTERS MOST: contract §1 discharges the UNMEASURED
+      # toolchains — gcc and libc++ — by arguing that CI executes the same gate.
+      # libc++ lives HERE and nowhere else (tier 1's matrix has no libc++ lane),
+      # and until this step landed this workflow carried NO count assertion of any
+      # kind. So for libc++ that argument rested on neither a cite nor a count.
+      # Contract §6a.
+      #
+      # UNCONDITIONAL — no `if:` guard. The two test steps below are mutually
+      # exclusive by `if:` (`:341` on all but -tsan, `:349` only on it) and jointly
+      # cover every lane, so one unguarded step covers both. Placed after Build and
+      # before the first test step: `ctest -N` needs a configured tree.
+      - name: Assert the consumer witness is registered (087 FR-014 gate)
+        run: |
+          set -euo pipefail
+          expected=1
+          n=$(ctest --preset ${{ matrix.preset }} -L consumer -N \
+                | sed -n 's/^Total Tests: //p')
+          echo "registered consumer witnesses: ${n:-0} (expected ${expected})"
+          if [ "${n:-0}" != "${expected}" ]; then
+            echo "::error::consumer label registered ${n:-0} tests, expected ${expected}."
+            echo "::error::The 086/087 installed-interface gate is not registered on this libc++ lane."
+            echo "::error::Refusing to report this lane green on an unrun gate."
+            exit 1
+          fi
 
       # TSan only: the apt-installed libc++ is NOT TSan-instrumented, so TSan
       # cannot see libc++'s internal synchronisation and reports FALSE data

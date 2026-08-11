@@ -128,7 +128,7 @@ The build enforces this graph at the include level via `include-what-you-use` co
 | `bindings/c` | `capi` only |
 | `config` | `core`, `session`, `dictionary`, `tls`, `transport`, `log` (opt-in adjacent; enforced in `check_layers.py`; conditional `log_otlp` link via CMake only) |
 
-**Forbidden:** any back-edge (e.g., `core` including `session/`), any cycle, and any non-C-ABI consumption from `service/` or the bindings. CI fails on violation. **Bridge-surface carve-out:** the `dictionary↔wire` bridge surface defined in §2.4 (the generated `fixpp::vXX::*` tree + the named hand-written `dict/` bridge headers + the vendored frozen `wire/message_view_contract.hpp` stub) compiles against both modules and is **not** a `dictionary` module edge; it is header-only template glue with no link cycle. `tools/check_layers.py` exempts exactly that documented file-list (see §2.4 RC#3 amendment) — the `dictionary | core` whitelist is otherwise unchanged for every non-bridge `dict/` header.
+**Forbidden:** any back-edge (e.g., `core` including `session/`), any cycle, and any non-C-ABI consumption from `service/` or the bindings. **CI fails on violation for `src/**` and `bindings/**` only** — those are the two trees `tools/check_layers.py` globs (`:173-176`). **`service/` is NOT scanned**, so the rule holds there by convention and review, not mechanically *(corrected by 086/FR-014; this sentence previously implied CI covered all three)*. **Bridge-surface carve-out:** the `dictionary↔wire` bridge surface defined in §2.4 (the generated `fixpp::vXX::*` tree + the named hand-written `dict/` bridge headers + the vendored frozen `wire/message_view_contract.hpp` stub) compiles against both modules and is **not** a `dictionary` module edge; it is header-only template glue with no link cycle. `tools/check_layers.py` exempts exactly that documented file-list (see §2.4 RC#3 amendment) — the `dictionary | core` whitelist is otherwise unchanged for every non-bridge `dict/` header.
 
 ### 2.4 Why this shape
 
@@ -497,16 +497,92 @@ include/
 
 ### 7.4 CMake target layout
 
-- `fixpp::core`, `fixpp::dict`, `fixpp::wire`, `fixpp::transport`, `fixpp::tls`, `fixpp::session`, `fixpp::log`, `fixpp::otel`, `fixpp::tap` — `OBJECT` libraries combined into the final `fixpp` shared/static.
-- `fixpp::capi-objects` — `OBJECT` library producing the `extern "C"` translation units; combined into the same shared library.
-- `fixpp` — the **C++ public umbrella**. Links every object library above. `INTERFACE_INCLUDE_DIRECTORIES = include/`, exposing `<fix/c_api.h>` and the entire `<fixpp/...>` C++ surface. This is what `find_package(fixpp) COMPONENTS Cxx` brings in for in-process C++ users.
-- `fixpp::capi` — the **C-ABI consumer target**. Same underlying shared library as `fixpp` (no duplication of object code), but `INTERFACE_INCLUDE_DIRECTORIES = include/fix/` only. C-ABI consumers link this; they cannot accidentally `#include <fixpp/...>` because the C++ headers aren't in their interface include path.
-- `fixpp::service-iface` — `INTERFACE` (header-only) target exposing `include/fixpp/service/` (just the public plugin interfaces — `ControlPlane`, `ControlPlaneConfig`). Depends transitively on `fixpp::core` headers it needs.
-- `fixpp-codegen` — host tool; not exported.
-- `fixppd` — depends on `fixpp::capi` and `fixpp::service-iface` (plus gRPC and iceoryx2 externs). It does **not** depend on `fixpp` or any of the C++ engine OBJECT libraries; it reaches the engine exclusively through `extern "C"` symbols.
+> ### ⚠️ RECONCILED against the delivered export — 084, 2026-08-02 (FR-024a / T070)
+>
+> §7.4 predates any `install(EXPORT)`. Feature 084 built one and **measured** the result, so the
+> clauses below are now checkable rather than aspirational. Read this table first; the prose that
+> follows is retained as the design intent it was written as, not as a description of what ships.
+>
+> **Delivered export set: 18 members — 13 STATIC, 4 INTERFACE, 1 OBJECT** (counted in the shipped
+> `fixppTargets.cmake`).
+>
+> | Clause | Disposition | Measured reality |
+> |---|---|---|
+> | `:500` module targets are **`OBJECT` libraries combined into a final `fixpp` shared/static** | **SUPERSEDED** | **13 STATIC / 4 INTERFACE / 1 OBJECT**, measured in the shipped `fixppTargets.cmake`: STATIC = `core`, `sync`, `wire`, `dictionary`, `dict_dispatch_bridge`, `session`, `transport`, `tls`, `log`, `otel`, `config_toml`, `log_otlp`, `capi`; INTERFACE = `fixpp`, `service`, `tap`, `dict::dispatch`; OBJECT = `capi_objects`. **Not all module targets are STATIC** — `tap` and `dict::dispatch` are INTERFACE (corrected Gate B r4). There is no combined shared/static `fixpp` library. The list is also incomplete and partly misnamed — the export carries `fixpp::sync`, `fixpp::config_toml`, `fixpp::dict_dispatch_bridge`, `fixpp::dict::dispatch` and `fixpp::log_otlp` besides, and the dictionary target exports as `fixpp::dictionary`, not `fixpp::dict` |
+> | `:501` `fixpp::capi-objects` is an **`OBJECT`** library | **SATISFIED (kind), SUPERSEDED (name + fate)** | It is genuinely the one OBJECT library in the set, but exports as `fixpp::capi_objects` (underscore), and its objects are absorbed into the **static** `fixpp_capi` archive — there is no shared library to combine into |
+> | `:502` `fixpp` — the **C++ public umbrella** | **SATISFIED IN PART** | 084 T029 creates it, as an **INTERFACE** target (`fixpp::fixpp`), and it is what `tests/consumer/` links. But it links `fixpp_session`, not "every object library", and **`find_package(fixpp)` has no `COMPONENTS` support** — `COMPONENTS Cxx` does not exist |
+> | `:503` `fixpp::capi` exposes **`include/fix/` only**, so C-ABI consumers *"cannot accidentally `#include <fixpp/...>`"* | ✅ **DELIVERED by 086 — INTENT, not the literal prescription** | The *intent* holds: an installed consumer linking only `fixpp::capi` reaches all 12 C-ABI headers and **no** `<fixpp/...>` header, asserted by a witness demonstrated able to fail. The *literal* clause is retired as **unsatisfiable** — see the row below. Measured: `INTERFACE_INCLUDE_DIRECTORIES "${_IMPORT_PREFIX}/include/capi"`, `INTERFACE_LINK_LIBRARIES "$<LINK_ONLY:fixpp::capi_objects>"` |
+> | `:503` (literal) `INTERFACE_INCLUDE_DIRECTORIES = include/fix/` | ⛔ **RETIRED — cannot be satisfied** | Every C-ABI header carries the `fix/` component **in its own include spelling**, in both forms: consumers write `#include <fix/c_api.h>`, and the entry header pulls its sub-headers as `"fix/c_api/export.h"` … (`include/fix/c_api.h:40-48`). A root of `include/fix/` resolves `<fix/c_api.h>` to `include/fix/fix/c_api.h` and breaks every consumer. 086 delivers an **additive** root instead — `include/capi/`, with the headers at `include/capi/fix/**` — so the spelling never changes and a bare `-I<prefix>/include` still resolves. Issue #218 inherited this wording and is answered, not implemented, on this point |
+> | `:504` `fixpp::service-iface` — INTERFACE target | **SATISFIED (kind), SUPERSEDED (name), include interface DELIVERED by 086** | Exports as **`fixpp::service`**; it is INTERFACE as described. **Its delivered include interface is now stated, because this row dispositioned only kind and name — which is how the second instance of the `:503` gap went unrecorded through 084.** Measured: `INTERFACE_INCLUDE_DIRECTORIES "${_IMPORT_PREFIX}/include/service-iface"` (carrying `fixpp/service/**` and nothing else), `INTERFACE_LINK_LIBRARIES "fixpp::capi"`. It declares **no C-ABI root of its own** and reaches `<fix/c_api.h>` through that link. Before 086 it exposed `${_IMPORT_PREFIX}/include` — the whole tree — and that line is **not** inherited from `fixpp_capi`, so narrowing `fixpp::capi` did not touch it |
+> | `:505` `fixpp-codegen` host tool, **not exported** | **SATISFIED** | Absent from the export set, verified by the T024 membership assertion |
+> | `:506`/`:507` `fixppd`, `fixpp-python` | **UNAFFECTED** | Neither is packaged by 084; the Python module keeps its own install rule (`bindings/python/CMakeLists.txt:196`) |
+> | `:509` `check_layers.py` backstop | **NARROWER STILL — it never covered this at all** *(corrected by 086/FR-014; the 084 wording "STILL ENFORCED, narrower than it reads" understated it and contradicted §8 below)* | `check_layers.py` is a source `#include`-edge lint over **`src/**` and `bindings/**`** (`:2-7`, `:173-176`). It reads no CMake and no link interface, so it never enforced the `:509` link-combination rule in any form — and it does not scan `service/` either. It is a real gate for the module include graph and no gate at all for the boundary §8 describes. The `:503` gap is now closed by 086's installed include isolation, which is a different mechanism |
+>
+> **The `:503` finding was tracked as [issue #218](https://github.com/CatalinSerafimescu/fixpp/issues/218)
+> and is CLOSED by 086** (`specs/086-capi-include-isolation/`). 084 left it open deliberately: narrowing
+> `fixpp::capi` is a **C-ABI surface decision**, not a packaging one, and it belonged to whoever owns
+> Article IV §2.
+>
+> The compile-fails witness 084 asked for exists and is the load-bearing part. It is **three**
+> configure-time `try_compile` calls asserted **TRUE** (`__has_include` + unique-token `#error`; inverted at Gate B r2) — not build targets, because
+> `tests/consumer/run_consumer_witness.cmake:107` raises `FATAL_ERROR` on any non-zero build exit, so a
+> must-fail target would red the whole witness. Each was **observed red with its own isolation reverted**
+> and green with it restored.
+>
+> **D1 Option A is not contradicted.** Under it `fixpp_capi` had no include directories of its own and
+> reached everything through `fixpp_capi_objects`. 086 keeps the *link* edge and withholds only the *usage
+> requirements*, via `$<LINK_ONLY:>` — the objects are still absorbed into the archive and every symbol
+> still resolves. `contracts/package-layout.md` §2a is reconciled accordingly.
+>
+> One thing 084 could not have known, recorded because it is the same class of defect: flipping the keyword
+> alone **breaks the in-tree build**. In-tree consumers of `fixpp_capi` were inheriting the Conan
+> dependencies' include directories through that `PUBLIC` edge, so the delivered change keeps the full edge
+> under `$<BUILD_INTERFACE:>` and narrows only the install interface.
+
+
+> ### ⚠️ REPLACED by 086/FR-013 (Gate B r2) — the bullets that stood here prescribed targets that do not exist
+>
+> The previous list described the engine modules as `OBJECT` libraries combined into a final shared/static
+> `fixpp`, selected via `find_package(fixpp) COMPONENTS Cxx`, with `fixpp::capi` sharing that library's object
+> code and `fixpp::service-iface` as the plugin target. **None of that is what ships**, and leaving it as
+> "design intent" left a second, superseded implementation recipe inside the normative architecture — one that
+> contradicted both the 084 reconciliation table above and `api-contract.md` §8. It is replaced, not annotated.
+
+The delivered export set is **18 members — 13 STATIC, 4 INTERFACE, 1 OBJECT**, measured in the shipped
+`fixppTargets.cmake`:
+
+- **STATIC (13)** — `fixpp::core`, `fixpp::sync`, `fixpp::wire`, `fixpp::dictionary`,
+  `fixpp::dict_dispatch_bridge`, `fixpp::session`, `fixpp::transport`, `fixpp::tls`, `fixpp::log`,
+  `fixpp::otel`, `fixpp::config_toml`, `fixpp::log_otlp`, and `fixpp::capi`. There is **no** combined
+  shared/static `fixpp` library for these to be "combined into".
+- **INTERFACE (4)** — `fixpp::fixpp` (the umbrella), `fixpp::service`, `fixpp::tap`, `fixpp::dict::dispatch`.
+  *(`tap` and `dict::dispatch` are header-only; an earlier revision of this list called them STATIC — corrected
+  at Gate B r4 against the shipped `fixppTargets.cmake`, which is the only authority for target kind.)*
+- `fixpp::capi_objects` — the **one** `OBJECT` library in the set, producing the `extern "C"` translation
+  units. Its objects are absorbed into the STATIC `fixpp_capi` archive. Note the **underscore**: it exports as
+  `fixpp::capi_objects`, not `fixpp::capi-objects`.
+- `fixpp::fixpp` — the **C++ public umbrella**, an **`INTERFACE`** target linking `fixpp::session`.
+  `INTERFACE_INCLUDE_DIRECTORIES = ${_IMPORT_PREFIX}/include`, exposing `<fix/c_api.h>` and the entire
+  `<fixpp/...>` C++ surface. Consumed as `find_package(fixpp REQUIRED)` + `target_link_libraries(app PRIVATE
+  fixpp::fixpp)`. **`COMPONENTS Cxx` does not exist.**
+- `fixpp::capi` — the **C-ABI consumer target**, a **`STATIC`** archive distinct from the umbrella (it does not
+  share object code with `fixpp::fixpp`, which is INTERFACE and has none). Its **installed** interface exposes
+  the isolated root `${_IMPORT_PREFIX}/include/capi`, under which the C-ABI headers sit at `capi/fix/**`, and
+  its link entry is `$<LINK_ONLY:fixpp::capi_objects>` so the objects target's whole-tree include path is not
+  inherited. Delivered and witnessed by 086; see the `:503` rows above for why the root is `include/capi/` and
+  not the unsatisfiable `include/fix/`.
+- `fixpp::service` — `INTERFACE` (header-only), exposing `include/fixpp/service/` (the public plugin interface,
+  `ControlPlaneFactory`). **Exports as `fixpp::service`; `fixpp::service-iface` is not a target.** Its installed
+  interface exposes `${_IMPORT_PREFIX}/include/service-iface`; it reaches `<fix/c_api.h>` through its link to
+  `fixpp::capi`.
+- `fixpp::log_otlp` — closure-only export member, present when the OTel SDK is.
+- `fixpp-codegen` — host tool; **not exported**.
+- `fixppd` — **not yet built** (`FIXPP_BUILD_SERVICE` is not functional). It will depend on `fixpp::capi` and
+  `fixpp::service` plus gRPC/iceoryx2 externs, and **not** on `fixpp::fixpp` or on any of the engine **STATIC**
+  libraries; it reaches the engine exclusively through `extern "C"` symbols.
 - `fixpp-python` — SWIG target; depends only on `fixpp::capi` and the SWIG-generated wrapper.
 
-**Constraint enforced by CMake property check:** any target downstream of `fixpp::capi` that also lists `fixpp` (the C++ umbrella) in its link interface fails the `tools/check_layers.py` lint. This is the structural backstop for the boundary rule in §8.
+**Constraint, and what actually enforces it** *(corrected by 086 — this paragraph previously attributed it to a tool that cannot perform it)*: a target that links both `fixpp::capi` and `fixpp` (the C++ umbrella) is the combination Article IV §2 rejects. **`tools/check_layers.py` does not detect it.** That script is a **source `#include`-edge lint** over `src/**` and `bindings/**` (`tools/check_layers.py:2-7`, `:173-176`); it parses no CMake file, reads no link interface, and cannot see an installed consumer at all. What is actually in force is (a) the **convention**, which is why `tests/consumer/` keeps `consumer_witness` and `consumer_capi_witness` as separate executables, and (b) 086's installed include isolation, which makes the *header* half structural for anyone consuming the package. **Nothing mechanically rejects the link combination**, in-tree or installed — an installed CMake package cannot observe which targets a consumer links together. Stated plainly so the gap is inherited deliberately rather than assumed closed.
 
 ### 7.5 Conan profile mapping
 
@@ -520,11 +596,15 @@ The `service/` directory exists to package the engine as a daemon. Its architect
 
 > The `fixppd` daemon and any default plugin implementations under `service/` consume the engine **only through the C ABI**. They must not include engine internal headers (`<fixpp/wire/...>`, `<fixpp/session/...>`, `<fixpp/dict/...>`, etc.).
 
-The rule applies to the binary and to default impl translation units. It does **not** restrict `include/fixpp/service/control_plane.h` or other public service-mode interface headers — those live under `include/fixpp/`, depend only on `core/`, and are part of the public C++ plugin surface like every other interface listed in §6. `fixppd` includes `<fixpp/service/control_plane.h>` (the interface), implements or instantiates a `ControlPlane`, and reaches engine functionality through the C ABI symbols exposed by `fixpp::capi`.
+The rule applies to the binary and to default impl translation units. It does **not** restrict `include/fixpp/service/control_plane_factory.hpp` or other public service-mode interface headers *(086/FR-014: this line named `control_plane.h`, which does not exist — `find include/fixpp/service -type f` returns `control_plane_factory.hpp` and a `.gitkeep`)* — those live under `include/fixpp/`, depend only on `core/`, and are part of the public C++ plugin surface like every other interface listed in §6. `fixppd` would include `<fixpp/service/control_plane_factory.hpp>` (the interface) and instantiate a `ControlPlaneFactory`, and reaches engine functionality through the C ABI symbols exposed by `fixpp::capi`.
 
-This is enforced by:
-- A CMake target visibility rule: `fixppd` links `fixpp::capi` and `fixpp::service-iface` only; the C++ engine umbrella `fixpp` is **not** in its include search path or link interface.
-- The `tools/check_layers.py` lint scans `service/` source for any `#include <fixpp/X/...>` where `X != service`, and fails the build on any hit. `<fixpp/service/...>` is allowed (interface). `<fixpp/wire/...>`, `<fixpp/session/...>`, etc. are forbidden.
+This is enforced by — **each mechanism named for what it actually does, corrected by 086 (FR-014); the previous two bullets over-claimed on both**:
+
+- **A CMake target visibility rule**, in force for the build graph — *stated in the future tense on purpose: neither `fixppd` nor `fixpp::service-iface` exists as a CMake target today (the exported alias is `fixpp::service`, `src/service/CMakeLists.txt:8`; `FIXPP_BUILD_SERVICE` is not yet functional)*: `fixppd` will link `fixpp::capi` and `fixpp::service` only; the C++ engine umbrella `fixpp` is **not** in its link interface. This is a property of how the target is *written*, not something a gate checks — nothing fails if someone adds the umbrella.
+- **The installed include isolation (086)**, which is the part that is genuinely structural, and only for consumers of the **package**: `fixpp::capi` exposes `include/capi` and `fixpp::service` exposes `include/service-iface`, so `#include <fixpp/wire/...>` does not resolve for either. Asserted by three configure-time `try_compile` calls in `tests/consumer/`, each demonstrated able to fail. In-tree this does **not** apply: `CMakeLists.txt:234`'s directory-scoped `include_directories()` makes every header reachable by design.
+- **`tools/check_layers.py`**, whose real scope is narrower than this section claimed: it is a source `#include`-edge lint over **`src/**` and `bindings/**`** (`:2-7`, `:173-176`) against the `[arch §2.3]` allowed-edge map. It does **not** scan `service/`, it parses no CMake, and it reads no link interface. It is a real gate for the module graph and no gate at all for the service-mode boundary described here.
+
+**Net**: for a consumer of the installed package the header boundary is mechanically enforced; for `service/` sources in this repo it rests on convention plus review, because the lint that this section named does not cover that directory.
 
 **Why this matters:** the service is the most common deployment shape for non-C++ consumers and for HFT shops that do not want the engine in-process. Keeping it strictly downstream of the C ABI makes the legal isolation (AGPL boundary `[const §V.1]`) structural, lets the service be packaged separately under different licensing if a commercial deployment requires it, and gives us a built-in compatibility test for the C ABI: if the service builds, the C ABI is at least cohesive enough to host a non-trivial consumer.
 

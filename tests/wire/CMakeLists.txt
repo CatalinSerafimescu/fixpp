@@ -73,6 +73,11 @@ target_compile_definitions(wire_pure_tests PRIVATE FIXPP_TEST_HOOKS)
 # scope real-frame accept/reject regressions (fixpp#201).
 target_compile_definitions(wire_pure_tests PRIVATE
   "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\"")
+# 085 T002 (FR-001b single-traversal source-inspection pin): repo src root so
+# the pin can read src/wire/offset_table.cpp verbatim. Mirrors
+# tests/dictionary/CMakeLists.txt:178-183 (080 T015).
+target_compile_definitions(wire_pure_tests PRIVATE
+  "FIXPP_SRC_DIR=\"${CMAKE_SOURCE_DIR}/src\"")
 # 079 T024: label the bucket `wire` so `ctest -L wire` selects the US1/US2
 # real-frame regressions living in validator_type_check_test.cpp (matches the
 # wire_dict_tests "075;wire" + required_scope_two_tier_test "079;wire" pattern;

@@ -1,0 +1,31 @@
+NOTICE
+======
+
+fixpp
+Copyright (c) the fixpp authors.
+
+fixpp is licensed under the GNU Affero General Public License v3.0 (AGPL-3.0).
+See LICENSE for the full text.
+
+
+Third-party material redistributed with this product
+----------------------------------------------------
+
+### FIX protocol dictionaries (QuickFIX)
+
+This product redistributes FIX protocol data dictionary files (`FIX40.xml`
+through `FIX50SP2.xml`, `FIXT11.xml`) obtained from the QuickFIX project. In a
+binary distribution these are installed under `share/fixpp/dictionaries/`.
+
+They are covered by The QuickFIX Software License, Version 1.0
+(Copyright (c) 2001-2020 Oren Miller), which is redistributed in full alongside
+the dictionary files as `QUICKFIX_LICENSE.txt`.
+
+Clause 3 of that licence requires the following acknowledgment to appear in
+end-user documentation:
+
+      "This product includes software developed by
+       quickfixengine.org (http://www.quickfixengine.org/)."
+
+fixpp is an independent implementation. It is neither affiliated with, nor
+endorsed or sponsored by, the QuickFIX project or quickfixengine.org.

@@ -32,7 +32,8 @@ add_library(fixpp_dictionary STATIC
 add_library(fixpp::dictionary ALIAS fixpp_dictionary)
 
 target_include_directories(fixpp_dictionary PUBLIC
-  "${CMAKE_SOURCE_DIR}/include"
+  "$<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>"
+  "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
 )
 
 # Allowed dependency: core only [arch §2.3], PLUS the 2b cutover link edge:

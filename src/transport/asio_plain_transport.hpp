@@ -24,8 +24,12 @@
 #include <fixpp/core/error.hpp>
 #include <fixpp/transport/listener_events.hpp>
 #include <fixpp/transport/transport.hpp>
+#include <memory>
 #include <memory_resource>
 #include <span>
+
+// The shared timer-epoch counter block (D-4.1) — internal, src/ only.
+#include "timer_epoch_state.hpp"
 
 namespace fixpp::transport {
 
@@ -51,16 +55,32 @@ class asio_plain_transport final : public Transport {
 public:
     enum class state_t : std::uint8_t { fresh, connected, closed };
 
+    // ── Timer-epoch guard (research.md D-4.1, FR-014) ───────────────────────
+    //
+    // The counter block is the SHARED `fixpp::transport::timer_epoch_state`
+    // from "transport/timer_epoch_state.hpp" — one type for both transports,
+    // as data-model.md §4 and D-4.1 specify. This transport uses `connect`
+    // only; the `handshake` field is TLS-only and unused here.
+
     // Initiator constructor — fresh socket; async_connect drives fresh→connected.
-    asio_plain_transport(asio::any_io_executor exec, Transport::Config cfg) noexcept;
+    // NOT noexcept (088/FR-014 widening): the default member initializer for
+    // timer_epochs_ below does a make_shared, which can throw bad_alloc. Both
+    // call sites (transport_factory.cpp asio_plain_transport_factory::make /
+    // ::make_accepted) already wrap construction in the [2a §4.2] trap_throw
+    // try/catch, previously vacuous, now load-bearing. See
+    // .specify/decisions/088-firstframe-budget-timer-lifetime-verify.md
+    // "Cross-feature surface note" for why this does not breach 043's
+    // contract (internal type, not an installed/C-ABI surface).
+    asio_plain_transport(asio::any_io_executor exec, Transport::Config cfg);
 
     // Acceptor adoption constructor — adopts an already-accepted TCP socket.
     // State starts in state_t::connected (TCP 3-way handshake already complete
     // at the OS level). async_connect returns transport_already_connected.
     // apply_socket_options_() is called immediately to apply cfg_ knobs.
+    // NOT noexcept — same 088/FR-014 reason as the initiator ctor above.
     struct from_accepted_tag {};
     asio_plain_transport(from_accepted_tag, asio::any_io_executor exec, Transport::Config cfg,
-                         asio::ip::tcp::socket accepted_socket) noexcept;
+                         asio::ip::tcp::socket accepted_socket);
 
     // Non-copyable; non-movable (socket_ tied to executor).
     asio_plain_transport(asio_plain_transport const&) = delete;
@@ -68,7 +88,12 @@ public:
     asio_plain_transport(asio_plain_transport&&) = delete;
     asio_plain_transport& operator=(asio_plain_transport&&) = delete;
 
-    ~asio_plain_transport() override = default;
+    // Not `= default`: the destructor BODY retires the armed timer epoch
+    // (D-4.1 item 3) before members are destroyed, so a stranded timer
+    // handler that observes the retirement is guaranteed `this` is still
+    // alive. Members are still destroyed in reverse declaration order after
+    // the body runs. Body in the .cpp.
+    ~asio_plain_transport() override;
 
     // ── Transport pure-virtual overrides ──────────────────────────────────────
 
@@ -122,6 +147,17 @@ public:
         return socket_.get_executor();
     }
 
+    // ── Timer-epoch accessor (D-4.1 mechanism 2; D-9 mechanism 2) ───────────
+    //
+    // Used by the T3-T5 witness cells to observe the retire-point-omitted
+    // mutant (D-6.4). This is exactly what it buys — not broader guard
+    // coverage; the sibling "guard omitted" mutant has no killer and is
+    // discharged structurally (D-9). Const, internal-header-only: no
+    // production branch, no FIXPP_TEST_HOOKS.
+    [[nodiscard]] std::shared_ptr<const timer_epoch_state> timer_epochs() const noexcept {
+        return timer_epochs_;
+    }
+
 private:
     // Apply FR-029 / FR-029a socket options (tcp_nodelay, SO_LINGER, recv/send
     // buffer sizes, TCP keepalive). Called by async_connect after TCP connect
@@ -140,6 +176,14 @@ private:
 
     // ── State ─────────────────────────────────────────────────────────────────
     state_t state_{state_t::fresh};
+
+    // ── Timer-epoch guard (D-4.1) ────────────────────────────────────────────
+    // Held by shared_ptr, not by value: a timer handler captures a copy of
+    // this pointer (never `this`), so `*timer_epochs_` outlives the
+    // transport unconditionally even when the owner destroys `this` with no
+    // drain (D-4.0 — reconnect_fsm.cpp:250-252 and engine.cpp:841-844 both
+    // destroy synchronously on the failure arm).
+    std::shared_ptr<timer_epoch_state> timer_epochs_{std::make_shared<timer_epoch_state>()};
 
     // ── In-flight exclusivity flags (strand-confined — NOT atomics) ───────────
     bool read_in_flight_{false};

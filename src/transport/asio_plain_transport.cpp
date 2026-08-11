@@ -35,17 +35,35 @@ namespace fixpp::transport {
 // Constructors
 // ─────────────────────────────────────────────────────────────────────────────
 
-asio_plain_transport::asio_plain_transport(asio::any_io_executor exec,
-                                           Transport::Config cfg) noexcept
+asio_plain_transport::asio_plain_transport(asio::any_io_executor exec, Transport::Config cfg)
     : cfg_{cfg}, exec_{exec}, socket_{exec} {}
 
 asio_plain_transport::asio_plain_transport(from_accepted_tag, asio::any_io_executor exec,
                                            Transport::Config cfg,
-                                           asio::ip::tcp::socket accepted_socket) noexcept
+                                           asio::ip::tcp::socket accepted_socket)
     : cfg_{cfg}, exec_{exec}, socket_{std::move(accepted_socket)}, state_{state_t::connected} {
     // Apply socket options immediately on the already-connected socket (D-12).
     apply_socket_options_();
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ~asio_plain_transport — retires the armed timer epoch (D-4.1 item 3).
+//
+// This is a destructor-BODY statement, not a retiring member: members
+// (including timer_epochs_ itself) are destroyed AFTER this body runs, so
+// the retirement is sequenced strictly before socket_'s destruction. A
+// stranded connect-timeout handler that observes the retired epoch is
+// therefore guaranteed `this` is still alive when it decided not to touch
+// it, and guaranteed dead when it did.
+//
+// Covers the destroy-with-no-drain leg (D-4.0): reconnect_fsm.cpp destroys
+// this transport synchronously on the failure arm, with no wait for an
+// in-flight timer handler to run first. The in-function retire-before-cancel
+// at the arm site (below) does NOT cover a coroutine frame destroyed
+// mid-co_await without resuming — this destructor is the only thing that
+// does.
+// ─────────────────────────────────────────────────────────────────────────────
+asio_plain_transport::~asio_plain_transport() { ++timer_epochs_->connect; }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // apply_socket_options_ — FR-029 / FR-029a socket-option application.
@@ -127,11 +145,17 @@ void asio_plain_transport::apply_socket_options_() noexcept {
     // Arm a timer that cancels the socket on expiry (mirrors TLS transport).
     asio::steady_timer timer{exec_};
     timer.expires_after(cfg_.connect_timeout);
-    timer.async_wait([this](asio::error_code ec) {
-        if (!ec) {
-            asio::error_code ignored;
-            socket_.cancel(ignored);
+    // Timer-epoch guard (D-4.1, FR-014): the handler captures a COPY of
+    // timer_epochs_, never `this` — nothing here touches `this` until the
+    // guard has passed, so a handler stranded by a destroy-with-no-drain
+    // (D-4.0) safely no-ops instead of reading/calling through dead memory.
+    const std::uint64_t connect_epoch = ++timer_epochs_->connect;
+    timer.async_wait([this, epochs = timer_epochs_, connect_epoch](asio::error_code ec) {
+        if (ec || connect_epoch != epochs->connect) {
+            return;  // cancelled, or this attempt's epoch was retired — no-op.
         }
+        asio::error_code ignored;
+        socket_.cancel(ignored);
     });
 
     // Map any accepted cancellation to `terminal` for the forwarded child op
@@ -147,6 +171,10 @@ void asio_plain_transport::apply_socket_options_() noexcept {
     auto connected_ep = co_await asio_free::async_connect(
         socket_, endpoints, asio::redirect_error(asio::use_awaitable, connect_ec));
 
+    // Retire this attempt's epoch BEFORE cancel() — a same-strand handler
+    // still queued after cancel() sees the retirement and no-ops instead of
+    // touching `this` (D-4.1).
+    ++timer_epochs_->connect;
     timer.cancel();
 
     if (connect_ec) {

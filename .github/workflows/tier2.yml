@@ -148,9 +148,18 @@ jobs:
   windows:
     name: "${{ matrix.preset }}"
     runs-on: windows-2022
-    # Hung-job backstop (2026-07-09): the MSVC matrix runs ~45 min cold; 90 sits
-    # well above that (matches wheel-windows / tier1's heavy-job convention) while
-    # capping a wedged build far below GitHub's 6h default.
+    permissions:
+      contents: read
+      packages: write  # save the rebuilt Conan cache + the sccache cache to GHCR
+    # Hung-job backstop. MEASURED (#231, run 30880318695, all three legs green):
+    # job totals are 104 / 104 / 171 min for debug / release / asan — so the asan
+    # leg finishes 9 minutes inside this backstop, not "well above" it.
+    #
+    # The "~45 min cold; 90 sits well above that" note this replaces (2026-07-09)
+    # was stale by 2-4x and read as headroom that does not exist. Left at 180
+    # deliberately: raising it would hide the proximity that #229 has to fix, and
+    # a compiler cache cannot buy it back — 85 of the asan leg's 171 min is
+    # Build, the other 81 is ctest, which sccache does not touch.
     timeout-minutes: 180
     needs: filter
     if: needs.filter.outputs.should_run == 'true'
@@ -166,6 +175,27 @@ jobs:
 
     env:
       CONAN_HOME: C:\Users\runneradmin\.conan2
+
+      # ── sccache (#231) ────────────────────────────────────────────────────
+      # ⚠️ CMAKE_{C,CXX}_COMPILER_LAUNCHER is deliberately ABSENT from this
+      # block. A JOB-level launcher is the tier1 exit-127 shape
+      # (tier1.yml:392-404): `conan install --build=missing` runs a dependency's
+      # compiler probe through the launcher, and a launcher not yet on PATH
+      # fails the probe with 127 and reddens the lane. Passing it with -D on the
+      # Configure step instead scopes it to the fixpp build, so Conan's
+      # dependency builds never see it and that shape is unrepresentable rather
+      # than merely ordered-around. Deps arrive prebuilt from GHCR on this lane
+      # by design, so caching them would buy little anyway.
+      SCCACHE_DIR: C:\sccache
+      # Never idle-shut-down. The default (600 s) lets the server exit during a
+      # long link with no compiles; the next invocation silently starts a FRESH
+      # server, and `--show-stats` then reports that server's zeros. The
+      # acceptance criterion here IS the stats, so a truncated counter would not
+      # be a cosmetic loss — it would fabricate the measurement.
+      SCCACHE_IDLE_TIMEOUT: "0"
+      # Bounds what the seed step has to upload. First estimate, to be tuned
+      # from the size the seed step prints into the job summary.
+      SCCACHE_CACHE_SIZE: 8G
 
     strategy:
       fail-fast: false
@@ -193,13 +223,57 @@ jobs:
       - name: Install Ninja
         run: choco install ninja --no-progress -y
 
-      - name: Cache Conan packages
-        uses: actions/cache@v5
-        with:
-          path: C:\Users\runneradmin\.conan2\p
-          key: conan-win-${{ matrix.preset }}-${{ hashFiles('conanfile.py', format('conan/profiles/{0}', matrix.preset)) }}
-          restore-keys: |
-            conan-win-${{ matrix.preset }}-
+      # sccache is wireable on this lane AT ALL because the Windows presets use
+      # the NINJA generator (CMakePresets.json:9): CMAKE_<LANG>_COMPILER_LAUNCHER
+      # is honored by Ninja/Makefiles and IGNORED by the Visual Studio generator.
+      # Moving this lane to the VS generator would silently disable the cache —
+      # the AC3 assertion after Configure is what would catch that.
+      #
+      # Installed from the pinned upstream release rather than `choco install
+      # sccache` (the idiom two lines up) because the version is then exactly
+      # what this file says: sccache's own entry hash covers the compiler and the
+      # preprocessed source, so a version drift cannot corrupt a build, but it
+      # CAN change the stats format and the non-cacheable classification that
+      # AC1 reads. Pinning keeps the measurement comparable run to run.
+      - name: Install sccache
+        shell: bash
+        run: |
+          set -euo pipefail
+          ver=v0.17.0
+          asset="sccache-${ver}-x86_64-pc-windows-msvc"
+          base="https://github.com/mozilla/sccache/releases/download/${ver}"
+          # $RUNNER_TEMP, not the workspace: the workspace IS the git checkout on
+          # this runner, and a stray download there is an untracked file in a
+          # tree several steps later assume is clean.
+          tmp="$(cygpath -u "$RUNNER_TEMP")/sccache-dl"
+          rm -rf "$tmp"; mkdir -p "$tmp"; cd "$tmp"
+          # PINNED IN-REPO, deliberately not fetched. Downloading the .sha256
+          # sidecar from the same mutable release that serves the archive checks
+          # transport integrity but pins nothing: whoever can replace the asset
+          # can replace its sidecar. This literal was verified out-of-band —
+          # asset downloaded and hashed locally, and the value agreed with the
+          # published sidecar at the time of pinning (2026-08-07).
+          # Bumping `ver` REQUIRES re-deriving this by hand.
+          sha256=e94cfc5b58cbe439302f586c1d1bd7980c2cd371d47bdf385ade657411e6f3ac
+          curl -sSfL -o sccache.zip "${base}/${asset}.zip"
+          echo "${sha256}  sccache.zip" | sha256sum -c -
+          unzip -q sccache.zip
+          mkdir -p "$HOME/bin"
+          mv "${asset}/sccache.exe" "$HOME/bin/"
+          # GITHUB_PATH must carry a WINDOWS path: the Configure/Build steps are
+          # `shell: cmd`, which cannot resolve the `/c/...` form Git Bash uses.
+          cygpath -w "$HOME/bin" >> "$GITHUB_PATH"
+          "$HOME/bin/sccache.exe" --version
+
+      # NOTE the ORDER of the next four steps is load-bearing: vcvars must run
+      # BEFORE the GHCR restore, because the restore's cache key is derived from
+      # the MSVC toolset version that vcvars exports. See ci/conan-cache-key.sh.
+      #
+      # The `actions/cache` Conan step that used to sit HERE is gone. It was
+      # keyed on hashFiles(conanfile, profile) with no toolset component, which
+      # is the unsafe key this lane now avoids; it also wrote ~790 MB per PR into
+      # the repo-wide 10 GB Actions-cache pool under a `refs/pull/<n>/merge`
+      # scope that nothing can read once the PR closes.
 
       # setup-msbuild only adds msbuild to PATH; it does NOT run vcvars, so cl.exe
       # is absent and the Ninja-generator presets fail "CMAKE_CXX_COMPILER (cl.exe)
@@ -211,31 +285,504 @@ jobs:
       - name: Set up MSVC environment (vcvars)
         uses: egor-tensin/vs-shell@v2
 
-      # OTel-OFF for the first lane-bring-up: skip the protobuf/abseil/grpc build so
-      # the toolchain/configure/codegen path converges in fast (~10 min) cycles.
-      # Flip with_otel=True (the V1.0 CI requirement) once the lane is proven green;
-      # the build-ctx cppstd=20 fix is already in place for that flip.
-      - name: Conan install (OTel-OFF — first lane bring-up)
+      # Record WHICH toolset this run used. This is not decoration: the whole
+      # MSVC cache design turns on VCToolsVersion (the MSVC toolset, which ships
+      # the STL and drives the ABI) rather than VSCMD_VER (the VS *instance*
+      # version, one level coarser). Printing both on every run means a future
+      # LNK2038 can be traced to a toolset change from the log alone, and a
+      # GitHub image bump is visible before it is mysterious.
+      - name: Record the MSVC toolset
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "VCToolsVersion = ${VCToolsVersion:-<unset>}"
+          echo "VSCMD_VER      = ${VSCMD_VER:-<unset>}"
+          cl 2>&1 | head -2 || true
+          {
+            echo "### MSVC toolset — ${{ matrix.preset }}"
+            echo ""
+            echo "| variable | value |"
+            echo "|---|---|"
+            echo "| \`VCToolsVersion\` | \`${VCToolsVersion:-<unset>}\` |"
+            echo "| \`VSCMD_VER\` | \`${VSCMD_VER:-<unset>}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Conan deps come from GHCR (the same fixpp-conan-cache package the Linux
+      # lanes use), NOT from the Actions cache. This lane was offloaded once
+      # before and REVERTED (main 327d7665) because a locally-seeded package HIT
+      # and then LNK2038-mismatched the runner. Two things changed:
+      #
+      #   1. The key now folds in the MSVC toolset, so a VS image bump MISSES and
+      #      auto-reseeds instead of silently restoring a foreign STL.
+      #   2. Seeding is RUNNER-ONLY. ci/seed-conan-cache.sh refuses a
+      #      windows-msvc-* seed when no toolset is in scope, which is exactly
+      #      the case off a runner — the local-seed mistake is now unrepresentable
+      #      rather than merely documented.
+      #
+      # MISS is never fatal: `conan install --build=missing` below rebuilds, and
+      # the save step then publishes it.
+      - name: Set up oras
+        uses: oras-project/setup-oras@v2
+
+      - name: Restore Conan cache from GHCR
+        id: conan_restore
+        shell: bash
+        run: ci/restore-conan-cache.sh ${{ matrix.preset }}
+
+      # OTel is ON here — the V1.0 "OTel everywhere" requirement, and a hard
+      # prerequisite for 084-packaging, whose FR-011/T062a fails the packaging
+      # step on any shipped artifact not recording FIXPP_BUILD_OTEL=ON across all
+      # six configurations, two of which are these MSVC legs.
+      #
+      # This is also what makes the MSVC offload worth doing at all: OTel-OFF,
+      # the only from-source cost here was static openssl; OTel-ON drags in the
+      # opentelemetry-cpp + protobuf + abseil chain, which is the expensive
+      # payload the GHCR package exists to carry.
+      #
+      # -s:b compiler.cppstd=20 applies to the BUILD context (protoc and friends)
+      # and was already in place for precisely this flip.
+      - name: Conan install (OTel-ON)
         shell: cmd
         run: |
           conan install . ^
             -pr conan/profiles/${{ matrix.preset }} ^
-            -o "fixpp/*:with_otel=False" ^
+            -o "fixpp/*:with_otel=True" ^
             -s:b compiler.cppstd=20 ^
             --build=missing ^
             -of build/${{ matrix.preset }}
 
-      - name: Configure (OTel-OFF)
+      # Auto-push-on-miss. Gated to push:main and workflow_dispatch on main:
+      # publication is restricted to main's ref, whether reached by push or by
+      # dispatch, so no branch other than main can publish into the namespace
+      # main consumes. workflow_dispatch is included deliberately: it makes a
+      # manual run on main the RESEED lever after a toolchain change, which is
+      # why no separate "the compiler changed" workflow is needed. A trigger
+      # that has to DETECT a change is strictly more fragile than a key that IS
+      # the change: the key already misses on a bump, so a dispatch only makes
+      # the reseed early instead of lazy.
+      #
+      # continue-on-error: publishing is an optimisation. A GHCR hiccup must not
+      # redden a lane whose build and tests passed.
+      - name: Save Conan cache to GHCR (push:main / dispatch on main + miss only)
+        if: (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')) && steps.conan_restore.outputs.hit == 'false'
+        continue-on-error: true
+        shell: bash
+        env:
+          # Prune needs `delete:packages`, which GITHUB_TOKEN does NOT carry — verified
+          # 403 against the live API. Supplying a GHCR_PAT repo secret with that scope
+          # turns pruning on with no other change; without the secret this falls back to
+          # GITHUB_TOKEN and behaves exactly as before, so the wiring is inert until then.
+          GH_TOKEN: ${{ secrets.GHCR_PAT || secrets.GITHUB_TOKEN }}  # for prune's `gh api`
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u "${{ github.actor }}" --password-stdin
+          ci/seed-conan-cache.sh ${{ matrix.preset }} -o 'fixpp/*:with_otel=True' -s:b compiler.cppstd=20
+
+      # ── sccache restore (#231) ──────────────────────────────────────────────
+      # MUST run before Configure: the first `sccache cl.exe` invocation starts
+      # the background server, and swapping SCCACHE_DIR under a live server is
+      # how a half-written entry gets restored as a compile failure instead of a
+      # miss.
+      #
+      # `oras login` here — unlike the Conan restore's anonymous pull. The Conan
+      # package was made public by hand; a package first created by
+      # GITHUB_TOKEN is PRIVATE, so an anonymous pull of fixpp-sccache 401s and
+      # every leg reads as a permanent MISS with no other symptom. `|| true`
+      # because a fork PR's downgraded token cannot log in, and there the
+      # anonymous attempt (public package) is still the correct fallback.
+      - name: Restore sccache from GHCR
+        id: sccache_restore
+        shell: bash
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u "${{ github.actor }}" --password-stdin || true
+          ci/restore-sccache.sh ${{ matrix.preset }}
+
+      - name: Configure (OTel-ON)
         shell: cmd
-        run: cmake --preset ${{ matrix.preset }} -DFIXPP_BUILD_OTEL=OFF
+        # 084 T066: FIXPP_ARTIFACT_DIR is a CACHE variable baked into the
+        # fixpp-package target at CONFIGURE time — it is not read from the
+        # environment. Its in-repo default is a local WSL mount, unreachable
+        # here, so it must be set now rather than on the packaging step.
+        #
+        # %GITHUB_WORKSPACE:\=/% rewrites the backslashes to forward slashes.
+        # Passing the raw Windows path would hand CMake a value containing
+        # sequences like `\a`, which it may interpret rather than take
+        # literally; CMake accepts forward slashes on Windows everywhere.
+        #
+        # ── sccache (#231): both -D pairs are CI-ONLY, never CMakePresets.json ──
+        #
+        # COMPILER_LAUNCHER on the command line rather than in the job env — see
+        # the `env:` block above for the exit-127 reason.
+        #
+        # MSVC_DEBUG_INFORMATION_FORMAT: sccache CANNOT cache a compilation that
+        # writes to a shared PDB (`/Zi`), because the PDB is an out-of-band side
+        # effect it cannot reproduce from a cache entry; it needs `/Z7` (debug
+        # info embedded in the .obj). MEASURED on a local Debug tree before this
+        # was wired: 3235 of 3235 compile FLAGS lines carried `-Zi`, zero `/Z7`
+        # — CMP0141 is NEW (cmake_minimum_required 3.28) and nothing in the tree
+        # overrides the default, so `Embedded` here is additive, not a fight
+        # with a preset value.
+        #
+        # The value is CMake's own default genex with ProgramDatabase swapped
+        # for Embedded, NOT a bare `Embedded`. A bare value would put /Z7 on
+        # windows-msvc-release too — that config emits no debug info today, and
+        # silently starting to would change what ships, not just how fast it
+        # builds. Quoted so `cmd` reads `<` and `>` as text and not as
+        # redirection.
+        #
+        # Kept OFF CMakePresets.json deliberately: a local developer's Debug
+        # build keeps /Zi and its PDBs.
+        #
+        # ⚠️ Scoped risk, recorded: cmake/FixppPackaging.cmake:358 redirects each
+        # static/object target's COMPILER PDB into lib/ so an
+        # install(... FILES_MATCHING "*.pdb") has something to match — a rule
+        # that already shipped a zero-symbol Debug ZIP once (fixed 2026-08-02,
+        # comment at FixppPackaging.cmake:333-353), silently, because a glob
+        # that matches nothing installs nothing and SUCCEEDS. Under /Z7 there is
+        # no compiler PDB at all. It does not bite today: `Build packages` is
+        # gated to windows-msvc-release, which the genex leaves on
+        # ProgramDatabase-less Release. It WOULD bite the day packaging is
+        # enabled on a Debug leg.
+        run: >
+          cmake --preset ${{ matrix.preset }} -DFIXPP_BUILD_OTEL=ON
+          -DFIXPP_ARTIFACT_DIR=%GITHUB_WORKSPACE:\=/%/_artifacts
+          -DCMAKE_C_COMPILER_LAUNCHER=sccache
+          -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
+          "-DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=$<$<CONFIG:Debug,RelWithDebInfo>:Embedded>"
+
+      # AC3 (#231) — assert the premise on the REAL command line, do not infer it.
+      #
+      # This is a gate, not an excerpt. Every claim sccache rests on is invisible
+      # from the outside: a VS-generator move drops the launcher, a preset change
+      # restores /Zi, and either one turns the cache into a 0%-hit no-op that
+      # still reports the lane green. `ninja -t commands` prints what will
+      # actually run, so the assertions here fail loudly instead.
+      #
+      # ⚠️ `-t commands` prints the FULL TRANSITIVE command list, not one line —
+      # MEASURED at 85 lines for a real fixpp .obj (codegen, then a
+      # `-scanDependencies` pass, then `cmake -E cmake_ninja_dyndep`, then the
+      # compile). `head -1` picks a codegen step and this gate would report
+      # "sccache is not on the command line" on a perfectly wired lane.
+      #
+      # ` -c ` is the discriminator: MEASURED to match exactly 1 of those 85
+      # lines, the compile itself. The `-scanDependencies` line ends in `-Fo…`
+      # and carries no `-c`, so it is excluded — which also records the caveat
+      # that CMake does NOT route the module-dependency scan through the
+      # launcher, so that per-TU cl invocation is never cached. See
+      # ci/tier2-sccache-probe.md.
+      - name: Assert the sccache prerequisites are on the cl command line
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "build/${{ matrix.preset }}"
+          obj=$(ninja -t targets all | grep -m1 -E '\.obj: ' | cut -d: -f1)
+          [ -n "$obj" ] || { echo "::error::no .obj target found in the ninja graph"; exit 1; }
+          cmdline=$(ninja -t commands "$obj" | grep -E ' [-/]c ' | tail -1)
+          case "$cmdline" in
+            *cl.exe*) ;;
+            *) echo "::error::could not isolate the compile line out of \`ninja -t commands $obj\` (got: ${cmdline:-<empty>}). The gate below would be vacuous, so this fails instead."; exit 1 ;;
+          esac
+          echo "$cmdline"
+          {
+            echo "### sccache prerequisites — ${{ matrix.preset }}"
+            echo ''
+            echo "One-TU \`ninja -t commands\` excerpt (\`$obj\`):"
+            echo ''
+            echo '```'
+            echo "$cmdline"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          fail=0
+          case "$cmdline" in
+            *sccache*) echo "OK: launcher present" ;;
+            *) echo "::error::sccache is NOT on the compile command line — CMAKE_CXX_COMPILER_LAUNCHER did not take effect (a Visual Studio generator would ignore it; these presets must stay on Ninja)."; fail=1 ;;
+          esac
+
+          # Release emits no debug info at all, so /Z7 must be ABSENT there —
+          # asserting its presence on every leg would fail the genex that keeps
+          # Release unchanged, which is the property that genex exists to hold.
+          if [ "${{ matrix.preset }}" = "windows-msvc-release" ]; then
+            case "$cmdline" in
+              *-Z7*|*/Z7*|*-Zi*|*/Zi*) echo "::error::windows-msvc-release must emit NO debug info; found a /Z7 or /Zi on the command line."; fail=1 ;;
+              *) echo "OK: no debug-info flag on Release" ;;
+            esac
+          else
+            case "$cmdline" in
+              *-Z7*|*/Z7*) echo "OK: /Z7 (embedded debug info)" ;;
+              *) echo "::error::/Z7 is NOT on the command line. MEASURED: this does not degrade to a poor hit rate, it FAILS the build - cl reports C1041 (cannot open program database) even with /FS present, at Non-cacheable compilations 0. Do not go looking for a non-cacheable bucket; there will not be one."; fail=1 ;;
+            esac
+            case "$cmdline" in
+              *-Zi*|*/Zi*) echo "::error::/Zi is STILL on the command line alongside /Z7 - the shared-PDB write is what breaks parallel cached compiles (C1041), so this must not survive."; fail=1 ;;
+              *) echo "OK: no /Zi" ;;
+            esac
+          fi
+          [ "$fail" = 0 ] || exit 1
 
       - name: Build
         shell: cmd
         run: cmake --build --preset ${{ matrix.preset }}
 
-      - name: Test
+      # AC1 (#231) — requests, hits, AND the non-cacheable / failure breakdown.
+      #
+      # `if: always()` so a RED build still reports them: a build that failed
+      # because of the cache is exactly the case where the stats are the
+      # diagnosis, and skipping them there would leave the one useful artifact
+      # unwritten.
+      - name: sccache statistics
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          stats=$(sccache --show-stats)
+          echo "$stats"
+          {
+            echo "### sccache stats — ${{ matrix.preset }}"
+            echo ''
+            echo "restore: \`${{ steps.sccache_restore.outputs.hit || 'n/a' }}\` (hit)"
+            echo ''
+            echo '```'
+            echo "$stats"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # Stop the server HERE, not only in the seed script. SCCACHE_IDLE_TIMEOUT=0
+          # means it never exits on its own, and the seed step that would stop it
+          # is skipped on every PR event — leaving a live background process for
+          # the runner to clean up at job teardown. Stopping it also quiesces
+          # SCCACHE_DIR before the seed step archives it; seed-sccache.sh repeats
+          # the call because it must hold that property on its own.
+          sccache --stop-server >/dev/null 2>&1 || true
+      # Publish BEFORE the ctest steps, not after. The cache is a compilation
+      # artifact: a red test says nothing about whether these objects are worth
+      # keeping, and withholding the cache on a test failure would make the next
+      # run pay a full cold build to fix an unrelated test. The Build step above
+      # succeeding is the only precondition that matters, and step ordering
+      # already enforces it.
+      #
+      # Gating and continue-on-error mirror the Conan save step above; the
+      # rationale differs and is recorded in ci/seed-sccache.sh.
+      #
+      # ⚠️ THE REF GUARD IS LOAD-BEARING HERE, MORE SO THAN ON THE CONAN STEP.
+      # `push` is already safe — `on: push:` is restricted to `branches: ["main"]`.
+      # `workflow_dispatch` is not: GitHub's dispatch UI lets you select ANY
+      # branch, so without `github.ref` this step publishes whatever branch you
+      # dispatched into the namespace `main` consumes.
+      #
+      # It bites harder than the Conan equivalent because of what the tag is
+      # keyed on (ci/sccache-cache-key.sh:75):
+      #
+      #   sccache tag:  sccache-<preset>-<toolset>                     ← no content hash
+      #   Conan tag:    <profile>-sha256(conanfile.py+profile+toolset) ← content-derived
+      #
+      # A branch that changes a Conan-key INPUT (conanfile.py, the profile, the
+      # toolset) gets a different Conan tag. A branch that changes only .cpp,
+      # headers, CMake, tests, or workflow YAML computes the SAME Conan tag as main —
+      # what protects that namespace is the ref check, not the key. Every branch
+      # computes the IDENTICAL sccache tag whatever it changed, so a
+      # dispatch writes to exactly the artifact main reads next.
+      #
+      # Not a correctness risk — sccache hashes compilation inputs internally, so
+      # a foreign entry is a MISS, never a wrong object. The cost is main's warm
+      # cache being replaced by a feature branch's, making the next push:main
+      # legs rebuild cold (#231 measured 75-94 min cold against a 100% warm hit
+      # rate). Same fix and shape as the four Conan save gates in #245.
+      - name: Save sccache to GHCR (push:main / dispatch on main)
+        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+        continue-on-error: true
+        shell: bash
+        env:
+          # Prune needs `delete:packages`, which GITHUB_TOKEN does NOT carry — verified
+          # 403 against the live API. Supplying a GHCR_PAT repo secret with that scope
+          # turns pruning on with no other change; without the secret this falls back to
+          # GITHUB_TOKEN and behaves exactly as before, so the wiring is inert until then.
+          GH_TOKEN: ${{ secrets.GHCR_PAT || secrets.GITHUB_TOKEN }}  # for prune's `gh api`
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u "${{ github.actor }}" --password-stdin
+          ci/seed-sccache.sh ${{ matrix.preset }}
+
+      # 087 T025 / FR-014 / SC-008 — the last gate-closable vacuity path.
+      #
+      # ⚠️ ASSERT THE COUNT, NOT JUST THE EXIT CODE. `ctest -L` exits 0 when the
+      # filter matches NOTHING, so an exit-code-only check reports this lane green
+      # having run zero witnesses. fixpp::consumer::install-witness — carrying the
+      # 087 system-include gate and 086's reachability matrix — is registered only
+      # inside `if(FIXPP_BUILD_CODEGEN_TOOL)` nested in `if(FIXPP_BUILD_TESTS)`
+      # (CMakeLists.txt:401), so if that option ever goes OFF here the gate stops
+      # existing and this lane still passes.
+      #
+      # ⚠️ `shell: bash` — this file's ctest steps are `shell: cmd`, and this is a
+      # POSIX-shell script. Modelled on THIS workflow's own packaging assertion
+      # below, which already switches to bash for exactly this reason — NOT on
+      # tier 1's step. Contract §6b.
+      #
+      # UNCONDITIONAL — no `if:` guard. The two test steps below are mutually
+      # exclusive by `if:` (`:363` on all but windows-msvc-release, `:389` only on
+      # it) and jointly cover every lane, so one unguarded step covers both.
+      # Placed after Build and before the first test step: `ctest -N` reads
+      # CTestTestfile.cmake and needs a configured tree.
+      - name: Assert the consumer witness is registered (087 FR-014 gate)
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected=1
+          n=$(ctest --preset ${{ matrix.preset }} -L consumer -N \
+                | sed -n 's/^Total Tests: //p')
+          echo "registered consumer witnesses: ${n:-0} (expected ${expected})"
+          if [ "${n:-0}" != "${expected}" ]; then
+            echo "::error::consumer label registered ${n:-0} tests, expected ${expected}."
+            echo "::error::The 086/087 installed-interface gate is not registered on this lane."
+            echo "::error::Refusing to report this lane green on an unrun gate."
+            exit 1
+          fi
+
+      # opentelemetry-cpp ships `opentelemetry_proto` as a DLL on Windows even
+      # though NOTHING in the Conan graph is shared=True — verified by
+      # dumpbin /dependents against a control binary: every import of
+      # config_044_tests.exe resolves except opentelemetry_proto.dll. Turning
+      # OTel ON therefore made four previously-green tests die at 0xc0000135
+      # (STATUS_DLL_NOT_FOUND) in the loader, before main(), with no output for
+      # ctest to report. config_044_tests does not link an OTel target at all —
+      # it inherits the import transitively through fixpp::session.
+      #
+      # The fix lives in CMakeLists.txt, which stages those DLLs next to the
+      # executables at build time — so it works for a developer running the
+      # tests from a plain Windows shell too, not only here.
+      #
+      # This step deliberately does NOT `call conanrun.bat`. Conan's run-env
+      # would also put the DLL on PATH and would therefore MASK any regression
+      # in the CMake staging: the lane would stay green while the fix that
+      # local developers depend on had quietly stopped firing. Keeping ctest
+      # bare makes the staging load-bearing, and so continuously verified.
+      # 084 T066 — the packaging tier is GATED ON windows-msvc-release.
+      #
+      # Turning OTel ON here also turned PACKAGING on (084 FR-011:
+      # FIXPP_PACKAGING_ENABLED tracks FIXPP_BUILD_OTEL), so these six witnesses
+      # now register on all three lanes where they never have before. Each one
+      # stage-installs a prefix and then configures and compiles a sub-project —
+      # including a 1700-line TU in the real-client tier — which is not something
+      # to run three times, least of all under ASan on a Windows runner.
+      #
+      # ⚠️ The exclusion is BY LABEL and is `packaging` ONLY, which preserves the
+      # property the comment above depends on: every real test binary still runs
+      # bare, so the CMakeLists DLL staging stays load-bearing and continuously
+      # verified. Narrowing ctest to a subset would have broken that; excluding
+      # one label does not.
+      #
+      # windows-msvc-asan is excluded outright — it is not one of the six shipped
+      # configurations (contracts/package-layout.md §1), so it has no artifact.
+      - name: Test (minimal tier — packaging gated on windows-msvc-release)
+        if: matrix.preset != 'windows-msvc-release'
+        shell: cmd
+        run: ctest --preset ${{ matrix.preset }} --output-on-failure -LE packaging
+
+      # ⚠️ ASSERT THE COUNT BEFORE RUNNING. `ctest -L` exits 0 when the filter
+      # matches NOTHING, so an exit-code-only check would report this lane green
+      # having run zero witnesses — and on Windows that is a live risk, not a
+      # theoretical one: if FIXPP_PACKAGING_ENABLED ever goes OFF here (an
+      # OTel-OFF regression in the conan step, say) the tier silently vanishes
+      # and the lane still passes.
+      - name: Assert the packaging tier is registered
+        if: matrix.preset == 'windows-msvc-release'
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected=8
+          n=$(ctest --preset ${{ matrix.preset }} -L packaging -N \
+                | sed -n 's/^Total Tests: //p')
+          echo "registered packaging witnesses: ${n:-0} (expected ${expected})"
+          if [ "${n:-0}" != "${expected}" ]; then
+            echo "::error::packaging tier registered ${n:-0} tests, expected ${expected}."
+            echo "::error::Refusing to report this lane green on an unrun gate."
+            exit 1
+          fi
+
+      - name: Test (full tier incl. packaging)
+        if: matrix.preset == 'windows-msvc-release'
         shell: cmd
         run: ctest --preset ${{ matrix.preset }} --output-on-failure
+
+      # Exit code 0xc0000135 is STATUS_DLL_NOT_FOUND: the process dies in the
+      # loader before main(), so ctest captures NO output and the test reports
+      # only that number. There is nothing to diagnose from the log, and
+      # guessing which DLL is missing from the dependency graph is exactly the
+      # kind of inference this project treats as unproven. dumpbin /dependents
+      # names the imports directly, and `where` says which of them the loader
+      # can actually resolve on this runner.
+      #
+      # Runs only on failure, so a green lane pays nothing.
+      - name: Diagnose a loader failure (0xc0000135 and friends)
+        if: failure()
+        shell: bash
+        continue-on-error: true
+        run: |
+          set +e
+          BIN="build/${{ matrix.preset }}/bin"
+          [ -d "$BIN" ] || { echo "no $BIN — the failure was before linking"; exit 0; }
+
+          # Scan EVERY executable rather than a hand-written list. The first
+          # version of this named four ctest TEST names, two of which are not
+          # target names, so they reported "NOT BUILT" and contributed nothing.
+          # Deriving the list from what was actually built has no such coupling.
+          TMP=$(mktemp -d)
+          for exe in "$BIN"/*.exe; do
+            [ -f "$exe" ] || continue
+            dumpbin //dependents "$exe" \
+              | grep -oiE '[A-Za-z0-9_.-]+\.dll' \
+              | sort -u \
+              | sed "s#^#$(basename "$exe" .exe)\t#"
+          done > "$TMP/imports.tsv"
+
+          echo "===== imported DLLs the loader CANNOT resolve ====="
+          # This is the whole diagnosis: an import nothing can resolve is why a
+          # process dies at 0xc0000135 before main(), with no output to show.
+          #
+          # The missing set is accumulated in a FILE, not a shell variable: a
+          # `while` on the right of a pipe runs in a subshell, so a flag set
+          # inside it does not survive, and this would cheerfully report "every
+          # import resolves" while listing the ones that do not.
+          cut -f2 "$TMP/imports.tsv" | sort -u | while read -r d; do
+            command -v "$d" >/dev/null 2>&1 || echo "$d"
+          done > "$TMP/missing.txt"
+
+          if [ -s "$TMP/missing.txt" ]; then
+            while read -r d; do
+              echo "  MISSING  $d"
+              echo "    imported by: $(awk -F'\t' -v d="$d" '$2==d {print $1}' "$TMP/imports.tsv" | tr '\n' ' ')"
+            done < "$TMP/missing.txt"
+          else
+            echo "  (none — every import resolves; the failure is NOT a missing DLL)"
+          fi
+
+          echo "===== PATH entries Conan added for running ====="
+          grep -oiE '[A-Za-z]:[^;\"]*\\bin' "build/${{ matrix.preset }}/conanrun.bat" 2>/dev/null | sort -u | head -20
+
+      # ── 084 T066 / FR-026: attach the Windows package artifacts ─────────────
+      # BOTH shipped Windows configurations upload, not just the gating lane:
+      # windows-msvc-{debug,release} are two of the six configurations
+      # contracts/package-layout.md §1 enumerates, and T062 counts fourteen
+      # artifacts across them. Gating the packaging TESTS to one lane (above) and
+      # producing ARTIFACTS from both is deliberate — the tests are expensive and
+      # configuration-independent, the artifacts are neither.
+      #
+      # windows-msvc-asan produces nothing: it is not a shipped configuration.
+      #
+      # Runs only after a green test step, so a red lane uploads nothing.
+      - name: Build packages
+        if: matrix.preset == 'windows-msvc-release'
+        shell: cmd
+        run: cmake --build --preset ${{ matrix.preset }} --target fixpp-package
+
+      # T068 / SC-010: names must identify the matrix cell or a second lane
+      # silently overwrites the first. matrix.preset is unique by construction,
+      # and the ZIP inside already carries all six FR-017 dimensions.
+      - name: Upload packages
+        if: matrix.preset == 'windows-msvc-release'
+        uses: actions/upload-artifact@v7
+        with:
+          name: packages-${{ matrix.preset }}
+          path: ${{ github.workspace }}/_artifacts/*
+          if-no-files-found: error
+          retention-days: 14
 
   # NOTE: the "ABI golden — fixpp_decimal_t" abidiff job moved to tier1.yml
   # (2026-06-22) — it is a Linux C-ABI layout gate with nothing Windows-specific,

@@ -1,0 +1,423 @@
+# ── 084-packaging-cpack-export: CPack configuration ──────────────────────────
+#
+# Factored out of the top-level CMakeLists.txt (which is already ~360 lines),
+# matching the existing cmake/*.cmake convention.
+#
+# ONE CPack invocation per configured build tree (research R10). The presets are
+# all single-config, and the serial build-and-delete discipline plus the storage
+# budget forbid two coexisting configurations, so a multi-config generator would
+# buy nothing.
+
+include(GNUInstallDirs)
+
+# ── T057 (FR-011a): the codegen tool must be ON for every packaged build ─────
+# FIXPP_BUILD_CODEGEN_TOOL defaults ON and is overridden nowhere, so this is
+# LATENT today -- pinned here so it STAYS latent. It silently gates TWO things:
+# the generated-typed-header install rule, AND the add_test() that registers
+# fixpp::consumer::install-witness. A lane that set it OFF would ship a package
+# with no typed headers and simultaneously deregister the witness meant to catch
+# that -- a skip that reads as green.
+if(NOT FIXPP_BUILD_CODEGEN_TOOL)
+  message(FATAL_ERROR
+    "084 FR-011a: packaging requires FIXPP_BUILD_CODEGEN_TOOL=ON. With it OFF the "
+    "package ships no generated typed headers AND the install-witness test is not "
+    "registered, so the omission would not be caught by any gate.")
+endif()
+
+# ── T062a (FR-011): telemetry provenance -- shipped artifacts are OTel-ON ─────
+# FR-011 permits an OTel-OFF dependency build as a DEVELOPMENT ACCELERATOR while
+# packaging logic is being written, and forbids one reaching a shipped artifact.
+# Nothing enforced the second half: T003 pins OTel-ON only for the new
+# linux-gcc-debug preset; the five pre-existing presets inherit the option
+# default and were unasserted, so a leftover accelerator configure would ship
+# silently -- reproducing exactly the gcc-Debug asymmetry spec Assumption 4
+# exists to prevent.
+#
+# FIXPP_ALLOW_OTEL_OFF_PACKAGE exists ONLY to prove this gate red (it is what the
+# packaging::telemetry-provenance test flips). It must never be set in CI or in
+# any shipped configuration.
+# FIXPP_ALLOW_OTEL_OFF_PACKAGE and FIXPP_PACKAGING_ENABLED are declared in the
+# root CMakeLists (near the FIXPP_BUILD_OTEL option), because tests/ needs the
+# same answer long before this module is included. THIS FILE IS ONLY INCLUDED
+# WHEN PACKAGING IS ENABLED, so reaching it with OTel OFF means the TEST-ONLY
+# escape hatch is set — the red-proof path, which must be loud.
+#
+# There is deliberately NO FATAL_ERROR here any more. The first cut refused to
+# CONFIGURE an OTel-OFF build, which was wrong because FR-011 explicitly
+# permits such development builds. The current tier2 MSVC packaging lane runs
+# OTel ON (`.github/workflows/tier2.yml` passes `-DFIXPP_BUILD_OTEL=ON` on
+# 2026-08-03), but the reason for removing the refusal does not depend on that
+# workflow detail. An OTel-OFF build now simply defines no packaging targets at
+# all unless the TEST-ONLY escape hatch is set, which enforces the same
+# invariant more strongly — there is nothing to invoke rather than something
+# that refuses when invoked.
+if(FIXPP_BUILD_OTEL)
+  set(FIXPP_PACKAGE_TELEMETRY "ON")
+else()
+  set(FIXPP_PACKAGE_TELEMETRY "OFF")
+  message(WARNING
+    "084 FR-011: packaging an OTel-OFF build because FIXPP_ALLOW_OTEL_OFF_PACKAGE "
+    "is set. This is the RED-PROOF path for packaging::telemetry-provenance and "
+    "must never be used for a shipped artifact.")
+endif()
+
+# ── T051 (FR-017, I10): artifact naming ──────────────────────────────────────
+# The name encodes PRODUCT, VERSION, PLATFORM, TOOLCHAIN, CONFIGURATION and
+# FORMAT, and must be unique across the whole six-configuration x format matrix.
+#
+# ⚠️ FORMAT is a NAMING dimension, not merely a uniqueness one: the three Linux
+# formats of one configuration are DISTINCT artifacts and each must be
+# independently identifiable by name. Encoding only the first five and relying on
+# directory placement would ship three same-named DEB/RPM/TGZ artifacts. Here the
+# format is carried by the extension each generator appends (.deb/.rpm/.tar.gz/
+# .zip), which FR-017 accepts as the format component -- so CPACK_PACKAGE_FILE_NAME
+# must NOT be overridden per-generator, or that property is lost.
+string(TOLOWER "${CMAKE_SYSTEM_NAME}" _fixpp_pkg_platform)
+string(TOLOWER "${CMAKE_CXX_COMPILER_ID}" _fixpp_pkg_toolchain)
+string(TOLOWER "${CMAKE_BUILD_TYPE}" _fixpp_pkg_config)
+if(NOT _fixpp_pkg_config)
+  message(FATAL_ERROR
+    "084 FR-017: CMAKE_BUILD_TYPE is empty. The artifact name encodes the "
+    "configuration, and an unnamed configuration breaks matrix uniqueness.")
+endif()
+
+set(CPACK_PACKAGE_NAME "fixpp")
+set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
+set(CPACK_PACKAGE_FILE_NAME
+    "fixpp-${PROJECT_VERSION}-${_fixpp_pkg_platform}-${_fixpp_pkg_toolchain}-${_fixpp_pkg_config}")
+if(NOT FIXPP_PACKAGE_TELEMETRY STREQUAL "ON")
+  string(APPEND CPACK_PACKAGE_FILE_NAME "-otel-off-fixture")
+endif()
+
+# ── T049 (FR-018, FR-018c): metadata ─────────────────────────────────────────
+# ⚠️ FR-018c constrains the DESCRIPTION wording. Third-party engine compatibility
+# is stated AS FACT and must never imply endorsement by, or affiliation with, the
+# upstream project: QuickFIX licence clause 4 forbids using its names to endorse
+# or promote derived products. (Clause 5 -- derived products may not be called
+# "QuickFIX" nor carry it in their name -- is discharged by the product name
+# `fixpp`; recorded here so it is not satisfied merely by accident.)
+set(CPACK_PACKAGE_VENDOR "the fixpp authors")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY
+    "Modern C++23 FIX protocol library (static libraries, headers and CMake package config)")
+set(CPACK_PACKAGE_CONTACT "the fixpp authors")
+# The project's OWN licence (constitution Article V §1) -- NOT the licence of the
+# redistributed dictionary data, which ships separately as QUICKFIX_LICENSE.txt.
+set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_SOURCE_DIR}/LICENSE")
+
+# ── T050 (FR-018e obligations 2 and 3): dependency metadata ──────────────────
+# Versions are read from conanfile.py and cited; never transcribed from an anchor
+# doc or a prior spec.
+#
+# find_dependency LOCATES, it does not PROVIDE -- so this text is the operator's
+# only warning before find_package(fixpp) fails at configure time.
+#
+#   Package            Pin       conanfile.py   ABI character
+#   -----------------  --------  -------------  --------------------------------
+#   OpenSSL            3.6.2     :69            ABI-stable
+#   asio               1.38.0    :67            no ABI surface (header-only)
+#   tomlplusplus       3.4.0     :77            no ABI surface (header-only)
+#   pugixml            1.15      :66            ABI-fragile (compiled C++)
+#   Crc32c             1.1.2     :68            ABI-fragile (compiled C++)
+#   opentelemetry-cpp  1.26.0    :94            ABI-fragile, ACUTE -- largest
+#                                               surface (7 imported targets on
+#                                               fixpp_otel + 3 on fixpp_log_otlp)
+#                                               and fastest-moving
+set(FIXPP_DOCUMENTED_DEP_PKGS
+  OpenSSL
+  asio
+  tomlplusplus
+  pugixml
+  Crc32c
+  opentelemetry-cpp
+)
+set(CPACK_PACKAGE_DESCRIPTION
+"fixpp is a modern C++23 implementation of the FIX protocol, shipped as static
+libraries with a CMake package configuration.
+
+  find_package(fixpp REQUIRED)
+  target_link_libraries(app PRIVATE fixpp::fixpp)
+
+The package is provider-agnostic: it names only imported CMake targets, so its
+dependencies resolve against your own CMAKE_PREFIX_PATH by whatever provider you
+use. It does NOT bundle them.
+
+YOU MUST SUPPLY, and they must be discoverable by find_package:
+  OpenSSL           (tested against 3.6.2)  - ABI-stable
+  asio              (tested against 1.38.0) - header-only
+  tomlplusplus      (tested against 3.4.0)  - header-only
+  pugixml           (tested against 1.15)   - ABI-fragile, compiled C++
+  Crc32c            (tested against 1.1.2)  - ABI-fragile; RARELY DISTRO-PACKAGED
+  opentelemetry-cpp (tested against 1.26.0) - ABI-fragile; RARELY DISTRO-PACKAGED,
+                                              and REQUIRED BY EVERY ARTIFACT this
+                                              project ships
+
+The ABI-fragile dependencies offer no cross-version ABI guarantee: build them
+with the same toolchain and standard library as this package.
+
+RESOLUTION MODE: configure your consumer project with
+-DCMAKE_FIND_PACKAGE_PREFER_CONFIG=ON. Without it, find_dependency(OpenSSL) can
+resolve through CMake's bundled FindOpenSSL MODULE instead of OpenSSL's own
+config package: measured, this binds whatever OpenSSL the host happens to have
+(host 3.0.13 vs the 3.6.2 this package was built against) with NO diagnostic,
+and it declares OpenSSL::SSL but not the lowercase openssl::openssl target the
+OpenTelemetry dependency chain expects, so configure can die deep inside a
+third-party config file instead of failing cleanly.
+
+fixpp is an independent implementation, neither affiliated with nor endorsed by
+the QuickFIX project. Redistributed FIX dictionary data retains its upstream
+licence; see the NOTICE and QUICKFIX_LICENSE.txt files in the package doc
+directory.")
+
+# ── T048 (FR-011, FR-015): generators ────────────────────────────────────────
+# T056 (FR-016) -- THE WINDOWS INSTALLER SEAM. Windows is ZIP-only for v1.0 by
+# user decision. To add an installer format later, append WIX or NSIS to the
+# Windows generator list below and set its generator-specific variables; nothing
+# else in this file is format-specific, and no consumer-visible contract changes.
+# That is the entire seam -- deliberately one line, so the deferral costs nothing
+# to reverse. See quickstart.md §8.
+if(WIN32)
+  set(CPACK_GENERATOR "ZIP")
+else()
+  set(CPACK_GENERATOR "DEB;RPM;TGZ")
+endif()
+
+# ── T052 (FR-020, FR-021, I20/I21): staging and output ───────────────────────
+# CPack stages into _CPack_Packages/ INSIDE the build tree, so deleting the tree
+# removes the staged files automatically. CMAKE_INSTALL_PREFIX must never point
+# at a system location -- violating that silently pollutes the host and is what
+# makes the automatic cleanup hold.
+set(CPACK_PACKAGE_DIRECTORY "${CMAKE_BINARY_DIR}/_packages")
+
+# FR-021: finished artifacts must survive the build-tree deletion that the serial
+# build discipline performs between configurations -- CPACK_PACKAGE_DIRECTORY is
+# INSIDE the tree, so on its own nothing outlives the cycle. FIXPP_ARTIFACT_DIR is
+# the durable location; `cmake --build . --target fixpp-package` depends on the
+# packaged build outputs so they are current, then packages them and copies the
+# artifacts out. This still does not bind the provenance stamp to the payload
+# bytes themselves; that digest leg remains a follow-up.
+#
+# Deliberately a TARGET rather than a post-CPack hook: CPack has no portable
+# "after all generators" hook, and a copy that silently did not happen would
+# leave T062 asserting over an empty directory.
+#
+# Default is a sibling of the build tree, NOT inside it -- FR-021 requires the
+# location to survive build-tree deletion, so nesting it under CMAKE_BINARY_DIR
+# would silently defeat the whole point of the variable. This is a developer
+# convenience default only; CI overrides it explicitly at configure time
+# (tier1.yml, tier2.yml) and does not rely on this value.
+cmake_path(SET _fixpp_default_artifact_dir NORMALIZE "${CMAKE_BINARY_DIR}/../artifacts")
+set(FIXPP_ARTIFACT_DIR "${_fixpp_default_artifact_dir}" CACHE PATH
+    "Durable directory for finished package artifacts (survives build-tree deletion)")
+unset(_fixpp_default_artifact_dir)
+
+set(_fixpp_package_copy_commands "")
+set(_fixpp_package_comment "084 FR-020/FR-021: package only")
+if(FIXPP_PACKAGE_TELEMETRY STREQUAL "ON")
+  list(APPEND _fixpp_package_copy_commands
+    COMMAND "${CMAKE_COMMAND}"
+            "-DFIXPP_PACKAGE_DIR=${CPACK_PACKAGE_DIRECTORY}"
+            "-DFIXPP_ARTIFACT_DIR=${FIXPP_ARTIFACT_DIR}"
+            -P "${CMAKE_SOURCE_DIR}/cmake/FixppCopyArtifacts.cmake")
+  set(_fixpp_package_comment
+      "084 FR-020/FR-021: package, then copy artifacts to ${FIXPP_ARTIFACT_DIR}")
+endif()
+add_custom_target(fixpp-package
+  COMMAND "${CMAKE_COMMAND}" -E rm -rf "${CPACK_PACKAGE_DIRECTORY}"
+  COMMAND "${CMAKE_COMMAND}" -E make_directory "${FIXPP_ARTIFACT_DIR}"
+  COMMAND "${CMAKE_CPACK_COMMAND}" --config "${CMAKE_BINARY_DIR}/CPackConfig.cmake"
+  ${_fixpp_package_copy_commands}
+  WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+  COMMENT "${_fixpp_package_comment}"
+  VERBATIM)
+set(_fixpp_package_dependencies "")
+foreach(_fixpp_package_tgt IN LISTS FIXPP_EXPORT_TARGETS)
+  if(NOT TARGET ${_fixpp_package_tgt})
+    continue()
+  endif()
+  get_target_property(_fixpp_package_type ${_fixpp_package_tgt} TYPE)
+  if(NOT _fixpp_package_type STREQUAL "INTERFACE_LIBRARY")
+    list(APPEND _fixpp_package_dependencies "${_fixpp_package_tgt}")
+  endif()
+endforeach()
+if(_fixpp_package_dependencies)
+  add_dependencies(fixpp-package ${_fixpp_package_dependencies})
+endif()
+unset(_fixpp_package_dependencies)
+unset(_fixpp_package_comment)
+unset(_fixpp_package_copy_commands)
+# ── Internal prefix — Linux ONLY ─────────────────────────────────────────────
+# MEASURED 2026-08-02, not assumed: with this set unconditionally, the Windows
+# ZIP shipped `fixpp-0.0.1-windows-msvc-release/usr/lib/fixpp_core.lib` — an FHS
+# path that means nothing on Windows, with a POSIX permission set applied beneath
+# it. A Windows developer package is expected to extract to <root>/{include,lib,
+# bin}; `usr/` reads as a packaging bug to any consumer of the ZIP.
+#
+# DEB and RPM genuinely need /usr — they install into the system tree. The
+# archive generators do not: they extract wherever the consumer puts them, and
+# the consumer points CMAKE_PREFIX_PATH at that directory.
+if(NOT WIN32)
+  set(CPACK_PACKAGING_INSTALL_PREFIX "/usr")
+  # POSIX permission bits are meaningless to the ZIP generator; scoped with the
+  # prefix they belong to rather than left applying to a Windows package.
+  set(CPACK_INSTALL_DEFAULT_DIRECTORY_PERMISSIONS
+      OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
+endif()
+
+# ── T053 + T062a (FR-021a, I24): provenance stamping ─────────────────────────
+# Configuration + source revision ALONE IS INSUFFICIENT: two packages built from
+# the same commit either side of an UNCOMMITTED EDIT are indistinguishable under
+# that pair -- and an uncommitted edit is the NORMAL state of a working branch,
+# so it is the likely staleness case, not the exotic one. Worktree cleanliness is
+# therefore recorded as a third field, reusing the machinery
+# tests/codegen/codegen_build_graph_test.cmake already uses.
+#
+# This is live, not theoretical: the artifact directory deliberately outlives the
+# build-tree deletion cycle (FR-021), so packages from earlier configurations and
+# earlier source states accumulate alongside current ones.
+#
+# ⚠️ GATE B ROUND 2 (R2-F1): the stamp MUST be sampled at INSTALL TIME, not
+# configure time. `configure_file()` freezes its output once, at configure --
+# nothing re-triggers configuration when a `.cpp` is edited afterwards, so a
+# configure-then-edit-then-package cycle used to ship an artifact stamped
+# `source-worktree: clean` for a build that was, at pack time, actually dirty.
+# That is a FALSE AFFIRMATIVE -- worse than a missing stamp -- and it is the
+# THIRD fail-open found on this exact field (the first two are the
+# 2026-08-02 history below, still relevant because cmake/FixppStampProvenance.cmake
+# reproduces the same RESULT_VARIABLE guards at install time). Fixed by moving
+# the git measurement into an install(CODE) block below, so EVERY `cpack` /
+# `cmake --install` invocation recomputes it fresh against the tree being
+# staged right now -- including the other witnesses that call
+# `cmake --install` directly (run_version_mismatch_witness.cmake,
+# run_real_client_witness.cmake, run_clean_env_witness.cmake,
+# tests/consumer/run_consumer_witness.cmake).
+#
+# ⚠️ TWO FAIL-OPEN BUGS FIXED HERE 2026-08-02 — found while preparing the MSVC
+# sandbox, which has no `.git` (the rsync procedure excludes it). This is NOT a
+# sandbox-only path: a build from a released SOURCE TARBALL hits it identically.
+#
+#   1. The `set(... "unknown")` fallbacks were DEAD CODE whenever git EXISTS but
+#      the directory is not a repository. `execute_process` assigns OUTPUT_VARIABLE
+#      the command's (empty) stdout on failure rather than leaving the prior
+#      value, so the revision became "" -- verified directly, not assumed. An
+#      artifact then shipped with a BLANK revision, which reads as a formatting
+#      glitch rather than as "provenance unavailable".
+#   2. Worse: a FAILED `git status --porcelain` also yields empty output, which
+#      compared equal to "" and stamped the package **"clean"** -- an affirmative
+#      claim of worktree cleanliness that was never verified. Fail-open on the
+#      exact field FR-021a added to catch staleness.
+#
+# Both are fixed by trusting output only when RESULT_VARIABLE says the command
+# succeeded, and by never inferring "clean" from a command that did not run --
+# now inside cmake/FixppStampProvenance.cmake, since that is where the git
+# commands run.
+
+# Explicit override, for building from a source tree that is legitimately not a
+# git repository (source tarball; the rsync-populated MSVC sandbox). Providing a
+# revision that CAN be traced is strictly better than stamping "unknown"; leaving
+# it unset is still honest, because "unknown" fails T060 by design. Read fresh
+# inside cmake/FixppStampProvenance.cmake at install time (baked into the
+# install(CODE) block below), so this escape hatch keeps working under the
+# install-time stamp exactly as it did under the configure-time one.
+set(FIXPP_PACKAGE_REVISION "" CACHE STRING
+    "Override the stamped source revision when the source tree is not a git repo")
+set(FIXPP_PACKAGE_WORKTREE "" CACHE STRING
+    "Override the stamped worktree state (clean|dirty) alongside FIXPP_PACKAGE_REVISION")
+
+# ── T055 (FR-019): Windows debug symbol files ────────────────────────────────
+# The Microsoft toolchain emits debug information to SEPARATE symbol files
+# alongside its static libraries, not inside the archive members -- so a Windows
+# Debug package built with Linux-shaped install rules ships UNDEBUGGABLE
+# libraries. THERE IS NO LINUX COUNTERPART TO THIS RULE: on Linux the compiler
+# writes DWARF into the .o members of the .a, and the archiver copies it.
+#
+# ── ✅ NOW MEASURED (2026-08-02, windows-msvc-debug) — and the rule was WRONG ──
+# The instruction above said this must be verified against real MSVC output. It
+# was, and the verification failed: `${CMAKE_BINARY_DIR}/lib/` contained ZERO
+# .pdb files, so the Debug ZIP shipped NO symbol files at all — precisely the
+# undebuggable-package outcome FR-019 exists to prevent.
+#
+# WHY. `$<TARGET_PDB_FILE>` and "the .pdb sits next to the library" describe the
+# LINKER pdb, which MSVC emits only for a DLL or EXE. A STATIC or OBJECT library
+# is never linked, so it gets a COMPILER pdb instead, written into the target's
+# object directory:
+#     build/<preset>/src/core/CMakeFiles/fixpp_core.dir/fixpp_core.pdb
+#     build/<preset>/src/capi/CMakeFiles/fixpp_capi_objects.dir/vc140.pdb
+# (18 found in the tree, 0 next to the archives; note the OBJECT library also
+# defaults to the toolset-wide name `vc140.pdb`, which would collide if several
+# were ever collected into one directory.)
+#
+# ⚠️ THIS FAILED SILENTLY. `install(DIRECTORY … FILES_MATCHING)` over a directory
+# with no match installs nothing and SUCCEEDS — the exact "a rule whose PATTERN
+# matches nothing yields a package missing content while looking entirely correct
+# in CMake" shape that run_package_contents_witness.cmake's own header warns
+# about. Nothing failed; the symbols were simply absent.
+#
+# FIX: point the compiler pdb at the archive output directory and give it the
+# target's own name, so the install rule below has something to match and each
+# artifact is identifiable.
+if(MSVC)
+  foreach(_fixpp_pdb_tgt IN LISTS FIXPP_EXPORT_TARGETS)
+    if(NOT TARGET ${_fixpp_pdb_tgt})
+      continue()
+    endif()
+    get_target_property(_fixpp_pdb_type ${_fixpp_pdb_tgt} TYPE)
+    # INTERFACE targets compile nothing and have no pdb; asking them for one is
+    # a hard error, not a no-op.
+    if(_fixpp_pdb_type STREQUAL "STATIC_LIBRARY" OR _fixpp_pdb_type STREQUAL "OBJECT_LIBRARY")
+      set_target_properties(${_fixpp_pdb_tgt} PROPERTIES
+        COMPILE_PDB_NAME "${_fixpp_pdb_tgt}"
+        COMPILE_PDB_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
+    endif()
+  endforeach()
+
+  install(
+    DIRECTORY "${CMAKE_BINARY_DIR}/lib/"
+    DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+    FILES_MATCHING PATTERN "*.pdb")
+endif()
+
+# Everything baked into this install(CODE) string below is a stable
+# per-configuration constant (source dir, version, platform, toolchain,
+# build type, telemetry flag, docdir, and the two overrides above) -- safe to
+# freeze at configure time. The `[==[ ... ]==]` bracket-quoting defers
+# interpretation of the VALUE to when cmake_install.cmake actually executes
+# this line (install time), so an empty override or one containing unusual
+# characters round-trips exactly. Only cmake/FixppStampProvenance.cmake's own
+# `execute_process(git ...)` calls, plus CMAKE_INSTALL_PREFIX / $ENV{DESTDIR},
+# are read live at install time.
+#
+# This install(CODE) block MUST stay the LAST install() rule in this file:
+# payload provenance is hashed from the fully staged install tree, so any later
+# install() would silently ship bytes the stamp never covered.
+install(CODE "
+  set(_fixpp_stamp_override_revision [==[${FIXPP_PACKAGE_REVISION}]==])
+  set(_fixpp_stamp_override_worktree [==[${FIXPP_PACKAGE_WORKTREE}]==])
+  set(_fixpp_stamp_source_dir [==[${CMAKE_SOURCE_DIR}]==])
+  set(_fixpp_stamp_project_version [==[${PROJECT_VERSION}]==])
+  set(_fixpp_stamp_platform [==[${CMAKE_SYSTEM_NAME}]==])
+  set(_fixpp_stamp_compiler_id [==[${CMAKE_CXX_COMPILER_ID}]==])
+  set(_fixpp_stamp_compiler_version [==[${CMAKE_CXX_COMPILER_VERSION}]==])
+  set(_fixpp_stamp_build_type [==[${CMAKE_BUILD_TYPE}]==])
+  set(_fixpp_stamp_telemetry [==[${FIXPP_PACKAGE_TELEMETRY}]==])
+  set(_fixpp_stamp_docdir [==[${CMAKE_INSTALL_DOCDIR}]==])
+  include(\"${CMAKE_SOURCE_DIR}/cmake/FixppStampProvenance.cmake\")
+")
+
+# ── Generator-specific ───────────────────────────────────────────────────────
+set(CPACK_DEBIAN_PACKAGE_SECTION "libdevel")
+set(CPACK_RPM_PACKAGE_LICENSE "AGPL-3.0")
+set(CPACK_RPM_PACKAGE_GROUP "Development/Libraries")
+# ⚠️ CPACK_DEBIAN_FILE_NAME / CPACK_RPM_FILE_NAME are deliberately NOT set to
+# DEB-DEFAULT / RPM-DEFAULT. Those switch each generator to its distribution
+# naming convention (fixpp_0.0.1_amd64.deb), which carries NEITHER the toolchain
+# NOR the configuration -- so linux-gcc-release and linux-clang-debug would
+# produce IDENTICALLY NAMED .deb files and silently overwrite each other in the
+# shared artifact directory. That is precisely the collision FR-017/I10 forbids
+# and the silent omission SC-003 exists to catch. Leaving them unset makes both
+# generators inherit CPACK_PACKAGE_FILE_NAME, which encodes all six dimensions.
+# The install tree writes into /usr/{include,lib,share}; without these the RPM
+# generator claims ownership of directories the distribution already owns.
+set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION
+    "/usr/include;/usr/lib;/usr/share;/usr/share/doc")
+
+include(CPack)

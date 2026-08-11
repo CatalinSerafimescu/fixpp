@@ -1,0 +1,333 @@
+name: Reclaim unreachable and superseded Actions caches
+
+# WHY THIS EXISTS
+#
+# GitHub scopes cache READS to the run's own ref plus the default branch (plus
+# the base branch, for a PR). So the entries a PR saves under
+# `refs/pull/<n>/merge` are readable by: a later run on `main` — no; the next PR
+# — no (different PR ref; it inherits `main`, never a sibling PR); that PR itself
+# — yes, until it closes. The moment the PR closes they are PERMANENTLY
+# UNREACHABLE, while still consuming the repo-wide 10 GB budget — and LRU has no
+# notion of "unreachable", so it evicts `main`'s entries, the only ones every
+# future PR inherits, just as readily.
+#
+# Measured on this repo right after 083 (#216) merged: `refs/heads/main` = 1
+# cache / 234 MB (zero ccache); `refs/pull/216/merge` = 15 caches / 9,749 MB.
+# 97.6% of the budget belonged to a merged, closed PR, and `main` held none of
+# the ccache its own prior push run had demonstrably saved.
+#
+# THIS IS THE SECOND HALF OF THE FIX, NOT THE WHOLE FIX. Reclaiming after a PR
+# ends cannot prevent an eviction that happens while the PR is still OPEN — main
+# (~7.7 GB) plus one open PR (~7 GB) does not fit in 10 GB by any ordering of
+# deletions. The first half is `save: ${{ github.event_name == 'push' }}` on
+# every ccache-action site that WRITES — `tier1.yml` matrix + bench. (Corrected
+# by #240: tier3-libcxx.yml no longer uses the action at all, its ccache having
+# moved to GHCR. ⚠️ Corrected again by #254: there is no longer a THIRD tier-1
+# site. It was `python-bindings`' `none` leg, restore-only with `save: false`,
+# and that job was folded into the six `linux` matrix legs and deleted — which
+# also retires this repo's only cross-job ccache key share. Every ccache call
+# site now owns its own key, with a real save path gated on `push`.) This stops
+# PRs writing ccache at all. What remains for this workflow is everything else a PR
+# still legitimately writes — `conan-abi-golden`, tier1's manylinux wheel cache
+# — roughly 1 GB per PR, which would otherwise accumulate.
+#
+# WHY STATE-BASED RATHER THAN EVENT-BASED
+#
+# The obvious design is "on pull_request closed, delete that PR's caches". It
+# works, and it is strictly weaker: it cleans only PRs that close from the moment
+# it lands, only if the event actually fires, and never the backlog. This asks
+# instead "which cache scopes belong to a PR that is no longer open?" — a
+# question about STATE, which is true regardless of what events were caught. A
+# missed event self-heals on the next run instead of leaking a scope forever.
+#
+# Note it is deliberately NOT restricted to MERGED PRs: a PR closed without
+# merging leaves caches that are exactly as unreachable, and an abandoned PR is
+# the one nobody comes back to clean up.
+#
+# Deleting caches is self-healing: the next run that misses simply rebuilds and
+# re-saves. Nothing downstream depends on a cache existing.
+#
+# Refs: remaining-work/ci-ghcr-package-offload-plan.md § "MEASURED 2026-08-02";
+# memory feedback_pr_scoped_actions_caches_unreachable_but_evict_main.
+
+on:
+  # The load-bearing trigger. A merge to main is exactly when the budget is
+  # needed: the post-merge tier1/2/3 matrices are about to save, and the PR that
+  # just merged is holding the room they need. No paths-ignore — a docs-only
+  # merge costs one API listing and keeps the sweep unconditional.
+  push:
+    branches: ["main"]
+
+  # Fast path, so a PR that closes WITHOUT merging (no push to main follows) does
+  # not squat until the next merge. The sweep it runs is the same one.
+  pull_request_target:
+    types: [closed]
+
+  # REQUIRED for the superseded-main sweep to reach a steady state of ONE entry
+  # per leg. `push: main` is the wrong moment for it: this workflow finishes in
+  # ~20 seconds while the matrices it shares that event with save their ccache an
+  # hour or more later. Measured for 8dc7ec9a on 2026-08-03 — sweep ran
+  # 15:57:33→15:57:53; the saves landed 16:57 through 17:19. So a push-triggered
+  # sweep can only ever collapse the PREVIOUS generation, and the moment the
+  # current run saves, every leg is back to two. At ~7 GB for one live set that
+  # is ~14 GB against a 10 GB cap — still evicting, just half as fast.
+  #
+  # Firing on the tiers' COMPLETION instead puts the sweep after the saves, which
+  # is the only ordering that leaves one entry per leg.
+  #
+  # ⚠️ These entries are NOT literal strings — GitHub runs them through its
+  # FILTER-PATTERN parser, where `+` means "one or more of the preceding". The
+  # unescaped `libc++` below was therefore a malformed pattern (`+` quantifying
+  # an already-quantified `c+`), and GitHub rejected the whole trigger with:
+  #
+  #   Encountered an issue parsing workflow trigger(s) "tier 3 — linux libc++ ci"
+  #   in a workflow ".github/workflows/cache-cleanup.yml".
+  #
+  # The failure is at BUILD time, before trigger filters are evaluated, so it
+  # produced one "(Unknown event)" startup_failure run per completed workflow —
+  # 15-20 per push to main — while `push`/`pull_request_target` kept working
+  # because they parse no patterns. Net effect: this workflow_run leg, the whole
+  # point of the change, never fired once between a5ae671f and this commit.
+  #
+  # SINGLE quotes are load-bearing: YAML single-quoted scalars keep backslashes
+  # literal, so the parser receives `libc\+\+`. The double-quoted form
+  # "libc\+\+" is INVALID YAML (`\+` is not a legal double-quoted escape); its
+  # valid equivalent would need "libc\\+\\+".
+  #
+  # Names must otherwise match the `name:` of each tier workflow exactly.
+  workflow_run:
+    workflows:
+      - 'Tier 1 — Linux CI'
+      - 'Tier 2 — Windows CI'
+      - 'Tier 3 — Linux libc\+\+ CI'
+    types: [completed]
+    branches: ['main']
+
+  workflow_dispatch:
+
+# `pull_request_target` rather than `pull_request`: for a PR from a fork the
+# GITHUB_TOKEN in a `pull_request` run is read-only no matter what this block
+# says, so the delete would silently fail. `pull_request_target` runs in the base
+# repository's context with a writable token. That is normally a supply-chain
+# hazard because the token is exposed to the PR's code — this job checks out
+# NOTHING and executes no repository content, only `gh api` calls, so there is no
+# untrusted code to expose it to.
+permissions:
+  actions: write        # required to DELETE /actions/caches/{id}
+  pull-requests: read   # to ask whether a PR is still open
+  contents: read
+
+# Never let two sweeps race: both could list the same entry and the loser would
+# log a spurious delete failure.
+concurrency:
+  group: cache-cleanup
+  cancel-in-progress: false
+
+jobs:
+  reclaim:
+    name: Delete caches from closed PRs and superseded main entries
+    runs-on: ubuntu-latest
+    steps:
+      - name: Sweep unreachable PR cache scopes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          # Page through: a single PR has held 15+ entries, and the default page
+          # size would silently truncate a large set into a partial sweep.
+          all=$(gh api --paginate "repos/${REPO}/actions/caches?per_page=100" \
+                  --jq '.actions_caches[] | "\(.id)\t\(.ref)\t\(.key)\t\(.size_in_bytes)"')
+
+          if [ -z "$all" ]; then
+            echo "No caches in this repository."
+            exit 0
+          fi
+
+          # Which PRs are represented at all. `sort -u` so each PR is queried
+          # once no matter how many entries it holds.
+          prs=$(echo "$all" | cut -f2 | sed -n 's#^refs/pull/\([0-9]\+\)/.*#\1#p' | sort -u -n)
+
+          if [ -z "$prs" ]; then
+            echo "No PR-scoped caches — nothing to reclaim."
+            exit 0
+          fi
+
+          # Decide per PR BEFORE deleting anything, so the delete loop is a pure
+          # execution of an already-made decision.
+          #
+          # FAIL CLOSED: if the state query fails (network, rate limit, a PR that
+          # cannot be read), SKIP. The only harmful outcome available here is
+          # deleting an OPEN PR's caches; not deleting merely defers a reclaim to
+          # the next sweep, and there is always a next sweep.
+          doomed=""
+          for pr in $prs; do
+            state=$(gh api "repos/${REPO}/pulls/${pr}" --jq '.state' 2>/dev/null || echo "unknown")
+            case "$state" in
+              closed)  echo "PR #${pr}: closed  → reclaim";  doomed="${doomed}${pr} " ;;
+              open)    echo "PR #${pr}: OPEN    → keep (its own runs can still read these)" ;;
+              *)       echo "::warning::PR #${pr}: state '${state}' could not be determined → keeping its caches" ;;
+            esac
+          done
+
+          if [ -z "$doomed" ]; then
+            echo "Every PR-scoped cache belongs to a still-open PR — nothing to reclaim."
+            exit 0
+          fi
+
+          total=0; count=0; failed=0
+          # `while read`, NOT `for x in $list`: word-splitting a newline-separated
+          # list is shell-dependent, and `gh api -X DELETE` exits 0 on an id that
+          # does not exist — so a broken loop reports success having deleted
+          # nothing. A manual sweep failed exactly this way and was caught only
+          # because the usage figure did not move.
+          while IFS=$'\t' read -r id ref key size; do
+            [ -n "${id:-}" ] || continue
+            pr=$(echo "$ref" | sed -n 's#^refs/pull/\([0-9]\+\)/.*#\1#p')
+            [ -n "$pr" ] || continue
+            # Space-delimited on both sides so PR 21 cannot match PR 216.
+            case " $doomed " in *" $pr "*) ;; *) continue ;; esac
+
+            # `</dev/null`: a command inside a `while read` loop inherits the
+            # loop's stdin and can swallow the remaining lines, silently
+            # truncating the sweep — the same failure SHAPE as the trap above.
+            if gh api -X DELETE "repos/${REPO}/actions/caches/${id}" </dev/null >/dev/null 2>&1; then
+              echo "  deleted  #${pr}  ${key}  ($((size / 1048576)) MB)"
+              total=$((total + size)); count=$((count + 1))
+            else
+              echo "::warning::failed to delete cache ${id} (${key})"
+              failed=$((failed + 1))
+            fi
+          done <<< "$all"
+
+          echo "Reclaimed ${count} entries, $((total / 1048576)) MB."
+          [ "$failed" -eq 0 ] || echo "::warning::${failed} entries could not be deleted."
+
+          # Verify by RE-LISTING, not by reading `actions/cache/usage` — that
+          # endpoint is eventually consistent and lagged several minutes behind
+          # confirmed deletes during the 2026-08-02 sweep.
+          {
+            echo "### Cache reclaim"
+            echo ""
+            echo "Reclaimed **${count}** entries, **$((total / 1048576)) MB** from PRs: ${doomed:-none}"
+            echo ""
+            echo "| scope | entries | MB |"
+            echo "|---|---|---|"
+            gh api --paginate "repos/${REPO}/actions/caches?per_page=100" \
+              --jq '[.actions_caches[]|{ref,mb:(.size_in_bytes/1048576)}]
+                    | group_by(.ref)
+                    | .[]
+                    | "| \(.[0].ref) | \(length) | \((map(.mb)|add)|round) |"'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # SECOND SWEEP — the default branch now evicts ITSELF.
+      #
+      # The PR sweep above fixed the PR-scoped squatter (measured 2026-08-03:
+      # zero bytes on any refs/pull/* ref). What it cannot see is that
+      # `hendrikmuhs/ccache-action` writes a NEW key every run —
+      # `ccache-<name>-<ISO8601>` — and never deletes the one it supersedes,
+      # while restoring via the `ccache-<name>-` prefix, so only the newest is
+      # ever read. Measured on this repo 2026-08-03, with PR scopes already at
+      # zero: 22 entries / 11.2 GB, 100% on refs/heads/main, over the 10 GB cap;
+      # `ccache-tier1-linux-clang-asan` was present THREE times. LRU was already
+      # biting — that day's tier1 ubsan and tsan saves had been evicted, leaving
+      # only the previous day's.
+      #
+      # KEEP-NEWEST-PER-KEY, and note what that deliberately does NOT do: the
+      # grouping key is the cache key with a trailing ISO8601 stamp stripped, and
+      # groups are matched by EXACT EQUALITY, never by prefix containment.
+      # `ccache-tier1-linux-clang-debug` and `ccache-tier1-linux-clang-debug-py`
+      # would therefore be different groups, not one group where the shorter
+      # swallows the longer.
+      #
+      # ⚠️ A RETIRED KEY'S NEWEST ENTRY IS IMMORTAL UNDER THIS RULE, and that is
+      # a real leak, not a corner case. Keep-newest only ever deletes an entry
+      # that something SUPERSEDED. When a lane stops writing a key altogether,
+      # its last entry becomes the newest of its group forever and this sweep
+      # protects it. #240 is exactly that case: moving Tier 3 to GHCR retired
+      # four `ccache-tier3-linux-clang-libc++*` keys holding 1.80 GiB (measured
+      # 2026-08-08), which this workflow would have preserved indefinitely —
+      # silently cancelling the pool reduction the move was for. Retiring a key
+      # therefore needs a ONE-TIME manual reclaim:
+      #
+      #     gh cache delete <key> --repo CatalinSerafimescu/fixpp
+      #
+      # Deliberately not automated: "no workflow writes this key any more" is not
+      # derivable from the cache list, and a sweep that guessed would delete a
+      # lane that is merely idle. A key with no such stamp — `conan-abi-golden-<sha>`,
+      # `conan-wheel-manylinux228-<sha>` — matches nothing to strip, so it forms a
+      # group of one and is ALWAYS kept. Content-hashed keys are self-invalidating
+      # and are not this sweep's business.
+      #
+      # Deleting a superseded entry cannot affect an in-flight run: a restore has
+      # already happened by the time a build is running, and a save writes a new
+      # key. As above, a miss is self-healing.
+      - name: Sweep superseded default-branch ccache entries
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          # `|| 'main'` because the payload differs per trigger: a workflow_run
+          # event carries `repository`, but an empty value here would make the
+          # ref filter match nothing and the sweep silently no-op — the exact
+          # reports-success-having-done-nothing shape the step below guards.
+          DEFAULT_REF: refs/heads/${{ github.event.repository.default_branch || 'main' }}
+        run: |
+          set -euo pipefail
+
+          all=$(gh api --paginate "repos/${REPO}/actions/caches?per_page=100" \
+                  --jq '.actions_caches[] | "\(.id)\t\(.ref)\t\(.key)\t\(.size_in_bytes)\t\(.created_at)"' \
+                | awk -F'\t' -v ref="$DEFAULT_REF" '$2 == ref')
+
+          if [ -z "$all" ]; then
+            echo "No caches on ${DEFAULT_REF} — nothing to sweep."
+            exit 0
+          fi
+
+          # Decide first, delete second — same shape as the PR sweep. Emit
+          # "<group>\t<created_at>\t<id>\t<key>\t<size>", sort by group then
+          # created_at DESCENDING (ISO8601 is fixed-width, so lexicographic order
+          # IS chronological order), and mark every row after the first in each
+          # group. Exact-equality grouping is what `$1 == prev` gives us.
+          # NO `{n}` interval quantifiers in this regex: ubuntu-latest's default
+          # awk is mawk, which does not support them. Verified, not assumed — the
+          # `{4}` form was run under mawk here and aborts with
+          # `REcompile() - panic: values still on machine stack`. Spelled out with
+          # [0-9] instead; the grouping was then checked to produce byte-identical
+          # output under mawk, gawk and default awk on a fixture covering
+          # three-copy groups, libc++ vs libc++-asan, hash-suffixed keys and a
+          # fraction-less timestamp.
+          doomed=$(awk -F'\t' '
+              { grp = $3
+                sub(/-[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9](\.[0-9]+)?Z$/, "", grp)
+                printf "%s\t%s\t%s\t%s\t%s\n", grp, $5, $1, $3, $4 }' <<< "$all" \
+            | sort -t$'\t' -k1,1 -k2,2r \
+            | awk -F'\t' '$1 == prev { print $3 "\t" $4 "\t" $5 } { prev = $1 }')
+
+          if [ -z "$doomed" ]; then
+            echo "Every ${DEFAULT_REF} cache key is the newest of its group — nothing to sweep."
+            exit 0
+          fi
+
+          total=0; count=0; failed=0
+          while IFS=$'\t' read -r id key size; do
+            [ -n "${id:-}" ] || continue
+            if gh api -X DELETE "repos/${REPO}/actions/caches/${id}" </dev/null >/dev/null 2>&1; then
+              echo "  deleted  superseded  ${key}  ($((size / 1048576)) MB)"
+              total=$((total + size)); count=$((count + 1))
+            else
+              echo "::warning::failed to delete cache ${id} (${key})"
+              failed=$((failed + 1))
+            fi
+          done <<< "$doomed"
+
+          echo "Swept ${count} superseded entries, $((total / 1048576)) MB."
+          [ "$failed" -eq 0 ] || echo "::warning::${failed} entries could not be deleted."
+
+          {
+            echo ""
+            echo "### Superseded ${DEFAULT_REF} ccache sweep"
+            echo ""
+            echo "Swept **${count}** superseded entries, **$((total / 1048576)) MB**."
+          } >> "$GITHUB_STEP_SUMMARY"

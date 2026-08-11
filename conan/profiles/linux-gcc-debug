@@ -1,0 +1,45 @@
+# Conan profile: linux-gcc-debug
+# GCC sanity build, Debug — Linux CI only per [const §II.2].
+# Pins are revisited at first CI failure; GCC 13 is the conservative 2026 baseline.
+#
+# 084 T002 (FR-022): the `build_type=Debug` sibling of linux-gcc-release. Every
+# other setting is IDENTICAL to that profile on purpose — this pair is what the
+# T061 debug/release fidelity check compares, so build_type must be the only
+# variable between them.
+#
+# A TRACKED profile, never `-s build_type=Debug` on the command line: an override
+# leaves the configuration unreproducible and outside Article III §2's "declared,
+# pinned" rule.
+#
+# ⚠️ This configuration builds NINE third-party packages from source (no prebuilt
+# Debug binaries in Conan Center for them) — schedule it LATE in a matrix run,
+# never first.
+
+[settings]
+os=Linux
+arch=x86_64
+build_type=Debug
+compiler=gcc
+compiler.version=13
+compiler.libcxx=libstdc++11
+compiler.cppstd=23
+
+[buildenv]
+CC=gcc-13
+CXX=g++-13
+
+[conf]
+tools.cmake.cmaketoolchain:generator=Ninja
+
+# Disable Conan's CMakeUserPresets.json (084, 2026-08-02).
+# Conan names its generated preset from build_type ALONE -- every Release profile
+# emits "conan-release" and every Debug profile "conan-debug" (12 of the 15
+# profiles here are Debug). CMakeUserPresets.json accumulates one `include:` per
+# `conan install -of <dir>`, so the SECOND output folder of the same build_type
+# makes the names collide and CMake then refuses to read ANY presets:
+#     CMake Error: Could not read presets from ...: Duplicate preset: "conan-debug"
+# which breaks `cmake --preset <anything>`, not just the colliding pair.
+# We never use conan-release/conan-debug: the tracked CMakePresets.json carries
+# all 16 presets and points CMAKE_TOOLCHAIN_FILE at each build/<preset>/
+# conan_toolchain.cmake itself. Empty value = do not generate the file.
+tools.cmake.cmaketoolchain:user_presets=

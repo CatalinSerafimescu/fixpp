@@ -1,0 +1,308 @@
+# Quickstart — Validating 084-packaging-cpack-export
+
+**Feature**: 084-packaging-cpack-export · **Date**: 2026-07-31
+
+Runnable validation. Written to be followed after a context reset — every path and constraint needed is here.
+
+---
+
+## 0. Environment
+
+| | |
+|---|---|
+| Worktree | `/home/catalin/Work/Programming/fixpp-parallel` (branch `084-packaging-cpack-export`) |
+| Build storage | `/mnt/wsl/fixppbuild` — 64 GB, mounted from a dedicated vhdx on F: |
+| Build trees | `build/<preset>` → symlinks into `/mnt/wsl/fixppbuild/build/<preset>` |
+| Package output | `/mnt/wsl/fixppbuild/artifacts/` — **survives build-tree deletion** |
+| ccache | 20 GB at `/mnt/wsl/fixppbuild/ccache` |
+
+`/mnt/wsl/fixppbuild/artifacts/` is **this host's chosen `-DFIXPP_ARTIFACT_DIR` override**, not the CMake built-in default. `FIXPP_ARTIFACT_DIR` is a `CACHE PATH` (`cmake/FixppPackaging.cmake`) that defaults to a sibling of the build tree (`${CMAKE_BINARY_DIR}/../artifacts`) — still outside it, per FR-021 — and is overridable per configure; CI does the same (`tier1.yml`, `tier2.yml`).
+
+**Two environment rules that cause silent damage if skipped:**
+
+```bash
+source /mnt/wsl/fixppbuild/env.sh     # BEFORE the first cmake --preset, always
+```
+CMake bakes the compiler launcher in at **first configure only**. Configure without this and ccache is baked *out* of that tree — the only fix is deleting the tree and starting over.
+
+If `/mnt/wsl/fixppbuild` is missing, the vhdx detached (any `wsl --shutdown` does this):
+```bash
+# from Windows:  schtasks /run /tn "WSL Mount fixpp-build"
+```
+A missing mount looks like a broken build tree. Check the mount first.
+
+### Artifact retention — DECIDED at implement (2026-08-02, T004)
+
+*(spec Assumption 5, SC-008, `contracts/package-layout.md` §5; `plan.md:429` open choice 3.)*
+
+**`artifacts/` stays on `/mnt/wsl/fixppbuild`. Artifacts accumulate for the whole matrix run and are purged only at the START of a run — never between configurations.**
+
+**Why not a between-configuration purge**, which is the obvious way to bound the growth: T062 asserts SC-003 by enumerating `/mnt/wsl/fixppbuild/artifacts/` and matching **both the count (14) and the name set** against the declared matrix. That assertion requires all fourteen to coexist. Purging as you go leaves the directory holding one configuration's output at every moment, so the count check passes trivially against whatever is present and the *silent omission* SC-003 exists to catch becomes undetectable — `feedback_completeness_gate_exact_set_not_subset`. The retention rule is therefore fixed by the gate, not free to choose.
+
+**Why not different storage**: the root vhdx is the wrong target — it is Dynamic with a 256 GiB virtual size on a 223.6 GB volume, has filled twice, and `/mnt/wsl/fixppbuild` exists specifically to relieve it (`project_wsl_build_vhdx_on_f_drive`). Moving artifacts there re-creates the pressure the build vhdx was provisioned to remove.
+
+**Budget enforcement — a preflight `df` check before EACH configuration**, since the three consumers share one 64 GB volume (build tree + 20 GB ccache + the accumulating artifact set):
+
+```bash
+df -h /mnt/wsl/fixppbuild        # run BEFORE configuring each configuration
+```
+
+Required free space, tree size + an 8 GB margin: **≥ 12 GB** before a Release configuration (tree measured 3.4 GB), **≥ 33 GB** before a Debug configuration (tree measured 22–25 GB). Below the threshold, **stop** — do not start the configuration and re-derive the budget.
+
+**Artifact total: 295 MB MEASURED** (2026-08-03, all 14 artifacts on the build volume). Per Linux Debug configuration, across DEB+RPM+TGZ: **gcc-debug 99 MB, clang-debug 72 MB**. Uncompressed staged Debug payload: **348 MB / 197 files**.
+
+> ⚠️ **CORRECTED at Gate B round 5 (2026-08-03) — the superseded projection was cited as fact and a decision was taken on it.**
+>
+> This line previously read *"Projected artifact total ≈ 7 GB — 2 Linux Debug configurations dominate (~4.6 GB installable payload each)"*, and carried its own instruction: *"This figure is PROJECTED, not measured … T064 measures the real whole-volume high-water mark across the T062 run and **this line is corrected from that measurement**; it must not be cited as a measured budget before then."*
+>
+> **T064 ran; this line was never corrected from it.** The projection then survived long enough to be cited — as ≈3 GB per Linux Debug configuration — in the FR-026 upload-coverage narrowing (Gate B round 1, F3), which is the rationale a user decision rested on. **The measured figure is ~99 MB, roughly 30× smaller**, so the disk-ceiling argument that narrowing rested on does not hold at the measured size. See the FR-026 banner in `spec.md` and T065 in `tasks.md`.
+>
+> Root cause worth keeping: a figure that labelled itself unmeasured, and named the task that would correct it, was still propagated verbatim into a decision rationale. The label did not prevent the citation.
+
+---
+
+## 1. Build order — and why it is not the obvious one
+
+**Start with `linux-gcc-release`.** It is the only configuration cheap on *both* axes.
+
+| Configuration | Tree size (planned) | **Tree size (MEASURED, full matrix 2026-08-02)** | Third-party deps to build |
+|---|---|---|---|
+| **`linux-gcc-release`** | 3.4 GB | **6.4 GB** | **0** |
+| `linux-clang-release` | 2.4 GB | **5.6 GB** | 5 |
+| `linux-clang-debug` | 22 GB | **26 GB** | 0 |
+| `linux-gcc-debug` | ~25 GB | **31 GB** | 9 |
+
+`linux-clang-release` has the smallest tree but five dependencies to build from source — smallest ≠ fastest to a first package.
+
+**Every configuration measured LARGER than planned** — by 1.9x on the Release legs and ~20% on the
+Debug ones. The planning figures came from a partial build; these are the completed matrix, including
+the packaging witnesses' own scratch trees (each stage-installs a prefix and configures a sub-build).
+
+**One configuration at a time. Delete before the next.** Four trees do not fit in 64 GB — and the
+measured total makes that starker than the estimate did: **~69 GB against a 64 GB volume that also
+carries a 20 GB ccache**. Two concurrent *Debug* configurations alone (57 GB) would exhaust it.
+Whole-volume high-water for the actual serial run was **41 GB of 64 GB** (T064/SC-008).
+
+```bash
+cd /home/catalin/Work/Programming/fixpp-parallel
+source /mnt/wsl/fixppbuild/env.sh
+
+conan install . -pr conan/profiles/linux-gcc-release --build=missing -of build/linux-gcc-release
+cmake --preset linux-gcc-release
+cmake --build --preset linux-gcc-release -j2      # -j2: wider OOM-kills the session
+# ... package + validate (sections 2-5) ...
+rm -rf /mnt/wsl/fixppbuild/build/linux-gcc-release  # artifacts/ is untouched
+```
+
+> **This invocation was executed at Gate A round 2; the previous one (`-pr:a=gcc13 -s build_type=Release -b missing`) does not run.** It failed two ways at once: it named `~/.conan2/profiles/gcc13`, a machine-local profile **not in the repository**, instead of the tracked `conan/profiles/linux-gcc-release` that constitution Article III §2/§3 requires; and it omitted `-of build/<preset>`, so Conan wrote into the source root and died with *"Existing CMakePresets.json not generated by Conan cannot be overwritten. Use --output-folder or define a 'layout' to avoid collision"*. The form above is byte-for-byte what CI uses (`.github/workflows/tier1.yml:411-414`). Measured: this lane needs **zero** third-party packages built from source (`opentelemetry-cpp/1.26.0: Already installed! (14 of 14)`). For `linux-gcc-debug`, substitute the tracked profile FR-022 / Assumption 8 adds — `conan/profiles/linux-gcc-debug` — never a `-s build_type=Debug` override.
+
+**Development accelerator**: while getting the CMake right, add `-o "&:with_otel=False"` to cut `linux-gcc-debug` from 9 dependency builds to 3. **Never ship an artifact built that way** — every other leg is telemetry-enabled, and a single telemetry-disabled package would be the only one missing those targets.
+
+---
+
+## 2. Minimal witness — `find_package` resolves
+
+```bash
+ctest --test-dir build/linux-gcc-release -R "consumer::install-witness" --output-on-failure
+```
+
+**Expected**: PASS — the standalone consumer configures via `find_package(fixpp)`, links `fixpp::fixpp`, and builds with no hand-added include or library path. **A second, separate target in the same witness links `fixpp::capi` by name** (FR-003, T034): it is the only place an installed *imported name* of a by-name member is exercised at all — everything else here links the umbrella. Keep it separate; linking `fixpp::capi` and `fixpp::fixpp` from one target is the combination Article IV §2 / `architecture.md:509` rejects.
+
+**This tier now links the whole closure.** It goes from four hand-listed archives (`tests/consumer/CMakeLists.txt:56`) to `fixpp::fixpp`, which pulls the **measured eleven-member closure** plus OpenSSL, asio and Crc32c. So it is the **first** place a missing `find_dependency` (FR-010c) or the `FILE_SET` blocker (FR-002b) will surface — expect early failures here to be real, not harness noise.
+
+> **The umbrella is not the export set — and `fixpp::fixpp` pulls neither group of the five.** `fixpp_session` links none of `fixpp_capi`, `fixpp_config_toml`, `fixpp_tap`, `fixpp_service` or `fixpp_log_otlp`. **Four** of those (`fixpp::capi`, `fixpp::config_toml`, `fixpp::tap`, `fixpp::service`) are exported so a consumer can link them **by name**; the **fifth**, `fixpp_log_otlp`, is **closure-only** — no public header names `fixpp::log_otlp` and no consumer is told to link it (`contracts/export-set.md` §1). A green run here says nothing about any of the five.
+
+> **⚠️ Six export-set members are DERIVED BY READING, not measured — the set is not settled.** `fixpp_capi`, `fixpp_capi_objects`, `fixpp_config_toml`, `fixpp_log_otlp`, `fixpp_tap` and `fixpp_service` were read out of `target_link_libraries`, which is the exact method the Gate A round-1 measurement caught being wrong in **three** places across a **three-level** cascade. Only the **eleven** in `contracts/export-set.md` §2 come from an executed `install(TARGETS … EXPORT …)` + generate run. **Re-running that experiment once the six are wired is a standing implementation obligation** (`contracts/export-set.md` §2a, `tasks.md` T024) — do not read this document as describing a closed export set.
+
+**Must include BOTH header kinds** (SC-002): a hand-written `include/` header *and* a generated per-version header (e.g. `Fields.hpp`). They arrive via two different install rules (`CMakeLists.txt:321` and `:346`), so this proves the generated headers were **installed and are reachable**.
+
+> **What this does NOT prove.** Both install rules write to the same `${CMAKE_INSTALL_INCLUDEDIR}` (`:323` == `:348`), so a generated header resolves through the umbrella's install include root whether or not any `fixpp::dict::<ver>` target has an install interface at all. **Because** those targets are **decided, excluded** (research R2; `contracts/export-set.md` §2 — a closed Gate A round-1 decision, not a live proposal), the question does not arise today. If a *future* change re-adds them, do **not** cite this check as evidence their install interface is correct — it structurally cannot fail on that.
+
+> **What this tier still cannot see.** It is handed the producing build's Conan toolchain (`tests/consumer/CMakeLists.txt:39-44`), so a green run says nothing about whether the package works on a host without that environment. That is §5b's job.
+
+---
+
+## 3. Real-client witness — the export actually links
+
+The tier that catches an export which *resolves but cannot link*. A header-only consumer never exercises the link interface and structurally cannot detect this.
+
+> **CI scope — `linux-gcc-release` only** (FR-026a, decision D3 closed 2026-08-01). That lane sets `FIXPP_BUILD_INTEROP_PERF=ON` (`cmake/ProjectOptions.cmake:10`, `OFF` by default) and gates SC-011/SC-012; the other five in-scope lanes run the minimal tier. It is the lane that builds **zero** third-party dependencies from source (Assumption 9), so the heaviest tier is gated at the lowest cost.
+
+```bash
+ctest --test-dir build/linux-gcc-release -R "packaging::real-client" --output-on-failure
+```
+
+**Expected**: `perf/fixpp_perf_driver.cpp` — the fixpp half of the cross-engine benchmark rig — builds **out-of-tree** against the installed package, links, and runs against a live counterparty.
+
+Three adaptations for the packaged variant (research R9):
+1. Drop `src/` and `tests/` from the include path (`perf/CMakeLists.txt:51-54`) — SC-012 forbids any source-tree path.
+2. Drop the `HdrHistogram_c` `FetchContent` (`:43-47`) — a network fetch; latency histograms are irrelevant to a link-and-run witness.
+3. Replace `support/minimal_dictionary.hpp` with a runtime load of a **shipped** dictionary via `fixpp::dict::load_any`.
+
+> **This inverts a standing caution.** The driver is documented as needing an in-tree build so it links freshly generated libraries. Building it against an installed package is safe **only** because the package comes from the build under test — which is what section 5 enforces.
+
+---
+
+## 4. Package contents — enumerate, never infer
+
+```bash
+ls /mnt/wsl/fixppbuild/artifacts/
+ctest --test-dir build/linux-gcc-release -R "packaging::contents" --output-on-failure
+```
+
+**Must be present** (SC-013, FR-011a): public headers · **at least one** generated per-version typed header · exported static libraries · `fixppConfig.cmake` + version file · FIX dictionaries · upstream license text · **`NOTICE`**.
+
+**Must be absent** (SC-004) — the exclusion set is **7 patterns**, asserted as **set equality**, not as a subset:
+
+`_dispatch/` · `vt11/` · `messages/` · `groups/` · `validators/` · `all.hpp` · `groups.hpp` — the full block at `CMakeLists.txt:349-355` — plus test executables, build scratch, and (FR-012a sign-off) the two **test-support header** subtrees `fixpp/core/test/` and `fixpp/transport/test/`.
+
+> **Why all seven.** The last five are the 078 tail; `_dispatch/` is the build-tree-private reify bridge and `vt11/` is FIXT.1.1, outside the public v42/v44/v50sp2 set. A check written from the 078 five would pass a package that leaked either of the first two, while looking perfectly coherent — `feedback_completeness_gate_exact_set_not_subset`.
+
+> **`NOTICE` content check** (SC-013): compare **whitespace-normalised against the pinned anchor `dictionaries/QUICKFIX_LICENSE.txt:19-20`** — never against a string typed into the test. The sentence spans two lines, sits indented inside clause 3, and is itself in quotation marks; a grep written from memory silently never matches.
+
+> Checked by **listing package contents**, never by reading install rules. A rule whose pattern matches nothing yields a package missing content while looking correct in CMake — and for the attribution set that is a legal deficiency, not a cosmetic one.
+
+---
+
+## 5. Provenance — the stale-package trap
+
+```bash
+ctest --test-dir build/linux-gcc-release -R "packaging::provenance" --output-on-failure
+```
+
+**Expected**: a witness fed a package from a *different* configuration, source revision, **or worktree state** fails.
+
+> **Why this is live, not theoretical.** The build strategy deletes trees between configurations while `artifacts/` deliberately survives (FR-021). That directory therefore accumulates packages from earlier configurations and earlier source states — precisely what would let a witness go green against a package predating the change under test.
+
+> **A SECOND, separate provenance gate — telemetry** (FR-011, T062a):
+> ```bash
+> ctest --test-dir build/linux-gcc-release -R "packaging::telemetry-provenance" --output-on-failure
+> ```
+> Every produced artifact must record `FIXPP_BUILD_OTEL=ON` in its provenance, across **all six** configurations, and the packaging step must **fail** on any that does not. FR-011 permits the `-o "&:with_otel=False"` accelerator (§1) while the CMake is being written and forbids one reaching a shipped artifact — nothing enforced the second half. It reads the same provenance record as the check above but has a **different red fixture** (a deliberately OTel-OFF configuration, versus a mismatched configuration/revision/worktree), so it is its own ctest and must not be merged into `packaging::provenance`. **Prove it red** by packaging one OTel-OFF configuration and confirming rejection.
+
+> **Configuration + revision is not enough** (FR-021a). Two packages built from the same commit either side of an uncommitted edit are indistinguishable under that pair — and an uncommitted edit is the *normal* state of a working branch, so it is the likely case, not the exotic one. Provenance must also record worktree cleanliness (reusing `git status --porcelain`, as `tests/codegen/codegen_build_graph_test.cmake:202-224` already does) or a build-input content hash.
+
+---
+
+## 5b. Clean-environment witness — is this package usable by anyone else?
+
+```bash
+ctest --test-dir build/linux-gcc-release -R "packaging::clean-env" --output-on-failure
+```
+
+The witness that inherits **nothing** from the producing build: no `conan_toolchain.cmake`, no source-tree path, no producer-supplied `CMAKE_PREFIX_PATH` entry (SC-016). It configures against the staged install prefix **plus a dependency prefix the producing build's package manager did not fill**.
+
+> **Why every other check is blind here.** The consumer harness passes the producing build's Conan toolchain straight into the sub-build (`tests/consumer/CMakeLists.txt:39-44`, driven from `CMakeLists.txt:284-306`), so the consumer sees exactly the producer's dependency graph. `find_dependency` **locates** rather than **provides**, so SC-001's "zero manually specified paths" is satisfiable without the provider-agnostic property ever being exercised. `feedback_verification_corpus_built_from_the_read_it_checks_is_blind`.
+
+**Expected: PASS** *(FR-018e decided 2026-08-01 — the package is provider-agnostic; the old "expected to fail under option (c)" reading is withdrawn)*. `find_package(fixpp REQUIRED)` succeeds, `fixpp::fixpp` is defined, and the consumer compiles and links — against dependencies the producer's package manager did not supply. That property holds by construction: `src/` links only imported target names (zero `find_library(…)`, zero `.conan2` paths), so every `find_dependency` is a plain `find_package` against the consumer's `CMAKE_PREFIX_PATH`.
+
+> **Prove the RED leg — a gate never observed failing proves nothing.** Remove exactly one **named** dependency from that prefix and re-run: `find_package(fixpp)` MUST fail with **that dependency's** `find_dependency` diagnostic and no other. Without this, the check cannot distinguish a missing dependency from an uninstalled `fixppConfig.cmake`, a malformed version file, or a `fixppTargets.cmake` naming a nonexistent target.
+>
+> **Paired assertion (FR-018e obligation 1).** In the same run, grep the **installed** `fixppConfig.cmake` and `fixppTargets*.cmake` for any path under the build host's package-manager cache (`~/.conan2`, `$CONAN_HOME`) and any provider-specific config filename. A hit is a **red**: the provider-agnostic property has been lost in a generated file nobody reads.
+>
+> **What a consumer must supply.** Four of the six are commonly distro-packaged (OpenSSL, asio, pugixml, tomlplusplus); **`Crc32c` and `opentelemetry-cpp` usually are not**, and `opentelemetry-cpp` is required by every shipped artifact. Tested-against versions are in `contracts/package-layout.md` §4, read from `conanfile.py`.
+
+---
+
+## 6. Telemetry-disabled config resolution
+
+> **⚠️ Amended at implement (2026-08-02).** `cmake/FixppPackaging.cmake` now **fatal-errors on an
+> OTel-OFF configure** (T062a / FR-011: a shipped artifact must be OTel-ON). The procedure below is
+> therefore no longer runnable as originally written — it dies at configure before SC-015 is reached.
+>
+> Add `-DFIXPP_ALLOW_OTEL_OFF_PACKAGE=ON` to the `cmake --preset` line for this run **only**. That
+> advanced flag exists solely to let SC-015 and the `packaging::telemetry-provenance` red proof
+> configure an OTel-OFF tree; it must never be set in CI or for any shipped artifact, and any package
+> produced under it is stamped `telemetry : OFF` in its provenance file and is expected to be rejected.
+
+**Use a FRESH build folder.** Do **not** reconfigure the tree from §1 — it was configured OTel-ON, `find_package(opentelemetry-cpp CONFIG QUIET)` (`CMakeLists.txt:52`) cached `opentelemetry-cpp_DIR` there, and `src/otel/CMakeLists.txt:36` keys its SDK link on `if(TARGET opentelemetry-cpp::api)`, **not** on `FIXPP_BUILD_OTEL`. Reusing the tree can leave SC-015 exercising a contaminated configure state — a check that passes because the thing it is testing never actually happened.
+
+```bash
+# MANDATORY first step — delete the OTel-ON tree; never reconfigure it in place
+rm -rf /mnt/wsl/fixppbuild/build/linux-gcc-release
+
+conan install . -pr conan/profiles/linux-gcc-release --build=missing \
+  -o "&:with_otel=False" -of build/linux-gcc-release
+cmake --preset linux-gcc-release -DFIXPP_BUILD_OTEL=OFF
+# then re-run the minimal witness against THIS build
+```
+
+**Expected** (SC-015): the generated config resolves. A config unconditionally requiring the telemetry dependency breaks **every** telemetry-disabled consumer, and no telemetry-enabled configuration can detect it.
+
+> **Why this is the only place the OTel dependency is optional.** `fixpp_otel` is a **mandatory** export-set member in every configuration (research R2, measured) — `fixpp_session` links it PUBLIC — so the telemetry `find_dependency` is not avoided by the target being missing. It is avoided **by construction**: with the option OFF, `fixpp_otel` is an empty INTERFACE stub (`CMakeLists.txt:167-170`, *"no headers, no SDK symbols, no link edges"*), so none of the seven `opentelemetry-cpp::*` names reach `fixppTargets.cmake`. Every *shipped* package is OTel-ON (Assumption 4) and therefore **does** require `opentelemetry-cpp` — 14 Conan packages — at consumer configure.
+
+> This is the one defect class the descoped clang-libc++ lane would have caught — it is the only lane built telemetry-disabled. Excluding it from verification is only acceptable *because* this check replaces the coverage.
+
+---
+
+## 7. Debug vs Release — platform asymmetry
+
+```bash
+readelf -S <installed>/libfixpp_core.a | grep -c debug_info
+```
+
+| | Release | Debug |
+|---|---|---|
+| Linux | 0 debug sections (13 KB) | present (228 KB) |
+| Windows | not shipped | **separate symbol files must be present** |
+
+Neither the archiver nor the linker strips anything — the compiler never emits debug information in Release. On Windows the information lives outside the library entirely, so a Debug package shipped with Linux-shaped rules is undebuggable. **Verify Windows naming against real toolchain output; do not assume it.**
+
+---
+
+## 7b. Two traps when adding the new tests
+
+**Every packaging test must be `RUN_SERIAL` with an explicit `TIMEOUT`** — now **five** (contents, provenance, telemetry-provenance, real-client, clean-environment), plus SC-007a's nested scratch configure if that option is taken. They configure and build sub-projects, so concurrent runs collide with each other and with the git-cleanliness gate. Mirror the existing consumer witness (`TIMEOUT 300` at `CMakeLists.txt:308-310`, driven via `cmake -P`). Any scratch configure must write **outside** the source tree, or it reds the same cleanliness gate.
+
+**Commit `NOTICE` together with its install rule.** `tests/codegen/codegen_build_graph_test.cmake:202-224` runs `git status --porcelain` and fails on any output. The build symlinks are invisible to it (git never descends into an ignored directory), but a new **tracked** file at the repo root is not — `NOTICE` will red that gate for as long as it stays uncommitted.
+
+---
+
+## 8. Windows legs
+
+> ### ⛔ ON HOLD as of 2026-08-02 — user decision
+>
+> **Do not start an MSVC build, and do not touch `/mnt/c/temp/`, without confirming with the
+> user first.** Another workstream has a bug to fix before the Windows legs may run.
+>
+> **Blocked while the hold stands**: T055 (FR-019 `.pdb` rule — currently written from
+> documented toolchain behaviour and **NOT measured**), the two MSVC rows of T054, T061's
+> Windows leg, and the full counts in T062 (**14** artifacts needs the 2 Windows ZIPs; only
+> the **12** Linux ones are reachable) and T062a.
+>
+> **Still proceeds**: all four Linux configurations, and *editing* `.github/workflows/tier2.yml`
+> (T066/T068) — authoring the workflow does not require running a Windows build.
+>
+> The pre-existing constraint survives the hold: when MSVC resumes it uses a **separate**
+> Windows sandbox, never `/mnt/c/temp/fixpp`, which holds unrelated in-flight state.
+
+Build in a **separate sandbox** under `/mnt/c/temp/`. **Do not reuse `/mnt/c/temp/fixpp`** — it holds unrelated in-flight state from another feature. Windows trees live on C: and do not consume the 64 GB budget.
+
+---
+
+## 9. Full acceptance
+
+| # | Check | Criterion |
+|---|---|---|
+| 1 | `find_package(fixpp)` + `fixpp::fixpp`, no manual paths | SC-001 |
+| 2 | Minimal witness green, both header kinds, reached through `fixpp::fixpp` alone | SC-002 |
+| 3 | All six configurations produce artifacts, names match exactly | SC-003 |
+| 4 | No tests/scratch/excluded content in any package — **all 7 patterns, set equality** | SC-004 |
+| 5 | Debug symbolicates; Release carries none — both platforms | SC-005 |
+| 6 | Incompatible version fails at **configure** | SC-006 |
+| 7a | Export closure enforced, evidenced by a **recorded red generate run** or a nested scratch configure | SC-007a |
+| 7b | Exclusion-set assertion **proven to fail** on a deliberately broken input | SC-007b |
+| 8 | Matrix produced under 64 GB — **whole-volume** high-water mark, one configuration at a time | SC-008 |
+| 9 | `Args` boundary verification recorded with evidence | SC-009 |
+| 9a | Every `include/<subtree>` row's disposition ∈ {`export`, `exclude`} — **any row still reading `OPEN` is a FAIL**; exclusions recorded as deliberate. *(All seven closed at the 2026-08-01 sign-off; the gate stays live for subtrees added later.)* | SC-009a |
+| 10 | CI artifacts attached, uniquely named | SC-010 |
+| 11 | Real client builds/links/runs against an installed package — **CI-gated on `linux-gcc-release` only** | SC-011, FR-026a |
+| 12 | No source-tree path participates in that build — via the **named equivalent check** | SC-012 |
+| 13 | Dictionaries + upstream license + `NOTICE` (anchor-compared) in every package | SC-013 |
+| 14 | Shipped dictionary loads via the public API from the installed prefix | SC-014 |
+| 15 | Config resolves against a telemetry-disabled build | SC-015 |
+| 16 | `find_package(fixpp)` **resolves** against dependencies the producing build's package manager did not provide — plus the **proven red leg** (one named dependency removed ⇒ that dependency's `find_dependency` diagnostic and no other) and the installed-config build-host-path grep | SC-016, FR-018e |
+
+**A gate never observed failing proves nothing.** SC-007b requires the exclusion assertion be demonstrated red on a deliberately broken input before it counts. SC-007a's closure leg cannot take that form — CMake enforces closure at *generate*, so a broken tree has no build system for ctest to run in — which is why it requires a recorded red **generate** run or a nested scratch configure instead. Claiming a ctest-shaped assertion for a failure mode that prevents ctest from existing is the defect this split exists to prevent.
+
+> **A fourth proven-red gate sits OUTSIDE this table because it is not SC-keyed.** T062a's telemetry-provenance gate (§5, FR-011) must also be demonstrated red — by packaging one deliberately OTel-OFF configuration and confirming rejection. The table above has sixteen SC rows; the proven-red set is **four**: SC-007a, SC-007b, SC-016's red leg, and this one. Do not infer the proven-red count from the row count.

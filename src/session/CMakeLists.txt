@@ -25,7 +25,8 @@ add_library(fixpp_session STATIC
 add_library(fixpp::session ALIAS fixpp_session)
 
 target_include_directories(fixpp_session PUBLIC
-  "${CMAKE_SOURCE_DIR}/include"
+  "$<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>"
+  "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
 )
 
 # engine.cpp (015 T012) needs src/transport/asio_listener.hpp (internal header).

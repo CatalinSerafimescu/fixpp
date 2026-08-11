@@ -20,7 +20,8 @@ add_library(fixpp_config_toml STATIC
 add_library(fixpp::config_toml ALIAS fixpp_config_toml)
 
 target_include_directories(fixpp_config_toml PUBLIC
-  "${CMAKE_SOURCE_DIR}/include"
+  "$<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>"
+  "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
 )
 
 # Allowed dependencies [arch §2.3]: core, session, dictionary, tls, transport, log.

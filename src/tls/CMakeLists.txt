@@ -17,7 +17,8 @@ add_library(fixpp_tls STATIC
 add_library(fixpp::tls ALIAS fixpp_tls)
 
 target_include_directories(fixpp_tls PUBLIC
-  "${CMAKE_SOURCE_DIR}/include"
+  "$<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>"
+  "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
 )
 
 # Allowed dependencies: core + asio [arch §2.3 / arch §4.6].
