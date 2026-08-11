@@ -173,16 +173,44 @@ linux_matrix_keys = sorted(str(k) for k in linux_job["strategy"]["matrix"].keys(
 # obfuscation and out of the tracked-workflow, non-obfuscating threat model.
 # Excluding documented spellings would be a gap; excluding constructed ones is a
 # boundary. Round 5 drew that line and round 6 moved another spelling across it.
+# ⚠️ Round 7 finding 2: this matched the NAME anywhere in the step, so a harmless
+# `echo 'github.path is documented by Actions'` reported as a writer — a false
+# RED, and the kind that teaches people to loosen the check. A write needs a
+# redirection or a `tee`, so that is what is matched: the target spelling must
+# FOLLOW one, on the same line.
+_ENV_FILE = (
+    r"(?:GITHUB_ENV|GITHUB_PATH"
+    r"|github\s*(?:\.\s*(?:env|path)\b|\[\s*['\"](?:env|path)['\"]\s*\]))"
+)
 _ENV_FILE_RE = re.compile(
-    r"GITHUB_ENV|GITHUB_PATH"
-    r"|github\s*(?:\.\s*(?:env|path)\b|\[\s*['\"](?:env|path)['\"]\s*\])"
+    r"(?:>>?|\btee\b[^\n]*?)\s*[\"']?\$?\{*\s*" + _ENV_FILE
 )
 linux_env_writers = [
     {"index": i, "name": str(s.get("name", ""))}
     for i, s in enumerate(linux_job["steps"])
     if _ENV_FILE_RE.search(str(s.get("run", "")))
 ]
-linux_uses = [str(s["uses"]) for s in linux_job["steps"] if "uses" in s]
+# ⚠️ Round 7 finding 1. This used to be the list of REFERENCES only, and that is
+# a projection again — the inputs are what decide what the action does. Measured
+# GREEN through the whole 31/31 harness:
+#
+#     - uses: actions/checkout@v6
+#       with:
+#         ref: main
+#
+# `ref` overrides the event's default, so on a PR all six linux legs would build
+# and test `main` instead of the proposed change, and a broken PR reports green
+# without one pinned pytest byte changing. Ordinary tracked syntax, no
+# obfuscation, no hostile runner — squarely inside the threat model.
+#
+# The whole ordered list of `uses:` step objects is compared, so `with:`, `if:`,
+# `env:` and any other key on an action step are all covered at once. Distinct
+# from the WAIVED question of a reference like `@main` changing remote content:
+# this pins what the workflow asks for, not what the remote returns.
+linux_uses = [
+    json.loads(json.dumps(s, sort_keys=True, default=str))
+    for s in linux_job["steps"] if "uses" in s
+]
 linux_step_count = len(linux_job["steps"])
 linux_job_env = {str(k): str(v) for k, v in (linux_job.get("env") or {}).items()}
 linux_has_defaults = "defaults" in linux_job
@@ -605,9 +633,28 @@ assert_linux_job_context() {
   [ "$got" = "0" ] \
     || fail "$case_id: $got step(s) in the linux job write to the environment/path files: $(echo "$json" | jq -c '.linux_env_writers'). Measured as ZERO on the unfixed tree, so this is a real change and not a pre-existing condition. Such a write reaches the pinned pytest steps without touching a byte of their run: text — PYTEST_ADDOPTS=--collect-only is the demonstrated case. If a legitimate one is ever needed, pin it here by name AND prove it cannot affect pytest."
 
-  got="$(echo "$json" | jq -r '.linux_uses | join(",")')"
-  [ "$got" = "actions/checkout@v6,jlumbroso/free-disk-space@main,actions/setup-python@v6,oras-project/setup-oras@v2,hendrikmuhs/ccache-action@v1.2.23,actions/upload-artifact@v7" ] \
-    || fail "$case_id: the linux job's \`uses:\` steps are '$got', which differs from the pinned set. A composite action can export environment to later steps from inside itself, so an added action is the same hazard as an added \$GITHUB_ENV write with none of the visibility."
+  # ⚠️ The whole ordered list of `uses:` step OBJECTS, not their references. The
+  # reference says which action; `with:` says what it does. `actions/checkout`
+  # with `ref: main` makes all six legs build and test main instead of the PR,
+  # with every pinned pytest byte intact (round 7 finding 1, measured).
+  # Heredoc-assigned because the expected JSON contains single quotes.
+  local _expected_uses
+  _expected_uses="$(cat <<'FIXPP_USES_EOF'
+[{"uses":"actions/checkout@v6"},{"name":"Free up disk space","uses":"jlumbroso/free-disk-space@main","with":{"android":true,"docker-images":true,"dotnet":true,"haskell":true,"large-packages":false,"swap-storage":false,"tool-cache":true}},{"uses":"actions/setup-python@v6","with":{"python-version":"3.12"}},{"name":"Set up oras","uses":"oras-project/setup-oras@v2"},{"name":"ccache (install + restore + save compiler cache)","uses":"hendrikmuhs/ccache-action@v1.2.23","with":{"key":"tier1-${{ matrix.preset }}","max-size":"2G","save":"${{ github.event_name == 'push' }}"}},{"if":"matrix.preset == 'linux-gcc-release' || matrix.preset == 'linux-clang-release'","name":"Upload packages","uses":"actions/upload-artifact@v7","with":{"if-no-files-found":"error","name":"packages-${{ matrix.preset }}","path":"${{ github.workspace }}/_artifacts/*","retention-days":14}}]
+FIXPP_USES_EOF
+)"
+  got="$(echo "$json" | jq -cS '.linux_uses')"
+  [ "$got" = "$_expected_uses" ] \
+    || fail "$case_id: the linux job's \`uses:\` steps do not match the pinned objects.
+An added action can export environment to later steps from inside a composite action, and an added
+or changed \`with:\` input can change what the job tests at all — \`actions/checkout\` with
+\`ref: main\` builds main instead of the PR. This pins what the workflow ASKS FOR; a reference like
+\`@main\` returning different remote content is a separate, waived question.
+
+--- expected
+$_expected_uses
+--- actual
+$got"
 
   got="$(echo "$json" | jq -r '.linux_step_count')"
   [ "$got" = "30" ] \
@@ -762,10 +809,13 @@ echo "PASS: derive-script table + call site + FIXPP_INSTALL_PYTHON=OFF + PY_RE c
 # for a miscount; a counter is. MUTANTS_RUN is incremented by each mutant AFTER
 # it has been proven RED for the right reason, so an early `return` or a mutant
 # silently commented out changes the total.
-MUTANTS_DECLARED=31  # M1 M2 M3 B M4 M5 M6 M7 M11 M14 M15 M21 M26 M27 M29-M41 M42-M44 + M28 — DOWN from 27 at
+MUTANTS_DECLARED=33  # M1 M2 M3 B M4 M5 M6 M7 M11 M14 M15 M21 M26 M27 M29-M45 + M28 M46 (2 GREEN controls) — DOWN from 27 at
                      # round 3b, because the golden subsumed 14 of them. See the
                      # RETIRED block in run_mutant_checks for the list and the reason.
 MUTANTS_RUN=0
+# GREEN controls are counted separately: a summary that calls them RED would be
+# the very over-claim MUTANTS_DECLARED exists to prevent.
+GREEN_CONTROLS=0
 
 run_mutant_checks() {
   local mut_dir
@@ -1277,7 +1327,7 @@ open(dst, "w").write(t.replace(old, old + "          echo \x27PYTEST_ADDOPTS=--c
 
   # M37 (round 5 finding 3): the `uses:` census had no mutant. A composite action
   # can export environment to later steps from inside itself.
-  mutate_workflow M37 "an action reference is changed" "uses:. steps are" '
+  mutate_workflow M37 "an action reference is changed" "uses:. steps do not match the pinned objects" '
 import sys
 src, dst = sys.argv[1], sys.argv[2]
 t = open(src).read()
@@ -1381,6 +1431,54 @@ assert t.count(old) == 1, t.count(old)
 open(dst, "w").write(t.replace(old, old + "          echo \x27PYTEST_ADDOPTS=--collect-only\x27 >> \"${{ github[\x27env\x27] }}\"\n"))
 '
 
+  # M45 (round 7 finding 1): `with: {ref: main}` on the linux checkout. Every
+  # pinned byte is intact; the six legs simply build and test `main` instead of
+  # the pull request, so a broken PR reports green. The reference is unchanged —
+  # only the INPUT — which is why pinning the reference list was not enough.
+  mutate_workflow M45 "checkout with ref: main on the linux job" "uses:. steps do not match the pinned objects" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+# The linux job\x27s checkout is the one followed by its reclaim-step comment.
+old = ("      - uses: actions/checkout@v6\n"
+       "\n"
+       "      # The Debug+sanitizer legs (asan/ubsan/tsan) are the disk-heaviest: 3627")
+assert t.count(old) == 1, t.count(old)
+new = ("      - uses: actions/checkout@v6\n"
+       "        with:\n"
+       "          ref: main\n"
+       "\n"
+       "      # The Debug+sanitizer legs (asan/ubsan/tsan) are the disk-heaviest: 3627")
+open(dst, "w").write(t.replace(old, new))
+'
+
+  # ── M46 — the SECOND positive control, for the writer census ────────────────
+  #
+  # A step that merely MENTIONS `github.path` in a diagnostic writes nothing, and
+  # must stay GREEN. Round 7 measured the previous regex reporting exactly this as
+  # a writer — a false RED, and the kind that teaches the next person to loosen
+  # the check rather than trust it. M34/M35/M36/M44 stay RED beside it, which is
+  # what makes this a control rather than a hole.
+  local m46="$mut_dir/tier1-m46.yml"
+  local m46_out="$mut_dir/m46_out"
+  python3 - "$WORKFLOW" "$m46" <<'PYEOF2'
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "      - name: Assert the Python install rules are OFF (#254 / L-056-4)\n        run: |\n          set -euo pipefail\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, old + "          echo 'github.path is documented by Actions'\n"))
+PYEOF2
+  if cmp -s "$WORKFLOW" "$m46"; then
+    fail "M46: python literal-replace produced no change — the positive control was not applied"
+  fi
+  if ! ( run_full_pin "$m46" "M46" ) >"$m46_out" 2>&1; then
+    fail "M46 (a diagnostic that merely NAMES github.path) went RED. The writer census is matching the NAME rather than a WRITE; a false RED here is how the census gets loosened later. Output: $(cat "$m46_out")"
+  fi
+  GREEN_CONTROLS=$((GREEN_CONTROLS + 1))
+  echo "GREEN (expected): M46 (prose naming github.path, no redirection) — the writer census matches WRITES, not mentions"
+  MUTANTS_RUN=$((MUTANTS_RUN + 1))
+
   # ── M28 — a POSITIVE control, and the golden needs one ──────────────────────
   #
   # Every other entry here proves the pin can go RED. This one proves it is not
@@ -1419,6 +1517,7 @@ PYEOF2
   if ! ( run_full_pin "$m28" "M28" ) >"$m28_out" 2>&1; then
     fail "M28 (semantically identical re-fold of the Configure block) went RED. The golden is comparing FILE TEXT, not the parsed value — a folded scalar re-wrapped at different columns is the same string, and pinning the byte layout instead would make every unrelated edit in the file a false RED. Output: $(cat "$m28_out")"
   fi
+  GREEN_CONTROLS=$((GREEN_CONTROLS + 1))
   echo "GREEN (expected): M28 (Configure block re-folded, same value) — the golden pins the VALUE, not the file bytes"
   MUTANTS_RUN=$((MUTANTS_RUN + 1))
 
@@ -1430,4 +1529,4 @@ if [ "$MUTANTS_RUN" != "$MUTANTS_DECLARED" ]; then
   fail "mutant count mismatch: $MUTANTS_RUN ran, $MUTANTS_DECLARED declared. A mutant was added, removed or short-circuited without updating MUTANTS_DECLARED — the summary below would otherwise claim coverage this run did not have."
 fi
 
-echo "PASS: ci/test-tier1-python-policy.sh — $MUTANTS_RUN/$MUTANTS_DECLARED mutants driven to their expected outcome ($((MUTANTS_RUN - 1)) RED, 1 GREEN positive control: M28), real workflow proven GREEN"
+echo "PASS: ci/test-tier1-python-policy.sh — $MUTANTS_RUN/$MUTANTS_DECLARED driven to their expected outcome ($((MUTANTS_RUN - GREEN_CONTROLS)) RED, $GREEN_CONTROLS GREEN positive controls), real workflow proven GREEN"
