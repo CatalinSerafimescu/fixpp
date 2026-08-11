@@ -114,6 +114,7 @@ extract_json() {
   local workflow="$1"
   python3 - "$workflow" <<'PYEOF'
 import json
+import re
 import sys
 import yaml
 
@@ -160,16 +161,42 @@ linux_matrix_keys = sorted(str(k) for k in linux_job["strategy"]["matrix"].keys(
 # only the `$GITHUB_ENV` spelling excludes a documented alias, which is a gap
 # rather than an accepted threat-model boundary (the concession for *computed*
 # paths stands; excluding official spellings does not).
-_ENV_FILE_SPELLINGS = ("GITHUB_ENV", "GITHUB_PATH", "github.env", "github.path")
+# ⚠️ Round 6 finding 2: a fixed list of spellings was still short. Actions
+# expressions support BOTH property dereference and INDEX syntax, so
+# `${{ github['env'] }}` and `${{ github["env"] }}` name the same file as
+# `${{ github.env }}` and were not matched. Both forms, with the whitespace
+# Actions permits, are now one regex.
+#
+# The stated boundary, unchanged and still honest: this covers the DOCUMENTED
+# spellings of the environment/path files. A path assembled at runtime
+# (`F=$GITHUB_"ENV"`, a variable holding it, a helper script) is deliberate
+# obfuscation and out of the tracked-workflow, non-obfuscating threat model.
+# Excluding documented spellings would be a gap; excluding constructed ones is a
+# boundary. Round 5 drew that line and round 6 moved another spelling across it.
+_ENV_FILE_RE = re.compile(
+    r"GITHUB_ENV|GITHUB_PATH"
+    r"|github\s*(?:\.\s*(?:env|path)\b|\[\s*['\"](?:env|path)['\"]\s*\])"
+)
 linux_env_writers = [
     {"index": i, "name": str(s.get("name", ""))}
     for i, s in enumerate(linux_job["steps"])
-    if any(t in str(s.get("run", "")) for t in _ENV_FILE_SPELLINGS)
+    if _ENV_FILE_RE.search(str(s.get("run", "")))
 ]
 linux_uses = [str(s["uses"]) for s in linux_job["steps"] if "uses" in s]
 linux_step_count = len(linux_job["steps"])
 linux_job_env = {str(k): str(v) for k, v in (linux_job.get("env") or {}).items()}
 linux_has_defaults = "defaults" in linux_job
+
+# ⚠️ Round 6 findings 1 and 3, and they are one gap: key-set equality was applied
+# at STEP level and not at JOB level. Both escapes are ordinary tracked syntax
+# that changes how the pinned steps execute without touching them:
+#   `jobs.linux.continue-on-error: true`  a failing leg stops failing the workflow
+#   `jobs.linux.container:`               runs every step in a container, which
+#                                         brings its own `env:` mapping AND changes
+#                                         the default shell to `sh`
+# Both were measured GREEN. `services:` and anything Actions adds later are the
+# same shape, which is why this is a SET comparison and not two new checks.
+linux_job_keys = sorted(str(k) for k in linux_job.keys())
 
 # ⚠️ Round 5 finding 2. WORKFLOW-level `env:` reaches every job, and workflow-level
 # `defaults.run` supplies the shell to every `run:` step in the file. Both sit
@@ -247,6 +274,7 @@ out = {
     "linux_step_count": linux_step_count,
     "linux_job_env": linux_job_env,
     "linux_has_defaults": linux_has_defaults,
+    "linux_job_keys": linux_job_keys,
     "workflow_env": workflow_env,
     "workflow_has_defaults": workflow_has_defaults,
 }
@@ -589,9 +617,14 @@ assert_linux_job_context() {
   [ "$got" = '{"CCACHE_COMPILERCHECK":"content","CCACHE_COMPRESSLEVEL":"5","CCACHE_DIR":"/tmp/fixpp-ccache-${{ matrix.preset }}","CMAKE_CXX_COMPILER_LAUNCHER":"ccache","CMAKE_C_COMPILER_LAUNCHER":"ccache"}' ] \
     || fail "$case_id: the linux job's env: block is $got, which differs from the pinned five ccache variables. Job-level env applies to EVERY step including the two pinned pytest steps."
 
-  got="$(echo "$json" | jq -r '.linux_has_defaults')"
-  [ "$got" = "false" ] \
-    || fail "$case_id: the linux job declares \`defaults:\` — \`defaults.run.shell\` changes the interpreter of every step in the job, including the pinned ones, with their run: text unchanged."
+  got="$(echo "$json" | jq -r '.linux_job_keys | join(",")')"
+  [ "$got" = "concurrency,env,if,name,needs,permissions,runs-on,steps,strategy,timeout-minutes" ] \
+    || fail "$case_id: the linux job's key set is '$got', expected exactly 'concurrency,env,if,name,needs,permissions,runs-on,steps,strategy,timeout-minutes'. Job-level keys decide how EVERY step in the job executes, with none of their text changed — \`continue-on-error: true\` stops a failing leg failing the workflow, \`container:\` supplies a second env mapping and switches the default shell to sh, \`services:\` and \`defaults:\` likewise. This is the same set comparison the four pinned STEPS get, applied one level up, where round 6 found it missing."
+
+  # (The job-level `defaults:` check that used to sit here is GONE — the key set
+  # above subsumes it exactly, and two assertions for one property is how the
+  # weaker one survives a later simplification. Same disposition as the step-level
+  # `if:`-emptiness checks removed at round 4.)
 
   # ⚠️ ONE LAYER ABOVE THE JOB, and it was open until round 5. Workflow-level
   # `env:` reaches every job and workflow-level `defaults.run` supplies the shell
@@ -729,7 +762,7 @@ echo "PASS: derive-script table + call site + FIXPP_INSTALL_PYTHON=OFF + PY_RE c
 # for a miscount; a counter is. MUTANTS_RUN is incremented by each mutant AFTER
 # it has been proven RED for the right reason, so an early `return` or a mutant
 # silently commented out changes the total.
-MUTANTS_DECLARED=28  # M1 M2 M3 B M4 M5 M6 M7 M11 M14 M15 M21 M26 M27 M29-M34 M35-M41 + M28 — DOWN from 27 at
+MUTANTS_DECLARED=31  # M1 M2 M3 B M4 M5 M6 M7 M11 M14 M15 M21 M26 M27 M29-M41 M42-M44 + M28 — DOWN from 27 at
                      # round 3b, because the golden subsumed 14 of them. See the
                      # RETIRED block in run_mutant_checks for the list and the reason.
 MUTANTS_RUN=0
@@ -1200,12 +1233,15 @@ src, dst = sys.argv[1], sys.argv[2]
 t = open(src).read()
 # `conan profile detect` and friends appear in several jobs; this line is unique
 # to the linux job (it is #254\x27s own disk-report step).
-old = "        run: cat /tmp/disk.txt >> \"$GITHUB_STEP_SUMMARY\"\n"
-new = ("        run: |\n"
-       "          cat /tmp/disk.txt >> \"$GITHUB_STEP_SUMMARY\"\n"
-       "          echo \x27PYTEST_ADDOPTS=--collect-only\x27 >> \"$GITHUB_ENV\"\n")
+# ⚠️ ANCHORED BEFORE THE PYTEST STEPS. Round 6 finding 4: these three mutants
+# used to modify "Report disk to the job summary", which is step 29 while the
+# pytest steps are 24 and 25 — and $GITHUB_ENV only affects SUBSEQUENT steps, so
+# the write happened too late to poison anything. They were unshadowed and RED,
+# and they proved the census detects TEXT rather than the hazard justifying it.
+# Step 14 is before both.
+old = "      - name: Assert the Python install rules are OFF (#254 / L-056-4)\n        run: |\n          set -euo pipefail\n"
 assert t.count(old) == 1, t.count(old)
-open(dst, "w").write(t.replace(old, new))
+open(dst, "w").write(t.replace(old, old + "          echo \x27PYTEST_ADDOPTS=--collect-only\x27 >> \"$GITHUB_ENV\"\n"))
 '
 
   # ── Round 5: the two escapes above the job, and the unwitnessed censuses ────
@@ -1218,15 +1254,12 @@ open(dst, "w").write(t.replace(old, new))
 import sys
 src, dst = sys.argv[1], sys.argv[2]
 t = open(src).read()
-old = "      - name: Report disk to the job summary (#254)\n"
+# Before the pytest steps, and UNNAMED. See the M34 note above.
+old = "      - name: Assert the Python install rules are OFF (#254 / L-056-4)\n        run: |\n          set -euo pipefail\n"
 assert t.count(old) == 1, t.count(old)
-t = t.replace(old, "      -\n")
-old2 = "        run: cat /tmp/disk.txt >> \"$GITHUB_STEP_SUMMARY\"\n"
-new2 = ("        run: |\n"
-        "          cat /tmp/disk.txt >> \"$GITHUB_STEP_SUMMARY\"\n"
-        "          echo \x27PYTEST_ADDOPTS=--collect-only\x27 >> \"$GITHUB_ENV\"\n")
-assert t.count(old2) == 1, t.count(old2)
-open(dst, "w").write(t.replace(old2, new2))
+new = ("      -\n        run: |\n          set -euo pipefail\n"
+       "          echo \x27PYTEST_ADDOPTS=--collect-only\x27 >> \"$GITHUB_ENV\"\n")
+open(dst, "w").write(t.replace(old, new))
 '
 
   # M36 (round 5 finding 1b): `${{ github.env }}` — GitHub's OFFICIAL context
@@ -1236,12 +1269,10 @@ open(dst, "w").write(t.replace(old2, new2))
 import sys
 src, dst = sys.argv[1], sys.argv[2]
 t = open(src).read()
-old = "        run: cat /tmp/disk.txt >> \"$GITHUB_STEP_SUMMARY\"\n"
-new = ("        run: |\n"
-       "          cat /tmp/disk.txt >> \"$GITHUB_STEP_SUMMARY\"\n"
-       "          echo \x27PYTEST_ADDOPTS=--collect-only\x27 >> \"${{ github.env }}\"\n")
+# Before the pytest steps. See the M34 note above.
+old = "      - name: Assert the Python install rules are OFF (#254 / L-056-4)\n        run: |\n          set -euo pipefail\n"
 assert t.count(old) == 1, t.count(old)
-open(dst, "w").write(t.replace(old, new))
+open(dst, "w").write(t.replace(old, old + "          echo \x27PYTEST_ADDOPTS=--collect-only\x27 >> \"${{ github.env }}\"\n"))
 '
 
   # M37 (round 5 finding 3): the `uses:` census had no mutant. A composite action
@@ -1276,7 +1307,7 @@ assert t.count(old) == 1, t.count(old)
 open(dst, "w").write(t.replace(old, old + "      PYTEST_ADDOPTS: --collect-only\n"))
 '
 
-  mutate_workflow M39 "job-level defaults.run.shell" "declares .defaults:" '
+  mutate_workflow M39 "job-level defaults.run.shell" "linux job.s key set is" '
 import sys
 src, dst = sys.argv[1], sys.argv[2]
 t = open(src).read()
@@ -1305,6 +1336,49 @@ t = open(src).read()
 old = "env:\n  CONAN_HOME: ~/.conan2\n"
 assert t.count(old) == 1, t.count(old)
 open(dst, "w").write(t.replace(old, old + "defaults:\n  run:\n    shell: /bin/true {0}\n"))
+'
+
+  # ── Round 6: two job-level keys and one more documented alias ───────────────
+
+  # M42 (round 6 finding 1): `jobs.linux.continue-on-error: true`. One level above
+  # the step-level property M29 pins, and strictly worse — it waives a failing
+  # pytest, Configure, build OR ctest on every leg at once, with no pinned step
+  # changed.
+  mutate_workflow M42 "job-level continue-on-error" "linux job.s key set is" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "      CCACHE_DIR: /tmp/fixpp-ccache-${{ matrix.preset }}\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, old + "    continue-on-error: true\n"))
+'
+
+  # M43 (round 6 finding 3): `jobs.linux.container:` — a THIRD environment mapping
+  # beside the workflow and job ones, and it switches the default shell to `sh`
+  # as well. Two reasons the golden text can execute differently, in one key.
+  mutate_workflow M43 "a container: with its own env on the linux job" "linux job.s key set is" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "      CCACHE_DIR: /tmp/fixpp-ccache-${{ matrix.preset }}\n"
+assert t.count(old) == 1, t.count(old)
+new = old + ("    container:\n"
+             "      image: ubuntu:24.04\n"
+             "      env:\n"
+             "        PYTEST_ADDOPTS: --collect-only\n")
+open(dst, "w").write(t.replace(old, new))
+'
+
+  # M44 (round 6 finding 2): `${{ github[\x27env\x27] }}` — Actions expressions support
+  # index syntax as well as property dereference, so this names the same file as
+  # M36 does and the four-spelling list missed it. Placed BEFORE the pytest steps.
+  mutate_workflow M44 "an existing pre-pytest step writes via github[env] index syntax" "write to the environment/path files" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "      - name: Assert the Python install rules are OFF (#254 / L-056-4)\n        run: |\n          set -euo pipefail\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, old + "          echo \x27PYTEST_ADDOPTS=--collect-only\x27 >> \"${{ github[\x27env\x27] }}\"\n"))
 '
 
   # ── M28 — a POSITIVE control, and the golden needs one ──────────────────────
