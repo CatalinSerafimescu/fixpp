@@ -142,6 +142,22 @@ DERIVE="${2:-$repo_root/ci/derive-python-sanitizer.sh}"
 
 fail() { echo "FAIL: $1" >&2; exit 1; }
 
+# ⚠️ Neutralise GitHub workflow commands in CAPTURED MUTANT OUTPUT before echoing
+# it. A mutant's output is, by design, the text of something failing — and three
+# of the mutants mutate `ci/derive-python-sanitizer.sh`, whose fail-closed path
+# emits `::error::` lines. Echoed verbatim from a step, `::error::` at the start
+# of a line is a WORKFLOW COMMAND, so a PASSING `ci-script-pins` job planted two
+# red annotations on the run (observed on the #254 merge run, 2026-08-11).
+#
+# That is not cosmetic. An annotation stream that cries wolf on a green job
+# teaches the reader to ignore `::error::` from this job — and this pin's whole
+# value is that its signals mean something. Same reasoning that rejected a false
+# RED in the environment-file census at Gate B round 7.
+#
+# `⟪::⟫` keeps the text readable and legible as "this was captured", while no
+# longer starting the line with `::`.
+scrub_wf_cmds() { sed -E 's/^[[:space:]]*::/⟪::⟫/' <<<"$1"; }
+
 command -v python3 >/dev/null || fail "python3 is required"
 command -v jq >/dev/null || fail "jq is required"
 python3 -c "import yaml" 2>/dev/null \
@@ -918,8 +934,8 @@ PYEOF2
     fail "M1 (tsan -> none in the derive script) did NOT fail the pin — the derive value check cannot distinguish it from the real mapping"
   fi
   grep -q "derive mismatch for 'linux-clang-tsan' field 'sanitizer'" "$m1_out" \
-    || fail "M1 failed the pin for the WRONG reason: $(cat "$m1_out")"
-  echo "RED (expected): M1 (tsan -> none in the derive script) — $(cat "$m1_out")"
+    || fail "M1 failed the pin for the WRONG reason: $(scrub_wf_cmds "$(cat "$m1_out")")"
+  echo "RED (expected): M1 (tsan -> none in the derive script) — $(scrub_wf_cmds "$(cat "$m1_out")")"
   MUTANTS_RUN=$((MUTANTS_RUN + 1))
 
   # M2 (heir of mutant D): delete linux-gcc-release from the script's case. Must
@@ -945,7 +961,7 @@ PYEOF2
   fi
   grep -q "not exhaustive over the matrix" "$m2_out" \
     || fail "M2 failed the pin for the WRONG reason (it must be the EXHAUSTIVENESS message, not a value mismatch): $(cat "$m2_out")"
-  echo "RED (expected): M2 (linux-gcc-release dropped from the derive case) — $(cat "$m2_out")"
+  echo "RED (expected): M2 (linux-gcc-release dropped from the derive case) — $(scrub_wf_cmds "$(cat "$m2_out")")"
   MUTANTS_RUN=$((MUTANTS_RUN + 1))
 
   # M3: ubsan_standalone -> ubsan. The ONE non-identity row in the table, and
@@ -969,8 +985,8 @@ PYEOF2
     fail "M3 (ubsan_standalone -> ubsan) did NOT fail the pin"
   fi
   grep -q "derive mismatch for 'linux-clang-ubsan' field 'rt_base'" "$m3_out" \
-    || fail "M3 failed the pin for the WRONG reason: $(cat "$m3_out")"
-  echo "RED (expected): M3 (ubsan_standalone -> ubsan) — $(cat "$m3_out")"
+    || fail "M3 failed the pin for the WRONG reason: $(scrub_wf_cmds "$(cat "$m3_out")")"
+  echo "RED (expected): M3 (ubsan_standalone -> ubsan) — $(scrub_wf_cmds "$(cat "$m3_out")")"
   MUTANTS_RUN=$((MUTANTS_RUN + 1))
 
   # Mutant B (kills assertion 4's target): un-anchor PY_RE back to the bare
@@ -999,7 +1015,7 @@ PYEOF
   fi
   grep -q "PY_RE against" "$mut_b_out" \
     || fail "mutant B failed the pin for the WRONG reason: $(cat "$mut_b_out")"
-  echo "RED (expected): mutant B (un-anchored PY_RE) — $(cat "$mut_b_out")"
+  echo "RED (expected): mutant B (un-anchored PY_RE) — $(scrub_wf_cmds "$(cat "$mut_b_out")")"
   MUTANTS_RUN=$((MUTANTS_RUN + 1))
 
   # ── M4-M8 mutate THE WORKFLOW ──────────────────────────────────────────
@@ -1030,8 +1046,8 @@ PYEOF2
     fail "M4 (coverage dropped from tier1-required's needs) did NOT fail the pin — the needs census has never been proven RED and cannot be trusted"
   fi
   grep -q "tier1-required needs set" "$m4_out" \
-    || fail "M4 failed the pin for the WRONG reason: $(cat "$m4_out")"
-  echo "RED (expected): M4 (coverage dropped from tier1-required needs) — $(cat "$m4_out")"
+    || fail "M4 failed the pin for the WRONG reason: $(scrub_wf_cmds "$(cat "$m4_out")")"
+  echo "RED (expected): M4 (coverage dropped from tier1-required needs) — $(scrub_wf_cmds "$(cat "$m4_out")")"
   MUTANTS_RUN=$((MUTANTS_RUN + 1))
 
   # M5: remove -DFIXPP_INSTALL_PYTHON=OFF from the Configure line. The payload
@@ -1055,8 +1071,8 @@ PYEOF2
     fail "M5 (FIXPP_INSTALL_PYTHON=OFF removed) did NOT fail the pin"
   fi
   grep -q "FIXPP_INSTALL_PYTHON=OFF" "$m5_out" \
-    || fail "M5 failed the pin for the WRONG reason: $(cat "$m5_out")"
-  echo "RED (expected): M5 (FIXPP_INSTALL_PYTHON=OFF removed) — $(cat "$m5_out")"
+    || fail "M5 failed the pin for the WRONG reason: $(scrub_wf_cmds "$(cat "$m5_out")")"
+  echo "RED (expected): M5 (FIXPP_INSTALL_PYTHON=OFF removed) — $(scrub_wf_cmds "$(cat "$m5_out")")"
   MUTANTS_RUN=$((MUTANTS_RUN + 1))
 
   # M6: the derive step stops invoking the script. The script is still tested
@@ -1086,8 +1102,8 @@ PYEOF2
   # dead-text form the derive call site has been attacked with (`#` comment, `;#`,
   # heredoc, `if false`, same-step echo).
   grep -q "Derive the python sanitizer identity from the preset' step's run: block does not match" "$m6_out" \
-    || fail "M6 failed the pin for the WRONG reason: $(cat "$m6_out")"
-  echo "RED (expected): M6 (derive step no longer invokes the script) — $(cat "$m6_out")"
+    || fail "M6 failed the pin for the WRONG reason: $(scrub_wf_cmds "$(cat "$m6_out")")"
+  echo "RED (expected): M6 (derive step no longer invokes the script) — $(scrub_wf_cmds "$(cat "$m6_out")")"
   MUTANTS_RUN=$((MUTANTS_RUN + 1))
 
   # M7 (R2-P2-3): san_opts goes unconsumed. The sanitizer legs then run pytest
@@ -1112,8 +1128,8 @@ PYEOF2
     fail "M7 (san_opts unconsumed) did NOT fail the pin — a sanitizer leg without halt_on_error=1 reports green after a real finding"
   fi
   grep -q "steps.pysan.outputs.san_opts" "$m7_out" \
-    || fail "M7 failed the pin for the WRONG reason: $(cat "$m7_out")"
-  echo "RED (expected): M7 (san_opts unconsumed) — $(cat "$m7_out")"
+    || fail "M7 failed the pin for the WRONG reason: $(scrub_wf_cmds "$(cat "$m7_out")")"
+  echo "RED (expected): M7 (san_opts unconsumed) — $(scrub_wf_cmds "$(cat "$m7_out")")"
   MUTANTS_RUN=$((MUTANTS_RUN + 1))
 
   # ── RETIRED AT GATE B ROUND 3b, WITH THE REASON ─────────────────────────────
@@ -1170,8 +1186,8 @@ PYEOF2
     fail "M11 (derive step id renamed) did NOT fail the pin — every steps.pysan.outputs.* would resolve to the empty string with nothing noticing"
   fi
   grep -q "expected 'pysan'" "$m11_out" \
-    || fail "M11 failed the pin for the WRONG reason: $(cat "$m11_out")"
-  echo "RED (expected): M11 (derive step id renamed) — $(cat "$m11_out")"
+    || fail "M11 failed the pin for the WRONG reason: $(scrub_wf_cmds "$(cat "$m11_out")")"
+  echo "RED (expected): M11 (derive step id renamed) — $(scrub_wf_cmds "$(cat "$m11_out")")"
   MUTANTS_RUN=$((MUTANTS_RUN + 1))
 
   # ── M12-M17 — the SELECTOR mutants (Gate B round 2) ───────────────────────
@@ -1194,8 +1210,8 @@ PYEOF2
       fail "$_id ($_label) did NOT fail the pin"
     fi
     grep -qE "$_why" "$_o" \
-      || fail "$_id failed the pin for the WRONG reason: $(cat "$_o")"
-    echo "RED (expected): $_id ($_label) — $(cat "$_o")"
+      || fail "$_id failed the pin for the WRONG reason: $(scrub_wf_cmds "$(cat "$_o")")"
+    echo "RED (expected): $_id ($_label) — $(scrub_wf_cmds "$(cat "$_o")")"
     MUTANTS_RUN=$((MUTANTS_RUN + 1))
   }
 
