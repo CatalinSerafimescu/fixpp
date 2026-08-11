@@ -130,6 +130,33 @@ jobs = doc["jobs"]
 linux_job = jobs["linux"]
 linux_presets = linux_job["strategy"]["matrix"]["preset"]
 
+# ⚠️ Gate B round 4 finding 1. `strategy.matrix.preset` is the BASE AXIS, not the
+# instantiated set: adding `exclude:` for the three sanitizer presets left the
+# "exact six-preset set" claim GREEN while no sanitizer leg would be created at
+# all. The key set of the matrix mapping is compared exactly rather than
+# expanding the matrix — `include`/`exclude` are the only two keys that can
+# change the instantiation, and a set comparison also covers anything added later.
+linux_matrix_keys = sorted(str(k) for k in linux_job["strategy"]["matrix"].keys())
+
+# ⚠️ Round 4 finding 3. Nothing in `run:` stops a PRECEDING step from changing
+# what the pinned steps execute. The measured escape was one unnamed step,
+# `run: echo 'PYTEST_ADDOPTS=--collect-only' >> "$GITHUB_ENV"`, which collides
+# with no pinned name and adds no pytest mention, yet turns both golden commands
+# into collection-only runs that exit 0.
+#
+# Three surfaces carry that, and each is censused rather than parsed:
+#   * writes to $GITHUB_ENV / $GITHUB_PATH from any step in the job (measured: ZERO today)
+#   * `uses:` steps, which can do the same from inside a composite action
+#   * the job-level `env:` and `defaults:`
+linux_env_writers = [
+    str(s.get("name", "")) for s in linux_job["steps"]
+    if "GITHUB_ENV" in str(s.get("run", "")) or "GITHUB_PATH" in str(s.get("run", ""))
+]
+linux_uses = [str(s["uses"]) for s in linux_job["steps"] if "uses" in s]
+linux_step_count = len(linux_job["steps"])
+linux_job_env = {str(k): str(v) for k, v in (linux_job.get("env") or {}).items()}
+linux_has_defaults = "defaults" in linux_job
+
 # ⚠️ PER-STEP OBJECTS, not one concatenated blob — and the difference is the
 # whole of Gate B round 1's F5. The previous version emitted only
 # "\n".join(step["run"]), which means the step `if:` guards, the step `id`s and
@@ -154,6 +181,14 @@ linux_steps = [
         # shell), and conflating them is how a position assertion silently
         # becomes a presence assertion again.
         "env":  {str(k): str(v) for k, v in (step.get("env") or {}).items()},
+        # ⚠️ The RAW key set of the step as written, NOT of this normalized dict.
+        # The projection above always emits name/id/if/run/env, so `keys` on it is
+        # a constant and asserting over it proves nothing — measured while adding
+        # the key-set golden, and it is the same class as everything else this file
+        # has been bitten by: an assertion evaluated against a projection that had
+        # already discarded the thing being asserted. This field is the only place
+        # `continue-on-error`, `shell`, `working-directory` or `uses` survive.
+        "raw_keys": sorted(str(k) for k in step.keys()),
     }
     for step in linux_job["steps"]
 ]
@@ -184,6 +219,12 @@ out = {
     "decide_run": decide_run,
     "tier1_required_needs": tier1_required_needs,
     "ci_pin_runs": ci_pin_runs,
+    "linux_matrix_keys": linux_matrix_keys,
+    "linux_env_writers": linux_env_writers,
+    "linux_uses": linux_uses,
+    "linux_step_count": linux_step_count,
+    "linux_job_env": linux_job_env,
+    "linux_has_defaults": linux_has_defaults,
 }
 print(json.dumps(out))
 PYEOF
@@ -400,6 +441,51 @@ $(diff <(printf '%s\n' "$_expected") <(printf '%s\n' "$_got") || true)"
   # It is NOT part of the run: text, so the golden does not cover it. Rename it and
   # all three consumers silently become the empty string while still reading as
   # present.
+  # ── The step-level keys, and this half is NOT optional ──────────────────────
+  #
+  # The `run:` golden pins WHAT the step runs. It says nothing about the keys that
+  # decide whether that text runs, how, or whether its failure counts — and none
+  # of those live in `run:`. Measured, all GREEN against the run-only golden:
+  #
+  #   E1/E3  `continue-on-error: true` on either pytest step -> a FAILING pytest
+  #          suite reports success. That is precisely the property PG-2 names —
+  #          "the pytest step itself, on all six legs, with continue-on-error
+  #          off" — so the run-only golden left the design doc's own stated gate
+  #          with no instrument at all.
+  #   E2     `shell: sh -c {0}` -> identical text, different interpreter: no
+  #          pipefail, different `-e`, and `set -euo pipefail` may not even parse.
+  #
+  # ⇒ The KEY SET of each pinned step is compared exactly. That is deliberately a
+  # set comparison rather than a list of forbidden keys: `continue-on-error` and
+  # `shell` are the two that were measured, but `working-directory`,
+  # `timeout-minutes`, `uses:` and whatever Actions adds next are all step-level
+  # and all unenumerated. A denylist needs extending every time the platform grows
+  # a key; exact-set equality is already complete and needs nothing.
+  assert_step_keys() {  # <step-json> <expected comma-separated sorted keys> <label>
+    local _got
+    _got="$(echo "$1" | jq -r '.raw_keys | sort | join(",")')"
+    [ "$_got" = "$2" ] \
+      || fail "$case_id: the '$3' step's key set is '$_got', expected exactly '$2'. Step-level keys are NOT part of the run: golden and several of them change behaviour without changing a character of the script — \`continue-on-error: true\` makes a failing pytest report success (PG-2), \`shell:\` changes the interpreter, \`working-directory\` changes where it runs. Any added or removed key must be a deliberate pin update."
+  }
+
+  assert_step_keys "$derive_step" "id,name,run"     "Derive the python sanitizer identity from the preset"
+  assert_step_keys "$cfg_step"    "name,run"        "Configure"
+  assert_step_keys "$none_step"   "env,if,name,run" "Run Python tests"
+  assert_step_keys "$san_step"    "env,if,name,run" "Run Python tests under sanitizer"
+
+  # `env:` is in the key set above; its CONTENTS are pinned here, as a whole
+  # object rather than one named variable. Round 4 finding 2 measured the
+  # difference: `env: {PYTHONPATH: <correct>, PYTEST_ADDOPTS: --collect-only}`
+  # leaves PYTHONPATH untouched and makes pytest collect the suite and exit 0
+  # WITHOUT RUNNING IT. Checking one key inside a mapping is the same
+  # representative-of-a-set mistake as `head -1` was.
+  local _env_json
+  for _step_json in "$none_step" "$san_step"; do
+    _env_json="$(echo "$_step_json" | jq -cS '.env')"
+    [ "$_env_json" = '{"PYTHONPATH":"${{ github.workspace }}/build/${{ matrix.preset }}/lib"}' ] \
+      || fail "$case_id: a pytest step's env: block is $_env_json, expected exactly {\"PYTHONPATH\":\"\${{ github.workspace }}/build/\${{ matrix.preset }}/lib\"}. PYTHONPATH is what makes the freshly built module importable; and any ADDITIONAL variable is a finding in itself — PYTEST_ADDOPTS=--collect-only collects the suite and exits 0 without running a single test."
+  done
+
   local derive_id
   derive_id="$(echo "$derive_step" | jq -r '.id // ""')"
   [ "$derive_id" = "pysan" ] \
@@ -410,14 +496,12 @@ $(diff <(printf '%s\n' "$_expected") <(printf '%s\n' "$_got") || true)"
   # changes which legs run: `false && …` and a `github.event_name` narrowing were
   # both measured passing a `contains()` form). The derive and Configure steps
   # must carry NO guard at all.
-  local _d_if _c_if _none_if _san_if
-  _d_if="$(echo "$derive_step" | jq -r '.["if"] // ""')"
-  _c_if="$(echo "$cfg_step"    | jq -r '.["if"] // ""')"
-  [ -z "$_d_if" ] \
-    || fail "$case_id: the derive step carries \`if: $_d_if\` — it must be unconditional; a guarded step can silently stop running on some or all legs, and every steps.pysan.outputs.* consumer would then read the empty string"
-  [ -z "$_c_if" ] \
-    || fail "$case_id: the Configure step carries \`if: $_c_if\` — it must be unconditional"
-
+  # ⚠️ The derive and Configure steps must be UNCONDITIONAL, and that is now
+  # enforced by the key sets above ("name,run" and "id,name,run" contain no `if`),
+  # not by a separate emptiness check. The separate check was removed rather than
+  # kept alongside: two assertions for one property is how the weaker one survives
+  # a later "simplification".
+  local _none_if _san_if
   _none_if="$(echo "$none_step" | jq -r '.["if"] // ""')"
   _san_if="$(echo "$san_step"   | jq -r '.["if"] // ""')"
   [ "$_none_if" = "steps.pysan.outputs.sanitizer == 'none'" ] \
@@ -436,6 +520,54 @@ $(diff <(printf '%s\n' "$_expected") <(printf '%s\n' "$_got") || true)"
   [ "$_pytest_n" = "2" ] \
     || fail "$case_id: $_pytest_n steps in the linux job mention \`pytest bindings/python/tests/\`, expected exactly 2 (the none/non-none pair, both pinned above). Note this counts MENTIONS deliberately — an extra step that merely echoes the command is also a finding here, because the two real ones are already pinned verbatim and anything else is unaccounted for."
   true
+}
+
+# ── 3b: the execution CONTEXT of the four pinned steps ──────────────────────
+#
+# Gate B round 4, findings 1 and 3. The golden pins what the four steps ARE. It
+# cannot pin what surrounds them, and three surrounding things were measured
+# changing their behaviour with every golden byte intact:
+#
+#   * `strategy.matrix.exclude:` for the three sanitizer presets — the pin still
+#     claimed the six-preset set was exact while no sanitizer leg existed.
+#   * an unnamed `run: echo PYTEST_ADDOPTS=--collect-only >> "$GITHUB_ENV"` step
+#     inserted before the pair — collides with no pinned name, adds no pytest
+#     mention, turns both golden commands into collection-only runs.
+#   * job-level `env:` / `defaults.run`, which apply to every step.
+#
+# Each is a CENSUS, not a parse. The honest scope statement: these close the
+# ordinary ways a preceding step or job setting reaches the pinned steps —
+# an added step, an added action, a $GITHUB_ENV write, a job-level default. A
+# determined author could still obfuscate a write (`GITHUB_${X}`); that is a
+# different threat model from the one this pin exists for, and saying so is
+# better than implying completeness it does not have.
+assert_linux_job_context() {
+  local json="$1" case_id="$2"
+  local got
+
+  got="$(echo "$json" | jq -r '.linux_matrix_keys | join(",")')"
+  [ "$got" = "preset" ] \
+    || fail "$case_id: the linux job's strategy.matrix has keys '$got', expected exactly 'preset'. \`include\`/\`exclude\` change which legs are INSTANTIATED, so the preset list stops being the effective set and assertion 1's exactness claim becomes false — measured: excluding the three sanitizer presets left this pin GREEN with no sanitizer leg running at all."
+
+  got="$(echo "$json" | jq -r '.linux_env_writers | join(",")')"
+  [ -z "$got" ] \
+    || fail "$case_id: step(s) in the linux job write to \$GITHUB_ENV/\$GITHUB_PATH: '$got'. Measured as ZERO on the unfixed tree, so this is a real change and not a pre-existing condition. Such a write reaches the pinned pytest steps without touching a byte of their run: text — PYTEST_ADDOPTS=--collect-only is the demonstrated case. If a legitimate one is ever needed, pin it here by name AND prove it cannot affect pytest."
+
+  got="$(echo "$json" | jq -r '.linux_uses | join(",")')"
+  [ "$got" = "actions/checkout@v6,jlumbroso/free-disk-space@main,actions/setup-python@v6,oras-project/setup-oras@v2,hendrikmuhs/ccache-action@v1.2.23,actions/upload-artifact@v7" ] \
+    || fail "$case_id: the linux job's \`uses:\` steps are '$got', which differs from the pinned set. A composite action can export environment to later steps from inside itself, so an added action is the same hazard as an added \$GITHUB_ENV write with none of the visibility."
+
+  got="$(echo "$json" | jq -r '.linux_step_count')"
+  [ "$got" = "30" ] \
+    || fail "$case_id: the linux job has $got steps, expected 30. A step added anywhere before the pytest pair can change what they execute without colliding with a pinned name or adding a pytest mention (round 4 finding 3, measured). This count is deliberately brittle: adding a step to this job is a deliberate act and must be paired with a deliberate look at whether it reaches the python steps."
+
+  got="$(echo "$json" | jq -cS '.linux_job_env')"
+  [ "$got" = '{"CCACHE_COMPILERCHECK":"content","CCACHE_COMPRESSLEVEL":"5","CCACHE_DIR":"/tmp/fixpp-ccache-${{ matrix.preset }}","CMAKE_CXX_COMPILER_LAUNCHER":"ccache","CMAKE_C_COMPILER_LAUNCHER":"ccache"}' ] \
+    || fail "$case_id: the linux job's env: block is $got, which differs from the pinned five ccache variables. Job-level env applies to EVERY step including the two pinned pytest steps."
+
+  got="$(echo "$json" | jq -r '.linux_has_defaults')"
+  [ "$got" = "false" ] \
+    || fail "$case_id: the linux job declares \`defaults:\` — \`defaults.run.shell\` changes the interpreter of every step in the job, including the pinned ones, with their run: text unchanged."
 }
 
 # ── 4: PY_RE case table ─────────────────────────────────────────────────────
@@ -544,6 +676,7 @@ run_full_pin() {
   assert_py_re_case_table "$json" "$case_id"
   assert_tier1_required_needs "$json" "$case_id"
   assert_ci_pin_call_sites "$json" "$case_id"
+  assert_linux_job_context "$json" "$case_id"
 }
 
 # ── Real workflow: must pass all four assertions ────────────────────────────
@@ -560,7 +693,7 @@ echo "PASS: derive-script table + call site + FIXPP_INSTALL_PYTHON=OFF + PY_RE c
 # for a miscount; a counter is. MUTANTS_RUN is incremented by each mutant AFTER
 # it has been proven RED for the right reason, so an early `return` or a mutant
 # silently commented out changes the total.
-MUTANTS_DECLARED=15  # M1 M2 M3 B M4 M5 M6 M7 M11 M14 M15 M21 M26 M27 + M28 — DOWN from 27 at
+MUTANTS_DECLARED=21  # M1 M2 M3 B M4 M5 M6 M7 M11 M14 M15 M21 M26 M27 M29 M30 M31 M32 M33 M34 + M28 — DOWN from 27 at
                      # round 3b, because the golden subsumed 14 of them. See the
                      # RETIRED block in run_mutant_checks for the list and the reason.
 MUTANTS_RUN=0
@@ -934,7 +1067,7 @@ open(dst, "w").write(t.replace(old, new))
   # golden compares `run:`, and a step that cannot run is not a step that does the
   # work. Round 3b raised this for `ci-script-pins`; it applies here too, and this
   # is the shape someone reaches for when trimming PR-side minutes.
-  mutate_workflow M27 "a guard added to the unconditional Configure step" "must be unconditional" '
+  mutate_workflow M27 "a guard added to the unconditional Configure step" "key set is .if,name,run., expected exactly .name,run." '
 import sys
 src, dst = sys.argv[1], sys.argv[2]
 t = open(src).read()
@@ -942,6 +1075,96 @@ t = open(src).read()
 # so the anchor carries the following comment line, which is unique to linux.
 old = "      - name: Configure\n        # FIXPP_ARTIFACT_DIR is a CACHE variable"
 new = "      - name: Configure\n        if: github.event_name != \x27pull_request\x27\n        # FIXPP_ARTIFACT_DIR is a CACHE variable"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
+'
+
+  # ── Round 4: the five measured escapes OUTSIDE `run:` ───────────────────────
+  # Each of these left the complete pin GREEN at f54ea0f4 while changing what the
+  # six legs actually do. They are what the key-set, env-object and context
+  # censuses exist for; without them those censuses would be untested assertions.
+
+  # M29: `continue-on-error: true` — a FAILING pytest suite reports success. This
+  # is verbatim the property PG-2 names, so before this mutant the design doc's
+  # own stated gate had no instrument.
+  mutate_workflow M29 "continue-on-error on the none-leg pytest step" "key set is .continue-on-error" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "      - name: Run Python tests\n        if: steps.pysan.outputs.sanitizer == \x27none\x27\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, old + "        continue-on-error: true\n"))
+'
+
+  # M30: `shell:` — same text, an interpreter that never runs it.
+  mutate_workflow M30 "a shell: override on the sanitizer pytest step" "key set is .env,if,name,run,shell." '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "      - name: Run Python tests under sanitizer\n        if: steps.pysan.outputs.sanitizer != \x27none\x27\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, old + "        shell: /bin/true {0}\n"))
+'
+
+  # M31: a SECOND env variable beside a correct PYTHONPATH. Collects the suite and
+  # exits 0 without running a test. The key set is unchanged — only the env OBJECT
+  # comparison catches this, which is why checking PYTHONPATH alone was not enough.
+  mutate_workflow M31 "PYTEST_ADDOPTS added beside a correct PYTHONPATH" "env: block is" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "        env:\n          PYTHONPATH: \"${{ github.workspace }}/build/${{ matrix.preset }}/lib\"\n        run: pytest bindings/python/tests/ -v\n"
+new = "        env:\n          PYTHONPATH: \"${{ github.workspace }}/build/${{ matrix.preset }}/lib\"\n          PYTEST_ADDOPTS: --collect-only\n        run: pytest bindings/python/tests/ -v\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
+'
+
+  # M32: `matrix.exclude` removing the three sanitizer presets. The preset LIST is
+  # untouched, so assertion 1 still reads as exact while no sanitizer leg exists.
+  mutate_workflow M32 "matrix.exclude drops the three sanitizer presets" "strategy.matrix has keys" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "          - linux-gcc-release\n"
+new = ("          - linux-gcc-release\n"
+       "        exclude:\n"
+       "          - preset: linux-clang-asan\n"
+       "          - preset: linux-clang-ubsan\n"
+       "          - preset: linux-clang-tsan\n")
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
+'
+
+  # M33: an UNNAMED step poisoning $GITHUB_ENV before the pytest pair. Collides
+  # with no pinned name, adds no pytest mention, and turns both golden commands
+  # into collection-only runs. Two censuses catch it (the env-writer census and
+  # the step count) — the reason-grep names the env-writer one, which is the
+  # specific mechanism.
+  mutate_workflow M33 "an unnamed step is inserted before the pytest pair" "has 31 steps, expected 30" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "      - name: Run Python tests\n        if: steps.pysan.outputs.sanitizer == \x27none\x27\n"
+inject = "      - run: echo \x27PYTEST_ADDOPTS=--collect-only\x27 >> \"$GITHUB_ENV\"\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, inject + old))
+'
+
+  # M34: an EXISTING step poisons $GITHUB_ENV. The step count is unchanged, no
+  # name collides, and nothing about the pinned steps differs — only the
+  # env-writer census can see this one, which is why M33 (which trips the count
+  # first) does not stand in for it. Each census gets its own mutant or it is an
+  # untested assertion.
+  mutate_workflow M34 "an existing step appends PYTEST_ADDOPTS to GITHUB_ENV" "write to .GITHUB_ENV" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+# `conan profile detect` and friends appear in several jobs; this line is unique
+# to the linux job (it is #254\x27s own disk-report step).
+old = "        run: cat /tmp/disk.txt >> \"$GITHUB_STEP_SUMMARY\"\n"
+new = ("        run: |\n"
+       "          cat /tmp/disk.txt >> \"$GITHUB_STEP_SUMMARY\"\n"
+       "          echo \x27PYTEST_ADDOPTS=--collect-only\x27 >> \"$GITHUB_ENV\"\n")
 assert t.count(old) == 1, t.count(old)
 open(dst, "w").write(t.replace(old, new))
 '
@@ -995,4 +1218,4 @@ if [ "$MUTANTS_RUN" != "$MUTANTS_DECLARED" ]; then
   fail "mutant count mismatch: $MUTANTS_RUN ran, $MUTANTS_DECLARED declared. A mutant was added, removed or short-circuited without updating MUTANTS_DECLARED — the summary below would otherwise claim coverage this run did not have."
 fi
 
-echo "PASS: ci/test-tier1-python-policy.sh — $MUTANTS_RUN/$MUTANTS_DECLARED mutants driven to their expected outcome (14 RED, 1 GREEN positive control), real workflow proven GREEN"
+echo "PASS: ci/test-tier1-python-policy.sh — $MUTANTS_RUN/$MUTANTS_DECLARED mutants driven to their expected outcome ($((MUTANTS_RUN - 1)) RED, 1 GREEN positive control: M28), real workflow proven GREEN"
