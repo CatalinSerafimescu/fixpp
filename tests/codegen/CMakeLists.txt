@@ -914,3 +914,29 @@ target_compile_definitions(test078_builders_hpp_removed_us4 PRIVATE
 add_test(NAME test078_builders_hpp_removed_us4 COMMAND test078_builders_hpp_removed_us4)
 set_tests_properties(test078_builders_hpp_removed_us4 PROPERTIES
   LABELS "codegen;078;us4;builders-hpp-removed")
+
+# 082-structural-group-detection T034 [US2] — FR-008 / SC-006 / K9: the 14
+# required='Y' group-omission witnesses for v42. This is the point of issue #196 —
+# a FIX 4.2 required group must be REPRESENTABLE in Args so its omission is
+# detectable rather than silent (Article VI).
+#
+# Links BOTH prebuilt v42 libs, same as tests/session/test_067_builder_validate
+# does for v44: builders for build_<Msg>, validators for validate_<Msg>.
+# `fixpp::builders::v42` / `fixpp::validators::v42` exist only because T035 added
+# v42 to Codegen.cmake's per-version builder/validator loop.
+add_executable(codegen_082_v42_required_group_omission_test
+  test_082_v42_required_group_omission_test.cpp)
+add_dependencies(codegen_082_v42_required_group_omission_test fixpp_codegen_generate)
+target_link_libraries(codegen_082_v42_required_group_omission_test PRIVATE
+  fixpp_wire
+  fixpp::builders::v42
+  fixpp::validators::v42
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(codegen_082_v42_required_group_omission_test PRIVATE
+  "${FIXPP_CODEGEN_OUT}")
+add_test(NAME codegen_082_v42_required_group_omission_test
+  COMMAND codegen_082_v42_required_group_omission_test)
+set_tests_properties(codegen_082_v42_required_group_omission_test PROPERTIES
+  LABELS "codegen;082;us2;required_group_omission")

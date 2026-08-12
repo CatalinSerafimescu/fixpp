@@ -1060,6 +1060,45 @@ sit with its v44/v50sp2 siblings — `FIXPP_CODEGEN_FIX_LATEST` gates **vlatest 
 Same shape as the #208 carve-out earlier in this feature: see
 [[feedback_a_carveout_list_built_by_grepping_one_issue_number_misses_the_others]].
 
+### ✅ T034 DELIVERED 2026-08-12 — US2 COMPLETE, all 14 required-group omissions rejected
+
+`tests/codegen/test_082_v42_required_group_omission_test.cpp`, ctest
+**`codegen_082_v42_required_group_omission_test`** (labels `codegen;082;us2;required_group_omission`),
+linking `fixpp::builders::v42` + `fixpp::validators::v42`. **15/15** — the 14 pairs plus a completeness
+guard. This is the hole issue #196 exists to close: a FIX 4.2 `required='Y'` group is now representable in
+`Args`, so omitting it is **detectable** rather than silent (Article VI).
+
+**Every case asserts a PAIR, and the positive control is load-bearing.** `validate_required` returns
+`wire_required_field_missing` for **both** a missing required scalar (`builder_validate.hpp:77`) **and** an
+empty required group (`:86`) — the same enum from two causes. So "it rejected" proves nothing alone: a case
+that forgot a required scalar would reject for the wrong reason and read as a pass. Each case asserts the
+full `Args` validates **clean** first, then that clearing only that span rejects.
+
+**Plan names are per-message, not per-tag** — seven of the tags are ordinaled, and the divergence is real
+and exercised: `73` → NewOrderList `G_73_1Args` vs ListStatus `G_73_3Args`; `146` → MarketDataRequest
+`G_146_3Args` vs QuoteRequest `G_146_2Args`; `268` → MDSnapshotFullRefresh `G_268_1Args` vs
+MDIncrementalRefresh `G_268_2Args`; `295` → QuoteCancel `G_295_1Args` vs MassQuote's nested `G_295_3Args`.
+
+**The 14th (nested) case is built as T034 prescribes**: a `G_296_2Args` entry complete in its own required
+scalars (302/311/304) but carrying an **empty** `quote_entries` span, so the rejection arrives through the
+296 row's `gc.validate_entry` rather than a top-level `group_checks` row.
+
+#### ⚠️ The mutation that "passed" — and why it was the mutant that was broken, not the test
+
+Flipping `{true → false}` on NewOrderList's group check in
+**`messages/NewOrderList.validator.inl`** left the test **GREEN**. The test was fine; the mutation was
+unreachable. The test links the prebuilt `fixpp_validators_v42`, whose traits come from
+**`NewOrderList.validator.cpp`** — the `.inl` is compiled only under `FIXPP_VALIDATORS_HEADER_ONLY`.
+Re-applied to the `.cpp`, the mutant **kills the test** with its intended message
+(*"omitting a required='Y' repeating group MUST be rejected"*), and the tree was restored and rebuilt.
+
+**The lesson is sharper than "guard your mutants".** The `assert applied == 1` guard **did fire correctly** —
+the string genuinely existed in the `.inl` and was genuinely replaced. A no-op guard proves the edit landed
+**in a file**; it does **not** prove that file is on the **test's build path**. Where a generated tier ships
+the same traits twice — once inline, once compiled — the guard must also pin *which* copy the binary under
+test actually consumes. See
+[[feedback_a_mutation_guard_proves_the_edit_landed_not_that_the_file_is_on_the_build_path]].
+
 ### ▶ T034 PREP — the 14 pairs DERIVED (2026-08-12), and T034's premise confirmed
 
 Derived from raw FIX42.xml (`required='Y'` on a `<group>` declaration, components expanded), so T034's
