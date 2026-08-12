@@ -228,3 +228,23 @@ Stated narrowly and up front, because an unbounded promise generates unbounded r
   Anyone measuring the PR run, or the merge commit's run, will read a cold 133 min and conclude the
   change does not work. It is stated here and in tier1.yml so that conclusion is pre-empted;
 - any change to `DA:`/`BRDA:` coverage numbers, which are not what this instrument measures.
+
+## 9. Pool budget — what this permanently costs
+
+The Actions cache pool is **10 GB per repository**, shared by every lane. Measured 2026-08-12 with
+both probe entries deleted (`gh api …/actions/cache/usage` is the authority — the per-entry list
+under-reports):
+
+| | |
+|---|---|
+| current pool | **6.92 GiB / 10 GB (74 %)**, 11 active entries |
+| the four sanitizer/debug legs alone | ubsan 1774 + asan 1524 + tsan 1462 + debug 740 MiB = **5.4 GiB** |
+| what #241 adds, permanently | **~900 MiB** (measured: the coverage entry was 901 MiB cold, 925 MiB warm) |
+| projected steady state | **~7.8 GiB (78 %)** |
+
+That is affordable, but it is not free and it is not reversible without reverting the feature. The
+remaining ~2.2 GB of headroom is what absorbs future lanes; anyone adding the next cached lane
+should re-derive this table rather than trusting it, since these entries grow with the tree.
+
+Both probe entries were deleted once the proof was recorded:
+`…-2026-08-11T20:02:00.630Z` (cold, 901 MiB) and `…-2026-08-12T06:31:49.527Z` (warm, 925 MiB).
