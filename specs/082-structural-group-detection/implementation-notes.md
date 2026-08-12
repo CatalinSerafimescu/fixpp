@@ -640,6 +640,29 @@ Two carve-outs were **inverted, not deleted** — each carried an explicit instr
 
 ### Concessions to #210 that must be REVERTED when it lands
 
+> ## ✅ ALL THREE DISCHARGED 2026-08-12 — and there was a FOURTH, to #208
+>
+> | # | Revert | Acceptance used | Result |
+> |---|---|---|---|
+> | 1 | `required_scope_census_test.cpp` — bounded allowance → plain `EXPECT_EQ(members, actual)` | **Strengthening** (one permitted extra tag → none), so a green *is* proof | **13/13** |
+> | 2 | `collision_membership_guards_test.cpp` — `first_tag_only_in`'s `exclude` removed | ⚠️ a **widening**, so green is NOT proof. Used the comment's own prediction — *"the exclusion becomes a no-op"* — checked against the **derived case set**, observable as the parameterised test-name list | **80/80**, and the case list is **byte-identical**: 78 cases, per dict 1/1/7/9/12/13/14/21 |
+> | 3 | `test_082_group_required_member_validation_test.cpp` T021b | already discharged by measurement (0 failures) | green |
+>
+> **#210's fix is on the CALLER side** — 083 T031/T032 made the delimiter source each context's own
+> declaration, so `table_view.hpp:645`'s unconditional `add_group_member_ctx(..., first)` is
+> **unchanged and meant to stay** (D-5 / C-3.3 — the injection is now a no-op). Reading `table_view.hpp`
+> alone concludes #210 is unfixed. Verified in this tree before reverting anything.
+>
+> **⚠️ A FOURTH carve-out existed and is not on this list** — conceded to **#208**, which 083 also
+> closed: `required_scope_census_test.cpp`'s `expected.erase(1499/1669/1919)`. This list was built by
+> grepping `#210`, so a carve-out citing a different issue was invisible to it. Retired separately; see
+> the § *A FOURTH carve-out* below and
+> [[feedback_a_carveout_list_built_by_grepping_one_issue_number_misses_the_others]].
+>
+> For #2, the acceptance instrument is worth keeping: **the parameterised test-name list IS the derived
+> case set**, so a set-identity check on it is free and strictly stronger than a count. It is recorded in
+> `first_tag_only_in`'s banner so a future change cannot silently re-baseline it.
+
 All three are commented in-place as such:
 
 1. **`required_scope_census_test.cpp` T017** — the per-context member-set leg allows exactly one

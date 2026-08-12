@@ -72,26 +72,32 @@ Dictionary load(std::filesystem::path const& path, std::pmr::memory_resource* mr
 
 // First tag in `a` that is NOT in `b` (a/b both sorted), or nullopt if `a`
 // is a subset of `b`.
-// `exclude` (082 T030, issue #210): the GLOBAL first-seen delimiter for this
-// no_tag can never discriminate between two contexts, because
-// `set_group_first_ctx` (table_view.hpp:641-646) injects it as a member of
-// EVERY context of that no_tag regardless of what the XML declares there. A
-// tag present in all contexts by construction is not a discriminator, so
-// selecting it would produce a case that cannot pass — the FIX42 tag-146
-// symptom, where 46 (RelatdSym, News(B)'s first child) leaks into
-// QuoteRequest(R)'s context.
+// The `exclude` parameter (082 T030, issue #210) is REMOVED — 2026-08-12.
 //
-// Excluding it here is a genuine STRENGTHENING, not a workaround: it forces
-// the case to discriminate on a tag whose presence actually reflects the
-// declared per-context variant. When #210 lands the exclusion becomes a
-// no-op, since the delimiter will only be a member where it is declared.
+// It used to skip the GLOBAL first-seen delimiter, which under #210 was injected
+// by `set_group_first_ctx` into EVERY context of a no_tag regardless of what the
+// XML declared there, making it a tag that is present by construction and so
+// cannot discriminate (the FIX42 tag-146 symptom: 46 RelatdSym, News(B)'s first
+// child, leaking into QuoteRequest(R)'s context).
+//
+// Its own comment predicted the retirement: *"when #210 lands the exclusion
+// becomes a no-op, since the delimiter will only be a member where it is
+// declared"*. #210 is closed (083 T031/T032 — the delimiter SOURCE is now each
+// context's own declaration), so the parameter is gone.
+//
+// ⚠️ Unlike the sibling revert in `required_scope_census_test.cpp`, dropping this
+// parameter WIDENS the discriminator candidate set, so a green here is NOT proof
+// on its own. The acceptance is the prediction itself — that removal is
+// BEHAVIOUR-NEUTRAL — and it is checked against the derived case set, which is
+// observable as the parameterised test-name list: **78 cases, per dict
+// FIX40 1 / FIX41 1 / FIX42 7 / FIX43 9 / FIX44 12 / FIX50 13 / FIX50SP1 14 /
+// FIX50SP2 21**, measured immediately before this change. If that list ever
+// moves, the exclusion was NOT a no-op: a variant pair that used to differ only
+// by the injected delimiter now yields a case (or stops yielding one) via the
+// `continue` in `derive_cases_for_dict` below. Re-derive rather than re-baseline.
 std::optional<std::uint16_t> first_tag_only_in(std::vector<std::uint16_t> const& a,
-                                                std::vector<std::uint16_t> const& b,
-                                                std::uint16_t exclude) {
+                                                std::vector<std::uint16_t> const& b) {
     for (auto const t : a) {
-        if (t == exclude) {
-            continue;
-        }
         if (!contains(b, t)) {
             return t;
         }
@@ -143,25 +149,23 @@ std::vector<CollisionCase> derive_cases_for_dict(std::string_view fname) {
         Variant const* absent = nullptr;
         std::uint16_t discriminator = 0;
 
-        // 082 T030 / issue #210: never pick the global first-seen delimiter as
-        // the discriminator — it is injected into every context of this no_tag,
-        // so it cannot distinguish them.
-        std::uint16_t const injected_everywhere = dict.group_first_field(no_tag);
-
-        if (auto const disc = first_tag_only_in(a.members, b.members, injected_everywhere);
-            disc.has_value()) {
+        // 082 T030 / issue #210's global-delimiter exclusion is REMOVED (#210 is
+        // closed by 083) — see first_tag_only_in's banner for why, and for the
+        // 78-case list that is this removal's acceptance instrument.
+        if (auto const disc = first_tag_only_in(a.members, b.members); disc.has_value()) {
             present = &a;
             absent = &b;
             discriminator = *disc;
         } else {
-            auto const disc_b = first_tag_only_in(b.members, a.members, injected_everywhere);
+            auto const disc_b = first_tag_only_in(b.members, a.members);
             if (!disc_b.has_value()) {
-                // The two variants differ ONLY by the injected delimiter, so
-                // this no_tag has no genuine discriminator under #210. Skip it
-                // rather than emit a case that cannot pass — and skip it
-                // LOUDLY via the per-dict count pin, which will then disagree
-                // with `expected_per_dict` if this ever starts happening on a
-                // dictionary where it did not before.
+                // Reachable only if two variants the census called DISTINCT have
+                // identical member sets, which `census_for` forbids by
+                // construction. Retained as a fail-safe rather than an expected
+                // path: pre-#210 this fired when a pair differed only by the
+                // injected delimiter. It is skipped LOUDLY via the per-dict count
+                // pin, which will disagree with `expected_per_dict` if it ever
+                // starts firing on a dictionary where it did not before.
                 continue;
             }
             present = &b;

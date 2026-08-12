@@ -623,7 +623,11 @@ TEST(RequiredScopeCensus, Fix42Tag146PerContextMemberSetsMatchOracle) {
         auto const actual =
             to_set(tv.group_member_tags(key.msg_type, std::span{key.path}, key.no_tag));
 
-        // ── Bounded allowance for issue #210 (delimiter pollution) ──────────
+        // ── RETIRED 2026-08-12: bounded allowance for issue #210 ────────────
+        // #210 is CLOSED (by 083). The allowance this banner describes NO LONGER
+        // EXISTS — the assertion below is plain set equality. The text is kept
+        // because it records why the allowance was written and what it bounded;
+        // read it as history, not as a description of the code.
         // `as_table_view()` resolves each group's delimiter from the GLOBAL
         // first-seen `group_first_field(no_tag)`, and
         // `table_view.hpp:641-646`'s `set_group_first_ctx` then UNCONDITIONALLY
@@ -648,24 +652,24 @@ TEST(RequiredScopeCensus, Fix42Tag146PerContextMemberSetsMatchOracle) {
         // still fails. Collapses to plain set equality once #210 lands.
         // Do NOT "simplify" this into a subset check — that would stop
         // pinning the excess side entirely.
-        std::vector<std::uint16_t> missing;
-        std::ranges::set_difference(members, actual, std::back_inserter(missing));
-        EXPECT_TRUE(missing.empty())
-            << "FIX42 msg=" << key.msg_type << " no_tag=146 (context store): oracle-declared "
-            << "member(s) MISSING from the actual set — " << describe_diff(members, actual);
-
-        std::vector<std::uint16_t> extra;
-        std::ranges::set_difference(actual, members, std::back_inserter(extra));
-        std::set<std::uint16_t> const allowed_extra{tv.group_first_field(key.no_tag)};
-        for (auto const t : extra) {
-            EXPECT_TRUE(allowed_extra.contains(t))
-                << "FIX42 msg=" << key.msg_type << " no_tag=146 (context store): tag " << t
-                << " is in the actual member set but is neither oracle-declared nor the global "
-                   "first-seen delimiter ("
-                << tv.group_first_field(key.no_tag)
-                << ") — this is BEYOND issue #210's known pollution, investigate rather than "
-                   "widening this allowance";
-        }
+        // #210 IS FIXED (083 T031/T032), so the bounded allowance that stood here
+        // is COLLAPSED to plain set equality, exactly as its own comment said it
+        // would be. Reverted 2026-08-12.
+        //
+        // Note the fix is on the CALLER side: `set_group_first_ctx`'s
+        // unconditional `add_group_member_ctx(..., first)` (table_view.hpp:645)
+        // is UNCHANGED and is meant to stay — what changed is that `first` is now
+        // this context's OWN declared delimiter, so the injection is a no-op
+        // (D-5 / C-3.3). Reading table_view.hpp alone concludes #210 is unfixed.
+        //
+        // This revert is a STRENGTHENING: the allowance permitted exactly one
+        // extra tag (the global first-seen delimiter) and now permits none, so a
+        // PASS here is positive evidence that the pollution is gone — not merely
+        // the absence of a signal.
+        EXPECT_EQ(members, actual)
+            << "FIX42 msg=" << key.msg_type << " no_tag=146 (context store): per-context member set "
+            << "must equal the oracle's EXACTLY (no #210 delimiter-pollution allowance remains) — "
+            << describe_diff(members, actual);
         distinct_variants.insert(members);
         ++contexts_checked;
     }
