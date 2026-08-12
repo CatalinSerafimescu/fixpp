@@ -186,11 +186,17 @@ TEST(SessionTableViewReuse, OpenAdoptsAConfigSuppliedViewAndWalksZeroTimes) {
     // (the field's derivation requirement), and hand it over.
     auto tv = std::make_shared<const fixpp::dict::table_view>(cfg.dictionary->as_table_view());
     cfg.dictionary_view = tv;
-    long const use_count_before = tv.use_count();  // this test + cfg
+
+    // Construct FIRST, then sample. `Session` stores a SessionConfig BY VALUE
+    // (session.hpp: "constructing `SessionConfig cfg_;` from a ..."), so
+    // construction alone bumps the count by one. Sampling before construction
+    // would make the assertion below pass whether or not open() adopted
+    // anything — a count identity that proves nothing.
+    Session sess{fix.engine, cfg};
+    long const use_count_before_open = tv.use_count();
 
     fixpp::dict::detail::reset_as_table_view_call_count();
 
-    Session sess{fix.engine, cfg};
     fix.run_open(sess);
 
     EXPECT_EQ(fixpp::dict::detail::as_table_view_call_count(), 0u)
@@ -198,10 +204,11 @@ TEST(SessionTableViewReuse, OpenAdoptsAConfigSuppliedViewAndWalksZeroTimes) {
            "Dictionary ZERO further times. This reads 1 on the unfixed tree, where SessionConfig "
            "had no field to carry a view and open() always built its own.";
 
-    EXPECT_GT(tv.use_count(), use_count_before)
-        << "the session must hold a strong reference to THE SUPPLIED view object — a count of "
-           "zero new walks paired with a dropped reference would mean open() had silently "
-           "stopped resolving a view at all.";
+    EXPECT_GT(tv.use_count(), use_count_before_open)
+        << "open() must take a strong reference to THE SUPPLIED view object. Sampled across "
+           "open() ALONE (the construction copy is already in the baseline), so this rises only "
+           "if inbound_tv_ was seated from cfg_.dictionary_view. Zero new walks paired with an "
+           "unchanged count would mean open() had silently stopped resolving a view at all.";
 }
 
 // ============================================================================

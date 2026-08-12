@@ -372,7 +372,12 @@ public:
     //   0        — `no_tag` is not a group anywhere (the group bit is clear)
     //   non-zero — EITHER the context store answered, OR the context MISSED and
     //              the legacy bare store answered with the globally-first-seen
-    //              variant (L-063-3).
+    //              variant (the DUAL-STORE INVARIANT note above is the
+    //              normative statement of this; note the `L-063-3` cited
+    //              there is recorded in spec/behaviors-and-limitations.md as
+    //              fully CLOSED — its residuals (a)/(b) were fixed by 072 and
+    //              083 — so it describes this fallback historically, and is
+    //              not an open row you can look up for current behaviour).
     //
     // That conflation is harmless where the fallback's value is merely a stale
     // tag, which is what 063 designed it for. It is NOT harmless at a

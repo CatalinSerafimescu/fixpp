@@ -749,7 +749,8 @@ static fixpp_error_t validate_group_grammar(const std::pmr::vector<AccumulatorEn
         // fixpp#215 item 2: that rule is now enforced by the ACCESSOR, not only
         // by the absence of an explicit bare call. The three-arg
         // `table_view::group_first_field` T052 originally used applies the
-        // legacy bare-store fallback INTERNALLY on a context miss (L-063-3), so
+        // legacy bare-store fallback INTERNALLY on a context miss (the
+        // DUAL-STORE INVARIANT note in table_view.hpp), so
         // this site could still resolve a delimiter from the global
         // first-seen variant — the very fallback the paragraph above forbids —
         // and had no way to tell that had happened. `group_first_field_exact`

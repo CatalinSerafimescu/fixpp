@@ -344,6 +344,66 @@ TEST(CapiGroupDelimiterCtx, CommitDoesNotRebuildTableViewPerMessage) {
 }
 
 // ============================================================================
+// fixpp#215 item 2 — a CONTEXT MISS at the commit path fails CLOSED.
+//
+// 083 T052 states that this site "must NEVER fall back to the bare global
+// `dict->group_first_field(e.tag)`", because a fallback "would let the builder
+// accept an order inbound validation rejects". It enforced that by not WRITING
+// a bare call — but the 3-arg `table_view::group_first_field` it did call
+// applies that same fallback INTERNALLY on a context miss (L-063-3), so the
+// rule was stated and not enforced. `group_first_field_exact` reports the miss;
+// the miss now joins `tv == nullptr` on TYPE_MISMATCH.
+//
+// REACHABLE WITHOUT A DICTIONARY BUG — which is why this witness exists rather
+// than a "not reachable" note. Nothing on the way here checks the group against
+// the MESSAGE's grammar:
+//   * fixpp_msg_group_begin gates on the BARE store
+//     (`dict_->group_first_field(group_tag) == 0`, message_write.cpp), so NoWrap
+//     (400) is accepted on ANY msg_type because it is a group SOMEWHERE.
+//   * entry_set_bytes_impl runs no check_dict at all — only framing-tag and
+//     group-collision checks — so WrapA(401) goes in unchallenged.
+// Heartbeat ("0") declares NO group in this fixture, so ("0", [], 400) has no
+// context record while the bare store still answers 401.
+//
+// PRE-FIX BEHAVIOUR (what makes this a witness and not a tautology): the bare
+// fallback resolved 400 -> 401, the instance below opens with exactly 401, so
+// the delimiter check PASSED and this committed FIXPP_ERR_OK — a group the
+// Heartbeat grammar does not declare, serialised onto the wire, which inbound
+// validation rejects. That is precisely the FR-018 construction-vs-validation
+// disagreement 083 exists to close.
+// ============================================================================
+TEST(CapiGroupDelimiterCtx, CommitFailsClosedOnAContextMissRatherThanUsingTheBareStore) {
+    auto f = open_session(make_cfg_with_dict(kDivergentNestedXml, "MISSA", "MISSB"));
+
+    fixpp_msg_t* msg = nullptr;
+    ASSERT_EQ(fixpp_msg_create_outbound(f.sess, "0", 1, &msg), FIXPP_ERR_OK)
+        << "Heartbeat is declared in this dictionary, so the handle must be creatable — the "
+           "rejection under test must come from the COMMIT, not from message creation.";
+
+    fixpp_group_builder_t* outer = nullptr;
+    ASSERT_EQ(fixpp_msg_group_begin(msg, 400, &outer), FIXPP_ERR_OK)
+        << "group_begin gates on the BARE store, so it accepts 400 on a message that does not "
+           "declare it. If this ever starts rejecting, the miss becomes unreachable from here "
+           "and this witness must be re-pointed rather than deleted.";
+    fixpp_entry_t* oe = nullptr;
+    ASSERT_EQ(fixpp_group_builder_add_entry(outer, &oe), FIXPP_ERR_OK);
+    // 401 is exactly what the bare store resolves for 400 — so a fallback would
+    // find the instance well-formed. The commit must reject on the MISS itself,
+    // not on a delimiter mismatch.
+    ASSERT_EQ(fixpp_entry_set_string(oe, 401, "W", 1), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_msg_group_end(msg, outer), FIXPP_ERR_OK);
+
+    const uint8_t* out = nullptr;
+    std::size_t len = 0;
+    EXPECT_EQ(fixpp_msg_commit(msg, &out, &len), FIXPP_ERR_TYPE_MISMATCH)
+        << "fixpp#215 item 2: (\"0\", [], 400) has no context record, so the delimiter is "
+           "UNKNOWN in this message's grammar. Resolving it from the bare global store instead "
+           "is the fallback 083 T052 forbids; the commit must fail closed.";
+    fixpp_msg_destroy(msg);
+    fixpp_engine_destroy(f.eng);
+}
+
+// ============================================================================
 // W-11b — a DICT-FREE handle still skips the delimiter check entirely (C-9.4).
 // "No dictionary" and "no view" are ONE state, so the dict-free disposition is
 // unchanged by this feature.
