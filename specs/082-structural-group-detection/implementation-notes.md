@@ -1020,6 +1020,46 @@ and a vt11 builders *marker* would demand a file that must never exist, wedging 
 Commented in place so nobody "restores symmetry". Two now-false "for every ns != v42" comments were
 corrected at the same time.
 
+### ✅ T036 / T037 / T038 / T039 DISCHARGED 2026-08-12 — v42's builder tier is emitted, compiled and gated
+
+Build clean (exit 0, 3228 edges): **`libfixpp_builders_v42.a` 12.5 MB, `libfixpp_validators_v42.a` 6.5 MB**.
+Both inverted pins flipped **RED → GREEN** (T032 3/3, T033 3/3), `codegen_determinism_test` **22/22**.
+
+- **T036** — 226 v42 builder-tier files checked in under
+  `specs/078-precompiled-builder-libs/contracts/golden/v42/` (28 `groups/<Plan>.hpp`), the copy
+  re-hashed byte-exact against the emitted tree. ⚠️ **And GATED**: a new
+  `DeterminismTest.V42AllModeBuildersMatchesGolden` cell plus v42 added to the setup's golden-set
+  existence loop. Without that cell the 226 files would be a **dead golden** — in the repo, compared by
+  nothing, reading as coverage while gating nothing.
+- **T037** — `DeterminismTest.V42OfficialModeBuildersStructuralShape`: **147 files** (25×5 + 19 + 3) and
+  **registry 25**, both derived from `builder_plan_census.py --families official`. **Deliberately not a
+  golden** — 078 retired the `--families official` pinned-golden convention, so a `v42-official/`
+  directory would reintroduce a dropped convention. ⚠️ Pins **counts only**: plan names are
+  mode-dependent (FR-016b), so this must never become a name-set comparison against the all-mode golden.
+- **T038** — vt11 still self-skips, and the assertion is **stronger than it could previously be**:
+  `grep 'ir.ns [!=]='` over `main.cpp` now matches **only a comment**, so there is no version predicate
+  anywhere in the emit path — yet vt11's emitted dir still contains exactly its 5 read-tier artifacts and
+  no `all.hpp`/`groups/`/`messages/`. Before T035 that emptiness was confounded with the v42 ns
+  predicate; now it can only be the `is_application` empty-registry skip. Both vt11 pins green; its read
+  golden unmoved (all 4 vt11 artifacts OK in `read-tier-byte-diff`).
+- **T039** — measured, both halves:
+  - *Regression half:* the three existing builder golden sets are **BYTE-IDENTICAL** after v42 was
+    added — v44 **506** files, v50sp2 **1341**, vlatest **1445**, same names and same sha256 throughout.
+  - *Structural-key half:* **17** tags carry **28** plans, and the ordinal map
+    `{73:3, 78:2, 146:4, 268:2, 295:3, 296:2, 420:2}` sums to exactly `28 − 17 = 11` extra plans. That
+    arithmetic **is** B-077-1's guarantee: a second structural variant of a tag becomes a new **ordinaled**
+    plan rather than silently sharing the first. The emitted names match the census's, ordinals included.
+  - ⚠️ **T039's own wording says "v42's 18 newly-visible groups entered the tier" — it is 17, not 18.**
+    `384 NoMsgTypes` is read-tier only; its sole FIX42 host is the admin message `Logon`, excluded by
+    `emit_builders`' `is_application` gate. T031 predicted this; the emitted plan set confirms it.
+
+⚠️ **A THIRD v42 builder-descope assertion existed, in a file FR-016b does not name.**
+`determinism_test.cpp:879-881` asserted v42 emits no `all.hpp` on the `FIX_LATEST=OFF` path. FR-016b lists
+exactly two descope pins and this is in neither; it surfaced **only by going RED after T035**. Inverted to
+sit with its v44/v50sp2 siblings — `FIXPP_CODEGEN_FIX_LATEST` gates **vlatest only** (FR-012/T014/G4a).
+Same shape as the #208 carve-out earlier in this feature: see
+[[feedback_a_carveout_list_built_by_grepping_one_issue_number_misses_the_others]].
+
 ### ▶ T034 PREP — the 14 pairs DERIVED (2026-08-12), and T034's premise confirmed
 
 Derived from raw FIX42.xml (`required='Y'` on a `<group>` declaration, components expanded), so T034's

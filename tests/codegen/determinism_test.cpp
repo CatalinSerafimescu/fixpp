@@ -313,6 +313,18 @@ static int run_codegen_v44_official(const fs::path& out_dir) {
     return run_system(cmd);
 }
 
+// 082-structural-group-detection T037 [US2]: the v42 sibling. Single-XML like the
+// v44 runner above — each --xml/--out pair is an independent job (main.cpp's job
+// loop), so one job still emits the full v42 tier.
+static int run_codegen_v42_official(const fs::path& out_dir) {
+    std::string cmd = quote(kBin);
+    fs::path xml_path = fs::path(kDictDir) / "FIX42.xml";
+    cmd += " --xml " + quote(xml_path.string());
+    cmd += " --out " + quote(out_dir.string());
+    cmd += " --families official";
+    return run_system(cmd);
+}
+
 // 076-fix-latest-typed-codegen T017/T018: invoke the tool over ONLY the FIX
 // Latest Orchestra XML. It lives under dictionaries/orchestra/ (Codegen.cmake
 // :269), not directly under kDictDir like the 4 legacy XMLs in kXmls. Each
@@ -959,6 +971,49 @@ TEST_F(DeterminismTest, OfficialModeBuildersStructuralShape) {
     EXPECT_EQ(parse_registry_array_size(run.path / "v44" / "all.hpp"), kExpectedOfficialMsgCount)
         << "SC-003 violated: `--families official` v44/all.hpp builder_registry array size != "
         << kExpectedOfficialMsgCount;
+}
+
+// ── 082-structural-group-detection T037 [US2]: the v42 official-mode STRUCTURAL
+// witness, mirroring the v44 cell above ──────────────────────────────────────
+//
+// **Deliberately NOT a golden.** 078 retired the `--families official` pinned-golden
+// convention (see the retirement rationale above: no `v44-official/` set is checked
+// in), so adding a `v42-official/` golden directory here would reintroduce a
+// convention this repo dropped on purpose. The official-mode bytes for the selected
+// subset are already pinned by V42AllModeBuildersMatchesGolden; what is NOT covered
+// by that is the per-MODE file-SET *shape* and the registry cardinality, which a
+// silently-wrong `is_official` filter would slip past. Those two are what this pins.
+//
+// Both numbers are DERIVED from `emit_builders`' own interning rule via
+// `contracts/builder_plan_census.py --families official` (T031), never transcribed
+// from a first run: 25 messages in scope, 19 distinct plans, 147 files.
+//
+// ⚠️ Plan NAMES are mode-dependent (FR-016b): a tag bare in one mode can be
+// ordinaled in the other, because `assign_plan_names()` keys on the final
+// per-`no_tag` count over the in-scope set. So this cell pins COUNTS only and must
+// never be turned into a name-set comparison against the all-mode golden.
+TEST_F(DeterminismTest, V42OfficialModeBuildersStructuralShape) {
+    TempDir run("fixpp_det_v42_official");
+    int rc = run_codegen_v42_official(run.path);
+    ASSERT_EQ(rc, 0) << "v42 official-mode codegen run failed (exit " << rc << ")";
+
+    constexpr std::size_t kExpectedV42OfficialMsgCount = 25;
+    constexpr std::size_t kExpectedV42OfficialGroupPlanCount = 19;
+    constexpr std::size_t kExpectedV42OfficialFileCount =
+        kExpectedV42OfficialMsgCount * 5 + kExpectedV42OfficialGroupPlanCount + 3;
+
+    auto const built_set = collect_builder_tier_set(run.path / "v42");
+    EXPECT_EQ(built_set.size(), kExpectedV42OfficialFileCount)
+        << "`--families official` v42 builder-tier file-set shape changed (expected "
+        << kExpectedV42OfficialMsgCount << " messages x 5 files + "
+        << kExpectedV42OfficialGroupPlanCount << " group-plan headers + 3 shared = "
+        << kExpectedV42OfficialFileCount << ", got " << built_set.size()
+        << ") -- re-derive with contracts/builder_plan_census.py, do not re-baseline";
+
+    EXPECT_EQ(parse_registry_array_size(run.path / "v42" / "all.hpp"),
+              kExpectedV42OfficialMsgCount)
+        << "`--families official` v42/all.hpp builder_registry array size != "
+        << kExpectedV42OfficialMsgCount;
 }
 
 // ── 078-precompiled-builder-libs T007/T008: checked-in-golden-SET-diff gate
