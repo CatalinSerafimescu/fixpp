@@ -863,6 +863,133 @@ TEST(RequiredScopeCensus, Fix43Tag576RegistersAsGroupWithClearingInstructionMemb
         << "FIX43 tag 576 member set: " << describe_diff(std::set<std::uint16_t>{577}, members);
 }
 
+// T041 [US3]: FIX43 tag 82 (NoRpts) is NOT registered as a repeating group --
+// and the reason matters. Pre-T023 it was excluded by a downstream guard; post-T023
+// it is excluded because the DICTIONARY DECLARES NO `<group>` for it. The predicate
+// must also leave it a fully usable PLAIN REQUIRED FIELD in ListStatus: not
+// unknown, not optional (FR-012 / K3).
+//
+// This is the inverse half of FR-002's "replacement, NOT a union" witness, and 82
+// is the tag that discriminates. Measured from raw FIX43.xml: 82 is typed
+// **NUMINGROUP** yet is declared as a `<group>` NOWHERE in the dictionary. So:
+//   - the OLD datatype gate would have registered it (NUMINGROUP);
+//   - a UNION of datatype-or-structural would ALSO register it;
+//   - only a PURE STRUCTURAL predicate rejects it.
+// Together with T040's 576 (INT-typed but a real `<group>`, so it must register),
+// the two tags pin the predicate from both sides using one dictionary.
+TEST(RequiredScopeCensus, Fix43Tag82IsNotAGroupButRemainsARequiredPlainField) {
+    std::cout << "\n=== 082 T041: FIX43 tag 82 (NoRpts) stays a plain required field ===\n";
+
+    auto storage = std::make_unique<std::byte[]>(kArenaBytes);
+    std::pmr::monotonic_buffer_resource mr{storage.get(), kArenaBytes};
+
+    auto const path = std::filesystem::path{FIXPP_DICT_DATA_DIR} / "FIX43.xml";
+    auto const dict = fixpp::dict::XmlLoader{}.load(path, &mr);
+    auto const tv = dict.as_table_view();
+
+    // (i) NOT a group -- the leg a union predicate would fail.
+    EXPECT_EQ(tv.group_first_field(82), 0)
+        << "FIX43 tag 82 (NoRpts) must NOT register as a repeating group: it is NUMINGROUP-typed but "
+           "the dictionary declares no <group> for it, so registering it would prove the predicate "
+           "is still (or is again) datatype-aware -- FR-002's union failure mode";
+    EXPECT_TRUE(to_set(tv.group_member_tags(82)).empty())
+        << "FIX43 tag 82 must carry no group member set";
+
+    // (ii) Still a KNOWN field of ListStatus(N) -- the predicate must not make it
+    // unknown. A validator that stopped recognising 82 would reject valid FIX43.
+    EXPECT_TRUE(tv.field_valid_for("N", 82))
+        << "FIX43 tag 82 must remain a declared field of ListStatus(N)";
+
+    // (iii) Still ENFORCED as required -- the predicate must not silently demote it
+    // to optional, which is the failure a `field_valid_for` check alone would miss.
+    auto const req = tv.required_fields("N");
+    EXPECT_NE(std::ranges::find(req, std::uint16_t{82}), req.end())
+        << "FIX43 tag 82 must remain REQUIRED in ListStatus(N) -- present-but-optional is a silent "
+           "weakening, not a pass";
+}
+
+// T043 [US3]: detection resolves PER DICTIONARY, not globally by tag, and the
+// predicate is a REPLACEMENT of the datatype gate rather than a union (FR-002 /
+// FR-003). T040/T041/T042 supply the FIX43 legs; this cell supplies the
+// cross-dictionary ones.
+//
+// ⚠️ **T043's task text names the wrong example, and it is unsatisfiable as
+// written.** It says *"tags 82 and 576 are a group in one dictionary and a plain
+// field in another across FIX43/FIX44"*. Measured from raw XML, neither is:
+//   - 82  is a `<group>` in NEITHER FIX43 nor FIX44.
+//   - 576 is a `<group>` in BOTH.
+// Stronger: across FIX43/FIX44 **no tag at all** is a group in one and a plain
+// field in the other -- all 25 FIX44-only groups are not even declared in FIX43's
+// `<fields>`, and there are zero FIX43-only groups. So the claim cannot be
+// witnessed on that pair by any tag.
+//
+// Two accurate witnesses are used instead:
+//   (a) 576's DATATYPE is dictionary-dependent -- INT in FIX43, NUMINGROUP in
+//       FIX44 -- while its STRUCTURAL answer is the same in both. It is the ONLY
+//       tag in the pair whose datatype differs while being a reachable group in
+//       both, so it is a unique witness: a datatype gate would register it in
+//       FIX44 only, and the structural predicate registers it in both.
+//   (b) The literal group-here/plain-field-there claim IS witnessable, just on a
+//       different pair. Exactly TWO tags in the whole shipped set qualify:
+//       33 `LinesOfText` (group in FIX41, plain field in FIX40) and
+//       85 `NoDlvyInst` (group in FIX44, plain field in FIX40).
+TEST(RequiredScopeCensus, DetectionResolvesPerDictionaryNotGloballyByTag) {
+    std::cout << "\n=== 082 T043: per-dictionary resolution (FR-003) ===\n";
+
+    auto load = [](char const* file, auto&& fn) {
+        auto storage = std::make_unique<std::byte[]>(kArenaBytes);
+        std::pmr::monotonic_buffer_resource mr{storage.get(), kArenaBytes};
+        auto const dict =
+            fixpp::dict::XmlLoader{}.load(std::filesystem::path{FIXPP_DICT_DATA_DIR} / file, &mr);
+        fn(dict.as_table_view());
+    };
+
+    // (a) 576: opposite datatypes, SAME structural answer. Only a predicate that
+    // ignores the datatype can produce this pair of results.
+    load("FIX43.xml", [](auto const& tv) {
+        EXPECT_NE(tv.group_first_field(576), 0)
+            << "FIX43 576 is INT-typed but a real <group> -- it must register";
+    });
+    load("FIX44.xml", [](auto const& tv) {
+        EXPECT_NE(tv.group_first_field(576), 0)
+            << "FIX44 576 is NUMINGROUP-typed and a <group> -- it must register too; the two "
+               "dictionaries disagree on the DATATYPE and agree on the STRUCTURE, and the predicate "
+               "must follow the structure";
+    });
+
+    // (b) The genuine group-here / plain-field-there pairs, both against FIX40.
+    load("FIX41.xml", [](auto const& tv) {
+        EXPECT_NE(tv.group_first_field(33), 0)
+            << "FIX41 declares <group> LinesOfText(33) -- must register";
+    });
+    load("FIX44.xml", [](auto const& tv) {
+        EXPECT_NE(tv.group_first_field(85), 0)
+            << "FIX44 declares <group> NoDlvyInst(85) -- must register";
+    });
+
+    // The two negative legs live in ONE FIX40 load, behind a NON-VACUITY guard.
+    //
+    // ⚠️ This guard is the point. `group_first_field(t) == 0` is what an EMPTY or
+    // failed-to-populate table returns for EVERY tag, so on its own the FIX40 half
+    // of this witness passes for the wrong reason and the whole per-dictionary claim
+    // becomes unfalsifiable. Pinning FIX40's OWN registered set first makes the two
+    // zeroes below mean "structurally absent" rather than "nothing is here".
+    // FIX40's 4 group tags are derived by contracts/predicate_census.py.
+    load("FIX40.xml", [](auto const& tv) {
+        auto const own = bare_registered_group_tags(tv);
+        ASSERT_EQ(own, (std::set<std::uint16_t>{73, 78, 124, 136}))
+            << "FIX40's own registered group set must be exactly {73,78,124,136} BEFORE the two "
+               "zero-assertions below are meaningful -- an empty table would make them vacuous: "
+            << describe_diff(std::set<std::uint16_t>{73, 78, 124, 136}, own);
+
+        EXPECT_EQ(tv.group_first_field(33), 0)
+            << "FIX40 uses 33 as a PLAIN FIELD -- registering it here would prove detection is "
+               "keyed globally by tag rather than per dictionary (FR-003)";
+        EXPECT_EQ(tv.group_first_field(85), 0)
+            << "FIX40 uses 85 as a PLAIN FIELD -- same per-dictionary requirement as 33 above";
+    });
+}
+
 // T042 [US3]: FIX43's bare-store registered set differs from the T004
 // pre-change baseline (33 tags; implementation-notes.md § T004) by EXACTLY
 // +1 tag (576) -- not merely "more than before" -- and no OTHER tag moves

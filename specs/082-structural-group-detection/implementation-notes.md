@@ -960,6 +960,62 @@ and `build_quickfix_oracle.group_tags` is likewise **505**. The `508` figure cam
 shipped pin was 505 and back-solving `505 + 3`; the pin was **502**. Two independent oracles agreeing on
 505 is a real corroboration of the new pin, not a coincidence to be distrusted.
 
+## ✅ US3 / Phase 5 COMPLETE 2026-08-12 (T041 + T043) — and T043's task text names a wrong example
+
+`dictionary_required_scope_census_test` **15/15**. Both new pins mutation-proven (below).
+
+### T041 — FIX43 tag 82 stays a plain REQUIRED field
+
+Three legs, and the third is the one a weaker pin would drop: `group_first_field(82) == 0` (not a
+group) · `field_valid_for("N", 82)` (still a **known** field of ListStatus) · `82 ∈ required_fields("N")`
+(still **enforced**, because present-but-optional is a silent weakening a validity check alone misses).
+
+82 is the tag that discriminates **union** from **replacement**: measured from raw XML it is typed
+**NUMINGROUP** yet declared as a `<group>` **nowhere**. The old datatype gate would register it; a
+datatype-OR-structural **union** would *also* register it; only a pure structural predicate rejects it.
+With T040's 576 (INT-typed but a real `<group>`, so it must register) the two pin the predicate from both
+sides **inside one dictionary**.
+
+### ⚠️ T043's named example is WRONG, and unsatisfiable as written
+
+T043 says *"tags 82 and 576 are a group in one dictionary and a plain field in another across
+FIX43/FIX44"*. Measured from raw XML, **neither is**:
+
+| tag | FIX43 type | FIX43 `<group>`? | FIX44 type | FIX44 `<group>`? |
+|---|---|---|---|---|
+| 82 `NoRpts` | **NUMINGROUP** | no | INT | no |
+| 576 `NoClearingInstructions` | **INT** | **yes** | **NUMINGROUP** | **yes** |
+
+82 is a group in **neither**; 576 is a group in **both**. Stronger still: across FIX43/FIX44 **no tag at
+all** satisfies the claim — all **25** FIX44-only groups are not even declared in FIX43's `<fields>`, and
+there are **zero** FIX43-only groups. The claim cannot be witnessed on that pair by any tag.
+
+Two accurate witnesses used instead:
+- **(a) 576's datatype is dictionary-dependent while its structure is not** — INT in FIX43, NUMINGROUP in
+  FIX44, a reachable group in both. It is the **only** tag in the pair whose datatype differs while being
+  a group in both, so it is a unique witness: a datatype gate registers it in FIX44 only; the structural
+  predicate registers it in both.
+- **(b) The literal group-here/plain-field-there claim IS witnessable, on a different pair.** Exactly
+  **two** tags in the whole shipped set qualify: **33 `LinesOfText`** (group in FIX41, plain field in
+  **FIX40**) and **85 `NoDlvyInst`** (group in FIX44, plain field in **FIX40**).
+
+### ⚠️ The negative legs needed a NON-VACUITY guard, or the claim is unfalsifiable
+
+`group_first_field(t) == 0` is exactly what an **empty or failed-to-populate** table returns for *every*
+tag. So the FIX40 half of (b) would pass for the wrong reason and the per-dictionary claim would be
+unfalsifiable. Both FIX40 zero-assertions now sit behind
+`ASSERT_EQ(bare_registered_group_tags(tv), {73, 78, 124, 136})` — FIX40's own set, derived by
+`predicate_census.py` — so the two zeroes mean *"structurally absent"* rather than *"nothing is here"*.
+Cf. [[feedback_verification_grep_must_be_proven_nonzero_on_the_unfixed_tree]].
+
+**Mutation matrix — all three kill their target:**
+
+| Mutant | Result |
+|---|---|
+| T041's required-field leg searches tag `9999` instead of `82` | RED |
+| T043's FIX40 `group_first_field(33) == 0` flipped to `!= 0` | RED |
+| **the non-vacuity guard itself** — drop `136` from FIX40's expected set | RED |
+
 ## US2 STARTED 2026-08-12 — the `fixpp::v42` builder tier is emitted (#196's actual deliverable)
 
 ### ✅ T031 — plan set derived BEFORE the first run, and the run matched it
