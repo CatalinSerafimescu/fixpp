@@ -637,6 +637,46 @@ Two carve-outs were **inverted, not deleted** — each carried an explicit instr
   it could report presence but never magnitude — it would have passed whether a dictionary
   contributed 1 case or 70. Now asserts the tally via `operator[]`.
 - `reused_tag_census_test.cpp` + the census helper — done earlier under T008.
+- **`delimiter_census_test.cpp` — a FIFTH file, and it was MISSED until CI found it.** See below.
+
+### The pin T030 missed — `delimiter_census_test.cpp` (found by CI, not by this branch)
+
+083 planted `DelimiterCensus.IntTypedOutOfCheckedSetIsExactlyFiftyFive` as a deliberate tripwire, with
+an in-source instruction to update it *"only if the cause is confirmed (e.g. **#196 landing**)"*. 082
+is #196, so it fired — and **nothing in this feature's task list enumerated it**. It failed every leg
+of tier1, tier2 and tier3 on the first CI run of the branch (PR #261), 358/359 passing.
+
+**The population is identical to the one T030 already recorded.** That section states FIX40 **6** /
+FIX41 **10** / FIX42 **38** contexts for `required_scope_census_test.cpp`'s inversion; the delimiter
+census pinned **6 / 10 / 38 / 1** for the same contexts under a different name. The matching numbers
+were sitting in this document while the pin went unnoticed — the miss was in the *enumeration*, not
+the evidence. Same class as the #208 carve-out miss: a list built from one file set cannot see a
+sibling asserting the same thing elsewhere. Enumerate by **the instruction to flip on #196**, which is
+greppable, not by the files a task happens to name.
+
+**Fixed by INVERTING it, not by zeroing it** (`IntTypedCountTagContextsAreExactlyFiftyFiveAndNowRegistered`).
+Structural detection registers the whole population, so `int_typed_out_of_checked_set` is now 0 on all
+ten dictionaries — but *0 alone is a vacuous pin*, satisfied equally by a census that stopped
+measuring, which is the exact failure this tripwire existed to prevent. So the 55 **moves** rather than
+dissolving: a new `int_typed_registered` bucket, classified by the same `FieldRef::type` test (082 does
+not change `FieldRef::type` — D-4), carries the same 6/10/38/1 breakdown. Measured:
+
+| | contexts | int_typed_oos | int_typed_reg |
+|---|---:|---:|---:|
+| FIX40 | 6 | 0 | **6** |
+| FIX41 | 10 | 0 | **10** |
+| FIX42 | 38 | 0 | **38** |
+| FIX43 | 235 | 0 | **1** |
+| other six | 55 992 | 0 | 0 |
+| **TOTAL** | 56 276 | **0** | **55** |
+
+**Mutation-proven (M1):** forcing `checked_set_status` never to return `kNotNumInGroup` — the
+classifier a reintroduced datatype gate would defeat — drops `int_typed_registered` to 0 and takes all
+five assertions RED. ⚠️ Note **the four zero-assertions still PASSED under M1**; only the 55-pin
+failed. That is the whole argument for inverting instead of zeroing, demonstrated rather than claimed.
+The complementary library-side mutant (re-introducing the datatype gate in `dictionary.cpp`) was **not**
+run — it triggers the full codegen cascade — but that direction is already covered by
+`RequiredScope.Fix42IntTypedGroupCountFieldNowResolvesInContextStore`.
 
 ### Concessions to #210 that must be REVERTED when it lands
 
