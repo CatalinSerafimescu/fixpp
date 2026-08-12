@@ -890,8 +890,32 @@ Two independent corroborations already in hand, neither conclusive alone:
   `group_first_field(no_tag)` store. Suggestive, not a substitute — which is why the direct measurement
   is still owed.
 
-⚠️ 1499 has **two** occurrences differing in their second component; both open with `Parties`, so
-first-seen-wins cannot change the answer for *this* tag. Do not generalise that to other reused tags.
+**First-seen-wins is unambiguous for all three, but for a DIFFERENT reason per tag** — counted, not assumed
+(`<group>` occurrences in FIX50SP2.xml): `NoAsgnReqs` **2**, `NoRiskLimits` **1**, `NoPriceMovements` **1**.
+So 1669/1919 are safe by *uniqueness*, and 1499 only because both of its occurrences open with `Parties`.
+Do not carry either reason to another reused tag.
+
+### The change unit for the hash update is TWO artifacts, not three — checked
+
+`AdditiveOffOnByteDiff` (`determinism_test.cpp:721`) was a candidate third member. It is not, and the
+reason matters: its leg **(a1)** compares each OFF-run legacy `Messages.hpp` against **the same 003
+golden** `GeneratedMatchesGolden` uses — it holds **no independent hash of its own**. So regenerating
+`v42_Messages.golden.hpp` satisfies both tests at once. Its leg **(b)** is a *relative* OFF-run-vs-ON-run
+byte-identity walk, golden-independent and unaffected.
+
+And `v42/Reify.hpp` has **no golden at all** — per `read_tier_byte_diff_test.cmake`'s own banner, only the
+four `Messages.hpp` are goldened; the other 12 artifacts are covered *solely* by that script's hashes.
+
+**Change unit = `read_tier_byte_diff_test.cmake` (the 2 v42 hashes) + `v42_Messages.golden.hpp`.** Nothing else.
+
+### `ctest -R 'dict|codegen'` DOES reach the 067 baseline — checked, because the sibling trap already bit once
+
+The 067 binary registers as **`codegen_067_emit_builders_unit_test`** (`tests/codegen/CMakeLists.txt:117-118`,
+LABELS `codegen;067`). The name contains `codegen`, so the planned sweep **will** produce the
+`Group077DedupSoundness` RED baseline the held patch is waiting on. Verified explicitly rather than assumed,
+because on this same branch `required_scope_census` — which contains neither `dict` nor `codegen` — silently
+sat outside both before/after sweeps. **If the sweep somehow does not run it, do not apply the patch on the
+strength of the source reading — run the binary directly**, the way T010's failure was found.
 
 ### Registration deltas RE-DERIVED 2026-08-12 with the branch's own non-circular oracle
 
