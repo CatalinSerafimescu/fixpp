@@ -1713,3 +1713,48 @@ landed witness — not to the absence of a diff. All three legs discharged, plus
 `version.h`"; there is no `include/fix/version.h` — the real files are `include/fix/c_api/error.h` and
 `include/fix/c_api/version.h`. A leg written against the assumed path would have diffed a **nonexistent
 file**, reported 0 changes, and passed vacuously. Resolved against the tree before asserting.
+
+## Phase 7 — T053: full `quickstart.md` validation, and the gate that missed its own feature
+
+| scenario | result |
+|---|---|
+| **S0** census oracle | **PASS, exact match.** FIX40 `0/4`, FIX41 `0/7`, FIX42 `0/18` DIFFER; FIX43 `34/34` with `82` type-only and `576` struct-only, registered `33 → 34`; FIX44/50/50SP1/50SP2/T11/Latest EQUAL at `59/67/97/505/1/524`; the `384`/`627` not-message-reachable note; and **no zero-member `<group>` warning on any of the ten** — FR-023's no-regression leg, measured. |
+| **S0b** builder-plan census | **PASS, exact match.** Three self-validation `OK` lines (v44 all 83/88 name-for-name against the golden, v50sp2 all 156/558, v44 official 33/54), then `v42 all` **39 msgs / 28 plans / 17 tags / 226 files** and `v42 official` **25 / 19 / 11 / 147**. Exit 0. |
+| **S1–S7** | **PASS** — all covered by the corrected gate below, 91/91 green. |
+| **S8** governing-document closure | **PASS** — constitution **v0.11** (Art. XVIII §7 v42 clause reclassified DELIVERED, status banner amended, Art. I §1 confirmed unchanged), B&L SC-010 verified 4/4 by grep. |
+| **S9** benchmarks | **PASS** — recorded under T046 / T047 / T048. |
+| **Full local gate** | **91/91 green** — *after correcting the selector.* See below. |
+
+### ⚠️ The prescribed gate misses 4 of this feature's own 7 new tests
+
+`-L "codegen|dictionary|wire|session"` selects **65** and reports green — while never executing:
+
+- **`test_082_v42_nested_exemplar_roundtrip`** — labels `082 dict golden`. **The US4 exemplar**, this
+  feature's headline write-path proof, dropped by a one-word label near-miss: `-L` is a regex
+  *search*, so the pattern `dictionary` does **not** match the label `dict`.
+- `test_082_group_required_member_validation` and `test_082_ungated_group_parse` — labels `082 us1`,
+  no gate label at all.
+- `capi_082_group_detection_cross_path` — labels `082 capi us1`.
+
+Corrected to `-L "codegen|dictionary|wire|session|082|capi"`: selection **65 → 91**, all green.
+
+**This is the second correction to the same command, and the first one did not go far enough.** The
+original was `-L codegen -L dictionary -L wire -L session` — *conjunctive*, selecting **0**, passing
+vacuously. That was fixed to the disjunctive form, which is correct syntax and still under-selects.
+Exactly the recorded class: **a selector is an assertion, and fixing one layer can move the defect one
+layer up rather than remove it**
+([[feedback_a_selector_is_an_assertion_so_fixing_a_class_can_move_it_one_layer_up]]). It is also the
+third time this feature has been bitten by a test *selector* rather than a test — after
+`ctest -R 'dict|codegen'` (which hid the #208 failure for a session) and the regex that missed
+`delimiter_census` (which CI then caught on every leg of all three tiers).
+
+**Rule going forward:** `-L 082` is the *feature*-scoped check (7 tests) and the label union is the
+*regression* check (91). Neither subsumes the other — run both, and never infer coverage from a
+selector without enumerating what it actually selected.
+
+### Known, pre-existing, NOT a fresh regression
+
+`ctest -L bench` is **nondeterministic** on this tree: `v44`'s compile-time overage straddles the 3 s
+ceiling (2.76–3.53 s over 7 runs) and the harness verdict flips `FAIL`↔`PASS`. Pre-existing per T003
+(≈4.5 s pre-change); see T048. The `bench` label is **not** part of the gate above, so it does not
+affect the 91/91 result — recorded so T055 does not read it as new.

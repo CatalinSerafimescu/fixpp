@@ -406,13 +406,39 @@ closely: 075's own T032 re-measurement already put `BM_TableView_BuildFix44` at 
 ## Full local gate
 
 ```bash
-ctest --test-dir <build> -L "codegen|dictionary|wire|session" --output-on-failure
+ctest --test-dir <build> -L "codegen|dictionary|wire|session|082|capi" --output-on-failure
 ```
 
-**Expected selection: ≥ 60 tests** (60 at the branch point). The previous revision wrote this as
-`-L codegen -L dictionary -L wire -L session`, which is conjunctive and selects **0** — the single
-most-likely-to-be-pasted command in this document, passing vacuously. Four separate invocations, as
-in `plan.md` § Testing, are equally valid; a single repeated-`-L` invocation is not.
+**Expected selection: ≥ 91 tests** (91 measured at T053, 91/91 green).
+
+⚠️ **The selector above is the SECOND correction to this command, and the first fix did not go far
+enough.** The original revision wrote `-L codegen -L dictionary -L wire -L session`, which is
+**conjunctive** and selects **0** — the single most-likely-to-be-pasted command in this document,
+passing vacuously. That was fixed to the disjunctive
+`-L "codegen|dictionary|wire|session"`, which is correct *syntax* — and **still misses 4 of this
+feature's own 7 new tests**, measured at T053:
+
+| 082 test | labels | in the 4-label gate? |
+|---|---|---|
+| `codegen_082_class_xml_consistency_test` | `082 class_xml_consistency codegen` | ✅ |
+| `codegen_082_v42_group_classes_test` | `082 codegen us1` | ✅ |
+| `codegen_082_v42_required_group_omission_test` | `082 codegen required_group_omission` | ✅ |
+| `test_082_v42_nested_exemplar_roundtrip` | `082 **dict** golden` | ❌ — label is `dict`, and the pattern is `dictionary` |
+| `test_082_group_required_member_validation` | `082 us1` | ❌ |
+| `test_082_ungated_group_parse` | `082 us1` | ❌ |
+| `capi_082_group_detection_cross_path` | `082 capi us1` | ❌ |
+
+The worst omission is **`test_082_v42_nested_exemplar_roundtrip` — the US4 exemplar**, i.e. the
+feature's headline write-path proof, dropped by a one-word label near-miss (`dict` ≠ `dictionary`;
+`-L` is a regex *search*, so `dictionary` does not match the label `dict`). A reviewer running the
+prescribed gate would have seen a green **65/65** having never executed it.
+
+Adding `|082|capi` fixes it and takes the selection 65 → **91**. The durable lesson is the one this
+feature already recorded once: **a selector is an assertion**, and fixing one layer of it can move the
+defect one layer up rather than removing it. Prefer `-L 082` as the *feature*-scoped check and treat
+the label union as the *regression* check; do not assume either subsumes the other. Four separate
+invocations, as in `plan.md` § Testing, remain equally valid; a single repeated-`-L` invocation is
+not.
 
 Then `/speckit-verify` for the sanitizer / coverage / static-analysis matrix. Note that
 `/speckit-verify` is clang-only — the `gcc-release` and MSVC legs are CI-only jobs.
