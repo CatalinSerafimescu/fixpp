@@ -596,9 +596,9 @@ void emit_validate_fn_def(TemplateWriter& w, std::string const& msg_id, bool as_
 // the top-level regime IS tag-ascending, served by the tag-sorted m.fields
 // run). Exclusion is by PROVENANCE (`header_trailer_tags`), with
 // `kFramingTags` retained as a defensive floor.
-std::vector<GroupOrderMember> top_level_synthetic_members(VersionIR const& ir, MessageIR const& m,
-                                                           std::vector<std::uint16_t> const&
-                                                               header_trailer_tags) {
+std::vector<GroupOrderMember> top_level_synthetic_members(
+    VersionIR const& ir, MessageIR const& m,
+    std::vector<std::uint16_t> const& header_trailer_tags) {
     std::vector<GroupOrderMember> out;
     for (FieldIR const* f : collect_top_fields(m)) {
         if (is_framing_tag(f->ref.tag) || is_header_trailer(f->ref.tag, header_trailer_tags)) {

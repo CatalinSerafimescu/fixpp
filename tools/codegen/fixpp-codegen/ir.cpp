@@ -148,7 +148,8 @@ void collect_tags(pugi::xml_node const& node, ComponentIndex const& comps,
 // on the read tier — confirmed empirically against the v44 read golden.
 // NOLINTNEXTLINE(misc-no-recursion)
 void collect_group_tags(pugi::xml_node const& node, ComponentIndex const& comps,
-                        fixpp::dict::Dictionary const& dict, std::unordered_set<std::uint16_t>& out) {
+                        fixpp::dict::Dictionary const& dict,
+                        std::unordered_set<std::uint16_t>& out) {
     for (auto const& child : node.children()) {
         std::string_view const tag_name{child.name()};
         if (tag_name == "component") {
