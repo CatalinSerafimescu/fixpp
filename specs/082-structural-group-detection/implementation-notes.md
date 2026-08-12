@@ -862,6 +862,47 @@ pollution disappears by construction rather than by a second fix"* (`dictionary.
   `continue` at `:158-166` (variants differing **only** by the injected delimiter). If a count moves,
   the exclusion was **not** a no-op — investigate rather than re-baseline the pin.
 
+### The 067 `Group077DedupSoundness` breakage — root cause found, and the recorded framing was wrong
+
+The parked note said *"synthetic tags 9002/9003 are `NUMINGROUP`-typed but declare no group structure"*.
+**That is not the cause.** `make_synth_group_message` (`test_067_emit_builders_unit.cpp:655-679`) **does**
+populate `m.group_order` with a proper `GroupOrderEntry`. The real cause is one level up:
+`build_dedup_soundness_ir()` (`:679-701`) hand-builds its `VersionIR` **bypassing `build_ir()`**, and
+`ir.group_tags` is a **derived** field that only `build_ir()` populates (`ir.cpp:731-744`). So it stays
+**empty**, `is_group_tag()` binary-searches an empty vector, and every synthetic no_tag — 9001 *and*
+9002/9003/9004 — reads as a non-group. All **three** `Group077DedupSoundness` tests fail, not just the
+two whose line numbers were recorded.
+
+This is the *"fixture builds the object graph by hand and misses a newly-added derived field"* shape, not
+a datatype-gate residue. **Censused before scoping** (cf.
+[[feedback_census_all_handrolled_scanners_before_scoping_parse_fix]]): of the four test files touching
+`VersionIR`, `build_dedup_soundness_ir()` is the **only** hand-built one — `required_scope_census_test.cpp:271`
+and `test_067_emit_builders_unit.cpp:65` both call `build_ir()`, and the other two only mention it in
+comments. So the fix is **single-site**; no shared helper is warranted.
+
+Prepared patch — append to `build_dedup_soundness_ir()` before `return ir;`, mirroring `ir.cpp:737-744`
+(the header/trailer union at `ir.cpp:206-211` has no analogue here — the fixture declares neither):
+
+```cpp
+    // 082 T024/T025: `group_tags` is DERIVED — only build_ir() populates it,
+    // and this fixture bypasses build_ir() by construction. Mirror
+    // ir.cpp:737-744 or every synthetic no_tag reads as a non-group and all
+    // three Group077DedupSoundness cases fail.
+    for (auto const& m : ir.messages) {
+        for (auto const& entry : m.group_order) {
+            ir.group_tags.push_back(entry.no_tag);
+        }
+    }
+    std::sort(ir.group_tags.begin(), ir.group_tags.end());
+    ir.group_tags.erase(std::unique(ir.group_tags.begin(), ir.group_tags.end()),
+                        ir.group_tags.end());
+```
+
+⚠️ **Apply it only AFTER the 3 failures are observed on the unfixed tree.** The fix is deliberately held
+until the in-flight rebuild produces that RED, per
+[[feedback_verification_grep_must_be_proven_nonzero_on_the_unfixed_tree]] — a fix landed before its
+baseline leaves no evidence it was load-bearing.
+
 ### Concession 3's `13`-vs-`14` is NOT a silent exclusion
 
 Worth writing down because it reads like one. `test_082_group_required_member_validation_test.cpp:526`
