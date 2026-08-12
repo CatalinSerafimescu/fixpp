@@ -182,9 +182,19 @@ same-day, which requires probe mode still ON.
    the **seventh** copy of that publish predicate.
 3. **Gate the revert on `tier1-required` going GREEN**, not on re-reading the five markers. Its RED
    is the tripwire's positive state; its GREEN is the dual, and only that proves probe mode is off.
-4. Drop the manifest step (probe scaffolding). **Keep `ci/ccache-stats.sh`** — it is standing
-   observability, and it moves tier1 the direction #248 wants. Confirm the matrix legs already call
-   it, so keeping it makes coverage *consistent* rather than adding a step.
+   ⚠️ **That dual cannot be checked cheaply now** — `push:` is `main`-only and a PR skips the
+   matrices until both gate labels land, so the only way to force it today is a full
+   `workflow_dispatch` (~277 runner-min). It is therefore checked **at the merge gate**: the PR's own
+   post-label run must show `tier1-required` GREEN. That run has to happen anyway, so this costs
+   nothing extra — but it means **the revert is not fully verified until then**, and that is
+   deliberately not claimed before it.
+4. Drop the manifest step (probe scaffolding). **Keep `ci/ccache-stats.sh`.**
+   ⚠️ **Corrected on measurement:** the assumption that "the matrix legs already call it, so keeping
+   it is consistency" is **false** — `grep -n "ci/ccache-stats.sh"` returns exactly **one** caller,
+   the coverage lane itself. Keeping it makes coverage the **first** lane with stats. Still the right
+   call (a silent fall to ~0 % hits is otherwise invisible — the lane just gets slow — and it is the
+   direction **#248** wants), but it must be pitched in the PR as **new surface**, not as matching
+   existing practice.
 5. `gh cache delete ccache-tier1-linux-clang-coverage-<stamp>` — the probe entry is ~900 MB of the
    shared 10 GB pool and can LRU-evict main's caches.
 6. Rewrite tier1.yml's "deliberately left UNCACHED" paragraph with the proof, citing both run IDs.
@@ -200,8 +210,21 @@ Stated narrowly and up front, because an unbounded promise generates unbounded r
 **Does not promise:**
 - that ccache is safe for *every future* coverage configuration — the proof is against this
   compiler, this profile, this flag set;
-- **that the first post-merge coverage run will be fast.** Once `save:` is back to `push:main` only,
-  `main` has no coverage cache until the first post-merge push builds one. **That run is still
-  ~133 min.** Anyone measuring immediately after merge will otherwise read it as the change not
-  working;
+- **that the win appears immediately. It does not — the first TWO coverage runs are both cold.**
+  Actions cache scoping plus a push-only `save:` makes the timeline:
+
+  | run | reads | cost | writes? |
+  |---|---|---|---|
+  | this PR's own CI | main's scope + the PR's — **neither holds a coverage entry** | **~133 min, cold** | no (`save:` is push-only) |
+  | first push to `main` after merge | main's scope — still empty | **~133 min, cold** | **yes** |
+  | every `main` run after that | main's fresh entry | **~33 min** | yes |
+
+  So **the first warm coverage run is the second post-merge run.** The ~900 MiB probe entry on
+  `refs/heads/ci/coverage-ccache` does *not* shorten the PR run — a feature branch's cache is
+  unreachable from a `refs/pull/N/merge` scope — which is why it is deleted rather than kept
+  (`feedback_pr_scoped_actions_caches_unreachable_but_evict_main`: it cannot help, and it can
+  LRU-evict main's caches).
+
+  Anyone measuring the PR run, or the merge commit's run, will read a cold 133 min and conclude the
+  change does not work. It is stated here and in tier1.yml so that conclusion is pre-empted;
 - any change to `DA:`/`BRDA:` coverage numbers, which are not what this instrument measures.
