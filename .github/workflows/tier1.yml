@@ -297,16 +297,7 @@ jobs:
     # `&& github.event_name != 'release'`: a published release only needs the
     # wheel build+install-test lanes to attach the asset — the C++/sanitizer
     # matrix already gated the merge commit this release descends from.
-    #
-    # ⛔ PROBE MODE (#241) — the `!= 'workflow_dispatch'` conjunct is TEMPORARY.
-    # REVERT BEFORE MERGE. It makes a dispatch on this branch run the coverage
-    # lane ALONE (~133 min) instead of all of Tier 1 (~376 runner-min), so the
-    # cold/warm equivalence pair costs one job rather than two full matrices.
-    # `tier1-required` WILL GO RED on every probe dispatch — that is the intended
-    # tripwire, not a failure: it has `needs: [… linux …]` and asserts on the
-    # result, so this hack cannot reach `main` unnoticed (tier1.yml's own
-    # "MOVE AS ONE UNIT" note at the tier1-required job).
-    if: needs.gate-precheck.outputs.proceed == 'true' && github.event_name != 'release' && github.event_name != 'workflow_dispatch'
+    if: needs.gate-precheck.outputs.proceed == 'true' && github.event_name != 'release'
     concurrency:
       group: tier1-${{ github.event.pull_request.number || github.ref }}-${{ matrix.preset }}
       cancel-in-progress: true
@@ -320,19 +311,36 @@ jobs:
     # a fail-closed guard against the stale-object false-green class
     # (feedback_stale_build_objects_false_green_masks_pins).
     #
-    # ⚠️ #241 IN FLIGHT — "Coverage is a separate job and is deliberately left
-    # UNCACHED to protect coverage-mapping integrity" USED TO STAND HERE, and it
-    # is the claim now under test. It is a recorded decision, not an omission,
-    # so the burden is an equivalence proof rather than a two-line step
-    # addition. The coverage job now carries its own ccache (see its env block);
-    # the proof is a sha256 manifest of every .o from a cold run diffed against
-    # the same from a warm 100 %-hit run — identical bytes cannot carry a
-    # different __llvm_covmap.
+    # ⚠️ #241 — "Coverage is a separate job and is deliberately left UNCACHED to
+    # protect coverage-mapping integrity" STOOD HERE for the life of this file,
+    # uncited. It was a recorded DECISION, not an omission, so removing it took
+    # an equivalence proof rather than a two-line step addition. It is now
+    # REFUTED BY MEASUREMENT and the coverage job carries its own ccache.
     #
-    # ⛔ DO NOT DELETE THIS PARAGRAPH ON MERGE WITHOUT THE PROOF ATTACHED. If the
-    # manifests differ, the correct outcome is to REVERT the coverage ccache and
-    # restore the original sentence WITH the citation it has always lacked —
-    # that is an acceptance bullet of #241, not a failure.
+    # THE PROOF (do not delete without reading .specify/ci241-coverage-ccache.md,
+    # which records the accept/reject bands fixed BEFORE the runs reported):
+    # sha256 every .o after a cold build and again after a warm one, and diff.
+    # Identical bytes cannot carry a different __llvm_covmap / __llvm_covfun /
+    # __llvm_prf_* section, so byte identity IS coverage-mapping integrity.
+    #
+    #   cold  run 31519511922 — 1486 objects, ccache 0.94% hits, 132.8 min
+    #   warm  run 31568303088 — 1486 objects, ccache 99.87% hits,  33.4 min
+    #   both manifests hash to dcf17d78…21408f — ZERO differing objects
+    #
+    # The hit rate is not decoration: an object that MISSED was freshly compiled
+    # in both runs, so its manifest line is a cold-vs-cold self-comparison
+    # proving nothing. Only 2 of 1489 calls missed and 3 produce no object at
+    # all, so >=1484 of the 1486 objects were genuinely cache-served.
+    #
+    # ⚠️ NOT proven, and deliberately not claimed: that ccache is safe for every
+    # FUTURE coverage configuration. The proof is against this compiler, this
+    # profile, this flag set. A change to any of them re-opens the question —
+    # the standing `ccache statistics` step in that job is what would make a
+    # silent regression visible.
+    #
+    # ⚠️ The FIRST post-merge coverage run on main is COLD (~133 min): `save:` is
+    # push-only, so main holds no coverage entry until that run creates one.
+    # That is the change working, not failing.
     env:
       CMAKE_CXX_COMPILER_LAUNCHER: ccache
       CMAKE_C_COMPILER_LAUNCHER: ccache
@@ -1243,15 +1251,9 @@ jobs:
         with:
           key: tier1-linux-clang-coverage
           max-size: 2G
-          # ⛔ PROBE MODE (#241) — REVERT TO `github.event_name == 'push'` BEFORE MERGE.
-          # The equivalence proof is two workflow_dispatch runs on this branch:
-          # run 1 must SAVE for run 2 to be the warm half. Safe while it lasts —
-          # Actions cache writes are scoped to the writing ref, so this cannot
-          # overwrite main's entry; the real cost is ~600-900 MB of the shared
-          # 10 GB pool, which CAN LRU-evict main's caches
-          # (feedback_pr_scoped_actions_caches_unreachable_but_evict_main).
-          # `gh cache delete` this key when the proof is done.
-          save: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
+          # Restore-only on a PR; only `push` (i.e. main) writes the entry —
+          # character-identical to the `linux` and `bench` legs' predicate.
+          save: ${{ github.event_name == 'push' }}
 
       # Conan from pre-seeded GHCR (off the 10 GB pool) — see the matrix-job note.
       - name: Set up oras
@@ -1296,56 +1298,17 @@ jobs:
         id: build
         run: cmake --build --preset linux-clang-coverage
 
-      # ⛔ PROBE MODE (#241) — the equivalence instrument. REMOVE BEFORE MERGE
-      # (or keep only if Gate B asks for a standing regression pin).
-      #
-      # THE CLAIM UNDER TEST is tier1.yml's own "deliberately left UNCACHED to
-      # protect coverage-mapping integrity". Refuting it needs evidence that an
-      # object served from ccache is the SAME object a fresh compile produced —
-      # because identical bytes cannot carry a different __llvm_covmap /
-      # __llvm_covfun / __llvm_prf_* section. So: sha256 every .o on a cold run
-      # and again on a warm 100%-hit run, and diff the two manifests.
-      #
-      # ⚠️ WHY NOT THE DA:/BRDA: DIFF §3 ASKS FOR. Those are EXECUTION counts,
-      # produced by llvm-cov from profdata merged across 350 test binaries in a
-      # codebase with async/threaded paths. Two byte-identical builds produce
-      # different counts, so that diff measures test nondeterminism, not cache
-      # fidelity — it would need a two-cold-run control just to find its own
-      # noise floor. Object identity is deterministic, needs no ctest run, and
-      # is STRICTLY STRONGER: it implies DA:/BRDA: equality rather than
-      # sampling it. This scales §3's already-measured n=2 `cmp fresh.o
-      # cached.o -> IDENTICAL` to the whole tree.
-      #
-      # ⚠️ The manifest is only evidence when PAIRED with the hit rate below. A
-      # cold-vs-cold pair is trivially identical and proves nothing; the warm
-      # run must independently report ~100% hits, or the comparison is between
-      # two fresh compiles.
-      - name: Coverage-object manifest (#241 equivalence proof)
-        run: |
-          set -euo pipefail
-          cd build/linux-clang-coverage
-          # Sorted for a stable diff; paths are relative to the build dir so the
-          # two runs' manifests are directly comparable.
-          find . -name '*.o' -type f -print0 \
-            | sort -z \
-            | xargs -0 sha256sum \
-            > /tmp/coverage-objects.sha256
-          n=$(wc -l < /tmp/coverage-objects.sha256)
-          echo "coverage-objects: $n objects hashed"
-          # Non-circularity: an empty or near-empty manifest would "match" the
-          # other run's and read as a clean proof. Assert the tree is really there.
-          if [ "$n" -lt 1000 ]; then
-            echo "::error::only $n objects found (expected ~1460) — manifest is not a valid basis for the equivalence proof"
-            exit 1
-          fi
-          echo "### #241 coverage-object manifest: $n objects" >> "$GITHUB_STEP_SUMMARY"
-
-      # The hit rate that makes the manifest above evidence rather than a
-      # comparison of two fresh compiles. Reuses the TESTED instrument
-      # (ci/test-ccache-scripts.sh — 30 assertions, 10 killed mutants) rather
-      # than an inline `run:` block, which is also the direction #248 wants
-      # tier1 to move. It ASSERTS liveness only; the hit rate is reported with
-      # no floor, so a cold run is green by design.
+      # ⚠️ NEW SURFACE IN #241 — this is the FIRST lane in tier1 to call
+      # ci/ccache-stats.sh; the matrix legs do not (yet). It is kept, not
+      # reverted with the rest of the #241 probe scaffolding, for two reasons:
+      # it is the standing regression detector for the equivalence proof
+      # recorded above (a silent drop to ~0% hits is otherwise invisible —
+      # the lane just gets slow), and it is the direction #248 wants tier1 to
+      # move. Reuses the TESTED instrument (ci/test-ccache-scripts.sh — 30
+      # assertions, 10 killed mutants) rather than an inline `run:` block. It
+      # ASSERTS liveness only; the hit rate is reported with no floor, so the
+      # first post-merge run on main — which is necessarily cold — is green by
+      # design.
       #
       # ⚠️ Argument 2 is deliberately EMPTY. It is the restore disposition from
       # ci/restore-ccache.sh's `hit` output, and this lane restores via
@@ -1353,14 +1316,8 @@ jobs:
       # an absent disposition as `n/a` and skips the restored-but-cold warning
       # that depends on it — passing a guessed 'true'/'false' here would
       # manufacture a disposition nothing measured.
-      - name: ccache statistics (#241 — the hit rate that makes the manifest evidence)
+      - name: ccache statistics
         run: ci/ccache-stats.sh linux-clang-coverage '' '${{ steps.build.outcome }}'
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: coverage-objects-sha256-${{ github.run_id }}-${{ github.run_attempt }}
-          path: /tmp/coverage-objects.sha256
-          if-no-files-found: error
 
       - name: Test (collect profiles)
         env:
@@ -1459,13 +1416,10 @@ jobs:
     # (`proceed`) AND the binding/C-ABI/packaging surface actually changed
     # (`python_touched`). A pure-C++ PR or a PR without gate labels skips it;
     # a merge to main (push) builds it unconditionally.
-    # ⛔ PROBE MODE (#241): `&& event_name != 'workflow_dispatch'` is TEMPORARY —
-    # see the `linux` job. REVERT BEFORE MERGE.
     if: >-
       github.event_name == 'release' ||
       (needs.gate-precheck.outputs.proceed == 'true' &&
-       needs.gate-precheck.outputs.python_touched == 'true' &&
-       github.event_name != 'workflow_dispatch')
+       needs.gate-precheck.outputs.python_touched == 'true')
     concurrency:               # CI-7
       group: tier1-${{ github.event.pull_request.number || github.ref }}-python-wheel-build
       cancel-in-progress: true
@@ -1797,8 +1751,7 @@ jobs:
     timeout-minutes: 180
     needs: gate-precheck
     # Skipped on release (see the `linux` job note) — bench is a soft gate, not an asset gate.
-    # ⛔ PROBE MODE (#241): `!= 'workflow_dispatch'` is TEMPORARY — see the `linux` job.
-    if: needs.gate-precheck.outputs.proceed == 'true' && github.event_name != 'release' && github.event_name != 'workflow_dispatch'
+    if: needs.gate-precheck.outputs.proceed == 'true' && github.event_name != 'release'
     concurrency:
       group: tier1-${{ github.event.pull_request.number || github.ref }}-bench
       cancel-in-progress: true
