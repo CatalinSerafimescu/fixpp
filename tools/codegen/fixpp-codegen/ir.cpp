@@ -740,9 +740,9 @@ VersionIR build_ir(std::filesystem::path const& xml_path, std::pmr::memory_resou
             ir.group_tags.push_back(entry.no_tag);
         }
     }
-    std::sort(ir.group_tags.begin(), ir.group_tags.end());
-    ir.group_tags.erase(std::unique(ir.group_tags.begin(), ir.group_tags.end()),
-                        ir.group_tags.end());
+    std::ranges::sort(ir.group_tags);
+    auto const duplicates = std::ranges::unique(ir.group_tags);
+    ir.group_tags.erase(duplicates.begin(), duplicates.end());
 
     // Length+Data pairs — ascending tag scan (deterministic order). AC-V4 is
     // verified exhaustively against source XML in seam #19; here we project
