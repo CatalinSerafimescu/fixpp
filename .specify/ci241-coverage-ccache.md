@@ -119,6 +119,50 @@ ccache-hitrate 0% over 1489 cacheable calls (linux-clang-coverage), restore=`n/a
 - `tier1-required` went RED **by design** — it `needs:` a job probe mode skips. That RED is the
   tripwire proving probe mode is still on.
 
+## 5b. Warm-half result and VERDICT (recorded 2026-08-12 06:35 UTC)
+
+Run `31568303088`, job `linux-clang-coverage`: **success, 33.4 min** (05:58:33 → 06:31:56).
+
+```
+coverage-objects: 1486 objects hashed
+ccache: hits=1487 (direct=1487 preprocessed=0) misses=2 cacheable_calls=1489
+ccache: size=925 MiB cap=1907 MiB (48% full) cleanups_this_run=0
+ccache-hitrate 99% over 1489 cacheable calls (linux-clang-coverage), restore=`n/a`
+```
+
+### ✅ VERDICT: PASS — the "deliberately left UNCACHED" decision is REFUTED
+
+Against the bands fixed in §3 *before* this run reported:
+
+| criterion | required | measured |
+|---|---|---|
+| manifest diff | empty | **empty** — 1486 vs 1486 lines, `diff` silent, and the two manifests share one whole-file sha256 `dcf17d78…21408f` |
+| warm hit rate | ≥ 99.0 % | **99.87 %** (1487 / 1489) |
+
+**The §3a residual is far tighter than budgeted.** Only **2** of 1489 calls missed. Since 3 calls
+produce no object at all (§4), **at least 1484 of the 1486 manifest objects were served from cache
+and are byte-identical to their cold-compiled counterparts** — 99.87 % of the population, versus the
+~15 inert lines the 99 % band would have allowed. The proof is not resting on self-comparison.
+
+**§3b is discharged without running it.** A 99.87 % hit rate under `CCACHE_COMPILERCHECK=content`
+*proves* the compiler binary did not move overnight; the version string matching
+(`22.1.8 ++20260714014902+ca7933e47d3a…` in both logs) is corroboration, not the evidence.
+
+Note the hit *kind* also shifted as theory predicts: cold `direct=9 preprocessed=5`, warm
+`direct=1487 preprocessed=0` — a fully populated direct-mode cache, not preprocessor fallback.
+
+### Measured saving
+
+| | cold | warm | Δ |
+|---|---|---|---|
+| `Build` step | 107.8 min | **7.5 min** | **−100.3** |
+| whole job | 132.8 min | **33.4 min** | **−99.4** |
+
+Tier-1 runner-minutes: **376 → ~277** (−26 %). ⚠️ **Quote the right latency axis** — coverage was
+100 % of *tier-1's* wall clock, so tier-1 wall drops sharply, but Tier 2 ran 100 min and Tier 3
+83 min on the same push, so **all-tier latency stays ~100 min (Tier 2-bound)**. The −99 is
+tier-1-local.
+
 ## 6. Coverage needs its OWN ccache namespace
 
 It is Debug like the matrix debug leg, but the coverage profile folds
