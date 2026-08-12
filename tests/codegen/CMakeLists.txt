@@ -211,6 +211,40 @@ add_test(NAME codegen_vlatest_manifest_class_test COMMAND codegen_vlatest_manife
 set_tests_properties(codegen_vlatest_manifest_class_test PROPERTIES
   LABELS "codegen;076;vlatest_manifest_class")
 
+# 082-structural-group-detection T029 [US1] — FR-021 / SC-004: the class-side ⟷
+# raw-XML consistency gate that reconciles v42's 0 → 18 `class G_` delta BY
+# CONSTRUCTION. Class side = text of the generated Messages.hpp; structural side =
+# required_scope_oracle.hpp's from-scratch pugixml XML walk.
+#
+# UNLIKE the vlatest sibling above, this one DOES link pugixml (the oracle needs
+# it) and DOES reach into tests/dictionary/ for that header — its non-circularity
+# claim is different and is stated in the .cpp banner. Do not "align" the two.
+#
+# The test name keeps the `codegen` token deliberately: 082 spans four tiers and a
+# name matching neither `dict` nor `codegen` falls outside every sweep regex used
+# on this branch (which is how a required_scope_census failure hid for a session).
+find_package(pugixml CONFIG REQUIRED)
+add_executable(codegen_082_class_xml_consistency_test test_082_class_xml_consistency_test.cpp)
+add_dependencies(codegen_082_class_xml_consistency_test fixpp_codegen_generate)
+target_include_directories(codegen_082_class_xml_consistency_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests/dictionary")
+target_link_libraries(codegen_082_class_xml_consistency_test PRIVATE
+  pugixml::pugixml
+  GTest::gtest
+  GTest::gtest_main
+)
+target_compile_definitions(codegen_082_class_xml_consistency_test PRIVATE
+  "FIXPP_CODEGEN_INC=\"${FIXPP_CODEGEN_OUT}\""
+  # Spelled from CMAKE_SOURCE_DIR, matching this directory's 067 sibling:
+  # `FIXPP_DICT_DATA_DIR` is a tests/dictionary-scope variable and is EMPTY here,
+  # which yielded a bare "FIX42.xml" and a loud oracle load failure.
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
+)
+add_test(NAME codegen_082_class_xml_consistency_test
+  COMMAND codegen_082_class_xml_consistency_test)
+set_tests_properties(codegen_082_class_xml_consistency_test PROPERTIES
+  LABELS "codegen;082;us1;class_xml_consistency")
+
 # 082-structural-group-detection T019/T020 [US1] RED pins: pure text-parse of
 # the shipped v42/Messages.hpp (same non-circular class-side-extraction shape
 # as codegen_vlatest_manifest_class_test above; no fixpp header, no runtime

@@ -960,6 +960,69 @@ and `build_quickfix_oracle.group_tags` is likewise **505**. The `508` figure cam
 shipped pin was 505 and back-solving `505 + 3`; the pin was **502**. Two independent oracles agreeing on
 505 is a real corroboration of the new pin, not a coincidence to be distrusted.
 
+### ✅ T029 DELIVERED 2026-08-12 — FR-021's class-side ⟷ raw-XML gate, version-parameterised
+
+`tests/codegen/test_082_class_xml_consistency_test.cpp`, ctest **`codegen_082_class_xml_consistency_test`**
+(#26, labels `codegen;082;us1;class_xml_consistency`). **4 tests, all green, over all four
+`<fix>`-schema versions** — v42 is FR-021's requirement, the other three were the "ideal" and cost one
+`kCases` row each.
+
+Two derivations sharing no code and no predicate: class side = **text** of the generated `Messages.hpp`;
+structural side = `build_quickfix_oracle()`'s from-scratch pugixml walk.
+
+| Leg | Assertion | v42 | v44 | v50sp2 | vt11 |
+|---|---|---|---|---|---|
+| pins | message classes / flyweights | 46 / **18** | 93 / **59** | 156 / **505** | 8 / **1** |
+| **A** | flyweight tag set == `oracle.group_tags`, both directions | ✅ | ✅ | ✅ | ✅ |
+| **B** | per-message top-level group refs == that msg_type's top-level groups | ✅ | ✅ | ✅ | ✅ |
+| **C** | flyweight direct members (scalars + nested refs) == **union** over contexts | ✅ | ✅ | ✅ | ✅ |
+
+**The count column is a fourth independent derivation of T018's registered-after numbers** — 59 / 505 / 1
+read off the *generated class tier*. Note **v50sp2 = 505**, agreeing with the oracle and the #208-flipped
+pin. Three independent routes now say 505.
+
+**The emitter's flyweight-member rule was MEASURED, not read** (non-circularity forbids reading the
+emitter). `G_<N>` is version-wide-shared but the oracle's member sets are per-context, and FIX42 tag 146
+has 6 contexts in 4 variants. `G_146` carries **53** members; the **union** of the 6 per-context direct
+sets is exactly **53**, equal both directions — first-seen (19) and largest (31) are both refuted. So
+leg C is an **exact set equality**, with no subset weakening anywhere in the gate.
+
+⚠️ **Two spellings of the same marker, and it is a live false-green trap.** Inside a flyweight the
+reference is unqualified (`group_view<G_295>`); at message level it is **fully qualified**
+(`group_view<::fixpp::v42::groups::G_296>`) — there is **no bare `group_view<G_296>` anywhere** in
+`v42/Messages.hpp`. A scanner written for the unqualified form alone sees **zero** message-level group
+references and every leg still passes. This bit the mutation harness first (M3 matched nothing), which is
+the only reason it was noticed. Cf.
+[[feedback_enumerate_the_layers_selector_source_quantifier_instead_of_patching_the_one_that_bit]].
+
+**Mutation matrix — run against the compiled binary, not the prototype**, each mutant guarded by an
+`applied == 1` assertion, and the generated header restored and re-hashed to `827a9bd0…` after each:
+
+| Mutant | Effect | Kills |
+|---|---|---|
+| **M1** delete `class G_384` | flyweight count 18→17 | A's **count** pin, C, nesting |
+| **M2** drop `G_296`'s scalar member 367 | shape only | **C only**, on `{296}` only |
+| **M3** drop one message-level `group_view<::fixpp::v42::groups::G_296>` | shape only | **B only** |
+| **M4** re-tag `class G_384` → `class G_9999` | count **stays 18** | A's **set-equality** |
+
+⚠️ **M4 is not redundant with M1, and M1 alone would have left leg A unproven.** Under M1 the `ASSERT_EQ`
+population pin fires first and **aborts the test**, so A's actual set-equality `EXPECT_EQ` never
+executes — the count was doing all the work, and a flyweight emitted under the *wrong tag* keeps the
+count at 18 and would have slipped through. M4 holds the count and moves only the set, reporting
+`structural-only: 384  class-only: 9999`. **A mutant that kills a test does not prove the assertion you
+care about killed it** — cf. [[feedback_witness_asserts_named_postcondition_not_proxy]].
+
+⚠️ **This gate is NOT the same non-circularity class as its vlatest sibling.** `vlatest_manifest_class_consistency_test.cpp`
+links **no** pugixml and no fixpp header — both its sides are generated text. This one links pugixml via
+the oracle. The claim here is narrower and stated in the banner: the structural side never consults
+`FieldRef::type`, `VersionIR::group_tags` or `group_first_field` — the three predicates 082 re-points —
+so it can witness the re-point rather than move with it. Do not cite the sibling's rationale for this file.
+
+Wiring note: `FIXPP_DICT_DATA_DIR` is a **`tests/dictionary`-scope** CMake variable and is **empty** in
+`tests/codegen`; spelling it from `${CMAKE_SOURCE_DIR}/dictionaries` (as this directory's 067 sibling
+does) is required. The empty value produced a bare `"FIX42.xml"` and a **loud** oracle load failure
+rather than a silent empty oracle — the fail-closed behaviour worth keeping.
+
 ### ✅ T026 / T027 / T028 DISCHARGED 2026-08-12 — the v42 delta reconciled BY CONSTRUCTION
 
 T028's bar is *"reconcile the emitted delta by construction — not 'golden regenerated'"*. Done, four ways,
