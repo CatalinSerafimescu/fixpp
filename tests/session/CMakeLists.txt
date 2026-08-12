@@ -2115,6 +2115,23 @@ add_threading_test(session_validate_gate_inbound
 set_tests_properties(session_validate_gate_inbound PROPERTIES
   LABELS "041;t012;t014;validation-gate;inbound;foundational")
 
+# ── fixpp#215 item 1 — one as_table_view() walk per opened session ───────────
+# W1: open() with no config-supplied view walks the Dictionary exactly ONCE
+#     (was 2: inbound_tv_ + the strict validator, independently).
+# W2: open() with SessionConfig::dictionary_view set walks it ZERO times and
+#     adopts THAT object (use_count) — the C-ABI's half of the fix.
+# W3: the adopted view is wired into the parser and validator, not just stored.
+# Instrument is 083 T049's W-11a counter, which lives in the INTERNAL dictionary
+# header — the same tests -> src/dictionary include tests/capi already takes for
+# it (tests/capi/CMakeLists.txt). tools/check_layers.py scans src/** and
+# bindings/** only, never tests/.
+add_threading_test(session_table_view_reuse
+  test_session_table_view_reuse.cpp)
+target_include_directories(session_table_view_reuse PRIVATE
+  "${CMAKE_SOURCE_DIR}/src/dictionary")  # dictionary_internal.hpp (083 T049 seam)
+set_tests_properties(session_table_view_reuse PROPERTIES
+  LABELS "fixpp215;table-view;session;validation-gate")
+
 # ── 041-validation-gate-wiring T013 — validate-first Logon-arm ordering ──────
 # C-2 rows a-f: validate before interpret_logon in NotConnected/LogonSent arms.
 # No-reject-loop exemption (35=3 and 35=5). Absent/malformed SendingTime(52)

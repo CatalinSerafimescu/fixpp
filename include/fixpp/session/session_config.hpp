@@ -41,6 +41,7 @@ class Clock;
 namespace fixpp::dict {
 class Dictionary;
 class DialectOverlay;
+class table_view;  // fixpp#215 item 1 — shared_ptr member ⇒ fwd-decl suffices
 }  // namespace fixpp::dict
 namespace fixpp::tls {
 class cert_source;
@@ -186,6 +187,29 @@ struct SessionConfig {
 
     std::shared_ptr<const fixpp::dict::Dictionary> dictionary;           // required
     std::shared_ptr<const fixpp::dict::DialectOverlay> dialect_overlay;  // optional
+
+    // fixpp#215 item 1 — OPTIONAL pre-built view of `dictionary`.
+    //
+    // `Dictionary::as_table_view()` has no cache: every call is a full walk of
+    // every message, group and field, and since 083 it also builds the
+    // per-context delimiter store. A caller that has ALREADY paid for that walk
+    // can hand the result over here instead of making `Session::open()` walk the
+    // same Dictionary a second time. Null (the default) → `open()` builds its
+    // own, exactly as before; every existing producer of a SessionConfig is
+    // unaffected.
+    //
+    // The C-ABI is the only producer today: `fixpp_session_open` needs its own
+    // `fixpp_session::tv_` for the outbound commit path, so it builds ONE view
+    // and passes that same object here.
+    //
+    // DERIVATION REQUIREMENT (caller-side, not enforceable here): when non-null
+    // this MUST be `dictionary->as_table_view()` — a view of THE dictionary in
+    // the field above, not of some other one. `table_view` carries no identity
+    // token back to its source Dictionary, so a view built from a DIFFERENT
+    // dictionary cannot be detected and would silently drive inbound parsing and
+    // validation from the wrong grammar. Derive it from `dictionary` at the
+    // point you set it; never copy this field across configs.
+    std::shared_ptr<const fixpp::dict::table_view> dictionary_view;  // null → open() builds one
 
     std::optional<std::chrono::seconds> heartbeat_interval;           // value owned by 005
     std::optional<std::chrono::milliseconds> test_request_threshold;  // value owned by 005

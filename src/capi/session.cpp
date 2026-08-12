@@ -82,11 +82,27 @@ fixpp_error_t fixpp_session_open(fixpp_engine_t* engine, fixpp_session_config_t*
     }
 
     fixpp::session::SessionId id;
+    // 083 T050 / fixpp#215 item 1: the session's ONE table_view. Built here —
+    // BEFORE register_session copies the config — so the SAME object serves both
+    // consumers: `fixpp_session::tv_` below (outbound commit path) and
+    // `Session::open()`'s inbound_tv_/validator, which used to walk the identical
+    // Dictionary all over again. Not per message (C-9.2a / [const §XV.1]).
+    std::shared_ptr<const fixpp::dict::table_view> tv;
     try {
         id = fixpp::session::SessionId::from_config(cfg->cfg);
         // register_session takes SessionConfig BY VALUE → copies the builder's
         // config (builder still owns its copy; consumed/freed below on success).
-        auto rr = engine->state_->engine_->register_session(cfg->cfg);
+        // The view is attached to a LOCAL copy, never to `cfg->cfg`: on the
+        // failure paths below the builder must come back to the caller exactly as
+        // it went in ("builder untouched on failure"), and a `dictionary_view`
+        // left behind on it would go stale the moment the caller re-pointed the
+        // builder's dictionary and retried.
+        fixpp::session::SessionConfig sc = cfg->cfg;
+        if (sc.dictionary) {
+            tv = std::make_shared<const fixpp::dict::table_view>(sc.dictionary->as_table_view());
+            sc.dictionary_view = tv;  // derived from sc.dictionary — the field's contract
+        }
+        auto rr = engine->state_->engine_->register_session(std::move(sc));
         if (!rr.has_value()) {
             // e.g. duplicate SessionId → session_invalid_argument (119) →
             // FIXPP_ERR_UNKNOWN (publication deferred, L-050-4). Builder NOT
@@ -109,11 +125,11 @@ fixpp_error_t fixpp_session_open(fixpp_engine_t* engine, fixpp_session_config_t*
         // D-5 (051): cache the dictionary BEFORE delete cfg so fixpp_msg_create_outbound
         // can copy it into each outbound fixpp_msg shell for set_* validation.
         h->dict_ = cfg->cfg.dictionary;
-        // 083 T050: build the session's table_view ONCE, here, where dict_ is
-        // already cached. Not per message (C-9.2a / [const §XV.1]).
-        if (h->dict_) {
-            h->tv_ = std::make_shared<const fixpp::dict::table_view>(h->dict_->as_table_view());
-        }
+        // 083 T050 / fixpp#215 item 1: adopt the view built above — the very
+        // object the registered SessionConfig carries — rather than building a
+        // second one from the same Dictionary. Null exactly when dict_ is null,
+        // so "no dictionary" and "no view" stay ONE state.
+        h->tv_ = tv;
         fixpp_session* raw = h.get();
         engine->sessions_.push_back(std::move(h));
         delete cfg;  // builder CONSUMED on success (invalidated)

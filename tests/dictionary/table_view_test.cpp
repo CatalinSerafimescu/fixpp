@@ -288,6 +288,54 @@ TEST(TableViewTest, GroupContextOnlyRegistrationFoundThroughContextAccessor) {
            "3-arg accessor";
 }
 
+// ── fixpp#215 item 2 — group_first_field_exact reports a context MISS ────────
+//
+// The 3-arg `group_first_field` answers a context miss out of the LEGACY BARE
+// store (L-063-3) and returns a plain std::uint16_t, so the caller cannot tell
+// "the context store answered" from "the context missed and you are holding the
+// globally-first-seen variant". Harmless where the value is only reported;
+// load-bearing where it decides control flow.
+//
+// This fixture is the discriminator: 802 is registered in BOTH stores, but the
+// context store knows it under ONE path and ONE msg_type only. Every probe off
+// that exact key is a miss with a non-zero bare answer waiting behind it — the
+// precise shape that is invisible through the old accessor.
+TEST(TableViewTest, GroupFirstFieldExactReportsAContextMissInsteadOfMaskingIt) {
+    fixpp::dict::table_view tv;
+    std::array<std::uint16_t, 1> const registered_path{453};
+    std::array<std::uint16_t, 1> const other_path{555};
+
+    tv.set_group_first(802, 600);                            // legacy bare store
+    tv.set_group_first_ctx("D", registered_path, 802, 523);  // context store — this key only
+
+    // 1. Context HIT — both accessors give the CONTEXT answer (523, not 600).
+    EXPECT_EQ(tv.group_first_field("D", registered_path, 802), std::uint16_t{523});
+    auto const hit = tv.group_first_field_exact("D", registered_path, 802);
+    ASSERT_TRUE(hit.has_value()) << "a registered context must not report a miss";
+    EXPECT_EQ(*hit, std::uint16_t{523});
+
+    // 2. Context MISS on the PATH axis — the whole point of the accessor.
+    EXPECT_EQ(tv.group_first_field("D", other_path, 802), std::uint16_t{600})
+        << "the 3-arg accessor MASKS the miss: it answers 600 out of the bare store, and 600 is "
+           "indistinguishable from a genuine context hit at the call site";
+    EXPECT_FALSE(tv.group_first_field_exact("D", other_path, 802).has_value())
+        << "group_first_field_exact must report the miss rather than fall back to 600";
+
+    // 3. Context MISS on the MSG_TYPE axis — same conflation, other half of the key.
+    EXPECT_EQ(tv.group_first_field("E", registered_path, 802), std::uint16_t{600});
+    EXPECT_FALSE(tv.group_first_field_exact("E", registered_path, 802).has_value())
+        << "a miss on the msg_type axis must be reported too — the key is (msg_type, path, no_tag)";
+
+    // 4. NOT A GROUP AT ALL is a real answer, not a miss. The group bit is exact
+    //    (a clear bit proves BOTH stores miss), so this must come back as
+    //    engaged-zero — otherwise a caller that fails closed on nullopt would
+    //    reject every non-group tag it was handed.
+    auto const not_a_group = tv.group_first_field_exact("D", registered_path, std::uint16_t{7777});
+    ASSERT_TRUE(not_a_group.has_value())
+        << "an unregistered no_tag is a definitive 'not a group', not a context miss";
+    EXPECT_EQ(*not_a_group, std::uint16_t{0});
+}
+
 // ── T007-5: field_type_of agrees with source Dictionary field_data_type ──────
 
 TEST(TableViewTest, FieldTypeOfAgreesWithDictionary) {

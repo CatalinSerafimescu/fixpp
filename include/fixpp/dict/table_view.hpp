@@ -40,6 +40,7 @@
 #include <cstdint>
 #include <fixpp/dict/field_type.hpp>  // field_type (7-value enum)
 #include <functional>
+#include <optional>  // group_first_field_exact (fixpp#215 item 2) — header-only, alloc-free
 #include <span>
 #include <string>
 #include <string_view>
@@ -362,6 +363,62 @@ public:
             return it->second.group_first;
         }
         return group_first_field(no_tag);  // legacy bare fallback — see doc above
+    }
+
+    // ── fixpp#215 item 2: exact context lookup, MISS reported not masked ────
+    // The three-arg `group_first_field` above cannot tell a caller which of two
+    // things happened, because both come back as a plain `std::uint16_t`:
+    //
+    //   0        — `no_tag` is not a group anywhere (the group bit is clear)
+    //   non-zero — EITHER the context store answered, OR the context MISSED and
+    //              the legacy bare store answered with the globally-first-seen
+    //              variant (L-063-3).
+    //
+    // That conflation is harmless where the fallback's value is merely a stale
+    // tag, which is what 063 designed it for. It is NOT harmless at a
+    // STRUCTURAL decision point, where the answer decides control flow rather
+    // than decorating it — a wrong non-zero there means "descend into a group"
+    // or "accept this builder ordering", not "report a slightly-off tag".
+    //
+    // This variant separates the three outcomes:
+    //
+    //   optional{0}  — group bit clear: definitively not a group, in ANY
+    //                  context. The bit is exact, not heuristic (see
+    //                  `group_bits_`), so this is a real answer, not a miss.
+    //   optional{t}  — the context store has a record for
+    //                  `(msg_type, parent_path, no_tag)`; `t` is ITS delimiter.
+    //   nullopt      — CONTEXT MISS: `no_tag` is a group somewhere, but this
+    //                  exact context has no record. NO bare-store fallback is
+    //                  applied; the caller decides.
+    //
+    // Bounded, not live, today: FR-023's completeness invariant (enforced in
+    // both loaders' `finalize()`) guarantees every context `as_table_view()`
+    // registers has a real record, so against a loader-built dictionary a
+    // `nullopt` can only come from a caller-side context-construction bug,
+    // never from dictionary data.
+    //
+    // WHY the three-arg accessor above keeps its fallback rather than being
+    // reimplemented on top of this one: hand-built bare-API fixtures (the
+    // 041-era `set_group_first(no_tag, first)` surface, e.g.
+    // tests/dictionary/table_view_test.cpp) never populate `group_ctx_` at
+    // all, so for them EVERY context probe is a miss. `validator.hpp`'s
+    // group descent and `offset_table.cpp`'s extent walk are bound to those
+    // fixtures and must keep falling through. The commit-path caller
+    // (`src/capi/message_write.cpp`) is not: it is reachable only with the
+    // session's own loader-built view, and 083 T052 already states it must
+    // never resolve a delimiter from the bare global store — so it uses THIS
+    // accessor and fails the commit closed on a miss.
+    [[nodiscard]] std::optional<std::uint16_t> group_first_field_exact(
+        std::string_view msg_type, std::span<std::uint16_t const> parent_path,
+        std::uint16_t no_tag) const noexcept {
+        if (!group_bit(no_tag)) {
+            return std::uint16_t{0};  // exact: not a group in any context
+        }
+        auto const it = group_ctx_.find(group_ctx_query{msg_type, parent_path, no_tag});
+        if (it != group_ctx_.end()) {
+            return it->second.group_first;
+        }
+        return std::nullopt;  // context miss — deliberately NOT masked by the bare store
     }
 
     [[nodiscard]] std::span<std::uint16_t const> group_member_tags(

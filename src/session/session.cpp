@@ -324,7 +324,7 @@ template <class CB>
     // 066-dict-backed-inbound-parse T006: dict-backed parse — inbound_tv_ is
     // GUARANTEED (see hpp comment above the member + open() ~:929/:942): both
     // callers (fire_to_admin_ and the receive loop) run only post-open.
-    assert(inbound_tv_.has_value());
+    assert(inbound_tv_ != nullptr);
     fixpp::wire::Parser<fixpp::wire::access_mode::Index> pd_parser{*inbound_tv_};
     auto mv_r = pd_parser.parse((*feed_r)[0], &pa_mr);
     if (!mv_r) return fixpp::core::expected_t<void>{};  // parse error — skip
@@ -981,15 +981,27 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
     }
 
     // 066-dict-backed-inbound-parse T002 (data-model.md "Session inbound
-    // table_view"): build the once-built inbound dict-membership table
+    // table_view"): resolve the once-built inbound dict-membership table
     // HERE, immediately after the guard above — cfg_.dictionary is
     // guaranteed non-null at this point. Mirrors the strict validator's own
-    // owned table_view build below (~:1171-1173/now further down). NOT YET
-    // consumed by parse_and_dispatch_ (session.cpp:316) — T006 flips the
-    // parser to use it; this member only lands the invariant that
-    // inbound_tv_.has_value() holds whenever a successfully-opened session
-    // later reaches parse_and_dispatch_ (both callers run post-open only).
-    inbound_tv_ = cfg_.dictionary->as_table_view();
+    // owned table_view build below (~:1171-1173/now further down). Lands the
+    // invariant that inbound_tv_ is non-null whenever a successfully-opened
+    // session later reaches parse_and_dispatch_ (both callers run post-open
+    // only).
+    //
+    // fixpp#215 item 1: PREFER a view the config already carries.
+    // `as_table_view()` is a full walk of every message/group/field with no
+    // cache of its own, so the C-ABI — which must build one anyway for its
+    // outbound commit path — hands that same object over in
+    // cfg_.dictionary_view rather than making this line walk the identical
+    // Dictionary a second time. Null (every non-C-ABI producer) → build one
+    // here, exactly as before. The field's derivation requirement (it must be
+    // a view OF cfg_.dictionary) is documented on SessionConfig and is the
+    // caller's to honour; nothing here can check it.
+    inbound_tv_ = cfg_.dictionary_view
+                      ? cfg_.dictionary_view
+                      : std::make_shared<const fixpp::dict::table_view>(
+                            cfg_.dictionary->as_table_view());
 
     // RC#1 (gate-b/r1): default-constructed security_profile sentinel →
     // invalid_session_config (slot 53 / N-P2-3 / [const §XII.5] / FR-018).
@@ -1226,12 +1238,23 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
     // therefore caught by open()'s own null-dict guard too. The additional
     // null-check here is a defensive belt-and-suspenders for future callers.
     // [041 T014; data-model E-2; research R-2/R-6; SC-005; FR-002]
+    //
+    // fixpp#215 item 1: COPY the view resolved above rather than walking the
+    // Dictionary a third time. `dictionary_driven_validator` holds its
+    // `table_view` BY VALUE and that is a frozen design point (validator.hpp
+    // "SC-007: no virtual edge"), so it cannot share `inbound_tv_`'s object —
+    // but a copy duplicates already-built tables instead of re-deriving them
+    // from the Dictionary (no re-traversal, no per-context key reconstruction,
+    // no membership dedup rescans). One walk + one copy, where it used to be
+    // two walks — and, on the C-ABI path, three.
     if (cfg_.validate_inbound_messages) {
         // Defensive: dictionary should be non-null here (open() rejects null-dict
         // above), but guard explicitly to avoid a null deref if the invariant drifts.
-        if (cfg_.dictionary) {
-            validator_ = std::make_unique<fixpp::wire::dictionary_driven_validator>(
-                cfg_.dictionary->as_table_view());
+        // inbound_tv_ is non-null whenever cfg_.dictionary is — both are set by the
+        // same guarded block above.
+        if (cfg_.dictionary && inbound_tv_) {
+            validator_ =
+                std::make_unique<fixpp::wire::dictionary_driven_validator>(*inbound_tv_);
         }
         // If dictionary is null despite the guard, validator_ stays null → the
         // validate gate in on_inbound_frame skips (fail-closed skip, not crash).

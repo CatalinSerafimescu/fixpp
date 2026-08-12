@@ -796,26 +796,33 @@ private:
 
     // ── 066-dict-backed-inbound-parse T002 — inbound dict-membership table ──
     //
-    // Built ONCE in open(), immediately after the non-null-dictionary guard
-    // (session.cpp ~:929), via cfg_.dictionary->as_table_view(). Mirrors the
-    // validator's owned table_view (above / session.cpp ~:1171-1173).
-    // Stable-address Session member (data-model.md "Session inbound
-    // table_view"): the dict-backed Parser ctor stores std::addressof of it
-    // (parser.hpp), so its address must not move for the session lifetime —
-    // a std::optional member (not reseated per message) satisfies this.
+    // Resolved ONCE in open(), immediately after the non-null-dictionary guard
+    // (session.cpp ~:929). Mirrors the validator's owned table_view (above /
+    // session.cpp ~:1171-1173).
+    // Stable-address referent (data-model.md "Session inbound table_view"): the
+    // dict-backed Parser ctor stores std::addressof of the POINTEE (parser.hpp),
+    // so the pointee's address must not move for the session lifetime — a
+    // heap-owned object held by shared_ptr and never reseated per message
+    // satisfies this at least as strongly as the former std::optional member did
+    // (the address is now independent of the Session object itself).
+    //
+    // fixpp#215 item 1 — shared_ptr, not std::optional-by-value: the view is
+    // built by whoever gets there FIRST and then SHARED, instead of every
+    // consumer walking the same Dictionary again. open() takes
+    // cfg_.dictionary_view when the config supplies one (the C-ABI path, which
+    // needs the same view for its outbound commit path) and otherwise builds one
+    // itself. Either way the Session owns a strong reference for its whole
+    // lifetime, so the pointee outlives every Parser built over it.
     //
     // Invariant: open() hard-fails (invalid_session_config) when
     // cfg_.dictionary is null, BEFORE this member is built — so
-    // inbound_tv_.has_value() is GUARANTEED whenever parse_and_dispatch_
+    // inbound_tv_ is GUARANTEED non-null whenever parse_and_dispatch_
     // runs (both callers, fire_to_admin_ and the receive loop, only run on a
     // successfully-opened session). open() is single-invocation per session
     // (state_ != never_opened rejects a second call) and reconnection is
     // driven by ReconnectFsm::drive_reconnect_attempt(), which does NOT
     // re-invoke open() — so no rebuild-during-parse hazard exists.
-    //
-    // NOT YET CONSUMED by parse_and_dispatch_ (T002 only adds+builds the
-    // member; T006 flips the parser to use it). No behavior change here.
-    std::optional<fixpp::dict::table_view> inbound_tv_;
+    std::shared_ptr<const fixpp::dict::table_view> inbound_tv_;
 
     // ── 029-persistent-seqnum-hydrate awaitable declarations ─────────────────
     //

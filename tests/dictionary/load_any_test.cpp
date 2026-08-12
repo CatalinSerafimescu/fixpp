@@ -10,14 +10,17 @@
 #include <fixpp/dict/dictionary.hpp>
 #include <fixpp/dict/error.hpp>
 #include <fixpp/dict/load_any.hpp>
+#include <fixpp/dict/loader_policy.hpp>  // unresolved_group_policy (fixpp#215 item 4)
 #include <fixpp/dict/orchestra_loader.hpp>
 #include <fixpp/dict/version_profile.hpp>
 #include <fixpp/dict/xml_loader.hpp>
 #include <fstream>
 #include <iterator>
+#include <cstddef>
 #include <memory_resource>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace {
 
@@ -119,6 +122,87 @@ TEST(LoadAny, MalformedXmlThrowsXmlParseError) {
     }
     std::pmr::monotonic_buffer_resource mr;
     EXPECT_THROW((void)fixpp::dict::load_any(path, &mr), fixpp::dict::xml_parse_error);
+    std::filesystem::remove(path);
+}
+
+// ── fixpp#215 item 4 — the tolerant opt-in is reachable THROUGH load_any ─────
+//
+// FR-006a's `unresolved_group_policy::tolerant` was built at real cost in both
+// concrete loaders, but `load_any` — the facade whose entire job is to hide
+// WHICH concrete loader a file needs — called them with no policy argument and
+// had no parameter to accept one. A caller that does not already know it is
+// holding a QuickFIX file rather than an Orchestra one could not opt in at all.
+//
+// Both halves are asserted here. The default half matters as much as the opt-in
+// half: a defaulted parameter that silently changed the default from
+// `fail_closed` to `tolerant` would make every existing load_any caller start
+// swallowing exactly the silent group drops FR-006 exists to surface.
+namespace {
+
+// The 083 W-4/W-5 fixture (tests/dictionary/loader_disposition_test.cpp): NoBad
+// (700) is declared as a group with NO members, so its delimiter cannot be
+// resolved. NoGood(600) is well-formed and must survive either way.
+constexpr std::string_view kUnresolvableGroupXml =
+    R"(<fix type='FIX' major='4' minor='4' servicepack='0'>)"
+    R"(<fields>)"
+    R"(<field number='8' name='BeginString' type='STRING'/>)"
+    R"(<field number='9' name='BodyLength' type='INT'/>)"
+    R"(<field number='10' name='CheckSum' type='STRING'/>)"
+    R"(<field number='35' name='MsgType' type='STRING'/>)"
+    R"(<field number='600' name='NoGood' type='NUMINGROUP'/>)"
+    R"(<field number='610' name='FieldA' type='STRING'/>)"
+    R"(<field number='700' name='NoBad' type='NUMINGROUP'/>)"
+    R"(</fields>)"
+    R"(<messages>)"
+    R"(<message name='V1Msg' msgtype='V1' msgcat='app'>)"
+    R"(<field name='BeginString' required='N'/>)"
+    R"(<field name='BodyLength' required='N'/>)"
+    R"(<field name='MsgType' required='N'/>)"
+    R"(<field name='CheckSum' required='N'/>)"
+    R"(<group name='NoGood' required='N'>)"
+    R"(<field name='FieldA' required='N'/>)"
+    R"(</group>)"
+    R"(<group name='NoBad' required='N'></group>)"  // <- no members: unresolvable
+    R"(</message>)"
+    R"(</messages></fix>)";
+
+std::filesystem::path write_temp_xml(std::string_view name, std::string_view text) {
+    auto const path = std::filesystem::temp_directory_path() / name;
+    std::ofstream out(path, std::ios::binary);
+    out << text;
+    return path;
+}
+
+}  // namespace
+
+TEST(LoadAny, DefaultPolicyStaysFailClosed) {
+    auto const path = write_temp_xml("load_any_test_unresolvable_default.xml", kUnresolvableGroupXml);
+    std::pmr::monotonic_buffer_resource mr;
+    // Called with NO policy argument — pins that the added trailing parameter
+    // DEFAULTS to fail_closed, not merely that it exists.
+    EXPECT_THROW((void)fixpp::dict::load_any(path, &mr), fixpp::dict::xml_parse_error)
+        << "FR-006 / C-6.1: load_any's default must reject an unresolvable group, exactly as "
+           "XmlLoader::load's does. A defaulted parameter that flipped the default would turn "
+           "every existing load_any caller tolerant without anyone asking.";
+    std::filesystem::remove(path);
+}
+
+TEST(LoadAny, TolerantPolicyReachesTheConcreteLoader) {
+    auto const path =
+        write_temp_xml("load_any_test_unresolvable_tolerant.xml", kUnresolvableGroupXml);
+    std::vector<std::byte> buf(2u * 1024u * 1024u);
+    std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
+
+    auto dict = fixpp::dict::load_any(path, &mr, fixpp::dict::unresolved_group_policy::tolerant);
+
+    // "It loaded" would be satisfied by loading nothing — pin that the
+    // well-formed sibling survived and the offending group is UNREGISTERED
+    // (FR-023a), i.e. the policy really reached XmlLoader rather than being
+    // accepted and dropped on the floor by the facade.
+    EXPECT_EQ(dict.group_first_field(600), 610)
+        << "FR-006a: tolerant mode must skip ONLY the unresolvable group";
+    EXPECT_EQ(dict.group_first_field(700), 0)
+        << "FR-023a: the skipped group must be left unregistered, not half-registered";
     std::filesystem::remove(path);
 }
 

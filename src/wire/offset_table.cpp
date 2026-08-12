@@ -468,6 +468,38 @@ std::size_t OffsetTable::consume_group_extent(std::size_t count_idx,
     // Context under which THIS group's nested members are registered
     // (its container path + its own no_tag).
     group_context const child = ctx.pushed(group_no_tag);
+    // fixpp#215 item 5: the "query before you advance" rule, stated ONCE.
+    //
+    // The walk below reaches a tag at two structurally different positions —
+    // the instance-opening delimiter, and an ordinary member inside an instance
+    // — and at BOTH it must ask the same question before stepping over it: is
+    // this tag itself a nested group's count tag in the CHILD context? The test
+    // is "the immediately-following entry is a member of the group this tag
+    // would open". If yes, consume that nested group's FULL extent; if no,
+    // advance one entry.
+    //
+    // Getting this wrong at either position produces the same Defect-B failure:
+    // a bare `++k` past a nested count field leaves the walk inside the nested
+    // group's instances, so the nested group's repeated delimiter is mistaken
+    // for an outer-instance boundary and the outer extent truncates.
+    //
+    // Two degenerate cases fall through to the plain `at + 1U`, deliberately:
+    // a tag that is the LAST entry (the `at + 1U < entries_.size()` bound), and
+    // a nested group declaring 0 instances (which returns `at + 1` from the
+    // zero-count arm above). Both behave exactly as they did before.
+    //
+    // The two call sites previously carried this logic inline, once each, with
+    // the overflow check written only in the descent branch. Checking it after
+    // BOTH branches is equivalent: `overflow` is false on entry (every setter
+    // returns immediately) and the non-descent branch cannot set it.
+    auto consume_one = [&](std::size_t at) noexcept -> std::size_t {
+        if (at + 1U < entries_.size() &&
+            group_member_fn_(opaque_dict_, child, entries_[at].tag, entries_[at + 1U].tag)) {
+            return consume_group_extent(at, child, static_cast<std::uint8_t>(depth + 1U),
+                                        overflow);
+        }
+        return at + 1U;  // ordinary tag — no nested descent
+    };
     std::size_t k = first;
     std::uint32_t inst = 0;
     // Consume exactly `declared` instances (Approach A), each delimited by
@@ -476,46 +508,24 @@ std::size_t OffsetTable::consume_group_extent(std::size_t count_idx,
     // actual mismatch flagging is the validator's job (plan.md).
     while (k < entries_.size() && inst < declared && entries_[k].tag == delim) {
         std::size_t const inst_start = k;
-        // 083 C-8.0c: query-before-consume AT the instance-opening delimiter.
-        // Is `delim` itself a nested group's count tag in the child context? If
-        // so, consuming it with a bare `++k` skips past its count field and
-        // leaves the walk inside the nested group's own instances, so the next
-        // OUTER instance's opening tag is never reached and the extent
-        // truncates to one instance. Same probe shape, same child context and
-        // same recursion as the post-delimiter descent below — one rule applied
-        // at both positions, not a new mechanism. The `k + 1U <
-        // entries_.size()` bound makes a delimiter that is the last entry fall
-        // through to the bare `++k`, and a nested group declaring 0 instances
-        // returns `k + 1` from :461-462, so both degenerate cases behave
-        // exactly as they do today.
-        if (k + 1U < entries_.size() &&
-            group_member_fn_(opaque_dict_, child, delim, entries_[k + 1U].tag)) {
-            k = consume_group_extent(k, child, static_cast<std::uint8_t>(depth + 1U), overflow);
-            if (overflow) {
-                return k;  // mirrors :489-491 — at the cap, RETURN rather than
-                           // burn `declared` no-op iterations (C-8.0c.3)
-            }
-        } else {
-            ++k;  // ordinary delimiter, no nested descent
+        // 083 C-8.0c: position 1 — the instance-opening delimiter.
+        k = consume_one(k);
+        if (overflow) {
+            return k;  // at the cap, RETURN rather than burn `declared` no-op
+                       // iterations (C-8.0c.3)
         }
         while (k < entries_.size() && entries_[k].tag != delim) {
-            std::uint16_t const t = entries_[k].tag;
-            if (!group_member_fn_(opaque_dict_, ctx, group_no_tag, t)) {
-                break;  // non-member ends this instance (and the group)
+            // Membership is checked against the OUTER group here (position 2 is
+            // inside an instance): a non-member ends this instance, and the
+            // group. Only once the tag is known to belong does `consume_one`
+            // decide whether it also OPENS a nested group.
+            if (!group_member_fn_(opaque_dict_, ctx, group_no_tag, entries_[k].tag)) {
+                break;
             }
-            // Nested group count? A member tag whose immediately-following
-            // entry is a member of ITS OWN group (in the child context). If so
-            // consume its full extent so its repeated delimiter is NOT mistaken
-            // for an outer-instance boundary (the Defect-B truncation).
-            if (k + 1U < entries_.size() &&
-                group_member_fn_(opaque_dict_, child, t, entries_[k + 1U].tag)) {
-                k = consume_group_extent(k, child,
-                                         static_cast<std::uint8_t>(depth + 1U), overflow);
-                if (overflow) {
-                    return k;
-                }
-            } else {
-                ++k;  // ordinary scalar member
+            // 083 C-8.0c: position 2 — an ordinary member inside an instance.
+            k = consume_one(k);
+            if (overflow) {
+                return k;
             }
         }
         if ((k - inst_start) > cfg_.max_group_entries_per_instance) {
