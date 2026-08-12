@@ -960,6 +960,66 @@ and `build_quickfix_oracle.group_tags` is likewise **505**. The `508` figure cam
 shipped pin was 505 and back-solving `505 + 3`; the pin was **502**. Two independent oracles agreeing on
 505 is a real corroboration of the new pin, not a coincidence to be distrusted.
 
+## US2 STARTED 2026-08-12 — the `fixpp::v42` builder tier is emitted (#196's actual deliverable)
+
+### ✅ T031 — plan set derived BEFORE the first run, and the run matched it
+
+`python3 contracts/builder_plan_census.py` (no args ⇒ self-validates against the v44/v50sp2 goldens
+first, then reports v42):
+
+| mode | messages in scope | distinct plans | tags with a plan | emitted files |
+|---|---|---|---|---|
+| `--families all` | **39** (= registry) | **28** | **17** | **226** = 39×5 + 28 + 3 |
+| `--families official` | **25** (= registry) | **19** | **11** | **147** = 25×5 + 19 + 3 |
+
+**17 builder tags, not 18** — `384 NoMsgTypes` is a read-tier tag but not a builder-tier one: its only
+FIX42 host is the admin message `Logon`, excluded by `emit_builders`' `is_application` gate. T031
+predicted exactly this and the census confirms it.
+
+**Post-T035 the emitted tree matches the derivation exactly**: 226 builder-tier files (195 under
+`messages/` = 39×5, **28** `groups/<Plan>.hpp`, 3 others), 28 plan headers. Derived first, then measured —
+not transcribed.
+
+### ✅ T032 / T033 — the two descope pins INVERTED (FR-016b), each proven RED before T035
+
+- **T032** `test_077_builder_no_emit.cpp`: `V42EmitsNoBuilders` → **`V42EmitsBuilders`**. RED pre-T035.
+  ⚠️ `Vt11EmitsNoBuilders` is deliberately **unchanged and still green** — vt11 must keep emitting
+  nothing, but for a *different and genuine* reason (zero application messages ⇒ `is_application`
+  self-skip, **not** a version check; FR-010/T038). Inverting both together would have destroyed that
+  distinction.
+- **T033** `test_077_v42_vt11_completeness_and_c4.cpp`: `V42HasAppMessagesButIsNonBuilderBearingByPolicy`
+  → **`V42RegistryExactSetEqualsRawXmlWalk`**, mirroring the v44 sibling. The expected set is the
+  **raw-XML-derived** one (the same `legacy_expected_msgtypes` call the old test already made **and then
+  discarded**), independently cross-checked by `builder_plan_census.py`'s 39 — *not* a transcribed list,
+  per FR-016b's own warning that a set copied from the first emitter run is a corpus built from the read
+  it checks. Added an `ASSERT_TRUE(exists(all.hpp))` guard so the exact-set comparison cannot "fail for
+  the wrong reason" against an empty parse. RED pre-T035, and it failed on exactly that guard.
+
+### ✅ T035 — the driver exclusion deleted, with NO replacement predicate
+
+`main.cpp`'s `if (ir.ns != "v42")` is gone (D-8 / FR-007 / FR-010). Its premise was the **datatype**
+gate — *"v42 types NumInGroup as legacy INT … so emit_builders materializes ZERO typed groups"* — which
+is the very thing 082 replaced. No version test remains on that path at all; the only legitimate skip is
+a genuinely empty application registry, which is vt11's, structurally.
+
+⚠️ **T035's text is INCOMPLETE as written, and the gap is a silent no-delivery.** Deleting the exclusion
+makes the codegen *emit* 226 v42 files, but `cmake/Codegen.cmake`'s
+`foreach(_ver IN ITEMS v44 v50sp2 vlatest)` meant **nothing compiled them** — files generated and
+consumed by no target, which fails no build and passes no test. Three CMake changes were required and
+are part of T035:
+
+1. `foreach(_ver IN ITEMS **v42** v44 v50sp2 vlatest)` — creates `fixpp_builders_v42` /
+   `fixpp_validators_v42`.
+2. A new `_v42_builders_marker` (`v42/all.hpp`), added to the missing-output regen-guard loop, so an
+   absent v42 builder tier triggers regeneration instead of being the expected state.
+3. The post-generation existence assertion, mirroring v44/v50sp2.
+
+⚠️ **vt11 is deliberately absent from all three**, and this is structural rather than policy: it emits
+no builder files, so `file(GLOB)` finds nothing and `add_library` would fail on an empty source list —
+and a vt11 builders *marker* would demand a file that must never exist, wedging the regen guard forever.
+Commented in place so nobody "restores symmetry". Two now-false "for every ns != v42" comments were
+corrected at the same time.
+
 ### ✅ T029 DELIVERED 2026-08-12 — FR-021's class-side ⟷ raw-XML gate, version-parameterised
 
 `tests/codegen/test_082_class_xml_consistency_test.cpp`, ctest **`codegen_082_class_xml_consistency_test`**

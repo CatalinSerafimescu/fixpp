@@ -269,11 +269,24 @@ set(_vt11_marker   "${CMAKE_BINARY_DIR}/_codegen/include/fixpp/vt11/Messages.hpp
 # is gone, FR-008).
 set(_v44_builders_marker "${CMAKE_BINARY_DIR}/_codegen/include/fixpp/v44/all.hpp")
 # gate-b/r1 F1 (077-builder-args-dedup): v50sp2 also gets a deduped
-# builder tier via the same version-agnostic emit_builders path (main.cpp
-# emits the builder-tier file set for every ns != v42, so v50sp2 too); this
+# builder tier via the same version-agnostic emit_builders path; this
 # marker must participate in the same missing-output / regen-guard
 # discipline as the v44 builders marker above.
+#
+# 082-structural-group-detection T035: the qualifier that used to read "for every
+# ns != v42" is gone — main.cpp now emits the builder-tier file set for EVERY
+# version with a non-empty application registry, with no ns predicate at all.
 set(_v50sp2_builders_marker "${CMAKE_BINARY_DIR}/_codegen/include/fixpp/v50sp2/all.hpp")
+# 082-structural-group-detection T035 [US2] — issue #196: v42's builder tier is in
+# scope now that detection is structural, so it needs its own marker on exactly the
+# same footing as v44/v50sp2. Without one, a missing v42 builder output would not
+# trigger regeneration and the tier would silently stay absent.
+#
+# ⚠️ vt11 deliberately gets NO builders marker: it emits none, and correctly so —
+# zero application messages means `emit_builders` self-skips via `is_application`,
+# not via any version check (FR-010 / T038). Adding a vt11 marker here would demand
+# a file that must never exist and wedge the regen guard permanently.
+set(_v42_builders_marker "${CMAKE_BINARY_DIR}/_codegen/include/fixpp/v42/all.hpp")
 # 076-fix-latest-typed-codegen T006: FIX Latest tier, gated by
 # FIXPP_CODEGEN_FIX_LATEST (default ON). Input lives under dictionaries/
 # orchestra/ (074), not dictionaries/ directly.
@@ -365,7 +378,7 @@ if(_codegen_source_fingerprint_changed)
 endif()
 
 # Missing output?
-foreach(_marker IN ITEMS "${_v42_marker}" "${_v44_marker}" "${_v50sp2_marker}" "${_vt11_marker}" "${_v44_builders_marker}" "${_v50sp2_builders_marker}")
+foreach(_marker IN ITEMS "${_v42_marker}" "${_v44_marker}" "${_v50sp2_marker}" "${_vt11_marker}" "${_v42_builders_marker}" "${_v44_builders_marker}" "${_v50sp2_builders_marker}")
   if(NOT EXISTS "${_marker}")
     set(_need_generate TRUE)
     break()
@@ -505,11 +518,17 @@ if(FIXPP_CODEGEN_FIX_LATEST AND NOT EXISTS "${_vlatest_builders_marker}")
     "${_vlatest_builders_marker}")
 endif()
 
-# gate-b/r1 F1 (077-builder-args-dedup): v44 and v50sp2 builder-tier outputs,
+# gate-b/r1 F1 (077-builder-args-dedup): v42, v44 and v50sp2 builder-tier outputs,
 # mirroring the vlatest builders assertion above — unconditional (not gated
-# on FIXPP_CODEGEN_FIX_LATEST) because v44/v50sp2 builders are part of the
-# always-generated legacy set (main.cpp emits the builder-tier file set
-# for every ns != v42).
+# on FIXPP_CODEGEN_FIX_LATEST) because the legacy builder tiers are part of the
+# always-generated set. 082 T035 adds v42 here: main.cpp no longer carries any ns
+# predicate, so a missing v42 all.hpp is now a real failure rather than the
+# expected state.
+if(NOT EXISTS "${_v42_builders_marker}")
+  message(FATAL_ERROR
+    "[Codegen] Expected output missing after configure-time generation: "
+    "${_v42_builders_marker}")
+endif()
 if(NOT EXISTS "${_v44_builders_marker}")
   message(FATAL_ERROR
     "[Codegen] Expected output missing after configure-time generation: "
@@ -554,7 +573,17 @@ endforeach()
 # safety). Always built (FR-004) — consumer opt-in is link-time only.
 # Build-tree + in-tree consumers only; NO install() (R3, Gate A round 1) —
 # same "no install() rules" convention as fixpp_dict_<ver> above.
-foreach(_ver IN ITEMS v44 v50sp2 vlatest)
+# 082-structural-group-detection T035 [US2] — issue #196: **v42 added.** T035 removes
+# main.cpp's `if (ir.ns != "v42")` so the 226-file v42 builder/validator set is now
+# emitted; without v42 in this list those files would be generated and then compiled
+# by nothing, which is a silent no-delivery rather than a build failure.
+#
+# ⚠️ vt11 is still absent, and for the reason FR-010/T038 pins: it emits no builder
+# files at all (zero application messages ⇒ `emit_builders` self-skips via
+# `is_application`), so `file(GLOB)` would find nothing and `add_library` would fail
+# on an empty source list. Its absence here is structural, NOT a version policy —
+# do not "restore symmetry" by adding it.
+foreach(_ver IN ITEMS v42 v44 v50sp2 vlatest)
   if(_ver STREQUAL "vlatest" AND NOT FIXPP_CODEGEN_FIX_LATEST)
     continue()
   endif()

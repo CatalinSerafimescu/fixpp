@@ -58,15 +58,31 @@ TEST(BuilderNoEmit077, Vt11EmitsNoBuilders) {
         << "vt11 is FIXT admin-only (0 application messages); expected NO messages/ dir (G4a).";
 }
 
-TEST(BuilderNoEmit077, V42EmitsNoBuilders) {
-    EXPECT_FALSE(std::filesystem::exists(FIXPP_CODEGEN_V42_BUILDERS_HPP))
-        << "v42 is DESCOPED (issue #196 / L-063-1: FIX 4.2 NumInGroup=INT => "
-           "0 typed groups); expected NO all.hpp (driver-level "
-           "exclusion, T017). Found one at "
-        << FIXPP_CODEGEN_V42_BUILDERS_HPP << " -- would mean the T017 exclusion regressed.";
-    EXPECT_FALSE(std::filesystem::exists(
+// 082-structural-group-detection T032 [US2] — FR-016b: this assertion was
+// `V42EmitsNoBuilders` and is **INVERTED, not deleted**, so the descope's
+// retirement is witnessed by the same pin that enforced it.
+//
+// 077's premise was L-063-1: "FIX 4.2 NumInGroup=INT => 0 typed groups", so a v42
+// builder tier had nothing to carry and `main.cpp`'s `if (ir.ns != "v42")`
+// excluded it (077 T017). 082 removes that premise — detection is now structural,
+// so FIX42's 18 declared groups ARE visible (T023–T025) — and T035 deletes the
+// exclusion with no replacement version predicate.
+//
+// ⚠️ `Vt11EmitsNoBuilders` above is deliberately UNCHANGED. vt11 must keep
+// emitting nothing, but for a *different and genuine* reason: it has zero
+// application messages, so `emit_builders`' `is_application` gate empties its
+// registry by construction rather than by a version check (FR-010 / T038). If
+// both tests had been inverted together, that distinction would be lost.
+TEST(BuilderNoEmit077, V42EmitsBuilders) {
+    EXPECT_TRUE(std::filesystem::exists(FIXPP_CODEGEN_V42_BUILDERS_HPP))
+        << "v42's builder tier is IN SCOPE as of 082 (issue #196): the L-063-1 descope premise is "
+           "retired and T035 removed main.cpp's `if (ir.ns != \"v42\")` exclusion, so all.hpp must "
+           "be emitted. Missing at "
+        << FIXPP_CODEGEN_V42_BUILDERS_HPP;
+    EXPECT_TRUE(std::filesystem::exists(
         std::filesystem::path(FIXPP_CODEGEN_V42_BUILDERS_HPP).parent_path() / "messages"))
-        << "v42 is DESCOPED; expected NO messages/ dir (driver-level exclusion, T017).";
+        << "v42 must emit a messages/ dir -- 39 application messages are in builder scope under "
+           "`--families all` (T031's derivation).";
 }
 
 // Positive control: the three builder-bearing versions DO emit.
