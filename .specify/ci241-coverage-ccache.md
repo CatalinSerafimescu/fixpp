@@ -146,18 +146,26 @@ produce no object at all (§4), **at least 1484 of the 1486 manifest objects wer
 and are byte-identical to their cold-compiled counterparts** — which holds because all 1486
 manifest entries are CMake target objects under a `.dir/` (verified per-file against the artifact)
 and both compiler launchers are set as job-level env vars, so the manifest population is a subset
-of `cacheable_calls`; `1489 − 1461 − 25 = 3` is the residual. That is 99.87 % of the population,
-versus the ~15 inert lines the 99 % band would have allowed. The proof is not resting on
-self-comparison.
+of `cacheable_calls`; `1489 − 1461 − 25 = 3` is the residual. The cold run's own 14 hits do not
+weaken this: its cache was **provably empty at start** — the `ccache-action` restore logged `No
+cache found.`, ccache was installed fresh by that step, and `remote_storage` is unset — so a cold
+hit could only be served from an entry a *miss earlier in the same run* had just written. Every
+byte in the cold manifest therefore traces to a fresh compile in the cold run, whether the compiler
+wrote it directly or ccache copied it. Consistent with this, the manifest holds 1486 paths over 1462
+distinct hashes: 24 same-source duplicate-compilation sites (e.g. `_fixtures_/test_double_fsm.cpp.o`
+at 12 target paths), which is more than enough to account for 14 intra-run hits. That is 99.87 % of
+the population, versus the ~15 inert lines the 99 % band would have allowed. The proof is not
+resting on self-comparison.
 
 **Independent bound, from wall clock alone.** Cold `Build` step 17:53:52→19:39:45 = 6353 s; warm
-`Build` 06:02:24→06:09:52 = 448 s. The ratio **14.2×** is core-count independent. The warm 448 s
-must also absorb 1487 cache-hit retrievals, the uncacheable C++20 module scan, the codegen
-bootstrap, and the link of ~350 test binaries — fresh compiles in the warm run are therefore
-bounded at **O(10²), not O(10³)**, even under the most hostile reading. Against a claim ("ccache
-corrupts coverage mapping") that is systematic by construction, that is refutation with three
-orders of magnitude of margin; it does not rescue the literal number 1484, but it rescues the
-conclusion.
+`Build` 06:02:24→06:09:52 = 448 s. The warm `Build` therefore performed at most **7.05 %**
+(448 / 6353) of the cold build's wall time at the same parallelism, and strictly less than that in
+fresh compilation — the 448 s must also absorb 1487 cache-hit retrievals, the uncacheable C++20
+module scan, the codegen bootstrap and ~350 links. This does not bound the **number** of fresh warm
+compiles: that would need a lower bound on per-TU compile time, which nothing here measures. The
+count is bounded by the counter — 2 misses. Against a claim ("ccache corrupts coverage mapping")
+that is systematic by construction, this ratio is corroborating evidence of substantial cache use;
+the literal number 1484 itself rests on the empty-cache premise stated above, not on this ratio.
 
 **§3b is discharged without running it.** A 99.87 % hit rate under `CCACHE_COMPILERCHECK=content`
 *proves* the compiler binary did not move overnight; the version string matching

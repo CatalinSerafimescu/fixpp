@@ -332,7 +332,8 @@ jobs:
     # proving nothing. Only 2 of 1489 calls missed and 3 produce no object at
     # all, so >=1484 of the 1486 objects were genuinely cache-served (every .o
     # is a CMake target object and the launcher is job-level env, so the
-    # manifest is a subset of cacheable_calls).
+    # manifest is a subset of cacheable_calls; cold cache was empty — restore
+    # logged "No cache found." — so cold hits are intra-run duplicates).
     #
     # ⚠️ NOT proven, and deliberately not claimed: that ccache is safe for every
     # FUTURE coverage configuration. The proof is against this compiler, this
@@ -1244,10 +1245,14 @@ jobs:
       # discharges both needs at once.
       #
       # Same restore-only-on-PR posture and the same 2G cap as the matrix legs —
-      # see that step's comment for the pool arithmetic. This lane is the
-      # ~600-900 MB the matrix comment already budgets against the post-#240
-      # ~4.2 GiB of headroom; re-derive with
-      # `gh api repos/<owner>/<repo>/actions/cache/usage` rather than trusting it.
+      # see that step's comment for the pool arithmetic. This lane's entry
+      # measured 901 MiB cold / 925 MiB warm. For the pool arithmetic see §9 of
+      # .specify/ci241-coverage-ccache.md — measured 2026-08-12: 6.49 GB over 9
+      # entries, projected 7.46 GB (74.6%) with this lane, 2.54 GB headroom
+      # against a 10 GB decimal cap.
+      # ⚠️ Re-derive by RE-LISTING (`gh cache list`); `gh api
+      # repos/<owner>/<repo>/actions/cache/usage` lags deletes and must not be
+      # trusted alone (cache-cleanup.yml:207-209).
       - name: ccache (install + restore + save compiler cache)
         uses: hendrikmuhs/ccache-action@v1.2.23
         with:
@@ -1313,8 +1318,8 @@ jobs:
       # and the restored-but-cold warning at its `:207` is gated on a restore
       # disposition this lane cannot supply (argument 2 is '', see below). A
       # warm run at 0% hits is therefore GREEN and silent — deliberately, so
-      # the necessarily-cold first two `main` runs (§8 of the record) are not
-      # red by design.
+      # the necessarily-cold PR run and first post-merge `main` run (§8 of the
+      # record) are not red by design.
       #
       # ⚠️ Argument 2 is deliberately EMPTY. It is the restore disposition from
       # ci/restore-ccache.sh's `hit` output, and this lane restores via
