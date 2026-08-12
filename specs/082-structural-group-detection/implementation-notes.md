@@ -1635,3 +1635,81 @@ is claimed as an 082 effect. Only in-session absolute figures against the ceilin
 control's movement is what makes the confound visible — see
 `[[feedback_ccache_cold_miss_overhead_is_below_runner_variance]]` for the same lesson on CI build
 times, and `[[feedback_a_topology_measurement_is_not_a_behavioural_claim]]`.
+
+## Phase 7 — T049 (SC-012): the 8-file baseline set, and why the check had to be REPLACED
+
+T049 asks for a ±5 % re-check of 8 pre-existing baselines. **As written it is not evaluable**, and the
+reason is in the baseline files themselves:
+
+| baseline | state | usable for ±5 %? |
+|---|---|---|
+| `wire/framer_bench.json` | `build_type: debug` | **No** — its own note: *"Debug overhead is ~20-25× release; debug timing here is NOT the ceiling gate."* |
+| `wire/offset_table_bench.json` | `build_type: debug` | **No** — same |
+| `wire/parser_bench.json` | `build_type: debug` | **No** — same |
+| `wire/writer_bench.json` | `build_type: debug` | **No** — same |
+| `codegen/typed_accessor_bench.json` | `benchmarks: []` | **No** — nothing to compare |
+| `dictionary/reify_bench.json` | `benchmarks: []` | **No** — *"Seed these baselines from the first 2b-green CI run."* |
+| `dictionary/xml_loader.json` | release, raw google-benchmark dump, **2026-05-14, `num_cpus: 8`** | Stale by ~9 features and a different host |
+| `wire/validator_bench.json` | release, 4 rows, 10-rep mean+median | Yes |
+
+**So the check was replaced with the only comparison that is valid on this machine: an in-session A/B
+against `main`.** T048 established why — `vt11`, which 082 provably does not touch, moved **−35 %**
+between measurement sessions, so any cross-session magnitude is uninterpretable. A detached worktree
+at `main` (`c8eb4fec`) was built with the same preset and the 8 profiles run **back-to-back on the same
+host, same load**.
+
+### Result: NO in-session regression on any of the 8 profiles
+
+21 rows compared. Five appeared outside ±5 % on the first pass; **all five were refuted**:
+
+- `BM_Validate_NoGroup` **+11.2 % → −2.4 %** on 3× re-measurement per side (run spread 3.9 % / 4.5 %).
+  Its sibling group-free row (`Validate_Heartbeat`) had moved only +4.0 % on the same pass, and that
+  disagreement between two near-identical cases is what flagged it as noise rather than signal.
+- `BM_OffsetTable_Find_32slot` +8.8 % — **0.25 ns absolute** on a ~3 ns measurement.
+- `BM_CharAccessor` −43.5 %, `BM_StringAccessor` −30.5 %, `BM_IntAccessor` −9.0 % — all *faster*,
+  sub-nanosecond absolute on 2–3.5 ns rows, and 082 does not touch the v44 typed accessors.
+
+**⚠️ Recorded as a methodology finding: ±5 % is BELOW THE RESOLUTION of several of these profiles.**
+`framer` is 37 ns, `offset_table_find` ~3 ns, the typed accessors 2–3.5 ns, `parser_iter` 2.3 ns. A
+±5 % budget on a 2.3 ns row is 0.1 ns — smaller than run-to-run jitter, so such a gate will fire on
+noise in both directions. That is not a reason to skip it; it is a reason to state the resolution
+alongside the verdict.
+
+### ⚠️ NEW, PRE-EXISTING, NOT 082's: `XmlLoader::load` has regressed 60-90 % on `main`
+
+Against `dictionary/xml_loader.json` (2026-05-14) the current tree is **+60.9 % / +62.4 % / +90.4 %**
+on FIX42 / FIX44 / FIX50SP2. The in-session A/B proves **082 is not the cause**:
+
+| | `main` `c8eb4fec` | `082` HEAD | 082's delta |
+|---|---|---|---|
+| `BM_XmlLoader_LoadFix42` | 1.035 ms | 0.981 ms | −5.2 % |
+| `BM_XmlLoader_LoadFix44` | 4.465 ms | 4.362 ms | −2.3 % |
+| `BM_XmlLoader_LoadFix50SP2` | 100.130 ms | 99.764 ms | −0.4 % |
+
+`main` **already** measures 4.465 / 100.130 ms against the baseline's 2.775 / 55.836 ms. Corroborated
+structurally: 082's entire `src/dictionary/xml_loader.cpp` diff is **14 added lines, 0 removed, and 0
+of them non-comment** (machine-checked, not eyeballed) — FR-023 is satisfied by 083's existing
+`captured == 0` disposition, not by new code in the timed region. The regression therefore accumulated
+across the ~9 features merged since 2026-05-14, most plausibly 083's per-context group store.
+
+**Why nothing caught it:** the baselines are stale or debug-seeded (table above), and `tier1.yml`'s
+`bench` job is **soft and runs only `placeholder_bench`** — the same blind spot T048 found for the
+compile-time ceiling. **Should be filed as an issue against `main`; it is out of 082's scope to fix.**
+
+## Phase 7 — T049b (FR-017 / SC-009): the frozen C-ABI surface, verified not assumed
+
+Article X's obligation is to **verify** the non-violation, and T055's bar requires every FR to map to a
+landed witness — not to the absence of a diff. All three legs discharged, plus the error-slot pin:
+
+| leg | check | result |
+|---|---|---|
+| (i) | `git diff origin/main...HEAD` over the C-ABI surface | **0 changed files** across `src/capi/`, `include/fixpp/capi/`, `include/fix/` (whole tree) |
+| (i) | `FIXPP_C_ABI_VERSION` | **1.5.0** (`MAJOR=1 MINOR=5 PATCH=0`) — unmoved |
+| (ii) | `capi_pure_tests --gtest_filter='AbiSymbolGolden.*'` | **2/2 PASS** — `CabiSymbolSetUnchanged`, `ErrorEnumUnchanged`. No golden regenerated (`nm` symbol golden is this repo's abidiff-equivalent since libabigail was retired 2026-06-22, so regeneration is neither expected nor permitted). |
+| (iii) | `.github/workflows/abi-golden.yml` on the branch | **green at `78e65304`** (run `31595505059`), and also at the prior head `c06b390e` |
+| extra | FR-023 adds no `fixpp::core::error` variant | `error_020_completeness` **PASS** (and `error_017` / `error_019` — all three slot pins run, 3/3) |
+
+⚠️ **T049b's header paths had to be resolved, not trusted.** The task text names "`error.h` and
+`version.h`"; there is no `include/fix/version.h` — the real files are `include/fix/c_api/error.h` and
+`include/fix/c_api/version.h`. A leg written against the assumed path would have diffed a **nonexistent
+file**, reported 0 changes, and passed vacuously. Resolved against the tree before asserting.
