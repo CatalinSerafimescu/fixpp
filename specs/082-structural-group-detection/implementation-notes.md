@@ -1020,6 +1020,46 @@ and a vt11 builders *marker* would demand a file that must never exist, wedging 
 Commented in place so nobody "restores symmetry". Two now-false "for every ns != v42" comments were
 corrected at the same time.
 
+### ▶ T034 PREP — the 14 pairs DERIVED (2026-08-12), and T034's premise confirmed
+
+Derived from raw FIX42.xml (`required='Y'` on a `<group>` declaration, components expanded), so T034's
+hand-written typed cases can be pinned against a **derived set** rather than a transcribed one:
+
+**14 pairs across 12 messages — 13 top-level, 1 nested**, exactly as T034 states:
+
+| message | msgtype | tag | location |
+|---|---|---|---|
+| BidResponse | `l` | 420 `NoBidComponents` | top-level |
+| Email | `C` | 33 `LinesOfText` | top-level |
+| ListStatus | `N` | 73 `NoOrders` | top-level |
+| ListStrikePrice | `m` | 428 `NoStrikes` | top-level |
+| MarketDataIncrementalRefresh | `X` | 268 `NoMDEntries` | top-level |
+| MarketDataRequest | `V` | 146 `NoRelatedSym` | top-level |
+| MarketDataRequest | `V` | 267 `NoMDEntryTypes` | top-level |
+| MarketDataSnapshotFullRefresh | `W` | 268 `NoMDEntries` | top-level |
+| MassQuote | `i` | 296 `NoQuoteSets` | top-level |
+| **MassQuote** | `i` | **295 `NoQuoteEntries`** | **nested in 296** ← the 14th |
+| NewOrderList | `E` | 73 `NoOrders` | top-level |
+| News | `B` | 33 `LinesOfText` | top-level |
+| QuoteCancel | `Z` | 295 `NoQuoteEntries` | top-level |
+| QuoteRequest | `R` | 146 `NoRelatedSym` | top-level |
+
+14 pairs / 12 messages reconciles because **MarketDataRequest and MassQuote each contribute two**.
+The single nested pair is `MassQuote 295-in-296` — so T034's "13 top-level + a 14th built as a 296 entry
+carrying an empty 295 span, checked via `gc.validate_entry`" is confirmed, not assumed.
+
+**Emitted v42 plan names (28, matching T031 including ordinals):** `G_124Args`, `G_136Args`,
+`G_146_{1..4}Args`, `G_199Args`, `G_215Args`, `G_267Args`, `G_268_{1,2}Args`, `G_295_{1,2,3}Args`,
+`G_296_{1,2}Args`, `G_33Args`, `G_382Args`, `G_386Args`, `G_398Args`, `G_420_{1,2}Args`, `G_428Args`,
+`G_73_{1,2,3}Args`, `G_78_{1,2}Args`. Ordinaled map = `{73:3, 78:2, 146:4, 268:2, 295:3, 296:2, 420:2}`,
+**identical** to `builder_plan_census.py`'s.
+
+⚠️ **Seven of the 14 pairs' tags are ORDINALED**, so T034 cannot name a plan from the tag alone — it must
+take the plan the *specific message* references (from the emitted `messages/<Msg>.hpp`). And per FR-016b
+plan names are **mode-dependent**, so an `--families official` name must never be cross-compared with an
+`--families all` one. Model to follow: `tests/session/test_067_builder_validate.cpp` (the v44 equivalent,
+e.g. `G_73_2Args` for `NewOrderList`).
+
 ### ✅ T029 DELIVERED 2026-08-12 — FR-021's class-side ⟷ raw-XML gate, version-parameterised
 
 `tests/codegen/test_082_class_xml_consistency_test.cpp`, ctest **`codegen_082_class_xml_consistency_test`**
