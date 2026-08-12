@@ -678,6 +678,28 @@ The complementary library-side mutant (re-introducing the datatype gate in `dict
 run — it triggers the full codegen cascade — but that direction is already covered by
 `RequiredScope.Fix42IntTypedGroupCountFieldNowResolvesInContextStore`.
 
+### Carve-out residue the same enumeration found — OPEN, all three GREEN in CI
+
+Having been bitten by enumerating from a task list, the fix pass re-derived the population properly:
+`grep -rln '#196\|L-066-1\|L-063-1\|L-061-1\|L-077-1' tests/ contracts/` → **16 files**. Five are the
+T030 set (incl. the delimiter census above), the rest are 082-authored — except **three that assert a
+premise 082 falsified**. None fails: they are stale *documentation and coverage scope*, invisible to a
+red/green signal, which is exactly why the grep matters. **Not fixed here** — this commit is scoped to
+the CI-red test. Phase 7 / T050 should absorb them:
+
+1. **`tests/wire/required_scope_two_tier_test.cpp:33-35`** — the strongest of the three, because it is a
+   *coverage* claim, not a comment: *"FIX42 excluded entirely: no generated typed `validate_<Msg>`
+   (`tools/codegen/fixpp-codegen/main.cpp:132` `if (ir.ns != "v42")` — L-077-1/#196)"*. **T035 deleted
+   that condition**, so the cite names a line that no longer exists and the stated reason for excluding
+   FIX42 from this suite is gone. FIX42 now *has* generated typed validators — this file should either
+   cover them or say why not.
+2. **`tests/wire/validator_type_check_test.cpp:974-982`** — describes L-066-1 as live and *"explicitly
+   deferred to issue #196 … NOT something T012 authorizes fixing here"*. 082 closes it, so whatever
+   group-path assertion was withheld on that basis is now writable.
+3. **`tests/support/fix44_dictionary.hpp:18`** — carries the *"FIX43/FIX44/FIX50/FIX50SP1/FIX50SP2/
+   FIXT.1.1 group-registering scope (L-063-1)"* six-dictionary enumeration. Comment-only, and it is the
+   exact scope note FR-019/T050 already requires widening — listed so the T050 pass has the site.
+
 ### Concessions to #210 that must be REVERTED when it lands
 
 > ## ✅ ALL THREE DISCHARGED 2026-08-12 — and there was a FOURTH, to #208
