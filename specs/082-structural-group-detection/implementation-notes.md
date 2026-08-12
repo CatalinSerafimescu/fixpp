@@ -1595,3 +1595,43 @@ asserts `cases_checked == 13` while the concession text says **14** contexts. Th
 |---|---|
 | S0 census transcript | `<scratchpad>/pre-change/S0-predicate-census.txt` |
 | S0b builder-plan derivation | `<scratchpad>/pre-change/S0b-builder-plan-census.txt` |
+
+## Phase 7 — T048 (FR-022(c)): compile-time ceiling, measured
+
+`ctest -R '^compile_time_bench$'`, release + `FIXPP_BUILD_BENCH=ON`, **7 runs**. Per T003 this is a
+**record-and-compare obligation, not a pass/fail gate** — the harness already returned
+`NFR-003-2 result: FAIL` before 082 touched anything, because `v44` exceeded the load-bearing 3 s
+single-version ceiling and only `v50sp2` is exempt.
+
+| version | pre-change (T003, steady) | post-082 observed range | verdict |
+|---|---|---|---|
+| `v42` | ≈ 2.73 s (~10 % headroom) | **1.70 – 2.24 s** | **PASS on 5/5 measured runs** |
+| `v44` | ≈ 4.5 s | **2.76 – 3.53 s** | **FAIL 5/7, PASS 2/7 — pre-existing overage, now FLAKY at the boundary** |
+| `v50sp2` | ≈ 10.3 s | 6.41 – 7.80 s | KNOWN_OVERAGE (exempt) |
+| `vt11` | ≈ 2.05 s | 1.18 – 1.52 s | PASS |
+| all-versions | ≈ 14.8 s | 9.40 – 11.38 s | PASS (15 s soft) |
+
+**1. The risk T048 exists to catch did NOT materialize.** 082 adds 18 `class G_` to `v42/Messages.hpp`
+and `Reify.hpp`, and T003 flagged that `v42` had only ≈0.27 s of headroom. Measured in-session, `v42`
+sits at **1.70–2.24 s against a 3 s ceiling and passed every run**. That absolute figure — not a
+cross-session delta — is the claim.
+
+**2. NEW finding: `v44`'s overage is now FLAKY, which is worse than a stable failure.** It straddles
+the ceiling (2.76 / 3.08 / 3.16 / 3.21 / 3.53 s plus two sub-3 s runs) and the harness verdict flips
+`FAIL`↔`PASS` run to run. Pre-existing per T003 (≈4.5 s), **not caused by 082** — but a gate whose
+verdict depends on machine load will read green on a lucky run and hide the overage entirely. ⚠️ This
+also means **`ctest -L bench` is nondeterministic on this tree**, which T053's "full local gate" and
+T055 must treat as a known pre-existing condition rather than a fresh regression. It is invisible in
+CI because `tier1.yml`'s `bench` job is soft and runs only `placeholder_bench`.
+
+**3. ⚠️ CROSS-SESSION MAGNITUDE COMPARISON IS INVALID HERE, AND `vt11` PROVES IT.** Every version
+measured 22–42 % faster than its T003 figure, including ones 082 cannot have improved. **`vt11` is a
+natural control**: it is admin-only, emits no builders, and 082 changes nothing for it — yet it moved
+≈2.05 s → 1.18–1.52 s (**−35 %**). `v50sp2`'s read tier is likewise proven bit-identical and moved
+−35 %. A uniform improvement across untouched versions is an **environment delta between the two
+measurement sessions**, not a code effect. The same pattern appears in T046 (FIX44/FIX50SP2 build
+34–44 % "faster"), which corroborates it. **Consequently: no before/after magnitude on either profile
+is claimed as an 082 effect. Only in-session absolute figures against the ceiling are.** Recording the
+control's movement is what makes the confound visible — see
+`[[feedback_ccache_cold_miss_overhead_is_below_runner_variance]]` for the same lesson on CI build
+times, and `[[feedback_a_topology_measurement_is_not_a_behavioural_claim]]`.

@@ -1,0 +1,55 @@
+{
+  "_note": "FIRST baseline. 082-structural-group-detection T047 / FR-022 (b) — the inbound PARSE path on FIX 4.2. Release build, --benchmark_min_time=0.5s, 4 runs. Measured spread is 2-12%, so evaluate any future ±5% budget against `measured_release_ns_runs`, not against a single run.",
+  "context": {
+    "date": "2026-08-12",
+    "host_name": "WSLUBUNTU24.04",
+    "executable": "build/linux-clang-release/bench/wire/fix42_group_parse_bench",
+    "build_type": "release",
+    "preset": "linux-clang-release",
+    "cpu": "10 X 3593.26 MHz",
+    "load_average_at_run": "0.98, 1.17, 1.41",
+    "benchmark_min_time": "0.5s",
+    "runs": 4,
+    "feature": "082-structural-group-detection",
+    "dictionary": "dictionaries/FIX42.xml via dict::XmlLoader -> Dictionary::as_table_view()"
+  },
+  "_what_changed_on_this_path": "table_view::is_group_tag() is the parse-path group pre-filter (table_view.hpp:737-741): it word-indexes group_bits_ and returns false when `w >= group_bits_.size()`. Pre-082 that vector was EMPTY on FIX 4.0/4.1/4.2 (their <group> count fields are typed legacy XML INT and detection keyed on the datatype), so every tag took the size-check short-circuit and the parser did NO group work. Post-082 it holds 7 words for FIX 4.2 (max registered no_tag 428 -> (428>>6)+1), so the same call loads a word and tests a bit, and a set bit descends into real group-context resolution (D-12).",
+  "_anti_vacuity": "Every group-bearing row ASSERTS registration (`group_first_field(tag) != 0`) and a non-empty group walk (`group_slices(tag)` non-empty, reported as the `group_entries` counter) BEFORE the timed loop, via SkipWithError. A bench whose group silently failed to register would time a FLAT parse and report a perfectly plausible number — indistinguishable from success, and exactly the silent-success class this feature removes. The counters below are the evidence those gates fired: group_entries=2 (top-level) and =1 (nested).",
+  "benchmarks": [
+    {
+      "name": "BM_Fix42Parse_NoGroup",
+      "unit": "ns",
+      "fixture": "35=0 Heartbeat, FIX 4.2",
+      "measured_release_ns_runs": [174, 178, 180, 170],
+      "measured_release_ns_median": 176,
+      "spread_pct": 5.9,
+      "has_pre_082_counterpart": true,
+      "role": "COMMON-PATH REGRESSION GUARD — the only row on this profile with a real pre-082 counterpart. Carries no group tag, so it still resolves to 'not a group', but now by loading a word and testing a bit instead of failing a size check. Every FIX 4.0/4.1/4.2 session pays this whether or not its traffic carries groups, so it must stay flat.",
+      "verdict": "176 ns median. No pre-082 number was captured for this specific profile (it did not exist), so this row establishes the baseline that FUTURE changes are measured against."
+    },
+    {
+      "name": "BM_Fix42Parse_TopLevelGroup",
+      "unit": "ns",
+      "fixture": "35=W MarketDataSnapshotFullRefresh, NoMDEntries(268) delim MDEntryType(269), 2 entries",
+      "measured_release_ns_runs": [279, 256, 287, 282],
+      "measured_release_ns_median": 280,
+      "spread_pct": 12.1,
+      "group_entries": 2,
+      "has_pre_082_counterpart": false,
+      "_why_no_before": "Pre-082, tag 268 was treated as a plain scalar on FIX 4.2 and the frame parsed FLAT. A 'before' figure would time a different operation, not a faster one — so comparing them would manufacture a regression or an improvement out of a change in what is being computed. Recorded as new, the same disposition 083's DivergentContext row took.",
+      "verdict": "NEW ROW — +104 ns over the group-free path is the cost of real group-context resolution on a 2-entry group, measured in-session."
+    },
+    {
+      "name": "BM_Fix42Parse_NestedGroup",
+      "unit": "ns",
+      "fixture": "35=i MassQuote, NoQuoteSets(296) -> NoQuoteEntries(295); mirrors the T044/T045 exemplar body incl. UnderlyingSymbol(311)",
+      "measured_release_ns_runs": [307, 301, 319, 297],
+      "measured_release_ns_median": 304,
+      "spread_pct": 7.4,
+      "group_entries": 1,
+      "has_pre_082_counterpart": false,
+      "verdict": "NEW ROW — the two-level shape US4's exemplar writes. +128 ns over the group-free path."
+    }
+  ],
+  "_cross_session_warning": "Do NOT compare these figures against numbers taken in a different session. T048 established that this machine's two measurement sessions differ by 22-42% on identical work: `vt11`, which 082 provably does not touch, moved -35%. Only in-session comparisons between the rows above are load-bearing."
+}
