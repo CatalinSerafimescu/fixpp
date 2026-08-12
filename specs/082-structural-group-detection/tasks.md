@@ -9,6 +9,36 @@
 OD-1 resolved → the fail-closed loader rejection (**FR-023**). OD-2 ratified → the annotation-only
 Article XVIII §7 amendment (**FR-020**, task T052). Appendix-A user `/plan` sign-off given.
 
+> ## ⛔ THE #208 DESCOPE BANNER BELOW IS RETIRED — #208 IS CLOSED (annotated 2026-08-12)
+>
+> **Read this before acting on any delta below.** #208 was closed by **083** (per-context
+> group-delimiter resolution), whose capture resolves **through** nested components — exactly the
+> one-level-`<component>`-scan defect the banner describes. 082 caught up to `main` by merge
+> `87fcf5a8`, so the defect is **not present in this branch**.
+>
+> **Measured 2026-08-12:** `group_first_field(1499 / 1669 / 1919)` on FIX50SP2 = **453 / 1529 / 1920**,
+> all non-zero; all three register. The loader now registers **505**, matching C2's oracle.
+>
+> **Per-delta disposition:**
+> - **Delta 1 (T018 pins 502)** — **DONE, flipped to 505.** The carve-out in
+>   `required_scope_census_test.cpp` is deleted and the pin re-derived; 13/13 green. This is precisely
+>   the flip the test's own banner prescribed *"once #208 lands"*.
+> - **Delta 2** — unchanged and now vindicated: the oracle's **505** was right all along; the
+>   505-vs-502 gap is closed from the *loader* side, not by moving the oracle.
+> - **Delta 3 / Delta 4** — still stand. FR-023's narrowed scope is now carried by 083's
+>   `captured == 0` disposition (see `spec.md` FR-023 § AMENDED); T011's ten-dictionary load-clean leg
+>   is green.
+> - **Delta 5 (T014 / T050 / T051 must state the residual)** — ⚠️ **NOW WRONG, and these tasks are
+>   still OPEN.** There is **no residual**: `group_first_field(T) == 0` is **not** reachable on any
+>   shipped dictionary, C1.1's "no caveat" claim **is** achieved, and P1-NON's narrowing is spent. Do
+>   **not** write a B&L row or release note describing a 3-tag FIX50SP2 residual — it would ship a
+>   retired limitation. See `contracts/group-detection.md` C1.1's retirement blockquote.
+> - **Delta 6 (T055 records FR-023 as partially delivered)** — re-assess. The #208 carry-forward is
+>   discharged; what remains is FR-023's *subsumption* under `unresolved_group_policy`, a different
+>   disposition (see `spec.md` FR-023 § AMENDED and the 2026-08-11 amendment).
+>
+> Everything below is the original 2026-07-30 banner, kept for the reasoning.
+
 > ## ⚠ DESCOPE BANNER — issue [#208](https://github.com/CatalinSerafimescu/fixpp/issues/208), user decision 2026-07-30
 >
 > Implementation-time measurement (T004) found a **pre-existing loader defect** that this task list
@@ -163,9 +193,9 @@ with declared members (today 0); regenerate the `v42` read tier and assert 18 ty
 - [X] T023 [US1] Replace the datatype gate with `group_first_field(fr.tag) != 0` at **all three** `Dictionary::as_table_view()` sites in `src/dictionary/dictionary.cpp` (`:398` bare loop, `:441` `immediate_parent`, `:446` context loop) — **in one change unit**, per FR-004: no configuration or code path may leave one store structural and the other datatype-gated. Fold the now-tautological `if (legacy_first == 0) { continue; }` guard at `:403-405` into the new predicate (`:402` is the `legacy_first = group_first_field(legacy_no_tag)` **lookup**, not the guard — `plan.md`'s Round-2 log records this same off-by-one for a reviewer-supplied cite) (D-7 disposition FOLD/REDUNDANT). Leave `:463`'s `if (members.empty()) continue;` **unchanged** — it is a post-detection registration guard, outside the predicate's scope (C1.3 P1 / P1-NON). Do **not** change `FieldRef::type` (D-4) — that is what keeps FR-016a's byte-identity prediction falsifiable rather than tautological.
 - [X] T024 [US1] Add `VersionIR::group_tags` to `tools/codegen/fixpp-codegen/ir.hpp` and populate it from the already-correct `MessageIR::group_order` in `tools/codegen/fixpp-codegen/ir.cpp` — D-3. `group_order` is *already* correct for FIX42 today (`ir.cpp:80-100`: `walk_level` keys on the element name and pushes the `GroupOrderEntry` unconditionally), which is what makes the codegen half a re-point rather than new plumbing.
 - [X] T025 [US1] Re-point all **8** emitter line-sites onto `VersionIR::group_tags` — `tools/codegen/fixpp-codegen/emit_messages.cpp:166,234,337,347,425`, `emit_reify.cpp:217,227`, `emit_builders.cpp:606` (D-3 / D-7). Leave `emit_manifest.cpp:73` alone: it is a pure datatype-token column with no group branching, dispositioned NO CHANGE.
-- [ ] T026 [US1] Force a clean codegen rebuild, regenerate every version, and classify **all five** emitted `v42` artifacts explicitly — `Fields.hpp`, `Messages.hpp`, `Validator.hpp`, `Reify.hpp`, `NormativeReferences.md` — as byte-identical or changed-with-explanation (FR-016). **`Manifest.txt` is NOT a `v42` artifact**: `MessageIR::occurrences` is populated only on the Orchestra path (`ir.cpp:476`), so `emit_manifest` returns empty for every `<fix>`-schema version and no file is written. `Fields.hpp` and `Validator.hpp` must be byte-identical (FR-016a).
-- [ ] T027 [US1] Verify the `v44` / `v50sp2` / `vt11` / `vlatest` read goldens diff **byte-identical** (FR-015 / SC-005 / K5) — the discriminating check that the predicate is set-equal wherever C2 says EQUAL.
-- [ ] T028 [US1] Regenerate `specs/003-dictionary-codegen/contracts/golden/v42_Messages.golden.hpp` and reconcile the emitted delta **by construction** to FIX42's declared structure — not "golden regenerated" (FR-016 / SC-004).
+- [X] T026 [US1] Force a clean codegen rebuild, regenerate every version, and classify **all five** emitted `v42` artifacts explicitly — `Fields.hpp`, `Messages.hpp`, `Validator.hpp`, `Reify.hpp`, `NormativeReferences.md` — as byte-identical or changed-with-explanation (FR-016). **`Manifest.txt` is NOT a `v42` artifact**: `MessageIR::occurrences` is populated only on the Orchestra path (`ir.cpp:476`), so `emit_manifest` returns empty for every `<fix>`-schema version and no file is written. `Fields.hpp` and `Validator.hpp` must be byte-identical (FR-016a).
+- [X] T027 [US1] Verify the `v44` / `v50sp2` / `vt11` / `vlatest` read goldens diff **byte-identical** (FR-015 / SC-005 / K5) — the discriminating check that the predicate is set-equal wherever C2 says EQUAL.
+- [X] T028 [US1] Regenerate `specs/003-dictionary-codegen/contracts/golden/v42_Messages.golden.hpp` and reconcile the emitted delta **by construction** to FIX42's declared structure — not "golden regenerated" (FR-016 / SC-004).
 - [ ] T029 [US1] Implement the `v42` **class-side ⟷ raw-XML** consistency gate in `tests/codegen/` — FR-021 / SC-004. Class side: parsed from the *text* of the regenerated `v42/Messages.hpp` (class bodies, `view_.template get<N>()` accessor calls, `group_view<...G_N>` return types marking a group reference) per the extraction rule at `tests/codegen/vlatest_manifest_class_consistency_test.cpp:33-63`. Structural side: T005's oracle. The 076 V-1/V-1b *manifest*↔class pair **cannot** be instantiated for `v42` (V-1b keys on a `Manifest.txt` `v42` does not emit), so this is the class-side leg only. Prefer a version-parameterised gate — it closes the same hole for `v44` / `v50sp2` / `vt11`.
 - [X] T030 [US1] Refresh the now-false carve-out comments in the four dictionary tests — `tests/dictionary/reused_tag_census_test.cpp`, `required_scope_test.cpp:107`, `required_scope_census_test.cpp:341`, and the census helper — and move the COUNT pins that shift.
 

@@ -53,8 +53,35 @@ endif()
 # ── Pre-077 baseline (T001, HEAD 455737c3) ─────────────────────────────────
 
 set(_expected_v42_Fields.hpp     c8bb64b1be70acdfae7e8efcfeba8c512b19910ed9987eb2a2d62257c48757e5)
-set(_expected_v42_Messages.hpp   128b334a7683dffc8757f7560c40b38943472d579e3dc63073a1f75fde7f6a85)
-set(_expected_v42_Reify.hpp      b234624461ca1be3452cf8222d3d02b6fccb9c00891ccd8e4333df4ec13f95e8)
+# ── 082-structural-group-detection T026/T028: the two v42 READ-TIER artifacts
+# below are RE-BASELINED (2026-08-12). The T001 values were correct under 077's
+# premise, stated in the banner above, that "077 touches ONLY emit_builders.cpp".
+# 082 invalidates that premise FOR v42 BY DESIGN: T025 re-points emit_messages.cpp
+# (5 sites) and emit_reify.cpp (2 sites) off `FieldRef::type == NumInGroup` onto
+# the structural `VersionIR::group_tags`, so FIX42's 18 declared repeating groups
+# become visible to the read emitters for the first time.
+#
+# Reconciled BY CONSTRUCTION, not "regenerated" (T028): the new Messages.hpp
+# carries exactly 18 `G_<tag>` group structs whose tag set is EXACTLY FR-005/K1's
+# {33,73,78,124,136,146,199,215,267,268,295,296,382,384,386,398,420,428}; the
+# message-class NAME SET is unchanged at 46 (none added, lost or renamed); 17 of
+# the 18 traded a scalar `decode_field<int32_t>(get<T>())` accessor for a group
+# accessor, and the 18th (136 NoMiscFees) is a NESTED group that never had a
+# top-level accessor to trade. Old golden had 0 `G_` structs.
+#
+# The other 14 hashes are DELIBERATELY UNTOUCHED and must stay so -- they are what
+# keeps this gate discriminating, and they are also T027's/FR-016a's assertions:
+# v42 Fields/Validator byte-identical (FieldRef::type is not modified, D-4) and all
+# 12 v44/v50sp2/vt11 artifacts byte-identical. All 14 re-verified OK at this commit.
+#
+# These two values were measured AFTER the FR-023 amendment and the Orchestra
+# diagnostic fix, and are bit-identical to a pre-amendment run -- i.e. that loader
+# change is provably codegen-neutral. `Messages.hpp`'s value below is also the
+# sha256 of the checked-in golden it corroborates (see banner): the two move as ONE
+# change unit, or `DeterminismTest.GeneratedMatchesGolden` goes red and the banner's
+# corroboration claim becomes false.
+set(_expected_v42_Messages.hpp   827a9bd0d5bf1d92d1cfd760c9b8b01bd6091d2fab456e48bc27abb49f1bc8ba)
+set(_expected_v42_Reify.hpp      4c546c831bd0863a6a43dc0e8e958de72a280b033c918792d473a4c858082b1b)
 set(_expected_v42_Validator.hpp  b5d39106b4cc81eafd32ab65998d109b3bff1ae8198920634869f5765e88f096)
 set(_expected_v44_Fields.hpp     e39f240770bc4115c80fc425da35ebb20619502fe633bb3b62dcd44322be5fcb)
 set(_expected_v44_Messages.hpp   11e7ebc293d313c91e54f67c0e9ee1a83c936cd3e6818e365a6acd48d235dddb)

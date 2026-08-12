@@ -937,6 +937,39 @@ and `build_quickfix_oracle.group_tags` is likewise **505**. The `508` figure cam
 shipped pin was 505 and back-solving `505 + 3`; the pin was **502**. Two independent oracles agreeing on
 505 is a real corroboration of the new pin, not a coincidence to be distrusted.
 
+### ✅ T026 / T027 / T028 DISCHARGED 2026-08-12 — the v42 delta reconciled BY CONSTRUCTION
+
+T028's bar is *"reconcile the emitted delta by construction — not 'golden regenerated'"*. Done, four ways,
+before the golden was touched (old golden vs the gate's own regenerated `v42/Messages.hpp`):
+
+| Check | Old golden | Regenerated | Verdict |
+|---|---|---|---|
+| `G_<tag>` group structs | **0** | **18** | T019's pin, exactly |
+| the 18 tags themselves | — | `{33,73,78,124,136,146,199,215,267,268,295,296,382,384,386,398,420,428}` | **set-identical** to T015/FR-005/K1 |
+| message-class **name set** | 46 | 46 | **sets equal** — none added, lost or renamed |
+| scalar `decode_field<int32_t>(get<T>())` for the 18 | 17 | **0** | all traded for group accessors |
+
+**The 17-vs-18 asymmetry is explained, not waved past:** tag **136** `NoMiscFees` has **no** `get<136>` in
+*either* file, because it is a **nested** group (inside `NoAllocs(78)`), never reachable as a top-level
+message accessor. It had no scalar accessor to lose and gains a `G_136` struct referenced from its
+parent's class. So 17 traded + 1 nested-only = the 18.
+
+⚠️ The delta is **not** purely additive — 5487 lines added, 4139 removed. The removals are exactly the
+displaced scalar accessors plus block-position churn. A "purely additive" claim would have been false;
+T026 asks for *byte-identical or changed-with-explanation*, and this is the explanation.
+
+⚠️ Measured with **Python, not `diff`** — RTK filters `diff` output, and `diff | grep -c '^<'` returned
+**0** on the very input whose `<` lines were visible one command later. Do not trust a piped `diff` count
+here. Cf. [[feedback_rtk_git_status_truncates_modified_list_use_proxy_before_destructive_git]].
+
+**Applied:** `v42_Messages.golden.hpp` regenerated (copy verified byte-exact afterwards — sha256
+`827a9bd0…`, guarding [[feedback_crash_torn_write_can_corrupt_a_checked_in_golden_one_byte]]), and the
+**two** v42 hashes in `read_tier_byte_diff_test.cmake` re-baselined with an in-place annotation explaining
+why 077's premise no longer holds for v42. **The other 14 literals untouched.**
+
+**Result: `read-tier-byte-diff` PASSES 16/16, `codegen_determinism_test` PASSES** (both
+`GeneratedMatchesGolden` and `AdditiveOffOnByteDiff`, 150 s). Both were RED at the sweep baseline.
+
 ### C1.1's RESIDUAL EXCEPTION — CONFIRMED RETIRED, by an independent route
 
 The prediction below was recorded before measuring. **It is confirmed, and not by the check it anticipated:**
