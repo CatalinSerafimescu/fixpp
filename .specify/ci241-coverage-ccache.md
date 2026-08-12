@@ -163,6 +163,47 @@ Tier-1 runner-minutes: **376 → ~277** (−26 %). ⚠️ **Quote the right late
 83 min on the same push, so **all-tier latency stays ~100 min (Tier 2-bound)**. The −99 is
 tier-1-local.
 
+## 5c. End-to-end corroboration on the LCOV report — and the near-miss it exposes
+
+The object diff is the proof, but the sentence being refuted was written about **coverage-mapping
+integrity**, so the downstream artifact deserves a look. Both runs upload `coverage-lcov`. Comparing
+them costs zero runner-minutes and answers the obvious Gate B question — *"you diffed `.o` files;
+did the coverage output actually match?"*
+
+**Raw bytes differ** (`8fc33bd4…` vs `9b47deac…`, 1716128 vs 1716283 bytes), and that is not a
+finding. Two independent reasons, both benign, both measured:
+
+1. **`SF:` block ordering is nondeterministic.** Cold leads with `include/fix/c_api.h`, warm with
+   `include/fixpp/tls/cipher_policy.hpp`. The *set* of 146 source files is identical.
+2. **Execution counts differ**, as predicted.
+
+Parsed per-`SF:` and compared order-insensitively:
+
+| | result |
+|---|---|
+| `SF:` file sets | **identical**, 146 = 146 |
+| **structural inventory** — `FN:` entries, `DA:` line numbers, `BRDA:` (line, block, branch) tuples, counts stripped | **identical for 146/146 files** |
+| full records *including* counts | matches for only **99/146**; **47 files differ in counts alone** |
+
+The structural inventory is exactly what the coverage *mapping* determines — *what* is instrumented,
+not *how often it ran*. It is identical across the pair, at every file. That is end-to-end
+corroboration at the level the original sentence was written at.
+
+### ⚠️ The 47 files are the near-miss, and they justify §3's instrument choice by measurement
+
+Had `DA:`/`BRDA:` counts been the acceptance instrument — as the original §3 plan proposed — this run
+pair would have reported **47 of 146 files "differing"** and read as a **refutation**. On a pair whose
+1486 objects are provably byte-identical. It would have been a **false negative that killed a correct
+change.**
+
+And the 47 are not random: `wire/parser.hpp`, `wire/tag_scan.hpp`, `wire/framer.hpp`,
+`session/engine.hpp`, `tls/pinset.hpp` — the parsing- and concurrency-heavy headers, i.e. precisely
+where run-to-run execution counts should be expected to move.
+
+This was argued a priori in §3 ("that diff measures test nondeterminism, not cache fidelity").
+It is now **measured**: the noise floor of the rejected instrument is 32 % of files.
+See `feedback_an_acceptance_instrument_built_on_execution_counts_measures_test_nondeterminism`.
+
 ## 6. Coverage needs its OWN ccache namespace
 
 It is Debug like the matrix debug leg, but the coverage profile folds
@@ -235,16 +276,26 @@ The Actions cache pool is **10 GB per repository**, shared by every lane. Measur
 both probe entries deleted (`gh api …/actions/cache/usage` is the authority — the per-entry list
 under-reports):
 
-| | |
-|---|---|
-| current pool | **6.92 GiB / 10 GB (74 %)**, 11 active entries |
-| the four sanitizer/debug legs alone | ubsan 1774 + asan 1524 + tsan 1462 + debug 740 MiB = **5.4 GiB** |
-| what #241 adds, permanently | **~900 MiB** (measured: the coverage entry was 901 MiB cold, 925 MiB warm) |
-| projected steady state | **~7.8 GiB (78 %)** |
+⚠️ **Units — the trap this table originally fell into.** GitHub's cap is **10 GB decimal**
+(10,000,000,000 bytes = 9.31 GiB). Percentages must be taken against that, not against 10 GiB.
+Mixing the two understated the projection by 6 points on the first draft of this section.
 
-That is affordable, but it is not free and it is not reversible without reverting the feature. The
-remaining ~2.2 GB of headroom is what absorbs future lanes; anyone adding the next cached lane
-should re-derive this table rather than trusting it, since these entries grow with the tree.
+| | GiB | GB | % of the 10 GB cap |
+|---|---|---|---|
+| current pool (11 active entries) | 6.92 | 7.43 | **74 %** |
+| what #241 adds, permanently | 0.88 | 0.94 | +9 pts |
+| **projected steady state** | **7.80** | **8.38** | **84 %** |
+| remaining headroom | 1.51 | **1.62** | 16 % |
+
+The four sanitizer/debug legs alone are 5.4 GiB of the current total (ubsan 1774 + asan 1524 +
+tsan 1462 + debug 740 MiB). #241's own entry measured 901 MiB cold / 925 MiB warm.
+
+**84 % is affordable but not comfortable**, and it is not reversible without reverting the feature.
+~1.6 GB is all that absorbs the next cached lane — note that **#259** (`python-wheel-build`, also
+uncached, 67.4 min) is queued behind this and will want its own namespace too. Re-derive this table
+with `gh api repos/<owner>/<repo>/actions/cache/usage` before adding it; these entries grow with the
+tree, and the per-entry list under-reports (9 rows summing to 6.04 GiB against an API total of
+6.92 GiB).
 
 Both probe entries were deleted once the proof was recorded:
 `…-2026-08-11T20:02:00.630Z` (cold, 901 MiB) and `…-2026-08-12T06:31:49.527Z` (warm, 925 MiB).
