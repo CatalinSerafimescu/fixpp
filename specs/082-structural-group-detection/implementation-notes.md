@@ -768,6 +768,106 @@ runs, so keep `ctest` at `-j2` (see project memory `feedback_build_resource_cap_
 predicate swap and the emitter re-point already applied. Reconcile **by reading code**, not by
 trusting the boxes — a task closable only by inspection is the false-green shape 083's handoff
 named. Tally at resume: 26 done / 31 open.
+**→ RECONCILED 2026-08-12 by code reading; see the section below.**
+
+---
+
+## RESUMED 2026-08-12 — T023–T025 reconciled, and the byte-diff "regression" dispositioned
+
+### T023 / T024 / T025 are APPLIED (read from code, not from the boxes)
+
+| Task | Site | Read state |
+|---|---|---|
+| T023 | `dictionary.cpp:489-492` bare loop | `legacy_first = group_first_field(legacy_no_tag); if (legacy_first == 0) continue;` — datatype gate gone, and the once-tautological guard is **folded into the predicate** exactly as T023 prescribes |
+| T023 | `dictionary.cpp:528` `immediate_parent` | `if (group_first_field(fr.tag) != 0)` |
+| T023 | `dictionary.cpp:533` context loop | `if (group_first_field(fr.tag) == 0) continue;` |
+| T023 | `dictionary.cpp:550` `members.empty()` | **unchanged**, as T023 requires (post-detection registration guard, outside the predicate) |
+| T024 | `ir.hpp:151` + `ir.cpp:731-739` | `VersionIR::group_tags` exists, populated on **both** schema paths (`collect_group_tags` / `collect_orchestra_group_tags`), header/trailer unioned, sorted+unique |
+| T025 | all **8** sites | `emit_messages.cpp:169,237,340,350,428` (5) + `emit_reify.cpp:218,228` (2) + `emit_builders.cpp:607` (1) all call `is_group_tag(ir, …)`, whose body is `std::binary_search(ir.group_tags…)` — structural, not datatype |
+
+The only residual `NumInGroup` token in `dictionary.cpp` is inside a comment (`:512`). `emit_manifest.cpp:73`
+is correctly left alone (dispositioned NO CHANGE). Line numbers have drifted from `tasks.md`'s by +1…+91;
+the **cites in `tasks.md` are pre-change and should be read as such**, not re-pointed
+(cf. [[feedback_stale_anchor_repoint_to_a_plausible_twin_is_worse_than_stale]]).
+
+### `read-tier-byte-diff`'s 2 diverged artifacts are NOT a regression — they are T026/T027's evidence
+
+The two are **`v42/Messages.hpp`** and **`v42/Reify.hpp`**. Nothing else moved. That four-way split is
+exactly what 082 predicts, and a regression would be very unlikely to reproduce it:
+
+| Measured | 082's own requirement |
+|---|---|
+| `v42/Fields.hpp` **OK** | T026 / **FR-016a**: must be byte-identical |
+| `v42/Validator.hpp` **OK** | T026 / **FR-016a**: must be byte-identical |
+| `v42/Messages.hpp` **DIFF** | **T025** re-points `emit_messages.cpp` (5 sites); **T028** exists to regenerate this very golden |
+| `v42/Reify.hpp` **DIFF** | **T025** re-points `emit_reify.cpp` (2 sites) |
+| all 12 `v44`/`v50sp2`/`vt11` **OK** | **T027** / FR-015 / SC-005: set-equal wherever C2 says EQUAL |
+
+FR-016a's byte-identity prediction is **falsifiable rather than tautological** precisely because T023
+declined to touch `FieldRef::type` (D-4) — so the two OK v42 artifacts are a real pass, not a no-op.
+`emit_builders.cpp:607` is T025's 8th site and does not appear in the read tier, which is consistent.
+
+**The gate it fails is 077's T022, not one of 082's.** `tests/codegen/read_tier_byte_diff_test.cmake`
+hardcodes a **pre-077 baseline** (2026-07-16, HEAD `455737c3`) on the premise, stated in its own banner,
+that *"077 touches ONLY `emit_builders.cpp` … so all 16 must be byte-identical."* **That premise is
+082's to invalidate for v42, by design.** So the disposition is: update **only** the two v42 hashes,
+leave the other 14 literals byte-for-byte untouched (that is what keeps the gate discriminating), and
+annotate the two lines rather than rewriting the T001 provenance banner — a silent hash swap would leave
+the next reader believing 077's premise still holds.
+
+⚠️ **The cmake hash and the checked-in golden are ONE change unit.** The banner claims the four
+`Messages.hpp` hashes are corroborated against
+`specs/003-dictionary-codegen/contracts/golden/<ns>_Messages.golden.hpp` (gated by
+`DeterminismTest.GeneratedMatchesGolden`). T028 regenerates the v42 one. Update the cmake hash without
+the golden and `GeneratedMatchesGolden` stays RED **and the banner's corroboration claim becomes false.**
+
+⚠️ **The hashes in `build/resume082-ctest-dict-codegen.log` are STALE — do not transcribe them.** They
+predate the FR-023 deletion and the Orchestra `gname` fix. `fixpp-codegen` links `fixpp_dictionary`, so
+codegen output is in scope for change even where none is expected. Re-run the gate post-build and
+**compare against the old hashes first**: if v42 Messages/Reify still hash `827a9bd0…` / `4c546c83…`
+and the other 14 still match baseline, that is a bonus result — the loader amendment is
+**codegen-neutral**. If any of the 14 moved, that IS a regression and it is 082's.
+
+**Supersedes** the "identify the two artifacts before any golden is regenerated / reaching for T028 on a
+`v44`+ divergence would enshrine a real defect" caution recorded above. That was written before the
+artifacts were known and was guarding the **opposite** case; the divergence is v42-only, so T028 is the
+correct instrument, not the dangerous one.
+
+**T028's bar is *by construction*, not "golden regenerated".** The instruments already exist: **T019**
+pins exactly **18** `class G_` and **46** message classes in the regenerated `v42/Messages.hpp`, and
+**T015** pins the 18 tags `{33, 73, 78, 124, 136, 146, 199, 215, 267, 268, 295, 296, 382, 384, 386, 398,
+420, 428}`. Diff old-golden vs new-golden and check the added `G_` classes are **exactly** that set. A
+`diff | wc -l` sanity number does not discharge it.
+
+### #210's fix is VERIFIED PRESENT in this tree — so concessions 1 and 2 are revertible
+
+Checked because "the issue is closed" is not evidence about *this* working tree. The mechanism the
+concessions cite — `set_group_first_ctx`'s unconditional
+`add_group_member_ctx(msg_type, parent_path, no_tag, first)` at `include/fixpp/dict/table_view.hpp:645`
+— **is still there, unchanged, and is meant to be.** #210 was fixed on the **caller** side: 083 T031/T032
+changed the delimiter *source* to this context's **own** declaration (Entity 2 / `delim_cap`), so the
+injected tag is already a declared member and the injection *"becomes a no-op (D-5 / C-3.3) and the
+pollution disappears by construction rather than by a second fix"* (`dictionary.cpp:592-610`).
+**Reading `table_view.hpp` alone would have concluded #210 was unfixed.**
+
+- **Concession 1** (`required_scope_census_test.cpp:626-670`, T017) — collapses to plain set equality.
+  This is a **strengthening** (it removes an allowance), so a green after the edit *is* proof. Today it
+  asserts `missing.empty()` plus `extra ⊆ {tv.group_first_field(no_tag)}`; post-#210 `extra` should be
+  empty outright.
+- **Concession 2** (`collision_membership_guards_test.cpp:88-100`, `first_tag_only_in`'s `exclude`) —
+  ⚠️ **not symmetric**: dropping `exclude` **widens** the discriminator candidate set, so green is not
+  proof. But the comment at `:86-88` states a sharp, falsifiable prediction — *"when #210 lands the
+  exclusion becomes a no-op"* — so the real acceptance is that removing it be **behaviour-neutral**:
+  the `expected_per_dict` case counts must not move. Counts can only move via the
+  `continue` at `:158-166` (variants differing **only** by the injected delimiter). If a count moves,
+  the exclusion was **not** a no-op — investigate rather than re-baseline the pin.
+
+### Concession 3's `13`-vs-`14` is NOT a silent exclusion
+
+Worth writing down because it reads like one. `test_082_group_required_member_validation_test.cpp:526`
+asserts `cases_checked == 13` while the concession text says **14** contexts. The 14th — the nested
+`MassQuote NoQuoteSets(296) → NoQuoteEntries(295)` descent — is an **explicit separate block** opening at
+`:528`, outside the top-level loop the counter bounds. 13 + 1 = 14; nothing is dropped.
 
 ---
 
