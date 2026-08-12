@@ -411,7 +411,9 @@ protected:
         // that the set was actually checked in (not just an empty <ns>/ dir).
         ASSERT_TRUE(fs::exists(kBuilderGoldenDir))
             << "078 golden dir not found: " << kBuilderGoldenDir;
-        for (auto const* ver : {"v44", "v50sp2", "vlatest"}) {
+        // 082 T036: `v42` joins the builder-bearing versions (issue #196) — its
+        // tier is emitted now that detection is structural.
+        for (auto const* ver : {"v42", "v44", "v50sp2", "vlatest"}) {
             ASSERT_TRUE(fs::exists(fs::path(kBuilderGoldenDir) / ver / "messages"))
                 << "078 golden set missing for " << ver << " under " << kBuilderGoldenDir;
         }
@@ -874,9 +876,22 @@ TEST_F(DeterminismTest, BuildersOffPathNoStaleVlatestOthersUnaffected) {
     EXPECT_TRUE(fs::exists(off_run.path / "v50sp2" / "all.hpp"))
         << "v50sp2/all.hpp missing from OFF-path job -- FR-012's gating must be vlatest-only.";
 
-    // v42 is DESCOPED independent of the FIX_LATEST option (T017/issue #196)
-    // -- confirm the OFF-path job doesn't accidentally emit it either.
-    EXPECT_FALSE(fs::exists(off_run.path / "v42" / "all.hpp"));
+    // 082-structural-group-detection T035 [US2] — issue #196: INVERTED. This read
+    // "v42 is DESCOPED independent of the FIX_LATEST option (T017/issue #196) --
+    // confirm the OFF-path job doesn't accidentally emit it either". The descope is
+    // retired (detection is structural; T035 deleted main.cpp's ns predicate), so
+    // v42 now belongs with the v44/v50sp2 assertions immediately above: its builder
+    // tier must be present on the OFF path too, because FIXPP_CODEGEN_FIX_LATEST
+    // gates **vlatest only** (FR-012 / T014 / G4a).
+    //
+    // ⚠️ This was a THIRD v42 builder-descope assertion. FR-016b names only two
+    // (`test_077_builder_no_emit.cpp`, `test_077_v42_vt11_completeness_and_c4.cpp`)
+    // and this one lives in neither — it was found only because it went RED after
+    // T035. Same shape as the #208 carve-out this feature already hit: a list of
+    // sites built by naming the obvious files misses the one filed elsewhere.
+    EXPECT_TRUE(fs::exists(off_run.path / "v42" / "all.hpp"))
+        << "v42/all.hpp missing from OFF-path job -- FR-012's gating must be vlatest-only, and "
+           "v42's builder tier is in scope as of 082.";
 }
 
 #ifdef FIXPP_CODEGEN_MAIN_VLATEST_ALL_HPP
@@ -954,6 +969,28 @@ TEST_F(DeterminismTest, OfficialModeBuildersStructuralShape) {
 // R6), mirroring GeneratedMatchesGolden / VlatestGeneratedMatchesGolden. The
 // v44 `official`-mode structural witness is a distinct, narrower mode gated
 // separately by OfficialModeBuildersStructuralShape above.
+
+// 082-structural-group-detection T036 [US2] — issue #196: v42's `all`-mode
+// builder-tier golden set. Without this cell the 226 files checked in under
+// golden/v42/ would be a DEAD golden — present in the repo and compared by
+// nothing, which reads as coverage while gating nothing.
+//
+// Derived, not transcribed (T031 / FR-016b): 226 files, 28 `groups/<Plan>.hpp`
+// plan headers over 17 tags, registry 39, reproducible from `emit_builders`' own
+// interning rule via `contracts/builder_plan_census.py`. The ordinal map
+// {73:3, 78:2, 146:4, 268:2, 295:3, 296:2, 420:2} accounts for exactly the
+// 28 - 17 = 11 extra plans, which is B-077-1's structural-key guarantee made
+// arithmetic: a second structural variant of a tag becomes a NEW ordinaled plan
+// rather than silently sharing the first one (T039).
+TEST_F(DeterminismTest, V42AllModeBuildersMatchesGolden) {
+    TempDir run("fixpp_det_v42_all_builders");
+    int rc = run_codegen(run.path);  // default families mode == All (39 v42 msgs)
+    ASSERT_EQ(rc, 0) << "codegen run failed (exit " << rc << ")";
+
+    expect_builder_sets_equal(run.path / "v42", fs::path(kBuilderGoldenDir) / "v42",
+                              "R6/FR-010 violated: v42 `all`-mode builder-tier set diverged from "
+                              "the checked-in golden set");
+}
 
 TEST_F(DeterminismTest, V44AllModeBuildersMatchesGolden) {
     TempDir run("fixpp_det_v44_all_builders");
