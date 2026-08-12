@@ -239,7 +239,13 @@ private:
 // `wire::dictionary_driven_validator`. Owns its backing storage; spans
 // returned by the methods remain valid for the lifetime of this object.
 //
-// move-only (large owned tables; copying is intentionally deleted).
+// Copyable AND movable — see the copy/move block below, which defaults all four.
+// (This line read "move-only … copying is intentionally deleted" until fixpp#215;
+// that was contradicted by the very next declarations and had been false since the
+// copy ctor was defaulted. Copies are load-bearing, not incidental:
+// `wire::dictionary_driven_validator` holds its `table_view` BY VALUE — a frozen
+// design point, "SC-007: no virtual edge" — so every validating session
+// copy-constructs one.)
 class table_view {
 public:
     table_view() = default;
