@@ -771,15 +771,28 @@ TEST(RequiredScopeCensus, Fix42Tag146PerContextMemberSetsMatchOracle) {
 // was never the obstacle); it stands as a witness that the predicate swap
 // moves none of them.
 //
-// FIX50SP2 is special-cased per the tasks.md DESCOPE BANNER (issue #208):
-// the shipped loader's one-level-deep <component> member scan
-// (xml_loader.cpp:610-641) never resolves 1499/1669/1919's only-nested-group
-// members, so those three tags never register — a PRE-EXISTING defect
-// unrelated to and unmoved by T023 (`group_first_field` returns 0 for all
-// three both before and after the predicate swap;
-// implementation-notes.md § BLOCKER B-1). Pinned at 502 = oracle.group_tags
-// minus those 3 tags; this row flips to a plain oracle.group_tags comparison
-// (505) once #208 lands.
+// FIX50SP2's #208 special-case is RETIRED (2026-08-12). It read: the shipped
+// loader's one-level-deep <component> member scan (xml_loader.cpp:610-641)
+// never resolves 1499/1669/1919's only-nested-group members, so those three
+// never register; pinned at 502 = oracle.group_tags minus those 3, "flips to a
+// plain oracle.group_tags comparison (505) once #208 lands".
+//
+// #208 HAS landed — closed by 083 (per-context group-delimiter resolution),
+// whose capture resolves THROUGH nested components. So this is exactly the
+// flip the old banner prescribed: the carve-out is gone and the row is now a
+// plain oracle.group_tags comparison at 505. Measured: all three register, and
+// `group_first_field(1499/1669/1919)` is now NON-ZERO (453 / 1529 / 1920 —
+// each itself a nested group's count tag, not a scalar).
+//
+// This RETIRES contracts/group-detection.md C1.1's RESIDUAL EXCEPTION, whose
+// claim that `group_first_field` returns 0 for all three "both before and
+// after the predicate swap" is now false.
+//
+// The flip is a STRENGTHENING (it restores 3 tags to the expected set), so the
+// green is proof. 082's own attributable delta here is still ZERO: FIX50SP2's
+// type set and struct set are both 507, so T023's predicate swap cannot move
+// this row — the +3 is 083's, inherited by catching up to main. FIX50SP2
+// remains a C2-EQUAL row; only its baseline moved.
 TEST(RequiredScopeCensus, SixUnchangedDictionariesBareStoreExactSet) {
     std::cout << "\n=== 082 T018: six unchanged dictionaries' bare-store exact-set ===\n";
 
@@ -793,7 +806,7 @@ TEST(RequiredScopeCensus, SixUnchangedDictionariesBareStoreExactSet) {
         {"FIX44.xml", "FIX44.xml", false, 59},
         {"FIX50.xml", "FIX50.xml", false, 67},
         {"FIX50SP1.xml", "FIX50SP1.xml", false, 97},
-        {"FIX50SP2.xml", "FIX50SP2.xml", false, 502},  // #208 -- see banner above; NOT 505
+        {"FIX50SP2.xml", "FIX50SP2.xml", false, 505},  // #208 retired -- see banner above
         {"FIXT11.xml", "FIXT11.xml", false, 1},
         {"OrchestraFIXLatest.xml", "OrchestraFIXLatest.xml", true, 524},
     };
@@ -810,13 +823,9 @@ TEST(RequiredScopeCensus, SixUnchangedDictionariesBareStoreExactSet) {
                                           : fixpp::dict::XmlLoader{}.load(path, &mr);
         auto const tv = dict.as_table_view();
 
-        auto expected = oracle.group_tags;
-        if (std::string_view{c.filename} == "FIX50SP2.xml") {
-            // #208: never registers -- one-level <component> scan defect, not this feature's predicate.
-            expected.erase(1499);
-            expected.erase(1669);
-            expected.erase(1919);
-        }
+        // No carve-out: every row is a plain oracle.group_tags comparison. The
+        // FIX50SP2 #208 erase block was removed 2026-08-12 (see banner above).
+        auto const expected = oracle.group_tags;
         ASSERT_EQ(expected.size(), c.expected_count)
             << c.label << ": derived expected-set size drifted from the pinned count -- re-derive";
 

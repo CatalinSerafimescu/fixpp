@@ -901,7 +901,11 @@ expected.erase(1499); expected.erase(1669); expected.erase(1919);
 **#208 is CLOSED — by 083** (`CLAUDE.md`: *"per-context group-delimiter resolution via 083 (closed #210 +
 #208 + #212)"*), and #208's *"one-level `<component>` scan defect"* is **precisely** what kept these three
 from resolving a delimiter. So the carve-out is stale, and the direction is the reassuring one: the
-**oracle always said 508**; the implementation used to say 505 and has now caught up to it.
+**oracle always said 505**; the implementation used to register only 502 of them and has now caught up.
+
+**The test's own banner already prescribed this exact fix** — *"Pinned at 502 = oracle.group_tags minus
+those 3 tags; this row flips to a plain oracle.group_tags comparison (505) once #208 lands."* #208 has
+landed, so the flip is the prescribed action, not an invention.
 
 **This is the same class as the three #210 concessions but a different issue, and it was NOT on the list
 of three.** The list was built by grepping for `#210`; a carve-out to a *different* closed issue is
@@ -909,10 +913,14 @@ invisible to that. Cf. [[feedback_enumerate_the_layers_selector_source_quantifie
 — enumerate by *what the carve-out concedes to*, not by the one issue number you happened to search.
 
 Fix (a **strengthening** — it restores 3 tags to the expected set, so a green after it is proof): delete
-the erase block and re-pin FIX50SP2's `expected_count` **505 → 508**. ⚠️ **Re-derived, not silently
+the erase block and re-pin FIX50SP2's `expected_count` **502 → 505**. ⚠️ **Re-derived, not silently
 updated** — the test's own message says *"re-derive, don't silently update this pin"*. The re-derivation:
-`build_quickfix_oracle` yields 508 for FIX50SP2 and always did; 505 was the *implementation's* pre-083
-number, frozen into the pin by the carve-out.
+`build_quickfix_oracle` yields **505** for FIX50SP2 and always did; **502** was the *implementation's*
+pre-#208 number, frozen into the pin by the carve-out. Applied 2026-08-12.
+
+⚠️ **T018's task text in `tasks.md` says "FIX50SP2 505" and was CORRECT ALL ALONG** — it names the
+post-#208 target. The shipped pin was 502. Anyone reconciling task text against code here will see a
+mismatch that is the *carve-out's* doing, not a stale task.
 
 ⚠️ **082's own attributable delta for FIX50SP2 is still ZERO.** The +3 is **083's**, inherited by catching
 up to `main`. T023's bare-loop edit cannot account for it: FIX50SP2's type set and struct set are both
@@ -922,11 +930,12 @@ loader-side. FIX50SP2 remains a C2-EQUAL row; only its *baseline* moved.
 ⚠️ This was **pre-existing at the parking point**, invisible because `ctest -R 'dict|codegen'` never
 matched `required_scope_census`. The predicted coverage hole biting exactly as predicted.
 
-⚠️ **`predicate_census.py` and `build_quickfix_oracle` DISAGREE on FIX50SP2** — 507 struct / 505 reachable
-vs **508** group_tags. Both are self-consistent (the test's own `ASSERT_EQ(expected.size(), 505)` passed
-before the failing `EXPECT_EQ`), so they model reachability differently. **Do not cite the census's 505 as
-corroboration of the pin's 505 — they are different 505s** and the coincidence is a trap. Worth resolving
-before US2's T031 leans on `builder_plan_census.py`.
+✅ **The two oracles AGREE — an earlier note in this file claiming they diverged (505 vs 508) was my own
+mis-derivation and is retracted.** `predicate_census.py` gives FIX50SP2 `struct=507`, `reachable=505`
+(excluding only `384`/`627` as not-message-reachable, **including** 1499/1669/1919 — measured directly),
+and `build_quickfix_oracle.group_tags` is likewise **505**. The `508` figure came from assuming the
+shipped pin was 505 and back-solving `505 + 3`; the pin was **502**. Two independent oracles agreeing on
+505 is a real corroboration of the new pin, not a coincidence to be distrusted.
 
 ### C1.1's RESIDUAL EXCEPTION — CONFIRMED RETIRED, by an independent route
 
