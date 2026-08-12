@@ -198,13 +198,39 @@ inline void capture_first_emission(DelimCapture* cap, std::uint16_t tag) noexcep
 // an Entity-2 record. Returns the offending `no_tag` on the first violation, or
 // 0 if the message is complete.
 //
-// The registration predicate is mirrored EXACTLY from
-// `Dictionary::as_table_view()` (`src/dictionary/dictionary.cpp:445-463`):
-// a context exists iff, on this message's deduped field run, the count tag's
-// `FieldRef.type` is `NumInGroup` AND at least one `FieldRef` has
-// `group_no_tag == no_tag` — C-3.4a's `!members.empty()` leg, which is what
-// keeps a message that merely REUSES a NumInGroup-typed tag as a plain scalar
-// from reading as a violation.
+// ⚠️ THIS PREDICATE HAS DIVERGED FROM `as_table_view()`'s — READ BEFORE TRUSTING
+// THE SENTENCE BELOW (082-structural-group-detection, 2026-08-12).
+//
+// The paragraph that follows described a mirror held in sync by nothing but
+// itself, and 082 broke it: `as_table_view()` now decides group-ness
+// STRUCTURALLY (`group_first_field(t) != 0`, `dictionary.cpp:489/528/533`)
+// while this sweep still tests `fr.type == NumInGroup`. On FIX 4.0/4.1/4.2 —
+// whose `<group>` count fields are legacy `INT`-typed — `as_table_view()`
+// registers 4/7/18 contexts and this fail-closed sweep sees **zero**. It is
+// blind to exactly the population 082 added.
+//
+// ⚠️ AND THE OBVIOUS FIX IS WRONG — it was tried, measured, and reverted.
+// Re-pointing this onto `h.group_first_field_impl()` DISABLES THE GUARD
+// ENTIRELY: `find_incomplete_group_context` runs at `xml_loader.cpp:1066`, but
+// `h.groups_` — the table that accessor binary-searches — is not filled until
+// `:1157-1207`, and `:1157` is the very sort the search depends on. At sweep
+// time the structural table is EMPTY, so every tag answers "not a group", the
+// sweep reports no violation, and FR-023 silently stops enforcing. Three
+// `LoaderDisposition` tests go RED on that change and are what caught it.
+//
+// So closing the divergence needs an ORDERING decision (move the sweep after
+// `groups_` is built, or give it a structural source that exists at :1066), not
+// a one-line re-point. Tracked as a follow-up; deliberately NOT done as a
+// cleanup. Until then the sweep's real scope is "NumInGroup-typed count tags
+// only", which is narrower than registration on three dictionaries.
+//
+// Historical (true before 082, retained because the reasoning still explains the
+// `!members.empty()` leg): the registration predicate is mirrored from
+// `Dictionary::as_table_view()`: a context exists iff, on this message's deduped
+// field run, the count tag's `FieldRef.type` is `NumInGroup` AND at least one
+// `FieldRef` has `group_no_tag == no_tag` — C-3.4a's `!members.empty()` leg,
+// which is what keeps a message that merely REUSES a NumInGroup-typed tag as a
+// plain scalar from reading as a violation.
 //
 // Enforced at `finalize()` and deliberately NOT at `as_table_view()`, which is
 // contractually non-throwing (established by 072, L-063-4) and must stay so —

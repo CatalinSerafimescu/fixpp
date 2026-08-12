@@ -131,10 +131,23 @@ std::set<std::uint16_t> to_set(std::span<std::uint16_t const> s) {
     return std::set<std::uint16_t>{s.begin(), s.end()};
 }
 
-// C-3.4a's checked set (contracts/group_ctx_delims.md), mirrored EXACTLY
-// against the loader's own gate (dictionary.cpp:445-463): a context is
-// checked iff, on `mt`'s deduped field run, the count tag's FieldRef type is
-// NumInGroup AND at least one FieldRef has group_no_tag == no_tag. Three
+// C-3.4a's checked set (contracts/group_ctx_delims.md), mirrored against the
+// loader's own gate — which post-082 is `find_context_without_delim_record`
+// (`src/dictionary/dictionary_internal.hpp`), NOT `dictionary.cpp:445-463` as
+// this banner used to cite. That anchor is stale twice over: the line range
+// moved, and `as_table_view()` no longer uses this datatype test at all
+// (082 re-pointed it onto `group_first_field(t) != 0`). What this mirrors is the
+// FR-023 load-time sweep, which still tests `NumInGroup` — see the divergence
+// warning at the head of that function.
+//
+// ⚠️ The datatype test in the body below is CORRECT AND DELIBERATE, not stale
+// residue: it is the classifier for the inverted 55-context pin
+// (`int_typed_registered`), whose whole job is to identify the INT-typed
+// population. Re-pointing it structurally would make the pin self-referential
+// and unable to detect a reintroduced datatype gate.
+//
+// A context is checked iff, on `mt`'s deduped field run, the count tag's
+// FieldRef type is NumInGroup AND at least one FieldRef has group_no_tag == no_tag. Three
 // outcomes, not two — an INT-typed count tag (L-066-1/#196) and a
 // NumInGroup-typed tag with no members in THIS message (dictionary.cpp:463's
 // separate "plain scalar reuse" skip) are different exclusion reasons and
