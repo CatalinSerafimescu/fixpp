@@ -862,6 +862,37 @@ pollution disappears by construction rather than by a second fix"* (`dictionary.
   `continue` at `:158-166` (variants differing **only** by the injected delimiter). If a count moves,
   the exclusion was **not** a no-op — investigate rather than re-baseline the pin.
 
+### C1.1's RESIDUAL EXCEPTION — PREDICTION recorded 2026-08-12, before measuring
+
+Open item 8 asks whether `group_first_field(1499 / 1669 / 1919)` on FIX50SP2 still returns **0**. Recorded
+here **before** the runtime check so the measurement can refute it rather than be fitted to it.
+
+Raw-XML structure — all three `<group>` elements have **only `<component>` children, no direct `<field>`
+child**, which is exactly the shape the exception was written for (a literal first-field scan finds nothing):
+
+| tag | name | children | transitive first member |
+|---|---|---|---|
+| 1499 | `NoAsgnReqs` | `Parties`, `StrmAsgnReq/RptInstrmtGrp` | **453** (`Parties` → group `NoPartyIDs`) |
+| 1669 | `NoRiskLimits` | `RiskLimitTypesGrp`, `RiskInstrumentScopeGrp` | **1529** (→ group `NoRiskLimitTypes`) |
+| 1919 | `NoPriceMovements` | `PriceMovementValueGrp`, `ClearingAccountTypeGrp` | **1920** (→ group `NoPriceMovementValues`) |
+
+**PREDICTION: all three now return NON-ZERO (453 / 1529 / 1920), so the RESIDUAL EXCEPTION is RETIRED.**
+083's capture resolves *through* nested components, and each of these resolves in one component hop. Note
+each first member is itself a **nested group's count tag**, not a scalar — so a check that assumed the
+delimiter must be a plain field would mis-read this.
+
+Two independent corroborations already in hand, neither conclusive alone:
+- The census above puts FIX50SP2 at `struct=507, registered=505`, and the **entire** gap of 2 is
+  attributed to `384`/`627` being not-message-reachable. Were 1499/1669/1919 unresolvable the gap would
+  be 5.
+- `AllShippedContextsHaveADelimiterRecord` is **GREEN** (measured, 11/11 `LoaderDisposition`). ⚠️ Read
+  that with care: it is a **context-store** assertion, whereas the exception is stated about the **bare**
+  `group_first_field(no_tag)` store. Suggestive, not a substitute — which is why the direct measurement
+  is still owed.
+
+⚠️ 1499 has **two** occurrences differing in their second component; both open with `Parties`, so
+first-seen-wins cannot change the answer for *this* tag. Do not generalise that to other reused tags.
+
 ### Registration deltas RE-DERIVED 2026-08-12 with the branch's own non-circular oracle
 
 `python3 specs/082-structural-group-detection/contracts/predicate_census.py --dict-dir dictionaries`
