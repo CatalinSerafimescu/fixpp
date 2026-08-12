@@ -862,6 +862,49 @@ pollution disappears by construction rather than by a second fix"* (`dictionary.
   `continue` at `:158-166` (variants differing **only** by the injected delimiter). If a count moves,
   the exclusion was **not** a no-op — investigate rather than re-baseline the pin.
 
+### Registration deltas RE-DERIVED 2026-08-12 with the branch's own non-circular oracle
+
+`python3 specs/082-structural-group-detection/contracts/predicate_census.py --dict-dir dictionaries`
+(raw-XML only — loads neither `Dictionary`/`table_view` nor the codegen IR, so it can witness the very
+predicate this feature changes):
+
+| Dictionary | type set | struct set | registered before → after | delta |
+|---|---|---|---|---|
+| FIX40 | 0 | 4 | 0 → **4** | +4 |
+| FIX41 | 0 | 7 | 0 → **7** | +7 |
+| FIX42 | 0 | 18 | 0 → **18** | +18 |
+| FIX43 | 34 | 34 | 33 → **34** | **+1** — tag **576** `NoClearingInstructions` |
+| FIX44 | 59 | 59 | 59 → 59 | +0 EQUAL |
+| FIX50 | 69 | 69 | 67 → 67 | +0 EQUAL |
+| FIX50SP1 | 99 | 99 | 97 → 97 | +0 EQUAL |
+| FIX50SP2 | 507 | 507 | 505 → 505 | +0 EQUAL |
+| FIXT11 | 1 | 1 | 1 → 1 | +0 EQUAL |
+| Orchestra FIX Latest | 524 | 524 | 524 → 524 | +0 EQUAL |
+
+**This corroborates three shipped pins independently:** T015's FIX42 set is *exactly* the 18 tags
+`{33, 73, 78, 124, 136, 146, 199, 215, 267, 268, 295, 296, 382, 384, 386, 398, 420, 428}`; T016's FIX40 **4**
+/ FIX41 **7**; and T018's registered-after column **59 / 67 / 97 / 505 / 1 / 524**, all six matched.
+The six `+0 EQUAL` rows are also the C2-EQUAL set T027 checks byte-identity for — consistent with the
+byte-diff measurement above (only v42 moved).
+
+⚠️ **Correction to the parked note, which said *"the brief's `+1` for FIX43 is stale — commit `8b9973a6`
+already corrected it to `+576`"`*.** Those are not competing numbers and neither is stale. `8b9973a6`'s
+message reads *"Effective FIX43 delta is **+576 ONLY**; tag 82 becomes a no-regression pin (FR-012)"* —
+**`576` is the TAG, not a count.** The delta is **+1 tag, whose number is 576**. The parked note read a
+tag identity as a cardinality and then declared the (correct) count stale. Measured above: `+1/-0`.
+Cf. [[feedback_a_count_identity_is_not_proof_a_scanner_does_not_over_or_under_match]] — same family:
+a count and an identity are different claims and must not be substituted for one another.
+
+FIX43's asymmetry is also confirmed and is *not* a de-registration: tag **82** `NoRpts` is NUMINGROUP-typed
+but is **not** a `<group>`, yet the delta is `-0` — because `group_first_field_impl` already returns 0 for
+it, so it was never registered. That is exactly the FR-012 no-regression pin `8b9973a6` describes.
+FIX50/SP1/SP2's `struct` (69/99/507) exceeding `registered` (67/97/505) by 2 is likewise benign and
+already explained by the oracle's own note: `384` `NoMsgTypes` and `627` `NoHops` are declared `<group>`s
+that are **not message-reachable**.
+
+**Open item 7 is discharged.** Nothing left to re-derive here; `builder_plan_census.py` remains for the
+US2 (T031) plan-set derivation, which is a different question.
+
 ### The 067 `Group077DedupSoundness` breakage — root cause found, and the recorded framing was wrong
 
 The parked note said *"synthetic tags 9002/9003 are `NUMINGROUP`-typed but declare no group structure"*.
