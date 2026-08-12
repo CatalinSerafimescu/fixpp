@@ -1083,6 +1083,33 @@ MDIncrementalRefresh `G_268_2Args`; `295` → QuoteCancel `G_295_1Args` vs MassQ
 scalars (302/311/304) but carrying an **empty** `quote_entries` span, so the rejection arrives through the
 296 row's `gc.validate_entry` rather than a top-level `group_checks` row.
 
+#### US2's gates, each proven RED by mutation (2026-08-12)
+
+Every US2 gate was mutation-tested against **the compiled binary**, with the artifact restored and
+re-hashed afterwards. Nothing here rests on "it passed the first time".
+
+| Gate | Mutant | Result |
+|---|---|---|
+| T034 case | `{true→false}` on NewOrderList's group check in the **compiled** `.validator.cpp` | RED, its own message |
+| T034 completeness | delete the `News_LinesOfText_33` TEST_F | RED — registered **14** vs expected **15** |
+| T034 completeness | duplicate a `kCovered` row | RED — distinct-row check |
+| **T036 golden** | flip **one byte** in the checked-in `golden/v42/groups/G_73_1Args.hpp` | RED, naming `groups/G_73_1Args.hpp not byte-identical` |
+| **T037 count** | `kExpectedV42OfficialMsgCount` 25 → 26 | RED on both legs (152 vs 147 files; registry ≠ 26) |
+
+⚠️ **T036's golden needed this most, and had it least.** It was copied from the same emitter run it now
+gates, so its first green was *"a corpus built from the read it checks"* —
+[[feedback_verification_corpus_built_from_the_read_it_checks_is_blind]] — and proved nothing until a
+perturbation was shown to fail it. Verified incidentally: the cell reads the golden **from disk at
+runtime**, so no rebuild is needed to mutate it (checked, not assumed — unlike the `.inl`/`.cpp` twin below).
+
+⚠️ **T034's completeness cell was a COMPILE-TIME TAUTOLOGY as first written.** It declared
+`std::array<..., kCaseCount> kCovered` and then asserted `kCovered.size() == kCaseCount` — extent and
+expectation were the same token, so it could never go red while reading as completeness coverage.
+Exactly the class this feature spent the day retiring. Fixed by deducing the extent (`std::to_array`),
+adding a distinct-row check, and — the part that actually binds table to tests — asserting gtest's own
+`current_test_suite()->total_test_count()`, so **deleting a whole case fails HERE** instead of silently
+shrinking coverage.
+
 #### ⚠️ The mutation that "passed" — and why it was the mutant that was broken, not the test
 
 Flipping `{true → false}` on NewOrderList's group check in

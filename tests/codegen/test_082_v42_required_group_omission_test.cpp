@@ -380,15 +380,26 @@ TEST_F(V42RequiredGroupOmission, QuoteRequest_NoRelatedSym_146) {
 // gated by T021b's wire-tier pin, and is reproducible from
 // `specs/082-structural-group-detection/implementation-notes.md` § T034 PREP.
 TEST_F(V42RequiredGroupOmission, AllFourteenDerivedPairsAreCovered) {
-    static constexpr std::array<std::pair<char const*, std::uint16_t>, kCaseCount> kCovered{{
+    // ⚠️ Deliberately NOT declared with extent `kCaseCount`. An earlier revision wrote
+    // `std::array<..., kCaseCount> kCovered` and then asserted
+    // `kCovered.size() == kCaseCount`, which is a COMPILE-TIME TAUTOLOGY — the extent
+    // and the expectation were the same token, so the assertion could never go red
+    // while reading as completeness coverage. Deducing the extent is what makes the
+    // count assertion below able to fail.
+    static constexpr auto kCovered = std::to_array<std::pair<std::string_view, std::uint16_t>>({
         {"l", 420}, {"C", 33},  {"N", 73},  {"m", 428}, {"X", 268},
         {"V", 146}, {"V", 267}, {"W", 268}, {"i", 296}, {"i", 295},
         {"E", 73},  {"B", 33},  {"Z", 295}, {"R", 146},
-    }};
+    });
     EXPECT_EQ(kCovered.size(), kCaseCount)
         << "the 14 raw-XML-derived required='Y' group pairs for FIX42 -- 13 top-level plus "
            "MassQuote/295 nested in 296. If this count moves, RE-DERIVE from the dictionary; do "
            "not delete a row to make it fit.";
+
+    // Every pair must be DISTINCT — a duplicated row would otherwise pad the count
+    // back to 14 while a real pair went uncovered.
+    std::set<std::pair<std::string_view, std::uint16_t>> distinct{kCovered.begin(), kCovered.end()};
+    EXPECT_EQ(distinct.size(), kCaseCount) << "duplicate (msg_type, tag) row in kCovered";
 
     // 12 distinct messages, because V and i each contribute two pairs.
     std::set<std::string_view> msgs;
@@ -396,4 +407,13 @@ TEST_F(V42RequiredGroupOmission, AllFourteenDerivedPairsAreCovered) {
         msgs.insert(mt);
     }
     EXPECT_EQ(msgs.size(), 12U) << "14 pairs span exactly 12 messages (V and i contribute two each)";
+
+    // Bind the table to the TEST BODIES above. Without this, deleting a whole
+    // TEST_F leaves every assertion in this cell green — the table would still list
+    // 14 rows while only 13 cases ran. gtest knows what is registered; ask it.
+    auto const* suite = ::testing::UnitTest::GetInstance()->current_test_suite();
+    ASSERT_NE(suite, nullptr);
+    EXPECT_EQ(static_cast<std::size_t>(suite->total_test_count()), kCaseCount + 1U)
+        << "this suite must hold exactly one TEST_F per derived pair, plus this completeness cell "
+           "-- a deleted or added case must fail HERE rather than silently changing coverage";
 }
