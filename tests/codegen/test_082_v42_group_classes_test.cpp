@@ -182,19 +182,25 @@ TEST(V42GroupClasses, MassQuoteNoQuoteSetsNestsNoQuoteEntriesNotFlattened) {
         << "v42/Messages.hpp has no G_295 (NoQuoteEntries) flyweight -- RED until T023-T028 land";
 
     // NESTED shape: G_296's own body must reference group_view<G_295>.
+    // There may be multiple group_view<G_N> refs inside G_296 (296 carries other
+    // nested/typed members too, per v44's precedent) -- scan all matches for a
+    // 295 hit. Same flag-loop shape as `mq_directly_refs_295` below, so the two
+    // halves of this test read identically.
+    //
+    // (/simplify: this was `regex_search(...) && [lambda]()`. The lambda's
+    // sregex_iterator already yields false when there is no match, so the
+    // regex_search conjunct could never change the result and its `std::smatch`
+    // existed only to feed it.)
     std::string const& g296_body = cs.group_body.at(296);
-    std::smatch m;
-    EXPECT_TRUE(std::regex_search(g296_body, m, kGrpRefRe) &&
-                [&] {
-                    // there may be multiple group_view<G_N> refs inside G_296
-                    // (296 has other nested/typed members too, per v44's
-                    // precedent) -- scan all matches for a 295 hit.
-                    for (auto it = std::sregex_iterator(g296_body.begin(), g296_body.end(), kGrpRefRe);
-                         it != std::sregex_iterator(); ++it) {
-                        if (std::stoi((*it)[1].str()) == 295) return true;
-                    }
-                    return false;
-                }())
+    bool g296_refs_295 = false;
+    for (auto it = std::sregex_iterator(g296_body.begin(), g296_body.end(), kGrpRefRe);
+         it != std::sregex_iterator(); ++it) {
+        if (std::stoi((*it)[1].str()) == 295) {
+            g296_refs_295 = true;
+            break;
+        }
+    }
+    EXPECT_TRUE(g296_refs_295)
         << "G_296's body does not reference group_view<G_295> -- NoQuoteEntries(295) is not "
            "expressed as a NESTED group under NoQuoteSets(296)";
 

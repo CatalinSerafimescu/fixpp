@@ -181,9 +181,11 @@ static void BM_TableView_BuildFix42(benchmark::State& state) {
         benchmark::DoNotOptimize(tv);
     }
     auto const tv = dictionary.as_table_view();
-    state.counters["group_bits_words"] = static_cast<double>(group_bits_words(tv));
-    state.counters["group_bits_B"] =
-        static_cast<double>(group_bits_words(tv) * sizeof(std::uint64_t));
+    // Computed ONCE: group_bits_words() runs a 10,000-iteration group_first_field
+    // sweep, and the byte figure is just the word figure scaled.
+    auto const words = group_bits_words(tv);
+    state.counters["group_bits_words"] = static_cast<double>(words);
+    state.counters["group_bits_B"] = static_cast<double>(words * sizeof(std::uint64_t));
 }
 BENCHMARK(BM_TableView_BuildFix42)->Unit(benchmark::kMicrosecond);
 

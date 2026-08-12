@@ -296,11 +296,11 @@ TEST(CollisionMembershipGuards, CoversEveryCensusedCollisionExactly) {
     // magnitude — it would have passed unchanged whether a dictionary
     // contributed 1 case or 70. Asserting the tally is what makes a wrong
     // count fail.
-    for (std::string_view const dict_file : {"FIXT11.xml"}) {
-        EXPECT_EQ(actual_per_dict[dict_file], 0u)
-            << dict_file
-            << " must contribute zero collision cases (benign same-membership reuse for FIXT.1.1)";
-    }
+    // 082 moved FIX40/41/42 out of this list and into `expected_per_dict`, leaving
+    // a one-element loop behind. Written directly now.
+    EXPECT_EQ(actual_per_dict["FIXT11.xml"], 0u)
+        << "FIXT11.xml must contribute zero collision cases (benign same-membership reuse for "
+           "FIXT.1.1)";
 }
 
 // FIXT.1.1: NoHops(627) is declared twice in FIXT11.xml (session-layer
