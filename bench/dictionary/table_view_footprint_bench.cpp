@@ -133,4 +133,58 @@ static void BM_TableView_BuildFix44(benchmark::State& state) {
 }
 BENCHMARK(BM_TableView_BuildFix44)->Unit(benchmark::kMicrosecond);
 
+// -----------------------------------------------------------------------
+// BM_TableView_BuildFix42 — 082-structural-group-detection T046 / FR-022(a).
+//
+// NEW ROW. FIX 4.2 was absent from this profile because it registered ZERO
+// repeating groups (L-063-1: its `<group>` count fields are typed legacy XML
+// `INT`, and detection used to key on the datatype), so `as_table_view()` did
+// no group work at all for it. 082 makes detection structural, so FIX 4.2 now
+// registers 18 groups and this row measures work that did not previously exist.
+// It is therefore the one row on this profile with no pre-change counterpart —
+// stated rather than silently baselined.
+//
+// `group_bits_words` is the heap-footprint half of FR-022(a): `table_view`'s
+// `sizeof` is a compile-time constant and does NOT move (see
+// BM_TableView_Sizeof), but `group_bits_` is a `std::vector<std::uint64_t>`
+// that goes from EMPTY to `(max registered no_tag >> 6) + 1` words per
+// `table_view` copy on FIX40/41/42. Derived here from the public accessor
+// rather than from the private member, so the figure is reproducible.
+// -----------------------------------------------------------------------
+namespace {
+
+// Highest registered group count-tag, via the public structural accessor.
+std::uint16_t max_registered_group_tag(fixpp::dict::table_view const& tv) {
+    std::uint16_t hi = 0;
+    for (std::uint32_t t = 1; t <= 10000U; ++t) {
+        if (tv.group_first_field(static_cast<std::uint16_t>(t)) != 0) {
+            hi = static_cast<std::uint16_t>(t);
+        }
+    }
+    return hi;
+}
+
+std::size_t group_bits_words(fixpp::dict::table_view const& tv) {
+    std::uint16_t const hi = max_registered_group_tag(tv);
+    return hi == 0 ? 0U : static_cast<std::size_t>(hi >> 6U) + 1U;
+}
+
+}  // namespace
+
+static void BM_TableView_BuildFix42(benchmark::State& state) {
+    auto const path = dict_path("FIX42.xml");
+    std::array<std::byte, 4u * 1024u * 1024u> buffer{};
+    std::pmr::monotonic_buffer_resource mr{buffer.data(), buffer.size()};
+    auto const dictionary = fixpp::dict::XmlLoader{}.load(path, &mr);
+    for (auto _ : state) {
+        auto tv = dictionary.as_table_view();
+        benchmark::DoNotOptimize(tv);
+    }
+    auto const tv = dictionary.as_table_view();
+    state.counters["group_bits_words"] = static_cast<double>(group_bits_words(tv));
+    state.counters["group_bits_B"] =
+        static_cast<double>(group_bits_words(tv) * sizeof(std::uint64_t));
+}
+BENCHMARK(BM_TableView_BuildFix42)->Unit(benchmark::kMicrosecond);
+
 BENCHMARK_MAIN();

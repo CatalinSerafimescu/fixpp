@@ -1,0 +1,59 @@
+{
+  "_note": "FIRST baseline for this profile. 075 recorded it in-file only, so Article VIII §2's ±5% budget had nothing to compare against; 082 T046 (FR-022(a) / SC-012 / K10) creates it. Release build, --benchmark_min_time=0.5s, 4 runs. READ THE per-benchmark spread fields before treating any single figure as a gate: this profile's run-to-run spread is 9-18%, so a ±5% budget is NOT resolvable on one run and must be evaluated against `measured_release_us_runs`.",
+  "context": {
+    "date": "2026-08-12",
+    "host_name": "WSLUBUNTU24.04",
+    "executable": "build/linux-clang-release/bench/dictionary/table_view_footprint_bench",
+    "build_type": "release",
+    "preset": "linux-clang-release",
+    "cpu": "10 X 3593.26 MHz",
+    "load_average_at_run": "1.00, 2.71, 1.93",
+    "benchmark_min_time": "0.5s",
+    "runs": 4,
+    "feature": "082-structural-group-detection",
+    "commit_note": "post-structural-detection; FieldRef::type deliberately unchanged"
+  },
+  "_before_side_caveat": "The pre-change (T002) figures below are n=1 — a single run captured before implementation, with no spread recorded. Their variance is therefore unbounded and the before/after deltas MUST NOT be read as precise. What the data does support is the weaker, sufficient claim: no regression. The FIX44 / FIX50SP2 deltas are NEGATIVE (faster) by 34-44%, which is outside this profile's measured 9-18% run-to-run spread in the same direction, so Article VIII §2's no-regression obligation is met without needing the exact magnitude to be trustworthy. The speed-up itself is NOT root-caused and is deliberately not claimed as a 082 improvement.",
+  "benchmarks": [
+    {
+      "name": "BM_TableView_Sizeof",
+      "metric": "sizeof_B",
+      "measured_B": 608,
+      "pre_change_B": 608,
+      "verdict": "UNCHANGED — the compile-time footprint of table_view does not move",
+      "_timing_is_meaningless_here": "Iterations(1) over a compile-time `sizeof`. Measured real-time across the 4 runs was 37038 / 2923 / 2753 / 3232 ns — a 12.7x first-run outlier on a benchmark that computes a constant. The timing column on THIS row is process warm-up, not a signal; only sizeof_B is."
+    },
+    {
+      "name": "BM_TableView_BuildFix50SP2",
+      "unit": "us",
+      "measured_release_us_runs": [199750, 203617, 236395, 214186],
+      "measured_release_us_median": 208902,
+      "spread_pct": 18.3,
+      "pre_change_us_n1": 357594,
+      "verdict": "NO REGRESSION (measured faster; magnitude not trusted — see _before_side_caveat)"
+    },
+    {
+      "name": "BM_TableView_BuildFix44",
+      "unit": "us",
+      "measured_release_us_runs": [2990, 3032, 3294, 2925],
+      "measured_release_us_median": 3011,
+      "spread_pct": 12.6,
+      "pre_change_us_n1": 4578,
+      "verdict": "NO REGRESSION (measured faster; magnitude not trusted — see _before_side_caveat)"
+    },
+    {
+      "name": "BM_TableView_BuildFix42",
+      "unit": "us",
+      "measured_release_us_runs": [455, 466, 466, 426],
+      "measured_release_us_median": 460,
+      "spread_pct": 9.4,
+      "pre_change_us_n1": null,
+      "verdict": "NEW ROW — no pre-change counterpart EXISTS, and that is the finding, not a gap in the data",
+      "_why_no_before": "Pre-082, FIX 4.2 registered ZERO repeating groups (L-063-1), so as_table_view() did no group work for it and the row was absent from this profile. This row measures work that did not previously exist; it cannot regress against anything.",
+      "group_bits_words": 7,
+      "group_bits_B": 56,
+      "_group_bits_note": "The heap half of FR-022(a). sizeof(table_view) is unchanged (row 1), but `group_bits_` is a std::vector<std::uint64_t> that goes EMPTY -> (max registered no_tag >> 6) + 1 words per table_view COPY on FIX40/41/42. Measured 7 words = 56 B for FIX 4.2. Derived in-bench from the public group_first_field() accessor, not from the private member, so the figure is reproducible."
+    }
+  ],
+  "_predicted_cost_not_observed": "T046's task text predicted a slowdown on EVERY dictionary — including the byte-identical ones — because the per-field group test goes from one enum compare to an O(log G) binary search over `groups_` (G = 507 on FIX50SP2, ~9 comparisons). That cost is NOT observable at this profile's granularity: FIX50SP2 and FIX44 both measured faster than the n=1 pre-change figure. Recorded as measured rather than as predicted, per Article VIII's 'asserting any leg unmoved instead of measuring it is non-conforming'."
+}
