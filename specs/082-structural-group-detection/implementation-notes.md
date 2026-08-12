@@ -960,6 +960,60 @@ and `build_quickfix_oracle.group_tags` is likewise **505**. The `508` figure cam
 shipped pin was 505 and back-solving `505 + 3`; the pin was **502**. Two independent oracles agreeing on
 505 is a real corroboration of the new pin, not a coincidence to be distrusted.
 
+## ✅ US4 / Phase 6 COMPLETE 2026-08-12 — ALL FOUR USER STORIES DELIVERED, L-061-1 closed
+
+### T044 — the golden is a genuinely INDEPENDENT oracle
+
+`tests/session/golden/v42_mass_quote.fix`, the **first FIX 4.2 golden** in that directory. Every prior
+entry is FIX 4.4 because before 082 no `v42` grouped write was expressible at all (L-061-1).
+
+Authored by a **real QuickFIX-cpp v1.16.0** (`reference-engines/quickfix-cpp`, `libquickfix.so.17`):
+`FIX42::MassQuote` + nested `NoQuoteSets::NoQuoteEntries` → `Message::toString()`, tags `8`/`9`/`10`
+stripped to the body-only form. Output verified byte-identical to the checked-in file.
+
+```
+> 35=i 117=QID-100 296=1 302=QS1 311=AAPL 304=1 295=1 299=QE1 132=10.5 133=10.75
+```
+
+Generator checked in at `tools/quickfix_v42_exemplar_golden/gen_v42_mass_quote.cpp`, **deliberately not
+wired into CMake** — same OFF-by-default rationale as `tools/quickfix_{enum,required}_golden`, since
+`reference-engines/` is outside the submodule and never present in CI, so a wired target could only fail
+there. Checked in anyway so the golden is reproducible rather than folklore.
+
+⚠️ **`311` is the entire delta vs the FIX 4.4 `mass_quote.fix`, and it is the DICTIONARIES' divergence,
+not an authoring choice.** FIX 4.2 marks `UnderlyingSymbol(311)` **required** inside `NoQuoteSets`; FIX 4.4
+does not. **Two independent sources agree**: QuickFIX's own FIX42 `message_order(302,311,312,…)` places it
+second, and fixpp's separately derived `G_296_2Args` required set is `{302, 311, 304}`. That agreement is
+the whole reason to use a reference engine. PROVENANCE.md warns against "aligning" the two goldens by
+deleting `311` — a FIX 4.2 MassQuote without it is invalid.
+
+### T045 — the exemplar: two legs, and neither substitutes for the other
+
+`tests/session/test_082_v42_nested_exemplar_roundtrip.cpp`, ctest
+**`test_082_v42_nested_exemplar_roundtrip`** (labels `082;us4;roundtrip;golden;dict;i`), linking
+`fixpp::builders::v42` + `fixpp::validators::v42`. **PASSES.**
+
+- **Leg 1 (write)** — `build_MassQuote` output byte-diffs clean against T044's QuickFIX golden.
+- **Leg 2 (read)** — the same bytes parsed back through the regenerated v42 read tier, with **both**
+  group levels enumerated (`G_296` → `G_295`) and every seeded field compared by value.
+
+⚠️ **Why both legs.** Leg 1 alone passes if the reader is broken. Leg 2 alone passes if writer and reader
+share a *compensating* bug — and they share the same dictionary and the same group tables, so a symmetric
+error is the plausible failure, not a far-fetched one. The QuickFIX golden is what breaks the symmetry.
+
+⚠️ **Two anti-vacuity guards, both necessary.** `ASSERT_NE(group_first_field(296/295), 0)` before the walk
+— an unregistered group yields an **empty** `group_view`, so every in-loop `EXPECT` would simply not run
+and read as "all fields matched". And `sets_seen == 1` / `entries_seen == 1` after it, for the same reason
+one level down. The nested count is the one that actually pins L-061-1's capability.
+
+**Mutation matrix — all three kill it:**
+
+| Mutant | Result |
+|---|---|
+| corrupt the **golden's** `311=AAPL` → `MSFT` (no rebuild — golden read at runtime) | RED |
+| change the seed's `OfferPx` `10.75` → `11.75` | RED |
+| drop `311` from the seed entirely | RED at `validate` with `error=38` (`wire_required_field_missing`) |
+
 ## ✅ US3 / Phase 5 COMPLETE 2026-08-12 (T041 + T043) — and T043's task text names a wrong example
 
 `dictionary_required_scope_census_test` **15/15**. Both new pins mutation-proven (below).

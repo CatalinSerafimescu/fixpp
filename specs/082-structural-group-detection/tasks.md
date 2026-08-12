@@ -261,7 +261,7 @@ implementation).
 **Depends on**: US1 and US2 (delivers no value without both).
 
 - [X] T044 [P] [US4] Derive an **independent** (QuickFIX-derived) golden for a `v42` `MassQuote` with a populated `NoQuoteSets(296) → NoQuoteEntries(295)` nesting — US4 AC1 / SC-007.
-- [ ] T045 [US4] Add the `v42` nested-group write exemplar alongside the 061 suite, assert its emitted bytes against T044's golden, and assert a **read round-trip** through the regenerated `v42` read tier in which every field and **both** group levels round-trip field-for-field — US4 AC2 / SC-007.
+- [X] T045 [US4] Add the `v42` nested-group write exemplar alongside the 061 suite, assert its emitted bytes against T044's golden, and assert a **read round-trip** through the regenerated `v42` read tier in which every field and **both** group levels round-trip field-for-field — US4 AC2 / SC-007.
 
 **Checkpoint**: all four user stories delivered and independently verifiable.
 

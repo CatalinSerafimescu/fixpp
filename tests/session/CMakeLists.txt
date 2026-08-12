@@ -3105,3 +3105,45 @@ set_tests_properties(session_first_frame_stop PROPERTIES
 # ── Conformance subdirectory (005 Q2 in-scope [FIX-TC] subset) ───────────────
 # Phase 3 adds tc_establishment_test.cpp (T020); later phases add more.
 add_subdirectory(conformance)
+
+# ── 082-structural-group-detection T045 [US4]: v42 nested write exemplar ──────
+# US4 AC2 / SC-007, closes L-061-1. The exemplar that proves the fixpp::v42 builder
+# tier is USABLE, not merely emitted: build a MassQuote with NoQuoteSets(296) ->
+# NoQuoteEntries(295), byte-diff it against T044's QuickFIX-authored golden, and
+# round-trip it back through the regenerated v42 read tier with BOTH group levels
+# enumerated.
+#
+# Links both prebuilt v42 libs (fixpp::builders::v42 for build_, ::validators::v42
+# for validate_), mirroring test_067_builder_validate's v44 pair. Compiles
+# golden_diff.cpp directly for the same ordering reason documented on
+# test_exemplar_roundtrip above (tests/session is add_subdirectory'd before
+# tests/interop, so interop_support does not exist yet at this point).
+if(TARGET fixpp_codegen_generate AND TARGET fixpp_builders_v42)
+  add_executable(test_082_v42_nested_exemplar_roundtrip
+    test_082_v42_nested_exemplar_roundtrip.cpp
+    "${CMAKE_SOURCE_DIR}/tests/interop/support/golden_diff.cpp"
+  )
+  add_dependencies(test_082_v42_nested_exemplar_roundtrip fixpp_codegen_generate)
+  target_link_libraries(test_082_v42_nested_exemplar_roundtrip PRIVATE
+    fixpp_wire
+    fixpp_dictionary
+    fixpp::builders::v42
+    fixpp::validators::v42
+    GTest::gtest
+    GTest::gtest_main
+  )
+  target_include_directories(test_082_v42_nested_exemplar_roundtrip PRIVATE
+    "${CMAKE_BINARY_DIR}/_codegen/include"
+    "${CMAKE_SOURCE_DIR}/tests"
+    "${CMAKE_SOURCE_DIR}/tests/interop"
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+  )
+  target_compile_definitions(test_082_v42_nested_exemplar_roundtrip PRIVATE
+    "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
+    "FIXPP_REPO_ROOT=\"${CMAKE_SOURCE_DIR}\""
+  )
+  add_test(NAME test_082_v42_nested_exemplar_roundtrip
+    COMMAND test_082_v42_nested_exemplar_roundtrip)
+  set_tests_properties(test_082_v42_nested_exemplar_roundtrip PROPERTIES
+    LABELS "082;us4;roundtrip;golden;dict;i")
+endif()
