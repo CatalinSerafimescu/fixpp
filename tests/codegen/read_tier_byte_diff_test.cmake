@@ -121,7 +121,8 @@ if(NOT _codegen_rc EQUAL 0)
     "[T022] fixpp-codegen run failed (exit ${_codegen_rc}):\n${_codegen_out}\n${_codegen_err}")
 endif()
 
-# ── Recursive byte-diff (via SHA256) vs the T001 baseline ─────────────────
+# ── Recursive byte-diff (via SHA256) vs each artifact's own baseline: 14 vs
+# the T001 baseline, 2 v42 artifacts vs their 082-approved hashes ─────────
 
 set(_PASS_COUNT 0)
 set(_FAIL_COUNT 0)
