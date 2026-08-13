@@ -718,11 +718,29 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_remove_tag(fixpp_msg_t* msg, uint16_t t
 // fixpp#215 item 3: the ancestor chain is `wire::group_context`, the same
 // by-value, alloc-free, K=16-bounded carrier the parse side threads, replacing a
 // heap-backed `std::vector<uint16_t>&` with manual push_back/pop_back pairing.
-// The vector was unbounded here but silently clamped downstream anyway:
-// `make_group_ctx_key` (table_view.hpp) keeps the first `kMaxGroupContextDepth`
-// entries and drops the rest, which is byte-for-byte what `group_context::
-// pushed()` does — so the resolved key is identical at every depth, and nothing
-// else in this recursion read `parent_path.size()`.
+//
+// CORRECTED (Gate B r1 O1 — the identity claim previously here was FALSE at
+// depth >= 17, and cited the wrong side of the hash map). `make_group_ctx_key`
+// is the INSERT-side key builder (called only from `add_group_member_ctx` /
+// `set_group_first_ctx`, i.e. registration) — it is not on this lookup path at
+// all. The lookup path (`group_first_field` / `group_first_field_exact`,
+// table_view.hpp) builds a `group_ctx_query` from the RAW span it is handed,
+// UNCLAMPED, and `group_ctx_equal::eq` uses the four-iterator `std::equal`,
+// which returns false on any length mismatch. So the actual delta at depth
+// >= 17 is: the OLD `std::vector<uint16_t>&` grew unbounded, so a query span
+// there had length 17+ and could NEVER match any stored key (max depth 16) —
+// a GUARANTEED context miss, unconditionally. The NEW `group_context::
+// pushed()` SATURATES at depth 16 (this file's span construction below is the
+// only place in this recursion that reads a depth/size at all), so a query
+// span here has length <= 16 and CAN match a context `as_table_view()`
+// registered under its own 16-clamped insert-side key. The two are NOT
+// behaviour-identical past depth 16 — see B-215-1's depth >= 17 addendum in
+// spec/behaviors-and-limitations.md — though within the shipped FIX
+// dictionaries no group nests that deep, so the delta is argued, not
+// witnessed: a depth->=17 fixture that could demonstrate it cannot currently
+// even LOAD, because of an UNRELATED, pre-existing depth->=17 defect this
+// Gate B round discovered but is out of scope to fix — see the verify record
+// for the full account and the escalation.
 static fixpp_error_t validate_group_grammar(const std::pmr::vector<AccumulatorEntry>& entries,
                                             const fixpp::dict::Dictionary* dict,
                                             const fixpp::dict::table_view* tv,
