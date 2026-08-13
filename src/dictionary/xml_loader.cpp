@@ -1062,8 +1062,25 @@ detail::dict_metadata_handle_ptr LoaderState::finalize() {
     // `captured == 0` means no FieldRef was emitted at that group's level, so
     // no FieldRef carries its `group_no_tag`, so the `!members.empty()` leg
     // excludes it from the registered set in the first place.
+    //
+    // Gate B r1 F1: the sweep's candidate source is now STRUCTURAL, matching
+    // `as_table_view()` (`group_first_field(t) != 0`) rather than
+    // `fr.type == NumInGroup` — this loader-side `groups_` table IS final at
+    // this point (the first-seen projection above just completed), unlike the
+    // handle-side `h.groups_`, which is not filled until :1157-1207. See the
+    // doc comment on `find_context_without_delim_record`
+    // (dictionary_internal.hpp) for the exact set definition.
+    std::vector<std::uint16_t> structural_group_tags;
+    structural_group_tags.reserve(group_index_by_no_tag_.size());
+    for (auto const& [tag, idx] : group_index_by_no_tag_) {
+        if (groups_[idx].first_field_tag != 0) {
+            structural_group_tags.push_back(tag);
+        }
+    }
+    std::ranges::sort(structural_group_tags);
+
     detail::maybe_drop_first_group_ctx_delim_run_for_testing(h);  // Gate B r1 F1 test seam
-    if (auto const bad = detail::find_incomplete_group_context(h); bad) {
+    if (auto const bad = detail::find_incomplete_group_context(h, structural_group_tags); bad) {
         throw xml_parse_error("dict::xml_parse_error: group context for NumInGroup tag " +
                               std::to_string(bad->second) + " in message '" +
                               std::string{messages_[bad->first].msg_type} +

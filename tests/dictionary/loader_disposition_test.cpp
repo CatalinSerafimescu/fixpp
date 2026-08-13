@@ -205,6 +205,92 @@ constexpr std::string_view kOrchestraValidGroupXml =
     R"(</fixr:messages>)"
     R"(</fixr:repository>)";
 
+// ── Gate B r1 F1 (fixpp#261 PR review) — the FIX 4.0/4.1/4.2 legacy shape
+// (L-063-1): the group count tag NoGood(600) is declared type='INT', not
+// NUMINGROUP. Otherwise identical to kOrchestraValidGroupXml/
+// kUnresolvableGroupXml's well-formed sibling — a real group with a real
+// member, FieldA(610). Used with ForceIncompleteGroupContextGuard to prove
+// the FR-023 completeness sweep now examines this population, which the
+// datatype-gated predicate used to skip entirely.
+constexpr std::string_view kIntTypedValidGroupXml =
+    R"(<fix type='FIX' major='4' minor='2' servicepack='0'>)"
+    R"(<fields>)"
+    R"(<field number='8' name='BeginString' type='STRING'/>)"
+    R"(<field number='9' name='BodyLength' type='INT'/>)"
+    R"(<field number='10' name='CheckSum' type='STRING'/>)"
+    R"(<field number='35' name='MsgType' type='STRING'/>)"
+    R"(<field number='600' name='NoGood' type='INT'/>)"
+    R"(<field number='610' name='FieldA' type='STRING'/>)"
+    R"(</fields>)"
+    R"(<messages>)"
+    R"(<message name='V1Msg' msgtype='V1' msgcat='app'>)"
+    R"(<field name='MsgType' required='N'/>)"
+    R"(<group name='NoGood' required='N'>)"
+    R"(<field name='FieldA' required='N'/>)"
+    R"(</group>)"
+    R"(</message>)"
+    R"(</messages></fix>)";
+
+// ── Gate B r1 F1 (fixpp#261 PR review) — the Orchestra twin of
+// kIntTypedValidGroupXml: NoGood(600) is declared type='int', not
+// 'NumInGroup'.
+constexpr std::string_view kOrchestraIntTypedValidGroupXml =
+    R"(<fixr:repository xmlns:fixr='http://fixprotocol.io/2020/orchestra/repository' )"
+    R"(name='FIX' version='FIX.Latest_EP303'>)"
+    R"(<fixr:datatypes>)"
+    R"(<fixr:datatype name='String'/><fixr:datatype name='int'/>)"
+    R"(</fixr:datatypes>)"
+    R"(<fixr:fields>)"
+    R"(<fixr:field id='35' name='MsgType' type='String'/>)"
+    R"(<fixr:field id='600' name='NoGood' type='int'/>)"
+    R"(<fixr:field id='610' name='FieldA' type='String'/>)"
+    R"(</fixr:fields>)"
+    R"(<fixr:groups>)"
+    R"(<fixr:group id='6000' name='GoodGrp'>)"
+    R"(<fixr:numInGroup id='600'/>)"
+    R"(<fixr:fieldRef id='610'/>)"
+    R"(</fixr:group>)"
+    R"(</fixr:groups>)"
+    R"(<fixr:messages>)"
+    R"(<fixr:message id='1' name='V1Msg' msgType='V1'>)"
+    R"(<fixr:structure>)"
+    R"(<fixr:fieldRef id='35'/>)"
+    R"(<fixr:groupRef id='6000'/>)"
+    R"(</fixr:structure>)"
+    R"(</fixr:message>)"
+    R"(</fixr:messages>)"
+    R"(</fixr:repository>)";
+
+// ── Gate B r1 F1 (fixpp#261 PR review) — the Int-typed twin of
+// kScalarReuseXml: V1 declares NoGood(600) [type='INT'] as a real group with
+// member FieldA(610); V2 reuses tag 600 as a plain scalar <field>. Pins that
+// C-3.4a's `!members.empty()` exclusion still holds once the sweep's
+// candidate source is the DICTIONARY-WIDE structural tag set rather than a
+// per-message type test — the false-rejection widening the fix queue warns
+// against would flag V2 even though it contributes no context.
+constexpr std::string_view kIntTypedScalarReuseXml =
+    R"(<fix type='FIX' major='4' minor='2' servicepack='0'>)"
+    R"(<fields>)"
+    R"(<field number='8' name='BeginString' type='STRING'/>)"
+    R"(<field number='9' name='BodyLength' type='INT'/>)"
+    R"(<field number='10' name='CheckSum' type='STRING'/>)"
+    R"(<field number='35' name='MsgType' type='STRING'/>)"
+    R"(<field number='600' name='NoGood' type='INT'/>)"
+    R"(<field number='610' name='FieldA' type='STRING'/>)"
+    R"(</fields>)"
+    R"(<messages>)"
+    R"(<message name='V1Msg' msgtype='V1' msgcat='app'>)"
+    R"(<field name='MsgType' required='N'/>)"
+    R"(<group name='NoGood' required='N'>)"
+    R"(<field name='FieldA' required='N'/>)"
+    R"(</group>)"
+    R"(</message>)"
+    R"(<message name='V2Msg' msgtype='V2' msgcat='app'>)"
+    R"(<field name='MsgType' required='N'/>)"
+    R"(<field name='NoGood' required='N'/>)"  // scalar reuse, NOT a group here
+    R"(</message>)"
+    R"(</messages></fix>)";
+
 struct DictFile {
     std::string label;
     std::string filename;
@@ -432,10 +518,54 @@ TEST(LoaderDisposition, FindIncompleteGroupContextDetectsMissingRecord) {
     // The violation under test: zero delimiter records for this message.
     h.per_msg_group_ctx_delim_offsets_.push_back({.start = 0, .count = 0});
 
-    auto const bad = fixpp::dict::detail::find_incomplete_group_context(h);
+    std::array<std::uint16_t, 1> const structural_tags{600};
+    auto const bad = fixpp::dict::detail::find_incomplete_group_context(h, structural_tags);
     ASSERT_TRUE(bad.has_value())
         << "a registered context (NoGood/600, with member FieldA/610) that has no delimiter "
            "record must be detected as the FR-023 / C-3.4 violation it is.";
+    EXPECT_EQ(bad->first, 0u);
+    EXPECT_EQ(bad->second, 600);
+}
+
+// ============================================================================
+// Gate B r1 F1 (fixpp#261 PR review) — the `field_data_type::Int` twin of
+// FindIncompleteGroupContextDetectsMissingRecord above. Proves the datatype-
+// gated predicate (`fr.type == NumInGroup`) misses exactly the population 082
+// added: legacy FIX 4.0/4.1/4.2 dialects whose `<group>` count fields are
+// INT-typed. Identical fixture, ONLY the type differs.
+// ============================================================================
+TEST(LoaderDisposition, FindIncompleteGroupContextDetectsMissingRecordIntTyped) {
+    std::array<std::byte, 4096> buf{};
+    std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
+    fixpp::dict::detail::dict_metadata_handle h{&mr};
+
+    // Same as the NumInGroup-typed fixture above, except the count tag's own
+    // FieldRef.type is Int — matching how FIX 4.0/4.1/4.2 declare <group>
+    // count fields (L-063-1).
+    fixpp::dict::FieldRef group_fr{};
+    group_fr.tag = 600;
+    group_fr.type = fixpp::dict::field_data_type::Int;
+    group_fr.group_no_tag = 0;
+
+    fixpp::dict::FieldRef member_fr{};
+    member_fr.tag = 610;
+    member_fr.type = fixpp::dict::field_data_type::String;
+    member_fr.group_no_tag = 600;
+
+    h.fields_.push_back(group_fr);
+    h.fields_.push_back(member_fr);
+    h.per_msg_field_offsets_.push_back({.start = 0, .count = 2});
+    // The violation under test: zero delimiter records for this message.
+    h.per_msg_group_ctx_delim_offsets_.push_back({.start = 0, .count = 0});
+
+    std::array<std::uint16_t, 1> const structural_tags{600};
+    auto const bad = fixpp::dict::detail::find_incomplete_group_context(h, structural_tags);
+    ASSERT_TRUE(bad.has_value())
+        << "an Int-typed registered context (NoGood/600, with member FieldA/610) that has no "
+           "delimiter record must be detected as the FR-023 / C-3.4 violation it is, exactly as "
+           "the NumInGroup-typed case above — the sweep's candidate source is structural "
+           "(caller-supplied group tags), not FieldRef.type. RED before the Gate B r1 F1 fix "
+           "(proven: bad.has_value() == false, see the fix's commit message for the transcript).";
     EXPECT_EQ(bad->first, 0u);
     EXPECT_EQ(bad->second, 600);
 }
@@ -526,6 +656,110 @@ TEST(LoaderDisposition, ContextWithoutDelimiterRecordRejectedAtFinalizeOrchestra
         << what;
     EXPECT_NE(what.find("600"), std::string::npos)
         << "the diagnostic must name the offending group's NumInGroup tag; got: " << what;
+}
+
+// ============================================================================
+// Gate B r1 F1 (fixpp#261 PR review) — the loader-seam twin of
+// ContextWithoutDelimiterRecordRejectedAtFinalize, on an INT-typed group
+// (kIntTypedValidGroupXml). Before the fix, the FR-023 sweep's `fr.type ==
+// NumInGroup` gate meant this exact fixture, forced incomplete by the SAME
+// guard, LOADED SUCCESSFULLY — the guard truncated the delimiter run, but the
+// detector never even looked at tag 600 because its FieldRef.type is Int.
+// That silent gap is exactly what F-1 reports; this proves it is closed.
+// ============================================================================
+TEST(LoaderDisposition, ContextWithoutDelimiterRecordRejectedAtFinalizeIntTyped) {
+    ForceIncompleteGroupContextGuard const guard;
+
+    std::vector<std::byte> buf(2u * 1024u * 1024u);
+    std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
+
+    bool threw = false;
+    std::string what;
+    try {
+        auto d = fixpp::dict::XmlLoader{}.load_from_string(kIntTypedValidGroupXml, &mr);
+        (void)d;
+    } catch (group_delimiter_collision_error const& e) {
+        ADD_FAILURE() << "the wrong guard fired (072's nested/parent delimiter collision check, "
+                         "not the FR-023 completeness invariant this test targets): "
+                      << e.what();
+        return;
+    } catch (xml_parse_error const& e) {
+        threw = true;
+        what = e.what();
+    }
+    ASSERT_TRUE(threw) << "FR-023 / C-3.4: an Int-typed registered context with no delimiter "
+                          "record must reject the load — the sweep's candidate source is "
+                          "structural (as_table_view()'s own predicate), not FieldRef.type.";
+    EXPECT_NE(what.find("no per-context delimiter record (FR-023 completeness invariant)"),
+              std::string::npos)
+        << "the diagnostic must name the FR-023 completeness invariant specifically; got: "
+        << what;
+    EXPECT_NE(what.find("600"), std::string::npos)
+        << "the diagnostic must name the offending group's count tag; got: " << what;
+    EXPECT_NE(what.find("V1"), std::string::npos)
+        << "the diagnostic must name the offending message; got: " << what;
+}
+
+// Gate B r1 F1 — the Orchestra twin (FR-006c), on kOrchestraIntTypedValidGroupXml.
+TEST(LoaderDisposition, ContextWithoutDelimiterRecordRejectedAtFinalizeIntTypedOrchestra) {
+    ForceIncompleteGroupContextGuard const guard;
+
+    std::vector<std::byte> buf(2u * 1024u * 1024u);
+    std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
+
+    bool caught_derived = false;
+    std::string what;
+    try {
+        auto d =
+            fixpp::dict::OrchestraLoader{}.load_from_string(kOrchestraIntTypedValidGroupXml, &mr);
+        (void)d;
+    } catch (orchestra_parse_error const& e) {
+        caught_derived = true;
+        what = e.what();
+    } catch (xml_parse_error const& e) {
+        ADD_FAILURE() << "FR-006c / C-6.1b: OrchestraLoader threw the BASE xml_parse_error, not "
+                         "the derived orchestra_parse_error; got: "
+                      << e.what();
+        return;
+    }
+    ASSERT_TRUE(caught_derived) << "FR-023 / C-3.4 must reject an Int-typed context in the "
+                                   "Orchestra loader too, as its own orchestra_parse_error "
+                                   "(FR-006c).";
+    EXPECT_NE(what.find("no per-context delimiter record (FR-023 completeness invariant)"),
+              std::string::npos)
+        << "the diagnostic must name the FR-023 completeness invariant specifically; got: "
+        << what;
+    EXPECT_NE(what.find("600"), std::string::npos)
+        << "the diagnostic must name the offending group's count tag; got: " << what;
+}
+
+// ============================================================================
+// Gate B r1 F1 (fixpp#261 PR review) — the negative counterpart to the two
+// tests above: proves widening the sweep's candidate source to the
+// DICTIONARY-WIDE structural tag set (rather than per-message FieldRef.type)
+// did NOT reopen the false-rejection hazard the fix queue names. V1 declares
+// a real Int-typed group (so tag 600 IS in the structural set); V2 reuses the
+// same tag as a plain scalar and must NOT be flagged, exactly as
+// ScalarReuseOfGroupTagIsNotACompletenessViolation pins for the
+// NumInGroup-typed case.
+// ============================================================================
+TEST(LoaderDisposition, IntTypedScalarReuseOfGroupTagIsNotACompletenessViolation) {
+    std::vector<std::byte> buf(2u * 1024u * 1024u);
+    std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
+
+    // The load itself is the assertion under test: if the widened sweep's
+    // structural tag set (built dictionary-wide) mistakenly flagged V2's
+    // scalar reuse as an incomplete context, this would throw
+    // xml_parse_error and fail the test before reaching the line below.
+    auto dict = fixpp::dict::XmlLoader{}.load_from_string(kIntTypedScalarReuseXml, &mr);
+
+    auto const tv = dict.as_table_view();
+    std::array<std::uint16_t, 0> const root{};
+    // V1's genuine Int-typed group context resolves.
+    EXPECT_EQ(tv.group_first_field("V1", root, std::uint16_t{600}), 610)
+        << "V1 declares NoGood(600) as a real Int-typed group; its context must resolve.";
+    SUCCEED() << "load succeeded with an Int-typed group tag reused as a scalar in V2 — the "
+                 "structural sweep's !members.empty() exclusion still holds per-message.";
 }
 
 // ============================================================================
