@@ -175,8 +175,10 @@ if(_FAIL_COUNT GREATER 0)
   endforeach()
   message(FATAL_ERROR
     "[T022] fixpp::dict::read-tier-byte-diff FAILED (${_FAIL_COUNT} artifact(s) diverged from "
-    "the pre-077 baseline -- FR-009/SC-005 violated; this is a real read-tier regression, "
-    "not test noise -- see above).")
+    "its own baseline -- the pre-077 T001 baseline for 14 artifacts, or the 082-approved "
+    "baseline for v42/Messages.hpp and v42/Reify.hpp -- FR-009/SC-005 violated; this is a real "
+    "read-tier regression, not test noise -- see above, per-artifact messages name the correct "
+    "baseline).")
 else()
   message(STATUS "[T022] fixpp::dict::read-tier-byte-diff PASSED "
     "(14 artifacts byte-identical to the pre-077 T001 baseline; 2 intentionally-changed v42 "
