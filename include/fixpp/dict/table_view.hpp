@@ -402,11 +402,18 @@ public:
     //                  exact context has no record. NO bare-store fallback is
     //                  applied; the caller decides.
     //
-    // Bounded, not live, today: FR-023's completeness invariant (enforced in
-    // both loaders' `finalize()`) guarantees every context `as_table_view()`
-    // registers has a real record, so against a loader-built dictionary a
-    // `nullopt` can only come from a caller-side context-construction bug,
-    // never from dictionary data.
+    // REACHABLE through ordinary public C-ABI use on a well-formed,
+    // loader-built dictionary — not merely a caller-side context-construction
+    // bug (Gate B r1 O2; the retracted reasoning previously here is recorded,
+    // not deleted, in .specify/decisions/215-simplify-followups-verify.md).
+    // FR-023's completeness invariant guarantees a record for every context
+    // `as_table_view()` itself registers, but nothing upstream of THIS
+    // accessor confines a caller to those contexts: `fixpp_msg_group_begin`
+    // and `fixpp_entry_group_begin` (src/capi/message_write.cpp) gate only on
+    // the bare no_tag store, and the entry setters run no `check_dict` at
+    // all — so a caller can open a group on a message type, or nest it under
+    // a parent path, the dictionary never registers that exact context for.
+    // See spec/behaviors-and-limitations.md B-215-1.
     //
     // WHY the three-arg accessor above keeps its fallback rather than being
     // reimplemented on top of this one: hand-built bare-API fixtures (the

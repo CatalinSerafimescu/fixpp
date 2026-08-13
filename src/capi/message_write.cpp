@@ -757,11 +757,20 @@ static fixpp_error_t validate_group_grammar(const std::pmr::vector<AccumulatorEn
         // reports the miss instead of masking it, and the miss fails the commit
         // closed, joining `tv == nullptr` on the same disposition.
         //
-        // A miss is not reachable from dictionary data: FR-023's completeness
-        // invariant (both loaders' `finalize()`) guarantees a record for every
-        // context `as_table_view()` registers, and `session_tv_` is always
-        // loader-built. It can only come from a context-construction bug on
-        // THIS path — exactly the case where guessing is worse than rejecting.
+        // A miss IS reachable here through ordinary public C-ABI use, on a
+        // well-formed loader-built `session_tv_` (Gate B r1 O2; the retracted
+        // "not reachable from dictionary data" reasoning previously here is
+        // recorded, not deleted, in
+        // .specify/decisions/215-simplify-followups-verify.md). FR-023's
+        // completeness invariant guarantees a record for every context
+        // `as_table_view()` itself registers, but `fixpp_msg_group_begin`
+        // (:895) and `fixpp_entry_group_begin` (:1006) gate only on the bare
+        // no_tag store, and the entry setters run no `check_dict` — so a
+        // caller can open a group on a message type, or nest it under a
+        // parent path, this dictionary never registered that exact context
+        // for. That is ordinary builder misuse, not a context-construction
+        // bug on this path — exactly the case where guessing is worse than
+        // rejecting. See spec/behaviors-and-limitations.md B-215-1.
         //
         // `!e.instances.empty()` keeps the hoist BEHAVIOUR-preserving: with zero
         // instances the old code never entered the inner loop and so never
