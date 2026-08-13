@@ -517,7 +517,11 @@ set_tests_properties("fixpp::dict::codegen-source-staleness-check" PROPERTIES
 # 16-artifact recursive byte-diff): regenerates the legacy read tier into an
 # isolated scratch dir (NOT the shared _codegen tree -- no RUN_SERIAL/
 # RESOURCE_LOCK needed, mirrors codegen_determinism_test's TempDir pattern)
-# and SHA256-diffs all 16 artifacts against the pre-077 T001 baseline.
+# and SHA256-diffs all 16 artifacts against their own baseline: 14 against
+# the pre-077 T001 baseline, and 2 v42 artifacts (Messages.hpp, Reify.hpp),
+# rebaselined by 082-structural-group-detection T026/T028, against their
+# 082-approved hashes (see read_tier_byte_diff_test.cmake for the full
+# rationale).
 add_test(
   NAME "fixpp::dict::read-tier-byte-diff"
   COMMAND "${CMAKE_COMMAND}"
