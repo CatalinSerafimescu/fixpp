@@ -1456,6 +1456,8 @@ jobs:
       # C ABI drifted. Plus the existing occupancy gate (mirrors check-layers).
       - name: C-ABI byte-freeze gate (NBC-1)
         run: bash tools/check_capi_freeze.sh
+      - name: Dictionary snapshot exclusivity gate
+        run: bash tools/check_dictionary_snapshot_exclusivity.sh
       - name: C-ABI occupancy gate
         run: bash tools/check_capi_occupancy.sh
 

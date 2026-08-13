@@ -355,6 +355,23 @@ TEST(CapiGroupDelimiterCtx, CommitDoesNotRebuildTableViewPerMessage) {
 }
 
 // ============================================================================
+// fixpp#215 item 1 / `.specify/215-dictionary-view.md` §5b — the public C ABI
+// must ALIAS the config snapshot's control block into fixpp_session::tv_, not
+// copy the table_view into a fresh shared_ptr control block.
+// ============================================================================
+TEST(CapiGroupDelimiterCtx, SessionHandleAliasesDictionarySnapshotControlBlock) {
+    auto f = open_session(make_cfg_with_dict(kDivergentNestedXml, "ALIA", "ALIB"));
+
+    auto* sess = f.sess;
+    ASSERT_NE(sess, nullptr);
+    EXPECT_GT(sess->tv_.use_count(), 1L)
+        << "§5b: fixpp_session::tv_ must ALIAS the config's snapshot (shared_dictionary_view), "
+           "not copy the table_view. A copy has its own control block and reads exactly 1.";
+
+    fixpp_engine_destroy(f.eng);
+}
+
+// ============================================================================
 // fixpp#215 item 2 — a CONTEXT MISS at the commit path fails CLOSED.
 //
 // 083 T052 states that this site "must NEVER fall back to the bare global

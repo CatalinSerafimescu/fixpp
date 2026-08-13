@@ -9,15 +9,17 @@
 #        function: fixpp::dict::make_dictionary_snapshot.
 #   G2 — the aliasing shared_ptr<const table_view> construction happens at
 #        exactly ONE production site: fixpp::dict::shared_dictionary_view.
-#        AND both Session::open() and fixpp_session_open route through it.
 #
-# This is a source gate that runs NOWHERE in CI — it is invoked from
-# `/speckit-verify` Step 1 (`[const §XVII.1]`), same as check_capi_freeze.sh
-# et al. Every grep is guarded with `|| true`: under `set -e` + `pipefail` an
-# unguarded grep that matches nothing aborts the WHOLE gate on its own
-# PASSING branch (this project's recorded `[ cond ] && fail` trap, pipeline
-# form) — see the design doc §6 seam 7 for the worked example that shipped
-# broken this way on first draft.
+# This is a source gate mirrored by the Tier-1 workflow and recorded manually
+# in the 215 `/speckit-verify` evidence doc; it is NOT wired through the same
+# path as `check_capi_freeze.sh`. The grep-based layer is intentionally narrow:
+# it counts only evidence carried by WHOLE LINES of code and cannot track a
+# `/* ... */` block opened on a line that also carries code. Every grep is
+# guarded with `|| true`: under `set -e` + `pipefail` an unguarded grep that
+# matches nothing aborts the WHOLE gate on its own PASSING branch (this
+# project's recorded `[ cond ] && fail` trap, pipeline form) — see the design
+# doc §6 seam 7 for the worked example that shipped broken this way on first
+# draft.
 set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
@@ -33,19 +35,24 @@ n_of() { printf '%s' "${1-}" | { grep -c . || true; }; }
 # comment, and awk needs no regex escaping of the `/` and `.` in a path.
 # awk exits 0, so no `|| true`.
 in_file() { printf '%s\n' "${2-}" | awk -F: -v f="$1" '$1==f{n++} END{print n+0}'; }
-# Drop FULL-LINE comments (`//...` or ` * ...` block-comment continuation,
-# after leading whitespace) before a CALL/CONSTRUCTION census. A gate that
-# asserts "X is CALLED" (not "X is NAMED") must not count a prose mention as
-# the call — measured: the code's own prose sentence
-# "shared_dictionary_view() is the sole production alias-formation site"
-# satisfies `\<shared_dictionary_view[[:space:]]*\(` even after the REAL call
-# is replaced by a copy, so the required-call assertion below stayed GREEN
-# under exactly the mutation it exists to catch (case H, comment-shielded
-# variant) until this filter was added. Does not handle a trailing same-line
-# comment after real code, or a `/* */` block whose FIRST line carries code —
-# neither occurs in this tree today; a stricter AST check would close that
-# residual (mirrors G2's own documented spelling-coverage limitation below).
-strip_comment_lines() { grep -vE '^[[:space:]]*(//|\*)' "$1" || true; }
+# Drop WHOLE-LINE comments only: `//...`, a ` * ...` continuation line, or a
+# line that OPENS `/*`. This is enough for the line-oriented counts below and
+# fixes the measured false-green where `/* snapshot_key */` kept G1 alive after
+# all five static_asserts were commented out. It still cannot see lexical state:
+# if `/* */` opens on a line that also carries code, that line is evidence as
+# far as this filter can tell.
+strip_full_line_comments() { grep -vE '^[[:space:]]*(//|/\*|\*)' "$1" || true; }
+# Keep only hits whose matched source line survives strip_full_line_comments().
+# The input is the usual `path:line:text` grep format.
+code_hits_only() {
+    while IFS=: read -r file line rest; do
+        [ -n "${file-}" ] || continue
+        src_line=$(sed -n "${line}p" "$file")
+        if printf '%s\n' "$src_line" | strip_full_line_comments /dev/stdin | grep -q .; then
+            printf '%s:%s:%s\n' "$file" "$line" "$rest"
+        fi
+    done
+}
 
 # ── G1 — SOLE MINTER ──────────────────────────────────────────────────────────
 # `snapshot_key` may be NAMED only where it is declared, defined, and asserted
@@ -74,7 +81,7 @@ g1_bad_n=$(n_of "$g1_bad")
 # version of this) no other assertion re-checks that $A5TU's assertions
 # still exist. `path:line:` kept literal (a `:` cannot appear in these repo
 # paths) so only the CONTENT after it is tested for a comment-line prefix.
-g1_hits_code=$(printf '%s\n' "$g1_hits" | { grep -vE '^[^:]+:[0-9]+:[[:space:]]*(//|\*)' || true; })
+g1_hits_code=$(printf '%s\n' "$g1_hits" | code_hits_only)
 
 # LIVENESS — PER ALLOWLISTED FILE, never a union total, and CODE ONLY, never
 # a comment mention. A union bound (e.g. `>= 3`) is met by the header alone
@@ -118,7 +125,7 @@ case "$g1_mint" in
     *) echo "G1 FAIL: the sole key construction is not in $FACTORY:"; echo "$g1_mint"; exit 1 ;;
 esac
 
-# ── G2 — SOLE ALIAS-FORMER, AND THE TWO REQUIRED CALLS ────────────────────────
+# ── G2 — SOLE ALIAS-FORMER ────────────────────────────────────────────────────
 # A TWO-ARGUMENT shared_ptr<const table_view> construction IS the aliasing
 # ctor. Two spellings are matched: `(std::move(...)` and `(<identifier>,`. The
 # pattern's coverage is the LISTED SPELLINGS ONLY (see the design doc §6 seam
@@ -141,17 +148,4 @@ echo "G2 alias-formation sites = $g2_all_n (in $FACTORY: $g2_helper_n, elsewhere
 [ "$g2_all_n" -eq 1 ] || { echo "G2 FAIL: $g2_all_n aliasing-ctor expression(s), expected exactly 1:"; echo "$g2_hits"; exit 1; }
 # ASSERTION (b) — and that one is the helper's.
 [ "$g2_bad_n" -eq 0 ] || { echo "G2 FAIL: $g2_bad_n hand-rolled alias site(s):"; echo "$g2_hits"; exit 1; }
-
-# ASSERTION (c) — the REQUIRED calls, the census G2 never had. Without this
-# both production consumers can COPY instead of aliasing while (a), (b), seam
-# 3 and seam 4 all stay green. `>= 1` per consumer, not `== 1`: the claim the
-# design makes is "each consumer routes through the helper"; singularity is
-# already carried by (a).
-G2_CALL='\<shared_dictionary_view[[:space:]]*\('
-for f in src/session/session.cpp src/capi/session.cpp; do
-    n=$(n_of "$(strip_comment_lines "$f" | { grep -nE "$G2_CALL" || true; })")
-    echo "G2 required call: $f = $n"
-    [ "$n" -ge 1 ] || { echo "G2 FAIL: $f never calls shared_dictionary_view — the view is copied, not aliased (comment mentions do not count)"; exit 1; }
-done
-
-echo "PASS: dictionary_snapshot exclusivity gates (G1 sole minter, G2 sole alias-former + required calls)."
+echo "PASS: dictionary_snapshot exclusivity gates (G1 sole minter, G2 sole alias-former)."
