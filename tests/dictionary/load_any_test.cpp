@@ -173,7 +173,87 @@ std::filesystem::path write_temp_xml(std::string_view name, std::string_view tex
     return path;
 }
 
+// The Orchestra twin of kUnresolvableGroupXml above (Gate B r1 F1, fixpp#216 /
+// tests/dictionary/loader_disposition_test.cpp:148): BadGrp(7000) declares
+// NoBad(700) as its NumInGroup with NO fieldRef members, so its delimiter
+// cannot be resolved.
+constexpr std::string_view kOrchestraUnresolvableXml =
+    R"(<fixr:repository xmlns:fixr='http://fixprotocol.io/2020/orchestra/repository' )"
+    R"(name='FIX' version='FIX.Latest_EP303'>)"
+    R"(<fixr:datatypes>)"
+    R"(<fixr:datatype name='String'/><fixr:datatype name='int'/>)"
+    R"(<fixr:datatype name='NumInGroup'/>)"
+    R"(</fixr:datatypes>)"
+    R"(<fixr:fields>)"
+    R"(<fixr:field id='35' name='MsgType' type='String'/>)"
+    R"(<fixr:field id='700' name='NoBad' type='NumInGroup'/>)"
+    R"(</fixr:fields>)"
+    R"(<fixr:groups>)"
+    R"(<fixr:group id='7000' name='BadGrp'>)"
+    R"(<fixr:numInGroup id='700'/>)"
+    R"(</fixr:group>)"
+    R"(</fixr:groups>)"
+    R"(<fixr:messages>)"
+    R"(<fixr:message id='1' name='V1Msg' msgType='V1'>)"
+    R"(<fixr:structure>)"
+    R"(<fixr:fieldRef id='35'/>)"
+    R"(<fixr:groupRef id='7000'/>)"
+    R"(</fixr:structure>)"
+    R"(</fixr:message>)"
+    R"(</fixr:messages>)"
+    R"(</fixr:repository>)";
+
 }  // namespace
+
+// ── fixpp Gate B (PR #262 round 1), C3 — the Orchestra half of load_any's
+// policy forwarding had no test. Both tests above (`DefaultPolicyStaysFail-
+// Closed`, `TolerantPolicyReachesTheConcreteLoader`) build `<fix …>` roots, so
+// `return OrchestraLoader{}.load(path, mr);` at load_any.cpp:53 (dropping the
+// policy argument) left every existing test green. These two mirror the XML
+// pair on the `<fixr:repository>` dispatch branch instead.
+
+// Default policy: the Orchestra loader throws the DERIVED orchestra_parse_error,
+// not the base xml_parse_error — the Orchestra fuzz harness catches only the
+// derived type (see loader_disposition_test.cpp:345-364), so asserting the base
+// type here would be a weaker pin than its XML twin's.
+TEST(LoadAny, OrchestraDefaultPolicyStaysFailClosed) {
+    auto const path =
+        write_temp_xml("load_any_test_orchestra_unresolvable_default.xml", kOrchestraUnresolvableXml);
+    std::pmr::monotonic_buffer_resource mr;
+    bool caught_derived = false;
+    try {
+        (void)fixpp::dict::load_any(path, &mr);
+        FAIL() << "expected fixpp::dict::orchestra_parse_error";
+    } catch (fixpp::dict::orchestra_parse_error const&) {
+        caught_derived = true;
+    } catch (fixpp::dict::xml_parse_error const&) {
+        ADD_FAILURE() << "load_any dispatched the Orchestra root to a loader that threw the BASE "
+                         "xml_parse_error instead of the derived orchestra_parse_error.";
+    }
+    EXPECT_TRUE(caught_derived)
+        << "FR-006 / C-6.1b: load_any's default must reject an unresolvable Orchestra group with "
+           "the DERIVED orchestra_parse_error, exactly as OrchestraLoader::load's does.";
+    std::filesystem::remove(path);
+}
+
+// Tolerant policy: the option must reach the concrete OrchestraLoader through
+// the facade, not be accepted and silently dropped on the floor.
+TEST(LoadAny, OrchestraTolerantPolicyReachesTheConcreteLoader) {
+    auto const path = write_temp_xml("load_any_test_orchestra_unresolvable_tolerant.xml",
+                                     kOrchestraUnresolvableXml);
+    std::pmr::monotonic_buffer_resource mr;
+    auto dict = fixpp::dict::load_any(path, &mr, fixpp::dict::unresolved_group_policy::tolerant);
+
+    // "It loaded" would be satisfied by loading nothing — pin that V1Msg
+    // actually loaded (the policy reached the loader rather than the facade
+    // swallowing it) and the offending group was left UNREGISTERED, not
+    // half-registered.
+    EXPECT_GT(dict.messages().size(), 0u)
+        << "FR-006a: V1Msg must still load with the unresolvable group skipped.";
+    EXPECT_EQ(dict.group_first_field(700), 0)
+        << "FR-023a: the skipped group must be left unregistered, not half-registered";
+    std::filesystem::remove(path);
+}
 
 TEST(LoadAny, DefaultPolicyStaysFailClosed) {
     auto const path = write_temp_xml("load_any_test_unresolvable_default.xml", kUnresolvableGroupXml);
