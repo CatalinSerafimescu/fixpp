@@ -42,7 +42,7 @@ transcript `<scratchpad>/pre-change/T002-table_view_footprint-BEFORE.txt`:
 | `BM_TableView_BuildFix50SP2` | 357594 us | 357604 us | 2 | — |
 | `BM_TableView_BuildFix44` | 4578 us | 4576 us | 141 | — |
 
-There is **no FIX 4.2 row today** — T046 adds it, so that row has no "before" by construction.
+There is **no FIX 4.2 row today** — T046 adds it. ⚠️ **Correction (Gate B round 1, PR #261):** the row's "before" figure was NOT unobtainable "by construction" as this note originally claimed — a pre-change figure was obtainable by back-porting the FIX42 row into a `main` worktree and running it, exactly as this same document's T049 later did for the 8-profile A/B (§ "Phase 7 — T049"). That back-port-and-measure WAS performed, retroactively, at Gate B round 1; see `bench/baselines/dictionary/table_view_footprint_bench.json`'s FIX42 row (`_pre_change_provenance`) for the measured figure and method. The original "no counterpart EXISTS" framing is superseded.
 `sizeof_B=608` is the pre-`group_bits_`-growth figure T046 must re-report against.
 
 ### T003 — pre-change `v42` compile-time TU figure

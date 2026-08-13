@@ -141,8 +141,11 @@ BENCHMARK(BM_TableView_BuildFix44)->Unit(benchmark::kMicrosecond);
 // `INT`, and detection used to key on the datatype), so `as_table_view()` did
 // no group work at all for it. 082 makes detection structural, so FIX 4.2 now
 // registers 18 groups and this row measures work that did not previously exist.
-// It is therefore the one row on this profile with no pre-change counterpart —
-// stated rather than silently baselined.
+// A pre-change figure for this row WAS measured (Gate B round 1, PR #261 —
+// see bench/baselines/dictionary/table_view_footprint_bench.json's
+// `_pre_change_provenance` on this row): retroactively, via this exact
+// back-ported-and-run technique against a throwaway `main` worktree, not at
+// T002/T046 as FR-022(a) asked.
 //
 // `group_bits_words` is the heap-footprint half of FR-022(a): `table_view`'s
 // `sizeof` is a compile-time constant and does NOT move (see

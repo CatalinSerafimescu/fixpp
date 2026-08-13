@@ -13,7 +13,7 @@
     "feature": "082-structural-group-detection",
     "commit_note": "post-structural-detection; FieldRef::type deliberately unchanged"
   },
-  "_before_side_caveat": "The pre-change (T002) figures below are n=1 — a single run captured before implementation, with no spread recorded. Their variance is therefore unbounded and the before/after deltas MUST NOT be read as precise. What the data does support is the weaker, sufficient claim: no regression. The FIX44 / FIX50SP2 deltas are NEGATIVE (faster) by 34-44%, which is outside this profile's measured 9-18% run-to-run spread in the same direction, so Article VIII §2's no-regression obligation is met without needing the exact magnitude to be trustworthy. The speed-up itself is NOT root-caused and is deliberately not claimed as a 082 improvement.",
+  "_before_side_caveat": "FIX44 / FIX50SP2 ONLY: the pre-change (T002) figures for those two rows are n=1 — a single run captured before implementation, with no spread recorded. Their variance is therefore unbounded and the before/after deltas MUST NOT be read as precise. What the data does support is the weaker, sufficient claim: no regression. The FIX44 / FIX50SP2 deltas are NEGATIVE (faster) by 34-44%, which is outside this profile's measured 9-18% run-to-run spread in the same direction, so Article VIII §2's no-regression obligation is met without needing the exact magnitude to be trustworthy. The speed-up itself is NOT root-caused and is deliberately not claimed as a 082 improvement. FIX42 is DIFFERENT and does not carry this caveat: its pre-change figure was measured n=4, back-to-back with the post-change figure at Gate B round 1 (see that row's `_pre_change_provenance`), so its ±spread is bounded exactly as the post-change side's is.",
   "benchmarks": [
     {
       "name": "BM_TableView_Sizeof",
@@ -44,15 +44,19 @@
     {
       "name": "BM_TableView_BuildFix42",
       "unit": "us",
-      "measured_release_us_runs": [455, 466, 466, 426],
-      "measured_release_us_median": 460,
-      "spread_pct": 9.4,
-      "pre_change_us_n1": null,
-      "verdict": "NEW ROW — no pre-change counterpart EXISTS, and that is the finding, not a gap in the data",
-      "_why_no_before": "Pre-082, FIX 4.2 registered ZERO repeating groups (L-063-1), so as_table_view() did no group work for it and the row was absent from this profile. This row measures work that did not previously exist; it cannot regress against anything.",
+      "measured_release_us_runs": [487, 477, 491, 481],
+      "measured_release_us_median": 484,
+      "spread_pct": 2.9,
+      "pre_change_us_runs": [327, 352, 341, 325],
+      "pre_change_us_median": 334,
+      "pre_change_spread_pct": 8.3,
+      "delta_pct": 44.9,
+      "verdict": "MEASURED, LARGE POSITIVE DELTA (+44.9% median) — Article VIII §2 INTENTIONAL perf change per FR-022's own opening declaration, not a regression to be explained away. FIX 4.2 registered ZERO repeating groups pre-082 (L-063-1); 082 makes group detection structural, so it now registers 18 groups and this row measures work that did not previously exist. The number bounds the added cost; it is not a pass/fail gate.",
+      "_pre_change_provenance": "Gate B round 1 (PR #261 review, fixpp#261, 2026-08-13) — MEASURED RETROACTIVELY, NOT captured at T002/T046 as FR-022(a) asked. A throwaway git worktree at `main` (c8eb4fec) had BM_TableView_BuildFix42 back-ported VERBATIM from this branch's bench/dictionary/table_view_footprint_bench.cpp (the row loads FIX42.xml outside the timed loop and times only as_table_view() — no 082-only API), configured with the same linux-clang-release Conan profile (via `conan install` + `cmake -B`, since `cmake --preset` cannot be used in a fresh worktree — Conan's CMakeUserPresets.json preset-name collision), and built. Both sides were then run --benchmark_min_time=0.5s, 4 runs each, BACK-TO-BACK on this same host under the same load (load average 0.6-1.05 across both legs, within the same ~15-second window) — the only comparison T049 found valid on this machine, since a cross-session magnitude comparison is provably uninterpretable here (vt11, which 082 does not touch, moved -35% between two measurement sessions with zero code change). This retroactive figure replaces the false claim this row originally shipped with ('NEW ROW — no pre-change counterpart EXISTS'): a pre-change figure WAS obtainable at T002/T046 via this exact back-port-and-measure technique (the technique the branch itself later used for T049's 8-profile A/B), and remains obtainable now. Filling in a number while implying it was captured pre-implementation would replace a false rationale with a false provenance — hence this field.",
       "group_bits_words": 7,
+      "pre_change_group_bits_words": 0,
       "group_bits_B": 56,
-      "_group_bits_note": "The heap half of FR-022(a). sizeof(table_view) is unchanged (row 1), but `group_bits_` is a std::vector<std::uint64_t> that goes EMPTY -> (max registered no_tag >> 6) + 1 words per table_view COPY on FIX40/41/42. Measured 7 words = 56 B for FIX 4.2. Derived in-bench from the public group_first_field() accessor, not from the private member, so the figure is reproducible."
+      "_group_bits_note": "The heap half of FR-022(a). sizeof(table_view) is unchanged (row 1), but `group_bits_` is a std::vector<std::uint64_t> that goes EMPTY -> (max registered no_tag >> 6) + 1 words per table_view COPY on FIX40/41/42. Measured 7 words = 56 B for FIX 4.2, vs 0 words pre-082 (FIX 4.2 registered zero groups then — a valid before/after, not a broken counter). Derived in-bench from the public group_first_field() accessor, not from the private member, so the figure is reproducible."
     }
   ],
   "_predicted_cost_not_observed": "T046's task text predicted a slowdown on EVERY dictionary — including the byte-identical ones — because the per-field group test goes from one enum compare to an O(log G) binary search over `groups_` (G = 507 on FIX50SP2, ~9 comparisons). That cost is NOT observable at this profile's granularity: FIX50SP2 and FIX44 both measured faster than the n=1 pre-change figure. Recorded as measured rather than as predicted, per Article VIII's 'asserting any leg unmoved instead of measuring it is non-conforming'."
