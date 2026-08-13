@@ -6,11 +6,16 @@
 # FR-009/SC-005, T006 decision (FULL 4-artifact x 4-version, not narrowed):
 # regenerates the legacy read tier (v42/v44/v50sp2/vt11 x Fields/Messages/
 # Reify/Validator.hpp, 16 artifacts) into a temp dir via a fresh fixpp-codegen
-# invocation, then SHA256-diffs each artifact against the pre-077 T001
-# baseline. 077 touches ONLY emit_builders.cpp (+ cmake/Codegen.cmake driver
-# wiring) -- the read emitters (emit_messages.cpp / fields / validator /
-# reify) are untouched, so all 16 must be byte-identical pre/post. A
-# mismatch here is a real read-tier regression (FR-009), not noise.
+# invocation, then SHA256-diffs each artifact against its expected baseline.
+# 077 touches ONLY emit_builders.cpp (+ cmake/Codegen.cmake driver wiring) --
+# the read emitters (emit_messages.cpp / fields / validator / reify) were
+# untouched by 077, so all 16 were byte-identical pre/post at T001.
+#
+# 082-structural-group-detection (T026/T028) intentionally rebaselines TWO of
+# the 16 -- v42/Messages.hpp and v42/Reify.hpp -- to 082-approved hashes (see
+# the dedicated comment below). The other 14 remain gated against the pre-077
+# T001 baseline. A mismatch on any of the 16, against its own baseline, is a
+# real read-tier regression (FR-009), not noise.
 #
 # Baseline hashes below were captured 2026-07-16 (T001) on pre-077 HEAD
 # 455737c3 via:
@@ -133,6 +138,17 @@ foreach(_ns IN ITEMS v42 v44 v50sp2 vt11)
       continue()
     endif()
 
+    # 082-structural-group-detection T026/T028 rebaselined v42/Messages.hpp and
+    # v42/Reify.hpp (see the banner above) -- their "expected" hash is the
+    # 082-approved one, not the pre-077 T001 baseline every other artifact
+    # still carries. Name the right baseline in the failure text so a v42
+    # divergence is not mis-described as a T001 regression.
+    if(_ns STREQUAL "v42" AND (_artifact STREQUAL "Messages.hpp" OR _artifact STREQUAL "Reify.hpp"))
+      set(_baseline_desc "its 082-approved baseline")
+    else()
+      set(_baseline_desc "the pre-077 T001 baseline")
+    endif()
+
     file(SHA256 "${_path}" _actual)
     if(_actual STREQUAL _expected)
       math(EXPR _PASS_COUNT "${_PASS_COUNT} + 1")
@@ -140,7 +156,7 @@ foreach(_ns IN ITEMS v42 v44 v50sp2 vt11)
     else()
       math(EXPR _FAIL_COUNT "${_FAIL_COUNT} + 1")
       list(APPEND _FAIL_MSGS
-        "  FAIL: ${_ns}/${_artifact} diverged from the pre-077 T001 baseline\n"
+        "  FAIL: ${_ns}/${_artifact} diverged from ${_baseline_desc}\n"
         "        expected sha256=${_expected}\n"
         "        actual   sha256=${_actual}\n"
         "        regenerated at: ${_path}")
@@ -163,5 +179,6 @@ if(_FAIL_COUNT GREATER 0)
     "not test noise -- see above).")
 else()
   message(STATUS "[T022] fixpp::dict::read-tier-byte-diff PASSED "
-    "(all 16 legacy read-tier artifacts byte-identical to the pre-077 T001 baseline).")
+    "(14 artifacts byte-identical to the pre-077 T001 baseline; 2 intentionally-changed v42 "
+    "artifacts -- Messages.hpp, Reify.hpp -- matching their 082-approved hashes).")
 endif()
