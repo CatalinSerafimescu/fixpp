@@ -25,6 +25,7 @@
 #include <fixpp/dict/orchestra_loader.hpp>
 #include <fixpp/dict/xml_loader.hpp>
 #include <memory_resource>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -750,16 +751,22 @@ TEST(LoaderDisposition, IntTypedScalarReuseOfGroupTagIsNotACompletenessViolation
     // The load itself is the assertion under test: if the widened sweep's
     // structural tag set (built dictionary-wide) mistakenly flagged V2's
     // scalar reuse as an incomplete context, this would throw
-    // xml_parse_error and fail the test before reaching the line below.
-    auto dict = fixpp::dict::XmlLoader{}.load_from_string(kIntTypedScalarReuseXml, &mr);
+    // xml_parse_error — discriminated explicitly rather than left to an
+    // uncaught-exception failure, so the test's intent is legible from the
+    // assertion itself.
+    std::optional<fixpp::dict::Dictionary> dict;
+    EXPECT_NO_THROW({
+        dict = fixpp::dict::XmlLoader{}.load_from_string(kIntTypedScalarReuseXml, &mr);
+    }) << "the structural sweep's !members.empty() exclusion must still hold per-message when the "
+          "candidate source is the dictionary-wide structural tag set (V2's scalar reuse of "
+          "NoGood(600) must not read as an incomplete context)";
+    ASSERT_TRUE(dict.has_value());
 
-    auto const tv = dict.as_table_view();
+    auto const tv = dict->as_table_view();
     std::array<std::uint16_t, 0> const root{};
     // V1's genuine Int-typed group context resolves.
     EXPECT_EQ(tv.group_first_field("V1", root, std::uint16_t{600}), 610)
         << "V1 declares NoGood(600) as a real Int-typed group; its context must resolve.";
-    SUCCEED() << "load succeeded with an Int-typed group tag reused as a scalar in V2 — the "
-                 "structural sweep's !members.empty() exclusion still holds per-message.";
 }
 
 // ============================================================================
