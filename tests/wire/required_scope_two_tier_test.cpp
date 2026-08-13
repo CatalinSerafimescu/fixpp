@@ -33,6 +33,16 @@
 //   - FIX42 excluded entirely: no generated typed `validate_<Msg>`
 //     (tools/codegen/fixpp-codegen/main.cpp:132 `if (ir.ns != "v42")` —
 //     L-077-1/#196).
+//     ⬆ **RETIRED by 082-structural-group-detection (2026-08-12, closes #196).**
+//     That `ir.ns != "v42"` condition was DELETED (082 T035), so `fixpp::v42`
+//     emits typed `validate_<Msg>` and the header-only `.inl` this file needs
+//     exists. The v42 leg is now present below
+//     (`V42NewOrderList_RequiredGroupInstanceMissingRequired_BothTiersReject`),
+//     using the SAME NewOrderList/NoOrders(73) required-group shape as the v44
+//     leg so the two tiers are directly comparable across versions. Note the
+//     exclusion was never about scheduling: pre-082 there was no typed tier to
+//     compare the runtime tier AGAINST, so the two-tier contract was
+//     unstateable for FIX 4.2, not merely untested.
 //
 // Header-only inclusion (`FIXPP_VALIDATORS_HEADER_ONLY_<Msg>`) is used for
 // every message here: `fixpp::wire::writer_traits<...>::required_checks` is
@@ -60,6 +70,16 @@
 #define FIXPP_VALIDATORS_HEADER_ONLY_TradeCaptureReport
 #include <fixpp/v50sp2/messages/TradeCaptureReport.hpp>
 #undef FIXPP_VALIDATORS_HEADER_ONLY_TradeCaptureReport
+
+// 082-structural-group-detection: the v42 leg. See the "FIX42 excluded entirely"
+// note in this file's header comment — that exclusion is RETIRED, because the
+// condition it cited (`main.cpp`'s `if (ir.ns != "v42")`) was DELETED by 082's
+// T035 and `fixpp::v42` now emits typed validators. FIX42 NewOrderList/
+// NoOrders(73) is the same required-group shape as the v44 leg, which makes the
+// two directly comparable.
+#define FIXPP_VALIDATORS_HEADER_ONLY_NewOrderList
+#include <fixpp/v42/messages/NewOrderList.hpp>
+#undef FIXPP_VALIDATORS_HEADER_ONLY_NewOrderList
 
 // vlatest's PositionReportArgs / groups live in a distinct `fixpp::vlatest`
 // namespace from v44's, so no symbol collision — but the free helper
@@ -366,6 +386,76 @@ TEST(RequiredScopeTwoTier, V44NewOrderList_RequiredGroupInstanceMissingRequired_
     EXPECT_EQ(typed_result.error(), error::wire_required_field_missing);
     EXPECT_EQ(runtime_result.has_value(), typed_result.has_value())
         << "two-tier verdict disagreement on malformed required-group NewOrderList (Contract 3)";
+}
+
+// ── 082: the v42 leg of Contract 3 ─────────────────────────────────────────
+// FIX42 NewOrderList/NoOrders(73) is `required='Y'`; its component-expanded
+// required members are {ClOrdID(11), ListSeqNo(67), Symbol(55), Side(54)} —
+// FIX44's set plus Symbol. A present NoOrders instance omitting Side(54) must
+// REJECT on BOTH tiers, exactly as the v44 leg above requires.
+//
+// This is the two-tier AGREEMENT check, which is a strictly stronger claim than
+// "the v42 typed validator rejects" (already covered by
+// tests/codegen/test_082_v42_required_group_omission_test.cpp): it asserts the
+// runtime `table_view`-driven derivation and the generated `writer_traits`
+// required-set reach the SAME verdict on the same frame. Pre-082 this was not a
+// failing test — it was an unstateable one, because there was no v42 typed tier
+// to disagree with.
+TEST(RequiredScopeTwoTier, V42NewOrderList_RequiredGroupInstanceMissingRequired_BothTiersReject) {
+    // Runtime tier.
+    std::pmr::monotonic_buffer_resource dict_mr;
+    auto d42 = load_real_dict("FIX42.xml", &dict_mr);
+    auto const tv = d42.as_table_view();
+
+    // Anti-vacuity: pre-082 this returned 0 (FIX42 registered zero groups), and
+    // with 0 the runtime tier would never descend into the group, so the
+    // "agreement" below would be two tiers agreeing for unrelated reasons.
+    ASSERT_NE(tv.group_first_field("E", {}, 73), 0)
+        << "FIX42 NoOrders(73) must resolve a delimiter or this two-tier comparison is vacuous "
+           "— the runtime tier would accept without ever checking a group member (#196)";
+
+    dictionary_driven_validator v{tv};
+    auto buf = make_frame(
+        "35=E\x01"
+        "34=1\x01" "49=SENDER\x01" "52=20240101-00:00:00\x01" "56=TARGET\x01"
+        "66=LIST1\x01" "68=1\x01" "394=1\x01"
+        "73=1\x01"
+        "11=ORD1\x01" "67=1\x01" "55=SYM\x01");  // Side(54) omitted
+    std::array<std::byte, 4096> stack{};
+    std::pmr::monotonic_buffer_resource arena;
+    auto mv = parse_index(buf, stack, arena);
+
+    std::array<std::byte, kScratch> scratch_buf{};
+    std::pmr::monotonic_buffer_resource scratch_mr{scratch_buf.data(), scratch_buf.size(),
+                                                   std::pmr::null_memory_resource()};
+    std::uint16_t ref_tag = 0;
+    auto runtime_result = v.validate(mv, &scratch_mr, &ref_tag);
+
+    // Typed tier: the same omission expressed as Args.
+    fixpp::v42::NewOrderListArgs args{};
+    args.list_id = "LIST1";
+    args.tot_no_orders = 1;
+    args.bid_type = 1;
+    fixpp::v42::groups::G_73_1Args entry{};
+    entry.cl_ord_id = "ORD1";
+    entry.list_seq_no = 1;
+    entry.symbol = "SYM";
+    // entry.side left unset — the malformed member.
+    std::array<fixpp::v42::groups::G_73_1Args, 1> entries{entry};
+    args.orders = std::span<const fixpp::v42::groups::G_73_1Args>{entries};
+    auto typed_result = fixpp::v42::validate_NewOrderList(args);
+
+    ASSERT_FALSE(runtime_result.has_value())
+        << "runtime tier: FIX42 required NoOrders instance omitting Side(54) must reject";
+    EXPECT_EQ(runtime_result.error(), error::wire_required_field_missing);
+    EXPECT_EQ(ref_tag, 54);
+    ASSERT_FALSE(typed_result.has_value())
+        << "typed tier: v42 orders[0] omitting side must reject (NoOrders is a required group) — "
+           "this is the arm 077 had to descope and 082 delivers";
+    EXPECT_EQ(typed_result.error(), error::wire_required_field_missing);
+    EXPECT_EQ(runtime_result.has_value(), typed_result.has_value())
+        << "two-tier verdict disagreement on malformed required-group FIX42 NewOrderList "
+           "(Contract 3) — the runtime and typed derivations must agree on v42 as they do on v44";
 }
 
 // No-false-reject corroboration (US2/T011 mirror): every group instance

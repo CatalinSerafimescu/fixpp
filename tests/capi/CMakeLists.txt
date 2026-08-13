@@ -238,6 +238,23 @@ target_include_directories(capi_message_write_test PRIVATE ${FIXPP_CAPI_FEATURE_
 add_test(NAME capi_message_write COMMAND capi_message_write_test)
 set_tests_properties(capi_message_write PROPERTIES LABELS "capi;051")
 
+# 082-structural-group-detection T022 [US1] RED pin (written BEFORE T023 per
+# the RED-first ordering rule): K6b cross-path pin — fixpp_msg_group_begin(t)
+# (C-ABI write path) vs as_table_view() bare-store registered set, both
+# directions, on the REAL FIX42.xml dictionary.
+add_executable(capi_082_group_detection_cross_path_test capi_082_group_detection_cross_path_test.cpp)
+target_link_libraries(capi_082_group_detection_cross_path_test PRIVATE
+  fixpp_capi
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(capi_082_group_detection_cross_path_test PRIVATE ${FIXPP_CAPI_FEATURE_B_INCLUDES})
+target_compile_definitions(capi_082_group_detection_cross_path_test PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
+)
+add_test(NAME capi_082_group_detection_cross_path COMMAND capi_082_group_detection_cross_path_test)
+set_tests_properties(capi_082_group_detection_cross_path PROPERTIES LABELS "capi;082;us1")
+
 # msg_clone_cross_strand_test — CA-009 clone seam ([2i §9] seam #13, SC-006)
 add_executable(capi_msg_clone_cross_strand_test msg_clone_cross_strand_test.cpp)
 target_link_libraries(capi_msg_clone_cross_strand_test PRIVATE

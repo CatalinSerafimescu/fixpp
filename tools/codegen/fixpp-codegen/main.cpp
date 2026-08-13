@@ -108,30 +108,33 @@ int main(int argc, char** argv) {
             write_file(base / "Reify.hpp", fixpp::codegen::emit_reify(ir));
             write_file(base / "NormativeReferences.md", fixpp::codegen::emit_normative_refs(ir));
             write_file(base / "Manifest.txt", fixpp::codegen::emit_manifest(ir));
-            // 077-builder-args-dedup T017 (issue #196 / L-063-1): v42 types
-            // NumInGroup as legacy INT (not NUMINGROUP), so emit_builders
-            // materializes ZERO typed groups for it -- a v42 build_<Msg>
-            // would silently omit a required='Y' group, emitting invalid
-            // FIX 4.2. v42 still has in-scope application messages (just no
-            // typed groups), so emit_builders(v42) does NOT self-skip via an
-            // empty file set -- it must be excluded at the DRIVER, not
-            // inside emit_builders (which stays version-agnostic per
-            // FR-005/T009). vt11 is the only version that self-skips via a
-            // truly empty registry (0 application messages,
-            // emit_builders.cpp).
+            // 082-structural-group-detection T035 [US2] — D-8 / FR-007 / FR-010:
+            // the `if (ir.ns != "v42")` driver exclusion that stood here is
+            // DELETED, with **no replacement version predicate**. There is now no
+            // version test on this path at all, by design.
             //
-            // 078-precompiled-builder-libs T004: emit_builders now returns
-            // the split file SET (data-model.md Entities 1-5) instead of a
-            // single Builders.hpp string. v42 stays descoped (issue #196 /
-            // L-063-1) -- keep the existing ir.ns != "v42" predicate, it
-            // just yields an empty write set here instead of a separate
-            // branch. remove_builder_output sweeps the whole builder/
-            // validator output region unconditionally before writing, so
-            // every branch (empty set / v42 / non-empty) is OFF-clean.
-            std::vector<fixpp::codegen::EmittedFile> files;
-            if (ir.ns != "v42") {
-                files = fixpp::codegen::emit_builders(ir, families_mode);
-            }
+            // What it said, and why it is gone: 077 T017 (issue #196 / L-063-1)
+            // excluded v42 because "v42 types NumInGroup as legacy INT (not
+            // NUMINGROUP), so emit_builders materializes ZERO typed groups for it
+            // -- a v42 build_<Msg> would silently omit a required='Y' group,
+            // emitting invalid FIX 4.2". That premise was about the DATATYPE gate,
+            // and 082 replaced it: detection is now structural (`VersionIR::
+            // group_tags`, T024/T025), so FIX42's 18 declared groups are visible
+            // and its `Args` carry them. The reason for the exclusion is the thing
+            // this feature removed, so the exclusion goes with it.
+            //
+            // The old comment also noted that v42 "does NOT self-skip via an empty
+            // file set" and so had to be stopped at the driver. That is still true
+            // and is exactly why no predicate replaces it: emit_builders stays
+            // version-agnostic (FR-005/T009), and the ONLY legitimate skip is a
+            // genuinely empty application registry — which is vt11's, via
+            // `is_application`, not via any ns check (FR-010 / T038).
+            //
+            // `remove_builder_output` still sweeps the whole builder/validator
+            // output region unconditionally before writing, so both branches
+            // (empty set / non-empty) remain OFF-clean.
+            std::vector<fixpp::codegen::EmittedFile> files =
+                fixpp::codegen::emit_builders(ir, families_mode);
             remove_builder_output(base);
             for (auto const& f : files) {
                 write_file(base / f.rel, f.content);

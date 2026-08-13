@@ -113,28 +113,44 @@ TEST(RequiredScope, Fix44AsTableViewContextExcludesOptionalGroupOwnRequireds) {
 // strict-but-GROUP-BLIND under dict validation"), deferred to issue #196 —
 // pinned here so a future fix to #196 flips this assertion (intentionally,
 // not silently).
-TEST(RequiredScope, Fix42GroupCountFieldIsIntTypedContextStoreBlindL0661) {
+// 082-structural-group-detection T030 — INVERTED. This pin previously asserted
+// the context store was group-BLIND for FIX42, and said so explicitly: "if this
+// ever resolves to 79, issue #196 has landed and this pin should be
+// updated/removed". 082 IS #196, so it is inverted rather than deleted.
+//
+// The root cause it documents is unchanged and still worth pinning: FIX42's
+// NoAllocs(78) really is XML `type='INT'`, not `NUMINGROUP`. What changed is
+// that detection no longer consults the datatype at all — `as_table_view()`
+// now keys on `group_first_field(tag) != 0` — so an INT-typed count field
+// registers correctly. Keeping the INT assertion is what makes this a
+// behavioural witness for FR-001 rather than a tautology: if someone
+// reintroduced a datatype gate, THIS is the test that would catch it.
+TEST(RequiredScope, Fix42IntTypedGroupCountFieldNowResolvesInContextStore) {
     std::pmr::monotonic_buffer_resource mr;
     auto d42 = load_dict("FIX42.xml", &mr);
     auto const tv = d42.as_table_view();
 
-    // NoAllocs(78) on Allocation(J): FieldRef.type is Int (not NumInGroup).
+    // NoAllocs(78) on Allocation(J): FieldRef.type is STILL Int (not NumInGroup).
+    // 082 deliberately does NOT change FieldRef::type (research.md D-4).
     auto const j_fields = d42.message_fields("J");
     auto const it = std::find_if(j_fields.begin(), j_fields.end(),
                                  [](auto const& fr) { return fr.tag == 78; });
     ASSERT_NE(it, j_fields.end()) << "NoAllocs(78) must appear in J's field expansion";
     EXPECT_EQ(it->type, fixpp::dict::field_data_type::Int)
-        << "FIX42 NoAllocs(78) is INT-typed, not NUMINGROUP — the L-066-1 root cause";
+        << "FIX42 NoAllocs(78) must REMAIN INT-typed — 082 changes the detection predicate, not "
+           "FieldRef::type (D-4). If this ever becomes NumInGroup the structural-detection "
+           "witness below is tautological and no longer proves anything";
 
-    // Bare global accessor (type-independent <group>-element scan) DOES resolve.
+    // Bare global accessor (type-independent <group>-element scan) resolves, as before.
     EXPECT_EQ(d42.group_first_field(78), 79)
         << "bare global group_first_field resolves via <group> element, not field type";
 
-    // Context-scoped store (keyed on NumInGroup type detection) does NOT.
-    EXPECT_EQ(tv.group_first_field("J", std::span<std::uint16_t const>{}, 78), 0U)
-        << "L-066-1: context store is group-blind for FIX42 (INT-typed count field) — "
-           "if this ever resolves to 79, issue #196 has landed and this pin should be "
-           "updated/removed";
+    // Context-scoped store: now resolves too. This is the L-066-1 closure —
+    // "FIX 4.0/4.1/4.2 sessions strict-but-GROUP-BLIND under dict validation"
+    // is no longer true.
+    EXPECT_EQ(tv.group_first_field("J", std::span<std::uint16_t const>{}, 78), 79U)
+        << "L-066-1 CLOSED (082/#196): the context store must resolve an INT-typed FIX42 group "
+           "count field structurally — a 0 here means the datatype gate is back";
 }
 
 // ============================================================================

@@ -131,10 +131,23 @@ std::set<std::uint16_t> to_set(std::span<std::uint16_t const> s) {
     return std::set<std::uint16_t>{s.begin(), s.end()};
 }
 
-// C-3.4a's checked set (contracts/group_ctx_delims.md), mirrored EXACTLY
-// against the loader's own gate (dictionary.cpp:445-463): a context is
-// checked iff, on `mt`'s deduped field run, the count tag's FieldRef type is
-// NumInGroup AND at least one FieldRef has group_no_tag == no_tag. Three
+// C-3.4a's checked set (contracts/group_ctx_delims.md), mirrored against the
+// loader's own gate — which post-082 is `find_context_without_delim_record`
+// (`src/dictionary/dictionary_internal.hpp`), NOT `dictionary.cpp:445-463` as
+// this banner used to cite. That anchor is stale twice over: the line range
+// moved, and `as_table_view()` no longer uses this datatype test at all
+// (082 re-pointed it onto `group_first_field(t) != 0`). What this mirrors is the
+// FR-023 load-time sweep, which still tests `NumInGroup` — see the divergence
+// warning at the head of that function.
+//
+// ⚠️ The datatype test in the body below is CORRECT AND DELIBERATE, not stale
+// residue: it is the classifier for the inverted 55-context pin
+// (`int_typed_registered`), whose whole job is to identify the INT-typed
+// population. Re-pointing it structurally would make the pin self-referential
+// and unable to detect a reintroduced datatype gate.
+//
+// A context is checked iff, on `mt`'s deduped field run, the count tag's
+// FieldRef type is NumInGroup AND at least one FieldRef has group_no_tag == no_tag. Three
 // outcomes, not two — an INT-typed count tag (L-066-1/#196) and a
 // NumInGroup-typed tag with no members in THIS message (dictionary.cpp:463's
 // separate "plain scalar reuse" skip) are different exclusion reasons and
@@ -168,12 +181,24 @@ constexpr std::size_t kArenaBytes = 32UZ * 1024UZ * 1024UZ;
 
 // Per-dictionary tally. T012 re-point: `unregistered` is split into
 // `unregistered_in_checked_set` (a real FR-023/C-3.4 completeness violation
-// — asserted 0) and `int_typed_out_of_checked_set` (L-066-1/#196, out of
-// 083's scope — asserted exactly 55/6/10/38/1, a tripwire, see below).
+// — asserted 0) and `int_typed_out_of_checked_set` (L-066-1/#196).
 // `empty_members_out_of_checked_set` is a THIRD, distinct exclusion reason
 // (dictionary.cpp:463's "plain scalar reuse" skip) — reported, not folded
 // into either bucket above, so it can't silently distort the exact-count
 // tripwire.
+//
+// 082 (#196) INVERTED the second bucket. It used to hold exactly 55 contexts
+// (FIX40 6 / FIX41 10 / FIX42 38 / FIX43 1) whose count tag is INT-typed and
+// which the datatype gate therefore skipped entirely. Detection is now
+// structural, so those same 55 contexts REGISTER: the bucket is 0 and the
+// population moved to `int_typed_registered`. Both halves are asserted below
+// — 0 alone would be satisfied by a census that measured nothing.
+//
+// `int_typed_registered` is classified by the SAME datatype test as the
+// out-of-checked-set bucket (`checked_set_status`, which reads
+// `FieldRef::type`). 082 deliberately does not change `FieldRef::type`
+// (research.md D-4), so the population stays identifiable and the 55 is a
+// stable pin rather than a moving target.
 struct DictCensus {
     std::string label;
     std::size_t contexts = 0;
@@ -189,6 +214,10 @@ struct DictCensus {
     std::size_t polluted = 0;
     std::size_t unregistered_in_checked_set = 0;
     std::size_t int_typed_out_of_checked_set = 0;
+    // 082/#196: same INT-typed-count-tag population as above, but REGISTERED.
+    // The two are exhaustive over that population, so a census that stopped
+    // measuring drops both to 0 and fails the exact-55 pin below.
+    std::size_t int_typed_registered = 0;
     std::size_t empty_members_out_of_checked_set = 0;
 };
 
@@ -260,8 +289,19 @@ DictCensus census_one(DictCase const& dc) {
             }
         }
 
-        if (!registered) {
-            switch (checked_set_status(dict, key)) {
+        // Hoisted above the registration branch by 082: the INT-typed-count-tag
+        // population (L-066-1/#196) must be counted on BOTH sides, because
+        // structural detection moved all 55 of them from the unregistered bucket
+        // to the registered one. Classified only from `FieldRef::type`, which 082
+        // does not change (research.md D-4).
+        CheckedSetStatus const status = checked_set_status(dict, key);
+
+        if (registered) {
+            if (status == CheckedSetStatus::kNotNumInGroup) {
+                ++census.int_typed_registered;
+            }
+        } else {
+            switch (status) {
                 case CheckedSetStatus::kChecked:
                     // In C-3.4a's checked set but not registered — a real
                     // FR-023/C-3.4 completeness violation (not #196).
@@ -274,8 +314,11 @@ DictCensus census_one(DictCase const& dc) {
                     break;
                 case CheckedSetStatus::kNotNumInGroup:
                     // L-066-1/#196: the count tag is INT-typed, not
-                    // NumInGroup-typed, so dictionary.cpp:446 never visits it
-                    // — out of 083's scope.
+                    // NumInGroup-typed, so the pre-082 datatype gate never
+                    // visited it — out of 083's scope. Post-082 this arm is
+                    // unreachable on all ten dictionaries (structural detection
+                    // registers the whole population); kept because reaching it
+                    // is exactly the regression the pin below must attribute.
                     ++census.int_typed_out_of_checked_set;
                     break;
                 case CheckedSetStatus::kEmptyMembers:
@@ -322,14 +365,14 @@ DictCensus census_one(DictCase const& dc) {
 void print_census_table(std::vector<DictCensus> const& all) {
     std::cout << "\n=== 083 T006/T012 delimiter census — all ten dictionaries ===\n";
     std::cout << "  dictionary            contexts  wrong  wrong(nested)  nested_total  polluted  "
-                 "unreg_checked  int_typed_oos  empty_members_oos\n";
+                 "unreg_checked  int_typed_oos  int_typed_reg  empty_members_oos\n";
     DictCensus total{.label = "TOTAL"};
     for (auto const& c : all) {
         std::cout << "  " << c.label << std::string(std::max<std::size_t>(1, 22 - c.label.size()), ' ')
                   << c.contexts << "  " << c.wrong_delimiter << "  " << c.wrong_delimiter_nested << "  "
                   << c.nested_delim_total << "  " << c.polluted << "  " << c.unregistered_in_checked_set
-                  << "  " << c.int_typed_out_of_checked_set << "  " << c.empty_members_out_of_checked_set
-                  << "\n";
+                  << "  " << c.int_typed_out_of_checked_set << "  " << c.int_typed_registered << "  "
+                  << c.empty_members_out_of_checked_set << "\n";
         total.contexts += c.contexts;
         total.wrong_delimiter += c.wrong_delimiter;
         total.wrong_delimiter_nested += c.wrong_delimiter_nested;
@@ -339,13 +382,14 @@ void print_census_table(std::vector<DictCensus> const& all) {
         total.polluted += c.polluted;
         total.unregistered_in_checked_set += c.unregistered_in_checked_set;
         total.int_typed_out_of_checked_set += c.int_typed_out_of_checked_set;
+        total.int_typed_registered += c.int_typed_registered;
         total.empty_members_out_of_checked_set += c.empty_members_out_of_checked_set;
     }
     std::cout << "  " << total.label << std::string(std::max<std::size_t>(1, 22 - total.label.size()), ' ')
               << total.contexts << "  " << total.wrong_delimiter << "  " << total.wrong_delimiter_nested
               << "  " << total.nested_delim_total << "  " << total.polluted << "  "
               << total.unregistered_in_checked_set << "  " << total.int_typed_out_of_checked_set << "  "
-              << total.empty_members_out_of_checked_set << "\n";
+              << total.int_typed_registered << "  " << total.empty_members_out_of_checked_set << "\n";
     std::cout << "  nested_delim_total registered/unregistered split: "
               << total.nested_delim_total_registered << " / " << total.nested_delim_total_unregistered
               << " (SC-016 asserts 262 over this UNCONDITIONED population — not asserted here, T012 "
@@ -455,8 +499,10 @@ TEST(DelimiterCensus, NoChangeDictionariesUnchanged) {
         EXPECT_EQ(c.polluted, 0u) << c.label << ": SC-008 violated — polluted-member-set count changed";
         // T012 re-point: the `unregistered` leg now checks
         // unregistered_in_checked_set only — L-066-1/#196's INT-typed
-        // out-of-scope exclusions land in int_typed_out_of_checked_set
-        // instead and must not fail this SC-008 pin.
+        // exclusions land in int_typed_out_of_checked_set instead and must not
+        // fail this SC-008 pin. (082 empties that bucket, so the distinction no
+        // longer changes this leg's outcome; it is kept because the split is what
+        // makes the exact-55 pin below attributable.)
         EXPECT_EQ(c.unregistered_in_checked_set, 0u)
             << c.label << ": SC-008 violated — unregistered-in-checked-set count changed";
     }
@@ -506,9 +552,11 @@ TEST(DelimiterCensus, RedCountsReconcileWithSpecBaseline) {
                                    << " context(s) with a polluted member set (post-fix target: 0, "
                                       "FR-010/FR-015)";
         // T012 re-point: this leg checks unregistered_in_checked_set only.
-        // int_typed_out_of_checked_set (L-066-1/#196) is a permanently-out-
-        // of-scope population that this pin must never require to be zero —
-        // see the dedicated exact-count tripwire test below instead.
+        // int_typed_out_of_checked_set (L-066-1/#196) was out of 083's scope and
+        // this pin was written never to require it to be zero. 082 makes it zero
+        // anyway; the requirement now lives in the dedicated pin below, which
+        // asserts BOTH that emptiness and where the 55 contexts went. Left split
+        // here so a future regression is attributed to the right bucket.
         EXPECT_EQ(c.unregistered_in_checked_set, 0u)
             << c.label << ": " << c.unregistered_in_checked_set
             << " unregistered-in-checked-set context(s) (post-fix target: 0, FR-006/FR-023)";
@@ -532,17 +580,36 @@ TEST(DelimiterCensus, RedCountsReconcileWithSpecBaseline) {
 // currently produces (that would pin nothing, per
 // [[feedback_coverage_push_enshrines_bugs]]-style "assert whatever we
 // observed").
+//
+// ── 082 (#196) DISCHARGED THIS TRIPWIRE, WHICH IS WHY IT INVERTS ────────────
+// The confirmed cause the comment above names has now happened: detection is
+// structural (`group_first_field(t) != 0`), so an INT-typed count tag is no
+// longer skipped and all 55 contexts REGISTER. The out-of-checked-set bucket
+// is therefore 0 — and 0 on its own would be a **vacuous** pin, satisfied
+// equally by a census that stopped measuring, which is the exact failure mode
+// this test was planted to prevent
+// ([[feedback_verification_grep_must_be_proven_nonzero_on_the_unfixed_tree]]).
+//
+// So the 55 is not deleted, it MOVES: the same per-dictionary breakdown
+// (6/10/38/1) is now asserted against `int_typed_registered`, classified by
+// the same `FieldRef::type` test as before (082 does not change `FieldRef::type`
+// — research.md D-4). The two buckets are exhaustive over that population, so
+// a dead census fails the second pair rather than passing the first. The pin
+// keeps its original job in the new direction: if someone reintroduced a
+// datatype gate, all 55 would fall back out and BOTH halves would fail.
 // ============================================================================
-TEST(DelimiterCensus, IntTypedOutOfCheckedSetIsExactlyFiftyFive) {
+TEST(DelimiterCensus, IntTypedCountTagContextsAreExactlyFiftyFiveAndNowRegistered) {
     std::vector<DictCensus> all;
     all.reserve(kAllDicts.size());
     for (auto const& dc : kAllDicts) {
         all.push_back(census_one(dc));
     }
 
-    std::size_t total = 0;
+    std::size_t total_out = 0;
+    std::size_t total_registered = 0;
     for (auto const& c : all) {
-        total += c.int_typed_out_of_checked_set;
+        total_out += c.int_typed_out_of_checked_set;
+        total_registered += c.int_typed_registered;
         std::size_t expected = 0;
         if (c.label == "FIX40") {
             expected = 6;
@@ -553,11 +620,23 @@ TEST(DelimiterCensus, IntTypedOutOfCheckedSetIsExactlyFiftyFive) {
         } else if (c.label == "FIX43") {
             expected = 1;
         }
-        EXPECT_EQ(c.int_typed_out_of_checked_set, expected)
-            << c.label << ": int_typed_out_of_checked_set (L-066-1/#196) drifted from its pinned "
-                           "per-dictionary count — update this pin deliberately only if the cause is "
-                           "confirmed (e.g. #196 landing), never to match an unexplained observation";
+        EXPECT_EQ(c.int_typed_out_of_checked_set, 0u)
+            << c.label << ": " << c.int_typed_out_of_checked_set
+            << " INT-typed count-tag context(s) still OUT of the checked set — 082/#196 makes"
+               " detection structural, so this bucket must be empty on every dictionary";
+        EXPECT_EQ(c.int_typed_registered, expected)
+            << c.label << ": int_typed_registered (L-066-1/#196) drifted from its pinned "
+                           "per-dictionary count — this is the SAME population the pre-082 pin held "
+                           "as out-of-checked-set, now required to be registered. Update these "
+                           "constants deliberately only if the cause is confirmed, never to match an "
+                           "unexplained observation; a drop toward 0 means the datatype gate is back";
     }
-    EXPECT_EQ(total, 55u) << "int_typed_out_of_checked_set total drifted from its pinned 55 "
-                             "(L-066-1/#196) — see per-dictionary breakdown above";
+    EXPECT_EQ(total_out, 0u) << "int_typed_out_of_checked_set must total 0 post-082 — see the "
+                                "per-dictionary breakdown above";
+    // Non-vacuity for the zeros above: the population still has to be FOUND.
+    EXPECT_EQ(total_registered, 55u)
+        << "int_typed_registered total drifted from its pinned 55 (L-066-1/#196). 55 is the count "
+           "the pre-082 tripwire pinned in the out-of-checked-set bucket; structural detection moves "
+           "it here rather than dissolving it, so this is the assertion that keeps the zeros above "
+           "from being vacuous";
 }

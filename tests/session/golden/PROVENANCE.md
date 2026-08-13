@@ -282,3 +282,46 @@ applicable, all 8 green as authored).
   (UnsupportedMessageType).
 - **Root level (group-free message)**: ascending among `372,380`.
 - Full observed wire frame: `8=FIX.4.4|9=53|35=j|34=1|49=S|52=20240101-00:00:00|56=T|372=D|380=3|10=251|`
+
+## 082-structural-group-detection T044 [US4] — `v42_mass_quote.fix` (i), FIX **4.2**
+
+⚠️ **The first FIX 4.2 golden in this directory.** Every entry above is FIX 4.4, because
+before 082 the `fixpp::v42` builder tier did not exist (L-061-1 / L-063-1 / issue #196):
+FIX42's NumInGroup tags were datatype-gated out, so no `v42` grouped write was
+expressible. US1+US2 make it expressible and this golden is US4's independent anchor.
+
+- **Engine**: QuickFIX-cpp v1.16.0, `libquickfix.so.17`
+  (`reference-engines/quickfix-cpp`, per `project_reference_engines_setup`).
+- **Authoring**: `FIX42::MassQuote` + nested
+  `FIX42::MassQuote::NoQuoteSets::NoQuoteEntries` → `Message::toString()`, then tags
+  `8`/`9`/`10` stripped for the body-only form this directory uses.
+- **Generator** (checked in, deliberately NOT wired into CMake — same OFF-by-default
+  rationale as `tools/quickfix_{enum,required}_golden`, since `reference-engines/` is
+  outside the submodule and never present in CI):
+  `tools/quickfix_v42_exemplar_golden/gen_v42_mass_quote.cpp`. Its banner carries the
+  exact compile + run command. Output verified byte-identical to the checked-in file.
+- **Authored**: 2026-08-12.
+
+| Golden file | MsgType | Exemplar | Nesting |
+|---|---|---|---|
+| `v42_mass_quote.fix` | `i` | MassQuote | `NoQuoteSets(296)` → `NoQuoteEntries(295)` |
+
+Body:
+
+```
+> 35=i 117=QID-100 296=1 302=QS1 311=AAPL 304=1 295=1 299=QE1 132=10.5 133=10.75
+```
+
+(SOH shown as spaces here; the file uses the `\x01` escape this directory's
+`parse_golden` expects.)
+
+### ⚠️ Why this differs from the FIX 4.4 `mass_quote.fix` — `311` is the whole delta
+
+`mass_quote.fix` (FIX 4.4) is otherwise the same shape and the same seed values, and
+the **only** difference is `311=AAPL` after `302`. That is not an authoring choice:
+**FIX 4.2 marks `UnderlyingSymbol(311)` required inside `NoQuoteSets`, FIX 4.4 does
+not.** Two independent sources agree on it — QuickFIX's own FIX42
+`message_order(302,311,312,…)` places it second, and fixpp's separately derived
+`G_296_2Args` required set is `{302, 311, 304}`. Do **not** "align" the two goldens by
+deleting `311`; the divergence is the dictionaries', and a FIX 4.2 MassQuote without it
+is invalid.

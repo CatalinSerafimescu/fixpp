@@ -35,9 +35,12 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <fixpp/dict/dictionary.hpp>
+#include <fixpp/dict/error.hpp>
 #include <fixpp/dict/field_ref.hpp>
 #include <fixpp/dict/orchestra_loader.hpp>
 #include <fixpp/dict/table_view.hpp>
@@ -51,6 +54,8 @@
 #include <span>
 #include <sstream>
 #include <string>
+#include <string_view>
+#include <unordered_map>
 #include <vector>
 
 #include "ir.hpp"  // fixpp::codegen::build_ir / MessageIR / collect_top_fields — ACTUAL side only
@@ -134,6 +139,64 @@ std::string describe_diff(std::set<std::uint16_t> const& expected, std::set<std:
 }
 
 constexpr std::size_t kArenaBytes = 32UZ * 1024UZ * 1024UZ;
+
+// 082-structural-group-detection T015/T016/T018/T040/T042: the bare store's
+// registered group-tag set, measured the SAME way T004's Phase-1 baseline
+// was captured (implementation-notes.md § T004: "sweeping
+// table_view::group_first_field(t) != 0 over all tags for each dictionary").
+// A sweep over the whole uint16_t space rather than a union of declared
+// field tags — table_view exposes no direct "list every registered no_tag"
+// accessor, and this mirrors the existing measurement methodology exactly
+// rather than inventing a second one.
+std::set<std::uint16_t> bare_registered_group_tags(table_view const& tv) {
+    std::set<std::uint16_t> tags;
+    for (std::uint32_t t = 1; t <= 0xFFFFU; ++t) {
+        auto const tag = static_cast<std::uint16_t>(t);
+        if (tv.group_first_field(tag) != 0) {
+            tags.insert(tag);
+        }
+    }
+    return tags;
+}
+
+// 082 T017 bare-store leg: bounded, read-only, document-order pugixml scan --
+// NOT "a third walker" in the 079 banner's sense (it shares no
+// required/component-AND semantics with qfix_walk; only document POSITION
+// matters here). Mirrors reused_tag_census_test.cpp's own DelimiterScan
+// precedent (a separate bounded scan alongside the shared oracle walker).
+//
+// Determines which `<group name="...">` declaration site the loader's OWN
+// global first-seen dedup guard (xml_loader.cpp:609,
+// "if (!group_index_by_no_tag_.contains(no_tag))") resolves to: a pre-order,
+// document-order depth-first search through `<field>`/`<group>`/`<component>`
+// children, recursing into named `<component>` refs -- mirroring
+// `expand_field_list`'s own traversal order (xml_loader.cpp:525+) -- and
+// returning the FIRST `<group name=group_name>` node encountered.
+std::optional<pugi::xml_node> dfs_find_group(
+    pugi::xml_node const& node, std::string_view group_name,
+    std::unordered_map<std::string, pugi::xml_node> const& components_by_name) {
+    for (auto const& child : node.children()) {
+        std::string_view const name{child.name()};
+        if (name == "group") {
+            if (std::string_view{child.attribute("name").as_string("")} == group_name) {
+                return child;
+            }
+            if (auto found = dfs_find_group(child, group_name, components_by_name)) {
+                return found;
+            }
+        } else if (name == "component") {
+            auto const cname = std::string{child.attribute("name").as_string("")};
+            auto const cit = components_by_name.find(cname);
+            if (cit != components_by_name.end()) {
+                if (auto found = dfs_find_group(cit->second, group_name, components_by_name)) {
+                    return found;
+                }
+            }
+        }
+        // "field" and anything else: no group can be nested under it.
+    }
+    return std::nullopt;
+}
 
 }  // namespace
 
@@ -345,9 +408,22 @@ TEST(RequiredScopeCensus, PerGroupContextStoreMatchesWalkerExceptL0661GroupBlind
 // a pin that flips intentionally when #196 lands (relaxes NumInGroup
 // detection to structural).
 // ============================================================================
-TEST(RequiredScopeCensus, PerGroupContextStoreIsEmptyForL0661GroupBlindDicts) {
-    std::cout << "\n=== 079 T017 L-066-1 carve-out: context store must be EMPTY for "
-                 "FIX40/FIX41/FIX42 ===\n";
+// 082 T030 — INVERTED. This test previously asserted the context store was
+// EMPTY for FIX40/41/42, and its own failure message said so explicitly:
+// "if this fires, issue #196 has landed (NumInGroup detection relaxed to
+// structural) and this carve-out test should be removed/updated, not silently
+// left red". 082 IS #196, so the carve-out is discharged and the pin is
+// inverted rather than deleted — the three dictionaries must now register
+// their real group contexts, with per-context REQUIRED-member sets matching
+// the independent walker.
+//
+// Note this asserts `group_required_members`, which is NOT affected by issue
+// #210's delimiter pollution: `set_group_first_ctx` injects the first-seen
+// delimiter via `add_group_member_ctx`, not `add_group_required_member_ctx`.
+// So plain equality is correct here, unlike T017's member-set leg.
+TEST(RequiredScopeCensus, PerGroupContextStoreIsPopulatedForFormerlyGroupBlindDicts) {
+    std::cout << "\n=== 082 T030 (was 079 T017 L-066-1 carve-out): context store must now be "
+                 "POPULATED for FIX40/FIX41/FIX42 ===\n";
 
     for (auto const& dc : kAllDicts) {
         if (!is_group_blind_l0661_dict(dc.filename)) {
@@ -361,25 +437,31 @@ TEST(RequiredScopeCensus, PerGroupContextStoreIsEmptyForL0661GroupBlindDicts) {
         auto const tv = dict.as_table_view();
 
         ASSERT_GT(oracle.group_members.size(), 0u)
-            << dc.label << ": independent oracle found zero real groups — the carve-out "
-               "precondition ('this dict has real structural groups the type-gated store cannot "
-               "see') is unmet; either the walker regressed or this dict no longer declares groups";
+            << dc.label << ": independent oracle found zero real groups — either the walker "
+               "regressed or this dict no longer declares groups";
 
         std::size_t checked = 0;
+        std::size_t non_empty = 0;
         for (auto const& [key, members] : oracle.group_members) {
             (void)members;
             auto const actual =
-                tv.group_required_members(key.msg_type, std::span{key.path}, key.no_tag);
-            EXPECT_TRUE(actual.empty())
+                to_set(tv.group_required_members(key.msg_type, std::span{key.path}, key.no_tag));
+            auto const it = oracle.group_required.find(key);
+            std::set<std::uint16_t> const expected =
+                it == oracle.group_required.end() ? std::set<std::uint16_t>{} : it->second;
+            EXPECT_EQ(expected, actual)
                 << dc.label << " msg=" << key.msg_type << " no_tag=" << key.no_tag
-                << ": context store unexpectedly non-empty — if this fires, issue #196 has landed "
-                   "(NumInGroup detection relaxed to structural) and this carve-out test should be "
-                   "removed/updated, not silently left red";
+                << ": per-context REQUIRED-member set diverges from the independent walker — "
+                << describe_diff(expected, actual);
+            if (!actual.empty()) {
+                ++non_empty;
+            }
             ++checked;
         }
-        std::cout << "  " << dc.label << ": " << checked
-                  << " real group context(s) found by the walker, all confirmed "
-                     "context-store-EMPTY\n";
+        // The whole point of #196: these three used to register ZERO contexts.
+        EXPECT_GT(checked, 0u) << dc.label << ": no group contexts checked at all";
+        std::cout << "  " << dc.label << ": " << checked << " group context(s), " << non_empty
+                  << " with a non-empty required-member set\n";
     }
 }
 
@@ -439,4 +521,655 @@ TEST(RequiredScopeCensus, BareStoreIsAValidPerContextVariantExceptL0661GroupBlin
     }
     std::cout << "  total no_tags censused: " << total_no_tags << "\n";
     EXPECT_GT(total_no_tags, 0u);
+}
+
+// ============================================================================
+// 082-structural-group-detection Phase 3/5 RED pins (tasks.md T015/T016/T017/
+// T018/T040/T042 — written BEFORE T023 per the RED-first ordering rule).
+// contracts/group-detection.md C1/C2/K1/K3/K4. See the ⚠ DESCOPE BANNER at
+// the top of tasks.md for the FIX50SP2 502-vs-505 delta (issue #208), which
+// T018 below pins explicitly.
+//
+// EXPECTED RED until T023 lands: `Dictionary::as_table_view()`'s bare and
+// context population loops (dictionary.cpp:397-420, :439-470) gate on
+// `fr.type == field_data_type::NumInGroup` BEFORE ever consulting the
+// structural `Dictionary::group_first_field()` predicate. FIX40/41/42 type
+// EVERY group-count tag `INT` (never `NUMINGROUP`), and FIX43's tag 576 is
+// the same INT-vs-NUMINGROUP typo, so none of their group-declaring tags
+// ever reach the loop body — the bare/context stores register zero (resp.
+// 33, missing 576) for them today. T023 replaces the gate with
+// `group_first_field(fr.tag) != 0` directly, at which point these pins go
+// GREEN by construction.
+// ============================================================================
+
+// T015 [US1]: FIX42's 18 bare-store registered group tags, exact-set both
+// directions vs the oracle (FR-005 / K1).
+TEST(RequiredScopeCensus, Fix42BareStoreRegistersAllEighteenGroupTags) {
+    std::cout << "\n=== 082 T015: FIX42 bare-store registered group-tag exact-set ===\n";
+
+    auto storage = std::make_unique<std::byte[]>(kArenaBytes);
+    std::pmr::monotonic_buffer_resource mr{storage.get(), kArenaBytes};
+
+    auto const path = std::filesystem::path{FIXPP_DICT_DATA_DIR} / "FIX42.xml";
+    auto const oracle = build_quickfix_oracle(path);
+    auto const dict = fixpp::dict::XmlLoader{}.load(path, &mr);
+    auto const tv = dict.as_table_view();
+
+    ASSERT_EQ(oracle.group_tags.size(), 18u)
+        << "FIX42 oracle group-tag count drifted from the pinned 18 -- re-derive, don't silently "
+           "update this pin";
+
+    auto const actual = bare_registered_group_tags(tv);
+    EXPECT_EQ(oracle.group_tags, actual)
+        << "FIX42 bare-store registered set vs oracle: " << describe_diff(oracle.group_tags, actual);
+}
+
+// T016 [US1]: FIX40 (4 tags) and FIX41 (7 tags) bare-store registered group
+// tags, exact-set both directions vs the oracle — these two dictionaries
+// have no codegen golden to regenerate, so this direct pin is their ONLY
+// witness (FR-005 / K1).
+TEST(RequiredScopeCensus, Fix40AndFix41BareStoreRegisterAllGroupTags) {
+    std::cout << "\n=== 082 T016: FIX40/FIX41 bare-store registered group-tag exact-set ===\n";
+
+    struct Case {
+        char const* filename;
+        std::size_t expected_count;
+    };
+    std::vector<Case> const kCases{{"FIX40.xml", 4}, {"FIX41.xml", 7}};
+
+    for (auto const& c : kCases) {
+        auto storage = std::make_unique<std::byte[]>(kArenaBytes);
+        std::pmr::monotonic_buffer_resource mr{storage.get(), kArenaBytes};
+
+        auto const path = std::filesystem::path{FIXPP_DICT_DATA_DIR} / c.filename;
+        auto const oracle = build_quickfix_oracle(path);
+        auto const dict = fixpp::dict::XmlLoader{}.load(path, &mr);
+        auto const tv = dict.as_table_view();
+
+        ASSERT_EQ(oracle.group_tags.size(), c.expected_count)
+            << c.filename << ": oracle group-tag count drifted from the pinned value -- re-derive";
+
+        auto const actual = bare_registered_group_tags(tv);
+        EXPECT_EQ(oracle.group_tags, actual)
+            << c.filename << " bare-store exact-set: " << describe_diff(oracle.group_tags, actual);
+    }
+}
+
+// T017 [US1]: per-context member-set equality for FIX42's divergent-
+// signature tag NoRelatedSym(146) across its 6 occurrences — 4 distinct
+// direct-member lists (K4 / FR-004 / I-4a). Deliberately NOT tag 33
+// (LinesOfText) — its two occurrences carry identical members, so a
+// collapse-to-projection bug would be unobservable there (K4's own text).
+// This checks the FULL per-context member SET via the context-scoped
+// accessor `table_view::group_member_tags(msg_type, parent_path, no_tag)` —
+// not a tag-set projection across contexts.
+TEST(RequiredScopeCensus, Fix42Tag146PerContextMemberSetsMatchOracle) {
+    std::cout << "\n=== 082 T017: FIX42 tag 146 (NoRelatedSym) per-context member sets ===\n";
+
+    auto storage = std::make_unique<std::byte[]>(kArenaBytes);
+    std::pmr::monotonic_buffer_resource mr{storage.get(), kArenaBytes};
+
+    auto const path = std::filesystem::path{FIXPP_DICT_DATA_DIR} / "FIX42.xml";
+    auto const oracle = build_quickfix_oracle(path);
+    auto const dict = fixpp::dict::XmlLoader{}.load(path, &mr);
+    auto const tv = dict.as_table_view();
+
+    std::size_t contexts_checked = 0;
+    std::set<std::set<std::uint16_t>> distinct_variants;
+    for (auto const& [key, members] : oracle.group_members) {
+        if (key.no_tag != 146) {
+            continue;
+        }
+        auto const actual =
+            to_set(tv.group_member_tags(key.msg_type, std::span{key.path}, key.no_tag));
+
+        // ── RETIRED 2026-08-12: bounded allowance for issue #210 ────────────
+        // #210 is CLOSED (by 083). The allowance this banner describes NO LONGER
+        // EXISTS — the assertion below is plain set equality. The text is kept
+        // because it records why the allowance was written and what it bounded;
+        // read it as history, not as a description of the code.
+        // `as_table_view()` resolves each group's delimiter from the GLOBAL
+        // first-seen `group_first_field(no_tag)`, and
+        // `table_view.hpp:641-646`'s `set_group_first_ctx` then UNCONDITIONALLY
+        // calls `add_group_member_ctx(...)` — so the first-seen delimiter is
+        // injected as a "member" of EVERY context of that no_tag, including
+        // contexts whose XML never declares it. For FIX42 tag 146 the
+        // first-seen occurrence is News(B), whose first child is
+        // RelatdSym(46), so 46 leaks into QuoteRequest(R)'s context.
+        //
+        // That is a PRE-EXISTING defect (measured: 42 polluted contexts across
+        // FIX44/FIX50/FIX50SP1/FIX50SP2, all C2 EQUAL rows, so T023 cannot
+        // have caused it) and is split out as issue #210 — NOT 082's to fix.
+        //
+        // This pin is therefore written to bound the defect EXACTLY rather
+        // than to tolerate it:
+        //   (1) every oracle-declared member MUST be present — nothing may go
+        //       missing. This is the FR-004 half-restructure witness and is
+        //       NOT weakened; and
+        //   (2) the ONLY tag permitted in excess is the single global
+        //       first-seen delimiter. Any other extra tag fails.
+        // So a projection, a dropped member, or any GROWTH of the pollution
+        // still fails. Collapses to plain set equality once #210 lands.
+        // Do NOT "simplify" this into a subset check — that would stop
+        // pinning the excess side entirely.
+        // #210 IS FIXED (083 T031/T032), so the bounded allowance that stood here
+        // is COLLAPSED to plain set equality, exactly as its own comment said it
+        // would be. Reverted 2026-08-12.
+        //
+        // Note the fix is on the CALLER side: `set_group_first_ctx`'s
+        // unconditional `add_group_member_ctx(..., first)` (table_view.hpp:645)
+        // is UNCHANGED and is meant to stay — what changed is that `first` is now
+        // this context's OWN declared delimiter, so the injection is a no-op
+        // (D-5 / C-3.3). Reading table_view.hpp alone concludes #210 is unfixed.
+        //
+        // This revert is a STRENGTHENING: the allowance permitted exactly one
+        // extra tag (the global first-seen delimiter) and now permits none, so a
+        // PASS here is positive evidence that the pollution is gone — not merely
+        // the absence of a signal.
+        EXPECT_EQ(members, actual)
+            << "FIX42 msg=" << key.msg_type << " no_tag=146 (context store): per-context member set "
+            << "must equal the oracle's EXACTLY (no #210 delimiter-pollution allowance remains) — "
+            << describe_diff(members, actual);
+        distinct_variants.insert(members);
+        ++contexts_checked;
+    }
+
+    ASSERT_EQ(contexts_checked, 6u)
+        << "oracle found a different number of FIX42 tag-146 occurrences than the pinned 6 -- "
+           "re-derive, don't silently update this pin";
+    ASSERT_EQ(distinct_variants.size(), 4u)
+        << "oracle found a different number of distinct tag-146 member-set variants than the "
+           "pinned 4 -- re-derive, don't silently update this pin";
+
+    std::vector<std::size_t> sizes;
+    for (auto const& v : distinct_variants) {
+        sizes.push_back(v.size());
+    }
+    std::ranges::sort(sizes);
+    EXPECT_EQ(sizes, (std::vector<std::size_t>{19u, 20u, 22u, 31u}))
+        << "distinct tag-146 variant sizes drifted from the pinned {19,20,22,31} "
+           "({News,Email}=19, MarketDataRequest=20, "
+           "{SecurityDefinitionRequest,SecurityDefinition}=22, QuoteRequest=31)";
+
+    // ---- LEG 2 (082 T017): the BARE store holds the loader's FIRST-SEEN set ----
+    //
+    // BOTH legs are required and they assert DIFFERENT things. The two stores are
+    // keyed differently — the context store by (msg_type, parent path, no_tag),
+    // the bare store by no_tag alone — so "the stores agree" could only ever mean
+    // a tag-set PROJECTION, which passes while every per-context member set is
+    // wrong. Leg 1 above pins the context store per context; this leg pins the
+    // bare store to the ONE variant the loader records (first-seen wins,
+    // `xml_loader.cpp:609`). Without leg 2 a half-restructure that populates the
+    // context store correctly and leaves the bare store wrong (or vice versa)
+    // passes T017 — exactly what FR-004 exists to prevent. T015 does not close
+    // this gap: it pins the bare store's registered *tag set*, not 146's *member
+    // set*.
+    //
+    // The expected value is DERIVED via `dfs_find_group`, NOT transcribed:
+    // walk `<messages>/<message>` in document order (xml_loader.cpp:747) and,
+    // within each message, depth-first through field/group/component children
+    // — the same traversal `expand_field_list` follows (xml_loader.cpp:525+) —
+    // to find the FIRST `<group name="NoRelatedSym">` declaration site
+    // anywhere in the document. A doc reorder therefore cannot silently
+    // invalidate this pin; the scan re-derives the answer instead of
+    // comparing against a stale literal.
+    pugi::xml_document raw_doc;
+    ASSERT_TRUE(raw_doc.load_file(path.c_str())) << "raw-XML scan: failed to load " << path;
+    auto const raw_root = raw_doc.child("fix");
+    std::unordered_map<std::string, pugi::xml_node> components_by_name;
+    for (auto const& c : raw_root.child("components").children("component")) {
+        components_by_name.emplace(std::string{c.attribute("name").as_string("")}, c);
+    }
+
+    std::string first_seen_msg_type;
+    pugi::xml_node first_seen_node;
+    // Header/trailer are expanded before EVERY message body by the real
+    // loader (xml_loader.cpp:927-931), so a header/trailer-declared group
+    // would win first-seen ahead of any message body — NoRelatedSym is not
+    // header/trailer-declared in FIX42 (kHeaderTrailerTags has no group
+    // entries), so scanning <messages> directly is faithful for this tag; a
+    // header/trailer-declared no_tag would need this scan widened.
+    for (auto const& m : raw_root.child("messages").children("message")) {
+        if (auto found = dfs_find_group(m, "NoRelatedSym", components_by_name)) {
+            first_seen_msg_type = std::string{m.attribute("msgtype").as_string("")};
+            first_seen_node = *found;
+            break;
+        }
+    }
+    ASSERT_FALSE(first_seen_msg_type.empty())
+        << "raw-XML document-order scan found no NoRelatedSym(146) declaration -- fixture/scan "
+           "regression";
+    ASSERT_EQ(std::string_view{first_seen_node.parent().name()}, std::string_view{"message"})
+        << "first-seen NoRelatedSym(146) site is NOT a direct message-top-level child (path != "
+           "[]) -- the GroupContextKey{msg_type, {}, 146} lookup below no longer holds; widen "
+           "this scan to walk the found node's ancestor chain and resolve a non-empty path";
+
+    GroupContextKey const first_seen_key{first_seen_msg_type, {}, 146};
+    auto const oit = oracle.group_members.find(first_seen_key);
+    ASSERT_NE(oit, oracle.group_members.end())
+        << "oracle has no group_members entry for the scan-derived first-seen key (msg_type="
+        << first_seen_msg_type << ") -- scan/oracle disagreement, investigate before trusting "
+           "this pin";
+    auto const& first_seen_variant = oit->second;
+
+    // Sanity pin over the derivation (not a substitute for it): News (msgtype
+    // 'B', line 269) is declared before Email (msgtype 'C', line 309) in
+    // FIX42.xml, so News's 19-member NoRelatedSym is first-seen.
+    EXPECT_EQ(first_seen_msg_type, "B")
+        << "scan-derived first-seen msg_type for tag 146 drifted from the pinned 'B' (News) -- "
+           "re-verify the dictionary's message order didn't change";
+    ASSERT_EQ(first_seen_variant.size(), 19u)
+        << "FIX42 News(B) tag-146 member count drifted from the derived 19";
+
+    auto const bare_actual = to_set(tv.group_member_tags(146));
+    EXPECT_EQ(first_seen_variant, bare_actual)
+        << "FIX42 tag 146 (BARE store, first-seen wins, msg_type=" << first_seen_msg_type
+        << "): " << describe_diff(first_seen_variant, bare_actual);
+}
+
+// T018 [US1]: the six unchanged dictionaries' bare-store registered group
+// set, exact-set both directions vs the registered-after column (C2 / K1 /
+// FR-014 / SC-002) — 082's C3 non-regression leg. Unlike T015/T016 this pin
+// is NOT expected to flip RED->GREEN across T023 for five of the six rows
+// (their group-count tags are already NUMINGROUP-typed, so the datatype gate
+// was never the obstacle); it stands as a witness that the predicate swap
+// moves none of them.
+//
+// FIX50SP2's #208 special-case is RETIRED (2026-08-12). It read: the shipped
+// loader's one-level-deep <component> member scan (xml_loader.cpp:610-641)
+// never resolves 1499/1669/1919's only-nested-group members, so those three
+// never register; pinned at 502 = oracle.group_tags minus those 3, "flips to a
+// plain oracle.group_tags comparison (505) once #208 lands".
+//
+// #208 HAS landed — closed by 083 (per-context group-delimiter resolution),
+// whose capture resolves THROUGH nested components. So this is exactly the
+// flip the old banner prescribed: the carve-out is gone and the row is now a
+// plain oracle.group_tags comparison at 505. Measured: all three register, and
+// `group_first_field(1499/1669/1919)` is now NON-ZERO (453 / 1529 / 1920 —
+// each itself a nested group's count tag, not a scalar).
+//
+// This RETIRES contracts/group-detection.md C1.1's RESIDUAL EXCEPTION, whose
+// claim that `group_first_field` returns 0 for all three "both before and
+// after the predicate swap" is now false.
+//
+// The flip is a STRENGTHENING (it restores 3 tags to the expected set), so the
+// green is proof. 082's own attributable delta here is still ZERO: FIX50SP2's
+// type set and struct set are both 507, so T023's predicate swap cannot move
+// this row — the +3 is 083's, inherited by catching up to main. FIX50SP2
+// remains a C2-EQUAL row; only its baseline moved.
+TEST(RequiredScopeCensus, SixUnchangedDictionariesBareStoreExactSet) {
+    std::cout << "\n=== 082 T018: six unchanged dictionaries' bare-store exact-set ===\n";
+
+    struct Case {
+        char const* label;
+        char const* filename;
+        bool is_orchestra;
+        std::size_t expected_count;
+    };
+    std::vector<Case> const kCases{
+        {"FIX44.xml", "FIX44.xml", false, 59},
+        {"FIX50.xml", "FIX50.xml", false, 67},
+        {"FIX50SP1.xml", "FIX50SP1.xml", false, 97},
+        {"FIX50SP2.xml", "FIX50SP2.xml", false, 505},  // #208 retired -- see banner above
+        {"FIXT11.xml", "FIXT11.xml", false, 1},
+        {"OrchestraFIXLatest.xml", "OrchestraFIXLatest.xml", true, 524},
+    };
+
+    for (auto const& c : kCases) {
+        auto storage = std::make_unique<std::byte[]>(kArenaBytes);
+        std::pmr::monotonic_buffer_resource mr{storage.get(), kArenaBytes};
+
+        auto const path = c.is_orchestra
+                             ? std::filesystem::path{FIXPP_ORCHESTRA_DATA_DIR} / c.filename
+                             : std::filesystem::path{FIXPP_DICT_DATA_DIR} / c.filename;
+        auto const oracle = c.is_orchestra ? build_orchestra_oracle(path) : build_quickfix_oracle(path);
+        auto const dict = c.is_orchestra ? fixpp::dict::OrchestraLoader{}.load(path, &mr)
+                                          : fixpp::dict::XmlLoader{}.load(path, &mr);
+        auto const tv = dict.as_table_view();
+
+        // No carve-out: every row is a plain oracle.group_tags comparison. The
+        // FIX50SP2 #208 erase block was removed 2026-08-12 (see banner above).
+        auto const expected = oracle.group_tags;
+        ASSERT_EQ(expected.size(), c.expected_count)
+            << c.label << ": derived expected-set size drifted from the pinned count -- re-derive";
+
+        auto const actual = bare_registered_group_tags(tv);
+        EXPECT_EQ(expected, actual)
+            << c.label << " bare-store exact-set: " << describe_diff(expected, actual);
+    }
+}
+
+// T040 [US3]: FIX43 tag 576 (NoClearingInstructions) registers as a
+// repeating group with member ClearingInstruction(577) in the bare store.
+// 576 is INT-typed (a pre-existing dialect typo -- FIX44 types it correctly
+// as NUMINGROUP), so registering it is only possible once T023 replaces the
+// `fr.type == NumInGroup` filter with the structural `group_first_field()`
+// predicate -- FR-001's behavioral witness, not a token grep (FR-011 / K3).
+TEST(RequiredScopeCensus, Fix43Tag576RegistersAsGroupWithClearingInstructionMember) {
+    std::cout << "\n=== 082 T040: FIX43 tag 576 (NoClearingInstructions) registration ===\n";
+
+    auto storage = std::make_unique<std::byte[]>(kArenaBytes);
+    std::pmr::monotonic_buffer_resource mr{storage.get(), kArenaBytes};
+
+    auto const path = std::filesystem::path{FIXPP_DICT_DATA_DIR} / "FIX43.xml";
+    auto const dict = fixpp::dict::XmlLoader{}.load(path, &mr);
+    auto const tv = dict.as_table_view();
+
+    EXPECT_NE(tv.group_first_field(576), 0)
+        << "FIX43 tag 576 (NoClearingInstructions) not registered as a group in the bare store -- "
+           "INT-typed group-count fields are filtered out before T023's predicate swap";
+    auto const members = to_set(tv.group_member_tags(576));
+    EXPECT_EQ(members, (std::set<std::uint16_t>{577}))
+        << "FIX43 tag 576 member set: " << describe_diff(std::set<std::uint16_t>{577}, members);
+}
+
+// T041 [US3]: FIX43 tag 82 (NoRpts) is NOT registered as a repeating group --
+// and the reason matters. Pre-T023 it was excluded by a downstream guard; post-T023
+// it is excluded because the DICTIONARY DECLARES NO `<group>` for it. The predicate
+// must also leave it a fully usable PLAIN REQUIRED FIELD in ListStatus: not
+// unknown, not optional (FR-012 / K3).
+//
+// This is the inverse half of FR-002's "replacement, NOT a union" witness, and 82
+// is the tag that discriminates. Measured from raw FIX43.xml: 82 is typed
+// **NUMINGROUP** yet is declared as a `<group>` NOWHERE in the dictionary. So:
+//   - the OLD datatype gate would have registered it (NUMINGROUP);
+//   - a UNION of datatype-or-structural would ALSO register it;
+//   - only a PURE STRUCTURAL predicate rejects it.
+// Together with T040's 576 (INT-typed but a real `<group>`, so it must register),
+// the two tags pin the predicate from both sides using one dictionary.
+TEST(RequiredScopeCensus, Fix43Tag82IsNotAGroupButRemainsARequiredPlainField) {
+    std::cout << "\n=== 082 T041: FIX43 tag 82 (NoRpts) stays a plain required field ===\n";
+
+    auto storage = std::make_unique<std::byte[]>(kArenaBytes);
+    std::pmr::monotonic_buffer_resource mr{storage.get(), kArenaBytes};
+
+    auto const path = std::filesystem::path{FIXPP_DICT_DATA_DIR} / "FIX43.xml";
+    auto const dict = fixpp::dict::XmlLoader{}.load(path, &mr);
+    auto const tv = dict.as_table_view();
+
+    // (i) NOT a group -- the leg a union predicate would fail.
+    EXPECT_EQ(tv.group_first_field(82), 0)
+        << "FIX43 tag 82 (NoRpts) must NOT register as a repeating group: it is NUMINGROUP-typed but "
+           "the dictionary declares no <group> for it, so registering it would prove the predicate "
+           "is still (or is again) datatype-aware -- FR-002's union failure mode";
+    EXPECT_TRUE(to_set(tv.group_member_tags(82)).empty())
+        << "FIX43 tag 82 must carry no group member set";
+
+    // (ii) Still a KNOWN field of ListStatus(N) -- the predicate must not make it
+    // unknown. A validator that stopped recognising 82 would reject valid FIX43.
+    EXPECT_TRUE(tv.field_valid_for("N", 82))
+        << "FIX43 tag 82 must remain a declared field of ListStatus(N)";
+
+    // (iii) Still ENFORCED as required -- the predicate must not silently demote it
+    // to optional, which is the failure a `field_valid_for` check alone would miss.
+    auto const req = tv.required_fields("N");
+    EXPECT_NE(std::ranges::find(req, std::uint16_t{82}), req.end())
+        << "FIX43 tag 82 must remain REQUIRED in ListStatus(N) -- present-but-optional is a silent "
+           "weakening, not a pass";
+}
+
+// T043 [US3]: detection resolves PER DICTIONARY, not globally by tag, and the
+// predicate is a REPLACEMENT of the datatype gate rather than a union (FR-002 /
+// FR-003). T040/T041/T042 supply the FIX43 legs; this cell supplies the
+// cross-dictionary ones.
+//
+// ⚠️ **T043's task text names the wrong example, and it is unsatisfiable as
+// written.** It says *"tags 82 and 576 are a group in one dictionary and a plain
+// field in another across FIX43/FIX44"*. Measured from raw XML, neither is:
+//   - 82  is a `<group>` in NEITHER FIX43 nor FIX44.
+//   - 576 is a `<group>` in BOTH.
+// Stronger: across FIX43/FIX44 **no tag at all** is a group in one and a plain
+// field in the other -- all 25 FIX44-only groups are not even declared in FIX43's
+// `<fields>`, and there are zero FIX43-only groups. So the claim cannot be
+// witnessed on that pair by any tag.
+//
+// Two accurate witnesses are used instead:
+//   (a) 576's DATATYPE is dictionary-dependent -- INT in FIX43, NUMINGROUP in
+//       FIX44 -- while its STRUCTURAL answer is the same in both. It is the ONLY
+//       tag in the pair whose datatype differs while being a reachable group in
+//       both, so it is a unique witness: a datatype gate would register it in
+//       FIX44 only, and the structural predicate registers it in both.
+//   (b) The literal group-here/plain-field-there claim IS witnessable, just on a
+//       different pair. Exactly TWO tags in the whole shipped set qualify:
+//       33 `LinesOfText` (group in FIX41, plain field in FIX40) and
+//       85 `NoDlvyInst` (group in FIX44, plain field in FIX40).
+TEST(RequiredScopeCensus, DetectionResolvesPerDictionaryNotGloballyByTag) {
+    std::cout << "\n=== 082 T043: per-dictionary resolution (FR-003) ===\n";
+
+    auto load = [](char const* file, auto&& fn) {
+        auto storage = std::make_unique<std::byte[]>(kArenaBytes);
+        std::pmr::monotonic_buffer_resource mr{storage.get(), kArenaBytes};
+        auto const dict =
+            fixpp::dict::XmlLoader{}.load(std::filesystem::path{FIXPP_DICT_DATA_DIR} / file, &mr);
+        fn(dict.as_table_view());
+    };
+
+    // (a) 576: opposite datatypes, SAME structural answer. Only a predicate that
+    // ignores the datatype can produce this pair of results.
+    load("FIX43.xml", [](auto const& tv) {
+        EXPECT_NE(tv.group_first_field(576), 0)
+            << "FIX43 576 is INT-typed but a real <group> -- it must register";
+    });
+    load("FIX44.xml", [](auto const& tv) {
+        EXPECT_NE(tv.group_first_field(576), 0)
+            << "FIX44 576 is NUMINGROUP-typed and a <group> -- it must register too; the two "
+               "dictionaries disagree on the DATATYPE and agree on the STRUCTURE, and the predicate "
+               "must follow the structure";
+    });
+
+    // (b) The genuine group-here / plain-field-there pairs, both against FIX40.
+    load("FIX41.xml", [](auto const& tv) {
+        EXPECT_NE(tv.group_first_field(33), 0)
+            << "FIX41 declares <group> LinesOfText(33) -- must register";
+    });
+    load("FIX44.xml", [](auto const& tv) {
+        EXPECT_NE(tv.group_first_field(85), 0)
+            << "FIX44 declares <group> NoDlvyInst(85) -- must register";
+    });
+
+    // The two negative legs live in ONE FIX40 load, behind a NON-VACUITY guard.
+    //
+    // ⚠️ This guard is the point. `group_first_field(t) == 0` is what an EMPTY or
+    // failed-to-populate table returns for EVERY tag, so on its own the FIX40 half
+    // of this witness passes for the wrong reason and the whole per-dictionary claim
+    // becomes unfalsifiable. Pinning FIX40's OWN registered set first makes the two
+    // zeroes below mean "structurally absent" rather than "nothing is here".
+    // FIX40's 4 group tags are derived by contracts/predicate_census.py.
+    load("FIX40.xml", [](auto const& tv) {
+        auto const own = bare_registered_group_tags(tv);
+        ASSERT_EQ(own, (std::set<std::uint16_t>{73, 78, 124, 136}))
+            << "FIX40's own registered group set must be exactly {73,78,124,136} BEFORE the two "
+               "zero-assertions below are meaningful -- an empty table would make them vacuous: "
+            << describe_diff(std::set<std::uint16_t>{73, 78, 124, 136}, own);
+
+        EXPECT_EQ(tv.group_first_field(33), 0)
+            << "FIX40 uses 33 as a PLAIN FIELD -- registering it here would prove detection is "
+               "keyed globally by tag rather than per dictionary (FR-003)";
+        EXPECT_EQ(tv.group_first_field(85), 0)
+            << "FIX40 uses 85 as a PLAIN FIELD -- same per-dictionary requirement as 33 above";
+    });
+}
+
+// T042 [US3]: FIX43's bare-store registered set differs from the T004
+// pre-change baseline (33 tags; implementation-notes.md § T004) by EXACTLY
+// +1 tag (576) -- not merely "more than before" -- and no OTHER tag moves
+// (FR-013 / SC-003 / K3).
+TEST(RequiredScopeCensus, Fix43RegisteredSetDeltaIsExactlyPlusOneTag576) {
+    std::cout << "\n=== 082 T042: FIX43 registered-set delta vs T004 baseline ===\n";
+
+    auto storage = std::make_unique<std::byte[]>(kArenaBytes);
+    std::pmr::monotonic_buffer_resource mr{storage.get(), kArenaBytes};
+
+    auto const path = std::filesystem::path{FIXPP_DICT_DATA_DIR} / "FIX43.xml";
+    auto const oracle = build_quickfix_oracle(path);
+    auto const dict = fixpp::dict::XmlLoader{}.load(path, &mr);
+    auto const tv = dict.as_table_view();
+
+    ASSERT_EQ(oracle.group_tags.size(), 34u)
+        << "FIX43 oracle struct-set drifted from the pinned 34 -- re-derive, don't silently update";
+
+    // T004's pre-change baseline (33 tags), derived here as oracle.group_tags
+    // minus 576 -- not re-transcribed, so it stays tied to the oracle's own
+    // 34-tag output rather than a second hand-copied literal.
+    auto baseline_before = oracle.group_tags;
+    baseline_before.erase(576);
+    ASSERT_EQ(baseline_before.size(), 33u)
+        << "derived T004 baseline drifted from the pinned 33 -- re-derive";
+
+    auto const actual = bare_registered_group_tags(tv);
+
+    // No OTHER tag moves: every one of the 33 baseline tags must still be
+    // registered.
+    for (auto const tag : baseline_before) {
+        EXPECT_TRUE(actual.contains(tag))
+            << "FIX43 baseline tag " << tag << " unexpectedly un-registered by the predicate swap";
+    }
+    // The delta is EXACTLY {576} -- both that it registers (RED until T023)
+    // and that nothing beyond it changes.
+    EXPECT_EQ(oracle.group_tags, actual)
+        << "FIX43 bare-store set vs full 34-tag registered-after set: "
+        << describe_diff(oracle.group_tags, actual);
+    EXPECT_EQ(actual.size(), baseline_before.size() + 1)
+        << "FIX43 registered-set delta is not exactly +1 tag -- actual size " << actual.size()
+        << " vs baseline " << baseline_before.size();
+}
+
+// ============================================================================
+// 082 T009/T010/T011 (FR-023 / K11 / OD-1) — fail-closed member-less-`<group>`
+// load rejection. Per the ⚠ DESCOPE BANNER (tasks.md, issue #208): the
+// rejection fires ONLY on a `<group>` with literally NO child elements at
+// all, never on "no *resolvable* member" (FIX50SP2's 1499/1669/1919 have
+// `<component>` children the loader cannot resolve one level deep -- those
+// are NOT rejected; see #208). Both fixtures below place the member-less
+// `<group>` at a NON-first-seen occurrence of its no_tag/numInGroup id,
+// because both loaders record `GroupDef`/`OrchestraGroupDef` inside a
+// first-seen-wins dedup guard (`xml_loader.cpp:609`,
+// `orchestra_loader.cpp:626`) -- a check wrongly placed inside that guard
+// would silently pass a fixture where the member-less occurrence isn't
+// first-seen.
+// ============================================================================
+
+// T009 [P] RED->GREEN: the `<fix>` (QuickFIX-XML) loader. `NoOuter`(100) is
+// first-seen in message 'Good' WITH a member (150); its second occurrence in
+// message 'Bad' has ZERO field/group/component children -- literally
+// member-less. Must throw `xml_parse_error` naming the group's name and its
+// no_tag.
+TEST(RequiredScopeCensus, MemberLessGroupAtNonFirstSeenOccurrenceThrowsXmlParseError) {
+    constexpr std::string_view kXml =
+        R"(<fix type='FIX' major='4' minor='4' servicepack='0'>)"
+        R"(<fields>)"
+        R"(<field number='35' name='MsgType' type='STRING'/>)"
+        R"(<field number='100' name='NoOuter' type='NUMINGROUP'/>)"
+        R"(<field number='150' name='OuterMember' type='STRING'/>)"
+        R"(</fields>)"
+        R"(<messages>)"
+        R"(<message name='Good' msgtype='U' msgcat='app'>)"
+        R"(<field name='MsgType' required='N'/>)"
+        R"(<group name='NoOuter' required='N'>)"
+        R"(<field name='OuterMember' required='N'/>)"  // first-seen: HAS a member
+        R"(</group></message>)"
+        R"(<message name='Bad' msgtype='V' msgcat='app'>)"
+        R"(<field name='MsgType' required='N'/>)"
+        R"(<group name='NoOuter' required='N'>)"  // non-first-seen: NO children at all
+        R"(</group></message>)"
+        R"(</messages></fix>)";
+
+    std::array<std::byte, (1UZ << 20)> buf{};
+    std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
+
+    bool threw = false;
+    try {
+        (void)fixpp::dict::XmlLoader{}.load_from_string(kXml, &mr);
+    } catch (fixpp::dict::xml_parse_error const& e) {
+        threw = true;
+        std::string_view const what{e.what()};
+        EXPECT_NE(what.find("NoOuter"), std::string_view::npos)
+            << "diagnostic must name the group's name (NoOuter): " << what;
+        EXPECT_NE(what.find("100"), std::string_view::npos)
+            << "diagnostic must name the group's no_tag (100): " << what;
+    }
+    EXPECT_TRUE(threw) << "a <group> with no field/group/component child at all must fail to "
+                          "load with fixpp::dict::xml_parse_error, even at a non-first-seen "
+                          "occurrence of its no_tag";
+}
+
+// T010 [P] RED->GREEN: the Orchestra sibling. `<fixr:group id=10>` (numInGroup
+// 100) is first-seen via message 'Good''s groupRef and HAS a fieldRef member;
+// `<fixr:group id=20>` shares the SAME numInGroup id (100) but has NO child
+// other than the mandatory `<fixr:numInGroup>` -- referenced by message
+// 'Bad''s groupRef, i.e. the non-first-seen occurrence of no_tag 100 (the
+// dedup guard is keyed by no_tag, not by the group element's own xml id).
+// Must throw the DERIVED `orchestra_parse_error` specifically (catching the
+// base `xml_parse_error` would not discriminate this from every other load
+// error).
+TEST(RequiredScopeCensus, MemberLessOrchestraGroupAtNonFirstSeenOccurrenceThrowsOrchestraParseError) {
+    constexpr std::string_view kXml = R"xml(
+<fixr:repository version="FIX.Latest_EP303">
+  <fixr:fields>
+    <fixr:field id="100" name="NoOuter" type="NumInGroup"/>
+    <fixr:field id="200" name="Member" type="String"/>
+  </fixr:fields>
+  <fixr:groups>
+    <fixr:group id="10" name="GroupFirstSeen">
+      <fixr:numInGroup id="100"/>
+      <fixr:fieldRef id="200"/>
+    </fixr:group>
+    <fixr:group id="20" name="GroupMemberLess">
+      <fixr:numInGroup id="100"/>
+    </fixr:group>
+  </fixr:groups>
+  <fixr:messages>
+    <fixr:message id="1" name="Good" msgType="U">
+      <fixr:structure><fixr:groupRef id="10"/></fixr:structure>
+    </fixr:message>
+    <fixr:message id="2" name="Bad" msgType="V">
+      <fixr:structure><fixr:groupRef id="20"/></fixr:structure>
+    </fixr:message>
+  </fixr:messages>
+</fixr:repository>
+)xml";
+
+    std::pmr::monotonic_buffer_resource mr;
+
+    bool threw_derived = false;
+    try {
+        (void)fixpp::dict::OrchestraLoader{}.load_from_string(kXml, &mr);
+    } catch (fixpp::dict::orchestra_parse_error const& e) {
+        threw_derived = true;
+        std::string_view const what{e.what()};
+        EXPECT_NE(what.find("GroupMemberLess"), std::string_view::npos)
+            << "diagnostic must name the group's name (GroupMemberLess): " << what;
+        EXPECT_NE(what.find("100"), std::string_view::npos)
+            << "diagnostic must name the group's no_tag/numInGroup id (100): " << what;
+    } catch (fixpp::dict::xml_parse_error const&) {
+        // Base type caught but NOT the derived orchestra_parse_error -- fails
+        // below via threw_derived staying false, discriminating this from a
+        // wrong-typed throw.
+    }
+    EXPECT_TRUE(threw_derived)
+        << "a member-less <fixr:group> (no child other than <fixr:numInGroup>/<fixr:annotation>) "
+           "must fail to load with the DERIVED fixpp::dict::orchestra_parse_error, even at a "
+           "non-first-seen occurrence of its numInGroup id";
+}
+
+// T011 [P] RED-by-construction->GREEN: all ten vendored dictionaries still
+// load clean -- the FR-023 no-regression leg, cross-checked against T007's
+// oracle zero-member-`<group>` report (0 across all ten). Doubly load-bearing
+// per the DESCOPE BANNER: this is what proves the narrowed (literal-only)
+// rejection does not take FIX50SP2 down (its 1499/1669/1919 have unresolved
+// `<component>` children, not zero children -- #208, not FR-023).
+TEST(RequiredScopeCensus, AllTenVendoredDictionariesStillLoadCleanAfterMemberLessGroupRejection) {
+    std::cout << "\n=== 082 T011: all ten vendored dictionaries load clean "
+                 "(FR-023 no-regression leg) ===\n";
+
+    for (auto const& dc : kAllDicts) {
+        auto storage = std::make_unique<std::byte[]>(kArenaBytes);
+        std::pmr::monotonic_buffer_resource mr{storage.get(), kArenaBytes};
+
+        Dictionary dict = load_actual(dc, &mr);
+        EXPECT_FALSE(dict.messages().empty())
+            << dc.label << ": failed to load or has no messages after the FR-023 rejection landed";
+        std::cout << "  " << dc.label << ": loaded clean, " << dict.messages().size()
+                  << " message(s)\n";
+    }
 }

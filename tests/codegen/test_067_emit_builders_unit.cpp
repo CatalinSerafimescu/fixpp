@@ -696,6 +696,22 @@ VersionIR build_dedup_soundness_ir() {
         make_synth_group_message("ZDEDUP9003A", 9003, 9301, /*member_required=*/true));
     ir.messages.push_back(
         make_synth_group_message("ZDEDUP9004A", 9004, 9301, /*member_required=*/true));
+
+    // 082 T024/T025: `group_tags` is a DERIVED field — only build_ir()
+    // populates it, and this fixture builds its VersionIR by hand, bypassing
+    // build_ir() by construction. Mirror ir.cpp's derivation or `is_group_tag()`
+    // binary-searches an empty vector, every synthetic no_tag reads as a
+    // non-group, no G_*Args is emitted, and all THREE Group077DedupSoundness
+    // cases fail. (No header/trailer analogue is needed — the fixture declares
+    // neither, so the ir.cpp union over those two subtrees has nothing to add.)
+    for (auto const& m : ir.messages) {
+        for (auto const& entry : m.group_order) {
+            ir.group_tags.push_back(entry.no_tag);
+        }
+    }
+    std::sort(ir.group_tags.begin(), ir.group_tags.end());
+    ir.group_tags.erase(std::unique(ir.group_tags.begin(), ir.group_tags.end()),
+                        ir.group_tags.end());
     return ir;
 }
 
