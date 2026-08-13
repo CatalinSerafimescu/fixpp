@@ -17,6 +17,10 @@ add_library(fixpp_dictionary STATIC
   # (dict::load_any) — routes to xml_loader.cpp / orchestra_loader.cpp above.
   load_any.cpp
   dictionary.cpp
+  # fixpp#215 item 1 (Option C, .specify/215-dictionary-view.md §3): the
+  # dictionary_snapshot value type + make_dictionary_snapshot /
+  # shared_dictionary_view factories.
+  dictionary_snapshot.cpp
   # 003-dictionary-codegen (RC#1): the 003-owned upstream surface bodies.
   # field_traits.cpp is a bridge file (arch §2.4 v0.3 — #includes the
   # vendored frozen wire stub header; NOT a cyclic dictionary→wire link

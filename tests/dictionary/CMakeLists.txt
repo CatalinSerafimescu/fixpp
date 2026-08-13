@@ -10,6 +10,9 @@
 find_package(GTest CONFIG REQUIRED)
 find_package(pugixml CONFIG REQUIRED)
 
+add_test(NAME dictionary_snapshot_exclusivity_gate
+  COMMAND bash "${CMAKE_SOURCE_DIR}/tools/test_dictionary_snapshot_exclusivity_gate.sh")
+
 # Path to vendored XML fixtures so tests can locate them regardless of
 # build-tree depth (used by load(path, mr) AC-L1 / AC-L2 paths and the
 # round-trip / determinism / dictionary_lookup suites).
@@ -39,6 +42,7 @@ add_executable(dictionary_pure_tests
   collision_membership_guards_test.cpp
   test_072_delimiter_guard_test.cpp  # 072 US1: load-time nested==parent delimiter guard witness
   oom_injection_test.cpp          # local failing_pmr_resource seam — no global state
+  dictionary_snapshot_test.cpp    # fixpp#215 item 1 (Option C): A1-A5 boundary pins + seam 4 alias identity
 )
 target_link_libraries(dictionary_pure_tests PRIVATE
   fixpp_dictionary

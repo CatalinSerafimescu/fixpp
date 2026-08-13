@@ -8,6 +8,7 @@
 #include <cassert>
 #include <filesystem>
 #include <fixpp/core/decimal_helpers.hpp>
+#include <fixpp/dict/loader_policy.hpp>  // unresolved_group_policy (fixpp#215 item 4)
 #include <fixpp/dict/orchestra_loader.hpp>
 #include <fixpp/dict/xml_loader.hpp>
 #include <fstream>
@@ -19,7 +20,8 @@
 
 namespace fixpp::dict {
 
-Dictionary load_any(std::filesystem::path const& path, std::pmr::memory_resource* mr) {
+Dictionary load_any(std::filesystem::path const& path, std::pmr::memory_resource* mr,
+                    unresolved_group_policy policy) {
     assert(mr != nullptr && "load_any: mr must not be null");
 
     return fixpp::core::detail::trap_throw_or_throw<xml_oom_error>([&] {
@@ -45,10 +47,10 @@ Dictionary load_any(std::filesystem::path const& path, std::pmr::memory_resource
         std::string_view const name{root.name()};
 
         if (name == "fix") {
-            return XmlLoader{}.load(path, mr);
+            return XmlLoader{}.load(path, mr, policy);
         }
         if (name == "fixr:repository") {
-            return OrchestraLoader{}.load(path, mr);
+            return OrchestraLoader{}.load(path, mr, policy);
         }
         throw dict::xml_parse_error(std::string{"dict::xml_parse_error: unrecognized dictionary root "
                                                  "element <"} +

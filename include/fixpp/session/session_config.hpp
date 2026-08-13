@@ -41,6 +41,7 @@ class Clock;
 namespace fixpp::dict {
 class Dictionary;
 class DialectOverlay;
+class dictionary_snapshot;  // fixpp#215 item 1 (Option C) — shared_ptr member ⇒ fwd-decl suffices
 }  // namespace fixpp::dict
 namespace fixpp::tls {
 class cert_source;
@@ -186,6 +187,31 @@ struct SessionConfig {
 
     std::shared_ptr<const fixpp::dict::Dictionary> dictionary;           // required
     std::shared_ptr<const fixpp::dict::DialectOverlay> dialect_overlay;  // optional
+
+    // fixpp#215 item 1 (Option C, `.specify/215-dictionary-view.md` §3/§5a) —
+    // OPTIONAL pre-built snapshot of `dictionary`.
+    //
+    // `Dictionary::as_table_view()` has no cache: every call is a full walk of
+    // every message, group and field, and since 083 it also builds the
+    // per-context delimiter store. A caller that has ALREADY paid for that walk
+    // can hand the result over here instead of making `Session::open()` walk the
+    // same Dictionary a second time. Null (the default) → `open()` builds its
+    // own, exactly as before; every existing producer of a SessionConfig is
+    // unaffected.
+    //
+    // The C-ABI is the only producer today: `fixpp_session_open` needs its own
+    // `fixpp_session::tv_` for the outbound commit path, so it mints ONE
+    // snapshot via `fixpp::dict::make_dictionary_snapshot` and passes it here.
+    //
+    // PROVENANCE: `open()` rejects (fail-closed, `error::invalid_session_config`)
+    // when `dict_snapshot->source()` is not pointer-identical to `dictionary`
+    // above — see `Session::open()`. Unlike the retired `dictionary_view`
+    // field, a mismatched pair is now detected rather than silently driving the
+    // wrong grammar. `make_dictionary_snapshot` is the sole minter of a
+    // snapshot; the type cannot be copied, moved, or value-constructed, so the
+    // only way to seat a view here is to derive it from `dictionary` through
+    // that factory.
+    std::shared_ptr<const fixpp::dict::dictionary_snapshot> dict_snapshot;  // null → open() builds one
 
     std::optional<std::chrono::seconds> heartbeat_interval;           // value owned by 005
     std::optional<std::chrono::milliseconds> test_request_threshold;  // value owned by 005

@@ -26,6 +26,7 @@
 #include "capi_internal.hpp"
 
 #include "fixpp/core/error.hpp"
+#include "fixpp/dict/dictionary_snapshot.hpp"  // fixpp#215 item 1 (Option C)
 #include "fixpp/session/session.hpp"  // Session::close/executor/is_open, close_mode
 
 namespace {
@@ -82,11 +83,28 @@ fixpp_error_t fixpp_session_open(fixpp_engine_t* engine, fixpp_session_config_t*
     }
 
     fixpp::session::SessionId id;
+    // 083 T050 / fixpp#215 item 1 (Option C): the session's ONE dictionary
+    // snapshot. Minted here — BEFORE register_session copies the config — so
+    // the SAME snapshot serves both consumers: `fixpp_session::tv_` below
+    // (outbound commit path, via shared_dictionary_view) and `Session::open()`'s
+    // inbound_tv_/validator, which used to walk the identical Dictionary all
+    // over again. Not per message (C-9.2a / [const §XV.1]).
+    std::shared_ptr<const fixpp::dict::dictionary_snapshot> snap;
     try {
         id = fixpp::session::SessionId::from_config(cfg->cfg);
         // register_session takes SessionConfig BY VALUE → copies the builder's
         // config (builder still owns its copy; consumed/freed below on success).
-        auto rr = engine->state_->engine_->register_session(cfg->cfg);
+        // The snapshot is attached to a LOCAL copy, never to `cfg->cfg`: on the
+        // failure paths below the builder must come back to the caller exactly as
+        // it went in ("builder untouched on failure"), and a `dict_snapshot`
+        // left behind on it would go stale the moment the caller re-pointed the
+        // builder's dictionary and retried.
+        fixpp::session::SessionConfig sc = cfg->cfg;
+        if (sc.dictionary) {
+            snap = fixpp::dict::make_dictionary_snapshot(sc.dictionary);
+            sc.dict_snapshot = snap;  // derived from sc.dictionary — the field's contract
+        }
+        auto rr = engine->state_->engine_->register_session(std::move(sc));
         if (!rr.has_value()) {
             // e.g. duplicate SessionId → session_invalid_argument (119) →
             // FIXPP_ERR_UNKNOWN (publication deferred, L-050-4). Builder NOT
@@ -109,11 +127,13 @@ fixpp_error_t fixpp_session_open(fixpp_engine_t* engine, fixpp_session_config_t*
         // D-5 (051): cache the dictionary BEFORE delete cfg so fixpp_msg_create_outbound
         // can copy it into each outbound fixpp_msg shell for set_* validation.
         h->dict_ = cfg->cfg.dictionary;
-        // 083 T050: build the session's table_view ONCE, here, where dict_ is
-        // already cached. Not per message (C-9.2a / [const §XV.1]).
-        if (h->dict_) {
-            h->tv_ = std::make_shared<const fixpp::dict::table_view>(h->dict_->as_table_view());
-        }
+        // 083 T050 / fixpp#215 item 1 (Option C): adopt a view aliased into the
+        // snapshot minted above — the very snapshot the registered SessionConfig
+        // carries — rather than building a second one from the same Dictionary.
+        // shared_dictionary_view is the sole production alias-formation site
+        // (§6 seam 4/G2); null exactly when dict_ is null, so "no dictionary"
+        // and "no view" stay ONE state.
+        h->tv_ = fixpp::dict::shared_dictionary_view(std::move(snap));
         fixpp_session* raw = h.get();
         engine->sessions_.push_back(std::move(h));
         delete cfg;  // builder CONSUMED on success (invalidated)

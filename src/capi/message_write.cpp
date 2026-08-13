@@ -710,14 +710,42 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_remove_tag(fixpp_msg_t* msg, uint16_t t
 // Returns TYPE_MISMATCH on violation (consistent with group_begin's non-group-tag
 // reject; no new symbol or error code needed).
 // Guarded on dict_ presence for the delimiter check (no-dict → empty check only).
-// 083 T052 (C-9.1 / C-9.2): `msg_type` and `parent_path` thread the CONTEXT in,
-// so construction resolves the delimiter by the same rule inbound validation
-// does. `tv` is the session's ONE cached view (T050/T051) — never rebuilt here.
+// 083 T052 (C-9.1 / C-9.2): `ctx` threads the CONTEXT in — the message type plus
+// the ancestor no_tag chain — so construction resolves the delimiter by the same
+// rule inbound validation does. `tv` is the session's ONE cached view
+// (T050/T051) — never rebuilt here.
+//
+// fixpp#215 item 3: the ancestor chain is `wire::group_context`, the same
+// by-value, alloc-free, K=16-bounded carrier the parse side threads, replacing a
+// heap-backed `std::vector<uint16_t>&` with manual push_back/pop_back pairing.
+//
+// CORRECTED (Gate B r1 O1 — the identity claim previously here was FALSE at
+// depth >= 17, and cited the wrong side of the hash map). `make_group_ctx_key`
+// is the INSERT-side key builder (called only from `add_group_member_ctx` /
+// `set_group_first_ctx`, i.e. registration) — it is not on this lookup path at
+// all. The lookup path (`group_first_field` / `group_first_field_exact`,
+// table_view.hpp) builds a `group_ctx_query` from the RAW span it is handed,
+// UNCLAMPED, and `group_ctx_equal::eq` uses the four-iterator `std::equal`,
+// which returns false on any length mismatch. So the actual delta at depth
+// >= 17 is: the OLD `std::vector<uint16_t>&` grew unbounded, so a query span
+// there had length 17+ and could NEVER match any stored key (max depth 16) —
+// a GUARANTEED context miss, unconditionally. The NEW `group_context::
+// pushed()` SATURATES at depth 16 (this file's span construction below is the
+// only place in this recursion that reads a depth/size at all), so a query
+// span here has length <= 16 and CAN match a context `as_table_view()`
+// registered under its own 16-clamped insert-side key. The two are NOT
+// behaviour-identical past depth 16 — see B-215-1's depth >= 17 addendum in
+// spec/behaviors-and-limitations.md — though within the shipped FIX
+// dictionaries no group nests that deep, so the delta is argued, not
+// witnessed: a depth->=17 fixture that could demonstrate it cannot currently
+// even LOAD, because of an UNRELATED, pre-existing depth->=17 defect this
+// Gate B round discovered but is out of scope to fix — see the verify record
+// for the full account and the escalation.
 static fixpp_error_t validate_group_grammar(const std::pmr::vector<AccumulatorEntry>& entries,
                                             const fixpp::dict::Dictionary* dict,
                                             const fixpp::dict::table_view* tv,
-                                            std::string_view msg_type,
-                                            std::vector<uint16_t>& parent_path) noexcept {
+                                            fixpp::wire::group_context ctx) noexcept {
+    std::span<const uint16_t> const parent_path{ctx.parent_path.data(), ctx.depth};
     for (const auto& e : entries) {
         if (!e.is_group) continue;
         // 083 T066: resolve the delimiter ONCE PER GROUP, not once per instance.
@@ -736,6 +764,32 @@ static fixpp_error_t validate_group_grammar(const std::pmr::vector<AccumulatorEn
         // the builder accept an order inbound validation rejects, which is the
         // disagreement this task exists to close.
         //
+        // fixpp#215 item 2: that rule is now enforced by the ACCESSOR, not only
+        // by the absence of an explicit bare call. The three-arg
+        // `table_view::group_first_field` T052 originally used applies the
+        // legacy bare-store fallback INTERNALLY on a context miss (the
+        // DUAL-STORE INVARIANT note in table_view.hpp), so
+        // this site could still resolve a delimiter from the global
+        // first-seen variant — the very fallback the paragraph above forbids —
+        // and had no way to tell that had happened. `group_first_field_exact`
+        // reports the miss instead of masking it, and the miss fails the commit
+        // closed, joining `tv == nullptr` on the same disposition.
+        //
+        // A miss IS reachable here through ordinary public C-ABI use, on a
+        // well-formed loader-built `session_tv_` (Gate B r1 O2; the retracted
+        // "not reachable from dictionary data" reasoning previously here is
+        // recorded, not deleted, in
+        // .specify/decisions/215-simplify-followups-verify.md). FR-023's
+        // completeness invariant guarantees a record for every context
+        // `as_table_view()` itself registers, but `fixpp_msg_group_begin`
+        // (:895) and `fixpp_entry_group_begin` (:1006) gate only on the bare
+        // no_tag store, and the entry setters run no `check_dict` — so a
+        // caller can open a group on a message type, or nest it under a
+        // parent path, this dictionary never registered that exact context
+        // for. That is ordinary builder misuse, not a context-construction
+        // bug on this path — exactly the case where guessing is worse than
+        // rejecting. See spec/behaviors-and-limitations.md B-215-1.
+        //
         // `!e.instances.empty()` keeps the hoist BEHAVIOUR-preserving: with zero
         // instances the old code never entered the inner loop and so never
         // reached the `tv == nullptr` fail-closed check, and hoisting it
@@ -745,8 +799,9 @@ static fixpp_error_t validate_group_grammar(const std::pmr::vector<AccumulatorEn
         uint16_t delim = 0;
         if (dict && !e.instances.empty()) {
             if (tv == nullptr) return FIXPP_ERR_TYPE_MISMATCH;
-            delim = tv->group_first_field(
-                msg_type, std::span<const uint16_t>{parent_path.data(), parent_path.size()}, e.tag);
+            auto const resolved = tv->group_first_field_exact(ctx.msg_type, parent_path, e.tag);
+            if (!resolved.has_value()) return FIXPP_ERR_TYPE_MISMATCH;  // context miss
+            delim = *resolved;
         }
         for (const auto& inst : e.instances) {
             // INV-4 leg (c): each instance must have at least one field.
@@ -760,12 +815,14 @@ static fixpp_error_t validate_group_grammar(const std::pmr::vector<AccumulatorEn
             }
             // Recurse into nested groups within this instance, with THIS group's
             // count tag pushed — so a nested group is keyed on its real ancestor
-            // path rather than on the root (C-9.2).
-            parent_path.push_back(e.tag);
-            fixpp_error_t const c =
-                validate_group_grammar(inst.fields, dict, tv, msg_type, parent_path);
-            parent_path.pop_back();
-            if (c != FIXPP_ERR_OK) return c;
+            // path rather than on the root (C-9.2). `pushed()` returns the child
+            // context BY VALUE, so there is no pop to pair with (and no way to
+            // forget one).
+            if (fixpp_error_t const c =
+                    validate_group_grammar(inst.fields, dict, tv, ctx.pushed(e.tag));
+                c != FIXPP_ERR_OK) {
+                return c;
+            }
         }
     }
     return FIXPP_ERR_OK;
@@ -797,13 +854,15 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_commit(fixpp_msg_t* msg, const uint8_t*
     // 083 T052: keyed on THIS message's type and, for nested groups, on their
     // real ancestor path — the same key inbound validation uses, which is what
     // makes FR-018's agreement structural rather than coincidental.
-    {
-        std::vector<uint16_t> parent_path;
-        if (fixpp_error_t c = validate_group_grammar(
-                acc.entries, h->dict_.get(), h->session_tv_.get(), acc.msg_type, parent_path);
-            c != FIXPP_ERR_OK) {
-            return c;
-        }
+    // fixpp#215 item 3: root context — `acc.msg_type` for the message type, an
+    // empty ancestor chain. `group_context::msg_type` aliases the accumulator's
+    // own storage here (see the provenance note on that field), which outlives
+    // this whole call.
+    if (fixpp_error_t c = validate_group_grammar(
+            acc.entries, h->dict_.get(), h->session_tv_.get(),
+            fixpp::wire::group_context{.msg_type = acc.msg_type});
+        c != FIXPP_ERR_OK) {
+        return c;
     }
 
     // First pass: compute total payload size = "35=<mt>\x01" + entries (recursive,

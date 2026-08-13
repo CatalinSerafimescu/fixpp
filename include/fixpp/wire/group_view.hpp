@@ -39,9 +39,17 @@ namespace fixpp::wire {
 // emit_messages.cpp:137) — no allocation, by-value ride-along in
 // entry_context (FR-004).
 struct group_context {
-    std::string_view msg_type{};  // aliases the MESSAGE WIRE BUFFER (data-model.md:28) — NOT
-                                   // dictionary scratch; outlives every nested entry (one-parse,
-                                   // ROOT-owned lifetime, same as entry_context::span).
+    std::string_view msg_type{};  // On the PARSE path: aliases the MESSAGE WIRE BUFFER
+                                   // (data-model.md:28) — NOT dictionary scratch; outlives every
+                                   // nested entry (one-parse, ROOT-owned lifetime, same as
+                                   // entry_context::span).
+                                   // fixpp#215 item 3 — on the C-ABI COMMIT path
+                                   // (src/capi/message_write.cpp) there is no wire buffer yet, so it
+                                   // aliases the outbound accumulator's own msg_type storage
+                                   // instead. The CONTRACT is unchanged and is what both provenances
+                                   // satisfy: the referent is owned by the root of the walk and
+                                   // outlives every nested descent below it. Never point this at a
+                                   // temporary or at per-instance scratch.
     std::array<std::uint16_t, 16> parent_path{};  // bounded parent-no_tag chain
     std::uint8_t depth = 0;                       // valid prefix length of parent_path
 

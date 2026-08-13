@@ -140,4 +140,85 @@ make_validation_test_dictionary() {
         }};
 }
 
+// fixpp#215 item 1 (Option C, `.specify/215-dictionary-view.md` §6 seam 1) —
+// SIBLING of kValidationTestFix42Xml, separately loaded, sharing the same
+// `<fix major="4" minor="2">` (so which_session_version() is EQUAL between
+// the two — the discriminating property this seam requires) and disagreeing
+// on exactly one rule: OrderQty(38) on NewOrderSingle is required="Y" here,
+// vs required="N" above.
+constexpr std::string_view kValidationTestFix42XmlRequiredOrderQty = R"xml(
+<fix major="4" minor="2">
+  <header>
+    <field number="8"  name="BeginString"  required="Y"/>
+    <field number="9"  name="BodyLength"   required="Y"/>
+    <field number="35" name="MsgType"      required="Y"/>
+    <field number="49" name="SenderCompID" required="Y"/>
+    <field number="56" name="TargetCompID" required="Y"/>
+    <field number="34" name="MsgSeqNum"    required="Y"/>
+    <field number="52" name="SendingTime"  required="Y"/>
+  </header>
+  <trailer>
+    <field number="10" name="CheckSum" required="Y"/>
+  </trailer>
+  <messages>
+    <message name="Heartbeat" msgtype="0" msgcat="admin">
+      <field number="112" name="TestReqID" required="N"/>
+    </message>
+    <message name="Logon" msgtype="A" msgcat="admin">
+      <field number="98"  name="EncryptMethod" required="Y"/>
+      <field number="108" name="HeartBtInt"    required="Y"/>
+    </message>
+    <message name="NewOrderSingle" msgtype="D" msgcat="app">
+      <field number="11"  name="ClOrdID"      required="Y"/>
+      <field number="54"  name="Side"         required="Y"/>
+      <field number="60"  name="TransactTime" required="Y"/>
+      <field number="38"  name="OrderQty"     required="Y"/>
+      <field number="44"  name="Price"        required="N"/>
+    </message>
+  </messages>
+  <fields>
+    <field number="8"   name="BeginString"  type="STRING"/>
+    <field number="9"   name="BodyLength"   type="INT"/>
+    <field number="10"  name="CheckSum"     type="STRING"/>
+    <field number="11"  name="ClOrdID"      type="STRING"/>
+    <field number="34"  name="MsgSeqNum"    type="INT"/>
+    <field number="35"  name="MsgType"      type="STRING"/>
+    <field number="38"  name="OrderQty"     type="INT"/>
+    <field number="44"  name="Price"        type="PRICE"/>
+    <field number="49"  name="SenderCompID" type="STRING"/>
+    <field number="52"  name="SendingTime"  type="UTCTIMESTAMP"/>
+    <field number="54"  name="Side"         type="CHAR"/>
+    <field number="56"  name="TargetCompID" type="STRING"/>
+    <field number="60"  name="TransactTime" type="UTCTIMESTAMP"/>
+    <field number="98"  name="EncryptMethod" type="INT"/>
+    <field number="108" name="HeartBtInt"   type="INT"/>
+    <field number="112" name="TestReqID"    type="STRING"/>
+  </fields>
+</fix>
+)xml";
+
+/// Sibling of make_validation_test_dictionary(): SEPARATELY loaded (a
+/// distinct Dictionary object — provenance identity in seam 1 is pointer
+/// equality, so this must never be the same shared_ptr as the other
+/// factory's), disagreeing on exactly one rule (OrderQty(38) required on
+/// NewOrderSingle).
+[[nodiscard]] inline std::shared_ptr<const fixpp::dict::Dictionary>
+make_validation_test_dictionary_required_order_qty() {
+    constexpr std::size_t kBufSize = 128u * 1024u;
+    auto buf = std::make_unique<std::array<std::byte, kBufSize>>();
+    auto* mr = new std::pmr::monotonic_buffer_resource{buf->data(), buf->size()};
+
+    fixpp::dict::Dictionary d = fixpp::dict::XmlLoader{}.load_from_string(
+        kValidationTestFix42XmlRequiredOrderQty, mr);
+
+    auto* raw_dict = new fixpp::dict::Dictionary{std::move(d)};
+    auto* raw_buf = buf.release();
+    return std::shared_ptr<const fixpp::dict::Dictionary>{
+        raw_dict, [mr, raw_buf](const fixpp::dict::Dictionary* p) {
+            delete p;
+            delete mr;
+            delete raw_buf;
+        }};
+}
+
 }  // namespace fixpp::test_support

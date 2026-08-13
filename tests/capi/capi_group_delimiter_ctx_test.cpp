@@ -92,6 +92,8 @@ constexpr std::string_view kDivergentNestedXml = R"xml(
     <field number="500" name="NoInner"      type="NUMINGROUP"/>
     <field number="501" name="InnerX"       type="STRING"/>
     <field number="502" name="InnerY"       type="STRING"/>
+    <field number="600" name="NoExtra"      type="NUMINGROUP"/>
+    <field number="601" name="ExtraA"       type="STRING"/>
   </fields>
   <messages>
     <message name="Heartbeat" msgtype="0" msgcat="admin">
@@ -115,6 +117,15 @@ constexpr std::string_view kDivergentNestedXml = R"xml(
           <field name="InnerY" required="N"/>
           <field name="InnerX" required="N"/>
         </group>
+      </group>
+    </message>
+    <!-- Gate B r1 C7 — MsgF declares NoExtra(600) only at its OWN root, never
+         nested under NoWrap(400). Its bare delimiter (601) still resolves
+         globally (Dictionary::group_first_field), so group_begin admits it
+         anywhere; only the exact ("D", [400], 600) context is unregistered. -->
+    <message name="MsgF" msgtype="F" msgcat="app">
+      <group name="NoExtra" required="N">
+        <field name="ExtraA" required="N"/>
       </group>
     </message>
   </messages>
@@ -340,6 +351,144 @@ TEST(CapiGroupDelimiterCtx, CommitDoesNotRebuildTableViewPerMessage) {
         << " group-bearing messages must add ZERO as_table_view() calls. A per-message rebuild "
            "would be a constitution violation, not merely a slow path — and it is invisible to "
            "every functional assertion, which is why this counter exists.";
+    fixpp_engine_destroy(f.eng);
+}
+
+// ============================================================================
+// fixpp#215 item 1 / `.specify/215-dictionary-view.md` §5b — the public C ABI
+// must ALIAS the config snapshot's control block into fixpp_session::tv_, not
+// copy the table_view into a fresh shared_ptr control block.
+// ============================================================================
+TEST(CapiGroupDelimiterCtx, SessionHandleAliasesDictionarySnapshotControlBlock) {
+    auto f = open_session(make_cfg_with_dict(kDivergentNestedXml, "ALIA", "ALIB"));
+
+    auto* sess = f.sess;
+    ASSERT_NE(sess, nullptr);
+    EXPECT_GT(sess->tv_.use_count(), 1L)
+        << "§5b: fixpp_session::tv_ must ALIAS the config's snapshot (shared_dictionary_view), "
+           "not copy the table_view. A copy has its own control block and reads exactly 1.";
+
+    fixpp_engine_destroy(f.eng);
+}
+
+// ============================================================================
+// fixpp#215 item 2 — a CONTEXT MISS at the commit path fails CLOSED.
+//
+// 083 T052 states that this site "must NEVER fall back to the bare global
+// `dict->group_first_field(e.tag)`", because a fallback "would let the builder
+// accept an order inbound validation rejects". It enforced that by not WRITING
+// a bare call — but the 3-arg `table_view::group_first_field` it did call
+// applies that same fallback INTERNALLY on a context miss (L-063-3), so the
+// rule was stated and not enforced. `group_first_field_exact` reports the miss;
+// the miss now joins `tv == nullptr` on TYPE_MISMATCH.
+//
+// REACHABLE WITHOUT A DICTIONARY BUG — which is why this witness exists rather
+// than a "not reachable" note. Nothing on the way here checks the group against
+// the MESSAGE's grammar:
+//   * fixpp_msg_group_begin gates on the BARE store
+//     (`dict_->group_first_field(group_tag) == 0`, message_write.cpp), so NoWrap
+//     (400) is accepted on ANY msg_type because it is a group SOMEWHERE.
+//   * entry_set_bytes_impl runs no check_dict at all — only framing-tag and
+//     group-collision checks — so WrapA(401) goes in unchallenged.
+// Heartbeat ("0") declares NO group in this fixture, so ("0", [], 400) has no
+// context record while the bare store still answers 401.
+//
+// PRE-FIX BEHAVIOUR (what makes this a witness and not a tautology): the bare
+// fallback resolved 400 -> 401, the instance below opens with exactly 401, so
+// the delimiter check PASSED and this committed FIXPP_ERR_OK — a group the
+// Heartbeat grammar does not declare, serialised onto the wire, which inbound
+// validation rejects. That is precisely the FR-018 construction-vs-validation
+// disagreement 083 exists to close.
+// ============================================================================
+TEST(CapiGroupDelimiterCtx, CommitFailsClosedOnAContextMissRatherThanUsingTheBareStore) {
+    auto f = open_session(make_cfg_with_dict(kDivergentNestedXml, "MISSA", "MISSB"));
+
+    fixpp_msg_t* msg = nullptr;
+    ASSERT_EQ(fixpp_msg_create_outbound(f.sess, "0", 1, &msg), FIXPP_ERR_OK)
+        << "Heartbeat is declared in this dictionary, so the handle must be creatable — the "
+           "rejection under test must come from the COMMIT, not from message creation.";
+
+    fixpp_group_builder_t* outer = nullptr;
+    ASSERT_EQ(fixpp_msg_group_begin(msg, 400, &outer), FIXPP_ERR_OK)
+        << "group_begin gates on the BARE store, so it accepts 400 on a message that does not "
+           "declare it. If this ever starts rejecting, the miss becomes unreachable from here "
+           "and this witness must be re-pointed rather than deleted.";
+    fixpp_entry_t* oe = nullptr;
+    ASSERT_EQ(fixpp_group_builder_add_entry(outer, &oe), FIXPP_ERR_OK);
+    // 401 is exactly what the bare store resolves for 400 — so a fallback would
+    // find the instance well-formed. The commit must reject on the MISS itself,
+    // not on a delimiter mismatch.
+    ASSERT_EQ(fixpp_entry_set_string(oe, 401, "W", 1), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_msg_group_end(msg, outer), FIXPP_ERR_OK);
+
+    const uint8_t* out = nullptr;
+    std::size_t len = 0;
+    EXPECT_EQ(fixpp_msg_commit(msg, &out, &len), FIXPP_ERR_TYPE_MISMATCH)
+        << "fixpp#215 item 2: (\"0\", [], 400) has no context record, so the delimiter is "
+           "UNKNOWN in this message's grammar. Resolving it from the bare global store instead "
+           "is the fallback 083 T052 forbids; the commit must fail closed.";
+    fixpp_msg_destroy(msg);
+    fixpp_engine_destroy(f.eng);
+}
+
+// ============================================================================
+// fixpp Gate B (PR #262 round 1), C7 — the WRONG-ANCESTOR axis of B-215-1's
+// context miss. The sibling witness above covers a group opened on a message
+// type that declares no group at all; this one covers a group the message
+// DOES have another (correctly-nested) group under, but the SECOND group is
+// opened at a nesting location the message never declares it at.
+//
+// MsgD declares NoWrap(400){WrapA(401), NoInner(500){...}} — so opening
+// NoWrap(400) at the root IS a declared context: ("D", [], 400) resolves.
+// MsgF separately declares NoExtra(600){ExtraA(601)} at ITS OWN root — so
+// 600's bare/global delimiter (601) resolves via `group_first_field`, and
+// `fixpp_entry_group_begin` (which gates on that SAME bare store, exactly
+// like `fixpp_msg_group_begin`) admits opening 600 nested inside NoWrap's
+// entry. But ("D", [400], 600) has no context record — MsgD never declares
+// NoExtra anywhere, let alone nested under NoWrap — so this is a genuine
+// wrong-ancestor miss, not a message-type miss.
+//
+// PRE-FIX BEHAVIOUR (what makes this a witness, not a tautology): the bare
+// fallback resolves 600 -> 601, the instance below opens with exactly 601,
+// so the delimiter check PASSED and this committed FIXPP_ERR_OK.
+// ============================================================================
+TEST(CapiGroupDelimiterCtx, CommitFailsClosedOnAWrongAncestorContextMiss) {
+    auto f = open_session(make_cfg_with_dict(kDivergentNestedXml, "ANCA", "ANCB"));
+
+    fixpp_msg_t* msg = nullptr;
+    ASSERT_EQ(fixpp_msg_create_outbound(f.sess, "D", 1, &msg), FIXPP_ERR_OK);
+
+    fixpp_group_builder_t* outer = nullptr;
+    ASSERT_EQ(fixpp_msg_group_begin(msg, 400, &outer), FIXPP_ERR_OK)
+        << "NoWrap(400) at the root IS declared for MsgD — the rejection under test must come "
+           "from the NESTED group, not from opening the outer one.";
+    fixpp_entry_t* oe = nullptr;
+    ASSERT_EQ(fixpp_group_builder_add_entry(outer, &oe), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_entry_set_string(oe, 401, "W", 1), FIXPP_ERR_OK);
+
+    fixpp_group_builder_t* inner = nullptr;
+    ASSERT_EQ(fixpp_entry_group_begin(oe, 600, &inner), FIXPP_ERR_OK)
+        << "entry_group_begin gates on the SAME bare store as msg_group_begin, so it accepts 600 "
+           "nested under NoWrap even though MsgD never declares NoExtra there. If this ever "
+           "starts rejecting, the miss becomes unreachable from here and this witness must be "
+           "re-pointed rather than deleted.";
+    fixpp_entry_t* ie = nullptr;
+    ASSERT_EQ(fixpp_group_builder_add_entry(inner, &ie), FIXPP_ERR_OK);
+    // 601 is exactly what the bare store resolves for 600 — so a fallback would
+    // find the instance well-formed. The commit must reject on the MISS itself,
+    // not on a delimiter mismatch.
+    ASSERT_EQ(fixpp_entry_set_string(ie, 601, "Z", 1), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_msg_group_end(msg, inner), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_msg_group_end(msg, outer), FIXPP_ERR_OK);
+
+    const uint8_t* out = nullptr;
+    std::size_t len = 0;
+    EXPECT_EQ(fixpp_msg_commit(msg, &out, &len), FIXPP_ERR_TYPE_MISMATCH)
+        << "fixpp Gate B r1 C7: (\"D\", [400], 600) has no context record — MsgD never declares "
+           "NoExtra nested under NoWrap. Resolving it from the bare global store instead is the "
+           "fallback 083 T052 forbids; the commit must fail closed on the wrong-ancestor axis "
+           "exactly as it does on the message-type axis.";
+    fixpp_msg_destroy(msg);
     fixpp_engine_destroy(f.eng);
 }
 

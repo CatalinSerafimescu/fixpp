@@ -1751,6 +1751,9 @@ jobs:
       - name: Run C-ABI reentrancy gate (FR-014)
         run: bash tools/check_capi_reentrancy.sh
 
+      - name: Run dictionary snapshot exclusivity gate
+        run: bash tools/check_dictionary_snapshot_exclusivity.sh
+
   # ── Benchmarks (SOFT — exit 0 always; Phase 3) ──────────────────────────
   # SOFT GATE: perf regression gate is disabled until Phase 4 module 1 closes
   # per [const §VIII.2] and the deliverables note in Step 4.

@@ -192,4 +192,42 @@ static void BM_TableView_BuildFix42(benchmark::State& state) {
 }
 BENCHMARK(BM_TableView_BuildFix42)->Unit(benchmark::kMicrosecond);
 
+// fixpp#215 Gate B r1 C6 — copy-vs-walk. Item 1 turned the C++ Session,
+// validation-ON path from "2 walks" into "1 walk + 1 table_view copy": the
+// strict validator still holds its own table_view BY VALUE (SC-007, no
+// virtual edge — L-215-2), so it is now copy-constructed from the view
+// open() already resolved instead of re-derived from the Dictionary. These
+// two benchmarks settle whether that copy is actually cheaper than the
+// second as_table_view() walk it replaces, on the same two dictionaries and
+// with the same ->Unit(kMicrosecond) as BM_TableView_BuildFix50SP2/Fix44
+// above, so the numbers are directly comparable. See table_view.hpp's
+// public copy ctor (defaulted; duplicates the owned unordered maps/vectors/
+// strings/enum-domain table/context keys).
+// -----------------------------------------------------------------------
+static void BM_TableView_CopyFix50SP2(benchmark::State& state) {
+    auto const path = dict_path("FIX50SP2.xml");
+    std::array<std::byte, 4u * 1024u * 1024u> buffer{};
+    std::pmr::monotonic_buffer_resource mr{buffer.data(), buffer.size()};
+    auto const dictionary = fixpp::dict::XmlLoader{}.load(path, &mr);
+    auto const tv = dictionary.as_table_view();  // built ONCE, outside the timed loop
+    for (auto _ : state) {
+        auto copy = tv;
+        benchmark::DoNotOptimize(copy);
+    }
+}
+BENCHMARK(BM_TableView_CopyFix50SP2)->Unit(benchmark::kMicrosecond);
+
+static void BM_TableView_CopyFix44(benchmark::State& state) {
+    auto const path = dict_path("FIX44.xml");
+    std::array<std::byte, 4u * 1024u * 1024u> buffer{};
+    std::pmr::monotonic_buffer_resource mr{buffer.data(), buffer.size()};
+    auto const dictionary = fixpp::dict::XmlLoader{}.load(path, &mr);
+    auto const tv = dictionary.as_table_view();  // built ONCE, outside the timed loop
+    for (auto _ : state) {
+        auto copy = tv;
+        benchmark::DoNotOptimize(copy);
+    }
+}
+BENCHMARK(BM_TableView_CopyFix44)->Unit(benchmark::kMicrosecond);
+
 BENCHMARK_MAIN();
