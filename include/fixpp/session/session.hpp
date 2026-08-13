@@ -806,13 +806,14 @@ private:
     // satisfies this at least as strongly as the former std::optional member did
     // (the address is now independent of the Session object itself).
     //
-    // fixpp#215 item 1 — shared_ptr, not std::optional-by-value: the view is
-    // built by whoever gets there FIRST and then SHARED, instead of every
-    // consumer walking the same Dictionary again. open() takes
-    // cfg_.dictionary_view when the config supplies one (the C-ABI path, which
-    // needs the same view for its outbound commit path) and otherwise builds one
-    // itself. Either way the Session owns a strong reference for its whole
-    // lifetime, so the pointee outlives every Parser built over it.
+    // fixpp#215 item 1 (Option C) — shared_ptr, not std::optional-by-value: the
+    // view is built by whoever gets there FIRST and then SHARED, instead of
+    // every consumer walking the same Dictionary again. open() adopts
+    // cfg_.dict_snapshot's view (via fixpp::dict::shared_dictionary_view) when
+    // the config supplies one (the C-ABI path, which needs the same view for
+    // its outbound commit path) and otherwise builds one itself. Either way the
+    // Session owns a strong reference for its whole lifetime, so the pointee
+    // outlives every Parser built over it.
     //
     // Invariant: open() hard-fails (invalid_session_config) when
     // cfg_.dictionary is null, BEFORE this member is built — so

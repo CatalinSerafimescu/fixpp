@@ -39,6 +39,7 @@ add_executable(dictionary_pure_tests
   collision_membership_guards_test.cpp
   test_072_delimiter_guard_test.cpp  # 072 US1: load-time nested==parent delimiter guard witness
   oom_injection_test.cpp          # local failing_pmr_resource seam — no global state
+  dictionary_snapshot_test.cpp    # fixpp#215 item 1 (Option C): A1-A5 boundary pins + seam 4 alias identity
 )
 target_link_libraries(dictionary_pure_tests PRIVATE
   fixpp_dictionary

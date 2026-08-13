@@ -41,7 +41,7 @@ class Clock;
 namespace fixpp::dict {
 class Dictionary;
 class DialectOverlay;
-class table_view;  // fixpp#215 item 1 — shared_ptr member ⇒ fwd-decl suffices
+class dictionary_snapshot;  // fixpp#215 item 1 (Option C) — shared_ptr member ⇒ fwd-decl suffices
 }  // namespace fixpp::dict
 namespace fixpp::tls {
 class cert_source;
@@ -188,7 +188,8 @@ struct SessionConfig {
     std::shared_ptr<const fixpp::dict::Dictionary> dictionary;           // required
     std::shared_ptr<const fixpp::dict::DialectOverlay> dialect_overlay;  // optional
 
-    // fixpp#215 item 1 — OPTIONAL pre-built view of `dictionary`.
+    // fixpp#215 item 1 (Option C, `.specify/215-dictionary-view.md` §3/§5a) —
+    // OPTIONAL pre-built snapshot of `dictionary`.
     //
     // `Dictionary::as_table_view()` has no cache: every call is a full walk of
     // every message, group and field, and since 083 it also builds the
@@ -199,17 +200,18 @@ struct SessionConfig {
     // unaffected.
     //
     // The C-ABI is the only producer today: `fixpp_session_open` needs its own
-    // `fixpp_session::tv_` for the outbound commit path, so it builds ONE view
-    // and passes that same object here.
+    // `fixpp_session::tv_` for the outbound commit path, so it mints ONE
+    // snapshot via `fixpp::dict::make_dictionary_snapshot` and passes it here.
     //
-    // DERIVATION REQUIREMENT (caller-side, not enforceable here): when non-null
-    // this MUST be `dictionary->as_table_view()` — a view of THE dictionary in
-    // the field above, not of some other one. `table_view` carries no identity
-    // token back to its source Dictionary, so a view built from a DIFFERENT
-    // dictionary cannot be detected and would silently drive inbound parsing and
-    // validation from the wrong grammar. Derive it from `dictionary` at the
-    // point you set it; never copy this field across configs.
-    std::shared_ptr<const fixpp::dict::table_view> dictionary_view;  // null → open() builds one
+    // PROVENANCE: `open()` rejects (fail-closed, `error::invalid_session_config`)
+    // when `dict_snapshot->source()` is not pointer-identical to `dictionary`
+    // above — see `Session::open()`. Unlike the retired `dictionary_view`
+    // field, a mismatched pair is now detected rather than silently driving the
+    // wrong grammar. `make_dictionary_snapshot` is the sole minter of a
+    // snapshot; the type cannot be copied, moved, or value-constructed, so the
+    // only way to seat a view here is to derive it from `dictionary` through
+    // that factory.
+    std::shared_ptr<const fixpp::dict::dictionary_snapshot> dict_snapshot;  // null → open() builds one
 
     std::optional<std::chrono::seconds> heartbeat_interval;           // value owned by 005
     std::optional<std::chrono::milliseconds> test_request_threshold;  // value owned by 005

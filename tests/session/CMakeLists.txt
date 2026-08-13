@@ -2116,11 +2116,13 @@ set_tests_properties(session_validate_gate_inbound PROPERTIES
   LABELS "041;t012;t014;validation-gate;inbound;foundational")
 
 # ── fixpp#215 item 1 — one as_table_view() walk per opened session ───────────
-# W1: open() with no config-supplied view walks the Dictionary exactly ONCE
+# W1: open() with no config-supplied snapshot walks the Dictionary exactly ONCE
 #     (was 2: inbound_tv_ + the strict validator, independently).
-# W2: open() with SessionConfig::dictionary_view set walks it ZERO times and
-#     adopts THAT object (use_count) — the C-ABI's half of the fix.
-# W3: the adopted view is wired into the parser and validator, not just stored.
+# W2: open() with SessionConfig::dict_snapshot set walks it ZERO times and
+#     adopts an aliased view of THAT snapshot (use_count) — the C-ABI's half of
+#     the fix.
+# W3: the adopted view is wired into the parser and validator (group-bearing
+#     frame — Gate B triage C5), not just stored.
 # Instrument is 083 T049's W-11a counter, which lives in the INTERNAL dictionary
 # header — the same tests -> src/dictionary include tests/capi already takes for
 # it (tests/capi/CMakeLists.txt). tools/check_layers.py scans src/** and
@@ -2129,7 +2131,24 @@ add_threading_test(session_table_view_reuse
   test_session_table_view_reuse.cpp)
 target_include_directories(session_table_view_reuse PRIVATE
   "${CMAKE_SOURCE_DIR}/src/dictionary")  # dictionary_internal.hpp (083 T049 seam)
+target_compile_definitions(session_table_view_reuse PRIVATE
+  # W3 (Gate B round-1 triage C5): the group-bearing rewrite pulls in
+  # support/fix44_dictionary.hpp + support/fix44_group_frame_bodies.hpp
+  # (transitively support/app_message_read_scaffold.hpp), which need the
+  # real FIX44.xml path.
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\"")
 set_tests_properties(session_table_view_reuse PROPERTIES
+  LABELS "fixpp215;table-view;session;validation-gate")
+
+# ── fixpp#215 item 1 (Option C) — provenance rejection/acceptance ────────────
+# .specify/215-dictionary-view.md §6 seams 1+2: a dict_snapshot whose
+# source() disagrees with cfg.dictionary must be rejected at open()
+# (invalid_session_config); the config's OWN dictionary+snapshot pairing
+# must not be refused, and the adopted view must be provably the config's
+# own (discriminating-frame check, not state()==Active alone).
+add_threading_test(session_dict_snapshot_provenance
+  test_session_dict_snapshot_provenance.cpp)
+set_tests_properties(session_dict_snapshot_provenance PROPERTIES
   LABELS "fixpp215;table-view;session;validation-gate")
 
 # ── 041-validation-gate-wiring T013 — validate-first Logon-arm ordering ──────

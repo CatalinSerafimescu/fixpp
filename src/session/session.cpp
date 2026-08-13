@@ -62,6 +62,7 @@
 #include <fixpp/transport/tls_transport.hpp>
 // 033 T006/T008: version_registry + version_profile full definitions.
 // Not in session.hpp (fwd-decl only there per [const §XV.9] closure guard).
+#include <fixpp/dict/dictionary_snapshot.hpp>  // fixpp#215 item 1 (Option C): dict_snapshot / shared_dictionary_view
 #include <fixpp/dict/version_profile.hpp>
 #include <fixpp/dict/version_registry.hpp>
 
@@ -989,19 +990,30 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
     // session later reaches parse_and_dispatch_ (both callers run post-open
     // only).
     //
-    // fixpp#215 item 1: PREFER a view the config already carries.
-    // `as_table_view()` is a full walk of every message/group/field with no
-    // cache of its own, so the C-ABI — which must build one anyway for its
-    // outbound commit path — hands that same object over in
-    // cfg_.dictionary_view rather than making this line walk the identical
-    // Dictionary a second time. Null (every non-C-ABI producer) → build one
-    // here, exactly as before. The field's derivation requirement (it must be
-    // a view OF cfg_.dictionary) is documented on SessionConfig and is the
-    // caller's to honour; nothing here can check it.
-    inbound_tv_ = cfg_.dictionary_view
-                      ? cfg_.dictionary_view
-                      : std::make_shared<const fixpp::dict::table_view>(
-                            cfg_.dictionary->as_table_view());
+    // fixpp#215 item 1 (Option C, `.specify/215-dictionary-view.md` §3): PREFER
+    // a snapshot the config already carries. `as_table_view()` is a full walk
+    // of every message/group/field with no cache of its own, so the C-ABI —
+    // which must build one anyway for its outbound commit path — hands that
+    // same snapshot over in cfg_.dict_snapshot rather than making this line
+    // walk the identical Dictionary a second time. Null (every non-C-ABI
+    // producer) → build one here, exactly as before.
+    //
+    // Provenance (C4) is REJECTED FAIL-CLOSED here, before any observable
+    // mutation (state_ = lifecycle::open happens later, at :1266): a supplied
+    // snapshot whose source() is not cfg_.dictionary would silently drive
+    // inbound parsing/validation from the wrong grammar (§2b of the design
+    // doc). shared_dictionary_view() is the sole production alias-formation
+    // site — it must be used here AND at fixpp_session_open, never a
+    // hand-rolled aliasing shared_ptr construction (§6 seam 4/G2).
+    if (cfg_.dict_snapshot) {
+        if (cfg_.dict_snapshot->source() != cfg_.dictionary) {
+            co_return std::unexpected(error::invalid_session_config);
+        }
+        inbound_tv_ = fixpp::dict::shared_dictionary_view(cfg_.dict_snapshot);
+    } else {
+        inbound_tv_ = std::make_shared<const fixpp::dict::table_view>(
+            cfg_.dictionary->as_table_view());
+    }
 
     // RC#1 (gate-b/r1): default-constructed security_profile sentinel →
     // invalid_session_config (slot 53 / N-P2-3 / [const §XII.5] / FR-018).
