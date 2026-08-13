@@ -86,6 +86,15 @@ struct DictOracle {
     // emission of the existing document-order walk below, keyed identically
     // to `group_members`.
     std::map<GroupContextKey, std::uint16_t> group_delims;
+    // 082-structural-group-detection T005/T006 (contracts/group-detection.md
+    // C1/C2): every no_tag for which a `<group>`/`<fixr:groupRef>` element was
+    // encountered while walking a message's own field run (header/trailer
+    // merged in, per-message component expansion) — i.e. C2's "registered
+    // after" column (struct-set ∩ reachable-set), populated UNCONDITIONALLY
+    // (independent of members/required=) directly inside qfix_walk/orch_walk's
+    // existing recursion, so this reproduces the reachability restriction by
+    // construction rather than by a second walker.
+    std::set<std::uint16_t> group_tags;
 };
 
 // ─────────────────────────── independent oracle (QuickFIX-XML) ────────────
@@ -153,6 +162,12 @@ inline void qfix_walk(pugi::xml_node parent, std::unordered_map<std::string, std
                                          "\"> has no matching <field> declaration");
             }
             auto const no_tag = it->second;
+            // 082 T005/T006: unconditional — this `<group>` element was
+            // reached from a message's own field run (this walk only visits
+            // header/trailer/message subtrees, so insertion here already
+            // carries the reachability restriction; independent of own_req/
+            // group_path/members, matching C1's predicate exactly).
+            oracle.group_tags.insert(no_tag);
             bool const own_req = std::string_view{child.attribute("required").as_string("N")} == "Y";
             bool const msg_final = own_req && component_and && group_path.empty();
             if (msg_final || is_header_trailer_tag(no_tag)) {
@@ -283,6 +298,9 @@ inline void orch_walk(pugi::xml_node parent, std::unordered_map<std::uint32_t, p
                                          std::to_string(gid) + "\"> missing <fixr:numInGroup>");
             }
             auto const no_tag = static_cast<std::uint16_t>(numin.attribute("id").as_uint());
+            // 082 T005/T006: unconditional reachable struct-set entry —
+            // symmetric with qfix_walk's group branch above.
+            oracle.group_tags.insert(no_tag);
             bool const own_req =
                 std::string_view{child.attribute("presence").as_string("")} == "required";
             bool const msg_final = own_req && component_and && group_path.empty();
@@ -350,6 +368,86 @@ inline DictOracle build_orchestra_oracle(std::filesystem::path const& xml_path) 
                   msg_required, oracle);
     }
     return oracle;
+}
+
+// ─────────────────────── zero-member-<group> report (T007) ────────────────
+//
+// FR-023/K11 no-regression evidence: the standing measurement behind P1-NON
+// ("no vendored dictionary declares a member-less <group>"). Literal
+// definition, matching `contracts/predicate_census.py`'s `empty_groups`
+// exactly per schema — NOT reachability-restricted (FR-023 must reject a
+// member-less <group> wherever it is declared, including inside an
+// unreferenced <component>, so this deliberately scans the WHOLE document
+// rather than reusing qfix_walk/orch_walk's reachable-subtree recursion).
+// This is a trivial element-count query with none of qfix_walk/orch_walk's
+// group_scope_and/component_and semantics, so it is not "a third walker" in
+// the 079 banner's sense — it shares no logic with the required-scope walk.
+//
+// NOLINTNEXTLINE(misc-no-recursion)
+inline void count_zero_member_groups_quickfix_walk(pugi::xml_node node, std::size_t& count) {
+    for (auto const& child : node.children()) {
+        if (std::string_view{child.name()} == "group") {
+            bool has_element_child = false;
+            for (auto const& gc : child.children()) {
+                if (gc.type() == pugi::node_element) {
+                    has_element_child = true;
+                    break;
+                }
+            }
+            if (!has_element_child) {
+                ++count;
+            }
+        }
+        count_zero_member_groups_quickfix_walk(child, count);
+    }
+}
+
+inline std::size_t count_zero_member_groups_quickfix(std::filesystem::path const& xml_path) {
+    pugi::xml_document doc;
+    auto const result = doc.load_file(xml_path.c_str());
+    if (!result) {
+        throw std::runtime_error("required_scope_oracle: failed to load " + xml_path.string());
+    }
+    std::size_t count = 0;
+    count_zero_member_groups_quickfix_walk(doc.document_element(), count);
+    return count;
+}
+
+// Orchestra: a <fixr:group> always structurally nests its own
+// <fixr:numInGroup> (the count-tag declaration), so "zero members" excludes
+// that mandatory child (and <fixr:annotation>) — mirrors
+// `predicate_census.py::census_orchestra`'s `members` computation exactly.
+//
+// NOLINTNEXTLINE(misc-no-recursion)
+inline void count_zero_member_groups_orchestra_walk(pugi::xml_node node, std::size_t& count) {
+    for (auto const& child : node.children()) {
+        if (std::string_view{child.name()} == "fixr:group") {
+            bool has_member = false;
+            for (auto const& gc : child.children()) {
+                std::string_view const gn{gc.name()};
+                if (gc.type() == pugi::node_element && gn != "fixr:numInGroup" &&
+                    gn != "fixr:annotation") {
+                    has_member = true;
+                    break;
+                }
+            }
+            if (!has_member) {
+                ++count;
+            }
+        }
+        count_zero_member_groups_orchestra_walk(child, count);
+    }
+}
+
+inline std::size_t count_zero_member_groups_orchestra(std::filesystem::path const& xml_path) {
+    pugi::xml_document doc;
+    auto const result = doc.load_file(xml_path.c_str());
+    if (!result) {
+        throw std::runtime_error("required_scope_oracle: failed to load " + xml_path.string());
+    }
+    std::size_t count = 0;
+    count_zero_member_groups_orchestra_walk(doc.document_element(), count);
+    return count;
 }
 
 // ═══════════════════════════ end of independent oracle ════════════════════

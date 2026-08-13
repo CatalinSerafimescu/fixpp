@@ -313,6 +313,18 @@ static int run_codegen_v44_official(const fs::path& out_dir) {
     return run_system(cmd);
 }
 
+// 082-structural-group-detection T037 [US2]: the v42 sibling. Single-XML like the
+// v44 runner above — each --xml/--out pair is an independent job (main.cpp's job
+// loop), so one job still emits the full v42 tier.
+static int run_codegen_v42_official(const fs::path& out_dir) {
+    std::string cmd = quote(kBin);
+    fs::path xml_path = fs::path(kDictDir) / "FIX42.xml";
+    cmd += " --xml " + quote(xml_path.string());
+    cmd += " --out " + quote(out_dir.string());
+    cmd += " --families official";
+    return run_system(cmd);
+}
+
 // 076-fix-latest-typed-codegen T017/T018: invoke the tool over ONLY the FIX
 // Latest Orchestra XML. It lives under dictionaries/orchestra/ (Codegen.cmake
 // :269), not directly under kDictDir like the 4 legacy XMLs in kXmls. Each
@@ -411,7 +423,9 @@ protected:
         // that the set was actually checked in (not just an empty <ns>/ dir).
         ASSERT_TRUE(fs::exists(kBuilderGoldenDir))
             << "078 golden dir not found: " << kBuilderGoldenDir;
-        for (auto const* ver : {"v44", "v50sp2", "vlatest"}) {
+        // 082 T036: `v42` joins the builder-bearing versions (issue #196) — its
+        // tier is emitted now that detection is structural.
+        for (auto const* ver : {"v42", "v44", "v50sp2", "vlatest"}) {
             ASSERT_TRUE(fs::exists(fs::path(kBuilderGoldenDir) / ver / "messages"))
                 << "078 golden set missing for " << ver << " under " << kBuilderGoldenDir;
         }
@@ -874,9 +888,22 @@ TEST_F(DeterminismTest, BuildersOffPathNoStaleVlatestOthersUnaffected) {
     EXPECT_TRUE(fs::exists(off_run.path / "v50sp2" / "all.hpp"))
         << "v50sp2/all.hpp missing from OFF-path job -- FR-012's gating must be vlatest-only.";
 
-    // v42 is DESCOPED independent of the FIX_LATEST option (T017/issue #196)
-    // -- confirm the OFF-path job doesn't accidentally emit it either.
-    EXPECT_FALSE(fs::exists(off_run.path / "v42" / "all.hpp"));
+    // 082-structural-group-detection T035 [US2] — issue #196: INVERTED. This read
+    // "v42 is DESCOPED independent of the FIX_LATEST option (T017/issue #196) --
+    // confirm the OFF-path job doesn't accidentally emit it either". The descope is
+    // retired (detection is structural; T035 deleted main.cpp's ns predicate), so
+    // v42 now belongs with the v44/v50sp2 assertions immediately above: its builder
+    // tier must be present on the OFF path too, because FIXPP_CODEGEN_FIX_LATEST
+    // gates **vlatest only** (FR-012 / T014 / G4a).
+    //
+    // ⚠️ This was a THIRD v42 builder-descope assertion. FR-016b names only two
+    // (`test_077_builder_no_emit.cpp`, `test_077_v42_vt11_completeness_and_c4.cpp`)
+    // and this one lives in neither — it was found only because it went RED after
+    // T035. Same shape as the #208 carve-out this feature already hit: a list of
+    // sites built by naming the obvious files misses the one filed elsewhere.
+    EXPECT_TRUE(fs::exists(off_run.path / "v42" / "all.hpp"))
+        << "v42/all.hpp missing from OFF-path job -- FR-012's gating must be vlatest-only, and "
+           "v42's builder tier is in scope as of 082.";
 }
 
 #ifdef FIXPP_CODEGEN_MAIN_VLATEST_ALL_HPP
@@ -946,6 +973,49 @@ TEST_F(DeterminismTest, OfficialModeBuildersStructuralShape) {
         << kExpectedOfficialMsgCount;
 }
 
+// ── 082-structural-group-detection T037 [US2]: the v42 official-mode STRUCTURAL
+// witness, mirroring the v44 cell above ──────────────────────────────────────
+//
+// **Deliberately NOT a golden.** 078 retired the `--families official` pinned-golden
+// convention (see the retirement rationale above: no `v44-official/` set is checked
+// in), so adding a `v42-official/` golden directory here would reintroduce a
+// convention this repo dropped on purpose. The official-mode bytes for the selected
+// subset are already pinned by V42AllModeBuildersMatchesGolden; what is NOT covered
+// by that is the per-MODE file-SET *shape* and the registry cardinality, which a
+// silently-wrong `is_official` filter would slip past. Those two are what this pins.
+//
+// Both numbers are DERIVED from `emit_builders`' own interning rule via
+// `contracts/builder_plan_census.py --families official` (T031), never transcribed
+// from a first run: 25 messages in scope, 19 distinct plans, 147 files.
+//
+// ⚠️ Plan NAMES are mode-dependent (FR-016b): a tag bare in one mode can be
+// ordinaled in the other, because `assign_plan_names()` keys on the final
+// per-`no_tag` count over the in-scope set. So this cell pins COUNTS only and must
+// never be turned into a name-set comparison against the all-mode golden.
+TEST_F(DeterminismTest, V42OfficialModeBuildersStructuralShape) {
+    TempDir run("fixpp_det_v42_official");
+    int rc = run_codegen_v42_official(run.path);
+    ASSERT_EQ(rc, 0) << "v42 official-mode codegen run failed (exit " << rc << ")";
+
+    constexpr std::size_t kExpectedV42OfficialMsgCount = 25;
+    constexpr std::size_t kExpectedV42OfficialGroupPlanCount = 19;
+    constexpr std::size_t kExpectedV42OfficialFileCount =
+        kExpectedV42OfficialMsgCount * 5 + kExpectedV42OfficialGroupPlanCount + 3;
+
+    auto const built_set = collect_builder_tier_set(run.path / "v42");
+    EXPECT_EQ(built_set.size(), kExpectedV42OfficialFileCount)
+        << "`--families official` v42 builder-tier file-set shape changed (expected "
+        << kExpectedV42OfficialMsgCount << " messages x 5 files + "
+        << kExpectedV42OfficialGroupPlanCount << " group-plan headers + 3 shared = "
+        << kExpectedV42OfficialFileCount << ", got " << built_set.size()
+        << ") -- re-derive with contracts/builder_plan_census.py, do not re-baseline";
+
+    EXPECT_EQ(parse_registry_array_size(run.path / "v42" / "all.hpp"),
+              kExpectedV42OfficialMsgCount)
+        << "`--families official` v42/all.hpp builder_registry array size != "
+        << kExpectedV42OfficialMsgCount;
+}
+
 // ── 078-precompiled-builder-libs T007/T008: checked-in-golden-SET-diff gate
 // for the three builder-bearing versions (R6/FR-010, replaces 077 T027's
 // single-file monolith diff). Boundary vs T008's run-to-run *determinism*
@@ -954,6 +1024,28 @@ TEST_F(DeterminismTest, OfficialModeBuildersStructuralShape) {
 // R6), mirroring GeneratedMatchesGolden / VlatestGeneratedMatchesGolden. The
 // v44 `official`-mode structural witness is a distinct, narrower mode gated
 // separately by OfficialModeBuildersStructuralShape above.
+
+// 082-structural-group-detection T036 [US2] — issue #196: v42's `all`-mode
+// builder-tier golden set. Without this cell the 226 files checked in under
+// golden/v42/ would be a DEAD golden — present in the repo and compared by
+// nothing, which reads as coverage while gating nothing.
+//
+// Derived, not transcribed (T031 / FR-016b): 226 files, 28 `groups/<Plan>.hpp`
+// plan headers over 17 tags, registry 39, reproducible from `emit_builders`' own
+// interning rule via `contracts/builder_plan_census.py`. The ordinal map
+// {73:3, 78:2, 146:4, 268:2, 295:3, 296:2, 420:2} accounts for exactly the
+// 28 - 17 = 11 extra plans, which is B-077-1's structural-key guarantee made
+// arithmetic: a second structural variant of a tag becomes a NEW ordinaled plan
+// rather than silently sharing the first one (T039).
+TEST_F(DeterminismTest, V42AllModeBuildersMatchesGolden) {
+    TempDir run("fixpp_det_v42_all_builders");
+    int rc = run_codegen(run.path);  // default families mode == All (39 v42 msgs)
+    ASSERT_EQ(rc, 0) << "codegen run failed (exit " << rc << ")";
+
+    expect_builder_sets_equal(run.path / "v42", fs::path(kBuilderGoldenDir) / "v42",
+                              "R6/FR-010 violated: v42 `all`-mode builder-tier set diverged from "
+                              "the checked-in golden set");
+}
 
 TEST_F(DeterminismTest, V44AllModeBuildersMatchesGolden) {
     TempDir run("fixpp_det_v44_all_builders");

@@ -6,11 +6,16 @@
 # FR-009/SC-005, T006 decision (FULL 4-artifact x 4-version, not narrowed):
 # regenerates the legacy read tier (v42/v44/v50sp2/vt11 x Fields/Messages/
 # Reify/Validator.hpp, 16 artifacts) into a temp dir via a fresh fixpp-codegen
-# invocation, then SHA256-diffs each artifact against the pre-077 T001
-# baseline. 077 touches ONLY emit_builders.cpp (+ cmake/Codegen.cmake driver
-# wiring) -- the read emitters (emit_messages.cpp / fields / validator /
-# reify) are untouched, so all 16 must be byte-identical pre/post. A
-# mismatch here is a real read-tier regression (FR-009), not noise.
+# invocation, then SHA256-diffs each artifact against its expected baseline.
+# 077 touches ONLY emit_builders.cpp (+ cmake/Codegen.cmake driver wiring) --
+# the read emitters (emit_messages.cpp / fields / validator / reify) were
+# untouched by 077, so all 16 were byte-identical pre/post at T001.
+#
+# 082-structural-group-detection (T026/T028) intentionally rebaselines TWO of
+# the 16 -- v42/Messages.hpp and v42/Reify.hpp -- to 082-approved hashes (see
+# the dedicated comment below). The other 14 remain gated against the pre-077
+# T001 baseline. A mismatch on any of the 16, against its own baseline, is a
+# real read-tier regression (FR-009), not noise.
 #
 # Baseline hashes below were captured 2026-07-16 (T001) on pre-077 HEAD
 # 455737c3 via:
@@ -53,8 +58,35 @@ endif()
 # ── Pre-077 baseline (T001, HEAD 455737c3) ─────────────────────────────────
 
 set(_expected_v42_Fields.hpp     c8bb64b1be70acdfae7e8efcfeba8c512b19910ed9987eb2a2d62257c48757e5)
-set(_expected_v42_Messages.hpp   128b334a7683dffc8757f7560c40b38943472d579e3dc63073a1f75fde7f6a85)
-set(_expected_v42_Reify.hpp      b234624461ca1be3452cf8222d3d02b6fccb9c00891ccd8e4333df4ec13f95e8)
+# ── 082-structural-group-detection T026/T028: the two v42 READ-TIER artifacts
+# below are RE-BASELINED (2026-08-12). The T001 values were correct under 077's
+# premise, stated in the banner above, that "077 touches ONLY emit_builders.cpp".
+# 082 invalidates that premise FOR v42 BY DESIGN: T025 re-points emit_messages.cpp
+# (5 sites) and emit_reify.cpp (2 sites) off `FieldRef::type == NumInGroup` onto
+# the structural `VersionIR::group_tags`, so FIX42's 18 declared repeating groups
+# become visible to the read emitters for the first time.
+#
+# Reconciled BY CONSTRUCTION, not "regenerated" (T028): the new Messages.hpp
+# carries exactly 18 `G_<tag>` group structs whose tag set is EXACTLY FR-005/K1's
+# {33,73,78,124,136,146,199,215,267,268,295,296,382,384,386,398,420,428}; the
+# message-class NAME SET is unchanged at 46 (none added, lost or renamed); 17 of
+# the 18 traded a scalar `decode_field<int32_t>(get<T>())` accessor for a group
+# accessor, and the 18th (136 NoMiscFees) is a NESTED group that never had a
+# top-level accessor to trade. Old golden had 0 `G_` structs.
+#
+# The other 14 hashes are DELIBERATELY UNTOUCHED and must stay so -- they are what
+# keeps this gate discriminating, and they are also T027's/FR-016a's assertions:
+# v42 Fields/Validator byte-identical (FieldRef::type is not modified, D-4) and all
+# 12 v44/v50sp2/vt11 artifacts byte-identical. All 14 re-verified OK at this commit.
+#
+# These two values were measured AFTER the FR-023 amendment and the Orchestra
+# diagnostic fix, and are bit-identical to a pre-amendment run -- i.e. that loader
+# change is provably codegen-neutral. `Messages.hpp`'s value below is also the
+# sha256 of the checked-in golden it corroborates (see banner): the two move as ONE
+# change unit, or `DeterminismTest.GeneratedMatchesGolden` goes red and the banner's
+# corroboration claim becomes false.
+set(_expected_v42_Messages.hpp   827a9bd0d5bf1d92d1cfd760c9b8b01bd6091d2fab456e48bc27abb49f1bc8ba)
+set(_expected_v42_Reify.hpp      4c546c831bd0863a6a43dc0e8e958de72a280b033c918792d473a4c858082b1b)
 set(_expected_v42_Validator.hpp  b5d39106b4cc81eafd32ab65998d109b3bff1ae8198920634869f5765e88f096)
 set(_expected_v44_Fields.hpp     e39f240770bc4115c80fc425da35ebb20619502fe633bb3b62dcd44322be5fcb)
 set(_expected_v44_Messages.hpp   11e7ebc293d313c91e54f67c0e9ee1a83c936cd3e6818e365a6acd48d235dddb)
@@ -89,7 +121,8 @@ if(NOT _codegen_rc EQUAL 0)
     "[T022] fixpp-codegen run failed (exit ${_codegen_rc}):\n${_codegen_out}\n${_codegen_err}")
 endif()
 
-# ── Recursive byte-diff (via SHA256) vs the T001 baseline ─────────────────
+# ── Recursive byte-diff (via SHA256) vs each artifact's own baseline: 14 vs
+# the T001 baseline, 2 v42 artifacts vs their 082-approved hashes ─────────
 
 set(_PASS_COUNT 0)
 set(_FAIL_COUNT 0)
@@ -106,6 +139,17 @@ foreach(_ns IN ITEMS v42 v44 v50sp2 vt11)
       continue()
     endif()
 
+    # 082-structural-group-detection T026/T028 rebaselined v42/Messages.hpp and
+    # v42/Reify.hpp (see the banner above) -- their "expected" hash is the
+    # 082-approved one, not the pre-077 T001 baseline every other artifact
+    # still carries. Name the right baseline in the failure text so a v42
+    # divergence is not mis-described as a T001 regression.
+    if(_ns STREQUAL "v42" AND (_artifact STREQUAL "Messages.hpp" OR _artifact STREQUAL "Reify.hpp"))
+      set(_baseline_desc "its 082-approved baseline")
+    else()
+      set(_baseline_desc "the pre-077 T001 baseline")
+    endif()
+
     file(SHA256 "${_path}" _actual)
     if(_actual STREQUAL _expected)
       math(EXPR _PASS_COUNT "${_PASS_COUNT} + 1")
@@ -113,7 +157,7 @@ foreach(_ns IN ITEMS v42 v44 v50sp2 vt11)
     else()
       math(EXPR _FAIL_COUNT "${_FAIL_COUNT} + 1")
       list(APPEND _FAIL_MSGS
-        "  FAIL: ${_ns}/${_artifact} diverged from the pre-077 T001 baseline\n"
+        "  FAIL: ${_ns}/${_artifact} diverged from ${_baseline_desc}\n"
         "        expected sha256=${_expected}\n"
         "        actual   sha256=${_actual}\n"
         "        regenerated at: ${_path}")
@@ -132,9 +176,12 @@ if(_FAIL_COUNT GREATER 0)
   endforeach()
   message(FATAL_ERROR
     "[T022] fixpp::dict::read-tier-byte-diff FAILED (${_FAIL_COUNT} artifact(s) diverged from "
-    "the pre-077 baseline -- FR-009/SC-005 violated; this is a real read-tier regression, "
-    "not test noise -- see above).")
+    "their own baseline -- the pre-077 T001 baseline for 14 artifacts, or the 082-approved "
+    "baseline for v42/Messages.hpp and v42/Reify.hpp -- FR-009/SC-005 violated; this is a real "
+    "read-tier regression, not test noise -- see above, per-artifact messages name the correct "
+    "baseline).")
 else()
   message(STATUS "[T022] fixpp::dict::read-tier-byte-diff PASSED "
-    "(all 16 legacy read-tier artifacts byte-identical to the pre-077 T001 baseline).")
+    "(14 artifacts byte-identical to the pre-077 T001 baseline; 2 intentionally-changed v42 "
+    "artifacts -- Messages.hpp, Reify.hpp -- matching their 082-approved hashes).")
 endif()

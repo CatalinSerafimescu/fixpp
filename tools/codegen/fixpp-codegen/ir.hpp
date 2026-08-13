@@ -12,6 +12,7 @@
 // per-message field/group enumeration is completed with the US1 emitters
 // (T023-T027), which extend this IR.
 #pragma once
+#include <algorithm>
 #include <cstdint>
 #include <filesystem>
 #include <fixpp/dict/field_ref.hpp>
@@ -134,12 +135,33 @@ struct VersionIR {
     // emitter's header/trailer-exclusion follow-up; supersedes the 8-tag
     // kFramingTags floor as the primary exclusion set).
     std::vector<std::uint16_t> header_trailer_tags;
+
+    // 082-structural-group-detection D-3/C1.2: the structural repeating-
+    // group-count-tag set for this version — sorted, unique union of
+    // `{e.no_tag : e ∈ m.group_order}` over every message, PLUS any
+    // <header>/<trailer> (StandardHeader/StandardTrailer)-declared group
+    // no_tags (populate_group_order/populate_orchestra_projection union
+    // those in directly — group_order's own walk is deliberately body-only,
+    // INV-2, but the read-tier emitters test membership against
+    // `m.fields`, which IS header/trailer-inclusive via
+    // `dict.message_fields()`; NoHops(627) in FIX44's/FIXT11's own
+    // <header> is the confirmed case). Every emitter discovery/branch site
+    // that used to test `FieldRef::type == NumInGroup` consults THIS set
+    // instead (D-7); `FieldRef::type` itself is not modified (D-4).
+    std::vector<std::uint16_t> group_tags;
 };
 
 // Per-message top-level fields (group_no_tag == 0), deduped by tag in
 // first-encounter order. Shared by emit_messages.cpp + emit_reify.cpp (was
 // a verbatim inline block in each); the returned pointers alias `m.fields`.
 [[nodiscard]] std::vector<FieldIR const*> collect_top_fields(MessageIR const& m);
+
+// D-3/D-7: the single membership test every emitter discovery/branch site
+// uses in place of `FieldRef::type == NumInGroup`. `ir.group_tags` is
+// sorted+unique (build_ir()), so a binary search suffices.
+[[nodiscard]] inline bool is_group_tag(VersionIR const& ir, std::uint16_t tag) noexcept {
+    return std::binary_search(ir.group_tags.begin(), ir.group_tags.end(), tag);
+}
 
 // Loads `xml_path` via XmlLoader and projects the Dictionary into VersionIR.
 // Throws dict::xml_* on malformed input (host tool — exceptions allowed,

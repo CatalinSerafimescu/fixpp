@@ -124,7 +124,8 @@ void emit_owning_group(TemplateWriter& w, std::string_view gq, std::string_view 
 }
 
 // Emit one owning_<Msg> class definition + its out-of-line method bodies.
-void emit_owning_message(TemplateWriter& w, std::string_view ns, MessageIR const& m) {
+void emit_owning_message(TemplateWriter& w, VersionIR const& ir, std::string_view ns,
+                         MessageIR const& m) {
     std::string const id = to_identifier(m.name);
     std::string const oid = "owning_" + id;
 
@@ -214,7 +215,7 @@ void emit_owning_message(TemplateWriter& w, std::string_view ns, MessageIR const
             return uniquify_accessor(used, std::move(base), tag);
         };
         for (auto const* f : top) {
-            if (f->ref.type == fixpp::dict::field_data_type::NumInGroup) {
+            if (is_group_tag(ir, f->ref.tag)) {
                 continue;
             }
             TypeKind const k = kind_of(f->ref.type);
@@ -224,7 +225,7 @@ void emit_owning_message(TemplateWriter& w, std::string_view ns, MessageIR const
             emit_owning_scalar(w, uniq(to_accessor(f->name), f->ref.tag), f->ref.tag, k);
         }
         for (auto const* f : top) {
-            if (f->ref.type != fixpp::dict::field_data_type::NumInGroup) {
+            if (!is_group_tag(ir, f->ref.tag)) {
                 continue;
             }
             std::string const acc = uniq(to_accessor(strip_no_prefix(f->name)), f->ref.tag);
@@ -396,7 +397,7 @@ std::string emit_reify(VersionIR const& ir) {
     w.line();
 
     for (auto const& m : ir.messages) {
-        emit_owning_message(w, ir.ns, m);
+        emit_owning_message(w, ir, ir.ns, m);
     }
 
     w.raw("}  // namespace fixpp::");

@@ -198,20 +198,53 @@ inline void capture_first_emission(DelimCapture* cap, std::uint16_t tag) noexcep
 // an Entity-2 record. Returns the offending `no_tag` on the first violation, or
 // 0 if the message is complete.
 //
-// The registration predicate is mirrored EXACTLY from
-// `Dictionary::as_table_view()` (`src/dictionary/dictionary.cpp:445-463`):
-// a context exists iff, on this message's deduped field run, the count tag's
-// `FieldRef.type` is `NumInGroup` AND at least one `FieldRef` has
-// `group_no_tag == no_tag` — C-3.4a's `!members.empty()` leg, which is what
-// keeps a message that merely REUSES a NumInGroup-typed tag as a plain scalar
-// from reading as a violation.
+// Gate B r1 F1 (fixpp#261 PR review, 2026-08-13) — the predicate below is
+// STRUCTURAL, matching `as_table_view()` exactly. History: 082 made
+// `as_table_view()` decide group-ness structurally (`group_first_field(t) !=
+// 0`, `dictionary.cpp:489/528/533`) while this sweep still tested
+// `fr.type == NumInGroup`, so on FIX 4.0/4.1/4.2 — whose `<group>` count
+// fields are legacy `INT`-typed — `as_table_view()` registered 4/7/18
+// contexts this sweep never examined. Closed by widening both
+// `find_context_without_delim_record()` and `find_incomplete_group_context()`
+// to take a caller-supplied, sorted `std::span<std::uint16_t const>` of
+// structural group tags, and testing SET MEMBERSHIP instead of `fr.type`.
+//
+// The set is `{tag : group_index_by_no_tag_.contains(tag) AND
+// groups_[idx].first_field_tag != 0}`, built by each loader from its OWN
+// build-time `groups_` / `group_index_by_no_tag_` — NOT from
+// `dict_metadata_handle::groups_` / `group_first_field_impl()` (the
+// handle-side table), which is not filled until `xml_loader.cpp:1157-1207` /
+// `orchestra_loader.cpp:980-1019`. That re-point was tried and reverted: at
+// sweep time the handle-side table is EMPTY, so every tag reads "not a
+// group", the sweep reports no violation, and FR-023 silently stops
+// enforcing — three `LoaderDisposition` tests went RED on that change. The
+// loader-side `groups_` table, by contrast, IS final at sweep time: both
+// loaders finish their first-seen `first_field_tag` projection immediately
+// before calling this sweep (`xml_loader.cpp:1038-1047`,
+// `orchestra_loader.cpp:881-890`), so there was never an ordering problem to
+// solve — only the wrong table being read.
+//
+// The `first_field_tag != 0` filter is load-bearing: dropping it would widen
+// the sweep past its consumer and manufacture false load rejections on the
+// declared-but-message-unreachable groups `as_table_view()` also declines to
+// register (tags 384/627 on FIX50/SP1/SP2).
+//
+// The registration predicate otherwise still mirrors `Dictionary::
+// as_table_view()`: a context exists iff, on this message's deduped field
+// run, the count tag is a structural group tag AND at least one `FieldRef`
+// has `group_no_tag == no_tag` — C-3.4a's `!members.empty()` leg, which is
+// what keeps a message that merely REUSES a group tag as a plain scalar from
+// reading as a violation.
 //
 // Enforced at `finalize()` and deliberately NOT at `as_table_view()`, which is
 // contractually non-throwing (established by 072, L-063-4) and must stay so —
 // which is what makes a consumer-side lookup miss unreachable by construction
 // rather than merely unobserved.
 [[nodiscard]] inline std::uint16_t find_context_without_delim_record(
-    std::span<FieldRef const> fields, std::span<GroupCtxDelim const> delims) noexcept {
+    std::span<FieldRef const> fields, std::span<GroupCtxDelim const> delims,
+    // Gate B r1 F1: sorted, unique structural group tags — see the doc
+    // comment above for the exact set definition and why it is loader-side.
+    std::span<std::uint16_t const> structural_group_tags) noexcept {
     // /simplify: the three scans below were each linear, making this
     // O(G²)/O(depth·G²) in groups-per-message on the largest dictionaries
     // (FIX50SP2, Orchestra). Each is replaced with the lookup structure the
@@ -226,7 +259,7 @@ inline void capture_first_emission(DelimCapture* cap, std::uint16_t tag) noexcep
     // Every tag that is some group's container — the C-3.4a "has members" test.
     std::unordered_set<std::uint16_t> has_members;
     for (auto const& fr : fields) {
-        if (fr.type == field_data_type::NumInGroup) {
+        if (std::ranges::binary_search(structural_group_tags, fr.tag)) {
             immediate_parent.emplace(fr.tag, fr.group_no_tag);
         }
         if (fr.group_no_tag != 0) {
@@ -238,7 +271,7 @@ inline void capture_first_emission(DelimCapture* cap, std::uint16_t tag) noexcep
         return it == immediate_parent.end() ? std::uint16_t{0} : it->second;
     };
     for (auto const& fr : fields) {
-        if (fr.type != field_data_type::NumInGroup) {
+        if (!std::ranges::binary_search(structural_group_tags, fr.tag)) {
             continue;
         }
         if (!has_members.contains(fr.tag)) {
@@ -546,8 +579,13 @@ inline void flush_group_ctx_delims(dict_metadata_handle& h, DelimCapture& cap) {
 // (FR-006c: `xml_parse_error` vs `orchestra_parse_error`, discriminated by
 // catch type) — that difference is the one thing that legitimately varies
 // between the two, and it stays at the call site.
+//
+// `structural_group_tags`: sorted, unique group tags, supplied by the caller
+// (each loader's own build-time `groups_` table — see the doc comment on
+// `find_context_without_delim_record` above).
 [[nodiscard]] inline std::optional<std::pair<std::size_t, std::uint16_t>>
-find_incomplete_group_context(dict_metadata_handle const& h) {
+find_incomplete_group_context(dict_metadata_handle const& h,
+                              std::span<std::uint16_t const> structural_group_tags) {
     for (std::size_t i = 0; i < h.per_msg_field_offsets_.size(); ++i) {
         auto const frun = h.per_msg_field_offsets_[i];
         auto const drun = (i < h.per_msg_group_ctx_delim_offsets_.size())
@@ -556,7 +594,8 @@ find_incomplete_group_context(dict_metadata_handle const& h) {
         auto const offender = find_context_without_delim_record(
             std::span<FieldRef const>{h.fields_.data() + frun.start, frun.count},
             std::span<GroupCtxDelim const>{h.group_ctx_delim_pool_.data() + drun.start,
-                                           drun.count});
+                                           drun.count},
+            structural_group_tags);
         if (offender != 0) {
             return std::pair{i, offender};
         }

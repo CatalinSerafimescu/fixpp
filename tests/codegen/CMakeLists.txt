@@ -211,6 +211,58 @@ add_test(NAME codegen_vlatest_manifest_class_test COMMAND codegen_vlatest_manife
 set_tests_properties(codegen_vlatest_manifest_class_test PROPERTIES
   LABELS "codegen;076;vlatest_manifest_class")
 
+# 082-structural-group-detection T029 [US1] — FR-021 / SC-004: the class-side ⟷
+# raw-XML consistency gate that reconciles v42's 0 → 18 `class G_` delta BY
+# CONSTRUCTION. Class side = text of the generated Messages.hpp; structural side =
+# required_scope_oracle.hpp's from-scratch pugixml XML walk.
+#
+# UNLIKE the vlatest sibling above, this one DOES link pugixml (the oracle needs
+# it) and DOES reach into tests/dictionary/ for that header — its non-circularity
+# claim is different and is stated in the .cpp banner. Do not "align" the two.
+#
+# The test name keeps the `codegen` token deliberately: 082 spans four tiers and a
+# name matching neither `dict` nor `codegen` falls outside every sweep regex used
+# on this branch (which is how a required_scope_census failure hid for a session).
+find_package(pugixml CONFIG REQUIRED)
+add_executable(codegen_082_class_xml_consistency_test test_082_class_xml_consistency_test.cpp)
+add_dependencies(codegen_082_class_xml_consistency_test fixpp_codegen_generate)
+target_include_directories(codegen_082_class_xml_consistency_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests/dictionary")
+target_link_libraries(codegen_082_class_xml_consistency_test PRIVATE
+  pugixml::pugixml
+  GTest::gtest
+  GTest::gtest_main
+)
+target_compile_definitions(codegen_082_class_xml_consistency_test PRIVATE
+  "FIXPP_CODEGEN_INC=\"${FIXPP_CODEGEN_OUT}\""
+  # Spelled from CMAKE_SOURCE_DIR, matching this directory's 067 sibling:
+  # `FIXPP_DICT_DATA_DIR` is a tests/dictionary-scope variable and is EMPTY here,
+  # which yielded a bare "FIX42.xml" and a loud oracle load failure.
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
+)
+add_test(NAME codegen_082_class_xml_consistency_test
+  COMMAND codegen_082_class_xml_consistency_test)
+set_tests_properties(codegen_082_class_xml_consistency_test PROPERTIES
+  LABELS "codegen;082;us1;class_xml_consistency")
+
+# 082-structural-group-detection T019/T020 [US1] RED pins: pure text-parse of
+# the shipped v42/Messages.hpp (same non-circular class-side-extraction shape
+# as codegen_vlatest_manifest_class_test above; no fixpp header, no runtime
+# Dictionary/table_view). MUST be written and observed RED BEFORE T023
+# (RED-first ordering rule, tasks.md).
+add_executable(codegen_082_v42_group_classes_test test_082_v42_group_classes_test.cpp)
+add_dependencies(codegen_082_v42_group_classes_test fixpp_codegen_generate)
+target_link_libraries(codegen_082_v42_group_classes_test PRIVATE
+  GTest::gtest
+  GTest::gtest_main
+)
+target_compile_definitions(codegen_082_v42_group_classes_test PRIVATE
+  "FIXPP_CODEGEN_V42_MESSAGES_HPP=\"${FIXPP_CODEGEN_OUT}/fixpp/v42/Messages.hpp\""
+)
+add_test(NAME codegen_082_v42_group_classes_test COMMAND codegen_082_v42_group_classes_test)
+set_tests_properties(codegen_082_v42_group_classes_test PROPERTIES
+  LABELS "codegen;082;us1")
+
 # 077-builder-args-dedup T023 [US4]: vlatest builder-completeness census.
 # Own executable, gated on FIXPP_CODEGEN_FIX_LATEST (mirrors
 # test_077_vlatest_builder_roundtrip above the tier gate at T012) —
@@ -465,7 +517,11 @@ set_tests_properties("fixpp::dict::codegen-source-staleness-check" PROPERTIES
 # 16-artifact recursive byte-diff): regenerates the legacy read tier into an
 # isolated scratch dir (NOT the shared _codegen tree -- no RUN_SERIAL/
 # RESOURCE_LOCK needed, mirrors codegen_determinism_test's TempDir pattern)
-# and SHA256-diffs all 16 artifacts against the pre-077 T001 baseline.
+# and SHA256-diffs all 16 artifacts against their own baseline: 14 against
+# the pre-077 T001 baseline, and 2 v42 artifacts (Messages.hpp, Reify.hpp),
+# rebaselined by 082-structural-group-detection T026/T028, against their
+# 082-approved hashes (see read_tier_byte_diff_test.cmake for the full
+# rationale).
 add_test(
   NAME "fixpp::dict::read-tier-byte-diff"
   COMMAND "${CMAKE_COMMAND}"
@@ -862,3 +918,29 @@ target_compile_definitions(test078_builders_hpp_removed_us4 PRIVATE
 add_test(NAME test078_builders_hpp_removed_us4 COMMAND test078_builders_hpp_removed_us4)
 set_tests_properties(test078_builders_hpp_removed_us4 PROPERTIES
   LABELS "codegen;078;us4;builders-hpp-removed")
+
+# 082-structural-group-detection T034 [US2] — FR-008 / SC-006 / K9: the 14
+# required='Y' group-omission witnesses for v42. This is the point of issue #196 —
+# a FIX 4.2 required group must be REPRESENTABLE in Args so its omission is
+# detectable rather than silent (Article VI).
+#
+# Links BOTH prebuilt v42 libs, same as tests/session/test_067_builder_validate
+# does for v44: builders for build_<Msg>, validators for validate_<Msg>.
+# `fixpp::builders::v42` / `fixpp::validators::v42` exist only because T035 added
+# v42 to Codegen.cmake's per-version builder/validator loop.
+add_executable(codegen_082_v42_required_group_omission_test
+  test_082_v42_required_group_omission_test.cpp)
+add_dependencies(codegen_082_v42_required_group_omission_test fixpp_codegen_generate)
+target_link_libraries(codegen_082_v42_required_group_omission_test PRIVATE
+  fixpp_wire
+  fixpp::builders::v42
+  fixpp::validators::v42
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(codegen_082_v42_required_group_omission_test PRIVATE
+  "${FIXPP_CODEGEN_OUT}")
+add_test(NAME codegen_082_v42_required_group_omission_test
+  COMMAND codegen_082_v42_required_group_omission_test)
+set_tests_properties(codegen_082_v42_required_group_omission_test PROPERTIES
+  LABELS "codegen;082;us2;required_group_omission")

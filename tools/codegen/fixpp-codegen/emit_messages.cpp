@@ -15,8 +15,10 @@
 //     default-constructible flyweight with the same accessor discipline +
 //     its own field_value(uint16_t) (AC-G5/AC-G6). Group structure is
 //     reconstructed from FieldRef::group_no_tag (XmlLoader sets it to the
-//     enclosing group's no_tag; 0 == top level) + type == NumInGroup (the
-//     delimiter) — the RC#5 message_fields run carries this verbatim.
+//     enclosing group's no_tag; 0 == top level) + membership in
+//     VersionIR::group_tags (082-structural-group-detection D-3; the
+//     structural group-count-tag set, not FieldRef::type) — the RC#5
+//     message_fields run carries this verbatim.
 //   * field_value(uint16_t) forwarder + view() bridge (AC-G6)
 //   * static_assert(sizeof == one pointer) (AC-G7; seam #18)
 // owning_<Msg> is forward-declared here (defined in Reify.hpp, US2/T032) so
@@ -154,8 +156,9 @@ struct GroupPlan {
 // emission order pinned by the 4 golden headers (ctest -R determinism).
 // Recursion depth is bounded by kMaxGroupDepth (16) — stack overflow excluded.
 // NOLINTNEXTLINE(misc-no-recursion)
-void plan_dfs(std::uint16_t g, MemberMap const& mm, std::unordered_set<std::uint16_t>& onpath,
-              std::unordered_set<std::uint16_t>& done, GroupPlan& gp, int depth) {
+void plan_dfs(VersionIR const& ir, std::uint16_t g, MemberMap const& mm,
+              std::unordered_set<std::uint16_t>& onpath, std::unordered_set<std::uint16_t>& done,
+              GroupPlan& gp, int depth) {
     if (done.contains(g)) {
         return;
     }
@@ -163,14 +166,14 @@ void plan_dfs(std::uint16_t g, MemberMap const& mm, std::unordered_set<std::uint
     auto const it = mm.find(g);
     if (it != mm.end()) {
         for (auto const* f : it->second) {
-            if (f->ref.type != fixpp::dict::field_data_type::NumInGroup) {
+            if (!is_group_tag(ir, f->ref.tag)) {
                 continue;
             }
             std::uint16_t const c = f->ref.tag;
             if (depth + 1 >= kMaxGroupDepth || onpath.contains(c)) {
                 continue;
             }
-            plan_dfs(c, mm, onpath, done, gp, depth + 1);  // NOLINT(misc-no-recursion)
+            plan_dfs(ir, c, mm, onpath, done, gp, depth + 1);  // NOLINT(misc-no-recursion)
             gp.kids[g].push_back(c);
         }
     }
@@ -199,8 +202,8 @@ FieldIR const* find_member(MemberMap const& mm, std::uint16_t no_tag, std::uint1
 // Emit one nested repeating-group flyweight class `G_<no_tag>`. Sub-group
 // classes it references (gp.kids[no_tag]) are already defined earlier in
 // gp.order, so referencing them by sibling name is well-formed.
-void emit_group_class(TemplateWriter& w, MemberMap const& mm, GroupPlan const& gp,
-                      std::uint16_t no_tag) {
+void emit_group_class(TemplateWriter& w, VersionIR const& ir, MemberMap const& mm,
+                      GroupPlan const& gp, std::uint16_t no_tag) {
     std::string const cls = group_cls(no_tag);
     w.raw("    class ");
     w.raw(cls);
@@ -231,7 +234,7 @@ void emit_group_class(TemplateWriter& w, MemberMap const& mm, GroupPlan const& g
     auto const it = mm.find(no_tag);
     if (it != mm.end()) {
         for (auto const* f : it->second) {
-            if (f->ref.type == fixpp::dict::field_data_type::NumInGroup) {
+            if (is_group_tag(ir, f->ref.tag)) {
                 continue;
             }
             TypeKind const k = kind_of(f->ref.type);
@@ -297,7 +300,7 @@ void emit_group_class(TemplateWriter& w, MemberMap const& mm, GroupPlan const& g
     w.line("    };");
 }
 
-void emit_message(TemplateWriter& w, std::string_view ns, MessageIR const& m) {
+void emit_message(TemplateWriter& w, VersionIR const& ir, std::string_view ns, MessageIR const& m) {
     std::string const id = to_identifier(m.name);
     w.raw("class ");
     w.raw(id);
@@ -334,7 +337,7 @@ void emit_message(TemplateWriter& w, std::string_view ns, MessageIR const& m) {
     gq += "::groups::";
 
     for (auto const* f : top) {
-        if (f->ref.type == fixpp::dict::field_data_type::NumInGroup) {
+        if (is_group_tag(ir, f->ref.tag)) {
             continue;
         }
         TypeKind const k = kind_of(f->ref.type);
@@ -344,7 +347,7 @@ void emit_message(TemplateWriter& w, std::string_view ns, MessageIR const& m) {
         emit_scalar(w, uniq(to_accessor(f->name), f->ref.tag), f->ref.tag, k, false);
     }
     for (auto const* f : top) {
-        if (f->ref.type != fixpp::dict::field_data_type::NumInGroup) {
+        if (!is_group_tag(ir, f->ref.tag)) {
             continue;
         }
         w.raw("    [[nodiscard]] inline ::fixpp::wire::group_view<");
@@ -422,8 +425,7 @@ std::string emit_messages(VersionIR const& ir) {
         std::unordered_set<std::uint16_t> gseen;
         for (auto const& m : ir.messages) {
             for (auto const& f : m.fields) {
-                if (f.ref.type == fixpp::dict::field_data_type::NumInGroup &&
-                    gseen.insert(f.ref.tag).second) {
+                if (is_group_tag(ir, f.ref.tag) && gseen.insert(f.ref.tag).second) {
                     group_tags.push_back(f.ref.tag);
                 }
             }
@@ -434,7 +436,7 @@ std::string emit_messages(VersionIR const& ir) {
         std::unordered_set<std::uint16_t> onpath;
         std::unordered_set<std::uint16_t> done;
         for (std::uint16_t const gt : group_tags) {
-            plan_dfs(gt, gmm, onpath, done, gp, 0);
+            plan_dfs(ir, gt, gmm, onpath, done, gp, 0);
         }
     }
     w.raw("namespace fixpp::");
@@ -442,7 +444,7 @@ std::string emit_messages(VersionIR const& ir) {
     w.line("::groups {  // shared repeating-group flyweights (AC-G5/AC-G6)");
     w.line();
     for (std::uint16_t const g : gp.order) {
-        emit_group_class(w, gmm, gp, g);
+        emit_group_class(w, ir, gmm, gp, g);
     }
     w.line();
     w.raw("}  // namespace fixpp::");
@@ -464,7 +466,7 @@ std::string emit_messages(VersionIR const& ir) {
     }
     w.line();
     for (auto const& m : ir.messages) {
-        emit_message(w, ir.ns, m);
+        emit_message(w, ir, ir.ns, m);
     }
     w.raw("}  // namespace fixpp::");
     w.line(ir.ns);

@@ -625,6 +625,20 @@ void LoaderState::expand_field_list(
             if (greq && group_scope_component_required && enclosing_group_no_tag != 0) {
                 group_required_pairs_out.emplace_back(enclosing_group_no_tag, no_tag);
             }
+            // FR-023 (082) is NOT implemented here. It is satisfied by 083's
+            // T036 `captured == 0` disposition below (:704-737), which rejects
+            // the same input class — a member-less <group> emits no first
+            // member — and does so with the policy layering FR-023 owes:
+            // fail-closed by default, skipped under the explicit
+            // `unresolved_group_policy::tolerant` opt-in (083 FR-006a/FR-023a),
+            // and structurally exempt when the group contributes zero contexts
+            // (083 FR-006d — that branch only runs under a non-null
+            // `delim_cap`, i.e. inside message-scoped expansion).
+            //
+            // A literal-definition scan HERE was tried and removed: it threw
+            // unconditionally, so it overrode BOTH of those dispositions and
+            // took four of 083's `LoaderDisposition` pins RED. See
+            // implementation-notes.md § RESUMED 2026-08-11 and spec.md FR-023.
             // Record the GroupRef (deduplicated by no_tag — first-seen wins).
             if (!group_index_by_no_tag_.contains(no_tag)) {
                 GroupDef gd{};
@@ -1048,8 +1062,25 @@ detail::dict_metadata_handle_ptr LoaderState::finalize() {
     // `captured == 0` means no FieldRef was emitted at that group's level, so
     // no FieldRef carries its `group_no_tag`, so the `!members.empty()` leg
     // excludes it from the registered set in the first place.
+    //
+    // Gate B r1 F1: the sweep's candidate source is now STRUCTURAL, matching
+    // `as_table_view()` (`group_first_field(t) != 0`) rather than
+    // `fr.type == NumInGroup` — this loader-side `groups_` table IS final at
+    // this point (the first-seen projection above just completed), unlike the
+    // handle-side `h.groups_`, which is not filled until :1157-1207. See the
+    // doc comment on `find_context_without_delim_record`
+    // (dictionary_internal.hpp) for the exact set definition.
+    std::vector<std::uint16_t> structural_group_tags;
+    structural_group_tags.reserve(group_index_by_no_tag_.size());
+    for (auto const& [tag, idx] : group_index_by_no_tag_) {
+        if (groups_[idx].first_field_tag != 0) {
+            structural_group_tags.push_back(tag);
+        }
+    }
+    std::ranges::sort(structural_group_tags);
+
     detail::maybe_drop_first_group_ctx_delim_run_for_testing(h);  // Gate B r1 F1 test seam
-    if (auto const bad = detail::find_incomplete_group_context(h); bad) {
+    if (auto const bad = detail::find_incomplete_group_context(h, structural_group_tags); bad) {
         throw xml_parse_error("dict::xml_parse_error: group context for NumInGroup tag " +
                               std::to_string(bad->second) + " in message '" +
                               std::string{messages_[bad->first].msg_type} +

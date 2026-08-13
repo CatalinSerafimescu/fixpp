@@ -14,8 +14,14 @@
 // `<group name='NoLegs' required='N'>` (field 555, NUMINGROUP,
 // dictionaries/FIX44.xml:5561) containing the `InstrumentLeg` component
 // (LegSymbol=600, LegSide=624, LegQty=687, ... dictionaries/FIX44.xml:2436+)
-// — a real dict-registered group on a real app message, per the FIX43/
-// FIX44/FIX50/FIX50SP1/FIX50SP2/FIXT.1.1 group-registering scope (L-063-1).
+// — a real dict-registered group on a real app message. (The six-dictionary
+// "group-registering scope" this comment used to enumerate — FIX43/FIX44/FIX50/
+// FIX50SP1/FIX50SP2/FIXT.1.1 — was RETIRED by 082-structural-group-detection
+// (2026-08-12, closes #196): detection is now structural, so all nine
+// QuickFIX-XML dictionaries register groups and FIX 4.0/4.1/4.2 are no longer
+// carved out. FIX44 remains the right fixture here for the unrelated reason
+// that it is the tests' established representative version, not because the
+// legacy versions cannot express a group.)
 // A synthetic inline test dict would not exercise the real component-
 // expansion registration path the shipped `as_table_view()` walks.
 //

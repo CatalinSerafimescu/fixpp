@@ -591,6 +591,12 @@ void OrchestraLoaderState::expand_field_list(
                 group_required_pairs_out.emplace_back(enclosing_group_no_tag, no_tag);
             }
 
+            // FR-023 (082) is NOT implemented here — the Orchestra sibling of
+            // the same removal in xml_loader.cpp. It is satisfied by 083's
+            // T036 `captured == 0` disposition below (:659-680), which rejects
+            // the same input class with the policy layering FR-023 owes
+            // (fail-closed default / tolerant skip / zero-context exempt).
+            // See implementation-notes.md § RESUMED 2026-08-11 and spec.md FR-023.
             // Record the GroupRef (deduplicated by no_tag — first-seen wins).
             if (!group_index_by_no_tag_.contains(no_tag)) {
                 OrchestraGroupDef gd{};
@@ -650,10 +656,21 @@ void OrchestraLoaderState::expand_field_list(
                 // would escape to its terminal rethrow and crash the fuzzer.
                 // C-6.1a / FR-006d holds STRUCTURALLY: this branch runs only
                 // under a non-null sink, i.e. only in the message-scoped walk.
+                // 082 FR-023: the diagnostic MUST name the group's `name`
+                // attribute as well as its `no_tag` — "the facts an operator
+                // needs to fix the offending dialect" (`error.hpp:73`). The
+                // `<fix>` twin already names it (`xml_loader.cpp`'s
+                // `<group name="...">`); this one did not, which is the ONE
+                // gap found when FR-023's own pins were re-pointed onto this
+                // disposition. `name` is optional on `<fixr:group>`, so an
+                // absent attribute degrades to the id-only form rather than
+                // printing an empty `name=""`.
                 else if (unresolved_policy_ == unresolved_group_policy::fail_closed) {
+                    std::string_view const gname{group_node.attribute("name").as_string("")};
                     throw orchestra_parse_error(
-                        "dict::orchestra_parse_error: <fixr:group> with <fixr:numInGroup id=\"" +
-                        std::to_string(no_tag) +
+                        "dict::orchestra_parse_error: <fixr:group" +
+                        (gname.empty() ? std::string{} : " name=\"" + std::string{gname} + "\"") +
+                        "> with <fixr:numInGroup id=\"" + std::to_string(no_tag) +
                         "\"> declares no first member, so its delimiter cannot be resolved; "
                         "pass unresolved_group_policy::tolerant to skip it instead");
                 }
@@ -888,8 +905,22 @@ detail::dict_metadata_handle_ptr OrchestraLoaderState::finalize() {
     // `captured == 0` means no FieldRef was emitted at that group's level, so
     // no FieldRef carries its `group_no_tag`, so the `!members.empty()` leg
     // excludes it from the registered set in the first place.
+    //
+    // Gate B r1 F1: the sweep's candidate source is now STRUCTURAL, symmetric
+    // with xml_loader.cpp — see that file's finalize() for the full rationale
+    // and dictionary_internal.hpp's `find_context_without_delim_record` doc
+    // comment for the exact set definition.
+    std::vector<std::uint16_t> structural_group_tags;
+    structural_group_tags.reserve(group_index_by_no_tag_.size());
+    for (auto const& [tag, idx] : group_index_by_no_tag_) {
+        if (groups_[idx].first_field_tag != 0) {
+            structural_group_tags.push_back(tag);
+        }
+    }
+    std::ranges::sort(structural_group_tags);
+
     detail::maybe_drop_first_group_ctx_delim_run_for_testing(h);  // Gate B r1 F1 test seam
-    if (auto const bad = detail::find_incomplete_group_context(h); bad) {
+    if (auto const bad = detail::find_incomplete_group_context(h, structural_group_tags); bad) {
         throw orchestra_parse_error(
             "dict::orchestra_parse_error: group context for NumInGroup tag " +
             std::to_string(bad->second) + " in message '" +

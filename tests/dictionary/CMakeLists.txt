@@ -128,6 +128,11 @@ set_tests_properties(dictionary_table_view_enum_domain_test PROPERTIES LABELS "0
 # T024/T022 QuickFIX-XML no-regression + wrong-grammar pins.
 set(FIXPP_ORCHESTRA_DATA_DIR "${CMAKE_SOURCE_DIR}/dictionaries/orchestra")
 
+# 082 T006: reused_tag_census_test.cpp's Orchestra-FIX-Latest leg (not in
+# kRuntimeDicts, which is QuickFIX-XML-only) needs the Orchestra dir too.
+target_compile_definitions(dictionary_pure_tests PRIVATE
+  "FIXPP_ORCHESTRA_DATA_DIR=\"${FIXPP_ORCHESTRA_DATA_DIR}\"")
+
 # 074 T021 (FR-007/SC-007) — supply-chain integrity gate: recompute the sha1 of
 # the vendored OrchestraFIXLatest.xml at configure time (portable file(SHA1),
 # Linux + MSVC) and hard-fail if it drifts from the spike's grade-1 pin. This is

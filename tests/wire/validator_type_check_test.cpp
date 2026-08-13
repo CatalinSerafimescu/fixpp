@@ -980,5 +980,124 @@ TEST(ValidatorTypeCheck, Fixpp201Fix44PositionReportAllGroupInstancesCompleteAcc
 // T007's FIX42 accept-path test above remains valid: it exercises ONLY the
 // message-level `in_group` required-set exclusion (candidate's
 // `expand_field_list`), which does NOT depend on NumInGroup-type detection.
+//
+// ── ⬆ BLOCK LIFTED by 082-structural-group-detection (2026-08-12, PR #261,
+//    closes #196) ─────────────────────────────────────────────────────────────
+// Every clause of the paragraph above was true when written and is now false.
+// Detection no longer keys on `fr.type == field_data_type::NumInGroup`; it keys
+// on the `<group>` element via `group_first_field(t) != 0`. So a FIX42 group
+// count field DOES populate a context entry, `validate_group_level` DOES
+// recognise it, `consume_group` IS invoked, and the per-instance required-member
+// check CAN fire. The reason the test was withheld — that it "would vacuously
+// pass for the WRONG reason (group invisibility, not correct enforcement)" — is
+// exactly why the legs below open with an ASSERT on the delimiter: that
+// assertion is what distinguishes real enforcement from the invisibility this
+// comment described, and it is the guard that would have failed pre-082.
+//
+// Fixture is FIX42 `NewOrderList(E)` / `NoOrders(73)`, NOT `Allocation(J)` /
+// `NoAllocs(78)` as the paragraph above assumed: 73 is `required='Y'` whereas 78
+// is optional, and under QuickFIX immediate-enclosing gating (081 B-081-2) an
+// OPTIONAL group's incomplete instance is legitimately ACCEPTED — so J/78 cannot
+// witness a reject at all. Verified against the dictionary: `NoOrders` is
+// `required='Y'`, its delimiter is `ClOrdID(11)`, and its component-expanded
+// direct required members are `{ClOrdID(11), ListSeqNo(67), Symbol(55), Side(54)}`
+// out of 72 direct members; E's top-level required set is
+// `{ListID(66), BidType(394), TotNoOrders(68)}`.
+//
+// ⚠️ That member set was derived WRONG twice before it was derived right, and the
+// validator caught both times — worth recording because the same two mistakes are
+// easy to repeat against any QuickFIX XML. (1) A non-greedy
+// `<group name='NoOrders'[^>]*>(.*?)</group>` regex truncates the body at the
+// FIRST `</group>`, which is the nested `NoAllocs` group's — so it reported only
+// `{11, 67}` and hid `Symbol`/`Side` entirely. Depth-matching is required.
+// (2) `<component>` members must be expanded, and their `required` composed with
+// the component's own (079's component-AND rule) — a required field inside an
+// optional component is NOT required. The first fixture omitted 55/54 and the
+// validator rejected naming `Side(54)`; it was right and the derivation was wrong.
+std::string fix42_new_order_list_prefix() {
+    return "35=E\x01"
+           "34=1\x01" "49=SENDER\x01" "52=20240101-00:00:00\x01" "56=TARGET\x01"
+           "66=LIST1\x01" "394=1\x01" "68=1\x01";
+}
 
 }  // namespace
+
+// ── 082 T010/T011 (FIX42): required-group instance missing a required member
+//    REJECTS; complete instance ACCEPTS ──────────────────────────────────────
+// The two legs the paragraph above documented as unwritable. Both open with the
+// anti-vacuity ASSERT: pre-082 `group_first_field("E", {}, 73)` returned 0, so
+// the group was invisible, `consume_group` never ran, and BOTH legs would have
+// passed for the wrong reason — the reject leg because nothing was enforced, the
+// accept leg because nothing was checked. The assert converts that silent
+// wrong-reason pass into a loud failure.
+TEST(ValidatorTypeCheck, Fix42NewOrderListRequiredGroupInstanceMissingMemberRejected) {
+    std::pmr::monotonic_buffer_resource mr;
+    auto d42 = load_real_dict("FIX42.xml", &mr);
+    auto const tv = d42.as_table_view();
+
+    ASSERT_NE(tv.group_first_field("E", {}, 73), 0)
+        << "FIX42 NoOrders(73) must resolve a per-context delimiter before this leg means "
+           "anything — a 0 here is the pre-082 group-invisibility state, under which the "
+           "rejection asserted below would happen for the WRONG reason or not at all (#196)";
+    EXPECT_EQ(tv.group_first_field("E", {}, 73), 11)
+        << "NoOrders(73)'s delimiter on E is ClOrdID(11) — its first declared member";
+    // Control, so the ASSERT above is not a tautology: the SAME accessor must
+    // still answer 0 for a tag that is a plain field rather than a group. An
+    // accessor that returned nonzero for everything would satisfy the assert
+    // while proving nothing.
+    EXPECT_EQ(tv.group_first_field("E", {}, 66), 0)
+        << "ListID(66) is a plain top-level field on E, not a group — group_first_field must "
+           "discriminate, or the non-zero assertion above carries no information";
+
+    dictionary_driven_validator v{tv};
+
+    // 73=1 with the delimiter and every OTHER required member present, so
+    // ListSeqNo(67) is the ONLY thing missing — that isolation is what lets the
+    // `ref_tag == 67` assertion below mean "it named the right member" rather
+    // than "it named some member".
+    auto buf = make_frame(fix42_new_order_list_prefix() +
+                          "73=1\x01" "11=ORD1\x01" "55=SYM\x01" "54=1\x01");
+    std::array<std::byte, 4096> stack{};
+    std::pmr::monotonic_buffer_resource arena;
+    auto mv = parse_index(buf, stack, arena);
+
+    std::array<std::byte, kScratch> scratch_buf{};
+    std::pmr::monotonic_buffer_resource scratch_mr{scratch_buf.data(), scratch_buf.size(),
+                                                   std::pmr::null_memory_resource()};
+    std::uint16_t ref_tag = 0;
+    auto result = v.validate(mv, &scratch_mr, &ref_tag);
+    EXPECT_FALSE(result.has_value())
+        << "a FIX42 NoOrders(73) instance omitting its required ListSeqNo(67) must be REJECTED "
+           "— 73 is required='Y' on E, so QuickFIX immediate-enclosing gating does not excuse "
+           "the missing member (contrast the OPTIONAL NoAllocs(78) case, B-081-2)";
+    EXPECT_EQ(ref_tag, 67) << "the rejection must name the missing required member, not a proxy";
+}
+
+TEST(ValidatorTypeCheck, Fix42NewOrderListCompleteGroupInstanceAccepted) {
+    std::pmr::monotonic_buffer_resource mr;
+    auto d42 = load_real_dict("FIX42.xml", &mr);
+    auto const tv = d42.as_table_view();
+
+    ASSERT_NE(tv.group_first_field("E", {}, 73), 0)
+        << "same anti-vacuity guard as the reject leg: with 73 invisible this acceptance would "
+           "prove nothing, because no group member would be checked at all";
+
+    dictionary_driven_validator v{tv};
+
+    // Same frame plus ListSeqNo(67) — all four required members now present.
+    auto buf = make_frame(fix42_new_order_list_prefix() +
+                          "73=1\x01" "11=ORD1\x01" "67=1\x01" "55=SYM\x01" "54=1\x01");
+    std::array<std::byte, 4096> stack{};
+    std::pmr::monotonic_buffer_resource arena;
+    auto mv = parse_index(buf, stack, arena);
+
+    std::array<std::byte, kScratch> scratch_buf{};
+    std::pmr::monotonic_buffer_resource scratch_mr{scratch_buf.data(), scratch_buf.size(),
+                                                   std::pmr::null_memory_resource()};
+    std::uint16_t ref_tag = 0;
+    auto result = v.validate(mv, &scratch_mr, &ref_tag);
+    EXPECT_TRUE(result.has_value())
+        << "a conforming FIX42 NewOrderList with a complete NoOrders(73) instance must be "
+           "ACCEPTED; err=" << (result.has_value() ? 0 : static_cast<int>(result.error()))
+        << " ref_tag=" << ref_tag;
+}

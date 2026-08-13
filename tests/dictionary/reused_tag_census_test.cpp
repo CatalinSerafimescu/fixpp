@@ -41,6 +41,7 @@
 // delimiter-variance finding here does not indicate a live parsing defect
 // — see the printed report for the full reasoning.
 
+#include "required_scope_oracle.hpp"  // 082 T008: independent group-tag census
 #include "reused_tag_census.hpp"
 
 #include <gtest/gtest.h>
@@ -147,50 +148,83 @@ TEST(ReusedTagCensus, AllNineRuntimeDictsCensused) {
         auto dict = fixpp::dict::XmlLoader{}.load(path, &mr);
         ASSERT_FALSE(dict.messages().empty()) << fname << " failed to load or has no messages";
 
-        auto const dc = census_for(dict, std::string{fname});
+        auto const oracle = fixpp_test::required_scope_oracle::build_quickfix_oracle(path);
+        auto const dc = census_for(dict, std::string{fname}, oracle.group_tags);
         auto const scan = delimiter_scan_for(path, dict);
 
-        // ESCALATED FINDING (source-verified, NOT part of Defect A/B, and
-        // out of 063's touch-scope to fix): Dictionary::as_table_view()'s
-        // group-membership population — BOTH the legacy bare-no_tag loop
-        // (dictionary.cpp:340-353, byte-identical pre-063) and the new 063
-        // context-scoped loop (dictionary.cpp:369-422) — identifies a
-        // group's count tag via `fr.type == field_data_type::NumInGroup`
-        // while walking message_fields(). The loader itself (xml_loader.cpp
-        // expand_field_list's "group" arm) identifies a group STRUCTURALLY
-        // (the raw `<group name="...">` XML element) regardless of what
-        // TYPE the referenced count field is declared with in `<fields>`
-        // — so `Dictionary::group()`/`group_fields()` (the GLOBAL,
-        // non-table_view accessors) are unaffected. FIX40.xml/FIX41.xml/
-        // FIX42.xml declare EVERY group count field with type INT (0
-        // matches for `type='NUMINGROUP'` in all three, confirmed by
-        // direct grep), so `as_table_view()`'s two loops silently register
-        // ZERO groups for these three dictionaries — table_view-driven
-        // group validation/parsing (`wire::Validator`, `OffsetTable::group()`
-        // via `group_member_fn`) is therefore INERT for FIX40/41/42's
-        // repeating groups, though the raw `Dictionary::group()`/
-        // `group_fields()` structural accessors work correctly. The SAME
-        // gate exists in codegen (`emit_messages.cpp` — `f->ref.type ==
-        // NumInGroup`), and v42 is a codegen-target dict: confirmed
-        // (`grep -c 'groups::' build/.../v42/Messages.hpp` == 0) that the
-        // generated v42 flyweight has NO repeating-group accessors at all.
-        // This is a PRE-EXISTING gap (unrelated to Defect A/B, present on
-        // `main` before this feature) discovered as a side effect of
-        // building this census faithfully against the real production
-        // algorithm; fixing it would require an xml_loader.cpp/
-        // dictionary.cpp/emit_messages.cpp change, out of T016's
-        // test-file-only scope — reported here, not silently patched.
+        // L-063-1 — RESOLVED at the test-time census by 082 T008
+        // (contracts/group-detection.md FR-018/FR-004): the finding below
+        // originally documented was that `Dictionary::as_table_view()`'s
+        // group-membership population — both the legacy bare-no_tag loop
+        // and the 063 context-scoped loop — identified a group's count tag
+        // via `fr.type == field_data_type::NumInGroup` while walking
+        // message_fields(), so FIX40.xml/FIX41.xml/FIX42.xml (which declare
+        // EVERY group count field with type INT, not NUMINGROUP) silently
+        // registered ZERO groups. `census_for` (this file's own census
+        // helper, reused_tag_census.hpp) used the SAME datatype gate, so it
+        // reproduced the gap rather than witnessing it — the load-bearing
+        // reason 082 T008 re-points `census_for`'s gate onto
+        // `required_scope_oracle.hpp`'s independent, structural, non-
+        // circular group-tag census (`DictOracle::group_tags` — a real
+        // `<group name="...">` element, regardless of the referenced
+        // field's declared datatype) instead. As of that re-point, THIS
+        // census now registers FIX40/41/42's groups correctly (4/7/18 tags,
+        // matching contracts/group-detection.md C2's registered-after
+        // column) — the loop below is therefore expected to find no
+        // registration gap for any of the nine runtime dicts.
+        //
+        // The underlying PRODUCTION gap this originally reported is NOT yet
+        // fixed by this test-file-only re-point: `Dictionary::as_table_view()`
+        // itself (`dictionary.cpp:398,441,446`) and codegen's
+        // `emit_messages.cpp` (`f->ref.type == NumInGroup`) both still gate on
+        // the same datatype test, so `wire::Validator`/`OffsetTable::group()`
+        // and the generated `v42` flyweight remain INERT for FIX40/41/42's
+        // repeating groups until 082's own T023 (runtime predicate
+        // replacement) and T024/T025 (codegen re-point) land — no longer an
+        // open, unowned limitation; it is this feature's Phase 3 work.
         {
             std::size_t const raw_group_notags = scan.site_count.size();
             std::size_t const registered_notags = dc.per_tag.size();
             if (raw_group_notags > 0 && registered_notags == 0) {
                 std::cout << "  *** REGISTRATION GAP: " << raw_group_notags
                           << " distinct no_tag(s) have raw <group> XML declaration sites but "
-                             "ZERO were registered by Dictionary::as_table_view() (their count "
-                             "field's declared type is not NUMINGROUP — see escalation note "
-                             "above). table_view-driven group parsing is INERT for this dict. "
-                             "***\n";
+                             "ZERO were registered by this census (unexpected post-082-T008 — "
+                             "the independent oracle's group-tag set should register every "
+                             "declared, message-reachable <group>). ***\n";
             }
+        }
+
+        // 082 T006 (contracts/group-detection.md C2/K1, FR-018/SC-002): the
+        // oracle's OWN output pinned against LITERAL constants transcribed
+        // from C2's registered-after column — deliberately NOT compared
+        // against `dc`/the loaded Dictionary here (that oracle-vs-actual
+        // comparison is T015/T016/T018/T042's job, landed separately). A
+        // pin against the loader only proves the two independent
+        // derivations agree with EACH OTHER; if the oracle were ever
+        // "simplified" to track a drifted loader, an oracle-vs-actual pin
+        // would still pass while both sides are wrong together. Do NOT
+        // collapse this into an oracle-vs-actual check.
+        {
+            static std::map<std::string_view, std::size_t> const kExpectedGroupTags{
+                {"FIX40.xml", 4},     {"FIX41.xml", 7},      {"FIX42.xml", 18},
+                {"FIX43.xml", 34},    {"FIX44.xml", 59},     {"FIX50.xml", 67},
+                {"FIX50SP1.xml", 97}, {"FIX50SP2.xml", 505}, {"FIXT11.xml", 1},
+            };
+            EXPECT_EQ(oracle.group_tags.size(), kExpectedGroupTags.at(fname))
+                << fname << ": oracle group_tags count vs literal C2 registered-after constant";
+            EXPECT_EQ(fixpp_test::required_scope_oracle::count_zero_member_groups_quickfix(path), 0U)
+                << fname << ": zero-member-<group> count vs literal 0 (FR-023/K11/P1-NON)";
+        }
+        if (fname == "FIX40.xml") {
+            std::set<std::uint16_t> const kExpected{73, 78, 124, 136};
+            EXPECT_EQ(oracle.group_tags, kExpected) << "FIX40 group-tag set vs literal C2 set";
+        } else if (fname == "FIX41.xml") {
+            std::set<std::uint16_t> const kExpected{33, 73, 78, 124, 136, 146, 199};
+            EXPECT_EQ(oracle.group_tags, kExpected) << "FIX41 group-tag set vs literal C2 set";
+        } else if (fname == "FIX42.xml") {
+            std::set<std::uint16_t> const kExpected{33,  73,  78,  124, 136, 146, 199, 215, 267,
+                                                     268, 295, 296, 382, 384, 386, 398, 420, 428};
+            EXPECT_EQ(oracle.group_tags, kExpected) << "FIX42 group-tag set vs literal C2 set";
         }
 
         std::size_t collisions = 0;
@@ -285,6 +319,20 @@ TEST(ReusedTagCensus, AllNineRuntimeDictsCensused) {
     EXPECT_TRUE(saw_fix44_295_collision)
         << "FIX44 tag 295 must show ≥2 variants, one containing QuoteEntryID(299) and one not "
            "— the census must reproduce the discriminator T010 already proved by hand";
+}
+
+// 082 T006 — Orchestra FIX Latest's leg of the same literal-constant pin.
+// Not in kRuntimeDicts (that array is QuickFIX-XML only), so it is not
+// exercised by the loop above. Same rationale as there: pinned against C2's
+// literal 524, not against a loaded Dictionary/table_view.
+TEST(ReusedTagCensus, OrchestraFixLatestGroupTagsMatchesLiteralConstant) {
+    auto const path =
+        std::filesystem::path{FIXPP_ORCHESTRA_DATA_DIR} / "OrchestraFIXLatest.xml";
+    auto const oracle = fixpp_test::required_scope_oracle::build_orchestra_oracle(path);
+    EXPECT_EQ(oracle.group_tags.size(), 524U)
+        << "Orchestra FIX Latest: oracle group_tags count vs literal C2 registered-after constant";
+    EXPECT_EQ(fixpp_test::required_scope_oracle::count_zero_member_groups_orchestra(path), 0U)
+        << "Orchestra FIX Latest: zero-member-<group> count vs literal 0 (FR-023/K11/P1-NON)";
 }
 
 // ============================================================================

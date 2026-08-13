@@ -133,6 +133,26 @@ set_target_properties(validate_group_bench PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bench/wire"
 )
 
+# ── 082 T047: fix42_group_parse_bench (FR-022 (b), inbound PARSE path) ───────
+# FIX 4.0/4.1/4.2 flip from a group_bits_ all-clear short-circuit to real
+# group-context resolution on parse. Same link/definition shape as
+# validate_group_bench above — it needs FIXPP_DICT_DATA_DIR because it loads the
+# REAL dictionaries/FIX42.xml (a hand-built table_view would populate neither
+# group_bits_ nor group_ctx_ and would measure the pre-082 path).
+add_executable(fix42_group_parse_bench fix42_group_parse_bench.cpp)
+target_link_libraries(fix42_group_parse_bench PRIVATE
+  fixpp_wire
+  fixpp_dictionary
+  benchmark::benchmark
+  benchmark::benchmark_main
+)
+target_compile_definitions(fix42_group_parse_bench PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${FIXPP_DICT_DATA_DIR}\""
+)
+set_target_properties(fix42_group_parse_bench PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bench/wire"
+)
+
 # ── 083 T064: typed_read_group_bench (FR-022 path 2, Article VIII §3) ────────
 # group_slices_status: the C-8.1/C-8.2 context-keyed delimiter callback plus
 # C-8.0c's per-instance descent probe. Carries a mode-(c) shape (the outer

@@ -74,27 +74,43 @@ TEST(BuilderCompleteness077Vt11V42, Vt11ExpectedEmptyNoFileEmitted) {
         << "vt11 is admin-only; no all.hpp should be emitted for it";
 }
 
-// C3c-analog (T026 override, issue #196 / L-063-1) -- v42: 39 real
-// application messages exist (raw-XML walk, no `in_scope` exclusion
-// applied), but the builder-completeness census's expected(v42) is DEFINED
-// as ∅ because v42 is a non-builder-bearing version by policy. No all.hpp
-// is emitted for it.
-TEST(BuilderCompleteness077Vt11V42, V42HasAppMessagesButIsNonBuilderBearingByPolicy) {
+// 082-structural-group-detection T033 [US2] — FR-016b: **INVERTED, not deleted.**
+//
+// This was `V42HasAppMessagesButIsNonBuilderBearingByPolicy`, and it asserted
+// expected(v42) == ∅ *by policy* while simultaneously recording that the raw-XML
+// walk finds 39 application messages. That gap was the descope (issue #196 /
+// L-063-1), and 082 closes it: detection is structural (T023–T025), so FIX42's
+// groups are visible, and T035 removed `main.cpp`'s `if (ir.ns != "v42")`.
+//
+// The expected set is now the RAW-XML-DERIVED one — the same
+// `legacy_expected_msgtypes` call the old test already made and then discarded.
+// ⚠️ It is deliberately NOT a transcribed list of 39 msg_types: this is an
+// exact-SET completeness gate, and a set copied out of the first emitter run is a
+// corpus built from the read it checks (FR-016b's own warning). Cross-checked
+// independently by `contracts/builder_plan_census.py`, which derives **39 messages
+// in scope / 28 plans over 17 tags** under `--families all` from `emit_builders`'
+// interning rule alone.
+//
+// Mirrors `BuilderCompleteness077V44.RegistryExactSetEqualsRawXmlWalk`. Note v42
+// needs no `in_scope` exclusion list, unlike v44's {BE,BF,BW,BX,BY}.
+TEST(BuilderCompleteness077Vt11V42, V42RegistryExactSetEqualsRawXmlWalk) {
     using namespace fixpp_test::builder_completeness;
-    std::set<std::string> const raw_app_messages =
+    std::set<std::string> const expected =
         legacy_expected_msgtypes(std::string(FIXPP_DICT_DATA_DIR) + "/FIX42.xml");
-    EXPECT_EQ(raw_app_messages.size(), 39U)
-        << "v42 DOES have application messages (unlike vt11) -- the ∅ census "
-           "expectation below is a policy exclusion, not a raw-XML fact";
+    EXPECT_EQ(expected.size(), 39U)
+        << "v42 raw-XML walk in-scope application-message count -- if this moved, re-derive with "
+           "contracts/builder_plan_census.py before touching anything downstream";
 
-    // Policy: v42 builder-completeness expected set is defined as empty
-    // (issue #196 / L-063-1), independent of the nonzero raw app count
-    // above.
-    std::set<std::string> const expected_for_census;
-    EXPECT_TRUE(expected_for_census.empty());
-    EXPECT_FALSE(std::filesystem::exists(FIXPP_CODEGEN_V42_BUILDERS_HPP))
-        << "v42 is DESCOPED (issue #196); no all.hpp should be emitted for it "
-           "despite having application messages";
+    ASSERT_TRUE(std::filesystem::exists(FIXPP_CODEGEN_V42_BUILDERS_HPP))
+        << "v42's builder tier is IN SCOPE as of 082 (issue #196): all.hpp must be emitted at "
+        << FIXPP_CODEGEN_V42_BUILDERS_HPP
+        << ". Without it the exact-set comparison below would compare against an empty parse and "
+           "could only fail for the wrong reason.";
+
+    std::set<std::string> const registry = parse_registry_msgtypes(FIXPP_CODEGEN_V42_BUILDERS_HPP);
+    EXPECT_EQ(registry, expected)
+        << "the emitted v42 builder_registry msg_type set must equal the raw-XML-derived scope "
+           "EXACTLY, both directions";
 }
 
 // C4 -- structural-key safety pin, verified against the shipped v50sp2
