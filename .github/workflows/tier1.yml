@@ -1456,8 +1456,6 @@ jobs:
       # C ABI drifted. Plus the existing occupancy gate (mirrors check-layers).
       - name: C-ABI byte-freeze gate (NBC-1)
         run: bash tools/check_capi_freeze.sh
-      - name: Dictionary snapshot exclusivity gate
-        run: bash tools/check_dictionary_snapshot_exclusivity.sh
       - name: C-ABI occupancy gate
         run: bash tools/check_capi_occupancy.sh
 
@@ -1752,6 +1750,9 @@ jobs:
 
       - name: Run C-ABI reentrancy gate (FR-014)
         run: bash tools/check_capi_reentrancy.sh
+
+      - name: Run dictionary snapshot exclusivity gate
+        run: bash tools/check_dictionary_snapshot_exclusivity.sh
 
   # ── Benchmarks (SOFT — exit 0 always; Phase 3) ──────────────────────────
   # SOFT GATE: perf regression gate is disabled until Phase 4 module 1 closes
