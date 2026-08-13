@@ -33,6 +33,19 @@ n_of() { printf '%s' "${1-}" | { grep -c . || true; }; }
 # comment, and awk needs no regex escaping of the `/` and `.` in a path.
 # awk exits 0, so no `|| true`.
 in_file() { printf '%s\n' "${2-}" | awk -F: -v f="$1" '$1==f{n++} END{print n+0}'; }
+# Drop FULL-LINE comments (`//...` or ` * ...` block-comment continuation,
+# after leading whitespace) before a CALL/CONSTRUCTION census. A gate that
+# asserts "X is CALLED" (not "X is NAMED") must not count a prose mention as
+# the call — measured: the code's own prose sentence
+# "shared_dictionary_view() is the sole production alias-formation site"
+# satisfies `\<shared_dictionary_view[[:space:]]*\(` even after the REAL call
+# is replaced by a copy, so the required-call assertion below stayed GREEN
+# under exactly the mutation it exists to catch (case H, comment-shielded
+# variant) until this filter was added. Does not handle a trailing same-line
+# comment after real code, or a `/* */` block whose FIRST line carries code —
+# neither occurs in this tree today; a stricter AST check would close that
+# residual (mirrors G2's own documented spelling-coverage limitation below).
+strip_comment_lines() { grep -vE '^[[:space:]]*(//|\*)' "$1" || true; }
 
 # ── G1 — SOLE MINTER ──────────────────────────────────────────────────────────
 # `snapshot_key` may be NAMED only where it is declared, defined, and asserted
@@ -52,14 +65,26 @@ g1_hits=$(printf '%s\n' "$g1_hits_raw" | { grep -v "^${SELF}:" || true; })
 g1_bad=$(printf '%s\n' "$g1_hits" | { grep -vE "$G1_ALLOW" || true; })
 g1_bad_n=$(n_of "$g1_bad")
 
-# LIVENESS — PER ALLOWLISTED FILE, never a union total. A union bound (e.g.
-# `>= 3`) is met by the header alone (it declares, comments on, and befriends
-# around the key), so an entire assertion TU could be deleted with the gate
-# green.
+# LIVENESS hits, CODE ONLY: same class of hole as the G2 required-call fix
+# above, and measured to be a REAL false-green here (not merely theoretical)
+# — deleting ALL FIVE A1-A5 static_asserts from $A5TU while leaving one
+# prose comment mentioning "snapshot_key" left this file's liveness at 1 and
+# the WHOLE gate green, because (unlike HDR's friend-count assertion, which
+# independently re-derives from $HDR and would have caught a header-only
+# version of this) no other assertion re-checks that $A5TU's assertions
+# still exist. `path:line:` kept literal (a `:` cannot appear in these repo
+# paths) so only the CONTENT after it is tested for a comment-line prefix.
+g1_hits_code=$(printf '%s\n' "$g1_hits" | { grep -vE '^[^:]+:[0-9]+:[[:space:]]*(//|\*)' || true; })
+
+# LIVENESS — PER ALLOWLISTED FILE, never a union total, and CODE ONLY, never
+# a comment mention. A union bound (e.g. `>= 3`) is met by the header alone
+# (it declares, comments on, and befriends around the key), so an entire
+# assertion TU could be deleted with the gate green; a comment-only mention
+# has the identical failure shape one level down (measured, see above).
 for f in "$HDR" "$FACTORY" "$A5TU"; do
-    n=$(in_file "$f" "$g1_hits")
+    n=$(in_file "$f" "$g1_hits_code")
     echo "G1 liveness: $f = $n"
-    [ "$n" -ge 1 ] || { echo "G1 DEAD: no 'snapshot_key' in $f — file deleted, type renamed, or scanner broken"; exit 1; }
+    [ "$n" -ge 1 ] || { echo "G1 DEAD: no CODE reference to 'snapshot_key' in $f — file deleted, type renamed, scanner broken, or only a comment mention remains"; exit 1; }
 done
 
 # ASSERTION (a) — nothing outside the allowlist may name the key.
@@ -124,9 +149,9 @@ echo "G2 alias-formation sites = $g2_all_n (in $FACTORY: $g2_helper_n, elsewhere
 # already carried by (a).
 G2_CALL='\<shared_dictionary_view[[:space:]]*\('
 for f in src/session/session.cpp src/capi/session.cpp; do
-    n=$(n_of "$(grep -nE "$G2_CALL" "$f" || true)")
+    n=$(n_of "$(strip_comment_lines "$f" | { grep -nE "$G2_CALL" || true; })")
     echo "G2 required call: $f = $n"
-    [ "$n" -ge 1 ] || { echo "G2 FAIL: $f never calls shared_dictionary_view — the view is copied, not aliased"; exit 1; }
+    [ "$n" -ge 1 ] || { echo "G2 FAIL: $f never calls shared_dictionary_view — the view is copied, not aliased (comment mentions do not count)"; exit 1; }
 done
 
 echo "PASS: dictionary_snapshot exclusivity gates (G1 sole minter, G2 sole alias-former + required calls)."
