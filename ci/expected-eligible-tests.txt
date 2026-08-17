@@ -43,11 +43,31 @@
 # CONFIRMATION, and any lane that renders DIAGNOSTIC ONLY gets its line
 # corrected here rather than argued with.
 #
-linux-clang-debug     362
-linux-clang-release   362
-linux-clang-asan      361
-linux-clang-ubsan     361
-linux-clang-tsan      361
+# ── #268: +1 ON EVERY LANE ───────────────────────────────────────────────────
+#
+# `capi_reset_seqnum_policy_range` is a new `add_test` in tests/capi/CMakeLists.txt
+# with NO `if()` guard and no label, in a directory every lane includes — so it
+# lands in both the `-LE packaging` minimal tier and the full-tier lanes alike.
+# Every line below is therefore its previous CI-derived value + 1.
+#
+# ⚠️ THIS IS ARITHMETIC ON A CI BASIS, NOT A LOCAL DERIVATION — the distinction
+# this file's own header insists on. Nothing here was counted on a workstation
+# (which the header measures as 15 tests adrift of a runner); a single
+# unconditional registration was added to numbers read off CI logs. The first CI
+# run on this branch is still the CONFIRMATION, and per the header a mismatch
+# renders that lane DIAGNOSTIC ONLY rather than failing it — the safe direction.
+#
+# ⚠️ #268 also DELETES a gtest case (`PublicRoundtrip.SetResetSeqnumPolicyOutOfRange`),
+# and that is deliberately NOT a -1: this project registers each gtest BINARY as
+# one ctest entry (`add_test(NAME capi_pure_tests COMMAND capi_pure_tests)` and
+# siblings) rather than using `gtest_discover_tests`, so removing a TEST inside a
+# binary moves no ctest count. Stated because "+1 -1 = 0" is the plausible wrong
+# answer here.
+linux-clang-debug     363
+linux-clang-release   363
+linux-clang-asan      362
+linux-clang-ubsan     362
+linux-clang-tsan      362
 
 # `linux-gcc-release` runs a DIFFERENT workload, not no workload.  ⚠️ An earlier
 # revision of this file said it "SKIPS the minimal-tier Test step entirely, so
@@ -59,17 +79,17 @@ linux-clang-tsan      361
 # Read off TWO independent CI runs, 32007171995 and 32011816399, both `ran: 370`.
 # Shipped as `-` until then rather than guessed from `linux-clang-release`, whose
 # 362 is a `-LE packaging` count and therefore a different quantity.
-linux-gcc-release     370
+linux-gcc-release     371
 
 # Tier 3 (`.github/workflows/tier3-libcxx.yml`). These lanes run the FULL suite
 # — their Test step carries no `-LE packaging` — so the counts are lower than
 # the Tier 1 five for a different reason than a label filter: fewer tests are
 # registered under libc++. Same provenance: Tier 3 run 31737273304, `5c56a17e`.
 # Measured but NOT widened by this change; see #267 phase 3.
-linux-clang-libc++        357
-linux-clang-libc++-asan   356
-linux-clang-libc++-ubsan  356
-linux-clang-libc++-tsan   356
+linux-clang-libc++        358
+linux-clang-libc++-asan   357
+linux-clang-libc++-ubsan  357
+linux-clang-libc++-tsan   357
 
 # The coverage lane runs the FULL suite (no `-LE packaging` filter), so its
 # count is not comparable to any lane above and had never been read off a CI log
@@ -81,4 +101,4 @@ linux-clang-libc++-tsan   356
 # Read off run 32003367497 (workflow_dispatch, branch ci/266-peak-rss-instrument,
 # `Peak memory` step: `ran: 369/-`).  369 rather than 362 because this lane runs
 # the packaging tier the five filtered lanes exclude.
-linux-clang-coverage  369
+linux-clang-coverage  370
