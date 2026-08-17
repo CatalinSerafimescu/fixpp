@@ -132,6 +132,17 @@ EXPECTED="${EXPECTED:-<no line>}"
 # these separately for exactly that reason, and #267's acceptance item 5 treats
 # any post-widening report as a real defect until disproven.
 #
+# ⚠️ FOR UBSan THAT IS NOT A CAVEAT, IT IS THE DEFAULT — MEASURED, not recalled.
+# `cmake/Sanitizers.cmake` and `conan/profiles/linux-clang-ubsan` pass
+# `-fsanitize=undefined` with NO `-fno-sanitize-recover`, and no `UBSAN_OPTIONS`
+# is set anywhere in the repo.  Compiled with those exact flags, a signed-overflow
+# probe prints
+#     ub.cpp:2:51: runtime error: signed integer overflow: ...
+# then CONTINUES and exits 0.  So `linux-clang-ubsan` cannot go red on a UBSan
+# finding, and this counter is currently the only thing in CI that would surface
+# one.  (ASan differs: `halt_on_error=1` is its default, so an ASan error aborts
+# and does redden the lane.)
+#
 # Source is CTest's own LastTest.log, NOT the step log: the Test step runs with
 # `--output-on-failure`, so a report emitted by a test that PASSED never reaches
 # stdout.  Counting from the step log would systematically miss the interesting
