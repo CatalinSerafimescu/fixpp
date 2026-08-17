@@ -32,6 +32,15 @@
 # re-run against a copy of the instrument that breaks exactly the property it
 # claims to pin, and the harness must go RED at that cell.
 #
+# ⚠️ IF A MUTANT REPORTS `the mutation did NOT apply`, THE FIX IS TO RE-POINT THE
+# PATTERN, not to delete the mutant. The mutations are `sed` expressions matching
+# exact lines of the two scripts — including indentation, and for two of them the
+# report script's awk regex verbatim — so any edit to a targeted line breaks its
+# pattern. That is the cmp-guard doing its job: it has already fired twice during
+# this file's own development (once after `run()` was re-indented by a try/except,
+# once after the workload-size regex was tightened). A silently non-applying
+# mutation would read as a thorough harness that tested nothing.
+#
 # No build tree and no ctest are required: every fixture is synthetic, because
 # `ci-script-pins` runs on a bare runner in ~2.5 s.
 set -uo pipefail
