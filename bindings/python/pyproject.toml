@@ -83,6 +83,35 @@ FIXPP_BUILD_OTEL = "OFF"
 # tree (defaults ON) nor bench/fuzz. Without this the wheel build compiles ~1500
 # test targets it then discards (the bulk of the in-container build time + size).
 FIXPP_BUILD_TESTS = "OFF"
+# ── C++20 module scanning OFF — a PREREQUISITE for the ccache, not a tweak (#259) ──
+#
+# ⚠️ WITHOUT THIS THE WHEEL LANE'S ccache CACHES NOTHING AT ALL. Measured on the
+# first CI run of the cache (run 32047903054): ccache was reached — 975 calls —
+# and classified **975/975 as uncacheable**, `unsupported_compiler_option 975`,
+# `cacheable_calls 0`. The build succeeded; the cache was a total no-op.
+#
+# Cause, reproduced in the pinned image: `CMAKE_CXX_STANDARD` is 23, so CMake
+# (4.4.2 here — scikit-build-core's `cmake.version = ">=3.28"` admits it) enables
+# C++20 module scanning on Ninja, and for GCC that puts
+#
+#     -fmodules-ts -fmodule-mapper=<map> -fdeps-file=… -fdeps-format=p1689r5
+#
+# on EVERY compile line. ccache does not support those and declines the call.
+# Paired probe in the container, same compiler, same standard:
+#
+#     default                        -> unsupported_compiler_option 1, cache_miss 0
+#     CMAKE_CXX_SCAN_FOR_MODULES=OFF -> unsupported_compiler_option 0, cache_miss 1
+#
+# The project ships ZERO modules (#242), so scanning buys nothing here.
+#
+# ⚠️ This is scoped to the WHEEL lane deliberately. #242 proposes the same flag
+# repo-wide and measured it at 0.6 % of compile CPU — "defer and bundle". That
+# framing does NOT hold on this lane: here it is not a 0.6 % saving, it is the
+# difference between a working compiler cache and none. Whether the matrix legs
+# are affected is a SEPARATE question and is not assumed either way here — they
+# use clang (whose scan uses a `@modmap` response file ccache does handle) and a
+# different CMake, and they carry no liveness assert that would have reported it.
+CMAKE_CXX_SCAN_FOR_MODULES = "OFF"
 
 [tool.scikit-build.metadata.version]
 # PKG-2 / D-6: single version source = the root CMake project(VERSION) (0.0.1

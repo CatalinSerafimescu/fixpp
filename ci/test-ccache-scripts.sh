@@ -481,6 +481,31 @@ ok "the wheel lane name agrees with the container-lane enumeration"
   || fail "the pinned image reference in pyproject.toml ('$IDENT_REF') is not one ccache_container_cache_key accepts"
 ok "the image reference pinned in pyproject.toml is digest-pinned and mintable"
 
+# ── C++20 module scanning must stay OFF for the wheel build (#259) ───────────
+#
+# ⚠️ THIS IS A PREREQUISITE FOR THE CACHE, NOT A TUNING KNOB. Measured on the
+# lane's first CI run (32047903054): with scanning ON, ccache was reached — 975
+# calls — and declined **975/975** with `unsupported_compiler_option`, so
+# `cacheable_calls` was 0 and the cache did nothing at all. `CMAKE_CXX_STANDARD`
+# is 23, so CMake enables module scanning on Ninja, and for GCC that puts
+# `-fmodules-ts -fmodule-mapper=… -fdeps-format=p1689r5` on every compile line;
+# ccache does not support them. Reproduced in the pinned image: default ->
+# unsupported_compiler_option 1 / cache_miss 0; scanning OFF -> 0 / 1.
+#
+# `ci/ccache-stats.sh`'s liveness assert DOES catch a regression here — that is
+# how it was found — but only after a ~69-minute container build. This pins it
+# where it fails in seconds instead.
+SCAN_OFF="$(
+  cd "$CI_DIR/.." && python3 -c '
+import tomllib
+d = tomllib.load(open("bindings/python/pyproject.toml", "rb"))
+print(d["tool"]["scikit-build"]["cmake"]["define"].get("CMAKE_CXX_SCAN_FOR_MODULES", "<unset>"))
+' 2>&1
+)"
+[ "$SCAN_OFF" = "OFF" ] \
+  || fail "wheel/module-scan: [tool.scikit-build.cmake.define].CMAKE_CXX_SCAN_FOR_MODULES is '$SCAN_OFF', expected 'OFF'. With scanning ON, GCC receives -fmodules-ts/-fmodule-mapper= and ccache declines EVERY call as unsupported_compiler_option — the wheel lane's cache silently becomes a no-op (measured 975/975 uncacheable on run 32047903054). The project ships zero modules, so scanning buys nothing here."
+ok "the wheel build keeps C++20 module scanning OFF (the cache is a no-op without it)"
+
 # ── ident: malformed values must be REFUSED at the source ────────────────────
 #
 # The guard is not decorative. `$GITHUB_OUTPUT` carries `key=value` on ONE line,
