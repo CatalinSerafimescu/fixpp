@@ -44,12 +44,18 @@
 #
 # ── WHY OPENSSL CARRIES THE POSITIVE ASSERTION ───────────────────────────────
 #
-# `libcrypto.a` / `libssl.a` are the only pure-C archives present on EVERY lane:
-# openssl is a direct `requires` in conanfile.py, while zlib, curl and civetweb
-# arrive transitively through opentelemetry-cpp, which the three Tier 3 libc++
-# profiles switch OFF (`with_otel=False`, see their headers). Asserting on an
-# archive that is absent by design on half the lanes would need a per-lane
-# exception list — a second census, and the wrong one to maintain.
+# `libcrypto.a` / `libssl.a` are the ones guaranteed on EVERY lane: openssl is a
+# direct `requires` in conanfile.py. `libcurl.a` and `libcivetweb.a` arrive
+# transitively through opentelemetry-cpp, which the three Tier 3 libc++ profiles
+# switch OFF (`with_otel=False`, see their headers), so they are absent there.
+# Asserting on an archive that is absent by design on half the lanes would need a
+# per-lane exception list — a second census, and the wrong one to maintain.
+#
+# ⚠️ `libz.a` IS NOT ONE OF THE OTEL-ONLY ONES, and the first version of this
+# comment said it was. Measured on the Tier 3 libc++-ubsan leg of run 32069887717
+# — `with_otel=False` — zlib is present anyway (357 symbols), because it reaches
+# the graph through openssl. It stays in the reported set for the UBSan reason
+# below, not for an availability reason.
 #
 # ⚠️ AND BECAUSE UBSan's FOOTPRINT IS OPERATION-DEPENDENT, NOT PER-TU. `-fsanitize=
 # thread` and `-fsanitize=address` instrument every function, so any non-trivial

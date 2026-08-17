@@ -15,11 +15,14 @@ compiler.cppstd=23
 CC=clang-22
 CXX=clang++-22
 CXXFLAGS=-fsanitize=undefined -fno-omit-frame-pointer
+# CFLAGS mirrors CXXFLAGS — see linux-clang-asan for the full #252 rationale.
+CFLAGS=-fsanitize=undefined -fno-omit-frame-pointer
 LDFLAGS=-fsanitize=undefined
 
 [conf]
 tools.cmake.cmaketoolchain:generator=Ninja
 tools.build:cxxflags=["-fsanitize=undefined", "-fno-omit-frame-pointer"]
+tools.build:cflags=["-fsanitize=undefined", "-fno-omit-frame-pointer"]
 tools.build:sharedlinkflags=["-fsanitize=undefined"]
 tools.build:exelinkflags=["-fsanitize=undefined"]
 # See linux-clang-asan for rationale on tools.info.package_id:confs.

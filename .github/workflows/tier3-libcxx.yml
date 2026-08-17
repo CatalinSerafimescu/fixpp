@@ -353,11 +353,15 @@ jobs:
       # keeps paying for; see ci/expected-sanitizer-reports.txt's header, where an
       # allowlist enumerated `linux-clang-asan` and missed `linux-clang-libc++-asan`.
       #
-      # ⚠️ THESE LANES CARRY `-o fixpp/*:with_otel=False`, so zlib, curl and
-      # civetweb are NOT in their closure. That is why the checker asserts on
-      # openssl (a direct `requires`, present everywhere) and merely REPORTS the
-      # others — an assertion keyed to an archive that is absent by design here
-      # would need a per-lane exception list. See the script's header.
+      # ⚠️ THESE LANES CARRY `-o fixpp/*:with_otel=False`, so curl and civetweb
+      # are NOT in their closure. That is why the checker asserts on openssl (a
+      # direct `requires`, present everywhere) and merely REPORTS the others — an
+      # assertion keyed to an archive that is absent by design here would need a
+      # per-lane exception list. See the script's header.
+      #
+      # zlib is NOT in that absent set, contrary to the obvious guess: measured on
+      # run 32069887717 it is present on this lane (357 symbols) because it
+      # reaches the graph through openssl rather than through OTel.
       - name: Assert the dependency closure is instrumented (#252)
         run: ci/assert-sanitized-deps.sh "${{ matrix.preset }}" "build/${{ matrix.preset }}"
 

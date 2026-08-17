@@ -591,6 +591,14 @@ jobs:
       # Placed here — after `conan install`, before configure/build — so a lane
       # whose closure is wrong fails in seconds rather than after a full build.
       # ci/test-sanitized-deps.sh pins the checker itself in `ci-script-pins`.
+      #
+      # ⚠️ IT ALSO SITS BEFORE THE GHCR SAVE STEPS, and that is deliberate rather
+      # than incidental: a RED here means the closure this run produced is not the
+      # one the profile asks for, and seeding it into the shared cache would hand
+      # every later run the same wrong binaries with a `HIT` to make them look
+      # earned. The cost is that a failing gate on `push:main` also forgoes that
+      # run's cache seeding — accepted, because the alternative is publishing a
+      # closure the gate has just rejected.
       - name: Assert the dependency closure is instrumented (#252)
         run: ci/assert-sanitized-deps.sh "${{ matrix.preset }}" "build/${{ matrix.preset }}"
 

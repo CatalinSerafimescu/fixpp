@@ -16,11 +16,21 @@ compiler.cppstd=23
 CC=clang-22
 CXX=clang++-22
 CXXFLAGS=-fsanitize=thread
+# CFLAGS mirrors CXXFLAGS — see linux-clang-asan for the full #252 rationale.
+# This is the lane the defect was MEASURED on: libcrypto.a 50,830 symbols and
+# zero __tsan_*, likewise libz/libssl/libcurl/libcivetweb, while the two C++
+# archives (libcivetweb-cpp.a, libpugixml.a) were instrumented — which is why it
+# went unnoticed. Under TSan the gap is not merely missing coverage: the
+# sanitizer cannot see accesses OR synchronisation performed in uninstrumented
+# code, so it produces false negatives and can report false positives on
+# correctly-synchronised data.
+CFLAGS=-fsanitize=thread
 LDFLAGS=-fsanitize=thread
 
 [conf]
 tools.cmake.cmaketoolchain:generator=Ninja
 tools.build:cxxflags=["-fsanitize=thread"]
+tools.build:cflags=["-fsanitize=thread"]
 tools.build:sharedlinkflags=["-fsanitize=thread"]
 tools.build:exelinkflags=["-fsanitize=thread"]
 # See linux-clang-asan for rationale on tools.info.package_id:confs.
