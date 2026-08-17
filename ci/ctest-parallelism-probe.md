@@ -146,29 +146,53 @@ no pin (#229's lane table does not cover it), rendered `DIAGNOSTIC ONLY` as
 designed, and its basis (369 — it runs the packaging tier the other five exclude)
 is now recorded from this run rather than guessed from a sibling.
 
-##### The instrument's own repeatability — measured on UNCHANGED lanes
+##### ⛔ REPEATABILITY — MEMORY IS SOLID, TIMING IS NOT, AND THE DIFFERENCE DECIDES WHAT THIS DOCUMENT MAY CLAIM
 
-Run `32011816399` re-ran two lanes that this work does not touch, at the same
-`jobs` as before, on the same C++ tree. Their spread is the instrument's noise
-floor, and it is needed before any delta elsewhere can be called real:
+Runs A/B/C re-ran several lanes at **unchanged configuration** on the same C++
+tree. Each matrix leg gets its **own VM**, so this spread is what any comparison
+of two separate runs must clear:
 
-| lane | runs | peak | wall | spread |
-|---|---|---|---|---:|
-| `linux-clang-release` (serial) | A, C | 0.369 → 0.379 GiB | ~251 → 258.4 s | **2.8 % / 2.9 %** |
-| `linux-gcc-release` (serial) | B, C | 0.3820 → 0.3817 GiB | 307.7 → 305.0 s | **0.08 % / 0.9 %** |
+| lane (unchanged config) | samples | wall spread | peak RSS spread |
+|---|---:|---:|---:|
+| `linux-gcc-release` (305–308 s) | 2 | **0.9 %** | 0.08 % |
+| `linux-clang-release` (251–258 s) | 2 | **2.9 %** | 2.8 % |
+| `linux-clang-asan` (1553–1980 s) | 2 | **27.5 %** | 1.7 % |
+| `linux-clang-tsan` @ j=2 (1376–2160 s) | 3 | **43.3 %** | 0.7 % |
 
-⚠️ **This is NOT the same quantity as the 6.91 % band** quoted against the
-phase-1 result. That band is `linux-clang-tsan`'s run-to-run variance *while
-running in parallel*, where makespan depends on how tests happen to pack — a
-property the original probe itself introduced (recorded further down this
-document). A **serial** lane has no packing freedom, which is why it reproduces
-to ~1–3 %.
+**Two different conclusions, and they must not be merged:**
 
-Both figures are therefore right for their own case, and the phase-1 comparison
-correctly used the parallel one: a j=2-vs-j=4 delta must clear the noise of a
-*parallel* lane, not of a serial one. What these two rows add is that the
-**instrument** is not the source of that noise — it reproduces a peak to 0.08 %
-on an unchanged workload.
+* **Peak RSS reproduces to under 2 % everywhere**, on light and heavy lanes
+  alike. #266's instrument is sound and its figures are usable as recorded.
+* **Wall-clock on the heavy lanes does not reproduce at all** — 27–43 % between
+  VMs. On those lanes a comparison of two separate CI runs measures the runner,
+  not the change.
+
+⚠️ **An earlier revision of this section claimed a "~1–3 % serial noise floor"
+and is CORRECTED, not merely extended.** That figure was taken from the two
+lightest lanes in the matrix (250–310 s) and then reasoned about as though it
+applied to serial lanes generally. `linux-clang-asan` is also serial and spreads
+**27.5 %**. Variance tracks lane WEIGHT, not the serial/parallel distinction the
+old text used to organise it — the light lanes are simply not stressed enough to
+expose the VM.
+
+⚠️ **The 6.91 % figure recorded further down this document is likewise not a
+usable floor.** It came from three runs in one sitting and is an order of
+magnitude below what three later samples of the same lane and the same `jobs`
+setting show (1903 / 2160 / 1376 s). Treat it as a historical measurement of
+three particular runs, never as a bound.
+
+##### Consequence: every UNPAIRED throughput comparison in this document is withdrawn
+
+Any A/B that compares one lane in run X against the same lane in run Y is
+confounded by the VM. The paired design that replaces it runs **both
+configurations back-to-back in ONE job on ONE VM**, driven by `--parallel N` on
+the command line (which overrides a preset's `execution.jobs` — verified by
+explicit local probe, recorded under "Two guards worth recording" in #229).
+
+⚠️ **Pass order is load-bearing: j=4 first, j=1 second.** The second pass runs
+against a warm OS page cache, so this order biases toward the SERIAL baseline and
+any surviving j=4 advantage is a **lower bound**. The opposite order would
+flatter the parallel pass — i.e. manufacture the result being tested for.
 
 ##### Two independent cross-validations of the instrument
 
@@ -250,14 +274,26 @@ adjacent in time. **This is the controlled A/B.**
 **The widening worked and was not worth having.** Concurrency rose exactly as
 intended — 2.73× is comfortably above the 2.2–2.6× acceptance band, so this is
 not a case of the field failing to take effect. What did not happen is the
-saving: **−3.5 % sits inside this lane's own 6.91 % run-to-run variance** (a
-figure this document already records, and one the probe itself caused), so on one
-sample per configuration the wall-clock change is **not distinguishable from
-noise**.
+saving.
 
-The cost, by contrast, is far outside noise on both axes: **+44 % total per-test
-wall-time** and **+36 % peak memory**. Contention ate the entire concurrency
-gain. Reverted to `jobs: 2`.
+⚠️ **THE ORIGINAL WORDING HERE WAS "−3.5 % sits inside this lane's own 6.91 %
+run-to-run variance". THAT IS WITHDRAWN — the true figure is far worse, and the
+conclusion survives only because it got worse.** Three samples of THIS lane at
+THIS `jobs: 2` setting, on the same tree, are **1903 / 2160 / 1376 s** —
+range/mean **43.3 %**. The two runs compared above are two different VMs. A
+−3.5 % delta against a 43 % floor does not measure anything at all; the honest
+statement is not "inside the noise band" but **"this comparison could not have
+detected an effect of any size a widening would plausibly produce"**.
+
+The costs, by contrast, are stable across VMs and remain trustworthy — peak RSS
+reproduces to 0.7 % on this lane, so **+36 % peak memory** is real. The **+44 %
+summed per-test wall-time** is an intra-run ratio, also unaffected by VM speed.
+
+So the disposition is unchanged and its warrant is stronger: measurable cost,
+**unmeasurable** benefit. Reverted to `jobs: 2`.
+
+Anything that wants to overturn this must use the paired same-VM design
+described above, not another pair of separate runs.
 
 ##### The premise that failed, and it is not the memory one
 
@@ -324,6 +360,12 @@ coincidentally, so the 40 ms / 100 ms / 200 ms-slack wall-clock assertions were 
 co-runner.
 
 ### A side effect worth recording
+
+⚠️ **THE 6.91 % FIGURE BELOW IS NOT A NOISE FLOOR — see the #266 section
+above.** Three later samples of this same lane at this same `jobs: 2` setting
+measured 1903 / 2160 / 1376 s, i.e. **43.3 %** range/mean. 6.91 % describes three
+particular runs in one sitting; it is not a bound and must not be used to accept
+or reject a delta.
 
 Run-to-run variance on this lane rose from **1.69% → 6.91%** (range/mean, three runs). That is expected —
 makespan now depends on how tests happen to pack rather than on a fixed serial sum — but it has a
