@@ -43,6 +43,17 @@ fi
 # tomllib is stdlib from 3.11; the wheel job sets up 3.12. Parsing the real TOML
 # rather than grepping the line means a reformat, a comment mentioning the key,
 # or a moved table cannot silently yield the wrong string.
+# ⚠️ STDERR GOES TO A FILE, NOT INTO THE VALUE. An earlier draft used `2>&1`
+# for the sake of the error path, which contaminates the SUCCESS path: any
+# Python warning on stderr would land INSIDE $IMAGE_REF. The `*@sha256:*` guard
+# below would still match (the ref is in there somewhere), so it would pass —
+# and then a multi-line value written to $GITHUB_OUTPUT as `key=value` truncates
+# at the first newline, handing restore and seed a mangled reference. The minter
+# then refuses it and the lane takes a permanent MISS: precisely the failure
+# ci/ccache-cache-key.sh's header is written about.
+ERR="$(mktemp)"
+trap 'rm -f "$ERR"' EXIT
+
 IMAGE_REF="$(
   python3 -c '
 import sys, tomllib
@@ -52,8 +63,18 @@ try:
     print(cfg["tool"]["cibuildwheel"]["manylinux-x86_64-image"])
 except KeyError:
     raise SystemExit("manylinux-x86_64-image is not set in [tool.cibuildwheel]")
-' "$PYPROJECT" 2>&1
-)" || { echo "wheel-ccache-ident: $IMAGE_REF" >&2; exit 1; }
+' "$PYPROJECT" 2>"$ERR"
+)" || { echo "wheel-ccache-ident: $(cat "$ERR")" >&2; exit 1; }
+
+# Exactly ONE line, and exactly the shape `$GITHUB_OUTPUT` can carry as a plain
+# `key=value`. Asserting the shape here means a malformed value can never reach
+# three consumers; a bare `key=value` cannot express a multi-line string, so a
+# second line would be silently dropped rather than reported.
+if [ "$(printf '%s' "$IMAGE_REF" | wc -l)" -ne 0 ] \
+   || ! printf '%s' "$IMAGE_REF" | grep -qE '^[^[:space:]]+@sha256:[0-9a-f]{64}$'; then
+  echo "wheel-ccache-ident: manylinux-x86_64-image did not resolve to a single, well-formed digest-pinned reference. Got: $(printf '%s' "$IMAGE_REF" | head -3)" >&2
+  exit 1
+fi
 
 # Fail closed on a floating reference HERE as well as in the minter. The minter
 # is the authority, but catching it at the source gives the error next to the

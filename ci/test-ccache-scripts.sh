@@ -14,7 +14,7 @@
 #
 # Shims `oras`, `ccache`, `gh` and the compiler on a temp PATH, builds a
 # throwaway CMakePresets.json, and drives the REAL scripts —
-# ci/{ccache-cache-key,restore-ccache,seed-ccache,ccache-stats}.sh — through
+# ci/{ccache-cache-key,restore-ccache,seed-ccache,ccache-stats,wheel-ccache-ident,assert-wheel-image}.sh — through
 # every disposition each one can reach.
 #
 # ── WHY EVERY CASE ASSERTS TWO THINGS ────────────────────────────────────────
@@ -410,6 +410,97 @@ ok "the wheel lane name agrees with the container-lane enumeration"
 ( . "$KEYSH" && ccache_container_cache_key "$IDENT_LANE" "$IDENT_REF" ) >/dev/null 2>&1 \
   || fail "the pinned image reference in pyproject.toml ('$IDENT_REF') is not one ccache_container_cache_key accepts"
 ok "the image reference pinned in pyproject.toml is digest-pinned and mintable"
+
+# ── ident: malformed values must be REFUSED at the source ────────────────────
+#
+# The guard is not decorative. `$GITHUB_OUTPUT` carries `key=value` on ONE line,
+# so a multi-line or malformed value is silently TRUNCATED rather than reported,
+# and the mangled ref reaches restore and seed — a permanent MISS, which is
+# indistinguishable from "ccache didn't help".
+ident_with() {  # $1 = the manylinux-x86_64-image value, verbatim
+  local tmp="$sandbox/pp-$RANDOM.toml"
+  { echo '[tool.cibuildwheel]'; echo "manylinux-x86_64-image = $1"; } > "$tmp"
+  run "$CI_DIR/wheel-ccache-ident.sh" "$tmp"
+}
+
+ident_with '"manylinux_2_28"'
+want_status 1 "ident/floating-alias"
+ok "ident refuses a floating alias (a moving toolchain under a stable tag)"
+
+# Passes a naive `*@sha256:*` substring test, fails the real grammar.
+ident_with '"quay.io/pypa/manylinux_2_28_x86_64@sha256:012f4a50"'
+want_status 1 "ident/short-digest"
+ok "ident refuses a truncated digest that a substring check would accept"
+
+ident_with '"quay.io/pypa/manylinux_2_28_x86_64@sha256:012f4a50472412f18bb2b450c1cce7158434cfae4ae878591c2748a13a30c2be"'
+want_status 0 "ident/well-formed"
+want_out '@sha256:012f4a50' "ident/well-formed"
+ok "ident accepts a well-formed digest-pinned reference"
+
+# ── ci/assert-wheel-image.sh — driven through BOTH outcomes ──────────────────
+#
+# ⚠️ A VERIFICATION GREP PROVEN ONLY GREEN IS NOT AN ASSERTION. The failing
+# case is asserted first, because that is the one whose absence would make this
+# whole step decorative — a pin that is silently ignored keys the lane's ccache
+# to a toolchain that is not compiling the wheel, and nothing else notices.
+WI_LOG="$sandbox/cibw.log"
+
+cat > "$WI_LOG" <<EOF
+info: something before
+Starting container image $IDENT_REF...
+info: This container will host the build for cp310-manylinux_x86_64...
+EOF
+run "$CI_DIR/assert-wheel-image.sh" "$WI_LOG" "$IDENT_REF"
+want_status 0 "assert-wheel-image/match"
+want_out 'matched 1 line' "assert-wheel-image/match"
+ok "the pinned-image assertion passes when cibuildwheel started the pinned image"
+
+# The RED case: the log shows a DIFFERENT digest — i.e. the pin was ignored and
+# cibuildwheel fell back to its own. This is the real-world shape (cibuildwheel
+# `main` pins the same alias to f854c50a…, so this is not a synthetic string).
+cat > "$WI_LOG" <<'EOF'
+Starting container image quay.io/pypa/manylinux_2_28_x86_64@sha256:f854c50adf7b7a325bc4794316f3758d387a41d61f9e2ebca0f26c7dc8f761d4...
+EOF
+run "$CI_DIR/assert-wheel-image.sh" "$WI_LOG" "$IDENT_REF"
+want_status 1 "assert-wheel-image/wrong-digest"
+want_out 'did NOT start the pinned image' "assert-wheel-image/wrong-digest"
+ok "the pinned-image assertion goes RED when a DIFFERENT digest was started"
+
+# A log that does not mention the image at all must also fail — a silent
+# cibuildwheel change that stops printing the line must not read as success.
+: > "$WI_LOG"
+run "$CI_DIR/assert-wheel-image.sh" "$WI_LOG" "$IDENT_REF"
+want_status 1 "assert-wheel-image/silent"
+ok "the pinned-image assertion goes RED when the log never names an image"
+
+# A missing log is 'unverified', not 'fine'.
+run "$CI_DIR/assert-wheel-image.sh" "$sandbox/no-such.log" "$IDENT_REF"
+want_status 1 "assert-wheel-image/missing-log"
+want_out 'could not run' "assert-wheel-image/missing-log"
+ok "a missing cibuildwheel log fails the assertion rather than passing it"
+
+# ⚠️ NO CONFIDENT WRONG CAUSE ON AN UNRELATED BUILD FAILURE. If the build dies
+# before any container starts — disk, Conan, a compile error — there is no image
+# line, and blaming the PIN would stack a specific false attribution on top of
+# the real failure. That is the class PR #245 exists to remove and was itself
+# caught shipping four times.
+: > "$WI_LOG"
+run "$CI_DIR/assert-wheel-image.sh" "$WI_LOG" "$IDENT_REF" "failure"
+want_status 0 "assert-wheel-image/build-failed"
+want_out 'NO claim is made about the pin' "assert-wheel-image/build-failed"
+want_no_out 'not taking effect' "assert-wheel-image/build-failed"
+ok "a failed build yields a report, not an attribution to the pin"
+
+# …but a build that FAILED LATE while still having started the right image must
+# not be turned into a false green either — the pin evidence is present, so the
+# assertion still passes on its own terms.
+cat > "$WI_LOG" <<EOF
+Starting container image $IDENT_REF...
+EOF
+run "$CI_DIR/assert-wheel-image.sh" "$WI_LOG" "$IDENT_REF" "failure"
+want_status 0 "assert-wheel-image/build-failed-but-image-seen"
+want_out 'matched 1 line' "assert-wheel-image/build-failed-but-image-seen"
+ok "a late build failure still reports the pin evidence that IS present"
 
 # ═════ ci/restore-ccache.sh ══════════════════════════════════════════════════
 echo "── restore-ccache.sh ──"
@@ -967,4 +1058,4 @@ want_out 'is not a non-negative integer percent' "stats/floor-malformed"
 ok "a malformed hit-floor is rejected rather than silently disabling the check"
 
 echo
-echo "PASS: $pass assertions over ci/{ccache-cache-key,restore-ccache,seed-ccache,ccache-stats}.sh — scripts: $CI_DIR"
+echo "PASS: $pass assertions over ci/{ccache-cache-key,restore-ccache,seed-ccache,ccache-stats,wheel-ccache-ident,assert-wheel-image}.sh — scripts: $CI_DIR"

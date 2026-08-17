@@ -57,25 +57,15 @@ export PATH="$PY:$PATH"
 # cannot be broken by a future image bump, and a compiler cache must NEVER
 # redden a lane whose build and tests pass.
 #
-# Version and digest are pinned and the digest is VERIFIED before the binary is
-# unpacked: this downloads an executable into the container that builds the
-# shipped wheel.
-CCACHE_VERSION=4.13.6
-CCACHE_TARBALL="ccache-${CCACHE_VERSION}-linux-x86_64-musl-static.tar.xz"
-CCACHE_SHA256=156ec57c5198cc849d92834023d09910b83dc5504c6cf405d09e6ae7b208a3e5
-
-(
-  cd /tmp
-  curl -sSLf -o "$CCACHE_TARBALL" \
-    "https://github.com/ccache/ccache/releases/download/v${CCACHE_VERSION}/${CCACHE_TARBALL}"
-  echo "${CCACHE_SHA256}  ${CCACHE_TARBALL}" | sha256sum -c -
-  tar xf "$CCACHE_TARBALL"
-  install -m 0755 "ccache-${CCACHE_VERSION}-linux-x86_64-musl-static/ccache" /usr/local/bin/ccache
-)
-# Fail loudly HERE if the binary cannot run, rather than at the first compile:
-# a missing launcher makes every compiler invocation exit 127, which surfaces as
-# a confusing whole-build failure far from its cause (the #177 / exit-127 shape).
-ccache --version | head -1
+# ⚠️ THE VERSION IS PINNED IN ci/install-ccache.sh AND NOT RESTATED HERE. The
+# host side of this lane installs ccache from that same script, and the two
+# share one bind-mounted CCACHE_DIR — so a version difference between them is a
+# silent failure in the worst direction (a host `--print-stats` that cannot read
+# a container-written cache reports zero cacheable calls, which is
+# indistinguishable from "the cache didn't help"). One file, both sides equal by
+# construction. See that script's header for the EPEL-3.7.7 and static-vs-glibc
+# decisions, both of which were probed in this exact pinned image.
+bash "$PROJECT/ci/install-ccache.sh" /usr/local/bin
 echo "ccache: $(command -v ccache)"
 
 pip install -q "conan>=2"                 # swig/ninja/scikit-build-core come from
