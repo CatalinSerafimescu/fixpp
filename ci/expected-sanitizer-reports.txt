@@ -8,11 +8,20 @@
 #
 # ── WHY AN ALLOWLIST EXISTS AT ALL ───────────────────────────────────────────
 #
-# Because one lane emits a report BY DESIGN, on every single run, forever.
+# Because some lanes emit a report BY DESIGN, on every single run, forever.
 # Without this file the instrument raises "real defect until disproven" on
-# `linux-clang-asan` every run — a permanent false alarm, and a warning that is
+# those lanes every run — a permanent false alarm, and a warning that is
 # always there is a warning nobody reads. That is how an instrument decays into
 # noise, and it would take the genuine signal down with it.
+#
+# ⚠️ THIS FILE IS KEYED PER PRESET, SO ENUMERATE EVERY PRESET THAT RUNS THE
+# CANARY — NOT JUST THE ONE YOU HAPPENED TO LOOK AT. The first version of this
+# file listed only `linux-clang-asan` and missed its Tier 3 twin
+# `linux-clang-libc++-asan`, which runs the SAME deliberate witness under the
+# SAME mechanism. Result: the very instrument this file protects fired a
+# permanent unexplained-report warning on that lane on the run that shipped it
+# (32024674144, job 95371515426) — the exact decay described above, introduced
+# by the fix meant to prevent it. "The asan lane" has more than one spelling.
 #
 # ── WHY IT MATCHES A SIGNATURE AND NOT A COUNT ───────────────────────────────
 #
@@ -57,6 +66,25 @@
 # which CTest does not make cheap.
 linux-clang-asan    ERROR: AddressSanitizer: stack-use-after-return
 
+# ── linux-clang-libc++-asan (Tier 3) ─────────────────────────────────────────
+#
+# THE SAME witness, on the Tier 3 libc++ ASan lane. Same three facts:
+#
+#   test       `CapiSendRecv.InboundHandleUseAfterReturnCaughtUnderAsan`, via the
+#              `capi_send_recv_uaf_negative` ctest entry.
+#   mechanism  `WILL_FAIL TRUE` is gated on `if(FIXPP_ENABLE_ASAN)`
+#              (`tests/capi/CMakeLists.txt:174-176`) — it keys on ASAN BEING ON,
+#              not on the standard library, so this lane registers the negative
+#              entry identically and ctest stays green.
+#   observed   run 32024674144, job 95371515426 (2026-08-17) — exactly 1,
+#              signature byte-identical to the Tier 1 lane's.
+#
+# Same accepted gap as above: anchored to the ASan error KIND, not the test name,
+# so an unrelated stack-use-after-return on this lane would also be treated as
+# expected. Same reasoning — the alternative (a bare `AddressSanitizer:`) would
+# allowlist every ASan error class on the lane.
+linux-clang-libc++-asan    ERROR: AddressSanitizer: stack-use-after-return
+
 # ── No other lane has an expected report ─────────────────────────────────────
 #
 # In particular `linux-clang-ubsan` has NONE, deliberately. Its 1 report on runs
@@ -64,3 +92,12 @@ linux-clang-asan    ERROR: AddressSanitizer: stack-use-after-return
 # `tests/capi/public_roundtrip_test.cpp:129` loads an out-of-range enum — filed
 # as #268 and NOT allowlisted. Allowlisting a real defect to quiet an instrument
 # is the failure this file must never become.
+#
+# ⚠️ THE SAME APPLIES TO `linux-clang-libc++-ubsan`, and it will look exactly
+# like the libc++-asan omission fixed above — a Tier 3 twin warning every run —
+# which makes it tempting to "fix" it the same way. DO NOT. Measured on run
+# 32024674144 (job 95371515603): 1 report, `ran: 356/356`, ctest green. That is
+# #268 reproducing on the libc++ lane, i.e. the finding is NOT libstdc++-specific.
+# The asan twin was an enumeration bug in this file; this one is a real defect in
+# the code. Same symptom, opposite disposition — the difference is whether the
+# report is deliberate, and #268's is not.
