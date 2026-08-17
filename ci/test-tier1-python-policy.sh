@@ -378,6 +378,23 @@ wheel_step_order = [
     {"index": i, "id": str(s.get("id", "")), "name": str(s.get("name", ""))}
     for i, s in enumerate(wheel_steps)
 ]
+wheel_identity_step_names = {
+    "Restore ccache from GHCR",
+    "Assert the pinned manylinux image is the one used",
+    "Save ccache to GHCR (push:main / dispatch on main, cache changed)",
+}
+wheel_identity_steps = [
+    {
+        "name": str(step.get("name", "")),
+        "id":   str(step.get("id", "")),
+        "if":   str(step.get("if", "")),
+        "run":  str(step.get("run", "")),
+        "env":  {str(k): str(v) for k, v in (step.get("env") or {}).items()},
+        "raw_keys": sorted(str(k) for k in step.keys()),
+    }
+    for step in wheel_steps
+    if step.get("name") in wheel_identity_step_names
+]
 _wheel_build_steps = [s for s in wheel_steps if s.get("id") == "wheel_build"]
 assert len(_wheel_build_steps) == 1, len(_wheel_build_steps)
 wheel_build_env = {
@@ -401,6 +418,7 @@ out = {
     "workflow_env": workflow_env,
     "workflow_has_defaults": workflow_has_defaults,
     "wheel_step_order": wheel_step_order,
+    "wheel_identity_steps": wheel_identity_steps,
     "wheel_build_env": wheel_build_env,
 }
 print(json.dumps(out))
@@ -862,6 +880,95 @@ assert_wheel_build_env() {
 The container does not inherit the runner's environment, so CIBW_ENVIRONMENT is the only path CONAN_HOME/CCACHE_* reach it by, and both its values must equal the mount TARGETS declared in the sibling CIBW_CONTAINER_ENGINE on this same step. If this is a deliberate change (a real path or cache-tuning bump), update this golden in the same commit — do not weaken the comparison to a substring or shape check, that is the defect this pin exists to close."
 }
 
+# ── 3d: wheel ccache identity call sites (#270 Gate B r3, R3-F1) ────────────
+#
+# The wheel lane's ccache identity is carried by THREE workflow steps: restore,
+# the pinned-image assertion, and seed. The earlier fix pinned the container
+# build env and the step order, but did not inspect the restore / assert / seed
+# `run:` text at all — measured GREEN through the full policy harness after
+# deleting the restore step's image_ref argument, because the old wheel
+# projection stored only index/id/name.
+#
+# The same per-step object discipline used by linux_steps is mirrored here
+# rather than inventing a special parser: exact run: goldens for the three call
+# sites, exact key sets for the same steps, and the seed step's exact `if:`
+# guard. That closes the actual workflow seam, including the BUILD_OUTCOME
+# argument that stops ci/assert-wheel-image.sh attributing any build failure to
+# the pin.
+WHEEL_IMAGE_ARG_TAIL='  "${{ steps.wheel_ident.outputs.lane }}" \
+  "${{ steps.wheel_ident.outputs.image_ref }}"'
+
+EXPECTED_WHEEL_RESTORE_RUN='echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u "${{ github.actor }}" --password-stdin || true
+ci/restore-ccache.sh \
+'"$WHEEL_IMAGE_ARG_TAIL"
+
+EXPECTED_WHEEL_ASSERT_RUN='ci/assert-wheel-image.sh /tmp/cibuildwheel.log \
+  '"'"'${{ steps.wheel_ident.outputs.image_ref }}'"'"' \
+  '"'"'${{ steps.wheel_build.outcome }}'"'"''
+
+EXPECTED_WHEEL_SEED_IF="(github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')) && steps.ccache_stats.outputs.changed != '0'"
+
+EXPECTED_WHEEL_SEED_RUN='echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u "${{ github.actor }}" --password-stdin
+ci/seed-ccache.sh \
+'"$WHEEL_IMAGE_ARG_TAIL"
+
+assert_wheel_identity_steps() {
+  local json="$1" case_id="$2"
+  local _by_name
+  _by_name="$(echo "$json" | jq -c '[ .wheel_identity_steps[] ]')"
+
+  wheel_step_by_name() {  # <exact name>
+    local _cnt
+    _cnt="$(echo "$_by_name" | jq --arg n "$1" '[ .[] | select(.name == $n) ] | length')"
+    if [ "$_cnt" != "1" ]; then
+      echo "FAIL: $case_id: expected EXACTLY ONE wheel step named '$1', found $_cnt" >&2
+      return 1
+    fi
+    echo "$_by_name" | jq -c --arg n "$1" 'first(.[] | select(.name == $n))'
+  }
+
+  assert_wheel_run_block() {  # <step-json> <expected> <label>
+    local _step="$1" _expected="$2" _label="$3" _got
+    _got="$(echo "$_step" | jq -r '.run // ""')"
+    _got="${_got%"${_got##*[!$'\n']}"}"
+    _expected="${_expected%"${_expected##*[!$'\n']}"}"
+    if [ "$_got" != "$_expected" ]; then
+      fail "$case_id: the wheel step '$_label' run: block does not match the canonical text pinned in this file.
+
+This is a GOLDEN. It reds on ANY change, cosmetic ones included. If the change is intended, update
+the expected text here in the same commit — do not weaken the selector back into content matching.
+
+--- expected
++++ actual
+$(diff <(printf '%s\n' "$_expected") <(printf '%s\n' "$_got") || true)"
+    fi
+  }
+
+  assert_wheel_step_keys() {  # <step-json> <expected comma-separated sorted keys> <label>
+    local _got
+    _got="$(echo "$1" | jq -r '.raw_keys | sort | join(",")')"
+    [ "$_got" = "$2" ] \
+      || fail "$case_id: the wheel step '$3' key set is '$_got', expected exactly '$2'. Step-level keys are NOT part of the run: golden — \`if:\` decides whether the identity call site runs at all, \`continue-on-error:\` can turn a publish failure into a green status, and any added key here is a deliberate pin update."
+  }
+
+  local restore_step assert_step seed_step seed_if
+  restore_step="$(wheel_step_by_name 'Restore ccache from GHCR')" || exit 1
+  assert_step="$(wheel_step_by_name 'Assert the pinned manylinux image is the one used')" || exit 1
+  seed_step="$(wheel_step_by_name 'Save ccache to GHCR (push:main / dispatch on main, cache changed)')" || exit 1
+
+  assert_wheel_run_block "$restore_step" "$EXPECTED_WHEEL_RESTORE_RUN" "Restore ccache from GHCR"
+  assert_wheel_run_block "$assert_step"  "$EXPECTED_WHEEL_ASSERT_RUN"  "Assert the pinned manylinux image is the one used"
+  assert_wheel_run_block "$seed_step"    "$EXPECTED_WHEEL_SEED_RUN"    "Save ccache to GHCR (push:main / dispatch on main, cache changed)"
+
+  assert_wheel_step_keys "$restore_step" "id,name,run" "Restore ccache from GHCR"
+  assert_wheel_step_keys "$assert_step"  "if,name,run" "Assert the pinned manylinux image is the one used"
+  assert_wheel_step_keys "$seed_step"    "continue-on-error,env,if,name,run" "Save ccache to GHCR (push:main / dispatch on main, cache changed)"
+
+  seed_if="$(echo "$seed_step" | jq -r '.["if"] // ""')"
+  [ "$seed_if" = "$EXPECTED_WHEEL_SEED_IF" ] \
+    || fail "$case_id: the wheel seed guard is \`$seed_if\`, expected exactly \`$EXPECTED_WHEEL_SEED_IF\`. The main-ref restriction is load-bearing here: every branch computes the same rolling tag, so a missing \`github.ref == 'refs/heads/main'\` turns any dispatch into an overwrite of main's warm cache."
+}
+
 # The host restore/stats/seed steps and the container's bind mount all read the
 # SAME $CCACHE_DIR (job-level env, tier1.yml:1459) — the mechanism that makes a
 # drifted mount fail LOUD via ccache-stats.sh's zero-cacheable-calls assert
@@ -1003,6 +1110,7 @@ run_full_pin() {
   assert_ci_pin_call_sites "$json" "$case_id"
   assert_linux_job_context "$json" "$case_id"
   assert_wheel_build_env "$json" "$case_id"
+  assert_wheel_identity_steps "$json" "$case_id"
   assert_wheel_build_step_order "$json" "$case_id"
 }
 
@@ -1020,13 +1128,15 @@ echo "PASS: derive-script table + call site + FIXPP_INSTALL_PYTHON=OFF + PY_RE c
 # for a miscount; a counter is. MUTANTS_RUN is incremented by each mutant AFTER
 # it has been proven RED for the right reason, so an early `return` or a mutant
 # silently commented out changes the total.
-MUTANTS_DECLARED=41  # M1 M2 M3 B M4 M5 M6 M7 M11 M14 M15 M21 M26 M27 M29-M45 M47 M48 M49 M50 M51-M55 + M28 (1
+MUTANTS_DECLARED=49  # M1 M2 M3 B M4 M5 M6 M7 M11 M14 M15 M21 M26 M27 M29-M45 M47 M48 M49 M50 M51-M55 M56-M63 + M28 (1
                      # GREEN control; M46 RETIRED at round 9 — its GREEN assertion became false by design) —
                      # DOWN from 27 at round 3b, because the golden subsumed 14 of them. See the RETIRED block
                      # in run_mutant_checks for the list and the reason. M48-M50 added at #270 Gate B r1 (F1):
                      # python-wheel-build's CIBW_ENVIRONMENT + ccache step order had no mutant at all before.
                      # M51-M55 added at #270 Gate B r2 (R2-F1): the substring loop those three replaced never
                      # checked a VALUE on either side of the CIBW_ENVIRONMENT / CIBW_CONTAINER_ENGINE contract.
+                     # M56-M63 added at #270 Gate B r3 (R3-F1): the wheel restore/assert/seed call sites and the
+                     # seed step's main-ref guard were still unpinned at the workflow boundary.
 MUTANTS_RUN=0
 # GREEN controls are counted separately: a summary that calls them RED would be
 # the very over-claim MUTANTS_DECLARED exists to prevent.
@@ -1859,6 +1969,107 @@ old = "-v ${{ env.CCACHE_DIR }}:/host-ccache"
 new = "-v /tmp/fixpp-ccache-wheel:/host-ccache"
 assert t.count(old) == 1, t.count(old)
 open(dst, "w").write(t.replace(old, new))
+'
+
+  # ── M56-M63 (#270 Gate B r3, R3-F1): wheel restore/assert/seed call sites ─
+  # M48-M55 pinned the wheel build env and step ordering. These eight prove the
+  # actual workflow boundary that carries the cache identity: the shared
+  # restore/seed image_ref tail, the assert step's BUILD_OUTCOME guard, and the
+  # seed step's main-ref restriction.
+
+  # M56: the restore call drops image_ref. restore-ccache.sh turns that into a
+  # successful MISS, so only the workflow run: golden can see this seam.
+  mutate_workflow M56 "wheel restore drops the image_ref argument" "wheel step 'Restore ccache from GHCR' run: block does not match" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "            \x22${{ steps.wheel_ident.outputs.image_ref }}\x22\n"
+assert t.count(old) >= 2, t.count(old)
+open(dst, "w").write(t.replace(old, "", 1))
+'
+
+  # M57: the seed call drops image_ref. seed-ccache.sh then exits 0 having
+  # published nothing, so the wheel seed call site itself must be pinned.
+  mutate_workflow M57 "wheel seed drops the image_ref argument" "wheel step 'Save ccache to GHCR \\(push:main / dispatch on main, cache changed\\)' run: block does not match" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "            \x22${{ steps.wheel_ident.outputs.image_ref }}\x22\n"
+assert t.count(old) >= 2, t.count(old)
+head, tail = t.rsplit(old, 1)
+open(dst, "w").write(head + tail)
+'
+
+  # M58: restore gets a DIFFERENT second argument on one side only. Publish/pull
+  # agreement is then broken even though both steps still pass two arguments.
+  mutate_workflow M58 "wheel restore uses github.sha instead of image_ref" "wheel step 'Restore ccache from GHCR' run: block does not match" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "            \x22${{ steps.wheel_ident.outputs.image_ref }}\x22\n"
+new = "            \x22${{ github.sha }}\x22\n"
+assert t.count(old) >= 2, t.count(old)
+open(dst, "w").write(t.replace(old, new, 1))
+'
+
+  # M59: the same one-sided drift on publish instead of pull.
+  mutate_workflow M59 "wheel seed uses github.sha instead of image_ref" "wheel step 'Save ccache to GHCR \\(push:main / dispatch on main, cache changed\\)' run: block does not match" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "            \x22${{ steps.wheel_ident.outputs.image_ref }}\x22\n"
+new = "            \x22${{ github.sha }}\x22\n"
+assert t.count(old) >= 2, t.count(old)
+head, tail = t.rsplit(old, 1)
+tail = new + tail
+open(dst, "w").write(head + tail)
+'
+
+  # M60: the assert call drops BUILD_OUTCOME. That silently discards the guard
+  # that stops ci/assert-wheel-image.sh blaming any build failure on the pin.
+  mutate_workflow M60 "wheel image assertion drops BUILD_OUTCOME" "wheel step 'Assert the pinned manylinux image is the one used' run: block does not match" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "            \x27${{ steps.wheel_build.outcome }}\x27\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, ""))
+'
+
+  # M61: the seed step loses its main-ref guard on workflow_dispatch. That is
+  # the load-bearing gate on this rolling tag namespace.
+  mutate_workflow M61 "wheel seed if: drops the main ref restriction" "wheel seed guard is" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "        if: (github.event_name == \x27push\x27 || (github.event_name == \x27workflow_dispatch\x27 && github.ref == \x27refs/heads/main\x27)) && steps.ccache_stats.outputs.changed != \x270\x27\n"
+new = "        if: (github.event_name == \x27push\x27 || github.event_name == \x27workflow_dispatch\x27) && steps.ccache_stats.outputs.changed != \x270\x27\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
+'
+
+  # M62: the assert step stops checking the pinned image ref and instead checks
+  # the lane name. Missing the second argument is fail-closed; a wrong one is not.
+  mutate_workflow M62 "wheel image assertion uses the lane instead of image_ref" "wheel step 'Assert the pinned manylinux image is the one used' run: block does not match" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "            \x27${{ steps.wheel_ident.outputs.image_ref }}\x27 \\\n"
+new = "            \x27${{ steps.wheel_ident.outputs.lane }}\x27 \\\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
+'
+
+  # M63: the assert step drops image_ref entirely. Under set -eu that reds
+  # fail-closed today, but the workflow pin must still prove it reads this call
+  # site rather than relying on the script's own usage error.
+  mutate_workflow M63 "wheel image assertion drops image_ref" "wheel step 'Assert the pinned manylinux image is the one used' run: block does not match" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "            \x27${{ steps.wheel_ident.outputs.image_ref }}\x27 \\\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, ""))
 '
 
 }

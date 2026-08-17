@@ -332,11 +332,12 @@ ok "the pruner's regex still accepts the minter's 'unknown major' fallback tag"
 # script, nothing about either grammar is restated here.
 KEYSH="$CI_DIR/ccache-cache-key.sh"
 PINNED_REF='quay.io/pypa/manylinux_2_28_x86_64@sha256:012f4a50472412f18bb2b450c1cce7158434cfae4ae878591c2748a13a30c2be'
+EXPECTED_CONTAINER_TAG='ccache-wheel-manylinux228-012f4a50'
 
 CTAG="$( . "$KEYSH" && ccache_container_cache_key 'wheel-manylinux228' "$PINNED_REF" >/dev/null 2>&1 && printf '%s' "$CCACHE_CACHE_TAG" )"
 [ -n "$CTAG" ] || fail "container/mint: ccache_container_cache_key produced no tag for a well-formed pinned reference"
 case "$CTAG" in
-  'ccache-wheel-manylinux228-012f4a50') ok "container tag is lane + the pinned image digest's first 8 hex" ;;
+  "$EXPECTED_CONTAINER_TAG") ok "container tag is lane + the pinned image digest's first 8 hex" ;;
   *) fail "container/mint: tag '$CTAG' is not the documented grammar" ;;
 esac
 
@@ -693,6 +694,17 @@ want_no_out 'precondition was NOT verified' "restore/hit"
 [ -f "$CDIR/aa/entry" ] || fail "restore/hit: the archive content was not swapped into CCACHE_DIR"
 ok "HIT — archive extracted, swapped in, hit=true"
 
+# The container lane must address the LITERAL pinned-image tag through the real
+# restore/seed scripts, not just through ccache_resolve_key in isolation. This
+# is the non-vacuous witness for the dispatcher each side calls.
+rm -rf "$CDIR"
+FAKE_EXPECTED_REF="$IMAGE:$EXPECTED_CONTAINER_TAG" FAKE_ORAS_PULL_MODE=ok FAKE_PRESET=wheel-manylinux228 \
+CCACHE_DIR="$CDIR" \
+  run "$CI_DIR/restore-ccache.sh" wheel-manylinux228 "$PINNED_REF"
+want_status 0 "restore/container-tag"; want_hit true "restore/container-tag"
+want_out "$EXPECTED_CONTAINER_TAG" "restore/container-tag"
+ok "container restore addresses the literal pinned-image tag, not an empty or host-probed key"
+
 # ── The run-me-before-anything-compiles precondition ────────────────────────
 #
 # Nonzero cacheable calls before the restore means the step was reordered below
@@ -813,6 +825,16 @@ want_out 'ccache-cache archive' "seed/ok"
 want_out 'cap `2G`' "seed/ok"
 grep -q "ccache-fake-libc++.tar" "$PUSH_RECORD" || fail "seed/ok: nothing was pushed"
 ok "SEEDED — archive published, size + cap reported"
+
+rm -rf "$CDIR"; mkdir -p "$CDIR/aa"; printf 'x\n' > "$CDIR/aa/entry"
+: > "$PUSH_RECORD"
+FAKE_EXPECTED_REF="$IMAGE:$EXPECTED_CONTAINER_TAG" FAKE_KEEP_TAG="$EXPECTED_CONTAINER_TAG" \
+FAKE_PUSH_RECORD="$PUSH_RECORD" CCACHE_DIR="$CDIR" CCACHE_MAXSIZE="2G" \
+  run "$CI_DIR/seed-ccache.sh" wheel-manylinux228 "$PINNED_REF"
+want_status 0 "seed/container-tag"
+want_out "ccache-cache SEEDED \`$EXPECTED_CONTAINER_TAG\`" "seed/container-tag"
+grep -q "ccache-wheel-manylinux228.tar" "$PUSH_RECORD" || fail "seed/container-tag: nothing was pushed for the container lane"
+ok "container seed addresses the literal pinned-image tag, not an empty or host-probed key"
 
 # ── 3a/F4 — THE SIZING DATUM FAILING MUST NOT ABORT THE PUBLISH ──────────────
 #
@@ -1195,7 +1217,19 @@ write_stats 0 0 1461 10 512000 0
 stats_case false success 60
 want_status 0 "stats/floor-miss-exempt"
 want_no_out 'HIT-FLOOR BREACHED' "stats/floor-miss-exempt"
+want_no_out 'satisfied' "stats/floor-miss-exempt"
+want_out 'NOT evaluated' "stats/floor-miss-exempt"
 ok "hit floor is EXEMPT on a restore MISS — a cold/seeding run at 0% stays green"
+
+write_stats 0 0 1461 10 512000 0
+FAKE_STATS_FILE="$STATS_FILE" FAKE_PRINT_STATS_EXIT="${PS_EXIT:-0}" \
+FAKE_SHOW_STATS_EXIT="${SS_EXIT:-0}" CCACHE_DIR="$CDIR" \
+  run "$CI_DIR/ccache-stats.sh" fake-libc++ "" success 60
+want_status 0 "stats/floor-no-restore-step"
+want_no_out 'satisfied' "stats/floor-no-restore-step"
+want_out 'restore=`n/a`' "stats/floor-no-restore-step"
+want_out 'NOT evaluated' "stats/floor-no-restore-step"
+ok "hit floor is also not evaluated when the restore step did not report a disposition"
 
 # The breach itself: a cache was pulled and then matched almost nothing.
 write_stats 100 0 1361 10 512000 0

@@ -261,6 +261,10 @@ if [ -n "${HIT_FLOOR:-}" ]; then
     echo "::error::ccache HIT-FLOOR BREACHED on ${PRESET}: restore reported a HIT, but only ${rate}% of ${calls} cacheable calls were served (floor ${HIT_FLOOR}%). This lane opted into the floor because it has a warm baseline, so a restored-but-unmatched cache is a regression, not noise — the usual causes are a toolchain change the cache tag did not follow, a flag change, or a build-path change. A cold/MISS run is exempt by construction and cannot reach this branch."
     exit 1
   fi
-  note "ccache: hit-floor ${HIT_FLOOR}% satisfied on ${PRESET} (rate ${rate}%, restore=\`${RESTORE:-n/a}\`)."
+  if [ "${RESTORE:-}" = "true" ]; then
+    note "ccache: hit-floor ${HIT_FLOOR}% satisfied on ${PRESET} (rate ${rate}%, restore=\`${RESTORE:-n/a}\`)."
+  else
+    note "ccache: hit-floor ${HIT_FLOOR}% NOT evaluated on ${PRESET} — the floor is gated on a restore HIT and restore=\`${RESTORE:-n/a}\` (rate ${rate}%)."
+  fi
 fi
 exit 0
