@@ -160,6 +160,7 @@ SAN_PATTERN='WARNING: ThreadSanitizer:|ERROR: (Address|Leak|Memory)Sanitizer:|ru
 LASTTEST="build/${PRESET}/Testing/Temporary/LastTest.log"
 SAN_COUNT="unreadable"
 SAN_LINES=""
+UNEXPLAINED=""
 if [ -r "$LASTTEST" ]; then
   SAN_COUNT="$(grep -cE "$SAN_PATTERN" "$LASTTEST" 2>/dev/null || true)"
   SAN_COUNT="${SAN_COUNT:-0}"
@@ -168,7 +169,36 @@ if [ -r "$LASTTEST" ]; then
     # can be followed by a 60-frame stack. The cap is stated in the output so a
     # reader is never left thinking they saw all of them.
     SAN_LINES="$(grep -nE "$SAN_PATTERN" "$LASTTEST" 2>/dev/null | head -5 | cut -c1-200)"
-    echo "::warning::#267 acceptance item 5 — ${SAN_COUNT} sanitizer report(s) in ${PRESET}'s LastTest.log on a run whose ctest outcome was '${TEST_OUTCOME}'. A sanitizer report does NOT necessarily fail the test that emitted it. Treat as a real defect until disproven. First matches (line:text, capped at 5, 200 chars):"
+
+    # ── Expected vs UNEXPLAINED ──────────────────────────────────────────────
+    #
+    # One lane emits a report BY DESIGN on every run (the ASan canary — see
+    # ci/expected-sanitizer-reports.txt). Warning on it every time would make
+    # this a permanent false alarm, and a warning that is always on is one
+    # nobody reads. So the warning fires on the UNEXPLAINED count.
+    #
+    # ⚠️ THE LINES ARE PRINTED EITHER WAY. The allowlist decides whether to
+    # WARN, never whether to SHOW — nothing here can hide a report.
+    UNEXPLAINED="$SAN_COUNT"
+    ALLOW_FILE="${HERE}/expected-sanitizer-reports.txt"
+    EXPECTED_PATTERN="$(awk -v p="$PRESET" '$1 == p { sub(/^[^ \t]+[ \t]+/, ""); print }' "$ALLOW_FILE" 2>/dev/null | paste -sd'|' -)"
+    if [ -n "$EXPECTED_PATTERN" ]; then
+      MATCHED_EXPECTED="$(grep -cE "$EXPECTED_PATTERN" "$LASTTEST" 2>/dev/null || true)"
+      UNEXPLAINED=$(( SAN_COUNT - ${MATCHED_EXPECTED:-0} ))
+      # `if/fi`, not `[ … ] && x` — this file runs under `set -uo pipefail`
+      # today so the `&&` form would be harmless, but it is one `set -e` away
+      # from aborting on its own passing branch, and that trap has already been
+      # paid for once in this repo.
+      if [ "$UNEXPLAINED" -lt 0 ]; then
+        UNEXPLAINED=0
+      fi
+    fi
+
+    if [ "$UNEXPLAINED" -gt 0 ]; then
+      echo "::warning::#267 acceptance item 5 — ${UNEXPLAINED} UNEXPLAINED sanitizer report(s) (of ${SAN_COUNT} total) in ${PRESET}'s LastTest.log, on a run whose ctest outcome was '${TEST_OUTCOME}'. A sanitizer report does NOT necessarily fail the test that emitted it — on linux-clang-ubsan it structurally CANNOT (see the UBSan note above and #268). Treat as a real defect until disproven; if it is deliberate, add it to ci/expected-sanitizer-reports.txt with the test, the mechanism and the run. Matches (line:text, capped at 5, 200 chars):"
+    else
+      echo "notice: ${SAN_COUNT} sanitizer report(s) in ${PRESET}'s LastTest.log, all matching ci/expected-sanitizer-reports.txt. Lines below; no unexplained report."
+    fi
     printf '%s\n' "$SAN_LINES"
   fi
 fi
@@ -214,7 +244,7 @@ summary "$HEADING" "" \
   "| sum of per-test durations | ${SUM_S:-unknown} s |" \
   "| **achieved concurrency** | **${CONCURRENCY}** |" \
   "| tests executed | ${RAN:-unknown} (basis ${EXPECTED}) |" \
-  "| sanitizer reports in LastTest.log | ${SAN_COUNT} |" \
+  "| sanitizer reports in LastTest.log | ${SAN_COUNT} (${UNEXPLAINED:-0} unexplained) |" \
   "| Test outcome | ${TEST_OUTCOME} |"
 
 if [ -n "$SAN_LINES" ]; then

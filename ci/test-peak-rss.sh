@@ -260,7 +260,7 @@ echo "== the acceptance disposition =="
 # From here the pin is exercised for real, against a preset line this harness
 # adds to a COPY of the pin file so the shipped one is never mutated.
 PINNED_DIR="$WORK/pinned"; mkdir -p "$PINNED_DIR"
-cp "$MEASURE" "$REPORT" "$PINNED_DIR/"
+cp "$MEASURE" "$REPORT" "$HERE/expected-sanitizer-reports.txt" "$PINNED_DIR/"
 { cat "$HERE/expected-eligible-tests.txt"; printf '%s %s\n' "$FAKE" 3; } > "$PINNED_DIR/expected-eligible-tests.txt"
 
 run_pinned() {
@@ -352,6 +352,40 @@ printf 'all quiet\n' > "$WORK/tree/build/$FAKE/Testing/Temporary/LastTest.log"
 OUT="$(run_pinned success "$WORK/good.env" "$WORK/ctest.log")"
 case "$OUT" in *"sanitizer reports: 0"*) ok "T17 a clean log reads 0";;
                *) bad "T17 a clean log did not read 0: $OUT";; esac
+
+# ── T17b/T17c: EXPECTED reports are not warned about, but ARE still shown ────
+#
+# One lane emits a report by design on every run (the ASan canary,
+# tests/capi/CMakeLists.txt). Warning on it every time is a permanent false
+# alarm, and an always-on warning is one nobody reads — it would take the
+# genuine signal down with it. So the allowlist decides whether to WARN.
+#
+# ⚠️ It must NEVER decide whether to SHOW. T17c is the half that pins that:
+# an allowlist that suppressed output would be a mechanism for hiding a real
+# report behind a benign-looking pattern.
+printf 'ERROR: AddressSanitizer: stack-use-after-return on address 0x60200\n' \
+  > "$WORK/tree/build/$FAKE/Testing/Temporary/LastTest.log"
+{ cat "$HERE/expected-sanitizer-reports.txt"
+  printf '%s %s\n' "$FAKE" 'ERROR: AddressSanitizer: stack-use-after-return'; } \
+  > "$PINNED_DIR/expected-sanitizer-reports.txt"
+OUT="$(run_pinned success "$WORK/good.env" "$WORK/ctest.log")"
+case "$OUT" in *"::warning::#267"*) bad "T17b an allowlisted report still raised the warning — this instrument becomes noise: $OUT";;
+               *) ok "T17b an allowlisted report does not raise the warning";; esac
+case "$OUT" in *"stack-use-after-return on address"*) ok "T17c an allowlisted report is STILL PRINTED (the allowlist gates the warning, not the output)";;
+               *) bad "T17c the allowlist SUPPRESSED the report line — that is a mechanism for hiding a real finding: $OUT";; esac
+
+# ── T17d: an UNEXPECTED report alongside an expected one still warns ─────────
+#
+# This is the fail-open case that ruled out a COUNT pin. With `expect 1`, a
+# canary that stops firing while a real defect appears keeps the count at 1 and
+# the instrument stays silent — the two changes cancel. Matching on the report
+# TEXT cannot cancel: a new finding is a new signature.
+{ printf 'ERROR: AddressSanitizer: stack-use-after-return on address 0x60200\n'
+  printf 'src/real.cpp:9:1: runtime error: signed integer overflow\n'; } \
+  > "$WORK/tree/build/$FAKE/Testing/Temporary/LastTest.log"
+OUT="$(run_pinned success "$WORK/good.env" "$WORK/ctest.log")"
+case "$OUT" in *"1 UNEXPLAINED sanitizer report"*) ok "T17d a new finding beside an allowlisted one is reported as 1 unexplained of 2";;
+               *) bad "T17d a genuine finding was absorbed by the allowlist — the count cancelled out, which is exactly why a count pin was rejected: $OUT";; esac
 
 # ── T18: a MISSING LastTest.log is 'unreadable', never 0 ─────────────────────
 #
@@ -467,6 +501,24 @@ mutant headline-only report \
 mutant count-without-lines report \
   's|^    SAN_LINES="$(grep -nE .*$|    SAN_LINES=""  # MUTANT|' \
   "T16b" "reports how many sanitizer reports there were without saying which lines matched"
+
+# No allowlist at all: the ASan canary then raises "real defect until disproven"
+# on every single run, forever, and the instrument decays into noise.
+mutant no-allowlist report \
+  's|^    EXPECTED_PATTERN="$(awk .*$|    EXPECTED_PATTERN=""  # MUTANT|' \
+  "T17b" "warns on a report that is deliberate and fires every run, making the warning permanent noise"
+
+# The fail-open shape a COUNT pin would have had: once anything is expected,
+# everything is explained. A real finding beside the canary goes silent.
+mutant allowlist-swallows-all report \
+  's|^      UNEXPLAINED=$(( SAN_COUNT - ${MATCHED_EXPECTED:-0} ))$|      UNEXPLAINED=0  # MUTANT|' \
+  "T17d" "treats every report as explained once the lane has any allowlist entry, so a genuine finding beside the canary is silent"
+
+# The allowlist deciding what is SHOWN rather than what is WARNED about — i.e. a
+# mechanism for hiding a real report behind a benign-looking pattern.
+mutant allowlist-suppresses-output report \
+  's|^    printf .%s.n. "$SAN_LINES"$|    if [ "${UNEXPLAINED:-0}" -gt 0 ]; then printf "%s\\n" "$SAN_LINES"; fi  # MUTANT|' \
+  "T17c" "prints the matched lines only when something is unexplained, so an allowlisted pattern hides its own output"
 
 mutant wrong-lasttest-path report \
   's|^LASTTEST="build/${PRESET}/Testing/Temporary/LastTest.log"$|LASTTEST="build/${PRESET}/Testing/LastTest.log"  # MUTANT|' \

@@ -208,6 +208,76 @@ against it). **A post-widening run reporting ~1.8× means the widening did not
 take effect, and its peak would then be a `j=2` reading mislabelled as `j=4`
 evidence** — precisely the class this PR exists to close.
 
+#### ⛔ PHASE 1 RESULT — j=4 MEASURED, REFUTED, AND REVERTED
+
+Run `32007171995`, same branch content as run A modulo CI files, same 361 tests,
+adjacent in time. **This is the controlled A/B.**
+
+| | j=2 (run `32003367497`) | j=4 (run `32007171995`) | delta |
+|---|---:|---:|---:|
+| wall — ctest `Total Test time (real)` | 2160.5 s | 2085.4 s | **−3.5 %** |
+| achieved concurrency | 1.83× | **2.73×** | the widening DID take effect |
+| summed per-test wall-time | 3954 s | **5693 s** | **+44.0 %** |
+| peak concurrent RSS | 1.41 GiB | 1.92 GiB | **+35.5 %** |
+| parallel efficiency | 92 % of j=2 | **68 % of j=4** | collapsed |
+| tests executed | 361 / 361 | 361 / 361 | unchanged |
+| sanitizer reports | 0 | 0 | unchanged |
+
+**The widening worked and was not worth having.** Concurrency rose exactly as
+intended — 2.73× is comfortably above the 2.2–2.6× acceptance band, so this is
+not a case of the field failing to take effect. What did not happen is the
+saving: **−3.5 % sits inside this lane's own 6.91 % run-to-run variance** (a
+figure this document already records, and one the probe itself caused), so on one
+sample per configuration the wall-clock change is **not distinguishable from
+noise**.
+
+The cost, by contrast, is far outside noise on both axes: **+44 % total per-test
+wall-time** and **+36 % peak memory**. Contention ate the entire concurrency
+gain. Reverted to `jobs: 2`.
+
+##### The premise that failed, and it is not the memory one
+
+Every projection in #267 and #229 — the greedy-LPT model *and* the local sweep —
+assumes **per-test durations are invariant under concurrency**. Measured on a
+runner, they are not: they inflate 44 % going from 2 to 4 concurrent TSan
+processes. The memory reasoning was sound and even conservative (projected
+2.35 GiB, measured 1.92); the *throughput* reasoning was not.
+
+⚠️ **The local ratio did not transfer, and "ratios transfer, absolutes do not"
+is exactly what #229 said would hold.** It did not:
+
+| | j=2 → j=4 wall improvement |
+|---|---:|
+| local sweep (`taskset -c 0-3`, 10-CPU / 23 GB host) | 1457.4 → 1057.2 s = **1.38×** |
+| CI (4-vCPU runner) | 2160.5 → 2085.4 s = **1.04× (noise)** |
+
+The likely mechanism, stated as a hypothesis and not a measurement: `taskset`
+restricts *scheduling* to four CPUs but leaves the host's full memory bandwidth,
+L3 and idle neighbours available. TSan is shadow-memory-bound, so four concurrent
+TSan processes saturate a small runner's bandwidth in a way they never do on the
+workstation. **Pinning core count is not pinning a runner.** Nothing here
+measures bandwidth, so this explains rather than proves.
+
+##### What this means for the remaining phases
+
+Efficiency is 92 % at j=2 and 68 % at j=4 on this lane — the curve is already
+flat by 2. j=3 is **not** proposed: interpolating the same contention gives
+≈2063 s, i.e. the same wall time again, so it would cost a 35-minute run to
+re-measure noise.
+
+Phases 2–3 are **not** cancelled by this, but their justification no longer
+carries over from the local sweep and must be re-earned per lane. The lanes most
+likely to behave differently are the ones that are **not** shadow-memory-bound:
+`linux-clang-debug` above all (no sanitizer, local j=1→j=4 2.54×). The sanitizer
+lanes should be assumed to saturate near j=2 until a lane shows otherwise.
+
+⚠️ **One run per configuration.** The wall-clock conclusion is
+"no measurable improvement", NOT "it got worse" — the deltas that are large
+enough to act on are the cost ones. The decision is asymmetric on purpose:
+measurable cost against unmeasurable benefit is a revert, and buying more samples
+to defend a change with no demonstrated upside is not a good use of a 35-minute
+lane.
+
 Not widened here, and each for its own reason: `asan`/`ubsan`/`debug` are phase 2
 and are held until their two unattributed sanitizer reports are resolved;
 `coverage` needs #267 acceptance item 4 (merged coverage shown identical before

@@ -1,0 +1,66 @@
+# Sanitizer reports that are EXPECTED on a given lane, by signature.
+#
+#   <preset>  <extended regex matching the expected report line>
+#
+# Consumed by ci/peak-memory-report.sh, which counts sanitizer reports in
+# build/<preset>/Testing/Temporary/LastTest.log separately from ctest's exit
+# code (a report does not necessarily fail the test that emitted it).
+#
+# ── WHY AN ALLOWLIST EXISTS AT ALL ───────────────────────────────────────────
+#
+# Because one lane emits a report BY DESIGN, on every single run, forever.
+# Without this file the instrument raises "real defect until disproven" on
+# `linux-clang-asan` every run — a permanent false alarm, and a warning that is
+# always there is a warning nobody reads. That is how an instrument decays into
+# noise, and it would take the genuine signal down with it.
+#
+# ── WHY IT MATCHES A SIGNATURE AND NOT A COUNT ───────────────────────────────
+#
+# ⚠️ A count pin (`asan: expect 1`) FAILS OPEN and was rejected for that reason.
+# If the canary stopped firing and a real defect appeared in the same run, the
+# count would still read 1 and the instrument would stay silent — the two
+# changes cancel. Matching on the report TEXT cannot cancel that way: a new
+# finding is a new signature, and a canary that stops firing removes a line that
+# was expected.  Same reasoning as `ci/expected-eligible-tests.txt` choosing
+# exact equality over a floor.
+#
+# ⚠️ An entry here NEVER suppresses output. Every matched report line is printed
+# with the count either way; the allowlist decides only whether the `::warning::`
+# fires. Nothing is hidden — a reader always sees what was found.
+#
+# ── ADDING AN ENTRY ──────────────────────────────────────────────────────────
+#
+# An entry is an assertion that a report is deliberate. It needs: the test that
+# emits it, the mechanism that makes ctest green anyway, and the run it was
+# observed on. If you cannot write those three, it is not expected — it is a
+# finding, and this repo's rule is real-defect-until-disproven.
+
+# ── linux-clang-asan ─────────────────────────────────────────────────────────
+#
+# `CapiSendRecv.InboundHandleUseAfterReturnCaughtUnderAsan` triggers a
+# stack-use-after-return ON PURPOSE, to prove ASan catches it — the
+# canary-proven-RED discipline.  ASan's default `halt_on_error=1` aborts the
+# process, so ctest stays green only because the test is registered as its OWN
+# entry with `WILL_FAIL TRUE` under ASan (`tests/capi/CMakeLists.txt:165-175`).
+# That split is itself deliberate: a binary-wide `WILL_FAIL` would invert a REAL
+# ASan failure in the positive round-trip tests into a pass.
+#
+# Observed on runs 32003367497 and 32007171995 — exactly 1, both times.
+#
+# ⚠️ ANCHORED TO THE ADDRESS-SANITIZER ERROR KIND, NOT TO THE TEST NAME: the
+# report line is ASan's own, and it does not carry the test name. Consequence,
+# stated rather than discovered later: a stack-use-after-return arising ELSEWHERE
+# on this lane would also match and be treated as expected. That is a real gap.
+# It is accepted here because the alternative — matching a bare
+# `AddressSanitizer:` — would allowlist every ASan error class on the lane, which
+# is far worse. Narrowing it further needs per-test attribution in LastTest.log,
+# which CTest does not make cheap.
+linux-clang-asan    ERROR: AddressSanitizer: stack-use-after-return
+
+# ── No other lane has an expected report ─────────────────────────────────────
+#
+# In particular `linux-clang-ubsan` has NONE, deliberately. Its 1 report on runs
+# 32003367497/32007171995 is a GENUINE finding —
+# `tests/capi/public_roundtrip_test.cpp:129` loads an out-of-range enum — filed
+# as #268 and NOT allowlisted. Allowlisting a real defect to quiet an instrument
+# is the failure this file must never become.

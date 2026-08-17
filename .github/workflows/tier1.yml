@@ -1714,7 +1714,7 @@ jobs:
 
       # #266 replaced a peak-memory probe that ran 8 times and measured nothing
       # while exiting 0 every time. Its replacement gets the pre-merge signal the
-      # original never had: 38 cells plus 12 mutants, each mutant proven to redden
+      # original never had: 40 cells plus 15 mutants, each mutant proven to redden
       # the ONE cell that names its defect. Synthetic fixtures only — no build
       # tree, no ctest.
       #
