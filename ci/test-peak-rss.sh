@@ -267,6 +267,26 @@ OUT="$(run_pinned success "$WORK/good.env" "$WORK/short.log")"
 case "$OUT" in *"DIAGNOSTIC ONLY"*) ok "T14 a count mismatch is not evidence (2 against a basis of 3)";;
                *) bad "T14 a run that executed FEWER tests than the basis was labelled evidence — the vacuity guard is dead: $OUT";; esac
 
+# ── T14b: a KILLED ctest cannot be rescued by a decoy in a test's output ─────
+#
+# The reachable shape, and it ends in a FALSE ACCEPTANCE rather than a wrong
+# number. `--output-on-failure` puts arbitrary test output in this log; if ctest
+# is then killed (OOM, job timeout — the `exit 143` this repo has already
+# mistaken for a flake) it never prints its summary. A scan for a bare
+# `out of N` anywhere in the log picks the phrase out of a test's own assertion
+# message, and if that number happens to equal the lane's pin the run is labelled
+# acceptance evidence for a suite that never finished.
+#
+# ⚠️ The decoy must be in a log with NO summary. An earlier draft put it BEFORE
+# a valid summary, where "last match wins" already protects the scan — the cell
+# passed under the broken implementation too, and the mutant proved it useless.
+printf 'ASSERT FAILED: 2 tests passed, 1 tests failed out of 3 in the widget suite\n' \
+  > "$WORK/decoy.log"
+printf 'Killed\n' >> "$WORK/decoy.log"
+OUT="$(run_pinned success "$WORK/good.env" "$WORK/decoy.log")"
+case "$OUT" in *"DIAGNOSTIC ONLY"*) ok "T14b a killed ctest is not evidence, decoy or no decoy";;
+               *) bad "T14b a ctest that never printed a summary was labelled evidence off a decoy in test output: $OUT";; esac
+
 # ── T15: a ctest log with no summary line is never evidence ──────────────────
 printf 'ctest died before printing a summary\n' > "$WORK/truncated.log"
 OUT="$(run_pinned success "$WORK/good.env" "$WORK/truncated.log")"
@@ -388,6 +408,18 @@ mutant swallow-status measure \
 mutant always-evidence report \
   's|^if \[ "$TEST_OUTCOME" = "success" \] && \[ -n "$RAN" \] && \[ "$RAN" = "$EXPECTED" \]; then$|if true; then  # MUTANT|' \
   "T14" "labels every run acceptance evidence, including one that executed the wrong number of tests"
+
+# The pre-tightening form of the workload-size scan: a bare `out of N` anywhere
+# in the log. It reads a failing test's own output as the run's test count.
+mutant bare-out-of report \
+  's|^  RAN="$(awk .match($0, /\^\[0-9\]+% tests passed.*$|  RAN="$(awk '"'"'match($0, /out of [0-9]+/) { n = substr($0, RSTART+7, RLENGTH-7) } END { print n }'"'"' "$CTEST_LOG")"  # MUTANT|' \
+  "T14b" "scans for a bare 'out of N' and so reads a failing test's output as the workload size"
+
+# The intermediate form this script actually shipped for one revision: the whole
+# sentence, but UNANCHORED. A decoy quoting ctest's phrasing walks through it.
+mutant unanchored-summary report \
+  's|^  RAN="$(awk .match($0, /\^\[0-9\]+% tests passed.*$|  RAN="$(awk '"'"'match($0, /tests passed,.* tests failed out of [0-9]+/) { m = substr($0, RSTART, RLENGTH); sub(/.* out of /, "", m); n = m } END { print n }'"'"' "$CTEST_LOG")"  # MUTANT|' \
+  "T14b" "matches ctest's summary sentence anywhere on a line, so a test quoting that phrasing is read as the workload size"
 
 mutant wrong-lasttest-path report \
   's|^LASTTEST="build/${PRESET}/Testing/Temporary/LastTest.log"$|LASTTEST="build/${PRESET}/Testing/LastTest.log"  # MUTANT|' \

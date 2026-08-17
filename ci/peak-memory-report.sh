@@ -97,7 +97,20 @@ RAN=""
 CTEST_REAL=""
 SUM_S=""
 if [ -r "$CTEST_LOG" ]; then
-  RAN="$(awk 'match($0, /out of [0-9]+/) { n = substr($0, RSTART+7, RLENGTH-7) } END { print n }' "$CTEST_LOG")"
+  # ANCHORED AT BOTH ENDS of ctest's own summary line, verified against real
+  # output: `100% tests passed, 0 tests failed out of 67` — column 0 to
+  # end-of-line, no leading or trailing whitespace.
+  #
+  # ⚠️ Both looser forms were tried and both are defeated by a DECOY, because
+  # `--output-on-failure` puts arbitrary test output in this log:
+  #   * a bare `out of [0-9]+` reads any assertion message carrying the phrase;
+  #   * the whole unanchored sentence `tests passed,.* tests failed out of N`
+  #     reads a decoy that quotes ctest's phrasing — which is what a test
+  #     asserting ON ctest output would naturally contain.
+  # Neither was caught by reading; T14b of ci/test-peak-rss.sh caught both.
+  #
+  # The last match wins — the summary is printed after the tests it summarises.
+  RAN="$(awk 'match($0, /^[0-9]+% tests passed, [0-9]+ tests failed out of [0-9]+$/) { m = $0; sub(/.* out of /, "", m); n = m } END { print n }' "$CTEST_LOG")"
   CTEST_REAL="$(awk -F'= *' '/Total Test time \(real\)/ { t = $2 } END { gsub(/[^0-9.]/, "", t); print t }' "$CTEST_LOG")"
   # `  12/361 Test  #7: name ......   Passed    1.42 sec`
   SUM_S="$(awk '/^ *[0-9]+\/[0-9]+ +Test +#[0-9]+/ && match($0, /[0-9.]+ sec$/) { s += substr($0, RSTART, RLENGTH-4) } END { if (s > 0) printf "%.1f", s }' "$CTEST_LOG")"

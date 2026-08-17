@@ -1676,7 +1676,7 @@ jobs:
 
       # #266 replaced a peak-memory probe that ran 8 times and measured nothing
       # while exiting 0 every time. Its replacement gets the pre-merge signal the
-      # original never had: 27 cells plus 8 mutants, each mutant proven to redden
+      # original never had: 28 cells plus 10 mutants, each mutant proven to redden
       # the ONE cell that names its defect. Synthetic fixtures only — no build
       # tree, no ctest, ~80 s.
       - name: Regression pin — peak-RSS instrument dispositions (#266)
