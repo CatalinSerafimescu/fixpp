@@ -38,7 +38,9 @@ set_target_properties(typed_accessor_bench PROPERTIES
 #
 # Known finding (T046): v50sp2/Messages.hpp (~120 kLOC) exceeds the ≤3 s
 # load-bearing ceiling in syntax-only mode (~8-9 s on typical hardware).
-# See bench/codegen/compile_time_bench/FINDINGS.md for the documented record.
+# See bench/codegen/compile_time_bench/README.md for the documented record
+# (#209 — this cited FINDINGS.md, which has never existed on disk or in history;
+# the record itself is real and lives in README.md).
 add_subdirectory(compile_time_bench)
 
 # ── 077-builder-args-dedup T015: vlatest_builders_compile_bench ────────────────

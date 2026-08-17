@@ -24,8 +24,15 @@
 #
 # Exits 0 if all single-version measurements are within the load-bearing
 # ceiling (or with a WARN note for v50sp2 which is a known finding).
-# See bench/codegen/compile_time_bench/FINDINGS.md for the documented
+# See bench/codegen/compile_time_bench/README.md for the documented
 # v50sp2 overage record.
+#
+# ⚠️ The two citations below used to name FINDINGS.md, which has never existed
+# on disk or in history (#209: `git log --all -- '*compile_time_bench/FINDINGS.md'`
+# returns nothing; only CMakeLists.txt, README.md and this script were ever
+# tracked here). The record it describes is REAL and lives in README.md, titled
+# "T046 — Compile-time bench known findings (NFR-003-2)" — so the citation was
+# misspelled, not missing, and is re-pointed rather than a new file authored.
 
 set -euo pipefail
 
@@ -88,11 +95,11 @@ EOF
     OVER=""
     # v50sp2 is a KNOWN FINDING — it exceeds the ≤3 s load-bearing ceiling.
     # Document as a recorded finding rather than failing the script.
-    # See FINDINGS.md for the root cause (120 kLOC typed surface).
+    # See README.md for the root cause (120 kLOC typed surface).
     if (( $(echo "${ELAPSED_S} > ${SINGLE_CEILING}" | bc -l) )); then
         if [[ "${ver}" == "v50sp2" ]]; then
             STATUS="KNOWN_OVERAGE"
-            OVER=" [KNOWN FINDING — see FINDINGS.md; R2 risk, not a regression]"
+            OVER=" [KNOWN FINDING — see README.md; R2 risk, not a regression]"
         else
             STATUS="FAIL"
             PASS=false

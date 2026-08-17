@@ -1,0 +1,58 @@
+# bench/ci-suite.txt — the benchmark binaries the CI `bench` gate runs (#209).
+#
+# ONE source of truth, read by BOTH ci/run-bench-suite.sh (what to execute) and
+# tools/bench_compare.py (what to compare). Two hand-maintained copies of a list
+# is how a gate silently stops covering something.
+#
+# Format:  <cmake target / binary name>    <baseline path, relative to bench/baselines/>
+# Blank lines and #-comments ignored. Exactly two whitespace-separated fields.
+#
+# ── WHY AN EXPLICIT ALLOWLIST AND NOT `ctest -L bench` ────────────────────────
+# `ctest -L bench` resolves to the FOUR add_test registrations in bench/ —
+# compile_time_bench, vlatest_builders_compile_bench, the tls benches and
+# bench_threading — and to NONE of the Google-Benchmark executables, which are
+# bare add_executable targets invoked by path. Sweeping the label would run the
+# compile-time ceiling harness, which `v44` breaches at ~4.5 s against its flat
+# 3 s ceiling and always has (#209). That ceiling is deliberately NOT wired here;
+# see .specify/ci209-bench-gate.md §1a/§6.
+#
+# ── SELECTION RULE: single-threaded, CPU-bound, no network, no disk WRITE ─────
+# Deliberately EXCLUDED under that rule, and each exclusion is a flake source,
+# not an oversight:
+#   bench/sync/*        contended async-mutex — timing is a function of scheduling
+#   bench/threading/*   ditto, explicitly a concurrency benchmark
+#   bench/session/*     FileStore does real disk I/O; baselines are even named
+#                       *_WSLUBUNTU24.04.json, i.e. host-specific by construction
+#   bench/tls/*         loopback sockets + real handshakes
+#   bench/transport/*   loopback sockets
+#   bench/log/log_spike tail-latency spike probe — a noise instrument by design
+#   placeholder_bench   its baseline is the null-`cpu_time` shape the comparator
+#                       now rejects (A5); it measures nothing
+# They can join once the timing axis has a demonstrated noise floor
+# (.specify/ci209-bench-gate.md §6) — they are the LAST things to gate on, not
+# the first.
+
+# ── core ─────────────────────────────────────────────────────────────────────
+decimal_bench                   decimal_baseline.json
+
+# ── dictionary ───────────────────────────────────────────────────────────────
+# xml_loader_bench is the #263 target: XmlLoader::load regressed 60-90% unseen.
+xml_loader_bench                dictionary/xml_loader.json
+table_view_footprint_bench      dictionary/table_view_footprint_bench.json
+reify_bench                     dictionary/reify_bench.json
+
+# ── codegen ──────────────────────────────────────────────────────────────────
+typed_accessor_bench            codegen/typed_accessor_bench.json
+
+# ── C-ABI ────────────────────────────────────────────────────────────────────
+capi_commit_group_bench         capi/capi_commit_group_bench.json
+
+# ── wire ─────────────────────────────────────────────────────────────────────
+framer_bench                    wire/framer_bench.json
+parser_bench                    wire/parser_bench.json
+offset_table_bench              wire/offset_table_bench.json
+writer_bench                    wire/writer_bench.json
+validator_bench                 wire/validator_bench.json
+validate_group_bench            wire/validate_group_bench.json
+fix42_group_parse_bench         wire/fix42_group_parse_bench.json
+typed_read_group_bench          wire/typed_read_group_bench.json

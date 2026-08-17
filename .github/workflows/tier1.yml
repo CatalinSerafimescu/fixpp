@@ -2136,7 +2136,17 @@ jobs:
     # and empty is neither `success` nor `skipped` — so leaving any assertion
     # behind makes this required check RED on EVERY non-release run, both
     # branches of the python_touched split, PR and push alike.
-    needs: [gate-precheck, linux, coverage, check-layers, ci-script-pins,
+    # #209: `bench` ADDED. It was absent, so the bench job could go red while
+    # this required check reported green — and it could not even do that, being
+    # soft in three independent places (both of its steps carried
+    # `continue-on-error: true` and `tools/bench_compare.py` returned 0 by
+    # construction). All three are gone; this entry is what makes the remaining
+    # `exit 1` able to block. `bench` joins the UNCONDITIONAL `== success` set
+    # below, not the wheel-style `skipped` branch: its `if:` is
+    # character-identical to `linux`/`check-layers`, so it has no legitimate
+    # skip disposition on a non-release event, and the release early-exit
+    # already covers the one event where it does not run.
+    needs: [gate-precheck, linux, coverage, check-layers, ci-script-pins, bench,
             python-wheel-build, python-wheel-test]
     if: always()
     steps:
@@ -2172,9 +2182,14 @@ jobs:
           # to be `success` even on a PR that has not yet earned its gate labels
           # — it is the only member of this list that can be green before then.
           csp='${{ needs.ci-script-pins.result }}'
-          echo "gate-precheck=$gp  linux=$lx  coverage=$cov  check-layers=$cl  ci-script-pins=$csp"
+          # #209 — moved in as ONE UNIT with the `needs:` entry above, per this
+          # job's own standing warning: a `needs:` member with no assertion is
+          # silently ignored, and an assertion for a job not in `needs:`
+          # evaluates to the empty string and reds every non-release run.
+          bch='${{ needs.bench.result }}'
+          echo "gate-precheck=$gp  linux=$lx  coverage=$cov  check-layers=$cl  ci-script-pins=$csp  bench=$bch"
           fail=0
-          for kv in "gate-precheck=$gp" "linux=$lx" "coverage=$cov" "check-layers=$cl" "ci-script-pins=$csp"; do
+          for kv in "gate-precheck=$gp" "linux=$lx" "coverage=$cov" "check-layers=$cl" "ci-script-pins=$csp" "bench=$bch"; do
             if [ "${kv#*=}" != "success" ]; then
               echo "::error::Tier 1 job '${kv%%=*}' did not run to success (got '${kv#*=}'). The core build/test matrix must actually run — satisfy Gate A + Gate B (gate-a-done / gate-b-done) so the matrix fires before merge."
               fail=1

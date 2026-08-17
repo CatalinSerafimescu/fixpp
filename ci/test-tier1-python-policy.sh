@@ -1062,7 +1062,11 @@ assert_py_re_case_table() {
 # fail; before #254 it never had a mutant at all.
 assert_tier1_required_needs() {
   local json="$1" case_id="$2"
-  local EXPECTED_NEEDS="check-layers,ci-script-pins,coverage,gate-precheck,linux,python-wheel-build,python-wheel-test"
+  # ⚠️ EIGHT since #209, was seven — `bench` added. The bench job was absent
+  # from tier1-required's needs:, so it could go red while this required check
+  # reported green. #209 makes it blocking; this census is what stops a later
+  # edit quietly dropping it back out.
+  local EXPECTED_NEEDS="bench,check-layers,ci-script-pins,coverage,gate-precheck,linux,python-wheel-build,python-wheel-test"
   local got
   got="$(echo "$json" | jq -r '.tier1_required_needs | sort | join(",")')"
   [ "$got" = "$EXPECTED_NEEDS" ] \
@@ -1084,6 +1088,10 @@ CI_PIN_HARNESSES=(
   "ci/test-ccache-scripts.sh"
   "ci/test-tier1-python-policy.sh"
   "ci/test-python-install-witness.sh"
+  # #209 — the bench gate's own harness. It proves ci/run-bench-suite.sh +
+  # tools/bench_compare.py actually redden on each integrity defect; a harness
+  # that is green when run but never run is exactly what this census exists for.
+  "ci/test-bench-gate.sh"
 )
 
 assert_ci_pin_call_sites() {
@@ -1128,7 +1136,7 @@ echo "PASS: derive-script table + call site + FIXPP_INSTALL_PYTHON=OFF + PY_RE c
 # for a miscount; a counter is. MUTANTS_RUN is incremented by each mutant AFTER
 # it has been proven RED for the right reason, so an early `return` or a mutant
 # silently commented out changes the total.
-MUTANTS_DECLARED=49  # M1 M2 M3 B M4 M5 M6 M7 M11 M14 M15 M21 M26 M27 M29-M45 M47 M48 M49 M50 M51-M55 M56-M63 + M28 (1
+MUTANTS_DECLARED=50  # M1 M2 M3 B M4 M5 M6 M7 M11 M14 M15 M21 M26 M27 M29-M45 M47 M48 M49 M50 M51-M55 M56-M63 M64 + M28 (1
                      # GREEN control; M46 RETIRED at round 9 — its GREEN assertion became false by design) —
                      # DOWN from 27 at round 3b, because the golden subsumed 14 of them. See the RETIRED block
                      # in run_mutant_checks for the list and the reason. M48-M50 added at #270 Gate B r1 (F1):
@@ -1272,8 +1280,8 @@ PYEOF
 import sys
 src, dst = sys.argv[1], sys.argv[2]
 t = open(src).read()
-old = "    needs: [gate-precheck, linux, coverage, check-layers, ci-script-pins,\n"
-new = "    needs: [gate-precheck, linux, check-layers, ci-script-pins,\n"
+old = "    needs: [gate-precheck, linux, coverage, check-layers, ci-script-pins, bench,\n"
+new = "    needs: [gate-precheck, linux, check-layers, ci-script-pins, bench,\n"
 assert t.count(old) == 1, t.count(old)
 open(dst, "w").write(t.replace(old, new))
 PYEOF2
@@ -1503,6 +1511,22 @@ src, dst = sys.argv[1], sys.argv[2]
 t = open(src).read()
 old = "        run: bash ci/test-python-install-witness.sh\n"
 new = "        run: echo \"bash ci/test-python-install-witness.sh\"\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
+'
+
+  # M64 (#209): the ci-script-pins call site for the BENCH-GATE harness replaced
+  # by an echo. M26 proves the census assertion can fire, but it proves it for
+  # ONE harness — and a census that only ever reddens on the member it was
+  # written against says nothing about the member added later. This is the
+  # (selector, text-source, quantifier) enumeration lesson: the new row needs its
+  # own witness, not the previous row's.
+  mutate_workflow M64 "the bench-gate harness call site replaced by an echo" "ci-script-pins does not INVOKE" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "        run: bash ci/test-bench-gate.sh\n"
+new = "        run: echo \"bash ci/test-bench-gate.sh\"\n"
 assert t.count(old) == 1, t.count(old)
 open(dst, "w").write(t.replace(old, new))
 '
