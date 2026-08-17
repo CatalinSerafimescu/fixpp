@@ -573,6 +573,27 @@ jobs:
             --build=missing \
             -of build/${{ matrix.preset }}
 
+      # ── #252: the dependency closure really carries the sanitizer, or none ──
+      #
+      # The sanitizer profiles set only CXXFLAGS/tools.build:cxxflags, so every
+      # PURE-C dependency (openssl, zlib, curl, civetweb) compiled UNINSTRUMENTED
+      # while its package id still moved — `tools.build:cflags` is listed in
+      # `tools.info.package_id:confs` and never set. Measured under
+      # `linux-clang-tsan`: libcrypto.a, 50,830 symbols, ZERO `__tsan_*`.
+      #
+      # ⚠️ UNCONDITIONAL, AND TWO-SIDED. Every preset in this matrix runs it: the
+      # sanitizer legs assert NON-ZERO references, the others assert ZERO. An
+      # `if: contains(preset, 'san')` guard would be a second spelling of the
+      # polarity table (the trap ci/derive-python-sanitizer.sh's header names),
+      # and dropping the negative half would leave the "grep proven only on the
+      # fixed tree" shape #252's own scope note rules out.
+      #
+      # Placed here — after `conan install`, before configure/build — so a lane
+      # whose closure is wrong fails in seconds rather than after a full build.
+      # ci/test-sanitized-deps.sh pins the checker itself in `ci-script-pins`.
+      - name: Assert the dependency closure is instrumented (#252)
+        run: ci/assert-sanitized-deps.sh "${{ matrix.preset }}" "build/${{ matrix.preset }}"
+
       # Self-populate: on push:main, if the restore MISSED (conanfile bumped),
       # push the just-rebuilt cache to GHCR so the next run hits. seed packs ONLY
       # the current graph's package_ids (conan cache save --list) → never stale
@@ -1935,6 +1956,25 @@ jobs:
       # the reason the cost was accepted, not as a claim that it is free.
       - name: Regression pin — peak-RSS instrument dispositions (#266)
         run: bash ci/test-peak-rss.sh
+
+      # #252's checker is the only thing standing between "the sanitizer legs are
+      # green" and "the sanitizer legs can see the C half of their closure", so it
+      # gets the same treatment as the instruments above: every property driven by
+      # a MUTANT that violates it, each proven to redden the one case that names
+      # it. Fixtures are REAL archives built with `cc -c -fsanitize=<x>` + `ar`
+      # (compile-only — no sanitizer runtime needed) and read with the REAL `nm`;
+      # a canned-output double would pin this harness's belief about what an
+      # instrumented archive looks like, which is the belief under test.
+      #
+      # Placed after the python-policy pin because T2 derives its preset census
+      # from tier1.yml AND tier3-libcxx.yml with PyYAML, and that step is where
+      # the bootstrap lives. The guard is repeated rather than assumed: a
+      # reordering that leaves this step first must not turn the census silently
+      # empty — and T2 fails loud on an empty census either way.
+      - name: Regression pin — sanitized-dependency checker (#252)
+        run: |
+          python3 -c "import yaml" 2>/dev/null || pip install --quiet pyyaml
+          bash ci/test-sanitized-deps.sh
 
   check-layers:
     name: check-layers

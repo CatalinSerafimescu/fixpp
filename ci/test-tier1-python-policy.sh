@@ -797,9 +797,33 @@ $got"
   #   * it has no `id` that anything references, collides with no pinned step
   #     name, and mentions no pytest token.
   # Conclusion: it cannot reach the pytest pair.
+  #
+  # 31 -> 32 (#252): the `linux` job gained `Assert the dependency closure is
+  # instrumented (#252)`, which runs `ci/assert-sanitized-deps.sh` immediately
+  # after `Conan install`.
+  #
+  # THE DELIBERATE LOOK, again done rather than asserted. This step also sits
+  # before the pytest pair:
+  #   * it writes NO environment — the script's only outputs are stdout and
+  #     `::error::` on stderr; it touches neither $GITHUB_ENV nor $GITHUB_PATH
+  #     (M34's env-writer census polices that independently);
+  #   * it carries no step-level `env:` at all;
+  #   * it has no `id` that anything references, collides with no pinned step
+  #     name, and mentions no pytest token;
+  #   * it READS the tree only — `find` + `nm` over the Conan package folders —
+  #     so it cannot alter what the python steps later build or import.
+  #   * ⚠️ it is NOT `continue-on-error`, unlike the #266 step above, so unlike
+  #     that one it CAN fail the job before the pytest pair runs. That is
+  #     deliberate and is the whole point (#252 is a fail-closed gate on the
+  #     dependency closure), but it is the one property this step does not share
+  #     with its predecessor, and stating it is cheaper than rediscovering it: a
+  #     RED here means the python legs never run, and their absence on such a run
+  #     is expected rather than a second defect.
+  # Conclusion: it cannot change what the pytest pair executes; it can only
+  # prevent them from executing at all, loudly.
   got="$(echo "$json" | jq -r '.linux_step_count')"
-  [ "$got" = "31" ] \
-    || fail "$case_id: the linux job has $got steps, expected 31. A step added anywhere before the pytest pair can change what they execute without colliding with a pinned name or adding a pytest mention (round 4 finding 3, measured). This count is deliberately brittle: adding a step to this job is a deliberate act and must be paired with a deliberate look at whether it reaches the python steps."
+  [ "$got" = "32" ] \
+    || fail "$case_id: the linux job has $got steps, expected 32. A step added anywhere before the pytest pair can change what they execute without colliding with a pinned name or adding a pytest mention (round 4 finding 3, measured). This count is deliberately brittle: adding a step to this job is a deliberate act and must be paired with a deliberate look at whether it reaches the python steps."
 
   got="$(echo "$json" | jq -cS '.linux_job_env')"
   [ "$got" = '{"CCACHE_COMPILERCHECK":"content","CCACHE_COMPRESSLEVEL":"5","CCACHE_DIR":"/tmp/fixpp-ccache-${{ matrix.preset }}","CMAKE_CXX_COMPILER_LAUNCHER":"ccache","CMAKE_C_COMPILER_LAUNCHER":"ccache"}' ] \
@@ -1587,7 +1611,13 @@ open(dst, "w").write(t.replace(old, new))
   # ⚠️ The inserted step deliberately writes NOTHING. An earlier version wrote
   # $GITHUB_ENV, which tripped the writer census first and left the step count
   # with no mutant of its own — the shadowing round 5 finding 3 is about.
-  mutate_workflow M33 "an unnamed step is inserted before the pytest pair" "has 32 steps, expected 31" '
+  # ⚠️ THE LITERAL TRACKS THE BASELINE. Bumped 31->32 by #252's
+  # `Assert the dependency closure is instrumented` step; the mutant inserts one
+  # more, so the message it must produce moves with it. A stale literal here does
+  # not fail open — `mutate_workflow` reports "failed the pin for the WRONG
+  # reason" — but it is the second edit the count pin demands, and forgetting it
+  # is how a deliberately brittle assertion earns a reputation for being noise.
+  mutate_workflow M33 "an unnamed step is inserted before the pytest pair" "has 33 steps, expected 32" '
 import sys
 src, dst = sys.argv[1], sys.argv[2]
 t = open(src).read()
