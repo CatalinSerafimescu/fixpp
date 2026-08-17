@@ -294,6 +294,98 @@ printf '%s' "$UNKNOWN_MAJOR_TAG" | grep -qE -- "$TAG_RE" \
   || fail "prune/tag-regex-unknown-major: '$UNKNOWN_MAJOR_TAG' does not match '$TAG_RE' — the tightened regex must still accept the minter's 'unknown major' fallback"
 ok "the pruner's regex still accepts the minter's 'unknown major' fallback tag"
 
+# ── CONTAINER LANES (#259) — the SAME producer/matcher bridge, second grammar ─
+#
+# A container lane's compiler lives inside a pinned image and cannot be probed
+# on the host, so `ccache_container_cache_key` mints `ccache-<lane>-<digest8>`
+# with no `clang<major>` component. That is a SECOND grammar, and the pruner
+# must classify it exactly — every assertion below is derived from the real
+# script, nothing about either grammar is restated here.
+KEYSH="$CI_DIR/ccache-cache-key.sh"
+PINNED_REF='quay.io/pypa/manylinux_2_28_x86_64@sha256:012f4a50472412f18bb2b450c1cce7158434cfae4ae878591c2748a13a30c2be'
+
+CTAG="$( . "$KEYSH" && ccache_container_cache_key 'wheel-manylinux228' "$PINNED_REF" >/dev/null 2>&1 && printf '%s' "$CCACHE_CACHE_TAG" )"
+[ -n "$CTAG" ] || fail "container/mint: ccache_container_cache_key produced no tag for a well-formed pinned reference"
+case "$CTAG" in
+  'ccache-wheel-manylinux228-012f4a50') ok "container tag is lane + the pinned image digest's first 8 hex" ;;
+  *) fail "container/mint: tag '$CTAG' is not the documented grammar" ;;
+esac
+
+CTAG_RE="$( . "$KEYSH" && ccache_tag_regex 'wheel-manylinux228' >/dev/null 2>&1 && printf '%s' "$CCACHE_TAG_RE" )"
+[ -n "$CTAG_RE" ] || fail "container/regex: ccache_tag_regex produced nothing for the container lane"
+printf '%s' "$CTAG" | grep -qE -- "$CTAG_RE" \
+  || fail "container/bridge: the pruner's regex '$CTAG_RE' does not match the tag the container minter produced ('$CTAG') — producer and matcher have drifted"
+ok "the container regex matches a tag the container minter actually produced"
+
+# ⚠️ THE TWO NEGATIVES ARE THE POINT. Without them this file would only have
+# shown each regex is loose enough, never that it is TIGHT enough — and this
+# regex is the sole classifier on an irreversible DELETE. Cross-matching would
+# mean the wheel lane's pruner could reclaim a host lane's live cache.
+if printf '%s' "$TAG" | grep -qE -- "$CTAG_RE"; then
+  fail "container/disjoint: the container regex '$CTAG_RE' matches a HOST lane's tag '$TAG' — the namespaces are not disjoint and a prune could delete a live host cache"
+fi
+if printf '%s' "$CTAG" | grep -qE -- "$TAG_RE"; then
+  fail "container/disjoint: a host lane's regex '$TAG_RE' matches the CONTAINER tag '$CTAG' — the namespaces are not disjoint"
+fi
+ok "the container and host tag namespaces are mutually disjoint (both directions asserted)"
+
+for bad in \
+  "ccache-wheel-manylinux228-012f4a5" \
+  "ccache-wheel-manylinux228-012f4a500" \
+  "ccache-wheel-manylinux228-012F4A50" \
+  "ccache-wheel-manylinux228-clang22-012f4a50"; do
+  if printf '%s' "$bad" | grep -qE -- "$CTAG_RE"; then
+    fail "container/near-miss: '$bad' matches '$CTAG_RE' — the classifier is wider than the grammar the container minter can produce"
+  fi
+done
+ok "the container regex rejects every near-miss no producer here mints"
+
+# ── FAIL-CLOSED ON A NON-PINNED REFERENCE ────────────────────────────────────
+#
+# A floating tag would give a STABLE cache key for a MOVING toolchain: internal
+# misses forever, reported as a healthy HIT. Each of these must be REFUSED, and
+# refused by returning non-zero rather than by minting something odd.
+# ⚠️ THE BARE-DIGEST CASE IS THE ONE THAT DISCRIMINATES, and it was added only
+# after a mutation SURVIVED. Deleting the `*@sha256:*` guard leaves the hex and
+# length checks, which already reject every other entry here — so without a
+# 64-hex input carrying no image reference, this loop proves the guard is
+# present but not that it does anything. A caller passing a raw digest instead
+# of a reference is exactly the mistake it exists to catch.
+for badref in \
+  'quay.io/pypa/manylinux_2_28_x86_64' \
+  'quay.io/pypa/manylinux_2_28_x86_64:latest' \
+  'quay.io/pypa/manylinux_2_28_x86_64@sha256:012f4a50' \
+  '012f4a50472412f18bb2b450c1cce7158434cfae4ae878591c2748a13a30c2be' \
+  'quay.io/pypa/manylinux_2_28_x86_64@sha256:ZZZf4a50472412f18bb2b450c1cce7158434cfae4ae878591c2748a13a30c2be'; do
+  if ( . "$KEYSH" && ccache_container_cache_key 'wheel-manylinux228' "$badref" ) >/dev/null 2>&1; then
+    fail "container/pin: '$badref' was ACCEPTED — a reference that is not digest-pinned keys a moving toolchain to a stable tag, which reads as a healthy cache forever"
+  fi
+done
+ok "the container minter refuses every reference that is not digest-pinned"
+
+# The dispatcher both sides use. If restore and seed could reach different
+# minters, the tag would differ between publish and pull — a permanent MISS,
+# indistinguishable from 'ccache did not help'.
+DTAG_C="$( . "$KEYSH" && ccache_resolve_key 'wheel-manylinux228' "$PINNED_REF" >/dev/null 2>&1 && printf '%s' "$CCACHE_CACHE_TAG" )"
+[ "$DTAG_C" = "$CTAG" ] \
+  || fail "container/dispatch: ccache_resolve_key with an image ref produced '$DTAG_C', not the container minter's '$CTAG'"
+# ⚠️ PATH is set on its OWN LINE inside the subshell, exactly as `expected_tag`
+# does it. `PATH=… . file` applies the assignment only for the duration of the
+# `.` builtin, so the shim would be gone by the time the compiler probe runs and
+# the host minter would fail for a reason that has nothing to do with dispatch.
+# The tag-regex block above survives that mistake only because
+# `ccache_tag_regex` is pure string work and probes no compiler.
+DTAG_H="$(
+  cd "$sandbox" || exit 1
+  PATH="$shim_dir:$PATH"
+  . "$KEYSH"
+  ccache_resolve_key 'fake-libc++' >/dev/null 2>&1 || exit 1
+  printf '%s' "$CCACHE_CACHE_TAG"
+)"
+[ "$DTAG_H" = "$TAG" ] \
+  || fail "container/dispatch: ccache_resolve_key without an image ref produced '$DTAG_H', not the host minter's '$TAG'"
+ok "ccache_resolve_key dispatches to the same minter both restore and seed would use"
+
 # ═════ ci/restore-ccache.sh ══════════════════════════════════════════════════
 echo "── restore-ccache.sh ──"
 CDIR="$sandbox/ccache-dir"

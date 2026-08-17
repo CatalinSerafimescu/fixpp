@@ -139,6 +139,108 @@ ccache_cache_key() {
   CCACHE_CACHE_TAG="ccache-${preset//+/x}-${CCACHE_CACHE_TOOLSET}"
 }
 
+# ── CONTAINER LANES ──────────────────────────────────────────────────────────
+#
+# ccache_lane_is_container <lane>
+#
+# The lanes whose compiler lives INSIDE a pinned container image. Enumerated in
+# ONE place, consulted by both the minter and the matcher below, because those
+# two must never disagree about which grammar a lane uses.
+ccache_lane_is_container() {
+  case "$1" in
+    wheel-manylinux228) return 0 ;;
+    *)                  return 1 ;;
+  esac
+}
+
+# ccache_container_cache_key <lane> <digest-pinned image ref>
+#
+# Sets: CCACHE_CACHE_TAG, CCACHE_CACHE_COMPILER, CCACHE_CACHE_TOOLSET.
+# Returns 1 if the lane or the image reference is unusable.
+#
+# ── WHY THIS EXISTS SEPARATELY FROM ccache_cache_key ─────────────────────────
+#
+# Not a stylistic split. `ccache_cache_key` runs `"$compiler" --version` ON THE
+# HOST, and for a containerized lane that compiler does not exist there — the
+# wheel is built by gcc-toolset-14 inside manylinux_2_28. There is nothing to
+# probe, so the identity has to come from somewhere else entirely.
+#
+# ── WHY THE IMAGE DIGEST IS THE IDENTITY ─────────────────────────────────────
+#
+# The digest moves if and only if the in-container toolchain moves — same
+# compiler binary, same glibc headers, same libstdc++, or a different digest.
+# That is a STRONGER invariant than the host lanes get from `--version`, which
+# is only a proxy.
+#
+# ⚠️ AND IT MUST BE THE PINNED REFERENCE, NOT A REGISTRY LOOKUP OF THE ALIAS.
+# cibuildwheel does not resolve `manylinux_2_28` against the registry at run
+# time; it substitutes a digest from its OWN pin file. Measured 2026-08-17: the
+# reference in use was `@sha256:012f4a50…`, while cibuildwheel `main` pinned the
+# same alias to `@sha256:f854c50a…`. So `docker manifest inspect <alias>` answers
+# a DIFFERENT question than "what will actually build this wheel", and keying on
+# it would roll the tag when the toolchain had not moved and fail to roll when it
+# had. The repo pins the image itself (bindings/python/pyproject.toml) precisely
+# so this function can read the identity off a tracked file.
+#
+# ⚠️ NO SEPARATE TOOLCHAIN LABEL — deliberately. An earlier draft appended a
+# hand-written `gcc14`. The day the pinned image moves to gcc-toolset-15 the
+# digest rolls, everything keeps working, and the tag QUIETLY LIES about the
+# toolchain — destroying the diagnostic that is the tag's whole justification.
+# One fact, one source.
+ccache_container_cache_key() {
+  local lane="$1" ref="$2"
+
+  # The lane is interpolated into a tag AND into the pruner's DELETE regex.
+  # Same character class the regex builder enforces, checked at the minter too
+  # so an unusable lane cannot reach GHCR in the first place.
+  case "$lane" in
+    ''|*[!a-zA-Z0-9_-]*)
+      echo "ccache-cache: lane '$lane' is empty or contains a character that is not tag-safe." >&2
+      return 1 ;;
+  esac
+
+  # Fail-closed on anything that is not digest-pinned. A floating tag here would
+  # produce a STABLE cache key for a MOVING toolchain — internal misses forever,
+  # reported as a healthy HIT, which is the one failure mode this whole file is
+  # written to prevent.
+  case "$ref" in
+    *@sha256:*) ;;
+    *)
+      echo "ccache-cache: image reference for '$lane' is not digest-pinned (expected '<image>@sha256:<64 hex>'): $ref" >&2
+      return 1 ;;
+  esac
+
+  local digest="${ref##*@sha256:}"
+  case "$digest" in
+    *[!0-9a-f]*)
+      echo "ccache-cache: image digest for '$lane' is not lowercase hex: $digest" >&2
+      return 1 ;;
+  esac
+  if [ "${#digest}" -ne 64 ]; then
+    echo "ccache-cache: image digest for '$lane' is ${#digest} chars, expected 64: $digest" >&2
+    return 1
+  fi
+
+  CCACHE_CACHE_COMPILER="$ref"
+  CCACHE_CACHE_TOOLSET="${digest:0:8}"
+  CCACHE_CACHE_TAG="ccache-${lane}-${CCACHE_CACHE_TOOLSET}"
+}
+
+# ccache_resolve_key <lane> [<image-ref>]
+#
+# The ONLY entry point restore-ccache.sh and seed-ccache.sh use. Both call this
+# and nothing else, so the publish side and the pull side cannot dispatch to
+# different minters — a tag the two compute differently is a PERMANENT MISS, and
+# a permanent miss on a compiler cache is indistinguishable from "ccache didn't
+# help" (see this file's opening note).
+ccache_resolve_key() {
+  if [ -n "${2-}" ]; then
+    ccache_container_cache_key "$1" "$2"
+  else
+    ccache_cache_key "$1"
+  fi
+}
+
 # ccache_tag_regex <preset>
 #
 # Sets: CCACHE_TAG_RE — an anchored regex matching every tag ccache_cache_key
@@ -188,5 +290,23 @@ ccache_tag_regex() {
   # non-`unknown` major and a digest of any length — near-misses no producer
   # here mints, but this regex is the sole classifier on an irreversible
   # DELETE, and this repo's precedent is strictest exactly there.
+  # ── ONE GRAMMAR PER MINTER, BRANCHED — NOT ONE LOOSENED GRAMMAR FOR BOTH ────
+  #
+  # A container lane's tag is `ccache-<lane>-<digest8>`: no `clang<major>`
+  # component at all, because `ccache_container_cache_key` mints no such thing.
+  #
+  # ⚠️ The tempting shortcut — relaxing the host grammar to
+  # `(clang|gcc)…` so one expression covers everything — was REJECTED. It widens
+  # the classifier for every preset lane, including lanes that will never mint a
+  # non-clang tag, and this regex is the sole classifier on an IRREVERSIBLE
+  # DELETE. "No such tag exists today" is precisely the they-happen-to-agree
+  # reasoning this file rejects for keying decisions two functions up; it is not
+  # more acceptable when the consequence is deletion. Each branch stays anchored
+  # to exactly what its own producer can emit.
+  if ccache_lane_is_container "$preset"; then
+    CCACHE_TAG_RE="^ccache-${safe}-[0-9a-f]{8}\$"
+    return 0
+  fi
+
   CCACHE_TAG_RE="^ccache-${safe}-clang([0-9]+|unknown)-[0-9a-f]{8}\$"
 }

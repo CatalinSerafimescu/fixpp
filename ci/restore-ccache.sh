@@ -24,6 +24,13 @@
 # Usage (from the library root, as the workflow's working directory):
 #   ci/restore-ccache.sh linux-clang-libc++
 #
+# A CONTAINER lane passes its digest-pinned image reference as a second
+# argument; the compiler then lives inside that image and cannot be probed on
+# the host, so the digest is the toolchain identity:
+#   ci/restore-ccache.sh wheel-manylinux228 "quay.io/pypa/manylinux_2_28_x86_64@sha256:012f…"
+# Both this script and seed-ccache.sh dispatch through `ccache_resolve_key`, so
+# neither can pick a different minter than the other.
+#
 # ⚠️ `set -uo pipefail` WITHOUT `-e`, deliberately, matching every other script
 # in this directory. Most failures here are non-fatal by design, and the
 # `note()` idiom below (`[ -n "$X" ] && echo`) returns non-zero on its PASSING
@@ -31,7 +38,8 @@
 # wrong. Do not "harden" this line.
 set -uo pipefail
 
-PRESET="${1:?usage: restore-ccache.sh <preset>}"
+PRESET="${1:?usage: restore-ccache.sh <preset> [<digest-pinned image ref>]}"
+IMAGE_REF="${2-}"
 IMAGE="${FIXPP_CCACHE_IMAGE:-ghcr.io/catalinserafimescu/fixpp-ccache}"
 
 # shellcheck source=ci/ccache-cache-key.sh
@@ -91,7 +99,7 @@ case "$precalls" in
     exit 1 ;;
 esac
 
-if ! ccache_cache_key "$PRESET"; then
+if ! ccache_resolve_key "$PRESET" "$IMAGE_REF"; then
   note "ccache-cache MISS ($PRESET, compiler unidentified) → building with an empty cache"
   emit false
   exit 0
