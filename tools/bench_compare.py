@@ -158,6 +158,23 @@ def read_manifest(path: str) -> list[Row]:
                 raise SystemExit(f"::error::{path}:{lineno}: comparand must start with "
                                  f"'gb-json:' or 'none:', got {comparand!r}")
             rows.append(Row(exe_rel, comparand, tier2))
+
+    # ⚠️ BASENAME COLLISION. Both consumers key the results file on
+    # `basename(exe)` — the runner writes `<out>/<basename>.json`, the
+    # comparator reads it — so two rows like `bench/a/foo_bench` and
+    # `bench/b/foo_bench` would run BOTH into one file: the second overwrites
+    # the first, and the comparator then validates and compares that same file
+    # twice. A regression in the first binary reads GREEN. The 23 current rows
+    # happen to be unique, which is exactly the condition under which nobody
+    # notices the missing check (Gate B round 1, P2).
+    seen: dict[str, str] = {}
+    for r in rows:
+        if r.name in seen:
+            raise SystemExit(f"::error::{path}: two manifest rows share the basename "
+                             f"{r.name!r} ({seen[r.name]!r} and {r.exe_rel!r}). Results are keyed "
+                             f"on the basename, so one would silently overwrite the other.")
+        seen[r.name] = r.exe_rel
+
     if not rows:
         # A manifest that parses to zero rows satisfies every downstream check
         # vacuously — the silent-empty class, three times in one gate previously.
@@ -395,20 +412,33 @@ def run_suite(results_dir: str, baselines_dir: str, manifest: str,
             tier3_skipped.append(f"{row.name}: no shared benchmark names with {base_rel}")
             continue
 
-        tier3_compared += 1
         print(f"    tier 3: vs {base_rel} (dev-host baseline — REPORT ONLY)")
+        # ⚠️ Counted AFTER at least one delta is actually computed, not before.
+        # Incrementing on entry made the summary factually false: a baseline of
+        # all zeros printed "1 row(s) compared; 0 not compared" having compared
+        # nothing (Gate B round 1, P3). The rule this file states — every skip
+        # printed with a named reason — has to hold for the summary too.
+        row_deltas = 0
         for nm in shared:
             (bv, bu), (cv, cu) = base_t[nm], cur_t[nm]
             if bv == 0:
+                print(f"      {nm:<52} baseline is zero; not compared")
+                tier3_skipped.append(f"{row.name}/{nm}: baseline value is zero")
                 continue
             if bu != cu:
                 print(f"      {nm:<52} unit changed {bu!r} -> {cu!r}; not compared")
+                tier3_skipped.append(f"{row.name}/{nm}: time_unit changed {bu!r} -> {cu!r}")
                 continue
+            row_deltas += 1
             d = (cv - bv) / bv * 100.0
             mark = "  <-- over ±%.0f%%" % tolerance if abs(d) > tolerance else ""
             print(f"      {nm:<52} {bv:>12.2f} -> {cv:>12.2f}  {d:>+7.1f}%{mark}")
             if abs(d) > tolerance:
                 tier3_over.append(f"{row.name}/{nm}: {d:+.1f}%")
+        if row_deltas:
+            tier3_compared += 1
+        else:
+            tier3_skipped.append(f"{row.name}: no row against {base_rel} yielded a usable delta")
 
     print()
     print("=== tier 3 summary (informational — [const §VIII.2] ±5%) ===")
@@ -477,16 +507,48 @@ def run_paired(a1_dir: str, b1_dir: str, a2_dir: str, b2_dir: str,
     for row in rows:
         print(f"--- {row.name} ---")
         loaded = {}
-        missing = False
+        bad = False
         for tag, d in (("A1", a1_dir), ("B1", b1_dir), ("A2", a2_dir), ("B2", b2_dir)):
             data, err = load_json(os.path.join(d, f"{row.name}.json"))
             if err:
                 hard.append(f"[T1-1] tier 2 {row.name}: leg {tag}: {err}")
                 print(f"    ::error::[T1-1] leg {tag}: {err}")
-                missing = True
+                bad = True
+                continue
+            # ⚠️ EVERY LEG GETS THE FULL TIER-1 VALIDATION. Gate B round 1 (P1)
+            # proved by fixture that skipping it is a fail-open in the one axis
+            # that is supposed to be hard: with A={100,200} and a B leg missing
+            # the 200 row, a **100% regression PASSED** because the intersection
+            # simply dropped it while the surviving row kept `compared > 0`.
+            # That is a real Google-Benchmark shape, not corruption — one
+            # `SkipWithError` emits an error row for one benchmark and leaves
+            # the rest of the binary valid.
+            findings = validate_results(f"{row.name} leg {tag}", data)
+            if findings:
+                for f_ in findings:
+                    print(f"    ::error::{f_}")
+                hard.extend(findings)
+                bad = True
                 continue
             loaded[tag] = median_rows(data)
-        if missing:
+        if bad:
+            continue
+
+        # WITHIN-TREE name sets must match exactly. The base-vs-candidate
+        # asymmetry (additions allowed) is deliberate and is applied below — but
+        # it must not be extended to the two legs of the SAME tree, which
+        # measure identical code and therefore have no legitimate reason to
+        # differ. Intersecting them was what let a partial row loss disappear.
+        for t1, t2 in (("A1", "A2"), ("B1", "B2")):
+            only1 = sorted(set(loaded[t1]) - set(loaded[t2]))
+            only2 = sorted(set(loaded[t2]) - set(loaded[t1]))
+            if only1 or only2:
+                hard.append(f"[T2-LEGSET] {row.name}: legs {t1}/{t2} measure the same tree but "
+                            f"report different benchmark sets — only in {t1}: {only1 or 'none'}; "
+                            f"only in {t2}: {only2 or 'none'}")
+                print(f"    ::error::[T2-LEGSET] legs {t1}/{t2} disagree on which benchmarks ran")
+                bad = True
+        if bad:
             continue
 
         base_names = set(loaded["B1"]) & set(loaded["B2"])
@@ -519,8 +581,18 @@ def run_paired(a1_dir: str, b1_dir: str, a2_dir: str, b2_dir: str,
         for nm in shared:
             (a1, ua1), (b1, ub1) = loaded["A1"][nm], loaded["B1"][nm]
             (a2, ua2), (b2, ub2) = loaded["A2"][nm], loaded["B2"][nm]
-            if min(a1, b1, a2, b2) <= 0:
-                continue
+            # INVARIANT: every value here is a positive, finite duration.
+            # Guaranteed by the full validate_results() run over all four legs
+            # above — T1-5 rejects a `median` row whose cpu_time is absent,
+            # non-numeric, NaN, infinite or <= 0, and median_rows() selects only
+            # `median` rows. So there is deliberately NO guard on this line.
+            #
+            # ⚠️ It used to be `if min(...) <= 0: continue`, which Gate B round 1
+            # showed silently skipping a NaN leg while counting it as compared
+            # and printing `+nan%`. The fix is the validation above, not a
+            # second check here: cells T2-NAN and T2-ZERO prove a bad median
+            # reddens at [T1-5], and a branch that cannot fire would only look
+            # like protection.
             # A unit change between base and candidate makes the numbers
             # incomparable; subtracting us from ns would read as a 1000x win.
             if len({ua1, ub1, ua2, ub2}) > 1:

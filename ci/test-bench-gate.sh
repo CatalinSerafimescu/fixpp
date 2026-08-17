@@ -42,7 +42,7 @@ trap 'rm -rf "$TMP"' EXIT
 # ⚠️ DECLARED vs RUN, checked by machine at the end. A summary claiming N cells
 # where N-1 ran is not something to leave to an eyeball — the same discipline
 # ci/test-tier1-python-policy.sh records for its mutant count.
-CELLS_DECLARED=36
+CELLS_DECLARED=42
 cells_run=0
 
 # ── fixture generation ───────────────────────────────────────────────────────
@@ -359,6 +359,64 @@ expect_red T2-DEL "benchmark present in base, renamed away in candidate" "[T2-DE
 mkfix "$A1/alpha_bench.json" BM_A=100 BM_NEW=50
 mkfix "$A2/alpha_bench.json" BM_A=100 BM_NEW=50
 expect_green G7 "a benchmark added by the candidate is not an error" pc
+
+# ── Gate B round 1 (P1) — THE FIXTURE THAT PROVED TIER 2 FAIL-OPEN. ──────────
+# A1/A2 measure {BM_A, BM_B}; B1 loses BM_B while B2 keeps it. Before the fix
+# the intersection silently dropped BM_B, the surviving BM_A row kept
+# `compared > 0`, and a **100% regression on BM_B PASSED**. This is a real
+# Google-Benchmark shape: one `SkipWithError` emits an error row for one
+# benchmark and leaves the rest of the binary valid.
+mkfix "$A1/alpha_bench.json" BM_A=100 BM_B=200
+mkfix "$A2/alpha_bench.json" BM_A=100 BM_B=200
+mkfix "$B1/alpha_bench.json" BM_A=100
+mkfix "$B2/alpha_bench.json" BM_A=100 BM_B=100
+expect_red T2-PARTIAL "a row present in one base leg but not the other" "[T2-LEGSET]" pc
+
+# T2-NAN — a NaN median was counted as compared and printed `+nan%` while the
+# job exited 0: a measurement that cannot be judged reading as one that passed.
+setlegs 100 100 100 100
+python3 -c "
+import json,sys
+d=json.load(open(sys.argv[1]))
+for r in d['benchmarks']:
+    if r['name']=='BM_A_median': r['cpu_time']=float('nan')
+open(sys.argv[1],'w').write(json.dumps(d))" "$B1/alpha_bench.json"
+expect_red T2-NAN "a non-finite median in one leg" "[T1-5]" pc
+
+# T2-ZERO — same rule for a non-positive duration.
+setlegs 100 100 100 100
+mutate "$B1/alpha_bench.json" BM_A_median cpu_time '0'
+expect_red T2-ZERO "a zero median in one leg" "[T1-5]" pc
+
+# T2-ERRROW — Google Benchmark's own error disposition inside a tier-2 leg.
+# Tier 1 catches this in suite mode; before the fix, tier 2 never ran tier-1
+# validation on its legs at all.
+setlegs 100 100 100 100
+mutate "$B1/alpha_bench.json" BM_A_median error_occurred 'true'
+expect_red T2-ERRROW "an error_occurred row in a tier-2 leg" "[T1-8]" pc
+setlegs 100 100 100 100
+
+# M-ALIAS — two manifest rows sharing a basename. Results are keyed on the
+# basename, so one silently overwrites the other and a regression in the first
+# binary reads GREEN. The 23 shipped rows are unique, which is precisely the
+# condition under which a missing check goes unnoticed.
+manifest "$MAN" \
+  "bench/a/dup_bench   none:n/a   no" \
+  "bench/b/dup_bench   none:n/a   no"
+expect_red M-ALIAS "two manifest rows share a basename" "share the basename" sc
+manifest "$MAN" "bench/x/alpha_bench   gb-json:dictionary/alpha.json   no"
+
+# T3-ZERO — a zero baseline was silently skipped AND counted as compared, so
+# the tier-3 summary read "1 compared; 0 not compared" having compared nothing.
+mkfix "$BASE/dictionary/alpha.json" BM_A=0 BM_B=0
+if ! sc > "$TMP/t3z.out" 2>&1; then fail "T3-ZERO: a zero baseline is informational, not fatal"; fi
+grep -q "baseline is zero; not compared" "$TMP/t3z.out" \
+  || fail "T3-ZERO: the zero-baseline skip was not printed with its reason:\n$(cat "$TMP/t3z.out")"
+grep -q "0 row(s) compared" "$TMP/t3z.out" \
+  || fail "T3-ZERO: the summary counted a row as compared when no delta was computed:\n$(cat "$TMP/t3z.out")"
+echo "GREEN (expected): T3-ZERO — a zero baseline is named as skipped and not counted as compared"
+cells_run=$((cells_run + 1))
+mkfix "$BASE/dictionary/alpha.json" BM_A=100 BM_B=200
 
 # T2-LEG — a missing leg. Silence here is a tier-2 false green.
 setlegs 100 100 100 100
