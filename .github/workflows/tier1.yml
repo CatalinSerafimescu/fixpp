@@ -886,9 +886,47 @@ jobs:
       # The `ci/` regression pins used to live here, on the linux-gcc-release
       # leg. They now have their own job — see `ci-script-pins` below for why.
 
+      # Wrapped by the #266 instrument for the same reason as the minimal-tier
+      # step above, and it is NOT an afterthought: this is the ONLY lane that
+      # runs the packaging tier, and the packaging witnesses stage-install a
+      # prefix and drive a nested `cmake` + `ninja` build. That is the shape
+      # behind the largest single-process transient in #229's local sweep — 0.87
+      # GiB at t=9.3 s on `linux-clang-debug`, twelve processes, against a run
+      # body that never again exceeded 0.39 GiB. So the lane most likely to hold
+      # a memory surprise is the one a `-LE packaging` view of the matrix cannot
+      # see at all.
+      #
+      # ⚠️ It is measured, NOT a widening candidate. #267's phases name asan,
+      # ubsan, debug, coverage, the four libc++ lanes and msvc; this lane is in
+      # none of them and gains no `execution.jobs`. Nested builds inside ctest
+      # are the case where naive test-level parallelism multiplies compile jobs,
+      # and nothing here measures that.
       - name: Test (full tier incl. packaging — the SC-011/SC-012 gate)
+        id: full_tier_test
         if: matrix.preset == 'linux-gcc-release'
-        run: ctest --preset ${{ matrix.preset }} --output-on-failure --no-tests=error
+        run: |
+          python3 ci/measure-peak-rss.py \
+            --out "/tmp/peak-rss-${{ matrix.preset }}.env" \
+            --log "/tmp/ctest-${{ matrix.preset }}.log" \
+            --label "${{ matrix.preset }}" \
+            -- ctest --preset ${{ matrix.preset }} --output-on-failure --no-tests=error
+
+      # A second report step rather than widening the one above's `if:`. The two
+      # ctest steps are 100 lines apart with the rpmbuild install and the
+      # packaging-registration assertion between them, so one combined step would
+      # sit nowhere near one of its two subjects. (Tier 3 combines its two
+      # because they are adjacent.)
+      - name: Peak memory (packaging tier, #266 / #229)
+        if: always() && matrix.preset == 'linux-gcc-release'
+        continue-on-error: true
+        env:
+          TEST_OUTCOME: ${{ steps.full_tier_test.outcome || 'unavailable' }}
+        run: |
+          ci/peak-memory-report.sh \
+            "${{ matrix.preset }}" \
+            "/tmp/peak-rss-${{ matrix.preset }}.env" \
+            "/tmp/ctest-${{ matrix.preset }}.log" \
+            "${TEST_OUTCOME}"
 
       # ── #254 — the Python binding tests, folded in from `python-bindings` ────
       #
@@ -1676,7 +1714,7 @@ jobs:
 
       # #266 replaced a peak-memory probe that ran 8 times and measured nothing
       # while exiting 0 every time. Its replacement gets the pre-merge signal the
-      # original never had: 28 cells plus 10 mutants, each mutant proven to redden
+      # original never had: 32 cells plus 11 mutants, each mutant proven to redden
       # the ONE cell that names its defect. Synthetic fixtures only — no build
       # tree, no ctest.
       #

@@ -136,11 +136,30 @@ EXPECTED="${EXPECTED:-<no line>}"
 # `--output-on-failure`, so a report emitted by a test that PASSED never reaches
 # stdout.  Counting from the step log would systematically miss the interesting
 # case. REPORTED, never asserted — this script does not gate.
+#
+# ⚠️ A COUNT ALONE IS NOT ACTIONABLE, and shipping one was a defect in this
+# script. Run 32003367497 reported `sanitizer reports: 1` on BOTH the asan and
+# ubsan lanes, on green runs — and nothing on the page said WHICH line matched,
+# so the two candidate readings (a real finding that did not fail its test, vs. a
+# `runtime error:` pattern matching ordinary test output) could not be told apart
+# without re-running CI. The matched lines are now printed with the count. This
+# repo's rule is that a sanitizer finding is a REAL DEFECT UNTIL DISPROVEN;
+# disproving one requires seeing it.
+SAN_PATTERN='WARNING: ThreadSanitizer:|ERROR: (Address|Leak|Memory)Sanitizer:|runtime error:'
 LASTTEST="build/${PRESET}/Testing/Temporary/LastTest.log"
 SAN_COUNT="unreadable"
+SAN_LINES=""
 if [ -r "$LASTTEST" ]; then
-  SAN_COUNT="$(grep -cE 'WARNING: ThreadSanitizer:|ERROR: (Address|Leak|Memory)Sanitizer:|runtime error:' "$LASTTEST" 2>/dev/null || true)"
+  SAN_COUNT="$(grep -cE "$SAN_PATTERN" "$LASTTEST" 2>/dev/null || true)"
   SAN_COUNT="${SAN_COUNT:-0}"
+  if [ "$SAN_COUNT" != "0" ]; then
+    # Truncated and capped: this goes on a summary page, and a sanitizer report
+    # can be followed by a 60-frame stack. The cap is stated in the output so a
+    # reader is never left thinking they saw all of them.
+    SAN_LINES="$(grep -nE "$SAN_PATTERN" "$LASTTEST" 2>/dev/null | head -5 | cut -c1-200)"
+    echo "::warning::#267 acceptance item 5 — ${SAN_COUNT} sanitizer report(s) in ${PRESET}'s LastTest.log on a run whose ctest outcome was '${TEST_OUTCOME}'. A sanitizer report does NOT necessarily fail the test that emitted it. Treat as a real defect until disproven. First matches (line:text, capped at 5, 200 chars):"
+    printf '%s\n' "$SAN_LINES"
+  fi
 fi
 
 echo "peak=${PEAK_BYTES} bytes (${PEAK_GIB} GiB) of ${TOTAL_GIB} GiB — ${PCT} [preset: ${PRESET}] [samples: $(kv samples)] [concurrency: ${CONCURRENCY}] [ran: ${RAN:-unknown}/${EXPECTED}] [test outcome: ${TEST_OUTCOME}] [sanitizer reports: ${SAN_COUNT}]"
@@ -169,8 +188,18 @@ summary "$HEADING" "" \
   "| **achieved concurrency** | **${CONCURRENCY}** |" \
   "| tests executed | ${RAN:-unknown} (basis ${EXPECTED}) |" \
   "| sanitizer reports in LastTest.log | ${SAN_COUNT} |" \
-  "| Test outcome | ${TEST_OUTCOME} |" \
-  "" \
+  "| Test outcome | ${TEST_OUTCOME} |"
+
+if [ -n "$SAN_LINES" ]; then
+  summary "" \
+    "<details><summary>${SAN_COUNT} sanitizer report(s) — first 5, truncated</summary>" \
+    "" '```' "$SAN_LINES" '```' "" \
+    "A sanitizer report does not necessarily fail the test that emitted it, so a" \
+    "green lane above is not evidence these are benign. Real defect until disproven." \
+    "</details>"
+fi
+
+summary "" \
   "Sum of per-process RSS across the whole tree, sampled from \`/proc\`; shared pages" \
   "are counted once per mapping process, so this **over**-states physical occupancy." \
   "Unlike #245's cgroup source it covers the test phase ONLY, not the build — it is a" \

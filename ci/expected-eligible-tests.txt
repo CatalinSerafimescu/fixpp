@@ -43,15 +43,24 @@
 # CONFIRMATION, and any lane that renders DIAGNOSTIC ONLY gets its line
 # corrected here rather than argued with.
 #
-# `linux-gcc-release` has no line: it is the packaging lane and SKIPS the
-# minimal-tier Test step entirely (`if: matrix.preset != 'linux-gcc-release'`),
-# so there is no `-LE packaging` workload on it to measure.
-
 linux-clang-debug     362
 linux-clang-release   362
 linux-clang-asan      361
 linux-clang-ubsan     361
 linux-clang-tsan      361
+
+# `linux-gcc-release` runs a DIFFERENT workload, not no workload.  ⚠️ An earlier
+# revision of this file said it "SKIPS the minimal-tier Test step entirely, so
+# there is no `-LE packaging` workload on it to measure" — accurate as far as it
+# goes, and misleading: it skips that step in order to run
+# `Test (full tier incl. packaging)` instead, the FULL suite with no label
+# filter.  It is the only lane in the matrix that runs the packaging tier at all.
+#
+# No CI basis yet — #229's lane table does not include this lane, so there is
+# nothing to carry over and it is NOT guessed from `linux-clang-release`, whose
+# 362 is a `-LE packaging` count and therefore a different quantity.  `-` renders
+# DIAGNOSTIC ONLY until a run reports the number.
+linux-gcc-release     -
 
 # Tier 3 (`.github/workflows/tier3-libcxx.yml`). These lanes run the FULL suite
 # — their Test step carries no `-LE packaging` — so the counts are lower than

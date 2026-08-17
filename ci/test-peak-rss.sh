@@ -320,6 +320,21 @@ OUT="$(run_pinned success "$WORK/good.env" "$WORK/ctest.log")"
 case "$OUT" in *"sanitizer reports: 3"*) ok "T16 the sanitizer counter sees TSan, ASan and UBSan reports (3)";;
                *) bad "T16 the sanitizer counter did not read 3 from a log containing 3 reports — a 0 from this instrument would mean nothing: $OUT";; esac
 
+# ── T16b: it says WHICH lines matched, not just how many ─────────────────────
+#
+# A bare count is not actionable, and shipping one WAS a defect: CI reported
+# `sanitizer reports: 1` on two green lanes and the page did not say what
+# matched, so a real finding and a false-positive pattern match could not be told
+# apart without another CI run. The rule this repo works to is "real defect until
+# disproven" — and disproving one requires seeing it.
+for probe in "ThreadSanitizer: data race" "AddressSanitizer: heap-use-after-free" "runtime error: signed integer overflow"; do
+  case "$OUT" in *"$probe"*) ok "T16b the matched line is reported: ${probe}";;
+                 *) bad "T16b the count was reported without the matching line (${probe} missing): $OUT";; esac
+done
+case "$OUT" in *"this line is not a sanitizer report"*)
+      bad "T16b a NON-matching line was echoed as a sanitizer report — the excerpt is not the grep's own output";;
+   *) ok "T16b only matching lines are echoed";; esac
+
 # ── T17: and it reads 0 on a clean log, not 'unreadable' ─────────────────────
 printf 'all quiet\n' > "$WORK/tree/build/$FAKE/Testing/Temporary/LastTest.log"
 OUT="$(run_pinned success "$WORK/good.env" "$WORK/ctest.log")"
@@ -429,6 +444,11 @@ mutant bare-out-of report \
 mutant unanchored-summary report \
   's|^  RAN="$(awk .match($0, /\^\[0-9\]+% tests passed.*$|  RAN="$(awk '"'"'match($0, /tests passed,.* tests failed out of [0-9]+/) { m = substr($0, RSTART, RLENGTH); sub(/.* out of /, "", m); n = m } END { print n }'"'"' "$CTEST_LOG")"  # MUTANT|' \
   "T14b" "matches ctest's summary sentence anywhere on a line, so a test quoting that phrasing is read as the workload size"
+
+# The form that shipped for one CI run: the count, with no attribution.
+mutant count-without-lines report \
+  's|^    SAN_LINES="$(grep -nE .*$|    SAN_LINES=""  # MUTANT|' \
+  "T16b" "reports how many sanitizer reports there were without saying which lines matched"
 
 mutant wrong-lasttest-path report \
   's|^LASTTEST="build/${PRESET}/Testing/Temporary/LastTest.log"$|LASTTEST="build/${PRESET}/Testing/LastTest.log"  # MUTANT|' \
