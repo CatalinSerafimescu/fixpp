@@ -1,0 +1,61 @@
+# Per-lane expected test count for the #229 / #266 peak-memory acceptance.
+#
+#   <preset>  <expected count>      # `-` = no CI-derived basis recorded yet
+#
+# ── WHY A PIN AT ALL ─────────────────────────────────────────────────────────
+#
+# A peak-memory figure is only evidence for `ctest --parallel` if it was taken
+# over the workload it claims to describe.  `ctest` exits 0 on a workload of
+# ZERO tests, so a green Test step alone does not mean "the suite ran".  The pin
+# makes the acceptance HEADING conditional on the run having executed the number
+# of tests the recorded basis was taken at.
+#
+# ⚠️ THE DIRECTION IS SAFE BY CONSTRUCTION, and that is the whole design.  A
+# STALE pin degrades a run toward "DIAGNOSTIC ONLY / not evidence"; it can never
+# degrade toward a false acceptance.  A mismatch is therefore the DESIGNED
+# PROMPT to re-record the basis in ci/ctest-parallelism-probe.md and update the
+# line here in the same commit — it is not a broken gate.  Do NOT replace exact
+# equality with a floor (`>= 340`): a floor inverts the safe direction and would
+# admit a run that silently lost twenty tests as acceptance evidence.
+#
+# ── WHY IT IS PER-LANE, AND NOT ONE NUMBER ───────────────────────────────────
+#
+# The counts genuinely DIFFER per lane — some tests are registered only under
+# certain build types or sanitizers.  #245's single `expected_eligible=350`
+# applied to `linux-clang-tsan` alone, which was correct while the probe ran on
+# that one lane.  #267 widens `--parallel` lane by lane and requires a peak
+# reading PER LANE, so one constant would be wrong for five of the six, not
+# merely stale.
+#
+# ── WHY THE VALUES MUST BE DERIVED IN CI, NOT LOCALLY ────────────────────────
+#
+# ⚠️ Local and CI trees do NOT agree, and the previous pin was set from a local
+# derivation.  The #229 local sweep (2026-08-16, `main` @ 0b51b1da) counted
+# 376 eligible tests on `linux-clang-tsan` and 377 on `linux-clang-debug`; CI on
+# the same content ran 361 and 362.  Fifteen tests are registered locally that
+# are not registered on a runner.  A value derived on a workstation is therefore
+# not a CI basis, however carefully it was measured.
+#
+# The counts below are read from the CI job logs of ONE `push:main` run —
+# run 31737273371, commit `5c56a17e` (Tier 1) — the same run every figure in
+# #266/#267/#229's 2026-08-16 comments is taken from.  Our branch changes no
+# test registration, so they carry over; the first CI run on this branch is the
+# CONFIRMATION, and any lane that renders DIAGNOSTIC ONLY gets its line
+# corrected here rather than argued with.
+#
+# `linux-gcc-release` has no line: it is the packaging lane and SKIPS the
+# minimal-tier Test step entirely (`if: matrix.preset != 'linux-gcc-release'`),
+# so there is no `-LE packaging` workload on it to measure.
+
+linux-clang-debug     362
+linux-clang-release   362
+linux-clang-asan      361
+linux-clang-ubsan     361
+linux-clang-tsan      361
+
+# The coverage lane runs the FULL suite (no `-LE packaging` filter), so its
+# count is not comparable to the five above and has never been read off a CI
+# log.  Left `-` deliberately: `-` renders DIAGNOSTIC ONLY, which is the honest
+# disposition for a lane whose basis has not been recorded.  It is filled in
+# from the first CI run that reports it — not guessed from a sibling lane.
+linux-clang-coverage  -

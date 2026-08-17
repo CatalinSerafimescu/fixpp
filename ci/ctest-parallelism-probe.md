@@ -1,8 +1,13 @@
 # `ctest` parallelism — single-lane probe (TSan)
 
 **Status:** MERGED (PR #227, squash `80ccb782`), **three measurements in — all green**.
-`linux-clang-tsan` only. Do **not** copy `execution.jobs` to any other test preset yet: acceptance
-criterion **4** (peak memory) is still unmet.
+
+⚠️ **This document has two layers and they are dated differently.** Everything below the
+*"MEASURED — 2026-08-04"* heading is the original single-lane probe record and is correct for the
+runs it cites. The **#266 section inside the acceptance table** carries the live mechanism: the
+cgroup instrument that criterion 4 depended on never produced a reading, so both the source and the
+closure condition were replaced. Read that section before acting on criterion 4 — the sentences it
+supersedes are deliberately left in place as a record of a falsified assumption, not as instructions.
 
 ## MEASURED — 2026-08-04
 
@@ -54,7 +59,75 @@ All three step-duration runs (and both `Total Test time` samples that overlap th
 | 1 | materially lower over more than one run | **MET** — 1935 / 1806 / 1859, all far below the 3300–3356 band |
 | 2 | no failures, no `exit 143` / OOM | **MET** — 346/346 on all three runs |
 | 3 | no previously-stable test turns intermittent | **MET** — identical 346 count and zero failures across three runs |
-| 4 | peak RSS / cgroup `memory.peak` captured | **UNMET** — still not measured. Closes on the first successful post-merge `linux-clang-tsan` run of the `Capture peak memory (ctest --parallel evidence, #229)` step added in PR #245 (`tier1.yml`); record that run here (URL, source path, peak bytes/GiB, runner MemTotal, Test outcome, eligible test count (`-LE packaging`), which must equal `tier1.yml`'s `expected_eligible`) when it lands. |
+| 4 | peak RSS captured, per lane | **see the #266 section below** — the source changed; the closure condition is restated there because the one written here was falsified. |
+
+### ⚠️ Criterion 4's old closure condition was FALSIFIED — #266
+
+It read: *"Closes on the first successful post-merge `linux-clang-tsan` run of the
+`Capture peak memory (ctest --parallel evidence, #229)` step added in PR #245."*
+
+**That run does not exist and never would have.** The step read cgroup v2's
+`memory.peak`, which exists only on **non-root** cgroup v2 nodes; a GitHub-hosted
+job sits in the root cgroup, so the file is absent. It failed on **8 of 8**
+post-merge runs over five days — a census, not a sample — each time emitting its
+loud `NOT MEASURED` warning rather than a silent nothing or a fabricated number.
+The probe's *refusal* was correct; its *source* did not exist on the platform it
+ran on.
+
+The sentence above is kept rather than deleted: an assumption that a criterion
+was written on, and that turned out to be false, is part of the record.
+
+#### The replacement, and what it closes on
+
+Source is now `ci/measure-peak-rss.py` — a `/proc` sampler that sums the RSS of
+`ctest`'s whole process tree at 250 ms, wrapped **around** the ctest invocation
+so the instrument's lifetime is structurally tied to the thing it measures.
+`/usr/bin/time -v` was considered and rejected: `getrusage(RUSAGE_CHILDREN)`
+reports the largest **single** child, not the concurrent **sum**, and #229's
+local sweep measures that error at **+37 %** on this very lane (1.04 GiB largest
+single ⇒ a naive ~4 GiB projection at j=4, against 2.53 GiB measured).
+
+**Criterion 4 now closes PER LANE, on a `pull_request`- or `push:main`-context
+run whose `Peak memory (ctest --parallel evidence, #266 / #229)` step renders the
+`evidence` heading — not the `DIAGNOSTIC ONLY` one — for that lane, recorded in
+the table below.** The heading is conditional on the Test step having succeeded
+*and* the run having executed exactly the count recorded for that lane in
+`ci/expected-eligible-tests.txt`, so a figure can never be labelled evidence over
+a workload that is not the recorded one.
+
+Three consequences worth stating, because each replaces something the old
+condition assumed:
+
+* **It is no longer "the first post-merge run".** That phrasing is what made the
+  criterion unfalsifiable for five days — there was no run to wait for. The
+  condition is now a *rendering* the job either produces or does not, visible on
+  the run's own summary page.
+* **It is per lane, not one number.** #267 widens `--parallel` lane by lane and
+  requires a reading for each; the pin moved out of `tier1.yml`'s single
+  `expected_eligible=350` into a per-lane file for the same reason.
+* **It measures the TEST PHASE only.** `memory.peak` was a job-wide high-water
+  mark covering `Build`, reported as a deliberate ceiling because the runner user
+  cannot reset it. Sampling around `ctest` needs no such concession — but it also
+  means the new figures are **not** comparable to a cgroup one, had any existed.
+
+#### The eligible-count basis, re-derived (#266 acceptance item 5)
+
+The old pin was `expected_eligible=350`, derived **locally** at `9e444ef5`.
+⚠️ **Local and CI trees do not agree**, which that derivation could not see: on
+`main` @ `0b51b1da` the #229 local sweep counted **376** eligible tests on
+`linux-clang-tsan` and **377** on `linux-clang-debug`, while CI on the same
+content ran **361** and **362**. Fifteen tests are registered on a workstation
+that are not registered on a runner. The per-lane values now in
+`ci/expected-eligible-tests.txt` are therefore read off **CI job logs** (run
+`31737273371`, commit `5c56a17e`), and the first CI run of this change is their
+confirmation; any lane that renders `DIAGNOSTIC ONLY` gets its line corrected
+rather than argued with.
+
+#### Measured (filled in from CI — empty until a run reports)
+
+| lane | run | ctest jobs | peak concurrent RSS | % of MemTotal | achieved concurrency | tests executed | sanitizer reports |
+|---|---|---:|---:|---:|---:|---:|---:|
+| _pending first CI run_ | | | | | | | |
 
 **Criterion 4 is what blocks widening, and it is not a formality.** Three green runs say the lane
 *did not* run out of memory; they say nothing about how close it came. Two concurrent TSan
@@ -184,32 +257,33 @@ registered CTest `TIMEOUT` is tight enough for a 2× slowdown to trip it — the
 1. The TSan `Test` step lands materially below the 3300–3356 s band, over **more than one** run.
 2. No new failures, and no `exit 143` / OOM on the lane.
 3. No test that was previously stable becomes intermittent.
-4. **Peak memory captured, not assumed** — record peak RSS / cgroup `memory.peak` during the run,
-   ideally while `codegen_determinism_test` (1132 s) overlaps `dictionary_pure_tests` (531 s), the
+4. **Peak memory captured, not assumed** — record the peak concurrent RSS during the run, ideally
+   while `codegen_determinism_test` (1132 s) overlaps `dictionary_pure_tests` (531 s), the
    worst-case pairing. Until that number exists, "two concurrent TSan processes fit in 16 GB" is
-   untested, and widening to `jobs=3` would be compounding an unmeasured assumption. **Still UNMET**:
-   PR #245 installs the `Capture peak memory` step (`tier1.yml`) that takes this measurement;
-   criterion 4 closes on the first successful post-merge `linux-clang-tsan` run after that PR merges,
-   recorded in this document (run URL, source path, peak bytes/GiB, runner MemTotal, Test outcome,
-   eligible test count) — not on the PR's own merge.
+   untested, and widening to `jobs=3` would be compounding an unmeasured assumption.
 
-   **The eligible-count coupling (Gate B round 2, RC#6):** the peak-memory step's acceptance
-   heading ("`ctest --parallel` evidence") only renders when `eligible` (`ctest -N -LE packaging` on
-   `linux-clang-tsan`) equals a pinned `expected_eligible` in `tier1.yml` — this is the OTHER end of
-   that coupling; the two must be kept in sync by hand. **This is a designed prompt, not a bug**: if
-   the first post-merge run renders `DIAGNOSTIC ONLY` with `eligible ≠ expected_eligible`, re-record
-   the basis here and update `expected_eligible` in the same commit; criterion 4 closes on the run
-   **after** that reconciliation, not on the mismatched one. The direction is safe by construction —
-   a stale expectation degrades toward "not evidence", never toward a false acceptance.
+   ⚠️ **This item's mechanism was rewritten by #266 and its closure condition now lives in the
+   *"Criterion 4's old closure condition was FALSIFIED"* section above.** The paragraphs that stood
+   here — the `Capture peak memory` step, the cgroup source, the single `expected_eligible` in
+   `tier1.yml`, and "closes on the first successful post-merge run" — described an instrument that
+   produced a reading on 0 of 8 runs. They are superseded there rather than patched here, so there
+   is one description of the live mechanism and not two that can drift apart.
 
-   `expected_eligible` was re-derived for PR #245 Gate B round 2 at `9e444ef5` (configure-only
-   `cmake --preset linux-clang-tsan` + `ctest --preset linux-clang-tsan -N -LE packaging`) and came
-   back **350**, not the 346 this document's criteria 2 and 3 above were discharged at — #239
-   (088-firstframe-budget-timer-lifetime) landed on `main` after the three runs cited above and added
-   test files under `tests/session/` and `tests/transport/`. The 346/346 figures in criteria 2 and 3
-   are correctly measured for the runs they cite and are left as-is (add, do not correct); this line
-   records that the suite has since grown to 350, which is the value written into `tier1.yml`'s
-   `expected_eligible`.
+   The one thing worth carrying forward verbatim, because it is a design property and not an
+   implementation detail: **a mismatch between the executed test count and the recorded basis is a
+   DESIGNED PROMPT, not a bug.** It degrades the run to `DIAGNOSTIC ONLY`, i.e. toward "not
+   evidence" — never toward a false acceptance. Re-record the basis and update
+   `ci/expected-eligible-tests.txt` in the same commit; the criterion closes on the run **after**
+   that reconciliation, not on the mismatched one.
+
+   For the record of what the pin was before: `expected_eligible` was re-derived for PR #245 Gate B
+   round 2 at `9e444ef5` (configure-only `cmake --preset linux-clang-tsan` +
+   `ctest --preset linux-clang-tsan -N -LE packaging`) and came back **350**, not the 346 this
+   document's criteria 2 and 3 above were discharged at — #239 landed on `main` after the three runs
+   cited above and added test files under `tests/session/` and `tests/transport/`. The 346/346
+   figures in criteria 2 and 3 are correctly measured for the runs they cite and are left as-is
+   (add, do not correct). ⚠️ That 350 was derived **locally**, which is why it drifted from CI
+   without anyone noticing — see the re-derivation note in the #266 section above.
 
 Only then extend `execution.jobs` to `linux-clang-asan` / `linux-clang-ubsan` /
 `linux-clang-coverage`, one at a time, re-measuring each.

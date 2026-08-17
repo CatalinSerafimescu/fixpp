@@ -1,0 +1,166 @@
+#!/usr/bin/env bash
+# CI-side (#266 / #229 criterion 4): render the peak-memory measurement taken by
+# ci/measure-peak-rss.py, and say whether it is ACCEPTANCE EVIDENCE or not.
+#
+#   ci/peak-memory-report.sh <preset> <peak-env-file> <ctest-log> <test-outcome>
+#
+#   peak-env-file — the key=value report written by ci/measure-peak-rss.py
+#   ctest-log     — the teed ctest output (`--log` of the same invocation)
+#   test-outcome  — steps.<id>.outcome ('success' / 'failure' / 'skipped' / '')
+#
+# NEVER FAILS THE LANE — it is a measurement, not a gate.  But a measurement
+# that could not be taken must SAY SO: every path below emits an attributed
+# disposition, and there is none on which "no number" can be read as "captured,
+# and it was fine"
+# (feedback_silent_empty_recurred_three_times_including_inside_its_own_fix).
+#
+# ── WHAT CHANGED FROM #245's VERSION, AND WHY ────────────────────────────────
+#
+# #245 read cgroup v2 `memory.peak` inline in tier1.yml.  That source does not
+# exist in a GitHub-hosted runner's root cgroup and produced a reading on 0 of 8
+# post-merge runs (#266).  The source is now ci/measure-peak-rss.py's sampled
+# process-tree sum; see that file for what the number is and is not.
+#
+# Two further changes, both narrowing what can be claimed:
+#
+#  1. THE WORKLOAD SIZE IS READ FROM THE RUN, NOT RE-DERIVED.  #245 ran a second
+#     `ctest -N -LE packaging` to count eligible tests.  That answers "what would
+#     a run now select?", which is not the same question as "what did the run
+#     this peak was measured over actually execute?" — they diverge the moment
+#     anything between the two invocations changes.  The count now comes out of
+#     the ctest log the peak was sampled around, so the figure and its basis are
+#     the same event by construction.
+#
+#  2. THE ACHIEVED CONCURRENCY IS REPORTED.  `execution.jobs` in a preset is an
+#     INTENTION.  The ratio of the summed per-test durations to ctest's own
+#     `Total Test time (real)` is what actually happened — it is how #229
+#     measured this lane's production 1.84x at j=2, and it is the only thing
+#     that would catch a widening that silently failed to take effect.
+#
+# ⚠️ `set -uo pipefail` WITHOUT `-e`: every failure path below is explicitly
+# dispositioned, and an unhandled abort here would produce exactly the silent
+# nothing this script exists to prevent.  (Also `[ cond ] && x` as a final
+# statement returns non-zero under `-e` on the PASSING branch —
+# feedback_bracket_and_fail_under_set_e_aborts_on_the_passing_branch.)
+set -uo pipefail
+
+PRESET="${1:?usage: peak-memory-report.sh <preset> <peak-env> <ctest-log> <test-outcome>}"
+PEAK_ENV="${2:?}"
+CTEST_LOG="${3:?}"
+TEST_OUTCOME="${4:-unavailable}"
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+EXPECTED_FILE="${HERE}/expected-eligible-tests.txt"
+
+summary() { [ -n "${GITHUB_STEP_SUMMARY:-}" ] && printf '%s\n' "$@" >> "$GITHUB_STEP_SUMMARY"; return 0; }
+
+# ── The measurement ──────────────────────────────────────────────────────────
+#
+# Read as DATA, never sourced.  The file records a `command=` line holding the
+# wrapped command verbatim; `source`ing it would execute a substring of the
+# thing being measured.
+kv() { awk -F= -v k="$1" '$1 == k { sub(/^[^=]*=/, ""); print; exit }' "$PEAK_ENV" 2>/dev/null; }
+
+if [ ! -r "$PEAK_ENV" ]; then
+  echo "::warning::#266 peak-memory report FAILED for ${PRESET} — the instrument's output file (${PEAK_ENV}) does not exist or is unreadable, so ci/measure-peak-rss.py did not run or could not write. The ctest --parallel memory criterion is UNMEASURED on this lane; do not read this run as evidence."
+  summary "### Peak memory (#266) — NOT MEASURED (\`${PRESET}\`)" "" \
+          "The instrument produced no output file. The \`--parallel\` widening criterion is still open for this lane."
+  exit 0
+fi
+
+STATUS="$(kv status)"
+PEAK_BYTES="$(kv peak_bytes)"
+
+if [ "${STATUS:-}" != "ok" ] || ! [ "${PEAK_BYTES:-x}" -gt 0 ] 2>/dev/null; then
+  echo "::warning::#266 peak-memory report FAILED for ${PRESET} — the instrument reported status='${STATUS:-<absent>}' (peak_bytes='${PEAK_BYTES:-<absent>}', samples='$(kv samples)'). The ctest --parallel memory criterion remains UNMEASURED; do not read this run as evidence."
+  summary "### Peak memory (#266) — NOT MEASURED (\`${PRESET}\`)" "" \
+          "Instrument status: \`${STATUS:-<absent>}\`. See \`ci/measure-peak-rss.py\`'s fail-loud contract for what each status means."
+  exit 0
+fi
+
+MEM_TOTAL="$(kv mem_total_bytes)"
+PEAK_GIB="$(awk -v b="$PEAK_BYTES" 'BEGIN{printf "%.2f", b/1073741824}')"
+SINGLE_GIB="$(awk -v b="$(kv peak_max_single_bytes)" 'BEGIN{printf "%.2f", b/1073741824}')"
+TOTAL_GIB="$(awk -v b="${MEM_TOTAL:-0}" 'BEGIN{printf "%.2f", b/1073741824}')"
+PCT="n/a"
+[ "${MEM_TOTAL:-0}" -gt 0 ] 2>/dev/null && \
+  PCT="$(awk -v b="$PEAK_BYTES" -v t="$MEM_TOTAL" 'BEGIN{printf "%.1f%%", b/t*100}')"
+
+# ── The workload, read out of the run the peak was sampled around ────────────
+#
+# `100% tests passed, 0 tests failed out of 361` — the trailing count is the
+# size of the workload whatever the outcome, which is why it is preferred over
+# the pass count.  RAN is empty when the line is absent (ctest died before its
+# summary), and an empty RAN can match no pin, so that degrades to
+# DIAGNOSTIC ONLY rather than to a silent pass.
+RAN=""
+CTEST_REAL=""
+SUM_S=""
+if [ -r "$CTEST_LOG" ]; then
+  RAN="$(awk 'match($0, /out of [0-9]+/) { n = substr($0, RSTART+7, RLENGTH-7) } END { print n }' "$CTEST_LOG")"
+  CTEST_REAL="$(awk -F'= *' '/Total Test time \(real\)/ { t = $2 } END { gsub(/[^0-9.]/, "", t); print t }' "$CTEST_LOG")"
+  # `  12/361 Test  #7: name ......   Passed    1.42 sec`
+  SUM_S="$(awk '/^ *[0-9]+\/[0-9]+ +Test +#[0-9]+/ && match($0, /[0-9.]+ sec$/) { s += substr($0, RSTART, RLENGTH-4) } END { if (s > 0) printf "%.1f", s }' "$CTEST_LOG")"
+fi
+
+CONCURRENCY="n/a"
+if [ -n "$SUM_S" ] && [ -n "$CTEST_REAL" ]; then
+  CONCURRENCY="$(awk -v s="$SUM_S" -v r="$CTEST_REAL" 'BEGIN{ if (r > 0) printf "%.2fx", s/r; else print "n/a" }')"
+fi
+
+# ── The pin ──────────────────────────────────────────────────────────────────
+EXPECTED="$(awk -v p="$PRESET" '$1 == p { print $2; exit }' "$EXPECTED_FILE" 2>/dev/null)"
+EXPECTED="${EXPECTED:-<no line>}"
+
+# ── Sanitizer reports, counted SEPARATELY from ctest's exit code ─────────────
+#
+# ⚠️ A sanitizer report does not necessarily fail the test that emitted it, so
+# "ctest was green" is not "no sanitizer fired".  #229's local sweep counted
+# these separately for exactly that reason, and #267's acceptance item 5 treats
+# any post-widening report as a real defect until disproven.
+#
+# Source is CTest's own LastTest.log, NOT the step log: the Test step runs with
+# `--output-on-failure`, so a report emitted by a test that PASSED never reaches
+# stdout.  Counting from the step log would systematically miss the interesting
+# case. REPORTED, never asserted — this script does not gate.
+LASTTEST="build/${PRESET}/Testing/Temporary/LastTest.log"
+SAN_COUNT="unreadable"
+if [ -r "$LASTTEST" ]; then
+  SAN_COUNT="$(grep -cE 'WARNING: ThreadSanitizer:|ERROR: (Address|Leak|Memory)Sanitizer:|runtime error:' "$LASTTEST" 2>/dev/null || true)"
+  SAN_COUNT="${SAN_COUNT:-0}"
+fi
+
+echo "peak=${PEAK_BYTES} bytes (${PEAK_GIB} GiB) of ${TOTAL_GIB} GiB — ${PCT} [preset: ${PRESET}] [samples: $(kv samples)] [concurrency: ${CONCURRENCY}] [ran: ${RAN:-unknown}/${EXPECTED}] [test outcome: ${TEST_OUTCOME}] [sanitizer reports: ${SAN_COUNT}]"
+
+# EVIDENCE requires all three: the suite succeeded, a basis is recorded for this
+# lane, and the run executed exactly that many tests.  `-` (no CI basis yet) can
+# never equal a number, so an un-recorded lane degrades to DIAGNOSTIC ONLY.
+if [ "$TEST_OUTCOME" = "success" ] && [ -n "$RAN" ] && [ "$RAN" = "$EXPECTED" ]; then
+  HEADING="### Peak memory — \`ctest --parallel\` evidence (#266 / #229 criterion 4) — \`${PRESET}\`"
+else
+  echo "::warning::#266 peak-memory figure for ${PRESET} is DIAGNOSTIC ONLY — Test outcome was '${TEST_OUTCOME}' and/or the executed test count (${RAN:-unknown}) did not match the recorded basis (${EXPECTED}), so this number does NOT discharge the ctest --parallel memory criterion. If only the count differs, that is the designed prompt to re-record the basis in ci/ctest-parallelism-probe.md and update ci/expected-eligible-tests.txt in the same commit."
+  HEADING="### Peak memory (#266) — DIAGNOSTIC ONLY — \`${PRESET}\` (outcome: ${TEST_OUTCOME}, ran: ${RAN:-unknown}, expected: ${EXPECTED})"
+fi
+
+summary "$HEADING" "" \
+  "| metric | value |" \
+  "|---|---|" \
+  "| peak concurrent RSS (process tree) | **${PEAK_GIB} GiB** |" \
+  "| largest single process at peak | ${SINGLE_GIB} GiB |" \
+  "| processes at peak | $(kv peak_procs) |" \
+  "| runner MemTotal | ${TOTAL_GIB} GiB |" \
+  "| utilisation | ${PCT} |" \
+  "| samples / interval | $(kv samples) @ $(kv interval_ms) ms |" \
+  "| ctest \`Total Test time (real)\` | ${CTEST_REAL:-unknown} s |" \
+  "| sum of per-test durations | ${SUM_S:-unknown} s |" \
+  "| **achieved concurrency** | **${CONCURRENCY}** |" \
+  "| tests executed | ${RAN:-unknown} (basis ${EXPECTED}) |" \
+  "| sanitizer reports in LastTest.log | ${SAN_COUNT} |" \
+  "| Test outcome | ${TEST_OUTCOME} |" \
+  "" \
+  "Sum of per-process RSS across the whole tree, sampled from \`/proc\`; shared pages" \
+  "are counted once per mapping process, so this **over**-states physical occupancy." \
+  "Unlike #245's cgroup source it covers the test phase ONLY, not the build — it is a" \
+  "measurement of \`ctest\`, not a job-wide ceiling. See \`ci/measure-peak-rss.py\`."
+
+exit 0
