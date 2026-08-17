@@ -1578,7 +1578,7 @@ jobs:
           # CI-3: route the in-container Conan home to the host-mounted, cached dir.
           # #259 adds a SECOND mount for the ccache directory, the same mechanism
           # the Conan home already proved.
-          CIBW_CONTAINER_ENGINE: "docker; create_args: -v /tmp/wheel-conan2:/host-conan2 -v /tmp/fixpp-ccache-wheel:/host-ccache"
+          CIBW_CONTAINER_ENGINE: "docker; create_args: -v /tmp/wheel-conan2:/host-conan2 -v ${{ env.CCACHE_DIR }}:/host-ccache"
           # ⚠️ ONE KEY, SPACE-SEPARATED — do NOT add a second `CIBW_ENVIRONMENT:`.
           # YAML keeps only the last duplicate key, so a second one would
           # silently drop CONAN_HOME and send the dependency closure back to a
@@ -1595,7 +1595,7 @@ jobs:
           # docker creates it root-owned and the restore's contents are not
           # there. restore-ccache.sh already mkdir's it; this is belt-and-braces
           # for the case where that step was skipped.
-          mkdir -p /tmp/fixpp-ccache-wheel
+          mkdir -p "$CCACHE_DIR"
           # A fresh CI checkout has NO build/ tree, so the local worktree wrapper
           # (build-wheel.sh — which exists only to dodge cibuildwheel's blind
           # `tar -c .` of cwd dragging in the multi-GB local build/) is
@@ -1644,7 +1644,7 @@ jobs:
       # every run, which is the exact shape #259 exists to end.
       - name: Reclaim ownership of the ccache dir
         if: always()
-        run: sudo chown -R "$(id -u):$(id -g)" /tmp/fixpp-ccache-wheel || true
+        run: sudo chown -R "$(id -u):$(id -g)" "$CCACHE_DIR" || true
 
       # ── ccache statistics + liveness (#259) ───────────────────────────────
       #
