@@ -1108,6 +1108,13 @@ CI_PIN_HARNESSES=(
   "ci/test-ccache-scripts.sh"
   "ci/test-tier1-python-policy.sh"
   "ci/test-python-install-witness.sh"
+  # #252's checker pin. ⚠️ ADDED WITH ITS OWN MUTANT (M65), not just appended.
+  # M26 proves this census CAN fire, but it proves it for ONE harness — and a
+  # census that only ever reddens on the member it was written against says
+  # nothing about the member added later. A new row here without a new mutant is
+  # an assertion nobody has seen fail, which is the same shape as the defect
+  # #252's own checker exists to close.
+  "ci/test-sanitized-deps.sh"
 )
 
 assert_ci_pin_call_sites() {
@@ -1152,7 +1159,13 @@ echo "PASS: derive-script table + call site + FIXPP_INSTALL_PYTHON=OFF + PY_RE c
 # for a miscount; a counter is. MUTANTS_RUN is incremented by each mutant AFTER
 # it has been proven RED for the right reason, so an early `return` or a mutant
 # silently commented out changes the total.
-MUTANTS_DECLARED=49  # M1 M2 M3 B M4 M5 M6 M7 M11 M14 M15 M21 M26 M27 M29-M45 M47 M48 M49 M50 M51-M55 M56-M63 + M28 (1
+# ⚠️ REBASE NOTE (#252). This is 49 + M65 = 50 ON THIS BRANCH. `ci/209-bench-gate`
+# independently takes it 49 -> 50 by adding its own M64, so after that branch
+# merges the correct value here is 51 and BOTH mutant names survive (64 and 65 do
+# not collide). Re-run the harness against the merged number rather than
+# re-deriving from either branch's local total — the failure mode this guards is
+# one side's edit silently replacing the other's, which reads as a passing count.
+MUTANTS_DECLARED=50  # M1 M2 M3 B M4 M5 M6 M7 M11 M14 M15 M21 M26 M27 M29-M45 M47 M48 M49 M50 M51-M55 M56-M63 M65 + M28 (1
                      # GREEN control; M46 RETIRED at round 9 — its GREEN assertion became false by design) —
                      # DOWN from 27 at round 3b, because the golden subsumed 14 of them. See the RETIRED block
                      # in run_mutant_checks for the list and the reason. M48-M50 added at #270 Gate B r1 (F1):
@@ -1527,6 +1540,21 @@ src, dst = sys.argv[1], sys.argv[2]
 t = open(src).read()
 old = "        run: bash ci/test-python-install-witness.sh\n"
 new = "        run: echo \"bash ci/test-python-install-witness.sh\"\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
+'
+
+  # M65 (#252): the SAME dead-call-site shape as M26, on the census row #252
+  # added. Its own mutant because M26 only ever proves the census fires for
+  # `ci/test-python-install-witness.sh`; a row proven by a sibling's mutant is a
+  # row nobody has seen fail. Numbered 65 to leave M64 to #209's bench harness,
+  # which lands in this same file — see the rebase note at MUTANTS_DECLARED.
+  mutate_workflow M65 "the sanitized-deps harness call site replaced by an echo" "ci-script-pins does not INVOKE" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "          bash ci/test-sanitized-deps.sh\n"
+new = "          echo \"bash ci/test-sanitized-deps.sh\"\n"
 assert t.count(old) == 1, t.count(old)
 open(dst, "w").write(t.replace(old, new))
 '
