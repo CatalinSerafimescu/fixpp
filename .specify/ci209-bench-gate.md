@@ -3,13 +3,25 @@
 Companion issue: **#263** (`XmlLoader::load` regressed 60–90 % on main, unseen). This record decides
 the **shape** of the gate; #263 owns the regression itself.
 
-> **Revision note (r2).** The first draft of this record proposed hardening the existing
-> baseline-vs-current ±5 % comparison and *seeding* CI-provenance baselines from this PR's own run.
-> Codex adversarial review returned **P1=2 P2=6 P3=1** and both P1s were correct. §2b is the finding
-> that killed it: **10 of the 14 allowlisted baselines contain no `cpu_time` field at all** — they are
-> hand-authored analysis records, not machine comparands — so the proposed integrity cells would have
-> fired on a *correct* tree. §3 is the pivot that resolves it. Review:
-> `research/reviews/codex_ci209_bench_gate_r1_review.md`.
+> **Revision note (r3).** Two adversarial review rounds, both of which changed the design. This
+> record is the Gate-A-equivalent for a CI-only PR: `/gate-a` resolves `specs/<id>/spec.md` +
+> `plan.md` and STOPs without them, so it cannot run here, and PR #270 — the most recent CI-only PR —
+> shipped `gate-a-waived`. The reviews below are what that waiver stands on.
+>
+> **r1** (`research/reviews/codex_ci209_bench_gate_r1_review.md`, **P1=2 P2=6 P3=1**) killed the
+> original design — harden the existing ±5 % baseline comparison and seed CI-provenance baselines
+> from this PR's own run. §2b is the finding: **10 of the 14 allowlisted baselines contain no
+> `cpu_time` field at all**, so the proposed integrity cells would have fired on a *correct* tree.
+> §2c is the second: both available seed sources are circular. §3 is the pivot.
+>
+> **r2** (`..._r2_review.md`, **P1=3 P2=6 P3=2**) then found three defects in the pivot. Two of them
+> would have shipped: a tier-1 unit rule that **reddens a correct tree** (§4 tier 1, T1-7), and a
+> **live bypass in the tier-2 comparison** that survived my first attempt at fixing it (§3). Both are
+> now pinned as cells in `ci/test-bench-gate.sh` rather than argued in prose.
+>
+> ⚠️ r2 read a tree mid-implementation, so its F1 ("the implementation does not implement the pivot")
+> and F8 ("`ci/test-bench-gate.sh` does not exist") describe a state that no longer holds — both are
+> now implemented and the policy pin runs 50/50 green. Its remaining findings were real.
 
 ---
 
@@ -90,9 +102,16 @@ row, not by reading names:
 
 | class | files | what they are |
 |---|---:|---|
-| genuine Google-Benchmark JSON (`cpu_time` on every row) | **12** | comparable in principle |
+| carries a `cpu_time` key on every row | **12** | ⚠️ **NOT the same as "genuine"** — see below |
 | non-empty but **zero `cpu_time` on every row** | **10** | hand-authored analysis records |
 | `benchmarks: []` | **3** | nothing to compare |
+
+⚠️ **The "12" is a `has("cpu_time")` count and must not be read as 12 usable baselines.** At least two
+of them are not Google-Benchmark output: `placeholder.json` has null timings, and
+`sync/async_mutex_baselines.json` pairs a `cpu_time` key with `ceiling_ns` / `ceiling_source` /
+`measured_ns` and **no** `real_time`, `time_unit` or `run_type`. An earlier revision classified the
+latter `gb-json` on exactly that basis (Codex round 2, F7). Presence of one familiar key is not schema
+validation — which is why tier 1 validates the full row shape rather than probing for a field.
 
 The 10 are not stale measurements. They are **documentation in JSON clothing**, with field names that
 say so outright:
@@ -105,13 +124,15 @@ say so outright:
 | `capi/capi_commit_group_bench.json` | `pre083_median_ns`, `seed_median_ns`, `delta_vs_pre083_pct`, `verdict` |
 | `wire/{framer,offset_table,parser,writer}_bench.json` | `ceiling_ns`, `ceiling_source`, `measured_debug_ns` |
 
-Mapped onto the 14 binaries r1 proposed to gate: **2 genuine** (`decimal_baseline.json`,
+Mapped onto the 14 binaries r1 proposed to gate: **2 usable** (`decimal_baseline.json`,
 `dictionary/xml_loader.json`), **2 empty**, **10 non-comparands**. r1's integrity cells would have
-fired on a correct tree for 10 of 14 rows.
+fired on a correct tree for 10 of 14 rows. *(The allowlist has since grown to 23 binaries on a
+per-binary source reading — see §4. The 2/2/10 figures describe r1's set, which is what makes the
+point.)*
 
-*(Codex counted 11 rather than 10 in this class; the sweep above yields 10 — capi, table_view_footprint,
-fix42_group_parse, framer, offset_table, parser, typed_read_group, validate_group, validator, writer.
-The discrepancy does not change the conclusion.)*
+*(r1 counted 11 in this class; the sweep yields **10** — capi, table_view_footprint, fix42_group_parse,
+framer, offset_table, parser, typed_read_group, validate_group, validator, writer. Codex round 2
+independently re-derived 10 and withdrew its own 11.)*
 
 These files are **tracked records cited by `bench/REPORT.md`.** They must not be deleted or
 overwritten to make a gate's life easier.
