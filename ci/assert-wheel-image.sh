@@ -63,13 +63,35 @@ echo "pinned:  $REF"
 # expected line is merely spelled differently.
 grep -E 'Starting container image' "$LOG" | head -3 || true
 
-# `grep -F` — the reference contains '/' , '.' and ':' , none of which should be
-# read as regex. `-c` and an explicit numeric test rather than bare `grep -q`,
-# so a zero count is an EXPLICIT failure rather than an exit status that a
-# future `|| true` could swallow.
-n="$(grep -cF "Starting container image $REF" "$LOG" || true)"
-if [ "${n:-0}" -lt 1 ]; then
+# ── SET check, not a COUNT check (#270 Gate B r1, F4) ────────────────────────
+#
+# A bare "at least one match" (the old `grep -cF ... ; [ "$n" -lt 1 ]`) never
+# rejects a SECOND, DIFFERENT `Starting container image` line — a mixed log
+# with both the pin and a fallback alias passed. Extract every started-image
+# TOKEN and require the set non-empty AND every element equal to the pin.
+#
+# `grep -oE` isolates the whitespace-delimited reference after the fixed
+# prefix; cibuildwheel appends a literal "..." after the ref, stripped here
+# rather than folded into the match pattern — a reference can legally contain
+# '.', so anchoring on it in the EXTRACTION regex would be fragile, whereas
+# stripping a known, fixed trailing marker from the captured token is not.
+mapfile -t started < <(
+  grep -oE 'Starting container image [^[:space:]]+' "$LOG" \
+    | sed -E 's/^Starting container image //'
+)
+n=${#started[@]}
+
+matched=0
+for tok in "${started[@]}"; do
+  tok="${tok%...}"   # strip cibuildwheel's trailing ellipsis, if present
+  [ "$tok" = "$REF" ] && matched=$((matched + 1))
+done
+
+if [ "$n" -lt 1 ] || [ "$matched" -ne "$n" ]; then
   echo "::error::cibuildwheel did NOT start the pinned image. Expected 'Starting container image ${REF}'. The pin in bindings/python/pyproject.toml is not taking effect, so this lane's ccache tag is keyed to a toolchain that is not building the wheel — the cache would report hits against the wrong compiler."
+  if [ "$n" -gt 0 ] && [ "$matched" -lt "$n" ]; then
+    echo "::error::${n} 'Starting container image' line(s) were found, but only ${matched} named the pin — the rest named a DIFFERENT image, so the pin is not the ONLY toolchain that built this wheel and the ccache tag may be keyed to the wrong one."
+  fi
   exit 1
 fi
 

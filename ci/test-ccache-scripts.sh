@@ -12,9 +12,9 @@
 # new code, and ci/ccache-stats.sh is still shaped to absorb whatever tier-1
 # probes remain. Do not read a green run of this file as evidence about #248.
 #
-# Shims `oras`, `ccache`, `gh` and the compiler on a temp PATH, builds a
+# Shims `oras`, `ccache`, `gh`, `curl` and the compiler on a temp PATH, builds a
 # throwaway CMakePresets.json, and drives the REAL scripts —
-# ci/{ccache-cache-key,restore-ccache,seed-ccache,ccache-stats,wheel-ccache-ident,assert-wheel-image}.sh — through
+# ci/{ccache-cache-key,restore-ccache,seed-ccache,ccache-stats,wheel-ccache-ident,assert-wheel-image,install-ccache}.sh — through
 # every disposition each one can reach.
 #
 # ── WHY EVERY CASE ASSERTS TWO THINGS ────────────────────────────────────────
@@ -191,6 +191,35 @@ fi
 echo "SHIM-VIOLATION: gh $*" >&2; exit 2
 SHIM
 chmod +x "$shim_dir/gh"
+
+# ── curl shim (install-ccache.sh) ───────────────────────────────────────────
+# install-ccache.sh calls exactly `curl -sSLf -o <dest> <url>`. The shim copies
+# a FIXTURE archive to <dest> rather than fetching anything, so the download is
+# byte-controlled by the case: FAKE_CURL_GOOD_SRC for a well-formed archive
+# whose content matches the driven script's pinned checksum, FAKE_CURL_BAD_SRC
+# for an equally well-formed archive that does NOT — the corrupted case has to
+# be a valid tar containing a working executable, or `tar xf` under
+# `set -euo pipefail` kills the step before the checksum guard is ever reached,
+# proving nothing about that guard.
+cat > "$shim_dir/curl" <<'SHIM'
+#!/usr/bin/env bash
+[ "${1:-}" = "-sSLf" ] && [ "${2:-}" = "-o" ] || { echo "SHIM-VIOLATION: curl $*" >&2; exit 2; }
+dest="${3:-}"; url="${4:-}"
+[ -n "$dest" ] || { echo "SHIM-VIOLATION: curl $*" >&2; exit 2; }
+case "$url" in
+  https://github.com/ccache/ccache/releases/download/v*) ;;
+  *) echo "SHIM-VIOLATION: curl unexpected url '$url'" >&2; exit 2 ;;
+esac
+case "${FAKE_CURL_MODE:-ok}" in
+  ok)      [ -n "${FAKE_CURL_GOOD_SRC:-}" ] || { echo "SHIM-VIOLATION: FAKE_CURL_GOOD_SRC unset" >&2; exit 2; }
+           cp "$FAKE_CURL_GOOD_SRC" "$dest" ;;
+  corrupt) [ -n "${FAKE_CURL_BAD_SRC:-}" ] || { echo "SHIM-VIOLATION: FAKE_CURL_BAD_SRC unset" >&2; exit 2; }
+           cp "$FAKE_CURL_BAD_SRC" "$dest" ;;
+  *) echo "SHIM-VIOLATION: unknown FAKE_CURL_MODE" >&2; exit 2 ;;
+esac
+exit 0
+SHIM
+chmod +x "$shim_dir/curl"
 
 # ── runner ───────────────────────────────────────────────────────────────────
 # Invoked as `bash <file>`, exactly as GitHub Actions invokes a run: block —
@@ -466,6 +495,23 @@ want_status 1 "assert-wheel-image/wrong-digest"
 want_out 'did NOT start the pinned image' "assert-wheel-image/wrong-digest"
 ok "the pinned-image assertion goes RED when a DIFFERENT digest was started"
 
+# ── #270 Gate B r1, F4 — a MIXED log (the pin AND a foreign image) ───────────
+#
+# The old check counted matches of the EXPECTED reference and never inspected
+# what else started — a log naming both the pin and a second, different image
+# passed with `n=1`. That is not "the pinned image was used", only "it was
+# used SOMEWHERE alongside something else" — this is the killed mutant/
+# counter-test for the count-vs-set defect.
+cat > "$WI_LOG" <<EOF
+Starting container image $IDENT_REF...
+Starting container image quay.io/pypa/manylinux_2_28_x86_64@sha256:f854c50adf7b7a325bc4794316f3758d387a41d61f9e2ebca0f26c7dc8f761d4...
+EOF
+run "$CI_DIR/assert-wheel-image.sh" "$WI_LOG" "$IDENT_REF"
+want_status 1 "assert-wheel-image/mixed-log"
+want_out 'did NOT start the pinned image' "assert-wheel-image/mixed-log"
+want_out 'only 1 named the pin' "assert-wheel-image/mixed-log"
+ok "the pinned-image assertion goes RED when the log names the pin AND a different image (count-vs-set)"
+
 # A log that does not mention the image at all must also fail — a silent
 # cibuildwheel change that stops printing the line must not read as success.
 : > "$WI_LOG"
@@ -501,6 +547,91 @@ run "$CI_DIR/assert-wheel-image.sh" "$WI_LOG" "$IDENT_REF" "failure"
 want_status 0 "assert-wheel-image/build-failed-but-image-seen"
 want_out 'matched 1 line' "assert-wheel-image/build-failed-but-image-seen"
 ok "a late build failure still reports the pin evidence that IS present"
+
+# ═════ ci/install-ccache.sh (#270 Gate B r1, F2) ═════════════════════════════
+#
+# Entirely untested before this — the PR body's "a killed mutant behind every
+# new guard" was false for this script specifically. Three of its four guards
+# are fatal by construction under `set -euo pipefail` (a failed download, a
+# missing extracted binary, a non-working installed executable each abort the
+# step with no help from this harness); the ONE guard that fails SILENTLY if
+# deleted is `sha256sum -c -` — replace it with `true` and every green run
+# stays green. That is the guard this section exists to pin.
+echo "── install-ccache.sh ──"
+IC_SANDBOX="$sandbox/install-ccache"
+mkdir -p "$IC_SANDBOX"
+
+# A small, REAL, executable "ccache" — a shell stub, not the actual binary; the
+# script only needs `--version` to succeed. Archived under the exact directory
+# name install-ccache.sh's NAME variable expects, so `tar xf` extracts to the
+# path the script installs from.
+IC_GOOD_ROOT="$IC_SANDBOX/good/ccache-4.13.6-linux-x86_64-musl-static"
+mkdir -p "$IC_GOOD_ROOT"
+cat > "$IC_GOOD_ROOT/ccache" <<'STUB'
+#!/usr/bin/env bash
+[ "${1:-}" = "--version" ] && { echo "ccache version 4.13.6 (shim)"; exit 0; }
+echo "SHIM-VIOLATION: fake ccache binary called with $*" >&2
+exit 2
+STUB
+chmod +x "$IC_GOOD_ROOT/ccache"
+IC_GOOD_TAR="$IC_SANDBOX/good.tar"
+tar -cf "$IC_GOOD_TAR" -C "$IC_SANDBOX/good" "ccache-4.13.6-linux-x86_64-musl-static"
+IC_GOOD_SHA256="$(sha256sum "$IC_GOOD_TAR" | cut -d' ' -f1)"
+
+# ⚠️ A DIFFERENT WELL-FORMED ARCHIVE, not garbage bytes. Garbage dies at
+# `tar xf` regardless of the checksum guard — that would make the corrupted
+# case pass "non-zero exit, nothing installed" whether or not `sha256sum -c`
+# is even present, which is exactly the vacuous witness this harness's own
+# header warns about (status alone proves nothing). This archive extracts and
+# runs fine; only its DIGEST disagrees with what was pinned.
+IC_BAD_ROOT="$IC_SANDBOX/bad/ccache-4.13.6-linux-x86_64-musl-static"
+mkdir -p "$IC_BAD_ROOT"
+cat > "$IC_BAD_ROOT/ccache" <<'STUB'
+#!/usr/bin/env bash
+[ "${1:-}" = "--version" ] && { echo "ccache version 0.0.0 (WRONG BUILD)"; exit 0; }
+exit 2
+STUB
+chmod +x "$IC_BAD_ROOT/ccache"
+IC_BAD_TAR="$IC_SANDBOX/bad.tar"
+tar -cf "$IC_BAD_TAR" -C "$IC_SANDBOX/bad" "ccache-4.13.6-linux-x86_64-musl-static"
+
+# A driven COPY of the real script with the pinned checksum replaced by the
+# GOOD fixture's real digest. The production script's own SHA256 cannot be
+# matched by a fixture invented here; a test-only env-var override on the
+# checksum would itself be a seam on a supply-chain guard, which is worse.
+IC_DRIVEN="$sandbox/install-ccache-driven.sh"
+python3 - "$CI_DIR/install-ccache.sh" "$IC_DRIVEN" "$IC_GOOD_SHA256" <<'PYEOF'
+import sys
+src, dst, digest = sys.argv[1], sys.argv[2], sys.argv[3]
+t = open(src).read()
+old = "CCACHE_SHA256=156ec57c5198cc849d92834023d09910b83dc5504c6cf405d09e6ae7b208a3e5\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, f"CCACHE_SHA256={digest}\n"))
+PYEOF
+if cmp -s "$CI_DIR/install-ccache.sh" "$IC_DRIVEN"; then
+  fail "install-ccache/driven: python literal-replace produced no change — the driven copy is not actually testing a matched checksum"
+fi
+
+IC_PREFIX_OK="$sandbox/install-prefix-ok"
+mkdir -p "$IC_PREFIX_OK"
+FAKE_CURL_MODE=ok FAKE_CURL_GOOD_SRC="$IC_GOOD_TAR" \
+  run "$IC_DRIVEN" "$IC_PREFIX_OK"
+want_status 0 "install-ccache/good"
+want_out 'ccache installed at' "install-ccache/good"
+[ -x "$IC_PREFIX_OK/ccache" ] || fail "install-ccache/good: ccache was not installed to the prefix"
+"$IC_PREFIX_OK/ccache" --version | grep -q '4.13.6' \
+  || fail "install-ccache/good: the installed binary is not the fixture that was verified"
+ok "good download, verified checksum, installed and runnable"
+
+IC_PREFIX_BAD="$sandbox/install-prefix-corrupt"
+mkdir -p "$IC_PREFIX_BAD"
+FAKE_CURL_MODE=corrupt FAKE_CURL_GOOD_SRC="$IC_GOOD_TAR" FAKE_CURL_BAD_SRC="$IC_BAD_TAR" \
+  run "$IC_DRIVEN" "$IC_PREFIX_BAD"
+want_status 1 "install-ccache/corrupted"
+want_no_out 'ccache installed at' "install-ccache/corrupted"
+[ ! -e "$IC_PREFIX_BAD/ccache" ] \
+  || fail "install-ccache/corrupted: a binary was installed despite a checksum mismatch — this is the sha256sum -c -> true mutant, live"
+ok "corrupted download (well-formed archive, wrong digest) — rejected, nothing installed (kills sha256sum -c -> true)"
 
 # ═════ ci/restore-ccache.sh ══════════════════════════════════════════════════
 echo "── restore-ccache.sh ──"

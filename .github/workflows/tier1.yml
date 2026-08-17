@@ -1447,6 +1447,19 @@ jobs:
     # CIBW_ENVIRONMENT at the build step (a container does not inherit the
     # runner's environment).
     #
+    # ⚠️ CORRECTION (#270 Gate B r1, F1 doc): a drifted mount between this
+    # $CCACHE_DIR and the container's CIBW_ENVIRONMENT CCACHE_DIR is LOUD, not
+    # silent. The host compiles nothing on this lane — every compile edge runs
+    # inside the container and reaches the host cache dir only through the
+    # bind mount — so if the two spellings disagree, the host's `ccache
+    # --print-stats` reads an empty/unshared directory and reports ZERO
+    # cacheable calls after a successful build. ci/ccache-stats.sh's liveness
+    # assert (the "recorded ZERO cacheable calls … after a SUCCESSFUL build …
+    # fatal" branch) fails the step on exactly that shape. (An earlier commit
+    # message, fc7a4ae3, described this as "silent and permanent" — that
+    # overstated it; the dedup of four spellings into one CCACHE_DIR read is
+    # still correct on its own merits, just not for that reason.)
+    #
     # ⚠️ This lane CANNOT share a namespace with any matrix leg, and that is a
     # measured fact rather than a precaution. The wheel is built by
     # gcc-toolset-14 (gcc 14.2.1, Red Hat 14.2.1-11) inside manylinux_2_28
