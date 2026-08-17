@@ -44,7 +44,8 @@
 # ⚠️ `set -uo pipefail` WITHOUT `-e` — see restore-ccache.sh's header.
 set -uo pipefail
 
-PRESET="${1:?usage: seed-ccache.sh <preset>}"
+PRESET="${1:?usage: seed-ccache.sh <preset> [<digest-pinned image ref>]}"
+IMAGE_REF="${2-}"
 IMAGE="${FIXPP_CCACHE_IMAGE:-ghcr.io/catalinserafimescu/fixpp-ccache}"
 
 # shellcheck source=ci/ccache-cache-key.sh
@@ -54,7 +55,7 @@ note() { echo "$1"; [ -n "${GITHUB_STEP_SUMMARY:-}" ] && echo "$1" >> "$GITHUB_S
 
 : "${CCACHE_DIR:?CCACHE_DIR must be set (the workflow sets it job-wide)}"
 
-if ! ccache_cache_key "$PRESET"; then
+if ! ccache_resolve_key "$PRESET" "$IMAGE_REF"; then
   note "ccache-cache: no identifiable compiler for \`$PRESET\` — nothing published, so the next run will be cold."
   exit 0
 fi

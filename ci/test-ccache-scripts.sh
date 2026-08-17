@@ -12,9 +12,9 @@
 # new code, and ci/ccache-stats.sh is still shaped to absorb whatever tier-1
 # probes remain. Do not read a green run of this file as evidence about #248.
 #
-# Shims `oras`, `ccache`, `gh` and the compiler on a temp PATH, builds a
+# Shims `oras`, `ccache`, `gh`, `curl` and the compiler on a temp PATH, builds a
 # throwaway CMakePresets.json, and drives the REAL scripts —
-# ci/{ccache-cache-key,restore-ccache,seed-ccache,ccache-stats}.sh — through
+# ci/{ccache-cache-key,restore-ccache,seed-ccache,ccache-stats,wheel-ccache-ident,assert-wheel-image,install-ccache}.sh — through
 # every disposition each one can reach.
 #
 # ── WHY EVERY CASE ASSERTS TWO THINGS ────────────────────────────────────────
@@ -192,6 +192,35 @@ echo "SHIM-VIOLATION: gh $*" >&2; exit 2
 SHIM
 chmod +x "$shim_dir/gh"
 
+# ── curl shim (install-ccache.sh) ───────────────────────────────────────────
+# install-ccache.sh calls exactly `curl -sSLf -o <dest> <url>`. The shim copies
+# a FIXTURE archive to <dest> rather than fetching anything, so the download is
+# byte-controlled by the case: FAKE_CURL_GOOD_SRC for a well-formed archive
+# whose content matches the driven script's pinned checksum, FAKE_CURL_BAD_SRC
+# for an equally well-formed archive that does NOT — the corrupted case has to
+# be a valid tar containing a working executable, or `tar xf` under
+# `set -euo pipefail` kills the step before the checksum guard is ever reached,
+# proving nothing about that guard.
+cat > "$shim_dir/curl" <<'SHIM'
+#!/usr/bin/env bash
+[ "${1:-}" = "-sSLf" ] && [ "${2:-}" = "-o" ] || { echo "SHIM-VIOLATION: curl $*" >&2; exit 2; }
+dest="${3:-}"; url="${4:-}"
+[ -n "$dest" ] || { echo "SHIM-VIOLATION: curl $*" >&2; exit 2; }
+case "$url" in
+  https://github.com/ccache/ccache/releases/download/v*) ;;
+  *) echo "SHIM-VIOLATION: curl unexpected url '$url'" >&2; exit 2 ;;
+esac
+case "${FAKE_CURL_MODE:-ok}" in
+  ok)      [ -n "${FAKE_CURL_GOOD_SRC:-}" ] || { echo "SHIM-VIOLATION: FAKE_CURL_GOOD_SRC unset" >&2; exit 2; }
+           cp "$FAKE_CURL_GOOD_SRC" "$dest" ;;
+  corrupt) [ -n "${FAKE_CURL_BAD_SRC:-}" ] || { echo "SHIM-VIOLATION: FAKE_CURL_BAD_SRC unset" >&2; exit 2; }
+           cp "$FAKE_CURL_BAD_SRC" "$dest" ;;
+  *) echo "SHIM-VIOLATION: unknown FAKE_CURL_MODE" >&2; exit 2 ;;
+esac
+exit 0
+SHIM
+chmod +x "$shim_dir/curl"
+
 # ── runner ───────────────────────────────────────────────────────────────────
 # Invoked as `bash <file>`, exactly as GitHub Actions invokes a run: block —
 # never `bash -c`, which disagrees with it on `set -e` for some constructs.
@@ -294,6 +323,382 @@ printf '%s' "$UNKNOWN_MAJOR_TAG" | grep -qE -- "$TAG_RE" \
   || fail "prune/tag-regex-unknown-major: '$UNKNOWN_MAJOR_TAG' does not match '$TAG_RE' — the tightened regex must still accept the minter's 'unknown major' fallback"
 ok "the pruner's regex still accepts the minter's 'unknown major' fallback tag"
 
+# ── CONTAINER LANES (#259) — the SAME producer/matcher bridge, second grammar ─
+#
+# A container lane's compiler lives inside a pinned image and cannot be probed
+# on the host, so `ccache_container_cache_key` mints `ccache-<lane>-<digest8>`
+# with no `clang<major>` component. That is a SECOND grammar, and the pruner
+# must classify it exactly — every assertion below is derived from the real
+# script, nothing about either grammar is restated here.
+KEYSH="$CI_DIR/ccache-cache-key.sh"
+PINNED_REF='quay.io/pypa/manylinux_2_28_x86_64@sha256:012f4a50472412f18bb2b450c1cce7158434cfae4ae878591c2748a13a30c2be'
+EXPECTED_CONTAINER_TAG='ccache-wheel-manylinux228-012f4a50'
+
+CTAG="$( . "$KEYSH" && ccache_container_cache_key 'wheel-manylinux228' "$PINNED_REF" >/dev/null 2>&1 && printf '%s' "$CCACHE_CACHE_TAG" )"
+[ -n "$CTAG" ] || fail "container/mint: ccache_container_cache_key produced no tag for a well-formed pinned reference"
+case "$CTAG" in
+  "$EXPECTED_CONTAINER_TAG") ok "container tag is lane + the pinned image digest's first 8 hex" ;;
+  *) fail "container/mint: tag '$CTAG' is not the documented grammar" ;;
+esac
+
+CTAG_RE="$( . "$KEYSH" && ccache_tag_regex 'wheel-manylinux228' >/dev/null 2>&1 && printf '%s' "$CCACHE_TAG_RE" )"
+[ -n "$CTAG_RE" ] || fail "container/regex: ccache_tag_regex produced nothing for the container lane"
+printf '%s' "$CTAG" | grep -qE -- "$CTAG_RE" \
+  || fail "container/bridge: the pruner's regex '$CTAG_RE' does not match the tag the container minter produced ('$CTAG') — producer and matcher have drifted"
+ok "the container regex matches a tag the container minter actually produced"
+
+# ⚠️ THE TWO NEGATIVES ARE THE POINT. Without them this file would only have
+# shown each regex is loose enough, never that it is TIGHT enough — and this
+# regex is the sole classifier on an irreversible DELETE. Cross-matching would
+# mean the wheel lane's pruner could reclaim a host lane's live cache.
+if printf '%s' "$TAG" | grep -qE -- "$CTAG_RE"; then
+  fail "container/disjoint: the container regex '$CTAG_RE' matches a HOST lane's tag '$TAG' — the namespaces are not disjoint and a prune could delete a live host cache"
+fi
+if printf '%s' "$CTAG" | grep -qE -- "$TAG_RE"; then
+  fail "container/disjoint: a host lane's regex '$TAG_RE' matches the CONTAINER tag '$CTAG' — the namespaces are not disjoint"
+fi
+ok "the container and host tag namespaces are mutually disjoint (both directions asserted)"
+
+for bad in \
+  "ccache-wheel-manylinux228-012f4a5" \
+  "ccache-wheel-manylinux228-012f4a500" \
+  "ccache-wheel-manylinux228-012F4A50" \
+  "ccache-wheel-manylinux228-clang22-012f4a50"; do
+  if printf '%s' "$bad" | grep -qE -- "$CTAG_RE"; then
+    fail "container/near-miss: '$bad' matches '$CTAG_RE' — the classifier is wider than the grammar the container minter can produce"
+  fi
+done
+ok "the container regex rejects every near-miss no producer here mints"
+
+# ── FAIL-CLOSED ON A NON-PINNED REFERENCE ────────────────────────────────────
+#
+# A floating tag would give a STABLE cache key for a MOVING toolchain: internal
+# misses forever, reported as a healthy HIT. Each of these must be REFUSED, and
+# refused by returning non-zero rather than by minting something odd.
+# ⚠️ THE BARE-DIGEST CASE IS THE ONE THAT DISCRIMINATES, and it was added only
+# after a mutation SURVIVED. Deleting the `*@sha256:*` guard leaves the hex and
+# length checks, which already reject every other entry here — so without a
+# 64-hex input carrying no image reference, this loop proves the guard is
+# present but not that it does anything. A caller passing a raw digest instead
+# of a reference is exactly the mistake it exists to catch.
+for badref in \
+  'quay.io/pypa/manylinux_2_28_x86_64' \
+  'quay.io/pypa/manylinux_2_28_x86_64:latest' \
+  'quay.io/pypa/manylinux_2_28_x86_64@sha256:012f4a50' \
+  '012f4a50472412f18bb2b450c1cce7158434cfae4ae878591c2748a13a30c2be' \
+  'quay.io/pypa/manylinux_2_28_x86_64@sha256:ZZZf4a50472412f18bb2b450c1cce7158434cfae4ae878591c2748a13a30c2be'; do
+  if ( . "$KEYSH" && ccache_container_cache_key 'wheel-manylinux228' "$badref" ) >/dev/null 2>&1; then
+    fail "container/pin: '$badref' was ACCEPTED — a reference that is not digest-pinned keys a moving toolchain to a stable tag, which reads as a healthy cache forever"
+  fi
+done
+ok "the container minter refuses every reference that is not digest-pinned"
+
+# The dispatcher both sides use. If restore and seed could reach different
+# minters, the tag would differ between publish and pull — a permanent MISS,
+# indistinguishable from 'ccache did not help'.
+DTAG_C="$( . "$KEYSH" && ccache_resolve_key 'wheel-manylinux228' "$PINNED_REF" >/dev/null 2>&1 && printf '%s' "$CCACHE_CACHE_TAG" )"
+[ "$DTAG_C" = "$CTAG" ] \
+  || fail "container/dispatch: ccache_resolve_key with an image ref produced '$DTAG_C', not the container minter's '$CTAG'"
+# ⚠️ PATH is set on its OWN LINE inside the subshell, exactly as `expected_tag`
+# does it. `PATH=… . file` applies the assignment only for the duration of the
+# `.` builtin, so the shim would be gone by the time the compiler probe runs and
+# the host minter would fail for a reason that has nothing to do with dispatch.
+# The tag-regex block above survives that mistake only because
+# `ccache_tag_regex` is pure string work and probes no compiler.
+DTAG_H="$(
+  cd "$sandbox" || exit 1
+  PATH="$shim_dir:$PATH"
+  . "$KEYSH"
+  ccache_resolve_key 'fake-libc++' >/dev/null 2>&1 || exit 1
+  printf '%s' "$CCACHE_CACHE_TAG"
+)"
+[ "$DTAG_H" = "$TAG" ] \
+  || fail "container/dispatch: ccache_resolve_key without an image ref produced '$DTAG_H', not the host minter's '$TAG'"
+ok "ccache_resolve_key dispatches to the same minter both restore and seed would use"
+
+# ── ccache_resolve_key REJECTS AN ARGUMENT SHAPE THAT DISAGREES WITH THE
+# ENUMERATION (opus_pr270_2_triage.md R2-F2) ─────────────────────────────────
+#
+# Before this fix ccache_resolve_key dispatched on `[ -n "${2-}" ]` alone,
+# never consulting ccache_lane_is_container — so a future container lane added
+# to the enumeration without every caller updated (or a ref passed for a lane
+# never added there) would mint under one grammar while ccache_tag_regex
+# matches against the other, a silent pruner skip. These two cases are the
+# ones no current caller reaches (every host caller passes no second argument;
+# the one container caller always passes a ref) but that the dispatcher must
+# still refuse rather than silently mis-mint.
+#
+# Both assert the DISPOSITION MESSAGE, not just a non-zero exit — a bare exit
+# check would pass for the wrong reason: 'linux-clang-libcxx' with a ref used
+# to be silently ACCEPTED by the pre-fix dispatcher (tag-safe, not enumerated,
+# so it fell into the old unconditional `ccache_container_cache_key` branch and
+# minted a container-grammar tag for a host lane); 'wheel-manylinux228' with no
+# ref used to fail too, but via the unrelated "preset declares no
+# CMAKE_CXX_COMPILER" path, not the dispatcher noticing the shape mismatch —
+# the message pins that it fails for the RIGHT reason.
+out="$( ( . "$KEYSH" && ccache_resolve_key 'linux-clang-libcxx' "$PINNED_REF" ) 2>&1 )" && rc=0 || rc=$?
+if [ "$rc" -eq 0 ]; then
+  fail "resolve/shape: an UNKNOWN lane ('linux-clang-libcxx') given an image ref was ACCEPTED — it should be refused, since ccache_lane_is_container does not enumerate it and the tag would mint under the container grammar the pruner never matches for a host lane"
+fi
+case "$out" in
+  *"is not an enumerated container lane"*) ;;
+  *) fail "resolve/shape: unenumerated-lane-with-ref was rejected for the WRONG reason: $out" ;;
+esac
+ok "ccache_resolve_key refuses an unenumerated lane given an image ref, for the right reason"
+
+out="$( ( . "$KEYSH" && ccache_resolve_key 'wheel-manylinux228' ) 2>&1 )" && rc=0 || rc=$?
+if [ "$rc" -eq 0 ]; then
+  fail "resolve/shape: the ENUMERATED container lane ('wheel-manylinux228') given NO image ref was ACCEPTED — it should be refused, since there is no host compiler to probe for an in-container toolchain"
+fi
+case "$out" in
+  *"is a container lane but no digest-pinned image reference was given"*) ;;
+  *) fail "resolve/shape: enumerated-container-lane-with-no-ref was rejected for the WRONG reason: $out" ;;
+esac
+ok "ccache_resolve_key refuses an enumerated container lane given no image ref, for the right reason"
+
+# ── ci/wheel-ccache-ident.sh — the workflow's single source, bound to BOTH ends
+#
+# The wheel lane's name is written in ci/wheel-ccache-ident.sh and enumerated
+# again in `ccache_lane_is_container`. If those drift, the pruner classifies the
+# lane's tags as somebody else's and skips them SILENTLY — no `prune: PENDING`,
+# no error, versions accumulating forever. Assert the agreement rather than
+# asking a comment to hold it.
+IDENT_OUT="$( cd "$CI_DIR/.." && bash ci/wheel-ccache-ident.sh 2>&1 )" \
+  || fail "wheel-ccache-ident: exited non-zero against the real pyproject.toml: $IDENT_OUT"
+IDENT_LANE="$(printf '%s\n' "$IDENT_OUT" | sed -n 's/^lane=//p')"
+IDENT_REF="$(printf '%s\n' "$IDENT_OUT" | sed -n 's/^image_ref=//p')"
+[ -n "$IDENT_LANE" ] || fail "wheel-ccache-ident printed no lane"
+[ -n "$IDENT_REF" ]  || fail "wheel-ccache-ident printed no image_ref"
+
+( . "$KEYSH" && ccache_lane_is_container "$IDENT_LANE" ) \
+  || fail "wheel-ccache-ident's lane '$IDENT_LANE' is NOT enumerated by ccache_lane_is_container — the pruner would classify this lane's tags as somebody else's and skip them silently"
+ok "the wheel lane name agrees with the container-lane enumeration"
+
+# The ref in the tracked file must be one the minter accepts. If pyproject ever
+# reverts to a floating alias, this fails HERE rather than in a CI job that then
+# keys a cache to a toolchain it cannot identify.
+( . "$KEYSH" && ccache_container_cache_key "$IDENT_LANE" "$IDENT_REF" ) >/dev/null 2>&1 \
+  || fail "the pinned image reference in pyproject.toml ('$IDENT_REF') is not one ccache_container_cache_key accepts"
+ok "the image reference pinned in pyproject.toml is digest-pinned and mintable"
+
+# ── C++20 module scanning must stay OFF for the wheel build (#259) ───────────
+#
+# ⚠️ THIS IS A PREREQUISITE FOR THE CACHE, NOT A TUNING KNOB. Measured on the
+# lane's first CI run (32047903054): with scanning ON, ccache was reached — 975
+# calls — and declined **975/975** with `unsupported_compiler_option`, so
+# `cacheable_calls` was 0 and the cache did nothing at all. `CMAKE_CXX_STANDARD`
+# is 23, so CMake enables module scanning on Ninja, and for GCC that puts
+# `-fmodules-ts -fmodule-mapper=… -fdeps-format=p1689r5` on every compile line;
+# ccache does not support them. Reproduced in the pinned image: default ->
+# unsupported_compiler_option 1 / cache_miss 0; scanning OFF -> 0 / 1.
+#
+# `ci/ccache-stats.sh`'s liveness assert DOES catch a regression here — that is
+# how it was found — but only after a ~69-minute container build. This pins it
+# where it fails in seconds instead.
+SCAN_OFF="$(
+  cd "$CI_DIR/.." && python3 -c '
+import tomllib
+d = tomllib.load(open("bindings/python/pyproject.toml", "rb"))
+print(d["tool"]["scikit-build"]["cmake"]["define"].get("CMAKE_CXX_SCAN_FOR_MODULES", "<unset>"))
+' 2>&1
+)"
+[ "$SCAN_OFF" = "OFF" ] \
+  || fail "wheel/module-scan: [tool.scikit-build.cmake.define].CMAKE_CXX_SCAN_FOR_MODULES is '$SCAN_OFF', expected 'OFF'. With scanning ON, GCC receives -fmodules-ts/-fmodule-mapper= and ccache declines EVERY call as unsupported_compiler_option — the wheel lane's cache silently becomes a no-op (measured 975/975 uncacheable on run 32047903054). The project ships zero modules, so scanning buys nothing here."
+ok "the wheel build keeps C++20 module scanning OFF (the cache is a no-op without it)"
+
+# ── ident: malformed values must be REFUSED at the source ────────────────────
+#
+# The guard is not decorative. `$GITHUB_OUTPUT` carries `key=value` on ONE line,
+# so a multi-line or malformed value is silently TRUNCATED rather than reported,
+# and the mangled ref reaches restore and seed — a permanent MISS, which is
+# indistinguishable from "ccache didn't help".
+ident_with() {  # $1 = the manylinux-x86_64-image value, verbatim
+  local tmp="$sandbox/pp-$RANDOM.toml"
+  { echo '[tool.cibuildwheel]'; echo "manylinux-x86_64-image = $1"; } > "$tmp"
+  run "$CI_DIR/wheel-ccache-ident.sh" "$tmp"
+}
+
+ident_with '"manylinux_2_28"'
+want_status 1 "ident/floating-alias"
+ok "ident refuses a floating alias (a moving toolchain under a stable tag)"
+
+# Passes a naive `*@sha256:*` substring test, fails the real grammar.
+ident_with '"quay.io/pypa/manylinux_2_28_x86_64@sha256:012f4a50"'
+want_status 1 "ident/short-digest"
+ok "ident refuses a truncated digest that a substring check would accept"
+
+ident_with '"quay.io/pypa/manylinux_2_28_x86_64@sha256:012f4a50472412f18bb2b450c1cce7158434cfae4ae878591c2748a13a30c2be"'
+want_status 0 "ident/well-formed"
+want_out '@sha256:012f4a50' "ident/well-formed"
+ok "ident accepts a well-formed digest-pinned reference"
+
+# ── ci/assert-wheel-image.sh — driven through BOTH outcomes ──────────────────
+#
+# ⚠️ A VERIFICATION GREP PROVEN ONLY GREEN IS NOT AN ASSERTION. The failing
+# case is asserted first, because that is the one whose absence would make this
+# whole step decorative — a pin that is silently ignored keys the lane's ccache
+# to a toolchain that is not compiling the wheel, and nothing else notices.
+WI_LOG="$sandbox/cibw.log"
+
+cat > "$WI_LOG" <<EOF
+info: something before
+Starting container image $IDENT_REF...
+info: This container will host the build for cp310-manylinux_x86_64...
+EOF
+run "$CI_DIR/assert-wheel-image.sh" "$WI_LOG" "$IDENT_REF"
+want_status 0 "assert-wheel-image/match"
+want_out 'matched 1 line' "assert-wheel-image/match"
+ok "the pinned-image assertion passes when cibuildwheel started the pinned image"
+
+# The RED case: the log shows a DIFFERENT digest — i.e. the pin was ignored and
+# cibuildwheel fell back to its own. This is the real-world shape (cibuildwheel
+# `main` pins the same alias to f854c50a…, so this is not a synthetic string).
+cat > "$WI_LOG" <<'EOF'
+Starting container image quay.io/pypa/manylinux_2_28_x86_64@sha256:f854c50adf7b7a325bc4794316f3758d387a41d61f9e2ebca0f26c7dc8f761d4...
+EOF
+run "$CI_DIR/assert-wheel-image.sh" "$WI_LOG" "$IDENT_REF"
+want_status 1 "assert-wheel-image/wrong-digest"
+want_out 'did NOT start the pinned image' "assert-wheel-image/wrong-digest"
+ok "the pinned-image assertion goes RED when a DIFFERENT digest was started"
+
+# ── #270 Gate B r1, F4 — a MIXED log (the pin AND a foreign image) ───────────
+#
+# The old check counted matches of the EXPECTED reference and never inspected
+# what else started — a log naming both the pin and a second, different image
+# passed with `n=1`. That is not "the pinned image was used", only "it was
+# used SOMEWHERE alongside something else" — this is the killed mutant/
+# counter-test for the count-vs-set defect.
+cat > "$WI_LOG" <<EOF
+Starting container image $IDENT_REF...
+Starting container image quay.io/pypa/manylinux_2_28_x86_64@sha256:f854c50adf7b7a325bc4794316f3758d387a41d61f9e2ebca0f26c7dc8f761d4...
+EOF
+run "$CI_DIR/assert-wheel-image.sh" "$WI_LOG" "$IDENT_REF"
+want_status 1 "assert-wheel-image/mixed-log"
+want_out 'did NOT start the pinned image' "assert-wheel-image/mixed-log"
+want_out 'only 1 named the pin' "assert-wheel-image/mixed-log"
+ok "the pinned-image assertion goes RED when the log names the pin AND a different image (count-vs-set)"
+
+# A log that does not mention the image at all must also fail — a silent
+# cibuildwheel change that stops printing the line must not read as success.
+: > "$WI_LOG"
+run "$CI_DIR/assert-wheel-image.sh" "$WI_LOG" "$IDENT_REF"
+want_status 1 "assert-wheel-image/silent"
+ok "the pinned-image assertion goes RED when the log never names an image"
+
+# A missing log is 'unverified', not 'fine'.
+run "$CI_DIR/assert-wheel-image.sh" "$sandbox/no-such.log" "$IDENT_REF"
+want_status 1 "assert-wheel-image/missing-log"
+want_out 'could not run' "assert-wheel-image/missing-log"
+ok "a missing cibuildwheel log fails the assertion rather than passing it"
+
+# ⚠️ NO CONFIDENT WRONG CAUSE ON AN UNRELATED BUILD FAILURE. If the build dies
+# before any container starts — disk, Conan, a compile error — there is no image
+# line, and blaming the PIN would stack a specific false attribution on top of
+# the real failure. That is the class PR #245 exists to remove and was itself
+# caught shipping four times.
+: > "$WI_LOG"
+run "$CI_DIR/assert-wheel-image.sh" "$WI_LOG" "$IDENT_REF" "failure"
+want_status 0 "assert-wheel-image/build-failed"
+want_out 'NO claim is made about the pin' "assert-wheel-image/build-failed"
+want_no_out 'not taking effect' "assert-wheel-image/build-failed"
+ok "a failed build yields a report, not an attribution to the pin"
+
+# …but a build that FAILED LATE while still having started the right image must
+# not be turned into a false green either — the pin evidence is present, so the
+# assertion still passes on its own terms.
+cat > "$WI_LOG" <<EOF
+Starting container image $IDENT_REF...
+EOF
+run "$CI_DIR/assert-wheel-image.sh" "$WI_LOG" "$IDENT_REF" "failure"
+want_status 0 "assert-wheel-image/build-failed-but-image-seen"
+want_out 'matched 1 line' "assert-wheel-image/build-failed-but-image-seen"
+ok "a late build failure still reports the pin evidence that IS present"
+
+# ═════ ci/install-ccache.sh (#270 Gate B r1, F2) ═════════════════════════════
+#
+# Entirely untested before this — the PR body's "a killed mutant behind every
+# new guard" was false for this script specifically. Three of its four guards
+# are fatal by construction under `set -euo pipefail` (a failed download, a
+# missing extracted binary, a non-working installed executable each abort the
+# step with no help from this harness); the ONE guard that fails SILENTLY if
+# deleted is `sha256sum -c -` — replace it with `true` and every green run
+# stays green. That is the guard this section exists to pin.
+echo "── install-ccache.sh ──"
+IC_SANDBOX="$sandbox/install-ccache"
+mkdir -p "$IC_SANDBOX"
+
+# A small, REAL, executable "ccache" — a shell stub, not the actual binary; the
+# script only needs `--version` to succeed. Archived under the exact directory
+# name install-ccache.sh's NAME variable expects, so `tar xf` extracts to the
+# path the script installs from.
+IC_GOOD_ROOT="$IC_SANDBOX/good/ccache-4.13.6-linux-x86_64-musl-static"
+mkdir -p "$IC_GOOD_ROOT"
+cat > "$IC_GOOD_ROOT/ccache" <<'STUB'
+#!/usr/bin/env bash
+[ "${1:-}" = "--version" ] && { echo "ccache version 4.13.6 (shim)"; exit 0; }
+echo "SHIM-VIOLATION: fake ccache binary called with $*" >&2
+exit 2
+STUB
+chmod +x "$IC_GOOD_ROOT/ccache"
+IC_GOOD_TAR="$IC_SANDBOX/good.tar"
+tar -cf "$IC_GOOD_TAR" -C "$IC_SANDBOX/good" "ccache-4.13.6-linux-x86_64-musl-static"
+IC_GOOD_SHA256="$(sha256sum "$IC_GOOD_TAR" | cut -d' ' -f1)"
+
+# ⚠️ A DIFFERENT WELL-FORMED ARCHIVE, not garbage bytes. Garbage dies at
+# `tar xf` regardless of the checksum guard — that would make the corrupted
+# case pass "non-zero exit, nothing installed" whether or not `sha256sum -c`
+# is even present, which is exactly the vacuous witness this harness's own
+# header warns about (status alone proves nothing). This archive extracts and
+# runs fine; only its DIGEST disagrees with what was pinned.
+IC_BAD_ROOT="$IC_SANDBOX/bad/ccache-4.13.6-linux-x86_64-musl-static"
+mkdir -p "$IC_BAD_ROOT"
+cat > "$IC_BAD_ROOT/ccache" <<'STUB'
+#!/usr/bin/env bash
+[ "${1:-}" = "--version" ] && { echo "ccache version 0.0.0 (WRONG BUILD)"; exit 0; }
+exit 2
+STUB
+chmod +x "$IC_BAD_ROOT/ccache"
+IC_BAD_TAR="$IC_SANDBOX/bad.tar"
+tar -cf "$IC_BAD_TAR" -C "$IC_SANDBOX/bad" "ccache-4.13.6-linux-x86_64-musl-static"
+
+# A driven COPY of the real script with the pinned checksum replaced by the
+# GOOD fixture's real digest. The production script's own SHA256 cannot be
+# matched by a fixture invented here; a test-only env-var override on the
+# checksum would itself be a seam on a supply-chain guard, which is worse.
+IC_DRIVEN="$sandbox/install-ccache-driven.sh"
+python3 - "$CI_DIR/install-ccache.sh" "$IC_DRIVEN" "$IC_GOOD_SHA256" <<'PYEOF'
+import sys
+src, dst, digest = sys.argv[1], sys.argv[2], sys.argv[3]
+t = open(src).read()
+old = "CCACHE_SHA256=156ec57c5198cc849d92834023d09910b83dc5504c6cf405d09e6ae7b208a3e5\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, f"CCACHE_SHA256={digest}\n"))
+PYEOF
+if cmp -s "$CI_DIR/install-ccache.sh" "$IC_DRIVEN"; then
+  fail "install-ccache/driven: python literal-replace produced no change — the driven copy is not actually testing a matched checksum"
+fi
+
+IC_PREFIX_OK="$sandbox/install-prefix-ok"
+mkdir -p "$IC_PREFIX_OK"
+FAKE_CURL_MODE=ok FAKE_CURL_GOOD_SRC="$IC_GOOD_TAR" \
+  run "$IC_DRIVEN" "$IC_PREFIX_OK"
+want_status 0 "install-ccache/good"
+want_out 'ccache installed at' "install-ccache/good"
+[ -x "$IC_PREFIX_OK/ccache" ] || fail "install-ccache/good: ccache was not installed to the prefix"
+"$IC_PREFIX_OK/ccache" --version | grep -q '4.13.6' \
+  || fail "install-ccache/good: the installed binary is not the fixture that was verified"
+ok "good download, verified checksum, installed and runnable"
+
+IC_PREFIX_BAD="$sandbox/install-prefix-corrupt"
+mkdir -p "$IC_PREFIX_BAD"
+FAKE_CURL_MODE=corrupt FAKE_CURL_GOOD_SRC="$IC_GOOD_TAR" FAKE_CURL_BAD_SRC="$IC_BAD_TAR" \
+  run "$IC_DRIVEN" "$IC_PREFIX_BAD"
+want_status 1 "install-ccache/corrupted"
+want_no_out 'ccache installed at' "install-ccache/corrupted"
+[ ! -e "$IC_PREFIX_BAD/ccache" ] \
+  || fail "install-ccache/corrupted: a binary was installed despite a checksum mismatch — this is the sha256sum -c -> true mutant, live"
+ok "corrupted download (well-formed archive, wrong digest) — rejected, nothing installed (kills sha256sum -c -> true)"
+
 # ═════ ci/restore-ccache.sh ══════════════════════════════════════════════════
 echo "── restore-ccache.sh ──"
 CDIR="$sandbox/ccache-dir"
@@ -313,6 +718,17 @@ want_out '^ccache-cache HIT' "restore/hit"
 want_no_out 'precondition was NOT verified' "restore/hit"
 [ -f "$CDIR/aa/entry" ] || fail "restore/hit: the archive content was not swapped into CCACHE_DIR"
 ok "HIT — archive extracted, swapped in, hit=true"
+
+# The container lane must address the LITERAL pinned-image tag through the real
+# restore/seed scripts, not just through ccache_resolve_key in isolation. This
+# is the non-vacuous witness for the dispatcher each side calls.
+rm -rf "$CDIR"
+FAKE_EXPECTED_REF="$IMAGE:$EXPECTED_CONTAINER_TAG" FAKE_ORAS_PULL_MODE=ok FAKE_PRESET=wheel-manylinux228 \
+CCACHE_DIR="$CDIR" \
+  run "$CI_DIR/restore-ccache.sh" wheel-manylinux228 "$PINNED_REF"
+want_status 0 "restore/container-tag"; want_hit true "restore/container-tag"
+want_out "$EXPECTED_CONTAINER_TAG" "restore/container-tag"
+ok "container restore addresses the literal pinned-image tag, not an empty or host-probed key"
 
 # ── The run-me-before-anything-compiles precondition ────────────────────────
 #
@@ -434,6 +850,16 @@ want_out 'ccache-cache archive' "seed/ok"
 want_out 'cap `2G`' "seed/ok"
 grep -q "ccache-fake-libc++.tar" "$PUSH_RECORD" || fail "seed/ok: nothing was pushed"
 ok "SEEDED — archive published, size + cap reported"
+
+rm -rf "$CDIR"; mkdir -p "$CDIR/aa"; printf 'x\n' > "$CDIR/aa/entry"
+: > "$PUSH_RECORD"
+FAKE_EXPECTED_REF="$IMAGE:$EXPECTED_CONTAINER_TAG" FAKE_KEEP_TAG="$EXPECTED_CONTAINER_TAG" \
+FAKE_PUSH_RECORD="$PUSH_RECORD" CCACHE_DIR="$CDIR" CCACHE_MAXSIZE="2G" \
+  run "$CI_DIR/seed-ccache.sh" wheel-manylinux228 "$PINNED_REF"
+want_status 0 "seed/container-tag"
+want_out "ccache-cache SEEDED \`$EXPECTED_CONTAINER_TAG\`" "seed/container-tag"
+grep -q "ccache-wheel-manylinux228.tar" "$PUSH_RECORD" || fail "seed/container-tag: nothing was pushed for the container lane"
+ok "container seed addresses the literal pinned-image tag, not an empty or host-probed key"
 
 # ── 3a/F4 — THE SIZING DATUM FAILING MUST NOT ABORT THE PUBLISH ──────────────
 #
@@ -628,7 +1054,7 @@ EOF
 stats_case() {
   FAKE_STATS_FILE="$STATS_FILE" FAKE_PRINT_STATS_EXIT="${PS_EXIT:-0}" \
   FAKE_SHOW_STATS_EXIT="${SS_EXIT:-0}" CCACHE_DIR="$CDIR" \
-    run "$CI_DIR/ccache-stats.sh" fake-libc++ "${1:-true}" "${2:-success}"
+    run "$CI_DIR/ccache-stats.sh" fake-libc++ "${1:-true}" "${2:-success}" ${3+"$3"}
 }
 
 write_stats 1400 0 61 1900000 2097152 0 0 37
@@ -804,5 +1230,100 @@ want_out 'ccache-hitrate 50%' "stats/show-stats-fails"
 want_out 'may be absent or incomplete' "stats/show-stats-fails"
 ok "--show-stats failure — warns without denying output the log may contain"
 
+# ── OPT-IN HIT FLOOR (#259) ──────────────────────────────────────────────────
+#
+# ⚠️ THE EXEMPTION IS THE CASE THAT MATTERS, not the breach. A floor that also
+# fires on a cold/MISS run would redden the SEEDING run — the first push:main
+# after the lane lands, which legitimately serves 0 % because there was nothing
+# to restore — making the change look broken at the exact moment it is working.
+# That is the failure mode this gate is shaped to avoid, so it is asserted
+# first and asserted explicitly.
+write_stats 0 0 1461 10 512000 0
+stats_case false success 60
+want_status 0 "stats/floor-miss-exempt"
+want_no_out 'HIT-FLOOR BREACHED' "stats/floor-miss-exempt"
+want_no_out 'satisfied' "stats/floor-miss-exempt"
+want_out 'NOT evaluated' "stats/floor-miss-exempt"
+ok "hit floor is EXEMPT on a restore MISS — a cold/seeding run at 0% stays green"
+
+write_stats 0 0 1461 10 512000 0
+FAKE_STATS_FILE="$STATS_FILE" FAKE_PRINT_STATS_EXIT="${PS_EXIT:-0}" \
+FAKE_SHOW_STATS_EXIT="${SS_EXIT:-0}" CCACHE_DIR="$CDIR" \
+  run "$CI_DIR/ccache-stats.sh" fake-libc++ "" success 60
+want_status 0 "stats/floor-no-restore-step"
+want_no_out 'satisfied' "stats/floor-no-restore-step"
+want_out 'restore=`n/a`' "stats/floor-no-restore-step"
+want_out 'NOT evaluated' "stats/floor-no-restore-step"
+ok "hit floor is also not evaluated when the restore step did not report a disposition"
+
+# The breach itself: a cache was pulled and then matched almost nothing.
+write_stats 100 0 1361 10 512000 0
+stats_case true success 60
+want_status 1 "stats/floor-breach"
+want_out 'HIT-FLOOR BREACHED' "stats/floor-breach"
+ok "hit floor is FATAL on a restore HIT below the floor"
+
+# Above the floor, same HIT — proves the previous case failed for the RATE and
+# not merely for passing a fourth argument.
+write_stats 1400 0 61 10 512000 0
+stats_case true success 60
+want_status 0 "stats/floor-satisfied"
+want_out 'hit-floor 60% satisfied' "stats/floor-satisfied"
+ok "hit floor passes when the rate is above it"
+
+# Omitted floor must behave EXACTLY as before — every existing caller passes
+# three arguments, and this is the regression guard for them.
+write_stats 100 0 1361 10 512000 0
+stats_case true success
+want_status 0 "stats/floor-absent"
+want_no_out 'HIT-FLOOR BREACHED' "stats/floor-absent"
+ok "no floor argument — the pre-existing three-argument behaviour is unchanged"
+
+# A malformed floor must be an attributed error, not silently treated as 0
+# (which would disable the check while looking configured).
+write_stats 1400 0 61 10 512000 0
+stats_case true success "sixty"
+want_status 1 "stats/floor-malformed"
+want_out 'is not a non-negative integer percent' "stats/floor-malformed"
+ok "a malformed hit-floor is rejected rather than silently disabling the check"
+
+# ── #270 Gate B r1, F3 — the RANGE half of the validator ────────────────────
+#
+# The old check validated only the CHARACTER CLASS (digits-only), not the
+# RANGE: 101 and an arbitrary-length digit string both parsed as "valid". On
+# the huge value the `-lt` comparison itself ERRORS ("integer expression
+# expected"), and because this script deliberately runs WITHOUT `-e`,
+# execution fell through past the error to the "satisfied" note — a false
+# PASS emitted by the instrument whose whole purpose is to stop one.
+# `want_no_out 'satisfied'` is the assertion that actually catches this; exit
+# status alone is unaffected by the fall-through and would pass before AND
+# after the fix for the wrong reason.
+write_stats 1400 0 61 10 512000 0
+stats_case true success "101"
+want_status 1 "stats/floor-101"
+want_out 'not a 0-100 integer percent' "stats/floor-101"
+want_no_out 'satisfied' "stats/floor-101"
+# 101 is small enough that `[ 95 -lt 101 ]` does not error — PRE-FIX this
+# already exited 1, but via HIT-FLOOR BREACHED (a real rate vs. an impossible
+# floor), not because 101 is out of range. want_status alone would be green
+# before AND after; the message is what proves the RANGE check, not the
+# ordinary comparison, is what fired.
+want_no_out 'HIT-FLOOR BREACHED' "stats/floor-101"
+ok "hit-floor 101 — rejected as out of range (0-100), not via the ordinary breach comparison"
+
+write_stats 1400 0 61 10 512000 0
+stats_case true success "1234567890123456789012345"
+want_status 1 "stats/floor-huge"
+want_out 'too many digits' "stats/floor-huge"
+want_no_out 'satisfied' "stats/floor-huge"
+ok "a 25-digit hit-floor — rejected before arithmetic can wrap it into [0,100]"
+
+write_stats 1400 0 61 10 512000 0
+stats_case true success "007"
+want_status 0 "stats/floor-leading-zero"
+want_out 'hit-floor 7% satisfied' "stats/floor-leading-zero"
+want_no_out '007%' "stats/floor-leading-zero"
+ok "hit-floor 007 — parsed as DECIMAL (7), not octal or malformed, and accepted"
+
 echo
-echo "PASS: $pass assertions over ci/{ccache-cache-key,restore-ccache,seed-ccache,ccache-stats}.sh — scripts: $CI_DIR"
+echo "PASS: $pass assertions over ci/{ccache-cache-key,restore-ccache,seed-ccache,ccache-stats,wheel-ccache-ident,assert-wheel-image,install-ccache}.sh — scripts: $CI_DIR"

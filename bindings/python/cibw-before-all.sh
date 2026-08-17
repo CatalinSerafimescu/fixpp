@@ -38,6 +38,36 @@ GT=/opt/rh/gcc-toolset-14/root/usr/bin   # gcc-toolset-14 toolchain binaries
 PY=/opt/python/cp310-cp310/bin           # a manylinux CPython for pip/conan
 export PATH="$PY:$PATH"
 
+# ── ccache (#259) ────────────────────────────────────────────────────────────
+#
+# This lane compiled its whole ninja graph uncached on every run — 68 min of a
+# 69 min job, and (with #241's coverage cache landed) Tier 1's critical path.
+#
+# ⚠️ NOT `dnf install ccache`, AND THE REASON IS MEASURED, NOT STYLISTIC.
+# EPEL *is* enabled in this image and the package *does* install — which is what
+# makes it the tempting choice — but EL8 ships **ccache 3.7.7** (2019).
+# `ci/ccache-stats.sh` opens with `ccache --print-stats`, a 4.x-only feature, and
+# every counter it parses is 4.x machine-readable output; 3.7.7 also predates
+# zstd, so the `CCACHE_COMPRESSLEVEL` every other lane sets would be inert. The
+# EPEL route does not degrade quietly — it fails the reporting step outright.
+# (Probed in this exact pinned image on 2026-08-17.)
+#
+# The static build is chosen over the `-glibc` one deliberately. Both were run
+# here and both work against this image's glibc 2.28 — the static one simply
+# cannot be broken by a future image bump, and a compiler cache must NEVER
+# redden a lane whose build and tests pass.
+#
+# ⚠️ THE VERSION IS PINNED IN ci/install-ccache.sh AND NOT RESTATED HERE. The
+# host side of this lane installs ccache from that same script, and the two
+# share one bind-mounted CCACHE_DIR — so a version difference between them is a
+# silent failure in the worst direction (a host `--print-stats` that cannot read
+# a container-written cache reports zero cacheable calls, which is
+# indistinguishable from "the cache didn't help"). One file, both sides equal by
+# construction. See that script's header for the EPEL-3.7.7 and static-vs-glibc
+# decisions, both of which were probed in this exact pinned image.
+bash "$PROJECT/ci/install-ccache.sh" /usr/local/bin
+echo "ccache: $(command -v ccache)"
+
 pip install -q "conan>=2"                 # swig/ninja/scikit-build-core come from
                                           # the build-frontend's build-requires
 conan profile detect --force

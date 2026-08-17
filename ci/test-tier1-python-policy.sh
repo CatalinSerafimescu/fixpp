@@ -366,6 +366,41 @@ tier1_required_needs = jobs["tier1-required"]["needs"]
 # an echo and the job stays green, the negative layouts stop being exercised).
 ci_pin_runs = "\n".join(str(s.get("run", "")) for s in jobs["ci-script-pins"]["steps"])
 
+# #270 Gate B r1, F1. `python-wheel-build`'s CONTAINER compile does not inherit
+# the runner's environment (tier1.yml:1587-1590), so CONAN_HOME and the four
+# CCACHE_* vars only reach it through the ONE `CIBW_ENVIRONMENT` string on the
+# `wheel_build` step — and the host-side restore/build/chown/stats/seed order
+# is what makes that step's ccache mount and the host's liveness read agree.
+# Both are read here, exact-set/ordered, same discipline as the linux job above.
+wheel_job = jobs["python-wheel-build"]
+wheel_steps = wheel_job["steps"]
+wheel_step_order = [
+    {"index": i, "id": str(s.get("id", "")), "name": str(s.get("name", ""))}
+    for i, s in enumerate(wheel_steps)
+]
+wheel_identity_step_names = {
+    "Restore ccache from GHCR",
+    "Assert the pinned manylinux image is the one used",
+    "Save ccache to GHCR (push:main / dispatch on main, cache changed)",
+}
+wheel_identity_steps = [
+    {
+        "name": str(step.get("name", "")),
+        "id":   str(step.get("id", "")),
+        "if":   str(step.get("if", "")),
+        "run":  str(step.get("run", "")),
+        "env":  {str(k): str(v) for k, v in (step.get("env") or {}).items()},
+        "raw_keys": sorted(str(k) for k in step.keys()),
+    }
+    for step in wheel_steps
+    if step.get("name") in wheel_identity_step_names
+]
+_wheel_build_steps = [s for s in wheel_steps if s.get("id") == "wheel_build"]
+assert len(_wheel_build_steps) == 1, len(_wheel_build_steps)
+wheel_build_env = {
+    str(k): str(v) for k, v in (_wheel_build_steps[0].get("env") or {}).items()
+}
+
 out = {
     "linux_presets": linux_presets,
     "linux_steps": linux_steps,
@@ -382,6 +417,9 @@ out = {
     "linux_job_keys": linux_job_keys,
     "workflow_env": workflow_env,
     "workflow_has_defaults": workflow_has_defaults,
+    "wheel_step_order": wheel_step_order,
+    "wheel_identity_steps": wheel_identity_steps,
+    "wheel_build_env": wheel_build_env,
 }
 print(json.dumps(out))
 PYEOF
@@ -789,6 +827,181 @@ $got"
     || fail "$case_id: the workflow declares top-level \`defaults:\` — \`defaults.run.shell\` supplies the interpreter for every run: step in the FILE, including the four pinned ones, with their text unchanged."
 }
 
+# ── 3c: python-wheel-build's CIBW_ENVIRONMENT + ccache step order (#270 F1) ──
+#
+# opus_pr270_1_triage.md F1 (downgraded P1->P2, queued as real coverage debt):
+# `ci/test-ccache-scripts.sh` drives the ccache SCRIPTS, and nothing anywhere
+# inspected the `python-wheel-build` JOB's environment or step order — the
+# exact seam Codex's flagship silent mutant lives on (drop `CONAN_HOME` from
+# the container's `CIBW_ENVIRONMENT` and every ccache-side assertion still
+# passes; only the dependency closure quietly rebuilds from source every run).
+#
+# The container does not inherit the runner's environment (tier1.yml:1587-1590),
+# so CONAN_HOME and the four CCACHE_* vars reach the compile ONLY through this
+# one string. YAML keeps only the LAST of two same-named mapping keys rather
+# than erroring, so a second `CIBW_ENVIRONMENT:` is the same silent-drop shape
+# under a different edit — both are asserted via the same "does the single
+# resolved value carry all five" check, which is what YAML parsing can see.
+# opus_pr270_2_triage.md R2-F1. The key-set + per-substring checks this used
+# to be were each satisfiable by a value the OTHER side of a two-sided contract
+# does not have: `case "$val" in *"CONAN_HOME="*)` matches inside
+# `XCONAN_HOME=/tmp` (Codex's flagship escape — a typo'd name that still
+# contains every pinned substring), and neither check compares a VALUE against
+# anything, so a wrong path (`CONAN_HOME=/tmp`), a swap of the two paths, or a
+# rename of the mount TARGET in the sibling `CIBW_CONTAINER_ENGINE` (same step,
+# :1594) all leave this pin green while the container silently loses its
+# Conan/ccache wiring.
+#
+# Exact whole-map equality subsumes the key-set check (so that check is DELETED
+# here, not kept alongside — two assertions for one property is how the weaker
+# one survives a later simplification, :794-797 above) and is strictly
+# stronger than a parsed-assignment map compared as a mount-target SET: a set
+# comparison is blind to a swap (`CONAN_HOME=/host-ccache
+# CCACHE_DIR=/host-conan2` produces the identical target set), because the
+# PAIRING is the property and only string equality on the whole value pins a
+# pairing without extra parsing code. It also pins the mount SOURCE
+# (`${{ env.CCACHE_DIR }}`) against a respelling to a literal path — the first
+# direct pin of the one-spelling invariant `fc7a4ae3` exists to establish.
+#
+# Not too brittle: this file already pins `linux_job_env` as an exact map
+# including "CCACHE_COMPRESSLEVEL":"5", with a written rationale
+# (`linux_step_count`, above) that a legitimate bump is a deliberate act priced
+# at one line in the same commit. Loosening CCACHE_MAXSIZE/CCACHE_COMPRESSLEVEL
+# to shape-regexes here would reproduce the defect this fix removes.
+assert_wheel_build_env() {
+  local json="$1" case_id="$2"
+  local got want
+  want='{"CIBW_CONTAINER_ENGINE":"docker; create_args: -v /tmp/wheel-conan2:/host-conan2 -v ${{ env.CCACHE_DIR }}:/host-ccache","CIBW_ENVIRONMENT":"CONAN_HOME=/host-conan2 CCACHE_DIR=/host-ccache CCACHE_MAXSIZE=2G CCACHE_COMPILERCHECK=content CCACHE_COMPRESSLEVEL=5"}'
+  got="$(echo "$json" | jq -cS '.wheel_build_env')"
+  [ "$got" = "$want" ] \
+    || fail "$case_id: python-wheel-build's 'Build the single cp310-abi3 wheel (CI-2)' step's env: is
+  got:  $got
+  want: $want
+The container does not inherit the runner's environment, so CIBW_ENVIRONMENT is the only path CONAN_HOME/CCACHE_* reach it by, and both its values must equal the mount TARGETS declared in the sibling CIBW_CONTAINER_ENGINE on this same step. If this is a deliberate change (a real path or cache-tuning bump), update this golden in the same commit — do not weaken the comparison to a substring or shape check, that is the defect this pin exists to close."
+}
+
+# ── 3d: wheel ccache identity call sites (#270 Gate B r3, R3-F1) ────────────
+#
+# The wheel lane's ccache identity is carried by THREE workflow steps: restore,
+# the pinned-image assertion, and seed. The earlier fix pinned the container
+# build env and the step order, but did not inspect the restore / assert / seed
+# `run:` text at all — measured GREEN through the full policy harness after
+# deleting the restore step's image_ref argument, because the old wheel
+# projection stored only index/id/name.
+#
+# The same per-step object discipline used by linux_steps is mirrored here
+# rather than inventing a special parser: exact run: goldens for the three call
+# sites, exact key sets for the same steps, and the seed step's exact `if:`
+# guard. That closes the actual workflow seam, including the BUILD_OUTCOME
+# argument that stops ci/assert-wheel-image.sh attributing any build failure to
+# the pin.
+WHEEL_IMAGE_ARG_TAIL='  "${{ steps.wheel_ident.outputs.lane }}" \
+  "${{ steps.wheel_ident.outputs.image_ref }}"'
+
+EXPECTED_WHEEL_RESTORE_RUN='echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u "${{ github.actor }}" --password-stdin || true
+ci/restore-ccache.sh \
+'"$WHEEL_IMAGE_ARG_TAIL"
+
+EXPECTED_WHEEL_ASSERT_RUN='ci/assert-wheel-image.sh /tmp/cibuildwheel.log \
+  '"'"'${{ steps.wheel_ident.outputs.image_ref }}'"'"' \
+  '"'"'${{ steps.wheel_build.outcome }}'"'"''
+
+EXPECTED_WHEEL_SEED_IF="(github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')) && steps.ccache_stats.outputs.changed != '0'"
+
+EXPECTED_WHEEL_SEED_RUN='echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u "${{ github.actor }}" --password-stdin
+ci/seed-ccache.sh \
+'"$WHEEL_IMAGE_ARG_TAIL"
+
+assert_wheel_identity_steps() {
+  local json="$1" case_id="$2"
+  local _by_name
+  _by_name="$(echo "$json" | jq -c '[ .wheel_identity_steps[] ]')"
+
+  wheel_step_by_name() {  # <exact name>
+    local _cnt
+    _cnt="$(echo "$_by_name" | jq --arg n "$1" '[ .[] | select(.name == $n) ] | length')"
+    if [ "$_cnt" != "1" ]; then
+      echo "FAIL: $case_id: expected EXACTLY ONE wheel step named '$1', found $_cnt" >&2
+      return 1
+    fi
+    echo "$_by_name" | jq -c --arg n "$1" 'first(.[] | select(.name == $n))'
+  }
+
+  assert_wheel_run_block() {  # <step-json> <expected> <label>
+    local _step="$1" _expected="$2" _label="$3" _got
+    _got="$(echo "$_step" | jq -r '.run // ""')"
+    _got="${_got%"${_got##*[!$'\n']}"}"
+    _expected="${_expected%"${_expected##*[!$'\n']}"}"
+    if [ "$_got" != "$_expected" ]; then
+      fail "$case_id: the wheel step '$_label' run: block does not match the canonical text pinned in this file.
+
+This is a GOLDEN. It reds on ANY change, cosmetic ones included. If the change is intended, update
+the expected text here in the same commit — do not weaken the selector back into content matching.
+
+--- expected
++++ actual
+$(diff <(printf '%s\n' "$_expected") <(printf '%s\n' "$_got") || true)"
+    fi
+  }
+
+  assert_wheel_step_keys() {  # <step-json> <expected comma-separated sorted keys> <label>
+    local _got
+    _got="$(echo "$1" | jq -r '.raw_keys | sort | join(",")')"
+    [ "$_got" = "$2" ] \
+      || fail "$case_id: the wheel step '$3' key set is '$_got', expected exactly '$2'. Step-level keys are NOT part of the run: golden — \`if:\` decides whether the identity call site runs at all, \`continue-on-error:\` can turn a publish failure into a green status, and any added key here is a deliberate pin update."
+  }
+
+  local restore_step assert_step seed_step seed_if
+  restore_step="$(wheel_step_by_name 'Restore ccache from GHCR')" || exit 1
+  assert_step="$(wheel_step_by_name 'Assert the pinned manylinux image is the one used')" || exit 1
+  seed_step="$(wheel_step_by_name 'Save ccache to GHCR (push:main / dispatch on main, cache changed)')" || exit 1
+
+  assert_wheel_run_block "$restore_step" "$EXPECTED_WHEEL_RESTORE_RUN" "Restore ccache from GHCR"
+  assert_wheel_run_block "$assert_step"  "$EXPECTED_WHEEL_ASSERT_RUN"  "Assert the pinned manylinux image is the one used"
+  assert_wheel_run_block "$seed_step"    "$EXPECTED_WHEEL_SEED_RUN"    "Save ccache to GHCR (push:main / dispatch on main, cache changed)"
+
+  assert_wheel_step_keys "$restore_step" "id,name,run" "Restore ccache from GHCR"
+  assert_wheel_step_keys "$assert_step"  "if,name,run" "Assert the pinned manylinux image is the one used"
+  assert_wheel_step_keys "$seed_step"    "continue-on-error,env,if,name,run" "Save ccache to GHCR (push:main / dispatch on main, cache changed)"
+
+  seed_if="$(echo "$seed_step" | jq -r '.["if"] // ""')"
+  [ "$seed_if" = "$EXPECTED_WHEEL_SEED_IF" ] \
+    || fail "$case_id: the wheel seed guard is \`$seed_if\`, expected exactly \`$EXPECTED_WHEEL_SEED_IF\`. The main-ref restriction is load-bearing here: every branch computes the same rolling tag, so a missing \`github.ref == 'refs/heads/main'\` turns any dispatch into an overwrite of main's warm cache."
+}
+
+# The host restore/stats/seed steps and the container's bind mount all read the
+# SAME $CCACHE_DIR (job-level env, tier1.yml:1459) — the mechanism that makes a
+# drifted mount fail LOUD via ccache-stats.sh's zero-cacheable-calls assert
+# (opus_pr270_1_triage.md F1's correction to fc7a4ae3's commit message). That
+# mechanism depends on running in the right ORDER: restore before the compile
+# (or it discards what Conan/ccache just wrote), the ownership reclaim (chown)
+# before the host reads stats on a root-owned mount, and stats before seed (so
+# a failed liveness read is never silently republished).
+assert_wheel_build_step_order() {
+  local json="$1" case_id="$2"
+  local restore_idx build_idx chown_idx stats_idx seed_idx
+
+  restore_idx="$(echo "$json" | jq -r '[.wheel_step_order[] | select(.id == "ccache_restore")] | if length == 1 then .[0].index else "MISSING" end')"
+  [ "$restore_idx" != "MISSING" ] || fail "$case_id: no step with id 'ccache_restore' in python-wheel-build"
+  build_idx="$(echo "$json" | jq -r '[.wheel_step_order[] | select(.id == "wheel_build")] | if length == 1 then .[0].index else "MISSING" end')"
+  [ "$build_idx" != "MISSING" ] || fail "$case_id: no step with id 'wheel_build' in python-wheel-build"
+  chown_idx="$(echo "$json" | jq -r '[.wheel_step_order[] | select(.name == "Reclaim ownership of the ccache dir")] | if length == 1 then .[0].index else "MISSING" end')"
+  [ "$chown_idx" != "MISSING" ] || fail "$case_id: no step named 'Reclaim ownership of the ccache dir' in python-wheel-build"
+  stats_idx="$(echo "$json" | jq -r '[.wheel_step_order[] | select(.id == "ccache_stats")] | if length == 1 then .[0].index else "MISSING" end')"
+  [ "$stats_idx" != "MISSING" ] || fail "$case_id: no step with id 'ccache_stats' in python-wheel-build"
+  seed_idx="$(echo "$json" | jq -r '[.wheel_step_order[] | select(.name == "Save ccache to GHCR (push:main / dispatch on main, cache changed)")] | if length == 1 then .[0].index else "MISSING" end')"
+  [ "$seed_idx" != "MISSING" ] || fail "$case_id: no step named 'Save ccache to GHCR (push:main / dispatch on main, cache changed)' in python-wheel-build"
+
+  [ "$restore_idx" -lt "$build_idx" ] \
+    || fail "$case_id: restore (index $restore_idx) is not before build (index $build_idx) in python-wheel-build — restoring after compiles start would discard entries the compile just wrote"
+  [ "$build_idx" -lt "$chown_idx" ] \
+    || fail "$case_id: build (index $build_idx) is not before chown (index $chown_idx) in python-wheel-build"
+  [ "$chown_idx" -lt "$stats_idx" ] \
+    || fail "$case_id: chown (index $chown_idx) is not before stats (index $stats_idx) in python-wheel-build — the host's \`ccache --print-stats\` reads a mount the container left root-owned"
+  [ "$stats_idx" -lt "$seed_idx" ] \
+    || fail "$case_id: stats (index $stats_idx) is not before seed (index $seed_idx) in python-wheel-build — a failed liveness read must not be silently republished"
+}
+
 # ── 4: PY_RE case table ─────────────────────────────────────────────────────
 # path, expected-match (post-anchor / post-#251 behaviour). Table matches
 # opus_pr251_1_triage.md's F4 19-case evaluation verbatim.
@@ -896,6 +1109,9 @@ run_full_pin() {
   assert_tier1_required_needs "$json" "$case_id"
   assert_ci_pin_call_sites "$json" "$case_id"
   assert_linux_job_context "$json" "$case_id"
+  assert_wheel_build_env "$json" "$case_id"
+  assert_wheel_identity_steps "$json" "$case_id"
+  assert_wheel_build_step_order "$json" "$case_id"
 }
 
 # ── Real workflow: must pass all four assertions ────────────────────────────
@@ -912,10 +1128,15 @@ echo "PASS: derive-script table + call site + FIXPP_INSTALL_PYTHON=OFF + PY_RE c
 # for a miscount; a counter is. MUTANTS_RUN is incremented by each mutant AFTER
 # it has been proven RED for the right reason, so an early `return` or a mutant
 # silently commented out changes the total.
-MUTANTS_DECLARED=33  # M1 M2 M3 B M4 M5 M6 M7 M11 M14 M15 M21 M26 M27 M29-M45 M47 + M28 (1 GREEN control;
-                     # M46 RETIRED at round 9 — its GREEN assertion became false by design) — DOWN from 27 at
-                     # round 3b, because the golden subsumed 14 of them. See the
-                     # RETIRED block in run_mutant_checks for the list and the reason.
+MUTANTS_DECLARED=49  # M1 M2 M3 B M4 M5 M6 M7 M11 M14 M15 M21 M26 M27 M29-M45 M47 M48 M49 M50 M51-M55 M56-M63 + M28 (1
+                     # GREEN control; M46 RETIRED at round 9 — its GREEN assertion became false by design) —
+                     # DOWN from 27 at round 3b, because the golden subsumed 14 of them. See the RETIRED block
+                     # in run_mutant_checks for the list and the reason. M48-M50 added at #270 Gate B r1 (F1):
+                     # python-wheel-build's CIBW_ENVIRONMENT + ccache step order had no mutant at all before.
+                     # M51-M55 added at #270 Gate B r2 (R2-F1): the substring loop those three replaced never
+                     # checked a VALUE on either side of the CIBW_ENVIRONMENT / CIBW_CONTAINER_ENGINE contract.
+                     # M56-M63 added at #270 Gate B r3 (R3-F1): the wheel restore/assert/seed call sites and the
+                     # seed step's main-ref guard were still unpinned at the workflow boundary.
 MUTANTS_RUN=0
 # GREEN controls are counted separately: a summary that calls them RED would be
 # the very over-claim MUTANTS_DECLARED exists to prevent.
@@ -1621,6 +1842,235 @@ PYEOF2
   GREEN_CONTROLS=$((GREEN_CONTROLS + 1))
   echo "GREEN (expected): M28 (Configure block re-folded, same value) — the golden pins the VALUE, not the file bytes"
   MUTANTS_RUN=$((MUTANTS_RUN + 1))
+
+  # ── M48-M50 (#270 Gate B r1, F1): python-wheel-build's CIBW_ENVIRONMENT + order ─
+  #
+  # M48 is Codex's own flagship silent mutant from the PR #270 review: drop
+  # CONAN_HOME from the container's CIBW_ENVIRONMENT and every ccache-side
+  # assertion (ci/test-ccache-scripts.sh) stays green — the dependency closure
+  # just rebuilds from source in an ephemeral container home every run.
+  mutate_workflow M48 "CONAN_HOME dropped from the wheel build's CIBW_ENVIRONMENT" 'got:.*"CIBW_ENVIRONMENT":"CCACHE_DIR=/host-ccache CCACHE_MAXSIZE' '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "          CIBW_ENVIRONMENT: \x22CONAN_HOME=/host-conan2 CCACHE_DIR=/host-ccache CCACHE_MAXSIZE=2G CCACHE_COMPILERCHECK=content CCACHE_COMPRESSLEVEL=5\x22\n"
+new = "          CIBW_ENVIRONMENT: \x22CCACHE_DIR=/host-ccache CCACHE_MAXSIZE=2G CCACHE_COMPILERCHECK=content CCACHE_COMPRESSLEVEL=5\x22\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
+'
+
+  # M49: a SECOND `CIBW_ENVIRONMENT:` key on the same step. The comment at
+  # tier1.yml:1582-1590 warns this silently drops the first one's content
+  # (YAML keeps only the last of two same-named mapping keys) — this mutant is
+  # the first instrument behind that warning.
+  mutate_workflow M49 "a second CIBW_ENVIRONMENT key shadows the first" 'got:.*"CIBW_ENVIRONMENT":"FOO=bar"' '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "          CIBW_ENVIRONMENT: \x22CONAN_HOME=/host-conan2 CCACHE_DIR=/host-ccache CCACHE_MAXSIZE=2G CCACHE_COMPILERCHECK=content CCACHE_COMPRESSLEVEL=5\x22\n"
+assert t.count(old) == 1, t.count(old)
+new = old + "          CIBW_ENVIRONMENT: \x22FOO=bar\x22\n"
+open(dst, "w").write(t.replace(old, new))
+'
+
+  # M50: the ownership reclaim (chown) moves to AFTER the seed step. A
+  # root-owned mount then reaches the host's `ccache --print-stats` and the
+  # publish step before anything reclaims it.
+  mutate_workflow M50 "chown moved to after the seed step" "chown .index [0-9]+. is not before stats" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+chown_step = """      - name: Reclaim ownership of the ccache dir
+        if: always()
+        run: sudo chown -R "$(id -u):$(id -g)" "$CCACHE_DIR" || true
+"""
+assert t.count(chown_step) == 1, t.count(chown_step)
+t = t.replace(chown_step, "", 1)
+seed_anchor = """          ci/seed-ccache.sh \\
+            "${{ steps.wheel_ident.outputs.lane }}" \\
+            "${{ steps.wheel_ident.outputs.image_ref }}"
+"""
+assert t.count(seed_anchor) == 1, t.count(seed_anchor)
+t = t.replace(seed_anchor, seed_anchor + "\n" + chown_step, 1)
+open(dst, "w").write(t)
+'
+
+  # ── M51-M55 (#270 Gate B r2, R2-F1): the exact-map pin's own mutants ──────
+  # M48-M50 proved the SET/ORDER checks; these prove the exact VALUE-map pin
+  # that replaced the substring loop can see what the substring loop could not
+  # — a two-sided contract (CIBW_ENVIRONMENT's two paths vs the mount TARGETS
+  # CIBW_CONTAINER_ENGINE declares on the same step) where no side's VALUE was
+  # ever checked before.
+
+  # M51: Codex's own demonstrated escape — `case "$val" in *"CONAN_HOME="*)`
+  # matched INSIDE a typo'd name, because it is a substring test, not a name
+  # test. The exact-map pin must reject it outright.
+  mutate_workflow M51 "CONAN_HOME renamed to XCONAN_HOME (substring-loop escape)" 'got:.*XCONAN_HOME=' '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "CONAN_HOME=/host-conan2 CCACHE_DIR=/host-ccache"
+new = "XCONAN_HOME=/host-conan2 CCACHE_DIR=/host-ccache"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
+'
+
+  # M52: correct NAME, wrong VALUE. The substring loop only checked the name
+  # occurred somewhere in the string, never the path it was bound to.
+  mutate_workflow M52 "CONAN_HOME points at the wrong path" 'got:.*CONAN_HOME=/tmp CCACHE_DIR=/host-ccache' '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "CONAN_HOME=/host-conan2 CCACHE_DIR=/host-ccache"
+new = "CONAN_HOME=/tmp CCACHE_DIR=/host-ccache"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
+'
+
+  # M53: the two path VALUES swapped. Well-formed, assignment-shaped, both
+  # names present with a real value each — the mutant a mount-target SET
+  # comparison (Codex's proposed fix) cannot see, because the set of targets
+  # is unchanged; only the PAIRING is wrong. Only whole-value string equality
+  # pins a pairing.
+  mutate_workflow M53 "CONAN_HOME and CCACHE_DIR values swapped" 'got:.*CONAN_HOME=/host-ccache CCACHE_DIR=/host-conan2' '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "CONAN_HOME=/host-conan2 CCACHE_DIR=/host-ccache"
+new = "CONAN_HOME=/host-ccache CCACHE_DIR=/host-conan2"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
+'
+
+  # M54: the mount TARGET renamed on ONE side only — inside
+  # CIBW_CONTAINER_ENGINE (:1594), leaving CIBW_ENVIRONMENT (:1604) still
+  # pointing CONAN_HOME at the now-nonexistent `/host-conan2`. This is the
+  # genuinely silent production drift the triage names: a two-character edit
+  # inside the two lines this PR adds, invisible to every prior assertion
+  # because none of them ever read CIBW_CONTAINER_ENGINE at all.
+  mutate_workflow M54 "the CONAN_HOME mount target renamed in CIBW_CONTAINER_ENGINE only" 'got:.*host-conan-renamed' '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "-v /tmp/wheel-conan2:/host-conan2 -v ${{ env.CCACHE_DIR }}:/host-ccache"
+new = "-v /tmp/wheel-conan2:/host-conan-renamed -v ${{ env.CCACHE_DIR }}:/host-ccache"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
+'
+
+  # M55: the mount SOURCE respelled from the derived `${{ env.CCACHE_DIR }}`
+  # to a literal path — the one-spelling invariant fc7a4ae3 exists to
+  # establish, pinned directly for the first time by this golden.
+  mutate_workflow M55 "the ccache mount source respelled to a literal path" 'got:.*tmp/fixpp-ccache-wheel:/host-ccache' '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "-v ${{ env.CCACHE_DIR }}:/host-ccache"
+new = "-v /tmp/fixpp-ccache-wheel:/host-ccache"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
+'
+
+  # ── M56-M63 (#270 Gate B r3, R3-F1): wheel restore/assert/seed call sites ─
+  # M48-M55 pinned the wheel build env and step ordering. These eight prove the
+  # actual workflow boundary that carries the cache identity: the shared
+  # restore/seed image_ref tail, the assert step's BUILD_OUTCOME guard, and the
+  # seed step's main-ref restriction.
+
+  # M56: the restore call drops image_ref. restore-ccache.sh turns that into a
+  # successful MISS, so only the workflow run: golden can see this seam.
+  mutate_workflow M56 "wheel restore drops the image_ref argument" "wheel step 'Restore ccache from GHCR' run: block does not match" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "            \x22${{ steps.wheel_ident.outputs.image_ref }}\x22\n"
+assert t.count(old) >= 2, t.count(old)
+open(dst, "w").write(t.replace(old, "", 1))
+'
+
+  # M57: the seed call drops image_ref. seed-ccache.sh then exits 0 having
+  # published nothing, so the wheel seed call site itself must be pinned.
+  mutate_workflow M57 "wheel seed drops the image_ref argument" "wheel step 'Save ccache to GHCR \\(push:main / dispatch on main, cache changed\\)' run: block does not match" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "            \x22${{ steps.wheel_ident.outputs.image_ref }}\x22\n"
+assert t.count(old) >= 2, t.count(old)
+head, tail = t.rsplit(old, 1)
+open(dst, "w").write(head + tail)
+'
+
+  # M58: restore gets a DIFFERENT second argument on one side only. Publish/pull
+  # agreement is then broken even though both steps still pass two arguments.
+  mutate_workflow M58 "wheel restore uses github.sha instead of image_ref" "wheel step 'Restore ccache from GHCR' run: block does not match" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "            \x22${{ steps.wheel_ident.outputs.image_ref }}\x22\n"
+new = "            \x22${{ github.sha }}\x22\n"
+assert t.count(old) >= 2, t.count(old)
+open(dst, "w").write(t.replace(old, new, 1))
+'
+
+  # M59: the same one-sided drift on publish instead of pull.
+  mutate_workflow M59 "wheel seed uses github.sha instead of image_ref" "wheel step 'Save ccache to GHCR \\(push:main / dispatch on main, cache changed\\)' run: block does not match" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "            \x22${{ steps.wheel_ident.outputs.image_ref }}\x22\n"
+new = "            \x22${{ github.sha }}\x22\n"
+assert t.count(old) >= 2, t.count(old)
+head, tail = t.rsplit(old, 1)
+tail = new + tail
+open(dst, "w").write(head + tail)
+'
+
+  # M60: the assert call drops BUILD_OUTCOME. That silently discards the guard
+  # that stops ci/assert-wheel-image.sh blaming any build failure on the pin.
+  mutate_workflow M60 "wheel image assertion drops BUILD_OUTCOME" "wheel step 'Assert the pinned manylinux image is the one used' run: block does not match" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "            \x27${{ steps.wheel_build.outcome }}\x27\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, ""))
+'
+
+  # M61: the seed step loses its main-ref guard on workflow_dispatch. That is
+  # the load-bearing gate on this rolling tag namespace.
+  mutate_workflow M61 "wheel seed if: drops the main ref restriction" "wheel seed guard is" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "        if: (github.event_name == \x27push\x27 || (github.event_name == \x27workflow_dispatch\x27 && github.ref == \x27refs/heads/main\x27)) && steps.ccache_stats.outputs.changed != \x270\x27\n"
+new = "        if: (github.event_name == \x27push\x27 || github.event_name == \x27workflow_dispatch\x27) && steps.ccache_stats.outputs.changed != \x270\x27\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
+'
+
+  # M62: the assert step stops checking the pinned image ref and instead checks
+  # the lane name. Missing the second argument is fail-closed; a wrong one is not.
+  mutate_workflow M62 "wheel image assertion uses the lane instead of image_ref" "wheel step 'Assert the pinned manylinux image is the one used' run: block does not match" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "            \x27${{ steps.wheel_ident.outputs.image_ref }}\x27 \\\n"
+new = "            \x27${{ steps.wheel_ident.outputs.lane }}\x27 \\\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
+'
+
+  # M63: the assert step drops image_ref entirely. Under set -eu that reds
+  # fail-closed today, but the workflow pin must still prove it reads this call
+  # site rather than relying on the script's own usage error.
+  mutate_workflow M63 "wheel image assertion drops image_ref" "wheel step 'Assert the pinned manylinux image is the one used' run: block does not match" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "            \x27${{ steps.wheel_ident.outputs.image_ref }}\x27 \\\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, ""))
+'
 
 }
 

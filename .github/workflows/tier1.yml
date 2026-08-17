@@ -133,7 +133,11 @@ jobs:
           # python-wheel-{build,test} gate on `proceed` (both gates satisfied)
           # AND this relevance flag: on a PR they run only once the gates clear,
           # and then only when the diff touches the binding/C-ABI surface — so a
-          # pure-C++ PR or a pre-gate PR skips the ~7-min container wheel build.
+          # pure-C++ PR or a pre-gate PR skips the container wheel build.
+          # (⚠️ This said "~7-min" and was wrong by ~10x — measured 53-74 min
+          # uncached, 68m46s on PR #269's run, where it was Tier 1's critical
+          # path. Corrected with its sibling at the job itself in the same
+          # commit; see there for the measurement and #259.)
           # A merge to main (push), workflow_dispatch, and release build them
           # UNCONDITIONALLY (full build on main; PRs stay path-gated).
           # `.github/workflows/tier1.yml` is in the set because the wheel jobs'
@@ -1407,15 +1411,27 @@ jobs:
   python-wheel-build:
     name: python-wheel (build cp310-abi3)
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write  # #259: publish this lane's ccache to GHCR on push:main / dispatch on main
     # CI-6: cibuildwheel builds the whole statically-linked engine + static
     # OpenSSL in-container; generous backstop against a hung build wedging the runner.
     timeout-minutes: 180
     needs: gate-precheck       # CI-1
-    # Gate-then-relevance: the ~7-min container wheel build runs on a release
+    # Gate-then-relevance: the container wheel build runs on a release
     # (the asset is built there), OR — on a PR — once both gates are satisfied
     # (`proceed`) AND the binding/C-ABI/packaging surface actually changed
     # (`python_touched`). A pure-C++ PR or a PR without gate labels skips it;
     # a merge to main (push) builds it unconditionally.
+    #
+    # ⚠️ THIS SAID "~7-min" AND WAS WRONG BY ~10x (#259). Measured UNCACHED:
+    # 53-74 min across five push:main runs, and 68m46s on PR #269's run — where
+    # it was the LAST job in Tier 1 to finish, ~24 min after the next-longest
+    # lane, i.e. the critical path. The sibling copy of this claim lived at the
+    # `python_touched` filter below and is corrected in the same commit; fixing
+    # one and leaving the other is the half-restructure this repo keeps
+    # re-paying for (#247's G2). With ccache warm the figure should fall
+    # sharply — deliberately not quoted here until a warm run has reported one.
     if: >-
       github.event_name == 'release' ||
       (needs.gate-precheck.outputs.proceed == 'true' &&
@@ -1423,6 +1439,45 @@ jobs:
     concurrency:               # CI-7
       group: tier1-${{ github.event.pull_request.number || github.ref }}-python-wheel-build
       cancel-in-progress: true
+
+    # ── ccache for the in-container wheel compile (#259) ──────────────────────
+    #
+    # These govern the HOST side only — restore, stats and seed. The COMPILE
+    # happens inside the manylinux container, which gets its own copies through
+    # CIBW_ENVIRONMENT at the build step (a container does not inherit the
+    # runner's environment).
+    #
+    # ⚠️ CORRECTION (#270 Gate B r1, F1 doc): a drifted mount between this
+    # $CCACHE_DIR and the container's CIBW_ENVIRONMENT CCACHE_DIR is LOUD, not
+    # silent. The host compiles nothing on this lane — every compile edge runs
+    # inside the container and reaches the host cache dir only through the
+    # bind mount — so if the two spellings disagree, the host's `ccache
+    # --print-stats` reads an empty/unshared directory and reports ZERO
+    # cacheable calls after a successful build. ci/ccache-stats.sh's liveness
+    # assert (the "recorded ZERO cacheable calls … after a SUCCESSFUL build …
+    # fatal" branch) fails the step on exactly that shape. (An earlier commit
+    # message, fc7a4ae3, described this as "silent and permanent" — that
+    # overstated it; the dedup of four spellings into one CCACHE_DIR read is
+    # still correct on its own merits, just not for that reason.)
+    #
+    # ⚠️ This lane CANNOT share a namespace with any matrix leg, and that is a
+    # measured fact rather than a precaution. The wheel is built by
+    # gcc-toolset-14 (gcc 14.2.1, Red Hat 14.2.1-11) inside manylinux_2_28
+    # against EL8 headers, statically linked, with OTel off; `linux-gcc-release`
+    # is Ubuntu gcc-13 against Ubuntu headers, shared, with OTel on. Under
+    # CCACHE_COMPILERCHECK=content those cannot serve each other's objects even
+    # if pointed at one directory — so this lane owns its own cache, seeded from
+    # cold once. Unlike #244 part 1 there is no existing lane to borrow from.
+    env:
+      CCACHE_DIR: /tmp/fixpp-ccache-wheel
+      # Matches the Tier 3 legs. ⚠️ A GUESS UNTIL THE FIRST SEED REPORTS: the
+      # demand measurement is the archive size seed-ccache.sh prints, and
+      # whether the cap binds is `cleanups_this_run` in the stats step — NOT the
+      # hit rate. The two Release matrix lanes store 96 and 120 MiB, so 2G is
+      # expected to be generous here; that expectation is not evidence.
+      CCACHE_MAXSIZE: 2G
+      CCACHE_COMPILERCHECK: content
+      CCACHE_COMPRESSLEVEL: "5"
 
     steps:
       - uses: actions/checkout@v6
@@ -1475,6 +1530,48 @@ jobs:
           # has no --version flag — `pipx list` is the version-agnostic check.)
           pipx list --short
 
+      # ── ccache identity, resolved ONCE (#259) ─────────────────────────────
+      #
+      # Three consumers need the same two strings — restore, seed, and the
+      # pinned-image assertion. Spelling them out three times is the drift
+      # ci/ccache-cache-key.sh's opening note is about: a lane string the pull
+      # side and the publish side compute DIFFERENTLY is a permanent MISS, and a
+      # permanent miss is indistinguishable from "ccache didn't help", which is
+      # the conclusion this whole change exists to overturn. One step, one read
+      # of the tracked pin in bindings/python/pyproject.toml.
+      - name: Resolve wheel ccache identity
+        id: wheel_ident
+        run: ci/wheel-ccache-ident.sh >> "$GITHUB_OUTPUT"
+
+      # The SAME pinned ccache the container gets (ci/install-ccache.sh). Host
+      # and container share one bind-mounted CCACHE_DIR, so running different
+      # versions across it risks a host-side read that cannot parse a
+      # container-written cache — which would report zero cacheable calls and
+      # read exactly like "the cache didn't help". Equal by construction.
+      - name: Install ccache (host side)
+        run: sudo ci/install-ccache.sh /usr/local/bin
+
+      - name: Set up oras
+        uses: oras-project/setup-oras@v2
+
+      # `oras login` before the pull — a package first created by GITHUB_TOKEN is
+      # private, and an anonymous pull would 401 and read as a permanent MISS
+      # with no other symptom. `|| true` because a fork PR's downgraded token
+      # cannot log in, and the anonymous attempt is the correct fallback there.
+      # Same shape as tier3-libcxx.yml's restore step.
+      #
+      # Ordering: BEFORE the build, obviously — but also before the Conan cache
+      # step below is harmless, because unlike Tier 3 this lane's dependency
+      # closure is built inside the container by cibw-before-all.sh and does not
+      # route through the host launcher.
+      - name: Restore ccache from GHCR
+        id: ccache_restore
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u "${{ github.actor }}" --password-stdin || true
+          ci/restore-ccache.sh \
+            "${{ steps.wheel_ident.outputs.lane }}" \
+            "${{ steps.wheel_ident.outputs.image_ref }}"
+
       # CI-3: persist the IN-CONTAINER Conan cache. cibw-before-all.sh runs
       # `conan install` inside the manylinux container, whose home is separate
       # from the host. Mount a host dir as the container's CONAN_HOME and cache
@@ -1489,19 +1586,126 @@ jobs:
             conan-wheel-manylinux228-
 
       - name: Build the single cp310-abi3 wheel (CI-2)
+        id: wheel_build
         env:
           # CI-3: route the in-container Conan home to the host-mounted, cached dir.
-          CIBW_CONTAINER_ENGINE: "docker; create_args: -v /tmp/wheel-conan2:/host-conan2"
-          CIBW_ENVIRONMENT: "CONAN_HOME=/host-conan2"
+          # #259 adds a SECOND mount for the ccache directory, the same mechanism
+          # the Conan home already proved.
+          CIBW_CONTAINER_ENGINE: "docker; create_args: -v /tmp/wheel-conan2:/host-conan2 -v ${{ env.CCACHE_DIR }}:/host-ccache"
+          # ⚠️ ONE KEY, SPACE-SEPARATED — do NOT add a second `CIBW_ENVIRONMENT:`.
+          # YAML keeps only the last duplicate key, so a second one would
+          # silently drop CONAN_HOME and send the dependency closure back to a
+          # from-source rebuild on every run, while looking like an addition.
+          #
+          # A container does not inherit the runner's environment, so the ccache
+          # settings from the job-level `env:` block have to be restated here for
+          # the side that actually compiles. CCACHE_DIR points at the MOUNT
+          # POINT, not the host path.
+          CIBW_ENVIRONMENT: "CONAN_HOME=/host-conan2 CCACHE_DIR=/host-ccache CCACHE_MAXSIZE=2G CCACHE_COMPILERCHECK=content CCACHE_COMPRESSLEVEL=5"
         run: |
           mkdir -p /tmp/wheel-conan2
+          # The bind-mount source must exist before the container is created, or
+          # docker creates it root-owned and the restore's contents are not
+          # there. restore-ccache.sh already mkdir's it; this is belt-and-braces
+          # for the case where that step was skipped.
+          mkdir -p "$CCACHE_DIR"
           # A fresh CI checkout has NO build/ tree, so the local worktree wrapper
           # (build-wheel.sh — which exists only to dodge cibuildwheel's blind
           # `tar -c .` of cwd dragging in the multi-GB local build/) is
           # unnecessary here. Run cibuildwheel directly from the repo root
           # (pyproject's cmake.source-dir=../.. requires cwd=root).
-          cibuildwheel --platform linux --output-dir wheelhouse bindings/python
+          #
+          # Output is teed so the next step can assert WHICH image was used.
+          # `pipefail` is on (Actions runs `bash -e {0}`… but NOT with pipefail),
+          # so set it explicitly — without it a cibuildwheel failure would be
+          # masked by tee's exit 0 and the lane would go green on a failed build.
+          set -o pipefail
+          cibuildwheel --platform linux --output-dir wheelhouse bindings/python 2>&1 | tee /tmp/cibuildwheel.log
           ls -l wheelhouse/
+
+      # ── ASSERT THE PIN TOOK EFFECT (#259) ─────────────────────────────────
+      #
+      # A pin that is silently ignored is worse than no pin here: the ccache tag
+      # is derived from the pinned digest, so an ignored pin keys this lane's
+      # cache to a toolchain that is NOT the one compiling — a permanent,
+      # invisible mismatch that still reports hits.
+      #
+      # ⚠️ THE LOGIC IS IN ci/assert-wheel-image.sh, NOT INLINE HERE. Workflow-
+      # embedded shell has no harness (#248), and this repo has paid repeatedly
+      # for verification greps that could never go RED. In a script it is driven
+      # by ci/test-ccache-scripts.sh through BOTH outcomes — a real match and a
+      # deliberately wrong pin — so a green tick here means something.
+      - name: Assert the pinned manylinux image is the one used
+        if: always() && steps.wheel_build.outcome != 'skipped'
+        run: |
+          ci/assert-wheel-image.sh /tmp/cibuildwheel.log \
+            '${{ steps.wheel_ident.outputs.image_ref }}' \
+            '${{ steps.wheel_build.outcome }}'
+
+      # ── Reclaim ownership of the bind-mounted cache dir (#259) ────────────
+      #
+      # The container runs as ROOT (manylinux needs it for dnf), so everything
+      # it wrote through the mount is root-owned. The two steps that follow run
+      # as the runner user: `ccache --print-stats` reads the directory, and the
+      # seed tars it.
+      #
+      # ⚠️ WITHOUT THIS THE FAILURE IS EFFECTIVELY SILENT. seed-ccache.sh does
+      # report a tar failure — but the Save step is `continue-on-error: true`
+      # (correctly: a cache that cannot publish must not redden a lane whose
+      # wheel built and tested fine), so the job would stay GREEN while nothing
+      # was ever published. The cache would appear installed and do nothing,
+      # every run, which is the exact shape #259 exists to end.
+      - name: Reclaim ownership of the ccache dir
+        if: always()
+        run: sudo chown -R "$(id -u):$(id -g)" "$CCACHE_DIR" || true
+
+      # ── ccache statistics + liveness (#259) ───────────────────────────────
+      #
+      # ⚠️ NO HIT FLOOR ON THIS LANE YET, deliberately. ci/ccache-stats.sh grew
+      # an opt-in floor in this same PR, and turning it on is a claim that the
+      # lane HAS a warm baseline. This lane has never had a warm run — the first
+      # push:main after this merges is the seeding run. Enabling a floor here
+      # now would assert a baseline nobody has measured, which is the failure
+      # this repo keeps recording. Turn it on in a follow-up once a warm rate
+      # exists, and #259's acceptance criterion 1 becomes machine-checked.
+      #
+      # What IS asserted today is liveness: zero cacheable calls after a
+      # SUCCESSFUL build is fatal, because a silently unwired launcher reports
+      # the lane green while measuring nothing.
+      - name: ccache statistics
+        id: ccache_stats
+        if: always()
+        run: |
+          ci/ccache-stats.sh \
+            "${{ steps.wheel_ident.outputs.lane }}" \
+            "${{ steps.ccache_restore.outputs.hit }}" \
+            "${{ steps.wheel_build.outcome }}"
+
+      # Publish only from main, and only when the cache actually CHANGED.
+      #
+      # `changed` reads ccache's `local_storage_write`, not `misses`:
+      # `cache_miss == 0` does NOT prove ccache wrote nothing (measured against
+      # 4.9.1 — a same-line-count edit yields cache_miss=0 with a real manifest
+      # write). Without the guard, a CI- or docs-only push to main re-tars and
+      # re-uploads the whole cache to publish a byte-equivalent artifact and
+      # orphans another untagged version for the pruner.
+      #
+      # Ref-restricted to main so no branch can publish into the namespace main
+      # consumes — load-bearing here because the tag is COARSE and ROLLING:
+      # every branch computes the identical tag whatever it changed.
+      - name: Save ccache to GHCR (push:main / dispatch on main, cache changed)
+        if: (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')) && steps.ccache_stats.outputs.changed != '0'
+        continue-on-error: true
+        env:
+          # Prune needs `delete:packages`, which GITHUB_TOKEN does NOT carry —
+          # verified 403 against the live API. Without GHCR_PAT the backlog is
+          # reported into the job summary instead of accumulating silently.
+          GH_TOKEN: ${{ secrets.GHCR_PAT || secrets.GITHUB_TOKEN }}
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u "${{ github.actor }}" --password-stdin
+          ci/seed-ccache.sh \
+            "${{ steps.wheel_ident.outputs.lane }}" \
+            "${{ steps.wheel_ident.outputs.image_ref }}"
 
       # T011 / SC-004 / LAY-3: exactly ONE wheel, tagged cp310-abi3 + manylinux,
       # external-library list EMPTY (static everything).

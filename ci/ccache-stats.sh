@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # CI-side (Tier 3, #240): report this run's ccache counters, and ASSERT LIVENESS.
 #
-#   ci/ccache-stats.sh <preset> <restore-disposition> <build-outcome>
+#   ci/ccache-stats.sh <preset> <restore-disposition> <build-outcome> [<hit-floor>]
 #
 #   restore-disposition — steps.<id>.outputs.hit ('true' / 'false' / '' )
 #   build-outcome       — steps.<id>.outcome ('success' / 'failure' / ...)
+#   hit-floor           — OPTIONAL integer percent. Omitted = no floor (the
+#                         behaviour every existing caller gets).
 #
 # ── WHAT IS ASSERTED, AND WHAT IS ONLY REPORTED ──────────────────────────────
 #
@@ -32,6 +34,9 @@ set -uo pipefail
 PRESET="${1:?usage: ccache-stats.sh <preset> <restore-disposition> <build-outcome>}"
 RESTORE="${2-}"
 BUILD_OUTCOME="${3-}"
+# Optional. Empty (the default, and what all three existing callers pass) means
+# no floor — see the opt-in block at the end of this file.
+HIT_FLOOR="${4-}"
 
 note() { echo "$1"; [ -n "${GITHUB_STEP_SUMMARY:-}" ] && echo "$1" >> "$GITHUB_STEP_SUMMARY"; }
 
@@ -206,5 +211,60 @@ note "ccache-hitrate ${rate}% over ${calls} cacheable calls (${PRESET}), restore
 # says nothing.
 if [ "${RESTORE:-}" = "true" ] && [ "$rate" -lt 10 ]; then
   note "::warning::ccache RESTORED a cache for ${PRESET} and then hit only ${rate}% of ${calls} cacheable calls. That pair — restore HIT with a near-zero rate — is the signature of a cache that was pulled but whose entries do not match this build: compiler drift (CCACHE_COMPILERCHECK=content hashes the binary, and llvm.sh can silently fall back to an earlier clang major), a flag change, or a build-directory path change. It is NOT a failure of this step, and it is deliberately not fatal — but it means the compiler cache is doing almost nothing on this lane, so do not read the green tick as evidence that it works."
+fi
+
+# ── OPT-IN FATAL FLOOR, GATED ON A RESTORE HIT (#259) ────────────────────────
+#
+# The warning above is the right default: it must not redden lanes whose warm
+# rate legitimately varies. But a warning is only as good as someone reading it,
+# and #241 is on record staying open precisely because "a HIT at 0 % is green by
+# design" — an acceptance criterion written as prose that no instrument enforces.
+# A lane that has a warm baseline can opt into having that criterion CHECKED.
+#
+# ⚠️ GATED ON `RESTORE == true`, and that gate is the whole design. The seeding
+# run — the first push:main after this lands — legitimately reports 0 % because
+# nothing was restored, and a floor that reddened it would make the change look
+# broken at the exact moment it is working. PR runs that MISS are equally exempt.
+# Only "we pulled a cache AND it did not match" is fatal, which is the pair the
+# acceptance criterion actually names.
+#
+# Not a default, and not retrofitted onto the existing lanes here: turning this
+# on for a lane is a claim that the lane HAS a warm baseline. Making that claim
+# for lanes whose baseline nobody has measured would be the same unmeasured
+# assertion this file keeps refusing to make.
+if [ -n "${HIT_FLOOR:-}" ]; then
+  case "$HIT_FLOOR" in
+    ''|*[!0-9]*)
+      echo "::error::ccache-stats: hit-floor argument '${HIT_FLOOR}' is not a non-negative integer percent."
+      exit 1 ;;
+  esac
+  # ⚠️ LENGTH-GATED BEFORE ARITHMETIC, not after. `$(( ))` overflow on an
+  # oversized digit string WRAPS silently (2's-complement) rather than
+  # erroring, so a magnitude check performed AFTER `$((10#$HIT_FLOOR))` can be
+  # evaded by a crafted 19+-digit value that wraps to something inside
+  # [0,100]. No legitimate percent needs more than 3 digits; refuse anything
+  # materially longer BEFORE arithmetic ever touches it — well short of where
+  # int64 could wrap (2^63 is 19 decimal digits) — rather than trust a
+  # post-hoc `-gt 100` to catch what the arithmetic already corrupted.
+  if [ "${#HIT_FLOOR}" -ge 15 ]; then
+    echo "::error::ccache-stats: hit-floor argument '${HIT_FLOOR}' is not a 0-100 integer percent (too many digits)."
+    exit 1
+  fi
+  # `10#` forces decimal (not octal) so a leading zero like '007' reads as 7,
+  # not as a malformed octal literal — same discipline as read_counter() above.
+  HIT_FLOOR=$((10#$HIT_FLOOR))
+  if [ "$HIT_FLOOR" -gt 100 ]; then
+    echo "::error::ccache-stats: hit-floor argument '${HIT_FLOOR}' is not a 0-100 integer percent."
+    exit 1
+  fi
+  if [ "${RESTORE:-}" = "true" ] && [ "$rate" -lt "$HIT_FLOOR" ]; then
+    echo "::error::ccache HIT-FLOOR BREACHED on ${PRESET}: restore reported a HIT, but only ${rate}% of ${calls} cacheable calls were served (floor ${HIT_FLOOR}%). This lane opted into the floor because it has a warm baseline, so a restored-but-unmatched cache is a regression, not noise — the usual causes are a toolchain change the cache tag did not follow, a flag change, or a build-path change. A cold/MISS run is exempt by construction and cannot reach this branch."
+    exit 1
+  fi
+  if [ "${RESTORE:-}" = "true" ]; then
+    note "ccache: hit-floor ${HIT_FLOOR}% satisfied on ${PRESET} (rate ${rate}%, restore=\`${RESTORE:-n/a}\`)."
+  else
+    note "ccache: hit-floor ${HIT_FLOOR}% NOT evaluated on ${PRESET} — the floor is gated on a restore HIT and restore=\`${RESTORE:-n/a}\` (rate ${rate}%)."
+  fi
 fi
 exit 0
