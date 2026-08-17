@@ -415,6 +415,46 @@ DTAG_H="$(
   || fail "container/dispatch: ccache_resolve_key without an image ref produced '$DTAG_H', not the host minter's '$TAG'"
 ok "ccache_resolve_key dispatches to the same minter both restore and seed would use"
 
+# ── ccache_resolve_key REJECTS AN ARGUMENT SHAPE THAT DISAGREES WITH THE
+# ENUMERATION (opus_pr270_2_triage.md R2-F2) ─────────────────────────────────
+#
+# Before this fix ccache_resolve_key dispatched on `[ -n "${2-}" ]` alone,
+# never consulting ccache_lane_is_container — so a future container lane added
+# to the enumeration without every caller updated (or a ref passed for a lane
+# never added there) would mint under one grammar while ccache_tag_regex
+# matches against the other, a silent pruner skip. These two cases are the
+# ones no current caller reaches (every host caller passes no second argument;
+# the one container caller always passes a ref) but that the dispatcher must
+# still refuse rather than silently mis-mint.
+#
+# Both assert the DISPOSITION MESSAGE, not just a non-zero exit — a bare exit
+# check would pass for the wrong reason: 'linux-clang-libcxx' with a ref used
+# to be silently ACCEPTED by the pre-fix dispatcher (tag-safe, not enumerated,
+# so it fell into the old unconditional `ccache_container_cache_key` branch and
+# minted a container-grammar tag for a host lane); 'wheel-manylinux228' with no
+# ref used to fail too, but via the unrelated "preset declares no
+# CMAKE_CXX_COMPILER" path, not the dispatcher noticing the shape mismatch —
+# the message pins that it fails for the RIGHT reason.
+out="$( ( . "$KEYSH" && ccache_resolve_key 'linux-clang-libcxx' "$PINNED_REF" ) 2>&1 )" && rc=0 || rc=$?
+if [ "$rc" -eq 0 ]; then
+  fail "resolve/shape: an UNKNOWN lane ('linux-clang-libcxx') given an image ref was ACCEPTED — it should be refused, since ccache_lane_is_container does not enumerate it and the tag would mint under the container grammar the pruner never matches for a host lane"
+fi
+case "$out" in
+  *"is not an enumerated container lane"*) ;;
+  *) fail "resolve/shape: unenumerated-lane-with-ref was rejected for the WRONG reason: $out" ;;
+esac
+ok "ccache_resolve_key refuses an unenumerated lane given an image ref, for the right reason"
+
+out="$( ( . "$KEYSH" && ccache_resolve_key 'wheel-manylinux228' ) 2>&1 )" && rc=0 || rc=$?
+if [ "$rc" -eq 0 ]; then
+  fail "resolve/shape: the ENUMERATED container lane ('wheel-manylinux228') given NO image ref was ACCEPTED — it should be refused, since there is no host compiler to probe for an in-container toolchain"
+fi
+case "$out" in
+  *"is a container lane but no digest-pinned image reference was given"*) ;;
+  *) fail "resolve/shape: enumerated-container-lane-with-no-ref was rejected for the WRONG reason: $out" ;;
+esac
+ok "ccache_resolve_key refuses an enumerated container lane given no image ref, for the right reason"
+
 # ── ci/wheel-ccache-ident.sh — the workflow's single source, bound to BOTH ends
 #
 # The wheel lane's name is written in ci/wheel-ccache-ident.sh and enumerated

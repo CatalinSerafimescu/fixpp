@@ -144,8 +144,10 @@ ccache_cache_key() {
 # ccache_lane_is_container <lane>
 #
 # The lanes whose compiler lives INSIDE a pinned container image. Enumerated in
-# ONE place, consulted by both the minter and the matcher below, because those
-# two must never disagree about which grammar a lane uses.
+# ONE place, consulted by the dispatcher below (ccache_resolve_key, which
+# routes to the matching minter and rejects any lane/argument-shape mismatch)
+# and by the matcher further down (ccache_tag_regex), because those two must
+# never disagree about which grammar a lane uses.
 ccache_lane_is_container() {
   case "$1" in
     wheel-manylinux228) return 0 ;;
@@ -233,10 +235,28 @@ ccache_container_cache_key() {
 # different minters — a tag the two compute differently is a PERMANENT MISS, and
 # a permanent miss on a compiler cache is indistinguishable from "ccache didn't
 # help" (see this file's opening note).
+#
+# ⚠️ DISPATCHES FROM THE ENUMERATION, not from "was a second argument given".
+# The two used to agree only by construction (every current caller happens to
+# pass an image ref iff the lane is a container lane) — but nothing enforced
+# it, so a future container lane added to ccache_lane_is_container without an
+# image-ref-passing caller (or a caller passing a ref for a lane never added
+# there) would mint under one grammar and get pruned under the other:
+# ccache_tag_regex only ever consults the enumeration, so the mismatch is a
+# silent pruner skip (see its header), never a wrongful delete. Reject the
+# shape mismatch here, loudly, instead of letting it reach GHCR.
 ccache_resolve_key() {
-  if [ -n "${2-}" ]; then
+  if ccache_lane_is_container "$1"; then
+    if [ -z "${2-}" ]; then
+      echo "ccache-cache: '$1' is a container lane but no digest-pinned image reference was given; its identity cannot come from a host compiler probe." >&2
+      return 1
+    fi
     ccache_container_cache_key "$1" "$2"
   else
+    if [ -n "${2-}" ]; then
+      echo "ccache-cache: '$1' is not an enumerated container lane, but an image reference was supplied. Add it to ccache_lane_is_container (which also selects the pruner's tag grammar) or drop the argument." >&2
+      return 1
+    fi
     ccache_cache_key "$1"
   fi
 }
