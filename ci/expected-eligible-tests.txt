@@ -64,8 +64,13 @@ linux-clang-libc++-ubsan  356
 linux-clang-libc++-tsan   356
 
 # The coverage lane runs the FULL suite (no `-LE packaging` filter), so its
-# count is not comparable to the five above and has never been read off a CI
-# log.  Left `-` deliberately: `-` renders DIAGNOSTIC ONLY, which is the honest
-# disposition for a lane whose basis has not been recorded.  It is filled in
-# from the first CI run that reports it — not guessed from a sibling lane.
-linux-clang-coverage  -
+# count is not comparable to any lane above and had never been read off a CI log
+# — #229's lane table does not include it.  It was shipped as `-` for exactly
+# one run rather than guessed from a sibling lane: `-` can equal no count, so
+# the lane rendered DIAGNOSTIC ONLY, which is the honest disposition for a basis
+# nobody had measured.
+#
+# Read off run 32003367497 (workflow_dispatch, branch ci/266-peak-rss-instrument,
+# `Peak memory` step: `ran: 369/-`).  369 rather than 362 because this lane runs
+# the packaging tier the five filtered lanes exclude.
+linux-clang-coverage  369
