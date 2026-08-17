@@ -261,7 +261,9 @@
     {
       "name": "linux-clang-ubsan",
       "configurePreset": "linux-clang-ubsan",
-      "output": { "outputOnFailure": true }
+      "description": "UBSan. jobs=4 — #267 phase 2, MEASURED 1.79x (1993 -> 1114 s, ~14.6 min/run) by a PAIRED same-VM run, cross-validated on a second VM to 1.9%/4.2%. Peak 0.65 -> 0.86 GiB, 5.5% of a 15.61 GiB runner. ⚠️ Do NOT copy to another lane: tsan measured NO gain at 4 and debug is unresolved. Between-VM wall-clock variance is 27-43%, so only a paired same-VM measurement can decide a lane. See ci/ctest-parallelism-probe.md.",
+      "output": { "outputOnFailure": true },
+      "execution": { "jobs": 4 }
     },
     {
       "name": "linux-clang-tsan",

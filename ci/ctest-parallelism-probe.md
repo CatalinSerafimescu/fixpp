@@ -338,7 +338,54 @@ measurable cost against unmeasurable benefit is a revert, and buying more sample
 to defend a change with no demonstrated upside is not a good use of a 35-minute
 lane.
 
-Not widened here, and each for its own reason: `asan`/`ubsan`/`debug` are phase 2
+#### ✅ PHASE 2 — `linux-clang-ubsan` `jobs: 1 → 4`, CONFIRMED
+
+Measured **paired, both passes in ONE job on ONE VM** (run `32015364279`), which
+is the only design that survives 27–43 % between-VM variance:
+
+| pass | order | wall | achieved concurrency | peak RSS | tests |
+|---|---|---:|---:|---:|---:|
+| `--parallel 4` | first | **1114.46 s** | 2.68× | 0.86 GiB | 361/361 |
+| `--parallel 1` | second | **1993.08 s** | 1.00× | 0.65 GiB | 361/361 |
+
+**1.79×**, i.e. ~880 s ≈ **14.6 min per run** off the largest Tier-1 lane.
+
+##### Why this is believed, when the earlier ubsan claim was withdrawn
+
+The withdrawn claim was **one unpaired comparison between two VMs**, which VM
+luck alone explains. This one is corroborated four ways across three VMs:
+
+| configuration | independent measurements | agreement |
+|---|---|---:|
+| ubsan `j=4` | 1136.04 s (run C, VM X) / 1114.46 s (run D, VM Y) | **1.9 %** |
+| ubsan `j=1` | 1912.90 s (run A, VM Z) / 1993.08 s (run D, VM Y) | **4.2 %** |
+
+⚠️ **The second row is the one that matters, and it kills the rival hypothesis.**
+Run D's `j=1` was a **second** pass. If second passes ran degraded — the effect
+that makes the `debug` numbers ambiguous below — it would have read ≈3800 s. It
+read 1993 s, within 4.2 % of an independent **first**-pass serial measurement on
+a different VM. So on this lane there is no meaningful position effect, and the
+pairing is trustworthy.
+
+Memory cost is modest and consistent with every other lane: 0.65 → 0.86 GiB
+(+32 %), **5.5 % of a 15.61 GiB runner**. Summed per-test wall-time inflates
+1993 → 2987 s (+50 %) — real contention, but far less than it buys.
+
+##### ⛔ `linux-clang-debug` — NOT widened; its own numbers do not reproduce
+
+| configuration | independent measurements | agreement |
+|---|---|---:|
+| debug `j=4` | 572.81 s (run C) / 561.94 s (run D) | 1.9 % ✅ |
+| debug `j=1` | 583.44 s (run A) / 1150.75 s (run D) | **97 %** ❌ |
+
+Its paired run says 2.05×, but one of the two serial numbers must be wrong, and
+until that is settled the paired figure cannot be read. Note the failure is
+**specific to this lane** — ubsan's second-pass serial reproduced fine, so a
+general "second pass is degraded" story does not account for it. An A-B-A run
+(`j=1`, `j=4`, `j=1`, with a fixed CPU calibration and `/proc/stat` steal sampled
+between passes) is the outstanding work.
+
+Not widened here, and each for its own reason: `asan`/`debug` are phase 2
 and are held until their two unattributed sanitizer reports are resolved;
 `coverage` needs #267 acceptance item 4 (merged coverage shown identical before
 and after) discharged first; the four `libc++` lanes are phase 3 and have no
