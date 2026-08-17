@@ -238,6 +238,25 @@ if [ -n "${HIT_FLOOR:-}" ]; then
       echo "::error::ccache-stats: hit-floor argument '${HIT_FLOOR}' is not a non-negative integer percent."
       exit 1 ;;
   esac
+  # ⚠️ LENGTH-GATED BEFORE ARITHMETIC, not after. `$(( ))` overflow on an
+  # oversized digit string WRAPS silently (2's-complement) rather than
+  # erroring, so a magnitude check performed AFTER `$((10#$HIT_FLOOR))` can be
+  # evaded by a crafted 19+-digit value that wraps to something inside
+  # [0,100]. No legitimate percent needs more than 3 digits; refuse anything
+  # materially longer BEFORE arithmetic ever touches it — well short of where
+  # int64 could wrap (2^63 is 19 decimal digits) — rather than trust a
+  # post-hoc `-gt 100` to catch what the arithmetic already corrupted.
+  if [ "${#HIT_FLOOR}" -ge 15 ]; then
+    echo "::error::ccache-stats: hit-floor argument '${HIT_FLOOR}' is not a 0-100 integer percent (too many digits)."
+    exit 1
+  fi
+  # `10#` forces decimal (not octal) so a leading zero like '007' reads as 7,
+  # not as a malformed octal literal — same discipline as read_counter() above.
+  HIT_FLOOR=$((10#$HIT_FLOOR))
+  if [ "$HIT_FLOOR" -gt 100 ]; then
+    echo "::error::ccache-stats: hit-floor argument '${HIT_FLOOR}' is not a 0-100 integer percent."
+    exit 1
+  fi
   if [ "${RESTORE:-}" = "true" ] && [ "$rate" -lt "$HIT_FLOOR" ]; then
     echo "::error::ccache HIT-FLOOR BREACHED on ${PRESET}: restore reported a HIT, but only ${rate}% of ${calls} cacheable calls were served (floor ${HIT_FLOOR}%). This lane opted into the floor because it has a warm baseline, so a restored-but-unmatched cache is a regression, not noise — the usual causes are a toolchain change the cache tag did not follow, a flag change, or a build-path change. A cold/MISS run is exempt by construction and cannot reach this branch."
     exit 1

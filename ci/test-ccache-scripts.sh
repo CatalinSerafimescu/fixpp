@@ -1188,5 +1188,43 @@ want_status 1 "stats/floor-malformed"
 want_out 'is not a non-negative integer percent' "stats/floor-malformed"
 ok "a malformed hit-floor is rejected rather than silently disabling the check"
 
+# ── #270 Gate B r1, F3 — the RANGE half of the validator ────────────────────
+#
+# The old check validated only the CHARACTER CLASS (digits-only), not the
+# RANGE: 101 and an arbitrary-length digit string both parsed as "valid". On
+# the huge value the `-lt` comparison itself ERRORS ("integer expression
+# expected"), and because this script deliberately runs WITHOUT `-e`,
+# execution fell through past the error to the "satisfied" note — a false
+# PASS emitted by the instrument whose whole purpose is to stop one.
+# `want_no_out 'satisfied'` is the assertion that actually catches this; exit
+# status alone is unaffected by the fall-through and would pass before AND
+# after the fix for the wrong reason.
+write_stats 1400 0 61 10 512000 0
+stats_case true success "101"
+want_status 1 "stats/floor-101"
+want_out 'not a 0-100 integer percent' "stats/floor-101"
+want_no_out 'satisfied' "stats/floor-101"
+# 101 is small enough that `[ 95 -lt 101 ]` does not error — PRE-FIX this
+# already exited 1, but via HIT-FLOOR BREACHED (a real rate vs. an impossible
+# floor), not because 101 is out of range. want_status alone would be green
+# before AND after; the message is what proves the RANGE check, not the
+# ordinary comparison, is what fired.
+want_no_out 'HIT-FLOOR BREACHED' "stats/floor-101"
+ok "hit-floor 101 — rejected as out of range (0-100), not via the ordinary breach comparison"
+
+write_stats 1400 0 61 10 512000 0
+stats_case true success "1234567890123456789012345"
+want_status 1 "stats/floor-huge"
+want_out 'too many digits' "stats/floor-huge"
+want_no_out 'satisfied' "stats/floor-huge"
+ok "a 25-digit hit-floor — rejected before arithmetic can wrap it into [0,100]"
+
+write_stats 1400 0 61 10 512000 0
+stats_case true success "007"
+want_status 0 "stats/floor-leading-zero"
+want_out 'hit-floor 7% satisfied' "stats/floor-leading-zero"
+want_no_out '007%' "stats/floor-leading-zero"
+ok "hit-floor 007 — parsed as DECIMAL (7), not octal or malformed, and accepted"
+
 echo
-echo "PASS: $pass assertions over ci/{ccache-cache-key,restore-ccache,seed-ccache,ccache-stats,wheel-ccache-ident,assert-wheel-image}.sh — scripts: $CI_DIR"
+echo "PASS: $pass assertions over ci/{ccache-cache-key,restore-ccache,seed-ccache,ccache-stats,wheel-ccache-ident,assert-wheel-image,install-ccache}.sh — scripts: $CI_DIR"
