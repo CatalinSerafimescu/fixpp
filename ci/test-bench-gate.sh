@@ -42,7 +42,7 @@ trap 'rm -rf "$TMP"' EXIT
 # ⚠️ DECLARED vs RUN, checked by machine at the end. A summary claiming N cells
 # where N-1 ran is not something to leave to an eyeball — the same discipline
 # ci/test-tier1-python-policy.sh records for its mutant count.
-CELLS_DECLARED=35
+CELLS_DECLARED=36
 cells_run=0
 
 # ── fixture generation ───────────────────────────────────────────────────────
@@ -285,6 +285,32 @@ setlegs() {  # setlegs <a1> <b1> <a2> <b2>  (single benchmark BM_A)
 # G4 — candidate matches base: pass.
 setlegs 100 100 102 101
 expect_green G4 "candidate ≈ base passes tier 2" pc
+
+# ── G9 — THE EQUAL-n CONTROL FOR min-per-tree. ───────────────────────────────
+# `min` is BIASED BY SAMPLE SIZE: min over n observations falls as n rises. So
+# if the two trees were ever observed a different number of times — A-B-A, say,
+# where base gets min-of-2 and candidate min-of-1 — the base estimate is
+# systematically the lower of the two, every candidate delta is inflated, and
+# the gate drifts toward FALSE RED on the required path. That is the safe
+# direction for a detector but the dangerous one for a merge gate: it surfaces
+# as unexplained flakiness that someone eventually "fixes" by widening the band,
+# quietly undoing the whole change.
+#
+# The design observes each tree exactly TWICE (A-B-A-B), so min is over 2 on
+# both sides and there is no bias. This cell is what keeps that true: identical
+# spreads on both trees must compute a delta of exactly 0.0%. Under an
+# unequal-n min it reads as a systematic non-zero, and the assertion below
+# catches it — a structural invariant, pinned rather than trusted.
+setlegs 100 100 120 120   # candidate {100,120}, base {100,120} — same distribution
+if ! pc > "$TMP/g9.out" 2>&1; then
+  fail "G9: identical candidate/base distributions must not fail — output:\n$(cat "$TMP/g9.out")"
+fi
+grep -qE 'BM_A_median .* +\+?0\.0%' "$TMP/g9.out" \
+  || fail "G9: min-per-tree is SAMPLE-SIZE BIASED — identical distributions on both trees \
+computed a non-zero delta, which means the two sides are not observed an equal number of \
+times. Output:\n$(cat "$TMP/g9.out")"
+echo "GREEN (expected): G9 — equal-n control: identical distributions compute delta 0.0%"
+cells_run=$((cells_run + 1))
 
 # G5 — a 40% slowdown is UNDER the provisional 50% band and must pass. This pins
 # the band's lower edge: without it, a cell asserting "regression detected"

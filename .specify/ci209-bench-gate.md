@@ -70,6 +70,25 @@ because the error is exactly the class this repo has a memory for — a census t
 cannot see the others. **The narrower conclusion survives and is what the design rests on: the job
 runs binaries by path and never invokes `ctest`, so no label set can reach `compile_time_bench`.**
 
+That is a **property of the job**, not a census of labels. A census goes stale the moment someone
+adds a target; "this job invokes no CTest" cannot.
+
+#### ⚠️ The three TLS entries carry p99 CEILINGS, and the allowlist bypasses them — deliberately
+
+`bench_pinset_snapshot_acquire` and `bench_pinset_find` are **on the tier-1 allowlist** (they are
+in-memory pinset operations: no socket, no handshake). They are *also* registered as CTest entries
+carrying **p99 latency ceilings** per `[2g §6.3]` — timing assertions of precisely the kind §2
+argues cannot be trusted against CI runner variance.
+
+**The gate does not inherit those ceilings**, and the reason is structural rather than incidental:
+the manifest names them as `bin/bench_pinset_*` and `ci/run-bench-suite.sh` execs that path with
+`--benchmark_format=json`. The CTest registration — and therefore its ceiling — is simply never
+reached. Had this job used `ctest -L bench` it would have inherited three p99 timing assertions on a
+shared runner as **blocking** checks, which is the opposite of this record's whole argument.
+
+`bench_verify_peer_in_envelope`, the third TLS registration, is **excluded** from the allowlist
+outright: it performs a real handshake.
+
 ### 1b. `v44` is not the only pre-breached ceiling
 
 Splitting the compile-time ceiling out is not a `v44` accommodation. `bench/REPORT.md:103-114` records

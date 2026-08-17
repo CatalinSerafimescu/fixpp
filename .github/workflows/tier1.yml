@@ -2225,11 +2225,42 @@ jobs:
       - name: "Tier 1 + 3 — execution, schema, and baseline report"
         run: python3 tools/bench_compare.py --suite bench-results/a1
 
+      # Exit 2 means the INSTRUMENT was noisy (same-tree spread over the noise
+      # band), not that the code regressed. Re-measure once before failing: a
+      # transient that spans one four-leg pass rarely spans two, and this keeps
+      # a bad runner from blocking the merge queue on a first blip.
+      #
+      # ⚠️ The retry is bounded at ONE and a second exit-2 FAILS. It does not
+      # loop, and it never degrades to exit 0 — a gate a noisy runner can
+      # silently switch off while reporting green is the false-green shape this
+      # whole change removes. The failure message names runner noise rather than
+      # a perf regression so an operator can tell the two apart without reading
+      # the log.
       - name: "Tier 2 — paired base-vs-candidate (HARD)"
         run: |
-          python3 tools/bench_compare.py --paired \
-            --a1 bench-results/a1 --b1 bench-results/b1 \
-            --a2 bench-results/a2 --b2 bench-results/b2
+          set -uo pipefail
+          cmp_paired() {
+            python3 tools/bench_compare.py --paired \
+              --a1 bench-results/a1 --b1 bench-results/b1 \
+              --a2 bench-results/a2 --b2 bench-results/b2
+          }
+          cmp_paired && exit 0
+          rc=$?
+          if [ "$rc" -ne 2 ]; then
+            echo "::error::tier 2 FAILED (exit $rc) — a regression or an integrity finding, not runner noise."
+            exit "$rc"
+          fi
+          echo "::warning::tier 2 was UNINFORMATIVE (runner noise exceeded the noise band). Re-measuring once."
+          ci/run-bench-suite.sh build/linux-clang-release bench-results/a1 --only-paired
+          ci/run-bench-suite.sh /tmp/fixpp-base/build/linux-clang-release bench-results/b1 --only-paired
+          ci/run-bench-suite.sh build/linux-clang-release bench-results/a2 --only-paired
+          ci/run-bench-suite.sh /tmp/fixpp-base/build/linux-clang-release bench-results/b2 --only-paired
+          cmp_paired && exit 0
+          rc=$?
+          if [ "$rc" -eq 2 ]; then
+            echo "::error::tier 2 UNINFORMATIVE TWICE — this runner's own measurement noise exceeds the noise band across two independent four-leg passes. This is an INSTRUMENT failure, not a detected performance regression: do not read it as the code being slow. Re-run the job; if it recurs, the tier-2 band needs re-deriving (see .specify/ci209-bench-gate.md §6a)."
+          fi
+          exit "$rc"
 
       # Kept for the record trail AC-8 asks for: the job's own cost, separable
       # into build vs measurement, so the critical-path budget can be judged

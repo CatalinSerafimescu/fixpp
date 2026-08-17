@@ -578,8 +578,24 @@ def run_paired(a1_dir: str, b1_dir: str, a2_dir: str, b2_dir: str,
         for h in hard:
             print(f"  - {h}")
 
-    if hard or uninformative or regressions:
+    # ── EXIT CODES ARE THE DISPOSITION, and the split is deliberate ──────────
+    #   1 = the CODE is bad      (a regression, or an integrity finding)
+    #   2 = the INSTRUMENT is bad (same-tree spread exceeded the noise band)
+    #
+    # In CI there is no third state — a job exits 0 or it does not — so
+    # "uninformative" had to be assigned to one of them. It is NOT 0: a gate
+    # that any noisy runner silently switches off, while still reporting green,
+    # is the observes-but-never-exit-1s false green, and it is worse than an
+    # inert job because it LOOKS enforced.
+    #
+    # It is a distinct code rather than a plain 1 so the caller can retry the
+    # measurement once before failing, and so an operator can tell "the
+    # instrument failed" from "the code regressed" without reading the log.
+    # A regression outranks noise: if both are present the answer is 1.
+    if hard or regressions:
         return 1
+    if uninformative:
+        return 2
     if compared == 0:
         print("::error::tier 2 compared ZERO rows — every paired binary produced no "
               "usable measurement. A gate that measures nothing must not pass.")
