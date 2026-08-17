@@ -20,6 +20,19 @@ set_target_properties(xml_loader_bench PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bench/dictionary"
 )
 
+# ── #263: xml_loader_arena_probe ────────────────────────────────────────────
+# Diagnostic only (no benchmark::, no ctest label): reports the loader's byte
+# footprint per dictionary and whether the 4 MiB NFR-002-1 arena above
+# overflows into its upstream.
+add_executable(xml_loader_arena_probe xml_loader_arena_probe.cpp)
+target_link_libraries(xml_loader_arena_probe PRIVATE fixpp_dictionary)
+target_compile_definitions(xml_loader_arena_probe PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${FIXPP_DICT_DATA_DIR}\""
+)
+set_target_properties(xml_loader_arena_probe PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bench/dictionary"
+)
+
 # ── T011: table_view_footprint_bench ────────────────────────────────────────
 # 075-live-wire-enum-validation SC-006 pre-change baseline: as_table_view()
 # build time + sizeof(table_view) on FIX50SP2 (largest) and FIX44 (mid-size).
