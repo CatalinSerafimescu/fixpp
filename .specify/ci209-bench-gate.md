@@ -89,6 +89,31 @@ shared runner as **blocking** checks, which is the opposite of this record's who
 `bench_verify_peer_in_envelope`, the third TLS registration, is **excluded** from the allowlist
 outright: it performs a real handshake.
 
+### 1a-bis. What an unexecuted budget rots into — a measured instance
+
+While #263 was diagnosing the load-path regression it found this at
+`bench/dictionary/xml_loader_bench.cpp:5`, the header comment of the very benchmark this gate's
+tier 2 exists to protect:
+
+```cpp
+// NFR-002-1: parse latency ≤ 80 ms / 4 MiB PMR (single-threaded wall-clock).
+```
+
+`specs/002-dictionary-xml-loader/spec.md` NFR-002-1 actually says **≤ 500 ms**, with a **1 s** CI
+regression bar, and says **nothing about 4 MiB**. The comment misquotes its own requirement by
+**6.25×** and invents a memory clause. A repo-wide grep finds exactly **one** occurrence of "80 ms"
+— that line.
+
+**This is the same defect class the gate is built for, and it is why tier 1 is comparand-free.** A
+budget nothing executes is never contradicted, so it drifts, and the drift is invisible precisely
+because the check that would have caught it does not run. §2b's ten hand-authored "baselines" are the
+same rot one stage further along: a `ceiling_ns` field nobody ever compares against is
+indistinguishable from a comment. *"The comparand does not exist"* is what this looks like in the
+wild.
+
+Corrected by #263 in its own one-line PR, not here — recorded as evidence for the design, not
+claimed as this PR's fix.
+
 ### 1b. `v44` is not the only pre-breached ceiling
 
 Splitting the compile-time ceiling out is not a `v44` accommodation. `bench/REPORT.md:103-114` records
