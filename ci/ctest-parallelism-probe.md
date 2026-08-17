@@ -123,11 +123,97 @@ that are not registered on a runner. The per-lane values now in
 confirmation; any lane that renders `DIAGNOSTIC ONLY` gets its line corrected
 rather than argued with.
 
-#### Measured (filled in from CI — empty until a run reports)
+#### MEASURED — run `32003367497`, 2026-08-17
 
-| lane | run | ctest jobs | peak concurrent RSS | % of MemTotal | achieved concurrency | tests executed | sanitizer reports |
-|---|---|---:|---:|---:|---:|---:|---:|
-| _pending first CI run_ | | | | | | | |
+`workflow_dispatch` on `probe/266-run-a` (branch `ci/266-peak-rss-instrument` plus
+a throwaway commit disabling the wheel jobs, which measure nothing here and cost
+71 runner-min). Runner `MemTotal` **15.61 GiB** on every lane.
+
+| lane | ctest jobs | peak concurrent RSS | % of MemTotal | achieved concurrency | tests executed | sanitizer reports |
+|---|---:|---:|---:|---:|---:|---:|
+| `linux-clang-release` | 1 | 0.37 GiB | 2.4 % | 1.00× | 362 / 362 ✅ | 0 |
+| `linux-clang-debug` | 1 | 0.59 GiB | 3.7 % | 1.00× | 362 / 362 ✅ | 0 |
+| `linux-clang-ubsan` | 1 | 0.68 GiB | 4.3 % | 1.00× | 361 / 361 ✅ | **1** ⚠️ |
+| `linux-clang-coverage` | 1 | 0.85 GiB | 5.5 % | 1.00× | 369 (basis unrecorded) | 0 |
+| `linux-clang-tsan` | **2** | **1.41 GiB** | **9.1 %** | **1.83×** | 361 / 361 ✅ | 0 |
+| `linux-clang-asan` | 1 | 1.84 GiB | 11.8 % | 1.00× | 361 / 361 ✅ | **1** ⚠️ |
+
+**#266 is discharged by the first row alone** — a real number, on a hosted
+runner, from an instrument that had produced none in 8 attempts.
+
+Five of six lanes matched their pin on first contact. `linux-clang-coverage` had
+no pin (#229's lane table does not cover it), rendered `DIAGNOSTIC ONLY` as
+designed, and its basis (369 — it runs the packaging tier the other five exclude)
+is now recorded from this run rather than guessed from a sibling.
+
+##### Two independent cross-validations of the instrument
+
+Neither was arranged; both are checks against numbers measured by something else.
+
+* **Achieved concurrency 1.83× against #229's 1.84×.** #229 derived the tsan
+  lane's production efficiency at `jobs: 2` from a *different* run
+  (`31737273371`) by summing per-test durations against `Total Test time (real)`.
+  This instrument computed 1.83× on run `32003367497` without reference to it.
+  **0.5 % apart.**
+* **CI peak 1.41 GiB against the local sweep's 1.52 GiB** at the same `j`, same
+  lane. **7.2 % apart** — so the local host reproduces the effect, and its
+  *ratios* transfer even though its absolutes do not (it is ~1.38× faster, has
+  23 GB against 15.61, and registers 376 tests against CI's 361).
+
+##### ⚠️ Two sanitizer reports, UNATTRIBUTED as of this run
+
+`linux-clang-asan` and `linux-clang-ubsan` each carry **1** report in
+`LastTest.log`, on runs whose ctest was **green**. That is not a contradiction —
+a sanitizer report does not necessarily fail the test that emitted it, which is
+why this count is taken separately from the exit code.
+
+What is known: the three non-sanitizer lanes read 0, so it is sanitizer-lane
+specific; and `linux-clang-asan` does **not** enable UBSan (checked in
+`cmake/Sanitizers.cmake` — `FIXPP_ENABLE_ASAN` and `FIXPP_ENABLE_UBSAN` are
+independent options and the presets set one each), so these are two independent
+matches rather than one shared cause.
+
+What is **not** known: which lines matched. The instrument reported a bare count
+on this run — a defect since fixed; it now prints the matched lines. Per this
+repo's standing rule these are **real defects until disproven**, and they are not
+disproven. Pending re-run.
+
+#### Phase 1 — `linux-clang-tsan` `jobs: 2 → 4` (#267)
+
+The arithmetic, done from the **CI** number rather than the local one, because
+that is the constraint being reasoned about:
+
+| step | value |
+|---|---:|
+| CI peak at `j=2` (measured, above) | **1.41 GiB** |
+| local `j=2 → j=4` factor (2.53 / 1.52 GiB, #229 sweep) | ×1.664 |
+| ⇒ projected CI peak at `j=4` | **~2.35 GiB** |
+| of a 15.61 GiB runner | **~15 %** — ~6.6× headroom |
+
+Cross-checked a second way: the local **absolute** at `j=4` is 2.53 GiB, i.e.
+16.2 % of this runner. Ratio-method and absolute-method land within 1.2
+percentage points of each other, so the conclusion does not depend on which is
+used.
+
+⚠️ **A single-process figure would have said something else**, and that is the
+whole reason this is a concurrent-sum instrument: the serial run's largest single
+process is 1.04 GiB locally, which projects naively to ~4 GiB at `j=4` — **37 %
+high** against the 2.53 GiB measured.
+
+**Acceptance for phase 1 is the PAIR, not the peak alone.** `execution.jobs` is
+an intention; the achieved-concurrency figure is what says it took effect. The
+expected band at `j=4` is **2.2–2.6×** (local measured 2.39× and 2.32× on two
+runs; the greedy-LPT model's 3.16× is a ceiling and ~⅓ optimistic — do not accept
+against it). **A post-widening run reporting ~1.8× means the widening did not
+take effect, and its peak would then be a `j=2` reading mislabelled as `j=4`
+evidence** — precisely the class this PR exists to close.
+
+Not widened here, and each for its own reason: `asan`/`ubsan`/`debug` are phase 2
+and are held until their two unattributed sanitizer reports are resolved;
+`coverage` needs #267 acceptance item 4 (merged coverage shown identical before
+and after) discharged first; the four `libc++` lanes are phase 3 and have no
+local sweep at all; `linux-gcc-release` is in no phase; `windows-msvc-asan` is a
+different platform and sanitizer runtime with no measurement of any kind.
 
 **Criterion 4 is what blocks widening, and it is not a formality.** Three green runs say the lane
 *did not* run out of memory; they say nothing about how close it came. Two concurrent TSan

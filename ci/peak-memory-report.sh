@@ -162,7 +162,23 @@ if [ -r "$LASTTEST" ]; then
   fi
 fi
 
-echo "peak=${PEAK_BYTES} bytes (${PEAK_GIB} GiB) of ${TOTAL_GIB} GiB — ${PCT} [preset: ${PRESET}] [samples: $(kv samples)] [concurrency: ${CONCURRENCY}] [ran: ${RAN:-unknown}/${EXPECTED}] [test outcome: ${TEST_OUTCOME}] [sanitizer reports: ${SAN_COUNT}]"
+# ⚠️ THIS LINE CARRIES THE DISCRIMINATING FIELDS, not just the headline.
+#
+# GitHub exposes no API for a job's step SUMMARY, so this echo is the only
+# machine-readable record of the measurement — anything omitted here can only be
+# recovered by re-running CI.
+#
+# `peak_at_s` and `peak_procs` are on it because a whole-run peak has two very
+# different causes and the headline number cannot tell them apart. #229 already
+# withdrew a finding over exactly this: `linux-clang-debug`'s 0.87 GiB serial
+# peak looked like sub-linear memory scaling and was actually ONE transient at
+# t=9.3 s — the `consumer::install-witness` test, which stage-installs a prefix
+# and drives a nested cmake+ninja build across 12 processes — after which the
+# same run never exceeded 0.39 GiB for eleven minutes. A peak at t≈10 s over ~12
+# processes is that nested build; a peak at mid-run over `jobs` processes is the
+# concurrency figure a widening decision needs. Sizing a widening off the first
+# while believing it is the second is the error the field prevents.
+echo "peak=${PEAK_BYTES} bytes (${PEAK_GIB} GiB) of ${TOTAL_GIB} GiB — ${PCT} [preset: ${PRESET}] [samples: $(kv samples)] [peak_at: $(kv peak_at_s)s of $(kv elapsed_s)s] [procs_at_peak: $(kv peak_procs)] [largest_single: ${SINGLE_GIB} GiB] [concurrency: ${CONCURRENCY}] [ran: ${RAN:-unknown}/${EXPECTED}] [test outcome: ${TEST_OUTCOME}] [sanitizer reports: ${SAN_COUNT}]"
 
 # EVIDENCE requires all three: the suite succeeded, a basis is recorded for this
 # lane, and the run executed exactly that many tests.  `-` (no CI basis yet) can

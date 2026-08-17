@@ -219,6 +219,18 @@ OUT="$(run_report success "$WORK/good.env" "$WORK/ctest.log")"
 case "$OUT" in *"DIAGNOSTIC ONLY"*) ok "T8 a lane with no recorded basis is NOT evidence";;
                *) bad "T8 a lane with no recorded basis was labelled evidence: $OUT";; esac
 
+# ── T8b: the log line carries the fields that discriminate a TRANSIENT ───────
+#
+# GitHub exposes no API for a step summary, so this echo is the only
+# machine-readable record — a field missing here is recoverable only by
+# re-running CI. `peak_at`/`procs_at_peak` are what separate "one nested-build
+# transient at t~10 s" from "the concurrency peak", the confusion #229 already
+# withdrew a finding over.
+for field in "peak_at:" "procs_at_peak:" "largest_single:" "concurrency:" "samples:"; do
+  case "$OUT" in *"$field"*) ok "T8b the log line carries ${field}";;
+                 *) bad "T8b the log line omits ${field}, and the step summary is not API-readable, so it could only be recovered by re-running CI: $OUT";; esac
+done
+
 # ── T9: the parsed figures ───────────────────────────────────────────────────
 case "$OUT" in *"concurrency: 2.00x"*) ok "T9 achieved concurrency parsed (2.00x from 60 s over 30 s)";;
                *) bad "T9 concurrency not parsed from the ctest log: $OUT";; esac
@@ -446,6 +458,12 @@ mutant unanchored-summary report \
   "T14b" "matches ctest's summary sentence anywhere on a line, so a test quoting that phrasing is read as the workload size"
 
 # The form that shipped for one CI run: the count, with no attribution.
+# The form that shipped for one CI run: headline only. It could not tell a
+# nested-build transient from a concurrency peak, which is a WIDENING decision.
+mutant headline-only report \
+  's|^echo "peak=${PEAK_BYTES} bytes .*$|echo "peak=${PEAK_BYTES} bytes (${PEAK_GIB} GiB) of ${TOTAL_GIB} GiB — ${PCT} [preset: ${PRESET}] [concurrency: ${CONCURRENCY}] [ran: ${RAN:-unknown}/${EXPECTED}] [test outcome: ${TEST_OUTCOME}] [sanitizer reports: ${SAN_COUNT}]"  # MUTANT|' \
+  "T8b" "prints the headline peak without peak_at / procs_at_peak, so a nested-build transient reads identically to a concurrency peak"
+
 mutant count-without-lines report \
   's|^    SAN_LINES="$(grep -nE .*$|    SAN_LINES=""  # MUTANT|' \
   "T16b" "reports how many sanitizer reports there were without saying which lines matched"

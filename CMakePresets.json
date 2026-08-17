@@ -266,9 +266,9 @@
     {
       "name": "linux-clang-tsan",
       "configurePreset": "linux-clang-tsan",
-      "description": "TSan. PROBE: jobs=2 is a single-lane ctest-parallelism trial — do NOT copy to the other lanes until this one is re-measured green (see ci/ctest-parallelism-probe.md).",
+      "description": "TSan. #267 phase 1: jobs=4, widened from the probe's 2 on a CI-MEASURED peak of 1.41 GiB at j=2 (9.1% of a 15.61 GiB runner) projecting to ~2.35 GiB at j=4 (~15%). Phases 2-3 (asan/ubsan/debug, then the libc++ tier) are NOT done — do not copy this field without that lane's own reading. See ci/ctest-parallelism-probe.md.",
       "output": { "outputOnFailure": true },
-      "execution": { "jobs": 2 }
+      "execution": { "jobs": 4 }
     },
     {
       "name": "linux-clang-coverage",
