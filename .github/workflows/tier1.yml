@@ -1678,7 +1678,19 @@ jobs:
       # while exiting 0 every time. Its replacement gets the pre-merge signal the
       # original never had: 28 cells plus 10 mutants, each mutant proven to redden
       # the ONE cell that names its defect. Synthetic fixtures only — no build
-      # tree, no ctest, ~80 s.
+      # tree, no ctest.
+      #
+      # ⚠️ IT IS NOT FREE: measured 117 s locally, against the ~2.5 s this whole
+      # job used to take. The cost is the mutants — each re-runs the full cell
+      # suite against a broken copy, and the cells that matter need REAL resident
+      # memory (a few hundred MiB touched, held for 1-2 s) because RSS is what is
+      # being measured and a mocked workload would pin nothing. Stated rather
+      # than buried: this job used to be the cheap one and is not any more.
+      #
+      # It does NOT move the critical path: `ci-script-pins` is in
+      # `tier1-required`'s `needs:` but runs concurrently with the linux matrix
+      # (40+ min) and coverage (33 min warm), so ~2 min is absorbed. Recorded as
+      # the reason the cost was accepted, not as a claim that it is free.
       - name: Regression pin — peak-RSS instrument dispositions (#266)
         run: bash ci/test-peak-rss.sh
 
