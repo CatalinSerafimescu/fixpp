@@ -213,8 +213,8 @@ constexpr VersionEntry kVersionTable[] = {
 // build-time scaffolding, which is freed before the loader returns; only the
 // interned bytes in `dict_metadata_handle::name_pool_` survive.
 struct PendingEnumCode {
-    std::string value;
-    std::string description;
+    std::string_view value;
+    std::string_view description;
 };
 
 struct GlobalFieldInfo {
@@ -445,20 +445,25 @@ void LoaderState::parse_global_fields(pugi::xml_node const& root) {
         // `enum` attribute is a load failure (fail-closed, mirroring
         // QuickFIX's ConfigError); a missing `description` is legal and
         // yields an empty description view (diagnostics-only).
-        std::unordered_set<std::string> seen_codes;
         for (auto const& v : f.children("value")) {
             auto const enum_attr = v.attribute("enum");
             if (!enum_attr) {
                 throw xml_parse_error("dict::xml_parse_error: <value> under <field number=\"" +
                                       num_s + "\"> missing enum attribute");
             }
-            std::string code_val{enum_attr.as_string("")};
-            if (!seen_codes.insert(code_val).second) {
+            std::string_view const code_val{enum_attr.as_string("")};
+            bool dup = false;
+            for (auto const& already : info.enum_codes) {
+                if (already.value == code_val) {
+                    dup = true;
+                    break;
+                }
+            }
+            if (dup) {
                 continue;  // FR-017 dedupe
             }
-            std::string desc{v.attribute("description").as_string("")};
             info.enum_codes.push_back(
-                {.value = std::move(code_val), .description = std::move(desc)});
+                {.value = code_val, .description = v.attribute("description").as_string("")});
         }
 
         by_tag_.emplace(tag, name);
