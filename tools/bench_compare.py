@@ -21,9 +21,17 @@ available, for a reason that is about the COMPARAND, not the band:
     They are hand-authored analysis records (`ceiling_ns`, `ceiling_source`,
     `verdict`, `_timing_is_meaningless_here`), never Google-Benchmark output.
   * 3 more are `benchmarks: []`.
-  * every remaining one was recorded on the WSL2 dev host (num_cpus 8 or 10).
-    #263 measured that host drifting -35% against ITSELF across two sessions;
-    this repo has measured 27-43% spread across CI runners.
+  * every remaining one was recorded on the WSL2 dev host (num_cpus 8 or 10),
+    which is NOT the machine class CI compares them against. This repo has
+    measured 27-43% spread across CI runners, and an unpaired A/B reading
+    1.02x where the paired same-VM A/B of the same change read 2.10x.
+
+    ⚠️ Deliberately NOT relied on: #263's "-35% same-host across two sessions".
+    #263 has since built the exact commit behind `dictionary/xml_loader.json`
+    and reproduced that file to ~2% nine features later, so same-host
+    reproducibility is evidently much better than that figure suggested. The
+    argument here never needed it — it is about the recording host not being
+    the CI runner, and about schema, not about drift.
   * and re-seeding is circular: seeding from the candidate makes the candidate
     its own comparand, seeding from main canonizes #263's known regression.
 

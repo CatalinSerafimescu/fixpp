@@ -132,12 +132,40 @@ Mechanical sweep of all 25 `bench/baselines/**/*.json`: every non-empty file rep
 or **10**, or omits the key. Four `wire/*` files are `build_type: debug` — their own note in
 `bench/REPORT.md`: *"debug timing is NOT the ceiling gate"*, ~10–25× release.
 
-#263 supplies the decisive corroboration, and it is about the dev host comparing to **itself**:
-*"`vt11`, which 082 provably does not touch, moved −35 % between two measurement sessions."* If
-same-host/cross-session is invalid at 35 %, cross-host is not rescued by widening a band. This repo
-has separately measured **27–43 %** spread across CI runners on heavy lanes
+This repo has measured **27–43 %** spread across CI runners on heavy lanes
 (`feedback_taskset_to_n_cpus_does_not_emulate_an_n_vcpu_runner`), where an unpaired A/B read
-1.02×/1.04× and the **paired same-VM** A/B of the same change read **2.10×/1.79×**.
+1.02×/1.04× and the **paired same-VM** A/B of the same change read **2.10×/1.79×**. That is the
+binding fact: the recording host is not the comparing host, and the cross-machine confound is
+larger than the effect a ±5 % budget is meant to detect.
+
+#### ⚠️ A retracted prop — recorded, because the argument must not rest on it
+
+Earlier drafts leaned on #263's *"`vt11` moved −35 % between two measurement sessions"* as evidence
+that even same-host comparison is invalid. **Do not rely on that.** #263 has since built `c766443e`
+— the `002-dictionary-xml-loader` commit dated 67 minutes before `dictionary/xml_loader.json`'s own
+timestamp — and re-run it today:
+
+| bench | baseline file | same code, today | delta |
+|---|---:|---:|---:|
+| FIX42 | 0.652 ms | 0.665 ms | **+2.0 %** |
+| FIX44 | 2.775 ms | 2.729 ms | **−1.7 %** |
+| FIX50SP2 | 55.836 ms | 55.432 ms | **−0.7 %** |
+
+**That baseline reproduces to ~2 % on its recording host, nine features later.** So "the baselines
+are stale" is *empirically false* for this file, and the −35 % figure cannot bear weight.
+
+**None of this touches the design**, because staleness was never the objection. The two that decide
+it are untouched: **§2b** (10 of the 14 originally-allowlisted baselines are not machine comparands
+at all) and **cross-machine provenance** (the WSL2 dev host is not the CI runner). Tier 3 is
+informational because **the recording host is not the CI runner** — not because the numbers drifted.
+Host-reproducibility and CI-comparability are different claims, and only the first was measured.
+
+#### The strongest form of this PR's case, now measured
+
+Against that *valid, reproducing* baseline, #263 measures a real regression of **+41 % / +60 % /
++83 %** — breaching `[const §VIII.2]`'s ±5 % budget by **8–16×** — which sat on `main` completely
+unseen, because the `bench` job ran `placeholder_bench` under `continue-on-error`. Not a
+hypothetical: a live 83 % regression against a comparand that was working the whole time.
 
 ### 2b. ⚠️ THE FINDING THAT DECIDES THE DESIGN — most baselines are not Google-Benchmark JSON
 
