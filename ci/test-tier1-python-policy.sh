@@ -824,25 +824,42 @@ $got"
 # than erroring, so a second `CIBW_ENVIRONMENT:` is the same silent-drop shape
 # under a different edit — both are asserted via the same "does the single
 # resolved value carry all five" check, which is what YAML parsing can see.
+# opus_pr270_2_triage.md R2-F1. The key-set + per-substring checks this used
+# to be were each satisfiable by a value the OTHER side of a two-sided contract
+# does not have: `case "$val" in *"CONAN_HOME="*)` matches inside
+# `XCONAN_HOME=/tmp` (Codex's flagship escape — a typo'd name that still
+# contains every pinned substring), and neither check compares a VALUE against
+# anything, so a wrong path (`CONAN_HOME=/tmp`), a swap of the two paths, or a
+# rename of the mount TARGET in the sibling `CIBW_CONTAINER_ENGINE` (same step,
+# :1594) all leave this pin green while the container silently loses its
+# Conan/ccache wiring.
+#
+# Exact whole-map equality subsumes the key-set check (so that check is DELETED
+# here, not kept alongside — two assertions for one property is how the weaker
+# one survives a later simplification, :794-797 above) and is strictly
+# stronger than a parsed-assignment map compared as a mount-target SET: a set
+# comparison is blind to a swap (`CONAN_HOME=/host-ccache
+# CCACHE_DIR=/host-conan2` produces the identical target set), because the
+# PAIRING is the property and only string equality on the whole value pins a
+# pairing without extra parsing code. It also pins the mount SOURCE
+# (`${{ env.CCACHE_DIR }}`) against a respelling to a literal path — the first
+# direct pin of the one-spelling invariant `fc7a4ae3` exists to establish.
+#
+# Not too brittle: this file already pins `linux_job_env` as an exact map
+# including "CCACHE_COMPRESSLEVEL":"5", with a written rationale
+# (`linux_step_count`, above) that a legitimate bump is a deliberate act priced
+# at one line in the same commit. Loosening CCACHE_MAXSIZE/CCACHE_COMPRESSLEVEL
+# to shape-regexes here would reproduce the defect this fix removes.
 assert_wheel_build_env() {
   local json="$1" case_id="$2"
-  local got
-
-  got="$(echo "$json" | jq -r '.wheel_build_env | keys | sort | join(",")')"
-  [ "$got" = "CIBW_CONTAINER_ENGINE,CIBW_ENVIRONMENT" ] \
-    || fail "$case_id: python-wheel-build's 'Build the single cp310-abi3 wheel (CI-2)' step's env: key set is '$got', expected exactly 'CIBW_CONTAINER_ENGINE,CIBW_ENVIRONMENT' — a differently-named or duplicated key can carry Conan/ccache settings the container never receives, or a build the container ignores."
-
-  local val v missing=""
-  val="$(echo "$json" | jq -r '.wheel_build_env.CIBW_ENVIRONMENT // ""')"
-  [ -n "$val" ] || fail "$case_id: python-wheel-build's CIBW_ENVIRONMENT is empty or absent"
-  for v in "CONAN_HOME=" "CCACHE_DIR=" "CCACHE_MAXSIZE=" "CCACHE_COMPILERCHECK=" "CCACHE_COMPRESSLEVEL="; do
-    case "$val" in
-      *"$v"*) ;;
-      *) missing="$missing $v" ;;
-    esac
-  done
-  [ -z "$missing" ] \
-    || fail "$case_id: python-wheel-build's single CIBW_ENVIRONMENT value ('$val') is missing:$missing — the container does not inherit the runner's environment, so a dropped var silently reverts to an ephemeral Conan home (from-source rebuild every run) or an unshared ccache mount (permanent MISS)."
+  local got want
+  want='{"CIBW_CONTAINER_ENGINE":"docker; create_args: -v /tmp/wheel-conan2:/host-conan2 -v ${{ env.CCACHE_DIR }}:/host-ccache","CIBW_ENVIRONMENT":"CONAN_HOME=/host-conan2 CCACHE_DIR=/host-ccache CCACHE_MAXSIZE=2G CCACHE_COMPILERCHECK=content CCACHE_COMPRESSLEVEL=5"}'
+  got="$(echo "$json" | jq -cS '.wheel_build_env')"
+  [ "$got" = "$want" ] \
+    || fail "$case_id: python-wheel-build's 'Build the single cp310-abi3 wheel (CI-2)' step's env: is
+  got:  $got
+  want: $want
+The container does not inherit the runner's environment, so CIBW_ENVIRONMENT is the only path CONAN_HOME/CCACHE_* reach it by, and both its values must equal the mount TARGETS declared in the sibling CIBW_CONTAINER_ENGINE on this same step. If this is a deliberate change (a real path or cache-tuning bump), update this golden in the same commit — do not weaken the comparison to a substring or shape check, that is the defect this pin exists to close."
 }
 
 # The host restore/stats/seed steps and the container's bind mount all read the
@@ -1003,11 +1020,13 @@ echo "PASS: derive-script table + call site + FIXPP_INSTALL_PYTHON=OFF + PY_RE c
 # for a miscount; a counter is. MUTANTS_RUN is incremented by each mutant AFTER
 # it has been proven RED for the right reason, so an early `return` or a mutant
 # silently commented out changes the total.
-MUTANTS_DECLARED=36  # M1 M2 M3 B M4 M5 M6 M7 M11 M14 M15 M21 M26 M27 M29-M45 M47 M48 M49 M50 + M28 (1 GREEN
-                     # control; M46 RETIRED at round 9 — its GREEN assertion became false by design) — DOWN
-                     # from 27 at round 3b, because the golden subsumed 14 of them. See the RETIRED block in
-                     # run_mutant_checks for the list and the reason. M48-M50 added at #270 Gate B r1 (F1):
+MUTANTS_DECLARED=41  # M1 M2 M3 B M4 M5 M6 M7 M11 M14 M15 M21 M26 M27 M29-M45 M47 M48 M49 M50 M51-M55 + M28 (1
+                     # GREEN control; M46 RETIRED at round 9 — its GREEN assertion became false by design) —
+                     # DOWN from 27 at round 3b, because the golden subsumed 14 of them. See the RETIRED block
+                     # in run_mutant_checks for the list and the reason. M48-M50 added at #270 Gate B r1 (F1):
                      # python-wheel-build's CIBW_ENVIRONMENT + ccache step order had no mutant at all before.
+                     # M51-M55 added at #270 Gate B r2 (R2-F1): the substring loop those three replaced never
+                     # checked a VALUE on either side of the CIBW_ENVIRONMENT / CIBW_CONTAINER_ENGINE contract.
 MUTANTS_RUN=0
 # GREEN controls are counted separately: a summary that calls them RED would be
 # the very over-claim MUTANTS_DECLARED exists to prevent.
@@ -1720,7 +1739,7 @@ PYEOF2
   # CONAN_HOME from the container's CIBW_ENVIRONMENT and every ccache-side
   # assertion (ci/test-ccache-scripts.sh) stays green — the dependency closure
   # just rebuilds from source in an ephemeral container home every run.
-  mutate_workflow M48 "CONAN_HOME dropped from the wheel build's CIBW_ENVIRONMENT" "missing:.*CONAN_HOME=" '
+  mutate_workflow M48 "CONAN_HOME dropped from the wheel build's CIBW_ENVIRONMENT" 'got:.*"CIBW_ENVIRONMENT":"CCACHE_DIR=/host-ccache CCACHE_MAXSIZE' '
 import sys
 src, dst = sys.argv[1], sys.argv[2]
 t = open(src).read()
@@ -1734,7 +1753,7 @@ open(dst, "w").write(t.replace(old, new))
   # tier1.yml:1582-1590 warns this silently drops the first one's content
   # (YAML keeps only the last of two same-named mapping keys) — this mutant is
   # the first instrument behind that warning.
-  mutate_workflow M49 "a second CIBW_ENVIRONMENT key shadows the first" "missing:.*CONAN_HOME=.*CCACHE_DIR=" '
+  mutate_workflow M49 "a second CIBW_ENVIRONMENT key shadows the first" 'got:.*"CIBW_ENVIRONMENT":"FOO=bar"' '
 import sys
 src, dst = sys.argv[1], sys.argv[2]
 t = open(src).read()
@@ -1764,6 +1783,82 @@ seed_anchor = """          ci/seed-ccache.sh \\
 assert t.count(seed_anchor) == 1, t.count(seed_anchor)
 t = t.replace(seed_anchor, seed_anchor + "\n" + chown_step, 1)
 open(dst, "w").write(t)
+'
+
+  # ── M51-M55 (#270 Gate B r2, R2-F1): the exact-map pin's own mutants ──────
+  # M48-M50 proved the SET/ORDER checks; these prove the exact VALUE-map pin
+  # that replaced the substring loop can see what the substring loop could not
+  # — a two-sided contract (CIBW_ENVIRONMENT's two paths vs the mount TARGETS
+  # CIBW_CONTAINER_ENGINE declares on the same step) where no side's VALUE was
+  # ever checked before.
+
+  # M51: Codex's own demonstrated escape — `case "$val" in *"CONAN_HOME="*)`
+  # matched INSIDE a typo'd name, because it is a substring test, not a name
+  # test. The exact-map pin must reject it outright.
+  mutate_workflow M51 "CONAN_HOME renamed to XCONAN_HOME (substring-loop escape)" 'got:.*XCONAN_HOME=' '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "CONAN_HOME=/host-conan2 CCACHE_DIR=/host-ccache"
+new = "XCONAN_HOME=/host-conan2 CCACHE_DIR=/host-ccache"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
+'
+
+  # M52: correct NAME, wrong VALUE. The substring loop only checked the name
+  # occurred somewhere in the string, never the path it was bound to.
+  mutate_workflow M52 "CONAN_HOME points at the wrong path" 'got:.*CONAN_HOME=/tmp CCACHE_DIR=/host-ccache' '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "CONAN_HOME=/host-conan2 CCACHE_DIR=/host-ccache"
+new = "CONAN_HOME=/tmp CCACHE_DIR=/host-ccache"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
+'
+
+  # M53: the two path VALUES swapped. Well-formed, assignment-shaped, both
+  # names present with a real value each — the mutant a mount-target SET
+  # comparison (Codex's proposed fix) cannot see, because the set of targets
+  # is unchanged; only the PAIRING is wrong. Only whole-value string equality
+  # pins a pairing.
+  mutate_workflow M53 "CONAN_HOME and CCACHE_DIR values swapped" 'got:.*CONAN_HOME=/host-ccache CCACHE_DIR=/host-conan2' '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "CONAN_HOME=/host-conan2 CCACHE_DIR=/host-ccache"
+new = "CONAN_HOME=/host-ccache CCACHE_DIR=/host-conan2"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
+'
+
+  # M54: the mount TARGET renamed on ONE side only — inside
+  # CIBW_CONTAINER_ENGINE (:1594), leaving CIBW_ENVIRONMENT (:1604) still
+  # pointing CONAN_HOME at the now-nonexistent `/host-conan2`. This is the
+  # genuinely silent production drift the triage names: a two-character edit
+  # inside the two lines this PR adds, invisible to every prior assertion
+  # because none of them ever read CIBW_CONTAINER_ENGINE at all.
+  mutate_workflow M54 "the CONAN_HOME mount target renamed in CIBW_CONTAINER_ENGINE only" 'got:.*host-conan-renamed' '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "-v /tmp/wheel-conan2:/host-conan2 -v ${{ env.CCACHE_DIR }}:/host-ccache"
+new = "-v /tmp/wheel-conan2:/host-conan-renamed -v ${{ env.CCACHE_DIR }}:/host-ccache"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
+'
+
+  # M55: the mount SOURCE respelled from the derived `${{ env.CCACHE_DIR }}`
+  # to a literal path — the one-spelling invariant fc7a4ae3 exists to
+  # establish, pinned directly for the first time by this golden.
+  mutate_workflow M55 "the ccache mount source respelled to a literal path" 'got:.*tmp/fixpp-ccache-wheel:/host-ccache' '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "-v ${{ env.CCACHE_DIR }}:/host-ccache"
+new = "-v /tmp/fixpp-ccache-wheel:/host-ccache"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
 '
 
 }
