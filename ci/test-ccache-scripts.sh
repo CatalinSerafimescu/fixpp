@@ -386,6 +386,31 @@ DTAG_H="$(
   || fail "container/dispatch: ccache_resolve_key without an image ref produced '$DTAG_H', not the host minter's '$TAG'"
 ok "ccache_resolve_key dispatches to the same minter both restore and seed would use"
 
+# ── ci/wheel-ccache-ident.sh — the workflow's single source, bound to BOTH ends
+#
+# The wheel lane's name is written in ci/wheel-ccache-ident.sh and enumerated
+# again in `ccache_lane_is_container`. If those drift, the pruner classifies the
+# lane's tags as somebody else's and skips them SILENTLY — no `prune: PENDING`,
+# no error, versions accumulating forever. Assert the agreement rather than
+# asking a comment to hold it.
+IDENT_OUT="$( cd "$CI_DIR/.." && bash ci/wheel-ccache-ident.sh 2>&1 )" \
+  || fail "wheel-ccache-ident: exited non-zero against the real pyproject.toml: $IDENT_OUT"
+IDENT_LANE="$(printf '%s\n' "$IDENT_OUT" | sed -n 's/^lane=//p')"
+IDENT_REF="$(printf '%s\n' "$IDENT_OUT" | sed -n 's/^image_ref=//p')"
+[ -n "$IDENT_LANE" ] || fail "wheel-ccache-ident printed no lane"
+[ -n "$IDENT_REF" ]  || fail "wheel-ccache-ident printed no image_ref"
+
+( . "$KEYSH" && ccache_lane_is_container "$IDENT_LANE" ) \
+  || fail "wheel-ccache-ident's lane '$IDENT_LANE' is NOT enumerated by ccache_lane_is_container — the pruner would classify this lane's tags as somebody else's and skip them silently"
+ok "the wheel lane name agrees with the container-lane enumeration"
+
+# The ref in the tracked file must be one the minter accepts. If pyproject ever
+# reverts to a floating alias, this fails HERE rather than in a CI job that then
+# keys a cache to a toolchain it cannot identify.
+( . "$KEYSH" && ccache_container_cache_key "$IDENT_LANE" "$IDENT_REF" ) >/dev/null 2>&1 \
+  || fail "the pinned image reference in pyproject.toml ('$IDENT_REF') is not one ccache_container_cache_key accepts"
+ok "the image reference pinned in pyproject.toml is digest-pinned and mintable"
+
 # ═════ ci/restore-ccache.sh ══════════════════════════════════════════════════
 echo "── restore-ccache.sh ──"
 CDIR="$sandbox/ccache-dir"
@@ -720,7 +745,7 @@ EOF
 stats_case() {
   FAKE_STATS_FILE="$STATS_FILE" FAKE_PRINT_STATS_EXIT="${PS_EXIT:-0}" \
   FAKE_SHOW_STATS_EXIT="${SS_EXIT:-0}" CCACHE_DIR="$CDIR" \
-    run "$CI_DIR/ccache-stats.sh" fake-libc++ "${1:-true}" "${2:-success}"
+    run "$CI_DIR/ccache-stats.sh" fake-libc++ "${1:-true}" "${2:-success}" ${3+"$3"}
 }
 
 write_stats 1400 0 61 1900000 2097152 0 0 37
@@ -895,6 +920,51 @@ want_out 'ccache-hitrate 50%' "stats/show-stats-fails"
 # any regression. This is the wording actually shipped by the warning branch.
 want_out 'may be absent or incomplete' "stats/show-stats-fails"
 ok "--show-stats failure — warns without denying output the log may contain"
+
+# ── OPT-IN HIT FLOOR (#259) ──────────────────────────────────────────────────
+#
+# ⚠️ THE EXEMPTION IS THE CASE THAT MATTERS, not the breach. A floor that also
+# fires on a cold/MISS run would redden the SEEDING run — the first push:main
+# after the lane lands, which legitimately serves 0 % because there was nothing
+# to restore — making the change look broken at the exact moment it is working.
+# That is the failure mode this gate is shaped to avoid, so it is asserted
+# first and asserted explicitly.
+write_stats 0 0 1461 10 512000 0
+stats_case false success 60
+want_status 0 "stats/floor-miss-exempt"
+want_no_out 'HIT-FLOOR BREACHED' "stats/floor-miss-exempt"
+ok "hit floor is EXEMPT on a restore MISS — a cold/seeding run at 0% stays green"
+
+# The breach itself: a cache was pulled and then matched almost nothing.
+write_stats 100 0 1361 10 512000 0
+stats_case true success 60
+want_status 1 "stats/floor-breach"
+want_out 'HIT-FLOOR BREACHED' "stats/floor-breach"
+ok "hit floor is FATAL on a restore HIT below the floor"
+
+# Above the floor, same HIT — proves the previous case failed for the RATE and
+# not merely for passing a fourth argument.
+write_stats 1400 0 61 10 512000 0
+stats_case true success 60
+want_status 0 "stats/floor-satisfied"
+want_out 'hit-floor 60% satisfied' "stats/floor-satisfied"
+ok "hit floor passes when the rate is above it"
+
+# Omitted floor must behave EXACTLY as before — every existing caller passes
+# three arguments, and this is the regression guard for them.
+write_stats 100 0 1361 10 512000 0
+stats_case true success
+want_status 0 "stats/floor-absent"
+want_no_out 'HIT-FLOOR BREACHED' "stats/floor-absent"
+ok "no floor argument — the pre-existing three-argument behaviour is unchanged"
+
+# A malformed floor must be an attributed error, not silently treated as 0
+# (which would disable the check while looking configured).
+write_stats 1400 0 61 10 512000 0
+stats_case true success "sixty"
+want_status 1 "stats/floor-malformed"
+want_out 'is not a non-negative integer percent' "stats/floor-malformed"
+ok "a malformed hit-floor is rejected rather than silently disabling the check"
 
 echo
 echo "PASS: $pass assertions over ci/{ccache-cache-key,restore-ccache,seed-ccache,ccache-stats}.sh — scripts: $CI_DIR"

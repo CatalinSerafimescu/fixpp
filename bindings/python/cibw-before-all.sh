@@ -38,6 +38,46 @@ GT=/opt/rh/gcc-toolset-14/root/usr/bin   # gcc-toolset-14 toolchain binaries
 PY=/opt/python/cp310-cp310/bin           # a manylinux CPython for pip/conan
 export PATH="$PY:$PATH"
 
+# ── ccache (#259) ────────────────────────────────────────────────────────────
+#
+# This lane compiled its whole ninja graph uncached on every run — 68 min of a
+# 69 min job, and (with #241's coverage cache landed) Tier 1's critical path.
+#
+# ⚠️ NOT `dnf install ccache`, AND THE REASON IS MEASURED, NOT STYLISTIC.
+# EPEL *is* enabled in this image and the package *does* install — which is what
+# makes it the tempting choice — but EL8 ships **ccache 3.7.7** (2019).
+# `ci/ccache-stats.sh` opens with `ccache --print-stats`, a 4.x-only feature, and
+# every counter it parses is 4.x machine-readable output; 3.7.7 also predates
+# zstd, so the `CCACHE_COMPRESSLEVEL` every other lane sets would be inert. The
+# EPEL route does not degrade quietly — it fails the reporting step outright.
+# (Probed in this exact pinned image on 2026-08-17.)
+#
+# The static build is chosen over the `-glibc` one deliberately. Both were run
+# here and both work against this image's glibc 2.28 — the static one simply
+# cannot be broken by a future image bump, and a compiler cache must NEVER
+# redden a lane whose build and tests pass.
+#
+# Version and digest are pinned and the digest is VERIFIED before the binary is
+# unpacked: this downloads an executable into the container that builds the
+# shipped wheel.
+CCACHE_VERSION=4.13.6
+CCACHE_TARBALL="ccache-${CCACHE_VERSION}-linux-x86_64-musl-static.tar.xz"
+CCACHE_SHA256=156ec57c5198cc849d92834023d09910b83dc5504c6cf405d09e6ae7b208a3e5
+
+(
+  cd /tmp
+  curl -sSLf -o "$CCACHE_TARBALL" \
+    "https://github.com/ccache/ccache/releases/download/v${CCACHE_VERSION}/${CCACHE_TARBALL}"
+  echo "${CCACHE_SHA256}  ${CCACHE_TARBALL}" | sha256sum -c -
+  tar xf "$CCACHE_TARBALL"
+  install -m 0755 "ccache-${CCACHE_VERSION}-linux-x86_64-musl-static/ccache" /usr/local/bin/ccache
+)
+# Fail loudly HERE if the binary cannot run, rather than at the first compile:
+# a missing launcher makes every compiler invocation exit 127, which surfaces as
+# a confusing whole-build failure far from its cause (the #177 / exit-127 shape).
+ccache --version | head -1
+echo "ccache: $(command -v ccache)"
+
 pip install -q "conan>=2"                 # swig/ninja/scikit-build-core come from
                                           # the build-frontend's build-requires
 conan profile detect --force

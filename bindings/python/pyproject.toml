@@ -100,7 +100,35 @@ regex = '(?s)project\(\s*fixpp\s+VERSION\s+(?P<value>[0-9]+\.[0-9]+\.[0-9]+)'
 # quickstart §1): abi3 from wheel.py-api="cp310", 2_28 from the image below.
 build = "cp310-manylinux_x86_64"
 archs = ["x86_64"]
-manylinux-x86_64-image = "manylinux_2_28"
+# ── PINNED BY DIGEST (#259) ──────────────────────────────────────────────────
+#
+# This was the bare alias `manylinux_2_28`. That is NOT resolved against the
+# registry at build time: cibuildwheel substitutes a digest from its OWN
+# `resources/pinned_docker_images.cfg`, and `pipx install cibuildwheel` in
+# tier1.yml is UNPINNED — so the SHIPPED WHEEL's compiler, glibc headers and
+# libstdc++ could change with no repo change and no review, simply because the
+# tool was reinstalled. Measured 2026-08-17: the reference in use was
+# `@sha256:012f4a50…` while cibuildwheel `main` already pinned the same alias to
+# `@sha256:f854c50a…`.
+#
+# Pinning here closes that, and additionally makes the wheel lane's ccache tag
+# derivable from a tracked file (ci/ccache-cache-key.sh :: ccache_container_cache_key,
+# which REQUIRES a digest-pinned reference and fails closed on a floating one).
+#
+# ⚠️ THIS VALUE IS THE STATUS QUO, DELIBERATELY — it is what both the
+# 2026-08-11 reference run and PR #269's run already resolved to, so introducing
+# the pin changed no bytes of the wheel. Upstream is AHEAD (`f854c50a…`).
+#
+# ⚠️ TO BUMP: take cibuildwheel's current `pinned_docker_images.cfg` value. A
+# bump is a TOOLCHAIN CHANGE (compiler/glibc/libstdc++), not a version tidy-up —
+# land it on its own so a wheel regression stays attributable, and expect the
+# ccache tag to roll and one cold build to follow.
+#
+# Verified in CI by the "Assert the pinned manylinux image is the one used"
+# step in tier1.yml: cibuildwheel prints `Starting container image <ref>`, and a
+# pin that is silently ignored would leave the ccache keyed to a toolchain that
+# is not building the wheel.
+manylinux-x86_64-image = "quay.io/pypa/manylinux_2_28_x86_64@sha256:012f4a50472412f18bb2b450c1cce7158434cfae4ae878591c2748a13a30c2be"
 
 [tool.cibuildwheel.linux]
 # Toolchain + Conan setup, run ONCE per container; writes the Conan toolchain to
@@ -121,3 +149,24 @@ repair-wheel-command = "auditwheel repair --plat manylinux_2_28_x86_64 --only-pl
 # locally), NOT via [tool.cibuildwheel.linux.environment].
 [tool.cibuildwheel.config-settings]
 "cmake.define.CMAKE_TOOLCHAIN_FILE" = "/tmp/wheel-conan/conan_toolchain.cmake"
+# ── ccache launcher (#259) ───────────────────────────────────────────────────
+#
+# Routed through config-settings for the SAME reason the toolchain file above
+# is: the environment route is not reliable here. The comment above records that
+# `CMAKE_TOOLCHAIN_FILE` had to move out of
+# [tool.cibuildwheel.linux.environment]; an explicit `-D` also survives whatever
+# Conan's generated CMakeToolchain writes into the cache, which an env default
+# does not.
+#
+# ccache itself is installed into the container by cibw-before-all.sh (a pinned
+# 4.x static tarball — EL8's EPEL ccache is 3.7.7 and cannot report the
+# statistics ci/ccache-stats.sh requires).
+#
+# ⚠️ CCACHE_COMPILERCHECK=content (set on the job) means this cache CANNOT serve
+# objects built by the Tier 1 matrix legs, and that is correct rather than a
+# limitation: those are Ubuntu gcc-13/clang-22 against different libstdc++
+# headers, while this is gcc-toolset-14 inside manylinux_2_28, statically linked
+# and with OTel off. Different compiler, different flags, different preprocessed
+# output — the lane owns its own cache namespace.
+"cmake.define.CMAKE_C_COMPILER_LAUNCHER" = "ccache"
+"cmake.define.CMAKE_CXX_COMPILER_LAUNCHER" = "ccache"
