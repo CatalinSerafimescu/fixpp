@@ -378,8 +378,17 @@ jobs:
       # disposition is a recorded rationale, not removal. If it is still tens of
       # minutes with a high hit rate, the parallelism is the remaining cost and
       # the question becomes whether this runner can hold `-j4` (2 vCPU-class
-      # concurrency against a libc++ TSan link is the suspected constraint, and
-      # `/sys/fs/cgroup/memory.peak` is unreadable on ubuntu-24.04 — see #229).
+      # concurrency against a libc++ TSan link is the suspected constraint).
+      #
+      # ⚠️ THE SECOND HALF OF THAT SENTENCE IS NO LONGER TRUE and is corrected
+      # rather than left to be inherited: it read "and `/sys/fs/cgroup/memory.peak`
+      # is unreadable on ubuntu-24.04 — see #229", which was accurate when
+      # written and is why no memory figure was available here. #266 replaced
+      # that source with `ci/measure-peak-rss.py`, a /proc sampler that works on
+      # a hosted runner. The measurement this paragraph says it lacks is now
+      # obtainable — for the TEST phase, which the `Peak memory` step below
+      # takes. ⚠️ It is NOT taken for `Build`: no build step is wrapped, so `-j4`
+      # here still has no memory figure and this decision stays open.
       #
       # Writing a rationale now would mean asserting a cause nothing measured.
       - name: Build
@@ -523,17 +532,66 @@ jobs:
           docker rm "$cid"
           ls -l "$RUNNER_TEMP/libcxx-tsan"
 
+      # ⚠️ THE ctest INVOCATIONS BELOW ARE UNCHANGED. Both are WRAPPED by the
+      # #266 peak-RSS instrument, which spawns ctest, samples /proc while it
+      # runs, tees its output and exits with ITS status — so each step's
+      # red/green signal is still ctest's. See ci/measure-peak-rss.py and the
+      # equivalent steps in tier1.yml.
+      #
+      # MEASURED HERE, NOT WIDENED. #267 phase 3 is these four lanes, and
+      # `linux-clang-libc++-tsan` is the largest beneficiary after msvc (102.9
+      # min, of which 77.1 is ctest). Its acceptance requires a peak-memory
+      # reading PER LANE before that lane widens, and there is no local sweep for
+      # any libc++ lane — #229's measurements are clang-tsan and clang-debug
+      # only. Instrumenting now is what makes phase 3 decidable later; no test
+      # preset in this tier carries `execution.jobs` and none is added here.
       - name: Test
+        id: libcxx_test
         if: matrix.preset != 'linux-clang-libc++-tsan'
-        run: ctest --preset ${{ matrix.preset }} --output-on-failure
+        run: |
+          python3 ci/measure-peak-rss.py \
+            --out "/tmp/peak-rss-${{ matrix.preset }}.env" \
+            --log "/tmp/ctest-${{ matrix.preset }}.log" \
+            --label "${{ matrix.preset }}" \
+            -- ctest --preset ${{ matrix.preset }} --output-on-failure
 
       - name: Test (TSan — instrumented libc++)
+        id: libcxx_tsan_test
         if: matrix.preset == 'linux-clang-libc++-tsan'
         env:
           # Prepend the instrumented libc++ ahead of the apt libc++ in the
           # job-level LD_LIBRARY_PATH so the soname resolves to it at runtime.
           LD_LIBRARY_PATH: ${{ runner.temp }}/libcxx-tsan:${{ env.LD_LIBRARY_PATH }}
-        run: ctest --preset ${{ matrix.preset }} --output-on-failure
+        run: |
+          python3 ci/measure-peak-rss.py \
+            --out "/tmp/peak-rss-${{ matrix.preset }}.env" \
+            --log "/tmp/ctest-${{ matrix.preset }}.log" \
+            --label "${{ matrix.preset }}" \
+            -- ctest --preset ${{ matrix.preset }} --output-on-failure
+
+      # One report step for both, because exactly one of the two Test steps runs
+      # per lane. `outcome` of the SKIPPED one is `skipped`, so the two are
+      # combined by taking whichever is not — never by assuming which fired.
+      - name: Peak memory (ctest --parallel evidence, #266 / #229)
+        if: always()
+        continue-on-error: true
+        env:
+          PLAIN: ${{ steps.libcxx_test.outcome || 'unavailable' }}
+          TSAN: ${{ steps.libcxx_tsan_test.outcome || 'unavailable' }}
+        run: |
+          # `if/fi`, NOT `[ … ] && outcome=…`. Actions runs a `run:` block as a
+          # script under `bash -e`, where an `&&` list whose test is FALSE
+          # returns non-zero and aborts the step — on the PASSING branch
+          # (feedback_bracket_and_fail_under_set_e_aborts_on_the_passing_branch).
+          outcome="$PLAIN"
+          if [ "$outcome" = "skipped" ]; then
+            outcome="$TSAN"
+          fi
+          ci/peak-memory-report.sh \
+            "${{ matrix.preset }}" \
+            "/tmp/peak-rss-${{ matrix.preset }}.env" \
+            "/tmp/ctest-${{ matrix.preset }}.log" \
+            "$outcome"
 
   # ── Required aggregate — red-on-skip (mirrors tier1-required in tier1.yml) ──
   # Tier 3 is green-on-skip: a pre-gate PR runs no `libcxx` matrix

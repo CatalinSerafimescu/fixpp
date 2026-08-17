@@ -53,6 +53,16 @@ linux-clang-asan      361
 linux-clang-ubsan     361
 linux-clang-tsan      361
 
+# Tier 3 (`.github/workflows/tier3-libcxx.yml`). These lanes run the FULL suite
+# — their Test step carries no `-LE packaging` — so the counts are lower than
+# the Tier 1 five for a different reason than a label filter: fewer tests are
+# registered under libc++. Same provenance: Tier 3 run 31737273304, `5c56a17e`.
+# Measured but NOT widened by this change; see #267 phase 3.
+linux-clang-libc++        357
+linux-clang-libc++-asan   356
+linux-clang-libc++-ubsan  356
+linux-clang-libc++-tsan   356
+
 # The coverage lane runs the FULL suite (no `-LE packaging` filter), so its
 # count is not comparable to the five above and has never been read off a CI
 # log.  Left `-` deliberately: `-` renders DIAGNOSTIC ONLY, which is the honest
