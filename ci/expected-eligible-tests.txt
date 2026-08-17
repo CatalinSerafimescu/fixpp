@@ -56,11 +56,10 @@ linux-clang-tsan      361
 # `Test (full tier incl. packaging)` instead, the FULL suite with no label
 # filter.  It is the only lane in the matrix that runs the packaging tier at all.
 #
-# No CI basis yet — #229's lane table does not include this lane, so there is
-# nothing to carry over and it is NOT guessed from `linux-clang-release`, whose
-# 362 is a `-LE packaging` count and therefore a different quantity.  `-` renders
-# DIAGNOSTIC ONLY until a run reports the number.
-linux-gcc-release     -
+# Read off TWO independent CI runs, 32007171995 and 32011816399, both `ran: 370`.
+# Shipped as `-` until then rather than guessed from `linux-clang-release`, whose
+# 362 is a `-LE packaging` count and therefore a different quantity.
+linux-gcc-release     370
 
 # Tier 3 (`.github/workflows/tier3-libcxx.yml`). These lanes run the FULL suite
 # — their Test step carries no `-LE packaging` — so the counts are lower than

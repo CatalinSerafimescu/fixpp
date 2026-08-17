@@ -146,6 +146,30 @@ no pin (#229's lane table does not cover it), rendered `DIAGNOSTIC ONLY` as
 designed, and its basis (369 — it runs the packaging tier the other five exclude)
 is now recorded from this run rather than guessed from a sibling.
 
+##### The instrument's own repeatability — measured on UNCHANGED lanes
+
+Run `32011816399` re-ran two lanes that this work does not touch, at the same
+`jobs` as before, on the same C++ tree. Their spread is the instrument's noise
+floor, and it is needed before any delta elsewhere can be called real:
+
+| lane | runs | peak | wall | spread |
+|---|---|---|---|---:|
+| `linux-clang-release` (serial) | A, C | 0.369 → 0.379 GiB | ~251 → 258.4 s | **2.8 % / 2.9 %** |
+| `linux-gcc-release` (serial) | B, C | 0.3820 → 0.3817 GiB | 307.7 → 305.0 s | **0.08 % / 0.9 %** |
+
+⚠️ **This is NOT the same quantity as the 6.91 % band** quoted against the
+phase-1 result. That band is `linux-clang-tsan`'s run-to-run variance *while
+running in parallel*, where makespan depends on how tests happen to pack — a
+property the original probe itself introduced (recorded further down this
+document). A **serial** lane has no packing freedom, which is why it reproduces
+to ~1–3 %.
+
+Both figures are therefore right for their own case, and the phase-1 comparison
+correctly used the parallel one: a j=2-vs-j=4 delta must clear the noise of a
+*parallel* lane, not of a serial one. What these two rows add is that the
+**instrument** is not the source of that noise — it reproduces a peak to 0.08 %
+on an unchanged workload.
+
 ##### Two independent cross-validations of the instrument
 
 Neither was arranged; both are checks against numbers measured by something else.
