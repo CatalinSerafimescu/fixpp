@@ -371,21 +371,46 @@ Memory cost is modest and consistent with every other lane: 0.65 → 0.86 GiB
 (+32 %), **5.5 % of a 15.61 GiB runner**. Summed per-test wall-time inflates
 1993 → 2987 s (+50 %) — real contention, but far less than it buys.
 
-##### ⛔ `linux-clang-debug` — NOT widened; its own numbers do not reproduce
+##### ✅ `linux-clang-debug` `jobs: 1 → 4`, CONFIRMED by A-B-A
 
-| configuration | independent measurements | agreement |
-|---|---|---:|
-| debug `j=4` | 572.81 s (run C) / 561.94 s (run D) | 1.9 % ✅ |
-| debug `j=1` | 583.44 s (run A) / 1150.75 s (run D) | **97 %** ❌ |
+The 97 % disagreement between `debug`'s two serial numbers was settled by running
+**three passes on one VM**, serial-parallel-serial, with an independent machine
+witness between each (run `32018795574`):
 
-Its paired run says 2.05×, but one of the two serial numbers must be wrong, and
-until that is settled the paired figure cannot be read. Note the failure is
-**specific to this lane** — ubsan's second-pass serial reproduced fine, so a
-general "second pass is degraded" story does not account for it. An A-B-A run
-(`j=1`, `j=4`, `j=1`, with a fixed CPU calibration and `/proc/stat` steal sampled
-between passes) is the outstanding work.
+| step | wall | 1-proc calibration | 4-proc calibration | cumulative steal |
+|---|---:|---:|---:|---:|
+| — | — | 2.73 s | 5.21 s | 0 |
+| `--parallel 1` | **1142.14 s** | 2.85 s | 5.16 s | 0 |
+| `--parallel 4` | **541.53 s** | 2.82 s | 5.11 s | 0 |
+| `--parallel 1` | **1135.28 s** | 2.94 s | 5.08 s | 0 |
 
-Not widened here, and each for its own reason: `asan`/`debug` are phase 2
+**The two serial passes agree to 0.6 %.** There is no pass-order effect, the
+calibration drifts under 8 %, and `/proc/stat` steal is **0** throughout — the
+machine did not change under the experiment. **2.10×**, ≈597 s ≈ **10 min/run**.
+
+⚠️ **The outlier was run A, not run D.** `debug` serial reads 1142 / 1135 / 1151 s
+on three VMs and **583 s** on run A's — that one VM was roughly twice as fast.
+Every "no gain" reading for this lane came from comparing against it.
+
+##### ⚠️ `linux-clang-tsan` — the j=2-vs-j=4 question is UNRESOLVED, not settled
+
+The phase-1 comparison (run A `j=2`, run B `j=4`) was **also unpaired**, on the
+lane with the worst measured spread of all (**43.3 %**). It resolves nothing, and
+the earlier wording *"measured no gain at j=4"* is **withdrawn** — the same error
+as the withdrawn `debug` and `ubsan` claims, and it survived longer because its
+conclusion happened to be the conservative one.
+
+What is still solid, because it does not depend on VM speed:
+
+* **+36 % peak memory at j=4 is real** — peak RSS reproduces to 0.7 % on this lane.
+* Achieved concurrency 1.83× at j=2 and 2.73× at j=4 are intra-run ratios.
+
+So `jobs: 2` stays as a **conservative default with a real known cost on the
+alternative**, not as a measured optimum. Given `debug` (2.10×) and `ubsan`
+(1.79×) both gained once measured properly, this lane deserves the same A-B-A
+treatment before anyone concludes anything about it.
+
+Not widened here, and each for its own reason: `asan` is phase 2
 and are held until their two unattributed sanitizer reports are resolved;
 `coverage` needs #267 acceptance item 4 (merged coverage shown identical before
 and after) discharged first; the four `libc++` lanes are phase 3 and have no

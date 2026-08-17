@@ -246,7 +246,9 @@
     {
       "name": "linux-clang-debug",
       "configurePreset": "linux-clang-debug",
-      "output": { "outputOnFailure": true }
+      "description": "Debug. jobs=4 — #267 phase 2, MEASURED 2.10x by an A-B-A run on ONE VM (j=1 1142.1 s, j=4 541.5 s, j=1 1135.3 s — the two serial passes agree to 0.6%, so there is no pass-order effect), with a CPU calibration between passes flat and /proc/stat steal 0 throughout. ~597 s = 10 min/run. See ci/ctest-parallelism-probe.md.",
+      "output": { "outputOnFailure": true },
+      "execution": { "jobs": 4 }
     },
     {
       "name": "linux-clang-release",
@@ -261,14 +263,14 @@
     {
       "name": "linux-clang-ubsan",
       "configurePreset": "linux-clang-ubsan",
-      "description": "UBSan. jobs=4 — #267 phase 2, MEASURED 1.79x (1993 -> 1114 s, ~14.6 min/run) by a PAIRED same-VM run, cross-validated on a second VM to 1.9%/4.2%. Peak 0.65 -> 0.86 GiB, 5.5% of a 15.61 GiB runner. ⚠️ Do NOT copy to another lane: tsan measured NO gain at 4 and debug is unresolved. Between-VM wall-clock variance is 27-43%, so only a paired same-VM measurement can decide a lane. See ci/ctest-parallelism-probe.md.",
+      "description": "UBSan. jobs=4 — #267 phase 2, MEASURED 1.79x (1993 -> 1114 s, ~14.6 min/run) by a PAIRED same-VM run, cross-validated on a second VM to 1.9%/4.2%. Peak 0.65 -> 0.86 GiB, 5.5% of a 15.61 GiB runner. ⚠️ Do NOT copy to another lane without ITS OWN paired measurement: between-VM wall-clock variance is 27-43%, so only a paired same-VM run can decide a lane. debug was separately confirmed at 2.10x; tsan's j=2-vs-j=4 question is UNRESOLVED (its comparison was unpaired). See ci/ctest-parallelism-probe.md.",
       "output": { "outputOnFailure": true },
       "execution": { "jobs": 4 }
     },
     {
       "name": "linux-clang-tsan",
       "configurePreset": "linux-clang-tsan",
-      "description": "TSan. jobs=2 — MEASURED OPTIMUM on a 4-vCPU runner, not a placeholder. j=4 was tried in CI (#267 phase 1) and REVERTED: concurrency did rise 1.83x->2.73x, but wall clock moved only -3.5% (inside this lane's own 6.91% variance) because contention inflated total per-test wall-time +44%, while peak RSS rose +36%. Measurable cost, unmeasurable benefit. Do NOT re-widen without re-reading ci/ctest-parallelism-probe.md's phase-1 section.",
+      "description": "TSan. jobs=2 — a CONSERVATIVE DEFAULT, not a measured optimum. ⚠️ The j=2-vs-j=4 comparison was made across TWO SEPARATE RUNS on a lane whose between-VM wall-clock spread is 43.3% (1903/2160/1376 s at an unchanged j=2), so it resolves nothing and an earlier claim of 'no gain at j=4' is WITHDRAWN. What IS solid: peak RSS reproduces to <2%, so j=4's +36% memory is real, and debug/ubsan both gain ~1.8-2.1x when measured properly. Settle this with the same paired A-B-A design before changing it.",
       "output": { "outputOnFailure": true },
       "execution": { "jobs": 2 }
     },
